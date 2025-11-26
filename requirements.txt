@@ -1,0 +1,11 @@
+python-telegram-bot~=21.0
+aiofiles~=24.1.0
+toml~=0.10.2
+pytz~=2025.1
+SQLAlchemy~=2.0.36
+httpx~=0.28.1
+requests~=2.32.3
+aiosqlite~=0.20.0
+Flask[async]~=3.1.0
+numpy~=2.2.1
+APScheduler~=3.11.0
