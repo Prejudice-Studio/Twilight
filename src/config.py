@@ -66,6 +66,7 @@ class EmbyConfig(BaseConfig):
     """
     EMBY_URL: str = 'http://127.0.0.1:8096/'  # Emby地址
     EMBY_TOKEN: str = ''  # Emby Token/ApiKey
+    EMBY_URL_LIST: List[str] = ['http://127.0.0.1:8096/']  # Emby地址列表
 
 class TelegramConfig(BaseConfig):
     """
@@ -76,6 +77,7 @@ class TelegramConfig(BaseConfig):
     ADMIN_ID: Union[int, List[int]] = []  # 管理员ID
     GROUP_ID: Union[int, List[int]] = []  # 群组ID
     CHANNEL_ID: Union[int, List[int]] = []  # 频道ID
+    FORCE_SUBSCRIBE: bool = False  # 是否强制加入群组/频道
     
 class ScoreAndRegisterConfig(BaseConfig):
     """
@@ -86,7 +88,13 @@ class ScoreAndRegisterConfig(BaseConfig):
     SCORE_REGISTER_MODE: bool = False  # 是否允许积分注册
     SCORE_REGISTER_NEED: int = 100  # SCORE_REGISTER_MODE为True时，注册所需积分
     USER_LIMIT: int = 200 # 允许的已注册用户数量上限
+    NEW_USER_NOTICE_STATUS: bool = False  # 新用户通知开关
+    NEW_USER_NOTICE_LINK: bool = False  # 新用户通知是否指向个人简介
+    RED_PACKET_MODE: bool = False  # 是否开启红包功能
+    PRIVATE_TRANSFER_MODE: bool = False # 私人转账
+    
 
-Config.update_from_toml()
+Config.update_from_toml("Global")
 EmbyConfig.update_from_toml('Emby')
 TelegramConfig.update_from_toml('Telegram')
+ScoreAndRegisterConfig.update_from_toml('SAR')
