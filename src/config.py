@@ -57,20 +57,36 @@ class Config(BaseConfig):
     MAX_RETRY: int = 3  # 重试次数
     DATABASES_DIR: Path = ROOT_PATH / 'db'  # 数据库路径
     BANGUMI_TOKEN: str = ''  # Bangumi Token
+    TELEGRAM_MODE: bool = False  # 是否开启Telegram模式
+    FORCE_BIND_TELEGRAM: bool = True  # 是否强制绑定Telegram
     
-class ManageConfig(BaseConfig):
-    """
-    管理配置管理类。
-    """
-    ADMIN_LIST: Union[str , int , List[Union[str, int]]] = '' # 管理员UID名单, 为str/int或者其List 
-    IDENTIFY_CODE: Union[str, int] = 1 # 身份码 , 用于识别 普通用户/白名单/管理员 , 默认为1(普通用户) , 0为管理员 , 2为白名单
-    ACTIVE_STATUS: bool = True # 账号是否在Emby启用/禁用
-    VALIDITY_TIME: int
-
 class EmbyConfig(BaseConfig):
     """
     Emby配置管理类。
     """
+    EMBY_URL: str = 'http://127.0.0.1:8096/'  # Emby地址
+    EMBY_TOKEN: str = ''  # Emby Token/ApiKey
+
+class TelegramConfig(BaseConfig):
+    """
+    Telegram配置管理类。
+    """
+    TELEGRAM_API_URL: str = 'https://api.telegram.org/bot'  # Telegram Bot API URL
+    BOT_TOKEN: str = ''  # Telegram Bot Token
+    ADMIN_ID: Union[int, List[int]] = []  # 管理员ID
+    GROUP_ID: Union[int, List[int]] = []  # 群组ID
+    CHANNEL_ID: Union[int, List[int]] = []  # 频道ID
+    
+class ScoreAndRegisterConfig(BaseConfig):
+    """
+    积分及注册配置管理类。
+    """
+    REGISTER_MODE: bool = False  # 是否允许注册功能
+    REGISTER_CODE_LIMIT: bool = False  # REGISTER_MODE为True时，是否允许注册码注册
+    SCORE_REGISTER_MODE: bool = False  # 是否允许积分注册
+    SCORE_REGISTER_NEED: int = 100  # SCORE_REGISTER_MODE为True时，注册所需积分
+    USER_LIMIT: int = 200 # 允许的已注册用户数量上限
 
 Config.update_from_toml()
 EmbyConfig.update_from_toml('Emby')
+TelegramConfig.update_from_toml('Telegram')
