@@ -1,6 +1,8 @@
 from enum import Enum
-
-from sqlalchemy import delete, select, update
+import random
+import time
+import hashlib
+from sqlalchemy import delete, select, update, func
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -20,22 +22,24 @@ class UserModel(UsersDatabaseModel):
     __tablename__ = 'users'
     UID: Mapped[int] = mapped_column(primary_key=True, index=True)  # 用户UID
     TELEGRAM_ID: Mapped[int] = mapped_column(index=True, nullable=True)  # 用户的Telegram ID
-    USERNAME: Mapped[str] = mapped_column(index=True, nullable=False)  # 用户的Emby用户名
+    USERNAME: Mapped[str] = mapped_column(index=True, nullable=True)  # 用户的Emby用户名
+    EMAIL: Mapped[str] = mapped_column(index=True, nullable=True)  # 用户的邮箱
     ROLE: Mapped[int] = mapped_column(default=Role.UNRECOGNIZED.value, nullable=False)  # 用户的角色
-    ACTIVE_STATUS: Mapped[bool] = mapped_column(default=True, nullable=False)  # 用户是否启用
-    CREATE_AT: Mapped[int] = mapped_column(default=None, nullable=False)  # 用户创建时间 使用时间戳
-    EXPIRED_AT: Mapped[int] = mapped_column(default=None, nullable=False)  # 用户到期时间 使用时间戳 如果为-1则永不过期
-    EMBYID: Mapped[str] = mapped_column(index=True, default='', nullable=False)  # 用户的Emby账户
-    PASSWORD: Mapped[str] = mapped_column(default='', nullable=False)  # 用户的Emby密码hash
-    NSFW: Mapped[bool] = mapped_column(default=False, nullable=False)  # 用户是否开启NSFW库
-    BGM_MODE: Mapped[bool] = mapped_column(default=False, nullable=False)  # 用户是否开启BGM点格子模式
-    BGM_TOKEN: Mapped[str] = mapped_column(default='', nullable=False)  # 用户的BGM Token
-    LAST_LOGIN_TIME: Mapped[int] = mapped_column(default=None, nullable=False)  # 用户上次登录时间 使用时间戳
-    LAST_LOGIN_IP: Mapped[str] = mapped_column(default='', nullable=False)  # 用户上次登录IP
-    LAST_LOGIN_UA: Mapped[str] = mapped_column(default='', nullable=False)  # 用户上次登录UA
-    DEVICE_LIST: Mapped[str] = mapped_column(default='', nullable=False)  # 用户设备列表
-    APIKEY: Mapped[str] = mapped_column(default='', nullable=False)  # 用户API Key , 用于API访问认证
-    OTHER_INFO: Mapped[str] = mapped_column(default='', nullable=False)  # 用户其他信息 , 使用json存储
+    ACTIVE_STATUS: Mapped[bool] = mapped_column(default=True, nullable=True)  # 用户是否启用
+    CREATE_AT: Mapped[int] = mapped_column(nullable=True)  # 注册时间
+    EXPIRED_AT: Mapped[int] = mapped_column(default=-1, nullable=True)  # 用户过期时间，时间戳，-1表示永不过期
+    EMBYID: Mapped[str] = mapped_column(index=True, default='', nullable=True)  # 用户的Emby账户ID
+    PASSWORD: Mapped[str] = mapped_column(default='', nullable=True)  # 用户的Emby密码hash
+    NSFW: Mapped[bool] = mapped_column(default=False, nullable=True)  # 用户是否开启NSFW库
+    BGM_MODE: Mapped[bool] = mapped_column(default=False, nullable=True)  # 用户是否开启BGM点格子模式
+    BGM_TOKEN: Mapped[str] = mapped_column(default='', nullable=True)  # 用户的BGM Token
+    LAST_LOGIN_TIME: Mapped[int] = mapped_column(default=0, nullable=True)  # 用户上次登录时间，时间戳
+    LAST_LOGIN_IP: Mapped[str] = mapped_column(default='', nullable=True)  # 用户上次登录IP
+    LAST_LOGIN_UA: Mapped[str] = mapped_column(default='', nullable=True)  # 用户上次登录UA
+    DEVICE_LIST: Mapped[str] = mapped_column(default='', nullable=True)  # 用户设备列表
+    APIKEY_STATUS: Mapped[bool] = mapped_column(default=False, nullable=True)  # 用户API Key是否启用
+    APIKEY: Mapped[str] = mapped_column(default='', nullable=True)  # 用户API Key , 用于API访问认证
+    OTHER_INFO: Mapped[str] = mapped_column(default='', nullable=True)  # 用户其他信息 , 使用json存储
     
 create_database("users", UsersDatabaseModel)
 DATABASE_URL = f'sqlite+aiosqlite:///{Config.DATABASES_DIR / "users.db"}'
@@ -44,7 +48,7 @@ UsersSessionFactory = async_sessionmaker(bind=ENGINE, expire_on_commit=False)
 
 class UserOperate:
     @classmethod
-    async def add_user(cls, user: UserModel):
+    async def add_user(user: UserModel):
         """
         添加用户
         """
@@ -59,7 +63,7 @@ class UserOperate:
         根据UID获取用户
         """
         async with UsersSessionFactory() as session:
-            scalar = await session.execute(select(UserModel).filter_by(uid=uid).limit(1))
+            scalar = await session.execute(select(UserModel).filter_by(UID=uid).limit(1))
             return scalar.scalar_one_or_none()
     
     @staticmethod
@@ -68,7 +72,7 @@ class UserOperate:
         根据Telegram ID获取用户
         """
         async with UsersSessionFactory() as session:
-            scalar = await session.execute(select(UserModel).filter_by(telegram_id=telegram_id).limit(1))
+            scalar = await session.execute(select(UserModel).filter_by(TELEGRAM_ID=telegram_id).limit(1))
             return scalar.scalar_one_or_none()
         
     @staticmethod
@@ -77,7 +81,7 @@ class UserOperate:
         根据Emby用户名获取用户
         """
         async with UsersSessionFactory() as session:
-            scalar = await session.execute(select(UserModel).filter_by(username=username).limit(1))
+            scalar = await session.execute(select(UserModel).filter_by(USERNAME=username).limit(1))
             return scalar.scalar_one_or_none()
     
     @staticmethod
@@ -86,7 +90,7 @@ class UserOperate:
         根据Emby ID获取用户
         """
         async with UsersSessionFactory() as session:
-            scalar = await session.execute(select(UserModel).filter_by(embyid=embyid).limit(1))
+            scalar = await session.execute(select(UserModel).filter_by(EMBYID=embyid).limit(1))
             return scalar.scalar_one_or_none()
     
     @staticmethod
@@ -116,7 +120,7 @@ class UserOperate:
         """
         async with UsersSessionFactory() as session:
             async with session.begin():
-                await session.execute(update(UserModel).where(UserModel.uid == user.uid).values(telegram_id=None))
+                await session.execute(update(UserModel).where(UserModel.UID == user.UID).values(TELEGRAM_ID=None))
         
     @staticmethod
     async def renew_user_expire_time(user: UserModel, duration: int):
@@ -127,20 +131,19 @@ class UserOperate:
         """
         async with UsersSessionFactory() as session:
             async with session.begin():
-                new_expired_at = user.expired_at
-                if user.expired_at == -1:
+                new_expired_at = user.EXPIRED_AT
+                if user.EXPIRED_AT == -1:
                     # 永不过期
                     return
                 else:
-                    from time import time
-                    current_time = int(time())
-                    if user.expired_at < current_time:
+                    current_time = int(time.time())
+                    if user.EXPIRED_AT < current_time:
                         # 已过期，从当前时间开始续期
                         new_expired_at = current_time + duration * 86400
                     else:
                         # 未过期，从原有过期时间开始续期
-                        new_expired_at = user.expired_at + duration * 86400
-                await session.execute(update(UserModel).where(UserModel.uid == user.uid).values(expired_at=new_expired_at))
+                        new_expired_at = user.EXPIRED_AT + duration * 86400
+                await session.execute(update(UserModel).where(UserModel.UID == user.UID).values(EXPIRED_AT=new_expired_at))
                 
     @staticmethod
     async def get_registered_users_count() -> int:
@@ -149,9 +152,14 @@ class UserOperate:
         排除未注册用户 , 白名单用户 , 管理员
         """
         async with UsersSessionFactory() as session:
-            async with session.begin():
-                scalar = await session.execute(select(UserModel).filter(UserModel.role != Role.UNRECOGNIZED.value, UserModel.role != Role.WHITE_LIST.value, UserModel.role != Role.ADMIN.value).count())
-                return scalar.scalar_one()
+            result = await session.execute(
+                select(func.count()).select_from(UserModel).where(
+                    UserModel.ROLE != Role.UNRECOGNIZED.value,
+                    UserModel.ROLE != Role.WHITE_LIST.value,
+                    UserModel.ROLE != Role.ADMIN.value
+                )
+            )
+            return result.scalar_one()
     
     @staticmethod
     async def get_active_users_count() -> int:
@@ -160,6 +168,31 @@ class UserOperate:
         排除未注册用户 , 白名单用户 , 管理员 , 过期用户
         """
         async with UsersSessionFactory() as session:
+            result = await session.execute(
+                select(func.count()).select_from(UserModel).where(
+                    UserModel.ROLE != Role.UNRECOGNIZED.value,
+                    UserModel.ROLE != Role.WHITE_LIST.value,
+                    UserModel.ROLE != Role.ADMIN.value,
+                    UserModel.ACTIVE_STATUS == True,
+                    UserModel.EXPIRED_AT > int(time.time())
+                )
+            )
+            return result.scalar_one()
+        
+    @staticmethod
+    async def reset_apikey(usr: UserModel) -> str:
+        """
+        重置用户API Key
+        使用特殊算法生成唯一的apikey
+        """
+        async with UsersSessionFactory() as session:
             async with session.begin():
-                scalar = await session.execute(select(UserModel).filter(UserModel.role != Role.UNRECOGNIZED.value, UserModel.role != Role.WHITE_LIST.value, UserModel.role != Role.ADMIN.value, UserModel.active_status == True, UserModel.expired_at > 0).count())
-                return scalar.scalar_one()
+                # 根据当前时间和UID生成唯一API Key
+                # apikey的格式为 key-xxxxxxxxxxxxxxxx-yyyyyyyy
+                # 其中 xxxxxxxxxxxxxxxx 为16位随机字符串,由当前时间决定，yyyyyyyy 为8位检验码
+                # 其中 x 由数字和字母组成，yyyyyyyy 由数字组成
+                random_part = hashlib.sha256(f'{usr.UID}_{int(time.time())}'.encode()).hexdigest()[:16]
+                check_part = ''.join(random.choices('0123456789', k=8))
+                usr.APIKEY = f'key-{random_part}-{check_part}'
+                await session.execute(update(UserModel).where(UserModel.UID == usr.UID).values(APIKEY=usr.APIKEY))
+                return usr.APIKEY
