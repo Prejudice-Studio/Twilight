@@ -1,5 +1,4 @@
-from enum import Enum
-
+import time
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -15,7 +14,7 @@ class ScoreModel(ScoreDatabaseModel):
     UID: Mapped[int] = mapped_column(primary_key=True, index=True)  # 用户UID
     TELEGRAM_ID: Mapped[int] = mapped_column(nullable=True, index=True)  # Telegram ID
     SCORE: Mapped[int] = mapped_column(nullable=False)  # 当前积分
-    CHECKIN_TIME: Mapped[int] = mapped_column(nullable=False)  # 签到时间 , 时间戳
+    CHECKIN_TIME: Mapped[int] = mapped_column(default=0, nullable=False)  # 修复：添加默认值
     CHECKIN_COUNT: Mapped[int] = mapped_column(default=0)  # 连续签到天数
 
 class RedPacketModel(ScoreDatabaseModel):
@@ -28,7 +27,7 @@ class RedPacketModel(ScoreDatabaseModel):
     CURRENT_AMOUNT: Mapped[int] = mapped_column(nullable=False)  # 当前剩余金额
     STATUS: Mapped[int] = mapped_column(default=0, nullable=False)  # 状态 0 未领取 1 已领完 2 已经撤回
     TYPE: Mapped[int] = mapped_column(default=1, nullable=False)  # 类型 1 随机 2 均分 0 定向
-    CREATE_TIME: Mapped[int] = mapped_column(nullable=False)  # 创建时间 , 时间戳
+    CREATE_TIME: Mapped[int] = mapped_column(default=lambda: int(time.time()), nullable=False)  # 创建时间 , 时间戳
     HISTORY: Mapped[str] = mapped_column(default='')  # 领取记录
     OTHER: Mapped[str] = mapped_column(default='')  # 其他信息 json
 
@@ -39,13 +38,13 @@ ScoreSessionFactory = async_sessionmaker(bind=ENGINE, expire_on_commit=False)
 
 class ScoreOperate:
     @classmethod
-    async def add_score(cls, score: ScoreModel):
+    async def edit_score(cls, score: ScoreModel):
         """
-        添加积分记录
+        修改积分记录
         """
         async with ScoreSessionFactory() as session:
             async with session.begin():
-                session.add(score)
+                session.merge(score)
             await session.commit()
     
     @staticmethod
@@ -54,7 +53,7 @@ class ScoreOperate:
         根据UID获取积分记录
         """
         async with ScoreSessionFactory() as session:
-            scalar = await session.execute(select(ScoreModel).filter_by(uid=uid).limit(1))
+            scalar = await session.execute(select(ScoreModel).filter_by(UID=uid).limit(1))  # 修复：改为UID
             return scalar.scalar_one_or_none()
     
     @staticmethod
@@ -63,7 +62,7 @@ class ScoreOperate:
         根据Telegram ID获取积分记录
         """
         async with ScoreSessionFactory() as session:
-            scalar = await session.execute(select(ScoreModel).filter_by(telegram_id=telegram_id).limit(1))
+            scalar = await session.execute(select(ScoreModel).filter_by(TELEGRAM_ID=telegram_id).limit(1))  # 修复：改为TELEGRAM_ID
             return scalar.scalar_one_or_none()
     
     @staticmethod
@@ -80,10 +79,11 @@ class ScoreOperate:
     async def delete_score(score: ScoreModel):
         """
         删除积分记录
+        根据UID选出用户 , 设置积分为0
         """
         async with ScoreSessionFactory() as session:
             async with session.begin():
-                session.delete(score)
+                session.execute(update(ScoreModel).where(ScoreModel.UID == score.UID).values(SCORE=0))
             await session.commit()
     
     @staticmethod
@@ -102,7 +102,7 @@ class ScoreOperate:
         根据红包ID获取红包记录
         """
         async with ScoreSessionFactory() as session:
-            scalar = await session.execute(select(RedPacketModel).filter_by(rpid=rpid).limit(1))
+            scalar = await session.execute(select(RedPacketModel).filter_by(RPID=rpid).limit(1))  # 修复：改为RPID
             return scalar.scalar_one_or_none()
     
     @staticmethod
@@ -111,7 +111,7 @@ class ScoreOperate:
         根据发送者UID获取红包记录列表
         """
         async with ScoreSessionFactory() as session:
-            result = await session.execute(select(RedPacketModel).filter_by(sender_uid=sender_uid))
+            result = await session.execute(select(RedPacketModel).filter_by(SENDER_UID=sender_uid))  # 修复：改为SENDER_UID
             return result.scalars().all()
     
     @staticmethod
@@ -120,7 +120,7 @@ class ScoreOperate:
         根据发送者Telegram ID获取红包记录列表
         """
         async with ScoreSessionFactory() as session:
-            result = await session.execute(select(RedPacketModel).filter_by(sender_telegram_id=sender_telegram_id))
+            result = await session.execute(select(RedPacketModel).filter_by(SENDER_TELEGRAM_ID=sender_telegram_id))  # 修复：改为SENDER_TELEGRAM_ID
             return result.scalars().all()
     
     @staticmethod
@@ -149,5 +149,18 @@ class ScoreOperate:
         获取所有未领取的红包记录
         """
         async with ScoreSessionFactory() as session:
-            result = await session.execute(select(RedPacketModel).filter_by(status=0))
+            result = await session.execute(select(RedPacketModel).filter_by(STATUS=0))  # 修复：改为STATUS
+            return result.scalars().all()
+    
+    @staticmethod
+    async def get_user_score_ranking(limit: int = 10) -> list[ScoreModel]:
+        """
+        获取积分排行榜
+        """
+        async with ScoreSessionFactory() as session:
+            result = await session.execute(
+                select(ScoreModel)
+                .order_by(ScoreModel.SCORE.desc())  # 修复：改为SCORE
+                .limit(limit)
+            )
             return result.scalars().all()
