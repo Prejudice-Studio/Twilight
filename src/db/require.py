@@ -132,24 +132,7 @@ class RequireOperate:
     async def update_require_by_key(cls, key: str, require: RequireModel) -> bool:
         async with UsersSessionFactory() as session:
             async with session.begin():
-                result = await session.execute(select(RequireModel).filter_by(REQ_KEY=key))
-                old_require = result.scalars().first()
-                if old_require:
-                    require.REQUIRE_ID = old_require.REQUIRE_ID
-                    require.UID = old_require.UID
-                    require.TYPE = old_require.TYPE
-                    require.STATUS = old_require.STATUS
-                    require.CREATE_TIME = old_require.CREATE_TIME
-                    require.STATUS_CHANGE_TIME = old_require.STATUS_CHANGE_TIME
-                    require.FIN_TIME = old_require.FIN_TIME
-                    require.URL = old_require.URL
-                    require.SEASON = old_require.SEASON
-                    require.REQ_KEY = old_require.REQ_KEY
-                    require.OTHER = old_require.OTHER
-                    session.add(require)
-                    return True
-                else:
-                    return False
+                session.merge(require)
                 
     @classmethod
     async def get_require_by_uid(cls, uid: int) -> RequireModel | List[RequireModel] | None:
