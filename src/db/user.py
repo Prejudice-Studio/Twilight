@@ -2,7 +2,7 @@ from enum import Enum
 import random
 import time
 import hashlib
-from sqlalchemy import delete, select, update, func
+from sqlalchemy import delete, select, update, func , String , Integer, Boolean
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -20,26 +20,27 @@ class Role(Enum):
     
 class UserModel(UsersDatabaseModel):
     __tablename__ = 'users'
-    UID: Mapped[int] = mapped_column(primary_key=True, index=True)  # 用户UID
-    TELEGRAM_ID: Mapped[int] = mapped_column(index=True, nullable=True)  # 用户的Telegram ID
-    USERNAME: Mapped[str] = mapped_column(index=True, nullable=True)  # 用户的Emby用户名
-    EMAIL: Mapped[str] = mapped_column(index=True, nullable=True)  # 用户的邮箱
-    ROLE: Mapped[int] = mapped_column(default=Role.UNRECOGNIZED.value, nullable=False)  # 用户的角色
-    ACTIVE_STATUS: Mapped[bool] = mapped_column(default=True, nullable=True)  # 用户是否启用
-    CREATE_AT: Mapped[int] = mapped_column(nullable=True)  # 注册时间
-    EXPIRED_AT: Mapped[int] = mapped_column(default=-1, nullable=True)  # 用户过期时间，时间戳，-1表示永不过期
-    EMBYID: Mapped[str] = mapped_column(index=True, default='', nullable=True)  # 用户的Emby账户ID
-    PASSWORD: Mapped[str] = mapped_column(default='', nullable=True)  # 用户的Emby密码hash
-    NSFW: Mapped[bool] = mapped_column(default=False, nullable=True)  # 用户是否开启NSFW库
-    BGM_MODE: Mapped[bool] = mapped_column(default=False, nullable=True)  # 用户是否开启BGM点格子模式
-    BGM_TOKEN: Mapped[str] = mapped_column(default='', nullable=True)  # 用户的BGM Token
-    LAST_LOGIN_TIME: Mapped[int] = mapped_column(default=0, nullable=True)  # 用户上次登录时间，时间戳
-    LAST_LOGIN_IP: Mapped[str] = mapped_column(default='', nullable=True)  # 用户上次登录IP
-    LAST_LOGIN_UA: Mapped[str] = mapped_column(default='', nullable=True)  # 用户上次登录UA
-    DEVICE_LIST: Mapped[str] = mapped_column(default='', nullable=True)  # 用户设备列表
-    APIKEY_STATUS: Mapped[bool] = mapped_column(default=False, nullable=True)  # 用户API Key是否启用
-    APIKEY: Mapped[str] = mapped_column(default='', nullable=True)  # 用户API Key , 用于API访问认证
-    OTHER_INFO: Mapped[str] = mapped_column(default='', nullable=True)  # 用户其他信息 , 使用json存储
+    UID: Mapped[int] = mapped_column(String , primary_key=True, index=True)                                               # 用户UID
+    TELEGRAM_ID: Mapped[int] = mapped_column(Integer , index=True, nullable=True)                                          # 用户的Telegram ID
+    USERNAME: Mapped[str] = mapped_column(String , index=True, nullable=True)                                             # 用户的Emby用户名
+    EMAIL: Mapped[str] = mapped_column(String , index=True, nullable=True)                                                 # 用户的邮箱
+    ROLE: Mapped[int] = mapped_column(Integer , default=Role.UNRECOGNIZED.value, nullable=False)                          # 用户的角色
+    ACTIVE_STATUS: Mapped[bool] = mapped_column(Boolean , default=True, nullable=True)                                    # 用户是否启用
+    CREATE_AT: Mapped[int] = mapped_column(Integer , nullable=True)                                                       # 用户Emby注册时间    
+    REGISTER_TIME: Mapped[int] = mapped_column(Integer , default=int(time.time()), nullable=True)                         # 用户创建时间
+    EXPIRED_AT: Mapped[int] = mapped_column(Integer , default=-1, nullable=True)                                          # 用户过期时间，时间戳，-1表示永不过期
+    EMBYID: Mapped[str] = mapped_column(String , index=True, default='', nullable=True)                                  # 用户的Emby账户ID
+    PASSWORD: Mapped[str] = mapped_column(String , default='', nullable=True)                                            # 用户的Emby密码hash
+    NSFW: Mapped[bool] = mapped_column(Boolean , default=False, nullable=True)                                            # 用户是否开启NSFW库
+    BGM_MODE: Mapped[bool] = mapped_column(Boolean , default=False, nullable=True)                                        # 用户是否开启BGM点格子模式
+    BGM_TOKEN: Mapped[str] = mapped_column(String , default='', nullable=True)                                           # 用户的BGM Token
+    LAST_LOGIN_TIME: Mapped[int] = mapped_column(Integer , default=0, nullable=True)                                      # 用户上次登录时间，时间戳
+    LAST_LOGIN_IP: Mapped[str] = mapped_column(String , default='', nullable=True)                                       # 用户上次登录IP
+    LAST_LOGIN_UA: Mapped[str] = mapped_column(String , default='', nullable=True)                                       # 用户上次登录UA
+    DEVICE_LIST: Mapped[str] = mapped_column(String , default='', nullable=True)                                         # 用户设备列表
+    APIKEY_STATUS: Mapped[bool] = mapped_column(Boolean , default=False, nullable=True)                                   # 用户API Key是否启用
+    APIKEY: Mapped[str] = mapped_column(String , default='', nullable=True)                                              # 用户API Key , 用于API访问认证
+    OTHER_INFO: Mapped[str] = mapped_column(String , default='', nullable=True)                                          # 用户其他信息 , 使用json存储
     
 create_database("users", UsersDatabaseModel)
 DATABASE_URL = f'sqlite+aiosqlite:///{Config.DATABASES_DIR / "users.db"}'
