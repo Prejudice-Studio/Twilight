@@ -2,7 +2,7 @@ from enum import Enum
 import time
 import hashlib
 import random
-from sqlalchemy import insert , select , func , String , Integer
+from sqlalchemy import insert , select , func , String , Integer , Boolean 
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.exc import SQLAlchemyError
@@ -22,12 +22,14 @@ class RegCodeModel(RegCodeDatabaseModel):
     CODE: Mapped[str] = mapped_column(Integer , primary_key=True, index=True, nullable=False)             # 注册码
     VALIDITY_TIME: Mapped[int] = mapped_column(Integer , default=-1, nullable=False)                      # 有效时间 单位为小时 . 默认为-1(永久)
     TYPE: Mapped[int] = mapped_column(Integer , nullable=False)                                           # 类型 1:注册 2:续期 3:白名单
-    UID: Mapped[int | list[int] | None] = mapped_column(Integer , nullable=True)                          # 使用用户UID/UID列表 , 因为生成时候不一定使用可以为空
-    TELEGRAM_ID: Mapped[int | None] = mapped_column(Integer , nullable=True)                              # 注册码使用者对应的telegram_id
+    UID: Mapped[int | list[int] | None] = mapped_column(String , nullable=True)                          # 使用用户UID/UID列表 , 因为生成时候不一定使用可以为空
+    TELEGRAM_ID: Mapped[int | list[int] | None] = mapped_column(String , nullable=True)                   # 注册码使用者对应的telegram_id
     USE_COUNT_LIMIT: Mapped[int] = mapped_column(Integer , default=1, nullable=False)                     # 注册码使用次数限制 , 默认为1次(-1为无限制),其余为正常数字
     USE_COUNT: Mapped[int] = mapped_column(Integer , default=0, nullable=False)                           # 注册码已被使用次数 , 默认为0
     CREATED_TIME: Mapped[int] = mapped_column(Integer , default=lambda: int(time.time()), nullable=False) # 注册码创建时间
     DAYS: Mapped[int] = mapped_column(Integer , default=30, nullable=True)                                # 注册码/续期码增加的天数 , 默认为30天
+    ACTIVE: Mapped[bool] = mapped_column(Boolean , default=True, nullable=False)                         # 注册码是否启用 , 默认为True
+    OTHER: Mapped[str] = mapped_column(String , nullable=True)                                            # 其他信息 , json格式
 
 create_database("RegCode", RegCodeDatabaseModel)
 DATABASE_URL = f'sqlite+aiosqlite:///{Config.DATABASES_DIR / "regcode.db"}'
