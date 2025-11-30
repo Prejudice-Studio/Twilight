@@ -28,8 +28,9 @@ class RedPacketModel(ScoreDatabaseModel):
     STATUS: Mapped[int] = mapped_column(Integer , default=0, nullable=False)                                  # 状态 0 未领取 1 已领完 2 已经撤回
     TYPE: Mapped[int] = mapped_column(Integer , default=1, nullable=False)                                    # 类型 1 随机 2 均分 0 定向
     CREATE_TIME: Mapped[int] = mapped_column(Integer , default=lambda: int(time.time()), nullable=False)      # 创建时间 , 时间戳
-    HISTORY: Mapped[str] = mapped_column(String , default='')                                                # 领取记录
-    OTHER: Mapped[str] = mapped_column(String , default='')                                                  # 其他信息 json
+    HISTORY: Mapped[str] = mapped_column(String , default='')                                                  # 领取记录
+    RP_KEY: Mapped[str] = mapped_column(String , default='' , nullable=True)                                   # 该红包的密钥 , 外部可以通过此Key对红包进行操作
+    OTHER: Mapped[str] = mapped_column(String , default='' , nullable=True)                                    # 其他信息 json
 
 create_database("score", ScoreDatabaseModel)
 DATABASE_URL = f'sqlite+aiosqlite:///{Config.DATABASES_DIR / "score.db"}'
