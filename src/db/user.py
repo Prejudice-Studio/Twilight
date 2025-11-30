@@ -20,7 +20,7 @@ class Role(Enum):
     
 class UserModel(UsersDatabaseModel):
     __tablename__ = 'users'
-    UID: Mapped[int] = mapped_column(String , primary_key=True, index=True)                                               # 用户UID
+    UID: Mapped[int] = mapped_column(Integer , primary_key=True, index=True)                                               # 用户UID
     TELEGRAM_ID: Mapped[int] = mapped_column(Integer , index=True, nullable=True)                                          # 用户的Telegram ID
     USERNAME: Mapped[str] = mapped_column(String , index=True, nullable=True)                                             # 用户的Emby用户名
     EMAIL: Mapped[str] = mapped_column(String , index=True, nullable=True)                                                 # 用户的邮箱
@@ -40,7 +40,7 @@ class UserModel(UsersDatabaseModel):
     DEVICE_LIST: Mapped[str] = mapped_column(String , default='', nullable=True)                                         # 用户设备列表
     APIKEY_STATUS: Mapped[bool] = mapped_column(Boolean , default=False, nullable=True)                                   # 用户API Key是否启用
     APIKEY: Mapped[str] = mapped_column(String , default='', nullable=True)                                              # 用户API Key , 用于API访问认证
-    OTHER_INFO: Mapped[str] = mapped_column(String , default='', nullable=True)                                          # 用户其他信息 , 使用json存储
+    OTHER: Mapped[str] = mapped_column(String , default='', nullable=True)                                          # 用户其他信息 , 使用json存储
     
 create_database("users", UsersDatabaseModel)
 DATABASE_URL = f'sqlite+aiosqlite:///{Config.DATABASES_DIR / "users.db"}'
@@ -48,6 +48,19 @@ ENGINE = create_async_engine(DATABASE_URL, echo=Config.SQLALCHEMY_LOG)
 UsersSessionFactory = async_sessionmaker(bind=ENGINE, expire_on_commit=False)
 
 class UserOperate:
+    @classmethod
+    async def get_new_uid(cls) -> int:
+        """
+        生成一个新的UID
+        """
+        async with UsersSessionFactory() as session:
+            result = await session.execute(select(func.max(UserModel.UID)).limit(1))
+            max_uid = result.scalar_one_or_none()
+            if max_uid is None:
+                return 1
+            else:
+                return max_uid + 1
+    
     @classmethod
     async def add_user(user: UserModel):
         """
