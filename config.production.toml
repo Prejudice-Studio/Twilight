@@ -1,0 +1,236 @@
+# Twilight 配置文件
+# 请将此文件复制为 config.toml 并修改配置
+
+[Global]
+# 是否开启日志
+logging = true
+# 日志等级 (10=DEBUG, 20=INFO, 30=WARNING, 40=ERROR)
+log_level = 20
+# 是否开启SQLAlchemy日志
+sqlalchemy_log = false
+# HTTP 代理 (可选)
+proxy = ""
+# 最大重试次数
+max_retry = 3
+# 数据库目录
+databases_dir = "db"
+# Bangumi Token (可选)
+bangumi_token = ""
+# 是否允许 BGM 点格子
+global_bgm_mode = false
+# 是否开启 Telegram 模式
+telegram_mode = false
+# 是否绑定邮箱
+email_bind = false
+# 是否强制绑定邮箱
+force_bind_email = false
+# 是否强制绑定 Telegram
+force_bind_telegram = true
+# TMDB API Key (从 https://www.themoviedb.org/settings/api 获取)
+tmdb_api_key = ""
+# TMDB API 地址
+tmdb_api_url = "https://api.themoviedb.org/3"
+# TMDB 图片地址
+tmdb_image_url = "https://image.tmdb.org/t/p"
+# Bangumi API 地址
+bangumi_api_url = "https://api.bgm.tv"
+# Bangumi App ID (可选)
+bangumi_app_id = ""
+
+[Emby]
+# Emby 服务器地址
+emby_url = "http://127.0.0.1:8096/"
+# Emby API Token
+emby_token = ""
+# Emby 地址列表 (用于展示)
+emby_url_list = [
+    "Direct : http://127.0.0.1:8096/",
+    "Sample : http://192.168.1.1:8096/"
+]
+# 白名单地址列表
+emby_url_list_for_whitelist = [
+    "Direct : http://127.0.0.1:8096/",
+    "Sample : http://192.168.1.1:8096/"
+]
+# NSFW 库 ID (可选)
+emby_nsfw = ""
+
+[Telegram]
+# Telegram Bot API 地址
+telegram_api_url = "https://api.telegram.org/bot"
+# Bot Token
+bot_token = ""
+# 管理员 ID (可以是单个数字或数组)
+admin_id = []
+# 群组 ID
+group_id = []
+# 频道 ID
+channel_id = []
+# 是否强制加入群组/频道
+force_subscribe = false
+
+[SAR]
+# 积分名称
+score_name = "暮光币"
+# 是否开启注册功能
+register_mode = false
+# 是否限制注册码注册
+register_code_limit = false
+# 是否开启积分注册
+score_register_mode = false
+# 积分注册所需积分
+score_register_need = 100
+# 用户数量上限
+user_limit = 200
+# 新用户通知开关
+new_user_notice_status = false
+# 新用户通知是否指向个人主页
+new_user_notice_link = false
+
+# ===== 红包配置 =====
+# 是否开启红包功能
+red_packet_mode = false
+# 红包最小金额
+red_packet_min_amount = 1
+# 红包最大金额
+red_packet_max_amount = 10000
+# 红包最小个数
+red_packet_min_count = 1
+# 红包最大个数
+red_packet_max_count = 100
+# 红包过期时间 (小时)
+red_packet_expire_hours = 24
+
+# ===== 转账配置 =====
+# 是否开启私人转账
+private_transfer_mode = false
+# 最小转账金额
+transfer_min_amount = 1
+# 最大转账金额
+transfer_max_amount = 10000
+# 每日转账限额
+transfer_daily_limit = 50000
+# 转账手续费率 (0.05 = 5%)
+transfer_fee_rate = 0.0
+
+# ===== 签到配置 =====
+# 签到基础奖励
+checkin_base_score = 10
+# 连签每天加成
+checkin_streak_bonus = 2
+# 最大连签加成
+checkin_max_streak_bonus = 20
+# 随机奖励最小值
+checkin_random_min = 0
+# 随机奖励最大值
+checkin_random_max = 5
+
+# ===== 积分自动续期 =====
+# 是否允许积分自动续期 (用户可在个人设置中开启)
+auto_renew_enabled = false
+# 自动续期天数
+auto_renew_days = 30
+# 自动续期所需积分
+auto_renew_cost = 100
+# 到期前几天自动续期
+auto_renew_before_days = 3
+# 续期后是否通知用户
+auto_renew_notify = true
+
+# ===== 邀请系统 =====
+# 是否启用邀请系统
+invite_enabled = false
+# 邀请奖励积分
+invite_reward = 50
+# 每人最多邀请数量 (-1 = 无限制)
+invite_limit = 10
+
+[DeviceLimit]
+# 是否启用设备限制
+device_limit_enabled = false
+# 最大设备数
+max_devices = 5
+# 最大同时播放数
+max_streams = 2
+# 超限时是否踢掉最早的会话
+kick_oldest_session = false
+
+[Webhook]
+# 是否启用 Webhook 功能
+webhook_enabled = true
+# Webhook 验证密钥 (用于验证来自 Emby 的请求)
+webhook_secret = ""
+# 外部推送端点列表 (将事件推送到这些地址)
+webhook_endpoints = []
+# 是否启用播放统计
+playback_stats_enabled = true
+# 是否启用排行榜
+ranking_enabled = true
+# 排行榜是否公开 (不需要登录即可查看)
+ranking_public = true
+
+# ===========================
+# API 服务器配置
+# ===========================
+[API]
+# API 服务器监听地址
+host = "0.0.0.0"
+# API 服务器端口
+port = 5000
+# 是否开启调试模式 (生产环境请设为 false)
+debug = false
+# Token 过期时间 (秒)
+token_expire = 86400
+# API Key 长度
+api_key_length = 32
+# 是否允许跨域 (CORS)
+cors_enabled = true
+# 允许的跨域来源 (空数组 = 允许所有)
+cors_origins = []
+
+# ===========================
+# 安全配置
+# ===========================
+[Security]
+# 是否启用 IP 限制
+ip_limit_enabled = false
+# 每个用户允许的最大 IP 数量 (30天内)
+max_ips_per_user = 10
+# 登录失败锁定阈值
+login_fail_threshold = 5
+# 锁定时间 (分钟)
+lockout_minutes = 30
+# 是否记录所有登录
+log_all_logins = true
+
+# ===========================
+# 定时任务配置
+# ===========================
+[Scheduler]
+# 时区
+timezone = "Asia/Shanghai"
+# 是否启用定时任务
+enabled = true
+# 过期用户检查时间 (小时:分钟)
+expired_check_time = "03:00"
+# 到期提醒检查时间
+expiring_check_time = "09:00"
+# 自动续期检查时间
+auto_renew_time = "02:00"
+# 每日统计时间
+daily_stats_time = "00:05"
+# 会话清理间隔 (小时)
+session_cleanup_interval = 6
+
+# ===========================
+# 通知配置
+# ===========================
+[Notification]
+# 是否启用通知服务
+enabled = true
+# 到期提前几天提醒
+expiry_remind_days = 3
+# 每日排行榜推送时间 (空字符串 = 不推送)
+daily_ranking_time = ""
+# 新媒体入库通知
+new_media_notify = false

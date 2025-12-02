@@ -1,4 +1,6 @@
 python-telegram-bot~=21.0
+pyrogram~=2.0.106
+TgCrypto~=1.2.5
 aiofiles~=24.1.0
 toml~=0.10.2
 pytz~=2025.1
