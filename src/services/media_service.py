@@ -52,8 +52,10 @@ class MediaSearchResult:
             'overview': self.overview,
             'release_date': self.release_date,
             'year': self.year,
-            'poster_url': self.poster_url,
+            'poster': self.poster_url,  # 前端使用 poster 字段
+            'poster_url': self.poster_url,  # 保留兼容性
             'vote_average': self.vote_average,
+            'rating': self.vote_average,  # 前端使用 rating 字段
             'source': self.source,
             'source_url': self.source_url,
             'extra': self.extra or {},
@@ -64,46 +66,116 @@ class MediaService:
     """媒体搜索服务"""
     
     @staticmethod
-    def _tmdb_to_result(media: TMDBMedia) -> MediaSearchResult:
+    def _tmdb_to_result(media: TMDBMedia, include_details: bool = False) -> MediaSearchResult:
         """将 TMDB 结果转换为统一格式"""
+        # 根据是否包含详细信息决定是否截断简介
+        overview = media.overview if include_details else (media.overview[:300] + '...' if len(media.overview) > 300 else media.overview)
+        
+        extra = {
+            'vote_count': media.vote_count,
+            'backdrop_url': media.backdrop_url,
+            'original_language': media.original_language,
+            'popularity': media.popularity,
+        }
+        
+        # 如果包含详细信息，使用 media.to_dict() 中的完整信息
+        if include_details and hasattr(media, 'to_dict'):
+            media_dict = media.to_dict()
+            if 'genres' in media_dict:
+                extra['genres'] = media_dict['genres']
+            if 'cast' in media_dict:
+                extra['cast'] = media_dict['cast']
+            if 'seasons' in media_dict:
+                extra['seasons'] = media_dict['seasons']
+            if 'runtime' in media_dict:
+                extra['runtime'] = media_dict['runtime']
+            if 'number_of_seasons' in media_dict:
+                extra['number_of_seasons'] = media_dict['number_of_seasons']
+            if 'number_of_episodes' in media_dict:
+                extra['number_of_episodes'] = media_dict['number_of_episodes']
+        
         return MediaSearchResult(
             id=media.id,
             title=media.title,
             original_title=media.original_title,
             media_type=media.media_type,
-            overview=media.overview[:300] + '...' if len(media.overview) > 300 else media.overview,
+            overview=overview,
             release_date=media.release_date,
             year=media.release_date[:4] if media.release_date else None,
             poster_url=media.poster_url,
             vote_average=media.vote_average,
             source='tmdb',
             source_url=media.tmdb_url,
-            extra={
-                'vote_count': media.vote_count,
-                'backdrop_url': media.backdrop_url,
-            }
+            extra=extra
         )
     
     @staticmethod
-    def _bgm_to_result(subject: BangumiSubject) -> MediaSearchResult:
+    def _bgm_to_result(subject: BangumiSubject, include_details: bool = False) -> MediaSearchResult:
         """将 Bangumi 结果转换为统一格式"""
+        # 处理类型名称
+        type_names = {
+            1: '书籍',
+            2: '动画',
+            3: '音乐',
+            4: '游戏',
+            6: '三次元',
+        }
+        type_name = type_names.get(subject.type, '未知')
+        
+        # 处理评分
+        score = 0.0
+        rank = 0
+        if subject.rating:
+            score = subject.rating.get('score', 0.0) or 0.0
+            rank = subject.rating.get('rank', 0) or 0
+        
+        # 处理简介（可能为 None 或空字符串）
+        summary = subject.summary or ''
+        # 根据是否包含详细信息决定是否截断简介
+        overview = summary if include_details else (summary[:300] + '...' if len(summary) > 300 else summary)
+        
+        # 处理日期
+        date = subject.date or ''
+        year = date[:4] if date and len(date) >= 4 else None
+        
+        # 处理标签
+        tags = []
+        if subject.tags:
+            for tag in subject.tags[:5]:
+                if isinstance(tag, dict):
+                    tags.append(tag.get('name', ''))
+                elif isinstance(tag, str):
+                    tags.append(tag)
+        
+        extra = {
+            'rank': rank,
+            'tags': tags,
+            'type_id': subject.type,
+            'eps': subject.eps,
+            'volumes': subject.volumes,
+        }
+        
+        # 如果包含详细信息，添加更多字段
+        if include_details:
+            extra.update({
+                'name_cn': subject.name_cn,
+                'name': subject.name,
+                'infobox': getattr(subject, 'infobox', []),
+            })
+        
         return MediaSearchResult(
             id=subject.id,
             title=subject.title,
             original_title=subject.name,
-            media_type=subject.type_name,
-            overview=subject.summary[:300] + '...' if len(subject.summary) > 300 else subject.summary,
-            release_date=subject.air_date,
-            year=subject.air_date[:4] if subject.air_date and len(subject.air_date) >= 4 else None,
+            media_type=type_name,
+            overview=overview,
+            release_date=date,
+            year=year,
             poster_url=subject.cover_url,
-            vote_average=subject.score,
+            vote_average=score,
             source='bangumi',
             source_url=subject.bgm_url,
-            extra={
-                'rank': subject.rank,
-                'tags': [t.get('name') for t in subject.tags[:5]] if subject.tags else [],
-                'type_id': subject.type,
-            }
+            extra=extra
         )
     
     @staticmethod
@@ -148,7 +220,9 @@ class MediaService:
         cls,
         query: str,
         source: MediaSource = MediaSource.ALL,
-        limit: int = 20
+        limit: int = 20,
+        year: Optional[int] = None,
+        bgm_type: Optional[int] = None
     ) -> List[MediaSearchResult]:
         """
         统一搜索接口
@@ -171,9 +245,9 @@ class MediaService:
             media_type, media_id = value
             tmdb = get_tmdb_client()
             try:
-                media = await tmdb.get_by_id(media_id, media_type)
+                media = await tmdb.get_by_id(media_id, media_type, include_details=True)
                 if media:
-                    results.append(cls._tmdb_to_result(media))
+                    results.append(cls._tmdb_to_result(media, include_details=True))
             except TMDBError as e:
                 logger.error(f"TMDB 查询失败: {e}")
             return results
@@ -185,7 +259,7 @@ class MediaService:
             try:
                 subject = await bgm.get_by_id(subject_id)
                 if subject:
-                    results.append(cls._bgm_to_result(subject))
+                    results.append(cls._bgm_to_result(subject, include_details=True))
             except BangumiError as e:
                 logger.error(f"Bangumi 查询失败: {e}")
             return results
@@ -194,9 +268,9 @@ class MediaService:
             media_type, media_id = value
             tmdb = get_tmdb_client()
             try:
-                media = await tmdb.get_by_id(media_id, media_type)
+                media = await tmdb.get_by_id(media_id, media_type, include_details=True)
                 if media:
-                    results.append(cls._tmdb_to_result(media))
+                    results.append(cls._tmdb_to_result(media, include_details=True))
             except TMDBError as e:
                 logger.error(f"TMDB 查询失败: {e}")
             return results
@@ -205,23 +279,68 @@ class MediaService:
         keyword = value
         half_limit = limit // 2
         
-        # TMDB 搜索
+        # TMDB 搜索（只搜索电影和电视剧）
         if source in (MediaSource.ALL, MediaSource.TMDB):
             tmdb = get_tmdb_client()
             try:
                 tmdb_results = await tmdb.search_multi(keyword)
-                for media in tmdb_results[:half_limit if source == MediaSource.ALL else limit]:
-                    results.append(cls._tmdb_to_result(media))
+                # 过滤：只保留 movie 和 tv 类型
+                filtered_results = [
+                    media for media in tmdb_results 
+                    if media.media_type in ('movie', 'tv')
+                ]
+                for media in filtered_results[:half_limit if source == MediaSource.ALL else limit]:
+                    results.append(cls._tmdb_to_result(media, include_details=False))
             except TMDBError as e:
                 logger.warning(f"TMDB 搜索失败: {e}")
         
-        # Bangumi 搜索
+        # Bangumi 搜索（只搜索动画和三次元）
         if source in (MediaSource.ALL, MediaSource.BANGUMI):
             bgm = get_bangumi_client()
             try:
-                bgm_results = await bgm.search(keyword, limit=half_limit if source == MediaSource.ALL else limit)
-                for subject in bgm_results:
-                    results.append(cls._bgm_to_result(subject))
+                from src.services.bangumi import SubjectType
+                
+                # 如果指定了 bgm_type，只搜索该类型
+                if bgm_type is not None:
+                    bgm_results = await bgm.search(
+                        keyword,
+                        subject_type=bgm_type,
+                        limit=half_limit if source == MediaSource.ALL else limit
+                    )
+                    for subject in bgm_results:
+                        # 年份过滤
+                        if year and subject.date:
+                            subject_year = subject.date[:4] if len(subject.date) >= 4 else None
+                            if subject_year and int(subject_year) != year:
+                                continue
+                        results.append(cls._bgm_to_result(subject, include_details=False))
+                else:
+                    # 默认搜索动画（type=2）和三次元（type=6）
+                    limit_per_type = (half_limit if source == MediaSource.ALL else limit) // 2
+                    
+                    # 并行搜索两种类型
+                    import asyncio
+                    anime_task = bgm.search(
+                        keyword, 
+                        subject_type=SubjectType.ANIME.value,  # 2
+                        limit=limit_per_type
+                    )
+                    real_task = bgm.search(
+                        keyword,
+                        subject_type=SubjectType.REAL.value,  # 6
+                        limit=limit_per_type
+                    )
+                    anime_results, real_results = await asyncio.gather(anime_task, real_task)
+                    
+                    # 合并结果并应用年份过滤
+                    bgm_results = anime_results + real_results
+                    for subject in bgm_results:
+                        # 年份过滤
+                        if year and subject.date:
+                            subject_year = subject.date[:4] if len(subject.date) >= 4 else None
+                            if subject_year and int(subject_year) != year:
+                                continue
+                        results.append(cls._bgm_to_result(subject, include_details=False))
             except BangumiError as e:
                 logger.warning(f"Bangumi 搜索失败: {e}")
         
@@ -241,23 +360,25 @@ class MediaService:
         return await cls.search(query, MediaSource.BANGUMI, limit)
     
     @classmethod
-    async def get_by_source_id(cls, source: str, media_id: int, media_type: str = None) -> Optional[MediaSearchResult]:
+    async def get_by_source_id(cls, source: str, media_id: int, media_type: str = None, include_details: bool = True) -> Optional[MediaSearchResult]:
         """根据来源和 ID 获取详情"""
         if source == 'tmdb':
             tmdb = get_tmdb_client()
             try:
-                media = await tmdb.get_by_id(media_id, media_type or 'movie')
+                media = await tmdb.get_by_id(media_id, media_type or 'movie', include_details)
                 if media:
-                    return cls._tmdb_to_result(media)
-            except TMDBError:
+                    return cls._tmdb_to_result(media, include_details)
+            except TMDBError as e:
+                logger.error(f"TMDB 获取详情失败: {e}")
                 pass
-        elif source == 'bangumi':
+        elif source == 'bangumi' or source == 'bgm':
             bgm = get_bangumi_client()
             try:
                 subject = await bgm.get_by_id(media_id)
                 if subject:
-                    return cls._bgm_to_result(subject)
-            except BangumiError:
+                    return cls._bgm_to_result(subject, include_details)
+            except BangumiError as e:
+                logger.error(f"Bangumi 获取详情失败: {e}")
                 pass
         return None
 

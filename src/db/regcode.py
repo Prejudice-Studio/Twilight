@@ -11,7 +11,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.config import Config
-from src.db import create_database
+from src.db.utils import create_database
 
 logger = logging.getLogger(__name__)
 class Type(Enum):
@@ -113,7 +113,7 @@ class RegCodeOperate:
                 reg_code = result.scalar_one_or_none()
                 if reg_code:
                     reg_code.USE_COUNT += increment
-                    session.merge(reg_code)
+                    await session.merge(reg_code)
                     await session.commit()
                     return True
                 else:

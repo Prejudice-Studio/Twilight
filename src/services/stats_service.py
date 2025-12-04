@@ -262,4 +262,51 @@ class StatsService:
         )
         
         return True
+    
+    @classmethod
+    async def get_playback_stats(cls, uid: int) -> Dict[str, Any]:
+        """
+        获取用户播放统计（用于前端）
+        
+        返回格式:
+        {
+            "total_plays": 100,
+            "total_time": 36000,
+            "favorite_genres": ["动作", "科幻"],
+            "recent_items": [
+                {
+                    "name": "电影名称",
+                    "type": "Movie",
+                    "played_at": "2024-01-01T00:00:00Z"
+                }
+            ]
+        }
+        """
+        # 获取总播放次数和时长
+        total_plays = await PlaybackOperate.get_user_play_count(uid)
+        total_time = await PlaybackOperate.get_user_total_duration(uid)
+        
+        # 获取最近的播放记录
+        recent_records = await PlaybackOperate.get_user_playback(uid, limit=10)
+        recent_items = []
+        for record in recent_records:
+            if record.ITEM_NAME:
+                played_at = datetime.fromtimestamp(record.START_TIME).isoformat() + 'Z'
+                recent_items.append({
+                    'name': record.ITEM_NAME,
+                    'type': record.ITEM_TYPE or 'Unknown',
+                    'played_at': played_at
+                })
+        
+        # 获取喜欢的类型（从播放记录中统计）
+        all_records = await PlaybackOperate.get_user_playback(uid, limit=1000)
+        # 这里可以根据实际需求统计类型，暂时返回空列表
+        favorite_genres = []
+        
+        return {
+            'total_plays': total_plays,
+            'total_time': total_time,
+            'favorite_genres': favorite_genres,
+            'recent_items': recent_items
+        }
 

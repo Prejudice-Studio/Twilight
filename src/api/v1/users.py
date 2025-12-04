@@ -3,11 +3,14 @@
 
 提供用户相关的 CRUD 操作
 """
+import logging
 from flask import Blueprint, request, g
 
 from src.api.v1.auth import async_route, require_auth, api_response
-from src.db.user import UserOperate
+from src.db.user import UserOperate, Role
 from src.services import UserService
+
+logger = logging.getLogger(__name__)
 
 users_bp = Blueprint('users', __name__, url_prefix='/users')
 
@@ -22,11 +25,12 @@ async def register():
     
     Request:
         {
-            "telegram_id": 123456789,
-            "username": "myusername",
-            "reg_code": "code-xxx",      // 注册码注册
-            "email": "user@example.com", // 可选
-            "use_score": false           // 是否使用积分注册
+            "username": "myusername",       // 必填
+            "password": "mypassword",       // Web 端必填，Telegram 端可选（自动生成）
+            "telegram_id": 123456789,       // 可选，Telegram 用户 ID
+            "reg_code": "code-xxx",         // 注册码注册
+            "email": "user@example.com",    // 可选
+            "use_score": false              // 是否使用积分注册
         }
     
     Response:
@@ -34,21 +38,37 @@ async def register():
             "success": true,
             "data": {
                 "username": "myusername",
-                "password": "生成的密码",
+                "password": "密码（仅自动生成时返回）",
                 "user": { ... }
             }
         }
     """
+    from src.config import Config
+    
     data = request.get_json() or {}
     
     telegram_id = data.get('telegram_id')
     username = data.get('username')
+    password = data.get('password')  # Web 端用户设置的密码
     reg_code = data.get('reg_code')
     email = data.get('email')
     use_score = data.get('use_score', False)
     
-    if not telegram_id or not username:
-        return api_response(False, "缺少必要参数 (telegram_id, username)", code=400)
+    # 验证必要参数
+    if not username:
+        return api_response(False, "缺少用户名", code=400)
+    
+    # 如果强制绑定 Telegram 但未提供 telegram_id
+    if Config.FORCE_BIND_TELEGRAM and not telegram_id:
+        return api_response(False, "系统要求绑定 Telegram，请提供 telegram_id", code=400)
+    
+    # Web 端注册：没有 telegram_id 时必须提供密码
+    if not telegram_id and not password:
+        return api_response(False, "请设置密码", code=400)
+    
+    # 密码长度验证
+    if password and len(password) < 6:
+        return api_response(False, "密码长度至少 6 位", code=400)
     
     # 用户名验证
     from src.core.utils import is_valid_username
@@ -63,17 +83,18 @@ async def register():
     
     # 注册
     if use_score:
-        result = await UserService.register_by_score(telegram_id, username, email)
+        result = await UserService.register_by_score(telegram_id, username, email, password)
     elif reg_code:
-        result = await UserService.register_by_code(telegram_id, username, reg_code, email)
+        result = await UserService.register_by_code(telegram_id, username, reg_code, email, password)
     else:
-        return api_response(False, "需要提供注册码或选择积分注册", code=400)
+        # 无码注册（待激活状态，只能签到）
+        result = await UserService.register_pending(telegram_id, username, email, password)
     
     if result.result.value == 'success':
         user_info = await UserService.get_user_info(result.user) if result.user else None
         return api_response(True, result.message, {
             'username': result.user.USERNAME if result.user else None,
-            'password': result.emby_password,
+            'password': result.emby_password if not password else None,  # 仅自动生成时返回
             'user': user_info,
         })
     
@@ -110,7 +131,36 @@ async def check_registration_available():
         'register_mode': ScoreAndRegisterConfig.REGISTER_MODE,
         'score_register_mode': ScoreAndRegisterConfig.SCORE_REGISTER_MODE,
         'score_register_need': ScoreAndRegisterConfig.SCORE_REGISTER_NEED,
+        'allow_pending_register': ScoreAndRegisterConfig.ALLOW_PENDING_REGISTER,
     })
+
+
+@users_bp.route('/me/activate', methods=['POST'])
+@async_route
+@require_auth
+async def activate_my_account():
+    """
+    激活待激活账户（使用积分创建 Emby 账户）
+    
+    需要足够的积分才能激活。
+    
+    Response:
+        {
+            "success": true,
+            "message": "账户激活成功！Emby 密码: xxx，有效期 30 天"
+        }
+    """
+    user = g.current_user
+    
+    # 检查是否已激活
+    if user.EMBYID or user.ACTIVE_STATUS:
+        return api_response(False, "账户已激活", code=400)
+    
+    success, message = await UserService.activate_pending_user(user)
+    
+    if success:
+        return api_response(True, message)
+    return api_response(False, message, code=400)
 
 
 # ==================== 用户信息 ====================
@@ -252,6 +302,155 @@ async def get_nsfw_status():
     })
 
 
+@users_bp.route('/me/emby/bind', methods=['POST'])
+@async_route
+@require_auth
+async def bind_emby_account():
+    """
+    绑定已有的 Emby 账号（需要验证用户名和密码）
+    
+    Request:
+        {
+            "emby_username": "existing_username",  // Emby 用户名
+            "emby_password": "password"           // Emby 密码
+        }
+    
+    Response:
+        {
+            "success": true,
+            "message": "绑定成功",
+            "data": {
+                "emby_id": "xxx",
+                "emby_username": "existing_username"
+            }
+        }
+    """
+    from src.services.emby import get_emby_client, EmbyError
+    
+    data = request.get_json() or {}
+    
+    # 尝试多种可能的字段名
+    emby_username = (
+        data.get('emby_username') or 
+        data.get('username') or 
+        data.get('embyUsername') or 
+        ''
+    )
+    if isinstance(emby_username, str):
+        emby_username = emby_username.strip()
+    else:
+        emby_username = ''
+    
+    emby_password = (
+        data.get('emby_password') or 
+        data.get('password') or 
+        data.get('embyPassword') or 
+        ''
+    )
+    if isinstance(emby_password, str):
+        emby_password = emby_password.strip()
+    else:
+        emby_password = ''
+    
+    # 调试日志
+    logger.debug(f"绑定 Emby 账号请求: username={emby_username}, password_length={len(emby_password)}, data_keys={list(data.keys())}")
+    
+    if not emby_username:
+        return api_response(False, "请输入 Emby 用户名", code=400)
+    
+    if not emby_password:
+        logger.warning(f"密码为空: data keys={list(data.keys())}, emby_password value={repr(data.get('emby_password'))}, password value={repr(data.get('password'))}")
+        return api_response(False, "请输入 Emby 密码", code=400)
+    
+    user = g.current_user
+    
+    # 检查用户是否已绑定 Emby 账号
+    if user.EMBYID:
+        return api_response(False, "您已绑定 Emby 账号，请先解绑", code=400)
+    
+    # 检查用户名是否已被其他用户使用
+    existing_user = await UserOperate.get_user_by_username(emby_username)
+    if existing_user and existing_user.UID != user.UID:
+        return api_response(False, "该用户名已被其他用户使用", code=400)
+    
+    # 验证 Emby 用户名和密码
+    emby = get_emby_client()
+    try:
+        # 首先验证用户名和密码
+        emby_user = await emby.authenticate_by_name(emby_username, emby_password)
+        if not emby_user:
+            return api_response(False, "用户名或密码错误", code=401)
+        
+        # 验证用户名是否匹配
+        if emby_user.name.lower() != emby_username.lower():
+            return api_response(False, "用户名不匹配", code=400)
+        
+        # 检查该 Emby 账号是否已被其他本地用户绑定
+        existing_bind = await UserOperate.get_user_by_embyid(emby_user.id)
+        if existing_bind and existing_bind.UID != user.UID:
+            return api_response(False, "该 Emby 账号已被其他用户绑定", code=400)
+        
+        # 绑定账号
+        user.EMBYID = emby_user.id
+        user.USERNAME = emby_username
+        
+        # 如果是管理员或白名单，保持永久有效期
+        if user.ROLE in (Role.ADMIN.value, Role.WHITE_LIST.value):
+            user.EXPIRED_AT = 253402214400  # 9999-12-31
+        # 如果用户是未注册状态，更新为普通用户
+        elif user.ROLE == Role.UNRECOGNIZED.value:
+            user.ROLE = Role.NORMAL.value
+        
+        # 如果用户是待激活状态，激活用户
+        if not user.ACTIVE_STATUS:
+            user.ACTIVE_STATUS = True
+            # 如果不是管理员/白名单且没有到期时间，设置默认30天
+            if user.EXPIRED_AT == -1 and user.ROLE == Role.NORMAL.value:
+                from src.core.utils import days_to_seconds, timestamp
+                user.EXPIRED_AT = timestamp() + days_to_seconds(30)
+        
+        await UserOperate.update_user(user)
+        
+        logger.info(f"用户绑定 Emby 账号成功: {user.USERNAME} -> {emby_username} (ID: {emby_user.id})")
+        
+        return api_response(True, "绑定成功", {
+            'emby_id': emby_user.id,
+            'emby_username': emby_username,
+        })
+        
+    except EmbyError as e:
+        logger.error(f"绑定 Emby 账号失败: {e}")
+        return api_response(False, f"绑定失败: {e}", code=500)
+    except Exception as e:
+        logger.error(f"绑定 Emby 账号失败: {e}")
+        return api_response(False, f"绑定失败: {e}", code=500)
+
+
+@users_bp.route('/me/emby/unbind', methods=['POST'])
+@async_route
+@require_auth
+async def unbind_emby_account():
+    """
+    解绑 Emby 账号
+    
+    注意：解绑后用户将无法访问 Emby，但不会删除 Emby 中的账号
+    """
+    user = g.current_user
+    
+    if not user.EMBYID:
+        return api_response(False, "您未绑定 Emby 账号", code=400)
+    
+    # 解绑（不清除 Emby 账号，只清除本地关联）
+    old_emby_id = user.EMBYID
+    user.EMBYID = None
+    # 不修改用户名，保留原用户名
+    await UserOperate.update_user(user)
+    
+    logger.info(f"用户解绑 Emby 账号: {user.USERNAME} (原 Emby ID: {old_emby_id})")
+    
+    return api_response(True, "解绑成功")
+
+
 @users_bp.route('/me/nsfw', methods=['PUT'])
 @async_route
 @require_auth
@@ -295,6 +494,58 @@ async def toggle_my_nsfw():
 
 
 # ==================== 用户续期 ====================
+
+@users_bp.route('/regcode/check', methods=['POST'])
+@async_route
+async def check_regcode():
+    """
+    检查注册码类型
+    
+    Request:
+        {
+            "reg_code": "code-xxx"
+        }
+    
+    Response:
+        {
+            "success": true,
+            "data": {
+                "type": 1,  // 1=注册, 2=续期, 3=白名单
+                "type_name": "注册",
+                "days": 30,
+                "valid": true
+            }
+        }
+    """
+    from src.db.regcode import RegCodeOperate
+    
+    data = request.get_json() or {}
+    reg_code = data.get('reg_code', '').strip()
+    
+    if not reg_code:
+        return api_response(False, "缺少注册码", code=400)
+    
+    code_info = await RegCodeOperate.get_regcode_by_code(reg_code)
+    
+    if not code_info:
+        return api_response(False, "注册码不存在", code=404)
+    
+    if not code_info.ACTIVE:
+        return api_response(False, "注册码已禁用", code=400)
+    
+    # 检查是否已用完
+    if code_info.USE_COUNT_LIMIT > 0 and code_info.USE_COUNT >= code_info.USE_COUNT_LIMIT:
+        return api_response(False, "注册码已用完", code=400)
+    
+    type_names = {1: '注册', 2: '续期', 3: '白名单'}
+    
+    return api_response(True, "注册码有效", {
+        'type': code_info.TYPE,
+        'type_name': type_names.get(code_info.TYPE, '未知'),
+        'days': code_info.DAYS or 30,
+        'valid': True,
+    })
+
 
 @users_bp.route('/me/renew', methods=['POST'])
 @async_route
@@ -446,10 +697,26 @@ async def get_telegram_status():
         else:
             masked_id = '****'
     
+    # 尝试获取 Telegram 用户名
+    telegram_username = None
+    if user.TELEGRAM_ID:
+        try:
+            from src.bot.bot import get_bot_instance
+            bot = get_bot_instance()
+            if bot and bot.app:
+                try:
+                    tg_user = await bot.app.get_users(user.TELEGRAM_ID)
+                    telegram_username = tg_user.username or f"{tg_user.first_name or ''} {tg_user.last_name or ''}".strip() or None
+                except Exception:
+                    pass  # 如果获取失败，忽略
+        except Exception:
+            pass  # Bot 未初始化或获取失败，忽略
+    
     return api_response(True, "获取成功", {
         'bound': bool(user.TELEGRAM_ID),
         'telegram_id': masked_id,
         'telegram_id_full': user.TELEGRAM_ID,  # 完整 ID（用于前端判断）
+        'telegram_username': telegram_username,  # Telegram 用户名
         'force_bind': force_bind,
         'can_unbind': not force_bind and bool(user.TELEGRAM_ID),
         'can_change': bool(user.TELEGRAM_ID),  # 已绑定才能换绑
@@ -639,6 +906,11 @@ async def renew_by_score():
     
     # 扣除积分
     score.SCORE -= cost
+    
+    # 更新累计消费
+    if hasattr(score, 'TOTAL_SPENT'):
+        score.TOTAL_SPENT = (score.TOTAL_SPENT or 0) + cost
+    
     await ScoreOperate.update_score(score)
     
     # 续期
@@ -647,8 +919,20 @@ async def renew_by_score():
     if not success:
         # 退还积分
         score.SCORE += cost
+        if hasattr(score, 'TOTAL_SPENT'):
+            score.TOTAL_SPENT = (score.TOTAL_SPENT or 0) - cost
         await ScoreOperate.update_score(score)
         return api_response(False, message)
+    
+    # 记录积分历史
+    from src.db.score import ScoreHistoryOperate
+    await ScoreHistoryOperate.add_history(
+        uid=g.current_user.UID,
+        type_='renew',
+        amount=-cost,
+        balance_after=score.SCORE,
+        note=f"续期 {days} 天"
+    )
     
     user_info = await UserService.get_user_info(g.current_user)
     return api_response(True, f"续期成功，扣除 {cost} {ScoreAndRegisterConfig.SCORE_NAME}", {

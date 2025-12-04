@@ -139,6 +139,11 @@ def get_bot() -> Optional[TelegramBot]:
     return _bot_instance
 
 
+def get_bot_instance() -> Optional[TelegramBot]:
+    """获取 Bot 实例（别名）"""
+    return _bot_instance
+
+
 async def start_bot() -> Optional[TelegramBot]:
     """启动 Bot"""
     global _bot_instance

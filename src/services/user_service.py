@@ -59,18 +59,20 @@ class UserService:
 
     @staticmethod
     async def register_by_code(
-        telegram_id: int,
+        telegram_id: Optional[int],
         username: str,
         reg_code: str,
-        email: Optional[str] = None
+        email: Optional[str] = None,
+        password: Optional[str] = None
     ) -> RegisterResponse:
         """
         通过注册码注册
         
-        :param telegram_id: Telegram ID
+        :param telegram_id: Telegram ID（Web 注册时可为空）
         :param username: Emby 用户名
         :param reg_code: 注册码
         :param email: 邮箱（可选）
+        :param password: 密码（Web 注册时使用，为空则自动生成）
         """
         from src.db.regcode import RegCodeOperate, Type as RegCodeType
         
@@ -79,10 +81,11 @@ class UserService:
         if not available:
             return RegisterResponse(RegisterResult.USER_LIMIT_REACHED, msg)
         
-        # 检查用户是否已存在
-        existing_user = await UserOperate.get_user_by_telegram_id(telegram_id)
-        if existing_user and existing_user.EMBYID:
-            return RegisterResponse(RegisterResult.USER_EXISTS, "您已经注册过了")
+        # 检查用户是否已存在（有 telegram_id 时检查）
+        if telegram_id:
+            existing_user = await UserOperate.get_user_by_telegram_id(telegram_id)
+            if existing_user and existing_user.EMBYID:
+                return RegisterResponse(RegisterResult.USER_EXISTS, "您已经注册过了")
         
         # 验证注册码
         code_info = await RegCodeOperate.get_regcode_by_code(reg_code)
@@ -111,18 +114,24 @@ class UserService:
             username=username,
             email=email,
             days=code_info.DAYS or 30,
-            reg_code=reg_code
+            reg_code=reg_code,
+            password=password
         )
 
     @staticmethod
     async def register_by_score(
-        telegram_id: int,
+        telegram_id: Optional[int],
         username: str,
-        email: Optional[str] = None
+        email: Optional[str] = None,
+        password: Optional[str] = None
     ) -> RegisterResponse:
         """通过积分注册"""
         if not ScoreAndRegisterConfig.SCORE_REGISTER_MODE:
             return RegisterResponse(RegisterResult.ERROR, "积分注册未开启")
+        
+        # 积分注册需要 telegram_id
+        if not telegram_id:
+            return RegisterResponse(RegisterResult.ERROR, "积分注册需要绑定 Telegram")
         
         # 检查注册是否开放
         available, msg = await UserService.check_registration_available()
@@ -154,16 +163,210 @@ class UserService:
             telegram_id=telegram_id,
             username=username,
             email=email,
-            days=30
+            days=30,
+            password=password
         )
 
     @staticmethod
+    async def register_pending(
+        telegram_id: Optional[int],
+        username: str,
+        email: Optional[str] = None,
+        password: Optional[str] = None
+    ) -> RegisterResponse:
+        """
+        无码注册（待激活状态）
+        
+        用户注册后不创建 Emby 账户，只能签到赚积分。
+        积分够了可以使用积分激活账户。
+        """
+        from src.config import ScoreAndRegisterConfig
+        
+        # 检查是否允许无码注册
+        if not ScoreAndRegisterConfig.ALLOW_PENDING_REGISTER:
+            return RegisterResponse(RegisterResult.ERROR, "暂不开放注册，请使用注册码")
+        
+        # 检查用户名是否已存在
+        existing = await UserOperate.get_user_by_username(username)
+        if existing:
+            return RegisterResponse(RegisterResult.USER_EXISTS, "用户名已被使用")
+        
+        # 如果有 telegram_id，检查是否已注册
+        if telegram_id:
+            existing_tg = await UserOperate.get_user_by_telegram_id(telegram_id)
+            if existing_tg:
+                return RegisterResponse(RegisterResult.USER_EXISTS, "该 Telegram 账号已注册")
+        
+        # 先获取新 UID
+        new_uid = await UserOperate.get_new_uid()
+        user_password = password if password else generate_password(12)
+        
+        # 检查是否是预设管理员或白名单（优先使用 UID，其次使用用户名）
+        is_admin = False
+        is_whitelist = False
+        
+        # 先检查管理员 UID 列表
+        admin_uids = ScoreAndRegisterConfig.ADMIN_UIDS
+        if admin_uids:
+            uid_list = [int(u.strip()) for u in admin_uids.split(',') if u.strip().isdigit()]
+            is_admin = new_uid in uid_list
+        
+        # 如果 UID 未匹配，再检查管理员用户名列表
+        if not is_admin:
+            admin_usernames = ScoreAndRegisterConfig.ADMIN_USERNAMES
+            if admin_usernames:
+                name_list = [n.strip().lower() for n in admin_usernames.split(',') if n.strip()]
+                is_admin = username.lower() in name_list
+        
+        # 检查白名单 UID 列表
+        if not is_admin:
+            whitelist_uids = ScoreAndRegisterConfig.WHITE_LIST_UIDS
+            if whitelist_uids:
+                uid_list = [int(u.strip()) for u in whitelist_uids.split(',') if u.strip().isdigit()]
+                is_whitelist = new_uid in uid_list
+        
+        # 如果 UID 未匹配，再检查白名单用户名列表
+        if not is_admin and not is_whitelist:
+            whitelist_usernames = ScoreAndRegisterConfig.WHITE_LIST_USERNAMES
+            if whitelist_usernames:
+                name_list = [n.strip().lower() for n in whitelist_usernames.split(',') if n.strip()]
+                is_whitelist = username.lower() in name_list
+        
+        # 9999-12-31 的时间戳（管理员和白名单使用）
+        permanent_expire = 253402214400
+        
+        # 管理员默认激活，到期时间为 9999 年
+        if is_admin:
+            user = UserModel(
+                UID=new_uid,
+                TELEGRAM_ID=telegram_id,
+                USERNAME=username,
+                EMAIL=email,
+                EMBYID=None,  # 稍后创建 Emby 账户
+                PASSWORD=hash_password(user_password),
+                ROLE=Role.ADMIN.value,
+                ACTIVE_STATUS=True,  # 管理员默认激活
+                EXPIRED_AT=permanent_expire,
+                REGISTER_TIME=timestamp(),
+            )
+        elif is_whitelist:
+            # 白名单用户默认激活，到期时间为 9999 年
+            user = UserModel(
+                UID=new_uid,
+                TELEGRAM_ID=telegram_id,
+                USERNAME=username,
+                EMAIL=email,
+                EMBYID=None,  # 稍后创建 Emby 账户
+                PASSWORD=hash_password(user_password),
+                ROLE=Role.WHITE_LIST.value,
+                ACTIVE_STATUS=True,  # 白名单默认激活
+                EXPIRED_AT=permanent_expire,
+                REGISTER_TIME=timestamp(),
+            )
+        else:
+            # 普通用户待激活
+            user = UserModel(
+                UID=new_uid,
+                TELEGRAM_ID=telegram_id,
+                USERNAME=username,
+                EMAIL=email,
+                EMBYID=None,  # 无 Emby 账户
+                PASSWORD=hash_password(user_password),
+                ROLE=Role.NORMAL.value,
+                ACTIVE_STATUS=False,  # 未激活状态
+                EXPIRED_AT=-1,
+                REGISTER_TIME=timestamp(),
+            )
+        await UserOperate.add_user(user)
+        
+        # 初始化积分记录（获取或创建）
+        from src.db.score import ScoreOperate
+        score_record = await ScoreOperate.get_score_by_uid(new_uid)
+        if not score_record:
+            from src.db.score import ScoreModel
+            score_record = ScoreModel(
+                UID=new_uid,
+                TELEGRAM_ID=telegram_id,
+                SCORE=ScoreAndRegisterConfig.PENDING_REGISTER_BONUS,  # 赠送初始积分
+            )
+            await ScoreOperate.add_score(score_record)
+        else:
+            # 已有记录，增加积分
+            score_record.SCORE += ScoreAndRegisterConfig.PENDING_REGISTER_BONUS
+            await ScoreOperate.update_score(score_record)
+        
+        logger.info(f"待激活用户注册: {username} (UID: {new_uid})")
+        
+        activate_cost = ScoreAndRegisterConfig.SCORE_REGISTER_NEED
+        return RegisterResponse(
+            result=RegisterResult.SUCCESS,
+            message=f"注册成功！您的账户待激活，请签到赚取 {activate_cost} 积分后激活",
+            user=user,
+            emby_password=user_password if not password else None
+        )
+
+    @staticmethod
+    async def activate_pending_user(user: UserModel) -> Tuple[bool, str]:
+        """
+        激活待激活用户（使用积分创建 Emby 账户）
+        """
+        from src.config import ScoreAndRegisterConfig
+        
+        if user.EMBYID:
+            return False, "账户已激活"
+        
+        if user.ACTIVE_STATUS:
+            return False, "账户已激活"
+        
+        # 检查积分
+        from src.db.score import ScoreOperate
+        score_record = await ScoreOperate.get_score_by_uid(user.UID)
+        needed = ScoreAndRegisterConfig.SCORE_REGISTER_NEED
+        
+        if not score_record or score_record.SCORE < needed:
+            current = score_record.SCORE if score_record else 0
+            return False, f"积分不足，需要 {needed}，当前 {current}"
+        
+        # 扣除积分
+        score_record.SCORE -= needed
+        await ScoreOperate.update_score(score_record)
+        
+        # 创建 Emby 账户
+        emby = get_emby_client()
+        password = generate_password(12)
+        
+        try:
+            emby_user = await emby.create_user(user.USERNAME, password)
+            if not emby_user:
+                # 退还积分
+                score_record.SCORE += needed
+                await ScoreOperate.update_score(score_record)
+                return False, "创建 Emby 账户失败"
+            
+            # 更新用户
+            user.EMBYID = emby_user.id
+            user.ACTIVE_STATUS = True
+            user.EXPIRED_AT = timestamp() + days_to_seconds(30)  # 30天有效期
+            await UserOperate.update_user(user)
+            
+            logger.info(f"用户激活成功: {user.USERNAME}")
+            return True, f"账户激活成功！Emby 密码: {password}，有效期 30 天"
+            
+        except Exception as e:
+            # 退还积分
+            score_record.SCORE += needed
+            await ScoreOperate.update_score(score_record)
+            logger.error(f"激活失败: {e}")
+            return False, f"激活失败: {e}"
+
+    @staticmethod
     async def _create_emby_user(
-        telegram_id: int,
+        telegram_id: Optional[int],
         username: str,
         email: Optional[str],
         days: int,
-        reg_code: Optional[str] = None
+        reg_code: Optional[str] = None,
+        password: Optional[str] = None
     ) -> RegisterResponse:
         """创建 Emby 用户（内部方法）"""
         emby = get_emby_client()
@@ -174,9 +377,9 @@ class UserService:
             if existing_emby:
                 return RegisterResponse(RegisterResult.EMBY_EXISTS, "该用户名在 Emby 中已存在")
             
-            # 生成密码并创建 Emby 用户
-            password = generate_password(12)
-            emby_user = await emby.create_user(username, password)
+            # 使用提供的密码或生成随机密码
+            user_password = password if password else generate_password(12)
+            emby_user = await emby.create_user(username, user_password)
             
             if not emby_user:
                 return RegisterResponse(RegisterResult.EMBY_ERROR, "创建 Emby 账户失败")
@@ -185,29 +388,76 @@ class UserService:
             expire_at = timestamp() + days_to_seconds(days) if days > 0 else -1
             
             # 创建或更新本地用户记录
-            existing_user = await UserOperate.get_user_by_telegram_id(telegram_id)
+            existing_user = None
+            if telegram_id:
+                existing_user = await UserOperate.get_user_by_telegram_id(telegram_id)
             
             if existing_user:
                 existing_user.USERNAME = username
                 existing_user.EMBYID = emby_user.id
-                existing_user.PASSWORD = hash_password(password)
-                existing_user.EXPIRED_AT = expire_at
-                existing_user.ROLE = Role.NORMAL.value
+                existing_user.PASSWORD = hash_password(user_password)
+                # 如果是管理员或白名单，保持永久有效期
+                if existing_user.ROLE in (Role.ADMIN.value, Role.WHITE_LIST.value):
+                    existing_user.EXPIRED_AT = 253402214400  # 9999-12-31
+                else:
+                    existing_user.EXPIRED_AT = expire_at
+                # 如果角色是未注册，更新为普通用户
+                if existing_user.ROLE == Role.UNRECOGNIZED.value:
+                    existing_user.ROLE = Role.NORMAL.value
                 existing_user.EMAIL = email
                 existing_user.REGISTER_TIME = timestamp()
                 await UserOperate.update_user(existing_user)
                 user = existing_user
             else:
                 new_uid = await UserOperate.get_new_uid()
+                
+                # 检查是否是管理员或白名单
+                is_admin = False
+                is_whitelist = False
+                
+                # 检查管理员
+                admin_uids = ScoreAndRegisterConfig.ADMIN_UIDS
+                if admin_uids:
+                    uid_list = [int(u.strip()) for u in admin_uids.split(',') if u.strip().isdigit()]
+                    is_admin = new_uid in uid_list
+                if not is_admin:
+                    admin_usernames = ScoreAndRegisterConfig.ADMIN_USERNAMES
+                    if admin_usernames:
+                        name_list = [n.strip().lower() for n in admin_usernames.split(',') if n.strip()]
+                        is_admin = username.lower() in name_list
+                
+                # 检查白名单
+                if not is_admin:
+                    whitelist_uids = ScoreAndRegisterConfig.WHITE_LIST_UIDS
+                    if whitelist_uids:
+                        uid_list = [int(u.strip()) for u in whitelist_uids.split(',') if u.strip().isdigit()]
+                        is_whitelist = new_uid in uid_list
+                if not is_admin and not is_whitelist:
+                    whitelist_usernames = ScoreAndRegisterConfig.WHITE_LIST_USERNAMES
+                    if whitelist_usernames:
+                        name_list = [n.strip().lower() for n in whitelist_usernames.split(',') if n.strip()]
+                        is_whitelist = username.lower() in name_list
+                
+                # 确定角色和到期时间
+                if is_admin:
+                    user_role = Role.ADMIN.value
+                    user_expire = 253402214400  # 9999-12-31
+                elif is_whitelist:
+                    user_role = Role.WHITE_LIST.value
+                    user_expire = 253402214400  # 9999-12-31
+                else:
+                    user_role = Role.NORMAL.value
+                    user_expire = expire_at
+                
                 user = UserModel(
                     UID=new_uid,
-                    TELEGRAM_ID=telegram_id,
+                    TELEGRAM_ID=telegram_id,  # 可以为 None
                     USERNAME=username,
                     EMAIL=email,
                     EMBYID=emby_user.id,
-                    PASSWORD=hash_password(password),
-                    ROLE=Role.NORMAL.value,
-                    EXPIRED_AT=expire_at,
+                    PASSWORD=hash_password(user_password),
+                    ROLE=user_role,
+                    EXPIRED_AT=user_expire,
                     REGISTER_TIME=timestamp(),
                 )
                 await UserOperate.add_user(user)
@@ -223,7 +473,7 @@ class UserService:
                 result=RegisterResult.SUCCESS,
                 message=f"注册成功！有效期 {days} 天",
                 user=user,
-                emby_password=password
+                emby_password=user_password if not password else None  # 仅自动生成时返回
             )
             
         except EmbyError as e:
@@ -374,46 +624,100 @@ class UserService:
 
     @staticmethod
     async def toggle_nsfw(user: UserModel, enable: bool) -> Tuple[bool, str]:
-        """切换 NSFW 库访问权限"""
+        """
+        切换 NSFW 库显示状态并同步到 Emby
+        
+        当用户开启/关闭 NSFW 显示时，会同步更新 Emby 中的 NSFW 库访问权限。
+        """
         if not user.EMBYID:
             return False, "用户没有关联的 Emby 账户"
+        
+        from src.config import EmbyConfig
+        
+        nsfw_library_id = EmbyConfig.EMBY_NSFW
+        if not nsfw_library_id:
+            return False, "系统未配置 NSFW 媒体库"
         
         try:
             emby = get_emby_client()
             
+            # 同步到 Emby
             if enable:
+                # 开启：授予 NSFW 库访问权限
                 success = await emby.grant_nsfw_access(user.EMBYID)
+                if not success:
+                    return False, "授予 NSFW 库访问权限失败"
             else:
+                # 关闭：撤销 NSFW 库访问权限
                 success = await emby.revoke_nsfw_access(user.EMBYID)
+                if not success:
+                    return False, "撤销 NSFW 库访问权限失败"
             
-            if success:
-                user.NSFW = enable
-                await UserOperate.update_user(user)
-                status = "开启" if enable else "关闭"
-                return True, f"NSFW 库已{status}"
-            else:
-                return False, "操作失败"
+            # 更新数据库中的显示状态
+            user.NSFW = enable
+            await UserOperate.update_user(user)
+            
+            status = "开启" if enable else "关闭"
+            return True, f"NSFW 显示已{status}，已同步到 Emby"
         except Exception as e:
-            logger.error(f"切换 NSFW 失败: {e}")
+            logger.error(f"切换 NSFW 显示状态失败: {e}")
             return False, f"操作失败: {e}"
+
+    @staticmethod
+    async def sync_user_to_emby(user: UserModel) -> Tuple[bool, str]:
+        """
+        同步用户状态到 Emby
+        
+        同步内容包括：
+        - 账号禁用状态（ACTIVE_STATUS）
+        
+        注意：
+        - NSFW 库访问权限由管理员在 Emby 中设置，不需要从数据库同步
+        - NSFW 显示状态（user.NSFW）是用户自己的选择，只存储在数据库中，不需要同步到 Emby
+        """
+        if not user.EMBYID:
+            return True, "用户未绑定 Emby 账户，跳过同步"
+        
+        try:
+            emby = get_emby_client()
+            
+            # 同步账号禁用状态
+            await emby.set_user_enabled(user.EMBYID, user.ACTIVE_STATUS)
+            
+            logger.info(f"用户状态已同步到 Emby: {user.USERNAME} (UID: {user.UID}), 状态: {'启用' if user.ACTIVE_STATUS else '禁用'}")
+            return True, "同步成功"
+        except Exception as e:
+            logger.error(f"同步用户状态到 Emby 失败: {e}")
+            return False, f"同步失败: {e}"
 
     @staticmethod
     async def get_user_info(user: UserModel) -> dict:
         """获取用户详细信息"""
         from src.core.utils import format_expire_time, mask_email
         
+        # 角色名称映射
+        role_name_map = {
+            Role.ADMIN.value: "管理员",
+            Role.NORMAL.value: "普通用户",
+            Role.WHITE_LIST.value: "白名单",
+            Role.UNRECOGNIZED.value: "未注册",
+        }
+        role_name = role_name_map.get(user.ROLE, "未知")
+        
         info = {
             "uid": user.UID,
             "username": user.USERNAME,
             "telegram_id": user.TELEGRAM_ID,
             "email": mask_email(user.EMAIL) if user.EMAIL else None,
-            "role": Role(user.ROLE).name,
+            "role": user.ROLE,  # 保留数字角色
+            "role_name": role_name,  # 添加角色名称
             "active": user.ACTIVE_STATUS,
             "expire_status": format_expire_time(user.EXPIRED_AT),
             "expired_at": user.EXPIRED_AT,
             "nsfw_enabled": user.NSFW,
             "bgm_mode": user.BGM_MODE,
             "register_time": user.REGISTER_TIME,
+            "emby_id": user.EMBYID,  # 添加 Emby ID
         }
         
         # 获取积分

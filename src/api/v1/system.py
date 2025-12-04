@@ -245,3 +245,226 @@ async def get_system_stats():
         'emby': emby_status,
     })
 
+
+@system_bp.route('/admin/config/toml', methods=['GET'])
+@async_route
+@require_auth
+@require_admin
+async def get_config_toml():
+    """获取 config.toml 文件内容（管理员）"""
+    import os
+    from pathlib import Path
+    from src.config import ROOT_PATH
+    
+    config_file = ROOT_PATH / 'config.toml'
+    
+    if not config_file.exists():
+        return api_response(False, "配置文件不存在", code=404)
+    
+    try:
+        with open(config_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        return api_response(True, "获取成功", {
+            'content': content,
+            'path': str(config_file),
+        })
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"读取配置文件失败: {e}", exc_info=True)
+        return api_response(False, f"读取配置文件失败: {e}", code=500)
+
+
+@system_bp.route('/admin/config/toml', methods=['PUT'])
+@async_route
+@require_auth
+@require_admin
+async def update_config_toml():
+    """更新 config.toml 文件内容（管理员）"""
+    import os
+    from pathlib import Path
+    from src.config import ROOT_PATH
+    import toml
+    
+    data = request.get_json() or {}
+    content = data.get('content')
+    
+    if content is None:
+        return api_response(False, "缺少 content 参数", code=400)
+    
+    config_file = ROOT_PATH / 'config.toml'
+    
+    # 验证 TOML 格式
+    try:
+        toml.loads(content)
+    except Exception as e:
+        return api_response(False, f"TOML 格式错误: {e}", code=400)
+    
+    # 备份原文件
+    backup_file = ROOT_PATH / 'config.toml.backup'
+    try:
+        if config_file.exists():
+            import shutil
+            shutil.copy2(config_file, backup_file)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"备份配置文件失败: {e}")
+    
+    # 写入新内容
+    try:
+        with open(config_file, 'w', encoding='utf-8') as f:
+            f.write(content)
+        
+        # 重新加载配置
+        from src.config import (
+            Config, EmbyConfig, ScoreAndRegisterConfig, WebhookConfig,
+            DeviceLimitConfig, APIConfig, SecurityConfig, SchedulerConfig,
+            NotificationConfig, TelegramConfig, BangumiSyncConfig
+        )
+        Config.update_from_toml("Global")
+        EmbyConfig.update_from_toml('Emby')
+        TelegramConfig.update_from_toml('Telegram')
+        ScoreAndRegisterConfig.update_from_toml('SAR')
+        WebhookConfig.update_from_toml('Webhook')
+        DeviceLimitConfig.update_from_toml('DeviceLimit')
+        APIConfig.update_from_toml('API')
+        SecurityConfig.update_from_toml('Security')
+        SchedulerConfig.update_from_toml('Scheduler')
+        NotificationConfig.update_from_toml('Notification')
+        BangumiSyncConfig.update_from_toml('BangumiSync')
+        
+        return api_response(True, "配置已更新并重新加载", {
+            'path': str(config_file),
+        })
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"更新配置文件失败: {e}", exc_info=True)
+        
+        # 尝试恢复备份
+        if backup_file.exists():
+            try:
+                import shutil
+                shutil.copy2(backup_file, config_file)
+            except Exception:
+                pass
+        
+        return api_response(False, f"更新配置文件失败: {e}", code=500)
+
+
+@system_bp.route('/admin/apis', methods=['GET'])
+@async_route
+@require_auth
+@require_admin
+async def list_all_apis():
+    """获取所有 API 列表（管理员）"""
+    from flask import current_app
+    
+    apis = []
+    
+    # 遍历所有注册的蓝图和路由
+    for rule in current_app.url_map.iter_rules():
+        # 过滤掉静态文件、根路径和 OPTIONS 方法
+        if rule.endpoint == 'static' or rule.rule == '/' or 'OPTIONS' in rule.methods:
+            continue
+        
+        # 只获取 /api/v1 开头的路由
+        if not rule.rule.startswith('/api/v1'):
+            continue
+        
+        # 获取方法
+        methods = [m for m in rule.methods if m != 'OPTIONS' and m != 'HEAD']
+        if not methods:
+            continue
+        
+        # 构建路径（移除 /api/v1 前缀以便前端使用）
+        path = rule.rule[7:]  # 移除 '/api/v1'
+        
+        for method in methods:
+            apis.append({
+                'method': method,
+                'path': path,
+                'endpoint': rule.endpoint,
+                'full_path': rule.rule,
+            })
+    
+    # 按路径和方法排序
+    apis.sort(key=lambda x: (x['path'], x['method']))
+    
+    return api_response(True, "获取成功", {
+        'apis': apis,
+        'total': len(apis),
+    })
+
+
+@system_bp.route('/admin/emby/libraries', methods=['GET'])
+@async_route
+@require_auth
+@require_admin
+async def get_emby_libraries():
+    """获取所有 Emby 媒体库列表（管理员）"""
+    from src.services import EmbyService
+    
+    libraries = await EmbyService.get_libraries_info()
+    return api_response(True, "获取成功", libraries)
+
+
+@system_bp.route('/admin/emby/nsfw', methods=['PUT'])
+@async_route
+@require_auth
+@require_admin
+async def update_nsfw_library():
+    """更新 NSFW 库配置（管理员）"""
+    import toml
+    from pathlib import Path
+    from src.config import ROOT_PATH
+    
+    data = request.get_json() or {}
+    nsfw_library_id = data.get('library_id', '')
+    
+    config_file = ROOT_PATH / 'config.toml'
+    
+    if not config_file.exists():
+        return api_response(False, "配置文件不存在", code=404)
+    
+    try:
+        # 读取现有配置
+        config = toml.load(config_file)
+        
+        # 更新 NSFW 库 ID
+        if 'Emby' not in config:
+            config['Emby'] = {}
+        config['Emby']['emby_nsfw'] = nsfw_library_id
+        
+        # 备份原文件
+        backup_file = ROOT_PATH / 'config.toml.backup'
+        if config_file.exists():
+            import shutil
+            shutil.copy2(config_file, backup_file)
+        
+        # 写入新配置
+        with open(config_file, 'w', encoding='utf-8') as f:
+            toml.dump(config, f)
+        
+        # 重新加载配置
+        EmbyConfig.update_from_toml('Emby')
+        
+        return api_response(True, "NSFW 库配置已更新", {
+            'nsfw_library_id': nsfw_library_id,
+        })
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"更新 NSFW 库配置失败: {e}", exc_info=True)
+        
+        # 尝试恢复备份
+        backup_file = ROOT_PATH / 'config.toml.backup'
+        if backup_file.exists():
+            try:
+                import shutil
+                shutil.copy2(backup_file, config_file)
+            except Exception:
+                pass
+        
+        return api_response(False, f"更新配置失败: {e}", code=500)

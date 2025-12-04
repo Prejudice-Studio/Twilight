@@ -207,7 +207,7 @@ class EmbyClient:
     ):
         self.base_url = (base_url or EmbyConfig.EMBY_URL).rstrip('/')
         self.api_key = api_key or EmbyConfig.EMBY_TOKEN
-        self.proxy = proxy or Config.PROXY
+        self.proxy = proxy
         self.timeout = timeout
         
         # 设备信息
@@ -404,6 +404,78 @@ class EmbyClient:
         except EmbyError as e:
             logger.error(f"重置密码失败: {e}")
             return False
+    
+    async def authenticate_by_name(self, username: str, password: str) -> Optional[EmbyUser]:
+        """
+        通过用户名和密码验证用户
+        
+        :param username: Emby 用户名
+        :param password: Emby 密码
+        :return: 如果验证成功返回用户信息，否则返回 None
+        """
+        try:
+            # 使用 Emby 的 AuthenticateByName API
+            # 注意：这个端点需要特定的认证头格式
+            import httpx
+            import hashlib
+            
+            # 生成设备 ID（用于认证）
+            device_id = hashlib.md5(f"twilight-bind-{username}".encode()).hexdigest()
+            
+            # 构建认证头（不需要 API Key）
+            auth_header = (
+                f'MediaBrowser Client="Twilight", '
+                f'Device="Twilight Bind", '
+                f'DeviceId="{device_id}", '
+                f'Version="1.0.0"'
+            )
+            
+            # 创建临时客户端（不使用 API Key）
+            async with httpx.AsyncClient(
+                base_url=self.base_url,
+                timeout=self.timeout,
+                proxy=self.proxy,
+                headers={
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-Emby-Authorization': auth_header,
+                }
+            ) as client:
+                # 调用认证端点
+                response = await client.post(
+                    '/Users/authenticatebyname',
+                    json={
+                        'Username': username,
+                        'Pw': password,
+                    }
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    # 返回用户信息
+                    user_data = data.get('User')
+                    if user_data:
+                        user_id = user_data.get('Id')
+                        if user_id:
+                            # 使用 API Key 获取完整用户信息
+                            return await self.get_user(user_id)
+                elif response.status_code == 401:
+                    # 认证失败（用户名或密码错误）
+                    logger.warning(f"Emby 认证失败: 用户名或密码错误")
+                    return None
+                else:
+                    logger.warning(f"认证请求失败: {response.status_code} - {response.text}")
+                    return None
+                    
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                logger.warning(f"Emby 认证失败: 用户名或密码错误")
+                return None
+            logger.error(f"验证用户凭据失败: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"验证用户凭据失败: {e}")
+            return None
 
     async def update_user_policy(self, user_id: str, policy: Dict[str, Any]) -> bool:
         """更新用户策略"""

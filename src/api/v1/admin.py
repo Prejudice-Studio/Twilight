@@ -37,34 +37,59 @@ async def list_users():
     search = request.args.get('search', '').strip()
     
     # 转换 active 参数
-    active_status = None
+    include_inactive = True
     if active is not None:
-        active_status = active.lower() == 'true'
+        include_inactive = active.lower() != 'true'  # 如果 active=true，则只包含激活用户
     
     # 计算偏移量
     offset = (page - 1) * per_page
     
-    # 获取用户列表
-    users = await UserOperate.get_all_users(
+    # 获取用户列表（包含总数）
+    users, total = await UserOperate.get_all_users(
         offset=offset,
         limit=per_page,
         role=role,
-        active_status=active_status
+        include_inactive=include_inactive
     )
-    
-    # 获取总数
-    total = await UserOperate.get_registered_users_count()
     
     # 如果有搜索条件，在内存中过滤（简单实现）
     if search:
-        users = [u for u in users if search.lower() in (u.USERNAME or '').lower()]
+        filtered_users = [u for u in users if search.lower() in (u.USERNAME or '').lower()]
+        # 如果进行了搜索过滤，需要重新计算总数（这里简化处理，使用过滤后的数量）
+        # 实际应该在前端或后端进行更精确的搜索
+        users = filtered_users
+        if search:
+            # 搜索时总数不准确，但至少显示当前页的结果数
+            total = len(users)
     
     # 转换为字典
     user_list = []
+    # 尝试获取 bot 实例用于获取 Telegram 用户名
+    bot_instance = None
+    try:
+        from src.bot.bot import get_bot_instance
+        bot_instance = get_bot_instance()
+    except Exception:
+        pass
+    
     for user in users:
+        # 获取用户积分
+        from src.db.score import ScoreOperate
+        score_record = await ScoreOperate.get_score_by_uid(user.UID)
+        
+        # 尝试获取 Telegram 用户名
+        telegram_username = None
+        if user.TELEGRAM_ID and bot_instance and bot_instance.app:
+            try:
+                tg_user = await bot_instance.app.get_users(user.TELEGRAM_ID)
+                telegram_username = tg_user.username or f"{tg_user.first_name or ''} {tg_user.last_name or ''}".strip() or None
+            except Exception:
+                pass  # 如果获取失败，忽略
+        
         user_list.append({
             'uid': user.UID,
             'telegram_id': user.TELEGRAM_ID,
+            'telegram_username': telegram_username,  # 添加 Telegram 用户名
             'username': user.USERNAME,
             'email': user.EMAIL,
             'role': user.ROLE,
@@ -76,6 +101,7 @@ async def list_users():
             'last_login_time': user.LAST_LOGIN_TIME,
             'auto_renew': user.AUTO_RENEW,
             'bgm_mode': user.BGM_MODE,
+            'score': score_record.SCORE if score_record else 0,
         })
     
     return api_response(True, f"共 {len(user_list)} 个用户", {
@@ -87,12 +113,55 @@ async def list_users():
     })
 
 
+@admin_bp.route('/me/update', methods=['PUT'])
+@async_route
+@require_auth
+@require_admin
+async def update_my_info():
+    """
+    管理员更新自己的信息
+    
+    Body:
+        score: int - 积分
+        其他字段...
+    """
+    data = request.get_json() or {}
+    
+    # 只允许管理员修改自己的某些字段
+    allowed_fields = {'score'}  # 可以扩展
+    update_data = {k: v for k, v in data.items() if k in allowed_fields}
+    
+    if not update_data:
+        return api_response(False, "没有可更新的字段", code=400)
+    
+    try:
+        user = await UserOperate.get_user_by_uid(g.current_user.UID)
+        if not user:
+            return api_response(False, "用户不存在", code=404)
+        
+        # 更新积分
+        if 'score' in update_data:
+            from src.db.score import ScoreOperate
+            if not g.current_user.TELEGRAM_ID:
+                return api_response(False, "用户未绑定 Telegram，无法设置积分", code=400)
+            await ScoreOperate.set_score(g.current_user.TELEGRAM_ID, update_data['score'])
+        
+        return api_response(True, "更新成功")
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"管理员更新自己信息失败: {e}", exc_info=True)
+        return api_response(False, f"更新失败: {e}", code=500)
+
+
 @admin_bp.route('/users/<int:uid>', methods=['GET'])
 @async_route
 @require_auth
 @require_admin
 async def get_user(uid: int):
     """获取用户详情"""
+    from src.config import EmbyConfig
+    
     user = await UserOperate.get_user_by_uid(uid)
     if not user:
         return api_response(False, "用户不存在", code=404)
@@ -100,11 +169,24 @@ async def get_user(uid: int):
     user_info = await UserService.get_user_info(user)
     status = await EmbyService.get_user_status(user)
     
+    # 获取 NSFW 权限信息
+    nsfw_library_id = EmbyConfig.EMBY_NSFW
+    has_nsfw_permission = False
+    if nsfw_library_id and user.EMBYID:
+        library_ids, enable_all = await EmbyService.get_user_library_access(user)
+        has_nsfw_permission = enable_all or (nsfw_library_id in library_ids)
+    
     user_info['emby_status'] = {
         'is_synced': status.is_synced,
         'is_active': status.is_active,
         'active_sessions': status.active_sessions,
         'message': status.message,
+    }
+    
+    user_info['nsfw'] = {
+        'enabled': user.NSFW,
+        'has_permission': has_nsfw_permission,
+        'nsfw_library_id': nsfw_library_id,
     }
     
     return api_response(True, "获取成功", user_info)
@@ -146,6 +228,67 @@ async def enable_user(uid: int):
     
     success, message = await UserService.enable_user(user)
     return api_response(success, message)
+
+
+@admin_bp.route('/users/<int:uid>', methods=['PUT'])
+@async_route
+@require_auth
+@require_admin
+async def update_user(uid: int):
+    """
+    更新用户信息
+    
+    Body:
+        role: int - 角色 (0=管理员, 1=普通用户, 2=白名单)
+        score: int - 积分
+        emby_id: str - Emby ID
+        active: bool - 启用状态
+    """
+    data = request.get_json() or {}
+    
+    # 获取目标用户
+    target_user = await UserOperate.get_user_by_uid(uid)
+    if not target_user:
+        return api_response(False, "用户不存在", code=404)
+    
+    # 权限检查：不允许修改其他管理员
+    if target_user.ROLE == Role.ADMIN.value and target_user.UID != g.current_user.UID:
+        return api_response(False, "不允许修改其他管理员的信息", code=403)
+    
+    # 权限检查：不允许将其他用户设置为管理员
+    if 'role' in data and data['role'] == Role.ADMIN.value and uid != g.current_user.UID:
+        return api_response(False, "不允许将其他用户设置为管理员", code=403)
+    
+    try:
+        # 更新角色
+        if 'role' in data:
+            role = data['role']
+            if role not in [r.value for r in Role]:
+                return api_response(False, "无效的角色值", code=400)
+            target_user.ROLE = role
+        
+        # 更新积分
+        if 'score' in data:
+            from src.db.score import ScoreOperate
+            await ScoreOperate.set_score_by_uid(uid, data['score'])
+        
+        # 更新 Emby ID
+        if 'emby_id' in data:
+            target_user.EMBYID = data['emby_id'] or None
+        
+        # 更新启用状态
+        if 'active' in data:
+            target_user.ACTIVE_STATUS = bool(data['active'])
+        
+        # 保存到数据库
+        await UserOperate.update_user(target_user)
+        
+        return api_response(True, "更新成功")
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"更新用户信息失败: {e}", exc_info=True)
+        return api_response(False, f"更新失败: {e}", code=500)
 
 
 @admin_bp.route('/users/<int:uid>', methods=['DELETE'])
@@ -237,6 +380,63 @@ async def set_user_libraries(uid: int):
     
     success, message = await EmbyService.set_user_library_access(user, library_ids, enable_all)
     return api_response(success, message)
+
+
+@admin_bp.route('/users/<int:uid>/nsfw', methods=['PUT'])
+@async_route
+@require_auth
+@require_admin
+async def set_user_nsfw_permission(uid: int):
+    """
+    设置用户 NSFW 库访问权限（管理员）
+    
+    Request:
+        {
+            "grant": true  // true=授予权限, false=撤销权限
+        }
+    """
+    from src.config import EmbyConfig
+    from src.services.emby import get_emby_client
+    
+    user = await UserOperate.get_user_by_uid(uid)
+    if not user:
+        return api_response(False, "用户不存在", code=404)
+    
+    if not user.EMBYID:
+        return api_response(False, "用户未绑定 Emby 账户", code=400)
+    
+    nsfw_library_id = EmbyConfig.EMBY_NSFW
+    if not nsfw_library_id:
+        return api_response(False, "系统未配置 NSFW 媒体库", code=400)
+    
+    data = request.get_json() or {}
+    grant = data.get('grant', True)
+    
+    try:
+        emby = get_emby_client()
+        
+        if grant:
+            # 授予 NSFW 库访问权限
+            success = await emby.grant_nsfw_access(user.EMBYID)
+            if success:
+                return api_response(True, "已授予 NSFW 库访问权限")
+            else:
+                return api_response(False, "授予权限失败", code=500)
+        else:
+            # 撤销 NSFW 库访问权限
+            success = await emby.revoke_nsfw_access(user.EMBYID)
+            if success:
+                # 同时关闭用户的 NSFW 显示状态
+                user.NSFW = False
+                await UserOperate.update_user(user)
+                return api_response(True, "已撤销 NSFW 库访问权限")
+            else:
+                return api_response(False, "撤销权限失败", code=500)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"设置用户 NSFW 权限失败: {e}", exc_info=True)
+        return api_response(False, f"操作失败: {e}", code=500)
 
 
 @admin_bp.route('/users/<int:uid>/admin', methods=['PUT'])
@@ -384,9 +584,11 @@ async def list_regcodes():
     获取注册码列表
     
     Query:
+        page: int - 页码（默认 1）
         type: int - 类型筛选 (1=注册, 2=续期, 3=白名单)
         active: bool - 是否只显示有效的注册码
     """
+    page = request.args.get('page', 1, type=int)
     code_type = request.args.get('type', type=int)
     active_only = request.args.get('active', 'false').lower() == 'true'
     
@@ -399,17 +601,154 @@ async def list_regcodes():
     if active_only:
         codes = [c for c in codes if c.ACTIVE]
     
-    return api_response(True, f"共 {len(codes)} 个注册码", [{
-        'code': c.CODE,
-        'type': c.TYPE,
-        'type_name': {1: '注册', 2: '续期', 3: '白名单'}.get(c.TYPE, '未知'),
-        'validity_time': c.VALIDITY_TIME,
-        'use_count': c.USE_COUNT,
-        'use_count_limit': c.USE_COUNT_LIMIT,
-        'days': c.DAYS,
-        'active': c.ACTIVE,
-        'created_time': c.CREATED_TIME,
-    } for c in codes])
+    # 分页处理
+    per_page = 20
+    total = len(codes)
+    start = (page - 1) * per_page
+    end = start + per_page
+    paginated_codes = codes[start:end]
+    
+    return api_response(True, f"共 {total} 个注册码", {
+        'regcodes': [{
+            'code': c.CODE,
+            'type': c.TYPE,
+            'type_name': {1: '注册', 2: '续期', 3: '白名单'}.get(c.TYPE, '未知'),
+            'validity_time': c.VALIDITY_TIME,
+            'use_count': c.USE_COUNT,
+            'use_count_limit': c.USE_COUNT_LIMIT,
+            'days': c.DAYS,
+            'active': c.ACTIVE,
+            'created_time': c.CREATED_TIME,
+        } for c in paginated_codes],
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+    })
+
+
+# ==================== 求片管理 ====================
+
+@admin_bp.route('/media-requests', methods=['GET'])
+@async_route
+@require_auth
+@require_admin
+async def list_media_requests():
+    """
+    获取求片请求列表（管理员）
+    
+    Query:
+        page: int - 页码（默认 1）
+        status: str - 状态筛选 (pending/accepted/rejected/completed，默认 pending)
+    """
+    from src.services import MediaRequestService
+    from src.db.bangumi import BangumiRequireOperate, ReqStatus
+    import json
+    
+    page = request.args.get('page', 1, type=int)
+    status_filter = request.args.get('status', 'pending').lower()
+    
+    # 转换状态
+    status_map = {
+        'pending': ReqStatus.UNHANDLED,
+        'accepted': ReqStatus.ACCEPTED,
+        'rejected': ReqStatus.REJECTED,
+        'completed': ReqStatus.COMPLETED,
+    }
+    
+    target_status = status_map.get(status_filter, ReqStatus.UNHANDLED)
+    
+    # 获取请求列表
+    if status_filter == 'pending':
+        # 待处理：只获取未处理的
+        requests = await BangumiRequireOperate.get_pending_list()
+    else:
+        # 其他状态：按状态筛选
+        requests = await BangumiRequireOperate.get_requires_by_status(target_status)
+    
+    # 转换为字典格式
+    results = []
+    for req in requests:
+        other = {}
+        if req.other_info:
+            try:
+                other = json.loads(req.other_info)
+            except:
+                pass
+        
+        # 获取用户信息
+        user = await UserOperate.get_user_by_telegram_id(req.telegram_id)
+        
+        results.append({
+            'id': req.id,
+            'media_id': req.bangumi_id,
+            'source': other.get('source', 'unknown'),
+            'status': ReqStatus(req.status).name.lower(),
+            'timestamp': req.timestamp,
+            'media_info': other.get('media_info', {}),
+            'season': other.get('season'),
+            'user': {
+                'telegram_id': req.telegram_id,
+                'username': user.USERNAME if user else None,
+                'uid': user.UID if user else None,
+            } if user else None,
+        })
+    
+    # 分页
+    per_page = 20
+    total = len(results)
+    start = (page - 1) * per_page
+    end = start + per_page
+    paginated_results = results[start:end]
+    
+    return api_response(True, "获取成功", {
+        'requests': paginated_results,
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+    })
+
+
+@admin_bp.route('/media-requests/<int:request_id>', methods=['PUT'])
+@async_route
+@require_auth
+@require_admin
+async def update_media_request(request_id: int):
+    """
+    更新求片请求状态（管理员）
+    
+    Request:
+        {
+            "status": "accepted",  // pending, accepted, rejected, completed
+            "note": "备注信息"      // 可选
+        }
+    """
+    from src.services import MediaRequestService
+    from src.db.bangumi import ReqStatus
+    
+    data = request.get_json() or {}
+    status_str = data.get('status', '').lower()
+    note = data.get('note', '')
+    
+    # 转换状态
+    status_map = {
+        'pending': ReqStatus.UNHANDLED,
+        'accepted': ReqStatus.ACCEPTED,
+        'rejected': ReqStatus.REJECTED,
+        'completed': ReqStatus.COMPLETED,
+    }
+    
+    if status_str not in status_map:
+        return api_response(False, f"无效状态，支持: {', '.join(status_map.keys())}", code=400)
+    
+    target_status = status_map[status_str]
+    
+    # 更新状态
+    success, message = await MediaRequestService.update_request_status(request_id, target_status)
+    
+    if success:
+        return api_response(True, message or f"状态已更新为 {status_str}")
+    else:
+        return api_response(False, message or "请求不存在", code=404)
 
 
 @admin_bp.route('/regcodes', methods=['POST'])

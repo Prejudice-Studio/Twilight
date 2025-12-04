@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from src.config import Config
-from src.db import create_database
+from src.db.utils import create_database
 
 
 class PlaybackDatabaseModel(AsyncAttrs, DeclarativeBase):

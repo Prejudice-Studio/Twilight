@@ -50,6 +50,10 @@ from src.services.bangumi import (
     get_bangumi_client,
     close_bangumi_client,
 )
+from src.services.bangumi_search import (
+    BangumiSearchAPI,
+    SubjectInfo as BangumiSubjectInfo,
+)
 from src.services.bangumi_sync import (
     BangumiSyncService,
     SyncRequest,

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from src.config import Config
-from src.db import create_database
+from src.db.utils import create_database
 class UsersDatabaseModel(AsyncAttrs, DeclarativeBase):
     pass
 class Role(Enum):
@@ -105,7 +105,7 @@ class UserOperate:
         """更新用户信息"""
         async with UsersSessionFactory() as session:
             async with session.begin():
-                session.merge(user)
+                await session.merge(user)
 
     @staticmethod
     async def delete_user(user: UserModel) -> None:

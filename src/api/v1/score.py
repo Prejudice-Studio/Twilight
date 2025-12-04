@@ -30,6 +30,45 @@ async def get_balance():
     })
 
 
+@score_bp.route('/info', methods=['GET'])
+@async_route
+@require_auth
+async def get_score_info():
+    """
+    获取积分详细信息（包括签到状态）
+    
+    Response:
+        {
+            "success": true,
+            "data": {
+                "balance": 150,
+                "score_name": "暮光币",
+                "today_checkin": false,
+                "checkin_streak": 7,
+                "total_earned": 1000,
+                "total_spent": 500
+            }
+        }
+    """
+    score_record = await ScoreOperate.get_score_by_uid(g.current_user.UID)
+    
+    # 检查今日是否已签到
+    today_checkin = False
+    if score_record and score_record.CHECKIN_TIME:
+        from src.services.score_service import ScoreService
+        today_start = ScoreService._get_today_start()
+        today_checkin = score_record.CHECKIN_TIME >= today_start
+    
+    return api_response(True, "获取成功", {
+        'balance': score_record.SCORE if score_record else 0,
+        'score_name': ScoreAndRegisterConfig.SCORE_NAME,
+        'today_checkin': today_checkin,
+        'checkin_streak': score_record.CHECKIN_COUNT if score_record else 0,
+        'total_earned': score_record.TOTAL_EARNED if score_record and hasattr(score_record, 'TOTAL_EARNED') else 0,
+        'total_spent': score_record.TOTAL_SPENT if score_record and hasattr(score_record, 'TOTAL_SPENT') else 0,
+    })
+
+
 @score_bp.route('/checkin', methods=['POST'])
 @async_route
 @require_auth
@@ -59,6 +98,54 @@ async def checkin():
             'score_name': ScoreAndRegisterConfig.SCORE_NAME,
         }
     )
+
+
+@score_bp.route('/history', methods=['GET'])
+@async_route
+@require_auth
+async def get_history():
+    """
+    获取积分变动历史
+    
+    Query:
+        page: 页码 (默认 1)
+        per_page: 每页数量 (默认 20)
+    
+    Response:
+        {
+            "success": true,
+            "data": {
+                "records": [...],
+                "total": 100
+            }
+        }
+    """
+    from src.db.score import ScoreHistoryOperate
+    
+    page = request.args.get('page', 1, type=int)
+    per_page = min(request.args.get('per_page', 20, type=int), 100)  # 最多 100 条
+    offset = (page - 1) * per_page
+    
+    records = await ScoreHistoryOperate.get_history_by_uid(g.current_user.UID, per_page, offset)
+    total = await ScoreHistoryOperate.get_history_count(g.current_user.UID)
+    
+    return api_response(True, "获取成功", {
+        'records': [
+            {
+                'id': r.ID,
+                'type': r.TYPE,
+                'amount': r.AMOUNT,
+                'balance_after': r.BALANCE_AFTER,
+                'note': r.NOTE,
+                'related_uid': r.RELATED_UID,
+                'created_at': r.CREATED_AT,
+            }
+            for r in records
+        ],
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+    })
 
 
 @score_bp.route('/transfer', methods=['POST'])

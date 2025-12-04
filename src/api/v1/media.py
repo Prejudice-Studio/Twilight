@@ -73,6 +73,8 @@ async def search_media():
     query = request.args.get('q', '').strip()
     source = request.args.get('source', 'all').lower()
     limit = request.args.get('limit', 20, type=int)
+    year = request.args.get('year', type=int)
+    bgm_type = request.args.get('type', type=int)  # Bangumi 类型过滤 (2=动画, 6=三次元)
     
     if not query:
         return api_response(False, "缺少搜索关键词", code=400)
@@ -88,7 +90,7 @@ async def search_media():
         media_source = MediaSource.ALL
     
     try:
-        results = await MediaService.search(query, media_source, limit)
+        results = await MediaService.search(query, media_source, limit, year=year, bgm_type=bgm_type)
         
         return api_response(True, f"找到 {len(results)} 个结果", {
             'query': query,
@@ -172,23 +174,109 @@ async def search_bangumi():
         return api_response(False, f"搜索失败: {e}", code=500)
 
 
+@media_bp.route('/search/id/<string:source_type>/<int:media_id>', methods=['GET'])
+@async_route
+@require_auth
+async def search_media_by_id(source_type: str, media_id: int):
+    """
+    通过来源和 ID 直接获取媒体详情（快捷接口）
+    
+    URL Parameters:
+        source_type: str - 来源类型 (tmdb/bangumi/bgm)
+        media_id: int - 媒体 ID
+    
+    Query Parameters:
+        type: str - 媒体类型 (仅 TMDB: movie/tv，默认 movie)
+        include_details: bool - 是否包含详细信息（默认 true）
+    
+    Examples:
+        GET /api/v1/media/search/id/tmdb/123?type=movie
+        GET /api/v1/media/search/id/tmdb/456?type=tv
+        GET /api/v1/media/search/id/bangumi/789
+        GET /api/v1/media/search/id/bgm/789
+    
+    Response:
+        {
+            "success": true,
+            "message": "获取成功",
+            "data": {
+                "id": 123,
+                "title": "电影名称",
+                "original_title": "Original Title",
+                "media_type": "movie",
+                "overview": "简介...",
+                "release_date": "2023-01-01",
+                "year": "2023",
+                "poster": "https://...",
+                "poster_url": "https://...",
+                "backdrop_url": "https://...",
+                "vote_average": 8.5,
+                "rating": 8.5,
+                "vote_count": 1000,
+                "source": "tmdb",
+                "source_url": "https://...",
+                "genres": ["动作", "科幻"],
+                "cast": [...],
+                "runtime": 120,
+                ...
+            }
+        }
+    """
+    source_type = source_type.lower()
+    
+    if source_type not in ('tmdb', 'bangumi', 'bgm'):
+        return api_response(False, "无效的来源类型，支持: tmdb, bangumi, bgm", code=400)
+    
+    if source_type == 'bgm':
+        source_type = 'bangumi'
+    
+    media_type = request.args.get('type', 'movie')
+    include_details = request.args.get('include_details', 'true').lower() == 'true'
+    
+    try:
+        result = await MediaService.get_by_source_id(
+            source=source_type,
+            media_id=media_id,
+            media_type=media_type,
+            include_details=include_details
+        )
+        
+        if result:
+            return api_response(True, "获取成功", result.to_dict())
+        return api_response(False, "媒体不存在", code=404)
+    
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"获取媒体详情失败 (source={source_type}, id={media_id}): {e}", exc_info=True)
+        return api_response(False, f"获取失败: {e}", code=500)
+
+
 @media_bp.route('/detail', methods=['GET'])
 @async_route
+@require_auth
 async def get_media_detail():
     """
     获取媒体详情
     
     Query:
         source: str - 来源 (tmdb/bangumi)
-        id: int - 媒体 ID
-        type: str - 类型 (tmdb: movie/tv，可选)
+        media_id: int - 媒体 ID（或使用 id）
+        media_type: str - 类型 (tmdb: movie/tv，可选，默认 movie)
+        include_details: bool - 是否包含详细信息（演员、类型等，默认 true）
+    
+    Examples:
+        GET /api/v1/media/detail?source=tmdb&media_id=123&media_type=movie
+        GET /api/v1/media/detail?source=tmdb&id=456&type=tv
+        GET /api/v1/media/detail?source=bangumi&media_id=789
     """
     source = request.args.get('source', '').lower()
-    media_id = request.args.get('id', type=int)
-    media_type = request.args.get('type', 'movie')
+    media_id = request.args.get('media_id', type=int) or request.args.get('id', type=int)
+    media_type = request.args.get('media_type', '') or request.args.get('type', 'movie')
+    include_details = request.args.get('include_details', 'true').lower() == 'true'
     
     if not source or not media_id:
-        return api_response(False, "缺少必要参数 (source, id)", code=400)
+        return api_response(False, "缺少必要参数 (source, media_id)", code=400)
     
     if source not in ('tmdb', 'bangumi', 'bgm'):
         return api_response(False, "无效的来源，支持: tmdb, bangumi", code=400)
@@ -197,12 +285,75 @@ async def get_media_detail():
         source = 'bangumi'
     
     try:
-        result = await MediaService.get_by_source_id(source, media_id, media_type)
+        result = await MediaService.get_by_source_id(source, media_id, media_type, include_details)
         
         if result:
             return api_response(True, "获取成功", result.to_dict())
         return api_response(False, "媒体不存在", code=404)
     except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"获取媒体详情失败: {e}", exc_info=True)
+        return api_response(False, f"获取失败: {e}", code=500)
+
+
+@media_bp.route('/tmdb/<int:tmdb_id>', methods=['GET'])
+@async_route
+@require_auth
+async def get_tmdb_detail(tmdb_id: int):
+    """
+    通过 TMDB ID 获取媒体详情（快捷接口）
+    
+    Query:
+        type: str - 媒体类型 (movie/tv，默认 movie)
+        include_details: bool - 是否包含详细信息（默认 true）
+    
+    Examples:
+        GET /api/v1/media/tmdb/123?type=movie
+        GET /api/v1/media/tmdb/456?type=tv
+    """
+    media_type = request.args.get('type', 'movie')
+    include_details = request.args.get('include_details', 'true').lower() == 'true'
+    
+    try:
+        result = await MediaService.get_by_source_id('tmdb', tmdb_id, media_type, include_details)
+        
+        if result:
+            return api_response(True, "获取成功", result.to_dict())
+        return api_response(False, "媒体不存在", code=404)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"获取 TMDB 详情失败: {e}", exc_info=True)
+        return api_response(False, f"获取失败: {e}", code=500)
+
+
+@media_bp.route('/bangumi/<int:bgm_id>', methods=['GET'])
+@async_route
+@require_auth
+async def get_bangumi_detail(bgm_id: int):
+    """
+    通过 Bangumi ID 获取媒体详情（快捷接口）
+    
+    Query:
+        include_details: bool - 是否包含详细信息（默认 true）
+    
+    Examples:
+        GET /api/v1/media/bangumi/123
+        GET /api/v1/media/bangumi/456?include_details=false
+    """
+    include_details = request.args.get('include_details', 'true').lower() == 'true'
+    
+    try:
+        result = await MediaService.get_by_source_id('bangumi', bgm_id, None, include_details)
+        
+        if result:
+            return api_response(True, "获取成功", result.to_dict())
+        return api_response(False, "媒体不存在", code=404)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"获取 Bangumi 详情失败: {e}", exc_info=True)
         return api_response(False, f"获取失败: {e}", code=500)
 
 
@@ -402,6 +553,7 @@ async def create_media_request():
     media_id = data.get('media_id')
     skip_inventory_check = data.get('skip_inventory_check', False)
     season = data.get('season')
+    year = data.get('year')  # 年份限制
     
     # 转换 season 为整数
     if season is not None:
@@ -409,6 +561,13 @@ async def create_media_request():
             season = int(season)
         except (ValueError, TypeError):
             season = None
+    
+    # 转换 year 为整数
+    if year is not None:
+        try:
+            year = int(year)
+        except (ValueError, TypeError):
+            year = None
     
     # 方式2: 搜索后选择
     query = data.get('query')

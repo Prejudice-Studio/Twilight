@@ -39,6 +39,11 @@ class BaseConfig:
             for key, value in items.items():
                 attr_name = key.upper()
                 if hasattr(cls, attr_name):
+                    # 获取原始属性的类型注解
+                    current_value = getattr(cls, attr_name)
+                    # 如果原始值是 Path 类型，将字符串转换为 Path
+                    if isinstance(current_value, Path) and isinstance(value, str):
+                        value = ROOT_PATH / value if not os.path.isabs(value) else Path(value)
                     setattr(cls, attr_name, value)
                     
         except FileNotFoundError:
@@ -102,7 +107,6 @@ class Config(BaseConfig):
     LOGGING: bool = True
     LOG_LEVEL: int = 20  # 日志等级，数字越大，日志越详细
     SQLALCHEMY_LOG: bool = False
-    PROXY: Optional[str] = None
     MAX_RETRY: int = 3
     DATABASES_DIR: Path = ROOT_PATH / 'db'
     BANGUMI_TOKEN: str = ''
@@ -150,11 +154,23 @@ class ScoreAndRegisterConfig(BaseConfig):
     SCORE_NAME: str = '暮光币'
     REGISTER_MODE: bool = False
     REGISTER_CODE_LIMIT: bool = False  # 是否限制注册码注册
-    SCORE_REGISTER_MODE: bool = False
-    SCORE_REGISTER_NEED: int = 100  # 注册所需积分
+    SCORE_REGISTER_MODE: bool = False # 是否允许积分注册
+    SCORE_REGISTER_NEED: int = 100  # 注册所需积分/激活所需积分
     USER_LIMIT: int = 200  # 允许的已注册用户数量上限
     NEW_USER_NOTICE_STATUS: bool = False  # 用户注册/续期/白名单通知开关
     NEW_USER_NOTICE_LINK: bool = False  # 通知是否指向个人主页
+    
+    # 无码注册（待激活）配置
+    ALLOW_PENDING_REGISTER: bool = True  # 是否允许无码注册（待激活状态）
+    PENDING_REGISTER_BONUS: int = 10  # 无码注册赠送的初始积分
+    
+    # 管理员配置（二选一，优先使用 UID）
+    ADMIN_UIDS: str = ''  # 管理员 UID 列表，逗号分隔（推荐，如 "1,2,3"）
+    ADMIN_USERNAMES: str = ''  # 管理员用户名列表，逗号分隔（如 "admin,superuser"）
+    
+    # 白名单配置（二选一，优先使用 UID）
+    WHITE_LIST_UIDS: str = ''  # 白名单 UID 列表，逗号分隔（如 "10,11,12"）
+    WHITE_LIST_USERNAMES: str = ''  # 白名单用户名列表，逗号分隔（如 "vip1,vip2"）
     
     # 红包配置
     RED_PACKET_MODE: bool = False
@@ -201,11 +217,11 @@ class DeviceLimitConfig(BaseConfig):
 
 class WebhookConfig(BaseConfig):
     """Webhook 配置管理类"""
-    WEBHOOK_ENABLED: bool = True  # 是否启用 Webhook
+    WEBHOOK_ENABLED: bool = False  # 是否启用 Webhook
     WEBHOOK_SECRET: str = ''  # Webhook 验证密钥
     WEBHOOK_ENDPOINTS: List[str] = []  # 外部推送端点列表
     # 播放统计
-    PLAYBACK_STATS_ENABLED: bool = True  # 是否启用播放统计
+    PLAYBACK_STATS_ENABLED: bool = False  # 是否启用播放统计
     # 排行榜
     RANKING_ENABLED: bool = True  # 是否启用排行榜
     RANKING_PUBLIC: bool = True  # 排行榜是否公开（不需要登录）
@@ -216,7 +232,7 @@ class APIConfig(BaseConfig):
     HOST: str = "0.0.0.0"
     PORT: int = 5000
     DEBUG: bool = False
-    TOKEN_EXPIRE: int = 86400  # Token 过期时间（秒）
+    TOKEN_EXPIRE: int = 864000  # Token 过期时间（秒）
     API_KEY_LENGTH: int = 32
     CORS_ENABLED: bool = True
     CORS_ORIGINS: List[str] = []
@@ -252,7 +268,7 @@ class NotificationConfig(BaseConfig):
 
 class BangumiSyncConfig(BaseConfig):
     """Bangumi 同步配置"""
-    ENABLED: bool = True  # 是否启用 Bangumi 同步
+    ENABLED: bool = False  # 是否启用 Bangumi 同步
     AUTO_ADD_COLLECTION: bool = True  # 同步时是否自动添加到收藏（设为"在看"）
     PRIVATE_COLLECTION: bool = False  # 观看记录是否设为私有
     BLOCK_KEYWORDS: List[str] = []  # 屏蔽关键词列表
