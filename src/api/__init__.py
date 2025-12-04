@@ -3,11 +3,11 @@ API 模块
 
 提供 Flask Web API
 """
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 
 from src.api.routes import api, admin_api
 from src.api.v1 import register_v1_blueprints
-from src.config import Config
+from src.config import Config, APIConfig
 from src.core.utils import setup_logging, timestamp
 
 
@@ -18,6 +18,39 @@ def create_app() -> Flask:
     # 配置
     app.config['JSON_AS_ASCII'] = False  # 支持中文
     app.config['JSON_SORT_KEYS'] = False
+    
+    # CORS 跨域支持
+    @app.after_request
+    def add_cors_headers(response):
+        if not APIConfig.CORS_ENABLED:
+            return response
+        
+        origin = request.headers.get('Origin', '')
+        
+        # 如果配置了允许的源列表，检查是否在列表中
+        if APIConfig.CORS_ORIGINS:
+            if origin in APIConfig.CORS_ORIGINS:
+                response.headers['Access-Control-Allow-Origin'] = origin
+            else:
+                # 不在允许列表中，不设置 CORS 头
+                return response
+        else:
+            # 未配置允许列表，允许所有源（开发环境）
+            response.headers['Access-Control-Allow-Origin'] = origin or '*'
+        
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-API-Key'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Max-Age'] = '86400'
+        return response
+    
+    # 处理 OPTIONS 预检请求
+    @app.before_request
+    def handle_preflight():
+        if request.method == 'OPTIONS':
+            response = jsonify({})
+            response.status_code = 200
+            return response
     
     # 注册旧版 API（兼容）
     app.register_blueprint(api)

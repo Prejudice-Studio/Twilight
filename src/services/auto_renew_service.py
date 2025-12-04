@@ -80,6 +80,11 @@ class AutoRenewService:
             try:
                 # 扣除积分
                 score.SCORE -= renew_cost
+                
+                # 更新累计消费
+                if hasattr(score, 'TOTAL_SPENT'):
+                    score.TOTAL_SPENT = (score.TOTAL_SPENT or 0) + renew_cost
+                
                 await ScoreOperate.update_score(score)
                 
                 # 续期
@@ -94,6 +99,16 @@ class AutoRenewService:
                         'days': renew_days,
                         'cost': renew_cost,
                     })
+                    
+                    # 记录积分历史
+                    from src.db.score import ScoreHistoryOperate
+                    await ScoreHistoryOperate.add_history(
+                        uid=user.UID,
+                        type_='renew',
+                        amount=-renew_cost,
+                        balance_after=score.SCORE,
+                        note=f"自动续期 {renew_days} 天"
+                    )
                     
                     logger.info(f"自动续期成功: {user.USERNAME}, {renew_days}天, 扣除 {renew_cost} 积分")
                     
@@ -113,6 +128,8 @@ class AutoRenewService:
                 else:
                     # 续期失败，退还积分
                     score.SCORE += renew_cost
+                    if hasattr(score, 'TOTAL_SPENT'):
+                        score.TOTAL_SPENT = (score.TOTAL_SPENT or 0) - renew_cost
                     await ScoreOperate.update_score(score)
                     
                     failed += 1

@@ -46,6 +46,37 @@ async def get_my_stats():
     return api_response(False, "获取失败", code=500)
 
 
+@stats_bp.route('/playback/my', methods=['GET'])
+@async_route
+@require_auth
+async def get_my_playback_stats():
+    """
+    获取我的播放统计（前端专用）
+    
+    Response:
+        {
+            "success": true,
+            "data": {
+                "total_plays": 100,
+                "total_time": 36000,
+                "favorite_genres": ["动作", "科幻"],
+                "recent_items": [
+                    {
+                        "name": "电影名称",
+                        "type": "Movie",
+                        "played_at": "2024-01-01T00:00:00Z"
+                    }
+                ]
+            }
+        }
+    """
+    stats = await StatsService.get_playback_stats(g.current_user.UID)
+    
+    if stats:
+        return api_response(True, "获取成功", stats)
+    return api_response(False, "获取失败", code=500)
+
+
 @stats_bp.route('/user/<int:uid>', methods=['GET'])
 @async_route
 @require_auth

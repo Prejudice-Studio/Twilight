@@ -16,6 +16,7 @@ from src.api.v1.webhook import webhook_bp
 from src.api.v1.security import security_bp
 from src.api.v1.batch import batch_bp
 from src.api.v1.system import system_bp
+from src.api.v1.apikey import apikey_bp
 
 # 创建 v1 API 蓝图
 api_v1 = Blueprint('api_v1', __name__, url_prefix='/api/v1')
@@ -34,6 +35,7 @@ def register_v1_blueprints(app):
     app.register_blueprint(security_bp, url_prefix='/api/v1/security')
     app.register_blueprint(batch_bp, url_prefix='/api/v1/batch')
     app.register_blueprint(system_bp, url_prefix='/api/v1/system')
+    app.register_blueprint(apikey_bp, url_prefix='/api/v1/apikey')
 
 
 __all__ = [
@@ -50,4 +52,5 @@ __all__ = [
     'security_bp',
     'batch_bp',
     'system_bp',
+    'apikey_bp',
 ]

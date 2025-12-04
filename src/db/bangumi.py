@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from src.config import Config
-from src.db import create_database
+from src.db.utils import create_database
 
 
 class ReqStatus(Enum):
@@ -74,7 +74,7 @@ class BangumiUserOperate:
         """更新用户信息"""
         async with BangumiSessionFactory() as session:
             async with session.begin():
-                session.merge(user)
+                await session.merge(user)
 
     @staticmethod
     async def delete_user(telegram_id: int) -> bool:
@@ -124,7 +124,7 @@ class BangumiRequireOperate:
         """更新求片请求"""
         async with BangumiSessionFactory() as session:
             async with session.begin():
-                session.merge(data)
+                await session.merge(data)
 
     @staticmethod
     async def update_status(req_id: int, status: ReqStatus) -> bool:
@@ -137,7 +137,7 @@ class BangumiRequireOperate:
                 req = result.scalar_one_or_none()
                 if req:
                     req.status = status.value
-                    session.merge(req)
+                    await session.merge(req)
                     return True
                 return False
 

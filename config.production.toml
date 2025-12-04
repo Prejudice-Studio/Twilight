@@ -8,8 +8,6 @@ logging = true
 log_level = 20
 # 是否开启SQLAlchemy日志
 sqlalchemy_log = false
-# HTTP 代理 (可选)
-proxy = ""
 # 最大重试次数
 max_retry = 3
 # 数据库目录
@@ -87,6 +85,20 @@ new_user_notice_status = false
 # 新用户通知是否指向个人主页
 new_user_notice_link = false
 
+# ===== 无码注册配置 =====
+# 是否允许无码注册（用户注册后为待激活状态，只能签到赚积分）
+allow_pending_register = true
+# 无码注册赠送的初始积分
+pending_register_bonus = 10
+
+# ===== 管理员配置 =====
+# 管理员 UID 列表，逗号分隔（推荐使用，如 "1,2,3"）
+# 这些 UID 的用户会自动成为管理员
+admin_uids = "1"
+# 管理员用户名列表，逗号分隔（备选，如 "admin,superuser"）
+# 如果 admin_uids 为空，则使用此列表
+admin_usernames = ""
+
 # ===== 红包配置 =====
 # 是否开启红包功能
 red_packet_mode = false
@@ -157,7 +169,7 @@ kick_oldest_session = false
 
 [Webhook]
 # 是否启用 Webhook 功能
-webhook_enabled = true
+webhook_enabled = false
 # Webhook 验证密钥 (用于验证来自 Emby 的请求)
 webhook_secret = ""
 # 外部推送端点列表 (将事件推送到这些地址)

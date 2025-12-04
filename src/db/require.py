@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from src.config import Config
-from src.db import create_database
+from src.db.utils import create_database
 
 logging.basicConfig(level=logging.INFO)
 class RequireDatabaseModel(AsyncAttrs, DeclarativeBase):
@@ -135,7 +135,7 @@ class RequireOperate:
                 result = await session.execute(select(RequireModel).filter_by(REQ_KEY=key))
                 existing = result.scalars().first()
                 if existing:
-                    session.merge(require)
+                    await session.merge(require)
                     return True
                 return False
 

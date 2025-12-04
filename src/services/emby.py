@@ -6,6 +6,7 @@ Emby/Jellyfin API 客户端
 - https://github.com/MediaBrowser/Emby.ApiClients
 - https://github.com/jellyfin/jellyfin-apiclient-python
 """
+import asyncio
 import logging
 from typing import Optional, Dict, Any, List, Tuple
 from dataclasses import dataclass, field
@@ -207,7 +208,7 @@ class EmbyClient:
     ):
         self.base_url = (base_url or EmbyConfig.EMBY_URL).rstrip('/')
         self.api_key = api_key or EmbyConfig.EMBY_TOKEN
-        self.proxy = proxy or Config.PROXY
+        self.proxy = proxy
         self.timeout = timeout
         
         # 设备信息
@@ -404,6 +405,78 @@ class EmbyClient:
         except EmbyError as e:
             logger.error(f"重置密码失败: {e}")
             return False
+    
+    async def authenticate_by_name(self, username: str, password: str) -> Optional[EmbyUser]:
+        """
+        通过用户名和密码验证用户
+        
+        :param username: Emby 用户名
+        :param password: Emby 密码
+        :return: 如果验证成功返回用户信息，否则返回 None
+        """
+        try:
+            # 使用 Emby 的 AuthenticateByName API
+            # 注意：这个端点需要特定的认证头格式
+            import httpx
+            import hashlib
+            
+            # 生成设备 ID（用于认证）
+            device_id = hashlib.md5(f"twilight-bind-{username}".encode()).hexdigest()
+            
+            # 构建认证头（不需要 API Key）
+            auth_header = (
+                f'MediaBrowser Client="Twilight", '
+                f'Device="Twilight Bind", '
+                f'DeviceId="{device_id}", '
+                f'Version="1.0.0"'
+            )
+            
+            # 创建临时客户端（不使用 API Key）
+            async with httpx.AsyncClient(
+                base_url=self.base_url,
+                timeout=self.timeout,
+                proxy=self.proxy,
+                headers={
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-Emby-Authorization': auth_header,
+                }
+            ) as client:
+                # 调用认证端点
+                response = await client.post(
+                    '/Users/authenticatebyname',
+                    json={
+                        'Username': username,
+                        'Pw': password,
+                    }
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    # 返回用户信息
+                    user_data = data.get('User')
+                    if user_data:
+                        user_id = user_data.get('Id')
+                        if user_id:
+                            # 使用 API Key 获取完整用户信息
+                            return await self.get_user(user_id)
+                elif response.status_code == 401:
+                    # 认证失败（用户名或密码错误）
+                    logger.warning(f"Emby 认证失败: 用户名或密码错误")
+                    return None
+                else:
+                    logger.warning(f"认证请求失败: {response.status_code} - {response.text}")
+                    return None
+                    
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                logger.warning(f"Emby 认证失败: 用户名或密码错误")
+                return None
+            logger.error(f"验证用户凭据失败: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"验证用户凭据失败: {e}")
+            return None
 
     async def update_user_policy(self, user_id: str, policy: Dict[str, Any]) -> bool:
         """更新用户策略"""
@@ -807,40 +880,125 @@ class EmbyClient:
     # ==================== NSFW 库管理 ====================
     
     async def grant_nsfw_access(self, user_id: str) -> bool:
-        """授予用户 NSFW 库访问权限"""
-        if not EmbyConfig.EMBY_NSFW:
-            logger.warning("未配置 NSFW 库ID")
+        """
+        授予用户 NSFW 库访问权限
+        
+        逻辑：先取消所有媒体库权限，再把包括NSFW库的所有库加上
+        支持通过媒体库名称或ID来标识NSFW库
+        """
+        from src.services.emby_service import EmbyService
+        
+        # 查找NSFW库ID（支持通过名称或ID匹配）
+        nsfw_library_id = await EmbyService.find_nsfw_library_id()
+        if not nsfw_library_id:
+            logger.warning("未找到NSFW库")
             return False
         
         user = await self.get_user(user_id)
         if not user:
             return False
         
-        current_folders = list(user.policy.get('EnabledFolders', []))
-        if EmbyConfig.EMBY_NSFW not in current_folders:
-            current_folders.append(EmbyConfig.EMBY_NSFW)
+        # 获取所有媒体库
+        libraries = await self.get_libraries()
+        all_library_ids = [lib.id for lib in libraries]
         
-        return await self.update_user_policy(user_id, {
-            'EnableAllFolders': False,
-            'EnabledFolders': current_folders,
-        })
+        # 获取当前用户的完整策略
+        current_policy = user.policy.copy()
+        
+        # 先取消所有媒体库权限（清空）
+        current_policy['EnableAllFolders'] = False
+        current_policy['EnabledFolders'] = []
+        
+        # 发送清空请求
+        try:
+            await self._request('POST', f'/Users/{user_id}/Policy', json=current_policy)
+        except EmbyError as e:
+            logger.error(f"清空媒体库权限失败: {e}")
+            return False
+        
+        # 等待一小段时间，确保Emby服务器处理完清空操作
+        await asyncio.sleep(0.8)
+        
+        # 重新获取用户信息以确保策略是最新的
+        user = await self.get_user(user_id)
+        if not user:
+            return False
+        
+        # 获取最新的策略
+        current_policy = user.policy.copy()
+        
+        # 再把包括NSFW库的所有库加上
+        current_policy['EnableAllFolders'] = False
+        current_policy['EnabledFolders'] = all_library_ids
+        
+        try:
+            await self._request('POST', f'/Users/{user_id}/Policy', json=current_policy)
+            return True
+        except EmbyError as e:
+            logger.error(f"设置媒体库权限失败: {e}")
+            return False
 
     async def revoke_nsfw_access(self, user_id: str) -> bool:
-        """撤销用户 NSFW 库访问权限"""
-        if not EmbyConfig.EMBY_NSFW:
+        """
+        撤销用户 NSFW 库访问权限
+        
+        逻辑：先取消所有媒体库权限，再把除了NSFW库的其他库加上
+        支持通过媒体库名称或ID来标识NSFW库
+        """
+        from src.services.emby_service import EmbyService
+        
+        # 查找NSFW库ID（支持通过名称或ID匹配）
+        nsfw_library_id = await EmbyService.find_nsfw_library_id()
+        if not nsfw_library_id:
+            logger.warning("未找到NSFW库")
             return False
         
         user = await self.get_user(user_id)
         if not user:
             return False
         
-        current_folders = list(user.policy.get('EnabledFolders', []))
-        if EmbyConfig.EMBY_NSFW in current_folders:
-            current_folders.remove(EmbyConfig.EMBY_NSFW)
+        # 获取所有媒体库
+        libraries = await self.get_libraries()
+        all_library_ids = [lib.id for lib in libraries]
         
-        return await self.update_user_policy(user_id, {
-            'EnabledFolders': current_folders,
-        })
+        # 从所有库中排除NSFW库
+        folders_without_nsfw = [lid for lid in all_library_ids if lid != nsfw_library_id]
+        
+        # 获取当前用户的完整策略
+        current_policy = user.policy.copy()
+        
+        # 先取消所有媒体库权限（清空）
+        current_policy['EnableAllFolders'] = False
+        current_policy['EnabledFolders'] = []
+        
+        # 发送清空请求
+        try:
+            await self._request('POST', f'/Users/{user_id}/Policy', json=current_policy)
+        except EmbyError as e:
+            logger.error(f"清空媒体库权限失败: {e}")
+            return False
+        
+        # 等待一小段时间，确保Emby服务器处理完清空操作
+        await asyncio.sleep(0.8)
+        
+        # 重新获取用户信息以确保策略是最新的
+        user = await self.get_user(user_id)
+        if not user:
+            return False
+        
+        # 获取最新的策略
+        current_policy = user.policy.copy()
+        
+        # 再把除了NSFW库的其他库加上
+        current_policy['EnableAllFolders'] = False
+        current_policy['EnabledFolders'] = folders_without_nsfw
+        
+        try:
+            await self._request('POST', f'/Users/{user_id}/Policy', json=current_policy)
+            return True
+        except EmbyError as e:
+            logger.error(f"设置媒体库权限失败: {e}")
+            return False
 
 
 # ==================== 全局实例 ====================

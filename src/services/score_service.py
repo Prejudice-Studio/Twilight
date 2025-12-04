@@ -133,7 +133,22 @@ class ScoreService:
         # 更新记录
         score_record.SCORE += total_gained
         score_record.CHECKIN_TIME = timestamp()
+        
+        # 更新累计获得
+        if hasattr(score_record, 'TOTAL_EARNED'):
+            score_record.TOTAL_EARNED = (score_record.TOTAL_EARNED or 0) + total_gained
+        
         await ScoreOperate.update_score(score_record)
+        
+        # 记录历史
+        from src.db.score import ScoreHistoryOperate
+        await ScoreHistoryOperate.add_history(
+            uid=uid,
+            type_='checkin',
+            amount=total_gained,
+            balance_after=score_record.SCORE,
+            note=f"连续签到 {score_record.CHECKIN_COUNT} 天"
+        )
 
         score_name = ScoreAndRegisterConfig.SCORE_NAME
         logger.info(f"用户签到成功: UID={uid}, +{total_gained} {score_name}")
@@ -224,10 +239,18 @@ class ScoreService:
 
         # 执行转账
         from_score.SCORE -= total_deduct
+        
+        # 更新累计消费
+        if hasattr(from_score, 'TOTAL_SPENT'):
+            from_score.TOTAL_SPENT = (from_score.TOTAL_SPENT or 0) + total_deduct
+        
         await ScoreOperate.update_score(from_score)
 
         if to_score:
             to_score.SCORE += amount
+            # 更新累计获得
+            if hasattr(to_score, 'TOTAL_EARNED'):
+                to_score.TOTAL_EARNED = (to_score.TOTAL_EARNED or 0) + amount
             await ScoreOperate.update_score(to_score)
         else:
             to_score = ScoreModel(
@@ -235,9 +258,34 @@ class ScoreService:
                 TELEGRAM_ID=to_user.TELEGRAM_ID or 0,
                 SCORE=amount,
                 CHECKIN_TIME=0,
-                CHECKIN_COUNT=0
+                CHECKIN_COUNT=0,
+                TOTAL_EARNED=amount,
+                TOTAL_SPENT=0
             )
             await ScoreOperate.add_score(to_score)
+        
+        # 记录历史
+        from src.db.score import ScoreHistoryOperate
+        
+        # 转出方记录
+        await ScoreHistoryOperate.add_history(
+            uid=from_uid,
+            type_='transfer_out',
+            amount=-total_deduct,
+            balance_after=from_score.SCORE,
+            note=f"转账给 {to_user.USERNAME}" + (f" (手续费 {fee})" if fee > 0 else ""),
+            related_uid=to_uid
+        )
+        
+        # 转入方记录
+        await ScoreHistoryOperate.add_history(
+            uid=to_uid,
+            type_='transfer_in',
+            amount=amount,
+            balance_after=to_score.SCORE,
+            note=f"来自 {from_user.USERNAME} 的转账",
+            related_uid=from_uid
+        )
 
         score_name = ScoreAndRegisterConfig.SCORE_NAME
         fee_msg = f"(手续费 {fee})" if fee > 0 else ""
@@ -271,7 +319,9 @@ class ScoreService:
                 TELEGRAM_ID=user.TELEGRAM_ID,
                 SCORE=amount,
                 CHECKIN_TIME=0,
-                CHECKIN_COUNT=0
+                CHECKIN_COUNT=0,
+                TOTAL_EARNED=amount if amount > 0 else 0,
+                TOTAL_SPENT=0
             )
             await ScoreOperate.add_score(score_record)
         else:
@@ -279,7 +329,24 @@ class ScoreService:
             if new_score < 0:
                 return False, f"积分不足，当前: {score_record.SCORE}"
             score_record.SCORE = new_score
+            
+            # 更新累计
+            if amount > 0 and hasattr(score_record, 'TOTAL_EARNED'):
+                score_record.TOTAL_EARNED = (score_record.TOTAL_EARNED or 0) + amount
+            elif amount < 0 and hasattr(score_record, 'TOTAL_SPENT'):
+                score_record.TOTAL_SPENT = (score_record.TOTAL_SPENT or 0) + abs(amount)
+            
             await ScoreOperate.update_score(score_record)
+        
+        # 记录历史
+        from src.db.score import ScoreHistoryOperate
+        await ScoreHistoryOperate.add_history(
+            uid=uid,
+            type_='admin',
+            amount=amount,
+            balance_after=score_record.SCORE,
+            note=reason or ("管理员增加" if amount > 0 else "管理员扣除")
+        )
 
         action = "增加" if amount > 0 else "扣除"
         logger.info(f"管理员调整积分: UID={uid}, {action} {abs(amount)}, 原因: {reason}")

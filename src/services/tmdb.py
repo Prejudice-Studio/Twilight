@@ -124,19 +124,19 @@ class TMDBClient:
         self.api_key = api_key or Config.TMDB_API_KEY
         self.base_url = Config.TMDB_API_URL
         self.language = language
-        self.proxy = proxy or Config.PROXY
+        self.proxy = proxy
         self.timeout = timeout
         self._client: Optional[httpx.AsyncClient] = None
     
     async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
-                base_url=self.base_url,
-                timeout=self.timeout,
-                proxy=self.proxy,
-                params={'api_key': self.api_key},
-            )
-        return self._client
+        # 每次请求都创建新的客户端，避免事件循环问题
+        # 使用 context manager 确保正确关闭
+        return httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=self.timeout,
+            proxy=self.proxy,
+            params={'api_key': self.api_key},
+        )
     
     async def close(self) -> None:
         if self._client and not self._client.is_closed:
@@ -148,24 +148,30 @@ class TMDBClient:
         if not self.api_key:
             raise TMDBError("TMDB API Key 未配置")
         
-        client = await self._get_client()
         request_params = {'language': self.language}
         if params:
             request_params.update(params)
         
-        try:
-            response = await client.get(endpoint, params=request_params)
-            
-            if response.status_code == 401:
-                raise TMDBError("TMDB API Key 无效")
-            elif response.status_code == 404:
-                return None
-            elif response.status_code != 200:
-                raise TMDBError(f"TMDB 请求失败: {response.status_code}")
-            
-            return response.json()
-        except httpx.RequestError as e:
-            raise TMDBError(f"TMDB 请求错误: {e}")
+        # 使用 context manager 确保客户端正确关闭
+        async with httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=self.timeout,
+            proxy=self.proxy,
+            params={'api_key': self.api_key},
+        ) as client:
+            try:
+                response = await client.get(endpoint, params=request_params)
+                
+                if response.status_code == 401:
+                    raise TMDBError("TMDB API Key 无效")
+                elif response.status_code == 404:
+                    return None
+                elif response.status_code != 200:
+                    raise TMDBError(f"TMDB 请求失败: {response.status_code}")
+                
+                return response.json()
+            except httpx.RequestError as e:
+                raise TMDBError(f"TMDB 请求错误: {e}")
     
     async def search_multi(self, query: str, page: int = 1) -> List[TMDBMedia]:
         """
@@ -214,26 +220,34 @@ class TMDBClient:
         
         return [TMDBMedia.from_dict(item, 'tv') for item in data.get('results', [])]
     
-    async def get_movie(self, movie_id: int) -> Optional[TMDBMedia]:
+    async def get_movie(self, movie_id: int, include_details: bool = True) -> Optional[TMDBMedia]:
         """获取电影详情"""
-        data = await self._request(f'/movie/{movie_id}')
+        endpoint = f'/movie/{movie_id}'
+        if include_details:
+            # 包含额外信息：演员、类型、视频等
+            endpoint += '?append_to_response=credits,genres,videos,images'
+        data = await self._request(endpoint)
         if not data:
             return None
         return TMDBMedia.from_dict(data, 'movie')
     
-    async def get_tv(self, tv_id: int) -> Optional[TMDBMedia]:
+    async def get_tv(self, tv_id: int, include_details: bool = True) -> Optional[TMDBMedia]:
         """获取电视剧详情"""
-        data = await self._request(f'/tv/{tv_id}')
+        endpoint = f'/tv/{tv_id}'
+        if include_details:
+            # 包含额外信息：演员、类型、视频、季度等
+            endpoint += '?append_to_response=credits,genres,videos,images,seasons'
+        data = await self._request(endpoint)
         if not data:
             return None
         return TMDBMedia.from_dict(data, 'tv')
     
-    async def get_by_id(self, media_id: int, media_type: str = 'movie') -> Optional[TMDBMedia]:
+    async def get_by_id(self, media_id: int, media_type: str = 'movie', include_details: bool = True) -> Optional[TMDBMedia]:
         """根据 ID 获取媒体详情"""
         if media_type == 'movie':
-            return await self.get_movie(media_id)
+            return await self.get_movie(media_id, include_details)
         elif media_type == 'tv':
-            return await self.get_tv(media_id)
+            return await self.get_tv(media_id, include_details)
         return None
     
     @staticmethod
