@@ -632,9 +632,10 @@ class UserService:
         if not user.EMBYID:
             return False, "用户没有关联的 Emby 账户"
         
-        from src.config import EmbyConfig
+        from src.services.emby_service import EmbyService
         
-        nsfw_library_id = EmbyConfig.EMBY_NSFW
+        # 查找NSFW库ID（支持通过名称或ID匹配）
+        nsfw_library_id = await EmbyService.find_nsfw_library_id()
         if not nsfw_library_id:
             return False, "系统未配置 NSFW 媒体库"
         

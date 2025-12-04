@@ -316,7 +316,7 @@ export default function ScorePage() {
                 <DialogHeader>
                   <DialogTitle>积分续期</DialogTitle>
                   <DialogDescription>
-                    使用积分延长会员时间
+                    使用积分延长账号时间
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4">

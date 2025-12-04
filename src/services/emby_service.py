@@ -36,6 +36,37 @@ class EmbyUserStatus:
 
 class EmbyService:
     """Emby 业务服务"""
+    
+    @staticmethod
+    async def find_nsfw_library_id() -> Optional[str]:
+        """
+        查找NSFW库的ID（支持通过名称或ID匹配）
+        
+        :return: NSFW库的ID，如果未找到则返回None
+        """
+        from src.config import EmbyConfig
+        
+        if not EmbyConfig.EMBY_NSFW:
+            return None
+        
+        emby = get_emby_client()
+        
+        try:
+            libraries = await emby.get_libraries()
+            nsfw_identifier = EmbyConfig.EMBY_NSFW.strip()
+            
+            for lib in libraries:
+                # 通过ID匹配
+                if lib.id == nsfw_identifier:
+                    return lib.id
+                # 通过名称匹配（不区分大小写）
+                if lib.name.strip().lower() == nsfw_identifier.lower():
+                    return lib.id
+            
+            return None
+        except EmbyError as e:
+            logger.error(f"查找NSFW库失败: {e}")
+            return None
 
     # ==================== 用户同步 ====================
 
@@ -266,12 +297,15 @@ class EmbyService:
             libraries = await emby.get_libraries()
             result = []
             
+            # 查找NSFW库ID
+            nsfw_library_id = await EmbyService.find_nsfw_library_id()
+            
             for lib in libraries:
                 result.append({
                     'id': lib.id,
                     'name': lib.name,
                     'type': lib.collection_type,
-                    'is_nsfw': lib.id == EmbyConfig.EMBY_NSFW,
+                    'is_nsfw': lib.id == nsfw_library_id if nsfw_library_id else False,
                 })
             
             return result

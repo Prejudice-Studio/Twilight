@@ -6,6 +6,7 @@ Emby/Jellyfin API 客户端
 - https://github.com/MediaBrowser/Emby.ApiClients
 - https://github.com/jellyfin/jellyfin-apiclient-python
 """
+import asyncio
 import logging
 from typing import Optional, Dict, Any, List, Tuple
 from dataclasses import dataclass, field
@@ -879,40 +880,125 @@ class EmbyClient:
     # ==================== NSFW 库管理 ====================
     
     async def grant_nsfw_access(self, user_id: str) -> bool:
-        """授予用户 NSFW 库访问权限"""
-        if not EmbyConfig.EMBY_NSFW:
-            logger.warning("未配置 NSFW 库ID")
+        """
+        授予用户 NSFW 库访问权限
+        
+        逻辑：先取消所有媒体库权限，再把包括NSFW库的所有库加上
+        支持通过媒体库名称或ID来标识NSFW库
+        """
+        from src.services.emby_service import EmbyService
+        
+        # 查找NSFW库ID（支持通过名称或ID匹配）
+        nsfw_library_id = await EmbyService.find_nsfw_library_id()
+        if not nsfw_library_id:
+            logger.warning("未找到NSFW库")
             return False
         
         user = await self.get_user(user_id)
         if not user:
             return False
         
-        current_folders = list(user.policy.get('EnabledFolders', []))
-        if EmbyConfig.EMBY_NSFW not in current_folders:
-            current_folders.append(EmbyConfig.EMBY_NSFW)
+        # 获取所有媒体库
+        libraries = await self.get_libraries()
+        all_library_ids = [lib.id for lib in libraries]
         
-        return await self.update_user_policy(user_id, {
-            'EnableAllFolders': False,
-            'EnabledFolders': current_folders,
-        })
+        # 获取当前用户的完整策略
+        current_policy = user.policy.copy()
+        
+        # 先取消所有媒体库权限（清空）
+        current_policy['EnableAllFolders'] = False
+        current_policy['EnabledFolders'] = []
+        
+        # 发送清空请求
+        try:
+            await self._request('POST', f'/Users/{user_id}/Policy', json=current_policy)
+        except EmbyError as e:
+            logger.error(f"清空媒体库权限失败: {e}")
+            return False
+        
+        # 等待一小段时间，确保Emby服务器处理完清空操作
+        await asyncio.sleep(0.8)
+        
+        # 重新获取用户信息以确保策略是最新的
+        user = await self.get_user(user_id)
+        if not user:
+            return False
+        
+        # 获取最新的策略
+        current_policy = user.policy.copy()
+        
+        # 再把包括NSFW库的所有库加上
+        current_policy['EnableAllFolders'] = False
+        current_policy['EnabledFolders'] = all_library_ids
+        
+        try:
+            await self._request('POST', f'/Users/{user_id}/Policy', json=current_policy)
+            return True
+        except EmbyError as e:
+            logger.error(f"设置媒体库权限失败: {e}")
+            return False
 
     async def revoke_nsfw_access(self, user_id: str) -> bool:
-        """撤销用户 NSFW 库访问权限"""
-        if not EmbyConfig.EMBY_NSFW:
+        """
+        撤销用户 NSFW 库访问权限
+        
+        逻辑：先取消所有媒体库权限，再把除了NSFW库的其他库加上
+        支持通过媒体库名称或ID来标识NSFW库
+        """
+        from src.services.emby_service import EmbyService
+        
+        # 查找NSFW库ID（支持通过名称或ID匹配）
+        nsfw_library_id = await EmbyService.find_nsfw_library_id()
+        if not nsfw_library_id:
+            logger.warning("未找到NSFW库")
             return False
         
         user = await self.get_user(user_id)
         if not user:
             return False
         
-        current_folders = list(user.policy.get('EnabledFolders', []))
-        if EmbyConfig.EMBY_NSFW in current_folders:
-            current_folders.remove(EmbyConfig.EMBY_NSFW)
+        # 获取所有媒体库
+        libraries = await self.get_libraries()
+        all_library_ids = [lib.id for lib in libraries]
         
-        return await self.update_user_policy(user_id, {
-            'EnabledFolders': current_folders,
-        })
+        # 从所有库中排除NSFW库
+        folders_without_nsfw = [lid for lid in all_library_ids if lid != nsfw_library_id]
+        
+        # 获取当前用户的完整策略
+        current_policy = user.policy.copy()
+        
+        # 先取消所有媒体库权限（清空）
+        current_policy['EnableAllFolders'] = False
+        current_policy['EnabledFolders'] = []
+        
+        # 发送清空请求
+        try:
+            await self._request('POST', f'/Users/{user_id}/Policy', json=current_policy)
+        except EmbyError as e:
+            logger.error(f"清空媒体库权限失败: {e}")
+            return False
+        
+        # 等待一小段时间，确保Emby服务器处理完清空操作
+        await asyncio.sleep(0.8)
+        
+        # 重新获取用户信息以确保策略是最新的
+        user = await self.get_user(user_id)
+        if not user:
+            return False
+        
+        # 获取最新的策略
+        current_policy = user.policy.copy()
+        
+        # 再把除了NSFW库的其他库加上
+        current_policy['EnableAllFolders'] = False
+        current_policy['EnabledFolders'] = folders_without_nsfw
+        
+        try:
+            await self._request('POST', f'/Users/{user_id}/Policy', json=current_policy)
+            return True
+        except EmbyError as e:
+            logger.error(f"设置媒体库权限失败: {e}")
+            return False
 
 
 # ==================== 全局实例 ====================
