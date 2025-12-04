@@ -381,7 +381,7 @@ export default function DashboardPage() {
             <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 translate-y-[-50%] rounded-full bg-gradient-to-br from-sunset-500/20 to-transparent" />
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                {isPending ? "账户状态" : "会员到期"}
+                {isPending ? "账户状态" : "账号到期"}
               </CardTitle>
               <Calendar className="h-4 w-4 text-sunset-500" />
             </CardHeader>

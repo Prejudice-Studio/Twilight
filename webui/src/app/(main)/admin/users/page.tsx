@@ -190,10 +190,19 @@ export default function AdminUsersPage() {
     try {
       const res = await api.getUser(user.uid);
       if (res.success && res.data) {
-        setUserNsfwInfo({
-          enabled: res.data.nsfw?.enabled || false,
-          has_permission: res.data.nsfw?.has_permission || false,
-        });
+        const nsfw = res.data.nsfw;
+        if (typeof nsfw === 'object' && nsfw !== null) {
+          setUserNsfwInfo({
+            enabled: nsfw.enabled || false,
+            has_permission: nsfw.has_permission || false,
+          });
+        } else {
+          // 如果是布尔值，说明是列表接口返回的简化数据
+          setUserNsfwInfo({
+            enabled: nsfw || false,
+            has_permission: false, // 列表接口不包含权限信息
+          });
+        }
       }
     } catch (error) {
       console.error("获取用户NSFW信息失败:", error);
@@ -550,7 +559,7 @@ export default function AdminUsersPage() {
           <DialogHeader>
             <DialogTitle>用户续期</DialogTitle>
             <DialogDescription>
-              为用户 {selectedUser?.username} 延长会员时间
+              为用户 {selectedUser?.username} 延长账号时间
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">

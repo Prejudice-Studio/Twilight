@@ -272,10 +272,9 @@ async def get_nsfw_status():
         }
     """
     from src.services import EmbyService
-    from src.config import EmbyConfig
-    
     user = g.current_user
-    nsfw_library_id = EmbyConfig.EMBY_NSFW
+    # 查找NSFW库ID（支持通过名称或ID匹配）
+    nsfw_library_id = await EmbyService.find_nsfw_library_id()
     
     # 检查是否配置了 NSFW 库
     if not nsfw_library_id:
@@ -473,7 +472,8 @@ async def toggle_my_nsfw():
     enable = data.get('enable', False)
     user = g.current_user
     
-    nsfw_library_id = EmbyConfig.EMBY_NSFW
+    # 查找NSFW库ID（支持通过名称或ID匹配）
+    nsfw_library_id = await EmbyService.find_nsfw_library_id()
     
     # 检查是否配置了 NSFW 库
     if not nsfw_library_id:
@@ -956,7 +956,7 @@ async def get_my_settings():
     user = g.current_user
     
     # 检查 NSFW 权限
-    nsfw_library_id = EmbyConfig.EMBY_NSFW
+    nsfw_library_id = await EmbyService.find_nsfw_library_id()
     has_nsfw_permission = False
     if nsfw_library_id and user.EMBYID:
         library_ids, enable_all = await EmbyService.get_user_library_access(user)

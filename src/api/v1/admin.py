@@ -170,7 +170,7 @@ async def get_user(uid: int):
     status = await EmbyService.get_user_status(user)
     
     # 获取 NSFW 权限信息
-    nsfw_library_id = EmbyConfig.EMBY_NSFW
+    nsfw_library_id = await EmbyService.find_nsfw_library_id()
     has_nsfw_permission = False
     if nsfw_library_id and user.EMBYID:
         library_ids, enable_all = await EmbyService.get_user_library_access(user)
@@ -405,7 +405,8 @@ async def set_user_nsfw_permission(uid: int):
     if not user.EMBYID:
         return api_response(False, "用户未绑定 Emby 账户", code=400)
     
-    nsfw_library_id = EmbyConfig.EMBY_NSFW
+    # 查找NSFW库ID（支持通过名称或ID匹配）
+    nsfw_library_id = await EmbyService.find_nsfw_library_id()
     if not nsfw_library_id:
         return api_response(False, "系统未配置 NSFW 媒体库", code=400)
     
