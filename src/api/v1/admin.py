@@ -185,7 +185,7 @@ async def get_user(uid: int):
     
     user_info['nsfw'] = {
         'enabled': user.NSFW,
-        'has_permission': has_nsfw_permission,
+        'has_permission': user.NSFW_ALLOWED,
         'nsfw_library_id': nsfw_library_id,
     }
     
@@ -414,25 +414,23 @@ async def set_user_nsfw_permission(uid: int):
     grant = data.get('grant', True)
     
     try:
-        emby = get_emby_client()
+        # 更新数据库中的权限状态
+        user.NSFW_ALLOWED = grant
+        if not grant:
+            # 如果取消权限，强制关闭显示状态
+            user.NSFW = False
+            
+        await UserOperate.update_user(user)
         
-        if grant:
-            # 授予 NSFW 库访问权限
-            success = await emby.grant_nsfw_access(user.EMBYID)
-            if success:
-                return api_response(True, "已授予 NSFW 库访问权限")
-            else:
-                return api_response(False, "授予权限失败", code=500)
+        # 同步到 Emby
+        success, message = await UserService.sync_user_to_emby(user)
+        
+        if success:
+            status_msg = "已授予" if grant else "已撤销"
+            return api_response(True, f"{status_msg} NSFW 库访问权限")
         else:
-            # 撤销 NSFW 库访问权限
-            success = await emby.revoke_nsfw_access(user.EMBYID)
-            if success:
-                # 同时关闭用户的 NSFW 显示状态
-                user.NSFW = False
-                await UserOperate.update_user(user)
-                return api_response(True, "已撤销 NSFW 库访问权限")
-            else:
-                return api_response(False, "撤销权限失败", code=500)
+            return api_response(False, f"同步到 Emby 失败: {message}", code=500)
+            
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
@@ -660,11 +658,11 @@ async def list_media_requests():
     
     # 获取请求列表
     if status_filter == 'pending':
-        # 待处理：只获取未处理的
-        requests = await BangumiRequireOperate.get_pending_list()
+        # 待处理：获取所有未处理/已接受/下载中的
+        requests = await BangumiRequireOperate.get_all_pending_list()
     else:
         # 其他状态：按状态筛选
-        requests = await BangumiRequireOperate.get_requires_by_status(target_status)
+        requests = await BangumiRequireOperate.get_all_requires_by_status(target_status)
     
     # 转换为字典格式
     results = []
@@ -679,14 +677,31 @@ async def list_media_requests():
         # 获取用户信息
         user = await UserOperate.get_user_by_telegram_id(req.telegram_id)
         
+        status_name = ReqStatus(req.status).name.lower()
+        if status_name == 'unhandled':
+            status_name = 'pending'
+            
+        # 整合媒体信息
+        m_info = other.get('media_info', other) if other else {}
+        if not m_info.get('title'):
+            m_info['title'] = req.title
+        if not m_info.get('season'):
+            m_info['season'] = req.season
+        if not m_info.get('media_type'):
+            m_info['media_type'] = req.media_type
+            
         results.append({
             'id': req.id,
-            'media_id': req.bangumi_id,
-            'source': other.get('source', 'unknown'),
-            'status': ReqStatus(req.status).name.lower(),
+            'media_id': getattr(req, 'bangumi_id', getattr(req, 'tmdb_id', None)),
+            'source': 'bangumi' if hasattr(req, 'bangumi_id') else 'tmdb',
+            'status': status_name,
             'timestamp': req.timestamp,
-            'media_info': other.get('media_info', {}),
-            'season': other.get('season'),
+            'title': req.title,
+            'season': req.season,
+            'media_type': req.media_type,
+            'require_key': req.require_key,
+            'admin_note': req.admin_note,
+            'media_info': m_info,
             'user': {
                 'telegram_id': req.telegram_id,
                 'username': user.USERNAME if user else None,
@@ -709,20 +724,22 @@ async def list_media_requests():
     })
 
 
-@admin_bp.route('/media-requests/<int:request_id>', methods=['PUT'])
+@admin_bp.route('/media-requests/<int:request_id>', methods=['PUT', 'DELETE'])
 @async_route
 @require_auth
 @require_admin
-async def update_media_request(request_id: int):
-    """
-    更新求片请求状态（管理员）
+async def update_or_delete_media_request(request_id: int):
+    """更新或删除求片请求（管理员）"""
+    from src.db.bangumi import BangumiRequireOperate
     
-    Request:
-        {
-            "status": "accepted",  // pending, accepted, rejected, completed
-            "note": "备注信息"      // 可选
-        }
-    """
+    if request.method == 'DELETE':
+        req = await BangumiRequireOperate.get_require(request_id)
+        if not req:
+            return api_response(False, "请求不存在", code=404)
+        source = 'bangumi' if hasattr(req, 'bangumi_id') else 'tmdb'
+        success = await BangumiRequireOperate.delete_require(request_id, source)
+        return api_response(success, "请求已删除" if success else "删除失败")
+
     from src.services import MediaRequestService
     from src.db.bangumi import ReqStatus
     
@@ -736,6 +753,7 @@ async def update_media_request(request_id: int):
         'accepted': ReqStatus.ACCEPTED,
         'rejected': ReqStatus.REJECTED,
         'completed': ReqStatus.COMPLETED,
+        'downloading': ReqStatus.DOWNLOADING,
     }
     
     if status_str not in status_map:
@@ -743,8 +761,11 @@ async def update_media_request(request_id: int):
     
     target_status = status_map[status_str]
     
+    # 尝试从 body 获取 source 或通过 ID 自动寻找
+    source = data.get('source')
+    
     # 更新状态
-    success, message = await MediaRequestService.update_request_status(request_id, target_status)
+    success, message = await MediaRequestService.update_request_status(request_id, target_status, note, source)
     
     if success:
         return api_response(True, message or f"状态已更新为 {status_str}")

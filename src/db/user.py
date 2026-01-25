@@ -32,7 +32,8 @@ class UserModel(UsersDatabaseModel):
     EXPIRED_AT: Mapped[Optional[int]] = mapped_column(Integer, default=-1, nullable=True)
     EMBYID: Mapped[Optional[str]] = mapped_column(String, index=True, default='', nullable=True)
     PASSWORD: Mapped[Optional[str]] = mapped_column(String, default='', nullable=True)
-    NSFW: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, nullable=True)
+    NSFW: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, nullable=True)  # 用户是否开启 NSFW 显示
+    NSFW_ALLOWED: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, nullable=True)  # 管理员是否允许用户访问 NSFW
     BGM_MODE: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, nullable=True)
     BGM_TOKEN: Mapped[Optional[str]] = mapped_column(String, default='', nullable=True)
     LAST_LOGIN_TIME: Mapped[Optional[int]] = mapped_column(Integer, default=0, nullable=True)

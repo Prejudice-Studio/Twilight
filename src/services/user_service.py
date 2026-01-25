@@ -688,6 +688,9 @@ class UserService:
         """
         if not user.EMBYID:
             return False, "用户没有关联的 Emby 账户"
+            
+        if enable and not user.NSFW_ALLOWED:
+            return False, "管理员未授予您访问 NSFW 媒体库的权限"
         
         from src.services.emby_service import EmbyService
         
@@ -728,10 +731,7 @@ class UserService:
         
         同步内容包括：
         - 账号禁用状态（ACTIVE_STATUS）
-        
-        注意：
-        - NSFW 库访问权限由管理员在 Emby 中设置，不需要从数据库同步
-        - NSFW 显示状态（user.NSFW）是用户自己的选择，只存储在数据库中，不需要同步到 Emby
+        - NSFW 库访问权限（基于 NSFW_ALLOWED 和 NSFW 字段）
         """
         if not user.EMBYID:
             return True, "用户未绑定 Emby 账户，跳过同步"
@@ -742,7 +742,14 @@ class UserService:
             # 同步账号禁用状态
             await emby.set_user_enabled(user.EMBYID, user.ACTIVE_STATUS)
             
-            logger.info(f"用户状态已同步到 Emby: {user.USERNAME} (UID: {user.UID}), 状态: {'启用' if user.ACTIVE_STATUS else '禁用'}")
+            # 同步 NSFW 访问权限
+            # 逻辑：只有管理员允许 (NSFW_ALLOWED) 且 用户开启显示 (NSFW) 时，才在 Emby 中授予访问权限
+            if user.NSFW_ALLOWED and user.NSFW:
+                await emby.grant_nsfw_access(user.EMBYID)
+            else:
+                await emby.revoke_nsfw_access(user.EMBYID)
+            
+            logger.info(f"用户状态已同步到 Emby: {user.USERNAME} (UID: {user.UID}), 状态: {'启用' if user.ACTIVE_STATUS else '禁用'}, NSFW: {'开启' if user.NSFW_ALLOWED and user.NSFW else '关闭'}")
             return True, "同步成功"
         except Exception as e:
             logger.error(f"同步用户状态到 Emby 失败: {e}")
@@ -773,6 +780,7 @@ class UserService:
             "expire_status": format_expire_time(user.EXPIRED_AT),
             "expired_at": user.EXPIRED_AT,
             "nsfw_enabled": user.NSFW,
+            "nsfw_allowed": user.NSFW_ALLOWED,
             "bgm_mode": user.BGM_MODE,
             "register_time": user.REGISTER_TIME,
             "emby_id": user.EMBYID,  # 添加 Emby ID

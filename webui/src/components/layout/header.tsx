@@ -10,10 +10,16 @@ export function Header() {
   // 判断账号状态
   const isUnregistered = user?.role === -1; // UNRECOGNIZED
   const isDisabled = user?.active === false;
-  const isExpired = user?.expired_at && 
-    user.expired_at !== -1 && 
-    user.expired_at !== "-1" && 
-    new Date(user.expired_at).getTime() < Date.now();
+  
+  // 处理时间戳（秒转毫秒）
+  const expiredTimeMs = typeof user?.expired_at === 'number' 
+    ? (user.expired_at < 10000000000 ? user.expired_at * 1000 : user.expired_at)
+    : (user?.expired_at ? new Date(user.expired_at).getTime() : -1);
+
+  const isExpired = expiredTimeMs !== -1 && 
+    expiredTimeMs !== 0 &&
+    expiredTimeMs < Date.now();
+
   const isPermanent = !user?.expired_at || 
     user.expired_at === -1 || 
     user.expired_at === "-1";
@@ -51,9 +57,9 @@ export function Header() {
           </h1>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-6">
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground">积分:</span>
+            <span className="text-muted-foreground font-medium">积分:</span>
             <span className="font-bold text-primary">{user?.score || 0}</span>
           </div>
         </div>

@@ -213,3 +213,5 @@ webui/node_modules
 webui/.next
 /db/
 config.toml
+test_api.py
+test_external.py

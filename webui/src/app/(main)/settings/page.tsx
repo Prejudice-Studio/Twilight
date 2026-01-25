@@ -73,6 +73,11 @@ export default function SettingsPage() {
   const [showEmbyPassword, setShowEmbyPassword] = useState(false);
   const [isEmbyLoading, setIsEmbyLoading] = useState(false);
 
+  // Email dialog
+  const [editEmailOpen, setEditEmailOpen] = useState(false);
+  const [emailValue, setEmailValue] = useState("");
+  const [isEmailLoading, setIsEmailLoading] = useState(false);
+
   useEffect(() => {
     loadData();
   }, []);
@@ -257,6 +262,29 @@ export default function SettingsPage() {
     }
   };
 
+  const handleUpdateEmail = async () => {
+    if (!emailValue) {
+      toast({ title: "请输入邮箱地址", variant: "destructive" });
+      return;
+    }
+
+    setIsEmailLoading(true);
+    try {
+      const res = await api.updateMe({ email: emailValue });
+      if (res.success) {
+        toast({ title: "邮箱更新成功", variant: "success" });
+        setEditEmailOpen(false);
+        fetchUser();
+      } else {
+        toast({ title: "更新失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "更新失败", description: error.message, variant: "destructive" });
+    } finally {
+      setIsEmailLoading(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -279,7 +307,7 @@ export default function SettingsPage() {
 
       {/* Account Info */}
       <motion.div variants={item}>
-        <Card>
+        <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <User className="h-5 w-5" />
@@ -305,8 +333,20 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div>
-                <Label className="text-muted-foreground">邮箱</Label>
-                <p className="mt-1 font-medium">{user?.email || "未设置"}</p>
+                <Label className="text-muted-foreground font-medium">邮箱</Label>
+                <div className="mt-1 flex items-center justify-between">
+                  <p className="font-medium">{user?.email || "未设置"}</p>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => {
+                      setEmailValue(user?.email || "");
+                      setEditEmailOpen(true);
+                    }}
+                  >
+                    修改
+                  </Button>
+                </div>
               </div>
             </div>
           </CardContent>
@@ -315,7 +355,7 @@ export default function SettingsPage() {
 
       {/* Telegram Binding */}
       <motion.div variants={item}>
-        <Card>
+        <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <MessageCircle className="h-5 w-5" />
@@ -386,7 +426,7 @@ export default function SettingsPage() {
 
       {/* Emby Binding */}
       <motion.div variants={item}>
-        <Card>
+        <Card className="glass-card border-primary/20 bg-primary/5">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Tv className="h-5 w-5" />
@@ -456,7 +496,7 @@ export default function SettingsPage() {
       {/* API Key Management */}
       {user?.emby_id && (
         <motion.div variants={item}>
-          <Card>
+          <Card className="glass-card">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Key className="h-5 w-5" />
@@ -488,7 +528,7 @@ export default function SettingsPage() {
 
       {/* Preferences */}
       <motion.div variants={item}>
-        <Card>
+        <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Shield className="h-5 w-5" />
@@ -726,6 +766,38 @@ export default function SettingsPage() {
             >
               {isEmbyLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               确认绑定
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Email Dialog */}
+      <Dialog open={editEmailOpen} onOpenChange={setEditEmailOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>设置/修改邮箱</DialogTitle>
+            <DialogDescription>
+              请输入您的邮箱地址，用于找回密码或接收重要通知
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>邮箱地址</Label>
+              <Input
+                type="email"
+                placeholder="例如：example@gmail.com"
+                value={emailValue}
+                onChange={(e) => setEmailValue(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditEmailOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleUpdateEmail} disabled={isEmailLoading}>
+              {isEmailLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              确认保存
             </Button>
           </DialogFooter>
         </DialogContent>

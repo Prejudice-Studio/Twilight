@@ -173,25 +173,35 @@ class BangumiClient:
         **kwargs
     ) -> Optional[Any]:
         """发送 HTTP 请求"""
-        client = await self._get_client()
-        
-        try:
-            response = await client.request(method, endpoint, **kwargs)
+        headers = {
+            'User-Agent': 'Twilight/1.0 (https://github.com/your-repo)',
+            'Accept': 'application/json',
+        }
+        if self.access_token:
+            headers['Authorization'] = f'Bearer {self.access_token}'
             
-            if response.status_code == 401:
-                raise BangumiError("Access Token 无效或已过期")
-            elif response.status_code == 404:
-                raise BangumiError(f"资源未找到: {endpoint}")
-            elif response.status_code >= 400:
-                raise BangumiError(f"请求失败: {response.status_code} - {response.text}")
-            
-            if response.content:
-                return response.json()
-            return None
-            
-        except httpx.RequestError as e:
-            logger.error(f"Bangumi 请求失败: {e}")
-            raise BangumiError(f"网络请求失败: {e}")
+        async with httpx.AsyncClient(
+            base_url=BASE_URL,
+            headers=headers,
+            timeout=30.0,
+        ) as client:
+            try:
+                response = await client.request(method, endpoint, **kwargs)
+                
+                if response.status_code == 401:
+                    raise BangumiError("Access Token 无效或已过期")
+                elif response.status_code == 404:
+                    raise BangumiError(f"资源未找到: {endpoint}")
+                elif response.status_code >= 400:
+                    raise BangumiError(f"请求失败: {response.status_code} - {response.text}")
+                
+                if response.content:
+                    return response.json()
+                return None
+                
+            except httpx.RequestError as e:
+                logger.error(f"Bangumi 请求失败: {e}")
+                raise BangumiError(f"网络请求失败: {e}")
     
     async def get_subject(self, subject_id: int) -> Optional[BangumiSubject]:
         """

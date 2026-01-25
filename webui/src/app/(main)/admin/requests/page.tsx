@@ -10,6 +10,9 @@ import {
   ChevronLeft,
   ChevronRight,
   MessageSquare,
+  Hash,
+  Fingerprint,
+  Trash2,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,6 +20,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -40,7 +50,7 @@ export default function AdminRequestsPage() {
   // Action dialog
   const [actionOpen, setActionOpen] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<MediaRequest | null>(null);
-  const [actionType, setActionType] = useState<"approve" | "reject">("approve");
+  const [selectedStatus, setSelectedStatus] = useState("accepted");
   const [adminNote, setAdminNote] = useState("");
   const [isActioning, setIsActioning] = useState(false);
 
@@ -68,12 +78,11 @@ export default function AdminRequestsPage() {
 
     setIsActioning(true);
     try {
-      const newStatus = actionType === "approve" ? "approved" : "rejected";
-      const res = await api.updateMediaRequest(selectedRequest.id, newStatus, adminNote);
+      const res = await api.updateMediaRequest(selectedRequest.id, selectedStatus, adminNote);
 
       if (res.success) {
         toast({
-          title: actionType === "approve" ? "已批准" : "已拒绝",
+          title: "操作成功",
           variant: "success",
         });
         setActionOpen(false);
@@ -90,9 +99,26 @@ export default function AdminRequestsPage() {
     }
   };
 
-  const openActionDialog = (request: MediaRequest, type: "approve" | "reject") => {
+  const handleDelete = async (id: number) => {
+    if (!confirm("确定要删除这条求片请求吗？该操作不可逆。")) return;
+
+    try {
+      const res = await api.deleteMediaRequest(id);
+      if (res.success) {
+        toast({ title: "删除成功", variant: "success" });
+        loadRequests();
+      } else {
+        toast({ title: "删除失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "删除失败", description: error.message, variant: "destructive" });
+    }
+  };
+
+  const openActionDialog = (request: MediaRequest) => {
     setSelectedRequest(request);
-    setActionType(type);
+    setSelectedStatus(request.status === "pending" ? "accepted" : request.status);
+    setAdminNote(request.admin_note || "");
     setActionOpen(true);
   };
 
@@ -105,11 +131,11 @@ export default function AdminRequestsPage() {
             待处理
           </Badge>
         );
-      case "approved":
+      case "accepted":
         return (
           <Badge variant="success">
             <Check className="mr-1 h-3 w-3" />
-            已批准
+            已接受
           </Badge>
         );
       case "rejected":
@@ -119,9 +145,16 @@ export default function AdminRequestsPage() {
             已拒绝
           </Badge>
         );
+      case "downloading":
+        return (
+          <Badge variant="gradient">
+            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+            下载中
+          </Badge>
+        );
       case "completed":
         return (
-          <Badge variant="info">
+          <Badge variant="success">
             <Check className="mr-1 h-3 w-3" />
             已完成
           </Badge>
@@ -149,7 +182,7 @@ export default function AdminRequestsPage() {
       <Tabs value={status} onValueChange={(v) => { setStatus(v); setPage(1); }}>
         <TabsList>
           <TabsTrigger value="pending">待处理</TabsTrigger>
-          <TabsTrigger value="approved">已批准</TabsTrigger>
+          <TabsTrigger value="accepted">已接受</TabsTrigger>
           <TabsTrigger value="rejected">已拒绝</TabsTrigger>
           <TabsTrigger value="completed">已完成</TabsTrigger>
         </TabsList>
@@ -170,16 +203,34 @@ export default function AdminRequestsPage() {
             <div className="divide-y">
               {requests.map((request) => (
                 <div key={request.id} className="flex items-center justify-between p-4 hover:bg-muted/30">
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
-                      <Film className="h-6 w-6 text-primary" />
+                  <div className="flex items-start gap-4 flex-1 min-w-0">
+                    <div className="flex h-20 w-14 shrink-0 items-center justify-center rounded-lg bg-primary/5 overflow-hidden border border-primary/10">
+                      {request.media_info?.poster || request.media_info?.poster_url ? (
+                        <img 
+                          src={request.media_info.poster || request.media_info.poster_url} 
+                          alt={request.media_info.title} 
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <Film className="h-6 w-6 text-primary/50" />
+                      )}
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <p className="font-medium">{request.title}</p>
-                        {request.season && (
+                        <p className="font-medium">{request.media_info?.title || request.title}</p>
+                        {request.media_info?.season && (
                           <Badge variant="outline" className="text-xs">
-                            第 {request.season} 季
+                            第 {request.media_info.season} 季
+                          </Badge>
+                        )}
+                        {request.media_info?.vote_average && (
+                          <Badge variant="outline" className="text-xs border-amber-500/20 text-amber-500">
+                             ★ {request.media_info.vote_average.toFixed(1)}
+                          </Badge>
+                        )}
+                        {request.media_info?.rating && (
+                          <Badge variant="outline" className="text-xs border-amber-500/20 text-amber-500">
+                             ★ {request.media_info.rating.toFixed(1)}
                           </Badge>
                         )}
                       </div>
@@ -188,14 +239,32 @@ export default function AdminRequestsPage() {
                           {request.source.toUpperCase()}
                         </Badge>
                         <span>•</span>
-                        <span>{request.media_type === "movie" ? "电影" : "剧集"}</span>
+                        <span className="flex items-center gap-0.5"><Hash className="h-3 w-3" />{request.id}</span>
                         <span>•</span>
-                        <span>{formatDate(request.created_at)}</span>
+                        <span className="flex items-center gap-0.5" title="External Update Key">
+                          <Fingerprint className="h-3 w-3" />
+                          <code className="bg-muted px-1 rounded">{request.require_key}</code>
+                        </span>
+                        <span>•</span>
+                        <span>{request.media_info?.media_type === "movie" ? "电影" : "剧集"}</span>
+                        <span>•</span>
+                        <span>{formatDate(request.timestamp)}</span>
+                        {request.user && (
+                          <>
+                            <span>•</span>
+                            <span>用户: {request.user.username || request.user.telegram_id}</span>
+                          </>
+                        )}
                       </div>
-                      {request.note && (
+                      {request.media_info?.overview && (
+                        <p className="mt-2 text-xs text-muted-foreground line-clamp-2 max-w-2xl">
+                          {request.media_info.overview}
+                        </p>
+                      )}
+                      {request.media_info?.note && (
                         <p className="mt-1 text-xs text-muted-foreground">
                           <MessageSquare className="mr-1 inline h-3 w-3" />
-                          {request.note}
+                          {request.media_info.note}
                         </p>
                       )}
                       {request.admin_note && (
@@ -205,31 +274,25 @@ export default function AdminRequestsPage() {
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    {getStatusBadge(request.status)}
-                    {request.status === "pending" && (
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="text-emerald-500 hover:text-emerald-600"
-                          onClick={() => openActionDialog(request, "approve")}
-                        >
-                          <Check className="mr-1 h-4 w-4" />
-                          批准
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="text-destructive hover:text-destructive"
-                          onClick={() => openActionDialog(request, "reject")}
-                        >
-                          <X className="mr-1 h-4 w-4" />
-                          拒绝
-                        </Button>
-                      </div>
-                    )}
-                  </div>
+                    <div className="flex items-center gap-3">
+                      {getStatusBadge(request.status)}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => openActionDialog(request)}
+                      >
+                        处理
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleDelete(request.id)}
+                        title="删除请求"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                 </div>
               ))}
             </div>
@@ -265,19 +328,34 @@ export default function AdminRequestsPage() {
       <Dialog open={actionOpen} onOpenChange={setActionOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>
-              {actionType === "approve" ? "批准请求" : "拒绝请求"}
-            </DialogTitle>
+            <DialogTitle>处理媒体请求</DialogTitle>
             <DialogDescription>
-              {selectedRequest?.title}
-              {selectedRequest?.season && ` - 第 ${selectedRequest.season} 季`}
+              ID: {selectedRequest?.id} | 媒体 ID: {selectedRequest?.media_id}
+              <br />
+              {selectedRequest?.media_info?.title}
+              {selectedRequest?.media_info?.season && ` - 第 ${selectedRequest.media_info.season} 季`}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
+              <Label>修改状态</Label>
+              <Select value={selectedStatus} onValueChange={setSelectedStatus}>
+                <SelectTrigger>
+                  <SelectValue placeholder="选择状态" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pending">待处理</SelectItem>
+                  <SelectItem value="accepted">已接受</SelectItem>
+                  <SelectItem value="downloading">下载中</SelectItem>
+                  <SelectItem value="rejected">已拒绝</SelectItem>
+                  <SelectItem value="completed">已完成</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
               <Label>管理员备注（可选）</Label>
               <Input
-                placeholder={actionType === "approve" ? "例如：已添加到下载队列" : "例如：版权原因无法添加"}
+                placeholder="在此输入备注信息..."
                 value={adminNote}
                 onChange={(e) => setAdminNote(e.target.value)}
               />
@@ -288,12 +366,11 @@ export default function AdminRequestsPage() {
               取消
             </Button>
             <Button
-              variant={actionType === "approve" ? "default" : "destructive"}
               onClick={handleAction}
               disabled={isActioning}
             >
               {isActioning && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              确认{actionType === "approve" ? "批准" : "拒绝"}
+              确认保存
             </Button>
           </DialogFooter>
         </DialogContent>

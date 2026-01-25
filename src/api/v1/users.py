@@ -289,8 +289,8 @@ async def get_nsfw_status():
     # 获取用户在 Emby 中的媒体库访问权限
     library_ids, enable_all = await EmbyService.get_user_library_access(user)
     
-    # 判断用户是否有 NSFW 库访问权限
-    has_permission = enable_all or (nsfw_library_id in library_ids)
+    # 判断用户是否有 NSFW 库访问权限 (优先使用数据库中的字段)
+    has_permission = bool(user.NSFW_ALLOWED)
     
     return api_response(True, "获取成功", {
         'enabled': user.NSFW,
@@ -955,18 +955,14 @@ async def get_my_settings():
     
     user = g.current_user
     
-    # 检查 NSFW 权限
+    # 检查 NSFW 库是否配置
     nsfw_library_id = await EmbyService.find_nsfw_library_id()
-    has_nsfw_permission = False
-    if nsfw_library_id and user.EMBYID:
-        library_ids, enable_all = await EmbyService.get_user_library_access(user)
-        has_nsfw_permission = enable_all or (nsfw_library_id in library_ids)
     
     return api_response(True, "获取成功", {
         # 用户设置
         'auto_renew': user.AUTO_RENEW,
         'nsfw_enabled': user.NSFW,
-        'nsfw_can_toggle': has_nsfw_permission,
+        'nsfw_can_toggle': bool(user.NSFW_ALLOWED),
         'bgm_mode': user.BGM_MODE,
         'api_key_enabled': user.APIKEY_STATUS,
         # Telegram 绑定

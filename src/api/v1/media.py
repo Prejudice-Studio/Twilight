@@ -582,15 +582,7 @@ async def create_media_request():
         # 获取媒体信息
         result = await MediaService.get_by_source_id(source, media_id, media_type)
         if result:
-            media_info = {
-                'id': result.id,
-                'title': result.title,
-                'original_title': result.original_title,
-                'media_type': result.media_type,
-                'year': result.year,
-                'release_date': result.release_date,
-                'source_url': result.source_url,
-            }
+            media_info = result.to_dict()
         
         if data.get('title'):
             media_info = media_info or {}
@@ -609,15 +601,7 @@ async def create_media_request():
             selected = results[index]
             source = selected.source
             media_id = selected.id
-            media_info = {
-                'id': selected.id,
-                'title': selected.title,
-                'original_title': selected.original_title,
-                'media_type': selected.media_type,
-                'year': selected.year,
-                'release_date': selected.release_date,
-                'source_url': selected.source_url,
-            }
+            media_info = selected.to_dict()
         except Exception as e:
             return api_response(False, f"搜索失败: {e}", code=500)
     
@@ -693,4 +677,90 @@ async def update_request_status(request_id: int):
     
     success, message = await MediaRequestService.update_request_status(request_id, status)
     return api_response(success, message)
+
+
+@media_bp.route('/request/external/update', methods=['POST'])
+@async_route
+async def external_update_request():
+    """
+    外部更新求片状态 (无需登录，凭 require_key 访问)
+    
+    Request:
+        {
+            "key": "...",            // 必填，求片请求的 require_key
+            "status": "COMPLETED",   // 必填，新状态 (UNHANDLED, ACCEPTED, REJECTED, COMPLETED, DOWNLOADING)
+            "note": "备注信息"        // 可选，管理员/系统备注
+        }
+    """
+    data = request.get_json() or {}
+    require_key = data.get('key')
+    status_name = data.get('status')
+    note = data.get('note', '')
+    
+    if not require_key or not status_name:
+        return api_response(False, "缺少必要参数 (key, status)", code=400)
+    
+    success, message = await MediaRequestService.update_request_by_key(require_key, status_name, note)
+    if success:
+        return api_response(True, message)
+    return api_response(False, message, code=400)
+
+
+@media_bp.route('/request/<int:request_id>', methods=['GET', 'DELETE'])
+@async_route
+@require_auth
+async def handle_request_item(request_id: int):
+    """获取或删除求片请求"""
+    from src.db.bangumi import BangumiRequireOperate
+    from src.db.user import Role
+    from flask import request as flask_request
+    
+    # 尝试寻找请求
+    req = await BangumiRequireOperate.get_require(request_id)
+    if not req:
+        return api_response(False, "请求不存在", code=404)
+        
+    if flask_request.method == 'DELETE':
+        # 权限检查：要么是本人，要么是管理员
+        if req.telegram_id != g.current_user.TELEGRAM_ID and g.current_user.ROLE != Role.ADMIN.value:
+            return api_response(False, "无权删除他人的请求", code=403)
+            
+        # 执行删除
+        source = 'bangumi' if hasattr(req, 'bangumi_id') else 'tmdb'
+        success = await BangumiRequireOperate.delete_require(request_id, source)
+        
+        if success:
+            return api_response(True, "请求已删除")
+        return api_response(False, "删除失败")
+    
+    # GET 请求：返回详情
+    # 这里可以复用 get_user_requests 的逻辑，但针对单条
+    media_info = None
+    if req.other_info:
+        try:
+            import json
+            media_info = json.loads(req.other_info)
+        except:
+            pass
+            
+    user = await UserOperate.get_user_by_telegram_id(req.telegram_id)
+    
+    res = {
+        'id': req.id,
+        'media_id': getattr(req, 'bangumi_id', getattr(req, 'tmdb_id', None)),
+        'source': 'bangumi' if hasattr(req, 'bangumi_id') else 'tmdb',
+        'status': ReqStatus(req.status).name,
+        'timestamp': req.timestamp,
+        'title': req.title,
+        'season': req.season,
+        'media_type': req.media_type,
+        'require_key': req.require_key,
+        'admin_note': req.admin_note,
+        'media_info': media_info,
+        'user': {
+            'telegram_id': req.telegram_id,
+            'username': user.USERNAME if user else None,
+        } if user else None,
+    }
+    return api_response(True, "获取成功", res)
 

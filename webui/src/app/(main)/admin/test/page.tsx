@@ -41,6 +41,15 @@ interface ApiInfo {
   full_path: string;
 }
 
+interface TestEndpoint {
+  id: string;
+  name: string;
+  method: string;
+  endpoint: string;
+  description: string;
+  body?: string;
+}
+
 export default function AdminTestPage() {
   const { toast } = useToast();
   const [testResults, setTestResults] = useState<Record<string, any>>({});
@@ -57,7 +66,7 @@ export default function AdminTestPage() {
   const [isLoadingApis, setIsLoadingApis] = useState(false);
   const [selectedApi, setSelectedApi] = useState<ApiInfo | null>(null);
 
-  const testEndpoints = [
+  const testEndpoints: TestEndpoint[] = [
     {
       id: "health",
       name: "健康检查",
@@ -90,12 +99,12 @@ export default function AdminTestPage() {
       id: "media_bangumi",
       name: "Bangumi 媒体详情",
       method: "GET",
-      endpoint: "/media/bangumi/329982",
-      description: "获取 Bangumi 动画详情（ID: 329982）",
+      endpoint: "/media/bangumi/400602",
+      description: "获取 Bangumi 动画详情（ID: 400602）",
     },
   ];
 
-  const handleTest = async (test: typeof testEndpoints[0]) => {
+  const handleTest = async (test: TestEndpoint) => {
     setIsLoading((prev) => ({ ...prev, [test.id]: true }));
     try {
       let response: any;

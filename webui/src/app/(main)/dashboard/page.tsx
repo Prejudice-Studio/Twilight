@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuthStore } from "@/store/auth";
-import { api, type ScoreInfo, type PlaybackStats } from "@/lib/api";
+import { api, type ScoreInfo, type PlaybackStats, type TopMediaItem } from "@/lib/api";
 import { formatRelativeTime, formatNumber } from "@/lib/utils";
 
 const container = {
@@ -61,6 +61,7 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [regCode, setRegCode] = useState("");
   const [isRenewing, setIsRenewing] = useState(false);
+  const [topMedia, setTopMedia] = useState<TopMediaItem[]>([]);
   const [regCodeInfo, setRegCodeInfo] = useState<{ type: number; type_name: string; days: number } | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   
@@ -72,15 +73,19 @@ export default function DashboardPage() {
   // 加载数据函数
   const loadData = async () => {
     try {
-      const [scoreRes, statsRes] = await Promise.all([
+      const [scoreRes, statsRes, topMediaRes] = await Promise.all([
         api.getScoreInfo(),
-        api.getMyStats().catch(() => ({ success: false, data: null })),  // 待激活用户可能没有统计数据
+        api.getMyStats().catch(() => ({ success: false, data: null })),
+        api.getTopMedia("week", 5).catch(() => ({ success: false, data: { ranking: [] } })),
       ]);
       if (scoreRes.success && scoreRes.data) {
         setScoreInfo(scoreRes.data);
       }
       if (statsRes.success && statsRes.data) {
         setStats(statsRes.data);
+      }
+      if (topMediaRes.success && topMediaRes.data) {
+        setTopMedia(topMediaRes.data.ranking);
       }
     } catch (error) {
       console.error(error);
@@ -317,7 +322,8 @@ export default function DashboardPage() {
     >
       {/* Welcome Banner */}
       <motion.div variants={item}>
-        <Card className={`overflow-hidden border-0 ${isPending ? 'bg-gradient-to-r from-amber-600 via-amber-500 to-orange-500' : 'bg-gradient-to-r from-twilight-600 via-twilight-500 to-sunset-500'}`}>
+        <Card className={`overflow-hidden border-0 relative glass ${isPending ? 'bg-gradient-to-r from-amber-600/90 to-orange-500/90' : 'bg-gradient-to-r from-twilight-600/90 to-sunset-500/90'}`}>
+          <div className="absolute inset-0 bg-grid-white/10 [mask-image:linear-gradient(0deg,white,rgba(255,255,255,0.5))]" />
           <CardContent className="flex items-center justify-between p-6">
             <div>
               <h2 className="text-2xl font-bold text-white">
@@ -558,42 +564,85 @@ export default function DashboardPage() {
         </motion.div>
       </div>
 
-      {/* Recent Activity */}
-      {stats?.recent_items && stats.recent_items.length > 0 && (
-        <motion.div variants={item}>
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Tv className="h-5 w-5 text-primary" />
-                最近观看
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {stats.recent_items.slice(0, 5).map((item, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between rounded-lg bg-accent/30 p-3"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10">
-                        <Play className="h-4 w-4 text-primary" />
+      {/* Bottom Grid */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Recent Activity */}
+        {stats?.recent_items && stats.recent_items.length > 0 && (
+          <motion.div variants={item}>
+            <Card className="glass-card">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Clock className="h-5 w-5 text-primary" />
+                  最近观看
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {stats.recent_items.slice(0, 5).map((item, index) => (
+                    <div
+                      key={index}
+                      className="flex items-center justify-between rounded-lg bg-accent/30 p-3 hover:bg-accent/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10">
+                          <Play className="h-4 w-4 text-primary" />
+                        </div>
+                        <div>
+                          <p className="font-medium line-clamp-1">{item.name}</p>
+                          <p className="text-xs text-muted-foreground">{item.type}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-medium">{item.name}</p>
-                        <p className="text-xs text-muted-foreground">{item.type}</p>
+                      <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">
+                        {formatRelativeTime(new Date(item.played_at).getTime())}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+
+        {/* Global Trending */}
+        {topMedia && topMedia.length > 0 && (
+          <motion.div variants={item}>
+            <Card className="glass-card">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5 text-orange-500" />
+                  本周热门
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {topMedia.map((item, index) => (
+                    <div
+                      key={index}
+                      className="flex items-center justify-between rounded-lg bg-accent/30 p-3"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`flex h-8 w-8 items-center justify-center rounded-full font-bold text-xs ${
+                          index === 0 ? "bg-yellow-500 text-white" : "bg-primary/10 text-primary"
+                        }`}>
+                          {index + 1}
+                        </div>
+                        <div>
+                          <p className="font-medium line-clamp-1">{item.item_name}</p>
+                          <p className="text-xs text-muted-foreground">{item.item_type}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-sm font-bold text-primary">{item.play_count}</span>
+                        <p className="text-[10px] text-muted-foreground">播放次数</p>
                       </div>
                     </div>
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(item.played_at).toLocaleDateString()}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+      </div>
 
       {/* Regcode Renew */}
       <motion.div variants={item}>
