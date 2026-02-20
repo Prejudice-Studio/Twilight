@@ -27,31 +27,66 @@ class BaseConfig:
     @classmethod
     def update_from_toml(cls, section: Optional[str] = None) -> None:
         """
-        从TOML配置文件中加载配置
+        从TOML配置文件和环境变量中加载配置
         
         :param section: TOML文件中的配置节名称，为None时加载根级配置
         """
+        cls._section = section
+        config = {}
+        
+        # 1. 从 TOML 加载
         try:
-            cls._section = section
             config = toml.load(cls.toml_file_path)
-            items = config.get(section, {}) if section else config
-            
-            for key, value in items.items():
-                attr_name = key.upper()
-                if hasattr(cls, attr_name):
-                    # 获取原始属性的类型注解
-                    current_value = getattr(cls, attr_name)
-                    # 如果原始值是 Path 类型，将字符串转换为 Path
-                    if isinstance(current_value, Path) and isinstance(value, str):
-                        value = ROOT_PATH / value if not os.path.isabs(value) else Path(value)
-                    setattr(cls, attr_name, value)
-                    
         except FileNotFoundError:
             logger.warning(f'配置文件不存在: {cls.toml_file_path}')
         except toml.TomlDecodeError as err:
             logger.error(f'TOML配置文件格式错误: {err}')
         except Exception as err:
             logger.error(f'加载配置文件时发生错误: {err}')
+            
+        items = config.get(section, {}) if section else config
+        
+        # 2. 从类属性更新（合并 TOML 与类默认值）
+        for key in dir(cls):
+            if not key.isupper() or key.startswith('_'):
+                continue
+                
+            attr_name = key
+            toml_key = key.lower()
+            
+            # 优先级: 环境变量 > TOML > 类默认值
+            
+            # 获取 TOML 值
+            value = items.get(toml_key)
+            
+            # 获取环境变量值
+            env_prefix = f"TWILIGHT_{section.upper()}_" if section else "TWILIGHT_"
+            env_key = env_prefix + attr_name
+            env_value = os.environ.get(env_key)
+            
+            if env_value is not None:
+                # 环境变量转换类型
+                current_value = getattr(cls, attr_name)
+                try:
+                    if isinstance(current_value, bool):
+                        value = env_value.lower() in ('true', '1', 'yes', 'on')
+                    elif isinstance(current_value, int):
+                        value = int(env_value)
+                    elif isinstance(current_value, float):
+                        value = float(env_value)
+                    elif isinstance(current_value, list):
+                        value = [v.strip() for v in env_value.split(',')]
+                    else:
+                        value = env_value
+                except ValueError:
+                    logger.warning(f"无法将环境变量 {env_key} 的值 {env_value} 转换为 {type(current_value)}")
+            
+            if value is not None:
+                # 如果原始值是 Path 类型，将字符串转换为 Path
+                current_value = getattr(cls, attr_name)
+                if isinstance(current_value, Path) and isinstance(value, str):
+                    value = ROOT_PATH / value if not os.path.isabs(value) else Path(value)
+                setattr(cls, attr_name, value)
 
     @classmethod
     def save_to_toml(cls) -> bool:

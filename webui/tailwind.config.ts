@@ -1,7 +1,6 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
-  darkMode: ["class"],
   content: [
     "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
@@ -126,9 +125,6 @@ const config: Config = {
       },
       backgroundImage: {
         "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
-        "twilight-gradient": "linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%)",
-        "sunset-gradient": "linear-gradient(135deg, #f093fb 0%, #f5576c 50%, #f97316 100%)",
-        "aurora-gradient": "linear-gradient(135deg, #0c1445 0%, #1e3a5f 25%, #4a044e 50%, #701a75 75%, #f97316 100%)",
       },
     },
   },

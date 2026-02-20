@@ -6,6 +6,7 @@ import { useAuthStore } from "@/store/auth";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export default function MainLayout({
   children,
@@ -13,7 +14,9 @@ export default function MainLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const { isAuthenticated, isLoading, fetchUser } = useAuthStore();
+  const { user, isAuthenticated, isLoading, fetchUser } = useAuthStore();
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
+  const isAdmin = user?.role === 0;
 
   useEffect(() => {
     fetchUser();
@@ -24,6 +27,12 @@ export default function MainLayout({
       router.push("/login");
     }
   }, [isAuthenticated, isLoading, router]);
+
+  useEffect(() => {
+    if (!isLoading && isAuthenticated && pathname.startsWith('/admin') && !isAdmin) {
+      router.push('/dashboard');
+    }
+  }, [isAuthenticated, isLoading, isAdmin, pathname, router]);
 
   if (isLoading) {
     return (
@@ -38,7 +47,7 @@ export default function MainLayout({
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className={cn("min-h-screen bg-background", !isAdmin && "hide-dev-tools")}>
       <Sidebar />
       <div className="pl-64">
         <Header />

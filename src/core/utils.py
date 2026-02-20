@@ -4,22 +4,19 @@
 提供通用的工具函数和装饰器
 """
 import hashlib
-import random
 import string
 import time
 import re
 import logging
-from typing import Optional, Callable, Any
+import secrets
+from typing import Optional, Callable, Any, List
 from functools import wraps
 
 logger = logging.getLogger(__name__)
 
-
-# ==================== 字符串工具 ====================
-
 def generate_random_string(length: int = 16, include_special: bool = False) -> str:
     """
-    生成随机字符串
+    生成随机字符串 (加密安全)
     
     :param length: 字符串长度
     :param include_special: 是否包含特殊字符
@@ -27,44 +24,71 @@ def generate_random_string(length: int = 16, include_special: bool = False) -> s
     chars = string.ascii_letters + string.digits
     if include_special:
         chars += "!@#$%^&*"
-    return ''.join(random.choices(chars, k=length))
+    return ''.join(secrets.choice(chars) for _ in range(length))
 
 
 def generate_password(length: int = 12) -> str:
-    """生成安全的随机密码"""
+    """生成加密安全的随机密码"""
     # 确保至少包含一个大写、小写、数字
+    uppercase = string.ascii_uppercase
+    lowercase = string.ascii_lowercase
+    digits = string.digits
+    
     password = [
-        random.choice(string.ascii_uppercase),
-        random.choice(string.ascii_lowercase),
-        random.choice(string.digits),
+        secrets.choice(uppercase),
+        secrets.choice(lowercase),
+        secrets.choice(digits),
     ]
     # 填充剩余长度
-    remaining = length - len(password)
-    password.extend(random.choices(string.ascii_letters + string.digits, k=remaining))
-    random.shuffle(password)
+    all_chars = uppercase + lowercase + digits
+    password.extend(secrets.choice(all_chars) for _ in range(length - 3))
+    
+    # 打乱顺序
+    secrets.SystemRandom().shuffle(password)
     return ''.join(password)
 
 
-def hash_password(password: str, salt: Optional[str] = None) -> str:
+def hash_password(password: str, salt: Optional[str] = None, iterations: int = 100000) -> str:
     """
-    对密码进行哈希处理
+    对密码进行哈希处理 (使用 PBKDF2-SHA256)
     
     :param password: 原始密码
     :param salt: 盐值，为空则自动生成
-    :return: 格式为 salt$hash 的字符串
+    :param iterations: 迭代次数
+    :return: 格式为 salt$iterations$hash 的字符串
     """
     if salt is None:
         salt = generate_random_string(16)
-    hashed = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
-    return f"{salt}${hashed}"
+    
+    # PBKDF2 哈希
+    dk = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), iterations)
+    hashed = dk.hex()
+    return f"{salt}${iterations}${hashed}"
 
 
 def verify_password(password: str, hashed: str) -> bool:
-    """验证密码是否正确"""
+    """验证密码是否正确 (兼容旧格式)"""
     if '$' not in hashed:
         return False
-    salt, _ = hashed.split('$', 1)
-    return hash_password(password, salt) == hashed
+        
+    parts = hashed.split('$')
+    
+    # 旧格式: salt$hash (SHA256)
+    if len(parts) == 2:
+        salt, _ = parts
+        expected = f"{salt}${hashlib.sha256(f'{salt}{password}'.encode()).hexdigest()}"
+        return expected == hashed
+        
+    # 新格式: salt$iterations$hash (PBKDF2)
+    if len(parts) == 3:
+        salt, iterations_str, _ = parts
+        try:
+            iterations = int(iterations_str)
+            return hash_password(password, salt, iterations) == hashed
+        except ValueError:
+            return False
+            
+    return False
 
 
 def is_valid_email(email: str) -> bool:

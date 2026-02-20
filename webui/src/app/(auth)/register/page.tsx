@@ -94,124 +94,133 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
+    <main className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-background p-4">
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ duration: 0.8, ease: "easeOut" }}
+        className="relative z-10 w-full max-w-[480px]"
       >
-        <Card className="w-full max-w-md glass-card border-white/10">
-          <CardHeader className="space-y-1 text-center">
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-twilight-500 to-sunset-500 shadow-lg shadow-twilight-500/30">
-              <Sparkles className="h-7 w-7 text-white" />
-            </div>
-            <CardTitle className="text-2xl font-bold gradient-text">
-              创建账号
+        <Card className="overflow-hidden border-border bg-card/50 shadow-2xl backdrop-blur-3xl">
+          <CardHeader className="space-y-2 pb-6 pt-10 text-center">
+            <motion.div 
+              initial={{ rotate: 10, scale: 0.8 }}
+              animate={{ rotate: 0, scale: 1 }}
+              transition={{ 
+                type: "spring",
+                stiffness: 260,
+                damping: 20,
+                delay: 0.2
+              }}
+              className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary shadow-lg shadow-primary/20"
+            >
+              <Sparkles className="h-7 w-7 text-primary-foreground" />
+            </motion.div>
+            
+            <CardTitle className="text-3xl font-black tracking-tight text-foreground">
+              加入 Twilight
             </CardTitle>
-            <CardDescription>
-              注册新的 Twilight 账号
+            <CardDescription className="text-muted-foreground">
+              开启全新的私人影音管理体验
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          
+          <CardContent className="px-8 pb-10">
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="username">用户名 *</Label>
-                <Input
-                  id="username"
-                  name="username"
-                  type="text"
-                  placeholder="请输入用户名"
-                  value={formData.username}
-                  onChange={handleChange}
-                  className="bg-background/50"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="username" className="text-foreground/70 ml-1">用户名 *</Label>
+                  <Input
+                    id="username"
+                    name="username"
+                    placeholder="Username"
+                    value={formData.username}
+                    onChange={handleChange}
+                    className="h-11 border-border bg-muted/50 text-foreground placeholder:text-muted-foreground/50 focus:ring-primary/20"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email" className="text-foreground/70 ml-1">邮箱</Label>
+                  <Input
+                    id="email"
+                    name="email"
+                    type="email"
+                    placeholder="Email (Optional)"
+                    value={formData.email}
+                    onChange={handleChange}
+                    className="h-11 border-border bg-muted/50 text-foreground placeholder:text-muted-foreground/50 focus:ring-primary/20"
+                  />
+                </div>
               </div>
-
+              
               <div className="space-y-2">
-                <Label htmlFor="email">邮箱</Label>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  placeholder="选填"
-                  value={formData.email}
-                  onChange={handleChange}
-                  className="bg-background/50"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="password">密码 *</Label>
+                <Label htmlFor="password" className="text-foreground/70 ml-1">设置密码 *</Label>
                 <div className="relative">
                   <Input
                     id="password"
                     name="password"
                     type={showPassword ? "text" : "password"}
-                    placeholder="至少 6 位"
+                    placeholder="Password (Min 6 chars)"
                     value={formData.password}
                     onChange={handleChange}
-                    className="bg-background/50 pr-10"
+                    className="h-11 border-border bg-muted/50 text-foreground placeholder:text-muted-foreground/50 focus:ring-primary/20 pr-10"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-foreground transition-colors"
                   >
-                    {showPassword ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="confirmPassword">确认密码 *</Label>
+                <Label htmlFor="confirmPassword" className="text-foreground/70 ml-1">确认密码 *</Label>
                 <Input
                   id="confirmPassword"
                   name="confirmPassword"
                   type="password"
-                  placeholder="再次输入密码"
+                  placeholder="Confirm Password"
                   value={formData.confirmPassword}
                   onChange={handleChange}
-                  className="bg-background/50"
+                  className="h-11 border-border bg-muted/50 text-foreground placeholder:text-muted-foreground/50 focus:ring-primary/20"
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="regCode">注册码</Label>
+                <Label htmlFor="regCode" className="text-foreground/70 ml-1 text-xs">注册码 / 邀请码</Label>
                 <Input
                   id="regCode"
                   name="regCode"
-                  type="text"
-                  placeholder="如有注册码请输入"
+                  placeholder="Registration Code"
                   value={formData.regCode}
                   onChange={handleChange}
-                  className="bg-background/50"
+                  className="h-11 border-border bg-muted/50 text-foreground placeholder:text-muted-foreground/50 focus:ring-primary/20"
                 />
               </div>
 
-              <Button
-                type="submit"
-                variant="gradient"
-                className="w-full"
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <UserPlus className="mr-2 h-4 w-4" />
-                )}
-                注册
-              </Button>
+              <div className="pt-4">
+                <Button
+                  type="submit"
+                  className="h-12 w-full bg-primary font-bold text-primary-foreground shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98]"
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                  ) : (
+                    <UserPlus className="mr-2 h-5 w-5" />
+                  )}
+                  开启旅程
+                </Button>
+              </div>
             </form>
 
-            <div className="mt-6 text-center text-sm">
-              <span className="text-muted-foreground">已有账号？</span>{" "}
+            <div className="mt-8 flex items-center justify-center gap-2 text-sm">
+              <span className="text-muted-foreground">已有账号？</span>
               <Link
                 href="/login"
-                className="font-medium text-primary hover:underline"
+                className="font-bold text-primary hover:underline transition-colors"
               >
                 立即登录
               </Link>
@@ -219,7 +228,7 @@ export default function RegisterPage() {
           </CardContent>
         </Card>
       </motion.div>
-    </div>
+    </main>
   );
 }
 

@@ -3,111 +3,125 @@
 @tailwind utilities;
 
 @layer base {
+  /* 极简高级浅色主题: 奶油白与天青色 */
   :root {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
+    --background: 40 40% 98.5%; /* 极淡奶油白 */
+    --foreground: 220 30% 15%;
     --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
+    --card-foreground: 220 30% 15%;
     --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
-    --primary: 280 85% 55%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --accent: 280 70% 95%;
-    --accent-foreground: 280 85% 35%;
-    --destructive: 0 84.2% 60.2%;
+    --popover-foreground: 220 30% 15%;
+    --primary: 200 100% 45%; /* 天青蓝 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 200 20% 96%;
+    --secondary-foreground: 200 80% 30%;
+    --muted: 220 15% 94%;
+    --muted-foreground: 220 15% 45%;
+    --accent: 200 30% 92%;
+    --accent-foreground: 200 100% 30%;
+    --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 98%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 280 85% 55%;
-    --radius: 0.75rem;
+    --border: 220 15% 90%;
+    --input: 220 15% 90%;
+    --ring: 200 100% 45%;
+    --radius: 1.25rem;
+    --bg-gradient-accent: hsla(200, 100%, 85%, 0.15);
   }
 
-  .dark {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 5.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 5.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 280 85% 65%;
-    --primary-foreground: 240 10% 3.9%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 280 50% 15%;
-    --accent-foreground: 280 85% 80%;
-    --destructive: 0 62.8% 50.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 280 85% 65%;
+  /* 柑橘橙模式 */
+  .bloom {
+    --primary: 32 95% 50%; /* 活力柑橘 */
+    --primary-foreground: 0 0% 100%;
+    --accent: 32 100% 94%;
+    --accent-foreground: 32 100% 30%;
+    --ring: 32 95% 50%;
+    --bg-gradient-accent: hsla(32, 100%, 85%, 0.2);
   }
-}
 
-@layer base {
   * {
     @apply border-border;
   }
   body {
     @apply bg-background text-foreground;
+    background-image: 
+      radial-gradient(at 0% 0%, var(--bg-gradient-accent) 0px, transparent 40%),
+      radial-gradient(at 100% 100%, var(--bg-gradient-accent) 0px, transparent 40%),
+      linear-gradient(to bottom, #ffffff 0%, transparent 100%);
+    background-attachment: fixed;
+    min-height: 100vh;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
 
 @layer utilities {
-  .glass {
-    @apply backdrop-blur-xl bg-white/10 dark:bg-black/10 border border-white/20 dark:border-white/10;
+  /* 亚克力材质: 高度透明, 强模糊 */
+  .glass-acrylic {
+    @apply backdrop-blur-[24px] bg-white/60 border border-white/40 shadow-[0_8px_32px_0_rgba(0,0,0,0.03)];
+  }
+
+  /* 磨砂玻璃: 中度透明, 柔和 */
+  .glass-frosted {
+    @apply backdrop-blur-[12px] bg-white/45 border border-white/20 shadow-sm transition-all duration-300;
+  }
+
+  /* 液态玻璃: 极高光泽, 动态感 */
+  .glass-liquid {
+    position: relative;
+    @apply backdrop-blur-[40px] bg-white/30 border border-white/50 shadow-inner overflow-hidden;
+    background: linear-gradient(135deg, rgba(255,255,255,0.4) 0%, rgba(255,255,255,0.1) 100%);
   }
   
-  .glass-card {
-    @apply backdrop-blur-xl bg-white/60 dark:bg-gray-900/60 border border-white/20 dark:border-gray-700/50 shadow-xl;
-  }
-
-  .gradient-text {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-twilight-500 via-twilight-400 to-sunset-500;
-  }
-
-  .glow-border {
-    @apply relative;
-  }
-
-  .glow-border::before {
+  .glass-liquid::before {
     content: "";
-    @apply absolute -inset-0.5 bg-gradient-to-r from-twilight-500 to-sunset-500 rounded-lg blur opacity-30 group-hover:opacity-100 transition duration-1000;
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle, rgba(255,255,255,0.2) 0%, transparent 70%);
+    animation: liquid-float 10s infinite alternate;
+    pointer-events: none;
   }
 
-  .animate-delay-100 { animation-delay: 100ms; }
-  .animate-delay-200 { animation-delay: 200ms; }
-  .animate-delay-300 { animation-delay: 300ms; }
-  .animate-delay-400 { animation-delay: 400ms; }
-  .animate-delay-500 { animation-delay: 500ms; }
-
-  .text-balance {
-    text-wrap: balance;
+  .premium-card {
+    @apply relative overflow-hidden rounded-[2rem] border border-white/40 bg-white/50 backdrop-blur-2xl transition-all duration-500 hover:shadow-2xl hover:shadow-primary/5 hover:-translate-y-1;
   }
 }
 
-/* 自定义滚动条 */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+@keyframes liquid-float {
+  0% { transform: translate(0, 0) rotate(0deg); }
+  100% { transform: translate(10%, 10%) rotate(5deg); }
 }
 
-::-webkit-scrollbar-track {
-  @apply bg-transparent;
+/* 核心优化 */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+  display: block;
+  background: var(--background);
+  color: var(--foreground);
 }
 
+::view-transition-old(root) { z-index: 1; }
+::view-transition-new(root) { z-index: 9999; }
+
+/* 现代滚动条 */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  @apply bg-twilight-500/30 rounded-full hover:bg-twilight-500/50 transition-colors;
+  background: var(--primary);
+  opacity: 0.2;
+  border-radius: 10px;
+  background-clip: padding-box;
+  border: 2px solid transparent;
 }
+::-webkit-scrollbar-thumb:hover { background: var(--primary); }
 
-/* 选中文本颜色 */
-::selection {
-  @apply bg-twilight-500/30 text-twilight-900 dark:text-twilight-100;
+::selection { @apply bg-primary/20 text-foreground; }
+
+.hide-dev-tools ~ #nextjs-portal, 
+.hide-dev-tools ~ [data-nextjs-toast-wrapper],
+.hide-dev-tools ~ [data-nextjs-dev-indicator] {
+  display: none !important;
 }
-

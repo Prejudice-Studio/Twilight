@@ -62,89 +62,100 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
+    <main className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-background p-4">
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ duration: 0.8, ease: "easeOut" }}
+        className="relative z-10 w-full max-w-[440px]"
       >
-        <Card className="w-full max-w-md glass-card border-white/10">
-          <CardHeader className="space-y-1 text-center">
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-twilight-500 to-sunset-500 shadow-lg shadow-twilight-500/30">
-              <Sparkles className="h-7 w-7 text-white" />
-            </div>
-            <CardTitle className="text-2xl font-bold gradient-text">
-              欢迎回来
+        <Card className="overflow-hidden border-border bg-card/50 shadow-2xl backdrop-blur-3xl">
+          <CardHeader className="space-y-2 pb-8 pt-10 text-center">
+            <motion.div 
+              initial={{ rotate: -10, scale: 0.8 }}
+              animate={{ rotate: 0, scale: 1 }}
+              transition={{ 
+                type: "spring",
+                stiffness: 260,
+                damping: 20,
+                delay: 0.2
+              }}
+              className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-3xl bg-primary shadow-lg shadow-primary/20"
+            >
+              <Sparkles className="h-8 w-8 text-primary-foreground" />
+            </motion.div>
+            
+            <CardTitle className="text-3xl font-black tracking-tight text-foreground">
+              Twilight
             </CardTitle>
-            <CardDescription>
-              登录到 Twilight 管理系统
+            <CardDescription className="text-muted-foreground text-base">
+              欢迎回来，开启你的影音之旅
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
+          
+          <CardContent className="px-8 pb-10">
+            <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-2">
-                <Label htmlFor="username">用户名</Label>
+                <Label htmlFor="username" className="text-foreground/70 ml-1">用户名</Label>
                 <Input
                   id="username"
-                  type="text"
-                  placeholder="请输入用户名"
+                  placeholder="Username"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="bg-background/50"
+                  className="h-12 border-border bg-muted/50 text-foreground placeholder:text-muted-foreground/50 focus:ring-primary/20"
                 />
               </div>
+              
               <div className="space-y-2">
-                <Label htmlFor="password">密码</Label>
+                <Label htmlFor="password" className="text-foreground/70 ml-1">密码</Label>
                 <div className="relative">
                   <Input
                     id="password"
                     type={showPassword ? "text" : "password"}
-                    placeholder="请输入密码"
+                    placeholder="Password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="bg-background/50 pr-10"
+                    className="h-12 border-border bg-muted/50 text-foreground placeholder:text-muted-foreground/50 focus:ring-primary/20 pr-10"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-foreground transition-colors"
                   >
-                    {showPassword ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
               </div>
-              <Button
-                type="submit"
-                variant="gradient"
-                className="w-full"
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <ArrowRight className="mr-2 h-4 w-4" />
-                )}
-                登录
-              </Button>
+ 
+              <div className="pt-2">
+                <Button
+                  type="submit"
+                  className="h-12 w-full bg-primary font-bold text-primary-foreground shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98]"
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                  ) : (
+                    <ArrowRight className="mr-2 h-5 w-5" />
+                  )}
+                  立即登入
+                </Button>
+              </div>
             </form>
-
-            <div className="mt-6 text-center text-sm">
-              <span className="text-muted-foreground">还没有账号？</span>{" "}
+ 
+            <div className="mt-8 flex items-center justify-center gap-2 text-sm">
+              <span className="text-muted-foreground">还没有账号？</span>
               <Link
                 href="/register"
-                className="font-medium text-primary hover:underline"
+                className="font-bold text-primary hover:underline transition-colors"
               >
-                立即注册
+                创建新账户
               </Link>
             </div>
           </CardContent>
         </Card>
       </motion.div>
-    </div>
+    </main>
   );
 }
 

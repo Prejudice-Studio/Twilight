@@ -5,11 +5,10 @@ import hashlib
 from typing import Optional
 
 from sqlalchemy import select, update, func, String, Integer, Boolean
-from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from src.config import Config
-from src.db.utils import create_database
 class UsersDatabaseModel(AsyncAttrs, DeclarativeBase):
     pass
 class Role(Enum):
@@ -46,10 +45,9 @@ class UserModel(UsersDatabaseModel):
     OTHER: Mapped[Optional[str]] = mapped_column(String, default='', nullable=True)
 
 
-create_database("users", UsersDatabaseModel)
-DATABASE_URL = f'sqlite+aiosqlite:///{Config.DATABASES_DIR / "users.db"}'
-ENGINE = create_async_engine(DATABASE_URL, echo=Config.SQLALCHEMY_LOG)
-UsersSessionFactory = async_sessionmaker(bind=ENGINE, expire_on_commit=False)
+from src.db.utils import init_async_db
+
+ENGINE, UsersSessionFactory = init_async_db("users", UsersDatabaseModel)
 
 
 class UserOperate:
@@ -183,12 +181,13 @@ class UserOperate:
     @staticmethod
     async def reset_apikey(usr: UserModel) -> str:
         """
-        重置用户API Key
+        重置用户API Key (加密安全)
         格式为 key-xxxxxxxxxxxxxxxx-yyyyyyyy
-        其中 xxxxxxxxxxxxxxxx 为16位随机字符串，yyyyyyyy 为8位校验码
+        其中 xxxxxxxxxxxxxxxx 为16位随机字符串，yyyyyyyy 为8位数字校验码
         """
-        random_part = hashlib.sha256(f'{usr.UID}_{int(time.time())}'.encode()).hexdigest()[:16]
-        check_part = ''.join(random.choices('0123456789', k=8))
+        import secrets
+        random_part = secrets.token_hex(8)  # 16 字符
+        check_part = ''.join(secrets.choice('0123456789') for _ in range(8))
         new_apikey = f'key-{random_part}-{check_part}'
 
         async with UsersSessionFactory() as session:

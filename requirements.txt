@@ -11,3 +11,4 @@ aiosqlite~=0.20.0
 Flask[async]~=3.1.0
 numpy~=2.2.1
 APScheduler~=3.11.0
+Flask-CORS~=5.0.0

@@ -235,9 +235,28 @@ export default function AdminRequestsPage() {
                         )}
                       </div>
                       <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                        <Badge variant="secondary" className="text-xs">
-                          {request.source.toUpperCase()}
-                        </Badge>
+                        <div className="flex items-center gap-1">
+                          {request.source.toLowerCase() === "tmdb" ? (
+                            <img 
+                              src="https://www.themoviedb.org/assets/2/v4/logos/v2/blue_short-8e7b30f73a4020692ccca9c88bafe5dcb6f8a62a4c6bc55cd9ba82bb2cd95f6c.svg" 
+                              alt="TMDB" 
+                              className="h-3 w-auto"
+                            />
+                          ) : request.source.toLowerCase() === "bangumi" ? (
+                            <div className="flex items-center gap-1 bg-[#f09199]/10 px-1.5 py-0.5 rounded text-[10px] font-bold text-[#f09199] border border-[#f09199]/20">
+                              <img 
+                                src="https://bangumi.tv/img/favicon.ico" 
+                                alt="Bangumi" 
+                                className="h-3 w-3"
+                              />
+                              Bangumi
+                            </div>
+                          ) : (
+                            <Badge variant="secondary" className="text-[10px] h-4">
+                              {request.source.toUpperCase()}
+                            </Badge>
+                          )}
+                        </div>
                         <span>•</span>
                         <span className="flex items-center gap-0.5"><Hash className="h-3 w-3" />{request.id}</span>
                         <span>•</span>

@@ -40,9 +40,18 @@ export const useAuthStore = create<AuthState>()(
       fetchUser: async () => {
         try {
           set({ isLoading: true });
-          const res = await api.getMe();
-          if (res.success && res.data) {
-            set({ user: res.data, isAuthenticated: true, isLoading: false });
+          const [userRes, scoreRes] = await Promise.all([
+            api.getMe(),
+            api.getScoreInfo().catch(() => ({ success: false, data: null }))
+          ]);
+          
+          if (userRes.success && userRes.data) {
+            const userData = userRes.data;
+            // 如果获取到了积分信息，则合并到用户数据中
+            if (scoreRes.success && scoreRes.data) {
+              userData.score = scoreRes.data.balance;
+            }
+            set({ user: userData, isAuthenticated: true, isLoading: false });
           } else {
             set({ user: null, isAuthenticated: false, isLoading: false });
           }

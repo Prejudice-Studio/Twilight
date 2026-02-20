@@ -164,16 +164,13 @@ def _cleanup_expired_tokens():
 
 
 def generate_token(uid: int) -> str:
-    """生成认证 token"""
+    """生成认证 token (加密安全)"""
     # 定期清理过期 token
     _cleanup_expired_tokens()
     
-    # 使用 uid + 时间戳 + 随机字符串生成 token
-    import random
-    import string
-    random_str = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
-    token_data = f"{uid}_{timestamp()}_{random_str}"
-    token = hashlib.sha256(token_data.encode()).hexdigest()
+    # 生成 256 位 (32 字节) 的加密安全随机 token (十六进制表示为 64 字符)
+    import secrets
+    token = secrets.token_hex(32)
     
     # 存储 token 信息
     _token_store[token] = {

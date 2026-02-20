@@ -49,6 +49,8 @@ def get_database_path(database_name: str) -> Path:
     return Config.DATABASES_DIR / f"{database_name}.db"
 
 
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
 def get_async_database_url(database_name: str) -> str:
     """
     获取异步数据库连接URL
@@ -57,4 +59,15 @@ def get_async_database_url(database_name: str) -> str:
     :return: 异步数据库连接URL
     """
     return f'sqlite+aiosqlite:///{get_database_path(database_name)}'
+
+
+def init_async_db(database_name: str, model: Type[DeclarativeBase]):
+    """
+    初始化异步数据库
+    """
+    create_database(database_name, model)
+    url = get_async_database_url(database_name)
+    engine = create_async_engine(url, echo=Config.SQLALCHEMY_LOG)
+    session_factory = async_sessionmaker(bind=engine, expire_on_commit=False)
+    return engine, session_factory
 

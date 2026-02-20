@@ -17,6 +17,7 @@ import {
   Loader2,
   Edit,
   AlertTriangle,
+  Sparkles,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,11 +32,12 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuthStore } from "@/store/auth";
 import { api, type ScoreInfo, type PlaybackStats, type TopMediaItem } from "@/lib/api";
-import { formatRelativeTime, formatNumber } from "@/lib/utils";
+import { formatRelativeTime, formatNumber, cn } from "@/lib/utils";
 
 const container = {
   hidden: { opacity: 0 },
@@ -294,8 +296,9 @@ export default function DashboardPage() {
     }
   }
   
-  const isExpired = expiredTimestamp !== null && expiredTimestamp !== -1 && expiredTimestamp < Date.now();
-  const isPermanent = !expiredTimestamp || expiredTimestamp === -1;
+  const isAdmin = user?.role === 0;
+  const isExpired = !isAdmin && expiredTimestamp !== null && expiredTimestamp !== -1 && expiredTimestamp < Date.now();
+  const isPermanent = isAdmin || !expiredTimestamp || expiredTimestamp === -1;
   
   const daysLeft = (!isPending && !isPermanent && expiredTimestamp)
     ? Math.max(0, Math.ceil((expiredTimestamp - Date.now()) / (1000 * 60 * 60 * 24)))
@@ -304,7 +307,7 @@ export default function DashboardPage() {
   // 获取问候语
   const getGreeting = () => {
     const hour = new Date().getHours();
-    if (hour < 6) return "夜深了";
+    if (hour < 6) return "凌晨好";
     if (hour < 9) return "早上好";
     if (hour < 12) return "上午好";
     if (hour < 14) return "中午好";
@@ -318,444 +321,347 @@ export default function DashboardPage() {
       variants={container}
       initial="hidden"
       animate="show"
-      className="space-y-6"
+      className="space-y-8 pb-10"
     >
-      {/* Welcome Banner */}
-      <motion.div variants={item}>
-        <Card className={`overflow-hidden border-0 relative glass ${isPending ? 'bg-gradient-to-r from-amber-600/90 to-orange-500/90' : 'bg-gradient-to-r from-twilight-600/90 to-sunset-500/90'}`}>
-          <div className="absolute inset-0 bg-grid-white/10 [mask-image:linear-gradient(0deg,white,rgba(255,255,255,0.5))]" />
-          <CardContent className="flex items-center justify-between p-6">
-            <div>
-              <h2 className="text-2xl font-bold text-white">
-                {getGreeting()}，{user?.username}！
-              </h2>
-              <p className="mt-1 text-white/80">
-                {isPending 
-                  ? "您的账户待激活，签到赚积分后可激活 Emby 账户" 
-                  : "今天也是美好的一天，来看点什么吧"}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div>
+          <h1 className="text-4xl font-black tracking-tighter text-foreground">
+            {getGreeting()}，{user?.username}
+          </h1>
+          <p className="text-muted-foreground font-medium mt-1">
+            {isPending ? "激活账号，开启您的星光之旅" : "发现新鲜事，品味好作品"}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+           <Badge className="bg-primary/10 text-primary border-primary/20 px-4 py-1.5 rounded-full font-black text-xs uppercase tracking-widest">
+             {user?.role_name}
+           </Badge>
+        </div>
+      </div>
+
+      {/* Stats Overview */}
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+        <motion.div variants={item}>
+          <div className="premium-card p-6 h-full flex flex-col justify-between group">
+            <div className="flex items-center justify-between">
+              <div className="p-3 bg-blue-500/10 text-blue-500 rounded-2xl group-hover:bg-blue-500 group-hover:text-white transition-all duration-500 shadow-sm">
+                <Coins className="h-5 w-5" />
+              </div>
+              {user?.role === 0 && (
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={() => {
+                  setEditScoreValue(scoreInfo?.balance || 0);
+                  setShowEditScore(true);
+                }}>
+                  <Edit className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
+            <div className="mt-6">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">{scoreInfo?.score_name || "积分"}余额</p>
+              <h3 className="text-3xl font-black mt-1">
+                {isLoading ? <Skeleton className="h-8 w-24" /> : formatNumber(scoreInfo?.balance || 0)}
+              </h3>
+            </div>
+          </div>
+        </motion.div>
+
+        <motion.div variants={item}>
+          <div className="premium-card p-6 h-full flex flex-col justify-between group">
+            <div className="p-3 w-fit bg-amber-500/10 text-amber-500 rounded-2xl group-hover:bg-amber-500 group-hover:text-white transition-all duration-500 shadow-sm">
+              <Calendar className="h-5 w-5" />
+            </div>
+            <div className="mt-6">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">到期倒计时</p>
+              <h3 className="text-3xl font-black mt-1">
+                {isPermanent ? "∞ 永恒" : `${daysLeft} 天`}
+              </h3>
+            </div>
+          </div>
+        </motion.div>
+
+        <motion.div variants={item}>
+          <div className="premium-card p-6 h-full flex flex-col justify-between group">
+            <div className="p-3 w-fit bg-emerald-500/10 text-emerald-500 rounded-2xl group-hover:bg-emerald-500 group-hover:text-white transition-all duration-500 shadow-sm">
+              <Flame className="h-5 w-5" />
+            </div>
+            <div className="mt-6">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">连续签到</p>
+              <h3 className="text-3xl font-black mt-1">
+                {isLoading ? <Skeleton className="h-8 w-24" /> : `${scoreInfo?.checkin_streak || 0} DAY`}
+              </h3>
+            </div>
+          </div>
+        </motion.div>
+
+        <motion.div variants={item}>
+          <div className="premium-card p-6 h-full flex flex-col justify-between group">
+            <div className="p-3 w-fit bg-purple-500/10 text-purple-500 rounded-2xl group-hover:bg-purple-500 group-hover:text-white transition-all duration-500 shadow-sm">
+              <Clock className="h-5 w-5" />
+            </div>
+            <div className="mt-6">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">累计观影</p>
+              <h3 className="text-3xl font-black mt-1">
+                {isLoading ? <Skeleton className="h-8 w-24" /> : `${Math.floor((stats?.total_time || 0) / 60)} HR`}
+              </h3>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* Main Interaction Area */}
+        <motion.div variants={item} className="lg:col-span-2 space-y-6">
+          {/* Checkin / Welcome Card */}
+          <div className="premium-card p-1 shadow-2xl">
+            <div className="glass-liquid p-8 rounded-[1.75rem] flex flex-col md:flex-row items-center gap-8 border-0 overflow-hidden relative">
+               <div className="absolute -top-12 -right-12 w-48 h-48 bg-primary/10 blur-[80px] rounded-full" />
+               <div className="relative group shrink-0">
+                  <div className="absolute -inset-4 bg-primary/20 rounded-full blur-2xl group-hover:bg-primary/30 transition-all duration-500" />
+                  <div className="relative bg-white/60 p-6 rounded-3xl border border-white shadow-xl">
+                    <Gift className="h-12 w-12 text-primary animate-bounce-slow" />
+                  </div>
+               </div>
+               <div className="flex-1 text-center md:text-left z-10">
+                  <h2 className="text-2xl font-black tracking-tight">每日福利时刻</h2>
+                  <p className="text-muted-foreground font-medium mt-1">
+                    {scoreInfo?.today_checkin 
+                      ? "任务已达成！明天再来领奖励吧" 
+                      : `快来领取今日奖励，已连签 ${scoreInfo?.checkin_streak || 0} 天`}
+                  </p>
+                  <div className="mt-8 flex flex-col sm:flex-row items-center gap-4">
+                    {scoreInfo?.today_checkin ? (
+                      <div className="inline-flex items-center gap-2 px-6 h-12 bg-emerald-500/10 text-emerald-600 rounded-2xl border border-emerald-200 font-black text-xs uppercase tracking-widest">
+                        <CheckCircle2 className="h-4 w-4" />
+                        MISSION COMPLETED
+                      </div>
+                    ) : (
+                      <Button 
+                        size="lg" 
+                        onClick={handleCheckin} 
+                        disabled={isCheckinLoading}
+                        className="rounded-2xl px-10 h-14 font-black text-base shadow-2xl shadow-primary/30 hover:scale-105 active:scale-95 transition-all"
+                      >
+                        {isCheckinLoading ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : <Sparkles className="h-5 w-5 mr-2" />}
+                        立即签到
+                      </Button>
+                    )}
+                    
+                    <div className="flex-1 max-w-[200px]">
+                       <div className="flex justify-between text-[10px] font-black uppercase mb-1.5 opacity-60">
+                         <span>连签进度</span>
+                         <span>{scoreInfo?.checkin_streak || 0}/7</span>
+                       </div>
+                       <Progress value={((scoreInfo?.checkin_streak || 0) % 7) / 7 * 100} className="h-1.5 bg-white/40" />
+                    </div>
+                  </div>
+               </div>
+            </div>
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-2">
+            {/* Activation / Renewal */}
+            <div className="premium-card p-6 flex flex-col border-white/40">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="p-2 bg-primary/10 rounded-xl text-primary">
+                  <Key className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black tracking-tight">账户激活与续期</h3>
+                  <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-tighter">Activate & Renew</p>
+                </div>
+              </div>
+              <div className="flex flex-col gap-3">
+                <Input
+                  placeholder="输入授权码以增加效期..."
+                  value={regCode}
+                  onChange={(e) => setRegCode(e.target.value)}
+                  className="h-12 rounded-xl border-white/60 bg-white/40 shadow-inner focus:bg-white transition-all font-medium"
+                />
+                <Button 
+                  onClick={handleCheckRegcode} 
+                  disabled={isRenewing}
+                  className="h-12 rounded-xl font-black bg-secondary text-foreground hover:bg-secondary/70 shadow-lg border-white transition-all"
+                >
+                  {isRenewing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : "验证并使用"}
+                </Button>
+              </div>
+              <p className="mt-4 text-[11px] text-center text-muted-foreground font-bold">
+                没有授权码？请联系管理员或在群组获取
               </p>
             </div>
-            <div className="hidden sm:block">
-              <Gift className="h-20 w-20 text-white/20" />
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
 
-      {/* Stats Grid */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {/* Score Card */}
-        <motion.div variants={item}>
-          <Card className="relative overflow-hidden">
-            <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 translate-y-[-50%] rounded-full bg-gradient-to-br from-twilight-500/20 to-transparent" />
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <div className="flex items-center gap-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {scoreInfo?.score_name || "积分"}余额
-              </CardTitle>
-                {user?.role === 0 && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 w-6 p-0"
-                    onClick={() => {
-                      setEditScoreValue(user?.score || 0);
-                      setShowEditScore(true);
-                    }}
-                  >
-                    <Edit className="h-3 w-3" />
-                  </Button>
+            {/* Favorite Genres / Quick Stats */}
+            <div className="premium-card p-6 border-white/40">
+               <div className="flex items-center gap-3 mb-6">
+                <div className="p-2 bg-orange-500/10 rounded-xl text-orange-500">
+                  <TrendingUp className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black tracking-tight">观影口味分布</h3>
+                  <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-tighter">Favorite Genres</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {stats?.favorite_genres && stats.favorite_genres.length > 0 ? (
+                  stats.favorite_genres.slice(0, 8).map((genre) => (
+                    <Badge key={genre} variant="secondary" className="bg-white/60 border border-white/40 text-muted-foreground font-bold rounded-lg px-2.5 py-1">
+                      {genre}
+                    </Badge>
+                  ))
+                ) : (
+                  <p className="text-xs text-muted-foreground italic py-4">正在分析您的观影爱好...</p>
                 )}
               </div>
-              <Coins className="h-4 w-4 text-twilight-500" />
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <Skeleton className="h-8 w-24" />
-              ) : (
-                <div className="text-3xl font-bold">
-                  {formatNumber(scoreInfo?.balance || 0)}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        {/* Expiry Card */}
-        <motion.div variants={item}>
-          <Card className="relative overflow-hidden">
-            <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 translate-y-[-50%] rounded-full bg-gradient-to-br from-sunset-500/20 to-transparent" />
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {isPending ? "账户状态" : "账号到期"}
-              </CardTitle>
-              <Calendar className="h-4 w-4 text-sunset-500" />
-            </CardHeader>
-            <CardContent>
-              {isPending ? (
-                <>
-                  <div className="text-xl font-bold text-amber-500">待激活</div>
-                  <p className="text-xs text-muted-foreground">
-                    签到赚积分后可激活
-                  </p>
-                </>
-              ) : isPermanent ? (
-                <div className="text-xl font-bold text-emerald-500">永久</div>
-              ) : isExpired ? (
-                <>
-                  <div className="text-xl font-bold text-destructive">已过期</div>
-                  <p className="text-xs text-muted-foreground">
-                    请续期以继续使用
-                  </p>
-                </>
-              ) : (
-                <>
-                  <div className="text-3xl font-bold">{daysLeft} 天</div>
-                  <p className="text-xs text-muted-foreground">
-                    {expiredTimestamp ? formatRelativeTime(expiredTimestamp) : '永久'}
-                  </p>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        {/* Checkin Streak */}
-        <motion.div variants={item}>
-          <Card className="relative overflow-hidden">
-            <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 translate-y-[-50%] rounded-full bg-gradient-to-br from-emerald-500/20 to-transparent" />
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                连续签到
-              </CardTitle>
-              <Flame className="h-4 w-4 text-emerald-500" />
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <Skeleton className="h-8 w-16" />
-              ) : (
-                <div className="text-3xl font-bold">
-                  {scoreInfo?.checkin_streak || 0} 天
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        {/* Watch Time */}
-        <motion.div variants={item}>
-          <Card className="relative overflow-hidden">
-            <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 translate-y-[-50%] rounded-full bg-gradient-to-br from-blue-500/20 to-transparent" />
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                观看时长
-              </CardTitle>
-              <Clock className="h-4 w-4 text-blue-500" />
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <Skeleton className="h-8 w-20" />
-              ) : (
-                <div className="text-3xl font-bold">
-                  {Math.floor((stats?.total_time || 0) / 60)} 小时
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </motion.div>
-      </div>
-
-      {/* Main Content */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Checkin Card */}
-        <motion.div variants={item} className="lg:col-span-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Gift className="h-5 w-5 text-primary" />
-                每日签到
-              </CardTitle>
-              <CardDescription>
-                连续签到可获得额外奖励
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between rounded-lg bg-accent/50 p-4">
-                <div className="flex items-center gap-4">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-                    {scoreInfo?.today_checkin ? (
-                      <CheckCircle2 className="h-6 w-6 text-emerald-500" />
-                    ) : (
-                      <Gift className="h-6 w-6 text-primary" />
-                    )}
-                  </div>
-                  <div>
-                    <p className="font-medium">
-                      {scoreInfo?.today_checkin ? "今日已签到" : "今日未签到"}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      累计获得 {formatNumber(scoreInfo?.total_earned || 0)} {scoreInfo?.score_name || '积分'}
-                    </p>
-                  </div>
-                </div>
-                <Button
-                  variant={scoreInfo?.today_checkin ? "outline" : "gradient"}
-                  disabled={scoreInfo?.today_checkin || isCheckinLoading}
-                  onClick={handleCheckin}
-                >
-                  {isCheckinLoading ? "签到中..." : scoreInfo?.today_checkin ? "已签到" : "立即签到"}
-                </Button>
-              </div>
-
-              {/* Streak Progress */}
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">连签进度</span>
-                  <span className="font-medium">{scoreInfo?.checkin_streak || 0} / 7 天</span>
-                </div>
-                <Progress value={((scoreInfo?.checkin_streak || 0) % 7) / 7 * 100} className="h-2" />
-                <p className="text-xs text-muted-foreground">
-                  连续签到 7 天可获得额外奖励！
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        {/* Quick Stats */}
-        <motion.div variants={item}>
-          <Card className="h-full">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-primary" />
-                观看统计
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Play className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm">总播放次数</span>
-                </div>
-                <span className="font-bold">{stats?.total_plays || 0}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Clock className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm">总观看时长</span>
-                </div>
-                <span className="font-bold">{Math.floor((stats?.total_time || 0) / 60)} 小时</span>
-              </div>
-
-              {stats?.favorite_genres && stats.favorite_genres.length > 0 && (
-                <div className="pt-4">
-                  <p className="mb-2 text-sm text-muted-foreground">喜欢的类型</p>
-                  <div className="flex flex-wrap gap-2">
-                    {stats.favorite_genres.slice(0, 5).map((genre) => (
-                      <Badge key={genre} variant="secondary">
-                        {genre}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </motion.div>
-      </div>
-
-      {/* Bottom Grid */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Recent Activity */}
-        {stats?.recent_items && stats.recent_items.length > 0 && (
-          <motion.div variants={item}>
-            <Card className="glass-card">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Clock className="h-5 w-5 text-primary" />
-                  最近观看
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {stats.recent_items.slice(0, 5).map((item, index) => (
-                    <div
-                      key={index}
-                      className="flex items-center justify-between rounded-lg bg-accent/30 p-3 hover:bg-accent/50 transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10">
-                          <Play className="h-4 w-4 text-primary" />
-                        </div>
-                        <div>
-                          <p className="font-medium line-clamp-1">{item.name}</p>
-                          <p className="text-xs text-muted-foreground">{item.type}</p>
-                        </div>
-                      </div>
-                      <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">
-                        {formatRelativeTime(new Date(item.played_at).getTime())}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
-
-        {/* Global Trending */}
-        {topMedia && topMedia.length > 0 && (
-          <motion.div variants={item}>
-            <Card className="glass-card">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5 text-orange-500" />
-                  本周热门
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {topMedia.map((item, index) => (
-                    <div
-                      key={index}
-                      className="flex items-center justify-between rounded-lg bg-accent/30 p-3"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className={`flex h-8 w-8 items-center justify-center rounded-full font-bold text-xs ${
-                          index === 0 ? "bg-yellow-500 text-white" : "bg-primary/10 text-primary"
-                        }`}>
-                          {index + 1}
-                        </div>
-                        <div>
-                          <p className="font-medium line-clamp-1">{item.item_name}</p>
-                          <p className="text-xs text-muted-foreground">{item.item_type}</p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-sm font-bold text-primary">{item.play_count}</span>
-                        <p className="text-[10px] text-muted-foreground">播放次数</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
-      </div>
-
-      {/* Regcode Renew */}
-      <motion.div variants={item}>
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Key className="h-5 w-5 text-primary" />
-              使用注册码续期
-            </CardTitle>
-            <CardDescription>
-              输入续期码来延长账号有效期
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="regcode">注册码</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="regcode"
-                  placeholder="请输入续期码"
-                  value={regCode}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRegCode(e.target.value)}
-                  onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                    if (e.key === "Enter" && regCode.trim()) {
-                      handleCheckRegcode();
-                    }
-                  }}
-                />
-                <Button
-                  variant="gradient"
-                  onClick={handleCheckRegcode}
-                  disabled={!regCode.trim() || isRenewing}
-                >
-                  {isRenewing ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      处理中...
-                    </>
-                  ) : (
-                    "检查并使用"
-                  )}
-                </Button>
-              </div>
             </div>
-          </CardContent>
-        </Card>
-      </motion.div>
+          </div>
+        </motion.div>
 
-      {/* Confirm Dialog */}
-      {showConfirm && regCodeInfo && (
-        <Dialog open={showConfirm} onOpenChange={setShowConfirm}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <AlertTriangle className="h-5 w-5 text-amber-500" />
-                确认使用注册码
-              </DialogTitle>
-              <DialogDescription>
-                <div className="space-y-2 mt-2">
-                  <p>注册码类型：<strong>{regCodeInfo.type_name}</strong></p>
-                  <p>有效天数：<strong>{regCodeInfo.days} 天</strong></p>
-                  <p className="text-sm text-muted-foreground mt-4">
-                    确定要使用此注册码吗？使用后将无法撤销。
-                  </p>
+        {/* Sidebar Widgets */}
+        <motion.div variants={item} className="space-y-6">
+           {/* Top Ranking */}
+           <div className="premium-card p-6">
+              <h3 className="text-lg font-black tracking-tight mb-6 flex items-center gap-2">
+                <TrendingUp className="h-5 w-5 text-primary" />
+                全站实时热门
+              </h3>
+              <div className="space-y-5">
+                {topMedia && topMedia.length > 0 ? (
+                  topMedia.map((item, index) => (
+                    <div key={index} className="flex items-center justify-between group">
+                      <div className="flex items-center gap-3">
+                        <span className={cn(
+                          "flex h-7 w-7 items-center justify-center rounded-xl text-xs font-black transition-all",
+                          index === 0 ? "bg-amber-400 text-amber-900 shadow-lg shadow-amber-400/20" : "bg-secondary text-muted-foreground"
+                        )}>
+                          {index + 1}
+                        </span>
+                        <div className="max-w-[140px]">
+                           <p className="text-sm font-bold truncate group-hover:text-primary transition-colors">{item.item_name}</p>
+                           <p className="text-[10px] text-muted-foreground/60 uppercase tracking-tighter">{item.item_type}</p>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                         <span className="text-[11px] font-black text-primary">{item.play_count}</span>
+                         <span className="text-[9px] text-muted-foreground/40 ml-1 font-black">PLAYS</span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="py-10 text-center">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground mx-auto opacity-20" />
+                  </div>
+                )}
+              </div>
+           </div>
+
+           {/* Recent Activity */}
+           <div className="premium-card p-6">
+              <h3 className="text-lg font-black tracking-tight mb-6 flex items-center gap-2">
+                <Play className="h-5 w-5 text-primary" />
+                最近观看历史
+              </h3>
+              <div className="space-y-5">
+                {stats?.recent_items && stats.recent_items.length > 0 ? (
+                  stats.recent_items.slice(0, 4).map((item, idx) => (
+                    <div key={idx} className="flex items-center gap-3 group">
+                       <div className="h-10 w-10 shrink-0 flex items-center justify-center rounded-2xl bg-primary/5 text-primary group-hover:bg-primary group-hover:text-white transition-all shadow-inner">
+                         <Tv className="h-4 w-4" />
+                       </div>
+                       <div className="min-w-0">
+                         <p className="text-sm font-black truncate group-hover:text-primary transition-colors">{item.name}</p>
+                         <p className="text-[9px] font-black text-muted-foreground uppercase opacity-60">
+                           {formatRelativeTime(new Date(item.played_at).getTime())}
+                         </p>
+                       </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-xs text-muted-foreground italic text-center py-4">暂入播放记录</p>
+                )}
+              </div>
+           </div>
+        </motion.div>
+      </div>
+
+      {/* Dialogs */}
+      <Dialog open={showConfirm} onOpenChange={setShowConfirm}>
+        <DialogContent className="max-w-md glass-acrylic border-0 rounded-[2.5rem] p-0 overflow-hidden shadow-2xl">
+          <div className="p-8">
+            <div className="flex items-center gap-4 mb-6">
+               <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
+                  <CheckCircle2 className="h-6 w-6" />
+               </div>
+               <div>
+                  <DialogTitle className="text-xl font-black">确认使用授权码</DialogTitle>
+                  <p className="text-sm text-muted-foreground font-medium">请确认以下授权信息</p>
+               </div>
+            </div>
+            
+            {regCodeInfo && (
+              <div className="p-4 rounded-2xl bg-secondary/50 border border-white mb-8 space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs font-bold text-muted-foreground">授权类型</span>
+                  <Badge className="bg-primary/20 text-primary border-0 rounded-lg">{regCodeInfo.type_name}</Badge>
                 </div>
-              </DialogDescription>
-            </DialogHeader>
-            <div className="flex justify-end gap-2 mt-4">
-              <Button variant="outline" onClick={() => setShowConfirm(false)}>
+                <div className="flex justify-between items-center">
+                  <span className="text-xs font-bold text-muted-foreground">增加时长</span>
+                  <span className="text-sm font-black">{regCodeInfo.days} 天</span>
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <Button variant="outline" className="flex-1 h-12 rounded-2xl font-black border-white bg-white/40" onClick={() => setShowConfirm(false)}>
                 取消
               </Button>
-              <Button variant="gradient" onClick={handleConfirmUseRegcode}>
-                确认使用
+              <Button className="flex-[2] h-12 rounded-2xl font-black shadow-xl shadow-primary/20" onClick={handleConfirmUseRegcode}>
+                立即激活
               </Button>
             </div>
-          </DialogContent>
-        </Dialog>
-      )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
-      {/* Edit Score Dialog (Admin only) */}
-      {user?.role === 0 && (
-        <Dialog open={showEditScore} onOpenChange={setShowEditScore}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>修改积分</DialogTitle>
-              <DialogDescription>
-                管理员可以直接修改自己的积分
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
+      <Dialog open={showEditScore} onOpenChange={setShowEditScore}>
+        <DialogContent className="max-w-md glass-acrylic border-0 rounded-[2.5rem] p-0 overflow-hidden shadow-2xl">
+          <div className="p-8">
+            <div className="flex items-center gap-4 mb-6">
+               <div className="h-12 w-12 rounded-2xl bg-amber-500/10 flex items-center justify-center text-amber-500">
+                  <AlertTriangle className="h-6 w-6" />
+               </div>
+               <div>
+                  <DialogTitle className="text-xl font-black">修改管理员积分</DialogTitle>
+                  <p className="text-sm text-muted-foreground font-medium">此操作仅限管理员调试</p>
+               </div>
+            </div>
+            
+            <div className="space-y-4 mb-8">
               <div className="space-y-2">
-                <Label>积分值</Label>
+                <Label className="text-xs font-black uppercase tracking-widest ml-1">New Balance</Label>
                 <Input
                   type="number"
                   value={editScoreValue}
-                  onChange={(e) => setEditScoreValue(parseInt(e.target.value) || 0)}
-                  placeholder="输入新的积分值"
+                  onChange={(e) => setEditScoreValue(Number(e.target.value))}
+                  className="h-12 rounded-2xl border-white bg-white/40 shadow-inner"
                 />
               </div>
             </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setShowEditScore(false)}>
+
+            <div className="flex gap-3">
+              <Button variant="outline" className="flex-1 h-12 rounded-2xl font-black border-white bg-white/40" onClick={() => setShowEditScore(false)}>
                 取消
               </Button>
-              <Button onClick={handleEditScore} disabled={isEditingScore}>
-                {isEditingScore && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                确认修改
+              <Button 
+                className="flex-[2] h-12 rounded-2xl font-black shadow-xl shadow-amber-500/20 bg-amber-500 text-white hover:bg-amber-600"
+                onClick={handleEditScore}
+                disabled={isEditingScore}
+              >
+                {isEditingScore ? <Loader2 className="h-5 w-5 animate-spin" /> : "更新积分"}
               </Button>
             </div>
-          </DialogContent>
-        </Dialog>
-      )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </motion.div>
   );
 }
-
