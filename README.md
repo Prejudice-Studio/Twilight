@@ -471,7 +471,6 @@ playback_stats_enabled = true
 - [🌐 后端 API 文档](docs/BACKEND_API.md) - REST API 接口说明
 - [🔑 API Key 文档](docs/API_KEY_API.md) - API Key 的使用说明
 - [🔌 前端开发指南](docs/FRONTEND_API.md) - 前端开发文档
-- [📝 更新日志](CHANGELOG.md) - 版本历史和重要变更
 
 ### 快速命令
 
