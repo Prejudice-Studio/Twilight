@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   User,
@@ -18,6 +18,7 @@ import {
   Tv,
   Key,
   AlertTriangle,
+  Palette,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useAsyncResource } from "@/hooks/use-async-resource";
+import { PageError, PageLoading } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
 import { api, type UserSettings, type TelegramStatus, type NsfwStatus } from "@/lib/api";
 import {
@@ -58,7 +61,6 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [telegramStatus, setTelegramStatus] = useState<TelegramStatus | null>(null);
   const [nsfwStatus, setNsfwStatus] = useState<NsfwStatus | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
 
   // Telegram dialogs
   const [bindTgOpen, setBindTgOpen] = useState(false);
@@ -78,32 +80,29 @@ export default function SettingsPage() {
   const [emailValue, setEmailValue] = useState("");
   const [isEmailLoading, setIsEmailLoading] = useState(false);
 
-  useEffect(() => {
-    loadData();
+  const loadSettingsResource = useCallback(async () => {
+    const [settingsRes, tgRes, nsfwRes] = await Promise.all([
+      api.getMySettings(),
+      api.getTelegramStatus(),
+      api.getNsfwStatus(),
+    ]);
+    if (settingsRes.success && settingsRes.data) {
+      setSettings(settingsRes.data);
+    }
+    if (tgRes.success && tgRes.data) {
+      setTelegramStatus(tgRes.data);
+    }
+    if (nsfwRes.success && nsfwRes.data) {
+      setNsfwStatus(nsfwRes.data);
+    }
+    return true;
   }, []);
 
-  const loadData = async () => {
-    try {
-      const [settingsRes, tgRes, nsfwRes] = await Promise.all([
-        api.getMySettings(),
-        api.getTelegramStatus(),
-        api.getNsfwStatus(),
-      ]);
-      if (settingsRes.success && settingsRes.data) {
-        setSettings(settingsRes.data);
-      }
-      if (tgRes.success && tgRes.data) {
-        setTelegramStatus(tgRes.data);
-      }
-      if (nsfwRes.success && nsfwRes.data) {
-        setNsfwStatus(nsfwRes.data);
-      }
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const {
+    isLoading,
+    error,
+    execute: loadData,
+  } = useAsyncResource(loadSettingsResource, { immediate: true });
 
   const handleToggleAutoRenew = async (enabled: boolean) => {
     try {
@@ -285,12 +284,12 @@ export default function SettingsPage() {
     }
   };
 
+  if (error) {
+    return <PageError message={error} onRetry={() => void loadData()} />;
+  }
+
   if (isLoading) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
+    return <PageLoading message="正在加载设置..." />;
   }
 
   return (
@@ -304,6 +303,25 @@ export default function SettingsPage() {
         <h1 className="text-3xl font-bold">个人设置</h1>
         <p className="text-muted-foreground">管理您的账户设置和偏好</p>
       </div>
+
+      {/* 快速导航 */}
+      <motion.div variants={item}>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <a href="/settings/appearance" className="group">
+            <Card className="glass-card cursor-pointer hover:shadow-lg transition-all h-full">
+              <CardContent className="p-6 flex flex-col items-center justify-center text-center gap-3 h-full">
+                <div className="p-3 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                  <Palette className="h-6 w-6 text-primary" />
+                </div>
+                <div>
+                  <h3 className="font-semibold">外观设置</h3>
+                  <p className="text-sm text-muted-foreground">背景和头像</p>
+                </div>
+              </CardContent>
+            </Card>
+          </a>
+        </div>
+      </motion.div>
 
       {/* Account Info */}
       <motion.div variants={item}>

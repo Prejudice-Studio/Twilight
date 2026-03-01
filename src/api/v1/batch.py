@@ -5,7 +5,7 @@
 """
 from flask import Blueprint, request, g
 
-from src.api.v1.auth import async_route, require_auth, require_admin, api_response
+from src.api.v1.auth import require_auth, require_admin, api_response
 from src.services.admin_service import BatchOperationService, DataExportService, WatchHistoryService, ReminderService
 
 batch_bp = Blueprint('batch', __name__, url_prefix='/batch')
@@ -14,7 +14,6 @@ batch_bp = Blueprint('batch', __name__, url_prefix='/batch')
 # ==================== 批量用户操作 ====================
 
 @batch_bp.route('/users/disable', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def batch_disable_users():
@@ -42,7 +41,6 @@ async def batch_disable_users():
 
 
 @batch_bp.route('/users/enable', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def batch_enable_users():
@@ -58,7 +56,6 @@ async def batch_enable_users():
 
 
 @batch_bp.route('/users/renew', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def batch_renew_users():
@@ -86,7 +83,6 @@ async def batch_renew_users():
 
 
 @batch_bp.route('/users/delete', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def batch_delete_users():
@@ -111,7 +107,6 @@ async def batch_delete_users():
 
 
 @batch_bp.route('/users/score', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def batch_adjust_score():
@@ -143,7 +138,6 @@ async def batch_adjust_score():
 # ==================== 数据导出 ====================
 
 @batch_bp.route('/export/users', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def export_users():
@@ -180,7 +174,6 @@ async def export_users():
 
 
 @batch_bp.route('/export/playback', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def export_playback():
@@ -205,7 +198,6 @@ async def export_playback():
 # ==================== 观看统计 ====================
 
 @batch_bp.route('/watch-stats', methods=['GET'])
-@async_route
 @require_auth
 async def get_my_watch_stats():
     """获取我的观看统计"""
@@ -214,7 +206,6 @@ async def get_my_watch_stats():
 
 
 @batch_bp.route('/watch-stats/<int:uid>', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def get_user_watch_stats(uid: int):
@@ -224,7 +215,6 @@ async def get_user_watch_stats(uid: int):
 
 
 @batch_bp.route('/watch-stats/global', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def get_global_watch_stats():
@@ -237,7 +227,6 @@ async def get_global_watch_stats():
 # ==================== 到期提醒 ====================
 
 @batch_bp.route('/expiring-users', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def get_expiring_users():
@@ -252,7 +241,6 @@ async def get_expiring_users():
 
 
 @batch_bp.route('/send-reminders', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def send_expiry_reminders():

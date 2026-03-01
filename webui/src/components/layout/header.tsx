@@ -3,6 +3,7 @@
 import { useAuthStore } from "@/store/auth";
 import { Badge } from "@/components/ui/badge";
 import { formatRelativeTime } from "@/lib/utils";
+import { Sparkles } from "lucide-react";
 
 export function Header() {
   const { user } = useAuthStore();
@@ -52,27 +53,25 @@ export function Header() {
   };
 
   return (
-    <header className="sticky top-0 z-30 h-20 border-b border-border bg-card/40 backdrop-blur-3xl px-8">
-      <div className="flex h-full items-center justify-between">
-        <div className="flex flex-col">
-          <h1 className="text-xl font-bold tracking-tight text-foreground">
-            你好, <span className="text-primary">{user?.username}</span>
-          </h1>
-          <div className="mt-1 flex items-center gap-2">
-            {getStatusBadge()}
+    <header className="sticky top-0 z-30 px-4 pt-4 md:px-6 md:pt-6 xl:px-8">
+      <div className="header-surface">
+        <div className="flex min-w-0 items-center gap-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary/15 text-primary">
+            <Sparkles className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Twilight Control</p>
+            <h1 className="truncate text-base font-semibold md:text-lg">
+              欢迎回来，{user?.username}
+            </h1>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-3 rounded-2xl bg-muted border border-border px-4 py-2">
-            <div className="flex flex-col items-end">
-              <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Balance</span>
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm font-black text-foreground">{user?.score || 0}</span>
-                <span className="text-[10px] font-bold text-primary">PTS</span>
-              </div>
-            </div>
-          </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Badge variant="outline" className="hidden md:inline-flex">
+            {user?.role_name}
+          </Badge>
+          {getStatusBadge()}
         </div>
       </div>
     </header>

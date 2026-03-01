@@ -5,7 +5,7 @@ Emby API
 """
 from flask import Blueprint, request
 
-from src.api.v1.auth import async_route, require_auth, api_response
+from src.api.v1.auth import require_auth, api_response
 from src.services import EmbyService, get_emby_client
 from src.config import EmbyConfig
 
@@ -15,7 +15,6 @@ emby_bp = Blueprint('emby', __name__, url_prefix='/emby')
 # ==================== 服务器信息 ====================
 
 @emby_bp.route('/status', methods=['GET'])
-@async_route
 async def get_server_status():
     """
     获取 Emby 服务器状态
@@ -39,7 +38,6 @@ async def get_server_status():
 
 
 @emby_bp.route('/urls', methods=['GET'])
-@async_route
 async def get_server_urls():
     """
     获取 Emby 服务器地址列表（用于客户端连接）
@@ -69,7 +67,6 @@ async def get_server_urls():
 # ==================== 媒体库 ====================
 
 @emby_bp.route('/libraries', methods=['GET'])
-@async_route
 async def get_libraries():
     """
     获取媒体库列表
@@ -94,7 +91,6 @@ async def get_libraries():
 # ==================== 媒体搜索 ====================
 
 @emby_bp.route('/search', methods=['GET'])
-@async_route
 async def search_media():
     """
     搜索媒体
@@ -130,7 +126,6 @@ async def search_media():
 
 
 @emby_bp.route('/latest', methods=['GET'])
-@async_route
 async def get_latest_media():
     """
     获取最新媒体
@@ -152,7 +147,6 @@ async def get_latest_media():
 # ==================== 会话信息（公开） ====================
 
 @emby_bp.route('/sessions/count', methods=['GET'])
-@async_route
 async def get_sessions_count():
     """获取当前活动会话数量"""
     emby = get_emby_client()

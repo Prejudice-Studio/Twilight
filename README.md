@@ -76,97 +76,146 @@
 
 ### 环境要求
 
-- Python 3.10+
-- Node.js 18+ (用于前端)
-- Emby Server / Jellyfin Server
-- （可选）TMDB API Key
-- （可选）Telegram Bot Token
+- **Python**: 3.10+ （强烈推荐 3.11+）
+- **Node.js**: 18+ （用于前端）
+- **Emby/Jellyfin**: 已部署的服务器
+- **Redis**: 可选（用于生产环境）
+- **操作系统**: Windows 11、Ubuntu 20.04+ 或其他 Linux 发行版
 
-### 安装步骤
+> 👉 **详细安装指南**: 请参考 [安装部署指南](docs/INSTALL.md)，包括 Windows 11 特定步骤。
 
-#### 1. 克隆项目
+### ⚡ 快速安装（Windows 11）
 
-```bash
+```powershell
+# 1. 克隆项目
 git clone https://github.com/Prejudice-Studio/Twilight.git
 cd Twilight
-```
 
-#### 2. 后端设置
-
-```bash
-# 创建虚拟环境
+# 2. 创建并激活虚拟环境
 python -m venv venv
+.\venv\Scripts\Activate.ps1
 
-# 激活虚拟环境
-# Windows
-venv\Scripts\activate
-# Linux/macOS
-source venv/bin/activate
-
-# 安装依赖
+# 3. 安装依赖
 pip install -r requirements.txt
 
-# 复制配置文件
-cp config.production.toml config.toml
+# 4. 配置环境变量
+Copy-Item .env.example .env
+# 使用记事本编辑 .env 文件
+notepad .env
 
-# 编辑配置文件
-# 修改 config.toml 中的 Emby 地址和 Token
+# 5. 启动 API 服务
+python main.py api
+
+# 6. 在浏览器中访问
+# API Docs: http://localhost:5000/api/v1/docs
 ```
 
-#### 3. 前端设置
+### ⚡ 快速安装（Linux/macOS）
+
+```bash
+# 1. 克隆项目
+git clone https://github.com/Prejudice-Studio/Twilight.git
+cd Twilight
+
+# 2. 创建并激活虚拟环境
+python3.11 -m venv venv
+source venv/bin/activate
+
+# 3. 安装依赖
+pip install -r requirements.txt
+
+# 4. 配置环境变量
+cp .env.example .env
+nano .env  # 编辑配置
+
+# 5. 启动 API 服务
+python main.py api
+
+# 6. 访问 API
+# API Docs: http://localhost:5000/api/v1/docs
+```
+
+### 配置说明
+
+Twilight 支持三种配置方式（按优先级）：
+
+1. **环境变量** - `.env` 文件或系统环境变量
+2. **TOML 配置** - `config.toml` 文件
+3. **默认值** - 代码中的默认配置
+
+**环境变量示例**：
+
+```bash
+# 必需配置
+TWILIGHT_EMBY_TOKEN=your_emby_api_token
+TWILIGHT_EMBY_URL=http://127.0.0.1:8096/
+
+# Redis（可选，生产推荐）
+TWILIGHT_REDIS_URL=redis://localhost:6379/0
+
+# API 配置
+TWILIGHT_API_PORT=5000
+TWILIGHT_API_CORS_ENABLED=true
+
+# Telegram Bot（可选）
+TWILIGHT_TELEGRAM_MODE=false
+TWILIGHT_TELEGRAM_BOT_TOKEN=your_bot_token
+```
+
+更多配置选项，请查看 `.env.example`、`config.production.toml` 或 [安装部署指南](docs/INSTALL.md)。
+
+### 启动模式
+
+```bash
+# API 服务器（开发模式）
+python main.py api --debug
+
+# API 服务器（生产模式）
+python main.py api
+
+# Telegram Bot（需在配置中启用）
+python main.py bot
+
+# 定时任务
+python main.py scheduler
+
+# 全功能模式（API + Bot + Scheduler）
+python main.py all
+
+# 生产环境推荐：使用 ASGI 服务器
+uvicorn asgi:app --host 0.0.0.0 --port 5000 --workers 4
+```
+
+### 前端设置（可选）
+
+如需使用 Web 管理界面：
 
 ```bash
 cd webui
 
 # 安装依赖
-npm install
+pnpm install
+# 或 npm install
 
-# 配置环境变量（可选）
-# 创建 .env.local 文件
-echo "NEXT_PUBLIC_API_URL=http://localhost:5000" > .env.local
+# 开发环境启动
+pnpm dev
+# 或 npm run dev
+
+# 访问 Web 界面
+# http://localhost:3000
 ```
 
-#### 4. 启动服务
+### Docker 部署
 
-**后端**:
-```bash
-# 在项目根目录
-python main.py
-```
+当前仓库尚未提供官方 `Dockerfile` / `docker-compose.yml`。
 
-**前端**:
-```bash
-# 在 webui 目录
-npm run dev
-```
+如需容器化部署，建议先使用以下方式：
 
-访问 `http://localhost:3000` 即可使用 Web 界面。
+1. 按 [安装部署指南](docs/INSTALL.md) 以裸机方式验证配置无误。
+2. 后端优先使用 `uvicorn asgi:app` 进行生产部署。
+3. 前端在 `webui/` 执行 `pnpm build` 后部署。
 
-### Docker 部署（推荐）
-
-```bash
-# 构建后端镜像
-docker build -t twilight-backend .
-
-# 构建前端镜像
-cd webui
-docker build -t twilight-frontend .
-
-# 运行后端容器
-docker run -d \
-  --name twilight-backend \
-  -p 5000:5000 \
-  -v ./config.toml:/app/config.toml \
-  -v ./db:/app/db \
-  twilight-backend
-
-# 运行前端容器
-docker run -d \
-  --name twilight-frontend \
-  -p 3000:3000 \
-  -e NEXT_PUBLIC_API_URL=http://your-backend-url:5000 \
-  twilight-frontend
-```
+后续将补充官方容器编排模板。
 
 ---
 
@@ -290,6 +339,8 @@ min_progress_percent = 80
 
 为了保持主文档整洁，详细的开发和接口文档已迁移至 `docs` 目录：
 
+- **[文档导航](docs/README.md)** - 统一入口，按角色快速定位需要的文档。
+
 - **[后端 API 文档](docs/BACKEND_API.md)** - 包含认证方式、模块概览及常用接口示例。
 - **[前端开发文档](docs/FRONTEND_API.md)** - 包含前端技术栈、项目结构及本地开发指南。
 - **[API Key 专用接口](docs/API_KEY_API.md)** - 专门为外部系统（如机器人、脚本）设计的接口文档。
@@ -350,8 +401,8 @@ min_progress_percent = 80
    - 重启服务后，配置的用户将自动成为管理员
 
 3. **启动服务**
-   - 启动后端：`python main.py`
-   - 启动前端：`cd webui && npm run dev`
+   - 启动后端：`python main.py api`
+   - 启动前端：`cd webui && pnpm dev`
    - 访问 `http://localhost:3000`
 
 4. **生成注册码**
@@ -409,19 +460,168 @@ webhook_endpoints = [
 playback_stats_enabled = true
 ```
 
-### 安全配置
+---
 
-```toml
-[Security]
-# 是否启用 IP 限制
-ip_limit_enabled = false
-# 每个用户允许的最大 IP 数量
-max_ips_per_user = 10
-# 登录失败锁定阈值
-login_fail_threshold = 5
-# 锁定时间 (分钟)
-lockout_minutes = 30
+## 📚 文档和资源
+
+### 主要文档
+
+- [📖 安装部署指南](docs/INSTALL.md) - 详细的安装步骤（包含 Windows 11 特定说明）
+- [🔧 开发指南](docs/DEVELOPMENT.md) - 面向开发者的完整指南（编码规范、调试等）
+- [🌐 后端 API 文档](docs/BACKEND_API.md) - REST API 接口说明
+- [🔑 API Key 文档](docs/API_KEY_API.md) - API Key 的使用说明
+- [🔌 前端开发指南](docs/FRONTEND_API.md) - 前端开发文档
+- [📝 更新日志](CHANGELOG.md) - 版本历史和重要变更
+
+### 快速命令
+
+#### Windows PowerShell
+
+```powershell
+# 初始化环境
+.\dev.ps1 -Task init
+
+# 完整设置
+.\dev.ps1 -Task setup
+
+# 运行开发服务器
+.\dev.ps1 -Task run
+
+# 运行测试
+.\dev.ps1 -Task test
+
+# 帮助信息
+.\dev.ps1 -Task help
 ```
+
+#### Linux/macOS (使用 Makefile)
+
+```bash
+# 初始化
+make install-dev
+
+# 运行开发服务器
+make run
+
+# 运行测试
+make test
+
+# 查看所有可用命令
+make help
+```
+
+### 系统要求
+
+| 组件 | 最低版本 | 推荐版本 |
+|------|---------|--------|
+| Python | 3.10 | 3.11+ |
+| Flask | 3.0 | 3.1+ |
+| SQLAlchemy | 2.0 | 2.0+ |
+| Node.js | 18 | 20+ |
+| Redis | - | 7.0+ |
+
+---
+
+## 🚀 部署推荐
+
+### 开发环境
+
+```bash
+python main.py api --debug
+```
+
+### 生产环境（推荐）
+
+```bash
+# 使用 Uvicorn + Gunicorn
+pip install gunicorn
+gunicorn -w 4 -b 0.0.0.0:5000 --worker-class uvicorn.workers.UvicornWorker asgi:app
+
+# 或使用 Hypercorn
+pip install hypercorn
+hypercorn asgi:app --bind 0.0.0.0:5000 --workers 4
+```
+
+### Nginx 反向代理配置
+
+```nginx
+upstream twilight {
+    server localhost:5000;
+}
+
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    location / {
+        proxy_pass http://twilight;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+---
+
+## 🤝 贡献指南
+
+欢迎所有形式的贡献！详见 [开发指南 - 贡献流程](docs/DEVELOPMENT.md#贡献流程)。
+
+### 贡献步骤
+
+1. Fork 本项目
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 打开 Pull Request
+
+### 代码风格
+
+项目使用以下工具维护代码质量：
+
+- **Black** - 代码格式化
+- **Flake8** - 风格检查
+- **MyPy** - 类型检查
+- **Pytest** - 单元测试
+
+运行自动格式化：
+
+```bash
+make format  # 或 .\dev.ps1 -Task format
+```
+
+---
+
+## 📞 获取帮助
+
+- 📖 查看 [文档](docs/)
+- 🐛 提交 [Issue](https://github.com/Prejudice-Studio/Twilight/issues)
+- 💬 讨论 [Discussions](https://github.com/Prejudice-Studio/Twilight/discussions)
+- 📧 发送邮件至 contact@twilight.example.com
+
+---
+
+## 📄 许可证
+
+本项目采用 [MIT 许可证](LICENSE)。详见 [LICENSE](LICENSE) 文件。
+
+---
+
+## 🙏 特别感谢
+
+感谢所有做出贡献的开发者，以及使用 Twilight 的用户！
+
+---
+
+<div align="center">
+
+**[⬆ 回到顶部](#twilight-暮光)**
+
+Made with ❤️ by [Prejudice Studio](https://github.com/Prejudice-Studio)
+
+</div>
 
 ---
 

@@ -1,0 +1,140 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "twilight"
+version = "1.0.0"
+description = "Next Generation Emby/Jellyfin Management System"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Twilight Team", email = "contact@twilight.example.com"}
+]
+keywords = ["emby", "jellyfin", "media", "management", "api"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "Flask[async]>=3.1",
+    "Flask-CORS>=5.0",
+    "SQLAlchemy>=2.0",
+    "aiosqlite>=0.20",
+    "httpx>=0.28",
+    "requests>=2.32",
+    "aiofiles>=24.1",
+    "redis>=5.2",
+    "python-dotenv>=1.0",
+    "toml>=0.10",
+    "pytz>=2025.1",
+    "APScheduler>=3.11",
+    "psutil>=6.1",
+    "python-telegram-bot>=21.0",
+    "pyrogram>=2.0",
+    "TgCrypto>=1.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "pytest-cov>=6.0",
+    "black>=24.3",
+    "flake8>=7.1",
+    "isort>=5.13",
+    "mypy>=1.13",
+    "sphinx>=8.1",
+    "uvicorn>=0.30",
+    "hypercorn>=0.17",
+    "scalene>=1.5",
+    "bandit>=1.8",
+]
+
+[project.urls]
+Homepage = "https://github.com/Prejudice-Studio/Twilight"
+Documentation = "https://twilight.example.com/docs"
+Repository = "https://github.com/Prejudice-Studio/Twilight.git"
+Issues = "https://github.com/Prejudice-Studio/Twilight/issues"
+
+[tool.setuptools]
+packages = ["src"]
+
+[tool.black]
+line-length = 120
+target-version = ['py310', 'py311', 'py312']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 120
+skip_gitignore = true
+known_first_party = ["src"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+follow_imports = "normal"
+pretty = true
+warn_return_any = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "pyrogram",
+    "telegram",
+    "toml",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+asyncio_mode = "auto"
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "setup.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+    "if 0:",
+    "if False:",
+]

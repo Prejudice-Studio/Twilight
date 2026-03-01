@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Coins,
@@ -31,6 +31,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useAsyncResource } from "@/hooks/use-async-resource";
+import { PageError } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
 import { api, type ScoreInfo, type ScoreRecord, type ScoreRankingItem } from "@/lib/api";
 import { formatNumber, formatDate } from "@/lib/utils";
@@ -53,7 +55,6 @@ export default function ScorePage() {
   const { fetchUser } = useAuthStore();
   const [scoreInfo, setScoreInfo] = useState<ScoreInfo | null>(null);
   const [history, setHistory] = useState<ScoreRecord[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
 
   // Transfer state
   const [transferOpen, setTransferOpen] = useState(false);
@@ -80,28 +81,25 @@ export default function ScorePage() {
   const [grabRPKey, setGrabRPKey] = useState("");
   const [isGrabbingRP, setIsGrabbingRP] = useState(false);
 
-  useEffect(() => {
-    loadData();
+  const loadScoreData = useCallback(async () => {
+    const [scoreRes, historyRes] = await Promise.all([
+      api.getScoreInfo(),
+      api.getScoreHistory(),
+    ]);
+    if (scoreRes.success && scoreRes.data) {
+      setScoreInfo(scoreRes.data);
+    }
+    if (historyRes.success && historyRes.data) {
+      setHistory(historyRes.data.records);
+    }
+    return true;
   }, []);
 
-  const loadData = async () => {
-    try {
-      const [scoreRes, historyRes] = await Promise.all([
-        api.getScoreInfo(),
-        api.getScoreHistory(),
-      ]);
-      if (scoreRes.success && scoreRes.data) {
-        setScoreInfo(scoreRes.data);
-      }
-      if (historyRes.success && historyRes.data) {
-        setHistory(historyRes.data.records);
-      }
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const {
+    isLoading,
+    error,
+    execute: loadData,
+  } = useAsyncResource(loadScoreData, { immediate: true });
 
   const handleTransfer = async () => {
     if (!transferTo || !transferAmount) {
@@ -272,6 +270,10 @@ export default function ScorePage() {
         return type;
     }
   };
+
+  if (error) {
+    return <PageError message={error} onRetry={() => void loadData()} />;
+  }
 
   return (
     <motion.div

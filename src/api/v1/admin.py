@@ -5,7 +5,7 @@
 """
 from flask import Blueprint, request, g
 
-from src.api.v1.auth import async_route, require_auth, require_admin, api_response
+from src.api.v1.auth import require_auth, require_admin, api_response
 from src.db.user import UserOperate, Role
 from src.db.regcode import RegCodeOperate
 from src.services import UserService, ScoreService, EmbyService
@@ -16,7 +16,6 @@ admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 # ==================== 用户管理 ====================
 
 @admin_bp.route('/users', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def list_users():
@@ -114,7 +113,6 @@ async def list_users():
 
 
 @admin_bp.route('/me/update', methods=['PUT'])
-@async_route
 @require_auth
 @require_admin
 async def update_my_info():
@@ -155,7 +153,6 @@ async def update_my_info():
 
 
 @admin_bp.route('/users/<int:uid>', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def get_user(uid: int):
@@ -193,7 +190,6 @@ async def get_user(uid: int):
 
 
 @admin_bp.route('/users/<int:uid>/disable', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def disable_user(uid: int):
@@ -217,7 +213,6 @@ async def disable_user(uid: int):
 
 
 @admin_bp.route('/users/<int:uid>/enable', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def enable_user(uid: int):
@@ -231,7 +226,6 @@ async def enable_user(uid: int):
 
 
 @admin_bp.route('/users/<int:uid>', methods=['PUT'])
-@async_route
 @require_auth
 @require_admin
 async def update_user(uid: int):
@@ -292,7 +286,6 @@ async def update_user(uid: int):
 
 
 @admin_bp.route('/users/<int:uid>', methods=['DELETE'])
-@async_route
 @require_auth
 @require_admin
 async def delete_user(uid: int):
@@ -313,7 +306,6 @@ async def delete_user(uid: int):
 
 
 @admin_bp.route('/users/<int:uid>/renew', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def renew_user(uid: int):
@@ -340,7 +332,6 @@ async def renew_user(uid: int):
 
 
 @admin_bp.route('/users/<int:uid>/kick', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def kick_user(uid: int):
@@ -357,7 +348,6 @@ async def kick_user(uid: int):
 
 
 @admin_bp.route('/users/<int:uid>/libraries', methods=['PUT'])
-@async_route
 @require_auth
 @require_admin
 async def set_user_libraries(uid: int):
@@ -383,7 +373,6 @@ async def set_user_libraries(uid: int):
 
 
 @admin_bp.route('/users/<int:uid>/nsfw', methods=['PUT'])
-@async_route
 @require_auth
 @require_admin
 async def set_user_nsfw_permission(uid: int):
@@ -439,7 +428,6 @@ async def set_user_nsfw_permission(uid: int):
 
 
 @admin_bp.route('/users/<int:uid>/admin', methods=['PUT'])
-@async_route
 @require_auth
 @require_admin
 async def set_user_admin(uid: int):
@@ -463,7 +451,6 @@ async def set_user_admin(uid: int):
 
 
 @admin_bp.route('/users/<int:uid>/unbind-telegram', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def unbind_user_telegram(uid: int):
@@ -492,7 +479,6 @@ async def unbind_user_telegram(uid: int):
 
 
 @admin_bp.route('/users/<int:uid>/bind-telegram', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def bind_user_telegram(uid: int):
@@ -532,7 +518,6 @@ async def bind_user_telegram(uid: int):
 
 
 @admin_bp.route('/users/by-telegram/<int:telegram_id>', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def get_user_by_telegram(telegram_id: int):
@@ -548,7 +533,6 @@ async def get_user_by_telegram(telegram_id: int):
 # ==================== 积分管理 ====================
 
 @admin_bp.route('/users/<int:uid>/score', methods=['PUT'])
-@async_route
 @require_auth
 @require_admin
 async def adjust_user_score(uid: int):
@@ -575,7 +559,6 @@ async def adjust_user_score(uid: int):
 # ==================== 注册码管理 ====================
 
 @admin_bp.route('/regcodes', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def list_regcodes():
@@ -628,7 +611,6 @@ async def list_regcodes():
 # ==================== 求片管理 ====================
 
 @admin_bp.route('/media-requests', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def list_media_requests():
@@ -725,7 +707,6 @@ async def list_media_requests():
 
 
 @admin_bp.route('/media-requests/<int:request_id>', methods=['PUT', 'DELETE'])
-@async_route
 @require_auth
 @require_admin
 async def update_or_delete_media_request(request_id: int):
@@ -774,7 +755,6 @@ async def update_or_delete_media_request(request_id: int):
 
 
 @admin_bp.route('/regcodes', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def create_regcode():
@@ -812,7 +792,6 @@ async def create_regcode():
 
 
 @admin_bp.route('/regcodes/<code>', methods=['DELETE'])
-@async_route
 @require_auth
 @require_admin
 async def delete_regcode(code: str):
@@ -827,7 +806,6 @@ async def delete_regcode(code: str):
 # ==================== Emby 管理 ====================
 
 @admin_bp.route('/emby/sessions', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def list_sessions():
@@ -837,7 +815,6 @@ async def list_sessions():
 
 
 @admin_bp.route('/emby/activity', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def get_activity_log():
@@ -855,7 +832,6 @@ async def get_activity_log():
 
 
 @admin_bp.route('/emby/broadcast', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def broadcast_message():
@@ -882,7 +858,6 @@ async def broadcast_message():
 # ==================== 白名单用户 ====================
 
 @admin_bp.route('/whitelist', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def create_whitelist_user():
@@ -919,7 +894,6 @@ async def create_whitelist_user():
 # ==================== 统计信息 ====================
 
 @admin_bp.route('/stats', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def get_stats():

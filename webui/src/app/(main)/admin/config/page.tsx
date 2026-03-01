@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Settings, Save, Loader2, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { useAsyncResource } from "@/hooks/use-async-resource";
+import { PageError } from "@/components/layout/page-state";
 import { api } from "@/lib/api";
 import {
   Alert,
@@ -33,54 +35,31 @@ export default function AdminConfigPage() {
   const { toast } = useToast();
   const [configContent, setConfigContent] = useState("");
   const [originalContent, setOriginalContent] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [configPath, setConfigPath] = useState("");
   const [hasChanges, setHasChanges] = useState(false);
 
   useEffect(() => {
-    loadConfig();
-  }, []);
-
-  useEffect(() => {
     setHasChanges(configContent !== originalContent);
   }, [configContent, originalContent]);
 
-  const loadConfig = async () => {
-    setIsLoading(true);
-    try {
-      const res = await api.getConfigToml();
-      if (res.success && res.data) {
-        setConfigContent(res.data.content);
-        setOriginalContent(res.data.content);
-        setConfigPath(res.data.path);
-      } else {
-        toast({
-          title: "加载失败",
-          description: res.message || "无法加载配置文件",
-          variant: "destructive",
-        });
-      }
-    } catch (error: any) {
-      const errorMessage = error.message || "请检查网络连接";
-      // 如果是接口不存在，提供更详细的提示
-      if (errorMessage.includes("接口不存在")) {
-        toast({
-          title: "接口不存在",
-          description: "请确认后端服务已重启并包含最新代码。如果问题持续，请联系管理员。",
-          variant: "destructive",
-        });
-      } else {
-        toast({
-          title: "加载失败",
-          description: errorMessage,
-          variant: "destructive",
-        });
-      }
-    } finally {
-      setIsLoading(false);
+  const loadConfigResource = useCallback(async () => {
+    const res = await api.getConfigToml();
+    if (res.success && res.data) {
+      setConfigContent(res.data.content);
+      setOriginalContent(res.data.content);
+      setConfigPath(res.data.path);
+    } else {
+      throw new Error(res.message || "无法加载配置文件");
     }
-  };
+    return true;
+  }, []);
+
+  const {
+    isLoading,
+    error,
+    execute: loadConfig,
+  } = useAsyncResource(loadConfigResource, { immediate: true });
 
   const handleSave = async () => {
     if (!hasChanges) {
@@ -120,6 +99,10 @@ export default function AdminConfigPage() {
       setIsSaving(false);
     }
   };
+
+  if (error) {
+    return <PageError message={error} onRetry={() => void loadConfig()} />;
+  }
 
   return (
     <motion.div

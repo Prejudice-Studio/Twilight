@@ -1,76 +1,110 @@
 # Twilight 后端 API 文档
 
-本文档详细介绍了 Twilight 系统的后端 RESTful API。
+本文档介绍 Twilight 后端 API 的认证方式、模块划分与调用约定。
+
+## 基础信息
+
+- API Base URL：`http://localhost:5000/api/v1`
+- Swagger UI：`http://localhost:5000/api/v1/docs`
+- 响应格式：默认返回 `success / message / data / timestamp`
+
+> 说明：接口会持续演进，完整字段请以 Swagger 和实际响应为准。
 
 ## 认证方式
 
-系统支持两种主要的认证方式：
+### 1) Bearer Token（Web 前端常用）
 
-### 1. Bearer Token (JWT 替代方案)
-主要用于前端 Web 界面。登录成功后，服务器会返回一个 Token。
-在后续请求中，需在 Header 中包含：
+登录成功后，在请求头带上：
+
 ```http
-Authorization: Bearer <your_token>
+Authorization: Bearer <token>
 ```
 
-### 2. API Key
-主要用于外部系统集成（如机器人、脚本等）。API Key 具有较长有效期，且权限受控。
-在请求中，可以通过以下两种方式之一提供：
-- **Header**: `X-API-Key: <your_api_key>`
-- **Header**: `Authorization: Bearer <your_api_key>`
+### 2) API Key（外部系统集成）
 
----
+在请求头带上：
 
-## 模块说明
+```http
+X-API-Key: <api_key>
+```
 
-| 模块 | 基础路径 | 说明 | 认证需求 |
-|------|------|------|---------|
-| **Auth** | `/api/v1/auth` | 处理登录、登出、Token 转换 | 部分需要 |
-| **Users** | `/api/v1/users` | 用户资料、设备管理、注册 | 需要 |
-| **Score** | `/api/v1/score` | 积分操作、签到、红包、排行榜 | 需要 |
-| **Emby** | `/api/v1/emby` | Emby 服务器状态、搜索、会话 | 需要 |
-| **Media** | `/api/v1/media` | TMDB/Bangumi 搜索、求片申请 | 需要 |
-| **Admin** | `/api/v1/admin` | 用户管理、系统统计、配置编辑 | 管理员权限 |
-| **Stats** | `/api/v1/stats` | 个人及全站播放统计 | 需要 |
-| **Webhook** | `/api/v1/webhook` | 接收 Emby/Jellyfin 事件 | Secret 验证 |
-| **System** | `/api/v1/system` | 系统公开信息、健康检查 | - |
-| **API Key** | `/api/v1/apikey` | 外部专用简化接口 | API Key |
+API Key 专用接口详见 [API_KEY_API.md](./API_KEY_API.md)。
 
----
+## 常见公共接口
 
-## 常用接口示例
+### 健康检查
+
+- `GET /system/health`
+- 用途：检查 Database / Redis / Emby 连通性
+- 认证：不需要
+
+### 系统统计（管理员）
+
+- `GET /system/stats`
+- 用途：获取 CPU / Memory / Disk 运行状态
+- 认证：需要管理员权限
+
+## 模块总览
+
+| 模块 | 前缀 | 说明 | 权限 |
+|------|------|------|------|
+| Auth | `/auth` | 登录、登出、认证相关 | 部分公开 |
+| Users | `/users` | 用户资料、账号与设备能力 | 用户 |
+| Score | `/score` | 签到、积分流转、排行榜 | 用户 |
+| Media | `/media` | TMDB/Bangumi 搜索与求片 | 用户 |
+| Emby | `/emby` | Emby 账户与会话能力 | 用户 |
+| Admin | `/admin` | 用户/注册码/系统管理 | 管理员 |
+| Stats | `/stats` | 播放与使用统计 | 用户/管理员 |
+| Webhook | `/webhook` | Emby/Jellyfin/Plex 事件接收 | Secret 校验 |
+| System | `/system` | 健康、系统公开信息 | 公开/管理员 |
+| API Key | `/apikey` | 外部系统专用接口 | API Key |
+
+## 调用示例
 
 ### 用户注册
-`POST /api/v1/users/register`
+
+`POST /users/register`
+
 ```json
 {
-    "username": "newuser",
-    "password": "strongpassword",
-    "reg_code": "optional-code",
-    "telegram_id": 12345678
+  "username": "newuser",
+  "password": "strongpassword",
+  "reg_code": "optional-code",
+  "telegram_id": 12345678
 }
 ```
 
 ### 签到
-`POST /api/v1/score/checkin`
-响应：
+
+`POST /score/checkin`
+
 ```json
 {
-    "success": true,
-    "data": {
-        "score": 15,
-        "balance": 250,
-        "streak": 5
-    }
+  "success": true,
+  "data": {
+    "score": 15,
+    "balance": 250,
+    "streak": 5
+  }
 }
 ```
 
 ### 媒体搜索
-`GET /api/v1/media/search?q=进击的巨人&source=all`
 
----
+`GET /media/search?q=进击的巨人&source=all`
 
-## 更多文档
+## 错误处理约定
 
-- **API Key 专用接口**: [API_KEY_API.md](./API_KEY_API.md) - 详细介绍了为外部集成设计的专用接口。
-- **Swagger UI**: 系统运行后，访问 `/api/v1/docs` 可查看交互式 API 文档。
+- 未认证：`401`
+- 权限不足：`403`
+- 参数错误：`400`
+- 资源不存在：`404`
+- 服务器错误：`500`
+
+建议外部调用方统一处理 `success=false` 与 HTTP 状态码。
+
+## 推荐阅读
+
+- [API Key 专用接口](./API_KEY_API.md)
+- [前端开发文档](./FRONTEND_API.md)
+- [开发指南](./DEVELOPMENT.md)

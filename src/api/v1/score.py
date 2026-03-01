@@ -5,7 +5,7 @@
 """
 from flask import Blueprint, request, g
 
-from src.api.v1.auth import async_route, require_auth, api_response
+from src.api.v1.auth import require_auth, api_response
 from src.services import ScoreService, RedPacketService, RedPacketType
 from src.db.score import ScoreOperate
 from src.db.user import UserOperate
@@ -17,7 +17,6 @@ score_bp = Blueprint('score', __name__, url_prefix='/score')
 # ==================== 积分操作 ====================
 
 @score_bp.route('/balance', methods=['GET'])
-@async_route
 @require_auth
 async def get_balance():
     """获取我的积分余额"""
@@ -31,7 +30,6 @@ async def get_balance():
 
 
 @score_bp.route('/info', methods=['GET'])
-@async_route
 @require_auth
 async def get_score_info():
     """
@@ -70,7 +68,6 @@ async def get_score_info():
 
 
 @score_bp.route('/checkin', methods=['POST'])
-@async_route
 @require_auth
 async def checkin():
     """
@@ -101,7 +98,6 @@ async def checkin():
 
 
 @score_bp.route('/history', methods=['GET'])
-@async_route
 @require_auth
 async def get_history():
     """
@@ -149,7 +145,6 @@ async def get_history():
 
 
 @score_bp.route('/transfer', methods=['POST'])
-@async_route
 @require_auth
 async def transfer():
     """
@@ -197,7 +192,6 @@ async def transfer():
 
 
 @score_bp.route('/ranking', methods=['GET'])
-@async_route
 async def get_ranking():
     """
     获取积分排行榜
@@ -217,7 +211,6 @@ async def get_ranking():
 
 
 @score_bp.route('/config', methods=['GET'])
-@async_route
 async def get_score_config():
     """获取积分配置信息（公开）"""
     return api_response(True, "获取成功", {
@@ -252,7 +245,6 @@ async def get_score_config():
 # ==================== 红包操作 ====================
 
 @score_bp.route('/redpacket', methods=['POST'])
-@async_route
 @require_auth
 async def create_redpacket():
     """
@@ -297,7 +289,6 @@ async def create_redpacket():
 
 
 @score_bp.route('/redpacket/<rp_key>/grab', methods=['POST'])
-@async_route
 @require_auth
 async def grab_redpacket(rp_key: str):
     """抢红包"""
@@ -320,7 +311,6 @@ async def grab_redpacket(rp_key: str):
 
 
 @score_bp.route('/redpacket/<rp_key>/withdraw', methods=['POST'])
-@async_route
 @require_auth
 async def withdraw_redpacket(rp_key: str):
     """撤回红包"""

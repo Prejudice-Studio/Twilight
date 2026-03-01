@@ -6,7 +6,7 @@
 """
 from flask import Blueprint, request, g
 
-from src.api.v1.auth import async_route, require_auth, api_response
+from src.api.v1.auth import require_auth, api_response
 from src.services import MediaService, MediaRequestService, MediaSource, InventoryService
 from src.db.bangumi import ReqStatus
 
@@ -16,7 +16,6 @@ media_bp = Blueprint('media', __name__, url_prefix='/media')
 # ==================== 媒体搜索 ====================
 
 @media_bp.route('/search', methods=['GET'])
-@async_route
 async def search_media():
     """
     统一媒体搜索
@@ -103,7 +102,6 @@ async def search_media():
 
 
 @media_bp.route('/search/tmdb', methods=['GET'])
-@async_route
 async def search_tmdb():
     """
     仅搜索 TMDB
@@ -139,7 +137,6 @@ async def search_tmdb():
 
 
 @media_bp.route('/search/bangumi', methods=['GET'])
-@async_route
 async def search_bangumi():
     """
     仅搜索 Bangumi
@@ -175,7 +172,6 @@ async def search_bangumi():
 
 
 @media_bp.route('/search/id/<string:source_type>/<int:media_id>', methods=['GET'])
-@async_route
 @require_auth
 async def search_media_by_id(source_type: str, media_id: int):
     """
@@ -253,7 +249,6 @@ async def search_media_by_id(source_type: str, media_id: int):
 
 
 @media_bp.route('/detail', methods=['GET'])
-@async_route
 @require_auth
 async def get_media_detail():
     """
@@ -298,7 +293,6 @@ async def get_media_detail():
 
 
 @media_bp.route('/tmdb/<int:tmdb_id>', methods=['GET'])
-@async_route
 @require_auth
 async def get_tmdb_detail(tmdb_id: int):
     """
@@ -329,7 +323,6 @@ async def get_tmdb_detail(tmdb_id: int):
 
 
 @media_bp.route('/bangumi/<int:bgm_id>', methods=['GET'])
-@async_route
 @require_auth
 async def get_bangumi_detail(bgm_id: int):
     """
@@ -360,7 +353,6 @@ async def get_bangumi_detail(bgm_id: int):
 # ==================== 库存检查 ====================
 
 @media_bp.route('/inventory/check', methods=['POST'])
-@async_route
 async def check_inventory():
     """
     检查媒体库存（支持季度检查）
@@ -458,7 +450,6 @@ async def check_inventory():
 
 
 @media_bp.route('/inventory/search', methods=['GET'])
-@async_route
 async def search_inventory():
     """
     搜索库存
@@ -505,7 +496,6 @@ async def search_inventory():
 # ==================== 求片功能 ====================
 
 @media_bp.route('/request', methods=['POST'])
-@async_route
 @require_auth
 async def create_media_request():
     """
@@ -631,7 +621,6 @@ async def create_media_request():
 
 
 @media_bp.route('/request/my', methods=['GET'])
-@async_route
 @require_auth
 async def get_my_requests():
     """获取我的求片列表"""
@@ -640,7 +629,6 @@ async def get_my_requests():
 
 
 @media_bp.route('/request/pending', methods=['GET'])
-@async_route
 @require_auth
 async def get_pending_requests():
     """获取待处理的求片列表（需要登录）"""
@@ -649,7 +637,6 @@ async def get_pending_requests():
 
 
 @media_bp.route('/request/<int:request_id>/status', methods=['PUT'])
-@async_route
 @require_auth
 async def update_request_status(request_id: int):
     """
@@ -680,7 +667,6 @@ async def update_request_status(request_id: int):
 
 
 @media_bp.route('/request/external/update', methods=['POST'])
-@async_route
 async def external_update_request():
     """
     外部更新求片状态 (无需登录，凭 require_key 访问)
@@ -707,7 +693,6 @@ async def external_update_request():
 
 
 @media_bp.route('/request/<int:request_id>', methods=['GET', 'DELETE'])
-@async_route
 @require_auth
 async def handle_request_item(request_id: int):
     """获取或删除求片请求"""

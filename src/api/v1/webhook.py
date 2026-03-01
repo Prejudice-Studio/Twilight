@@ -6,7 +6,7 @@ Webhook API
 """
 from flask import Blueprint, request, g
 
-from src.api.v1.auth import async_route, require_auth, require_admin, api_response
+from src.api.v1.auth import require_auth, require_admin, api_response
 from src.services.webhook import WebhookService, WebhookPushService
 from src.services.bangumi_sync import BangumiSyncService, SyncRequest
 from src.core.utils import timestamp
@@ -17,7 +17,6 @@ webhook_bp = Blueprint('webhook', __name__, url_prefix='/webhook')
 # ==================== 接收 Webhook ====================
 
 @webhook_bp.route('/emby', methods=['POST'])
-@async_route
 async def receive_emby_webhook():
     """
     接收 Emby Webhook
@@ -46,7 +45,6 @@ async def receive_emby_webhook():
 
 
 @webhook_bp.route('/jellyfin', methods=['POST'])
-@async_route
 async def receive_jellyfin_webhook():
     """
     接收 Jellyfin Webhook
@@ -70,7 +68,6 @@ async def receive_jellyfin_webhook():
 
 
 @webhook_bp.route('/custom', methods=['POST'])
-@async_route
 async def receive_custom_webhook():
     """
     接收自定义 Webhook
@@ -97,7 +94,6 @@ async def receive_custom_webhook():
 # ==================== Webhook 推送管理 ====================
 
 @webhook_bp.route('/endpoints', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def list_endpoints():
@@ -112,7 +108,6 @@ async def list_endpoints():
 
 
 @webhook_bp.route('/endpoints', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def add_endpoint():
@@ -144,7 +139,6 @@ async def add_endpoint():
 
 
 @webhook_bp.route('/endpoints', methods=['DELETE'])
-@async_route
 @require_auth
 @require_admin
 async def remove_endpoint():
@@ -167,7 +161,6 @@ async def remove_endpoint():
 
 
 @webhook_bp.route('/test', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def test_webhook():
@@ -195,7 +188,6 @@ async def test_webhook():
 # ==================== Webhook 配置 ====================
 
 @webhook_bp.route('/config', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def get_webhook_config():
@@ -225,7 +217,6 @@ async def get_webhook_config():
 
 
 @webhook_bp.route('/config/secret', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def set_webhook_secret():
@@ -250,7 +241,6 @@ async def set_webhook_secret():
 # ==================== Bangumi 同步 ====================
 
 @webhook_bp.route('/bangumi/emby', methods=['POST'])
-@async_route
 async def bangumi_emby_webhook():
     """
     Bangumi 同步 - Emby Webhook
@@ -284,7 +274,6 @@ async def bangumi_emby_webhook():
 
 
 @webhook_bp.route('/bangumi/jellyfin', methods=['POST'])
-@async_route
 async def bangumi_jellyfin_webhook():
     """
     Bangumi 同步 - Jellyfin Webhook
@@ -326,7 +315,6 @@ async def bangumi_jellyfin_webhook():
 
 
 @webhook_bp.route('/bangumi/plex', methods=['POST'])
-@async_route
 async def bangumi_plex_webhook():
     """
     Bangumi 同步 - Plex Webhook
@@ -368,7 +356,6 @@ async def bangumi_plex_webhook():
 
 
 @webhook_bp.route('/bangumi/custom', methods=['POST'])
-@async_route
 async def bangumi_custom_webhook():
     """
     Bangumi 同步 - 自定义 Webhook
@@ -403,7 +390,6 @@ async def bangumi_custom_webhook():
 # ==================== Bangumi 映射管理 ====================
 
 @webhook_bp.route('/bangumi/mappings', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def get_bangumi_mappings():
@@ -416,7 +402,6 @@ async def get_bangumi_mappings():
 
 
 @webhook_bp.route('/bangumi/mappings', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def add_bangumi_mapping():
@@ -444,7 +429,6 @@ async def add_bangumi_mapping():
 
 
 @webhook_bp.route('/bangumi/mappings', methods=['DELETE'])
-@async_route
 @require_auth
 @require_admin
 async def remove_bangumi_mapping():
@@ -468,7 +452,6 @@ async def remove_bangumi_mapping():
 
 
 @webhook_bp.route('/bangumi/mappings/import', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def import_bangumi_mappings():
@@ -495,7 +478,6 @@ async def import_bangumi_mappings():
 
 
 @webhook_bp.route('/bangumi/mappings/export', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def export_bangumi_mappings():
@@ -509,7 +491,6 @@ async def export_bangumi_mappings():
 
 
 @webhook_bp.route('/bangumi/sync', methods=['POST'])
-@async_route
 @require_auth
 async def manual_bangumi_sync():
     """
@@ -550,7 +531,6 @@ async def manual_bangumi_sync():
 
 
 @webhook_bp.route('/bangumi/config', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def get_bangumi_sync_config():

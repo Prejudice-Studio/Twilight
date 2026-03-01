@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Users,
@@ -48,6 +48,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
+import { useAsyncResource } from "@/hooks/use-async-resource";
+import { PageError } from "@/components/layout/page-state";
 import { api, type UserInfo } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 
@@ -58,7 +60,6 @@ export default function AdminUsersPage() {
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [search, setSearch] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
 
   // Dialog states
   const [renewOpen, setRenewOpen] = useState(false);
@@ -78,34 +79,51 @@ export default function AdminUsersPage() {
     enabled: boolean;
     has_permission: boolean;
   } | null>(null);
+  const usersCacheRef = useRef<
+    Map<string, { users: UserInfo[]; total: number; pages: number }>
+  >(new Map());
 
-  useEffect(() => {
-    loadUsers();
-  }, [page]);
-
-  const loadUsers = async () => {
-    setIsLoading(true);
-    try {
-      const res = await api.getUsers({
-        page,
-        per_page: 20,
-        search: search || undefined,
-      });
-      if (res.success && res.data) {
-        setUsers(res.data.users);
-        setTotal(res.data.total);
-        setPages(res.data.pages);
-      }
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsLoading(false);
-    }
+  const invalidateUsersCache = () => {
+    usersCacheRef.current.clear();
   };
+
+  const loadUsersResource = useCallback(async (signal?: AbortSignal) => {
+    const cacheKey = `${page}-${search || ""}`;
+    const cached = usersCacheRef.current.get(cacheKey);
+    if (cached) {
+      setUsers(cached.users);
+      setTotal(cached.total);
+      setPages(cached.pages);
+      return true;
+    }
+
+    const res = await api.getUsers({
+      page,
+      per_page: 20,
+      search: search || undefined,
+    }, signal);
+    if (res.success && res.data) {
+      setUsers(res.data.users);
+      setTotal(res.data.total);
+      setPages(res.data.pages);
+      usersCacheRef.current.set(cacheKey, {
+        users: res.data.users,
+        total: res.data.total,
+        pages: res.data.pages,
+      });
+    }
+    return true;
+  }, [page, search]);
+
+  const {
+    isLoading,
+    error,
+    execute: loadUsers,
+  } = useAsyncResource(loadUsersResource, { immediate: true });
 
   const handleSearch = () => {
     setPage(1);
-    loadUsers();
+    void loadUsers();
   };
 
   const handleRenew = async () => {
@@ -118,6 +136,7 @@ export default function AdminUsersPage() {
         toast({ title: "续期成功", variant: "success" });
         setRenewOpen(false);
         setSelectedUser(null);
+        invalidateUsersCache();
         loadUsers();
       } else {
         toast({ title: "续期失败", description: res.message, variant: "destructive" });
@@ -150,6 +169,7 @@ export default function AdminUsersPage() {
       const res = await api.updateUser(user.uid, { active: !user.active });
       if (res.success) {
         toast({ title: user.active ? "已禁用" : "已启用", variant: "success" });
+        invalidateUsersCache();
         loadUsers();
       } else {
         toast({ title: "操作失败", description: res.message, variant: "destructive" });
@@ -168,6 +188,7 @@ export default function AdminUsersPage() {
       const res = await api.deleteUser(user.uid);
       if (res.success) {
         toast({ title: "用户已删除", variant: "success" });
+        invalidateUsersCache();
         loadUsers();
       } else {
         toast({ title: "删除失败", description: res.message, variant: "destructive" });
@@ -223,6 +244,7 @@ export default function AdminUsersPage() {
         setEditOpen(false);
         setSelectedUser(null);
         setUserNsfwInfo(null);
+        invalidateUsersCache();
         loadUsers();
       } else {
         toast({ title: "更新失败", description: res.message, variant: "destructive" });
@@ -253,6 +275,7 @@ export default function AdminUsersPage() {
             enabled: grant ? userNsfwInfo.enabled : false, // 撤销权限时关闭显示
           });
         }
+        invalidateUsersCache();
         loadUsers();
       } else {
         toast({ title: "操作失败", description: res.message, variant: "destructive" });
@@ -263,6 +286,10 @@ export default function AdminUsersPage() {
       setIsActionLoading(false);
     }
   };
+
+  if (error) {
+    return <PageError message={error} onRetry={() => void loadUsers()} />;
+  }
 
   const getRoleBadge = (role: number) => {
     switch (role) {

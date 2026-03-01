@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import Image from "next/image";
 import {
   Film,
   Check,
@@ -36,6 +37,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useAsyncResource } from "@/hooks/use-async-resource";
+import { PageError, PageLoading } from "@/components/layout/page-state";
 import { api, type MediaRequest } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 
@@ -45,7 +48,6 @@ export default function AdminRequestsPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState("pending");
-  const [isLoading, setIsLoading] = useState(true);
 
   // Action dialog
   const [actionOpen, setActionOpen] = useState(false);
@@ -53,25 +55,40 @@ export default function AdminRequestsPage() {
   const [selectedStatus, setSelectedStatus] = useState("accepted");
   const [adminNote, setAdminNote] = useState("");
   const [isActioning, setIsActioning] = useState(false);
+  const requestsCacheRef = useRef<Map<string, { requests: MediaRequest[]; total: number }>>(
+    new Map()
+  );
 
-  useEffect(() => {
-    loadRequests();
+  const invalidateRequestsCache = () => {
+    requestsCacheRef.current.clear();
+  };
+
+  const loadRequestsResource = useCallback(async (signal?: AbortSignal) => {
+    const cacheKey = `${page}-${status}`;
+    const cached = requestsCacheRef.current.get(cacheKey);
+    if (cached) {
+      setRequests(cached.requests);
+      setTotal(cached.total);
+      return true;
+    }
+
+    const res = await api.getMediaRequests({ page, status }, signal);
+    if (res.success && res.data) {
+      setRequests(res.data.requests);
+      setTotal(res.data.total);
+      requestsCacheRef.current.set(cacheKey, {
+        requests: res.data.requests,
+        total: res.data.total,
+      });
+    }
+    return true;
   }, [page, status]);
 
-  const loadRequests = async () => {
-    setIsLoading(true);
-    try {
-      const res = await api.getMediaRequests({ page, status });
-      if (res.success && res.data) {
-        setRequests(res.data.requests);
-        setTotal(res.data.total);
-      }
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const {
+    isLoading,
+    error,
+    execute: loadRequests,
+  } = useAsyncResource(loadRequestsResource, { immediate: true });
 
   const handleAction = async () => {
     if (!selectedRequest) return;
@@ -88,6 +105,7 @@ export default function AdminRequestsPage() {
         setActionOpen(false);
         setSelectedRequest(null);
         setAdminNote("");
+        invalidateRequestsCache();
         loadRequests();
       } else {
         toast({ title: "操作失败", description: res.message, variant: "destructive" });
@@ -106,6 +124,7 @@ export default function AdminRequestsPage() {
       const res = await api.deleteMediaRequest(id);
       if (res.success) {
         toast({ title: "删除成功", variant: "success" });
+        invalidateRequestsCache();
         loadRequests();
       } else {
         toast({ title: "删除失败", description: res.message, variant: "destructive" });
@@ -166,6 +185,10 @@ export default function AdminRequestsPage() {
 
   const pages = Math.ceil(total / 20);
 
+  if (error) {
+    return <PageError message={error} onRetry={() => void loadRequests()} />;
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -204,11 +227,14 @@ export default function AdminRequestsPage() {
               {requests.map((request) => (
                 <div key={request.id} className="flex items-center justify-between p-4 hover:bg-muted/30">
                   <div className="flex items-start gap-4 flex-1 min-w-0">
-                    <div className="flex h-20 w-14 shrink-0 items-center justify-center rounded-lg bg-primary/5 overflow-hidden border border-primary/10">
+                    <div className="relative flex h-20 w-14 shrink-0 items-center justify-center rounded-lg bg-primary/5 overflow-hidden border border-primary/10">
                       {request.media_info?.poster || request.media_info?.poster_url ? (
-                        <img 
-                          src={request.media_info.poster || request.media_info.poster_url} 
-                          alt={request.media_info.title} 
+                        <Image
+                          src={request.media_info.poster || request.media_info.poster_url || ""}
+                          alt={request.media_info.title}
+                          fill
+                          unoptimized
+                          sizes="56px"
                           className="h-full w-full object-cover"
                         />
                       ) : (
@@ -237,16 +263,22 @@ export default function AdminRequestsPage() {
                       <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
                         <div className="flex items-center gap-1">
                           {request.source.toLowerCase() === "tmdb" ? (
-                            <img 
-                              src="https://www.themoviedb.org/assets/2/v4/logos/v2/blue_short-8e7b30f73a4020692ccca9c88bafe5dcb6f8a62a4c6bc55cd9ba82bb2cd95f6c.svg" 
-                              alt="TMDB" 
+                            <Image
+                              src="https://www.themoviedb.org/assets/2/v4/logos/v2/blue_short-8e7b30f73a4020692ccca9c88bafe5dcb6f8a62a4c6bc55cd9ba82bb2cd95f6c.svg"
+                              alt="TMDB"
+                              width={42}
+                              height={12}
+                              unoptimized
                               className="h-3 w-auto"
                             />
                           ) : request.source.toLowerCase() === "bangumi" ? (
                             <div className="flex items-center gap-1 bg-[#f09199]/10 px-1.5 py-0.5 rounded text-[10px] font-bold text-[#f09199] border border-[#f09199]/20">
-                              <img 
-                                src="https://bangumi.tv/img/favicon.ico" 
-                                alt="Bangumi" 
+                              <Image
+                                src="https://bangumi.tv/img/favicon.ico"
+                                alt="Bangumi"
+                                width={12}
+                                height={12}
+                                unoptimized
                                 className="h-3 w-3"
                               />
                               Bangumi

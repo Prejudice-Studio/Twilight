@@ -1,7 +1,7 @@
 """
 配置管理模块
 
-提供基于TOML文件的配置管理功能
+提供基于TOML文件和环境变量的配置管理功能
 """
 import logging
 import os
@@ -9,6 +9,13 @@ from pathlib import Path
 from typing import List, Union, Any, Optional
 
 import toml
+
+# 从 .env 文件加载环境变量（如果存在）
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv 未安装，继续使用系统环境变量
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +151,7 @@ class Config(BaseConfig):
     SQLALCHEMY_LOG: bool = False
     MAX_RETRY: int = 3
     DATABASES_DIR: Path = ROOT_PATH / 'db'
+    REDIS_URL: str = ''  # Token/缓存存储的 Redis 连接串，如 redis://localhost:6379/0
     BANGUMI_TOKEN: str = ''
     GLOBAL_BGM_MODE: bool = False  # 是否允许BGM点格子
     TELEGRAM_MODE: bool = False
@@ -271,6 +279,8 @@ class APIConfig(BaseConfig):
     API_KEY_LENGTH: int = 32
     CORS_ENABLED: bool = True
     CORS_ORIGINS: List[str] = []
+    UPLOAD_FOLDER: str = os.path.join(ROOT_PATH, 'uploads')  # 文件上传目录
+    MAX_UPLOAD_SIZE: int = 5 * 1024 * 1024  # 最大上传文件大小（字节）
 
 
 class SecurityConfig(BaseConfig):

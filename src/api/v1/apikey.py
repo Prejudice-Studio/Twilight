@@ -8,7 +8,7 @@ from functools import wraps
 from typing import Callable, Any
 from flask import Blueprint, request, g
 
-from src.api.v1.auth import async_route, api_response
+from src.api.v1.auth import api_response
 from src.db.user import UserOperate, UserModel
 from src.services import UserService, EmbyService
 
@@ -69,7 +69,6 @@ def require_apikey(f: Callable) -> Callable:
 # ==================== 账号信息 ====================
 
 @apikey_bp.route('/info', methods=['GET'])
-@async_route
 @require_apikey
 async def get_account_info():
     """
@@ -141,7 +140,6 @@ async def get_account_info():
 
 
 @apikey_bp.route('/status', methods=['GET'])
-@async_route
 @require_apikey
 async def get_account_status():
     """
@@ -187,7 +185,6 @@ async def get_account_status():
 # ==================== 账号控制 ====================
 
 @apikey_bp.route('/enable', methods=['POST'])
-@async_route
 @require_apikey
 async def enable_account():
     """
@@ -221,7 +218,6 @@ async def enable_account():
 
 
 @apikey_bp.route('/disable', methods=['POST'])
-@async_route
 @require_apikey
 async def disable_account():
     """
@@ -263,7 +259,6 @@ async def disable_account():
 
 
 @apikey_bp.route('/renew', methods=['POST'])
-@async_route
 @require_apikey
 async def renew_account():
     """
@@ -324,7 +319,6 @@ async def renew_account():
 # ==================== API Key 管理 ====================
 
 @apikey_bp.route('/key/refresh', methods=['POST'])
-@async_route
 @require_apikey
 async def refresh_apikey():
     """
@@ -356,7 +350,6 @@ async def refresh_apikey():
 
 
 @apikey_bp.route('/key/disable', methods=['POST'])
-@async_route
 @require_apikey
 async def disable_apikey():
     """
@@ -387,7 +380,6 @@ async def disable_apikey():
 
 
 @apikey_bp.route('/key/enable', methods=['POST'])
-@async_route
 @require_apikey
 async def enable_apikey():
     """
@@ -430,7 +422,6 @@ async def enable_apikey():
 # ==================== Emby 相关 ====================
 
 @apikey_bp.route('/emby/status', methods=['GET'])
-@async_route
 @require_apikey
 async def get_emby_status():
     """
@@ -468,7 +459,6 @@ async def get_emby_status():
 
 
 @apikey_bp.route('/emby/kick', methods=['POST'])
-@async_route
 @require_apikey
 async def kick_emby_sessions():
     """
@@ -503,7 +493,6 @@ async def kick_emby_sessions():
 # ==================== 积分相关 ====================
 
 @apikey_bp.route('/score', methods=['GET'])
-@async_route
 @require_apikey
 async def get_score():
     """
@@ -551,7 +540,6 @@ async def get_score():
 
 
 @apikey_bp.route('/score/checkin', methods=['POST'])
-@async_route
 @require_apikey
 async def checkin():
     """
@@ -592,7 +580,6 @@ async def checkin():
 
 
 @apikey_bp.route('/score/history', methods=['GET'])
-@async_route
 @require_apikey
 async def get_score_history():
     """
@@ -673,7 +660,6 @@ async def get_score_history():
 
 
 @apikey_bp.route('/score/ranking', methods=['GET'])
-@async_route
 @require_apikey
 async def get_score_ranking():
     """

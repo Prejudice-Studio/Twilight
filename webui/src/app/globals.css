@@ -2,126 +2,283 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes twilight-gradient-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.twilight-bg-layer {
+  transition:
+    filter 260ms ease,
+    opacity 260ms ease,
+    transform 260ms ease,
+    background-position 300ms ease;
+  will-change: clip-path, filter, opacity, transform;
+}
+
+.twilight-bg-wipe {
+  clip-path: polygon(-25% 0%, -25% 0%, -45% 100%, -45% 100%);
+  transition: clip-path 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.twilight-bg-wipe-active {
+  clip-path: polygon(-5% 0%, 130% 0%, 105% 100%, -30% 100%);
+}
+
 @layer base {
-  /* 极简高级浅色主题: 奶油白与天青色 */
   :root {
-    --background: 40 40% 98.5%; /* 极淡奶油白 */
-    --foreground: 220 30% 15%;
+    --background: 222 20% 97%;
+    --foreground: 224 36% 10%;
     --card: 0 0% 100%;
-    --card-foreground: 220 30% 15%;
+    --card-foreground: 224 36% 10%;
     --popover: 0 0% 100%;
-    --popover-foreground: 220 30% 15%;
-    --primary: 200 100% 45%; /* 天青蓝 */
+    --popover-foreground: 224 36% 10%;
+    --primary: 257 90% 58%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 200 20% 96%;
-    --secondary-foreground: 200 80% 30%;
-    --muted: 220 15% 94%;
-    --muted-foreground: 220 15% 45%;
-    --accent: 200 30% 92%;
-    --accent-foreground: 200 100% 30%;
+    --secondary: 220 24% 93%;
+    --secondary-foreground: 224 28% 24%;
+    --muted: 220 20% 90%;
+    --muted-foreground: 220 12% 44%;
+    --accent: 262 70% 93%;
+    --accent-foreground: 258 85% 30%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 98%;
-    --border: 220 15% 90%;
-    --input: 220 15% 90%;
-    --ring: 200 100% 45%;
-    --radius: 1.25rem;
-    --bg-gradient-accent: hsla(200, 100%, 85%, 0.15);
+    --border: 220 19% 84%;
+    --input: 220 20% 88%;
+    --ring: 257 90% 58%;
+    --radius: 1rem;
+    --shell-glow: hsla(257, 92%, 60%, 0.16);
   }
 
-  /* 柑橘橙模式 */
-  .bloom {
-    --primary: 32 95% 50%; /* 活力柑橘 */
-    --primary-foreground: 0 0% 100%;
-    --accent: 32 100% 94%;
-    --accent-foreground: 32 100% 30%;
-    --ring: 32 95% 50%;
-    --bg-gradient-accent: hsla(32, 100%, 85%, 0.2);
+  .dark {
+    --background: 228 24% 8%;
+    --foreground: 220 18% 95%;
+    --card: 228 22% 12%;
+    --card-foreground: 220 18% 95%;
+    --popover: 228 22% 12%;
+    --popover-foreground: 220 18% 95%;
+    --primary: 262 92% 67%;
+    --primary-foreground: 235 42% 12%;
+    --secondary: 228 16% 19%;
+    --secondary-foreground: 220 18% 95%;
+    --muted: 228 14% 21%;
+    --muted-foreground: 220 12% 72%;
+    --accent: 258 42% 22%;
+    --accent-foreground: 260 90% 84%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 230 18% 26%;
+    --input: 228 18% 24%;
+    --ring: 262 92% 67%;
+    --shell-glow: hsla(262, 92%, 67%, 0.14);
   }
 
-  * {
-    @apply border-border;
-  }
+  * { @apply border-border; }
+
+  html,
   body {
     @apply bg-background text-foreground;
-    background-image: 
-      radial-gradient(at 0% 0%, var(--bg-gradient-accent) 0px, transparent 40%),
-      radial-gradient(at 100% 100%, var(--bg-gradient-accent) 0px, transparent 40%),
-      linear-gradient(to bottom, #ffffff 0%, transparent 100%);
-    background-attachment: fixed;
-    min-height: 100vh;
-    font-feature-settings: "rlig" 1, "calt" 1;
+    min-height: 100%;
   }
+
+  body {
+    @apply antialiased;
+    color-scheme: light;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
+    background-image:
+      radial-gradient(circle at 12% 8%, var(--shell-glow), transparent 28%),
+      radial-gradient(circle at 86% 90%, var(--shell-glow), transparent 25%);
+    background-attachment: fixed;
+    transition: background-color 300ms ease, color 300ms ease;
+  }
+
+  .dark body { color-scheme: dark; }
 }
 
 @layer utilities {
-  /* 亚克力材质: 高度透明, 强模糊 */
-  .glass-acrylic {
-    @apply backdrop-blur-[24px] bg-white/60 border border-white/40 shadow-[0_8px_32px_0_rgba(0,0,0,0.03)];
-  }
-
-  /* 磨砂玻璃: 中度透明, 柔和 */
-  .glass-frosted {
-    @apply backdrop-blur-[12px] bg-white/45 border border-white/20 shadow-sm transition-all duration-300;
-  }
-
-  /* 液态玻璃: 极高光泽, 动态感 */
-  .glass-liquid {
+  .app-shell {
     position: relative;
-    @apply backdrop-blur-[40px] bg-white/30 border border-white/50 shadow-inner overflow-hidden;
-    background: linear-gradient(135deg, rgba(255,255,255,0.4) 0%, rgba(255,255,255,0.1) 100%);
+    isolation: isolate;
   }
-  
-  .glass-liquid::before {
-    content: "";
-    position: absolute;
-    top: -50%;
-    left: -50%;
-    width: 200%;
-    height: 200%;
-    background: radial-gradient(circle, rgba(255,255,255,0.2) 0%, transparent 70%);
-    animation: liquid-float 10s infinite alternate;
+
+  .shell-glow {
+    position: fixed;
+    height: 360px;
+    width: 360px;
+    border-radius: 9999px;
+    filter: blur(80px);
+    background: var(--shell-glow);
     pointer-events: none;
+    z-index: 0;
   }
 
-  .premium-card {
-    @apply relative overflow-hidden rounded-[2rem] border border-white/40 bg-white/50 backdrop-blur-2xl transition-all duration-500 hover:shadow-2xl hover:shadow-primary/5 hover:-translate-y-1;
+  .shell-glow-left {
+    left: -120px;
+    top: -80px;
   }
-}
 
-@keyframes liquid-float {
-  0% { transform: translate(0, 0) rotate(0deg); }
-  100% { transform: translate(10%, 10%) rotate(5deg); }
-}
+  .shell-glow-right {
+    bottom: -120px;
+    right: -80px;
+  }
 
-/* 核心优化 */
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation: none;
-  mix-blend-mode: normal;
-  display: block;
-  background: var(--background);
-  color: var(--foreground);
-}
+  .section-surface {
+    min-height: calc(100vh - 120px);
+    border-radius: 1.5rem;
+    border: 1px solid hsl(var(--border) / 0.7);
+    background: hsl(var(--card) / 0.72);
+    backdrop-filter: blur(16px);
+    padding: 1rem;
+  }
 
-::view-transition-old(root) { z-index: 1; }
-::view-transition-new(root) { z-index: 9999; }
+  @media (min-width: 768px) {
+    .section-surface {
+      padding: 1.5rem;
+    }
+  }
 
-/* 现代滚动条 */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb {
-  background: var(--primary);
-  opacity: 0.2;
-  border-radius: 10px;
-  background-clip: padding-box;
-  border: 2px solid transparent;
-}
-::-webkit-scrollbar-thumb:hover { background: var(--primary); }
+  .header-surface {
+    display: flex;
+    min-height: 68px;
+    align-items: center;
+    justify-content: space-between;
+    border-radius: 1rem;
+    border: 1px solid hsl(var(--border) / 0.7);
+    background: hsl(var(--card) / 0.7);
+    padding: 0.75rem 1rem;
+    backdrop-filter: blur(14px);
+  }
 
-::selection { @apply bg-primary/20 text-foreground; }
+  .sidebar-surface {
+    display: flex;
+    height: 100%;
+    flex-direction: column;
+    border: 1px solid hsl(var(--border) / 0.75);
+    border-radius: 1.4rem;
+    background: hsl(var(--card) / 0.74);
+    backdrop-filter: blur(18px);
+    padding: 0.95rem;
+  }
 
-.hide-dev-tools ~ #nextjs-portal, 
-.hide-dev-tools ~ [data-nextjs-toast-wrapper],
-.hide-dev-tools ~ [data-nextjs-dev-indicator] {
-  display: none !important;
+  .sidebar-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    border: 1px solid hsl(var(--border) / 0.55);
+    border-radius: 1rem;
+    padding: 0.75rem;
+  }
+
+  .brand-logo {
+    display: grid;
+    place-items: center;
+    height: 2.25rem;
+    width: 2.25rem;
+    border-radius: 0.75rem;
+    background: hsl(var(--primary) / 0.18);
+    color: hsl(var(--primary));
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+  }
+
+  .sidebar-nav {
+    margin-top: 1rem;
+    flex: 1;
+    overflow: auto;
+  }
+
+  .sidebar-label {
+    margin-bottom: 0.5rem;
+    padding: 0 0.4rem;
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .sidebar-link {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    border: 1px solid transparent;
+    border-radius: 0.85rem;
+    padding: 0.58rem 0.72rem;
+    margin-bottom: 0.4rem;
+    color: hsl(var(--muted-foreground));
+    transition: all 180ms ease;
+  }
+
+  .sidebar-link:hover {
+    color: hsl(var(--foreground));
+    background: hsl(var(--accent) / 0.45);
+    border-color: hsl(var(--border) / 0.6);
+  }
+
+  .sidebar-link-active {
+    color: hsl(var(--foreground));
+    background: hsl(var(--accent) / 0.72);
+    border-color: hsl(var(--border));
+  }
+
+  .sidebar-dot {
+    position: absolute;
+    right: 0.45rem;
+    height: 0.34rem;
+    width: 0.34rem;
+    border-radius: 9999px;
+    background: hsl(var(--primary));
+  }
+
+  .sidebar-footer {
+    margin-top: 0.6rem;
+    display: grid;
+    gap: 0.7rem;
+  }
+
+  .profile-card {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    border: 1px solid hsl(var(--border) / 0.7);
+    border-radius: 0.9rem;
+    padding: 0.55rem;
+    background: hsl(var(--secondary) / 0.6);
+  }
+
+  .premium-card,
+  .glass-acrylic,
+  .glass-frosted,
+  .glass-liquid {
+    border: 1px solid hsl(var(--border) / 0.7);
+    border-radius: 1.25rem;
+    background: hsl(var(--card) / 0.68);
+    backdrop-filter: blur(14px);
+  }
+
+  .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+  .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: hsl(var(--primary) / 0.45);
+    border-radius: 9999px;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.24);
+    color: hsl(var(--foreground));
+  }
+
+  .hide-dev-tools ~ #nextjs-portal,
+  .hide-dev-tools ~ [data-nextjs-toast-wrapper],
+  .hide-dev-tools ~ [data-nextjs-dev-indicator] {
+    display: none !important;
+  }
 }

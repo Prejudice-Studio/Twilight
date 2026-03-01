@@ -130,24 +130,32 @@ async def run_all():
 def main():
     """主入口"""
     parser = argparse.ArgumentParser(
-        description='Twilight - Emby 用户管理系统',
+        description='Twilight - Emby 用户管理系统 v{}'.format(__version__),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
-示例:
-  python main.py api                    # 启动 API 服务器
-  python main.py api --port 8080        # 指定端口
+快速开始:
+  python main.py api                    # 启动 API 服务器（开发）
+  python main.py api --debug            # 调试模式
   python main.py bot                    # 启动 Telegram Bot
   python main.py scheduler              # 启动定时任务
   python main.py all                    # 启动所有服务
-  python main.py --version              # 显示版本
 
-注意:
-  Telegram Bot 默认不启用，需要在 config.toml 中设置:
-    [Global]
-    telegram_mode = true
-    
-    [Telegram]
-    bot_token = "your_bot_token"
+生产部署:
+  pip install uvicorn
+  uvicorn asgi:app --host 0.0.0.0 --port 5000 --workers 4
+
+文档和帮助:
+  📖 安装指南:      docs/INSTALL.md
+  🔧 开发指南:      docs/DEVELOPMENT.md
+  🌐 API 文档:      docs/BACKEND_API.md
+  🚀 快速开始:      README.md
+
+配置:
+  1. 复制 .env.example 为 .env
+  2. 编辑 .env 文件配置相关参数
+  3. （可选）编辑 config.toml 进行高级配置
+
+更多信息: https://github.com/Prejudice-Studio/Twilight
         '''
     )
     
@@ -160,7 +168,7 @@ def main():
     subparsers = parser.add_subparsers(dest='command', help='可用命令')
     
     # API 服务器命令
-    api_parser = subparsers.add_parser('api', help='启动 API 服务器')
+    api_parser = subparsers.add_parser('api', help='(仅开发用) 启动 API 服务器')
     api_parser.add_argument('--host', default='0.0.0.0', help='监听地址')
     api_parser.add_argument('--port', type=int, default=5000, help='监听端口')
     api_parser.add_argument('--debug', action='store_true', help='调试模式')

@@ -4,14 +4,16 @@
 提供系统配置、状态等信息
 """
 from flask import Blueprint, request, g
+from sqlalchemy import text
 
-from src.api.v1.auth import async_route, require_auth, require_admin, api_response
+from src.api.v1.auth import require_auth, require_admin, api_response
 from src.config import (
     Config, EmbyConfig, ScoreAndRegisterConfig, WebhookConfig,
     DeviceLimitConfig, APIConfig, SecurityConfig, SchedulerConfig,
     NotificationConfig, TelegramConfig
 )
 from src import __version__
+from src.db.user import UsersSessionFactory
 
 system_bp = Blueprint('system', __name__, url_prefix='/system')
 
@@ -19,7 +21,6 @@ system_bp = Blueprint('system', __name__, url_prefix='/system')
 # ==================== 公开信息 ====================
 
 @system_bp.route('/info', methods=['GET'])
-@async_route
 async def get_system_info():
     """
     获取系统公开信息
@@ -53,17 +54,24 @@ async def get_system_info():
 
 
 @system_bp.route('/health', methods=['GET'])
-@async_route
 async def health_check():
     """健康检查"""
     from src.services import get_emby_client
     
     status = {
         'api': True,
-        'database': True,
+        'database': False,
         'emby': False,
     }
     
+    # 检查数据库连接
+    try:
+        async with UsersSessionFactory() as session:
+            await session.execute(text('SELECT 1'))
+        status['database'] = True
+    except Exception:
+        status['database'] = False
+
     # 检查 Emby 连接
     try:
         emby = get_emby_client()
@@ -77,8 +85,51 @@ async def health_check():
     return api_response(all_healthy, "OK" if all_healthy else "部分服务异常", status)
 
 
+@system_bp.route('/stats', methods=['GET'])
+@require_auth
+@require_admin
+async def system_stats():
+    """获取系统运行时统计信息（管理员）"""
+    import os
+    import time
+    try:
+        import psutil
+    except ImportError:
+        psutil = None
+
+    stats = {
+        'timestamp': int(time.time()),
+        'cpu_count': os.cpu_count(),
+        'cpu_percent': None,
+        'memory': None,
+        'disk': None,
+    }
+
+    if psutil:
+        stats['cpu_percent'] = psutil.cpu_percent(interval=None)
+        
+        mem = psutil.virtual_memory()
+        stats['memory'] = {
+            'total': mem.total,
+            'available': mem.available,
+            'percent': mem.percent,
+            'used': mem.used
+        }
+        
+        disk = psutil.disk_usage('/')
+        stats['disk'] = {
+            'total': disk.total,
+            'free': disk.free,
+            'percent': disk.percent
+        }
+    
+    # 获取应用级统计 (如总用户数，今日活跃等，这里由于性能原因可以简化或异步获取，暂时只返回系统级)
+    # 若需业务统计，可复用 src.api.v1.stats
+    
+    return api_response(True, "获取成功", stats)
+
+
 @system_bp.route('/emby-urls', methods=['GET'])
-@async_route
 async def get_emby_urls():
     """获取 Emby 服务器地址列表"""
     return api_response(True, "获取成功", {
@@ -89,7 +140,6 @@ async def get_emby_urls():
 # ==================== 需要登录 ====================
 
 @system_bp.route('/config', methods=['GET'])
-@async_route
 @require_auth
 async def get_user_config():
     """获取用户可见的配置"""
@@ -133,7 +183,6 @@ async def get_user_config():
 # ==================== 管理员专用 ====================
 
 @system_bp.route('/admin/config', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def get_admin_config():
@@ -208,7 +257,6 @@ async def get_admin_config():
 
 
 @system_bp.route('/admin/stats', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def get_system_stats():
@@ -247,7 +295,6 @@ async def get_system_stats():
 
 
 @system_bp.route('/admin/config/toml', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def get_config_toml():
@@ -276,7 +323,6 @@ async def get_config_toml():
 
 
 @system_bp.route('/admin/config/toml', methods=['PUT'])
-@async_route
 @require_auth
 @require_admin
 async def update_config_toml():
@@ -354,7 +400,6 @@ async def update_config_toml():
 
 
 @system_bp.route('/admin/apis', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def list_all_apis():
@@ -399,7 +444,6 @@ async def list_all_apis():
 
 
 @system_bp.route('/admin/emby/libraries', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def get_emby_libraries():
@@ -411,7 +455,6 @@ async def get_emby_libraries():
 
 
 @system_bp.route('/admin/emby/nsfw', methods=['PUT'])
-@async_route
 @require_auth
 @require_admin
 async def update_nsfw_library():

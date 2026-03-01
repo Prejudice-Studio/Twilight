@@ -7,21 +7,18 @@ import { Sparkles } from "lucide-react";
 
 export default function Home() {
   const router = useRouter();
-  const { isAuthenticated, isLoading, fetchUser } = useAuthStore();
+  const { isAuthenticated, isLoading, initialize } = useAuthStore();
 
   useEffect(() => {
-    const checkAuth = async () => {
-      await fetchUser();
-    };
-    checkAuth();
-  }, [fetchUser]);
+    void initialize();
+  }, [initialize]);
 
   useEffect(() => {
     if (!isLoading) {
       if (isAuthenticated) {
-        router.push("/dashboard");
+        router.replace("/dashboard");
       } else {
-        router.push("/login");
+        router.replace("/login");
       }
     }
   }, [isAuthenticated, isLoading, router]);

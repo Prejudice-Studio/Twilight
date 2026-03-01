@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Sparkles, Eye, EyeOff, UserPlus, Loader2 } from "lucide-react";
+import { Eye, EyeOff, UserPlus, Loader2, ShieldPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -94,53 +94,43 @@ export default function RegisterPage() {
   };
 
   return (
-    <main className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-background p-4">
+    <main className="relative flex min-h-screen w-full items-center justify-center p-4">
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ duration: 0.8, ease: "easeOut" }}
+        transition={{ duration: 0.35, ease: "easeOut" }}
         className="relative z-10 w-full max-w-[480px]"
       >
-        <Card className="overflow-hidden border-border bg-card/50 shadow-2xl backdrop-blur-3xl">
-          <CardHeader className="space-y-2 pb-6 pt-10 text-center">
-            <motion.div 
-              initial={{ rotate: 10, scale: 0.8 }}
-              animate={{ rotate: 0, scale: 1 }}
-              transition={{ 
-                type: "spring",
-                stiffness: 260,
-                damping: 20,
-                delay: 0.2
-              }}
-              className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary shadow-lg shadow-primary/20"
-            >
-              <Sparkles className="h-7 w-7 text-primary-foreground" />
-            </motion.div>
-            
-            <CardTitle className="text-3xl font-black tracking-tight text-foreground">
+        <Card className="border-border/70 bg-card/78 shadow-2xl backdrop-blur-xl">
+          <CardHeader className="space-y-2 pb-5 pt-8 text-center">
+            <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/14 text-primary">
+              <ShieldPlus className="h-7 w-7" />
+            </div>
+
+            <CardTitle className="text-2xl font-semibold tracking-tight">
               加入 Twilight
             </CardTitle>
-            <CardDescription className="text-muted-foreground">
-              开启全新的私人影音管理体验
+            <CardDescription className="text-sm">
+              创建一个新的账户
             </CardDescription>
           </CardHeader>
-          
-          <CardContent className="px-8 pb-10">
+
+          <CardContent className="px-6 pb-7 md:px-8">
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="username" className="text-foreground/70 ml-1">用户名 *</Label>
+                  <Label htmlFor="username" className="ml-1">用户名 *</Label>
                   <Input
                     id="username"
                     name="username"
                     placeholder="Username"
                     value={formData.username}
                     onChange={handleChange}
-                    className="h-11 border-border bg-muted/50 text-foreground placeholder:text-muted-foreground/50 focus:ring-primary/20"
+                    className="h-11"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="email" className="text-foreground/70 ml-1">邮箱</Label>
+                  <Label htmlFor="email" className="ml-1">邮箱</Label>
                   <Input
                     id="email"
                     name="email"
@@ -148,13 +138,13 @@ export default function RegisterPage() {
                     placeholder="Email (Optional)"
                     value={formData.email}
                     onChange={handleChange}
-                    className="h-11 border-border bg-muted/50 text-foreground placeholder:text-muted-foreground/50 focus:ring-primary/20"
+                    className="h-11"
                   />
                 </div>
               </div>
-              
+
               <div className="space-y-2">
-                <Label htmlFor="password" className="text-foreground/70 ml-1">设置密码 *</Label>
+                <Label htmlFor="password" className="ml-1">设置密码 *</Label>
                 <div className="relative">
                   <Input
                     id="password"
@@ -163,12 +153,12 @@ export default function RegisterPage() {
                     placeholder="Password (Min 6 chars)"
                     value={formData.password}
                     onChange={handleChange}
-                    className="h-11 border-border bg-muted/50 text-foreground placeholder:text-muted-foreground/50 focus:ring-primary/20 pr-10"
+                    className="h-11 pr-10"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-foreground transition-colors"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -176,7 +166,7 @@ export default function RegisterPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="confirmPassword" className="text-foreground/70 ml-1">确认密码 *</Label>
+                <Label htmlFor="confirmPassword" className="ml-1">确认密码 *</Label>
                 <Input
                   id="confirmPassword"
                   name="confirmPassword"
@@ -184,26 +174,26 @@ export default function RegisterPage() {
                   placeholder="Confirm Password"
                   value={formData.confirmPassword}
                   onChange={handleChange}
-                  className="h-11 border-border bg-muted/50 text-foreground placeholder:text-muted-foreground/50 focus:ring-primary/20"
+                  className="h-11"
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="regCode" className="text-foreground/70 ml-1 text-xs">注册码 / 邀请码</Label>
+                <Label htmlFor="regCode" className="ml-1 text-xs">注册码 / 邀请码</Label>
                 <Input
                   id="regCode"
                   name="regCode"
                   placeholder="Registration Code"
                   value={formData.regCode}
                   onChange={handleChange}
-                  className="h-11 border-border bg-muted/50 text-foreground placeholder:text-muted-foreground/50 focus:ring-primary/20"
+                  className="h-11"
                 />
               </div>
 
               <div className="pt-4">
                 <Button
                   type="submit"
-                  className="h-12 w-full bg-primary font-bold text-primary-foreground shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98]"
+                  className="h-11 w-full"
                   disabled={isLoading}
                 >
                   {isLoading ? (
@@ -220,7 +210,7 @@ export default function RegisterPage() {
               <span className="text-muted-foreground">已有账号？</span>
               <Link
                 href="/login"
-                className="font-bold text-primary hover:underline transition-colors"
+                className="font-medium text-primary hover:underline"
               >
                 立即登录
               </Link>
