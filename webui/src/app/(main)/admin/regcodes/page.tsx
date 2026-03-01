@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   FileText,
@@ -35,6 +35,8 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { useAsyncResource } from "@/hooks/use-async-resource";
+import { PageError } from "@/components/layout/page-state";
 import { api, type Regcode } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 
@@ -43,7 +45,6 @@ export default function AdminRegcodesPage() {
   const [regcodes, setRegcodes] = useState<Regcode[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [isLoading, setIsLoading] = useState(true);
 
   // Create dialog
   const [createOpen, setCreateOpen] = useState(false);
@@ -57,34 +58,28 @@ export default function AdminRegcodesPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [createdCodes, setCreatedCodes] = useState<string[]>([]);
 
-  useEffect(() => {
-    loadRegcodes();
-  }, [page]);
-
-  const loadRegcodes = async () => {
-    setIsLoading(true);
-    try {
-      const res = await api.getRegcodes(page);
-      if (res.success && res.data) {
-        const regcodesList = Array.isArray(res.data.regcodes) 
-          ? res.data.regcodes 
-          : Array.isArray(res.data) 
-            ? res.data 
-            : [];
-        setRegcodes(regcodesList);
-        setTotal(res.data.total || regcodesList.length);
-      } else {
-        setRegcodes([]);
-        setTotal(0);
-      }
-    } catch (error) {
-      console.error(error);
+  const loadRegcodesResource = useCallback(async () => {
+    const res = await api.getRegcodes(page);
+    if (res.success && res.data) {
+      const regcodesList = Array.isArray(res.data.regcodes)
+        ? res.data.regcodes
+        : Array.isArray(res.data)
+          ? res.data
+          : [];
+      setRegcodes(regcodesList);
+      setTotal(res.data.total || regcodesList.length);
+    } else {
       setRegcodes([]);
       setTotal(0);
-    } finally {
-      setIsLoading(false);
     }
-  };
+    return true;
+  }, [page]);
+
+  const {
+    isLoading,
+    error,
+    execute: loadRegcodes,
+  } = useAsyncResource(loadRegcodesResource, { immediate: true });
 
   // 监听 Tab 切换，重置数据
   useEffect(() => {
@@ -159,6 +154,10 @@ export default function AdminRegcodesPage() {
   };
 
   const pages = Math.ceil(total / 20);
+
+  if (error) {
+    return <PageError message={error} onRetry={() => void loadRegcodes()} />;
+  }
 
   return (
     <div className="space-y-6">

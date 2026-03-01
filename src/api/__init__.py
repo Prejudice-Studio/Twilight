@@ -15,20 +15,34 @@ from flask_cors import CORS
 
 def create_app() -> Flask:
     """创建 Flask 应用"""
-    app = Flask(__name__)
+    import os
+    from pathlib import Path
+    from src.config import APIConfig
+    
+    # 获取上传目录配置
+    uploads_path = APIConfig.UPLOAD_FOLDER
+    
+    # 确保上传目录存在
+    os.makedirs(uploads_path, exist_ok=True)
+    
+    app = Flask(__name__, static_folder=uploads_path, static_url_path='/uploads')
     
     # 配置
     app.config['JSON_AS_ASCII'] = False  # 支持中文
     app.config['JSON_SORT_KEYS'] = False
+    app.config['MAX_CONTENT_LENGTH'] = APIConfig.MAX_UPLOAD_SIZE  # 最大上传文件大小
+    app.config['UPLOAD_FOLDER'] = uploads_path
     
     # CORS 跨域支持
     if APIConfig.CORS_ENABLED:
-        CORS(app, 
-             origins=APIConfig.CORS_ORIGINS if APIConfig.CORS_ORIGINS else "*",
-             supports_credentials=True,
-             allow_headers=['Content-Type', 'Authorization', 'X-API-Key'],
-             methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-             max_age=86400)
+        CORS(
+            app,
+            resources={r"/api/*": {"origins": "*"}},
+            supports_credentials=False,
+            allow_headers=['Content-Type', 'Authorization', 'X-API-Key'],
+            methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+            max_age=86400,
+        )
     
     # 注册旧版 API（兼容）
     app.register_blueprint(api)

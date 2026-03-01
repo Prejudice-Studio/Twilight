@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search,
@@ -57,15 +58,49 @@ export default function MediaPage() {
   const [activeTab, setActiveTab] = useState("search");
   const [myRequests, setMyRequests] = useState<MediaRequest[]>([]);
   const [isRequestsLoading, setIsRequestsLoading] = useState(false);
+  const searchAbortRef = useRef<AbortController | null>(null);
+  const detailAbortRef = useRef<AbortController | null>(null);
+  const requestsAbortRef = useRef<AbortController | null>(null);
+  const searchCacheRef = useRef<Map<string, MediaItem[]>>(new Map());
+  const detailCacheRef = useRef<Map<string, MediaDetail>>(new Map());
+  const inventoryCacheRef = useRef<Map<string, InventoryCheckResult>>(new Map());
+  const myRequestsCacheRef = useRef<{ data: MediaRequest[]; ts: number } | null>(null);
+
+  useEffect(() => {
+    return () => {
+      searchAbortRef.current?.abort();
+      detailAbortRef.current?.abort();
+      requestsAbortRef.current?.abort();
+    };
+  }, []);
+
+  const isAbortError = (error: unknown) => {
+    return error instanceof DOMException && error.name === "AbortError";
+  };
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
+
+    searchAbortRef.current?.abort();
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+
+    const normalizedQuery = searchQuery.trim();
+    const searchCacheKey = `${searchMode}|${source}|${mediaType}|${normalizedQuery}`;
+
+    if (searchMode === "name") {
+      const cachedResults = searchCacheRef.current.get(searchCacheKey);
+      if (cachedResults) {
+        setResults(cachedResults);
+        return;
+      }
+    }
 
     setIsSearching(true);
     try {
       if (searchMode === "id") {
         // ID 搜索模式
-        const mediaId = parseInt(searchQuery.trim());
+        const mediaId = parseInt(normalizedQuery);
         if (isNaN(mediaId)) {
           toast({
             title: "无效的 ID",
@@ -79,9 +114,9 @@ export default function MediaPage() {
         // 根据来源调用不同的 API
         let detailRes;
         if (source === "tmdb") {
-          detailRes = await api.getMediaByTmdbId(mediaId, mediaType);
+          detailRes = await api.getMediaByTmdbId(mediaId, mediaType, true, controller.signal);
         } else if (source === "bangumi" || source === "bgm") {
-          detailRes = await api.getMediaByBangumiId(mediaId);
+          detailRes = await api.getMediaByBangumiId(mediaId, true, controller.signal);
         } else {
           toast({
             title: "请选择来源",
@@ -119,6 +154,11 @@ export default function MediaPage() {
           setInventoryCheck(null);
           setSelectedSeason(undefined);
           setRequestNote("");
+
+          if (controller.signal.aborted) return;
+
+          const detailKey = `${detail.source}-${detail.id}-${detail.media_type}`;
+          detailCacheRef.current.set(detailKey, detail);
           
           try {
             // 只检查库存，不再重复获取详情
@@ -128,14 +168,18 @@ export default function MediaPage() {
               media_type: detail.media_type,
               title: detail.title,
               year: detail.year,
-            });
+            }, controller.signal);
+
+            if (controller.signal.aborted) return;
             
             // 直接使用已获取的详情数据
             setMediaDetail(detail);
             if (inventoryRes.success && inventoryRes.data) {
               setInventoryCheck(inventoryRes.data);
+              inventoryCacheRef.current.set(detailKey, inventoryRes.data);
             }
           } catch (error: any) {
+            if (isAbortError(error)) return;
             console.error(error);
             // 即使库存检查失败，也显示详情
             setMediaDetail(detail);
@@ -151,7 +195,8 @@ export default function MediaPage() {
         }
       } else {
         // 名称搜索模式
-        const res = await api.searchMedia(searchQuery, source);
+        const res = await api.searchMedia(normalizedQuery, source, controller.signal);
+        if (controller.signal.aborted) return;
         if (res.success && res.data) {
           // 聚合逻辑：确保 TMDB 同片多季（或重复结果）被折叠
           const uniqueResults = new Map<string, MediaItem>();
@@ -169,6 +214,7 @@ export default function MediaPage() {
           
           const finalResults = Array.from(uniqueResults.values());
           setResults(finalResults);
+          searchCacheRef.current.set(searchCacheKey, finalResults);
           
           if (finalResults.length === 0) {
             toast({
@@ -179,6 +225,7 @@ export default function MediaPage() {
         }
       }
     } catch (error: any) {
+      if (isAbortError(error)) return;
       toast({
         title: "搜索失败",
         description: error.message,
@@ -190,6 +237,10 @@ export default function MediaPage() {
   };
 
   const handleSelectMedia = async (media: MediaItem) => {
+    detailAbortRef.current?.abort();
+    const controller = new AbortController();
+    detailAbortRef.current = controller;
+
     setSelectedMedia(media);
     setIsLoadingDetail(true);
     setMediaDetail(null);
@@ -198,20 +249,37 @@ export default function MediaPage() {
     setRequestNote("");
 
     try {
+      const detailKey = `${media.source}-${media.id}-${media.media_type}`;
+      const cachedDetail = detailCacheRef.current.get(detailKey);
+      const cachedInventory = inventoryCacheRef.current.get(detailKey);
+
+      if (cachedDetail) {
+        setMediaDetail(cachedDetail);
+      }
+      if (cachedInventory) {
+        setInventoryCheck(cachedInventory);
+      }
+      if (cachedDetail && cachedInventory) {
+        return;
+      }
+
       // 获取详情和库存检查
       const [detailRes, inventoryRes] = await Promise.all([
-        api.getMediaDetail(media.source, media.id, media.media_type),
+        api.getMediaDetail(media.source, media.id, media.media_type, controller.signal),
         api.checkInventory({
           source: media.source,
           media_id: media.id,
           media_type: media.media_type,
           title: media.title,
           year: media.year,
-        }),
+        }, controller.signal),
       ]);
+
+      if (controller.signal.aborted) return;
 
       if (detailRes.success && detailRes.data) {
         setMediaDetail(detailRes.data);
+        detailCacheRef.current.set(detailKey, detailRes.data);
       } else {
         toast({
           title: "获取详情失败",
@@ -221,8 +289,10 @@ export default function MediaPage() {
       }
       if (inventoryRes.success && inventoryRes.data) {
         setInventoryCheck(inventoryRes.data);
+        inventoryCacheRef.current.set(detailKey, inventoryRes.data);
       }
     } catch (error: any) {
+      if (isAbortError(error)) return;
       console.error(error);
       toast({
         title: "获取详情失败",
@@ -253,6 +323,7 @@ export default function MediaPage() {
           description: "管理员会尽快处理您的请求",
           variant: "success",
         });
+        myRequestsCacheRef.current = null;
         setSelectedMedia(null);
       } else {
         toast({
@@ -279,6 +350,7 @@ export default function MediaPage() {
       const res = await api.deleteMediaRequest(id);
       if (res.success) {
         toast({ title: "删除成功", variant: "success" });
+        myRequestsCacheRef.current = null;
         loadMyRequests();
       } else {
         toast({ title: "删除失败", description: res.message, variant: "destructive" });
@@ -289,13 +361,29 @@ export default function MediaPage() {
   };
 
   const loadMyRequests = async () => {
+    const now = Date.now();
+    if (myRequestsCacheRef.current && now - myRequestsCacheRef.current.ts < 30000) {
+      setMyRequests(myRequestsCacheRef.current.data);
+      return;
+    }
+
+    requestsAbortRef.current?.abort();
+    const controller = new AbortController();
+    requestsAbortRef.current = controller;
+
     setIsRequestsLoading(true);
     try {
-      const res = await api.getMyRequests();
+      const res = await api.getMyRequests(controller.signal);
+      if (controller.signal.aborted) return;
       if (res.success && res.data) {
         setMyRequests(res.data);
+        myRequestsCacheRef.current = {
+          data: res.data,
+          ts: now,
+        };
       }
-    } catch (error) {
+    } catch (error: unknown) {
+      if (isAbortError(error)) return;
       console.error(error);
     } finally {
       setIsRequestsLoading(false);
@@ -468,9 +556,12 @@ export default function MediaPage() {
                     >
                       <div className="aspect-[2/3] relative rounded-t-[2rem] overflow-hidden bg-muted">
                         {media.poster ? (
-                          <img
+                          <Image
                             src={media.poster}
                             alt={media.title}
+                            fill
+                            unoptimized
+                            sizes="(max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
                             className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-110"
                           />
                         ) : (
@@ -550,11 +641,14 @@ export default function MediaPage() {
                       className="group flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-3xl bg-secondary/30 border border-white/40 hover:bg-white/60 transition-all duration-300"
                     >
                       <div className="flex items-center gap-4 flex-1 min-w-0">
-                        <div className="flex h-20 w-14 shrink-0 items-center justify-center rounded-2xl bg-white overflow-hidden shadow-sm border border-white/60">
+                        <div className="relative flex h-20 w-14 shrink-0 items-center justify-center rounded-2xl bg-white overflow-hidden shadow-sm border border-white/60">
                           {req.media_info?.poster_url || req.media_info?.poster ? (
-                            <img 
-                              src={req.media_info.poster_url || req.media_info.poster} 
-                              alt={req.media_info.title} 
+                            <Image
+                              src={req.media_info.poster_url || req.media_info.poster || ""}
+                              alt={req.media_info.title}
+                              fill
+                              unoptimized
+                              sizes="56px"
                               className="h-full w-full object-cover"
                             />
                           ) : (
@@ -638,9 +732,12 @@ export default function MediaPage() {
               {/* Left Side: Poster */}
               <div className="w-full md:w-1/3 aspect-[2/3] md:aspect-auto relative group">
                 {mediaDetail.poster ? (
-                  <img
+                  <Image
                     src={mediaDetail.poster}
                     alt={mediaDetail.title}
+                    fill
+                    unoptimized
+                    sizes="(max-width: 768px) 100vw, 33vw"
                     className="h-full w-full object-cover"
                   />
                 ) : (

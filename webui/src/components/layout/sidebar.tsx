@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
@@ -12,20 +13,19 @@ import {
   Settings,
   Users,
   FileText,
-  Shield,
-  BarChart3,
   LogOut,
   Moon,
   Sun,
-  Sparkles,
   TestTube,
   FileCode,
   Library,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Separator } from "@/components/ui/separator";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { api } from "@/lib/api";
+import { useRegionRefresh } from "@/hooks/use-region-refresh";
+import { RegionRefreshKeys } from "@/lib/region-refresh";
 
 const userNavItems = [
   { href: "/dashboard", label: "仪表盘", icon: LayoutDashboard },
@@ -46,14 +46,47 @@ const adminNavItems = [
 export function Sidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
-  const { setTheme, themes, theme: currentTheme } = useTheme();
+  const { setTheme, theme: currentTheme } = useTheme();
   const isAdmin = user?.role === 0;
+  const [profileAvatar, setProfileAvatar] = useState<string | null>(user?.avatar || null);
+
+  const loadProfileAvatar = useCallback(async () => {
+    if (!user?.uid) {
+      setProfileAvatar(null);
+      return;
+    }
+
+    try {
+      const res = await api.getUserAvatar(user.uid);
+      if (res.success) {
+        setProfileAvatar(res.data?.avatar || user.avatar || null);
+      } else {
+        setProfileAvatar(user.avatar || null);
+      }
+    } catch {
+      setProfileAvatar(user.avatar || null);
+    }
+  }, [user?.uid, user?.avatar]);
+
+  useEffect(() => {
+    setProfileAvatar(user?.avatar || null);
+    void loadProfileAvatar();
+  }, [user?.avatar, loadProfileAvatar]);
+
+  useRegionRefresh(
+    RegionRefreshKeys.UserProfile,
+    useCallback(() => {
+      void loadProfileAvatar();
+    }, [loadProfileAvatar])
+  );
 
   const toggleTheme = (event: React.MouseEvent) => {
     const x = event.clientX;
     const y = event.clientY;
 
-    const nextTheme = currentTheme === "light" ? "bloom" : "light";
+    const themeOrder = ["light", "dark"];
+    const currentIndex = themeOrder.indexOf(currentTheme || "light");
+    const nextTheme = themeOrder[(currentIndex + 1) % themeOrder.length];
 
     if (!(document as any).startViewTransition) {
       setTheme(nextTheme);
@@ -87,119 +120,78 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-white/40 glass-acrylic transition-all duration-500">
-      <div className="flex h-full flex-col">
-        {/* Logo */}
-        <div className="flex h-20 items-center gap-3 border-b border-white/20 px-6">
-          <div className="group relative flex h-10 w-10 items-center justify-center rounded-2xl bg-primary shadow-lg shadow-primary/20 transition-all hover:scale-110 active:scale-95">
-            <Sparkles className="h-6 w-6 text-primary-foreground" />
-          </div>
-          <div className="flex flex-col">
-            <span className="text-xl font-black tracking-tight text-foreground bg-clip-text text-transparent bg-gradient-to-br from-foreground to-foreground/70">Twilight</span>
-            <span className="text-[9px] font-bold text-primary/60 uppercase tracking-widest leading-none">Studio</span>
+    <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 p-4 lg:block">
+      <div className="sidebar-surface h-full">
+        <div className="sidebar-brand">
+          <div className="brand-logo">TW</div>
+          <div>
+            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Media OPS</p>
+            <h2 className="text-lg font-semibold">Twilight</h2>
           </div>
         </div>
 
-        {/* User Nav */}
-        <nav className="flex-1 space-y-1.5 px-3 py-6 overflow-y-auto custom-scrollbar">
-          <div className="mb-4 px-3">
-            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-muted-foreground/60">
-              Menu
-            </p>
-          </div>
-          {userNavItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "group relative flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-bold transition-all duration-500",
-                pathname === item.href
-                  ? "glass-frosted text-primary shadow-lg shadow-primary/5"
-                  : "text-muted-foreground/80 hover:bg-white/40 hover:text-foreground"
-              )}
-            >
-              <div className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-xl transition-all duration-500",
-                pathname === item.href ? "bg-primary text-primary-foreground shadow-md shadow-primary/20" : "bg-white/50 text-muted-foreground group-hover:bg-primary group-hover:text-primary-foreground group-hover:shadow-md"
-              )}>
+        <nav className="sidebar-nav">
+          <p className="sidebar-label">用户菜单</p>
+          {userNavItems.map((item) => {
+            const active = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn("sidebar-link", active && "sidebar-link-active")}
+              >
                 <item.icon className="h-4 w-4" />
-              </div>
-              {item.label}
-              {pathname === item.href && (
-                <motion.div 
-                  layoutId="sidebar-active"
-                  className="absolute left-0 h-6 w-1 rounded-r-full bg-primary" 
-                />
-              )}
-            </Link>
-          ))}
+                <span>{item.label}</span>
+                {active && <motion.div layoutId="sidebar-active" className="sidebar-dot" />}
+              </Link>
+            );
+          })}
 
           {isAdmin && (
             <>
-              <div className="mt-10 mb-4 px-3">
-                <p className="text-[10px] font-black uppercase tracking-[0.3em] text-muted-foreground/60">
-                  Admin Control
-                </p>
-              </div>
-              {adminNavItems.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    "group relative flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-bold transition-all duration-500",
-                    pathname.startsWith(item.href)
-                      ? "glass-frosted text-primary shadow-lg shadow-primary/5"
-                      : "text-muted-foreground/80 hover:bg-white/40 hover:text-foreground"
-                  )}
-                >
-                  <div className={cn(
-                    "flex h-8 w-8 items-center justify-center rounded-xl transition-all duration-500",
-                    pathname.startsWith(item.href) ? "bg-primary text-primary-foreground shadow-md shadow-primary/20" : "bg-white/50 text-muted-foreground group-hover:bg-primary group-hover:text-primary-foreground group-hover:shadow-md"
-                  )}>
+              <p className="sidebar-label mt-5">管理菜单</p>
+              {adminNavItems.map((item) => {
+                const active = pathname.startsWith(item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn("sidebar-link", active && "sidebar-link-active")}
+                  >
                     <item.icon className="h-4 w-4" />
-                  </div>
-                  {item.label}
-                  {pathname.startsWith(item.href) && (
-                    <motion.div 
-                      layoutId="sidebar-active-admin"
-                      className="absolute left-0 h-6 w-1 rounded-r-full bg-primary" 
-                    />
-                  )}
-                </Link>
-              ))}
+                    <span>{item.label}</span>
+                    {active && <motion.div layoutId="sidebar-active-admin" className="sidebar-dot" />}
+                  </Link>
+                );
+              })}
             </>
           )}
         </nav>
 
-        {/* Action Buttons */}
-        <div className="mt-auto p-4 space-y-3">
-          <div className="flex items-center gap-3 rounded-[1.5rem] border border-white/50 bg-white/40 p-3 shadow-inner">
-            <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
-              <AvatarFallback className="bg-primary text-primary-foreground text-xs font-black">
+        <div className="sidebar-footer">
+          <div className="profile-card">
+            <Avatar className="h-10 w-10 border border-border/60">
+              {profileAvatar && <AvatarImage src={profileAvatar} alt={user?.username} />}
+              <AvatarFallback className="bg-primary/15 text-primary text-xs font-semibold">
                 {user?.username?.slice(0, 2).toUpperCase() || "U"}
               </AvatarFallback>
             </Avatar>
-            <div className="flex-1 truncate">
-              <p className="text-sm font-black text-foreground truncate">{user?.username}</p>
-              <p className="text-[9px] text-primary/70 uppercase font-black tracking-widest leading-none mt-0.5">{user?.role_name}</p>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">{user?.username}</p>
+              <p className="truncate text-xs text-muted-foreground">{user?.role_name}</p>
             </div>
           </div>
 
-          <div className="flex gap-2">
+          <div className="grid grid-cols-2 gap-2">
             <Button
               variant="outline"
-              size="icon"
+              className="h-10"
               onClick={toggleTheme}
-              className="flex-1 h-11 rounded-2xl bg-white/60 hover:bg-white border-white/40 shadow-sm"
+              title={`当前主题: ${currentTheme || "light"}`}
             >
-              <Sun className={cn("h-4 w-4 transition-all", currentTheme === "bloom" ? "text-orange-500" : "text-amber-500")} />
+              {currentTheme === "dark" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
             </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={logout}
-              className="flex-1 h-11 rounded-2xl bg-white/60 hover:bg-red-50 hover:text-red-500 border-white/40 shadow-sm"
-            >
+            <Button variant="outline" className="h-10" onClick={logout}>
               <LogOut className="h-4 w-4" />
             </Button>
           </div>

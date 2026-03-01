@@ -1,0 +1,50 @@
+# EditorConfig 配置
+# 详见 https://editorconfig.org/
+
+root = true
+
+# 所有文件
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Python 文件
+[*.py]
+indent_style = space
+indent_size = 4
+max_line_length = 120
+
+# TOML 文件
+[*.toml]
+indent_style = space
+indent_size = 2
+
+# JSON 文件
+[*.json]
+indent_style = space
+indent_size = 2
+
+# Markdown 文件
+[*.md]
+trim_trailing_whitespace = false
+
+# YAML 文件
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+# TypeScript/JavaScript 文件
+[*.{ts,tsx,js,jsx}]
+indent_style = space
+indent_size = 2
+
+# CSS/SCSS 文件
+[*.{css,scss}]
+indent_style = space
+indent_size = 2
+
+# Windows 特定行尾处理
+[*.{bat,cmd,ps1}]
+end_of_line = crlf

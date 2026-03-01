@@ -42,6 +42,7 @@ class UserModel(UsersDatabaseModel):
     APIKEY_STATUS: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, nullable=True)
     APIKEY: Mapped[Optional[str]] = mapped_column(String, default='', nullable=True)
     AUTO_RENEW: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, nullable=True)  # 自动续期开关
+    AVATAR: Mapped[Optional[str]] = mapped_column(String, default='', nullable=True)  # 用户头像 URL
     OTHER: Mapped[Optional[str]] = mapped_column(String, default='', nullable=True)
 
 

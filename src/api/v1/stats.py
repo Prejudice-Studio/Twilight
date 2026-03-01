@@ -5,7 +5,7 @@
 """
 from flask import Blueprint, request, g
 
-from src.api.v1.auth import async_route, require_auth, require_admin, api_response
+from src.api.v1.auth import require_auth, require_admin, api_response
 from src.services.stats_service import StatsService
 
 stats_bp = Blueprint('stats', __name__, url_prefix='/stats')
@@ -14,7 +14,6 @@ stats_bp = Blueprint('stats', __name__, url_prefix='/stats')
 # ==================== 个人统计 ====================
 
 @stats_bp.route('/me', methods=['GET'])
-@async_route
 @require_auth
 async def get_my_stats():
     """
@@ -47,7 +46,6 @@ async def get_my_stats():
 
 
 @stats_bp.route('/playback/my', methods=['GET'])
-@async_route
 @require_auth
 async def get_my_playback_stats():
     """
@@ -78,7 +76,6 @@ async def get_my_playback_stats():
 
 
 @stats_bp.route('/user/<int:uid>', methods=['GET'])
-@async_route
 @require_auth
 async def get_user_stats(uid: int):
     """获取指定用户的统计（需要登录）"""
@@ -92,7 +89,6 @@ async def get_user_stats(uid: int):
 # ==================== 排行榜 ====================
 
 @stats_bp.route('/ranking', methods=['GET'])
-@async_route
 async def get_ranking():
     """
     获取播放排行榜
@@ -142,7 +138,6 @@ async def get_ranking():
 
 
 @stats_bp.route('/ranking/media', methods=['GET'])
-@async_route
 async def get_media_ranking():
     """
     获取媒体播放排行
@@ -165,7 +160,6 @@ async def get_media_ranking():
 
 
 @stats_bp.route('/ranking/daily', methods=['GET'])
-@async_route
 async def get_daily_ranking():
     """
     获取日榜（按日期）

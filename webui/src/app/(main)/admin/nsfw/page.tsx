@@ -1,11 +1,13 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { motion } from "framer-motion";
 import { Library, Loader2, Save, AlertCircle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { useAsyncResource } from "@/hooks/use-async-resource";
+import { PageError, PageLoading } from "@/components/layout/page-state";
 import { api } from "@/lib/api";
 import {
   Alert,
@@ -39,50 +41,25 @@ export default function NsfwLibraryPage() {
   const { toast } = useToast();
   const [libraries, setLibraries] = useState<LibraryItem[]>([]);
   const [selectedLibraryId, setSelectedLibraryId] = useState<string>("");
-  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
-  useEffect(() => {
-    loadLibraries();
+  const loadLibrariesResource = useCallback(async () => {
+    const res = await api.getEmbyLibraries();
+    if (res.success && res.data) {
+      setLibraries(res.data);
+      const nsfwLib = res.data.find((lib) => lib.is_nsfw);
+      setSelectedLibraryId(nsfwLib?.id || "");
+    } else {
+      throw new Error(res.message || "无法加载媒体库列表");
+    }
+    return true;
   }, []);
 
-  const loadLibraries = async () => {
-    setIsLoading(true);
-    try {
-      const res = await api.getEmbyLibraries();
-      if (res.success && res.data) {
-        setLibraries(res.data);
-        // 找到当前选中的 NSFW 库
-        const nsfwLib = res.data.find((lib) => lib.is_nsfw);
-        if (nsfwLib) {
-          setSelectedLibraryId(nsfwLib.id);
-        }
-      } else {
-        toast({
-          title: "加载失败",
-          description: res.message || "无法加载媒体库列表",
-          variant: "destructive",
-        });
-      }
-    } catch (error: any) {
-      const errorMessage = error.message || "请检查网络连接";
-      if (errorMessage.includes("接口不存在")) {
-        toast({
-          title: "接口不存在",
-          description: "请确认后端服务已重启并包含最新代码。如果问题持续，请联系管理员。",
-          variant: "destructive",
-        });
-      } else {
-        toast({
-          title: "加载失败",
-          description: errorMessage,
-          variant: "destructive",
-        });
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const {
+    isLoading,
+    error,
+    execute: loadLibraries,
+  } = useAsyncResource(loadLibrariesResource, { immediate: true });
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -113,12 +90,12 @@ export default function NsfwLibraryPage() {
     }
   };
 
+  if (error) {
+    return <PageError message={error} onRetry={() => void loadLibraries()} />;
+  }
+
   if (isLoading) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
+    return <PageLoading message="正在加载媒体库..." />;
   }
 
   return (

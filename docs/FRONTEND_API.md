@@ -1,60 +1,98 @@
 # Twilight 前端开发文档
 
-Twilight 前端采用现代化技术栈构建，专注于提供极佳的用户体验。
+Twilight 当前主前端位于 `webui/`，技术栈为 Next.js + TypeScript + Tailwind CSS。
 
-## 技术栈
+## 前端目录说明
 
-- **框架**: Next.js 16 (App Router)
-- **样式**: Tailwind CSS
-- **组件库**: Radix UI + Lucide React
-- **状态管理**: Zustand
-- **数据获取**: TanStack Query (React Query)
-- **动画**: Framer Motion
+- `webui/`：主前端（Next.js 16，生产使用）
+- `webui/webui/`：历史 Vite 原型工程（默认不参与主流程）
 
-## 开发配置
+## 技术栈（主前端）
 
-### 环境变量
+- Next.js 16（App Router）
+- TypeScript
+- Tailwind CSS
+- Radix UI + 自定义组件
+- Zustand（状态管理）
+- TanStack Query（数据请求）
+- Framer Motion（动效）
 
-在 `webui` 目录下创建 `.env.local`:
+## 本地开发
 
-```env
-# 后端 API 地址
-NEXT_PUBLIC_API_URL=http://localhost:5000
-```
-
-### 运行
+### 1) 安装依赖
 
 ```bash
-npm install
-npm run dev
+cd webui
+pnpm install
+# 或 npm install
 ```
 
-## 项目结构
+### 2) 配置环境变量
 
-- **`src/app`**: 页面路由定义。
-- **`src/components`**: 可复用的 UI 组件。
-- **`src/lib`**: 工具类和 API 客户端 (`api.ts`)。
-- **`src/store`**: 状态管理（认证、全局状态）。
-- **`src/hooks`**: 自定义 React Hooks。
+创建 `webui/.env.local`：
 
-## API 调用规范
+```env
+NEXT_PUBLIC_API_URL=http://localhost:5000
+NEXT_PUBLIC_SITE_NAME=Twilight
+```
 
-前端统一使用 `webui/src/lib/api.ts` 中的 `ApiClient` 类与后端通信。
+### 3) 启动开发服务
+
+```bash
+pnpm dev
+# 或 npm run dev
+```
+
+默认访问：`http://localhost:3000`
+
+## 与后端联调
+
+- 后端推荐启动命令：`python main.py api --debug`
+- Swagger：`http://localhost:5000/api/v1/docs`
+- 前端 API 客户端：`webui/src/lib/api.ts`
 
 示例：
-```typescript
+
+```ts
 import { api } from "@/lib/api";
 
-const userInfo = await api.getMe();
+const me = await api.getMe();
 ```
 
-所有请求都会自动携带 Auth Store 中的 Token。
+## 构建与发布
 
-## 主题系统
+```bash
+pnpm build
+pnpm start
+```
 
-系统支持三种内置主题，可通过侧边栏切换：
-1. **淡蓝与奶白色**
-2. **淡柑橘色**
-3. **深色模式**
+若使用 npm：
 
-切换主题时使用圆周扩散动画效果。
+```bash
+npm run build
+npm run start
+```
+
+## 常见问题
+
+### 前端请求 401
+
+- 确认已登录并有有效 Token
+- 检查浏览器存储中的认证信息是否过期
+
+### 前端请求不到后端
+
+- 检查 `NEXT_PUBLIC_API_URL`
+- 确认后端服务运行在对应端口（默认 5000）
+- 如跨域，检查后端 CORS 配置
+
+### 页面样式异常
+
+- 删除缓存后重装依赖：`rm -rf node_modules .next`（Windows 可手动删除）
+- 重新安装并启动
+
+## 参考文档
+
+- [后端 API 文档](./BACKEND_API.md)
+- [开发指南](./DEVELOPMENT.md)
+- [安装部署指南](./INSTALL.md)

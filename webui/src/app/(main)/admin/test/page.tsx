@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { TestTube, Loader2, CheckCircle2, XCircle, Plus, X, List, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -264,7 +264,7 @@ export default function AdminTestPage() {
     setCustomParams(newParams);
   };
 
-  const loadApiList = async () => {
+  const loadApiList = useCallback(async () => {
     setIsLoadingApis(true);
     try {
       const res = await api.getAllApis();
@@ -296,11 +296,11 @@ export default function AdminTestPage() {
     } finally {
       setIsLoadingApis(false);
     }
-  };
+  }, [toast]);
 
   useEffect(() => {
-    loadApiList();
-  }, []);
+    void loadApiList();
+  }, [loadApiList]);
 
   const handleSelectApi = (apiInfo: ApiInfo) => {
     setSelectedApi(apiInfo);

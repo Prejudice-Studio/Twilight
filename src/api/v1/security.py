@@ -5,7 +5,7 @@
 """
 from flask import Blueprint, request, g
 
-from src.api.v1.auth import async_route, require_auth, require_admin, api_response
+from src.api.v1.auth import require_auth, require_admin, api_response
 from src.services.security_service import SecurityService
 from src.db.login_log import LoginLogOperate, IPListOperate
 
@@ -15,7 +15,6 @@ security_bp = Blueprint('security', __name__, url_prefix='/security')
 # ==================== 用户设备管理 ====================
 
 @security_bp.route('/devices', methods=['GET'])
-@async_route
 @require_auth
 async def get_my_devices():
     """获取我的设备列表"""
@@ -24,7 +23,6 @@ async def get_my_devices():
 
 
 @security_bp.route('/devices/<device_id>/block', methods=['POST'])
-@async_route
 @require_auth
 async def block_my_device(device_id: str):
     """封禁我的设备"""
@@ -33,7 +31,6 @@ async def block_my_device(device_id: str):
 
 
 @security_bp.route('/devices/<device_id>/trust', methods=['POST'])
-@async_route
 @require_auth
 async def trust_my_device(device_id: str):
     """信任我的设备"""
@@ -44,7 +41,6 @@ async def trust_my_device(device_id: str):
 # ==================== 登录日志 ====================
 
 @security_bp.route('/login-history', methods=['GET'])
-@async_route
 @require_auth
 async def get_my_login_history():
     """获取我的登录历史"""
@@ -56,7 +52,6 @@ async def get_my_login_history():
 
 
 @security_bp.route('/login-history/<int:uid>', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def get_user_login_history(uid: int):
@@ -69,7 +64,6 @@ async def get_user_login_history(uid: int):
 # ==================== IP 管理（管理员） ====================
 
 @security_bp.route('/ip/blacklist', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def get_ip_blacklist():
@@ -90,7 +84,6 @@ async def get_ip_blacklist():
 
 
 @security_bp.route('/ip/blacklist', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def add_ip_to_blacklist():
@@ -108,7 +101,6 @@ async def add_ip_to_blacklist():
 
 
 @security_bp.route('/ip/blacklist', methods=['DELETE'])
-@async_route
 @require_auth
 @require_admin
 async def remove_ip_from_blacklist():
@@ -126,7 +118,6 @@ async def remove_ip_from_blacklist():
 # ==================== 可疑活动 ====================
 
 @security_bp.route('/suspicious', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def get_suspicious_activity():
@@ -139,7 +130,6 @@ async def get_suspicious_activity():
 # ==================== 管理员设备管理 ====================
 
 @security_bp.route('/users/<int:uid>/devices', methods=['GET'])
-@async_route
 @require_auth
 @require_admin
 async def get_user_devices(uid: int):
@@ -149,7 +139,6 @@ async def get_user_devices(uid: int):
 
 
 @security_bp.route('/users/<int:uid>/devices/<device_id>/block', methods=['POST'])
-@async_route
 @require_auth
 @require_admin
 async def admin_block_device(uid: int, device_id: str):

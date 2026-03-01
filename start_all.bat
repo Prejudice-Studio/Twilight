@@ -14,6 +14,13 @@ timeout /t 2 /nobreak > nul
 echo Starting Frontend...
 start "Twilight Frontend" cmd /k "cd /d %~dp0webui && npm run dev"
 
+:: 等待 5 秒让前端完全启动
+timeout /t 5 /nobreak > nul
+
+:: 自动打开浏览器
+echo Opening browser...
+start http://localhost:3000
+
 echo ==========================================
 echo    All services are launching!
 echo    Backend: http://127.0.0.1:5000/api/v1/docs

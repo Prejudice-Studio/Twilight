@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Users,
@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { useAsyncResource } from "@/hooks/use-async-resource";
+import { PageError, PageLoading } from "@/components/layout/page-state";
 import { api, type SystemStats } from "@/lib/api";
 import { formatNumber } from "@/lib/utils";
 
@@ -30,31 +32,27 @@ const item = {
 
 export default function AdminStatsPage() {
   const [stats, setStats] = useState<SystemStats | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    loadStats();
+  const loadStatsResource = useCallback(async () => {
+    const res = await api.getSystemStats();
+    if (res.success && res.data) {
+      setStats(res.data);
+    }
+    return true;
   }, []);
 
-  const loadStats = async () => {
-    try {
-      const res = await api.getSystemStats();
-      if (res.success && res.data) {
-        setStats(res.data);
-      }
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const {
+    isLoading,
+    error,
+    execute: loadStats,
+  } = useAsyncResource(loadStatsResource, { immediate: true });
+
+  if (error) {
+    return <PageError message={error} onRetry={() => void loadStats()} />;
+  }
 
   if (isLoading) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
+    return <PageLoading message="正在加载统计数据..." />;
   }
 
   return (

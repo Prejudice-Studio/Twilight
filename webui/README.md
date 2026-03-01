@@ -1,10 +1,10 @@
 # Twilight Web UI
 
-基于 Next.js 14 + TypeScript + Tailwind CSS 的现代化 Web 管理界面。
+基于 Next.js 16 + TypeScript + Tailwind CSS 的现代化 Web 管理界面。
 
 ## 技术栈
 
-- **框架**: [Next.js 14](https://nextjs.org/) (App Router)
+- **框架**: [Next.js 16](https://nextjs.org/) (App Router)
 - **语言**: TypeScript
 - **样式**: [Tailwind CSS](https://tailwindcss.com/)
 - **UI 组件**: [shadcn/ui](https://ui.shadcn.com/) + [Radix UI](https://www.radix-ui.com/)
@@ -38,9 +38,9 @@
 
 ```bash
 cd webui
-npm install
-# 或
 pnpm install
+# 或
+npm install
 ```
 
 ### 配置环境
@@ -58,7 +58,8 @@ NEXT_PUBLIC_SITE_NAME=Twilight
 ### 开发模式
 
 ```bash
-npm run dev
+pnpm dev
+# 或 npm run dev
 ```
 
 访问 <http://localhost:3000>
@@ -66,8 +67,9 @@ npm run dev
 ### 构建生产版本
 
 ```bash
-npm run build
-npm run start
+pnpm build
+pnpm start
+# 或 npm run build && npm run start
 ```
 
 ## 目录结构

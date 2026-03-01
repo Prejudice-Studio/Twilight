@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Coins,
@@ -35,9 +35,13 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useAsyncResource } from "@/hooks/use-async-resource";
+import { useRegionRefresh } from "@/hooks/use-region-refresh";
+import { PageError } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
 import { api, type ScoreInfo, type PlaybackStats, type TopMediaItem } from "@/lib/api";
 import { formatRelativeTime, formatNumber, cn } from "@/lib/utils";
+import { RegionRefreshKeys } from "@/lib/region-refresh";
 
 const container = {
   hidden: { opacity: 0 },
@@ -60,7 +64,6 @@ export default function DashboardPage() {
   const [scoreInfo, setScoreInfo] = useState<ScoreInfo | null>(null);
   const [stats, setStats] = useState<PlaybackStats | null>(null);
   const [isCheckinLoading, setIsCheckinLoading] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
   const [regCode, setRegCode] = useState("");
   const [isRenewing, setIsRenewing] = useState(false);
   const [topMedia, setTopMedia] = useState<TopMediaItem[]>([]);
@@ -72,33 +75,35 @@ export default function DashboardPage() {
   const [editScoreValue, setEditScoreValue] = useState(0);
   const [isEditingScore, setIsEditingScore] = useState(false);
 
-  // 加载数据函数
-  const loadData = async () => {
-    try {
-      const [scoreRes, statsRes, topMediaRes] = await Promise.all([
-        api.getScoreInfo(),
-        api.getMyStats().catch(() => ({ success: false, data: null })),
-        api.getTopMedia("week", 5).catch(() => ({ success: false, data: { ranking: [] } })),
-      ]);
-      if (scoreRes.success && scoreRes.data) {
-        setScoreInfo(scoreRes.data);
-      }
-      if (statsRes.success && statsRes.data) {
-        setStats(statsRes.data);
-      }
-      if (topMediaRes.success && topMediaRes.data) {
-        setTopMedia(topMediaRes.data.ranking);
-      }
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const loadDashboardData = useCallback(async () => {
+    const [scoreRes, statsRes, topMediaRes] = await Promise.all([
+      api.getScoreInfo(),
+      api.getMyStats().catch(() => ({ success: false, data: null })),
+      api.getTopMedia("week", 5).catch(() => ({ success: false, data: { ranking: [] } })),
+    ]);
 
-  useEffect(() => {
-    loadData();
+    if (scoreRes.success && scoreRes.data) {
+      setScoreInfo(scoreRes.data);
+    }
+    if (statsRes.success && statsRes.data) {
+      setStats(statsRes.data);
+    }
+    if (topMediaRes.success && topMediaRes.data) {
+      setTopMedia(topMediaRes.data.ranking);
+    }
+
+    return true;
   }, []);
+
+  const {
+    isLoading,
+    error,
+    execute: loadData,
+  } = useAsyncResource(loadDashboardData, { immediate: true });
+
+  useRegionRefresh(RegionRefreshKeys.DashboardData, useCallback(() => {
+    void loadData();
+  }, [loadData]));
 
   const handleCheckRegcode = async () => {
     if (!regCode.trim()) {
@@ -315,6 +320,10 @@ export default function DashboardPage() {
     if (hour < 22) return "晚上好";
     return "夜深了";
   };
+
+  if (error) {
+    return <PageError message={error} onRetry={() => void loadData()} />;
+  }
 
   return (
     <motion.div

@@ -4,22 +4,30 @@
 提供用户认证、登录、登出等功能
 """
 import hashlib
+import logging
 import time
 from functools import wraps
 from typing import Optional, Callable, Any
 from flask import Blueprint, request, g, jsonify
 
-from src.config import APIConfig
+from src.config import APIConfig, Config
 from src.core.utils import verify_password, timestamp
 from src.db.user import UserOperate, UserModel, Role
 from src.db.login_log import LoginLogOperate, LoginLogModel
+from src.services import UserService
+
+try:
+    from redis.asyncio import Redis
+except ImportError:  # pragma: no cover - optional dependency
+    Redis = None  # type: ignore
+
+logger = logging.getLogger(__name__)
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 
-# 简单的 token 存储（生产环境应使用 Redis 等）
+# token 存储：优先使用 Redis，未配置时回退内存（单进程有效）
 _token_store: dict[str, dict] = {}
-_last_cleanup_time: int = 0
-_cleanup_interval: int = 3600  # 每小时清理一次过期 token
+_redis_client: Optional["Redis"] = None
 
 
 # ==================== 工具函数 ====================
@@ -42,43 +50,76 @@ def api_response(success: bool, message: str, data: Any = None, code: int = 200)
     return jsonify(response), code
 
 
-def async_route(f: Callable) -> Callable:
-    """将异步函数转换为 Flask 路由"""
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        import asyncio
-        import inspect
-        
-        # 检查函数是否是协程函数
-        if inspect.iscoroutinefunction(f):
-            # 是协程函数，需要运行
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            
-            # 调用函数获取协程
-            coro = f(*args, **kwargs)
-            # 确保是协程
-            if inspect.iscoroutine(coro):
-                return loop.run_until_complete(coro)
-            else:
-                # 如果不是协程，直接返回
-                return coro
-        else:
-            # 不是协程函数，直接调用
-            return f(*args, **kwargs)
-    return wrapper
 
+
+def _token_key(token: str) -> str:
+    return f"tw:token:{token}"
+
+
+def _user_tokens_key(uid: int) -> str:
+    return f"tw:user:{uid}:tokens"
+
+
+async def _get_redis() -> Optional["Redis"]:
+    """延迟初始化 Redis 客户端，未配置时返回 None。"""
+    global _redis_client
+    if not Config.REDIS_URL:
+        return None
+    if Redis is None:
+        logger.warning("检测到 REDIS_URL 但未安装 redis 依赖，回退为内存 token 存储")
+        return None
+    if _redis_client is None:
+        _redis_client = Redis.from_url(Config.REDIS_URL, decode_responses=True, encoding="utf-8")
+    return _redis_client
+
+
+async def _load_token(token: str) -> Optional[dict]:
+    redis_client = await _get_redis()
+    if redis_client:
+        try:
+            data = await redis_client.hgetall(_token_key(token))
+            if not data:
+                return None
+            return {
+                'uid': int(data['uid']),
+                'created_at': int(data['created_at']),
+                'expires_at': int(data['expires_at']),
+            }
+        except (KeyError, ValueError):
+            await redis_client.delete(_token_key(token))
+            return None
+        except Exception as exc:  # pragma: no cover - redis 挂掉时回退
+            logger.warning("Redis token store 读取失败，回退内存：%s", exc)
+    return _token_store.get(token)
+
+
+async def _store_token(token: str, uid: int) -> dict:
+    payload = {
+        'uid': uid,
+        'created_at': timestamp(),
+        'expires_at': timestamp() + APIConfig.TOKEN_EXPIRE,
+    }
+    redis_client = await _get_redis()
+    if redis_client:
+        try:
+            pipe = redis_client.pipeline()
+            pipe.hset(_token_key(token), mapping=payload)
+            pipe.expire(_token_key(token), APIConfig.TOKEN_EXPIRE)
+            pipe.sadd(_user_tokens_key(uid), token)
+            pipe.expire(_user_tokens_key(uid), APIConfig.TOKEN_EXPIRE)
+            await pipe.execute()
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Redis token store 写入失败，回退内存：%s", exc)
+            _token_store[token] = payload
+            return payload
+    else:
+        _token_store[token] = payload
+    return payload
 
 def require_auth(f: Callable) -> Callable:
     """要求认证的装饰器（管理员可选认证）"""
     @wraps(f)
     async def wrapper(*args, **kwargs):
-        # 定期清理过期 token
-        _cleanup_expired_tokens()
-        
         # 从请求头获取 token
         auth_header = request.headers.get('Authorization', '')
         
@@ -95,20 +136,20 @@ def require_auth(f: Callable) -> Callable:
             return api_response(False, "认证令牌格式无效", code=401)
         
         # 验证 token
-        token_data = _token_store.get(token)
+        token_data = await _load_token(token)
         if not token_data:
             return api_response(False, "认证令牌无效或已过期", code=401)
         
         # 检查 token 是否过期
         if timestamp() > token_data['expires_at']:
             # 清理过期 token
-            _token_store.pop(token, None)
+            await revoke_token(token, token_data.get('uid'))
             return api_response(False, "认证令牌已过期", code=401)
         
         # 获取用户
         user = await UserOperate.get_user_by_uid(token_data['uid'])
         if not user:
-            _token_store.pop(token, None)
+            await revoke_token(token, token_data.get('uid'))
             return api_response(False, "用户不存在", code=401)
         
         # 检查用户状态
@@ -140,58 +181,48 @@ def require_admin(f: Callable) -> Callable:
         return await f(*args, **kwargs)
     return wrapper
 
-
-def _cleanup_expired_tokens():
-    """清理过期的 token"""
-    global _last_cleanup_time
-    current_time = timestamp()
-    
-    # 如果距离上次清理时间不足，跳过
-    if current_time - _last_cleanup_time < _cleanup_interval:
-        return
-    
-    _last_cleanup_time = current_time
-    expired_tokens = [
-        token for token, data in _token_store.items()
-        if current_time > data['expires_at']
-    ]
-    for token in expired_tokens:
-        _token_store.pop(token, None)
-    
-    if expired_tokens:
-        import logging
-        logging.getLogger(__name__).debug(f"清理了 {len(expired_tokens)} 个过期 token")
-
-
-def generate_token(uid: int) -> str:
-    """生成认证 token (加密安全)"""
-    # 定期清理过期 token
-    _cleanup_expired_tokens()
-    
-    # 生成 256 位 (32 字节) 的加密安全随机 token (十六进制表示为 64 字符)
+async def generate_token(uid: int) -> str:
+    """生成认证 token (加密安全)并持久化。"""
     import secrets
     token = secrets.token_hex(32)
-    
-    # 存储 token 信息
-    _token_store[token] = {
-        'uid': uid,
-        'created_at': timestamp(),
-        'expires_at': timestamp() + APIConfig.TOKEN_EXPIRE,
-    }
-    
+    await _store_token(token, uid)
     return token
 
 
-def revoke_token(token: str):
+async def revoke_token(token: str, uid: Optional[int] = None):
     """撤销 token"""
+    redis_client = await _get_redis()
+    if redis_client:
+        try:
+            pipe = redis_client.pipeline()
+            pipe.delete(_token_key(token))
+            if uid is not None:
+                pipe.srem(_user_tokens_key(uid), token)
+            await pipe.execute()
+            return
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Redis token 撤销失败，回退内存：%s", exc)
     _token_store.pop(token, None)
 
 
-def revoke_user_tokens(uid: int):
+async def revoke_user_tokens(uid: int):
     """撤销用户的所有 token"""
+    redis_client = await _get_redis()
+    if redis_client:
+        try:
+            tokens = await redis_client.smembers(_user_tokens_key(uid))
+            if tokens:
+                pipe = redis_client.pipeline()
+                for token in tokens:
+                    pipe.delete(_token_key(token))
+                pipe.delete(_user_tokens_key(uid))
+                await pipe.execute()
+            return
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Redis 批量撤销 token 失败，回退内存：%s", exc)
     tokens_to_remove = [
         token for token, data in _token_store.items()
-        if data['uid'] == uid
+        if data.get('uid') == uid
     ]
     for token in tokens_to_remove:
         _token_store.pop(token, None)
@@ -200,7 +231,6 @@ def revoke_user_tokens(uid: int):
 # ==================== 登录相关 ====================
 
 @auth_bp.route('/login', methods=['POST'])
-@async_route
 async def login():
     """
     用户名密码登录
@@ -260,30 +290,41 @@ async def login():
     # 记录登录成功
     await _log_login_attempt(username, True, "登录成功")
     
-    # 同步用户状态到 Emby（账号禁用状态、NSFW库访问权限等）
-    from src.services import UserService
+    # 生成 token（快速操作）
+    token = await generate_token(user.UID)
+    
+    # 快速返回基本用户信息，不阻塞登录
+    basic_user_info = {
+        'uid': user.UID,
+        'username': user.USERNAME,
+        'email': user.EMAIL,
+        'role': user.ROLE,
+        'active': user.ACTIVE_STATUS,
+    }
+    
+    # 异步后台任务：同步 Emby 状态和获取完整用户信息（不阻塞登录）
+    async def sync_background_tasks():
+        try:
+            # 同步用户到 Emby
+            await UserService.sync_user_to_emby(user)
+        except Exception as e:
+            logger.warning(f"后台同步用户状态到 Emby 失败: {e}")
+    
+    # 在后台运行，不等待
     try:
-        await UserService.sync_user_to_emby(user)
-    except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.warning(f"同步用户状态到 Emby 失败: {e}")
-        # 同步失败不影响登录，只记录警告
-    
-    # 生成 token
-    token = generate_token(user.UID)
-    
-    # 获取用户信息
-    user_info = await UserService.get_user_info(user)
+        import asyncio
+        loop = asyncio.get_running_loop()
+        loop.create_task(sync_background_tasks())
+    except:
+        pass
     
     return api_response(True, "登录成功", {
         'token': token,
-        'user': user_info,
+        'user': basic_user_info,
     })
 
 
 @auth_bp.route('/login/telegram', methods=['POST'])
-@async_route
 async def login_telegram():
     """
     通过 Telegram ID 登录
@@ -314,18 +355,21 @@ async def login_telegram():
     user.LAST_LOGIN_UA = request.headers.get('User-Agent', 'unknown')
     await UserOperate.update_user(user)
     
-    # 同步用户状态到 Emby（账号禁用状态、NSFW库访问权限等）
+    # 异步后台同步用户状态到 Emby（不阻塞登录）
+    import asyncio
     from src.services import UserService
-    try:
-        await UserService.sync_user_to_emby(user)
-    except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.warning(f"同步用户状态到 Emby 失败: {e}")
-        # 同步失败不影响登录，只记录警告
+    async def sync_emby_async():
+        try:
+            await UserService.sync_user_to_emby(user)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"同步用户状态到 Emby 失败: {e}")
+    
+    asyncio.create_task(sync_emby_async())
     
     # 生成 token
-    token = generate_token(user.UID)
+    token = await generate_token(user.UID)
     
     # 获取用户信息
     user_info = await UserService.get_user_info(user)
@@ -337,7 +381,6 @@ async def login_telegram():
 
 
 @auth_bp.route('/login/apikey', methods=['POST'])
-@async_route
 async def login_apikey():
     """
     通过 API Key 登录/验证
@@ -363,7 +406,7 @@ async def login_apikey():
         return api_response(False, "账户已被禁用", code=403)
     
     # 生成 token（API Key 登录也生成 token）
-    token = generate_token(user.UID)
+    token = await generate_token(user.UID)
     
     # 获取用户信息
     from src.services import UserService
@@ -381,7 +424,7 @@ async def login_apikey():
 @require_auth
 async def logout():
     """登出当前设备"""
-    revoke_token(g.token)
+    await revoke_token(g.token, getattr(g.current_user, 'UID', None))
     return api_response(True, "登出成功")
 
 
@@ -389,7 +432,7 @@ async def logout():
 @require_auth
 async def logout_all():
     """登出所有设备"""
-    revoke_user_tokens(g.current_user.UID)
+    await revoke_user_tokens(g.current_user.UID)
     return api_response(True, "已登出所有设备")
 
 
@@ -411,10 +454,10 @@ async def get_me():
 async def refresh_token():
     """刷新 Token"""
     # 撤销旧 token
-    revoke_token(g.token)
+    await revoke_token(g.token, g.current_user.UID)
     
     # 生成新 token
-    new_token = generate_token(g.current_user.UID)
+    new_token = await generate_token(g.current_user.UID)
     
     return api_response(True, "刷新成功", {
         'token': new_token,

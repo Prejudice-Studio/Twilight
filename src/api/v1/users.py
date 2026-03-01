@@ -6,7 +6,7 @@
 import logging
 from flask import Blueprint, request, g
 
-from src.api.v1.auth import async_route, require_auth, api_response
+from src.api.v1.auth import require_auth, api_response
 from src.db.user import UserOperate, Role
 from src.services import UserService
 
@@ -18,7 +18,6 @@ users_bp = Blueprint('users', __name__, url_prefix='/users')
 # ==================== 用户注册 ====================
 
 @users_bp.route('/register', methods=['POST'])
-@async_route
 async def register():
     """
     用户注册
@@ -102,7 +101,6 @@ async def register():
 
 
 @users_bp.route('/check-available', methods=['GET'])
-@async_route
 async def check_registration_available():
     """
     检查是否可以注册
@@ -136,7 +134,6 @@ async def check_registration_available():
 
 
 @users_bp.route('/me/activate', methods=['POST'])
-@async_route
 @require_auth
 async def activate_my_account():
     """
@@ -166,7 +163,6 @@ async def activate_my_account():
 # ==================== 用户信息 ====================
 
 @users_bp.route('/me', methods=['GET'])
-@async_route
 @require_auth
 async def get_my_info():
     """获取当前用户详细信息"""
@@ -187,7 +183,6 @@ async def get_my_info():
 
 
 @users_bp.route('/me', methods=['PUT'])
-@async_route
 @require_auth
 async def update_my_info():
     """
@@ -216,7 +211,6 @@ async def update_my_info():
 
 
 @users_bp.route('/me/username', methods=['PUT'])
-@async_route
 @require_auth
 async def change_my_username():
     """
@@ -242,7 +236,6 @@ async def change_my_username():
 
 
 @users_bp.route('/me/password', methods=['PUT'])
-@async_route
 @require_auth
 async def reset_my_password():
     """重置密码"""
@@ -254,7 +247,6 @@ async def reset_my_password():
 
 
 @users_bp.route('/me/nsfw', methods=['GET'])
-@async_route
 @require_auth
 async def get_nsfw_status():
     """
@@ -302,7 +294,6 @@ async def get_nsfw_status():
 
 
 @users_bp.route('/me/emby/bind', methods=['POST'])
-@async_route
 @require_auth
 async def bind_emby_account():
     """
@@ -426,7 +417,6 @@ async def bind_emby_account():
 
 
 @users_bp.route('/me/emby/unbind', methods=['POST'])
-@async_route
 @require_auth
 async def unbind_emby_account():
     """
@@ -451,7 +441,6 @@ async def unbind_emby_account():
 
 
 @users_bp.route('/me/nsfw', methods=['PUT'])
-@async_route
 @require_auth
 async def toggle_my_nsfw():
     """
@@ -496,7 +485,6 @@ async def toggle_my_nsfw():
 # ==================== 用户续期 ====================
 
 @users_bp.route('/regcode/check', methods=['POST'])
-@async_route
 async def check_regcode():
     """
     检查注册码类型
@@ -548,7 +536,6 @@ async def check_regcode():
 
 
 @users_bp.route('/me/renew', methods=['POST'])
-@async_route
 @require_auth
 async def renew_my_account():
     """
@@ -579,7 +566,6 @@ async def renew_my_account():
 # ==================== 用户设备 ====================
 
 @users_bp.route('/me/devices', methods=['GET'])
-@async_route
 @require_auth
 async def get_my_devices():
     """获取我的设备列表"""
@@ -589,7 +575,6 @@ async def get_my_devices():
 
 
 @users_bp.route('/me/devices/<device_id>', methods=['DELETE'])
-@async_route
 @require_auth
 async def remove_my_device(device_id: str):
     """移除我的设备"""
@@ -601,7 +586,6 @@ async def remove_my_device(device_id: str):
 # ==================== 用户媒体库 ====================
 
 @users_bp.route('/me/libraries', methods=['GET'])
-@async_route
 @require_auth
 async def get_my_libraries():
     """获取我可访问的媒体库"""
@@ -625,7 +609,6 @@ async def get_my_libraries():
 # ==================== 用户会话 ====================
 
 @users_bp.route('/me/sessions', methods=['GET'])
-@async_route
 @require_auth
 async def get_my_sessions():
     """获取我的活动会话"""
@@ -649,7 +632,6 @@ async def get_my_sessions():
 # ==================== 用户登录历史 ====================
 
 @users_bp.route('/me/login-history', methods=['GET'])
-@async_route
 @require_auth
 async def get_my_login_history():
     """获取我的登录信息"""
@@ -665,7 +647,6 @@ async def get_my_login_history():
 # ==================== Telegram 绑定管理 ====================
 
 @users_bp.route('/me/telegram', methods=['GET'])
-@async_route
 @require_auth
 async def get_telegram_status():
     """
@@ -724,7 +705,6 @@ async def get_telegram_status():
 
 
 @users_bp.route('/me/telegram/bind', methods=['POST'])
-@async_route
 @require_auth
 async def bind_my_telegram():
     """
@@ -761,7 +741,6 @@ async def bind_my_telegram():
 
 
 @users_bp.route('/me/telegram/unbind', methods=['POST'])
-@async_route
 @require_auth
 async def unbind_my_telegram():
     """
@@ -791,7 +770,6 @@ async def unbind_my_telegram():
 
 
 @users_bp.route('/me/telegram/change', methods=['POST'])
-@async_route
 @require_auth
 async def change_my_telegram():
     """
@@ -835,7 +813,6 @@ async def change_my_telegram():
 # ==================== 自动续期 ====================
 
 @users_bp.route('/me/auto-renew', methods=['GET'])
-@async_route
 @require_auth
 async def get_auto_renew_status():
     """获取自动续期状态"""
@@ -852,7 +829,6 @@ async def get_auto_renew_status():
 
 
 @users_bp.route('/me/auto-renew', methods=['PUT'])
-@async_route
 @require_auth
 async def set_auto_renew():
     """
@@ -878,7 +854,6 @@ async def set_auto_renew():
 # ==================== 用户积分续期 ====================
 
 @users_bp.route('/me/renew-by-score', methods=['POST'])
-@async_route
 @require_auth
 async def renew_by_score():
     """
@@ -946,7 +921,6 @@ async def renew_by_score():
 # ==================== 用户设置 ====================
 
 @users_bp.route('/me/settings', methods=['GET'])
-@async_route
 @require_auth
 async def get_my_settings():
     """获取用户所有设置"""
@@ -984,3 +958,547 @@ async def get_my_settings():
         },
     })
 
+
+# ==================== 背景管理 ====================
+
+@users_bp.route('/<int:uid>/background', methods=['GET'])
+async def get_user_background(uid: int):
+    """获取用户背景配置"""
+    user = await UserOperate.get_user_by_uid(uid)
+    if not user:
+        return api_response(False, "用户不存在", code=404)
+    
+    # 从 OTHER 字段解析背景配置
+    background_config = {}
+    if user.OTHER:
+        try:
+            import json
+            data = json.loads(user.OTHER)
+            background_config = data.get('background', {})
+        except:
+            pass
+    
+    return api_response(True, "获取成功", {
+        'background': json.dumps(background_config) if background_config else None
+    })
+
+
+@users_bp.route('/me/background', methods=['PUT'])
+@require_auth
+async def update_user_background():
+    """
+    更新用户背景配置
+    
+    Request:
+        {
+            "lightBg": "linear-gradient(...)",  // 浅色主题背景
+            "darkBg": "linear-gradient(...)",    // 暗色主题背景
+            "lightBgImage": "url(...)",         // 浅色背景图片
+            "darkBgImage": "url(...)",          // 暗色背景图片
+            "lightFlow": false,                   // 浅色背景流光开关
+            "darkFlow": false,                    // 暗色背景流光开关
+            "lightBlur": 0,                       // 浅色背景模糊(px)
+            "darkBlur": 0,                        // 暗色背景模糊(px)
+            "lightOpacity": 100,                  // 浅色背景透明度(0-100)
+            "darkOpacity": 100                    // 暗色背景透明度(0-100)
+        }
+    """
+    import json
+    from src.core.utils import timestamp
+    
+    # 检查认证
+    if not hasattr(g, 'current_user') or g.current_user is None:
+        return api_response(False, "需要认证", code=401)
+    
+    user = g.current_user
+    data = request.get_json() or {}
+    
+    # 验证输入
+    light_bg = data.get('lightBg', '').strip()
+    dark_bg = data.get('darkBg', '').strip()
+    light_bg_image = data.get('lightBgImage', '').strip()
+    dark_bg_image = data.get('darkBgImage', '').strip()
+    
+    if not light_bg and not dark_bg and not light_bg_image and not dark_bg_image:
+        return api_response(False, "至少需要一个背景配置", code=400)
+    
+    # 背景URL或CSS长度限制
+    MAX_BG_LENGTH = 2000
+    if len(light_bg) > MAX_BG_LENGTH or len(dark_bg) > MAX_BG_LENGTH:
+        return api_response(False, f"背景配置过长，最多 {MAX_BG_LENGTH} 字符", code=400)
+    if len(light_bg_image) > MAX_BG_LENGTH or len(dark_bg_image) > MAX_BG_LENGTH:
+        return api_response(False, f"背景图片URL过长", code=400)
+    
+    # 保存到 OTHER 字段
+    try:
+        other_data = {}
+        if user.OTHER:
+            try:
+                other_data = json.loads(user.OTHER)
+            except:
+                other_data = {}
+
+        existing_background = other_data.get('background', {}) if isinstance(other_data.get('background', {}), dict) else {}
+        light_flow = bool(data.get('lightFlow')) if 'lightFlow' in data else bool(existing_background.get('lightFlow', False))
+        dark_flow = bool(data.get('darkFlow')) if 'darkFlow' in data else bool(existing_background.get('darkFlow', False))
+
+        def _clamp_int(value, default, min_value, max_value):
+            try:
+                num = int(value)
+            except Exception:
+                num = default
+            return max(min_value, min(max_value, num))
+
+        light_blur = _clamp_int(
+            data.get('lightBlur', existing_background.get('lightBlur', 0)),
+            0,
+            0,
+            30,
+        )
+        dark_blur = _clamp_int(
+            data.get('darkBlur', existing_background.get('darkBlur', 0)),
+            0,
+            0,
+            30,
+        )
+        light_opacity = _clamp_int(
+            data.get('lightOpacity', existing_background.get('lightOpacity', 100)),
+            100,
+            10,
+            100,
+        )
+        dark_opacity = _clamp_int(
+            data.get('darkOpacity', existing_background.get('darkOpacity', 100)),
+            100,
+            10,
+            100,
+        )
+        
+        other_data['background'] = {
+            'lightBg': light_bg,
+            'darkBg': dark_bg,
+            'lightBgImage': light_bg_image,
+            'darkBgImage': dark_bg_image,
+            'lightFlow': light_flow,
+            'darkFlow': dark_flow,
+            'lightBlur': light_blur,
+            'darkBlur': dark_blur,
+            'lightOpacity': light_opacity,
+            'darkOpacity': dark_opacity,
+            'updated_at': timestamp()
+        }
+        
+        user.OTHER = json.dumps(other_data)
+        await UserOperate.update_user(user)
+        
+        return api_response(True, "背景更新成功", {
+            'background': json.dumps(other_data['background'])
+        })
+    except Exception as e:
+        logger.error(f"保存背景配置失败: {e}")
+        return api_response(False, "保存失败", code=500)
+
+
+@users_bp.route('/me/background', methods=['DELETE'])
+@require_auth
+async def delete_user_background():
+    """删除用户背景配置，恢复默认背景"""
+    import json
+    
+    # 检查认证
+    if not hasattr(g, 'current_user') or g.current_user is None:
+        return api_response(False, "需要认证", code=401)
+    
+    user = g.current_user
+    
+    try:
+        other_data = {}
+        if user.OTHER:
+            try:
+                other_data = json.loads(user.OTHER)
+            except:
+                other_data = {}
+        
+        # 删除背景配置
+        if 'background' in other_data:
+            del other_data['background']
+        
+        user.OTHER = json.dumps(other_data) if other_data else ''
+        await UserOperate.update_user(user)
+        
+        return api_response(True, "背景已重置为默认")
+    except Exception as e:
+        logger.error(f"删除背景配置失败: {e}")
+        return api_response(False, "删除失败", code=500)
+
+
+@users_bp.route('/me/background/upload', methods=['POST'])
+@require_auth
+async def upload_background_image():
+    """
+    上传背景图片
+    
+    Request:
+        Form-data:
+            file: 图片文件 (max 5MB)
+            type: 'light' 或 'dark' - 指定这是浅色或暗色背景
+    
+    Response:
+        {
+            "success": true,
+            "data": {
+                "url": "/uploads/backgrounds/xxx.jpg",
+                "type": "light"
+            }
+        }
+    """
+    import os
+    import uuid
+    from pathlib import Path
+    from werkzeug.utils import secure_filename
+    from flask import current_app
+    
+    # 检查认证
+    if not hasattr(g, 'current_user') or g.current_user is None:
+        return api_response(False, "需要认证", code=401)
+    
+    user = g.current_user
+    
+    # 检查文件
+    if 'file' not in request.files:
+        return api_response(False, "未找到文件", code=400)
+    
+    file = request.files['file']
+    if file.filename == '':
+        return api_response(False, "文件名为空", code=400)
+    
+    # 检查背景类型
+    bg_type = request.form.get('type', 'light').lower()
+    if bg_type not in ['light', 'dark']:
+        return api_response(False, "背景类型必须为 'light' 或 'dark'", code=400)
+    
+    # 验证文件类型
+    ALLOWED_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'webp'}
+    if not file.filename.lower().endswith(tuple('.' + ext for ext in ALLOWED_EXTENSIONS)):
+        return api_response(False, f"只支持图片格式: {', '.join(ALLOWED_EXTENSIONS)}", code=400)
+    
+    # 验证文件大小
+    file.seek(0, os.SEEK_END)
+    file_size = file.tell()
+    file.seek(0)
+    
+    MAX_SIZE = current_app.config.get('MAX_CONTENT_LENGTH', 5 * 1024 * 1024)
+    if file_size > MAX_SIZE:
+        return api_response(False, f"文件过大，最大 {MAX_SIZE // (1024*1024)}MB", code=400)
+    
+    try:
+        # 创建上传目录
+        upload_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], 'backgrounds')
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        # 生成唯一文件名
+        ext = Path(file.filename).suffix.lower()
+        filename = f"{uuid.uuid4().hex}{ext}"
+        filepath = os.path.join(upload_dir, filename)
+        
+        # 保存文件
+        file.save(filepath)
+        
+        # 生成 URL
+        file_url = f"/uploads/backgrounds/{filename}"
+        
+        return api_response(True, "上传成功", {
+            'url': file_url,
+            'type': bg_type,
+            'filename': filename
+        })
+    except Exception as e:
+        logger.error(f"上传背景图片失败: {e}")
+        return api_response(False, "上传失败", code=500)
+
+# ==================== 头像管理 ====================
+
+@users_bp.route('/<int:uid>/avatar', methods=['GET'])
+async def get_user_avatar(uid: int):
+    """获取用户头像"""
+    user = await UserOperate.get_user_by_uid(uid)
+    if not user:
+        return api_response(False, "用户不存在", code=404)
+    
+    return api_response(True, "获取成功", {
+        'avatar': user.AVATAR or None,
+        'uid': user.UID,
+        'username': user.USERNAME,
+    })
+
+
+@users_bp.route('/me/avatar/upload', methods=['POST'])
+@require_auth
+async def upload_avatar():
+    """
+    上传用户头像
+    
+    Request:
+        Form-data:
+            file: 头像图片文件 (max 2MB，推荐 200x200px)
+    
+    Response:
+        {
+            "success": true,
+            "data": {
+                "avatar_url": "/uploads/avatars/xxx.jpg"
+            }
+        }
+    """
+    import os
+    import uuid
+    from pathlib import Path
+    from flask import current_app
+    
+    user = g.current_user
+    
+    # 检查文件
+    if 'file' not in request.files:
+        return api_response(False, "缺少文件", code=400)
+    
+    file = request.files['file']
+    if file.filename == '':
+        return api_response(False, "未选择文件", code=400)
+    
+    try:
+        # 验证文件类型
+        allowed_types = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
+        if file.content_type not in allowed_types:
+            return api_response(False, "只支持 JPG、PNG、GIF、WebP 格式的图片", code=400)
+        
+        # 验证文件大小
+        file.seek(0, 2)
+        file_size = file.tell()
+        file.seek(0)
+        
+        if file_size > 2 * 1024 * 1024:  # 2MB
+            return api_response(False, "文件大小不能超过 2MB", code=400)
+        
+        # 创建上传目录
+        upload_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], 'avatars')
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        # 生成唯一文件名
+        ext = Path(file.filename).suffix.lower()
+        filename = f"{uuid.uuid4().hex}{ext}"
+        filepath = os.path.join(upload_dir, filename)
+        
+        # 保存文件
+        file.save(filepath)
+        
+        # 生成 URL
+        avatar_url = f"/uploads/avatars/{filename}"
+        
+        # 更新用户头像
+        user.AVATAR = avatar_url
+        await UserOperate.update_user(user)
+        
+        logger.info(f"用户上传头像: {user.USERNAME} -> {avatar_url}")
+        
+        return api_response(True, "头像上传成功", {
+            'avatar_url': avatar_url,
+        })
+    except Exception as e:
+        logger.error(f"上传头像失败: {e}")
+        return api_response(False, "上传失败", code=500)
+
+
+@users_bp.route('/me/avatar', methods=['DELETE'])
+@require_auth
+async def delete_avatar():
+    """删除用户头像"""
+    user = g.current_user
+    
+    if not user.AVATAR:
+        return api_response(False, "用户未设置头像", code=400)
+    
+    # 删除头像文件
+    try:
+        import os
+        file_path = os.path.join('webui/public', user.AVATAR.lstrip('/'))
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception as e:
+        logger.warning(f"删除头像文件失败: {e}")
+    
+    # 清除头像 URL
+    user.AVATAR = None
+    await UserOperate.update_user(user)
+    
+    return api_response(True, "头像已删除")
+
+
+# ==================== API Key 管理 ====================
+
+@users_bp.route('/me/apikeys', methods=['GET'])
+@require_auth
+async def get_my_api_keys():
+    """获取我的 API Keys 列表"""
+    from src.db.apikey import ApiKeyOperate
+    
+    api_keys = await ApiKeyOperate.get_user_api_keys(g.current_user.UID)
+    
+    # 隐藏完整的 key 值，只显示前后几位
+    keys_list = []
+    for key in api_keys:
+        key_str = key.KEY
+        masked_key = f"{key_str[:8]}...{key_str[-8:]}" if len(key_str) > 16 else "****"
+        
+        keys_list.append({
+            'id': key.ID,
+            'name': key.NAME,
+            'key': masked_key,
+            'key_full': key_str,  # 前端需要时返回完整值
+            'enabled': key.ENABLED,
+            'allow_checkin': key.ALLOW_CHECKIN,
+            'allow_transfer': key.ALLOW_TRANSFER,
+            'allow_query': key.ALLOW_QUERY,
+            'rate_limit': key.RATE_LIMIT,
+            'request_count': key.REQUEST_COUNT,
+            'last_used': key.LAST_USED_AT,
+            'created_at': key.CREATED_AT,
+            'expired_at': key.EXPIRED_AT,
+        })
+    
+    return api_response(True, "获取成功", {
+        'keys': keys_list,
+        'total': len(keys_list),
+    })
+
+
+@users_bp.route('/me/apikeys', methods=['POST'])
+@require_auth
+async def generate_api_key():
+    """
+    生成新的 API Key
+    
+    Request:
+        {
+            "name": "My API Key",           // 可选，自定义名称
+            "allow_checkin": true,          // 允许签到
+            "allow_transfer": false,        // 是否允许转账
+            "allow_query": true,            // 是否允许查询
+            "rate_limit": 100,              // 速率限制（请求/小时）
+            "expired_at": -1                // 过期时间戳，-1 表示永不过期
+        }
+    """
+    from src.db.apikey import ApiKeyOperate
+    
+    data = request.get_json() or {}
+    
+    name = data.get('name')
+    allow_checkin = data.get('allow_checkin', True)
+    allow_transfer = data.get('allow_transfer', False)
+    allow_query = data.get('allow_query', True)
+    rate_limit = data.get('rate_limit', 100)
+    expired_at = data.get('expired_at', -1)
+    
+    # 验证速率限制
+    if rate_limit < 0:
+        return api_response(False, "速率限制不能为负数", code=400)
+    
+    try:
+        api_key = await ApiKeyOperate.create_api_key(
+            uid=g.current_user.UID,
+            name=name,
+            allow_checkin=allow_checkin,
+            allow_transfer=allow_transfer,
+            allow_query=allow_query,
+            rate_limit=rate_limit,
+            expired_at=expired_at,
+        )
+        
+        logger.info(f"用户生成 API Key: {g.current_user.USERNAME} -> {api_key.ID}")
+        
+        return api_response(True, "API Key 生成成功", {
+            'id': api_key.ID,
+            'key': api_key.KEY,
+            'name': api_key.NAME,
+            'created_at': api_key.CREATED_AT,
+        })
+    except Exception as e:
+        logger.error(f"生成 API Key 失败: {e}")
+        return api_response(False, "生成失败", code=500)
+
+
+@users_bp.route('/me/apikeys/<int:key_id>', methods=['PUT'])
+@require_auth
+async def update_api_key(key_id: int):
+    """
+    更新 API Key 配置
+    
+    Request:
+        {
+            "name": "Updated Name",
+            "enabled": true,
+            "allow_checkin": true,
+            "allow_transfer": false,
+            "allow_query": true,
+            "rate_limit": 100,
+            "expired_at": -1
+        }
+    """
+    from src.db.apikey import ApiKeyOperate
+    
+    # 验证 Key 所有者
+    api_key = await ApiKeyOperate.get_api_key_by_id(key_id)
+    if not api_key or api_key.UID != g.current_user.UID:
+        return api_response(False, "API Key 不存在或无权限修改", code=404)
+    
+    data = request.get_json() or {}
+    
+    try:
+        updated_key = await ApiKeyOperate.update_api_key(
+            key_id=key_id,
+            name=data.get('name'),
+            enabled=data.get('enabled'),
+            allow_checkin=data.get('allow_checkin'),
+            allow_transfer=data.get('allow_transfer'),
+            allow_query=data.get('allow_query'),
+            rate_limit=data.get('rate_limit'),
+            expired_at=data.get('expired_at'),
+        )
+        
+        logger.info(f"用户更新 API Key: {g.current_user.USERNAME} -> {key_id}")
+        
+        return api_response(True, "API Key 更新成功", {
+            'id': updated_key.ID,
+            'name': updated_key.NAME,
+            'enabled': updated_key.ENABLED,
+        })
+    except Exception as e:
+        logger.error(f"更新 API Key 失败: {e}")
+        return api_response(False, "更新失败", code=500)
+
+
+@users_bp.route('/me/apikeys/<int:key_id>', methods=['DELETE'])
+@require_auth
+async def delete_api_key(key_id: int):
+    """
+    删除 API Key
+    
+    Warning: 删除后无法恢复，使用此 Key 的应用将失效
+    """
+    from src.db.apikey import ApiKeyOperate
+    
+    # 验证 Key 所有者
+    api_key = await ApiKeyOperate.get_api_key_by_id(key_id)
+    if not api_key or api_key.UID != g.current_user.UID:
+        return api_response(False, "API Key 不存在或无权限删除", code=404)
+    
+    try:
+        success = await ApiKeyOperate.delete_api_key(key_id)
+        
+        if success:
+            logger.info(f"用户删除 API Key: {g.current_user.USERNAME} -> {key_id}")
+            return api_response(True, "API Key 已删除")
+        
+        return api_response(False, "删除失败", code=500)
+    except Exception as e:
+        logger.error(f"删除 API Key 失败: {e}")
+        return api_response(False, "删除失败", code=500)
