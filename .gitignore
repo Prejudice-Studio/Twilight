@@ -146,7 +146,6 @@ dmypy.json
 *.bak
 migrate.py
 start_all.bat
-start_all.bat
 test_api.py
 test_external.py
 start_all.bat
