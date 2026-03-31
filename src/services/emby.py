@@ -6,7 +6,6 @@ Emby/Jellyfin API 客户端
 - https://github.com/MediaBrowser/Emby.ApiClients
 - https://github.com/jellyfin/jellyfin-apiclient-python
 """
-import asyncio
 import logging
 from typing import Optional, Dict, Any, List, Tuple
 from dataclasses import dataclass, field
@@ -211,6 +210,11 @@ class EmbyClient:
         self.proxy = proxy
         self.timeout = timeout
         
+        # 备用认证凭据
+        self._admin_username = EmbyConfig.EMBY_USERNAME
+        self._admin_password = EmbyConfig.EMBY_PASSWORD
+        self._auth_fallback_attempted = False
+        
         # 设备信息
         self.device_name = device_name
         self.device_id = device_id
@@ -271,7 +275,22 @@ class EmbyClient:
                 response = await client.request(method, endpoint, **kwargs)
                 
                 if response.status_code == 401:
-                    raise EmbyAuthError("API Key 无效或已过期")
+                    # API Key 无效，尝试使用管理员账号密码备用认证
+                    if not self._auth_fallback_attempted and self._admin_username:
+                        logger.warning("API Key 认证失败，尝试使用管理员账号密码备用认证...")
+                        token = await self._authenticate_admin()
+                        if token:
+                            logger.info("管理员账号密码认证成功，已切换 Token")
+                            self._auth_fallback_attempted = True
+                            # 使用新 token 重试当前请求
+                            client = await self._get_client()
+                            response = await client.request(method, endpoint, **kwargs)
+                            if response.status_code == 401:
+                                raise EmbyAuthError("备用认证获取的 Token 也无效")
+                        else:
+                            raise EmbyAuthError("API Key 无效且管理员账号密码认证也失败")
+                    else:
+                        raise EmbyAuthError("API Key 无效或已过期")
                 elif response.status_code == 404:
                     raise EmbyNotFoundError(f"资源未找到: {endpoint}")
                 elif response.status_code >= 400:
@@ -292,6 +311,64 @@ class EmbyClient:
                 logger.warning(f"请求超时 (尝试 {attempt + 1}/{Config.MAX_RETRY})")
                 if attempt == Config.MAX_RETRY - 1:
                     raise EmbyConnectionError("请求超时")
+
+    async def _authenticate_admin(self) -> Optional[str]:
+        """
+        使用管理员账号密码进行认证，获取 Access Token
+        
+        :return: 成功返回 Token，失败返回 None
+        """
+        if not self._admin_username:
+            return None
+        
+        try:
+            import hashlib
+            device_id = hashlib.md5(f"twilight-admin-{self._admin_username}".encode()).hexdigest()
+            
+            auth_header = (
+                f'MediaBrowser Client="{self.app_name}", '
+                f'Device="{self.device_name}", '
+                f'DeviceId="{device_id}", '
+                f'Version="{self.app_version}"'
+            )
+            
+            async with httpx.AsyncClient(
+                base_url=self.base_url,
+                timeout=self.timeout,
+                proxy=self.proxy,
+                headers={
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-Emby-Authorization': auth_header,
+                }
+            ) as client:
+                response = await client.post(
+                    '/Users/authenticatebyname',
+                    json={
+                        'Username': self._admin_username,
+                        'Pw': self._admin_password,
+                    }
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    access_token = data.get('AccessToken')
+                    if access_token:
+                        # 更新客户端的 API Key 为新获取的 Token
+                        self.api_key = access_token
+                        # 关闭旧客户端，下次请求时会使用新 token 创建
+                        if self._client and not self._client.is_closed:
+                            await self._client.aclose()
+                            self._client = None
+                        logger.info(f"管理员备用认证成功，用户: {self._admin_username}")
+                        return access_token
+                    
+                logger.warning(f"管理员备用认证失败: {response.status_code}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"管理员备用认证出错: {e}")
+            return None
 
     # ==================== 系统 API ====================
     
@@ -883,121 +960,102 @@ class EmbyClient:
         """
         授予用户 NSFW 库访问权限
         
-        逻辑：先取消所有媒体库权限，再把包括NSFW库的所有库加上
-        支持通过媒体库名称或ID来标识NSFW库
+        参考 Sakura_EmbyBoss 的单次 API 调用方式：
+        读取当前策略 → 在 EnabledFolders 中添加 NSFW 库 ID → 
+        从 BlockedMediaFolders 中移除 NSFW 库名 → 一次性提交
         """
         from src.services.emby_service import EmbyService
         
-        # 查找NSFW库ID（支持通过名称或ID匹配）
         nsfw_library_id = await EmbyService.find_nsfw_library_id()
         if not nsfw_library_id:
             logger.warning("未找到NSFW库")
             return False
         
+        nsfw_library_name = EmbyService.get_nsfw_library_name()
+        
         user = await self.get_user(user_id)
         if not user:
             return False
         
-        # 获取所有媒体库
-        libraries = await self.get_libraries()
-        all_library_ids = [lib.id for lib in libraries]
-        
-        # 获取当前用户的完整策略
         current_policy = user.policy.copy()
         
-        # 先取消所有媒体库权限（清空）
+        # 获取当前已启用的文件夹列表
+        if current_policy.get('EnableAllFolders', False):
+            # 如果是"全部启用"模式，获取所有库 ID 作为基准
+            libraries = await self.get_libraries()
+            enabled_folders = [lib.id for lib in libraries]
+        else:
+            enabled_folders = list(current_policy.get('EnabledFolders', []))
+        
+        # 添加 NSFW 库 ID（如果尚未包含）
+        if nsfw_library_id not in enabled_folders:
+            enabled_folders.append(nsfw_library_id)
+        
+        # 从 BlockedMediaFolders 中移除 NSFW 库名
+        blocked_folders = list(current_policy.get('BlockedMediaFolders', []))
+        blocked_folders = [f for f in blocked_folders if f != nsfw_library_name]
+        
+        # 一次性提交更新后的策略
         current_policy['EnableAllFolders'] = False
-        current_policy['EnabledFolders'] = []
-        
-        # 发送清空请求
-        try:
-            await self._request('POST', f'/Users/{user_id}/Policy', json=current_policy)
-        except EmbyError as e:
-            logger.error(f"清空媒体库权限失败: {e}")
-            return False
-        
-        # 等待一小段时间，确保Emby服务器处理完清空操作
-        await asyncio.sleep(0.8)
-        
-        # 重新获取用户信息以确保策略是最新的
-        user = await self.get_user(user_id)
-        if not user:
-            return False
-        
-        # 获取最新的策略
-        current_policy = user.policy.copy()
-        
-        # 再把包括NSFW库的所有库加上
-        current_policy['EnableAllFolders'] = False
-        current_policy['EnabledFolders'] = all_library_ids
+        current_policy['EnabledFolders'] = enabled_folders
+        current_policy['BlockedMediaFolders'] = blocked_folders
         
         try:
             await self._request('POST', f'/Users/{user_id}/Policy', json=current_policy)
             return True
         except EmbyError as e:
-            logger.error(f"设置媒体库权限失败: {e}")
+            logger.error(f"授予NSFW库权限失败: {e}")
             return False
 
     async def revoke_nsfw_access(self, user_id: str) -> bool:
         """
         撤销用户 NSFW 库访问权限
         
-        逻辑：先取消所有媒体库权限，再把除了NSFW库的其他库加上
-        支持通过媒体库名称或ID来标识NSFW库
+        参考 Sakura_EmbyBoss 的单次 API 调用方式：
+        读取当前策略 → 从 EnabledFolders 中移除 NSFW 库 ID → 
+        在 BlockedMediaFolders 中添加 NSFW 库名 → 一次性提交
         """
         from src.services.emby_service import EmbyService
         
-        # 查找NSFW库ID（支持通过名称或ID匹配）
         nsfw_library_id = await EmbyService.find_nsfw_library_id()
         if not nsfw_library_id:
             logger.warning("未找到NSFW库")
             return False
         
+        nsfw_library_name = EmbyService.get_nsfw_library_name()
+        
         user = await self.get_user(user_id)
         if not user:
             return False
         
-        # 获取所有媒体库
-        libraries = await self.get_libraries()
-        all_library_ids = [lib.id for lib in libraries]
-        
-        # 从所有库中排除NSFW库
-        folders_without_nsfw = [lid for lid in all_library_ids if lid != nsfw_library_id]
-        
-        # 获取当前用户的完整策略
         current_policy = user.policy.copy()
         
-        # 先取消所有媒体库权限（清空）
+        # 获取当前已启用的文件夹列表
+        if current_policy.get('EnableAllFolders', False):
+            # 如果是"全部启用"模式，获取所有库 ID 作为基准
+            libraries = await self.get_libraries()
+            enabled_folders = [lib.id for lib in libraries]
+        else:
+            enabled_folders = list(current_policy.get('EnabledFolders', []))
+        
+        # 从 EnabledFolders 中移除 NSFW 库 ID
+        enabled_folders = [fid for fid in enabled_folders if fid != nsfw_library_id]
+        
+        # 在 BlockedMediaFolders 中添加 NSFW 库名（如果尚未包含）
+        blocked_folders = list(current_policy.get('BlockedMediaFolders', []))
+        if nsfw_library_name and nsfw_library_name not in blocked_folders:
+            blocked_folders.append(nsfw_library_name)
+        
+        # 一次性提交更新后的策略
         current_policy['EnableAllFolders'] = False
-        current_policy['EnabledFolders'] = []
-        
-        # 发送清空请求
-        try:
-            await self._request('POST', f'/Users/{user_id}/Policy', json=current_policy)
-        except EmbyError as e:
-            logger.error(f"清空媒体库权限失败: {e}")
-            return False
-        
-        # 等待一小段时间，确保Emby服务器处理完清空操作
-        await asyncio.sleep(0.8)
-        
-        # 重新获取用户信息以确保策略是最新的
-        user = await self.get_user(user_id)
-        if not user:
-            return False
-        
-        # 获取最新的策略
-        current_policy = user.policy.copy()
-        
-        # 再把除了NSFW库的其他库加上
-        current_policy['EnableAllFolders'] = False
-        current_policy['EnabledFolders'] = folders_without_nsfw
+        current_policy['EnabledFolders'] = enabled_folders
+        current_policy['BlockedMediaFolders'] = blocked_folders
         
         try:
             await self._request('POST', f'/Users/{user_id}/Policy', json=current_policy)
             return True
         except EmbyError as e:
-            logger.error(f"设置媒体库权限失败: {e}")
+            logger.error(f"撤销NSFW库权限失败: {e}")
             return False
 
 

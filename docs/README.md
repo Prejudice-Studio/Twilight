@@ -7,16 +7,17 @@
 1. [安装部署](./INSTALL.md)（环境准备、启动方式、常见故障）
 2. [开发指南](./DEVELOPMENT.md)（代码结构、规范、测试与提交流程）
 3. [后端 API](./BACKEND_API.md)（认证方式、模块与调用示例）
-4. [API Key 接口](./API_KEY_API.md)（外部系统集成专用）
+4. [API Key 接口](./API_KEY_API.md)（外部系统集成专用，含权限系统）
 5. [前端开发](./FRONTEND_API.md)（Next.js 主前端说明）
 
-## 相关文档（仓库根目录）
+## 专题文档
+
+- [背景自定义](./BACKGROUND.md)：用户背景设置的使用指南、API 接口与运维说明
+
+## 其他文档
 
 - [README](../README.md)：项目概览与快速开始
-- [QUICKSTART-Windows](../QUICKSTART-Windows.md)：Windows 快速启动
-- [CHANGELOG](../CHANGELOG.md)：版本与变更记录
-- [BACKGROUND_FEATURES](../BACKGROUND_FEATURES.md)：背景自定义功能说明
-- [BACKGROUND_GUIDE](../BACKGROUND_GUIDE.md)：背景功能运维与配置指南
+- [QUICKSTART-Windows](./QUICKSTART-Windows.md)：Windows 快速启动
 
 ## 说明
 

@@ -63,22 +63,24 @@ pip install -r requirements.txt -r requirements-dev.txt
 Twilight/
 ├── src/
 │   ├── api/              # API 模块
-│   │   ├── v1/          # API v1 接口
+│   │   ├── v1/          # API v1 接口（auth, users, apikey, score, media, emby, admin, ...）
 │   │   └── swagger_template.py
 │   ├── bot/              # Telegram Bot
 │   ├── core/             # 核心工具
-│   ├── db/               # 数据库模块
-│   ├── services/         # 业务逻辑服务
+│   ├── db/               # 数据库模块（ORM 模型 + 数据访问）
+│   ├── services/         # 业务逻辑服务（emby, bangumi, score, scheduler, ...）
 │   └── schemas/          # 数据模型
 ├── tests/                # 单元测试
 ├── docs/                 # 文档
+├── uploads/              # 用户上传文件（背景图片等）
 ├── webui/                # Next.js 前端
 ├── main.py               # 应用入口
 ├── asgi.py               # ASGI 入口（生产）
+├── migrate.py            # 数据库迁移脚本
 ├── config.toml           # 配置文件
 ├── requirements.txt      # 生产依赖
 ├── requirements-dev.txt  # 开发依赖
-└── .env.example          # 环境变量示例
+└── dev.ps1 / Makefile    # 开发辅助脚本
 ```
 
 ### 关键目录说明

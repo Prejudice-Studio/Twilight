@@ -83,6 +83,10 @@ async def checkin():
             }
         }
     """
+    # 检查无 Emby 账户用户是否允许签到
+    if not g.current_user.EMBYID and not ScoreAndRegisterConfig.ALLOW_NO_EMBY_CHECKIN:
+        return api_response(False, "请先激活 Emby 账户后再签到", code=403)
+    
     result_type, response = await ScoreService.checkin(g.current_user.UID)
     
     return api_response(

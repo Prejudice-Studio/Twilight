@@ -26,6 +26,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { api } from "@/lib/api";
 import { useRegionRefresh } from "@/hooks/use-region-refresh";
 import { RegionRefreshKeys } from "@/lib/region-refresh";
+import { useSystemStore } from "@/store/system";
 
 const userNavItems = [
   { href: "/dashboard", label: "仪表盘", icon: LayoutDashboard },
@@ -49,6 +50,11 @@ export function Sidebar() {
   const { setTheme, theme: currentTheme } = useTheme();
   const isAdmin = user?.role === 0;
   const [profileAvatar, setProfileAvatar] = useState<string | null>(user?.avatar || null);
+  const { info: systemInfo, fetchInfo: fetchSystemInfo } = useSystemStore();
+
+  useEffect(() => {
+    void fetchSystemInfo();
+  }, [fetchSystemInfo]);
 
   const loadProfileAvatar = useCallback(async () => {
     if (!user?.uid) {
@@ -123,10 +129,14 @@ export function Sidebar() {
     <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 p-4 lg:block">
       <div className="sidebar-surface h-full">
         <div className="sidebar-brand">
-          <div className="brand-logo">TW</div>
+          {systemInfo?.icon ? (
+            <img src={systemInfo.icon} alt={systemInfo?.name || "Twilight"} className="h-10 w-10 rounded-xl object-cover" />
+          ) : (
+            <div className="brand-logo">{(systemInfo?.name || "TW").slice(0, 2).toUpperCase()}</div>
+          )}
           <div>
             <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Media OPS</p>
-            <h2 className="text-lg font-semibold">Twilight</h2>
+            <h2 className="text-lg font-semibold">{systemInfo?.name || "Twilight"}</h2>
           </div>
         </div>
 

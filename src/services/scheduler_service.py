@@ -130,6 +130,19 @@ class SchedulerService:
         except Exception as e:
             logger.error(f"❌ 发送到期提醒出错: {e}")
 
+    @staticmethod
+    async def emby_sync():
+        """定期同步 Emby 用户数据"""
+        logger.info("🔄 开始 Emby 用户数据同步...")
+        try:
+            success, failed, errors = await EmbyService.sync_all_users()
+            logger.info(f"✅ Emby 同步完成: 成功 {success}, 失败 {failed}")
+            if errors:
+                for e in errors[:10]:
+                    logger.warning(f"  ⚠️ {e}")
+        except Exception as e:
+            logger.error(f"❌ Emby 同步出错: {e}")
+
     @classmethod
     async def start(cls):
         """启动调度器"""
@@ -163,6 +176,9 @@ class SchedulerService:
         
         scheduler.add_job(cls.cleanup_inactive_sessions, 'interval', hours=SchedulerConfig.SESSION_CLEANUP_INTERVAL, id='cleanup_sessions')
         
+        # Emby 数据同步（每 6 小时）
+        scheduler.add_job(cls.emby_sync, 'interval', hours=SchedulerConfig.EMBY_SYNC_INTERVAL, id='emby_sync')
+        
         scheduler.start()
         logger.info("=" * 50)
         logger.info(f"🌙 Twilight Scheduler 已启动 ({SchedulerConfig.TIMEZONE})")
@@ -171,6 +187,7 @@ class SchedulerService:
         logger.info(f"  - 到期提醒: {SchedulerConfig.EXPIRING_CHECK_TIME}")
         logger.info(f"  - 每日统计: {SchedulerConfig.DAILY_STATS_TIME}")
         logger.info(f"  - 会话清理: 每 {SchedulerConfig.SESSION_CLEANUP_INTERVAL} 小时")
+        logger.info(f"  - Emby 同步: 每 {SchedulerConfig.EMBY_SYNC_INTERVAL} 小时")
         logger.info("=" * 50)
         
         # 立即运行一次统计

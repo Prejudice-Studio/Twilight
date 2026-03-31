@@ -258,14 +258,15 @@ async def get_nsfw_status():
             "data": {
                 "enabled": true,           // 用户是否已开启 NSFW
                 "has_permission": true,    // 用户在 Emby 中是否有 NSFW 库访问权限
-                "nsfw_library_id": "xxx",  // NSFW 库 ID
+                "nsfw_library_name": "xxx",  // NSFW 库名称
                 "can_toggle": true         // 用户是否可以切换（有权限才能切换）
             }
         }
     """
     from src.services import EmbyService
     user = g.current_user
-    # 查找NSFW库ID（支持通过名称或ID匹配）
+    # 获取NSFW库名称和ID
+    nsfw_library_name = EmbyService.get_nsfw_library_name()
     nsfw_library_id = await EmbyService.find_nsfw_library_id()
     
     # 检查是否配置了 NSFW 库
@@ -273,7 +274,7 @@ async def get_nsfw_status():
         return api_response(True, "NSFW 库未配置", {
             'enabled': False,
             'has_permission': False,
-            'nsfw_library_id': None,
+            'nsfw_library_name': None,
             'can_toggle': False,
             'message': '系统未配置 NSFW 媒体库'
         })
@@ -287,7 +288,7 @@ async def get_nsfw_status():
     return api_response(True, "获取成功", {
         'enabled': user.NSFW,
         'has_permission': has_permission,
-        'nsfw_library_id': nsfw_library_id,
+        'nsfw_library_name': nsfw_library_name,
         'can_toggle': has_permission,
         'message': '有访问权限，可自行开关' if has_permission else '您没有 NSFW 库的访问权限，请联系管理员'
     })
@@ -461,21 +462,16 @@ async def toggle_my_nsfw():
     enable = data.get('enable', False)
     user = g.current_user
     
-    # 查找NSFW库ID（支持通过名称或ID匹配）
+    # 通过名称查找NSFW库ID
     nsfw_library_id = await EmbyService.find_nsfw_library_id()
     
     # 检查是否配置了 NSFW 库
     if not nsfw_library_id:
         return api_response(False, "系统未配置 NSFW 媒体库", code=400)
     
-    # 获取用户在 Emby 中的媒体库访问权限
-    library_ids, enable_all = await EmbyService.get_user_library_access(user)
-    
-    # 判断用户是否有 NSFW 库访问权限
-    has_permission = enable_all or (nsfw_library_id in library_ids)
-    
-    if not has_permission:
-        return api_response(False, "您没有 NSFW 库的访问权限，无法切换此选项", code=403)
+    # 使用数据库中的 NSFW_ALLOWED 字段判断权限（由管理员控制）
+    if not user.NSFW_ALLOWED:
+        return api_response(False, "管理员未授予您 NSFW 库的访问权限，无法切换此选项", code=403)
     
     # 有权限，执行切换
     success, message = await UserService.toggle_nsfw(user, enable)
@@ -561,6 +557,53 @@ async def renew_my_account():
             'expired_at': user_info['expired_at'],
         })
     return api_response(False, message)
+
+
+@users_bp.route('/me/use-code', methods=['POST'])
+@require_auth
+async def use_code():
+    """
+    统一使用授权码（注册码/续期码/白名单码）
+    
+    已登录用户根据授权码类型自动处理：
+    - 注册码：为无 Emby 账户的用户创建 Emby 账户
+    - 续期码：续期
+    - 白名单码：赋予白名单角色，自动创建 Emby 账户（如没有）
+    
+    Request:
+        {
+            "reg_code": "code-xxx"
+        }
+    
+    Response:
+        {
+            "success": true,
+            "message": "操作成功",
+            "data": {
+                "emby_password": "xxx",  // 仅创建 Emby 账户时返回
+                "expire_status": "...",
+                "expired_at": 12345678
+            }
+        }
+    """
+    data = request.get_json() or {}
+    reg_code = data.get('reg_code', '').strip()
+    
+    if not reg_code:
+        return api_response(False, "缺少授权码", code=400)
+    
+    success, message, emby_password = await UserService.use_code(g.current_user, reg_code)
+    
+    if success:
+        user_info = await UserService.get_user_info(g.current_user)
+        return api_response(True, message, {
+            'emby_password': emby_password,
+            'expire_status': user_info['expire_status'],
+            'expired_at': user_info['expired_at'],
+            'role': user_info['role'],
+            'role_name': user_info['role_name'],
+        })
+    return api_response(False, message, code=400)
 
 
 # ==================== 用户设备 ====================
@@ -721,6 +764,10 @@ async def bind_my_telegram():
     
     if not telegram_id:
         return api_response(False, "缺少 telegram_id", code=400)
+    
+    # 类型校验
+    if not isinstance(telegram_id, int) or telegram_id <= 0:
+        return api_response(False, "telegram_id 格式无效", code=400)
     
     # 检查是否已绑定其他 Telegram
     if user.TELEGRAM_ID and user.TELEGRAM_ID != telegram_id:
@@ -1177,10 +1224,24 @@ async def upload_background_image():
     if bg_type not in ['light', 'dark']:
         return api_response(False, "背景类型必须为 'light' 或 'dark'", code=400)
     
-    # 验证文件类型
+    # 验证文件类型（扩展名 + magic bytes）
     ALLOWED_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'webp'}
     if not file.filename.lower().endswith(tuple('.' + ext for ext in ALLOWED_EXTENSIONS)):
         return api_response(False, f"只支持图片格式: {', '.join(ALLOWED_EXTENSIONS)}", code=400)
+    
+    # 读取文件头校验 magic bytes
+    header = file.read(16)
+    file.seek(0)
+    IMAGE_SIGNATURES = {
+        b'\xff\xd8\xff': 'jpg',     # JPEG
+        b'\x89PNG\r\n': 'png',      # PNG
+        b'GIF87a': 'gif',           # GIF87a
+        b'GIF89a': 'gif',           # GIF89a
+        b'RIFF': 'webp',           # WebP (RIFF header)
+    }
+    is_valid_image = any(header.startswith(sig) for sig in IMAGE_SIGNATURES)
+    if not is_valid_image:
+        return api_response(False, "文件内容不是有效的图片", code=400)
     
     # 验证文件大小
     file.seek(0, os.SEEK_END)
@@ -1266,10 +1327,24 @@ async def upload_avatar():
         return api_response(False, "未选择文件", code=400)
     
     try:
-        # 验证文件类型
+        # 验证文件类型（Content-Type + magic bytes）
         allowed_types = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
         if file.content_type not in allowed_types:
             return api_response(False, "只支持 JPG、PNG、GIF、WebP 格式的图片", code=400)
+        
+        # 读取文件头校验 magic bytes
+        header = file.read(16)
+        file.seek(0)
+        IMAGE_SIGNATURES = {
+            b'\xff\xd8\xff': 'jpg',     # JPEG
+            b'\x89PNG\r\n': 'png',      # PNG
+            b'GIF87a': 'gif',           # GIF87a
+            b'GIF89a': 'gif',           # GIF89a
+            b'RIFF': 'webp',           # WebP (RIFF header)
+        }
+        is_valid_image = any(header.startswith(sig) for sig in IMAGE_SIGNATURES)
+        if not is_valid_image:
+            return api_response(False, "文件内容不是有效的图片", code=400)
         
         # 验证文件大小
         file.seek(0, 2)
@@ -1319,10 +1394,10 @@ async def delete_avatar():
     
     # 删除头像文件
     try:
-        import os
-        file_path = os.path.join('webui/public', user.AVATAR.lstrip('/'))
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        from src.config import ROOT_PATH
+        file_path = ROOT_PATH / 'webui' / 'public' / user.AVATAR.lstrip('/')
+        if file_path.exists():
+            file_path.unlink()
     except Exception as e:
         logger.warning(f"删除头像文件失败: {e}")
     

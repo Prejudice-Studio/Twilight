@@ -28,7 +28,7 @@ class BaseConfig:
     
     提供从TOML文件读取和保存配置的能力
     """
-    toml_file_path: str = os.path.join(ROOT_PATH, 'config.toml')
+    toml_file_path: str = str(ROOT_PATH / 'config.toml')
     _section: Optional[str] = None
 
     @classmethod
@@ -146,6 +146,8 @@ class BaseConfig:
 
 class Config(BaseConfig):
     """全局配置管理类"""
+    SERVER_NAME: str = 'Twilight'  # 服务器名称，用于前端显示
+    SERVER_ICON: str = ''  # 服务器图标 URL，用于前端显示
     LOGGING: bool = True
     LOG_LEVEL: int = 20  # 日志等级，数字越大，日志越详细
     SQLALCHEMY_LOG: bool = False
@@ -171,6 +173,8 @@ class EmbyConfig(BaseConfig):
     """Emby配置管理类"""
     EMBY_URL: str = 'http://127.0.0.1:8096/'
     EMBY_TOKEN: str = ''
+    EMBY_USERNAME: str = ''  # 管理员用户名（API Key 无效时的备用认证）
+    EMBY_PASSWORD: str = ''  # 管理员密码（API Key 无效时的备用认证）
     EMBY_URL_LIST: List[str] = [
         'Direct : http://127.0.0.1:8096/',
         'Sample : http://192.168.1.1:8096/'
@@ -206,6 +210,8 @@ class ScoreAndRegisterConfig(BaseConfig):
     # 无码注册（待激活）配置
     ALLOW_PENDING_REGISTER: bool = True  # 是否允许无码注册（待激活状态）
     PENDING_REGISTER_BONUS: int = 10  # 无码注册赠送的初始积分
+    ALLOW_NO_EMBY_CHECKIN: bool = True  # 是否允许无 Emby 账户的用户签到
+    ALLOW_NO_EMBY_VIEW: bool = True  # 是否允许无 Emby 账户的用户查看部分信息
     
     # 管理员配置（二选一，优先使用 UID）
     ADMIN_UIDS: str = ''  # 管理员 UID 列表，逗号分隔（推荐，如 "1,2,3"）
@@ -279,7 +285,7 @@ class APIConfig(BaseConfig):
     API_KEY_LENGTH: int = 32
     CORS_ENABLED: bool = True
     CORS_ORIGINS: List[str] = []
-    UPLOAD_FOLDER: str = os.path.join(ROOT_PATH, 'uploads')  # 文件上传目录
+    UPLOAD_FOLDER: str = str(ROOT_PATH / 'uploads')  # 文件上传目录
     MAX_UPLOAD_SIZE: int = 5 * 1024 * 1024  # 最大上传文件大小（字节）
 
 
@@ -301,6 +307,7 @@ class SchedulerConfig(BaseConfig):
     AUTO_RENEW_TIME: str = "02:00"
     DAILY_STATS_TIME: str = "00:05"
     SESSION_CLEANUP_INTERVAL: int = 6
+    EMBY_SYNC_INTERVAL: int = 6
 
 
 class NotificationConfig(BaseConfig):

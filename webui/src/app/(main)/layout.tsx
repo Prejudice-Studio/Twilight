@@ -27,6 +27,7 @@ export default function MainLayout({
   const [bgRevealActive, setBgRevealActive] = useState(false);
   const bgTransitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialBgResolvedRef = useRef(false);
+  const bgStyleRef = useRef<Record<string, string>>({});
 
   const clearBgTransitionTimer = () => {
     if (bgTransitionTimerRef.current) {
@@ -38,13 +39,14 @@ export default function MainLayout({
   const applyBackgroundStyle = useCallback((style: Record<string, string>) => {
     if (!initialBgResolvedRef.current) {
       initialBgResolvedRef.current = true;
+      bgStyleRef.current = style;
       setBgStyle(style);
       setNextBgStyle(null);
       setBgRevealActive(false);
       return;
     }
 
-    const currentSerialized = JSON.stringify(bgStyle);
+    const currentSerialized = JSON.stringify(bgStyleRef.current);
     const nextSerialized = JSON.stringify(style);
     if (currentSerialized === nextSerialized) {
       return;
@@ -61,11 +63,12 @@ export default function MainLayout({
     });
 
     bgTransitionTimerRef.current = setTimeout(() => {
+      bgStyleRef.current = style;
       setBgStyle(style);
       setNextBgStyle(null);
       setBgRevealActive(false);
     }, 520);
-  }, [bgStyle]);
+  }, []);
 
   const loadUserBg = useCallback(async () => {
     if (!isAuthenticated || !user?.uid) {

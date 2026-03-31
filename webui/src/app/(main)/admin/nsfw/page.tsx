@@ -40,7 +40,7 @@ interface LibraryItem {
 export default function NsfwLibraryPage() {
   const { toast } = useToast();
   const [libraries, setLibraries] = useState<LibraryItem[]>([]);
-  const [selectedLibraryId, setSelectedLibraryId] = useState<string>("");
+  const [selectedLibraryName, setSelectedLibraryName] = useState<string>("");
   const [isSaving, setIsSaving] = useState(false);
 
   const loadLibrariesResource = useCallback(async () => {
@@ -48,7 +48,7 @@ export default function NsfwLibraryPage() {
     if (res.success && res.data) {
       setLibraries(res.data);
       const nsfwLib = res.data.find((lib) => lib.is_nsfw);
-      setSelectedLibraryId(nsfwLib?.id || "");
+      setSelectedLibraryName(nsfwLib?.name || "");
     } else {
       throw new Error(res.message || "无法加载媒体库列表");
     }
@@ -64,11 +64,11 @@ export default function NsfwLibraryPage() {
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const res = await api.updateNsfwLibrary(selectedLibraryId);
+      const res = await api.updateNsfwLibrary(selectedLibraryName);
       if (res.success) {
         toast({
           title: "保存成功",
-          description: `NSFW 库已更新为: ${libraries.find((lib) => lib.id === selectedLibraryId)?.name || "未选择"}`,
+          description: `NSFW 库已更新为: ${selectedLibraryName || "未选择"}`,
         });
         // 重新加载以更新状态
         await loadLibraries();
@@ -135,21 +135,21 @@ export default function NsfwLibraryPage() {
               <>
                 <div className="space-y-3">
                   <div
-                    onClick={() => setSelectedLibraryId("")}
+                    onClick={() => setSelectedLibraryName("")}
                     className={`flex cursor-pointer items-center space-x-3 rounded-lg border p-3 transition-all ${
-                      selectedLibraryId === ""
+                      selectedLibraryName === ""
                         ? "border-primary bg-primary/5"
                         : "hover:bg-accent"
                     }`}
                   >
                     <div
                       className={`h-4 w-4 rounded-full border-2 ${
-                        selectedLibraryId === ""
+                        selectedLibraryName === ""
                           ? "border-primary bg-primary"
                           : "border-muted-foreground"
                       }`}
                     >
-                      {selectedLibraryId === "" && (
+                      {selectedLibraryName === "" && (
                         <div className="h-full w-full rounded-full bg-primary" />
                       )}
                     </div>
@@ -165,21 +165,21 @@ export default function NsfwLibraryPage() {
                   {libraries.map((library) => (
                     <div
                       key={library.id}
-                      onClick={() => setSelectedLibraryId(library.id)}
+                      onClick={() => setSelectedLibraryName(library.name)}
                       className={`flex cursor-pointer items-center space-x-3 rounded-lg border p-3 transition-all ${
-                        selectedLibraryId === library.id
+                        selectedLibraryName === library.name
                           ? "border-primary bg-primary/5"
                           : "hover:bg-accent"
                       }`}
                     >
                       <div
                         className={`h-4 w-4 rounded-full border-2 ${
-                          selectedLibraryId === library.id
+                          selectedLibraryName === library.name
                             ? "border-primary bg-primary"
                             : "border-muted-foreground"
                         }`}
                       >
-                        {selectedLibraryId === library.id && (
+                        {selectedLibraryName === library.name && (
                           <div className="h-full w-full rounded-full bg-primary" />
                         )}
                       </div>
@@ -209,9 +209,8 @@ export default function NsfwLibraryPage() {
                   <div>
                     <p className="font-medium">当前选择</p>
                     <p className="text-sm text-muted-foreground">
-                      {selectedLibraryId
-                        ? libraries.find((lib) => lib.id === selectedLibraryId)
-                            ?.name || "未知"
+                      {selectedLibraryName
+                        ? selectedLibraryName
                         : "未选择（禁用 NSFW 功能）"}
                     </p>
                   </div>

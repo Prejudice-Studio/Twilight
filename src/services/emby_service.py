@@ -38,9 +38,20 @@ class EmbyService:
     """Emby 业务服务"""
     
     @staticmethod
+    def get_nsfw_library_name() -> Optional[str]:
+        """
+        获取配置的NSFW库名称
+        
+        :return: NSFW库名称，如果未配置则返回None
+        """
+        from src.config import EmbyConfig
+        name = EmbyConfig.EMBY_NSFW.strip() if EmbyConfig.EMBY_NSFW else ''
+        return name if name else None
+
+    @staticmethod
     async def find_nsfw_library_id() -> Optional[str]:
         """
-        查找NSFW库的ID（支持通过名称或ID匹配）
+        通过配置的NSFW库名称查找其在Emby中的ID
         
         :return: NSFW库的ID，如果未找到则返回None
         """
@@ -53,16 +64,14 @@ class EmbyService:
         
         try:
             libraries = await emby.get_libraries()
-            nsfw_identifier = EmbyConfig.EMBY_NSFW.strip()
+            nsfw_name = EmbyConfig.EMBY_NSFW.strip()
             
             for lib in libraries:
-                # 通过ID匹配
-                if lib.id == nsfw_identifier:
-                    return lib.id
                 # 通过名称匹配（不区分大小写）
-                if lib.name.strip().lower() == nsfw_identifier.lower():
+                if lib.name.strip().lower() == nsfw_name.lower():
                     return lib.id
             
+            logger.warning(f"未找到名为 '{nsfw_name}' 的NSFW库")
             return None
         except EmbyError as e:
             logger.error(f"查找NSFW库失败: {e}")
@@ -102,7 +111,12 @@ class EmbyService:
     @staticmethod
     async def sync_all_users() -> Tuple[int, int, List[str]]:
         """
-        同步所有用户状态
+        批量同步所有用户状态（Twilight DB ↔ Emby）
+        
+        - 检测并清理孤儿记录（Emby 用户已删除但 DB 仍有 EMBYID）
+        - 同步用户名不一致的情况
+        - 同步启用/禁用状态
+        - 同步 NSFW 权限
         
         :return: (成功数, 失败数, 错误列表)
         """
@@ -115,10 +129,49 @@ class EmbyService:
             emby_users = await emby.get_users()
             emby_user_map = {u.id: u for u in emby_users}
             
-            # 获取所有有 Emby ID 的本地用户
-            # 这里需要一个批量查询方法，暂时跳过
-            # TODO: 实现批量同步
+            local_users = await UserOperate.get_all_emby_users()
             
+            for user in local_users:
+                try:
+                    emby_user = emby_user_map.get(user.EMBYID)
+                    
+                    if emby_user is None:
+                        # Emby 用户已被外部删除，清理本地记录
+                        logger.warning(
+                            f"Emby 用户已不存在，清理 EMBYID: "
+                            f"{user.USERNAME} (UID: {user.UID}, EMBYID: {user.EMBYID})"
+                        )
+                        user.EMBYID = None
+                        await UserOperate.update_user(user)
+                        errors.append(f"{user.USERNAME}: Emby 用户不存在，已清理 EMBYID")
+                        fail_count += 1
+                        continue
+                    
+                    # 同步用户名（Emby → 本地）
+                    if emby_user.name != user.USERNAME:
+                        logger.info(
+                            f"用户名不一致，同步: {user.USERNAME} → {emby_user.name}"
+                        )
+                        user.USERNAME = emby_user.name
+                        await UserOperate.update_user(user)
+                    
+                    # 同步状态（本地 → Emby）
+                    from src.services.user_service import UserService
+                    ok, msg = await UserService.sync_user_to_emby(user)
+                    if ok:
+                        success_count += 1
+                    else:
+                        fail_count += 1
+                        errors.append(f"{user.USERNAME}: {msg}")
+                        
+                except Exception as e:
+                    fail_count += 1
+                    errors.append(f"{user.USERNAME}: {str(e)}")
+                    logger.error(f"同步用户 {user.USERNAME} 失败: {e}")
+            
+            logger.info(
+                f"批量同步完成: 成功 {success_count}, 失败 {fail_count}"
+            )
             return success_count, fail_count, errors
         except EmbyError as e:
             logger.error(f"同步所有用户失败: {e}")
@@ -297,21 +350,53 @@ class EmbyService:
             libraries = await emby.get_libraries()
             result = []
             
-            # 查找NSFW库ID
-            nsfw_library_id = await EmbyService.find_nsfw_library_id()
+            # 通过名称判断NSFW库
+            nsfw_name = EmbyService.get_nsfw_library_name()
             
             for lib in libraries:
                 result.append({
                     'id': lib.id,
                     'name': lib.name,
                     'type': lib.collection_type,
-                    'is_nsfw': lib.id == nsfw_library_id if nsfw_library_id else False,
+                    'is_nsfw': (lib.name.strip().lower() == nsfw_name.lower()) if nsfw_name else False,
                 })
             
             return result
         except EmbyError as e:
             logger.error(f"获取媒体库失败: {e}")
             return []
+
+    @staticmethod
+    async def resolve_library_names_to_ids(library_names: List[str]) -> Tuple[List[str], List[str]]:
+        """
+        将媒体库名称列表解析为 Emby 内部 ID 列表
+        
+        :param library_names: 媒体库名称列表
+        :return: (解析成功的 ID 列表, 未找到的名称列表)
+        """
+        if not library_names:
+            return [], []
+        
+        emby = get_emby_client()
+        
+        try:
+            libraries = await emby.get_libraries()
+            # 构建名称到ID的映射（不区分大小写）
+            name_to_id = {lib.name.strip().lower(): lib.id for lib in libraries}
+            
+            resolved_ids = []
+            not_found = []
+            for name in library_names:
+                name_lower = name.strip().lower()
+                if name_lower in name_to_id:
+                    resolved_ids.append(name_to_id[name_lower])
+                else:
+                    not_found.append(name)
+            
+            return resolved_ids, not_found
+        except EmbyError as e:
+            logger.error(f"解析媒体库名称失败: {e}")
+            return [], list(library_names)
 
     @staticmethod
     async def set_user_library_access(

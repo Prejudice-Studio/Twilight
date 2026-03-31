@@ -48,16 +48,16 @@ API Key 专用接口详见 [API_KEY_API.md](./API_KEY_API.md)。
 
 | 模块 | 前缀 | 说明 | 权限 |
 |------|------|------|------|
-| Auth | `/auth` | 登录、登出、认证相关 | 部分公开 |
-| Users | `/users` | 用户资料、账号与设备能力 | 用户 |
+| Auth | `/auth` | 登录、登出、认证、API Key 权限管理 | 部分公开 |
+| Users | `/users` | 用户资料、账号与设备能力、背景自定义 | 用户 |
 | Score | `/score` | 签到、积分流转、排行榜 | 用户 |
 | Media | `/media` | TMDB/Bangumi 搜索与求片 | 用户 |
 | Emby | `/emby` | Emby 账户与会话能力 | 用户 |
 | Admin | `/admin` | 用户/注册码/系统管理 | 管理员 |
 | Stats | `/stats` | 播放与使用统计 | 用户/管理员 |
 | Webhook | `/webhook` | Emby/Jellyfin/Plex 事件接收 | Secret 校验 |
-| System | `/system` | 健康、系统公开信息 | 公开/管理员 |
-| API Key | `/apikey` | 外部系统专用接口 | API Key |
+| System | `/system` | 健康、系统公开信息、服务器名称/图标 | 公开/管理员 |
+| API Key | `/apikey` | 外部系统专用接口（含权限管理） | API Key |
 
 ## 调用示例
 

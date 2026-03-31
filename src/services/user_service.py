@@ -264,7 +264,7 @@ class UserService:
                 REGISTER_TIME=timestamp(),
             )
         else:
-            # 普通用户待激活
+            # 普通用户：已激活但无 Emby 账户（需要积分激活 Emby 功能）
             user = UserModel(
                 UID=new_uid,
                 TELEGRAM_ID=telegram_id,
@@ -273,7 +273,7 @@ class UserService:
                 EMBYID=None,  # 无 Emby 账户
                 PASSWORD=hash_password(user_password),
                 ROLE=Role.NORMAL.value,
-                ACTIVE_STATUS=False,  # 未激活状态
+                ACTIVE_STATUS=True,  # 账户激活，可以登录、签到
                 EXPIRED_AT=-1,
                 REGISTER_TIME=timestamp(),
             )
@@ -300,7 +300,7 @@ class UserService:
         activate_cost = ScoreAndRegisterConfig.SCORE_REGISTER_NEED
         return RegisterResponse(
             result=RegisterResult.SUCCESS,
-            message=f"注册成功！您的账户待激活，请签到赚取 {activate_cost} 积分后激活",
+            message=f"注册成功！您可以登录使用基础功能，积攒 {activate_cost} 积分后可激活 Emby 账户",
             user=user,
             emby_password=user_password if not password else None
         )
@@ -313,9 +313,6 @@ class UserService:
         from src.config import ScoreAndRegisterConfig
         
         if user.EMBYID:
-            return False, "账户已激活"
-        
-        if user.ACTIVE_STATUS:
             return False, "账户已激活"
         
         # 检查积分
@@ -651,6 +648,115 @@ class UserService:
             return False, f"删除失败: {e}"
 
     @staticmethod
+    async def use_code(user: UserModel, code_str: str) -> Tuple[bool, str, Optional[str]]:
+        """
+        已登录用户统一使用授权码（注册码/续期码/白名单码）
+        
+        - 注册码(TYPE=1)：为无 Emby 账户的用户创建 Emby 账户
+        - 续期码(TYPE=2)：续期
+        - 白名单码(TYPE=3)：赋予白名单角色，如果没有 Emby 账户则自动创建
+        
+        :return: (成功, 消息, 新Emby密码 或 None)
+        """
+        from src.db.regcode import RegCodeOperate, Type as RegCodeType
+        
+        code_info = await RegCodeOperate.get_regcode_by_code(code_str)
+        if not code_info:
+            return False, "授权码无效", None
+        
+        if not code_info.ACTIVE:
+            return False, "授权码已停用", None
+        
+        if code_info.USE_COUNT_LIMIT != -1 and code_info.USE_COUNT >= code_info.USE_COUNT_LIMIT:
+            return False, "授权码已被使用完", None
+        
+        # 检查有效期
+        if code_info.VALIDITY_TIME != -1:
+            expire_time = code_info.CREATED_TIME + code_info.VALIDITY_TIME * 3600
+            if timestamp() > expire_time:
+                return False, "授权码已过期", None
+        
+        code_type = code_info.TYPE
+        
+        # ========== 续期码 ==========
+        if code_type == RegCodeType.RENEW.value:
+            success, msg = await UserService.renew_user(user, 30, code_str)
+            return success, msg, None
+        
+        # ========== 注册码 ==========
+        if code_type == RegCodeType.REGISTER.value:
+            if user.EMBYID:
+                return False, "您已拥有 Emby 账户，无需使用注册码", None
+            
+            # 为已有系统账户的用户创建 Emby 账户
+            emby = get_emby_client()
+            emby_password = generate_password(12)
+            days = code_info.DAYS or 30
+            
+            try:
+                existing_emby = await emby.get_user_by_name(user.USERNAME)
+                if existing_emby:
+                    return False, "该用户名在 Emby 中已存在", None
+                
+                emby_user = await emby.create_user(user.USERNAME, emby_password)
+                if not emby_user:
+                    return False, "创建 Emby 账户失败", None
+                
+                user.EMBYID = emby_user.id
+                user.ACTIVE_STATUS = True
+                if user.ROLE in (Role.ADMIN.value, Role.WHITE_LIST.value):
+                    user.EXPIRED_AT = 253402214400
+                else:
+                    user.EXPIRED_AT = timestamp() + days_to_seconds(days)
+                await UserOperate.update_user(user)
+                
+                await RegCodeOperate.update_regcode_use_count(code_str, 1)
+                logger.info(f"注册码激活 Emby 账户: {user.USERNAME}")
+                return True, f"Emby 账户创建成功！有效期 {days} 天", emby_password
+            except EmbyError as e:
+                logger.error(f"注册码创建 Emby 账户失败: {e}")
+                return False, f"Emby 服务器错误: {e}", None
+        
+        # ========== 白名单码 ==========
+        if code_type == RegCodeType.WHITELIST.value:
+            emby_password = None
+            
+            # 如果没有 Emby 账户，自动创建
+            if not user.EMBYID:
+                emby = get_emby_client()
+                emby_password = generate_password(12)
+                
+                try:
+                    existing_emby = await emby.get_user_by_name(user.USERNAME)
+                    if existing_emby:
+                        return False, "该用户名在 Emby 中已存在", None
+                    
+                    emby_user = await emby.create_user(user.USERNAME, emby_password)
+                    if not emby_user:
+                        return False, "创建 Emby 账户失败", None
+                    
+                    user.EMBYID = emby_user.id
+                except EmbyError as e:
+                    logger.error(f"白名单码创建 Emby 账户失败: {e}")
+                    return False, f"Emby 服务器错误: {e}", None
+            
+            # 赋予白名单角色 + 永久有效期
+            user.ROLE = Role.WHITE_LIST.value
+            user.ACTIVE_STATUS = True
+            user.EXPIRED_AT = 253402214400  # 9999-12-31
+            await UserOperate.update_user(user)
+            
+            await RegCodeOperate.update_regcode_use_count(code_str, 1)
+            
+            msg = "白名单授权成功！已获得永久有效期"
+            if emby_password:
+                msg += f"，Emby 账户已自动创建"
+            logger.info(f"白名单码激活: {user.USERNAME}")
+            return True, msg, emby_password
+        
+        return False, "未知的授权码类型", None
+
+    @staticmethod
     async def reset_password(user: UserModel) -> Tuple[bool, str, Optional[str]]:
         """
         重置用户密码
@@ -694,7 +800,7 @@ class UserService:
         
         from src.services.emby_service import EmbyService
         
-        # 查找NSFW库ID（支持通过名称或ID匹配）
+        # 通过名称查找NSFW库ID
         nsfw_library_id = await EmbyService.find_nsfw_library_id()
         if not nsfw_library_id:
             return False, "系统未配置 NSFW 媒体库"
@@ -782,7 +888,10 @@ class UserService:
             "nsfw_enabled": user.NSFW,
             "nsfw_allowed": user.NSFW_ALLOWED,
             "bgm_mode": user.BGM_MODE,
+            "auto_renew": user.AUTO_RENEW or False,
+            "avatar": user.AVATAR or None,
             "register_time": user.REGISTER_TIME,
+            "created_at": user.REGISTER_TIME,  # 前端兼容字段
             "emby_id": user.EMBYID,  # 添加 Emby ID
         }
         

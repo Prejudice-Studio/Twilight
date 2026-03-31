@@ -50,7 +50,7 @@ emby_url_list_for_whitelist = [
     "Direct : http://127.0.0.1:8096/",
     "Sample : http://192.168.1.1:8096/"
 ]
-# NSFW 库 ID (可选)
+# NSFW 库名称 (Emby 中的媒体库名称，不区分大小写)
 emby_nsfw = ""
 
 [Telegram]

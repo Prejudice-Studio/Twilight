@@ -167,6 +167,7 @@ async def get_user(uid: int):
     status = await EmbyService.get_user_status(user)
     
     # 获取 NSFW 权限信息
+    nsfw_library_name = EmbyService.get_nsfw_library_name()
     nsfw_library_id = await EmbyService.find_nsfw_library_id()
     has_nsfw_permission = False
     if nsfw_library_id and user.EMBYID:
@@ -183,7 +184,7 @@ async def get_user(uid: int):
     user_info['nsfw'] = {
         'enabled': user.NSFW,
         'has_permission': user.NSFW_ALLOWED,
-        'nsfw_library_id': nsfw_library_id,
+        'nsfw_library_name': nsfw_library_name,
     }
     
     return api_response(True, "获取成功", user_info)
@@ -354,9 +355,12 @@ async def set_user_libraries(uid: int):
     """
     设置用户媒体库权限
     
+    支持按名称或ID设置，优先使用名称。
+    
     Request:
         {
-            "library_ids": ["id1", "id2"],
+            "library_names": ["电影", "电视剧"],   // 按名称（推荐）
+            "library_ids": ["id1", "id2"],          // 按ID（兼容）
             "enable_all": false
         }
     """
@@ -365,8 +369,16 @@ async def set_user_libraries(uid: int):
         return api_response(False, "用户不存在", code=404)
     
     data = request.get_json() or {}
+    library_names = data.get('library_names', [])
     library_ids = data.get('library_ids', [])
     enable_all = data.get('enable_all', False)
+    
+    # 优先使用名称解析
+    if library_names:
+        resolved_ids, not_found = await EmbyService.resolve_library_names_to_ids(library_names)
+        if not_found:
+            return api_response(False, f"未找到以下媒体库: {', '.join(not_found)}", code=400)
+        library_ids = resolved_ids
     
     success, message = await EmbyService.set_user_library_access(user, library_ids, enable_all)
     return api_response(success, message)
@@ -394,7 +406,7 @@ async def set_user_nsfw_permission(uid: int):
     if not user.EMBYID:
         return api_response(False, "用户未绑定 Emby 账户", code=400)
     
-    # 查找NSFW库ID（支持通过名称或ID匹配）
+    # 通过名称查找NSFW库ID
     nsfw_library_id = await EmbyService.find_nsfw_library_id()
     if not nsfw_library_id:
         return api_response(False, "系统未配置 NSFW 媒体库", code=400)
@@ -500,6 +512,9 @@ async def bind_user_telegram(uid: int):
     if not telegram_id:
         return api_response(False, "缺少 telegram_id", code=400)
     
+    if not isinstance(telegram_id, int) or telegram_id <= 0:
+        return api_response(False, "telegram_id 格式无效", code=400)
+    
     # 检查该 Telegram ID 是否已被其他用户绑定
     existing = await UserOperate.get_user_by_telegram_id(telegram_id)
     if existing and existing.UID != uid:
@@ -528,6 +543,32 @@ async def get_user_by_telegram(telegram_id: int):
     
     user_info = await UserService.get_user_info(user)
     return api_response(True, "找到用户", user_info)
+
+
+# ==================== Emby 同步 ====================
+
+@admin_bp.route('/emby/sync', methods=['POST'])
+@require_auth
+@require_admin
+async def sync_all_emby():
+    """
+    批量同步所有 Emby 用户数据
+    
+    检测孤儿记录、同步用户名、同步状态和权限。
+    
+    Response:
+        {
+            "success": 5,
+            "failed": 1,
+            "errors": ["username: detail"]
+        }
+    """
+    success, failed, errors = await EmbyService.sync_all_users()
+    return api_response(True, f"同步完成: 成功 {success}, 失败 {failed}", {
+        'success': success,
+        'failed': failed,
+        'errors': errors,
+    })
 
 
 # ==================== 积分管理 ====================

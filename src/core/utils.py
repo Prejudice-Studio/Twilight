@@ -189,7 +189,7 @@ def format_duration(seconds: int) -> str:
 
 def format_expire_time(expire_timestamp: int) -> str:
     """格式化过期时间"""
-    if expire_timestamp == -1:
+    if expire_timestamp == -1 or expire_timestamp >= 253402214400:
         return "永不过期"
     
     remaining = expire_timestamp - timestamp()

@@ -41,6 +41,7 @@ class UserModel(UsersDatabaseModel):
     DEVICE_LIST: Mapped[Optional[str]] = mapped_column(String, default='', nullable=True)
     APIKEY_STATUS: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, nullable=True)
     APIKEY: Mapped[Optional[str]] = mapped_column(String, default='', nullable=True)
+    APIKEY_PERMISSIONS: Mapped[Optional[str]] = mapped_column(String, default='', nullable=True)  # JSON: API Key 权限范围
     AUTO_RENEW: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, nullable=True)  # 自动续期开关
     AVATAR: Mapped[Optional[str]] = mapped_column(String, default='', nullable=True)  # 用户头像 URL
     OTHER: Mapped[Optional[str]] = mapped_column(String, default='', nullable=True)
@@ -94,6 +95,18 @@ class UserOperate:
         async with UsersSessionFactory() as session:
             scalar = await session.execute(select(UserModel).filter_by(EMBYID=embyid).limit(1))
             return scalar.scalar_one_or_none()
+
+    @staticmethod
+    async def get_all_emby_users() -> list[UserModel]:
+        """获取所有绑定了 Emby 的用户"""
+        async with UsersSessionFactory() as session:
+            result = await session.execute(
+                select(UserModel).where(
+                    UserModel.EMBYID.isnot(None),
+                    UserModel.EMBYID != '',
+                )
+            )
+            return list(result.scalars().all())
     
     @staticmethod
     async def get_user_by_emby_username(username: str) -> Optional[UserModel]:

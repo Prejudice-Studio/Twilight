@@ -3,9 +3,18 @@ API Key 专用接口
 
 提供基于 API Key 认证的外部接口，用于外部系统控制账号
 这些接口与前端使用的接口完全独立
+
+权限范围 (permissions):
+  account:read  - 读取账号信息、状态
+  account:write - 启用/禁用/续期账号
+  score:read    - 读取积分信息
+  score:write   - 签到等积分操作
+  emby:read     - 读取 Emby 状态
+  emby:write    - 控制 Emby 账户（NSFW 等）
 """
+import json
 from functools import wraps
-from typing import Callable, Any
+from typing import Callable, Any, List
 from flask import Blueprint, request, g
 
 from src.api.v1.auth import api_response
@@ -13,6 +22,25 @@ from src.db.user import UserOperate, UserModel
 from src.services import UserService, EmbyService
 
 apikey_bp = Blueprint('apikey', __name__, url_prefix='/apikey')
+
+# 所有可用的权限范围
+ALL_PERMISSIONS = [
+    'account:read', 'account:write',
+    'score:read', 'score:write',
+    'emby:read', 'emby:write',
+]
+
+
+def _get_user_permissions(user: UserModel) -> List[str]:
+    """获取用户 API Key 的权限列表"""
+    if not user.APIKEY_PERMISSIONS:
+        # 默认权限：向后兼容，旧 Key 拥有全部权限
+        return list(ALL_PERMISSIONS)
+    try:
+        perms = json.loads(user.APIKEY_PERMISSIONS)
+        return [p for p in perms if p in ALL_PERMISSIONS]
+    except (json.JSONDecodeError, TypeError):
+        return list(ALL_PERMISSIONS)
 
 
 def require_apikey(f: Callable) -> Callable:
@@ -60,16 +88,36 @@ def require_apikey(f: Callable) -> Callable:
         # 将用户存储到 g 对象中
         g.current_user = user
         g.apikey = apikey
+        g.apikey_permissions = _get_user_permissions(user)
         
         return await f(*args, **kwargs)
     
     return wrapper
 
 
+def require_permission(*perms: str):
+    """
+    API Key 权限检查装饰器
+    
+    用法: @require_permission('account:read')
+    """
+    def decorator(f: Callable) -> Callable:
+        @wraps(f)
+        async def wrapper(*args, **kwargs):
+            user_perms = getattr(g, 'apikey_permissions', [])
+            missing = [p for p in perms if p not in user_perms]
+            if missing:
+                return api_response(False, f"API Key 缺少权限: {', '.join(missing)}", code=403)
+            return await f(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
 # ==================== 账号信息 ====================
 
 @apikey_bp.route('/info', methods=['GET'])
 @require_apikey
+@require_permission('account:read')
 async def get_account_info():
     """
     获取账号信息
@@ -141,6 +189,7 @@ async def get_account_info():
 
 @apikey_bp.route('/status', methods=['GET'])
 @require_apikey
+@require_permission('account:read')
 async def get_account_status():
     """
     获取账号状态（简化版）
@@ -186,6 +235,7 @@ async def get_account_status():
 
 @apikey_bp.route('/enable', methods=['POST'])
 @require_apikey
+@require_permission('account:write')
 async def enable_account():
     """
     启用账号
@@ -219,6 +269,7 @@ async def enable_account():
 
 @apikey_bp.route('/disable', methods=['POST'])
 @require_apikey
+@require_permission('account:write')
 async def disable_account():
     """
     禁用账号
@@ -260,6 +311,7 @@ async def disable_account():
 
 @apikey_bp.route('/renew', methods=['POST'])
 @require_apikey
+@require_permission('account:write')
 async def renew_account():
     """
     续期账号
@@ -349,6 +401,63 @@ async def refresh_apikey():
     })
 
 
+# ==================== 权限管理 ====================
+
+@apikey_bp.route('/permissions', methods=['GET'])
+@require_apikey
+async def get_permissions():
+    """
+    获取当前 API Key 的权限列表
+    
+    Response:
+        {
+            "success": true,
+            "data": {
+                "permissions": ["account:read", "account:write", ...],
+                "all_permissions": ["account:read", "account:write", "score:read", ...]
+            }
+        }
+    """
+    return api_response(True, "获取成功", {
+        'permissions': g.apikey_permissions,
+        'all_permissions': ALL_PERMISSIONS,
+    })
+
+
+@apikey_bp.route('/permissions', methods=['PUT'])
+@require_apikey
+async def update_permissions():
+    """
+    更新 API Key 的权限列表
+    
+    Request:
+        {
+            "permissions": ["account:read", "score:read"]
+        }
+    """
+    data = request.get_json() or {}
+    permissions = data.get('permissions')
+    
+    if permissions is None:
+        return api_response(False, "缺少 permissions 参数", code=400)
+    
+    if not isinstance(permissions, list):
+        return api_response(False, "permissions 必须是数组", code=400)
+    
+    # 验证权限值
+    invalid = [p for p in permissions if p not in ALL_PERMISSIONS]
+    if invalid:
+        return api_response(False, f"无效的权限: {', '.join(invalid)}", code=400)
+    
+    user = g.current_user
+    user.APIKEY_PERMISSIONS = json.dumps(permissions)
+    await UserOperate.update_user(user)
+    
+    return api_response(True, "权限已更新", {
+        'permissions': permissions,
+    })
+
+
 @apikey_bp.route('/key/disable', methods=['POST'])
 @require_apikey
 async def disable_apikey():
@@ -423,6 +532,7 @@ async def enable_apikey():
 
 @apikey_bp.route('/emby/status', methods=['GET'])
 @require_apikey
+@require_permission('emby:read')
 async def get_emby_status():
     """
     获取 Emby 账号状态
@@ -460,6 +570,7 @@ async def get_emby_status():
 
 @apikey_bp.route('/emby/kick', methods=['POST'])
 @require_apikey
+@require_permission('emby:write')
 async def kick_emby_sessions():
     """
     踢出所有 Emby 会话
@@ -494,6 +605,7 @@ async def kick_emby_sessions():
 
 @apikey_bp.route('/score', methods=['GET'])
 @require_apikey
+@require_permission('score:read')
 async def get_score():
     """
     获取积分信息
@@ -541,6 +653,7 @@ async def get_score():
 
 @apikey_bp.route('/score/checkin', methods=['POST'])
 @require_apikey
+@require_permission('score:write')
 async def checkin():
     """
     签到
@@ -581,6 +694,7 @@ async def checkin():
 
 @apikey_bp.route('/score/history', methods=['GET'])
 @require_apikey
+@require_permission('score:read')
 async def get_score_history():
     """
     获取积分历史记录
@@ -661,6 +775,7 @@ async def get_score_history():
 
 @apikey_bp.route('/score/ranking', methods=['GET'])
 @require_apikey
+@require_permission('score:read')
 async def get_score_ranking():
     """
     获取积分排行榜
@@ -730,4 +845,135 @@ async def get_score_ranking():
         'my_rank': my_rank if my_rank > 0 else None,
         'my_score': my_score_record.SCORE if my_score_record else 0,
     })
+
+
+# ==================== NSFW 库管理 ====================
+
+@apikey_bp.route('/emby/nsfw', methods=['GET'])
+@require_apikey
+@require_permission('emby:read')
+async def get_nsfw_status():
+    """
+    获取 NSFW 库状态
+    
+    Headers:
+        X-API-Key: <your_api_key>
+    
+    Response:
+        {
+            "success": true,
+            "data": {
+                "enabled": true,
+                "has_permission": true,
+                "nsfw_library_name": "xxx",
+                "can_toggle": true
+            }
+        }
+    """
+    user = g.current_user
+
+    nsfw_library_name = EmbyService.get_nsfw_library_name()
+    nsfw_library_id = await EmbyService.find_nsfw_library_id()
+
+    if not nsfw_library_id:
+        return api_response(True, "NSFW 库未配置", {
+            'enabled': False,
+            'has_permission': False,
+            'nsfw_library_name': None,
+            'can_toggle': False,
+        })
+
+    return api_response(True, "获取成功", {
+        'enabled': user.NSFW,
+        'has_permission': bool(user.NSFW_ALLOWED),
+        'nsfw_library_name': nsfw_library_name,
+        'can_toggle': bool(user.NSFW_ALLOWED),
+    })
+
+
+@apikey_bp.route('/emby/nsfw', methods=['PUT'])
+@require_apikey
+@require_permission('emby:write')
+async def toggle_nsfw():
+    """
+    切换 NSFW 库访问
+    
+    Headers:
+        X-API-Key: <your_api_key>
+    
+    Request:
+        {
+            "enable": true
+        }
+    
+    Response:
+        {
+            "success": true,
+            "message": "NSFW 已开启"
+        }
+    """
+    user = g.current_user
+    data = request.get_json() or {}
+    enable = data.get('enable', False)
+
+    nsfw_library_id = await EmbyService.find_nsfw_library_id()
+    if not nsfw_library_id:
+        return api_response(False, "系统未配置 NSFW 媒体库", code=400)
+
+    if not user.NSFW_ALLOWED:
+        return api_response(False, "管理员未授予您 NSFW 库的访问权限", code=403)
+
+    success, message = await UserService.toggle_nsfw(user, enable)
+    return api_response(success, message)
+
+
+# ==================== 授权码 ====================
+
+@apikey_bp.route('/use-code', methods=['POST'])
+@require_apikey
+@require_permission('account:write')
+async def use_code():
+    """
+    使用授权码（注册码/续期码/白名单码）
+    
+    Headers:
+        X-API-Key: <your_api_key>
+    
+    Request:
+        {
+            "reg_code": "code-xxx"
+        }
+    
+    Response:
+        {
+            "success": true,
+            "message": "操作成功",
+            "data": {
+                "emby_password": "xxx",
+                "expired_at": 12345678,
+                "role": 1,
+                "role_name": "普通用户"
+            }
+        }
+    """
+    user = g.current_user
+    data = request.get_json() or {}
+    reg_code = data.get('reg_code', '').strip()
+
+    if not reg_code:
+        return api_response(False, "缺少授权码", code=400)
+
+    success, message, emby_password = await UserService.use_code(user, reg_code)
+
+    if success:
+        # 重新获取用户信息
+        updated_user = await UserOperate.get_user_by_uid(user.UID)
+        role_names = {0: 'ADMIN', 1: 'NORMAL', 2: 'WHITE_LIST', -1: 'UNRECOGNIZED'}
+        return api_response(True, message, {
+            'emby_password': emby_password,
+            'expired_at': updated_user.EXPIRED_AT,
+            'role': updated_user.ROLE,
+            'role_name': role_names.get(updated_user.ROLE, 'UNKNOWN'),
+        })
+    return api_response(False, message, code=400)
 

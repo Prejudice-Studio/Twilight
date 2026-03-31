@@ -52,6 +52,83 @@ Authorization: ApiKey key-xxxxxxxxxxxxxxxx-yyyyyyyy
 }
 ```
 
+## 权限系统
+
+API Key 支持细粒度的权限控制。每个 API Key 可以被限制为只允许特定操作。
+
+### 权限范围
+
+| 权限 | 说明 |
+|------|------|
+| `account:read` | 读取账号信息、状态 |
+| `account:write` | 启用/禁用账号、续期 |
+| `score:read` | 查看积分、排行榜、历史 |
+| `score:write` | 签到等积分写操作 |
+| `emby:read` | 查看 Emby 状态 |
+| `emby:write` | 踢出 Emby 会话 |
+
+默认情况下，新创建的 API Key 拥有全部权限（向后兼容）。
+
+### 获取权限列表
+
+```http
+GET /api/v1/apikey/permissions
+X-API-Key: key-xxxxxxxxxxxxxxxx-yyyyyyyy
+```
+
+**响应**:
+```json
+{
+    "success": true,
+    "data": {
+        "permissions": ["account:read", "account:write", "score:read"],
+        "all_permissions": ["account:read", "account:write", "score:read", "score:write", "emby:read", "emby:write"]
+    }
+}
+```
+
+### 更新权限
+
+```http
+PUT /api/v1/apikey/permissions
+X-API-Key: key-xxxxxxxxxxxxxxxx-yyyyyyyy
+Content-Type: application/json
+```
+
+```json
+{
+    "permissions": ["account:read", "score:read"]
+}
+```
+
+也可通过前端 Token 认证接口管理：
+- `GET /api/v1/auth/apikey/permissions`
+- `PUT /api/v1/auth/apikey/permissions`
+
+### 权限不足错误
+
+当 API Key 缺少所需权限时，返回 `403`:
+```json
+{
+    "success": false,
+    "message": "API Key 缺少权限: account:write"
+}
+```
+
+### 各接口所需权限
+
+| 接口 | 需要权限 |
+|------|---------|
+| 获取账号信息 / 状态 | `account:read` |
+| 启用 / 禁用 / 续期账号 | `account:write` |
+| 获取积分 / 历史 / 排行榜 | `score:read` |
+| 签到 | `score:write` |
+| 获取 Emby 状态 | `emby:read` |
+| 踢出 Emby 会话 | `emby:write` |
+| 权限管理 / Key 管理 | 无额外权限（仅需有效 Key） |
+
+---
+
 ## 接口列表
 
 ### 1. 获取账号信息
@@ -452,7 +529,7 @@ X-API-Key: key-xxxxxxxxxxxxxxxx-yyyyyyyy
 | 200 | 请求成功 |
 | 400 | 请求参数错误 |
 | 401 | 认证失败（API Key 无效、已禁用或格式错误） |
-| 403 | 权限不足（账号被禁用） |
+| 403 | 权限不足（账号被禁用或 API Key 缺少所需权限范围） |
 | 404 | 资源不存在 |
 | 500 | 服务器内部错误 |
 

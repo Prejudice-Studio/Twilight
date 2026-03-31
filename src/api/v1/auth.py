@@ -6,11 +6,12 @@
 import hashlib
 import logging
 import time
+from collections import defaultdict
 from functools import wraps
 from typing import Optional, Callable, Any
 from flask import Blueprint, request, g, jsonify
 
-from src.config import APIConfig, Config
+from src.config import APIConfig, Config, SecurityConfig
 from src.core.utils import verify_password, timestamp
 from src.db.user import UserOperate, UserModel, Role
 from src.db.login_log import LoginLogOperate, LoginLogModel
@@ -28,6 +29,52 @@ auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 # token 存储：优先使用 Redis，未配置时回退内存（单进程有效）
 _token_store: dict[str, dict] = {}
 _redis_client: Optional["Redis"] = None
+
+# 登录速率限制：IP -> (失败次数, 首次失败时间戳)
+_login_rate_limit: dict[str, dict] = defaultdict(lambda: {'count': 0, 'first_fail': 0})
+_LOGIN_RATE_WINDOW = 900  # 15 分钟窗口
+
+
+def _check_login_rate_limit(ip: str) -> Optional[str]:
+    """
+    检查 IP 是否超过登录失败阈值
+    
+    :return: 如果超限则返回错误消息，否则返回 None
+    """
+    threshold = SecurityConfig.LOGIN_FAIL_THRESHOLD
+    if threshold <= 0:
+        return None
+    
+    now = timestamp()
+    record = _login_rate_limit[ip]
+    
+    # 窗口过期则重置
+    if now - record['first_fail'] > _LOGIN_RATE_WINDOW:
+        record['count'] = 0
+        record['first_fail'] = 0
+        return None
+    
+    if record['count'] >= threshold:
+        remaining = _LOGIN_RATE_WINDOW - (now - record['first_fail'])
+        return f"登录尝试过于频繁，请在 {max(remaining // 60, 1)} 分钟后重试"
+    
+    return None
+
+
+def _record_login_failure(ip: str):
+    """记录一次登录失败"""
+    now = timestamp()
+    record = _login_rate_limit[ip]
+    if record['count'] == 0 or now - record['first_fail'] > _LOGIN_RATE_WINDOW:
+        record['count'] = 1
+        record['first_fail'] = now
+    else:
+        record['count'] += 1
+
+
+def _clear_login_failures(ip: str):
+    """登录成功后清除失败记录"""
+    _login_rate_limit.pop(ip, None)
 
 
 # ==================== 工具函数 ====================
@@ -264,15 +311,23 @@ async def login():
     if len(password) > 200:
         return api_response(False, "密码过长", code=400)
     
+    # IP 速率限制检查
+    client_ip = request.remote_addr or 'unknown'
+    rate_limit_msg = _check_login_rate_limit(client_ip)
+    if rate_limit_msg:
+        return api_response(False, rate_limit_msg, code=429)
+    
     # 获取用户
     user = await UserOperate.get_user_by_username(username)
     if not user:
         # 记录登录失败
+        _record_login_failure(client_ip)
         await _log_login_attempt(username, False, "用户不存在")
         return api_response(False, "用户名或密码错误", code=401)
     
     # 验证密码
     if not user.PASSWORD or not verify_password(password, user.PASSWORD):
+        _record_login_failure(client_ip)
         await _log_login_attempt(username, False, "密码错误")
         return api_response(False, "用户名或密码错误", code=401)
     
@@ -281,9 +336,12 @@ async def login():
         await _log_login_attempt(username, False, "账户已被禁用")
         return api_response(False, "账户已被禁用", code=403)
     
+    # 登录成功，清除该 IP 的失败记录
+    _clear_login_failures(client_ip)
+    
     # 更新登录信息
     user.LAST_LOGIN_TIME = timestamp()
-    user.LAST_LOGIN_IP = request.remote_addr or 'unknown'
+    user.LAST_LOGIN_IP = client_ip
     user.LAST_LOGIN_UA = request.headers.get('User-Agent', 'unknown')
     await UserOperate.update_user(user)
     
@@ -334,24 +392,38 @@ async def login_telegram():
             "telegram_id": 123456789
         }
     """
+    # IP 速率限制检查
+    client_ip = request.remote_addr or 'unknown'
+    rate_limit_msg = _check_login_rate_limit(client_ip)
+    if rate_limit_msg:
+        return api_response(False, rate_limit_msg, code=429)
+
     data = request.get_json() or {}
     telegram_id = data.get('telegram_id')
     
     if not telegram_id:
         return api_response(False, "缺少 telegram_id", code=400)
     
+    # 类型校验
+    if not isinstance(telegram_id, int) or telegram_id <= 0:
+        return api_response(False, "telegram_id 格式无效", code=400)
+    
     # 获取用户
     user = await UserOperate.get_user_by_telegram_id(telegram_id)
     if not user:
-        return api_response(False, "未找到绑定的用户", code=404)
+        _record_login_failure(client_ip)
+        return api_response(False, "认证失败", code=401)
     
     # 检查用户状态
     if not user.ACTIVE_STATUS:
         return api_response(False, "账户已被禁用", code=403)
     
+    # 登录成功，清除该 IP 的失败记录
+    _clear_login_failures(client_ip)
+    
     # 更新登录信息
     user.LAST_LOGIN_TIME = timestamp()
-    user.LAST_LOGIN_IP = request.remote_addr or 'unknown'
+    user.LAST_LOGIN_IP = client_ip
     user.LAST_LOGIN_UA = request.headers.get('User-Agent', 'unknown')
     await UserOperate.update_user(user)
     
@@ -390,6 +462,12 @@ async def login_apikey():
             "apikey": "key-xxxxx-xxxxx"
         }
     """
+    # IP 速率限制检查
+    client_ip = request.remote_addr or 'unknown'
+    rate_limit_msg = _check_login_rate_limit(client_ip)
+    if rate_limit_msg:
+        return api_response(False, rate_limit_msg, code=429)
+
     data = request.get_json() or {}
     apikey = data.get('apikey')
     
@@ -399,11 +477,15 @@ async def login_apikey():
     # 获取用户
     user = await UserOperate.get_user_by_apikey(apikey)
     if not user:
+        _record_login_failure(client_ip)
         return api_response(False, "API Key 无效", code=401)
     
     # 检查用户状态
     if not user.ACTIVE_STATUS:
         return api_response(False, "账户已被禁用", code=403)
+    
+    # 登录成功，清除该 IP 的失败记录
+    _clear_login_failures(client_ip)
     
     # 生成 token（API Key 登录也生成 token）
     token = await generate_token(user.UID)
@@ -519,6 +601,48 @@ async def enable_apikey():
         })
 
 
+@auth_bp.route('/apikey/permissions', methods=['GET'])
+@require_auth
+async def get_apikey_permissions():
+    """获取 API Key 的权限列表"""
+    import json
+    from src.api.v1.apikey import ALL_PERMISSIONS, _get_user_permissions
+    
+    return api_response(True, "获取成功", {
+        'permissions': _get_user_permissions(g.current_user),
+        'all_permissions': ALL_PERMISSIONS,
+    })
+
+
+@auth_bp.route('/apikey/permissions', methods=['PUT'])
+@require_auth
+async def update_apikey_permissions():
+    """更新 API Key 的权限列表"""
+    import json
+    from src.api.v1.apikey import ALL_PERMISSIONS
+    
+    data = request.get_json() or {}
+    permissions = data.get('permissions')
+    
+    if permissions is None:
+        return api_response(False, "缺少 permissions 参数", code=400)
+    
+    if not isinstance(permissions, list):
+        return api_response(False, "permissions 必须是数组", code=400)
+    
+    invalid = [p for p in permissions if p not in ALL_PERMISSIONS]
+    if invalid:
+        return api_response(False, f"无效的权限: {', '.join(invalid)}", code=400)
+    
+    user = g.current_user
+    user.APIKEY_PERMISSIONS = json.dumps(permissions)
+    await UserOperate.update_user(user)
+    
+    return api_response(True, "权限已更新", {
+        'permissions': permissions,
+    })
+
+
 # ==================== 辅助函数 ====================
 
 async def _log_login_attempt(username: str, success: bool, reason: str = ""):
@@ -546,7 +670,6 @@ async def _log_login_attempt(username: str, success: bool, reason: str = ""):
 
 __all__ = [
     'auth_bp',
-    'async_route',
     'require_auth',
     'require_admin',
     'api_response',

@@ -35,13 +35,19 @@ def create_app() -> Flask:
     
     # CORS 跨域支持
     if APIConfig.CORS_ENABLED:
+        cors_origins = APIConfig.CORS_ORIGINS if APIConfig.CORS_ORIGINS else "*"
+        if cors_origins == "*":
+            import logging
+            logging.getLogger(__name__).warning(
+                "⚠️ CORS 允许所有来源 (*)，建议在生产环境中配置 cors_origins 白名单"
+            )
         CORS(
             app,
-            resources={r"/api/*": {"origins": "*"}},
-            supports_credentials=False,
+            resources={r"/api/*": {"origins": cors_origins}},
+            supports_credentials=bool(APIConfig.CORS_ORIGINS),
             allow_headers=['Content-Type', 'Authorization', 'X-API-Key'],
             methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-            max_age=86400,
+            max_age=3600,
         )
     
     # 注册旧版 API（兼容）

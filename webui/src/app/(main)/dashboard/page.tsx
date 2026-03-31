@@ -10,7 +10,6 @@ import {
   Tv,
   Flame,
   Gift,
-  TrendingUp,
   CheckCircle2,
   XCircle,
   Key,
@@ -39,7 +38,7 @@ import { useAsyncResource } from "@/hooks/use-async-resource";
 import { useRegionRefresh } from "@/hooks/use-region-refresh";
 import { PageError } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
-import { api, type ScoreInfo, type PlaybackStats, type TopMediaItem } from "@/lib/api";
+import { api, type ScoreInfo, type PlaybackStats } from "@/lib/api";
 import { formatRelativeTime, formatNumber, cn } from "@/lib/utils";
 import { RegionRefreshKeys } from "@/lib/region-refresh";
 
@@ -66,7 +65,7 @@ export default function DashboardPage() {
   const [isCheckinLoading, setIsCheckinLoading] = useState(false);
   const [regCode, setRegCode] = useState("");
   const [isRenewing, setIsRenewing] = useState(false);
-  const [topMedia, setTopMedia] = useState<TopMediaItem[]>([]);
+  const [topMedia, setTopMedia] = useState<TopMediaItem[]>([]); // kept for future use
   const [regCodeInfo, setRegCodeInfo] = useState<{ type: number; type_name: string; days: number } | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   
@@ -76,10 +75,9 @@ export default function DashboardPage() {
   const [isEditingScore, setIsEditingScore] = useState(false);
 
   const loadDashboardData = useCallback(async () => {
-    const [scoreRes, statsRes, topMediaRes] = await Promise.all([
+    const [scoreRes, statsRes] = await Promise.all([
       api.getScoreInfo(),
       api.getMyStats().catch(() => ({ success: false, data: null })),
-      api.getTopMedia("week", 5).catch(() => ({ success: false, data: { ranking: [] } })),
     ]);
 
     if (scoreRes.success && scoreRes.data) {
@@ -87,9 +85,6 @@ export default function DashboardPage() {
     }
     if (statsRes.success && statsRes.data) {
       setStats(statsRes.data);
-    }
-    if (topMediaRes.success && topMediaRes.data) {
-      setTopMedia(topMediaRes.data.ranking);
     }
 
     return true;
@@ -108,7 +103,7 @@ export default function DashboardPage() {
   const handleCheckRegcode = async () => {
     if (!regCode.trim()) {
       toast({
-        title: "请输入注册码",
+        title: "请输入授权码",
         variant: "destructive",
       });
       return;
@@ -118,25 +113,12 @@ export default function DashboardPage() {
       const res = await api.checkRegcode(regCode.trim());
       if (res.success && res.data) {
         setRegCodeInfo(res.data);
-        
-        // 如果是注册类型，提示用户去注册页面
-        if (res.data.type === 1) {
-          toast({
-            title: "这是注册码",
-            description: "请前往注册页面使用此注册码进行注册",
-            variant: "default",
-          });
-          // 跳转到注册页面
-          window.location.href = "/register?regcode=" + encodeURIComponent(regCode.trim());
-          return;
-        }
-        
-        // 其他类型显示确认对话框
+        // 所有类型（注册码/续期码/白名单码）统一显示确认对话框
         setShowConfirm(true);
       } else {
         toast({
-          title: "注册码无效",
-          description: res.message || "请检查注册码是否正确",
+          title: "授权码无效",
+          description: res.message || "请检查授权码是否正确",
           variant: "destructive",
         });
         setRegCodeInfo(null);
@@ -157,11 +139,16 @@ export default function DashboardPage() {
     setIsRenewing(true);
     setShowConfirm(false);
     try {
-      const res = await api.renewWithRegcode(regCode.trim());
+      const res = await api.useCode(regCode.trim());
       if (res.success) {
+        const messages: string[] = [`账号已成功${regCodeInfo.type_name}`];
+        if (res.data?.emby_password) {
+          messages.push(`Emby 密码: ${res.data.emby_password}`);
+          messages.push("请牢记此密码");
+        }
         toast({
           title: `${regCodeInfo.type_name}成功`,
-          description: `账号已成功${regCodeInfo.type_name}`,
+          description: messages.join("\n"),
           variant: "success",
         });
         setRegCode("");
@@ -431,7 +418,7 @@ export default function DashboardPage() {
                   </div>
                </div>
                <div className="flex-1 text-center md:text-left z-10">
-                  <h2 className="text-2xl font-black tracking-tight">每日福利时刻</h2>
+                  <h2 className="text-2xl font-black tracking-tight">每日签到</h2>
                   <p className="text-muted-foreground font-medium mt-1">
                     {scoreInfo?.today_checkin 
                       ? "任务已达成！明天再来领奖励吧" 
@@ -475,13 +462,13 @@ export default function DashboardPage() {
                   <Key className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-black tracking-tight">账户激活与续期</h3>
-                  <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-tighter">Activate & Renew</p>
+                  <h3 className="text-base font-black tracking-tight">兑换码使用</h3>
+                  <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-tighter">Code Use</p>
                 </div>
               </div>
               <div className="flex flex-col gap-3">
                 <Input
-                  placeholder="输入授权码以增加效期..."
+                  placeholder="请输入兑换码以获得权益"
                   value={regCode}
                   onChange={(e) => setRegCode(e.target.value)}
                   className="h-12 rounded-xl border-white/60 bg-white/40 shadow-inner focus:bg-white transition-all font-medium"
@@ -499,69 +486,12 @@ export default function DashboardPage() {
               </p>
             </div>
 
-            {/* Favorite Genres / Quick Stats */}
-            <div className="premium-card p-6 border-white/40">
-               <div className="flex items-center gap-3 mb-6">
-                <div className="p-2 bg-orange-500/10 rounded-xl text-orange-500">
-                  <TrendingUp className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black tracking-tight">观影口味分布</h3>
-                  <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-tighter">Favorite Genres</p>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {stats?.favorite_genres && stats.favorite_genres.length > 0 ? (
-                  stats.favorite_genres.slice(0, 8).map((genre) => (
-                    <Badge key={genre} variant="secondary" className="bg-white/60 border border-white/40 text-muted-foreground font-bold rounded-lg px-2.5 py-1">
-                      {genre}
-                    </Badge>
-                  ))
-                ) : (
-                  <p className="text-xs text-muted-foreground italic py-4">正在分析您的观影爱好...</p>
-                )}
-              </div>
-            </div>
+
           </div>
         </motion.div>
 
         {/* Sidebar Widgets */}
         <motion.div variants={item} className="space-y-6">
-           {/* Top Ranking */}
-           <div className="premium-card p-6">
-              <h3 className="text-lg font-black tracking-tight mb-6 flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-primary" />
-                全站实时热门
-              </h3>
-              <div className="space-y-5">
-                {topMedia && topMedia.length > 0 ? (
-                  topMedia.map((item, index) => (
-                    <div key={index} className="flex items-center justify-between group">
-                      <div className="flex items-center gap-3">
-                        <span className={cn(
-                          "flex h-7 w-7 items-center justify-center rounded-xl text-xs font-black transition-all",
-                          index === 0 ? "bg-amber-400 text-amber-900 shadow-lg shadow-amber-400/20" : "bg-secondary text-muted-foreground"
-                        )}>
-                          {index + 1}
-                        </span>
-                        <div className="max-w-[140px]">
-                           <p className="text-sm font-bold truncate group-hover:text-primary transition-colors">{item.item_name}</p>
-                           <p className="text-[10px] text-muted-foreground/60 uppercase tracking-tighter">{item.item_type}</p>
-                        </div>
-                      </div>
-                      <div className="text-right shrink-0">
-                         <span className="text-[11px] font-black text-primary">{item.play_count}</span>
-                         <span className="text-[9px] text-muted-foreground/40 ml-1 font-black">PLAYS</span>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="py-10 text-center">
-                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground mx-auto opacity-20" />
-                  </div>
-                )}
-              </div>
-           </div>
 
            {/* Recent Activity */}
            <div className="premium-card p-6">
@@ -585,7 +515,7 @@ export default function DashboardPage() {
                     </div>
                   ))
                 ) : (
-                  <p className="text-xs text-muted-foreground italic text-center py-4">暂入播放记录</p>
+                  <p className="text-xs text-muted-foreground italic text-center py-4">暂无播放记录</p>
                 )}
               </div>
            </div>
@@ -613,8 +543,8 @@ export default function DashboardPage() {
                   <Badge className="bg-primary/20 text-primary border-0 rounded-lg">{regCodeInfo.type_name}</Badge>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-xs font-bold text-muted-foreground">增加时长</span>
-                  <span className="text-sm font-black">{regCodeInfo.days} 天</span>
+                  <span className="text-xs font-bold text-muted-foreground">{regCodeInfo.type === 3 ? '有效期' : '增加时长'}</span>
+                  <span className="text-sm font-black">{regCodeInfo.type === 3 ? '永久' : `${regCodeInfo.days} 天`}</span>
                 </div>
               </div>
             )}

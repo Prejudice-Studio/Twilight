@@ -95,8 +95,8 @@
 5. **初始化数据库**
    ```powershell
    # 数据库会在首次运行时自动创建
-   # 如需手动初始化，可运行：
-   python -c "from src.db import *; print('Database initialized')"
+   # 升级版本后运行迁移脚本，添加新列：
+   python migrate.py
    ```
 
 ### 运行应用
@@ -322,14 +322,17 @@ sudo useradd -m -s /bin/bash twilight
 ## 更新和维护
 
 ```powershell
+# 拉取最新代码
+git pull
+
 # 更新依赖
 pip install -r requirements.txt --upgrade
 
+# 运行数据库迁移（每次更新后）
+python migrate.py
+
 # 查看已安装的包版本
 pip list
-
-# 生成依赖锁定文件
-pip freeze > requirements.lock
 ```
 
 ## 性能优化建议
