@@ -1394,10 +1394,10 @@ async def delete_avatar():
     
     # 删除头像文件
     try:
-        import os
-        file_path = os.path.join('webui/public', user.AVATAR.lstrip('/'))
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        from src.config import ROOT_PATH
+        file_path = ROOT_PATH / 'webui' / 'public' / user.AVATAR.lstrip('/')
+        if file_path.exists():
+            file_path.unlink()
     except Exception as e:
         logger.warning(f"删除头像文件失败: {e}")
     

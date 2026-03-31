@@ -25,8 +25,8 @@ def create_database(database_name: str, model: Type[DeclarativeBase]) -> None:
     """
     os.makedirs(Config.DATABASES_DIR, exist_ok=True)
     
-    db_path = os.path.join(Config.DATABASES_DIR, f'{database_name}.db')
-    database_url = f"sqlite:///{db_path}"
+    db_path = Path(Config.DATABASES_DIR) / f'{database_name}.db'
+    database_url = f"sqlite:///{db_path.as_posix()}"
     
     engine = create_engine(database_url)
     model.metadata.create_all(engine)
@@ -58,7 +58,7 @@ def get_async_database_url(database_name: str) -> str:
     :param database_name: 数据库名称（不含.db后缀）
     :return: 异步数据库连接URL
     """
-    return f'sqlite+aiosqlite:///{get_database_path(database_name)}'
+    return f'sqlite+aiosqlite:///{get_database_path(database_name).as_posix()}'
 
 
 def init_async_db(database_name: str, model: Type[DeclarativeBase]):

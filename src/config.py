@@ -28,7 +28,7 @@ class BaseConfig:
     
     提供从TOML文件读取和保存配置的能力
     """
-    toml_file_path: str = os.path.join(ROOT_PATH, 'config.toml')
+    toml_file_path: str = str(ROOT_PATH / 'config.toml')
     _section: Optional[str] = None
 
     @classmethod
@@ -285,7 +285,7 @@ class APIConfig(BaseConfig):
     API_KEY_LENGTH: int = 32
     CORS_ENABLED: bool = True
     CORS_ORIGINS: List[str] = []
-    UPLOAD_FOLDER: str = os.path.join(ROOT_PATH, 'uploads')  # 文件上传目录
+    UPLOAD_FOLDER: str = str(ROOT_PATH / 'uploads')  # 文件上传目录
     MAX_UPLOAD_SIZE: int = 5 * 1024 * 1024  # 最大上传文件大小（字节）
 
 
