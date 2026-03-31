@@ -269,9 +269,8 @@ async def get_system_stats():
     total_users = await UserOperate.get_registered_users_count()
     active_users = await UserOperate.get_active_users_count()
     
-    # 注册码统计
-    regcodes = await RegCodeOperate.get_all_regcodes()
-    active_codes = len([c for c in regcodes if c.ACTIVE])
+    # 注册码统计（使用数据库层面计数，避免全量加载到内存）
+    regcode_stats = await RegCodeOperate.get_regcode_stats()
     
     # Emby 状态
     try:
@@ -286,10 +285,7 @@ async def get_system_stats():
             'limit': ScoreAndRegisterConfig.USER_LIMIT,
             'usage_percent': round(total_users / ScoreAndRegisterConfig.USER_LIMIT * 100, 1) if ScoreAndRegisterConfig.USER_LIMIT > 0 else 0,
         },
-        'regcodes': {
-            'total': len(regcodes),
-            'active': active_codes,
-        },
+        'regcodes': regcode_stats,
         'emby': emby_status,
     })
 
@@ -458,27 +454,40 @@ async def get_emby_libraries():
 @require_auth
 @require_admin
 async def update_nsfw_library():
-    """更新 NSFW 库配置（管理员）"""
+    """更新 NSFW 库配置（管理员），使用库名称标识"""
     import toml
     from pathlib import Path
     from src.config import ROOT_PATH
+    from src.services import EmbyService
+    from src.services.emby import get_emby_client, EmbyError
     
     data = request.get_json() or {}
-    nsfw_library_id = data.get('library_id', '')
+    library_name = data.get('library_name', '').strip()
     
     config_file = ROOT_PATH / 'config.toml'
     
     if not config_file.exists():
         return api_response(False, "配置文件不存在", code=404)
     
+    # 如果提供了库名称，验证它在 Emby 中存在
+    if library_name:
+        try:
+            emby = get_emby_client()
+            libraries = await emby.get_libraries()
+            matched = any(lib.name.strip().lower() == library_name.lower() for lib in libraries)
+            if not matched:
+                return api_response(False, f"Emby 中不存在名为 '{library_name}' 的媒体库", code=400)
+        except EmbyError as e:
+            return api_response(False, f"无法连接 Emby 验证媒体库: {e}", code=500)
+    
     try:
         # 读取现有配置
         config = toml.load(config_file)
         
-        # 更新 NSFW 库 ID
+        # 更新 NSFW 库名称
         if 'Emby' not in config:
             config['Emby'] = {}
-        config['Emby']['emby_nsfw'] = nsfw_library_id
+        config['Emby']['emby_nsfw'] = library_name
         
         # 备份原文件
         backup_file = ROOT_PATH / 'config.toml.backup'
@@ -494,7 +503,7 @@ async def update_nsfw_library():
         EmbyConfig.update_from_toml('Emby')
         
         return api_response(True, "NSFW 库配置已更新", {
-            'nsfw_library_id': nsfw_library_id,
+            'nsfw_library_name': library_name,
         })
     except Exception as e:
         import logging

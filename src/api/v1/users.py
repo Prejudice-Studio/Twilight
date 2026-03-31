@@ -258,14 +258,15 @@ async def get_nsfw_status():
             "data": {
                 "enabled": true,           // 用户是否已开启 NSFW
                 "has_permission": true,    // 用户在 Emby 中是否有 NSFW 库访问权限
-                "nsfw_library_id": "xxx",  // NSFW 库 ID
+                "nsfw_library_name": "xxx",  // NSFW 库名称
                 "can_toggle": true         // 用户是否可以切换（有权限才能切换）
             }
         }
     """
     from src.services import EmbyService
     user = g.current_user
-    # 查找NSFW库ID（支持通过名称或ID匹配）
+    # 获取NSFW库名称和ID
+    nsfw_library_name = EmbyService.get_nsfw_library_name()
     nsfw_library_id = await EmbyService.find_nsfw_library_id()
     
     # 检查是否配置了 NSFW 库
@@ -273,7 +274,7 @@ async def get_nsfw_status():
         return api_response(True, "NSFW 库未配置", {
             'enabled': False,
             'has_permission': False,
-            'nsfw_library_id': None,
+            'nsfw_library_name': None,
             'can_toggle': False,
             'message': '系统未配置 NSFW 媒体库'
         })
@@ -287,7 +288,7 @@ async def get_nsfw_status():
     return api_response(True, "获取成功", {
         'enabled': user.NSFW,
         'has_permission': has_permission,
-        'nsfw_library_id': nsfw_library_id,
+        'nsfw_library_name': nsfw_library_name,
         'can_toggle': has_permission,
         'message': '有访问权限，可自行开关' if has_permission else '您没有 NSFW 库的访问权限，请联系管理员'
     })
@@ -461,7 +462,7 @@ async def toggle_my_nsfw():
     enable = data.get('enable', False)
     user = g.current_user
     
-    # 查找NSFW库ID（支持通过名称或ID匹配）
+    # 通过名称查找NSFW库ID
     nsfw_library_id = await EmbyService.find_nsfw_library_id()
     
     # 检查是否配置了 NSFW 库

@@ -694,7 +694,7 @@ class UserService:
         
         from src.services.emby_service import EmbyService
         
-        # 查找NSFW库ID（支持通过名称或ID匹配）
+        # 通过名称查找NSFW库ID
         nsfw_library_id = await EmbyService.find_nsfw_library_id()
         if not nsfw_library_id:
             return False, "系统未配置 NSFW 媒体库"

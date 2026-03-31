@@ -884,11 +884,11 @@ class EmbyClient:
         授予用户 NSFW 库访问权限
         
         逻辑：先取消所有媒体库权限，再把包括NSFW库的所有库加上
-        支持通过媒体库名称或ID来标识NSFW库
+        通过媒体库名称来标识NSFW库
         """
         from src.services.emby_service import EmbyService
         
-        # 查找NSFW库ID（支持通过名称或ID匹配）
+        # 通过名称查找NSFW库ID
         nsfw_library_id = await EmbyService.find_nsfw_library_id()
         if not nsfw_library_id:
             logger.warning("未找到NSFW库")
@@ -943,11 +943,11 @@ class EmbyClient:
         撤销用户 NSFW 库访问权限
         
         逻辑：先取消所有媒体库权限，再把除了NSFW库的其他库加上
-        支持通过媒体库名称或ID来标识NSFW库
+        通过媒体库名称来标识NSFW库
         """
         from src.services.emby_service import EmbyService
         
-        # 查找NSFW库ID（支持通过名称或ID匹配）
+        # 通过名称查找NSFW库ID
         nsfw_library_id = await EmbyService.find_nsfw_library_id()
         if not nsfw_library_id:
             logger.warning("未找到NSFW库")
