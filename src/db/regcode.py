@@ -39,7 +39,7 @@ class RegCodeModel(RegCodeDatabaseModel):
     OTHER: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # 其他信息(json)
 
 
-create_database("RegCode", RegCodeDatabaseModel)
+create_database("regcode", RegCodeDatabaseModel)
 DATABASE_URL = f'sqlite+aiosqlite:///{Config.DATABASES_DIR / "regcode.db"}'
 ENGINE = create_async_engine(DATABASE_URL, echo=Config.SQLALCHEMY_LOG)
 RegCodeSessionFactory = async_sessionmaker(bind=ENGINE, expire_on_commit=False)
