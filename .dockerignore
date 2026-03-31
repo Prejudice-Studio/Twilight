@@ -1,0 +1,43 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+venv/
+.venv/
+*.egg
+
+# Node.js
+webui/node_modules/
+webui/.next/
+webui/webui/node_modules/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 本地配置和数据（运行时挂载）
+.env
+db/*.db
+logs/
+uploads/avatars/*
+uploads/backgrounds/*
+
+# 开发/测试文件
+tests/
+test_*.py
+requirements-dev.txt
+*.md
+docs/
+Makefile
+dev.ps1

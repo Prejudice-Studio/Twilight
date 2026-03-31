@@ -1,0 +1,37 @@
+# 前端独立构建镜像
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# 安装 pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+# 先复制包管理文件以利用 Docker 缓存
+COPY webui/package.json webui/pnpm-lock.yaml webui/pnpm-workspace.yaml ./
+
+RUN pnpm install --frozen-lockfile
+
+# 复制前端源码并构建
+COPY webui/ ./
+
+ENV NEXT_PUBLIC_API_URL=http://localhost:5000
+
+RUN pnpm build
+
+# ========================
+# 运行阶段
+# ========================
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+# 复制 standalone 构建产物
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+
+EXPOSE 3000
+
+CMD ["node", "server.js"]

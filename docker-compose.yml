@@ -1,0 +1,63 @@
+services:
+  # ========== 后端 API ==========
+  twilight:
+    build:
+      context: .
+      target: backend          # 仅后端，不含前端
+    container_name: twilight-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-5000}:5000"
+    volumes:
+      - ./config.toml:/app/config.toml:ro      # 配置文件
+      - ./db:/app/db                            # 数据库持久化
+      - ./uploads:/app/uploads                  # 上传文件
+      - ./logs:/app/logs                        # 日志
+    environment:
+      - TZ=Asia/Shanghai
+      - TWILIGHT_REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - twilight-net
+
+  # ========== 前端 WebUI ==========
+  webui:
+    build:
+      context: .
+      dockerfile: Dockerfile.webui
+    container_name: twilight-webui
+    restart: unless-stopped
+    ports:
+      - "${WEBUI_PORT:-3000}:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://twilight:5000
+      - HOSTNAME=0.0.0.0
+      - PORT=3000
+    depends_on:
+      - twilight
+    networks:
+      - twilight-net
+
+  # ========== Redis 缓存 ==========
+  redis:
+    image: redis:7-alpine
+    container_name: twilight-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - twilight-net
+
+volumes:
+  redis-data:
+
+networks:
+  twilight-net:
+    driver: bridge
