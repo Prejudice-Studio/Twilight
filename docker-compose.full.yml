@@ -1,0 +1,50 @@
+# Twilight 前后端一体化部署
+# 使用方法: docker compose -f docker-compose.full.yml up -d
+
+services:
+  # ========== 前后端一体化 ==========
+  twilight:
+    build:
+      context: .
+      target: full             # 使用完整镜像（后端 + 前端）
+    container_name: twilight
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-5000}:5000"     # 后端 API
+      - "${WEBUI_PORT:-3000}:3000"   # 前端 WebUI
+    volumes:
+      - ./config.toml:/app/config.toml:ro      # 配置文件
+      - ./db:/app/db                            # 数据库持久化
+      - ./uploads:/app/uploads                  # 上传文件
+      - ./logs:/app/logs                        # 日志
+    environment:
+      - TZ=Asia/Shanghai
+      - WORKERS=${WORKERS:-2}
+      - TWILIGHT_REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - twilight-net
+
+  # ========== Redis 缓存 ==========
+  redis:
+    image: redis:7-alpine
+    container_name: twilight-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - twilight-net
+
+volumes:
+  redis-data:
+
+networks:
+  twilight-net:
+    driver: bridge

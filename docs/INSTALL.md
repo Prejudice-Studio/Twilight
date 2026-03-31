@@ -202,9 +202,183 @@ sudo systemctl status twilight
 
 ## Docker 部署
 
-当前仓库暂未提供官方 `Dockerfile` 与 `docker-compose.yml`。
+> **推荐方式**：Docker Compose 一键部署，适合大多数 Linux 服务器。
 
-建议先使用本指南中的裸机部署流程完成验证，再根据你的环境自定义容器镜像。
+### 前置要求
+
+```bash
+# 安装 Docker（官方脚本）
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+# 注销并重新登录使 docker 组生效
+
+# 验证安装
+docker --version
+docker compose version
+```
+
+### 方案一：前后端一体化部署（推荐）
+
+前后端运行在同一容器中，配置简单，适合个人和小团队使用。
+
+```bash
+# 克隆项目
+git clone https://github.com/Prejudice-Studio/Twilight.git
+cd Twilight
+
+# 编辑配置
+cp .env.example .env
+nano .env           # 设置 Emby 地址、Token 等
+nano config.toml    # 高级配置
+
+# 一键启动（后端 + 前端 + Redis）
+docker compose -f docker-compose.full.yml up -d
+
+# 查看运行状态
+docker compose -f docker-compose.full.yml ps
+
+# 查看日志
+docker compose -f docker-compose.full.yml logs -f
+```
+
+启动后访问：
+- **后端 API 文档**: `http://<服务器IP>:5000/api/v1/docs`
+- **前端 WebUI**: `http://<服务器IP>:3000`
+
+| 服务 | 容器 | 端口 | 说明 |
+| --- | --- | --- | --- |
+| `twilight` | twilight | 5000 + 3000 | 后端 API + 前端 WebUI |
+| `redis` | twilight-redis | 内部 | Redis 缓存 |
+
+### 方案二：前后端分离部署
+
+前后端各自独立容器，适合需要独立扩展或分布式部署的场景。
+
+```bash
+# 启动所有服务（后端 + 前端 + Redis 分离）
+docker compose up -d
+
+# 查看运行状态
+docker compose ps
+
+# 查看日志
+docker compose logs -f
+```
+
+| 服务 | 容器 | 端口 | 说明 |
+| --- | --- | --- | --- |
+| `twilight` | twilight-api | 5000 | 后端 API（Flask + Uvicorn） |
+| `webui` | twilight-webui | 3000 | 前端 WebUI（Next.js） |
+| `redis` | twilight-redis | 内部 | Redis 缓存 |
+
+仅部署后端（不需要前端 WebUI）：
+
+```bash
+docker compose up -d twilight redis
+```
+
+### 仅构建后端镜像（手动 Docker）
+
+```bash
+docker build --target backend -t twilight:latest .
+
+docker run -d \
+  --name twilight-api \
+  -p 5000:5000 \
+  -v $(pwd)/config.toml:/app/config.toml:ro \
+  -v $(pwd)/db:/app/db \
+  -v $(pwd)/uploads:/app/uploads \
+  twilight:latest
+```
+
+### 数据持久化
+
+Docker Compose 会自动挂载以下目录：
+
+| 宿主机路径 | 容器路径 | 说明 |
+| --- | --- | --- |
+| `./config.toml` | `/app/config.toml` | 配置文件（只读） |
+| `./db/` | `/app/db/` | SQLite 数据库 |
+| `./uploads/` | `/app/uploads/` | 上传的文件 |
+| `./logs/` | `/app/logs/` | 日志文件 |
+
+### 自定义端口
+
+通过 `.env` 文件修改端口映射：
+
+```bash
+# .env
+API_PORT=8080
+WEBUI_PORT=8081
+```
+
+### 更新部署
+
+```bash
+cd Twilight
+git pull
+
+# 一体化方案
+docker compose -f docker-compose.full.yml up -d --build
+
+# 分离方案
+docker compose up -d --build
+
+# 清理旧镜像
+docker image prune -f
+```
+
+### Docker + Nginx 反向代理
+
+使用宿主机 Nginx 统一入口：
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    client_max_body_size 20M;
+}
+```
+
+### 常用 Docker 命令
+
+```bash
+# 查看状态（按使用的 compose 文件切换）
+docker compose -f docker-compose.full.yml ps
+docker compose ps
+
+# 查看日志（实时）
+docker compose -f docker-compose.full.yml logs -f twilight
+
+# 重启服务
+docker compose -f docker-compose.full.yml restart twilight
+
+# 停止所有服务
+docker compose -f docker-compose.full.yml down
+
+# 停止并删除数据卷（慎用）
+docker compose -f docker-compose.full.yml down -v
+
+# 进入容器调试
+docker compose -f docker-compose.full.yml exec twilight bash
+```
 
 ## 配置说明
 
@@ -263,6 +437,80 @@ docker run -d -p 6379:6379 redis:latest
 # 配置环境变量
 TWILIGHT_REDIS_URL=redis://localhost:6379/0
 ```
+
+## Vercel 部署前端
+
+如果你想将前端 WebUI 部署到 Vercel、Netlify 等平台，后端仍自行托管（Docker / 裸机），按以下步骤操作。
+
+### 前置条件
+
+- 后端已部署并有公网可访问的地址（如 `https://api.example.com`）
+- 后端 `config.toml` 中已开启 CORS 并添加白名单：
+
+```toml
+[API]
+cors_enabled = true
+cors_origins = ["https://your-vercel-app.vercel.app", "https://your-domain.com"]
+```
+
+### 方式一：Vercel Web 面板导入（推荐）
+
+1. **Fork 或推送** 本仓库到你的 GitHub
+2. 登录 [vercel.com](https://vercel.com)，点击 **New Project** → 导入你的仓库
+3. 配置构建设置：
+   - **Framework Preset**: Next.js
+   - **Root Directory**: `webui`（点击 Edit 设置为 `webui`）
+4. 添加环境变量：
+
+   | 变量名 | 值 | 说明 |
+   | --- | --- | --- |
+   | `NEXT_PUBLIC_API_URL` | `https://api.example.com` | 后端公网地址（用于静态资源如头像） |
+
+5. 修改 `webui/vercel.json`，将 `destination` 改为你的后端地址：
+
+   ```json
+   {
+     "rewrites": [
+       {
+         "source": "/api/:path*",
+         "destination": "https://api.example.com/api/:path*"
+       }
+     ]
+   }
+   ```
+
+6. 点击 **Deploy**
+
+### 方式二：Vercel CLI
+
+```bash
+# 安装 Vercel CLI
+npm i -g vercel
+
+# 进入前端目录
+cd webui
+
+# 修改 vercel.json 中的后端地址
+# 然后部署
+vercel --prod
+```
+
+按提示操作，设置 Root Directory 为当前目录。
+
+### 工作原理
+
+```
+浏览器 → Vercel (前端)
+   ├── 页面/JS/CSS → 直接由 Vercel CDN 提供
+   ├── /api/* 请求 → Vercel rewrites 代理到后端（无跨域问题）
+   └── 静态资源(头像等) → 通过 NEXT_PUBLIC_API_URL 直连后端
+```
+
+所有 API 请求都走相对路径 `/api/v1/...`，由 Vercel 的 `rewrites` 透明代理到后端，**浏览器不会直接跨域请求后端 API**。
+
+### 自定义域名
+
+在 Vercel 面板 → Settings → Domains 中添加自定义域名后，记得同步更新后端 CORS 白名单。
 
 ## 故障排除
 
