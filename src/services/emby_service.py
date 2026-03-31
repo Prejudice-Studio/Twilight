@@ -38,9 +38,20 @@ class EmbyService:
     """Emby 业务服务"""
     
     @staticmethod
+    def get_nsfw_library_name() -> Optional[str]:
+        """
+        获取配置的NSFW库名称
+        
+        :return: NSFW库名称，如果未配置则返回None
+        """
+        from src.config import EmbyConfig
+        name = EmbyConfig.EMBY_NSFW.strip() if EmbyConfig.EMBY_NSFW else ''
+        return name if name else None
+
+    @staticmethod
     async def find_nsfw_library_id() -> Optional[str]:
         """
-        查找NSFW库的ID（支持通过名称或ID匹配）
+        通过配置的NSFW库名称查找其在Emby中的ID
         
         :return: NSFW库的ID，如果未找到则返回None
         """
@@ -53,16 +64,14 @@ class EmbyService:
         
         try:
             libraries = await emby.get_libraries()
-            nsfw_identifier = EmbyConfig.EMBY_NSFW.strip()
+            nsfw_name = EmbyConfig.EMBY_NSFW.strip()
             
             for lib in libraries:
-                # 通过ID匹配
-                if lib.id == nsfw_identifier:
-                    return lib.id
                 # 通过名称匹配（不区分大小写）
-                if lib.name.strip().lower() == nsfw_identifier.lower():
+                if lib.name.strip().lower() == nsfw_name.lower():
                     return lib.id
             
+            logger.warning(f"未找到名为 '{nsfw_name}' 的NSFW库")
             return None
         except EmbyError as e:
             logger.error(f"查找NSFW库失败: {e}")
@@ -297,15 +306,15 @@ class EmbyService:
             libraries = await emby.get_libraries()
             result = []
             
-            # 查找NSFW库ID
-            nsfw_library_id = await EmbyService.find_nsfw_library_id()
+            # 通过名称判断NSFW库
+            nsfw_name = EmbyService.get_nsfw_library_name()
             
             for lib in libraries:
                 result.append({
                     'id': lib.id,
                     'name': lib.name,
                     'type': lib.collection_type,
-                    'is_nsfw': lib.id == nsfw_library_id if nsfw_library_id else False,
+                    'is_nsfw': (lib.name.strip().lower() == nsfw_name.lower()) if nsfw_name else False,
                 })
             
             return result

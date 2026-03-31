@@ -166,6 +166,23 @@ class RegCodeOperate:
             return result.scalar_one()
 
     @staticmethod
+    async def get_regcode_stats() -> dict:
+        """获取注册码统计数据（总数和启用数，仅在数据库层面计数）"""
+        async with RegCodeSessionFactory() as session:
+            total_result = await session.execute(
+                select(func.count()).select_from(RegCodeModel)
+            )
+            active_result = await session.execute(
+                select(func.count()).select_from(RegCodeModel).where(
+                    RegCodeModel.ACTIVE == True
+                )
+            )
+            return {
+                'total': total_result.scalar_one(),
+                'active': active_result.scalar_one(),
+            }
+
+    @staticmethod
     async def get_code_info(code: str) -> Optional[RegCodeModel]:
         """获取注册码详细信息"""
         return await RegCodeOperate.get_regcode_by_code(code)

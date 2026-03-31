@@ -530,10 +530,10 @@ class ApiClient {
     return this.request<Array<{ id: string; name: string; type: string; is_nsfw: boolean }>>("/system/admin/emby/libraries");
   }
 
-  async updateNsfwLibrary(libraryId: string) {
-    return this.request<{ nsfw_library_id: string }>("/system/admin/emby/nsfw", {
+  async updateNsfwLibrary(libraryName: string) {
+    return this.request<{ nsfw_library_name: string }>("/system/admin/emby/nsfw", {
       method: "PUT",
-      body: JSON.stringify({ library_id: libraryId }),
+      body: JSON.stringify({ library_name: libraryName }),
     });
   }
 
@@ -756,7 +756,7 @@ export interface UserInfo {
   nsfw: boolean | {  // 可能是布尔值（列表）或对象（详情）
     enabled: boolean;
     has_permission: boolean;
-    nsfw_library_id?: string;
+    nsfw_library_name?: string;
   };
   created_at: string;
   is_pending?: boolean;  // 是否待激活
@@ -814,7 +814,7 @@ export interface TelegramStatus {
 export interface NsfwStatus {
   enabled: boolean;
   has_permission: boolean;
-  nsfw_library_id?: string;
+  nsfw_library_name?: string;
   can_toggle: boolean;
   message: string;
 }
