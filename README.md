@@ -109,34 +109,13 @@ cd webui && pnpm install && pnpm dev
 
 ---
 
-## ❓ 常见问题
-
-| 问题 | 解决方案 |
-|------|---------|
-| 无法连接 Emby | 检查 `config.toml` 中 `emby_url` 和 `emby_token` |
-| Web 界面无法访问后端 | 检查 `NEXT_PUBLIC_API_URL` 或 `next.config.mjs` 中的 rewrites |
-| API Key 返回 401 | 确认 Key 正确、已启用、账号未被禁用 |
-| 数据库迁移错误 | 运行 `python migrate.py` |
-
----
-
-## 🤝 贡献
-
-欢迎所有形式的贡献！详见 [开发指南](docs/DEVELOPMENT.md)。
-
-```
-Fork → 创建分支 → 提交更改 → Pull Request
-```
-
----
-
 ## 🙏 鸣谢
 
-[Emby](https://emby.media/) / [Jellyfin](https://jellyfin.org/) •
-[TMDB](https://www.themoviedb.org/) •
-[Bangumi](https://bgm.tv/) •
-[Next.js](https://nextjs.org/) •
-[Sakura_embyboss](https://github.com/berry8838/Sakura_embyboss) •
+[Emby](https://emby.media/) / [Jellyfin](https://jellyfin.org/)
+[TMDB](https://www.themoviedb.org/)
+[Bangumi](https://bgm.tv/)
+[Next.js](https://nextjs.org/)
+[Sakura_embyboss](https://github.com/berry8838/Sakura_embyboss)
 [Bangumi-syncer](https://github.com/SanaeMio/Bangumi-syncer)
 
 ## 📄 许可证
