@@ -19,6 +19,7 @@ import {
   TestTube,
   FileCode,
   Library,
+  Server,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,7 @@ const adminNavItems = [
   { href: "/admin/users", label: "用户管理", icon: Users },
   { href: "/admin/regcodes", label: "注册码", icon: FileText },
   { href: "/admin/requests", label: "求片审核", icon: Film },
+  { href: "/admin/emby", label: "Emby 管理", icon: Server },
   { href: "/admin/config", label: "配置管理", icon: FileCode },
   { href: "/admin/nsfw", label: "NSFW 库管理", icon: Library },
   { href: "/admin/test", label: "API 测试", icon: TestTube },

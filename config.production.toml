@@ -95,12 +95,16 @@ telegram_api_url = "https://api.telegram.org/bot"
 bot_token = ""
 # 管理员 Telegram ID（数字，可以从 @userinfobot 获取）
 admin_id = []
-# 群组 ID（负数）
+# 群组 ID（负数）或 @用户名（如 @mygroup），支持多个
 group_id = []
-# 频道 ID（负数）
+# 频道 ID（负数）或 @用户名（如 @mychannel），支持多个
 channel_id = []
 # 是否强制用户加入群组/频道后才能使用
 force_subscribe = false
+# 是否开启 TG Bot 完整面板（关闭后仅保留 /help, /bind, /me 基础命令）
+enable_tg_panel = false
+# Telegram Bot HTTP 代理地址（可选，如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080）
+proxy_url = ""
 
 # ===================================================================
 [SAR]
@@ -240,6 +244,10 @@ cors_enabled = true
 # 允许的跨域来源（空 = 允许所有，生产环境建议限制为前端域名）
 # 示例: ["https://your-domain.com"]
 cors_origins = []
+# 文件上传目录（相对于项目根目录或绝对路径）
+# upload_folder = "uploads"
+# 最大上传文件大小（字节，默认 5MB）
+# max_upload_size = 5242880
 
 # ===================================================================
 [Security]

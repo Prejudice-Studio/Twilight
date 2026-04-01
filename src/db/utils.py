@@ -50,6 +50,7 @@ def get_database_path(database_name: str) -> Path:
 
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.pool import NullPool
 
 def get_async_database_url(database_name: str) -> str:
     """
@@ -67,7 +68,7 @@ def init_async_db(database_name: str, model: Type[DeclarativeBase]):
     """
     create_database(database_name, model)
     url = get_async_database_url(database_name)
-    engine = create_async_engine(url, echo=Config.SQLALCHEMY_LOG)
+    engine = create_async_engine(url, echo=Config.SQLALCHEMY_LOG, poolclass=NullPool)
     session_factory = async_sessionmaker(bind=engine, expire_on_commit=False)
     return engine, session_factory
 

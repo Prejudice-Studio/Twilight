@@ -11,7 +11,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.config import Config
-from src.db.utils import create_database
+from src.db.utils import create_database, init_async_db
 
 logger = logging.getLogger(__name__)
 class Type(Enum):
@@ -39,10 +39,7 @@ class RegCodeModel(RegCodeDatabaseModel):
     OTHER: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # 其他信息(json)
 
 
-create_database("regcode", RegCodeDatabaseModel)
-DATABASE_URL = f'sqlite+aiosqlite:///{Config.DATABASES_DIR / "regcode.db"}'
-ENGINE = create_async_engine(DATABASE_URL, echo=Config.SQLALCHEMY_LOG)
-RegCodeSessionFactory = async_sessionmaker(bind=ENGINE, expire_on_commit=False)
+ENGINE, RegCodeSessionFactory = init_async_db("regcode", RegCodeDatabaseModel)
 
 
 class RegCodeOperate:

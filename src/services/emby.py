@@ -221,7 +221,7 @@ class EmbyClient:
         self.app_name = app_name
         self.app_version = app_version
         
-        self._client: Optional[httpx.AsyncClient] = None
+        # 不再缓存客户端，每次请求通过 _make_client() 创建新实例
 
     def _get_auth_header(self) -> str:
         """生成认证头"""
@@ -233,27 +233,35 @@ class EmbyClient:
             f'Token="{self.api_key}"'
         )
 
+    def _make_client(self) -> httpx.AsyncClient:
+        """创建新的 HTTP 客户端
+        
+        注意：Flask + asgiref 每次请求使用不同的 event loop，
+        因此不能复用 AsyncClient，必须每次创建新实例。
+        """
+        transport = httpx.AsyncHTTPTransport(
+            local_address='0.0.0.0',
+        )
+        return httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=self.timeout,
+            proxy=self.proxy,
+            transport=transport,
+            headers={
+                'X-Emby-Token': self.api_key,
+                'X-Emby-Authorization': self._get_auth_header(),
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+            }
+        )
+
     async def _get_client(self) -> httpx.AsyncClient:
-        """获取或创建 HTTP 客户端"""
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
-                base_url=self.base_url,
-                timeout=self.timeout,
-                proxy=self.proxy,
-                headers={
-                    'X-Emby-Token': self.api_key,
-                    'X-Emby-Authorization': self._get_auth_header(),
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                }
-            )
-        return self._client
+        """获取 HTTP 客户端（兼容旧调用）"""
+        return self._make_client()
 
     async def close(self) -> None:
-        """关闭客户端连接"""
-        if self._client and not self._client.is_closed:
-            await self._client.aclose()
-            self._client = None
+        """关闭客户端连接（客户端已改为每次请求独立创建，此方法保留以兼容接口）"""
+        pass
 
     async def __aenter__(self):
         return self
@@ -268,40 +276,39 @@ class EmbyClient:
         **kwargs
     ) -> Optional[Any]:
         """发送 HTTP 请求"""
-        client = await self._get_client()
-        
         for attempt in range(Config.MAX_RETRY):
             try:
-                response = await client.request(method, endpoint, **kwargs)
-                
-                if response.status_code == 401:
-                    # API Key 无效，尝试使用管理员账号密码备用认证
-                    if not self._auth_fallback_attempted and self._admin_username:
-                        logger.warning("API Key 认证失败，尝试使用管理员账号密码备用认证...")
-                        token = await self._authenticate_admin()
-                        if token:
-                            logger.info("管理员账号密码认证成功，已切换 Token")
-                            self._auth_fallback_attempted = True
-                            # 使用新 token 重试当前请求
-                            client = await self._get_client()
-                            response = await client.request(method, endpoint, **kwargs)
-                            if response.status_code == 401:
-                                raise EmbyAuthError("备用认证获取的 Token 也无效")
+                async with self._make_client() as client:
+                    response = await client.request(method, endpoint, **kwargs)
+                    
+                    if response.status_code == 401:
+                        # API Key 无效，尝试使用管理员账号密码备用认证
+                        if not self._auth_fallback_attempted and self._admin_username:
+                            logger.warning("API Key 认证失败，尝试使用管理员账号密码备用认证...")
+                            token = await self._authenticate_admin()
+                            if token:
+                                logger.info("管理员账号密码认证成功，已切换 Token")
+                                self._auth_fallback_attempted = True
+                                # 使用新 token 重试当前请求
+                                async with self._make_client() as new_client:
+                                    response = await new_client.request(method, endpoint, **kwargs)
+                                    if response.status_code == 401:
+                                        raise EmbyAuthError("备用认证获取的 Token 也无效")
+                            else:
+                                raise EmbyAuthError("API Key 无效且管理员账号密码认证也失败")
                         else:
-                            raise EmbyAuthError("API Key 无效且管理员账号密码认证也失败")
-                    else:
-                        raise EmbyAuthError("API Key 无效或已过期")
-                elif response.status_code == 404:
-                    raise EmbyNotFoundError(f"资源未找到: {endpoint}")
-                elif response.status_code >= 400:
-                    raise EmbyError(f"请求失败: {response.status_code} - {response.text}")
-                
-                if response.content:
-                    try:
-                        return response.json()
-                    except Exception:
-                        return response.text
-                return None
+                            raise EmbyAuthError("API Key 无效或已过期")
+                    elif response.status_code == 404:
+                        raise EmbyNotFoundError(f"资源未找到: {endpoint}")
+                    elif response.status_code >= 400:
+                        raise EmbyError(f"请求失败: {response.status_code} - {response.text}")
+                    
+                    if response.content:
+                        try:
+                            return response.json()
+                        except Exception:
+                            return response.text
+                    return None
                 
             except httpx.ConnectError as e:
                 logger.warning(f"连接失败 (尝试 {attempt + 1}/{Config.MAX_RETRY}): {e}")
@@ -336,6 +343,7 @@ class EmbyClient:
                 base_url=self.base_url,
                 timeout=self.timeout,
                 proxy=self.proxy,
+                transport=httpx.AsyncHTTPTransport(local_address='0.0.0.0'),
                 headers={
                     'Content-Type': 'application/json',
                     'Accept': 'application/json',
@@ -354,12 +362,8 @@ class EmbyClient:
                     data = response.json()
                     access_token = data.get('AccessToken')
                     if access_token:
-                        # 更新客户端的 API Key 为新获取的 Token
+                        # 更新 API Key 为新获取的 Token，下次 _make_client() 会使用新值
                         self.api_key = access_token
-                        # 关闭旧客户端，下次请求时会使用新 token 创建
-                        if self._client and not self._client.is_closed:
-                            await self._client.aclose()
-                            self._client = None
                         logger.info(f"管理员备用认证成功，用户: {self._admin_username}")
                         return access_token
                     
@@ -513,6 +517,7 @@ class EmbyClient:
                 base_url=self.base_url,
                 timeout=self.timeout,
                 proxy=self.proxy,
+                transport=httpx.AsyncHTTPTransport(local_address='0.0.0.0'),
                 headers={
                     'Content-Type': 'application/json',
                     'Accept': 'application/json',
@@ -956,22 +961,31 @@ class EmbyClient:
 
     # ==================== NSFW 库管理 ====================
     
-    async def grant_nsfw_access(self, user_id: str) -> bool:
+    async def update_nsfw_access(
+        self,
+        user_id: str,
+        grant_library_ids: List[str] = None,
+        revoke_library_ids: List[str] = None,
+        grant_library_names: List[str] = None,
+        revoke_library_names: List[str] = None,
+    ) -> bool:
         """
-        授予用户 NSFW 库访问权限
+        批量更新用户 NSFW 库访问权限
         
-        参考 Sakura_EmbyBoss 的单次 API 调用方式：
-        读取当前策略 → 在 EnabledFolders 中添加 NSFW 库 ID → 
-        从 BlockedMediaFolders 中移除 NSFW 库名 → 一次性提交
+        一次性读取策略 → 修改 EnabledFolders/BlockedMediaFolders → 提交
+        
+        :param grant_library_ids: 要授予的库 ID 列表
+        :param revoke_library_ids: 要撤销的库 ID 列表
+        :param grant_library_names: 要授予的库名称列表（用于 BlockedMediaFolders）
+        :param revoke_library_names: 要撤销的库名称列表（用于 BlockedMediaFolders）
         """
-        from src.services.emby_service import EmbyService
+        grant_ids = grant_library_ids or []
+        revoke_ids = revoke_library_ids or []
+        grant_names = grant_library_names or []
+        revoke_names = revoke_library_names or []
         
-        nsfw_library_id = await EmbyService.find_nsfw_library_id()
-        if not nsfw_library_id:
-            logger.warning("未找到NSFW库")
-            return False
-        
-        nsfw_library_name = EmbyService.get_nsfw_library_name()
+        if not grant_ids and not revoke_ids:
+            return True
         
         user = await self.get_user(user_id)
         if not user:
@@ -981,21 +995,25 @@ class EmbyClient:
         
         # 获取当前已启用的文件夹列表
         if current_policy.get('EnableAllFolders', False):
-            # 如果是"全部启用"模式，获取所有库 ID 作为基准
             libraries = await self.get_libraries()
             enabled_folders = [lib.id for lib in libraries]
         else:
             enabled_folders = list(current_policy.get('EnabledFolders', []))
         
-        # 添加 NSFW 库 ID（如果尚未包含）
-        if nsfw_library_id not in enabled_folders:
-            enabled_folders.append(nsfw_library_id)
-        
-        # 从 BlockedMediaFolders 中移除 NSFW 库名
         blocked_folders = list(current_policy.get('BlockedMediaFolders', []))
-        blocked_folders = [f for f in blocked_folders if f != nsfw_library_name]
         
-        # 一次性提交更新后的策略
+        # 授予：添加到 EnabledFolders，从 BlockedMediaFolders 移除
+        for lib_id in grant_ids:
+            if lib_id not in enabled_folders:
+                enabled_folders.append(lib_id)
+        blocked_folders = [f for f in blocked_folders if f not in grant_names]
+        
+        # 撤销：从 EnabledFolders 移除，添加到 BlockedMediaFolders
+        enabled_folders = [fid for fid in enabled_folders if fid not in revoke_ids]
+        for name in revoke_names:
+            if name and name not in blocked_folders:
+                blocked_folders.append(name)
+        
         current_policy['EnableAllFolders'] = False
         current_policy['EnabledFolders'] = enabled_folders
         current_policy['BlockedMediaFolders'] = blocked_folders
@@ -1004,59 +1022,38 @@ class EmbyClient:
             await self._request('POST', f'/Users/{user_id}/Policy', json=current_policy)
             return True
         except EmbyError as e:
-            logger.error(f"授予NSFW库权限失败: {e}")
+            logger.error(f"更新 NSFW 库权限失败: {e}")
             return False
 
-    async def revoke_nsfw_access(self, user_id: str) -> bool:
-        """
-        撤销用户 NSFW 库访问权限
-        
-        参考 Sakura_EmbyBoss 的单次 API 调用方式：
-        读取当前策略 → 从 EnabledFolders 中移除 NSFW 库 ID → 
-        在 BlockedMediaFolders 中添加 NSFW 库名 → 一次性提交
-        """
+    async def grant_nsfw_access(self, user_id: str) -> bool:
+        """授予用户所有 NSFW 库访问权限（向后兼容）"""
         from src.services.emby_service import EmbyService
         
-        nsfw_library_id = await EmbyService.find_nsfw_library_id()
-        if not nsfw_library_id:
-            logger.warning("未找到NSFW库")
+        nsfw_map = await EmbyService.find_nsfw_library_ids()
+        if not nsfw_map:
+            logger.warning("未找到 NSFW 库")
             return False
         
-        nsfw_library_name = EmbyService.get_nsfw_library_name()
+        return await self.update_nsfw_access(
+            user_id,
+            grant_library_ids=list(nsfw_map.values()),
+            grant_library_names=list(nsfw_map.keys()),
+        )
+
+    async def revoke_nsfw_access(self, user_id: str) -> bool:
+        """撤销用户所有 NSFW 库访问权限（向后兼容）"""
+        from src.services.emby_service import EmbyService
         
-        user = await self.get_user(user_id)
-        if not user:
+        nsfw_map = await EmbyService.find_nsfw_library_ids()
+        if not nsfw_map:
+            logger.warning("未找到 NSFW 库")
             return False
         
-        current_policy = user.policy.copy()
-        
-        # 获取当前已启用的文件夹列表
-        if current_policy.get('EnableAllFolders', False):
-            # 如果是"全部启用"模式，获取所有库 ID 作为基准
-            libraries = await self.get_libraries()
-            enabled_folders = [lib.id for lib in libraries]
-        else:
-            enabled_folders = list(current_policy.get('EnabledFolders', []))
-        
-        # 从 EnabledFolders 中移除 NSFW 库 ID
-        enabled_folders = [fid for fid in enabled_folders if fid != nsfw_library_id]
-        
-        # 在 BlockedMediaFolders 中添加 NSFW 库名（如果尚未包含）
-        blocked_folders = list(current_policy.get('BlockedMediaFolders', []))
-        if nsfw_library_name and nsfw_library_name not in blocked_folders:
-            blocked_folders.append(nsfw_library_name)
-        
-        # 一次性提交更新后的策略
-        current_policy['EnableAllFolders'] = False
-        current_policy['EnabledFolders'] = enabled_folders
-        current_policy['BlockedMediaFolders'] = blocked_folders
-        
-        try:
-            await self._request('POST', f'/Users/{user_id}/Policy', json=current_policy)
-            return True
-        except EmbyError as e:
-            logger.error(f"撤销NSFW库权限失败: {e}")
-            return False
+        return await self.update_nsfw_access(
+            user_id,
+            revoke_library_ids=list(nsfw_map.values()),
+            revoke_library_names=list(nsfw_map.keys()),
+        )
 
 
 # ==================== 全局实例 ====================

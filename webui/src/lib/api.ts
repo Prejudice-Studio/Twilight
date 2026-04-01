@@ -243,28 +243,14 @@ class ApiClient {
     return this.request<TelegramStatus>("/users/me/telegram");
   }
 
-  async bindTelegram(telegramId: number) {
-    return this.request("/users/me/telegram/bind", {
+  async getBindCode() {
+    return this.request<{ bind_code: string; expires_in: number }>("/users/me/telegram/bind-code", {
       method: "POST",
-      body: JSON.stringify({ telegram_id: telegramId }),
     });
   }
 
   async unbindTelegram() {
     return this.request("/users/me/telegram/unbind", {
-      method: "POST",
-    });
-  }
-
-  async changeTelegram(newTelegramId: number) {
-    return this.request("/users/me/telegram/change", {
-      method: "POST",
-      body: JSON.stringify({ new_telegram_id: newTelegramId }),
-    });
-  }
-
-  async getTelegramVerifyLink() {
-    return this.request<{ verify_url: string; token: string; expires_in: number }>("/users/me/telegram/verify-link", {
       method: "POST",
     });
   }
@@ -296,14 +282,14 @@ class ApiClient {
     });
   }
 
-  async getEmbyUrls(reveal = false) {
-    return this.request<{ urls: string[]; masked: boolean }>(`/system/emby-urls?reveal=${reveal}`);
+  async getEmbyUrls() {
+    return this.request<{ lines: Array<{ name: string; url: string }>; whitelist_lines?: Array<{ name: string; url: string }> }>(`/system/emby-urls`);
   }
 
-  async toggleNsfw(enable: boolean) {
+  async toggleNsfw(enable: boolean, libraryNames?: string[]) {
     return this.request("/users/me/nsfw", {
       method: "PUT",
-      body: JSON.stringify({ enable }),
+      body: JSON.stringify({ enable, library_names: libraryNames }),
     });
   }
 
@@ -576,10 +562,10 @@ class ApiClient {
     return this.request<Array<{ id: string; name: string; type: string; is_nsfw: boolean }>>("/system/admin/emby/libraries");
   }
 
-  async updateNsfwLibrary(libraryName: string) {
-    return this.request<{ nsfw_library_name: string }>("/system/admin/emby/nsfw", {
+  async updateNsfwLibraries(libraryNames: string[]) {
+    return this.request<{ nsfw_library_names: string[] }>("/system/admin/emby/nsfw", {
       method: "PUT",
-      body: JSON.stringify({ library_name: libraryName }),
+      body: JSON.stringify({ library_names: libraryNames }),
     });
   }
 
@@ -593,6 +579,85 @@ class ApiClient {
   async syncAllEmbyUsers() {
     return this.request<{ success: number; failed: number; errors: string[] }>("/admin/emby/sync", {
       method: "POST",
+    });
+  }
+
+  // Emby 管理
+  async testEmbyConnectivity() {
+    return this.request<{
+      emby_url: string;
+      tests: Array<{ name: string; success: boolean; latency_ms?: number; message: string }>;
+      overall: boolean;
+      server_info?: { name: string; version: string; os: string; id: string };
+    }>("/admin/emby/test", { method: "POST" });
+  }
+
+  async listEmbyUsers() {
+    return this.request<{
+      emby_users: Array<{
+        emby_id: string; emby_name: string; has_password: boolean;
+        is_admin: boolean; is_disabled: boolean; is_hidden: boolean;
+        last_login: string | null; last_activity: string | null;
+        local_user: { uid: number; username: string; telegram_id: number | null; active: boolean; role: number } | null;
+        sync_status: 'synced' | 'name_mismatch' | 'unlinked';
+      }>;
+      orphans: Array<{ uid: number; username: string; emby_id: string; telegram_id: number | null }>;
+      total_emby: number; total_linked: number; total_orphans: number;
+    }>("/admin/emby/users");
+  }
+
+  async cleanupOrphanEmbyIds() {
+    return this.request<{
+      cleaned: Array<{ uid: number; username: string; old_emby_id: string }>;
+      count: number;
+    }>("/admin/emby/cleanup-orphans", { method: "POST" });
+  }
+
+  async importEmbyUsers(embyIds?: string[]) {
+    return this.request<{
+      imported: Array<{ uid: number; username: string; emby_id: string; action: string }>;
+      skipped: Array<{ emby_id: string; name: string; reason: string }>;
+      imported_count: number; skipped_count: number;
+    }>("/admin/emby/import-users", {
+      method: "POST",
+      body: JSON.stringify(embyIds ? { emby_ids: embyIds } : {}),
+    });
+  }
+
+  async resetAllEmbyBindings() {
+    return this.request<{ count: number }>("/admin/emby/reset-bindings", {
+      method: "POST",
+      body: JSON.stringify({ confirm: "RESET_ALL_EMBY" }),
+    });
+  }
+
+  async cleanupInvalidUsers(minDays: number = 7, dryRun: boolean = false) {
+    return this.request<{
+      users: Array<{
+        uid: number;
+        username: string;
+        role: number;
+        active: boolean;
+        register_time: number | null;
+      }>;
+      count: number;
+      dry_run: boolean;
+    }>("/admin/users/cleanup-invalid", {
+      method: "POST",
+      body: JSON.stringify({ min_days: minDays, dry_run: dryRun }),
+    });
+  }
+
+  async testBotConnectivity(target?: string) {
+    return this.request<{
+      results: Array<{
+        target: string;
+        success: boolean;
+        error: string | null;
+      }>;
+    }>("/system/admin/bot/test", {
+      method: "POST",
+      body: JSON.stringify(target ? { target } : {}),
     });
   }
 
@@ -897,8 +962,8 @@ export interface TelegramStatus {
 export interface NsfwStatus {
   enabled: boolean;
   has_permission: boolean;
-  nsfw_library_name?: string;
   can_toggle: boolean;
+  libraries: Array<{ name: string; enabled: boolean }>;
   message: string;
 }
 

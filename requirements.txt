@@ -29,4 +29,3 @@ psutil>=6.1,<7.0                    # 系统资源监控（CPU、内存、网络
 
 # ==================== Telegram Bot ====================
 python-telegram-bot>=21.0,<22.0     # Telegram Bot API 包装
-pyrogram>=2.0,<3.0                  # 高性能 Telegram 客户端库

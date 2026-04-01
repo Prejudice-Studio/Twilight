@@ -3,13 +3,16 @@
 
 提供管理员专用的操作接口
 """
+import logging
 from flask import Blueprint, request, g
 
 from src.api.v1.auth import require_auth, require_admin, api_response
-from src.db.user import UserOperate, Role
+from src.db.user import UserOperate, UserModel, Role
 from src.db.regcode import RegCodeOperate
 from src.services import UserService, ScoreService, EmbyService
+from src.services.emby import get_emby_client, EmbyError, EmbyConnectionError
 
+logger = logging.getLogger(__name__)
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
 
@@ -78,9 +81,9 @@ async def list_users():
         
         # 尝试获取 Telegram 用户名
         telegram_username = None
-        if user.TELEGRAM_ID and bot_instance and bot_instance.app:
+        if user.TELEGRAM_ID and bot_instance and bot_instance.application:
             try:
-                tg_user = await bot_instance.app.get_users(user.TELEGRAM_ID)
+                tg_user = await bot_instance.application.bot.get_chat(user.TELEGRAM_ID)
                 telegram_username = tg_user.username or f"{tg_user.first_name or ''} {tg_user.last_name or ''}".strip() or None
             except Exception:
                 pass  # 如果获取失败，忽略
@@ -959,5 +962,336 @@ async def get_stats():
             'online': server_status.get('online', False),
             'active_sessions': server_status.get('active_sessions', 0),
         },
+    })
+
+
+# ==================== Emby 管理 ====================
+
+@admin_bp.route('/emby/test', methods=['POST'])
+@require_auth
+@require_admin
+async def test_emby_connectivity():
+    """一键测试 Emby 连通性（网络、认证、用户列表、媒体库）"""
+    from src.config import EmbyConfig
+    import time as _time
+
+    results = {
+        'emby_url': EmbyConfig.EMBY_URL,
+        'tests': [],
+        'overall': True,
+    }
+    emby = get_emby_client()
+
+    # Test 1: Ping
+    t0 = _time.time()
+    try:
+        ok = await emby.ping()
+        latency = round((_time.time() - t0) * 1000)
+        results['tests'].append({
+            'name': '网络连通', 'success': ok, 'latency_ms': latency,
+            'message': f'延迟 {latency}ms' if ok else '无法连接到 Emby 服务器',
+        })
+        if not ok:
+            results['overall'] = False
+    except Exception as e:
+        results['tests'].append({'name': '网络连通', 'success': False, 'message': str(e)})
+        results['overall'] = False
+
+    # Test 2: Server Info (tests API auth)
+    t0 = _time.time()
+    try:
+        info = await emby.get_server_info()
+        latency = round((_time.time() - t0) * 1000)
+        results['tests'].append({
+            'name': 'API 认证', 'success': True, 'latency_ms': latency,
+            'message': f"服务器: {info.get('ServerName', '?')}, 版本: {info.get('Version', '?')}",
+        })
+        results['server_info'] = {
+            'name': info.get('ServerName'),
+            'version': info.get('Version'),
+            'os': info.get('OperatingSystemDisplayName'),
+            'id': info.get('Id'),
+        }
+    except EmbyError as e:
+        results['tests'].append({'name': 'API 认证', 'success': False, 'message': f'认证失败: {e}'})
+        results['overall'] = False
+
+    # Test 3: User list
+    t0 = _time.time()
+    try:
+        users = await emby.get_users()
+        latency = round((_time.time() - t0) * 1000)
+        results['tests'].append({
+            'name': '用户列表', 'success': True, 'latency_ms': latency,
+            'message': f'共 {len(users)} 个 Emby 用户',
+        })
+    except EmbyError as e:
+        results['tests'].append({'name': '用户列表', 'success': False, 'message': str(e)})
+        results['overall'] = False
+
+    # Test 4: Libraries
+    t0 = _time.time()
+    try:
+        libs = await emby.get_libraries()
+        latency = round((_time.time() - t0) * 1000)
+        results['tests'].append({
+            'name': '媒体库', 'success': True, 'latency_ms': latency,
+            'message': f'共 {len(libs)} 个媒体库',
+        })
+    except EmbyError as e:
+        results['tests'].append({'name': '媒体库', 'success': False, 'message': str(e)})
+        results['overall'] = False
+
+    return api_response(True, "测试完成", results)
+
+
+@admin_bp.route('/emby/users', methods=['GET'])
+@require_auth
+@require_admin
+async def list_emby_users():
+    """获取 Emby 用户列表，与本地数据库对比，返回绑定状态和孤儿记录"""
+    emby = get_emby_client()
+
+    try:
+        emby_users = await emby.get_users()
+    except EmbyError as e:
+        return api_response(False, f"无法连接 Emby: {e}", code=500)
+
+    local_emby_users = await UserOperate.get_all_emby_users()
+    local_by_embyid = {u.EMBYID: u for u in local_emby_users}
+
+    result = []
+    for eu in emby_users:
+        local_user = local_by_embyid.get(eu.id)
+        sync_status = 'unlinked'
+        if local_user:
+            sync_status = 'synced' if local_user.USERNAME == eu.name else 'name_mismatch'
+
+        result.append({
+            'emby_id': eu.id,
+            'emby_name': eu.name,
+            'has_password': eu.has_password,
+            'is_admin': eu.policy.get('IsAdministrator', False),
+            'is_disabled': eu.policy.get('IsDisabled', False),
+            'is_hidden': eu.policy.get('IsHidden', False),
+            'last_login': eu.last_login_date,
+            'last_activity': eu.last_activity_date,
+            'local_user': {
+                'uid': local_user.UID,
+                'username': local_user.USERNAME,
+                'telegram_id': local_user.TELEGRAM_ID,
+                'active': local_user.ACTIVE_STATUS,
+                'role': local_user.ROLE,
+            } if local_user else None,
+            'sync_status': sync_status,
+        })
+
+    # 本地有 EMBYID 但 Emby 端不存在的孤儿记录
+    emby_id_set = {eu.id for eu in emby_users}
+    orphans = [
+        {
+            'uid': u.UID, 'username': u.USERNAME,
+            'emby_id': u.EMBYID, 'telegram_id': u.TELEGRAM_ID,
+        }
+        for u in local_emby_users if u.EMBYID not in emby_id_set
+    ]
+
+    return api_response(True, "获取成功", {
+        'emby_users': result,
+        'orphans': orphans,
+        'total_emby': len(emby_users),
+        'total_linked': sum(1 for r in result if r['sync_status'] != 'unlinked'),
+        'total_orphans': len(orphans),
+    })
+
+
+@admin_bp.route('/emby/cleanup-orphans', methods=['POST'])
+@require_auth
+@require_admin
+async def cleanup_orphan_emby_ids():
+    """清理孤儿 EMBYID（本地记录指向已不存在的 Emby 用户），将 EMBYID 置空"""
+    emby = get_emby_client()
+
+    try:
+        emby_users = await emby.get_users()
+    except EmbyError as e:
+        return api_response(False, f"无法连接 Emby: {e}", code=500)
+
+    emby_id_set = {eu.id for eu in emby_users}
+    local_emby_users = await UserOperate.get_all_emby_users()
+
+    cleaned = []
+    for user in local_emby_users:
+        if user.EMBYID not in emby_id_set:
+            old_emby_id = user.EMBYID
+            user.EMBYID = None
+            await UserOperate.update_user(user)
+            cleaned.append({'uid': user.UID, 'username': user.USERNAME, 'old_emby_id': old_emby_id})
+
+    return api_response(True, f"已清理 {len(cleaned)} 条孤儿记录", {
+        'cleaned': cleaned, 'count': len(cleaned),
+    })
+
+
+@admin_bp.route('/emby/import-users', methods=['POST'])
+@require_auth
+@require_admin
+async def import_emby_users():
+    """
+    从 Emby 导入未关联的用户到本地数据库。
+    Request body (optional): { "emby_ids": ["id1", "id2"] }
+    为空则导入全部未关联的非管理员用户。
+    """
+    import time as _time
+    emby = get_emby_client()
+
+    try:
+        emby_users = await emby.get_users()
+    except EmbyError as e:
+        return api_response(False, f"无法连接 Emby: {e}", code=500)
+
+    data = request.get_json() or {}
+    target_ids = set(data.get('emby_ids', []))
+
+    local_emby_users = await UserOperate.get_all_emby_users()
+    linked_emby_ids = {u.EMBYID for u in local_emby_users}
+
+    imported = []
+    skipped = []
+
+    for eu in emby_users:
+        if eu.policy.get('IsAdministrator', False):
+            skipped.append({'emby_id': eu.id, 'name': eu.name, 'reason': '管理员账户'})
+            continue
+        if eu.id in linked_emby_ids:
+            continue
+        if target_ids and eu.id not in target_ids:
+            continue
+
+        existing = await UserOperate.get_user_by_username(eu.name)
+        if existing:
+            if not existing.EMBYID:
+                existing.EMBYID = eu.id
+                await UserOperate.update_user(existing)
+                imported.append({'uid': existing.UID, 'username': eu.name, 'emby_id': eu.id, 'action': 'linked_existing'})
+            else:
+                skipped.append({'emby_id': eu.id, 'name': eu.name, 'reason': '用户名已存在且已绑定其他 Emby'})
+            continue
+
+        new_uid = await UserOperate.get_new_uid()
+        new_user = UserModel(
+            UID=new_uid,
+            USERNAME=eu.name,
+            EMBYID=eu.id,
+            ROLE=Role.NORMAL.value,
+            ACTIVE_STATUS=not eu.policy.get('IsDisabled', False),
+            REGISTER_TIME=int(_time.time()),
+            EXPIRED_AT=-1,
+        )
+        await UserOperate.add_user(new_user)
+        imported.append({'uid': new_uid, 'username': eu.name, 'emby_id': eu.id, 'action': 'created'})
+
+    return api_response(True, f"导入 {len(imported)} 个用户", {
+        'imported': imported, 'skipped': skipped,
+        'imported_count': len(imported), 'skipped_count': len(skipped),
+    })
+
+
+@admin_bp.route('/emby/reset-bindings', methods=['POST'])
+@require_auth
+@require_admin
+async def reset_all_emby_bindings():
+    """
+    重置所有用户的 Emby 绑定（清空所有 EMBYID）。
+    ⚠️ 危险操作，用于测试环境重置。不会删除 Emby 端用户。
+    Request body: { "confirm": "RESET_ALL_EMBY" }
+    """
+    data = request.get_json() or {}
+    if data.get('confirm') != 'RESET_ALL_EMBY':
+        return api_response(False, "需要提供确认字符串 confirm='RESET_ALL_EMBY'", code=400)
+
+    local_emby_users = await UserOperate.get_all_emby_users()
+    count = 0
+    for user in local_emby_users:
+        user.EMBYID = None
+        await UserOperate.update_user(user)
+        count += 1
+
+    return api_response(True, f"已重置 {count} 个用户的 Emby 绑定", {'count': count})
+
+
+# ==================== 无效用户清理 ====================
+
+@admin_bp.route('/users/cleanup-invalid', methods=['POST'])
+@require_auth
+@require_admin
+async def cleanup_invalid_users():
+    """
+    清理长期无效用户（既未绑定 TG 也未绑定 Emby 的非管理员/非白名单用户）
+
+    Request:
+        {
+            "min_days": 7,      // 注册超过多少天仍无绑定则视为无效（默认7）
+            "dry_run": false    // 试运行模式，只返回列表不删除（默认false）
+        }
+
+    Response:
+        {
+            "users": [...],     // 匹配的用户列表
+            "count": 5,         // 匹配/删除数量
+            "dry_run": false
+        }
+    """
+    import time as _time
+
+    data = request.get_json() or {}
+    min_days = max(1, data.get('min_days', 7))
+    dry_run = data.get('dry_run', False)
+
+    threshold = int(_time.time()) - min_days * 86400
+
+    # 查询所有用户
+    all_users, _ = await UserOperate.get_all_users(include_inactive=True, limit=100000, offset=0)
+
+    invalid_users = []
+    for u in all_users:
+        # 跳过管理员和白名单
+        if u.ROLE in (Role.ADMIN.value, Role.WHITE_LIST.value):
+            continue
+        # 必须同时没有 TG 和 Emby 绑定
+        has_tg = bool(u.TELEGRAM_ID)
+        has_emby = bool(u.EMBYID)
+        if has_tg or has_emby:
+            continue
+        # 注册时间判定
+        reg_time = u.REGISTER_TIME or u.CREATE_AT or 0
+        if reg_time > threshold:
+            continue  # 注册时间不够久
+        invalid_users.append(u)
+
+    result_list = []
+    for u in invalid_users:
+        result_list.append({
+            'uid': u.UID,
+            'username': u.USERNAME,
+            'role': u.ROLE,
+            'active': u.ACTIVE_STATUS,
+            'register_time': u.REGISTER_TIME,
+        })
+
+    deleted_count = 0
+    if not dry_run:
+        for u in invalid_users:
+            try:
+                await UserOperate.delete_user(u)
+                deleted_count += 1
+            except Exception as e:
+                logger.warning(f"删除无效用户 {u.USERNAME}(UID:{u.UID}) 失败: {e}")
+
+    action = "预览" if dry_run else "清理"
+    return api_response(True, f"{action}完成: 共 {len(invalid_users)} 个无效用户" + (f"，已删除 {deleted_count} 个" if not dry_run else ""), {
+        'users': result_list,
+        'count': deleted_count if not dry_run else len(invalid_users),
+        'dry_run': dry_run,
     })
 

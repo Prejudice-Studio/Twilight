@@ -4,6 +4,12 @@ Twilight - Emby 用户管理系统
 
 主入口文件
 """
+# Windows WMI 服务不可用时，platform.machine() 会无限阻塞，
+# 导致 SQLAlchemy 等依赖 platform 模块的库无法导入。
+# 此补丁禁用 WMI 查询，使 platform 回退到注册表方式获取系统信息。
+import platform as _platform
+_platform._wmi = None
+
 import argparse
 import asyncio
 import logging

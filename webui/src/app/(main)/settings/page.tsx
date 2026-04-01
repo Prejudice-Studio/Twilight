@@ -7,6 +7,7 @@ import {
   Shield,
   Bell,
   RefreshCw,
+  Copy,
   Eye,
   EyeOff,
   MessageCircle,
@@ -21,6 +22,7 @@ import {
   Palette,
   Lock,
   Globe,
+  Star,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -64,13 +66,10 @@ export default function SettingsPage() {
   const [telegramStatus, setTelegramStatus] = useState<TelegramStatus | null>(null);
   const [nsfwStatus, setNsfwStatus] = useState<NsfwStatus | null>(null);
 
-  // Telegram dialogs
-  const [bindTgOpen, setBindTgOpen] = useState(false);
-  const [changeTgOpen, setChangeTgOpen] = useState(false);
-  const [newTelegramId, setNewTelegramId] = useState("");
+  // Telegram bind code
+  const [bindCode, setBindCode] = useState<string | null>(null);
+  const [bindCodeExpiry, setBindCodeExpiry] = useState<number>(0);
   const [isTgLoading, setIsTgLoading] = useState(false);
-  const [tgVerifyUrl, setTgVerifyUrl] = useState<string | null>(null);
-  const [isTgVerifyLoading, setIsTgVerifyLoading] = useState(false);
 
   // Emby dialogs
   const [bindEmbyOpen, setBindEmbyOpen] = useState(false);
@@ -94,9 +93,9 @@ export default function SettingsPage() {
   const [isPwdLoading, setIsPwdLoading] = useState(false);
 
   // Emby URLs
-  const [embyUrls, setEmbyUrls] = useState<string[]>([]);
-  const [urlsMasked, setUrlsMasked] = useState(true);
-  const [isUrlsLoading, setIsUrlsLoading] = useState(false);
+  const [embyLines, setEmbyLines] = useState<Array<{ name: string; url: string }>>([]);
+  const [whitelistLines, setWhitelistLines] = useState<Array<{ name: string; url: string }>>([]);
+  const [copiedIndex, setCopiedIndex] = useState<string | null>(null);
 
   const loadSettingsResource = useCallback(async () => {
     const [settingsRes, tgRes, nsfwRes] = await Promise.all([
@@ -139,13 +138,20 @@ export default function SettingsPage() {
     }
   };
 
-  const handleToggleNsfw = async (enabled: boolean) => {
+  const handleToggleNsfwLibrary = async (libraryName: string, enabled: boolean) => {
     try {
-      const res = await api.toggleNsfw(enabled);
+      const res = await api.toggleNsfw(enabled, [libraryName]);
       if (res.success) {
-        setNsfwStatus((prev) => prev ? { ...prev, enabled } : null);
+        setNsfwStatus((prev) => {
+          if (!prev) return null;
+          const updatedLibraries = prev.libraries.map((lib) =>
+            lib.name === libraryName ? { ...lib, enabled } : lib
+          );
+          const anyEnabled = updatedLibraries.some((lib) => lib.enabled);
+          return { ...prev, enabled: anyEnabled, libraries: updatedLibraries };
+        });
         toast({
-          title: enabled ? "已开启 NSFW 内容" : "已关闭 NSFW 内容",
+          title: enabled ? `已开启「${libraryName}」` : `已关闭「${libraryName}」`,
           variant: "success",
         });
       } else {
@@ -156,26 +162,23 @@ export default function SettingsPage() {
     }
   };
 
-  const handleBindTelegram = async () => {
-    if (!newTelegramId) {
-      toast({ title: "请输入 Telegram ID", variant: "destructive" });
-      return;
-    }
-
+  const handleGetBindCode = async () => {
     setIsTgLoading(true);
     try {
-      const res = await api.bindTelegram(parseInt(newTelegramId));
-      if (res.success) {
-        toast({ title: "绑定成功", variant: "success" });
-        setBindTgOpen(false);
-        setNewTelegramId("");
-        loadData();
-        fetchUser();
+      const res = await api.getBindCode();
+      if (res.success && res.data?.bind_code) {
+        setBindCode(res.data.bind_code);
+        setBindCodeExpiry(res.data.expires_in);
+        toast({
+          title: "绑定码已生成",
+          description: `请在 ${Math.floor(res.data.expires_in / 60)} 分钟内向 Bot 发送 /bind ${res.data.bind_code}`,
+          variant: "success",
+        });
       } else {
-        toast({ title: "绑定失败", description: res.message, variant: "destructive" });
+        toast({ title: "获取绑定码失败", description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "绑定失败", description: error.message, variant: "destructive" });
+      toast({ title: "获取绑定码失败", description: error.message, variant: "destructive" });
     } finally {
       setIsTgLoading(false);
     }
@@ -187,6 +190,7 @@ export default function SettingsPage() {
       const res = await api.unbindTelegram();
       if (res.success) {
         toast({ title: "解绑成功", variant: "success" });
+        setBindCode(null);
         loadData();
         fetchUser();
       } else {
@@ -254,53 +258,6 @@ export default function SettingsPage() {
     }
   };
 
-  const handleChangeTelegram = async () => {
-    if (!newTelegramId) {
-      toast({ title: "请输入新的 Telegram ID", variant: "destructive" });
-      return;
-    }
-
-    setIsTgLoading(true);
-    try {
-      const res = await api.changeTelegram(parseInt(newTelegramId));
-      if (res.success) {
-        toast({ title: "换绑成功", variant: "success" });
-        setChangeTgOpen(false);
-        setNewTelegramId("");
-        loadData();
-        fetchUser();
-      } else {
-        toast({ title: "换绑失败", description: res.message, variant: "destructive" });
-      }
-    } catch (error: any) {
-      toast({ title: "换绑失败", description: error.message, variant: "destructive" });
-    } finally {
-      setIsTgLoading(false);
-    }
-  };
-
-  const handleTgVerifyBind = async () => {
-    setIsTgVerifyLoading(true);
-    try {
-      const res = await api.getTelegramVerifyLink();
-      if (res.success && res.data?.verify_url) {
-        setTgVerifyUrl(res.data.verify_url);
-        window.open(res.data.verify_url, "_blank");
-        toast({
-          title: "验证链接已生成",
-          description: "请在 Telegram 中完成验证，然后刷新此页面",
-          variant: "success",
-        });
-      } else {
-        toast({ title: "生成验证链接失败", description: res.message, variant: "destructive" });
-      }
-    } catch (error: any) {
-      toast({ title: "生成验证链接失败", description: error.message, variant: "destructive" });
-    } finally {
-      setIsTgVerifyLoading(false);
-    }
-  };
-
   const handleUpdateEmail = async () => {
     if (!emailValue) {
       toast({ title: "请输入邮箱地址", variant: "destructive" });
@@ -357,29 +314,20 @@ export default function SettingsPage() {
     }
   };
 
-  const handleToggleUrlReveal = async () => {
-    setIsUrlsLoading(true);
-    try {
-      const res = await api.getEmbyUrls(!urlsMasked);
-      if (res.success && res.data) {
-        setEmbyUrls(res.data.urls);
-        setUrlsMasked(res.data.masked);
-      } else {
-        toast({ title: "获取失败", description: res.message, variant: "destructive" });
-      }
-    } catch (error: any) {
-      toast({ title: "获取失败", description: error.message, variant: "destructive" });
-    } finally {
-      setIsUrlsLoading(false);
-    }
+  const handleCopyUrl = (url: string, key: string) => {
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedIndex(key);
+      toast({ title: "已复制", description: "线路地址已复制到剪贴板" });
+      setTimeout(() => setCopiedIndex(null), 2000);
+    });
   };
 
-  // 初始加载脱敏 URL
+  // 初始加载线路
   useEffect(() => {
-    api.getEmbyUrls(false).then((res) => {
+    api.getEmbyUrls().then((res) => {
       if (res.success && res.data) {
-        setEmbyUrls(res.data.urls);
-        setUrlsMasked(res.data.masked);
+        setEmbyLines(res.data.lines);
+        setWhitelistLines(res.data.whitelist_lines || []);
       }
     });
   }, []);
@@ -510,29 +458,19 @@ export default function SettingsPage() {
               </div>
               <div className="flex gap-2">
                 {!telegramStatus?.bound ? (
-                  <>
-                    <Button onClick={() => setBindTgOpen(true)}>
+                  <Button
+                    onClick={handleGetBindCode}
+                    disabled={isTgLoading}
+                  >
+                    {isTgLoading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
                       <LinkIcon className="mr-2 h-4 w-4" />
-                      手动绑定
-                    </Button>
-                    <Button 
-                      variant="outline"
-                      onClick={handleTgVerifyBind}
-                      disabled={isTgVerifyLoading}
-                    >
-                      {isTgVerifyLoading ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <MessageCircle className="mr-2 h-4 w-4" />
-                      )}
-                      Bot 验证绑定
-                    </Button>
-                  </>
+                    )}
+                    获取绑定码
+                  </Button>
                 ) : (
                   <>
-                    <Button variant="outline" onClick={() => setChangeTgOpen(true)}>
-                      换绑
-                    </Button>
                     {telegramStatus.can_unbind && (
                       <Button
                         variant="destructive"
@@ -552,15 +490,30 @@ export default function SettingsPage() {
                 ⚠️ 系统要求必须绑定 Telegram，无法解绑
               </p>
             )}
-            {tgVerifyUrl && !telegramStatus?.bound && (
-              <div className="rounded-lg bg-blue-500/10 p-3 text-sm">
-                <p className="font-medium text-blue-500">验证链接已生成</p>
-                <p className="text-muted-foreground mt-1">
-                  请在 Telegram 中点击链接完成验证，验证后请刷新此页面。
+            {bindCode && !telegramStatus?.bound && (
+              <div className="rounded-lg bg-blue-500/10 p-4 space-y-2">
+                <p className="font-medium text-blue-500">绑定码已生成</p>
+                <div className="flex items-center gap-3">
+                  <code className="text-2xl font-mono font-bold tracking-widest bg-background/50 px-4 py-2 rounded-lg">
+                    {bindCode}
+                  </code>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`/bind ${bindCode}`);
+                      toast({ title: "已复制到剪贴板", variant: "success" });
+                    }}
+                  >
+                    复制命令
+                  </Button>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  请在 {Math.floor(bindCodeExpiry / 60)} 分钟内向 Telegram Bot 发送：<code className="bg-background/50 px-1.5 py-0.5 rounded">/bind {bindCode}</code>
                 </p>
-                <a href={tgVerifyUrl} target="_blank" rel="noopener noreferrer" className="text-blue-500 underline text-xs break-all">
-                  {tgVerifyUrl}
-                </a>
+                <p className="text-xs text-muted-foreground">
+                  绑定完成后请刷新此页面确认。
+                </p>
               </div>
             )}
           </CardContent>
@@ -690,43 +643,98 @@ export default function SettingsPage() {
         </Card>
       </motion.div>
 
-      {/* Emby URLs */}
+      {/* 服务器线路 */}
       <motion.div variants={item}>
         <Card className="glass-card">
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2">
-                <Globe className="h-5 w-5" />
-                服务器线路
-              </CardTitle>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleToggleUrlReveal}
-                disabled={isUrlsLoading}
-              >
-                {isUrlsLoading ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : urlsMasked ? (
-                  <Eye className="mr-2 h-4 w-4" />
-                ) : (
-                  <EyeOff className="mr-2 h-4 w-4" />
-                )}
-                {urlsMasked ? "显示地址" : "隐藏地址"}
-              </Button>
-            </div>
+            <CardTitle className="flex items-center gap-2">
+              <Globe className="h-5 w-5" />
+              服务器线路
+            </CardTitle>
+            <CardDescription>
+              选择延迟最低的线路连接 Emby，点击地址可复制
+            </CardDescription>
           </CardHeader>
-          <CardContent>
-            {embyUrls.length > 0 ? (
-              <div className="space-y-2">
-                {embyUrls.map((url, i) => (
-                  <div key={i} className="rounded-lg bg-accent/50 px-4 py-2 text-sm font-mono">
-                    {url}
-                  </div>
-                ))}
+          <CardContent className="space-y-4">
+            {embyLines.length > 0 ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {embyLines.map((line, i) => {
+                  const key = `line-${i}`;
+                  return (
+                    <div
+                      key={key}
+                      className="group relative rounded-xl border bg-card p-4 transition-colors hover:bg-accent/50"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold">{line.name || `线路 ${i + 1}`}</p>
+                          <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                            {line.url}
+                          </p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+                          onClick={() => handleCopyUrl(line.url, key)}
+                        >
+                          {copiedIndex === key ? (
+                            <Check className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <Copy className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">暂无可用线路</p>
+            )}
+
+            {whitelistLines.length > 0 && (
+              <>
+                <Separator />
+                <div>
+                  <p className="mb-3 flex items-center gap-1.5 text-sm font-medium">
+                    <Star className="h-4 w-4 text-yellow-500" />
+                    专属线路
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {whitelistLines.map((line, i) => {
+                      const key = `wl-${i}`;
+                      return (
+                        <div
+                          key={key}
+                          className="group relative rounded-xl border border-yellow-500/20 bg-yellow-500/5 p-4 transition-colors hover:bg-yellow-500/10"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-semibold">{line.name || `专属线路 ${i + 1}`}</p>
+                              <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                                {line.url}
+                              </p>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+                              onClick={() => handleCopyUrl(line.url, key)}
+                            >
+                              {copiedIndex === key ? (
+                                <Check className="h-4 w-4 text-green-500" />
+                              ) : (
+                                <Copy className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>
@@ -763,44 +771,22 @@ export default function SettingsPage() {
             {/* NSFW Management */}
             {settings?.system_config.nsfw_library_configured && (
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label className="flex items-center gap-2">
-                      NSFW 内容显示
-                      {nsfwStatus?.has_permission ? (
-                        <Badge variant="default" className="text-xs">
-                          有权限
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-xs">
-                          无权限
-                        </Badge>
-                      )}
-                      {nsfwStatus?.enabled && (
-                        <Badge variant="secondary" className="text-xs">
-                          已启用
-                        </Badge>
-                      )}
-                    </Label>
-                    <p className="text-sm text-muted-foreground">
-                      {nsfwStatus?.message || "控制是否在媒体库中显示 NSFW 内容"}
-                    </p>
-                    {nsfwStatus?.has_permission && (
-                      <div className="mt-2 space-y-1">
-                        <p className="text-xs text-muted-foreground">
-                          当前状态: <span className="font-medium">{nsfwStatus?.enabled ? "已启用" : "已禁用"}</span>
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          说明: {nsfwStatus?.enabled ? "NSFW 内容将在媒体库中显示" : "NSFW 内容将被隐藏"}
-                        </p>
-                      </div>
+                <div className="space-y-0.5">
+                  <Label className="flex items-center gap-2">
+                    NSFW 内容显示
+                    {nsfwStatus?.has_permission ? (
+                      <Badge variant="default" className="text-xs">
+                        有权限
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-xs">
+                        无权限
+                      </Badge>
                     )}
-                  </div>
-                  <Switch
-                    checked={nsfwStatus?.enabled || false}
-                    onCheckedChange={handleToggleNsfw}
-                    disabled={!nsfwStatus?.can_toggle}
-                  />
+                  </Label>
+                  <p className="text-sm text-muted-foreground">
+                    {nsfwStatus?.message || "控制是否在媒体库中显示 NSFW 内容"}
+                  </p>
                 </div>
                 {!nsfwStatus?.has_permission ? (
                   <Alert>
@@ -809,10 +795,38 @@ export default function SettingsPage() {
                       您没有 NSFW 库的访问权限，请联系管理员授予权限
                     </AlertDescription>
                   </Alert>
+                ) : nsfwStatus?.libraries && nsfwStatus.libraries.length > 0 ? (
+                  <div className="space-y-2">
+                    {nsfwStatus.libraries.map((lib) => (
+                      <div
+                        key={lib.name}
+                        className="flex items-center justify-between rounded-lg border p-3"
+                      >
+                        <div>
+                          <p className="text-sm font-medium">{lib.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {lib.enabled ? "已启用" : "已禁用"}
+                          </p>
+                        </div>
+                        <Switch
+                          checked={lib.enabled}
+                          onCheckedChange={(checked) =>
+                            handleToggleNsfwLibrary(lib.name, checked)
+                          }
+                          disabled={!nsfwStatus?.can_toggle}
+                        />
+                      </div>
+                    ))}
+                    <Alert>
+                      <AlertDescription className="text-xs">
+                        <strong>提示：</strong>此设置仅控制各 NSFW 库内容的显示状态，不影响您的访问权限。权限由管理员在 Emby 中管理。
+                      </AlertDescription>
+                    </Alert>
+                  </div>
                 ) : (
                   <Alert>
                     <AlertDescription className="text-xs">
-                      <strong>提示：</strong>此设置仅控制 NSFW 内容的显示状态，不影响您的访问权限。权限由管理员在 Emby 中管理。
+                      暂无可用的 NSFW 库
                     </AlertDescription>
                   </Alert>
                 )}
@@ -834,70 +848,6 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
       </motion.div>
-
-      {/* Bind Telegram Dialog */}
-      <Dialog open={bindTgOpen} onOpenChange={setBindTgOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>绑定 Telegram</DialogTitle>
-            <DialogDescription>
-              输入您的 Telegram 用户 ID（可通过 @userinfobot 获取）
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Telegram ID</Label>
-              <Input
-                type="number"
-                placeholder="例如：123456789"
-                value={newTelegramId}
-                onChange={(e) => setNewTelegramId(e.target.value)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setBindTgOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={handleBindTelegram} disabled={isTgLoading}>
-              {isTgLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              确认绑定
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Change Telegram Dialog */}
-      <Dialog open={changeTgOpen} onOpenChange={setChangeTgOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>换绑 Telegram</DialogTitle>
-            <DialogDescription>
-              输入新的 Telegram 用户 ID
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>新 Telegram ID</Label>
-              <Input
-                type="number"
-                placeholder="例如：123456789"
-                value={newTelegramId}
-                onChange={(e) => setNewTelegramId(e.target.value)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setChangeTgOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={handleChangeTelegram} disabled={isTgLoading}>
-              {isTgLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              确认换绑
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Bind Emby Dialog */}
       <Dialog open={bindEmbyOpen} onOpenChange={setBindEmbyOpen}>

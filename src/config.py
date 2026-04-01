@@ -143,6 +143,61 @@ class BaseConfig:
         """
         return getattr(cls, key.upper(), default)
 
+    @classmethod
+    def _get_default_values(cls) -> dict:
+        """获取类定义的所有默认配置键值（小写键名 -> 默认值）"""
+        defaults = {}
+        # 遍历 MRO 获取原始类定义的默认值
+        for klass in reversed(cls.__mro__):
+            for key, value in vars(klass).items():
+                if key.isupper() and not key.startswith('_'):
+                    defaults[key.lower()] = value
+        return defaults
+
+    @classmethod
+    def fill_missing_to_toml(cls) -> bool:
+        """
+        检查 TOML 文件中是否缺少当前类定义的配置项，
+        如缺少则用类默认值补全并写回文件。
+        
+        :return: 是否有新增配置项
+        """
+        if not cls._section:
+            return False
+        
+        try:
+            config = toml.load(cls.toml_file_path)
+        except (FileNotFoundError, toml.TomlDecodeError):
+            config = {}
+        
+        section_data = config.get(cls._section, {})
+        defaults = cls._get_default_values()
+        
+        missing = {}
+        for key, default_value in defaults.items():
+            if key not in section_data:
+                # 将 Path 转为字符串以便 TOML 序列化
+                if isinstance(default_value, Path):
+                    default_value = str(default_value)
+                missing[key] = default_value
+        
+        if not missing:
+            return False
+        
+        # 补全缺失项
+        if cls._section not in config:
+            config[cls._section] = {}
+        config[cls._section].update(missing)
+        
+        try:
+            with open(cls.toml_file_path, 'w', encoding='utf-8') as f:
+                toml.dump(config, f)
+            logger.info(f"[{cls._section}] 已补全 {len(missing)} 个缺失配置项: {', '.join(missing.keys())}")
+            return True
+        except Exception as err:
+            logger.error(f"补全配置文件时发生错误: {err}")
+            return False
+
 
 class Config(BaseConfig):
     """全局配置管理类"""
@@ -183,7 +238,7 @@ class EmbyConfig(BaseConfig):
         'Direct : http://127.0.0.1:8096/',
         'Sample : http://192.168.1.1:8096/'
     ]
-    EMBY_NSFW: str = ''
+    EMBY_NSFW: List[str] = []  # NSFW 媒体库名称列表
 
 
 class TelegramConfig(BaseConfig):
@@ -191,9 +246,11 @@ class TelegramConfig(BaseConfig):
     TELEGRAM_API_URL: str = 'https://api.telegram.org/bot'
     BOT_TOKEN: str = ''
     ADMIN_ID: Union[int, List[int]] = []
-    GROUP_ID: Union[int, List[int]] = []
-    CHANNEL_ID: Union[int, List[int]] = []
+    GROUP_ID: Union[int, str, List[Union[int, str]]] = []  # 支持数字ID或 @channelusername
+    CHANNEL_ID: Union[int, str, List[Union[int, str]]] = []  # 支持数字ID或 @channelusername
     FORCE_SUBSCRIBE: bool = False
+    PROXY_URL: str = ''  # HTTP 代理地址，如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080
+    ENABLE_TG_PANEL: bool = False  # 是否开启 TG Bot 完整面板（关闭时仅允许绑定和查看基础信息）
 
 
 class ScoreAndRegisterConfig(BaseConfig):
@@ -334,6 +391,9 @@ class BangumiSyncConfig(BaseConfig):
 # 自动加载配置
 Config.update_from_toml("Global")
 EmbyConfig.update_from_toml('Emby')
+# 兼容旧配置：emby_nsfw 可能是字符串，需要转换为列表
+if isinstance(EmbyConfig.EMBY_NSFW, str):
+    EmbyConfig.EMBY_NSFW = [n.strip() for n in EmbyConfig.EMBY_NSFW.split(',') if n.strip()] if EmbyConfig.EMBY_NSFW.strip() else []
 TelegramConfig.update_from_toml('Telegram')
 ScoreAndRegisterConfig.update_from_toml('SAR')
 WebhookConfig.update_from_toml('Webhook')
@@ -343,3 +403,13 @@ SecurityConfig.update_from_toml('Security')
 SchedulerConfig.update_from_toml('Scheduler')
 NotificationConfig.update_from_toml('Notification')
 BangumiSyncConfig.update_from_toml('BangumiSync')
+
+# 启动时自动补全缺失的配置项
+_config_classes = [
+    Config, EmbyConfig, TelegramConfig, ScoreAndRegisterConfig,
+    WebhookConfig, DeviceLimitConfig, APIConfig, SecurityConfig,
+    SchedulerConfig, NotificationConfig, BangumiSyncConfig,
+]
+_filled = sum(1 for c in _config_classes if c.fill_missing_to_toml())
+if _filled:
+    logger.info(f"已补全 {_filled} 个配置节的缺失项")

@@ -83,7 +83,7 @@ export default function LoginPage() {
             </div>
 
             <CardTitle className="text-2xl font-semibold tracking-tight">
-              登录 {systemInfo?.name || "Twilight"}
+              进入 {systemInfo?.name || "Twilight"}
             </CardTitle>
             <CardDescription className="text-sm">
               访问你的媒体控制台

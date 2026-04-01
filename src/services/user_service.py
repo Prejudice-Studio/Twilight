@@ -5,7 +5,7 @@
 """
 import time
 import logging
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
@@ -822,11 +822,13 @@ class UserService:
             return False, f"修改密码失败: {e}"
 
     @staticmethod
-    async def toggle_nsfw(user: UserModel, enable: bool) -> Tuple[bool, str]:
+    async def toggle_nsfw(user: UserModel, enable: bool, library_names: List[str] = None) -> Tuple[bool, str]:
         """
         切换 NSFW 库显示状态并同步到 Emby
         
-        当用户开启/关闭 NSFW 显示时，会同步更新 Emby 中的 NSFW 库访问权限。
+        :param user: 用户对象
+        :param enable: 开启/关闭
+        :param library_names: 指定要操作的库名称列表，为 None 时操作所有 NSFW 库
         """
         if not user.EMBYID:
             return False, "用户没有关联的 Emby 账户"
@@ -836,35 +838,83 @@ class UserService:
         
         from src.services.emby_service import EmbyService
         
-        # 通过名称查找NSFW库ID
-        nsfw_library_id = await EmbyService.find_nsfw_library_id()
-        if not nsfw_library_id:
+        # 查找所有 NSFW 库 {名称: ID}
+        nsfw_map = await EmbyService.find_nsfw_library_ids()
+        if not nsfw_map:
             return False, "系统未配置 NSFW 媒体库"
+        
+        # 如果指定了库名称，过滤出目标库
+        if library_names:
+            target_map = {k: v for k, v in nsfw_map.items() if k in library_names}
+            if not target_map:
+                return False, "指定的 NSFW 媒体库不存在"
+        else:
+            target_map = nsfw_map
         
         try:
             emby = get_emby_client()
             
-            # 同步到 Emby
             if enable:
-                # 开启：授予 NSFW 库访问权限
-                success = await emby.grant_nsfw_access(user.EMBYID)
-                if not success:
-                    return False, "授予 NSFW 库访问权限失败"
+                success = await emby.update_nsfw_access(
+                    user.EMBYID,
+                    grant_library_ids=list(target_map.values()),
+                    grant_library_names=list(target_map.keys()),
+                )
             else:
-                # 关闭：撤销 NSFW 库访问权限
-                success = await emby.revoke_nsfw_access(user.EMBYID)
-                if not success:
-                    return False, "撤销 NSFW 库访问权限失败"
+                success = await emby.update_nsfw_access(
+                    user.EMBYID,
+                    revoke_library_ids=list(target_map.values()),
+                    revoke_library_names=list(target_map.keys()),
+                )
             
-            # 更新数据库中的显示状态
-            user.NSFW = enable
+            if not success:
+                return False, "更新 Emby NSFW 库权限失败"
+            
+            # 读取用户的 NSFW 偏好
+            import json
+            other_data = {}
+            if user.OTHER:
+                try:
+                    other_data = json.loads(user.OTHER)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            
+            enabled_nsfw = set(other_data.get('nsfw_libraries', []))
+            
+            if enable:
+                enabled_nsfw.update(target_map.keys())
+            else:
+                enabled_nsfw -= set(target_map.keys())
+            
+            other_data['nsfw_libraries'] = sorted(enabled_nsfw)
+            user.OTHER = json.dumps(other_data)
+            
+            # NSFW 全局标志：有任何 NSFW 库开启即为 True
+            user.NSFW = len(enabled_nsfw) > 0
             await UserOperate.update_user(user)
             
             status = "开启" if enable else "关闭"
-            return True, f"NSFW 显示已{status}，已同步到 Emby"
+            lib_str = ", ".join(target_map.keys())
+            return True, f"NSFW 库 [{lib_str}] 已{status}，已同步到 Emby"
         except Exception as e:
             logger.error(f"切换 NSFW 显示状态失败: {e}")
             return False, f"操作失败: {e}"
+
+    @staticmethod
+    async def get_user_nsfw_preferences(user: UserModel) -> List[str]:
+        """获取用户已启用的 NSFW 库名称列表"""
+        import json
+        if user.OTHER:
+            try:
+                other_data = json.loads(user.OTHER)
+                return other_data.get('nsfw_libraries', [])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        # 兼容旧的布尔 NSFW 字段
+        if user.NSFW:
+            from src.services.emby_service import EmbyService
+            return EmbyService.get_nsfw_library_names()
+        return []
 
     @staticmethod
     async def sync_user_to_emby(user: UserModel) -> Tuple[bool, str]:

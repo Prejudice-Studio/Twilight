@@ -38,44 +38,68 @@ class EmbyService:
     """Emby 业务服务"""
     
     @staticmethod
-    def get_nsfw_library_name() -> Optional[str]:
+    def get_nsfw_library_names() -> List[str]:
         """
-        获取配置的NSFW库名称
+        获取配置的 NSFW 库名称列表
         
-        :return: NSFW库名称，如果未配置则返回None
+        :return: NSFW 库名称列表
         """
         from src.config import EmbyConfig
-        name = EmbyConfig.EMBY_NSFW.strip() if EmbyConfig.EMBY_NSFW else ''
-        return name if name else None
+        names = EmbyConfig.EMBY_NSFW
+        if isinstance(names, str):
+            # 兼容旧配置
+            return [n.strip() for n in names.split(',') if n.strip()]
+        return [n.strip() for n in names if n.strip()]
 
     @staticmethod
-    async def find_nsfw_library_id() -> Optional[str]:
+    def get_nsfw_library_name() -> Optional[str]:
         """
-        通过配置的NSFW库名称查找其在Emby中的ID
+        获取配置的第一个 NSFW 库名称（向后兼容）
         
-        :return: NSFW库的ID，如果未找到则返回None
+        :return: NSFW 库名称，如果未配置则返回 None
+        """
+        names = EmbyService.get_nsfw_library_names()
+        return names[0] if names else None
+
+    @staticmethod
+    async def find_nsfw_library_ids() -> Dict[str, str]:
+        """
+        通过配置的 NSFW 库名称列表查找其在 Emby 中的 ID
+        
+        :return: {库名称: 库ID} 字典
         """
         from src.config import EmbyConfig
         
-        if not EmbyConfig.EMBY_NSFW:
-            return None
+        names = EmbyService.get_nsfw_library_names()
+        if not names:
+            return {}
         
         emby = get_emby_client()
         
         try:
             libraries = await emby.get_libraries()
-            nsfw_name = EmbyConfig.EMBY_NSFW.strip()
-            
-            for lib in libraries:
-                # 通过名称匹配（不区分大小写）
-                if lib.name.strip().lower() == nsfw_name.lower():
-                    return lib.id
-            
-            logger.warning(f"未找到名为 '{nsfw_name}' 的NSFW库")
-            return None
+            result = {}
+            for name in names:
+                for lib in libraries:
+                    if lib.name.strip().lower() == name.lower():
+                        result[name] = lib.id
+                        break
+                else:
+                    logger.warning(f"未找到名为 '{name}' 的 NSFW 库")
+            return result
         except EmbyError as e:
-            logger.error(f"查找NSFW库失败: {e}")
-            return None
+            logger.error(f"查找 NSFW 库失败: {e}")
+            return {}
+
+    @staticmethod
+    async def find_nsfw_library_id() -> Optional[str]:
+        """
+        查找第一个 NSFW 库的 ID（向后兼容）
+        
+        :return: NSFW 库的 ID，如果未找到则返回 None
+        """
+        ids = await EmbyService.find_nsfw_library_ids()
+        return next(iter(ids.values()), None) if ids else None
 
     # ==================== 用户同步 ====================
 
@@ -350,15 +374,15 @@ class EmbyService:
             libraries = await emby.get_libraries()
             result = []
             
-            # 通过名称判断NSFW库
-            nsfw_name = EmbyService.get_nsfw_library_name()
+            # 通过名称判断 NSFW 库
+            nsfw_names = [n.lower() for n in EmbyService.get_nsfw_library_names()]
             
             for lib in libraries:
                 result.append({
                     'id': lib.id,
                     'name': lib.name,
                     'type': lib.collection_type,
-                    'is_nsfw': (lib.name.strip().lower() == nsfw_name.lower()) if nsfw_name else False,
+                    'is_nsfw': lib.name.strip().lower() in nsfw_names,
                 })
             
             return result

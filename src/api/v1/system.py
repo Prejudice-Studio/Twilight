@@ -135,31 +135,34 @@ async def system_stats():
 @require_auth
 async def get_emby_urls():
     """
-    获取 Emby 服务器地址列表
+    获取 Emby 服务器线路列表
     
-    默认返回脱敏 URL，登录用户请求 reveal=true 可查看完整 URL
-    Query:
-        reveal=true  (需要登录)
+    根据用户角色返回不同线路：
+    - 普通用户：返回普通线路列表
+    - 白名单/管理员：额外返回白名单专属线路
+    
+    返回结构化数据: { lines: [{name, url, tag?}], whitelist_lines?: [{name, url, tag?}] }
     """
-    import re
-    reveal = request.args.get('reveal', 'false').lower() == 'true'
+    from src.db.user import Role
     
-    if reveal and g.current_user:
-        return api_response(True, "获取成功", {
-            'urls': EmbyConfig.EMBY_URL_LIST,
-            'masked': False,
-        })
+    def parse_url_entry(entry: str) -> dict:
+        """解析 'Label : http://...' 格式"""
+        if ' : ' in entry:
+            parts = entry.split(' : ', 1)
+            return {'name': parts[0].strip(), 'url': parts[1].strip()}
+        return {'name': '默认线路', 'url': entry.strip()}
     
-    # 脱敏：将 URL 中的主机部分替换为 ***
-    def mask_url(line: str) -> str:
-        # 格式通常为 "Label : http://host:port/"
-        return re.sub(r'(https?://)([^:/\s]+)', r'\1***', line)
+    lines = [parse_url_entry(u) for u in EmbyConfig.EMBY_URL_LIST]
     
-    masked = [mask_url(u) for u in EmbyConfig.EMBY_URL_LIST]
-    return api_response(True, "获取成功", {
-        'urls': masked,
-        'masked': True,
-    })
+    result = {'lines': lines}
+    
+    # 白名单/管理员用户额外返回专属线路
+    if g.current_user and g.current_user.ROLE in (Role.ADMIN.value, Role.WHITE_LIST.value):
+        whitelist_lines = [parse_url_entry(u) for u in EmbyConfig.EMBY_URL_LIST_FOR_WHITELIST]
+        if whitelist_lines:
+            result['whitelist_lines'] = whitelist_lines
+    
+    return api_response(True, "获取成功", result)
 
 
 # ==================== 需要登录 ====================
@@ -230,6 +233,7 @@ async def get_admin_config():
             'enabled': Config.TELEGRAM_MODE,
             'admin_ids': TelegramConfig.ADMIN_ID,
             'group_ids': TelegramConfig.GROUP_ID,
+            'channel_ids': TelegramConfig.CHANNEL_ID,
             'force_subscribe': TelegramConfig.FORCE_SUBSCRIBE,
         },
         'sar': {
@@ -477,8 +481,8 @@ async def get_config_schema():
                     {'key': 'telegram_api_url', 'label': 'API 地址', 'type': 'string', 'description': 'Telegram Bot API 地址，可用于自建 API 代理', 'value': TelegramConfig.TELEGRAM_API_URL},
                     {'key': 'bot_token', 'label': 'Bot Token', 'type': 'secret', 'description': '从 @BotFather 获取的 Bot Token', 'value': TelegramConfig.BOT_TOKEN},
                     {'key': 'admin_id', 'label': '管理员 ID', 'type': 'list', 'description': 'Telegram 管理员用户 ID 列表', 'value': TelegramConfig.ADMIN_ID},
-                    {'key': 'group_id', 'label': '群组 ID', 'type': 'list', 'description': 'Telegram 群组 ID 列表', 'value': TelegramConfig.GROUP_ID},
-                    {'key': 'channel_id', 'label': '频道 ID', 'type': 'list', 'description': 'Telegram 频道 ID 列表', 'value': TelegramConfig.CHANNEL_ID},
+                    {'key': 'group_id', 'label': '群组 ID', 'type': 'list', 'description': 'Telegram 群组 ID 列表，支持数字ID（如 -1001234567890）或 @用户名（如 @mygroup）', 'value': TelegramConfig.GROUP_ID},
+                    {'key': 'channel_id', 'label': '频道 ID', 'type': 'list', 'description': 'Telegram 频道 ID 列表，支持数字ID（如 -1001234567890）或 @用户名（如 @mychannel）', 'value': TelegramConfig.CHANNEL_ID},
                     {'key': 'force_subscribe', 'label': '强制订阅', 'type': 'bool', 'description': '是否要求用户订阅频道后才能使用', 'value': TelegramConfig.FORCE_SUBSCRIBE},
                 ],
             },
@@ -755,7 +759,7 @@ async def get_emby_libraries():
 @require_auth
 @require_admin
 async def update_nsfw_library():
-    """更新 NSFW 库配置（管理员），使用库名称标识"""
+    """更新 NSFW 库配置（管理员），支持多库"""
     import toml
     from pathlib import Path
     from src.config import ROOT_PATH
@@ -763,55 +767,55 @@ async def update_nsfw_library():
     from src.services.emby import get_emby_client, EmbyError
     
     data = request.get_json() or {}
-    library_name = data.get('library_name', '').strip()
+    # 支持 library_names (列表) 或 library_name (单个，向后兼容)
+    library_names = data.get('library_names', [])
+    if not library_names:
+        single = data.get('library_name', '').strip()
+        library_names = [single] if single else []
+    library_names = [n.strip() for n in library_names if n.strip()]
     
     config_file = ROOT_PATH / 'config.toml'
     
     if not config_file.exists():
         return api_response(False, "配置文件不存在", code=404)
     
-    # 如果提供了库名称，验证它在 Emby 中存在
-    if library_name:
+    # 验证所有库名称在 Emby 中存在
+    if library_names:
         try:
             emby = get_emby_client()
             libraries = await emby.get_libraries()
-            matched = any(lib.name.strip().lower() == library_name.lower() for lib in libraries)
-            if not matched:
-                return api_response(False, f"Emby 中不存在名为 '{library_name}' 的媒体库", code=400)
+            emby_names = {lib.name.strip().lower() for lib in libraries}
+            not_found = [n for n in library_names if n.lower() not in emby_names]
+            if not_found:
+                return api_response(False, f"Emby 中不存在以下媒体库: {', '.join(not_found)}", code=400)
         except EmbyError as e:
             return api_response(False, f"无法连接 Emby 验证媒体库: {e}", code=500)
     
     try:
-        # 读取现有配置
         config = toml.load(config_file)
         
-        # 更新 NSFW 库名称
         if 'Emby' not in config:
             config['Emby'] = {}
-        config['Emby']['emby_nsfw'] = library_name
+        config['Emby']['emby_nsfw'] = library_names
         
-        # 备份原文件
         backup_file = ROOT_PATH / 'config.toml.backup'
         if config_file.exists():
             import shutil
             shutil.copy2(config_file, backup_file)
         
-        # 写入新配置
         with open(config_file, 'w', encoding='utf-8') as f:
             toml.dump(config, f)
         
-        # 重新加载配置
         EmbyConfig.update_from_toml('Emby')
         
         return api_response(True, "NSFW 库配置已更新", {
-            'nsfw_library_name': library_name,
+            'nsfw_library_names': library_names,
         })
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
         logger.error(f"更新 NSFW 库配置失败: {e}", exc_info=True)
         
-        # 尝试恢复备份
         backup_file = ROOT_PATH / 'config.toml.backup'
         if backup_file.exists():
             try:
@@ -821,3 +825,77 @@ async def update_nsfw_library():
                 pass
         
         return api_response(False, f"更新配置失败: {e}", code=500)
+
+
+# ==================== Bot 连通性测试 ====================
+
+@system_bp.route('/admin/bot/test', methods=['POST'])
+@require_auth
+@require_admin
+async def test_bot_connectivity():
+    """
+    测试 Telegram Bot 连通性
+    
+    向指定的群组/频道发送一条测试消息
+    """
+    import time
+
+    if not Config.TELEGRAM_MODE:
+        return api_response(False, "Telegram 模式未启用", code=400)
+
+    if not TelegramConfig.BOT_TOKEN:
+        return api_response(False, "未配置 Bot Token", code=400)
+
+    data = request.get_json() or {}
+    target = data.get('target')  # 可选：指定群组/频道，不传则发送到所有配置的群组和频道
+
+    from src.bot.bot import get_bot
+    bot = get_bot()
+
+    if not bot:
+        return api_response(False, "Bot 实例不存在，请先启用 Telegram 模式并重启服务", code=400)
+
+    if not bot.is_running:
+        return api_response(False, "Bot 未成功启动，请检查 bot_token 配置是否正确", code=400)
+
+    results = []
+    targets = []
+
+    if target:
+        # 指定目标
+        targets = [target]
+    else:
+        # 发送到所有配置的群组和频道
+        group_ids = TelegramConfig.GROUP_ID
+        if isinstance(group_ids, (int, str)):
+            group_ids = [group_ids] if group_ids else []
+        channel_ids = TelegramConfig.CHANNEL_ID
+        if isinstance(channel_ids, (int, str)):
+            channel_ids = [channel_ids] if channel_ids else []
+        targets = group_ids + channel_ids
+
+    if not targets:
+        return api_response(False, "没有配置群组或频道，请先在 Telegram 配置中设置 group_id 或 channel_id", code=400)
+
+    test_time = time.strftime('%Y-%m-%d %H:%M:%S')
+    test_text = f"✅ **Twilight Bot 连通性测试**\n\n服务器: {Config.SERVER_NAME}\n时间: {test_time}\n\n此消息用于验证 Bot 与群组/频道的连通性。"
+
+    for chat_id in targets:
+        try:
+            msg = await bot.send_message(chat_id=chat_id, text=test_text)
+            results.append({
+                'target': str(chat_id),
+                'success': msg is not None,
+                'error': None if msg else '发送失败（未知原因）',
+            })
+        except Exception as e:
+            results.append({
+                'target': str(chat_id),
+                'success': False,
+                'error': str(e),
+            })
+
+    all_ok = all(r['success'] for r in results)
+    return api_response(all_ok, "测试完成" if all_ok else "部分目标发送失败", {
+        'results': results,
+    })

@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from src.config import Config
-from src.db.utils import create_database
+from src.db.utils import create_database, init_async_db
 class ScoreDatabaseModel(AsyncAttrs, DeclarativeBase):
     pass
 class ScoreModel(ScoreDatabaseModel):
@@ -49,10 +49,7 @@ class ScoreHistoryModel(ScoreDatabaseModel):
     CREATED_AT: Mapped[int] = mapped_column(Integer, nullable=False)  # 创建时间戳
 
 
-create_database("score", ScoreDatabaseModel)
-DATABASE_URL = f'sqlite+aiosqlite:///{Config.DATABASES_DIR / "score.db"}'
-ENGINE = create_async_engine(DATABASE_URL, echo=Config.SQLALCHEMY_LOG)
-ScoreSessionFactory = async_sessionmaker(bind=ENGINE, expire_on_commit=False)
+ENGINE, ScoreSessionFactory = init_async_db("score", ScoreDatabaseModel)
 class ScoreOperate:
     @staticmethod
     async def add_score(score: ScoreModel) -> None:

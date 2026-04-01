@@ -1,4 +1,7 @@
 import os
+import platform as _platform
+_platform._wmi = None  # 规避 Windows WMI 服务无响应导致 SQLAlchemy 导入卡死
+
 from src.api import create_app
 from asgiref.wsgi import WsgiToAsgi
 

@@ -282,46 +282,59 @@ async def change_my_password():
 @require_auth
 async def get_nsfw_status():
     """
-    获取 NSFW 权限状态
+    获取 NSFW 权限状态（支持多 NSFW 库）
     
     Response:
         {
             "success": true,
             "data": {
-                "enabled": true,           // 用户是否已开启 NSFW
-                "has_permission": true,    // 用户在 Emby 中是否有 NSFW 库访问权限
-                "nsfw_library_name": "xxx",  // NSFW 库名称
-                "can_toggle": true         // 用户是否可以切换（有权限才能切换）
+                "enabled": true,
+                "has_permission": true,
+                "can_toggle": true,
+                "libraries": [
+                    {"name": "xxx", "enabled": true},
+                    {"name": "yyy", "enabled": false}
+                ],
+                "message": "..."
             }
         }
     """
     from src.services import EmbyService
     user = g.current_user
-    # 获取NSFW库名称和ID
-    nsfw_library_name = EmbyService.get_nsfw_library_name()
-    nsfw_library_id = await EmbyService.find_nsfw_library_id()
-    
-    # 检查是否配置了 NSFW 库
-    if not nsfw_library_id:
+
+    nsfw_names = EmbyService.get_nsfw_library_names()
+    nsfw_map = await EmbyService.find_nsfw_library_ids()
+
+    if not nsfw_map:
         return api_response(True, "NSFW 库未配置", {
             'enabled': False,
             'has_permission': False,
-            'nsfw_library_name': None,
             'can_toggle': False,
+            'libraries': [],
             'message': '系统未配置 NSFW 媒体库'
         })
-    
-    # 获取用户在 Emby 中的媒体库访问权限
-    library_ids, enable_all = await EmbyService.get_user_library_access(user)
-    
-    # 判断用户是否有 NSFW 库访问权限 (优先使用数据库中的字段)
+
     has_permission = bool(user.NSFW_ALLOWED)
-    
+
+    # 获取用户已启用的 NSFW 库（从 Emby policy 中读取）
+    enabled_lib_ids, enable_all = await EmbyService.get_user_library_access(user)
+
+    libs = []
+    any_enabled = False
+    for name, lib_id in nsfw_map.items():
+        lib_enabled = enable_all or lib_id in enabled_lib_ids
+        if lib_enabled and has_permission:
+            any_enabled = True
+        libs.append({
+            'name': name,
+            'enabled': lib_enabled and has_permission,
+        })
+
     return api_response(True, "获取成功", {
-        'enabled': user.NSFW,
+        'enabled': any_enabled,
         'has_permission': has_permission,
-        'nsfw_library_name': nsfw_library_name,
         'can_toggle': has_permission,
+        'libraries': libs,
         'message': '有访问权限，可自行开关' if has_permission else '您没有 NSFW 库的访问权限，请联系管理员'
     })
 
@@ -477,14 +490,12 @@ async def unbind_emby_account():
 @require_auth
 async def toggle_my_nsfw():
     """
-    切换 NSFW 库访问权限
-    
-    只有在 Emby 中有 NSFW 库访问权限的用户才能切换。
-    此设置控制用户是否"显示" NSFW 内容，而非权限本身。
+    切换 NSFW 库访问权限（支持按库切换）
     
     Request:
         {
-            "enable": true
+            "enable": true,
+            "library_names": ["xxx", "yyy"]  // 可选，指定要切换的库
         }
     """
     from src.services import EmbyService
@@ -492,21 +503,17 @@ async def toggle_my_nsfw():
     
     data = request.get_json() or {}
     enable = data.get('enable', False)
+    library_names = data.get('library_names', None)  # None = 所有 NSFW 库
     user = g.current_user
     
-    # 通过名称查找NSFW库ID
-    nsfw_library_id = await EmbyService.find_nsfw_library_id()
-    
-    # 检查是否配置了 NSFW 库
-    if not nsfw_library_id:
+    nsfw_map = await EmbyService.find_nsfw_library_ids()
+    if not nsfw_map:
         return api_response(False, "系统未配置 NSFW 媒体库", code=400)
     
-    # 使用数据库中的 NSFW_ALLOWED 字段判断权限（由管理员控制）
     if not user.NSFW_ALLOWED:
         return api_response(False, "管理员未授予您 NSFW 库的访问权限，无法切换此选项", code=403)
     
-    # 有权限，执行切换
-    success, message = await UserService.toggle_nsfw(user, enable)
+    success, message = await UserService.toggle_nsfw(user, enable, library_names)
     return api_response(success, message)
 
 
@@ -759,9 +766,9 @@ async def get_telegram_status():
         try:
             from src.bot.bot import get_bot_instance
             bot = get_bot_instance()
-            if bot and bot.app:
+            if bot and bot.application:
                 try:
-                    tg_user = await bot.app.get_users(user.TELEGRAM_ID)
+                    tg_user = await bot.application.bot.get_chat(user.TELEGRAM_ID)
                     telegram_username = tg_user.username or f"{tg_user.first_name or ''} {tg_user.last_name or ''}".strip() or None
                 except Exception:
                     pass  # 如果获取失败，忽略
@@ -775,47 +782,7 @@ async def get_telegram_status():
         'telegram_username': telegram_username,  # Telegram 用户名
         'force_bind': force_bind,
         'can_unbind': not force_bind and bool(user.TELEGRAM_ID),
-        'can_change': bool(user.TELEGRAM_ID),  # 已绑定才能换绑
-    })
-
-
-@users_bp.route('/me/telegram/bind', methods=['POST'])
-@require_auth
-async def bind_my_telegram():
-    """
-    绑定 Telegram 账号
-    
-    Request:
-        {
-            "telegram_id": 123456789
-        }
-    """
-    user = g.current_user
-    data = request.get_json() or {}
-    telegram_id = data.get('telegram_id')
-    
-    if not telegram_id:
-        return api_response(False, "缺少 telegram_id", code=400)
-    
-    # 类型校验
-    if not isinstance(telegram_id, int) or telegram_id <= 0:
-        return api_response(False, "telegram_id 格式无效", code=400)
-    
-    # 检查是否已绑定其他 Telegram
-    if user.TELEGRAM_ID and user.TELEGRAM_ID != telegram_id:
-        return api_response(False, "您已绑定其他 Telegram 账号，请先解绑或使用换绑功能", code=400)
-    
-    # 检查该 Telegram ID 是否已被其他用户绑定
-    existing = await UserOperate.get_user_by_telegram_id(telegram_id)
-    if existing and existing.UID != user.UID:
-        return api_response(False, "该 Telegram 账号已被其他用户绑定", code=400)
-    
-    # 绑定
-    user.TELEGRAM_ID = telegram_id
-    await UserOperate.update_user(user)
-    
-    return api_response(True, "Telegram 绑定成功", {
-        'telegram_id': telegram_id,
+        'can_change': False,  # 不再允许手动换绑
     })
 
 
@@ -848,45 +815,7 @@ async def unbind_my_telegram():
     })
 
 
-@users_bp.route('/me/telegram/change', methods=['POST'])
-@require_auth
-async def change_my_telegram():
-    """
-    换绑 Telegram 账号
-    
-    Request:
-        {
-            "new_telegram_id": 987654321
-        }
-    """
-    user = g.current_user
-    data = request.get_json() or {}
-    new_telegram_id = data.get('new_telegram_id')
-    
-    if not new_telegram_id:
-        return api_response(False, "缺少 new_telegram_id", code=400)
-    
-    # 检查是否已绑定
-    if not user.TELEGRAM_ID:
-        return api_response(False, "您尚未绑定 Telegram，请使用绑定功能", code=400)
-    
-    # 检查新 ID 是否与旧 ID 相同
-    if user.TELEGRAM_ID == new_telegram_id:
-        return api_response(False, "新 Telegram ID 与当前绑定的相同", code=400)
-    
-    # 检查新 Telegram ID 是否已被其他用户绑定
-    existing = await UserOperate.get_user_by_telegram_id(new_telegram_id)
-    if existing and existing.UID != user.UID:
-        return api_response(False, "该 Telegram 账号已被其他用户绑定", code=400)
-    
-    old_telegram_id = user.TELEGRAM_ID
-    user.TELEGRAM_ID = new_telegram_id
-    await UserOperate.update_user(user)
-    
-    return api_response(True, "Telegram 换绑成功", {
-        'old_telegram_id': old_telegram_id,
-        'new_telegram_id': new_telegram_id,
-    })
+
 
 
 # ==================== 自动续期 ====================
@@ -930,132 +859,154 @@ async def set_auto_renew():
     return api_response(False, message)
 
 
-# ==================== Telegram 验证绑定 ====================
+# ==================== Telegram 绑定码 ====================
 
-# 内存存储验证 token: {token: {uid, created_at}}
+# 内存存储绑定码: {code: {uid, username, created_at}}
 import time as _time
-_tg_verify_tokens: dict = {}
+import secrets as _secrets
+import string as _string
+_tg_bind_codes: dict = {}
 
-def _cleanup_expired_tokens():
-    """清理过期 token（5 分钟过期）"""
+_BIND_CODE_EXPIRE = 300  # 绑定码有效期（秒）
+
+def _cleanup_expired_codes():
+    """清理过期绑定码"""
     now = _time.time()
-    expired = [k for k, v in _tg_verify_tokens.items() if now - v['created_at'] > 300]
+    expired = [k for k, v in _tg_bind_codes.items() if now - v['created_at'] > _BIND_CODE_EXPIRE]
     for k in expired:
-        del _tg_verify_tokens[k]
+        del _tg_bind_codes[k]
+
+def _generate_bind_code() -> str:
+    """生成 6 位数字绑定码"""
+    return ''.join(_secrets.choice(_string.digits) for _ in range(6))
 
 
-@users_bp.route('/me/telegram/verify-link', methods=['POST'])
+@users_bp.route('/me/telegram/bind-code', methods=['POST'])
 @require_auth
-async def generate_tg_verify_link():
+async def generate_tg_bind_code():
     """
-    生成 Telegram 验证链接
+    生成 Telegram 绑定码
     
-    用户点击该链接跳转到 Bot，Bot 自动获取用户的 Telegram ID 并完成绑定。
+    用户获取绑定码后，在 Bot 中发送 /bind <绑定码> 完成绑定。
     
     Response:
         {
             "success": true,
             "data": {
-                "verify_url": "https://t.me/bot_username?start=verify_TOKEN",
-                "token": "TOKEN",
+                "bind_code": "123456",
                 "expires_in": 300
             }
         }
     """
     from src.config import Config, TelegramConfig
-    import secrets
     
     if not Config.TELEGRAM_MODE or not TelegramConfig.BOT_TOKEN:
         return api_response(False, "Telegram Bot 未启用", code=400)
     
     user = g.current_user
     
-    # 清理过期 token
-    _cleanup_expired_tokens()
+    # 已绑定则不允许再生成
+    if user.TELEGRAM_ID:
+        return api_response(False, "您已绑定 Telegram，如需更换请先解绑", code=400)
     
-    # 生成验证 token
-    token = secrets.token_urlsafe(32)
-    _tg_verify_tokens[token] = {
+    # 清理过期绑定码
+    _cleanup_expired_codes()
+    
+    # 撤销该用户之前未使用的绑定码
+    old_codes = [k for k, v in _tg_bind_codes.items() if v['uid'] == user.UID]
+    for k in old_codes:
+        del _tg_bind_codes[k]
+    
+    # 生成新绑定码（确保不重复）
+    code = _generate_bind_code()
+    while code in _tg_bind_codes:
+        code = _generate_bind_code()
+    
+    _tg_bind_codes[code] = {
         'uid': user.UID,
+        'username': user.USERNAME,
         'created_at': _time.time(),
     }
     
-    # 获取 Bot username
-    bot_username = None
-    try:
-        from src.bot.bot import get_bot_instance
-        bot = get_bot_instance()
-        if bot and bot.app:
-            me = await bot.app.get_me()
-            bot_username = me.username
-    except Exception:
-        pass
-    
-    if not bot_username:
-        return api_response(False, "无法获取 Bot 信息，请确认 Bot 已启动", code=500)
-    
-    verify_url = f"https://t.me/{bot_username}?start=verify_{token}"
-    
-    return api_response(True, "验证链接已生成", {
-        'verify_url': verify_url,
-        'token': token,
-        'expires_in': 300,
+    return api_response(True, "绑定码已生成", {
+        'bind_code': code,
+        'expires_in': _BIND_CODE_EXPIRE,
     })
 
 
-@users_bp.route('/me/telegram/verify-confirm', methods=['POST'])
-async def confirm_tg_verify():
+@users_bp.route('/me/telegram/bind-confirm', methods=['POST'])
+async def confirm_tg_bind():
     """
-    Bot 调用此接口完成验证（内部接口）
+    Bot 调用此接口完成绑定（内部接口）
     
     Request:
         {
-            "token": "verify_token",
-            "telegram_id": 123456789
+            "bind_code": "123456",
+            "telegram_id": 123456789,
+            "bot_secret": "..."
         }
     """
     data = request.get_json() or {}
-    token = data.get('token', '')
+    bind_code = data.get('bind_code', '').strip()
     telegram_id = data.get('telegram_id')
     bot_secret = data.get('bot_secret', '')
     
-    # 简单验证：使用 Bot Token 的前 20 位作为密钥
+    # 验证 Bot 身份
     from src.config import TelegramConfig
     expected_secret = TelegramConfig.BOT_TOKEN[:20] if TelegramConfig.BOT_TOKEN else ''
     if not bot_secret or bot_secret != expected_secret:
         return api_response(False, "未授权", code=403)
     
-    if not token or not telegram_id:
+    if not bind_code or not telegram_id:
         return api_response(False, "参数缺失", code=400)
     
-    # 清理过期 token
-    _cleanup_expired_tokens()
+    # 清理过期绑定码
+    _cleanup_expired_codes()
     
-    token_info = _tg_verify_tokens.get(token)
-    if not token_info:
-        return api_response(False, "验证链接已过期或无效", code=400)
+    code_info = _tg_bind_codes.get(bind_code)
+    if not code_info:
+        return api_response(False, "绑定码无效或已过期", code=400)
     
-    uid = token_info['uid']
+    uid = code_info['uid']
     
     # 检查该 Telegram ID 是否已被其他用户绑定
     existing = await UserOperate.get_user_by_telegram_id(telegram_id)
     if existing and existing.UID != uid:
-        return api_response(False, "该 Telegram 账号已被其他用户绑定", code=400)
+        return api_response(False, "该 Telegram 已绑定其他账号，一个 Telegram 只能绑定一个账号", code=400)
     
     # 绑定
     user = await UserOperate.get_user_by_uid(uid)
     if not user:
         return api_response(False, "用户不存在", code=404)
     
+    if user.TELEGRAM_ID:
+        del _tg_bind_codes[bind_code]
+        return api_response(False, "该账号已绑定 Telegram", code=400)
+    
     user.TELEGRAM_ID = telegram_id
     await UserOperate.update_user(user)
     
-    # 删除已使用的 token
-    del _tg_verify_tokens[token]
+    # 删除已使用的绑定码
+    del _tg_bind_codes[bind_code]
     
-    return api_response(True, "Telegram 验证绑定成功", {
+    logger.info(f"用户 {user.USERNAME} 通过 Bot 绑定 Telegram: {telegram_id}")
+    
+    from src.core.utils import format_expire_time
+    from src.db.user import Role
+    role_map = {
+        Role.ADMIN.value: "管理员",
+        Role.WHITE_LIST.value: "白名单",
+        Role.NORMAL.value: "普通用户",
+    }
+    
+    return api_response(True, "Telegram 绑定成功", {
         'uid': uid,
+        'username': user.USERNAME,
         'telegram_id': telegram_id,
+        'emby_id': user.EMBYID or None,
+        'role': role_map.get(user.ROLE, '未知'),
+        'active': user.ACTIVE_STATUS,
+        'expired_at': format_expire_time(user.EXPIRED_AT),
     })
 
 # ==================== 用户积分续期 ====================

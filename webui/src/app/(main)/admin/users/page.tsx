@@ -17,6 +17,7 @@ import {
   ChevronRight,
   Edit,
   Coins,
+  UserX,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -67,6 +68,12 @@ export default function AdminUsersPage() {
   const [selectedUser, setSelectedUser] = useState<UserInfo | null>(null);
   const [isActionLoading, setIsActionLoading] = useState(false);
   
+  // Cleanup dialog states
+  const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [cleanupMinDays, setCleanupMinDays] = useState("7");
+  const [cleanupPreview, setCleanupPreview] = useState<any[] | null>(null);
+  const [cleanupLoading, setCleanupLoading] = useState(false);
+
   // Edit dialog states
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -287,6 +294,47 @@ export default function AdminUsersPage() {
     }
   };
 
+  const handleCleanupPreview = async () => {
+    setCleanupLoading(true);
+    setCleanupPreview(null);
+    try {
+      const res = await api.cleanupInvalidUsers(parseInt(cleanupMinDays) || 7, true);
+      if (res.success && res.data) {
+        setCleanupPreview(res.data.users || []);
+      } else {
+        toast({ title: "预览失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "预览失败", description: error.message, variant: "destructive" });
+    } finally {
+      setCleanupLoading(false);
+    }
+  };
+
+  const handleCleanupConfirm = async () => {
+    setCleanupLoading(true);
+    try {
+      const res = await api.cleanupInvalidUsers(parseInt(cleanupMinDays) || 7, false);
+      if (res.success && res.data) {
+        toast({
+          title: "清理完成",
+          description: `已删除 ${res.data.count} 个无效用户`,
+          variant: "success",
+        });
+        setCleanupOpen(false);
+        setCleanupPreview(null);
+        invalidateUsersCache();
+        loadUsers();
+      } else {
+        toast({ title: "清理失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "清理失败", description: error.message, variant: "destructive" });
+    } finally {
+      setCleanupLoading(false);
+    }
+  };
+
   if (error) {
     return <PageError message={error} onRetry={() => void loadUsers()} />;
   }
@@ -309,9 +357,23 @@ export default function AdminUsersPage() {
           <h1 className="text-3xl font-bold">用户管理</h1>
           <p className="text-muted-foreground">管理所有注册用户</p>
         </div>
-        <Badge variant="outline" className="text-lg px-4 py-2">
-          共 {total} 用户
-        </Badge>
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            className="text-destructive hover:text-destructive"
+            onClick={() => {
+              setCleanupPreview(null);
+              setCleanupMinDays("7");
+              setCleanupOpen(true);
+            }}
+          >
+            <UserX className="mr-2 h-4 w-4" />
+            清理无效用户
+          </Button>
+          <Badge variant="outline" className="text-lg px-4 py-2">
+            共 {total} 用户
+          </Badge>
+        </div>
       </div>
 
       {/* Search */}
@@ -575,6 +637,87 @@ export default function AdminUsersPage() {
             <Button onClick={handleEdit} disabled={isActionLoading}>
               {isActionLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               保存更改
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cleanup Invalid Users Dialog */}
+      <Dialog open={cleanupOpen} onOpenChange={(open) => { setCleanupOpen(open); if (!open) setCleanupPreview(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>清理无效用户</DialogTitle>
+            <DialogDescription>
+              删除未绑定 Telegram 且未绑定 Emby 的非管理员 / 白名单用户
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>最少注册天数</Label>
+              <Input
+                type="number"
+                min={1}
+                placeholder="注册超过多少天的无效用户"
+                value={cleanupMinDays}
+                onChange={(e) => {
+                  setCleanupMinDays(e.target.value);
+                  setCleanupPreview(null);
+                }}
+              />
+              <p className="text-xs text-muted-foreground">
+                仅清理注册超过 {cleanupMinDays || 7} 天的无效用户
+              </p>
+            </div>
+
+            {cleanupPreview !== null && (
+              <div className="space-y-2">
+                <Label>匹配到 {cleanupPreview.length} 个无效用户</Label>
+                {cleanupPreview.length > 0 ? (
+                  <div className="max-h-48 overflow-y-auto rounded-md border">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b bg-muted/50">
+                          <th className="px-3 py-2 text-left">用户名</th>
+                          <th className="px-3 py-2 text-left">注册时间</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cleanupPreview.map((u: any) => (
+                          <tr key={u.uid} className="border-b">
+                            <td className="px-3 py-1.5">{u.username}</td>
+                            <td className="px-3 py-1.5 text-muted-foreground">
+                              {u.register_time ? new Date(u.register_time * 1000).toLocaleDateString() : "-"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">没有符合条件的无效用户</p>
+                )}
+              </div>
+            )}
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setCleanupOpen(false)}>
+              取消
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleCleanupPreview}
+              disabled={cleanupLoading}
+            >
+              {cleanupLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              预览
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleCleanupConfirm}
+              disabled={cleanupLoading || !cleanupPreview || cleanupPreview.length === 0}
+            >
+              {cleanupLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              确认清理
             </Button>
           </DialogFooter>
         </DialogContent>

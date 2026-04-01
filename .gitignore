@@ -153,3 +153,4 @@ OPTIMIZATION_SUMMARY.md
 /tests
 config.toml
 *.backup
+test_import.py

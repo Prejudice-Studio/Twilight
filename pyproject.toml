@@ -41,8 +41,6 @@ dependencies = [
     "APScheduler>=3.11",
     "psutil>=6.1",
     "python-telegram-bot>=21.0",
-    "pyrogram>=2.0",
-    "TgCrypto>=1.2",
 ]
 
 [project.optional-dependencies]
@@ -105,7 +103,6 @@ warn_unused_configs = true
 
 [[tool.mypy.overrides]]
 module = [
-    "pyrogram",
     "telegram",
     "toml",
 ]
