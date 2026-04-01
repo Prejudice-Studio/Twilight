@@ -286,6 +286,27 @@ class UserOperate:
             return list(result.scalars().all())
 
     @staticmethod
+    async def get_no_emby_users(days: int = 7) -> list[UserModel]:
+        """
+        获取注册超过指定天数但仍无 Emby 账户的用户
+        
+        :param days: 注册超过多少天
+        """
+        from sqlalchemy import or_
+        threshold = int(time.time()) - days * 86400
+        async with UsersSessionFactory() as session:
+            result = await session.execute(
+                select(UserModel).where(
+                    or_(UserModel.EMBYID.is_(None), UserModel.EMBYID == ''),
+                    UserModel.REGISTER_TIME.isnot(None),
+                    UserModel.REGISTER_TIME <= threshold,
+                    UserModel.ROLE != Role.ADMIN.value,
+                    UserModel.ROLE != Role.WHITE_LIST.value,
+                )
+            )
+            return list(result.scalars().all())
+
+    @staticmethod
     async def get_all_users(
         include_inactive: bool = False,
         role: Optional[int] = None,

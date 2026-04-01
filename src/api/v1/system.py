@@ -132,10 +132,33 @@ async def system_stats():
 
 
 @system_bp.route('/emby-urls', methods=['GET'])
+@require_auth
 async def get_emby_urls():
-    """获取 Emby 服务器地址列表"""
+    """
+    获取 Emby 服务器地址列表
+    
+    默认返回脱敏 URL，登录用户请求 reveal=true 可查看完整 URL
+    Query:
+        reveal=true  (需要登录)
+    """
+    import re
+    reveal = request.args.get('reveal', 'false').lower() == 'true'
+    
+    if reveal and g.current_user:
+        return api_response(True, "获取成功", {
+            'urls': EmbyConfig.EMBY_URL_LIST,
+            'masked': False,
+        })
+    
+    # 脱敏：将 URL 中的主机部分替换为 ***
+    def mask_url(line: str) -> str:
+        # 格式通常为 "Label : http://host:port/"
+        return re.sub(r'(https?://)([^:/\s]+)', r'\1***', line)
+    
+    masked = [mask_url(u) for u in EmbyConfig.EMBY_URL_LIST]
     return api_response(True, "获取成功", {
-        'urls': EmbyConfig.EMBY_URL_LIST,
+        'urls': masked,
+        'masked': True,
     })
 
 

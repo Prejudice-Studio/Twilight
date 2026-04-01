@@ -60,6 +60,14 @@ tmdb_image_url = "https://image.tmdb.org/t/p"
 [Emby]
 # ===================================================================
 # Emby/Jellyfin 服务器内网地址（后端连接用，确保可达）
+#
+# ⚠️ Docker 部署注意：
+# 如果 Emby 运行在 Docker 中，使用 127.0.0.1 可能无法连接。
+# 请根据部署方式选择：
+#   - Docker Desktop (Windows/Mac): 使用 http://host.docker.internal:8096/
+#   - Linux Docker (--network=host):  使用 http://127.0.0.1:8096/
+#   - Linux Docker (bridge 模式):     使用 http://172.17.0.1:8096/ 或宿主机实际 IP
+#   - 同一 docker-compose 网络:       使用 http://emby:8096/（容器名）
 emby_url = "http://127.0.0.1:8096/"
 # Emby API Token（管理面板 → 高级 → API 密钥）
 emby_token = ""
@@ -179,6 +187,12 @@ invite_enabled = false
 invite_reward = 50
 # 每人最多邀请人数（-1 = 无限制）
 invite_limit = 10
+
+# ----- 无 Emby 账户用户清理 -----
+# 是否自动清理注册后长期未创建 Emby 账户的用户
+auto_cleanup_no_emby = false
+# 注册后超过多少天没有 Emby 账户就自动删除（默认 7 天）
+auto_cleanup_no_emby_days = 7
 
 # ===================================================================
 [DeviceLimit]

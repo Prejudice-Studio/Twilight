@@ -786,6 +786,42 @@ class UserService:
             return False, f"重置失败: {e}", None
 
     @staticmethod
+    async def change_password(
+        user: UserModel, old_password: str, new_password: str
+    ) -> Tuple[bool, str]:
+        """
+        修改用户密码（同时修改系统密码和 Emby 密码）
+
+        :return: (成功, 消息)
+        """
+        from src.core.utils import verify_password as _verify
+
+        # 验证旧密码
+        if not user.PASSWORD or not _verify(old_password, user.PASSWORD):
+            return False, "当前密码错误"
+
+        if len(new_password) < 6:
+            return False, "新密码长度至少 6 位"
+
+        try:
+            # 更新系统密码
+            user.PASSWORD = hash_password(new_password)
+            await UserOperate.update_user(user)
+
+            # 同步修改 Emby 密码
+            if user.EMBYID:
+                emby = get_emby_client()
+                # 先重置再设定新密码
+                await emby.reset_user_password(user.EMBYID)
+                await emby.set_user_password(user.EMBYID, new_password)
+
+            logger.info(f"用户修改密码成功: {user.USERNAME}")
+            return True, "密码修改成功"
+        except Exception as e:
+            logger.error(f"修改密码失败: {e}")
+            return False, f"修改密码失败: {e}"
+
+    @staticmethod
     async def toggle_nsfw(user: UserModel, enable: bool) -> Tuple[bool, str]:
         """
         切换 NSFW 库显示状态并同步到 Emby

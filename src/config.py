@@ -250,6 +250,10 @@ class ScoreAndRegisterConfig(BaseConfig):
     AUTO_RENEW_BEFORE_DAYS: int = 3  # 到期前几天自动续期
     AUTO_RENEW_NOTIFY: bool = True  # 续期后是否通知用户
     
+    # 无 Emby 账户用户自动清理
+    AUTO_CLEANUP_NO_EMBY: bool = False  # 是否自动清理没有 Emby 账户的用户
+    AUTO_CLEANUP_NO_EMBY_DAYS: int = 7  # 注册后多少天未创建 Emby 账户则自动删除
+
     # 邀请系统
     INVITE_ENABLED: bool = False  # 是否启用邀请系统
     INVITE_REWARD: int = 50  # 邀请奖励积分

@@ -263,6 +263,12 @@ class ApiClient {
     });
   }
 
+  async getTelegramVerifyLink() {
+    return this.request<{ verify_url: string; token: string; expires_in: number }>("/users/me/telegram/verify-link", {
+      method: "POST",
+    });
+  }
+
   async getNsfwStatus() {
     return this.request<NsfwStatus>("/users/me/nsfw");
   }
@@ -281,6 +287,17 @@ class ApiClient {
     return this.request("/users/me/emby/unbind", {
       method: "POST",
     });
+  }
+
+  async changePassword(oldPassword: string, newPassword: string) {
+    return this.request("/users/me/password/change", {
+      method: "POST",
+      body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+    });
+  }
+
+  async getEmbyUrls(reveal = false) {
+    return this.request<{ urls: string[]; masked: boolean }>(`/system/emby-urls?reveal=${reveal}`);
   }
 
   async toggleNsfw(enable: boolean) {

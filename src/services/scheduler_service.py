@@ -5,6 +5,7 @@ from src.config import Config, ScoreAndRegisterConfig, SchedulerConfig
 from src.db.user import UserOperate
 from src.services import get_emby_client, EmbyService
 from src.core.utils import timestamp, format_duration
+from src.services.user_service import UserService
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,37 @@ class SchedulerService:
         except Exception as e:
             logger.error(f"❌ Emby 同步出错: {e}")
 
+    @staticmethod
+    async def cleanup_no_emby_users():
+        """清理注册后长期未创建 Emby 账户的用户"""
+        if not ScoreAndRegisterConfig.AUTO_CLEANUP_NO_EMBY:
+            return
+        days = ScoreAndRegisterConfig.AUTO_CLEANUP_NO_EMBY_DAYS
+        logger.info(f"🧹 开始清理注册超过 {days} 天无 Emby 账户的用户...")
+        try:
+            users = await UserOperate.get_no_emby_users(days)
+            if not users:
+                logger.info("✅ 没有需要清理的无 Emby 账户用户")
+                return
+
+            deleted_count = 0
+            failed_count = 0
+            for user in users:
+                try:
+                    success, msg = await UserService.delete_user(user, delete_emby=False)
+                    if success:
+                        deleted_count += 1
+                        logger.info(f"  🗑️ 已删除: {user.USERNAME} (UID: {user.UID})")
+                    else:
+                        failed_count += 1
+                        logger.warning(f"  ⚠️ 删除失败: {user.USERNAME} - {msg}")
+                except Exception as e:
+                    failed_count += 1
+                    logger.error(f"  ❌ 删除失败: {user.USERNAME} - {e}")
+            logger.info(f"✅ 无 Emby 账户用户清理完成: 删除 {deleted_count} 个, 失败 {failed_count} 个")
+        except Exception as e:
+            logger.error(f"❌ 清理无 Emby 账户用户时发生错误: {e}")
+
     @classmethod
     async def start(cls):
         """启动调度器"""
@@ -179,6 +211,10 @@ class SchedulerService:
         # Emby 数据同步（每 6 小时）
         scheduler.add_job(cls.emby_sync, 'interval', hours=SchedulerConfig.EMBY_SYNC_INTERVAL, id='emby_sync')
         
+        # 无 Emby 账户用户清理（每天过期检查后执行）
+        h_cleanup, m_cleanup = parse_time(SchedulerConfig.EXPIRED_CHECK_TIME)
+        scheduler.add_job(cls.cleanup_no_emby_users, 'cron', hour=h_cleanup, minute=(m_cleanup + 30) % 60, id='cleanup_no_emby')
+        
         scheduler.start()
         logger.info("=" * 50)
         logger.info(f"🌙 Twilight Scheduler 已启动 ({SchedulerConfig.TIMEZONE})")
@@ -188,6 +224,8 @@ class SchedulerService:
         logger.info(f"  - 每日统计: {SchedulerConfig.DAILY_STATS_TIME}")
         logger.info(f"  - 会话清理: 每 {SchedulerConfig.SESSION_CLEANUP_INTERVAL} 小时")
         logger.info(f"  - Emby 同步: 每 {SchedulerConfig.EMBY_SYNC_INTERVAL} 小时")
+        if ScoreAndRegisterConfig.AUTO_CLEANUP_NO_EMBY:
+            logger.info(f"  - 无 Emby 清理: {SchedulerConfig.EXPIRED_CHECK_TIME} (注册超 {ScoreAndRegisterConfig.AUTO_CLEANUP_NO_EMBY_DAYS} 天)")
         logger.info("=" * 50)
         
         # 立即运行一次统计

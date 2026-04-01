@@ -246,6 +246,38 @@ async def reset_my_password():
     return api_response(False, message)
 
 
+@users_bp.route('/me/password/change', methods=['POST'])
+@require_auth
+async def change_my_password():
+    """
+    修改密码（同时修改系统密码和 Emby 密码）
+    
+    Request:
+        {
+            "old_password": "current_password",
+            "new_password": "new_password"
+        }
+    """
+    data = request.get_json() or {}
+    old_password = data.get('old_password', '')
+    new_password = data.get('new_password', '')
+
+    if not old_password or not new_password:
+        return api_response(False, "请提供当前密码和新密码", code=400)
+
+    if len(new_password) < 6:
+        return api_response(False, "新密码长度至少 6 位", code=400)
+
+    if len(new_password) > 200:
+        return api_response(False, "密码过长", code=400)
+
+    success, message = await UserService.change_password(g.current_user, old_password, new_password)
+
+    if success:
+        return api_response(True, message)
+    return api_response(False, message, code=400)
+
+
 @users_bp.route('/me/nsfw', methods=['GET'])
 @require_auth
 async def get_nsfw_status():
@@ -897,6 +929,134 @@ async def set_auto_renew():
         return api_response(True, message, {'auto_renew': enabled})
     return api_response(False, message)
 
+
+# ==================== Telegram 验证绑定 ====================
+
+# 内存存储验证 token: {token: {uid, created_at}}
+import time as _time
+_tg_verify_tokens: dict = {}
+
+def _cleanup_expired_tokens():
+    """清理过期 token（5 分钟过期）"""
+    now = _time.time()
+    expired = [k for k, v in _tg_verify_tokens.items() if now - v['created_at'] > 300]
+    for k in expired:
+        del _tg_verify_tokens[k]
+
+
+@users_bp.route('/me/telegram/verify-link', methods=['POST'])
+@require_auth
+async def generate_tg_verify_link():
+    """
+    生成 Telegram 验证链接
+    
+    用户点击该链接跳转到 Bot，Bot 自动获取用户的 Telegram ID 并完成绑定。
+    
+    Response:
+        {
+            "success": true,
+            "data": {
+                "verify_url": "https://t.me/bot_username?start=verify_TOKEN",
+                "token": "TOKEN",
+                "expires_in": 300
+            }
+        }
+    """
+    from src.config import Config, TelegramConfig
+    import secrets
+    
+    if not Config.TELEGRAM_MODE or not TelegramConfig.BOT_TOKEN:
+        return api_response(False, "Telegram Bot 未启用", code=400)
+    
+    user = g.current_user
+    
+    # 清理过期 token
+    _cleanup_expired_tokens()
+    
+    # 生成验证 token
+    token = secrets.token_urlsafe(32)
+    _tg_verify_tokens[token] = {
+        'uid': user.UID,
+        'created_at': _time.time(),
+    }
+    
+    # 获取 Bot username
+    bot_username = None
+    try:
+        from src.bot.bot import get_bot_instance
+        bot = get_bot_instance()
+        if bot and bot.app:
+            me = await bot.app.get_me()
+            bot_username = me.username
+    except Exception:
+        pass
+    
+    if not bot_username:
+        return api_response(False, "无法获取 Bot 信息，请确认 Bot 已启动", code=500)
+    
+    verify_url = f"https://t.me/{bot_username}?start=verify_{token}"
+    
+    return api_response(True, "验证链接已生成", {
+        'verify_url': verify_url,
+        'token': token,
+        'expires_in': 300,
+    })
+
+
+@users_bp.route('/me/telegram/verify-confirm', methods=['POST'])
+async def confirm_tg_verify():
+    """
+    Bot 调用此接口完成验证（内部接口）
+    
+    Request:
+        {
+            "token": "verify_token",
+            "telegram_id": 123456789
+        }
+    """
+    data = request.get_json() or {}
+    token = data.get('token', '')
+    telegram_id = data.get('telegram_id')
+    bot_secret = data.get('bot_secret', '')
+    
+    # 简单验证：使用 Bot Token 的前 20 位作为密钥
+    from src.config import TelegramConfig
+    expected_secret = TelegramConfig.BOT_TOKEN[:20] if TelegramConfig.BOT_TOKEN else ''
+    if not bot_secret or bot_secret != expected_secret:
+        return api_response(False, "未授权", code=403)
+    
+    if not token or not telegram_id:
+        return api_response(False, "参数缺失", code=400)
+    
+    # 清理过期 token
+    _cleanup_expired_tokens()
+    
+    token_info = _tg_verify_tokens.get(token)
+    if not token_info:
+        return api_response(False, "验证链接已过期或无效", code=400)
+    
+    uid = token_info['uid']
+    
+    # 检查该 Telegram ID 是否已被其他用户绑定
+    existing = await UserOperate.get_user_by_telegram_id(telegram_id)
+    if existing and existing.UID != uid:
+        return api_response(False, "该 Telegram 账号已被其他用户绑定", code=400)
+    
+    # 绑定
+    user = await UserOperate.get_user_by_uid(uid)
+    if not user:
+        return api_response(False, "用户不存在", code=404)
+    
+    user.TELEGRAM_ID = telegram_id
+    await UserOperate.update_user(user)
+    
+    # 删除已使用的 token
+    del _tg_verify_tokens[token]
+    
+    return api_response(True, "Telegram 验证绑定成功", {
+        'uid': uid,
+        'telegram_id': telegram_id,
+    })
 
 # ==================== 用户积分续期 ====================
 

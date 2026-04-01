@@ -19,6 +19,8 @@ import {
   Key,
   AlertTriangle,
   Palette,
+  Lock,
+  Globe,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -67,6 +69,8 @@ export default function SettingsPage() {
   const [changeTgOpen, setChangeTgOpen] = useState(false);
   const [newTelegramId, setNewTelegramId] = useState("");
   const [isTgLoading, setIsTgLoading] = useState(false);
+  const [tgVerifyUrl, setTgVerifyUrl] = useState<string | null>(null);
+  const [isTgVerifyLoading, setIsTgVerifyLoading] = useState(false);
 
   // Emby dialogs
   const [bindEmbyOpen, setBindEmbyOpen] = useState(false);
@@ -79,6 +83,20 @@ export default function SettingsPage() {
   const [editEmailOpen, setEditEmailOpen] = useState(false);
   const [emailValue, setEmailValue] = useState("");
   const [isEmailLoading, setIsEmailLoading] = useState(false);
+
+  // Password change
+  const [changePwdOpen, setChangePwdOpen] = useState(false);
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showOldPwd, setShowOldPwd] = useState(false);
+  const [showNewPwd, setShowNewPwd] = useState(false);
+  const [isPwdLoading, setIsPwdLoading] = useState(false);
+
+  // Emby URLs
+  const [embyUrls, setEmbyUrls] = useState<string[]>([]);
+  const [urlsMasked, setUrlsMasked] = useState(true);
+  const [isUrlsLoading, setIsUrlsLoading] = useState(false);
 
   const loadSettingsResource = useCallback(async () => {
     const [settingsRes, tgRes, nsfwRes] = await Promise.all([
@@ -261,6 +279,28 @@ export default function SettingsPage() {
     }
   };
 
+  const handleTgVerifyBind = async () => {
+    setIsTgVerifyLoading(true);
+    try {
+      const res = await api.getTelegramVerifyLink();
+      if (res.success && res.data?.verify_url) {
+        setTgVerifyUrl(res.data.verify_url);
+        window.open(res.data.verify_url, "_blank");
+        toast({
+          title: "验证链接已生成",
+          description: "请在 Telegram 中完成验证，然后刷新此页面",
+          variant: "success",
+        });
+      } else {
+        toast({ title: "生成验证链接失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "生成验证链接失败", description: error.message, variant: "destructive" });
+    } finally {
+      setIsTgVerifyLoading(false);
+    }
+  };
+
   const handleUpdateEmail = async () => {
     if (!emailValue) {
       toast({ title: "请输入邮箱地址", variant: "destructive" });
@@ -283,6 +323,66 @@ export default function SettingsPage() {
       setIsEmailLoading(false);
     }
   };
+
+  const handleChangePassword = async () => {
+    if (!oldPassword || !newPassword) {
+      toast({ title: "请填写当前密码和新密码", variant: "destructive" });
+      return;
+    }
+    if (newPassword.length < 6) {
+      toast({ title: "新密码长度至少 6 位", variant: "destructive" });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast({ title: "两次输入的新密码不一致", variant: "destructive" });
+      return;
+    }
+
+    setIsPwdLoading(true);
+    try {
+      const res = await api.changePassword(oldPassword, newPassword);
+      if (res.success) {
+        toast({ title: "密码修改成功", description: "系统密码和 Emby 密码已同步更新", variant: "success" });
+        setChangePwdOpen(false);
+        setOldPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
+      } else {
+        toast({ title: "修改失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "修改失败", description: error.message, variant: "destructive" });
+    } finally {
+      setIsPwdLoading(false);
+    }
+  };
+
+  const handleToggleUrlReveal = async () => {
+    setIsUrlsLoading(true);
+    try {
+      const res = await api.getEmbyUrls(!urlsMasked);
+      if (res.success && res.data) {
+        setEmbyUrls(res.data.urls);
+        setUrlsMasked(res.data.masked);
+      } else {
+        toast({ title: "获取失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "获取失败", description: error.message, variant: "destructive" });
+    } finally {
+      setIsUrlsLoading(false);
+    }
+  };
+
+  // 初始加载脱敏 URL
+  useEffect(() => {
+    api.getEmbyUrls(false).then((res) => {
+      if (res.success && res.data) {
+        setEmbyUrls(res.data.urls);
+        setUrlsMasked(res.data.masked);
+      }
+    });
+  }, []);
 
   if (error) {
     return <PageError message={error} onRetry={() => void loadData()} />;
@@ -410,10 +510,24 @@ export default function SettingsPage() {
               </div>
               <div className="flex gap-2">
                 {!telegramStatus?.bound ? (
-                  <Button onClick={() => setBindTgOpen(true)}>
-                    <LinkIcon className="mr-2 h-4 w-4" />
-                    绑定
-                  </Button>
+                  <>
+                    <Button onClick={() => setBindTgOpen(true)}>
+                      <LinkIcon className="mr-2 h-4 w-4" />
+                      手动绑定
+                    </Button>
+                    <Button 
+                      variant="outline"
+                      onClick={handleTgVerifyBind}
+                      disabled={isTgVerifyLoading}
+                    >
+                      {isTgVerifyLoading ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <MessageCircle className="mr-2 h-4 w-4" />
+                      )}
+                      Bot 验证绑定
+                    </Button>
+                  </>
                 ) : (
                   <>
                     <Button variant="outline" onClick={() => setChangeTgOpen(true)}>
@@ -437,6 +551,17 @@ export default function SettingsPage() {
               <p className="text-sm text-amber-500">
                 ⚠️ 系统要求必须绑定 Telegram，无法解绑
               </p>
+            )}
+            {tgVerifyUrl && !telegramStatus?.bound && (
+              <div className="rounded-lg bg-blue-500/10 p-3 text-sm">
+                <p className="font-medium text-blue-500">验证链接已生成</p>
+                <p className="text-muted-foreground mt-1">
+                  请在 Telegram 中点击链接完成验证，验证后请刷新此页面。
+                </p>
+                <a href={tgVerifyUrl} target="_blank" rel="noopener noreferrer" className="text-blue-500 underline text-xs break-all">
+                  {tgVerifyUrl}
+                </a>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -543,6 +668,69 @@ export default function SettingsPage() {
           </Card>
         </motion.div>
       )}
+
+      {/* Password Change & Emby URLs */}
+      <motion.div variants={item}>
+        <Card className="glass-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Lock className="h-5 w-5" />
+              修改密码
+            </CardTitle>
+            <CardDescription>
+              同时修改系统账号密码和 Emby 账号密码
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={() => setChangePwdOpen(true)}>
+              <Lock className="mr-2 h-4 w-4" />
+              修改密码
+            </Button>
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* Emby URLs */}
+      <motion.div variants={item}>
+        <Card className="glass-card">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <Globe className="h-5 w-5" />
+                服务器线路
+              </CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleToggleUrlReveal}
+                disabled={isUrlsLoading}
+              >
+                {isUrlsLoading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : urlsMasked ? (
+                  <Eye className="mr-2 h-4 w-4" />
+                ) : (
+                  <EyeOff className="mr-2 h-4 w-4" />
+                )}
+                {urlsMasked ? "显示地址" : "隐藏地址"}
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {embyUrls.length > 0 ? (
+              <div className="space-y-2">
+                {embyUrls.map((url, i) => (
+                  <div key={i} className="rounded-lg bg-accent/50 px-4 py-2 text-sm font-mono">
+                    {url}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">暂无可用线路</p>
+            )}
+          </CardContent>
+        </Card>
+      </motion.div>
 
       {/* Preferences */}
       <motion.div variants={item}>
@@ -820,7 +1008,92 @@ export default function SettingsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Change Password Dialog */}
+      <Dialog open={changePwdOpen} onOpenChange={(open) => {
+        setChangePwdOpen(open);
+        if (!open) { setOldPassword(""); setNewPassword(""); setConfirmPassword(""); }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>修改密码</DialogTitle>
+            <DialogDescription>
+              修改后系统密码和 Emby 密码将同步更新
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>当前密码</Label>
+              <div className="relative">
+                <Input
+                  type={showOldPwd ? "text" : "password"}
+                  placeholder="请输入当前密码"
+                  value={oldPassword}
+                  onChange={(e) => setOldPassword(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowOldPwd(!showOldPwd)}
+                >
+                  {showOldPwd ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>新密码</Label>
+              <div className="relative">
+                <Input
+                  type={showNewPwd ? "text" : "password"}
+                  placeholder="至少 6 位"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowNewPwd(!showNewPwd)}
+                >
+                  {showNewPwd ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>确认新密码</Label>
+              <Input
+                type="password"
+                placeholder="再次输入新密码"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && oldPassword && newPassword && confirmPassword) {
+                    handleChangePassword();
+                  }
+                }}
+              />
+              {confirmPassword && newPassword !== confirmPassword && (
+                <p className="text-xs text-destructive">两次输入的密码不一致</p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setChangePwdOpen(false)}>
+              取消
+            </Button>
+            <Button
+              onClick={handleChangePassword}
+              disabled={isPwdLoading || !oldPassword || !newPassword || newPassword !== confirmPassword}
+            >
+              {isPwdLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              确认修改
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </motion.div>
   );
 }
-

@@ -34,6 +34,38 @@ def register(bot):
         """开始命令"""
         user_name = message.from_user.first_name if message.from_user else "用户"
         
+        # 检查是否是验证绑定链接
+        args = message.text.split()
+        if len(args) > 1 and args[1].startswith("verify_"):
+            token = args[1][len("verify_"):]
+            telegram_id = message.from_user.id
+            
+            # 调用后端验证确认接口
+            import httpx
+            from src.config import TelegramConfig, APIConfig
+            bot_secret = TelegramConfig.BOT_TOKEN[:20] if TelegramConfig.BOT_TOKEN else ''
+            api_url = f"http://127.0.0.1:{APIConfig.PORT}/api/v1/users/me/telegram/verify-confirm"
+            try:
+                async with httpx.AsyncClient(timeout=10) as http_client:
+                    resp = await http_client.post(api_url, json={
+                        'token': token,
+                        'telegram_id': telegram_id,
+                        'bot_secret': bot_secret,
+                    })
+                    result = resp.json()
+                    if result.get('success'):
+                        await message.reply(
+                            f"✅ **Telegram 验证成功！**\n\n"
+                            f"您的 Telegram 已成功绑定到系统账户。\n"
+                            f"现在可以返回网页继续操作。"
+                        )
+                    else:
+                        await message.reply(f"❌ 验证失败: {result.get('message', '未知错误')}")
+            except Exception as e:
+                logger.error(f"TG 验证回调失败: {e}")
+                await message.reply("❌ 验证失败，请稍后重试或联系管理员")
+            return
+        
         text = f"""
 👋 你好，**{escape_markdown(user_name)}**！
 

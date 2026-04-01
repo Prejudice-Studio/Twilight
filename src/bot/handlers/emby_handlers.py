@@ -55,8 +55,10 @@ def register(bot):
     
     @app.on_message(filters.command("lines") & private_filter())
     @require_subscribe
-    async def cmd_lines(client, message: Message):
-        """线路信息"""
+    @require_registered
+    async def cmd_lines(client, message: Message, user=None):
+        """线路信息（已注册用户可见完整地址）"""
+        import re
         lines = EmbyConfig.EMBY_URL_LIST
         
         if not lines:
