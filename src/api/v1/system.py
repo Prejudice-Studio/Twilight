@@ -10,10 +10,68 @@ from src.api.v1.auth import require_auth, require_admin, api_response
 from src.config import (
     Config, EmbyConfig, ScoreAndRegisterConfig, WebhookConfig,
     DeviceLimitConfig, APIConfig, SecurityConfig, SchedulerConfig,
-    NotificationConfig, TelegramConfig
+    NotificationConfig, TelegramConfig, BangumiSyncConfig
 )
 from src import __version__
 from src.db.user import UsersSessionFactory
+
+import asyncio
+import logging
+import threading
+
+_reload_logger = logging.getLogger(__name__)
+
+
+def _hot_reload_services():
+    """热重载服务（Bot 和调度器），在配置更新后调用"""
+
+    def _do_reload():
+        loop = None
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(_async_reload_services())
+        except Exception as e:
+            _reload_logger.error(f"热重载服务失败: {e}", exc_info=True)
+        finally:
+            if loop:
+                loop.close()
+
+    threading.Thread(target=_do_reload, daemon=True).start()
+    _reload_logger.info("🔄 配置已热重载，服务正在后台刷新...")
+
+
+async def _async_reload_services():
+    """异步重载 Bot 和调度器"""
+    # 重载 Bot
+    try:
+        from src.bot.bot import get_bot, stop_bot, start_bot
+        bot = get_bot()
+        if bot and bot.is_running:
+            _reload_logger.info("正在重启 Telegram Bot...")
+            await stop_bot()
+            await start_bot()
+            _reload_logger.info("✅ Telegram Bot 已热重载")
+        elif Config.TELEGRAM_MODE and TelegramConfig.BOT_TOKEN:
+            # 之前未启动但现在配置启用了
+            await start_bot()
+            _reload_logger.info("✅ Telegram Bot 已启动")
+    except Exception as e:
+        _reload_logger.error(f"重载 Bot 失败: {e}", exc_info=True)
+
+    # 重载调度器
+    try:
+        from src.services.scheduler_service import SchedulerService
+        scheduler = SchedulerService.get_scheduler()
+        if scheduler and scheduler.running:
+            _reload_logger.info("正在重启调度器...")
+            scheduler.shutdown(wait=False)
+            SchedulerService._scheduler = None
+            await SchedulerService.start()
+            _reload_logger.info("✅ 调度器已热重载")
+    except Exception as e:
+        _reload_logger.error(f"重载调度器失败: {e}", exc_info=True)
+
 
 system_bp = Blueprint('system', __name__, url_prefix='/system')
 
@@ -405,17 +463,10 @@ async def update_config_toml():
         NotificationConfig.update_from_toml('Notification')
         BangumiSyncConfig.update_from_toml('BangumiSync')
         
-        # 延迟重启进程以加载新配置
-        import threading
-        def _restart():
-            import time, os, sys, logging as _log
-            time.sleep(2)
-            _log.getLogger(__name__).info("🔄 配置已更新，正在重启程序...")
-            os.execv(sys.executable, [sys.executable] + sys.argv)
+        # 热重载服务
+        _hot_reload_services()
         
-        threading.Thread(target=_restart, daemon=True).start()
-        
-        return api_response(True, "配置已更新，程序将在 2 秒后自动重启", {
+        return api_response(True, "配置已热重载", {
             'path': str(config_file),
         })
     except Exception as e:
@@ -696,17 +747,10 @@ async def update_config_by_schema():
         NotificationConfig.update_from_toml('Notification')
         BangumiSyncConfig.update_from_toml('BangumiSync')
         
-        # 延迟重启进程以加载新配置
-        import threading
-        def _restart():
-            import time, os, sys, logging as _log
-            time.sleep(2)  # 等待响应返回
-            _log.getLogger(__name__).info("🔄 配置已更新，正在重启程序...")
-            os.execv(sys.executable, [sys.executable] + sys.argv)
+        # 热重载服务
+        _hot_reload_services()
         
-        threading.Thread(target=_restart, daemon=True).start()
-        
-        return api_response(True, "配置已更新，程序将在 2 秒后自动重启")
+        return api_response(True, "配置已热重载")
     except Exception as e:
         import logging
         logging.getLogger(__name__).error(f"更新配置文件失败: {e}", exc_info=True)

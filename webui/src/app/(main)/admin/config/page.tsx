@@ -772,30 +772,9 @@ export default function AdminConfigPage() {
         setOriginalValues(JSON.parse(JSON.stringify(editedValues)));
         toast({
           title: "保存成功",
-          description: "配置已更新，程序正在重启...",
+          description: "配置已热重载，Bot 和调度器已自动刷新",
           variant: "success",
         });
-        // 等待后端重启完成后自动刷新页面
-        setTimeout(() => {
-          const checkBackend = async () => {
-            for (let i = 0; i < 15; i++) {
-              try {
-                const r = await fetch(`/api/v1/system/info`);
-                if (r.ok) {
-                  window.location.reload();
-                  return;
-                }
-              } catch {}
-              await new Promise((r) => setTimeout(r, 2000));
-            }
-            toast({
-              title: "重启超时",
-              description: "后端可能仍在重启中，请手动刷新页面",
-              variant: "destructive",
-            });
-          };
-          checkBackend();
-        }, 3000);
       } else {
         toast({
           title: "保存失败",
@@ -829,30 +808,9 @@ export default function AdminConfigPage() {
         setHasChanges(false);
         toast({
           title: "保存成功",
-          description: "配置已更新，程序正在重启...",
+          description: "配置已热重载，Bot 和调度器已自动刷新",
           variant: "success",
         });
-        // 等待后端重启完成后自动刷新页面
-        setTimeout(() => {
-          const checkBackend = async () => {
-            for (let i = 0; i < 15; i++) {
-              try {
-                const r = await fetch(`/api/v1/system/info`);
-                if (r.ok) {
-                  window.location.reload();
-                  return;
-                }
-              } catch {}
-              await new Promise((r) => setTimeout(r, 2000));
-            }
-            toast({
-              title: "重启超时",
-              description: "后端可能仍在重启中，请手动刷新页面",
-              variant: "destructive",
-            });
-          };
-          checkBackend();
-        }, 3000);
       } else {
         toast({
           title: "保存失败",
