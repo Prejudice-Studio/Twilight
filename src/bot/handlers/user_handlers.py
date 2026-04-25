@@ -6,6 +6,7 @@
 /bind  - 绑定 TG
 /me    - 个人信息
 """
+import asyncio
 import logging
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
@@ -333,35 +334,38 @@ def register(bot):
 
         bind_code = context.args[0].strip()
 
-        import httpx
+        import requests
         from src.config import TelegramConfig, APIConfig
         bot_secret = TelegramConfig.BOT_TOKEN[:20] if TelegramConfig.BOT_TOKEN else ''
         port = getattr(APIConfig, 'PORT', 5000)
         api_url = f"http://127.0.0.1:{port}/api/v1/users/me/telegram/bind-confirm"
 
         try:
-            transport = httpx.AsyncHTTPTransport(local_address='0.0.0.0')
-            async with httpx.AsyncClient(timeout=10, transport=transport) as http_client:
-                resp = await http_client.post(api_url, json={
+            resp = await asyncio.to_thread(
+                requests.post,
+                api_url,
+                json={
                     'bind_code': bind_code,
                     'telegram_id': telegram_id,
                     'bot_secret': bot_secret,
-                })
-                result = resp.json()
-                if result.get('success'):
-                    d = result.get('data', {})
-                    info_lines = [
-                        "✅ **绑定成功！**\n",
-                        f"👤 **用户名**: `{d.get('username', '')}`",
-                        f"👑 **角色**: {d.get('role', '未知')}",
-                        f"📊 **状态**: {'✅ 活跃' if d.get('active') else '❌ 禁用'}",
-                        f"⏰ **到期**: {d.get('expired_at', '未知')}",
-                        f"🎬 **Emby**: {'已绑定' if d.get('emby_id') else '未绑定'}",
-                        "\n💡 发送 /start 打开主菜单",
-                    ]
-                    await update.message.reply_text("\n".join(info_lines), parse_mode="Markdown")
-                else:
-                    await update.message.reply_text(f"❌ 绑定失败: {result.get('message', '未知错误')}")
+                },
+                timeout=10,
+            )
+            result = resp.json()
+            if result.get('success'):
+                d = result.get('data', {})
+                info_lines = [
+                    "✅ **绑定成功！**\n",
+                    f"👤 **用户名**: `{d.get('username', '')}`",
+                    f"👑 **角色**: {d.get('role', '未知')}",
+                    f"📊 **状态**: {'✅ 活跃' if d.get('active') else '❌ 禁用'}",
+                    f"⏰ **到期**: {d.get('expired_at', '未知')}",
+                    f"🎬 **Emby**: {'已绑定' if d.get('emby_id') else '未绑定'}",
+                    "\n💡 发送 /start 打开主菜单",
+                ]
+                await update.message.reply_text("\n".join(info_lines), parse_mode="Markdown")
+            else:
+                await update.message.reply_text(f"❌ 绑定失败: {result.get('message', '未知错误')}")
         except Exception as e:
             logger.error(f"TG 绑定回调失败: {e}")
             await update.message.reply_text("❌ 绑定失败，请稍后重试或联系管理员")

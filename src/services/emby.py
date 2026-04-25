@@ -7,6 +7,7 @@ Emby/Jellyfin API 客户端
 - https://github.com/jellyfin/jellyfin-apiclient-python
 """
 import logging
+import time
 from typing import Optional, Dict, Any, List, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
@@ -214,7 +215,11 @@ class EmbyClient:
         self._admin_username = EmbyConfig.EMBY_USERNAME
         self._admin_password = EmbyConfig.EMBY_PASSWORD
         self._auth_fallback_attempted = False
-        
+
+        # Emby 用户列表缓存，减少短时间内重复请求
+        self._users_cache: Dict[tuple[Optional[bool], Optional[bool]], tuple[float, List[EmbyUser]]] = {}
+        self._users_cache_ttl = 15.0
+
         # 设备信息
         self.device_name = device_name
         self.device_id = device_id
@@ -412,6 +417,14 @@ class EmbyClient:
     
     async def get_users(self, is_hidden: Optional[bool] = None, is_disabled: Optional[bool] = None) -> List[EmbyUser]:
         """获取用户列表"""
+        cache_key = (is_hidden, is_disabled)
+        now = time.time()
+        cached = self._users_cache.get(cache_key)
+        if cached:
+            timestamp, users = cached
+            if now - timestamp < self._users_cache_ttl:
+                return users
+
         params = {}
         if is_hidden is not None:
             params['IsHidden'] = str(is_hidden).lower()
@@ -419,7 +432,9 @@ class EmbyClient:
             params['IsDisabled'] = str(is_disabled).lower()
         
         data = await self._request('GET', '/Users', params=params or None)
-        return [EmbyUser.from_dict(u) for u in (data or [])]
+        users = [EmbyUser.from_dict(u) for u in (data or [])]
+        self._users_cache[cache_key] = (now, users)
+        return users
 
     async def get_user(self, user_id: str) -> Optional[EmbyUser]:
         """根据 ID 获取用户"""
@@ -445,12 +460,16 @@ class EmbyClient:
             user_id = data.get('Id')
             await self.set_user_password(user_id, password)
         
-        return EmbyUser.from_dict(data) if data else None
+        if data:
+            self._users_cache.clear()
+            return EmbyUser.from_dict(data)
+        return None
 
     async def delete_user(self, user_id: str) -> bool:
         """删除用户"""
         try:
             await self._request('DELETE', f'/Users/{user_id}')
+            self._users_cache.clear()
             return True
         except EmbyError as e:
             logger.error(f"删除用户失败: {e}")
@@ -460,6 +479,7 @@ class EmbyClient:
         """更新用户信息"""
         try:
             await self._request('POST', f'/Users/{user_id}', json=user_data)
+            self._users_cache.clear()
             return True
         except EmbyError as e:
             logger.error(f"更新用户失败: {e}")

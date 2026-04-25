@@ -107,6 +107,7 @@ export default function AdminEmbyPage() {
   const [isImporting, setIsImporting] = useState(false);
   const [isCleaning, setIsCleaning] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  const [isDeletingUnlinked, setIsDeletingUnlinked] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
   // Confirm dialog
@@ -212,18 +213,39 @@ export default function AdminEmbyPage() {
       const res = await api.importEmbyUsers();
       if (res.success && res.data) {
         toast({
-          title: "导入完成",
-          description: `导入 ${res.data.imported_count} 个，跳过 ${res.data.skipped_count} 个`,
+          title: "扫描完成",
+          description: `发现 ${res.data.unlinked_count} 个未绑定用户，跳过 ${res.data.skipped_count} 个`,
           variant: "success",
         });
         await handleLoadUsers();
       } else {
-        toast({ title: "导入失败", description: res.message, variant: "destructive" });
+        toast({ title: "扫描失败", description: res.message, variant: "destructive" });
       }
     } catch (err: any) {
-      toast({ title: "导入出错", description: err.message, variant: "destructive" });
+      toast({ title: "扫描出错", description: err.message, variant: "destructive" });
     } finally {
       setIsImporting(false);
+    }
+  }, [toast, handleLoadUsers]);
+
+  const handleDeleteUnlinked = useCallback(async () => {
+    setIsDeletingUnlinked(true);
+    try {
+      const res = await api.deleteUnlinkedEmbyUsers(false);
+      if (res.success && res.data) {
+        toast({
+          title: "删除完成",
+          description: `共 ${res.data.count} 个未绑定用户，成功删除 ${res.data.deleted.length} 个`,
+          variant: res.data.failed.length > 0 ? "destructive" : "success",
+        });
+        await handleLoadUsers();
+      } else {
+        toast({ title: "删除失败", description: res.message, variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "删除出错", description: err.message, variant: "destructive" });
+    } finally {
+      setIsDeletingUnlinked(false);
     }
   }, [toast, handleLoadUsers]);
 
@@ -511,7 +533,15 @@ export default function AdminEmbyPage() {
                   ) : (
                     <Download className="mr-2 h-4 w-4" />
                   )}
-                  导入未关联
+                  扫描未绑定
+                </Button>
+                <Button variant="destructive" onClick={handleDeleteUnlinked} disabled={isDeletingUnlinked || !embyData}>
+                  {isDeletingUnlinked ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="mr-2 h-4 w-4" />
+                  )}
+                  删除未绑定
                 </Button>
               </div>
             </div>

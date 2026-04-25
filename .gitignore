@@ -154,3 +154,5 @@ OPTIMIZATION_SUMMARY.md
 config.toml
 *.backup
 test_import.py
+*.sh
+*.bat

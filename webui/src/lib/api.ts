@@ -615,12 +615,25 @@ class ApiClient {
 
   async importEmbyUsers(embyIds?: string[]) {
     return this.request<{
-      imported: Array<{ uid: number; username: string; emby_id: string; action: string }>;
+      unlinked: Array<{ emby_id: string; emby_name: string; is_disabled: boolean; is_hidden: boolean }>;
       skipped: Array<{ emby_id: string; name: string; reason: string }>;
-      imported_count: number; skipped_count: number;
+      unlinked_count: number; skipped_count: number;
     }>("/admin/emby/import-users", {
       method: "POST",
       body: JSON.stringify(embyIds ? { emby_ids: embyIds } : {}),
+    });
+  }
+
+  async deleteUnlinkedEmbyUsers(dryRun: boolean = false) {
+    return this.request<{
+      candidates: Array<{ emby_id: string; emby_name: string; is_disabled: boolean; is_hidden: boolean }>;
+      deleted: Array<{ emby_id: string; emby_name: string; is_disabled: boolean; is_hidden: boolean }>;
+      failed: Array<{ emby_id: string; emby_name: string; reason: string }>;
+      count: number;
+      dry_run: boolean;
+    }>("/admin/emby/delete-unlinked", {
+      method: "POST",
+      body: JSON.stringify({ dry_run: dryRun }),
     });
   }
 

@@ -261,6 +261,7 @@ class ScoreAndRegisterConfig(BaseConfig):
     SCORE_REGISTER_MODE: bool = False # 是否允许积分注册
     SCORE_REGISTER_NEED: int = 100  # 注册所需积分/激活所需积分
     USER_LIMIT: int = 200  # 允许的已注册用户数量上限
+    MAX_CONCURRENT_REQUESTS_PER_USER: int = -1  # 每个用户允许同时存在的求片请求上限，-1 表示不限制
     NEW_USER_NOTICE_STATUS: bool = False  # 用户注册/续期/白名单通知开关
     NEW_USER_NOTICE_LINK: bool = False  # 通知是否指向个人主页
     

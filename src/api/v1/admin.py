@@ -1138,11 +1138,12 @@ async def cleanup_orphan_emby_ids():
 @require_admin
 async def import_emby_users():
     """
-    从 Emby 导入未关联的用户到本地数据库。
+    扫描 Emby 中未绑定本地系统的用户。
+    不会自动链接或创建本地用户，仅返回未绑定的 Emby 用户列表。
+
     Request body (optional): { "emby_ids": ["id1", "id2"] }
-    为空则导入全部未关联的非管理员用户。
+    为空则扫描全部未绑定的非管理员用户。
     """
-    import time as _time
     emby = get_emby_client()
 
     try:
@@ -1151,49 +1152,36 @@ async def import_emby_users():
         return api_response(False, f"无法连接 Emby: {e}", code=500)
 
     data = request.get_json() or {}
-    target_ids = set(data.get('emby_ids', []))
+    emby_ids = data.get('emby_ids', [])
+    if emby_ids and not isinstance(emby_ids, list):
+        return api_response(False, "emby_ids 必须为数组", code=400)
+    target_ids = {str(i) for i in emby_ids if isinstance(i, (str, int))}
 
     local_emby_users = await UserOperate.get_all_emby_users()
     linked_emby_ids = {u.EMBYID for u in local_emby_users}
 
-    imported = []
     skipped = []
+    unlinked = []
 
     for eu in emby_users:
         if eu.policy.get('IsAdministrator', False):
             skipped.append({'emby_id': eu.id, 'name': eu.name, 'reason': '管理员账户'})
             continue
-        if eu.id in linked_emby_ids:
-            continue
         if target_ids and eu.id not in target_ids:
+            skipped.append({'emby_id': eu.id, 'name': eu.name, 'reason': '未在筛选列表中'})
+            continue
+        if eu.id in linked_emby_ids:
+            skipped.append({'emby_id': eu.id, 'name': eu.name, 'reason': '已绑定本地用户'})
             continue
 
-        existing = await UserOperate.get_user_by_username(eu.name)
-        if existing:
-            if not existing.EMBYID:
-                existing.EMBYID = eu.id
-                await UserOperate.update_user(existing)
-                imported.append({'uid': existing.UID, 'username': eu.name, 'emby_id': eu.id, 'action': 'linked_existing'})
-            else:
-                skipped.append({'emby_id': eu.id, 'name': eu.name, 'reason': '用户名已存在且已绑定其他 Emby'})
-            continue
+        # 不做用户名匹配、不做本地用户创建，仅返回未绑定的 Emby 用户列表
+        unlinked.append({'emby_id': eu.id, 'emby_name': eu.name, 'is_disabled': eu.policy.get('IsDisabled', False), 'is_hidden': eu.policy.get('IsHidden', False)})
 
-        new_uid = await UserOperate.get_new_uid()
-        new_user = UserModel(
-            UID=new_uid,
-            USERNAME=eu.name,
-            EMBYID=eu.id,
-            ROLE=Role.NORMAL.value,
-            ACTIVE_STATUS=not eu.policy.get('IsDisabled', False),
-            REGISTER_TIME=int(_time.time()),
-            EXPIRED_AT=-1,
-        )
-        await UserOperate.add_user(new_user)
-        imported.append({'uid': new_uid, 'username': eu.name, 'emby_id': eu.id, 'action': 'created'})
-
-    return api_response(True, f"导入 {len(imported)} 个用户", {
-        'imported': imported, 'skipped': skipped,
-        'imported_count': len(imported), 'skipped_count': len(skipped),
+    return api_response(True, f"扫描完成，共 {len(unlinked)} 个未绑定 Emby 用户", {
+        'unlinked': unlinked,
+        'skipped': skipped,
+        'unlinked_count': len(unlinked),
+        'skipped_count': len(skipped),
     })
 
 
@@ -1218,6 +1206,65 @@ async def reset_all_emby_bindings():
         count += 1
 
     return api_response(True, f"已重置 {count} 个用户的 Emby 绑定", {'count': count})
+
+
+@admin_bp.route('/emby/delete-unlinked', methods=['POST'])
+@require_auth
+@require_admin
+async def delete_unlinked_emby_users():
+    """
+    删除所有未绑定本地用户的 Emby 用户。
+    只删除非管理员账户，默认直接执行。
+
+    Request body:
+        {
+            "dry_run": false
+        }
+    """
+    data = request.get_json() or {}
+    dry_run = bool(data.get('dry_run', False))
+
+    emby = get_emby_client()
+    try:
+        emby_users = await emby.get_users()
+    except EmbyError as e:
+        return api_response(False, f"无法连接 Emby: {e}", code=500)
+
+    local_emby_users = await UserOperate.get_all_emby_users()
+    linked_emby_ids = {u.EMBYID for u in local_emby_users if u.EMBYID}
+
+    candidates = []
+    deleted = []
+    failed = []
+
+    for eu in emby_users:
+        if eu.policy.get('IsAdministrator', False):
+            continue
+        if eu.id in linked_emby_ids:
+            continue
+
+        record = {
+            'emby_id': eu.id,
+            'emby_name': eu.name,
+            'is_disabled': eu.policy.get('IsDisabled', False),
+            'is_hidden': eu.policy.get('IsHidden', False),
+        }
+        candidates.append(record)
+
+        if not dry_run:
+            ok = await emby.delete_user(eu.id)
+            if ok:
+                deleted.append(record)
+            else:
+                failed.append({'emby_id': eu.id, 'emby_name': eu.name, 'reason': '删除失败'})
+
+    return api_response(True, f"{'预览' if dry_run else '删除'}完成: 共 {len(candidates)} 个未绑定 Emby 用户" + (f"，成功删除 {len(deleted)} 个" if not dry_run else ''), {
+        'candidates': candidates,
+        'deleted': deleted,
+        'failed': failed,
+        'count': len(candidates),
+        'dry_run': dry_run,
+    })
 
 
 # ==================== 无效用户清理 ====================

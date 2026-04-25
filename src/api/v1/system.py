@@ -560,6 +560,7 @@ async def get_config_schema():
                     {'key': 'score_register_mode', 'label': '积分注册', 'type': 'bool', 'description': '是否允许使用积分注册', 'value': ScoreAndRegisterConfig.SCORE_REGISTER_MODE},
                     {'key': 'score_register_need', 'label': '注册所需积分', 'type': 'int', 'description': '注册或激活账号所需的积分数量', 'value': ScoreAndRegisterConfig.SCORE_REGISTER_NEED},
                     {'key': 'user_limit', 'label': '用户上限', 'type': 'int', 'description': '系统允许的最大注册用户数量', 'value': ScoreAndRegisterConfig.USER_LIMIT},
+                    {'key': 'max_concurrent_requests_per_user', 'label': '每用户最大同时求片数', 'type': 'int', 'description': '每个用户允许同时存在的待处理或下载中的求片请求数量，-1 表示不限制', 'value': ScoreAndRegisterConfig.MAX_CONCURRENT_REQUESTS_PER_USER},
                     {'key': 'new_user_notice_status', 'label': '注册通知', 'type': 'bool', 'description': '用户注册/续期/白名单变更时是否发送通知', 'value': ScoreAndRegisterConfig.NEW_USER_NOTICE_STATUS},
                     {'key': 'new_user_notice_link', 'label': '通知指向主页', 'type': 'bool', 'description': '通知消息是否指向用户个人主页', 'value': ScoreAndRegisterConfig.NEW_USER_NOTICE_LINK},
                     {'key': 'allow_pending_register', 'label': '允许无码注册', 'type': 'bool', 'description': '是否允许无注册码注册（待激活状态）', 'value': ScoreAndRegisterConfig.ALLOW_PENDING_REGISTER},

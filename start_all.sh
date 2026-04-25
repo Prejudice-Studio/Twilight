@@ -10,7 +10,7 @@ echo "=========================================="
 
 # 启动后端
 echo "Starting Backend (All Services)..."
-source ./venv/bin/activate
+source ./.venv/bin/activate
 python main.py all &
 BACKEND_PID=$!
 

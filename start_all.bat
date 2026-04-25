@@ -5,7 +5,7 @@ echo ==========================================
 
 :: 启动后端
 echo Starting Backend (All Services)...
-start "Twilight Backend" cmd /k "cd /d %~dp0 && .\\venv\\Scripts\\activate && python main.py all"
+start "Twilight Backend" cmd /k "cd /d %~dp0 && .\\.venv\\Scripts\\activate && python main.py all"
 
 :: 等待 2 秒让后端初始化
 timeout /t 2 /nobreak > nul

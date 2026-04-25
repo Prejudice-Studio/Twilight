@@ -732,6 +732,26 @@ class MediaRequestService:
             }.get(status, "未知状态")
             season_str = f" 第 {season} 季" if season else ""
             return False, f"该媒体{season_str}已被请求过（{status_msg}）", existing.id
+
+        # 检查当前用户的并发求片数量
+        from src.config import ScoreAndRegisterConfig
+        current_requests = await BangumiRequireOperate.get_all_requires_by_user(telegram_id)
+        active_count = sum(
+            1
+            for req in current_requests
+            if req.status in {
+                ReqStatus.UNHANDLED.value,
+                ReqStatus.ACCEPTED.value,
+                ReqStatus.DOWNLOADING.value,
+            }
+        )
+        max_concurrent = ScoreAndRegisterConfig.MAX_CONCURRENT_REQUESTS_PER_USER
+        if max_concurrent > 0 and active_count >= max_concurrent:
+            return (
+                False,
+                f"您当前已有 {active_count} 个待处理或下载中的求片请求，超过系统允许的最大同时请求数 {max_concurrent}，请等待已有请求处理完成后再提交。",
+                None,
+            )
         
         # 库存检查（除非明确跳过）
         if not skip_inventory_check:
