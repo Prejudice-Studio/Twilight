@@ -1,4 +1,4 @@
-# ===================================================================
+﻿# ===================================================================
 # Twilight 生产环境配置模板
 # 复制此文件为 config.toml 并根据实际情况修改
 # 优先级: 环境变量 > config.toml > 程序默认值
@@ -10,48 +10,48 @@
 server_name = "Twilight"
 # 服务器图标 URL（可选，留空使用默认图标）
 server_icon = ""
-# 是否开启日志
+# 是否开启日志输出
 logging = true
 # 日志等级 (10=DEBUG, 20=INFO, 30=WARNING, 40=ERROR)
 log_level = 20
-# SQLAlchemy ORM 日志（调试用，生产环境建议关闭）
+# 是否打印 SQLAlchemy ORM 日志（调试时开启）
 sqlalchemy_log = false
-# 网络请求最大重试次数
+# HTTP 请求失败时最大重试次数
 max_retry = 3
 # 数据库文件存放目录（相对于项目根目录）
 databases_dir = "db"
 
-# Redis 连接地址（可选，用于 Token 缓存和会话管理）
-# 留空则使用内存存储，重启后 Token 失效
-# 格式: redis://[:password@]host:port/db
+# Redis 连接地址（可选，用于缓存、分布式锁、Token 等）
+# 留空则使用内存实现，程序重启后缓存失效
+# 格式示例：redis://[:password@]host:port/db
 redis_url = ""
 
-# ----- Bangumi 配置 -----
-# Bangumi 个人令牌（https://bgm.tv/dev/app → 创建令牌）
+# Bangumi 相关配置
+# Bangumi 个人令牌（从 https://bgm.tv/dev/app 获取）
 bangumi_token = ""
-# 是否全局启用 BGM 点格子功能
+# 是否启用全局 Bangumi 同步功能
 global_bgm_mode = false
 # Bangumi API 地址
 bangumi_api_url = "https://api.bgm.tv"
 # Bangumi App ID（可选）
 bangumi_app_id = ""
 
-# ----- Telegram 绑定 -----
-# 是否开启 Telegram Bot 模式
+# Telegram 相关配置
+# 是否启用 Telegram Bot 模式
 telegram_mode = false
-# 是否强制绑定 Telegram（开启后注册时必须填写 TG ID）
+# 是否强制绑定 Telegram（开启后注册时必须提供 telegram_id）
 force_bind_telegram = false
 
-# ----- 邮箱绑定 -----
-# 是否开启邮箱绑定功能
+# 邮箱绑定相关配置
+# 是否启用邮箱绑定功能
 email_bind = false
 # 是否强制绑定邮箱
 force_bind_email = false
 
-# ----- TMDB 配置 -----
+# TMDB 相关配置
 # TMDB API Key v3（从 https://www.themoviedb.org/settings/api 获取）
 tmdb_api_key = ""
-# TMDB API 地址（国内可使用镜像）
+# TMDB API 地址（可替换国内镜像）
 tmdb_api_url = "https://api.themoviedb.org/3"
 # TMDB 图片 CDN 地址
 tmdb_image_url = "https://image.tmdb.org/t/p"
@@ -59,94 +59,83 @@ tmdb_image_url = "https://image.tmdb.org/t/p"
 # ===================================================================
 [Emby]
 # ===================================================================
-# Emby/Jellyfin 服务器内网地址（后端连接用，确保可达）
-#
-# ⚠️ Docker 部署注意：
-# 如果 Emby 运行在 Docker 中，使用 127.0.0.1 可能无法连接。
-# 请根据部署方式选择：
-#   - Docker Desktop (Windows/Mac): 使用 http://host.docker.internal:8096/
-#   - Linux Docker (--network=host):  使用 http://127.0.0.1:8096/
-#   - Linux Docker (bridge 模式):     使用 http://172.17.0.1:8096/ 或宿主机实际 IP
-#   - 同一 docker-compose 网络:       使用 http://emby:8096/（容器名）
+# Emby/Jellyfin 服务器地址（后端用于连接）
+# Docker 部署时请按实际网络环境配置地址
 emby_url = "http://127.0.0.1:8096/"
 # Emby API Token（管理面板 → 高级 → API 密钥）
 emby_token = ""
-# 管理员用户名（API Key 无效时的备用认证，可选）
+# 管理员用户名（API Token 不可用时备用）
 emby_username = ""
-# 管理员密码（API Key 无效时的备用认证，可选）
+# 管理员密码（API Token 不可用时备用）
 emby_password = ""
-# 展示给用户的线路列表（格式: "线路名 : 地址"）
+# 前端展示的 Emby 访问线路列表，格式为 "名称 : 地址"
 emby_url_list = [
-    "直连 : http://your-server:8096/",
+  "直连 : http://your-server:8096/",
 ]
-# 白名单用户可见的线路列表
+# 白名单用户专用线路列表
 emby_url_list_for_whitelist = [
-    "直连 : http://your-server:8096/",
+  "直连 : http://your-server:8096/",
 ]
-# NSFW 媒体库名称（匹配 Emby 中的媒体库名，不区分大小写，逗号分隔）
-emby_nsfw = ""
+# NSFW 媒体库名称列表，匹配 Emby 中的媒体库名
+emby_nsfw = []
 
 # ===================================================================
 [Telegram]
 # ===================================================================
-# Telegram Bot API 地址（如有自建可替换）
+# Telegram Bot API 基础地址
 telegram_api_url = "https://api.telegram.org/bot"
-# Bot Token（从 @BotFather 获取）
+# Bot Token
 bot_token = ""
-# 管理员 Telegram ID（数字，可以从 @userinfobot 获取）
+# 管理员 Telegram ID 列表
 admin_id = []
-# 群组 ID（负数）或 @用户名（如 @mygroup），支持多个
+# 群组 ID 或 @用户名 列表
 group_id = []
-# 频道 ID（负数）或 @用户名（如 @mychannel），支持多个
+# 频道 ID 或 @用户名 列表
 channel_id = []
-# 是否强制用户加入群组/频道后才能使用
+# 是否要求用户加入群组/频道后才能使用系统
 force_subscribe = false
-# 是否开启 TG Bot 完整面板（关闭后仅保留 /help, /bind, /me 基础命令）
+# 是否启用 TG Bot 面板功能
 enable_tg_panel = false
-# Telegram Bot HTTP 代理地址（可选，如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080）
+# Telegram 代理地址（可选）
 proxy_url = ""
 
 # ===================================================================
 [SAR]
 # ===================================================================
-# 积分名称（显示在前端和通知中）
+# 积分名称，会在前端和通知中显示
 score_name = "暮光币"
-# 是否开放注册
+# 是否允许注册
 register_mode = true
-# 是否要求注册码才能注册
+# 是否仅允许使用注册码注册
 register_code_limit = false
-# 是否允许积分注册/激活
+# 是否允许使用积分注册/激活
 score_register_mode = false
 # 积分注册/激活所需积分
 score_register_need = 100
-# 最大可注册用户数量（-1 = 无限制）
+# 最大注册用户数量，-1 表示不限制
 user_limit = 200
-# 新用户注册/续期时是否通知管理员
+# 新用户注册或续期时是否通知管理员
 new_user_notice_status = false
-# 通知内容是否包含个人主页链接
+# 通知是否包含个人主页链接
 new_user_notice_link = false
 
-# ----- 无码注册（待激活）-----
-# 是否允许无码注册（注册后为待激活状态，只能签到赚积分）
+# ---- 无码注册（待激活） ----
+# 是否允许无码注册
 allow_pending_register = true
-# 无码注册赠送的初始积分
+# 无码注册赠送初始积分
 pending_register_bonus = 0
-# 是否允许无 Emby 账户的用户签到
+# 是否允许无 Emby 账户用户签到
 allow_no_emby_checkin = true
-# 是否允许无 Emby 账户的用户查看部分信息
+# 是否允许无 Emby 账户用户查看部分内容
 allow_no_emby_view = true
 
-# ----- 管理员配置 -----
-# 管理员 UID，逗号分隔（如 "1,2,3"，对应数据库用户 ID）
+# ---- 管理员 / 白名单 ----
 admin_uids = "1"
-# 管理员用户名，逗号分隔（备选，admin_uids 为空时使用）
 admin_usernames = ""
-# 白名单 UID，逗号分隔
 white_list_uids = ""
-# 白名单用户名，逗号分隔
 white_list_usernames = ""
 
-# ----- 红包功能 -----
+# ---- 红包功能 ----
 red_packet_mode = false
 red_packet_min_amount = 1
 red_packet_max_amount = 10000
@@ -154,48 +143,34 @@ red_packet_min_count = 1
 red_packet_max_count = 100
 red_packet_expire_hours = 24
 
-# ----- 转账功能 -----
+# ---- 转账功能 ----
 private_transfer_mode = false
 transfer_min_amount = 1
 transfer_max_amount = 10000
 transfer_daily_limit = 50000
-# 手续费率（0.05 = 5%，0 = 免手续费）
 transfer_fee_rate = 0.0
 
-# ----- 签到配置 -----
-# 基础奖励
+# ---- 签到配置 ----
 checkin_base_score = 10
-# 连签每天额外加成
 checkin_streak_bonus = 2
-# 连签加成上限
 checkin_max_streak_bonus = 20
-# 随机奖励范围
 checkin_random_min = 0
 checkin_random_max = 5
 
-# ----- 积分自动续期 -----
-# 是否允许用户开启自动续期
+# ---- 自动续期 ----
 auto_renew_enabled = false
-# 自动续期天数
 auto_renew_days = 30
-# 自动续期扣除积分
 auto_renew_cost = 100
-# 到期前几天触发自动续期
 auto_renew_before_days = 3
-# 续期后是否通知用户
 auto_renew_notify = true
 
-# ----- 邀请系统 -----
+# ---- 邀请系统 ----
 invite_enabled = false
-# 邀请成功奖励积分
 invite_reward = 50
-# 每人最多邀请人数（-1 = 无限制）
 invite_limit = 10
 
-# ----- 无 Emby 账户用户清理 -----
-# 是否自动清理注册后长期未创建 Emby 账户的用户
+# ---- 无 Emby 账户用户清理 ----
 auto_cleanup_no_emby = false
-# 注册后超过多少天没有 Emby 账户就自动删除（默认 7 天）
 auto_cleanup_no_emby_days = 7
 
 # ===================================================================
@@ -203,11 +178,11 @@ auto_cleanup_no_emby_days = 7
 # ===================================================================
 # 是否启用设备限制
 device_limit_enabled = false
-# 每用户最大绑定设备数
+# 单用户最大允许设备数
 max_devices = 5
-# 最大同时播放流数
+# 单用户最大同时播放流数
 max_streams = 2
-# 超限时是否自动踢掉最早的会话
+# 超出限制时是否踢掉最早会话
 kick_oldest_session = false
 
 # ===================================================================
