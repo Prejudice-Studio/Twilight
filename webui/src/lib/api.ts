@@ -212,6 +212,10 @@ class ApiClient {
     return this.request<SystemInfo>("/system/info");
   }
 
+  async getSystemHealth() {
+    return this.request<SystemHealth>("/system/health");
+  }
+
   // User
   async getMe() {
     const res = await this.request<UserInfo>("/users/me");
@@ -221,7 +225,7 @@ class ApiClient {
     return res;
   }
 
-  async updateMe(data: { email?: string; username?: string }) {
+  async updateMe(data: { email?: string; username?: string; bgm_mode?: boolean; bgm_token?: string }) {
     return this.request<UserInfo>("/users/me", {
       method: "PUT",
       body: JSON.stringify(data),
@@ -230,6 +234,13 @@ class ApiClient {
 
   async getMySettings() {
     return this.request<UserSettings>("/users/me/settings");
+  }
+
+  async updateMySettings(data: { bgm_mode?: boolean; bgm_token?: string; email?: string }) {
+    return this.request<UserInfo>("/users/me", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
   }
 
   async updateAutoRenew(enabled: boolean) {
@@ -246,6 +257,13 @@ class ApiClient {
   async getBindCode() {
     return this.request<{ bind_code: string; expires_in: number }>("/users/me/telegram/bind-code", {
       method: "POST",
+    });
+  }
+
+  async requestTelegramRebind(reason?: string) {
+    return this.request("/users/me/telegram/rebind-request", {
+      method: "POST",
+      body: JSON.stringify({ reason }),
     });
   }
 
@@ -279,6 +297,20 @@ class ApiClient {
     return this.request("/users/me/password/change", {
       method: "POST",
       body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+    });
+  }
+
+  async changeSystemPassword(oldPassword: string, newPassword: string) {
+    return this.request("/users/me/password/system", {
+      method: "POST",
+      body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+    });
+  }
+
+  async changeEmbyPassword(newPassword: string) {
+    return this.request("/users/me/password/emby", {
+      method: "POST",
+      body: JSON.stringify({ new_password: newPassword }),
     });
   }
 
@@ -528,6 +560,28 @@ class ApiClient {
     });
   }
 
+  async getTelegramRebindRequests(params: { page?: number; per_page?: number; status?: string } = {}, signal?: AbortSignal) {
+    const query = new URLSearchParams();
+    if (params.page) query.set('page', String(params.page));
+    if (params.per_page) query.set('per_page', String(params.per_page));
+    if (params.status) query.set('status', params.status);
+    return this.request<{ requests: TelegramRebindRequest[]; total: number }>(`/admin/telegram/rebind-requests?${query}`, { signal });
+  }
+
+  async approveTelegramRebindRequest(id: number, admin_note?: string) {
+    return this.request(`/admin/telegram/rebind-requests/${id}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ admin_note }),
+    });
+  }
+
+  async rejectTelegramRebindRequest(id: number, admin_note?: string) {
+    return this.request(`/admin/telegram/rebind-requests/${id}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ admin_note }),
+    });
+  }
+
   async getSystemStats() {
     return this.request<SystemStats>("/system/admin/stats");
   }
@@ -580,6 +634,47 @@ class ApiClient {
     return this.request<{ success: number; failed: number; errors: string[] }>("/admin/emby/sync", {
       method: "POST",
     });
+  }
+
+  async reviewInactiveEmbyUsers(data?: { threshold_days?: number; action?: string; delete_emby?: boolean }) {
+    return this.request<{
+      processed: Array<any>;
+      skipped: Array<any>;
+      failed: Array<any>;
+      threshold_days: number;
+      action: string;
+    }>("/admin/emby/review/inactive", {
+      method: "POST",
+      body: JSON.stringify(data || {}),
+    });
+  }
+
+  async reviewEmbyDeviceUsage(data?: { max_devices?: number; threshold_days?: number; action?: string }) {
+    return this.request<{
+      processed: Array<any>;
+      skipped: Array<any>;
+      failed: Array<any>;
+      max_devices: number;
+      threshold_days: number;
+      action: string;
+    }>("/admin/emby/review/devices", {
+      method: "POST",
+      body: JSON.stringify(data || {}),
+    });
+  }
+
+  async getEmbyReviewSettings() {
+    return this.request<{
+      enabled: boolean;
+      review_time: string;
+      inactive_threshold_days: number;
+      inactive_action: string;
+      inactive_delete_emby: boolean;
+      device_review_enabled: boolean;
+      device_threshold_days: number;
+      device_max_count: number;
+      device_action: string;
+    }>("/admin/emby/review/settings");
   }
 
   // Emby 管理
@@ -888,6 +983,12 @@ export interface SystemInfo {
   score: Record<string, string | number>;
 }
 
+export interface SystemHealth {
+  api: boolean;
+  database: boolean;
+  emby: boolean;
+}
+
 export interface User {
   uid: number;
   username: string;
@@ -944,12 +1045,19 @@ export interface UserSettings {
   nsfw_enabled: boolean;
   nsfw_can_toggle: boolean;
   bgm_mode: boolean;
+  bgm_token_set: boolean;
   api_key_enabled: boolean;
   telegram: {
     bound: boolean;
     force_bind: boolean;
     can_unbind: boolean;
     can_change: boolean;
+  };
+  emby_status: {
+    is_synced: boolean;
+    is_active: boolean;
+    active_sessions: number;
+    message: string;
   };
   system_config: {
     auto_renew_enabled: boolean;
@@ -962,6 +1070,13 @@ export interface UserSettings {
   };
 }
 
+export interface EmbyStatus {
+  is_synced: boolean;
+  is_active: boolean;
+  active_sessions: number;
+  message: string;
+}
+
 export interface TelegramStatus {
   bound: boolean;
   telegram_id?: string;
@@ -970,6 +1085,22 @@ export interface TelegramStatus {
   force_bind: boolean;
   can_unbind: boolean;
   can_change: boolean;
+  pending_rebind_request?: boolean;
+  rebind_request_status?: string | null;
+  rebind_request_id?: number | null;
+}
+
+export interface TelegramRebindRequest {
+  id: number;
+  uid: number;
+  username?: string | null;
+  old_telegram_id?: number | null;
+  status: string;
+  reason?: string | null;
+  admin_note?: string | null;
+  reviewer_uid?: number | null;
+  created_at: number;
+  reviewed_at?: number | null;
 }
 
 export interface NsfwStatus {
@@ -1072,6 +1203,7 @@ export interface InventoryCheckRequest {
   media_id: number;
   media_type: string;
   title?: string;
+  original_title?: string;
   year?: number;
   season?: number;
 }
@@ -1202,12 +1334,20 @@ export interface UserUpdateData {
 }
 
 export interface SystemStats {
-  total_users: number;
-  active_users: number;
-  expired_users: number;
-  total_score: number;
-  active_regcodes: number;
-  pending_requests: number;
+  timestamp: number;
+  cpu_count: number | null;
+  cpu_percent?: number | null;
+  memory?: {
+    total: number;
+    available: number;
+    percent: number;
+    used: number;
+  } | null;
+  disk?: {
+    total: number;
+    free: number;
+    percent: number;
+  } | null;
 }
 
 export interface Regcode {

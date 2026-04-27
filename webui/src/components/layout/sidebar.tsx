@@ -13,6 +13,7 @@ import {
   Settings,
   Users,
   FileText,
+  MessageSquare,
   LogOut,
   Moon,
   Sun,
@@ -31,7 +32,7 @@ import { useSystemStore } from "@/store/system";
 
 const userNavItems = [
   { href: "/dashboard", label: "仪表盘", icon: LayoutDashboard },
-  { href: "/media", label: "媒体搜索", icon: Film },
+  { href: "/media", label: "求片中心", icon: Film },
   { href: "/score", label: "积分中心", icon: Coins },
   { href: "/settings", label: "个人设置", icon: Settings },
 ];
@@ -40,10 +41,11 @@ const adminNavItems = [
   { href: "/admin/users", label: "用户管理", icon: Users },
   { href: "/admin/regcodes", label: "注册码", icon: FileText },
   { href: "/admin/requests", label: "求片审核", icon: Film },
+  { href: "/admin/telegram-rebind-requests", label: "Telegram 换绑", icon: MessageSquare },
   { href: "/admin/emby", label: "Emby 管理", icon: Server },
   { href: "/admin/config", label: "配置管理", icon: FileCode },
   { href: "/admin/nsfw", label: "NSFW 库管理", icon: Library },
-  { href: "/admin/test", label: "API 测试", icon: TestTube },
+  { href: "/admin/test", label: "服务器信息", icon: TestTube },
 ];
 
 export function Sidebar() {
@@ -158,7 +160,6 @@ export function Sidebar() {
               </Link>
             );
           })}
-
           {isAdmin && (
             <>
               <p className="sidebar-label mt-5">管理菜单</p>

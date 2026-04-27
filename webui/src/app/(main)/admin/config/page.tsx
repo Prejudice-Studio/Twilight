@@ -100,6 +100,7 @@ const SECTION_ICONS: Record<string, React.ElementType> = {
   Telegram: Send,
   SAR: Coins,
   DeviceLimit: Monitor,
+  EmbyReview: Shield,
   Webhook: Webhook,
   API: Server,
   Security: Shield,

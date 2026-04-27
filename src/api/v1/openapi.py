@@ -33,7 +33,7 @@ def generate_openapi_spec():
         }
     }
 
-    # 获取所有路由
+    # 遍历当前 Flask 应用的路由，自动生成 OpenAPI 规范中的 paths 部分。
     for rule in current_app.url_map.iter_rules():
         if rule.endpoint == 'static' or not rule.rule.startswith('/api/v1'):
             continue

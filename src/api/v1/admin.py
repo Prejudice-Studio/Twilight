@@ -7,6 +7,7 @@ import logging
 from flask import Blueprint, request, g
 
 from src.api.v1.auth import require_auth, require_admin, api_response
+from src.config import EmbyReviewConfig
 from src.db.user import UserOperate, UserModel, Role
 from src.db.regcode import RegCodeOperate
 from src.services import UserService, ScoreService, EmbyService
@@ -535,6 +536,58 @@ async def bind_user_telegram(uid: int):
     })
 
 
+@admin_bp.route('/telegram/rebind-requests', methods=['GET'])
+@require_auth
+@require_admin
+async def list_telegram_rebind_requests():
+    """获取 Telegram 换绑请求列表"""
+    page = request.args.get('page', 1, type=int)
+    per_page = min(request.args.get('per_page', 20, type=int), 100)
+    status = request.args.get('status')
+
+    requests, total = await UserService.list_telegram_rebind_requests(status=status, page=page, per_page=per_page)
+    payload = []
+    for req in requests:
+        user = await UserOperate.get_user_by_uid(req.UID)
+        payload.append({
+            'id': req.ID,
+            'uid': req.UID,
+            'username': user.USERNAME if user else None,
+            'old_telegram_id': req.OLD_TELEGRAM_ID,
+            'status': req.STATUS,
+            'reason': req.REASON,
+            'admin_note': req.ADMIN_NOTE,
+            'reviewer_uid': req.REVIEWER_UID,
+            'created_at': req.CREATED_AT,
+            'reviewed_at': req.REVIEWED_AT,
+        })
+
+    return api_response(True, "获取成功", {
+        'requests': payload,
+        'total': total,
+    })
+
+
+@admin_bp.route('/telegram/rebind-requests/<int:request_id>/approve', methods=['POST'])
+@require_auth
+@require_admin
+async def approve_telegram_rebind_request(request_id: int):
+    data = request.get_json() or {}
+    admin_note = data.get('admin_note')
+    success, message = await UserService.approve_telegram_rebind_request(request_id, g.current_user.UID, admin_note)
+    return api_response(success, message)
+
+
+@admin_bp.route('/telegram/rebind-requests/<int:request_id>/reject', methods=['POST'])
+@require_auth
+@require_admin
+async def reject_telegram_rebind_request(request_id: int):
+    data = request.get_json() or {}
+    admin_note = data.get('admin_note')
+    success, message = await UserService.reject_telegram_rebind_request(request_id, g.current_user.UID, admin_note)
+    return api_response(success, message)
+
+
 @admin_bp.route('/users/by-telegram/<int:telegram_id>', methods=['GET'])
 @require_auth
 @require_admin
@@ -571,6 +624,60 @@ async def sync_all_emby():
         'success': success,
         'failed': failed,
         'errors': errors,
+    })
+
+
+@admin_bp.route('/emby/review/inactive', methods=['POST'])
+@require_auth
+@require_admin
+async def review_inactive_emby_users():
+    """手动触发 Emby 不活跃用户审查"""
+    data = request.get_json() or {}
+    threshold_days = data.get('threshold_days', EmbyReviewConfig.INACTIVE_THRESHOLD_DAYS)
+    action = data.get('action', EmbyReviewConfig.INACTIVE_ACTION)
+    delete_emby = data.get('delete_emby', EmbyReviewConfig.INACTIVE_DELETE_EMBY)
+
+    result = await EmbyService.review_inactive_users(
+        action=action,
+        threshold_days=threshold_days,
+        delete_emby=delete_emby,
+    )
+    return api_response(True, "不活跃用户审查完成", result)
+
+
+@admin_bp.route('/emby/review/devices', methods=['POST'])
+@require_auth
+@require_admin
+async def review_emby_device_usage():
+    """手动触发 Emby 设备使用审查"""
+    data = request.get_json() or {}
+    max_devices = data.get('max_devices', EmbyReviewConfig.DEVICE_MAX_COUNT)
+    threshold_days = data.get('threshold_days', EmbyReviewConfig.DEVICE_THRESHOLD_DAYS)
+    action = data.get('action', EmbyReviewConfig.DEVICE_ACTION)
+
+    result = await EmbyService.review_device_usage(
+        max_devices=max_devices,
+        threshold_days=threshold_days,
+        action=action,
+    )
+    return api_response(True, "设备使用审查完成", result)
+
+
+@admin_bp.route('/emby/review/settings', methods=['GET'])
+@require_auth
+@require_admin
+async def get_emby_review_settings():
+    """获取 Emby 审查配置"""
+    return api_response(True, "获取成功", {
+        'enabled': EmbyReviewConfig.ENABLED,
+        'review_time': EmbyReviewConfig.REVIEW_TIME,
+        'inactive_threshold_days': EmbyReviewConfig.INACTIVE_THRESHOLD_DAYS,
+        'inactive_action': EmbyReviewConfig.INACTIVE_ACTION,
+        'inactive_delete_emby': EmbyReviewConfig.INACTIVE_DELETE_EMBY,
+        'device_review_enabled': EmbyReviewConfig.DEVICE_REVIEW_ENABLED,
+        'device_threshold_days': EmbyReviewConfig.DEVICE_THRESHOLD_DAYS,
+        'device_max_count': EmbyReviewConfig.DEVICE_MAX_COUNT,
+        'device_action': EmbyReviewConfig.DEVICE_ACTION,
     })
 
 

@@ -119,7 +119,7 @@ async def check_registration_available():
     from src.config import ScoreAndRegisterConfig
     
     available, msg = await UserService.check_registration_available()
-    current_count = await UserOperate.get_registered_users_count()
+    current_count = await UserService.get_registered_user_count()
     
     return api_response(True, msg, {
         'available': available,
@@ -190,12 +190,17 @@ async def update_my_info():
     
     Request:
         {
-            "email": "new@example.com"
+            "email": "new@example.com",
+            "bgm_mode": true,
+            "bgm_token": "your_bgm_access_token"
         }
     """
+    from src.config import Config
+
     data = request.get_json() or {}
     user = g.current_user
-    
+    updated = False
+
     # 更新邮箱
     if 'email' in data:
         email = data['email']
@@ -204,8 +209,24 @@ async def update_my_info():
             if not is_valid_email(email):
                 return api_response(False, "邮箱格式不正确", code=400)
         user.EMAIL = email
+        updated = True
+
+    # 更新 Bangumi 同步设置
+    if 'bgm_token' in data:
+        bgm_token = data.get('bgm_token') or ''
+        user.BGM_TOKEN = bgm_token
+        updated = True
+
+    if 'bgm_mode' in data:
+        bgm_mode = bool(data['bgm_mode'])
+        if bgm_mode and not (user.BGM_TOKEN or Config.BANGUMI_TOKEN):
+            return api_response(False, "请先设置 Bangumi Token 后启用 BGM 同步", code=400)
+        user.BGM_MODE = bgm_mode
+        updated = True
+
+    if updated:
         await UserOperate.update_user(user)
-    
+
     user_info = await UserService.get_user_info(user)
     return api_response(True, "更新成功", user_info)
 
@@ -273,6 +294,66 @@ async def change_my_password():
 
     success, message = await UserService.change_password(g.current_user, old_password, new_password)
 
+    if success:
+        return api_response(True, message)
+    return api_response(False, message, code=400)
+
+
+@users_bp.route('/me/password/system', methods=['POST'])
+@require_auth
+async def change_my_system_password():
+    """
+    修改系统登录密码（不影响 Emby 密码）
+
+    Request:
+        {
+            "old_password": "current_password",
+            "new_password": "new_password"
+        }
+    """
+    data = request.get_json() or {}
+    old_password = data.get('old_password', '')
+    new_password = data.get('new_password', '')
+
+    if not old_password or not new_password:
+        return api_response(False, "请提供当前密码和新密码", code=400)
+
+    if len(new_password) < 6:
+        return api_response(False, "新密码长度至少 6 位", code=400)
+
+    if len(new_password) > 200:
+        return api_response(False, "密码过长", code=400)
+
+    success, message = await UserService.change_system_password(g.current_user, old_password, new_password)
+    if success:
+        return api_response(True, message)
+    return api_response(False, message, code=400)
+
+
+@users_bp.route('/me/password/emby', methods=['POST'])
+@require_auth
+async def change_my_emby_password():
+    """
+    修改 Emby 密码（仅更新绑定的 Emby 账户）
+
+    Request:
+        {
+            "new_password": "new_password"
+        }
+    """
+    data = request.get_json() or {}
+    new_password = data.get('new_password', '')
+
+    if not new_password:
+        return api_response(False, "请提供新密码", code=400)
+
+    if len(new_password) < 6:
+        return api_response(False, "新密码长度至少 6 位", code=400)
+
+    if len(new_password) > 200:
+        return api_response(False, "密码过长", code=400)
+
+    success, message = await UserService.change_emby_password(g.current_user, new_password)
     if success:
         return api_response(True, message)
     return api_response(False, message, code=400)
@@ -775,6 +856,8 @@ async def get_telegram_status():
         except Exception:
             pass  # Bot 未初始化或获取失败，忽略
     
+    pending_request = await UserService.get_telegram_rebind_request(user.UID)
+    has_pending_rebind_request = bool(pending_request and pending_request.STATUS == 'pending')
     return api_response(True, "获取成功", {
         'bound': bool(user.TELEGRAM_ID),
         'telegram_id': masked_id,
@@ -782,8 +865,35 @@ async def get_telegram_status():
         'telegram_username': telegram_username,  # Telegram 用户名
         'force_bind': force_bind,
         'can_unbind': not force_bind and bool(user.TELEGRAM_ID),
-        'can_change': False,  # 不再允许手动换绑
+        'can_change': bool(user.TELEGRAM_ID) and not has_pending_rebind_request,
+        'pending_rebind_request': has_pending_rebind_request,
+        'rebind_request_status': pending_request.STATUS if pending_request else None,
+        'rebind_request_id': pending_request.ID if pending_request else None,
     })
+
+
+@users_bp.route('/me/telegram/rebind-request', methods=['POST'])
+@require_auth
+async def create_tg_rebind_request():
+    from src.config import Config
+
+    if not Config.TELEGRAM_MODE:
+        return api_response(False, "Telegram 功能未启用", code=400)
+
+    user = g.current_user
+    if not user.TELEGRAM_ID:
+        return api_response(False, "当前账号尚未绑定 Telegram", code=400)
+
+    data = request.get_json() or {}
+    reason = data.get('reason')
+
+    success, message, request_obj = await UserService.create_telegram_rebind_request(user, reason)
+    if success:
+        return api_response(True, message, {
+            'request_id': request_obj.ID,
+            'status': request_obj.STATUS,
+        })
+    return api_response(False, message, code=400)
 
 
 @users_bp.route('/me/telegram/unbind', methods=['POST'])
@@ -1090,13 +1200,22 @@ async def get_my_settings():
     # 检查 NSFW 库是否配置
     nsfw_library_id = await EmbyService.find_nsfw_library_id()
     
+    status = await EmbyService.get_user_status(user)
+
     return api_response(True, "获取成功", {
         # 用户设置
         'auto_renew': user.AUTO_RENEW,
         'nsfw_enabled': user.NSFW,
         'nsfw_can_toggle': bool(user.NSFW_ALLOWED),
         'bgm_mode': user.BGM_MODE,
+        'bgm_token_set': bool(user.BGM_TOKEN),
         'api_key_enabled': user.APIKEY_STATUS,
+        'emby_status': {
+            'is_synced': status.is_synced,
+            'is_active': status.is_active,
+            'active_sessions': status.active_sessions,
+            'message': status.message,
+        },
         # Telegram 绑定
         'telegram': {
             'bound': bool(user.TELEGRAM_ID),

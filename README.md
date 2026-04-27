@@ -1,14 +1,20 @@
 <div align="center">
 
+# ！！须知！！
+
+ **！！该项目绝大部分由LLM完成，仅有少量人工修改和润色。主贡献者对该项目安全性等不做任何保证，使用前请务必仔细审查代码。
+ 如出现问题，本项目不会承担任何责任。请了解以上信息后再决定是否使用。！！**
+
+
 # Twilight 暮光
 
 ## Next Generation Emby/Jellyfin Manager
 
-[![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)](https://www.python.org/)
-[![Flask](https://img.shields.io/badge/Flask-3.x-green?logo=flask&logoColor=white)](https://flask.palletsprojects.com/)
-[![Next.js](https://img.shields.io/badge/Next.js-16.0+-black?logo=next.js&logoColor=white)](https://nextjs.org/)
-[![SQLite](https://img.shields.io/badge/SQLite-3-blue?logo=sqlite&logoColor=white)](https://www.sqlite.org/)
-[![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
+</div>
+
+<div align="center">
+
+[![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)](https://www.python.org/) [![Flask](https://img.shields.io/badge/Flask-3.x-green?logo=flask&logoColor=white)](https://flask.palletsprojects.com/) [![Next.js](https://img.shields.io/badge/Next.js-16.0+-black?logo=next.js&logoColor=white)](https://nextjs.org/) [![SQLite](https://img.shields.io/badge/SQLite-3-blue?logo=sqlite&logoColor=white)](https://www.sqlite.org/) [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 </div>
 
@@ -111,16 +117,41 @@ cd webui && pnpm install && pnpm dev
 
 ## 🙏 鸣谢
 
-[Emby](https://emby.media/) / [Jellyfin](https://jellyfin.org/)
-[TMDB](https://www.themoviedb.org/)
-[Bangumi](https://bgm.tv/)
-[Next.js](https://nextjs.org/)
-[Sakura_embyboss](https://github.com/berry8838/Sakura_embyboss)
-[Bangumi-syncer](https://github.com/SanaeMio/Bangumi-syncer)
+- [Emby](https://emby.media/) / [Jellyfin](https://jellyfin.org/)
+- [TheMovieDataBase](https://www.themoviedb.org/)
+- [Bangumi 番组计划](https://bgm.tv/)
+- [Next.js](https://nextjs.org/)
+- [Sakura_embyboss](https://github.com/berry8838/Sakura_embyboss)
+- [Bangumi-syncer](https://github.com/SanaeMio/Bangumi-syncer)
 
-## 📄 许可证
+## 📄 许可证 License
 
-[MIT License](LICENSE)
+``` LICENSE
+
+MIT License
+
+Copyright (c) 2025 Prejudice Studio
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+```
 
 ---
 

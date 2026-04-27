@@ -59,6 +59,7 @@ def hash_password(password: str, salt: Optional[str] = None, iterations: int = 1
     """
     if salt is None:
         salt = generate_random_string(16)
+    # 该哈希格式兼容 verify_password 的新旧密码校验逻辑
     
     # PBKDF2 哈希
     dk = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), iterations)
@@ -224,6 +225,7 @@ def retry(max_attempts: int = 3, delay: float = 1.0, exceptions: tuple = (Except
     :param delay: 重试间隔（秒）
     :param exceptions: 需要重试的异常类型
     """
+    # 该装饰器支持同步与异步函数，适用于网络请求、外部接口、数据库等不稳定操作
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def async_wrapper(*args, **kwargs):

@@ -9,8 +9,9 @@ from sqlalchemy import text
 from src.api.v1.auth import require_auth, require_admin, api_response
 from src.config import (
     Config, EmbyConfig, ScoreAndRegisterConfig, WebhookConfig,
-    DeviceLimitConfig, APIConfig, SecurityConfig, SchedulerConfig,
-    NotificationConfig, TelegramConfig, BangumiSyncConfig
+    DeviceLimitConfig, APIConfig, SecurityConfig,
+    SchedulerConfig, NotificationConfig, TelegramConfig,
+    BangumiSyncConfig, EmbyReviewConfig
 )
 from src import __version__
 from src.db.user import UsersSessionFactory
@@ -448,8 +449,9 @@ async def update_config_toml():
         # 重新加载配置
         from src.config import (
             Config, EmbyConfig, ScoreAndRegisterConfig, WebhookConfig,
-            DeviceLimitConfig, APIConfig, SecurityConfig, SchedulerConfig,
-            NotificationConfig, TelegramConfig, BangumiSyncConfig
+            DeviceLimitConfig, APIConfig, SecurityConfig,
+            SchedulerConfig, NotificationConfig, TelegramConfig,
+            BangumiSyncConfig
         )
         Config.update_from_toml("Global")
         EmbyConfig.update_from_toml('Emby')
@@ -609,6 +611,28 @@ async def get_config_schema():
                 ],
             },
             {
+                'key': 'EmbyReview',
+                'title': 'Emby 审查',
+                'description': '自动审查长时间未播放与设备使用情况',
+                'fields': [
+                    {'key': 'enabled', 'label': '启用 Emby 审查', 'type': 'bool', 'description': '是否自动执行 Emby 帐号审查任务', 'value': EmbyReviewConfig.ENABLED},
+                    {'key': 'review_time', 'label': '审查时间', 'type': 'string', 'description': '每天执行 Emby 审查任务的时间 (HH:MM)', 'value': EmbyReviewConfig.REVIEW_TIME},
+                    {'key': 'inactive_threshold_days', 'label': '不活跃阈值 (天)', 'type': 'int', 'description': '多少天没有播放记录则视为不活跃', 'value': EmbyReviewConfig.INACTIVE_THRESHOLD_DAYS},
+                    {'key': 'inactive_action', 'label': '不活跃处理方式', 'type': 'select', 'description': '不活跃用户达到阈值后的处理方式', 'value': EmbyReviewConfig.INACTIVE_ACTION, 'options': [
+                        {'label': '禁用账户', 'value': 'disable'},
+                        {'label': '删除账户', 'value': 'delete'},
+                    ]},
+                    {'key': 'inactive_delete_emby', 'label': '删除时同步删除 Emby 账号', 'type': 'bool', 'description': '选择删除账户时是否同时删除 Emby 中对应用户', 'value': EmbyReviewConfig.INACTIVE_DELETE_EMBY},
+                    {'key': 'device_review_enabled', 'label': '启用设备审查', 'type': 'bool', 'description': '是否审查设备数量过多的用户', 'value': EmbyReviewConfig.DEVICE_REVIEW_ENABLED},
+                    {'key': 'device_threshold_days', 'label': '设备审查时间窗口 (天)', 'type': 'int', 'description': '统计最近多少天的设备使用情况', 'value': EmbyReviewConfig.DEVICE_THRESHOLD_DAYS},
+                    {'key': 'device_max_count', 'label': '设备数量上限', 'type': 'int', 'description': '超过该设备数量后触发审查', 'value': EmbyReviewConfig.DEVICE_MAX_COUNT},
+                    {'key': 'device_action', 'label': '设备超限处理', 'type': 'select', 'description': '超过设备数量时的处理方式', 'value': EmbyReviewConfig.DEVICE_ACTION, 'options': [
+                        {'label': '踢出最早会话', 'value': 'kick_oldest'},
+                        {'label': '封禁最早设备', 'value': 'block_oldest'},
+                    ]},
+                ],
+            },
+            {
                 'key': 'Webhook',
                 'title': 'Webhook 配置',
                 'description': 'Webhook 推送和播放统计',
@@ -747,6 +771,7 @@ async def update_config_by_schema():
         SchedulerConfig.update_from_toml('Scheduler')
         NotificationConfig.update_from_toml('Notification')
         BangumiSyncConfig.update_from_toml('BangumiSync')
+        EmbyReviewConfig.update_from_toml('EmbyReview')
         
         # 热重载服务
         _hot_reload_services()

@@ -32,6 +32,7 @@ def create_app() -> Flask:
     app.config['JSON_SORT_KEYS'] = False
     app.config['MAX_CONTENT_LENGTH'] = APIConfig.MAX_UPLOAD_SIZE  # 最大上传文件大小
     app.config['UPLOAD_FOLDER'] = uploads_path
+    # uploads_path 目录作为静态文件目录挂载，用于存储上传的文件并通过 /uploads 提供访问
     
     # CORS 跨域支持
     if APIConfig.CORS_ENABLED:
@@ -55,6 +56,7 @@ def create_app() -> Flask:
     app.register_blueprint(admin_api)
     
     # 注册 v1 API（推荐前端使用）
+    # 这里将 /api/v1 下的蓝图全部挂载到主应用，以保持版本化路由结构。
     register_v1_blueprints(app)
     
     # 配置日志
@@ -95,6 +97,7 @@ def create_app() -> Flask:
     
     @app.errorhandler(500)
     def internal_error(e):
+        # 统一 error handler，保证所有未捕获异常也按照统一 JSON 结构返回
         return jsonify({
             'success': False,
             'code': 500,

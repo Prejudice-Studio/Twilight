@@ -43,7 +43,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError, PageLoading } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
-import { api, type UserSettings, type TelegramStatus, type NsfwStatus } from "@/lib/api";
+import { api, type UserSettings, type TelegramStatus, type NsfwStatus, type EmbyStatus } from "@/lib/api";
 import {
   Alert,
   AlertDescription,
@@ -65,11 +65,17 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [telegramStatus, setTelegramStatus] = useState<TelegramStatus | null>(null);
   const [nsfwStatus, setNsfwStatus] = useState<NsfwStatus | null>(null);
+  const [bgmTokenSet, setBgmTokenSet] = useState(false);
+  const [bgmMode, setBgmMode] = useState(false);
+  const [bgmToken, setBgmToken] = useState("");
+  const [isBgmLoading, setIsBgmLoading] = useState(false);
+  const [embyStatus, setEmbyStatus] = useState<EmbyStatus | null>(null);
 
   // Telegram bind code
   const [bindCode, setBindCode] = useState<string | null>(null);
   const [bindCodeExpiry, setBindCodeExpiry] = useState<number>(0);
   const [isTgLoading, setIsTgLoading] = useState(false);
+  const [isRebindLoading, setIsRebindLoading] = useState(false);
 
   // Emby dialogs
   const [bindEmbyOpen, setBindEmbyOpen] = useState(false);
@@ -84,13 +90,21 @@ export default function SettingsPage() {
   const [isEmailLoading, setIsEmailLoading] = useState(false);
 
   // Password change
-  const [changePwdOpen, setChangePwdOpen] = useState(false);
+  const [changeSystemPwdOpen, setChangeSystemPwdOpen] = useState(false);
+  const [changeEmbyPwdOpen, setChangeEmbyPwdOpen] = useState(false);
+
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showOldPwd, setShowOldPwd] = useState(false);
   const [showNewPwd, setShowNewPwd] = useState(false);
-  const [isPwdLoading, setIsPwdLoading] = useState(false);
+  const [isSystemPwdLoading, setIsSystemPwdLoading] = useState(false);
+
+  const [newEmbyPassword, setNewEmbyPassword] = useState("");
+  const [confirmEmbyPassword, setConfirmEmbyPassword] = useState("");
+  const [showNewEmbyPwd, setShowNewEmbyPwd] = useState(false);
+  const [showConfirmEmbyPwd, setShowConfirmEmbyPwd] = useState(false);
+  const [isEmbyPwdLoading, setIsEmbyPwdLoading] = useState(false);
 
   // Emby URLs
   const [embyLines, setEmbyLines] = useState<Array<{ name: string; url: string }>>([]);
@@ -105,6 +119,9 @@ export default function SettingsPage() {
     ]);
     if (settingsRes.success && settingsRes.data) {
       setSettings(settingsRes.data);
+      setBgmMode(settingsRes.data.bgm_mode);
+      setBgmTokenSet(settingsRes.data.bgm_token_set ?? false);
+      setEmbyStatus(settingsRes.data.emby_status ?? null);
     }
     if (tgRes.success && tgRes.data) {
       setTelegramStatus(tgRes.data);
@@ -135,6 +152,34 @@ export default function SettingsPage() {
       }
     } catch (error: any) {
       toast({ title: "操作失败", description: error.message, variant: "destructive" });
+    }
+  };
+
+  const handleSaveBgmSettings = async () => {
+    if (bgmMode && !bgmToken && !bgmTokenSet) {
+      toast({ title: "请输入 Bangumi Token", description: "启用 BGM 同步前需要填写个人 Token", variant: "destructive" });
+      return;
+    }
+
+    setIsBgmLoading(true);
+    try {
+      const res = await api.updateMySettings({
+        bgm_mode: bgmMode,
+        bgm_token: bgmToken || undefined,
+      });
+
+      if (res.success) {
+        setBgmToken("");
+        setBgmTokenSet(bgmTokenSet || Boolean(bgmToken));
+        setSettings((prev) => prev ? { ...prev, bgm_mode: bgmMode, bgm_token_set: bgmTokenSet || Boolean(bgmToken) } : prev);
+        toast({ title: "保存成功", description: "Bangumi 同步设置已更新", variant: "success" });
+      } else {
+        toast({ title: "保存失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "保存失败", description: error.message, variant: "destructive" });
+    } finally {
+      setIsBgmLoading(false);
     }
   };
 
@@ -181,6 +226,23 @@ export default function SettingsPage() {
       toast({ title: "获取绑定码失败", description: error.message, variant: "destructive" });
     } finally {
       setIsTgLoading(false);
+    }
+  };
+
+  const handleRequestTelegramRebind = async () => {
+    setIsRebindLoading(true);
+    try {
+      const res = await api.requestTelegramRebind();
+      if (res.success) {
+        toast({ title: "换绑请求已提交", description: res.message, variant: "success" });
+        loadData();
+      } else {
+        toast({ title: "换绑请求提交失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "换绑请求提交失败", description: error.message, variant: "destructive" });
+    } finally {
+      setIsRebindLoading(false);
     }
   };
 
@@ -281,7 +343,7 @@ export default function SettingsPage() {
     }
   };
 
-  const handleChangePassword = async () => {
+  const handleChangeSystemPassword = async () => {
     if (!oldPassword || !newPassword) {
       toast({ title: "请填写当前密码和新密码", variant: "destructive" });
       return;
@@ -295,12 +357,12 @@ export default function SettingsPage() {
       return;
     }
 
-    setIsPwdLoading(true);
+    setIsSystemPwdLoading(true);
     try {
-      const res = await api.changePassword(oldPassword, newPassword);
+      const res = await api.changeSystemPassword(oldPassword, newPassword);
       if (res.success) {
-        toast({ title: "密码修改成功", description: "系统密码和 Emby 密码已同步更新", variant: "success" });
-        setChangePwdOpen(false);
+        toast({ title: "系统密码修改成功", description: "仅系统登录密码已更新", variant: "success" });
+        setChangeSystemPwdOpen(false);
         setOldPassword("");
         setNewPassword("");
         setConfirmPassword("");
@@ -310,7 +372,39 @@ export default function SettingsPage() {
     } catch (error: any) {
       toast({ title: "修改失败", description: error.message, variant: "destructive" });
     } finally {
-      setIsPwdLoading(false);
+      setIsSystemPwdLoading(false);
+    }
+  };
+
+  const handleChangeEmbyPassword = async () => {
+    if (!newEmbyPassword) {
+      toast({ title: "请填写新的 Emby 密码", variant: "destructive" });
+      return;
+    }
+    if (newEmbyPassword.length < 6) {
+      toast({ title: "新密码长度至少 6 位", variant: "destructive" });
+      return;
+    }
+    if (newEmbyPassword !== confirmEmbyPassword) {
+      toast({ title: "两次输入的新密码不一致", variant: "destructive" });
+      return;
+    }
+
+    setIsEmbyPwdLoading(true);
+    try {
+      const res = await api.changeEmbyPassword(newEmbyPassword);
+      if (res.success) {
+        toast({ title: "Emby 密码修改成功", description: "仅 Emby 密码已更新", variant: "success" });
+        setChangeEmbyPwdOpen(false);
+        setNewEmbyPassword("");
+        setConfirmEmbyPassword("");
+      } else {
+        toast({ title: "修改失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "修改失败", description: error.message, variant: "destructive" });
+    } finally {
+      setIsEmbyPwdLoading(false);
     }
   };
 
@@ -481,6 +575,25 @@ export default function SettingsPage() {
                         解绑
                       </Button>
                     )}
+                    {telegramStatus.can_change && (
+                      <Button
+                        variant="outline"
+                        onClick={handleRequestTelegramRebind}
+                        disabled={isRebindLoading}
+                      >
+                        {isRebindLoading ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <LinkIcon className="mr-2 h-4 w-4" />
+                        )}
+                        提交换绑请求
+                      </Button>
+                    )}
+                    {!telegramStatus.can_change && telegramStatus.pending_rebind_request && (
+                      <Badge variant="outline" className="self-center">
+                        换绑请求已提交，等待管理员处理
+                      </Badge>
+                    )}
                   </>
                 )}
               </div>
@@ -628,17 +741,35 @@ export default function SettingsPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Lock className="h-5 w-5" />
-              修改密码
+              密码管理
             </CardTitle>
             <CardDescription>
-              同时修改系统账号密码和 Emby 账号密码
+              分别修改系统登录密码和绑定 Emby 密码。
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <Button onClick={() => setChangePwdOpen(true)}>
-              <Lock className="mr-2 h-4 w-4" />
-              修改密码
-            </Button>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-border p-4">
+                <p className="text-sm font-medium">系统密码</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  修改网站登录密码，不会更改 Emby 账户密码。
+                </p>
+                <Button className="mt-4" onClick={() => setChangeSystemPwdOpen(true)}>
+                  <Lock className="mr-2 h-4 w-4" />
+                  修改系统密码
+                </Button>
+              </div>
+              <div className="rounded-xl border border-border p-4">
+                <p className="text-sm font-medium">Emby 密码</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  只更新当前绑定的 Emby 账号密码。
+                </p>
+                <Button className="mt-4" onClick={() => setChangeEmbyPwdOpen(true)} disabled={!user?.emby_id}>
+                  <Lock className="mr-2 h-4 w-4" />
+                  修改 Emby 密码
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </motion.div>
@@ -663,12 +794,12 @@ export default function SettingsPage() {
                   return (
                     <div
                       key={key}
-                      className="group relative rounded-xl border bg-card p-4 transition-colors hover:bg-accent/50"
+                      className="group relative h-full rounded-xl border bg-card p-4 transition-colors hover:bg-accent/50 dark:border-slate-700/70 dark:bg-slate-950/60 dark:hover:bg-slate-900/80"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-semibold">{line.name || `线路 ${i + 1}`}</p>
-                          <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                          <p className="mt-1 break-all truncate font-mono text-xs text-muted-foreground">
                             {line.url}
                           </p>
                         </div>
@@ -707,7 +838,7 @@ export default function SettingsPage() {
                       return (
                         <div
                           key={key}
-                          className="group relative rounded-xl border border-yellow-500/20 bg-yellow-500/5 p-4 transition-colors hover:bg-yellow-500/10"
+                          className="group relative rounded-xl border border-yellow-500/20 bg-yellow-500/5 p-4 transition-colors hover:bg-yellow-500/10 dark:border-yellow-500/30 dark:bg-yellow-500/10 dark:hover:bg-yellow-500/20"
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0 flex-1">
@@ -765,6 +896,45 @@ export default function SettingsPage() {
                 />
               </div>
             )}
+
+            <Separator />
+
+            {/* Bangumi Sync */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label>Bangumi 同步</Label>
+                  <p className="text-sm text-muted-foreground">
+                    启用后会将观看记录同步到 Bangumi，需要填写个人 Token。
+                  </p>
+                </div>
+                <Switch checked={bgmMode} onCheckedChange={setBgmMode} />
+              </div>
+              <div className="space-y-2">
+                <div className="space-y-2">
+                  <Label>Bangumi Token</Label>
+                  <Input
+                    type="password"
+                    placeholder={bgmTokenSet ? "已配置 Token，留空则保留当前值" : "请输入 Bangumi Token"}
+                    value={bgmToken}
+                    onChange={(e) => setBgmToken(e.target.value)}
+                  />
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <Button
+                    onClick={handleSaveBgmSettings}
+                    disabled={isBgmLoading}
+                  >
+                    {isBgmLoading ? "保存中..." : "保存 Bangumi 设置"}
+                  </Button>
+                  {bgmTokenSet && (
+                    <p className="text-sm text-muted-foreground">
+                      当前已配置 Bangumi Token，可直接启用同步。
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
 
             <Separator />
 
@@ -960,15 +1130,19 @@ export default function SettingsPage() {
       </Dialog>
 
       {/* Change Password Dialog */}
-      <Dialog open={changePwdOpen} onOpenChange={(open) => {
-        setChangePwdOpen(open);
-        if (!open) { setOldPassword(""); setNewPassword(""); setConfirmPassword(""); }
+      <Dialog open={changeSystemPwdOpen} onOpenChange={(open) => {
+        setChangeSystemPwdOpen(open);
+        if (!open) {
+          setOldPassword("");
+          setNewPassword("");
+          setConfirmPassword("");
+        }
       }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>修改密码</DialogTitle>
+            <DialogTitle>修改系统密码</DialogTitle>
             <DialogDescription>
-              修改后系统密码和 Emby 密码将同步更新
+              修改系统登录密码，不会同步更改 Emby 密码。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -1021,7 +1195,7 @@ export default function SettingsPage() {
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && oldPassword && newPassword && confirmPassword) {
-                    handleChangePassword();
+                    handleChangeSystemPassword();
                   }
                 }}
               />
@@ -1031,14 +1205,93 @@ export default function SettingsPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setChangePwdOpen(false)}>
+            <Button variant="outline" onClick={() => setChangeSystemPwdOpen(false)}>
               取消
             </Button>
             <Button
-              onClick={handleChangePassword}
-              disabled={isPwdLoading || !oldPassword || !newPassword || newPassword !== confirmPassword}
+              onClick={handleChangeSystemPassword}
+              disabled={isSystemPwdLoading || !oldPassword || !newPassword || newPassword !== confirmPassword}
             >
-              {isPwdLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {isSystemPwdLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              确认修改
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={changeEmbyPwdOpen} onOpenChange={(open) => {
+        setChangeEmbyPwdOpen(open);
+        if (!open) {
+          setNewEmbyPassword("");
+          setConfirmEmbyPassword("");
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>修改 Emby 密码</DialogTitle>
+            <DialogDescription>
+              只更新当前绑定的 Emby 账号密码。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>新密码</Label>
+              <div className="relative">
+                <Input
+                  type={showNewEmbyPwd ? "text" : "password"}
+                  placeholder="至少 6 位"
+                  value={newEmbyPassword}
+                  onChange={(e) => setNewEmbyPassword(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowNewEmbyPwd(!showNewEmbyPwd)}
+                >
+                  {showNewEmbyPwd ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>确认新密码</Label>
+              <div className="relative">
+                <Input
+                  type={showConfirmEmbyPwd ? "text" : "password"}
+                  placeholder="再次输入新密码"
+                  value={confirmEmbyPassword}
+                  onChange={(e) => setConfirmEmbyPassword(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && newEmbyPassword && confirmEmbyPassword) {
+                      handleChangeEmbyPassword();
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowConfirmEmbyPwd(!showConfirmEmbyPwd)}
+                >
+                  {showConfirmEmbyPwd ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
+                </Button>
+              </div>
+              {confirmEmbyPassword && newEmbyPassword !== confirmEmbyPassword && (
+                <p className="text-xs text-destructive">两次输入的密码不一致</p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setChangeEmbyPwdOpen(false)}>
+              取消
+            </Button>
+            <Button
+              onClick={handleChangeEmbyPassword}
+              disabled={isEmbyPwdLoading || !newEmbyPassword || newEmbyPassword !== confirmEmbyPassword}
+            >
+              {isEmbyPwdLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               确认修改
             </Button>
           </DialogFooter>

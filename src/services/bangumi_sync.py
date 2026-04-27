@@ -418,13 +418,24 @@ class BangumiSyncService:
             return SyncResult(False, f"用户 {request.user_name} 未开启 Bangumi 同步")
         
         # 获取用户的 Bangumi Token
-        bgm_user = await BangumiUserOperate.get_user(user.TELEGRAM_ID)
-        if not bgm_user or not bgm_user.access_token:
+        token = await cls._get_user_bgm_token(user)
+        if not token:
             return SyncResult(False, f"用户 {request.user_name} 未绑定 Bangumi 账号")
         
         # 同步
-        return await cls.sync_episode(request, bgm_user.access_token)
+        return await cls.sync_episode(request, token)
     
+    @classmethod
+    async def _get_user_bgm_token(cls, user) -> Optional[str]:
+        """获取用户 Bangumi Token，优先使用个人设置。"""
+        if user.BGM_TOKEN:
+            return user.BGM_TOKEN
+        if user.TELEGRAM_ID:
+            bgm_user = await BangumiUserOperate.get_user(user.TELEGRAM_ID)
+            if bgm_user and bgm_user.access_token:
+                return bgm_user.access_token
+        return None
+
     @classmethod
     async def sync_for_user(
         cls,
@@ -449,9 +460,9 @@ class BangumiSyncService:
         
         if not user.BGM_MODE:
             return SyncResult(False, "用户未开启 Bangumi 同步")
-        
-        bgm_user = await BangumiUserOperate.get_user(user.TELEGRAM_ID)
-        if not bgm_user or not bgm_user.access_token:
+
+        token = await cls._get_user_bgm_token(user)
+        if not token:
             return SyncResult(False, "用户未绑定 Bangumi 账号")
         
         request = SyncRequest(
@@ -465,7 +476,7 @@ class BangumiSyncService:
             source='api'
         )
         
-        return await cls.sync_episode(request, bgm_user.access_token)
+        return await cls.sync_episode(request, token)
 
 
 # 注册 Webhook 处理器

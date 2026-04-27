@@ -88,7 +88,16 @@ class PlaybackOperate:
                 .limit(limit)
             )
             return list(result.scalars().all())
-    
+
+    @staticmethod
+    async def get_user_last_play_time(uid: int) -> Optional[int]:
+        """获取用户最后一次播放时间戳"""
+        async with PlaybackSessionFactory() as session:
+            result = await session.execute(
+                select(func.max(PlaybackModel.START_TIME)).filter_by(UID=uid)
+            )
+            return result.scalar_one_or_none()
+
     @staticmethod
     async def get_active_session(emby_user_id: str, item_id: str) -> Optional[PlaybackModel]:
         """获取活跃的播放会话"""

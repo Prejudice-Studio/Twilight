@@ -10,10 +10,18 @@ from dataclasses import dataclass
 from enum import Enum
 
 from src.config import Config, ScoreAndRegisterConfig
-from src.db.user import UserModel, UserOperate, Role
+from src.db.user import UserModel, UserOperate, Role, TelegramRebindRequestOperate
 from src.db.score import ScoreModel, ScoreOperate
 from src.services.emby import get_emby_client, EmbyError
 from src.core.utils import generate_password, hash_password, timestamp, days_to_seconds
+from src.core.registration_lock import (
+    acquire_global_registration_lock,
+    acquire_registration_lock,
+    release_global_registration_lock,
+    release_registration_lock,
+    get_cached_registered_user_count,
+    set_cached_registered_user_count,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,16 +54,96 @@ class UserService:
     """用户业务服务"""
 
     @staticmethod
-    async def check_registration_available() -> Tuple[bool, str]:
+    async def get_registered_user_count(use_cache: bool = True) -> int:
+        """获取当前已注册用户数量。
+
+        :param use_cache: 是否优先使用短期缓存。
+        """
+        if use_cache:
+            cached = await get_cached_registered_user_count()
+            if cached is not None:
+                return cached
+
+        current_count = await UserOperate.get_registered_users_count()
+        await set_cached_registered_user_count(current_count)
+        return current_count
+
+    @staticmethod
+    async def check_registration_available(use_cache: bool = True) -> Tuple[bool, str]:
         """检查是否可以注册"""
         if not ScoreAndRegisterConfig.REGISTER_MODE:
             return False, "注册功能已关闭"
         
-        current_count = await UserOperate.get_registered_users_count()
+        current_count = await UserService.get_registered_user_count(use_cache=use_cache)
         if current_count >= ScoreAndRegisterConfig.USER_LIMIT:
             return False, f"已达到用户数量上限 ({ScoreAndRegisterConfig.USER_LIMIT})"
         
         return True, "可以注册"
+
+    @staticmethod
+    async def get_telegram_rebind_request(uid: int):
+        return await TelegramRebindRequestOperate.get_request_by_uid(uid)
+
+    @staticmethod
+    async def create_telegram_rebind_request(user: UserModel, reason: Optional[str] = None) -> Tuple[bool, str, Optional[object]]:
+        if not user.TELEGRAM_ID:
+            return False, "当前账号尚未绑定 Telegram"
+
+        existing = await TelegramRebindRequestOperate.get_request_by_uid(user.UID)
+        if existing and existing.STATUS == 'pending':
+            return False, "您已有待处理的换绑请求，请等待管理员处理"
+
+        request = await TelegramRebindRequestOperate.create_request(user.UID, user.TELEGRAM_ID, reason)
+        return True, "换绑请求已提交，管理员审核后您可以重新绑定 Telegram", request
+
+    @staticmethod
+    async def list_telegram_rebind_requests(status: Optional[str] = None, page: int = 1, per_page: int = 20):
+        return await TelegramRebindRequestOperate.list_requests(status=status, page=page, per_page=per_page)
+
+    @staticmethod
+    async def approve_telegram_rebind_request(request_id: int, reviewer_uid: int, admin_note: Optional[str] = None) -> Tuple[bool, str]:
+        request = await TelegramRebindRequestOperate.get_request_by_id(request_id)
+        if not request:
+            return False, "换绑请求不存在"
+        if request.STATUS != 'pending':
+            return False, "该请求已处理"
+
+        user = await UserOperate.get_user_by_uid(request.UID)
+        if not user:
+            return False, "关联用户不存在"
+
+        if user.TELEGRAM_ID:
+            await UserOperate.unbind_telegram_user(user)
+
+        success = await TelegramRebindRequestOperate.update_request_status(
+            request_id,
+            'approved',
+            reviewer_uid=reviewer_uid,
+            admin_note=admin_note,
+        )
+        if not success:
+            return False, "更新请求状态失败"
+
+        return True, "已批准换绑请求并解绑当前 Telegram，用户可重新绑定新账号"
+
+    @staticmethod
+    async def reject_telegram_rebind_request(request_id: int, reviewer_uid: int, admin_note: Optional[str] = None) -> Tuple[bool, str]:
+        request = await TelegramRebindRequestOperate.get_request_by_id(request_id)
+        if not request:
+            return False, "换绑请求不存在"
+        if request.STATUS != 'pending':
+            return False, "该请求已处理"
+
+        success = await TelegramRebindRequestOperate.update_request_status(
+            request_id,
+            'rejected',
+            reviewer_uid=reviewer_uid,
+            admin_note=admin_note,
+        )
+        if not success:
+            return False, "更新请求状态失败"
+
+        return True, "已拒绝换绑请求"
 
     @staticmethod
     async def register_by_code(
@@ -76,47 +164,59 @@ class UserService:
         """
         from src.db.regcode import RegCodeOperate, Type as RegCodeType
         
-        # 检查注册是否开放
-        available, msg = await UserService.check_registration_available()
-        if not available:
-            return RegisterResponse(RegisterResult.USER_LIMIT_REACHED, msg)
-        
-        # 检查用户是否已存在（有 telegram_id 时检查）
-        if telegram_id:
-            existing_user = await UserOperate.get_user_by_telegram_id(telegram_id)
-            if existing_user and existing_user.EMBYID:
-                return RegisterResponse(RegisterResult.USER_EXISTS, "您已经注册过了")
-        
-        # 验证注册码
-        code_info = await RegCodeOperate.get_regcode_by_code(reg_code)
-        if not code_info:
-            return RegisterResponse(RegisterResult.INVALID_CODE, "注册码无效")
-        
-        if code_info.TYPE != RegCodeType.REGISTER.value:
-            return RegisterResponse(RegisterResult.INVALID_CODE, "这不是注册码")
-        
-        if not code_info.ACTIVE:
-            return RegisterResponse(RegisterResult.CODE_EXPIRED, "注册码已停用")
-        
-        # 检查使用次数
-        if code_info.USE_COUNT_LIMIT != -1 and code_info.USE_COUNT >= code_info.USE_COUNT_LIMIT:
-            return RegisterResponse(RegisterResult.CODE_USED, "注册码已被使用完")
-        
-        # 检查有效期
-        if code_info.VALIDITY_TIME != -1:
-            expire_time = code_info.CREATED_TIME + code_info.VALIDITY_TIME * 3600
-            if timestamp() > expire_time:
-                return RegisterResponse(RegisterResult.CODE_EXPIRED, "注册码已过期")
-        
-        # 创建 Emby 账户
-        return await UserService._create_emby_user(
-            telegram_id=telegram_id,
-            username=username,
-            email=email,
-            days=code_info.DAYS or 30,
-            reg_code=reg_code,
-            password=password
-        )
+        locks = await acquire_registration_lock(username, telegram_id, reg_code=reg_code)
+        if locks is None:
+            return RegisterResponse(RegisterResult.ERROR, "当前注册请求较多，请稍后重试")
+
+        global_lock = await acquire_global_registration_lock()
+        if global_lock is None:
+            await release_registration_lock(locks)
+            return RegisterResponse(RegisterResult.ERROR, "当前注册请求较多，请稍后重试")
+
+        try:
+            # 检查注册是否开放
+            available, msg = await UserService.check_registration_available(use_cache=False)
+            if not available:
+                return RegisterResponse(RegisterResult.USER_LIMIT_REACHED, msg)
+            
+            # 检查用户是否已存在（有 telegram_id 时检查）
+            if telegram_id:
+                existing_user = await UserOperate.get_user_by_telegram_id(telegram_id)
+                if existing_user and existing_user.EMBYID:
+                    return RegisterResponse(RegisterResult.USER_EXISTS, "您已经注册过了")
+
+            # 验证注册码
+            code_info = await RegCodeOperate.get_regcode_by_code(reg_code)
+            if not code_info:
+                return RegisterResponse(RegisterResult.INVALID_CODE, "注册码无效")
+            
+            if code_info.TYPE != RegCodeType.REGISTER.value:
+                return RegisterResponse(RegisterResult.INVALID_CODE, "这不是注册码")
+            
+            if not code_info.ACTIVE:
+                return RegisterResponse(RegisterResult.CODE_EXPIRED, "注册码已停用")
+            
+            # 检查使用次数
+            if code_info.USE_COUNT_LIMIT != -1 and code_info.USE_COUNT >= code_info.USE_COUNT_LIMIT:
+                return RegisterResponse(RegisterResult.CODE_USED, "注册码已被使用完")
+
+            if code_info.VALIDITY_TIME != -1:
+                expire_time = code_info.CREATED_TIME + code_info.VALIDITY_TIME * 3600
+                if timestamp() > expire_time:
+                    return RegisterResponse(RegisterResult.CODE_EXPIRED, "注册码已过期")
+
+            # 创建 Emby 账户
+            return await UserService._create_emby_user(
+                telegram_id=telegram_id,
+                username=username,
+                email=email,
+                days=code_info.DAYS or 30,
+                reg_code=reg_code,
+                password=password
+            )
+        finally:
+            await release_global_registration_lock(global_lock)
+            await release_registration_lock(locks)
 
     @staticmethod
     async def register_by_score(
@@ -132,40 +232,53 @@ class UserService:
         # 积分注册需要 telegram_id
         if not telegram_id:
             return RegisterResponse(RegisterResult.ERROR, "积分注册需要绑定 Telegram")
-        
-        # 检查注册是否开放
-        available, msg = await UserService.check_registration_available()
-        if not available:
-            return RegisterResponse(RegisterResult.USER_LIMIT_REACHED, msg)
-        
-        # 检查用户是否已存在
-        existing_user = await UserOperate.get_user_by_telegram_id(telegram_id)
-        if existing_user and existing_user.EMBYID:
-            return RegisterResponse(RegisterResult.USER_EXISTS, "您已经注册过了")
-        
-        # 检查积分
-        score_record = await ScoreOperate.get_score_by_telegram_id(telegram_id)
-        needed = ScoreAndRegisterConfig.SCORE_REGISTER_NEED
-        
-        if not score_record or score_record.SCORE < needed:
-            current = score_record.SCORE if score_record else 0
-            return RegisterResponse(
-                RegisterResult.INSUFFICIENT_SCORE,
-                f"积分不足，需要 {needed} {ScoreAndRegisterConfig.SCORE_NAME}，当前 {current}"
+
+        locks = await acquire_registration_lock(username, telegram_id)
+        if locks is None:
+            return RegisterResponse(RegisterResult.ERROR, "当前注册请求较多，请稍后重试")
+
+        global_lock = await acquire_global_registration_lock()
+        if global_lock is None:
+            await release_registration_lock(locks)
+            return RegisterResponse(RegisterResult.ERROR, "当前注册请求较多，请稍后重试")
+
+        try:
+            # 检查注册是否开放
+            available, msg = await UserService.check_registration_available(use_cache=False)
+            if not available:
+                return RegisterResponse(RegisterResult.USER_LIMIT_REACHED, msg)
+            
+            # 检查用户是否已存在
+            existing_user = await UserOperate.get_user_by_telegram_id(telegram_id)
+            if existing_user and existing_user.EMBYID:
+                return RegisterResponse(RegisterResult.USER_EXISTS, "您已经注册过了")
+
+            # 检查积分
+            score_record = await ScoreOperate.get_score_by_telegram_id(telegram_id)
+            needed = ScoreAndRegisterConfig.SCORE_REGISTER_NEED
+            
+            if not score_record or score_record.SCORE < needed:
+                current = score_record.SCORE if score_record else 0
+                return RegisterResponse(
+                    RegisterResult.INSUFFICIENT_SCORE,
+                    f"积分不足，需要 {needed} {ScoreAndRegisterConfig.SCORE_NAME}，当前 {current}"
+                )
+            
+            # 扣除积分
+            score_record.SCORE -= needed
+            await ScoreOperate.update_score(score_record)
+            
+            # 创建 Emby 账户
+            return await UserService._create_emby_user(
+                telegram_id=telegram_id,
+                username=username,
+                email=email,
+                days=30,
+                password=password
             )
-        
-        # 扣除积分
-        score_record.SCORE -= needed
-        await ScoreOperate.update_score(score_record)
-        
-        # 创建 Emby 账户
-        return await UserService._create_emby_user(
-            telegram_id=telegram_id,
-            username=username,
-            email=email,
-            days=30,
-            password=password
-        )
+        finally:
+            await release_global_registration_lock(global_lock)
+            await release_registration_lock(locks)
 
     @staticmethod
     async def register_pending(
@@ -186,124 +299,146 @@ class UserService:
         if not ScoreAndRegisterConfig.ALLOW_PENDING_REGISTER:
             return RegisterResponse(RegisterResult.ERROR, "暂不开放注册，请使用注册码")
         
-        # 检查用户名是否已存在
-        existing = await UserOperate.get_user_by_username(username)
-        if existing:
-            return RegisterResponse(RegisterResult.USER_EXISTS, "用户名已被使用")
-        
-        # 如果有 telegram_id，检查是否已注册
-        if telegram_id:
-            existing_tg = await UserOperate.get_user_by_telegram_id(telegram_id)
-            if existing_tg:
-                return RegisterResponse(RegisterResult.USER_EXISTS, "该 Telegram 账号已注册")
-        
-        # 先获取新 UID
-        new_uid = await UserOperate.get_new_uid()
-        user_password = password if password else generate_password(12)
-        
-        # 检查是否是预设管理员或白名单（优先使用 UID，其次使用用户名）
-        is_admin = False
-        is_whitelist = False
-        
-        # 先检查管理员 UID 列表
-        admin_uids = ScoreAndRegisterConfig.ADMIN_UIDS
-        if admin_uids:
-            uid_list = [int(u.strip()) for u in admin_uids.split(',') if u.strip().isdigit()]
-            is_admin = new_uid in uid_list
-        
-        # 如果 UID 未匹配，再检查管理员用户名列表
-        if not is_admin:
-            admin_usernames = ScoreAndRegisterConfig.ADMIN_USERNAMES
-            if admin_usernames:
-                name_list = [n.strip().lower() for n in admin_usernames.split(',') if n.strip()]
-                is_admin = username.lower() in name_list
-        
-        # 检查白名单 UID 列表
-        if not is_admin:
-            whitelist_uids = ScoreAndRegisterConfig.WHITE_LIST_UIDS
-            if whitelist_uids:
-                uid_list = [int(u.strip()) for u in whitelist_uids.split(',') if u.strip().isdigit()]
-                is_whitelist = new_uid in uid_list
-        
-        # 如果 UID 未匹配，再检查白名单用户名列表
-        if not is_admin and not is_whitelist:
-            whitelist_usernames = ScoreAndRegisterConfig.WHITE_LIST_USERNAMES
-            if whitelist_usernames:
-                name_list = [n.strip().lower() for n in whitelist_usernames.split(',') if n.strip()]
-                is_whitelist = username.lower() in name_list
-        
-        # 9999-12-31 的时间戳（管理员和白名单使用）
-        permanent_expire = 253402214400
-        
-        # 管理员默认激活，到期时间为 9999 年
-        if is_admin:
-            user = UserModel(
-                UID=new_uid,
-                TELEGRAM_ID=telegram_id,
-                USERNAME=username,
-                EMAIL=email,
-                EMBYID=None,  # 稍后创建 Emby 账户
-                PASSWORD=hash_password(user_password),
-                ROLE=Role.ADMIN.value,
-                ACTIVE_STATUS=True,  # 管理员默认激活
-                EXPIRED_AT=permanent_expire,
-                REGISTER_TIME=timestamp(),
+        locks = await acquire_registration_lock(username, telegram_id)
+        if locks is None:
+            return RegisterResponse(RegisterResult.ERROR, "当前注册请求较多，请稍后重试")
+
+        global_lock = await acquire_global_registration_lock()
+        if global_lock is None:
+            await release_registration_lock(locks)
+            return RegisterResponse(RegisterResult.ERROR, "当前注册请求较多，请稍后重试")
+
+        try:
+            # 检查是否允许无码注册
+            if not ScoreAndRegisterConfig.ALLOW_PENDING_REGISTER:
+                return RegisterResponse(RegisterResult.ERROR, "暂不开放注册，请使用注册码")
+
+            # 检查注册是否开放
+            available, msg = await UserService.check_registration_available(use_cache=False)
+            if not available:
+                return RegisterResponse(RegisterResult.USER_LIMIT_REACHED, msg)
+            
+            # 检查用户名是否已存在
+            existing = await UserOperate.get_user_by_username(username)
+            if existing:
+                return RegisterResponse(RegisterResult.USER_EXISTS, "用户名已被使用")
+            
+            # 如果有 telegram_id，检查是否已注册
+            if telegram_id:
+                existing_tg = await UserOperate.get_user_by_telegram_id(telegram_id)
+                if existing_tg:
+                    return RegisterResponse(RegisterResult.USER_EXISTS, "该 Telegram 账号已注册")
+            
+            # 先获取新 UID
+            new_uid = await UserOperate.get_new_uid()
+            user_password = password if password else generate_password(12)
+            
+            # 检查是否是预设管理员或白名单（优先使用 UID，其次使用用户名）
+            is_admin = False
+            is_whitelist = False
+            
+            # 先检查管理员 UID 列表
+            admin_uids = ScoreAndRegisterConfig.ADMIN_UIDS
+            if admin_uids:
+                uid_list = [int(u.strip()) for u in admin_uids.split(',') if u.strip().isdigit()]
+                is_admin = new_uid in uid_list
+            
+            # 如果 UID 未匹配，再检查管理员用户名列表
+            if not is_admin:
+                admin_usernames = ScoreAndRegisterConfig.ADMIN_USERNAMES
+                if admin_usernames:
+                    name_list = [n.strip().lower() for n in admin_usernames.split(',') if n.strip()]
+                    is_admin = username.lower() in name_list
+            
+            # 检查白名单 UID 列表
+            if not is_admin:
+                whitelist_uids = ScoreAndRegisterConfig.WHITE_LIST_UIDS
+                if whitelist_uids:
+                    uid_list = [int(u.strip()) for u in whitelist_uids.split(',') if u.strip().isdigit()]
+                    is_whitelist = new_uid in uid_list
+            
+            # 如果 UID 未匹配，再检查白名单用户名列表
+            if not is_admin and not is_whitelist:
+                whitelist_usernames = ScoreAndRegisterConfig.WHITE_LIST_USERNAMES
+                if whitelist_usernames:
+                    name_list = [n.strip().lower() for n in whitelist_usernames.split(',') if n.strip()]
+                    is_whitelist = username.lower() in name_list
+            
+            # 9999-12-31 的时间戳（管理员和白名单使用）
+            permanent_expire = 253402214400
+            
+            # 管理员默认激活，到期时间为 9999 年
+            if is_admin:
+                user = UserModel(
+                    UID=new_uid,
+                    TELEGRAM_ID=telegram_id,
+                    USERNAME=username,
+                    EMAIL=email,
+                    EMBYID=None,  # 稍后创建 Emby 账户
+                    PASSWORD=hash_password(user_password),
+                    ROLE=Role.ADMIN.value,
+                    ACTIVE_STATUS=True,  # 管理员默认激活
+                    EXPIRED_AT=permanent_expire,
+                    REGISTER_TIME=timestamp(),
+                )
+            elif is_whitelist:
+                # 白名单用户默认激活，到期时间为 9999 年
+                user = UserModel(
+                    UID=new_uid,
+                    TELEGRAM_ID=telegram_id,
+                    USERNAME=username,
+                    EMAIL=email,
+                    EMBYID=None,  # 稍后创建 Emby 账户
+                    PASSWORD=hash_password(user_password),
+                    ROLE=Role.WHITE_LIST.value,
+                    ACTIVE_STATUS=True,
+                    EXPIRED_AT=permanent_expire,
+                    REGISTER_TIME=timestamp(),
+                )
+            else:
+                # 普通用户：已激活但无 Emby 账户（需要积分激活 Emby 功能）
+                user = UserModel(
+                    UID=new_uid,
+                    TELEGRAM_ID=telegram_id,
+                    USERNAME=username,
+                    EMAIL=email,
+                    EMBYID=None,  # 无 Emby 账户
+                    PASSWORD=hash_password(user_password),
+                    ROLE=Role.NORMAL.value,
+                    ACTIVE_STATUS=True,  # 账户激活，可以登录、签到
+                    EXPIRED_AT=-1,
+                    REGISTER_TIME=timestamp(),
+                )
+            await UserOperate.add_user(user)
+            
+            # 初始化积分记录（获取或创建）
+            from src.db.score import ScoreOperate
+            score_record = await ScoreOperate.get_score_by_uid(new_uid)
+            if not score_record:
+                from src.db.score import ScoreModel
+                score_record = ScoreModel(
+                    UID=new_uid,
+                    TELEGRAM_ID=telegram_id,
+                    SCORE=ScoreAndRegisterConfig.PENDING_REGISTER_BONUS,  # 赠送初始积分
+                )
+                await ScoreOperate.add_score(score_record)
+            else:
+                # 已有记录，增加积分
+                score_record.SCORE += ScoreAndRegisterConfig.PENDING_REGISTER_BONUS
+                await ScoreOperate.update_score(score_record)
+            
+            logger.info(f"待激活用户注册: {username} (UID: {new_uid})")
+            
+            activate_cost = ScoreAndRegisterConfig.SCORE_REGISTER_NEED
+            return RegisterResponse(
+                result=RegisterResult.SUCCESS,
+                message=f"注册成功！您可以登录使用基础功能，积攒 {activate_cost} 积分后可激活 Emby 账户",
+                user=user,
+                emby_password=user_password if not password else None
             )
-        elif is_whitelist:
-            # 白名单用户默认激活，到期时间为 9999 年
-            user = UserModel(
-                UID=new_uid,
-                TELEGRAM_ID=telegram_id,
-                USERNAME=username,
-                EMAIL=email,
-                EMBYID=None,  # 稍后创建 Emby 账户
-                PASSWORD=hash_password(user_password),
-                ROLE=Role.WHITE_LIST.value,
-                ACTIVE_STATUS=True,  # 白名单默认激活
-                EXPIRED_AT=permanent_expire,
-                REGISTER_TIME=timestamp(),
-            )
-        else:
-            # 普通用户：已激活但无 Emby 账户（需要积分激活 Emby 功能）
-            user = UserModel(
-                UID=new_uid,
-                TELEGRAM_ID=telegram_id,
-                USERNAME=username,
-                EMAIL=email,
-                EMBYID=None,  # 无 Emby 账户
-                PASSWORD=hash_password(user_password),
-                ROLE=Role.NORMAL.value,
-                ACTIVE_STATUS=True,  # 账户激活，可以登录、签到
-                EXPIRED_AT=-1,
-                REGISTER_TIME=timestamp(),
-            )
-        await UserOperate.add_user(user)
-        
-        # 初始化积分记录（获取或创建）
-        from src.db.score import ScoreOperate
-        score_record = await ScoreOperate.get_score_by_uid(new_uid)
-        if not score_record:
-            from src.db.score import ScoreModel
-            score_record = ScoreModel(
-                UID=new_uid,
-                TELEGRAM_ID=telegram_id,
-                SCORE=ScoreAndRegisterConfig.PENDING_REGISTER_BONUS,  # 赠送初始积分
-            )
-            await ScoreOperate.add_score(score_record)
-        else:
-            # 已有记录，增加积分
-            score_record.SCORE += ScoreAndRegisterConfig.PENDING_REGISTER_BONUS
-            await ScoreOperate.update_score(score_record)
-        
-        logger.info(f"待激活用户注册: {username} (UID: {new_uid})")
-        
-        activate_cost = ScoreAndRegisterConfig.SCORE_REGISTER_NEED
-        return RegisterResponse(
-            result=RegisterResult.SUCCESS,
-            message=f"注册成功！您可以登录使用基础功能，积攒 {activate_cost} 积分后可激活 Emby 账户",
-            user=user,
-            emby_password=user_password if not password else None
-        )
+        finally:
+            await release_global_registration_lock(global_lock)
+            await release_registration_lock(locks)
 
     @staticmethod
     async def activate_pending_user(user: UserModel) -> Tuple[bool, str]:
@@ -820,6 +955,55 @@ class UserService:
         except Exception as e:
             logger.error(f"修改密码失败: {e}")
             return False, f"修改密码失败: {e}"
+
+    @staticmethod
+    async def change_system_password(
+        user: UserModel, old_password: str, new_password: str
+    ) -> Tuple[bool, str]:
+        """
+        修改系统登录密码（不影响 Emby 密码）
+
+        :return: (成功, 消息)
+        """
+        from src.core.utils import verify_password as _verify
+
+        if not user.PASSWORD or not _verify(old_password, user.PASSWORD):
+            return False, "当前密码错误"
+
+        if len(new_password) < 6:
+            return False, "新密码长度至少 6 位"
+
+        try:
+            user.PASSWORD = hash_password(new_password)
+            await UserOperate.update_user(user)
+            logger.info(f"系统密码修改成功: {user.USERNAME}")
+            return True, "系统密码修改成功"
+        except Exception as e:
+            logger.error(f"修改系统密码失败: {e}")
+            return False, f"修改系统密码失败: {e}"
+
+    @staticmethod
+    async def change_emby_password(user: UserModel, new_password: str) -> Tuple[bool, str]:
+        """
+        修改 Emby 密码（仅更新绑定的 Emby 账户）
+
+        :return: (成功, 消息)
+        """
+        if not user.EMBYID:
+            return False, "用户没有关联的 Emby 账户"
+
+        if len(new_password) < 6:
+            return False, "新密码长度至少 6 位"
+
+        try:
+            emby = get_emby_client()
+            await emby.reset_user_password(user.EMBYID)
+            await emby.set_user_password(user.EMBYID, new_password)
+            logger.info(f"Emby 密码修改成功: {user.USERNAME}")
+            return True, "Emby 密码修改成功"
+        except Exception as e:
+            logger.error(f"修改 Emby 密码失败: {e}")
+            return False, f"修改 Emby 密码失败: {e}"
 
     @staticmethod
     async def toggle_nsfw(user: UserModel, enable: bool, library_names: List[str] = None) -> Tuple[bool, str]:

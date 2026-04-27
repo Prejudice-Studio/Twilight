@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from src.config import Config, ScoreAndRegisterConfig, SchedulerConfig
+from src.config import Config, ScoreAndRegisterConfig, SchedulerConfig, EmbyReviewConfig
 from src.db.user import UserOperate
 from src.services import get_emby_client, EmbyService
 from src.core.utils import timestamp, format_duration
@@ -145,6 +145,32 @@ class SchedulerService:
             logger.error(f"❌ Emby 同步出错: {e}")
 
     @staticmethod
+    async def emby_review():
+        """定期审查 Emby 账号的不活跃和设备使用情况"""
+        if not EmbyReviewConfig.ENABLED:
+            logger.info("ℹ️ Emby 审查已禁用，跳过执行")
+            return
+
+        logger.info("🔍 开始 Emby 账号审查...")
+        try:
+            inactive_result = await EmbyService.review_inactive_users(
+                action=EmbyReviewConfig.INACTIVE_ACTION,
+                threshold_days=EmbyReviewConfig.INACTIVE_THRESHOLD_DAYS,
+                delete_emby=EmbyReviewConfig.INACTIVE_DELETE_EMBY,
+            )
+            device_result = await EmbyService.review_device_usage(
+                max_devices=EmbyReviewConfig.DEVICE_MAX_COUNT,
+                threshold_days=EmbyReviewConfig.DEVICE_THRESHOLD_DAYS,
+                action=EmbyReviewConfig.DEVICE_ACTION,
+            )
+
+            logger.info(
+                f"✅ Emby 审查完成: 不活跃处理 {len(inactive_result['processed'])}, 设备审查处理 {len(device_result['processed'])}"
+            )
+        except Exception as e:
+            logger.error(f"❌ Emby 审查出错: {e}")
+
+    @staticmethod
     async def cleanup_no_emby_users():
         """清理注册后长期未创建 Emby 账户的用户"""
         if not ScoreAndRegisterConfig.AUTO_CLEANUP_NO_EMBY:
@@ -210,7 +236,11 @@ class SchedulerService:
         
         # Emby 数据同步（每 6 小时）
         scheduler.add_job(cls.emby_sync, 'interval', hours=SchedulerConfig.EMBY_SYNC_INTERVAL, id='emby_sync')
-        
+
+        if EmbyReviewConfig.ENABLED:
+            h_review, m_review = parse_time(EmbyReviewConfig.REVIEW_TIME)
+            scheduler.add_job(cls.emby_review, 'cron', hour=h_review, minute=m_review, id='emby_review')
+
         # 无 Emby 账户用户清理（每天过期检查后执行）
         h_cleanup, m_cleanup = parse_time(SchedulerConfig.EXPIRED_CHECK_TIME)
         scheduler.add_job(cls.cleanup_no_emby_users, 'cron', hour=h_cleanup, minute=(m_cleanup + 30) % 60, id='cleanup_no_emby')

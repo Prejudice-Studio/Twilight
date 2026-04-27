@@ -88,15 +88,13 @@
    # 复制 .env.example 为 .env
    Copy-Item .env.example .env
    
-   # 编辑 .env 文件配置各项参数
+   # 编辑 .env 文件配置各项参数，或直接使用 config.toml 进行配置
    notepad .env
    ```
 
 5. **初始化数据库**
    ```powershell
-   # 数据库会在首次运行时自动创建
-   # 升级版本后运行迁移脚本，添加新列：
-   python migrate.py
+   # 数据库文件会在首次运行时自动创建
    ```
 
 ### 运行应用
@@ -131,15 +129,6 @@ uvicorn asgi:app --host 0.0.0.0 --port 5000 --workers 4
 # 或部署为 Windows 服务...
 ```
 
-### 测试
-
-```powershell
-# 运行单元测试
-pytest tests/ -v
-
-# 生成覆盖率报告
-pytest tests/ --cov=src --cov-report=html
-```
 
 ## Linux 安装
 
@@ -456,9 +445,6 @@ git pull
 
 # 更新依赖
 pip install -r requirements.txt --upgrade
-
-# 运行数据库迁移（每次更新后）
-python migrate.py
 
 # 查看已安装的包版本
 pip list

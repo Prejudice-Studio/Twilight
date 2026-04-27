@@ -21,6 +21,8 @@ from src.core.utils import setup_logging, format_duration
 
 logger = logging.getLogger(__name__)
 
+# main.py 仅作为命令行入口，无论是单独启动 API、Bot、调度器，还是全功能模式，
+# 这里的任务都负责协调各项服务的生命周期。
 
 def run_api_server(host: str = '0.0.0.0', port: int = 5000, debug: bool = False):
     """启动 API 服务器"""
@@ -37,9 +39,10 @@ async def run_scheduler():
     """运行定时任务"""
     from src.services.scheduler_service import SchedulerService
     
+    # 启动调度器服务，它会在后台处理定时任务，如自动续期、定时同步等
     await SchedulerService.start()
     
-    # 保持运行
+    # 保持运行，直到外部终止
     try:
         while True:
             await asyncio.sleep(3600)
@@ -91,6 +94,7 @@ async def run_all():
     logger.info("=" * 50)
     
     # 1. 在单独线程中运行 API
+    #    这样可以让当前协程继续执行 Bot 和调度器逻辑，避免事件循环阻塞。
     def run_api_in_thread():
         from src.api import create_app
         app = create_app()

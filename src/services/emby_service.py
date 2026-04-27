@@ -8,6 +8,8 @@ from typing import Optional, List, Tuple, Dict, Any
 from dataclasses import dataclass
 
 from src.config import EmbyConfig, ScoreAndRegisterConfig
+from src.db.login_log import UserDeviceOperate
+from src.db.playback import PlaybackOperate
 from src.db.user import UserModel, UserOperate, Role
 from src.services.emby import (
     get_emby_client,
@@ -178,8 +180,16 @@ class EmbyService:
                         )
                         user.USERNAME = emby_user.name
                         await UserOperate.update_user(user)
-                    
-                    # 同步状态（本地 → Emby）
+
+                    # 同步启用/禁用状态：如果 Emby 已禁用但本地仍启用，则修正本地状态；否则按本地状态同步到 Emby
+                    emby_disabled = bool(emby_user.policy.get('IsDisabled', False))
+                    if emby_disabled and user.ACTIVE_STATUS:
+                        logger.info(
+                            f"Emby 账户已被禁用，更新本地状态: {user.USERNAME} (UID: {user.UID})"
+                        )
+                        user.ACTIVE_STATUS = False
+                        await UserOperate.update_user(user)
+
                     from src.services.user_service import UserService
                     ok, msg = await UserService.sync_user_to_emby(user)
                     if ok:
@@ -201,6 +211,105 @@ class EmbyService:
             logger.error(f"同步所有用户失败: {e}")
             return 0, 0, [str(e)]
 
+    @staticmethod
+    async def review_inactive_users(action: str = 'disable', threshold_days: int = 21, delete_emby: bool = False) -> Dict[str, Any]:
+        """审查长时间未播放的用户并按配置处理"""
+        from src.services.user_service import UserService
+
+        users = await UserOperate.get_all_emby_users()
+        cutoff = timestamp() - threshold_days * 86400
+        processed = []
+        skipped = []
+        failed = []
+
+        for user in users:
+            if (not user.EMBYID or not user.ACTIVE_STATUS or
+                user.ROLE in (Role.ADMIN.value, Role.WHITE_LIST.value)):
+                skipped.append({'uid': user.UID, 'username': user.USERNAME, 'reason': '未绑定 Emby/已禁用/管理员或白名单账号'})
+                continue
+
+            last_play = await PlaybackOperate.get_user_last_play_time(user.UID)
+            if last_play is not None and last_play >= cutoff:
+                skipped.append({'uid': user.UID, 'username': user.USERNAME, 'reason': '最近有播放记录'})
+                continue
+
+            try:
+                if action == 'none':
+                    processed.append({'uid': user.UID, 'username': user.USERNAME, 'action': 'none', 'message': '候选账号，仅预审'})
+                else:
+                    if action == 'delete':
+                        success, message = await UserService.delete_user(user, delete_emby=delete_emby)
+                    else:
+                        success, message = await UserService.disable_user(user)
+
+                    if success:
+                        processed.append({'uid': user.UID, 'username': user.USERNAME, 'action': action, 'message': message})
+                    else:
+                        failed.append({'uid': user.UID, 'username': user.USERNAME, 'reason': message})
+            except Exception as e:
+                failed.append({'uid': user.UID, 'username': user.USERNAME, 'reason': str(e)})
+
+        return {
+            'processed': processed,
+            'skipped': skipped,
+            'failed': failed,
+            'threshold_days': threshold_days,
+            'action': action,
+        }
+
+    @staticmethod
+    async def review_device_usage(max_devices: int = 5, threshold_days: int = 30, action: str = 'kick_oldest') -> Dict[str, Any]:
+        """审查设备使用情况并按配置处理"""
+        users = await UserOperate.get_all_emby_users()
+        cutoff = timestamp() - threshold_days * 86400
+        processed = []
+        skipped = []
+        failed = []
+
+        for user in users:
+            if (not user.EMBYID or not user.ACTIVE_STATUS or
+                user.ROLE in (Role.ADMIN.value, Role.WHITE_LIST.value)):
+                skipped.append({'uid': user.UID, 'username': user.USERNAME, 'reason': '未绑定 Emby/已禁用/管理员或白名单账号'})
+                continue
+
+            devices = await UserDeviceOperate.get_user_devices(user.UID)
+            recent_devices = [d for d in devices if d.LAST_SEEN >= cutoff]
+            if len(recent_devices) <= max_devices:
+                skipped.append({'uid': user.UID, 'username': user.USERNAME, 'device_count': len(recent_devices), 'reason': '设备数量未超限'})
+                continue
+
+            try:
+                if action == 'none':
+                    processed.append({'uid': user.UID, 'username': user.USERNAME, 'action': 'none', 'message': '候选账号，仅预审', 'device_count': len(recent_devices)})
+                elif action == 'block_oldest':
+                    block_count = 0
+                    for device in sorted(recent_devices, key=lambda d: d.LAST_SEEN):
+                        if len(recent_devices) - block_count <= max_devices:
+                            break
+                        await UserDeviceOperate.block_device(user.UID, device.DEVICE_ID)
+                        block_count += 1
+                    processed.append({'uid': user.UID, 'username': user.USERNAME, 'action': action, 'blocked': block_count, 'device_count': len(recent_devices)})
+                else:
+                    emby = get_emby_client()
+                    sessions = await emby.get_user_sessions(user.EMBYID)
+                    if not sessions:
+                        skipped.append({'uid': user.UID, 'username': user.USERNAME, 'device_count': len(recent_devices), 'reason': '无活跃会话可踢出'})
+                        continue
+                    oldest = min(sessions, key=lambda s: s.last_activity_date or 0)
+                    await emby.kill_session(oldest.id)
+                    processed.append({'uid': user.UID, 'username': user.USERNAME, 'action': action, 'killed_session': oldest.id, 'device_count': len(recent_devices)})
+            except Exception as e:
+                failed.append({'uid': user.UID, 'username': user.USERNAME, 'reason': str(e)})
+
+        return {
+            'processed': processed,
+            'skipped': skipped,
+            'failed': failed,
+            'max_devices': max_devices,
+            'threshold_days': threshold_days,
+            'action': action,
+        }
+
     # ==================== 用户状态检查 ====================
 
     @staticmethod
@@ -218,9 +327,13 @@ class EmbyService:
                 emby_user = await emby.get_user(user.EMBYID)
                 if emby_user:
                     # 检查同步状态
+                    emby_disabled = bool(emby_user.policy.get('IsDisabled', False))
                     if emby_user.name != user.USERNAME:
                         is_synced = False
                         message = "用户名不同步"
+                    elif emby_disabled != (not user.ACTIVE_STATUS):
+                        is_synced = False
+                        message = "账户启用状态与 Emby 不一致"
                     
                     # 获取活跃会话
                     sessions = await emby.get_user_sessions(user.EMBYID)

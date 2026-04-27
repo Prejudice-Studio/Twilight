@@ -96,6 +96,15 @@ class BaseConfig:
                 setattr(cls, attr_name, value)
 
     @classmethod
+    @classmethod
+    def _serialize_config_value(cls, value: Any) -> Any:
+        if isinstance(value, Path):
+            try:
+                return str(value.relative_to(ROOT_PATH))
+            except ValueError:
+                return str(value)
+        return value
+
     def save_to_toml(cls) -> bool:
         """
         将当前配置保存到TOML文件
@@ -113,7 +122,9 @@ class BaseConfig:
             config_data = {}
             for key in dir(cls):
                 if key.isupper() and not key.startswith('_'):
-                    config_data[key.lower()] = getattr(cls, key)
+                    config_data[key.lower()] = cls._serialize_config_value(
+                        getattr(cls, key)
+                    )
 
             # 更新配置
             if cls._section:
@@ -178,7 +189,7 @@ class BaseConfig:
             if key not in section_data:
                 # 将 Path 转为字符串以便 TOML 序列化
                 if isinstance(default_value, Path):
-                    default_value = str(default_value)
+                    default_value = cls._serialize_config_value(default_value)
                 missing[key] = default_value
         
         if not missing:
@@ -338,6 +349,19 @@ class WebhookConfig(BaseConfig):
     RANKING_PUBLIC: bool = True  # 排行榜是否公开（不需要登录）
 
 
+class EmbyReviewConfig(BaseConfig):
+    """Emby 账号审查配置"""
+    ENABLED: bool = False  # 是否启用 Emby 审查任务
+    REVIEW_TIME: str = "04:00"  # 审查任务执行时间
+    INACTIVE_THRESHOLD_DAYS: int = 21  # 多久没有播放记录则视为不活跃
+    INACTIVE_ACTION: str = "disable"  # 不活跃账号的处理方式 disable/delete
+    INACTIVE_DELETE_EMBY: bool = False  # 删除账号时是否同时删除 Emby 用户
+    DEVICE_REVIEW_ENABLED: bool = False  # 是否启用设备使用审查
+    DEVICE_THRESHOLD_DAYS: int = 30  # 统计设备数量的时间窗口（天）
+    DEVICE_MAX_COUNT: int = 5  # 允许的最大设备数量
+    DEVICE_ACTION: str = "kick_oldest"  # 超限时的处理方式 kick_oldest/block_oldest
+
+
 class APIConfig(BaseConfig):
     """API 服务器配置"""
     HOST: str = "0.0.0.0"
@@ -404,12 +428,14 @@ SecurityConfig.update_from_toml('Security')
 SchedulerConfig.update_from_toml('Scheduler')
 NotificationConfig.update_from_toml('Notification')
 BangumiSyncConfig.update_from_toml('BangumiSync')
+EmbyReviewConfig.update_from_toml('EmbyReview')
 
 # 启动时自动补全缺失的配置项
 _config_classes = [
     Config, EmbyConfig, TelegramConfig, ScoreAndRegisterConfig,
     WebhookConfig, DeviceLimitConfig, APIConfig, SecurityConfig,
     SchedulerConfig, NotificationConfig, BangumiSyncConfig,
+    EmbyReviewConfig,
 ]
 _filled = sum(1 for c in _config_classes if c.fill_missing_to_toml())
 if _filled:

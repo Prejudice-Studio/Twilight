@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Server,
@@ -18,11 +18,15 @@ import {
   Wifi,
   WifiOff,
   Send,
+  Save,
   MessageCircle,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
 import {
@@ -109,6 +113,23 @@ export default function AdminEmbyPage() {
   const [isResetting, setIsResetting] = useState(false);
   const [isDeletingUnlinked, setIsDeletingUnlinked] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isReviewingInactive, setIsReviewingInactive] = useState(false);
+  const [isReviewingDevices, setIsReviewingDevices] = useState(false);
+  const [isSavingReviewConfig, setIsSavingReviewConfig] = useState(false);
+
+  const [reviewSettings, setReviewSettings] = useState<{
+    enabled: boolean;
+    review_time: string;
+    inactive_threshold_days: number;
+    inactive_action: string;
+    inactive_delete_emby: boolean;
+    device_review_enabled: boolean;
+    device_threshold_days: number;
+    device_max_count: number;
+    device_action: string;
+  } | null>(null);
+  const [inactiveReviewResult, setInactiveReviewResult] = useState<any | null>(null);
+  const [deviceReviewResult, setDeviceReviewResult] = useState<any | null>(null);
 
   // Confirm dialog
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
@@ -181,6 +202,17 @@ export default function AdminEmbyPage() {
       toast({ title: "加载出错", description: err.message, variant: "destructive" });
     } finally {
       setIsLoadingUsers(false);
+    }
+  }, [toast]);
+
+  const loadReviewSettings = useCallback(async () => {
+    try {
+      const res = await api.getEmbyReviewSettings();
+      if (res.success && res.data) {
+        setReviewSettings(res.data);
+      }
+    } catch (err: any) {
+      toast({ title: "加载审查配置失败", description: err.message, variant: "destructive" });
     }
   }, [toast]);
 
@@ -294,6 +326,93 @@ export default function AdminEmbyPage() {
     }
   }, [toast, handleLoadUsers]);
 
+  const handleReviewInactiveUsers = useCallback(async () => {
+    if (!reviewSettings) {
+      toast({ title: "审查配置未加载", variant: "destructive" });
+      return;
+    }
+
+    setIsReviewingInactive(true);
+    try {
+      const res = await api.reviewInactiveEmbyUsers({
+        threshold_days: reviewSettings.inactive_threshold_days,
+        action: reviewSettings.inactive_action,
+        delete_emby: reviewSettings.inactive_delete_emby,
+      });
+      if (res.success && res.data) {
+        setInactiveReviewResult(res.data);
+        toast({ title: "不活跃审查完成", description: `处理 ${res.data.processed.length} 个用户`, variant: "success" });
+        await handleLoadUsers();
+      } else {
+        toast({ title: "审查失败", description: res.message, variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "审查出错", description: err.message, variant: "destructive" });
+    } finally {
+      setIsReviewingInactive(false);
+    }
+  }, [toast, handleLoadUsers, reviewSettings]);
+
+  const handleReviewDeviceUsage = useCallback(async () => {
+    if (!reviewSettings) {
+      toast({ title: "审查配置未加载", variant: "destructive" });
+      return;
+    }
+
+    setIsReviewingDevices(true);
+    try {
+      const res = await api.reviewEmbyDeviceUsage({
+        max_devices: reviewSettings.device_max_count,
+        threshold_days: reviewSettings.device_threshold_days,
+        action: reviewSettings.device_action,
+      });
+      if (res.success && res.data) {
+        setDeviceReviewResult(res.data);
+        toast({ title: "设备审查完成", description: `处理 ${res.data.processed.length} 个用户`, variant: "success" });
+        await handleLoadUsers();
+      } else {
+        toast({ title: "审查失败", description: res.message, variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "审查出错", description: err.message, variant: "destructive" });
+    } finally {
+      setIsReviewingDevices(false);
+    }
+  }, [toast, handleLoadUsers, reviewSettings]);
+
+  const handleSaveReviewSettings = useCallback(async () => {
+    if (!reviewSettings) {
+      toast({ title: "审查配置未加载", variant: "destructive" });
+      return;
+    }
+
+    setIsSavingReviewConfig(true);
+    try {
+      const res = await api.updateConfigBySchema({
+        EmbyReview: {
+          enabled: reviewSettings.enabled,
+          review_time: reviewSettings.review_time,
+          inactive_threshold_days: reviewSettings.inactive_threshold_days,
+          inactive_action: reviewSettings.inactive_action,
+          inactive_delete_emby: reviewSettings.inactive_delete_emby,
+          device_review_enabled: reviewSettings.device_review_enabled,
+          device_threshold_days: reviewSettings.device_threshold_days,
+          device_max_count: reviewSettings.device_max_count,
+          device_action: reviewSettings.device_action,
+        },
+      });
+      if (res.success) {
+        toast({ title: "配置已保存", variant: "success" });
+      } else {
+        toast({ title: "保存失败", description: res.message, variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "保存失败", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSavingReviewConfig(false);
+    }
+  }, [toast, reviewSettings]);
+
   const syncStatusBadge = (status: string) => {
     switch (status) {
       case "synced":
@@ -306,6 +425,11 @@ export default function AdminEmbyPage() {
         return <Badge variant="secondary">{status}</Badge>;
     }
   };
+
+  useEffect(() => {
+    void handleLoadUsers();
+    void loadReviewSettings();
+  }, [handleLoadUsers, loadReviewSettings]);
 
   return (
     <motion.div
@@ -676,6 +800,243 @@ export default function AdminEmbyPage() {
               )}
             </CardContent>
           )}
+        </Card>
+      </motion.div>
+
+      {/* Review Actions */}
+      <motion.div variants={item}>
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Shield className="h-5 w-5" />
+                  审查与策略配置
+                </CardTitle>
+                <CardDescription>
+                  审查候选账号并列出结果，不直接执行禁用/删除/踢出操作。
+                </CardDescription>
+              </div>
+              <Button
+                variant="secondary"
+                onClick={handleSaveReviewSettings}
+                disabled={!reviewSettings || isSavingReviewConfig}
+              >
+                {isSavingReviewConfig ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-2 h-4 w-4" />
+                )}
+                保存审查配置
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-lg border p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="font-medium">不活跃用户审查</p>
+                    <p className="text-sm text-muted-foreground">
+                      检查最近没有播放记录的用户并按配置禁用或删除。
+                    </p>
+                  </div>
+                  <Switch
+                    checked={reviewSettings?.enabled ?? false}
+                    onCheckedChange={(checked) =>
+                      setReviewSettings((prev) => prev ? { ...prev, enabled: checked } : prev)
+                    }
+                  />
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <Label>不活跃阈值 (天)</Label>
+                    <Input
+                      type="number"
+                      value={reviewSettings?.inactive_threshold_days ?? 21}
+                      onChange={(e) =>
+                        setReviewSettings((prev) => prev ? { ...prev, inactive_threshold_days: Number(e.target.value) } : prev)
+                      }
+                    />
+                  </div>
+                  <div>
+                    <Label>处理方式</Label>
+                    <select
+                      className="w-full rounded-md border p-2"
+                      value={reviewSettings?.inactive_action ?? 'disable'}
+                      onChange={(e) =>
+                        setReviewSettings((prev) => prev ? { ...prev, inactive_action: e.target.value } : prev)
+                      }
+                    >
+                      <option value="disable">禁用账户</option>
+                      <option value="delete">删除账户</option>
+                      <option value="none">仅列出候选账号（不执行）</option>
+                    </select>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      仅列出符合条件的不活跃账号，下方显示候选账号列表。
+                    </p>
+                  </div>
+                  <div>
+                    <Label>删除时同步删除 Emby 账户</Label>
+                    <Switch
+                      checked={reviewSettings?.inactive_delete_emby ?? false}
+                      onCheckedChange={(checked) =>
+                        setReviewSettings((prev) => prev ? { ...prev, inactive_delete_emby: checked } : prev)
+                      }
+                    />
+                  </div>
+                  <Button
+                    onClick={handleReviewInactiveUsers}
+                    disabled={isReviewingInactive || !reviewSettings?.enabled}
+                  >
+                    {isReviewingInactive ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
+                    执行不活跃审查
+                  </Button>
+                </div>
+              </div>
+
+              <div className="rounded-lg border p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="font-medium">设备使用审查</p>
+                    <p className="text-sm text-muted-foreground">
+                      检查最近设备数是否超限，并踢出/封禁最早设备。
+                    </p>
+                  </div>
+                  <Switch
+                    checked={reviewSettings?.device_review_enabled ?? false}
+                    onCheckedChange={(checked) =>
+                      setReviewSettings((prev) => prev ? { ...prev, device_review_enabled: checked } : prev)
+                    }
+                  />
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <Label>时间窗口 (天)</Label>
+                    <Input
+                      type="number"
+                      value={reviewSettings?.device_threshold_days ?? 30}
+                      onChange={(e) =>
+                        setReviewSettings((prev) => prev ? { ...prev, device_threshold_days: Number(e.target.value) } : prev)
+                      }
+                    />
+                  </div>
+                  <div>
+                    <Label>设备上限</Label>
+                    <Input
+                      type="number"
+                      value={reviewSettings?.device_max_count ?? 5}
+                      onChange={(e) =>
+                        setReviewSettings((prev) => prev ? { ...prev, device_max_count: Number(e.target.value) } : prev)
+                      }
+                    />
+                  </div>
+                  <div>
+                    <Label>超限处理</Label>
+                    <select
+                      className="w-full rounded-md border p-2"
+                      value={reviewSettings?.device_action ?? 'kick_oldest'}
+                      onChange={(e) =>
+                        setReviewSettings((prev) => prev ? { ...prev, device_action: e.target.value } : prev)
+                      }
+                    >
+                      <option value="kick_oldest">踢出最早会话</option>
+                      <option value="block_oldest">封禁最早设备</option>
+                      <option value="none">仅列出候选账号（不执行）</option>
+                    </select>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      仅列出设备超限候选账号，下方显示候选账号列表。
+                    </p>
+                  </div>
+                  <Button
+                    onClick={handleReviewDeviceUsage}
+                    disabled={isReviewingDevices || !reviewSettings?.device_review_enabled}
+                  >
+                    {isReviewingDevices ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
+                    执行设备审查
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {inactiveReviewResult && (
+              <div className="rounded-lg border p-4 bg-slate-50 dark:bg-slate-950 space-y-3">
+                <p className="font-medium">不活跃审查结果</p>
+                <p className="text-sm text-muted-foreground">
+                  {inactiveReviewResult.action === 'none'
+                    ? `候选账号 ${inactiveReviewResult.processed.length} 个，跳过 ${inactiveReviewResult.skipped.length} 个。`
+                    : `已处理 ${inactiveReviewResult.processed.length} 个用户，跳过 ${inactiveReviewResult.skipped.length} 个。`}
+                </p>
+                {inactiveReviewResult.processed.length > 0 && (
+                  <div className="overflow-x-auto rounded-lg border">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50">
+                        <tr>
+                          <th className="text-left p-3 font-medium">UID</th>
+                          <th className="text-left p-3 font-medium">用户名</th>
+                          <th className="text-left p-3 font-medium">动作</th>
+                          <th className="text-left p-3 font-medium">说明</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {inactiveReviewResult.processed.map((item: any) => (
+                          <tr key={`${item.uid}-${item.action}`} className="hover:bg-muted/30">
+                            <td className="p-3 font-medium">{item.uid}</td>
+                            <td className="p-3">{item.username}</td>
+                            <td className="p-3">{item.action ?? '-'} </td>
+                            <td className="p-3 text-muted-foreground">{item.message || item.reason || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {deviceReviewResult && (
+              <div className="rounded-lg border p-4 bg-slate-50 dark:bg-slate-950 space-y-3">
+                <p className="font-medium">设备审查结果</p>
+                <p className="text-sm text-muted-foreground">
+                  {deviceReviewResult.action === 'none'
+                    ? `候选账号 ${deviceReviewResult.processed.length} 个，跳过 ${deviceReviewResult.skipped.length} 个。`
+                    : `已处理 ${deviceReviewResult.processed.length} 个用户，跳过 ${deviceReviewResult.skipped.length} 个。`}
+                </p>
+                {deviceReviewResult.processed.length > 0 && (
+                  <div className="overflow-x-auto rounded-lg border">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50">
+                        <tr>
+                          <th className="text-left p-3 font-medium">UID</th>
+                          <th className="text-left p-3 font-medium">用户名</th>
+                          <th className="text-left p-3 font-medium">动作</th>
+                          <th className="text-left p-3 font-medium">说明</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {deviceReviewResult.processed.map((item: any) => (
+                          <tr key={`${item.uid}-${item.action}`} className="hover:bg-muted/30">
+                            <td className="p-3 font-medium">{item.uid}</td>
+                            <td className="p-3">{item.username}</td>
+                            <td className="p-3">{item.action ?? '-'} </td>
+                            <td className="p-3 text-muted-foreground">{item.message || item.reason || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
         </Card>
       </motion.div>
 

@@ -70,13 +70,12 @@ Twilight/
 │   ├── db/               # 数据库模块（ORM 模型 + 数据访问）
 │   ├── services/         # 业务逻辑服务（emby, bangumi, score, scheduler, ...）
 │   └── schemas/          # 数据模型
-├── tests/                # 单元测试
+├── tests/                # 可选：单元测试目录（按需补充）
 ├── docs/                 # 文档
 ├── uploads/              # 用户上传文件（背景图片等）
 ├── webui/                # Next.js 前端
 ├── main.py               # 应用入口
 ├── asgi.py               # ASGI 入口（生产）
-├── migrate.py            # 数据库迁移脚本
 ├── config.toml           # 配置文件
 ├── requirements.txt      # 生产依赖
 ├── requirements-dev.txt  # 开发依赖
@@ -88,7 +87,7 @@ Twilight/
 - **src/api/v1/** - REST API 接口实现，按功能分为多个蓝图
 - **src/services/** - 业务逻辑层，包含 Emby、Bangumi、积分等服务
 - **src/db/** - 数据库操作层，包含 ORM 模型和数据访问对象
-- **tests/** - 单元测试和集成测试
+- **tests/** - 可选测试目录（按需创建与维护）
 
 ## 编码规范
 
@@ -170,11 +169,13 @@ except Exception as e:
 
 ## 运行测试
 
-### 基本测试
+当前仓库主要包含后端与前端代码，测试目录可根据项目需要逐步补充。
+
+### 使用 pytest
 
 ```bash
 # 运行所有测试
-pytest tests/ -v
+pytest -v
 
 # 运行特定测试文件
 pytest tests/test_system.py -v
@@ -183,20 +184,13 @@ pytest tests/test_system.py -v
 pytest tests/test_system.py::test_health_check -v
 
 # 运行并显示打印输出
-pytest tests/ -v -s
+pytest -v -s
 ```
 
 ### 生成覆盖率报告
 
 ```bash
-# 生成覆盖率报告
-pytest tests/ --cov=src --cov-report=html
-
-# 查看报告
-# Linux/macOS
-open htmlcov/index.html
-# Windows PowerShell
-start htmlcov/index.html
+pytest --cov=src --cov-report=html
 ```
 
 ### 测试异步代码

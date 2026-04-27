@@ -259,3 +259,5 @@ class ScoreHistoryOperate:
                 .filter_by(UID=uid)
             )
             return result.scalar_one() or 0
+
+

@@ -261,7 +261,8 @@
     border: 1px solid hsl(var(--border) / 0.7);
     border-radius: 1.25rem;
     background: hsl(var(--card) / 0.68);
-    backdrop-filter: blur(14px);
+    backdrop-filter: blur(12px);
+    transition: background 200ms ease, border-color 200ms ease, backdrop-filter 200ms ease;
   }
 
   .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -269,6 +270,14 @@
   .custom-scrollbar::-webkit-scrollbar-thumb {
     background: hsl(var(--primary) / 0.45);
     border-radius: 9999px;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
   }
 
   ::selection {

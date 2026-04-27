@@ -47,6 +47,101 @@ class UserModel(UsersDatabaseModel):
     OTHER: Mapped[Optional[str]] = mapped_column(String, default='', nullable=True)
 
 
+class TelegramRebindRequestModel(UsersDatabaseModel):
+    __tablename__ = 'telegram_rebind_requests'
+    ID: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    UID: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    OLD_TELEGRAM_ID: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    STATUS: Mapped[str] = mapped_column(String, default='pending', nullable=False, index=True)
+    REASON: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    ADMIN_NOTE: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    REVIEWER_UID: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    CREATED_AT: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()), nullable=False)
+    UPDATED_AT: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()), nullable=False)
+    REVIEWED_AT: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+
+class TelegramRebindRequestOperate:
+    @staticmethod
+    async def create_request(uid: int, old_telegram_id: Optional[int], reason: Optional[str] = None) -> TelegramRebindRequestModel:
+        request = TelegramRebindRequestModel(
+            UID=uid,
+            OLD_TELEGRAM_ID=old_telegram_id,
+            STATUS='pending',
+            REASON=reason,
+            CREATED_AT=int(time.time()),
+            UPDATED_AT=int(time.time()),
+        )
+        async with UsersSessionFactory() as session:
+            async with session.begin():
+                session.add(request)
+        return request
+
+    @staticmethod
+    async def get_request_by_uid(uid: int) -> Optional[TelegramRebindRequestModel]:
+        async with UsersSessionFactory() as session:
+            scalar = await session.execute(
+                select(TelegramRebindRequestModel)
+                .filter_by(UID=uid)
+                .order_by(TelegramRebindRequestModel.CREATED_AT.desc())
+                .limit(1)
+            )
+            return scalar.scalar_one_or_none()
+
+    @staticmethod
+    async def get_request_by_id(request_id: int) -> Optional[TelegramRebindRequestModel]:
+        async with UsersSessionFactory() as session:
+            scalar = await session.execute(
+                select(TelegramRebindRequestModel).filter_by(ID=request_id).limit(1)
+            )
+            return scalar.scalar_one_or_none()
+
+    @staticmethod
+    async def list_requests(status: Optional[str] = None, page: int = 1, per_page: int = 20) -> tuple[list[TelegramRebindRequestModel], int]:
+        async with UsersSessionFactory() as session:
+            query = select(TelegramRebindRequestModel)
+            if status:
+                query = query.filter_by(STATUS=status)
+            query = query.order_by(TelegramRebindRequestModel.CREATED_AT.desc())
+            result = await session.execute(query.offset((page - 1) * per_page).limit(per_page))
+            requests = list(result.scalars().all())
+
+            count_query = select(func.count()).select_from(TelegramRebindRequestModel)
+            if status:
+                count_query = count_query.filter_by(STATUS=status)
+            total_result = await session.execute(count_query)
+            total = total_result.scalar_one()
+
+            return requests, total
+
+    @staticmethod
+    async def update_request_status(
+        request_id: int,
+        status: str,
+        reviewer_uid: Optional[int] = None,
+        admin_note: Optional[str] = None,
+    ) -> bool:
+        async with UsersSessionFactory() as session:
+            async with session.begin():
+                values = {
+                    'STATUS': status,
+                    'UPDATED_AT': int(time.time()),
+                }
+                if admin_note is not None:
+                    values['ADMIN_NOTE'] = admin_note
+                if reviewer_uid is not None:
+                    values['REVIEWER_UID'] = reviewer_uid
+                if status in ('approved', 'rejected'):
+                    values['REVIEWED_AT'] = int(time.time())
+
+                result = await session.execute(
+                    update(TelegramRebindRequestModel)
+                    .where(TelegramRebindRequestModel.ID == request_id)
+                    .values(**values)
+                )
+                return result.rowcount > 0
+
+
 from src.db.utils import init_async_db
 
 ENGINE, UsersSessionFactory = init_async_db("users", UsersDatabaseModel)

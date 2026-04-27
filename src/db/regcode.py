@@ -5,7 +5,7 @@ import random
 import logging
 from typing import Optional, List, Union
 
-from sqlalchemy import select, func, String, Integer, Boolean
+from sqlalchemy import select, func, String, Integer, Boolean, update
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.exc import SQLAlchemyError
@@ -103,19 +103,23 @@ class RegCodeOperate:
 
     @staticmethod
     async def update_regcode_use_count(code: str, increment: int = 1) -> bool:
-        """更新注册码的使用次数"""
+        """更新注册码的使用次数。"""
         async with RegCodeSessionFactory() as session:
             try:
-                result = await session.execute(select(RegCodeModel).filter_by(CODE=code).limit(1))
-                reg_code = result.scalar_one_or_none()
-                if reg_code:
-                    reg_code.USE_COUNT += increment
-                    await session.merge(reg_code)
-                    await session.commit()
-                    return True
-                else:
-                    logger.warning(f"未找到注册码: {code}")
+                stmt = update(RegCodeModel).where(RegCodeModel.CODE == code)
+                if increment > 0:
+                    stmt = stmt.where(
+                        (RegCodeModel.USE_COUNT_LIMIT == -1) |
+                        (RegCodeModel.USE_COUNT < RegCodeModel.USE_COUNT_LIMIT)
+                    )
+                stmt = stmt.values(USE_COUNT=RegCodeModel.USE_COUNT + increment)
+                result = await session.execute(stmt)
+                if result.rowcount == 0:
+                    logger.warning(f"未找到或已超出使用次数的注册码: {code}")
+                    await session.rollback()
                     return False
+                await session.commit()
+                return True
             except SQLAlchemyError as e:
                 await session.rollback()
                 logger.error(f"数据库操作失败: {e}")

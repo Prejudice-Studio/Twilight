@@ -23,7 +23,11 @@ api_v1 = Blueprint('api_v1', __name__, url_prefix='/api/v1')
 
 
 def register_v1_blueprints(app):
-    """注册所有 v1 API 蓝图"""
+    """注册所有 v1 API 蓝图。
+
+    这里将各个子模块以固定前缀挂载到应用，
+    便于后续维护和版本管理。
+    """
     app.register_blueprint(auth_bp, url_prefix='/api/v1/auth')
     app.register_blueprint(users_bp, url_prefix='/api/v1/users')
     app.register_blueprint(score_bp, url_prefix='/api/v1/score')

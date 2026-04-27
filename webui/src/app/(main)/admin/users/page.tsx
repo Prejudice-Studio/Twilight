@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Users,
@@ -15,6 +15,7 @@ import {
   Loader2,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Edit,
   Coins,
   UserX,
@@ -59,8 +60,10 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(20);
   const [pages, setPages] = useState(1);
   const [search, setSearch] = useState("");
+  const [expandedUserIds, setExpandedUserIds] = useState<Set<number>>(new Set());
 
   // Dialog states
   const [renewOpen, setRenewOpen] = useState(false);
@@ -89,13 +92,26 @@ export default function AdminUsersPage() {
   const usersCacheRef = useRef<
     Map<string, { users: UserInfo[]; total: number; pages: number }>
   >(new Map());
+  const loadedUsersRef = useRef(false);
 
   const invalidateUsersCache = () => {
     usersCacheRef.current.clear();
   };
 
+  const toggleUserDetails = (uid: number) => {
+    setExpandedUserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(uid)) {
+        next.delete(uid);
+      } else {
+        next.add(uid);
+      }
+      return next;
+    });
+  };
+
   const loadUsersResource = useCallback(async (signal?: AbortSignal) => {
-    const cacheKey = `${page}-${search || ""}`;
+    const cacheKey = `${page}-${perPage}-${search || ""}`;
     const cached = usersCacheRef.current.get(cacheKey);
     if (cached) {
       setUsers(cached.users);
@@ -106,7 +122,7 @@ export default function AdminUsersPage() {
 
     const res = await api.getUsers({
       page,
-      per_page: 20,
+      per_page: perPage,
       search: search || undefined,
     }, signal);
     if (res.success && res.data) {
@@ -120,7 +136,7 @@ export default function AdminUsersPage() {
       });
     }
     return true;
-  }, [page, search]);
+  }, [page, perPage, search]);
 
   const {
     isLoading,
@@ -130,8 +146,18 @@ export default function AdminUsersPage() {
 
   const handleSearch = () => {
     setPage(1);
+    invalidateUsersCache();
+    setExpandedUserIds(new Set());
     void loadUsers();
   };
+
+  useEffect(() => {
+    if (loadedUsersRef.current) {
+      void loadUsers();
+    } else {
+      loadedUsersRef.current = true;
+    }
+  }, [page, perPage, loadUsers]);
 
   const handleRenew = async () => {
     if (!selectedUser || !renewDays) return;
@@ -390,10 +416,22 @@ export default function AdminUsersPage() {
                 className="pl-10"
               />
             </div>
-            <Button onClick={handleSearch}>
-              <Search className="mr-2 h-4 w-4" />
-              搜索
-            </Button>
+            <div className="flex items-center gap-2">
+              <Select value={perPage.toString()} onValueChange={(value) => { setPerPage(Number(value)); setPage(1); invalidateUsersCache(); }}>
+                <SelectTrigger className="w-24">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="20">20 / 页</SelectItem>
+                  <SelectItem value="50">50 / 页</SelectItem>
+                  <SelectItem value="100">100 / 页</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button onClick={handleSearch}>
+                <Search className="mr-2 h-4 w-4" />
+                搜索
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -420,25 +458,36 @@ export default function AdminUsersPage() {
                 </thead>
                 <tbody>
                   {users.map((user) => (
-                    <tr key={user.uid} className="border-b hover:bg-muted/30">
+                    <Fragment key={user.uid}>
+                      <tr className="border-b hover:bg-muted/30">
                       <td className="px-4 py-3">
-                        <div>
-                          <p className="font-medium">{user.username}</p>
-                          <p className="text-xs text-muted-foreground">
-                            UID: {user.uid}
-                            {user.telegram_id && (
-                              <span>
-                                {" | TG: "}
-                                {user.telegram_username ? (
-                                  <span>
-                                    @{user.telegram_username} ({user.telegram_id})
-                                  </span>
-                                ) : (
-                                  user.telegram_id
-                                )}
-                              </span>
-                            )}
-                          </p>
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="min-w-0">
+                            <p className="font-medium">{user.username}</p>
+                            <p className="text-xs text-muted-foreground truncate">
+                              UID: {user.uid}
+                              {user.telegram_id && (
+                                <span>
+                                  {" | TG: "}
+                                  {user.telegram_username ? (
+                                    <span>
+                                      @{user.telegram_username} ({user.telegram_id})
+                                    </span>
+                                  ) : (
+                                    user.telegram_id
+                                  )}
+                                </span>
+                              )}
+                            </p>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => toggleUserDetails(user.uid)}
+                            className="mt-1"
+                          >
+                            <ChevronDown className={`h-4 w-4 transition-transform ${expandedUserIds.has(user.uid) ? "rotate-180" : ""}`} />
+                          </Button>
                         </div>
                       </td>
                       <td className="px-4 py-3">{getRoleBadge(user.role)}</td>
@@ -498,7 +547,27 @@ export default function AdminUsersPage() {
                         </DropdownMenu>
                       </td>
                     </tr>
-                  ))}
+                    {expandedUserIds.has(user.uid) && (
+                      <tr className="bg-muted/10">
+                        <td colSpan={6} className="px-4 py-3 text-sm text-muted-foreground">
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div>
+                              <p className="font-medium">更多信息</p>
+                              <p>注册时间: {user.register_time ? formatDate(user.register_time) : "未知"}</p>
+                              <p>创建时间: {user.created_at ? formatDate(user.created_at) : "未记录"}</p>
+                            </div>
+                            <div>
+                              <p className="font-medium">账号详情</p>
+                              <p>Emby ID: {user.emby_id || "未绑定"}</p>
+                              <p>自动续期: {user.auto_renew ? "已开启" : "未开启"}</p>
+                              <p>BGM 模式: {user.bgm_mode ? "已开启" : "未开启"}</p>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
                 </tbody>
               </table>
             </div>

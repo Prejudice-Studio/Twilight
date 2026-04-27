@@ -161,27 +161,11 @@ export default function MediaPage() {
           detailCacheRef.current.set(detailKey, detail);
           
           try {
-            // 只检查库存，不再重复获取详情
-            const inventoryRes = await api.checkInventory({
-              source: detail.source,
-              media_id: detail.id,
-              media_type: detail.media_type,
-              title: detail.title,
-              year: detail.year,
-            }, controller.signal);
-
-            if (controller.signal.aborted) return;
-            
-            // 直接使用已获取的详情数据
+            // Bangumi 源不做库存检查
             setMediaDetail(detail);
-            if (inventoryRes.success && inventoryRes.data) {
-              setInventoryCheck(inventoryRes.data);
-              inventoryCacheRef.current.set(detailKey, inventoryRes.data);
-            }
           } catch (error: any) {
             if (isAbortError(error)) return;
             console.error(error);
-            // 即使库存检查失败，也显示详情
             setMediaDetail(detail);
           } finally {
             setIsLoadingDetail(false);
@@ -264,16 +248,18 @@ export default function MediaPage() {
       }
 
       // 获取详情和库存检查
-      const [detailRes, inventoryRes] = await Promise.all([
-        api.getMediaDetail(media.source, media.id, media.media_type, controller.signal),
-        api.checkInventory({
+      const detailRes = await api.getMediaDetail(media.source, media.id, media.media_type, controller.signal);
+      let inventoryRes = null;
+      if (media.source !== "bangumi" && media.source !== "bgm") {
+        inventoryRes = await api.checkInventory({
           source: media.source,
           media_id: media.id,
           media_type: media.media_type,
           title: media.title,
+          original_title: media.original_title,
           year: media.year,
-        }, controller.signal),
-      ]);
+        }, controller.signal);
+      }
 
       if (controller.signal.aborted) return;
 
@@ -287,7 +273,7 @@ export default function MediaPage() {
           variant: "destructive",
         });
       }
-      if (inventoryRes.success && inventoryRes.data) {
+      if (inventoryRes?.success && inventoryRes.data) {
         setInventoryCheck(inventoryRes.data);
         inventoryCacheRef.current.set(detailKey, inventoryRes.data);
       }
@@ -392,7 +378,7 @@ export default function MediaPage() {
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case "UNHANDLED": return <Badge variant="outline" className="rounded-lg bg-gray-100/50">待处理</Badge>;
+      case "UNHANDLED": return <Badge variant="outline" className="rounded-lg bg-gray-100/50 dark:bg-slate-900/40 dark:text-slate-100">待处理</Badge>;
       case "ACCEPTED": return <Badge variant="default" className="rounded-lg bg-blue-500/10 text-blue-500 border-blue-200">已接受</Badge>;
       case "DOWNLOADING": return <Badge variant="default" className="rounded-lg bg-orange-500/10 text-orange-500 border-orange-200">下载中</Badge>;
       case "REJECTED": return <Badge variant="destructive" className="rounded-lg">已拒绝</Badge>;
@@ -447,13 +433,13 @@ export default function MediaPage() {
                   <div className="flex p-1 bg-secondary rounded-xl">
                     <button 
                       onClick={() => setSearchMode("name")}
-                      className={cn("px-4 py-1.5 rounded-lg text-xs font-bold transition-all", searchMode === "name" ? "bg-white text-primary shadow-sm" : "text-muted-foreground")}
+                      className={cn("px-4 py-1.5 rounded-lg text-xs font-bold transition-all", searchMode === "name" ? "bg-white text-primary shadow-sm dark:bg-slate-950/80 dark:text-primary-foreground" : "text-muted-foreground")}
                     >
                       名称搜索
                     </button>
                     <button 
                       onClick={() => setSearchMode("id")}
-                      className={cn("px-4 py-1.5 rounded-lg text-xs font-bold transition-all", searchMode === "id" ? "bg-white text-primary shadow-sm" : "text-muted-foreground")}
+                      className={cn("px-4 py-1.5 rounded-lg text-xs font-bold transition-all", searchMode === "id" ? "bg-white text-primary shadow-sm dark:bg-slate-950/80 dark:text-primary-foreground" : "text-muted-foreground")}
                     >
                       ID 搜索
                     </button>
@@ -479,44 +465,44 @@ export default function MediaPage() {
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                      className="h-14 pl-12 rounded-[1.25rem] border-white/40 bg-white/50 backdrop-blur-md focus:bg-white transition-all shadow-inner text-base font-medium"
+                      className="h-14 pl-12 rounded-[1.25rem] border-white/40 bg-white/50 text-slate-950 backdrop-blur-md focus:bg-white transition-all shadow-inner text-base font-medium dark:border-slate-700/70 dark:bg-slate-950/80 dark:text-slate-100 dark:focus:bg-slate-900/95"
                     />
                   </div>
                   
-                  <div className="flex gap-2 p-1 bg-white/40 backdrop-blur-md rounded-[1.25rem] border border-white/50">
+                  <div className="flex gap-2 p-1 bg-white/40 backdrop-blur-md rounded-[1.25rem] border border-white/50 dark:border-slate-700/70 dark:bg-slate-950/30">
                     {searchMode === "name" && (
                       <button 
                         onClick={() => setSource("all")}
-                        className={cn("px-6 rounded-xl font-bold text-sm transition-all", source === "all" ? "bg-primary text-primary-foreground shadow-lg" : "hover:bg-white/50")}
+                        className={cn("px-6 rounded-xl font-bold text-sm transition-all", source === "all" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-slate-950/70 dark:hover:bg-slate-900/90")}
                       >
                         全部
                       </button>
                     )}
                     <button 
                       onClick={() => setSource("tmdb")}
-                      className={cn("px-6 rounded-xl font-bold text-sm transition-all", source === "tmdb" ? "bg-primary text-primary-foreground shadow-lg" : "hover:bg-white/50")}
+                      className={cn("px-6 rounded-xl font-bold text-sm transition-all", source === "tmdb" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-slate-950/70 dark:hover:bg-slate-900/90")}
                     >
                       TMDB
                     </button>
                     <button 
                       onClick={() => setSource("bangumi")}
-                      className={cn("px-6 rounded-xl font-bold text-sm transition-all", source === "bangumi" ? "bg-primary text-primary-foreground shadow-lg" : "hover:bg-white/50")}
+                      className={cn("px-6 rounded-xl font-bold text-sm transition-all", source === "bangumi" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-slate-950/70 dark:hover:bg-slate-900/90")}
                     >
                       Bangumi
                     </button>
                   </div>
 
                   {searchMode === "id" && source === "tmdb" && (
-                    <div className="flex p-1 bg-white/40 backdrop-blur-md rounded-[1.25rem] border border-white/50">
+                    <div className="flex p-1 bg-white/40 backdrop-blur-md rounded-[1.25rem] border border-white/50 dark:border-slate-700/70 dark:bg-slate-950/30">
                       <button 
                         onClick={() => setMediaType("movie")}
-                        className={cn("px-6 rounded-xl font-bold text-sm transition-all", mediaType === "movie" ? "bg-primary text-primary-foreground shadow-lg" : "hover:bg-white/50")}
+                        className={cn("px-6 rounded-xl font-bold text-sm transition-all", mediaType === "movie" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-slate-950/70 dark:hover:bg-slate-900/90")}
                       >
                         电影
                       </button>
                       <button 
                         onClick={() => setMediaType("tv")}
-                        className={cn("px-6 rounded-xl font-bold text-sm transition-all", mediaType === "tv" ? "bg-primary text-primary-foreground shadow-lg" : "hover:bg-white/50")}
+                        className={cn("px-6 rounded-xl font-bold text-sm transition-all", mediaType === "tv" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-slate-950/70 dark:hover:bg-slate-900/90")}
                       >
                         剧集
                       </button>
@@ -575,7 +561,7 @@ export default function MediaPage() {
                         )}
                         
                         <div className="absolute top-4 left-4 z-10 flex flex-col gap-2">
-                          <Badge className="bg-white/60 backdrop-blur-xl border-white/40 text-black/80 font-black text-[10px] tracking-widest px-2.5 py-1">
+                          <Badge className="bg-white/60 backdrop-blur-xl border-white/40 text-black/80 font-black text-[10px] tracking-widest px-2.5 py-1 dark:border-slate-700/70 dark:bg-slate-950/70 dark:text-slate-100">
                             {media.source.toUpperCase()}
                           </Badge>
                           <Badge className="bg-black/40 backdrop-blur-xl border-0 text-white font-black text-[10px] tracking-widest px-2.5 py-1 uppercase">
@@ -638,10 +624,10 @@ export default function MediaPage() {
                       key={req.id}
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
-                      className="group flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-3xl bg-secondary/30 border border-white/40 hover:bg-white/60 transition-all duration-300"
+                      className="group flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-3xl bg-secondary/30 border border-white/40 hover:bg-white/60 transition-all duration-300 dark:bg-slate-950/40 dark:border-slate-700/70 dark:hover:bg-slate-900/80"
                     >
                       <div className="flex items-center gap-4 flex-1 min-w-0">
-                        <div className="relative flex h-20 w-14 shrink-0 items-center justify-center rounded-2xl bg-white overflow-hidden shadow-sm border border-white/60">
+                        <div className="relative flex h-20 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/90 overflow-hidden shadow-sm border border-white/60 dark:bg-slate-950/70 dark:border-slate-700/70">
                           {req.media_info?.poster_url || req.media_info?.poster ? (
                             <Image
                               src={req.media_info.poster_url || req.media_info.poster || ""}
@@ -675,7 +661,7 @@ export default function MediaPage() {
                           </div>
                           
                           {req.admin_note && (
-                            <div className="mt-2 text-[11px] font-bold text-primary bg-primary/5 px-3 py-1.5 rounded-xl border border-primary/10">
+                            <div className="mt-2 text-[11px] font-bold text-primary bg-primary/5 px-3 py-1.5 rounded-xl border border-primary/10 dark:bg-primary/10 dark:text-primary dark:border-primary/20">
                               💌 管理回复: {req.admin_note}
                             </div>
                           )}
@@ -763,7 +749,7 @@ export default function MediaPage() {
               </div>
 
               {/* Right Side: Content */}
-              <div className="flex-1 p-8 overflow-y-auto custom-scrollbar bg-white/40">
+              <div className="flex-1 p-8 overflow-y-auto custom-scrollbar bg-white/95 text-slate-950 dark:bg-white/95 dark:text-slate-950">
                 <div className="space-y-6">
                   {/* Status & Genres */}
                   <div className="flex flex-wrap gap-2">
@@ -780,7 +766,7 @@ export default function MediaPage() {
                   {/* Overview */}
                   <div className="space-y-2">
                     <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">About</p>
-                    <p className="text-sm leading-relaxed text-foreground/80 font-medium">
+                    <p className="text-sm leading-relaxed text-slate-950 font-medium">
                       {mediaDetail.overview || "暂无简介内容"}
                     </p>
                   </div>
@@ -823,7 +809,7 @@ export default function MediaPage() {
                             "px-4 py-2 rounded-xl text-xs font-black transition-all border shadow-sm",
                             selectedSeason === undefined 
                               ? "bg-primary text-primary-foreground border-primary shadow-primary/20" 
-                              : "bg-white border-white/40 text-muted-foreground hover:bg-white/80"
+                              : "bg-white border-white/40 text-muted-foreground hover:bg-slate-950/90 dark:hover:bg-slate-900/90"
                           )}
                         >
                           全部季度
@@ -841,7 +827,7 @@ export default function MediaPage() {
                                   ? "bg-primary text-primary-foreground border-primary shadow-primary/20" 
                                   : isAvailable
                                     ? "bg-emerald-50 border-emerald-100 text-emerald-600 opacity-60 cursor-not-allowed"
-                                    : "bg-white border-white/40 text-muted-foreground hover:bg-white/80"
+                                    : "bg-white border-white/40 text-muted-foreground hover:bg-slate-950/90 dark:hover:bg-slate-900/90"
                               )}
                             >
                               Season {s}
@@ -860,7 +846,7 @@ export default function MediaPage() {
                       placeholder="有什么特别的要求吗？（选填）"
                       value={requestNote}
                       onChange={(e) => setRequestNote(e.target.value)}
-                      className="rounded-[1.25rem] border-white/60 bg-white/40 shadow-inner h-12"
+                      className="rounded-[1.25rem] border-white/60 bg-white/40 shadow-inner h-12 dark:border-slate-700/70 dark:bg-slate-950/70 dark:text-slate-100"
                     />
                   </div>
                 </div>

@@ -30,6 +30,12 @@ const item = {
   show: { opacity: 1, y: 0 },
 };
 
+const formatBytes = (bytes?: number) => {
+  if (bytes == null) return "未知";
+  const mb = bytes / 1024 / 1024;
+  return `${formatNumber(Math.round(mb))} MB`;
+};
+
 export default function AdminStatsPage() {
   const [stats, setStats] = useState<SystemStats | null>(null);
 
@@ -74,13 +80,13 @@ export default function AdminStatsPage() {
             <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 translate-y-[-50%] rounded-full bg-gradient-to-br from-blue-500/20 to-transparent" />
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                总用户数
+                CPU 核心数
               </CardTitle>
               <Users className="h-4 w-4 text-blue-500" />
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold">
-                {formatNumber(stats?.total_users || 0)}
+                {stats?.cpu_count ?? 0}
               </div>
             </CardContent>
           </Card>
@@ -91,17 +97,14 @@ export default function AdminStatsPage() {
             <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 translate-y-[-50%] rounded-full bg-gradient-to-br from-emerald-500/20 to-transparent" />
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                活跃用户
+                CPU 使用率
               </CardTitle>
-              <UserCheck className="h-4 w-4 text-emerald-500" />
+              <TrendingUp className="h-4 w-4 text-emerald-500" />
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-emerald-500">
-                {formatNumber(stats?.active_users || 0)}
+                {stats?.cpu_percent != null ? `${stats.cpu_percent}%` : "未知"}
               </div>
-              <p className="text-xs text-muted-foreground">
-                占比 {stats?.total_users ? ((stats.active_users / stats.total_users) * 100).toFixed(1) : 0}%
-              </p>
             </CardContent>
           </Card>
         </motion.div>
@@ -111,13 +114,13 @@ export default function AdminStatsPage() {
             <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 translate-y-[-50%] rounded-full bg-gradient-to-br from-orange-500/20 to-transparent" />
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                过期用户
+                内存使用
               </CardTitle>
-              <UserX className="h-4 w-4 text-orange-500" />
+              <FileText className="h-4 w-4 text-orange-500" />
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-orange-500">
-                {formatNumber(stats?.expired_users || 0)}
+                {stats?.memory?.percent != null ? `${stats.memory.percent}%` : "未知"}
               </div>
             </CardContent>
           </Card>
@@ -128,13 +131,13 @@ export default function AdminStatsPage() {
             <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 translate-y-[-50%] rounded-full bg-gradient-to-br from-twilight-500/20 to-transparent" />
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                总积分流通
+                可用内存
               </CardTitle>
               <Coins className="h-4 w-4 text-twilight-500" />
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold">
-                {formatNumber(stats?.total_score || 0)}
+                {formatBytes(stats?.memory?.available)}
               </div>
             </CardContent>
           </Card>
@@ -145,30 +148,13 @@ export default function AdminStatsPage() {
             <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 translate-y-[-50%] rounded-full bg-gradient-to-br from-purple-500/20 to-transparent" />
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                可用注册码
+                磁盘使用
               </CardTitle>
-              <FileText className="h-4 w-4 text-purple-500" />
+              <Clock className="h-4 w-4 text-purple-500" />
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold">
-                {formatNumber(stats?.active_regcodes || 0)}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        <motion.div variants={item}>
-          <Card className="relative overflow-hidden">
-            <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 translate-y-[-50%] rounded-full bg-gradient-to-br from-amber-500/20 to-transparent" />
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                待处理求片
-              </CardTitle>
-              <Clock className="h-4 w-4 text-amber-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">
-                {formatNumber(stats?.pending_requests || 0)}
+                {stats?.disk?.percent != null ? `${stats.disk.percent}%` : "未知"}
               </div>
             </CardContent>
           </Card>
@@ -188,29 +174,29 @@ export default function AdminStatsPage() {
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-3">
                 <div className="flex items-center justify-between rounded-lg bg-accent/50 p-3">
-                  <span className="text-sm">用户活跃率</span>
-                  <Badge variant="success">
-                    {stats?.total_users ? ((stats.active_users / stats.total_users) * 100).toFixed(1) : 0}%
+                  <span className="text-sm">最近更新时间</span>
+                  <Badge variant="secondary">
+                    {stats?.timestamp ? new Date(stats.timestamp * 1000).toLocaleString() : "未知"}
                   </Badge>
                 </div>
                 <div className="flex items-center justify-between rounded-lg bg-accent/50 p-3">
-                  <span className="text-sm">过期用户比例</span>
-                  <Badge variant={stats?.expired_users && stats.expired_users > 10 ? "warning" : "secondary"}>
-                    {stats?.total_users ? ((stats.expired_users / stats.total_users) * 100).toFixed(1) : 0}%
+                  <span className="text-sm">内存总量</span>
+                  <Badge variant="secondary">
+                    {formatBytes(stats?.memory?.total)}
                   </Badge>
                 </div>
               </div>
               <div className="space-y-3">
                 <div className="flex items-center justify-between rounded-lg bg-accent/50 p-3">
-                  <span className="text-sm">待处理事项</span>
-                  <Badge variant={stats?.pending_requests && stats.pending_requests > 0 ? "warning" : "secondary"}>
-                    {stats?.pending_requests || 0} 项
+                  <span className="text-sm">可用内存</span>
+                  <Badge variant={stats?.memory?.available && stats.memory.available > 0 ? "success" : "secondary"}>
+                    {formatBytes(stats?.memory?.available)}
                   </Badge>
                 </div>
                 <div className="flex items-center justify-between rounded-lg bg-accent/50 p-3">
-                  <span className="text-sm">可用注册码</span>
-                  <Badge variant="secondary">
-                    {stats?.active_regcodes || 0} 个
+                  <span className="text-sm">可用磁盘</span>
+                  <Badge variant={stats?.disk?.free && stats.disk.free > 0 ? "success" : "secondary"}>
+                    {formatBytes(stats?.disk?.free)}
                   </Badge>
                 </div>
               </div>
