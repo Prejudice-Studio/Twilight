@@ -295,16 +295,19 @@ export default function AdminEmbyPage() {
   }, [toast, handleLoadUsers]);
 
   const syncStatusBadge = (status: string) => {
-    switch (status) {
-      case "synced":
-        return <Badge variant="default" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20">已同步</Badge>;
-      case "name_mismatch":
-        return <Badge variant="default" className="bg-amber-500/10 text-amber-500 border-amber-500/20">名称不一致</Badge>;
-      case "unlinked":
-        return <Badge variant="secondary">未关联</Badge>;
-      default:
-        return <Badge variant="secondary">{status}</Badge>;
+    // 用户名一致与否不展示——本地与 Emby 用户名是允许不一致的，
+    // 只要本地账户绑定到了对应 Emby ID 即视为已绑定。
+    if (status === "unlinked") {
+      return <Badge variant="secondary">未绑定</Badge>;
     }
+    return (
+      <Badge
+        variant="default"
+        className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
+      >
+        已绑定
+      </Badge>
+    );
   };
 
   useEffect(() => {

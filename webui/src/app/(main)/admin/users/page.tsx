@@ -61,7 +61,7 @@ export default function AdminUsersPage() {
   // 筛选 / 排序
   const [roleFilter, setRoleFilter] = useState<string>("all"); // "all" | "0" | "1" | "2"
   const [activeFilter, setActiveFilter] = useState<string>("all"); // "all" | "true" | "false"
-  const [sortBy, setSortBy] = useState<string>("uid_desc");
+  const [sortBy, setSortBy] = useState<string>("uid_asc");
   const [expandedUserIds, setExpandedUserIds] = useState<Set<number>>(new Set());
 
   // Dialog states
@@ -83,6 +83,18 @@ export default function AdminUsersPage() {
     emby_id: "",
     active: true,
   });
+
+  // 删除（含邀请树级联）对话框
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<UserInfo | null>(null);
+  const [deleteScope, setDeleteScope] = useState<"with_emby" | "local_only" | "emby_only">("with_emby");
+  const [cascadeDepth, setCascadeDepth] = useState<number>(1);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // 禁用对话框（提示禁用不会影响邀请树结构）
+  const [toggleOpen, setToggleOpen] = useState(false);
+  const [toggleTarget, setToggleTarget] = useState<UserInfo | null>(null);
+  const [isToggling, setIsToggling] = useState(false);
 
   // 强制重置 Emby 密码（按 Emby 用户名）
   const [forcePwdOpen, setForcePwdOpen] = useState(false);
@@ -263,47 +275,56 @@ export default function AdminUsersPage() {
     }
   };
 
-  const handleToggleActive = async (user: UserInfo) => {
+  const handleToggleActive = (user: UserInfo) => {
+    setToggleTarget(user);
+    setToggleOpen(true);
+  };
+
+  const confirmToggleActive = async () => {
+    if (!toggleTarget) return;
+    setIsToggling(true);
     try {
-      const res = await api.updateUser(user.uid, { active: !user.active });
+      const res = await api.updateUser(toggleTarget.uid, { active: !toggleTarget.active });
       if (res.success) {
-        toast({ title: user.active ? "已禁用" : "已启用", variant: "success" });
+        toast({ title: toggleTarget.active ? "已禁用" : "已启用", variant: "success" });
         invalidateUsersCache();
         loadUsers();
+        setToggleOpen(false);
       } else {
         toast({ title: "操作失败", description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
       toast({ title: "操作失败", description: error.message, variant: "destructive" });
+    } finally {
+      setIsToggling(false);
     }
   };
 
-  const handleDelete = async (user: UserInfo) => {
-    const hasEmby = Boolean(user.emby_id);
-    const choice = await confirmAction({
-      title: `删除用户 ${user.username}？`,
-      description: hasEmby
-        ? "请选择要执行的操作。本地账户的删除不可恢复。"
-        : "本地账户的删除不可恢复。该用户未绑定 Emby 账户。",
-      tone: "danger",
-      actions: hasEmby
-        ? [
-            { label: "同时删除 Emby 账户", variant: "destructive", value: "with_emby" },
-            { label: "仅删除本地账户", variant: "outline", value: "local_only" },
-            { label: "仅删除 Emby 账户", variant: "outline", value: "emby_only" },
-          ]
-        : [
-            { label: "删除本地账户", variant: "destructive", value: "local_only" },
-          ],
-    });
-    if (!choice) return;
+  const handleDelete = (user: UserInfo) => {
+    setDeleteTarget(user);
+    setDeleteScope(user.emby_id ? "with_emby" : "local_only");
+    setCascadeDepth(1);
+    setDeleteOpen(true);
+  };
 
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
     try {
-      let res;
-      if (choice === "emby_only") {
-        res = await api.deleteUserEmby(user.uid);
+      let res: any;
+      if (deleteScope === "emby_only") {
+        // 只删 Emby 不影响邀请树
+        res = await api.deleteUserEmby(deleteTarget.uid);
+      } else if (cascadeDepth > 1) {
+        // 级联删本人 + N-1 层下级；deleteEmby 跟选择的 scope 走
+        res = await api.deleteUserCascade(deleteTarget.uid, {
+          deleteEmby: deleteScope === "with_emby",
+          cascadeDepth,
+        });
       } else {
-        res = await api.deleteUser(user.uid, { deleteEmby: choice === "with_emby" });
+        res = await api.deleteUser(deleteTarget.uid, {
+          deleteEmby: deleteScope === "with_emby",
+        });
       }
 
       if (res.success) {
@@ -312,14 +333,22 @@ export default function AdminUsersPage() {
           local_only: "用户已删除",
           emby_only: "Emby 账户已删除",
         };
-        toast({ title: successTitles[choice] ?? "操作成功", variant: "success" });
+        toast({
+          title: cascadeDepth > 1
+            ? `级联删除完成（${cascadeDepth} 层）`
+            : successTitles[deleteScope] ?? "操作成功",
+          variant: "success",
+        });
         invalidateUsersCache();
         loadUsers();
+        setDeleteOpen(false);
       } else {
         toast({ title: "操作失败", description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
       toast({ title: "操作失败", description: error.message, variant: "destructive" });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -556,8 +585,8 @@ export default function AdminUsersPage() {
                   <SelectValue placeholder="排序" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="uid_asc">UID 从旧到新（默认）</SelectItem>
                   <SelectItem value="uid_desc">UID 从新到旧</SelectItem>
-                  <SelectItem value="uid_asc">UID 从旧到新</SelectItem>
                   <SelectItem value="username_asc">用户名 A→Z</SelectItem>
                   <SelectItem value="username_desc">用户名 Z→A</SelectItem>
                   <SelectItem value="register_time_desc">注册时间 新→旧</SelectItem>
@@ -573,7 +602,7 @@ export default function AdminUsersPage() {
             </div>
           </div>
 
-          {(roleFilter !== "all" || activeFilter !== "all" || sortBy !== "uid_desc") && (
+          {(roleFilter !== "all" || activeFilter !== "all" || sortBy !== "uid_asc") && (
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>已应用筛选 / 排序</span>
               <Button
@@ -582,7 +611,7 @@ export default function AdminUsersPage() {
                 onClick={() => {
                   setRoleFilter("all");
                   setActiveFilter("all");
-                  setSortBy("uid_desc");
+                  setSortBy("uid_asc");
                 }}
               >
                 重置
@@ -1066,6 +1095,112 @@ export default function AdminUsersPage() {
             <Button onClick={handleRenew} disabled={isActionLoading}>
               {isActionLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               确认续期
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 删除（含邀请树级联）对话框 */}
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>删除用户 {deleteTarget?.username}</DialogTitle>
+            <DialogDescription>
+              本地账户与（可选）Emby 账户的删除不可恢复。请同时选择是否级联删除该用户邀请的下级。
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 text-sm">
+            <div className="space-y-2">
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground">删除范围</Label>
+              <Select
+                value={deleteScope}
+                onValueChange={(v) => setDeleteScope(v as "with_emby" | "local_only" | "emby_only")}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {deleteTarget?.emby_id && (
+                    <SelectItem value="with_emby">同时删除本地账户 + Emby 账户</SelectItem>
+                  )}
+                  <SelectItem value="local_only">仅删除本地账户</SelectItem>
+                  {deleteTarget?.emby_id && (
+                    <SelectItem value="emby_only">仅删除 Emby 账户（不动本地）</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+              {deleteScope === "emby_only" && (
+                <p className="text-[11px] text-muted-foreground">
+                  「仅删除 Emby」不会影响该用户在邀请树中的位置。
+                </p>
+              )}
+            </div>
+
+            {deleteScope !== "emby_only" && (
+              <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+                <Label className="text-xs uppercase tracking-wider text-muted-foreground">
+                  邀请树级联深度
+                </Label>
+                <Select value={String(cascadeDepth)} onValueChange={(v) => setCascadeDepth(Number(v))}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">仅本人（下级自动晋升为新树根）</SelectItem>
+                    <SelectItem value="2">本人 + 直接下级</SelectItem>
+                    <SelectItem value="3">本人 + 下两层</SelectItem>
+                    <SelectItem value="4">本人 + 下三层</SelectItem>
+                    <SelectItem value="32">整棵子树（不限层级）</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  {cascadeDepth === 1
+                    ? "默认：仅删除该用户。被他邀请的下级会按规则自动成为新的树根，互相之间不再有上下级关系。"
+                    : cascadeDepth >= 32
+                      ? "将沿着邀请关系，一并删除该用户及其全部后代账号（含 Emby）。请确认！"
+                      : `将一并删除该用户向下 ${cascadeDepth - 1} 层的所有下级账号（含 Emby）。`}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)} disabled={isDeleting}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={confirmDelete} disabled={isDeleting}>
+              {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              确认删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 启停（提示邀请树不受影响） */}
+      <Dialog open={toggleOpen} onOpenChange={setToggleOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {toggleTarget?.active ? "禁用" : "启用"}用户 {toggleTarget?.username}
+            </DialogTitle>
+            <DialogDescription>
+              {toggleTarget?.active
+                ? "禁用后用户将无法登录系统与 Emby，但邀请树结构（上下级关系、已发出邀请码）不变。重新启用即可恢复访问。"
+                : "启用后用户可以重新登录系统与 Emby。"}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setToggleOpen(false)} disabled={isToggling}>
+              取消
+            </Button>
+            <Button
+              variant={toggleTarget?.active ? "destructive" : "default"}
+              onClick={confirmToggleActive}
+              disabled={isToggling}
+            >
+              {isToggling && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {toggleTarget?.active ? "确认禁用" : "确认启用"}
             </Button>
           </DialogFooter>
         </DialogContent>

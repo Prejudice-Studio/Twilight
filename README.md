@@ -6,7 +6,7 @@
 
 ## !!须知!!
 
-**该项目绝大部分由 LLM 完成，仅有少量人工修改和润色。主贡献者对该项目安全性等不做任何保证，使用前请务必仔细审查代码。如出现问题，本项目不会承担任何责任。请了解以上信息后再决定是否使用。**
+**该项目绝大部分由 Claude Code Opus 4.6/4.7 与 ChatGPT Codex 5.3 完成，仅有少量人工修改和润色。主贡献者对该项目安全性等不做任何保证，使用前请务必仔细审查代码。如出现问题，本项目不会承担任何责任。请了解以上信息后再决定是否使用。**
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)](https://www.python.org/) [![Flask](https://img.shields.io/badge/Flask-3.x-green?logo=flask&logoColor=white)](https://flask.palletsprojects.com/) [![Next.js](https://img.shields.io/badge/Next.js-16.0+-black?logo=next.js&logoColor=white)](https://nextjs.org/) [![SQLite](https://img.shields.io/badge/SQLite-3-blue?logo=sqlite&logoColor=white)](https://www.sqlite.org/) [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
@@ -108,6 +108,7 @@ bash ./start_all.sh
 | [API Key 文档](docs/API_KEY_API.md) | 外部系统接入指南 |
 | [前端开发文档](docs/FRONTEND.md) | 前端技术栈与开发指南 |
 | [开发指南](docs/DEVELOPMENT.md) | 编码规范、调试、贡献流程 |
+| [邀请树 & 公告渲染](docs/INVITE_AND_ANNOUNCEMENTS.md) | 邀请森林、Markdown/BBCode 公告 |
 | [安全加固指南](docs/SECURITY.md) | 生产安全基线与检查清单 |
 
 运行时访问 `/api/v1/docs` 查看 Swagger UI 交互式文档。

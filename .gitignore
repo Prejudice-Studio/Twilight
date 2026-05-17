@@ -159,6 +159,37 @@ OPTIMIZATION_SUMMARY.md
 /tests
 config.toml
 /.claude
+/memory/
+.notes/
+
+# ==================== Editor swap & coverage extras ====================
+.vs/
+*.suo
+*.user
+*.sln.docstates
+.history/
+.aider*
+
+# ==================== AI / Tooling cache ====================
+.codex/
+.continue/
+.copilot/
+
+# ==================== Routes / Generated ====================
+routes.json
+openapi.json
+schema.dump
+
+# ==================== Frontend specific (additional) ====================
+webui/.next-env.d.ts.lock
+webui/tsconfig.tsbuildinfo
+webui/.opennextjs/
+webui/.wrangler/
+
+# ==================== Large media / sample files ====================
+sample/
+samples/
+fixtures/local/
 
 # VS Code/Copilot local session artifacts
 .copilot/

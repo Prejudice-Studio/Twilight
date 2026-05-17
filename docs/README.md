@@ -27,6 +27,7 @@
 ## 专题
 
 - [背景自定义](./BACKGROUND.md) — 用户自定义主题背景的实现
+- [邀请树 & 公告渲染](./INVITE_AND_ANNOUNCEMENTS.md) — 多级邀请森林、Markdown/BBCode 公告
 - [安全加固指南](./SECURITY.md) — 生产安全基线、密钥与部署检查清单
 
 ## 说明

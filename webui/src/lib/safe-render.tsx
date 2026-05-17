@@ -62,33 +62,70 @@ function normalizeSize(raw: string): string {
 }
 
 // ============== 行内 Markdown 渲染（手写极小子集） ==============
+// 支持：行内代码 `...`、加粗 **...**、斜体 *...* 或 _..._、删除线 ~~..~~、
+// 链接 [label](url)、自动链接 https://...，以及把单独 `\n` 渲染为 <br/>。
 function renderMarkdownInline(text: string, keyPrefix = ""): React.ReactNode[] {
-  // 顺序：行内代码 > 加粗 > 斜体 > 链接
-  // 用 token 化方式避免重叠匹配。
   const out: React.ReactNode[] = [];
   let i = 0;
   let buf = "";
+
   const pushBuf = () => {
-    if (buf) {
-      out.push(buf);
-      buf = "";
+    if (!buf) return;
+    // 段内换行 → <br/>
+    const segments = buf.split("\n");
+    segments.forEach((seg, idx) => {
+      if (seg) out.push(seg);
+      if (idx < segments.length - 1) {
+        out.push(<br key={`${keyPrefix}br-${i}-${idx}-${out.length}`} />);
+      }
+    });
+    buf = "";
+  };
+
+  const tryDelim = (open: string): number => {
+    // 从 i 起寻找下一处闭合 open；要求闭合处后面不是 open 的延续字符
+    // （避免 *italic* 把 ** 截断）
+    const len = open.length;
+    let j = i + len;
+    while (j < text.length) {
+      const idx = text.indexOf(open, j);
+      if (idx < 0) return -1;
+      // 排除空内容；排除前面立刻就是反斜杠转义
+      if (idx === i + len) {
+        j = idx + len;
+        continue;
+      }
+      return idx;
     }
+    return -1;
   };
 
   while (i < text.length) {
     const ch = text[i];
 
-    // 行内代码 `...`
+    // 反斜杠转义：跳过下一个字符作为字面
+    if (ch === "\\" && i + 1 < text.length) {
+      buf += text[i + 1];
+      i += 2;
+      continue;
+    }
+
+    // 行内代码 `...`（也支持 `` `code` `` 双反引号）
     if (ch === "`") {
-      const end = text.indexOf("`", i + 1);
+      const isDouble = text[i + 1] === "`";
+      const close = isDouble ? "``" : "`";
+      const end = text.indexOf(close, i + close.length);
       if (end > i) {
         pushBuf();
         out.push(
-          <code key={`${keyPrefix}c-${i}`} className="rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]">
-            {text.slice(i + 1, end)}
+          <code
+            key={`${keyPrefix}c-${i}`}
+            className="rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]"
+          >
+            {text.slice(i + close.length, end)}
           </code>,
         );
-        i = end + 1;
+        i = end + close.length;
         continue;
       }
     }
@@ -111,7 +148,7 @@ function renderMarkdownInline(text: string, keyPrefix = ""): React.ReactNode[] {
                 rel="noopener noreferrer nofollow ugc"
                 className="text-primary underline-offset-2 hover:underline break-words"
               >
-                {label}
+                {renderMarkdownInline(label, `${keyPrefix}a${i}-`)}
               </a>,
             );
           } else {
@@ -123,10 +160,35 @@ function renderMarkdownInline(text: string, keyPrefix = ""): React.ReactNode[] {
       }
     }
 
-    // 加粗 **...**
-    if (ch === "*" && text[i + 1] === "*") {
-      const end = text.indexOf("**", i + 2);
-      if (end > i) {
+    // 自动链接 http(s)://
+    if (ch === "h" && /^https?:\/\//i.test(text.slice(i))) {
+      const match = /^https?:\/\/[^\s<>)]+/i.exec(text.slice(i));
+      if (match) {
+        const url = match[0];
+        if (isSafeUrl(url)) {
+          pushBuf();
+          out.push(
+            <a
+              key={`${keyPrefix}al-${i}`}
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer nofollow ugc"
+              className="text-primary underline-offset-2 hover:underline break-all"
+            >
+              {url}
+            </a>,
+          );
+          i += url.length;
+          continue;
+        }
+      }
+    }
+
+    // 加粗 **...** 或 __...__
+    if ((ch === "*" || ch === "_") && text[i + 1] === ch) {
+      const open = ch + ch;
+      const end = tryDelim(open);
+      if (end > i + 1) {
         pushBuf();
         out.push(
           <strong key={`${keyPrefix}b-${i}`} className="font-semibold">
@@ -138,18 +200,37 @@ function renderMarkdownInline(text: string, keyPrefix = ""): React.ReactNode[] {
       }
     }
 
-    // 斜体 *...*
-    if (ch === "*") {
-      const end = text.indexOf("*", i + 1);
-      // 避免与 ** 冲突
-      if (end > i && text[end - 1] !== "*" && text[end + 1] !== "*") {
+    // 斜体 *...* 或 _..._
+    if (ch === "*" || ch === "_") {
+      // 避免和加粗冲突：要求左右紧邻的不是同一个分隔符
+      if (text[i + 1] !== ch) {
+        const end = text.indexOf(ch, i + 1);
+        if (end > i + 1 && text[end + 1] !== ch && text[end - 1] !== ch) {
+          // 排除"裸 *"作为列表的情况：这种情况已在 inline 调用之前被块级解析吃掉，
+          // 这里只关心行内对儿。
+          pushBuf();
+          out.push(
+            <em key={`${keyPrefix}i-${i}`} className="italic">
+              {renderMarkdownInline(text.slice(i + 1, end), `${keyPrefix}i${i}-`)}
+            </em>,
+          );
+          i = end + 1;
+          continue;
+        }
+      }
+    }
+
+    // 删除线 ~~...~~
+    if (ch === "~" && text[i + 1] === "~") {
+      const end = text.indexOf("~~", i + 2);
+      if (end > i) {
         pushBuf();
         out.push(
-          <em key={`${keyPrefix}i-${i}`} className="italic">
-            {renderMarkdownInline(text.slice(i + 1, end), `${keyPrefix}i${i}-`)}
-          </em>,
+          <s key={`${keyPrefix}s-${i}`} className="line-through opacity-80">
+            {renderMarkdownInline(text.slice(i + 2, end), `${keyPrefix}s${i}-`)}
+          </s>,
         );
-        i = end + 1;
+        i = end + 2;
         continue;
       }
     }
@@ -163,21 +244,26 @@ function renderMarkdownInline(text: string, keyPrefix = ""): React.ReactNode[] {
 }
 
 // ============== 块级 Markdown 渲染 ==============
+//
+// 重写历史
+// --------
+// 第一版会因为「列表 / 标题 / 引用前忘记 flush 段落」导致 `abc\n- def`
+// 渲染成乱序。这一版统一在「跳出段落模式」时调用 ``closeParagraph``，
+// 列表 / 标题 / 引用 / 代码块 / 分割线进入前一律先把段落和列表关闭，
+// 同样的，进入列表时也先关闭段落，避免上一行被吞掉。
 function renderMarkdown(content: string): React.ReactNode {
   const lines = content.replace(/\r\n/g, "\n").split("\n");
   const out: React.ReactNode[] = [];
-  let i = 0;
   let paragraphBuf: string[] = [];
   let listBuf: string[] = [];
   let listType: "ul" | "ol" | null = null;
   let blockCodeBuf: string[] | null = null;
-  let blockCodeLang = "";
 
   const flushParagraph = () => {
     if (paragraphBuf.length === 0) return;
     const text = paragraphBuf.join("\n");
     out.push(
-      <p key={`p-${out.length}`} className="leading-relaxed whitespace-pre-wrap break-words">
+      <p key={`p-${out.length}`} className="leading-relaxed break-words my-1">
         {renderMarkdownInline(text, `p${out.length}-`)}
       </p>,
     );
@@ -185,21 +271,25 @@ function renderMarkdown(content: string): React.ReactNode {
   };
 
   const flushList = () => {
-    if (!listType || listBuf.length === 0) return;
+    if (!listType || listBuf.length === 0) {
+      listBuf = [];
+      listType = null;
+      return;
+    }
     const items = listBuf.map((item, idx) => (
-      <li key={`li-${out.length}-${idx}`} className="ml-5 list-outside">
+      <li key={`li-${out.length}-${idx}`} className="ml-5 leading-relaxed">
         {renderMarkdownInline(item, `li${out.length}-${idx}-`)}
       </li>
     ));
     if (listType === "ul") {
       out.push(
-        <ul key={`ul-${out.length}`} className="list-disc space-y-1 my-2">
+        <ul key={`ul-${out.length}`} className="my-2 list-disc list-outside space-y-0.5 pl-1">
           {items}
         </ul>,
       );
     } else {
       out.push(
-        <ol key={`ol-${out.length}`} className="list-decimal space-y-1 my-2">
+        <ol key={`ol-${out.length}`} className="my-2 list-decimal list-outside space-y-0.5 pl-1">
           {items}
         </ol>,
       );
@@ -211,27 +301,34 @@ function renderMarkdown(content: string): React.ReactNode {
   const flushCodeBlock = () => {
     if (!blockCodeBuf) return;
     out.push(
-      <pre key={`pre-${out.length}`} className="my-2 overflow-x-auto rounded-md bg-muted p-3 text-xs font-mono leading-snug">
+      <pre
+        key={`pre-${out.length}`}
+        className="my-2 overflow-x-auto rounded-md bg-muted p-3 text-xs font-mono leading-snug"
+      >
         <code>{blockCodeBuf.join("\n")}</code>
       </pre>,
     );
     blockCodeBuf = null;
-    blockCodeLang = "";
   };
 
+  /** 切换离开「段落 / 列表」上下文时的统一收尾。 */
+  const flushBlockState = () => {
+    flushParagraph();
+    flushList();
+  };
+
+  let i = 0;
   while (i < lines.length) {
-    const raw = lines[i];
-    const line = raw;
-    // 代码块开始 / 结束
-    const fence = /^```\s*([\w-]*)\s*$/.exec(line);
+    const line = lines[i];
+
+    // 1) 代码块围栏 ```
+    const fence = /^```\s*[\w-]*\s*$/.exec(line);
     if (fence) {
       if (blockCodeBuf) {
         flushCodeBlock();
       } else {
-        flushParagraph();
-        flushList();
+        flushBlockState();
         blockCodeBuf = [];
-        blockCodeLang = fence[1] || "";
       }
       i += 1;
       continue;
@@ -242,11 +339,10 @@ function renderMarkdown(content: string): React.ReactNode {
       continue;
     }
 
-    // 标题 # ~ ######
-    const heading = /^(#{1,6})\s+(.+)$/.exec(line);
+    // 2) 标题
+    const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
     if (heading) {
-      flushParagraph();
-      flushList();
+      flushBlockState();
       const level = heading[1].length;
       const text = heading[2];
       const sizeClass =
@@ -254,7 +350,7 @@ function renderMarkdown(content: string): React.ReactNode {
         : level === 2 ? "text-lg font-bold"
         : level === 3 ? "text-base font-bold"
         : "text-sm font-semibold";
-      const Tag = (`h${Math.min(6, Math.max(1, level))}`) as keyof JSX.IntrinsicElements;
+      const Tag = `h${Math.min(6, Math.max(1, level))}` as keyof JSX.IntrinsicElements;
       out.push(
         <Tag key={`h-${out.length}`} className={`mt-3 first:mt-0 ${sizeClass}`}>
           {renderMarkdownInline(text, `h${out.length}-`)}
@@ -264,10 +360,9 @@ function renderMarkdown(content: string): React.ReactNode {
       continue;
     }
 
-    // 引用 >
+    // 3) 引用
     if (/^>\s?/.test(line)) {
-      flushParagraph();
-      flushList();
+      flushBlockState();
       const quoteLines: string[] = [];
       while (i < lines.length && /^>\s?/.test(lines[i])) {
         quoteLines.push(lines[i].replace(/^>\s?/, ""));
@@ -276,7 +371,7 @@ function renderMarkdown(content: string): React.ReactNode {
       out.push(
         <blockquote
           key={`quote-${out.length}`}
-          className="border-l-4 border-primary/50 pl-3 my-2 text-muted-foreground italic"
+          className="my-2 border-l-4 border-primary/50 pl-3 italic text-muted-foreground"
         >
           {renderMarkdownInline(quoteLines.join("\n"), `quote${out.length}-`)}
         </blockquote>,
@@ -284,10 +379,31 @@ function renderMarkdown(content: string): React.ReactNode {
       continue;
     }
 
-    // 列表
-    const ul = /^\s*[-*+]\s+(.+)$/.exec(line);
-    const ol = /^\s*\d+\.\s+(.+)$/.exec(line);
+    // 4) 分割线（先于列表判定，避免 `---` 被当成 ul）
+    //    规则：整行只有 ≥3 个相同字符（- * _），允许中间空格
+    {
+      const trimmed = line.trim();
+      const compact = trimmed.replace(/\s+/g, "");
+      if (
+        compact.length >= 3 &&
+        (compact === "-".repeat(compact.length) ||
+          compact === "*".repeat(compact.length) ||
+          compact === "_".repeat(compact.length))
+      ) {
+        flushBlockState();
+        out.push(<hr key={`hr-${out.length}`} className="my-3 border-border" />);
+        i += 1;
+        continue;
+      }
+    }
+
+    // 5) 列表
+    //   - 进入列表前必须先 flushParagraph，避免上一段被吞
+    //   - 兼容 `-/* /+` 三种无序符号；有序为 `数字.`
+    const ul = /^\s*[-*+]\s+(.*)$/.exec(line);
+    const ol = /^\s*\d+\.\s+(.*)$/.exec(line);
     if (ul) {
+      flushParagraph();
       if (listType && listType !== "ul") flushList();
       listType = "ul";
       listBuf.push(ul[1]);
@@ -295,38 +411,28 @@ function renderMarkdown(content: string): React.ReactNode {
       continue;
     }
     if (ol) {
+      flushParagraph();
       if (listType && listType !== "ol") flushList();
       listType = "ol";
       listBuf.push(ol[1]);
       i += 1;
       continue;
     }
-    if (listType) {
-      flushList();
-    }
+    if (listType) flushList();
 
-    // 分割线
-    if (/^[-=*]{3,}\s*$/.test(line)) {
-      flushParagraph();
-      flushList();
-      out.push(<hr key={`hr-${out.length}`} className="my-3 border-border" />);
-      i += 1;
-      continue;
-    }
-
-    // 空行 → 段落分隔
+    // 6) 空行 → 段落分隔
     if (line.trim() === "") {
       flushParagraph();
       i += 1;
       continue;
     }
 
+    // 普通段落
     paragraphBuf.push(line);
     i += 1;
   }
 
-  flushParagraph();
-  flushList();
+  flushBlockState();
   flushCodeBlock();
   return <div className="space-y-1">{out}</div>;
 }
@@ -469,12 +575,35 @@ function renderBBNode(frame: BBFrame): React.ReactNode {
       return <u key={key} className="underline">{children}</u>;
     case "s":
       return <s key={key} className="line-through opacity-80">{children}</s>;
-    case "code":
+    case "code": {
+      // 含换行 → 渲染为块级 <pre>；单行 → 行内 <code>
+      const hasBlock = (children as React.ReactNode[]).some(
+        (n) => n && typeof n !== "string" && (n as any).type === "br",
+      );
+      if (hasBlock) {
+        // 把 <br/> 替换为字符 "\n" 后塞进 <pre>
+        const text = (children as React.ReactNode[])
+          .map((n) => {
+            if (typeof n === "string") return n;
+            if (n && typeof n !== "string" && (n as any).type === "br") return "\n";
+            return "";
+          })
+          .join("");
+        return (
+          <pre
+            key={key}
+            className="my-2 overflow-x-auto rounded-md bg-muted p-3 text-xs font-mono leading-snug whitespace-pre-wrap break-words"
+          >
+            <code>{text}</code>
+          </pre>
+        );
+      }
       return (
         <code key={key} className="rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]">
           {children}
         </code>
       );
+    }
     case "quote":
       return (
         <blockquote key={key} className="my-2 border-l-4 border-primary/50 pl-3 italic text-muted-foreground">
