@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
 
 from src.config import TelegramConfig
+from src.services.telegram_runtime import has_telegram_api_access, run_bot_operation
 
 logger = logging.getLogger(__name__)
 
@@ -70,15 +71,8 @@ class TelegramMembershipService:
 
     @staticmethod
     def is_bot_available() -> bool:
-        """Bot 已实例化并完成 PTB initialize 返回 True。"""
-        try:
-            from src.bot.bot import get_bot_instance
-        except Exception:  # pragma: no cover
-            return False
-        bot_instance = get_bot_instance()
-        return bool(
-            bot_instance and bot_instance.application and bot_instance.application.bot
-        )
+        """当前配置是否允许执行 Telegram 成员资格校验。"""
+        return has_telegram_api_access()
 
     @staticmethod
     async def check_user_in_groups(
@@ -100,18 +94,9 @@ class TelegramMembershipService:
         if not telegram_id:
             return False, []
 
-        try:
-            from src.bot.bot import get_bot_instance  # 延迟导入避免循环
-        except Exception as exc:  # pragma: no cover
-            logger.warning(f"无法导入 Bot 实例: {exc}")
+        if not has_telegram_api_access():
+            logger.info("Telegram API 不可用，跳过群组成员资格检查")
             return (not strict), []
-
-        bot_instance = get_bot_instance()
-        if not (bot_instance and bot_instance.application and bot_instance.application.bot):
-            logger.info("Bot 未运行，跳过群组成员资格检查")
-            return (not strict), []
-
-        bot = bot_instance.application.bot
 
         # 延迟导入 telegram.error，避免顶层依赖
         try:
@@ -119,85 +104,92 @@ class TelegramMembershipService:
         except Exception:
             BadRequest = TelegramError = Forbidden = Exception  # type: ignore
 
-        missing: List[MissingGroup] = []
+        async def _check_with_bot(bot) -> Tuple[bool, List[MissingGroup]]:
+            missing: List[MissingGroup] = []
 
-        # 并发查询所有群组成员资格
-        async def _probe_one(gid: Union[int, str]) -> Optional[MissingGroup]:
-            chat = None
-            try:
-                # 先尽量拿一次群组元信息，便于失败时返回标题/链接
+            # 并发查询所有群组成员资格
+            async def _probe_one(gid: Union[int, str]) -> Optional[MissingGroup]:
+                chat = None
                 try:
-                    chat = await bot.get_chat(gid)
-                except Exception:
-                    chat = None
+                    # 先尽量拿一次群组元信息，便于失败时返回标题/链接
+                    try:
+                        chat = await bot.get_chat(gid)
+                    except Exception:
+                        chat = None
 
-                member = await bot.get_chat_member(gid, telegram_id)
-                status = str(getattr(member, "status", "") or "").lower()
-                if status in ("left", "kicked"):
-                    return MissingGroup(
-                        id=str(gid),
-                        title=getattr(chat, "title", None) if chat else None,
-                        url=_build_invite_url(gid, chat),
+                    member = await bot.get_chat_member(gid, telegram_id)
+                    status = str(getattr(member, "status", "") or "").lower()
+                    if status in ("left", "kicked"):
+                        return MissingGroup(
+                            id=str(gid),
+                            title=getattr(chat, "title", None) if chat else None,
+                            url=_build_invite_url(gid, chat),
+                        )
+                    return None
+                except BadRequest as exc:
+                    msg = str(exc).lower()
+                    if (
+                        "not found" in msg
+                        or "user not found" in msg
+                        or "participant" in msg
+                        or "member list is inaccessible" in msg
+                    ):
+                        return MissingGroup(
+                            id=str(gid),
+                            title=getattr(chat, "title", None) if chat else None,
+                            url=_build_invite_url(gid, chat),
+                        )
+                    logger.warning(
+                        f"检查群组 {gid} 成员资格 BadRequest (tg_id={telegram_id}): {exc}"
                     )
-                return None
-            except BadRequest as exc:
-                msg = str(exc).lower()
-                if (
-                    "not found" in msg
-                    or "user not found" in msg
-                    or "participant" in msg
-                    or "member list is inaccessible" in msg
-                ):
-                    return MissingGroup(
-                        id=str(gid),
-                        title=getattr(chat, "title", None) if chat else None,
-                        url=_build_invite_url(gid, chat),
+                    if strict:
+                        return MissingGroup(
+                            id=str(gid),
+                            title=getattr(chat, "title", None) if chat else None,
+                            url=_build_invite_url(gid, chat),
+                        )
+                    return None
+                except Forbidden as exc:
+                    logger.warning(
+                        f"Bot 缺少群 {gid} 的查看权限 (tg_id={telegram_id}): {exc}"
                     )
-                logger.warning(
-                    f"检查群组 {gid} 成员资格 BadRequest (tg_id={telegram_id}): {exc}"
-                )
-                if strict:
-                    return MissingGroup(
-                        id=str(gid),
-                        title=getattr(chat, "title", None) if chat else None,
-                        url=_build_invite_url(gid, chat),
+                    # Bot 没权限就别拦人，否则一旦群里失权就全员被踢
+                    return None
+                except TelegramError as exc:
+                    logger.warning(
+                        f"检查群组 {gid} Telegram 异常 (tg_id={telegram_id}): {exc}"
                     )
-                return None
-            except Forbidden as exc:
-                logger.warning(
-                    f"Bot 缺少群 {gid} 的查看权限 (tg_id={telegram_id}): {exc}"
-                )
-                # Bot 没权限就别拦人，否则一旦群里失权就全员被踢
-                return None
-            except TelegramError as exc:
-                logger.warning(
-                    f"检查群组 {gid} Telegram 异常 (tg_id={telegram_id}): {exc}"
-                )
-                if strict:
-                    return MissingGroup(
-                        id=str(gid),
-                        title=getattr(chat, "title", None) if chat else None,
-                        url=_build_invite_url(gid, chat),
+                    if strict:
+                        return MissingGroup(
+                            id=str(gid),
+                            title=getattr(chat, "title", None) if chat else None,
+                            url=_build_invite_url(gid, chat),
+                        )
+                    return None
+                except Exception as exc:  # pragma: no cover - safety net
+                    logger.warning(
+                        f"检查群组 {gid} 未知异常 (tg_id={telegram_id}): {exc}"
                     )
-                return None
-            except Exception as exc:  # pragma: no cover - safety net
-                logger.warning(
-                    f"检查群组 {gid} 未知异常 (tg_id={telegram_id}): {exc}"
-                )
-                if strict:
-                    return MissingGroup(
-                        id=str(gid),
-                        title=getattr(chat, "title", None) if chat else None,
-                        url=_build_invite_url(gid, chat),
-                    )
-                return None
+                    if strict:
+                        return MissingGroup(
+                            id=str(gid),
+                            title=getattr(chat, "title", None) if chat else None,
+                            url=_build_invite_url(gid, chat),
+                        )
+                    return None
 
-        results = await asyncio.gather(*[_probe_one(gid) for gid in group_ids])
-        for r in results:
-            if r is not None:
-                missing.append(r)
+            results = await asyncio.gather(*[_probe_one(gid) for gid in group_ids])
+            for r in results:
+                if r is not None:
+                    missing.append(r)
 
-        return (len(missing) == 0), missing
+            return (len(missing) == 0), missing
+
+        try:
+            return await run_bot_operation(_check_with_bot, timeout=30)
+        except Exception as exc:
+            logger.warning(f"执行群组成员资格检查失败 (tg_id={telegram_id}): {exc}")
+            return (not strict), []
 
     @staticmethod
     def format_missing_message(missing: List[MissingGroup]) -> str:

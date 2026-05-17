@@ -847,14 +847,17 @@ async def get_telegram_status():
     telegram_username = None
     if user.TELEGRAM_ID:
         try:
-            from src.bot.bot import get_bot_instance
-            bot = get_bot_instance()
-            if bot and bot.application:
-                try:
-                    tg_user = await bot.application.bot.get_chat(user.TELEGRAM_ID)
-                    telegram_username = tg_user.username or f"{tg_user.first_name or ''} {tg_user.last_name or ''}".strip() or None
-                except Exception:
-                    pass  # 如果获取失败，忽略
+            from src.services.telegram_runtime import run_bot_operation
+
+            async def _resolve_username(bot):
+                tg_user = await bot.get_chat(user.TELEGRAM_ID)
+                return (
+                    tg_user.username
+                    or f"{tg_user.first_name or ''} {tg_user.last_name or ''}".strip()
+                    or None
+                )
+
+            telegram_username = await run_bot_operation(_resolve_username, timeout=8)
         except Exception:
             pass  # Bot 未初始化或获取失败，忽略
     

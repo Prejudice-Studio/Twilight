@@ -503,8 +503,8 @@ export default function DashboardPage() {
               </p>
             )}
             {user?.emby_id ? (
-              <p className="text-xs text-muted-foreground break-all" title={user.emby_id}>
-                我的 Emby ID：<span className="font-mono">{user.emby_id}</span>
+              <p className="text-xs text-muted-foreground break-all" title={user.emby_username}>
+                我的 Emby：<span className="font-mono">{user.emby_username}</span>
               </p>
             ) : (
               <p className="text-xs text-amber-500">尚未绑定 Emby 账号</p>
@@ -564,7 +564,7 @@ export default function DashboardPage() {
             <div className="min-w-0">
               <h3 className="text-base font-black tracking-tight">服务器线路延迟</h3>
               <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-tighter">
-                Network Probe · 不展示具体地址
+                Server Network Status
               </p>
             </div>
           </div>

@@ -68,28 +68,19 @@ async def list_users():
     _MAX_LIVE_TG_FETCH = 10
     live_fetch_used = 0
 
-    bot = None
-    try:
-        from src.bot.bot import get_bot_instance
-        bot_instance = get_bot_instance()
-        if bot_instance and bot_instance.application and bot_instance.application.bot:
-            bot = bot_instance.application.bot
-    except Exception:
-        bot = None
+    from src.services.telegram_runtime import run_bot_operation
 
     user_list = []
     for user in users:
         telegram_username = UserService.get_cached_telegram_username(user)
 
         # 没缓存 + Bot 在线 + 本次请求还有 live fetch 配额 → 试一次
-        if (
-            telegram_username is None
-            and user.TELEGRAM_ID
-            and bot is not None
-            and live_fetch_used < _MAX_LIVE_TG_FETCH
-        ):
+        if telegram_username is None and user.TELEGRAM_ID and live_fetch_used < _MAX_LIVE_TG_FETCH:
             try:
-                tg_user = await bot.get_chat(user.TELEGRAM_ID)
+                async def _resolve_chat(bot):
+                    return await bot.get_chat(user.TELEGRAM_ID)
+
+                tg_user = await run_bot_operation(_resolve_chat, timeout=8)
                 resolved = tg_user.username or None
                 live_fetch_used += 1
                 if resolved:

@@ -167,11 +167,15 @@ async def get_system_info():
     telegram_bot_username: Optional[str] = None
     if Config.TELEGRAM_MODE:
         try:
-            from src.bot.bot import get_bot_instance
-            bot_instance = get_bot_instance()
-            if bot_instance and bot_instance.application and bot_instance.application.bot:
-                # PTB 在 application.initialize() 后会缓存 username，可同步读取
-                telegram_bot_username = bot_instance.application.bot.username or None
+            from src.services.telegram_runtime import run_bot_operation
+
+            async def _read_bot_username(bot):
+                if getattr(bot, "username", None):
+                    return bot.username
+                me = await bot.get_me()
+                return me.username or None
+
+            telegram_bot_username = await run_bot_operation(_read_bot_username, timeout=8)
         except Exception:
             telegram_bot_username = None
 
