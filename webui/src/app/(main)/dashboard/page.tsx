@@ -372,10 +372,6 @@ export default function DashboardPage() {
         </Badge>
       </div>
 
-      <motion.div variants={item}>
-        <AnnouncementBoard splitPinned />
-      </motion.div>
-
       {/* 顶部三块: 到期 / 状态 / Emby 绑定 */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <motion.div variants={item} className="premium-card p-5 sm:p-6">
@@ -647,6 +643,11 @@ export default function DashboardPage() {
             {isUsingCode ? <Loader2 className="h-4 w-4 animate-spin" /> : "验证并使用"}
           </Button>
         </div>
+      </motion.div>
+
+      {/* 公告板 —— 仪表盘最下方 */}
+      <motion.div variants={item}>
+        <AnnouncementBoard splitPinned />
       </motion.div>
 
       <Dialog open={showConfirm} onOpenChange={setShowConfirm}>

@@ -29,7 +29,53 @@ class BaseConfig:
     提供从TOML文件读取和保存配置的能力
     """
     toml_file_path: str = str(ROOT_PATH / 'config.toml')
+    toml_override_file_path: str = str(ROOT_PATH / 'config.local.toml')
     _section: Optional[str] = None
+
+    @classmethod
+    def _merge_dict(cls, base: dict, override: dict) -> dict:
+        """递归合并 dict（override 覆盖 base）。"""
+        result = dict(base)
+        for key, value in (override or {}).items():
+            if isinstance(value, dict) and isinstance(result.get(key), dict):
+                result[key] = cls._merge_dict(result[key], value)
+            else:
+                result[key] = value
+        return result
+
+    @classmethod
+    def _load_toml_config(cls) -> dict:
+        """加载配置：主配置 + 本地覆盖配置。"""
+        config: dict = {}
+
+        primary_path = os.environ.get("TWILIGHT_CONFIG_FILE", cls.toml_file_path)
+        local_override_path = os.environ.get(
+            "TWILIGHT_CONFIG_LOCAL_FILE",
+            cls.toml_override_file_path,
+        )
+
+        try:
+            config = toml.load(primary_path)
+        except FileNotFoundError:
+            logger.warning(f'配置文件不存在: {primary_path}')
+        except toml.TomlDecodeError as err:
+            logger.error(f'TOML配置文件格式错误 ({primary_path}): {err}')
+        except Exception as err:
+            logger.error(f'加载配置文件时发生错误 ({primary_path}): {err}')
+
+        if local_override_path:
+            try:
+                override_config = toml.load(local_override_path)
+                config = cls._merge_dict(config, override_config)
+                logger.debug(f"已加载本地覆盖配置: {local_override_path}")
+            except FileNotFoundError:
+                pass
+            except toml.TomlDecodeError as err:
+                logger.error(f'TOML配置文件格式错误 ({local_override_path}): {err}')
+            except Exception as err:
+                logger.error(f'加载本地覆盖配置时发生错误 ({local_override_path}): {err}')
+
+        return config
 
     @classmethod
     def update_from_toml(cls, section: Optional[str] = None) -> None:
@@ -39,17 +85,7 @@ class BaseConfig:
         :param section: TOML文件中的配置节名称，为None时加载根级配置
         """
         cls._section = section
-        config = {}
-        
-        # 1. 从 TOML 加载
-        try:
-            config = toml.load(cls.toml_file_path)
-        except FileNotFoundError:
-            logger.warning(f'配置文件不存在: {cls.toml_file_path}')
-        except toml.TomlDecodeError as err:
-            logger.error(f'TOML配置文件格式错误: {err}')
-        except Exception as err:
-            logger.error(f'加载配置文件时发生错误: {err}')
+        config = cls._load_toml_config()
             
         items = config.get(section, {}) if section else config
         
@@ -294,9 +330,12 @@ class RegisterConfig(BaseConfig):
     AUTO_CLEANUP_NO_EMBY: bool = False  # 是否自动清理没有 Emby 账户的用户
     AUTO_CLEANUP_NO_EMBY_DAYS: int = 7  # 注册后多少天未创建 Emby 账户则自动删除
 
-    # 邀请系统
-    INVITE_ENABLED: bool = False  # 是否启用邀请系统
+    # 邀请系统（树状邀请：用户 B 生成 Emby 注册码，A 使用后成为 B 的下级）
+    INVITE_ENABLED: bool = False  # 是否启用邀请系统（关闭时所有邀请相关 API 直接返回禁用）
     INVITE_LIMIT: int = 10  # 每人最多邀请数量 (-1 = 无限制)
+    INVITE_MAX_DEPTH: int = 3  # 邀请树最大层级，B->A->C 计为 3 层。1 表示禁止任何邀请
+    INVITE_REQUIRE_EMBY: bool = True  # 是否要求邀请人已绑定 Emby 账号才能生码
+    INVITE_CODE_DEFAULT_DAYS: int = 30  # 被邀请人 Emby 账号的默认开通天数
 
 
 class DeviceLimitConfig(BaseConfig):

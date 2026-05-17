@@ -959,6 +959,7 @@ class ApiClient {
     title?: string;
     content: string;
     level?: 'info' | 'notice' | 'warning' | 'critical';
+    render_mode?: AnnouncementRenderMode;
     pinned?: boolean;
     visible?: boolean;
     expires_at?: number;
@@ -973,6 +974,7 @@ class ApiClient {
     title?: string;
     content?: string;
     level?: 'info' | 'notice' | 'warning' | 'critical';
+    render_mode?: AnnouncementRenderMode;
     pinned?: boolean;
     visible?: boolean;
     expires_at?: number;
@@ -987,6 +989,76 @@ class ApiClient {
     return this.request(`/admin/announcements/${id}`, {
       method: 'DELETE',
     });
+  }
+
+  // ==================== 邀请树 ====================
+  async getInviteConfig() {
+    return this.request<InviteConfig>("/invite/config");
+  }
+
+  async getMyInviteStatus() {
+    return this.request<InviteMyStatus>("/invite/me");
+  }
+
+  async getMyInviteCodes() {
+    return this.request<{ codes: InviteCodeItem[]; total: number }>("/invite/codes");
+  }
+
+  async createInviteCode(payload: { days?: number; expires_at?: number; note?: string }) {
+    return this.request<InviteCodeItem>("/invite/codes", {
+      method: "POST",
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
+  async revokeInviteCode(code: string) {
+    return this.request(`/invite/codes/${encodeURIComponent(code)}`, {
+      method: "DELETE",
+    });
+  }
+
+  async useInviteCode(payload: { code: string; emby_username: string; emby_password: string }) {
+    return this.request<{
+      emby_id: string;
+      emby_username: string;
+      expired_at: number;
+      inviter_uid: number | null;
+      days: number;
+    }>("/invite/use", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async checkInviteCode(code: string) {
+    return this.request<{ days: number; inviter: string | null }>("/invite/check", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    });
+  }
+
+  // 管理员：邀请森林
+  async adminGetInviteTree() {
+    return this.request<InviteForest>("/admin/invite/tree");
+  }
+
+  async adminDetachInviteUser(uid: number) {
+    return this.request<{ uid: number; is_root: boolean }>(`/admin/invite/users/${uid}/detach`, {
+      method: "POST",
+    });
+  }
+
+  // 扩展用户删除：支持级联层级
+  async deleteUserCascade(uid: number, options?: { deleteEmby?: boolean; cascadeDepth?: number }) {
+    const deleteEmby = options?.deleteEmby ?? true;
+    const cascadeDepth = Math.max(1, options?.cascadeDepth ?? 1);
+    return this.request<{ deleted: number[]; failed: Array<{ uid: number; reason: string }>; cascade_depth: number }>(
+      `/admin/users/${uid}`,
+      {
+        method: "DELETE",
+        body: JSON.stringify({ delete_emby: deleteEmby, cascade_depth: cascadeDepth }),
+      },
+    );
   }
 }
 
@@ -1394,16 +1466,83 @@ export interface SchedulerJobItem {
 }
 
 
+export type AnnouncementRenderMode = "plain" | "markdown" | "bbcode";
+
 export interface Announcement {
   id: number;
   title: string | null;
   content: string;
   level: "info" | "notice" | "warning" | "critical";
+  render_mode?: AnnouncementRenderMode;
   pinned: boolean;
   visible: boolean;
   expires_at: number; // -1 = 永不过期
   created_at: number;
   updated_at: number;
   created_by_uid?: number | null;
+}
+
+// ==================== 邀请树 ====================
+export interface InviteConfig {
+  enabled: boolean;
+  max_depth: number;
+  invite_limit: number;
+  require_emby: boolean;
+  default_days: number;
+}
+
+export interface InviteCodeItem {
+  code: string;
+  inviter_uid: number;
+  days: number;
+  use_count_limit: number;
+  use_count: number;
+  expires_at: number;
+  active: boolean;
+  created_at: number;
+  used_by_uid?: number | null;
+  used_at?: number | null;
+  note?: string | null;
+}
+
+export interface InviteMyStatus {
+  enabled: boolean;
+  is_root: boolean;
+  parent: { uid: number; username: string } | null;
+  children: Array<{ uid: number; username: string; active: boolean; has_emby: boolean }>;
+  depth: number;
+  max_depth: number;
+  can_invite: boolean;
+  invite_block_reason?: string;
+}
+
+export interface InviteForestNode {
+  uid: number;
+  username: string;
+  role: number;
+  emby_id?: string | null;
+  active: boolean;
+  telegram_id?: number | null;
+  register_time?: number | null;
+  expired_at?: number | null;
+  is_root: boolean;
+}
+
+export interface InviteForestEdge {
+  parent: number;
+  child: number;
+}
+
+export interface InviteForest {
+  nodes: InviteForestNode[];
+  edges: InviteForestEdge[];
+  roots: number[];
+  max_depth: number;
+  config: {
+    enabled: boolean;
+    max_depth: number;
+    invite_limit: number;
+    require_emby: boolean;
+  };
 }
 

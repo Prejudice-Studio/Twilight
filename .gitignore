@@ -59,8 +59,10 @@ ENV/
 .env.*.private
 .envrc
 config.local.toml
+config.private.toml
+config.secrets.toml
+config.*.secrets.toml
 config.*.local.toml
-config.*.production.toml
 config.toml.backup
 config.toml.bak
 
@@ -157,3 +159,7 @@ OPTIMIZATION_SUMMARY.md
 /tests
 config.toml
 /.claude
+
+# VS Code/Copilot local session artifacts
+.copilot/
+/.github/copilot-instructions.local.md

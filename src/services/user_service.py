@@ -670,6 +670,14 @@ class UserService:
                 emby = get_emby_client()
                 await emby.delete_user(user.EMBYID)
 
+            # 清理邀请关系（如果启用）：子节点自动晋升为新树根
+            try:
+                from src.db.invite import InviteRelationOperate, InviteCodeOperate
+                await InviteRelationOperate.delete_relations_for_uid(user.UID)
+                await InviteCodeOperate.delete_for_inviter(user.UID)
+            except Exception as exc:  # pragma: no cover - 邀请表缺失不应阻塞主删除
+                logger.warning(f"清理邀请关系失败 uid={user.UID}: {exc}")
+
             # 删除用户记录
             await UserOperate.delete_user(user)
 

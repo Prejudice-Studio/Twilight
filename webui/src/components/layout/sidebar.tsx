@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ComponentType } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -22,6 +22,8 @@ import {
   Server,
   Megaphone,
   TimerReset,
+  GitBranch,
+  Network,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
@@ -38,10 +40,29 @@ export interface SidebarNavItem {
   icon: ComponentType<{ className?: string }>;
 }
 
+type ViewTransitionLike = {
+  ready: Promise<void>;
+};
+
+type MaybeStartViewTransition = {
+  startViewTransition?: (updateCallback: () => void | Promise<void>) => ViewTransitionLike;
+};
+
+const SAFE_IMAGE_URL = /^(https?:\/\/|\/|data:image\/|blob:)/i;
+
+function sanitizeImageUrl(url?: string | null): string | undefined {
+  if (!url) return undefined;
+  const value = url.trim();
+  if (!value) return undefined;
+  if (!SAFE_IMAGE_URL.test(value)) return undefined;
+  return value;
+}
+
 export const userNavItems: SidebarNavItem[] = [
   { href: "/dashboard", label: "仪表盘", icon: LayoutDashboard },
   { href: "/announcements", label: "公告", icon: Megaphone },
   { href: "/media", label: "求片中心", icon: Film },
+  { href: "/invite", label: "邀请中心", icon: GitBranch },
   { href: "/settings", label: "个人设置", icon: Settings },
 ];
 
@@ -49,6 +70,7 @@ export const adminNavItems: SidebarNavItem[] = [
   { href: "/admin/users", label: "用户管理", icon: Users },
   { href: "/admin/announcements", label: "公告管理", icon: Megaphone },
   { href: "/admin/regcodes", label: "注册码", icon: FileText },
+  { href: "/admin/invite", label: "邀请森林", icon: Network },
   { href: "/admin/requests", label: "求片审核", icon: Film },
   { href: "/admin/telegram-rebind-requests", label: "Telegram 换绑", icon: MessageSquare },
   { href: "/admin/emby", label: "Emby 管理", icon: Server },
@@ -100,6 +122,8 @@ export function Sidebar() {
   );
 
   const displaySiteName = systemInfo?.name || SITE_NAME;
+  const safeSystemIcon = useMemo(() => sanitizeImageUrl(systemInfo?.icon), [systemInfo?.icon]);
+  const safeProfileAvatar = useMemo(() => sanitizeImageUrl(profileAvatar), [profileAvatar]);
 
   const toggleTheme = (event: React.MouseEvent) => {
     const x = event.clientX;
@@ -109,16 +133,18 @@ export function Sidebar() {
     const currentIndex = themeOrder.indexOf(currentTheme || "light");
     const nextTheme = themeOrder[(currentIndex + 1) % themeOrder.length];
 
-    if (!(document as any).startViewTransition) {
+    const startViewTransition = (document as unknown as MaybeStartViewTransition).startViewTransition;
+
+    if (!startViewTransition) {
       setTheme(nextTheme);
       return;
     }
 
-    const transition = (document as any).startViewTransition(async () => {
+    const transition = startViewTransition(() => {
       setTheme(nextTheme);
     });
 
-    transition.ready.then(() => {
+    void transition.ready.then(() => {
       const radius = Math.hypot(
         Math.max(x, window.innerWidth - x),
         Math.max(y, window.innerHeight - y)
@@ -135,17 +161,23 @@ export function Sidebar() {
           duration: 500,
           easing: "ease-in-out",
           pseudoElement: "::view-transition-new(root)",
-        }
+        } as KeyframeAnimationOptions
       );
-    });
+    }).catch(() => undefined);
   };
 
   return (
     <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 p-4 lg:block">
       <div className="sidebar-surface h-full">
         <div className="sidebar-brand">
-          {systemInfo?.icon ? (
-            <img src={systemInfo.icon} alt={displaySiteName} className="h-10 w-10 rounded-xl object-cover" />
+          {safeSystemIcon ? (
+            <img
+              src={safeSystemIcon}
+              alt={displaySiteName}
+              className="h-10 w-10 rounded-xl object-cover"
+              loading="lazy"
+              referrerPolicy="no-referrer"
+            />
           ) : (
             <div className="brand-logo">{displaySiteName.slice(0, 2).toUpperCase()}</div>
           )}
@@ -195,7 +227,7 @@ export function Sidebar() {
         <div className="sidebar-footer">
           <div className="profile-card">
             <Avatar className="h-10 w-10 border border-border/60">
-              {profileAvatar && <AvatarImage src={profileAvatar} alt={user?.username} />}
+              {safeProfileAvatar && <AvatarImage src={safeProfileAvatar} alt={user?.username} />}
               <AvatarFallback className="bg-primary/15 text-primary text-xs font-semibold">
                 {user?.username?.slice(0, 2).toUpperCase() || "U"}
               </AvatarFallback>

@@ -28,6 +28,8 @@ class AnnouncementModel(AnnouncementsDatabaseModel):
     CONTENT: Mapped[str] = mapped_column(String, default='', nullable=False)
     # 级别：info / notice / warning / critical
     LEVEL: Mapped[str] = mapped_column(String(16), default='info', nullable=False, index=True)
+    # 渲染方式：plain / markdown / bbcode
+    RENDER_MODE: Mapped[str] = mapped_column(String(16), default='plain', nullable=False)
     PINNED: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     VISIBLE: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
     # -1 表示永不过期
@@ -45,11 +47,52 @@ _, AnnouncementsSessionFactory = init_async_db("announcements", AnnouncementsDat
 
 
 ALLOWED_LEVELS = {'info', 'notice', 'warning', 'critical'}
+ALLOWED_RENDER_MODES = {'plain', 'markdown', 'bbcode'}
 
 
 def normalize_level(level: Optional[str]) -> str:
     raw = (level or 'info').strip().lower()
     return raw if raw in ALLOWED_LEVELS else 'info'
+
+
+def normalize_render_mode(mode: Optional[str]) -> str:
+    raw = (mode or 'plain').strip().lower()
+    # 兼容别名：text -> plain
+    if raw in ('text', 'plaintext', 'txt'):
+        raw = 'plain'
+    if raw in ('md',):
+        raw = 'markdown'
+    if raw in ('bb',):
+        raw = 'bbcode'
+    return raw if raw in ALLOWED_RENDER_MODES else 'plain'
+
+
+def _column_exists(conn, table: str, column: str) -> bool:
+    rows = list(conn.exec_driver_sql(f"PRAGMA table_info({table})"))
+    return any((row[1] or '').upper() == column.upper() for row in rows)
+
+
+def _ensure_render_mode_column() -> None:
+    """老库升级：缺失 RENDER_MODE 列时自动 ALTER。"""
+    from sqlalchemy import create_engine, text as _text
+    from src.db.utils import get_database_path
+
+    db_path = get_database_path("announcements")
+    if not db_path.exists():
+        return
+    engine = create_engine(f"sqlite:///{db_path.as_posix()}")
+    try:
+        with engine.begin() as conn:
+            if not _column_exists(conn, 'announcements', 'RENDER_MODE'):
+                conn.exec_driver_sql(
+                    "ALTER TABLE announcements ADD COLUMN RENDER_MODE VARCHAR(16) "
+                    "NOT NULL DEFAULT 'plain'"
+                )
+    finally:
+        engine.dispose()
+
+
+_ensure_render_mode_column()
 
 
 class AnnouncementOperate:
@@ -129,12 +172,14 @@ class AnnouncementOperate:
         visible: bool = True,
         expires_at: int = -1,
         created_by_uid: Optional[int] = None,
+        render_mode: str = 'plain',
     ) -> AnnouncementModel:
         now = int(time.time())
         item = AnnouncementModel(
             TITLE=(title or '').strip() or None,
             CONTENT=(content or '').strip(),
             LEVEL=normalize_level(level),
+            RENDER_MODE=normalize_render_mode(render_mode),
             PINNED=bool(pinned),
             VISIBLE=bool(visible),
             EXPIRES_AT=int(expires_at) if expires_at is not None else -1,
@@ -151,6 +196,7 @@ class AnnouncementOperate:
                     TITLE=item.TITLE,
                     CONTENT=item.CONTENT,
                     LEVEL=item.LEVEL,
+                    RENDER_MODE=item.RENDER_MODE,
                     PINNED=item.PINNED,
                     VISIBLE=item.VISIBLE,
                     EXPIRES_AT=item.EXPIRES_AT,
@@ -169,6 +215,7 @@ class AnnouncementOperate:
         pinned: Optional[bool] = None,
         visible: Optional[bool] = None,
         expires_at: Optional[int] = None,
+        render_mode: Optional[str] = None,
     ) -> Optional[AnnouncementModel]:
         values: dict = {}
         if title is not None:
@@ -177,6 +224,8 @@ class AnnouncementOperate:
             values['CONTENT'] = content.strip()
         if level is not None:
             values['LEVEL'] = normalize_level(level)
+        if render_mode is not None:
+            values['RENDER_MODE'] = normalize_render_mode(render_mode)
         if pinned is not None:
             values['PINNED'] = bool(pinned)
         if visible is not None:

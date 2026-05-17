@@ -5,6 +5,7 @@ import { ChevronDown, ChevronUp, Clock3, Pin, Megaphone, Info, AlertTriangle, Al
 import { api, type Announcement } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { SafeAnnouncementContent } from "@/lib/safe-render";
 
 const LEVEL_STYLES: Record<Announcement["level"], { icon: typeof Info; cardClass: string; iconClass: string; label: string }> = {
   info: {
@@ -91,8 +92,8 @@ function AnnouncementCard({ ann }: { ann: Announcement }) {
           </p>
         </div>
       </header>
-      <div className="mt-3 text-sm leading-relaxed whitespace-pre-wrap break-words">
-        {ann.content}
+      <div className="mt-3 text-sm leading-relaxed break-words">
+        <SafeAnnouncementContent content={ann.content} mode={ann.render_mode} />
       </div>
     </article>
   );

@@ -369,6 +369,29 @@ register_mode = true
 user_limit = 200
 ```
 
+### config.local.toml（推荐）
+
+用于放置本机私密配置（如 Token、密码、内部密钥），该文件默认已在 `.gitignore` 中。
+
+加载顺序：
+
+- `config.toml`
+- `config.local.toml`（同名键覆盖）
+- 环境变量 `TWILIGHT_*`（最高优先级）
+
+示例：
+
+```toml
+[Emby]
+emby_token = "replace_with_real_token"
+
+[Telegram]
+bot_token = "replace_with_real_bot_token"
+
+[Security]
+bot_internal_secret = "replace_with_strong_secret"
+```
+
 ### 环境变量
 
 可通过 `.env` 文件或系统环境变量覆盖 `config.toml`：

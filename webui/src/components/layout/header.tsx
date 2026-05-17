@@ -22,7 +22,7 @@ export function Header() {
   const isDark = activeTheme === "dark";
 
   return (
-    <header className="sticky top-0 z-30 px-4 pt-4 md:px-6 md:pt-6 xl:px-8">
+    <header className="sticky top-0 z-30 px-2 pt-3 sm:px-4 sm:pt-4 md:px-6 md:pt-6 xl:px-8">
       <div className="header-surface">
         <div className="flex min-w-0 items-center gap-4">
           <Dialog open={mobileOpen} onOpenChange={setMobileOpen}>

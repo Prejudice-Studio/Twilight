@@ -148,18 +148,32 @@
   }
 
   .section-surface {
-    min-height: calc(100vh - 120px);
-    border-radius: 1.5rem;
+    min-height: calc(100dvh - 120px);
+    border-radius: 1.25rem;
     border: 1px solid hsl(var(--border) / 0.7);
     background: hsl(var(--card) / 0.72);
     backdrop-filter: blur(16px);
-    padding: 1rem;
+    padding: 0.85rem;
+  }
+
+  @media (min-width: 640px) {
+    .section-surface {
+      padding: 1.25rem;
+      border-radius: 1.5rem;
+    }
   }
 
   @media (min-width: 768px) {
     .section-surface {
       padding: 1.5rem;
     }
+  }
+
+  /* 防止任何长字符串横向溢出导致整页可滚动 */
+  .section-surface,
+  .premium-card {
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .header-surface {

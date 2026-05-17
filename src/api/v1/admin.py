@@ -262,20 +262,71 @@ async def delete_user(uid: int):
     """
     删除用户
 
-    Query / Body:
+    Body:
         delete_emby: bool - 是否同时删除 Emby 账户（默认 true）
+        cascade_depth: int - 邀请树级联删除层级，默认 1（仅本人）；
+                              2 = 本人 + 直接邀请的下级；3 = 再往下一层；以此类推。
+                              <=0 视为仅本人。开启时下级用户的 Emby 账号将一并按 delete_emby 处理。
     """
     user = await UserOperate.get_user_by_uid(uid)
     if not user:
         return api_response(False, "用户不存在", code=404)
 
-    # 优先读取 JSON body，回退到 query string
     body = request.get_json(silent=True) or {}
-    raw = body.get('delete_emby', request.args.get('delete_emby', 'true'))
-    delete_emby = str(raw).lower() not in ('false', '0', 'no')
+    raw_delete = body.get('delete_emby', request.args.get('delete_emby', 'true'))
+    delete_emby = str(raw_delete).lower() not in ('false', '0', 'no')
 
-    success, message = await UserService.delete_user(user, delete_emby)
-    return api_response(success, message)
+    try:
+        cascade_depth = int(body.get('cascade_depth', request.args.get('cascade_depth', 1)))
+    except (TypeError, ValueError):
+        cascade_depth = 1
+    cascade_depth = max(1, min(cascade_depth, 32))
+
+    from src.services import InviteService
+
+    if cascade_depth <= 1:
+        # 仅删本人，子节点晋升为新树根（清理邀请关系）
+        try:
+            await InviteService.delete_user_keep_subtree(uid)
+        except Exception as exc:  # pragma: no cover
+            logger.warning(f"清理邀请关系失败: {exc}")
+        success, message = await UserService.delete_user(user, delete_emby)
+        return api_response(success, message)
+
+    # 级联：先收集本人 + N 层下级
+    target_uids = await InviteService.collect_uids_to_delete(uid, cascade_depth)
+    # 安全保护：不允许把当前管理员一并删掉（除非他主动删自己）
+    safe_targets = []
+    for tid in target_uids:
+        if tid == g.current_user.UID and uid != g.current_user.UID:
+            continue
+        safe_targets.append(tid)
+
+    deleted = []
+    failed = []
+    # 从叶子往根删，避免外键 / 关系上的悬空
+    for tid in reversed(safe_targets):
+        target = await UserOperate.get_user_by_uid(tid)
+        if not target:
+            continue
+        if target.ROLE == Role.ADMIN.value and target.UID != g.current_user.UID:
+            failed.append({'uid': tid, 'reason': '管理员账户不可级联删除'})
+            continue
+        try:
+            await InviteService.delete_user_keep_subtree(tid)
+        except Exception as exc:  # pragma: no cover
+            logger.warning(f"清理邀请关系失败 uid={tid}: {exc}")
+        ok, msg = await UserService.delete_user(target, delete_emby)
+        if ok:
+            deleted.append(tid)
+        else:
+            failed.append({'uid': tid, 'reason': msg})
+
+    return api_response(True, f"级联删除完成：成功 {len(deleted)}，失败 {len(failed)}", {
+        'deleted': deleted,
+        'failed': failed,
+        'cascade_depth': cascade_depth,
+    })
 
 
 @admin_bp.route('/users/<int:uid>/emby', methods=['DELETE'])
@@ -1456,6 +1507,77 @@ async def cleanup_invalid_users():
     })
 
 
+# ==================== 邀请树管理 ====================
+
+
+@admin_bp.route('/invite/tree', methods=['GET'])
+@require_auth
+@require_admin
+async def admin_invite_tree():
+    """返回完整邀请森林：节点 + 边 + 根节点列表，供前端星图渲染。"""
+    from src.services import InviteService
+    payload = await InviteService.build_forest_view()
+    return api_response(True, "获取成功", payload)
+
+
+@admin_bp.route('/invite/users/<int:uid>/detach', methods=['POST'])
+@require_auth
+@require_admin
+async def admin_detach_user_from_tree(uid: int):
+    """让某用户从其上级断开，自身晋升为新树根。"""
+    user = await UserOperate.get_user_by_uid(uid)
+    if not user:
+        return api_response(False, "用户不存在", code=404)
+    from src.db.invite import InviteRelationOperate
+    ok = await InviteRelationOperate.detach_child(uid)
+    if not ok:
+        return api_response(True, "用户原本就是树根，无需操作", {
+            'uid': uid,
+            'is_root': True,
+        })
+    return api_response(True, "已断开上级关系", {'uid': uid, 'is_root': True})
+
+
+@admin_bp.route('/invite/codes', methods=['GET'])
+@require_auth
+@require_admin
+async def admin_list_invite_codes():
+    """管理员视角：列出指定用户的邀请码（缺省返回全部）。"""
+    from src.db.invite import InviteSessionFactory, InviteCodeModel
+    from sqlalchemy import select as _select
+
+    inviter_uid = request.args.get('inviter_uid', type=int)
+    page = max(1, request.args.get('page', 1, type=int))
+    per_page = min(max(1, request.args.get('per_page', 50, type=int)), 200)
+
+    async with InviteSessionFactory() as session:
+        q = _select(InviteCodeModel)
+        if inviter_uid is not None:
+            q = q.where(InviteCodeModel.INVITER_UID == inviter_uid)
+        q = q.order_by(InviteCodeModel.CREATED_AT.desc())
+        rows = await session.execute(q.offset((page - 1) * per_page).limit(per_page))
+        codes = list(rows.scalars().all())
+
+    return api_response(True, f"共 {len(codes)} 条", {
+        'codes': [
+            {
+                'code': c.CODE,
+                'inviter_uid': c.INVITER_UID,
+                'days': c.DAYS,
+                'use_count_limit': c.USE_COUNT_LIMIT,
+                'use_count': c.USE_COUNT,
+                'expires_at': c.EXPIRES_AT,
+                'active': bool(c.ACTIVE),
+                'used_by_uid': c.USED_BY_UID,
+                'used_at': c.USED_AT,
+                'created_at': c.CREATED_AT,
+                'note': c.NOTE,
+            }
+            for c in codes
+        ],
+    })
+
+
 # ==================== 公告板管理 ====================
 
 @admin_bp.route('/announcements', methods=['GET'])
@@ -1497,6 +1619,8 @@ def _validate_announcement_payload(data: dict, require_content: bool = True) -> 
     title = (data.get('title') or '').strip()
     content = (data.get('content') or '').strip()
     level = (data.get('level') or 'info').strip().lower()
+    render_mode_raw = data.get('render_mode')
+    render_mode = (render_mode_raw or '').strip().lower() if render_mode_raw is not None else ''
 
     if require_content and not content:
         return False, "公告内容不能为空"
@@ -1506,6 +1630,8 @@ def _validate_announcement_payload(data: dict, require_content: bool = True) -> 
         return False, "公告内容最多 10000 字符"
     if level and level not in {'info', 'notice', 'warning', 'critical'}:
         return False, "公告级别仅支持 info / notice / warning / critical"
+    if render_mode and render_mode not in {'plain', 'markdown', 'bbcode', 'text', 'plaintext', 'md', 'bb'}:
+        return False, "公告渲染方式仅支持 plain / markdown / bbcode"
     return True, ""
 
 
@@ -1543,6 +1669,7 @@ async def admin_create_announcement():
         title=data.get('title'),
         content=data['content'],
         level=data.get('level', 'info'),
+        render_mode=data.get('render_mode', 'plain'),
         pinned=bool(data.get('pinned', False)),
         visible=bool(data.get('visible', True)),
         expires_at=expires_at,
@@ -1581,6 +1708,7 @@ async def admin_update_announcement(announcement_id: int):
         title=data.get('title') if 'title' in data else None,
         content=data.get('content') if 'content' in data else None,
         level=data.get('level') if 'level' in data else None,
+        render_mode=data.get('render_mode') if 'render_mode' in data else None,
         pinned=data.get('pinned') if 'pinned' in data else None,
         visible=data.get('visible') if 'visible' in data else None,
         expires_at=expires_at,

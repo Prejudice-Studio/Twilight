@@ -81,6 +81,7 @@ from src.services.admin_service import (
 from src.services.emby_register_queue import (
     EmbyRegisterQueueService,
 )
+from src.services.invite_service import InviteService
 __all__ = [
     # Emby API 客户端
     'EmbyClient',
@@ -145,4 +146,6 @@ __all__ = [
     'ReminderService',
     # Emby 自由注册队列
     'EmbyRegisterQueueService',
+    # 邀请树
+    'InviteService',
 ]

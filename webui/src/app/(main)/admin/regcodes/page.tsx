@@ -177,10 +177,10 @@ export default function AdminRegcodesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold">卡码管理</h1>
-          <p className="text-muted-foreground">批量生成注册码、续期码和白名单码</p>
+          <h1 className="text-2xl sm:text-3xl font-bold">卡码管理</h1>
+          <p className="text-sm text-muted-foreground">批量生成注册码、续期码和白名单码</p>
         </div>
         <Dialog open={createOpen} onOpenChange={(open) => {
           setCreateOpen(open);

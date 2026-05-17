@@ -41,9 +41,16 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useAsyncResource } from "@/hooks/use-async-resource";
-import { api, type Announcement } from "@/lib/api";
+import { api, type Announcement, type AnnouncementRenderMode } from "@/lib/api";
+import { SafeAnnouncementContent } from "@/lib/safe-render";
 
 type Level = Announcement["level"];
+
+const RENDER_OPTIONS: Array<{ value: AnnouncementRenderMode; label: string; hint: string }> = [
+  { value: "plain", label: "纯文本", hint: "保留换行，原样展示，所有标签都按字面显示" },
+  { value: "markdown", label: "Markdown", hint: "支持 # 标题、**粗体**、`代码`、列表、引用、[链接](URL) 等" },
+  { value: "bbcode", label: "BBCode", hint: "支持 [b][i][u][code][quote][url=...][color=#fff][size=14] 等白名单标签" },
+];
 
 const LEVEL_OPTIONS: Array<{ value: Level; label: string }> = [
   { value: "info", label: "通知 (info)" },
@@ -63,6 +70,7 @@ interface FormState {
   title: string;
   content: string;
   level: Level;
+  renderMode: AnnouncementRenderMode;
   pinned: boolean;
   visible: boolean;
   expiresAtLocal: string; // datetime-local input value; empty = never expires
@@ -72,6 +80,7 @@ const emptyForm = (): FormState => ({
   title: "",
   content: "",
   level: "info",
+  renderMode: "plain",
   pinned: false,
   visible: true,
   expiresAtLocal: "",
@@ -143,6 +152,7 @@ export default function AdminAnnouncementsPage() {
       title: ann.title || "",
       content: ann.content,
       level: ann.level,
+      renderMode: (ann.render_mode as AnnouncementRenderMode) || "plain",
       pinned: ann.pinned,
       visible: ann.visible,
       expiresAtLocal: unixToLocalInput(ann.expires_at),
@@ -162,6 +172,7 @@ export default function AdminAnnouncementsPage() {
         title: form.title.trim() || undefined,
         content,
         level: form.level,
+        render_mode: form.renderMode,
         pinned: form.pinned,
         visible: form.visible,
         expires_at: localInputToUnix(form.expiresAtLocal),
@@ -390,8 +401,13 @@ export default function AdminAnnouncementsPage() {
                       </Button>
                     </div>
                   </div>
-                  <div className="text-sm whitespace-pre-wrap break-words bg-muted/40 rounded-md p-3">
-                    {ann.content}
+                  <div className="text-sm break-words bg-muted/40 rounded-md p-3">
+                    <SafeAnnouncementContent content={ann.content} mode={ann.render_mode} />
+                    {ann.render_mode && ann.render_mode !== "plain" && (
+                      <p className="mt-2 text-[10px] text-muted-foreground/80 font-mono">
+                        渲染：{ann.render_mode}
+                      </p>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -456,7 +472,7 @@ export default function AdminAnnouncementsPage() {
                 {form.content.length} / 10000 字
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="space-y-2">
                 <Label>级别</Label>
                 <Select
@@ -476,6 +492,27 @@ export default function AdminAnnouncementsPage() {
                 </Select>
               </div>
               <div className="space-y-2">
+                <Label>渲染方式</Label>
+                <Select
+                  value={form.renderMode}
+                  onValueChange={(v) => setForm({ ...form, renderMode: v as AnnouncementRenderMode })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {RENDER_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-muted-foreground">
+                  {RENDER_OPTIONS.find((o) => o.value === form.renderMode)?.hint}
+                </p>
+              </div>
+              <div className="space-y-2">
                 <Label>截止时间（留空 = 永久）</Label>
                 <Input
                   type="datetime-local"
@@ -484,6 +521,14 @@ export default function AdminAnnouncementsPage() {
                 />
               </div>
             </div>
+            {form.content.trim() && (
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground">预览</Label>
+                <div className="rounded-md border bg-muted/30 p-3 max-h-48 overflow-y-auto">
+                  <SafeAnnouncementContent content={form.content} mode={form.renderMode} />
+                </div>
+              </div>
+            )}
             <div className="flex items-center justify-between p-3 border rounded-md">
               <div>
                 <p className="text-sm font-medium">置顶</p>

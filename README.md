@@ -53,6 +53,7 @@ pip install -r requirements.txt
 # 编辑配置（至少填写 Emby 地址和 Token）
 # 参考 config.production.toml 获取完整配置项
 nano config.toml  # 或 notepad config.toml
+# 建议把密钥放到 config.local.toml（git 已忽略）
 
 # 启动后端
 python main.py api
@@ -107,6 +108,7 @@ bash ./start_all.sh
 | [API Key 文档](docs/API_KEY_API.md) | 外部系统接入指南 |
 | [前端开发文档](docs/FRONTEND.md) | 前端技术栈与开发指南 |
 | [开发指南](docs/DEVELOPMENT.md) | 编码规范、调试、贡献流程 |
+| [安全加固指南](docs/SECURITY.md) | 生产安全基线与检查清单 |
 
 运行时访问 `/api/v1/docs` 查看 Swagger UI 交互式文档。
 

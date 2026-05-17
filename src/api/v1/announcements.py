@@ -21,6 +21,7 @@ def serialize_announcement(item: AnnouncementModel, include_internal: bool = Fal
         'title': item.TITLE,
         'content': item.CONTENT,
         'level': item.LEVEL,
+        'render_mode': getattr(item, 'RENDER_MODE', None) or 'plain',
         'pinned': bool(item.PINNED),
         'visible': bool(item.VISIBLE),
         'expires_at': item.EXPIRES_AT,

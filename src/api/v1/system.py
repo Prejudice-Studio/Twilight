@@ -630,6 +630,11 @@ async def get_config_schema():
                     {'key': 'admin_usernames', 'label': '管理员用户名', 'type': 'string', 'description': '管理员用户名列表，逗号分隔', 'value': RegisterConfig.ADMIN_USERNAMES},
                     {'key': 'white_list_uids', 'label': '白名单 UID', 'type': 'string', 'description': '白名单 UID 列表，逗号分隔', 'value': RegisterConfig.WHITE_LIST_UIDS},
                     {'key': 'white_list_usernames', 'label': '白名单用户名', 'type': 'string', 'description': '白名单用户名列表，逗号分隔', 'value': RegisterConfig.WHITE_LIST_USERNAMES},
+                    {'key': 'invite_enabled', 'label': '启用邀请树', 'type': 'bool', 'description': '启用后，已绑定 Emby 的用户可生成邀请码，被邀请人成为其下级，形成树状关系', 'value': RegisterConfig.INVITE_ENABLED},
+                    {'key': 'invite_max_depth', 'label': '邀请最大层级', 'type': 'int', 'description': '邀请树最大层级（B→A→C 计为 3）。1 表示禁止任何邀请', 'value': RegisterConfig.INVITE_MAX_DEPTH},
+                    {'key': 'invite_limit', 'label': '单人邀请上限', 'type': 'int', 'description': '每人最多同时存在多少未使用的邀请码，-1 = 无限制', 'value': RegisterConfig.INVITE_LIMIT},
+                    {'key': 'invite_require_emby', 'label': '邀请需绑定 Emby', 'type': 'bool', 'description': '是否要求邀请人已绑定 Emby 账号才能生成邀请码', 'value': RegisterConfig.INVITE_REQUIRE_EMBY},
+                    {'key': 'invite_code_default_days', 'label': '邀请码默认天数', 'type': 'int', 'description': '被邀请人 Emby 账号默认开通天数（0 或 -1 表示永久）', 'value': RegisterConfig.INVITE_CODE_DEFAULT_DAYS},
                 ],
             },
             {
