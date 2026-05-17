@@ -78,15 +78,27 @@
 
 ```json
 {
-  "delete_emby": true,
+  "mode": "with_emby",
   "cascade_depth": 1
 }
 ```
 
-* `cascade_depth = 1`：仅删本人，子节点自动晋升为新树根（默认）。
-* `cascade_depth = 2`：本人 + 直接下级。
-* `cascade_depth >= 32`：视为不限层级，整棵子树一并删除。
-* 当遇到下级里的 **管理员账号** 时会跳过并记录到 `failed`，避免误删平台管理员。
+字段说明：
+
+* **`mode`**（推荐）：
+  * `with_emby`：本地账户 + Emby 账户一起删（清理邀请关系）
+  * `local_only`：仅删本地账户（清理邀请关系，保留 Emby 账号）
+  * `emby_only`：仅删 Emby 账号（**本地账户与邀请关系完全保留**）
+* **兼容旧字段** `delete_emby`：未传 `mode` 时仍生效（`true` → `with_emby`，`false` → `local_only`）。
+* **`cascade_depth`**：
+  * `1`（默认）：仅本人
+  * `2`：本人 + 直接下级
+  * `N`：本人 + 下 N-1 层
+  * `0` 或 `>= 999`：整棵子树（不限层级）
+* 三种 `mode` 都会按 `cascade_depth` 级联生效。例如 `mode=emby_only, cascade_depth=2`
+  会同时删除该用户及其直接下级的 Emby 账号，但保留所有本地账户和上下级关系。
+* 当遇到下级里的 **管理员账号** 时会跳过并记录到 `skipped`，避免误删平台管理员。
+* 返回结构包含 `deleted` / `skipped` / `failed` 三列以及最终采用的 `mode` 与 `cascade_depth`。
 
 ### 1.7 核心校验
 
@@ -105,10 +117,10 @@
 
 | 场景 | 邀请关系处理 |
 | ---- | ----------- |
-| 普通删除（`cascade_depth=1`） | 该用户为 PARENT 的所有边删掉，子节点晋升为新树根；该用户为 CHILD 的边一并删掉 |
-| 级联删除（`cascade_depth>=2`） | 先 BFS 收集 N 层 UID，再按叶子→根顺序逐个走「普通删除」 |
+| 普通删除（`mode=with_emby/local_only`, `cascade_depth=1`） | 该用户为 PARENT 的所有边删掉，子节点晋升为新树根；该用户为 CHILD 的边一并删掉 |
+| 级联删除（`mode=with_emby/local_only`, `cascade_depth>=2` 或 `=0`） | 先 BFS 收集 N 层 UID，再按叶子→根顺序逐个走「普通删除」 |
 | 仅停用（`active=false`） | 邀请关系完全不变；重新启用即可恢复访问 |
-| 仅删 Emby 账号 | 不动邀请关系；本地账号、上下级不变 |
+| `mode=emby_only`（任意 `cascade_depth`） | 仅删 Emby 账号；本地账号、上下级、邀请码全部保留 |
 
 ---
 

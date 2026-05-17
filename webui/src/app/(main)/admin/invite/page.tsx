@@ -207,24 +207,29 @@ export default function AdminInviteTreePage() {
   const handleCascadeDelete = async () => {
     if (!selected) return;
     const cascadeDepth = window.prompt(
-      "请输入级联删除层级：1=仅本人；2=本人 + 直接邀请的下级；3=再往下一层；以此类推",
+      "请输入级联删除层级：\n  1 = 仅本人（默认）\n  2 = 本人 + 直接下级\n  N = 本人 + 下 N-1 层\n  0 = 整棵子树（不限层级）",
       "1",
     );
     if (cascadeDepth === null) return;
     const parsed = parseInt(cascadeDepth, 10);
-    if (!Number.isFinite(parsed) || parsed < 1) {
-      toast({ title: "请输入大于等于 1 的整数", variant: "destructive" });
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      toast({ title: "请输入 ≥ 0 的整数", variant: "destructive" });
       return;
     }
     const ok = await confirm({
-      title: `确认级联删除 ${parsed} 层？`,
-      description: parsed === 1 ? "仅删除本用户，子节点晋升为新树根。" : `将一并删除该用户与其向下 ${parsed - 1} 层的所有下级及其 Emby 账号。`,
+      title: parsed === 0 ? "整棵子树都删？" : `级联删除 ${parsed} 层？`,
+      description:
+        parsed === 1
+          ? "仅删除本用户，子节点晋升为新树根。"
+          : parsed === 0
+            ? "将一并删除该用户与其全部后代的本地账号 + Emby 账号。"
+            : `将一并删除该用户与其向下 ${parsed - 1} 层的所有下级（本地 + Emby）。`,
       tone: "danger",
       confirmLabel: "确认删除",
     });
     if (!ok) return;
-    const res = await api.deleteUserCascade(selected.uid, {
-      deleteEmby: true,
+    const res = await api.deleteUserScoped(selected.uid, {
+      mode: "with_emby",
       cascadeDepth: parsed,
     }).catch((err) => ({
       success: false,

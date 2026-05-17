@@ -259,74 +259,113 @@ async def update_user(uid: int):
 @require_auth
 @require_admin
 async def delete_user(uid: int):
-    """
-    删除用户
+    """删除用户（支持邀请树级联）。
 
     Body:
-        delete_emby: bool - 是否同时删除 Emby 账户（默认 true）
-        cascade_depth: int - 邀请树级联删除层级，默认 1（仅本人）；
-                              2 = 本人 + 直接邀请的下级；3 = 再往下一层；以此类推。
-                              <=0 视为仅本人。开启时下级用户的 Emby 账号将一并按 delete_emby 处理。
+        mode: str - 'with_emby'（默认）/ 'local_only' / 'emby_only'
+              - with_emby：同时删除本地账户与 Emby 账户，清理邀请关系
+              - local_only：仅删除本地账户与邀请关系，保留 Emby 账户
+              - emby_only：仅删除 Emby 账户，本地账户与邀请关系完全保留
+        cascade_depth: int - 邀请树级联层级，默认 1（仅本人）。
+              1 = 仅本人；2 = 本人 + 直接邀请下级；以此类推。
+              传 0 / 负数或 >= 999 视为「整棵子树」。
+        delete_emby: bool - 兼容旧字段；未传 mode 时使用，
+              true → with_emby，false → local_only。
     """
     user = await UserOperate.get_user_by_uid(uid)
     if not user:
         return api_response(False, "用户不存在", code=404)
 
     body = request.get_json(silent=True) or {}
-    raw_delete = body.get('delete_emby', request.args.get('delete_emby', 'true'))
-    delete_emby = str(raw_delete).lower() not in ('false', '0', 'no')
+
+    # 优先 mode；老调用方仍可用 delete_emby
+    mode = (body.get('mode') or request.args.get('mode') or '').strip().lower()
+    if mode not in ('with_emby', 'local_only', 'emby_only'):
+        raw_delete = body.get('delete_emby', request.args.get('delete_emby', 'true'))
+        mode = 'with_emby' if str(raw_delete).lower() not in ('false', '0', 'no') else 'local_only'
 
     try:
-        cascade_depth = int(body.get('cascade_depth', request.args.get('cascade_depth', 1)))
+        cascade_depth_raw = int(body.get('cascade_depth', request.args.get('cascade_depth', 1)))
     except (TypeError, ValueError):
-        cascade_depth = 1
-    cascade_depth = max(1, min(cascade_depth, 32))
+        cascade_depth_raw = 1
+    # 0 / 负数 / 极大值 视为「整棵子树」
+    if cascade_depth_raw <= 0 or cascade_depth_raw >= 999:
+        cascade_depth = None  # None = 不限层级
+    else:
+        cascade_depth = max(1, cascade_depth_raw)
 
     from src.services import InviteService
 
-    if cascade_depth <= 1:
-        # 仅删本人，子节点晋升为新树根（清理邀请关系）
-        try:
-            await InviteService.delete_user_keep_subtree(uid)
-        except Exception as exc:  # pragma: no cover
-            logger.warning(f"清理邀请关系失败: {exc}")
-        success, message = await UserService.delete_user(user, delete_emby)
-        return api_response(success, message)
+    # ---------- 收集目标 UID 列表 ----------
+    if cascade_depth == 1:
+        target_uids = [uid]
+    else:
+        # cascade_depth=None → 整棵子树；其它走 BFS 收集到指定层
+        target_uids = await InviteService.collect_uids_to_delete(
+            uid, cascade_depth if cascade_depth is not None else 9999,
+        )
 
-    # 级联：先收集本人 + N 层下级
-    target_uids = await InviteService.collect_uids_to_delete(uid, cascade_depth)
-    # 安全保护：不允许把当前管理员一并删掉（除非他主动删自己）
-    safe_targets = []
+    # 安全保护：不允许把"当前操作管理员自己"被动卷进级联里
+    safe_targets: list[int] = []
     for tid in target_uids:
         if tid == g.current_user.UID and uid != g.current_user.UID:
             continue
         safe_targets.append(tid)
 
-    deleted = []
-    failed = []
-    # 从叶子往根删，避免外键 / 关系上的悬空
+    # ---------- 执行 ----------
+    deleted: list[int] = []
+    skipped: list[dict] = []
+    failed: list[dict] = []
+
+    # 叶子优先，避免外键/关系悬空
     for tid in reversed(safe_targets):
         target = await UserOperate.get_user_by_uid(tid)
         if not target:
             continue
-        if target.ROLE == Role.ADMIN.value and target.UID != g.current_user.UID:
-            failed.append({'uid': tid, 'reason': '管理员账户不可级联删除'})
+        # 非主动操作的下级里若混入其他管理员账号，跳过保护
+        if target.ROLE == Role.ADMIN.value and target.UID != g.current_user.UID and tid != uid:
+            skipped.append({'uid': tid, 'reason': '管理员账户不可被级联删除'})
             continue
-        try:
-            await InviteService.delete_user_keep_subtree(tid)
-        except Exception as exc:  # pragma: no cover
-            logger.warning(f"清理邀请关系失败 uid={tid}: {exc}")
-        ok, msg = await UserService.delete_user(target, delete_emby)
+
+        if mode == 'emby_only':
+            # 仅删 Emby 账号：本地账户与邀请关系完全保留
+            if not target.EMBYID:
+                skipped.append({'uid': tid, 'reason': '未绑定 Emby 账户'})
+                continue
+            ok, msg = await UserService.delete_emby_only(target)
+        else:
+            # local_only / with_emby：都删本地账户 + 清理邀请关系
+            try:
+                await InviteService.delete_user_keep_subtree(tid)
+            except Exception as exc:  # pragma: no cover
+                logger.warning(f"清理邀请关系失败 uid={tid}: {exc}")
+            ok, msg = await UserService.delete_user(target, delete_emby=(mode == 'with_emby'))
+
         if ok:
             deleted.append(tid)
         else:
             failed.append({'uid': tid, 'reason': msg})
 
-    return api_response(True, f"级联删除完成：成功 {len(deleted)}，失败 {len(failed)}", {
-        'deleted': deleted,
-        'failed': failed,
-        'cascade_depth': cascade_depth,
-    })
+    cascade_display = "整棵子树" if cascade_depth is None else cascade_depth
+
+    if mode == 'emby_only':
+        message_prefix = "Emby 级联删除完成" if len(safe_targets) > 1 else "Emby 删除完成"
+    elif mode == 'local_only':
+        message_prefix = "本地账户级联删除完成" if len(safe_targets) > 1 else "本地账户删除完成"
+    else:
+        message_prefix = "级联删除完成" if len(safe_targets) > 1 else "删除完成"
+
+    return api_response(
+        len(failed) == 0,
+        f"{message_prefix}：成功 {len(deleted)}，跳过 {len(skipped)}，失败 {len(failed)}",
+        {
+            'deleted': deleted,
+            'skipped': skipped,
+            'failed': failed,
+            'mode': mode,
+            'cascade_depth': cascade_display,
+        },
+    )
 
 
 @admin_bp.route('/users/<int:uid>/emby', methods=['DELETE'])

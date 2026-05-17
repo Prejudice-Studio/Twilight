@@ -311,32 +311,24 @@ export default function AdminUsersPage() {
     if (!deleteTarget) return;
     setIsDeleting(true);
     try {
-      let res: any;
-      if (deleteScope === "emby_only") {
-        // 只删 Emby 不影响邀请树
-        res = await api.deleteUserEmby(deleteTarget.uid);
-      } else if (cascadeDepth > 1) {
-        // 级联删本人 + N-1 层下级；deleteEmby 跟选择的 scope 走
-        res = await api.deleteUserCascade(deleteTarget.uid, {
-          deleteEmby: deleteScope === "with_emby",
-          cascadeDepth,
-        });
-      } else {
-        res = await api.deleteUser(deleteTarget.uid, {
-          deleteEmby: deleteScope === "with_emby",
-        });
-      }
+      const res = await api.deleteUserScoped(deleteTarget.uid, {
+        mode: deleteScope,
+        cascadeDepth, // 0 表示整棵子树
+      });
 
       if (res.success) {
-        const successTitles: Record<string, string> = {
+        const summary =
+          res.data && (res.data.deleted?.length ?? 0) > 1
+            ? `成功 ${res.data.deleted.length}，跳过 ${res.data.skipped?.length ?? 0}`
+            : undefined;
+        const titles: Record<string, string> = {
           with_emby: "用户与 Emby 账户已删除",
-          local_only: "用户已删除",
-          emby_only: "Emby 账户已删除",
+          local_only: "本地账户已删除（Emby 保留）",
+          emby_only: "Emby 账户已删除（本地与邀请关系保留）",
         };
         toast({
-          title: cascadeDepth > 1
-            ? `级联删除完成（${cascadeDepth} 层）`
-            : successTitles[deleteScope] ?? "操作成功",
+          title: cascadeDepth !== 1 ? `级联完成（层级 ${cascadeDepth === 0 ? "整棵子树" : cascadeDepth}）` : titles[deleteScope],
+          description: summary,
           variant: "success",
         });
         invalidateUsersCache();
@@ -1130,39 +1122,88 @@ export default function AdminUsersPage() {
                   )}
                 </SelectContent>
               </Select>
-              {deleteScope === "emby_only" && (
-                <p className="text-[11px] text-muted-foreground">
-                  「仅删除 Emby」不会影响该用户在邀请树中的位置。
-                </p>
-              )}
             </div>
 
-            {deleteScope !== "emby_only" && (
-              <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+            <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+              <div className="flex items-center justify-between gap-2">
                 <Label className="text-xs uppercase tracking-wider text-muted-foreground">
                   邀请树级联深度
                 </Label>
-                <Select value={String(cascadeDepth)} onValueChange={(v) => setCascadeDepth(Number(v))}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">仅本人（下级自动晋升为新树根）</SelectItem>
-                    <SelectItem value="2">本人 + 直接下级</SelectItem>
-                    <SelectItem value="3">本人 + 下两层</SelectItem>
-                    <SelectItem value="4">本人 + 下三层</SelectItem>
-                    <SelectItem value="32">整棵子树（不限层级）</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  {cascadeDepth === 1
-                    ? "默认：仅删除该用户。被他邀请的下级会按规则自动成为新的树根，互相之间不再有上下级关系。"
-                    : cascadeDepth >= 32
-                      ? "将沿着邀请关系，一并删除该用户及其全部后代账号（含 Emby）。请确认！"
-                      : `将一并删除该用户向下 ${cascadeDepth - 1} 层的所有下级账号（含 Emby）。`}
-                </p>
+                <span className="text-[10px] text-muted-foreground">
+                  当前：{cascadeDepth === 0 ? "整棵子树" : `${cascadeDepth} 层`}
+                </span>
               </div>
-            )}
+
+              {/* 预设快捷键 */}
+              <div className="flex flex-wrap gap-1.5">
+                {[1, 2, 3, 5, 0].map((preset) => (
+                  <Button
+                    key={preset}
+                    type="button"
+                    size="sm"
+                    variant={cascadeDepth === preset ? "default" : "outline"}
+                    className="h-7 px-2 text-[11px]"
+                    onClick={() => setCascadeDepth(preset)}
+                  >
+                    {preset === 0 ? "全部" : `${preset} 层`}
+                  </Button>
+                ))}
+              </div>
+
+              {/* 自定义输入 */}
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={999}
+                  value={cascadeDepth}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (Number.isNaN(v)) {
+                      setCascadeDepth(1);
+                    } else {
+                      setCascadeDepth(Math.max(0, Math.min(999, v)));
+                    }
+                  }}
+                  placeholder="自定义层级，输入 0 表示整棵子树"
+                  className="h-9"
+                />
+              </div>
+
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                {cascadeDepth === 1 ? (
+                  <>仅处理该用户本人；被他邀请的下级会自动成为新树根，互相之间不再有上下级关系。</>
+                ) : cascadeDepth === 0 ? (
+                  <>
+                    将沿邀请关系，一路处理该用户及其
+                    <span className="font-semibold text-foreground"> 全部后代</span>
+                    （
+                    {deleteScope === "with_emby"
+                      ? "本地账号 + Emby 账号"
+                      : deleteScope === "local_only"
+                        ? "仅本地账号，Emby 保留"
+                        : "仅 Emby 账号，本地账号与邀请关系保留"}
+                    ）。请二次确认！
+                  </>
+                ) : (
+                  <>
+                    将一并处理该用户向下 {cascadeDepth - 1} 层的所有下级（
+                    {deleteScope === "with_emby"
+                      ? "本地 + Emby"
+                      : deleteScope === "local_only"
+                        ? "仅本地"
+                        : "仅 Emby"}
+                    ）。
+                  </>
+                )}
+              </p>
+              {deleteScope === "emby_only" && cascadeDepth !== 1 && (
+                <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                  注意：「仅删除 Emby」级联只会删除下级用户的 Emby 账号，本地账号与邀请关系完全保留。
+                </p>
+              )}
+            </div>
           </div>
 
           <DialogFooter>

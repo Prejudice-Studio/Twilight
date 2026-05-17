@@ -1048,17 +1048,39 @@ class ApiClient {
     });
   }
 
-  // 扩展用户删除：支持级联层级
+  /**
+   * 扩展用户删除：支持邀请树级联，且三种 mode 均可级联。
+   * - mode = with_emby：本地 + Emby
+   * - mode = local_only：仅本地（保留 Emby）
+   * - mode = emby_only：仅 Emby（保留本地与树关系）
+   * - cascadeDepth：1 = 仅本人；2 = 本人+直接下级；... 传 0 表示整棵子树
+   */
+  async deleteUserScoped(
+    uid: number,
+    options: {
+      mode: "with_emby" | "local_only" | "emby_only";
+      cascadeDepth?: number;
+    },
+  ) {
+    const cascadeDepth = Math.max(0, Math.floor(options.cascadeDepth ?? 1));
+    return this.request<{
+      deleted: number[];
+      skipped: Array<{ uid: number; reason: string }>;
+      failed: Array<{ uid: number; reason: string }>;
+      mode: string;
+      cascade_depth: number | string;
+    }>(`/admin/users/${uid}`, {
+      method: "DELETE",
+      body: JSON.stringify({ mode: options.mode, cascade_depth: cascadeDepth }),
+    });
+  }
+
+  /** @deprecated 用 deleteUserScoped 代替。保留旧 API 兼容。 */
   async deleteUserCascade(uid: number, options?: { deleteEmby?: boolean; cascadeDepth?: number }) {
-    const deleteEmby = options?.deleteEmby ?? true;
-    const cascadeDepth = Math.max(1, options?.cascadeDepth ?? 1);
-    return this.request<{ deleted: number[]; failed: Array<{ uid: number; reason: string }>; cascade_depth: number }>(
-      `/admin/users/${uid}`,
-      {
-        method: "DELETE",
-        body: JSON.stringify({ delete_emby: deleteEmby, cascade_depth: cascadeDepth }),
-      },
-    );
+    return this.deleteUserScoped(uid, {
+      mode: options?.deleteEmby === false ? "local_only" : "with_emby",
+      cascadeDepth: options?.cascadeDepth ?? 1,
+    });
   }
 }
 
