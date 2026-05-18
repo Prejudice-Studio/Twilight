@@ -28,125 +28,79 @@ users_bp = Blueprint('users', __name__, url_prefix='/users')
 @users_bp.route('/register', methods=['POST'])
 async def register():
     """
-    用户注册
-    
+    统一账号注册
+
+    使用注册码（可选）创建系统账号；Emby 账号由首次登录后在前端 Modal 补建。
+
     Request:
         {
-            "username": "myusername",            // 必填
-            "password": "mypassword",            // Web 端必填，Telegram 端可选（自动生成）
-            "telegram_bind_code": "123456",      // 推荐，注册前先在 Bot 中验证
-            "reg_code": "code-xxx",              // 系统账号：注册码注册
-            "email": "user@example.com",         // 可选
-            "registration_target": "system"      // system | emby
-        }
-    
-    Response:
-        {
-            "success": true,
-            "data": {
-                "username": "myusername",
-                "password": "密码（仅自动生成时返回）",
-                "user": { ... }
-            }
+            "username": "myusername",       // 必填
+            "password": "mypassword",       // Web 端必填
+            "telegram_bind_code": "123456", // 全局强制绑定 Telegram 时必填
+            "reg_code": "code-xxx",         // 可选；若有则按注册码授予 Emby 开通天数
+            "email": "user@example.com"     // 可选
         }
     """
     from src.config import Config
-    
+
     data = request.get_json() or {}
-    
+
     telegram_id = data.get('telegram_id')
     telegram_bind_code = (data.get('telegram_bind_code') or '').strip().upper()
-    registration_target = (data.get('registration_target') or 'system').strip().lower()
     username = data.get('username')
-    password = data.get('password')  # Web 端用户设置的密码
-    reg_code = data.get('reg_code')
+    password = data.get('password')
+    reg_code = (data.get('reg_code') or '').strip() or None
     email = data.get('email')
-    
-    # 验证必要参数
+
     if not username:
         return api_response(False, "缺少用户名", code=400)
 
-    if registration_target not in ('system', 'emby'):
-        return api_response(False, "registration_target 仅支持 system 或 emby", code=400)
-
-    # 注册时不要直接提交 Telegram ID，请使用 Bot 绑定码验证
+    # 注册时不允许直接提交 Telegram ID，必须走绑定码
     if telegram_id is not None:
         return api_response(False, "请使用 Telegram Bot 绑定码验证 Telegram ID", code=400)
 
-    # 通过绑定码获取 Telegram ID（先解析，成功后再消费）
     if telegram_bind_code:
         telegram_id = await _get_register_bind_telegram_id(telegram_bind_code)
         if not telegram_id:
-            return api_response(False, "Telegram 绑定码无效或尚未通过 Bot 验证，请先在 Bot 中完成绑定", code=400)
+            return api_response(
+                False,
+                "Telegram 绑定码无效或尚未通过 Bot 验证，请先在 Bot 中完成绑定",
+                code=400,
+            )
 
-    # Telegram ID 类型校验
     if telegram_id is not None and telegram_id != '':
-        if isinstance(telegram_id, str):
-            if telegram_id.isdigit():
-                telegram_id = int(telegram_id)
+        if isinstance(telegram_id, str) and telegram_id.isdigit():
+            telegram_id = int(telegram_id)
         if not isinstance(telegram_id, int) or telegram_id <= 0:
             return api_response(False, "telegram_id 格式无效", code=400)
     else:
         telegram_id = None
-    
-    # Emby 队列注册必须绑定 Telegram；系统注册按全局配置决定
-    if registration_target == 'emby' and not telegram_id:
-        return api_response(False, "Emby 账号注册需要先完成 Telegram 绑定", code=400)
 
     if Config.FORCE_BIND_TELEGRAM and not telegram_id:
         return api_response(False, "系统要求绑定 Telegram，请先获取绑定码并通过 Bot 验证", code=400)
-    
-    # Web 端注册：没有 telegram_id 时必须提供密码
-    if not telegram_id and not password:
+
+    # Web 端注册：始终要求设置密码
+    if not password:
         return api_response(False, "请设置密码", code=400)
-    
-    # 密码长度验证（与 UserService 校验一致）
-    if password and len(password) < 8:
+    if len(password) < 8:
         return api_response(False, "密码长度至少 8 位", code=400)
-    
-    # 用户名验证
+
     from src.core.utils import is_valid_username
     if not is_valid_username(username):
-        return api_response(False, "用户名格式不正确（3-20位字母数字下划线，不能以数字开头）", code=400)
-    
-    # 邮箱验证
+        return api_response(
+            False,
+            "用户名格式不正确（3-20位字母数字下划线，不能以数字开头）",
+            code=400,
+        )
+
     if email:
         from src.core.utils import is_valid_email
         if not is_valid_email(email):
             return api_response(False, "邮箱格式不正确", code=400)
-    
-    # Emby 账号注册：进入队列异步处理
-    if registration_target == 'emby':
-        from src.services import EmbyRegisterQueueService
 
-        queue_result, message = await EmbyRegisterQueueService.enqueue(
-            telegram_id=telegram_id,
-            username=username,
-            email=email,
-            password=password,
-        )
-
-        if not queue_result:
-            return api_response(False, message, code=400)
-
-        # 队列受理后消费绑定码，避免重复提交
-        if telegram_bind_code:
-            await _delete_bind_code(telegram_bind_code)
-
-        return api_response(True, message, {
-            'registration_target': 'emby',
-            'request_id': queue_result.get('request_id'),
-            'status_token': queue_result.get('status_token'),
-            'status': queue_result.get('status'),
-            'queue_position': queue_result.get('queue_position'),
-            'reused': queue_result.get('reused', False),
-        })
-
-    # 系统账号注册
     if reg_code:
         result = await UserService.register_by_code(telegram_id, username, reg_code, email, password)
     else:
-        # 无码注册（待激活状态）
         result = await UserService.register_pending(telegram_id, username, email, password)
 
     if result.result.value == 'success':
@@ -155,13 +109,50 @@ async def register():
 
         user_info = await UserService.get_user_info(result.user) if result.user else None
         return api_response(True, result.message, {
-            'registration_target': 'system',
             'username': result.user.USERNAME if result.user else None,
-            'password': result.emby_password if not password else None,  # 仅自动生成时返回
+            'pending_emby': True,
             'user': user_info,
         })
 
     return api_response(False, result.message, code=400)
+
+
+@users_bp.route('/me/emby/register', methods=['POST'])
+@require_auth
+async def complete_emby_account_for_me():
+    """
+    已登录用户补建 Emby 账号。
+
+    需要当前用户 PENDING_EMBY=True 且 EMBYID 为空。
+    失败会保留 PENDING_EMBY 标记，前端可重复尝试。
+
+    Request:
+        { "emby_username": "name", "emby_password": "Pwd1234X" }
+    """
+    user = g.current_user
+    if user.EMBYID:
+        return api_response(False, "您已绑定 Emby 账号，无需再次注册", code=400)
+    if not getattr(user, 'PENDING_EMBY', False):
+        return api_response(
+            False,
+            "您的账号不在待补建 Emby 状态。如果需要绑定 Emby，请联系管理员。",
+            code=400,
+        )
+
+    data = request.get_json() or {}
+    emby_username = (data.get('emby_username') or '').strip()
+    emby_password = data.get('emby_password') or ''
+
+    result = await UserService.complete_emby_registration(user, emby_username, emby_password)
+
+    if result.result.value == 'success':
+        user_info = await UserService.get_user_info(result.user)
+        return api_response(True, result.message, {
+            'user': user_info,
+        })
+
+    code = 409 if result.result.value == 'emby_exists' else 400
+    return api_response(False, result.message, code=code)
 
 
 @users_bp.route('/register/emby/status', methods=['GET'])

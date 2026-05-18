@@ -1993,3 +1993,160 @@ async def admin_reset_scheduler_job_schedule(job_id: str):
         code=200 if ok else 400,
     )
 
+
+# ==================== Emby 独立账号 / 强制绑定 ====================
+
+@admin_bp.route('/emby/create-standalone', methods=['POST'])
+@require_auth
+@require_admin
+async def create_standalone_emby_user():
+    """创建一个独立的 Emby 用户（不绑定任何系统账号）。
+
+    Request:
+        {
+            "username": "name",       // 必填，Emby 用户名
+            "password": "Pass1234",   // 必填，至少 8 位，含大小写 + 数字
+            "email": "u@example.com"  // 可选，仅写入备注
+        }
+    """
+    from src.services import UserService
+
+    data = request.get_json() or {}
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+
+    if not username:
+        return api_response(False, "缺少 Emby 用户名", code=400)
+    if len(username) > 64:
+        return api_response(False, "Emby 用户名过长", code=400)
+
+    ok, msg = UserService.validate_password_strength(password, label="Emby 密码")
+    if not ok:
+        return api_response(False, msg, code=400)
+
+    emby = get_emby_client()
+    try:
+        existing = await emby.get_user_by_name(username)
+    except EmbyError as e:
+        return api_response(False, f"无法连接 Emby: {e}", code=502)
+    if existing:
+        return api_response(False, "该 Emby 用户名已存在", code=409)
+
+    try:
+        emby_user = await emby.create_user(username, password)
+    except EmbyError as e:
+        logger.error(f"管理员 {g.current_user.USERNAME} 创建独立 Emby 账号失败: {e}")
+        return api_response(False, f"创建 Emby 账号失败: {e}", code=502)
+
+    if not emby_user:
+        return api_response(False, "创建 Emby 账号失败：未返回用户信息", code=502)
+
+    logger.info(
+        f"管理员 {g.current_user.USERNAME} 创建独立 Emby 账号: "
+        f"name={emby_user.name}, id={emby_user.id}"
+    )
+    return api_response(True, "Emby 账号创建成功", {
+        'emby_id': emby_user.id,
+        'emby_username': emby_user.name,
+    })
+
+
+@admin_bp.route('/users/<int:uid>/bind-emby', methods=['POST'])
+@require_auth
+@require_admin
+async def bind_emby_to_user(uid: int):
+    """将一个 Emby 用户强制绑定到指定系统账号。
+
+    Request:
+        {
+            "emby_username": "name",  // 二选一
+            "emby_id": "guid",        // 二选一
+            "force": false             // 目标 Emby 已被其他系统账号占用时是否夺取
+        }
+    """
+    import json
+    data = request.get_json() or {}
+    emby_username = (data.get('emby_username') or '').strip()
+    emby_id_input = (data.get('emby_id') or '').strip()
+    force = bool(data.get('force', False))
+
+    if not emby_username and not emby_id_input:
+        return api_response(False, "请提供 emby_username 或 emby_id", code=400)
+
+    target_user = await UserOperate.get_user_by_uid(uid)
+    if not target_user:
+        return api_response(False, "目标系统账号不存在", code=404)
+
+    emby = get_emby_client()
+    try:
+        emby_user = None
+        if emby_id_input:
+            emby_user = await emby.get_user(emby_id_input)
+        if emby_user is None and emby_username:
+            emby_user = await emby.get_user_by_name(emby_username)
+    except EmbyError as e:
+        return api_response(False, f"无法连接 Emby: {e}", code=502)
+
+    if emby_user is None:
+        return api_response(False, "目标 Emby 用户不存在", code=404)
+
+    # 已被其他系统账号占用？
+    occupant = await UserOperate.get_user_by_embyid(emby_user.id)
+    if occupant and occupant.UID != target_user.UID:
+        if not force:
+            # 返回 200 以便前端读取 conflict 详情，由 success=false 表示业务未完成
+            return api_response(
+                False,
+                f"该 Emby 用户已绑定到系统账号 UID={occupant.UID}（{occupant.USERNAME}），需要强制夺取",
+                {
+                    'conflict': True,
+                    'conflict_uid': occupant.UID,
+                    'conflict_username': occupant.USERNAME,
+                    'emby_id': emby_user.id,
+                    'emby_username': emby_user.name,
+                },
+                code=200,
+            )
+        # 夺取：清空旧账号绑定，并标记其需要重新绑定
+        occupant.EMBYID = None
+        occupant.PENDING_EMBY = True
+        await UserOperate.update_user(occupant)
+        logger.warning(
+            f"管理员 {g.current_user.USERNAME} 强制夺取 Emby 绑定: "
+            f"emby_id={emby_user.id} 旧UID={occupant.UID} -> 新UID={target_user.UID}"
+        )
+
+    # 绑定到目标账号
+    target_user.EMBYID = emby_user.id
+    target_user.PENDING_EMBY = False
+    target_user.PENDING_EMBY_DAYS = None
+    # 把 emby 用户名记入 OTHER，便于后续展示
+    other_data = {}
+    if target_user.OTHER:
+        try:
+            other_data = json.loads(target_user.OTHER)
+        except (json.JSONDecodeError, TypeError):
+            other_data = {}
+    other_data['emby_username'] = emby_user.name
+    target_user.OTHER = json.dumps(other_data)
+    await UserOperate.update_user(target_user)
+
+    # 同步状态到 Emby（按本地启用/到期状态调整 Emby 的 IsDisabled）
+    try:
+        from src.services import UserService
+        await UserService.sync_user_to_emby(target_user)
+    except Exception as exc:
+        logger.warning(f"绑定后同步 Emby 状态失败: {exc}")
+
+    logger.info(
+        f"管理员 {g.current_user.USERNAME} 绑定 Emby 到系统账号: "
+        f"uid={target_user.UID} emby_id={emby_user.id} emby_name={emby_user.name} force={force}"
+    )
+    return api_response(True, "绑定成功", {
+        'uid': target_user.UID,
+        'emby_id': emby_user.id,
+        'emby_username': emby_user.name,
+        'force_taken': bool(occupant and force),
+        'previous_uid': occupant.UID if occupant else None,
+    })
+

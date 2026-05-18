@@ -41,6 +41,10 @@ class UserModel(UsersDatabaseModel):
     APIKEY: Mapped[Optional[str]] = mapped_column(String, default='', nullable=True)
     APIKEY_PERMISSIONS: Mapped[Optional[str]] = mapped_column(String, default='', nullable=True)  # JSON: API Key 权限范围
     AVATAR: Mapped[Optional[str]] = mapped_column(String, default='', nullable=True)  # 用户头像 URL
+    # 是否处于"待补建 Emby 账号"状态：注册码注册后未绑定 Emby 时为 True；首次登录后由用户补完。
+    PENDING_EMBY: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, nullable=True)
+    # 待补建时，注册码给定的开通天数（None 时回退到 EMBY_DIRECT_REGISTER_DAYS）
+    PENDING_EMBY_DAYS: Mapped[Optional[int]] = mapped_column(Integer, default=None, nullable=True)
     OTHER: Mapped[Optional[str]] = mapped_column(String, default='', nullable=True)
 
 

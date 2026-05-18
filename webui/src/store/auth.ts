@@ -56,6 +56,8 @@ export const useAuthStore = create<AuthState>()(
               telegram_id: baseUser.telegram_id,
               telegram_username: baseUser.telegram_username,
               is_pending: baseUser.is_pending,
+              pending_emby: baseUser.pending_emby,
+              pending_emby_days: baseUser.pending_emby_days,
             };
 
             set({ user: quickUser, isAuthenticated: true, isLoading: false });

@@ -400,6 +400,18 @@ class BangumiSyncConfig(BaseConfig):
     MIN_PROGRESS_PERCENT: int = 80  # 最小播放进度（百分比）才算看完
 
 
+class SigninConfig(BaseConfig):
+    """签到与积分系统配置（积分仅装饰用途，无排行榜）"""
+    ENABLED: bool = True
+    CURRENCY_NAME: str = '星币'  # 货币展示名
+    DAILY_MIN: int = 5  # 每日签到最少奖励
+    DAILY_MAX: int = 20  # 每日签到最多奖励
+    # 连签加成：达到列表中的连签天数（含当日），额外奖励对应位置的积分
+    STREAK_BONUS_DAYS: List[int] = [3, 7, 14, 30]
+    STREAK_BONUS_POINTS: List[int] = [10, 50, 100, 300]
+    RESET_AFTER_MISS: bool = True  # 漏签是否清零连签
+
+
 # 自动加载配置
 Config.update_from_toml("Global")
 EmbyConfig.update_from_toml('Emby')
@@ -411,12 +423,14 @@ SecurityConfig.update_from_toml('Security')
 SchedulerConfig.update_from_toml('Scheduler')
 NotificationConfig.update_from_toml('Notification')
 BangumiSyncConfig.update_from_toml('BangumiSync')
+SigninConfig.update_from_toml('Signin')
 
 # 启动时自动补全缺失的配置项
 _config_classes = [
     Config, EmbyConfig, TelegramConfig, RegisterConfig,
     DeviceLimitConfig, APIConfig, SecurityConfig,
     SchedulerConfig, NotificationConfig, BangumiSyncConfig,
+    SigninConfig,
 ]
 _filled = sum(1 for c in _config_classes if c.fill_missing_to_toml())
 if _filled:

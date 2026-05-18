@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
+import { EmbyPendingModal } from "@/components/emby-pending-modal";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "next-themes";
@@ -234,6 +235,7 @@ export default function MainLayout({
           </main>
         </div>
       </div>
+      <EmbyPendingModal />
     </div>
   );
 }

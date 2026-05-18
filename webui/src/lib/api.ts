@@ -300,7 +300,17 @@ class ApiClient {
   async bindEmbyAccount(embyUsername: string, embyPassword: string) {
     return this.request<{ emby_id: string; emby_username: string }>("/users/me/emby/bind", {
       method: "POST",
-      body: JSON.stringify({ 
+      body: JSON.stringify({
+        emby_username: embyUsername,
+        emby_password: embyPassword,
+      }),
+    });
+  }
+
+  async completeEmbyRegistration(embyUsername: string, embyPassword: string) {
+    return this.request<{ user: UserInfo }>("/users/me/emby/register", {
+      method: "POST",
+      body: JSON.stringify({
         emby_username: embyUsername,
         emby_password: embyPassword,
       }),
@@ -354,6 +364,25 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify({ reg_code: regCode }),
     });
+  }
+
+  // Signin (签到 / 积分)
+  async getSigninSummary() {
+    return this.request<SigninSummary>("/signin/me");
+  }
+
+  async getSigninPublicConfig() {
+    return this.request<SigninPublicConfig>("/signin/config");
+  }
+
+  async signinNow() {
+    return this.request<SigninActionResult>("/signin", { method: "POST" });
+  }
+
+  async getSigninHistory(limit = 30) {
+    return this.request<{ records: SigninHistoryRecord[]; currency_name: string }>(
+      `/signin/history?limit=${limit}`,
+    );
   }
 
   async useCode(regCode: string, options?: { embyUsername?: string; embyPassword?: string }) {
@@ -493,6 +522,29 @@ class ApiClient {
   async deleteUserEmby(uid: number) {
     return this.request(`/admin/users/${uid}/emby`, {
       method: "DELETE",
+    });
+  }
+
+  async adminCreateStandaloneEmby(payload: { username: string; password: string; email?: string }) {
+    return this.request<{ emby_id: string; emby_username: string }>("/admin/emby/create-standalone", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async adminBindEmbyToUser(uid: number, payload: { emby_username?: string; emby_id?: string; force?: boolean }) {
+    return this.request<{
+      uid: number;
+      emby_id: string;
+      emby_username: string;
+      force_taken: boolean;
+      previous_uid: number | null;
+      conflict?: boolean;
+      conflict_uid?: number;
+      conflict_username?: string;
+    }>(`/admin/users/${uid}/bind-emby`, {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   }
 
@@ -1158,6 +1210,8 @@ export interface UserInfo {
   created_at?: string | number;
   register_time?: number;
   is_pending?: boolean;  // 是否待激活
+  pending_emby?: boolean;  // 系统账号已建但待补建 Emby
+  pending_emby_days?: number | null;  // 注册码授予的开通天数（待 Emby 补建）
 }
 
 export interface ApiKeyItem {
@@ -1353,7 +1407,6 @@ export interface RegisterData {
   password?: string;
   email?: string;
   reg_code?: string;
-  registration_target?: "system" | "emby";
 }
 
 export interface RegisterResponse {
@@ -1594,5 +1647,53 @@ export interface InviteForest {
     invite_limit: number;
     require_emby: boolean;
   };
+}
+
+// ==================== 签到 / 积分 ====================
+export interface SigninSummary {
+  enabled: boolean;
+  currency_name: string;
+  current_points: number;
+  current_streak: number;
+  longest_streak: number;
+  total_points: number;
+  last_signin_date: string | null;
+  today_signed: boolean;
+  next_bonus_in_days: number | null;
+  next_bonus_points: number | null;
+}
+
+export interface SigninBonusRule {
+  streak_days: number;
+  bonus_points: number;
+}
+
+export interface SigninPublicConfig {
+  enabled: boolean;
+  currency_name: string;
+  daily_min: number;
+  daily_max: number;
+  bonus_table: SigninBonusRule[];
+  reset_after_miss: boolean;
+}
+
+export interface SigninActionResult {
+  today_signed: boolean;
+  daily_points: number;
+  bonus_points: number;
+  total_today: number;
+  current_streak: number;
+  longest_streak: number;
+  current_points: number;
+  currency_name: string;
+}
+
+export interface SigninHistoryRecord {
+  date: string;
+  daily_points: number;
+  bonus_points: number;
+  total: number;
+  streak: number;
+  created_at: number;
 }
 

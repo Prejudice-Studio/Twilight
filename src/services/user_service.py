@@ -188,69 +188,58 @@ class UserService:
         password: Optional[str] = None
     ) -> RegisterResponse:
         """
-        通过注册码注册
-        
+        通过注册码注册：仅创建系统账号并标记 PENDING_EMBY=True，
+        Emby 账号由用户首次登录后在前端 Modal 补完。
+
         :param telegram_id: Telegram ID（Web 注册时可为空）
-        :param username: Emby 用户名
+        :param username: 系统/Emby 用户名（首次提交即为期望的用户名）
         :param reg_code: 注册码
         :param email: 邮箱（可选）
         :param password: 密码（Web 注册时使用，为空则自动生成）
         """
         from src.db.regcode import RegCodeOperate, Type as RegCodeType
-        
-        locks = await acquire_registration_lock(username, telegram_id, reg_code=reg_code)
-        if locks is None:
-            return RegisterResponse(RegisterResult.ERROR, "当前注册请求较多，请稍后重试")
 
-        global_lock = await acquire_global_registration_lock()
-        if global_lock is None:
-            await release_registration_lock(locks)
-            return RegisterResponse(RegisterResult.ERROR, "当前注册请求较多，请稍后重试")
+        # 仅校验注册码合法性，再委派 register_pending 完成系统账号创建。
+        # 这样既复用了管理员/白名单识别、并发锁等逻辑，又确保 Emby 账号不会在此立即创建。
+        code_info = await RegCodeOperate.get_regcode_by_code(reg_code)
+        if not code_info:
+            return RegisterResponse(RegisterResult.INVALID_CODE, "注册码无效")
 
-        try:
-            # 检查注册是否开放
-            available, msg = await UserService.check_registration_available(use_cache=False)
-            if not available:
-                return RegisterResponse(RegisterResult.USER_LIMIT_REACHED, msg)
-            
-            # 检查用户是否已存在（有 telegram_id 时检查）
-            if telegram_id:
-                existing_user = await UserOperate.get_user_by_telegram_id(telegram_id)
-                if existing_user and existing_user.EMBYID:
-                    return RegisterResponse(RegisterResult.USER_EXISTS, "您已经注册过了")
+        if code_info.TYPE != RegCodeType.REGISTER.value:
+            return RegisterResponse(RegisterResult.INVALID_CODE, "这不是注册码")
 
-            # 验证注册码
-            code_info = await RegCodeOperate.get_regcode_by_code(reg_code)
-            if not code_info:
-                return RegisterResponse(RegisterResult.INVALID_CODE, "注册码无效")
-            
-            if code_info.TYPE != RegCodeType.REGISTER.value:
-                return RegisterResponse(RegisterResult.INVALID_CODE, "这不是注册码")
-            
-            if not code_info.ACTIVE:
-                return RegisterResponse(RegisterResult.CODE_EXPIRED, "注册码已停用")
-            
-            # 检查使用次数
-            if code_info.USE_COUNT_LIMIT != -1 and code_info.USE_COUNT >= code_info.USE_COUNT_LIMIT:
-                return RegisterResponse(RegisterResult.CODE_USED, "注册码已被使用完")
+        if not code_info.ACTIVE:
+            return RegisterResponse(RegisterResult.CODE_EXPIRED, "注册码已停用")
 
-            if code_info.VALIDITY_TIME != -1:
-                expire_time = code_info.CREATED_TIME + code_info.VALIDITY_TIME * 3600
-                if timestamp() > expire_time:
-                    return RegisterResponse(RegisterResult.CODE_EXPIRED, "注册码已过期")
+        if code_info.USE_COUNT_LIMIT != -1 and code_info.USE_COUNT >= code_info.USE_COUNT_LIMIT:
+            return RegisterResponse(RegisterResult.CODE_USED, "注册码已被使用完")
 
-            # 创建 Emby 账户
-            return await UserService._create_emby_user(
-                telegram_id=telegram_id,
-                username=username,
-                email=email,
-                days=UserService._normalize_code_days(code_info.DAYS, default=30),
-                reg_code=reg_code,
-                password=password
+        if code_info.VALIDITY_TIME != -1:
+            expire_time = code_info.CREATED_TIME + code_info.VALIDITY_TIME * 3600
+            if timestamp() > expire_time:
+                return RegisterResponse(RegisterResult.CODE_EXPIRED, "注册码已过期")
+
+        pending_days = UserService._normalize_code_days(code_info.DAYS, default=30)
+
+        response = await UserService.register_pending(
+            telegram_id=telegram_id,
+            username=username,
+            email=email,
+            password=password,
+            pending_emby_days=pending_days,
+            skip_pending_check=True,
+        )
+
+        # 注册码消费：只在系统账号创建成功时计数
+        if response.result == RegisterResult.SUCCESS:
+            await RegCodeOperate.update_regcode_use_count(reg_code, 1)
+            # 重新组装一份更贴合"已使用注册码"的提示文案
+            days_text = "永久" if pending_days <= 0 else f"{pending_days} 天"
+            response.message = (
+                f"注册成功！注册码已使用，Emby 账号开通时长 {days_text}，请在首次登录后补建 Emby 账号。"
             )
-        finally:
-            await release_global_registration_lock(global_lock)
-            await release_registration_lock(locks)
+
+        return response
 
     @staticmethod
     async def register_direct_emby(
@@ -300,17 +289,22 @@ class UserService:
         telegram_id: Optional[int],
         username: str,
         email: Optional[str] = None,
-        password: Optional[str] = None
+        password: Optional[str] = None,
+        pending_emby_days: Optional[int] = None,
+        skip_pending_check: bool = False,
     ) -> RegisterResponse:
         """
-        无码注册（待激活状态）
+        待激活注册（仅创建系统账号，未绑定 Emby）。
+
+        :param pending_emby_days: 注册码授予的开通天数；为 None 时由 Emby 注册流程使用默认值
+        :param skip_pending_check: 走注册码路径时不需要再校验 ALLOW_PENDING_REGISTER
         """
         from src.config import RegisterConfig
-        
-        # 检查是否允许无码注册
-        if not RegisterConfig.ALLOW_PENDING_REGISTER:
+
+        # 检查是否允许无码注册（除非来自注册码路径）
+        if not skip_pending_check and not RegisterConfig.ALLOW_PENDING_REGISTER:
             return RegisterResponse(RegisterResult.ERROR, "暂不开放注册，请使用注册码")
-        
+
         locks = await acquire_registration_lock(username, telegram_id)
         if locks is None:
             return RegisterResponse(RegisterResult.ERROR, "当前注册请求较多，请稍后重试")
@@ -321,8 +315,8 @@ class UserService:
             return RegisterResponse(RegisterResult.ERROR, "当前注册请求较多，请稍后重试")
 
         try:
-            # 检查是否允许无码注册
-            if not RegisterConfig.ALLOW_PENDING_REGISTER:
+            # 二次校验（避免锁竞争窗口）
+            if not skip_pending_check and not RegisterConfig.ALLOW_PENDING_REGISTER:
                 return RegisterResponse(RegisterResult.ERROR, "暂不开放注册，请使用注册码")
 
             # 检查注册是否开放
@@ -392,6 +386,8 @@ class UserService:
                     ACTIVE_STATUS=True,  # 管理员默认激活
                     EXPIRED_AT=permanent_expire,
                     REGISTER_TIME=timestamp(),
+                    PENDING_EMBY=True,
+                    PENDING_EMBY_DAYS=pending_emby_days,
                 )
             elif is_whitelist:
                 # 白名单用户默认激活，到期时间为 9999 年
@@ -406,6 +402,8 @@ class UserService:
                     ACTIVE_STATUS=True,
                     EXPIRED_AT=permanent_expire,
                     REGISTER_TIME=timestamp(),
+                    PENDING_EMBY=True,
+                    PENDING_EMBY_DAYS=pending_emby_days,
                 )
             else:
                 # 普通用户：已激活但无 Emby 账户
@@ -420,10 +418,14 @@ class UserService:
                     ACTIVE_STATUS=True,  # 账户激活，可以登录
                     EXPIRED_AT=-1,
                     REGISTER_TIME=timestamp(),
+                    PENDING_EMBY=True,
+                    PENDING_EMBY_DAYS=pending_emby_days,
                 )
             await UserOperate.add_user(user)
-            
-            logger.info(f"待激活用户注册: {username} (UID: {new_uid})")
+
+            logger.info(
+                f"待激活用户注册: {username} (UID: {new_uid}, pending_emby_days={pending_emby_days})"
+            )
 
             return RegisterResponse(
                 result=RegisterResult.SUCCESS,
@@ -433,6 +435,92 @@ class UserService:
             )
         finally:
             await release_global_registration_lock(global_lock)
+            await release_registration_lock(locks)
+
+    @staticmethod
+    async def complete_emby_registration(
+        user: UserModel,
+        emby_username: str,
+        emby_password: str,
+    ) -> RegisterResponse:
+        """已登录用户补建 Emby 账号；失败保留 PENDING_EMBY 标记便于重试。"""
+        from src.config import RegisterConfig
+        import json
+
+        if user.EMBYID:
+            return RegisterResponse(RegisterResult.USER_EXISTS, "您已绑定 Emby 账号")
+
+        emby_username = (emby_username or '').strip()
+        if not emby_username:
+            return RegisterResponse(RegisterResult.ERROR, "Emby 用户名不能为空")
+        if not is_valid_username(emby_username):
+            return RegisterResponse(
+                RegisterResult.ERROR,
+                "Emby 用户名格式不正确（3-20位字母数字下划线，不能以数字开头）",
+            )
+
+        ok, msg = UserService.validate_password_strength(emby_password, label="Emby 密码")
+        if not ok:
+            return RegisterResponse(RegisterResult.ERROR, msg)
+
+        locks = await acquire_registration_lock(emby_username, user.TELEGRAM_ID)
+        if locks is None:
+            return RegisterResponse(RegisterResult.ERROR, "当前注册请求较多，请稍后重试")
+
+        emby = get_emby_client()
+        try:
+            existing_emby = await emby.get_user_by_name(emby_username)
+            if existing_emby:
+                return RegisterResponse(RegisterResult.EMBY_EXISTS, "该用户名在 Emby 中已存在")
+
+            try:
+                emby_user = await emby.create_user(emby_username, emby_password)
+            except EmbyError as exc:
+                logger.error(f"用户 {user.UID} 补建 Emby 账号失败: {exc}")
+                return RegisterResponse(RegisterResult.EMBY_ERROR, f"创建 Emby 账户失败: {exc}")
+
+            if not emby_user:
+                return RegisterResponse(RegisterResult.EMBY_ERROR, "创建 Emby 账户失败：未返回用户信息")
+
+            days = user.PENDING_EMBY_DAYS
+            if days is None:
+                days = int(RegisterConfig.EMBY_DIRECT_REGISTER_DAYS or 30)
+            days = UserService._normalize_code_days(days, default=30)
+
+            # 管理员/白名单永久；其它账号按 days 计算
+            if user.ROLE in (Role.ADMIN.value, Role.WHITE_LIST.value):
+                user.EXPIRED_AT = 253402214400
+            else:
+                user.EXPIRED_AT = (timestamp() + days_to_seconds(days)) if days > 0 else -1
+
+            user.EMBYID = emby_user.id
+            user.PENDING_EMBY = False
+            user.PENDING_EMBY_DAYS = None
+
+            other_data = {}
+            if user.OTHER:
+                try:
+                    other_data = json.loads(user.OTHER)
+                except (json.JSONDecodeError, TypeError):
+                    other_data = {}
+            other_data['emby_username'] = emby_username
+            user.OTHER = json.dumps(other_data)
+
+            await UserOperate.update_user(user)
+
+            # 把启用/到期状态同步到 Emby（启用 Policy 等）
+            try:
+                await UserService.sync_user_to_emby(user)
+            except Exception as exc:  # pragma: no cover
+                logger.warning(f"补建 Emby 后同步状态失败: {exc}")
+
+            days_text = UserService._format_days_text(days)
+            return RegisterResponse(
+                result=RegisterResult.SUCCESS,
+                message=f"Emby 账号已创建并绑定，开通时长 {days_text}",
+                user=user,
+            )
+        finally:
             await release_registration_lock(locks)
 
     @staticmethod
@@ -1096,6 +1184,8 @@ class UserService:
             "created_at": user.REGISTER_TIME,  # 前端兼容字段
             "emby_id": user.EMBYID,  # 添加 Emby ID
             "emby_username": embay_username,
+            "pending_emby": bool(getattr(user, 'PENDING_EMBY', False)) and not user.EMBYID,
+            "pending_emby_days": getattr(user, 'PENDING_EMBY_DAYS', None),
         }
 
         return info

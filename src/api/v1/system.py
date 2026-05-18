@@ -13,7 +13,7 @@ from src.config import (
     Config, EmbyConfig, RegisterConfig,
     DeviceLimitConfig, APIConfig, SecurityConfig,
     SchedulerConfig, NotificationConfig, TelegramConfig,
-    BangumiSyncConfig
+    BangumiSyncConfig, SigninConfig
 )
 from src import __version__
 from src.db.user import UsersSessionFactory
@@ -512,7 +512,7 @@ async def update_config_toml():
             Config, EmbyConfig, RegisterConfig,
             DeviceLimitConfig, APIConfig, SecurityConfig,
             SchedulerConfig, NotificationConfig, TelegramConfig,
-            BangumiSyncConfig
+            BangumiSyncConfig, SigninConfig,
         )
         Config.update_from_toml("Global")
         EmbyConfig.update_from_toml('Emby')
@@ -524,6 +524,7 @@ async def update_config_toml():
         SchedulerConfig.update_from_toml('Scheduler')
         NotificationConfig.update_from_toml('Notification')
         BangumiSyncConfig.update_from_toml('BangumiSync')
+        SigninConfig.update_from_toml('Signin')
 
         # 改为重启整个程序（由进程管理器/启动脚本拉起）
         _schedule_process_restart()
@@ -710,6 +711,20 @@ async def get_config_schema():
                     {'key': 'min_progress_percent', 'label': '最小播放进度', 'type': 'int', 'description': '播放进度达到多少百分比才算看完并同步', 'value': BangumiSyncConfig.MIN_PROGRESS_PERCENT},
                 ],
             },
+            {
+                'key': 'Signin',
+                'title': '签到与积分',
+                'description': '每日签到、积分奖励与连签加成；积分仅装饰用途，无排行榜',
+                'fields': [
+                    {'key': 'enabled', 'label': '启用签到', 'type': 'bool', 'description': '是否开放签到功能', 'value': SigninConfig.ENABLED},
+                    {'key': 'currency_name', 'label': '货币名称', 'type': 'string', 'description': '展示用的货币名（如 星币 / 金币 / 云币）', 'value': SigninConfig.CURRENCY_NAME},
+                    {'key': 'daily_min', 'label': '每日最少奖励', 'type': 'int', 'description': '单日签到获得的最少积分（含 0）', 'value': SigninConfig.DAILY_MIN},
+                    {'key': 'daily_max', 'label': '每日最多奖励', 'type': 'int', 'description': '单日签到获得的最多积分（≥ 最少）', 'value': SigninConfig.DAILY_MAX},
+                    {'key': 'streak_bonus_days', 'label': '连签加成天数', 'type': 'list', 'description': '达到该连签天数时获得额外奖励，与下方"加成积分"列表一一对应', 'value': SigninConfig.STREAK_BONUS_DAYS},
+                    {'key': 'streak_bonus_points', 'label': '加成积分', 'type': 'list', 'description': '上方天数对应的额外奖励积分', 'value': SigninConfig.STREAK_BONUS_POINTS},
+                    {'key': 'reset_after_miss', 'label': '漏签清零连签', 'type': 'bool', 'description': '关闭后即使漏签也保留并累计连签', 'value': SigninConfig.RESET_AFTER_MISS},
+                ],
+            },
         ],
     }
     
@@ -771,6 +786,7 @@ async def update_config_by_schema():
         SchedulerConfig.update_from_toml('Scheduler')
         NotificationConfig.update_from_toml('Notification')
         BangumiSyncConfig.update_from_toml('BangumiSync')
+        SigninConfig.update_from_toml('Signin')
 
         # 改为重启整个程序（由进程管理器/启动脚本拉起）
         _schedule_process_restart()

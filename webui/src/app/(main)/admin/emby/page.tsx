@@ -19,10 +19,13 @@ import {
   WifiOff,
   Send,
   MessageCircle,
+  UserPlus,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
 import {
@@ -112,6 +115,13 @@ export default function AdminEmbyPage() {
 
   // Confirm dialog
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
+
+  // Standalone Emby create
+  const [standaloneOpen, setStandaloneOpen] = useState(false);
+  const [standaloneName, setStandaloneName] = useState("");
+  const [standalonePwd, setStandalonePwd] = useState("");
+  const [standaloneEmail, setStandaloneEmail] = useState("");
+  const [standaloneSubmitting, setStandaloneSubmitting] = useState(false);
 
   // Bot test state
   const [isBotTesting, setIsBotTesting] = useState(false);
@@ -270,6 +280,40 @@ export default function AdminEmbyPage() {
       setIsCleaning(false);
     }
   }, [toast, handleLoadUsers]);
+
+  // Create standalone Emby user
+  const handleCreateStandalone = useCallback(async () => {
+    if (!standaloneName.trim() || !standalonePwd) {
+      toast({ title: "请填写用户名与密码", variant: "destructive" });
+      return;
+    }
+    setStandaloneSubmitting(true);
+    try {
+      const res = await api.adminCreateStandaloneEmby({
+        username: standaloneName.trim(),
+        password: standalonePwd,
+        email: standaloneEmail.trim() || undefined,
+      });
+      if (res.success && res.data) {
+        toast({
+          title: "创建成功",
+          description: `已创建 Emby 用户 ${res.data.emby_username}`,
+          variant: "success",
+        });
+        setStandaloneOpen(false);
+        setStandaloneName("");
+        setStandalonePwd("");
+        setStandaloneEmail("");
+        await handleLoadUsers();
+      } else {
+        toast({ title: "创建失败", description: res.message, variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "创建出错", description: err.message, variant: "destructive" });
+    } finally {
+      setStandaloneSubmitting(false);
+    }
+  }, [standaloneName, standalonePwd, standaloneEmail, toast, handleLoadUsers]);
 
   // Reset all bindings
   const handleResetBindings = useCallback(async () => {
@@ -500,6 +544,29 @@ export default function AdminEmbyPage() {
               </div>
             </CardContent>
           )}
+        </Card>
+      </motion.div>
+
+      {/* Standalone Emby account creation */}
+      <motion.div variants={item}>
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <UserPlus className="h-5 w-5" />
+                  新建独立 Emby 账号
+                </CardTitle>
+                <CardDescription>
+                  直接在 Emby 服务器上创建一个全新账号，不绑定任何系统账号；适合给临时朋友/外部账户用
+                </CardDescription>
+              </div>
+              <Button onClick={() => setStandaloneOpen(true)}>
+                <UserPlus className="mr-2 h-4 w-4" />
+                新建 Emby 账号
+              </Button>
+            </div>
+          </CardHeader>
         </Card>
       </motion.div>
 
@@ -776,6 +843,63 @@ export default function AdminEmbyPage() {
             >
               {isResetting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               确认重置
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Standalone Emby account dialog */}
+      <Dialog open={standaloneOpen} onOpenChange={setStandaloneOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserPlus className="h-5 w-5" />
+              新建独立 Emby 账号
+            </DialogTitle>
+            <DialogDescription>
+              直接调用 Emby API 创建一个新账号。该账号不会写入本地用户表、不参与 Twilight 系统的过期/权限管理。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="standalone-name">Emby 用户名</Label>
+              <Input
+                id="standalone-name"
+                value={standaloneName}
+                onChange={(e) => setStandaloneName(e.target.value)}
+                placeholder="如 guest123"
+                disabled={standaloneSubmitting}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="standalone-pwd">Emby 密码</Label>
+              <Input
+                id="standalone-pwd"
+                type="password"
+                value={standalonePwd}
+                onChange={(e) => setStandalonePwd(e.target.value)}
+                placeholder="至少 8 位，含大小写和数字"
+                disabled={standaloneSubmitting}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="standalone-email">邮箱（可选）</Label>
+              <Input
+                id="standalone-email"
+                value={standaloneEmail}
+                onChange={(e) => setStandaloneEmail(e.target.value)}
+                placeholder="仅做备注，不会同步到 Emby"
+                disabled={standaloneSubmitting}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStandaloneOpen(false)} disabled={standaloneSubmitting}>
+              取消
+            </Button>
+            <Button onClick={handleCreateStandalone} disabled={standaloneSubmitting}>
+              {standaloneSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              创建
             </Button>
           </DialogFooter>
         </DialogContent>

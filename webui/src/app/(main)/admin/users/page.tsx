@@ -14,6 +14,8 @@ import {
   ChevronDown,
   Edit,
   UserX,
+  Link2,
+  AlertTriangle,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -97,6 +99,18 @@ export default function AdminUsersPage() {
   const [isToggling, setIsToggling] = useState(false);
   const [toggleCascadeDepth, setToggleCascadeDepth] = useState<number>(1);
   const [toggleReason, setToggleReason] = useState<string>("");
+
+  // 绑定 Emby 到当前系统账号
+  const [bindOpen, setBindOpen] = useState(false);
+  const [bindTarget, setBindTarget] = useState<UserInfo | null>(null);
+  const [bindEmbyName, setBindEmbyName] = useState("");
+  const [bindSubmitting, setBindSubmitting] = useState(false);
+  const [bindConflict, setBindConflict] = useState<null | {
+    emby_id: string;
+    emby_username: string;
+    conflict_uid: number;
+    conflict_username: string;
+  }>(null);
 
   // 强制重置 Emby 密码（按 Emby 用户名）
   const [forcePwdOpen, setForcePwdOpen] = useState(false);
@@ -274,6 +288,51 @@ export default function AdminUsersPage() {
       }
     } catch (error: any) {
       toast({ title: "重置失败", description: error.message, variant: "destructive" });
+    }
+  };
+
+  const handleOpenBindEmby = (user: UserInfo) => {
+    setBindTarget(user);
+    setBindEmbyName(user.emby_username || "");
+    setBindConflict(null);
+    setBindOpen(true);
+  };
+
+  const submitBindEmby = async (force: boolean) => {
+    if (!bindTarget) return;
+    const name = bindEmbyName.trim();
+    if (!name) {
+      toast({ title: "请输入 Emby 用户名", variant: "destructive" });
+      return;
+    }
+    setBindSubmitting(true);
+    try {
+      const res = await api.adminBindEmbyToUser(bindTarget.uid, { emby_username: name, force });
+      if (res.success && res.data) {
+        const takeOver = res.data.force_taken ? `（已从 UID ${res.data.previous_uid} 夺取）` : "";
+        toast({
+          title: "绑定成功",
+          description: `${bindTarget.username} → ${res.data.emby_username} ${takeOver}`,
+          variant: "success",
+        });
+        invalidateUsersCache();
+        await loadUsers();
+        setBindOpen(false);
+        setBindConflict(null);
+      } else if (res.data?.conflict) {
+        setBindConflict({
+          emby_id: res.data.emby_id,
+          emby_username: res.data.emby_username,
+          conflict_uid: res.data.conflict_uid!,
+          conflict_username: res.data.conflict_username!,
+        });
+      } else {
+        toast({ title: "绑定失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "绑定失败", description: error.message, variant: "destructive" });
+    } finally {
+      setBindSubmitting(false);
     }
   };
 
@@ -470,6 +529,10 @@ export default function AdminUsersPage() {
         <DropdownMenuItem onClick={() => handleResetPassword(user)}>
           <Key className="mr-2 h-4 w-4" />
           重置密码
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => handleOpenBindEmby(user)}>
+          <Link2 className="mr-2 h-4 w-4" />
+          绑定 Emby
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => handleToggleActive(user)}>
@@ -1337,6 +1400,84 @@ export default function AdminUsersPage() {
               {isToggling && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {toggleTarget?.active ? "确认禁用" : "确认启用"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 绑定 Emby 对话框 */}
+      <Dialog
+        open={bindOpen}
+        onOpenChange={(open) => {
+          setBindOpen(open);
+          if (!open) setBindConflict(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Link2 className="h-5 w-5" />
+              绑定 Emby 账号
+            </DialogTitle>
+            <DialogDescription>
+              将一个已存在的 Emby 账号强制绑定到系统账号 {bindTarget?.username}（UID {bindTarget?.uid}）。
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="bind-emby-name">Emby 用户名</Label>
+              <Input
+                id="bind-emby-name"
+                value={bindEmbyName}
+                onChange={(e) => {
+                  setBindEmbyName(e.target.value);
+                  setBindConflict(null);
+                }}
+                placeholder="输入要绑定的 Emby 用户名"
+                disabled={bindSubmitting}
+              />
+              <p className="text-xs text-muted-foreground">
+                若该 Emby 已被其他系统账号占用，将出现确认按钮以"夺取"绑定。
+              </p>
+            </div>
+
+            {bindConflict && (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+                <div className="mb-1 flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                  <AlertTriangle className="h-4 w-4" />
+                  <span className="font-medium">绑定冲突</span>
+                </div>
+                <p>
+                  Emby 用户 <span className="font-mono">{bindConflict.emby_username}</span> 当前已绑定到
+                  系统账号 <span className="font-mono">{bindConflict.conflict_username}</span>
+                  （UID {bindConflict.conflict_uid}）。
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  确认"夺取"将清空旧账号的 EMBYID，旧账号会被标记为"待重新绑定 Emby"状态。
+                </p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBindOpen(false)} disabled={bindSubmitting}>
+              取消
+            </Button>
+            {bindConflict ? (
+              <Button
+                variant="destructive"
+                onClick={() => void submitBindEmby(true)}
+                disabled={bindSubmitting}
+              >
+                {bindSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                确认夺取并绑定
+              </Button>
+            ) : (
+              <Button onClick={() => void submitBindEmby(false)} disabled={bindSubmitting}>
+                {bindSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                绑定
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

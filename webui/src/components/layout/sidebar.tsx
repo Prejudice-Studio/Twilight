@@ -25,6 +25,7 @@ import {
   TimerReset,
   GitBranch,
   Network,
+  Coins,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
@@ -63,6 +64,7 @@ export const userNavItems: SidebarNavItem[] = [
   { href: "/dashboard", label: "仪表盘", icon: LayoutDashboard },
   { href: "/announcements", label: "公告", icon: Megaphone },
   { href: "/media", label: "求片中心", icon: Film },
+  { href: "/score", label: "签到", icon: Coins },
   { href: "/invite", label: "邀请中心", icon: GitBranch },
   { href: "/settings", label: "个人设置", icon: Settings },
 ];

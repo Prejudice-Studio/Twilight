@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
+import Link from "next/link";
 import {
   Calendar,
   Clock,
@@ -22,6 +23,9 @@ import {
   Hourglass,
   Download,
   Globe,
+  Coins,
+  Flame,
+  Sparkles,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,7 +37,7 @@ import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
-import { api, type EmbyInfo, type MediaRequest, type TelegramStatus } from "@/lib/api";
+import { api, type EmbyInfo, type MediaRequest, type TelegramStatus, type SigninSummary } from "@/lib/api";
 import { AnnouncementBoard } from "@/components/announcement-board";
 
 const container = {
@@ -82,18 +86,25 @@ export default function DashboardPage() {
   const [linesRequireEmby, setLinesRequireEmby] = useState(false);
   const [lineLatencyMap, setLineLatencyMap] = useState<Record<string, LineLatencyInfo>>({});
   const [isLatencyTesting, setIsLatencyTesting] = useState(false);
+  const [signinSummary, setSigninSummary] = useState<SigninSummary | null>(null);
+  const [signingIn, setSigningIn] = useState(false);
 
   useEffect(() => {
     void fetchSystemInfo();
   }, [fetchSystemInfo]);
 
   const loadDashboardData = useCallback(async (signal?: AbortSignal) => {
-    const [tgRes, embyRes, urlsRes, reqRes] = await Promise.all([
+    const [tgRes, embyRes, urlsRes, reqRes, signinRes] = await Promise.all([
       api.getTelegramStatus().catch(() => null),
       api.getEmbyInfo().catch(() => null),
       api.getEmbyUrls().catch(() => null),
       api.getMyRequests(signal).catch(() => null),
+      api.getSigninSummary().catch(() => null),
     ]);
+
+    if (signinRes && signinRes.success && signinRes.data) {
+      setSigninSummary(signinRes.data);
+    }
 
     if (tgRes && tgRes.success && tgRes.data) {
       setTelegramStatus(tgRes.data);
@@ -249,6 +260,7 @@ export default function DashboardPage() {
   // ============== 用户/到期信息 ==============
   const isAdmin = user?.role === 0;
   const isPending = !user?.emby_id && !user?.active;
+  const isPendingEmby = Boolean(user?.pending_emby) && !user?.emby_id;
 
   let expiredTimestamp: number | null = null;
   if (user?.expired_at) {
@@ -347,6 +359,30 @@ export default function DashboardPage() {
     }
   };
 
+  const handleQuickSignin = async () => {
+    if (signingIn) return;
+    setSigningIn(true);
+    try {
+      const res = await api.signinNow();
+      if (res.success && res.data) {
+        const bonus = res.data.bonus_points > 0 ? `（含连签加成 +${res.data.bonus_points}）` : "";
+        toast({
+          title: `签到成功 +${res.data.total_today} ${res.data.currency_name}`,
+          description: `当前连签 ${res.data.current_streak} 天 ${bonus}`,
+          variant: "success",
+        });
+      } else {
+        toast({ title: "签到失败", description: res.message, variant: "destructive" });
+      }
+      const summary = await api.getSigninSummary().catch(() => null);
+      if (summary?.success && summary.data) setSigninSummary(summary.data);
+    } catch (err: any) {
+      toast({ title: "签到失败", description: err?.message || "网络异常", variant: "destructive" });
+    } finally {
+      setSigningIn(false);
+    }
+  };
+
   if (error) {
     return <PageError message={error} />;
   }
@@ -364,7 +400,11 @@ export default function DashboardPage() {
             {getGreeting()}，{user?.username}
           </h1>
           <p className="text-muted-foreground font-medium mt-1 text-sm sm:text-base">
-            {isPending ? "当前账号可登录，若需媒体服务请联系管理员开通 Emby 账号" : "欢迎回来，当前账号状态正常"}
+            {isPendingEmby
+              ? "你的系统账号已建好，但还没绑定 Emby 账号 — 点击右上角弹窗或刷新页面即可补建"
+              : isPending
+                ? "当前账号可登录，若需媒体服务请联系管理员开通 Emby 账号"
+                : "欢迎回来，当前账号状态正常"}
           </p>
         </div>
         <Badge className="bg-primary/10 text-primary border-primary/20 px-4 py-1.5 rounded-full font-black text-xs uppercase tracking-widest w-fit">
@@ -548,6 +588,54 @@ export default function DashboardPage() {
           )}
         </motion.div>
       </div>
+
+      {/* 签到 / 积分 快捷区 */}
+      {signinSummary?.enabled && (
+        <motion.div variants={item} className="premium-card p-5 sm:p-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-4 min-w-0">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-500">
+                <Coins className="h-6 w-6" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  我的{signinSummary.currency_name}
+                </p>
+                <div className="flex items-baseline gap-2">
+                  <h3 className="text-2xl font-black tracking-tight">{signinSummary.current_points}</h3>
+                  <span className="text-sm text-muted-foreground">{signinSummary.currency_name}</span>
+                </div>
+                <p className="mt-0.5 text-xs text-muted-foreground inline-flex items-center gap-1">
+                  <Flame className="h-3 w-3 text-orange-500" />
+                  连签 {signinSummary.current_streak} 天
+                  {signinSummary.next_bonus_in_days && signinSummary.next_bonus_points ? (
+                    <span className="ml-1">· 再签 {signinSummary.next_bonus_in_days} 天 +{signinSummary.next_bonus_points}</span>
+                  ) : null}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 md:justify-end">
+              <Button
+                size="sm"
+                onClick={handleQuickSignin}
+                disabled={signingIn || signinSummary.today_signed}
+              >
+                {signingIn ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : signinSummary.today_signed ? (
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                ) : (
+                  <Sparkles className="mr-2 h-4 w-4" />
+                )}
+                {signinSummary.today_signed ? "今日已签" : "立即签到"}
+              </Button>
+              <Button asChild size="sm" variant="outline">
+                <Link href="/score">前往签到中心</Link>
+              </Button>
+            </div>
+          </div>
+        </motion.div>
+      )}
 
       {/* 线路延迟 —— 仅在用户已绑定 Emby 时显示，避免预先泄露线路 */}
       {!linesRequireEmby && (
