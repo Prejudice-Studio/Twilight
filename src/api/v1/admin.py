@@ -39,6 +39,7 @@ async def list_users():
     per_page = min(max(1, request.args.get('per_page', 20, type=int)), 100)
     role = request.args.get('role', type=int)
     active = request.args.get('active')
+    emby = (request.args.get('emby') or '').strip().lower()
     search = request.args.get('search', '').strip()
     sort_by = (request.args.get('sort') or '').strip() or None
 
@@ -50,6 +51,13 @@ async def list_users():
         elif active.lower() == 'false':
             active_status = False
 
+    # Emby 绑定筛选：bound=只看已绑定，unbound=只看未绑定，省略/其它=全部
+    has_emby: bool | None = None
+    if emby == 'bound':
+        has_emby = True
+    elif emby == 'unbound':
+        has_emby = False
+
     offset = (page - 1) * per_page
 
     users, total = await UserOperate.get_all_users(
@@ -60,6 +68,7 @@ async def list_users():
         include_inactive=True,  # 让 active_status 完全主导筛选
         search=search or None,
         sort_by=sort_by,
+        has_emby=has_emby,
     )
     
     # Telegram username 优先取 user.OTHER 里缓存的（用户每次 /start /bind 会刷新）。

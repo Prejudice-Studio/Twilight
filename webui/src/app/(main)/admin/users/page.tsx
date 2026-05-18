@@ -16,6 +16,7 @@ import {
   UserX,
   Link2,
   AlertTriangle,
+  UserPlus,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -63,6 +64,7 @@ export default function AdminUsersPage() {
   // 筛选 / 排序
   const [roleFilter, setRoleFilter] = useState<string>("all"); // "all" | "0" | "1" | "2"
   const [activeFilter, setActiveFilter] = useState<string>("all"); // "all" | "true" | "false"
+  const [embyFilter, setEmbyFilter] = useState<string>("all"); // "all" | "bound" | "unbound"
   const [sortBy, setSortBy] = useState<string>("uid_asc");
   const [expandedUserIds, setExpandedUserIds] = useState<Set<number>>(new Set());
 
@@ -99,6 +101,13 @@ export default function AdminUsersPage() {
   const [isToggling, setIsToggling] = useState(false);
   const [toggleCascadeDepth, setToggleCascadeDepth] = useState<number>(1);
   const [toggleReason, setToggleReason] = useState<string>("");
+
+  // 新建独立 Emby 账号（不写本地 users 表）
+  const [standaloneOpen, setStandaloneOpen] = useState(false);
+  const [standaloneName, setStandaloneName] = useState("");
+  const [standalonePwd, setStandalonePwd] = useState("");
+  const [standaloneEmail, setStandaloneEmail] = useState("");
+  const [standaloneSubmitting, setStandaloneSubmitting] = useState(false);
 
   // 绑定 Emby 到当前系统账号
   const [bindOpen, setBindOpen] = useState(false);
@@ -142,7 +151,7 @@ export default function AdminUsersPage() {
   };
 
   const loadUsersResource = useCallback(async (signal?: AbortSignal) => {
-    const cacheKey = `${page}-${perPage}-${search || ""}-${roleFilter}-${activeFilter}-${sortBy}`;
+    const cacheKey = `${page}-${perPage}-${search || ""}-${roleFilter}-${activeFilter}-${embyFilter}-${sortBy}`;
     const cached = usersCacheRef.current.get(cacheKey);
     if (cached) {
       setUsers(cached.users);
@@ -154,6 +163,8 @@ export default function AdminUsersPage() {
     const role = roleFilter === "all" ? undefined : Number(roleFilter);
     const active =
       activeFilter === "all" ? undefined : activeFilter === "true";
+    const emby =
+      embyFilter === "bound" ? "bound" : embyFilter === "unbound" ? "unbound" : undefined;
 
     const res = await api.getUsers({
       page,
@@ -161,6 +172,7 @@ export default function AdminUsersPage() {
       search: search || undefined,
       role,
       active,
+      emby,
       sort: sortBy || undefined,
     }, signal);
     if (res.success && res.data) {
@@ -174,7 +186,7 @@ export default function AdminUsersPage() {
       });
     }
     return true;
-  }, [page, perPage, search, roleFilter, activeFilter, sortBy]);
+  }, [page, perPage, search, roleFilter, activeFilter, embyFilter, sortBy]);
 
   const {
     isLoading,
@@ -205,7 +217,7 @@ export default function AdminUsersPage() {
     setExpandedUserIds(new Set());
     void loadUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roleFilter, activeFilter, sortBy]);
+  }, [roleFilter, activeFilter, embyFilter, sortBy]);
 
   const handleForceSetEmbyPassword = async () => {
     const emby = forcePwdEmbyName.trim();
@@ -288,6 +300,38 @@ export default function AdminUsersPage() {
       }
     } catch (error: any) {
       toast({ title: "重置失败", description: error.message, variant: "destructive" });
+    }
+  };
+
+  const handleCreateStandaloneEmby = async () => {
+    if (!standaloneName.trim() || !standalonePwd) {
+      toast({ title: "请填写用户名与密码", variant: "destructive" });
+      return;
+    }
+    setStandaloneSubmitting(true);
+    try {
+      const res = await api.adminCreateStandaloneEmby({
+        username: standaloneName.trim(),
+        password: standalonePwd,
+        email: standaloneEmail.trim() || undefined,
+      });
+      if (res.success && res.data) {
+        toast({
+          title: "Emby 账号已创建",
+          description: `用户名：${res.data.emby_username}（未绑定任何系统账号）`,
+          variant: "success",
+        });
+        setStandaloneOpen(false);
+        setStandaloneName("");
+        setStandalonePwd("");
+        setStandaloneEmail("");
+      } else {
+        toast({ title: "创建失败", description: res.message, variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "创建出错", description: err?.message, variant: "destructive" });
+    } finally {
+      setStandaloneSubmitting(false);
     }
   };
 
@@ -570,6 +614,18 @@ export default function AdminUsersPage() {
           </Button>
           <Button
             variant="outline"
+            onClick={() => {
+              setStandaloneName("");
+              setStandalonePwd("");
+              setStandaloneEmail("");
+              setStandaloneOpen(true);
+            }}
+          >
+            <UserPlus className="mr-2 h-4 w-4" />
+            新建独立 Emby 账号
+          </Button>
+          <Button
+            variant="outline"
             className="text-destructive hover:text-destructive"
             onClick={() => {
               setCleanupPreview(null);
@@ -619,7 +675,7 @@ export default function AdminUsersPage() {
           </div>
 
           {/* 筛选 / 排序 */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">角色</p>
               <Select value={roleFilter} onValueChange={setRoleFilter}>
@@ -648,6 +704,19 @@ export default function AdminUsersPage() {
               </Select>
             </div>
             <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">Emby 绑定</p>
+              <Select value={embyFilter} onValueChange={setEmbyFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="全部" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部</SelectItem>
+                  <SelectItem value="bound">已绑定 Emby</SelectItem>
+                  <SelectItem value="unbound">未绑定 Emby</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
               <p className="text-xs text-muted-foreground">排序</p>
               <Select value={sortBy} onValueChange={setSortBy}>
                 <SelectTrigger>
@@ -671,7 +740,7 @@ export default function AdminUsersPage() {
             </div>
           </div>
 
-          {(roleFilter !== "all" || activeFilter !== "all" || sortBy !== "uid_asc") && (
+          {(roleFilter !== "all" || activeFilter !== "all" || embyFilter !== "all" || sortBy !== "uid_asc") && (
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>已应用筛选 / 排序</span>
               <Button
@@ -680,6 +749,7 @@ export default function AdminUsersPage() {
                 onClick={() => {
                   setRoleFilter("all");
                   setActiveFilter("all");
+                  setEmbyFilter("all");
                   setSortBy("uid_asc");
                 }}
               >
@@ -1478,6 +1548,69 @@ export default function AdminUsersPage() {
                 绑定
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 新建独立 Emby 账号 */}
+      <Dialog open={standaloneOpen} onOpenChange={setStandaloneOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserPlus className="h-5 w-5" />
+              新建独立 Emby 账号
+            </DialogTitle>
+            <DialogDescription>
+              直接调用 Emby API 创建一个新账号；该账号不会写入本地用户表、不参与 Twilight 系统的过期/权限管理。
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="standalone-name">Emby 用户名</Label>
+              <Input
+                id="standalone-name"
+                value={standaloneName}
+                onChange={(e) => setStandaloneName(e.target.value)}
+                placeholder="如 guest123"
+                disabled={standaloneSubmitting}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="standalone-pwd">Emby 密码</Label>
+              <Input
+                id="standalone-pwd"
+                type="password"
+                value={standalonePwd}
+                onChange={(e) => setStandalonePwd(e.target.value)}
+                placeholder="至少 8 位，含大小写和数字"
+                disabled={standaloneSubmitting}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="standalone-email">邮箱（可选）</Label>
+              <Input
+                id="standalone-email"
+                value={standaloneEmail}
+                onChange={(e) => setStandaloneEmail(e.target.value)}
+                placeholder="仅做备注，不会同步到 Emby"
+                disabled={standaloneSubmitting}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setStandaloneOpen(false)}
+              disabled={standaloneSubmitting}
+            >
+              取消
+            </Button>
+            <Button onClick={handleCreateStandaloneEmby} disabled={standaloneSubmitting}>
+              {standaloneSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              创建
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

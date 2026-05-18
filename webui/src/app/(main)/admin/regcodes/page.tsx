@@ -354,7 +354,15 @@ export default function AdminRegcodesPage() {
                       </td>
                       <td className="px-4 py-3">
                         <Badge variant={code.active === false ? "destructive" : "success"}>
-                          {code.active === false ? "已禁用" : code.use_count && code.use_count_limit && code.use_count >= code.use_count_limit ? "已用完" : "可用"}
+                          {(() => {
+                            if (code.active === false) return "已禁用";
+                            const limit = code.use_count_limit;
+                            // -1 / 0 / null / undefined 都视为无限制
+                            const limited = typeof limit === "number" && limit > 0;
+                            const used = code.use_count || 0;
+                            if (limited && used >= (limit as number)) return "已用完";
+                            return "可用";
+                          })()}
                         </Badge>
                         {code.used_by && (
                           <span className="ml-2 text-xs text-muted-foreground">

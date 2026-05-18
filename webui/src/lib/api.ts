@@ -496,6 +496,7 @@ class ApiClient {
     if (params.per_page) query.set("per_page", String(params.per_page));
     if (params.role !== undefined && params.role !== null) query.set("role", String(params.role));
     if (params.active !== undefined && params.active !== null) query.set("active", String(params.active));
+    if (params.emby) query.set("emby", params.emby);
     if (params.search) query.set("search", params.search);
     if (params.sort) query.set("sort", params.sort);
     return this.request<AdminUserListResponse>(`/admin/users?${query}`, { signal });
@@ -1453,6 +1454,7 @@ export interface AdminUserListParams {
   per_page?: number;
   role?: number | null;
   active?: boolean | null;
+  emby?: "bound" | "unbound" | null;
   search?: string;
   sort?: string;
 }

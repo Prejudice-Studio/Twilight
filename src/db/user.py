@@ -671,6 +671,7 @@ class UserOperate:
         offset: int = 0,
         active_status: Optional[bool] = None,
         sort_by: Optional[str] = None,
+        has_emby: Optional[bool] = None,
     ) -> tuple[list[UserModel], int]:
         """分页 + 筛选 + 排序获取用户列表。
 
@@ -695,6 +696,16 @@ class UserOperate:
 
             if role is not None:
                 conditions.append(UserModel.ROLE == role)
+            if has_emby is True:
+                # 已绑定 Emby：EMBYID 非空且非空字符串
+                conditions.append(UserModel.EMBYID.isnot(None))
+                conditions.append(UserModel.EMBYID != '')
+            elif has_emby is False:
+                # 未绑定 Emby：EMBYID 为空或空字符串
+                from sqlalchemy import or_ as _or_emby
+                conditions.append(
+                    _or_emby(UserModel.EMBYID.is_(None), UserModel.EMBYID == '')
+                )
             if search:
                 like = f"%{search}%"
                 or_clauses = [UserModel.USERNAME.ilike(like)]
