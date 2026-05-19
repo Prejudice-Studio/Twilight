@@ -4,8 +4,7 @@ Twilight 当前主前端位于 `webui/`，技术栈为 Next.js + TypeScript + Ta
 
 ## 前端目录说明
 
-- `webui/`：主前端（Next.js 16，生产使用）
-- `webui/webui/`：历史 Vite 原型工程（默认不参与主流程）
+- `webui/`：主前端（Next.js 16，生产使用，唯一前端工程）
 
 ## 技术栈（主前端）
 

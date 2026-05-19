@@ -81,6 +81,10 @@ api_error.log
 /db/
 database.db
 
+# 配置文件备份目录（启动期 sweep + 管理员保存都会写入；按 TWILIGHT_CONFIG_BACKUP_RETENTION
+# 自动裁剪保留份数，但不应该入库）
+config_backups/
+
 # Uploads and temporary files
 uploads/
 tmp/
@@ -88,6 +92,7 @@ temp/
 .cache/
 *.tmp
 *.temp
+*.pid
 
 # Routes generated file
 routes.txt
@@ -108,28 +113,32 @@ desktop.ini
 *.p12
 
 # ==================== Frontend (Next.js/TypeScript) ====================
-# Dependencies
-webui/node_modules/
-webui/.pnp
-webui/.pnp.js
-webui/.turbo/
+# 用通用前缀，避免再有 webui/<sub>/ 子工程时漏配。next-env.d.ts 是
+# Next.js 官方建议提交的，不要加进来。
+node_modules/
+.pnp
+.pnp.js
+.turbo/
+.next/
+out/
+.eslintcache
+.env*.local
 
-# Next.js
-webui/.next/
-webui/out/
-webui/dist/
+# 通用 TypeScript / 构建器缓存（任何深度都忽略）
+**/tsconfig.tsbuildinfo
+**/*.tsbuildinfo
+.vite/
+.parcel-cache/
 
-# Production
-webui/build/
-
-# Misc
-webui/.eslintcache
-webui/.env*.local
+# OpenNext / Cloudflare Workers 部署中间产物
+.opennextjs/
+.wrangler/
 
 # Debug
-webui/npm-debug.log*
-webui/yarn-debug.log*
-webui/yarn-error.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # ==================== Build & Distribution ====================
 *.egg
@@ -180,11 +189,9 @@ routes.json
 openapi.json
 schema.dump
 
-# ==================== Frontend specific (additional) ====================
+# ==================== Frontend specific (legacy aliases) ====================
+# 上方已经按通用 glob 忽略；以下条目仅做兼容兜底，删除也无功能影响。
 webui/.next-env.d.ts.lock
-webui/tsconfig.tsbuildinfo
-webui/.opennextjs/
-webui/.wrangler/
 
 # ==================== Large media / sample files ====================
 sample/

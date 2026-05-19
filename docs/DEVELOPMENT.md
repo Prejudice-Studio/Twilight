@@ -89,6 +89,7 @@ Twilight/
 - **src/api/v1/** - REST API 接口实现，按功能分为多个蓝图
 - **src/services/** - 业务逻辑层，包含 Emby、Bangumi、调度等服务
 - **src/db/** - 数据库操作层，包含 ORM 模型和数据访问对象
+- **config_backups/** - 配置变更自动生成的轮转备份（已被 `.gitignore` 忽略；保留份数受 `TWILIGHT_CONFIG_BACKUP_RETENTION` 控制）
 - **tests/** - 可选测试目录（按需创建与维护）
 
 ## 关键架构决策
@@ -187,6 +188,55 @@ async def my_job(ctx: RunContext):
 
 前端 `webui/src/app/(main)/layout.tsx::normalizeBgImageValue` 会把裸 URL 包装成 `url("...")`，
 后端必须能识别这种包装形式。
+
+### 9. 配置文件自动整理（sweep）
+
+`src/config.py::sweep_config_toml` 在每次进程启动时自动跑一遍：
+
+1. **迁移**：把已废弃的 section/key（如 `[Signin].enabled` → `[SAR].signin_enabled`）搬到新归属
+2. **裁剪**：删除任何没有被 `BaseConfig` 子类声明的孤立 section / key
+3. **补齐**：把代码里声明但 toml 没写的字段按默认值补上
+4. **备份**：若有变更，写回前调 `backup_config_file()` 落档（详见 §10）
+
+新增配置项的步骤：
+
+1. 在对应 `XxxConfig` 类里加字段 + 默认值 + 注释
+2. 顶部 `config.toml` / `config.production.toml` 模板加注释 + 默认值（不必须，sweep 会自动补，但建议手工补让示例完整）
+3. 在 `src/api/v1/system.py` 的 schema 端点对应 section 里加 `{'key', 'label', 'type', 'description', 'value'}` 一行（前端会自动渲染为表单字段）
+4. 不要为废弃字段写"兼容读取"——直接在 `_LEGACY_SECTION_KEY_MIGRATIONS` 注册搬迁规则
+
+### 10. 配置文件备份
+
+`src/config.py::backup_config_file` 是统一的备份入口：
+
+- 写到 `config_backups/<filename>.<YYYYmmdd-HHMMSS>.<reason>.bak`，权限收紧 0o600
+- 同时维护一份 `config.toml.backup` 单文件副本（兼容旧手动恢复脚本）
+- 保留份数：默认 20，环境变量 `TWILIGHT_CONFIG_BACKUP_RETENTION` 覆盖；超过按 mtime 淘汰
+
+调用方：
+
+- 启动期 sweep（`reason='sweep'`）
+- `fill_missing_config_items`（`reason='fill-missing'`）
+- 管理员 PUT toml / schema 接口（`reason='manual'`）
+
+`config_backups/` 已加入 `.gitignore`，备份文件**含敏感字段**，请勿提交。
+
+### 11. API 速率限制
+
+`src/core/utils.py::rate_limit_check(namespace, key, *, max_requests, window_seconds)` 是统一限流器：
+
+- 单进程内存的滑动窗口，进程重启清零
+- 失败返回 `(False, retry_after_seconds)`，业务侧返回 `HTTP 429`
+- 维度任选：IP / UID / 业务 key（如绑定码、request_id）；多维度叠加用不同 `namespace`
+
+具体已启用的端点见 [BACKEND_API.md §3.1](./BACKEND_API.md#31-速率限制)。
+扩展时优先选择"防滥用价值高 + 误伤合法用户成本低"的端点，避免每个 GET 都套限速。
+
+### 12. Telegram 群成员花名册 + 退群封禁
+
+- 花名册（`src/db/telegram_roster.py::TelegramGroupRosterModel`）依赖被动观察：`chat_member` 事件 + 群消息 + 用户主动 `/bind` 时的成员探测。`TelegramMembershipService.check_user_in_groups(..., sync_roster=True)` 会在每次绑定时把当前成员状态同步进表，弥补"从未发言用户"的盲区。
+- `Telegram.ban_on_leave=True` 时，scheduler 巡检 (`enforce_group_membership`) 发现退群用户会调 `TelegramMembershipService.ban_user_permanently()` 在所有 `GROUP_ID` 群里永久 ban（不 unban）。永封模式下"重新入群识别"分支会被跳过。
+- 误判 = 不可逆，运维风险高，默认关闭。详见 [SECURITY.md §3](./SECURITY.md#3-telegram-相关安全)。
 
 ## 编码规范
 

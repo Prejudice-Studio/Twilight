@@ -35,6 +35,18 @@ cors_origins = ["https://app.example.com"]
 - 启用 Bot 内部回调时，必须配置强随机的 `Security.bot_internal_secret`。
 - Bot 与 API 分离部署时，建议显式配置 `Telegram.bind_confirm_api_url`。
 - 开启群组强制校验时，确保 Bot 在目标群有足够权限，避免误判。
+- **退群完全封禁模式（`Telegram.ban_on_leave`）**：
+  - 默认 `false`；开启后定时巡检发现退群用户会被 Bot 永久 `ban_chat_member`（不会自动解封），无法重新加入。
+  - 依赖 Bot 在每个 `GROUP_ID` 群里是管理员且具备"封禁成员"权限。
+  - 开启时巡检的"重新入群识别"分支会被跳过；如需放行某个被永封 ID，需手动在 TG 群里解封。
+  - 误判 = 不可逆，上线前请先以 `require_group_membership=true` + `ban_on_leave=false` 观察 1～2 周巡检日志。
+
+## 3.1 API 速率限制
+
+- 主要登录、注册、TG 绑定、密码/绑定相关接口都已启用滑动窗口限流（见 [BACKEND_API.md §3.1](./BACKEND_API.md#31-速率限制)）。
+- 配额维度：IP / UID / 业务 key（如绑定码、request_id）。
+- 命中后返回 `HTTP 429` + `retry_after` 提示，并写 `logger.warning`。
+- 配额是单进程内存的（`src/core/utils.py::_RATE_BUCKETS`），多 worker 部署下每个进程独立计数；如有进一步加固需求，可改为基于 Redis 的实现。
 
 ## 4. 多进程部署一致性
 
@@ -65,7 +77,14 @@ cors_origins = ["https://app.example.com"]
 - 管理员账号数量最小化，长期不使用的高权限账号及时停用。
 - Telegram 管理员 ID 仅配置必要人员。
 
-## 8. 上线前检查清单
+## 8. 配置文件自动备份
+
+- 启动期 `sweep_config_toml` 会自动迁移老 section、补齐缺失默认、删除孤立键，并在写回前备份到 `config_backups/<file>.<timestamp>.<reason>.bak`，权限收紧为 `0o600`。
+- 兼容旧逻辑：同时维护一份 `config.toml.backup` 单文件副本便于人工快速恢复。
+- 保留份数：默认 20 份，环境变量 `TWILIGHT_CONFIG_BACKUP_RETENTION` 可覆盖（`<=0` 表示不裁剪）。超出按 mtime 从旧到新淘汰。
+- 备份目录已加入 `.gitignore`，不要 commit。
+
+## 9. 上线前检查清单
 
 - [ ] 所有默认密钥/示例密钥已替换
 - [ ] `config.local.toml` 与 `.env` 未入库
@@ -73,3 +92,5 @@ cors_origins = ["https://app.example.com"]
 - [ ] HTTPS 与安全 Cookie 已启用
 - [ ] Bot 内部密钥已配置并验证
 - [ ] 关键日志可追溯但不泄密
+- [ ] 公开端点的速率限制阈值已按预期流量评估（[BACKEND_API.md §3.1](./BACKEND_API.md#31-速率限制)）
+- [ ] `Telegram.ban_on_leave` 评估过：要开就先确认 Bot 在每个群都有封禁权限，并准备好"误封解除"的运维流程

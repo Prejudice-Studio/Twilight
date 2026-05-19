@@ -109,6 +109,17 @@
 > 请配合 systemd / docker / supervisor 等具备自动拉起能力的方式启动，
 > 或等待后续版本完善。
 
+### 可选环境变量
+
+| 变量 | 用途 | 默认 |
+| ---- | ---- | ---- |
+| `TWILIGHT_CONFIG_FILE` | 主配置文件路径 | `<项目根>/config.toml` |
+| `TWILIGHT_CONFIG_LOCAL_FILE` | 本地覆盖配置（合并到主配置之上，已 `.gitignore`） | `<项目根>/config.local.toml` |
+| `TWILIGHT_CONFIG_BACKUP_RETENTION` | `config_backups/` 目录最多保留多少份历史 `.bak`；`<=0` 表示不裁剪 | `20` |
+
+> 启动期会自动迁移老 section、删孤立键、补缺失默认；任何变更前都会先备份到
+> `config_backups/`（权限 `0o600`），见 [SECURITY.md §8](./SECURITY.md#8-配置文件自动备份)。
+
 ## 获取帮助
 
 - 查看日志：`logs/twilight.log`

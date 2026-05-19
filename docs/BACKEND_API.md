@@ -85,8 +85,29 @@ Authorization: ApiKey <api_key>
 | 403 | 权限不足 / 账号或 API Key 被禁用 |
 | 404 | 资源不存在 |
 | 410 | 端点已弃用（如 `/emby/urls`，请改用文档指明的替代接口） |
-| 429 | 触发限流（如登录失败次数超阈值） |
+| 429 | 触发限流；响应 `message` 形如 `请求过于频繁，请在 N 秒后重试` |
 | 500 | 服务器内部错误 |
+
+### 3.1 速率限制
+
+为了防止暴力破解与公开端点被刷，部分接口启用了基于 IP / UID / 资源 key 的滑动窗口限流（实现：`src/core/utils.py::rate_limit_check`）。被限流时返回 HTTP `429`，响应体的 `message` 会包含建议的等待秒数。
+
+| 接口 | 维度 | 阈值 | 说明 |
+| ---- | ---- | ---- | ---- |
+| `POST /auth/login` 系列 | IP | 失败计数式 | 登录失败累计触发临时锁 IP，详见 `src/api/v1/auth.py::_check_login_rate_limit` |
+| `POST /users/register` | IP | 5 / 10 分钟 | 防批量注册 |
+| `GET  /users/check-available` | IP | 60 / 60 秒 | 防扫描可用用户名 |
+| `GET  /users/register/emby/status` | request_id + IP | 60/60s + 240/60s | Emby 注册队列轮询 |
+| `POST /users/telegram/register/bind-code` | IP | 5 / 10 分钟 | 生成注册绑定码 |
+| `GET  /users/telegram/register/bind-code/status` | code + IP | 60/60s + 240/60s | 注册绑定码轮询；防反复刷 |
+| `POST /users/me/telegram/bind-code` | UID | 5 / 10 分钟 | 已登录用户生成 TG 绑定码 |
+| `POST /users/me/telegram/unbind` | UID | 5 / 10 分钟 | 防恶意频繁解绑 |
+| `POST /users/me/telegram/rebind-request` | UID | 3 / 1 小时 | 换绑申请会进管理员队列，从严限制 |
+| `POST /users/regcode/check` | IP | 10 / 60 秒 | 防注册码枚举 |
+| `POST /invite/check` | IP | 见 `invite.py` | 邀请码校验 |
+| `POST /users/me/avatar/upload` 等上传 | UID | 10 / 60 秒 | 防滥用上传 |
+
+> 限速命中只写 `logger.warning`，不会写入 SecurityLog / login_history。
 
 ## 4. 模块总览
 
