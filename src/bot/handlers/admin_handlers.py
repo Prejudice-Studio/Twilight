@@ -1016,7 +1016,7 @@ def register(bot):
     def _format_group_user_info(user, tg_id: int | None, label: str) -> str:
         from src.core.utils import format_expire_time
 
-        lines = ["🔎 **用户查询**"]
+        lines = ["🔎 **用户信息**", ""]
         if user:
             role_map = {
                 Role.ADMIN.value: "管理员",
@@ -1025,21 +1025,20 @@ def register(bot):
                 Role.UNRECOGNIZED.value: "未注册",
             }
             lines += [
-                f"系统用户: `{_md_code(user.USERNAME)}`",
-                f"UID: `{user.UID}`",
-                f"角色: {role_map.get(user.ROLE, '未知')}",
-                f"状态: {'启用' if user.ACTIVE_STATUS else '禁用'}",
-                f"Telegram: {'已绑定' if user.TELEGRAM_ID else '未绑定'}",
-                f"Emby: {'已绑定' if user.EMBYID else '未绑定'}",
-                f"开通资格: {'有' if bool(getattr(user, 'PENDING_EMBY', False)) and not user.EMBYID else '无'}",
-                f"到期: {format_expire_time(user.EXPIRED_AT) if user.EMBYID else '未绑定 Emby'}",
+                f"👤 用户: `{_md_code(user.USERNAME)}`",
+                f"🆔 UID: `{user.UID}`",
+                f"👑 角色: {role_map.get(user.ROLE, '未知')}",
+                f"📊 状态: {'✅ 启用' if user.ACTIVE_STATUS else '❌ 禁用'}",
+                f"📱 Telegram: {'✅ 已绑定' if user.TELEGRAM_ID else '❌ 未绑定'}",
+                f"🎬 Emby: {'✅ 已绑定' if user.EMBYID else '❌ 未绑定'}",
+                f"🎟️ 开通资格: {'✅ 有' if bool(getattr(user, 'PENDING_EMBY', False)) and not user.EMBYID else '❌ 无'}",
+                f"⏰ 到期: {format_expire_time(user.EXPIRED_AT) if user.EMBYID else '未绑定 Emby'}",
             ]
         else:
             lines += [
-                f"Telegram 用户: `{_md_code(label or '未知')}`",
-                "系统用户: 未绑定 / 未找到",
+                f"👤 Telegram 用户: `{_md_code(label or '未知')}`",
+                "📦 系统用户: 未绑定 / 未找到",
             ]
-        lines.append("\n未展示密码、线路、Emby 用户名、Emby ID、Telegram ID 等隐私信息。")
         return "\n".join(lines)
 
     def _group_user_action_kb(token: str, *, has_user: bool, has_tg: bool, has_emby: bool, active: bool) -> InlineKeyboardMarkup:
@@ -1075,15 +1074,19 @@ def register(bot):
             "label": label,
         })
         if require_verify:
-            await update.message.reply_text(
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=
                 "匿名管理员指令已收到。请点击按钮验证管理员身份后查看。",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("验证管理员身份", callback_data=f"gadm:auth:{token}")]]),
             )
+            await safe_delete_message(update.message)
             return
 
         text = _format_group_user_info(user, tg_id, label)
-        await update.message.reply_text(
-            text,
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=text,
             reply_markup=_group_user_action_kb(
                 token,
                 has_user=bool(user),
@@ -1093,6 +1096,7 @@ def register(bot):
             ),
             parse_mode="Markdown",
         )
+        await safe_delete_message(update.message)
 
     async def cmd_twguser(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message:
