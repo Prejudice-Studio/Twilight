@@ -1464,7 +1464,7 @@ export interface UserInfo {
   expired_at?: string | number;  // 可能是时间戳或字符串，-1 表示永久
   emby_id?: string;
   emby_username?: string;  // 绑定的 Emby 用户名（与系统用户名独立）
-  emby_bound?: boolean;  // 后端判定的「真正绑定了 Emby」：EMBYID 非空且非 pending
+  emby_bound?: boolean;  // 后端判定的「已绑定 Emby」：EMBYID 非空
   avatar?: string;
   bgm_mode: boolean;
   created_at?: string | number;

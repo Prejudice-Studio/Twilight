@@ -465,8 +465,8 @@ async def get_emby_urls():
     user = getattr(g, "current_user", None)
     is_admin = bool(user and user.ROLE == Role.ADMIN.value)
     # 与 user_service.get_user_info / admin 列表用同一套口径：
-    # 「真正绑定 Emby」=有 EMBYID 且 PENDING_EMBY 为假；只要还在 pending 就视作未绑。
-    emby_bound = bool(user and user.EMBYID and not bool(getattr(user, "PENDING_EMBY", False)))
+    # EMBYID 非空即视为已绑定。历史数据可能残留 PENDING_EMBY=True，不能因此拒绝下发线路。
+    emby_bound = bool(user and user.EMBYID)
 
     # 注册码授予的待补建用户已具备开通资格，允许查看线路以完成后续配置；
     # 普通无码待激活账号仍不下发线路。

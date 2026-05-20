@@ -240,6 +240,15 @@ export default function SettingsPage() {
     setIsLatencyTesting(false);
   }, [embyLineItems, whitelistLineItems, testSingleLineLatency]);
 
+  const loadEmbyUrls = useCallback(async () => {
+    const res = await api.getEmbyUrls();
+    if (res.success && res.data) {
+      setEmbyLines(res.data.lines || []);
+      setWhitelistLines(res.data.whitelist_lines || []);
+      setLinesRequireEmby(Boolean(res.data.requires_emby_account));
+    }
+  }, []);
+
   const loadSettingsResource = useCallback(async () => {
     const settingsRes = await api.getMySettings();
     if (settingsRes.success && settingsRes.data) {
@@ -365,8 +374,9 @@ export default function SettingsPage() {
         setCompletePendingEmby(false);
         setEmbyUsername("");
         setEmbyPassword("");
-        loadData();
-        fetchUser();
+        await loadData();
+        await fetchUser();
+        await loadEmbyUrls();
       } else {
         toast({ title: completePendingEmby ? "开通失败" : "绑定失败", description: res.message, variant: "destructive" });
       }
@@ -384,8 +394,9 @@ export default function SettingsPage() {
       const res = await api.unbindEmbyAccount();
       if (res.success) {
         toast({ title: "解绑成功", variant: "success" });
-        loadData();
-        fetchUser();
+        await loadData();
+        await fetchUser();
+        await loadEmbyUrls();
       } else {
         toast({ title: "解绑失败", description: res.message, variant: "destructive" });
       }
@@ -494,16 +505,10 @@ export default function SettingsPage() {
     });
   };
 
-  // 初始加载线路
+  // 初始加载线路；绑定/解绑后也会因 user.emby_id 变化重新拉取，避免保留旧的“需绑定”状态。
   useEffect(() => {
-    api.getEmbyUrls().then((res) => {
-      if (res.success && res.data) {
-        setEmbyLines(res.data.lines);
-        setWhitelistLines(res.data.whitelist_lines || []);
-        setLinesRequireEmby(Boolean(res.data.requires_emby_account));
-      }
-    });
-  }, []);
+    void loadEmbyUrls();
+  }, [loadEmbyUrls, user?.emby_id, user?.role]);
 
   useEffect(() => {
     void fetchSystemInfo();

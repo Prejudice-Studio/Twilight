@@ -124,6 +124,34 @@ export default function DashboardPage() {
     void fetchSystemInfo();
   }, [fetchSystemInfo]);
 
+  const applyEmbyUrls = useCallback((data: {
+    lines?: Array<{ name: string; url: string }>;
+    whitelist_lines?: Array<{ name: string; url: string }>;
+    requires_emby_account?: boolean;
+  }) => {
+    const lines = (data.lines || []).map((line, index) => ({
+      key: `line:${index}:${line.url}`,
+      name: line.name || `线路 ${index + 1}`,
+      url: line.url,
+      scope: "line" as const,
+    }));
+    const wl = (data.whitelist_lines || []).map((line, index) => ({
+      key: `wl:${index}:${line.url}`,
+      name: line.name || `专属线路 ${index + 1}`,
+      url: line.url,
+      scope: "wl" as const,
+    }));
+    setLineSlots([...lines, ...wl]);
+    setLinesRequireEmby(Boolean(data.requires_emby_account));
+  }, []);
+
+  const loadEmbyUrls = useCallback(async () => {
+    const res = await api.getEmbyUrls();
+    if (res.success && res.data) {
+      applyEmbyUrls(res.data);
+    }
+  }, [applyEmbyUrls]);
+
   useEffect(() => {
     if (!embyRegisterStorageKey) return;
     try {
@@ -149,6 +177,7 @@ export default function DashboardPage() {
         setEmbyRegisterStatus(res.data);
         if (res.data.status === "success") {
           await fetchUser();
+          await loadEmbyUrls();
         }
       } else if (!res.success) {
         clearEmbyRegisterRequest();
@@ -156,7 +185,7 @@ export default function DashboardPage() {
     } catch {
       // Keep the local request for 15 minutes; transient errors should not hide status.
     }
-  }, [clearEmbyRegisterRequest, embyRegisterStored, fetchUser]);
+  }, [clearEmbyRegisterRequest, embyRegisterStored, fetchUser, loadEmbyUrls]);
 
   useEffect(() => {
     if (!embyRegisterStored) return;
@@ -188,20 +217,7 @@ export default function DashboardPage() {
       setEmbyInfo(embyRes.data);
     }
     if (urlsRes && urlsRes.success && urlsRes.data) {
-      const lines = (urlsRes.data.lines || []).map((line, index) => ({
-        key: `line:${index}:${line.url}`,
-        name: line.name || `线路 ${index + 1}`,
-        url: line.url,
-        scope: "line" as const,
-      }));
-      const wl = (urlsRes.data.whitelist_lines || []).map((line, index) => ({
-        key: `wl:${index}:${line.url}`,
-        name: line.name || `专属线路 ${index + 1}`,
-        url: line.url,
-        scope: "wl" as const,
-      }));
-      setLineSlots([...lines, ...wl]);
-      setLinesRequireEmby(Boolean(urlsRes.data.requires_emby_account));
+      applyEmbyUrls(urlsRes.data);
     }
     if (reqRes && reqRes.success && Array.isArray(reqRes.data)) {
       setMyRequests(reqRes.data);
@@ -210,7 +226,7 @@ export default function DashboardPage() {
       setRegisterAvailability(registerRes.data);
     }
     return true;
-  }, []);
+  }, [applyEmbyUrls]);
 
   const {
     isLoading,
@@ -437,6 +453,7 @@ export default function DashboardPage() {
         setEmbyUsername("");
         setEmbyPassword("");
         await fetchUser();
+        await loadEmbyUrls();
       } else {
         toast({ title: "使用失败", description: res.message, variant: "destructive" });
       }
@@ -536,6 +553,7 @@ export default function DashboardPage() {
                       variant: "success",
                     });
                     await fetchUser();
+                    await loadEmbyUrls();
                     return;
                   }
                   if (st === "failed") {
@@ -567,6 +585,7 @@ export default function DashboardPage() {
           setShowDirectRegisterDialog(false);
           setDirectEmbyPassword("");
           await fetchUser();
+          await loadEmbyUrls();
         }
       } else {
         toast({ title: "开通失败", description: res.message, variant: "destructive" });
