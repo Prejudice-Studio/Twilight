@@ -726,6 +726,32 @@ class ApiClient {
     });
   }
 
+  async updateFromGit(payload: {
+    repo_url: string;
+    branch?: string;
+    install_dependencies?: boolean;
+    restart_services?: boolean;
+  }) {
+    return this.request<{
+      project_root: string;
+      repo_url: string;
+      branch: string;
+      install_dependencies: boolean;
+      restart_scheduled: boolean;
+      services?: string[];
+      results: Array<{
+        command: string;
+        returncode: number;
+        stdout: string;
+        stderr: string;
+        duration_ms: number;
+      }>;
+    }>("/system/admin/update", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getAllApis() {
     return this.request<{ apis: Array<{ method: string; path: string; endpoint: string; full_path: string }>; total: number }>("/system/admin/apis");
   }

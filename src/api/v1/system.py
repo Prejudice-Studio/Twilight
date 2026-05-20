@@ -7,6 +7,12 @@
 from typing import Optional, Any
 from pathlib import Path
 import shutil
+import os
+import re
+import subprocess
+import sys
+import time
+from urllib.parse import urlparse
 
 from flask import Blueprint, request, g, send_file
 from sqlalchemy import text
@@ -40,6 +46,9 @@ import threading
 import mimetypes
 
 _reload_logger = logging.getLogger(__name__)
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_GIT_BRANCH_RE = re.compile(r"^[A-Za-z0-9._/-]{1,128}$")
 
 
 _CONFIG_CLASSES = [
@@ -98,6 +107,70 @@ def _schedule_process_restart(delay: float = 1.5) -> None:
 def _reload_runtime_config() -> None:
     """重新加载运行时配置类。"""
     _config_reload_runtime_config()
+
+
+def _validate_update_repo_url(repo_url: str) -> tuple[bool, str]:
+    raw = (repo_url or "").strip()
+    if not raw:
+        return False, "缺少 Git 仓库地址"
+    if any(ch.isspace() for ch in raw) or any(ord(ch) < 32 for ch in raw):
+        return False, "Git 仓库地址包含非法字符"
+    parsed = urlparse(raw)
+    if parsed.scheme != "https":
+        return False, "仅支持 https Git 仓库地址"
+    if not parsed.netloc:
+        return False, "Git 仓库地址格式不正确"
+    if parsed.username or parsed.password:
+        return False, "Git 仓库地址不能包含用户名或密码"
+    if not parsed.path or parsed.path in {"/", ""}:
+        return False, "Git 仓库地址缺少路径"
+    return True, ""
+
+
+def _validate_update_branch(branch: str) -> tuple[bool, str]:
+    value = (branch or "main").strip()
+    if not _GIT_BRANCH_RE.fullmatch(value):
+        return False, "分支名只能包含字母、数字、点、下划线、斜杠和短横线"
+    if value.startswith(("-", "/", ".")) or value.endswith(("/", ".")):
+        return False, "分支名格式不正确"
+    if ".." in value or "//" in value or "@{" in value:
+        return False, "分支名格式不正确"
+    return True, ""
+
+
+def _run_command(args: list[str], timeout: int = 120) -> dict:
+    started = time.time()
+    proc = subprocess.run(
+        args,
+        cwd=str(_PROJECT_ROOT),
+        text=True,
+        capture_output=True,
+        timeout=timeout,
+        shell=False,
+    )
+    return {
+        "command": " ".join(args),
+        "returncode": proc.returncode,
+        "stdout": (proc.stdout or "")[-8000:],
+        "stderr": (proc.stderr or "")[-8000:],
+        "duration_ms": int((time.time() - started) * 1000),
+    }
+
+
+def _schedule_systemd_restart(services: list[str], delay: float = 1.5) -> None:
+    def _restart():
+        time.sleep(max(0.1, delay))
+        try:
+            subprocess.Popen(
+                ["systemctl", "restart", *services],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except Exception as exc:  # pragma: no cover
+            _reload_logger.error("自动更新后重启 systemd 服务失败: %s", exc)
+
+    threading.Thread(target=_restart, daemon=True, name="twilight-systemd-restart").start()
 
 
 async def _apply_runtime_hot_reload() -> dict:
@@ -642,6 +715,117 @@ async def get_system_stats():
             },
             "regcodes": regcode_stats,
             "emby": emby_status,
+        },
+    )
+
+
+@system_bp.route("/admin/update", methods=["POST"])
+@require_auth
+@require_admin
+async def admin_update_from_git():
+    """从管理员指定的 Git 仓库拉取指定分支并重启 systemd 服务。"""
+    data = request.get_json(silent=True) or {}
+    repo_url = (data.get("repo_url") or "").strip()
+    branch = (data.get("branch") or "main").strip()
+    install_dependencies = parse_bool(data.get("install_dependencies"), default=True)
+    restart_services = parse_bool(data.get("restart_services"), default=True)
+
+    ok, msg = _validate_update_repo_url(repo_url)
+    if not ok:
+        return api_response(False, msg, code=400)
+    ok, msg = _validate_update_branch(branch)
+    if not ok:
+        return api_response(False, msg, code=400)
+    if not (_PROJECT_ROOT / ".git").is_dir():
+        return api_response(False, f"当前目录不是 Git 仓库: {_PROJECT_ROOT}", code=400)
+    if shutil.which("git") is None:
+        return api_response(False, "服务器未安装 git", code=500)
+
+    commands: list[list[str]] = [
+        ["git", "remote", "set-url", "origin", repo_url],
+        ["git", "fetch", "--prune", "origin", branch],
+        ["git", "checkout", branch],
+        ["git", "pull", "--ff-only", "origin", branch],
+    ]
+    if install_dependencies:
+        requirements = _PROJECT_ROOT / "requirements.txt"
+        if requirements.exists():
+            commands.append([sys.executable, "-m", "pip", "install", "-r", str(requirements)])
+
+    results = []
+    try:
+        for command in commands:
+            result = _run_command(command, timeout=300 if "pip" in command[0] else 120)
+            results.append(result)
+            if result["returncode"] != 0:
+                _reload_logger.error("自动更新命令失败: %s", result)
+                return api_response(
+                    False,
+                    "自动更新失败，请查看返回日志",
+                    {
+                        "project_root": str(_PROJECT_ROOT),
+                        "repo_url": repo_url,
+                        "branch": branch,
+                        "results": results,
+                    },
+                    code=500,
+                )
+    except subprocess.TimeoutExpired as exc:
+        return api_response(False, f"自动更新命令超时: {' '.join(exc.cmd)}", {"results": results}, code=500)
+    except Exception as exc:  # pragma: no cover
+        _reload_logger.exception("自动更新异常")
+        return api_response(False, f"自动更新异常: {exc}", {"results": results}, code=500)
+
+    services = ["twilight", "twilight-bot", "twilight-scheduler"]
+    restart_scheduled = False
+    if restart_services:
+        if os.name == "nt":
+            return api_response(
+                True,
+                "代码已更新；当前不是 Linux/systemd 环境，未自动重启服务",
+                {
+                    "project_root": str(_PROJECT_ROOT),
+                    "repo_url": repo_url,
+                    "branch": branch,
+                    "install_dependencies": install_dependencies,
+                    "restart_scheduled": False,
+                    "results": results,
+                },
+            )
+        if shutil.which("systemctl") is None:
+            return api_response(
+                True,
+                "代码已更新；未找到 systemctl，未自动重启服务",
+                {
+                    "project_root": str(_PROJECT_ROOT),
+                    "repo_url": repo_url,
+                    "branch": branch,
+                    "install_dependencies": install_dependencies,
+                    "restart_scheduled": False,
+                    "results": results,
+                },
+            )
+        _schedule_systemd_restart(services, delay=1.5)
+        restart_scheduled = True
+
+    _reload_logger.warning(
+        "管理员 %s 触发自动更新: repo=%s branch=%s restart=%s",
+        getattr(g.current_user, "USERNAME", None),
+        repo_url,
+        branch,
+        restart_scheduled,
+    )
+    return api_response(
+        True,
+        "代码已更新，服务即将重启" if restart_scheduled else "代码已更新",
+        {
+            "project_root": str(_PROJECT_ROOT),
+            "repo_url": repo_url,
+            "branch": branch,
+            "install_dependencies": install_dependencies,
+            "restart_scheduled": restart_scheduled,
+            "services": services if restart_scheduled else [],
+            "results": results,
         },
     )
 

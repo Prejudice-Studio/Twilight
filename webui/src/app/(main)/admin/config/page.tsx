@@ -29,6 +29,8 @@ import {
   BookOpen,
   Info,
   CircleDot,
+  Github,
+  GitPullRequest,
 } from "lucide-react";
 import {
   Card,
@@ -704,6 +706,12 @@ export default function AdminConfigPage() {
   );
   const [activeSection, setActiveSection] = useState("");
   const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [updateRepoUrl, setUpdateRepoUrl] = useState("https://github.com/Prejudice-Studio/Twilight.git");
+  const [updateBranch, setUpdateBranch] = useState("main");
+  const [updateInstallDeps, setUpdateInstallDeps] = useState(true);
+  const [updateRestartServices, setUpdateRestartServices] = useState(true);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [updateOutput, setUpdateOutput] = useState<string[]>([]);
 
   // 初始化时展开所有 sections
   useEffect(() => {
@@ -964,6 +972,46 @@ export default function AdminConfigPage() {
     }
   };
 
+  const handleGitUpdate = async () => {
+    setIsUpdating(true);
+    setUpdateOutput([]);
+    try {
+      const res = await api.updateFromGit({
+        repo_url: updateRepoUrl.trim(),
+        branch: updateBranch.trim() || "main",
+        install_dependencies: updateInstallDeps,
+        restart_services: updateRestartServices,
+      });
+      if (res.success) {
+        const logs = (res.data?.results || []).map((item) => {
+          const output = [item.stdout, item.stderr].filter(Boolean).join("\n").trim();
+          return `$ ${item.command}\nexit=${item.returncode} duration=${item.duration_ms}ms${output ? `\n${output}` : ""}`;
+        });
+        setUpdateOutput(logs);
+        toast({
+          title: "更新完成",
+          description: res.message || "代码已更新，服务将按设置重启",
+          variant: "success",
+        });
+      } else {
+        setUpdateOutput((res.data?.results || []).map((item) => `$ ${item.command}\n${item.stderr || item.stdout}`));
+        toast({
+          title: "更新失败",
+          description: res.message || "请查看命令输出",
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: "更新失败",
+        description: error.message || "请检查网络连接",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
   if (schemaError && tomlError) {
     return (
       <PageError
@@ -1005,6 +1053,10 @@ export default function AdminConfigPage() {
               <TabsTrigger value="toml" className="gap-1.5">
                 <FileText className="h-4 w-4" />
                 源文件编辑
+              </TabsTrigger>
+              <TabsTrigger value="update" className="gap-1.5">
+                <GitPullRequest className="h-4 w-4" />
+                在线更新
               </TabsTrigger>
             </TabsList>
           </div>
@@ -1313,6 +1365,89 @@ export default function AdminConfigPage() {
                 </CardContent>
               </Card>
             </motion.div>
+          </TabsContent>
+
+          <TabsContent value="update" className="mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Github className="h-5 w-5" />
+                  Git 自动更新
+                </CardTitle>
+                <CardDescription>
+                  从指定仓库拉取分支，安装依赖后自动重启 systemd 服务。请只填写可信仓库。
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                <Alert>
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertTitle>生产操作</AlertTitle>
+                  <AlertDescription>
+                    后端会执行 git pull --ff-only，并重启 twilight / twilight-bot / twilight-scheduler。若服务器有未提交代码改动，更新会失败而不会强制覆盖。
+                  </AlertDescription>
+                </Alert>
+
+                <div className="grid gap-4 md:grid-cols-[1fr_180px]">
+                  <div className="space-y-2">
+                    <Label htmlFor="update-repo-url">Git 仓库地址</Label>
+                    <Input
+                      id="update-repo-url"
+                      value={updateRepoUrl}
+                      onChange={(e) => setUpdateRepoUrl(e.target.value)}
+                      placeholder="https://github.com/Prejudice-Studio/Twilight.git"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="update-branch">分支</Label>
+                    <Input
+                      id="update-branch"
+                      value={updateBranch}
+                      onChange={(e) => setUpdateBranch(e.target.value)}
+                      placeholder="main"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="flex items-center justify-between rounded-lg border p-3">
+                    <span>
+                      <span className="block text-sm font-medium">安装 Python 依赖</span>
+                      <span className="text-xs text-muted-foreground">执行 pip install -r requirements.txt</span>
+                    </span>
+                    <Switch checked={updateInstallDeps} onCheckedChange={setUpdateInstallDeps} />
+                  </label>
+                  <label className="flex items-center justify-between rounded-lg border p-3">
+                    <span>
+                      <span className="block text-sm font-medium">自动重启服务</span>
+                      <span className="text-xs text-muted-foreground">systemctl restart 三个 Twilight 服务</span>
+                    </span>
+                    <Switch checked={updateRestartServices} onCheckedChange={setUpdateRestartServices} />
+                  </label>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={handleGitUpdate} disabled={isUpdating || !updateRepoUrl.trim()}>
+                    {isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <GitPullRequest className="mr-2 h-4 w-4" />}
+                    拉取并更新
+                  </Button>
+                  <a
+                    href="https://github.com/Prejudice-Studio/Twilight"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+                  >
+                    <Github className="h-4 w-4" />
+                    打开 GitHub
+                  </a>
+                </div>
+
+                {updateOutput.length > 0 && (
+                  <pre className="max-h-96 overflow-auto rounded-lg border bg-muted/50 p-4 text-xs whitespace-pre-wrap">
+                    {updateOutput.join("\n\n")}
+                  </pre>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
 

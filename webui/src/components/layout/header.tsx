@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { adminNavItems, userNavItems } from "@/components/layout/sidebar";
-import { Menu, Moon, Sparkles, Sun } from "lucide-react";
+import { Github, Menu, Moon, Sparkles, Sun } from "lucide-react";
 
 const SAFE_IMAGE_URL = /^(https?:\/\/|\/|data:image\/(png|jpe?g|gif|webp|avif|bmp)(;|,))/i;
 
@@ -100,6 +100,15 @@ export function Header() {
               </nav>
 
               <div className="mt-4 grid grid-cols-2 gap-2 border-t pt-4">
+                <a
+                  href="https://github.com/Prejudice-Studio/Twilight"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="col-span-2 flex h-11 items-center justify-center gap-2 rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+                >
+                  <Github className="h-4 w-4" />
+                  GitHub Project
+                </a>
                 <Button
                   variant="outline"
                   className="h-11 w-full"

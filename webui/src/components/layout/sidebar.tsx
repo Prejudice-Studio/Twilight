@@ -27,6 +27,7 @@ import {
   GitBranch,
   Network,
   Coins,
+  Github,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
@@ -249,6 +250,16 @@ export function Sidebar() {
         </nav>
 
         <div className="sidebar-footer">
+          <a
+            href="https://github.com/Prejudice-Studio/Twilight"
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center justify-center gap-2 rounded-full border border-border/70 bg-background/60 px-3 py-2 text-xs font-medium text-muted-foreground transition-all hover:bg-primary/10 hover:text-primary"
+          >
+            <Github className="h-4 w-4" />
+            GitHub Project
+          </a>
+
           <div className="profile-card">
             <Avatar className="h-10 w-10 border border-border/60">
               {safeProfileAvatar && <AvatarImage src={safeProfileAvatar} alt={user?.username} />}
