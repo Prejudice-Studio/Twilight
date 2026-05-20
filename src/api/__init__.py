@@ -5,6 +5,7 @@ API 模块
 """
 
 import os
+import logging
 
 from flask import Flask, jsonify, request
 
@@ -15,6 +16,28 @@ from src.core.utils import setup_logging, timestamp
 
 
 from flask_cors import CORS
+
+
+logger = logging.getLogger(__name__)
+
+
+def _log_fd_limit() -> None:
+    try:
+        import resource
+
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if soft < 4096:
+            logger.warning(
+                "进程 NOFILE 上限较低 soft=%s hard=%s；高并发下可能触发 Too many open files。"
+                "建议设置 LimitNOFILE=65535 或容器 ulimit nofile=65535:65535。",
+                soft,
+                hard,
+            )
+        else:
+            logger.info("进程 NOFILE 上限 soft=%s hard=%s", soft, hard)
+    except Exception:
+        # Windows / restricted environments may not provide resource.
+        pass
 
 
 def create_app() -> Flask:
@@ -69,6 +92,7 @@ def create_app() -> Flask:
     # 配置日志
     if Config.LOGGING:
         setup_logging(level=Config.LOG_LEVEL)
+    _log_fd_limit()
 
     # 兜底：直接运行 `uvicorn asgi:app` / `python main.py api` 时也启动定时任务。
     # start_backend_*.sh 已先起独立 scheduler；这里会因锁文件存在而跳过，避免重复调度。
