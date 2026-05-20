@@ -28,6 +28,7 @@
 ## 专题
 
 - [背景自定义](./BACKGROUND.md) — 用户自定义主题背景的实现
+- [Telegram Bot 命令](./TG_BOT_COMMANDS.md) — Bot 普通命令、管理员命令、群组管理工具
 - [邀请树 & 公告渲染](./INVITE_AND_ANNOUNCEMENTS.md) — 多级邀请森林、Markdown/BBCode 公告
 - [安全加固指南](./SECURITY.md) — 生产安全基线、密钥与部署检查清单
 - [安全与性能优化记录](./SECURITY_AND_PERFORMANCE_REVIEW.md) — 上传资源、注册队列、定时任务与管理接口加固
