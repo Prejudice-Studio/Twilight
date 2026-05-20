@@ -1,13 +1,22 @@
 # Twilight 后端 API 文档
 
-本文档为 Twilight 后端 API 的统一参考指南，采用模块化结构，覆盖认证、请求格式、错误码、常用接口与管理员功能。
+本文档为 Twilight 后端 API 的统一参考指南，覆盖认证、请求格式、错误码、核心接口与管理员功能。完整路由清单见 [API_INDEX.md](./API_INDEX.md)，API Key 专用接口见 [API_KEY_API.md](./API_KEY_API.md)。
 
 ## 1. 文档说明
 
 - Base URL：`http://localhost:5000/api/v1`
 - Swagger UI：`http://localhost:5000/api/v1/docs`
 - 格式：JSON 响应结构为 `success` + `message` + `data` + `timestamp`
-- 说明：接口变更优先以 Swagger 和后端实际返回为准。
+- 说明：接口变更优先以 Swagger、[API_INDEX.md](./API_INDEX.md) 和后端实际返回为准。
+
+### 1.1 文档分工
+
+| 文档 | 用途 |
+| ---- | ---- |
+| [BACKEND_API.md](./BACKEND_API.md) | 通用规范、认证、错误码、重点接口说明 |
+| [API_INDEX.md](./API_INDEX.md) | `/api/v1` 完整路由索引、认证级别、归属模块 |
+| [API_KEY_API.md](./API_KEY_API.md) | 外部 API Key 接入方式、权限矩阵、专用示例 |
+| `/api/v1/docs` | 运行时 Swagger UI，按当前代码自动生成 |
 
 ## 2. 认证与请求规范
 
@@ -124,6 +133,8 @@ Authorization: ApiKey <api_key>
 
 ## 4. 模块总览
 
+> 完整端点列表见 [API_INDEX.md](./API_INDEX.md)。本节只保留模块边界和维护口径。
+
 | 模块 | 路径前缀 | 说明 |
 | ---- | -------- | ---- |
 | Auth | `/auth` | 登录、会话、Token 刷新、API Key 管理 |
@@ -134,6 +145,22 @@ Authorization: ApiKey <api_key>
 | Stats | `/stats` | 播放统计 |
 | System | `/system` | 健康、系统信息、配置、路由列表 |
 | API Key | `/apikey` | 外部系统专用 API Key 接口 |
+
+### 4.1 命名与归属约定
+
+| 场景 | 约定 |
+| ---- | ---- |
+| 当前登录用户 | 使用 `/users/me/*`，不要新增 `/user/current/*` 一类别名 |
+| 管理用户 | 使用 `/admin/users/*` |
+| 系统配置管理 | 使用 `/system/admin/config/*` |
+| 定时任务管理 | 使用 `/admin/scheduler/*` |
+| 用户可见系统信息 | 使用 `/system/info` 或 `/system/config` |
+| Emby 线路下发 | 只使用 `/system/emby-urls`，按登录用户角色和 Emby 绑定状态判断 |
+| 上传头像/背景读取 | 只使用 `/users/assets/{avatars|backgrounds}/{filename}` |
+| 外部系统 API Key 调用 | 使用 `/apikey/*`，不混用登录 Token |
+| 废弃接口 | 保留时返回明确错误和替代路径，例如 `/emby/urls` 返回 410 |
+
+新增或修改接口时，需要同步更新 [API_INDEX.md](./API_INDEX.md)，如果接口有请求体、响应体、限流或安全注意事项，还需要更新本文对应章节。
 
 ## 5. Auth 模块
 

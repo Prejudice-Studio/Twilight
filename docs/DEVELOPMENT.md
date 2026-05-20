@@ -136,6 +136,8 @@ Bot 特殊规则：
 Emby 面板（`src/bot/handlers/emby_handlers.py`）只保留播放统计 / 密码说明 / 主菜单。
 新增 Bot 功能时不应直接泄露 Emby URL；如需暴露，应引导到网页端。
 
+群组管理员查询命令 `/twguser` 只能展示非隐私信息：本地用户名、UID、角色、启停状态、Telegram/Emby 是否绑定、开通资格和到期状态。禁止展示密码、线路、Emby 用户名、Emby ID、Telegram ID。群组内按钮回调必须重新校验点击者是否在 `Telegram.admin_id` 中；匿名管理员发出的命令只能先生成“验证管理员身份”按钮，由真实管理员点击后才展示查询结果和操作按钮。
+
 ### 5. `.gitignore` 中 `/db/` 必须有前导斜杠
 
 旧版 `db/` 模式会同时匹配根目录 `db/`（sqlite）与 `src/db/`（Python 包），
@@ -401,6 +403,9 @@ scalene --profile-interval 0.001 --html main.py api > profile.html
 3. 使用 `@require_auth` 或 `@require_admin` 装饰器进行认证
 4. 返回 `api_response()` 格式化的响应
 5. 在 `src/api/v1/__init__.py` 中注册蓝图
+6. 同步更新 `docs/API_INDEX.md`；如果有请求/响应体、限流、安全注意事项，同步更新 `docs/BACKEND_API.md`
+
+命名归属遵循 `docs/BACKEND_API.md#41-命名与归属约定`。不要为同一语义新增多个别名路径；兼容旧端点时必须在文档标记 `Deprecated` 并写明替代路径。
 
 示例：
 

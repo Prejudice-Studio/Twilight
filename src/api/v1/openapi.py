@@ -1,5 +1,79 @@
-from flask import current_app, jsonify
+import inspect
+import re
+
+from flask import current_app
 from src import __version__
+
+
+PUBLIC_PATHS = {
+    "/auth/login",
+    "/auth/login/telegram",
+    "/auth/login/apikey",
+    "/users/register",
+    "/users/register/emby/status",
+    "/users/check-available",
+    "/users/regcode/check",
+    "/users/telegram/register/bind-code",
+    "/users/telegram/register/bind-code/status",
+    "/system/info",
+    "/system/server-icon",
+    "/system/health",
+    "/announcements",
+    "/invite/config",
+    "/invite/check",
+    "/signin/config",
+}
+
+API_KEY_PREFIXES = ("/apikey",)
+
+TAG_NAMES = {
+    "auth": "Auth",
+    "users": "Users",
+    "emby": "Emby",
+    "admin": "Admin",
+    "media": "Media",
+    "stats": "Stats",
+    "security": "Security",
+    "batch": "Batch",
+    "system": "System",
+    "apikey": "API Key",
+    "announcements": "Announcements",
+    "invite": "Invite",
+    "signin": "Signin",
+}
+
+
+def _swagger_path(rule_path: str) -> str:
+    path = rule_path[7:] or "/"
+    return re.sub(r"<(?:\w+:)?(\w+)>", r"{\1}", path)
+
+
+def _path_parameters(swagger_path: str) -> list[dict]:
+    return [
+        {"name": param.strip("{}"), "in": "path", "required": True, "schema": {"type": "string"}}
+        for param in re.findall(r"{\w+}", swagger_path)
+    ]
+
+
+def _tag_from_endpoint(endpoint: str) -> str:
+    blueprint = endpoint.split(".", 1)[0]
+    return TAG_NAMES.get(blueprint, blueprint.capitalize())
+
+
+def _summary_for_endpoint(endpoint: str) -> str:
+    view_func = current_app.view_functions.get(endpoint)
+    doc = inspect.getdoc(view_func) if view_func else None
+    if doc:
+        return doc.splitlines()[0].strip()
+    return endpoint
+
+
+def _security_for_path(swagger_path: str) -> list[dict]:
+    if swagger_path in PUBLIC_PATHS:
+        return []
+    if swagger_path.startswith(API_KEY_PREFIXES):
+        return [{"ApiKeyAuth": []}]
+    return [{"BearerAuth": []}]
 
 
 def generate_openapi_spec():
@@ -27,36 +101,18 @@ def generate_openapi_spec():
         if rule.endpoint == "static" or not rule.rule.startswith("/api/v1"):
             continue
 
-        # 移除 /api/v1 前缀
-        path = rule.rule[7:]
-        if not path:
-            path = "/"
-
-        # 将 Flask 的路径参数转换成 OpenAPI 格式
-        # e.g., /users/<int:uid> -> /users/{uid}
-        import re
-
-        swagger_path = re.sub(r"<(?:\w+:)?(\w+)>", r"{\1}", path)
+        swagger_path = _swagger_path(rule.rule)
 
         if swagger_path not in spec["paths"]:
             spec["paths"][swagger_path] = {}
 
         for method in rule.methods:
             if method in ("GET", "POST", "PUT", "DELETE", "PATCH"):
-                # 确定 Tag
-                tag = rule.endpoint.split(".")[1] if "." in rule.endpoint else "Other"
-
-                # 确定参数
-                parameters = []
-                for param in re.findall(r"{\w+}", swagger_path):
-                    parameters.append(
-                        {"name": param.strip("{}"), "in": "path", "required": True, "schema": {"type": "string"}}
-                    )
-
                 spec["paths"][swagger_path][method.lower()] = {
-                    "tags": [tag.capitalize()],
-                    "summary": rule.endpoint,
-                    "parameters": parameters,
+                    "tags": [_tag_from_endpoint(rule.endpoint)],
+                    "summary": _summary_for_endpoint(rule.endpoint),
+                    "operationId": f"{rule.endpoint}.{method.lower()}",
+                    "parameters": _path_parameters(swagger_path),
                     "responses": {
                         "200": {
                             "description": "OK",
@@ -65,7 +121,7 @@ def generate_openapi_spec():
                             },
                         }
                     },
-                    "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
+                    "security": _security_for_path(swagger_path),
                 }
 
     return spec

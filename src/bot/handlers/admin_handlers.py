@@ -6,6 +6,7 @@
 """
 
 import logging
+import secrets
 import time
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
@@ -27,13 +28,15 @@ from src.services.user_service import UserService, RegisterResult
 from src.services.emby_service import EmbyService
 from src.services.emby import get_emby_client
 from src.core.utils import generate_random_string, generate_password, days_to_seconds, timestamp
-from src.config import Config, TelegramConfig
+from src.config import Config, TelegramConfig, RegisterConfig
 
 logger = logging.getLogger(__name__)
 
 # 会话状态存储（admin_id -> state dict）
 _admin_states = {}
 _ADMIN_STATE_TTL = 15 * 60
+_group_admin_contexts: dict[str, dict] = {}
+_GROUP_ADMIN_CONTEXT_TTL = 10 * 60
 
 
 def _set_admin_state(uid: int, state: dict):
@@ -61,6 +64,31 @@ def _clear_admin_state(uid: int) -> bool:
     return _admin_states.pop(uid, None) is not None
 
 
+def _new_group_admin_context(payload: dict) -> str:
+    now = int(time.time())
+    stale = [k for k, v in _group_admin_contexts.items() if now - int(v.get("ts", 0)) > _GROUP_ADMIN_CONTEXT_TTL]
+    for key in stale:
+        _group_admin_contexts.pop(key, None)
+    token = secrets.token_urlsafe(8)
+    _group_admin_contexts[token] = {**payload, "ts": now}
+    return token
+
+
+def _get_group_admin_context(token: str) -> dict | None:
+    payload = _group_admin_contexts.get(token)
+    if not payload:
+        return None
+    if int(time.time()) - int(payload.get("ts", 0)) > _GROUP_ADMIN_CONTEXT_TTL:
+        _group_admin_contexts.pop(token, None)
+        return None
+    return payload
+
+
+def _is_anonymous_group_command(update: Update) -> bool:
+    message = update.message
+    return bool(message and message.sender_chat and (not update.effective_user or not is_admin(update.effective_user.id)))
+
+
 def _render_custom_text(template: str) -> str:
     if not template:
         return ""
@@ -83,6 +111,7 @@ def register(bot):
             "🔧 **管理员命令**\n\n"
             "• /admin - 打开管理面板\n"
             "• /twfind <关键词> - 按系统用户名/UID/TGID/TG用户名/Emby标识搜索\n"
+            "• /twguser <用户> - 群组内查询用户；也可回复某人发送 /twguser\n"
             "• /twbindcheck [关键词] - 检查指定用户或全局 TG 绑定状态\n"
             "• /twforcebind <用户> <TGID> - 强制绑定 TG 到系统用户\n"
             "• /twsyncuser <用户> - 同步用户状态到 Emby\n"
@@ -948,6 +977,299 @@ def register(bot):
         ok, msg = await UserService.sync_user_to_emby(users[0])
         await update.message.reply_text(("✅ " if ok else "❌ ") + msg)
 
+    # ======================== 群组管理员工具 ========================
+
+    async def _resolve_group_target(update: Update, context: ContextTypes.DEFAULT_TYPE) -> tuple[object | None, int | None, str]:
+        reply = update.message.reply_to_message if update.message else None
+        if reply and reply.from_user:
+            tg_id = int(reply.from_user.id)
+            user = await UserOperate.get_user_by_telegram_id(tg_id)
+            label = reply.from_user.full_name or reply.from_user.username or str(tg_id)
+            return user, tg_id, label
+
+        query = " ".join(context.args or []).strip()
+        if not query:
+            return None, None, ""
+
+        if query.isdigit():
+            uid_user = await UserOperate.get_user_by_uid(int(query))
+            if uid_user:
+                return uid_user, uid_user.TELEGRAM_ID, uid_user.USERNAME
+            tg_user = await UserOperate.get_user_by_telegram_id(int(query))
+            if tg_user:
+                return tg_user, int(query), tg_user.USERNAME
+
+        users, _ = await UserOperate.get_all_users(include_inactive=True, search=query, limit=2, offset=0)
+        if len(users) == 1:
+            return users[0], users[0].TELEGRAM_ID, users[0].USERNAME
+        return None, None, query
+
+    def _format_group_user_info(user, tg_id: int | None, label: str) -> str:
+        from src.core.utils import format_expire_time
+
+        lines = ["🔎 **用户查询**"]
+        if user:
+            role_map = {
+                Role.ADMIN.value: "管理员",
+                Role.WHITE_LIST.value: "白名单",
+                Role.NORMAL.value: "普通用户",
+                Role.UNRECOGNIZED.value: "未注册",
+            }
+            lines += [
+                f"系统用户: `{_md_code(user.USERNAME)}`",
+                f"UID: `{user.UID}`",
+                f"角色: {role_map.get(user.ROLE, '未知')}",
+                f"状态: {'启用' if user.ACTIVE_STATUS else '禁用'}",
+                f"Telegram: {'已绑定' if user.TELEGRAM_ID else '未绑定'}",
+                f"Emby: {'已绑定' if user.EMBYID else '未绑定'}",
+                f"开通资格: {'有' if bool(getattr(user, 'PENDING_EMBY', False)) and not user.EMBYID else '无'}",
+                f"到期: {format_expire_time(user.EXPIRED_AT) if user.EMBYID else '未绑定 Emby'}",
+            ]
+        else:
+            lines += [
+                f"Telegram 用户: `{_md_code(label or '未知')}`",
+                "系统用户: 未绑定 / 未找到",
+            ]
+        lines.append("\n未展示密码、线路、Emby 用户名、Emby ID、Telegram ID 等隐私信息。")
+        return "\n".join(lines)
+
+    def _group_user_action_kb(token: str, *, has_user: bool, has_tg: bool, has_emby: bool, active: bool) -> InlineKeyboardMarkup:
+        rows = []
+        if has_user and not has_emby:
+            rows.append([InlineKeyboardButton("给予 Emby 开通资格", callback_data=f"gadm:act:grant:{token}")])
+        if has_user:
+            rows.append([
+                InlineKeyboardButton("禁用" if active else "启用", callback_data=f"gadm:act:{'disable' if active else 'enable'}:{token}"),
+                InlineKeyboardButton("删除", callback_data=f"gadm:act:delask:{token}"),
+            ])
+        if has_tg:
+            rows.append([
+                InlineKeyboardButton("踢出不封禁", callback_data=f"gadm:act:kick:{token}"),
+                InlineKeyboardButton("封禁", callback_data=f"gadm:act:ban:{token}"),
+            ])
+        rows.append([InlineKeyboardButton("刷新", callback_data=f"gadm:act:refresh:{token}")])
+        return InlineKeyboardMarkup(rows)
+
+    async def _send_group_user_card(update: Update, context: ContextTypes.DEFAULT_TYPE, *, require_verify: bool = False):
+        user, tg_id, label = await _resolve_group_target(update, context)
+        if not user and not tg_id:
+            await update.message.reply_text(
+                "用法: `/twguser <UID/用户名/TGID/关键词>`，也可以回复某人的消息发送 `/twguser`",
+                parse_mode="Markdown",
+            )
+            return
+
+        token = _new_group_admin_context({
+            "uid": user.UID if user else None,
+            "tg_id": int(tg_id) if tg_id else None,
+            "chat_id": update.effective_chat.id if update.effective_chat else None,
+            "label": label,
+        })
+        if require_verify:
+            await update.message.reply_text(
+                "匿名管理员指令已收到。请点击按钮验证管理员身份后查看。",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("验证管理员身份", callback_data=f"gadm:auth:{token}")]]),
+            )
+            return
+
+        text = _format_group_user_info(user, tg_id, label)
+        await update.message.reply_text(
+            text,
+            reply_markup=_group_user_action_kb(
+                token,
+                has_user=bool(user),
+                has_tg=bool(tg_id),
+                has_emby=bool(user and user.EMBYID),
+                active=bool(user and user.ACTIVE_STATUS),
+            ),
+            parse_mode="Markdown",
+        )
+
+    async def cmd_twguser(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not update.message:
+            return
+        if not update.effective_chat or update.effective_chat.type not in ("group", "supergroup"):
+            await update.message.reply_text("此命令用于群组管理。私聊请使用 /twfind 或 /userinfo")
+            return
+        if _is_anonymous_group_command(update):
+            await _send_group_user_card(update, context, require_verify=True)
+            return
+        actor_id = update.effective_user.id if update.effective_user else 0
+        if not is_admin(actor_id):
+            await update.message.reply_text("仅限管理员使用")
+            return
+        await _send_group_user_card(update, context)
+
+    async def cb_group_admin_auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        actor_id = update.effective_user.id if update.effective_user else 0
+        if not is_admin(actor_id):
+            await answer_callback_safe(query, "仅限管理员", show_alert=True)
+            return
+        token = (query.data or "").split(":")[-1]
+        payload = _get_group_admin_context(token)
+        if not payload:
+            await answer_callback_safe(query, "操作已过期", show_alert=True)
+            return
+        user = await UserOperate.get_user_by_uid(payload.get("uid")) if payload.get("uid") else None
+        text = _format_group_user_info(user, payload.get("tg_id"), payload.get("label") or "")
+        await answer_callback_safe(query)
+        await safe_edit_message(
+            query.message,
+            text,
+            reply_markup=_group_user_action_kb(
+                token,
+                has_user=bool(user),
+                has_tg=bool(payload.get("tg_id")),
+                has_emby=bool(user and user.EMBYID),
+                active=bool(user and user.ACTIVE_STATUS),
+            ),
+        )
+
+    async def cb_group_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        actor_id = update.effective_user.id if update.effective_user else 0
+        if not is_admin(actor_id):
+            await answer_callback_safe(query, "仅限管理员", show_alert=True)
+            return
+        parts = (query.data or "").split(":")
+        if len(parts) < 4:
+            await answer_callback_safe(query, "参数错误", show_alert=True)
+            return
+        action, token = parts[2], parts[3]
+        payload = _get_group_admin_context(token)
+        if not payload:
+            await answer_callback_safe(query, "操作已过期", show_alert=True)
+            return
+
+        user = await UserOperate.get_user_by_uid(payload.get("uid")) if payload.get("uid") else None
+        tg_id = payload.get("tg_id")
+        label = payload.get("label") or "用户"
+        chat_id = payload.get("chat_id") or (query.message.chat_id if query.message else None)
+
+        if action == "refresh":
+            text = _format_group_user_info(user, tg_id, label)
+            await answer_callback_safe(query, "已刷新")
+            await safe_edit_message(
+                query.message,
+                text,
+                reply_markup=_group_user_action_kb(
+                    token,
+                    has_user=bool(user),
+                    has_tg=bool(tg_id),
+                    has_emby=bool(user and user.EMBYID),
+                    active=bool(user and user.ACTIVE_STATUS),
+                ),
+            )
+            return
+
+        if action == "delask":
+            if not user:
+                await answer_callback_safe(query, "未找到本地用户", show_alert=True)
+                return
+            await answer_callback_safe(query)
+            await safe_edit_message(
+                query.message,
+                f"确认删除本地用户 `{_md_code(user.USERNAME)}`？\n\n将同时尝试删除其 Emby 账号；此操作不可恢复。",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("确认删除", callback_data=f"gadm:act:delete:{token}")],
+                    [InlineKeyboardButton("取消", callback_data=f"gadm:act:refresh:{token}")],
+                ]),
+            )
+            return
+
+        if action in {"grant", "disable", "enable", "delete"} and not user:
+            await answer_callback_safe(query, "未找到本地用户", show_alert=True)
+            return
+        if user and user.ROLE == Role.ADMIN.value and user.TELEGRAM_ID != actor_id and action in {"disable", "delete", "ban"}:
+            await answer_callback_safe(query, "不允许操作其他管理员", show_alert=True)
+            return
+
+        message = "操作完成"
+        if action == "grant":
+            if user.EMBYID:
+                await answer_callback_safe(query, "该用户已有 Emby 账号", show_alert=True)
+                return
+            user.PENDING_EMBY = True
+            user.PENDING_EMBY_DAYS = int(RegisterConfig.EMBY_DIRECT_REGISTER_DAYS or 30)
+            if not user.ACTIVE_STATUS:
+                user.ACTIVE_STATUS = True
+            await UserOperate.update_user(user)
+            message = "已授予 Emby 开通资格，用户前往 Web 即可创建账号"
+        elif action == "disable":
+            if user.EMBYID:
+                try:
+                    await get_emby_client().set_user_enabled(user.EMBYID, False)
+                except Exception as exc:
+                    logger.warning("群组禁用 Emby 用户失败: %s", exc)
+            user.ACTIVE_STATUS = False
+            await UserOperate.update_user(user)
+            message = "已禁用用户"
+        elif action == "enable":
+            if user.EMBYID:
+                try:
+                    await get_emby_client().set_user_enabled(user.EMBYID, True)
+                except Exception as exc:
+                    logger.warning("群组启用 Emby 用户失败: %s", exc)
+            user.ACTIVE_STATUS = True
+            await UserOperate.update_user(user)
+            message = "已启用用户"
+        elif action == "delete":
+            ok, msg = await UserService.delete_user(user, delete_emby=True)
+            _group_admin_contexts.pop(token, None)
+            await answer_callback_safe(query, msg if ok else "删除失败", show_alert=not ok)
+            await safe_edit_message(query.message, ("✅ " if ok else "❌ ") + msg)
+            return
+        elif action == "kick":
+            if not tg_id or not chat_id:
+                await answer_callback_safe(query, "缺少 Telegram 用户或群组信息", show_alert=True)
+                return
+            try:
+                await context.bot.ban_chat_member(chat_id=chat_id, user_id=int(tg_id))
+                await context.bot.unban_chat_member(chat_id=chat_id, user_id=int(tg_id), only_if_banned=True)
+            except Exception as exc:
+                logger.warning("群组踢出用户失败: %s", exc)
+                await answer_callback_safe(query, "踢出失败，请确认 Bot 有封禁权限", show_alert=True)
+                return
+            message = "已踢出用户（未封禁）"
+        elif action == "ban":
+            if not tg_id or not chat_id:
+                await answer_callback_safe(query, "缺少 Telegram 用户或群组信息", show_alert=True)
+                return
+            try:
+                await context.bot.ban_chat_member(chat_id=chat_id, user_id=int(tg_id))
+            except Exception as exc:
+                logger.warning("群组封禁用户失败: %s", exc)
+                await answer_callback_safe(query, "封禁失败，请确认 Bot 有封禁权限", show_alert=True)
+                return
+            if user:
+                user.ACTIVE_STATUS = False
+                if user.EMBYID:
+                    try:
+                        await get_emby_client().set_user_enabled(user.EMBYID, False)
+                    except Exception as exc:
+                        logger.warning("群组封禁时禁用 Emby 用户失败: %s", exc)
+                await UserOperate.update_user(user)
+            message = "已封禁用户"
+        else:
+            await answer_callback_safe(query, "未知操作", show_alert=True)
+            return
+
+        user = await UserOperate.get_user_by_uid(user.UID) if user else None
+        text = _format_group_user_info(user, tg_id, label) + f"\n\n✅ {message}"
+        await answer_callback_safe(query, message)
+        await safe_edit_message(
+            query.message,
+            text,
+            reply_markup=_group_user_action_kb(
+                token,
+                has_user=bool(user),
+                has_tg=bool(tg_id),
+                has_emby=bool(user and user.EMBYID),
+                active=bool(user and user.ACTIVE_STATUS),
+            ),
+        )
+
     # ======================== 注册处理器 ========================
 
     # 命令
@@ -960,6 +1282,7 @@ def register(bot):
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("userinfo", cmd_userinfo))
     app.add_handler(CommandHandler("twfind", cmd_twfind))
+    app.add_handler(CommandHandler("twguser", cmd_twguser))
     app.add_handler(CommandHandler("twbindcheck", cmd_twbindcheck))
     app.add_handler(CommandHandler("twforcebind", cmd_twforcebind))
     app.add_handler(CommandHandler("twsyncuser", cmd_twsyncuser))
@@ -992,6 +1315,10 @@ def register(bot):
     app.add_handler(CallbackQueryHandler(cb_adm_emby_users, pattern="^adm_emby_users$"))
     app.add_handler(CallbackQueryHandler(cb_adm_emby_cleanup, pattern="^adm_emby_cleanup$"))
     app.add_handler(CallbackQueryHandler(cb_adm_emby_cleanup_confirm, pattern="^adm_emby_cleanup_confirm$"))
+
+    # 群组管理员工具
+    app.add_handler(CallbackQueryHandler(cb_group_admin_auth, pattern=r"^gadm:auth:"))
+    app.add_handler(CallbackQueryHandler(cb_group_admin_action, pattern=r"^gadm:act:"))
 
     # noop
     app.add_handler(CallbackQueryHandler(lambda u, c: answer_callback_safe(u.callback_query), pattern="^noop$"))

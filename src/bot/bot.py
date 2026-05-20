@@ -168,6 +168,7 @@ class TelegramBot:
         "stats",
         "userinfo",
         "twfind",
+        "twguser",
         "twbindcheck",
         "twforcebind",
         "twsyncuser",
@@ -214,6 +215,8 @@ class TelegramBot:
         "adm_userdetail:",
         "adm_renew:",
         "adm_reggen:",
+        "gadm:auth:",
+        "gadm:act:",
     )
 
     def __init__(self):
