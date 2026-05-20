@@ -51,13 +51,14 @@ type MaybeStartViewTransition = {
   startViewTransition?: (updateCallback: () => void | Promise<void>) => ViewTransitionLike;
 };
 
-const SAFE_IMAGE_URL = /^(https?:\/\/|\/|data:image\/|blob:)/i;
+const SAFE_IMAGE_URL = /^(https?:\/\/|\/|data:image\/(png|jpe?g|gif|webp|avif|bmp)(;|,)|blob:|[a-zA-Z]:[\\/])/i;
 
 function sanitizeImageUrl(url?: string | null): string | undefined {
   if (!url) return undefined;
   const value = url.trim();
   if (!value) return undefined;
   if (!SAFE_IMAGE_URL.test(value)) return undefined;
+  if (/^[a-zA-Z]:[\\/]/.test(value)) return `/api/v1/system/server-icon`;
   return value;
 }
 
@@ -265,12 +266,13 @@ export function Sidebar() {
             <Button
               type="button"
               variant="outline"
-              className="h-10"
+              className="h-10 justify-start gap-2 overflow-hidden rounded-full border-border/70 bg-background/60 px-3 transition-all hover:bg-primary/10 hover:text-primary"
               onClick={toggleTheme}
               title={`当前主题：${currentTheme === "dark" ? "暗色" : "浅色"} · 点击切换`}
               aria-label="切换暗色 / 浅色主题"
             >
               {currentTheme === "dark" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+              <span className="text-xs font-medium">{currentTheme === "dark" ? "暗色" : "浅色"}</span>
             </Button>
             <Button type="button" variant="outline" className="h-10" onClick={() => void logout()}>
               <LogOut className="h-4 w-4" />

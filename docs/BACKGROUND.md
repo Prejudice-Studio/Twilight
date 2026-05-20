@@ -36,8 +36,8 @@
 - 跨域图片需服务器支持 CORS
 - 上传文件最大 5MB
 - 切换主题时背景自动切换
-- 后端接受的 URL 格式：站内相对路径 `/uploads/...`、裸 `http(s)://` URL、
-  `url("...")` CSS 包装、`linear-gradient(...)` 等 CSS 背景函数都可以
+- 后端接受的 URL 格式：受控站内资源 `/api/v1/users/assets/...`、兼容旧数据的 `/uploads/...`、裸 `http(s)://` URL、`url("...")` CSS 包装、CSS 渐变函数
+- 上传后的图片通过已登录接口读取，不再直接暴露整个 `uploads` 目录
 
 ---
 
@@ -78,7 +78,7 @@ Content-Type: multipart/form-data
 
 参数：`file`（图片文件，≤5MB）、`type`（`"light"` 或 `"dark"`）
 
-返回：`{ "url": "/uploads/backgrounds/abc123.jpg", "type": "light", "filename": "abc123.jpg" }`
+返回：`{ "url": "/api/v1/users/assets/backgrounds/abc123.jpg", "type": "light", "filename": "abc123.jpg" }`
 
 ### 删除背景配置
 
@@ -105,7 +105,7 @@ Authorization: Bearer {token}
 }
 ```
 
-上传的图片文件存储在 `./uploads/backgrounds/`，通过 `/uploads/backgrounds/{filename}` 访问。
+上传的图片文件存储在 `./uploads/backgrounds/`，通过 `/api/v1/users/assets/backgrounds/{filename}` 受控访问。
 
 ### 限制
 
@@ -131,21 +131,13 @@ class APIConfig(BaseConfig):
 
 ### 生产环境
 
-#### Nginx
+#### 上传文件访问
 
-```nginx
-location /uploads/ {
-    alias /path/to/project/uploads/;
-    expires 30d;
-    add_header Cache-Control "public, immutable";
-}
-```
+不要在 Nginx 中直接 `alias /uploads/`。由后端 `/api/v1/users/assets/{avatars|backgrounds}/{filename}` 做路径校验、登录鉴权与 MIME 限制。
 
 #### 定期清理
 
-```bash
-find uploads/backgrounds -type f -mtime +90 -delete
-```
+系统内置定时任务“未使用头像/背景图片清理”，每天清理未被任何用户引用且超过 24 小时宽限期的上传文件。
 
 ### 故障排除
 

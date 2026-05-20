@@ -545,10 +545,23 @@ class UserOperate:
 
     @staticmethod
     async def get_emby_bound_users_count() -> int:
-        """获取当前已绑定 Emby 的用户数量（EMBYID 非空）。"""
+        """获取当前占用 Emby 名额的用户数量。
+
+        已创建 Emby 账号与已获得注册码资格但尚未补建 Emby 的用户都占用名额，
+        避免用户关掉页面后留下的 PENDING_EMBY 资格绕过上限。
+        """
+        from sqlalchemy import or_
+
         async with UsersSessionFactory() as session:
             result = await session.execute(
-                select(func.count()).select_from(UserModel).where(UserModel.EMBYID.is_not(None), UserModel.EMBYID != "")
+                select(func.count())
+                .select_from(UserModel)
+                .where(
+                    or_(
+                        UserModel.EMBYID.is_not(None) & (UserModel.EMBYID != ""),
+                        UserModel.PENDING_EMBY == True,
+                    )
+                )
             )
             return result.scalar_one()
 
@@ -704,7 +717,7 @@ class UserOperate:
         :param include_inactive: 兼容字段。``active_status`` 未传时回退使用它：
                                  False（默认）→ 仅活跃，True → 不限制。
         :param role: 角色过滤，传 ``Role.value``。
-        :param search: 模糊匹配 ``UID`` / ``USERNAME`` / ``TELEGRAM_ID``。
+        :param search: 模糊匹配 ``UID`` / ``USERNAME`` / ``EMAIL`` / ``EMBYID`` / ``TELEGRAM_ID`` / ``OTHER`` 缓存信息。
         :param active_status: 显式启停过滤。None=不过滤；True=仅启用；False=仅禁用。
         :param sort_by: 排序字段，形如 ``uid_desc`` / ``username_asc`` / ``register_time_desc`` 等。
         :return: ``(users, total)``。
@@ -723,18 +736,30 @@ class UserOperate:
             if role is not None:
                 conditions.append(UserModel.ROLE == role)
             if has_emby is True:
-                # 已绑定 Emby：EMBYID 非空且非空字符串
-                conditions.append(UserModel.EMBYID.isnot(None))
-                conditions.append(UserModel.EMBYID != "")
+                # 占用 Emby 名额：已绑定或持有待补建资格
+                from sqlalchemy import or_ as _or_emby
+
+                conditions.append(
+                    _or_emby(
+                        UserModel.EMBYID.isnot(None) & (UserModel.EMBYID != ""),
+                        UserModel.PENDING_EMBY == True,
+                    )
+                )
             elif has_emby is False:
-                # 未绑定 Emby：EMBYID 为空或空字符串
+                # 未占用 Emby 名额：未绑定且无待补建资格
                 from sqlalchemy import or_ as _or_emby
 
                 conditions.append(_or_emby(UserModel.EMBYID.is_(None), UserModel.EMBYID == ""))
+                conditions.append(_or_emby(UserModel.PENDING_EMBY.is_(None), UserModel.PENDING_EMBY != True))
             if search:
                 escaped = UserOperate._escape_like_pattern(search)
                 like = f"%{escaped}%"
-                or_clauses = [UserModel.USERNAME.ilike(like, escape="\\")]
+                or_clauses = [
+                    UserModel.USERNAME.ilike(like, escape="\\"),
+                    UserModel.EMAIL.ilike(like, escape="\\"),
+                    UserModel.EMBYID.ilike(like, escape="\\"),
+                    UserModel.OTHER.ilike(like, escape="\\"),
+                ]
                 if search.isdigit():
                     try:
                         as_int = int(search)

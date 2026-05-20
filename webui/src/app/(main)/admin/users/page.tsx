@@ -20,6 +20,7 @@ import {
   UserCheck,
   CalendarClock,
   Send,
+  Unlink,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -74,6 +75,7 @@ export default function AdminUsersPage() {
   // Dialog states
   const [renewOpen, setRenewOpen] = useState(false);
   const [renewDays, setRenewDays] = useState("30");
+  const [renewPermanent, setRenewPermanent] = useState(false);
   const [selectedUser, setSelectedUser] = useState<UserInfo | null>(null);
   const [isActionLoading, setIsActionLoading] = useState(false);
   
@@ -319,11 +321,11 @@ export default function AdminUsersPage() {
   };
 
   const handleRenew = async () => {
-    if (!selectedUser || !renewDays) return;
+    if (!selectedUser || (!renewPermanent && !renewDays)) return;
 
     setIsActionLoading(true);
     try {
-      const res = await api.renewUser(selectedUser.uid, parseInt(renewDays));
+      const res = await api.renewUser(selectedUser.uid, renewPermanent ? -1 : parseInt(renewDays, 10));
       if (res.success) {
         toast({ title: "续期成功", variant: "success" });
         setRenewOpen(false);
@@ -450,6 +452,71 @@ export default function AdminUsersPage() {
       toast({ title: "绑定失败", description: error.message, variant: "destructive" });
     } finally {
       setBindSubmitting(false);
+    }
+  };
+
+  const handleForceUnbind = async (user: UserInfo) => {
+    const scope = await confirmAction({
+      title: `强制解绑 ${user.username}`,
+      description: "仅解除本地绑定关系，不删除 Telegram/Emby 外部账号。",
+      tone: "warning",
+      actions: [
+        { label: "解绑 TG", value: "telegram", variant: "outline" },
+        { label: "解绑 Emby", value: "emby", variant: "outline" },
+        { label: "全部解绑", value: "both", variant: "destructive" },
+      ],
+    });
+    if (!scope) return;
+    try {
+      const res = await api.forceUnbindUser(user.uid, scope as "telegram" | "emby" | "both");
+      if (res.success) {
+        toast({ title: "解绑完成", description: res.message, variant: "success" });
+        invalidateUsersCache();
+        await loadUsers();
+      } else {
+        toast({ title: "解绑失败", description: res.message, variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "解绑失败", description: err.message || "网络异常", variant: "destructive" });
+    }
+  };
+
+  const handleSyncBindings = async (options: { uid?: number; currentFilter?: boolean } = {}) => {
+    const ok = await confirmAction({
+      title: options.uid ? "同步该用户绑定状态" : options.currentFilter ? "同步当前筛选用户" : "同步所有用户",
+      description: "会检查 TG/Emby 绑定，清理非法/重复 TGID 与失效 EmbyID，并同步 Emby 启停状态。",
+      tone: "warning",
+      confirmLabel: "开始同步",
+    });
+    if (!ok) return;
+    const filter: { role?: number; active?: boolean; emby?: "bound" | "unbound"; search?: string } = {};
+    if (options.currentFilter) {
+      if (roleFilter !== "all") filter.role = Number(roleFilter);
+      if (activeFilter !== "all") filter.active = activeFilter === "true";
+      if (embyFilter === "bound") filter.emby = "bound";
+      else if (embyFilter === "unbound") filter.emby = "unbound";
+      if (search.trim()) filter.search = search.trim();
+    }
+    try {
+      const res = await api.syncUserBindings({
+        scope: "both",
+        uid: options.uid,
+        filter: options.uid ? undefined : options.currentFilter ? filter : undefined,
+        repair: true,
+      });
+      if (res.success && res.data) {
+        toast({
+          title: "同步完成",
+          description: `匹配 ${res.data.matched}，TG修复 ${res.data.telegram_repaired}，Emby修复 ${res.data.emby_repaired}，失败 ${res.data.failed.length}`,
+          variant: res.data.failed.length ? "default" : "success",
+        });
+        invalidateUsersCache();
+        await loadUsers();
+      } else {
+        toast({ title: "同步失败", description: res.message, variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "同步失败", description: err.message || "网络异常", variant: "destructive" });
     }
   };
 
@@ -878,6 +945,8 @@ export default function AdminUsersPage() {
         <DropdownMenuItem
           onClick={() => {
             setSelectedUser(user);
+            setRenewPermanent(false);
+            setRenewDays("30");
             setRenewOpen(true);
           }}
         >
@@ -891,6 +960,14 @@ export default function AdminUsersPage() {
         <DropdownMenuItem onClick={() => handleOpenBindEmby(user)}>
           <Link2 className="mr-2 h-4 w-4" />
           绑定 Emby
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => handleSyncBindings({ uid: user.uid })}>
+          <RefreshCw className="mr-2 h-4 w-4" />
+          同步绑定状态
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => handleForceUnbind(user)}>
+          <Unlink className="mr-2 h-4 w-4" />
+          强制解绑
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => handleToggleActive(user)}>
@@ -967,6 +1044,20 @@ export default function AdminUsersPage() {
           >
             <UserCheck className="mr-2 h-4 w-4" />
             批量启用禁用账号
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => void handleSyncBindings({ currentFilter: true })}
+          >
+            <RefreshCw className="mr-2 h-4 w-4" />
+            同步当前筛选
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => void handleSyncBindings()}
+          >
+            <RefreshCw className="mr-2 h-4 w-4" />
+            同步全部绑定
           </Button>
           <Button
             variant="outline"
@@ -1845,7 +1936,10 @@ export default function AdminUsersPage() {
       </Dialog>
 
       {/* Renew Dialog */}
-      <Dialog open={renewOpen} onOpenChange={setRenewOpen}>
+      <Dialog open={renewOpen} onOpenChange={(open) => {
+        setRenewOpen(open);
+        if (!open) setRenewPermanent(false);
+      }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>用户续期</DialogTitle>
@@ -1861,8 +1955,18 @@ export default function AdminUsersPage() {
                 placeholder="输入续期天数"
                 value={renewDays}
                 onChange={(e) => setRenewDays(e.target.value)}
+                disabled={renewPermanent}
               />
             </div>
+            <label className="flex items-center gap-2 rounded-md border bg-muted/30 p-3 text-sm">
+              <input
+                type="checkbox"
+                checked={renewPermanent}
+                onChange={(e) => setRenewPermanent(e.target.checked)}
+                className="h-4 w-4"
+              />
+              设置为永久有效
+            </label>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setRenewOpen(false)}>

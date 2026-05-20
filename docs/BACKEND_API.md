@@ -107,6 +107,8 @@ Authorization: ApiKey <api_key>
 | `POST /invite/check` | IP | 见 `invite.py` | 邀请码校验 |
 | `POST /users/me/avatar/upload` 等上传 | UID | 10 / 60 秒 | 防滥用上传 |
 
+上传后的头像/背景通过 `GET /users/assets/{avatars|backgrounds}/{filename}` 读取。该接口要求登录，并校验路径、文件名和当前用户引用关系；不要直接公开 `/uploads` 目录。
+
 > 限速命中只写 `logger.warning`，不会写入 SecurityLog / login_history。
 
 #### `bind-code/status` 的三层防御

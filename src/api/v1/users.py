@@ -14,7 +14,7 @@ from typing import Any
 import time as _time
 import secrets as _secrets
 import string as _string
-from flask import Blueprint, request, g
+from flask import Blueprint, request, g, send_file
 
 from src.api.v1.auth import require_auth, api_response
 from src.db.user import UserOperate, Role, TelegramBindCodeOperate
@@ -1187,6 +1187,7 @@ async def get_telegram_status():
 
     pending_request = await UserService.get_telegram_rebind_request(user.UID)
     has_pending_rebind_request = bool(pending_request and pending_request.STATUS == "pending")
+    can_change = bool(user.TELEGRAM_ID) and not has_pending_rebind_request
     return api_response(
         True,
         "获取成功",
@@ -1197,7 +1198,7 @@ async def get_telegram_status():
             "telegram_username": telegram_username,  # Telegram 用户名
             "force_bind": force_bind,
             "can_unbind": not force_bind and bool(user.TELEGRAM_ID),
-            "can_change": bool(user.TELEGRAM_ID) and not has_pending_rebind_request,
+            "can_change": can_change,
             "pending_rebind_request": has_pending_rebind_request,
             "rebind_request_status": pending_request.STATUS if pending_request else None,
             "rebind_request_id": pending_request.ID if pending_request else None,
@@ -1333,12 +1334,13 @@ def _is_safe_upload_relative_url(value: str) -> bool:
     if not value:
         return False
     s = value.strip()
-    if not s.startswith("/uploads/"):
+    if not (s.startswith("/uploads/") or s.startswith("/api/v1/users/assets/")):
         return False
     if "\\" in s or "\x00" in s:
         return False
 
-    rel = Path(s.removeprefix("/uploads/"))
+    rel_raw = s.removeprefix("/uploads/").removeprefix("/api/v1/users/assets/")
+    rel = Path(rel_raw)
     # 只允许普通相对路径片段
     if rel.is_absolute() or any(part in ("..", ".", "") for part in rel.parts):
         return False
@@ -1360,7 +1362,7 @@ def _resolve_upload_file_path(relative_url: str, required_subdir: str | None = N
         return None
 
     upload_root = _get_upload_root_path()
-    rel = Path(relative_url.removeprefix("/uploads/"))
+    rel = Path(relative_url.removeprefix("/uploads/").removeprefix("/api/v1/users/assets/"))
     file_path = (upload_root / rel).resolve()
 
     if not file_path.is_relative_to(upload_root):
@@ -1372,6 +1374,158 @@ def _resolve_upload_file_path(relative_url: str, required_subdir: str | None = N
             return None
 
     return file_path
+
+
+def _make_upload_asset_url(kind: str, filename: str) -> str:
+    return f"/api/v1/users/assets/{kind}/{filename}"
+
+
+def _legacy_upload_url(kind: str, filename: str) -> str:
+    return f"/uploads/{kind}/{filename}"
+
+
+def _extract_upload_ref(value: str, *, allowed_kinds: set[str] | None = None) -> tuple[str, str] | None:
+    """Extract (kind, filename) from controlled or legacy upload URLs/CSS url(...)."""
+    if not value:
+        return None
+    raw = value.strip()
+    match = _CSS_URL_RE.match(raw) if "url" in raw.lower() else None
+    if match:
+        raw = match.group(2).strip()
+    prefixes = ("/api/v1/users/assets/", "/uploads/")
+    for prefix in prefixes:
+        if raw.startswith(prefix):
+            rel = raw.removeprefix(prefix)
+            parts = rel.split("/", 1)
+            if len(parts) != 2:
+                return None
+            kind, filename = parts[0], parts[1]
+            if allowed_kinds and kind not in allowed_kinds:
+                return None
+            if not re.fullmatch(r"[0-9a-f]{32}\.(jpg|png|gif|webp)", filename, re.IGNORECASE):
+                return None
+            return kind, filename
+    return None
+
+
+def _rewrite_upload_urls_in_background(config: dict) -> dict:
+    """Return a copy whose local background URLs use authenticated asset endpoints."""
+    out = dict(config or {})
+    for key in ("lightBgImage", "darkBgImage"):
+        value = str(out.get(key) or "")
+        ref = _extract_upload_ref(value, allowed_kinds={"backgrounds"})
+        if ref:
+            kind, filename = ref
+            out[key] = f'url("{_make_upload_asset_url(kind, filename)}")'
+    return out
+
+
+def _rewrite_avatar_url(value: str | None) -> str | None:
+    ref = _extract_upload_ref(value or "", allowed_kinds={"avatars"})
+    if not ref:
+        return value or None
+    kind, filename = ref
+    return _make_upload_asset_url(kind, filename)
+
+
+def _referenced_upload_urls_from_background(config: dict) -> set[str]:
+    refs: set[str] = set()
+    for key in ("lightBgImage", "darkBgImage"):
+        ref = _extract_upload_ref(str((config or {}).get(key) or ""), allowed_kinds={"backgrounds"})
+        if ref:
+            kind, filename = ref
+            refs.add(_legacy_upload_url(kind, filename))
+            refs.add(_make_upload_asset_url(kind, filename))
+    return refs
+
+
+async def cleanup_unused_upload_assets(max_age_seconds: int = 24 * 3600) -> dict:
+    """Remove uploaded avatars/backgrounds no longer referenced by any user.
+
+    Fresh files are kept for a grace period because upload and save background are two
+    separate requests.
+    """
+    now = _time.time()
+    upload_root = _get_upload_root_path()
+    referenced: set[str] = set()
+    users, _ = await UserOperate.get_all_users(include_inactive=True, limit=100000, offset=0)
+    for user in users:
+        if user.AVATAR:
+            ref = _extract_upload_ref(user.AVATAR, allowed_kinds={"avatars"})
+            if ref:
+                kind, filename = ref
+                referenced.add(_legacy_upload_url(kind, filename))
+                referenced.add(_make_upload_asset_url(kind, filename))
+        if user.OTHER:
+            try:
+                other = json.loads(user.OTHER)
+            except (json.JSONDecodeError, TypeError):
+                other = {}
+            if isinstance(other, dict):
+                bg = other.get("background") if isinstance(other.get("background"), dict) else {}
+                referenced.update(_referenced_upload_urls_from_background(bg))
+
+    result = {"scanned": 0, "deleted": 0, "skipped_recent": 0, "failed": 0}
+    for kind in ("avatars", "backgrounds"):
+        folder = (upload_root / kind).resolve()
+        if not folder.is_dir() or not folder.is_relative_to(upload_root):
+            continue
+        for path in folder.iterdir():
+            if not path.is_file():
+                continue
+            result["scanned"] += 1
+            filename = path.name
+            if _legacy_upload_url(kind, filename) in referenced or _make_upload_asset_url(kind, filename) in referenced:
+                continue
+            try:
+                if now - path.stat().st_mtime < max_age_seconds:
+                    result["skipped_recent"] += 1
+                    continue
+                path.unlink()
+                result["deleted"] += 1
+            except Exception:
+                result["failed"] += 1
+                logger.warning("清理未引用上传文件失败: %s", path, exc_info=True)
+    return result
+
+
+@users_bp.route("/assets/<kind>/<filename>", methods=["GET"])
+@require_auth
+async def get_user_upload_asset(kind: str, filename: str):
+    """Serve user-uploaded avatars/backgrounds through an authenticated safe path."""
+    if kind not in {"avatars", "backgrounds"}:
+        return api_response(False, "资源类型不存在", code=404)
+    if not re.fullmatch(r"[0-9a-f]{32}\.(jpg|png|gif|webp)", filename, re.IGNORECASE):
+        return api_response(False, "资源不存在", code=404)
+
+    file_path = _resolve_upload_file_path(_legacy_upload_url(kind, filename), required_subdir=kind)
+    if not file_path or not file_path.exists() or not file_path.is_file():
+        return api_response(False, "资源不存在", code=404)
+
+    # Users may only fetch files referenced by their own profile. Admins can fetch any
+    # managed upload for support/debugging.
+    current = g.current_user
+    allowed = current.ROLE == Role.ADMIN.value
+    if not allowed and kind == "avatars":
+        allowed = _rewrite_avatar_url(current.AVATAR) == _make_upload_asset_url(kind, filename)
+    if not allowed and kind == "backgrounds" and current.OTHER:
+        try:
+            other = json.loads(current.OTHER)
+        except (json.JSONDecodeError, TypeError):
+            other = {}
+        bg = other.get("background") if isinstance(other, dict) and isinstance(other.get("background"), dict) else {}
+        allowed = _make_upload_asset_url(kind, filename) in _referenced_upload_urls_from_background(bg)
+
+    if not allowed:
+        return api_response(False, "无权限访问该资源", code=403)
+
+    mimetype = {
+        "jpg": "image/jpeg",
+        "png": "image/png",
+        "gif": "image/gif",
+        "webp": "image/webp",
+    }.get(filename.rsplit(".", 1)[-1].lower(), "application/octet-stream")
+    return send_file(file_path, mimetype=mimetype, conditional=True, max_age=3600)
 
 
 async def _cleanup_expired_codes():
@@ -1849,6 +2003,8 @@ async def get_my_settings():
     user = g.current_user
 
     status = await EmbyService.get_user_status(user)
+    pending_request = await UserService.get_telegram_rebind_request(user.UID)
+    has_pending_rebind_request = bool(pending_request and pending_request.STATUS == "pending")
 
     return api_response(
         True,
@@ -1869,7 +2025,10 @@ async def get_my_settings():
                 "bound": bool(user.TELEGRAM_ID),
                 "force_bind": Config.FORCE_BIND_TELEGRAM,
                 "can_unbind": not Config.FORCE_BIND_TELEGRAM and bool(user.TELEGRAM_ID),
-                "can_change": bool(user.TELEGRAM_ID),
+                "can_change": bool(user.TELEGRAM_ID) and not has_pending_rebind_request,
+                "pending_rebind_request": has_pending_rebind_request,
+                "rebind_request_status": pending_request.STATUS if pending_request else None,
+                "rebind_request_id": pending_request.ID if pending_request else None,
             },
             # 系统配置
             "system_config": {
@@ -1886,8 +2045,7 @@ async def get_my_settings():
 _CSS_URL_RE = re.compile(r'^\s*url\(\s*([\'"]?)([^\'")]+)\1\s*\)\s*$', re.IGNORECASE)
 _CSS_BG_FUNC_RE = re.compile(
     r"^\s*(linear-gradient|radial-gradient|conic-gradient|repeating-linear-gradient|"
-    r"repeating-radial-gradient|repeating-conic-gradient|image-set|cross-fade|"
-    r"paint|element)\s*\(",
+    r"repeating-radial-gradient|repeating-conic-gradient)\s*\(",
     re.IGNORECASE,
 )
 
@@ -1940,7 +2098,7 @@ def _is_valid_background_url(value: str) -> bool:
     if not stripped:
         return True
 
-    # 站内相对路径
+    # 站内相对路径（只允许受控上传资源）
     if stripped.startswith("/"):
         return _is_safe_upload_relative_url(stripped)
 
@@ -1996,6 +2154,7 @@ async def get_user_background(uid: int):
         except:
             pass
 
+    background_config = _rewrite_upload_urls_in_background(background_config)
     return api_response(True, "获取成功", {"background": json.dumps(background_config) if background_config else None})
 
 
@@ -2121,7 +2280,8 @@ async def update_user_background():
         user.OTHER = json.dumps(other_data)
         await UserOperate.update_user(user)
 
-        return api_response(True, "背景更新成功", {"background": json.dumps(other_data["background"])})
+        response_background = _rewrite_upload_urls_in_background(other_data["background"])
+        return api_response(True, "背景更新成功", {"background": json.dumps(response_background)})
     except Exception as e:
         logger.error(f"保存背景配置失败: {e}")
         return api_response(False, "保存失败", code=500)
@@ -2249,7 +2409,7 @@ async def upload_background_image():
         file.save(str(filepath))
 
         # 生成 URL
-        file_url = f"/uploads/backgrounds/{filename}"
+        file_url = _make_upload_asset_url("backgrounds", filename)
 
         return api_response(True, "上传成功", {"url": file_url, "type": bg_type, "filename": filename})
     except Exception as e:
@@ -2275,7 +2435,7 @@ async def get_user_avatar(uid: int):
         True,
         "获取成功",
         {
-            "avatar": user.AVATAR or None,
+            "avatar": _rewrite_avatar_url(user.AVATAR),
             "uid": user.UID,
             "username": user.USERNAME,
         },
@@ -2364,7 +2524,7 @@ async def upload_avatar():
         file.save(str(filepath))
 
         # 生成 URL
-        avatar_url = f"/uploads/avatars/{filename}"
+        avatar_url = _make_upload_asset_url("avatars", filename)
 
         # 更新用户头像
         user.AVATAR = avatar_url
@@ -2396,7 +2556,7 @@ async def delete_avatar():
     # 删除头像文件
     try:
         avatar_url = (user.AVATAR or "").strip()
-        if avatar_url.startswith("/uploads/avatars/"):
+        if avatar_url.startswith("/uploads/avatars/") or avatar_url.startswith("/api/v1/users/assets/avatars/"):
             file_path = _resolve_upload_file_path(avatar_url, required_subdir="avatars")
             if file_path and file_path.exists() and file_path.is_file():
                 file_path.unlink()

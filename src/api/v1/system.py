@@ -8,7 +8,7 @@ from typing import Optional, Any
 from pathlib import Path
 import shutil
 
-from flask import Blueprint, request, g
+from flask import Blueprint, request, g, send_file
 from sqlalchemy import text
 
 from src.api.v1.auth import require_auth, require_admin, api_response
@@ -37,6 +37,7 @@ from src.db.user import UsersSessionFactory
 import asyncio
 import logging
 import threading
+import mimetypes
 
 _reload_logger = logging.getLogger(__name__)
 
@@ -269,6 +270,42 @@ async def _sync_admin_role_from_config():
 system_bp = Blueprint("system", __name__, url_prefix="/system")
 
 
+_IMAGE_MIME_PREFIXES = ("image/",)
+
+
+def _resolve_local_server_icon_path() -> Optional[Path]:
+    """Resolve Config.SERVER_ICON when it points at a local image file."""
+    raw = (Config.SERVER_ICON or "").strip()
+    if not raw:
+        return None
+    lowered = raw.lower()
+    if lowered.startswith(("http://", "https://", "//", "data:", "blob:")):
+        return None
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = (Path.cwd() / path).resolve()
+    else:
+        path = path.resolve()
+    if not path.is_file():
+        return None
+    guessed, _ = mimetypes.guess_type(str(path))
+    if not guessed or not guessed.startswith(_IMAGE_MIME_PREFIXES):
+        return None
+    return path
+
+
+def _public_server_icon_value() -> str:
+    raw = (Config.SERVER_ICON or "").strip()
+    if not raw:
+        return ""
+    if _resolve_local_server_icon_path():
+        return "/api/v1/system/server-icon"
+    # Do not leak explicit local filesystem paths when the configured file is missing/invalid.
+    if raw.startswith("~") or "\\" in raw or (len(raw) >= 3 and raw[1:3] in (":\\", ":/")):
+        return ""
+    return raw
+
+
 # ==================== 公开信息 ====================
 
 
@@ -302,7 +339,7 @@ async def get_system_info():
         "获取成功",
         {
             "name": Config.SERVER_NAME or "Twilight",
-            "icon": Config.SERVER_ICON or "",
+            "icon": _public_server_icon_value(),
             "version": __version__,
             "features": {
                 "register": RegisterConfig.REGISTER_MODE,
@@ -320,6 +357,16 @@ async def get_system_info():
             },
         },
     )
+
+
+@system_bp.route("/server-icon", methods=["GET"])
+async def get_server_icon():
+    """Serve the configured local server icon, if SERVER_ICON is a local image path."""
+    path = _resolve_local_server_icon_path()
+    if not path:
+        return api_response(False, "未配置本地图标或文件不存在", code=404)
+    guessed, _ = mimetypes.guess_type(str(path))
+    return send_file(path, mimetype=guessed or "application/octet-stream", conditional=True, max_age=3600)
 
 
 @system_bp.route("/health", methods=["GET"])
@@ -413,8 +460,10 @@ async def get_emby_urls():
     # 「真正绑定 Emby」=有 EMBYID 且 PENDING_EMBY 为假；只要还在 pending 就视作未绑。
     emby_bound = bool(user and user.EMBYID and not bool(getattr(user, "PENDING_EMBY", False)))
 
-    # 没绑定 Emby 且不是管理员 → 不下发任何线路，前端会据此隐藏整块 UI
-    if user and not emby_bound and not is_admin:
+    # 注册码授予的待补建用户已具备开通资格，允许查看线路以完成后续配置；
+    # 普通无码待激活账号仍不下发线路。
+    entitled_pending = bool(user and getattr(user, "PENDING_EMBY_DAYS", None) is not None)
+    if user and not emby_bound and not is_admin and not entitled_pending:
         return api_response(
             True,
             "未绑定 Emby 账号，未下发线路",
@@ -1089,6 +1138,20 @@ async def get_config_schema():
                         "type": "int",
                         "description": "注册完成后状态保留秒数，便于前端查询结果",
                         "value": RegisterConfig.EMBY_DIRECT_REGISTER_STATUS_TTL,
+                    },
+                    {
+                        "key": "auto_cleanup_no_emby",
+                        "label": "自动清理未绑定 Emby 用户",
+                        "type": "bool",
+                        "description": "开启后定时任务会自动删除注册超过指定天数但仍未绑定 Emby 的普通系统用户；管理员、白名单、未注册占位用户会被跳过。",
+                        "value": RegisterConfig.AUTO_CLEANUP_NO_EMBY,
+                    },
+                    {
+                        "key": "auto_cleanup_no_emby_days",
+                        "label": "清理未绑定 Emby 天数",
+                        "type": "int",
+                        "description": "注册后超过多少天仍未绑定 Emby 才会被清理。定时任务默认读取这里的最新值；手动触发时可临时覆盖。",
+                        "value": RegisterConfig.AUTO_CLEANUP_NO_EMBY_DAYS,
                     },
                     {
                         "key": "admin_uids",

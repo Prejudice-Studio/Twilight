@@ -38,7 +38,7 @@ import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
-import { api, type EmbyInfo, type MediaRequest, type TelegramStatus, type SigninSummary, type RegisterAvailability } from "@/lib/api";
+import { api, type EmbyInfo, type MediaRequest, type TelegramStatus, type SigninSummary, type RegisterAvailability, type EmbyRegisterStatus } from "@/lib/api";
 import { AnnouncementBoard } from "@/components/announcement-board";
 import { validatePasswordStrength } from "@/lib/password";
 
@@ -69,6 +69,12 @@ interface LineSlot {
   scope: "line" | "wl";
 }
 
+interface StoredEmbyRegisterRequest {
+  requestId: string;
+  statusToken: string;
+  savedAt: number;
+}
+
 export default function DashboardPage() {
   const { user, fetchUser } = useAuthStore();
   const { info: systemInfo, fetchInfo: fetchSystemInfo } = useSystemStore();
@@ -86,6 +92,8 @@ export default function DashboardPage() {
   const [directEmbyUsername, setDirectEmbyUsername] = useState("");
   const [directEmbyPassword, setDirectEmbyPassword] = useState("");
   const [showDirectEmbyPassword, setShowDirectEmbyPassword] = useState(false);
+  const [embyRegisterStatus, setEmbyRegisterStatus] = useState<EmbyRegisterStatus | null>(null);
+  const [embyRegisterStored, setEmbyRegisterStored] = useState<StoredEmbyRegisterRequest | null>(null);
   // 自由注册天数由管理员单值固定，前端不再让用户挑套餐或自定义
 
   const [telegramStatus, setTelegramStatus] = useState<TelegramStatus | null>(null);
@@ -98,9 +106,66 @@ export default function DashboardPage() {
   const [signinSummary, setSigninSummary] = useState<SigninSummary | null>(null);
   const [signingIn, setSigningIn] = useState(false);
 
+  const embyRegisterStorageKey = user?.uid ? `twilight:emby-register:${user.uid}` : null;
+
+  const saveEmbyRegisterRequest = useCallback((requestId: string, statusToken: string) => {
+    if (!embyRegisterStorageKey) return;
+    const item = { requestId, statusToken, savedAt: Date.now() };
+    localStorage.setItem(embyRegisterStorageKey, JSON.stringify(item));
+    setEmbyRegisterStored(item);
+  }, [embyRegisterStorageKey]);
+
+  const clearEmbyRegisterRequest = useCallback(() => {
+    if (embyRegisterStorageKey) localStorage.removeItem(embyRegisterStorageKey);
+    setEmbyRegisterStored(null);
+  }, [embyRegisterStorageKey]);
+
   useEffect(() => {
     void fetchSystemInfo();
   }, [fetchSystemInfo]);
+
+  useEffect(() => {
+    if (!embyRegisterStorageKey) return;
+    try {
+      const raw = localStorage.getItem(embyRegisterStorageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as StoredEmbyRegisterRequest;
+      if (!parsed.requestId || !parsed.statusToken) return;
+      if (Date.now() - Number(parsed.savedAt || 0) > 15 * 60 * 1000) {
+        localStorage.removeItem(embyRegisterStorageKey);
+        return;
+      }
+      setEmbyRegisterStored(parsed);
+    } catch {
+      localStorage.removeItem(embyRegisterStorageKey);
+    }
+  }, [embyRegisterStorageKey]);
+
+  const refreshStoredEmbyRegisterStatus = useCallback(async () => {
+    if (!embyRegisterStored) return;
+    try {
+      const res = await api.getEmbyRegisterStatus(embyRegisterStored.requestId, embyRegisterStored.statusToken);
+      if (res.success && res.data) {
+        setEmbyRegisterStatus(res.data);
+        if (res.data.status === "success") {
+          await fetchUser();
+        }
+      } else if (!res.success) {
+        clearEmbyRegisterRequest();
+      }
+    } catch {
+      // Keep the local request for 15 minutes; transient errors should not hide status.
+    }
+  }, [clearEmbyRegisterRequest, embyRegisterStored, fetchUser]);
+
+  useEffect(() => {
+    if (!embyRegisterStored) return;
+    void refreshStoredEmbyRegisterStatus();
+    const timer = window.setInterval(() => {
+      void refreshStoredEmbyRegisterStatus();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [embyRegisterStored, refreshStoredEmbyRegisterStatus]);
 
   const loadDashboardData = useCallback(async (signal?: AbortSignal) => {
     const [tgRes, embyRes, urlsRes, reqRes, signinRes, registerRes] = await Promise.all([
@@ -437,6 +502,16 @@ export default function DashboardPage() {
         const pending = Boolean((res.data as any)?.pending);
         if (pending) {
           const data = res.data as any;
+          if (data?.request_id && data?.status_token) {
+            saveEmbyRegisterRequest(data.request_id, data.status_token);
+            setEmbyRegisterStatus({
+              request_id: data.request_id,
+              status: data.status || "queued",
+              queue_position: data.queue_position,
+              message: res.message,
+              updated_at: Math.floor(Date.now() / 1000),
+            });
+          }
           toast({
             title: "Emby 注册已加入队列",
             description: data?.queue_position ? `排队中（第 ${data.queue_position} 位），稍后会自动完成` : "稍后会自动完成，请刷新页面查看",
@@ -454,6 +529,7 @@ export default function DashboardPage() {
                 if (s.success && s.data) {
                   const st = s.data.status;
                   if (st === "success") {
+                    clearEmbyRegisterRequest();
                     toast({
                       title: "Emby 账号已开通",
                       description: directRegisterDays <= 0 ? "永久" : `开通时长 ${directRegisterDays} 天`,
@@ -482,6 +558,7 @@ export default function DashboardPage() {
             });
           })();
         } else {
+          clearEmbyRegisterRequest();
           toast({
             title: "Emby 账号已开通",
             description: directRegisterDays <= 0 ? "永久" : `开通时长 ${directRegisterDays} 天`,
@@ -882,6 +959,39 @@ export default function DashboardPage() {
           </Button>
         </div>
       </motion.div>
+
+      {embyRegisterStored && embyRegisterStatus && (
+        <motion.div variants={item} className="premium-card p-5 sm:p-6 border-emerald-500/20 bg-emerald-500/5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <h3 className="text-base font-black tracking-tight">Emby 注册队列状态</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {embyRegisterStatus.status === "queued"
+                  ? `排队中${embyRegisterStatus.queue_position ? `（第 ${embyRegisterStatus.queue_position} 位）` : ""}`
+                  : embyRegisterStatus.status === "processing"
+                    ? "正在创建 Emby 账号"
+                    : embyRegisterStatus.status === "success"
+                      ? "注册完成，状态将保留 15 分钟"
+                      : embyRegisterStatus.message || "注册失败"}
+              </p>
+              {embyRegisterStatus.message && (
+                <p className="mt-1 text-xs text-muted-foreground">{embyRegisterStatus.message}</p>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => void refreshStoredEmbyRegisterStatus()}>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                刷新
+              </Button>
+              {(["success", "failed", "rejected"] as const).includes(embyRegisterStatus.status as any) && (
+                <Button variant="ghost" size="sm" onClick={clearEmbyRegisterRequest}>
+                  关闭
+                </Button>
+              )}
+            </div>
+          </div>
+        </motion.div>
+      )}
 
       {/* Emby 自由注册：登录后可在仪表盘开通 */}
       {showEmbyDirectRegisterCard && (

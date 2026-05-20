@@ -29,14 +29,16 @@ def create_app() -> Flask:
     # 确保上传目录存在
     uploads_path.mkdir(parents=True, exist_ok=True)
 
-    app = Flask(__name__, static_folder=str(uploads_path), static_url_path="/uploads")
+    # Uploaded files are served by authenticated, path-checked API endpoints instead of
+    # Flask's generic static handler.
+    app = Flask(__name__, static_folder=None)
 
     # 配置
     app.config["JSON_AS_ASCII"] = False  # 支持中文
     app.config["JSON_SORT_KEYS"] = False
     app.config["MAX_CONTENT_LENGTH"] = APIConfig.MAX_UPLOAD_SIZE  # 最大上传文件大小
     app.config["UPLOAD_FOLDER"] = str(uploads_path)
-    # uploads_path 目录作为静态文件目录挂载，用于存储上传的文件并通过 /uploads 提供访问
+    # uploads_path 目录仅用于存储上传文件，不直接暴露为静态目录。
 
     # CORS 跨域支持
     if APIConfig.CORS_ENABLED:

@@ -45,19 +45,28 @@ class ApiClient {
 
   private toAbsoluteAssetUrl(url?: string | null): string | null {
     if (!url) return null;
-    if (/^(https?:)?\/\//i.test(url) || url.startsWith("data:") || url.startsWith("blob:")) {
-      return url;
+    const value = url.trim();
+    if (!value) return null;
+    if (/^(https?:)?\/\//i.test(value) || value.startsWith("blob:")) {
+      return value;
     }
-    if (url.startsWith("/")) {
-      return `${API_BASE}${url}`;
+    if (/^data:image\/(png|jpe?g|gif|webp|avif|bmp)(;|,)/i.test(value)) {
+      return value;
     }
-    return `${API_BASE}/${url}`;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
+      return null;
+    }
+    if (value.startsWith("/")) {
+      return `${API_BASE}${value}`;
+    }
+    return `${API_BASE}/${value}`;
   }
 
   private normalizeCssUrlValue(value?: string | null): string {
     if (!value) return "";
     return value.replace(/url\((['"]?)(.*?)\1\)/g, (_match, quote, rawUrl: string) => {
-      const normalized = this.toAbsoluteAssetUrl(rawUrl.trim()) || rawUrl.trim();
+      const normalized = this.toAbsoluteAssetUrl(rawUrl.trim());
+      if (!normalized) return "none";
       const q = quote || '"';
       return `url(${q}${normalized}${q})`;
     });
@@ -214,7 +223,16 @@ class ApiClient {
 
   // System
   async getSystemInfo() {
-    return this.request<SystemInfo>("/system/info");
+    const res = await this.request<SystemInfo>("/system/info");
+    if (res.success && res.data?.icon) {
+      res.data.icon = this.toAbsoluteAssetUrl(res.data.icon) || "";
+    }
+    return res;
+  }
+
+  private toApiRelativeAssetValue(value?: string | null): string {
+    if (!value || !API_BASE) return value || "";
+    return value.replace(API_BASE, "");
   }
 
   async getSystemHealth() {
@@ -319,7 +337,7 @@ class ApiClient {
   async completeEmbyRegistration(embyUsername: string, embyPassword: string) {
     // 自由注册的开通天数由管理员在配置里固定（[SAR].emby_direct_register_days），
     // 客户端不再上传 days；老调用方传值也由后端静默丢弃。
-    return this.request<{ user: UserInfo }>("/users/me/emby/register", {
+    return this.request<{ user?: UserInfo; pending?: boolean; request_id?: string; status_token?: string; status?: string; queue_position?: number }>("/users/me/emby/register", {
       method: "POST",
       body: JSON.stringify({
         emby_username: embyUsername,
@@ -534,6 +552,34 @@ class ApiClient {
   async deleteUserEmby(uid: number) {
     return this.request(`/admin/users/${uid}/emby`, {
       method: "DELETE",
+    });
+  }
+
+  async forceUnbindUser(uid: number, scope: "telegram" | "emby" | "both" = "both") {
+    return this.request<{ changed: string[]; old: { telegram_id?: number | null; emby_id?: string | null } }>(
+      `/admin/users/${uid}/force-unbind`,
+      { method: "POST", body: JSON.stringify({ scope }) },
+    );
+  }
+
+  async syncUserBindings(payload: {
+    scope?: "telegram" | "emby" | "both";
+    uid?: number;
+    filter?: { role?: number; active?: boolean; emby?: "bound" | "unbound"; search?: string };
+    repair?: boolean;
+  }) {
+    return this.request<{
+      matched: number;
+      telegram_checked: number;
+      telegram_repaired: number;
+      emby_checked: number;
+      emby_repaired: number;
+      synced: number;
+      failed: Array<{ uid: number; scope: string; reason: string }>;
+      details: Array<Record<string, unknown>>;
+    }>(`/admin/users/sync-bindings`, {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   }
 
@@ -1037,9 +1083,14 @@ class ApiClient {
     lightOpacity?: number;
     darkOpacity?: number;
   }) {
+    const body = {
+      ...payload,
+      lightBgImage: this.toApiRelativeAssetValue(payload.lightBgImage),
+      darkBgImage: this.toApiRelativeAssetValue(payload.darkBgImage),
+    };
     return this.request<{ background: string }>('/users/me/background', {
       method: 'PUT',
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
   }
 
@@ -1058,9 +1109,6 @@ class ApiClient {
       formData,
       'POST'
     );
-    if (res.success && res.data?.url) {
-      res.data.url = this.toAbsoluteAssetUrl(res.data.url) || res.data.url;
-    }
     return res;
   }
 
@@ -1451,6 +1499,9 @@ export interface UserSettings {
     force_bind: boolean;
     can_unbind: boolean;
     can_change: boolean;
+    pending_rebind_request?: boolean;
+    rebind_request_status?: string | null;
+    rebind_request_id?: number | null;
   };
   emby_status: {
     is_synced: boolean;
@@ -1655,7 +1706,7 @@ export interface RegisterAvailability {
 
 export interface EmbyRegisterStatus {
   request_id: string;
-  status: "queued" | "processing" | "success" | "failed";
+  status: "queued" | "processing" | "success" | "failed" | "rejected";
   queue_position?: number;
   message?: string;
   created_at?: number;
@@ -1719,7 +1770,9 @@ export interface Regcode {
   use_count_limit?: number;
   active?: boolean;
   used: boolean;
-  used_by?: number;
+  used_by?: number | string;
+  used_by_uids?: number[];
+  used_by_telegram_ids?: number[];
   created_at: string;
   created_time?: number; // 创建时间戳（兼容字段）
   used_at?: string;
@@ -1802,6 +1855,7 @@ export interface SchedulerJobItem {
    * 后端在 JOB_DEFINITIONS 上打的标记，下发到前端用于隐藏"编辑触发器"按钮。
    */
   manual_only?: boolean;
+  runtime_params?: Record<string, unknown> | null;
 }
 
 

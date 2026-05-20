@@ -11,6 +11,7 @@ import {
   Loader2,
   ChevronLeft,
   ChevronRight,
+  Download,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -48,6 +49,7 @@ export default function AdminRegcodesPage() {
   const [regcodes, setRegcodes] = useState<Regcode[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set());
 
   // Create dialog
   const [createOpen, setCreateOpen] = useState(false);
@@ -154,6 +156,44 @@ export default function AdminRegcodesPage() {
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     toast({ title: "已复制到剪贴板" });
+  };
+
+  const selectedRegcodes = regcodes.filter((item) => selectedCodes.has(item.code));
+
+  const toggleSelectAll = (checked: boolean) => {
+    setSelectedCodes(checked ? new Set(regcodes.map((item) => item.code)) : new Set());
+  };
+
+  const toggleSelectCode = (code: string, checked: boolean) => {
+    setSelectedCodes((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(code);
+      else next.delete(code);
+      return next;
+    });
+  };
+
+  const downloadText = (filename: string, content: string, type: string) => {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportSelected = (format: "json" | "txt") => {
+    const items = selectedRegcodes.length > 0 ? selectedRegcodes : regcodes;
+    if (items.length === 0) return;
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    if (format === "json") {
+      downloadText(`regcodes-${stamp}.json`, JSON.stringify(items, null, 2), "application/json;charset=utf-8");
+    } else {
+      downloadText(`regcodes-${stamp}.txt`, items.map((item) => item.code).join("\n"), "text/plain;charset=utf-8");
+    }
   };
 
   const getTypeBadge = (type: number) => {
@@ -299,6 +339,20 @@ export default function AdminRegcodesPage() {
         </Dialog>
       </div>
 
+      <div className="flex flex-col gap-2 rounded-xl border bg-muted/30 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+        <span className="text-muted-foreground">
+          已选择 {selectedCodes.size} 个；未选择时导出当前页全部 {regcodes.length} 个。
+        </span>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => exportSelected("txt")} disabled={regcodes.length === 0}>
+            <Download className="mr-2 h-4 w-4" /> 导出 TXT
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => exportSelected("json")} disabled={regcodes.length === 0}>
+            <Download className="mr-2 h-4 w-4" /> 导出 JSON
+          </Button>
+        </div>
+      </div>
+
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
@@ -314,12 +368,19 @@ export default function AdminRegcodesPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b bg-muted/50">
+                    <th className="px-4 py-3 text-left text-sm font-medium">
+                      <input
+                        type="checkbox"
+                        checked={regcodes.length > 0 && selectedCodes.size === regcodes.length}
+                        onChange={(e) => toggleSelectAll(e.target.checked)}
+                      />
+                    </th>
                     <th className="px-4 py-3 text-left text-sm font-medium">注册码</th>
                     <th className="px-4 py-3 text-left text-sm font-medium">类型</th>
                     <th className="px-4 py-3 text-left text-sm font-medium">账号有效天数</th>
                     <th className="px-4 py-3 text-left text-sm font-medium">注册码有效期</th>
                     <th className="px-4 py-3 text-left text-sm font-medium">使用次数</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium">状态</th>
+                    <th className="px-4 py-3 text-left text-sm font-medium">状态 / 使用用户</th>
                     <th className="px-4 py-3 text-left text-sm font-medium">创建时间</th>
                     <th className="px-4 py-3 text-right text-sm font-medium">操作</th>
                   </tr>
@@ -327,6 +388,13 @@ export default function AdminRegcodesPage() {
                 <tbody>
                   {regcodes.map((code) => (
                     <tr key={code.code} className="border-b hover:bg-muted/30">
+                      <td className="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedCodes.has(code.code)}
+                          onChange={(e) => toggleSelectCode(code.code, e.target.checked)}
+                        />
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <code className="rounded bg-muted px-2 py-1 text-sm">
@@ -364,10 +432,11 @@ export default function AdminRegcodesPage() {
                             return "可用";
                           })()}
                         </Badge>
-                        {code.used_by && (
-                          <span className="ml-2 text-xs text-muted-foreground">
-                            UID: {code.used_by}
-                          </span>
+                        {((code.used_by_uids?.length || 0) > 0 || (code.used_by_telegram_ids?.length || 0) > 0) && (
+                          <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                            {(code.used_by_uids?.length || 0) > 0 && <div>UID: {code.used_by_uids?.join(", ")}</div>}
+                            {(code.used_by_telegram_ids?.length || 0) > 0 && <div>TG: {code.used_by_telegram_ids?.join(", ")}</div>}
+                          </div>
                         )}
                       </td>
                       <td className="px-4 py-3 text-sm text-muted-foreground">

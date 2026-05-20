@@ -124,6 +124,56 @@ class RegCodeOperate:
                 return False
 
     @staticmethod
+    def _append_csv_value(current: Optional[str], value: Optional[Union[int, str]]) -> Optional[str]:
+        if value is None or value == "":
+            return current
+        value_str = str(value)
+        parts = [p.strip() for p in (current or "").split(",") if p.strip()]
+        if value_str not in parts:
+            parts.append(value_str)
+        return ",".join(parts) if parts else None
+
+    @staticmethod
+    async def record_regcode_use(
+        code: str,
+        *,
+        uid: Optional[Union[int, str]] = None,
+        telegram_id: Optional[Union[int, str]] = None,
+        increment: int = 1,
+    ) -> bool:
+        """原子记录卡码使用次数与使用人，供管理员追踪卡码去向。"""
+        async with RegCodeSessionFactory() as session:
+            try:
+                if increment:
+                    stmt = update(RegCodeModel).where(RegCodeModel.CODE == code)
+                    if increment > 0:
+                        stmt = stmt.where(
+                            (RegCodeModel.USE_COUNT_LIMIT == -1)
+                            | (RegCodeModel.USE_COUNT < RegCodeModel.USE_COUNT_LIMIT)
+                        )
+                    stmt = stmt.values(USE_COUNT=RegCodeModel.USE_COUNT + increment)
+                    updated = await session.execute(stmt)
+                    if updated.rowcount == 0:
+                        logger.warning(f"未找到或已超出使用次数的注册码: {code}")
+                        await session.rollback()
+                        return False
+
+                result = await session.execute(select(RegCodeModel).where(RegCodeModel.CODE == code).limit(1))
+                reg_code = result.scalar_one_or_none()
+                if not reg_code:
+                    await session.rollback()
+                    logger.warning(f"未找到注册码: {code}")
+                    return False
+                reg_code.UID = RegCodeOperate._append_csv_value(reg_code.UID, uid)
+                reg_code.TELEGRAM_ID = RegCodeOperate._append_csv_value(reg_code.TELEGRAM_ID, telegram_id)
+                await session.commit()
+                return True
+            except SQLAlchemyError as e:
+                await session.rollback()
+                logger.error(f"数据库操作失败: {e}")
+                return False
+
+    @staticmethod
     async def delete_regcode(code: str) -> bool:
         """删除指定的注册码"""
         async with RegCodeSessionFactory() as session:

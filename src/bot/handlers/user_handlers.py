@@ -59,7 +59,7 @@ def register(bot):
     """注册处理器"""
     app = bot.application
 
-    def _build_help_text(panel_on: bool, admin_mode: bool) -> str:
+    def _build_help_text(panel_on: bool, admin_mode: bool = False) -> str:
         custom_header = _render_custom_text(TelegramConfig.BOT_HELP_HEADER or "")
         custom_footer = _render_custom_text(TelegramConfig.BOT_HELP_FOOTER or "")
 
@@ -67,12 +67,12 @@ def register(bot):
         if custom_header:
             lines += [custom_header, ""]
         lines += [
-            "📚 **命令导航**\n",
+            "📚 **普通命令**\n",
             "**👤 常用功能**",
             "• /start - 打开主菜单",
             "• /bind - 开始绑定 Telegram",
             "• /me - 查看个人信息",
-            "• /help - 查看帮助",
+            "• /twihelp - 查看普通帮助",
         ]
 
         if panel_on:
@@ -89,9 +89,7 @@ def register(bot):
             lines += [
                 "",
                 "**🔧 管理员功能**",
-                "• /admin - 打开管理面板",
-                "• /stats - 查看系统统计",
-                "• /cancel - 取消当前输入流程",
+                "管理员命令请发送 /twishelp",
             ]
 
         lines += [
@@ -215,8 +213,7 @@ def register(bot):
     async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """帮助命令"""
         panel_on = is_panel_enabled()
-        user_id = update.effective_user.id if update.effective_user else 0
-        text = _build_help_text(panel_on=panel_on, admin_mode=is_admin(user_id))
+        text = _build_help_text(panel_on=panel_on, admin_mode=False)
         if panel_on:
             kb = InlineKeyboardMarkup([[back_button()]])
             await update.message.reply_text(text, reply_markup=kb, parse_mode="Markdown")
@@ -420,6 +417,13 @@ def register(bot):
 
         d = d or {}
         if ok:
+            try:
+                from src.services.telegram_membership import TelegramMembershipService
+
+                await TelegramMembershipService.check_user_in_groups(telegram_id, strict=False, update_roster=True)
+            except Exception as exc:  # pragma: no cover
+                logger.warning(f"绑定成功后刷新 Telegram 花名册失败: {exc}")
+
             # 顺手把 Telegram username 缓存进 user.OTHER，admin 列表后续可以
             # 直接读，不必每次都打 bot.get_chat()（既慢也容易触发限流）。
             try:
@@ -592,6 +596,7 @@ def register(bot):
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("twihelp", cmd_help))
     app.add_handler(CommandHandler("me", cmd_me))
     app.add_handler(CommandHandler("bind", cmd_bind))
     app.add_handler(CommandHandler("cancel", cmd_cancel))

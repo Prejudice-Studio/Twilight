@@ -145,8 +145,8 @@ class SchedulerService:
         },
         {
             "id": "cleanup_no_emby",
-            "name": "无 Emby 账户用户清理",
-            "description": "清理注册超过配置天数仍未创建 Emby 账户的用户。开关：AUTO_CLEANUP_NO_EMBY",
+            "name": "清理 x 天以上未绑定 Emby 的系统用户",
+            "description": "按 [SAR].auto_cleanup_no_emby_days 清理注册超过 N 天仍未绑定 Emby 的系统用户；[SAR].auto_cleanup_no_emby 控制定时自动执行，手动执行可临时覆盖天数。",
             "default_trigger": {
                 "type": "cron_daily",
                 "config_field": "EXPIRED_CHECK_TIME",
@@ -162,6 +162,26 @@ class SchedulerService:
                 "config_field": "GROUP_CHECK_INTERVAL_MINUTES",
                 "unit": "minutes",
                 "source": "TelegramConfig",
+            },
+        },
+        {
+            "id": "check_telegram_bindings",
+            "name": "Telegram 绑定状态一致性检查",
+            "description": "检查系统用户的 Telegram 绑定是否重复、非法，及换绑申请状态是否与用户绑定状态一致；仅记录问题，不自动改库。",
+            "default_trigger": {
+                "type": "cron_daily",
+                "config_field": "DAILY_STATS_TIME",
+                "offset_minutes": 15,
+            },
+        },
+        {
+            "id": "cleanup_unused_uploads",
+            "name": "未使用头像/背景图片清理",
+            "description": "清理未被任何用户头像或背景配置引用的上传图片；新上传文件保留 24 小时宽限期。",
+            "default_trigger": {
+                "type": "cron_daily",
+                "config_field": "DAILY_STATS_TIME",
+                "offset_minutes": 45,
             },
         },
         {
@@ -638,6 +658,14 @@ class SchedulerService:
                     "trigger_spec": trigger_spec,
                     "default_trigger_spec": default_spec,
                     "is_custom": is_custom,
+                    "runtime_params": (
+                        {
+                            "days": int(RegisterConfig.AUTO_CLEANUP_NO_EMBY_DAYS),
+                            "auto_enabled": bool(RegisterConfig.AUTO_CLEANUP_NO_EMBY),
+                        }
+                        if jid == "cleanup_no_emby"
+                        else None
+                    ),
                 }
             )
         return items
@@ -660,6 +688,17 @@ class SchedulerService:
         return cls._scheduler
 
     @staticmethod
+    async def _run_bounded(items, limit: int, handler):
+        """Run async item handlers with bounded concurrency for high-cardinality jobs."""
+        sem = asyncio.Semaphore(max(1, min(int(limit or 1), 64)))
+
+        async def _one(item):
+            async with sem:
+                return await handler(item)
+
+        return await asyncio.gather(*(_one(item) for item in items), return_exceptions=True)
+
+    @staticmethod
     async def check_expired_users(ctx: RunContext):
         """检查过期用户并禁用"""
         ctx.log("🔍 开始检查过期用户...")
@@ -675,17 +714,29 @@ class SchedulerService:
             ctx.log(f"📋 发现 {len(expired_users)} 个过期用户")
             emby = get_emby_client()
 
-            for user in expired_users:
+            async def _disable_one(user):
                 try:
                     if user.EMBYID:
                         await emby.set_user_enabled(user.EMBYID, False)
                     user.ACTIVE_STATUS = False
                     await UserOperate.update_user(user)
+                    return True, user, None
+                except Exception as e:
+                    return False, user, e
+
+            results = await SchedulerService._run_bounded(expired_users, 12, _disable_one)
+            for result in results:
+                if isinstance(result, Exception):
+                    ctx.summary["failed"] += 1
+                    ctx.log(f"  ❌ 禁用任务异常: {result}")
+                    continue
+                ok, user, err = result
+                if ok:
                     ctx.summary["disabled"] += 1
                     ctx.log(f"  ⏹️ 已禁用: {user.USERNAME} (UID: {user.UID})")
-                except Exception as e:
+                else:
                     ctx.summary["failed"] += 1
-                    ctx.log(f"  ❌ 禁用失败: {user.USERNAME} - {e}")
+                    ctx.log(f"  ❌ 禁用失败: {user.USERNAME} - {err}")
             ctx.log(f"✅ 过期用户检查完成: 禁用 {ctx.summary['disabled']} 个, " f"失败 {ctx.summary['failed']} 个")
         except Exception as e:
             ctx.log(f"❌ 检查过期用户时发生错误: {e}")
@@ -1172,6 +1223,73 @@ class SchedulerService:
             ctx.log(f"❌ 清理无 Emby 账户用户时发生错误: {e}")
             raise
 
+    @staticmethod
+    async def cleanup_unused_uploads(ctx: RunContext):
+        """Clean user-uploaded image files that are no longer referenced."""
+        ctx.log("🧹 开始清理未使用头像/背景图片...")
+        try:
+            from src.api.v1.users import cleanup_unused_upload_assets
+
+            result = await cleanup_unused_upload_assets(max_age_seconds=24 * 3600)
+            ctx.summary.update(result)
+            ctx.log(
+                "✅ 上传图片清理完成: 扫描 {scanned}, 删除 {deleted}, "
+                "保留新文件 {skipped_recent}, 失败 {failed}".format(**result)
+            )
+        except Exception as e:
+            ctx.log(f"❌ 清理上传图片时发生错误: {e}")
+            raise
+
+    @staticmethod
+    async def check_telegram_bindings(ctx: RunContext):
+        """检查 Telegram 与系统账号绑定状态一致性。"""
+        from src.db.user import TelegramRebindRequestOperate
+
+        ctx.log("🔎 开始检查 Telegram 绑定状态一致性...")
+        users, total = await UserOperate.get_all_users(include_inactive=True, limit=100000, offset=0)
+        tg_map: dict[int, list] = {}
+        invalid = []
+        for user in users:
+            if user.TELEGRAM_ID is None:
+                continue
+            try:
+                tg_id = int(user.TELEGRAM_ID)
+            except (TypeError, ValueError):
+                invalid.append(user)
+                continue
+            if tg_id <= 0:
+                invalid.append(user)
+                continue
+            tg_map.setdefault(tg_id, []).append(user)
+
+        duplicates = {tg_id: rows for tg_id, rows in tg_map.items() if len(rows) > 1}
+        rebind_mismatch = []
+        for user in users:
+            try:
+                req = await TelegramRebindRequestOperate.get_request_by_uid(user.UID)
+            except Exception:
+                req = None
+            if not req:
+                continue
+            if req.STATUS == "pending" and not user.TELEGRAM_ID:
+                rebind_mismatch.append((user, "pending_without_bound_tg"))
+            if req.STATUS == "approved" and user.TELEGRAM_ID == req.OLD_TELEGRAM_ID:
+                rebind_mismatch.append((user, "approved_but_old_tg_still_bound"))
+
+        ctx.summary["users"] = int(total or 0)
+        ctx.summary["telegram_bound"] = sum(len(v) for v in tg_map.values())
+        ctx.summary["invalid_telegram_id"] = len(invalid)
+        ctx.summary["duplicate_telegram_ids"] = len(duplicates)
+        ctx.summary["rebind_state_mismatch"] = len(rebind_mismatch)
+
+        for user in invalid[:20]:
+            ctx.log(f"  ⚠️ 非法 TG ID: UID={user.UID} username={user.USERNAME} tg={user.TELEGRAM_ID}")
+        for tg_id, rows in list(duplicates.items())[:20]:
+            ctx.log("  ⚠️ TG ID 重复: %s -> %s" % (tg_id, ", ".join(f"{u.UID}/{u.USERNAME}" for u in rows)))
+        for user, reason in rebind_mismatch[:20]:
+            ctx.log(f"  ⚠️ 换绑状态不一致: UID={user.UID} username={user.USERNAME} reason={reason}")
+        ctx.log("✅ Telegram 绑定状态一致性检查完成")
+
     @classmethod
     async def start(cls):
         """启动调度器"""
@@ -1249,6 +1367,8 @@ class SchedulerService:
             "cleanup_sessions": cls.cleanup_inactive_sessions,
             "emby_sync": cls.emby_sync,
             "cleanup_no_emby": cls.cleanup_no_emby_users,
+            "cleanup_unused_uploads": cls.cleanup_unused_uploads,
+            "check_telegram_bindings": cls.check_telegram_bindings,
             "enforce_group_membership": cls.enforce_group_membership,
             "kick_unknown_group_members": cls.kick_unknown_group_members,
         }

@@ -95,6 +95,10 @@ const SUMMARY_LABELS: Record<string, string> = {
   not_in_group: "已不在群",
   kicked: "已踢出",
   skipped: "跳过",
+  telegram_bound: "TG绑定",
+  invalid_telegram_id: "非法TGID",
+  duplicate_telegram_ids: "重复TGID",
+  rebind_state_mismatch: "换绑状态异常",
 };
 
 function formatSummaryValue(value: unknown): string {
@@ -496,14 +500,16 @@ export default function AdminSchedulerPage() {
     if (PARAMETERIZED_JOBS.has(job.id)) {
       // 弹窗收集参数后再发起
       const lastDays = Number(
-        (job.last_run?.summary as Record<string, unknown> | undefined)?.["days_threshold"] ?? 7,
+        (job.runtime_params as Record<string, unknown> | undefined)?.["days"] ??
+          (job.last_run?.summary as Record<string, unknown> | undefined)?.["days_threshold"] ??
+          7,
       );
       setParamDays(Number.isFinite(lastDays) && lastDays > 0 ? String(Math.trunc(lastDays)) : "7");
       const lastPreserveTg = (job.last_run?.summary as Record<string, unknown> | undefined)?.[
         "preserve_tg_bound"
       ];
       setParamPreserveTg(lastPreserveTg === undefined ? true : Boolean(lastPreserveTg));
-      setParamIgnoreEnabled(true);
+      setParamIgnoreEnabled(Boolean((job.runtime_params as Record<string, unknown> | undefined)?.["auto_enabled"] ?? true));
       setParamKickDryRun(true);
       setParamKickMaxPerRun("200");
       setParamJob(job);

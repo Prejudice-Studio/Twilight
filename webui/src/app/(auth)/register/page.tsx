@@ -25,7 +25,6 @@ export default function RegisterPage() {
     password: "",
     confirmPassword: "",
     email: "",
-    regCode: "",
   });
 
   const [registerAvailability, setRegisterAvailability] = useState<RegisterAvailability | null>(null);
@@ -214,10 +213,6 @@ export default function RegisterPage() {
         password: formData.password,
       };
 
-      if (formData.regCode.trim()) {
-        payload.reg_code = formData.regCode.trim();
-      }
-
       const res = await api.register(payload);
 
       if (!res.success) {
@@ -260,7 +255,7 @@ export default function RegisterPage() {
               <div>
                 <h2 className="text-xl font-semibold">欢迎来到 {systemInfo?.name || SITE_NAME}</h2>
                 <p className="text-sm text-muted-foreground">
-                  使用注册码注册系统账号；登录后将自动引导你完成 Emby 账号补建。
+                  先创建系统账号；登录后可在仪表盘兑换注册码/续期码并开通或续期 Emby。
                 </p>
               </div>
             </div>
@@ -268,8 +263,7 @@ export default function RegisterPage() {
             <div className="rounded-2xl border border-border/70 bg-muted/40 p-4 text-sm text-muted-foreground">
               <p className="font-semibold text-foreground">关于注册码</p>
               <p className="mt-2 leading-relaxed">
-                注册码即 Emby 注册码：使用它创建账号后，首次登录时会自动弹出 Emby 账号注册流程，
-                如失败可在后续登录时反复重试，直到绑定成功。
+                注册页不再直接使用注册码。请先注册并登录，再到仪表盘兑换注册码或续期码。
               </p>
               {systemInfo?.telegram_bot?.username ? (
                 <p className="mt-2 inline-flex items-center gap-1.5 text-xs">
@@ -297,7 +291,7 @@ export default function RegisterPage() {
             <div className="space-y-3">
               <CardTitle className="text-2xl font-semibold tracking-tight">创建账号</CardTitle>
               <p className="text-sm text-muted-foreground">
-                填写下面的信息即可注册。注册码如有可直接填入，将影响 Emby 账号的开通时长。
+                填写下面的信息即可创建系统账号。注册码兑换请登录后在仪表盘完成。
               </p>
             </div>
 
@@ -370,21 +364,6 @@ export default function RegisterPage() {
                     className="h-11"
                   />
                 </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="regCode" className="ml-1 text-xs">注册码（可选）</Label>
-                <Input
-                  id="regCode"
-                  name="regCode"
-                  placeholder="Registration Code"
-                  value={formData.regCode}
-                  onChange={handleChange}
-                  className="h-11"
-                />
-                <p className="text-xs text-muted-foreground">
-                  使用注册码注册可在首次登录时获得对应的 Emby 开通天数；不填则按管理员设置的默认时长。
-                </p>
               </div>
 
               {(forceBindTelegram || systemInfo?.features?.telegram) && (

@@ -142,6 +142,8 @@ class TelegramBot:
     KNOWN_COMMANDS = {
         "start",
         "help",
+        "twihelp",
+        "twishelp",
         "me",
         "bind",
         "cancel",
@@ -151,6 +153,10 @@ class TelegramBot:
         "broadcast",
         "stats",
         "userinfo",
+        "twfind",
+        "twbindcheck",
+        "twforcebind",
+        "twsyncuser",
         "emby",
         "resetpwd",
         "playinfo",
@@ -288,22 +294,14 @@ class TelegramBot:
         # 群组花名册被动收集（chat_member 事件 + 群消息观察）
         roster_handlers.register(self)
 
-        # 兜底处理：未知命令与过期按钮
+        # 兜底处理：未知命令静默忽略，避免响应其它 Bot 的命令或群内噪音；过期按钮仍提示。
         self.application.add_handler(MessageHandler(filters.COMMAND, self._unknown_command_handler), group=99)
         self.application.add_handler(CallbackQueryHandler(self._stale_callback_handler), group=99)
 
     @staticmethod
     async def _unknown_command_handler(update: Update, context) -> None:
-        """兜底处理未知命令，避免无响应体验"""
-        if not update.message:
-            return
-        text = (update.message.text or "").strip()
-        if not text.startswith("/"):
-            return
-        cmd = text.split()[0].split("@")[0][1:].lower()
-        if cmd in TelegramBot.KNOWN_COMMANDS:
-            return
-        await update.message.reply_text("⚠️ 未知命令，请发送 /help 查看可用命令")
+        """兜底处理未知命令：不主动回复。"""
+        return
 
     @staticmethod
     async def _stale_callback_handler(update: Update, context) -> None:

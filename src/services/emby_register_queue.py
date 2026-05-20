@@ -84,7 +84,9 @@ class EmbyRegisterQueueService:
 
     @classmethod
     def _status_ttl(cls) -> int:
-        return max(60, int(RegisterConfig.EMBY_DIRECT_REGISTER_STATUS_TTL or 1800))
+        # Terminal registration status is intentionally short-lived: enough for a user
+        # to close the dialog and come back, not long enough to retain sensitive state.
+        return 15 * 60
 
     @classmethod
     def _worker_count(cls) -> int:

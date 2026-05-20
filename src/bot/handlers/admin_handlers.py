@@ -68,6 +68,22 @@ def register(bot):
 
     @require_private
     @require_admin
+    async def cmd_twishelp(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        text = (
+            "🔧 **管理员命令**\n\n"
+            "• /admin - 打开管理面板\n"
+            "• /twfind <关键词> - 按系统用户名/UID/TGID/TG用户名/Emby标识搜索\n"
+            "• /twbindcheck [关键词] - 检查指定用户或全局 TG 绑定状态\n"
+            "• /twforcebind <用户> <TGID> - 强制绑定 TG 到系统用户\n"
+            "• /twsyncuser <用户> - 同步用户状态到 Emby\n"
+            "• /stats - 系统统计\n"
+            "• /cancel - 取消输入流程\n\n"
+            "不会通过 Bot 展示线路、密码、Emby 用户名等隐私信息。"
+        )
+        await update.message.reply_text(text, parse_mode="Markdown")
+
+    @require_private
+    @require_admin
     async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """管理面板命令"""
         await update.message.reply_text(
@@ -638,8 +654,8 @@ def register(bot):
                 await update.message.reply_text(
                     f"✅ **用户创建成功**\n\n"
                     f"👤 用户名: `{username}`\n"
-                    f"🔑 密码: `{resp.emby_password}`\n"
-                    f"⏰ 有效期: **{days}** 天",
+                    f"⏰ 有效期: **{days}** 天\n"
+                    "🔒 密码不通过 Bot 展示，请在 Web 后台重置后安全交付。",
                     parse_mode="Markdown",
                 )
                 _clear_admin_state(uid)
@@ -747,7 +763,7 @@ def register(bot):
         resp = await UserService._create_emby_user(telegram_id=None, username=username, email=None, days=days)
         if resp.result == RegisterResult.SUCCESS:
             await update.message.reply_text(
-                f"✅ 创建成功\n👤 `{username}`\n🔑 `{resp.emby_password}`\n⏰ {days}天",
+                f"✅ 创建成功\n👤 `{username}`\n⏰ {days}天\n🔒 密码不通过 Bot 展示，请在 Web 后台重置后安全交付。",
                 parse_mode="Markdown",
             )
         else:
@@ -834,16 +850,109 @@ def register(bot):
         text = f"📋 **用户详情**\n\n{format_user_info(user)}"
         await update.message.reply_text(text, reply_markup=_user_action_kb(user), parse_mode="Markdown")
 
+    @require_private
+    @require_admin
+    async def cmd_twfind(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not context.args:
+            await update.message.reply_text("用法: `/twfind <用户名/UID/TGID/TG用户名/Emby标识>`", parse_mode="Markdown")
+            return
+        query = " ".join(context.args).strip()
+        users, total = await UserOperate.get_all_users(include_inactive=True, search=query, limit=10, offset=0)
+        if not users:
+            await update.message.reply_text("未找到匹配用户")
+            return
+        lines = [f"🔍 **查询结果** ({len(users)}/{total})\n"]
+        for user in users:
+            lines.append(format_user_info(user, brief=True))
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+    @require_private
+    @require_admin
+    async def cmd_twbindcheck(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if context.args:
+            users, _ = await UserOperate.get_all_users(
+                include_inactive=True,
+                search=" ".join(context.args).strip(),
+                limit=10,
+                offset=0,
+            )
+        else:
+            users, _ = await UserOperate.get_all_users(include_inactive=True, limit=100000, offset=0)
+        tg_map = {}
+        invalid = []
+        for user in users:
+            if user.TELEGRAM_ID is None:
+                continue
+            try:
+                tg_id = int(user.TELEGRAM_ID)
+            except (TypeError, ValueError):
+                invalid.append(user)
+                continue
+            if tg_id <= 0:
+                invalid.append(user)
+                continue
+            tg_map.setdefault(tg_id, []).append(user)
+        duplicates = {tg_id: rows for tg_id, rows in tg_map.items() if len(rows) > 1}
+        lines = ["📱 **TG 绑定检查**", f"扫描用户: {len(users)}", f"已绑定 TG: {sum(len(v) for v in tg_map.values())}"]
+        lines.append(f"非法 TGID: {len(invalid)}")
+        lines.append(f"重复 TGID: {len(duplicates)}")
+        for tg_id, rows in list(duplicates.items())[:10]:
+            lines.append(f"• `{tg_id}` -> " + ", ".join(f"{u.UID}/{u.USERNAME}" for u in rows))
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+    @require_private
+    @require_admin
+    async def cmd_twforcebind(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if len(context.args) < 2:
+            await update.message.reply_text("用法: `/twforcebind <用户> <TGID>`", parse_mode="Markdown")
+            return
+        query, tg_raw = context.args[0], context.args[1]
+        try:
+            tg_id = int(tg_raw)
+        except ValueError:
+            await update.message.reply_text("TGID 必须是数字")
+            return
+        users, _ = await UserOperate.get_all_users(include_inactive=True, search=query, limit=2, offset=0)
+        if len(users) != 1:
+            await update.message.reply_text("请提供能唯一匹配一个用户的关键词")
+            return
+        target = users[0]
+        occupant = await UserOperate.get_user_by_telegram_id(tg_id)
+        if occupant and occupant.UID != target.UID:
+            occupant.TELEGRAM_ID = None
+            await UserOperate.update_user(occupant)
+        target.TELEGRAM_ID = tg_id
+        await UserOperate.update_user(target)
+        await update.message.reply_text(f"✅ 已绑定 UID={target.UID} 到 TGID `{tg_id}`", parse_mode="Markdown")
+
+    @require_private
+    @require_admin
+    async def cmd_twsyncuser(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not context.args:
+            await update.message.reply_text("用法: `/twsyncuser <用户>`", parse_mode="Markdown")
+            return
+        users, _ = await UserOperate.get_all_users(include_inactive=True, search=" ".join(context.args), limit=2, offset=0)
+        if len(users) != 1:
+            await update.message.reply_text("请提供能唯一匹配一个用户的关键词")
+            return
+        ok, msg = await UserService.sync_user_to_emby(users[0])
+        await update.message.reply_text(("✅ " if ok else "❌ ") + msg)
+
     # ======================== 注册处理器 ========================
 
     # 命令
     app.add_handler(CommandHandler("admin", cmd_admin))
+    app.add_handler(CommandHandler("twishelp", cmd_twishelp))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CommandHandler("adduser", cmd_adduser))
     app.add_handler(CommandHandler("regcode", cmd_regcode))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("userinfo", cmd_userinfo))
+    app.add_handler(CommandHandler("twfind", cmd_twfind))
+    app.add_handler(CommandHandler("twbindcheck", cmd_twbindcheck))
+    app.add_handler(CommandHandler("twforcebind", cmd_twforcebind))
+    app.add_handler(CommandHandler("twsyncuser", cmd_twsyncuser))
 
     # 管理面板导航
     app.add_handler(CallbackQueryHandler(cb_panel_admin, pattern="^panel_admin$"))

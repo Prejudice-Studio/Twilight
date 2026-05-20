@@ -103,8 +103,8 @@ async def list_users():
             except Exception:
                 live_fetch_used += 1  # 失败也算一次，免得一直死磕同一个
 
-        # 未绑定 Emby 的账号：EXPIRED_AT 仅为 sentinel（0=未开通），UI 应展示"未绑定"
-        emby_bound = bool(user.EMBYID) and not bool(getattr(user, "PENDING_EMBY", False))
+        # EMBYID 非空即视为已绑定；历史数据可能残留 PENDING_EMBY=True，不能因此把到期显示成未绑定。
+        emby_bound = bool(user.EMBYID)
         user_list.append(
             {
                 "uid": user.UID,
@@ -117,7 +117,7 @@ async def list_users():
                 "active": user.ACTIVE_STATUS,
                 "emby_id": user.EMBYID,
                 "emby_bound": emby_bound,
-                "pending_emby": bool(getattr(user, "PENDING_EMBY", False)),
+                "pending_emby": bool(getattr(user, "PENDING_EMBY", False)) and not emby_bound,
                 "expired_at": user.EXPIRED_AT if emby_bound else None,
                 "register_time": user.REGISTER_TIME,
                 "created_at": user.CREATE_AT or user.REGISTER_TIME,
@@ -515,6 +515,200 @@ async def delete_user_emby(uid: int):
     return api_response(success, message, code=200 if success else 400)
 
 
+@admin_bp.route("/users/<int:uid>/force-unbind", methods=["POST"])
+@require_auth
+@require_admin
+async def force_unbind_user(uid: int):
+    """仅解除本地绑定关系，不删除 Telegram/Emby 外部账号。
+
+    Body:
+        scope: "telegram" | "emby" | "both"，默认 both
+    """
+    import json
+
+    user = await UserOperate.get_user_by_uid(uid)
+    if not user:
+        return api_response(False, "用户不存在", code=404)
+    if user.ROLE == Role.ADMIN.value and user.UID != g.current_user.UID:
+        return api_response(False, "不允许操作其他管理员账号", code=403)
+
+    data = request.get_json(silent=True) or {}
+    scope = (data.get("scope") or "both").strip().lower()
+    if scope not in {"telegram", "tg", "emby", "both"}:
+        return api_response(False, "scope 仅支持 telegram/emby/both", code=400)
+
+    changed: list[str] = []
+    old = {"telegram_id": user.TELEGRAM_ID, "emby_id": user.EMBYID}
+    if scope in {"telegram", "tg", "both"} and user.TELEGRAM_ID:
+        user.TELEGRAM_ID = None
+        changed.append("telegram")
+    if scope in {"emby", "both"} and user.EMBYID:
+        user.EMBYID = None
+        user.PENDING_EMBY = False
+        user.PENDING_EMBY_DAYS = None
+        if user.OTHER:
+            try:
+                other_data = json.loads(user.OTHER)
+            except (json.JSONDecodeError, TypeError):
+                other_data = {}
+            if isinstance(other_data, dict):
+                other_data.pop("emby_username", None)
+                user.OTHER = json.dumps(other_data) if other_data else ""
+        changed.append("emby")
+
+    if changed:
+        await UserOperate.update_user(user)
+        logger.warning(
+            "管理员 %s 强制解绑用户 uid=%s scope=%s old=%s",
+            g.current_user.USERNAME,
+            uid,
+            scope,
+            old,
+        )
+
+    return api_response(True, "已解除绑定" if changed else "没有可解除的绑定", {"changed": changed, "old": old})
+
+
+@admin_bp.route("/users/sync-bindings", methods=["POST"])
+@require_auth
+@require_admin
+async def sync_user_bindings():
+    """强制同步用户 TG/Emby 绑定状态。
+
+    Body:
+        scope: "telegram" | "emby" | "both"
+        uid: 可选，单个用户
+        filter: 可选，role/active/emby/search，用于批量指定类型
+        repair: bool，默认 true；为 true 时会清理非法/重复 TG 与失效 EMBYID
+    """
+    import json
+    from src.services.telegram_runtime import run_bot_operation
+
+    data = request.get_json(silent=True) or {}
+    scope = (data.get("scope") or "both").strip().lower()
+    if scope not in {"telegram", "tg", "emby", "both"}:
+        return api_response(False, "scope 仅支持 telegram/emby/both", code=400)
+    repair = parse_bool(data.get("repair"), default=True)
+    uid = data.get("uid")
+
+    if uid is not None:
+        try:
+            uid = int(uid)
+        except (TypeError, ValueError):
+            return api_response(False, "uid 必须是整数", code=400)
+        one = await UserOperate.get_user_by_uid(uid)
+        users = [one] if one else []
+    else:
+        f = data.get("filter") if isinstance(data.get("filter"), dict) else {}
+        emby_filter = (f.get("emby") or "").strip().lower() if isinstance(f.get("emby"), str) else ""
+        has_emby = True if emby_filter == "bound" else False if emby_filter == "unbound" else None
+        users, _ = await UserOperate.get_all_users(
+            include_inactive=True,
+            role=f.get("role") if isinstance(f.get("role"), int) else None,
+            active_status=f.get("active") if isinstance(f.get("active"), bool) else None,
+            has_emby=has_emby,
+            search=(f.get("search") or None) if isinstance(f.get("search"), str) else None,
+            limit=100000,
+            offset=0,
+        )
+
+    if not users:
+        return api_response(False, "没有匹配用户", code=404)
+
+    result = {
+        "matched": len(users),
+        "telegram_checked": 0,
+        "telegram_repaired": 0,
+        "emby_checked": 0,
+        "emby_repaired": 0,
+        "synced": 0,
+        "failed": [],
+        "details": [],
+    }
+
+    # TG 重复绑定：保留 UID 最小的一条，其他在 repair=true 时清除。
+    if scope in {"telegram", "tg", "both"}:
+        tg_map: dict[int, list[UserModel]] = {}
+        for u in users:
+            if u.TELEGRAM_ID is None:
+                continue
+            result["telegram_checked"] += 1
+            try:
+                tg_id = int(u.TELEGRAM_ID)
+            except (TypeError, ValueError):
+                tg_id = 0
+            if tg_id <= 0:
+                if repair:
+                    u.TELEGRAM_ID = None
+                    await UserOperate.update_user(u)
+                    result["telegram_repaired"] += 1
+                result["details"].append({"uid": u.UID, "scope": "telegram", "action": "invalid_cleared"})
+                continue
+            tg_map.setdefault(tg_id, []).append(u)
+
+        for tg_id, rows in tg_map.items():
+            rows.sort(key=lambda x: int(x.UID))
+            for dup in rows[1:]:
+                if repair:
+                    dup.TELEGRAM_ID = None
+                    await UserOperate.update_user(dup)
+                    result["telegram_repaired"] += 1
+                result["details"].append({"uid": dup.UID, "scope": "telegram", "action": "duplicate_cleared", "telegram_id": tg_id})
+            keeper = rows[0]
+            try:
+                async def _resolve_chat(bot):
+                    return await bot.get_chat(tg_id)
+
+                tg_user = await run_bot_operation(_resolve_chat, timeout=8)
+                username = tg_user.username or None
+                if username:
+                    await UserService.cache_telegram_username(keeper, username)
+            except Exception:
+                pass
+
+    if scope in {"emby", "both"}:
+        emby = get_emby_client()
+        for u in users:
+            if not u.EMBYID:
+                continue
+            result["emby_checked"] += 1
+            try:
+                remote = await emby.get_user(u.EMBYID)
+                if not remote:
+                    if repair:
+                        old_emby_id = u.EMBYID
+                        u.EMBYID = None
+                        u.PENDING_EMBY = False
+                        u.PENDING_EMBY_DAYS = None
+                        if u.OTHER:
+                            try:
+                                other_data = json.loads(u.OTHER)
+                            except (json.JSONDecodeError, TypeError):
+                                other_data = {}
+                            if isinstance(other_data, dict):
+                                other_data.pop("emby_username", None)
+                                u.OTHER = json.dumps(other_data) if other_data else ""
+                        await UserOperate.update_user(u)
+                        result["emby_repaired"] += 1
+                        result["details"].append({"uid": u.UID, "scope": "emby", "action": "missing_remote_cleared", "emby_id": old_emby_id})
+                    continue
+                if getattr(u, "PENDING_EMBY", False):
+                    u.PENDING_EMBY = False
+                    u.PENDING_EMBY_DAYS = None
+                    await UserOperate.update_user(u)
+                    result["emby_repaired"] += 1
+                ok, msg = await UserService.sync_user_to_emby(u)
+                if ok:
+                    result["synced"] += 1
+                else:
+                    result["failed"].append({"uid": u.UID, "scope": "emby", "reason": msg})
+            except Exception as exc:
+                result["failed"].append({"uid": u.UID, "scope": "emby", "reason": str(exc)})
+
+    logger.warning("管理员 %s 强制同步绑定状态: %s", g.current_user.USERNAME, result)
+    return api_response(True, "同步完成", result)
+
+
 @admin_bp.route("/users/<int:uid>/renew", methods=["POST"])
 @require_auth
 @require_admin
@@ -532,10 +726,12 @@ async def renew_user(uid: int):
         return api_response(False, "用户不存在", code=404)
 
     data = request.get_json() or {}
-    days = data.get("days", 30)
+    try:
+        days = int(data.get("days", 30))
+    except (TypeError, ValueError):
+        return api_response(False, "天数必须是整数", code=400)
 
-    if days <= 0:
-        return api_response(False, "天数必须大于0", code=400)
+    # days <= 0 表示设置为永久，与注册码/批量过期策略保持一致。
 
     success, message = await UserService.renew_user(user, days)
     return api_response(success, message)
@@ -800,9 +996,13 @@ async def set_user_admin(uid: int):
     user = await UserOperate.get_user_by_uid(uid)
     if not user:
         return api_response(False, "用户不存在", code=404)
+    if user.ROLE == Role.ADMIN.value and user.UID != g.current_user.UID:
+        return api_response(False, "不允许修改其他管理员权限", code=403)
 
     data = request.get_json() or {}
-    is_admin = data.get("is_admin", False)
+    is_admin = bool(data.get("is_admin", False))
+    if user.UID == g.current_user.UID and not is_admin:
+        return api_response(False, "不允许撤销自己的管理员权限", code=403)
 
     success, message = await UserService.set_user_admin(user, is_admin)
     return api_response(success, message)
@@ -821,6 +1021,8 @@ async def unbind_user_telegram(uid: int):
     user = await UserOperate.get_user_by_uid(uid)
     if not user:
         return api_response(False, "用户不存在", code=404)
+    if user.ROLE == Role.ADMIN.value and user.UID != g.current_user.UID:
+        return api_response(False, "不允许解绑其他管理员的 Telegram", code=403)
 
     if not user.TELEGRAM_ID:
         return api_response(False, "该用户未绑定 Telegram", code=400)
@@ -855,6 +1057,8 @@ async def bind_user_telegram(uid: int):
     user = await UserOperate.get_user_by_uid(uid)
     if not user:
         return api_response(False, "用户不存在", code=404)
+    if user.ROLE == Role.ADMIN.value and user.UID != g.current_user.UID:
+        return api_response(False, "不允许修改其他管理员的 Telegram", code=403)
 
     data = request.get_json() or {}
     telegram_id = data.get("telegram_id")
@@ -1038,6 +1242,11 @@ async def list_regcodes():
                     "days": c.DAYS,
                     "active": c.ACTIVE,
                     "created_time": c.CREATED_TIME,
+                    "used_by": c.UID,
+                    "used_by_uids": [int(x) for x in (c.UID or "").split(",") if x.strip().isdigit()],
+                    "used_by_telegram_ids": [
+                        int(x) for x in (c.TELEGRAM_ID or "").split(",") if x.strip().isdigit()
+                    ],
                 }
                 for c in paginated_codes
             ],

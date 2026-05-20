@@ -319,11 +319,16 @@ class UserService:
             password=password,
             pending_emby_days=pending_days,
             skip_pending_check=True,
+            reg_code_lock=reg_code,
         )
 
         # 注册码消费：只在系统账号创建成功时计数
         if response.result == RegisterResult.SUCCESS:
-            await RegCodeOperate.update_regcode_use_count(reg_code, 1)
+            await RegCodeOperate.record_regcode_use(
+                reg_code,
+                uid=response.user.UID if response.user else None,
+                telegram_id=telegram_id,
+            )
             # 重新组装一份更贴合"已使用注册码"的提示文案
             days_text = "永久" if pending_days <= 0 else f"{pending_days} 天"
             response.message = f"注册成功！注册码已使用，Emby 账号开通时长 {days_text}，请在首次登录后补建 Emby 账号。"
@@ -342,6 +347,7 @@ class UserService:
         password: Optional[str] = None,
         pending_emby_days: Optional[int] = None,
         skip_pending_check: bool = False,
+        reg_code_lock: Optional[str] = None,
     ) -> RegisterResponse:
         """
         待激活注册（仅创建系统账号，未绑定 Emby）。
@@ -355,7 +361,7 @@ class UserService:
         if not skip_pending_check and not RegisterConfig.ALLOW_PENDING_REGISTER:
             return RegisterResponse(RegisterResult.ERROR, "暂不开放注册，请使用注册码")
 
-        locks = await acquire_registration_lock(username, telegram_id)
+        locks = await acquire_registration_lock(username, telegram_id, reg_code=reg_code_lock)
         if locks is None:
             return RegisterResponse(RegisterResult.ERROR, "当前注册请求较多，请稍后重试")
 
@@ -710,7 +716,7 @@ class UserService:
             if reg_code:
                 from src.db.regcode import RegCodeOperate
 
-                await RegCodeOperate.update_regcode_use_count(reg_code, 1)
+                await RegCodeOperate.record_regcode_use(reg_code, uid=user.UID, telegram_id=telegram_id)
 
             logger.info(f"用户注册成功: {username} (TG: {telegram_id})")
 
@@ -759,7 +765,7 @@ class UserService:
                 return False, "续期码已被使用完"
 
             days = UserService._normalize_code_days(code_info.DAYS, default=days)
-            await RegCodeOperate.update_regcode_use_count(reg_code, 1)
+            await RegCodeOperate.record_regcode_use(reg_code, uid=user.UID, telegram_id=user.TELEGRAM_ID)
 
         if days <= 0:
             user.EXPIRED_AT = -1
@@ -886,6 +892,25 @@ class UserService:
         emby_username: Optional[str] = None,
         emby_password: Optional[str] = None,
     ) -> Tuple[bool, str, Optional[str]]:
+        """串行化同一用户/同一卡码的兑换，避免多次卡码并发串绑。"""
+        locks = await acquire_registration_lock(f"uid-{user.UID}", user.TELEGRAM_ID, reg_code=code_str)
+        if locks is None:
+            return False, "当前卡码或账号正在处理中，请稍后重试", None
+        try:
+            fresh_user = await UserOperate.get_user_by_uid(user.UID)
+            if not fresh_user:
+                return False, "用户不存在", None
+            return await UserService._use_code_unlocked(fresh_user, code_str, emby_username, emby_password)
+        finally:
+            await release_registration_lock(locks)
+
+    @staticmethod
+    async def _use_code_unlocked(
+        user: UserModel,
+        code_str: str,
+        emby_username: Optional[str] = None,
+        emby_password: Optional[str] = None,
+    ) -> Tuple[bool, str, Optional[str]]:
         """
         已登录用户统一使用注册码/续期码/白名单码
 
@@ -943,14 +968,25 @@ class UserService:
             # 为已有系统账户的用户创建 Emby 账户
             emby = get_emby_client()
             days = UserService._normalize_code_days(code_info.DAYS, default=30)
+            reserved_code = False
 
             try:
+                if not await RegCodeOperate.record_regcode_use(
+                    code_str,
+                    uid=user.UID,
+                    telegram_id=user.TELEGRAM_ID,
+                ):
+                    return False, "注册码/续期码已被使用完", None
+                reserved_code = True
+
                 existing_emby = await emby.get_user_by_name(emby_username)
                 if existing_emby:
+                    await RegCodeOperate.record_regcode_use(code_str, increment=-1)
                     return False, "该 Emby 用户名已被占用", None
 
                 emby_user = await emby.create_user(emby_username, emby_password or "")
                 if not emby_user:
+                    await RegCodeOperate.record_regcode_use(code_str, increment=-1)
                     return False, "创建 Emby 账户失败", None
 
                 user.EMBYID = emby_user.id
@@ -970,32 +1006,46 @@ class UserService:
                 user.OTHER = json.dumps(other_data)
                 await UserOperate.update_user(user)
 
-                await RegCodeOperate.update_regcode_use_count(code_str, 1)
                 logger.info(f"注册码创建 Emby 账户成功: system={user.USERNAME}, emby={emby_username}")
                 return True, f"Emby 账户创建成功！有效期 {UserService._format_days_text(days)}", None
             except EmbyError as e:
+                if reserved_code:
+                    await RegCodeOperate.record_regcode_use(code_str, increment=-1)
                 logger.error(f"注册码创建 Emby 账户失败: {e}")
                 return False, f"Emby 服务器错误: {e}", None
 
         # ========== 白名单码 ==========
         if code_type == RegCodeType.WHITELIST.value:
             created_emby_account = False
+            reserved_code = False
+
+            if not await RegCodeOperate.record_regcode_use(
+                code_str,
+                uid=user.UID,
+                telegram_id=user.TELEGRAM_ID,
+            ):
+                return False, "注册码/续期码已被使用完", None
+            reserved_code = True
 
             # 如果没有 Emby 账户，自动创建
             if not user.EMBYID:
                 cap_ok, cap_msg = await UserService.check_emby_user_capacity()
                 if not cap_ok:
+                    await RegCodeOperate.record_regcode_use(code_str, increment=-1)
                     return False, cap_msg, None
 
                 emby_username = (emby_username or "").strip()
                 if not emby_username:
+                    await RegCodeOperate.record_regcode_use(code_str, increment=-1)
                     return False, "使用白名单码创建 Emby 账号时，请填写 Emby 用户名", None
 
                 if not is_valid_username(emby_username):
+                    await RegCodeOperate.record_regcode_use(code_str, increment=-1)
                     return False, "Emby 用户名格式不正确（3-20位字母数字下划线，不能以数字开头）", None
 
                 pwd_ok, pwd_msg = UserService._validate_emby_register_password(emby_password)
                 if not pwd_ok:
+                    await RegCodeOperate.record_regcode_use(code_str, increment=-1)
                     return False, pwd_msg, None
 
                 emby = get_emby_client()
@@ -1003,10 +1053,12 @@ class UserService:
                 try:
                     existing_emby = await emby.get_user_by_name(emby_username)
                     if existing_emby:
+                        await RegCodeOperate.record_regcode_use(code_str, increment=-1)
                         return False, "该 Emby 用户名已被占用", None
 
                     emby_user = await emby.create_user(emby_username, emby_password or "")
                     if not emby_user:
+                        await RegCodeOperate.record_regcode_use(code_str, increment=-1)
                         return False, "创建 Emby 账户失败", None
 
                     user.EMBYID = emby_user.id
@@ -1020,6 +1072,8 @@ class UserService:
                     other_data["emby_username"] = emby_username
                     user.OTHER = json.dumps(other_data)
                 except EmbyError as e:
+                    if reserved_code:
+                        await RegCodeOperate.record_regcode_use(code_str, increment=-1)
                     logger.error(f"白名单码创建 Emby 账户失败: {e}")
                     return False, f"Emby 服务器错误: {e}", None
 
@@ -1028,8 +1082,6 @@ class UserService:
             user.ACTIVE_STATUS = True
             user.EXPIRED_AT = 253402214400  # 9999-12-31
             await UserOperate.update_user(user)
-
-            await RegCodeOperate.update_regcode_use_count(code_str, 1)
 
             msg = "白名单授权成功！已获得永久有效期"
             if created_emby_account:

@@ -181,10 +181,10 @@ async def my_job(ctx: RunContext):
 ### 8. 背景图片 URL 验证支持 CSS 包装
 
 `src/api/v1/users.py::_is_valid_background_url` 同时接受：
-- 站内相对路径 `/uploads/...`
+- 受控站内资源 `/api/v1/users/assets/...`（兼容历史 `/uploads/...`，读取时会改写）
 - 裸 `http(s)://` URL
 - `url("...")` / `url('...')` CSS 包装
-- `linear-gradient(...)` / `radial-gradient(...)` / `image-set(...)` 等 CSS 背景函数
+- `linear-gradient(...)` / `radial-gradient(...)` / `conic-gradient(...)` 等渐变函数
 
 前端 `webui/src/app/(main)/layout.tsx::normalizeBgImageValue` 会把裸 URL 包装成 `url("...")`，
 后端必须能识别这种包装形式。

@@ -77,6 +77,7 @@ export default function SettingsPage() {
 
   // Emby dialogs
   const [bindEmbyOpen, setBindEmbyOpen] = useState(false);
+  const [completePendingEmby, setCompletePendingEmby] = useState(false);
   const [embyUsername, setEmbyUsername] = useState("");
   const [embyPassword, setEmbyPassword] = useState("");
   const [showEmbyPassword, setShowEmbyPassword] = useState(false);
@@ -240,18 +241,13 @@ export default function SettingsPage() {
   }, [embyLineItems, whitelistLineItems, testSingleLineLatency]);
 
   const loadSettingsResource = useCallback(async () => {
-    const [settingsRes, tgRes] = await Promise.all([
-      api.getMySettings(),
-      api.getTelegramStatus(),
-    ]);
+    const settingsRes = await api.getMySettings();
     if (settingsRes.success && settingsRes.data) {
       setSettings(settingsRes.data);
       setBgmMode(settingsRes.data.bgm_mode);
       setBgmTokenSet(settingsRes.data.bgm_token_set ?? false);
       setEmbyStatus(settingsRes.data.emby_status ?? null);
-    }
-    if (tgRes.success && tgRes.data) {
-      setTelegramStatus(tgRes.data);
+      setTelegramStatus(settingsRes.data.telegram as TelegramStatus);
     }
     return true;
   }, []);
@@ -360,20 +356,23 @@ export default function SettingsPage() {
 
     setIsEmbyLoading(true);
     try {
-      const res = await api.bindEmbyAccount(username, password);
+      const res = completePendingEmby
+        ? await api.completeEmbyRegistration(username, password)
+        : await api.bindEmbyAccount(username, password);
       if (res.success) {
-        toast({ title: "绑定成功", variant: "success" });
+        toast({ title: completePendingEmby ? "Emby 账号已开通" : "绑定成功", variant: "success" });
         setBindEmbyOpen(false);
+        setCompletePendingEmby(false);
         setEmbyUsername("");
         setEmbyPassword("");
         loadData();
         fetchUser();
       } else {
-        toast({ title: "绑定失败", description: res.message, variant: "destructive" });
+        toast({ title: completePendingEmby ? "开通失败" : "绑定失败", description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
       console.error("绑定失败:", error);
-      toast({ title: "绑定失败", description: error.message, variant: "destructive" });
+      toast({ title: completePendingEmby ? "开通失败" : "绑定失败", description: error.message, variant: "destructive" });
     } finally {
       setIsEmbyLoading(false);
     }
@@ -813,9 +812,16 @@ export default function SettingsPage() {
               </div>
               <div className="flex gap-2 shrink-0 sm:justify-end">
                 {!user?.emby_id ? (
-                  <Button onClick={() => setBindEmbyOpen(true)} className="w-full sm:w-auto">
+                  <Button
+                    onClick={() => {
+                      setCompletePendingEmby(Boolean(user?.pending_emby));
+                      setEmbyUsername(user?.username || "");
+                      setBindEmbyOpen(true);
+                    }}
+                    className="w-full sm:w-auto"
+                  >
                     <LinkIcon className="mr-2 h-4 w-4" />
-                    绑定
+                    {user?.pending_emby ? "继续开通" : "绑定"}
                   </Button>
                 ) : (
                   <Button
@@ -836,7 +842,9 @@ export default function SettingsPage() {
             </div>
             {!user?.emby_id && (
               <p className="text-sm text-muted-foreground">
-                如果您在 Emby 服务器中已有账号，可以在此绑定。绑定后即可使用该账号访问媒体内容。
+                {user?.pending_emby
+                  ? "你已拥有 Emby 开通资格但尚未创建账号，可点击“继续开通”完成注册。"
+                  : "如果您在 Emby 服务器中已有账号，可以在此绑定。绑定后即可使用该账号访问媒体内容。"}
               </p>
             )}
           </CardContent>
@@ -1078,12 +1086,15 @@ export default function SettingsPage() {
       </motion.div>
 
       {/* Bind Emby Dialog */}
-      <Dialog open={bindEmbyOpen} onOpenChange={setBindEmbyOpen}>
+      <Dialog open={bindEmbyOpen} onOpenChange={(open) => {
+        setBindEmbyOpen(open);
+        if (!open) setCompletePendingEmby(false);
+      }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>绑定 Emby 账号</DialogTitle>
+            <DialogTitle>{completePendingEmby ? "开通 Emby 账号" : "绑定 Emby 账号"}</DialogTitle>
             <DialogDescription>
-              输入您在 Emby 服务器中的用户名和密码以验证身份
+              {completePendingEmby ? "填写要创建的 Emby 用户名和密码" : "输入您在 Emby 服务器中的用户名和密码以验证身份"}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -1101,7 +1112,7 @@ export default function SettingsPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Emby 密码 <span className="text-xs text-muted-foreground">（如账号无密码请留空）</span></Label>
+              <Label>Emby 密码 {!completePendingEmby && <span className="text-xs text-muted-foreground">（如账号无密码请留空）</span>}</Label>
               <div className="relative">
                 <Input
                   type={showEmbyPassword ? "text" : "password"}
@@ -1137,7 +1148,8 @@ export default function SettingsPage() {
             <Button
               variant="outline"
               onClick={() => {
-                setBindEmbyOpen(false);
+                    setBindEmbyOpen(false);
+                    setCompletePendingEmby(false);
                 setEmbyUsername("");
                 setEmbyPassword("");
               }}
@@ -1149,7 +1161,7 @@ export default function SettingsPage() {
               disabled={isEmbyLoading || !embyUsername.trim()}
             >
               {isEmbyLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              确认绑定
+              {completePendingEmby ? "确认开通" : "确认绑定"}
             </Button>
           </DialogFooter>
         </DialogContent>
