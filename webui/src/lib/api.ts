@@ -1003,6 +1003,28 @@ class ApiClient {
     });
   }
 
+  async clearStalePendingEmbyUsers(opts: { dryRun?: boolean } = {}) {
+    const dryRun = Boolean(opts.dryRun);
+    const body: Record<string, unknown> = { dry_run: dryRun };
+    if (!dryRun) body.confirm = "CLEAR_PENDING_EMBY_OK";
+    return this.request<{
+      users: Array<{
+        uid: number;
+        username: string;
+        telegram_id: number | null;
+        register_time: number | null;
+        created_at: number | null;
+      }>;
+      count: number;
+      cleared: number;
+      failed: Array<{ uid: number; username: string; error: string }>;
+      dry_run: boolean;
+    }>("/admin/users/clear-stale-pending-emby", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
   async testBotConnectivity(target?: string) {
     return this.request<{
       results: Array<{

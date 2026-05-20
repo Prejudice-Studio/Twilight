@@ -2596,6 +2596,95 @@ async def cleanup_invalid_users():
     )
 
 
+@admin_bp.route("/users/clear-stale-pending-emby", methods=["POST"])
+@require_auth
+@require_admin
+async def clear_stale_pending_emby_users():
+    """清理旧自由注册残留的 Emby 待补建资格。
+
+    仅处理同时满足以下条件的账号：
+      - 未绑定 Emby；
+      - ``PENDING_EMBY=True``；
+      - ``PENDING_EMBY_DAYS`` 为空。
+
+    使用注册码产生的待补建资格会带有 ``PENDING_EMBY_DAYS``，不会被本接口清理。
+    """
+    from src.core.utils import rate_limit_check
+
+    data = request.get_json(silent=True) or {}
+    dry_run = parse_bool(data.get("dry_run"), default=True)
+
+    if not dry_run:
+        confirm = (data.get("confirm") or "").strip()
+        if confirm != "CLEAR_PENDING_EMBY_OK":
+            return api_response(
+                False,
+                '需要提供 confirm="CLEAR_PENDING_EMBY_OK" 以确认实际清理',
+                code=400,
+            )
+        allowed, retry_after = rate_limit_check(
+            "admin_clear_stale_pending_emby",
+            str(g.current_user.UID),
+            max_requests=10,
+            window_seconds=60,
+        )
+        if not allowed:
+            return api_response(False, f"操作过于频繁，请 {retry_after} 秒后再试", code=429)
+
+    all_users, _ = await UserOperate.get_all_users(
+        include_inactive=True,
+        limit=100000,
+        offset=0,
+    )
+
+    targets: list[UserModel] = []
+    for u in all_users:
+        if u.EMBYID:
+            continue
+        if not bool(getattr(u, "PENDING_EMBY", False)):
+            continue
+        if getattr(u, "PENDING_EMBY_DAYS", None) is not None:
+            continue
+        targets.append(u)
+
+    users_view = [
+        {
+            "uid": int(u.UID),
+            "username": u.USERNAME,
+            "telegram_id": u.TELEGRAM_ID,
+            "register_time": u.REGISTER_TIME,
+            "created_at": u.CREATE_AT or u.REGISTER_TIME,
+        }
+        for u in targets
+    ]
+
+    cleared = 0
+    failed: list[dict] = []
+    if not dry_run:
+        for u in targets:
+            try:
+                u.PENDING_EMBY = False
+                u.PENDING_EMBY_DAYS = None
+                await UserOperate.update_user(u)
+                cleared += 1
+            except Exception as exc:
+                logger.warning("清理旧 Emby 待补建资格失败 uid=%s username=%s: %s", u.UID, u.USERNAME, exc)
+                failed.append({"uid": int(u.UID), "username": u.USERNAME, "error": str(exc)})
+
+    action = "预览" if dry_run else "清理"
+    return api_response(
+        True,
+        f"{action}完成：匹配 {len(targets)} 个旧自由注册残留资格" + (f"，已清理 {cleared} 个" if not dry_run else ""),
+        {
+            "users": users_view,
+            "count": len(targets),
+            "cleared": cleared,
+            "failed": failed,
+            "dry_run": dry_run,
+        },
+    )
+
+
 @admin_bp.route("/users/kick-no-emby", methods=["POST"])
 @require_auth
 @require_admin

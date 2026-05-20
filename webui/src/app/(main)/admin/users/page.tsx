@@ -31,6 +31,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -84,6 +87,7 @@ export default function AdminUsersPage() {
   const [cleanupMinDays, setCleanupMinDays] = useState("7");
   const [cleanupPreview, setCleanupPreview] = useState<any[] | null>(null);
   const [cleanupLoading, setCleanupLoading] = useState(false);
+  const [stalePendingLoading, setStalePendingLoading] = useState(false);
 
   // Edit dialog states
   const [editOpen, setEditOpen] = useState(false);
@@ -826,6 +830,46 @@ export default function AdminUsersPage() {
     }
   };
 
+  const handleClearStalePendingEmby = async () => {
+    setStalePendingLoading(true);
+    try {
+      const preview = await api.clearStalePendingEmbyUsers({ dryRun: true });
+      if (!preview.success || !preview.data) {
+        toast({ title: "预览失败", description: preview.message, variant: "destructive" });
+        return;
+      }
+      if (preview.data.count === 0) {
+        toast({ title: "无需清理", description: "没有旧自由注册残留的 Emby 开通资格", variant: "success" });
+        return;
+      }
+
+      const ok = await confirmAction({
+        title: "清理旧 Emby 开通资格",
+        description: `将清理 ${preview.data.count} 个旧自由注册残留资格。使用注册码产生的待补建资格不会受影响。`,
+        tone: "warning",
+        confirmLabel: "确认清理",
+      });
+      if (!ok) return;
+
+      const res = await api.clearStalePendingEmbyUsers({ dryRun: false });
+      if (res.success && res.data) {
+        toast({
+          title: `已清理 ${res.data.cleared} 个旧资格`,
+          description: res.data.failed.length ? `失败 ${res.data.failed.length} 个` : "个人设置里的错误开通提示会消失",
+          variant: res.data.failed.length ? "default" : "success",
+        });
+        invalidateUsersCache();
+        await loadUsers();
+      } else {
+        toast({ title: "清理失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "清理失败", description: error.message || "网络异常", variant: "destructive" });
+    } finally {
+      setStalePendingLoading(false);
+    }
+  };
+
   // ============== 一键踢出未绑定 Emby 的系统账号 ==============
   const noEmbyMinDaysParsed = (() => {
     const n = Number(noEmbyMinDays);
@@ -992,105 +1036,134 @@ export default function AdminUsersPage() {
           <p className="text-sm text-muted-foreground">管理所有注册用户</p>
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          <Button
-            variant="outline"
-            onClick={() => {
-              setForcePwdEmbyName("");
-              setForcePwdNewPwd("");
-              setForcePwdAuto(true);
-              setForcePwdResult(null);
-              setForcePwdOpen(true);
-            }}
-          >
-            <Key className="mr-2 h-4 w-4" />
-            按 Emby 用户名改密
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setStandaloneName("");
-              setStandalonePwd("");
-              setStandaloneEmail("");
-              setStandaloneOpen(true);
-            }}
-          >
-            <UserPlus className="mr-2 h-4 w-4" />
-            新建独立 Emby 账号
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setBulkExpireMode("permanent");
-              setBulkExpireDays("30");
-              setBulkExpireIncludeAdmin(false);
-              setBulkExpireIncludeWhitelist(false);
-              setBulkExpireConfirmText("");
-              setBulkExpireOpen(true);
-            }}
-          >
-            <CalendarClock className="mr-2 h-4 w-4" />
-            批量到期调控
-          </Button>
-          <Button
-            variant="outline"
-            disabled={bulkEnableBlocked}
-            title={bulkEnableBlocked ? "当前状态筛选为仅已启用，无法批量启用禁用账号" : undefined}
-            onClick={() => {
-              setBulkEnableIncludeAdmin(false);
-              setBulkEnableIncludeWhitelist(false);
-              setBulkEnableConfirmText("");
-              setBulkEnableOpen(true);
-            }}
-          >
-            <UserCheck className="mr-2 h-4 w-4" />
-            批量启用禁用账号
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => void handleSyncBindings({ currentFilter: true })}
-          >
-            <RefreshCw className="mr-2 h-4 w-4" />
-            同步当前筛选
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => void handleSyncBindings()}
-          >
-            <RefreshCw className="mr-2 h-4 w-4" />
-            同步全部绑定
-          </Button>
-          <Button
-            variant="outline"
-            className="text-destructive hover:text-destructive"
-            onClick={() => {
-              setCleanupPreview(null);
-              setCleanupMinDays("7");
-              setCleanupOpen(true);
-            }}
-          >
-            <UserX className="mr-2 h-4 w-4" />
-            清理无效用户
-          </Button>
-          <Button
-            variant="outline"
-            className="text-destructive hover:text-destructive"
-            onClick={() => {
-              setNoEmbyPreview(null);
-              setNoEmbyConfirmText("");
-              setNoEmbyOpen(true);
-            }}
-          >
-            <UserX className="mr-2 h-4 w-4" />
-            踢出未绑 Emby 账号
-          </Button>
-          <Button
-            variant="outline"
-            className="text-destructive hover:text-destructive"
-            onClick={openKickDialog}
-          >
-            <Send className="mr-2 h-4 w-4" />
-            踢出未绑 TG 成员
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">
+                <MoreHorizontal className="mr-2 h-4 w-4" />
+                管理操作
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <Key className="mr-2 h-4 w-4" />
+                  Emby 操作
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-56">
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setForcePwdEmbyName("");
+                      setForcePwdNewPwd("");
+                      setForcePwdAuto(true);
+                      setForcePwdResult(null);
+                      setForcePwdOpen(true);
+                    }}
+                  >
+                    <Key className="mr-2 h-4 w-4" />
+                    按 Emby 用户名改密
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setStandaloneName("");
+                      setStandalonePwd("");
+                      setStandaloneEmail("");
+                      setStandaloneOpen(true);
+                    }}
+                  >
+                    <UserPlus className="mr-2 h-4 w-4" />
+                    新建独立 Emby 账号
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void handleSyncBindings({ currentFilter: true })}>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    同步当前筛选
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void handleSyncBindings()}>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    同步全部绑定
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <CalendarClock className="mr-2 h-4 w-4" />
+                  批量处理
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-56">
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setBulkExpireMode("permanent");
+                      setBulkExpireDays("30");
+                      setBulkExpireIncludeAdmin(false);
+                      setBulkExpireIncludeWhitelist(false);
+                      setBulkExpireConfirmText("");
+                      setBulkExpireOpen(true);
+                    }}
+                  >
+                    <CalendarClock className="mr-2 h-4 w-4" />
+                    批量到期调控
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={bulkEnableBlocked}
+                    onClick={() => {
+                      setBulkEnableIncludeAdmin(false);
+                      setBulkEnableIncludeWhitelist(false);
+                      setBulkEnableConfirmText("");
+                      setBulkEnableOpen(true);
+                    }}
+                  >
+                    <UserCheck className="mr-2 h-4 w-4" />
+                    批量启用禁用账号
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuSeparator />
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger className="text-destructive focus:text-destructive">
+                  <UserX className="mr-2 h-4 w-4" />
+                  清理 / 踢出
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-60">
+                  <DropdownMenuItem
+                    disabled={stalePendingLoading}
+                    onClick={() => void handleClearStalePendingEmby()}
+                  >
+                    {stalePendingLoading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <UserX className="mr-2 h-4 w-4" />
+                    )}
+                    清理旧 Emby 开通资格
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="text-destructive focus:text-destructive"
+                    onClick={() => {
+                      setCleanupPreview(null);
+                      setCleanupMinDays("7");
+                      setCleanupOpen(true);
+                    }}
+                  >
+                    <UserX className="mr-2 h-4 w-4" />
+                    清理无效用户
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="text-destructive focus:text-destructive"
+                    onClick={() => {
+                      setNoEmbyPreview(null);
+                      setNoEmbyConfirmText("");
+                      setNoEmbyOpen(true);
+                    }}
+                  >
+                    <UserX className="mr-2 h-4 w-4" />
+                    踢出未绑 Emby 账号
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={openKickDialog}>
+                    <Send className="mr-2 h-4 w-4" />
+                    踢出未绑 TG 成员
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Badge variant="outline" className="text-lg px-4 py-2">
             共 {total} 用户
           </Badge>
