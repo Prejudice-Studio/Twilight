@@ -17,6 +17,7 @@
 | [后端 API 参考](./BACKEND_API.md) | REST API 接口规范、认证、错误码 |
 | [API 路由索引](./API_INDEX.md) | `/api/v1` 完整路由清单、认证级别、模块归属 |
 | [API Key 外部接入](./API_KEY_API.md) | 第三方系统集成、权限矩阵 |
+| [注册码与卡码说明](./REGCODES.md) | 注册码、续期码、白名单码和诱饵码规则 |
 
 ## 前端与开发
 
@@ -29,6 +30,7 @@
 
 - [背景自定义](./BACKGROUND.md) — 用户自定义主题背景的实现
 - [Telegram Bot 命令](./TG_BOT_COMMANDS.md) — Bot 普通命令、管理员命令、群组管理工具
+- [注册码与卡码说明](./REGCODES.md) — 卡码类型、生成格式、兼容性与安全口径
 - [安全加固指南](./SECURITY.md) — 生产安全基线、密钥与部署检查清单
 - [安全与性能优化记录](./SECURITY_AND_PERFORMANCE_REVIEW.md) — 上传资源、注册队列、定时任务与管理接口加固
 

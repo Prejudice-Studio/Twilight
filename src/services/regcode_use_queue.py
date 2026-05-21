@@ -129,6 +129,10 @@ class RegcodeUseQueueService:
         return {int(uid) for uid in cls._pending_by_uid.keys() if uid is not None}
 
     @classmethod
+    def in_flight_count(cls) -> int:
+        return len(cls._pending_by_uid)
+
+    @classmethod
     async def get_status(cls, request_id: str, status_token: str) -> Optional[Dict[str, Any]]:
         cls._ensure_started()
         assert cls._state_lock is not None

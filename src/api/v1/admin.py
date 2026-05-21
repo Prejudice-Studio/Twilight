@@ -1628,6 +1628,8 @@ async def list_regcodes():
         codes = [c for c in codes if _is_expired(c)]
     elif status == "active":
         codes = [c for c in codes if c.ACTIVE]
+    elif status == "decoy":
+        codes = [c for c in codes if RegCodeOperate.is_decoy(c)]
 
     if search:
         codes = [
@@ -1664,6 +1666,7 @@ async def list_regcodes():
                     "code": c.CODE,
                     "type": c.TYPE,
                     "type_name": {1: "注册", 2: "续期", 3: "白名单"}.get(c.TYPE, "未知"),
+                    "is_decoy": RegCodeOperate.is_decoy(c),
                     "validity_time": c.VALIDITY_TIME,
                     "use_count": c.USE_COUNT,
                     "use_count_limit": c.USE_COUNT_LIMIT,
@@ -1930,8 +1933,35 @@ async def create_regcode():
     except (TypeError, ValueError):
         return api_response(False, "参数类型错误，请检查 type/validity_time/use_count_limit/days/count", code=400)
 
+    decoy = parse_bool(data.get("decoy"), default=False)
+    code_format = (data.get("format") or "").strip() or None
+    random_algorithm = (data.get("random_algorithm") or "").strip() or None
+
     if code_type not in (1, 2, 3):
         return api_response(False, "type 仅支持 1=注册, 2=续期, 3=白名单", code=400)
+
+    if validity_time < -1:
+        return api_response(False, "validity_time 不能小于 -1", code=400)
+
+    if use_count_limit < -1 or use_count_limit == 0:
+        return api_response(False, "use_count_limit 仅支持 -1 或大于 0 的整数", code=400)
+
+    allowed_algorithms = {
+        "base32-20",
+        "base32-24",
+        "hex32",
+        "hex20",
+        "base32-16",
+        "alnum-24",
+        "alnum-16",
+        "urlsafe-24",
+        "digits-16",
+        "digits-12",
+        "uuid",
+        "legacy-sha1",
+    }
+    if random_algorithm and random_algorithm.lower() not in allowed_algorithms:
+        return api_response(False, "random_algorithm 不支持", code=400)
 
     # 0 和 -1 都表示永久
     if days <= 0:
@@ -1940,7 +1970,20 @@ async def create_regcode():
     if count < 1 or count > 100:
         return api_response(False, "生成数量必须在 1-100 之间", code=400)
 
-    codes = await RegCodeOperate.create_regcode(validity_time, code_type, use_count_limit, count, days)
+    try:
+        codes = await RegCodeOperate.create_regcode(
+            validity_time,
+            code_type,
+            use_count_limit,
+            count,
+            days,
+            code_format=code_format,
+            random_algorithm=random_algorithm,
+            decoy=decoy,
+        )
+    except Exception as exc:
+        logger.warning("生成卡码失败: %s", exc, exc_info=True)
+        return api_response(False, f"生成失败: {exc}", code=400)
 
     return api_response(
         True,
@@ -1948,6 +1991,7 @@ async def create_regcode():
         {
             "codes": codes if isinstance(codes, list) else [codes],
             "count": count,
+            "decoy": decoy,
         },
     )
 

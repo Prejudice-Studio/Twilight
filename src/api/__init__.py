@@ -155,13 +155,23 @@ def create_app() -> Flask:
     # 错误处理
     @app.errorhandler(404)
     def not_found(e):
+        path = request.path or ""
+        method = request.method or ""
+        if path.startswith("/api/"):
+            message = f"接口不存在: {method} {path}"
+        else:
+            message = f"资源不存在: {method} {path}"
         return (
             jsonify(
                 {
                     "success": False,
                     "code": 404,
-                    "message": "接口不存在",
-                    "data": None,
+                    "message": message,
+                    "data": {
+                        "method": method,
+                        "path": path,
+                        "hint": "请确认前后端版本一致、后端服务已重启，且路由已注册。",
+                    },
                     "timestamp": timestamp(),
                 }
             ),
@@ -186,13 +196,19 @@ def create_app() -> Flask:
 
     @app.errorhandler(405)
     def method_not_allowed(e):
+        path = request.path or ""
+        method = request.method or ""
         return (
             jsonify(
                 {
                     "success": False,
                     "code": 405,
-                    "message": "请求方法不允许",
-                    "data": None,
+                    "message": f"请求方法不允许: {method} {path}",
+                    "data": {
+                        "method": method,
+                        "path": path,
+                        "hint": "请确认前端使用的 HTTP 方法与后端路由一致。",
+                    },
                     "timestamp": timestamp(),
                 }
             ),

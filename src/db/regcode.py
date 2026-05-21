@@ -4,6 +4,9 @@ import hashlib
 import random
 import logging
 import json
+import secrets
+import string
+import uuid
 from typing import Optional, List, Union
 
 from sqlalchemy import select, func, String, Integer, Boolean, update
@@ -11,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.exc import SQLAlchemyError
 
-from src.config import Config
+from src.config import Config, RegisterConfig
 from src.db.utils import create_database, init_async_db
 
 logger = logging.getLogger(__name__)
@@ -47,14 +50,69 @@ ENGINE, RegCodeSessionFactory = init_async_db("regcode", RegCodeDatabaseModel)
 
 class RegCodeOperate:
     @staticmethod
-    def _generate_code(vali_time: int, use_count_limit: int, day: int) -> str:
-        """生成唯一的注册码"""
-        unique_part = f"{vali_time}-{use_count_limit}-{day}-{random.randint(10000, 99999)}-{time.time()}"
-        return "code-" + hashlib.sha1(unique_part.encode()).hexdigest()[:20]
+    def _random_part(algorithm: Optional[str] = None) -> str:
+        algo = (algorithm or RegisterConfig.REGCODE_RANDOM_ALGORITHM or "base32-20").strip().lower()
+        base32_alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        alnum_alphabet = string.ascii_uppercase + string.digits
+        urlsafe_alphabet = string.ascii_letters + string.digits + "-_"
+        if algo == "hex32":
+            return secrets.token_hex(16)
+        if algo == "base32-24":
+            return "".join(secrets.choice(base32_alphabet) for _ in range(24))
+        if algo == "base32-20":
+            return "".join(secrets.choice(base32_alphabet) for _ in range(20))
+        if algo == "base32-16":
+            return "".join(secrets.choice(base32_alphabet) for _ in range(16))
+        if algo == "alnum-24":
+            return "".join(secrets.choice(alnum_alphabet) for _ in range(24))
+        if algo == "alnum-16":
+            return "".join(secrets.choice(alnum_alphabet) for _ in range(16))
+        if algo == "urlsafe-24":
+            return "".join(secrets.choice(urlsafe_alphabet) for _ in range(24))
+        if algo == "digits-16":
+            return "".join(secrets.choice(string.digits) for _ in range(16))
+        if algo == "digits-12":
+            return "".join(secrets.choice(string.digits) for _ in range(12))
+        if algo == "uuid":
+            return str(uuid.uuid4())
+        if algo == "legacy-sha1":
+            unique_part = f"{random.randint(10000, 99999)}-{time.time()}-{secrets.token_hex(8)}"
+            return hashlib.sha1(unique_part.encode()).hexdigest()[:20]
+        return "".join(secrets.choice(base32_alphabet) for _ in range(20))
+
+    @staticmethod
+    def _type_label(type_: int) -> str:
+        return {Type.REGISTER.value: "register", Type.RENEW.value: "renew", Type.WHITELIST.value: "whitelist"}.get(int(type_ or 0), "code")
+
+    @staticmethod
+    def _generate_code(vali_time: int, use_count_limit: int, day: int, type_: int = 1, index: int = 1, *, code_format: Optional[str] = None, random_algorithm: Optional[str] = None) -> str:
+        """按配置格式生成卡码。支持 {random}/{type}/{days}/{index}。"""
+        fmt = (code_format if code_format is not None else RegisterConfig.REGCODE_FORMAT) or "code-{random}"
+        fmt = str(fmt).strip()[:128] or "code-{random}"
+        if "{random}" not in fmt:
+            fmt = f"{fmt}-{{random}}"
+        code = fmt.format(
+            random=RegCodeOperate._random_part(random_algorithm),
+            type=RegCodeOperate._type_label(type_),
+            days=day,
+            index=index,
+            validity=vali_time,
+            limit=use_count_limit,
+        )
+        code = "".join(ch for ch in code if ch.isalnum() or ch in "._:-").strip("._:-")
+        return code[:96] or ("code-" + secrets.token_hex(10))
 
     @staticmethod
     async def create_regcode(
-        vali_time: int, type_: int, use_count_limit: int = 1, count: int = 1, day: int = 30
+        vali_time: int,
+        type_: int,
+        use_count_limit: int = 1,
+        count: int = 1,
+        day: int = 30,
+        *,
+        code_format: Optional[str] = None,
+        random_algorithm: Optional[str] = None,
+        decoy: bool = False,
     ) -> Union[str, List[str]]:
         """创建指定数量的注册码并添加到数据库中"""
         try:
@@ -64,30 +122,54 @@ class RegCodeOperate:
         day = -1 if parsed_day <= 0 else parsed_day
         codes = []
         async with RegCodeSessionFactory() as session:
-            for _ in range(count):
-                code = RegCodeOperate._generate_code(vali_time, use_count_limit, day)
-                reg_code = RegCodeModel(
-                    CODE=code, VALIDITY_TIME=vali_time, TYPE=type_, USE_COUNT_LIMIT=use_count_limit, DAYS=day
-                )
-                try:
+            try:
+                generated_in_batch: set[str] = set()
+                for index in range(1, count + 1):
+                    code = RegCodeOperate._generate_code(vali_time, use_count_limit, day, type_, index, code_format=code_format, random_algorithm=random_algorithm)
+                    for _retry in range(8):
+                        exists = await session.execute(select(RegCodeModel.CODE).where(RegCodeModel.CODE == code).limit(1))
+                        if exists.scalar_one_or_none() is None and code not in generated_in_batch:
+                            break
+                        code = RegCodeOperate._generate_code(vali_time, use_count_limit, day, type_, index, code_format=code_format, random_algorithm=random_algorithm)
+                    else:
+                        raise ValueError("生成卡码重复次数过多，请调整格式或随机算法")
+                    generated_in_batch.add(code)
+                    other = {"decoy": True} if decoy else None
+                    reg_code = RegCodeModel(
+                        CODE=code,
+                        VALIDITY_TIME=vali_time,
+                        TYPE=type_,
+                        USE_COUNT_LIMIT=use_count_limit,
+                        DAYS=day,
+                        OTHER=json.dumps(other, ensure_ascii=False) if other else None,
+                    )
                     session.add(reg_code)
-                    await session.commit()
                     codes.append(code)
-                except SQLAlchemyError as e:
-                    await session.rollback()
-                    logger.error(f"数据库操作失败: {e}")
-                    raise
+                await session.commit()
+            except (SQLAlchemyError, ValueError) as e:
+                await session.rollback()
+                logger.error(f"数据库操作失败: {e}")
+                raise
 
         return codes[0] if len(codes) == 1 else codes
 
     @staticmethod
-    def get_note(reg_code: RegCodeModel) -> str:
+    def _other_dict(reg_code: RegCodeModel) -> dict:
         if not reg_code.OTHER:
-            return ""
+            return {}
         try:
             data = json.loads(reg_code.OTHER)
+            return data if isinstance(data, dict) else {}
         except (json.JSONDecodeError, TypeError):
-            return ""
+            return {}
+
+    @staticmethod
+    def is_decoy(reg_code: RegCodeModel) -> bool:
+        return bool(RegCodeOperate._other_dict(reg_code).get("decoy"))
+
+    @staticmethod
+    def get_note(reg_code: RegCodeModel) -> str:
+        data = RegCodeOperate._other_dict(reg_code)
         return data.get("note", "") if isinstance(data, dict) else ""
 
     @staticmethod

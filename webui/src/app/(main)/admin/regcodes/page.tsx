@@ -73,7 +73,10 @@ export default function AdminRegcodesPage() {
     validityTime: "-1",
     useCountLimit: "1",
     count: "1",
+    format: "",
+    randomAlgorithm: "",
   });
+  const [createDecoy, setCreateDecoy] = useState(false);
   const [isPermanentDays, setIsPermanentDays] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [createdCodes, setCreatedCodes] = useState<string[]>([]);
@@ -105,20 +108,26 @@ export default function AdminRegcodesPage() {
   // 监听 Tab 切换，重置数据
   useEffect(() => {
     if (!createOpen) return;
-    setCreatedCodes([]);
-    if (activeTab === "1") {
-      setIsPermanentDays(false);
-      setCreateData({ days: "30", validityTime: "-1", useCountLimit: "1", count: "1" });
-    } else if (activeTab === "2") {
-      setIsPermanentDays(false);
-      setCreateData({ days: "30", validityTime: "72", useCountLimit: "1", count: "1" });
-    } else {
-      setIsPermanentDays(true);
-      setCreateData({ days: "-1", validityTime: "-1", useCountLimit: "-1", count: "1" });
-    }
+      setCreatedCodes([]);
+      setCreateDecoy(false);
+      if (activeTab === "1") {
+        setIsPermanentDays(false);
+        setCreateData({ days: "30", validityTime: "-1", useCountLimit: "1", count: "1", format: "", randomAlgorithm: "" });
+      } else if (activeTab === "2") {
+        setIsPermanentDays(false);
+        setCreateData({ days: "30", validityTime: "72", useCountLimit: "1", count: "1", format: "", randomAlgorithm: "" });
+      } else {
+        setIsPermanentDays(true);
+        setCreateData({ days: "-1", validityTime: "-1", useCountLimit: "-1", count: "1", format: "", randomAlgorithm: "" });
+      }
   }, [activeTab, createOpen]);
 
   const handleCreate = async () => {
+    const count = parseInt(createData.count, 10);
+    if (Number.isNaN(count) || count < 1 || count > 100) {
+      toast({ title: "参数错误", description: "生成数量必须在 1-100 之间", variant: "destructive" });
+      return;
+    }
     setIsCreating(true);
     try {
       const parsedDays = parseInt(createData.days, 10);
@@ -129,7 +138,10 @@ export default function AdminRegcodesPage() {
         days: normalizedDays,
         validity_time: parseInt(createData.validityTime) || -1,
         use_count_limit: parseInt(createData.useCountLimit) || 1,
-        count: parseInt(createData.count) || 1,
+        count,
+        decoy: createDecoy,
+        format: createData.format.trim() || undefined,
+        random_algorithm: createData.randomAlgorithm || undefined,
       });
 
       if (res.success && res.data) {
@@ -171,6 +183,24 @@ export default function AdminRegcodesPage() {
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     toast({ title: "已复制到剪贴板" });
+  };
+
+  const copyRegcodes = (items: Regcode[], emptyMessage = "没有可复制的卡码") => {
+    if (items.length === 0) {
+      toast({ title: emptyMessage, variant: "destructive" });
+      return;
+    }
+    navigator.clipboard.writeText(items.map((item) => item.code).join("\n"));
+    toast({ title: `已复制 ${items.length} 个卡码` });
+  };
+
+  const clearFilters = () => {
+    setFilterType("all");
+    setFilterStatus("all");
+    setSearch("");
+    setSort("created_time");
+    setOrder("desc");
+    setPage(1);
   };
 
   const handleSaveNote = async (code: string) => {
@@ -265,11 +295,51 @@ export default function AdminRegcodesPage() {
 
   const getStatusBadge = (code: Regcode) => {
     const status = code.status || (code.active === false ? "disabled" : "available");
+    if (code.is_decoy) return <Badge variant="destructive">诱饵码</Badge>;
     if (status === "disabled") return <Badge variant="destructive">已禁用</Badge>;
     if (status === "used_up") return <Badge variant="warning">已用完</Badge>;
     if (status === "expired") return <Badge variant="secondary">已过期</Badge>;
     return <Badge variant="success">可用</Badge>;
   };
+
+  const typeDescriptions: Record<string, { title: string; description: string; defaults: string }> = {
+    "1": {
+      title: "注册码",
+      description: "用于新用户注册系统账号，并授予首次补建 Emby 账号的开通天数。旧版已生成注册码仍按数据库中的类型、天数和使用次数生效。",
+      defaults: "默认：账号 30 天、卡码永久有效、使用 1 次。",
+    },
+    "2": {
+      title: "续期码",
+      description: "仅已绑定 Emby 的用户可使用，用于延长账号有效期；永久天数会把到期设置为永久。",
+      defaults: "默认：增加 30 天、卡码 72 小时有效、使用 1 次。",
+    },
+    "3": {
+      title: "白名单码",
+      description: "将用户升级为白名单并设置永久有效；未绑定 Emby 时需同时填写 Emby 用户名和密码完成创建。",
+      defaults: "默认：永久账号、卡码永久有效、不限制使用次数。",
+    },
+  };
+
+  const activeTypeDescription = typeDescriptions[activeTab];
+
+  const randomAlgorithmDescriptions: Record<string, string> = {
+    "base32-20": "20 位易抄写大写 Base32 风格字符，去掉易混淆字符，默认推荐。",
+    "base32-24": "24 位易抄写大写 Base32 风格字符，更高强度，适合公开发放。",
+    hex32: "32 位十六进制随机串，约 128-bit 强度，适合系统间导入导出。",
+    hex20: "20 位十六进制随机串，旧默认格式，保留兼容。",
+    "base32-16": "16 位大写 Base32 风格字符，去掉易混淆字符，适合人工抄写。",
+    "alnum-24": "24 位大写字母 + 数字，更高强度，兼顾可读性和随机性。",
+    "alnum-16": "16 位大写字母 + 数字，兼顾可读性和随机性。",
+    "urlsafe-24": "24 位 URL 安全字符，包含大小写字母、数字、- 和 _。",
+    "digits-16": "16 位纯数字，比 12 位更安全，但仍低于字母数字混合。",
+    "digits-12": "12 位纯数字，便于口头传递，但安全性低于字母数字混合。",
+    uuid: "标准 UUID v4，长度较长，唯一性强，适合系统间导入导出。",
+    "legacy-sha1": "旧版 SHA1 截断格式，用于兼容历史卡码风格。",
+  };
+
+  const selectedAlgorithmDescription = createData.randomAlgorithm
+    ? randomAlgorithmDescriptions[createData.randomAlgorithm]
+    : "使用配置管理中的默认随机算法。";
 
   const pages = Math.ceil(total / 20);
 
@@ -315,7 +385,13 @@ export default function AdminRegcodesPage() {
                 <TabsTrigger value="3">白名单</TabsTrigger>
               </TabsList>
 
-              <div className="space-y-4 py-2">
+                <div className="space-y-4 py-2">
+                <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground">
+                  <div className="font-medium text-foreground">{activeTypeDescription.title}</div>
+                  <p className="mt-1">{activeTypeDescription.description}</p>
+                  <p className="mt-1">{activeTypeDescription.defaults}</p>
+                  <p className="mt-1">类型值：注册=1、续期=2、白名单=3；0 或 -1 天数均表示永久。</p>
+                </div>
                 <div className="space-y-2">
                   <Label>{activeTab === "3" ? "白名单有效天数" : "账号天数"}</Label>
                   <div className="flex items-center justify-between rounded-md border border-border/80 bg-muted/40 px-3 py-2">
@@ -375,9 +451,72 @@ export default function AdminRegcodesPage() {
                   />
                 </div>
 
+                <div className="space-y-2 rounded-xl border border-border/80 bg-muted/30 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <Label>生成假卡码 / 诱饵码</Label>
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        用户使用后会按 [SAR].regcode_decoy_action 执行安全动作。
+                      </p>
+                    </div>
+                    <Switch checked={createDecoy} onCheckedChange={setCreateDecoy} />
+                  </div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>随机算法</Label>
+                    <Select value={createData.randomAlgorithm || "default"} onValueChange={(v) => setCreateData({ ...createData, randomAlgorithm: v === "default" ? "" : v })}>
+                      <SelectTrigger><SelectValue placeholder="使用配置默认" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="default">使用配置默认</SelectItem>
+                        <SelectItem value="base32-20">base32-20 推荐</SelectItem>
+                        <SelectItem value="base32-24">base32-24 高强度</SelectItem>
+                        <SelectItem value="hex32">hex32 128-bit</SelectItem>
+                        <SelectItem value="hex20">hex20 旧默认</SelectItem>
+                        <SelectItem value="base32-16">base32-16 短码</SelectItem>
+                        <SelectItem value="alnum-24">alnum-24 高强度</SelectItem>
+                        <SelectItem value="alnum-16">alnum-16</SelectItem>
+                        <SelectItem value="urlsafe-24">urlsafe-24</SelectItem>
+                        <SelectItem value="digits-16">digits-16</SelectItem>
+                        <SelectItem value="digits-12">digits-12</SelectItem>
+                        <SelectItem value="uuid">uuid</SelectItem>
+                        <SelectItem value="legacy-sha1">legacy-sha1</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[11px] text-muted-foreground">{selectedAlgorithmDescription}</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>自定义格式</Label>
+                    <Input
+                      value={createData.format}
+                      onChange={(e) => setCreateData({ ...createData, format: e.target.value })}
+                      placeholder="如 TW-{type}-{random}"
+                    />
+                  </div>
+                </div>
+                <div className="rounded-xl border bg-muted/30 p-3 text-[11px] text-muted-foreground">
+                  <p className="font-medium text-foreground">格式说明</p>
+                  <p className="mt-1">可直接写自定义文本，例如 <code>VIP-{'{random}'}</code>、<code>银河列车-{'{type}'}-{'{random}'}</code>。</p>
+                  <p><code>{'{random}'}</code>：按所选随机算法生成的随机部分。</p>
+                  <p><code>{'{type}'}</code>：卡码类型，register / renew / whitelist。</p>
+                  <p><code>{'{days}'}</code>：账号有效天数，-1 表示永久。</p>
+                  <p><code>{'{index}'}</code>：本次批量生成序号，从 1 开始。</p>
+                  <p><code>{'{validity}'}</code>：卡码自身有效期小时数；<code>{'{limit}'}</code>：使用次数上限。</p>
+                  <p className="mt-1">留空则使用配置管理中的默认格式。格式中没有 <code>{'{random}'}</code> 时，后端会自动追加随机部分。</p>
+                </div>
+
                 {createdCodes.length > 0 && (
                   <div className="mt-4 space-y-2 p-3 bg-muted/50 rounded-xl border border-border">
-                    <Label className="text-xs">已生成的代码</Label>
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-xs">已生成的代码</Label>
+                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => {
+                        navigator.clipboard.writeText(createdCodes.join("\n"));
+                        toast({ title: `已复制 ${createdCodes.length} 个卡码` });
+                      }}>
+                        <Copy className="mr-1 h-3.5 w-3.5" /> 复制全部
+                      </Button>
+                    </div>
                     <div className="max-h-40 overflow-y-auto space-y-2 pr-1">
                       {createdCodes.map((code) => (
                         <div key={code} className="flex items-center gap-2 group">
@@ -412,6 +551,9 @@ export default function AdminRegcodesPage() {
           已选择 {selectedCodes.size} 个；未选择时导出当前页全部 {regcodes.length} 个。
         </span>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => copyRegcodes(selectedRegcodes.length > 0 ? selectedRegcodes : regcodes)} disabled={regcodes.length === 0}>
+            <Copy className="mr-2 h-4 w-4" /> 复制卡码
+          </Button>
           <Button variant="outline" size="sm" onClick={() => exportSelected("txt")} disabled={regcodes.length === 0}>
             <Download className="mr-2 h-4 w-4" /> 导出 TXT
           </Button>
@@ -439,11 +581,12 @@ export default function AdminRegcodesPage() {
           </Select>
           <Select value={filterStatus} onValueChange={(v) => { setFilterStatus(v); setPage(1); }}>
             <SelectTrigger><SelectValue placeholder="状态" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部状态</SelectItem>
-              <SelectItem value="available">可用</SelectItem>
-              <SelectItem value="active">启用中</SelectItem>
-              <SelectItem value="used_up">已用完</SelectItem>
+              <SelectContent>
+                <SelectItem value="all">全部状态</SelectItem>
+                <SelectItem value="available">可用</SelectItem>
+                <SelectItem value="active">启用中</SelectItem>
+                <SelectItem value="decoy">诱饵码</SelectItem>
+                <SelectItem value="used_up">已用完</SelectItem>
               <SelectItem value="expired">已过期</SelectItem>
               <SelectItem value="disabled">已禁用</SelectItem>
             </SelectContent>
@@ -466,7 +609,10 @@ export default function AdminRegcodesPage() {
               <SelectItem value="asc">升序</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" onClick={() => void loadRegcodes()}>刷新</Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={clearFilters}>重置</Button>
+            <Button variant="outline" onClick={() => void loadRegcodes()}>刷新</Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -529,7 +675,10 @@ export default function AdminRegcodesPage() {
                       </td>
                       <td className="px-4 py-3 min-w-[220px]">
                         <div className="space-y-2">
-                          {getTypeBadge(code.type)}
+                          <div className="flex flex-wrap gap-1">
+                            {getTypeBadge(code.type)}
+                            {code.is_decoy ? <Badge variant="destructive">假卡码</Badge> : <Badge variant="outline">正常卡码</Badge>}
+                          </div>
                           <div className="flex gap-1">
                             <Input
                               value={noteDrafts[code.code] ?? code.note ?? ""}

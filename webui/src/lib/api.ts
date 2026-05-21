@@ -17,6 +17,72 @@ function isAbortError(error: unknown): boolean {
   return false;
 }
 
+function requestMethod(options: RequestInit, fallback = "GET"): string {
+  return (options.method || fallback).toString().toUpperCase();
+}
+
+function describeApiTarget(endpoint: string, method: string): string {
+  return `${method} /api/v1${endpoint}`;
+}
+
+function buildHttpErrorMessage(
+  status: number,
+  endpoint: string,
+  method: string,
+  backendMessage?: string,
+): string {
+  const target = describeApiTarget(endpoint, method);
+  const detail = backendMessage && backendMessage !== "接口不存在" ? `后端返回：${backendMessage}` : "";
+
+  if (status === 404) {
+    return [
+      `接口不存在：${target}`,
+      detail,
+      "常见原因：后端未更新/未重启、前后端版本不一致，或当前功能在后端尚未实现。",
+    ].filter(Boolean).join("\n");
+  }
+  if (status === 405) {
+    return [
+      `请求方法不允许：${target}`,
+      detail,
+      "请确认前端调用的方法与后端路由一致，例如 GET/POST/PUT/DELETE 是否写反。",
+    ].filter(Boolean).join("\n");
+  }
+  if (status === 401) {
+    return backendMessage || "登录状态已失效，请重新登录。";
+  }
+  if (status === 403) {
+    return backendMessage || `权限不足：当前账号无权访问 ${target}。`;
+  }
+  if (status === 413) {
+    return backendMessage || "上传内容过大，请压缩文件或联系管理员调整上传上限。";
+  }
+  if (status === 429) {
+    return backendMessage || "请求过于频繁，请稍后再试。";
+  }
+  if (status === 500) {
+    return [
+      `后端接口执行失败：${target}`,
+      detail || "服务器内部错误，请查看后端日志。",
+    ].filter(Boolean).join("\n");
+  }
+  if (status === 502 || status === 503 || status === 504) {
+    return `后端服务暂不可用 (${status})：${target}\n请确认 API 服务、反向代理或网关正在运行。`;
+  }
+  return backendMessage || `请求失败 (${status})：${target}`;
+}
+
+function buildParseErrorMessage(status: number, endpoint: string, method: string): string {
+  const target = describeApiTarget(endpoint, method);
+  if (status === 404) {
+    return `接口不存在：${target}\n服务器没有返回标准 JSON，可能命中了前端页面 404、反向代理路径错误，或后端缺少该路由。`;
+  }
+  if (status >= 500) {
+    return `后端响应格式异常：${target}\nHTTP ${status} 未返回标准 JSON，请查看后端或网关日志。`;
+  }
+  return `服务器响应解析失败 (${status})：${target}\n接口没有返回标准 JSON。`;
+}
+
 class ApiClient {
   private normalizeRequestStatus(status?: string | null, mode: "user" | "admin" = "user"): string {
     const raw = (status || "").trim().toLowerCase();
@@ -94,6 +160,7 @@ class ApiClient {
     };
 
     const url = `${API_BASE}/api/v1${endpoint}`;
+    const method = requestMethod(options);
     
     let response: Response;
     try {
@@ -107,11 +174,10 @@ class ApiClient {
         throw error;
       }
       console.error("Network error:", error);
-      throw new Error("网络连接失败，请检查后端服务是否启动");
+      throw new Error(
+        `无法连接后端接口：${describeApiTarget(endpoint, method)}\n请检查后端服务是否启动、API 地址是否正确、反向代理是否可达。`
+      );
     }
-
-    // 检查响应内容类型
-    const contentType = response.headers.get("content-type");
 
     let data: ApiResponse<T>;
     
@@ -119,40 +185,12 @@ class ApiClient {
     try {
       data = await response.json();
     } catch (error) {
-      // 如果不是JSON，检查状态码
-      if (response.status === 404) {
-        throw new Error("接口不存在，请检查后端服务是否已重启并包含最新路由");
-      }
-      if (response.status === 403) {
-        throw new Error("权限不足，请确认您有访问此接口的权限");
-      }
-      if (response.status === 401) {
-        throw new Error("未授权，请重新登录");
-      }
       console.error("JSON parse error:", error);
-      throw new Error(`服务器响应解析失败 (${response.status})`);
+      throw new Error(buildParseErrorMessage(response.status, endpoint, method));
     }
 
     if (!response.ok) {
-      // 如果后端返回了错误信息，使用后端的错误信息
-      if (data && data.message) {
-        // 对于404错误，提供更详细的提示
-        if (response.status === 404) {
-          throw new Error(`接口不存在: ${data.message}。请确认后端服务已重启并包含最新代码。`);
-        }
-        throw new Error(data.message);
-      }
-      // 否则根据状态码提供友好的错误信息
-      if (response.status === 404) {
-        throw new Error(`接口不存在 (${endpoint})。请检查后端服务是否已重启并包含最新路由。`);
-      }
-      if (response.status === 403) {
-        throw new Error("权限不足，请确认您有访问此接口的权限");
-      }
-      if (response.status === 401) {
-        throw new Error("未授权，请重新登录");
-      }
-      throw new Error(`请求失败 (${response.status})`);
+      throw new Error(buildHttpErrorMessage(response.status, endpoint, method, data?.message));
     }
 
     return data;
@@ -166,6 +204,7 @@ class ApiClient {
     const headers: Record<string, string> = {};
 
     const url = `${API_BASE}/api/v1${endpoint}`;
+    const methodName = method.toUpperCase();
 
     let response: Response;
     try {
@@ -177,18 +216,20 @@ class ApiClient {
       });
     } catch (error) {
       console.error("Network error:", error);
-      throw new Error("网络连接失败，请检查后端服务是否启动");
+      throw new Error(
+        `无法连接后端接口：${describeApiTarget(endpoint, methodName)}\n请检查后端服务是否启动、API 地址是否正确、反向代理是否可达。`
+      );
     }
 
     let data: ApiResponse<T>;
     try {
       data = await response.json();
     } catch {
-      throw new Error(`服务器响应解析失败 (${response.status})`);
+      throw new Error(buildParseErrorMessage(response.status, endpoint, methodName));
     }
 
     if (!response.ok) {
-      throw new Error(data?.message || `请求失败 (${response.status})`);
+      throw new Error(buildHttpErrorMessage(response.status, endpoint, methodName, data?.message));
     }
 
     return data;
@@ -1351,14 +1392,14 @@ class ApiClient {
   }
 
   async createRegcode(data: CreateRegcodeData) {
-    return this.request<{ codes: string[]; count: number }>("/admin/regcodes", {
+    return this.request<{ codes: string[]; count: number; decoy?: boolean }>("/admin/regcodes", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async deleteRegcode(code: string) {
-    return this.request(`/admin/regcodes/${code}`, {
+    return this.request(`/admin/regcodes/${encodeURIComponent(code)}`, {
       method: "DELETE",
     });
   }
@@ -1958,6 +1999,7 @@ export interface Regcode {
   code: string;
   type: number;
   type_name: string;
+  is_decoy?: boolean;
   days: number;
   validity_time?: number; // 注册码有效期（小时），-1 表示永久
   use_count?: number;
@@ -1980,6 +2022,9 @@ export interface CreateRegcodeData {
   validity_time?: number; // 注册码有效期（小时），-1 表示永久
   use_count_limit?: number; // 使用次数限制，-1 表示无限
   count?: number;
+  decoy?: boolean;
+  format?: string;
+  random_algorithm?: string;
 }
 
 export interface ConfigFieldOption {

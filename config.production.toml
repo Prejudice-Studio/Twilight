@@ -121,6 +121,14 @@ user_limit = 200
 media_request_enabled = false
 # 每用户最多同时存在的求片数（待处理 + 下载中），-1 不限
 max_concurrent_requests_per_user = -1
+# 卡码生成格式，可包含自定义文本。
+# 占位符：{random}=随机部分，{type}=register/renew/whitelist，{days}=账号天数，{index}=批量序号，{validity}=卡码有效期小时，{limit}=次数上限。
+# 示例: TW-{type}-{random} / 银河列车-{days}-{random}
+regcode_format = "code-{random}"
+# 随机算法预设：hex20=20位十六进制；base32-16=易抄写大写字符；alnum-16=大写字母数字；digits-12=纯数字；uuid=UUID v4；legacy-sha1=旧版风格
+regcode_random_algorithm = "hex20"
+# 假卡码被已登录用户使用后的动作：none / disable_user / disable_user_and_deactivate_code
+regcode_decoy_action = "disable_user"
 # 是否允许无码注册（无注册码也能建系统账号；Emby 仍需事后补建）
 allow_pending_register = true
 # 无 Emby 账户的用户是否可查看部分页面（公告、签到等）

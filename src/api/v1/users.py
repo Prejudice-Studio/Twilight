@@ -1007,7 +1007,7 @@ async def check_regcode():
 
         code_info = await RegCodeOperate.get_regcode_by_code(reg_code)
 
-        if not code_info:
+        if not code_info or RegCodeOperate.is_decoy(code_info):
             return api_response(False, "注册码不存在", code=404)
 
         if not code_info.ACTIVE:
@@ -1016,6 +1016,9 @@ async def check_regcode():
         # 检查是否已用完
         if code_info.USE_COUNT_LIMIT > 0 and code_info.USE_COUNT >= code_info.USE_COUNT_LIMIT:
             return api_response(False, "注册码已用完", code=400)
+
+        if UserService._is_regcode_expired(code_info):
+            return api_response(False, "注册码已过期", code=400)
 
         type_names = {1: "注册", 2: "续期", 3: "白名单"}
         days = UserService._normalize_code_days(code_info.DAYS, default=30)
@@ -1132,6 +1135,32 @@ async def use_code():
         return api_response(False, "缺少注册码/续期码", code=400)
 
     from src.services import RegcodeUseQueueService
+
+    # 低流量时走同步快路径，避免无意义入队和轮询；有队列压力时再退回后台队列。
+    if RegcodeUseQueueService.in_flight_count() == 0:
+        success, message, generated_password = await UserService.use_code(
+            g.current_user,
+            reg_code,
+            emby_username=emby_username,
+            emby_password=emby_password,
+        )
+        if success:
+            refreshed = await UserOperate.get_user_by_uid(g.current_user.UID) or g.current_user
+            user_info = await UserService.get_user_info(refreshed)
+            return api_response(
+                True,
+                message,
+                {
+                    "pending": False,
+                    "emby_password": generated_password,
+                    "expire_status": user_info["expire_status"],
+                    "expired_at": user_info["expired_at"],
+                    "role": user_info["role"],
+                    "role_name": user_info["role_name"],
+                    "user": user_info,
+                },
+            )
+        return api_response(False, message, code=400)
 
     payload, message = await RegcodeUseQueueService.enqueue(
         uid=int(g.current_user.UID),

@@ -455,6 +455,9 @@ class RegisterConfig(BaseConfig):
     USER_LIMIT: int = 200  # 允许的已注册用户数量上限
     MEDIA_REQUEST_ENABLED: bool = False  # 是否启用求片功能
     MAX_CONCURRENT_REQUESTS_PER_USER: int = -1  # 每个用户允许同时存在的求片请求上限，-1 表示不限制
+    REGCODE_FORMAT: str = "code-{random}"  # 卡码生成格式，支持 {random}/{type}/{days}/{index}
+    REGCODE_RANDOM_ALGORITHM: str = "base32-20"  # 推荐 base32-20；兼容 hex20/base32-16/alnum-16/digits-12/uuid/legacy-sha1
+    REGCODE_DECOY_ACTION: str = "disable_user"  # none/disable_user/disable_user_and_deactivate_code
 
     # 无码注册（待激活）配置
     ALLOW_PENDING_REGISTER: bool = True  # 是否允许无码注册（待激活状态）

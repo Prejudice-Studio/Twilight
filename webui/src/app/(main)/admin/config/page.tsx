@@ -64,13 +64,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -336,24 +329,23 @@ function ConfigFieldEditor({
 
     case "select":
       return (
-        <Select
-          value={String(value)}
-          onValueChange={(v) => {
-            const opt = field.options?.find((o) => String(o.value) === v);
-            onChange(opt ? opt.value : v);
-          }}
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(field.options ?? []).map((opt) => (
-              <SelectItem key={String(opt.value)} value={String(opt.value)}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {(field.options ?? []).map((opt) => {
+            const selected = String(value) === String(opt.value);
+            return (
+              <Button
+                key={String(opt.value)}
+                type="button"
+                variant={selected ? "default" : "outline"}
+                className="h-auto min-h-10 justify-start whitespace-normal px-3 py-2 text-left text-sm"
+                onClick={() => onChange(opt.value)}
+              >
+                <CircleDot className={`mr-2 h-4 w-4 shrink-0 ${selected ? "opacity-100" : "opacity-35"}`} />
+                <span>{opt.label}</span>
+              </Button>
+            );
+          })}
+        </div>
       );
 
     default:

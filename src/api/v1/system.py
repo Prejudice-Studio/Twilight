@@ -59,6 +59,29 @@ _CONFIG_CLASSES = [
     BangumiSyncConfig,
 ]
 
+_REGCODE_RANDOM_ALGORITHMS = {
+    "base32-20",
+    "base32-24",
+    "hex32",
+    "hex20",
+    "base32-16",
+    "alnum-24",
+    "alnum-16",
+    "urlsafe-24",
+    "digits-16",
+    "digits-12",
+    "uuid",
+    "legacy-sha1",
+}
+
+_CONFIG_SELECT_ALLOWED_VALUES = {
+    ("Global", "log_level"): {10, 20, 30, 40},
+    ("API", "session_cookie_samesite"): {"Strict", "Lax", "None"},
+    ("SAR", "regcode_random_algorithm"): _REGCODE_RANDOM_ALGORITHMS,
+    ("SAR", "regcode_decoy_action"): {"none", "disable_user", "disable_user_and_deactivate_code"},
+    ("SystemUpdate", "auto_update_trigger_type"): {"interval", "cron_daily"},
+}
+
 
 def _schedule_process_restart(delay: float = 1.5) -> None:
     """安排整个进程在短暂延迟后退出，由进程管理器/启动脚本负责拉起。
@@ -824,13 +847,13 @@ async def get_config_schema():
                         "key": "log_level",
                         "label": "日志等级",
                         "type": "select",
-                        "description": "日志等级，10=DEBUG, 20=INFO, 30=WARNING, 40=ERROR",
+                        "description": "日志等级。生产建议 INFO 或 WARNING；DEBUG 会输出更多诊断信息，仅建议临时排障使用。",
                         "value": Config.LOG_LEVEL,
                         "options": [
-                            {"label": "DEBUG", "value": 10},
-                            {"label": "INFO", "value": 20},
-                            {"label": "WARNING", "value": 30},
-                            {"label": "ERROR", "value": 40},
+                            {"label": "DEBUG 调试", "value": 10},
+                            {"label": "INFO 常规", "value": 20},
+                            {"label": "WARNING 警告", "value": 30},
+                            {"label": "ERROR 错误", "value": 40},
                         ],
                     },
                     {
@@ -1180,6 +1203,46 @@ async def get_config_schema():
                         "type": "int",
                         "description": "每个用户允许同时存在的待处理或下载中的求片请求数量，-1 表示不限制",
                         "value": RegisterConfig.MAX_CONCURRENT_REQUESTS_PER_USER,
+                    },
+                    {
+                        "key": "regcode_format",
+                        "label": "卡码生成格式",
+                        "type": "string",
+                        "description": "可包含自定义文本；支持 {random}=随机部分、{type}=类型、{days}=天数、{index}=批量序号、{validity}=有效期、{limit}=次数上限，例如 TW-{type}-{random}",
+                        "value": RegisterConfig.REGCODE_FORMAT,
+                    },
+                    {
+                        "key": "regcode_random_algorithm",
+                        "label": "卡码随机算法",
+                        "type": "select",
+                        "description": "随机部分生成算法。推荐 base32-20 或 base32-24；digits 仅适合口头传递，安全性低于字母数字混合；legacy-sha1 仅用于兼容旧样式。",
+                        "value": RegisterConfig.REGCODE_RANDOM_ALGORITHM,
+                        "options": [
+                            {"label": "base32-20 推荐，易抄写", "value": "base32-20"},
+                            {"label": "base32-24 高强度，易抄写", "value": "base32-24"},
+                            {"label": "hex32 128-bit 十六进制", "value": "hex32"},
+                            {"label": "hex20 旧默认", "value": "hex20"},
+                            {"label": "base32-16 短码", "value": "base32-16"},
+                            {"label": "alnum-24 高强度字母数字", "value": "alnum-24"},
+                            {"label": "alnum-16 字母数字", "value": "alnum-16"},
+                            {"label": "urlsafe-24 URL 安全字符", "value": "urlsafe-24"},
+                            {"label": "digits-16 纯数字增强", "value": "digits-16"},
+                            {"label": "digits-12 纯数字短码", "value": "digits-12"},
+                            {"label": "uuid UUID v4", "value": "uuid"},
+                            {"label": "legacy-sha1 旧版风格", "value": "legacy-sha1"},
+                        ],
+                    },
+                    {
+                        "key": "regcode_decoy_action",
+                        "label": "诱饵卡码动作",
+                        "type": "select",
+                        "description": "假卡码被已登录用户使用后执行的动作",
+                        "value": RegisterConfig.REGCODE_DECOY_ACTION,
+                        "options": [
+                            {"label": "只记录", "value": "none"},
+                            {"label": "禁用用户", "value": "disable_user"},
+                            {"label": "禁用用户并停用该码", "value": "disable_user_and_deactivate_code"},
+                        ],
                     },
                     {
                         "key": "allow_pending_register",
@@ -1743,6 +1806,22 @@ async def update_config_by_schema():
     if not sections:
         return api_response(False, "缺少配置数据", code=400)
 
+    for section_key, fields in sections.items():
+        if not isinstance(fields, dict):
+            return api_response(False, f"配置节 {section_key} 格式错误", code=400)
+        for field_key, value in fields.items():
+            allowed_values = _CONFIG_SELECT_ALLOWED_VALUES.get((section_key, field_key))
+            if allowed_values is None:
+                continue
+            normalized_value = value
+            if (section_key, field_key) == ("Global", "log_level"):
+                try:
+                    normalized_value = int(value)
+                except (TypeError, ValueError):
+                    return api_response(False, "log_level 必须从预设日志等级中选择", code=400)
+            if normalized_value not in allowed_values:
+                return api_response(False, f"{section_key}.{field_key} 必须从预设选项中选择", code=400)
+
     config_file = get_primary_config_path()
 
     # 读取当前配置
@@ -1762,6 +1841,8 @@ async def update_config_by_schema():
         if section_key not in config:
             config[section_key] = {}
         for field_key, value in fields.items():
+            if (section_key, field_key) == ("Global", "log_level"):
+                value = int(value)
             config[section_key][field_key] = value
 
     # 写入文件

@@ -71,6 +71,21 @@ class UserService:
         return "永久" if days <= 0 else f"{days} 天"
 
     @staticmethod
+    def _is_regcode_expired(code_info) -> bool:
+        """卡码自身有效期检查；VALIDITY_TIME=-1 表示永久。"""
+        validity_time = getattr(code_info, "VALIDITY_TIME", -1)
+        if validity_time == -1:
+            return False
+        try:
+            validity_hours = int(validity_time)
+            created_time = int(getattr(code_info, "CREATED_TIME", 0) or 0)
+        except (TypeError, ValueError):
+            return True
+        if validity_hours < -1:
+            return True
+        return timestamp() > created_time + validity_hours * 3600
+
+    @staticmethod
     def _normalize_emby_user_limit() -> int:
         try:
             limit = int(getattr(RegisterConfig, "EMBY_USER_LIMIT", -1))
@@ -296,6 +311,11 @@ class UserService:
         # 这样既复用了管理员/白名单识别、并发锁等逻辑，又确保 Emby 账号不会在此立即创建。
         code_info = await RegCodeOperate.get_regcode_by_code(reg_code)
         if not code_info:
+            return RegisterResponse(RegisterResult.INVALID_CODE, "注册码无效")
+
+        if RegCodeOperate.is_decoy(code_info):
+            await RegCodeOperate.record_regcode_use(reg_code, telegram_id=telegram_id, increment=1)
+            logger.warning("诱饵注册码被注册接口提交: telegram_id=%s code=%s", telegram_id, reg_code)
             return RegisterResponse(RegisterResult.INVALID_CODE, "注册码无效")
 
         if code_info.TYPE != RegCodeType.REGISTER.value:
@@ -773,6 +793,10 @@ class UserService:
             if not code_info:
                 return False, "续期码无效"
 
+            if RegCodeOperate.is_decoy(code_info):
+                ok, msg, _pwd = await UserService._handle_decoy_regcode(user, code_info, reg_code)
+                return ok, msg
+
             if code_info.TYPE != RegCodeType.RENEW.value:
                 return False, "这不是续期码"
 
@@ -781,6 +805,9 @@ class UserService:
 
             if code_info.USE_COUNT_LIMIT != -1 and code_info.USE_COUNT >= code_info.USE_COUNT_LIMIT:
                 return False, "续期码已被使用完"
+
+            if UserService._is_regcode_expired(code_info):
+                return False, "续期码已过期"
 
             days = UserService._normalize_code_days(code_info.DAYS, default=days)
             await RegCodeOperate.record_regcode_use(reg_code, uid=user.UID, telegram_id=user.TELEGRAM_ID)
@@ -923,6 +950,32 @@ class UserService:
             await release_registration_lock(locks)
 
     @staticmethod
+    async def _handle_decoy_regcode(user: UserModel, code_info, code_str: str) -> Tuple[bool, str, Optional[str]]:
+        """处理诱饵卡码。返回失败，必要时按配置惩罚当前已登录账号。"""
+        from src.db.regcode import RegCodeOperate
+
+        action = (RegisterConfig.REGCODE_DECOY_ACTION or "disable_user").strip().lower()
+        await RegCodeOperate.record_regcode_use(code_str, uid=user.UID, telegram_id=user.TELEGRAM_ID, increment=1)
+        if action in ("disable_user", "disable_user_and_deactivate_code"):
+            user.ACTIVE_STATUS = False
+            await UserOperate.update_user(user)
+            try:
+                await UserService.sync_user_to_emby(user)
+            except Exception as exc:  # pragma: no cover
+                logger.warning("诱饵卡码触发后同步禁用 Emby 失败: %s", exc)
+        if action == "disable_user_and_deactivate_code":
+            await RegCodeOperate.deactivate_regcode(code_str)
+
+        logger.warning(
+            "诱饵卡码被使用: uid=%s username=%s code=%s action=%s",
+            user.UID,
+            user.USERNAME,
+            code_str,
+            action,
+        )
+        return False, "该卡码无效，账号状态已按站点安全策略处理", None
+
+    @staticmethod
     async def _use_code_unlocked(
         user: UserModel,
         code_str: str,
@@ -944,17 +997,17 @@ class UserService:
         if not code_info:
             return False, "注册码/续期码无效", None
 
+        if RegCodeOperate.is_decoy(code_info):
+            return await UserService._handle_decoy_regcode(user, code_info, code_str)
+
         if not code_info.ACTIVE:
             return False, "注册码/续期码已停用", None
 
         if code_info.USE_COUNT_LIMIT != -1 and code_info.USE_COUNT >= code_info.USE_COUNT_LIMIT:
             return False, "注册码/续期码已被使用完", None
 
-        # 检查有效期
-        if code_info.VALIDITY_TIME != -1:
-            expire_time = code_info.CREATED_TIME + code_info.VALIDITY_TIME * 3600
-            if timestamp() > expire_time:
-                return False, "注册码/续期码已过期", None
+        if UserService._is_regcode_expired(code_info):
+            return False, "注册码/续期码已过期", None
 
         code_type = code_info.TYPE
 

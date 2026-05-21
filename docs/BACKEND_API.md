@@ -1,6 +1,6 @@
 # Twilight 后端 API 文档
 
-本文档为 Twilight 后端 API 的统一参考指南，覆盖认证、请求格式、错误码、核心接口与管理员功能。完整路由清单见 [API_INDEX.md](./API_INDEX.md)，API Key 专用接口见 [API_KEY_API.md](./API_KEY_API.md)。
+本文档为 Twilight 后端 API 的统一参考指南，覆盖认证、请求格式、错误码、核心接口与管理员功能。完整路由清单见 [API_INDEX.md](./API_INDEX.md)，API Key 专用接口见 [API_KEY_API.md](./API_KEY_API.md)，注册码规则见 [REGCODES.md](./REGCODES.md)。
 
 ## 1. 文档说明
 
@@ -16,6 +16,7 @@
 | [BACKEND_API.md](./BACKEND_API.md) | 通用规范、认证、错误码、重点接口说明 |
 | [API_INDEX.md](./API_INDEX.md) | `/api/v1` 完整路由索引、认证级别、归属模块 |
 | [API_KEY_API.md](./API_KEY_API.md) | 外部 API Key 接入方式、权限矩阵、专用示例 |
+| [REGCODES.md](./REGCODES.md) | 注册码/续期码/白名单码规则、兼容性与安全口径 |
 | `/api/v1/docs` | 运行时 Swagger UI，按当前代码自动生成 |
 
 ## 2. 认证与请求规范
@@ -515,6 +516,8 @@ curl -X POST "http://localhost:5000/api/v1/users/me/emby/unbind" \
 
 ### 6.4 续期与注册码/续期码
 
+注册码、续期码、白名单码的类型、生成格式、旧码兼容与安全口径见 [REGCODES.md](./REGCODES.md)。
+
 #### 管理员续期用户
 
 `POST /users/me/renew`
@@ -544,13 +547,15 @@ curl -X POST "http://localhost:5000/api/v1/users/me/renew" \
 
 `POST /users/me/use-code`
 
-- 说明：使用注册码 / 续期码
+- 说明：统一使用注册码 / 续期码 / 白名单码
 - 认证：登录 Token
 - 请求体：
 
 ```json
 {
-  "reg_code": "code-abc123"
+  "reg_code": "code-abc123",
+  "emby_username": "emby_name",
+  "emby_password": "Password123"
 }
 ```
 
@@ -1277,9 +1282,14 @@ curl -X GET "http://localhost:5000/api/v1/admin/regcodes" \
 
 ```json
 {
+  "type": 1,
+  "validity_time": -1,
+  "use_count_limit": 1,
   "days": 30,
   "count": 1,
-  "remark": "推广码"
+  "format": "TW-{type}-{random}",
+  "random_algorithm": "base32-20",
+  "decoy": false
 }
 ```
 
@@ -1289,7 +1299,7 @@ curl -X GET "http://localhost:5000/api/v1/admin/regcodes" \
 curl -X POST "http://localhost:5000/api/v1/admin/regcodes" \
   -H "Authorization: Bearer <admin_token>" \
   -H "Content-Type: application/json" \
-  -d '{"days":30,"count":1,"remark":"推广码"}'
+  -d '{"type":1,"validity_time":-1,"use_count_limit":1,"days":30,"count":1}'
 ```
 
 #### 删除注册码
