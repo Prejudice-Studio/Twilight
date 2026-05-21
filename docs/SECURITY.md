@@ -29,6 +29,7 @@ cors_origins = ["https://app.example.com"]
 - 若通过 HTTPS 对外提供服务，建议同时启用：
   - `session_cookie_secure = true`
   - 合理的 `session_cookie_samesite`（通常 `Lax`）
+- 使用 Cookie 会话执行写操作时，前端必须带 `X-Twilight-Client: webui`；后端会拒绝缺少该头的 Cookie 写请求，用于阻断 CSRF 表单提交。
 
 ## 3. Telegram 相关安全
 
@@ -74,6 +75,7 @@ cors_origins = ["https://app.example.com"]
 ## 7. 最小权限原则
 
 - API Key 仅授予必要 scope。
+- API Key 不能自行修改权限；权限变更必须通过已登录 Web 端完成，避免只读 Key 自提权。
 - 管理员账号数量最小化，长期不使用的高权限账号及时停用。
 - Telegram 管理员 ID 仅配置必要人员。
 

@@ -78,7 +78,7 @@ def create_app() -> Flask:
             app,
             resources={r"/api/*": {"origins": cors_origins}},
             supports_credentials=not allow_all,
-            allow_headers=["Content-Type", "Authorization", "X-API-Key"],
+            allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Twilight-Client"],
             methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
             max_age=3600,
         )

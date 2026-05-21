@@ -14,7 +14,8 @@ from flask import Blueprint, request, g, send_file
 from sqlalchemy import text
 
 from src.api.v1.auth import require_auth, require_admin, api_response
-from src.core.utils import parse_bool
+from src.core.utils import parse_bool, rate_limit_check
+from src.core.request_utils import get_real_client_ip
 from src.config import (
     Config,
     EmbyConfig,
@@ -27,6 +28,7 @@ from src.config import (
     NotificationConfig,
     TelegramConfig,
     BangumiSyncConfig,
+    ROOT_PATH,
     backup_config_file,
     fill_missing_config_items,
     sweep_config_toml,
@@ -309,6 +311,19 @@ system_bp = Blueprint("system", __name__, url_prefix="/system")
 _IMAGE_MIME_PREFIXES = ("image/",)
 
 
+def _check_public_system_rate_limit(scope: str, *, max_requests: int = 60, window_seconds: int = 60):
+    client_ip = get_real_client_ip()
+    allowed, retry_after = rate_limit_check(
+        f"system_public:{scope}",
+        client_ip,
+        max_requests=max_requests,
+        window_seconds=window_seconds,
+    )
+    if not allowed:
+        return api_response(False, f"请求过于频繁，请在 {retry_after} 秒后重试", code=429)
+    return None
+
+
 def _resolve_local_server_icon_path() -> Optional[Path]:
     """Resolve Config.SERVER_ICON when it points at a local image file."""
     raw = (Config.SERVER_ICON or "").strip()
@@ -322,6 +337,10 @@ def _resolve_local_server_icon_path() -> Optional[Path]:
         path = (Path.cwd() / path).resolve()
     else:
         path = path.resolve()
+    try:
+        path.relative_to(ROOT_PATH)
+    except ValueError:
+        return None
     if not path.is_file():
         return None
     guessed, _ = mimetypes.guess_type(str(path))
@@ -352,6 +371,10 @@ async def get_system_info():
 
     不需要登录即可访问
     """
+    limited = _check_public_system_rate_limit("info", max_requests=60, window_seconds=60)
+    if limited:
+        return limited
+
     # 暴露 Bot 用户名供前端展示/跳转
     telegram_bot_username: Optional[str] = None
     if Config.TELEGRAM_MODE:
@@ -398,6 +421,9 @@ async def get_system_info():
 @system_bp.route("/server-icon", methods=["GET"])
 async def get_server_icon():
     """Serve the configured local server icon, if SERVER_ICON is a local image path."""
+    limited = _check_public_system_rate_limit("server_icon", max_requests=120, window_seconds=60)
+    if limited:
+        return limited
     path = _resolve_local_server_icon_path()
     if not path:
         return api_response(False, "未配置本地图标或文件不存在", code=404)
@@ -408,6 +434,10 @@ async def get_server_icon():
 @system_bp.route("/health", methods=["GET"])
 async def health_check():
     """健康检查"""
+    limited = _check_public_system_rate_limit("health", max_requests=30, window_seconds=60)
+    if limited:
+        return limited
+
     from src.services import get_emby_client
 
     status = {

@@ -74,7 +74,8 @@ API Key 支持细粒度权限控制，部分接口只在特定权限下可用。
 | `/key/enable` | `account:write` |
 | `/emby/status` | `emby:read` |
 | `/emby/kick` | `emby:write` |
-| `/permissions` | 无（仅需有效 API Key） |
+| `GET /permissions` | 无（仅需有效 API Key） |
+| `PUT /permissions` | 禁止 API Key 自行调用；请在 Web 端管理 |
 | `/use-code` | `account:write` |
 
 ## 5. 关键接口
@@ -86,6 +87,7 @@ API Key 支持细粒度权限控制，部分接口只在特定权限下可用。
 `GET /api/v1/apikey/info`
 
 - 认证：API Key
+- 权限：`account:write`
 - 请求头：
   - `X-API-Key: key-xxxxxxxxxxxxxxxx-yyyyyyyy`
 - 说明：查询当前 API Key 对应账号的完整信息。
@@ -101,6 +103,7 @@ curl -X GET "https://your-domain.com/api/v1/apikey/info" \
 `GET /api/v1/apikey/status`
 
 - 认证：API Key
+- 权限：`account:write`
 - 请求头：
   - `X-API-Key: key-xxxxxxxxxxxxxxxx-yyyyyyyy`
 - 说明：获取账号激活状态、过期时间、剩余天数和是否被禁用。
@@ -118,6 +121,7 @@ curl -X GET "https://your-domain.com/api/v1/apikey/status" \
 `POST /api/v1/apikey/enable`
 
 - 认证：API Key
+- 权限：`account:write`
 - 请求头：
   - `X-API-Key: key-xxxxxxxxxxxxxxxx-yyyyyyyy`
 - 说明：启用当前账号。
@@ -428,4 +432,4 @@ A: 是的，单次续期天数通常限制在 1-3650 天（10 年）之间。
 
 ### Q: 如何查看当前 API Key 的可用权限？
 
-A: 使用 `/api/v1/apikey/permissions`（GET）获取当前权限与完整权限列表；可通过同路径 `PUT` 更新权限集。
+A: 使用 `/api/v1/apikey/permissions`（GET）获取当前权限与完整权限列表；权限修改只能在 Web 端个人设置中完成，API Key 不能自行调用 `PUT /permissions` 提权。

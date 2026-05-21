@@ -21,7 +21,7 @@ export default function TestWebPage() {
           <div>
             <h1 className="text-4xl font-black tracking-tight">TestWeb 安全演示台</h1>
             <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-              这里完全不连接后端、不读取登录态、不发送 API 请求，仅用本地 mock 数据展示前端用户端与管理端的完整交互外观。
+              这里复刻真实用户端与管理端的主要界面，但只连接 /api/v1/demo 模拟接口；不会读取登录态，也不会执行真实写入操作。
             </p>
           </div>
           <Badge variant="outline" className="w-fit gap-1.5"><ShieldCheck className="h-3.5 w-3.5" />Mock Only</Badge>

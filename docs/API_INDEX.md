@@ -284,6 +284,18 @@
 | POST | `/signin` | User | 签到 |
 | GET | `/signin/history` | User | 签到历史 |
 
+## Demo
+
+| 方法 | 路径 | 认证 | 说明 |
+| ---- | ---- | ---- | ---- |
+| GET | `/demo/bootstrap` | Public | TestWeb 演示聚合数据，返回预设假数据 |
+| GET | `/demo/auth/me` | Public | TestWeb 演示当前用户 |
+| GET | `/demo/system/info` | Public | TestWeb 演示系统信息 |
+| GET | `/demo/admin/users` | Public | TestWeb 演示用户列表 |
+| GET | `/demo/admin/regcodes` | Public | TestWeb 演示注册码列表 |
+| GET | `/demo/media/search` | Public | TestWeb 演示媒体搜索 |
+| POST/PUT/DELETE | `/demo/action/{action_name}` | Public | TestWeb 演示写操作模拟结果；忽略请求体，不执行真实操作 |
+
 ## API Key
 
 | 方法 | 路径 | 认证 | 说明 |
@@ -295,7 +307,7 @@
 | POST | `/apikey/renew` | API Key | 续期当前账号 |
 | POST | `/apikey/key/refresh` | API Key | 刷新 API Key |
 | GET | `/apikey/permissions` | API Key | 权限列表 |
-| PUT | `/apikey/permissions` | API Key | 更新权限 |
+| PUT | `/apikey/permissions` | API Key | 禁止：API Key 不能自行修改权限 |
 | POST | `/apikey/key/disable` | API Key | 禁用 Key |
 | POST | `/apikey/key/enable` | API Key | 启用 Key |
 | GET | `/apikey/emby/status` | API Key | Emby 状态 |

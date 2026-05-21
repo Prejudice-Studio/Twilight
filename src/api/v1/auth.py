@@ -236,14 +236,21 @@ def require_auth(f: Callable) -> Callable:
         # 从请求头获取 token
         auth_header = request.headers.get("Authorization", "")
         token = ""
+        token_from_cookie = False
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header[7:]
         else:
             cookie_name = (APIConfig.SESSION_COOKIE_NAME or _AUTH_COOKIE_NAME).strip() or _AUTH_COOKIE_NAME
             token = (request.cookies.get(cookie_name) or "").strip()
+            token_from_cookie = bool(token)
 
         if not token:
             return api_response(False, "需要认证", code=401)
+
+        if token_from_cookie and request.method not in {"GET", "HEAD", "OPTIONS"}:
+            # Cookie 会自动随跨站请求发送；写操作必须带 JS 可设置的自定义头，阻断表单/图片等 CSRF。
+            if request.headers.get("X-Twilight-Client") != "webui":
+                return api_response(False, "缺少 CSRF 防护请求头", code=403)
 
         # 验证 token 格式（应该是 64 位十六进制字符串）
         if len(token) != 64 or not all(c in "0123456789abcdef" for c in token):

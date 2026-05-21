@@ -156,6 +156,7 @@ class ApiClient {
   ): Promise<ApiResponse<T>> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
+      "X-Twilight-Client": "webui",
       ...((options.headers as Record<string, string>) || {}),
     };
 
@@ -201,7 +202,9 @@ class ApiClient {
     formData: FormData,
     method: "POST" | "PUT" = "POST"
   ): Promise<ApiResponse<T>> {
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = {
+      "X-Twilight-Client": "webui",
+    };
 
     const url = `${API_BASE}/api/v1${endpoint}`;
     const methodName = method.toUpperCase();

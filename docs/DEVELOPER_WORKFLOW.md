@@ -95,6 +95,14 @@ pytest
 - 涉及认证态、系统配置、区域刷新时复用已有 store/hook。
 - 新页面必须考虑桌面和移动端基本可用。
 
+## 修改 TestWeb 演示的规则
+
+- `/testweb`、`/testwebuser`、`/testwebadmin` 只能调用 `/api/v1/demo/*`。
+- TestWeb 不读取真实登录态，不调用真实用户、管理员、Emby、注册、求片、配置接口。
+- 需要新增演示数据时，先在 `src/api/v1/demo.py` 增加预设假数据，再让前端读取该字段。
+- `src/api/v1/demo.py` 禁止导入 `src.db.*`、`src.services.*` 或读取 `g.current_user` / Cookie / Authorization。
+- 演示按钮可以调用 `/demo/action/{action_name}`，但该接口必须忽略请求体，只返回 `simulated=true`，不得回显用户输入、写库或调用外部服务。
+
 ## 修改数据库的规则
 
 - 现有数据库按模块拆分在 `src/db/*.py`。

@@ -416,6 +416,7 @@ async def renew_account():
 
 @apikey_bp.route("/key/refresh", methods=["POST"])
 @require_apikey
+@require_permission("account:write")
 async def refresh_apikey():
     """
     刷新 API Key（生成新的 API Key，旧的立即失效）
@@ -488,35 +489,12 @@ async def update_permissions():
             "permissions": ["account:read", "media:read"]
         }
     """
-    data = request.get_json() or {}
-    permissions = data.get("permissions")
-
-    if permissions is None:
-        return api_response(False, "缺少 permissions 参数", code=400)
-
-    if not isinstance(permissions, list):
-        return api_response(False, "permissions 必须是数组", code=400)
-
-    # 验证权限值
-    invalid = [p for p in permissions if p not in ALL_PERMISSIONS]
-    if invalid:
-        return api_response(False, f"无效的权限: {', '.join(invalid)}", code=400)
-
-    user = g.current_user
-    user.APIKEY_PERMISSIONS = json.dumps(permissions)
-    await UserOperate.update_user(user)
-
-    return api_response(
-        True,
-        "权限已更新",
-        {
-            "permissions": permissions,
-        },
-    )
+    return api_response(False, "API Key 不能自行修改权限，请登录 Web 端在个人设置中管理", code=403)
 
 
 @apikey_bp.route("/key/disable", methods=["POST"])
 @require_apikey
+@require_permission("account:write")
 async def disable_apikey():
     """
     禁用当前 API Key
@@ -551,6 +529,7 @@ async def disable_apikey():
 
 @apikey_bp.route("/key/enable", methods=["POST"])
 @require_apikey
+@require_permission("account:write")
 async def enable_apikey():
     """
     启用 API Key（如果不存在则生成）

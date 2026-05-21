@@ -147,6 +147,17 @@ Authorization: ApiKey <api_key>
 | Stats | `/stats` | 播放统计 |
 | System | `/system` | 健康、系统信息、配置、路由列表 |
 | API Key | `/apikey` | 外部系统专用 API Key 接口 |
+| Demo | `/demo` | TestWeb 演示专用模拟接口，只返回假数据 |
+
+### 4.2 TestWeb 演示接口
+
+`/api/v1/demo/*` 仅供 `/testweb`、`/testwebuser`、`/testwebadmin` 演示页面使用。
+
+- 认证：公开，不读取登录态。
+- 数据：全部为后端静态预设假数据，不读取数据库、不读取登录态、不调用真实业务服务。
+- 写操作：统一返回 `simulated=true`，忽略请求体，不回显用户输入，不写数据库、不调用 Emby、不调用 Telegram。
+- 响应：统一带 `Cache-Control: no-store` 和 `X-Twilight-Demo: true`，避免缓存演示响应。
+- 生产建议：可通过反向代理限制公开访问，避免访客误以为是真实后台。
 
 ### 4.1 命名与归属约定
 

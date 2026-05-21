@@ -49,6 +49,7 @@ Twilight 使用语义化版本号：`MAJOR.MINOR.PATCH`。
 | Invite | `/api/v1/invite` | 邀请配置、邀请码生成/删除/使用、邀请状态。 |
 | Signin | `/api/v1/signin` | 签到配置、签到、签到历史、积分摘要。 |
 | Announcements | `/api/v1/announcements` | 公开公告列表。 |
+| Demo | `/api/v1/demo` | TestWeb 演示专用模拟接口，只返回静态预设假数据；模拟操作忽略请求体，不触碰数据库或外部服务。 |
 | OpenAPI | `/api/v1/openapi.json`、`/api/v1/docs` | 运行时 API 描述和 Swagger UI。 |
 
 ### 业务服务
@@ -92,7 +93,7 @@ Twilight 使用语义化版本号：`MAJOR.MINOR.PATCH`。
 | 认证 | 登录、注册、忘记密码。 |
 | 用户 | 仪表盘、媒体搜索/求片、签到积分、邀请码、公告、设置、外观、背景、API Key。 |
 | 管理 | 用户管理、Emby 管理、注册码管理、配置管理、定时任务、公告管理、求片管理、邀请管理、统计、Telegram 换绑申请、系统测试页。 |
-| 测试/演示 | `testweb*` 页面用于 UI/交互验证，不应作为生产入口依赖。 |
+| 测试/演示 | `testweb*` 页面复刻真实前端主要界面，但只调用 `/api/v1/demo/*` 模拟接口，不执行真实业务操作。 |
 
 ### Telegram Bot
 
@@ -115,17 +116,6 @@ Twilight 使用语义化版本号：`MAJOR.MINOR.PATCH`。
 | `docs/BACKEND_API.md`、`API_INDEX.md`、`API_KEY_API.md` | API 规范和索引。 |
 | `docs/REGCODES.md` | 卡码类型、生成、安全和兼容性。 |
 | `docs/SECURITY.md` | 生产安全基线。 |
-
-## 后续版本规划
-
-| 版本 | 目标 |
-| ---- | ---- |
-| `0.0.2` | 补齐核心回归测试、补充配置 schema 校验、整理公开/管理员接口鉴权矩阵。 |
-| `0.1.0` | 完成注册/Emby/注册码/邀请/求片的稳定闭环，形成可公开试用版本。 |
-| `0.2.0` | 强化管理后台体验、批量操作安全确认、运行状态观测和审计导出。 |
-| `0.3.0` | 完善 Telegram Bot 面板、群组成员策略、通知与公告联动。 |
-| `0.4.0` | 完成部署体验优化、配置迁移策略、备份恢复文档。 |
-| `1.0.0` | API、配置和数据库迁移策略稳定，核心功能测试通过，发布流程冻结。 |
 
 ## 版本步进流程
 
