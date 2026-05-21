@@ -762,6 +762,13 @@ class UserService:
             except Exception as exc:  # pragma: no cover
                 logger.warning(f"补建 Emby 后同步状态失败: {exc}")
 
+            try:
+                from src.services.emby_service import EmbyService
+
+                await EmbyService.apply_default_hidden_libraries(user)
+            except Exception as exc:  # pragma: no cover
+                logger.warning(f"补建 Emby 后应用默认隐藏媒体库失败: {exc}")
+
             days_text = UserService._format_days_text(days)
             return RegisterResponse(
                 result=RegisterResult.SUCCESS,
@@ -922,6 +929,13 @@ class UserService:
                 from src.db.regcode import RegCodeOperate
 
                 await RegCodeOperate.record_regcode_use(reg_code, uid=user.UID, telegram_id=telegram_id)
+
+            try:
+                from src.services.emby_service import EmbyService
+
+                await EmbyService.apply_default_hidden_libraries(user)
+            except Exception as exc:  # pragma: no cover
+                logger.warning(f"注册后应用默认隐藏媒体库失败: {exc}")
 
             logger.info(f"用户注册成功: {username} (TG: {telegram_id})")
 
@@ -1632,6 +1646,7 @@ class UserService:
             expire_status = format_expire_time(user.EXPIRED_AT)
 
         emby_bound = bool(user.EMBYID) and not is_pending_emby
+        bgm_token_set = bool((user.BGM_TOKEN or "").strip())
         info = {
             "uid": user.UID,
             "username": user.USERNAME,
@@ -1644,6 +1659,8 @@ class UserService:
             # 未绑定 Emby 时不下发 EXPIRED_AT 数值，避免 sentinel(0) 被 UI 误解
             "expired_at": user.EXPIRED_AT if emby_bound else None,
             "bgm_mode": user.BGM_MODE,
+            "bgm_token_set": bgm_token_set,
+            "bgm_sync_ready": bool(user.BGM_MODE and bgm_token_set),
             "avatar": user.AVATAR or None,
             "register_time": user.REGISTER_TIME,
             "created_at": user.CREATE_AT or user.REGISTER_TIME,  # 前端兼容字段
@@ -1653,6 +1670,7 @@ class UserService:
             "pending_emby": is_pending_emby,
             "pending_emby_days": getattr(user, "PENDING_EMBY_DAYS", None),
             "emby_disabled_by_expiry": emby_disabled_by_expiry,
+            "library_self_service": bool(getattr(user, "LIBRARY_SELF_SERVICE", False)),
         }
 
         return info

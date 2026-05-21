@@ -107,6 +107,7 @@ async def list_users():
         # EMBYID 非空即视为已绑定；历史数据可能残留 PENDING_EMBY=True，不能因此把到期显示成未绑定。
         emby_bound = bool(user.EMBYID)
         emby_disabled_by_expiry = UserService.is_emby_access_expired(user)
+        bgm_token_set = bool((user.BGM_TOKEN or "").strip())
         user_list.append(
             {
                 "uid": user.UID,
@@ -126,7 +127,10 @@ async def list_users():
                 "register_time": user.REGISTER_TIME,
                 "created_at": user.CREATE_AT or user.REGISTER_TIME,
                 "last_login_time": user.LAST_LOGIN_TIME,
-                "bgm_mode": user.BGM_MODE,
+                "bgm_mode": bool(user.BGM_MODE),
+                "bgm_token_set": bgm_token_set,
+                "bgm_sync_ready": bool(user.BGM_MODE and bgm_token_set),
+                "library_self_service": bool(getattr(user, "LIBRARY_SELF_SERVICE", False)),
             }
         )
 
@@ -1473,21 +1477,20 @@ async def get_user_libraries(uid: int):
                 "enabled_ids": [],
                 "enable_all": False,
                 "has_emby": False,
+                "blocked_names": [],
+                "libraries": [],
+                "default_hidden_libraries": EmbyService.default_hidden_library_names(),
+                "self_service_libraries": EmbyService.self_service_library_names(),
+                "self_service_enabled": EmbyService.can_self_service_libraries(user),
             },
         )
 
-    all_libraries = await EmbyService.get_libraries_info()
-    enabled_ids, enable_all = await EmbyService.get_user_library_access(user)
+    detail = await EmbyService.get_user_library_access_detail(user, include_self_service_config=True)
 
     return api_response(
         True,
         "获取成功",
-        {
-            "all_libraries": all_libraries,
-            "enabled_ids": enabled_ids,
-            "enable_all": enable_all,
-            "has_emby": True,
-        },
+        detail,
     )
 
 
@@ -1502,6 +1505,7 @@ async def set_user_libraries(uid: int):
 
     Request:
         {
+            "action": "set",                     // set/show/hide/enable_all/disable_all
             "library_names": ["电影", "电视剧"],   // 按名称（推荐）
             "library_ids": ["id1", "id2"],          // 按ID（兼容）
             "enable_all": false
@@ -1511,20 +1515,102 @@ async def set_user_libraries(uid: int):
     if not user:
         return api_response(False, "用户不存在", code=404)
 
+    if not user.EMBYID:
+        return api_response(False, "用户没有关联的 Emby 账户", code=400)
+
     data = request.get_json() or {}
-    library_names = data.get("library_names", [])
-    library_ids = data.get("library_ids", [])
-    enable_all = data.get("enable_all", False)
+    library_names = EmbyService._normalize_library_names(data.get("library_names", []))
+    raw_library_ids = data.get("library_ids", [])
+    library_ids = [str(i or "").strip() for i in raw_library_ids if str(i or "").strip()] if isinstance(raw_library_ids, list) else []
+    enable_all = parse_bool(data.get("enable_all"), default=False)
+    action = str(data.get("action") or "set").strip().lower()
 
-    # 优先使用名称解析
-    if library_names:
-        resolved_ids, not_found = await EmbyService.resolve_library_names_to_ids(library_names)
-        if not_found:
-            return api_response(False, f"未找到以下媒体库: {', '.join(not_found)}", code=400)
-        library_ids = resolved_ids
+    if action in {"show", "hide"}:
+        if not library_names and library_ids:
+            resolved_names, not_found_ids = await get_emby_client().get_folder_names_by_ids(library_ids)
+            if not_found_ids:
+                return api_response(False, f"未找到以下媒体库 ID: {', '.join(not_found_ids)}", code=400)
+            library_names = resolved_names
+        if not library_names:
+            return api_response(False, "媒体库名称不能为空", code=400)
+        success, message = await EmbyService.set_user_library_visibility(
+            user,
+            library_names,
+            visible=(action == "show"),
+        )
+    elif action == "enable_all":
+        success, message = await EmbyService.set_user_library_access(user, [], True)
+    elif action == "disable_all":
+        success = await get_emby_client().disable_all_folders_for_user(user.EMBYID)
+        message = "已隐藏全部媒体库" if success else "更新失败"
+    elif action == "set":
+        # 优先使用名称解析
+        if library_names:
+            resolved_ids, not_found = await EmbyService.resolve_library_names_to_ids(library_names)
+            if not_found:
+                return api_response(False, f"未找到以下媒体库: {', '.join(not_found)}", code=400)
+            library_ids = resolved_ids
 
-    success, message = await EmbyService.set_user_library_access(user, library_ids, enable_all)
-    return api_response(success, message)
+        success, message = await EmbyService.set_user_library_access(user, library_ids, enable_all)
+    else:
+        return api_response(False, "action 必须是 set/show/hide/enable_all/disable_all", code=400)
+
+    if not success:
+        return api_response(False, message, code=500)
+    detail = await EmbyService.get_user_library_access_detail(user, include_self_service_config=True)
+    return api_response(True, message, detail)
+
+
+@admin_bp.route("/users/<int:uid>/library-self-service", methods=["PUT"])
+@require_auth
+@require_admin
+async def set_user_library_self_service(uid: int):
+    """管理员开启/关闭单个用户的媒体库自助显隐权限。"""
+    user = await UserOperate.get_user_by_uid(uid)
+    if not user:
+        return api_response(False, "用户不存在", code=404)
+    if user.ROLE == Role.UNRECOGNIZED.value:
+        return api_response(False, "未注册用户不能授予媒体库自助显隐权限", code=400)
+
+    data = request.get_json(silent=True) or {}
+    if "enabled" not in data:
+        return api_response(False, "缺少 enabled 字段", code=400)
+    raw_enabled = data.get("enabled")
+    if not isinstance(raw_enabled, (bool, int, float, str)):
+        return api_response(False, "enabled 必须是布尔值", code=400)
+    enabled = parse_bool(raw_enabled, default=False)
+
+    updated = await UserOperate.set_library_self_service(uid, enabled)
+    if not updated:
+        return api_response(False, "更新失败", code=500)
+
+    logger.info(
+        "管理员 %s %s用户媒体库自助显隐权限 uid=%s username=%s",
+        g.current_user.USERNAME,
+        "开启" if enabled else "关闭",
+        user.UID,
+        user.USERNAME,
+    )
+    return api_response(True, "已更新", {"uid": uid, "library_self_service": enabled})
+
+
+@admin_bp.route("/users/library-self-service/bulk-enable", methods=["POST"])
+@require_auth
+@require_admin
+async def bulk_enable_library_self_service():
+    """为所有已注册用户开启媒体库自助显隐权限。"""
+    data = request.get_json(silent=True) or {}
+    confirm = str(data.get("confirm") or "").strip()
+    if confirm != "ENABLE_LIBRARY_SELF_SERVICE":
+        return api_response(False, "缺少确认字段", code=400)
+
+    updated = await UserOperate.enable_library_self_service_for_all()
+    logger.warning(
+        "管理员 %s 批量开启媒体库自助显隐权限 updated=%s",
+        g.current_user.USERNAME,
+        updated,
+    )
+    return api_response(True, f"已为 {updated} 个用户开启媒体库自助显隐权限", {"updated": updated})
 
 
 @admin_bp.route("/users/<int:uid>/admin", methods=["PUT"])
@@ -3986,6 +4072,11 @@ async def create_standalone_emby_user():
         await UserService.release_emby_capacity_lock(capacity_lock)
         return api_response(False, "创建 Emby 账号失败：未返回用户信息", code=502)
 
+    try:
+        await EmbyService.apply_default_hidden_libraries_by_emby_id(emby_user.id)
+    except Exception as exc:  # pragma: no cover
+        logger.warning(f"创建独立 Emby 账号后应用默认隐藏媒体库失败: {exc}")
+
     logger.info(f"管理员 {g.current_user.USERNAME} 创建独立 Emby 账号: " f"name={emby_user.name}, id={emby_user.id}")
     await UserService.release_emby_capacity_lock(capacity_lock)
     return api_response(
@@ -4055,6 +4146,7 @@ async def bind_emby_to_user(uid: int):
             return api_response(False, cap_msg, code=409)
     if occupant and occupant.UID != target_user.UID:
         if not force:
+            await UserService.release_emby_capacity_lock(capacity_lock)
             # 返回 200 以便前端读取 conflict 详情，由 success=false 表示业务未完成
             return api_response(
                 False,
@@ -4100,8 +4192,9 @@ async def bind_emby_to_user(uid: int):
     # 同步状态到 Emby（按本地启用/到期状态调整 Emby 的 IsDisabled）
     try:
         await UserService.sync_user_to_emby(target_user)
+        await EmbyService.apply_default_hidden_libraries(target_user)
     except Exception as exc:
-        logger.warning(f"绑定后同步 Emby 状态失败: {exc}")
+        logger.warning(f"绑定后同步 Emby 状态或应用默认隐藏媒体库失败: {exc}")
 
     logger.info(
         f"管理员 {g.current_user.USERNAME} 绑定 Emby 到系统账号: "

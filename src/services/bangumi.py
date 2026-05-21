@@ -113,6 +113,7 @@ class BangumiEpisode:
     name: str
     name_cn: str
     ep: int
+    sort: int
     airdate: str
     duration: str
     desc: str
@@ -128,6 +129,7 @@ class BangumiEpisode:
             name=data.get("name", ""),
             name_cn=data.get("name_cn", ""),
             ep=data.get("ep", 0),
+            sort=data.get("sort", data.get("ep", 0)),
             airdate=data.get("airdate", ""),
             duration=data.get("duration", ""),
             desc=data.get("desc", ""),
@@ -145,8 +147,9 @@ class BangumiClient:
 
         :param access_token: Bangumi Access Token（可选）
         """
-        self.access_token = access_token or Config.BANGUMI_TOKEN
+        self.access_token = (access_token or "").strip()
         self._client: Optional[httpx.AsyncClient] = None
+        self._current_username: Optional[str] = None
 
     async def _get_client(self) -> httpx.AsyncClient:
         """获取 HTTP 客户端"""
@@ -179,6 +182,7 @@ class BangumiClient:
 
     async def _request(self, method: str, endpoint: str, **kwargs) -> Optional[Any]:
         """发送 HTTP 请求"""
+        allow_404 = bool(kwargs.pop("allow_404", False))
         headers = {
             "User-Agent": "Twilight/1.0 (https://github.com/your-repo)",
             "Accept": "application/json",
@@ -197,6 +201,8 @@ class BangumiClient:
                 if response.status_code == 401:
                     raise BangumiError("Access Token 无效或已过期")
                 elif response.status_code == 404:
+                    if allow_404:
+                        return None
                     raise BangumiError(f"资源未找到: {endpoint}")
                 elif response.status_code >= 400:
                     raise BangumiError(f"请求失败: {response.status_code} - {response.text}")
@@ -208,6 +214,25 @@ class BangumiClient:
             except httpx.RequestError as e:
                 logger.error(f"Bangumi 请求失败: {e}")
                 raise BangumiError(f"网络请求失败: {e}")
+
+    async def get_current_user(self) -> Optional[Dict[str, Any]]:
+        """获取当前 Access Token 对应的 Bangumi 用户。"""
+        if not self.access_token:
+            return None
+        data = await self._request("GET", "/me")
+        if isinstance(data, dict):
+            self._current_username = str(data.get("username") or data.get("id") or "") or None
+            return data
+        return None
+
+    async def get_current_username(self) -> Optional[str]:
+        """获取当前 Bangumi 用户名，供收藏查询 API 使用。"""
+        if self._current_username:
+            return self._current_username
+        data = await self.get_current_user()
+        if not data:
+            return None
+        return self._current_username
 
     async def get_subject(self, subject_id: int) -> Optional[BangumiSubject]:
         """
@@ -236,17 +261,11 @@ class BangumiClient:
             return None
 
         try:
-            # 需要先获取当前用户信息
-            user_data = await self._request("GET", "/me")
-            if not user_data:
+            username = await self.get_current_username()
+            if not username:
                 return None
 
-            user_id = user_data.get("id")
-            if not user_id:
-                return None
-
-            # 获取用户收藏
-            data = await self._request("GET", f"/users/{user_id}/collections/{subject_id}")
+            data = await self._request("GET", f"/users/{username}/collections/{subject_id}", allow_404=True)
             return data
         except BangumiError:
             raise
@@ -284,34 +303,89 @@ class BangumiClient:
             payload["rating"] = rating
 
         try:
-            data = await self._request("POST", f"/collections/{subject_id}", json=payload)
-            return data is not None
+            await self._request("POST", f"/users/-/collections/{subject_id}", json=payload)
+            return True
         except BangumiError:
             raise
         except Exception as e:
             logger.error(f"更新收藏失败: {e}")
             return False
 
+    async def get_episode_collection(self, episode_id: int) -> Optional[Dict[str, Any]]:
+        """获取当前用户对指定章节的收藏进度。"""
+        if not self.access_token:
+            return None
+        try:
+            data = await self._request("GET", f"/users/-/collections/-/episodes/{episode_id}", allow_404=True)
+            return data if isinstance(data, dict) else None
+        except BangumiError:
+            raise
+        except Exception as e:
+            logger.error(f"获取章节收藏失败: {e}")
+            return None
+
     async def update_episode_status(self, episode_id: int, status: int = 2) -> bool:
         """
         更新章节观看状态
 
         :param episode_id: 章节 ID
-        :param status: 状态 (0=未看, 1=看过, 2=在看)
+        :param status: Bangumi 章节收藏状态；2=看过
         """
         if not self.access_token:
             raise BangumiError("需要 Access Token")
 
-        payload = {"status": status}
+        payload = {"type": status}
 
         try:
-            data = await self._request("POST", f"/episodes/{episode_id}/status", json=payload)
-            return data is not None
+            await self._request("PUT", f"/users/-/collections/-/episodes/{episode_id}", json=payload)
+            return True
         except BangumiError:
             raise
         except Exception as e:
             logger.error(f"更新章节状态失败: {e}")
             return False
+
+    async def get_subject_episodes(self, subject_id: int, ep_type: int = 0, limit: int = 100) -> List[BangumiEpisode]:
+        """获取条目的章节列表。默认只取本篇章节(type=0)。"""
+        episodes: List[BangumiEpisode] = []
+        offset = 0
+        while True:
+            data = await self._request(
+                "GET",
+                "/episodes",
+                params={"subject_id": subject_id, "type": ep_type, "limit": limit, "offset": offset},
+            )
+            if not data:
+                break
+            items = data.get("data", []) if isinstance(data, dict) else []
+            for item in items:
+                try:
+                    episodes.append(BangumiEpisode.from_dict(item))
+                except Exception as e:
+                    logger.warning(f"解析章节失败: {e}")
+            total = int(data.get("total") or len(episodes)) if isinstance(data, dict) else len(episodes)
+            if not items or len(episodes) >= total:
+                break
+            offset += len(items)
+        return episodes
+
+    async def mark_episode_by_ep_number(self, subject_id: int, ep_number: int, status: int = 2) -> bool:
+        """按 Bangumi 本篇章节序号打格子。"""
+        episodes = await self.get_subject_episodes(subject_id, ep_type=0)
+        target = next((ep for ep in episodes if ep.sort == ep_number), None)
+        if not target:
+            target = next(
+                (ep for ep in episodes if int(ep.ep or 0) == int(ep_number) and int(ep.ep or 0) <= int(ep.sort or 0)),
+                None,
+            )
+        if not target:
+            logger.warning("未找到 Bangumi 章节: subject_id=%s ep=%s", subject_id, ep_number)
+            return False
+
+        collection = await self.get_episode_collection(target.id)
+        if collection and collection.get("type") == 2:
+            return True
+        return await self.update_episode_status(target.id, status=status)
 
     async def search(self, keyword: str, subject_type: Optional[int] = None, limit: int = 20) -> List[BangumiSubject]:
         """
@@ -334,6 +408,8 @@ class BangumiClient:
         # 构建搜索请求体
         filter_dict = {"nsfw": True}  # 允许 NSFW 内容
         if subject_type is not None:
+            if isinstance(subject_type, SubjectType):
+                subject_type = subject_type.value
             filter_dict["type"] = [subject_type]
 
         payload = {
@@ -413,8 +489,10 @@ _bangumi_client: Optional[BangumiClient] = None
 def get_bangumi_client(access_token: Optional[str] = None) -> BangumiClient:
     """获取 Bangumi 客户端"""
     global _bangumi_client
+    if access_token is not None:
+        return BangumiClient(access_token=access_token)
     if _bangumi_client is None:
-        _bangumi_client = BangumiClient(access_token=access_token)
+        _bangumi_client = BangumiClient(access_token=Config.BANGUMI_TOKEN)
     return _bangumi_client
 
 

@@ -401,7 +401,7 @@ curl -X GET "http://localhost:5000/api/v1/users/me" \
 ```json
 {
   "email": "updated@example.com",
-  "bgm_mode": "token",
+  "bgm_mode": true,
   "bgm_token": "new-bgm-token"
 }
 ```
@@ -412,7 +412,7 @@ curl -X GET "http://localhost:5000/api/v1/users/me" \
 curl -X PUT "http://localhost:5000/api/v1/users/me" \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"email":"updated@example.com","bgm_mode":"token","bgm_token":"new-bgm-token"}'
+  -d '{"email":"updated@example.com","bgm_mode":true,"bgm_token":"new-bgm-token"}'
 ```
 
 #### 修改用户名

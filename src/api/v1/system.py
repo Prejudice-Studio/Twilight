@@ -405,6 +405,7 @@ async def get_system_info():
                 "emby_direct_register": RegisterConfig.EMBY_DIRECT_REGISTER_ENABLED,
                 "telegram": Config.TELEGRAM_MODE,
                 "force_bind_telegram": Config.FORCE_BIND_TELEGRAM,
+                "bangumi_sync": BangumiSyncConfig.ENABLED,
             },
             "limits": {
                 "user_limit": RegisterConfig.USER_LIMIT,
@@ -587,6 +588,9 @@ async def get_user_config():
                 "max_devices": DeviceLimitConfig.MAX_DEVICES,
                 "max_streams": DeviceLimitConfig.MAX_STREAMS,
             },
+            "bangumi_sync": {
+                "enabled": BangumiSyncConfig.ENABLED,
+            },
         },
     )
 
@@ -655,6 +659,11 @@ async def get_admin_config():
             "notification": {
                 "enabled": NotificationConfig.ENABLED,
                 "expiry_remind_days": NotificationConfig.EXPIRY_REMIND_DAYS,
+            },
+            "bangumi_sync": {
+                "enabled": BangumiSyncConfig.ENABLED,
+                "webhook_secret_set": bool(BangumiSyncConfig.WEBHOOK_SECRET),
+                "min_progress_percent": BangumiSyncConfig.MIN_PROGRESS_PERCENT,
             },
         },
     )
@@ -1031,6 +1040,20 @@ async def get_config_schema():
                         "type": "list",
                         "description": "白名单用户专用的 Emby 服务器线路列表",
                         "value": EmbyConfig.EMBY_URL_LIST_FOR_WHITELIST,
+                    },
+                    {
+                        "key": "emby_default_hidden_libraries",
+                        "label": "默认隐藏媒体库",
+                        "type": "list",
+                        "description": "普通用户新建/补建 Emby 账号后自动隐藏的媒体库名称；按 Emby 媒体库名称填写，留空不处理。",
+                        "value": EmbyConfig.EMBY_DEFAULT_HIDDEN_LIBRARIES,
+                    },
+                    {
+                        "key": "emby_self_service_libraries",
+                        "label": "用户自助显隐媒体库",
+                        "type": "list",
+                        "description": "管理员开放给已授予自助显隐权限用户自行显示/隐藏的媒体库名称；按 Emby 媒体库名称填写，留空则无法自助操作。",
+                        "value": EmbyConfig.EMBY_SELF_SERVICE_LIBRARIES,
                     },
                 ],
             },
@@ -1793,28 +1816,35 @@ async def get_config_schema():
             {
                 "key": "BangumiSync",
                 "category": "integration",
-                "title": "Bangumi 同步",
-                "description": "Bangumi 观看记录同步设置",
+                "title": "Bangumi 点格子",
+                "description": "通过 Emby Webhook 在用户看完后同步 Bangumi 观看进度",
                 "fields": [
                     {
                         "key": "enabled",
                         "label": "启用同步",
                         "type": "bool",
-                        "description": "是否启用 Bangumi 观看记录同步",
+                        "description": "是否启用 Bangumi 点格子功能。关闭时用户侧 Bangumi 配置面板不会显示，Webhook 也会拒绝处理。",
                         "value": BangumiSyncConfig.ENABLED,
+                    },
+                    {
+                        "key": "webhook_secret",
+                        "label": "Webhook 密钥",
+                        "type": "secret",
+                        "description": "Emby 通知 Webhook 调用时携带的共享密钥；建议设置高熵随机值，并在 URL 中追加 ?token=该值。留空则不校验密钥。",
+                        "value": BangumiSyncConfig.WEBHOOK_SECRET,
                     },
                     {
                         "key": "auto_add_collection",
                         "label": "自动收藏",
                         "type": "bool",
-                        "description": "同步时是否自动添加到 Bangumi 收藏（在看）",
+                        "description": "用户未收藏该条目时，是否自动加入 Bangumi 收藏并设为在看。关闭后未收藏条目不会被同步。",
                         "value": BangumiSyncConfig.AUTO_ADD_COLLECTION,
                     },
                     {
                         "key": "private_collection",
                         "label": "私有收藏",
                         "type": "bool",
-                        "description": "观看记录是否设为 Bangumi 私有",
+                        "description": "自动收藏或调整收藏状态时是否设为私有。单集点格子仍使用 Bangumi 的章节收藏接口。",
                         "value": BangumiSyncConfig.PRIVATE_COLLECTION,
                     },
                     {
@@ -1828,7 +1858,7 @@ async def get_config_schema():
                         "key": "min_progress_percent",
                         "label": "最小播放进度",
                         "type": "int",
-                        "description": "播放进度达到多少百分比才算看完并同步",
+                        "description": "Emby playback.stop 未携带 PlayedToCompletion=true 时，播放进度达到多少百分比才算看完并同步。",
                         "value": BangumiSyncConfig.MIN_PROGRESS_PERCENT,
                     },
                 ],

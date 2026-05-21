@@ -21,6 +21,8 @@ import {
   CalendarClock,
   Send,
   Unlink,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -56,7 +58,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError } from "@/components/layout/page-state";
-import { api, type UserInfo } from "@/lib/api";
+import { api, type UserInfo, type EmbyLibraryAccess } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 
 export default function AdminUsersPage() {
@@ -98,6 +100,14 @@ export default function AdminUsersPage() {
     emby_id: "",
     active: true,
   });
+
+  // 媒体库权限对话框
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryTarget, setLibraryTarget] = useState<UserInfo | null>(null);
+  const [libraryAccess, setLibraryAccess] = useState<EmbyLibraryAccess | null>(null);
+  const [selectedLibraryIds, setSelectedLibraryIds] = useState<Set<string>>(new Set());
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [librarySelfServiceBulkLoading, setLibrarySelfServiceBulkLoading] = useState(false);
 
   // 删除（含邀请树级联）对话框
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -723,6 +733,118 @@ export default function AdminUsersPage() {
     }
   };
 
+  const applyLibraryAccessState = (data: EmbyLibraryAccess) => {
+    setLibraryAccess(data);
+    setSelectedLibraryIds(new Set((data.libraries || []).map((lib) => lib.id)));
+  };
+
+  const handleOpenLibraries = async (user: UserInfo) => {
+    setLibraryTarget(user);
+    setLibraryAccess(null);
+    setSelectedLibraryIds(new Set());
+    setLibraryOpen(true);
+    setLibraryLoading(true);
+    try {
+      const res = await api.getUserLibraries(user.uid);
+      if (res.success && res.data) {
+        applyLibraryAccessState(res.data);
+      } else {
+        toast({ title: "加载媒体库权限失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "加载媒体库权限失败", description: error.message, variant: "destructive" });
+    } finally {
+      setLibraryLoading(false);
+    }
+  };
+
+  const toggleSelectedLibrary = (libraryId: string) => {
+    setSelectedLibraryIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(libraryId)) next.delete(libraryId);
+      else next.add(libraryId);
+      return next;
+    });
+  };
+
+  const updateTargetLibraries = async (payload: Parameters<typeof api.updateUserLibraries>[1]) => {
+    if (!libraryTarget) return;
+    setLibraryLoading(true);
+    try {
+      const res = await api.updateUserLibraries(libraryTarget.uid, payload);
+      if (res.success && res.data) {
+        applyLibraryAccessState(res.data);
+        toast({ title: "媒体库权限已更新", variant: "success" });
+      } else {
+        toast({ title: "更新失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "更新失败", description: error.message, variant: "destructive" });
+    } finally {
+      setLibraryLoading(false);
+    }
+  };
+
+  const saveSelectedLibraries = async () => {
+    await updateTargetLibraries({
+      action: "set",
+      library_ids: Array.from(selectedLibraryIds),
+      enable_all: false,
+    });
+  };
+
+  const applyLibrarySelfServiceState = (uid: number, enabled: boolean) => {
+    setUsers((prev) => prev.map((item) => item.uid === uid ? { ...item, library_self_service: enabled } : item));
+    setLibraryTarget((prev) => prev && prev.uid === uid ? { ...prev, library_self_service: enabled } : prev);
+    if (libraryTarget?.uid === uid) {
+      setLibraryAccess((prev) => prev ? { ...prev, self_service_enabled: enabled } : prev);
+    }
+  };
+
+  const handleSetLibrarySelfService = async (user: UserInfo, enabled: boolean) => {
+    setIsActionLoading(true);
+    try {
+      const res = await api.setUserLibrarySelfService(user.uid, enabled);
+      if (res.success && res.data) {
+        applyLibrarySelfServiceState(user.uid, res.data.library_self_service);
+        invalidateUsersCache();
+        toast({ title: enabled ? "已开启自助显隐权限" : "已关闭自助显隐权限", variant: "success" });
+      } else {
+        toast({ title: "更新失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "更新失败", description: error.message, variant: "destructive" });
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleBulkEnableLibrarySelfService = async () => {
+    const action = await confirmAction({
+      title: "为所有用户开启媒体库自助显隐？",
+      description: "只开启入口授权，不会改变任何用户当前可见的媒体库。用户仍只能操作管理员在 Emby 配置中开放的媒体库。",
+      tone: "warning",
+      confirmLabel: "批量开启",
+    });
+    if (!action) return;
+
+    setLibrarySelfServiceBulkLoading(true);
+    try {
+      const res = await api.bulkEnableLibrarySelfService();
+      if (res.success && res.data) {
+        toast({ title: `已为 ${res.data.updated} 个用户开启自助显隐权限`, variant: "success" });
+        invalidateUsersCache();
+        await loadUsers();
+      } else {
+        toast({ title: "批量开启失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "批量开启失败", description: error.message, variant: "destructive" });
+    } finally {
+      setLibrarySelfServiceBulkLoading(false);
+    }
+  };
+
   const handleBulkExpire = async () => {
     if (bulkExpireConfirmText.trim() !== "确认") {
       toast({ title: "需要在文本框输入「确认」二字以继续", variant: "destructive" });
@@ -1193,6 +1315,17 @@ export default function AdminUsersPage() {
           <Link2 className="mr-2 h-4 w-4" />
           绑定 Emby
         </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => void handleOpenLibraries(user)} disabled={!Boolean(user.emby_id)}>
+          <Eye className="mr-2 h-4 w-4" />
+          媒体库权限
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => void handleSetLibrarySelfService(user, !Boolean(user.library_self_service))}
+          disabled={isActionLoading}
+        >
+          {user.library_self_service ? <EyeOff className="mr-2 h-4 w-4" /> : <Eye className="mr-2 h-4 w-4" />}
+          {user.library_self_service ? "关闭自助显隐权" : "开启自助显隐权"}
+        </DropdownMenuItem>
         <DropdownMenuItem onClick={() => handleSyncBindings({ uid: user.uid })}>
           <RefreshCw className="mr-2 h-4 w-4" />
           同步绑定状态
@@ -1287,6 +1420,18 @@ export default function AdminUsersPage() {
                   <DropdownMenuItem onClick={() => void handleSyncBindings()}>
                     <RefreshCw className="mr-2 h-4 w-4" />
                     同步全部绑定
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    disabled={librarySelfServiceBulkLoading}
+                    onClick={() => void handleBulkEnableLibrarySelfService()}
+                  >
+                    {librarySelfServiceBulkLoading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Eye className="mr-2 h-4 w-4" />
+                    )}
+                    批量开启自助显隐
                   </DropdownMenuItem>
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
@@ -1578,7 +1723,7 @@ export default function AdminUsersPage() {
                     </div>
                   </div>
 
-                  {(user.telegram_id || user.emby_id) && (
+                  {(user.telegram_id || user.emby_id || user.library_self_service) && (
                     <div className="mt-3 space-y-1 border-t pt-3 text-xs text-muted-foreground">
                       {user.telegram_id && (
                         <p>
@@ -1586,6 +1731,7 @@ export default function AdminUsersPage() {
                         </p>
                       )}
                       {user.emby_id && <p className="break-all">Emby ID: {user.emby_id}</p>}
+                      {user.library_self_service && <p>媒体库自助显隐：已开启</p>}
                     </div>
                   )}
                 </div>
@@ -1648,6 +1794,9 @@ export default function AdminUsersPage() {
                         {user.emby_id ? (
                           <div className="flex flex-col gap-0.5 min-w-0">
                             <Badge variant="success" className="w-fit text-[10px]">已绑定</Badge>
+                            {user.library_self_service && (
+                              <Badge variant="outline" className="w-fit text-[10px]">自助显隐</Badge>
+                            )}
                             <span
                               className="text-xs text-muted-foreground truncate max-w-[160px]"
                               title={user.emby_username || user.username}
@@ -1674,11 +1823,14 @@ export default function AdminUsersPage() {
                               <p className="font-medium">更多信息</p>
                               <p>注册时间: {user.register_time ? formatDate(user.register_time) : "未知"}</p>
                               <p>创建时间: {user.created_at ? formatDate(user.created_at) : "未记录"}</p>
+                              <p>媒体库自助显隐: {user.library_self_service ? "已开启" : "未开启"}</p>
                             </div>
                             <div>
                               <p className="font-medium">账号详情</p>
                               <p>Emby ID: {user.emby_id || "未绑定"}</p>
-                              <p>BGM 模式: {user.bgm_mode ? "已开启" : "未开启"}</p>
+                              <p>BGM 同步: {user.bgm_mode ? "已开启" : "未开启"}</p>
+                              <p>BGM Token: {user.bgm_token_set ? "已配置" : "未配置"}</p>
+                              <p>BGM 状态: {user.bgm_sync_ready ? "可同步" : user.bgm_mode ? "缺少个人 Token" : "未启用"}</p>
                             </div>
                           </div>
                         </td>
@@ -1774,6 +1926,141 @@ export default function AdminUsersPage() {
             <Button onClick={handleEdit} disabled={isActionLoading}>
               {isActionLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               保存更改
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Library Access Dialog */}
+      <Dialog open={libraryOpen} onOpenChange={(open) => { if (!libraryLoading) setLibraryOpen(open); }}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>媒体库权限</DialogTitle>
+            <DialogDescription>
+              {libraryTarget ? `调整 ${libraryTarget.username} 的 Emby 媒体库显示/隐藏权限` : "调整用户媒体库权限"}
+            </DialogDescription>
+          </DialogHeader>
+
+          {libraryLoading && !libraryAccess ? (
+            <div className="flex items-center gap-2 rounded-lg bg-accent/50 p-4 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              正在加载媒体库权限
+            </div>
+          ) : !libraryAccess?.has_emby ? (
+            <div className="rounded-lg bg-accent/50 p-4 text-sm text-muted-foreground">
+              该用户尚未绑定 Emby 账号，无法设置媒体库权限。
+            </div>
+          ) : libraryAccess ? (
+            <div className="space-y-4">
+              <div className="flex flex-col gap-3 rounded-lg border bg-card/60 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="space-y-1">
+                  <Label>自助显隐授权</Label>
+                  <p className="text-xs text-muted-foreground">
+                    只控制该用户能否在个人设置里自行操作；下方按钮才会改变当前媒体库可见状态。
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={libraryAccess.self_service_enabled ? "success" : "outline"}>
+                    {libraryAccess.self_service_enabled ? "已开启" : "未开启"}
+                  </Badge>
+                  {libraryTarget && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={libraryLoading || isActionLoading}
+                      onClick={() => void handleSetLibrarySelfService(libraryTarget, !libraryAccess.self_service_enabled)}
+                    >
+                      {libraryAccess.self_service_enabled ? "关闭授权" : "开启授权"}
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card/60 p-3">
+                <Badge variant={libraryAccess.enable_all ? "default" : "secondary"}>
+                  {libraryAccess.enable_all ? "策略：显示全部" : "策略：按选择显示"}
+                </Badge>
+                <Badge variant="outline">可见 {libraryAccess.libraries.length}/{libraryAccess.all_libraries.length}</Badge>
+                {libraryAccess.blocked_names.length > 0 && (
+                  <Badge variant="outline">隐藏：{libraryAccess.blocked_names.join("、")}</Badge>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" disabled={libraryLoading} onClick={() => void updateTargetLibraries({ action: "enable_all" })}>
+                  <Eye className="mr-2 h-4 w-4" />
+                  显示全部
+                </Button>
+                <Button variant="outline" size="sm" disabled={libraryLoading} onClick={() => void updateTargetLibraries({ action: "disable_all" })}>
+                  <EyeOff className="mr-2 h-4 w-4" />
+                  隐藏全部
+                </Button>
+                {libraryAccess.default_hidden_libraries.length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={libraryLoading}
+                    onClick={() => void updateTargetLibraries({ action: "hide", library_names: libraryAccess.default_hidden_libraries })}
+                  >
+                    隐藏默认库
+                  </Button>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label>选择可见媒体库</Label>
+                <div className="grid max-h-72 gap-2 overflow-y-auto rounded-lg border p-3 sm:grid-cols-2">
+                  {libraryAccess.all_libraries.map((lib) => {
+                    const selected = selectedLibraryIds.has(lib.id);
+                    return (
+                      <button
+                        key={lib.id}
+                        type="button"
+                        className={`rounded-lg border p-3 text-left transition-colors ${selected ? "border-primary bg-primary/10" : "bg-background hover:bg-accent"}`}
+                        onClick={() => toggleSelectedLibrary(lib.id)}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium">{lib.name}</span>
+                          <Badge variant={selected ? "default" : "secondary"}>{selected ? "显示" : "隐藏"}</Badge>
+                        </div>
+                        {lib.type && <p className="mt-1 text-xs text-muted-foreground">{lib.type}</p>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {libraryAccess.self_service_libraries.length > 0 && (
+                <div className="space-y-2 rounded-lg border p-3">
+                  <Label>可自助操作的媒体库（全局配置）</Label>
+                  <p className="text-xs text-muted-foreground">
+                    这些库来自 Emby 配置；这里的“显示/隐藏”会直接调整当前用户可见状态。
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {libraryAccess.self_service_libraries.map((name) => (
+                      <div key={name} className="flex items-center gap-2 rounded-md bg-accent/50 px-2 py-1">
+                        <span className="text-sm">{name}</span>
+                        <Button variant="ghost" size="sm" disabled={libraryLoading} onClick={() => void updateTargetLibraries({ action: "show", library_names: [name] })}>
+                          显示
+                        </Button>
+                        <Button variant="ghost" size="sm" disabled={libraryLoading} onClick={() => void updateTargetLibraries({ action: "hide", library_names: [name] })}>
+                          隐藏
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLibraryOpen(false)} disabled={libraryLoading}>
+              关闭
+            </Button>
+            <Button onClick={() => void saveSelectedLibraries()} disabled={libraryLoading || !libraryAccess || !libraryAccess.has_emby || libraryAccess.all_libraries.length === 0}>
+              {libraryLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              保存选择
             </Button>
           </DialogFooter>
         </DialogContent>

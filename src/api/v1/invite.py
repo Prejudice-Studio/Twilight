@@ -457,6 +457,14 @@ async def use_invite_code():
         user.PASSWORD = hash_password(emby_password or "")
         await UserOperate.update_user(user)
 
+        try:
+            from src.services import EmbyService
+
+            await UserService.sync_user_to_emby(user)
+            await EmbyService.apply_default_hidden_libraries(user)
+        except Exception as exc:  # pragma: no cover
+            logger.warning(f"邀请开通后同步状态或应用默认隐藏媒体库失败: {exc}")
+
         return api_response(
             True,
             "邀请使用成功",

@@ -31,7 +31,7 @@ redis_url = ""
 telegram_mode = false
 # 是否强制所有用户绑定 Telegram 才能登录/注册
 force_bind_telegram = false
-# Bangumi 个人 token（https://bgm.tv/dev/app）；留空则不调用 BGM
+# Bangumi 全局 API Token（可选；点格子不会把它作为用户兜底 Token）
 bangumi_token = ""
 # Bangumi API 地址（自建反代时可改）
 bangumi_api_url = "https://api.bgm.tv"
@@ -61,6 +61,10 @@ emby_url_list = [
 emby_url_list_for_whitelist = [
   "直连 : http://your-server:8096/",
 ]
+# 普通用户新建/补建 Emby 账号后默认隐藏的媒体库名称；按 Emby 媒体库名称填写，留空不处理
+emby_default_hidden_libraries = []
+# 允许用户在个人设置中自行显示/隐藏的媒体库名称；留空关闭自助显隐入口
+emby_self_service_libraries = []
 
 # ───────── Telegram Bot ─────────
 [Telegram]
@@ -273,8 +277,10 @@ new_media_notify = false
 
 # ───────── Bangumi 同步 ─────────
 [BangumiSync]
-# 开启后看完 Emby 自动在 BGM 标记进度（依赖 [Global].bangumi_token 或用户自配）
+# 开启后看完 Emby 自动在 BGM 标记进度（每个用户必须配置自己的 Token）
 enabled = false
+# Emby Webhook 共享密钥；建议设置并在通知 URL 后追加 ?token=该值
+webhook_secret = ""
 auto_add_collection = true
 private_collection = true
 # 命中关键词的条目不同步

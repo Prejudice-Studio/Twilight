@@ -14,6 +14,7 @@ from difflib import SequenceMatcher
 
 from src.db.bangumi import BangumiUserModel, BangumiUserOperate
 from src.db.user import UserOperate
+from src.config import BangumiSyncConfig
 from src.services.bangumi import BangumiClient, BangumiSubject, BangumiError, get_bangumi_client, SubjectType, EpStatus
 from src.services.bangumi_search import BangumiSearchAPI
 
@@ -142,7 +143,7 @@ class BangumiSyncService:
 
     @classmethod
     async def _search_subject(
-        cls, title: str, original_title: str, release_date: str, season: int = 1
+        cls, title: str, original_title: str, release_date: str, season: int = 1, access_token: Optional[str] = None
     ) -> Optional[int]:
         """搜索匹配的 Bangumi 条目"""
 
@@ -162,7 +163,7 @@ class BangumiSyncService:
             cls._search_cache.pop(cache_key, None)
             cls._search_cache_time.pop(cache_key, None)
 
-        client = get_bangumi_client()
+        client = BangumiClient(access_token=access_token) if access_token else get_bangumi_client()
 
         # 3. 使用标题搜索
         normalized_title = cls._normalize_title(title)
@@ -196,11 +197,12 @@ class BangumiSyncService:
                     score += title_sim * 0.6
 
                     # 年份匹配
-                    if year and subject.air_date:
-                        subject_year = subject.air_date[:4]
+                    subject_date = getattr(subject, "date", "") or getattr(subject, "air_date", "") or ""
+                    if year and subject_date:
+                        subject_year = subject_date[:4]
                         if year == subject_year:
                             score += 0.2
-                        elif abs(int(year) - int(subject_year)) == 1:
+                        elif year.isdigit() and subject_year.isdigit() and abs(int(year) - int(subject_year)) == 1:
                             score += 0.1
 
                     # 类型加分（动画）
@@ -208,7 +210,13 @@ class BangumiSyncService:
                         score += 0.1
 
                     # 评分加分
-                    if subject.score > 7:
+                    rating_score = 0.0
+                    if isinstance(subject.rating, dict):
+                        try:
+                            rating_score = float(subject.rating.get("score") or 0)
+                        except (TypeError, ValueError):
+                            rating_score = 0.0
+                    if rating_score > 7:
                         score += 0.1
 
                     if score > best_score:
@@ -252,6 +260,15 @@ class BangumiSyncService:
         :param request: 同步请求
         :param bgm_token: 用户的 Bangumi Access Token
         """
+        if not BangumiSyncConfig.ENABLED:
+            return SyncResult(False, "Bangumi 点格子功能未启用")
+
+        bgm_token = (bgm_token or "").strip()
+        if not bgm_token:
+            return SyncResult(False, "用户未配置 Bangumi Token")
+
+        cls.set_block_keywords(BangumiSyncConfig.BLOCK_KEYWORDS)
+
         # 检查基本信息
         if not request.title:
             return SyncResult(False, "缺少番剧标题")
@@ -265,7 +282,7 @@ class BangumiSyncService:
 
         # 搜索条目
         subject_id = await cls._search_subject(
-            request.title, request.original_title, request.release_date, request.season
+            request.title, request.original_title, request.release_date, request.season, bgm_token
         )
 
         if not subject_id:
@@ -280,16 +297,40 @@ class BangumiSyncService:
             if not subject:
                 return SyncResult(False, f"无法获取 Bangumi 条目信息: {subject_id}")
 
-            # 确保用户已收藏该条目（设为"在看"）
+            # 确保用户已收藏该条目（设为"在看"），再打单集格子。
             try:
                 collection = await client.get_user_collection(subject_id)
-                if not collection:
-                    # 添加到收藏
-                    await client.update_collection(subject_id, status=3)  # 3=在看
+                if collection and collection.get("type") == 2:
+                    return SyncResult(
+                        success=True,
+                        message=f"已看过: {subject.title}，跳过重复标记",
+                        subject_id=subject_id,
+                        subject_name=subject.title,
+                        episode=request.episode,
+                    )
+                if collection and collection.get("type") in (1, 4):
+                    await client.update_collection(
+                        subject_id,
+                        status=3,
+                        private=BangumiSyncConfig.PRIVATE_COLLECTION,
+                    )
+                elif not collection:
+                    if not BangumiSyncConfig.AUTO_ADD_COLLECTION:
+                        return SyncResult(False, f"条目未收藏且未开启自动收藏: {subject.title}", subject_id=subject_id)
+                    await client.update_collection(
+                        subject_id,
+                        status=3,
+                        private=BangumiSyncConfig.PRIVATE_COLLECTION,
+                    )
                     logger.info(f"已将 {subject.title} 添加到收藏")
             except BangumiError:
-                # 尝试添加收藏
-                await client.update_collection(subject_id, status=3)
+                if not BangumiSyncConfig.AUTO_ADD_COLLECTION:
+                    raise
+                await client.update_collection(
+                    subject_id,
+                    status=3,
+                    private=BangumiSyncConfig.PRIVATE_COLLECTION,
+                )
 
             # 计算实际集数（考虑季度）
             actual_episode = request.episode
@@ -297,7 +338,8 @@ class BangumiSyncService:
             # 这里简单处理，如果是第二季以上，尝试获取前几季的集数
 
             # 标记为已看
-            success = await client.mark_episode_by_ep_number(subject_id, actual_episode, EpStatus.WATCHED)
+            # Bangumi 章节收藏 type=2 表示「看过」。
+            success = await client.mark_episode_by_ep_number(subject_id, actual_episode, 2)
 
             if success:
                 logger.info(f"✅ 同步成功: {subject.title} 第 {actual_episode} 集")
@@ -321,13 +363,15 @@ class BangumiSyncService:
 
     @classmethod
     async def _get_user_bgm_token(cls, user) -> Optional[str]:
-        """获取用户 Bangumi Token，优先使用个人设置。"""
-        if user.BGM_TOKEN:
-            return user.BGM_TOKEN
+        """获取用户个人 Bangumi Token，不使用全局 Token 兜底。"""
+        token = (getattr(user, "BGM_TOKEN", "") or "").strip()
+        if token:
+            return token
         if user.TELEGRAM_ID:
             bgm_user = await BangumiUserOperate.get_user(user.TELEGRAM_ID)
-            if bgm_user and bgm_user.access_token:
-                return bgm_user.access_token
+            token = (getattr(bgm_user, "access_token", "") or "").strip() if bgm_user else ""
+            if token:
+                return token
         return None
 
     @classmethod
@@ -345,6 +389,9 @@ class BangumiSyncService:
         user = await UserOperate.get_user_by_uid(uid)
         if not user:
             return SyncResult(False, "用户不存在")
+
+        if not BangumiSyncConfig.ENABLED:
+            return SyncResult(False, "Bangumi 点格子功能未启用")
 
         if not user.BGM_MODE:
             return SyncResult(False, "用户未开启 Bangumi 同步")
@@ -364,4 +411,143 @@ class BangumiSyncService:
             source="api",
         )
 
+        return await cls.sync_episode(request, token)
+
+    @staticmethod
+    def _to_int(value: Any, default: int = 0) -> int:
+        try:
+            if value is None or value == "":
+                return default
+            return int(float(value))
+        except (TypeError, ValueError):
+            return default
+
+    @classmethod
+    def _extract_progress_percent(cls, payload: Dict[str, Any]) -> Optional[float]:
+        """从 Emby Webhook 中提取播放进度百分比。"""
+        info = payload.get("PlaybackInfo") if isinstance(payload.get("PlaybackInfo"), dict) else {}
+        candidates = [
+            info.get("PlayedPercentage"),
+            info.get("PlayedPercent"),
+            payload.get("PlayedPercentage"),
+            payload.get("PlayedPercent"),
+        ]
+        for value in candidates:
+            if value is None or value == "":
+                continue
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+
+        position = cls._to_int(info.get("PositionTicks") or info.get("PlaybackPositionTicks"), 0)
+        runtime = cls._to_int(
+            info.get("RunTimeTicks")
+            or payload.get("RunTimeTicks")
+            or (payload.get("Item") or {}).get("RunTimeTicks"),
+            0,
+        )
+        if position > 0 and runtime > 0:
+            return position / runtime * 100
+        return None
+
+    @classmethod
+    def _should_sync_emby_event(cls, payload: Dict[str, Any]) -> tuple[bool, str]:
+        event = str(payload.get("Event") or payload.get("NotificationType") or "").strip().lower()
+        if event in {"item.markplayed", "item.markedplayed", "userdataplayed"}:
+            return True, "手动标记已播放"
+        if event not in {"playback.stop", "playbackstop"}:
+            return False, f"事件 {event or 'unknown'} 无需同步"
+
+        info = payload.get("PlaybackInfo") if isinstance(payload.get("PlaybackInfo"), dict) else {}
+        played_to_completion = info.get("PlayedToCompletion")
+        if played_to_completion is True or str(played_to_completion).lower() == "true":
+            return True, "播放完成"
+
+        percent = cls._extract_progress_percent(payload)
+        threshold = max(1, min(100, int(BangumiSyncConfig.MIN_PROGRESS_PERCENT or 80)))
+        if percent is not None and percent >= threshold:
+            return True, f"播放进度 {percent:.1f}% 达到阈值 {threshold}%"
+        if percent is None:
+            return False, "未播放完成且未提供播放进度"
+        return False, f"播放进度 {percent:.1f}% 未达到阈值 {threshold}%"
+
+    @classmethod
+    def _build_request_from_emby_payload(cls, payload: Dict[str, Any], username: str) -> Optional[SyncRequest]:
+        item = payload.get("Item") if isinstance(payload.get("Item"), dict) else {}
+        item_type = str(item.get("Type") or "").strip().lower()
+
+        if item_type == "episode":
+            title = str(item.get("SeriesName") or item.get("Series") or "").strip()
+            season = cls._to_int(item.get("ParentIndexNumber"), 1)
+            episode = cls._to_int(item.get("IndexNumber"), 0)
+            if not title or episode <= 0:
+                return None
+            return SyncRequest(
+                media_type="episode",
+                title=title,
+                original_title=str(item.get("OriginalTitle") or "").strip(),
+                season=season,
+                episode=episode,
+                release_date=str(item.get("PremiereDate") or "")[:10],
+                user_name=username,
+                source="emby-webhook",
+            )
+
+        if item_type == "movie":
+            title = str(item.get("Name") or "").strip()
+            if not title:
+                return None
+            return SyncRequest(
+                media_type="movie",
+                title=title,
+                original_title=str(item.get("OriginalTitle") or "").strip(),
+                season=1,
+                episode=1,
+                release_date=str(item.get("PremiereDate") or "")[:10],
+                user_name=username,
+                source="emby-webhook",
+            )
+
+        return None
+
+    @classmethod
+    async def sync_emby_payload(cls, payload: Dict[str, Any]) -> SyncResult:
+        """处理 Emby Webhook 负载并为对应本地用户同步 Bangumi 点格子。"""
+        if not BangumiSyncConfig.ENABLED:
+            return SyncResult(False, "Bangumi 点格子功能未启用")
+
+        should_sync, reason = cls._should_sync_emby_event(payload)
+        if not should_sync:
+            return SyncResult(False, reason)
+
+        user_data = payload.get("User") if isinstance(payload.get("User"), dict) else {}
+        emby_user_id = str(user_data.get("Id") or payload.get("UserId") or "").strip()
+        emby_username = str(user_data.get("Name") or payload.get("UserName") or "").strip()
+
+        user = await UserOperate.get_user_by_embyid(emby_user_id) if emby_user_id else None
+        if not user and emby_username:
+            user = await UserOperate.get_user_by_emby_username(emby_username)
+        if not user:
+            return SyncResult(False, "未找到绑定该 Emby 用户的本地账号")
+
+        if not user.BGM_MODE:
+            return SyncResult(False, "用户未开启 Bangumi 同步")
+
+        token = await cls._get_user_bgm_token(user)
+        if not token:
+            return SyncResult(False, "用户未配置 Bangumi Token")
+
+        request = cls._build_request_from_emby_payload(payload, user.USERNAME or emby_username)
+        if not request:
+            return SyncResult(False, "Emby Webhook 缺少可同步的媒体信息")
+
+        logger.info(
+            "Bangumi Webhook 触发同步: uid=%s title=%s S%sE%s reason=%s",
+            user.UID,
+            request.title,
+            request.season,
+            request.episode,
+            reason,
+        )
         return await cls.sync_episode(request, token)

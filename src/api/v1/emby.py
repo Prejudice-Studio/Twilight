@@ -3,14 +3,32 @@ Emby API
 
 提供 Emby 相关查询操作
 """
+import hmac
+import logging
 
 from flask import Blueprint, request
 
 from src.api.v1.auth import require_auth, api_response
 from src.services import EmbyService, get_emby_client
-from src.config import EmbyConfig
+from src.config import EmbyConfig, BangumiSyncConfig
 
 emby_bp = Blueprint("emby", __name__, url_prefix="/emby")
+logger = logging.getLogger(__name__)
+
+
+def _verify_bangumi_webhook_secret(payload: dict) -> bool:
+    """校验 Emby Bangumi Webhook 共享密钥；未配置时兼容内网无密钥接入。"""
+    expected = (BangumiSyncConfig.WEBHOOK_SECRET or "").strip()
+    if not expected:
+        return True
+    provided = (
+        request.args.get("token")
+        or request.headers.get("X-Twilight-Bangumi-Token")
+        or request.headers.get("X-Webhook-Token")
+        or payload.get("token")
+        or ""
+    )
+    return hmac.compare_digest(str(provided), expected)
 
 
 # ==================== 服务器信息 ====================
@@ -160,3 +178,34 @@ async def get_sessions_count():
         )
     except Exception as e:
         return api_response(False, f"获取失败: {e}")
+
+
+# ==================== Bangumi 点格子 Webhook ====================
+
+
+@emby_bp.route("/bangumi/webhook", methods=["POST"])
+async def bangumi_sync_webhook():
+    """接收 Emby 通知 Webhook，并按用户配置同步 Bangumi 点格子。"""
+    if not BangumiSyncConfig.ENABLED:
+        return api_response(False, "Bangumi 点格子功能未启用", code=400)
+
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict) or not payload:
+        return api_response(False, "Webhook 负载必须是 JSON 对象", code=400)
+
+    if not _verify_bangumi_webhook_secret(payload):
+        return api_response(False, "Webhook 密钥无效", code=403)
+
+    try:
+        from src.services import BangumiSyncService
+
+        result = await BangumiSyncService.sync_emby_payload(payload)
+        data = {
+            "subject_id": result.subject_id,
+            "subject_name": result.subject_name,
+            "episode": result.episode,
+        }
+        return api_response(result.success, result.message, data)
+    except Exception as e:
+        logger.error("Bangumi Webhook 处理失败: %s", e, exc_info=True)
+        return api_response(False, "Bangumi Webhook 处理失败", {"error": str(e)}, code=500)

@@ -47,6 +47,7 @@
 | ---- | ---- |
 | [安装部署](docs/INSTALL.md) | 后端、前端、服务配置 |
 | [Telegram Bot 命令](docs/TG_BOT_COMMANDS.md) | Bot 命令与群组管理说明 |
+| [Bangumi 点格子同步](docs/BANGUMI_SYNC.md) | Emby Webhook 与 Bangumi Token 配置 |
 | [后端 API](docs/BACKEND_API.md) | REST API 规范与重点接口 |
 | [API Key 外部接入](docs/API_KEY_API.md) | 外部系统调用说明 |
 | [安全加固](docs/SECURITY.md) | 生产安全检查清单 |

@@ -51,6 +51,8 @@ class UserModel(UsersDatabaseModel):
     PENDING_EMBY: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, nullable=True)
     # 待补建时，注册码给定的开通天数（None 时回退到 EMBY_DIRECT_REGISTER_DAYS）
     PENDING_EMBY_DAYS: Mapped[Optional[int]] = mapped_column(Integer, default=None, nullable=True)
+    # 是否允许该用户在个人设置中自助显示/隐藏管理员开放的特定媒体库。
+    LIBRARY_SELF_SERVICE: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, nullable=True)
     OTHER: Mapped[Optional[str]] = mapped_column(String, default="", nullable=True)
 
 
@@ -465,6 +467,33 @@ class UserOperate:
         async with UsersSessionFactory() as session:
             async with session.begin():
                 await session.merge(user)
+
+    @staticmethod
+    async def set_library_self_service(uid: int, enabled: bool) -> bool:
+        """设置单个用户是否允许自助显隐媒体库。"""
+        async with UsersSessionFactory() as session:
+            async with session.begin():
+                result = await session.execute(
+                    update(UserModel).where(UserModel.UID == uid).values(LIBRARY_SELF_SERVICE=bool(enabled))
+                )
+                return result.rowcount > 0
+
+    @staticmethod
+    async def enable_library_self_service_for_all() -> int:
+        """为所有已注册系统用户开启媒体库自助显隐权限。"""
+        from sqlalchemy import or_
+
+        async with UsersSessionFactory() as session:
+            async with session.begin():
+                result = await session.execute(
+                    update(UserModel)
+                    .where(
+                        UserModel.ROLE != Role.UNRECOGNIZED.value,
+                        or_(UserModel.LIBRARY_SELF_SERVICE.is_(None), UserModel.LIBRARY_SELF_SERVICE != True),
+                    )
+                    .values(LIBRARY_SELF_SERVICE=True)
+                )
+                return int(result.rowcount or 0)
 
     @staticmethod
     async def delete_user(user: UserModel) -> None:

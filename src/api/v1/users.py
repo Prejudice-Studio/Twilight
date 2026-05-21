@@ -155,7 +155,7 @@ async def register():
             "email": "user@example.com"     // 可选
         }
     """
-    from src.config import Config
+    from src.config import Config, BangumiSyncConfig
     from src.core.utils import rate_limit_check
 
     # 公开端点：注册接口防批量创建，按 IP 限 5 次/10 分钟。
@@ -558,7 +558,7 @@ async def update_my_info():
             "bgm_token": "your_bgm_access_token"
         }
     """
-    from src.config import Config
+    from src.config import BangumiSyncConfig
 
     data = request.get_json() or {}
     user = g.current_user
@@ -576,15 +576,21 @@ async def update_my_info():
         updated = True
 
     # 更新 Bangumi 同步设置
+    bgm_fields_present = "bgm_token" in data or "bgm_mode" in data
+    if bgm_fields_present and not BangumiSyncConfig.ENABLED:
+        return api_response(False, "Bangumi 点格子功能未启用", code=400)
+
     if "bgm_token" in data:
-        bgm_token = data.get("bgm_token") or ""
+        bgm_token = str(data.get("bgm_token") or "").strip()
+        if len(bgm_token) > 4096:
+            return api_response(False, "Bangumi Token 过长", code=400)
         user.BGM_TOKEN = bgm_token
         updated = True
 
     if "bgm_mode" in data:
-        bgm_mode = bool(data["bgm_mode"])
-        if bgm_mode and not (user.BGM_TOKEN or Config.BANGUMI_TOKEN):
-            return api_response(False, "请先设置 Bangumi Token 后启用 BGM 同步", code=400)
+        bgm_mode = parse_bool(data["bgm_mode"], default=False)
+        if bgm_mode and not (user.BGM_TOKEN or "").strip():
+            return api_response(False, "请先设置个人 Bangumi Token 后启用 BGM 同步", code=400)
         user.BGM_MODE = bgm_mode
         updated = True
 
@@ -903,6 +909,14 @@ async def bind_emby_account():
             user.ACTIVE_STATUS = True
 
         await UserOperate.update_user(user)
+
+        try:
+            from src.services import EmbyService
+
+            await UserService.sync_user_to_emby(user)
+            await EmbyService.apply_default_hidden_libraries(user)
+        except Exception as exc:  # pragma: no cover
+            logger.warning(f"绑定 Emby 后同步状态或应用默认隐藏媒体库失败: {exc}")
 
         logger.info(f"用户绑定 Emby 账号成功: {user.USERNAME} -> {emby_username} (ID: {emby_user.id})")
 
@@ -1241,24 +1255,60 @@ async def get_my_libraries():
     """获取我可访问的媒体库"""
     from src.services import EmbyService
 
-    library_ids, enable_all = await EmbyService.get_user_library_access(g.current_user)
+    detail = await EmbyService.get_user_library_access_detail(g.current_user)
+    return api_response(True, "获取成功", detail)
 
-    # 获取媒体库详情
-    all_libraries = await EmbyService.get_libraries_info()
 
-    if enable_all:
-        my_libraries = all_libraries
-    else:
-        my_libraries = [lib for lib in all_libraries if lib["id"] in library_ids]
+@users_bp.route("/me/libraries/visibility", methods=["PUT"])
+@require_auth
+async def update_my_library_visibility():
+    """用户自行显示/隐藏管理员配置允许的媒体库。"""
+    from src.services import EmbyService
 
-    return api_response(
-        True,
-        "获取成功",
-        {
-            "enable_all": enable_all,
-            "libraries": my_libraries,
-        },
+    user = g.current_user
+    if not user.EMBYID:
+        return api_response(False, "请先绑定 Emby 账号", code=400)
+
+    if not EmbyService.can_self_service_libraries(user):
+        return api_response(False, "管理员未为你开启媒体库自助显隐权限", code=403)
+
+    allowed_names = EmbyService.self_service_library_names()
+    if not allowed_names:
+        return api_response(False, "管理员未开放可自助显隐的媒体库", code=403)
+
+    data = request.get_json() or {}
+    action = str(data.get("action") or "").strip().lower()
+    if action not in {"show", "hide"}:
+        return api_response(False, "action 必须是 show 或 hide", code=400)
+
+    raw_names = data.get("library_names")
+    if raw_names is not None and not isinstance(raw_names, (str, list, tuple, set)):
+        return api_response(False, "library_names 必须是字符串或字符串数组", code=400)
+
+    requested_names = EmbyService._normalize_library_names(raw_names or allowed_names)
+    if not requested_names:
+        return api_response(False, "媒体库名称不能为空", code=400)
+    if len(requested_names) > 50:
+        return api_response(False, "一次最多操作 50 个媒体库", code=400)
+    too_long = [name for name in requested_names if len(name) > 128]
+    if too_long:
+        return api_response(False, "媒体库名称过长", code=400)
+
+    allowed_keys = {name.lower() for name in allowed_names}
+    denied = [name for name in requested_names if name.lower() not in allowed_keys]
+    if denied:
+        return api_response(False, f"以下媒体库未开放自助显隐: {', '.join(denied)}", code=403)
+
+    ok, msg = await EmbyService.set_user_library_visibility(
+        user,
+        requested_names,
+        visible=(action == "show"),
     )
+    if not ok:
+        return api_response(False, msg, code=500)
+
+    detail = await EmbyService.get_user_library_access_detail(user)
+    return api_response(True, msg, detail)
 
 
 # ==================== 用户会话 ====================
@@ -2173,7 +2223,7 @@ async def confirm_tg_bind():
 @require_auth
 async def get_my_settings():
     """获取用户所有设置"""
-    from src.config import RegisterConfig, DeviceLimitConfig, Config, EmbyConfig
+    from src.config import RegisterConfig, DeviceLimitConfig, Config, EmbyConfig, BangumiSyncConfig
     from src.services import EmbyService
 
     user = g.current_user
@@ -2188,7 +2238,7 @@ async def get_my_settings():
         {
             # 用户设置
             "bgm_mode": user.BGM_MODE,
-            "bgm_token_set": bool(user.BGM_TOKEN),
+            "bgm_token_set": bool((user.BGM_TOKEN or "").strip()),
             "api_key_enabled": user.APIKEY_STATUS,
             "emby_status": {
                 "is_synced": status.is_synced,
@@ -2211,6 +2261,7 @@ async def get_my_settings():
                 "device_limit_enabled": DeviceLimitConfig.DEVICE_LIMIT_ENABLED,
                 "max_devices": DeviceLimitConfig.MAX_DEVICES,
                 "max_streams": DeviceLimitConfig.MAX_STREAMS,
+                "bangumi_sync_enabled": BangumiSyncConfig.ENABLED,
             },
         },
     )

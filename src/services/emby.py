@@ -619,6 +619,7 @@ class EmbyClient:
             current_policy.update(policy)
 
             await self._request("POST", f"/Users/{user_id}/Policy", json=current_policy)
+            self._users_cache.clear()
             return True
         except EmbyError as e:
             logger.error(f"更新用户策略失败: {e}")
@@ -999,19 +1000,67 @@ class EmbyClient:
     # - 全量操作（enable_all / disable_all）：直接写入完整状态
     # - 不再使用"先开后关再排除"的多步流程，避免中间步骤失败导致用户被锁
 
+    async def resolve_libraries_by_names(self, folder_names: List[str]) -> Tuple[List[EmbyLibrary], List[str]]:
+        """按媒体库名称查找库对象（大小写不敏感、去重保序）。"""
+        if not folder_names:
+            return [], []
+
+        wanted: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for name in folder_names:
+            raw = (name or "").strip()
+            key = raw.lower()
+            if not raw or key in seen:
+                continue
+            wanted.append((raw, key))
+            seen.add(key)
+
+        if not wanted:
+            return [], []
+
+        libraries = await self.get_libraries()
+        by_name = {(lib.name or "").strip().lower(): lib for lib in libraries if (lib.name or "").strip()}
+
+        resolved: List[EmbyLibrary] = []
+        missing: List[str] = []
+        for raw, key in wanted:
+            lib = by_name.get(key)
+            if not lib or not lib.id:
+                missing.append(raw)
+                continue
+            if lib.id not in {item.id for item in resolved}:
+                resolved.append(lib)
+        return resolved, missing
+
     async def get_folder_ids_by_names(self, folder_names: List[str]) -> List[str]:
         """根据媒体库名称查找 GUID（大小写不敏感、去重保序）。"""
-        if not folder_names:
-            return []
-        wanted = {(n or "").strip().lower() for n in folder_names if (n or "").strip()}
-        if not wanted:
-            return []
+        libraries, _missing = await self.resolve_libraries_by_names(folder_names)
+        return [lib.id for lib in libraries if lib.id]
+
+    async def get_folder_names_by_ids(self, folder_ids: List[str]) -> Tuple[List[str], List[str]]:
+        """根据媒体库 GUID 查找名称（去重保序）。"""
+        if not folder_ids:
+            return [], []
+        wanted: list[str] = []
+        seen: set[str] = set()
+        for folder_id in folder_ids:
+            value = (folder_id or "").strip()
+            if not value or value in seen:
+                continue
+            wanted.append(value)
+            seen.add(value)
+
         libraries = await self.get_libraries()
-        ids: List[str] = []
-        for lib in libraries:
-            if (lib.name or "").strip().lower() in wanted and lib.id and lib.id not in ids:
-                ids.append(lib.id)
-        return ids
+        by_id = {(lib.id or "").strip(): lib for lib in libraries if (lib.id or "").strip()}
+        names: List[str] = []
+        missing: List[str] = []
+        for folder_id in wanted:
+            lib = by_id.get(folder_id)
+            if not lib or not lib.name:
+                missing.append(folder_id)
+                continue
+            names.append(lib.name)
+        return names, missing
 
     async def get_current_folder_state(self, user_id: str) -> Optional[tuple[List[str], bool, List[str]]]:
         """读取用户当前媒体库策略：`(EnabledFolders, EnableAllFolders, BlockedMediaFolders)`。"""
@@ -1019,7 +1068,7 @@ class EmbyClient:
         if not user:
             return None
         policy = user.policy or {}
-        enable_all = bool(policy.get("EnableAllFolders", False))
+        enable_all = bool(policy.get("EnableAllFolders", True))
         blocked = list(policy.get("BlockedMediaFolders", []) or [])
 
         if enable_all:
@@ -1081,7 +1130,11 @@ class EmbyClient:
         if not names:
             return True
 
-        hide_ids = await self.get_folder_ids_by_names(names)
+        hide_libraries, missing = await self.resolve_libraries_by_names(names)
+        hide_ids = [lib.id for lib in hide_libraries if lib.id]
+        hide_names = [(lib.name or "").strip() for lib in hide_libraries if (lib.name or "").strip()]
+        if missing:
+            logger.warning("hide_folders_by_names: 未找到部分媒体库 %s", missing)
         if not hide_ids:
             logger.warning("hide_folders_by_names: 未找到要隐藏的媒体库 %s", names)
             return True
@@ -1093,9 +1146,12 @@ class EmbyClient:
 
         new_enabled = [fid for fid in current_enabled if fid not in hide_ids]
         new_blocked = list(current_blocked)
-        for n in names:
-            if n not in new_blocked:
-                new_blocked.append(n)
+        blocked_keys = {(n or "").strip().lower() for n in new_blocked}
+        for name in hide_names:
+            key = name.lower()
+            if key not in blocked_keys:
+                new_blocked.append(name)
+                blocked_keys.add(key)
 
         return await self.update_user_enabled_folder(
             user_id=user_id,
@@ -1116,7 +1172,11 @@ class EmbyClient:
         if not names:
             return True
 
-        show_ids = await self.get_folder_ids_by_names(names)
+        show_libraries, missing = await self.resolve_libraries_by_names(names)
+        show_ids = [lib.id for lib in show_libraries if lib.id]
+        show_names = [(lib.name or "").strip() for lib in show_libraries if (lib.name or "").strip()]
+        if missing:
+            logger.warning("show_folders_by_names: 未找到部分媒体库 %s", missing)
         if not show_ids:
             logger.warning("show_folders_by_names: 未找到要显示的媒体库 %s", names)
             return True
@@ -1128,8 +1188,8 @@ class EmbyClient:
 
         if enable_all:
             # 用户已可见全部库，只需要从 BlockedMediaFolders 移除目标项
-            remove_names = set(names)
-            new_blocked = [n for n in current_blocked if n not in remove_names]
+            remove_names = {n.lower() for n in show_names}
+            new_blocked = [n for n in current_blocked if (n or "").strip().lower() not in remove_names]
             return await self.update_user_enabled_folder(
                 user_id=user_id,
                 blocked_media_folders=new_blocked,
@@ -1137,8 +1197,8 @@ class EmbyClient:
             )
 
         new_enabled = list(dict.fromkeys(list(current_enabled) + list(show_ids)))
-        remove_names = set(names)
-        new_blocked = [n for n in current_blocked if n not in remove_names]
+        remove_names = {n.lower() for n in show_names}
+        new_blocked = [n for n in current_blocked if (n or "").strip().lower() not in remove_names]
 
         return await self.update_user_enabled_folder(
             user_id=user_id,

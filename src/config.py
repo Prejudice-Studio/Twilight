@@ -407,6 +407,10 @@ class EmbyConfig(BaseConfig):
     EMBY_PASSWORD: str = ""  # 管理员密码（API Key 无效时的备用认证）
     EMBY_URL_LIST: List[str] = ["Direct : http://127.0.0.1:8096/", "Sample : http://192.168.1.1:8096/"]
     EMBY_URL_LIST_FOR_WHITELIST: List[str] = ["Direct : http://127.0.0.1:8096/", "Sample : http://192.168.1.1:8096/"]
+    # 新建/补建普通用户 Emby 账号后默认隐藏的媒体库名称；留空不改媒体库策略。
+    EMBY_DEFAULT_HIDDEN_LIBRARIES: List[str] = []
+    # 管理员开放给“已授予自助显隐权限的用户”自行显示/隐藏的媒体库名称；留空则无法自助操作。
+    EMBY_SELF_SERVICE_LIBRARIES: List[str] = []
 
 
 class TelegramConfig(BaseConfig):
@@ -613,6 +617,7 @@ class BangumiSyncConfig(BaseConfig):
 
     _section = "BangumiSync"
     ENABLED: bool = False  # 是否启用 Bangumi 同步
+    WEBHOOK_SECRET: str = ""  # Emby Webhook 共享密钥；配置后请求必须携带 ?token= 或 X-Twilight-Bangumi-Token
     AUTO_ADD_COLLECTION: bool = True  # 同步时是否自动添加到收藏（设为"在看"）
     PRIVATE_COLLECTION: bool = False  # 观看记录是否设为私有
     BLOCK_KEYWORDS: List[str] = []  # 屏蔽关键词列表

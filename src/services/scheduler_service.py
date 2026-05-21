@@ -135,13 +135,10 @@ class SchedulerService:
         },
         {
             "id": "emby_sync",
-            "name": "Emby 用户同步",
-            "description": "校对本地 EMBYID、用户名、启停状态与下载权限。",
-            "default_trigger": {
-                "type": "interval",
-                "config_field": "EMBY_SYNC_INTERVAL",
-                "unit": "hours",
-            },
+            "name": "Emby 与系统记录同步（手动）",
+            "description": "手动校对本地 EMBYID、用户名、启停状态与下载权限；默认不自动执行。",
+            "default_trigger": None,
+            "manual_only": True,
         },
         {
             "id": "cleanup_no_emby",
