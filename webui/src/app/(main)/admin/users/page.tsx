@@ -88,6 +88,7 @@ export default function AdminUsersPage() {
   const [cleanupPreview, setCleanupPreview] = useState<any[] | null>(null);
   const [cleanupLoading, setCleanupLoading] = useState(false);
   const [stalePendingLoading, setStalePendingLoading] = useState(false);
+  const [registrationQueueLoading, setRegistrationQueueLoading] = useState(false);
 
   // Edit dialog states
   const [editOpen, setEditOpen] = useState(false);
@@ -948,6 +949,93 @@ export default function AdminUsersPage() {
     }
   };
 
+  const handleClearRegistrationQueueUsers = async () => {
+    setRegistrationQueueLoading(true);
+    try {
+      const preview = await api.previewRegistrationQueueUsers();
+      if (!preview.success || !preview.data) {
+        toast({ title: "预览失败", description: preview.message, variant: "destructive" });
+        return;
+      }
+      if (preview.data.count === 0) {
+        toast({ title: "无需清理", description: "当前没有注册队列用户", variant: "success" });
+        return;
+      }
+      const ok = await confirmAction({
+        title: "清理注册队列用户",
+        description: `将从注册队列中移出 ${preview.data.count} 个尚未完成的用户。已开始 processing 的请求不会被强制移出。`,
+        tone: "warning",
+        confirmLabel: "确认清理",
+      });
+      if (!ok) return;
+      const res = await api.clearRegistrationQueueUsers();
+      if (res.success && res.data) {
+        toast({
+          title: `已清理 ${res.data.cleared} 个队列项`,
+          description: res.data.blocked ? `${res.data.blocked} 个已开始处理，未移出` : undefined,
+          variant: res.data.blocked ? "default" : "success",
+        });
+        invalidateUsersCache();
+        await loadUsers();
+      } else {
+        toast({ title: "清理失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "清理失败", description: error.message || "网络异常", variant: "destructive" });
+    } finally {
+      setRegistrationQueueLoading(false);
+    }
+  };
+
+  const handleGrantRegistrationQueueUsersEntitlementAndClear = async () => {
+    const action = await confirmAction({
+      title: "给予注册队列用户注册资格并清理",
+      description: "会先预览当前注册队列用户，之后给未绑定 Emby 且启用的用户授予补建资格，并只移出尚未开始处理的队列项。",
+      tone: "warning",
+      actions: [
+        { label: "默认时长", value: "default", variant: "default" },
+        { label: "永久", value: "permanent", variant: "outline" },
+      ],
+    });
+    if (!action) return;
+    const days = action === "permanent" ? -1 : undefined;
+    setRegistrationQueueLoading(true);
+    try {
+      const preview = await api.previewGrantRegistrationQueueUsersEntitlement(days);
+      if (!preview.success || !preview.data) {
+        toast({ title: "预览失败", description: preview.message, variant: "destructive" });
+        return;
+      }
+      if (preview.data.eligible === 0) {
+        toast({ title: "没有可授权用户", description: `队列匹配 ${preview.data.matched}，可授权 0`, variant: "default" });
+        return;
+      }
+      const ok = await confirmAction({
+        title: `确认授权 ${preview.data.eligible} 个队列用户？`,
+        description: `队列匹配 ${preview.data.matched}，将授予 Emby 补建资格（${preview.data.days === -1 ? "永久" : `${preview.data.days} 天`}）并清理未处理队列。`,
+        tone: "warning",
+        confirmLabel: "确认授权并清理",
+      });
+      if (!ok) return;
+      const res = await api.grantRegistrationQueueUsersEntitlementAndClear(days);
+      if (res.success && res.data) {
+        toast({
+          title: `已授权 ${res.data.granted} 个用户`,
+          description: `移出队列 ${res.data.dequeued}，已开始处理 ${res.data.blocked}，失败 ${res.data.failed.length}`,
+          variant: res.data.failed.length ? "default" : "success",
+        });
+        invalidateUsersCache();
+        await loadUsers();
+      } else {
+        toast({ title: "操作失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "操作失败", description: error.message || "网络异常", variant: "destructive" });
+    } finally {
+      setRegistrationQueueLoading(false);
+    }
+  };
+
   // ============== 一键踢出未绑定 Emby 的系统账号 ==============
   const noEmbyMinDaysParsed = (() => {
     const n = Number(noEmbyMinDays);
@@ -1210,6 +1298,29 @@ export default function AdminUsersPage() {
                   >
                     <UserCheck className="mr-2 h-4 w-4" />
                     批量启用禁用账号
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    disabled={registrationQueueLoading}
+                    onClick={() => void handleClearRegistrationQueueUsers()}
+                  >
+                    {registrationQueueLoading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <CalendarClock className="mr-2 h-4 w-4" />
+                    )}
+                    清理注册队列
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={registrationQueueLoading}
+                    onClick={() => void handleGrantRegistrationQueueUsersEntitlementAndClear()}
+                  >
+                    {registrationQueueLoading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <UserCheck className="mr-2 h-4 w-4" />
+                    )}
+                    队列用户授权并清理
                   </DropdownMenuItem>
                 </DropdownMenuSubContent>
               </DropdownMenuSub>

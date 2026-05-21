@@ -13,6 +13,7 @@ from src.api.v1.auth import require_auth, require_admin, api_response
 from src.core.request_utils import get_real_client_ip
 from src.services import MediaService, MediaRequestService, MediaSource, InventoryService
 from src.db.bangumi import ReqStatus
+from src.config import RegisterConfig
 
 media_bp = Blueprint("media", __name__, url_prefix="/media")
 logger = logging.getLogger(__name__)
@@ -560,6 +561,9 @@ async def create_media_request():
             }
         }
     """
+    if not RegisterConfig.MEDIA_REQUEST_ENABLED:
+        return api_response(False, "求片功能未开启", code=403)
+
     data = request.get_json() or {}
 
     # 方式1: 直接指定

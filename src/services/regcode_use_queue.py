@@ -124,6 +124,11 @@ class RegcodeUseQueueService:
         return None
 
     @classmethod
+    def pending_uids(cls) -> set[int]:
+        """当前卡码处理队列中仍未完成的 UID 集合。"""
+        return {int(uid) for uid in cls._pending_by_uid.keys() if uid is not None}
+
+    @classmethod
     async def get_status(cls, request_id: str, status_token: str) -> Optional[Dict[str, Any]]:
         cls._ensure_started()
         assert cls._state_lock is not None

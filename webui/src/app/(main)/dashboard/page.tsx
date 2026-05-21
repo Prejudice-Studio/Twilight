@@ -534,6 +534,14 @@ export default function DashboardPage() {
       toast({ title: "请输入 Emby 用户名", variant: "destructive" });
       return;
     }
+    if (!/^[A-Za-z_][A-Za-z0-9_]{2,19}$/.test(username)) {
+      toast({
+        title: "Emby 用户名格式不正确",
+        description: "3-20 位字母数字下划线，不能以数字开头",
+        variant: "destructive",
+      });
+      return;
+    }
     const password = directEmbyPassword;
     if (password.length < 8 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password)) {
       toast({

@@ -210,6 +210,9 @@ class EmbyRegisterQueueService:
         )
         if not has_code_entitlement and not RegisterConfig.EMBY_DIRECT_REGISTER_ENABLED:
             return None, "Emby 自由注册未开启"
+        days_ok, _days, days_msg = UserService.resolve_emby_direct_register_days(user)
+        if not days_ok:
+            return None, days_msg or "当前账号没有 Emby 注册资格"
 
         cls.ensure_started_sync()
         if cls._queue is None:

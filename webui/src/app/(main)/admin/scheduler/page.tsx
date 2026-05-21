@@ -972,26 +972,40 @@ export default function AdminSchedulerPage() {
                 {logsHistory.length > 0 && (
                   <div>
                     <p className="mb-2 text-xs font-medium text-muted-foreground">历史运行（最近 {logsHistory.length} 次）</p>
-                    <div className="space-y-1">
+                    <div className="space-y-2">
                       {logsHistory.map((run) => (
-                        <div
+                        <details
                           key={run.id || `${run.started_at}-${run.status}`}
-                          className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/40 px-3 py-2 text-xs"
+                          className="rounded-md border border-border/40 px-3 py-2 text-xs"
                         >
-                          <span className="font-mono text-muted-foreground">
-                            {formatTimestamp(run.started_at)}
-                          </span>
-                          <span className="flex items-center gap-2">
-                            <Badge
-                              variant={run.status === "success" ? "success" : run.status === "failed" ? "destructive" : "outline"}
-                              className="text-[10px]"
-                            >
-                              {run.status}
-                            </Badge>
-                            <span className="text-muted-foreground">{formatDuration(run.started_at, run.finished_at)}</span>
-                            <span className="text-muted-foreground">[{formatRunType(run)}]</span>
-                          </span>
-                        </div>
+                          <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2">
+                            <span className="font-mono text-muted-foreground">
+                              {formatTimestamp(run.started_at)}
+                            </span>
+                            <span className="flex items-center gap-2">
+                              <Badge
+                                variant={run.status === "success" ? "success" : run.status === "failed" ? "destructive" : "outline"}
+                                className="text-[10px]"
+                              >
+                                {run.status}
+                              </Badge>
+                              <span className="text-muted-foreground">{formatDuration(run.started_at, run.finished_at)}</span>
+                              <span className="text-muted-foreground">[{formatRunType(run)}]</span>
+                              <span className="text-muted-foreground">日志 {run.logs?.length || 0} 行</span>
+                            </span>
+                          </summary>
+                          <div className="mt-2 space-y-2 border-t border-border/40 pt-2">
+                            {run.error && <p className="break-words text-destructive">错误：{run.error}</p>}
+                            {renderSummaryChips(run.summary)}
+                            {run.logs && run.logs.length > 0 ? (
+                              <pre className="max-h-60 overflow-auto rounded-md border border-border/60 bg-background p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words">
+                                {run.logs.join("\n")}
+                              </pre>
+                            ) : (
+                              <p className="text-muted-foreground">本次未产生日志输出</p>
+                            )}
+                          </div>
+                        </details>
                       ))}
                     </div>
                   </div>

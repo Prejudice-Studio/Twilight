@@ -708,7 +708,6 @@ export default function AdminConfigPage() {
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [updateRepoUrl, setUpdateRepoUrl] = useState("https://github.com/Prejudice-Studio/Twilight.git");
   const [updateBranch, setUpdateBranch] = useState("main");
-  const [updateInstallDeps, setUpdateInstallDeps] = useState(true);
   const [updateRestartServices, setUpdateRestartServices] = useState(true);
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateOutput, setUpdateOutput] = useState<string[]>([]);
@@ -979,7 +978,6 @@ export default function AdminConfigPage() {
       const res = await api.updateFromGit({
         repo_url: updateRepoUrl.trim(),
         branch: updateBranch.trim() || "main",
-        install_dependencies: updateInstallDeps,
         restart_services: updateRestartServices,
       });
       if (res.success) {
@@ -1375,7 +1373,7 @@ export default function AdminConfigPage() {
                   Git 自动更新
                 </CardTitle>
                 <CardDescription>
-                  从指定仓库拉取分支，安装依赖后自动重启 systemd 服务。请只填写可信仓库。
+                  从指定仓库拉取分支，并按需自动重启 systemd 服务。请只填写可信仓库。
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
@@ -1409,13 +1407,6 @@ export default function AdminConfigPage() {
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="flex items-center justify-between rounded-lg border p-3">
-                    <span>
-                      <span className="block text-sm font-medium">安装 Python 依赖</span>
-                      <span className="text-xs text-muted-foreground">执行 pip install -r requirements.txt</span>
-                    </span>
-                    <Switch checked={updateInstallDeps} onCheckedChange={setUpdateInstallDeps} />
-                  </label>
                   <label className="flex items-center justify-between rounded-lg border p-3">
                     <span>
                       <span className="block text-sm font-medium">自动重启服务</span>

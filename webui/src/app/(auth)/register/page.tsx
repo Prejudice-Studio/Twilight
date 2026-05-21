@@ -160,6 +160,20 @@ export default function RegisterPage() {
       return false;
     }
 
+    if (!/^[A-Za-z_][A-Za-z0-9_]{2,19}$/.test(formData.username.trim())) {
+      toast({
+        title: "用户名格式不正确",
+        description: "3-20 位字母数字下划线，不能以数字开头",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    if (registerAvailability && !registerAvailability.available) {
+      toast({ title: "暂时无法注册", description: registerAvailability.message, variant: "destructive" });
+      return false;
+    }
+
     if (!formData.password) {
       toast({ title: "请设置密码", variant: "destructive" });
       return false;
@@ -207,7 +221,7 @@ export default function RegisterPage() {
     setIsRegisterLoading(true);
     try {
       const payload: RegisterData = {
-        username: formData.username,
+        username: formData.username.trim(),
         email: formData.email || undefined,
         telegram_bind_code: bindCode || undefined,
         password: formData.password,
@@ -479,6 +493,7 @@ export default function RegisterPage() {
                   className="h-11 w-full"
                   disabled={
                     isRegisterLoading ||
+                    Boolean(registerAvailability && !registerAvailability.available) ||
                     (forceBindTelegram && !!bindCode && !bindConfirmed)
                   }
                 >

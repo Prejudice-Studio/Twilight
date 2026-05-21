@@ -630,6 +630,57 @@ class ApiClient {
     });
   }
 
+  async previewRegistrationQueueUsers() {
+    return this.request<{ dry_run: true; count: number; uids: number[] }>(
+      "/admin/users/registration-queue/clear",
+      { method: "POST", body: JSON.stringify({ dry_run: true }) },
+    );
+  }
+
+  async clearRegistrationQueueUsers() {
+    return this.request<{
+      dry_run: false;
+      matched: number;
+      cleared: number;
+      blocked: number;
+      results: Array<{ uid: number; cleared: boolean; blocked: boolean }>;
+    }>("/admin/users/registration-queue/clear", {
+      method: "POST",
+      body: JSON.stringify({ dry_run: false, confirm: "CLEAR_REGISTRATION_QUEUE" }),
+    });
+  }
+
+  async previewGrantRegistrationQueueUsersEntitlement(days?: number) {
+    return this.request<{
+      dry_run: true;
+      days: number;
+      matched: number;
+      eligible: number;
+      skipped: Array<{ uid: number; username?: string; reason: string }>;
+      users: Array<{ uid: number; username: string }>;
+    }>("/admin/users/registration-queue/grant-entitlement-and-clear", {
+      method: "POST",
+      body: JSON.stringify({ dry_run: true, days }),
+    });
+  }
+
+  async grantRegistrationQueueUsersEntitlementAndClear(days?: number) {
+    return this.request<{
+      dry_run: false;
+      days: number;
+      matched: number;
+      eligible: number;
+      granted: number;
+      dequeued: number;
+      blocked: number;
+      skipped: Array<{ uid: number; username?: string; reason: string }>;
+      failed: Array<{ uid: number; username?: string; reason: string }>;
+    }>("/admin/users/registration-queue/grant-entitlement-and-clear", {
+      method: "POST",
+      body: JSON.stringify({ dry_run: false, days, confirm: "GRANT_AND_CLEAR_REGISTRATION_QUEUE" }),
+    });
+  }
+
   async syncUserBindings(payload: {
     scope?: "telegram" | "emby" | "both";
     uid?: number;
@@ -770,14 +821,12 @@ class ApiClient {
   async updateFromGit(payload: {
     repo_url: string;
     branch?: string;
-    install_dependencies?: boolean;
     restart_services?: boolean;
   }) {
     return this.request<{
       project_root: string;
       repo_url: string;
       branch: string;
-      install_dependencies: boolean;
       restart_scheduled: boolean;
       services?: string[];
       results: Array<{

@@ -9,7 +9,7 @@ from typing import Any, Awaitable, Callable, Optional
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
-from src.config import RegisterConfig, SchedulerConfig, TelegramConfig, get_primary_config_path
+from src.config import RegisterConfig, SchedulerConfig, SystemUpdateConfig, TelegramConfig, get_primary_config_path
 from src.db.scheduler_run import SchedulerRunOperate
 from src.db.scheduler_schedule import (
     MAX_INTERVAL_SECONDS,
@@ -173,6 +173,12 @@ class SchedulerService:
                 "config_field": "DAILY_STATS_TIME",
                 "offset_minutes": 15,
             },
+        },
+        {
+            "id": "system_auto_update",
+            "name": "系统自动更新",
+            "description": "按 [SystemUpdate] 配置从 Git 仓库自动拉取代码更新；不会安装 Python 依赖。",
+            "default_trigger": {"type": "system_update"},
         },
         {
             "id": "cleanup_unused_uploads",
@@ -339,8 +345,24 @@ class SchedulerService:
         spec = definition.get("default_trigger") or {}
         field = spec.get("config_field")
         source = spec.get("source", "SchedulerConfig")
-        config_obj = SchedulerConfig if source == "SchedulerConfig" else TelegramConfig
+        config_map = {
+            "SchedulerConfig": SchedulerConfig,
+            "TelegramConfig": TelegramConfig,
+            "SystemUpdateConfig": SystemUpdateConfig,
+        }
+        config_obj = config_map.get(source, SchedulerConfig)
         raw = getattr(config_obj, field, None) if field else None
+
+        if spec.get("type") == "system_update":
+            trigger_type = (SystemUpdateConfig.AUTO_UPDATE_TRIGGER_TYPE or "interval").strip().lower()
+            if trigger_type == "cron_daily":
+                h, m = cls._parse_time_str(str(SystemUpdateConfig.AUTO_UPDATE_TIME or "04:00"))
+                return {"type": TRIGGER_CRON_DAILY, "hour": h, "minute": m}
+            try:
+                hours = int(SystemUpdateConfig.AUTO_UPDATE_INTERVAL_HOURS or 24)
+            except (TypeError, ValueError):
+                hours = 24
+            return {"type": TRIGGER_INTERVAL, "seconds": max(MIN_INTERVAL_SECONDS, hours * 3600)}
 
         if spec.get("type") == "cron_daily":
             h, m = cls._parse_time_str(str(raw or "00:00"))
@@ -1355,6 +1377,37 @@ class SchedulerService:
             ctx.log(f"  ⚠️ 换绑状态不一致: UID={user.UID} username={user.USERNAME} reason={reason}")
         ctx.log("✅ Telegram 绑定状态一致性检查完成")
 
+    @staticmethod
+    async def system_auto_update(ctx: RunContext):
+        """按配置执行 Git 自动更新。"""
+        from src.services.system_update_service import apply_git_update
+
+        if not SystemUpdateConfig.AUTO_UPDATE_ENABLED:
+            ctx.log("系统自动更新未开启，跳过")
+            ctx.summary["skipped"] = True
+            return
+
+        ctx.log(f"开始自动更新: repo={SystemUpdateConfig.REPO_URL} branch={SystemUpdateConfig.BRANCH}")
+        result = await asyncio.to_thread(
+            apply_git_update,
+            SystemUpdateConfig.REPO_URL,
+            SystemUpdateConfig.BRANCH,
+            restart_services=SystemUpdateConfig.RESTART_SERVICES,
+        )
+        ctx.summary.update(
+            {
+                "success": bool(result.get("success")),
+                "message": result.get("message"),
+                "restart_scheduled": bool(result.get("restart_scheduled")),
+                "commands": len(result.get("results") or []),
+            }
+        )
+        for item in result.get("results") or []:
+            ctx.log(f"$ {item.get('command')} -> exit={item.get('returncode')} ({item.get('duration_ms')}ms)")
+        if not result.get("success"):
+            raise RuntimeError(result.get("message") or "系统自动更新失败")
+        ctx.log(result.get("message") or "系统自动更新完成")
+
     @classmethod
     async def start(cls):
         """启动调度器"""
@@ -1418,6 +1471,8 @@ class SchedulerService:
                 continue
             if jid == "enforce_group_membership" and not TelegramMembershipService.enforcement_enabled():
                 continue
+            if jid == "system_auto_update" and not SystemUpdateConfig.AUTO_UPDATE_ENABLED:
+                continue
             spec, _custom = await cls._effective_trigger(definition)
             scheduler.add_job(
                 cls._make_scheduled(jid, fn_map[jid]),
@@ -1438,6 +1493,7 @@ class SchedulerService:
             "cleanup_no_emby": cls.cleanup_no_emby_users,
             "cleanup_unused_uploads": cls.cleanup_unused_uploads,
             "check_telegram_bindings": cls.check_telegram_bindings,
+            "system_auto_update": cls.system_auto_update,
             "enforce_group_membership": cls.enforce_group_membership,
             "kick_unknown_group_members": cls.kick_unknown_group_members,
         }

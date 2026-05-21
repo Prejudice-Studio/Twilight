@@ -182,10 +182,10 @@ async def register():
 
     telegram_id = data.get("telegram_id")
     telegram_bind_code = (data.get("telegram_bind_code") or "").strip().upper()
-    username = data.get("username")
+    username = (data.get("username") or "").strip()
     password = data.get("password")
     reg_code = (data.get("reg_code") or "").strip() or None
-    email = data.get("email")
+    email = (data.get("email") or "").strip() or None
 
     regcode_slot_acquired = False
     if reg_code:
@@ -319,12 +319,20 @@ async def complete_emby_account_for_me():
             code=400,
         )
 
+    days_ok, _days, days_msg = UserService.resolve_emby_direct_register_days(user)
+    if not days_ok:
+        return api_response(False, days_msg or "当前账号没有 Emby 注册资格", code=400)
+
     data = request.get_json() or {}
     emby_username = (data.get("emby_username") or "").strip()
     emby_password = data.get("emby_password") or ""
 
     if not emby_username:
         return api_response(False, "请输入 Emby 用户名", code=400)
+    from src.core.utils import is_valid_username
+
+    if not is_valid_username(emby_username):
+        return api_response(False, "Emby 用户名格式不正确（3-20位字母数字下划线，不能以数字开头）", code=400)
     ok, msg = UserService.validate_password_strength(emby_password, label="Emby 密码")
     if not ok:
         return api_response(False, msg, code=400)

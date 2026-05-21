@@ -197,8 +197,12 @@ async def clear_user_registration_queue(uid: int):
     if not allowed:
         return api_response(False, f"操作过于频繁，请 {retry_after} 秒后再试", code=429)
 
-    emby_result = await EmbyRegisterQueueService.clear_for_uid(uid)
-    regcode_result = await RegcodeUseQueueService.clear_for_uid(uid)
+    data = request.get_json(silent=True) or {}
+    # 默认只清理尚未开始处理的队列项；processing 可能已在外部创建账号，不能静默摘除。
+    queued_only = parse_bool(data.get("queued_only"), default=True)
+
+    emby_result = await EmbyRegisterQueueService.clear_for_uid(uid, queued_only=queued_only)
+    regcode_result = await RegcodeUseQueueService.clear_for_uid(uid, queued_only=queued_only)
     logger.warning(
         "管理员 %s 清理用户注册队列 uid=%s username=%s emby=%s regcode=%s",
         getattr(g.current_user, "USERNAME", None),
@@ -215,8 +219,190 @@ async def clear_user_registration_queue(uid: int):
             "uid": uid,
             "username": user.USERNAME,
             "cleared": cleared,
+            "queued_only": queued_only,
             "emby_register_queue": emby_result,
             "regcode_use_queue": regcode_result,
+        },
+    )
+
+
+async def _registration_queue_uids() -> set[int]:
+    from src.services import EmbyRegisterQueueService, RegcodeUseQueueService
+
+    return set(EmbyRegisterQueueService.pending_uids()) | set(RegcodeUseQueueService.pending_uids())
+
+
+def _parse_registration_entitlement_days(raw_days) -> tuple[bool, int, str]:
+    try:
+        days = int(raw_days if raw_days is not None else RegisterConfig.EMBY_DIRECT_REGISTER_DAYS)
+    except (TypeError, ValueError):
+        return False, 0, "days 必须是整数"
+    if days == 0:
+        days = -1
+    if days < -1:
+        return False, 0, "days 不能小于 -1"
+    if days > 3650:
+        return False, 0, "days 不能超过 3650"
+    return True, days, ""
+
+
+@admin_bp.route("/users/registration-queue/clear", methods=["POST"])
+@require_auth
+@require_admin
+async def clear_registration_queue_users():
+    """批量清理当前注册队列中尚未开始处理的用户。"""
+    from src.core.utils import rate_limit_check
+    from src.services import EmbyRegisterQueueService, RegcodeUseQueueService
+
+    allowed, retry_after = rate_limit_check(
+        "admin_clear_registration_queue_users",
+        str(g.current_user.UID),
+        max_requests=10,
+        window_seconds=60,
+    )
+    if not allowed:
+        return api_response(False, f"操作过于频繁，请 {retry_after} 秒后再试", code=429)
+
+    data = request.get_json(silent=True) or {}
+    dry_run = parse_bool(data.get("dry_run"), default=True)
+    confirm = (data.get("confirm") or "").strip()
+    uids = sorted(await _registration_queue_uids())
+
+    if dry_run:
+        return api_response(True, "获取成功", {"dry_run": True, "count": len(uids), "uids": uids[:500]})
+    if confirm != "CLEAR_REGISTRATION_QUEUE":
+        return api_response(False, "缺少确认标记", code=400)
+
+    results = []
+    cleared = 0
+    blocked = 0
+    for uid in uids[:1000]:
+        emby_result = await EmbyRegisterQueueService.clear_for_uid(uid, queued_only=True)
+        regcode_result = await RegcodeUseQueueService.clear_for_uid(uid, queued_only=True)
+        item_cleared = bool(emby_result.get("cleared") or regcode_result.get("cleared"))
+        item_blocked = bool(emby_result.get("reason") or regcode_result.get("reason"))
+        cleared += 1 if item_cleared else 0
+        blocked += 1 if item_blocked else 0
+        results.append({"uid": uid, "cleared": item_cleared, "blocked": item_blocked})
+
+    logger.warning(
+        "管理员 %s 批量清理注册队列: matched=%d cleared=%d blocked=%d",
+        getattr(g.current_user, "USERNAME", None),
+        len(uids),
+        cleared,
+        blocked,
+    )
+    return api_response(
+        True,
+        f"已清理 {cleared} 个未处理队列项" + (f"；{blocked} 个已开始处理，未移出" if blocked else ""),
+        {"dry_run": False, "matched": len(uids), "cleared": cleared, "blocked": blocked, "results": results},
+    )
+
+
+@admin_bp.route("/users/registration-queue/grant-entitlement-and-clear", methods=["POST"])
+@require_auth
+@require_admin
+async def grant_registration_queue_users_entitlement_and_clear():
+    """给当前注册队列用户授予 Emby 补建资格，并移出未处理队列。"""
+    from src.core.utils import rate_limit_check
+    from src.services import EmbyRegisterQueueService, RegcodeUseQueueService
+
+    allowed, retry_after = rate_limit_check(
+        "admin_grant_registration_queue_users_entitlement",
+        str(g.current_user.UID),
+        max_requests=10,
+        window_seconds=60,
+    )
+    if not allowed:
+        return api_response(False, f"操作过于频繁，请 {retry_after} 秒后再试", code=429)
+
+    data = request.get_json(silent=True) or {}
+    dry_run = parse_bool(data.get("dry_run"), default=True)
+    confirm = (data.get("confirm") or "").strip()
+    ok, days, msg = _parse_registration_entitlement_days(data.get("days", RegisterConfig.EMBY_DIRECT_REGISTER_DAYS))
+    if not ok:
+        return api_response(False, msg, code=400)
+
+    queue_uids = sorted(await _registration_queue_uids())
+    users = []
+    skipped = []
+    for uid in queue_uids[:1000]:
+        user = await UserOperate.get_user_by_uid(uid)
+        if not user:
+            skipped.append({"uid": uid, "reason": "用户不存在"})
+            continue
+        if user.EMBYID:
+            skipped.append({"uid": uid, "username": user.USERNAME, "reason": "已绑定 Emby"})
+            continue
+        if not user.ACTIVE_STATUS:
+            skipped.append({"uid": uid, "username": user.USERNAME, "reason": "账号已禁用"})
+            continue
+        users.append(user)
+
+    if dry_run:
+        return api_response(
+            True,
+            "获取成功",
+            {
+                "dry_run": True,
+                "days": days,
+                "matched": len(queue_uids),
+                "eligible": len(users),
+                "skipped": skipped[:200],
+                "users": [{"uid": u.UID, "username": u.USERNAME} for u in users[:200]],
+            },
+        )
+    if confirm != "GRANT_AND_CLEAR_REGISTRATION_QUEUE":
+        return api_response(False, "缺少确认标记", code=400)
+
+    granted = 0
+    dequeued = 0
+    blocked = 0
+    failed = []
+    for user in users:
+        try:
+            user.PENDING_EMBY = True
+            user.PENDING_EMBY_DAYS = days
+            if user.ROLE == Role.UNRECOGNIZED.value:
+                user.ROLE = Role.NORMAL.value
+            if not user.CREATE_AT:
+                user.CREATE_AT = user.REGISTER_TIME
+            await UserOperate.update_user(user)
+            granted += 1
+
+            emby_result = await EmbyRegisterQueueService.clear_for_uid(user.UID, queued_only=True)
+            regcode_result = await RegcodeUseQueueService.clear_for_uid(user.UID, queued_only=True)
+            if emby_result.get("cleared") or regcode_result.get("cleared"):
+                dequeued += 1
+            if emby_result.get("reason") or regcode_result.get("reason"):
+                blocked += 1
+        except Exception as exc:  # pragma: no cover
+            failed.append({"uid": user.UID, "username": user.USERNAME, "reason": str(exc)})
+
+    logger.warning(
+        "管理员 %s 批量授权注册队列用户: matched=%d eligible=%d granted=%d dequeued=%d blocked=%d failed=%d days=%s",
+        getattr(g.current_user, "USERNAME", None),
+        len(queue_uids),
+        len(users),
+        granted,
+        dequeued,
+        blocked,
+        len(failed),
+        days,
+    )
+    return api_response(
+        True,
+        f"已授予 {granted} 个用户 Emby 注册资格，并移出 {dequeued} 个未处理队列项",
+        {
+            "dry_run": False,
+            "days": days,
+            "matched": len(queue_uids),
+            "eligible": len(users),
+            "granted": granted,
+            "dequeued": dequeued,
+            "blocked": blocked,
+            "skipped": skipped[:200],
+            "failed": failed,
         },
     )
 

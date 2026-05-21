@@ -453,6 +453,7 @@ class RegisterConfig(BaseConfig):
     REGISTER_MODE: bool = False
     REGISTER_CODE_LIMIT: bool = False  # 是否限制注册码注册
     USER_LIMIT: int = 200  # 允许的已注册用户数量上限
+    MEDIA_REQUEST_ENABLED: bool = False  # 是否启用求片功能
     MAX_CONCURRENT_REQUESTS_PER_USER: int = -1  # 每个用户允许同时存在的求片请求上限，-1 表示不限制
 
     # 无码注册（待激活）配置
@@ -577,6 +578,19 @@ class SchedulerConfig(BaseConfig):
     DAILY_STATS_TIME: str = "00:05"
     SESSION_CLEANUP_INTERVAL: int = 6
     EMBY_SYNC_INTERVAL: int = 6
+
+
+class SystemUpdateConfig(BaseConfig):
+    """系统在线更新配置"""
+
+    _section = "SystemUpdate"
+    AUTO_UPDATE_ENABLED: bool = False
+    REPO_URL: str = "https://github.com/Prejudice-Studio/Twilight.git"
+    BRANCH: str = "main"
+    RESTART_SERVICES: bool = True
+    AUTO_UPDATE_TRIGGER_TYPE: str = "interval"  # interval / cron_daily
+    AUTO_UPDATE_INTERVAL_HOURS: int = 24
+    AUTO_UPDATE_TIME: str = "04:00"
 
 
 class NotificationConfig(BaseConfig):
@@ -722,6 +736,7 @@ _config_classes = [
     APIConfig,
     SecurityConfig,
     SchedulerConfig,
+    SystemUpdateConfig,
     NotificationConfig,
     BangumiSyncConfig,
 ]
@@ -737,6 +752,7 @@ def _load_all_configs() -> None:
     APIConfig.update_from_toml("API")
     SecurityConfig.update_from_toml("Security")
     SchedulerConfig.update_from_toml("Scheduler")
+    SystemUpdateConfig.update_from_toml("SystemUpdate")
     NotificationConfig.update_from_toml("Notification")
     BangumiSyncConfig.update_from_toml("BangumiSync")
     normalize_storage_settings()

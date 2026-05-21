@@ -117,6 +117,8 @@ register_mode = false
 register_code_limit = false
 # 最大已注册用户数；超过后停止接收新注册
 user_limit = 200
+# 是否启用求片功能；默认关闭
+media_request_enabled = false
 # 每用户最多同时存在的求片数（待处理 + 下载中），-1 不限
 max_concurrent_requests_per_user = -1
 # 是否允许无码注册（无注册码也能建系统账号；Emby 仍需事后补建）
@@ -236,6 +238,22 @@ daily_stats_time = "00:05"
 session_cleanup_interval = 6
 # Emby 用户同步间隔（小时，默认值）
 emby_sync_interval = 6
+
+# ───────── 系统自动更新 ─────────
+[SystemUpdate]
+# 默认关闭；开启后由 Scheduler 自动执行 git fetch/checkout/pull，不安装 Python 依赖
+auto_update_enabled = false
+# 自动更新使用的 Git 仓库和分支
+repo_url = "https://github.com/Prejudice-Studio/Twilight.git"
+branch = "main"
+# Linux/systemd 环境下更新后重启 twilight / twilight-bot / twilight-scheduler
+restart_services = true
+# 自动更新时间类型：interval = 固定间隔；cron_daily = 每日固定时间
+auto_update_trigger_type = "interval"
+# 固定间隔模式：每多少小时更新一次
+auto_update_interval_hours = 24
+# 每日固定时间模式：HH:MM
+auto_update_time = "04:00"
 
 # ───────── 通知 ─────────
 [Notification]
