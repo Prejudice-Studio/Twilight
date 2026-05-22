@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -334,7 +337,24 @@ func OpenPostgres(ctx context.Context, dsn string) (*Store, error) {
 	db.SetConnMaxLifetime(30 * time.Minute)
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		return nil, err
+		if isUndefinedDatabaseError(err) {
+			if createErr := CreatePostgresDatabase(ctx, dsn); createErr != nil {
+				return nil, fmt.Errorf("postgres database does not exist and automatic creation failed: %w", createErr)
+			}
+			db, err = sql.Open("pgx", dsn)
+			if err != nil {
+				return nil, err
+			}
+			db.SetMaxOpenConns(8)
+			db.SetMaxIdleConns(4)
+			db.SetConnMaxLifetime(30 * time.Minute)
+			if err := db.PingContext(ctx); err != nil {
+				_ = db.Close()
+				return nil, err
+			}
+		} else {
+			return nil, err
+		}
 	}
 	if _, err := db.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS twilight_state (
@@ -364,6 +384,115 @@ CREATE TABLE IF NOT EXISTS twilight_state (
 	}
 	st.state.ensure()
 	return st, nil
+}
+
+func CreatePostgresDatabase(ctx context.Context, dsn string) error {
+	cfg, err := pgconn.ParseConfig(strings.TrimSpace(dsn))
+	if err != nil {
+		return err
+	}
+	target := strings.TrimSpace(cfg.Database)
+	if target == "" {
+		return fmt.Errorf("target database name is empty")
+	}
+	if strings.EqualFold(target, "postgres") || strings.EqualFold(target, "template1") {
+		return fmt.Errorf("refusing to auto-create maintenance database %q", target)
+	}
+	maintenanceDSNs := maintenancePostgresDSNs(dsn)
+	var lastErr error
+	for _, maintenanceDSN := range maintenanceDSNs {
+		db, err := sql.Open("pgx", maintenanceDSN)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		db.SetMaxOpenConns(1)
+		db.SetMaxIdleConns(0)
+		_, err = db.ExecContext(ctx, `CREATE DATABASE `+quotePostgresIdentifier(target))
+		closeErr := db.Close()
+		if err == nil && closeErr == nil {
+			return nil
+		}
+		if err == nil {
+			err = closeErr
+		}
+		if isDuplicateDatabaseError(err) {
+			return nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no maintenance database connection strings could be built")
+	}
+	return lastErr
+}
+
+func maintenancePostgresDSNs(dsn string) []string {
+	databases := []string{"postgres", "template1"}
+	out := make([]string, 0, len(databases))
+	for _, database := range databases {
+		if rewritten, ok := rewritePostgresDatabaseInDSN(dsn, database); ok {
+			out = append(out, rewritten)
+		}
+	}
+	return out
+}
+
+func rewritePostgresDatabaseInDSN(dsn, database string) (string, bool) {
+	dsn = strings.TrimSpace(dsn)
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		parsed, err := url.Parse(dsn)
+		if err != nil {
+			return "", false
+		}
+		parsed.Path = "/" + database
+		return parsed.String(), true
+	}
+	cfg, err := pgconn.ParseConfig(dsn)
+	if err != nil || cfg.Host == "" || cfg.User == "" {
+		return "", false
+	}
+	u := url.URL{
+		Scheme: "postgres",
+		Host:   net.JoinHostPort(cfg.Host, strconv.Itoa(int(cfg.Port))),
+		Path:   "/" + database,
+	}
+	if cfg.Password == "" {
+		u.User = url.User(cfg.User)
+	} else {
+		u.User = url.UserPassword(cfg.User, cfg.Password)
+	}
+	q := u.Query()
+	if cfg.TLSConfig == nil {
+		q.Set("sslmode", "disable")
+	}
+	for key, value := range cfg.RuntimeParams {
+		if strings.TrimSpace(value) != "" {
+			q.Set(key, value)
+		}
+	}
+	u.RawQuery = q.Encode()
+	return u.String(), true
+}
+
+func isUndefinedDatabaseError(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "3D000" {
+		return true
+	}
+	return strings.Contains(err.Error(), "SQLSTATE 3D000")
+}
+
+func isDuplicateDatabaseError(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "42P04" {
+		return true
+	}
+	return strings.Contains(err.Error(), "SQLSTATE 42P04")
+}
+
+func quotePostgresIdentifier(value string) string {
+	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }
 
 func CheckPostgres(ctx context.Context, dsn string) error {

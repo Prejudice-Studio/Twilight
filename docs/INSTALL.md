@@ -71,6 +71,8 @@ TWILIGHT_POSTGRES_MAX_IDLE_CONNS=4
 
 如果只有旧 Python 版 `db/users.db`，请在 Linux 上安装 `sqlite3`。Go 后端会在自身状态没有 active 管理员时只读导入旧库 active 管理员账号；这只是登录引导，不会在启动时全量迁移旧 SQLite 业务数据。
 
+如果 PostgreSQL 用户已经存在但数据库还不存在，后端启动时会尝试自动创建 `postgres_database` / URL 中的目标数据库。该用户必须拥有 `CREATEDB` 权限；没有权限时，需要先让 PostgreSQL 管理员执行 `ALTER USER <用户名> CREATEDB;` 或手动创建数据库。
+
 ## 前端部署
 
 ```bash

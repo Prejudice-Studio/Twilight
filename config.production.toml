@@ -51,6 +51,8 @@ tmdb_image_url = "https://image.tmdb.org/t/p"
 # 存储后端：
 #   json     = 默认 JSON 状态文件，兼容原 Go 状态存储，适合小型部署
 #   postgres = PostgreSQL 后端，适合用户量/记录量较大或需要更高并发的部署
+# 当 driver=postgres 且目标数据库不存在时，后端会尝试用同一用户连接 postgres/template1
+# 维护库并执行 CREATE DATABASE；该用户需要 CREATEDB 权限，否则会明确报错。
 driver = "json"
 # Go JSON 状态文件路径；留空时使用 <databases_dir>/twilight_go_state.json。
 state_file = ""

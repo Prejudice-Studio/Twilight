@@ -124,6 +124,8 @@ postgres_max_idle_conns = 4
 
 数据库恢复和迁移均需要预览与二次确认。执行前后端会创建 `pre_operation_backup`，避免误操作后没有回滚点。已有 JSON 数据切换 PostgreSQL 时，先保持 JSON 能登录，进入管理端完成 PostgreSQL 迁移预检和确认后，再重启到 PostgreSQL。旧 SQLite 管理员引导只用于恢复后台入口，不会在启动时全量迁移旧业务数据。
 
+PostgreSQL 启动时如果目标数据库不存在，后端会尝试用同一连接用户连到 `postgres` / `template1` 维护库并创建目标数据库；该用户需要 `CREATEDB` 权限。数据库创建完成后会继续初始化 `twilight_state` 状态表。
+
 ## 安全边界
 
 生产环境至少确认以下项目：

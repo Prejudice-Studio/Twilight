@@ -15,6 +15,7 @@
 - `config.production.toml` 新增 `[Database]` PostgreSQL 配置示例，包含完整 DSN、分项连接参数、备份目录和连接池参数。
 - 新增数据库状态、备份、恢复、迁移预检和迁移执行接口，并在前端配置页提供对应入口。
 - 支持默认 JSON 状态存储和可选 PostgreSQL 存储；迁移预检会返回实体数量、快照大小、目标连通性和配置/重启告警。
+- PostgreSQL 目标数据库不存在时，启动阶段会尝试连接 `postgres` / `template1` 维护库自动执行 `CREATE DATABASE`，减少已有用户但未建库时的部署阻塞。
 - 当配置为 PostgreSQL 但目标库尚未迁移且没有管理员时，启动阶段会检测旧 JSON 状态文件；若其中已有 active 管理员，则临时回退 JSON，保证原管理员可以登录管理端执行迁移。
 - 当 Go 状态没有 active 管理员但存在旧 Python 版 `db/users.db` 时，启动阶段可通过系统 `sqlite3` 只读导入旧库 active 管理员账号用于引导登录。
 - PostgreSQL 迁移预检只做连接探测，不创建表或写入数据；实际迁移才初始化目标状态表。

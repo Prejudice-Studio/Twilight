@@ -117,6 +117,7 @@ Go 后端不是空接口骨架，以下模块已经按旧 Python 行为实现本
 - 现有 Go JSON 状态文件可通过 `[Database] state_file = "/path/to/twilight_go_state.json"` 或 `TWILIGHT_STATE_FILE` 指定。
 - 可选 PostgreSQL 后端：配置 `database.driver = "postgres"` 和 DSN，适合用户量、播放记录、调度记录较多的部署。
 - 生产模板 `config.production.toml` 已包含 `[Database]` 示例，可使用完整 `url` 或 `postgres_host/postgres_user/postgres_password/postgres_database` 分项配置。
+- PostgreSQL 目标数据库不存在时，启动阶段会尝试用同一连接用户连接 `postgres` / `template1` 维护库并执行 `CREATE DATABASE`；连接用户需要 `CREATEDB` 权限，已有数据库则不会重复创建。
 - 管理端提供数据库状态、备份、恢复、迁移预检和执行。
 - 恢复和迁移都必须先走预览；后端在缺少确认短语时只返回 `dry_run=true` 的预览结果，不会写入数据。
 - 迁移预检返回源/目标 driver、实体计数、快照大小、目标连通性和重启/配置告警；PostgreSQL 目标只验证连接，不创建表或写入数据。
