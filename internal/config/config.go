@@ -136,10 +136,7 @@ type Config struct {
 func Load(path string) (Config, error) {
 	cfg := defaults()
 	if path == "" {
-		path = os.Getenv("TWILIGHT_CONFIG_FILE")
-	}
-	if path == "" {
-		path = "config.toml"
+		path = defaultConfigPath()
 	}
 	cfg.ConfigFile = path
 
@@ -160,6 +157,7 @@ func Load(path string) (Config, error) {
 	cfg.DatabaseDriver = strings.ToLower(first(values, "Database.driver", "Global.database_driver", "database_driver", cfg.DatabaseDriver))
 	cfg.DatabaseURL = first(values, "Database.url", "Database.database_url", "Global.database_url", "database_url", cfg.DatabaseURL)
 	cfg.DatabaseBackupDir = first(values, "Database.backup_dir", "database_backup_dir", cfg.DatabaseBackupDir)
+	cfg.StateFile = first(values, "Database.state_file", "Global.state_file", "state_file", cfg.StateFile)
 	cfg.PostgresHost = first(values, "Database.postgres_host", "PostgreSQL.host", "postgres_host", cfg.PostgresHost)
 	cfg.PostgresPort = intValue(first(values, "Database.postgres_port", "PostgreSQL.port", "postgres_port", strconv.Itoa(cfg.PostgresPort)), cfg.PostgresPort)
 	cfg.PostgresUser = first(values, "Database.postgres_user", "PostgreSQL.user", "postgres_user", cfg.PostgresUser)
@@ -265,6 +263,16 @@ func Load(path string) (Config, error) {
 		cfg.UploadDir = "uploads"
 	}
 	return cfg, nil
+}
+
+func defaultConfigPath() string {
+	if _, err := os.Stat("config.toml"); err == nil {
+		return "config.toml"
+	}
+	if path := strings.TrimSpace(os.Getenv("TWILIGHT_CONFIG_FILE")); path != "" {
+		return path
+	}
+	return "config.toml"
 }
 
 func defaults() Config {

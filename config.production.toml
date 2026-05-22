@@ -2,7 +2,9 @@
 #  Twilight 生产环境配置模板
 #  ------------------------------------------------------------
 #  使用方法：复制此文件为 config.toml，再按真实环境修改。
-#  覆盖优先级：环境变量 > config.toml > 程序默认值。
+#  主配置文件选择：显式 --config 最高；未指定时优先当前目录 config.toml；
+#  若当前目录没有 config.toml，再读取 TWILIGHT_CONFIG_FILE；最后回退程序默认值。
+#  配置文件加载完成后，TWILIGHT_* 环境变量仍会覆盖对应配置字段。
 #  环境变量命名：TWILIGHT_{SECTION}_{KEY}，例：TWILIGHT_GLOBAL_SERVER_NAME。
 #  程序启动时会自动备份 config.toml 到 config_backups/ 目录，
 #  并把代码里新增但 toml 没有的配置项写回，无需手工补齐。
@@ -50,6 +52,8 @@ tmdb_image_url = "https://image.tmdb.org/t/p"
 #   json     = 默认 JSON 状态文件，兼容原 Go 状态存储，适合小型部署
 #   postgres = PostgreSQL 后端，适合用户量/记录量较大或需要更高并发的部署
 driver = "json"
+# Go JSON 状态文件路径；留空时使用 <databases_dir>/twilight_go_state.json。
+state_file = ""
 # 完整 PostgreSQL DSN；填写后优先于下面分项配置。
 # 例：postgres://twilight:CHANGE_ME@127.0.0.1:5432/twilight?sslmode=disable
 url = ""

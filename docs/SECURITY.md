@@ -18,6 +18,8 @@
 ## 2. CORS 与会话安全
 
 - 生产环境不要使用 `cors_origins = ["*"]`。
+- `cors_origins` 只填写 Origin，不填写路径、查询串或片段；例如写 `https://app.example.com`，不要写 `https://app.example.com/admin`。
+- 配置中的尾斜杠会被规范化，但非法 scheme、带路径的 Origin 和通配符都不会被当作可信凭据接口来源。
 - 只允许你的前端域名，例如：
 
 ```toml
@@ -105,6 +107,8 @@ cors_origins = ["https://app.example.com"]
 - 数据库备份、恢复、迁移接口均要求管理员登录；恢复目标会限制在配置的备份目录内，拒绝 `../` 路径穿越。
 - 迁移到 PostgreSQL 前先使用管理端预检，确认目标连接成功、快照大小和实体计数符合预期。
 - 切换 `database.driver` 后需要重启后端；仅迁移数据不会让当前进程自动切换已打开的 store。
+- 如果 PostgreSQL 没有管理员但旧 JSON 状态里已有管理员，Go 后端会临时使用 JSON 状态启动，避免管理员在迁移前被空库锁在登录外；迁移完成并确认后再重启到 PostgreSQL。
+- 如果 Go 状态没有 active 管理员但存在旧 `db/users.db`，Go 后端会尝试通过系统 `sqlite3` 只读导入 active 管理员账号。该引导只读取固定 `users.db`，拒绝符号链接，不接受前端传入路径，不全量迁移普通用户。
 - Git 自动更新只允许 HTTPS 仓库 URL，不允许 URL 内携带用户名/密码/token。
 - 自动更新默认拒绝 dirty worktree；先执行安全预检，再执行拉取。需要本地补丁长期存在时，请先合并或提交，不要依赖强制覆盖。
 - 自动更新使用 `git pull --ff-only`，不会做 rebase、merge 或 reset。

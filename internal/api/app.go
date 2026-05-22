@@ -354,16 +354,17 @@ func (a *App) applySecurityHeaders(w http.ResponseWriter) {
 }
 
 func (a *App) applyCORS(w http.ResponseWriter, r *http.Request) bool {
-	origin := r.Header.Get("Origin")
+	origin := normalizeCORSOrigin(r.Header.Get("Origin"))
 	if origin == "" {
 		return false
 	}
 	allowed := false
 	for _, candidate := range a.cfg.CORSOrigins {
+		candidate = strings.TrimSpace(candidate)
 		if candidate == "*" {
 			continue
 		}
-		if strings.EqualFold(candidate, origin) {
+		if strings.EqualFold(normalizeCORSOrigin(candidate), origin) {
 			allowed = true
 			break
 		}
@@ -378,6 +379,27 @@ func (a *App) applyCORS(w http.ResponseWriter, r *http.Request) bool {
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
 	w.Header().Set("Access-Control-Max-Age", "600")
 	return true
+}
+
+func normalizeCORSOrigin(raw string) string {
+	raw = strings.TrimRight(strings.TrimSpace(raw), "/")
+	if raw == "" || raw == "*" {
+		return raw
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return ""
+	}
+	if parsed.Path != "" && parsed.Path != "/" {
+		return ""
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return ""
+	}
+	parsed.Scheme = scheme
+	parsed.Path = ""
+	return parsed.String()
 }
 
 func (a *App) setSessionCookie(w http.ResponseWriter, token string, expires time.Time) {
