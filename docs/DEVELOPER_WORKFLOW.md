@@ -1,29 +1,31 @@
-# Developer Workflow
+# 开发工作流
 
-This branch is the Go backend branch. Treat `cmd/` and `internal/` as the backend source of truth.
+本分支是 Go 后端分支，后端源码以 `cmd/` 和 `internal/` 为准。
 
-## Backend
+## 后端
 
-- Run checks with `go test ./...`.
-- Start locally with `bash start_backend_dev.sh`.
-- Build production binary with `go build -o bin/twilight ./cmd/twilight`.
-- Run production mode with `bash start_backend_prod.sh`.
+- 执行检查：`go test ./...`。
+- 本地启动：`bash start_backend_dev.sh`。
+- 构建生产二进制：`go build -o bin/twilight ./cmd/twilight`。
+- 生产模式启动：`bash start_backend_prod.sh`。
 
-## Frontend
+## 前端
 
-- Install frontend dependencies in `webui/` with `pnpm install --frozen-lockfile`.
-- Keep API calls centralized in `webui/src/lib/api.ts`.
-- When adding backend endpoints, register them in `internal/api/routes.go` and add focused Go tests when behavior is security-sensitive or shared.
+- 在 `webui/` 安装依赖：`pnpm install --frozen-lockfile`。
+- 前端 API 调用统一维护在 `webui/src/lib/api.ts`。
+- 新增后端接口时，需要在 `internal/api/routes.go` 注册路由；涉及鉴权、文件、路径、密钥、迁移或共享行为时补充聚焦测试。
 
-## Safety Baseline
+## 安全基线
 
-- Prefer Redis-backed sessions and rate limits in production by setting `RedisURL`.
-- Keep destructive admin actions behind explicit confirmation strings.
-- Do not return secrets except one-time generated passwords or API keys, and only on creation/reset responses.
-- Use `http.MaxBytesReader`, content-type checks, path cleaning, and strict response envelopes for upload and asset flows.
+- 生产环境优先配置 Redis，用于共享会话和限流计数。
+- 破坏性管理操作必须保留明确确认步骤或 dry-run 预检。
+- 除一次性生成的密码或 API Key 创建/重置响应外，不返回密钥明文。
+- 上传和资产读取必须使用 `http.MaxBytesReader`、MIME 白名单、目录约束和统一响应 envelope。
+- 数据库备份、恢复、迁移、Git 更新和 systemd 操作不得拼接 shell 字符串。
 
-## Release Checks
+## 发布检查
 
 - `go test ./...`
-- Frontend lint/build from `webui/` when UI or API client behavior changes.
-- Confirm `start_backend_prod.sh` and `deploy/*.service` point at `bin/twilight`, not any removed Python runtime.
+- `go vet ./...`
+- 前端或 API 客户端变更后，在 `webui/` 执行 `npm run lint` 和 `npm run build`。
+- 确认 `start_backend_prod.sh` 和 `deploy/*.service` 指向 `bin/twilight`，没有重新引入旧后端运行入口。

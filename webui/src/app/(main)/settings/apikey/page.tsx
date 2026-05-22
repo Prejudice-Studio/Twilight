@@ -235,7 +235,7 @@ export default function ApiKeyPage() {
               <p className="text-sm text-foreground font-medium">无法加载 API Keys</p>
               <p className="text-xs text-muted-foreground break-words">{error}</p>
               <p className="text-[11px] text-muted-foreground">
-                若后端返回 500，请确认服务端是否包含 <code className="text-[10px]">src/db/apikey.py</code> 并已重启
+                若后端返回 500，请确认 Go 后端已完成数据库迁移并已重启
               </p>
               <Button variant="outline" size="sm" onClick={handleRefresh}>
                 <RefreshCw className="h-4 w-4 mr-1" />

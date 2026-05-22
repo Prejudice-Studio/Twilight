@@ -52,6 +52,7 @@ export default function AdminRegcodesPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set());
+  const [isBatchDeleting, setIsBatchDeleting] = useState(false);
   const [filterType, setFilterType] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [search, setSearch] = useState("");
@@ -177,6 +178,42 @@ export default function AdminRegcodesPage() {
       }
     } catch (error: any) {
       toast({ title: "删除失败", description: error.message, variant: "destructive" });
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    const codes = Array.from(selectedCodes);
+    if (codes.length === 0) {
+      toast({ title: "请先选择要删除的注册码", variant: "destructive" });
+      return;
+    }
+    const preview = codes.slice(0, 6).join("\n");
+    const ok = await confirm({
+      title: `批量删除 ${codes.length} 个注册码？`,
+      description: `${preview}${codes.length > 6 ? `\n... 另有 ${codes.length - 6} 个` : ""}\n\n删除后无法恢复。`,
+      tone: "danger",
+      confirmLabel: "批量删除",
+    });
+    if (!ok) return;
+
+    setIsBatchDeleting(true);
+    try {
+      const res = await api.batchDeleteRegcodes(codes);
+      if (res.success && res.data) {
+        toast({
+          title: "批量删除完成",
+          description: `已删除 ${res.data.deleted} 个，未找到 ${res.data.missing} 个`,
+          variant: "success",
+        });
+        setSelectedCodes(new Set());
+        await loadRegcodes();
+      } else {
+        toast({ title: "批量删除失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "批量删除失败", description: error.message, variant: "destructive" });
+    } finally {
+      setIsBatchDeleting(false);
     }
   };
 
@@ -550,15 +587,25 @@ export default function AdminRegcodesPage() {
         <span className="text-muted-foreground">
           已选择 {selectedCodes.size} 个；未选择时导出当前页全部 {regcodes.length} 个。
         </span>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => copyRegcodes(selectedRegcodes.length > 0 ? selectedRegcodes : regcodes)} disabled={regcodes.length === 0}>
+        <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+          <Button className="flex-1 sm:flex-none" variant="outline" size="sm" onClick={() => copyRegcodes(selectedRegcodes.length > 0 ? selectedRegcodes : regcodes)} disabled={regcodes.length === 0}>
             <Copy className="mr-2 h-4 w-4" /> 复制卡码
           </Button>
-          <Button variant="outline" size="sm" onClick={() => exportSelected("txt")} disabled={regcodes.length === 0}>
+          <Button className="flex-1 sm:flex-none" variant="outline" size="sm" onClick={() => exportSelected("txt")} disabled={regcodes.length === 0}>
             <Download className="mr-2 h-4 w-4" /> 导出 TXT
           </Button>
-          <Button variant="outline" size="sm" onClick={() => exportSelected("json")} disabled={regcodes.length === 0}>
+          <Button className="flex-1 sm:flex-none" variant="outline" size="sm" onClick={() => exportSelected("json")} disabled={regcodes.length === 0}>
             <Download className="mr-2 h-4 w-4" /> 导出 JSON
+          </Button>
+          <Button
+            className="flex-1 sm:flex-none"
+            variant="destructive"
+            size="sm"
+            onClick={() => void handleBatchDelete()}
+            disabled={selectedCodes.size === 0 || isBatchDeleting}
+          >
+            {isBatchDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+            批量删除
           </Button>
         </div>
       </div>
@@ -609,9 +656,9 @@ export default function AdminRegcodesPage() {
               <SelectItem value="asc">升序</SelectItem>
             </SelectContent>
           </Select>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={clearFilters}>重置</Button>
-            <Button variant="outline" onClick={() => void loadRegcodes()}>刷新</Button>
+          <div className="flex gap-2 md:min-w-0">
+            <Button className="flex-1 md:flex-none" variant="outline" onClick={clearFilters}>重置</Button>
+            <Button className="flex-1 md:flex-none" variant="outline" onClick={() => void loadRegcodes()}>刷新</Button>
           </div>
         </CardContent>
       </Card>
@@ -627,8 +674,101 @@ export default function AdminRegcodesPage() {
               暂无注册码
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
+            <>
+            <div className="space-y-3 p-3 md:hidden">
+              {regcodes.map((code) => (
+                <div key={code.code} className="rounded-xl border bg-background p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <label className="flex min-w-0 flex-1 items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedCodes.has(code.code)}
+                        onChange={(e) => toggleSelectCode(code.code, e.target.checked)}
+                        className="mt-1 shrink-0"
+                      />
+                      <span className="min-w-0">
+                        <code className="block truncate rounded bg-muted px-2 py-1 text-sm" title={code.code}>
+                          {code.code}
+                        </code>
+                        <span className="mt-2 flex flex-wrap gap-1">
+                          {getTypeBadge(code.type)}
+                          {getStatusBadge(code)}
+                          {code.is_decoy ? <Badge variant="destructive">假卡码</Badge> : <Badge variant="outline">正常卡码</Badge>}
+                        </span>
+                      </span>
+                    </label>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8"
+                        onClick={() => copyToClipboard(code.code)}
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        onClick={() => handleDelete(code.code)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground">账号有效</p>
+                      <p className="mt-1">{code.days <= 0 ? "永久" : `${code.days} 天`}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">卡码有效</p>
+                      <p className="mt-1">
+                        {code.validity_time === -1 || code.validity_time === undefined
+                          ? "永久有效"
+                          : `${code.validity_time} 小时`}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">使用次数</p>
+                      <p className="mt-1">{code.use_count || 0} / {code.use_count_limit === -1 ? "∞" : code.use_count_limit || "∞"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">创建时间</p>
+                      <p className="mt-1">{formatDate(code.created_time || code.created_at)}</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex gap-2 border-t pt-3">
+                    <Input
+                      value={noteDrafts[code.code] ?? code.note ?? ""}
+                      maxLength={120}
+                      placeholder="备注 / 名称"
+                      className="h-9 min-w-0 text-xs"
+                      onChange={(e) => setNoteDrafts((prev) => ({ ...prev, [code.code]: e.target.value }))}
+                    />
+                    <Button size="icon" variant="outline" className="h-9 w-9 shrink-0" disabled={savingNote === code.code} onClick={() => void handleSaveNote(code.code)}>
+                      {savingNote === code.code ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                    </Button>
+                    {usedCount(code) > 0 && (
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-9 w-9 shrink-0"
+                        onClick={() => void openUsageDialog(code)}
+                        title={`${usedCount(code)} 人使用`}
+                      >
+                        <Users className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full min-w-[980px]">
                 <thead>
                   <tr className="border-b bg-muted/50">
                     <th className="px-4 py-3 text-left text-sm font-medium">
@@ -734,6 +874,7 @@ export default function AdminRegcodesPage() {
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </CardContent>
       </Card>

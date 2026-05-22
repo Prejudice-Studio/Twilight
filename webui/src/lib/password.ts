@@ -1,5 +1,5 @@
-// Frontend password strength rule — must match `UserService.validate_password_strength`
-// in src/services/user_service.py.
+// Frontend password strength rule. Keep this in sync with the Go backend
+// password validation policy.
 
 export interface PasswordStrengthResult {
   ok: boolean;

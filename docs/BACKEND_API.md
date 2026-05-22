@@ -115,10 +115,10 @@ Authorization: ApiKey <api_key>
 | `POST /users/me/telegram/unbind` | UID | 5 / 10 分钟 | 防恶意频繁解绑 |
 | `POST /users/me/telegram/rebind-request` | UID | 3 / 1 小时 | 换绑申请会进管理员队列，从严限制 |
 | `POST /users/regcode/check` | IP | 10 / 60 秒 | 防注册码枚举 |
-| `POST /invite/check` | IP | 见 `invite.py` | 邀请码校验 |
+| `POST /invite/check` | IP | 10 / 60 秒 | 邀请码校验 |
 | `POST /users/me/avatar/upload` 等上传 | UID | 10 / 60 秒 | 防滥用上传 |
 
-上传后的头像/背景通过 `GET /users/assets/{avatars|backgrounds}/{filename}` 读取。该接口要求登录，并校验路径、文件名和当前用户引用关系；不要直接公开 `/uploads` 目录。
+上传后的头像/背景通过 `GET /users/assets/{avatar|background}/{filename}` 读取。该接口要求登录，并校验资源类型、服务端生成的文件名格式和最终文件路径；不要直接公开 `/uploads` 目录。
 
 > 限速命中只写 `logger.warning`，不会写入 SecurityLog / login_history。
 
@@ -149,17 +149,18 @@ Authorization: ApiKey <api_key>
 | API Key | `/apikey` | 外部系统专用 API Key 接口 |
 | Demo | `/demo` | TestWeb 演示专用模拟接口，只返回假数据 |
 
-### 4.2 TestWeb 演示接口
+### 4.1 TestWeb 演示接口
 
 `/api/v1/demo/*` 仅供 `/testweb`、`/testwebuser`、`/testwebadmin` 演示页面使用。
 
 - 认证：公开，不读取登录态。
 - 数据：全部为后端静态预设假数据，不读取数据库、不读取登录态、不调用真实业务服务。
-- 写操作：统一返回 `simulated=true`，忽略请求体，不回显用户输入，不写数据库、不调用 Emby、不调用 Telegram。
+- 写操作：统一返回 `simulated=true`、`readonly=true`、`mutated=false`，忽略请求体，不回显用户输入，不写数据库、不调用 Emby、不调用 Telegram。
+- 动作名：`/demo/action/{action_name}` 只接受安全白名单字符，拒绝路径片段、控制字符和 URL 编码绕过。
 - 响应：统一带 `Cache-Control: no-store` 和 `X-Twilight-Demo: true`，避免缓存演示响应。
 - 生产建议：可通过反向代理限制公开访问，避免访客误以为是真实后台。
 
-### 4.1 命名与归属约定
+### 4.2 命名与归属约定
 
 | 场景 | 约定 |
 | ---- | ---- |
@@ -169,7 +170,7 @@ Authorization: ApiKey <api_key>
 | 定时任务管理 | 使用 `/admin/scheduler/*` |
 | 用户可见系统信息 | 使用 `/system/info` 或 `/system/config` |
 | Emby 线路下发 | 只使用 `/system/emby-urls`，按登录用户角色和 Emby 绑定状态判断 |
-| 上传头像/背景读取 | 只使用 `/users/assets/{avatars|backgrounds}/{filename}` |
+| 上传头像/背景读取 | 只使用 `/users/assets/{avatar|background}/{filename}` |
 | 外部系统 API Key 调用 | 使用 `/apikey/*`，不混用登录 Token |
 | 废弃接口 | 保留时返回明确错误和替代路径，例如 `/emby/urls` 返回 410 |
 
@@ -1772,6 +1773,47 @@ curl -X GET "http://localhost:5000/api/v1/system/emby-urls" \
   -H "Authorization: Bearer <token>"
 ```
 
+### 管理员运行状态与实时日志
+
+`GET /system/admin/runtime/status`
+
+- 说明：返回 Go 进程、主机、内存、数据库、路由数和 Redis 状态，供管理端实时状态卡片使用。
+- 认证：管理员 Token。
+- 安全口径：只读取进程内统计和 Linux `/proc` 汇总信息，不暴露环境变量、命令行参数、配置明文或任意文件内容。
+
+响应 `data` 主要字段：
+
+| 字段 | 说明 |
+| ---- | ---- |
+| `started_at` | Go 进程启动时间戳 |
+| `uptime_seconds` | Go 进程运行秒数 |
+| `host_uptime_seconds` | Linux 主机运行秒数，可用时返回 |
+| `go_version` / `goos` / `goarch` | Go 运行时与平台 |
+| `goroutines` / `cpu_count` | 协程数和 CPU 数 |
+| `active_database` / `config_database` | 当前存储后端与配置中的目标后端 |
+| `memory` | Go runtime 内存统计 |
+| `host_memory` | `/proc/meminfo` 摘要，可用时返回 |
+| `load_average` | `/proc/loadavg` 的 1/5/15 分钟负载，可用时返回 |
+
+`GET /system/admin/runtime/logs?limit=200&after=0`
+
+- 说明：读取后端进程内最近日志快照，`limit` 范围 1-1000。
+- 认证：管理员 Token。
+- 响应：`entries` 为日志数组，`next_cursor` 用于下一次增量读取。
+
+`GET /system/admin/runtime/logs/stream?limit=100&after=0`
+
+- 说明：SSE 实时日志流，事件类型包括 `snapshot`、`logs`、`ping`。
+- 认证：管理员 Token；浏览器端使用同源 Cookie 或显式可信 CORS Origin。
+- 安全口径：日志来自 Go 进程内 `slog` 处理链，敏感键、API Key、Bearer Token、Cookie、密码、DSN 会被尽力脱敏；接口不读取 journald、系统日志文件或用户指定路径。
+
+示例：
+
+```bash
+curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100" \
+  -H "Authorization: Bearer <admin_token>"
+```
+
 ### 读取当前 config.toml
 
 `GET /system/admin/config/toml`
@@ -1870,19 +1912,25 @@ curl -X PUT "http://localhost:5000/api/v1/system/admin/config/schema" \
 
 `POST /system/admin/database/restore`
 
-- 说明：从指定备份恢复。恢复前会自动创建保护性备份；备份名会限制在配置的备份目录内。
+- 说明：从指定备份恢复。未传确认短语时只返回预览，不写入数据；确认执行前会自动创建保护性备份。备份名会限制在配置的备份目录内。
 - 认证：管理员 Token
-- 请求体：
+- 预览请求体：
 
 ```json
-{"name":"twilight-20260522-120000.json"}
+{"name":"twilight_state_20260522_120000_123456789.json","dry_run":true}
+```
+
+- 执行请求体：
+
+```json
+{"name":"twilight_state_20260522_120000_123456789.json","confirm":"RESTORE_DATABASE_BACKUP"}
 ```
 
 `POST /system/admin/database/migrate`
 
-- 说明：迁移当前状态快照到 `json` 或 `postgres`。建议先传 `dry_run: true` 预检。
+- 说明：迁移当前状态快照到 `json` 或 `postgres`。未传确认短语时只返回预检，不写入数据；确认执行前会自动创建保护性备份。
 - 认证：管理员 Token
-- 请求体：
+- 预检请求体：
 
 ```json
 {
@@ -1892,7 +1940,17 @@ curl -X PUT "http://localhost:5000/api/v1/system/admin/config/schema" \
 }
 ```
 
-- 预检响应 `data` 包含 `source_driver`、`configured_driver`、`target_driver`、`snapshot_bytes`、`target_ready`、`warnings`、`counts`，并保留 `users`、`regcodes`、`invite_codes` 等兼容字段。
+- 执行请求体：
+
+```json
+{
+  "target_driver": "postgres",
+  "confirm": "MIGRATE_DATABASE"
+}
+```
+
+- 预检响应 `data` 包含 `source_driver`、`configured_driver`、`target_driver`、`snapshot_bytes`、`target_ready`、`warnings`、`counts`、`requires_confirmation`、`confirm`，并保留 `users`、`regcodes`、`invite_codes` 等兼容字段。
+- 执行响应会额外返回 `pre_operation_backup` / `pre_migration_backup`，用于确认写入前已自动创建保护性备份。
 
 ### Git 自动更新
 
@@ -1912,6 +1970,8 @@ curl -X PUT "http://localhost:5000/api/v1/system/admin/config/schema" \
 ```
 
 - 安全约束：仓库 URL 不允许携带凭据；分支名只允许安全字符；`dry_run` 只做预检；响应中 `repo_url` 与 `before.remote_url` 会移除凭据。
+- 重启策略：只有 commit 实际变化且请求 `restart_services=true` 时才调度重启；优先使用 `systemd-run --on-active=2` 延迟重启 `twilight`、`twilight-bot`、`twilight-scheduler`，失败时回退为后台 `systemctl restart`。
+- 响应字段：`updated` 表示 commit 是否变化，`restart_requested` 表示请求是否要求重启，`restart_scheduled` 表示是否成功安排重启，`restart_method` 表示使用的调度方式。
 
 ### 测试 Telegram Bot 连通性
 

@@ -65,7 +65,7 @@ export const demoRequests = [
 
 export const demoSchedulerRuns = [
   { name: "过期用户检查", status: "success", time: "03:00", logs: ["扫描用户 186", "禁用过期账号 2", "同步 Emby 完成"] },
-  { name: "系统自动更新", status: "success", time: "04:00", logs: ["git fetch origin main", "git pull --ff-only", "未安装 Python 依赖"] },
+  { name: "系统自动更新", status: "success", time: "04:00", logs: ["git fetch origin main", "git pull --ff-only", "未发现旧后端依赖"] },
   { name: "清理未绑定 Emby", status: "failed", time: "手动", logs: ["dry_run=false", "跳过注册队列 UID 12", "失败：示例错误"] },
 ];
 

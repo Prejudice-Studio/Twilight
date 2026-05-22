@@ -4,11 +4,13 @@ import (
 	"crypto/rand"
 	"encoding/csv"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +19,10 @@ import (
 	"github.com/prejudice-studio/twilight/internal/security"
 	"github.com/prejudice-studio/twilight/internal/store"
 )
+
+var uploadFilenamePattern = regexp.MustCompile(`^[a-f0-9]{16}\.(jpg|png|gif|webp|bmp)$`)
+var demoActionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$`)
+var backgroundGradientPattern = regexp.MustCompile(`(?i)^(linear-gradient|radial-gradient|conic-gradient|repeating-linear-gradient|repeating-radial-gradient)\s*\(`)
 
 func (a *App) handleRoot(w http.ResponseWriter, r *http.Request, _ Params) {
 	ok(w, "Twilight API", map[string]any{"name": a.cfg.AppName, "version": a.cfg.Version, "docs": "/api/v1/docs"})
@@ -798,15 +804,110 @@ func (a *App) handleGetBackground(w http.ResponseWriter, r *http.Request, params
 func (a *App) handleUpdateBackground(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
 	payload := decodeMap(r)
-	bg := stringValue(payload, "background")
-	if bg == "" {
-		bg = stringValue(payload, "url")
+	bg, err := sanitizedBackgroundConfig(payload)
+	if err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	u, err := a.store.UpdateUser(p.User.UID, func(u *store.User) error { u.Background = bg; return nil })
 	if statusFromError(w, err) {
 		return
 	}
 	ok(w, "background updated", map[string]any{"background": u.Background})
+}
+
+func sanitizedBackgroundConfig(payload map[string]any) (string, error) {
+	if len(payload) == 0 {
+		return "", fmt.Errorf("背景配置不能为空")
+	}
+	if raw := firstNonEmpty(stringValue(payload, "background"), stringValue(payload, "url")); raw != "" {
+		var nested map[string]any
+		if err := json.Unmarshal([]byte(raw), &nested); err == nil && len(nested) > 0 {
+			payload = nested
+		} else {
+			css, err := sanitizeBackgroundCSSValue(raw)
+			if err != nil {
+				return "", err
+			}
+			return mustJSON(map[string]any{"lightBg": css, "darkBg": css}), nil
+		}
+	}
+
+	lightBg, err := sanitizeBackgroundCSSValue(stringValue(payload, "lightBg"))
+	if err != nil {
+		return "", err
+	}
+	darkBg, err := sanitizeBackgroundCSSValue(stringValue(payload, "darkBg"))
+	if err != nil {
+		return "", err
+	}
+	lightImage, err := sanitizeBackgroundImageValue(stringValue(payload, "lightBgImage"))
+	if err != nil {
+		return "", err
+	}
+	darkImage, err := sanitizeBackgroundImageValue(stringValue(payload, "darkBgImage"))
+	if err != nil {
+		return "", err
+	}
+	if lightBg == "" && darkBg == "" && lightImage == "" && darkImage == "" {
+		return "", fmt.Errorf("背景配置不能为空")
+	}
+
+	cfg := map[string]any{
+		"lightBg":      lightBg,
+		"darkBg":       darkBg,
+		"lightBgImage": lightImage,
+		"darkBgImage":  darkImage,
+		"lightFlow":    boolValue(payload, "lightFlow", false),
+		"darkFlow":     boolValue(payload, "darkFlow", false),
+		"lightBlur":    clamp(intValue(payload, "lightBlur", 0), 0, 30),
+		"darkBlur":     clamp(intValue(payload, "darkBlur", 0), 0, 30),
+		"lightOpacity": clamp(intValue(payload, "lightOpacity", 100), 10, 100),
+		"darkOpacity":  clamp(intValue(payload, "darkOpacity", 100), 10, 100),
+	}
+	return mustJSON(cfg), nil
+}
+
+func sanitizeBackgroundCSSValue(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	if len(value) > 2000 || strings.ContainsAny(value, "\x00\r\n<>;{}") || strings.Contains(strings.ToLower(value), "url(") || strings.Contains(value, "@") {
+		return "", fmt.Errorf("背景 CSS 只允许安全渐变表达式")
+	}
+	if !backgroundGradientPattern.MatchString(value) {
+		return "", fmt.Errorf("背景 CSS 只允许 linear/radial/conic gradient")
+	}
+	return value, nil
+}
+
+func sanitizeBackgroundImageValue(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.EqualFold(value, "none") {
+		return "", nil
+	}
+	if len(value) > 1000 || strings.ContainsAny(value, "\x00\r\n<>") {
+		return "", fmt.Errorf("背景图片地址无效")
+	}
+	if strings.HasPrefix(strings.ToLower(value), "url(") && strings.HasSuffix(value, ")") {
+		value = strings.TrimSpace(value[4 : len(value)-1])
+		value = strings.Trim(value, `"'`)
+	}
+	const prefix = "/api/v1/users/assets/background/"
+	if !strings.HasPrefix(value, prefix) {
+		return "", fmt.Errorf("背景图片只允许使用本系统上传的背景资源")
+	}
+	filename := strings.TrimPrefix(value, prefix)
+	if strings.ContainsAny(filename, `/\`) || !uploadFilenamePattern.MatchString(filename) {
+		return "", fmt.Errorf("背景图片文件名无效")
+	}
+	return `url("` + value + `")`, nil
+}
+
+func mustJSON(value any) string {
+	data, _ := json.Marshal(value)
+	return string(data)
 }
 
 func (a *App) handleDeleteBackground(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -845,7 +946,7 @@ func (a *App) handleUpload(w http.ResponseWriter, r *http.Request, kind string) 
 		fail(w, http.StatusBadRequest, "涓婁紶鍐呭鏃犳晥")
 		return
 	}
-	file, header, err := r.FormFile("file")
+	file, _, err := r.FormFile("file")
 	if err != nil {
 		fail(w, http.StatusBadRequest, "缂哄皯鏂囦欢")
 		return
@@ -856,15 +957,13 @@ func (a *App) handleUpload(w http.ResponseWriter, r *http.Request, kind string) 
 		fail(w, http.StatusRequestEntityTooLarge, "鏂囦欢杩囧ぇ")
 		return
 	}
-	contentType := http.DetectContentType(data)
-	if !strings.HasPrefix(contentType, "image/") {
+	contentType := strings.ToLower(strings.Split(http.DetectContentType(data), ";")[0])
+	ext, okImage := uploadImageExtension(contentType)
+	if !okImage {
 		fail(w, http.StatusBadRequest, "only image uploads are allowed")
 		return
 	}
-	filename := randomCode(16) + extFromContentType(contentType)
-	if ext := strings.ToLower(filepath.Ext(header.Filename)); ext == ".webp" || ext == ".avif" {
-		filename = randomCode(16) + ext
-	}
+	filename := randomCode(16) + ext
 	dir := filepath.Join(a.cfg.UploadDir, kind)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		fail(w, http.StatusInternalServerError, "鍒涘缓涓婁紶鐩綍澶辫触")
@@ -891,15 +990,56 @@ func (a *App) handleUpload(w http.ResponseWriter, r *http.Request, kind string) 
 	ok(w, "涓婁紶鎴愬姛", map[string]any{"url": url, "type": kind, "filename": filename})
 }
 
+func uploadImageExtension(contentType string) (string, bool) {
+	switch contentType {
+	case "image/jpeg":
+		return ".jpg", true
+	case "image/png":
+		return ".png", true
+	case "image/gif":
+		return ".gif", true
+	case "image/webp":
+		return ".webp", true
+	case "image/bmp":
+		return ".bmp", true
+	default:
+		return "", false
+	}
+}
+
 func (a *App) handleAsset(w http.ResponseWriter, r *http.Request, params Params) {
 	kind := params["kind"]
-	filename := filepath.Base(params["filename"])
+	filename := params["filename"]
 	if kind != "avatar" && kind != "background" {
 		fail(w, http.StatusNotFound, "resource not found")
 		return
 	}
-	filePath := filepath.Join(a.cfg.UploadDir, kind, filename)
+	if !uploadFilenamePattern.MatchString(filename) {
+		fail(w, http.StatusNotFound, "resource not found")
+		return
+	}
+	filePath, okPath := resolveUploadAssetPath(a.cfg.UploadDir, kind, filename)
+	if !okPath {
+		fail(w, http.StatusNotFound, "resource not found")
+		return
+	}
 	http.ServeFile(w, r, filePath)
+}
+
+func resolveUploadAssetPath(uploadDir, kind, filename string) (string, bool) {
+	root, err := filepath.Abs(firstNonEmpty(uploadDir, "uploads"))
+	if err != nil {
+		return "", false
+	}
+	target, err := filepath.Abs(filepath.Join(root, kind, filename))
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return target, true
 }
 
 func (a *App) handleDeleteAvatar(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -1157,30 +1297,15 @@ func (a *App) handleConfigTOMLGet(w http.ResponseWriter, r *http.Request, _ Para
 }
 
 func (a *App) handleConfigTOMLPut(w http.ResponseWriter, r *http.Request, _ Params) {
-	payload := decodeMap(r)
-	content := stringValue(payload, "content")
-	if content == "" {
-		fail(w, http.StatusBadRequest, "閰嶇疆鍐呭涓嶈兘涓虹┖")
-		return
-	}
-	if existing, err := os.ReadFile(a.cfg.ConfigFile); err == nil {
-		_ = os.WriteFile(a.cfg.ConfigFile+"."+strconv.FormatInt(time.Now().Unix(), 10)+".bak", existing, 0o600)
-	}
-	if err := os.WriteFile(a.cfg.ConfigFile, []byte(content), 0o600); err != nil {
-		fail(w, http.StatusInternalServerError, "淇濆瓨閰嶇疆澶辫触")
-		return
-	}
-	ok(w, "config saved", map[string]any{"path": a.cfg.ConfigFile})
+	a.handleConfigTOMLPutSafe(w, r, nil)
 }
 
 func (a *App) handleConfigSchema(w http.ResponseWriter, r *http.Request, _ Params) {
-	ok(w, "OK", map[string]any{"sections": []map[string]any{{"name": "Global", "fields": []string{"redis_url"}}, {"name": "API", "fields": []string{"host", "port", "cors_origins", "max_upload_size"}}}})
+	a.handleConfigSchemaFull(w, r, nil)
 }
 
 func (a *App) handleConfigSchemaUpdate(w http.ResponseWriter, r *http.Request, _ Params) {
-	// Config schema updates are acknowledged but not executed dynamically: writing arbitrary schema
-	// mutations from HTTP is intentionally avoided to keep runtime config safe and auditable.
-	ok(w, "config schema validated", map[string]any{"updated": false, "reason": "schema is code-owned in Go backend"})
+	a.handleConfigSchemaUpdateSafe(w, r, nil)
 }
 
 func (a *App) handleConfigSweep(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -2112,19 +2237,70 @@ func (a *App) handleSigninHistory(w http.ResponseWriter, r *http.Request, _ Para
 }
 
 func (a *App) handleDemoBootstrap(w http.ResponseWriter, r *http.Request, _ Params) {
-	ok(w, "OK", map[string]any{"user": map[string]any{"uid": 1, "username": "demo", "role": 0, "role_name": "Admin", "active": true}, "stats": map[string]any{"users": 12, "requests": 3}})
+	setDemoHeaders(w)
+	role := strings.ToLower(firstNonEmpty(r.URL.Query().Get("role"), "user"))
+	if role != "admin" {
+		role = "user"
+	}
+	ok(w, "OK", map[string]any{
+		"readonly": true,
+		"notice":   "TestWeb 演示接口只返回固定模拟数据，不读取登录态，不执行真实写入。",
+		"user":     map[string]any{"uid": 1, "username": "demo_" + role, "role": map[string]int{"admin": 0, "user": 1}[role], "role_name": role, "active": true},
+		"metrics": map[string]any{
+			"admin": []map[string]string{{"label": "总用户", "value": "186", "description": "+12 本月"}, {"label": "Emby 绑定", "value": "143", "description": "77%"}, {"label": "待处理求片", "value": "8", "description": "3 个下载中"}, {"label": "定时任务", "value": "11", "description": "9 个启用"}},
+			"user":  []map[string]string{{"label": "账号状态", "value": "正常", "description": "Emby 已绑定"}, {"label": "剩余天数", "value": "42", "description": "到期提醒开启"}, {"label": "积分", "value": "1,280", "description": "今日已签到"}, {"label": "求片", "value": "3", "description": "1 个已完成"}},
+		},
+		"stats": map[string]any{"users": 186, "requests": 8, "readonly": true},
+	})
 }
 func (a *App) handleDemoMe(w http.ResponseWriter, r *http.Request, _ Params) {
+	setDemoHeaders(w)
 	ok(w, "OK", map[string]any{"uid": 1, "username": "demo", "role": 0, "role_name": "Admin", "active": true})
 }
 func (a *App) handleDemoUsers(w http.ResponseWriter, r *http.Request, _ Params) {
+	setDemoHeaders(w)
 	ok(w, "OK", map[string]any{"users": []map[string]any{{"uid": 1, "username": "demo", "role": 0, "active": true}}, "total": 1})
 }
 func (a *App) handleDemoRegcodes(w http.ResponseWriter, r *http.Request, _ Params) {
+	setDemoHeaders(w)
 	ok(w, "OK", map[string]any{"regcodes": []any{}, "total": 0})
 }
+func (a *App) handleDemoMediaSearch(w http.ResponseWriter, r *http.Request, _ Params) {
+	setDemoHeaders(w)
+	query := strings.ToLower(strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("q"), r.URL.Query().Get("query"), r.URL.Query().Get("keyword"))))
+	items := []map[string]any{
+		{"title": "The Bear", "type": "剧集", "year": "2022", "status": "可求片", "rating": "8.6", "source": "demo"},
+		{"title": "Dune: Part Two", "type": "电影", "year": "2024", "status": "已入库", "rating": "8.4", "source": "demo"},
+		{"title": "Frieren", "type": "动画", "year": "2023", "status": "处理中", "rating": "9.1", "source": "demo"},
+	}
+	results := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if query == "" || strings.Contains(strings.ToLower(asString(item["title"])), query) {
+			results = append(results, item)
+		}
+	}
+	ok(w, "OK", map[string]any{"results": results, "total": len(results), "readonly": true})
+}
 func (a *App) handleDemoAction(w http.ResponseWriter, r *http.Request, params Params) {
-	ok(w, "OK", map[string]any{"demo": true, "action": params["action_name"], "mutated": false})
+	setDemoHeaders(w)
+	if !a.limiter.Allow(r.Context(), rateKey("demo-action:", a.clientIP(r)), 60, time.Minute) {
+		fail(w, http.StatusTooManyRequests, "演示操作过于频繁")
+		return
+	}
+	action := strings.TrimSpace(params["action_name"])
+	if action == "" {
+		action = "noop"
+	}
+	if !demoActionPattern.MatchString(action) || strings.ContainsAny(action, "/\\\x00\r\n\t") {
+		fail(w, http.StatusBadRequest, "演示操作名称无效")
+		return
+	}
+	ok(w, "OK", map[string]any{"demo": true, "action": action, "mutated": false, "readonly": true, "simulated": true})
+}
+
+func setDemoHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Twilight-Demo", "true")
 }
 
 func randomCode(length int) string {

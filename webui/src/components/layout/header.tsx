@@ -49,13 +49,13 @@ export function Header() {
                 <span className="sr-only">打开菜单</span>
               </Button>
             </DialogTrigger>
-            <DialogContent className="left-auto right-0 top-0 h-dvh w-[85vw] max-w-sm translate-x-0 translate-y-0 rounded-none border-l p-5 sm:max-w-sm">
-              <DialogHeader>
+            <DialogContent className="left-auto right-0 top-0 h-[100dvh] w-[min(92vw,24rem)] max-w-none translate-x-0 translate-y-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden rounded-none border-y-0 border-r-0 p-0 sm:max-h-[100dvh] sm:rounded-none sm:p-0">
+              <DialogHeader className="border-b px-5 py-4 pr-12 text-left">
                 <DialogTitle>导航菜单</DialogTitle>
                 <DialogDescription>快速切换页面</DialogDescription>
               </DialogHeader>
 
-              <nav className="mt-2 space-y-2">
+              <nav className="min-h-0 space-y-2 overflow-y-auto overscroll-contain px-3 py-4">
                 <p className="px-2 text-xs uppercase tracking-[0.14em] text-muted-foreground">用户菜单</p>
                 {userNavItems.map((item) => {
                   const active = pathname === item.href;
@@ -64,13 +64,14 @@ export function Header() {
                       key={item.href}
                       href={item.href}
                       onClick={() => setMobileOpen(false)}
+                      aria-current={active ? "page" : undefined}
                       className={cn(
-                        "flex items-center gap-2 rounded-lg px-3 py-3 text-sm",
+                        "flex min-w-0 items-center gap-3 rounded-lg px-3 py-3 text-sm",
                         active ? "bg-primary/12 text-primary" : "hover:bg-muted"
                       )}
                     >
-                      <item.icon className="h-4 w-4" />
-                      <span>{item.label}</span>
+                      <item.icon className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{item.label}</span>
                     </Link>
                   );
                 })}
@@ -85,13 +86,14 @@ export function Header() {
                           key={item.href}
                           href={item.href}
                           onClick={() => setMobileOpen(false)}
+                          aria-current={active ? "page" : undefined}
                           className={cn(
-                            "flex items-center gap-2 rounded-lg px-3 py-3 text-sm",
+                            "flex min-w-0 items-center gap-3 rounded-lg px-3 py-3 text-sm",
                             active ? "bg-primary/12 text-primary" : "hover:bg-muted"
                           )}
                         >
-                          <item.icon className="h-4 w-4" />
-                          <span>{item.label}</span>
+                          <item.icon className="h-4 w-4 shrink-0" />
+                          <span className="truncate">{item.label}</span>
                         </Link>
                       );
                     })}
@@ -99,34 +101,34 @@ export function Header() {
                 )}
               </nav>
 
-              <div className="mt-4 grid grid-cols-2 gap-2 border-t pt-4">
+              <div className="grid grid-cols-2 gap-2 border-t bg-background/95 p-4">
                 <a
                   href="https://github.com/Prejudice-Studio/Twilight"
                   target="_blank"
                   rel="noreferrer"
-                  className="col-span-2 flex h-11 items-center justify-center gap-2 rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+                  className="col-span-2 flex h-11 min-w-0 items-center justify-center gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
                 >
-                  <Github className="h-4 w-4" />
-                  GitHub Project
+                  <Github className="h-4 w-4 shrink-0" />
+                  <span className="truncate">GitHub Project</span>
                 </a>
                 <Button
                   variant="outline"
-                  className="h-11 w-full"
+                  className="h-11 w-full min-w-0"
                   onClick={() => setTheme(isDark ? "light" : "dark")}
                   title={`当前主题：${isDark ? "暗色" : "浅色"}`}
                 >
-                  {isDark ? <Moon className="mr-2 h-4 w-4" /> : <Sun className="mr-2 h-4 w-4" />}
-                  {isDark ? "暗色" : "浅色"}
+                  {isDark ? <Moon className="mr-2 h-4 w-4 shrink-0" /> : <Sun className="mr-2 h-4 w-4 shrink-0" />}
+                  <span className="truncate">{isDark ? "暗色" : "浅色"}</span>
                 </Button>
                 <Button
                   variant="outline"
-                  className="h-11 w-full"
+                  className="h-11 w-full min-w-0"
                   onClick={() => {
                     setMobileOpen(false);
                     void logout();
                   }}
                 >
-                  退出登录
+                  <span className="truncate">退出登录</span>
                 </Button>
               </div>
             </DialogContent>

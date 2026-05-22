@@ -144,6 +144,10 @@ func (a *App) handleAdminMediaRequests(w http.ResponseWriter, r *http.Request, _
 }
 
 func (a *App) handleUpdateMediaRequestStatus(w http.ResponseWriter, r *http.Request, params Params) {
+	if current(r).User.Role != store.RoleAdmin {
+		fail(w, http.StatusForbidden, "需要管理员权限")
+		return
+	}
 	id, _ := int64Param(params, "request_id")
 	payload := decodeMap(r)
 	status := normalizeMediaStatus(firstNonEmpty(stringValue(payload, "status"), "ACCEPTED"))

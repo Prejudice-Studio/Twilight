@@ -15,11 +15,11 @@ export default function TestWebPage() {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25 }}
-        className="rounded-3xl border bg-card/85 p-8 shadow-2xl backdrop-blur"
+        className="rounded-3xl border bg-card/85 p-5 shadow-2xl backdrop-blur sm:p-8"
       >
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
-            <h1 className="text-4xl font-black tracking-tight">TestWeb 安全演示台</h1>
+            <h1 className="break-words text-3xl font-black tracking-tight sm:text-4xl">TestWeb 安全演示台</h1>
             <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
               这里复刻真实用户端与管理端的主要界面，但只连接 /api/v1/demo 模拟接口；不会读取登录态，也不会执行真实写入操作。
             </p>

@@ -254,7 +254,7 @@ export default function MainLayout({
         <Sidebar />
         <div className="flex min-h-screen min-w-0 flex-1 flex-col lg:pl-72">
           <Header />
-          <main className="mx-auto w-full max-w-[1680px] flex-1 px-2 py-3 sm:p-4 md:p-6 xl:p-8">
+          <main className="mx-auto w-full min-w-0 max-w-[1680px] flex-1 px-2 py-3 sm:p-4 md:p-6 xl:p-8">
             <div className="section-surface">{children}</div>
           </main>
         </div>

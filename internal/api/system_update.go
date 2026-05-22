@@ -7,12 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
 
 var gitBranchPattern = regexp.MustCompile(`^[A-Za-z0-9._/-]{1,128}$`)
+var systemdServicePattern = regexp.MustCompile(`^twilight(-[a-z0-9]+)?$`)
 
 func validateUpdateRepoURL(repoURL string) (string, error) {
 	raw := strings.TrimSpace(repoURL)
@@ -28,6 +29,9 @@ func validateUpdateRepoURL(repoURL string) (string, error) {
 	}
 	if parsed.User != nil {
 		return "", fmt.Errorf("Git repository URL must not contain credentials")
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("Git repository URL must not contain query strings or fragments")
 	}
 	return raw, nil
 }
@@ -90,7 +94,7 @@ func applyGitUpdate(ctx context.Context, repoURL, branch string, restartServices
 			"repo_url":          redactGitURL(repoURL),
 			"branch":            branch,
 			"dry_run":           true,
-			"restart_available": runtime.GOOS != "windows" && commandExists("systemctl"),
+			"restart_available": commandExists("systemctl"),
 			"before":            before,
 			"results":           []any{},
 		}
@@ -113,32 +117,35 @@ func applyGitUpdate(ctx context.Context, repoURL, branch string, restartServices
 	after, stateErr := gitRepositoryState(ctx, projectRoot)
 	services := []string{"twilight", "twilight-bot", "twilight-scheduler"}
 	restartScheduled := false
-	message := "code updated"
+	restartMethod := ""
+	updated := false
+	message := "代码已更新"
+	if stateErr == nil {
+		updated = asString(before["commit"]) != asString(after["commit"])
+	}
 	if restartServices {
-		switch {
-		case runtime.GOOS == "windows":
-			message = "code updated; systemd restart is not available on Windows"
-		case commandExists("systemctl"):
-			restartScheduled = scheduleSystemdRestart(services)
+		if !updated {
+			message = "代码已是最新，已跳过服务重启"
+		} else if commandExists("systemctl") {
+			restartScheduled, restartMethod = scheduleSystemdRestart(services)
 			if restartScheduled {
-				message = "code updated; services will restart shortly"
+				message = "代码已更新，服务将在稍后重启"
 			} else {
-				message = "code updated; failed to schedule service restart"
+				message = "代码已更新，但服务重启调度失败"
 			}
-		default:
-			message = "code updated; systemctl was not found"
+		} else {
+			message = "代码已更新，但未找到 systemctl"
 		}
 	}
 	outServices := []string{}
 	if restartScheduled {
 		outServices = services
 	}
-	response := map[string]any{"success": true, "message": message, "code": 200, "project_root": projectRoot, "repo_url": redactGitURL(repoURL), "branch": branch, "dry_run": false, "restart_scheduled": restartScheduled, "restart_available": runtime.GOOS != "windows" && commandExists("systemctl"), "services": outServices, "before": before, "results": results}
+	response := map[string]any{"success": true, "message": message, "code": 200, "project_root": projectRoot, "repo_url": redactGitURL(repoURL), "branch": branch, "dry_run": false, "updated": updated, "restart_requested": restartServices, "restart_scheduled": restartScheduled, "restart_method": restartMethod, "restart_available": commandExists("systemctl"), "services": outServices, "before": before, "results": results}
 	if stateErr != nil {
 		response["after_error"] = stateErr.Error()
 	} else {
 		response["after"] = after
-		response["updated"] = asString(before["commit"]) != asString(after["commit"])
 	}
 	return response
 }
@@ -163,7 +170,7 @@ func runUpdateCommand(ctx context.Context, cwd string, args []string, timeout ti
 			stderr.WriteString("\ncommand timed out")
 		}
 	}
-	return map[string]any{"command": strings.Join(args, " "), "returncode": code, "stdout": tailString(stdout.String(), 8000), "stderr": tailString(stderr.String(), 8000), "duration_ms": time.Since(started).Milliseconds()}
+	return map[string]any{"command": strings.Join(args, " "), "returncode": code, "stdout": tailString(redactSensitiveText(stdout.String()), 8000), "stderr": tailString(redactSensitiveText(stderr.String()), 8000), "duration_ms": time.Since(started).Milliseconds()}
 }
 
 func gitRepositoryState(ctx context.Context, cwd string) (map[string]any, error) {
@@ -258,13 +265,25 @@ func commandExists(name string) bool {
 	return err == nil
 }
 
-func scheduleSystemdRestart(services []string) bool {
+func scheduleSystemdRestart(services []string) (bool, string) {
+	for _, service := range services {
+		if !systemdServicePattern.MatchString(service) {
+			return false, ""
+		}
+	}
 	args := append([]string{"restart"}, services...)
+	if commandExists("systemd-run") {
+		unit := "twilight-delayed-restart-" + strconv.FormatInt(time.Now().Unix(), 10)
+		runArgs := append([]string{"--unit", unit, "--on-active=2", "--collect", "systemctl"}, args...)
+		if err := exec.Command("systemd-run", runArgs...).Start(); err == nil {
+			return true, "systemd-run"
+		}
+	}
 	go func() {
 		time.Sleep(1500 * time.Millisecond)
 		_ = exec.Command("systemctl", args...).Start()
 	}()
-	return true
+	return true, "background-systemctl"
 }
 
 func tailString(value string, limit int) string {

@@ -3,6 +3,7 @@ package config
 import (
 	"bufio"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -70,6 +71,17 @@ type Config struct {
 	TelegramGroupActionConcurrency int
 	TelegramBanOnLeave             bool
 	TelegramAutoEnableRejoined     bool
+	TelegramEnablePanel            bool
+	TelegramBotStartText           string
+	TelegramBotGroupStartText      string
+	TelegramBotStartTitle          string
+	TelegramBotStartIntro          string
+	TelegramBotBindPromptText      string
+	TelegramBotHelpText            string
+	TelegramBotAdminHelpText       string
+	TelegramBotHelpHeader          string
+	TelegramBotHelpFooter          string
+	TelegramBotAbout               string
 	BotInternalSecret              string
 	BangumiEnabled                 bool
 	BangumiWebhookSecret           string
@@ -187,6 +199,17 @@ func Load(path string) (Config, error) {
 	cfg.TelegramGroupActionConcurrency = intValue(first(values, "Telegram.group_action_concurrency", "group_action_concurrency", strconv.Itoa(cfg.TelegramGroupActionConcurrency)), cfg.TelegramGroupActionConcurrency)
 	cfg.TelegramBanOnLeave = boolValue(first(values, "Telegram.ban_on_leave", "ban_on_leave", strconv.FormatBool(cfg.TelegramBanOnLeave)), cfg.TelegramBanOnLeave)
 	cfg.TelegramAutoEnableRejoined = boolValue(first(values, "Telegram.auto_enable_rejoined", "auto_enable_rejoined", strconv.FormatBool(cfg.TelegramAutoEnableRejoined)), cfg.TelegramAutoEnableRejoined)
+	cfg.TelegramEnablePanel = boolValue(first(values, "Telegram.enable_tg_panel", "enable_tg_panel", strconv.FormatBool(cfg.TelegramEnablePanel)), cfg.TelegramEnablePanel)
+	cfg.TelegramBotStartText = first(values, "Telegram.bot_start_text", "bot_start_text", cfg.TelegramBotStartText)
+	cfg.TelegramBotGroupStartText = first(values, "Telegram.bot_group_start_text", "bot_group_start_text", cfg.TelegramBotGroupStartText)
+	cfg.TelegramBotStartTitle = first(values, "Telegram.bot_start_title", "bot_start_title", cfg.TelegramBotStartTitle)
+	cfg.TelegramBotStartIntro = first(values, "Telegram.bot_start_intro", "bot_start_intro", cfg.TelegramBotStartIntro)
+	cfg.TelegramBotBindPromptText = first(values, "Telegram.bot_bind_prompt_text", "bot_bind_prompt_text", cfg.TelegramBotBindPromptText)
+	cfg.TelegramBotHelpText = first(values, "Telegram.bot_help_text", "bot_help_text", cfg.TelegramBotHelpText)
+	cfg.TelegramBotAdminHelpText = first(values, "Telegram.bot_admin_help_text", "bot_admin_help_text", cfg.TelegramBotAdminHelpText)
+	cfg.TelegramBotHelpHeader = first(values, "Telegram.bot_help_header", "bot_help_header", cfg.TelegramBotHelpHeader)
+	cfg.TelegramBotHelpFooter = first(values, "Telegram.bot_help_footer", "bot_help_footer", cfg.TelegramBotHelpFooter)
+	cfg.TelegramBotAbout = first(values, "Telegram.bot_about", "bot_about", cfg.TelegramBotAbout)
 	cfg.BangumiEnabled = boolValue(first(values, "BangumiSync.enabled", "bangumi_sync_enabled", strconv.FormatBool(cfg.BangumiEnabled)), cfg.BangumiEnabled)
 	cfg.BangumiWebhookSecret = first(values, "BangumiSync.webhook_secret", "webhook_secret", cfg.BangumiWebhookSecret)
 	cfg.TMDBAPIKey = first(values, "Global.tmdb_api_key", "tmdb_api_key", cfg.TMDBAPIKey)
@@ -247,13 +270,14 @@ func Load(path string) (Config, error) {
 func defaults() Config {
 	return Config{
 		AppName:                         "Twilight",
-		Version:                         "go-0.1.0",
+		Version:                         "0.0.4",
 		Host:                            "0.0.0.0",
 		Port:                            5000,
 		DatabaseDir:                     "db",
 		DatabaseDriver:                  "json",
 		PostgresHost:                    "127.0.0.1",
 		PostgresPort:                    5432,
+		PostgresUser:                    "twilight",
 		PostgresDatabase:                "twilight",
 		PostgresSSLMode:                 "disable",
 		PostgresMaxOpenConns:            8,
@@ -326,6 +350,9 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("TWILIGHT_DATABASE_URL"); v != "" {
 		cfg.DatabaseURL = v
 	}
+	if v := os.Getenv("TWILIGHT_POSTGRES_DSN"); v != "" {
+		cfg.DatabaseURL = v
+	}
 	if v := os.Getenv("TWILIGHT_DATABASE_BACKUP_DIR"); v != "" {
 		cfg.DatabaseBackupDir = v
 	}
@@ -346,6 +373,12 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("TWILIGHT_POSTGRES_SSLMODE"); v != "" {
 		cfg.PostgresSSLMode = v
+	}
+	if v := os.Getenv("TWILIGHT_POSTGRES_MAX_OPEN_CONNS"); v != "" {
+		cfg.PostgresMaxOpenConns = intValue(v, cfg.PostgresMaxOpenConns)
+	}
+	if v := os.Getenv("TWILIGHT_POSTGRES_MAX_IDLE_CONNS"); v != "" {
+		cfg.PostgresMaxIdleConns = intValue(v, cfg.PostgresMaxIdleConns)
 	}
 	if v := os.Getenv("TWILIGHT_STATE_FILE"); v != "" {
 		cfg.StateFile = v
@@ -657,10 +690,14 @@ func (c Config) PostgresDSN() string {
 	}
 	u := url.URL{
 		Scheme: "postgres",
-		Host:   c.PostgresHost + ":" + strconv.Itoa(c.PostgresPort),
+		Host:   net.JoinHostPort(c.PostgresHost, strconv.Itoa(c.PostgresPort)),
 		Path:   "/" + c.PostgresDatabase,
 	}
-	u.User = url.UserPassword(c.PostgresUser, c.PostgresPassword)
+	if c.PostgresPassword == "" {
+		u.User = url.User(c.PostgresUser)
+	} else {
+		u.User = url.UserPassword(c.PostgresUser, c.PostgresPassword)
+	}
 	q := u.Query()
 	if c.PostgresSSLMode != "" {
 		q.Set("sslmode", c.PostgresSSLMode)

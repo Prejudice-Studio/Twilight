@@ -1,6 +1,7 @@
 [Unit]
 Description=Twilight Go Scheduler
-After=network.target twilight.service
+After=network-online.target twilight.service
+Wants=network-online.target
 PartOf=twilight.service
 
 [Service]
@@ -8,7 +9,7 @@ Type=exec
 User=root
 Group=root
 WorkingDirectory=/root/Twilight
-ExecStart=/root/Twilight/bin/twilight scheduler
+ExecStart=/root/Twilight/bin/twilight scheduler --config /root/Twilight/config.toml
 
 Environment=TWILIGHT_CONFIG_FILE=/root/Twilight/config.toml
 EnvironmentFile=-/root/Twilight/.env

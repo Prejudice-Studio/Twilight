@@ -11,6 +11,10 @@
 # Environment and local config
 .env
 .env.local
+.env.development
+.env.production
+.env.staging
+.env.test
 .env.*.local
 .env.*.private
 .envrc
@@ -22,12 +26,20 @@ config.*.local.toml
 config.toml.backup
 config.toml.bak
 config.toml
+1panel*.env
+1panel*.toml
+1panel*.json
+1panel*.yaml
+1panel*.yml
+1panel*.conf
+.1panel/
+1panel/
 *.local
 *.secret
 
 # Runtime data
 *.log
-logs/
+/logs/
 api_error.log
 *.db
 *.db-journal

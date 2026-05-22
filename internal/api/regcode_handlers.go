@@ -82,6 +82,30 @@ func (a *App) handleDeleteRegcode(w http.ResponseWriter, r *http.Request, params
 	ok(w, "娉ㄥ唽鐮佸凡鍒犻櫎", nil)
 }
 
+func (a *App) handleBatchDeleteRegcodes(w http.ResponseWriter, r *http.Request, _ Params) {
+	payload := decodeMap(r)
+	codes := regcodePayloadCodes(payload["codes"])
+	if len(codes) == 0 {
+		fail(w, http.StatusBadRequest, "请选择要删除的注册码")
+		return
+	}
+	if len(codes) > 200 {
+		fail(w, http.StatusBadRequest, "单次最多删除 200 个注册码")
+		return
+	}
+	deleted, missing, err := a.store.DeleteRegCodes(codes)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, "批量删除注册码失败")
+		return
+	}
+	ok(w, "注册码已批量删除", map[string]any{
+		"deleted":       len(deleted),
+		"deleted_codes": deleted,
+		"missing":       len(missing),
+		"missing_codes": missing,
+	})
+}
+
 func (a *App) handleRegcodeUsers(w http.ResponseWriter, r *http.Request, params Params) {
 	reg, okReg := a.store.RegCode(params["code"])
 	if !okReg {
@@ -95,4 +119,22 @@ func (a *App) handleRegcodeUsers(w http.ResponseWriter, r *http.Request, params 
 		}
 	}
 	ok(w, "OK", map[string]any{"users": users, "unresolved_telegram_ids": reg.UsedByTelegramIDs, "total": len(users)})
+}
+
+func regcodePayloadCodes(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	seen := map[string]bool{}
+	for _, item := range items {
+		code := strings.TrimSpace(asString(item))
+		if code == "" || seen[code] {
+			continue
+		}
+		seen[code] = true
+		out = append(out, code)
+	}
+	return out
 }

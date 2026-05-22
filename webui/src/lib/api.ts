@@ -166,6 +166,32 @@ class ApiClient {
     });
   }
 
+  private normalizeBackgroundAssetCssUrlValue(value?: string | null): string {
+    if (!value) return "";
+    return value.replace(/url\((['"]?)(.*?)\1\)/g, (_match, quote, rawUrl: string) => {
+      const raw = rawUrl.trim();
+      let path = raw;
+      if (/^https?:\/\//i.test(raw)) {
+        try {
+          const parsed = new URL(raw);
+          const allowedOrigin = API_BASE
+            ? new URL(API_BASE, typeof window === "undefined" ? "http://localhost" : window.location.origin).origin
+            : (typeof window === "undefined" ? "" : window.location.origin);
+          if (!allowedOrigin) return "none";
+          if (parsed.origin !== allowedOrigin) return "none";
+          path = parsed.pathname;
+        } catch {
+          return "none";
+        }
+      }
+      if (!/^\/api\/v1\/users\/assets\/background\/[a-f0-9]{16}\.(jpg|png|gif|webp|bmp)$/i.test(path)) return "none";
+      const normalized = this.toAbsoluteAssetUrl(path);
+      if (!normalized) return "none";
+      const q = quote || '"';
+      return `url(${q}${normalized}${q})`;
+    });
+  }
+
   setToken(token: string | null) {
     void token;
   }
@@ -912,6 +938,22 @@ class ApiClient {
     return this.request<SystemStats>("/system/admin/stats");
   }
 
+  async getRuntimeStatus() {
+    return this.request<RuntimeStatus>("/system/admin/runtime/status");
+  }
+
+  async getRuntimeLogs(limit = 200, after?: number) {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (after && after > 0) query.set("after", String(after));
+    return this.request<RuntimeLogsResponse>(`/system/admin/runtime/logs?${query}`);
+  }
+
+  runtimeLogStreamURL(limit = 100, after?: number) {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (after && after > 0) query.set("after", String(after));
+    return `${API_BASE}/api/v1/system/admin/runtime/logs/stream?${query}`;
+  }
+
   async getConfigToml() {
     return this.request<{ content: string; path: string }>("/system/admin/config/toml");
   }
@@ -949,16 +991,25 @@ class ApiClient {
     });
   }
 
-  async restoreDatabaseBackup(name: string) {
-    return this.request<{ restored: string; pre_restore_backup: DatabaseBackup }>("/system/admin/database/restore", {
+  async restoreDatabaseBackup(
+    name: string,
+    options?: { dry_run?: boolean; preview?: boolean; confirm?: string }
+  ) {
+    return this.request<DatabaseRestoreResult>("/system/admin/database/restore", {
       method: "POST",
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, ...(options || {}) }),
     });
+  }
+
+  async previewDatabaseRestore(name: string) {
+    return this.restoreDatabaseBackup(name, { dry_run: true });
   }
 
   async migrateDatabase(payload: {
     target_driver: "json" | "postgres";
     dry_run?: boolean;
+    preview?: boolean;
+    confirm?: string;
     database_url?: string;
     postgres_dsn?: string;
     state_file?: string;
@@ -1398,8 +1449,8 @@ class ApiClient {
     if (res.success && res.data?.background) {
       try {
         const config = JSON.parse(res.data.background);
-        config.lightBgImage = this.normalizeCssUrlValue(config.lightBgImage);
-        config.darkBgImage = this.normalizeCssUrlValue(config.darkBgImage);
+        config.lightBgImage = this.normalizeBackgroundAssetCssUrlValue(config.lightBgImage);
+        config.darkBgImage = this.normalizeBackgroundAssetCssUrlValue(config.darkBgImage);
         res.data.background = JSON.stringify(config);
       } catch {
         // ignore invalid legacy format
@@ -1532,6 +1583,18 @@ class ApiClient {
   async deleteRegcode(code: string) {
     return this.request(`/admin/regcodes/${encodeURIComponent(code)}`, {
       method: "DELETE",
+    });
+  }
+
+  async batchDeleteRegcodes(codes: string[]) {
+    return this.request<{
+      deleted: number;
+      deleted_codes: string[];
+      missing: number;
+      missing_codes: string[];
+    }>("/admin/regcodes/batch-delete", {
+      method: "POST",
+      body: JSON.stringify({ codes }),
     });
   }
 
@@ -2192,6 +2255,40 @@ export interface SystemStats {
   } | null;
 }
 
+export interface RuntimeLogEntry {
+  id: number;
+  time: number;
+  level: string;
+  message: string;
+  attrs?: Record<string, string>;
+}
+
+export interface RuntimeLogsResponse {
+  entries: RuntimeLogEntry[];
+  next_cursor: number;
+  limit: number;
+}
+
+export interface RuntimeStatus {
+  started_at: number;
+  uptime_seconds: number;
+  host_uptime_seconds?: number;
+  hostname?: string;
+  go_version: string;
+  goos: string;
+  goarch: string;
+  goroutines: number;
+  cpu_count: number;
+  redis_enabled: boolean;
+  routes: number;
+  active_database: string;
+  config_database: string;
+  users: number;
+  load_average?: number[];
+  memory?: Record<string, number>;
+  host_memory?: Record<string, number>;
+}
+
 export interface Regcode {
   code: string;
   type: number;
@@ -2277,15 +2374,21 @@ export interface DatabaseStatus {
   user_count: number;
 }
 
-export interface DatabaseMigrationResult {
+export interface DatabaseOperationResult {
+  operation?: "restore" | "migrate" | string;
   source_driver?: string;
   configured_driver?: string;
-  target_driver: string;
+  target_driver?: string;
   dry_run: boolean;
+  requires_confirmation?: boolean;
+  confirm?: string;
   snapshot_bytes?: number;
+  target_snapshot_bytes?: number;
+  current_snapshot_bytes?: number;
   target_ready?: Record<string, unknown>;
   warnings?: string[];
   counts?: Record<string, number>;
+  current_counts?: Record<string, number>;
   users: number;
   api_keys: number;
   regcodes: number;
@@ -2293,7 +2396,21 @@ export interface DatabaseMigrationResult {
   media_requests: number;
   announcements: number;
   state_file?: string;
+  backup?: DatabaseBackup;
+  restored?: string;
+  pre_restore_backup?: DatabaseBackup;
+  pre_migration_backup?: DatabaseBackup;
+  pre_operation_backup?: DatabaseBackup;
 }
+
+export type DatabaseMigrationResult = DatabaseOperationResult & {
+  target_driver: string;
+};
+
+export type DatabaseRestoreResult = DatabaseOperationResult & {
+  restored: string;
+  backup?: DatabaseBackup;
+};
 
 export interface SchedulerJobRun {
   id?: number;

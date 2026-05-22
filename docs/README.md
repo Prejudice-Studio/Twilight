@@ -7,8 +7,7 @@
 | 文档 | 适用人群 |
 | ---- | -------- |
 | [项目概览](../README.md) | 所有用户 |
-| [安装部署](./INSTALL.md) | 部署运维 |
-| [Windows 快速启动](./QUICKSTART-Windows.md) | Windows 用户首次试用 |
+| [安装部署](./INSTALL.md) | Linux 部署运维 |
 
 ## 后端与接口
 
@@ -33,7 +32,7 @@
 
 - [背景自定义](./BACKGROUND.md) — 用户自定义主题背景的实现
 - [Bangumi 点格子同步](./BANGUMI_SYNC.md) — Emby Webhook、Bangumi Token 与用户面板配置
-- [Telegram Bot 命令](./TG_BOT_COMMANDS.md) — Bot 普通命令、管理员命令、群组管理工具
+- [Telegram Bot 命令](./TG_BOT_COMMANDS.md) — Bot 普通命令、管理员只读查询和群聊安全边界
 - [注册码与卡码说明](./REGCODES.md) — 卡码类型、生成格式、兼容性与安全口径
 - [版本更新与规划](./VERSION_HISTORY.md) — 当前版本、功能地图和后续版本步进流程
 - [安全加固指南](./SECURITY.md) — 生产安全基线、密钥与部署检查清单

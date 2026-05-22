@@ -27,6 +27,9 @@ const item = {
   show: { opacity: 1, y: 0 },
 };
 
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
+const BACKGROUND_ASSET_PATH = /^\/api\/v1\/users\/assets\/background\/[a-f0-9]{16}\.(jpg|png|gif|webp|bmp)$/i;
+
 const gradientPresets = [
   {
     name: "蓝色渐变",
@@ -58,14 +61,25 @@ function normalizeBgImage(raw: string): string {
   const value = (raw || "").trim();
   if (!value) return "";
   if (/^(linear-gradient|radial-gradient|conic-gradient|repeating-linear-gradient|repeating-radial-gradient)\s*\(/i.test(value)) {
+    if (/[<>{};]|\burl\s*\(/i.test(value)) return "";
     return value;
   }
   const match = value.match(/^url\(\s*(['"]?)(.*?)\1\s*\)$/i);
-  const url = (match ? match[2] : value).trim();
-  if (!url || /[\u0000-\u001F\u007F]/.test(url) || url.startsWith("//")) return "";
-  if (/^[a-z][a-z0-9+.-]*:/i.test(url) && !/^https?:\/\//i.test(url) && !url.startsWith("blob:") && !/^data:image\/(png|jpe?g|gif|webp|avif|bmp)(;|,)/i.test(url)) {
-    return "";
+  let url = (match ? match[2] : value).trim();
+  if (!url || /[\u0000-\u001F\u007F<>]/.test(url) || url.startsWith("//")) return "";
+  if (/^https?:\/\//i.test(url)) {
+    try {
+      const parsed = new URL(url);
+      const allowedOrigin = API_BASE
+        ? new URL(API_BASE).origin
+        : (typeof window === "undefined" ? "" : window.location.origin);
+      if (!allowedOrigin || parsed.origin !== allowedOrigin) return "";
+      url = parsed.pathname;
+    } catch {
+      return "";
+    }
   }
+  if (!BACKGROUND_ASSET_PATH.test(url)) return "";
   return `url("${url.replace(/"/g, '\\"')}")`;
 }
 

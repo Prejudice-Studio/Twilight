@@ -12,6 +12,11 @@ import (
 	"github.com/prejudice-studio/twilight/internal/store"
 )
 
+const (
+	databaseRestoreConfirmPhrase = "RESTORE_DATABASE_BACKUP"
+	databaseMigrateConfirmPhrase = "MIGRATE_DATABASE"
+)
+
 func (a *App) handleDatabaseStatus(w http.ResponseWriter, r *http.Request, _ Params) {
 	backups, _ := store.ListBackups(a.cfg.DatabaseBackupDir)
 	ok(w, "OK", map[string]any{
@@ -52,16 +57,77 @@ func (a *App) handleDatabaseRestore(w http.ResponseWriter, r *http.Request, _ Pa
 		fail(w, http.StatusBadRequest, "备份文件无效")
 		return
 	}
+
+	targetData, err := os.ReadFile(target)
+	if err != nil {
+		fail(w, http.StatusBadRequest, "读取备份失败")
+		return
+	}
+	var targetState store.State
+	if err := json.Unmarshal(targetData, &targetState); err != nil {
+		fail(w, http.StatusBadRequest, "备份内容不是有效的 Twilight 状态快照")
+		return
+	}
+	targetState.EnsureForMigration()
+
+	currentSnapshot, err := a.store.Snapshot()
+	if err != nil {
+		fail(w, http.StatusInternalServerError, "生成当前数据库快照失败")
+		return
+	}
+	var currentState store.State
+	if err := json.Unmarshal(currentSnapshot, &currentState); err != nil {
+		fail(w, http.StatusInternalServerError, "当前数据库快照校验失败")
+		return
+	}
+	currentState.EnsureForMigration()
+
+	backupInfo, err := databaseBackupInfo(target)
+	if err != nil {
+		fail(w, http.StatusBadRequest, "备份文件无效")
+		return
+	}
+	result := map[string]any{
+		"operation":              "restore",
+		"dry_run":                true,
+		"requires_confirmation":  true,
+		"confirm":                databaseRestoreConfirmPhrase,
+		"restored":               filepath.Base(target),
+		"backup":                 backupInfo,
+		"target_snapshot_bytes":  len(targetData),
+		"current_snapshot_bytes": len(currentSnapshot),
+		"counts":                 databaseStateCounts(targetState),
+		"current_counts":         databaseStateCounts(currentState),
+		"users":                  len(targetState.Users),
+		"api_keys":               len(targetState.APIKeys),
+		"regcodes":               len(targetState.RegCodes),
+		"invite_codes":           len(targetState.InviteCodes),
+		"media_requests":         len(targetState.MediaRequests),
+		"announcements":          len(targetState.Announcements),
+		"warnings": []string{
+			"restore will replace the active database state",
+			"the server will create a protective backup before applying this restore",
+		},
+	}
+	if boolValue(payload, "dry_run", false) || boolValue(payload, "preview", false) || stringValue(payload, "confirm") != databaseRestoreConfirmPhrase {
+		ok(w, "恢复预览已生成", result)
+		return
+	}
+
 	preRestore, backupErr := a.store.Backup(a.cfg.DatabaseBackupDir)
 	if backupErr != nil {
 		fail(w, http.StatusInternalServerError, "恢复前备份失败")
 		return
 	}
-	if err := a.store.RestoreFrom(target); err != nil {
+	if err := a.store.LoadSnapshot(targetData); err != nil {
 		fail(w, http.StatusBadRequest, "备份恢复失败")
 		return
 	}
-	ok(w, "数据库已恢复", map[string]any{"restored": filepath.Base(target), "pre_restore_backup": preRestore})
+	result["dry_run"] = false
+	result["requires_confirmation"] = false
+	result["pre_restore_backup"] = preRestore
+	result["pre_operation_backup"] = preRestore
+	ok(w, "数据库已恢复", result)
 }
 
 func (a *App) handleDatabaseMigrate(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -70,7 +136,8 @@ func (a *App) handleDatabaseMigrate(w http.ResponseWriter, r *http.Request, _ Pa
 	if targetDriver == "" {
 		targetDriver = store.BackendJSON
 	}
-	dryRun := boolValue(payload, "dry_run", false)
+	confirmed := stringValue(payload, "confirm") == databaseMigrateConfirmPhrase
+	dryRun := boolValue(payload, "dry_run", false) || boolValue(payload, "preview", false) || !confirmed
 	snapshot, err := a.store.Snapshot()
 	if err != nil {
 		fail(w, http.StatusInternalServerError, "生成迁移快照失败")
@@ -95,6 +162,20 @@ func (a *App) handleDatabaseMigrate(w http.ResponseWriter, r *http.Request, _ Pa
 		targetReady := map[string]any{"driver": targetDriver, "configured": true, "connected": false}
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
+		if dryRun {
+			if err := store.CheckPostgres(ctx, dsn); err != nil {
+				fail(w, http.StatusBadRequest, "连接 PostgreSQL 失败")
+				return
+			}
+			targetReady["connected"] = true
+			ok(w, "迁移预检通过", a.databaseMigrationSummary(targetDriver, state, dryRun, snapshotBytes, targetReady))
+			return
+		}
+		preMigration, backupErr := a.store.Backup(a.cfg.DatabaseBackupDir)
+		if backupErr != nil {
+			fail(w, http.StatusInternalServerError, "迁移前备份失败")
+			return
+		}
 		targetStore, err := store.OpenPostgres(ctx, dsn)
 		if err != nil {
 			fail(w, http.StatusBadRequest, "连接 PostgreSQL 失败")
@@ -103,15 +184,14 @@ func (a *App) handleDatabaseMigrate(w http.ResponseWriter, r *http.Request, _ Pa
 		defer targetStore.Close()
 		targetStore.ConfigurePostgres(a.cfg.PostgresMaxOpenConns, a.cfg.PostgresMaxIdleConns)
 		targetReady["connected"] = true
-		if dryRun {
-			ok(w, "迁移预检通过", a.databaseMigrationSummary(targetDriver, state, dryRun, snapshotBytes, targetReady))
-			return
-		}
 		if err := targetStore.LoadSnapshot(snapshot); err != nil {
 			fail(w, http.StatusInternalServerError, "写入 PostgreSQL 失败")
 			return
 		}
-		ok(w, "数据库已迁移到 PostgreSQL", a.databaseMigrationSummary(targetDriver, state, dryRun, snapshotBytes, targetReady))
+		summary := a.databaseMigrationSummary(targetDriver, state, dryRun, snapshotBytes, targetReady)
+		summary["pre_migration_backup"] = preMigration
+		summary["pre_operation_backup"] = preMigration
+		ok(w, "数据库已迁移到 PostgreSQL", summary)
 	case store.BackendJSON, "file":
 		targetDriver = store.BackendJSON
 		targetPath := strings.TrimSpace(stringValue(payload, "state_file"))
@@ -131,6 +211,11 @@ func (a *App) handleDatabaseMigrate(w http.ResponseWriter, r *http.Request, _ Pa
 			ok(w, "迁移预检通过", summary)
 			return
 		}
+		preMigration, backupErr := a.store.Backup(a.cfg.DatabaseBackupDir)
+		if backupErr != nil {
+			fail(w, http.StatusInternalServerError, "迁移前备份失败")
+			return
+		}
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0o700); err != nil {
 			fail(w, http.StatusInternalServerError, "创建数据库目录失败")
 			return
@@ -146,6 +231,8 @@ func (a *App) handleDatabaseMigrate(w http.ResponseWriter, r *http.Request, _ Pa
 		}
 		summary := a.databaseMigrationSummary(store.BackendJSON, state, dryRun, snapshotBytes, targetReady)
 		summary["state_file"] = targetPath
+		summary["pre_migration_backup"] = preMigration
+		summary["pre_operation_backup"] = preMigration
 		ok(w, "数据库已迁移到 JSON 状态文件", summary)
 	default:
 		fail(w, http.StatusBadRequest, "不支持的数据库目标")
@@ -153,7 +240,37 @@ func (a *App) handleDatabaseMigrate(w http.ResponseWriter, r *http.Request, _ Pa
 }
 
 func (a *App) databaseMigrationSummary(driver string, state store.State, dryRun bool, snapshotBytes int, targetReady map[string]any) map[string]any {
-	counts := map[string]int{
+	counts := databaseStateCounts(state)
+	warnings := []string{}
+	if a.store.Backend() != driver {
+		warnings = append(warnings, "active database backend will not change until the service restarts with the target driver")
+	}
+	if strings.ToLower(a.cfg.DatabaseDriver) != driver {
+		warnings = append(warnings, "configured database.driver differs from migration target; update config before restart")
+	}
+	return map[string]any{
+		"source_driver":         a.store.Backend(),
+		"configured_driver":     strings.ToLower(a.cfg.DatabaseDriver),
+		"target_driver":         driver,
+		"dry_run":               dryRun,
+		"operation":             "migrate",
+		"requires_confirmation": dryRun,
+		"confirm":               databaseMigrateConfirmPhrase,
+		"snapshot_bytes":        snapshotBytes,
+		"target_ready":          targetReady,
+		"warnings":              warnings,
+		"counts":                counts,
+		"users":                 counts["users"],
+		"api_keys":              counts["api_keys"],
+		"regcodes":              counts["regcodes"],
+		"invite_codes":          counts["invite_codes"],
+		"media_requests":        counts["media_requests"],
+		"announcements":         counts["announcements"],
+	}
+}
+
+func databaseStateCounts(state store.State) map[string]int {
+	return map[string]int{
 		"users":               len(state.Users),
 		"api_keys":            len(state.APIKeys),
 		"regcodes":            len(state.RegCodes),
@@ -172,29 +289,22 @@ func (a *App) databaseMigrationSummary(driver string, state store.State, dryRun 
 		"rebind_requests":     len(state.RebindRequests),
 		"telegram_roster":     len(state.TelegramRoster),
 	}
-	warnings := []string{}
-	if a.store.Backend() != driver {
-		warnings = append(warnings, "active database backend will not change until the service restarts with the target driver")
+}
+
+func databaseBackupInfo(path string) (store.BackupInfo, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return store.BackupInfo{}, err
 	}
-	if strings.ToLower(a.cfg.DatabaseDriver) != driver {
-		warnings = append(warnings, "configured database.driver differs from migration target; update config before restart")
+	if !info.Mode().IsRegular() {
+		return store.BackupInfo{}, store.ErrNotFound
 	}
-	return map[string]any{
-		"source_driver":     a.store.Backend(),
-		"configured_driver": strings.ToLower(a.cfg.DatabaseDriver),
-		"target_driver":     driver,
-		"dry_run":           dryRun,
-		"snapshot_bytes":    snapshotBytes,
-		"target_ready":      targetReady,
-		"warnings":          warnings,
-		"counts":            counts,
-		"users":             counts["users"],
-		"api_keys":          counts["api_keys"],
-		"regcodes":          counts["regcodes"],
-		"invite_codes":      counts["invite_codes"],
-		"media_requests":    counts["media_requests"],
-		"announcements":     counts["announcements"],
-	}
+	return store.BackupInfo{
+		Name:      filepath.Base(path),
+		Path:      path,
+		Size:      info.Size(),
+		CreatedAt: info.ModTime().Unix(),
+	}, nil
 }
 
 func resolveStateFileTarget(databaseDir, target string) (string, error) {
@@ -215,7 +325,10 @@ func resolveStateFileTarget(databaseDir, target string) (string, error) {
 		return "", err
 	}
 	rel, err := filepath.Rel(base, joined)
-	if err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+	if err != nil || rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", store.ErrNotFound
+	}
+	if strings.ToLower(filepath.Ext(joined)) != ".json" {
 		return "", store.ErrNotFound
 	}
 	return joined, nil

@@ -9,7 +9,7 @@
  * - 不引入额外可视化库，方便部署到 Cloudflare Workers（rendering tree small）。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   GitBranch,
@@ -27,6 +27,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { api, type InviteForest, type InviteForestNode } from "@/lib/api";
@@ -58,6 +66,18 @@ interface PlacedForest {
   systems: StarSystem[];
   width: number;
   height: number;
+}
+
+interface DepthPromptOptions {
+  title: string;
+  description: string;
+  defaultValue?: string;
+  confirmLabel: string;
+}
+
+interface DepthPromptState extends DepthPromptOptions {
+  value: string;
+  resolve: (value: string | null) => void;
 }
 
 const DEPTH_COLOR_LIGHT = ["#38bdf8", "#34d399", "#c084fc", "#fbbf24", "#fb7185", "#60a5fa"];
@@ -272,9 +292,28 @@ export default function AdminInviteTreePage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedUid, setSelectedUid] = useState<number | null>(null);
   const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
   const [rootFilter, setRootFilter] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [scale, setScale] = useState(1);
+  const [depthPrompt, setDepthPrompt] = useState<DepthPromptState | null>(null);
+
+  const requestDepth = useCallback((options: DepthPromptOptions) => {
+    return new Promise<string | null>((resolve) => {
+      setDepthPrompt({
+        ...options,
+        value: options.defaultValue ?? "1",
+        resolve,
+      });
+    });
+  }, []);
+
+  const closeDepthPrompt = useCallback((value: string | null) => {
+    setDepthPrompt((current) => {
+      if (current) current.resolve(value);
+      return null;
+    });
+  }, []);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -309,7 +348,7 @@ export default function AdminInviteTreePage() {
   }, [visibleForest]);
 
   const matchingUIDs = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = deferredQuery.trim().toLowerCase();
     const matches = new Set<number>();
     if (!q || !visibleForest) return matches;
     for (const node of visibleForest.nodes) {
@@ -318,7 +357,7 @@ export default function AdminInviteTreePage() {
       }
     }
     return matches;
-  }, [query, visibleForest]);
+  }, [deferredQuery, visibleForest]);
 
   const showLabels = (visibleForest?.nodes.length || 0) <= 260 && scale >= 0.7;
 
@@ -361,10 +400,12 @@ export default function AdminInviteTreePage() {
   const handleCascadeToggle = async (enable: boolean) => {
     if (!selected) return;
     const action = enable ? "启用" : "禁用";
-    const cascadeRaw = window.prompt(
-      `请输入级联${action}层级：\n  1 = 仅本人（默认）\n  N = 本人 + 下 N-1 层\n  0 = 整棵子树（不限层级）`,
-      "1",
-    );
+    const cascadeRaw = await requestDepth({
+      title: `设置级联${action}层级`,
+      description: "1 = 仅本人（默认）；N = 本人 + 下 N-1 层；0 = 整棵子树（不限层级）。",
+      defaultValue: "1",
+      confirmLabel: `继续${action}`,
+    });
     if (cascadeRaw === null) return;
     const parsed = parseInt(cascadeRaw, 10);
     if (!Number.isFinite(parsed) || parsed < 0) {
@@ -407,10 +448,12 @@ export default function AdminInviteTreePage() {
 
   const handleCascadeDelete = async () => {
     if (!selected) return;
-    const cascadeDepth = window.prompt(
-      "请输入级联删除层级：\n  1 = 仅本人（默认）\n  2 = 本人 + 直接下级\n  N = 本人 + 下 N-1 层\n  0 = 整棵子树（不限层级）",
-      "1",
-    );
+    const cascadeDepth = await requestDepth({
+      title: "设置级联删除层级",
+      description: "1 = 仅本人（默认）；2 = 本人 + 直接下级；N = 本人 + 下 N-1 层；0 = 整棵子树（不限层级）。",
+      defaultValue: "1",
+      confirmLabel: "继续删除",
+    });
     if (cascadeDepth === null) return;
     const parsed = parseInt(cascadeDepth, 10);
     if (!Number.isFinite(parsed) || parsed < 0) {
@@ -452,7 +495,7 @@ export default function AdminInviteTreePage() {
       animate={{ opacity: 1, y: 0 }}
       className="space-y-4"
     >
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Network className="h-5 w-5" />
@@ -462,7 +505,7 @@ export default function AdminInviteTreePage() {
             管理员视角的整棵邀请关系。点击任意节点查看用户详情、断开/级联删除。
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="grid w-full grid-cols-[auto_1fr_auto_auto] items-center gap-2 sm:flex sm:w-auto">
           <Button variant="outline" size="sm" onClick={() => setScale((s) => Math.max(0.4, s - 0.1))}>
             −
           </Button>
@@ -488,7 +531,7 @@ export default function AdminInviteTreePage() {
               className="pl-9"
             />
           </div>
-          <div className="flex gap-2 overflow-x-auto pb-1">
+              <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
             <Button size="sm" variant={rootFilter === null ? "default" : "outline"} onClick={() => setRootFilter(null)}>
               全部
             </Button>
@@ -500,9 +543,9 @@ export default function AdminInviteTreePage() {
                   size="sm"
                   variant={rootFilter === root ? "default" : "outline"}
                   onClick={() => setRootFilter(root)}
-                  className="shrink-0"
+                  className="max-w-40 shrink-0"
                 >
-                  {node?.username || `#${root}`}
+                  <span className="truncate">{node?.username || `#${root}`}</span>
                 </Button>
               );
             })}
@@ -511,7 +554,7 @@ export default function AdminInviteTreePage() {
       )}
 
       {forest && (
-        <div className="grid gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Card><CardContent className="p-4">
             <p className="text-[11px] uppercase tracking-widest text-muted-foreground">节点</p>
             <p className="text-2xl font-bold">{visibleForest?.nodes.length ?? forest.nodes.length}</p>
@@ -567,7 +610,7 @@ export default function AdminInviteTreePage() {
             <div
               ref={containerRef}
               className="overflow-auto bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.22),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(168,85,247,0.18),transparent_28%),linear-gradient(180deg,#020617,#0f172a)]"
-              style={{ maxHeight: "70vh" }}
+              style={{ maxHeight: "min(70vh, 720px)", touchAction: "pan-x pan-y" }}
             >
               <div
                 style={{
@@ -666,7 +709,7 @@ export default function AdminInviteTreePage() {
                     const pos = placed!.positions.get(n.uid);
                     if (!pos) return null;
                     const isSelected = selectedUid === n.uid;
-                    const searchActive = query.trim().length > 0;
+                    const searchActive = deferredQuery.trim().length > 0;
                     const isMatched = matchingUIDs.has(n.uid);
                     const dimmed = searchActive && !isMatched && !isSelected;
                     const color = nodeColor(n, pos.depth);
@@ -815,6 +858,49 @@ export default function AdminInviteTreePage() {
           </div>
         </Sheet>
       )}
+
+      <Dialog
+        open={depthPrompt !== null}
+        onOpenChange={(open) => {
+          if (!open) closeDepthPrompt(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{depthPrompt?.title}</DialogTitle>
+            <DialogDescription>{depthPrompt?.description}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Input
+              type="number"
+              min={0}
+              inputMode="numeric"
+              value={depthPrompt?.value ?? "1"}
+              onChange={(event) =>
+                setDepthPrompt((current) =>
+                  current ? { ...current, value: event.target.value } : current,
+                )
+              }
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  closeDepthPrompt(depthPrompt?.value.trim() || "1");
+                }
+              }}
+            />
+            <p className="text-xs text-muted-foreground">
+              输入 0 表示整棵子树；输入 1 表示仅当前用户。
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => closeDepthPrompt(null)}>
+              取消
+            </Button>
+            <Button onClick={() => closeDepthPrompt(depthPrompt?.value.trim() || "1")}>
+              {depthPrompt?.confirmLabel ?? "确认"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </motion.div>
   );
 }

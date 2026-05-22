@@ -28,6 +28,7 @@ import {
   Network,
   Coins,
   Github,
+  ScrollText,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
@@ -82,6 +83,7 @@ export const adminNavItems: SidebarNavItem[] = [
   { href: "/admin/emby", label: "Emby 管理", icon: Server },
   { href: "/admin/scheduler", label: "定时任务", icon: TimerReset },
   { href: "/admin/config", label: "配置管理", icon: FileCode },
+  { href: "/admin/logs", label: "实时日志", icon: ScrollText },
   { href: "/admin/test", label: "服务器信息", icon: TestTube },
 ];
 

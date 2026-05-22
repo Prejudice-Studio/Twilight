@@ -6,7 +6,9 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -87,6 +89,35 @@ func TestAuthFlowAndCSRFMitigation(t *testing.T) {
 	allowed := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me", `{"email":"a@example.com"}`, []*http.Cookie{cookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if allowed.Code != http.StatusOK {
 		t.Fatalf("update status = %d body=%s", allowed.Code, allowed.Body.String())
+	}
+}
+
+func TestCredentialedCORSRequiresExplicitOrigin(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg.CORSOrigins = []string{"*"}
+
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/users/me", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Access-Control-Request-Method", "PUT")
+	rr := httptest.NewRecorder()
+	app.ServeHTTP(rr, req)
+
+	if rr.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("wildcard CORS origin was allowed: %q", rr.Header().Get("Access-Control-Allow-Origin"))
+	}
+
+	app.cfg.CORSOrigins = []string{"https://panel.example"}
+	req = httptest.NewRequest(http.MethodOptions, "/api/v1/users/me", nil)
+	req.Header.Set("Origin", "https://panel.example")
+	req.Header.Set("Access-Control-Request-Method", "PUT")
+	rr = httptest.NewRecorder()
+	app.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("explicit CORS preflight status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if rr.Header().Get("Access-Control-Allow-Origin") != "https://panel.example" {
+		t.Fatalf("explicit CORS origin not allowed: %q", rr.Header().Get("Access-Control-Allow-Origin"))
 	}
 }
 
@@ -172,6 +203,92 @@ func TestUploadRejectsNonImage(t *testing.T) {
 	}
 }
 
+func TestUploadImageExtensionWhitelist(t *testing.T) {
+	allowed := map[string]string{
+		"image/jpeg": ".jpg",
+		"image/png":  ".png",
+		"image/gif":  ".gif",
+		"image/webp": ".webp",
+		"image/bmp":  ".bmp",
+	}
+	for contentType, expectedExt := range allowed {
+		ext, ok := uploadImageExtension(contentType)
+		if !ok || ext != expectedExt {
+			t.Fatalf("uploadImageExtension(%q) = %q, %v; want %q, true", contentType, ext, ok, expectedExt)
+		}
+	}
+
+	blocked := []string{"image/svg+xml", "text/html", "application/octet-stream", ""}
+	for _, contentType := range blocked {
+		if ext, ok := uploadImageExtension(contentType); ok || ext != "" {
+			t.Fatalf("uploadImageExtension(%q) = %q, %v; want empty, false", contentType, ext, ok)
+		}
+	}
+}
+
+func TestUploadAssetPathAndFilenameSafety(t *testing.T) {
+	app := newTestApp(t)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	cookie := findCookie(login.Result().Cookies(), "twilight_session")
+
+	validName := "0123456789abcdef.png"
+	avatarDir := filepath.Join(app.cfg.UploadDir, "avatar")
+	if err := os.MkdirAll(avatarDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(avatarDir, validName), []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	valid := doJSON(app, http.MethodGet, "/api/v1/users/assets/avatar/"+validName, ``, []*http.Cookie{cookie})
+	if valid.Code != http.StatusOK {
+		t.Fatalf("valid asset status=%d body=%s", valid.Code, valid.Body.String())
+	}
+
+	invalids := []string{
+		"/api/v1/users/assets/avatar/0123456789abcdef.svg",
+		"/api/v1/users/assets/avatar/0123456789abcdeg.png",
+		"/api/v1/users/assets/avatar/%2e%2e",
+		"/api/v1/users/assets/profile/" + validName,
+	}
+	for _, path := range invalids {
+		resp := doJSON(app, http.MethodGet, path, ``, []*http.Cookie{cookie})
+		if resp.Code != http.StatusNotFound {
+			t.Fatalf("invalid asset %s status=%d body=%s", path, resp.Code, resp.Body.String())
+		}
+	}
+}
+
+func TestBackgroundConfigIsSanitized(t *testing.T) {
+	app := newTestApp(t)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	cookie := findCookie(login.Result().Cookies(), "twilight_session")
+	headers := map[string]string{"X-Twilight-Client": "webui"}
+
+	valid := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me/background", `{"lightBg":"linear-gradient(135deg, #111 0%, #222 100%)","lightBgImage":"url('/api/v1/users/assets/background/0123456789abcdef.png')","lightBlur":99,"lightOpacity":1}`, []*http.Cookie{cookie}, headers)
+	if valid.Code != http.StatusOK {
+		t.Fatalf("valid background status=%d body=%s", valid.Code, valid.Body.String())
+	}
+	var env envelope
+	if err := json.Unmarshal(valid.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	background := env.Data.(map[string]any)["background"].(string)
+	if !strings.Contains(background, `"lightBlur":30`) || !strings.Contains(background, `"lightOpacity":10`) {
+		t.Fatalf("background bounds were not enforced: %s", background)
+	}
+	blockedURL := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me/background", `{"lightBgImage":"http://127.0.0.1/private.png"}`, []*http.Cookie{cookie}, headers)
+	if blockedURL.Code != http.StatusBadRequest {
+		t.Fatalf("external background URL status=%d body=%s", blockedURL.Code, blockedURL.Body.String())
+	}
+	blockedCSS := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me/background", `{"lightBg":"linear-gradient(red, blue);background:url(http://127.0.0.1/x)"}`, []*http.Cookie{cookie}, headers)
+	if blockedCSS.Code != http.StatusBadRequest {
+		t.Fatalf("unsafe background CSS status=%d body=%s", blockedCSS.Code, blockedCSS.Body.String())
+	}
+}
+
 func TestRegcodeInviteMediaAndSecurityFlows(t *testing.T) {
 	app := newTestApp(t)
 	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
@@ -202,6 +319,20 @@ func TestRegcodeInviteMediaAndSecurityFlows(t *testing.T) {
 	if used.Code != http.StatusOK {
 		t.Fatalf("use code status=%d body=%s", used.Code, used.Body.String())
 	}
+	batchCodes := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/regcodes", `{"type":1,"days":3,"count":2,"random_algorithm":"hex20"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	if batchCodes.Code != http.StatusOK {
+		t.Fatalf("create batch regcodes status=%d body=%s", batchCodes.Code, batchCodes.Body.String())
+	}
+	var batchEnv envelope
+	if err := json.Unmarshal(batchCodes.Body.Bytes(), &batchEnv); err != nil {
+		t.Fatal(err)
+	}
+	rawBatchCodes := batchEnv.Data.(map[string]any)["codes"].([]any)
+	deletePayload := `{"codes":["` + rawBatchCodes[0].(string) + `","` + rawBatchCodes[1].(string) + `","missing-code"]}`
+	batchDelete := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/regcodes/batch-delete", deletePayload, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	if batchDelete.Code != http.StatusOK || !strings.Contains(batchDelete.Body.String(), `"deleted":2`) || !strings.Contains(batchDelete.Body.String(), `"missing":1`) {
+		t.Fatalf("batch delete regcodes status=%d body=%s", batchDelete.Code, batchDelete.Body.String())
+	}
 
 	invite := doJSONWithHeaders(app, http.MethodPost, "/api/v1/invite/codes", `{"days":7}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if invite.Code != http.StatusCreated {
@@ -215,6 +346,18 @@ func TestRegcodeInviteMediaAndSecurityFlows(t *testing.T) {
 	media := doJSONWithHeaders(app, http.MethodPost, "/api/v1/media/request", `{"source":"tmdb","media_id":550,"title":"Fight Club","media_type":"movie"}`, []*http.Cookie{userCookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if media.Code != http.StatusCreated || !strings.Contains(media.Body.String(), "require_key") {
 		t.Fatalf("media status=%d body=%s", media.Code, media.Body.String())
+	}
+	userRequests := app.store.ListMediaRequests(user.UID, false)
+	if len(userRequests) != 1 {
+		t.Fatalf("expected one media request, got %d", len(userRequests))
+	}
+	userStatusUpdate := doJSONWithHeaders(app, http.MethodPut, "/api/v1/media/request/"+strconv.FormatInt(userRequests[0].ID, 10)+"/status", `{"status":"accepted"}`, []*http.Cookie{userCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	if userStatusUpdate.Code != http.StatusForbidden {
+		t.Fatalf("user status update should be forbidden, status=%d body=%s", userStatusUpdate.Code, userStatusUpdate.Body.String())
+	}
+	adminStatusUpdate := doJSONWithHeaders(app, http.MethodPut, "/api/v1/admin/media-requests/"+strconv.FormatInt(userRequests[0].ID, 10), `{"status":"accepted"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	if adminStatusUpdate.Code != http.StatusOK || !strings.Contains(adminStatusUpdate.Body.String(), `"status":"accepted"`) {
+		t.Fatalf("admin status update status=%d body=%s", adminStatusUpdate.Code, adminStatusUpdate.Body.String())
 	}
 	adminReqs := doJSONWithHeaders(app, http.MethodGet, "/api/v1/admin/media-requests?status=all", ``, []*http.Cookie{adminCookie}, nil)
 	if adminReqs.Code != http.StatusOK || !strings.Contains(adminReqs.Body.String(), "Fight Club") {
@@ -267,6 +410,72 @@ func TestSystemUpdateRejectsUnsafeRepoURL(t *testing.T) {
 	resp := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/update", `{"repo_url":"https://user:pass@example.com/repo.git","branch":"main"}`, []*http.Cookie{cookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if resp.Code != http.StatusBadRequest {
 		t.Fatalf("unsafe update URL status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestRuntimeLogsRequireAdminAndRedactSecrets(t *testing.T) {
+	app := newTestApp(t)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
+	adminLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	adminCookie := findCookie(adminLogin.Result().Cookies(), "twilight_session")
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"user","password":"user123456"}`, nil)
+	userLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"user","password":"user123456"}`, nil)
+	userCookie := findCookie(userLogin.Result().Cookies(), "twilight_session")
+
+	unauth := doJSON(app, http.MethodGet, "/api/v1/system/admin/runtime/logs", ``, nil)
+	if unauth.Code != http.StatusUnauthorized {
+		t.Fatalf("runtime logs unauth = %d body=%s", unauth.Code, unauth.Body.String())
+	}
+	forbidden := doJSON(app, http.MethodGet, "/api/v1/system/admin/runtime/status", ``, []*http.Cookie{userCookie})
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("runtime status user = %d body=%s", forbidden.Code, forbidden.Body.String())
+	}
+	adminStatus := doJSON(app, http.MethodGet, "/api/v1/system/admin/runtime/status", ``, []*http.Cookie{adminCookie})
+	if adminStatus.Code != http.StatusOK || !strings.Contains(adminStatus.Body.String(), `"goroutines"`) {
+		t.Fatalf("runtime status admin = %d body=%s", adminStatus.Code, adminStatus.Body.String())
+	}
+	redacted := redactSensitiveText("Authorization: Bearer abcdefghijklmnopqrstuvwxyz api_key=123456789012345")
+	if strings.Contains(redacted, "abcdefghijklmnopqrstuvwxyz") || strings.Contains(redacted, "123456789012345") {
+		t.Fatalf("secret was not redacted: %s", redacted)
+	}
+	for _, key := range []string{"apiKey", "api-key", "authorization", "postgres_dsn", "bot.token"} {
+		if !sensitiveLogKey(key) {
+			t.Fatalf("sensitive log key was not detected: %s", key)
+		}
+	}
+}
+
+func TestDemoEndpointsAreReadonlyAndValidateActions(t *testing.T) {
+	app := newTestApp(t)
+	media := doJSON(app, http.MethodGet, "/api/v1/demo/media/search?q=dune", ``, nil)
+	if media.Code != http.StatusOK || !strings.Contains(media.Body.String(), "Dune") || !strings.Contains(media.Body.String(), `"readonly":true`) {
+		t.Fatalf("demo media status=%d body=%s", media.Code, media.Body.String())
+	}
+	if media.Header().Get("Cache-Control") != "no-store" || media.Header().Get("X-Twilight-Demo") != "true" {
+		t.Fatalf("demo headers missing: cache=%q demo=%q", media.Header().Get("Cache-Control"), media.Header().Get("X-Twilight-Demo"))
+	}
+	valid := doJSON(app, http.MethodPost, "/api/v1/demo/action/media-request", ``, nil)
+	if valid.Code != http.StatusOK || !strings.Contains(valid.Body.String(), `"mutated":false`) {
+		t.Fatalf("demo action status=%d body=%s", valid.Code, valid.Body.String())
+	}
+	invalid := doJSON(app, http.MethodPost, "/api/v1/demo/action/bad%0Aname", ``, nil)
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid demo action status=%d body=%s", invalid.Code, invalid.Body.String())
+	}
+}
+
+func TestSystemUpdateValidationHelpers(t *testing.T) {
+	if _, err := validateUpdateBranch("../main"); err == nil {
+		t.Fatal("expected traversal branch to be rejected")
+	}
+	if _, err := validateUpdateRepoURL("https://user:pass@example.com/repo.git"); err == nil {
+		t.Fatal("expected credentialed repo URL to be rejected")
+	}
+	if _, err := validateUpdateRepoURL("https://example.com/repo.git?token=secret"); err == nil {
+		t.Fatal("expected query-bearing repo URL to be rejected")
+	}
+	if !systemdServicePattern.MatchString("twilight-scheduler") || systemdServicePattern.MatchString("twilight;reboot") {
+		t.Fatal("systemd service name validator is too loose or too strict")
 	}
 }
 
@@ -333,9 +542,19 @@ func TestDatabaseAdminBackupRestoreAndAuth(t *testing.T) {
 	if _, ok := app.store.FindUserByUsername("extra"); !ok {
 		t.Fatal("expected extra user before restore")
 	}
-	restore := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/restore", `{"name":"`+backupName+`"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	restorePreview := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/restore", `{"name":"`+backupName+`"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	if restorePreview.Code != http.StatusOK || !strings.Contains(restorePreview.Body.String(), `"requires_confirmation":true`) {
+		t.Fatalf("restore preview status=%d body=%s", restorePreview.Code, restorePreview.Body.String())
+	}
+	if _, ok := app.store.FindUserByUsername("extra"); !ok {
+		t.Fatal("restore preview mutated state")
+	}
+	restore := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/restore", `{"name":"`+backupName+`","confirm":"RESTORE_DATABASE_BACKUP"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if restore.Code != http.StatusOK {
 		t.Fatalf("restore status=%d body=%s", restore.Code, restore.Body.String())
+	}
+	if !strings.Contains(restore.Body.String(), `"pre_operation_backup"`) {
+		t.Fatalf("restore did not report pre-operation backup body=%s", restore.Body.String())
 	}
 	if _, ok := app.store.FindUserByUsername("extra"); ok {
 		t.Fatal("restore did not replace state")
@@ -347,6 +566,28 @@ func TestDatabaseAdminBackupRestoreAndAuth(t *testing.T) {
 	migrate := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","dry_run":true}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if migrate.Code != http.StatusOK || !strings.Contains(migrate.Body.String(), `"dry_run":true`) {
 		t.Fatalf("migrate dry-run status=%d body=%s", migrate.Code, migrate.Body.String())
+	}
+	migrateNoConfirm := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","state_file":"migrated.json"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	if migrateNoConfirm.Code != http.StatusOK || !strings.Contains(migrateNoConfirm.Body.String(), `"requires_confirmation":true`) || !strings.Contains(migrateNoConfirm.Body.String(), `"dry_run":true`) {
+		t.Fatalf("migrate without confirm status=%d body=%s", migrateNoConfirm.Code, migrateNoConfirm.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(app.cfg.DatabaseDir, "migrated.json")); err == nil {
+		t.Fatal("migrate without confirm wrote target file")
+	}
+	migrateExecute := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","state_file":"migrated.json","confirm":"MIGRATE_DATABASE"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	if migrateExecute.Code != http.StatusOK || !strings.Contains(migrateExecute.Body.String(), `"pre_operation_backup"`) {
+		t.Fatalf("migrate execute status=%d body=%s", migrateExecute.Code, migrateExecute.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(app.cfg.DatabaseDir, "migrated.json")); err != nil {
+		t.Fatalf("migrate with confirm did not write target file: %v", err)
+	}
+	migrateTraversal := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","state_file":"../outside.json","dry_run":true}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	if migrateTraversal.Code != http.StatusBadRequest {
+		t.Fatalf("migrate traversal status=%d body=%s", migrateTraversal.Code, migrateTraversal.Body.String())
+	}
+	migrateWrongType := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","state_file":"state.txt","dry_run":true}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	if migrateWrongType.Code != http.StatusBadRequest {
+		t.Fatalf("migrate wrong type status=%d body=%s", migrateWrongType.Code, migrateWrongType.Body.String())
 	}
 }
 

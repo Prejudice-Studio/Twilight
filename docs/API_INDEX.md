@@ -103,6 +103,15 @@
 | GET | `/system/config` | User | 用户可见配置 |
 | GET | `/system/admin/config` | Admin | 管理员完整配置 |
 | GET | `/system/admin/stats` | Admin | 管理统计 |
+| GET | `/system/admin/runtime/status` | Admin | Go 进程、主机、数据库和内存状态 |
+| GET | `/system/admin/runtime/logs` | Admin | 读取后端内存日志快照 |
+| GET | `/system/admin/runtime/logs/stream` | Admin | SSE 实时后端日志流 |
+| POST | `/system/admin/update` | Admin | Git 自动更新与可选 systemd 重启调度 |
+| GET | `/system/admin/database/status` | Admin | 当前数据库状态 |
+| GET | `/system/admin/database/backups` | Admin | 数据库备份列表 |
+| POST | `/system/admin/database/backup` | Admin | 创建数据库备份 |
+| POST | `/system/admin/database/restore` | Admin | 从受控备份恢复数据库 |
+| POST | `/system/admin/database/migrate` | Admin | 数据库迁移预检/执行 |
 | GET | `/system/admin/config/toml` | Admin | 读取 TOML 配置 |
 | PUT | `/system/admin/config/toml` | Admin | 保存 TOML 配置 |
 | GET | `/system/admin/config/schema` | Admin | 配置表单 schema |
@@ -295,7 +304,7 @@
 | GET | `/demo/admin/users` | Public | TestWeb 演示用户列表 |
 | GET | `/demo/admin/regcodes` | Public | TestWeb 演示注册码列表 |
 | GET | `/demo/media/search` | Public | TestWeb 演示媒体搜索 |
-| POST/PUT/DELETE | `/demo/action/{action_name}` | Public | TestWeb 演示写操作模拟结果；忽略请求体，不执行真实操作 |
+| POST/PUT/DELETE | `/demo/action/{action_name}` | Public | TestWeb 演示写操作模拟结果；动作名白名单校验，忽略请求体，不执行真实操作 |
 
 ## API Key
 

@@ -27,6 +27,7 @@ import {
 import { CheckCircle2, DatabaseZap, Eye, Lock, PlayCircle, RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
+const SAFE_DEMO_ACTION = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 
 interface DemoMetric {
   label: string;
@@ -79,8 +80,10 @@ const fallbackDemoData: DemoData = {
 };
 
 async function postDemoAction(action: string) {
+  if (!SAFE_DEMO_ACTION.test(action)) return;
   await fetch(`${API_BASE}/api/v1/demo/action/${encodeURIComponent(action)}`, {
     method: "POST",
+    cache: "no-store",
     credentials: "omit",
   }).catch(() => undefined);
 }
@@ -129,7 +132,7 @@ function DemoSidebar({ role, nav, active, setActive }: { role: DemoRole; nav: De
             <Lock className="h-4 w-4 text-emerald-500" />
             安全演示模式
           </div>
-          本页面不读取 token、不调用 API、不连接真实后端数据。
+          本页面不读取 token，只调用 /api/v1/demo 只读模拟接口。
         </div>
       </div>
     </aside>
@@ -239,15 +242,15 @@ function UserPanel({ active, data }: { active: string; data: DemoData }) {
 function AdminPanel({ active, data }: { active: string; data: DemoData }) {
   if (active === "users") {
     return (
-      <Card><CardHeader><CardTitle>用户管理</CardTitle><CardDescription>包含注册队列清理与授权演示。</CardDescription></CardHeader><CardContent className="space-y-3">{data.users.map((u) => <div key={u.uid} className="grid gap-2 rounded-xl border p-3 text-sm md:grid-cols-[60px_1fr_100px_100px_100px_auto]"><span>#{u.uid}</span><b>{u.username}</b><Badge variant="outline">{u.role}</Badge><Badge variant={u.active ? "success" : "destructive"}>{u.active ? "启用" : "禁用"}</Badge><Badge variant={statusVariant(u.emby)}>{u.emby}</Badge><Button size="sm" variant="outline" onClick={() => void postDemoAction("admin-user")}>模拟操作</Button></div>)}<div className="flex flex-wrap gap-2 pt-2"><Button onClick={() => void postDemoAction("clear-registration-queue")}>清理注册队列</Button><Button variant="secondary" onClick={() => void postDemoAction("grant-registration-entitlement")}>队列用户授权并清理</Button></div></CardContent></Card>
+          <Card><CardHeader><CardTitle>用户管理</CardTitle><CardDescription>包含注册队列清理与授权演示。</CardDescription></CardHeader><CardContent className="space-y-3">{data.users.map((u) => <div key={u.uid} className="grid min-w-0 gap-2 rounded-xl border p-3 text-sm md:grid-cols-[60px_minmax(0,1fr)_100px_100px_100px_auto]"><span>#{u.uid}</span><b className="break-all">{u.username}</b><Badge variant="outline">{u.role}</Badge><Badge variant={u.active ? "success" : "destructive"}>{u.active ? "启用" : "禁用"}</Badge><Badge variant={statusVariant(u.emby)}>{u.emby}</Badge><Button size="sm" variant="outline" onClick={() => void postDemoAction("admin-user")}>模拟操作</Button></div>)}<div className="flex flex-wrap gap-2 pt-2"><Button onClick={() => void postDemoAction("clear-registration-queue")}>清理注册队列</Button><Button variant="secondary" onClick={() => void postDemoAction("grant-registration-entitlement")}>队列用户授权并清理</Button></div></CardContent></Card>
     );
   }
   if (active === "regcodes") {
-    return <Card><CardHeader><CardTitle>注册码管理</CardTitle><CardDescription>模拟展示注册码、续期码、白名单码，不会创建或删除真实卡码。</CardDescription></CardHeader><CardContent className="space-y-3">{data.regcodes.map((code) => <div key={code.code} className="grid gap-2 rounded-xl border p-3 text-sm md:grid-cols-[1fr_90px_90px_120px_auto]"><code>{code.code}</code><Badge variant="outline">{code.type_name}</Badge><Badge variant={statusVariant(code.status)}>{code.status}</Badge><span>{code.days <= 0 ? "永久" : `${code.days} 天`}</span><Button size="sm" variant="outline" onClick={() => void postDemoAction("regcode-copy")}>模拟操作</Button></div>)}</CardContent></Card>;
+    return <Card><CardHeader><CardTitle>注册码管理</CardTitle><CardDescription>模拟展示注册码、续期码、白名单码，不会创建或删除真实卡码。</CardDescription></CardHeader><CardContent className="space-y-3">{data.regcodes.map((code) => <div key={code.code} className="grid min-w-0 gap-2 rounded-xl border p-3 text-sm md:grid-cols-[minmax(0,1fr)_90px_90px_120px_auto]"><code className="break-all">{code.code}</code><Badge variant="outline">{code.type_name}</Badge><Badge variant={statusVariant(code.status)}>{code.status}</Badge><span>{code.days <= 0 ? "永久" : `${code.days} 天`}</span><Button size="sm" variant="outline" onClick={() => void postDemoAction("regcode-copy")}>模拟操作</Button></div>)}</CardContent></Card>;
   }
   if (active === "scheduler") {
     return (
-      <Card><CardHeader><CardTitle>定时任务</CardTitle><CardDescription>历史运行可展开查看每次日志。</CardDescription></CardHeader><CardContent className="space-y-3">{data.scheduler_runs.map((run) => <details key={run.name} className="rounded-xl border p-3"><summary className="flex cursor-pointer items-center justify-between"><span className="font-semibold">{run.name}</span><span className="flex items-center gap-2"><Badge variant={statusVariant(run.status)}>{run.status}</Badge><span className="text-xs text-muted-foreground">{run.time}</span></span></summary><pre className="mt-3 rounded-lg bg-muted p-3 text-xs">{run.logs.join("\n")}</pre></details>)}</CardContent></Card>
+      <Card><CardHeader><CardTitle>定时任务</CardTitle><CardDescription>历史运行可展开查看每次日志。</CardDescription></CardHeader><CardContent className="space-y-3">{data.scheduler_runs.map((run) => <details key={run.name} className="rounded-xl border p-3"><summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2"><span className="font-semibold">{run.name}</span><span className="flex items-center gap-2"><Badge variant={statusVariant(run.status)}>{run.status}</Badge><span className="text-xs text-muted-foreground">{run.time}</span></span></summary><pre className="mt-3 overflow-x-auto rounded-lg bg-muted p-3 text-xs">{run.logs.join("\n")}</pre></details>)}</CardContent></Card>
     );
   }
   if (active === "requests") {
@@ -275,7 +278,7 @@ export function TestWebDemo({ role }: { role: DemoRole }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API_BASE}/api/v1/demo/bootstrap?role=${role}`, { credentials: "omit" })
+    fetch(`${API_BASE}/api/v1/demo/bootstrap?role=${role}`, { cache: "no-store", credentials: "omit" })
       .then((res) => res.json())
       .then((res) => {
         if (!cancelled && res?.success && res.data) {
@@ -296,7 +299,7 @@ export function TestWebDemo({ role }: { role: DemoRole }) {
           <DemoHeader role={role} activeLabel={activeLabel} />
           <main className="mx-auto max-w-7xl space-y-4 p-4 md:p-6">
             <div className="flex gap-2 overflow-x-auto pb-1 lg:hidden">
-              {nav.map((item) => <Button key={item.key} size="sm" variant={active === item.key ? "default" : "outline"} onClick={() => setActive(item.key)}><item.icon className="mr-1.5 h-4 w-4" />{item.label}</Button>)}
+              {nav.map((item) => <Button key={item.key} size="sm" variant={active === item.key ? "default" : "outline"} className="shrink-0" onClick={() => setActive(item.key)}><item.icon className="mr-1.5 h-4 w-4" />{item.label}</Button>)}
             </div>
             <motion.div key={active} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18 }}>
               {role === "admin" ? <AdminPanel active={active} data={data} /> : <UserPanel active={active} data={data} />}

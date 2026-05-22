@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -40,7 +41,7 @@ func run(args []string) error {
 	case "bot":
 		return runBot(args[2:])
 	case "version", "--version", "-v":
-		fmt.Println("Twilight Go Backend 0.1.0")
+		fmt.Println("Twilight Go Backend 0.0.4")
 		return nil
 	case "help", "--help", "-h":
 		printHelp()
@@ -59,9 +60,11 @@ func runAPI(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	logLevel := slog.LevelInfo
 	if *debug {
-		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
+		logLevel = slog.LevelDebug
 	}
+	api.InstallRuntimeLogger(os.Stdout, logLevel)
 
 	cfg, err := config.Load(*configFile)
 	if err != nil {
@@ -118,9 +121,11 @@ func runAPI(args []string) error {
 
 func runScheduler(args []string) error {
 	fs := flag.NewFlagSet("scheduler", flag.ContinueOnError)
+	_ = fs.String("config", "", "config file path")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	api.InstallRuntimeLogger(os.Stdout, slog.LevelInfo)
 	slog.Info("scheduler mode is built into the Go backend; background jobs are exposed through /api/v1/admin/scheduler/jobs")
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -134,9 +139,17 @@ func runBot(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	api.InstallRuntimeLogger(os.Stdout, slog.LevelInfo)
 	cfg, err := config.Load(*configFile)
 	if err != nil {
 		return err
+	}
+	if !cfg.TelegramMode || strings.TrimSpace(cfg.TelegramBotToken) == "" {
+		slog.Info("Telegram bot mode is disabled or bot token is not configured; waiting for shutdown")
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		<-ctx.Done()
+		return nil
 	}
 	state, err := openStore(context.Background(), cfg)
 	if err != nil {

@@ -4,8 +4,8 @@
 
 ## 上传资源
 
-- `uploads` 目录不再作为 Flask 静态目录直接暴露。
-- 用户头像和背景图统一通过 `/api/v1/users/assets/{avatars|backgrounds}/{filename}` 读取。
+- `uploads` 目录不再作为旧后端静态目录直接暴露。
+- 用户头像和背景图统一通过 `/api/v1/users/assets/{avatar|background}/{filename}` 读取。
 - 资源接口要求登录，并校验文件名、目录、MIME 与用户引用关系。
 - 上传返回受控 API URL；历史 `/uploads/...` 数据在读取时会自动改写为受控 URL。
 - 新增定时任务 `cleanup_unused_uploads`，清理未被用户头像/背景引用的上传图片，保留 24 小时新文件宽限期。
@@ -13,8 +13,9 @@
 ## 背景 CSS
 
 - 背景图片 URL 写入时会拦截内网、回环、链路本地和云元数据地址。
-- CSS 背景函数仅允许渐变类函数，避免 `paint()`、`element()`、`image-set()` 等复杂函数扩大攻击面。
-- 前端会丢弃不安全 URL scheme，避免 `javascript:`、非图片 `data:` 等被写入样式或图片源。
+- CSS 背景函数仅允许渐变类函数，避免 `paint()`、`element()`、`image-set()`、`url()` 等复杂函数扩大攻击面。
+- 后端保存背景配置时只允许本系统上传的 `/api/v1/users/assets/background/{filename}` 资源，不保存任意外部 URL。
+- 前端会丢弃不安全 URL scheme，避免 `javascript:`、非图片 `data:` 或跨域绝对地址被写入样式或图片源。
 
 ## 注册队列
 
@@ -39,4 +40,6 @@
 - 不要在反代层直接公开 `uploads` 目录。
 - `SERVER_ICON` 可以配置本地图片路径；若路径无效或非图片，公开信息不会返回该路径。
 - 保持 `CORS_ORIGINS` 为明确域名列表，避免生产环境使用 `*`。
+- PostgreSQL 生产部署优先使用独立用户和最小权限数据库；低配环境先保持较小连接池，确认负载后再调大。
+- 标准 Node/1Panel 前端部署禁用 Next 图片优化器，避免服务端代拉任意远程图片 URL。
 - 如果部署多进程 worker，Emby 注册队列仍是单进程内队列；强一致名额控制仍应依赖数据库与业务锁兜底。

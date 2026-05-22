@@ -366,6 +366,22 @@ CREATE TABLE IF NOT EXISTS twilight_state (
 	return st, nil
 }
 
+func CheckPostgres(ctx context.Context, dsn string) error {
+	dsn = strings.TrimSpace(dsn)
+	if dsn == "" {
+		return fmt.Errorf("postgres dsn is empty")
+	}
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(0)
+	db.SetConnMaxLifetime(30 * time.Second)
+	return db.PingContext(ctx)
+}
+
 func (s *Store) Close() error {
 	if s == nil || s.db == nil {
 		return nil
@@ -576,11 +592,14 @@ func ListBackups(dir string) ([]BackupInfo, error) {
 	}
 	backups := make([]BackupInfo, 0, len(entries))
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".json") {
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || !strings.HasSuffix(strings.ToLower(entry.Name()), ".json") {
 			continue
 		}
 		info, err := entry.Info()
 		if err != nil {
+			continue
+		}
+		if !info.Mode().IsRegular() {
 			continue
 		}
 		backups = append(backups, BackupInfo{
@@ -617,6 +636,13 @@ func ResolveBackupPath(dir, name string) (string, error) {
 		return "", err
 	}
 	if filepath.Dir(target) != base {
+		return "", ErrNotFound
+	}
+	info, err := os.Lstat(target)
+	if err != nil {
+		return "", ErrNotFound
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 		return "", ErrNotFound
 	}
 	return target, nil
@@ -1187,6 +1213,29 @@ func (s *Store) DeleteRegCode(code string) error {
 	}
 	delete(s.state.RegCodes, code)
 	return s.saveLocked()
+}
+
+func (s *Store) DeleteRegCodes(codes []string) (deleted []string, missing []string, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seen := map[string]bool{}
+	for _, code := range codes {
+		code = strings.TrimSpace(code)
+		if code == "" || seen[code] {
+			continue
+		}
+		seen[code] = true
+		if _, ok := s.state.RegCodes[code]; !ok {
+			missing = append(missing, code)
+			continue
+		}
+		delete(s.state.RegCodes, code)
+		deleted = append(deleted, code)
+	}
+	if len(deleted) == 0 {
+		return deleted, missing, nil
+	}
+	return deleted, missing, s.saveLocked()
 }
 
 func (s *Store) Signin(uid int64) Signin {

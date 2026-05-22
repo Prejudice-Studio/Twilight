@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -361,7 +360,10 @@ func (a *App) applyCORS(w http.ResponseWriter, r *http.Request) bool {
 	}
 	allowed := false
 	for _, candidate := range a.cfg.CORSOrigins {
-		if candidate == "*" || strings.EqualFold(candidate, origin) {
+		if candidate == "*" {
+			continue
+		}
+		if strings.EqualFold(candidate, origin) {
 			allowed = true
 			break
 		}
@@ -596,16 +598,6 @@ func maskAPIKey(key string) (prefix, suffix, masked string) {
 	prefix = key[:12]
 	suffix = key[len(key)-6:]
 	return prefix, suffix, prefix + "..." + suffix
-}
-
-func extFromContentType(contentType string) string {
-	if contentType == "" {
-		return ".bin"
-	}
-	if exts, err := mime.ExtensionsByType(contentType); err == nil && len(exts) > 0 {
-		return exts[0]
-	}
-	return ".bin"
 }
 
 func statusFromError(w http.ResponseWriter, err error) bool {

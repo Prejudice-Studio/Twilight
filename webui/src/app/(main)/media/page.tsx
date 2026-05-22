@@ -458,13 +458,13 @@ export default function MediaPage() {
   return (
     <div className="space-y-8 pb-10">
       <div className="flex flex-col gap-2">
-        <h1 className="text-4xl font-black tracking-tighter text-foreground">媒体搜索</h1>
+        <h1 className="text-3xl font-black tracking-tighter text-foreground sm:text-4xl">媒体搜索</h1>
         <p className="text-muted-foreground font-medium">寻找你心仪的作品，我们为你带回家</p>
       </div>
 
       {/* Navigation Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full max-w-[400px] grid-cols-2 p-1.5 glass-frosted rounded-2xl mb-8">
+        <TabsList className="mb-8 grid w-full grid-cols-2 rounded-2xl p-1.5 glass-frosted sm:max-w-[400px]">
           <TabsTrigger value="search" className="gap-2 rounded-xl py-2 font-bold data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md">
             <Search className="h-4 w-4" />
             媒体搜索
@@ -483,16 +483,16 @@ export default function MediaPage() {
                 {/* 搜索模式切换 */}
                 <div className="flex items-center gap-4 flex-wrap">
                   <span className="text-xs font-black uppercase tracking-widest text-muted-foreground">Search Mode</span>
-                  <div className="flex p-1 bg-secondary rounded-xl">
+                  <div className="grid w-full grid-cols-2 rounded-xl bg-secondary p-1 sm:w-auto">
                     <button 
                       onClick={() => setSearchMode("name")}
-                      className={cn("px-4 py-1.5 rounded-lg text-xs font-bold transition-all", searchMode === "name" ? "bg-white text-primary shadow-sm dark:bg-slate-950/80 dark:text-primary-foreground" : "text-muted-foreground")}
+                      className={cn("rounded-lg px-3 py-1.5 text-xs font-bold transition-all sm:px-4", searchMode === "name" ? "bg-white text-primary shadow-sm dark:bg-slate-950/80 dark:text-primary-foreground" : "text-muted-foreground")}
                     >
                       名称搜索
                     </button>
                     <button 
                       onClick={() => setSearchMode("id")}
-                      className={cn("px-4 py-1.5 rounded-lg text-xs font-bold transition-all", searchMode === "id" ? "bg-white text-primary shadow-sm dark:bg-slate-950/80 dark:text-primary-foreground" : "text-muted-foreground")}
+                      className={cn("rounded-lg px-3 py-1.5 text-xs font-bold transition-all sm:px-4", searchMode === "id" ? "bg-white text-primary shadow-sm dark:bg-slate-950/80 dark:text-primary-foreground" : "text-muted-foreground")}
                     >
                       ID 搜索
                     </button>
@@ -506,7 +506,7 @@ export default function MediaPage() {
                 </div>
 
                 {/* 搜索输入区域 */}
-                <div className="flex flex-col gap-4 lg:flex-row items-stretch">
+                <div className="flex min-w-0 flex-col items-stretch gap-4 lg:flex-row">
                   <div className="relative flex-1 group">
                     <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-primary" />
                     <Input
@@ -522,47 +522,47 @@ export default function MediaPage() {
                     />
                   </div>
                   
-                  <div className="flex gap-2 p-1 bg-white/40 backdrop-blur-md rounded-[1.25rem] border border-white/50 dark:border-slate-700/70 dark:bg-slate-950/30">
+                  <div className="flex w-full gap-2 rounded-[1.25rem] border border-white/50 bg-white/40 p-1 backdrop-blur-md dark:border-slate-700/70 dark:bg-slate-950/30 sm:w-auto">
                     {searchMode === "name" && (
                       <button 
                         onClick={() => setSource("all")}
-                        className={cn("px-6 rounded-xl font-bold text-sm transition-all", source === "all" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent")}
+                        className={cn("min-w-0 flex-1 rounded-xl px-3 text-sm font-bold transition-all sm:flex-none sm:px-6", source === "all" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent")}
                       >
                         全部
                       </button>
                     )}
                     <button 
                       onClick={() => setSource("tmdb")}
-                      className={cn("px-6 rounded-xl font-bold text-sm transition-all", source === "tmdb" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent")}
+                      className={cn("min-w-0 flex-1 rounded-xl px-3 text-sm font-bold transition-all sm:flex-none sm:px-6", source === "tmdb" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent")}
                     >
                       TMDB
                     </button>
                     <button 
                       onClick={() => setSource("bangumi")}
-                      className={cn("px-6 rounded-xl font-bold text-sm transition-all", source === "bangumi" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent")}
+                      className={cn("min-w-0 flex-1 rounded-xl px-3 text-sm font-bold transition-all sm:flex-none sm:px-6", source === "bangumi" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent")}
                     >
                       Bangumi
                     </button>
                   </div>
 
                   {searchMode === "id" && source === "tmdb" && (
-                    <div className="flex p-1 bg-white/40 backdrop-blur-md rounded-[1.25rem] border border-white/50 dark:border-slate-700/70 dark:bg-slate-950/30">
+                    <div className="flex w-full gap-2 rounded-[1.25rem] border border-white/50 bg-white/40 p-1 backdrop-blur-md dark:border-slate-700/70 dark:bg-slate-950/30 sm:w-auto">
                       <button 
                         onClick={() => setMediaType("movie")}
-                        className={cn("px-6 rounded-xl font-bold text-sm transition-all", mediaType === "movie" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent")}
+                        className={cn("flex-1 rounded-xl px-3 text-sm font-bold transition-all sm:flex-none sm:px-6", mediaType === "movie" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent")}
                       >
                         电影
                       </button>
                       <button 
                         onClick={() => setMediaType("tv")}
-                        className={cn("px-6 rounded-xl font-bold text-sm transition-all", mediaType === "tv" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent")}
+                        className={cn("flex-1 rounded-xl px-3 text-sm font-bold transition-all sm:flex-none sm:px-6", mediaType === "tv" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent")}
                       >
                         剧集
                       </button>
                     </div>
                   )}
                   
-                  <Button onClick={handleSearch} disabled={isSearching} className="h-14 px-8 rounded-[1.25rem] shadow-xl shadow-primary/20 active:scale-95 transition-all">
+                  <Button onClick={handleSearch} disabled={isSearching} className="h-14 w-full rounded-[1.25rem] px-8 shadow-xl shadow-primary/20 transition-all active:scale-95 lg:w-auto">
                     {isSearching ? (
                       <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                     ) : (

@@ -104,10 +104,13 @@
   body {
     @apply bg-background text-foreground;
     min-height: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
   }
 
   body {
     @apply antialiased;
+    min-width: 0;
     color-scheme: light;
     font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
     background-image:
@@ -124,6 +127,9 @@
   .app-shell {
     position: relative;
     isolation: isolate;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: clip;
   }
 
   .shell-glow {
@@ -149,6 +155,8 @@
 
   .section-surface {
     min-height: calc(100dvh - 120px);
+    min-width: 0;
+    max-width: 100%;
     border-radius: 1.25rem;
     border: 1px solid hsl(var(--border) / 0.7);
     background: hsl(var(--card) / 0.72);
@@ -160,6 +168,14 @@
     .section-surface {
       padding: 1.25rem;
       border-radius: 1.5rem;
+    }
+  }
+
+  @media (max-width: 639px) {
+    .section-surface {
+      min-height: calc(100dvh - 96px);
+      border-radius: 1rem;
+      padding: 0.65rem;
     }
   }
 
@@ -178,14 +194,23 @@
 
   .header-surface {
     display: flex;
+    min-width: 0;
     min-height: 68px;
     align-items: center;
     justify-content: space-between;
+    gap: 0.75rem;
     border-radius: 1rem;
     border: 1px solid hsl(var(--border) / 0.7);
     background: hsl(var(--card) / 0.7);
     padding: 0.75rem 1rem;
     backdrop-filter: blur(14px);
+  }
+
+  @media (max-width: 639px) {
+    .header-surface {
+      min-height: 60px;
+      padding: 0.65rem 0.75rem;
+    }
   }
 
   .sidebar-surface {
@@ -290,6 +315,8 @@
   .glass-acrylic,
   .glass-frosted,
   .glass-liquid {
+    min-width: 0;
+    max-width: 100%;
     border: 1px solid hsl(var(--border) / 0.7);
     border-radius: 1.25rem;
     background: hsl(var(--card) / 0.68);

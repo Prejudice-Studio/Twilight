@@ -1,23 +1,136 @@
-# Version Notes
+# 版本更新历史
 
-## Go Backend Branch
+## 0.0.4 - 2026-05-22
 
-- Backend source of truth: `cmd/` and `internal/`.
-- Frontend source of truth: `webui/`.
-- Legacy backend source and dependency metadata have been removed from this branch.
+本版本将 `golang` 分支确认为 Go 后端主线版本，目标是完整承接旧后端能力、对齐前端接口，并补齐部署、数据库、安全和移动端体验。
 
-## Current Unreleased
+### 后端架构
 
-- Refactored the Go backend by feature boundary: Emby client/library/inventory, TMDB, Bangumi, media requests, invite/regcode/code use, scheduler handlers/runner, database admin, and system update now live in separate files.
-- Added PostgreSQL-compatible database migration preview details: source/target driver, snapshot size, full entity counts, target readiness, and restart/config warnings.
-- Hardened Git update and auto-update: HTTPS-only repo URLs, credential rejection, branch validation, dry-run preflight, dirty worktree refusal, redacted response metadata, and `git pull --ff-only`.
-- Updated the admin config frontend for database migration preview details and Git update safety preflight.
-- Expanded `.gitignore` for Go build/test artifacts, coverage/pprof outputs, SQLite WAL files, runtime data, frontend coverage, and deployment/test caches.
-- Documented the Go backend split, database migration/restore workflow, hot reload behavior, and update security model.
+- 将后端业务按功能域拆分，避免继续把 Emby、TMDB、Bangumi、求片、邀请、卡码、调度、数据库和系统更新逻辑混在少数大文件中。
+- `internal/api` 现在按 handler、client、service 和运维模块维护，外部服务调用统一收敛到独立客户端文件。
+- `cmd/twilight` 统一提供 `api`、`all`、`scheduler`、`bot`、`version` 子命令；Telegram 未启用时 bot 子命令安全空转，避免 systemd 重启循环。
 
-## Release Checklist
+### 数据库与迁移
 
-- Update backend version in `cmd/twilight/main.go` when cutting a release.
-- Update frontend version in `webui/package.json` and lockfiles when frontend dependencies change.
-- Run `go test ./...`.
-- Run frontend lint/build from `webui/` when UI or API client behavior changes.
+- `config.production.toml` 新增 `[Database]` PostgreSQL 配置示例，包含完整 DSN、分项连接参数、备份目录和连接池参数。
+- 新增数据库状态、备份、恢复、迁移预检和迁移执行接口，并在前端配置页提供对应入口。
+- 支持默认 JSON 状态存储和可选 PostgreSQL 存储；迁移预检会返回实体数量、快照大小、目标连通性和配置/重启告警。
+- PostgreSQL 迁移预检只做连接探测，不创建表或写入数据；实际迁移才初始化目标状态表。
+- 恢复和迁移执行前强制预览与二次确认；后端在缺少确认短语时只返回 `dry_run=true` 预览，不执行写入。
+- 恢复备份和执行迁移前都会自动创建保护性备份，并在响应中返回 `pre_operation_backup` 方便审计和回滚。
+- 备份恢复限制在备份目录内，只接受普通 `.json` 文件并拒绝符号链接。
+- JSON 迁移目标限制在数据库目录内，且必须是 `.json` 文件，防止路径穿越和错误文件类型写入。
+
+### 安全加固
+
+- 凭据型 CORS 不再接受 `*`，生产环境必须显式配置可信前端 Origin。
+- Cookie 写请求继续要求 `X-Twilight-Client: webui`，降低跨站表单和脚本误用风险。
+- 新增管理员实时日志与服务器状态接口；日志只来自 Go 进程内缓冲，不读取任意系统日志文件，并对 Token、Cookie、密码、API Key、DSN 等敏感内容做脱敏。
+- TestWeb 后端改为固定只读模拟接口，演示媒体搜索不再复用真实搜索链路，演示动作增加白名单校验、限流、`no-store` 和 `X-Twilight-Demo` 标识。
+- 用户背景配置改为后端结构化校验，只允许安全渐变表达式和本系统上传的背景资源，阻断任意外部 URL、复杂 CSS 函数和 `url()` 注入。
+- 标准前端部署禁用 Next 服务端图片优化器，避免特殊部署环境中由图片优化器代拉任意远程 URL。
+- 上传入口只允许 JPEG、PNG、GIF、WebP、BMP 这类栅格图片 MIME；读取上传资源时只接受服务端生成的白名单文件名。
+- 上传资源读取路径会重新计算绝对路径并校验仍位于上传目录内，防止路径穿越、转义路径和伪造文件名。
+- Git 更新接口仅接受不含凭据的 HTTPS 仓库 URL，校验分支名，默认拒绝脏工作区，执行前支持 `dry_run` 预检，并使用 `git pull --ff-only`；只有 commit 变化时才调度重启，优先通过 `systemd-run` 延迟重启服务。
+- Telegram Bot 账号类命令强制私聊，群聊仅保留管理员只读查询；绑定码增加格式校验，Bot 输出不展示密码、Token、Emby ID、服务器线路等敏感信息。
+
+### Linux 部署
+
+- 新增 `deploy/setup-systemd.sh`，用于 Linux 一键设置 systemd 服务。
+- 脚本会检查项目路径、配置路径、二进制路径、服务用户/组、端口、依赖命令、systemd 特殊字符和旧 Python 版 systemd 残留。
+- 检测到旧 Python unit 时会停止、禁用并备份旧服务文件，再写入 Go 版 unit。
+- systemd unit 默认指向 `bin/twilight`，并使用独立的 API、Bot、Scheduler 服务名保持向后兼容。
+
+### 前端体验
+
+- 新增管理员“实时日志”页面，可实时查看后端日志流、Go 运行时、主机负载、内存、数据库和 Redis 状态。
+- 优化移动端主布局、顶部栏、导航抽屉、配置页、注册码页、媒体页和邀请森林视图。
+- TestWeb 页面改为更明确的只读安全演示模式，并优化移动端标题、表格、日志块和横向导航的溢出表现。
+- 注册码页在移动端切换为卡片列表，桌面端保留高密度表格。
+- 配置页移动端标签改为两列网格，避免内部横向滚动。
+- 邀请森林加入更适合移动端的缩放、平移和统计布局。
+
+### 文档与维护
+
+- 文档统一以 Go 后端和 Linux 部署路径为准，移除旧平台快速启动入口。
+- 更新 Go 后端说明、安装部署、开发维护、API Key 示例、版本历史和发布检查清单。
+- `.gitignore` 扩展覆盖 Go 构建产物、前端缓存、运行数据、数据库文件、本地密钥、补丁备份和 1Panel 本地运行配置。
+
+## 0.0.3
+
+### 媒体与外部集成
+
+- 新增 Bangumi 同步流程，并对齐前端的同步状态显示。
+- 新增 Emby 媒体库自助能力，便于用户和管理员查看/选择可用媒体库。
+
+### 邀请与卡码
+
+- 支持更细粒度的邀请码行为配置。
+- 新增使用码预览能力，用户在真正消费注册码、续期码、白名单码或邀请码前可以先看到效果。
+
+### 前端兼容
+
+- 优化前端 API 错误处理，后端能力缺失或接口不匹配时给出更清晰的用户提示。
+
+### 安全与稳定性
+
+- 加强接口限流和错误响应一致性。
+- 加强 Emby 密码验证、会话检查和容量检查，降低误注册、超额使用和异常会话风险。
+
+## 0.0.2
+
+### 安全基础
+
+- 增加面向公网部署的安全修复和 Emby 容量控制。
+- 增加代理感知的客户端 IP 识别，提升反向代理部署下的限流准确性。
+- 增加 Redis 限流和会话能力，支持多实例共享状态。
+- 增加 CSRF 保护和 TestWeb 相关限流。
+
+### 数据一致性
+
+- 增加 SQLite pragma 和事务化注册流程，降低并发注册和异常退出导致的数据损坏风险。
+- 增加注册队列、过期清理、待补建 Emby 用户处理和注册权益补发工具。
+
+### 邀请与注册码
+
+- 增加根用户邀请限制和更严格的注册准入控制。
+- 增加注册码格式、随机算法、诱饵码隐藏、注册码用户查询和使用队列。
+- 支持通过注册码授予 Emby 注册权益、Emby 重置、过期处理和取消永久有效状态。
+
+### 系统更新
+
+- 增加 Git 自动更新 API 和管理端入口。
+- 增加系统自动更新和注册队列运维工具。
+
+### 文档
+
+- 补充工作流、版本操作和运维说明。
+
+## 0.0.1
+
+### 项目基础
+
+- 建立 Twilight 后端和前端基础能力，包括注册、登录、角色检查、管理员用户管理和 Emby 绑定/注册。
+- 建立 dashboard、设置、用户管理、管理员管理、注册码、邀请、Emby 操作、公告和服务信息等基础页面。
+
+### Telegram
+
+- 增加 Telegram Bot 集成、自定义 Bot 消息、群组管理员工具和相关 API 文档。
+
+### 邀请与卡码
+
+- 增加邀请码、注册码、续期码、白名单码和早期管理员运维流程。
+
+### 文档
+
+- 增加中文项目说明和生产启动指导。
+
+## 发布检查清单
+
+- 更新后端版本号：`cmd/twilight/main.go`、`internal/config/config.go`。
+- 更新前端版本号：`webui/package.json`、`webui/package-lock.json`。
+- 对变更的 Go 文件执行 `gofmt`。
+- 执行 `go test ./...`。
+- 执行 `go vet ./...`。
+- 修改前端或 API 客户端后，在 `webui/` 执行 lint 和 build。
+- 发布前扫描敏感信息、旧后端残留、路径穿越、文件类型白名单和鉴权边界。

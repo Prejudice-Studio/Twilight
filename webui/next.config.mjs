@@ -39,22 +39,15 @@ const nextConfig = {
       },
     ];
   },
-  // 允许从后端服务器加载静态资源（头像、背景图等）
+  // 禁用 Next 服务端图片优化，避免特殊部署环境中由图片优化器代拉任意远程 URL。
+  // 页面内图片组件均显式使用 unoptimized，头像/背景等资源由浏览器直接请求受控 API 或可信外部 CDN。
   images: {
-    remotePatterns: [
-      {
-        protocol: 'http',
-        hostname: '**',
-      },
-      {
-        protocol: 'https',
-        hostname: '**',
-      },
-    ],
+    unoptimized: true,
   },
 };
 
 export default nextConfig;
 
-
-import('@opennextjs/cloudflare').then(m => m.initOpenNextCloudflareForDev());
+if (process.env.TWILIGHT_OPENNEXT_DEV === 'true') {
+  import('@opennextjs/cloudflare').then((m) => m.initOpenNextCloudflareForDev());
+}

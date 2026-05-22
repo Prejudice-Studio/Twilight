@@ -323,35 +323,46 @@ curl -X POST "https://your-domain.com/api/v1/apikey/disable" \
   -d '{"reason": "违规操作"}'
 ```
 
-### 7.2 Python 示例
+### 7.2 Go 示例
 
-```python
-import requests
+```go
+package main
 
-API_BASE = "https://your-domain.com/api/v1/apikey"
-API_KEY = "key-xxxxxxxxxxxxxxxx-yyyyyyyy"
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"net/http"
+)
 
-headers = {
-    "X-API-Key": API_KEY,
-    "Content-Type": "application/json"
+const apiBase = "https://your-domain.com/api/v1/apikey"
+const apiKey = "key-xxxxxxxxxxxxxxxx-yyyyyyyy"
+
+func request(method, path, body string) ([]byte, error) {
+	req, err := http.NewRequest(method, apiBase+path, bytes.NewBufferString(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-API-Key", apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
 }
 
-response = requests.get(f"{API_BASE}/info", headers=headers)
-print(response.json())
+func main() {
+	info, _ := request(http.MethodGet, "/info", "")
+	fmt.Println(string(info))
 
-renew = requests.post(
-    f"{API_BASE}/renew",
-    headers=headers,
-    json={"days": 30}
-)
-print(renew.json())
+	renew, _ := request(http.MethodPost, "/renew", `{"days":30}`)
+	fmt.Println(string(renew))
 
-disable = requests.post(
-    f"{API_BASE}/disable",
-    headers=headers,
-    json={"reason": "违规操作"}
-)
-print(disable.json())
+	disable, _ := request(http.MethodPost, "/disable", `{"reason":"违规操作"}`)
+	fmt.Println(string(disable))
+}
 ```
 
 ### 7.3 JavaScript 示例
