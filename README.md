@@ -50,7 +50,7 @@ deploy/                 Nginx、systemd、一键安装脚本
 docs/                   中文部署、API、安全、版本历史文档
 ```
 
-Go 后端默认使用 JSON 状态文件，生产环境可切换 PostgreSQL。切换数据库前必须先在管理端执行迁移预览，确认后端会在真正迁移或恢复前自动创建保护性备份。
+Go 后端默认使用 JSON 状态文件，生产环境可切换 PostgreSQL。切换数据库前必须先在管理端执行迁移预览，确认后端会在真正迁移或恢复前自动创建保护性备份。如果配置成 PostgreSQL 但目标库仍没有管理员，同时旧 JSON 状态文件里已有 active 管理员，后端会临时回退到 JSON 状态启动，确保原管理员可以登录前端完成迁移。若只有旧 Python 版 `db/users.db`，且系统安装了 `sqlite3` 命令，Go 后端会在自身状态还没有管理员时只读导入旧库中的 active 管理员账号用于引导登录。
 
 ## 环境要求
 
@@ -100,13 +100,14 @@ sudo bash deploy/setup-systemd.sh --restart
 
 ## 配置与数据库
 
-主要配置文件为 `config.toml`，本地私密覆盖建议使用 `config.local.toml`，该文件已被 `.gitignore` 忽略。
+主要配置文件为 `config.toml`，本地私密覆盖建议使用 `config.local.toml`，该文件已被 `.gitignore` 忽略。未显式传 `--config` 时，后端优先读取当前目录 `config.toml`；如果不存在，再读取 `TWILIGHT_CONFIG_FILE` 指向的文件；配置字段最终仍可被 `TWILIGHT_*` 环境变量覆盖。
 
 数据库配置支持：
 
 ```toml
 [Database]
 driver = "json"        # json 或 postgres
+state_file = ""        # 留空时使用 <databases_dir>/twilight_go_state.json
 backup_dir = "db/backups"
 
 # PostgreSQL 可使用 url，也可拆分配置 host/user/password/database。
@@ -121,13 +122,13 @@ postgres_max_open_conns = 8
 postgres_max_idle_conns = 4
 ```
 
-数据库恢复和迁移均需要预览与二次确认。执行前后端会创建 `pre_operation_backup`，避免误操作后没有回滚点。
+数据库恢复和迁移均需要预览与二次确认。执行前后端会创建 `pre_operation_backup`，避免误操作后没有回滚点。已有 JSON 数据切换 PostgreSQL 时，先保持 JSON 能登录，进入管理端完成 PostgreSQL 迁移预检和确认后，再重启到 PostgreSQL。旧 SQLite 管理员引导只用于恢复后台入口，不会在启动时全量迁移旧业务数据。
 
 ## 安全边界
 
 生产环境至少确认以下项目：
 
-- 只允许可信前端域名写入 `cors_origins`，不要把带凭据 CORS 配成通配。
+- 只允许可信前端域名写入 `cors_origins`，不要把带凭据 CORS 配成通配；填写 Origin 时只写 `https://app.example.com` 这种协议、域名和端口，不要带路径。
 - HTTPS 部署时启用安全 Cookie：`session_cookie_secure = true`，并按反向代理情况配置 SameSite。
 - 不要直接公开 `uploads/` 目录；头像和背景图必须通过 `/api/v1/users/assets/{kind}/{filename}` 受控读取。
 - 管理接口均要求管理员鉴权，包括数据库、运行日志、Git 更新、注册码批量删除、用户批量操作和 Telegram 管理操作。

@@ -46,6 +46,7 @@ databases_dir = "db"
 
 [Database]
 driver = "postgres"
+state_file = "db/existing_state.json"
 postgres_host = "db.local"
 postgres_port = 5433
 postgres_user = "twilight"
@@ -71,12 +72,70 @@ emby_url_list = [
 	if cfg.DatabaseDriver != "postgres" || cfg.PostgresPort != 5433 || cfg.PostgresMaxOpenConns != 16 || cfg.PostgresMaxIdleConns != 8 {
 		t.Fatalf("unexpected database config: %#v", cfg)
 	}
+	if cfg.StateFile != "db/existing_state.json" {
+		t.Fatalf("state_file was not loaded: %q", cfg.StateFile)
+	}
 	if cfg.PostgresDSN() == "" || cfg.PostgresSSLMode != "require" {
 		t.Fatalf("expected postgres dsn, got %q", cfg.PostgresDSN())
 	}
 	if len(cfg.EmbyURLList) != 2 || cfg.EmbyURLList[0].Name != "Direct" {
 		t.Fatalf("unexpected emby lines: %#v", cfg.EmbyURLList)
 	}
+}
+
+func TestLoadDefaultPathPrefersConfigTomlOverEnv(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	if err := os.WriteFile("config.toml", []byte("[API]\nport = 5051\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	envPath := filepath.Join(dir, "env.toml")
+	if err := os.WriteFile(envPath, []byte("[API]\nport = 6061\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TWILIGHT_CONFIG_FILE", envPath)
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ConfigFile != "config.toml" || cfg.Port != 5051 {
+		t.Fatalf("expected local config.toml to win, file=%q port=%d", cfg.ConfigFile, cfg.Port)
+	}
+}
+
+func TestLoadDefaultPathUsesEnvWhenConfigTomlMissing(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	envPath := filepath.Join(dir, "env.toml")
+	if err := os.WriteFile(envPath, []byte("[API]\nport = 6062\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TWILIGHT_CONFIG_FILE", envPath)
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ConfigFile != envPath || cfg.Port != 6062 {
+		t.Fatalf("expected env config when config.toml is absent, file=%q port=%d", cfg.ConfigFile, cfg.Port)
+	}
+}
+
+func chdir(t *testing.T, dir string) {
+	t.Helper()
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(previous); err != nil {
+			t.Fatalf("restore working directory: %v", err)
+		}
+	})
 }
 
 func TestPostgresEnvOverridesAndIPv6DSN(t *testing.T) {

@@ -106,7 +106,7 @@ func TestCredentialedCORSRequiresExplicitOrigin(t *testing.T) {
 		t.Fatalf("wildcard CORS origin was allowed: %q", rr.Header().Get("Access-Control-Allow-Origin"))
 	}
 
-	app.cfg.CORSOrigins = []string{"https://panel.example"}
+	app.cfg.CORSOrigins = []string{"https://panel.example/"}
 	req = httptest.NewRequest(http.MethodOptions, "/api/v1/users/me", nil)
 	req.Header.Set("Origin", "https://panel.example")
 	req.Header.Set("Access-Control-Request-Method", "PUT")
@@ -118,6 +118,16 @@ func TestCredentialedCORSRequiresExplicitOrigin(t *testing.T) {
 	}
 	if rr.Header().Get("Access-Control-Allow-Origin") != "https://panel.example" {
 		t.Fatalf("explicit CORS origin not allowed: %q", rr.Header().Get("Access-Control-Allow-Origin"))
+	}
+
+	app.cfg.CORSOrigins = []string{"https://panel.example/app"}
+	req = httptest.NewRequest(http.MethodOptions, "/api/v1/users/me", nil)
+	req.Header.Set("Origin", "https://panel.example")
+	req.Header.Set("Access-Control-Request-Method", "PUT")
+	rr = httptest.NewRecorder()
+	app.ServeHTTP(rr, req)
+	if rr.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("path-bearing CORS origin was allowed: %q", rr.Header().Get("Access-Control-Allow-Origin"))
 	}
 }
 

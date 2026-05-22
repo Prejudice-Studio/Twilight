@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -168,7 +169,12 @@ func runBot(args []string) error {
 func openStore(ctx context.Context, cfg config.Config) (*store.Store, error) {
 	switch cfg.DatabaseDriver {
 	case "", store.BackendJSON, "file":
-		return store.Open(cfg.StateFile)
+		st, err := store.Open(cfg.StateFile)
+		if err != nil {
+			return nil, err
+		}
+		bootstrapLegacyAdminsIfNeeded(cfg, st)
+		return st, nil
 	case store.BackendPostgres, "postgresql":
 		dsn := cfg.PostgresDSN()
 		if dsn == "" {
@@ -181,10 +187,74 @@ func openStore(ctx context.Context, cfg config.Config) (*store.Store, error) {
 			return nil, err
 		}
 		st.ConfigurePostgres(cfg.PostgresMaxOpenConns, cfg.PostgresMaxIdleConns)
+		if !storeHasAdmin(st) {
+			legacy, err := openLegacyJSONStoreIfPopulated(cfg)
+			if err != nil {
+				_ = st.Close()
+				return nil, err
+			}
+			if legacy != nil {
+				bootstrapLegacyAdminsIfNeeded(cfg, legacy)
+				if storeHasAdmin(legacy) {
+					_ = st.Close()
+					slog.Warn("PostgreSQL has no administrator; using legacy JSON state so existing admins can log in and run database migration", "state_file", cfg.StateFile)
+					return legacy, nil
+				}
+				_ = legacy.Close()
+			}
+			bootstrapLegacyAdminsIfNeeded(cfg, st)
+		}
 		return st, nil
 	default:
 		return nil, fmt.Errorf("unsupported database driver %q", cfg.DatabaseDriver)
 	}
+}
+
+func storeHasAdmin(st *store.Store) bool {
+	if st == nil {
+		return false
+	}
+	for _, user := range st.ListUsers() {
+		if user.Role == store.RoleAdmin && user.Active {
+			return true
+		}
+	}
+	return false
+}
+
+func openLegacyJSONStoreIfPopulated(cfg config.Config) (*store.Store, error) {
+	stateFile := strings.TrimSpace(cfg.StateFile)
+	if stateFile == "" {
+		stateFile = filepath.Join(firstNonEmpty(cfg.DatabaseDir, "db"), "twilight_go_state.json")
+	}
+	info, err := os.Stat(stateFile)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if info.IsDir() || !info.Mode().IsRegular() || info.Size() == 0 {
+		return nil, nil
+	}
+	legacy, err := store.Open(stateFile)
+	if err != nil {
+		return nil, fmt.Errorf("open legacy JSON state %q: %w", stateFile, err)
+	}
+	if legacy.UserCount() == 0 {
+		_ = legacy.Close()
+		return nil, nil
+	}
+	return legacy, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func printHelp() {

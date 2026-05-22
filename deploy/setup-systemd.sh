@@ -152,6 +152,10 @@ if [[ "$DRY_RUN" -eq 0 ]]; then
     "$PROJECT_ROOT/config_backups"
 fi
 
+if [[ -f "$PROJECT_ROOT/db/users.db" ]] && ! command -v sqlite3 >/dev/null 2>&1; then
+  echo "Warning: legacy db/users.db exists but sqlite3 is not installed; Go backend cannot bootstrap legacy administrators automatically." >&2
+fi
+
 if [[ "$CONFIG_WILL_CREATE" -eq 0 ]] && command -v runuser >/dev/null 2>&1; then
   if ! runuser -u "$SERVICE_USER" -- test -r "$CONFIG_FILE"; then
     echo "Config is not readable by service user $SERVICE_USER: $CONFIG_FILE" >&2
