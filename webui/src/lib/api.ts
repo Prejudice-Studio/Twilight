@@ -2844,6 +2844,7 @@ export interface SigninPublicConfig {
 }
 
 export interface SigninActionResult {
+  created?: boolean;
   today_signed: boolean;
   daily_points: number;
   bonus_points: number;

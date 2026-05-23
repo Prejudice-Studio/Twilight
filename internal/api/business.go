@@ -461,6 +461,68 @@ func (a *App) inviteDepth(uid int64) int {
 	}
 }
 
+func (a *App) inviteTreeNode(uid int64, depth int, seen map[int64]bool) (map[string]any, int) {
+	u, ok := a.store.User(uid)
+	if !ok {
+		return nil, 0
+	}
+	node := map[string]any{
+		"uid":           u.UID,
+		"username":      u.Username,
+		"active":        u.Active,
+		"has_emby":      u.EmbyID != "",
+		"expired_at":    u.ExpiredAt,
+		"expire_status": expireStatus(u.ExpiredAt),
+		"emby_expired":  u.ExpiredAt > 0 && u.ExpiredAt < time.Now().Unix(),
+		"depth":         depth,
+		"children":      []map[string]any{},
+	}
+	if seen[uid] {
+		return node, 0
+	}
+	seen[uid] = true
+
+	children := []map[string]any{}
+	count := 0
+	for _, rel := range a.store.ChildrenOf(uid) {
+		child, childCount := a.inviteTreeNode(rel.ChildUID, depth+1, seen)
+		if child == nil {
+			continue
+		}
+		children = append(children, child)
+		count += 1 + childCount
+	}
+	node["children"] = children
+	return node, count
+}
+
+func (a *App) inviteTreeFor(user store.User) map[string]any {
+	self, count := a.inviteTreeNode(user.UID, a.inviteDepth(user.UID), map[int64]bool{})
+	if self == nil {
+		self = map[string]any{
+			"uid":           user.UID,
+			"username":      user.Username,
+			"active":        user.Active,
+			"has_emby":      user.EmbyID != "",
+			"expired_at":    user.ExpiredAt,
+			"expire_status": expireStatus(user.ExpiredAt),
+			"emby_expired":  user.ExpiredAt > 0 && user.ExpiredAt < time.Now().Unix(),
+			"depth":         a.inviteDepth(user.UID),
+			"children":      []map[string]any{},
+		}
+	}
+	descendants, _ := self["children"].([]map[string]any)
+	if descendants == nil {
+		descendants = []map[string]any{}
+		self["children"] = descendants
+	}
+	return map[string]any{
+		"self":             self,
+		"descendants":      descendants,
+		"descendant_count": count,
+	}
+}
+
 func (a *App) canInvite(user store.User) (bool, string) {
 	if !a.cfg.InviteEnabled {
 		return false, "邀请系统未启用"

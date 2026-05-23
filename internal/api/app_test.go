@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"errors"
 	"io"
 	"log"
 	"mime/multipart"
@@ -455,6 +455,81 @@ func TestRegcodeInviteMediaAndSecurityFlows(t *testing.T) {
 	blocked := doJSONWithHeaders(app, http.MethodPost, "/api/v1/security/ip/blacklist", `{"ip":"203.0.113.9","reason":"test"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if blocked.Code != http.StatusOK {
 		t.Fatalf("blacklist status=%d body=%s", blocked.Code, blocked.Body.String())
+	}
+}
+
+func TestInviteMeReturnsStableTreeShape(t *testing.T) {
+	app := newTestApp(t)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	cookie := findCookie(login.Result().Cookies(), "twilight_session")
+
+	resp := doJSON(app, http.MethodGet, "/api/v1/invite/me", ``, []*http.Cookie{cookie})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("invite/me status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var env struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	tree, ok := env.Data["tree"].(map[string]any)
+	if !ok {
+		t.Fatalf("tree is not an object: %#v", env.Data["tree"])
+	}
+	self, ok := tree["self"].(map[string]any)
+	if !ok {
+		t.Fatalf("tree.self missing: %#v", tree)
+	}
+	if depth, _ := self["depth"].(float64); depth != 1 {
+		t.Fatalf("unexpected self depth: %#v", self["depth"])
+	}
+	if _, ok := tree["descendants"].([]any); !ok {
+		t.Fatalf("tree.descendants missing: %#v", tree)
+	}
+}
+
+func TestSigninResponsesMatchFrontendContract(t *testing.T) {
+	app := newTestApp(t)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	cookie := findCookie(login.Result().Cookies(), "twilight_session")
+
+	first := doJSONWithHeaders(app, http.MethodPost, "/api/v1/signin", `{}`, []*http.Cookie{cookie}, map[string]string{"X-Twilight-Client": "webui"})
+	if first.Code != http.StatusOK {
+		t.Fatalf("signin status=%d body=%s", first.Code, first.Body.String())
+	}
+	var firstEnv struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &firstEnv); err != nil {
+		t.Fatal(err)
+	}
+	if firstEnv.Data["currency_name"] != "积分" || firstEnv.Data["total_today"].(float64) != 1 || firstEnv.Data["current_points"].(float64) != 1 {
+		t.Fatalf("unexpected first signin payload: %#v", firstEnv.Data)
+	}
+
+	second := doJSONWithHeaders(app, http.MethodPost, "/api/v1/signin", `{}`, []*http.Cookie{cookie}, map[string]string{"X-Twilight-Client": "webui"})
+	if second.Code != http.StatusOK {
+		t.Fatalf("second signin status=%d body=%s", second.Code, second.Body.String())
+	}
+	var secondEnv struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(second.Body.Bytes(), &secondEnv); err != nil {
+		t.Fatal(err)
+	}
+	if secondEnv.Data["created"].(bool) || secondEnv.Data["total_today"].(float64) != 0 || secondEnv.Data["today_signed"] != true {
+		t.Fatalf("unexpected duplicate signin payload: %#v", secondEnv.Data)
+	}
+
+	history := doJSON(app, http.MethodGet, "/api/v1/signin/history?limit=30", ``, []*http.Cookie{cookie})
+	if history.Code != http.StatusOK {
+		t.Fatalf("history status=%d body=%s", history.Code, history.Body.String())
+	}
+	if !strings.Contains(history.Body.String(), `"daily_points":1`) || !strings.Contains(history.Body.String(), `"total":1`) {
+		t.Fatalf("history did not include frontend fields: %s", history.Body.String())
 	}
 }
 

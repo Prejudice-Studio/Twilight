@@ -245,17 +245,21 @@ type RuntimeLogEntry struct {
 }
 
 type Signin struct {
-	UID        int64          `json:"uid"`
-	Points     int            `json:"points"`
-	Streak     int            `json:"streak"`
-	LastSignin string         `json:"last_signin"`
-	Records    []SigninRecord `json:"records"`
+	UID           int64          `json:"uid"`
+	Points        int            `json:"points"`
+	Streak        int            `json:"streak"`
+	LongestStreak int            `json:"longest_streak,omitempty"`
+	LastSignin    string         `json:"last_signin"`
+	Records       []SigninRecord `json:"records"`
 }
 
 type SigninRecord struct {
-	Date      string `json:"date"`
-	Points    int    `json:"points"`
-	CreatedAt int64  `json:"created_at"`
+	Date        string `json:"date"`
+	Points      int    `json:"points"`
+	BonusPoints int    `json:"bonus_points,omitempty"`
+	Total       int    `json:"total,omitempty"`
+	Streak      int    `json:"streak,omitempty"`
+	CreatedAt   int64  `json:"created_at"`
 }
 
 type SchedulerRun struct {
@@ -1602,18 +1606,30 @@ func (s *Store) Signin(uid int64) Signin {
 func (s *Store) AddSignin(uid int64, points int) (Signin, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	today := time.Now().Format("2006-01-02")
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
 	si := s.state.Signin[uid]
 	if si.UID == 0 {
 		si.UID = uid
 	}
+	if si.LongestStreak < si.Streak {
+		si.LongestStreak = si.Streak
+	}
 	if si.LastSignin == today {
 		return si, false, nil
 	}
+	if si.LastSignin == yesterday {
+		si.Streak++
+	} else {
+		si.Streak = 1
+	}
+	if si.Streak > si.LongestStreak {
+		si.LongestStreak = si.Streak
+	}
 	si.LastSignin = today
-	si.Streak++
 	si.Points += points
-	si.Records = append(si.Records, SigninRecord{Date: today, Points: points, CreatedAt: time.Now().Unix()})
+	si.Records = append(si.Records, SigninRecord{Date: today, Points: points, Total: points, Streak: si.Streak, CreatedAt: now.Unix()})
 	s.state.Signin[uid] = si
 	return si, true, s.saveLocked()
 }

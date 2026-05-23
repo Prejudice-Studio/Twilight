@@ -251,6 +251,7 @@ export default function InviteCenterPage() {
     [codes],
   );
   const maxCodeDays = status?.max_code_days ?? 0;
+  const inviteTree = status?.tree && !Array.isArray(status.tree) && status.tree.self ? status.tree : null;
 
   if (loading && !config) {
     return (
@@ -375,7 +376,7 @@ export default function InviteCenterPage() {
         </div>
       )}
 
-      {status?.tree && (
+      {inviteTree && (
         <Card>
           <CardContent className="space-y-4 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -384,14 +385,14 @@ export default function InviteCenterPage() {
                 我的上下级树
               </h3>
               <Badge variant="outline" className="text-[10px]">
-                下级总数 {status.tree.descendant_count}
+                下级总数 {inviteTree.descendant_count}
               </Badge>
             </div>
 
             <div className="rounded-lg border bg-muted/30 p-3">
               <p className="mb-2 text-[11px] uppercase tracking-widest text-muted-foreground">直属上级</p>
               <div className="flex flex-wrap items-center gap-2 text-sm">
-                {status.parent ? (
+                {status?.parent ? (
                   <Badge variant="secondary" className="max-w-[220px] truncate">
                     {status.parent.username} · UID #{status.parent.uid}
                   </Badge>
@@ -399,15 +400,15 @@ export default function InviteCenterPage() {
                   <span className="text-muted-foreground">你当前没有上级，是邀请树根节点。</span>
                 )}
                 <Badge variant="default" className="max-w-[180px] truncate">
-                  我 · 第 {status.tree.self.depth} 层
+                  我 · 第 {inviteTree.self.depth} 层
                 </Badge>
               </div>
             </div>
 
             <div className="space-y-2">
               <p className="text-[11px] uppercase tracking-widest text-muted-foreground">下级树</p>
-              {status.tree.descendants.length ? (
-                <InviteTreeNodeList nodes={status.tree.descendants} />
+              {inviteTree.descendants.length ? (
+                <InviteTreeNodeList nodes={inviteTree.descendants} />
               ) : (
                 <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
                   暂无下级。生成邀请码并被使用后，这里会展示完整下级树。

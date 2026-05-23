@@ -26,14 +26,18 @@ func (a *App) handleInviteMe(w http.ResponseWriter, r *http.Request, _ Params) {
 		}
 	}
 	children := []map[string]any{}
+	maxDays, maxReason := a.maxCodeDays(user)
 	for _, rel := range a.store.ChildrenOf(user.UID) {
 		if u, okUser := a.store.User(rel.ChildUID); okUser {
-			children = append(children, publicUser(u))
+			item := publicUser(u)
+			item["has_emby"] = u.EmbyID != ""
+			item["emby_expired"] = u.ExpiredAt > 0 && u.ExpiredAt < time.Now().Unix()
+			item["can_generate_renew_code"] = maxDays > 0
+			children = append(children, item)
 		}
 	}
 	canInvite, reason := a.canInvite(user)
-	maxDays, maxReason := a.maxCodeDays(user)
-	ok(w, "OK", map[string]any{"parent": parent, "children": children, "tree": children, "depth": a.inviteDepth(user.UID), "max_depth": a.cfg.InviteMaxDepth, "can_invite": canInvite, "invite_block_reason": reason, "max_code_days": maxDays, "max_code_days_reason": maxReason, "codes": codeItems, "total": len(codeItems)})
+	ok(w, "OK", map[string]any{"enabled": a.cfg.InviteEnabled, "is_root": parent == nil, "parent": parent, "children": children, "tree": a.inviteTreeFor(user), "depth": a.inviteDepth(user.UID), "max_depth": a.cfg.InviteMaxDepth, "can_invite": canInvite, "invite_block_reason": reason, "max_code_days": maxDays, "max_code_days_reason": maxReason, "codes": codeItems, "total": len(codeItems)})
 }
 
 func (a *App) handleCreateInviteCode(w http.ResponseWriter, r *http.Request, _ Params) {

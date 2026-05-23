@@ -654,11 +654,18 @@ export default function DashboardPage() {
       const res = await api.signinNow();
       if (res.success && res.data) {
         const bonus = res.data.bonus_points > 0 ? `（含连签加成 +${res.data.bonus_points}）` : "";
-        toast({
-          title: `签到成功 +${res.data.total_today} ${res.data.currency_name}`,
-          description: `当前连签 ${res.data.current_streak} 天 ${bonus}`,
-          variant: "success",
-        });
+        if (res.data.created === false || res.data.total_today <= 0) {
+          toast({
+            title: "今日已签到",
+            description: `当前连签 ${res.data.current_streak} 天`,
+          });
+        } else {
+          toast({
+            title: `签到成功 +${res.data.total_today} ${res.data.currency_name}`,
+            description: `当前连签 ${res.data.current_streak} 天 ${bonus}`,
+            variant: "success",
+          });
+        }
       } else {
         toast({ title: "签到失败", description: res.message, variant: "destructive" });
       }

@@ -2854,24 +2854,114 @@ func (a *App) handleExpiringUsers(w http.ResponseWriter, r *http.Request, _ Para
 }
 
 func (a *App) handleSigninConfig(w http.ResponseWriter, r *http.Request, _ Params) {
-	ok(w, "OK", map[string]any{"enabled": true, "currency_name": "积分", "daily_points": 1})
+	ok(w, "OK", signinConfigPayload())
 }
+
 func (a *App) handleSigninMe(w http.ResponseWriter, r *http.Request, _ Params) {
 	si := a.store.Signin(current(r).User.UID)
-	ok(w, "OK", map[string]any{"points": si.Points, "streak": si.Streak, "last_signin": si.LastSignin, "currency_name": "绉垎"})
+	ok(w, "OK", signinSummaryPayload(si))
 }
+
 func (a *App) handleSignin(w http.ResponseWriter, r *http.Request, _ Params) {
 	si, createdToday, err := a.store.AddSignin(current(r).User.UID, 1)
 	if statusFromError(w, err) {
 		return
 	}
-	ok(w, "OK", map[string]any{"created": createdToday, "points": si.Points, "streak": si.Streak, "award": 1, "currency_name": "绉垎"})
+	dailyPoints := 0
+	if createdToday {
+		dailyPoints = 1
+	}
+	payload := signinActionPayload(si, createdToday, dailyPoints, 0)
+	if createdToday {
+		ok(w, "签到成功", payload)
+		return
+	}
+	ok(w, "今日已签到", payload)
 }
+
 func (a *App) handleSigninHistory(w http.ResponseWriter, r *http.Request, _ Params) {
 	si := a.store.Signin(current(r).User.UID)
 	records := append([]store.SigninRecord(nil), si.Records...)
 	sort.Slice(records, func(i, j int) bool { return records[i].CreatedAt > records[j].CreatedAt })
-	ok(w, "OK", map[string]any{"records": records, "currency_name": "绉垎"})
+	limit := queryInt(r, "limit", 30)
+	if limit <= 0 || limit > 365 {
+		limit = 30
+	}
+	if len(records) > limit {
+		records = records[:limit]
+	}
+	items := make([]map[string]any, 0, len(records))
+	for _, record := range records {
+		total := record.Total
+		if total == 0 {
+			total = record.Points + record.BonusPoints
+		}
+		streak := record.Streak
+		if streak <= 0 {
+			streak = 1
+		}
+		items = append(items, map[string]any{
+			"date":         record.Date,
+			"daily_points": record.Points,
+			"bonus_points": record.BonusPoints,
+			"total":        total,
+			"streak":       streak,
+			"created_at":   record.CreatedAt,
+		})
+	}
+	ok(w, "OK", map[string]any{"records": items, "currency_name": signinCurrencyName()})
+}
+
+func signinCurrencyName() string {
+	return "积分"
+}
+
+func signinConfigPayload() map[string]any {
+	return map[string]any{
+		"enabled":              true,
+		"currency_name":        signinCurrencyName(),
+		"daily_min":            1,
+		"daily_max":            1,
+		"streak_bonus_enabled": false,
+		"bonus_table":          []map[string]any{},
+		"reset_after_miss":     true,
+	}
+}
+
+func signinSummaryPayload(si store.Signin) map[string]any {
+	today := time.Now().Format("2006-01-02")
+	longest := si.LongestStreak
+	if longest < si.Streak {
+		longest = si.Streak
+	}
+	for _, record := range si.Records {
+		if record.Streak > longest {
+			longest = record.Streak
+		}
+	}
+	return map[string]any{
+		"enabled":            true,
+		"currency_name":      signinCurrencyName(),
+		"current_points":     si.Points,
+		"current_streak":     si.Streak,
+		"longest_streak":     longest,
+		"total_points":       si.Points,
+		"last_signin_date":   emptyNil(si.LastSignin),
+		"today_signed":       si.LastSignin == today,
+		"next_bonus_in_days": nil,
+		"next_bonus_points":  nil,
+	}
+}
+
+func signinActionPayload(si store.Signin, created bool, dailyPoints, bonusPoints int) map[string]any {
+	totalToday := dailyPoints + bonusPoints
+	payload := signinSummaryPayload(si)
+	payload["created"] = created
+	payload["today_signed"] = true
+	payload["daily_points"] = dailyPoints
+	payload["bonus_points"] = bonusPoints
+	payload["total_today"] = totalToday
+	return payload
 }
 
 func (a *App) handleDemoBootstrap(w http.ResponseWriter, r *http.Request, _ Params) {
