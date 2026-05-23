@@ -18,6 +18,11 @@ type Line struct {
 	URL  string `json:"url"`
 }
 
+type TelegramCommandReply struct {
+	Command string `json:"command"`
+	Reply   string `json:"reply"`
+}
+
 type Config struct {
 	AppName                       string
 	Version                       string
@@ -86,6 +91,7 @@ type Config struct {
 	TelegramBotHelpHeader          string
 	TelegramBotHelpFooter          string
 	TelegramBotAbout               string
+	TelegramCustomCommands         []TelegramCommandReply
 	BotInternalSecret              string
 	BangumiEnabled                 bool
 	BangumiWebhookSecret           string
@@ -217,6 +223,7 @@ func Load(path string) (Config, error) {
 	cfg.TelegramBotHelpHeader = first(values, "Telegram.bot_help_header", "bot_help_header", cfg.TelegramBotHelpHeader)
 	cfg.TelegramBotHelpFooter = first(values, "Telegram.bot_help_footer", "bot_help_footer", cfg.TelegramBotHelpFooter)
 	cfg.TelegramBotAbout = first(values, "Telegram.bot_about", "bot_about", cfg.TelegramBotAbout)
+	cfg.TelegramCustomCommands = parseTelegramCommandReplies(first(values, "Telegram.bot_custom_commands", "bot_custom_commands", ""))
 	cfg.BangumiEnabled = boolValue(first(values, "BangumiSync.enabled", "bangumi_sync_enabled", strconv.FormatBool(cfg.BangumiEnabled)), cfg.BangumiEnabled)
 	cfg.BangumiWebhookSecret = first(values, "BangumiSync.webhook_secret", "webhook_secret", cfg.BangumiWebhookSecret)
 	cfg.TMDBAPIKey = first(values, "Global.tmdb_api_key", "tmdb_api_key", cfg.TMDBAPIKey)
@@ -822,6 +829,50 @@ func parseLines(value string) []Line {
 		lines = append(lines, Line{Name: name, URL: rawURL})
 	}
 	return lines
+}
+
+func parseTelegramCommandReplies(value string) []TelegramCommandReply {
+	parts := listValue(value)
+	out := make([]TelegramCommandReply, 0, len(parts))
+	seen := map[string]bool{}
+	for _, part := range parts {
+		command, reply, ok := strings.Cut(part, " = ")
+		if !ok {
+			command, reply, ok = strings.Cut(part, "=")
+		}
+		if !ok {
+			command, reply, ok = strings.Cut(part, " : ")
+		}
+		if !ok {
+			command, reply, ok = strings.Cut(part, "| ")
+		}
+		if !ok {
+			continue
+		}
+		command = normalizeTelegramCommand(command)
+		reply = strings.TrimSpace(reply)
+		if command == "" || reply == "" || seen[command] {
+			continue
+		}
+		seen[command] = true
+		out = append(out, TelegramCommandReply{Command: command, Reply: reply})
+	}
+	return out
+}
+
+func normalizeTelegramCommand(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	value = strings.TrimPrefix(value, "/")
+	if value == "" || len(value) > 32 {
+		return ""
+	}
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			continue
+		}
+		return ""
+	}
+	return "/" + value
 }
 
 func (c Config) PostgresDSN() string {

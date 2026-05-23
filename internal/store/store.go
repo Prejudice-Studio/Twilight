@@ -64,6 +64,7 @@ type State struct {
 	NextRequestID       int64                          `json:"next_request_id"`
 	NextAnnouncementID  int64                          `json:"next_announcement_id"`
 	NextLoginLogID      int64                          `json:"next_login_log_id"`
+	NextRuntimeLogID    int64                          `json:"next_runtime_log_id"`
 	NextSchedulerRunID  int64                          `json:"next_scheduler_run_id"`
 	NextRebindRequestID int64                          `json:"next_rebind_request_id"`
 	Users               map[int64]User                 `json:"users"`
@@ -79,6 +80,7 @@ type State struct {
 	SchedulerSchedules  map[string]SchedulerSchedule   `json:"scheduler_schedules"`
 	Devices             map[string]Device              `json:"devices"`
 	LoginLogs           []LoginLog                     `json:"login_logs"`
+	RuntimeLogs         []RuntimeLogEntry              `json:"runtime_logs"`
 	IPBlacklist         map[string]IPBlacklistEntry    `json:"ip_blacklist"`
 	PlaybackRecords     []PlaybackRecord               `json:"playback_records"`
 	RebindRequests      map[int64]RebindRequest        `json:"rebind_requests"`
@@ -232,6 +234,14 @@ type ViolationLog struct {
 	IP         string `json:"ip,omitempty"`
 	TelegramID int64  `json:"telegram_id,omitempty"`
 	CreatedAt  int64  `json:"created_at"`
+}
+
+type RuntimeLogEntry struct {
+	ID      int64             `json:"id"`
+	Time    int64             `json:"time"`
+	Level   string            `json:"level"`
+	Message string            `json:"message"`
+	Attrs   map[string]string `json:"attrs,omitempty"`
 }
 
 type Signin struct {
@@ -673,6 +683,9 @@ func (s *State) ensure() {
 	if s.NextLoginLogID <= 0 {
 		s.NextLoginLogID = 1
 	}
+	if s.NextRuntimeLogID <= 0 {
+		s.NextRuntimeLogID = 1
+	}
 	if s.NextSchedulerRunID <= 0 {
 		s.NextSchedulerRunID = 1
 	}
@@ -723,6 +736,9 @@ func (s *State) ensure() {
 	}
 	if s.ViolationLogs == nil {
 		s.ViolationLogs = []ViolationLog{}
+	}
+	if s.RuntimeLogs == nil {
+		s.RuntimeLogs = []RuntimeLogEntry{}
 	}
 }
 
@@ -1731,6 +1747,97 @@ func (s *Store) LoginHistory(uid int64, blockedOnly bool, since int64, limit int
 		}
 	}
 	return out
+}
+
+func (s *Store) AddRuntimeLog(entry RuntimeLogEntry, limit int) (RuntimeLogEntry, error) {
+	if s == nil {
+		return entry, ErrNotFound
+	}
+	limit = clampRuntimeLogLimit(limit)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if entry.ID == 0 {
+		entry.ID = s.state.NextRuntimeLogID
+		s.state.NextRuntimeLogID++
+	}
+	if entry.Time == 0 {
+		entry.Time = time.Now().Unix()
+	}
+	s.state.RuntimeLogs = append(s.state.RuntimeLogs, entry)
+	if len(s.state.RuntimeLogs) > limit {
+		copy(s.state.RuntimeLogs, s.state.RuntimeLogs[len(s.state.RuntimeLogs)-limit:])
+		s.state.RuntimeLogs = s.state.RuntimeLogs[:limit]
+	}
+	return entry, s.saveLocked()
+}
+
+func (s *Store) RuntimeLogs(limit int, after int64) ([]RuntimeLogEntry, int64) {
+	if s == nil {
+		return nil, after
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	maxLimit := len(s.state.RuntimeLogs)
+	if limit <= 0 || limit > maxLimit {
+		limit = maxLimit
+	}
+	filtered := make([]RuntimeLogEntry, 0, maxLimit)
+	for _, entry := range s.state.RuntimeLogs {
+		if after <= 0 || entry.ID > after {
+			filtered = append(filtered, entry)
+		}
+	}
+	if len(filtered) > limit {
+		filtered = filtered[len(filtered)-limit:]
+	}
+	next := after
+	if s.state.NextRuntimeLogID > 1 {
+		next = s.state.NextRuntimeLogID - 1
+	}
+	if len(filtered) > 0 {
+		next = filtered[len(filtered)-1].ID
+	}
+	out := make([]RuntimeLogEntry, len(filtered))
+	copy(out, filtered)
+	return out, next
+}
+
+func (s *Store) RuntimeLogStats() (int64, int) {
+	if s == nil {
+		return 0, 0
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	next := int64(0)
+	if s.state.NextRuntimeLogID > 1 {
+		next = s.state.NextRuntimeLogID - 1
+	}
+	return next, len(s.state.RuntimeLogs)
+}
+
+func (s *Store) PruneRuntimeLogs(limit int) error {
+	if s == nil {
+		return nil
+	}
+	limit = clampRuntimeLogLimit(limit)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.state.RuntimeLogs) <= limit {
+		return nil
+	}
+	copy(s.state.RuntimeLogs, s.state.RuntimeLogs[len(s.state.RuntimeLogs)-limit:])
+	s.state.RuntimeLogs = s.state.RuntimeLogs[:limit]
+	return s.saveLocked()
+}
+
+func clampRuntimeLogLimit(limit int) int {
+	if limit < 100 {
+		return 100
+	}
+	if limit > 50000 {
+		return 50000
+	}
+	return limit
 }
 
 func (s *Store) AddPlaybackRecord(record PlaybackRecord) error {

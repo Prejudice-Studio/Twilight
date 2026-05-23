@@ -292,6 +292,70 @@ function ListField({
   );
 }
 
+function toCommandRows(value: unknown): Array<{ command: string; reply: string }> {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    if (item && typeof item === "object") {
+      const row = item as Record<string, unknown>;
+      return { command: String(row.command ?? ""), reply: String(row.reply ?? "") };
+    }
+    const text = String(item ?? "");
+    const [command, ...replyParts] = text.split(" = ");
+    return { command: command ?? "", reply: replyParts.join(" = ") };
+  });
+}
+
+function CommandMapField({
+  value,
+  onChange,
+}: {
+  value: unknown;
+  onChange: (v: Array<{ command: string; reply: string }>) => void;
+}) {
+  const rows = toCommandRows(value);
+  const updateRow = (idx: number, patch: Partial<{ command: string; reply: string }>) => {
+    const next = [...rows];
+    next[idx] = { ...next[idx], ...patch };
+    onChange(next);
+  };
+  const addRow = () => onChange([...rows, { command: "/", reply: "" }]);
+  const removeRow = (idx: number) => onChange(rows.filter((_, i) => i !== idx));
+
+  return (
+    <div className="space-y-3">
+      {rows.map((row, idx) => (
+        <div key={idx} className="grid gap-2 rounded-md border p-3 sm:grid-cols-[minmax(140px,220px)_1fr_auto]">
+          <Input
+            value={row.command}
+            placeholder="/hello"
+            onChange={(e) => updateRow(idx, { command: e.target.value })}
+            className="font-mono"
+          />
+          <Textarea
+            value={row.reply}
+            placeholder="回复内容，支持换行"
+            onChange={(e) => updateRow(idx, { reply: e.target.value })}
+            className="min-h-20 font-mono text-sm"
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => removeRow(idx)}
+            className="text-muted-foreground hover:text-destructive"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      ))}
+      <Button type="button" variant="outline" size="sm" onClick={addRow} className="w-full">
+        <Plus className="mr-1 h-4 w-4" />
+        添加自定义指令
+      </Button>
+    </div>
+  );
+}
+
 function ConfigFieldEditor({
   field,
   value,
@@ -353,6 +417,9 @@ function ConfigFieldEditor({
           onChange={onChange}
         />
       );
+
+    case "command_map":
+      return <CommandMapField value={value} onChange={onChange} />;
 
     case "select":
       return (

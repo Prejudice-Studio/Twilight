@@ -2398,7 +2398,7 @@ export interface ConfigFieldOption {
 export interface ConfigField {
   key: string;
   label: string;
-  type: 'string' | 'textarea' | 'int' | 'float' | 'bool' | 'secret' | 'list' | 'select';
+  type: 'string' | 'textarea' | 'int' | 'float' | 'bool' | 'secret' | 'list' | 'select' | 'command_map';
   description: string;
   value: unknown;
   options?: ConfigFieldOption[];

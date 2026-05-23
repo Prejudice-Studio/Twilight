@@ -15,15 +15,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/prejudice-studio/twilight/internal/store"
 )
 
-type RuntimeLogEntry struct {
-	ID      int64             `json:"id"`
-	Time    int64             `json:"time"`
-	Level   string            `json:"level"`
-	Message string            `json:"message"`
-	Attrs   map[string]string `json:"attrs,omitempty"`
-}
+type RuntimeLogEntry = store.RuntimeLogEntry
 
 type runtimeLogBuffer struct {
 	mu      sync.Mutex
@@ -35,12 +31,127 @@ type runtimeLogBuffer struct {
 
 var (
 	runtimeStartedAt = time.Now()
-	runtimeLogs      = newRuntimeLogBuffer(5000)
+	runtimeLogs      = newRuntimeLogSink(5000)
 	runtimeLogLevel  slog.LevelVar
 	sensitivePattern = regexp.MustCompile(`(?i)(authorization|cookie|token|secret|password|passwd|api[_-]?key|bot[_-]?token|dsn)\s*[:=]\s*[^ \t\r\n,;]+`)
 	bearerPattern    = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._~+/=-]{12,}`)
 	keyPattern       = regexp.MustCompile(`key-[A-Za-z0-9._~+/=-]{12,}`)
 )
+
+type runtimeLogSink struct {
+	mu       sync.RWMutex
+	cond     *sync.Cond
+	st       *store.Store
+	fallback *runtimeLogBuffer
+	limit    int
+}
+
+func newRuntimeLogSink(limit int) *runtimeLogSink {
+	s := &runtimeLogSink{fallback: newRuntimeLogBuffer(limit), limit: clamp(limit, 100, 50000)}
+	s.cond = sync.NewCond(&s.mu)
+	return s
+}
+
+func (s *runtimeLogSink) configure(st *store.Store, limit int) {
+	if limit <= 0 {
+		limit = s.currentLimit()
+	}
+	limit = clamp(limit, 100, 50000)
+	s.mu.Lock()
+	if st != nil {
+		s.st = st
+	}
+	s.limit = limit
+	s.fallback.setLimit(limit)
+	s.cond.Broadcast()
+	s.mu.Unlock()
+	if st != nil {
+		for _, entry := range s.fallback.drain() {
+			entry.ID = 0
+			_, _ = st.AddRuntimeLog(entry, limit)
+		}
+		_ = st.PruneRuntimeLogs(limit)
+	}
+}
+
+func (s *runtimeLogSink) currentLimit() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.limit <= 0 {
+		return 5000
+	}
+	return s.limit
+}
+
+func (s *runtimeLogSink) append(entry RuntimeLogEntry) {
+	s.mu.RLock()
+	st := s.st
+	limit := s.limit
+	s.mu.RUnlock()
+	if st != nil {
+		if _, err := st.AddRuntimeLog(entry, limit); err == nil {
+			s.mu.Lock()
+			s.cond.Broadcast()
+			s.mu.Unlock()
+			return
+		}
+	}
+	s.fallback.append(entry)
+	s.mu.Lock()
+	s.cond.Broadcast()
+	s.mu.Unlock()
+}
+
+func (s *runtimeLogSink) setLimit(limit int) {
+	s.configure(nil, limit)
+}
+
+func (s *runtimeLogSink) stats() (int, int) {
+	s.mu.RLock()
+	st := s.st
+	limit := s.limit
+	s.mu.RUnlock()
+	if st != nil {
+		_, entries := st.RuntimeLogStats()
+		return limit, entries
+	}
+	fallbackLimit, entries := s.fallback.stats()
+	return fallbackLimit, entries
+}
+
+func (s *runtimeLogSink) snapshot(limit int, after int64) ([]RuntimeLogEntry, int64) {
+	s.mu.RLock()
+	st := s.st
+	maxLimit := s.limit
+	s.mu.RUnlock()
+	if limit <= 0 || limit > maxLimit {
+		limit = maxLimit
+	}
+	if st != nil {
+		return st.RuntimeLogs(limit, after)
+	}
+	return s.fallback.snapshot(limit, after)
+}
+
+func (s *runtimeLogSink) waitAfter(ctx context.Context, after int64, limit int) ([]RuntimeLogEntry, int64, bool) {
+	deadline := time.NewTimer(25 * time.Second)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer deadline.Stop()
+	defer ticker.Stop()
+	for {
+		entries, next := s.snapshot(limit, after)
+		if len(entries) > 0 {
+			return entries, next, true
+		}
+		select {
+		case <-ctx.Done():
+			return nil, after, false
+		case <-deadline.C:
+			return nil, after, true
+		case <-ticker.C:
+		}
+	}
+}
 
 func newRuntimeLogBuffer(limit int) *runtimeLogBuffer {
 	b := &runtimeLogBuffer{limit: limit}
@@ -112,6 +223,15 @@ func (b *runtimeLogBuffer) snapshot(limit int, after int64) ([]RuntimeLogEntry, 
 	return out, next
 }
 
+func (b *runtimeLogBuffer) drain() []RuntimeLogEntry {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]RuntimeLogEntry, len(b.entries))
+	copy(out, b.entries)
+	b.entries = nil
+	return out
+}
+
 func (b *runtimeLogBuffer) waitAfter(ctx context.Context, after int64, limit int) ([]RuntimeLogEntry, int64, bool) {
 	deadline := time.NewTimer(25 * time.Second)
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -157,8 +277,16 @@ func ConfigureRuntimeLogging(level slog.Leveler, limit int) {
 		slog.SetLogLoggerLevel(level.Level())
 	}
 	if limit > 0 {
-		runtimeLogs.setLimit(limit)
+		runtimeLogs.configure(nil, limit)
 	}
+}
+
+func ConfigureRuntimeLoggingStore(st *store.Store, level slog.Leveler, limit int) {
+	if level != nil {
+		runtimeLogLevel.Set(level.Level())
+		slog.SetLogLoggerLevel(level.Level())
+	}
+	runtimeLogs.configure(st, limit)
 }
 
 func (h *runtimeLogHandler) Enabled(ctx context.Context, level slog.Level) bool {

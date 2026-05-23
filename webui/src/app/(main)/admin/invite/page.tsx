@@ -69,6 +69,11 @@ interface PlacedForest {
   height: number;
 }
 
+interface DynamicForest {
+  positions: Map<number, Positioned>;
+  systems: Map<number, StarSystem & { influence: number }>;
+}
+
 interface DepthPromptOptions {
   title: string;
   description: string;
@@ -206,19 +211,44 @@ function makeStarfield(width: number, height: number): Array<{ x: number; y: num
   }));
 }
 
-function rootOrbit(system: StarSystem, pointer: { x: number; y: number } | null) {
-  if (!pointer) {
-    return { x: system.x, y: system.y, influence: 0 };
-  }
-  const dx = pointer.x - system.x;
-  const dy = pointer.y - system.y;
-  const distance = Math.hypot(dx, dy);
-  const influence = Math.max(0, Math.min(1, 1 - distance / Math.max(360, system.radius + 280)));
-  return {
-    x: system.x + dx * (0.18 + influence * 0.16),
-    y: system.y + dy * (0.18 + influence * 0.16),
-    influence,
-  };
+function dynamicForest(placed: PlacedForest, pointer: { x: number; y: number } | null, tick: number): DynamicForest {
+  const positions = new Map<number, Positioned>();
+  const systems = new Map<number, StarSystem & { influence: number }>();
+  const total = Math.max(1, placed.systems.length);
+
+  placed.systems.forEach((system, index) => {
+    const seed = seededUnit(system.rootUid * 17 + index * 41);
+    const baseAngle = (Math.PI * 2 * index) / total + seed * Math.PI * 2;
+    const speed = 0.28 + seed * 0.18;
+    const angle = baseAngle + tick * speed;
+    const orbitRadius = Math.min(260, 72 + system.radius * 0.34 + Math.sqrt(system.count) * 12);
+    const influence = pointer ? 1 : 0;
+    const center = pointer
+      ? {
+          x: pointer.x + Math.cos(angle) * orbitRadius,
+          y: pointer.y + Math.sin(angle) * orbitRadius * 0.64,
+        }
+      : {
+          x: system.x + Math.cos(angle) * (10 + seed * 8),
+          y: system.y + Math.sin(angle * 1.2) * (8 + seed * 6),
+        };
+    const dx = center.x - system.x;
+    const dy = center.y - system.y;
+    systems.set(system.rootUid, { ...system, x: center.x, y: center.y, influence });
+
+    for (const pos of placed.positions.values()) {
+      if (pos.rootUid !== system.rootUid) continue;
+      const childPhase = tick * (0.7 + pos.depth * 0.11) + pos.angle + seed * Math.PI * 2;
+      const childDrift = pos.depth <= 1 ? 0 : Math.min(22, 3 + pos.depth * 4 + influence * 8);
+      positions.set(pos.uid, {
+        ...pos,
+        x: pos.x + dx + Math.cos(childPhase) * childDrift,
+        y: pos.y + dy + Math.sin(childPhase * 1.15) * childDrift * 0.72,
+      });
+    }
+  });
+
+  return { positions, systems };
 }
 
 function edgePath(parent: Positioned, child: Positioned): string {
@@ -314,6 +344,7 @@ export default function AdminInviteTreePage() {
   const [scale, setScale] = useState(1);
   const [depthPrompt, setDepthPrompt] = useState<DepthPromptState | null>(null);
   const [pointer, setPointer] = useState<{ x: number; y: number } | null>(null);
+  const [orbitTick, setOrbitTick] = useState(0);
 
   const requestDepth = useCallback((options: DepthPromptOptions) => {
     return new Promise<string | null>((resolve) => {
@@ -355,6 +386,7 @@ export default function AdminInviteTreePage() {
 
   const visibleForest = useMemo(() => (forest ? filterForestByRoot(forest, rootFilter) : null), [forest, rootFilter]);
   const placed = useMemo(() => (visibleForest ? placeForest(visibleForest) : null), [visibleForest]);
+  const dynamicPlaced = useMemo(() => (placed ? dynamicForest(placed, pointer, orbitTick) : null), [placed, pointer, orbitTick]);
   const starfield = useMemo(() => (placed ? makeStarfield(placed.width, placed.height) : []), [placed]);
   const highlightedEdges = useMemo(() => relationHighlight(visibleForest, selectedUid), [visibleForest, selectedUid]);
 
@@ -379,18 +411,35 @@ export default function AdminInviteTreePage() {
   const showLabels = (visibleForest?.nodes.length || 0) <= 260 && scale >= 0.7;
 
   const selected = selectedUid && nodeByUid.get(selectedUid) ? nodeByUid.get(selectedUid)! : null;
-  const selectedPosition = selectedUid && placed ? placed.positions.get(selectedUid) : null;
+  const selectedPosition = selectedUid && dynamicPlaced ? dynamicPlaced.positions.get(selectedUid) : null;
   const pointerNearestUid = useMemo(() => {
-    if (!pointer || !placed || (visibleForest?.nodes.length || 0) > 1200) return null;
+    if (!pointer || !dynamicPlaced || (visibleForest?.nodes.length || 0) > 1200) return null;
     let best: { uid: number; d: number } | null = null;
     for (const node of visibleForest?.nodes || []) {
-      const pos = placed.positions.get(node.uid);
+      const pos = dynamicPlaced.positions.get(node.uid);
       if (!pos) continue;
       const d = Math.hypot(pos.x - pointer.x, pos.y - pointer.y);
       if (d < 92 && (!best || d < best.d)) best = { uid: node.uid, d };
     }
     return best?.uid ?? null;
-  }, [placed, pointer, visibleForest]);
+  }, [dynamicPlaced, pointer, visibleForest]);
+
+  useEffect(() => {
+    if (!placed || (visibleForest?.nodes.length || 0) > 1400) return;
+    let raf = 0;
+    let mounted = true;
+    const start = performance.now();
+    const frame = (now: number) => {
+      if (!mounted) return;
+      setOrbitTick((now - start) / 1000);
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => {
+      mounted = false;
+      cancelAnimationFrame(raf);
+    };
+  }, [placed, visibleForest]);
 
   const handleMapPointerMove = useCallback((event: PointerEvent<SVGSVGElement>) => {
     if (!placed || (visibleForest?.nodes.length || 0) > 1200) return;
@@ -703,11 +752,11 @@ export default function AdminInviteTreePage() {
                     <circle key={`star-${index}`} cx={star.x} cy={star.y} r={star.r} fill="#e0f2fe" opacity={star.o} />
                   ))}
                   {placed!.systems.map((system) => {
-                    const orbit = rootOrbit(system, pointer);
+                    const orbit = dynamicPlaced?.systems.get(system.rootUid) ?? { ...system, influence: 0 };
                     const volume = Math.min(32, 10 + Math.sqrt(system.count) * 3 + system.depth * 2);
                     return (
                       <g key={`system-${system.rootUid}`}>
-                        <circle cx={system.x} cy={system.y} r={system.radius + 28} fill="url(#invite-node-glow)" opacity={0.08} />
+                        <circle cx={orbit.x} cy={orbit.y} r={system.radius + 28} fill="url(#invite-node-glow)" opacity={0.08} />
                         <g transform={`translate(${orbit.x}, ${orbit.y})`}>
                           <circle r={volume + system.radius * 0.1} fill="url(#invite-root-volume)" opacity={0.14 + orbit.influence * 0.12} filter="url(#invite-soft-glow)" />
                           <g>
@@ -741,8 +790,8 @@ export default function AdminInviteTreePage() {
                           return (
                             <circle
                               key={`orbit-${system.rootUid}-${index}`}
-                              cx={system.x}
-                              cy={system.y}
+                              cx={orbit.x}
+                              cy={orbit.y}
                               r={ring}
                               fill="none"
                               stroke="#94a3b8"
@@ -752,7 +801,7 @@ export default function AdminInviteTreePage() {
                             />
                           );
                         })}
-                        <text x={system.x} y={system.y + system.radius + 46} textAnchor="middle" fontSize={11} fill="#94a3b8">
+                        <text x={orbit.x} y={orbit.y + system.radius + 46} textAnchor="middle" fontSize={11} fill="#94a3b8">
                           ROOT #{system.rootUid} · {system.count} nodes · depth {system.depth}
                         </text>
                       </g>
@@ -760,8 +809,8 @@ export default function AdminInviteTreePage() {
                   })}
                   {/* 边 */}
                   {visibleForest!.edges.map((e) => {
-                    const p = placed!.positions.get(e.parent);
-                    const c = placed!.positions.get(e.child);
+                    const p = dynamicPlaced?.positions.get(e.parent);
+                    const c = dynamicPlaced?.positions.get(e.child);
                     if (!p || !c) return null;
                     const edgeKey = `${e.parent}-${e.child}`;
                     const isPointerEdge = pointerNearestUid != null && (e.parent === pointerNearestUid || e.child === pointerNearestUid);
@@ -792,7 +841,7 @@ export default function AdminInviteTreePage() {
                   )}
                   {/* 节点 */}
                   {visibleForest!.nodes.map((n) => {
-                    const pos = placed!.positions.get(n.uid);
+                    const pos = dynamicPlaced?.positions.get(n.uid);
                     if (!pos) return null;
                     const isSelected = selectedUid === n.uid;
                     const isPointerNear = pointerNearestUid === n.uid;

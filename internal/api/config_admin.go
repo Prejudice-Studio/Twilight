@@ -447,16 +447,17 @@ func configSectionDefs() []configSectionDef {
 			{Key: "ban_on_leave", Label: "退群封禁", Type: "bool", Description: "退群后在群组永久封禁"},
 			{Key: "group_check_concurrency", Label: "巡检并发", Type: "int", Description: "getChatMember 并发数"},
 			{Key: "group_action_concurrency", Label: "写操作并发", Type: "int", Description: "踢出/封禁等动作并发数"},
-			{Key: "bot_start_text", Label: "Bot 开始文案", Type: "string", Description: "覆盖私聊 /start 文案，留空使用内置文案"},
-			{Key: "bot_group_start_text", Label: "群聊开始文案", Type: "string", Description: "覆盖群聊 /start 提示，留空使用内置文案"},
+			{Key: "bot_start_text", Label: "Bot 开始文案", Type: "textarea", Description: "覆盖私聊 /start 文案，支持换行；保存到 TOML 时会自动转义为 \\n"},
+			{Key: "bot_group_start_text", Label: "群聊开始文案", Type: "textarea", Description: "覆盖群聊 /start 提示，支持换行；留空使用内置文案"},
 			{Key: "bot_start_title", Label: "开始标题", Type: "string", Description: "内置 /start 文案的标题"},
-			{Key: "bot_start_intro", Label: "开始简介", Type: "string", Description: "内置 /start 文案的简介"},
-			{Key: "bot_bind_prompt_text", Label: "绑定提示文案", Type: "string", Description: "/bind 无参数时的提示文本"},
-			{Key: "bot_help_text", Label: "用户帮助文案", Type: "string", Description: "覆盖 /help 和 /twihelp 文案"},
-			{Key: "bot_admin_help_text", Label: "管理员帮助文案", Type: "string", Description: "覆盖 /twishelp 文案"},
-			{Key: "bot_help_header", Label: "帮助页前缀", Type: "string", Description: "追加到内置用户帮助顶部"},
-			{Key: "bot_help_footer", Label: "帮助页后缀", Type: "string", Description: "追加到内置用户帮助底部"},
-			{Key: "bot_about", Label: "Bot 关于文案", Type: "string", Description: "/about 的服务说明"},
+			{Key: "bot_start_intro", Label: "开始简介", Type: "textarea", Description: "内置 /start 文案的简介，支持换行"},
+			{Key: "bot_bind_prompt_text", Label: "绑定提示文案", Type: "textarea", Description: "/bind 无参数时的提示文本，支持换行"},
+			{Key: "bot_help_text", Label: "用户帮助文案", Type: "textarea", Description: "覆盖 /help 和 /twihelp 文案，支持换行"},
+			{Key: "bot_admin_help_text", Label: "管理员帮助文案", Type: "textarea", Description: "覆盖 /twishelp 文案，支持换行"},
+			{Key: "bot_help_header", Label: "帮助页前缀", Type: "textarea", Description: "追加到内置用户帮助顶部，支持换行"},
+			{Key: "bot_help_footer", Label: "帮助页后缀", Type: "textarea", Description: "追加到内置用户帮助底部，支持换行"},
+			{Key: "bot_about", Label: "Bot 关于文案", Type: "textarea", Description: "/about 的服务说明，支持换行"},
+			{Key: "bot_custom_commands", Label: "Bot 自定义指令回复", Type: "command_map", Description: "自定义 /command 与回复内容的映射，回复支持换行；内置指令优先级更高"},
 		}},
 		{Key: "SAR", Title: "注册/邀请", Description: "注册、卡码、邀请树和求片", Category: "policy", Fields: []configFieldDef{
 			{Key: "register_mode", Label: "开放注册", Type: "bool", Description: "是否允许注册系统账号"},
@@ -547,7 +548,7 @@ func configValues(cfg config.Config) map[string]map[string]any {
 			"bot_start_text": cfg.TelegramBotStartText, "bot_group_start_text": cfg.TelegramBotGroupStartText, "bot_start_title": cfg.TelegramBotStartTitle,
 			"bot_start_intro": cfg.TelegramBotStartIntro, "bot_bind_prompt_text": cfg.TelegramBotBindPromptText, "bot_help_text": cfg.TelegramBotHelpText,
 			"bot_admin_help_text": cfg.TelegramBotAdminHelpText, "bot_help_header": cfg.TelegramBotHelpHeader, "bot_help_footer": cfg.TelegramBotHelpFooter,
-			"bot_about": cfg.TelegramBotAbout,
+			"bot_about": cfg.TelegramBotAbout, "bot_custom_commands": commandRepliesToAny(cfg.TelegramCustomCommands),
 		},
 		"SAR": {
 			"register_mode": cfg.RegisterEnabled, "register_code_limit": cfg.RegisterCodeLimit, "allow_pending_register": cfg.AllowPendingRegister,
@@ -594,6 +595,24 @@ func normalizeConfigField(field configFieldDef, value any) any {
 			return []any{text}
 		}
 		return []any{}
+	case "command_map":
+		items, _ := value.([]any)
+		out := make([]any, 0, len(items))
+		seen := map[string]bool{}
+		for _, item := range items {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			command := normalizeTelegramCustomCommand(fmt.Sprint(m["command"]))
+			reply := strings.TrimSpace(fmt.Sprint(m["reply"]))
+			if command == "" || reply == "" || seen[command] {
+				continue
+			}
+			seen[command] = true
+			out = append(out, command+" = "+reply)
+		}
+		return out
 	default:
 		return fmt.Sprint(value)
 	}
@@ -661,6 +680,8 @@ func tomlArray(values []any) string {
 			}
 		case bool:
 			parts = append(parts, strconv.FormatBool(typed))
+		case map[string]any:
+			parts = append(parts, strconv.Quote(formatCommandReplyMap(typed)))
 		default:
 			parts = append(parts, strconv.Quote(fmt.Sprint(value)))
 		}
@@ -678,6 +699,33 @@ func linesToStrings(lines []config.Line) []string {
 		}
 	}
 	return out
+}
+
+func commandRepliesToAny(values []config.TelegramCommandReply) []any {
+	out := make([]any, 0, len(values))
+	for _, item := range values {
+		out = append(out, map[string]any{"command": item.Command, "reply": item.Reply})
+	}
+	return out
+}
+
+func formatCommandReplyMap(value map[string]any) string {
+	return normalizeTelegramCustomCommand(fmt.Sprint(value["command"])) + " = " + strings.TrimSpace(fmt.Sprint(value["reply"]))
+}
+
+func normalizeTelegramCustomCommand(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	value = strings.TrimPrefix(value, "/")
+	if value == "" || len(value) > 32 {
+		return ""
+	}
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			continue
+		}
+		return ""
+	}
+	return "/" + value
 }
 
 func int64sToAny(values []int64) []any {

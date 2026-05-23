@@ -11,7 +11,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -49,6 +51,7 @@ type App struct {
 	redis                 *redis.Client
 	routes                []Route
 	runtimeMu             sync.Mutex
+	configSignature       string
 	telegramBotMu         sync.Mutex
 	telegramBotCacheToken string
 	telegramBotCacheUntil time.Time
@@ -86,7 +89,9 @@ func New(cfg config.Config, st *store.Store) (*App, error) {
 		redis:          redisClient,
 		embyAdminCache: map[string]embyAdminCacheEntry{},
 	}
+	app.configSignature = configFileSignature(cfg.ConfigFile)
 	app.registerRoutes()
+	ConfigureRuntimeLoggingStore(st, cfg.SlogLevel(), cfg.RuntimeLogLimit)
 	return app, nil
 }
 
@@ -109,6 +114,28 @@ func newRedisClient(cfg config.Config) (*redis.Client, error) {
 	return redisClient, nil
 }
 
+func openConfiguredStore(ctx context.Context, cfg config.Config) (*store.Store, error) {
+	switch cfg.DatabaseDriver {
+	case "", store.BackendJSON, "file":
+		return store.Open(cfg.StateFile)
+	case store.BackendPostgres, "postgresql":
+		dsn := cfg.PostgresDSN()
+		if dsn == "" {
+			return nil, fmt.Errorf("database driver is postgres but no PostgreSQL URL or host/user/database is configured")
+		}
+		openCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		st, err := store.OpenPostgres(openCtx, dsn)
+		if err != nil {
+			return nil, err
+		}
+		st.ConfigurePostgres(cfg.PostgresMaxOpenConns, cfg.PostgresMaxIdleConns)
+		return st, nil
+	default:
+		return nil, fmt.Errorf("unsupported database driver %q", cfg.DatabaseDriver)
+	}
+}
+
 func (a *App) Routes() []Route {
 	out := make([]Route, len(a.routes))
 	copy(out, a.routes)
@@ -118,14 +145,29 @@ func (a *App) Routes() []Route {
 func (a *App) reloadConfig() (map[string]any, error) {
 	a.runtimeMu.Lock()
 	defer a.runtimeMu.Unlock()
+	return a.reloadConfigLocked()
+}
 
+func (a *App) reloadConfigLocked() (map[string]any, error) {
 	previous := a.cfg
-	next, err := config.Load(previous.ConfigFile)
+	next, err := config.NewReader(previous.ConfigFile).Read()
 	if err != nil {
 		return nil, err
 	}
 
 	reinitialized := []string{}
+	if previous.DatabaseDriver != next.DatabaseDriver || previous.StateFile != next.StateFile || previous.PostgresDSN() != next.PostgresDSN() {
+		nextStore, err := openConfiguredStore(context.Background(), next)
+		if err != nil {
+			return nil, err
+		}
+		oldStore := a.store
+		a.store = nextStore
+		if oldStore != nil && oldStore != nextStore {
+			_ = oldStore.Close()
+		}
+		reinitialized = append(reinitialized, "database")
+	}
 	if previous.RedisURL != next.RedisURL || previous.SessionTTL != next.SessionTTL {
 		redisClient, err := newRedisClient(next)
 		if err != nil {
@@ -142,19 +184,17 @@ func (a *App) reloadConfig() (map[string]any, error) {
 	}
 
 	a.cfg = next
-	ConfigureRuntimeLogging(next.SlogLevel(), next.RuntimeLogLimit)
+	ConfigureRuntimeLoggingStore(a.store, next.SlogLevel(), next.RuntimeLogLimit)
 	reinitialized = append(reinitialized, "runtime_logger")
 	if a.store.Backend() == store.BackendPostgres && (previous.PostgresMaxOpenConns != next.PostgresMaxOpenConns || previous.PostgresMaxIdleConns != next.PostgresMaxIdleConns) {
 		a.store.ConfigurePostgres(next.PostgresMaxOpenConns, next.PostgresMaxIdleConns)
 		reinitialized = append(reinitialized, "postgres_pool")
 	}
 	restartRequired := []string{}
-	if previous.DatabaseDriver != next.DatabaseDriver || previous.StateFile != next.StateFile || previous.PostgresDSN() != next.PostgresDSN() {
-		restartRequired = append(restartRequired, "database")
-	}
 	if previous.Host != next.Host || previous.Port != next.Port {
 		restartRequired = append(restartRequired, "listen_addr")
 	}
+	a.configSignature = configFileSignature(next.ConfigFile)
 
 	info := map[string]any{
 		"reloaded":            true,
@@ -163,9 +203,53 @@ func (a *App) reloadConfig() (map[string]any, error) {
 		"restart_required":    restartRequired,
 		"active_database":     a.store.Backend(),
 		"configured_database": next.DatabaseDriver,
+		"runtime_restarted":   len(reinitialized) > 0,
 	}
 	slog.Info("config hot reloaded", "config_file", next.ConfigFile, "reinitialized", strings.Join(reinitialized, ","), "restart_required", strings.Join(restartRequired, ","))
 	return info, nil
+}
+
+func (a *App) reloadConfigIfChanged() {
+	current := configFileSignature(a.cfg.ConfigFile)
+	a.runtimeMu.Lock()
+	if current == "" || current == a.configSignature {
+		a.runtimeMu.Unlock()
+		return
+	}
+	info, err := a.reloadConfigLocked()
+	a.runtimeMu.Unlock()
+	if err != nil {
+		slog.Warn("config hot reload check failed", "error", err)
+		return
+	}
+	slog.Info("config file change applied", "reload", info)
+}
+
+func configFileSignature(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		path = "config.toml"
+	}
+	paths := []string{path}
+	local := os.Getenv("TWILIGHT_CONFIG_LOCAL_FILE")
+	if local == "" {
+		local = strings.TrimSuffix(path, filepath.Ext(path)) + ".local" + filepath.Ext(path)
+	}
+	paths = append(paths, local)
+	parts := make([]string, 0, len(paths))
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err != nil {
+			if os.IsNotExist(err) {
+				parts = append(parts, p+":missing")
+			} else {
+				parts = append(parts, p+":error")
+			}
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s:%d:%d", p, info.Size(), info.ModTime().UnixNano()))
+	}
+	return strings.Join(parts, "|")
 }
 
 func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -175,6 +259,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusInternalServerError, "服务器内部错误")
 		}
 	}()
+	a.reloadConfigIfChanged()
 	a.applySecurityHeaders(w)
 	if a.applyCORS(w, r) && r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)

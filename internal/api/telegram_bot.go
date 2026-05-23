@@ -15,20 +15,39 @@ import (
 var telegramBindCodePattern = regexp.MustCompile(`^[A-Za-z0-9]{6,16}$`)
 
 func (a *App) RunTelegramBot(ctx context.Context) error {
-	if !a.telegramAvailable() {
-		return fmt.Errorf("Telegram mode is disabled or bot token is not configured")
-	}
-	me, err := a.telegramGetMe(ctx)
-	if err != nil {
-		return err
-	}
-	slog.Info("Telegram bot polling started", "username", me["username"])
 	offset := int64(0)
+	activeConfig := ""
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		default:
+		}
+		a.reloadConfigIfChanged()
+		if !a.telegramAvailable() {
+			slog.Info("Telegram bot configuration disabled; waiting before next config check")
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(3 * time.Second):
+				continue
+			}
+		}
+		currentConfig := strings.TrimSpace(a.cfg.TelegramAPIURL) + "|" + strings.TrimSpace(a.cfg.TelegramBotToken)
+		if currentConfig != activeConfig {
+			me, err := a.telegramGetMe(ctx)
+			if err != nil {
+				slog.Warn("Telegram bot initialization failed", "error", err)
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-time.After(3 * time.Second):
+					continue
+				}
+			}
+			activeConfig = currentConfig
+			offset = 0
+			slog.Info("Telegram bot polling started", "username", me["username"])
 		}
 		updates, err := a.telegramGetUpdates(ctx, offset)
 		if err != nil {
@@ -162,6 +181,10 @@ func (a *App) handleTelegramUpdate(ctx context.Context, update map[string]any) {
 		}
 		a.telegramConfirmBindCode(ctx, chatID, fromID, username, fields[1])
 	default:
+		if reply, ok := a.telegramCustomCommandReply(command); ok {
+			_ = a.telegramSendMessage(ctx, chatID, a.telegramRenderText(reply))
+			return
+		}
 		if privateChat && telegramBindCodePattern.MatchString(command) && !strings.HasPrefix(command, "/") {
 			a.telegramConfirmBindCode(ctx, chatID, fromID, username, command)
 			return
@@ -458,6 +481,19 @@ func telegramCommand(raw string) string {
 		raw = raw[:idx]
 	}
 	return strings.ToLower(raw)
+}
+
+func (a *App) telegramCustomCommandReply(command string) (string, bool) {
+	command = telegramCommand(command)
+	if command == "" || !strings.HasPrefix(command, "/") {
+		return "", false
+	}
+	for _, item := range a.cfg.TelegramCustomCommands {
+		if telegramCommand(item.Command) == command && strings.TrimSpace(item.Reply) != "" {
+			return item.Reply, true
+		}
+	}
+	return "", false
 }
 
 func (a *App) telegramStartText() string {

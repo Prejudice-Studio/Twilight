@@ -33,6 +33,7 @@ func newTestApp(t *testing.T) *App {
 		Host:                         "127.0.0.1",
 		Port:                         0,
 		DatabaseDir:                  dir,
+		DatabaseDriver:               store.BackendJSON,
 		DatabaseBackupDir:            filepath.Join(dir, "backups"),
 		StateFile:                    filepath.Join(dir, "state.json"),
 		UploadDir:                    filepath.Join(dir, "uploads"),
@@ -459,9 +460,9 @@ func TestRuntimeLogsRequireAdminAndRedactSecrets(t *testing.T) {
 }
 
 func TestRuntimeLoggerAppliesLevelAndCapturesStdLog(t *testing.T) {
-	runtimeLogs = newRuntimeLogBuffer(20)
+	runtimeLogs = newRuntimeLogSink(20)
 	t.Cleanup(func() {
-		runtimeLogs = newRuntimeLogBuffer(5000)
+		runtimeLogs = newRuntimeLogSink(5000)
 		InstallRuntimeLogger(io.Discard, slog.LevelInfo)
 	})
 
@@ -486,6 +487,83 @@ func TestRuntimeLoggerAppliesLevelAndCapturesStdLog(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "secret-value") {
 		t.Fatalf("sensitive attribute leaked to runtime log output: %s", out.String())
+	}
+}
+
+func TestConfigFileChangeHotReloadsRuntimeLogLevel(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg.ConfigFile = filepath.Join(app.cfg.DatabaseDir, "config.toml")
+	writeRuntimeConfig := func(level string, limit int) {
+		t.Helper()
+		content := "[Global]\n" +
+			"databases_dir = " + strconv.Quote(app.cfg.DatabaseDir) + "\n" +
+			"log_level = " + strconv.Quote(level) + "\n" +
+			"runtime_log_limit = " + strconv.Itoa(limit) + "\n\n" +
+			"[Database]\n" +
+			"driver = " + strconv.Quote(app.cfg.DatabaseDriver) + "\n" +
+			"backup_dir = " + strconv.Quote(app.cfg.DatabaseBackupDir) + "\n" +
+			"state_file = " + strconv.Quote(app.cfg.StateFile) + "\n"
+		if err := os.WriteFile(app.cfg.ConfigFile, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	runtimeLogs = newRuntimeLogSink(20)
+	t.Cleanup(func() {
+		runtimeLogs = newRuntimeLogSink(5000)
+		InstallRuntimeLogger(io.Discard, slog.LevelInfo)
+	})
+	InstallRuntimeLogger(io.Discard, slog.LevelError)
+	ConfigureRuntimeLogging(slog.LevelError, 20)
+	app.cfg.LogLevel = "error"
+	writeRuntimeConfig("error", 20)
+	app.configSignature = configFileSignature(app.cfg.ConfigFile)
+
+	time.Sleep(5 * time.Millisecond)
+	writeRuntimeConfig("debug", 21)
+	app.reloadConfigIfChanged()
+
+	if app.cfg.LogLevel != "debug" || app.cfg.RuntimeLogLimit != 21 {
+		t.Fatalf("config was not hot reloaded: level=%q limit=%d", app.cfg.LogLevel, app.cfg.RuntimeLogLimit)
+	}
+	slog.Debug("debug after hot reload")
+	entries, _ := runtimeLogs.snapshot(20, 0)
+	found := false
+	for _, entry := range entries {
+		if strings.Contains(entry.Message, "debug after hot reload") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("debug log was not captured after hot reload: %#v", entries)
+	}
+}
+
+func TestConfigSchemaRendersTelegramNewlines(t *testing.T) {
+	values := configValues(config.Config{
+		TelegramBotStartText: "第一行\n第二行",
+		TelegramCustomCommands: []config.TelegramCommandReply{
+			{Command: "/hello", Reply: "第一行\n第二行"},
+		},
+	})
+	content := renderConfigTOML(values)
+	if !strings.Contains(content, `bot_start_text = "第一行\n第二行"`) {
+		t.Fatalf("telegram newline was not TOML escaped correctly:\n%s", content)
+	}
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TelegramBotStartText != "第一行\n第二行" {
+		t.Fatalf("telegram newline did not round-trip: %q", cfg.TelegramBotStartText)
+	}
+	if len(cfg.TelegramCustomCommands) != 1 || cfg.TelegramCustomCommands[0].Reply != "第一行\n第二行" {
+		t.Fatalf("telegram custom command did not round-trip: %#v", cfg.TelegramCustomCommands)
 	}
 }
 
@@ -672,7 +750,7 @@ func TestDatabaseAdminBackupRestoreAndAuth(t *testing.T) {
 func TestConfigAdminBackupRestoreAndDelete(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg.ConfigFile = filepath.Join(app.cfg.DatabaseDir, "config.toml")
-	original := "[Global]\ndatabases_dir = " + strconv.Quote(app.cfg.DatabaseDir) + "\n\n[Database]\nbackup_dir = " + strconv.Quote(app.cfg.DatabaseBackupDir) + "\nstate_file = " + strconv.Quote(app.cfg.StateFile) + "\n\n[API]\nhost = \"127.0.0.1\"\nport = 5010\n"
+	original := "[Global]\ndatabases_dir = " + strconv.Quote(app.cfg.DatabaseDir) + "\n\n[Database]\ndriver = " + strconv.Quote(app.cfg.DatabaseDriver) + "\nbackup_dir = " + strconv.Quote(app.cfg.DatabaseBackupDir) + "\nstate_file = " + strconv.Quote(app.cfg.StateFile) + "\n\n[API]\nhost = \"127.0.0.1\"\nport = 5010\n"
 	changed := strings.Replace(original, "port = 5010", "port = 5011", 1)
 	if err := os.WriteFile(app.cfg.ConfigFile, []byte(original), 0o600); err != nil {
 		t.Fatal(err)

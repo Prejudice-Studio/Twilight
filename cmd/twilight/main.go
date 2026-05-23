@@ -65,7 +65,7 @@ func runAPI(args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(configPath)
+	cfg, err := config.NewReader(configPath).Read()
 	if err != nil {
 		return err
 	}
@@ -134,7 +134,7 @@ func runScheduler(args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(configPath)
+	cfg, err := config.NewReader(configPath).Read()
 	if err != nil {
 		return err
 	}
@@ -157,18 +157,29 @@ func runBot(args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(configPath)
+	reader := config.NewReader(configPath)
+	cfg, err := reader.Read()
 	if err != nil {
 		return err
 	}
 	api.InstallRuntimeLogger(os.Stdout, cfg.SlogLevel())
 	api.ConfigureRuntimeLogging(cfg.SlogLevel(), cfg.RuntimeLogLimit)
-	if !cfg.TelegramMode || strings.TrimSpace(cfg.TelegramBotToken) == "" {
-		slog.Info("Telegram bot mode is disabled or bot token is not configured; waiting for shutdown")
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
-		<-ctx.Done()
-		return nil
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	for !cfg.TelegramMode || strings.TrimSpace(cfg.TelegramBotToken) == "" {
+		slog.Info("Telegram bot mode is disabled or bot token is not configured; waiting for config reload")
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(3 * time.Second):
+		}
+		next, err := reader.Read()
+		if err != nil {
+			slog.Warn("Telegram bot config reload failed", "error", err)
+			continue
+		}
+		cfg = next
+		api.ConfigureRuntimeLogging(cfg.SlogLevel(), cfg.RuntimeLogLimit)
 	}
 	state, err := openStore(context.Background(), cfg)
 	if err != nil {
@@ -179,8 +190,6 @@ func runBot(args []string) error {
 	if err != nil {
 		return err
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	return app.RunTelegramBot(ctx)
 }
 
