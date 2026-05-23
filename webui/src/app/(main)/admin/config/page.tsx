@@ -55,6 +55,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError } from "@/components/layout/page-state";
 import { api } from "@/lib/api";
+import { useSystemStore } from "@/store/system";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Alert,
@@ -770,6 +771,7 @@ function SectionNav({
 export default function AdminConfigPage() {
   const { toast } = useToast();
   const { confirm } = useConfirm();
+  const { fetchInfo: fetchSystemInfo } = useSystemStore();
 
   // 源文件编辑状态
   const [configContent, setConfigContent] = useState("");
@@ -1112,6 +1114,7 @@ export default function AdminConfigPage() {
       if (configContent) {
         await loadConfig();
       }
+      await fetchSystemInfo(true);
       toast({
         title: "上传成功",
         description: "服务器图标已保存并热重载。",

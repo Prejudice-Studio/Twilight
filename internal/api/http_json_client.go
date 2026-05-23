@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -41,12 +42,16 @@ func doJSONRequest(req *http.Request, dst any) error {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("remote status %d", resp.StatusCode)
-	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
 		return err
+	}
+	if resp.StatusCode >= 400 {
+		detail := strings.TrimSpace(string(data))
+		if detail != "" {
+			return fmt.Errorf("remote status %d: %s", resp.StatusCode, truncateString(detail, 300))
+		}
+		return fmt.Errorf("remote status %d", resp.StatusCode)
 	}
 	if dst == nil {
 		return nil

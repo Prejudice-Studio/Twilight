@@ -3,12 +3,23 @@ package api
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 )
 
 func (a *App) searchBangumi(ctx context.Context, query string, limit int) ([]map[string]any, error) {
-	endpoint := strings.TrimRight(a.cfg.BangumiAPIURL, "/") + "/search/subjects"
-	body := map[string]any{"keyword": query, "filter": map[string]any{"type": []int{2, 6}}, "sort": "match", "limit": limit}
+	endpoint, err := bangumiEndpoint(a.cfg.BangumiAPIURL, "/search/subjects", url.Values{
+		"limit":  {fmt.Sprint(limit)},
+		"offset": {"0"},
+	})
+	if err != nil {
+		return nil, err
+	}
+	body := map[string]any{
+		"keyword": query,
+		"sort":    "match",
+		"filter":  map[string]any{"type": []int{2, 6}, "nsfw": true},
+	}
 	var payload map[string]any
 	if err := postJSON(ctx, endpoint, a.bangumiHeaders(), body, &payload); err != nil {
 		return nil, err
@@ -25,7 +36,10 @@ func (a *App) searchBangumi(ctx context.Context, query string, limit int) ([]map
 }
 
 func (a *App) getBangumi(ctx context.Context, id string) (map[string]any, error) {
-	endpoint := strings.TrimRight(a.cfg.BangumiAPIURL, "/") + "/subjects/" + id
+	endpoint, err := bangumiEndpoint(a.cfg.BangumiAPIURL, "/subjects/"+id, nil)
+	if err != nil {
+		return nil, err
+	}
 	var payload map[string]any
 	if err := getJSON(ctx, endpoint, a.bangumiHeaders(), &payload); err != nil {
 		return nil, err
@@ -39,6 +53,26 @@ func (a *App) bangumiHeaders() map[string]string {
 		headers["Authorization"] = "Bearer " + a.cfg.BangumiToken
 	}
 	return headers
+}
+
+func bangumiEndpoint(base, path string, values url.Values) (string, error) {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = "https://api.bgm.tv/v0"
+	}
+	parsed, err := url.Parse(base)
+	if err != nil {
+		return "", err
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	if !strings.HasSuffix(parsed.Path, "/v0") {
+		parsed.Path += "/v0"
+	}
+	parsed.Path += "/" + strings.TrimLeft(path, "/")
+	if values != nil {
+		parsed.RawQuery = values.Encode()
+	}
+	return parsed.String(), nil
 }
 
 func bangumiToMedia(item map[string]any) map[string]any {

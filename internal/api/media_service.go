@@ -2,35 +2,44 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 )
 
-func (a *App) searchMedia(ctx context.Context, query, source, mediaType string, limit int, includeDetails bool) ([]map[string]any, string) {
+func (a *App) searchMedia(ctx context.Context, query, source, mediaType string, limit int, includeDetails bool) ([]map[string]any, string, map[string]string) {
 	if strings.TrimSpace(query) == "" {
-		return []map[string]any{}, "OK"
+		return []map[string]any{}, "OK", nil
 	}
 	if kind, id, mt, ok := detectMediaID(query); ok {
 		if result, found := a.mediaDetail(ctx, kind, id, mt); found {
-			return []map[string]any{result}, "OK"
+			return []map[string]any{result}, "OK", nil
 		}
 	}
 	results := []map[string]any{}
+	sourceErrors := map[string]string{}
 	if source == "all" || source == "tmdb" {
 		if tmdb, err := a.searchTMDB(ctx, query, mediaType, limit); err == nil {
 			results = append(results, tmdb...)
+		} else {
+			sourceErrors["tmdb"] = fmt.Sprintf("TMDB 搜索失败：%v", err)
 		}
 	}
 	if source == "all" || source == "bangumi" {
 		if bgm, err := a.searchBangumi(ctx, query, limit); err == nil {
 			results = append(results, bgm...)
+		} else {
+			sourceErrors["bangumi"] = fmt.Sprintf("Bangumi 搜索失败：%v", err)
 		}
 	}
 	if len(results) > limit {
 		results = results[:limit]
 	}
-	return results, "OK"
+	if len(sourceErrors) == 0 {
+		sourceErrors = nil
+	}
+	return results, "OK", sourceErrors
 }
 
 func (a *App) mediaDetail(ctx context.Context, source, id, mediaType string) (map[string]any, bool) {

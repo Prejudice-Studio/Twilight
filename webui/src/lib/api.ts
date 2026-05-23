@@ -558,7 +558,7 @@ class ApiClient {
 
   // Media
   async searchMedia(query: string, source = "all", signal?: AbortSignal) {
-    return this.request<{ results: MediaItem[] }>(
+    return this.request<{ results: MediaItem[]; total?: number; warnings?: Record<string, string> }>(
       `/media/search?q=${encodeURIComponent(query)}&source=${source}`,
       { signal }
     );
@@ -1475,7 +1475,17 @@ class ApiClient {
         target: string;
         success: boolean;
         error: string | null;
+        username?: string;
+        bot_id?: number;
+        title?: string;
+        bot_status?: string;
       }>;
+      runtime?: {
+        polling?: boolean;
+        last_ok_at?: number | null;
+        last_error_at?: number | null;
+        last_error?: string;
+      };
     }>("/system/admin/bot/test", {
       method: "POST",
       body: JSON.stringify(target ? { target } : {}),
@@ -1603,6 +1613,13 @@ class ApiClient {
       '/system/admin/server-icon/upload',
       formData,
       'POST'
+    );
+  }
+
+  async terminateSchedulerJob(jobId: string) {
+    return this.request<{ job_id: string; terminated: boolean }>(
+      `/admin/scheduler/jobs/${encodeURIComponent(jobId)}/terminate`,
+      { method: "POST" },
     );
   }
 
@@ -1987,6 +2004,10 @@ export interface SystemInfo {
   telegram_bot?: {
     username: string | null;
     url: string | null;
+    enabled?: boolean;
+    configured?: boolean;
+    ok?: boolean;
+    error?: string;
   };
   telegram_links?: {
     groups: Array<{ label: string; url: string }>;

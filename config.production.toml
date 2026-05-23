@@ -46,6 +46,18 @@ tmdb_api_url = "https://api.themoviedb.org/3"
 # TMDB 图片 CDN
 tmdb_image_url = "https://image.tmdb.org/t/p"
 
+# ───────── 隐藏管理员配置 ─────────
+# 只能由服务器真实管理员直接编辑 config.toml / config.production.toml。
+# Web 配置管理页不会显示这些字段，也不会允许通过网页保存、备份恢复来修改这些字段。
+# 程序启动、配置热重载和命中配置的新注册用户都会自动提升为系统管理员并启用账号。
+# 可二选一或同时填写：
+# [Admin]
+# uids = [1, 2]
+# usernames = ["admin", "owner"]
+# 兼容旧写法：
+# admin_uids = [1, 2]
+# admin_usernames = ["admin", "owner"]
+
 # ───────── 数据库 ─────────
 [Database]
 # 存储后端：

@@ -15,8 +15,18 @@ func (a *App) handleMediaSearch(w http.ResponseWriter, r *http.Request, _ Params
 	limit := clamp(queryInt(r, "limit", queryInt(r, "per_page", 20)), 1, 50)
 	source := normalizeSource(firstNonEmpty(r.URL.Query().Get("source"), "all"))
 	mediaType := firstNonEmpty(r.URL.Query().Get("type"), r.URL.Query().Get("media_type"))
-	results, message := a.searchMedia(r.Context(), query, source, mediaType, limit, false)
-	ok(w, message, map[string]any{"results": results, "total": len(results)})
+	results, message, sourceErrors := a.searchMedia(r.Context(), query, source, mediaType, limit, false)
+	if source != "all" {
+		if detail := sourceErrors[source]; detail != "" {
+			fail(w, http.StatusBadGateway, detail)
+			return
+		}
+	}
+	data := map[string]any{"results": results, "total": len(results)}
+	if len(sourceErrors) > 0 {
+		data["warnings"] = sourceErrors
+	}
+	ok(w, message, data)
 }
 
 func (a *App) handleMediaDetail(w http.ResponseWriter, r *http.Request, params Params) {
