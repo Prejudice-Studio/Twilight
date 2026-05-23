@@ -27,12 +27,6 @@
               pkg-config
               openssl
             ];
-
-            shellHook = ''
-              echo "Twilight dev shell: Go $(go version), Node $(node --version), pnpm $(pnpm --version)"
-              echo "Backend check: go test ./..."
-              echo "Frontend deps: cd webui && pnpm install --frozen-lockfile"
-            '';
           };
         });
     };
