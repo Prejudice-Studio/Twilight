@@ -30,6 +30,7 @@ import {
   Coins,
   Github,
   ScrollText,
+  ShieldAlert,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
@@ -80,6 +81,7 @@ export const adminNavItems: SidebarNavItem[] = [
   { href: "/admin/regcodes", label: "注册码", icon: FileText },
   { href: "/admin/invite", label: "邀请森林", icon: Network },
   { href: "/admin/requests", label: "求片审核", icon: Film },
+  { href: "/admin/violations", label: "违规审计", icon: ShieldAlert },
   { href: "/admin/telegram-rebind-requests", label: "Telegram 换绑", icon: MessageSquare },
   { href: "/admin/emby", label: "Emby 管理", icon: Server },
   { href: "/admin/scheduler", label: "定时任务", icon: TimerReset },

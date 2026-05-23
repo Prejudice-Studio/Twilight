@@ -676,10 +676,16 @@ func (a *App) handleLibraries(w http.ResponseWriter, r *http.Request, params Par
 	if strings.Contains(r.URL.Path, "/emby/libraries") || strings.Contains(r.URL.Path, "/admin/emby/libraries") {
 		remoteLibraries, err := a.embyLibraries(r.Context())
 		if err != nil {
-			fail(w, http.StatusBadGateway, "failed to read Emby libraries")
+			fail(w, http.StatusBadGateway, "无法连接 Emby 服务器，请检查 Emby 是否在线："+err.Error())
 			return
 		}
 		ok(w, "OK", remoteLibraries)
+		return
+	}
+
+	// Pre-check: Emby must be configured
+	if a.cfg.EmbyURL == "" {
+		fail(w, http.StatusServiceUnavailable, "Emby 未配置")
 		return
 	}
 

@@ -539,7 +539,48 @@ func readTOML(path string, values map[string]string) error {
 }
 
 func normalizeValue(value string) string {
-	return strings.TrimSpace(strings.Trim(strings.TrimSpace(value), "\"'"))
+	value = strings.TrimSpace(value)
+	// Strip outer quotes and unescape TOML string escape sequences
+	if (strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"")) ||
+		(strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'")) {
+		value = value[1 : len(value)-1]
+	}
+	return unescapeTomlString(value)
+}
+
+// unescapeTomlString handles common TOML escape sequences within string values.
+func unescapeTomlString(s string) string {
+	if !strings.ContainsRune(s, '\\') {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			switch s[i+1] {
+			case '"':
+				b.WriteByte('"')
+				i++
+			case '\\':
+				b.WriteByte('\\')
+				i++
+			case 'n':
+				b.WriteByte('\n')
+				i++
+			case 't':
+				b.WriteByte('\t')
+				i++
+			case 'r':
+				b.WriteByte('\r')
+				i++
+			default:
+				b.WriteByte(s[i])
+			}
+		} else {
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
 }
 
 func bracketDelta(line string) int {
@@ -638,15 +679,60 @@ func listValue(value string) []string {
 	if value == "" {
 		return nil
 	}
-	parts := strings.Split(value, ",")
+	parts := splitRespectingQuotes(value)
 	out := make([]string, 0, len(parts))
 	for _, part := range parts {
-		part = strings.TrimSpace(strings.Trim(part, "\"'"))
+		part = strings.TrimSpace(part)
+		// Strip surrounding quotes and unescape
+		if (strings.HasPrefix(part, "\"") && strings.HasSuffix(part, "\"")) ||
+			(strings.HasPrefix(part, "'") && strings.HasSuffix(part, "'")) {
+			part = unescapeTomlString(part[1 : len(part)-1])
+		}
 		if part != "" {
 			out = append(out, part)
 		}
 	}
 	return out
+}
+
+// splitRespectingQuotes splits a string by commas but respects quoted segments.
+func splitRespectingQuotes(s string) []string {
+	var parts []string
+	var current strings.Builder
+	inQuote := rune(0)
+	escaped := false
+	for _, r := range s {
+		if escaped {
+			current.WriteRune(r)
+			escaped = false
+			continue
+		}
+		if r == '\\' && inQuote == '"' {
+			current.WriteRune(r)
+			escaped = true
+			continue
+		}
+		if (r == '"' || r == '\'') && inQuote == 0 {
+			inQuote = r
+			current.WriteRune(r)
+			continue
+		}
+		if r == inQuote {
+			inQuote = 0
+			current.WriteRune(r)
+			continue
+		}
+		if r == ',' && inQuote == 0 {
+			parts = append(parts, current.String())
+			current.Reset()
+			continue
+		}
+		current.WriteRune(r)
+	}
+	if current.Len() > 0 {
+		parts = append(parts, current.String())
+	}
+	return parts
 }
 
 func int64ListValue(value string) []int64 {
