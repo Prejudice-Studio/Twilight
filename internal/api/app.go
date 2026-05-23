@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
+	"go.uber.org/zap"
 	"net"
 	"net/http"
 	"net/url"
@@ -92,7 +92,7 @@ func New(cfg config.Config, st *store.Store) (*App, error) {
 	app.configSignature = configFileSignature(cfg.ConfigFile)
 	app.registerRoutes()
 	app.applyConfiguredAdmins()
-	ConfigureRuntimeLoggingStore(st, cfg.SlogLevel(), cfg.RuntimeLogLimit)
+	ConfigureRuntimeLoggingStore(st, cfg.ZapLevel(), cfg.RuntimeLogLimit)
 	return app, nil
 }
 
@@ -105,11 +105,11 @@ func newRedisClient(cfg config.Config) (*redis.Client, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		if err := redisClient.Ping(ctx); err != nil {
 			cancel()
-			slog.Warn("redis configured but unavailable; using memory fallback", "error", err)
+			zap.L().Warn("redis configured but unavailable; using memory fallback", zap.Error(err))
 			redisClient = nil
 		} else {
 			cancel()
-			slog.Info("redis enabled for sessions and rate limits")
+			zap.L().Info("redis enabled for sessions and rate limits")
 		}
 	}
 	return redisClient, nil
@@ -186,7 +186,7 @@ func (a *App) reloadConfigLocked() (map[string]any, error) {
 
 	a.cfg = next
 	a.applyConfiguredAdmins()
-	ConfigureRuntimeLoggingStore(a.store, next.SlogLevel(), next.RuntimeLogLimit)
+	ConfigureRuntimeLoggingStore(a.store, next.ZapLevel(), next.RuntimeLogLimit)
 	reinitialized = append(reinitialized, "runtime_logger")
 	if a.store.Backend() == store.BackendPostgres && (previous.PostgresMaxOpenConns != next.PostgresMaxOpenConns || previous.PostgresMaxIdleConns != next.PostgresMaxIdleConns) {
 		a.store.ConfigurePostgres(next.PostgresMaxOpenConns, next.PostgresMaxIdleConns)
@@ -207,7 +207,7 @@ func (a *App) reloadConfigLocked() (map[string]any, error) {
 		"configured_database": next.DatabaseDriver,
 		"runtime_restarted":   len(reinitialized) > 0,
 	}
-	slog.Info("config hot reloaded", "config_file", next.ConfigFile, "reinitialized", strings.Join(reinitialized, ","), "restart_required", strings.Join(restartRequired, ","))
+	zap.L().Info("config hot reloaded", zap.String("config_file", next.ConfigFile), zap.String("reinitialized", strings.Join(reinitialized, ",")), zap.String("restart_required", strings.Join(restartRequired, ",")))
 	return info, nil
 }
 
@@ -221,10 +221,10 @@ func (a *App) reloadConfigIfChanged() {
 	info, err := a.reloadConfigLocked()
 	a.runtimeMu.Unlock()
 	if err != nil {
-		slog.Warn("config hot reload check failed", "error", err)
+		zap.L().Warn("config hot reload check failed", zap.Error(err))
 		return
 	}
-	slog.Info("config file change applied", "reload", info)
+	zap.L().Info("config file change applied", zap.Any("reload", info))
 }
 
 func configFileSignature(path string) string {
@@ -257,7 +257,7 @@ func configFileSignature(path string) string {
 func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			slog.Error("panic in api handler", "panic", recovered)
+			zap.L().Error("panic in api handler", zap.Any("panic", recovered))
 			fail(w, http.StatusInternalServerError, "服务器内部错误")
 		}
 	}()

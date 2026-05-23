@@ -3,9 +3,10 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"io"
 	"log"
-	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -534,16 +535,17 @@ func TestRuntimeLoggerAppliesLevelAndCapturesStdLog(t *testing.T) {
 	runtimeLogs = newRuntimeLogSink(20)
 	t.Cleanup(func() {
 		runtimeLogs = newRuntimeLogSink(5000)
-		InstallRuntimeLogger(io.Discard, slog.LevelInfo)
+		InstallRuntimeLogger(io.Discard, zapcore.InfoLevel)
 	})
 
 	var out bytes.Buffer
-	InstallRuntimeLogger(&out, slog.LevelWarn)
-	ConfigureRuntimeLogging(slog.LevelWarn, 20)
+	InstallRuntimeLogger(&out, zapcore.WarnLevel)
+	ConfigureRuntimeLogging(zapcore.WarnLevel, 20)
 
-	slog.Info("runtime info should be filtered")
-	slog.Warn("runtime warn should be captured", "token", "secret-value")
+	zap.L().Info("runtime info should be filtered")
+	zap.L().Warn("runtime warn should be captured", zap.String("token", "secret-value"))
 	log.Print("runtime standard log should be captured")
+	time.Sleep(10 * time.Millisecond)
 
 	entries, _ := runtimeLogs.snapshot(20, 0)
 	joined := ""
@@ -582,10 +584,10 @@ func TestConfigFileChangeHotReloadsRuntimeLogLevel(t *testing.T) {
 	runtimeLogs = newRuntimeLogSink(20)
 	t.Cleanup(func() {
 		runtimeLogs = newRuntimeLogSink(5000)
-		InstallRuntimeLogger(io.Discard, slog.LevelInfo)
+		InstallRuntimeLogger(io.Discard, zapcore.InfoLevel)
 	})
-	InstallRuntimeLogger(io.Discard, slog.LevelError)
-	ConfigureRuntimeLogging(slog.LevelError, 20)
+	InstallRuntimeLogger(io.Discard, zapcore.ErrorLevel)
+	ConfigureRuntimeLogging(zapcore.ErrorLevel, 20)
 	app.cfg.LogLevel = "error"
 	writeRuntimeConfig("error", 20)
 	app.configSignature = configFileSignature(app.cfg.ConfigFile)
@@ -597,7 +599,7 @@ func TestConfigFileChangeHotReloadsRuntimeLogLevel(t *testing.T) {
 	if app.cfg.LogLevel != "debug" || app.cfg.RuntimeLogLimit != 21 {
 		t.Fatalf("config was not hot reloaded: level=%q limit=%d", app.cfg.LogLevel, app.cfg.RuntimeLogLimit)
 	}
-	slog.Debug("debug after hot reload")
+	zap.L().Debug("debug after hot reload")
 	entries, _ := runtimeLogs.snapshot(20, 0)
 	found := false
 	for _, entry := range entries {

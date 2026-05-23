@@ -1,7 +1,7 @@
 package api
 
 import (
-	"log/slog"
+	"go.uber.org/zap"
 	"strings"
 
 	"github.com/prejudice-studio/twilight/internal/store"
@@ -26,7 +26,7 @@ func (a *App) applyConfiguredAdmins() {
 			return nil
 		})
 		if err == nil {
-			slog.Info("configured administrator applied", "uid", updated.UID, "username", updated.Username)
+			zap.L().Info("configured administrator applied", zap.Int64("uid", updated.UID), zap.String("username", updated.Username))
 		}
 	}
 }

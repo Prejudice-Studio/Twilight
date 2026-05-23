@@ -5,8 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
-	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"regexp"
@@ -17,6 +16,8 @@ import (
 	"time"
 
 	"github.com/prejudice-studio/twilight/internal/store"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 type RuntimeLogEntry = store.RuntimeLogEntry
@@ -32,7 +33,7 @@ type runtimeLogBuffer struct {
 var (
 	runtimeStartedAt = time.Now()
 	runtimeLogs      = newRuntimeLogSink(5000)
-	runtimeLogLevel  slog.LevelVar
+	runtimeLogLevel  = zap.NewAtomicLevelAt(zapcore.InfoLevel)
 	sensitivePattern = regexp.MustCompile(`(?i)(authorization|cookie|token|secret|password|passwd|api[_-]?key|bot[_-]?token|dsn)\s*[:=]\s*[^ \t\r\n,;]+`)
 	bearerPattern    = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._~+/=-]{12,}`)
 	keyPattern       = regexp.MustCompile(`key-[A-Za-z0-9._~+/=-]{12,}`)
@@ -252,121 +253,162 @@ func (b *runtimeLogBuffer) waitAfter(ctx context.Context, after int64, limit int
 	}
 }
 
-type runtimeLogHandler struct {
-	next  slog.Handler
-	attrs []slog.Attr
+type runtimeLogCore struct {
+	zapcore.Core
+	fields []zapcore.Field
 }
 
-func InstallRuntimeLogger(w io.Writer, level slog.Leveler) {
+func InstallRuntimeLogger(w io.Writer, level zapcore.Level) {
 	if w == nil {
 		w = io.Discard
 	}
-	if level == nil {
-		level = slog.LevelInfo
+	runtimeLogLevel.SetLevel(level)
+	stdLogLevel := zapcore.InfoLevel
+	if level > stdLogLevel {
+		stdLogLevel = level
 	}
-	runtimeLogLevel.Set(level.Level())
-	slog.SetLogLoggerLevel(level.Level())
-	next := slog.NewTextHandler(w, &slog.HandlerOptions{Level: &runtimeLogLevel})
-	slog.SetDefault(slog.New(&runtimeLogHandler{next: next}))
-	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
+	encoderConfig := zap.NewProductionEncoderConfig()
+	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
+	core := zapcore.NewCore(zapcore.NewConsoleEncoder(encoderConfig), zapcore.AddSync(w), runtimeLogLevel)
+	logger := zap.New(&runtimeLogCore{Core: core}, zap.AddCaller(), zap.ErrorOutput(zapcore.AddSync(w)))
+	zap.ReplaceGlobals(logger)
+	zap.RedirectStdLogAt(logger, stdLogLevel)
 }
 
-func ConfigureRuntimeLogging(level slog.Leveler, limit int) {
-	if level != nil {
-		runtimeLogLevel.Set(level.Level())
-		slog.SetLogLoggerLevel(level.Level())
-	}
+func ConfigureRuntimeLogging(level zapcore.Level, limit int) {
+	runtimeLogLevel.SetLevel(level)
 	if limit > 0 {
 		runtimeLogs.configure(nil, limit)
 	}
 }
 
-func ConfigureRuntimeLoggingStore(st *store.Store, level slog.Leveler, limit int) {
-	if level != nil {
-		runtimeLogLevel.Set(level.Level())
-		slog.SetLogLoggerLevel(level.Level())
-	}
+func ConfigureRuntimeLoggingStore(st *store.Store, level zapcore.Level, limit int) {
+	runtimeLogLevel.SetLevel(level)
 	runtimeLogs.configure(st, limit)
 }
 
-func (h *runtimeLogHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return h.next.Enabled(ctx, level)
+func (c *runtimeLogCore) With(fields []zapcore.Field) zapcore.Core {
+	nextFields := append([]zapcore.Field{}, c.fields...)
+	nextFields = append(nextFields, cloneZapFields(fields)...)
+	return &runtimeLogCore{Core: c.Core.With(sanitizeZapFields(fields)), fields: nextFields}
 }
 
-func (h *runtimeLogHandler) Handle(ctx context.Context, record slog.Record) error {
-	attrs := map[string]string{}
-	for _, attr := range h.attrs {
-		addLogAttr(attrs, attr)
+func (c *runtimeLogCore) Check(entry zapcore.Entry, checked *zapcore.CheckedEntry) *zapcore.CheckedEntry {
+	if c.Enabled(entry.Level) {
+		return checked.AddCore(entry, c)
 	}
-	sanitized := slog.NewRecord(record.Time, record.Level, redactSensitiveText(record.Message), record.PC)
-	record.Attrs(func(attr slog.Attr) bool {
-		addLogAttr(attrs, attr)
-		sanitized.AddAttrs(sanitizeLogAttr(attr))
-		return true
-	})
+	return checked
+}
+
+func (c *runtimeLogCore) Write(entry zapcore.Entry, fields []zapcore.Field) error {
+	allFields := append(cloneZapFields(c.fields), cloneZapFields(fields)...)
+	attrs := zapFieldsToAttrs(allFields)
 	runtimeLogs.append(RuntimeLogEntry{
-		Time:    record.Time.Unix(),
-		Level:   record.Level.String(),
-		Message: redactSensitiveText(record.Message),
+		Time:    entry.Time.Unix(),
+		Level:   strings.ToUpper(entry.Level.String()),
+		Message: redactSensitiveText(entry.Message),
 		Attrs:   attrs,
 	})
-	return h.next.Handle(ctx, sanitized)
+	sanitized := zapcore.Entry{
+		Level:      entry.Level,
+		Time:       entry.Time,
+		LoggerName: entry.LoggerName,
+		Message:    redactSensitiveText(entry.Message),
+		Caller:     entry.Caller,
+		Stack:      redactSensitiveText(entry.Stack),
+	}
+	return c.Core.Write(sanitized, sanitizeZapFields(fields))
 }
 
-func (h *runtimeLogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	nextAttrs := append([]slog.Attr{}, h.attrs...)
-	nextAttrs = append(nextAttrs, attrs...)
-	sanitized := make([]slog.Attr, 0, len(attrs))
-	for _, attr := range attrs {
-		sanitized = append(sanitized, sanitizeLogAttr(attr))
+func cloneZapFields(fields []zapcore.Field) []zapcore.Field {
+	if len(fields) == 0 {
+		return nil
 	}
-	return &runtimeLogHandler{next: h.next.WithAttrs(sanitized), attrs: nextAttrs}
+	out := make([]zapcore.Field, len(fields))
+	copy(out, fields)
+	return out
 }
 
-func (h *runtimeLogHandler) WithGroup(name string) slog.Handler {
-	return &runtimeLogHandler{next: h.next.WithGroup(name), attrs: append([]slog.Attr{}, h.attrs...)}
-}
-
-func addLogAttr(attrs map[string]string, attr slog.Attr) {
-	attr.Value = attr.Value.Resolve()
-	key := strings.ToLower(attr.Key)
-	value := fmt.Sprint(attr.Value.Any())
-	if sensitiveLogKey(key) {
-		attrs[attr.Key] = "[REDACTED]"
-		return
+func sanitizeZapFields(fields []zapcore.Field) []zapcore.Field {
+	if len(fields) == 0 {
+		return nil
 	}
-	attrs[attr.Key] = redactSensitiveText(value)
-}
-
-func sanitizeLogAttr(attr slog.Attr) slog.Attr {
-	attr.Value = attr.Value.Resolve()
-	if sensitiveLogKey(attr.Key) {
-		return slog.String(attr.Key, "[REDACTED]")
-	}
-	if attr.Value.Kind() == slog.KindGroup {
-		group := attr.Value.Group()
-		sanitized := make([]slog.Attr, 0, len(group))
-		for _, child := range group {
-			sanitized = append(sanitized, sanitizeLogAttr(child))
-		}
-		return slog.Group(attr.Key, attrsToAny(sanitized)...)
-	}
-	if attr.Value.Kind() == slog.KindString {
-		return slog.String(attr.Key, redactSensitiveText(attr.Value.String()))
-	}
-	text := fmt.Sprint(attr.Value.Any())
-	if redacted := redactSensitiveText(text); redacted != text {
-		return slog.String(attr.Key, redacted)
-	}
-	return attr
-}
-
-func attrsToAny(attrs []slog.Attr) []any {
-	out := make([]any, 0, len(attrs))
-	for _, attr := range attrs {
-		out = append(out, attr)
+	out := make([]zapcore.Field, 0, len(fields))
+	for _, field := range fields {
+		out = append(out, sanitizeZapField(field))
 	}
 	return out
+}
+
+func sanitizeZapField(field zapcore.Field) zapcore.Field {
+	if sensitiveLogKey(field.Key) {
+		return zap.String(field.Key, "[REDACTED]")
+	}
+	if field.Type == zapcore.StringType {
+		field.String = redactSensitiveText(field.String)
+		return field
+	}
+	if field.Type == zapcore.ErrorType {
+		if err, ok := field.Interface.(error); ok && err != nil {
+			return zap.String(field.Key, redactSensitiveText(err.Error()))
+		}
+	}
+	text := zapFieldValueString(field)
+	if redacted := redactSensitiveText(text); redacted != text {
+		return zap.String(field.Key, redacted)
+	}
+	return field
+}
+
+func zapFieldsToAttrs(fields []zapcore.Field) map[string]string {
+	if len(fields) == 0 {
+		return nil
+	}
+	attrs := map[string]string{}
+	for _, field := range fields {
+		if sensitiveLogKey(field.Key) {
+			attrs[field.Key] = "[REDACTED]"
+			continue
+		}
+		attrs[field.Key] = redactSensitiveText(zapFieldValueString(field))
+	}
+	if len(attrs) == 0 {
+		return nil
+	}
+	return attrs
+}
+
+func zapFieldValueString(field zapcore.Field) string {
+	switch field.Type {
+	case zapcore.StringType:
+		return field.String
+	case zapcore.ErrorType:
+		if err, ok := field.Interface.(error); ok && err != nil {
+			return err.Error()
+		}
+	case zapcore.BoolType:
+		return strconv.FormatBool(field.Integer == 1)
+	case zapcore.Int8Type, zapcore.Int16Type, zapcore.Int32Type, zapcore.Int64Type:
+		return strconv.FormatInt(field.Integer, 10)
+	case zapcore.Uint8Type, zapcore.Uint16Type, zapcore.Uint32Type, zapcore.Uint64Type, zapcore.UintptrType:
+		return strconv.FormatUint(uint64(field.Integer), 10)
+	case zapcore.Float32Type:
+		return strconv.FormatFloat(float64(math.Float32frombits(uint32(field.Integer))), 'f', -1, 32)
+	case zapcore.Float64Type:
+		return strconv.FormatFloat(math.Float64frombits(uint64(field.Integer)), 'f', -1, 64)
+	case zapcore.DurationType:
+		return time.Duration(field.Integer).String()
+	case zapcore.TimeType:
+		return time.Unix(0, field.Integer).UTC().Format(time.RFC3339Nano)
+	}
+	if field.Interface != nil {
+		return fmt.Sprint(field.Interface)
+	}
+	if field.String != "" {
+		return field.String
+	}
+	return strconv.FormatInt(field.Integer, 10)
 }
 
 func sensitiveLogKey(key string) bool {

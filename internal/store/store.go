@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
+	"go.uber.org/zap"
 	"net"
 	"net/url"
 	"os"
@@ -407,7 +407,7 @@ func CreatePostgresDatabase(ctx context.Context, dsn string) error {
 	var lastErr error
 	for _, maintenanceDSN := range maintenanceDSNs {
 		maintenance := postgresTargetInfo(maintenanceDSN)
-		slog.Info("attempting PostgreSQL database creation through maintenance database", "target_database", target, "maintenance_database", maintenance.Database, "user", maintenance.User, "host", maintenance.Host)
+		zap.L().Info("attempting PostgreSQL database creation through maintenance database", zap.String("target_database", target), zap.String("maintenance_database", maintenance.Database), zap.String("user", maintenance.User), zap.String("host", maintenance.Host))
 		db, err := sql.Open("pgx", maintenanceDSN)
 		if err != nil {
 			lastErr = err
@@ -429,7 +429,7 @@ func CreatePostgresDatabase(ctx context.Context, dsn string) error {
 		targetInfo := maintenance
 		targetInfo.Database = target
 		lastErr = describePostgresConnectionError(targetInfo, err)
-		slog.Warn("PostgreSQL automatic database creation attempt failed", "target_database", target, "maintenance_database", maintenance.Database, "user", maintenance.User, "host", maintenance.Host, "error", lastErr)
+		zap.L().Warn("PostgreSQL automatic database creation attempt failed", zap.String("target_database", target), zap.String("maintenance_database", maintenance.Database), zap.String("user", maintenance.User), zap.String("host", maintenance.Host), zap.Error(lastErr))
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("no maintenance database connection strings could be built")
@@ -591,12 +591,12 @@ func openPreparedPostgres(ctx context.Context, dsn string) (*sql.DB, PostgresTar
 		if !isUndefinedDatabaseError(err) {
 			return nil, status, describePostgresConnectionError(target, err)
 		}
-		slog.Warn("PostgreSQL database does not exist; attempting automatic creation", "database", target.Database, "user", target.User, "host", target.Host)
+		zap.L().Warn("PostgreSQL database does not exist; attempting automatic creation", zap.String("database", target.Database), zap.String("user", target.User), zap.String("host", target.Host))
 		if createErr := CreatePostgresDatabase(ctx, dsn); createErr != nil {
 			return nil, status, fmt.Errorf("PostgreSQL database %q does not exist and automatic creation failed: %w", target.Database, describePostgresConnectionError(target, createErr))
 		}
 		status.DatabaseCreated = true
-		slog.Info("PostgreSQL database created", "database", target.Database, "user", target.User, "host", target.Host)
+		zap.L().Info("PostgreSQL database created", zap.String("database", target.Database), zap.String("user", target.User), zap.String("host", target.Host))
 		db, err = sql.Open("pgx", dsn)
 		if err != nil {
 			return nil, status, err

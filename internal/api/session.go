@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
+	"go.uber.org/zap"
 	"sync"
 	"time"
 
@@ -40,7 +40,7 @@ func (s *sessionStore) Create(ctx context.Context, uid int64) (string, time.Time
 		if err := s.redis.SetEX(ctx, s.prefix+token, int(s.ttl/time.Second), string(payload)); err == nil {
 			return token, expires, nil
 		} else {
-			slog.Warn("redis session create failed; falling back to memory", "error", err)
+			zap.L().Warn("redis session create failed; falling back to memory", zap.Error(err))
 		}
 	}
 	s.mu.Lock()
@@ -61,7 +61,7 @@ func (s *sessionStore) Get(ctx context.Context, token string) (int64, bool) {
 				return record.UID, true
 			}
 		} else if err != nil {
-			slog.Warn("redis session read failed; falling back to memory", "error", err)
+			zap.L().Warn("redis session read failed; falling back to memory", zap.Error(err))
 		}
 	}
 	s.mu.RLock()

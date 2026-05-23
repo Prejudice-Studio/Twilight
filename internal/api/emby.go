@@ -3,12 +3,12 @@ package api
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/prejudice-studio/twilight/internal/store"
+	"go.uber.org/zap"
 )
 
 func (a *App) embyIsAdmin(ctx context.Context, embyID string) bool {
@@ -43,8 +43,8 @@ func (a *App) requireNonEmbyAdmin(w http.ResponseWriter, r *http.Request, user s
 		return false
 	}
 	if a.embyIsAdmin(r.Context(), user.EmbyID) {
-		slog.Warn("blocked sensitive operation for non-admin user with Emby admin account",
-			"uid", user.UID, "username", user.Username, "emby_id", user.EmbyID)
+		zap.L().Warn("blocked sensitive operation for non-admin user with Emby admin account",
+			zap.Int64("uid", user.UID), zap.String("username", user.Username), zap.String("emby_id", user.EmbyID))
 		fail(w, http.StatusForbidden, "安全限制：您绑定的 Emby 账号具有管理员权限，但您不是系统管理员。为防止越权操作，已禁止此请求。请联系系统管理员。")
 		return true
 	}
@@ -61,8 +61,8 @@ func (a *App) blockRestrictedEmbyAdmin(w http.ResponseWriter, r *http.Request, r
 	if embyAdminRestrictionAllowed(r.Method, r.URL.Path) {
 		return false
 	}
-	slog.Warn("blocked request for non-admin user bound to Emby administrator",
-		"uid", user.UID, "username", user.Username, "method", r.Method, "path", r.URL.Path)
+	zap.L().Warn("blocked request for non-admin user bound to Emby administrator",
+		zap.Int64("uid", user.UID), zap.String("username", user.Username), zap.String("method", r.Method), zap.String("path", r.URL.Path))
 	fail(w, http.StatusForbidden, "安全限制：当前系统账号不是管理员，但绑定的 Emby 账号具有管理员权限。除查看账号状态和退出登录外，所有操作已被禁止，请联系系统管理员处理。")
 	return true
 }

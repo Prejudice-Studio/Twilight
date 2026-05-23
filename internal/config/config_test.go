@@ -1,7 +1,7 @@
 package config
 
 import (
-	"log/slog"
+	"go.uber.org/zap/zapcore"
 	"os"
 	"path/filepath"
 	"strings"
@@ -211,8 +211,8 @@ func TestLogConfigSupportsLegacyNumericLevels(t *testing.T) {
 	if !cfg.DatabaseMigrationPanelEnabled {
 		t.Fatal("expected database migration panel to be enabled")
 	}
-	if cfg.SlogLevel() != slog.LevelWarn {
-		t.Fatalf("expected warn slog level, got %v", cfg.SlogLevel())
+	if cfg.ZapLevel() != zapcore.WarnLevel {
+		t.Fatalf("expected warn zap level, got %v", cfg.ZapLevel())
 	}
 
 	if err := os.WriteFile(path, []byte("[Global]\nlog_level = 10\n"), 0o600); err != nil {
@@ -222,8 +222,8 @@ func TestLogConfigSupportsLegacyNumericLevels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.LogLevel != "debug" || cfg.SlogLevel() != slog.LevelDebug {
-		t.Fatalf("expected legacy numeric debug level, got %q/%v", cfg.LogLevel, cfg.SlogLevel())
+	if cfg.LogLevel != "debug" || cfg.ZapLevel() != zapcore.DebugLevel {
+		t.Fatalf("expected legacy numeric debug level, got %q/%v", cfg.LogLevel, cfg.ZapLevel())
 	}
 }
 

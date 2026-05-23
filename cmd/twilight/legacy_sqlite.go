@@ -6,7 +6,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"errors"
-	"log/slog"
+	"go.uber.org/zap"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,12 +30,12 @@ func bootstrapLegacyAdminsIfNeeded(cfg config.Config, st *store.Store) {
 	}
 	sqliteBin, err := exec.LookPath("sqlite3")
 	if err != nil {
-		slog.Warn("legacy users.db found but sqlite3 command is unavailable; existing admins cannot be bootstrapped automatically", "path", dbPath)
+		zap.L().Warn("legacy users.db found but sqlite3 command is unavailable; existing admins cannot be bootstrapped automatically", zap.String("path", dbPath))
 		return
 	}
 	admins, err := readLegacySQLiteAdmins(sqliteBin, dbPath)
 	if err != nil {
-		slog.Warn("failed to read legacy users.db administrators", "path", dbPath, "error", err)
+		zap.L().Warn("failed to read legacy users.db administrators", zap.String("path", dbPath), zap.Error(err))
 		return
 	}
 	if len(admins) == 0 {
@@ -54,20 +54,20 @@ func bootstrapLegacyAdminsIfNeeded(cfg config.Config, st *store.Store) {
 				applyLegacyAdmin(u, admin)
 				return nil
 			}); err != nil {
-				slog.Warn("failed to promote existing user from legacy users.db", "username", admin.Username, "error", err)
+				zap.L().Warn("failed to promote existing user from legacy users.db", zap.String("username", admin.Username), zap.Error(err))
 				continue
 			}
 			imported++
 			continue
 		}
 		if _, err := st.CreateUser(admin); err != nil {
-			slog.Warn("failed to bootstrap administrator from legacy users.db", "username", admin.Username, "error", err)
+			zap.L().Warn("failed to bootstrap administrator from legacy users.db", zap.String("username", admin.Username), zap.Error(err))
 			continue
 		}
 		imported++
 	}
 	if imported > 0 {
-		slog.Warn("bootstrapped administrators from legacy users.db so existing admins can log in and migrate", "path", dbPath, "count", imported)
+		zap.L().Warn("bootstrapped administrators from legacy users.db so existing admins can log in and migrate", zap.String("path", dbPath), zap.Int("count", imported))
 	}
 }
 

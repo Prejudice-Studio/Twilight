@@ -1,9 +1,8 @@
 package config
 
 import (
-	"bufio"
+	"bytes"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/url"
 	"os"
@@ -11,6 +10,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/spf13/viper"
+	"go.uber.org/zap/zapcore"
 )
 
 type Line struct {
@@ -154,126 +156,126 @@ func Load(path string) (Config, error) {
 	}
 	cfg.ConfigFile = path
 
-	values := map[string]string{}
-	if err := readTOML(path, values); err != nil && !os.IsNotExist(err) {
+	reader := newViperConfigReader()
+	if err := reader.mergeFile(path); err != nil {
 		return cfg, err
 	}
 	local := os.Getenv("TWILIGHT_CONFIG_LOCAL_FILE")
 	if local == "" {
 		local = strings.TrimSuffix(path, filepath.Ext(path)) + ".local" + filepath.Ext(path)
 	}
-	if err := readTOML(local, values); err != nil && !os.IsNotExist(err) {
+	if err := reader.mergeFile(local); err != nil {
 		return cfg, err
 	}
 
-	cfg.AppName = first(values, "Global.server_name", "server_name", cfg.AppName)
-	cfg.ServerIcon = first(values, "Global.server_icon", "server_icon", cfg.ServerIcon)
-	cfg.RedisURL = first(values, "Global.redis_url", "redis_url", cfg.RedisURL)
-	cfg.LogLevel = normalizeLogLevel(first(values, "Global.log_level", "log_level", cfg.LogLevel))
-	cfg.RuntimeLogLimit = intValue(first(values, "Global.runtime_log_limit", "runtime_log_limit", strconv.Itoa(cfg.RuntimeLogLimit)), cfg.RuntimeLogLimit)
-	cfg.AdminUIDs = int64ListValue(first(values, "Admin.uids", "Admin.admin_uids", "admin_uids", strings.Join(int64ListToStrings(cfg.AdminUIDs), ",")))
-	cfg.AdminUsernames = listValue(first(values, "Admin.usernames", "Admin.admin_usernames", "Admin.users", "admin_usernames", strings.Join(cfg.AdminUsernames, ",")))
-	cfg.DatabaseDir = first(values, "Global.databases_dir", "databases_dir", cfg.DatabaseDir)
-	cfg.DatabaseDriver = strings.ToLower(first(values, "Database.driver", "Global.database_driver", "database_driver", cfg.DatabaseDriver))
-	cfg.DatabaseURL = first(values, "Database.url", "Database.database_url", "Global.database_url", "database_url", cfg.DatabaseURL)
-	cfg.DatabaseBackupDir = first(values, "Database.backup_dir", "database_backup_dir", cfg.DatabaseBackupDir)
-	cfg.DatabaseMigrationPanelEnabled = boolValue(first(values, "Database.migration_panel_enabled", "database_migration_panel_enabled", strconv.FormatBool(cfg.DatabaseMigrationPanelEnabled)), cfg.DatabaseMigrationPanelEnabled)
-	cfg.StateFile = first(values, "Database.state_file", "Global.state_file", "state_file", cfg.StateFile)
-	cfg.PostgresHost = first(values, "Database.postgres_host", "PostgreSQL.host", "postgres_host", cfg.PostgresHost)
-	cfg.PostgresPort = intValue(first(values, "Database.postgres_port", "PostgreSQL.port", "postgres_port", strconv.Itoa(cfg.PostgresPort)), cfg.PostgresPort)
-	cfg.PostgresUser = first(values, "Database.postgres_user", "PostgreSQL.user", "postgres_user", cfg.PostgresUser)
-	cfg.PostgresPassword = first(values, "Database.postgres_password", "PostgreSQL.password", "postgres_password", cfg.PostgresPassword)
-	cfg.PostgresDatabase = first(values, "Database.postgres_database", "PostgreSQL.database", "postgres_database", cfg.PostgresDatabase)
-	cfg.PostgresSSLMode = first(values, "Database.postgres_sslmode", "PostgreSQL.sslmode", "postgres_sslmode", cfg.PostgresSSLMode)
-	cfg.PostgresMaxOpenConns = intValue(first(values, "Database.postgres_max_open_conns", "PostgreSQL.max_open_conns", "postgres_max_open_conns", strconv.Itoa(cfg.PostgresMaxOpenConns)), cfg.PostgresMaxOpenConns)
-	cfg.PostgresMaxIdleConns = intValue(first(values, "Database.postgres_max_idle_conns", "PostgreSQL.max_idle_conns", "postgres_max_idle_conns", strconv.Itoa(cfg.PostgresMaxIdleConns)), cfg.PostgresMaxIdleConns)
-	cfg.UploadDir = first(values, "API.upload_folder", "upload_folder", cfg.UploadDir)
-	cfg.Host = first(values, "API.host", "host", cfg.Host)
-	cfg.Port = intValue(first(values, "API.port", "port", strconv.Itoa(cfg.Port)), cfg.Port)
-	cfg.MaxUploadSize = int64Value(first(values, "API.max_upload_size", "max_upload_size", strconv.FormatInt(cfg.MaxUploadSize, 10)), cfg.MaxUploadSize)
-	cfg.CORSOrigins = listValue(first(values, "API.cors_origins", "cors_origins", strings.Join(cfg.CORSOrigins, ",")))
-	cfg.TrustProxyHeaders = boolValue(first(values, "API.trust_proxy_headers", "trust_proxy_headers", strconv.FormatBool(cfg.TrustProxyHeaders)), cfg.TrustProxyHeaders)
-	cfg.SessionCookie = first(values, "Security.session_cookie_name", "session_cookie_name", cfg.SessionCookie)
-	cfg.BotInternalSecret = first(values, "Security.bot_internal_secret", "bot_internal_secret", cfg.BotInternalSecret)
-	cfg.EmbyURL = first(values, "Emby.emby_url", "emby_url", cfg.EmbyURL)
-	cfg.EmbyToken = first(values, "Emby.emby_token", "emby_token", cfg.EmbyToken)
-	cfg.EmbyUsername = first(values, "Emby.emby_username", "emby_username", cfg.EmbyUsername)
-	cfg.EmbyPassword = first(values, "Emby.emby_password", "emby_password", cfg.EmbyPassword)
-	cfg.EmbyPublicURL = first(values, "Emby.emby_public_url", "emby_public_url", cfg.EmbyPublicURL)
-	cfg.EmbyWhitelistURL = first(values, "Emby.emby_whitelist_url", "emby_whitelist_url", cfg.EmbyWhitelistURL)
-	cfg.EmbyURLList = parseLines(first(values, "Emby.emby_url_list", "emby_url_list", ""))
-	cfg.EmbyWhitelistURLList = parseLines(first(values, "Emby.emby_url_list_for_whitelist", "emby_url_list_for_whitelist", ""))
-	cfg.EmbyDefaultHiddenLibraries = listValue(first(values, "Emby.emby_default_hidden_libraries", "emby_default_hidden_libraries", ""))
-	cfg.EmbySelfServiceLibraries = listValue(first(values, "Emby.emby_self_service_libraries", "emby_self_service_libraries", ""))
-	cfg.TelegramMode = boolValue(first(values, "Global.telegram_mode", "telegram_mode", strconv.FormatBool(cfg.TelegramMode)), cfg.TelegramMode)
-	cfg.ForceBindTelegram = boolValue(first(values, "Global.force_bind_telegram", "force_bind_telegram", strconv.FormatBool(cfg.ForceBindTelegram)), cfg.ForceBindTelegram)
-	cfg.TelegramBotToken = first(values, "Telegram.bot_token", "bot_token", cfg.TelegramBotToken)
-	cfg.TelegramAPIURL = first(values, "Telegram.telegram_api_url", "telegram_api_url", cfg.TelegramAPIURL)
-	cfg.TelegramAdminIDs = int64ListValue(first(values, "Telegram.admin_id", "admin_id", strings.Join(int64ListToStrings(cfg.TelegramAdminIDs), ",")))
-	cfg.TelegramGroupIDs = listValue(first(values, "Telegram.group_id", "group_id", strings.Join(cfg.TelegramGroupIDs, ",")))
-	cfg.TelegramChannelIDs = listValue(first(values, "Telegram.channel_id", "channel_id", strings.Join(cfg.TelegramChannelIDs, ",")))
-	cfg.TelegramForceSubscribe = boolValue(first(values, "Telegram.force_subscribe", "force_subscribe", strconv.FormatBool(cfg.TelegramForceSubscribe)), cfg.TelegramForceSubscribe)
-	cfg.TelegramRequireMembership = boolValue(first(values, "Telegram.require_group_membership", "require_group_membership", strconv.FormatBool(cfg.TelegramRequireMembership)), cfg.TelegramRequireMembership)
-	cfg.TelegramGroupCheckConcurrency = intValue(first(values, "Telegram.group_check_concurrency", "group_check_concurrency", strconv.Itoa(cfg.TelegramGroupCheckConcurrency)), cfg.TelegramGroupCheckConcurrency)
-	cfg.TelegramGroupActionConcurrency = intValue(first(values, "Telegram.group_action_concurrency", "group_action_concurrency", strconv.Itoa(cfg.TelegramGroupActionConcurrency)), cfg.TelegramGroupActionConcurrency)
-	cfg.TelegramBanOnLeave = boolValue(first(values, "Telegram.ban_on_leave", "ban_on_leave", strconv.FormatBool(cfg.TelegramBanOnLeave)), cfg.TelegramBanOnLeave)
-	cfg.TelegramAutoEnableRejoined = boolValue(first(values, "Telegram.auto_enable_rejoined", "auto_enable_rejoined", strconv.FormatBool(cfg.TelegramAutoEnableRejoined)), cfg.TelegramAutoEnableRejoined)
-	cfg.TelegramEnablePanel = boolValue(first(values, "Telegram.enable_tg_panel", "enable_tg_panel", strconv.FormatBool(cfg.TelegramEnablePanel)), cfg.TelegramEnablePanel)
-	cfg.TelegramBotStartText = first(values, "Telegram.bot_start_text", "bot_start_text", cfg.TelegramBotStartText)
-	cfg.TelegramBotGroupStartText = first(values, "Telegram.bot_group_start_text", "bot_group_start_text", cfg.TelegramBotGroupStartText)
-	cfg.TelegramBotStartTitle = first(values, "Telegram.bot_start_title", "bot_start_title", cfg.TelegramBotStartTitle)
-	cfg.TelegramBotStartIntro = first(values, "Telegram.bot_start_intro", "bot_start_intro", cfg.TelegramBotStartIntro)
-	cfg.TelegramBotBindPromptText = first(values, "Telegram.bot_bind_prompt_text", "bot_bind_prompt_text", cfg.TelegramBotBindPromptText)
-	cfg.TelegramBotHelpText = first(values, "Telegram.bot_help_text", "bot_help_text", cfg.TelegramBotHelpText)
-	cfg.TelegramBotAdminHelpText = first(values, "Telegram.bot_admin_help_text", "bot_admin_help_text", cfg.TelegramBotAdminHelpText)
-	cfg.TelegramBotHelpHeader = first(values, "Telegram.bot_help_header", "bot_help_header", cfg.TelegramBotHelpHeader)
-	cfg.TelegramBotHelpFooter = first(values, "Telegram.bot_help_footer", "bot_help_footer", cfg.TelegramBotHelpFooter)
-	cfg.TelegramBotAbout = first(values, "Telegram.bot_about", "bot_about", cfg.TelegramBotAbout)
-	cfg.TelegramCustomCommands = parseTelegramCommandReplies(first(values, "Telegram.bot_custom_commands", "bot_custom_commands", ""))
-	cfg.BangumiEnabled = boolValue(first(values, "BangumiSync.enabled", "bangumi_sync_enabled", strconv.FormatBool(cfg.BangumiEnabled)), cfg.BangumiEnabled)
-	cfg.BangumiWebhookSecret = first(values, "BangumiSync.webhook_secret", "webhook_secret", cfg.BangumiWebhookSecret)
-	cfg.TMDBAPIKey = first(values, "Global.tmdb_api_key", "tmdb_api_key", cfg.TMDBAPIKey)
-	cfg.TMDBAPIURL = first(values, "Global.tmdb_api_url", "tmdb_api_url", cfg.TMDBAPIURL)
-	cfg.TMDBImageURL = first(values, "Global.tmdb_image_url", "tmdb_image_url", cfg.TMDBImageURL)
-	cfg.BangumiToken = first(values, "Global.bangumi_token", "bangumi_token", cfg.BangumiToken)
-	cfg.BangumiAPIURL = first(values, "Global.bangumi_api_url", "bangumi_api_url", cfg.BangumiAPIURL)
-	cfg.BangumiAppID = first(values, "Global.bangumi_app_id", "bangumi_app_id", cfg.BangumiAppID)
-	cfg.RegisterEnabled = boolValue(first(values, "SAR.register_mode", "Register.register_mode", "register_mode", strconv.FormatBool(cfg.RegisterEnabled)), cfg.RegisterEnabled)
-	cfg.RegisterCodeLimit = boolValue(first(values, "SAR.register_code_limit", "Register.register_code_limit", "register_code_limit", strconv.FormatBool(cfg.RegisterCodeLimit)), cfg.RegisterCodeLimit)
-	cfg.AllowPendingRegister = boolValue(first(values, "SAR.allow_pending_register", "Register.allow_pending_register", "allow_pending_register", strconv.FormatBool(cfg.AllowPendingRegister)), cfg.AllowPendingRegister)
-	cfg.EmbyDirectRegisterEnabled = boolValue(first(values, "SAR.emby_direct_register_enabled", "Register.emby_direct_register_enabled", "emby_direct_register_enabled", strconv.FormatBool(cfg.EmbyDirectRegisterEnabled)), cfg.EmbyDirectRegisterEnabled)
-	cfg.EmbyDirectRegisterDays = intValue(first(values, "SAR.emby_direct_register_days", "Register.emby_direct_register_days", "emby_direct_register_days", strconv.Itoa(cfg.EmbyDirectRegisterDays)), cfg.EmbyDirectRegisterDays)
-	cfg.EmbyUserLimit = intValue(first(values, "SAR.emby_user_limit", "Register.emby_user_limit", "emby_user_limit", strconv.Itoa(cfg.EmbyUserLimit)), cfg.EmbyUserLimit)
-	cfg.DecoyAction = first(values, "SAR.regcode_decoy_action", "Register.regcode_decoy_action", "regcode_decoy_action", cfg.DecoyAction)
-	cfg.MediaRequestEnabled = boolValue(first(values, "SAR.media_request_enabled", "Register.media_request_enabled", "media_request_enabled", strconv.FormatBool(cfg.MediaRequestEnabled)), cfg.MediaRequestEnabled)
-	cfg.MaxConcurrentRequestsPerUser = intValue(first(values, "SAR.max_concurrent_requests_per_user", "Register.max_concurrent_requests_per_user", "max_concurrent_requests_per_user", strconv.Itoa(cfg.MaxConcurrentRequestsPerUser)), cfg.MaxConcurrentRequestsPerUser)
-	cfg.InviteEnabled = boolValue(first(values, "SAR.invite_enabled", "Register.invite_enabled", "invite_enabled", strconv.FormatBool(cfg.InviteEnabled)), cfg.InviteEnabled)
-	cfg.InviteMaxDepth = intValue(first(values, "SAR.invite_max_depth", "Register.invite_max_depth", "invite_max_depth", strconv.Itoa(cfg.InviteMaxDepth)), cfg.InviteMaxDepth)
-	cfg.InviteLimit = intValue(first(values, "SAR.invite_limit", "Register.invite_limit", "invite_limit", strconv.Itoa(cfg.InviteLimit)), cfg.InviteLimit)
-	cfg.InviteRootUserLimit = intValue(first(values, "SAR.invite_root_user_limit", "Register.invite_root_user_limit", "invite_root_user_limit", strconv.Itoa(cfg.InviteRootUserLimit)), cfg.InviteRootUserLimit)
-	cfg.InviteRequireEmby = boolValue(first(values, "SAR.invite_require_emby", "Register.invite_require_emby", "invite_require_emby", strconv.FormatBool(cfg.InviteRequireEmby)), cfg.InviteRequireEmby)
-	cfg.InviteDefaultDays = intValue(first(values, "SAR.invite_code_default_days", "SAR.invite_default_days", "Register.invite_default_days", "invite_default_days", strconv.Itoa(cfg.InviteDefaultDays)), cfg.InviteDefaultDays)
-	cfg.PermanentInviteMaxDays = intValue(first(values, "SAR.permanent_invite_max_days", "Register.permanent_invite_max_days", "permanent_invite_max_days", strconv.Itoa(cfg.PermanentInviteMaxDays)), cfg.PermanentInviteMaxDays)
-	cfg.UserLimit = intValue(first(values, "SAR.user_limit", "Register.user_limit", "user_limit", strconv.Itoa(cfg.UserLimit)), cfg.UserLimit)
-	cfg.AutoCleanupNoEmby = boolValue(first(values, "SAR.auto_cleanup_no_emby", "Register.auto_cleanup_no_emby", "auto_cleanup_no_emby", strconv.FormatBool(cfg.AutoCleanupNoEmby)), cfg.AutoCleanupNoEmby)
-	cfg.AutoCleanupNoEmbyDays = intValue(first(values, "SAR.auto_cleanup_no_emby_days", "Register.auto_cleanup_no_emby_days", "auto_cleanup_no_emby_days", strconv.Itoa(cfg.AutoCleanupNoEmbyDays)), cfg.AutoCleanupNoEmbyDays)
-	cfg.NotificationEnabled = boolValue(first(values, "Notification.enabled", "notification_enabled", strconv.FormatBool(cfg.NotificationEnabled)), cfg.NotificationEnabled)
-	cfg.NotificationExpiryRemindDays = intValue(first(values, "Notification.expiry_remind_days", "expiry_remind_days", strconv.Itoa(cfg.NotificationExpiryRemindDays)), cfg.NotificationExpiryRemindDays)
-	cfg.SchedulerEnabled = boolValue(first(values, "Scheduler.enabled", "scheduler_enabled", strconv.FormatBool(cfg.SchedulerEnabled)), cfg.SchedulerEnabled)
-	cfg.SchedulerExpiredCheckTime = first(values, "Scheduler.expired_check_time", "expired_check_time", cfg.SchedulerExpiredCheckTime)
-	cfg.SchedulerExpiringCheckTime = first(values, "Scheduler.expiring_check_time", "expiring_check_time", cfg.SchedulerExpiringCheckTime)
-	cfg.SchedulerDailyStatsTime = first(values, "Scheduler.daily_stats_time", "daily_stats_time", cfg.SchedulerDailyStatsTime)
-	cfg.SchedulerSessionCleanupInterval = intValue(first(values, "Scheduler.session_cleanup_interval", "session_cleanup_interval", strconv.Itoa(cfg.SchedulerSessionCleanupInterval)), cfg.SchedulerSessionCleanupInterval)
-	cfg.SystemUpdateEnabled = boolValue(first(values, "SystemUpdate.auto_update_enabled", "auto_update_enabled", strconv.FormatBool(cfg.SystemUpdateEnabled)), cfg.SystemUpdateEnabled)
-	cfg.SystemUpdateRepoURL = first(values, "SystemUpdate.repo_url", "repo_url", cfg.SystemUpdateRepoURL)
-	cfg.SystemUpdateBranch = first(values, "SystemUpdate.branch", "branch", cfg.SystemUpdateBranch)
-	cfg.SystemUpdateRestartServices = boolValue(first(values, "SystemUpdate.restart_services", "restart_services", strconv.FormatBool(cfg.SystemUpdateRestartServices)), cfg.SystemUpdateRestartServices)
-	cfg.SystemUpdateTriggerType = first(values, "SystemUpdate.auto_update_trigger_type", "auto_update_trigger_type", cfg.SystemUpdateTriggerType)
-	cfg.SystemUpdateIntervalHours = intValue(first(values, "SystemUpdate.auto_update_interval_hours", "auto_update_interval_hours", strconv.Itoa(cfg.SystemUpdateIntervalHours)), cfg.SystemUpdateIntervalHours)
-	cfg.SystemUpdateTime = first(values, "SystemUpdate.auto_update_time", "auto_update_time", cfg.SystemUpdateTime)
-	cfg.DeviceLimitEnabled = boolValue(first(values, "DeviceLimit.enabled", "device_limit_enabled", strconv.FormatBool(cfg.DeviceLimitEnabled)), cfg.DeviceLimitEnabled)
-	cfg.MaxDevices = intValue(first(values, "DeviceLimit.max_devices", "max_devices", strconv.Itoa(cfg.MaxDevices)), cfg.MaxDevices)
-	cfg.MaxStreams = intValue(first(values, "DeviceLimit.max_streams", "max_streams", strconv.Itoa(cfg.MaxStreams)), cfg.MaxStreams)
+	cfg.AppName = reader.stringValue(cfg.AppName, "Global.server_name", "server_name")
+	cfg.ServerIcon = reader.stringValue(cfg.ServerIcon, "Global.server_icon", "server_icon")
+	cfg.RedisURL = reader.stringValue(cfg.RedisURL, "Global.redis_url", "redis_url")
+	cfg.LogLevel = normalizeLogLevel(reader.stringValue(cfg.LogLevel, "Global.log_level", "log_level"))
+	cfg.RuntimeLogLimit = reader.intValue(cfg.RuntimeLogLimit, "Global.runtime_log_limit", "runtime_log_limit")
+	cfg.AdminUIDs = reader.int64ListValue(cfg.AdminUIDs, "Admin.uids", "Admin.admin_uids", "SAR.admin_uids", "admin_uids")
+	cfg.AdminUsernames = reader.stringListValue(cfg.AdminUsernames, "Admin.usernames", "Admin.admin_usernames", "Admin.users", "SAR.admin_usernames", "admin_usernames")
+	cfg.DatabaseDir = reader.stringValue(cfg.DatabaseDir, "Global.databases_dir", "databases_dir")
+	cfg.DatabaseDriver = strings.ToLower(reader.stringValue(cfg.DatabaseDriver, "Database.driver", "Global.database_driver", "database_driver"))
+	cfg.DatabaseURL = reader.stringValue(cfg.DatabaseURL, "Database.url", "Database.database_url", "Global.database_url", "database_url")
+	cfg.DatabaseBackupDir = reader.stringValue(cfg.DatabaseBackupDir, "Database.backup_dir", "database_backup_dir")
+	cfg.DatabaseMigrationPanelEnabled = reader.boolValue(cfg.DatabaseMigrationPanelEnabled, "Database.migration_panel_enabled", "database_migration_panel_enabled")
+	cfg.StateFile = reader.stringValue(cfg.StateFile, "Database.state_file", "Global.state_file", "state_file")
+	cfg.PostgresHost = reader.stringValue(cfg.PostgresHost, "Database.postgres_host", "PostgreSQL.host", "postgres_host")
+	cfg.PostgresPort = reader.intValue(cfg.PostgresPort, "Database.postgres_port", "PostgreSQL.port", "postgres_port")
+	cfg.PostgresUser = reader.stringValue(cfg.PostgresUser, "Database.postgres_user", "PostgreSQL.user", "postgres_user")
+	cfg.PostgresPassword = reader.stringValue(cfg.PostgresPassword, "Database.postgres_password", "PostgreSQL.password", "postgres_password")
+	cfg.PostgresDatabase = reader.stringValue(cfg.PostgresDatabase, "Database.postgres_database", "PostgreSQL.database", "postgres_database")
+	cfg.PostgresSSLMode = reader.stringValue(cfg.PostgresSSLMode, "Database.postgres_sslmode", "PostgreSQL.sslmode", "postgres_sslmode")
+	cfg.PostgresMaxOpenConns = reader.intValue(cfg.PostgresMaxOpenConns, "Database.postgres_max_open_conns", "PostgreSQL.max_open_conns", "postgres_max_open_conns")
+	cfg.PostgresMaxIdleConns = reader.intValue(cfg.PostgresMaxIdleConns, "Database.postgres_max_idle_conns", "PostgreSQL.max_idle_conns", "postgres_max_idle_conns")
+	cfg.UploadDir = reader.stringValue(cfg.UploadDir, "API.upload_folder", "upload_folder")
+	cfg.Host = reader.stringValue(cfg.Host, "API.host", "host")
+	cfg.Port = reader.intValue(cfg.Port, "API.port", "port")
+	cfg.MaxUploadSize = reader.int64Value(cfg.MaxUploadSize, "API.max_upload_size", "max_upload_size")
+	cfg.CORSOrigins = reader.stringListValue(cfg.CORSOrigins, "API.cors_origins", "cors_origins")
+	cfg.TrustProxyHeaders = reader.boolValue(cfg.TrustProxyHeaders, "API.trust_proxy_headers", "trust_proxy_headers")
+	cfg.SessionCookie = reader.stringValue(cfg.SessionCookie, "Security.session_cookie_name", "API.session_cookie_name", "session_cookie_name")
+	cfg.BotInternalSecret = reader.stringValue(cfg.BotInternalSecret, "Security.bot_internal_secret", "bot_internal_secret")
+	cfg.EmbyURL = reader.stringValue(cfg.EmbyURL, "Emby.emby_url", "emby_url")
+	cfg.EmbyToken = reader.stringValue(cfg.EmbyToken, "Emby.emby_token", "emby_token")
+	cfg.EmbyUsername = reader.stringValue(cfg.EmbyUsername, "Emby.emby_username", "emby_username")
+	cfg.EmbyPassword = reader.stringValue(cfg.EmbyPassword, "Emby.emby_password", "emby_password")
+	cfg.EmbyPublicURL = reader.stringValue(cfg.EmbyPublicURL, "Emby.emby_public_url", "emby_public_url")
+	cfg.EmbyWhitelistURL = reader.stringValue(cfg.EmbyWhitelistURL, "Emby.emby_whitelist_url", "emby_whitelist_url")
+	cfg.EmbyURLList = parseLinesList(reader.stringListValue(nil, "Emby.emby_url_list", "emby_url_list"))
+	cfg.EmbyWhitelistURLList = parseLinesList(reader.stringListValue(nil, "Emby.emby_url_list_for_whitelist", "emby_url_list_for_whitelist"))
+	cfg.EmbyDefaultHiddenLibraries = reader.stringListValue(nil, "Emby.emby_default_hidden_libraries", "emby_default_hidden_libraries")
+	cfg.EmbySelfServiceLibraries = reader.stringListValue(nil, "Emby.emby_self_service_libraries", "emby_self_service_libraries")
+	cfg.TelegramMode = reader.boolValue(cfg.TelegramMode, "Global.telegram_mode", "telegram_mode")
+	cfg.ForceBindTelegram = reader.boolValue(cfg.ForceBindTelegram, "Global.force_bind_telegram", "force_bind_telegram")
+	cfg.TelegramBotToken = reader.stringValue(cfg.TelegramBotToken, "Telegram.bot_token", "bot_token")
+	cfg.TelegramAPIURL = reader.stringValue(cfg.TelegramAPIURL, "Telegram.telegram_api_url", "telegram_api_url")
+	cfg.TelegramAdminIDs = reader.int64ListValue(cfg.TelegramAdminIDs, "Telegram.admin_id", "admin_id")
+	cfg.TelegramGroupIDs = reader.stringListValue(cfg.TelegramGroupIDs, "Telegram.group_id", "group_id")
+	cfg.TelegramChannelIDs = reader.stringListValue(cfg.TelegramChannelIDs, "Telegram.channel_id", "channel_id")
+	cfg.TelegramForceSubscribe = reader.boolValue(cfg.TelegramForceSubscribe, "Telegram.force_subscribe", "force_subscribe")
+	cfg.TelegramRequireMembership = reader.boolValue(cfg.TelegramRequireMembership, "Telegram.require_group_membership", "require_group_membership")
+	cfg.TelegramGroupCheckConcurrency = reader.intValue(cfg.TelegramGroupCheckConcurrency, "Telegram.group_check_concurrency", "group_check_concurrency")
+	cfg.TelegramGroupActionConcurrency = reader.intValue(cfg.TelegramGroupActionConcurrency, "Telegram.group_action_concurrency", "group_action_concurrency")
+	cfg.TelegramBanOnLeave = reader.boolValue(cfg.TelegramBanOnLeave, "Telegram.ban_on_leave", "ban_on_leave")
+	cfg.TelegramAutoEnableRejoined = reader.boolValue(cfg.TelegramAutoEnableRejoined, "Telegram.auto_enable_rejoined", "auto_enable_rejoined")
+	cfg.TelegramEnablePanel = reader.boolValue(cfg.TelegramEnablePanel, "Telegram.enable_tg_panel", "enable_tg_panel")
+	cfg.TelegramBotStartText = reader.stringValue(cfg.TelegramBotStartText, "Telegram.bot_start_text", "bot_start_text")
+	cfg.TelegramBotGroupStartText = reader.stringValue(cfg.TelegramBotGroupStartText, "Telegram.bot_group_start_text", "bot_group_start_text")
+	cfg.TelegramBotStartTitle = reader.stringValue(cfg.TelegramBotStartTitle, "Telegram.bot_start_title", "bot_start_title")
+	cfg.TelegramBotStartIntro = reader.stringValue(cfg.TelegramBotStartIntro, "Telegram.bot_start_intro", "bot_start_intro")
+	cfg.TelegramBotBindPromptText = reader.stringValue(cfg.TelegramBotBindPromptText, "Telegram.bot_bind_prompt_text", "bot_bind_prompt_text")
+	cfg.TelegramBotHelpText = reader.stringValue(cfg.TelegramBotHelpText, "Telegram.bot_help_text", "bot_help_text")
+	cfg.TelegramBotAdminHelpText = reader.stringValue(cfg.TelegramBotAdminHelpText, "Telegram.bot_admin_help_text", "bot_admin_help_text")
+	cfg.TelegramBotHelpHeader = reader.stringValue(cfg.TelegramBotHelpHeader, "Telegram.bot_help_header", "bot_help_header")
+	cfg.TelegramBotHelpFooter = reader.stringValue(cfg.TelegramBotHelpFooter, "Telegram.bot_help_footer", "bot_help_footer")
+	cfg.TelegramBotAbout = reader.stringValue(cfg.TelegramBotAbout, "Telegram.bot_about", "bot_about")
+	cfg.TelegramCustomCommands = parseTelegramCommandRepliesList(reader.stringListValue(nil, "Telegram.bot_custom_commands", "bot_custom_commands"))
+	cfg.BangumiEnabled = reader.boolValue(cfg.BangumiEnabled, "BangumiSync.enabled", "bangumi_sync_enabled")
+	cfg.BangumiWebhookSecret = reader.stringValue(cfg.BangumiWebhookSecret, "BangumiSync.webhook_secret", "webhook_secret")
+	cfg.TMDBAPIKey = reader.stringValue(cfg.TMDBAPIKey, "Global.tmdb_api_key", "tmdb_api_key")
+	cfg.TMDBAPIURL = reader.stringValue(cfg.TMDBAPIURL, "Global.tmdb_api_url", "tmdb_api_url")
+	cfg.TMDBImageURL = reader.stringValue(cfg.TMDBImageURL, "Global.tmdb_image_url", "tmdb_image_url")
+	cfg.BangumiToken = reader.stringValue(cfg.BangumiToken, "Global.bangumi_token", "bangumi_token")
+	cfg.BangumiAPIURL = reader.stringValue(cfg.BangumiAPIURL, "Global.bangumi_api_url", "bangumi_api_url")
+	cfg.BangumiAppID = reader.stringValue(cfg.BangumiAppID, "Global.bangumi_app_id", "bangumi_app_id")
+	cfg.RegisterEnabled = reader.boolValue(cfg.RegisterEnabled, "SAR.register_mode", "Register.register_mode", "register_mode")
+	cfg.RegisterCodeLimit = reader.boolValue(cfg.RegisterCodeLimit, "SAR.register_code_limit", "Register.register_code_limit", "register_code_limit")
+	cfg.AllowPendingRegister = reader.boolValue(cfg.AllowPendingRegister, "SAR.allow_pending_register", "Register.allow_pending_register", "allow_pending_register")
+	cfg.EmbyDirectRegisterEnabled = reader.boolValue(cfg.EmbyDirectRegisterEnabled, "SAR.emby_direct_register_enabled", "Register.emby_direct_register_enabled", "emby_direct_register_enabled")
+	cfg.EmbyDirectRegisterDays = reader.intValue(cfg.EmbyDirectRegisterDays, "SAR.emby_direct_register_days", "Register.emby_direct_register_days", "emby_direct_register_days")
+	cfg.EmbyUserLimit = reader.intValue(cfg.EmbyUserLimit, "SAR.emby_user_limit", "Register.emby_user_limit", "emby_user_limit")
+	cfg.DecoyAction = reader.stringValue(cfg.DecoyAction, "SAR.regcode_decoy_action", "Register.regcode_decoy_action", "regcode_decoy_action")
+	cfg.MediaRequestEnabled = reader.boolValue(cfg.MediaRequestEnabled, "SAR.media_request_enabled", "Register.media_request_enabled", "media_request_enabled")
+	cfg.MaxConcurrentRequestsPerUser = reader.intValue(cfg.MaxConcurrentRequestsPerUser, "SAR.max_concurrent_requests_per_user", "Register.max_concurrent_requests_per_user", "max_concurrent_requests_per_user")
+	cfg.InviteEnabled = reader.boolValue(cfg.InviteEnabled, "SAR.invite_enabled", "Register.invite_enabled", "invite_enabled")
+	cfg.InviteMaxDepth = reader.intValue(cfg.InviteMaxDepth, "SAR.invite_max_depth", "Register.invite_max_depth", "invite_max_depth")
+	cfg.InviteLimit = reader.intValue(cfg.InviteLimit, "SAR.invite_limit", "Register.invite_limit", "invite_limit")
+	cfg.InviteRootUserLimit = reader.intValue(cfg.InviteRootUserLimit, "SAR.invite_root_user_limit", "Register.invite_root_user_limit", "invite_root_user_limit")
+	cfg.InviteRequireEmby = reader.boolValue(cfg.InviteRequireEmby, "SAR.invite_require_emby", "Register.invite_require_emby", "invite_require_emby")
+	cfg.InviteDefaultDays = reader.intValue(cfg.InviteDefaultDays, "SAR.invite_code_default_days", "SAR.invite_default_days", "Register.invite_default_days", "invite_default_days")
+	cfg.PermanentInviteMaxDays = reader.intValue(cfg.PermanentInviteMaxDays, "SAR.permanent_invite_max_days", "Register.permanent_invite_max_days", "permanent_invite_max_days")
+	cfg.UserLimit = reader.intValue(cfg.UserLimit, "SAR.user_limit", "Register.user_limit", "user_limit")
+	cfg.AutoCleanupNoEmby = reader.boolValue(cfg.AutoCleanupNoEmby, "SAR.auto_cleanup_no_emby", "Register.auto_cleanup_no_emby", "auto_cleanup_no_emby")
+	cfg.AutoCleanupNoEmbyDays = reader.intValue(cfg.AutoCleanupNoEmbyDays, "SAR.auto_cleanup_no_emby_days", "Register.auto_cleanup_no_emby_days", "auto_cleanup_no_emby_days")
+	cfg.NotificationEnabled = reader.boolValue(cfg.NotificationEnabled, "Notification.enabled", "notification_enabled")
+	cfg.NotificationExpiryRemindDays = reader.intValue(cfg.NotificationExpiryRemindDays, "Notification.expiry_remind_days", "expiry_remind_days")
+	cfg.SchedulerEnabled = reader.boolValue(cfg.SchedulerEnabled, "Scheduler.enabled", "scheduler_enabled")
+	cfg.SchedulerExpiredCheckTime = reader.stringValue(cfg.SchedulerExpiredCheckTime, "Scheduler.expired_check_time", "expired_check_time")
+	cfg.SchedulerExpiringCheckTime = reader.stringValue(cfg.SchedulerExpiringCheckTime, "Scheduler.expiring_check_time", "expiring_check_time")
+	cfg.SchedulerDailyStatsTime = reader.stringValue(cfg.SchedulerDailyStatsTime, "Scheduler.daily_stats_time", "daily_stats_time")
+	cfg.SchedulerSessionCleanupInterval = reader.intValue(cfg.SchedulerSessionCleanupInterval, "Scheduler.session_cleanup_interval", "session_cleanup_interval")
+	cfg.SystemUpdateEnabled = reader.boolValue(cfg.SystemUpdateEnabled, "SystemUpdate.auto_update_enabled", "auto_update_enabled")
+	cfg.SystemUpdateRepoURL = reader.stringValue(cfg.SystemUpdateRepoURL, "SystemUpdate.repo_url", "repo_url")
+	cfg.SystemUpdateBranch = reader.stringValue(cfg.SystemUpdateBranch, "SystemUpdate.branch", "branch")
+	cfg.SystemUpdateRestartServices = reader.boolValue(cfg.SystemUpdateRestartServices, "SystemUpdate.restart_services", "restart_services")
+	cfg.SystemUpdateTriggerType = reader.stringValue(cfg.SystemUpdateTriggerType, "SystemUpdate.auto_update_trigger_type", "auto_update_trigger_type")
+	cfg.SystemUpdateIntervalHours = reader.intValue(cfg.SystemUpdateIntervalHours, "SystemUpdate.auto_update_interval_hours", "auto_update_interval_hours")
+	cfg.SystemUpdateTime = reader.stringValue(cfg.SystemUpdateTime, "SystemUpdate.auto_update_time", "auto_update_time")
+	cfg.DeviceLimitEnabled = reader.boolValue(cfg.DeviceLimitEnabled, "DeviceLimit.enabled", "DeviceLimit.device_limit_enabled", "device_limit_enabled")
+	cfg.MaxDevices = reader.intValue(cfg.MaxDevices, "DeviceLimit.max_devices", "max_devices")
+	cfg.MaxStreams = reader.intValue(cfg.MaxStreams, "DeviceLimit.max_streams", "max_streams")
 
 	applyEnv(&cfg)
 	if cfg.StateFile == "" {
@@ -503,182 +505,296 @@ func applyEnv(cfg *Config) {
 	}
 }
 
-func readTOML(path string, values map[string]string) error {
-	file, err := os.Open(path)
+type viperConfigReader struct {
+	v *viper.Viper
+}
+
+func newViperConfigReader() viperConfigReader {
+	v := viper.New()
+	v.SetConfigType("toml")
+	return viperConfigReader{v: v}
+}
+
+func (r viperConfigReader) mergeFile(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
-	defer file.Close()
+	return r.v.MergeConfig(bytes.NewReader(data))
+}
 
-	section := ""
-	var pendingKey, pendingFull string
-	var pending strings.Builder
-	pendingDepth := 0
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 1024), 1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(stripComment(scanner.Text()))
-		if pendingKey != "" {
-			if line != "" {
-				pending.WriteByte(' ')
-				pending.WriteString(line)
-				pendingDepth += bracketDelta(line)
-			}
-			if pendingDepth > 0 {
-				continue
-			}
-			value := normalizeValue(pending.String())
-			values[pendingFull] = value
-			values[pendingKey] = value
-			pending.Reset()
-			pendingKey, pendingFull = "", ""
-			pendingDepth = 0
-			continue
-		}
-		if line == "" {
-			continue
-		}
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			section = strings.TrimSpace(strings.Trim(line, "[]"))
-			continue
-		}
-		key, val, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
+func (r viperConfigReader) rawValue(keys ...string) (any, bool) {
+	for _, key := range keys {
 		key = strings.TrimSpace(key)
-		val = strings.TrimSpace(val)
-		full := key
-		if section != "" {
-			full = section + "." + key
-		}
-		if depth := bracketDelta(val); depth > 0 {
-			pendingKey = key
-			pendingFull = full
-			pending.WriteString(val)
-			pendingDepth = depth
+		if key == "" {
 			continue
 		}
-		val = normalizeValue(val)
-		values[full] = val
-		values[key] = val
-	}
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-	if pendingKey != "" {
-		return fmt.Errorf("unterminated TOML array for key %s", pendingFull)
-	}
-	return nil
-}
-
-func normalizeValue(value string) string {
-	value = strings.TrimSpace(value)
-	// Strip outer quotes and unescape TOML string escape sequences
-	if (strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"")) ||
-		(strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'")) {
-		value = value[1 : len(value)-1]
-	}
-	return unescapeTomlString(value)
-}
-
-// unescapeTomlString handles common TOML escape sequences within string values.
-func unescapeTomlString(s string) string {
-	if !strings.ContainsRune(s, '\\') {
-		return s
-	}
-	var b strings.Builder
-	b.Grow(len(s))
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\\' && i+1 < len(s) {
-			switch s[i+1] {
-			case '"':
-				b.WriteByte('"')
-				i++
-			case '\\':
-				b.WriteByte('\\')
-				i++
-			case 'n':
-				b.WriteByte('\n')
-				i++
-			case 't':
-				b.WriteByte('\t')
-				i++
-			case 'r':
-				b.WriteByte('\r')
-				i++
-			default:
-				b.WriteByte(s[i])
-			}
-		} else {
-			b.WriteByte(s[i])
+		if r.v.IsSet(key) {
+			return r.v.Get(key), true
 		}
-	}
-	return b.String()
-}
-
-func bracketDelta(line string) int {
-	inQuote := rune(0)
-	escaped := false
-	delta := 0
-	for _, r := range line {
-		if escaped {
-			escaped = false
-			continue
-		}
-		if r == '\\' && inQuote != 0 {
-			escaped = true
-			continue
-		}
-		if r == '\'' || r == '"' {
-			if inQuote == 0 {
-				inQuote = r
-			} else if inQuote == r {
-				inQuote = 0
-			}
-			continue
-		}
-		if inQuote != 0 {
-			continue
-		}
-		switch r {
-		case '[':
-			delta++
-		case ']':
-			delta--
-		}
-	}
-	return delta
-}
-
-func stripComment(line string) string {
-	inQuote := rune(0)
-	for i, r := range line {
-		if r == '\'' || r == '"' {
-			if inQuote == 0 {
-				inQuote = r
-			} else if inQuote == r {
-				inQuote = 0
+		if !strings.Contains(key, ".") {
+			if value, ok := findBareSetting(r.v.AllSettings(), key); ok {
+				return value, true
 			}
 		}
-		if r == '#' && inQuote == 0 {
-			return line[:i]
-		}
 	}
-	return line
+	return nil, false
 }
 
-func first(values map[string]string, keys ...string) string {
-	def := ""
-	if len(keys) > 0 {
-		def = keys[len(keys)-1]
+func findBareSetting(settings map[string]any, key string) (any, bool) {
+	needle := strings.ToLower(strings.TrimSpace(key))
+	if needle == "" {
+		return nil, false
 	}
-	for _, key := range keys[:len(keys)-1] {
-		if value, ok := values[key]; ok && strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
+	var found any
+	ok := false
+	var walk func(map[string]any)
+	walk = func(m map[string]any) {
+		for k, v := range m {
+			if strings.EqualFold(k, needle) {
+				if _, nested := v.(map[string]any); !nested {
+					found = v
+					ok = true
+				}
+			}
+			if child, nested := v.(map[string]any); nested {
+				walk(child)
+			}
 		}
 	}
-	return def
+	walk(settings)
+	return found, ok
+}
+
+func (r viperConfigReader) stringValue(fallback string, keys ...string) string {
+	raw, ok := r.rawValue(keys...)
+	if !ok {
+		return fallback
+	}
+	text, ok := rawToString(raw)
+	if !ok || strings.TrimSpace(text) == "" {
+		return fallback
+	}
+	return strings.TrimSpace(text)
+}
+
+func rawToString(raw any) (string, bool) {
+	switch value := raw.(type) {
+	case nil:
+		return "", false
+	case string:
+		return strings.TrimSpace(value), true
+	case fmt.Stringer:
+		return strings.TrimSpace(value.String()), true
+	default:
+		return strings.TrimSpace(fmt.Sprint(value)), true
+	}
+}
+
+func (r viperConfigReader) intValue(fallback int, keys ...string) int {
+	raw, ok := r.rawValue(keys...)
+	if !ok {
+		return fallback
+	}
+	switch value := raw.(type) {
+	case int:
+		return value
+	case int8:
+		return int(value)
+	case int16:
+		return int(value)
+	case int32:
+		return int(value)
+	case int64:
+		return int(value)
+	case uint:
+		return int(value)
+	case uint8:
+		return int(value)
+	case uint16:
+		return int(value)
+	case uint32:
+		return int(value)
+	case uint64:
+		return int(value)
+	case float32:
+		return int(value)
+	case float64:
+		return int(value)
+	}
+	text, ok := rawToString(raw)
+	if !ok || strings.TrimSpace(text) == "" {
+		return fallback
+	}
+	return intValue(text, fallback)
+}
+
+func (r viperConfigReader) int64Value(fallback int64, keys ...string) int64 {
+	raw, ok := r.rawValue(keys...)
+	if !ok {
+		return fallback
+	}
+	switch value := raw.(type) {
+	case int:
+		return int64(value)
+	case int8:
+		return int64(value)
+	case int16:
+		return int64(value)
+	case int32:
+		return int64(value)
+	case int64:
+		return value
+	case uint:
+		return int64(value)
+	case uint8:
+		return int64(value)
+	case uint16:
+		return int64(value)
+	case uint32:
+		return int64(value)
+	case uint64:
+		return int64(value)
+	case float32:
+		return int64(value)
+	case float64:
+		return int64(value)
+	}
+	text, ok := rawToString(raw)
+	if !ok || strings.TrimSpace(text) == "" {
+		return fallback
+	}
+	return int64Value(text, fallback)
+}
+
+func (r viperConfigReader) boolValue(fallback bool, keys ...string) bool {
+	raw, ok := r.rawValue(keys...)
+	if !ok {
+		return fallback
+	}
+	switch value := raw.(type) {
+	case bool:
+		return value
+	case int:
+		return value != 0
+	case int64:
+		return value != 0
+	case float64:
+		return value != 0
+	}
+	text, ok := rawToString(raw)
+	if !ok || strings.TrimSpace(text) == "" {
+		return fallback
+	}
+	return boolValue(text, fallback)
+}
+
+func (r viperConfigReader) stringListValue(fallback []string, keys ...string) []string {
+	raw, ok := r.rawValue(keys...)
+	if !ok {
+		return cloneStringSlice(fallback)
+	}
+	list, ok := rawToStringList(raw)
+	if !ok {
+		return cloneStringSlice(fallback)
+	}
+	return list
+}
+
+func rawToStringList(raw any) ([]string, bool) {
+	switch value := raw.(type) {
+	case nil:
+		return nil, false
+	case []string:
+		return cleanStringList(value), true
+	case []any:
+		out := make([]string, 0, len(value))
+		for _, item := range value {
+			text := strings.TrimSpace(fmt.Sprint(item))
+			if text != "" {
+				out = append(out, text)
+			}
+		}
+		if len(out) == 0 {
+			return nil, true
+		}
+		return out, true
+	case []int:
+		out := make([]string, 0, len(value))
+		for _, item := range value {
+			out = append(out, strconv.Itoa(item))
+		}
+		return out, true
+	case string:
+		if strings.TrimSpace(value) == "" {
+			return nil, false
+		}
+		return listValue(value), true
+	default:
+		text := strings.TrimSpace(fmt.Sprint(value))
+		if text == "" {
+			return nil, false
+		}
+		return listValue(text), true
+	}
+}
+
+func cleanStringList(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func cloneStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, len(values))
+	copy(out, values)
+	return out
+}
+
+func (r viperConfigReader) int64ListValue(fallback []int64, keys ...string) []int64 {
+	raw, ok := r.rawValue(keys...)
+	if !ok {
+		return cloneInt64Slice(fallback)
+	}
+	items, ok := rawToStringList(raw)
+	if !ok {
+		return cloneInt64Slice(fallback)
+	}
+	out := make([]int64, 0, len(items))
+	for _, item := range items {
+		parsed, err := strconv.ParseInt(strings.TrimSpace(item), 10, 64)
+		if err == nil && parsed != 0 {
+			out = append(out, parsed)
+		}
+	}
+	return out
+}
+
+func cloneInt64Slice(values []int64) []int64 {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]int64, len(values))
+	copy(out, values)
+	return out
 }
 
 func intValue(value string, fallback int) int {
@@ -723,17 +839,52 @@ func normalizeLogLevel(value string) string {
 	}
 }
 
-func (c Config) SlogLevel() slog.Level {
+func (c Config) ZapLevel() zapcore.Level {
 	switch normalizeLogLevel(c.LogLevel) {
 	case "debug":
-		return slog.LevelDebug
+		return zapcore.DebugLevel
 	case "warn":
-		return slog.LevelWarn
+		return zapcore.WarnLevel
 	case "error":
-		return slog.LevelError
+		return zapcore.ErrorLevel
 	default:
-		return slog.LevelInfo
+		return zapcore.InfoLevel
 	}
+}
+
+// unescapeTomlString keeps legacy comma-list parsing compatible with TOML string escapes.
+func unescapeTomlString(s string) string {
+	if !strings.ContainsRune(s, '\\') {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			switch s[i+1] {
+			case '"':
+				b.WriteByte('"')
+				i++
+			case '\\':
+				b.WriteByte('\\')
+				i++
+			case 'n':
+				b.WriteByte('\n')
+				i++
+			case 't':
+				b.WriteByte('\t')
+				i++
+			case 'r':
+				b.WriteByte('\r')
+				i++
+			default:
+				b.WriteByte(s[i])
+			}
+		} else {
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
 }
 
 func listValue(value string) []string {
@@ -820,7 +971,10 @@ func int64ListToStrings(values []int64) []string {
 }
 
 func parseLines(value string) []Line {
-	parts := listValue(value)
+	return parseLinesList(listValue(value))
+}
+
+func parseLinesList(parts []string) []Line {
 	lines := make([]Line, 0, len(parts))
 	for _, part := range parts {
 		name := "默认线路"
@@ -847,7 +1001,10 @@ func parseLines(value string) []Line {
 }
 
 func parseTelegramCommandReplies(value string) []TelegramCommandReply {
-	parts := listValue(value)
+	return parseTelegramCommandRepliesList(listValue(value))
+}
+
+func parseTelegramCommandRepliesList(parts []string) []TelegramCommandReply {
 	out := make([]TelegramCommandReply, 0, len(parts))
 	seen := map[string]bool{}
 	for _, part := range parts {

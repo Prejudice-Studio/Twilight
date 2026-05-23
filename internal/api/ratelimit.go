@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"go.uber.org/zap"
 	"sync"
 	"time"
 
@@ -35,7 +35,7 @@ func (r *rateLimiter) Allow(ctx context.Context, key string, limit int, window t
 		if err == nil {
 			return count <= int64(limit)
 		}
-		slog.Warn("redis rate limit failed; falling back to memory", "error", err)
+		zap.L().Warn("redis rate limit failed; falling back to memory", zap.Error(err))
 	}
 	now := time.Now()
 	r.mu.Lock()

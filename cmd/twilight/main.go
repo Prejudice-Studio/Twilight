@@ -5,7 +5,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log/slog"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,7 +23,7 @@ import (
 
 func main() {
 	if err := run(os.Args); err != nil {
-		slog.Error("twilight exited", "error", err)
+		zap.L().Error("twilight exited", zap.Error(err))
 		os.Exit(1)
 	}
 }
@@ -69,9 +70,9 @@ func runAPI(args []string) error {
 	if err != nil {
 		return err
 	}
-	logLevel := cfg.SlogLevel()
+	logLevel := cfg.ZapLevel()
 	if *debug {
-		logLevel = slog.LevelDebug
+		logLevel = zapcore.DebugLevel
 	}
 	api.InstallRuntimeLogger(os.Stdout, logLevel)
 	api.ConfigureRuntimeLogging(logLevel, cfg.RuntimeLogLimit)
@@ -107,7 +108,7 @@ func runAPI(args []string) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("Twilight Go API listening", "addr", server.Addr)
+		zap.L().Info("Twilight Go API listening", zap.String("addr", server.Addr))
 		errCh <- server.ListenAndServe()
 	}()
 
@@ -141,9 +142,9 @@ func runAll(args []string) error {
 	if err != nil {
 		return err
 	}
-	logLevel := cfg.SlogLevel()
+	logLevel := cfg.ZapLevel()
 	if *debug {
-		logLevel = slog.LevelDebug
+		logLevel = zapcore.DebugLevel
 	}
 	api.InstallRuntimeLogger(os.Stdout, logLevel)
 	api.ConfigureRuntimeLogging(logLevel, cfg.RuntimeLogLimit)
@@ -179,7 +180,7 @@ func runAll(args []string) error {
 
 	errCh := make(chan error, 3)
 	go func() {
-		slog.Info("Twilight Go API listening", "addr", server.Addr)
+		zap.L().Info("Twilight Go API listening", zap.String("addr", server.Addr))
 		errCh <- server.ListenAndServe()
 	}()
 	go func() {
@@ -220,8 +221,8 @@ func runScheduler(args []string) error {
 	if err != nil {
 		return err
 	}
-	api.InstallRuntimeLogger(os.Stdout, cfg.SlogLevel())
-	api.ConfigureRuntimeLogging(cfg.SlogLevel(), cfg.RuntimeLogLimit)
+	api.InstallRuntimeLogger(os.Stdout, cfg.ZapLevel())
+	api.ConfigureRuntimeLogging(cfg.ZapLevel(), cfg.RuntimeLogLimit)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	state, err := openStore(context.Background(), cfg)
@@ -251,12 +252,12 @@ func runBot(args []string) error {
 	if err != nil {
 		return err
 	}
-	api.InstallRuntimeLogger(os.Stdout, cfg.SlogLevel())
-	api.ConfigureRuntimeLogging(cfg.SlogLevel(), cfg.RuntimeLogLimit)
+	api.InstallRuntimeLogger(os.Stdout, cfg.ZapLevel())
+	api.ConfigureRuntimeLogging(cfg.ZapLevel(), cfg.RuntimeLogLimit)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	for !cfg.TelegramMode || strings.TrimSpace(cfg.TelegramBotToken) == "" {
-		slog.Info("Telegram bot mode is disabled or bot token is not configured; waiting for config reload")
+		zap.L().Info("Telegram bot mode is disabled or bot token is not configured; waiting for config reload")
 		select {
 		case <-ctx.Done():
 			return nil
@@ -264,11 +265,11 @@ func runBot(args []string) error {
 		}
 		next, err := reader.Read()
 		if err != nil {
-			slog.Warn("Telegram bot config reload failed", "error", err)
+			zap.L().Warn("Telegram bot config reload failed", zap.Error(err))
 			continue
 		}
 		cfg = next
-		api.ConfigureRuntimeLogging(cfg.SlogLevel(), cfg.RuntimeLogLimit)
+		api.ConfigureRuntimeLogging(cfg.ZapLevel(), cfg.RuntimeLogLimit)
 	}
 	state, err := openStore(context.Background(), cfg)
 	if err != nil {
@@ -316,7 +317,7 @@ func openStore(ctx context.Context, cfg config.Config) (*store.Store, error) {
 				applyConfiguredAdmins(cfg, legacy)
 				if storeHasAdmin(legacy) {
 					_ = st.Close()
-					slog.Warn("PostgreSQL has no administrator; using legacy JSON state so existing admins can log in and run database migration", "state_file", cfg.StateFile)
+					zap.L().Warn("PostgreSQL has no administrator; using legacy JSON state so existing admins can log in and run database migration", zap.String("state_file", cfg.StateFile))
 					return legacy, nil
 				}
 				_ = legacy.Close()
@@ -360,7 +361,7 @@ func applyConfiguredAdmins(cfg config.Config, st *store.Store) {
 			return nil
 		})
 		if err == nil {
-			slog.Info("configured administrator applied", "uid", updated.UID, "username", updated.Username)
+			zap.L().Info("configured administrator applied", zap.Int64("uid", updated.UID), zap.String("username", updated.Username))
 		}
 	}
 }
