@@ -265,6 +265,13 @@ export default function MediaPage() {
           const finalResults = Array.from(uniqueResults.values());
           setResults(finalResults);
           rememberCache(searchCacheRef.current, searchCacheKey, finalResults, MAX_SEARCH_CACHE_ENTRIES);
+          if (res.data.warnings && Object.keys(res.data.warnings).length > 0) {
+            toast({
+              title: "部分来源搜索失败",
+              description: Object.values(res.data.warnings).join("\n"),
+              variant: "destructive",
+            });
+          }
           
           if (finalResults.length === 0) {
             toast({
@@ -477,6 +484,12 @@ export default function MediaPage() {
     hidden: { opacity: 0, y: 20 },
     show: { opacity: 1, y: 0 }
   };
+  const compactSegmentClass = "grid w-full grid-cols-2 overflow-hidden rounded-xl border border-border/60 bg-secondary/80 p-0.5 sm:w-auto";
+  const compactSegmentButtonClass = "min-w-0 rounded-[0.65rem] px-3 py-1.5 text-xs font-bold transition-colors sm:px-4";
+  const sourceSegmentClass = "isolate flex h-14 w-full overflow-hidden rounded-[1.25rem] border border-border/70 bg-card/60 backdrop-blur-md dark:bg-slate-950/40 sm:w-auto";
+  const sourceSegmentButtonClass = "min-w-0 flex-1 px-3 text-sm font-bold transition-colors sm:flex-none sm:px-6";
+  const activeSegmentClass = "bg-primary text-primary-foreground";
+  const inactiveSegmentClass = "text-muted-foreground hover:bg-accent/80";
 
   return (
     <div className="space-y-8 pb-10">
@@ -506,16 +519,16 @@ export default function MediaPage() {
                 {/* 搜索模式切换 */}
                 <div className="flex items-center gap-4 flex-wrap">
                   <span className="text-xs font-black uppercase tracking-widest text-muted-foreground">Search Mode</span>
-                  <div className="grid w-full grid-cols-2 rounded-xl bg-secondary p-1 sm:w-auto">
+                  <div className={compactSegmentClass}>
                     <button 
                       onClick={() => setSearchMode("name")}
-                      className={cn("rounded-lg px-3 py-1.5 text-xs font-bold transition-all sm:px-4", searchMode === "name" ? "bg-white text-primary shadow-sm dark:bg-slate-950/80 dark:text-primary-foreground" : "text-muted-foreground")}
+                      className={cn(compactSegmentButtonClass, searchMode === "name" ? "bg-background text-primary shadow-sm dark:text-primary-foreground" : inactiveSegmentClass)}
                     >
                       名称搜索
                     </button>
                     <button 
                       onClick={() => setSearchMode("id")}
-                      className={cn("rounded-lg px-3 py-1.5 text-xs font-bold transition-all sm:px-4", searchMode === "id" ? "bg-white text-primary shadow-sm dark:bg-slate-950/80 dark:text-primary-foreground" : "text-muted-foreground")}
+                      className={cn(compactSegmentButtonClass, searchMode === "id" ? "bg-background text-primary shadow-sm dark:text-primary-foreground" : inactiveSegmentClass)}
                     >
                       ID 搜索
                     </button>
@@ -545,40 +558,40 @@ export default function MediaPage() {
                     />
                   </div>
                   
-                  <div className="flex w-full gap-2 rounded-[1.25rem] border border-white/50 bg-white/40 p-1 backdrop-blur-md dark:border-slate-700/70 dark:bg-slate-950/30 sm:w-auto">
+                  <div className={sourceSegmentClass}>
                     {searchMode === "name" && (
                       <button 
                         onClick={() => setSource("all")}
-                        className={cn("min-w-0 flex-1 rounded-xl px-3 text-sm font-bold transition-all sm:flex-none sm:px-6", source === "all" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent")}
+                        className={cn(sourceSegmentButtonClass, source === "all" ? activeSegmentClass : inactiveSegmentClass)}
                       >
                         全部
                       </button>
                     )}
                     <button 
                       onClick={() => setSource("tmdb")}
-                      className={cn("min-w-0 flex-1 rounded-xl px-3 text-sm font-bold transition-all sm:flex-none sm:px-6", source === "tmdb" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent")}
+                      className={cn(sourceSegmentButtonClass, source === "tmdb" ? activeSegmentClass : inactiveSegmentClass)}
                     >
                       TMDB
                     </button>
                     <button 
                       onClick={() => setSource("bangumi")}
-                      className={cn("min-w-0 flex-1 rounded-xl px-3 text-sm font-bold transition-all sm:flex-none sm:px-6", source === "bangumi" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent")}
+                      className={cn(sourceSegmentButtonClass, source === "bangumi" ? activeSegmentClass : inactiveSegmentClass)}
                     >
                       Bangumi
                     </button>
                   </div>
 
                   {searchMode === "id" && source === "tmdb" && (
-                    <div className="flex w-full gap-2 rounded-[1.25rem] border border-white/50 bg-white/40 p-1 backdrop-blur-md dark:border-slate-700/70 dark:bg-slate-950/30 sm:w-auto">
+                    <div className={sourceSegmentClass}>
                       <button 
                         onClick={() => setMediaType("movie")}
-                        className={cn("flex-1 rounded-xl px-3 text-sm font-bold transition-all sm:flex-none sm:px-6", mediaType === "movie" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent")}
+                        className={cn(sourceSegmentButtonClass, mediaType === "movie" ? activeSegmentClass : inactiveSegmentClass)}
                       >
                         电影
                       </button>
                       <button 
                         onClick={() => setMediaType("tv")}
-                        className={cn("flex-1 rounded-xl px-3 text-sm font-bold transition-all sm:flex-none sm:px-6", mediaType === "tv" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent")}
+                        className={cn(sourceSegmentButtonClass, mediaType === "tv" ? activeSegmentClass : inactiveSegmentClass)}
                       >
                         剧集
                       </button>
@@ -613,10 +626,10 @@ export default function MediaPage() {
                     variants={itemAnim}
                   >
                     <div
-                      className="group cursor-pointer premium-card p-0 h-full flex flex-col hover:ring-2 ring-primary/40"
+                      className="group cursor-pointer premium-card h-full overflow-hidden p-0 flex flex-col hover:ring-2 ring-primary/40"
                       onClick={() => handleSelectMedia(media)}
                     >
-                      <div className="aspect-[2/3] relative rounded-t-[2rem] overflow-hidden bg-muted">
+                      <div className="aspect-[2/3] relative overflow-hidden bg-muted">
                         {media.poster ? (
                           <Image
                             src={media.poster}

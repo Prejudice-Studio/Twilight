@@ -487,6 +487,64 @@ func TestInventoryCheckUsesEmbyProviderAndSeasons(t *testing.T) {
 	}
 }
 
+func TestBangumiSearchUsesV0EndpointAndReturnsResults(t *testing.T) {
+	app := newTestApp(t)
+	bgm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v0/search/subjects" {
+			t.Fatalf("unexpected Bangumi request %s %s", r.Method, r.URL.String())
+		}
+		if got := r.URL.Query().Get("limit"); got != "20" {
+			t.Fatalf("limit query = %q", got)
+		}
+		if got := r.URL.Query().Get("offset"); got != "0" {
+			t.Fatalf("offset query = %q", got)
+		}
+		if ct := r.Header.Get("Content-Type"); !strings.Contains(ct, "application/json") {
+			t.Fatalf("content-type = %q", ct)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["keyword"] != "葬送的芙莉莲" || body["sort"] != "match" {
+			t.Fatalf("unexpected Bangumi body %#v", body)
+		}
+		filter, _ := body["filter"].(map[string]any)
+		if filter == nil || filter["nsfw"] != true {
+			t.Fatalf("missing Bangumi filter %#v", body["filter"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":400602,"type":2,"name":"Sousou no Frieren","name_cn":"葬送的芙莉莲","date":"2023-09-29","images":{"common":"https://example.test/frieren.jpg"},"rating":{"score":8.8,"rank":10},"eps":28,"tags":[{"name":"漫画改"}]}]}`))
+	}))
+	defer bgm.Close()
+	app.cfg.BangumiAPIURL = bgm.URL
+
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	cookie := findCookie(login.Result().Cookies(), "twilight_session")
+	resp := doJSON(app, http.MethodGet, "/api/v1/media/search?q=%E8%91%AC%E9%80%81%E7%9A%84%E8%8A%99%E8%8E%89%E8%8E%B2&source=bangumi", ``, []*http.Cookie{cookie})
+	if resp.Code != http.StatusOK || !strings.Contains(resp.Body.String(), `"source":"bangumi"`) || !strings.Contains(resp.Body.String(), "葬送的芙莉莲") {
+		t.Fatalf("bangumi search status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestBangumiSearchErrorIsVisibleForBangumiSource(t *testing.T) {
+	app := newTestApp(t)
+	bgm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"description":"bad bangumi request"}`, http.StatusBadGateway)
+	}))
+	defer bgm.Close()
+	app.cfg.BangumiAPIURL = bgm.URL
+
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	cookie := findCookie(login.Result().Cookies(), "twilight_session")
+	resp := doJSON(app, http.MethodGet, "/api/v1/media/search?q=test&source=bangumi", ``, []*http.Cookie{cookie})
+	if resp.Code != http.StatusBadGateway || !strings.Contains(resp.Body.String(), "Bangumi 搜索失败") {
+		t.Fatalf("bangumi failure status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
 func TestSystemUpdateRejectsUnsafeRepoURL(t *testing.T) {
 	app := newTestApp(t)
 	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
@@ -686,6 +744,23 @@ func TestTelegramBindConfirmRequiresInternalSecret(t *testing.T) {
 	allowed := doJSONWithHeaders(app, http.MethodPost, "/api/v1/users/me/telegram/bind-confirm", `{"code":"ABCDEFGH","telegram_id":42}`, nil, map[string]string{"X-Internal-Secret": "test-secret"})
 	if allowed.Code != http.StatusOK {
 		t.Fatalf("bind confirm with secret = %d body=%s", allowed.Code, allowed.Body.String())
+	}
+}
+
+func TestTelegramEndpointAcceptsCommonBaseURLs(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg.TelegramMode = true
+	app.cfg.TelegramBotToken = "123:ABC"
+	cases := map[string]string{
+		"https://api.telegram.org":            "https://api.telegram.org/bot123:ABC/getMe",
+		"https://api.telegram.org/bot":        "https://api.telegram.org/bot123:ABC/getMe",
+		"https://api.telegram.org/bot123:ABC": "https://api.telegram.org/bot123:ABC/getMe",
+	}
+	for base, want := range cases {
+		app.cfg.TelegramAPIURL = base
+		if got := app.telegramEndpoint("getMe"); got != want {
+			t.Fatalf("telegramEndpoint(%q) = %q, want %q", base, got, want)
+		}
 	}
 }
 

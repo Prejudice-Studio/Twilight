@@ -208,6 +208,7 @@ func (a *App) registerAdminRoutes() {
 	a.add(http.MethodPost, "/api/v1/admin/telegram/kick-unbound", AuthAdmin, a.handleTelegramKickUnbound)
 	a.add(http.MethodGet, "/api/v1/admin/scheduler/jobs", AuthAdmin, a.handleSchedulerJobs)
 	a.add(http.MethodPost, "/api/v1/admin/scheduler/jobs/:job_id/run", AuthAdmin, a.handleSchedulerRunV2)
+	a.add(http.MethodPost, "/api/v1/admin/scheduler/jobs/:job_id/terminate", AuthAdmin, a.handleSchedulerTerminate)
 	a.add(http.MethodGet, "/api/v1/admin/scheduler/jobs/:job_id/last-run", AuthAdmin, a.handleSchedulerLastRun)
 	a.add(http.MethodGet, "/api/v1/admin/scheduler/jobs/:job_id/history", AuthAdmin, a.handleSchedulerHistory)
 	a.add(http.MethodPut, "/api/v1/admin/scheduler/jobs/:job_id/schedule", AuthAdmin, a.handleSchedulerSchedule)

@@ -4,14 +4,14 @@ import { api, type SystemInfo } from "@/lib/api";
 interface SystemStore {
   info: SystemInfo | null;
   loaded: boolean;
-  fetchInfo: () => Promise<void>;
+  fetchInfo: (force?: boolean) => Promise<void>;
 }
 
 export const useSystemStore = create<SystemStore>((set, get) => ({
   info: null,
   loaded: false,
-  fetchInfo: async () => {
-    if (get().loaded) return;
+  fetchInfo: async (force = false) => {
+    if (get().loaded && !force) return;
     try {
       const res = await api.getSystemInfo();
       if (res.success && res.data) {

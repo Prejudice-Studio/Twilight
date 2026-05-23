@@ -25,10 +25,37 @@ func (a *App) telegramAvailable() bool {
 func (a *App) telegramEndpoint(method string) string {
 	base := strings.TrimRight(firstNonEmpty(a.cfg.TelegramAPIURL, "https://api.telegram.org"), "/")
 	token := strings.TrimSpace(a.cfg.TelegramBotToken)
+	if strings.HasSuffix(base, "/bot"+token) {
+		return base + "/" + method
+	}
 	if strings.HasSuffix(base, "/bot") {
 		return base + token + "/" + method
 	}
 	return base + "/bot" + token + "/" + method
+}
+
+func (a *App) setTelegramRuntimeStatus(polling bool, err error) {
+	a.telegramStatusMu.Lock()
+	defer a.telegramStatusMu.Unlock()
+	a.telegramPolling = polling
+	if err != nil {
+		a.telegramLastError = err.Error()
+		a.telegramLastErrorAt = time.Now().Unix()
+		return
+	}
+	a.telegramLastError = ""
+	a.telegramLastOKAt = time.Now().Unix()
+}
+
+func (a *App) telegramRuntimeStatus() map[string]any {
+	a.telegramStatusMu.Lock()
+	defer a.telegramStatusMu.Unlock()
+	return map[string]any{
+		"polling":       a.telegramPolling,
+		"last_ok_at":    zeroNil(a.telegramLastOKAt),
+		"last_error_at": zeroNil(a.telegramLastErrorAt),
+		"last_error":    a.telegramLastError,
+	}
 }
 
 func (a *App) telegramPost(ctx context.Context, method string, body map[string]any, dst any) error {

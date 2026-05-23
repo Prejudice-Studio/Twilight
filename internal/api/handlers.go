@@ -1421,8 +1421,9 @@ func (a *App) handleSystemInfo(w http.ResponseWriter, r *http.Request, _ Params)
 }
 
 func (a *App) publicTelegramBotInfo(ctx context.Context) map[string]any {
-	empty := map[string]any{"username": nil, "url": nil}
+	empty := map[string]any{"username": nil, "url": nil, "enabled": a.cfg.TelegramMode, "configured": strings.TrimSpace(a.cfg.TelegramBotToken) != "", "ok": false, "error": ""}
 	if !a.telegramAvailable() {
+		empty["error"] = "Telegram 未启用或未配置 Bot Token"
 		return empty
 	}
 	token := strings.TrimSpace(a.cfg.TelegramBotToken)
@@ -1442,13 +1443,19 @@ func (a *App) publicTelegramBotInfo(ctx context.Context) map[string]any {
 	if err == nil {
 		username := strings.TrimPrefix(asString(me["username"]), "@")
 		if telegramPublicUsernamePattern.MatchString(username) {
-			bot = map[string]any{"username": username, "url": "https://t.me/" + username}
+			bot = map[string]any{"username": username, "url": "https://t.me/" + username, "enabled": a.cfg.TelegramMode, "configured": true, "ok": true, "error": ""}
 		}
+	} else {
+		bot["error"] = err.Error()
 	}
 
 	a.telegramBotMu.Lock()
 	a.telegramBotCacheToken = token
-	a.telegramBotCacheUntil = now.Add(10 * time.Minute)
+	if err == nil {
+		a.telegramBotCacheUntil = now.Add(10 * time.Minute)
+	} else {
+		a.telegramBotCacheUntil = now.Add(30 * time.Second)
+	}
 	a.telegramBotCache = cloneMap(bot)
 	a.telegramBotMu.Unlock()
 	return bot
@@ -1524,7 +1531,7 @@ func (a *App) handleServerIcon(w http.ResponseWriter, r *http.Request, _ Params)
 		}
 	}
 	w.Header().Set("Content-Type", "image/png")
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Cache-Control", "public, max-age=300")
 	_, _ = w.Write(serverIconPNG)
 }
 
@@ -1538,6 +1545,11 @@ func (a *App) publicServerIconURL() string {
 			return value
 		}
 		return "/api/v1/system/server-icon"
+	}
+	if iconPath, _, okIcon := a.configuredServerIconPath(); okIcon {
+		if info, err := os.Stat(iconPath); err == nil {
+			return "/api/v1/system/server-icon?v=" + strconv.FormatInt(info.ModTime().UnixNano(), 36) + "-" + strconv.FormatInt(info.Size(), 36)
+		}
 	}
 	return "/api/v1/system/server-icon"
 }
@@ -1731,18 +1743,59 @@ func (a *App) handleAPIRoutes(w http.ResponseWriter, r *http.Request, _ Params) 
 }
 
 func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request, _ Params) {
-	if a.cfg.TelegramBotToken == "" {
-		fail(w, http.StatusBadRequest, "未配置 Telegram Bot Token")
+	results := []map[string]any{}
+	if !a.cfg.TelegramMode {
+		results = append(results, map[string]any{"target": "配置", "success": false, "error": "telegram_mode 未启用"})
+		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatus()})
 		return
 	}
-	apiURL := strings.TrimRight(firstNonEmpty(a.cfg.TelegramAPIURL, "https://api.telegram.org"), "/") + "/bot" + a.cfg.TelegramBotToken + "/getMe"
-	var payload map[string]any
-	if err := getJSON(r.Context(), apiURL, nil, &payload); err != nil {
-		ok(w, "测试完成", map[string]any{"results": []map[string]any{{"target": "bot", "success": false, "error": err.Error()}}})
+	if strings.TrimSpace(a.cfg.TelegramBotToken) == "" {
+		results = append(results, map[string]any{"target": "Bot Token", "success": false, "error": "未配置 Telegram Bot Token"})
+		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatus()})
 		return
 	}
-	result, _ := payload["result"].(map[string]any)
-	ok(w, "测试完成", map[string]any{"results": []map[string]any{{"target": "bot", "success": payload["ok"] == true, "username": result["username"]}}})
+	testCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	me, err := a.telegramGetMe(testCtx)
+	if err != nil {
+		results = append(results, map[string]any{"target": "Bot getMe", "success": false, "error": err.Error()})
+		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatus()})
+		return
+	}
+	botID := int64(numeric(me["id"]))
+	username := strings.TrimPrefix(asString(me["username"]), "@")
+	results = append(results, map[string]any{"target": "Bot getMe", "success": true, "username": username, "bot_id": zeroNil(botID)})
+	for _, chatID := range telegramChatIDs(a.cfg.TelegramGroupIDs) {
+		var chat map[string]any
+		err := a.telegramPost(testCtx, "getChat", map[string]any{"chat_id": chatID}, &chat)
+		item := map[string]any{"target": "群组 " + chatID, "success": err == nil}
+		if err != nil {
+			item["error"] = err.Error()
+		} else {
+			item["title"] = firstNonEmpty(asString(chat["title"]), asString(chat["username"]))
+			if botID != 0 {
+				if member, memberErr := a.telegramGetChatMember(testCtx, chatID, botID); memberErr != nil {
+					item["success"] = false
+					item["error"] = memberErr.Error()
+				} else {
+					item["bot_status"] = asString(member["status"])
+				}
+			}
+		}
+		results = append(results, item)
+	}
+	for _, chatID := range telegramChatIDs(a.cfg.TelegramChannelIDs) {
+		var chat map[string]any
+		err := a.telegramPost(testCtx, "getChat", map[string]any{"chat_id": chatID}, &chat)
+		item := map[string]any{"target": "频道 " + chatID, "success": err == nil}
+		if err != nil {
+			item["error"] = err.Error()
+		} else {
+			item["title"] = firstNonEmpty(asString(chat["title"]), asString(chat["username"]))
+		}
+		results = append(results, item)
+	}
+	ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatus()})
 }
 
 func (a *App) handleEmbyStatus(w http.ResponseWriter, r *http.Request, _ Params) {

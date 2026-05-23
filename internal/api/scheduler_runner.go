@@ -48,17 +48,17 @@ func (a *App) sendExpiryReminders(ctx context.Context, days int) map[string]any 
 
 func (a *App) handleSchedulerRunV2(w http.ResponseWriter, r *http.Request, params Params) {
 	now := time.Now().Unix()
-	summary, logs, err := a.runSchedulerJob(r, params["job_id"])
-	status := "success"
-	message := "job completed"
-	errText := ""
-	if err != nil {
-		status = "failed"
-		message = err.Error()
-		errText = err.Error()
+	jobID := params["job_id"]
+	runCtx, finish, okRun := a.startSchedulerRun(r.Context(), jobID)
+	if !okRun {
+		fail(w, http.StatusConflict, "job is already running")
+		return
 	}
-	finished := time.Now().Unix()
-	run := store.SchedulerRun{JobID: params["job_id"], Type: "manual", Trigger: "manual", Status: status, Message: message, StartedAt: now, FinishedAt: finished, EndedAt: finished, Summary: summary, Logs: logs, Error: errText}
+	defer finish()
+	_ = a.store.AddSchedulerRun(store.SchedulerRun{JobID: jobID, Type: "manual", Trigger: "manual", Status: "running", Message: "running", StartedAt: now})
+	req := r.WithContext(runCtx)
+	summary, logs, err := a.runSchedulerJob(req, jobID)
+	run := schedulerFinishedRun(jobID, "manual", "manual", now, summary, logs, err)
 	_ = a.store.AddSchedulerRun(run)
 	ok(w, "job executed", map[string]any{"job_id": run.JobID, "last_run": run})
 }
@@ -68,12 +68,18 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		return map[string]any{"success": false}, nil, fmt.Errorf("job not found")
 	}
 	params := schedulerRequestParams(r)
+	if err := r.Context().Err(); err != nil {
+		return map[string]any{"success": false, "terminated": true}, []string{"job terminated before execution"}, err
+	}
 	now := time.Now().Unix()
 	switch jobID {
 	case "check_expired":
 		disabled := 0
 		embyDisabled := 0
 		for _, u := range a.store.ListUsers() {
+			if err := r.Context().Err(); err != nil {
+				return map[string]any{"success": false, "terminated": true, "disabled": disabled, "emby_disabled": embyDisabled}, []string{"job terminated"}, err
+			}
 			if u.Active && u.ExpiredAt > 0 && u.ExpiredAt < now {
 				// For invited users (have invite relation), only disable Emby access
 				// but keep the account active so they can still log in and renew
@@ -111,6 +117,9 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		deadline := time.Now().Add(time.Duration(days) * 24 * time.Hour).Unix()
 		count := 0
 		for _, u := range a.store.ListUsers() {
+			if err := r.Context().Err(); err != nil {
+				return map[string]any{"success": false, "terminated": true, "expiring": count, "days": days}, []string{"job terminated"}, err
+			}
 			if u.Active && u.ExpiredAt > now && u.ExpiredAt <= deadline {
 				count++
 			}
@@ -150,6 +159,9 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		}
 		updatedNames, syncedState, missing := 0, 0, 0
 		for _, u := range a.store.ListUsers() {
+			if err := r.Context().Err(); err != nil {
+				return map[string]any{"success": false, "terminated": true, "updated_names": updatedNames, "synced_state": syncedState, "missing": missing}, []string{"job terminated"}, err
+			}
 			if u.EmbyID == "" {
 				continue
 			}
@@ -188,6 +200,9 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		deleted := 0
 		failed := 0
 		for _, u := range a.store.ListUsers() {
+			if err := r.Context().Err(); err != nil {
+				return map[string]any{"success": false, "terminated": true, "candidates": candidates, "deleted": deleted, "failed": failed, "dry_run": dryRun}, []string{"job terminated"}, err
+			}
 			if u.Role == store.RoleAdmin || u.Role == store.RoleWhitelist || u.EmbyID != "" {
 				continue
 			}
@@ -216,6 +231,9 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		seen := map[int64]int64{}
 		duplicates := 0
 		for _, u := range a.store.ListUsers() {
+			if err := r.Context().Err(); err != nil {
+				return map[string]any{"success": false, "terminated": true, "duplicates": duplicates, "bound": len(seen)}, []string{"job terminated"}, err
+			}
 			if u.TelegramID == 0 {
 				continue
 			}
@@ -276,6 +294,11 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		kicked, skipped, failedCount, notInGroup, scanned := 0, 0, 0, 0, 0
 		logs := []string{}
 		for _, target := range targets {
+			if err := r.Context().Err(); err != nil {
+				summary["success"] = false
+				summary["terminated"] = true
+				return summary, append(logs, "job terminated"), err
+			}
 			if scanned >= maxPerRun {
 				break
 			}

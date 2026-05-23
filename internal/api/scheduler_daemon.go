@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -82,15 +83,26 @@ func (a *App) schedulerJobDue(jobID string, spec map[string]any, now time.Time) 
 }
 
 func (a *App) runScheduledJob(ctx context.Context, jobID string) {
-	if !a.markSchedulerRunning(jobID) {
+	runCtx, finish, ok := a.startSchedulerRun(ctx, jobID)
+	if !ok {
 		return
 	}
-	defer a.clearSchedulerRunning(jobID)
+	defer finish()
 	started := time.Now().Unix()
 	run := store.SchedulerRun{JobID: jobID, Type: "auto", Trigger: "scheduler", Status: "running", Message: "running", StartedAt: started}
 	_ = a.store.AddSchedulerRun(run)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "/scheduler/internal", nil)
+	req, _ := http.NewRequestWithContext(runCtx, http.MethodPost, "/scheduler/internal", nil)
 	summary, logs, err := a.runSchedulerJob(req, jobID)
+	run = schedulerFinishedRun(jobID, "auto", "scheduler", started, summary, logs, err)
+	_ = a.store.AddSchedulerRun(run)
+	if err != nil {
+		slog.Warn("scheduler job failed", "job_id", jobID, "error", err)
+	} else {
+		slog.Info("scheduler job completed", "job_id", jobID)
+	}
+}
+
+func schedulerFinishedRun(jobID, runType, trigger string, started int64, summary map[string]any, logs []string, err error) store.SchedulerRun {
 	status := "success"
 	message := "job completed"
 	errText := ""
@@ -98,12 +110,16 @@ func (a *App) runScheduledJob(ctx context.Context, jobID string) {
 		status = "failed"
 		message = err.Error()
 		errText = err.Error()
+		if errors.Is(err, context.Canceled) {
+			message = "job terminated by administrator"
+			errText = message
+		}
 	}
 	finished := time.Now().Unix()
-	_ = a.store.AddSchedulerRun(store.SchedulerRun{
+	return store.SchedulerRun{
 		JobID:      jobID,
-		Type:       "auto",
-		Trigger:    "scheduler",
+		Type:       runType,
+		Trigger:    trigger,
 		Status:     status,
 		Message:    message,
 		StartedAt:  started,
@@ -112,11 +128,6 @@ func (a *App) runScheduledJob(ctx context.Context, jobID string) {
 		Summary:    summary,
 		Logs:       logs,
 		Error:      errText,
-	})
-	if err != nil {
-		slog.Warn("scheduler job failed", "job_id", jobID, "error", err)
-	} else {
-		slog.Info("scheduler job completed", "job_id", jobID)
 	}
 }
 
@@ -181,13 +192,45 @@ func parseClock(value string, fallbackHour, fallbackMinute int) (int, int) {
 	return clamp(hour, 0, 23), clamp(minute, 0, 59)
 }
 
-var schedulerProcessLocks sync.Map
-
-func (a *App) markSchedulerRunning(jobID string) bool {
-	_, loaded := schedulerProcessLocks.LoadOrStore(jobID, true)
-	return !loaded
+type schedulerProcessRun struct {
+	cancel  context.CancelFunc
+	started int64
 }
 
-func (a *App) clearSchedulerRunning(jobID string) {
-	schedulerProcessLocks.Delete(jobID)
+var schedulerProcessLocks sync.Map
+
+func (a *App) startSchedulerRun(ctx context.Context, jobID string) (context.Context, func(), bool) {
+	runCtx, cancel := context.WithCancel(ctx)
+	run := &schedulerProcessRun{cancel: cancel, started: time.Now().Unix()}
+	actual, loaded := schedulerProcessLocks.LoadOrStore(jobID, run)
+	if loaded {
+		cancel()
+		_ = actual
+		return ctx, func() {}, false
+	}
+	finish := func() {
+		cancel()
+		if current, ok := schedulerProcessLocks.Load(jobID); ok && current == run {
+			schedulerProcessLocks.Delete(jobID)
+		}
+	}
+	return runCtx, finish, true
+}
+
+func (a *App) schedulerJobRunning(jobID string) bool {
+	_, ok := schedulerProcessLocks.Load(jobID)
+	return ok
+}
+
+func (a *App) terminateSchedulerJob(jobID string) bool {
+	value, ok := schedulerProcessLocks.Load(jobID)
+	if !ok {
+		return false
+	}
+	run, ok := value.(*schedulerProcessRun)
+	if !ok || run.cancel == nil {
+		return false
+	}
+	run.cancel()
+	return true
 }

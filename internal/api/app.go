@@ -56,6 +56,11 @@ type App struct {
 	telegramBotCacheToken string
 	telegramBotCacheUntil time.Time
 	telegramBotCache      map[string]any
+	telegramStatusMu      sync.Mutex
+	telegramLastOKAt      int64
+	telegramLastErrorAt   int64
+	telegramLastError     string
+	telegramPolling       bool
 	embyAdminMu           sync.Mutex
 	embyAdminCache        map[string]embyAdminCacheEntry
 }

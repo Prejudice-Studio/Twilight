@@ -158,16 +158,19 @@ export default function AdminEmbyPage() {
 
   // Bot test state
   const [isBotTesting, setIsBotTesting] = useState(false);
-  const [botResults, setBotResults] = useState<Array<{ target: string; success: boolean; error: string | null }> | null>(null);
+  const [botResults, setBotResults] = useState<Array<{ target: string; success: boolean; error: string | null; username?: string; bot_id?: number; title?: string; bot_status?: string }> | null>(null);
+  const [botRuntime, setBotRuntime] = useState<{ polling?: boolean; last_ok_at?: number | null; last_error_at?: number | null; last_error?: string } | null>(null);
 
   // Bot connectivity test
   const handleTestBot = useCallback(async () => {
     setIsBotTesting(true);
     setBotResults(null);
+    setBotRuntime(null);
     try {
       const res = await api.testBotConnectivity();
       if (res.success && res.data) {
         setBotResults(res.data.results);
+        setBotRuntime(res.data.runtime || null);
         const allOk = res.data.results.every((r) => r.success);
         toast({
           title: allOk ? "Bot 连通性测试成功" : "部分目标发送失败",
@@ -497,6 +500,14 @@ export default function AdminEmbyPage() {
           </CardHeader>
           {botResults && (
             <CardContent className="space-y-3">
+              {botRuntime && (
+                <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
+                  <div>轮询状态：{botRuntime.polling ? "运行中" : "未运行或等待配置"}</div>
+                  {botRuntime.last_ok_at ? <div>最近成功：{new Date(botRuntime.last_ok_at * 1000).toLocaleString()}</div> : null}
+                  {botRuntime.last_error_at ? <div>最近错误时间：{new Date(botRuntime.last_error_at * 1000).toLocaleString()}</div> : null}
+                  {botRuntime.last_error ? <div className="break-words text-red-500">最近错误：{botRuntime.last_error}</div> : null}
+                </div>
+              )}
               <div className="grid gap-2 sm:grid-cols-2">
                 {botResults.map((r, i) => (
                   <div
@@ -517,6 +528,11 @@ export default function AdminEmbyPage() {
                     </div>
                     {r.error && (
                       <p className="text-xs text-red-500 mt-1">{r.error}</p>
+                    )}
+                    {!r.error && (r.username || r.title || r.bot_status) && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {[r.username ? `@${r.username}` : "", r.title || "", r.bot_status ? `Bot 状态：${r.bot_status}` : ""].filter(Boolean).join(" · ")}
+                      </p>
                     )}
                     {r.success && (
                       <p className="text-xs text-muted-foreground">发送成功</p>

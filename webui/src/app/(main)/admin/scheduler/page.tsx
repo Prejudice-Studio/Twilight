@@ -10,6 +10,7 @@ import {
   RefreshCw,
   RotateCcw,
   Settings2,
+  Square,
   TimerReset,
   XCircle,
 } from "lucide-react";
@@ -472,6 +473,7 @@ export default function AdminSchedulerPage() {
   const { toast } = useToast();
   const [jobs, setJobs] = useState<SchedulerJobItem[]>([]);
   const [running, setRunning] = useState<Record<string, boolean>>({});
+  const [terminating, setTerminating] = useState<Record<string, boolean>>({});
   const [rejoinEnabling, setRejoinEnabling] = useState(false);
   const pollTimerRef = useRef<number | null>(null);
 
@@ -581,6 +583,26 @@ export default function AdminSchedulerPage() {
     }
     void runJob(job);
   };
+
+  const handleTerminate = useCallback(
+    async (job: SchedulerJobItem) => {
+      setTerminating((p) => ({ ...p, [job.id]: true }));
+      try {
+        const res = await api.terminateSchedulerJob(job.id);
+        if (res.success) {
+          toast({ title: "已请求终止", description: `${job.name} 正在停止，请稍后刷新状态。`, variant: "success" });
+          await refresh();
+        } else {
+          toast({ title: "终止失败", description: res.message, variant: "destructive" });
+        }
+      } catch (err: any) {
+        toast({ title: "终止失败", description: err.message || "网络异常", variant: "destructive" });
+      } finally {
+        setTerminating((p) => ({ ...p, [job.id]: false }));
+      }
+    },
+    [refresh, toast],
+  );
 
   const handleParamConfirm = async () => {
     if (!paramJob) return;
@@ -786,7 +808,7 @@ export default function AdminSchedulerPage() {
                     </div>
                   )}
 
-                  <div className={job.manual_only ? "grid grid-cols-[1fr_auto] gap-2" : "grid grid-cols-[1fr_auto_auto] gap-2"}>
+                  <div className={job.manual_only ? "grid grid-cols-[1fr_auto_auto] gap-2" : "grid grid-cols-[1fr_auto_auto_auto] gap-2"}>
                     <Button
                       onClick={() => void handleTrigger(job)}
                       disabled={isRunning}
@@ -798,6 +820,19 @@ export default function AdminSchedulerPage() {
                         <PlayCircle className="mr-2 h-4 w-4" />
                       )}
                       {isRunning ? "运行中…" : "立即运行"}
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="icon"
+                      onClick={() => void handleTerminate(job)}
+                      disabled={!isRunning || Boolean(terminating[job.id])}
+                      title="终止当前运行"
+                    >
+                      {terminating[job.id] ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Square className="h-4 w-4" />
+                      )}
                     </Button>
                     {!job.manual_only && (
                       <Button
