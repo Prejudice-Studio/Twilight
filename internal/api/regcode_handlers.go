@@ -56,12 +56,13 @@ func (a *App) handleCreateRegcodes(w http.ResponseWriter, r *http.Request, _ Par
 	format := firstNonEmpty(stringValue(payload, "format"), "TW-{type}-{random}")
 	algorithm := firstNonEmpty(stringValue(payload, "random_algorithm"), "base32-20")
 	codes := make([]string, 0, count)
+	targetUsername := strings.TrimSpace(stringValue(payload, "target_username"))
 	for i := 0; i < count; i++ {
 		code := generateRegCode(format, codeType, algorithm)
-		_ = a.store.UpsertRegCode(store.RegCode{Code: code, Type: codeType, ValidityTime: validity, UseCountLimit: useLimit, Days: days, Note: truncateString(stringValue(payload, "note"), 120), IsDecoy: boolValue(payload, "decoy", false), Active: true})
+		_ = a.store.UpsertRegCode(store.RegCode{Code: code, Type: codeType, ValidityTime: validity, UseCountLimit: useLimit, Days: days, Note: truncateString(stringValue(payload, "note"), 120), IsDecoy: boolValue(payload, "decoy", false), TargetUsername: targetUsername, Active: true})
 		codes = append(codes, code)
 	}
-	ok(w, "娉ㄥ唽鐮佸凡鍒涘缓", map[string]any{"codes": codes, "count": len(codes), "decoy": boolValue(payload, "decoy", false)})
+	ok(w, "注册码已创建", map[string]any{"codes": codes, "count": len(codes), "decoy": boolValue(payload, "decoy", false), "target_username": targetUsername})
 }
 
 func (a *App) handleUpdateRegcode(w http.ResponseWriter, r *http.Request, params Params) {

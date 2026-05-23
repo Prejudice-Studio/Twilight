@@ -55,6 +55,19 @@ interface State {
 const toastTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 const toastDismissTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
+const clearToastTimers = (toastId: string) => {
+  const removeTimeout = toastTimeouts.get(toastId);
+  if (removeTimeout) {
+    clearTimeout(removeTimeout);
+    toastTimeouts.delete(toastId);
+  }
+  const dismissTimeout = toastDismissTimeouts.get(toastId);
+  if (dismissTimeout) {
+    clearTimeout(dismissTimeout);
+    toastDismissTimeouts.delete(toastId);
+  }
+};
+
 const addToRemoveQueue = (toastId: string) => {
   if (toastTimeouts.has(toastId)) {
     return;
@@ -74,6 +87,9 @@ const addToRemoveQueue = (toastId: string) => {
 export const reducer = (state: State, action: Action): State => {
   switch (action.type) {
     case "ADD_TOAST":
+      [action.toast, ...state.toasts].slice(TOAST_LIMIT).forEach((toast) => {
+        clearToastTimers(toast.id);
+      });
       return {
         ...state,
         toasts: [action.toast, ...state.toasts].slice(0, TOAST_LIMIT),
@@ -112,6 +128,8 @@ export const reducer = (state: State, action: Action): State => {
     }
     case "REMOVE_TOAST":
       if (action.toastId === undefined) {
+        toastTimeouts.forEach((timeout) => clearTimeout(timeout));
+        toastTimeouts.clear();
         toastDismissTimeouts.forEach((timeout) => clearTimeout(timeout));
         toastDismissTimeouts.clear();
         return {
@@ -120,11 +138,7 @@ export const reducer = (state: State, action: Action): State => {
         };
       }
       {
-        const timeout = toastDismissTimeouts.get(action.toastId);
-        if (timeout) {
-          clearTimeout(timeout);
-          toastDismissTimeouts.delete(action.toastId);
-        }
+        clearToastTimers(action.toastId);
       }
       return {
         ...state,
@@ -200,7 +214,7 @@ function useToast() {
         listeners.splice(index, 1);
       }
     };
-  }, [state]);
+  }, []);
 
   return {
     ...state,

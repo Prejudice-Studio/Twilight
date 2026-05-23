@@ -47,12 +47,17 @@ func (a *App) handleCreateInviteCode(w http.ResponseWriter, r *http.Request, _ P
 	days := intValue(payload, "days", a.cfg.InviteDefaultDays)
 	maxDays, _ := a.maxCodeDays(user)
 	if days <= 0 || days > maxDays {
-		fail(w, http.StatusBadRequest, "閭€璇风爜澶╂暟瓒呭嚭鍏佽鑼冨洿")
+		fail(w, http.StatusBadRequest, "邀请码天数超出允许范围")
 		return
 	}
 	code := strings.ToUpper("INV" + randomCode(10))
 	expiresAt := int64(intValue(payload, "expires_at", -1))
-	invite := store.InviteCode{Code: code, UID: user.UID, InviterUID: user.UID, Days: days, UseCountLimit: 1, Active: true, Note: truncateString(stringValue(payload, "note"), 255), CreatedAt: time.Now().Unix(), ExpiredAt: expiresAt}
+	targetUsername := strings.TrimSpace(stringValue(payload, "target_username"))
+	if targetUsername != "" && (len(targetUsername) < 3 || len(targetUsername) > 32) {
+		fail(w, http.StatusBadRequest, "目标用户名长度需在 3-32 字符之间")
+		return
+	}
+	invite := store.InviteCode{Code: code, UID: user.UID, InviterUID: user.UID, Days: days, UseCountLimit: 1, Active: true, Note: truncateString(stringValue(payload, "note"), 255), TargetUsername: targetUsername, CreatedAt: time.Now().Unix(), ExpiredAt: expiresAt}
 	_ = a.store.UpsertInviteCode(invite)
 	created(w, "invite code created", inviteCodeDTO(invite))
 }
@@ -75,7 +80,7 @@ func (a *App) handleInviteCheck(w http.ResponseWriter, r *http.Request, _ Params
 	code := stringValue(decodeMap(r), "code")
 	invite, okInvite := a.store.InviteCode(code)
 	if !okInvite || !invite.Active || (invite.ExpiredAt > 0 && invite.ExpiredAt < time.Now().Unix()) {
-		fail(w, http.StatusNotFound, "閭€璇风爜鏃犳晥鎴栧凡鍋滅敤")
+		fail(w, http.StatusNotFound, "邀请码无效或已停用")
 		return
 	}
 	inviter := ""
@@ -88,12 +93,22 @@ func (a *App) handleInviteUse(w http.ResponseWriter, r *http.Request, _ Params) 
 	payload := decodeMap(r)
 	code := stringValue(payload, "code")
 	if code == "" {
-		fail(w, http.StatusBadRequest, "閭€璇风爜涓嶈兘涓虹┖")
+		fail(w, http.StatusBadRequest, "邀请码不能为空")
 		return
 	}
 	user := current(r).User
 	if user.EmbyID != "" {
-		fail(w, http.StatusBadRequest, "褰撳墠璐﹀彿宸茬粦瀹?Emby")
+		fail(w, http.StatusBadRequest, "当前账号已绑定 Emby")
+		return
+	}
+	// Validate target_username restriction if set on the invite code
+	invite, okInvite := a.store.InviteCode(code)
+	if !okInvite || !invite.Active {
+		fail(w, http.StatusNotFound, "邀请码无效或已停用")
+		return
+	}
+	if invite.TargetUsername != "" && !strings.EqualFold(invite.TargetUsername, user.Username) {
+		fail(w, http.StatusForbidden, "此邀请码仅限指定用户使用")
 		return
 	}
 	if _, err := a.store.ConsumeInviteCode(code, user.UID); statusFromError(w, err) {

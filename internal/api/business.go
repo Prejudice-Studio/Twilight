@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sort"
@@ -276,7 +277,17 @@ func generateRegCode(format string, codeType int, algorithm string) string {
 
 func (a *App) previewCode(code string, user store.User) (map[string]any, string, bool) {
 	if reg, ok := a.store.RegCode(code); ok {
-		if reg.IsDecoy || regcodeStatus(reg) != "available" {
+		// Decoy code: record violation and apply configured action
+		if reg.IsDecoy {
+			a.recordViolation(user, code, "regcode_decoy", "使用诱饵注册码")
+			return nil, "", false
+		}
+		// Target username restriction: record violation if mismatch
+		if reg.TargetUsername != "" && !strings.EqualFold(reg.TargetUsername, user.Username) {
+			a.recordViolation(user, code, "regcode_target_mismatch", "使用指名注册码（目标用户: "+reg.TargetUsername+"）")
+			return nil, "", false
+		}
+		if regcodeStatus(reg) != "available" {
 			return nil, "", false
 		}
 		return codePreview("regcode", reg.Type, reg.Days, ""), "regcode", true
@@ -295,6 +306,35 @@ func (a *App) previewCode(code string, user store.User) (map[string]any, string,
 		return codePreview("invite", 1, invite.Days, inviter), "invite", true
 	}
 	return nil, "", false
+}
+
+// recordViolation logs a code violation and applies the configured punitive action.
+func (a *App) recordViolation(user store.User, code, codeType, reason string) {
+	action := strings.ToLower(strings.TrimSpace(a.cfg.DecoyAction))
+	if action == "" {
+		action = "log_only"
+	}
+	_ = a.store.AddViolationLog(store.ViolationLog{
+		UID:        user.UID,
+		Username:   user.Username,
+		Code:       code,
+		CodeType:   codeType,
+		Reason:     reason,
+		Action:     action,
+		TelegramID: user.TelegramID,
+		CreatedAt:  time.Now().Unix(),
+	})
+	switch action {
+	case "disable_user":
+		_, _ = a.store.UpdateUser(user.UID, func(u *store.User) error {
+			u.Active = false
+			return nil
+		})
+	case "disable_emby":
+		if user.EmbyID != "" {
+			_ = a.embySetUserEnabled(context.Background(), user.EmbyID, false)
+		}
+	}
 }
 
 func sortUsers(items []map[string]any, sortKey string) {
@@ -373,6 +413,7 @@ func inviteCodeDTO(code store.InviteCode) map[string]any {
 		"used_by_uid":     zeroNil(code.UsedByUID),
 		"used_at":         zeroNil(code.UsedAt),
 		"note":            code.Note,
+		"target_username": code.TargetUsername,
 	}
 }
 
@@ -384,7 +425,7 @@ func (a *App) maxCodeDays(user store.User) (int, string) {
 		return a.cfg.PermanentInviteMaxDays, ""
 	}
 	if user.ExpiredAt <= time.Now().Unix() {
-		return 0, "閭€璇蜂汉 Emby 鏈夋晥鏈熷凡鍒版湡锛屼笉鑳界敓鎴愰個璇风爜"
+		return 0, "邀请人 Emby 有效期已到期，不能生成邀请码"
 	}
 	days := int((user.ExpiredAt - time.Now().Unix() + 86399) / 86400)
 	if days > a.cfg.PermanentInviteMaxDays {
@@ -412,13 +453,13 @@ func (a *App) inviteDepth(uid int64) int {
 
 func (a *App) canInvite(user store.User) (bool, string) {
 	if !a.cfg.InviteEnabled {
-		return false, "閭€璇风郴缁熸湭鍚敤"
+		return false, "邀请系统未启用"
 	}
 	if !user.Active {
-		return false, "璐︽埛宸茶绂佺敤锛屾棤娉曠敓鎴愰個璇风爜"
+		return false, "账号已被禁用，无法生成邀请码"
 	}
 	if a.cfg.InviteRequireEmby && user.EmbyID == "" {
-		return false, "璇峰厛缁戝畾 Emby 璐﹀彿鍚庡啀鐢熸垚閭€璇风爜"
+		return false, "请先绑定 Emby 账号后再生成邀请码"
 	}
 	if maxDays, reason := a.maxCodeDays(user); maxDays <= 0 {
 		return false, reason
@@ -434,7 +475,7 @@ func (a *App) canInvite(user store.User) (bool, string) {
 			}
 		}
 		if active >= a.cfg.InviteLimit {
-			return false, fmt.Sprintf("鏈娇鐢ㄧ殑閭€璇风爜宸茶揪涓婇檺 (%d)锛岃鍏堟挙閿€鏃х殑", a.cfg.InviteLimit)
+			return false, fmt.Sprintf("未使用的邀请码已达上限 (%d)，请先撤销旧的", a.cfg.InviteLimit)
 		}
 	}
 	return true, ""

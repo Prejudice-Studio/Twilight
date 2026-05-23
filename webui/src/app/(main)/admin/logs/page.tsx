@@ -175,9 +175,11 @@ export default function AdminRuntimeLogsPage() {
       }
     };
 
+    const handlePing = () => setConnected(true);
+
     source.addEventListener("snapshot", handlePayload);
     source.addEventListener("logs", handlePayload);
-    source.addEventListener("ping", () => setConnected(true));
+    source.addEventListener("ping", handlePing);
     source.onopen = () => {
       setConnected(true);
       setError(null);
@@ -187,7 +189,13 @@ export default function AdminRuntimeLogsPage() {
     };
 
     return () => {
+      source.removeEventListener("snapshot", handlePayload);
+      source.removeEventListener("logs", handlePayload);
+      source.removeEventListener("ping", handlePing);
       source.close();
+      if (eventRef.current === source) {
+        eventRef.current = null;
+      }
     };
   }, [appendLogs, paused]);
 

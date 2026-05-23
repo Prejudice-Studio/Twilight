@@ -209,7 +209,8 @@ class ApiClient {
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
+      "Accept": "application/json; charset=utf-8",
+      "Content-Type": "application/json; charset=utf-8",
       "X-Twilight-Client": "webui",
       ...((options.headers as Record<string, string>) || {}),
     };
@@ -249,6 +250,7 @@ class ApiClient {
     method: "POST" | "PUT" = "POST"
   ): Promise<ApiResponse<T>> {
     const headers: Record<string, string> = {
+      "Accept": "application/json; charset=utf-8",
       "X-Twilight-Client": "webui",
     };
 
@@ -965,6 +967,34 @@ class ApiClient {
     });
   }
 
+  async listConfigBackups() {
+    return this.request<{ backups: ConfigBackup[]; config_file: string; backup_dir: string }>("/system/admin/config/backups");
+  }
+
+  async createConfigBackup() {
+    return this.request<{ backup: ConfigBackup }>("/system/admin/config/backup", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  async getConfigBackup(name: string) {
+    return this.request<ConfigBackupView>(`/system/admin/config/backups/${encodeURIComponent(name)}`);
+  }
+
+  async restoreConfigBackup(name: string, options?: { dry_run?: boolean; preview?: boolean; confirm?: string }) {
+    return this.request<ConfigRestoreResult>("/system/admin/config/restore", {
+      method: "POST",
+      body: JSON.stringify({ name, ...(options || {}) }),
+    });
+  }
+
+  async deleteConfigBackup(name: string) {
+    return this.request<{ backup: ConfigBackup }>(`/system/admin/config/backups/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
+  }
+
   async getConfigSchema() {
     return this.request<ConfigSchema>("/system/admin/config/schema");
   }
@@ -984,8 +1014,18 @@ class ApiClient {
     return this.request<{ backups: DatabaseBackup[] }>("/system/admin/database/backups");
   }
 
+  async inspectDatabaseBackup(name: string) {
+    return this.request<DatabaseBackupInspectResult>(`/system/admin/database/backups/${encodeURIComponent(name)}`);
+  }
+
+  async deleteDatabaseBackup(name: string) {
+    return this.request<{ backup: DatabaseBackup }>(`/system/admin/database/backups/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
+  }
+
   async createDatabaseBackup() {
-    return this.request<{ backup: DatabaseBackup }>("/system/admin/database/backup", {
+    return this.request<{ backup: DatabaseBackup; legacy_sqlite_backup?: LegacySQLiteBackupInfo }>("/system/admin/database/backup", {
       method: "POST",
       body: JSON.stringify({}),
     });
@@ -1006,6 +1046,7 @@ class ApiClient {
   }
 
   async migrateDatabase(payload: {
+    source_driver?: "json" | "postgres" | "sqlite" | "legacy_sqlite";
     target_driver: "json" | "postgres";
     dry_run?: boolean;
     preview?: boolean;
@@ -1621,6 +1662,27 @@ class ApiClient {
     });
   }
 
+  // Violations audit
+  async getViolations(page = 1, params: { type?: string; search?: string } = {}) {
+    const query = new URLSearchParams({ page: String(page) });
+    if (params.type && params.type !== "all") query.set("type", params.type);
+    if (params.search) query.set("search", params.search);
+    return this.request<{ violations: ViolationLog[]; total: number; page: number; per_page: number }>(
+      `/admin/violations?${query.toString()}`
+    );
+  }
+
+  async deleteViolation(id: number) {
+    return this.request(`/admin/violations/${id}`, { method: "DELETE" });
+  }
+
+  async clearViolations() {
+    return this.request("/admin/violations/clear", {
+      method: "POST",
+      body: JSON.stringify({ confirm: "CLEAR_VIOLATIONS" }),
+    });
+  }
+
   async getMediaRequests(params: { page?: number; status?: string } = {}, signal?: AbortSignal) {
     const query = new URLSearchParams();
     if (params.page) query.set("page", String(params.page));
@@ -1878,6 +1940,10 @@ export interface SystemInfo {
   telegram_bot?: {
     username: string | null;
     url: string | null;
+  };
+  telegram_links?: {
+    groups: Array<{ label: string; url: string }>;
+    channels: Array<{ label: string; url: string }>;
   };
 }
 
@@ -2363,6 +2429,98 @@ export interface DatabaseBackup {
   created_at: number;
 }
 
+export type ConfigBackup = DatabaseBackup;
+
+export interface ConfigBackupView {
+  backup: ConfigBackup;
+  content: string;
+  config_file: string;
+}
+
+export interface ConfigRestoreResult {
+  operation: "restore_config" | string;
+  dry_run: boolean;
+  requires_confirmation?: boolean;
+  confirm?: string;
+  restored: string;
+  backup: ConfigBackup;
+  config_file: string;
+  content_bytes: number;
+  warnings?: string[];
+  pre_restore_backup?: ConfigBackup;
+  pre_operation_backup?: ConfigBackup;
+  reload?: Record<string, unknown>;
+}
+
+export interface DatabaseBackupInspectResult {
+  backup: DatabaseBackup;
+  snapshot_bytes: number;
+  counts: Record<string, number>;
+  users: number;
+  api_keys: number;
+  regcodes: number;
+  invite_codes: number;
+  media_requests: number;
+  announcements: number;
+}
+
+export interface LegacySQLiteFile {
+  name: string;
+  path: string;
+  size: number;
+  modified_at: number;
+}
+
+export interface LegacySQLiteReport {
+  detected: boolean;
+  sqlite_available: boolean;
+  database_dir: string;
+  file_count: number;
+  total_size: number;
+  files: LegacySQLiteFile[];
+  table_counts?: Record<string, number>;
+  active_admin_count?: number;
+  warnings?: string[];
+}
+
+export interface LegacySQLiteBackupInfo {
+  name: string;
+  path: string;
+  size: number;
+  file_count: number;
+  created_at: number;
+  files: LegacySQLiteFile[];
+}
+
+export interface LegacySQLiteFieldMapping {
+  source: string;
+  target: string;
+  transform?: string;
+}
+
+export interface LegacySQLiteMapping {
+  source_database: string;
+  source_table: string;
+  source_key: string;
+  target: string;
+  fields?: LegacySQLiteFieldMapping[];
+  rows: number;
+  mapped: boolean;
+}
+
+export interface LegacySQLiteImportResult {
+  detected: boolean;
+  imported: boolean;
+  source: LegacySQLiteReport;
+  counts: Record<string, number>;
+  table_counts?: Record<string, number>;
+  mapped_tables?: string[];
+  skipped_tables?: string[];
+  mappings?: LegacySQLiteMapping[];
+  warnings?: string[];
+  snapshot_bytes?: number;
+}
+
 export interface DatabaseStatus {
   active_driver: string;
   configured_driver: string;
@@ -2372,6 +2530,8 @@ export interface DatabaseStatus {
   postgres_configured: boolean;
   redis_enabled: boolean;
   user_count: number;
+  legacy_sqlite_detected?: boolean;
+  legacy_sqlite?: LegacySQLiteReport;
 }
 
 export interface DatabaseOperationResult {
@@ -2385,7 +2545,9 @@ export interface DatabaseOperationResult {
   snapshot_bytes?: number;
   target_snapshot_bytes?: number;
   current_snapshot_bytes?: number;
+  source_ready?: Record<string, unknown>;
   target_ready?: Record<string, unknown>;
+  backup_ready?: Record<string, unknown>;
   warnings?: string[];
   counts?: Record<string, number>;
   current_counts?: Record<string, number>;
@@ -2401,6 +2563,9 @@ export interface DatabaseOperationResult {
   pre_restore_backup?: DatabaseBackup;
   pre_migration_backup?: DatabaseBackup;
   pre_operation_backup?: DatabaseBackup;
+  legacy_sqlite?: LegacySQLiteReport;
+  legacy_sqlite_import?: LegacySQLiteImportResult;
+  legacy_sqlite_backup?: LegacySQLiteBackupInfo;
 }
 
 export type DatabaseMigrationResult = DatabaseOperationResult & {
@@ -2610,5 +2775,19 @@ export interface SigninHistoryRecord {
   bonus_points: number;
   total: number;
   streak: number;
+  created_at: number;
+}
+
+// ==================== 违规审计 ====================
+export interface ViolationLog {
+  id: number;
+  uid: number;
+  username: string;
+  code: string;
+  code_type: string;
+  reason: string;
+  action: string;
+  ip: string | null;
+  telegram_id: number | null;
   created_at: number;
 }

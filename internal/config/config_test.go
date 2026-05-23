@@ -11,6 +11,7 @@ func TestLoadTOMLAndEnvOverrides(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 	content := `[Global]
+server_name = "Test Twilight"
 redis_url = "redis://localhost:6379/2"
 
 [API]
@@ -29,6 +30,9 @@ max_upload_size = 1234
 	}
 	if cfg.RedisURL != "redis://localhost:6379/2" {
 		t.Fatalf("unexpected redis url: %q", cfg.RedisURL)
+	}
+	if cfg.AppName != "Test Twilight" {
+		t.Fatalf("server_name was not loaded: %q", cfg.AppName)
 	}
 	if cfg.Host != "127.0.0.1" || cfg.Port != 6060 {
 		t.Fatalf("unexpected host/port: %s/%d", cfg.Host, cfg.Port)

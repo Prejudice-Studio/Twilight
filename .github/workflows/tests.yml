@@ -2,15 +2,63 @@ name: Tests
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, golang, develop ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, golang, develop ]
 
 jobs:
+  go-test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        go-version: ['1.23']
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go ${{ matrix.go-version }}
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go-version }}
+        cache: true
+
+    - name: Verify dependencies
+      run: go mod verify
+
+    - name: Run go vet
+      run: go vet ./...
+
+    - name: Run tests
+      run: go test ./... -v -race -count=1
+
+    - name: Build binary
+      run: go build -o bin/twilight ./cmd/twilight
+
+  go-security:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.23'
+        cache: true
+
+    - name: Install govulncheck
+      run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+    - name: Run govulncheck
+      run: govulncheck ./...
+
+    - name: Run go vet
+      run: go vet ./...
+
   nix:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v4
 
     - name: Install Nix
       uses: cachix/install-nix-action@v31
@@ -20,66 +68,4 @@ jobs:
 
     - name: Smoke test dev shell
       run: |
-        nix develop --no-write-lock-file --command bash -lc 'python --version && uv --version && node --version && pnpm --version'
-
-  test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.10', '3.11', '3.12']
-
-    steps:
-    - uses: actions/checkout@v5
-
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v6
-      with:
-        python-version: ${{ matrix.python-version }}
-        cache: 'pip'
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements-ci.txt
-
-    - name: Type check with mypy
-      run: |
-        mypy src/ --ignore-missing-imports || true
-
-    - name: Run tests with pytest
-      if: ${{ hashFiles('tests/**/*.py') != '' }}
-      run: |
-        pytest tests/ -v --cov=src --cov-report=xml --cov-report=html
-
-    - name: Upload coverage reports
-      if: ${{ hashFiles('tests/**/*.py') != '' }}
-      uses: codecov/codecov-action@v5
-      with:
-        file: ./coverage.xml
-        flags: unittests
-        name: codecov-umbrella
-
-    - name: Generate coverage badge
-      if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11' && hashFiles('tests/**/*.py') != '' }}
-      run: |
-        pytest tests/ --cov=src --cov-report=term-missing
-
-  security:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v5
-
-    - name: Set up Python
-      uses: actions/setup-python@v6
-      with:
-        python-version: '3.11'
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install bandit
-
-    - name: Run Bandit security check
-      run: |
-        bandit -r src/ -ll || true
+        nix develop --no-write-lock-file --command bash -lc 'go version && node --version && pnpm --version'

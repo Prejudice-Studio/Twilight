@@ -14,8 +14,6 @@
 [Global]
 # 前端站点名称（标题栏/侧边栏）
 server_name = "Twilight"
-# 站点图标 URL，留空使用内置
-server_icon = ""
 # 是否输出运行日志
 logging = true
 # 日志级别：10=DEBUG / 20=INFO / 30=WARNING / 40=ERROR

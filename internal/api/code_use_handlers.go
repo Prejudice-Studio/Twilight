@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/prejudice-studio/twilight/internal/store"
@@ -13,12 +14,12 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 	payload := decodeMap(r)
 	code := firstNonEmpty(stringValue(payload, "reg_code"), stringValue(payload, "code"))
 	if code == "" {
-		fail(w, http.StatusBadRequest, "鍗＄爜涓嶈兘涓虹┖")
+		fail(w, http.StatusBadRequest, "卡码不能为空")
 		return
 	}
 	preview, source, okPreview := a.previewCode(code, p.User)
 	if !okPreview {
-		fail(w, http.StatusBadRequest, "鍗＄爜鏃犳晥鎴栧凡杩囨湡")
+		fail(w, http.StatusBadRequest, "卡码无效或已过期")
 		return
 	}
 	if boolValue(payload, "check_only", false) {
@@ -28,11 +29,15 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 	if source == "invite" {
 		invite, _ := a.store.InviteCode(code)
 		if invite.InviterUID == p.User.UID {
-			fail(w, http.StatusBadRequest, "涓嶈兘浣跨敤鑷繁鐢熸垚鐨勯個璇风爜")
+			fail(w, http.StatusBadRequest, "不能使用自己生成的邀请码")
+			return
+		}
+		if invite.TargetUsername != "" && !strings.EqualFold(invite.TargetUsername, p.User.Username) {
+			fail(w, http.StatusForbidden, "此邀请码仅限指定用户使用")
 			return
 		}
 		if p.User.EmbyID != "" {
-			fail(w, http.StatusBadRequest, "褰撳墠璐﹀彿宸茬粦瀹?Emby锛屼笉鑳戒娇鐢ㄩ個璇风爜")
+			fail(w, http.StatusBadRequest, "当前账号已绑定 Emby，不能使用邀请码")
 			return
 		}
 		if _, err := a.store.ConsumeInviteCode(code, p.User.UID); statusFromError(w, err) {

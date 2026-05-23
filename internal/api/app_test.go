@@ -537,9 +537,19 @@ func TestDatabaseAdminBackupRestoreAndAuth(t *testing.T) {
 	if forbidden.Code != http.StatusForbidden {
 		t.Fatalf("database status user = %d body=%s", forbidden.Code, forbidden.Body.String())
 	}
+	if err := os.WriteFile(filepath.Join(app.cfg.DatabaseDir, "users.db"), []byte("legacy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	status := doJSON(app, http.MethodGet, "/api/v1/system/admin/database/status", ``, []*http.Cookie{adminCookie})
+	if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"legacy_sqlite_detected":true`) {
+		t.Fatalf("database status did not report legacy sqlite status=%d body=%s", status.Code, status.Body.String())
+	}
 	backup := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/backup", `{}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if backup.Code != http.StatusOK {
 		t.Fatalf("backup status=%d body=%s", backup.Code, backup.Body.String())
+	}
+	if !strings.Contains(backup.Body.String(), `"legacy_sqlite_backup"`) {
+		t.Fatalf("backup did not include legacy sqlite files body=%s", backup.Body.String())
 	}
 	var env envelope
 	if err := json.Unmarshal(backup.Body.Bytes(), &env); err != nil {
@@ -547,6 +557,10 @@ func TestDatabaseAdminBackupRestoreAndAuth(t *testing.T) {
 	}
 	backupData := env.Data.(map[string]any)["backup"].(map[string]any)
 	backupName := backupData["name"].(string)
+	backupInspect := doJSONWithHeaders(app, http.MethodGet, "/api/v1/system/admin/database/backups/"+backupName, ``, []*http.Cookie{adminCookie}, nil)
+	if backupInspect.Code != http.StatusOK || !strings.Contains(backupInspect.Body.String(), `"counts"`) {
+		t.Fatalf("backup inspect status=%d body=%s", backupInspect.Code, backupInspect.Body.String())
+	}
 
 	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"extra","password":"extra123456"}`, nil)
 	if _, ok := app.store.FindUserByUsername("extra"); !ok {
@@ -598,6 +612,69 @@ func TestDatabaseAdminBackupRestoreAndAuth(t *testing.T) {
 	migrateWrongType := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","state_file":"state.txt","dry_run":true}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if migrateWrongType.Code != http.StatusBadRequest {
 		t.Fatalf("migrate wrong type status=%d body=%s", migrateWrongType.Code, migrateWrongType.Body.String())
+	}
+	deleteBackup := doJSONWithHeaders(app, http.MethodDelete, "/api/v1/system/admin/database/backups/"+backupName, ``, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	if deleteBackup.Code != http.StatusOK {
+		t.Fatalf("delete backup status=%d body=%s", deleteBackup.Code, deleteBackup.Body.String())
+	}
+}
+
+func TestConfigAdminBackupRestoreAndDelete(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg.ConfigFile = filepath.Join(app.cfg.DatabaseDir, "config.toml")
+	original := "[Global]\ndatabases_dir = " + strconv.Quote(app.cfg.DatabaseDir) + "\n\n[Database]\nbackup_dir = " + strconv.Quote(app.cfg.DatabaseBackupDir) + "\nstate_file = " + strconv.Quote(app.cfg.StateFile) + "\n\n[API]\nhost = \"127.0.0.1\"\nport = 5010\n"
+	changed := strings.Replace(original, "port = 5010", "port = 5011", 1)
+	if err := os.WriteFile(app.cfg.ConfigFile, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
+	adminLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	adminCookie := findCookie(adminLogin.Result().Cookies(), "twilight_session")
+
+	backup := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/config/backup", `{}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	if backup.Code != http.StatusOK {
+		t.Fatalf("config backup status=%d body=%s", backup.Code, backup.Body.String())
+	}
+	var env envelope
+	if err := json.Unmarshal(backup.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	backupData := env.Data.(map[string]any)["backup"].(map[string]any)
+	backupName := backupData["name"].(string)
+
+	list := doJSONWithHeaders(app, http.MethodGet, "/api/v1/system/admin/config/backups", ``, []*http.Cookie{adminCookie}, nil)
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), backupName) {
+		t.Fatalf("config backup list status=%d body=%s", list.Code, list.Body.String())
+	}
+	inspect := doJSONWithHeaders(app, http.MethodGet, "/api/v1/system/admin/config/backups/"+backupName, ``, []*http.Cookie{adminCookie}, nil)
+	if inspect.Code != http.StatusOK || !strings.Contains(inspect.Body.String(), "port = 5010") {
+		t.Fatalf("config backup inspect status=%d body=%s", inspect.Code, inspect.Body.String())
+	}
+
+	if err := os.WriteFile(app.cfg.ConfigFile, []byte(changed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restorePreview := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/config/restore", `{"name":"`+backupName+`"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	if restorePreview.Code != http.StatusOK || !strings.Contains(restorePreview.Body.String(), `"requires_confirmation":true`) {
+		t.Fatalf("config restore preview status=%d body=%s", restorePreview.Code, restorePreview.Body.String())
+	}
+	if data, _ := os.ReadFile(app.cfg.ConfigFile); !strings.Contains(string(data), "port = 5011") {
+		t.Fatal("config restore preview mutated file")
+	}
+	restore := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/config/restore", `{"name":"`+backupName+`","confirm":"RESTORE_CONFIG_BACKUP"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	if restore.Code != http.StatusOK || !strings.Contains(restore.Body.String(), `"pre_operation_backup"`) {
+		t.Fatalf("config restore status=%d body=%s", restore.Code, restore.Body.String())
+	}
+	if data, _ := os.ReadFile(app.cfg.ConfigFile); !strings.Contains(string(data), "port = 5010") {
+		t.Fatalf("config restore did not restore original content: %s", string(data))
+	}
+
+	adminLogin = doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	adminCookie = findCookie(adminLogin.Result().Cookies(), "twilight_session")
+	deleteBackup := doJSONWithHeaders(app, http.MethodDelete, "/api/v1/system/admin/config/backups/"+backupName, ``, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	if deleteBackup.Code != http.StatusOK {
+		t.Fatalf("config backup delete status=%d body=%s", deleteBackup.Code, deleteBackup.Body.String())
 	}
 }
 

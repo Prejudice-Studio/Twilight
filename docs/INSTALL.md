@@ -65,13 +65,15 @@ TWILIGHT_POSTGRES_MAX_OPEN_CONNS=8
 TWILIGHT_POSTGRES_MAX_IDLE_CONNS=4
 ```
 
-切换前必须先在管理端执行数据库迁移预检；预检只验证连接和快照信息，不会创建 PostgreSQL 表或写入数据。确认 `target_ready.connected=true` 后，再在前端二次确认执行迁移。后端会在实际迁移前自动创建保护性备份，并在响应中返回 `pre_operation_backup`。低配 1Panel 或同机 PostgreSQL 建议先保持连接池较小，避免数据库连接数被面板、备份任务和 Twilight 同时打满。
+切换前必须先在管理端执行数据库迁移预检；预检会验证源快照和目标 PostgreSQL，并在目标库不存在且权限允许时自动创建数据库和 `twilight_state` 状态表，但不会写入业务快照数据。确认 `target_ready.connected=true` 且 `target_ready.schema_ready=true` 后，再在前端二次确认执行迁移。后端会在实际迁移前自动创建保护性备份，并在响应中返回 `pre_operation_backup`。低配 1Panel 或同机 PostgreSQL 建议先保持连接池较小，避免数据库连接数被面板、备份任务和 Twilight 同时打满。
 
 如果已经有 JSON 状态文件，不要先删除它。即使你提前把 `driver` 改成 `postgres`，只要 PostgreSQL 还没有管理员且 JSON 里已有管理员，后端会临时回退到 JSON 启动，让原管理员能登录管理端完成迁移。迁移确认成功后，再重启服务切换到 PostgreSQL。
 
-如果只有旧 Python 版 `db/users.db`，请在 Linux 上安装 `sqlite3`。Go 后端会在自身状态没有 active 管理员时只读导入旧库 active 管理员账号；这只是登录引导，不会在启动时全量迁移旧 SQLite 业务数据。
+如果只有旧 Python 版 `db/users.db`，请在 Linux 上安装 `sqlite3`。Go 后端会在自身状态没有 active 管理员时只读导入旧库 active 管理员账号；这只是登录引导，不会在启动时隐式全量迁移旧 SQLite 业务数据。
 
-如果 PostgreSQL 用户已经存在但数据库还不存在，后端启动时会尝试自动创建 `postgres_database` / URL 中的目标数据库。该用户必须拥有 `CREATEDB` 权限；没有权限时，需要先让 PostgreSQL 管理员执行 `ALTER USER <用户名> CREATEDB;` 或手动创建数据库。
+登录管理端后进入“数据库迁移”，来源选择“旧 SQLite”即可预览旧库导入结果。页面左侧显示源数据库，右侧显示目标数据库，底部展示字段映射、实体计数、备份策略和告警；后端会按固定库名扫描并映射多份旧库，确认执行前会先备份当前 Go 状态和旧 SQLite 文件集，再写入 JSON 或 PostgreSQL。
+
+如果 PostgreSQL 用户已经存在但数据库还不存在，后端启动和迁移预检时会尝试自动创建 `postgres_database` / URL 中的目标数据库并准备 `twilight_state` 状态表。该用户必须拥有 `CREATEDB` 权限；没有权限时，需要先让 PostgreSQL 管理员执行 `ALTER USER <用户名> CREATEDB;` 或手动创建数据库。
 
 ## 前端部署
 
@@ -135,7 +137,7 @@ sudo TWILIGHT_PROJECT_ROOT=/opt/Twilight \
 - 上传目录：`uploads/`
 - 配置备份目录：`config_backups/`
 
-管理员可以在前端配置页执行数据库备份、恢复和迁移预检。恢复和迁移必须先预览、再二次确认；后端在实际写入前会自动创建保护性备份。备份恢复只接受备份目录内的普通 `.json` 文件。
+管理员可以在前端“数据库迁移”页执行数据库备份、恢复和迁移预检。恢复和迁移必须先预览、再二次确认；后端在实际写入前会自动创建保护性备份。创建备份时若检测到旧 SQLite 文件，会同时复制 `.db`、`.db-wal`、`.db-shm` 文件集。备份恢复只接受备份目录内的普通 `.json` 文件，旧 SQLite 备份用于迁移前回滚，不通过恢复接口直接覆盖运行库。
 
 ## 本地配置与密钥
 

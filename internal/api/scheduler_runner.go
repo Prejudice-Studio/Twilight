@@ -75,11 +75,23 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		embyDisabled := 0
 		for _, u := range a.store.ListUsers() {
 			if u.Active && u.ExpiredAt > 0 && u.ExpiredAt < now {
-				updated, err := a.store.UpdateUser(u.UID, func(u *store.User) error { u.Active = false; return nil })
-				if err == nil {
-					disabled++
-					if updated.EmbyID != "" && a.embySetUserEnabled(r.Context(), updated.EmbyID, false) == nil {
+				// For invited users (have invite relation), only disable Emby access
+				// but keep the account active so they can still log in and renew
+				_, isInvited := a.store.ParentOf(u.UID)
+				if isInvited {
+					// Only disable Emby, keep account active
+					if u.EmbyID != "" && a.embySetUserEnabled(r.Context(), u.EmbyID, false) == nil {
 						embyDisabled++
+					}
+					disabled++
+				} else {
+					// Non-invited users: disable the whole account
+					updated, err := a.store.UpdateUser(u.UID, func(u *store.User) error { u.Active = false; return nil })
+					if err == nil {
+						disabled++
+						if updated.EmbyID != "" && a.embySetUserEnabled(r.Context(), updated.EmbyID, false) == nil {
+							embyDisabled++
+						}
 					}
 				}
 			}

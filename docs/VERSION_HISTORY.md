@@ -1,5 +1,57 @@
 # 版本更新历史
 
+## 0.0.5 - 2025-07-14
+
+本版本聚焦安全加固、邀请制度完善、违规审计系统和 CI 现代化。
+
+### 安全加固（关键）
+
+- **Emby 管理员账号隔离**：非系统管理员用户绑定了 Emby 管理员账号时，禁止所有敏感操作（修改密码、修改 Emby 密码、修改个人资料、解绑 Emby、媒体库自助切换等），防止越权控制 Emby 服务器。
+- **绑定时拦截**：非系统管理员用户不允许绑定 Emby 管理员账号，从源头阻断风险。
+- **自助续期修复**：`/users/me/renew` 不再允许无条件免费续期，必须提供有效注册码，通过 `ConsumeRegCode` 验证并消耗。
+- **Telegram 强制绑定策略**：`handleUnbindTelegram` 现在正确检查 `force_bind_telegram` 配置，非管理员用户在强制绑定模式下无法解绑。`handleTelegramStatus` 返回真实的 `force_bind` 和 `can_unbind` 状态。
+- **管理员保护**：`handleAdminSetRole` 新增最后管理员保护，禁止移除系统中唯一活跃管理员的权限。
+- **输入验证加强**：注册、修改用户名、修改个人资料接口增加 `<>"'&` 等 XSS 危险字符过滤；邮箱增加长度和字符校验。
+- **路由鉴权修正**：`PUT /api/v1/media/request/:request_id/status` 从 `AuthUser` 提升为 `AuthAdmin`，与 handler 内部检查一致。
+- **Emby 线路越权修复**：`handleEmbyURLs` 新增对已禁用账号（`!u.Active`）的检查，防止 Emby 被禁用或过期后仍能查看服务器线路。
+
+### 邀请制度完善
+
+- **邀请码指名限制**：生成邀请码时可指定 `target_username`，只有匹配的用户名才能使用该邀请码。
+- **邀请制用户到期策略**：通过邀请注册的用户到期时只禁用 Emby 访问，保持账号 Active，用户仍可登录续期。非邀请制用户行为不变。
+- **Emby 用户上限计算优化**：容量检查现在额外计入活跃未使用的邀请码（每个代表一个潜在 Emby 名额），防止超发。
+
+### 违规审计系统（新增）
+
+- **诱饵码检测与处罚**：使用诱饵注册码时自动记录违规并执行配置的处罚动作（`regcode_decoy_action`：`disable_user` / `disable_emby` / `log_only`）。
+- **指名码越权检测**：注册码设置 `target_username` 后，非目标用户尝试使用时记录违规并拒绝。
+- **违规审计接口**：`GET /api/v1/admin/violations`（分页、筛选）、`DELETE /api/v1/admin/violations/:id`、`POST /api/v1/admin/violations/clear`。
+- **前端审计页面**：新增 `/admin/violations` 管理页面，支持按类型筛选、搜索、单条删除和全部清除。
+- **Store 层**：新增 `ViolationLog` 结构体和 `AddViolationLog`、`ListViolationLogs`、`DeleteViolationLog`、`ClearViolationLogs` 方法。
+- **数据库兼容**：新增字段均使用 `omitempty` 或 nil-safe slice，旧备份恢复到新版本无需迁移。
+
+### 媒体库权限
+
+- **绑定时应用默认隐藏库**：用户通过 `handleBindEmby` 绑定已有 Emby 账号时，自动应用 `emby_default_hidden_libraries` 配置（与注册创建新账号行为一致）。
+
+### 服务器图标
+
+- 服务器图标从内联 SVG 改为嵌入式 PNG（使用项目 Logo），通过 `go:embed` 编译进二进制。
+- `/api/v1/system/server-icon` 返回 `image/png` 并设置 `Cache-Control: public, max-age=86400`。
+
+### CI/CD
+
+- GitHub Actions 工作流从旧 Python（pytest/mypy/bandit）完全迁移到 Go。
+- 新增 `go-test` job：多平台（ubuntu/windows）运行 `go vet` + `go test -race`。
+- 新增 `go-security` job：运行 `govulncheck` 检查已知漏洞。
+- 保留 `nix` job：验证 flake 输出和 dev shell 可用性。
+
+### 代码质量
+
+- 清理重复的 AI 生成注释，精简函数文档。
+- 前端 `utils.ts` 改为函数级 JSDoc。
+- 所有 Go 测试通过（`go test ./...`），`go vet` 无警告。
+
 ## 0.0.4 - 2026-05-22
 
 本版本将 `golang` 分支确认为 Go 后端主线版本，目标是完整承接旧后端能力、对齐前端接口，并补齐部署、数据库、安全和移动端体验。
@@ -13,12 +65,14 @@
 ### 数据库与迁移
 
 - `config.production.toml` 新增 `[Database]` PostgreSQL 配置示例，包含完整 DSN、分项连接参数、备份目录和连接池参数。
-- 新增数据库状态、备份、恢复、迁移预检和迁移执行接口，并在前端配置页提供对应入口。
+- 新增数据库状态、备份、恢复、迁移预检和迁移执行接口，并提供独立的数据库迁移管理页。
 - 支持默认 JSON 状态存储和可选 PostgreSQL 存储；迁移预检会返回实体数量、快照大小、目标连通性和配置/重启告警。
-- PostgreSQL 目标数据库不存在时，启动阶段会尝试连接 `postgres` / `template1` 维护库自动执行 `CREATE DATABASE`，减少已有用户但未建库时的部署阻塞。
+- PostgreSQL 目标数据库不存在时，启动阶段和迁移预检会尝试连接 `postgres` / `template1` 维护库自动执行 `CREATE DATABASE`，减少已有用户但未建库时的部署阻塞。
 - 当配置为 PostgreSQL 但目标库尚未迁移且没有管理员时，启动阶段会检测旧 JSON 状态文件；若其中已有 active 管理员，则临时回退 JSON，保证原管理员可以登录管理端执行迁移。
 - 当 Go 状态没有 active 管理员但存在旧 Python 版 `db/users.db` 时，启动阶段可通过系统 `sqlite3` 只读导入旧库 active 管理员账号用于引导登录。
-- PostgreSQL 迁移预检只做连接探测，不创建表或写入数据；实际迁移才初始化目标状态表。
+- 数据库管理页会自动检测多份旧 SQLite 数据库；备份会同时复制 `.db`、`.db-wal`、`.db-shm` 文件集。
+- 迁移来源新增“旧 SQLite”，按固定库名映射用户、API Key、注册码、邀请码、公告、Bangumi/TMDB 求片、签到积分、登录设备、播放记录、调度记录和 Telegram 花名册，再写入 JSON 或 PostgreSQL。
+- PostgreSQL 迁移预检会准备目标数据库和 `twilight_state` 状态表，但不会写入业务快照；目标库不存在且用户有 `CREATEDB` 权限时可自动创建。
 - 恢复和迁移执行前强制预览与二次确认；后端在缺少确认短语时只返回 `dry_run=true` 预览，不执行写入。
 - 恢复备份和执行迁移前都会自动创建保护性备份，并在响应中返回 `pre_operation_backup` 方便审计和回滚。
 - 备份恢复限制在备份目录内，只接受普通 `.json` 文件并拒绝符号链接。

@@ -3,11 +3,48 @@ package api
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/prejudice-studio/twilight/internal/store"
 )
+
+// embyIsAdmin checks whether the given Emby user ID corresponds to an Emby
+// administrator account. Returns true if the remote Emby user has
+// IsAdministrator set in their policy. On network errors or missing users,
+// returns false conservatively.
+func (a *App) embyIsAdmin(ctx context.Context, embyID string) bool {
+	if embyID == "" || a.cfg.EmbyURL == "" {
+		return false
+	}
+	user, found, err := a.embyUserByID(ctx, embyID)
+	if err != nil || !found {
+		return false
+	}
+	policy := embyPolicy(user)
+	return boolish(policy["IsAdministrator"])
+}
+
+// requireNonEmbyAdmin blocks sensitive operations for non-system-admin users
+// whose bound Emby account has IsAdministrator=true. Prevents privilege escalation.
+// Returns true if the request was blocked (HTTP response already written).
+func (a *App) requireNonEmbyAdmin(w http.ResponseWriter, r *http.Request, user store.User) bool {
+	if user.Role == store.RoleAdmin {
+		return false
+	}
+	if user.EmbyID == "" {
+		return false
+	}
+	if a.embyIsAdmin(r.Context(), user.EmbyID) {
+		slog.Warn("blocked sensitive operation for non-admin user with Emby admin account",
+			"uid", user.UID, "username", user.Username, "emby_id", user.EmbyID)
+		fail(w, http.StatusForbidden, "安全限制：您绑定的 Emby 账号具有管理员权限，但您不是系统管理员。为防止越权操作，已禁止此请求。请联系系统管理员。")
+		return true
+	}
+	return false
+}
 
 func (a *App) embyUserByName(ctx context.Context, username string) (map[string]any, bool, error) {
 	username = strings.TrimSpace(username)

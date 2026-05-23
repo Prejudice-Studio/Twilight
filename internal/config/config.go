@@ -98,6 +98,7 @@ type Config struct {
 	EmbyDirectRegisterEnabled    bool
 	EmbyDirectRegisterDays       int
 	EmbyUserLimit                int
+	DecoyAction                  string
 	NotificationEnabled          bool
 	NotificationExpiryRemindDays int
 	AutoCleanupNoEmby            bool
@@ -152,6 +153,7 @@ func Load(path string) (Config, error) {
 		return cfg, err
 	}
 
+	cfg.AppName = first(values, "Global.server_name", "server_name", cfg.AppName)
 	cfg.RedisURL = first(values, "Global.redis_url", "redis_url", cfg.RedisURL)
 	cfg.DatabaseDir = first(values, "Global.databases_dir", "databases_dir", cfg.DatabaseDir)
 	cfg.DatabaseDriver = strings.ToLower(first(values, "Database.driver", "Global.database_driver", "database_driver", cfg.DatabaseDriver))
@@ -222,6 +224,7 @@ func Load(path string) (Config, error) {
 	cfg.EmbyDirectRegisterEnabled = boolValue(first(values, "SAR.emby_direct_register_enabled", "Register.emby_direct_register_enabled", "emby_direct_register_enabled", strconv.FormatBool(cfg.EmbyDirectRegisterEnabled)), cfg.EmbyDirectRegisterEnabled)
 	cfg.EmbyDirectRegisterDays = intValue(first(values, "SAR.emby_direct_register_days", "Register.emby_direct_register_days", "emby_direct_register_days", strconv.Itoa(cfg.EmbyDirectRegisterDays)), cfg.EmbyDirectRegisterDays)
 	cfg.EmbyUserLimit = intValue(first(values, "SAR.emby_user_limit", "Register.emby_user_limit", "emby_user_limit", strconv.Itoa(cfg.EmbyUserLimit)), cfg.EmbyUserLimit)
+	cfg.DecoyAction = first(values, "SAR.regcode_decoy_action", "Register.regcode_decoy_action", "regcode_decoy_action", cfg.DecoyAction)
 	cfg.MediaRequestEnabled = boolValue(first(values, "SAR.media_request_enabled", "Register.media_request_enabled", "media_request_enabled", strconv.FormatBool(cfg.MediaRequestEnabled)), cfg.MediaRequestEnabled)
 	cfg.MaxConcurrentRequestsPerUser = intValue(first(values, "SAR.max_concurrent_requests_per_user", "Register.max_concurrent_requests_per_user", "max_concurrent_requests_per_user", strconv.Itoa(cfg.MaxConcurrentRequestsPerUser)), cfg.MaxConcurrentRequestsPerUser)
 	cfg.InviteEnabled = boolValue(first(values, "SAR.invite_enabled", "Register.invite_enabled", "invite_enabled", strconv.FormatBool(cfg.InviteEnabled)), cfg.InviteEnabled)
@@ -339,6 +342,12 @@ func defaults() Config {
 func applyEnv(cfg *Config) {
 	if v := os.Getenv("TWILIGHT_API_HOST"); v != "" {
 		cfg.Host = v
+	}
+	if v := os.Getenv("TWILIGHT_GLOBAL_SERVER_NAME"); v != "" {
+		cfg.AppName = v
+	}
+	if v := os.Getenv("TWILIGHT_SERVER_NAME"); v != "" {
+		cfg.AppName = v
 	}
 	if v := os.Getenv("TWILIGHT_API_PORT"); v != "" {
 		cfg.Port = intValue(v, cfg.Port)

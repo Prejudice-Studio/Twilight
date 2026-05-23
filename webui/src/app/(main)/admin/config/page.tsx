@@ -34,6 +34,7 @@ import {
   Database,
   Archive,
   UploadCloud,
+  Trash2,
 } from "lucide-react";
 import {
   Card,
@@ -49,6 +50,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError } from "@/components/layout/page-state";
 import { api } from "@/lib/api";
@@ -81,6 +83,9 @@ import type {
   DatabaseStatus,
   DatabaseMigrationResult,
   DatabaseRestoreResult,
+  ConfigBackup,
+  ConfigBackupView,
+  ConfigRestoreResult,
 } from "@/lib/api";
 
 // 没有声明 categories 时的回退：所有 section 归到「全部」一类，保持原来的扁平体验
@@ -99,6 +104,7 @@ const MIXED_ID_LIST_FIELD_KEYS = new Set([
 
 const DATABASE_RESTORE_CONFIRM = "RESTORE_DATABASE_BACKUP";
 const DATABASE_MIGRATE_CONFIRM = "MIGRATE_DATABASE";
+const CONFIG_RESTORE_CONFIRM = "RESTORE_CONFIG_BACKUP";
 
 function toEditorList(value: unknown): string[] {
   if (Array.isArray(value)) {
@@ -701,6 +707,7 @@ function SectionNav({
 
 export default function AdminConfigPage() {
   const { toast } = useToast();
+  const { confirm } = useConfirm();
 
   // 源文件编辑状态
   const [configContent, setConfigContent] = useState("");
@@ -735,11 +742,20 @@ export default function AdminConfigPage() {
   const [dbBackups, setDbBackups] = useState<DatabaseBackup[]>([]);
   const [isLoadingDatabase, setIsLoadingDatabase] = useState(false);
   const [isDatabaseBusy, setIsDatabaseBusy] = useState(false);
+  const [migrationSource, setMigrationSource] = useState<"current" | "sqlite">("current");
   const [migrationTarget, setMigrationTarget] = useState<"json" | "postgres">("postgres");
   const [migrationResult, setMigrationResult] = useState<DatabaseMigrationResult | null>(null);
   const [restorePreview, setRestorePreview] = useState<DatabaseRestoreResult | null>(null);
   const [showRestoreDialog, setShowRestoreDialog] = useState(false);
   const [showMigrationDialog, setShowMigrationDialog] = useState(false);
+  const [configBackups, setConfigBackups] = useState<ConfigBackup[]>([]);
+  const [isLoadingConfigBackups, setIsLoadingConfigBackups] = useState(false);
+  const [isConfigBackupBusy, setIsConfigBackupBusy] = useState(false);
+  const [configBackupView, setConfigBackupView] = useState<ConfigBackupView | null>(null);
+  const [configRestorePreview, setConfigRestorePreview] = useState<ConfigRestoreResult | null>(null);
+  const [showConfigBackupView, setShowConfigBackupView] = useState(false);
+  const [showConfigRestoreDialog, setShowConfigRestoreDialog] = useState(false);
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 初始化时展开所有 sections
   useEffect(() => {
@@ -815,6 +831,21 @@ export default function AdminConfigPage() {
   useEffect(() => {
     setHasChanges(configContent !== originalContent);
   }, [configContent, originalContent]);
+
+  useEffect(() => {
+    if (migrationSource === "sqlite" && dbStatus && !dbStatus.legacy_sqlite_detected) {
+      setMigrationSource("current");
+      setMigrationResult(null);
+    }
+  }, [dbStatus, migrationSource]);
+
+  useEffect(() => {
+    return () => {
+      if (scrollTimerRef.current) {
+        clearTimeout(scrollTimerRef.current);
+      }
+    };
+  }, []);
 
   // 加载源文件
   const loadConfigResource = useCallback(async () => {
@@ -907,7 +938,10 @@ export default function AdminConfigPage() {
     if (!expandedSections.has(key)) {
       setExpandedSections((prev) => new Set(prev).add(key));
     }
-    setTimeout(() => {
+    if (scrollTimerRef.current) {
+      clearTimeout(scrollTimerRef.current);
+    }
+    scrollTimerRef.current = setTimeout(() => {
       document
         .getElementById(`section-${key}`)
         ?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1024,12 +1058,142 @@ export default function AdminConfigPage() {
     }
   }, [toast]);
 
+  const loadConfigBackups = useCallback(async () => {
+    setIsLoadingConfigBackups(true);
+    try {
+      const res = await api.listConfigBackups();
+      if (res.success && res.data) {
+        setConfigBackups(res.data.backups || []);
+      }
+    } catch (error: any) {
+      toast({
+        title: "加载配置备份失败",
+        description: error.message || "请检查后端连接",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingConfigBackups(false);
+    }
+  }, [toast]);
+
+  const handleCreateConfigBackup = async () => {
+    setIsConfigBackupBusy(true);
+    try {
+      const res = await api.createConfigBackup();
+      if (res.success) {
+        toast({ title: "配置备份已创建", description: res.data?.backup?.name, variant: "success" });
+        await loadConfigBackups();
+      } else {
+        toast({ title: "配置备份失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "配置备份失败", description: error.message || "请检查后端日志", variant: "destructive" });
+    } finally {
+      setIsConfigBackupBusy(false);
+    }
+  };
+
+  const handleViewConfigBackup = async (backup: ConfigBackup) => {
+    setIsConfigBackupBusy(true);
+    try {
+      const res = await api.getConfigBackup(backup.name);
+      if (res.success && res.data) {
+        setConfigBackupView(res.data);
+        setShowConfigBackupView(true);
+      } else {
+        toast({ title: "读取配置备份失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "读取配置备份失败", description: error.message || "请检查后端日志", variant: "destructive" });
+    } finally {
+      setIsConfigBackupBusy(false);
+    }
+  };
+
+  const handlePreviewConfigRestore = async (backup: ConfigBackup) => {
+    setIsConfigBackupBusy(true);
+    try {
+      const res = await api.restoreConfigBackup(backup.name, { dry_run: true });
+      if (res.success && res.data) {
+        setConfigRestorePreview(res.data);
+        setShowConfigRestoreDialog(true);
+      } else {
+        toast({ title: "配置恢复预览失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "配置恢复预览失败", description: error.message || "请检查后端日志", variant: "destructive" });
+    } finally {
+      setIsConfigBackupBusy(false);
+    }
+  };
+
+  const handleConfirmConfigRestore = async () => {
+    if (!configRestorePreview?.restored) return;
+    setIsConfigBackupBusy(true);
+    try {
+      const res = await api.restoreConfigBackup(configRestorePreview.restored, {
+        confirm: configRestorePreview.confirm || CONFIG_RESTORE_CONFIRM,
+      });
+      if (res.success && res.data) {
+        setConfigRestorePreview(res.data);
+        setShowConfigRestoreDialog(false);
+        toast({
+          title: "配置已恢复",
+          description: res.data.pre_operation_backup ? `保护性备份：${res.data.pre_operation_backup.name}` : "已创建保护性备份",
+          variant: "success",
+        });
+        await loadConfigBackups();
+        await loadSchema();
+        if (configContent) {
+          await loadConfig();
+        }
+      } else {
+        toast({ title: "配置恢复失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "配置恢复失败", description: error.message || "请检查后端日志", variant: "destructive" });
+    } finally {
+      setIsConfigBackupBusy(false);
+    }
+  };
+
+  const handleDeleteConfigBackup = async (backup: ConfigBackup) => {
+    const accepted = await confirm({
+      title: "删除配置备份",
+      description: `确认删除配置备份 ${backup.name}？此操作不可恢复。`,
+      tone: "danger",
+      confirmLabel: "删除备份",
+      confirmVariant: "destructive",
+    });
+    if (!accepted) return;
+    setIsConfigBackupBusy(true);
+    try {
+      const res = await api.deleteConfigBackup(backup.name);
+      if (res.success) {
+        toast({ title: "配置备份已删除", description: backup.name, variant: "success" });
+        await loadConfigBackups();
+      } else {
+        toast({ title: "删除配置备份失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "删除配置备份失败", description: error.message || "请检查后端日志", variant: "destructive" });
+    } finally {
+      setIsConfigBackupBusy(false);
+    }
+  };
+
   const handleCreateBackup = async () => {
     setIsDatabaseBusy(true);
     try {
       const res = await api.createDatabaseBackup();
       if (res.success) {
-        toast({ title: "备份已创建", variant: "success" });
+        toast({
+          title: "备份已创建",
+          description: res.data?.legacy_sqlite_backup
+            ? `已同时备份旧 SQLite：${res.data.legacy_sqlite_backup.file_count} 个文件`
+            : undefined,
+          variant: "success",
+        });
         await loadDatabase();
       } else {
         toast({ title: "备份失败", description: res.message, variant: "destructive" });
@@ -1091,13 +1255,18 @@ export default function AdminConfigPage() {
     setIsDatabaseBusy(true);
     setMigrationResult(null);
     try {
-      const res = await api.migrateDatabase({ target_driver: migrationTarget, dry_run: true });
+      const res = await api.migrateDatabase({
+        source_driver: migrationSource === "sqlite" ? "sqlite" : undefined,
+        target_driver: migrationTarget,
+        dry_run: true,
+      });
       if (res.success && res.data) {
         setMigrationResult(res.data);
         if (dryRun) {
+          const source = res.data.source_driver === "sqlite" ? "旧 SQLite" : "当前 Go 状态";
           toast({
             title: "迁移预检通过",
-            description: `${res.data.users} 用户，${res.data.regcodes} 卡码，${res.data.invite_codes} 邀请码`,
+            description: `${source}: ${res.data.users} 用户，${res.data.regcodes} 卡码，${res.data.invite_codes} 邀请码`,
             variant: "success",
           });
         } else {
@@ -1117,6 +1286,7 @@ export default function AdminConfigPage() {
     setIsDatabaseBusy(true);
     try {
       const res = await api.migrateDatabase({
+        source_driver: migrationSource === "sqlite" ? "sqlite" : undefined,
         target_driver: migrationTarget,
         dry_run: false,
         confirm: migrationResult?.confirm || DATABASE_MIGRATE_CONFIRM,
@@ -1127,7 +1297,7 @@ export default function AdminConfigPage() {
         toast({
           title: "迁移完成",
           description: res.data.pre_operation_backup
-            ? `已创建保护性备份 ${res.data.pre_operation_backup.name}`
+            ? `已创建保护性备份 ${res.data.pre_operation_backup.name}${res.data.legacy_sqlite_backup ? "，并备份旧 SQLite" : ""}`
             : `${res.data.users} 用户，${res.data.regcodes} 卡码，${res.data.invite_codes} 邀请码`,
           variant: "success",
         });
@@ -1230,6 +1400,9 @@ export default function AdminConfigPage() {
             if (v === "database" && !dbStatus) {
               void loadDatabase();
             }
+            if (v === "config-backups" && configBackups.length === 0) {
+              void loadConfigBackups();
+            }
           }}
         >
           <div className="min-w-0 pb-1">
@@ -1245,6 +1418,10 @@ export default function AdminConfigPage() {
               <TabsTrigger value="database" className="min-w-0 gap-1.5 px-2 sm:px-4">
                 <Database className="h-4 w-4" />
                 数据库
+              </TabsTrigger>
+              <TabsTrigger value="config-backups" className="min-w-0 gap-1.5 px-2 sm:px-4">
+                <Archive className="h-4 w-4" />
+                配置备份
               </TabsTrigger>
               <TabsTrigger value="update" className="min-w-0 gap-1.5 px-2 sm:px-4">
                 <GitPullRequest className="h-4 w-4" />
@@ -1561,6 +1738,78 @@ export default function AdminConfigPage() {
             </motion.div>
           </TabsContent>
 
+          <TabsContent value="config-backups" className="mt-4">
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="flex items-center gap-2 text-lg font-semibold">
+                    <Archive className="h-5 w-5" />
+                    配置备份与恢复
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    保存配置前会自动生成保护性备份；也可以手动备份、查看内容、恢复或删除历史备份。
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" onClick={() => void loadConfigBackups()} disabled={isLoadingConfigBackups || isConfigBackupBusy}>
+                    {isLoadingConfigBackups ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                    刷新
+                  </Button>
+                  <Button size="sm" onClick={() => void handleCreateConfigBackup()} disabled={isConfigBackupBusy}>
+                    {isConfigBackupBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Archive className="mr-2 h-4 w-4" />}
+                    创建配置备份
+                  </Button>
+                </div>
+              </div>
+
+              <Alert>
+                <Shield className="h-4 w-4" />
+                <AlertTitle>安全机制</AlertTitle>
+                <AlertDescription>
+                  配置恢复会先校验 TOML 是否可加载，再创建当前配置的保护性备份；热重载失败会自动回滚当前配置文件。
+                </AlertDescription>
+              </Alert>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>配置备份列表</CardTitle>
+                  <CardDescription>备份文件保存在数据库备份目录下的 config 子目录。</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {configBackups.length === 0 ? (
+                    <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
+                      {isLoadingConfigBackups ? "正在加载..." : "暂无配置备份"}
+                    </div>
+                  ) : (
+                    <div className="divide-y rounded-md border">
+                      {configBackups.map((backup) => (
+                        <div key={backup.name} className="flex flex-col gap-3 px-3 py-3 md:flex-row md:items-center md:justify-between">
+                          <div className="min-w-0">
+                            <p className="break-all text-sm font-medium">{backup.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {formatBytes(backup.size)} · {formatUnixTime(backup.created_at)}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Button variant="outline" size="sm" onClick={() => void handleViewConfigBackup(backup)} disabled={isConfigBackupBusy}>
+                              <Eye className="mr-2 h-4 w-4" />查看
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => void handlePreviewConfigRestore(backup)} disabled={isConfigBackupBusy}>
+                              <RotateCcw className="mr-2 h-4 w-4" />恢复
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => void handleDeleteConfigBackup(backup)} disabled={isConfigBackupBusy} className="text-destructive hover:text-destructive">
+                              <Trash2 className="mr-2 h-4 w-4" />删除
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
           <TabsContent value="database" className="mt-4">
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1570,13 +1819,21 @@ export default function AdminConfigPage() {
                     数据库管理
                   </h2>
                   <p className="text-sm text-muted-foreground">
-                    备份、恢复和迁移当前 Go 后端状态；PostgreSQL 连接信息在可视化配置的 Database 分组中维护。
+                    备份、恢复和迁移 Go 状态；检测到旧 SQLite 时可直接预览并导入到 JSON 或 PostgreSQL。
                   </p>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => void loadDatabase()} disabled={isLoadingDatabase}>
-                  {isLoadingDatabase ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
-                  刷新
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <a
+                    href="/admin/database"
+                    className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+                  >
+                    打开独立迁移页
+                  </a>
+                  <Button variant="outline" size="sm" onClick={() => void loadDatabase()} disabled={isLoadingDatabase}>
+                    {isLoadingDatabase ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                    刷新
+                  </Button>
+                </div>
               </div>
 
               <div className="grid gap-3 md:grid-cols-4">
@@ -1613,6 +1870,31 @@ export default function AdminConfigPage() {
                   <AlertDescription>
                     状态文件：{dbStatus.state_file}；备份目录：{dbStatus.backup_dir}；PostgreSQL {dbStatus.postgres_configured ? "已配置" : "未配置"}。
                     切换存储后端需要先迁移数据，然后重启后端进程使新 driver 生效。
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {dbStatus?.legacy_sqlite_detected && dbStatus.legacy_sqlite && (
+                <Alert className="border-amber-500/40 bg-amber-500/10">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertTitle>检测到旧 SQLite 数据库</AlertTitle>
+                  <AlertDescription className="space-y-2">
+                    <p>
+                      目录 {dbStatus.legacy_sqlite.database_dir} 中有 {dbStatus.legacy_sqlite.file_count} 个旧 SQLite/WAL 文件，
+                      合计 {formatBytes(dbStatus.legacy_sqlite.total_size)}。
+                      {dbStatus.legacy_sqlite.active_admin_count ? ` 可读取 active 管理员 ${dbStatus.legacy_sqlite.active_admin_count} 个。` : ""}
+                    </p>
+                    {dbStatus.legacy_sqlite.table_counts && (
+                      <p className="break-words text-xs">
+                        已识别表：{Object.keys(dbStatus.legacy_sqlite.table_counts).slice(0, 12).join("、")}
+                        {Object.keys(dbStatus.legacy_sqlite.table_counts).length > 12 ? " 等" : ""}
+                      </p>
+                    )}
+                    {dbStatus.legacy_sqlite.warnings?.length ? (
+                      <p className="text-xs text-amber-700 dark:text-amber-300">
+                        {dbStatus.legacy_sqlite.warnings.join("；")}
+                      </p>
+                    ) : null}
                   </AlertDescription>
                 </Alert>
               )}
@@ -1670,9 +1952,35 @@ export default function AdminConfigPage() {
                       <UploadCloud className="h-5 w-5" />
                       迁移
                     </CardTitle>
-                    <CardDescription>将当前状态快照写入目标后端。</CardDescription>
+                    <CardDescription>预检会先构造目标快照；执行前会自动备份当前状态和旧 SQLite 文件。</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">来源</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          variant={migrationSource === "current" ? "default" : "outline"}
+                          onClick={() => {
+                            setMigrationSource("current");
+                            setMigrationResult(null);
+                          }}
+                        >
+                          当前 Go 状态
+                        </Button>
+                        <Button
+                          variant={migrationSource === "sqlite" ? "default" : "outline"}
+                          disabled={!dbStatus?.legacy_sqlite_detected}
+                          onClick={() => {
+                            setMigrationSource("sqlite");
+                            setMigrationResult(null);
+                          }}
+                        >
+                          旧 SQLite
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">目标</p>
                     <div className="grid grid-cols-2 gap-2">
                       <Button
                         variant={migrationTarget === "postgres" ? "default" : "outline"}
@@ -1693,6 +2001,7 @@ export default function AdminConfigPage() {
                         JSON
                       </Button>
                     </div>
+                    </div>
                     <div className="flex gap-2">
                       <Button variant="outline" className="flex-1" onClick={() => void handleDatabaseMigrate(true)} disabled={isDatabaseBusy}>
                         预检
@@ -1711,6 +2020,17 @@ export default function AdminConfigPage() {
                         <div className="flex justify-between"><span>卡码</span><strong>{migrationResult.regcodes}</strong></div>
                         <div className="flex justify-between"><span>邀请</span><strong>{migrationResult.invite_codes}</strong></div>
                         <div className="flex justify-between"><span>求片</span><strong>{migrationResult.media_requests}</strong></div>
+                        {migrationResult.legacy_sqlite_import && (
+                          <>
+                            <div className="flex justify-between"><span>映射表</span><strong>{migrationResult.legacy_sqlite_import.mapped_tables?.length ?? 0}</strong></div>
+                            <div className="flex justify-between"><span>跳过表</span><strong>{migrationResult.legacy_sqlite_import.skipped_tables?.length ?? 0}</strong></div>
+                            {migrationResult.legacy_sqlite_import.skipped_tables?.length ? (
+                              <div className="pt-2 text-muted-foreground break-words">
+                                未映射：{migrationResult.legacy_sqlite_import.skipped_tables.join("、")}
+                              </div>
+                            ) : null}
+                          </>
+                        )}
                         {migrationResult.target_ready && (
                           <div className="pt-2 text-muted-foreground">
                             目标状态：{JSON.stringify(migrationResult.target_ready)}
@@ -1724,6 +2044,11 @@ export default function AdminConfigPage() {
                         {migrationResult.pre_operation_backup && (
                           <div className="pt-2 text-emerald-600 dark:text-emerald-400">
                             保护性备份：{migrationResult.pre_operation_backup.name}
+                          </div>
+                        )}
+                        {migrationResult.legacy_sqlite_backup && (
+                          <div className="pt-2 text-emerald-600 dark:text-emerald-400">
+                            旧 SQLite 备份：{migrationResult.legacy_sqlite_backup.name}
                           </div>
                         )}
                       </div>
@@ -1814,6 +2139,71 @@ export default function AdminConfigPage() {
             </Card>
           </TabsContent>
         </Tabs>
+
+        <Dialog open={showConfigBackupView} onOpenChange={setShowConfigBackupView}>
+          <DialogContent className="max-h-[85vh] max-w-3xl overflow-hidden p-0">
+            <DialogHeader className="border-b p-4">
+              <DialogTitle>查看配置备份</DialogTitle>
+              <DialogDescription>
+                {configBackupView?.backup.name} · {formatBytes(configBackupView?.backup.size || 0)}
+              </DialogDescription>
+            </DialogHeader>
+            <pre className="max-h-[65vh] overflow-auto p-4 text-xs leading-relaxed whitespace-pre-wrap">
+              {configBackupView?.content || ""}
+            </pre>
+            <DialogFooter className="border-t p-4">
+              <Button variant="outline" onClick={() => setShowConfigBackupView(false)}>关闭</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={showConfigRestoreDialog} onOpenChange={setShowConfigRestoreDialog}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>确认恢复配置备份</DialogTitle>
+              <DialogDescription>
+                恢复会替换当前 config.toml，并立即尝试热重载；失败时会自动回滚。
+              </DialogDescription>
+            </DialogHeader>
+            {configRestorePreview && (
+              <div className="space-y-3 text-sm">
+                <Alert className="border-amber-500/40 bg-amber-500/10">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertTitle>高风险操作</AlertTitle>
+                  <AlertDescription>
+                    确认后会先备份当前配置，再用备份内容覆盖当前配置文件。
+                  </AlertDescription>
+                </Alert>
+                <div className="grid gap-2 rounded-md border p-3 text-xs">
+                  <div className="flex justify-between gap-3">
+                    <span className="text-muted-foreground">目标备份</span>
+                    <strong className="break-all text-right">{configRestorePreview.restored}</strong>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-muted-foreground">配置文件</span>
+                    <strong className="break-all text-right">{configRestorePreview.config_file}</strong>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-muted-foreground">内容大小</span>
+                    <strong>{formatBytes(configRestorePreview.content_bytes)}</strong>
+                  </div>
+                </div>
+                {configRestorePreview.warnings?.length ? (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                    {configRestorePreview.warnings.join("；")}
+                  </div>
+                ) : null}
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowConfigRestoreDialog(false)} disabled={isConfigBackupBusy}>取消</Button>
+              <Button onClick={() => void handleConfirmConfigRestore()} disabled={isConfigBackupBusy || !configRestorePreview}>
+                {isConfigBackupBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                确认恢复
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={showRestoreDialog} onOpenChange={setShowRestoreDialog}>
           <DialogContent className="max-w-lg">

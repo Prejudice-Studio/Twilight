@@ -96,7 +96,7 @@
 | 方法 | 路径 | 认证 | 说明 |
 | ---- | ---- | ---- | ---- |
 | GET | `/system/info` | Public | 系统公开信息 |
-| GET | `/system/server-icon` | Public | 本地服务器图标 |
+| GET | `/system/server-icon` | Public | 内置服务器图标 |
 | GET | `/system/health` | Public | 健康检查 |
 | GET | `/system/stats` | Admin | 系统运行时统计 |
 | GET | `/system/emby-urls` | User | 按权限下发 Emby 线路 |

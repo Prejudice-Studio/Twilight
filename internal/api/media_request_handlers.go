@@ -61,7 +61,7 @@ func (a *App) handleInventorySearch(w http.ResponseWriter, r *http.Request, _ Pa
 	}
 	items, err := a.embySearchItems(r.Context(), query, includeTypes, queryInt(r, "year", 0), limit)
 	if err != nil {
-		fail(w, http.StatusBadGateway, "鎼滅储搴撳瓨澶辫触")
+		fail(w, http.StatusBadGateway, "搜索库存失败")
 		return
 	}
 	results := make([]map[string]any, 0, len(items))
@@ -78,7 +78,7 @@ func (a *App) handleCreateMediaRequest(w http.ResponseWriter, r *http.Request, _
 	}
 	p := current(r)
 	if p.User.TelegramID == 0 {
-		fail(w, http.StatusBadRequest, "璇峰厛鍦ㄤ釜浜鸿缃腑缁戝畾 Telegram 璐﹀彿鍚庡啀杩涜姹傜墖")
+		fail(w, http.StatusBadRequest, "请先在个人设置中绑定 Telegram 账号后再进行求片")
 		return
 	}
 	if a.cfg.MaxConcurrentRequestsPerUser > 0 && a.store.ActiveMediaRequestCount(p.User.UID) >= a.cfg.MaxConcurrentRequestsPerUser {

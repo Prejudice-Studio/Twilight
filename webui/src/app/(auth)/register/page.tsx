@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Eye, EyeOff, Loader2, ShieldPlus, UserPlus, Bot } from "lucide-react";
+import { Eye, EyeOff, Loader2, ShieldPlus, UserPlus, Bot, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,6 +42,10 @@ export default function RegisterPage() {
   }, [fetchSystemInfo]);
 
   const forceBindTelegram = Boolean(systemInfo?.features?.force_bind_telegram);
+  const telegramLinks = [
+    ...(systemInfo?.telegram_links?.groups || []),
+    ...(systemInfo?.telegram_links?.channels || []),
+  ];
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -299,6 +303,28 @@ export default function RegisterPage() {
                 </p>
               ) : null}
             </div>
+
+            {telegramLinks.length > 0 && (
+              <div className="rounded-2xl border border-border/70 bg-muted/40 p-4 text-sm">
+                <div className="mb-3 flex items-center gap-2 font-semibold text-foreground">
+                  <Send className="h-4 w-4 text-primary" />
+                  Telegram 社群
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {telegramLinks.map((item) => (
+                    <a
+                      key={item.url}
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-md border border-border/70 bg-background px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/10"
+                    >
+                      {item.label}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="space-y-6 p-6 sm:p-8">

@@ -42,13 +42,17 @@ type Route struct {
 }
 
 type App struct {
-	cfg       config.Config
-	store     *store.Store
-	sessions  *sessionStore
-	limiter   *rateLimiter
-	redis     *redis.Client
-	routes    []Route
-	runtimeMu sync.Mutex
+	cfg                   config.Config
+	store                 *store.Store
+	sessions              *sessionStore
+	limiter               *rateLimiter
+	redis                 *redis.Client
+	routes                []Route
+	runtimeMu             sync.Mutex
+	telegramBotMu         sync.Mutex
+	telegramBotCacheToken string
+	telegramBotCacheUntil time.Time
+	telegramBotCache      map[string]any
 }
 
 type principal struct {

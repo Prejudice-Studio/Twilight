@@ -16,7 +16,6 @@ import {
   Activity,
   Film,
   RefreshCw,
-  Bot,
   CheckCircle2,
   XCircle,
   AlertCircle,
@@ -79,7 +78,7 @@ type CodeCheckInfo = CodeUsePreview;
 
 export default function DashboardPage() {
   const { user, fetchUser } = useAuthStore();
-  const { info: systemInfo, fetchInfo: fetchSystemInfo } = useSystemStore();
+  const { fetchInfo: fetchSystemInfo } = useSystemStore();
   const { toast } = useToast();
   const [regCode, setRegCode] = useState("");
   const [regCodeInfo, setRegCodeInfo] = useState<CodeCheckInfo | null>(null);
@@ -676,11 +675,6 @@ export default function DashboardPage() {
     return <PageError message={error} />;
   }
 
-  const botUsername = systemInfo?.telegram_bot?.username || null;
-  const botUrl =
-    systemInfo?.telegram_bot?.url ||
-    (botUsername ? `https://t.me/${botUsername}` : null);
-
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-6 pb-10">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -771,11 +765,9 @@ export default function DashboardPage() {
             {telegramStatus?.bound ? (
               <>
                 <p className="text-base font-bold truncate">
-                  {telegramStatus.telegram_username ? `@${telegramStatus.telegram_username}` : `ID ${telegramStatus.telegram_id}`}
+                  Telegram 已绑定
                 </p>
-                {telegramStatus.telegram_id && telegramStatus.telegram_username && (
-                  <p className="text-xs text-muted-foreground truncate">ID: {telegramStatus.telegram_id}</p>
-                )}
+                <p className="text-xs text-muted-foreground truncate">可在个人设置中管理绑定状态</p>
                 {telegramStatus.pending_rebind_request && (
                   <p className="text-xs text-amber-500">已提交换绑请求，等待管理员处理</p>
                 )}
@@ -788,20 +780,6 @@ export default function DashboardPage() {
               </p>
             )}
           </div>
-
-          {botUsername && botUrl && (
-            <div className="mt-auto flex flex-wrap items-center gap-2 pt-2">
-              <Badge variant="outline" className="gap-1 truncate max-w-full">
-                <Bot className="h-3 w-3 shrink-0" />
-                <span className="truncate">@{botUsername}</span>
-              </Badge>
-              <Button asChild size="sm" variant="outline" className="ml-auto">
-                <a href={botUrl} target="_blank" rel="noopener noreferrer">
-                  打开 Bot
-                </a>
-              </Button>
-            </div>
-          )}
         </motion.div>
 
         {/* Emby 服务器 */}

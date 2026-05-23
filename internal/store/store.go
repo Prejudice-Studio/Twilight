@@ -48,6 +48,15 @@ type BackupInfo struct {
 	CreatedAt int64  `json:"created_at"`
 }
 
+type PostgresTargetStatus struct {
+	Host            string `json:"host,omitempty"`
+	User            string `json:"user,omitempty"`
+	Database        string `json:"database,omitempty"`
+	Connected       bool   `json:"connected"`
+	DatabaseCreated bool   `json:"database_created"`
+	SchemaReady     bool   `json:"schema_ready"`
+}
+
 type State struct {
 	NextUserID          int64                          `json:"next_user_id"`
 	NextAPIKeyID        int64                          `json:"next_api_key_id"`
@@ -73,6 +82,7 @@ type State struct {
 	PlaybackRecords     []PlaybackRecord               `json:"playback_records"`
 	RebindRequests      map[int64]RebindRequest        `json:"rebind_requests"`
 	TelegramRoster      map[string]TelegramRosterEntry `json:"telegram_roster"`
+	ViolationLogs       []ViolationLog                 `json:"violation_logs"`
 }
 
 type User struct {
@@ -153,19 +163,20 @@ type Announcement struct {
 }
 
 type InviteCode struct {
-	Code          string `json:"code"`
-	UID           int64  `json:"uid"`
-	InviterUID    int64  `json:"inviter_uid"`
-	Days          int    `json:"days"`
-	UseCountLimit int    `json:"use_count_limit"`
-	UseCount      int    `json:"use_count"`
-	UsedByUID     int64  `json:"used_by_uid,omitempty"`
-	UsedAt        int64  `json:"used_at,omitempty"`
-	Active        bool   `json:"active"`
-	Note          string `json:"note,omitempty"`
-	Used          bool   `json:"used"`
-	CreatedAt     int64  `json:"created_at"`
-	ExpiredAt     int64  `json:"expired_at,omitempty"`
+	Code           string `json:"code"`
+	UID            int64  `json:"uid"`
+	InviterUID     int64  `json:"inviter_uid"`
+	Days           int    `json:"days"`
+	UseCountLimit  int    `json:"use_count_limit"`
+	UseCount       int    `json:"use_count"`
+	UsedByUID      int64  `json:"used_by_uid,omitempty"`
+	UsedAt         int64  `json:"used_at,omitempty"`
+	Active         bool   `json:"active"`
+	Note           string `json:"note,omitempty"`
+	Used           bool   `json:"used"`
+	TargetUsername string `json:"target_username,omitempty"`
+	CreatedAt      int64  `json:"created_at"`
+	ExpiredAt      int64  `json:"expired_at,omitempty"`
 }
 
 type RegCode struct {
@@ -181,6 +192,7 @@ type RegCode struct {
 	UsedByTelegramIDs []int64 `json:"used_by_telegram_ids,omitempty"`
 	Active            bool    `json:"active"`
 	IsDecoy           bool    `json:"is_decoy"`
+	TargetUsername    string  `json:"target_username,omitempty"`
 	CreatedAt         int64   `json:"created_at"`
 	CreatedTime       int64   `json:"created_time"`
 	ExpiredAt         int64   `json:"expired_at,omitempty"`
@@ -201,6 +213,21 @@ type BindCode struct {
 	TelegramID int64  `json:"telegram_id,omitempty"`
 	CreatedAt  int64  `json:"created_at"`
 	ExpiresAt  int64  `json:"expires_at"`
+}
+
+// ViolationLog records attempts to use decoy codes or codes restricted to
+// a specific username by an unauthorized user.
+type ViolationLog struct {
+	ID         int64  `json:"id"`
+	UID        int64  `json:"uid"`
+	Username   string `json:"username"`
+	Code       string `json:"code"`
+	CodeType   string `json:"code_type"`
+	Reason     string `json:"reason"`
+	Action     string `json:"action"`
+	IP         string `json:"ip,omitempty"`
+	TelegramID int64  `json:"telegram_id,omitempty"`
+	CreatedAt  int64  `json:"created_at"`
 }
 
 type Signin struct {
@@ -325,48 +352,8 @@ func Open(path string) (*Store, error) {
 }
 
 func OpenPostgres(ctx context.Context, dsn string) (*Store, error) {
-	dsn = strings.TrimSpace(dsn)
-	if dsn == "" {
-		return nil, fmt.Errorf("postgres dsn is empty")
-	}
-	db, err := sql.Open("pgx", dsn)
+	db, _, err := openPreparedPostgres(ctx, dsn)
 	if err != nil {
-		return nil, err
-	}
-	db.SetMaxOpenConns(8)
-	db.SetMaxIdleConns(4)
-	db.SetConnMaxLifetime(30 * time.Minute)
-	if err := db.PingContext(ctx); err != nil {
-		_ = db.Close()
-		if isUndefinedDatabaseError(err) {
-			target := postgresTargetInfo(dsn)
-			slog.Warn("PostgreSQL database does not exist; attempting automatic creation", "database", target.Database, "user", target.User, "host", target.Host)
-			if createErr := CreatePostgresDatabase(ctx, dsn); createErr != nil {
-				return nil, fmt.Errorf("PostgreSQL database %q does not exist and automatic creation failed: %w", target.Database, describePostgresConnectionError(target, createErr))
-			}
-			slog.Info("PostgreSQL database created", "database", target.Database, "user", target.User, "host", target.Host)
-			db, err = sql.Open("pgx", dsn)
-			if err != nil {
-				return nil, err
-			}
-			db.SetMaxOpenConns(8)
-			db.SetMaxIdleConns(4)
-			db.SetConnMaxLifetime(30 * time.Minute)
-			if err := db.PingContext(ctx); err != nil {
-				_ = db.Close()
-				return nil, describePostgresConnectionError(target, err)
-			}
-		} else {
-			return nil, describePostgresConnectionError(postgresTargetInfo(dsn), err)
-		}
-	}
-	if _, err := db.ExecContext(ctx, `
-CREATE TABLE IF NOT EXISTS twilight_state (
-	id integer PRIMARY KEY,
-	state jsonb NOT NULL,
-	updated_at timestamptz NOT NULL DEFAULT now()
-)`); err != nil {
-		_ = db.Close()
 		return nil, err
 	}
 
@@ -551,19 +538,79 @@ func quotePostgresIdentifier(value string) string {
 }
 
 func CheckPostgres(ctx context.Context, dsn string) error {
-	dsn = strings.TrimSpace(dsn)
-	if dsn == "" {
-		return fmt.Errorf("postgres dsn is empty")
-	}
-	db, err := sql.Open("pgx", dsn)
+	db, _, err := openPreparedPostgres(ctx, dsn)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(0)
-	db.SetConnMaxLifetime(30 * time.Second)
-	return db.PingContext(ctx)
+	return db.Close()
+}
+
+func CheckPostgresTarget(ctx context.Context, dsn string) (PostgresTargetStatus, error) {
+	db, status, err := openPreparedPostgres(ctx, dsn)
+	if err != nil {
+		return status, err
+	}
+	if closeErr := db.Close(); closeErr != nil {
+		return status, closeErr
+	}
+	return status, nil
+}
+
+func openPreparedPostgres(ctx context.Context, dsn string) (*sql.DB, PostgresTargetStatus, error) {
+	dsn = strings.TrimSpace(dsn)
+	target := postgresTargetInfo(dsn)
+	status := PostgresTargetStatus{
+		Host:     target.Host,
+		User:     target.User,
+		Database: target.Database,
+	}
+	if dsn == "" {
+		return nil, status, fmt.Errorf("postgres dsn is empty")
+	}
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return nil, status, err
+	}
+	configurePostgresDB(db, 8, 4)
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		if !isUndefinedDatabaseError(err) {
+			return nil, status, describePostgresConnectionError(target, err)
+		}
+		slog.Warn("PostgreSQL database does not exist; attempting automatic creation", "database", target.Database, "user", target.User, "host", target.Host)
+		if createErr := CreatePostgresDatabase(ctx, dsn); createErr != nil {
+			return nil, status, fmt.Errorf("PostgreSQL database %q does not exist and automatic creation failed: %w", target.Database, describePostgresConnectionError(target, createErr))
+		}
+		status.DatabaseCreated = true
+		slog.Info("PostgreSQL database created", "database", target.Database, "user", target.User, "host", target.Host)
+		db, err = sql.Open("pgx", dsn)
+		if err != nil {
+			return nil, status, err
+		}
+		configurePostgresDB(db, 8, 4)
+		if err := db.PingContext(ctx); err != nil {
+			_ = db.Close()
+			return nil, status, describePostgresConnectionError(target, err)
+		}
+	}
+	status.Connected = true
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS twilight_state (
+	id integer PRIMARY KEY,
+	state jsonb NOT NULL,
+	updated_at timestamptz NOT NULL DEFAULT now()
+)`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
+	status.SchemaReady = true
+	return db, status, nil
+}
+
+func configurePostgresDB(db *sql.DB, maxOpen, maxIdle int) {
+	db.SetMaxOpenConns(maxOpen)
+	db.SetMaxIdleConns(maxIdle)
+	db.SetConnMaxLifetime(30 * time.Minute)
 }
 
 func (s *Store) Close() error {
@@ -670,6 +717,9 @@ func (s *State) ensure() {
 	if s.TelegramRoster == nil {
 		s.TelegramRoster = map[string]TelegramRosterEntry{}
 	}
+	if s.ViolationLogs == nil {
+		s.ViolationLogs = []ViolationLog{}
+	}
 }
 
 func (s *State) EnsureForMigration() {
@@ -684,7 +734,15 @@ func (s *Store) Save() error {
 
 func (s *Store) saveLocked() error {
 	s.state.ensure()
-	data, err := json.MarshalIndent(s.state, "", "  ")
+	var (
+		data []byte
+		err  error
+	)
+	if s.db != nil {
+		data, err = json.Marshal(s.state)
+	} else {
+		data, err = json.MarshalIndent(s.state, "", "  ")
+	}
 	if err != nil {
 		return err
 	}
@@ -1881,6 +1939,48 @@ func telegramRosterActive(status string) bool {
 
 func deviceKey(uid int64, deviceID string) string {
 	return strconv36(uid) + ":" + deviceID
+}
+
+// AddViolationLog records a code violation attempt.
+func (s *Store) AddViolationLog(log ViolationLog) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	log.ID = int64(len(s.state.ViolationLogs)) + 1
+	s.state.ViolationLogs = append(s.state.ViolationLogs, log)
+	return s.saveLocked()
+}
+
+// ListViolationLogs returns all violation logs, newest first.
+func (s *Store) ListViolationLogs() []ViolationLog {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]ViolationLog, len(s.state.ViolationLogs))
+	copy(out, s.state.ViolationLogs)
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out
+}
+
+// DeleteViolationLog removes a single violation log entry by ID.
+func (s *Store) DeleteViolationLog(id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, log := range s.state.ViolationLogs {
+		if log.ID == id {
+			s.state.ViolationLogs = append(s.state.ViolationLogs[:i], s.state.ViolationLogs[i+1:]...)
+			return s.saveLocked()
+		}
+	}
+	return ErrNotFound
+}
+
+// ClearViolationLogs removes all violation logs.
+func (s *Store) ClearViolationLogs() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.state.ViolationLogs = nil
+	return s.saveLocked()
 }
 
 var (

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Eye, EyeOff, ArrowRight, Loader2, ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, ArrowRight, Loader2, ShieldCheck, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,6 +24,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const telegramLinks = [
+    ...(systemInfo?.telegram_links?.groups || []),
+    ...(systemInfo?.telegram_links?.channels || []),
+  ];
 
   useEffect(() => {
     router.prefetch("/dashboard");
@@ -94,6 +98,27 @@ export default function LoginPage() {
           </CardHeader>
 
           <CardContent className="px-6 pb-7 md:px-8">
+            {telegramLinks.length > 0 && (
+              <div className="mb-5 rounded-xl border border-border/70 bg-muted/40 px-4 py-3 text-sm">
+                <div className="mb-2 flex items-center gap-2 font-medium">
+                  <Send className="h-4 w-4 text-primary" />
+                  Telegram 社群
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {telegramLinks.map((item) => (
+                    <a
+                      key={item.url}
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-md border border-border/70 bg-background px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/10"
+                    >
+                      {item.label}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-2">
                 <Label htmlFor="username" className="ml-1">用户名</Label>

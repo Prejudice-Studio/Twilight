@@ -11,67 +11,112 @@ import (
 	"time"
 
 	"github.com/prejudice-studio/twilight/internal/config"
+	"github.com/prejudice-studio/twilight/internal/store"
 )
+
+const configRestoreConfirmPhrase = "RESTORE_CONFIG_BACKUP"
 
 func (a *App) handleConfigTOMLPutSafe(w http.ResponseWriter, r *http.Request, _ Params) {
 	payload := decodeMap(r)
-	content := stringValue(payload, "content")
-	if strings.TrimSpace(content) == "" {
-		fail(w, http.StatusBadRequest, "配置内容不能为空")
+	info, status, message := a.saveConfigContent(stringValue(payload, "content"))
+	if status != http.StatusOK {
+		fail(w, status, message)
 		return
 	}
+	ok(w, "配置已保存并热重载", info)
+}
 
-	configFile := a.cfg.ConfigFile
-	if err := os.MkdirAll(filepath.Dir(configFile), 0o700); err != nil {
-		fail(w, http.StatusInternalServerError, "创建配置目录失败")
+func (a *App) handleConfigBackups(w http.ResponseWriter, r *http.Request, _ Params) {
+	backups, err := listConfigBackups(a.configBackupDir())
+	if err != nil {
+		fail(w, http.StatusInternalServerError, "读取配置备份列表失败")
 		return
 	}
-	stamp := strconv.FormatInt(time.Now().Unix(), 10)
-	tmpPath := configFile + "." + stamp + ".tmp"
-	backupPath := configFile + "." + stamp + ".bak"
+	ok(w, "OK", map[string]any{"backups": backups, "config_file": a.configFilePath(), "backup_dir": a.configBackupDir()})
+}
 
-	if err := os.WriteFile(tmpPath, []byte(content), 0o600); err != nil {
-		fail(w, http.StatusInternalServerError, "保存临时配置失败")
-		return
-	}
-	if _, err := config.Load(tmpPath); err != nil {
-		_ = os.Remove(tmpPath)
-		fail(w, http.StatusBadRequest, "配置校验失败: "+err.Error())
-		return
-	}
-
-	hadExisting := false
-	if existing, err := os.ReadFile(configFile); err == nil {
-		hadExisting = true
-		if err := os.WriteFile(backupPath, existing, 0o600); err != nil {
-			_ = os.Remove(tmpPath)
-			fail(w, http.StatusInternalServerError, "备份现有配置失败")
+func (a *App) handleConfigBackup(w http.ResponseWriter, r *http.Request, _ Params) {
+	info, err := a.createConfigBackup()
+	if err != nil {
+		if err == store.ErrNotFound {
+			fail(w, http.StatusNotFound, "配置文件不存在")
 			return
 		}
+		fail(w, http.StatusInternalServerError, "配置备份失败")
+		return
 	}
-	if hadExisting {
-		_ = os.Remove(configFile)
+	ok(w, "配置备份已创建", map[string]any{"backup": info})
+}
+
+func (a *App) handleConfigBackupInspect(w http.ResponseWriter, r *http.Request, params Params) {
+	backup, content, err := a.configBackupContent(params["name"])
+	if err != nil {
+		fail(w, http.StatusBadRequest, "配置备份无效")
+		return
 	}
-	if err := os.Rename(tmpPath, configFile); err != nil {
-		if hadExisting {
-			_ = os.Rename(backupPath, configFile)
-		}
-		_ = os.Remove(tmpPath)
-		fail(w, http.StatusInternalServerError, "替换配置失败")
+	ok(w, "OK", map[string]any{"backup": backup, "content": string(content), "config_file": a.configFilePath()})
+}
+
+func (a *App) handleConfigRestore(w http.ResponseWriter, r *http.Request, _ Params) {
+	payload := decodeMap(r)
+	name := firstNonEmpty(stringValue(payload, "name"), stringValue(payload, "backup"))
+	backup, content, err := a.configBackupContent(name)
+	if err != nil {
+		fail(w, http.StatusBadRequest, "配置备份无效")
+		return
+	}
+	if err := validateConfigContent(a.configFilePath(), content); err != nil {
+		fail(w, http.StatusBadRequest, "配置备份校验失败: "+err.Error())
+		return
+	}
+	result := map[string]any{
+		"operation":             "restore_config",
+		"dry_run":               true,
+		"requires_confirmation": true,
+		"confirm":               configRestoreConfirmPhrase,
+		"restored":              backup.Name,
+		"backup":                backup,
+		"config_file":           a.configFilePath(),
+		"content_bytes":         len(content),
+		"warnings": []string{
+			"config restore will replace the active config file",
+			"the server will create a protective config backup before applying this restore",
+		},
+	}
+	if boolValue(payload, "dry_run", false) || boolValue(payload, "preview", false) || stringValue(payload, "confirm") != configRestoreConfirmPhrase {
+		ok(w, "配置恢复预览已生成", result)
 		return
 	}
 
-	reloadInfo, err := a.reloadConfig()
-	if err != nil {
-		if hadExisting {
-			_ = os.Remove(configFile)
-			_ = os.Rename(backupPath, configFile)
-			_, _ = a.reloadConfig()
-		}
-		fail(w, http.StatusBadRequest, "配置已回滚，热重载失败: "+err.Error())
+	info, status, message := a.saveConfigContent(string(content))
+	if status != http.StatusOK {
+		fail(w, status, message)
 		return
 	}
-	ok(w, "配置已保存并热重载", map[string]any{"path": configFile, "backup": backupPath, "reload": reloadInfo})
+	result["dry_run"] = false
+	result["requires_confirmation"] = false
+	result["pre_restore_backup"] = info["backup"]
+	result["pre_operation_backup"] = info["backup"]
+	result["reload"] = info["reload"]
+	ok(w, "配置已恢复并热重载", result)
+}
+
+func (a *App) handleConfigBackupDelete(w http.ResponseWriter, r *http.Request, params Params) {
+	path, err := resolveConfigBackupPath(a.configBackupDir(), params["name"])
+	if err != nil {
+		fail(w, http.StatusBadRequest, "配置备份无效")
+		return
+	}
+	info, err := configBackupInfo(path)
+	if err != nil {
+		fail(w, http.StatusBadRequest, "配置备份无效")
+		return
+	}
+	if err := os.Remove(path); err != nil {
+		fail(w, http.StatusInternalServerError, "删除配置备份失败")
+		return
+	}
+	ok(w, "配置备份已删除", map[string]any{"backup": info})
 }
 
 func (a *App) handleConfigSchemaFull(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -150,34 +195,34 @@ func (a *App) saveConfigContent(content string) (map[string]any, int, string) {
 	if strings.TrimSpace(content) == "" {
 		return nil, http.StatusBadRequest, "配置内容不能为空"
 	}
-	configFile := a.cfg.ConfigFile
+	configFile := a.configFilePath()
 	if err := os.MkdirAll(filepath.Dir(configFile), 0o700); err != nil {
 		return nil, http.StatusInternalServerError, "创建配置目录失败"
 	}
-	stamp := strconv.FormatInt(time.Now().Unix(), 10)
-	tmpPath := configFile + "." + stamp + ".tmp"
-	backupPath := configFile + "." + stamp + ".bak"
-	if err := os.WriteFile(tmpPath, []byte(content), 0o600); err != nil {
-		return nil, http.StatusInternalServerError, "保存临时配置失败"
-	}
-	if _, err := config.Load(tmpPath); err != nil {
-		_ = os.Remove(tmpPath)
+	if err := validateConfigContent(configFile, []byte(content)); err != nil {
 		return nil, http.StatusBadRequest, "配置校验失败: " + err.Error()
 	}
-	hadExisting := false
-	if existing, err := os.ReadFile(configFile); err == nil {
-		hadExisting = true
-		if err := os.WriteFile(backupPath, existing, 0o600); err != nil {
-			_ = os.Remove(tmpPath)
+	existing, readErr := os.ReadFile(configFile)
+	hadExisting := readErr == nil
+	var backupInfo *store.BackupInfo
+	if hadExisting {
+		info, err := writeConfigBackupBytes(configFile, a.configBackupDir(), existing)
+		if err != nil {
 			return nil, http.StatusInternalServerError, "备份现有配置失败"
 		}
+		backupInfo = &info
+	}
+	stamp := strconv.FormatInt(time.Now().UnixNano(), 10)
+	tmpPath := configFile + "." + stamp + ".tmp"
+	if err := os.WriteFile(tmpPath, []byte(content), 0o600); err != nil {
+		return nil, http.StatusInternalServerError, "保存临时配置失败"
 	}
 	if hadExisting {
 		_ = os.Remove(configFile)
 	}
 	if err := os.Rename(tmpPath, configFile); err != nil {
 		if hadExisting {
-			_ = os.Rename(backupPath, configFile)
+			_ = os.WriteFile(configFile, existing, 0o600)
 		}
 		_ = os.Remove(tmpPath)
 		return nil, http.StatusInternalServerError, "替换配置失败"
@@ -186,12 +231,150 @@ func (a *App) saveConfigContent(content string) (map[string]any, int, string) {
 	if err != nil {
 		if hadExisting {
 			_ = os.Remove(configFile)
-			_ = os.Rename(backupPath, configFile)
+			_ = os.WriteFile(configFile, existing, 0o600)
 			_, _ = a.reloadConfig()
 		}
 		return nil, http.StatusBadRequest, "配置已回滚，热重载失败: " + err.Error()
 	}
-	return map[string]any{"path": configFile, "backup": backupPath, "reload": reloadInfo}, http.StatusOK, ""
+	info := map[string]any{"path": configFile, "reload": reloadInfo}
+	if backupInfo != nil {
+		info["backup"] = *backupInfo
+		info["backup_path"] = backupInfo.Path
+	}
+	return info, http.StatusOK, ""
+}
+
+func (a *App) configBackupDir() string {
+	dir := strings.TrimSpace(a.cfg.DatabaseBackupDir)
+	if dir == "" {
+		dir = filepath.Join(firstNonEmpty(a.cfg.DatabaseDir, "db"), "backups")
+	}
+	return filepath.Join(dir, "config")
+}
+
+func (a *App) configFilePath() string {
+	return firstNonEmpty(a.cfg.ConfigFile, "config.toml")
+}
+
+func (a *App) createConfigBackup() (store.BackupInfo, error) {
+	data, err := os.ReadFile(a.configFilePath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return store.BackupInfo{}, store.ErrNotFound
+		}
+		return store.BackupInfo{}, err
+	}
+	return writeConfigBackupBytes(a.configFilePath(), a.configBackupDir(), data)
+}
+
+func (a *App) configBackupContent(name string) (store.BackupInfo, []byte, error) {
+	path, err := resolveConfigBackupPath(a.configBackupDir(), name)
+	if err != nil {
+		return store.BackupInfo{}, nil, err
+	}
+	info, err := configBackupInfo(path)
+	if err != nil {
+		return store.BackupInfo{}, nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return store.BackupInfo{}, nil, err
+	}
+	return info, data, nil
+}
+
+func validateConfigContent(configFile string, content []byte) error {
+	if strings.TrimSpace(string(content)) == "" {
+		return store.ErrNotFound
+	}
+	dir := filepath.Dir(configFile)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmpPath := filepath.Join(dir, ".twilight_config_validate_"+strconv.FormatInt(time.Now().UnixNano(), 10)+".toml")
+	if err := os.WriteFile(tmpPath, content, 0o600); err != nil {
+		return err
+	}
+	defer os.Remove(tmpPath)
+	_, err := config.Load(tmpPath)
+	return err
+}
+
+func writeConfigBackupBytes(configFile, backupDir string, content []byte) (store.BackupInfo, error) {
+	if len(content) == 0 {
+		return store.BackupInfo{}, store.ErrNotFound
+	}
+	if err := os.MkdirAll(backupDir, 0o700); err != nil {
+		return store.BackupInfo{}, err
+	}
+	now := time.Now().UTC()
+	base := strings.TrimSuffix(filepath.Base(configFile), filepath.Ext(configFile))
+	if base == "" || base == "." {
+		base = "config"
+	}
+	name := base + "_" + now.Format("20060102_150405") + "_" + strconv.FormatInt(now.UnixNano()%1e9, 10) + ".toml"
+	path := filepath.Join(backupDir, name)
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		return store.BackupInfo{}, err
+	}
+	return store.BackupInfo{Name: name, Path: path, Size: int64(len(content)), CreatedAt: now.Unix()}, nil
+}
+
+func listConfigBackups(dir string) ([]store.BackupInfo, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []store.BackupInfo{}, nil
+		}
+		return nil, err
+	}
+	backups := make([]store.BackupInfo, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || strings.ToLower(filepath.Ext(entry.Name())) != ".toml" {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		backups = append(backups, store.BackupInfo{Name: entry.Name(), Path: filepath.Join(dir, entry.Name()), Size: info.Size(), CreatedAt: info.ModTime().Unix()})
+	}
+	sort.Slice(backups, func(i, j int) bool { return backups[i].CreatedAt > backups[j].CreatedAt })
+	return backups, nil
+}
+
+func resolveConfigBackupPath(dir, name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || filepath.IsAbs(name) || filepath.Base(name) != name || strings.Contains(name, "..") || strings.ToLower(filepath.Ext(name)) != ".toml" {
+		return "", store.ErrNotFound
+	}
+	base, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	target, err := filepath.Abs(filepath.Join(base, name))
+	if err != nil {
+		return "", err
+	}
+	if filepath.Dir(target) != base {
+		return "", store.ErrNotFound
+	}
+	info, err := os.Lstat(target)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return "", store.ErrNotFound
+	}
+	return target, nil
+}
+
+func configBackupInfo(path string) (store.BackupInfo, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return store.BackupInfo{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return store.BackupInfo{}, store.ErrNotFound
+	}
+	return store.BackupInfo{Name: filepath.Base(path), Path: path, Size: info.Size(), CreatedAt: info.ModTime().Unix()}, nil
 }
 
 type configSectionDef struct {

@@ -1717,7 +1717,7 @@ curl -X GET "http://localhost:5000/api/v1/system/health"
 
 `GET /system/info`
 
-- 说明：系统信息
+- 说明：系统公开信息。`icon` 固定为内置 `/favicon.svg`；`telegram_bot` 会在 Telegram 已启用且可连通时返回 Bot 用户名；`telegram_links.groups/channels` 只返回通过白名单校验的公开 `t.me` 链接，不暴露纯数字私有群 ID。
 - 认证：公开
 
 - 示例 cURL：
@@ -1928,17 +1928,20 @@ curl -X PUT "http://localhost:5000/api/v1/system/admin/config/schema" \
 
 `POST /system/admin/database/migrate`
 
-- 说明：迁移当前状态快照到 `json` 或 `postgres`。未传确认短语时只返回预检，不写入数据；确认执行前会自动创建保护性备份。
+- 说明：迁移当前 Go 状态快照或旧 SQLite 文件集到 `json` / `postgres`。未传确认短语时只返回预检，不写入数据；确认执行前会自动创建保护性备份。
 - 认证：管理员 Token
 - 预检请求体：
 
 ```json
 {
+  "source_driver": "sqlite",
   "target_driver": "postgres",
   "dry_run": true,
   "database_url": "postgres://user:pass@127.0.0.1:5432/twilight?sslmode=disable"
 }
 ```
+
+`source_driver` 可省略，省略时表示当前 Go 状态；传 `sqlite` / `legacy_sqlite` 时，后端只扫描固定数据库目录中的旧 SQLite 文件，不接受前端传入任意路径。
 
 - 执行请求体：
 
@@ -1949,8 +1952,9 @@ curl -X PUT "http://localhost:5000/api/v1/system/admin/config/schema" \
 }
 ```
 
-- 预检响应 `data` 包含 `source_driver`、`configured_driver`、`target_driver`、`snapshot_bytes`、`target_ready`、`warnings`、`counts`、`requires_confirmation`、`confirm`，并保留 `users`、`regcodes`、`invite_codes` 等兼容字段。
-- 执行响应会额外返回 `pre_operation_backup` / `pre_migration_backup`，用于确认写入前已自动创建保护性备份。
+- 预检响应 `data` 包含 `source_driver`、`configured_driver`、`target_driver`、`snapshot_bytes`、`target_ready`、`backup_ready`、`warnings`、`counts`、`requires_confirmation`、`confirm`，并保留 `users`、`regcodes`、`invite_codes` 等兼容字段。PostgreSQL 目标会在权限允许时自动创建缺失数据库并准备 `twilight_state` 状态表，`target_ready.database_created` / `target_ready.schema_ready` 会反映结果。
+- 旧 SQLite 来源会额外返回 `legacy_sqlite` 与 `legacy_sqlite_import`，其中包含检测到的文件、表计数、已映射表和未映射表。
+- 执行响应会额外返回 `pre_operation_backup` / `pre_migration_backup`；旧 SQLite 来源还会返回 `legacy_sqlite_backup`，用于确认写入前已自动备份旧文件集。
 
 ### Git 自动更新
 

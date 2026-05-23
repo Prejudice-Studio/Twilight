@@ -41,6 +41,22 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { api, type MediaItem, type MediaDetail, type InventoryCheckResult, type MediaRequest } from "@/lib/api";
 import { formatRelativeTime, cn } from "@/lib/utils";
 
+const MAX_SEARCH_CACHE_ENTRIES = 20;
+const MAX_DETAIL_CACHE_ENTRIES = 40;
+const MAX_INVENTORY_CACHE_ENTRIES = 40;
+
+function rememberCache<K, V>(cache: Map<K, V>, key: K, value: V, limit: number) {
+  if (cache.has(key)) {
+    cache.delete(key);
+  }
+  cache.set(key, value);
+  while (cache.size > limit) {
+    const oldestKey = cache.keys().next().value as K | undefined;
+    if (oldestKey === undefined) break;
+    cache.delete(oldestKey);
+  }
+}
+
 function buildRequestExternalUrl(req: MediaRequest): string | null {
   const source = (req.source || "").toLowerCase();
   const rawId = req.media_id;
@@ -93,10 +109,17 @@ export default function MediaPage() {
   const myRequestsCacheRef = useRef<{ data: MediaRequest[]; ts: number } | null>(null);
 
   useEffect(() => {
+    const searchCache = searchCacheRef.current;
+    const detailCache = detailCacheRef.current;
+    const inventoryCache = inventoryCacheRef.current;
     return () => {
       searchAbortRef.current?.abort();
       detailAbortRef.current?.abort();
       requestsAbortRef.current?.abort();
+      searchCache.clear();
+      detailCache.clear();
+      inventoryCache.clear();
+      myRequestsCacheRef.current = null;
     };
   }, []);
 
@@ -184,7 +207,7 @@ export default function MediaPage() {
           if (controller.signal.aborted) return;
 
           const detailKey = `${detail.source}-${detail.id}-${detail.media_type}`;
-          detailCacheRef.current.set(detailKey, detail);
+          rememberCache(detailCacheRef.current, detailKey, detail, MAX_DETAIL_CACHE_ENTRIES);
           
           try {
             let inventoryRes = null;
@@ -204,7 +227,7 @@ export default function MediaPage() {
             setMediaDetail(detail);
             if (inventoryRes?.success && inventoryRes.data) {
               setInventoryCheck(inventoryRes.data);
-              inventoryCacheRef.current.set(detailKey, inventoryRes.data);
+              rememberCache(inventoryCacheRef.current, detailKey, inventoryRes.data, MAX_INVENTORY_CACHE_ENTRIES);
             }
           } catch (error: any) {
             if (isAbortError(error)) return;
@@ -241,7 +264,7 @@ export default function MediaPage() {
           
           const finalResults = Array.from(uniqueResults.values());
           setResults(finalResults);
-          searchCacheRef.current.set(searchCacheKey, finalResults);
+          rememberCache(searchCacheRef.current, searchCacheKey, finalResults, MAX_SEARCH_CACHE_ENTRIES);
           
           if (finalResults.length === 0) {
             toast({
@@ -308,7 +331,7 @@ export default function MediaPage() {
 
       if (detailRes.success && detailRes.data) {
         setMediaDetail(detailRes.data);
-        detailCacheRef.current.set(detailKey, detailRes.data);
+        rememberCache(detailCacheRef.current, detailKey, detailRes.data, MAX_DETAIL_CACHE_ENTRIES);
       } else {
         toast({
           title: "获取详情失败",
@@ -318,7 +341,7 @@ export default function MediaPage() {
       }
       if (inventoryRes?.success && inventoryRes.data) {
         setInventoryCheck(inventoryRes.data);
-        inventoryCacheRef.current.set(detailKey, inventoryRes.data);
+        rememberCache(inventoryCacheRef.current, detailKey, inventoryRes.data, MAX_INVENTORY_CACHE_ENTRIES);
       }
     } catch (error: any) {
       if (isAbortError(error)) return;
