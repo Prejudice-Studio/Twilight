@@ -2691,6 +2691,7 @@ export interface SchedulerJobItem {
   trigger_spec: SchedulerTriggerSpec;
   default_trigger_spec: SchedulerTriggerSpec;
   is_custom: boolean;
+  auto_disabled?: boolean;
   last_auto_run_at?: number | null;
   last_manual_run_at?: number | null;
   persisted_info?: Record<string, unknown> | null;

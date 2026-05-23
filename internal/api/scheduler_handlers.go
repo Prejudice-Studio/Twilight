@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"time"
 )
 
 var schedulerJobs = []map[string]any{
@@ -25,17 +26,32 @@ func (a *App) handleSchedulerJobs(w http.ResponseWriter, r *http.Request, _ Para
 	for _, job := range schedulerJobs {
 		item := cloneMap(job)
 		jobID := fmt.Sprint(job["id"])
+		var spec map[string]any
 		if schedule, okSchedule := a.store.SchedulerSchedule(jobID); okSchedule {
-			item["trigger_spec"] = schedule.TriggerSpec
+			spec = schedule.TriggerSpec
 			item["is_custom"] = schedule.IsCustom
 		} else {
-			item["trigger_spec"] = a.schedulerDefaultTriggerSpec(jobID)
+			spec = a.schedulerDefaultTriggerSpec(jobID)
 			item["is_custom"] = false
 		}
+		item["trigger_spec"] = spec
 		item["default_trigger_spec"] = a.schedulerDefaultTriggerSpec(jobID)
 		item["last_run"] = nil
-		if runs := a.store.SchedulerRuns(jobID, 1); len(runs) > 0 {
+		item["next_run_at"] = zeroNil(a.schedulerNextRunAt(jobID, spec, time.Now()))
+		item["auto_disabled"] = schedulerTriggerDisabled(spec)
+		if runs := a.store.SchedulerRuns(jobID, 20); len(runs) > 0 {
 			item["last_run"] = runs[0]
+			var lastAuto, lastManual int64
+			for _, run := range runs {
+				if run.Type == "auto" && lastAuto == 0 {
+					lastAuto = run.StartedAt
+				}
+				if run.Type == "manual" && lastManual == 0 {
+					lastManual = run.StartedAt
+				}
+			}
+			item["last_auto_run_at"] = zeroNil(lastAuto)
+			item["last_manual_run_at"] = zeroNil(lastManual)
 		}
 		item["is_running"] = a.schedulerJobRunning(jobID)
 		jobs = append(jobs, item)
@@ -64,7 +80,7 @@ func (a *App) handleSchedulerLastRun(w http.ResponseWriter, r *http.Request, par
 	ok(w, "OK", map[string]any{"job_id": params["job_id"], "last_run": last})
 }
 func (a *App) handleSchedulerHistory(w http.ResponseWriter, r *http.Request, params Params) {
-	runs := a.store.SchedulerRuns(params["job_id"], 20)
+	runs := a.store.SchedulerRuns(params["job_id"], queryInt(r, "limit", 20))
 	ok(w, "OK", map[string]any{"job_id": params["job_id"], "history": runs, "total": len(runs)})
 }
 func (a *App) handleSchedulerSchedule(w http.ResponseWriter, r *http.Request, params Params) {
@@ -83,7 +99,9 @@ func (a *App) handleSchedulerSchedule(w http.ResponseWriter, r *http.Request, pa
 	}
 	payload := decodeMap(r)
 	spec := map[string]any{"type": firstNonEmpty(stringValue(payload, "type"), "interval")}
-	if spec["type"] == "cron_daily" {
+	if spec["type"] == "manual" {
+		spec = map[string]any{"type": "manual"}
+	} else if spec["type"] == "cron_daily" {
 		spec["hour"] = clamp(intValue(payload, "hour", 0), 0, 23)
 		spec["minute"] = clamp(intValue(payload, "minute", 0), 0, 59)
 	} else {

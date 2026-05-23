@@ -2,7 +2,9 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"log/slog"
@@ -761,6 +763,136 @@ func TestTelegramEndpointAcceptsCommonBaseURLs(t *testing.T) {
 		if got := app.telegramEndpoint("getMe"); got != want {
 			t.Fatalf("telegramEndpoint(%q) = %q, want %q", base, got, want)
 		}
+	}
+}
+
+func TestTelegramErrorRedactsBotToken(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg.TelegramBotToken = "123:SECRET"
+	raw := `Post "https://api.telegram.org/bot123:SECRET/getUpdates": context deadline exceeded 123:SECRET`
+	got := app.telegramSanitizeError(errors.New(raw))
+	if strings.Contains(got, "123:SECRET") || !strings.Contains(got, "/bot<redacted>/getUpdates") {
+		t.Fatalf("telegram error was not redacted: %s", got)
+	}
+	app.setTelegramRuntimeStatus(true, errors.New(raw))
+	status := app.telegramRuntimeStatus()
+	if strings.Contains(asString(status["last_error"]), "123:SECRET") {
+		t.Fatalf("runtime status leaked token: %#v", status)
+	}
+}
+
+func TestTelegramGetUpdatesAllowsCallbacks(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg.TelegramMode = true
+	app.cfg.TelegramBotToken = "123:ABC"
+	var body map[string]any
+	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/bot123:ABC/getUpdates" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":[]}`))
+	}))
+	defer tg.Close()
+	app.cfg.TelegramAPIURL = tg.URL
+	if _, err := app.telegramGetUpdates(context.Background(), 42); err != nil {
+		t.Fatal(err)
+	}
+	updates, _ := body["allowed_updates"].([]any)
+	foundCallback := false
+	for _, update := range updates {
+		if update == "callback_query" {
+			foundCallback = true
+		}
+	}
+	if !foundCallback || numeric(body["timeout"]) != 30 || numeric(body["offset"]) != 42 {
+		t.Fatalf("unexpected getUpdates body: %#v", body)
+	}
+}
+
+func TestTelegramAnonymousGroupUserRequiresInlineAuth(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg.TelegramMode = true
+	app.cfg.TelegramBotToken = "123:ABC"
+	user := store.User{UID: 1001, Username: "target", Role: store.RoleNormal, Active: true, TelegramID: 888, CreatedAt: time.Now().Unix(), RegisterTime: time.Now().Unix()}
+	if _, err := app.store.CreateUser(user); err != nil {
+		t.Fatal(err)
+	}
+	requests := []map[string]any{}
+	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		body["_path"] = r.URL.Path
+		requests = append(requests, body)
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":9001}}`))
+	}))
+	defer tg.Close()
+	app.cfg.TelegramAPIURL = tg.URL
+
+	app.handleTelegramUpdate(context.Background(), map[string]any{
+		"message": map[string]any{
+			"message_id": 77,
+			"text":       "/twguser target",
+			"chat":       map[string]any{"id": -1001, "type": "supergroup"},
+			"from":       map[string]any{"id": 1087968824, "is_bot": true},
+			"sender_chat": map[string]any{
+				"id": -1001,
+			},
+		},
+	})
+	if len(requests) != 1 {
+		t.Fatalf("expected one Telegram request, got %#v", requests)
+	}
+	if requests[0]["_path"] != "/bot123:ABC/sendMessage" {
+		t.Fatalf("expected sendMessage, got %#v", requests[0])
+	}
+	markup, _ := requests[0]["reply_markup"].(map[string]any)
+	keyboard, _ := markup["inline_keyboard"].([]any)
+	if len(keyboard) == 0 || !strings.Contains(asString(requests[0]["text"]), "验证") {
+		t.Fatalf("anonymous command did not create auth panel: %#v", requests[0])
+	}
+}
+
+func TestSchedulerManualRunUpdatesSingleHistoryEntry(t *testing.T) {
+	app := newTestApp(t)
+	run, okRun := app.startManualSchedulerJob(context.Background(), "daily_stats", nil)
+	if !okRun {
+		t.Fatal("manual scheduler job did not start")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for app.schedulerJobRunning("daily_stats") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if app.schedulerJobRunning("daily_stats") {
+		t.Fatal("manual scheduler job did not finish")
+	}
+	runs := app.store.SchedulerRuns("daily_stats", 10)
+	if len(runs) != 1 {
+		t.Fatalf("manual run should update one history entry, got %d: %#v", len(runs), runs)
+	}
+	if runs[0].ID != run.ID || runs[0].Status != "success" || runs[0].Type != "manual" || runs[0].FinishedAt == 0 {
+		t.Fatalf("unexpected manual run history: %#v", runs[0])
+	}
+}
+
+func TestSchedulerManualTriggerSpecDisablesAutoRun(t *testing.T) {
+	app := newTestApp(t)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/scheduler/jobs/daily_stats/schedule", strings.NewReader(`{"type":"manual"}`))
+	rr := httptest.NewRecorder()
+	app.handleSchedulerSchedule(rr, req, Params{"job_id": "daily_stats"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("schedule manual status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	spec := app.schedulerTriggerSpec("daily_stats")
+	if asString(spec["type"]) != "manual" || !schedulerTriggerDisabled(spec) {
+		t.Fatalf("manual trigger spec not persisted: %#v", spec)
+	}
+	if next := app.schedulerNextRunAt("daily_stats", spec, time.Now()); next != 0 {
+		t.Fatalf("manual trigger should not have next run, got %d", next)
 	}
 }
 

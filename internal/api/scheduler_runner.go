@@ -47,20 +47,17 @@ func (a *App) sendExpiryReminders(ctx context.Context, days int) map[string]any 
 }
 
 func (a *App) handleSchedulerRunV2(w http.ResponseWriter, r *http.Request, params Params) {
-	now := time.Now().Unix()
 	jobID := params["job_id"]
-	runCtx, finish, okRun := a.startSchedulerRun(r.Context(), jobID)
+	if !schedulerJobExists(jobID) {
+		fail(w, http.StatusNotFound, "job not found")
+		return
+	}
+	run, okRun := a.startManualSchedulerJob(context.Background(), jobID, schedulerRequestParams(r))
 	if !okRun {
 		fail(w, http.StatusConflict, "job is already running")
 		return
 	}
-	defer finish()
-	_ = a.store.AddSchedulerRun(store.SchedulerRun{JobID: jobID, Type: "manual", Trigger: "manual", Status: "running", Message: "running", StartedAt: now})
-	req := r.WithContext(runCtx)
-	summary, logs, err := a.runSchedulerJob(req, jobID)
-	run := schedulerFinishedRun(jobID, "manual", "manual", now, summary, logs, err)
-	_ = a.store.AddSchedulerRun(run)
-	ok(w, "job executed", map[string]any{"job_id": run.JobID, "last_run": run})
+	ok(w, "job started", map[string]any{"job_id": run.JobID, "last_run": run})
 }
 
 func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []string, error) {
@@ -350,7 +347,7 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		result["success"] = true
 		return result, []string{fmt.Sprintf("scanned %d upload files, deleted %d", int(numeric(result["scanned"])), int(numeric(result["deleted"])))}, nil
 	case "system_auto_update":
-		if !a.cfg.SystemUpdateEnabled {
+		if !a.cfg.SystemUpdateEnabled && !schedulerManualRun(r) {
 			return map[string]any{"success": true, "skipped": true, "enabled": false}, []string{"system auto update disabled"}, nil
 		}
 		result := applyGitUpdate(r.Context(), a.cfg.SystemUpdateRepoURL, a.cfg.SystemUpdateBranch, a.cfg.SystemUpdateRestartServices, false, false)
@@ -364,11 +361,25 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 }
 
 func schedulerRequestParams(r *http.Request) map[string]any {
+	if params, ok := r.Context().Value(schedulerParamsContextKey).(map[string]any); ok {
+		return params
+	}
 	payload := decodeMap(r)
 	if params, ok := payload["params"].(map[string]any); ok {
 		return params
 	}
 	return payload
+}
+
+type schedulerParamsKey struct{}
+type schedulerManualKey struct{}
+
+var schedulerParamsContextKey schedulerParamsKey
+var schedulerManualContextKey schedulerManualKey
+
+func schedulerManualRun(r *http.Request) bool {
+	manual, _ := r.Context().Value(schedulerManualContextKey).(bool)
+	return manual
 }
 
 func jobParamInt(params map[string]any, key string, fallback int) int {

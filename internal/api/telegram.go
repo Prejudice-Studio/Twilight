@@ -39,7 +39,7 @@ func (a *App) setTelegramRuntimeStatus(polling bool, err error) {
 	defer a.telegramStatusMu.Unlock()
 	a.telegramPolling = polling
 	if err != nil {
-		a.telegramLastError = err.Error()
+		a.telegramLastError = a.telegramSanitizeError(err)
 		a.telegramLastErrorAt = time.Now().Unix()
 		return
 	}
@@ -59,12 +59,16 @@ func (a *App) telegramRuntimeStatus() map[string]any {
 }
 
 func (a *App) telegramPost(ctx context.Context, method string, body map[string]any, dst any) error {
+	return a.telegramPostWithTimeout(ctx, method, body, dst, 20*time.Second)
+}
+
+func (a *App) telegramPostWithTimeout(ctx context.Context, method string, body map[string]any, dst any, timeout time.Duration) error {
 	if !a.telegramAvailable() {
 		return fmt.Errorf("Telegram is not enabled or bot token is not configured")
 	}
 	var payload telegramResponse
-	if err := postJSON(ctx, a.telegramEndpoint(method), map[string]string{"Accept": "application/json"}, body, &payload); err != nil {
-		return err
+	if err := postJSONWithTimeout(ctx, a.telegramEndpoint(method), map[string]string{"Accept": "application/json"}, body, &payload, timeout); err != nil {
+		return fmt.Errorf("%s", a.telegramSanitizeError(err))
 	}
 	if !payload.OK {
 		msg := strings.TrimSpace(payload.Description)
@@ -84,6 +88,20 @@ func (a *App) telegramPost(ctx context.Context, method string, body map[string]a
 	return nil
 }
 
+func (a *App) telegramSanitizeError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	token := strings.TrimSpace(a.cfg.TelegramBotToken)
+	if token == "" {
+		return msg
+	}
+	msg = strings.ReplaceAll(msg, "/bot"+token, "/bot<redacted>")
+	msg = strings.ReplaceAll(msg, token, "<redacted>")
+	return msg
+}
+
 func (a *App) telegramGetMe(ctx context.Context) (map[string]any, error) {
 	var result map[string]any
 	err := a.telegramPost(ctx, "getMe", map[string]any{}, &result)
@@ -91,14 +109,57 @@ func (a *App) telegramGetMe(ctx context.Context) (map[string]any, error) {
 }
 
 func (a *App) telegramSendMessage(ctx context.Context, chatID any, text string) error {
+	_, err := a.telegramSendMessageWithMarkup(ctx, chatID, text, nil)
+	return err
+}
+
+func (a *App) telegramSendMessageWithMarkup(ctx context.Context, chatID any, text string, replyMarkup any) (int64, error) {
+	text = truncateString(strings.TrimSpace(text), 3900)
+	if text == "" {
+		return 0, fmt.Errorf("message text is empty")
+	}
+	body := map[string]any{
+		"chat_id":                  chatID,
+		"text":                     text,
+		"disable_web_page_preview": true,
+	}
+	if replyMarkup != nil {
+		body["reply_markup"] = replyMarkup
+	}
+	var result map[string]any
+	if err := a.telegramPost(ctx, "sendMessage", body, &result); err != nil {
+		return 0, err
+	}
+	return numeric(result["message_id"]), nil
+}
+
+func (a *App) telegramEditMessageText(ctx context.Context, chatID, messageID int64, text string, replyMarkup any) error {
 	text = truncateString(strings.TrimSpace(text), 3900)
 	if text == "" {
 		return fmt.Errorf("message text is empty")
 	}
-	return a.telegramPost(ctx, "sendMessage", map[string]any{
-		"chat_id":                  chatID,
-		"text":                     text,
-		"disable_web_page_preview": true,
+	body := map[string]any{"chat_id": chatID, "message_id": messageID, "text": text, "disable_web_page_preview": true}
+	if replyMarkup != nil {
+		body["reply_markup"] = replyMarkup
+	}
+	return a.telegramPost(ctx, "editMessageText", body, nil)
+}
+
+func (a *App) telegramDeleteMessage(ctx context.Context, chatID, messageID int64) error {
+	if chatID == 0 || messageID == 0 {
+		return nil
+	}
+	return a.telegramPost(ctx, "deleteMessage", map[string]any{"chat_id": chatID, "message_id": messageID}, nil)
+}
+
+func (a *App) telegramAnswerCallbackQuery(ctx context.Context, callbackID, text string, showAlert bool) error {
+	if strings.TrimSpace(callbackID) == "" {
+		return nil
+	}
+	return a.telegramPost(ctx, "answerCallbackQuery", map[string]any{
+		"callback_query_id": callbackID,
+		"text":              truncateString(text, 190),
+		"show_alert":        showAlert,
 	}, nil)
 }
 

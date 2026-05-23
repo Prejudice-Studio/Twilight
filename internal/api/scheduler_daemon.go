@@ -60,12 +60,14 @@ func schedulerJobEnabledByConfig(systemUpdateEnabled bool, job map[string]any) b
 }
 
 func (a *App) schedulerJobDue(jobID string, spec map[string]any, now time.Time) bool {
-	runs := a.store.SchedulerRuns(jobID, 1)
+	runs := a.store.SchedulerRuns(jobID, 20)
 	last := int64(0)
-	if len(runs) > 0 {
-		last = runs[0].StartedAt
-		if runs[0].Status == "running" && time.Since(time.Unix(runs[0].StartedAt, 0)) < 30*time.Minute {
+	for _, run := range runs {
+		if run.Status == "running" && time.Since(time.Unix(run.StartedAt, 0)) < 30*time.Minute {
 			return false
+		}
+		if run.Type == "auto" && run.StartedAt > last {
+			last = run.StartedAt
 		}
 	}
 	switch strings.ToLower(asString(spec["type"])) {
@@ -90,16 +92,48 @@ func (a *App) runScheduledJob(ctx context.Context, jobID string) {
 	defer finish()
 	started := time.Now().Unix()
 	run := store.SchedulerRun{JobID: jobID, Type: "auto", Trigger: "scheduler", Status: "running", Message: "running", StartedAt: started}
-	_ = a.store.AddSchedulerRun(run)
+	run, _ = a.store.AddSchedulerRunReturning(run)
 	req, _ := http.NewRequestWithContext(runCtx, http.MethodPost, "/scheduler/internal", nil)
 	summary, logs, err := a.runSchedulerJob(req, jobID)
-	run = schedulerFinishedRun(jobID, "auto", "scheduler", started, summary, logs, err)
-	_ = a.store.AddSchedulerRun(run)
+	finished := schedulerFinishedRun(jobID, "auto", "scheduler", started, summary, logs, err)
+	finished.ID = run.ID
+	_, _ = a.store.UpdateSchedulerRun(run.ID, func(run *store.SchedulerRun) error {
+		*run = finished
+		return nil
+	})
 	if err != nil {
 		slog.Warn("scheduler job failed", "job_id", jobID, "error", err)
 	} else {
 		slog.Info("scheduler job completed", "job_id", jobID)
 	}
+}
+
+func (a *App) startManualSchedulerJob(ctx context.Context, jobID string, params map[string]any) (store.SchedulerRun, bool) {
+	runCtx, finish, ok := a.startSchedulerRun(ctx, jobID)
+	if !ok {
+		return store.SchedulerRun{}, false
+	}
+	started := time.Now().Unix()
+	run, _ := a.store.AddSchedulerRunReturning(store.SchedulerRun{JobID: jobID, Type: "manual", Trigger: "manual", Status: "running", Message: "running", StartedAt: started})
+	go func() {
+		defer finish()
+		req, _ := http.NewRequestWithContext(runCtx, http.MethodPost, "/scheduler/manual", nil)
+		req = req.WithContext(context.WithValue(req.Context(), schedulerParamsContextKey, params))
+		req = req.WithContext(context.WithValue(req.Context(), schedulerManualContextKey, true))
+		summary, logs, err := a.runSchedulerJob(req, jobID)
+		finished := schedulerFinishedRun(jobID, "manual", "manual", started, summary, logs, err)
+		finished.ID = run.ID
+		_, _ = a.store.UpdateSchedulerRun(run.ID, func(current *store.SchedulerRun) error {
+			*current = finished
+			return nil
+		})
+		if err != nil {
+			slog.Warn("manual scheduler job failed", "job_id", jobID, "error", err)
+		} else {
+			slog.Info("manual scheduler job completed", "job_id", jobID)
+		}
+	}()
+	return run, true
 }
 
 func schedulerFinishedRun(jobID, runType, trigger string, started int64, summary map[string]any, logs []string, err error) store.SchedulerRun {
@@ -136,6 +170,42 @@ func (a *App) schedulerTriggerSpec(jobID string) map[string]any {
 		return schedule.TriggerSpec
 	}
 	return a.schedulerDefaultTriggerSpec(jobID)
+}
+
+func schedulerTriggerDisabled(spec map[string]any) bool {
+	return strings.EqualFold(asString(spec["type"]), "manual")
+}
+
+func (a *App) schedulerNextRunAt(jobID string, spec map[string]any, now time.Time) int64 {
+	if schedulerTriggerDisabled(spec) {
+		return 0
+	}
+	last := int64(0)
+	if runs := a.store.SchedulerRuns(jobID, 20); len(runs) > 0 {
+		for _, run := range runs {
+			if run.Type == "auto" && run.StartedAt > last {
+				last = run.StartedAt
+			}
+		}
+	}
+	switch strings.ToLower(asString(spec["type"])) {
+	case "cron_daily", "daily":
+		hour := clamp(int(numeric(spec["hour"])), 0, 23)
+		minute := clamp(int(numeric(spec["minute"])), 0, 59)
+		due := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
+		if !now.Before(due) || last >= due.Unix() {
+			due = due.Add(24 * time.Hour)
+		}
+		return due.Unix()
+	case "interval":
+		seconds := clamp(int(numeric(spec["seconds"])), 60, 604800)
+		if last == 0 {
+			return now.Unix()
+		}
+		return time.Unix(last+int64(seconds), 0).Unix()
+	default:
+		return 0
+	}
 }
 
 func (a *App) schedulerDefaultTriggerSpec(jobID string) map[string]any {
