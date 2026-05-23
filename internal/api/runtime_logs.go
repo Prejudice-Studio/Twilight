@@ -413,6 +413,7 @@ func (a *App) handleRuntimeStatus(w http.ResponseWriter, r *http.Request, _ Para
 		"log_level":           a.cfg.LogLevel,
 		"runtime_log_limit":   logLimit,
 		"runtime_log_entries": logEntries,
+		"runtime_log_backend": a.store.Backend(),
 		"memory": map[string]any{
 			"alloc":       mem.Alloc,
 			"sys":         mem.Sys,

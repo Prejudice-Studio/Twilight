@@ -28,6 +28,7 @@ type Config struct {
 	Version                       string
 	Host                          string
 	Port                          int
+	ServerIcon                    string
 	DatabaseDir                   string
 	DatabaseDriver                string
 	DatabaseURL                   string
@@ -164,6 +165,7 @@ func Load(path string) (Config, error) {
 	}
 
 	cfg.AppName = first(values, "Global.server_name", "server_name", cfg.AppName)
+	cfg.ServerIcon = first(values, "Global.server_icon", "server_icon", cfg.ServerIcon)
 	cfg.RedisURL = first(values, "Global.redis_url", "redis_url", cfg.RedisURL)
 	cfg.LogLevel = normalizeLogLevel(first(values, "Global.log_level", "log_level", cfg.LogLevel))
 	cfg.RuntimeLogLimit = intValue(first(values, "Global.runtime_log_limit", "runtime_log_limit", strconv.Itoa(cfg.RuntimeLogLimit)), cfg.RuntimeLogLimit)
@@ -358,6 +360,9 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("TWILIGHT_SERVER_NAME"); v != "" {
 		cfg.AppName = v
+	}
+	if v := os.Getenv("TWILIGHT_SERVER_ICON"); v != "" {
+		cfg.ServerIcon = v
 	}
 	if v := os.Getenv("TWILIGHT_API_PORT"); v != "" {
 		cfg.Port = intValue(v, cfg.Port)

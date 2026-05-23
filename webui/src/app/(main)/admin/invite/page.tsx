@@ -71,7 +71,12 @@ interface PlacedForest {
 
 interface DynamicForest {
   positions: Map<number, Positioned>;
-  systems: Map<number, StarSystem & { influence: number }>;
+  systems: Map<number, DynamicSystemCenter>;
+}
+
+interface DynamicSystemCenter extends StarSystem {
+  influence: number;
+  volume: number;
 }
 
 interface DepthPromptOptions {
@@ -213,8 +218,9 @@ function makeStarfield(width: number, height: number): Array<{ x: number; y: num
 
 function dynamicForest(placed: PlacedForest, pointer: { x: number; y: number } | null, tick: number): DynamicForest {
   const positions = new Map<number, Positioned>();
-  const systems = new Map<number, StarSystem & { influence: number }>();
+  const systems = new Map<number, DynamicSystemCenter>();
   const total = Math.max(1, placed.systems.length);
+  const centers: DynamicSystemCenter[] = [];
 
   placed.systems.forEach((system, index) => {
     const seed = seededUnit(system.rootUid * 17 + index * 41);
@@ -232,23 +238,67 @@ function dynamicForest(placed: PlacedForest, pointer: { x: number; y: number } |
           x: system.x + Math.cos(angle) * (10 + seed * 8),
           y: system.y + Math.sin(angle * 1.2) * (8 + seed * 6),
         };
-    const dx = center.x - system.x;
-    const dy = center.y - system.y;
-    systems.set(system.rootUid, { ...system, x: center.x, y: center.y, influence });
+    const volume = Math.min(260, Math.max(92, 52 + Math.sqrt(system.count) * 18 + system.depth * 20));
+    centers.push({ ...system, x: center.x, y: center.y, influence, volume });
+  });
+
+  resolveSystemCollisions(centers, placed.width, placed.height);
+
+  for (const center of centers) {
+    const seed = seededUnit(center.rootUid * 17);
+    const original = placed.systems.find((system) => system.rootUid === center.rootUid);
+    if (!original) continue;
+    const dx = center.x - original.x;
+    const dy = center.y - original.y;
+    systems.set(center.rootUid, center);
 
     for (const pos of placed.positions.values()) {
-      if (pos.rootUid !== system.rootUid) continue;
+      if (pos.rootUid !== center.rootUid) continue;
       const childPhase = tick * (0.7 + pos.depth * 0.11) + pos.angle + seed * Math.PI * 2;
-      const childDrift = pos.depth <= 1 ? 0 : Math.min(22, 3 + pos.depth * 4 + influence * 8);
+      const childDrift = pos.depth <= 1 ? 0 : Math.min(28, 3 + pos.depth * 4 + center.influence * 10);
       positions.set(pos.uid, {
         ...pos,
         x: pos.x + dx + Math.cos(childPhase) * childDrift,
         y: pos.y + dy + Math.sin(childPhase * 1.15) * childDrift * 0.72,
       });
     }
-  });
+  }
 
   return { positions, systems };
+}
+
+function resolveSystemCollisions(centers: DynamicSystemCenter[], width: number, height: number) {
+  for (let pass = 0; pass < 8; pass++) {
+    for (let i = 0; i < centers.length; i++) {
+      for (let j = i + 1; j < centers.length; j++) {
+        const a = centers[i];
+        const b = centers[j];
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        let distance = Math.hypot(dx, dy);
+        if (distance < 0.01) {
+          dx = seededUnit(a.rootUid + b.rootUid) - 0.5;
+          dy = seededUnit(a.rootUid * b.rootUid + 3) - 0.5;
+          distance = Math.max(0.01, Math.hypot(dx, dy));
+        }
+        const minDistance = Math.min(360, a.volume * 0.62 + b.volume * 0.62);
+        const overlap = minDistance - distance;
+        if (overlap <= 0) continue;
+        const nx = dx / distance;
+        const ny = dy / distance;
+        const pressure = overlap * 0.52;
+        a.x -= nx * pressure;
+        a.y -= ny * pressure;
+        b.x += nx * pressure;
+        b.y += ny * pressure;
+      }
+    }
+    for (const center of centers) {
+      const margin = Math.min(260, Math.max(80, center.volume * 0.58));
+      center.x = Math.max(margin, Math.min(width - margin, center.x));
+      center.y = Math.max(margin, Math.min(height - margin, center.y));
+    }
+  }
 }
 
 function edgePath(parent: Positioned, child: Positioned): string {
@@ -345,6 +395,7 @@ export default function AdminInviteTreePage() {
   const [depthPrompt, setDepthPrompt] = useState<DepthPromptState | null>(null);
   const [pointer, setPointer] = useState<{ x: number; y: number } | null>(null);
   const [orbitTick, setOrbitTick] = useState(0);
+  const [orbitFrozen, setOrbitFrozen] = useState(false);
 
   const requestDepth = useCallback((options: DepthPromptOptions) => {
     return new Promise<string | null>((resolve) => {
@@ -425,7 +476,7 @@ export default function AdminInviteTreePage() {
   }, [dynamicPlaced, pointer, visibleForest]);
 
   useEffect(() => {
-    if (!placed || (visibleForest?.nodes.length || 0) > 1400) return;
+    if (!placed || orbitFrozen || (visibleForest?.nodes.length || 0) > 1400) return;
     let raf = 0;
     let mounted = true;
     const start = performance.now();
@@ -439,15 +490,15 @@ export default function AdminInviteTreePage() {
       mounted = false;
       cancelAnimationFrame(raf);
     };
-  }, [placed, visibleForest]);
+  }, [orbitFrozen, placed, visibleForest]);
 
   const handleMapPointerMove = useCallback((event: PointerEvent<SVGSVGElement>) => {
-    if (!placed || (visibleForest?.nodes.length || 0) > 1200) return;
+    if (!placed || orbitFrozen || (visibleForest?.nodes.length || 0) > 1200) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const x = ((event.clientX - rect.left) / rect.width) * placed.width;
     const y = ((event.clientY - rect.top) / rect.height) * placed.height;
     setPointer({ x, y });
-  }, [placed, visibleForest]);
+  }, [orbitFrozen, placed, visibleForest]);
 
   useEffect(() => {
     if (forest && rootFilter && !forest.roots.includes(rootFilter)) {
@@ -710,7 +761,19 @@ export default function AdminInviteTreePage() {
                   height={placed!.height * scale}
                   className="block select-none text-slate-100"
                   onPointerMove={handleMapPointerMove}
-                  onPointerLeave={() => setPointer(null)}
+                  onPointerDown={(event) => {
+                    if (event.button === 0) {
+                      setOrbitFrozen(true);
+                      event.currentTarget.setPointerCapture?.(event.pointerId);
+                    }
+                  }}
+                  onPointerUp={(event) => {
+                    if (event.button === 0) {
+                      setOrbitFrozen(false);
+                      event.currentTarget.releasePointerCapture?.(event.pointerId);
+                    }
+                  }}
+                  onPointerCancel={() => setOrbitFrozen(false)}
                 >
                   <defs>
                     <radialGradient id="invite-node-glow" cx="50%" cy="45%" r="70%">
@@ -752,8 +815,9 @@ export default function AdminInviteTreePage() {
                     <circle key={`star-${index}`} cx={star.x} cy={star.y} r={star.r} fill="#e0f2fe" opacity={star.o} />
                   ))}
                   {placed!.systems.map((system) => {
-                    const orbit = dynamicPlaced?.systems.get(system.rootUid) ?? { ...system, influence: 0 };
-                    const volume = Math.min(32, 10 + Math.sqrt(system.count) * 3 + system.depth * 2);
+                    const fallbackVolume = Math.min(260, Math.max(92, 52 + Math.sqrt(system.count) * 18 + system.depth * 20));
+                    const orbit = dynamicPlaced?.systems.get(system.rootUid) ?? { ...system, influence: 0, volume: fallbackVolume };
+                    const volume = Math.min(42, 10 + Math.sqrt(system.count) * 3 + system.depth * 2 + (orbit.volume || 0) * 0.04);
                     return (
                       <g key={`system-${system.rootUid}`}>
                         <circle cx={orbit.x} cy={orbit.y} r={system.radius + 28} fill="url(#invite-node-glow)" opacity={0.08} />
@@ -856,6 +920,10 @@ export default function AdminInviteTreePage() {
                         transform={`translate(${pos.x}, ${pos.y})`}
                         style={{ cursor: "pointer" }}
                         onClick={() => setSelectedUid(n.uid)}
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          setSelectedUid(n.uid);
+                        }}
                       >
                         <circle
                           r={r + 14}

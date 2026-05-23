@@ -2353,6 +2353,7 @@ export interface RuntimeStatus {
   log_level?: string;
   runtime_log_limit?: number;
   runtime_log_entries?: number;
+  runtime_log_backend?: string;
   load_average?: number[];
   memory?: Record<string, number>;
   host_memory?: Record<string, number>;

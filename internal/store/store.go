@@ -617,6 +617,23 @@ CREATE TABLE IF NOT EXISTS twilight_state (
 		_ = db.Close()
 		return nil, status, describePostgresConnectionError(target, err)
 	}
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS twilight_runtime_logs (
+	id bigserial PRIMARY KEY,
+	time bigint NOT NULL,
+	level text NOT NULL,
+	message text NOT NULL,
+	attrs jsonb,
+	created_at timestamptz NOT NULL DEFAULT now()
+)`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
+	if _, err := db.ExecContext(ctx, `
+CREATE INDEX IF NOT EXISTS twilight_runtime_logs_time_idx ON twilight_runtime_logs (time DESC)`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
 	status.SchemaReady = true
 	return db, status, nil
 }
@@ -1754,6 +1771,30 @@ func (s *Store) AddRuntimeLog(entry RuntimeLogEntry, limit int) (RuntimeLogEntry
 		return entry, ErrNotFound
 	}
 	limit = clampRuntimeLogLimit(limit)
+	if entry.Time == 0 {
+		entry.Time = time.Now().Unix()
+	}
+	if s.db != nil {
+		attrs, err := json.Marshal(entry.Attrs)
+		if err != nil {
+			return entry, err
+		}
+		var id int64
+		err = s.db.QueryRowContext(
+			context.Background(),
+			`INSERT INTO twilight_runtime_logs (time, level, message, attrs) VALUES ($1, $2, $3, $4::jsonb) RETURNING id`,
+			entry.Time,
+			entry.Level,
+			entry.Message,
+			string(attrs),
+		).Scan(&id)
+		if err != nil {
+			return entry, err
+		}
+		entry.ID = id
+		_ = s.PruneRuntimeLogs(limit)
+		return entry, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if entry.ID == 0 {
@@ -1774,6 +1815,9 @@ func (s *Store) AddRuntimeLog(entry RuntimeLogEntry, limit int) (RuntimeLogEntry
 func (s *Store) RuntimeLogs(limit int, after int64) ([]RuntimeLogEntry, int64) {
 	if s == nil {
 		return nil, after
+	}
+	if s.db != nil {
+		return s.postgresRuntimeLogs(limit, after)
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1806,6 +1850,14 @@ func (s *Store) RuntimeLogStats() (int64, int) {
 	if s == nil {
 		return 0, 0
 	}
+	if s.db != nil {
+		var next sql.NullInt64
+		var count int
+		if err := s.db.QueryRowContext(context.Background(), `SELECT max(id), count(*) FROM twilight_runtime_logs`).Scan(&next, &count); err != nil {
+			return 0, 0
+		}
+		return next.Int64, count
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	next := int64(0)
@@ -1820,6 +1872,14 @@ func (s *Store) PruneRuntimeLogs(limit int) error {
 		return nil
 	}
 	limit = clampRuntimeLogLimit(limit)
+	if s.db != nil {
+		_, err := s.db.ExecContext(context.Background(), `
+DELETE FROM twilight_runtime_logs
+WHERE id NOT IN (
+	SELECT id FROM twilight_runtime_logs ORDER BY id DESC LIMIT $1
+)`, limit)
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.state.RuntimeLogs) <= limit {
@@ -1828,6 +1888,66 @@ func (s *Store) PruneRuntimeLogs(limit int) error {
 	copy(s.state.RuntimeLogs, s.state.RuntimeLogs[len(s.state.RuntimeLogs)-limit:])
 	s.state.RuntimeLogs = s.state.RuntimeLogs[:limit]
 	return s.saveLocked()
+}
+
+func (s *Store) postgresRuntimeLogs(limit int, after int64) ([]RuntimeLogEntry, int64) {
+	limit = clampRuntimeLogReadLimit(limit)
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if after > 0 {
+		rows, err = s.db.QueryContext(context.Background(), `
+SELECT id, time, level, message, COALESCE(attrs, '{}'::jsonb)::text
+FROM twilight_runtime_logs
+WHERE id > $1
+ORDER BY id ASC
+LIMIT $2`, after, limit)
+	} else {
+		rows, err = s.db.QueryContext(context.Background(), `
+SELECT id, time, level, message, COALESCE(attrs, '{}'::jsonb)::text
+FROM twilight_runtime_logs
+ORDER BY id DESC
+LIMIT $1`, limit)
+	}
+	if err != nil {
+		return nil, after
+	}
+	defer rows.Close()
+	out := []RuntimeLogEntry{}
+	for rows.Next() {
+		var entry RuntimeLogEntry
+		var attrsText string
+		if err := rows.Scan(&entry.ID, &entry.Time, &entry.Level, &entry.Message, &attrsText); err != nil {
+			continue
+		}
+		if attrsText != "" {
+			_ = json.Unmarshal([]byte(attrsText), &entry.Attrs)
+		}
+		out = append(out, entry)
+	}
+	if after <= 0 {
+		for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+			out[i], out[j] = out[j], out[i]
+		}
+	}
+	next := after
+	if len(out) > 0 {
+		next = out[len(out)-1].ID
+	} else if maxID, _ := s.RuntimeLogStats(); maxID > next {
+		next = maxID
+	}
+	return out, next
+}
+
+func clampRuntimeLogReadLimit(limit int) int {
+	if limit <= 0 {
+		return 200
+	}
+	if limit > 50000 {
+		return 50000
+	}
+	return limit
 }
 
 func clampRuntimeLogLimit(limit int) int {

@@ -111,6 +111,7 @@ export default function AdminRuntimeLogsPage() {
         for (const entry of entries) {
           if (!seen.has(entry.id)) merged.push(entry);
         }
+        merged.sort((a, b) => a.id - b.id);
         return merged.slice(-logLimit);
       });
     }
@@ -132,7 +133,10 @@ export default function AdminRuntimeLogsPage() {
       ]);
       if (statusRes.success) setStatus(statusRes.data || null);
       if (logsRes.success && logsRes.data) {
-        setLogs(logsRes.data.entries || []);
+        const entries = [...(logsRes.data.entries || [])].sort((a, b) => a.id - b.id);
+        setLogs(entries);
+        cursorRef.current = logsRes.data.next_cursor || 0;
+        setCursor(logsRes.data.next_cursor || 0);
         setNextCursor(logsRes.data.next_cursor || 0);
       }
     } catch (err: any) {
@@ -197,6 +201,7 @@ export default function AdminRuntimeLogsPage() {
     };
     source.onerror = () => {
       setConnected(false);
+      setError("实时日志连接已断开，正在使用轮询同步。");
     };
 
     return () => {
@@ -209,6 +214,22 @@ export default function AdminRuntimeLogsPage() {
       }
     };
   }, [appendLogs, paused]);
+
+  useEffect(() => {
+    if (paused || connected) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const res = await api.getRuntimeLogs(200, cursorRef.current);
+        if (res.success && res.data) {
+          appendLogs(res.data.entries || [], res.data.next_cursor);
+          setError(null);
+        }
+      } catch {
+        setError("实时日志轮询失败，请检查登录状态和后端日志接口。");
+      }
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [appendLogs, connected, paused]);
 
   useEffect(() => {
     if (!paused) bottomRef.current?.scrollIntoView({ block: "end" });
@@ -326,6 +347,7 @@ export default function AdminRuntimeLogsPage() {
               <p>启动时间：{formatTime(status.started_at)}</p>
               <p>Redis：{status.redis_enabled ? "启用" : "未启用"}</p>
               <p>日志等级：{status.log_level || "info"}</p>
+              <p>日志存储：{status.runtime_log_backend || status.active_database || "unknown"}</p>
               <p>日志缓冲：{status.runtime_log_entries ?? logs.length} / {status.runtime_log_limit ?? logLimit}</p>
               <p>路由数：{status.routes}</p>
               <p>主机运行：{formatDuration(status.host_uptime_seconds)}</p>

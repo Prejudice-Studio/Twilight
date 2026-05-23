@@ -1327,7 +1327,7 @@ func defaultPermissions() []string {
 func (a *App) handleSystemInfo(w http.ResponseWriter, r *http.Request, _ Params) {
 	ok(w, "OK", map[string]any{
 		"name":        a.cfg.AppName,
-		"icon":        "/api/v1/system/server-icon",
+		"icon":        a.publicServerIconURL(),
 		"version":     a.cfg.Version,
 		"api_version": "v1",
 		"features": map[string]any{
@@ -1438,9 +1438,66 @@ func publicTelegramLink(raw string) (map[string]string, bool) {
 }
 
 func (a *App) handleServerIcon(w http.ResponseWriter, r *http.Request, _ Params) {
+	iconPath, contentType, okIcon := a.configuredServerIconPath()
+	if okIcon {
+		data, err := os.ReadFile(iconPath)
+		if err == nil {
+			w.Header().Set("Content-Type", contentType)
+			w.Header().Set("Cache-Control", "public, max-age=300")
+			_, _ = w.Write(data)
+			return
+		}
+	}
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	_, _ = w.Write(serverIconPNG)
+}
+
+func (a *App) publicServerIconURL() string {
+	value := strings.TrimSpace(a.cfg.ServerIcon)
+	if value == "" {
+		return "/api/v1/system/server-icon"
+	}
+	if u, err := url.Parse(value); err == nil && u.Scheme != "" {
+		if u.Scheme == "https" && u.User == nil && u.Hostname() != "" {
+			return value
+		}
+		return "/api/v1/system/server-icon"
+	}
+	return "/api/v1/system/server-icon"
+}
+
+func (a *App) configuredServerIconPath() (string, string, bool) {
+	value := strings.TrimSpace(a.cfg.ServerIcon)
+	if value == "" {
+		return "", "", false
+	}
+	if u, err := url.Parse(value); err == nil && u.Scheme != "" {
+		return "", "", false
+	}
+	ext := strings.ToLower(filepath.Ext(value))
+	contentTypes := map[string]string{
+		".png":  "image/png",
+		".jpg":  "image/jpeg",
+		".jpeg": "image/jpeg",
+		".webp": "image/webp",
+		".gif":  "image/gif",
+		".ico":  "image/x-icon",
+		".svg":  "image/svg+xml",
+	}
+	contentType, ok := contentTypes[ext]
+	if !ok {
+		return "", "", false
+	}
+	path := value
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(firstNonEmpty(a.cfg.UploadDir, "uploads"), path)
+	}
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > 2*1024*1024 {
+		return "", "", false
+	}
+	return path, contentType, true
 }
 
 func (a *App) handleHealth(w http.ResponseWriter, r *http.Request, _ Params) {
