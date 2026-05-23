@@ -21,18 +21,12 @@
         {
           default = pkgs.mkShell {
             packages = with pkgs; [
-              go_1_23
-              nodejs_22
+              go
+              nodejs
               pnpm
               pkg-config
               openssl
             ];
-
-            shellHook = ''
-              echo "Twilight dev shell: Go $(go version), Node $(node --version), pnpm $(pnpm --version)"
-              echo "Backend check: go test ./..."
-              echo "Frontend deps: cd webui && pnpm install --frozen-lockfile"
-            '';
           };
         });
     };
