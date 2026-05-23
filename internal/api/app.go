@@ -61,6 +61,8 @@ type App struct {
 	telegramLastErrorAt   int64
 	telegramLastError     string
 	telegramPolling       bool
+	telegramPanelMu       sync.Mutex
+	telegramPanels        map[string]telegramPanelContext
 	embyAdminMu           sync.Mutex
 	embyAdminCache        map[string]embyAdminCacheEntry
 }
@@ -92,6 +94,7 @@ func New(cfg config.Config, st *store.Store) (*App, error) {
 		sessions:       newSessionStore(cfg.SessionTTL, redisClient),
 		limiter:        newRateLimiter(redisClient),
 		redis:          redisClient,
+		telegramPanels: map[string]telegramPanelContext{},
 		embyAdminCache: map[string]embyAdminCacheEntry{},
 	}
 	app.configSignature = configFileSignature(cfg.ConfigFile)

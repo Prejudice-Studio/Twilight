@@ -1619,6 +1619,11 @@ func (s *Store) AddSignin(uid int64, points int) (Signin, bool, error) {
 }
 
 func (s *Store) AddSchedulerRun(run SchedulerRun) error {
+	_, err := s.AddSchedulerRunReturning(run)
+	return err
+}
+
+func (s *Store) AddSchedulerRunReturning(run SchedulerRun) (SchedulerRun, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if run.ID == 0 {
@@ -1638,7 +1643,30 @@ func (s *Store) AddSchedulerRun(run SchedulerRun) error {
 	if len(s.state.SchedulerRuns) > 200 {
 		s.state.SchedulerRuns = s.state.SchedulerRuns[:200]
 	}
-	return s.saveLocked()
+	return run, s.saveLocked()
+}
+
+func (s *Store) UpdateSchedulerRun(id int64, fn func(*SchedulerRun) error) (SchedulerRun, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id == 0 {
+		return SchedulerRun{}, ErrNotFound
+	}
+	for i := range s.state.SchedulerRuns {
+		if s.state.SchedulerRuns[i].ID != id {
+			continue
+		}
+		run := s.state.SchedulerRuns[i]
+		if err := fn(&run); err != nil {
+			return SchedulerRun{}, err
+		}
+		if run.FinishedAt == 0 && run.EndedAt != 0 {
+			run.FinishedAt = run.EndedAt
+		}
+		s.state.SchedulerRuns[i] = run
+		return run, s.saveLocked()
+	}
+	return SchedulerRun{}, ErrNotFound
 }
 
 func (s *Store) SchedulerRuns(jobID string, limit int) []SchedulerRun {

@@ -23,6 +23,10 @@ func getJSON(ctx context.Context, endpoint string, headers map[string]string, ds
 }
 
 func postJSON(ctx context.Context, endpoint string, headers map[string]string, body any, dst any) error {
+	return postJSONWithTimeout(ctx, endpoint, headers, body, dst, 10*time.Second)
+}
+
+func postJSONWithTimeout(ctx context.Context, endpoint string, headers map[string]string, body any, dst any, timeout time.Duration) error {
 	data, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
@@ -32,11 +36,18 @@ func postJSON(ctx context.Context, endpoint string, headers map[string]string, b
 	for key, value := range headers {
 		req.Header.Set(key, value)
 	}
-	return doJSONRequest(req, dst)
+	return doJSONRequestWithTimeout(req, dst, timeout)
 }
 
 func doJSONRequest(req *http.Request, dst any) error {
-	client := &http.Client{Timeout: 10 * time.Second}
+	return doJSONRequestWithTimeout(req, dst, 10*time.Second)
+}
+
+func doJSONRequestWithTimeout(req *http.Request, dst any, timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err

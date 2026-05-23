@@ -75,16 +75,20 @@ func (a *App) RunTelegramBot(ctx context.Context) error {
 
 func (a *App) telegramGetUpdates(ctx context.Context, offset int64) ([]map[string]any, error) {
 	var result []map[string]any
-	body := map[string]any{"timeout": 30, "allowed_updates": []string{"message", "chat_member", "my_chat_member"}}
+	body := map[string]any{"timeout": 30, "allowed_updates": []string{"message", "callback_query", "chat_member", "my_chat_member"}}
 	if offset > 0 {
 		body["offset"] = offset
 	}
-	err := a.telegramPost(ctx, "getUpdates", body, &result)
+	err := a.telegramPostWithTimeout(ctx, "getUpdates", body, &result, 45*time.Second)
 	return result, err
 }
 
 func (a *App) handleTelegramUpdate(ctx context.Context, update map[string]any) {
 	a.observeTelegramRoster(update)
+	if callback, _ := update["callback_query"].(map[string]any); callback != nil {
+		a.telegramHandleCallback(ctx, callback)
+		return
+	}
 	message, _ := update["message"].(map[string]any)
 	if message == nil {
 		return
@@ -429,35 +433,22 @@ func (a *App) telegramHandleFind(ctx context.Context, chatID, telegramID int64, 
 }
 
 func (a *App) telegramHandleGroupUser(ctx context.Context, chatID, telegramID int64, fields []string, message map[string]any) {
+	messageID := numeric(message["message_id"])
+	anonymousCommand := telegramIsAnonymousGroupMessage(message)
+	if anonymousCommand {
+		a.telegramSendGroupAdminAuth(ctx, chatID, messageID, fields, message)
+		return
+	}
 	if !a.telegramAdminID(telegramID) {
-		_ = a.telegramSendMessage(ctx, chatID, "没有管理员权限。")
+		a.telegramSendUnauthorizedAndCleanup(ctx, chatID, messageID)
 		return
 	}
-	query := strings.Join(fields[1:], " ")
-	if strings.TrimSpace(query) == "" {
-		if reply, _ := message["reply_to_message"].(map[string]any); reply != nil {
-			if from, _ := reply["from"].(map[string]any); from != nil {
-				if id := numeric(from["id"]); id != 0 {
-					if u, okUser := a.store.FindUserByTelegramID(id); okUser {
-						_ = a.telegramSendMessage(ctx, chatID, "群组用户查询\n\n"+telegramUserSummary(u))
-						return
-					}
-				}
-			}
-		}
-		_ = a.telegramSendMessage(ctx, chatID, "请回复目标用户消息后发送 /twguser，或发送 /twguser <用户名/UID/关键词>。")
+	user, reason := a.telegramResolveGroupUserTarget(fields, message)
+	if reason != "" {
+		_ = a.telegramSendMessage(ctx, chatID, reason)
 		return
 	}
-	users := a.telegramFindUsers(query, 6)
-	if len(users) == 0 {
-		_ = a.telegramSendMessage(ctx, chatID, "未找到匹配用户。")
-		return
-	}
-	if len(users) > 1 {
-		_ = a.telegramSendMessage(ctx, chatID, "找到多个匹配项，请缩小关键词。\n\n"+telegramUserList(users))
-		return
-	}
-	_ = a.telegramSendMessage(ctx, chatID, "群组用户查询\n\n"+telegramUserSummary(users[0]))
+	a.telegramSendGroupUserPanel(ctx, chatID, messageID, user, false)
 }
 
 func (a *App) telegramAdminID(telegramID int64) bool {
@@ -525,7 +516,7 @@ func (a *App) telegramGroupPrompt() string {
 	if text := strings.TrimSpace(a.cfg.TelegramBotGroupStartText); text != "" {
 		return a.telegramRenderText(text)
 	}
-	return "为避免泄露账号信息，请私聊 Bot 使用 /bind、/me、/emby 等账号命令。管理员可在群内使用 /twguser 进行只读查询。"
+	return "为避免泄露账号信息，请私聊 Bot 使用 /bind、/me、/emby 等账号命令。管理员可在群内使用 /twguser 打开用户管理面板。"
 }
 
 func (a *App) telegramBindPrompt() string {
@@ -569,7 +560,7 @@ func (a *App) telegramAdminHelpText() string {
 	if text := strings.TrimSpace(a.cfg.TelegramBotAdminHelpText); text != "" {
 		return a.telegramRenderText(text)
 	}
-	return "管理员帮助\n\n/stats 服务统计\n/userinfo <用户名/UID/关键词> 查看用户详情\n/twfind <用户名/UID/关键词> 搜索用户\n/twguser <关键词> 群组只读查询\n/twguser 回复群成员消息时按 Telegram 绑定关系查询\n\nBot 管理命令只展示非敏感摘要；用户写入、删除、封禁、密码和系统更新请在 Web 后台完成。"
+	return "管理员帮助\n\n/stats 服务统计\n/userinfo <用户名/UID/关键词> 查看用户详情\n/twfind <用户名/UID/关键词> 搜索用户\n/twguser <关键词> 群组用户管理面板\n/twguser 回复群成员消息时按 Telegram 绑定关系查询\n\n群组匿名管理员使用 /twguser 时需要通过 inline 按钮验证身份；每次按钮操作都会重新鉴权。"
 }
 
 func (a *App) telegramAboutText() string {

@@ -194,7 +194,7 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
     if (!open || !job) return;
     const spec = job.trigger_spec;
     if (spec.type === "manual") {
-      setType("cron_daily");
+      setType("manual");
       setHour(0);
       setMinute(0);
       setIntervalValue(1);
@@ -227,7 +227,9 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
     setSaving(true);
     try {
       let payload: SchedulerTriggerSpec;
-      if (type === "cron_daily") {
+      if (type === "manual") {
+        payload = { type: "manual" };
+      } else if (type === "cron_daily") {
         if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
           toast({ title: "时间不合法", description: "小时 0-23 / 分钟 0-59", variant: "destructive" });
           return;
@@ -315,13 +317,18 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="manual">关闭自动执行，仅手动</SelectItem>
                 <SelectItem value="cron_daily">每日固定时间</SelectItem>
                 <SelectItem value="interval">固定间隔</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
-          {type === "cron_daily" ? (
+          {type === "manual" ? (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+              保存后该任务不会被调度器自动执行，管理员仍可点击“立即运行”手动触发。
+            </div>
+          ) : type === "cron_daily" ? (
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>小时 (0-23)</Label>
@@ -374,7 +381,7 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
           )}
 
           <p className="text-xs text-muted-foreground">
-            修改后立即生效并落库，重启进程后仍保留。可点击「恢复默认」清除覆盖。
+            修改后立即生效并落库，重启进程后仍保留。选择“关闭自动执行”可完全停止该任务的自动调度；可点击「恢复默认」清除覆盖。
           </p>
 
           {job.id === "cleanup_no_emby" && (
@@ -514,7 +521,7 @@ export default function AdminSchedulerPage() {
   );
 
   const schedulerHasTimedJobs = useMemo(
-    () => jobs.some((j) => !j.manual_only && j.enabled),
+    () => jobs.some((j) => !j.manual_only && j.enabled && j.trigger_spec?.type !== "manual"),
     [jobs]
   );
 
