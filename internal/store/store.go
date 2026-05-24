@@ -640,6 +640,26 @@ CREATE INDEX IF NOT EXISTS twilight_runtime_logs_time_idx ON twilight_runtime_lo
 		_ = db.Close()
 		return nil, status, describePostgresConnectionError(target, err)
 	}
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS twilight_sessions (
+	token text PRIMARY KEY,
+	uid bigint NOT NULL,
+	expires_at bigint NOT NULL,
+	created_at timestamptz NOT NULL DEFAULT now()
+)`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
+	if _, err := db.ExecContext(ctx, `
+CREATE INDEX IF NOT EXISTS twilight_sessions_uid_idx ON twilight_sessions (uid)`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
+	if _, err := db.ExecContext(ctx, `
+CREATE INDEX IF NOT EXISTS twilight_sessions_expires_at_idx ON twilight_sessions (expires_at)`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
 	status.SchemaReady = true
 	return db, status, nil
 }
@@ -655,6 +675,14 @@ func (s *Store) Close() error {
 		return nil
 	}
 	return s.db.Close()
+}
+
+// DB returns the underlying *sql.DB when using PostgreSQL backend, or nil otherwise.
+func (s *Store) DB() *sql.DB {
+	if s == nil {
+		return nil
+	}
+	return s.db
 }
 
 func (s *Store) ConfigurePostgres(maxOpen, maxIdle int) {

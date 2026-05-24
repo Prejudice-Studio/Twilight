@@ -130,7 +130,13 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		if err != nil {
 			return map[string]any{"success": false, "deleted": deleted}, []string{fmt.Sprintf("failed to delete expired bind codes: %v", err)}, err
 		}
-		return map[string]any{"success": true, "deleted": deleted}, []string{fmt.Sprintf("deleted %d expired bind codes", deleted)}, nil
+		// Also clean up expired app sessions from memory and PostgreSQL
+		expiredSessions := a.sessions.CleanupExpired()
+		logs := []string{fmt.Sprintf("deleted %d expired bind codes", deleted)}
+		if expiredSessions > 0 {
+			logs = append(logs, fmt.Sprintf("cleaned up %d expired sessions", expiredSessions))
+		}
+		return map[string]any{"success": true, "deleted": deleted, "expired_sessions": expiredSessions}, logs, nil
 	case "cleanup_sessions":
 		if a.cfg.EmbyURL == "" {
 			return map[string]any{"success": true, "configured": false, "active": 0, "total": 0}, []string{"Emby not configured"}, nil

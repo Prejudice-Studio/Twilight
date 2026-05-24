@@ -114,7 +114,7 @@ func New(cfg config.Config, st *store.Store) (*App, error) {
 	app := &App{
 		cfg:            cfg,
 		store:          st,
-		sessions:       newSessionStore(cfg.SessionTTL, redisClient),
+		sessions:       newSessionStoreWithDB(cfg.SessionTTL, redisClient, st),
 		limiter:        newRateLimiter(redisClient),
 		redis:          redisClient,
 		telegramPanels: map[string]telegramPanelContext{},
@@ -206,7 +206,7 @@ func (a *App) reloadConfigLocked() (map[string]any, error) {
 			return nil, err
 		}
 		oldRedis := a.redis
-		a.sessions = newSessionStore(next.SessionTTL, redisClient)
+		a.sessions = newSessionStoreWithDB(next.SessionTTL, redisClient, a.store)
 		a.limiter = newRateLimiter(redisClient)
 		a.redis = redisClient
 		if oldRedis != nil && oldRedis != redisClient {

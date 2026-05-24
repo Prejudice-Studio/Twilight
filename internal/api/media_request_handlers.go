@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -206,7 +207,7 @@ func (a *App) handleUpdateMediaRequestByKey(w http.ResponseWriter, r *http.Reque
 
 func (a *App) handleExternalMediaUpdate(w http.ResponseWriter, r *http.Request, _ Params) {
 	secret := firstNonEmpty(r.Header.Get("X-Internal-Secret"), strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
-	if a.cfg.BotInternalSecret == "" || secret != a.cfg.BotInternalSecret {
+	if a.cfg.BotInternalSecret == "" || subtle.ConstantTimeCompare([]byte(secret), []byte(a.cfg.BotInternalSecret)) != 1 {
 		fail(w, http.StatusForbidden, "内部密钥无效")
 		return
 	}

@@ -26,8 +26,15 @@ sqlalchemy_log = false
 max_retry = 3
 # JSON 状态、备份和迁移文件目录（绝对或相对路径，相对则相对项目根）
 databases_dir = "db"
-# Redis 连接串；留空使用进程内内存（重启失效，仅单进程可用）
-# 例：redis://[:password@]host:port/db
+# Redis 连接串；强烈建议生产环境配置 Redis。
+# 用途：会话缓存（快速读取）、速率限制（分布式计数）。
+# 即使配置了 Redis，会话仍会持久化到 PostgreSQL，确保 Redis/进程重启后自动恢复。
+# 格式：redis://[:password@]host:port/db
+# 示例（无密码）：redis://127.0.0.1:6379/0
+# 示例（有密码）：redis://:your_redis_password@127.0.0.1:6379/0
+# 示例（远程+密码）：redis://:StrongPass123@192.168.1.100:6379/0
+# 示例（TLS 加密）：rediss://:password@redis.example.com:6380/0
+# 留空时使用进程内内存（会话仍通过 PostgreSQL 持久化，但速率限制重启后重置）
 redis_url = ""
 # 是否启用 Telegram Bot（关闭时所有 /tg 相关功能直接拒绝）
 telegram_mode = false
