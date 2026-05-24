@@ -57,6 +57,10 @@ func (a *App) systemUserLimitReached() (bool, int, int) {
 }
 
 func (a *App) embyCapacityReached(excludeUID int64) (bool, int, int) {
+	return a.embyCapacityReachedExcluding(excludeUID, "", "")
+}
+
+func (a *App) embyCapacityReachedExcluding(excludeUID int64, excludeRegCode, excludeInviteCode string) (bool, int, int) {
 	limit := a.cfg.EmbyUserLimit
 	current := 0
 	now := time.Now().Unix()
@@ -70,23 +74,29 @@ func (a *App) embyCapacityReached(excludeUID int64) (bool, int, int) {
 		}
 	}
 	for _, code := range a.store.ListAllInviteCodes() {
+		if excludeInviteCode != "" && strings.EqualFold(code.Code, excludeInviteCode) {
+			continue
+		}
 		current += remainingInviteSlots(code, now)
 	}
 	for _, code := range a.store.ListRegCodes() {
+		if excludeRegCode != "" && strings.EqualFold(code.Code, excludeRegCode) {
+			continue
+		}
 		current += remainingRegCodeEmbySlots(code, now)
 	}
 	return limit > 0 && current >= limit, current, limit
 }
 
 func remainingInviteSlots(code store.InviteCode, now int64) int {
-	if !code.Active || (code.ExpiredAt > 0 && code.ExpiredAt < now) {
+	if !code.Active || (code.ExpiredAt > 0 && code.ExpiredAt <= now) {
 		return 0
 	}
 	return remainingUseSlots(code.UseCount, code.UseCountLimit)
 }
 
 func remainingRegCodeEmbySlots(code store.RegCode, now int64) int {
-	if !code.Active || code.IsDecoy || (code.ValidityTime > 0 && code.CreatedAt+code.ValidityTime*3600 < now) {
+	if !code.Active || code.IsDecoy || (code.ValidityTime > 0 && code.CreatedAt+code.ValidityTime*3600 <= now) {
 		return 0
 	}
 	if code.Type != 1 && code.Type != 3 {
@@ -310,7 +320,7 @@ func regcodeStatus(code store.RegCode) string {
 	if !code.Active {
 		return "disabled"
 	}
-	if code.ValidityTime > 0 && code.CreatedAt+code.ValidityTime*3600 < now {
+	if code.ValidityTime > 0 && code.CreatedAt+code.ValidityTime*3600 <= now {
 		return "expired"
 	}
 	if code.UseCountLimit != -1 && code.UseCount >= code.UseCountLimit {
@@ -512,7 +522,7 @@ func (a *App) previewCode(code string, user store.User) (map[string]any, string,
 		return codePreview("regcode", reg.Type, reg.Days, ""), "regcode", true
 	}
 	if invite, ok := a.store.InviteCode(code); ok {
-		if !invite.Active || (invite.ExpiredAt > 0 && invite.ExpiredAt < time.Now().Unix()) || (invite.UseCountLimit != -1 && invite.UseCount >= invite.UseCountLimit) {
+		if !invite.Active || (invite.ExpiredAt > 0 && invite.ExpiredAt <= time.Now().Unix()) || (invite.UseCountLimit != -1 && invite.UseCount >= invite.UseCountLimit) {
 			return nil, "", false
 		}
 		if _, hasParent := a.store.ParentOf(user.UID); hasParent {
@@ -831,7 +841,7 @@ func (a *App) canInvite(user store.User) (bool, string) {
 	if a.cfg.InviteLimit != -1 {
 		active := 0
 		for _, code := range a.store.ListInviteCodes(user.UID) {
-			if code.Active && code.UseCount == 0 {
+			if code.Active && code.UseCount == 0 && (code.ExpiredAt <= 0 || code.ExpiredAt > time.Now().Unix()) {
 				active++
 			}
 		}

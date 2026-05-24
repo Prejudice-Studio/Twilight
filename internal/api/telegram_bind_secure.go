@@ -16,6 +16,10 @@ func (a *App) handleBindConfirmSecure(w http.ResponseWriter, r *http.Request, _ 
 	}
 	payload := decodeMap(r)
 	code := strings.ToUpper(strings.TrimSpace(stringValue(payload, "code")))
+	if !telegramBindCodePattern.MatchString(code) {
+		fail(w, http.StatusBadRequest, "绑定码格式无效")
+		return
+	}
 	bind, okBind := a.store.BindCode(code)
 	if !okBind || bind.ExpiresAt <= time.Now().Unix() {
 		if okBind {
@@ -31,6 +35,13 @@ func (a *App) handleBindConfirmSecure(w http.ResponseWriter, r *http.Request, _ 
 	}
 	if existing, okUser := a.store.FindUserByTelegramID(telegramID); okUser && (bind.UID == 0 || existing.UID != bind.UID) {
 		fail(w, http.StatusConflict, "该 Telegram 已绑定到账号 "+existing.Username)
+		return
+	}
+	if missing, err := a.telegramBindRequirementMissing(r.Context(), telegramID); err != nil {
+		fail(w, http.StatusBadGateway, "Telegram 加群/频道校验失败，请稍后重试")
+		return
+	} else if len(missing) > 0 {
+		fail(w, http.StatusForbidden, "绑定前需要先加入指定 Telegram 群组/频道: "+strings.Join(missing, ", "))
 		return
 	}
 	bind.Confirmed = true

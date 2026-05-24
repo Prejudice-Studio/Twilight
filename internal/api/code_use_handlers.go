@@ -35,7 +35,14 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 	var inviteForUse store.InviteCode
 	var inviterForUse store.User
 	if grantsEmby && p.User.EmbyID == "" && !replacesPendingEntitlement {
-		if reached, current, limit := a.embyCapacityReached(p.User.UID); reached {
+		excludeRegCode := ""
+		excludeInviteCode := ""
+		if source == "regcode" {
+			excludeRegCode = code
+		} else if source == "invite" {
+			excludeInviteCode = code
+		}
+		if reached, current, limit := a.embyCapacityReachedExcluding(p.User.UID, excludeRegCode, excludeInviteCode); reached {
 			fail(w, http.StatusConflict, "Emby 用户数量已达上限 "+strconv.Itoa(current)+"/"+strconv.Itoa(limit))
 			return
 		}
@@ -43,7 +50,7 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 
 	if source == "invite" {
 		invite, okInvite := a.store.InviteCode(code)
-		if !okInvite || !invite.Active {
+		if !okInvite || !invite.Active || (invite.ExpiredAt > 0 && invite.ExpiredAt <= time.Now().Unix()) {
 			fail(w, http.StatusNotFound, "邀请码无效或已停用")
 			return
 		}
@@ -95,6 +102,10 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 	}
 	var reg store.RegCode
 	if source == "regcode" {
+		if int(numeric(preview["type"])) == 1 && p.User.EmbyID != "" {
+			fail(w, http.StatusBadRequest, "当前账号已绑定 Emby，请使用续期码")
+			return
+		}
 		var err error
 		reg, err = a.store.ConsumeRegCode(code, p.User.UID, p.User.TelegramID)
 		if statusFromError(w, err) {
@@ -166,7 +177,7 @@ func (a *App) handleRegcodeCheck(w http.ResponseWriter, r *http.Request, _ Param
 	code := stringValue(payload, "reg_code")
 	if code != "" {
 		if reg, okReg := a.store.RegCode(code); okReg {
-			if reg.IsDecoy {
+			if reg.IsDecoy || reg.TargetUsername != "" {
 				fail(w, http.StatusNotFound, "注册码不存在")
 				return
 			}

@@ -654,7 +654,19 @@ func (a *App) handleUserBindCode(w http.ResponseWriter, r *http.Request, _ Param
 
 func (a *App) createBindCode(w http.ResponseWriter, uid int64, scene string) {
 	_, _ = a.store.CleanupExpiredBindCodes(time.Now().Unix())
-	code := strings.ToUpper(randomCode(12))
+	code := ""
+	for attempt := 0; attempt < 20; attempt++ {
+		candidate := strings.ToUpper(randomCode(12))
+		if _, exists := a.store.BindCode(candidate); exists {
+			continue
+		}
+		code = candidate
+		break
+	}
+	if code == "" {
+		fail(w, http.StatusConflict, "绑定码生成冲突，请重试")
+		return
+	}
 	now := time.Now().Unix()
 	_ = a.store.UpsertBindCode(store.BindCode{Code: code, Scene: scene, UID: uid, CreatedAt: now, ExpiresAt: now + 600})
 	ok(w, "OK", map[string]any{"bind_code": code, "expires_in": 600})

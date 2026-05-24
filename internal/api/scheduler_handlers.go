@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/prejudice-studio/twilight/internal/store"
 )
 
 var schedulerJobs = []map[string]any{
@@ -41,6 +43,8 @@ func (a *App) handleSchedulerJobs(w http.ResponseWriter, r *http.Request, _ Para
 		item["trigger_spec"] = spec
 		item["default_trigger_spec"] = a.schedulerDefaultTriggerSpec(jobID)
 		item["last_run"] = nil
+		running := a.schedulerJobRunning(jobID)
+		a.reconcileSchedulerRunState(jobID, running)
 		item["next_run_at"] = zeroNil(a.schedulerNextRunAt(jobID, spec, time.Now()))
 		item["auto_disabled"] = schedulerTriggerDisabled(spec)
 		if runs := a.store.SchedulerRuns(jobID, 20); len(runs) > 0 {
@@ -57,7 +61,7 @@ func (a *App) handleSchedulerJobs(w http.ResponseWriter, r *http.Request, _ Para
 			item["last_auto_run_at"] = zeroNil(lastAuto)
 			item["last_manual_run_at"] = zeroNil(lastManual)
 		}
-		item["is_running"] = a.schedulerJobRunning(jobID)
+		item["is_running"] = running
 		jobs = append(jobs, item)
 	}
 	ok(w, "OK", map[string]any{"jobs": jobs})
@@ -70,12 +74,14 @@ func (a *App) handleSchedulerTerminate(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 	if !a.terminateSchedulerJob(jobID) {
-		fail(w, http.StatusConflict, "job is not running")
+		a.reconcileSchedulerRunState(jobID, false)
+		ok(w, "job is not running", map[string]any{"job_id": jobID, "terminated": false, "already_stopped": true})
 		return
 	}
 	ok(w, "job termination requested", map[string]any{"job_id": jobID, "terminated": true})
 }
 func (a *App) handleSchedulerLastRun(w http.ResponseWriter, r *http.Request, params Params) {
+	a.reconcileSchedulerRunState(params["job_id"], a.schedulerJobRunning(params["job_id"]))
 	runs := a.store.SchedulerRuns(params["job_id"], 1)
 	var last any
 	if len(runs) > 0 {
@@ -84,6 +90,7 @@ func (a *App) handleSchedulerLastRun(w http.ResponseWriter, r *http.Request, par
 	ok(w, "OK", map[string]any{"job_id": params["job_id"], "last_run": last})
 }
 func (a *App) handleSchedulerHistory(w http.ResponseWriter, r *http.Request, params Params) {
+	a.reconcileSchedulerRunState(params["job_id"], a.schedulerJobRunning(params["job_id"]))
 	runs := a.store.SchedulerRuns(params["job_id"], queryInt(r, "limit", 20))
 	ok(w, "OK", map[string]any{"job_id": params["job_id"], "history": runs, "total": len(runs)})
 }
@@ -184,4 +191,32 @@ func (a *App) normalizeSchedulerRuntimeParams(jobID string, params map[string]an
 func schedulerRuntimeParamsMap(value any) map[string]any {
 	params, _ := value.(map[string]any)
 	return params
+}
+
+func (a *App) reconcileSchedulerRunState(jobID string, running bool) {
+	if running {
+		return
+	}
+	now := time.Now().Unix()
+	for _, run := range a.store.SchedulerRuns(jobID, 20) {
+		if run.Status != "running" {
+			continue
+		}
+		_, _ = a.store.UpdateSchedulerRun(run.ID, func(current *store.SchedulerRun) error {
+			if current.Status != "running" {
+				return nil
+			}
+			current.Status = "failed"
+			current.Message = "job interrupted before completion"
+			current.Error = "job interrupted before completion"
+			current.FinishedAt = now
+			current.EndedAt = now
+			if current.Summary == nil {
+				current.Summary = map[string]any{}
+			}
+			current.Summary["interrupted"] = true
+			current.Summary["success"] = false
+			return nil
+		})
+	}
 }

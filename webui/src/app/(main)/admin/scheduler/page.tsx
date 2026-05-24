@@ -462,8 +462,8 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
   );
 }
 
-function StatusBadge({ job }: { job: SchedulerJobItem }) {
-  if (job.is_running || job.last_run?.status === "running") {
+function StatusBadge({ job, isRunning }: { job: SchedulerJobItem; isRunning?: boolean }) {
+  if (isRunning ?? job.is_running) {
     return (
       <Badge variant="outline" className="text-[10px] border-sky-500/40 text-sky-600 dark:text-sky-400">
         <Loader2 className="mr-1 h-3 w-3 animate-spin" />
@@ -538,7 +538,7 @@ export default function AdminSchedulerPage() {
   } = useAsyncResource(loadJobs, { immediate: true });
 
   const anyRunning = useMemo(
-    () => jobs.some((j) => j.is_running || j.last_run?.status === "running") || Object.values(running).some(Boolean),
+    () => jobs.some((j) => j.is_running) || Object.values(running).some(Boolean),
     [jobs, running]
   );
 
@@ -747,14 +747,14 @@ export default function AdminSchedulerPage() {
             {jobs.map((job) => {
             const lr = job.last_run;
             const triggering = Boolean(running[job.id]);
-            const isRunning = job.is_running || lr?.status === "running" || triggering;
+            const isRunning = job.is_running || triggering;
               const rejoinCandidates = Number((lr?.summary as Record<string, unknown> | null | undefined)?.["rejoin_candidates"] ?? 0);
             return (
               <Card key={job.id} className="flex min-h-[360px] flex-col overflow-hidden">
                 <CardHeader className="space-y-2">
                   <div className="flex items-start justify-between gap-3">
                     <CardTitle className="min-w-0 text-base leading-snug">{job.name}</CardTitle>
-                    <StatusBadge job={job} />
+                    <StatusBadge job={job} isRunning={isRunning} />
                   </div>
                   <CardDescription className="min-h-10 break-words leading-relaxed">
                     {job.description}

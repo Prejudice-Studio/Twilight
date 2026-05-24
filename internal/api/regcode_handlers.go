@@ -61,9 +61,28 @@ func (a *App) handleCreateRegcodes(w http.ResponseWriter, r *http.Request, _ Par
 		fail(w, http.StatusBadRequest, "目标用户名长度需为 3-32 个字符，且不能包含特殊路径或注入字符")
 		return
 	}
+	seen := map[string]bool{}
 	for i := 0; i < count; i++ {
-		code := generateRegCode(format, codeType, algorithm, days, i+1, validity, useLimit)
-		_ = a.store.UpsertRegCode(store.RegCode{Code: code, Type: codeType, ValidityTime: validity, UseCountLimit: useLimit, Days: days, Note: truncateString(stringValue(payload, "note"), 120), IsDecoy: boolValue(payload, "decoy", false), TargetUsername: targetUsername, Active: true})
+		code := ""
+		for attempt := 0; attempt < 20; attempt++ {
+			candidate := generateRegCode(format, codeType, algorithm, days, i+1, validity, useLimit)
+			if seen[candidate] {
+				continue
+			}
+			if _, exists := a.store.RegCode(candidate); exists {
+				continue
+			}
+			code = candidate
+			break
+		}
+		if code == "" {
+			fail(w, http.StatusConflict, "注册码生成冲突，请调整格式或随机算法后重试")
+			return
+		}
+		seen[code] = true
+		if err := a.store.UpsertRegCode(store.RegCode{Code: code, Type: codeType, ValidityTime: validity, UseCountLimit: useLimit, Days: days, Note: truncateString(stringValue(payload, "note"), 120), IsDecoy: boolValue(payload, "decoy", false), TargetUsername: targetUsername, Active: true}); statusFromError(w, err) {
+			return
+		}
 		codes = append(codes, code)
 	}
 	ok(w, "注册码已创建", map[string]any{"codes": codes, "count": len(codes), "decoy": boolValue(payload, "decoy", false), "target_username": targetUsername})

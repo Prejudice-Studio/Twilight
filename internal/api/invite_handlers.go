@@ -51,28 +51,107 @@ func (a *App) handleCreateInviteCode(w http.ResponseWriter, r *http.Request, _ P
 		return
 	}
 	user := current(r).User
+	payload := decodeMap(r)
+	if strings.HasSuffix(r.URL.Path, "/renew-codes") {
+		a.handleCreateInviteRenewCode(w, r, user, payload)
+		return
+	}
 	canInvite, reason := a.canInvite(user)
 	if !canInvite {
 		fail(w, http.StatusForbidden, reason)
 		return
 	}
-	payload := decodeMap(r)
 	days := intValue(payload, "days", a.cfg.InviteDefaultDays)
 	maxDays, _ := a.maxCodeDays(user)
 	if days <= 0 || days > maxDays {
 		fail(w, http.StatusBadRequest, "邀请码天数超出允许范围")
 		return
 	}
-	code := strings.ToUpper("INV" + randomCode(10))
 	expiresAt := int64(intValue(payload, "expires_at", -1))
+	if expiresAt > 0 && expiresAt <= time.Now().Unix() {
+		fail(w, http.StatusBadRequest, "邀请码过期时间必须晚于当前时间")
+		return
+	}
 	targetUsername := strings.TrimSpace(stringValue(payload, "target_username"))
-	if targetUsername != "" && (len(targetUsername) < 3 || len(targetUsername) > 32) {
-		fail(w, http.StatusBadRequest, "目标用户名长度需在 3-32 字符之间")
+	if targetUsername != "" && !validRegcodeTargetUsername(targetUsername) {
+		fail(w, http.StatusBadRequest, "目标用户名长度需为 3-32 个字符，且不能包含特殊路径或注入字符")
+		return
+	}
+	code := ""
+	for attempt := 0; attempt < 20; attempt++ {
+		candidate := strings.ToUpper("INV" + randomCode(10))
+		if _, exists := a.store.InviteCode(candidate); exists {
+			continue
+		}
+		code = candidate
+		break
+	}
+	if code == "" {
+		fail(w, http.StatusConflict, "邀请码生成冲突，请重试")
 		return
 	}
 	invite := store.InviteCode{Code: code, UID: user.UID, InviterUID: user.UID, Days: days, UseCountLimit: 1, Active: true, Note: truncateString(stringValue(payload, "note"), 255), TargetUsername: targetUsername, CreatedAt: time.Now().Unix(), ExpiredAt: expiresAt}
-	_ = a.store.UpsertInviteCode(invite)
+	if err := a.store.UpsertInviteCode(invite); statusFromError(w, err) {
+		return
+	}
 	created(w, "invite code created", inviteCodeDTO(invite))
+}
+
+func (a *App) handleCreateInviteRenewCode(w http.ResponseWriter, r *http.Request, user store.User, payload map[string]any) {
+	if !user.Active {
+		fail(w, http.StatusForbidden, "账号已被禁用，无法生成续期码")
+		return
+	}
+	if a.cfg.InviteRequireEmby && user.EmbyID == "" {
+		fail(w, http.StatusForbidden, "请先绑定 Emby 账号后再生成续期码")
+		return
+	}
+	targetUID := int64(intValue(payload, "target_uid", 0))
+	if targetUID <= 0 {
+		fail(w, http.StatusBadRequest, "目标用户无效")
+		return
+	}
+	rel, okRel := a.store.ParentOf(targetUID)
+	if !okRel || rel.ParentUID != user.UID {
+		fail(w, http.StatusForbidden, "只能给自己的直属下级生成续期码")
+		return
+	}
+	child, okChild := a.store.User(targetUID)
+	if !okChild {
+		fail(w, http.StatusNotFound, "目标用户不存在")
+		return
+	}
+	maxDays, reason := a.maxCodeDays(user)
+	if maxDays <= 0 {
+		fail(w, http.StatusForbidden, firstNonEmpty(reason, "当前账号有效期不足，无法生成续期码"))
+		return
+	}
+	days := intValue(payload, "days", minInt(30, maxDays))
+	if days <= 0 || days > maxDays {
+		fail(w, http.StatusBadRequest, "续期天数超出允许范围")
+		return
+	}
+	validityHours := clamp(intValue(payload, "validity_hours", 72), 1, 720)
+	format := firstNonEmpty(stringValue(payload, "format"), "REN-{random}")
+	algorithm := firstNonEmpty(stringValue(payload, "random_algorithm"), a.cfg.RegCodeRandomAlgorithm, "base32-20")
+	code := ""
+	for attempt := 0; attempt < 20; attempt++ {
+		candidate := generateRegCode(format, 2, algorithm, days, 1, int64(validityHours), 1)
+		if _, exists := a.store.RegCode(candidate); exists {
+			continue
+		}
+		code = candidate
+		break
+	}
+	if code == "" {
+		fail(w, http.StatusConflict, "续期码生成冲突，请重试")
+		return
+	}
+	reg := store.RegCode{Code: code, Type: 2, ValidityTime: int64(validityHours), UseCountLimit: 1, Days: days, Note: truncateString(stringValue(payload, "note"), 120), TargetUsername: child.Username, Active: true}
+	if err := a.store.UpsertRegCode(reg); statusFromError(w, err) {
+		return
+	}
+	created(w, "renew code created", map[string]any{"code": code, "target_uid": child.UID, "target_username": child.Username, "days": days, "validity_hours": validityHours, "max_code_days": maxDays})
 }
 
 func (a *App) handleInviteCodes(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -148,7 +227,7 @@ func (a *App) handleInviteCheck(w http.ResponseWriter, r *http.Request, _ Params
 	}
 	code := stringValue(decodeMap(r), "code")
 	invite, okInvite := a.store.InviteCode(code)
-	if !okInvite || !invite.Active || (invite.ExpiredAt > 0 && invite.ExpiredAt < time.Now().Unix()) {
+	if !okInvite || !invite.Active || (invite.ExpiredAt > 0 && invite.ExpiredAt <= time.Now().Unix()) {
 		fail(w, http.StatusNotFound, "邀请码无效或已停用")
 		return
 	}
@@ -187,7 +266,7 @@ func (a *App) handleInviteUse(w http.ResponseWriter, r *http.Request, _ Params) 
 		return
 	}
 	invite, okInvite := a.store.InviteCode(code)
-	if !okInvite || !invite.Active {
+	if !okInvite || !invite.Active || (invite.ExpiredAt > 0 && invite.ExpiredAt <= time.Now().Unix()) {
 		fail(w, http.StatusNotFound, "邀请码无效或已停用")
 		return
 	}
@@ -228,7 +307,7 @@ func (a *App) handleInviteUse(w http.ResponseWriter, r *http.Request, _ Params) 
 	if effectiveDays <= 0 || effectiveDays > maxDays {
 		effectiveDays = maxDays
 	}
-	if reached, current, limit := a.embyCapacityReached(user.UID); reached {
+	if reached, current, limit := a.embyCapacityReachedExcluding(user.UID, "", code); reached {
 		fail(w, http.StatusConflict, fmt.Sprintf("Emby 用户数量已达上限 %d/%d", current, limit))
 		return
 	}

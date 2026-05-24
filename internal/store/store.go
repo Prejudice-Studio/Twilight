@@ -1493,6 +1493,12 @@ func (s *Store) ConsumeInviteCode(code string, childUID int64) (InviteCode, erro
 		return InviteCode{}, ErrConflict
 	}
 	now := time.Now().Unix()
+	if c.ExpiredAt > 0 && c.ExpiredAt <= now {
+		return InviteCode{}, ErrExpired
+	}
+	if c.InviterUID != 0 && c.InviterUID == childUID {
+		return InviteCode{}, ErrConflict
+	}
 	c.UseCount++
 	c.Used = true
 	c.UsedByUID = childUID
@@ -1555,6 +1561,7 @@ func (s *Store) RegCode(code string) (RegCode, bool) {
 func (s *Store) UpsertRegCode(code RegCode) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	_, exists := s.state.RegCodes[code.Code]
 	if code.CreatedAt == 0 {
 		code.CreatedAt = time.Now().Unix()
 	}
@@ -1567,7 +1574,7 @@ func (s *Store) UpsertRegCode(code RegCode) error {
 	if code.UseCountLimit == 0 {
 		code.UseCountLimit = 1
 	}
-	if !code.Active && code.UseCount == 0 {
+	if !exists && !code.Active && code.UseCount == 0 {
 		code.Active = true
 	}
 	s.state.RegCodes[code.Code] = code
@@ -1585,7 +1592,7 @@ func (s *Store) ConsumeRegCode(code string, uid, telegramID int64) (RegCode, err
 		return RegCode{}, ErrConflict
 	}
 	now := time.Now().Unix()
-	if r.ValidityTime > 0 && r.CreatedAt+r.ValidityTime*3600 < now {
+	if r.ValidityTime > 0 && r.CreatedAt+r.ValidityTime*3600 <= now {
 		return RegCode{}, ErrExpired
 	}
 	r.UseCount++
@@ -1617,10 +1624,16 @@ func (s *Store) ListRegCodes() []RegCode {
 func (s *Store) DeleteRegCode(code string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.state.RegCodes[code]; !ok {
+	reg, ok := s.state.RegCodes[code]
+	if !ok {
 		return ErrNotFound
 	}
-	delete(s.state.RegCodes, code)
+	if regCodeHasUsage(reg) {
+		reg.Active = false
+		s.state.RegCodes[code] = reg
+	} else {
+		delete(s.state.RegCodes, code)
+	}
 	return s.saveLocked()
 }
 
@@ -1634,17 +1647,27 @@ func (s *Store) DeleteRegCodes(codes []string) (deleted []string, missing []stri
 			continue
 		}
 		seen[code] = true
-		if _, ok := s.state.RegCodes[code]; !ok {
+		reg, ok := s.state.RegCodes[code]
+		if !ok {
 			missing = append(missing, code)
 			continue
 		}
-		delete(s.state.RegCodes, code)
+		if regCodeHasUsage(reg) {
+			reg.Active = false
+			s.state.RegCodes[code] = reg
+		} else {
+			delete(s.state.RegCodes, code)
+		}
 		deleted = append(deleted, code)
 	}
 	if len(deleted) == 0 {
 		return deleted, missing, nil
 	}
 	return deleted, missing, s.saveLocked()
+}
+
+func regCodeHasUsage(code RegCode) bool {
+	return code.UseCount > 0 || code.UsedBy != 0 || len(code.UsedByUIDs) > 0 || len(code.UsedByTelegramIDs) > 0
 }
 
 func (s *Store) Signin(uid int64) Signin {

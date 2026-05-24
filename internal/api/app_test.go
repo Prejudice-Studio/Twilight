@@ -932,6 +932,9 @@ func TestSchedulerCleanupBindCodesJob(t *testing.T) {
 	if err := app.store.UpsertBindCode(store.BindCode{Code: "OLD123456789", Scene: "register", CreatedAt: now - 800, ExpiresAt: now - 1}); err != nil {
 		t.Fatal(err)
 	}
+	if err := app.store.UpsertRegCode(store.RegCode{Code: "OLD-REGCODE", Type: 1, Days: 30, ValidityTime: 1, UseCountLimit: 1, Active: true, CreatedAt: now - 7200}); err != nil {
+		t.Fatal(err)
+	}
 	req := httptest.NewRequest(http.MethodPost, "/scheduler", nil)
 	summary, logs, err := app.runSchedulerJob(req, "cleanup_bind_codes")
 	if err != nil {
@@ -942,6 +945,9 @@ func TestSchedulerCleanupBindCodesJob(t *testing.T) {
 	}
 	if _, ok := app.store.BindCode("OLD123456789"); ok {
 		t.Fatal("scheduler did not delete expired bind code")
+	}
+	if _, ok := app.store.RegCode("OLD-REGCODE"); !ok {
+		t.Fatal("bind-code cleanup deleted a regcode")
 	}
 }
 
@@ -1412,6 +1418,40 @@ func TestSchedulerManualTriggerSpecDisablesAutoRun(t *testing.T) {
 	}
 	if next := app.schedulerNextRunAt("daily_stats", spec, time.Now()); next != 0 {
 		t.Fatalf("manual trigger should not have next run, got %d", next)
+	}
+}
+
+func TestSchedulerJobsReconcileStaleRunningHistory(t *testing.T) {
+	app := newTestApp(t)
+	run, err := app.store.AddSchedulerRunReturning(store.SchedulerRun{JobID: "enforce_group_membership", Type: "auto", Trigger: "scheduler", Status: "running", Message: "running", StartedAt: time.Now().Add(-time.Hour).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scheduler/jobs", nil)
+	rr := httptest.NewRecorder()
+	app.handleSchedulerJobs(rr, req, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("jobs status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	runs := app.store.SchedulerRuns("enforce_group_membership", 1)
+	if len(runs) != 1 || runs[0].ID != run.ID || runs[0].Status == "running" || runs[0].FinishedAt == 0 {
+		t.Fatalf("stale running history was not reconciled: %#v", runs)
+	}
+	if !boolish(runs[0].Summary["interrupted"]) {
+		t.Fatalf("reconciled run should be marked interrupted: %#v", runs[0])
+	}
+}
+
+func TestSchedulerTerminateIsIdempotentWhenJobAlreadyStopped(t *testing.T) {
+	app := newTestApp(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/scheduler/jobs/enforce_group_membership/terminate", nil)
+	rr := httptest.NewRecorder()
+	app.handleSchedulerTerminate(rr, req, Params{"job_id": "enforce_group_membership"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("terminate should be idempotent, status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"already_stopped":true`) {
+		t.Fatalf("terminate response did not mark already_stopped: %s", rr.Body.String())
 	}
 }
 
@@ -1965,6 +2005,138 @@ func TestPendingEmbyUserCanReplaceEntitlementWithRegisterCode(t *testing.T) {
 	reg, _ := app.store.RegCode("REG-REPLACE")
 	if reg.UseCount != 1 || reg.UsedBy != user.UID {
 		t.Fatalf("register code usage was not recorded: %#v", reg)
+	}
+}
+
+func TestRegisterCodeCapacityExcludesCodeBeingConsumedAndRejectsBoundUser(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg.EmbyUserLimit = 1
+	user, err := app.store.CreateUser(store.User{Username: "capacity-user", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store.UpsertRegCode(store.RegCode{Code: "REG-CAPACITY", Type: 1, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/use-code", strings.NewReader(`{"reg_code":"REG-CAPACITY"}`))
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, principal{User: user}))
+	rr := httptest.NewRecorder()
+	app.handleUseCode(rr, req, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("register code should consume its own reserved capacity slot, status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	bound, err := app.store.CreateUser(store.User{Username: "bound-user", Role: store.RoleNormal, Active: true, EmbyID: "emby-bound"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store.UpsertRegCode(store.RegCode{Code: "REG-BOUND", Type: 1, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/users/me/use-code", strings.NewReader(`{"reg_code":"REG-BOUND"}`))
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, principal{User: bound}))
+	rr = httptest.NewRecorder()
+	app.handleUseCode(rr, req, nil)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("Emby-bound user should not use register code as renewal, status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	reg, _ := app.store.RegCode("REG-BOUND")
+	if reg.UseCount != 0 {
+		t.Fatalf("rejected register code was consumed: %#v", reg)
+	}
+}
+
+func TestExpiredInviteCannotBeUsedOrConsumed(t *testing.T) {
+	app := newTestApp(t)
+	now := time.Now()
+	parent, err := app.store.CreateUser(store.User{Username: "expired-invite-parent", Role: store.RoleNormal, Active: true, EmbyID: "emby-parent", ExpiredAt: now.AddDate(0, 0, 30).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := app.store.CreateUser(store.User{Username: "expired-invite-child", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store.UpsertInviteCode(store.InviteCode{Code: "INV-EXPIRED-CODE", UID: parent.UID, InviterUID: parent.UID, Days: 7, UseCountLimit: 1, Active: true, CreatedAt: now.Add(-time.Hour).Unix(), ExpiredAt: now.Add(-time.Second).Unix()}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/invite/use", strings.NewReader(`{"code":"INV-EXPIRED-CODE"}`))
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, principal{User: child}))
+	rr := httptest.NewRecorder()
+	app.handleInviteUse(rr, req, nil)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expired invite should be rejected, status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if _, err := app.store.ConsumeInviteCode("INV-EXPIRED-CODE", child.UID); !errors.Is(err, store.ErrExpired) {
+		t.Fatalf("store should reject expired invite consumption, got %v", err)
+	}
+	invite, _ := app.store.InviteCode("INV-EXPIRED-CODE")
+	if invite.UseCount != 0 || invite.UsedByUID != 0 {
+		t.Fatalf("expired invite was consumed: %#v", invite)
+	}
+}
+
+func TestInviteRenewCodeCreatesTargetedRegCode(t *testing.T) {
+	app := newTestApp(t)
+	now := time.Now()
+	parent, err := app.store.CreateUser(store.User{Username: "renew-parent", Role: store.RoleNormal, Active: true, EmbyID: "emby-parent", ExpiredAt: now.AddDate(0, 0, 30).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := app.store.CreateUser(store.User{Username: "renew-child", Role: store.RoleNormal, Active: true, ExpiredAt: now.AddDate(0, 0, 1).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outsider, err := app.store.CreateUser(store.User{Username: "renew-outsider", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store.UpsertInviteCode(store.InviteCode{Code: "INV-RENEW-PARENT", UID: parent.UID, InviterUID: parent.UID, Days: 7, UseCountLimit: 1, Active: true, CreatedAt: now.Unix()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.store.ConsumeInviteCode("INV-RENEW-PARENT", child.UID); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/invite/renew-codes", strings.NewReader(fmt.Sprintf(`{"target_uid":%d,"days":5,"validity_hours":24}`, child.UID)))
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, principal{User: parent}))
+	rr := httptest.NewRecorder()
+	app.handleCreateInviteCode(rr, req, nil)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create renew code status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var env envelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	code := env.Data.(map[string]any)["code"].(string)
+	reg, ok := app.store.RegCode(code)
+	if !ok || reg.Type != 2 || reg.TargetUsername != child.Username || reg.ValidityTime != 24 {
+		t.Fatalf("renew code was not stored as targeted regcode: %#v", reg)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/users/me/renew", strings.NewReader(`{"reg_code":"`+code+`"}`))
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, principal{User: outsider}))
+	rr = httptest.NewRecorder()
+	app.handleRenew(rr, req, nil)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("outsider should not use targeted renew code, status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/users/me/renew", strings.NewReader(`{"reg_code":"`+code+`"}`))
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, principal{User: child}))
+	rr = httptest.NewRecorder()
+	app.handleRenew(rr, req, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("target child should use renew code, status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestPublicRegcodeCheckHidesTargetedCodes(t *testing.T) {
+	app := newTestApp(t)
+	if err := app.store.UpsertRegCode(store.RegCode{Code: "TARGET-SECRET", Type: 2, Days: 5, ValidityTime: -1, UseCountLimit: 1, Active: true, TargetUsername: "alpha"}); err != nil {
+		t.Fatal(err)
+	}
+	resp := doJSON(app, http.MethodPost, "/api/v1/users/regcode/check", `{"reg_code":"TARGET-SECRET"}`, nil)
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("public regcode check should hide targeted codes, status=%d body=%s", resp.Code, resp.Body.String())
 	}
 }
 
