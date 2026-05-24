@@ -37,6 +37,9 @@ func (a *App) handleListRegcodes(w http.ResponseWriter, r *http.Request, _ Param
 }
 
 func (a *App) handleCreateRegcodes(w http.ResponseWriter, r *http.Request, _ Params) {
+	if a.rejectRegcodeWriteIfStorageMismatch(w) {
+		return
+	}
 	payload := decodeMap(r)
 	count := intValue(payload, "count", 1)
 	if count < 1 {
@@ -89,6 +92,9 @@ func (a *App) handleCreateRegcodes(w http.ResponseWriter, r *http.Request, _ Par
 }
 
 func (a *App) handleUpdateRegcode(w http.ResponseWriter, r *http.Request, params Params) {
+	if a.rejectRegcodeWriteIfStorageMismatch(w) {
+		return
+	}
 	reg, okReg := a.store.RegCode(params["code"])
 	if !okReg {
 		fail(w, http.StatusNotFound, "注册码不存在")
@@ -100,6 +106,9 @@ func (a *App) handleUpdateRegcode(w http.ResponseWriter, r *http.Request, params
 }
 
 func (a *App) handleDeleteRegcode(w http.ResponseWriter, r *http.Request, params Params) {
+	if a.rejectRegcodeWriteIfStorageMismatch(w) {
+		return
+	}
 	if statusFromError(w, a.store.DeleteRegCode(params["code"])) {
 		return
 	}
@@ -111,6 +120,9 @@ func validRegcodeTargetUsername(username string) bool {
 }
 
 func (a *App) handleBatchDeleteRegcodes(w http.ResponseWriter, r *http.Request, _ Params) {
+	if a.rejectRegcodeWriteIfStorageMismatch(w) {
+		return
+	}
 	payload := decodeMap(r)
 	codes := regcodePayloadCodes(payload["codes"])
 	if len(codes) == 0 {

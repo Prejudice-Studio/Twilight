@@ -70,6 +70,25 @@ func newTestApp(t *testing.T) *App {
 	return app
 }
 
+func TestRegcodeWritesBlockedWhenRuntimeDatabaseMismatchesConfig(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg.DatabaseDriver = store.BackendPostgres
+
+	rec := httptest.NewRecorder()
+	if !app.rejectRegcodeWriteIfStorageMismatch(rec) {
+		t.Fatal("expected regcode writes to be blocked when configured database differs from active store")
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected conflict status, got %d", rec.Code)
+	}
+
+	app.cfg.DatabaseDriver = store.BackendJSON
+	rec = httptest.NewRecorder()
+	if app.rejectRegcodeWriteIfStorageMismatch(rec) {
+		t.Fatal("regcode writes were blocked even though active and configured databases match")
+	}
+}
+
 func TestAuthFlowAndCSRFMitigation(t *testing.T) {
 	app := newTestApp(t)
 

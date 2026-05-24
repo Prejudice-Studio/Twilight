@@ -36,6 +36,8 @@ func (a *App) handleDatabaseStatus(w http.ResponseWriter, r *http.Request, _ Par
 		"state_file":              a.cfg.StateFile,
 		"backup_dir":              a.cfg.DatabaseBackupDir,
 		"backup_count":            len(backups),
+		"storage_mismatch":        a.runtimeDatabaseMismatch(),
+		"storage_warning":         a.databaseMismatchWarning(),
 		"migration_panel_enabled": a.cfg.DatabaseMigrationPanelEnabled,
 		"postgres_configured":     a.cfg.PostgresDSN() != "",
 		"redis_enabled":           a.redis != nil,

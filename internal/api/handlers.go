@@ -612,6 +612,9 @@ func (a *App) handleRenew(w http.ResponseWriter, r *http.Request, _ Params) {
 		fail(w, http.StatusBadRequest, "续期码无效、已用完、已过期或不属于当前用户")
 		return
 	}
+	if a.rejectRegcodeWriteIfStorageMismatch(w) {
+		return
+	}
 	// Consume the reg code (validates active, use count, expiry)
 	code, err := a.store.ConsumeRegCode(regCode, p.User.UID, p.User.TelegramID)
 	if err != nil {
@@ -1686,16 +1689,18 @@ func (a *App) configuredServerIconPath() (string, string, bool) {
 func (a *App) handleHealth(w http.ResponseWriter, r *http.Request, _ Params) {
 	emby := a.embyOverview(r.Context())
 	data := map[string]any{
-		"status":          "healthy",
-		"time":            time.Now().Unix(),
-		"api":             true,
-		"database":        a.store != nil,
-		"emby":            boolValue(emby, "online", false),
-		"emby_configured": a.cfg.EmbyURL != "",
-		"redis":           a.redis != nil,
-		"storage":         a.store.Backend(),
-		"active_database": a.store.Backend(),
-		"config_database": strings.ToLower(a.cfg.DatabaseDriver),
+		"status":           "healthy",
+		"time":             time.Now().Unix(),
+		"api":              true,
+		"database":         a.store != nil,
+		"emby":             boolValue(emby, "online", false),
+		"emby_configured":  a.cfg.EmbyURL != "",
+		"redis":            a.redis != nil,
+		"storage":          a.store.Backend(),
+		"active_database":  a.store.Backend(),
+		"config_database":  strings.ToLower(a.cfg.DatabaseDriver),
+		"storage_mismatch": a.runtimeDatabaseMismatch(),
+		"storage_warning":  a.databaseMismatchWarning(),
 	}
 	ok(w, "OK", data)
 }

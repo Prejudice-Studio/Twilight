@@ -98,6 +98,9 @@ func (a *App) handleCreateInviteCode(w http.ResponseWriter, r *http.Request, _ P
 }
 
 func (a *App) handleCreateInviteRenewCode(w http.ResponseWriter, r *http.Request, user store.User, payload map[string]any) {
+	if a.rejectRegcodeWriteIfStorageMismatch(w) {
+		return
+	}
 	if !user.Active {
 		fail(w, http.StatusForbidden, "账号已被禁用，无法生成续期码")
 		return

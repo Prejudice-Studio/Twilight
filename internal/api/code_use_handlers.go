@@ -36,6 +36,9 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 		ok(w, "OK", preview)
 		return
 	}
+	if source == "regcode" && a.rejectRegcodeWriteIfStorageMismatch(w) {
+		return
+	}
 	replacesPendingEntitlement := source == "regcode" && p.User.EmbyID == "" && p.User.PendingEmby && codeGrantsEmbyRegistration(source, codeType)
 	var inviteForUse store.InviteCode
 	var inviterForUse store.User

@@ -451,6 +451,8 @@ func (a *App) handleRuntimeStatus(w http.ResponseWriter, r *http.Request, _ Para
 		"routes":              len(a.routes),
 		"active_database":     a.store.Backend(),
 		"config_database":     strings.ToLower(a.cfg.DatabaseDriver),
+		"storage_mismatch":    a.runtimeDatabaseMismatch(),
+		"storage_warning":     a.databaseMismatchWarning(),
 		"users":               a.store.UserCount(),
 		"log_level":           a.cfg.LogLevel,
 		"runtime_log_limit":   logLimit,
