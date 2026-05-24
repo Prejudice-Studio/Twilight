@@ -64,7 +64,7 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 	if !schedulerJobExists(jobID) {
 		return map[string]any{"success": false}, nil, fmt.Errorf("job not found")
 	}
-	params := schedulerRequestParams(r)
+	params := a.schedulerEffectiveParams(r, jobID)
 	if err := r.Context().Err(); err != nil {
 		return map[string]any{"success": false, "terminated": true}, []string{"job terminated before execution"}, err
 	}
@@ -244,7 +244,8 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		return map[string]any{"success": true, "remote_users": len(remote), "updated_names": updatedNames, "synced_state": syncedState, "missing": missing, "filled_emby_ids": filledIDs, "repaired_placeholders": repairedPlaceholders, "conflicts": conflicts}, []string{fmt.Sprintf("read %d Emby users", len(remote))}, nil
 	case "cleanup_no_emby":
 		ignoreEnabled := jobParamBool(params, "ignore_enabled_flag", false)
-		if !a.cfg.AutoCleanupNoEmby && !ignoreEnabled {
+		enabled := jobParamBool(params, "enabled", jobParamBool(params, "auto_enabled", a.cfg.AutoCleanupNoEmby))
+		if !enabled && !ignoreEnabled {
 			return map[string]any{"success": true, "enabled": false, "deleted": 0}, []string{"auto cleanup no-Emby disabled"}, nil
 		}
 		days := jobParamInt(params, "days", queryInt(r, "days", a.cfg.AutoCleanupNoEmbyDays))
@@ -295,14 +296,10 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		return map[string]any{"success": true, "enabled": true, "candidates": candidates, "deleted": deleted, "failed": failed, "dry_run": dryRun, "days": days, "days_threshold": days, "preserve_tg_bound": preserveTG, "skipped_pending_emby": skippedPending}, []string{fmt.Sprintf("processed %d no-Emby web users", candidates)}, nil
 	case "cleanup_pending_emby_entitlements":
 		ignoreEnabled := jobParamBool(params, "ignore_enabled_flag", false)
-		if !a.cfg.AutoCleanupPendingEmby && !ignoreEnabled {
+		enabled := jobParamBool(params, "enabled", jobParamBool(params, "auto_enabled", a.cfg.AutoCleanupPendingEmby))
+		if !enabled && !ignoreEnabled {
 			return map[string]any{"success": true, "enabled": false, "cleared": 0}, []string{"auto cleanup pending-Emby entitlement disabled"}, nil
 		}
-		days := jobParamInt(params, "days", queryInt(r, "days", a.cfg.AutoCleanupPendingEmbyDays))
-		if days <= 0 {
-			days = 7
-		}
-		threshold := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
 		dryRun := jobParamBool(params, "dry_run", false)
 		candidates := 0
 		cleared := 0
@@ -312,13 +309,6 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 				return map[string]any{"success": false, "terminated": true, "candidates": candidates, "cleared": cleared, "failed": failed, "dry_run": dryRun}, []string{"job terminated"}, err
 			}
 			if u.Role == store.RoleAdmin || u.Role == store.RoleWhitelist || u.EmbyID != "" || !u.PendingEmby {
-				continue
-			}
-			registered := u.RegisterTime
-			if registered == 0 {
-				registered = u.CreatedAt
-			}
-			if registered > threshold {
 				continue
 			}
 			candidates++
@@ -335,7 +325,7 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 				cleared++
 			}
 		}
-		return map[string]any{"success": true, "enabled": true, "candidates": candidates, "cleared": cleared, "failed": failed, "dry_run": dryRun, "days": days, "days_threshold": days}, []string{fmt.Sprintf("cleared %d pending Emby entitlements", cleared)}, nil
+		return map[string]any{"success": true, "enabled": true, "candidates": candidates, "cleared": cleared, "failed": failed, "dry_run": dryRun, "scope": "all"}, []string{fmt.Sprintf("cleared %d pending Emby entitlements", cleared)}, nil
 	case "enforce_group_membership":
 		result, logs, err := a.enforceTelegramMembership(r.Context())
 		result["success"] = err == nil
@@ -485,6 +475,22 @@ func schedulerRequestParams(r *http.Request) map[string]any {
 		return params
 	}
 	return payload
+}
+
+func (a *App) schedulerEffectiveParams(r *http.Request, jobID string) map[string]any {
+	var stored map[string]any
+	if schedule, ok := a.store.SchedulerSchedule(jobID); ok {
+		stored = schedule.RuntimeParams
+	}
+	params := a.schedulerRuntimeParamsFromSchedule(jobID, stored)
+	requestParams := schedulerRequestParams(r)
+	if len(params) == 0 {
+		return requestParams
+	}
+	for key, value := range requestParams {
+		params[key] = value
+	}
+	return params
 }
 
 func embyRemoteID(user map[string]any) string {

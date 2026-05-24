@@ -41,6 +41,7 @@ import {
   api,
   type SchedulerJobItem,
   type SchedulerJobRun,
+  type SchedulerSchedulePayload,
   type SchedulerTriggerSpec,
 } from "@/lib/api";
 
@@ -181,21 +182,19 @@ interface ScheduleEditorProps {
   onSaved: () => Promise<unknown> | unknown;
 }
 
-function cleanupSchedulerConfig(jobID: string) {
+function cleanupSchedulerRuntimeConfig(jobID: string) {
   if (jobID === "cleanup_no_emby") {
     return {
-      enabledKey: "auto_cleanup_no_emby",
-      daysKey: "auto_cleanup_no_emby_days",
-      title: "Web 账号清理阈值",
+      hasDays: true,
+      title: "Web 账号清理参数",
       description: "注册超过该天数、没有 Emby 且没有 Emby 开通资格的 Web 账号会被清理。",
     };
   }
   if (jobID === "cleanup_pending_emby_entitlements") {
     return {
-      enabledKey: "auto_cleanup_pending_emby",
-      daysKey: "auto_cleanup_pending_emby_days",
-      title: "Emby 开通资格清理阈值",
-      description: "拥有 Emby 注册资格但超过该天数仍未创建 Emby 的账号，只会被收回资格，不删除 Web 账号。",
+      hasDays: false,
+      title: "Emby 开通资格清理参数",
+      description: "每次执行会收回所有尚未创建 Emby 的开通资格，不删除 Web 账号。",
     };
   }
   return null;
@@ -224,12 +223,12 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
       setIntervalValue(1);
       setIntervalUnit("hours");
       setCleanupDays(String(Number((job.runtime_params || {}).days ?? 7) || 7));
-      setCleanupEnabled(Boolean((job.runtime_params || {}).auto_enabled));
+      setCleanupEnabled(Boolean((job.runtime_params || {}).enabled ?? (job.runtime_params || {}).auto_enabled));
       return;
     }
     setType(spec.type);
     setCleanupDays(String(Number((job.runtime_params || {}).days ?? 7) || 7));
-    setCleanupEnabled(Boolean((job.runtime_params || {}).auto_enabled));
+    setCleanupEnabled(Boolean((job.runtime_params || {}).enabled ?? (job.runtime_params || {}).auto_enabled));
     if (spec.type === "cron_daily") {
       setHour(spec.hour);
       setMinute(spec.minute);
@@ -246,12 +245,12 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
   }, [open, job]);
 
   if (!job) return null;
-  const cleanupConfig = cleanupSchedulerConfig(job.id);
+  const cleanupConfig = cleanupSchedulerRuntimeConfig(job.id);
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      let payload: SchedulerTriggerSpec;
+      let payload: SchedulerSchedulePayload;
       if (type === "manual") {
         payload = { type: "manual" };
       } else if (type === "cron_daily") {
@@ -274,21 +273,16 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
         payload = { type: "interval", seconds };
       }
       if (cleanupConfig) {
-        const days = Number(cleanupDays);
-        if (!Number.isFinite(days) || days < 1 || days > 3650) {
-          toast({ title: "清理阈值不合法", description: "天数必须在 1-3650 之间", variant: "destructive" });
-          return;
+        const runtimeParams: Record<string, unknown> = { enabled: cleanupEnabled };
+        if (cleanupConfig.hasDays) {
+          const days = Number(cleanupDays);
+          if (!Number.isFinite(days) || days < 1 || days > 3650) {
+            toast({ title: "清理参数不合法", description: "天数必须在 1-3650 之间", variant: "destructive" });
+            return;
+          }
+          runtimeParams.days = Math.trunc(days);
         }
-        const cfgRes = await api.updateConfigBySchema({
-          SAR: {
-            [cleanupConfig.enabledKey]: cleanupEnabled,
-            [cleanupConfig.daysKey]: Math.trunc(days),
-          },
-        });
-        if (!cfgRes.success) {
-          toast({ title: "配置保存失败", description: cfgRes.message, variant: "destructive" });
-          return;
-        }
+        payload.runtime_params = runtimeParams;
       }
       const res = await api.setSchedulerJobSchedule(job.id, payload);
       if (res.success) {
@@ -413,15 +407,17 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
             <div className="space-y-3 rounded-xl border border-border/70 bg-muted/30 p-3">
               <div className="space-y-2">
                 <Label>{cleanupConfig.title}</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  max={3650}
-                  value={cleanupDays}
-                  onChange={(e) => setCleanupDays(e.target.value)}
-                />
+                {cleanupConfig.hasDays && (
+                  <Input
+                    type="number"
+                    min={1}
+                    max={3650}
+                    value={cleanupDays}
+                    onChange={(e) => setCleanupDays(e.target.value)}
+                  />
+                )}
                 <p className="text-xs text-muted-foreground">
-                  写入 [SAR].{cleanupConfig.daysKey}。{cleanupConfig.description}
+                  {cleanupConfig.description}
                 </p>
               </div>
               <label className="flex items-start gap-2 rounded-lg border border-border/60 bg-background/60 p-2 text-sm">
@@ -434,7 +430,7 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
                 <span>
                   启用自动清理
                   <span className="block text-xs text-muted-foreground">
-                    写入 [SAR].{cleanupConfig.enabledKey}；关闭后定时自动执行会跳过，手动运行仍可临时强制执行。
+                    该开关保存到调度器数据库参数；关闭后定时自动执行会跳过，手动运行仍可临时强制执行。
                   </span>
                 </span>
               </label>
@@ -530,6 +526,7 @@ export default function AdminSchedulerPage() {
     const res = await api.listSchedulerJobs();
     if (res.success && res.data) {
       setJobs(res.data.jobs || []);
+      setRunning({});
     }
     return true;
   }, []);
@@ -607,7 +604,7 @@ export default function AdminSchedulerPage() {
         "preserve_tg_bound"
       ];
       setParamPreserveTg(lastPreserveTg === undefined ? true : Boolean(lastPreserveTg));
-      setParamIgnoreEnabled(Boolean((job.runtime_params as Record<string, unknown> | undefined)?.["auto_enabled"] ?? true));
+      setParamIgnoreEnabled(Boolean((job.runtime_params as Record<string, unknown> | undefined)?.["enabled"] ?? (job.runtime_params as Record<string, unknown> | undefined)?.["auto_enabled"] ?? true));
       setParamKickDryRun(true);
       setParamKickMaxPerRun("200");
       setParamJob(job);
@@ -639,17 +636,19 @@ export default function AdminSchedulerPage() {
   const handleParamConfirm = async () => {
     if (!paramJob) return;
     let params: Record<string, unknown> = {};
-    const cleanupConfig = cleanupSchedulerConfig(paramJob.id);
+    const cleanupConfig = cleanupSchedulerRuntimeConfig(paramJob.id);
     if (cleanupConfig) {
-      const days = Number(paramDays);
-      if (!Number.isFinite(days) || days < 1) {
-        toast({ title: "天数不合法", description: "必须 ≥ 1 天", variant: "destructive" });
-        return;
-      }
       params = {
-        days: Math.trunc(days),
         ignore_enabled_flag: paramIgnoreEnabled,
       };
+      if (cleanupConfig.hasDays) {
+        const days = Number(paramDays);
+        if (!Number.isFinite(days) || days < 1) {
+          toast({ title: "天数不合法", description: "必须 >= 1 天", variant: "destructive" });
+          return;
+        }
+        params.days = Math.trunc(days);
+      }
       if (paramJob.id === "cleanup_no_emby") {
         params.preserve_tg_bound = paramPreserveTg;
       }
@@ -916,20 +915,29 @@ export default function AdminSchedulerPage() {
             </DialogDescription>
           </DialogHeader>
 
-          {paramJob && cleanupSchedulerConfig(paramJob.id) && (
+          {paramJob && cleanupSchedulerRuntimeConfig(paramJob.id) && (
             <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>{cleanupSchedulerConfig(paramJob.id)?.title}</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  value={paramDays}
-                  onChange={(e) => setParamDays(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  {cleanupSchedulerConfig(paramJob.id)?.description}
-                </p>
-              </div>
+              {cleanupSchedulerRuntimeConfig(paramJob.id)?.hasDays ? (
+                <div className="space-y-2">
+                  <Label>{cleanupSchedulerRuntimeConfig(paramJob.id)?.title}</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={paramDays}
+                    onChange={(e) => setParamDays(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {cleanupSchedulerRuntimeConfig(paramJob.id)?.description}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label>{cleanupSchedulerRuntimeConfig(paramJob.id)?.title}</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {cleanupSchedulerRuntimeConfig(paramJob.id)?.description}
+                  </p>
+                </div>
+              )}
               {paramJob.id === "cleanup_no_emby" && (
                 <label className="flex items-start gap-2 text-sm">
                   <input

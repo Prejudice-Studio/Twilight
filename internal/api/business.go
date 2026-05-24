@@ -346,10 +346,7 @@ func regcodeDTO(code store.RegCode) map[string]any {
 }
 
 func regcodeUsedByUIDs(code store.RegCode) []int64 {
-	out := make([]int64, 0, len(code.UsedByUIDs)+1)
-	if code.UsedBy != 0 {
-		out = appendUniqueRegcodeInt64(out, code.UsedBy)
-	}
+	out := make([]int64, 0, len(code.UsedByUIDs))
 	for _, uid := range code.UsedByUIDs {
 		if uid != 0 {
 			out = appendUniqueRegcodeInt64(out, uid)

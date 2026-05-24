@@ -1179,15 +1179,15 @@ class ApiClient {
     );
   }
 
-  async setSchedulerJobSchedule(jobId: string, payload: SchedulerTriggerSpec) {
-    return this.request<{ job_id: string; trigger_spec: SchedulerTriggerSpec; is_custom: boolean }>(
+  async setSchedulerJobSchedule(jobId: string, payload: SchedulerSchedulePayload) {
+    return this.request<{ job_id: string; trigger_spec: SchedulerTriggerSpec; runtime_params?: Record<string, unknown> | null; is_custom: boolean }>(
       `/admin/scheduler/jobs/${encodeURIComponent(jobId)}/schedule`,
       { method: "PUT", body: JSON.stringify(payload) },
     );
   }
 
   async resetSchedulerJobSchedule(jobId: string) {
-    return this.request<{ job_id: string; trigger_spec: SchedulerTriggerSpec; is_custom: boolean }>(
+    return this.request<{ job_id: string; trigger_spec: SchedulerTriggerSpec; runtime_params?: Record<string, unknown> | null; is_custom: boolean }>(
       `/admin/scheduler/jobs/${encodeURIComponent(jobId)}/schedule`,
       { method: "DELETE" },
     );
@@ -2696,6 +2696,10 @@ export type SchedulerTriggerSpec =
   | { type: "cron_daily"; hour: number; minute: number }
   | { type: "interval"; seconds: number }
   | { type: "manual" };
+
+export type SchedulerSchedulePayload = SchedulerTriggerSpec & {
+  runtime_params?: Record<string, unknown> | null;
+};
 
 export interface SchedulerJobItem {
   id: string;

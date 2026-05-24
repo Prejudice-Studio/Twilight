@@ -980,8 +980,13 @@ func TestSchedulerCleanupPendingEmbyEntitlementsKeepsWebAccount(t *testing.T) {
 	app.cfg.AutoCleanupPendingEmby = true
 	app.cfg.AutoCleanupPendingEmbyDays = 1
 	old := time.Now().AddDate(0, 0, -3).Unix()
+	recent := time.Now().Unix()
 	days := 30
 	user, err := app.store.CreateUser(store.User{Username: "pending-clear", Role: store.RoleNormal, Active: true, PendingEmby: true, PendingEmbyDays: &days, RegisterTime: old, CreatedAt: old})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recentUser, err := app.store.CreateUser(store.User{Username: "pending-recent-clear", Role: store.RoleNormal, Active: true, PendingEmby: true, PendingEmbyDays: &days, RegisterTime: recent, CreatedAt: recent})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -990,7 +995,7 @@ func TestSchedulerCleanupPendingEmbyEntitlementsKeepsWebAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if int(numeric(summary["cleared"])) != 1 || int(numeric(summary["deleted"])) != 0 {
+	if int(numeric(summary["cleared"])) != 2 || int(numeric(summary["deleted"])) != 0 || asString(summary["scope"]) != "all" {
 		t.Fatalf("unexpected entitlement cleanup summary: %#v", summary)
 	}
 	updated, ok := app.store.User(user.UID)
@@ -999,6 +1004,10 @@ func TestSchedulerCleanupPendingEmbyEntitlementsKeepsWebAccount(t *testing.T) {
 	}
 	if updated.PendingEmby || updated.PendingEmbyDays != nil || !updated.Active {
 		t.Fatalf("pending entitlement was not cleared cleanly: %#v", updated)
+	}
+	updatedRecent, ok := app.store.User(recentUser.UID)
+	if !ok || updatedRecent.PendingEmby || updatedRecent.PendingEmbyDays != nil || !updatedRecent.Active {
+		t.Fatalf("recent pending entitlement was not cleared cleanly: ok=%v user=%#v", ok, updatedRecent)
 	}
 }
 
@@ -1403,6 +1412,56 @@ func TestSchedulerManualTriggerSpecDisablesAutoRun(t *testing.T) {
 	}
 	if next := app.schedulerNextRunAt("daily_stats", spec, time.Now()); next != 0 {
 		t.Fatalf("manual trigger should not have next run, got %d", next)
+	}
+}
+
+func TestSchedulerRuntimeParamsPersistInStoreAndDriveRunner(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg.AutoCleanupPendingEmby = true
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/scheduler/jobs/cleanup_pending_emby_entitlements/schedule", strings.NewReader(`{"type":"interval","seconds":120,"runtime_params":{"enabled":false}}`))
+	rr := httptest.NewRecorder()
+	app.handleSchedulerSchedule(rr, req, Params{"job_id": "cleanup_pending_emby_entitlements"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("schedule status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scheduler/jobs", nil)
+	listRR := httptest.NewRecorder()
+	app.handleSchedulerJobs(listRR, listReq, nil)
+	if listRR.Code != http.StatusOK {
+		t.Fatalf("jobs status=%d body=%s", listRR.Code, listRR.Body.String())
+	}
+	var body struct {
+		Data struct {
+			Jobs []map[string]any `json:"jobs"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(listRR.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, job := range body.Data.Jobs {
+		if asString(job["id"]) != "cleanup_pending_emby_entitlements" {
+			continue
+		}
+		found = true
+		params, _ := job["runtime_params"].(map[string]any)
+		if boolish(params["enabled"]) || asString(params["scope"]) != "all" {
+			t.Fatalf("runtime params did not come from backend store: %#v", params)
+		}
+	}
+	if !found {
+		t.Fatal("cleanup_pending_emby_entitlements job not returned")
+	}
+	days := 30
+	if _, err := app.store.CreateUser(store.User{Username: "pending-db-disabled", Role: store.RoleNormal, Active: true, PendingEmby: true, PendingEmbyDays: &days}); err != nil {
+		t.Fatal(err)
+	}
+	summary, _, err := app.runSchedulerJob(httptest.NewRequest(http.MethodPost, "/scheduler", nil), "cleanup_pending_emby_entitlements")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if boolish(summary["enabled"]) || int(numeric(summary["cleared"])) != 0 {
+		t.Fatalf("DB runtime params should disable automatic cleanup: %#v", summary)
 	}
 }
 
@@ -1842,7 +1901,7 @@ func TestInviteParentCanDetachExpiredChildAndKeepWebAccountActive(t *testing.T) 
 	}
 }
 
-func TestRegcodeDTOAndUsersIncludeLegacyUsedBy(t *testing.T) {
+func TestRegcodeDTOAndUsersHideLegacyUsedBy(t *testing.T) {
 	app := newTestApp(t)
 	user, err := app.store.CreateUser(store.User{Username: "legacy-user", Role: store.RoleNormal, Active: true})
 	if err != nil {
@@ -1851,8 +1910,8 @@ func TestRegcodeDTOAndUsersIncludeLegacyUsedBy(t *testing.T) {
 	reg := store.RegCode{Code: "LEGACY-USED", Type: 2, Days: 30, ValidityTime: -1, UseCountLimit: 5, UseCount: 1, UsedBy: user.UID, Active: true}
 	dto := regcodeDTO(reg)
 	uids, _ := dto["used_by_uids"].([]int64)
-	if len(uids) != 1 || uids[0] != user.UID || asString(dto["used_by"]) != strconv.FormatInt(user.UID, 10) {
-		t.Fatalf("legacy used_by was not exposed in dto: %#v", dto)
+	if len(uids) != 0 || asString(dto["used_by"]) != "" {
+		t.Fatalf("legacy used_by should be hidden in dto: %#v", dto)
 	}
 	if err := app.store.UpsertRegCode(reg); err != nil {
 		t.Fatal(err)
@@ -1860,8 +1919,14 @@ func TestRegcodeDTOAndUsersIncludeLegacyUsedBy(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/regcodes/LEGACY-USED/users", nil)
 	rr := httptest.NewRecorder()
 	app.handleRegcodeUsers(rr, req, Params{"code": "LEGACY-USED"})
-	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"username":"legacy-user"`) {
-		t.Fatalf("legacy used_by user was not listed, status=%d body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK || strings.Contains(rr.Body.String(), `"username":"legacy-user"`) {
+		t.Fatalf("legacy used_by user should not be listed, status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	reg.UsedByUIDs = []int64{user.UID}
+	dto = regcodeDTO(reg)
+	uids, _ = dto["used_by_uids"].([]int64)
+	if len(uids) != 1 || uids[0] != user.UID || asString(dto["used_by"]) != strconv.FormatInt(user.UID, 10) {
+		t.Fatalf("new used_by_uids should be exposed in dto: %#v", dto)
 	}
 }
 

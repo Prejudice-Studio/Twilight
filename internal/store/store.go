@@ -279,10 +279,11 @@ type SchedulerRun struct {
 }
 
 type SchedulerSchedule struct {
-	JobID       string         `json:"job_id"`
-	TriggerSpec map[string]any `json:"trigger_spec"`
-	IsCustom    bool           `json:"is_custom"`
-	UpdatedAt   int64          `json:"updated_at"`
+	JobID         string         `json:"job_id"`
+	TriggerSpec   map[string]any `json:"trigger_spec"`
+	RuntimeParams map[string]any `json:"runtime_params,omitempty"`
+	IsCustom      bool           `json:"is_custom"`
+	UpdatedAt     int64          `json:"updated_at"`
 }
 
 type Device struct {
@@ -1569,9 +1570,6 @@ func (s *Store) UpsertRegCode(code RegCode) error {
 	if !code.Active && code.UseCount == 0 {
 		code.Active = true
 	}
-	if code.UsedBy != 0 {
-		code.UsedByUIDs = appendUniqueInt64(code.UsedByUIDs, code.UsedBy)
-	}
 	s.state.RegCodes[code.Code] = code
 	return s.saveLocked()
 }
@@ -1767,9 +1765,13 @@ func (s *Store) SchedulerRuns(jobID string, limit int) []SchedulerRun {
 }
 
 func (s *Store) SetSchedulerSchedule(jobID string, spec map[string]any, custom bool) (SchedulerSchedule, error) {
+	return s.SetSchedulerScheduleWithParams(jobID, spec, nil, custom)
+}
+
+func (s *Store) SetSchedulerScheduleWithParams(jobID string, spec map[string]any, params map[string]any, custom bool) (SchedulerSchedule, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	schedule := SchedulerSchedule{JobID: jobID, TriggerSpec: spec, IsCustom: custom, UpdatedAt: time.Now().Unix()}
+	schedule := SchedulerSchedule{JobID: jobID, TriggerSpec: spec, RuntimeParams: params, IsCustom: custom, UpdatedAt: time.Now().Unix()}
 	if !custom {
 		delete(s.state.SchedulerSchedules, jobID)
 		return schedule, s.saveLocked()
