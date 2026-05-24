@@ -122,7 +122,7 @@ func (a *App) handleRegcodeUsers(w http.ResponseWriter, r *http.Request, params 
 		return
 	}
 	users := []map[string]any{}
-	for _, uid := range reg.UsedByUIDs {
+	for _, uid := range regcodeUsedByUIDs(reg) {
 		if u, okUser := a.store.User(uid); okUser {
 			users = append(users, publicUser(u))
 		}

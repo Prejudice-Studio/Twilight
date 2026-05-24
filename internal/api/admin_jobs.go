@@ -16,8 +16,10 @@ func (a *App) enforceTelegramMembership(ctx context.Context) (map[string]any, []
 	result := map[string]any{
 		"enabled": false, "telegram_available": a.telegramAvailable(), "groups": chats,
 		"scanned": 0, "disabled": 0, "emby_disabled": 0, "banned": 0, "rejoined_enabled": 0,
-		"skipped": 0, "failed": 0,
+		"rejoined_pending_review": 0, "rejoin_candidates": 0, "skipped": 0, "failed": 0,
+		"auto_enable_rejoined": a.cfg.TelegramAutoEnableRejoined,
 	}
+	rejoinCandidates := []map[string]any{}
 	logs := []string{}
 	if !a.cfg.TelegramRequireMembership || len(chats) == 0 {
 		logs = append(logs, "Telegram membership enforcement disabled")
@@ -65,20 +67,34 @@ func (a *App) enforceTelegramMembership(ctx context.Context) (map[string]any, []
 			}
 			continue
 		}
-		if !u.Active && a.cfg.TelegramAutoEnableRejoined && !a.cfg.TelegramBanOnLeave && len(missing) == 0 && (u.ExpiredAt <= 0 || u.ExpiredAt > now) {
-			updated, err := a.store.UpdateUser(u.UID, func(u *store.User) error { u.Active = true; return nil })
-			if err != nil {
-				result["failed"] = int(numeric(result["failed"])) + 1
+		if !u.Active && len(missing) == 0 && (u.ExpiredAt <= 0 || u.ExpiredAt > now) {
+			if a.cfg.TelegramAutoEnableRejoined && !a.cfg.TelegramBanOnLeave {
+				updated, err := a.store.UpdateUser(u.UID, func(u *store.User) error { u.Active = true; return nil })
+				if err != nil {
+					result["failed"] = int(numeric(result["failed"])) + 1
+					continue
+				}
+				if updated.EmbyID != "" {
+					_ = a.embySetUserEnabled(ctx, updated.EmbyID, a.embyShouldEnableUser(updated))
+				}
+				result["rejoined_enabled"] = int(numeric(result["rejoined_enabled"])) + 1
+				if len(logs) < 50 {
+					logs = append(logs, fmt.Sprintf("re-enabled uid=%d username=%s", updated.UID, updated.Username))
+				}
 				continue
 			}
-			if updated.EmbyID != "" {
-				_ = a.embySetUserEnabled(ctx, updated.EmbyID, a.embyShouldEnableUser(updated))
+			result["rejoined_pending_review"] = int(numeric(result["rejoined_pending_review"])) + 1
+			result["rejoin_candidates"] = int(numeric(result["rejoin_candidates"])) + 1
+			if len(rejoinCandidates) < 200 {
+				rejoinCandidates = append(rejoinCandidates, map[string]any{"uid": u.UID, "username": u.Username, "telegram_id": u.TelegramID, "emby_bound": u.EmbyID != "", "expired_at": zeroNil(u.ExpiredAt)})
 			}
-			result["rejoined_enabled"] = int(numeric(result["rejoined_enabled"])) + 1
 			if len(logs) < 50 {
-				logs = append(logs, fmt.Sprintf("re-enabled uid=%d username=%s", updated.UID, updated.Username))
+				logs = append(logs, fmt.Sprintf("rejoin pending review uid=%d username=%s", u.UID, u.Username))
 			}
 		}
+	}
+	if len(rejoinCandidates) > 0 {
+		result["rejoin_candidate_users"] = rejoinCandidates
 	}
 	return result, logs, nil
 }

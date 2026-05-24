@@ -64,6 +64,7 @@ const SUMMARY_LABELS: Record<string, string> = {
   scanned: "扫描",
   disabled: "禁用",
   deleted: "删除",
+  cleared: "清理资格",
   failed: "失败",
   sent: "发送",
   success: "成功",
@@ -79,6 +80,8 @@ const SUMMARY_LABELS: Record<string, string> = {
   days_threshold: "阈值(天)",
   preserve_tg_bound: "保留TG绑定",
   pending_register_excluded: "注册队列排除",
+  skipped_pending_emby: "跳过开通资格",
+  rejoined_pending_review: "回群待复核",
   rejoin_scanned: "复核扫描",
   rejoin_candidates: "待复核恢复",
   rejoin_expired_skipped: "过期跳过",
@@ -110,6 +113,7 @@ function formatSummaryValue(value: unknown): string {
   if (value === null || value === undefined) return "—";
   if (typeof value === "boolean") return value ? "是" : "否";
   if (typeof value === "number") return value.toLocaleString();
+  if (Array.isArray(value) || typeof value === "object") return "";
   return String(value);
 }
 
@@ -120,7 +124,7 @@ function formatRunType(run?: SchedulerJobRun | null): string {
 
 function renderSummaryChips(summary: SchedulerJobRun["summary"]) {
   if (!summary || typeof summary !== "object") return null;
-  const entries = Object.entries(summary);
+  const entries = Object.entries(summary).filter(([, value]) => !Array.isArray(value) && (value === null || typeof value !== "object"));
   if (entries.length === 0) return null;
 
   // 按已知键的顺序排（其余追加）
@@ -177,6 +181,26 @@ interface ScheduleEditorProps {
   onSaved: () => Promise<unknown> | unknown;
 }
 
+function cleanupSchedulerConfig(jobID: string) {
+  if (jobID === "cleanup_no_emby") {
+    return {
+      enabledKey: "auto_cleanup_no_emby",
+      daysKey: "auto_cleanup_no_emby_days",
+      title: "Web 账号清理阈值",
+      description: "注册超过该天数、没有 Emby 且没有 Emby 开通资格的 Web 账号会被清理。",
+    };
+  }
+  if (jobID === "cleanup_pending_emby_entitlements") {
+    return {
+      enabledKey: "auto_cleanup_pending_emby",
+      daysKey: "auto_cleanup_pending_emby_days",
+      title: "Emby 开通资格清理阈值",
+      description: "拥有 Emby 注册资格但超过该天数仍未创建 Emby 的账号，只会被收回资格，不删除 Web 账号。",
+    };
+  }
+  return null;
+}
+
 function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProps) {
   const { toast } = useToast();
   const [type, setType] = useState<SchedulerTriggerSpec["type"]>("cron_daily");
@@ -222,6 +246,7 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
   }, [open, job]);
 
   if (!job) return null;
+  const cleanupConfig = cleanupSchedulerConfig(job.id);
 
   const handleSave = async () => {
     setSaving(true);
@@ -248,7 +273,7 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
         }
         payload = { type: "interval", seconds };
       }
-      if (job.id === "cleanup_no_emby") {
+      if (cleanupConfig) {
         const days = Number(cleanupDays);
         if (!Number.isFinite(days) || days < 1 || days > 3650) {
           toast({ title: "清理阈值不合法", description: "天数必须在 1-3650 之间", variant: "destructive" });
@@ -256,8 +281,8 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
         }
         const cfgRes = await api.updateConfigBySchema({
           SAR: {
-            auto_cleanup_no_emby: cleanupEnabled,
-            auto_cleanup_no_emby_days: Math.trunc(days),
+            [cleanupConfig.enabledKey]: cleanupEnabled,
+            [cleanupConfig.daysKey]: Math.trunc(days),
           },
         });
         if (!cfgRes.success) {
@@ -267,7 +292,7 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
       }
       const res = await api.setSchedulerJobSchedule(job.id, payload);
       if (res.success) {
-        toast({ title: "已更新", description: job.id === "cleanup_no_emby" ? "触发器与清理阈值已保存" : describeTriggerSpec(res.data?.trigger_spec), variant: "success" });
+        toast({ title: "已更新", description: cleanupConfig ? "触发器与清理阈值已保存" : describeTriggerSpec(res.data?.trigger_spec), variant: "success" });
         onOpenChange(false);
         await onSaved();
       } else {
@@ -384,10 +409,10 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
             修改后立即生效并落库，重启进程后仍保留。选择“关闭自动执行”可完全停止该任务的自动调度；可点击「恢复默认」清除覆盖。
           </p>
 
-          {job.id === "cleanup_no_emby" && (
+          {cleanupConfig && (
             <div className="space-y-3 rounded-xl border border-border/70 bg-muted/30 p-3">
               <div className="space-y-2">
-                <Label>清理天数阈值</Label>
+                <Label>{cleanupConfig.title}</Label>
                 <Input
                   type="number"
                   min={1}
@@ -396,7 +421,7 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
                   onChange={(e) => setCleanupDays(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  写入 [SAR].auto_cleanup_no_emby_days。注册超过该天数且仍未绑定 Emby 的系统用户会被清理。
+                  写入 [SAR].{cleanupConfig.daysKey}。{cleanupConfig.description}
                 </p>
               </div>
               <label className="flex items-start gap-2 rounded-lg border border-border/60 bg-background/60 p-2 text-sm">
@@ -409,7 +434,7 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
                 <span>
                   启用自动清理
                   <span className="block text-xs text-muted-foreground">
-                    写入 [SAR].auto_cleanup_no_emby；关闭后定时自动执行会跳过，手动运行仍可临时强制执行。
+                    写入 [SAR].{cleanupConfig.enabledKey}；关闭后定时自动执行会跳过，手动运行仍可临时强制执行。
                   </span>
                 </span>
               </label>
@@ -474,7 +499,7 @@ function StatusBadge({ job }: { job: SchedulerJobItem }) {
 }
 
 // 哪些任务在手动触发时支持参数面板
-const PARAMETERIZED_JOBS = new Set(["cleanup_no_emby", "kick_unknown_group_members"]);
+const PARAMETERIZED_JOBS = new Set(["cleanup_no_emby", "cleanup_pending_emby_entitlements", "kick_unknown_group_members"]);
 
 export default function AdminSchedulerPage() {
   const { toast } = useToast();
@@ -614,7 +639,8 @@ export default function AdminSchedulerPage() {
   const handleParamConfirm = async () => {
     if (!paramJob) return;
     let params: Record<string, unknown> = {};
-    if (paramJob.id === "cleanup_no_emby") {
+    const cleanupConfig = cleanupSchedulerConfig(paramJob.id);
+    if (cleanupConfig) {
       const days = Number(paramDays);
       if (!Number.isFinite(days) || days < 1) {
         toast({ title: "天数不合法", description: "必须 ≥ 1 天", variant: "destructive" });
@@ -622,9 +648,11 @@ export default function AdminSchedulerPage() {
       }
       params = {
         days: Math.trunc(days),
-        preserve_tg_bound: paramPreserveTg,
         ignore_enabled_flag: paramIgnoreEnabled,
       };
+      if (paramJob.id === "cleanup_no_emby") {
+        params.preserve_tg_bound = paramPreserveTg;
+      }
     } else if (paramJob.id === "kick_unknown_group_members") {
       const mpr = Number(paramKickMaxPerRun);
       params = {
@@ -875,7 +903,7 @@ export default function AdminSchedulerPage() {
         onSaved={refresh}
       />
 
-      {/* 参数化手动触发：cleanup_no_emby / kick_unknown_group_members */}
+      {/* 参数化手动触发：cleanup jobs / kick_unknown_group_members */}
       <Dialog
         open={Boolean(paramJob)}
         onOpenChange={(open) => { if (!open) setParamJob(null); }}
@@ -888,10 +916,10 @@ export default function AdminSchedulerPage() {
             </DialogDescription>
           </DialogHeader>
 
-          {paramJob?.id === "cleanup_no_emby" && (
+          {paramJob && cleanupSchedulerConfig(paramJob.id) && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label>注册超过多少天才清理</Label>
+                <Label>{cleanupSchedulerConfig(paramJob.id)?.title}</Label>
                 <Input
                   type="number"
                   min={1}
@@ -899,23 +927,25 @@ export default function AdminSchedulerPage() {
                   onChange={(e) => setParamDays(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  仅删除注册时间 ≥ N 天且仍未补建 Emby 的非管理员账号。当前 Emby 注册队列里的 UID 会被强制排除。
+                  {cleanupSchedulerConfig(paramJob.id)?.description}
                 </p>
               </div>
-              <label className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={paramPreserveTg}
-                  onChange={(e) => setParamPreserveTg(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-border accent-primary"
-                />
-                <span>
-                  保留已绑 Telegram 的待激活账号
-                  <span className="block text-xs text-muted-foreground">
-                    他们仍可在前端 Modal 自助补建 Emby。关闭后这些“半完成”账号也会一并删除。
+              {paramJob.id === "cleanup_no_emby" && (
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={paramPreserveTg}
+                    onChange={(e) => setParamPreserveTg(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-border accent-primary"
+                  />
+                  <span>
+                    保留已绑定 Telegram 的账号
+                    <span className="block text-xs text-muted-foreground">
+                      勾选后已绑定 Telegram 但没有 Emby 的 Web 账号会被保留。
+                    </span>
                   </span>
-                </span>
-              </label>
+                </label>
+              )}
               <label className="flex items-start gap-2 text-sm">
                 <input
                   type="checkbox"
@@ -924,7 +954,7 @@ export default function AdminSchedulerPage() {
                   className="mt-0.5 h-4 w-4 rounded border-border accent-primary"
                 />
                 <span>
-                  忽略 AUTO_CLEANUP_NO_EMBY 总开关
+                  忽略自动清理总开关
                   <span className="block text-xs text-muted-foreground">
                     勾选后即便 config 里没启用自动清理，也能手动跑一次。
                   </span>

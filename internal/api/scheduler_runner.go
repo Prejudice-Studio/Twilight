@@ -155,35 +155,93 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 			return map[string]any{"success": false}, nil, err
 		}
 		remoteByID := map[string]map[string]any{}
+		remoteByName := map[string]map[string]any{}
+		duplicateRemoteNames := map[string]bool{}
 		for _, user := range remote {
-			if id := asString(user["Id"]); id != "" {
+			if id := embyRemoteID(user); id != "" {
 				remoteByID[id] = user
 			}
+			if name := normalizeEmbyName(embyRemoteName(user)); name != "" {
+				if _, exists := remoteByName[name]; exists {
+					duplicateRemoteNames[name] = true
+				}
+				remoteByName[name] = user
+			}
 		}
-		updatedNames, syncedState, missing := 0, 0, 0
+		for name := range duplicateRemoteNames {
+			delete(remoteByName, name)
+		}
+		claimedRemoteIDs := map[string]int64{}
+		for _, u := range a.store.ListUsers() {
+			if u.EmbyID != "" && !isSyntheticEmbyID(u.EmbyID, u.UID) {
+				claimedRemoteIDs[u.EmbyID] = u.UID
+			}
+		}
+		updatedNames, syncedState, missing, filledIDs, repairedPlaceholders, conflicts := 0, 0, 0, 0, 0, 0
 		for _, u := range a.store.ListUsers() {
 			if err := r.Context().Err(); err != nil {
-				return map[string]any{"success": false, "terminated": true, "updated_names": updatedNames, "synced_state": syncedState, "missing": missing}, []string{"job terminated"}, err
+				return map[string]any{"success": false, "terminated": true, "updated_names": updatedNames, "synced_state": syncedState, "missing": missing, "filled_emby_ids": filledIDs, "repaired_placeholders": repairedPlaceholders, "conflicts": conflicts}, []string{"job terminated"}, err
 			}
-			if u.EmbyID == "" {
-				continue
-			}
+			placeholder := isSyntheticEmbyID(u.EmbyID, u.UID)
 			remoteUser, okRemote := remoteByID[u.EmbyID]
 			if !okRemote {
+				for _, name := range []string{u.EmbyUsername, u.Username} {
+					if candidate, okByName := remoteByName[normalizeEmbyName(name)]; okByName {
+						remoteUser = candidate
+						okRemote = true
+						break
+					}
+				}
+			}
+			if !okRemote {
+				if u.EmbyID != "" {
+					missing++
+				}
+				continue
+			}
+			remoteID := embyRemoteID(remoteUser)
+			if remoteID == "" {
 				missing++
 				continue
 			}
-			name := asString(remoteUser["Name"])
-			if name != "" && name != u.EmbyUsername {
-				if _, err := a.store.UpdateUser(u.UID, func(u *store.User) error { u.EmbyUsername = name; return nil }); err == nil {
+			if ownerUID, claimed := claimedRemoteIDs[remoteID]; claimed && ownerUID != u.UID {
+				conflicts++
+				continue
+			}
+			name := embyRemoteName(remoteUser)
+			updatedUser := u
+			if remoteID != u.EmbyID || (name != "" && name != u.EmbyUsername) || u.PendingEmby {
+				var err error
+				updatedUser, err = a.store.UpdateUser(u.UID, func(u *store.User) error {
+					if remoteID != u.EmbyID {
+						u.EmbyID = remoteID
+					}
+					if name != "" {
+						u.EmbyUsername = name
+					}
+					u.PendingEmby = false
+					u.PendingEmbyDays = nil
+					return nil
+				})
+				if err == nil {
+					if remoteID != u.EmbyID {
+						filledIDs++
+						if placeholder {
+							repairedPlaceholders++
+						}
+					}
 					updatedNames++
+					claimedRemoteIDs[remoteID] = u.UID
+				} else {
+					conflicts++
+					continue
 				}
 			}
-			if a.embySetUserEnabled(r.Context(), u.EmbyID, a.embyShouldEnableUser(u)) == nil {
+			if a.embySetUserEnabled(r.Context(), updatedUser.EmbyID, a.embyShouldEnableUser(updatedUser)) == nil {
 				syncedState++
 			}
 		}
-		return map[string]any{"success": true, "remote_users": len(remote), "updated_names": updatedNames, "synced_state": syncedState, "missing": missing}, []string{fmt.Sprintf("read %d Emby users", len(remote))}, nil
+		return map[string]any{"success": true, "remote_users": len(remote), "updated_names": updatedNames, "synced_state": syncedState, "missing": missing, "filled_emby_ids": filledIDs, "repaired_placeholders": repairedPlaceholders, "conflicts": conflicts}, []string{fmt.Sprintf("read %d Emby users", len(remote))}, nil
 	case "cleanup_no_emby":
 		ignoreEnabled := jobParamBool(params, "ignore_enabled_flag", false)
 		if !a.cfg.AutoCleanupNoEmby && !ignoreEnabled {
@@ -202,17 +260,26 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		candidates := 0
 		deleted := 0
 		failed := 0
+		skippedPending := 0
 		for _, u := range a.store.ListUsers() {
 			if err := r.Context().Err(); err != nil {
-				return map[string]any{"success": false, "terminated": true, "candidates": candidates, "deleted": deleted, "failed": failed, "dry_run": dryRun}, []string{"job terminated"}, err
+				return map[string]any{"success": false, "terminated": true, "candidates": candidates, "deleted": deleted, "failed": failed, "dry_run": dryRun, "skipped_pending_emby": skippedPending}, []string{"job terminated"}, err
 			}
 			if u.Role == store.RoleAdmin || u.Role == store.RoleWhitelist || u.EmbyID != "" {
+				continue
+			}
+			if u.PendingEmby {
+				skippedPending++
 				continue
 			}
 			if preserveTG && u.TelegramID != 0 {
 				continue
 			}
-			if threshold > 0 && u.RegisterTime > threshold {
+			registered := u.RegisterTime
+			if registered == 0 {
+				registered = u.CreatedAt
+			}
+			if threshold > 0 && registered > threshold {
 				continue
 			}
 			candidates++
@@ -225,7 +292,50 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 				deleted++
 			}
 		}
-		return map[string]any{"success": true, "enabled": true, "candidates": candidates, "deleted": deleted, "failed": failed, "dry_run": dryRun, "days": days, "preserve_tg_bound": preserveTG}, []string{fmt.Sprintf("processed %d no-Emby users", candidates)}, nil
+		return map[string]any{"success": true, "enabled": true, "candidates": candidates, "deleted": deleted, "failed": failed, "dry_run": dryRun, "days": days, "days_threshold": days, "preserve_tg_bound": preserveTG, "skipped_pending_emby": skippedPending}, []string{fmt.Sprintf("processed %d no-Emby web users", candidates)}, nil
+	case "cleanup_pending_emby_entitlements":
+		ignoreEnabled := jobParamBool(params, "ignore_enabled_flag", false)
+		if !a.cfg.AutoCleanupPendingEmby && !ignoreEnabled {
+			return map[string]any{"success": true, "enabled": false, "cleared": 0}, []string{"auto cleanup pending-Emby entitlement disabled"}, nil
+		}
+		days := jobParamInt(params, "days", queryInt(r, "days", a.cfg.AutoCleanupPendingEmbyDays))
+		if days <= 0 {
+			days = 7
+		}
+		threshold := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
+		dryRun := jobParamBool(params, "dry_run", false)
+		candidates := 0
+		cleared := 0
+		failed := 0
+		for _, u := range a.store.ListUsers() {
+			if err := r.Context().Err(); err != nil {
+				return map[string]any{"success": false, "terminated": true, "candidates": candidates, "cleared": cleared, "failed": failed, "dry_run": dryRun}, []string{"job terminated"}, err
+			}
+			if u.Role == store.RoleAdmin || u.Role == store.RoleWhitelist || u.EmbyID != "" || !u.PendingEmby {
+				continue
+			}
+			registered := u.RegisterTime
+			if registered == 0 {
+				registered = u.CreatedAt
+			}
+			if registered > threshold {
+				continue
+			}
+			candidates++
+			if dryRun {
+				continue
+			}
+			if _, err := a.store.UpdateUser(u.UID, func(u *store.User) error {
+				u.PendingEmby = false
+				u.PendingEmbyDays = nil
+				return nil
+			}); err != nil {
+				failed++
+			} else {
+				cleared++
+			}
+		}
+		return map[string]any{"success": true, "enabled": true, "candidates": candidates, "cleared": cleared, "failed": failed, "dry_run": dryRun, "days": days, "days_threshold": days}, []string{fmt.Sprintf("cleared %d pending Emby entitlements", cleared)}, nil
 	case "enforce_group_membership":
 		result, logs, err := a.enforceTelegramMembership(r.Context())
 		result["success"] = err == nil
@@ -375,6 +485,26 @@ func schedulerRequestParams(r *http.Request) map[string]any {
 		return params
 	}
 	return payload
+}
+
+func embyRemoteID(user map[string]any) string {
+	return strings.TrimSpace(firstNonEmpty(asString(user["Id"]), asString(user["ID"]), asString(user["id"])))
+}
+
+func embyRemoteName(user map[string]any) string {
+	return strings.TrimSpace(firstNonEmpty(asString(user["Name"]), asString(user["name"]), asString(user["UserName"]), asString(user["Username"])))
+}
+
+func normalizeEmbyName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+func isSyntheticEmbyID(id string, uid int64) bool {
+	value := strings.TrimSpace(id)
+	if value == "" || uid == 0 {
+		return false
+	}
+	return strings.EqualFold(value, fmt.Sprintf("emby_%d", uid))
 }
 
 type schedulerParamsKey struct{}

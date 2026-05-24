@@ -8,7 +8,7 @@
 
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js&logoColor=white)](https://nextjs.org/)
-[![Version](https://img.shields.io/badge/Version-0.0.5-blue)](docs/VERSION_HISTORY.md)
+[![Version](https://img.shields.io/badge/Version-0.0.6-blue)](docs/VERSION_HISTORY.md)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 [Telegram 频道](https://t.me/Twilightpanel) · [Telegram 群组](https://t.me/TwilightPanelChat) · [文档导航](docs/README.md)

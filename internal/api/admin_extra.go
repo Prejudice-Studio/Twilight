@@ -533,7 +533,7 @@ func (a *App) handleAdminClearStalePendingEmby(w http.ResponseWriter, r *http.Re
 	}
 	targets := []store.User{}
 	for _, u := range a.store.ListUsers() {
-		if u.EmbyID == "" && u.PendingEmby && u.PendingEmbyDays == nil {
+		if u.EmbyID == "" && u.PendingEmby {
 			targets = append(targets, u)
 		}
 	}

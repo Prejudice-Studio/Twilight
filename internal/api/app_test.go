@@ -945,6 +945,175 @@ func TestSchedulerCleanupBindCodesJob(t *testing.T) {
 	}
 }
 
+func TestSchedulerCleanupNoEmbySkipsPendingEntitlements(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg.AutoCleanupNoEmby = true
+	app.cfg.AutoCleanupNoEmbyDays = 1
+	old := time.Now().AddDate(0, 0, -3).Unix()
+	plain, err := app.store.CreateUser(store.User{Username: "plain-no-emby", Role: store.RoleNormal, Active: true, RegisterTime: old, CreatedAt: old})
+	if err != nil {
+		t.Fatal(err)
+	}
+	days := 30
+	pending, err := app.store.CreateUser(store.User{Username: "pending-emby", Role: store.RoleNormal, Active: true, PendingEmby: true, PendingEmbyDays: &days, RegisterTime: old, CreatedAt: old})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/scheduler", nil)
+	summary, _, err := app.runSchedulerJob(req, "cleanup_no_emby")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if int(numeric(summary["deleted"])) != 1 || int(numeric(summary["skipped_pending_emby"])) != 1 {
+		t.Fatalf("unexpected cleanup summary: %#v", summary)
+	}
+	if _, ok := app.store.User(plain.UID); ok {
+		t.Fatal("plain no-Emby web user was not deleted")
+	}
+	if u, ok := app.store.User(pending.UID); !ok || !u.PendingEmby {
+		t.Fatalf("pending Emby entitlement user was not preserved: ok=%v user=%#v", ok, u)
+	}
+}
+
+func TestSchedulerCleanupPendingEmbyEntitlementsKeepsWebAccount(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg.AutoCleanupPendingEmby = true
+	app.cfg.AutoCleanupPendingEmbyDays = 1
+	old := time.Now().AddDate(0, 0, -3).Unix()
+	days := 30
+	user, err := app.store.CreateUser(store.User{Username: "pending-clear", Role: store.RoleNormal, Active: true, PendingEmby: true, PendingEmbyDays: &days, RegisterTime: old, CreatedAt: old})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/scheduler", nil)
+	summary, _, err := app.runSchedulerJob(req, "cleanup_pending_emby_entitlements")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if int(numeric(summary["cleared"])) != 1 || int(numeric(summary["deleted"])) != 0 {
+		t.Fatalf("unexpected entitlement cleanup summary: %#v", summary)
+	}
+	updated, ok := app.store.User(user.UID)
+	if !ok {
+		t.Fatal("web account was deleted while clearing pending Emby entitlement")
+	}
+	if updated.PendingEmby || updated.PendingEmbyDays != nil || !updated.Active {
+		t.Fatalf("pending entitlement was not cleared cleanly: %#v", updated)
+	}
+}
+
+func TestSchedulerEmbySyncRepairsPlaceholderAndMissingIDs(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg.EmbyToken = "token"
+	remoteUsers := []map[string]any{
+		{"Id": "real-alpha", "Name": "alpha", "Policy": map[string]any{}},
+		{"Id": "real-beta", "Name": "beta", "Policy": map[string]any{}},
+	}
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/Users":
+			_ = json.NewEncoder(w).Encode(remoteUsers)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/Users/"):
+			id := strings.TrimPrefix(r.URL.Path, "/Users/")
+			for _, user := range remoteUsers {
+				if asString(user["Id"]) == id {
+					_ = json.NewEncoder(w).Encode(user)
+					return
+				}
+			}
+			http.NotFound(w, r)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/Policy"):
+			_, _ = io.Copy(io.Discard, r.Body)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			t.Fatalf("unexpected Emby request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer emby.Close()
+	app.cfg.EmbyURL = emby.URL
+
+	alpha, err := app.store.CreateUser(store.User{Username: "alpha", Role: store.RoleNormal, Active: true, PendingEmby: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = app.store.UpdateUser(alpha.UID, func(u *store.User) error {
+		u.EmbyID = fmt.Sprintf("Emby_%d", alpha.UID)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	beta, err := app.store.CreateUser(store.User{Username: "local-beta", EmbyUsername: "beta", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/scheduler", nil)
+	summary, _, err := app.runSchedulerJob(req, "emby_sync")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if int(numeric(summary["filled_emby_ids"])) != 2 || int(numeric(summary["repaired_placeholders"])) != 1 {
+		t.Fatalf("unexpected emby sync summary: %#v", summary)
+	}
+	updatedAlpha, _ := app.store.User(alpha.UID)
+	if updatedAlpha.EmbyID != "real-alpha" || updatedAlpha.EmbyUsername != "alpha" || updatedAlpha.PendingEmby {
+		t.Fatalf("placeholder Emby ID was not repaired: %#v", updatedAlpha)
+	}
+	updatedBeta, _ := app.store.User(beta.UID)
+	if updatedBeta.EmbyID != "real-beta" || updatedBeta.EmbyUsername != "beta" {
+		t.Fatalf("missing Emby ID was not filled by username: %#v", updatedBeta)
+	}
+}
+
+func TestTelegramMembershipRejoinManualReviewAndAutoEnable(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg.TelegramMode = true
+	app.cfg.TelegramBotToken = "123:ABC"
+	app.cfg.TelegramRequireMembership = true
+	app.cfg.TelegramGroupIDs = []string{"-1001"}
+	user, err := app.store.CreateUser(store.User{Username: "rejoined", Role: store.RoleNormal, Active: false, TelegramID: 4242, EmbyID: "emby-rejoined"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.store.UpdateUser(user.UID, func(u *store.User) error { u.Active = false; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/bot123:ABC/getChatMember" {
+			t.Fatalf("unexpected telegram path: %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"status":"member","user":{"id":4242,"is_bot":false}}}`))
+	}))
+	defer tg.Close()
+	app.cfg.TelegramAPIURL = tg.URL
+
+	app.cfg.TelegramAutoEnableRejoined = false
+	summary, _, err := app.enforceTelegramMembership(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if int(numeric(summary["rejoined_pending_review"])) != 1 || int(numeric(summary["rejoin_candidates"])) != 1 {
+		t.Fatalf("manual review rejoin was not reported: %#v", summary)
+	}
+	if updated, _ := app.store.User(user.UID); updated.Active {
+		t.Fatal("manual review mode should not auto-enable the web account")
+	}
+
+	app.cfg.TelegramAutoEnableRejoined = true
+	summary, _, err = app.enforceTelegramMembership(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if int(numeric(summary["rejoined_enabled"])) != 1 {
+		t.Fatalf("auto rejoin did not enable user: %#v", summary)
+	}
+	if updated, _ := app.store.User(user.UID); !updated.Active {
+		t.Fatal("auto rejoin did not enable the web account")
+	}
+}
+
 func TestRegisterConsumesConfirmedTelegramBindCode(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg.BotInternalSecret = "test-secret"
@@ -998,6 +1167,20 @@ func TestRegisterRejectsUserSceneTelegramBindCode(t *testing.T) {
 	}
 	if _, ok := app.store.FindUserByUsername("bob"); ok {
 		t.Fatal("user was registered with a user-scene bind code")
+	}
+}
+
+func TestRegisterRejectsMalformedTelegramBindCodeBeforeLookup(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg.ForceBindTelegram = true
+	resp := doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"badbind","password":"badbind123A","telegram_bind_code":"../../bad"}`, nil)
+	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), "invalid telegram bind code format") {
+		t.Fatalf("malformed bind code status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	rr := doJSON(app, http.MethodGet, "/api/v1/users/telegram/register/bind-code/status?code=../../bad", ``, nil)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"invalid":true`) || !strings.Contains(rr.Body.String(), `"terminal":true`) {
+		t.Fatalf("malformed bind code status endpoint response=%d body=%s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -1533,6 +1716,10 @@ func TestRegCodeRandomAlgorithmsAndFormatFallback(t *testing.T) {
 	if !strings.HasPrefix(code, "TW-REG-") {
 		t.Fatalf("format without random should append random part, got %q", code)
 	}
+	mixedCase := generateRegCode("Twilight-{type}-Vip-{random}", 1, "digits-12", 30, 1, -1, 1)
+	if !strings.HasPrefix(mixedCase, "Twilight-REG-Vip-") {
+		t.Fatalf("custom format text casing was not preserved: %q", mixedCase)
+	}
 	seenSpecial := false
 	for i := 0; i < 10; i++ {
 		symbolCode := generateRegCode("TW-{random}", 1, "symbols-24", 30, i+1, -1, 1)
@@ -1652,6 +1839,29 @@ func TestInviteParentCanDetachExpiredChildAndKeepWebAccountActive(t *testing.T) 
 	updated, ok := app.store.User(child.UID)
 	if !ok || !updated.Active || updated.EmbyID != "" || updated.EmbyUsername != "" || updated.PendingEmby {
 		t.Fatalf("child web account was not preserved while Emby was cleared: %#v", updated)
+	}
+}
+
+func TestRegcodeDTOAndUsersIncludeLegacyUsedBy(t *testing.T) {
+	app := newTestApp(t)
+	user, err := app.store.CreateUser(store.User{Username: "legacy-user", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := store.RegCode{Code: "LEGACY-USED", Type: 2, Days: 30, ValidityTime: -1, UseCountLimit: 5, UseCount: 1, UsedBy: user.UID, Active: true}
+	dto := regcodeDTO(reg)
+	uids, _ := dto["used_by_uids"].([]int64)
+	if len(uids) != 1 || uids[0] != user.UID || asString(dto["used_by"]) != strconv.FormatInt(user.UID, 10) {
+		t.Fatalf("legacy used_by was not exposed in dto: %#v", dto)
+	}
+	if err := app.store.UpsertRegCode(reg); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/regcodes/LEGACY-USED/users", nil)
+	rr := httptest.NewRecorder()
+	app.handleRegcodeUsers(rr, req, Params{"code": "LEGACY-USED"})
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"username":"legacy-user"`) {
+		t.Fatalf("legacy used_by user was not listed, status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }
 

@@ -224,11 +224,16 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request, _ Params) {
 	var telegramID int64
 	var telegramUsername string
 	if a.cfg.ForceBindTelegram || telegramBindCode != "" {
+		if telegramBindCode == "" {
+			fail(w, http.StatusBadRequest, "闇€瑕佸厛瀹屾垚 Telegram 缁戝畾")
+			return
+		}
+		if !telegramBindCodePattern.MatchString(telegramBindCode) {
+			fail(w, http.StatusBadRequest, "invalid telegram bind code format")
+			return
+		}
 		bind, okBind := a.store.BindCode(telegramBindCode)
 		switch {
-		case telegramBindCode == "":
-			fail(w, http.StatusBadRequest, "需要先完成 Telegram 绑定")
-			return
 		case !okBind || bind.ExpiresAt <= time.Now().Unix():
 			if okBind {
 				_ = a.store.DeleteBindCode(telegramBindCode)
@@ -657,6 +662,10 @@ func (a *App) createBindCode(w http.ResponseWriter, uid int64, scene string) {
 
 func (a *App) handleBindCodeStatus(w http.ResponseWriter, r *http.Request, _ Params) {
 	code := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("code")))
+	if !telegramBindCodePattern.MatchString(code) {
+		ok(w, "OK", map[string]any{"code": code, "confirmed": false, "invalid": true, "terminal": true})
+		return
+	}
 	bind, okBind := a.store.BindCode(code)
 	if !okBind || bind.ExpiresAt < time.Now().Unix() {
 		if okBind {

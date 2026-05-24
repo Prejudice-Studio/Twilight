@@ -324,6 +324,7 @@ func regcodeDTO(code store.RegCode) map[string]any {
 	if created == 0 {
 		created = code.CreatedAt
 	}
+	usedByUIDs := regcodeUsedByUIDs(code)
 	return map[string]any{
 		"code":                 code.Code,
 		"type":                 code.Type,
@@ -338,10 +339,32 @@ func regcodeDTO(code store.RegCode) map[string]any {
 		"note":                 code.Note,
 		"target_username":      code.TargetUsername,
 		"created_time":         created,
-		"used_by":              joinInt64(code.UsedByUIDs),
-		"used_by_uids":         code.UsedByUIDs,
+		"used_by":              joinInt64(usedByUIDs),
+		"used_by_uids":         usedByUIDs,
 		"used_by_telegram_ids": code.UsedByTelegramIDs,
 	}
+}
+
+func regcodeUsedByUIDs(code store.RegCode) []int64 {
+	out := make([]int64, 0, len(code.UsedByUIDs)+1)
+	if code.UsedBy != 0 {
+		out = appendUniqueRegcodeInt64(out, code.UsedBy)
+	}
+	for _, uid := range code.UsedByUIDs {
+		if uid != 0 {
+			out = appendUniqueRegcodeInt64(out, uid)
+		}
+	}
+	return out
+}
+
+func appendUniqueRegcodeInt64(values []int64, value int64) []int64 {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 func joinInt64(values []int64) string {
@@ -384,7 +407,7 @@ func generateRegCode(format string, codeType int, algorithm string, days int, in
 	for placeholder, value := range replacements {
 		code = strings.ReplaceAll(code, placeholder, value)
 	}
-	return strings.ToUpper(code)
+	return code
 }
 
 func regCodeRandomPart(algorithm string) string {

@@ -86,6 +86,11 @@ export default function SettingsPage() {
   const [isEmbyLoading, setIsEmbyLoading] = useState(false);
   const [libraryAccess, setLibraryAccess] = useState<EmbyLibraryAccess | null>(null);
   const [isLibraryLoading, setIsLibraryLoading] = useState(false);
+  const hasEmbyRegistrationEntitlement =
+    Boolean(user?.pending_emby) &&
+    !user?.emby_id &&
+    user?.pending_emby_days !== null &&
+    user?.pending_emby_days !== undefined;
 
   // Email dialog
   const [editEmailOpen, setEditEmailOpen] = useState(false);
@@ -896,14 +901,14 @@ export default function SettingsPage() {
                 {!user?.emby_id ? (
                   <Button
                     onClick={() => {
-                      setCompletePendingEmby(Boolean(user?.pending_emby));
+                      setCompletePendingEmby(hasEmbyRegistrationEntitlement);
                       setEmbyUsername(user?.username || "");
                       setBindEmbyOpen(true);
                     }}
                     className="w-full sm:w-auto"
                   >
                     <LinkIcon className="mr-2 h-4 w-4" />
-                    {user?.pending_emby ? "继续开通" : "绑定"}
+                    {hasEmbyRegistrationEntitlement ? "继续开通" : "绑定"}
                   </Button>
                 ) : (
                   <Button
@@ -924,7 +929,7 @@ export default function SettingsPage() {
             </div>
             {!user?.emby_id && (
               <p className="text-sm text-muted-foreground">
-                {user?.pending_emby
+                {hasEmbyRegistrationEntitlement
                   ? "你已拥有 Emby 开通资格但尚未创建账号，可点击“继续开通”完成注册。"
                   : "如果您在 Emby 服务器中已有账号，可以在此绑定。绑定后即可使用该账号访问媒体内容。"}
               </p>

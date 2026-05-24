@@ -43,7 +43,7 @@ func run(args []string) error {
 	case "bot":
 		return runBot(args[2:])
 	case "version", "--version", "-v":
-		fmt.Println("Twilight Go Backend 0.0.4")
+		fmt.Println("Twilight Go Backend 0.0.6")
 		return nil
 	case "help", "--help", "-h":
 		printHelp()

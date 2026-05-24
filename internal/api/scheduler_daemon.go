@@ -226,6 +226,10 @@ func (a *App) schedulerDefaultTriggerSpec(jobID string) map[string]any {
 		return map[string]any{"type": "interval", "seconds": hours * 3600}
 	case "cleanup_bind_codes":
 		return map[string]any{"type": "interval", "seconds": 3600}
+	case "cleanup_no_emby":
+		return dailySpec("03:30", 3, 30)
+	case "cleanup_pending_emby_entitlements":
+		return dailySpec("03:45", 3, 45)
 	case "system_auto_update":
 		switch strings.ToLower(strings.TrimSpace(a.cfg.SystemUpdateTriggerType)) {
 		case "daily", "cron_daily":

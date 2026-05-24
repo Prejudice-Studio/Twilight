@@ -1569,6 +1569,9 @@ func (s *Store) UpsertRegCode(code RegCode) error {
 	if !code.Active && code.UseCount == 0 {
 		code.Active = true
 	}
+	if code.UsedBy != 0 {
+		code.UsedByUIDs = appendUniqueInt64(code.UsedByUIDs, code.UsedBy)
+	}
 	s.state.RegCodes[code.Code] = code
 	return s.saveLocked()
 }
@@ -1588,8 +1591,10 @@ func (s *Store) ConsumeRegCode(code string, uid, telegramID int64) (RegCode, err
 		return RegCode{}, ErrExpired
 	}
 	r.UseCount++
-	r.UsedBy = uid
-	r.UsedByUIDs = appendUniqueInt64(r.UsedByUIDs, uid)
+	if uid != 0 {
+		r.UsedBy = uid
+		r.UsedByUIDs = appendUniqueInt64(r.UsedByUIDs, uid)
+	}
 	if telegramID != 0 {
 		r.UsedByTelegramIDs = appendUniqueInt64(r.UsedByTelegramIDs, telegramID)
 	}

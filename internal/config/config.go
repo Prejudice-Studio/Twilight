@@ -122,6 +122,8 @@ type Config struct {
 	NotificationExpiryRemindDays int
 	AutoCleanupNoEmby            bool
 	AutoCleanupNoEmbyDays        int
+	AutoCleanupPendingEmby       bool
+	AutoCleanupPendingEmbyDays   int
 
 	RateLimitEnabled                  bool
 	RateLimitGlobalPerMinute          int
@@ -299,6 +301,8 @@ func Load(path string) (Config, error) {
 	cfg.UserLimit = reader.intValue(cfg.UserLimit, "SAR.user_limit", "Register.user_limit", "user_limit")
 	cfg.AutoCleanupNoEmby = reader.boolValue(cfg.AutoCleanupNoEmby, "SAR.auto_cleanup_no_emby", "Register.auto_cleanup_no_emby", "auto_cleanup_no_emby")
 	cfg.AutoCleanupNoEmbyDays = reader.intValue(cfg.AutoCleanupNoEmbyDays, "SAR.auto_cleanup_no_emby_days", "Register.auto_cleanup_no_emby_days", "auto_cleanup_no_emby_days")
+	cfg.AutoCleanupPendingEmby = reader.boolValue(cfg.AutoCleanupPendingEmby, "SAR.auto_cleanup_pending_emby", "Register.auto_cleanup_pending_emby", "auto_cleanup_pending_emby")
+	cfg.AutoCleanupPendingEmbyDays = reader.intValue(cfg.AutoCleanupPendingEmbyDays, "SAR.auto_cleanup_pending_emby_days", "Register.auto_cleanup_pending_emby_days", "auto_cleanup_pending_emby_days")
 	cfg.NotificationEnabled = reader.boolValue(cfg.NotificationEnabled, "Notification.enabled", "notification_enabled")
 	cfg.NotificationExpiryRemindDays = reader.intValue(cfg.NotificationExpiryRemindDays, "Notification.expiry_remind_days", "expiry_remind_days")
 	cfg.RateLimitEnabled = reader.boolValue(cfg.RateLimitEnabled, "RateLimit.enabled", "rate_limit_enabled")
@@ -346,7 +350,7 @@ func defaultConfigPath() string {
 func defaults() Config {
 	return Config{
 		AppName:                           "Twilight",
-		Version:                           "0.0.5",
+		Version:                           "0.0.6",
 		Host:                              "0.0.0.0",
 		Port:                              5000,
 		DatabaseDir:                       "db",
@@ -380,6 +384,7 @@ func defaults() Config {
 		NotificationEnabled:               true,
 		NotificationExpiryRemindDays:      3,
 		AutoCleanupNoEmbyDays:             7,
+		AutoCleanupPendingEmbyDays:        7,
 		RateLimitEnabled:                  true,
 		RateLimitGlobalPerMinute:          1200,
 		RateLimitLoginPerMinute:           60,
@@ -591,6 +596,12 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("TWILIGHT_EMBY_USER_LIMIT"); v != "" {
 		cfg.EmbyUserLimit = intValue(v, cfg.EmbyUserLimit)
+	}
+	if v := os.Getenv("TWILIGHT_AUTO_CLEANUP_PENDING_EMBY"); v != "" {
+		cfg.AutoCleanupPendingEmby = boolValue(v, cfg.AutoCleanupPendingEmby)
+	}
+	if v := os.Getenv("TWILIGHT_AUTO_CLEANUP_PENDING_EMBY_DAYS"); v != "" {
+		cfg.AutoCleanupPendingEmbyDays = intValue(v, cfg.AutoCleanupPendingEmbyDays)
 	}
 	if v := os.Getenv("TWILIGHT_REGCODE_FORMAT"); v != "" {
 		cfg.RegCodeFormat = strings.TrimSpace(v)

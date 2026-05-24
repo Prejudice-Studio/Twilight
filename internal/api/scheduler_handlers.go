@@ -14,7 +14,8 @@ var schedulerJobs = []map[string]any{
 	{"id": "daily_stats", "name": "每日统计", "description": "生成每日用户与活跃状态汇总。", "manual_only": false, "enabled": true},
 	{"id": "cleanup_sessions", "name": "会话巡检", "description": "读取 Emby 当前会话，统计活跃播放情况。", "manual_only": false, "enabled": true},
 	{"id": "emby_sync", "name": "同步 Emby 用户", "description": "同步本地用户与 Emby 用户名称、启用状态等信息。", "manual_only": true, "enabled": true},
-	{"id": "cleanup_no_emby", "name": "清理未补建 Emby 用户", "description": "清理长期未补建 Emby 的本地账号，可配置保留已绑定 Telegram 的用户。", "manual_only": false, "enabled": true, "runtime_params": []string{"days", "preserve_tg_bound", "ignore_enabled_flag"}},
+	{"id": "cleanup_no_emby", "name": "清理无 Emby Web 账号", "description": "清理注册后长期没有绑定或注册 Emby、且没有 Emby 开通资格的 Web 账号。", "manual_only": false, "enabled": true},
+	{"id": "cleanup_pending_emby_entitlements", "name": "清理未使用 Emby 开通资格", "description": "收回长期拥有 Emby 注册资格但尚未创建 Emby 的资格，不删除 Web 账号。", "manual_only": false, "enabled": true},
 	{"id": "enforce_group_membership", "name": "Telegram 群成员校验", "description": "校验用户是否仍在要求加入的 Telegram 群组内，并按配置处理退群用户。", "manual_only": false, "enabled": true},
 	{"id": "check_telegram_bindings", "name": "Telegram 绑定检查", "description": "检查重复或异常的 Telegram 绑定关系。", "manual_only": false, "enabled": true},
 	{"id": "system_auto_update", "name": "系统自动更新", "description": "按配置拉取可信 Git 仓库更新，并可选择重启服务。", "manual_only": false, "enabled": false},
@@ -37,6 +38,14 @@ func (a *App) handleSchedulerJobs(w http.ResponseWriter, r *http.Request, _ Para
 		}
 		item["trigger_spec"] = spec
 		item["default_trigger_spec"] = a.schedulerDefaultTriggerSpec(jobID)
+		switch jobID {
+		case "cleanup_no_emby":
+			item["runtime_params"] = map[string]any{"days": a.cfg.AutoCleanupNoEmbyDays, "auto_enabled": a.cfg.AutoCleanupNoEmby, "preserve_tg_bound": a.cfg.EmbyDirectRegisterEnabled}
+		case "cleanup_pending_emby_entitlements":
+			item["runtime_params"] = map[string]any{"days": a.cfg.AutoCleanupPendingEmbyDays, "auto_enabled": a.cfg.AutoCleanupPendingEmby}
+		case "kick_unknown_group_members":
+			item["runtime_params"] = map[string]any{"dry_run": true, "max_per_run": 200}
+		}
 		item["last_run"] = nil
 		item["next_run_at"] = zeroNil(a.schedulerNextRunAt(jobID, spec, time.Now()))
 		item["auto_disabled"] = schedulerTriggerDisabled(spec)
