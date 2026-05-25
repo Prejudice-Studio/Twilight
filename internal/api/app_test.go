@@ -448,7 +448,10 @@ func TestProtectedAdminConfigHiddenPreservedAndApplied(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := string(data)
-	if strings.Contains(content, "999") || strings.Contains(content, "mallory") {
+	// 必须用完整 key=value 形式断言，避免 Windows 临时目录里随机数字（典型如
+	// `...Temp\TestProtected...1493999686\001\state.json`）巧合包含 "999"
+	// 子串触发误报。"mallory" 同理保持显式 key=value 检查。
+	if strings.Contains(content, `admin_uids = "999"`) || strings.Contains(content, `admin_usernames = "mallory"`) {
 		t.Fatalf("submitted protected admin config was not stripped: %s", content)
 	}
 	if !strings.Contains(content, `admin_uids = "2"`) || !strings.Contains(content, `admin_usernames = "alice"`) {
