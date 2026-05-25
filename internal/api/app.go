@@ -494,21 +494,21 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(lw, r.Body, a.cfg().MaxUploadSize)
 	}
 	if a.store().IsIPBlacklisted(a.clientIP(r)) {
-		fail(lw, http.StatusForbidden, "IP 已被封禁")
+		failWithCode(lw, http.StatusForbidden, ErrIPBlacklisted, "IP 已被封禁")
 		return
 	}
 
 	if !a.allowRate(r.Context(), rateKey("global:", a.clientIP(r)), a.cfg().RateLimitGlobalPerMinute, time.Minute) {
-		fail(lw, http.StatusTooManyRequests, "请求过于频繁，请稍后再试")
+		failWithCode(lw, http.StatusTooManyRequests, ErrGlobalRateLimited, "请求过于频繁，请稍后再试")
 		return
 	}
 
 	route, params, methodAllowed := a.match(r.Method, r.URL.Path)
 	if route == nil {
 		if methodAllowed {
-			fail(lw, http.StatusMethodNotAllowed, "请求方法不允许")
+			failWithCode(lw, http.StatusMethodNotAllowed, ErrRouteMethodNotAllow, "请求方法不允许")
 		} else {
-			fail(lw, http.StatusNotFound, "接口不存在")
+			failWithCode(lw, http.StatusNotFound, ErrRouteNotFound, "接口不存在")
 		}
 		return
 	}

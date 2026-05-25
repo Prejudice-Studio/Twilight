@@ -260,6 +260,13 @@ export type ErrCode =
   | "DEMO_ACTION_INVALID"
   | "CONFIG_SAVE_FAILED"
   | "AUTH_APIKEY_LOGIN_RATE_LIMITED"
+  // === 中间件层（IP 黑名单 / 全局限流 / 路由分发） ===
+  // 比通用 FORBIDDEN / RATE_LIMITED / METHOD_NOT_ALLOWED / NOT_FOUND 更精确，
+  // UI 可以分别给出"联系管理员解封"、"稍后重试"、"接口已下线" 等不同 CTA。
+  | "SECURITY_IP_BLACKLISTED"
+  | "RATE_GLOBAL_LIMITED"
+  | "ROUTE_METHOD_NOT_ALLOWED"
+  | "ROUTE_NOT_FOUND"
   // === defaultErrorCode 兜底（response.go HTTP status → 通用码） ===
   // 完整覆盖 response.go 全部 13 个 fallback 字面量，任何 isKnownErrCode
   // 命中失败都意味着 errcode.go 又增了新协议码。
@@ -522,6 +529,11 @@ export const ErrCodes = {
   DemoActionInvalid: "DEMO_ACTION_INVALID",
   ConfigSaveFailed: "CONFIG_SAVE_FAILED",
   APIKeyLoginRateLimited: "AUTH_APIKEY_LOGIN_RATE_LIMITED",
+  // 中间件层（IP 黑名单 / 全局限流 / 路由分发）
+  IPBlacklisted: "SECURITY_IP_BLACKLISTED",
+  GlobalRateLimited: "RATE_GLOBAL_LIMITED",
+  RouteMethodNotAllowed: "ROUTE_METHOD_NOT_ALLOWED",
+  RouteNotFound: "ROUTE_NOT_FOUND",
   BadRequest: "BAD_REQUEST",
   Unauthorized: "UNAUTHORIZED",
   Forbidden: "FORBIDDEN",

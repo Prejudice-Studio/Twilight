@@ -303,6 +303,17 @@ const (
 	ErrTGBindGroupCheckFailed        ErrCode = "TG_BIND_GROUP_CHECK_FAILED"
 	ErrTGBindGroupMembershipRequired ErrCode = "TG_BIND_GROUP_MEMBERSHIP_REQUIRED"
 
+	// === 中间件层（IP 黑名单 / 全局限流 / 路由分发） ===
+	// 这一组错误码原本走 fail() 推导通用 FORBIDDEN / TOO_MANY_REQUESTS /
+	// METHOD_NOT_ALLOWED / NOT_FOUND，前端无法区分"IP 全局封禁"和"路由级
+	// forbidden"、"全局限流"和"登录限流 AUTH_LOGIN_RATE_LIMITED"，也无法
+	// 区分"路径不存在"和"用户/资源不存在 USER_NOT_FOUND"。补结构化码后，
+	// UI 可以分别给出"联系管理员解封"、"稍后重试"、"接口已下线" 等不同 CTA。
+	ErrIPBlacklisted        ErrCode = "SECURITY_IP_BLACKLISTED"
+	ErrGlobalRateLimited    ErrCode = "RATE_GLOBAL_LIMITED"
+	ErrRouteMethodNotAllow  ErrCode = "ROUTE_METHOD_NOT_ALLOWED"
+	ErrRouteNotFound        ErrCode = "ROUTE_NOT_FOUND"
+
 	// === 鉴权中间件 / Emby 越权拦截（app.go authenticate / emby.go） ===
 	// 这一组覆盖原本散落在中间件里的几条裸 fail() 路径。前端拿到这些码即可
 	// 给出更精准引导：API Key 失效 → 重新生成；账号禁用 → 提示申诉；Emby
