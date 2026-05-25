@@ -933,8 +933,16 @@ func (s *Store) saveLocked() error {
 		return err
 	}
 	if s.db != nil {
+		// 整 jsonb 一次写入大对象（用户表 + 邀请关系 + 登录历史 + … 数 MB）；
+		// 之前裸 context.Background() 一旦 PG 抖动会让 saveLocked 永久挂起，
+		// graceful shutdown 与并发 handler 全部跟着卡死。这里用 30s
+		// WithTimeout 兜底：到期 ExecContext 自行退出释放连接，调用方拿到
+		// context.DeadlineExceeded 走回滚分支（mutateAndSaveLocked 把内存 state
+		// 还原到 snapshot），磁盘和内存仍保持一致。
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 		_, err = s.db.ExecContext(
-			context.Background(),
+			ctx,
 			`INSERT INTO twilight_state (id, state, updated_at) VALUES (1, $1::jsonb, now())
 			 ON CONFLICT (id) DO UPDATE SET state = EXCLUDED.state, updated_at = now()`,
 			string(data),
