@@ -1008,7 +1008,15 @@ func (s *Store) refreshLocked() error {
 	var data []byte
 	var err error
 	if s.db != nil {
-		err = s.db.QueryRowContext(context.Background(), `SELECT state FROM twilight_state WHERE id = 1`).Scan(&data)
+		// 与 saveLocked 对齐：裸 context.Background 一旦 PG 抖动 / 主从切换
+		// 会让 refreshLocked 永久挂起，而 refreshLocked 是所有 mutating 路径
+		// 的前置（mutateAndSaveLocked / 直裸写者都走它）。整个 store mutex
+		// 会跟着卡死，进而把 HTTP handler、scheduler、bot 全部排队挂起。
+		// 30s 与 saveLocked 同档，超时由调用方拿到 context.DeadlineExceeded
+		// 后走错误回滚 / 报错路径。
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		err = s.db.QueryRowContext(ctx, `SELECT state FROM twilight_state WHERE id = 1`).Scan(&data)
 		if errors.Is(err, sql.ErrNoRows) {
 			s.state = emptyState()
 			return nil
@@ -1083,8 +1091,15 @@ func (s *Store) Snapshot() ([]byte, error) {
 // snapshotRuntimeLogsLocked 必须在持有 s.mu 的情况下调用，从 PG 拉出所有
 // runtime_logs（按 id 升序）以及 next_id（max(id)+1）。limit 暂不裁剪：
 // 备份要求时点完整，超大表的取舍交由保留策略（PruneRuntimeLogs）控制。
+//
+// 这里走显式 5min 超时：备份场景容忍时间长一些，但不能裸
+// context.Background 让备份卡死时把整个 store 写锁也卡死（Snapshot 由
+// s.mu.Lock 持有写锁调用本函数）。超时回 caller 让 admin 看到错误信息，
+// 比让全站登录 / 注册排队挂起强。
 func (s *Store) snapshotRuntimeLogsLocked() ([]RuntimeLogEntry, int64, error) {
-	rows, err := s.db.QueryContext(context.Background(), `
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	rows, err := s.db.QueryContext(ctx, `
 SELECT id, time, level, message, COALESCE(attrs, '{}'::jsonb)::text
 FROM twilight_runtime_logs
 ORDER BY id ASC`)
