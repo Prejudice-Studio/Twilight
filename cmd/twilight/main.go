@@ -159,9 +159,9 @@ func runAll(args []string) error {
 	if err != nil {
 		return err
 	}
-	defer state.Close()
 	app, err := api.New(cfg, state)
 	if err != nil {
+		state.Close()
 		return err
 	}
 
@@ -178,33 +178,91 @@ func runAll(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	errCh := make(chan error, 3)
+	// 三个 supervisor goroutine 各自把退出原因送到独立 channel：
+	//   - serverErr：ListenAndServe 退出（http.ErrServerClosed = 正常 shutdown）
+	//   - schedulerErr / botErr：scheduler / bot 退出。bot 在未配置 token 时
+	//     return nil，不能让这条 nil 当成"server 挂了"触发整进程退出（旧实现把
+	//     scheduler/bot 任意一个先收到的退出当作 fatal，bot 因为 1s 内 nil 退出
+	//     直接拖走 scheduler 与 server）。
+	// shutdown 路径：select 看到任一 fatal 后 stop()，等待所有 goroutine drain
+	// 完再 state.Close()，避免 scheduler/bot 持的 store 引用在 Close 后被解引用。
+	serverErr := make(chan error, 1)
+	schedulerErr := make(chan error, 1)
+	botErr := make(chan error, 1)
 	go func() {
 		zap.L().Info("Twilight Go API listening", zap.String("addr", server.Addr))
-		errCh <- server.ListenAndServe()
+		serverErr <- server.ListenAndServe()
 	}()
 	go func() {
-		errCh <- app.RunScheduler(ctx)
+		schedulerErr <- app.RunScheduler(ctx)
 	}()
 	go func() {
-		errCh <- app.RunTelegramBot(ctx)
+		botErr <- app.RunTelegramBot(ctx)
 	}()
 
+	closeStore := func() {
+		// 三条 goroutine 都 drain 完才 Close store：scheduler 退出顺序里若仍持
+		// 一个未醒的 PG 调用，提前 Close 会让那条 ExecContext 拿到 nil db。
+		state.Close()
+	}
+
+	var fatal error
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		return server.Shutdown(shutdownCtx)
-	case err := <-errCh:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
+	case err := <-serverErr:
+		if !errors.Is(err, http.ErrServerClosed) {
+			fatal = err
 		}
-		stop()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = server.Shutdown(shutdownCtx)
-		return err
+	case err := <-schedulerErr:
+		// scheduler 主循环 panic recover 后会重启，正常路径只有 ctx.Done 才返回
+		// nil；非 nil 表示长时间崩溃后 RunScheduler 自己放弃。视作 fatal。
+		if err != nil {
+			fatal = err
+		}
+	case err := <-botErr:
+		// bot 在未配置 token 时立即 return nil，这条不能视为 fatal：进入
+		// "server + scheduler 继续跑，bot 不参与"模式，并继续等下一个事件。
+		if err != nil {
+			fatal = err
+		} else {
+			zap.L().Info("telegram bot exited cleanly; remaining services keep running")
+			select {
+			case <-ctx.Done():
+			case err := <-serverErr:
+				if !errors.Is(err, http.ErrServerClosed) {
+					fatal = err
+				}
+			case err := <-schedulerErr:
+				if err != nil {
+					fatal = err
+				}
+			}
+		}
 	}
+
+	stop()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = server.Shutdown(shutdownCtx)
+
+	// drain 剩余 channel：每个 goroutine 退出时都会向自己 channel 发一条，这里
+	// 先排空再 Close store。serverErr 已可能在 select 里被消费，再读一次会阻塞，
+	// 用 select+default 保证不卡死。
+	drain := func(ch <-chan error) {
+		select {
+		case <-ch:
+		case <-time.After(15 * time.Second):
+		}
+	}
+	drain(serverErr)
+	drain(schedulerErr)
+	drain(botErr)
+	closeStore()
+
+	if fatal != nil && !errors.Is(fatal, http.ErrServerClosed) {
+		return fatal
+	}
+	return nil
 }
 
 func runScheduler(args []string) error {
