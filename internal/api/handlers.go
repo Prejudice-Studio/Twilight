@@ -1769,7 +1769,6 @@ func (a *App) handleExportPlayback(w http.ResponseWriter, r *http.Request, _ Par
 		})
 	}
 	cw.Flush()
-	return
 }
 
 func (a *App) handleWatchStats(w http.ResponseWriter, r *http.Request, _ Params) {
