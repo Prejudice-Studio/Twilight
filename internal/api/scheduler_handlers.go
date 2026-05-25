@@ -32,7 +32,7 @@ func (a *App) handleSchedulerJobs(w http.ResponseWriter, r *http.Request, _ Para
 		item := cloneMap(job)
 		jobID := fmt.Sprint(job["id"])
 		var spec map[string]any
-		if schedule, okSchedule := a.store.SchedulerSchedule(jobID); okSchedule {
+		if schedule, okSchedule := a.store().SchedulerSchedule(jobID); okSchedule {
 			spec = schedule.TriggerSpec
 			item["is_custom"] = schedule.IsCustom
 			item["runtime_params"] = a.schedulerRuntimeParamsFromSchedule(jobID, schedule.RuntimeParams)
@@ -48,7 +48,7 @@ func (a *App) handleSchedulerJobs(w http.ResponseWriter, r *http.Request, _ Para
 		a.reconcileSchedulerRunState(jobID, running)
 		item["next_run_at"] = zeroNil(a.schedulerNextRunAt(jobID, spec, time.Now()))
 		item["auto_disabled"] = schedulerTriggerDisabled(spec)
-		if runs := a.store.SchedulerRuns(jobID, 20); len(runs) > 0 {
+		if runs := a.store().SchedulerRuns(jobID, 20); len(runs) > 0 {
 			item["last_run"] = runs[0]
 			var lastAuto, lastManual int64
 			for _, run := range runs {
@@ -83,7 +83,7 @@ func (a *App) handleSchedulerTerminate(w http.ResponseWriter, r *http.Request, p
 }
 func (a *App) handleSchedulerLastRun(w http.ResponseWriter, r *http.Request, params Params) {
 	a.reconcileSchedulerRunState(params["job_id"], a.schedulerJobRunning(params["job_id"]))
-	runs := a.store.SchedulerRuns(params["job_id"], 1)
+	runs := a.store().SchedulerRuns(params["job_id"], 1)
 	var last any
 	if len(runs) > 0 {
 		last = runs[0]
@@ -92,7 +92,7 @@ func (a *App) handleSchedulerLastRun(w http.ResponseWriter, r *http.Request, par
 }
 func (a *App) handleSchedulerHistory(w http.ResponseWriter, r *http.Request, params Params) {
 	a.reconcileSchedulerRunState(params["job_id"], a.schedulerJobRunning(params["job_id"]))
-	runs := a.store.SchedulerRuns(params["job_id"], queryInt(r, "limit", 20))
+	runs := a.store().SchedulerRuns(params["job_id"], queryInt(r, "limit", 20))
 	ok(w, "OK", map[string]any{"job_id": params["job_id"], "history": runs, "total": len(runs)})
 }
 func (a *App) handleSchedulerSchedule(w http.ResponseWriter, r *http.Request, params Params) {
@@ -102,7 +102,7 @@ func (a *App) handleSchedulerSchedule(w http.ResponseWriter, r *http.Request, pa
 		return
 	}
 	if r.Method == http.MethodDelete {
-		schedule, err := a.store.SetSchedulerSchedule(jobID, a.schedulerDefaultTriggerSpec(jobID), false)
+		schedule, err := a.store().SetSchedulerSchedule(jobID, a.schedulerDefaultTriggerSpec(jobID), false)
 		if statusFromError(w, err) {
 			return
 		}
@@ -121,7 +121,7 @@ func (a *App) handleSchedulerSchedule(w http.ResponseWriter, r *http.Request, pa
 		spec["seconds"] = clamp(intValue(payload, "seconds", 3600), 60, 604800)
 	}
 	runtimeParams := a.schedulerRuntimeParamsFromPayload(jobID, payload)
-	schedule, err := a.store.SetSchedulerScheduleWithParams(jobID, spec, runtimeParams, true)
+	schedule, err := a.store().SetSchedulerScheduleWithParams(jobID, spec, runtimeParams, true)
 	if statusFromError(w, err) {
 		return
 	}
@@ -131,13 +131,13 @@ func (a *App) handleSchedulerSchedule(w http.ResponseWriter, r *http.Request, pa
 func (a *App) schedulerDefaultRuntimeParams(jobID string) map[string]any {
 	switch jobID {
 	case "cleanup_no_emby":
-		days := a.cfg.AutoCleanupNoEmbyDays
+		days := a.cfg().AutoCleanupNoEmbyDays
 		if days <= 0 {
 			days = 7
 		}
-		return map[string]any{"enabled": a.cfg.AutoCleanupNoEmby, "auto_enabled": a.cfg.AutoCleanupNoEmby, "days": days, "preserve_tg_bound": a.cfg.EmbyDirectRegisterEnabled}
+		return map[string]any{"enabled": a.cfg().AutoCleanupNoEmby, "auto_enabled": a.cfg().AutoCleanupNoEmby, "days": days, "preserve_tg_bound": a.cfg().EmbyDirectRegisterEnabled}
 	case "cleanup_pending_emby_entitlements":
-		return map[string]any{"enabled": a.cfg.AutoCleanupPendingEmby, "auto_enabled": a.cfg.AutoCleanupPendingEmby, "scope": "all"}
+		return map[string]any{"enabled": a.cfg().AutoCleanupPendingEmby, "auto_enabled": a.cfg().AutoCleanupPendingEmby, "scope": "all"}
 	case "kick_unknown_group_members":
 		return map[string]any{"dry_run": true, "max_per_run": 200}
 	default:
@@ -176,11 +176,11 @@ func (a *App) schedulerRuntimeParamsFromPayload(jobID string, payload map[string
 func (a *App) normalizeSchedulerRuntimeParams(jobID string, params map[string]any) map[string]any {
 	switch jobID {
 	case "cleanup_no_emby":
-		enabled := boolValue(params, "enabled", boolValue(params, "auto_enabled", a.cfg.AutoCleanupNoEmby))
-		days := clamp(intValue(params, "days", a.cfg.AutoCleanupNoEmbyDays), 1, 3650)
-		return map[string]any{"enabled": enabled, "auto_enabled": enabled, "days": days, "preserve_tg_bound": boolValue(params, "preserve_tg_bound", a.cfg.EmbyDirectRegisterEnabled)}
+		enabled := boolValue(params, "enabled", boolValue(params, "auto_enabled", a.cfg().AutoCleanupNoEmby))
+		days := clamp(intValue(params, "days", a.cfg().AutoCleanupNoEmbyDays), 1, 3650)
+		return map[string]any{"enabled": enabled, "auto_enabled": enabled, "days": days, "preserve_tg_bound": boolValue(params, "preserve_tg_bound", a.cfg().EmbyDirectRegisterEnabled)}
 	case "cleanup_pending_emby_entitlements":
-		enabled := boolValue(params, "enabled", boolValue(params, "auto_enabled", a.cfg.AutoCleanupPendingEmby))
+		enabled := boolValue(params, "enabled", boolValue(params, "auto_enabled", a.cfg().AutoCleanupPendingEmby))
 		return map[string]any{"enabled": enabled, "auto_enabled": enabled, "scope": "all"}
 	case "kick_unknown_group_members":
 		return map[string]any{"dry_run": boolValue(params, "dry_run", true), "max_per_run": clamp(intValue(params, "max_per_run", 200), 1, 500)}
@@ -199,11 +199,11 @@ func (a *App) reconcileSchedulerRunState(jobID string, running bool) {
 		return
 	}
 	now := time.Now().Unix()
-	for _, run := range a.store.SchedulerRuns(jobID, 20) {
+	for _, run := range a.store().SchedulerRuns(jobID, 20) {
 		if run.Status != "running" {
 			continue
 		}
-		if _, err := a.store.UpdateSchedulerRun(run.ID, func(current *store.SchedulerRun) error {
+		if _, err := a.store().UpdateSchedulerRun(run.ID, func(current *store.SchedulerRun) error {
 			if current.Status != "running" {
 				return nil
 			}

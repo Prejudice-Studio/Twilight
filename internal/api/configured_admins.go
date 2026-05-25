@@ -8,7 +8,7 @@ import (
 )
 
 func (a *App) applyConfiguredAdmins() {
-	if a.store == nil {
+	if a.store() == nil {
 		return
 	}
 	uidSet := a.configuredAdminUIDSet()
@@ -16,11 +16,11 @@ func (a *App) applyConfiguredAdmins() {
 	if len(uidSet) == 0 && len(nameSet) == 0 {
 		return
 	}
-	for _, user := range a.store.ListUsers() {
+	for _, user := range a.store().ListUsers() {
 		if !configuredAdminMatchSets(uidSet, nameSet, user.UID, user.Username) {
 			continue
 		}
-		updated, err := a.store.UpdateUser(user.UID, func(u *store.User) error {
+		updated, err := a.store().UpdateUser(user.UID, func(u *store.User) error {
 			u.Role = store.RoleAdmin
 			u.Active = true
 			return nil
@@ -45,7 +45,7 @@ func configuredAdminMatchSets(uidSet map[int64]bool, nameSet map[string]bool, ui
 
 func (a *App) configuredAdminUIDSet() map[int64]bool {
 	uidSet := map[int64]bool{}
-	for _, uid := range a.cfg.AdminUIDs {
+	for _, uid := range a.cfg().AdminUIDs {
 		if uid > 0 {
 			uidSet[uid] = true
 		}
@@ -55,7 +55,7 @@ func (a *App) configuredAdminUIDSet() map[int64]bool {
 
 func (a *App) configuredAdminUsernameSet() map[string]bool {
 	nameSet := map[string]bool{}
-	for _, username := range a.cfg.AdminUsernames {
+	for _, username := range a.cfg().AdminUsernames {
 		username = strings.ToLower(strings.TrimSpace(username))
 		if username != "" {
 			nameSet[username] = true

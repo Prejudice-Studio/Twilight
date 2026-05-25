@@ -18,23 +18,23 @@ import (
 // 拆分原则：仅做「按业务域归位」，不修改任何对外行为；现有 router/路由表不变。
 
 func (a *App) handleSigninConfig(w http.ResponseWriter, r *http.Request, _ Params) {
-	ok(w, "OK", signinConfigPayload(a.cfg))
+	ok(w, "OK", signinConfigPayload(*a.cfg()))
 }
 
 func (a *App) handleSigninMe(w http.ResponseWriter, r *http.Request, _ Params) {
-	si := a.store.Signin(current(r).User.UID)
-	ok(w, "OK", signinSummaryPayload(a.cfg, si))
+	si := a.store().Signin(current(r).User.UID)
+	ok(w, "OK", signinSummaryPayload(*a.cfg(), si))
 }
 
 func (a *App) handleSignin(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.cfg.SigninEnabled {
+	if !a.cfg().SigninEnabled {
 		failWithCode(w, http.StatusForbidden, ErrSigninDisabled, "签到功能未开启")
 		return
 	}
-	dailyPoints := signinDailyPoints(a.cfg)
-	si, createdToday, err := a.store.AddSigninWithOptions(current(r).User.UID, dailyPoints, func(streak int) int {
-		return signinBonusForStreak(a.cfg, streak)
-	}, a.cfg.SigninResetAfterMiss)
+	dailyPoints := signinDailyPoints(*a.cfg())
+	si, createdToday, err := a.store().AddSigninWithOptions(current(r).User.UID, dailyPoints, func(streak int) int {
+		return signinBonusForStreak(*a.cfg(), streak)
+	}, a.cfg().SigninResetAfterMiss)
 	if statusFromError(w, err) {
 		return
 	}
@@ -48,7 +48,7 @@ func (a *App) handleSignin(w http.ResponseWriter, r *http.Request, _ Params) {
 			bonusPoints = last.BonusPoints
 		}
 	}
-	payload := signinActionPayload(a.cfg, si, createdToday, dailyPoints, bonusPoints)
+	payload := signinActionPayload(*a.cfg(), si, createdToday, dailyPoints, bonusPoints)
 	if createdToday {
 		ok(w, "签到成功", payload)
 		return
@@ -57,7 +57,7 @@ func (a *App) handleSignin(w http.ResponseWriter, r *http.Request, _ Params) {
 }
 
 func (a *App) handleSigninHistory(w http.ResponseWriter, r *http.Request, _ Params) {
-	si := a.store.Signin(current(r).User.UID)
+	si := a.store().Signin(current(r).User.UID)
 	records := append([]store.SigninRecord(nil), si.Records...)
 	sort.Slice(records, func(i, j int) bool { return records[i].CreatedAt > records[j].CreatedAt })
 	limit := queryInt(r, "limit", 30)
@@ -86,7 +86,7 @@ func (a *App) handleSigninHistory(w http.ResponseWriter, r *http.Request, _ Para
 			"created_at":   record.CreatedAt,
 		})
 	}
-	ok(w, "OK", map[string]any{"records": items, "currency_name": signinCurrencyName(a.cfg)})
+	ok(w, "OK", map[string]any{"records": items, "currency_name": signinCurrencyName(*a.cfg())})
 }
 
 func signinCurrencyName(cfg config.Config) string {

@@ -20,7 +20,7 @@ import (
 const embyAdminCacheMaxEntries = 10000
 
 func (a *App) embyIsAdmin(ctx context.Context, embyID string) bool {
-	if embyID == "" || a.cfg.EmbyURL == "" {
+	if embyID == "" || a.cfg().EmbyURL == "" {
 		return false
 	}
 	now := time.Now()
@@ -77,7 +77,7 @@ func (a *App) evictEmbyAdminCacheLocked(now time.Time) {
 // 而且每处超时各异（1.5s / 10s / 无超时）。统一后调用方只需选超时档位
 // （embyHealthFast 1.5s / 默认 5s / 自定义 ctx），不再自己写 fallback。
 func (a *App) embyHealth(ctx context.Context) (info map[string]any, ok bool) {
-	if a.cfg.EmbyURL == "" {
+	if a.cfg().EmbyURL == "" {
 		return nil, false
 	}
 	if err := a.embyGet(ctx, "/System/Info/Public", &info); err == nil && info != nil {

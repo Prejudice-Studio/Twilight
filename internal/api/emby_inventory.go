@@ -113,7 +113,7 @@ func (a *App) embyCheckInventory(ctx context.Context, payload map[string]any) ma
 			mediaType = normalizeInventoryMediaType(firstNonEmpty(asString(detail["media_type"]), mediaType))
 		}
 	}
-	if a.cfg.EmbyURL == "" {
+	if a.cfg().EmbyURL == "" {
 		return inventoryResult(false, "库存检查不可用：Emby 未配置", nil, nil, season)
 	}
 	var item map[string]any

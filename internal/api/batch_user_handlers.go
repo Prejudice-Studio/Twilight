@@ -27,7 +27,7 @@ func (a *App) handleBatchToggleUsers(w http.ResponseWriter, r *http.Request, ena
 	}
 	result := batchResult(len(uids))
 	for _, uid := range uniqueInt64s(uids) {
-		target, okUser := a.store.User(uid)
+		target, okUser := a.store().User(uid)
 		if !okUser {
 			addBatchOutcome(result, uid, fmt.Errorf("user not found"))
 			continue
@@ -36,8 +36,8 @@ func (a *App) handleBatchToggleUsers(w http.ResponseWriter, r *http.Request, ena
 			addBatchOutcome(result, uid, fmt.Errorf("cannot batch toggle protected account: %s", a.protectedUserReason(target)))
 			continue
 		}
-		updated, err := a.store.UpdateUser(uid, func(u *store.User) error { u.Active = enable; return nil })
-		if err == nil && updated.EmbyID != "" && a.cfg.EmbyURL != "" {
+		updated, err := a.store().UpdateUser(uid, func(u *store.User) error { u.Active = enable; return nil })
+		if err == nil && updated.EmbyID != "" && a.cfg().EmbyURL != "" {
 			if syncErr := a.embySetUserEnabled(r.Context(), updated.EmbyID, a.embyShouldEnableUser(updated)); syncErr != nil {
 				err = syncErr
 			}
@@ -57,7 +57,7 @@ func (a *App) handleBatchRenewUsers(w http.ResponseWriter, r *http.Request, _ Pa
 	}
 	result := batchResult(len(uids))
 	for _, uid := range uids {
-		_, err := a.store.UpdateUser(uid, func(u *store.User) error {
+		_, err := a.store().UpdateUser(uid, func(u *store.User) error {
 			u.ExpiredAt = addDaysToExpiry(u.ExpiredAt, days, time.Now())
 			return nil
 		})
@@ -79,7 +79,7 @@ func (a *App) handleBatchDeleteUsers(w http.ResponseWriter, r *http.Request, _ P
 			addBatchOutcome(result, uid, fmt.Errorf("cannot delete current admin"))
 			continue
 		}
-		target, okUser := a.store.User(uid)
+		target, okUser := a.store().User(uid)
 		if !okUser {
 			addBatchOutcome(result, uid, fmt.Errorf("user not found"))
 			continue
@@ -88,7 +88,7 @@ func (a *App) handleBatchDeleteUsers(w http.ResponseWriter, r *http.Request, _ P
 			addBatchOutcome(result, uid, fmt.Errorf("cannot batch delete protected account: %s", a.protectedUserReason(target)))
 			continue
 		}
-		if deleteEmby && a.cfg.EmbyURL != "" {
+		if deleteEmby && a.cfg().EmbyURL != "" {
 			if target.EmbyID != "" {
 				if err := a.embyDelete(r.Context(), "/Users/"+urlPathEscape(target.EmbyID)); err != nil {
 					addBatchOutcome(result, uid, err)
@@ -96,7 +96,7 @@ func (a *App) handleBatchDeleteUsers(w http.ResponseWriter, r *http.Request, _ P
 				}
 			}
 		}
-		addBatchOutcome(result, uid, a.store.DeleteUser(uid))
+		addBatchOutcome(result, uid, a.store().DeleteUser(uid))
 	}
 	ok(w, "批量删除完成", result)
 }
@@ -109,7 +109,7 @@ func (a *App) handleBatchLibrarySelfService(w http.ResponseWriter, r *http.Reque
 	enabled := boolValue(payload, "enabled", true)
 	result := batchResult(len(uids))
 	for _, uid := range uniqueInt64s(uids) {
-		_, err := a.store.UpdateUser(uid, func(u *store.User) error {
+		_, err := a.store().UpdateUser(uid, func(u *store.User) error {
 			u.LibrarySelfService = enabled
 			return nil
 		})
@@ -136,7 +136,7 @@ func (a *App) handleBatchUserLibraries(w http.ResponseWriter, r *http.Request, _
 	enableAll := boolValue(payload, "enable_all", false)
 	result := batchResult(len(uids))
 	for _, uid := range uniqueInt64s(uids) {
-		target, okUser := a.store.User(uid)
+		target, okUser := a.store().User(uid)
 		if !okUser {
 			addBatchOutcome(result, uid, fmt.Errorf("user not found"))
 			continue

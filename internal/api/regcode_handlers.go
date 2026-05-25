@@ -9,7 +9,7 @@ import (
 )
 
 func (a *App) handleListRegcodes(w http.ResponseWriter, r *http.Request, _ Params) {
-	codes := a.store.ListRegCodes()
+	codes := a.store().ListRegCodes()
 	page := max(1, queryInt(r, "page", 1))
 	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
 	statusFilter := strings.ToLower(r.URL.Query().Get("status"))
@@ -56,8 +56,8 @@ func (a *App) handleCreateRegcodes(w http.ResponseWriter, r *http.Request, _ Par
 	}
 	validity := int64(intValue(payload, "validity_time", -1))
 	useLimit := intValue(payload, "use_count_limit", 1)
-	format := firstNonEmpty(stringValue(payload, "format"), a.cfg.RegCodeFormat, "TW-{type}-{random}")
-	algorithm := firstNonEmpty(stringValue(payload, "random_algorithm"), a.cfg.RegCodeRandomAlgorithm, "base32-20")
+	format := firstNonEmpty(stringValue(payload, "format"), a.cfg().RegCodeFormat, "TW-{type}-{random}")
+	algorithm := firstNonEmpty(stringValue(payload, "random_algorithm"), a.cfg().RegCodeRandomAlgorithm, "base32-20")
 	codes := make([]string, 0, count)
 	targetUsername := strings.TrimSpace(stringValue(payload, "target_username"))
 	if targetUsername != "" && !validRegcodeTargetUsername(targetUsername) {
@@ -72,7 +72,7 @@ func (a *App) handleCreateRegcodes(w http.ResponseWriter, r *http.Request, _ Par
 			if seen[candidate] {
 				continue
 			}
-			if _, exists := a.store.RegCode(candidate); exists {
+			if _, exists := a.store().RegCode(candidate); exists {
 				continue
 			}
 			code = candidate
@@ -83,7 +83,7 @@ func (a *App) handleCreateRegcodes(w http.ResponseWriter, r *http.Request, _ Par
 			return
 		}
 		seen[code] = true
-		if err := a.store.UpsertRegCode(store.RegCode{Code: code, Type: codeType, ValidityTime: validity, UseCountLimit: useLimit, Days: days, Note: truncateString(stringValue(payload, "note"), 120), IsDecoy: boolValue(payload, "decoy", false), TargetUsername: targetUsername, Active: true}); statusFromError(w, err) {
+		if err := a.store().UpsertRegCode(store.RegCode{Code: code, Type: codeType, ValidityTime: validity, UseCountLimit: useLimit, Days: days, Note: truncateString(stringValue(payload, "note"), 120), IsDecoy: boolValue(payload, "decoy", false), TargetUsername: targetUsername, Active: true}); statusFromError(w, err) {
 			return
 		}
 		codes = append(codes, code)
@@ -95,13 +95,13 @@ func (a *App) handleUpdateRegcode(w http.ResponseWriter, r *http.Request, params
 	if a.rejectRegcodeWriteIfStorageMismatch(w) {
 		return
 	}
-	reg, okReg := a.store.RegCode(params["code"])
+	reg, okReg := a.store().RegCode(params["code"])
 	if !okReg {
 		failWithCode(w, http.StatusNotFound, ErrRegcodeNotFound, "注册码不存在")
 		return
 	}
 	reg.Note = stringValue(decodeMap(r), "note")
-	_ = a.store.UpsertRegCode(reg)
+	_ = a.store().UpsertRegCode(reg)
 	ok(w, "注册码已更新", regcodeDTO(reg))
 }
 
@@ -109,7 +109,7 @@ func (a *App) handleDeleteRegcode(w http.ResponseWriter, r *http.Request, params
 	if a.rejectRegcodeWriteIfStorageMismatch(w) {
 		return
 	}
-	if statusFromError(w, a.store.DeleteRegCode(params["code"])) {
+	if statusFromError(w, a.store().DeleteRegCode(params["code"])) {
 		return
 	}
 	ok(w, "注册码已删除", nil)
@@ -137,7 +137,7 @@ func (a *App) handleBatchDeleteRegcodes(w http.ResponseWriter, r *http.Request, 
 		failWithCode(w, http.StatusBadRequest, ErrRegcodeBatchTooLarge, "单次最多删除 200 个注册码")
 		return
 	}
-	deleted, missing, err := a.store.DeleteRegCodes(codes)
+	deleted, missing, err := a.store().DeleteRegCodes(codes)
 	if err != nil {
 		failWithCode(w, http.StatusInternalServerError, ErrRegcodeBatchFailed, "批量删除注册码失败")
 		return
@@ -151,14 +151,14 @@ func (a *App) handleBatchDeleteRegcodes(w http.ResponseWriter, r *http.Request, 
 }
 
 func (a *App) handleRegcodeUsers(w http.ResponseWriter, r *http.Request, params Params) {
-	reg, okReg := a.store.RegCode(params["code"])
+	reg, okReg := a.store().RegCode(params["code"])
 	if !okReg {
 		failWithCode(w, http.StatusNotFound, ErrRegcodeNotFound, "注册码不存在")
 		return
 	}
 	users := []map[string]any{}
 	for _, uid := range regcodeUsedByUIDs(reg) {
-		if u, okUser := a.store.User(uid); okUser {
+		if u, okUser := a.store().User(uid); okUser {
 			users = append(users, publicUser(u))
 		}
 	}

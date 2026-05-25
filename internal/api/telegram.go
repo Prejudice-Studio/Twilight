@@ -19,12 +19,12 @@ type telegramResponse struct {
 }
 
 func (a *App) telegramAvailable() bool {
-	return a.cfg.TelegramMode && strings.TrimSpace(a.cfg.TelegramBotToken) != ""
+	return a.cfg().TelegramMode && strings.TrimSpace(a.cfg().TelegramBotToken) != ""
 }
 
 func (a *App) telegramEndpoint(method string) string {
-	base := strings.TrimRight(firstNonEmpty(a.cfg.TelegramAPIURL, "https://api.telegram.org"), "/")
-	token := strings.TrimSpace(a.cfg.TelegramBotToken)
+	base := strings.TrimRight(firstNonEmpty(a.cfg().TelegramAPIURL, "https://api.telegram.org"), "/")
+	token := strings.TrimSpace(a.cfg().TelegramBotToken)
 	if strings.HasSuffix(base, "/bot"+token) {
 		return base + "/" + method
 	}
@@ -93,7 +93,7 @@ func (a *App) telegramSanitizeError(err error) string {
 		return ""
 	}
 	msg := err.Error()
-	token := strings.TrimSpace(a.cfg.TelegramBotToken)
+	token := strings.TrimSpace(a.cfg().TelegramBotToken)
 	if token == "" {
 		return msg
 	}
@@ -187,17 +187,17 @@ func (a *App) telegramBanChatMember(ctx context.Context, chatID string, userID i
 }
 
 func (a *App) telegramMembershipMissing(ctx context.Context, telegramID int64, strict bool) ([]string, error) {
-	chats := telegramChatIDs(a.cfg.TelegramGroupIDs)
+	chats := telegramChatIDs(a.cfg().TelegramGroupIDs)
 	return a.telegramMembershipMissingForChats(ctx, telegramID, chats, strict)
 }
 
 func (a *App) telegramBindRequirementMissing(ctx context.Context, telegramID int64) ([]string, error) {
 	chats := []string{}
-	if a.cfg.TelegramForceBindGroup {
-		chats = append(chats, telegramChatIDs(a.cfg.TelegramGroupIDs)...)
+	if a.cfg().TelegramForceBindGroup {
+		chats = append(chats, telegramChatIDs(a.cfg().TelegramGroupIDs)...)
 	}
-	if a.cfg.TelegramForceBindChannel {
-		chats = append(chats, telegramChatIDs(a.cfg.TelegramChannelIDs)...)
+	if a.cfg().TelegramForceBindChannel {
+		chats = append(chats, telegramChatIDs(a.cfg().TelegramChannelIDs)...)
 	}
 	return a.telegramMembershipMissingForChats(ctx, telegramID, chats, true)
 }
@@ -219,7 +219,7 @@ func (a *App) telegramMembershipMissingForChats(ctx context.Context, telegramID 
 			msg := strings.ToLower(err.Error())
 			if strings.Contains(msg, "not found") || strings.Contains(msg, "participant") || strings.Contains(msg, "user not found") {
 				missing = append(missing, chatID)
-				_ = a.store.MarkTelegramRosterLeft(chatID, telegramID, "left")
+				_ = a.store().MarkTelegramRosterLeft(chatID, telegramID, "left")
 				continue
 			}
 			if strict {
@@ -231,18 +231,18 @@ func (a *App) telegramMembershipMissingForChats(ctx context.Context, telegramID 
 		status := strings.ToLower(asString(member["status"]))
 		if status == "left" || status == "kicked" {
 			missing = append(missing, chatID)
-			_ = a.store.MarkTelegramRosterLeft(chatID, telegramID, status)
+			_ = a.store().MarkTelegramRosterLeft(chatID, telegramID, status)
 			continue
 		}
 		user, _ := member["user"].(map[string]any)
-		_ = a.store.UpsertTelegramRoster(chatID, telegramID, firstNonEmpty(status, "member"), boolish(user["is_bot"]))
+		_ = a.store().UpsertTelegramRoster(chatID, telegramID, firstNonEmpty(status, "member"), boolish(user["is_bot"]))
 	}
 	return missing, nil
 }
 
 func (a *App) telegramAdminSet(ctx context.Context, chatID string) map[int64]bool {
 	out := map[int64]bool{}
-	for _, id := range a.cfg.TelegramAdminIDs {
+	for _, id := range a.cfg().TelegramAdminIDs {
 		out[id] = true
 	}
 	admins, err := a.telegramGetChatAdministrators(ctx, chatID)
@@ -262,7 +262,7 @@ func (a *App) telegramKickTargets() ([]telegramKickTarget, map[string]int, int) 
 	skipped := map[string]int{"admin": 0, "whitelist": 0, "bound": 0, "no_telegram": 0}
 	targets := []telegramKickTarget{}
 	preservedBound := 0
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if u.TelegramID == 0 {
 			skipped["no_telegram"]++
 			continue
@@ -314,18 +314,18 @@ func (t telegramKickTarget) dto() map[string]any {
 }
 
 func (a *App) telegramKickPlan(chatID string) telegramKickPlan {
-	entries := a.store.TelegramRoster(chatID, true)
+	entries := a.store().TelegramRoster(chatID, true)
 	if len(entries) == 0 {
 		targets, skipped, preserved := a.telegramKickTargets()
 		return telegramKickPlan{Targets: targets, Skipped: skipped, PreservedBound: preserved, RosterSize: len(targets) + preserved + skipped["admin"] + skipped["whitelist"], KnownOnly: true}
 	}
 	skipped := map[string]int{"admin": 0, "whitelist": 0, "bound": 0, "no_telegram": 0, "bot": 0}
 	adminIDs := map[int64]bool{}
-	for _, id := range a.cfg.TelegramAdminIDs {
+	for _, id := range a.cfg().TelegramAdminIDs {
 		adminIDs[id] = true
 	}
 	usersByTG := map[int64]store.User{}
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if u.TelegramID != 0 {
 			usersByTG[u.TelegramID] = u
 		} else {

@@ -8,7 +8,7 @@ import (
 
 // handleListViolations returns all violation audit logs for admin review.
 func (a *App) handleListViolations(w http.ResponseWriter, r *http.Request, _ Params) {
-	logs := a.store.ListViolationLogs()
+	logs := a.store().ListViolationLogs()
 	page := max(1, queryInt(r, "page", 1))
 	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
 	typeFilter := strings.ToLower(r.URL.Query().Get("type"))
@@ -47,7 +47,7 @@ func (a *App) handleDeleteViolation(w http.ResponseWriter, r *http.Request, para
 		failWithCode(w, http.StatusBadRequest, ErrViolationIDInvalid, "invalid violation ID")
 		return
 	}
-	if statusFromError(w, a.store.DeleteViolationLog(id)) {
+	if statusFromError(w, a.store().DeleteViolationLog(id)) {
 		return
 	}
 	ok(w, "violation log deleted", nil)
@@ -60,7 +60,7 @@ func (a *App) handleClearViolations(w http.ResponseWriter, r *http.Request, _ Pa
 		failWithCode(w, http.StatusBadRequest, ErrViolationConfirmReq, "需要确认短语 confirm="+confirmClearViolations)
 		return
 	}
-	if err := a.store.ClearViolationLogs(); err != nil {
+	if err := a.store().ClearViolationLogs(); err != nil {
 		failWithCode(w, http.StatusInternalServerError, ErrViolationClearFailed, "清除失败")
 		return
 	}

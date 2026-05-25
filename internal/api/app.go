@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prejudice-studio/twilight/internal/config"
@@ -46,11 +47,15 @@ type Route struct {
 }
 
 type App struct {
-	cfg                   config.Config
-	store                 *store.Store
-	sessions              *sessionStore
-	limiter               *rateLimiter
-	redis                 *redis.Client
+	// runtime 持有 cfg / store / sessions / limiter / redis 这五个 hot reload
+	// 期间会被整体替换的运行时句柄。读端必须经 a.cfg() / a.store() 等访问器，
+	// 一次性 Load 出 *runtimeState 后再读字段；reload 端构造完整的 next 状态后
+	// 一次 Store 完成原子切换，避免：
+	//   - cfg（multi-word struct）字段半新半旧的撕裂读；
+	//   - store / sessions / limiter / redis 接口/指针的 (type,data) 双 word
+	//     非原子赋值导致 vtable 与 data 撕裂触发 segfault；
+	//   - reload 中途读端拿到 cfg 是 next、store 仍是 prev 的混合视图。
+	runtime               atomic.Pointer[runtimeState]
 	routes                []Route
 	runtimeMu             sync.Mutex
 	configSignature       string
@@ -67,6 +72,64 @@ type App struct {
 	telegramPanels        map[string]telegramPanelContext
 	embyAdminMu           sync.Mutex
 	embyAdminCache        map[string]embyAdminCacheEntry
+}
+
+// runtimeState 把 reload 期间会一并替换的运行时句柄打包成一个不可变快照，
+// 走 atomic.Pointer 整体切换。任何一个字段都不能在 store 之后被修改——读端
+// 拿到的快照必须自洽（cfg / store / sessions / limiter / redis 来自同一次
+// reload）。
+type runtimeState struct {
+	cfg      config.Config
+	store    *store.Store
+	sessions *sessionStore
+	limiter  *rateLimiter
+	redis    *redis.Client
+}
+
+// cfg 返回当前生效的 config.Config 指针：调用方读字段后即可释放快照；
+// 同一次 handler 内若需要前后一致，先 `cfg := a.cfg()` 一次再多次读字段。
+// 返回指针而非值避免在 hot path 上每次拷贝 ~50 字段的 Config struct。
+func (a *App) cfg() *config.Config {
+	if rt := a.runtime.Load(); rt != nil {
+		return &rt.cfg
+	}
+	// New() 之后 runtime 必然非 nil；这里仅作 nil 防御。
+	var empty config.Config
+	return &empty
+}
+
+func (a *App) store() *store.Store {
+	if rt := a.runtime.Load(); rt != nil {
+		return rt.store
+	}
+	return nil
+}
+
+func (a *App) sessions() *sessionStore {
+	if rt := a.runtime.Load(); rt != nil {
+		return rt.sessions
+	}
+	return nil
+}
+
+func (a *App) limiter() *rateLimiter {
+	if rt := a.runtime.Load(); rt != nil {
+		return rt.limiter
+	}
+	return nil
+}
+
+func (a *App) redis() *redis.Client {
+	if rt := a.runtime.Load(); rt != nil {
+		return rt.redis
+	}
+	return nil
+}
+
+// runtimeSnapshot 返回当前快照本身，便于持锁段或一次性需要多个字段的代码
+// 一次 Load 后多次读取，避免重复走 atomic.Load。
+func (a *App) runtimeSnapshot() *runtimeState {
+	return a.runtime.Load()
 }
 
 type embyAdminCacheEntry struct {
@@ -114,14 +177,16 @@ func New(cfg config.Config, st *store.Store) (*App, error) {
 		return nil, err
 	}
 	app := &App{
-		cfg:            cfg,
-		store:          st,
-		sessions:       newSessionStoreWithDB(cfg.SessionTTL, redisClient, st),
-		limiter:        newRateLimiter(redisClient),
-		redis:          redisClient,
 		telegramPanels: map[string]telegramPanelContext{},
 		embyAdminCache: map[string]embyAdminCacheEntry{},
 	}
+	app.runtime.Store(&runtimeState{
+		cfg:      cfg,
+		store:    st,
+		sessions: newSessionStoreWithDB(cfg.SessionTTL, redisClient, st),
+		limiter:  newRateLimiter(redisClient),
+		redis:    redisClient,
+	})
 	app.configSignature = configFileSignature(cfg.ConfigFile)
 	app.registerRoutes()
 	app.applyConfiguredAdmins()
@@ -218,17 +283,29 @@ func (a *App) reloadConfig() (map[string]any, error) {
 }
 
 func (a *App) reloadConfigLocked() (map[string]any, error) {
-	previous := a.cfg
+	prevState := a.runtimeSnapshot()
+	if prevState == nil {
+		return nil, fmt.Errorf("runtime not initialized")
+	}
+	previous := prevState.cfg
 	next, err := config.NewReader(previous.ConfigFile).Read()
 	if err != nil {
 		return nil, err
 	}
 
+	// 在快照副本上累积所有变更：开新 store / 新 redis / 新 sessions 等都先
+	// 写 nextState，最后一次 atomic.Store 把整组 hot 字段一并切换。读端走
+	// 访问器只能看到旧快照或新快照两种自洽视图，不会出现"cfg 已是 next、
+	// store 还是 prev"的撕裂态。
+	nextState := *prevState
+	nextState.cfg = next
+
 	reinitialized := []string{}
+	closeOldStore := false
 	if storeBackendChanged(previous, next) {
 		// Backend / 路径 / DSN 真的变了：先开新 store，确认成功后再关旧 store。
-		// 不能"先关后开"——那会留下 a.store==nil 窗口，并发 ServeHTTP 走到
-		// `a.store.IsIPBlacklisted` / `a.store.User` 等点会直接 nil panic；
+		// 不能"先关后开"——那会留下 store==nil 窗口，并发 ServeHTTP 走到
+		// store().IsIPBlacklisted / store().User 等点会直接 nil panic；
 		// 失败时也无法干净回滚（旧 store 已 Close，再 Open 同一 JSON 路径
 		// 会与还在挥发的 flock 竞争）。
 		// storeBackendChanged 已经把"同 path JSON"过滤掉（normalizeStoreDriver
@@ -238,30 +315,46 @@ func (a *App) reloadConfigLocked() (map[string]any, error) {
 		if err != nil {
 			return nil, err
 		}
-		oldStore := a.store
-		a.store = nextStore
-		if oldStore != nil {
-			_ = oldStore.Close()
-		}
+		nextState.store = nextStore
+		closeOldStore = prevState.store != nil
 		reinitialized = append(reinitialized, "database")
 	}
+	closeOldRedis := false
 	if previous.RedisURL != next.RedisURL || previous.SessionTTL != next.SessionTTL {
 		redisClient, err := newRedisClient(next)
 		if err != nil {
 			return nil, err
 		}
-		oldRedis := a.redis
-		a.sessions = newSessionStoreWithDB(next.SessionTTL, redisClient, a.store)
-		a.limiter = newRateLimiter(redisClient)
-		a.redis = redisClient
-		if oldRedis != nil && oldRedis != redisClient {
-			_ = oldRedis.Close()
-		}
+		nextState.sessions = newSessionStoreWithDB(next.SessionTTL, redisClient, nextState.store)
+		nextState.limiter = newRateLimiter(redisClient)
+		nextState.redis = redisClient
+		closeOldRedis = prevState.redis != nil && prevState.redis != redisClient
 		reinitialized = append(reinitialized, "sessions", "rate_limiter")
+	} else if nextState.store != prevState.store {
+		// store 换了但 redis 没换：sessions 内部持有 store 引用，需要重新
+		// 绑定到新 store，否则会话回写还是落到旧 backend 上。
+		nextState.sessions = newSessionStoreWithDB(next.SessionTTL, nextState.redis, nextState.store)
 	}
 
-	a.cfg = next
+	if nextState.store.Backend() == store.BackendPostgres && (previous.PostgresMaxOpenConns != next.PostgresMaxOpenConns || previous.PostgresMaxIdleConns != next.PostgresMaxIdleConns) {
+		nextState.store.ConfigurePostgres(next.PostgresMaxOpenConns, next.PostgresMaxIdleConns)
+		reinitialized = append(reinitialized, "postgres_pool")
+	}
+
+	// 原子切换：在此之前任何 return 都不会污染当前运行时；之后读端就是新状态。
+	a.runtime.Store(&nextState)
+
+	// applyConfiguredAdmins 读 cfg / 写 store，必须在 atomic Store 之后调用，
+	// 否则它内部的 a.cfg() / a.store() 还会看到旧快照。
 	a.applyConfiguredAdmins()
+
+	if closeOldStore {
+		_ = prevState.store.Close()
+	}
+	if closeOldRedis {
+		_ = prevState.redis.Close()
+	}
+
 	// reload 也走一遍 CORS 校验，捕获 hot reload 引入的错配置。
 	if !sameStringSlice(previous.CORSOrigins, next.CORSOrigins) {
 		validateCORSOriginsStartup(next.CORSOrigins, next.AllowCredential)
@@ -270,12 +363,9 @@ func (a *App) reloadConfigLocked() (map[string]any, error) {
 		!sameStringSlice(previous.TrustedProxyCIDRs, next.TrustedProxyCIDRs) {
 		validateTrustedProxyStartup(next.TrustProxyHeaders, next.TrustedProxyCIDRs)
 	}
-	ConfigureRuntimeLoggingStore(a.store, next.ZapLevel(), next.RuntimeLogLimit)
+	ConfigureRuntimeLoggingStore(nextState.store, next.ZapLevel(), next.RuntimeLogLimit)
 	reinitialized = append(reinitialized, "runtime_logger")
-	if a.store.Backend() == store.BackendPostgres && (previous.PostgresMaxOpenConns != next.PostgresMaxOpenConns || previous.PostgresMaxIdleConns != next.PostgresMaxIdleConns) {
-		a.store.ConfigurePostgres(next.PostgresMaxOpenConns, next.PostgresMaxIdleConns)
-		reinitialized = append(reinitialized, "postgres_pool")
-	}
+
 	restartRequired := []string{}
 	if previous.Host != next.Host || previous.Port != next.Port {
 		restartRequired = append(restartRequired, "listen_addr")
@@ -287,7 +377,7 @@ func (a *App) reloadConfigLocked() (map[string]any, error) {
 		"config_file":         next.ConfigFile,
 		"reinitialized":       reinitialized,
 		"restart_required":    restartRequired,
-		"active_database":     a.store.Backend(),
+		"active_database":     nextState.store.Backend(),
 		"configured_database": next.DatabaseDriver,
 		"runtime_restarted":   len(reinitialized) > 0,
 	}
@@ -296,7 +386,7 @@ func (a *App) reloadConfigLocked() (map[string]any, error) {
 }
 
 func (a *App) reloadConfigIfChanged() {
-	current := configFileSignature(a.cfg.ConfigFile)
+	current := configFileSignature(a.cfg().ConfigFile)
 	a.runtimeMu.Lock()
 	if current == "" || current == a.configSignature {
 		a.runtimeMu.Unlock()
@@ -394,15 +484,15 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		lw.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if a.cfg.MaxUploadSize > 0 {
-		r.Body = http.MaxBytesReader(lw, r.Body, a.cfg.MaxUploadSize)
+	if a.cfg().MaxUploadSize > 0 {
+		r.Body = http.MaxBytesReader(lw, r.Body, a.cfg().MaxUploadSize)
 	}
-	if a.store.IsIPBlacklisted(a.clientIP(r)) {
+	if a.store().IsIPBlacklisted(a.clientIP(r)) {
 		fail(lw, http.StatusForbidden, "IP 已被封禁")
 		return
 	}
 
-	if !a.allowRate(r.Context(), rateKey("global:", a.clientIP(r)), a.cfg.RateLimitGlobalPerMinute, time.Minute) {
+	if !a.allowRate(r.Context(), rateKey("global:", a.clientIP(r)), a.cfg().RateLimitGlobalPerMinute, time.Minute) {
 		fail(lw, http.StatusTooManyRequests, "请求过于频繁，请稍后再试")
 		return
 	}
@@ -438,10 +528,10 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) allowRate(ctx context.Context, key string, limit int, window time.Duration) bool {
-	if !a.cfg.RateLimitEnabled || limit <= 0 {
+	if !a.cfg().RateLimitEnabled || limit <= 0 {
 		return true
 	}
-	return a.limiter.Allow(ctx, key, limit, window)
+	return a.limiter().Allow(ctx, key, limit, window)
 }
 func (a *App) add(method, pattern string, auth AuthLevel, handler HandlerFunc) {
 	a.routes = append(a.routes, Route{Method: method, Pattern: pattern, Auth: auth, Handler: handler})
@@ -523,16 +613,16 @@ func (a *App) authenticateUser(r *http.Request) (*principal, bool) {
 	token := bearerToken(r.Header.Get("Authorization"))
 	fromCookie := false
 	if token == "" {
-		if cookie, err := r.Cookie(a.cfg.SessionCookie); err == nil {
+		if cookie, err := r.Cookie(a.cfg().SessionCookie); err == nil {
 			token = cookie.Value
 			fromCookie = true
 		}
 	}
-	uid, ok := a.sessions.Get(r.Context(), token)
+	uid, ok := a.sessions().Get(r.Context(), token)
 	if !ok {
 		return nil, false
 	}
-	u, ok := a.store.User(uid)
+	u, ok := a.store().User(uid)
 	if !ok {
 		return nil, false
 	}
@@ -566,7 +656,7 @@ func (a *App) authenticateAPIKey(r *http.Request) (*principal, bool) {
 		return nil, false
 	}
 	hash := hashAPIKey(key)
-	ak, u, ok := a.store.FindAPIKeyByHash(hash)
+	ak, u, ok := a.store().FindAPIKeyByHash(hash)
 	if !ok || !u.Active {
 		return nil, false
 	}
@@ -575,13 +665,13 @@ func (a *App) authenticateAPIKey(r *http.Request) (*principal, bool) {
 	}
 	limit := ak.RateLimit
 	if limit <= 0 {
-		limit = a.cfg.RateLimitAPIKeyDefaultPerMinute
+		limit = a.cfg().RateLimitAPIKeyDefaultPerMinute
 	}
 	if !a.allowRate(r.Context(), rateKey("apikey:", hash), limit, time.Minute) {
 		return nil, false
 	}
 	if ak.ID > 0 {
-		_ = a.store.RecordAPIKeyUse(ak.ID)
+		_ = a.store().RecordAPIKeyUse(ak.ID)
 	}
 	return &principal{User: u, APIKey: ak}, true
 }
@@ -622,7 +712,7 @@ func (a *App) applyCORS(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	allowed := false
-	for _, candidate := range a.cfg.CORSOrigins {
+	for _, candidate := range a.cfg().CORSOrigins {
 		candidate = strings.TrimSpace(candidate)
 		if candidate == "*" {
 			// 启动期已 zap.Error 告警；运行期再次防御性跳过，
@@ -803,26 +893,26 @@ func normalizeCORSOrigin(raw string) string {
 
 func (a *App) setSessionCookie(w http.ResponseWriter, token string, expires time.Time) {
 	cookie := &http.Cookie{
-		Name:     a.cfg.SessionCookie,
+		Name:     a.cfg().SessionCookie,
 		Value:    token,
 		Path:     "/",
 		Expires:  expires,
 		MaxAge:   int(time.Until(expires).Seconds()),
 		HttpOnly: true,
-		Secure:   a.cfg.CookieSecure,
-		SameSite: sameSite(a.cfg.CookieSameSite),
+		Secure:   a.cfg().CookieSecure,
+		SameSite: sameSite(a.cfg().CookieSameSite),
 	}
 	http.SetCookie(w, cookie)
 }
 
 func (a *App) clearSessionCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{Name: a.cfg.SessionCookie, Path: "/", MaxAge: -1, Expires: time.Unix(0, 0), HttpOnly: true, Secure: a.cfg.CookieSecure, SameSite: sameSite(a.cfg.CookieSameSite)})
-	http.SetCookie(w, &http.Cookie{Name: a.csrfCookieName(), Path: "/", MaxAge: -1, Expires: time.Unix(0, 0), HttpOnly: false, Secure: a.cfg.CookieSecure, SameSite: sameSite(a.cfg.CookieSameSite)})
+	http.SetCookie(w, &http.Cookie{Name: a.cfg().SessionCookie, Path: "/", MaxAge: -1, Expires: time.Unix(0, 0), HttpOnly: true, Secure: a.cfg().CookieSecure, SameSite: sameSite(a.cfg().CookieSameSite)})
+	http.SetCookie(w, &http.Cookie{Name: a.csrfCookieName(), Path: "/", MaxAge: -1, Expires: time.Unix(0, 0), HttpOnly: false, Secure: a.cfg().CookieSecure, SameSite: sameSite(a.cfg().CookieSameSite)})
 }
 
 // csrfCookieName 返回 CSRF cookie 名，固定为 session cookie 名 + "_csrf" 后缀。
 func (a *App) csrfCookieName() string {
-	return a.cfg.SessionCookie + "_csrf"
+	return a.cfg().SessionCookie + "_csrf"
 }
 
 // newCSRFToken 生成 32 字节随机 CSRF 令牌（hex 编码）。
@@ -846,8 +936,8 @@ func (a *App) setCSRFCookie(w http.ResponseWriter, token string, expires time.Ti
 		Expires:  expires,
 		MaxAge:   int(time.Until(expires).Seconds()),
 		HttpOnly: false, // CRITICAL：必须可被前端 JS 读取
-		Secure:   a.cfg.CookieSecure,
-		SameSite: sameSite(a.cfg.CookieSameSite),
+		Secure:   a.cfg().CookieSecure,
+		SameSite: sameSite(a.cfg().CookieSameSite),
 	})
 }
 
@@ -897,7 +987,7 @@ func sameSite(value string) http.SameSite {
 }
 
 func (a *App) clientIP(r *http.Request) string {
-	if a.cfg.TrustProxyHeaders && upstreamIsTrustedProxy(r.RemoteAddr, a.cfg.TrustedProxyCIDRs) {
+	if a.cfg().TrustProxyHeaders && upstreamIsTrustedProxy(r.RemoteAddr, a.cfg().TrustedProxyCIDRs) {
 		for _, header := range []string{"CF-Connecting-IP", "X-Real-IP"} {
 			if value := parseClientIPHeader(r.Header.Get(header)); value != "" {
 				return value
@@ -920,7 +1010,7 @@ func (a *App) clientIP(r *http.Request) string {
 				if i == 0 {
 					return ipStr
 				}
-				if upstreamIsTrustedProxy(ipStr, a.cfg.TrustedProxyCIDRs) {
+				if upstreamIsTrustedProxy(ipStr, a.cfg().TrustedProxyCIDRs) {
 					continue
 				}
 				return ipStr

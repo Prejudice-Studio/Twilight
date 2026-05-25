@@ -64,25 +64,25 @@ func libraryIDsByName(libraries []map[string]any, names []string) ([]string, []s
 // 失败不阻断主流程：默认隐藏只是 UX 优化，绑定/创建本身已经完成；只在 logger
 // 留痕便于追踪 emby 端可能的同步异常。
 func (a *App) applyDefaultHiddenLibraries(ctx context.Context, u store.User) {
-	if len(a.cfg.EmbyDefaultHiddenLibraries) == 0 {
+	if len(a.cfg().EmbyDefaultHiddenLibraries) == 0 {
 		return
 	}
 	if u.Role == store.RoleAdmin || u.Role == store.RoleWhitelist {
 		return
 	}
-	if err := a.embySetLibrariesByAction(ctx, u, "hide", nil, a.cfg.EmbyDefaultHiddenLibraries, false); err != nil {
+	if err := a.embySetLibrariesByAction(ctx, u, "hide", nil, a.cfg().EmbyDefaultHiddenLibraries, false); err != nil {
 		zap.L().Warn("apply default hidden libraries failed",
 			zap.Int64("uid", u.UID), zap.String("emby_id", u.EmbyID), zap.Error(err))
 	}
 }
 
 func (a *App) embyLibraryAccess(ctx context.Context, user store.User, includeSelfService bool) map[string]any {
-	defaultHidden := normalizeLibraryNames(a.cfg.EmbyDefaultHiddenLibraries)
+	defaultHidden := normalizeLibraryNames(a.cfg().EmbyDefaultHiddenLibraries)
 	selfService := []string{}
 	if includeSelfService || user.LibrarySelfService {
-		selfService = normalizeLibraryNames(a.cfg.EmbySelfServiceLibraries)
+		selfService = normalizeLibraryNames(a.cfg().EmbySelfServiceLibraries)
 	}
-	if user.EmbyID == "" || a.cfg.EmbyURL == "" {
+	if user.EmbyID == "" || a.cfg().EmbyURL == "" {
 		return map[string]any{"has_emby": false, "enable_all": false, "enabled_ids": []string{}, "blocked_names": []string{}, "all_libraries": []any{}, "libraries": []any{}, "default_hidden_libraries": defaultHidden, "self_service_libraries": selfService, "self_service_enabled": user.LibrarySelfService}
 	}
 	libraries, err := a.embyLibraries(ctx)

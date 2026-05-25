@@ -148,7 +148,7 @@ func (a *App) handleConfigBackupDelete(w http.ResponseWriter, r *http.Request, p
 }
 
 func (a *App) handleConfigSchemaFull(w http.ResponseWriter, r *http.Request, _ Params) {
-	values := configValues(a.cfg)
+	values := configValues(*a.cfg())
 	sections := make([]map[string]any, 0, len(configSectionDefs()))
 	for _, def := range configSectionDefs() {
 		fields := make([]map[string]any, 0, len(def.Fields))
@@ -199,7 +199,7 @@ func (a *App) handleConfigSchemaFull(w http.ResponseWriter, r *http.Request, _ P
 func (a *App) handleConfigSchemaUpdateSafe(w http.ResponseWriter, r *http.Request, _ Params) {
 	payload := decodeMap(r)
 	rawSections, _ := payload["sections"].(map[string]any)
-	values := configValues(a.cfg)
+	values := configValues(*a.cfg())
 	allowed := map[string]map[string]configFieldDef{}
 	for _, section := range configSectionDefs() {
 		allowed[section.Key] = map[string]configFieldDef{}
@@ -313,15 +313,15 @@ func normalizeConfigContent(configFile, content string) (string, error) {
 }
 
 func (a *App) configBackupDir() string {
-	dir := strings.TrimSpace(a.cfg.DatabaseBackupDir)
+	dir := strings.TrimSpace(a.cfg().DatabaseBackupDir)
 	if dir == "" {
-		dir = filepath.Join(firstNonEmpty(a.cfg.DatabaseDir, "db"), "backups")
+		dir = filepath.Join(firstNonEmpty(a.cfg().DatabaseDir, "db"), "backups")
 	}
 	return filepath.Join(dir, "config")
 }
 
 func (a *App) configFilePath() string {
-	return firstNonEmpty(a.cfg.ConfigFile, "config.toml")
+	return firstNonEmpty(a.cfg().ConfigFile, "config.toml")
 }
 
 func (a *App) createConfigBackup() (store.BackupInfo, error) {

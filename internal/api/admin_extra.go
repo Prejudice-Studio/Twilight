@@ -13,7 +13,7 @@ import (
 func (a *App) handleEmbySyncV2(w http.ResponseWriter, r *http.Request, _ Params) {
 	updated := 0
 	missing := []map[string]any{}
-	if a.cfg.EmbyURL == "" {
+	if a.cfg().EmbyURL == "" {
 		ok(w, "Emby not configured", map[string]any{"success": 0, "failed": 0, "errors": []any{}, "configured": false})
 		return
 	}
@@ -28,7 +28,7 @@ func (a *App) handleEmbySyncV2(w http.ResponseWriter, r *http.Request, _ Params)
 			remoteByID[id] = user
 		}
 	}
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if u.EmbyID == "" {
 			continue
 		}
@@ -39,7 +39,7 @@ func (a *App) handleEmbySyncV2(w http.ResponseWriter, r *http.Request, _ Params)
 		}
 		name := asString(remoteUser["Name"])
 		if name != "" && name != u.EmbyUsername {
-			if _, err := a.store.UpdateUser(u.UID, func(u *store.User) error { u.EmbyUsername = name; return nil }); err == nil {
+			if _, err := a.store().UpdateUser(u.UID, func(u *store.User) error { u.EmbyUsername = name; return nil }); err == nil {
 				updated++
 			}
 		}
@@ -49,7 +49,7 @@ func (a *App) handleEmbySyncV2(w http.ResponseWriter, r *http.Request, _ Params)
 
 func (a *App) handleEmbyActivity(w http.ResponseWriter, r *http.Request, _ Params) {
 	limit := clamp(queryInt(r, "limit", 50), 1, 200)
-	if a.cfg.EmbyURL == "" {
+	if a.cfg().EmbyURL == "" {
 		ok(w, "OK", []any{})
 		return
 	}
@@ -66,7 +66,7 @@ func (a *App) handleEmbyActivity(w http.ResponseWriter, r *http.Request, _ Param
 }
 
 func (a *App) handleAdminEmbyUsersV2(w http.ResponseWriter, r *http.Request, _ Params) {
-	if a.cfg.EmbyURL == "" {
+	if a.cfg().EmbyURL == "" {
 		ok(w, "OK", map[string]any{"emby_users": []any{}, "users": []any{}, "orphans": []any{}, "total": 0, "total_emby": 0, "total_linked": 0, "total_orphans": 0})
 		return
 	}
@@ -76,7 +76,7 @@ func (a *App) handleAdminEmbyUsersV2(w http.ResponseWriter, r *http.Request, _ P
 		return
 	}
 	localByEmbyID := map[string]store.User{}
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if u.EmbyID != "" {
 			localByEmbyID[u.EmbyID] = u
 		}
@@ -105,7 +105,7 @@ func (a *App) handleAdminEmbyUsersV2(w http.ResponseWriter, r *http.Request, _ P
 		})
 	}
 	orphans := []map[string]any{}
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if u.EmbyID != "" && !seen[u.EmbyID] {
 			orphans = append(orphans, map[string]any{"uid": u.UID, "username": u.Username, "emby_id": u.EmbyID, "telegram_id": nullableInt(u.TelegramID)})
 		}
@@ -153,10 +153,10 @@ func (a *App) handleEmbyBroadcast(w http.ResponseWriter, r *http.Request, _ Para
 }
 
 func (a *App) handleEmbyTestV2(w http.ResponseWriter, r *http.Request, _ Params) {
-	tests := []map[string]any{{"name": "configuration", "success": a.cfg.EmbyURL != "", "message": "Emby URL configured"}}
-	overall := a.cfg.EmbyURL != ""
+	tests := []map[string]any{{"name": "configuration", "success": a.cfg().EmbyURL != "", "message": "Emby URL configured"}}
+	overall := a.cfg().EmbyURL != ""
 	var info map[string]any
-	if a.cfg.EmbyURL != "" {
+	if a.cfg().EmbyURL != "" {
 		start := time.Now()
 		// 改用 embyHealth 集中处理 /System/Info/Public → /System/Info 的双段 fallback。
 		// 失败的具体 error 会在 embyGet 内部通过 zap.L() 记录，admin 看 latency_ms 即可定位是慢还是不通。
@@ -171,11 +171,11 @@ func (a *App) handleEmbyTestV2(w http.ResponseWriter, r *http.Request, _ Params)
 		}
 		tests = append(tests, map[string]any{"name": "server_info", "success": success, "latency_ms": time.Since(start).Milliseconds(), "message": message})
 	}
-	ok(w, "OK", map[string]any{"success": overall, "url": a.cfg.EmbyURL, "emby_url": a.cfg.EmbyURL, "tests": tests, "overall": overall, "server_info": info})
+	ok(w, "OK", map[string]any{"success": overall, "url": a.cfg().EmbyURL, "emby_url": a.cfg().EmbyURL, "tests": tests, "overall": overall, "server_info": info})
 }
 
 func (a *App) handleEmbyCleanupOrphans(w http.ResponseWriter, r *http.Request, _ Params) {
-	if a.cfg.EmbyURL == "" {
+	if a.cfg().EmbyURL == "" {
 		failWithCode(w, http.StatusBadRequest, ErrEmbyNotConfigured, "Emby 未配置，请先在系统配置中填写 Emby 服务地址")
 		return
 	}
@@ -189,12 +189,12 @@ func (a *App) handleEmbyCleanupOrphans(w http.ResponseWriter, r *http.Request, _
 		remoteIDs[asString(eu["Id"])] = true
 	}
 	cleaned := []map[string]any{}
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if u.EmbyID == "" || remoteIDs[u.EmbyID] {
 			continue
 		}
 		oldID := u.EmbyID
-		updated, err := a.store.UpdateUser(u.UID, func(u *store.User) error { u.EmbyID = ""; u.EmbyUsername = ""; return nil })
+		updated, err := a.store().UpdateUser(u.UID, func(u *store.User) error { u.EmbyID = ""; u.EmbyUsername = ""; return nil })
 		if err == nil {
 			cleaned = append(cleaned, map[string]any{"uid": updated.UID, "username": updated.Username, "old_emby_id": oldID})
 		}
@@ -203,7 +203,7 @@ func (a *App) handleEmbyCleanupOrphans(w http.ResponseWriter, r *http.Request, _
 }
 
 func (a *App) handleEmbyImportUsers(w http.ResponseWriter, r *http.Request, _ Params) {
-	if a.cfg.EmbyURL == "" {
+	if a.cfg().EmbyURL == "" {
 		failWithCode(w, http.StatusBadRequest, ErrEmbyNotConfigured, "Emby 未配置，请先在系统配置中填写 Emby 服务地址")
 		return
 	}
@@ -218,7 +218,7 @@ func (a *App) handleEmbyImportUsers(w http.ResponseWriter, r *http.Request, _ Pa
 		return
 	}
 	linked := map[string]bool{}
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if u.EmbyID != "" {
 			linked[u.EmbyID] = true
 		}
@@ -252,11 +252,11 @@ func (a *App) handleEmbyResetBindings(w http.ResponseWriter, r *http.Request, _ 
 		return
 	}
 	count := 0
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if u.EmbyID == "" && u.EmbyUsername == "" && !u.PendingEmby {
 			continue
 		}
-		if _, err := a.store.UpdateUser(u.UID, func(u *store.User) error {
+		if _, err := a.store().UpdateUser(u.UID, func(u *store.User) error {
 			u.EmbyID = ""
 			u.EmbyUsername = ""
 			u.PendingEmby = false
@@ -270,7 +270,7 @@ func (a *App) handleEmbyResetBindings(w http.ResponseWriter, r *http.Request, _ 
 }
 
 func (a *App) handleEmbyDeleteUnlinked(w http.ResponseWriter, r *http.Request, _ Params) {
-	if a.cfg.EmbyURL == "" {
+	if a.cfg().EmbyURL == "" {
 		failWithCode(w, http.StatusBadRequest, ErrEmbyNotConfigured, "Emby 未配置，请先在系统配置中填写 Emby 服务地址")
 		return
 	}
@@ -281,7 +281,7 @@ func (a *App) handleEmbyDeleteUnlinked(w http.ResponseWriter, r *http.Request, _
 		return
 	}
 	linked := map[string]bool{}
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if u.EmbyID != "" {
 			linked[u.EmbyID] = true
 		}
@@ -322,7 +322,7 @@ func (a *App) handleCreateStandaloneEmbyV2(w http.ResponseWriter, r *http.Reques
 		failWithCode(w, http.StatusBadRequest, ErrEmbyPasswordTooShort, "密码长度需至少 8 位")
 		return
 	}
-	if a.cfg.EmbyURL == "" {
+	if a.cfg().EmbyURL == "" {
 		failWithCode(w, http.StatusBadRequest, ErrEmbyNotConfigured, "Emby 未配置，请先在系统配置中填写 Emby 服务地址")
 		return
 	}
@@ -359,7 +359,7 @@ func (a *App) handleWhitelist(w http.ResponseWriter, r *http.Request, _ Params) 
 		failWithCode(w, http.StatusInternalServerError, ErrPasswordHashFailed, "密码哈希失败，请稍后重试")
 		return
 	}
-	u, err := a.store.CreateUser(store.User{
+	u, err := a.store().CreateUser(store.User{
 		Username: username, Email: stringValue(payload, "email"), TelegramID: int64(intValue(payload, "telegram_id", 0)),
 		Role: store.RoleWhitelist, Active: true, ExpiredAt: 253402214400, PasswordHash: hash,
 	})
@@ -472,7 +472,7 @@ func (a *App) handleAdminBulkEnableDisabled(w http.ResponseWriter, r *http.Reque
 			continue
 		}
 		eligible++
-		updated, err := a.store.UpdateUser(u.UID, func(u *store.User) error { u.Active = true; return nil })
+		updated, err := a.store().UpdateUser(u.UID, func(u *store.User) error { u.Active = true; return nil })
 		if err != nil {
 			failedItems = append(failedItems, map[string]any{"uid": u.UID, "username": u.Username, "reason": err.Error()})
 			continue
@@ -500,7 +500,7 @@ func (a *App) handleAdminCleanupInvalid(w http.ResponseWriter, r *http.Request, 
 	dryRun := boolValue(payload, "dry_run", false)
 	threshold := time.Now().Add(-time.Duration(minDays) * 24 * time.Hour).Unix()
 	targets := []store.User{}
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if u.Role == store.RoleAdmin || u.Role == store.RoleWhitelist || u.TelegramID != 0 || u.EmbyID != "" {
 			continue
 		}
@@ -517,7 +517,7 @@ func (a *App) handleAdminCleanupInvalid(w http.ResponseWriter, r *http.Request, 
 	deleted := 0
 	if !dryRun {
 		for _, u := range targets {
-			if err := a.store.DeleteUser(u.UID); err == nil {
+			if err := a.store().DeleteUser(u.UID); err == nil {
 				deleted++
 			}
 		}
@@ -533,7 +533,7 @@ func (a *App) handleAdminClearStalePendingEmby(w http.ResponseWriter, r *http.Re
 		return
 	}
 	targets := []store.User{}
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if u.EmbyID == "" && u.PendingEmby {
 			targets = append(targets, u)
 		}
@@ -542,7 +542,7 @@ func (a *App) handleAdminClearStalePendingEmby(w http.ResponseWriter, r *http.Re
 	failedItems := []map[string]any{}
 	if !dryRun {
 		for _, u := range targets {
-			if _, err := a.store.UpdateUser(u.UID, func(u *store.User) error { u.PendingEmby = false; u.PendingEmbyDays = nil; return nil }); err == nil {
+			if _, err := a.store().UpdateUser(u.UID, func(u *store.User) error { u.PendingEmby = false; u.PendingEmbyDays = nil; return nil }); err == nil {
 				cleared++
 			} else {
 				failedItems = append(failedItems, map[string]any{"uid": u.UID, "username": u.Username, "error": err.Error()})
@@ -567,7 +567,7 @@ func (a *App) handleAdminKickNoEmby(w http.ResponseWriter, r *http.Request, _ Pa
 	preservePending := boolValue(payload, "preserve_pending_register", true)
 	targets := []store.User{}
 	skipped := map[string]int{"admin": 0, "whitelist": 0, "unrecognized": 0, "pending_register": 0, "too_recent": 0}
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if u.UID == current(r).User.UID || u.Role == store.RoleAdmin {
 			skipped["admin"]++
 			continue
@@ -601,7 +601,7 @@ func (a *App) handleAdminKickNoEmby(w http.ResponseWriter, r *http.Request, _ Pa
 	failedItems := []map[string]any{}
 	if !dryRun {
 		for _, u := range targets {
-			if err := a.store.DeleteUser(u.UID); err == nil {
+			if err := a.store().DeleteUser(u.UID); err == nil {
 				deleted++
 			} else {
 				failedItems = append(failedItems, map[string]any{"uid": u.UID, "username": u.Username, "error": err.Error()})
@@ -612,17 +612,17 @@ func (a *App) handleAdminKickNoEmby(w http.ResponseWriter, r *http.Request, _ Pa
 }
 
 func (a *App) handleInviteDetach(w http.ResponseWriter, r *http.Request, params Params) {
-	if !a.cfg.InviteEnabled {
+	if !a.cfg().InviteEnabled {
 		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
 		return
 	}
 	uid, _ := int64Param(params, "uid")
-	if _, okUser := a.store.User(uid); !okUser {
+	if _, okUser := a.store().User(uid); !okUser {
 		failWithCode(w, http.StatusNotFound, ErrUserNotFound, "用户不存在")
 		return
 	}
-	_, hadParent := a.store.ParentOf(uid)
-	if err := a.store.DetachInvite(uid); statusFromError(w, err) {
+	_, hadParent := a.store().ParentOf(uid)
+	if err := a.store().DetachInvite(uid); statusFromError(w, err) {
 		return
 	}
 	ok(w, "detached", map[string]any{"uid": uid, "is_root": true, "changed": hadParent})
@@ -636,13 +636,13 @@ func (a *App) handleListRebindRequests(w http.ResponseWriter, r *http.Request, _
 	}
 	page := max(1, queryInt(r, "page", 1))
 	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
-	requests := a.store.ListRebindRequests(status)
+	requests := a.store().ListRebindRequests(status)
 	total := len(requests)
 	requests = paginate(requests, page, perPage)
 	items := make([]map[string]any, 0, len(requests))
 	for _, req := range requests {
 		username := req.Username
-		if u, okUser := a.store.User(req.UID); okUser && username == "" {
+		if u, okUser := a.store().User(req.UID); okUser && username == "" {
 			username = u.Username
 		}
 		items = append(items, map[string]any{"id": req.ID, "uid": req.UID, "username": username, "old_telegram_id": req.OldTelegramID, "status": req.Status, "reason": req.Reason, "admin_note": req.AdminNote, "reviewer_uid": zeroNil(req.ReviewerUID), "created_at": req.CreatedAt, "reviewed_at": zeroNil(req.ReviewedAt)})
@@ -656,7 +656,7 @@ func (a *App) handleReviewRebindRequest(w http.ResponseWriter, r *http.Request, 
 	if strings.HasSuffix(r.URL.Path, "/approve") {
 		status = "approved"
 	}
-	req, err := a.store.ReviewRebindRequest(id, current(r).User.UID, status, truncateString(stringValue(decodeMap(r), "admin_note"), 500))
+	req, err := a.store().ReviewRebindRequest(id, current(r).User.UID, status, truncateString(stringValue(decodeMap(r), "admin_note"), 500))
 	if statusFromError(w, err) {
 		return
 	}
@@ -679,7 +679,7 @@ func (a *App) handleBatchReviewRebindRequests(w http.ResponseWriter, r *http.Req
 	result := map[string]any{"success": 0, "failed": 0, "errors": []map[string]any{}}
 	note := truncateString(stringValue(payload, "admin_note"), 500)
 	for _, id := range ids {
-		if _, err := a.store.ReviewRebindRequest(id, current(r).User.UID, status, note); err == nil {
+		if _, err := a.store().ReviewRebindRequest(id, current(r).User.UID, status, note); err == nil {
 			result["success"] = result["success"].(int) + 1
 		} else {
 			result["failed"] = result["failed"].(int) + 1
@@ -698,7 +698,7 @@ func (a *App) handleTelegramRejoinedEnable(w http.ResponseWriter, r *http.Reques
 	enabled := []map[string]any{}
 	skipped := []map[string]any{}
 	now := time.Now().Unix()
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if u.Active || u.TelegramID == 0 {
 			continue
 		}
@@ -706,7 +706,7 @@ func (a *App) handleTelegramRejoinedEnable(w http.ResponseWriter, r *http.Reques
 			skipped = append(skipped, map[string]any{"uid": u.UID, "username": u.Username, "reason": "expired"})
 			continue
 		}
-		if a.cfg.TelegramRequireMembership {
+		if a.cfg().TelegramRequireMembership {
 			missing, err := a.telegramMembershipMissing(r.Context(), u.TelegramID, true)
 			if err != nil {
 				skipped = append(skipped, map[string]any{"uid": u.UID, "username": u.Username, "reason": "telegram_check_failed", "error": err.Error()})
@@ -717,7 +717,7 @@ func (a *App) handleTelegramRejoinedEnable(w http.ResponseWriter, r *http.Reques
 				continue
 			}
 		}
-		updated, err := a.store.UpdateUser(u.UID, func(u *store.User) error { u.Active = true; return nil })
+		updated, err := a.store().UpdateUser(u.UID, func(u *store.User) error { u.Active = true; return nil })
 		if err == nil {
 			if updated.EmbyID != "" {
 				_ = a.embySetUserEnabled(r.Context(), updated.EmbyID, a.embyShouldEnableUser(updated))
@@ -736,9 +736,9 @@ func (a *App) handleTelegramKickUnbound(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	maxPerRun := clamp(intValue(payload, "max_per_run", 200), 1, 500)
-	chats := telegramChatIDs(a.cfg.TelegramGroupIDs)
+	chats := telegramChatIDs(a.cfg().TelegramGroupIDs)
 	if len(chats) == 0 {
-		chats = telegramChatIDs(a.cfg.TelegramChannelIDs)
+		chats = telegramChatIDs(a.cfg().TelegramChannelIDs)
 	}
 	if len(chats) == 0 {
 		ok(w, "telegram group not configured", map[string]any{
@@ -865,7 +865,7 @@ func (a *App) updateFilteredUsers(filterValue any, include func(store.User) (boo
 	activeFilter, hasActive := filter["active"]
 	embyFilter := strings.ToLower(asString(filter["emby"]))
 	search := strings.ToLower(asString(filter["search"]))
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if len(uidSet) > 0 && !uidSet[u.UID] {
 			continue
 		}
@@ -896,7 +896,7 @@ func (a *App) updateFilteredUsers(filterValue any, include func(store.User) (boo
 			skipped[reason]++
 			continue
 		}
-		if _, err := a.store.UpdateUser(u.UID, func(u *store.User) error { update(u); return nil }); err == nil {
+		if _, err := a.store().UpdateUser(u.UID, func(u *store.User) error { update(u); return nil }); err == nil {
 			updated++
 		}
 	}
@@ -915,7 +915,7 @@ func (a *App) filteredUsers(payload map[string]any) []store.User {
 	embyFilter := strings.ToLower(asString(filter["emby"]))
 	search := strings.ToLower(asString(filter["search"]))
 	out := []store.User{}
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if len(uidSet) > 0 && !uidSet[u.UID] {
 			continue
 		}

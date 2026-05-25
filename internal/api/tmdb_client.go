@@ -8,14 +8,14 @@ import (
 )
 
 func (a *App) searchTMDB(ctx context.Context, query, mediaType string, limit int) ([]map[string]any, error) {
-	if a.cfg.TMDBAPIKey == "" {
+	if a.cfg().TMDBAPIKey == "" {
 		return nil, fmt.Errorf("TMDB API Key 未配置")
 	}
-	endpoint := strings.TrimRight(a.cfg.TMDBAPIURL, "/") + "/search/multi"
+	endpoint := strings.TrimRight(a.cfg().TMDBAPIURL, "/") + "/search/multi"
 	if mediaType == "movie" || mediaType == "tv" {
-		endpoint = strings.TrimRight(a.cfg.TMDBAPIURL, "/") + "/search/" + mediaType
+		endpoint = strings.TrimRight(a.cfg().TMDBAPIURL, "/") + "/search/" + mediaType
 	}
-	q := url.Values{"api_key": {a.cfg.TMDBAPIKey}, "language": {"zh-CN"}, "query": {query}}
+	q := url.Values{"api_key": {a.cfg().TMDBAPIKey}, "language": {"zh-CN"}, "query": {query}}
 	var payload map[string]any
 	if err := getJSON(ctx, endpoint+"?"+q.Encode(), nil, &payload); err != nil {
 		return nil, err
@@ -31,7 +31,7 @@ func (a *App) searchTMDB(ctx context.Context, query, mediaType string, limit int
 		if mt == "person" {
 			continue
 		}
-		results = append(results, tmdbToMedia(item, mt, a.cfg.TMDBImageURL))
+		results = append(results, tmdbToMedia(item, mt, a.cfg().TMDBImageURL))
 		if len(results) >= limit {
 			break
 		}
@@ -40,16 +40,16 @@ func (a *App) searchTMDB(ctx context.Context, query, mediaType string, limit int
 }
 
 func (a *App) getTMDB(ctx context.Context, id, mediaType string) (map[string]any, error) {
-	if a.cfg.TMDBAPIKey == "" {
+	if a.cfg().TMDBAPIKey == "" {
 		return nil, fmt.Errorf("TMDB API Key 未配置")
 	}
-	endpoint := strings.TrimRight(a.cfg.TMDBAPIURL, "/") + "/" + firstNonEmpty(mediaType, "movie") + "/" + id
-	q := url.Values{"api_key": {a.cfg.TMDBAPIKey}, "language": {"zh-CN"}, "append_to_response": {"credits,genres,videos,images,seasons"}}
+	endpoint := strings.TrimRight(a.cfg().TMDBAPIURL, "/") + "/" + firstNonEmpty(mediaType, "movie") + "/" + id
+	q := url.Values{"api_key": {a.cfg().TMDBAPIKey}, "language": {"zh-CN"}, "append_to_response": {"credits,genres,videos,images,seasons"}}
 	var payload map[string]any
 	if err := getJSON(ctx, endpoint+"?"+q.Encode(), nil, &payload); err != nil {
 		return nil, err
 	}
-	return tmdbToMedia(payload, mediaType, a.cfg.TMDBImageURL), nil
+	return tmdbToMedia(payload, mediaType, a.cfg().TMDBImageURL), nil
 }
 
 func tmdbToMedia(item map[string]any, mediaType, imageBase string) map[string]any {

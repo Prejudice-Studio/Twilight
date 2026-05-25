@@ -57,7 +57,7 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 	}
 
 	if source == "invite" {
-		invite, okInvite := a.store.InviteCode(code)
+		invite, okInvite := a.store().InviteCode(code)
 		if !okInvite || !invite.Active || (invite.ExpiredAt > 0 && invite.ExpiredAt <= time.Now().Unix()) {
 			failWithCode(w, http.StatusNotFound, ErrInviteNotFound, "邀请码无效或已停用")
 			return
@@ -67,7 +67,7 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 			failWithCode(w, http.StatusBadRequest, ErrInviteSelfGenerate, "不能使用自己生成的邀请码")
 			return
 		}
-		if _, hasParent := a.store.ParentOf(p.User.UID); hasParent {
+		if _, hasParent := a.store().ParentOf(p.User.UID); hasParent {
 			failWithCode(w, http.StatusBadRequest, ErrInviteAlreadyHasParent, "当前账号已存在邀请上级，不能重复加入邀请树")
 			return
 		}
@@ -75,19 +75,19 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 			failWithCode(w, http.StatusForbidden, ErrInviteTargetMismatch, "此邀请码仅限指定用户使用")
 			return
 		}
-		inviter, okInviter := a.store.User(inviteForUse.InviterUID)
+		inviter, okInviter := a.store().User(inviteForUse.InviterUID)
 		if !okInviter || !inviter.Active {
 			failWithCode(w, http.StatusForbidden, ErrInviterUnavailable, "邀请人状态不可用")
 			return
 		}
 		inviterForUse = inviter
-		if a.inviteDepth(inviterForUse.UID) >= a.cfg.InviteMaxDepth {
+		if a.inviteDepth(inviterForUse.UID) >= a.cfg().InviteMaxDepth {
 			failWithCode(w, http.StatusForbidden, ErrInviteDepthExceeded, "邀请树层级已达上限")
 			return
 		}
-		if a.cfg.InviteRootUserLimit > 0 {
+		if a.cfg().InviteRootUserLimit > 0 {
 			rootUID := a.inviteRootUID(inviterForUse.UID)
-			if a.inviteDescendantCount(rootUID) >= a.cfg.InviteRootUserLimit {
+			if a.inviteDescendantCount(rootUID) >= a.cfg().InviteRootUserLimit {
 				failWithCode(w, http.StatusForbidden, ErrInviteRootFull, "邀请树人数已达上限")
 				return
 			}
@@ -100,19 +100,19 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 		if days <= 0 || days > maxDays {
 			days = maxDays
 		}
-		if _, err := a.store.ConsumeInviteCode(code, p.User.UID); statusFromError(w, err) {
+		if _, err := a.store().ConsumeInviteCode(code, p.User.UID); statusFromError(w, err) {
 			return
 		}
 	}
 	var reg store.RegCode
 	if source == "regcode" {
 		var err error
-		reg, err = a.store.ConsumeRegCode(code, p.User.UID, p.User.TelegramID)
+		reg, err = a.store().ConsumeRegCode(code, p.User.UID, p.User.TelegramID)
 		if statusFromError(w, err) {
 			return
 		}
 	}
-	u, err := a.store.UpdateUser(p.User.UID, func(u *store.User) error {
+	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error {
 		if replacesPendingEntitlement {
 			u.PendingEmby = false
 			u.PendingEmbyDays = nil
@@ -181,7 +181,7 @@ func (a *App) handleRegcodeCheck(w http.ResponseWriter, r *http.Request, _ Param
 	payload := decodeMap(r)
 	code := stringValue(payload, "reg_code")
 	if code != "" {
-		if reg, okReg := a.store.RegCode(code); okReg {
+		if reg, okReg := a.store().RegCode(code); okReg {
 			if reg.IsDecoy || reg.TargetUsername != "" {
 				failWithCode(w, http.StatusNotFound, ErrRegcodeNotFound, "注册码不存在")
 				return

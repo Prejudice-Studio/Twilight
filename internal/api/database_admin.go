@@ -21,25 +21,25 @@ const (
 )
 
 func (a *App) handleDatabaseStatus(w http.ResponseWriter, r *http.Request, _ Params) {
-	backups, _ := store.ListBackups(a.cfg.DatabaseBackupDir)
+	backups, _ := store.ListBackups(a.cfg().DatabaseBackupDir)
 	ok(w, "OK", map[string]any{
-		"active_driver":     a.store.Backend(),
-		"configured_driver": a.cfg.DatabaseDriver,
-		"active_label":      databaseDriverLabel(a.store.Backend()),
-		"configured_label":  databaseDriverLabel(a.cfg.DatabaseDriver),
+		"active_driver":     a.store().Backend(),
+		"configured_driver": a.cfg().DatabaseDriver,
+		"active_label":      databaseDriverLabel(a.store().Backend()),
+		"configured_label":  databaseDriverLabel(a.cfg().DatabaseDriver),
 		"supported_drivers": []map[string]string{
 			{"driver": "postgres", "label": "postgresql", "role": "runtime"},
 			{"driver": "json", "label": "gojson", "role": "runtime"},
 		},
-		"state_file":              a.cfg.StateFile,
-		"backup_dir":              a.cfg.DatabaseBackupDir,
+		"state_file":              a.cfg().StateFile,
+		"backup_dir":              a.cfg().DatabaseBackupDir,
 		"backup_count":            len(backups),
 		"storage_mismatch":        a.runtimeDatabaseMismatch(),
 		"storage_warning":         a.databaseMismatchWarning(),
-		"migration_panel_enabled": a.cfg.DatabaseMigrationPanelEnabled,
-		"postgres_configured":     a.cfg.PostgresDSN() != "",
-		"redis_enabled":           a.redis != nil,
-		"user_count":              a.store.UserCount(),
+		"migration_panel_enabled": a.cfg().DatabaseMigrationPanelEnabled,
+		"postgres_configured":     a.cfg().PostgresDSN() != "",
+		"redis_enabled":           a.redis() != nil,
+		"user_count":              a.store().UserCount(),
 		"legacy_sqlite_detected":  false,
 	})
 }
@@ -56,7 +56,7 @@ func databaseDriverLabel(driver string) string {
 }
 
 func (a *App) handleDatabaseBackups(w http.ResponseWriter, r *http.Request, _ Params) {
-	backups, err := store.ListBackups(a.cfg.DatabaseBackupDir)
+	backups, err := store.ListBackups(a.cfg().DatabaseBackupDir)
 	if err != nil {
 		failWithCode(w, http.StatusInternalServerError, ErrDBBackupListFailed, "读取数据库备份列表失败")
 		return
@@ -66,7 +66,7 @@ func (a *App) handleDatabaseBackups(w http.ResponseWriter, r *http.Request, _ Pa
 
 func (a *App) handleDatabaseBackupInspect(w http.ResponseWriter, r *http.Request, params Params) {
 	name := strings.TrimSpace(params["name"])
-	target, err := store.ResolveBackupPath(a.cfg.DatabaseBackupDir, name)
+	target, err := store.ResolveBackupPath(a.cfg().DatabaseBackupDir, name)
 	if err != nil {
 		failWithCode(w, http.StatusBadRequest, ErrDBBackupInvalid, "备份文件无效")
 		return
@@ -103,7 +103,7 @@ func (a *App) handleDatabaseBackupInspect(w http.ResponseWriter, r *http.Request
 
 func (a *App) handleDatabaseBackupDelete(w http.ResponseWriter, r *http.Request, params Params) {
 	name := strings.TrimSpace(params["name"])
-	target, err := store.ResolveBackupPath(a.cfg.DatabaseBackupDir, name)
+	target, err := store.ResolveBackupPath(a.cfg().DatabaseBackupDir, name)
 	if err != nil {
 		failWithCode(w, http.StatusBadRequest, ErrDBBackupInvalid, "备份文件无效")
 		return
@@ -124,7 +124,7 @@ func (a *App) handleDatabaseBackupDelete(w http.ResponseWriter, r *http.Request,
 func (a *App) handleDatabaseBackup(w http.ResponseWriter, r *http.Request, _ Params) {
 	payload := decodeMap(r)
 	note := firstNonEmpty(stringValue(payload, "note"), stringValue(payload, "remark"))
-	info, err := a.store.BackupWithNote(a.cfg.DatabaseBackupDir, note)
+	info, err := a.store().BackupWithNote(a.cfg().DatabaseBackupDir, note)
 	if err != nil {
 		failWithCode(w, http.StatusInternalServerError, ErrDBBackupCreateFailed, "数据库备份失败")
 		return
@@ -135,7 +135,7 @@ func (a *App) handleDatabaseBackup(w http.ResponseWriter, r *http.Request, _ Par
 func (a *App) handleDatabaseRestore(w http.ResponseWriter, r *http.Request, _ Params) {
 	payload := decodeMap(r)
 	name := firstNonEmpty(stringValue(payload, "name"), stringValue(payload, "backup"))
-	target, err := store.ResolveBackupPath(a.cfg.DatabaseBackupDir, name)
+	target, err := store.ResolveBackupPath(a.cfg().DatabaseBackupDir, name)
 	if err != nil {
 		failWithCode(w, http.StatusBadRequest, ErrDBBackupInvalid, "备份文件无效")
 		return
@@ -151,7 +151,7 @@ func (a *App) handleDatabaseRestore(w http.ResponseWriter, r *http.Request, _ Pa
 		return
 	}
 	targetState.EnsureForMigration()
-	currentSnapshot, err := a.store.Snapshot()
+	currentSnapshot, err := a.store().Snapshot()
 	if err != nil {
 		failWithCode(w, http.StatusInternalServerError, ErrDBSnapshotFailed, "生成当前数据库快照失败")
 		return
@@ -193,12 +193,12 @@ func (a *App) handleDatabaseRestore(w http.ResponseWriter, r *http.Request, _ Pa
 		ok(w, "恢复预览已生成", result)
 		return
 	}
-	preRestore, backupErr := a.store.BackupWithNote(a.cfg.DatabaseBackupDir, "数据库恢复前保护性备份")
+	preRestore, backupErr := a.store().BackupWithNote(a.cfg().DatabaseBackupDir, "数据库恢复前保护性备份")
 	if backupErr != nil {
 		failWithCode(w, http.StatusInternalServerError, ErrDBRestoreBackupFail, "恢复前备份失败")
 		return
 	}
-	if err := a.store.LoadSnapshot(targetData); err != nil {
+	if err := a.store().LoadSnapshot(targetData); err != nil {
 		failWithCode(w, http.StatusBadRequest, ErrDBRestoreFailed, "备份恢复失败")
 		return
 	}
@@ -210,24 +210,24 @@ func (a *App) handleDatabaseRestore(w http.ResponseWriter, r *http.Request, _ Pa
 }
 
 func (a *App) handleDatabaseMigrate(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.cfg.DatabaseMigrationPanelEnabled {
+	if !a.cfg().DatabaseMigrationPanelEnabled {
 		failWithCode(w, http.StatusForbidden, ErrDBMigrationDisabled, "数据库迁移功能未开启，请先在配置文件中启用 Database.migration_panel_enabled")
 		return
 	}
 	payload := decodeMap(r)
-	sourceDriver := strings.ToLower(firstNonEmpty(stringValue(payload, "source_driver"), stringValue(payload, "source"), a.store.Backend()))
+	sourceDriver := strings.ToLower(firstNonEmpty(stringValue(payload, "source_driver"), stringValue(payload, "source"), a.store().Backend()))
 	if sourceDriver == "sqlite" || sourceDriver == "legacy_sqlite" || sourceDriver == "legacy-sqlite" {
 		failWithCode(w, http.StatusForbidden, ErrDBSQLiteDisabled, "SQLite 数据源已禁用；请使用当前运行状态或 PostgreSQL")
 		return
 	}
 	defer runtime.GC()
-	targetDriver := strings.ToLower(firstNonEmpty(stringValue(payload, "target_driver"), stringValue(payload, "driver"), a.cfg.DatabaseDriver))
+	targetDriver := strings.ToLower(firstNonEmpty(stringValue(payload, "target_driver"), stringValue(payload, "driver"), a.cfg().DatabaseDriver))
 	if targetDriver == "" {
 		targetDriver = store.BackendJSON
 	}
 	confirmed := stringValue(payload, "confirm") == databaseMigrateConfirmPhrase
 	dryRun := boolValue(payload, "dry_run", false) || boolValue(payload, "preview", false) || !confirmed
-	snapshot, err := a.store.Snapshot()
+	snapshot, err := a.store().Snapshot()
 	if err != nil {
 		failWithCode(w, http.StatusInternalServerError, ErrDBSnapshotFailed, "生成迁移快照失败")
 		return
@@ -243,7 +243,7 @@ func (a *App) handleDatabaseMigrate(w http.ResponseWriter, r *http.Request, _ Pa
 	switch targetDriver {
 	case store.BackendPostgres, "postgresql":
 		targetDriver = store.BackendPostgres
-		dsn := firstNonEmpty(stringValue(payload, "database_url"), stringValue(payload, "postgres_dsn"), a.cfg.PostgresDSN())
+		dsn := firstNonEmpty(stringValue(payload, "database_url"), stringValue(payload, "postgres_dsn"), a.cfg().PostgresDSN())
 		if dsn == "" {
 			failWithCode(w, http.StatusBadRequest, ErrDBPostgresMissing, "未配置 PostgreSQL 连接信息")
 			return
@@ -261,7 +261,7 @@ func (a *App) handleDatabaseMigrate(w http.ResponseWriter, r *http.Request, _ Pa
 			ok(w, "迁移预检通过", a.databaseMigrationSummary(targetDriver, state, dryRun, snapshotBytes, targetReady))
 			return
 		}
-		preMigration, backupErr := a.store.BackupWithNote(a.cfg.DatabaseBackupDir, "数据库迁移前保护性备份")
+		preMigration, backupErr := a.store().BackupWithNote(a.cfg().DatabaseBackupDir, "数据库迁移前保护性备份")
 		if backupErr != nil {
 			failWithCode(w, http.StatusInternalServerError, ErrDBRestoreBackupFail, "迁移前备份失败")
 			return
@@ -272,7 +272,7 @@ func (a *App) handleDatabaseMigrate(w http.ResponseWriter, r *http.Request, _ Pa
 			return
 		}
 		defer targetStore.Close()
-		targetStore.ConfigurePostgres(a.cfg.PostgresMaxOpenConns, a.cfg.PostgresMaxIdleConns)
+		targetStore.ConfigurePostgres(a.cfg().PostgresMaxOpenConns, a.cfg().PostgresMaxIdleConns)
 		targetReady["connected"] = true
 		targetReady["schema_ready"] = true
 		if err := targetStore.LoadSnapshot(snapshot); err != nil {
@@ -287,9 +287,9 @@ func (a *App) handleDatabaseMigrate(w http.ResponseWriter, r *http.Request, _ Pa
 		targetDriver = store.BackendJSON
 		targetPath := strings.TrimSpace(stringValue(payload, "state_file"))
 		if targetPath == "" {
-			targetPath = a.cfg.StateFile
+			targetPath = a.cfg().StateFile
 		} else {
-			targetPath, err = resolveStateFileTarget(a.cfg.DatabaseDir, targetPath)
+			targetPath, err = resolveStateFileTarget(a.cfg().DatabaseDir, targetPath)
 			if err != nil {
 				failWithCode(w, http.StatusBadRequest, ErrDBStateFileBadPath, "目标状态文件路径无效")
 				return
@@ -302,7 +302,7 @@ func (a *App) handleDatabaseMigrate(w http.ResponseWriter, r *http.Request, _ Pa
 			ok(w, "迁移预检通过", summary)
 			return
 		}
-		preMigration, backupErr := a.store.BackupWithNote(a.cfg.DatabaseBackupDir, "数据库迁移前保护性备份")
+		preMigration, backupErr := a.store().BackupWithNote(a.cfg().DatabaseBackupDir, "数据库迁移前保护性备份")
 		if backupErr != nil {
 			failWithCode(w, http.StatusInternalServerError, ErrDBRestoreBackupFail, "迁移前备份失败")
 			return
@@ -354,15 +354,15 @@ func postgresTargetReadyMap(driver string, status store.PostgresTargetStatus) ma
 func (a *App) databaseMigrationSummary(driver string, state store.State, dryRun bool, snapshotBytes int, targetReady map[string]any) map[string]any {
 	counts := databaseStateCounts(state)
 	warnings := []string{}
-	if a.store.Backend() != driver {
+	if a.store().Backend() != driver {
 		warnings = append(warnings, "active database backend will not change until the service restarts with the target driver")
 	}
-	if strings.ToLower(a.cfg.DatabaseDriver) != driver {
+	if strings.ToLower(a.cfg().DatabaseDriver) != driver {
 		warnings = append(warnings, "configured database.driver differs from migration target; update config before restart")
 	}
 	return map[string]any{
-		"source_driver":         a.store.Backend(),
-		"configured_driver":     strings.ToLower(a.cfg.DatabaseDriver),
+		"source_driver":         a.store().Backend(),
+		"configured_driver":     strings.ToLower(a.cfg().DatabaseDriver),
 		"target_driver":         driver,
 		"dry_run":               dryRun,
 		"operation":             "migrate",
@@ -370,7 +370,7 @@ func (a *App) databaseMigrationSummary(driver string, state store.State, dryRun 
 		"confirm":               databaseMigrateConfirmPhrase,
 		"snapshot_bytes":        snapshotBytes,
 		"source_ready": map[string]any{
-			"driver":   a.store.Backend(),
+			"driver":   a.store().Backend(),
 			"snapshot": true,
 			"counts":   counts,
 		},
@@ -379,7 +379,7 @@ func (a *App) databaseMigrationSummary(driver string, state store.State, dryRun 
 			"automatic":     true,
 			"current_state": true,
 			"legacy_sqlite": false,
-			"backup_dir":    a.cfg.DatabaseBackupDir,
+			"backup_dir":    a.cfg().DatabaseBackupDir,
 		},
 		"warnings":       warnings,
 		"counts":         counts,

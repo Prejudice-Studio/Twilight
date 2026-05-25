@@ -21,10 +21,10 @@ func normalizedRuntimeDriver(driver string) string {
 }
 
 func (a *App) runtimeDatabaseMismatch() bool {
-	if a == nil || a.store == nil {
+	if a == nil || a.store() == nil {
 		return false
 	}
-	return normalizedRuntimeDriver(a.cfg.DatabaseDriver) != normalizedRuntimeDriver(a.store.Backend())
+	return normalizedRuntimeDriver(a.cfg().DatabaseDriver) != normalizedRuntimeDriver(a.store().Backend())
 }
 
 func (a *App) rejectRegcodeWriteIfStorageMismatch(w http.ResponseWriter) bool {

@@ -63,12 +63,12 @@ func (a *App) runSchedulerLoop(ctx context.Context) (err error) {
 }
 
 func (a *App) runDueSchedulerJobs(ctx context.Context) {
-	if !a.cfg.SchedulerEnabled {
+	if !a.cfg().SchedulerEnabled {
 		return
 	}
 	for _, job := range schedulerJobs {
 		jobID := fmt.Sprint(job["id"])
-		if jobID == "" || boolish(job["manual_only"]) || !schedulerJobEnabledByConfig(a.cfg.SystemUpdateEnabled, job) {
+		if jobID == "" || boolish(job["manual_only"]) || !schedulerJobEnabledByConfig(a.cfg().SystemUpdateEnabled, job) {
 			continue
 		}
 		spec := a.schedulerTriggerSpec(jobID)
@@ -92,7 +92,7 @@ func schedulerJobEnabledByConfig(systemUpdateEnabled bool, job map[string]any) b
 }
 
 func (a *App) schedulerJobDue(jobID string, spec map[string]any, now time.Time) bool {
-	runs := a.store.SchedulerRuns(jobID, 20)
+	runs := a.store().SchedulerRuns(jobID, 20)
 	last := int64(0)
 	for _, run := range runs {
 		if run.Status == "running" && time.Since(time.Unix(run.StartedAt, 0)) < 30*time.Minute {
@@ -133,7 +133,7 @@ func (a *App) runScheduledJob(ctx context.Context, jobID string) {
 	defer finish()
 	started := time.Now().Unix()
 	run := store.SchedulerRun{JobID: jobID, Type: "auto", Trigger: "scheduler", Status: "running", Message: "running", StartedAt: started}
-	run, err := a.store.AddSchedulerRunReturning(run)
+	run, err := a.store().AddSchedulerRunReturning(run)
 	if err != nil {
 		zap.L().Warn("scheduler job run record create failed", zap.String("job_id", jobID), zap.Error(err))
 		return
@@ -143,7 +143,7 @@ func (a *App) runScheduledJob(ctx context.Context, jobID string) {
 	summary, logs, err := a.runSchedulerJob(req, jobID)
 	finished := schedulerFinishedRun(jobID, "auto", "scheduler", started, summary, logs, err)
 	finished.ID = run.ID
-	if _, updateErr := a.store.UpdateSchedulerRun(run.ID, func(run *store.SchedulerRun) error {
+	if _, updateErr := a.store().UpdateSchedulerRun(run.ID, func(run *store.SchedulerRun) error {
 		*run = finished
 		return nil
 	}); updateErr != nil {
@@ -162,7 +162,7 @@ func (a *App) startManualSchedulerJob(ctx context.Context, jobID string, params 
 		return store.SchedulerRun{}, false
 	}
 	started := time.Now().Unix()
-	run, err := a.store.AddSchedulerRunReturning(store.SchedulerRun{JobID: jobID, Type: "manual", Trigger: "manual", Status: "running", Message: "running", StartedAt: started})
+	run, err := a.store().AddSchedulerRunReturning(store.SchedulerRun{JobID: jobID, Type: "manual", Trigger: "manual", Status: "running", Message: "running", StartedAt: started})
 	if err != nil {
 		finish()
 		zap.L().Warn("manual scheduler job run record create failed", zap.String("job_id", jobID), zap.Error(err))
@@ -185,7 +185,7 @@ func (a *App) startManualSchedulerJob(ctx context.Context, jobID string, params 
 		summary, logs, err := a.runSchedulerJob(req, jobID)
 		finished := schedulerFinishedRun(jobID, "manual", "manual", started, summary, logs, err)
 		finished.ID = run.ID
-		if _, updateErr := a.store.UpdateSchedulerRun(run.ID, func(current *store.SchedulerRun) error {
+		if _, updateErr := a.store().UpdateSchedulerRun(run.ID, func(current *store.SchedulerRun) error {
 			*current = finished
 			return nil
 		}); updateErr != nil {
@@ -230,7 +230,7 @@ func schedulerFinishedRun(jobID, runType, trigger string, started int64, summary
 }
 
 func (a *App) schedulerTriggerSpec(jobID string) map[string]any {
-	if schedule, ok := a.store.SchedulerSchedule(jobID); ok && len(schedule.TriggerSpec) > 0 {
+	if schedule, ok := a.store().SchedulerSchedule(jobID); ok && len(schedule.TriggerSpec) > 0 {
 		return schedule.TriggerSpec
 	}
 	return a.schedulerDefaultTriggerSpec(jobID)
@@ -245,7 +245,7 @@ func (a *App) schedulerNextRunAt(jobID string, spec map[string]any, now time.Tim
 		return 0
 	}
 	last := int64(0)
-	if runs := a.store.SchedulerRuns(jobID, 20); len(runs) > 0 {
+	if runs := a.store().SchedulerRuns(jobID, 20); len(runs) > 0 {
 		for _, run := range runs {
 			if run.Type == "auto" && run.StartedAt > last {
 				last = run.StartedAt
@@ -275,13 +275,13 @@ func (a *App) schedulerNextRunAt(jobID string, spec map[string]any, now time.Tim
 func (a *App) schedulerDefaultTriggerSpec(jobID string) map[string]any {
 	switch jobID {
 	case "check_expired":
-		return dailySpec(a.cfg.SchedulerExpiredCheckTime, 3, 0)
+		return dailySpec(a.cfg().SchedulerExpiredCheckTime, 3, 0)
 	case "check_expiring", "expiry_reminders":
-		return dailySpec(a.cfg.SchedulerExpiringCheckTime, 9, 0)
+		return dailySpec(a.cfg().SchedulerExpiringCheckTime, 9, 0)
 	case "daily_stats":
-		return dailySpec(a.cfg.SchedulerDailyStatsTime, 0, 5)
+		return dailySpec(a.cfg().SchedulerDailyStatsTime, 0, 5)
 	case "cleanup_sessions":
-		hours := a.cfg.SchedulerSessionCleanupInterval
+		hours := a.cfg().SchedulerSessionCleanupInterval
 		if hours <= 0 {
 			hours = 6
 		}
@@ -293,13 +293,13 @@ func (a *App) schedulerDefaultTriggerSpec(jobID string) map[string]any {
 	case "cleanup_pending_emby_entitlements":
 		return dailySpec("03:45", 3, 45)
 	case "system_auto_update":
-		switch strings.ToLower(strings.TrimSpace(a.cfg.SystemUpdateTriggerType)) {
+		switch strings.ToLower(strings.TrimSpace(a.cfg().SystemUpdateTriggerType)) {
 		case "daily", "cron_daily":
-			return dailySpec(a.cfg.SystemUpdateTime, 4, 0)
+			return dailySpec(a.cfg().SystemUpdateTime, 4, 0)
 		case "manual":
 			return map[string]any{"type": "manual"}
 		default:
-			hours := a.cfg.SystemUpdateIntervalHours
+			hours := a.cfg().SystemUpdateIntervalHours
 			if hours <= 0 {
 				hours = 24
 			}

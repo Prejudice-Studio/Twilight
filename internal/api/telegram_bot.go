@@ -42,7 +42,7 @@ func (a *App) RunTelegramBot(ctx context.Context) error {
 				continue
 			}
 		}
-		currentConfig := strings.TrimSpace(a.cfg.TelegramAPIURL) + "|" + strings.TrimSpace(a.cfg.TelegramBotToken)
+		currentConfig := strings.TrimSpace(a.cfg().TelegramAPIURL) + "|" + strings.TrimSpace(a.cfg().TelegramBotToken)
 		if currentConfig != activeConfig {
 			me, err := a.telegramGetMe(ctx)
 			if err != nil {
@@ -174,7 +174,7 @@ func (a *App) observeTelegramRoster(update map[string]any) {
 		chatID := numeric(chat["id"])
 		fromID := numeric(from["id"])
 		if chatID != 0 && fromID > 0 && chatID != fromID {
-			_ = a.store.UpsertTelegramRoster(fmt.Sprint(chatID), fromID, "member", boolish(from["is_bot"]))
+			_ = a.store().UpsertTelegramRoster(fmt.Sprint(chatID), fromID, "member", boolish(from["is_bot"]))
 		}
 		return
 	}
@@ -193,10 +193,10 @@ func (a *App) observeTelegramRoster(update map[string]any) {
 			return
 		}
 		if status == "left" || status == "kicked" {
-			_ = a.store.MarkTelegramRosterLeft(fmt.Sprint(chatID), userID, status)
+			_ = a.store().MarkTelegramRosterLeft(fmt.Sprint(chatID), userID, status)
 			return
 		}
-		_ = a.store.UpsertTelegramRoster(fmt.Sprint(chatID), userID, firstNonEmpty(status, "member"), boolish(user["is_bot"]))
+		_ = a.store().UpsertTelegramRoster(fmt.Sprint(chatID), userID, firstNonEmpty(status, "member"), boolish(user["is_bot"]))
 		return
 	}
 }
@@ -207,10 +207,10 @@ func (a *App) telegramConfirmBindCode(ctx context.Context, chatID, telegramID in
 		_ = a.telegramSendMessage(ctx, chatID, "绑定码格式无效，请在 Web 端重新生成后再发送。")
 		return
 	}
-	bind, okBind := a.store.BindCode(code)
+	bind, okBind := a.store().BindCode(code)
 	if !okBind || bind.ExpiresAt <= time.Now().Unix() {
 		if okBind {
-			_ = a.store.DeleteBindCode(code)
+			_ = a.store().DeleteBindCode(code)
 		}
 		_ = a.telegramSendMessage(ctx, chatID, "绑定码无效或已过期，请在网页重新获取。")
 		return
@@ -225,13 +225,13 @@ func (a *App) telegramConfirmBindCode(ctx context.Context, chatID, telegramID in
 		_ = a.telegramSendMessage(ctx, chatID, "Telegram 绑定已确认，可以回到网页继续。")
 		return
 	}
-	if existing, okUser := a.store.FindUserByTelegramID(telegramID); okUser && (bind.UID == 0 || existing.UID != bind.UID) {
+	if existing, okUser := a.store().FindUserByTelegramID(telegramID); okUser && (bind.UID == 0 || existing.UID != bind.UID) {
 		_ = a.telegramSendMessage(ctx, chatID, fmt.Sprintf("该 Telegram 已绑定到账号 %s。", existing.Username))
 		return
 	}
 	// per-tg-id 速率限制：阻止用同一个 tg 账号反复对 bot 发未确认的合法 code，
 	// 触发对 Telegram API 的 getChatMember 流量放大。
-	if !a.allowRate(ctx, rateKey("tg-bind-confirm:", telegramID), a.cfg.RateLimitLoginPerMinute, time.Minute) {
+	if !a.allowRate(ctx, rateKey("tg-bind-confirm:", telegramID), a.cfg().RateLimitLoginPerMinute, time.Minute) {
 		_ = a.telegramSendMessage(ctx, chatID, "操作过于频繁，请稍后再试。")
 		return
 	}
@@ -245,10 +245,10 @@ func (a *App) telegramConfirmBindCode(ctx context.Context, chatID, telegramID in
 	bind.Confirmed = true
 	bind.TelegramID = telegramID
 	bind.TelegramUsername = username
-	_ = a.store.UpsertBindCode(bind)
+	_ = a.store().UpsertBindCode(bind)
 	if bind.UID != 0 {
-		defer func() { _ = a.store.DeleteBindCode(code) }()
-		_, err := a.store.UpdateUser(bind.UID, func(u *store.User) error {
+		defer func() { _ = a.store().DeleteBindCode(code) }()
+		_, err := a.store().UpdateUser(bind.UID, func(u *store.User) error {
 			u.TelegramID = telegramID
 			u.TelegramUsername = username
 			return nil
@@ -262,7 +262,7 @@ func (a *App) telegramConfirmBindCode(ctx context.Context, chatID, telegramID in
 }
 
 func (a *App) telegramHandleMe(ctx context.Context, chatID, telegramID int64) {
-	if u, okUser := a.store.FindUserByTelegramID(telegramID); okUser {
+	if u, okUser := a.store().FindUserByTelegramID(telegramID); okUser {
 		_ = a.telegramSendMessage(ctx, chatID, "当前绑定信息\n\n"+telegramUserSummary(u))
 		return
 	}
@@ -270,14 +270,14 @@ func (a *App) telegramHandleMe(ctx context.Context, chatID, telegramID int64) {
 }
 
 func (a *App) telegramHandleEmby(ctx context.Context, chatID, telegramID int64) {
-	u, okUser := a.store.FindUserByTelegramID(telegramID)
+	u, okUser := a.store().FindUserByTelegramID(telegramID)
 	if !okUser {
 		_ = a.telegramSendMessage(ctx, chatID, "当前 Telegram 尚未绑定 Twilight 账号。")
 		return
 	}
 	online := false
 	checked := false
-	if strings.TrimSpace(a.cfg.EmbyURL) != "" {
+	if strings.TrimSpace(a.cfg().EmbyURL) != "" {
 		checked = true
 		// 5s ctx 走 embyHealth：双段 fallback 由 helper 集中处理。
 		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -297,20 +297,20 @@ func (a *App) telegramHandleEmby(ctx context.Context, chatID, telegramID int64) 
 		"本地状态: " + telegramActiveLabel(u.Active),
 		"到期: " + expireStatus(u.ExpiredAt),
 		"Emby 绑定: " + telegramEmbyLabel(u),
-		"服务器配置: " + telegramConfiguredLabel(a.cfg.EmbyURL != ""),
+		"服务器配置: " + telegramConfiguredLabel(a.cfg().EmbyURL != ""),
 		"连通性: " + status,
 	}
 	_ = a.telegramSendMessage(ctx, chatID, strings.Join(lines, "\n"))
 }
 
 func (a *App) telegramHandlePlayInfo(ctx context.Context, chatID, telegramID int64) {
-	u, okUser := a.store.FindUserByTelegramID(telegramID)
+	u, okUser := a.store().FindUserByTelegramID(telegramID)
 	if !okUser {
 		_ = a.telegramSendMessage(ctx, chatID, "当前 Telegram 尚未绑定 Twilight 账号。")
 		return
 	}
 	since := time.Now().AddDate(0, 0, -30).Unix()
-	records := a.store.PlaybackRecords(u.UID, since, 1000)
+	records := a.store().PlaybackRecords(u.UID, since, 1000)
 	totalDuration := int64(0)
 	for _, record := range records {
 		totalDuration += record.Duration
@@ -336,7 +336,7 @@ func (a *App) telegramHandlePlayInfo(ctx context.Context, chatID, telegramID int
 }
 
 func (a *App) telegramHandleResetPassword(ctx context.Context, chatID, telegramID int64) {
-	if _, okUser := a.store.FindUserByTelegramID(telegramID); !okUser {
+	if _, okUser := a.store().FindUserByTelegramID(telegramID); !okUser {
 		_ = a.telegramSendMessage(ctx, chatID, "当前 Telegram 尚未绑定 Twilight 账号。")
 		return
 	}
@@ -348,7 +348,7 @@ func (a *App) telegramHandleStats(ctx context.Context, chatID, telegramID int64)
 		_ = a.telegramSendMessage(ctx, chatID, "没有管理员权限。")
 		return
 	}
-	users := a.store.ListUsers()
+	users := a.store().ListUsers()
 	active := 0
 	embyBound := 0
 	telegramBound := 0
@@ -367,8 +367,8 @@ func (a *App) telegramHandleStats(ctx context.Context, chatID, telegramID int64)
 			pendingEmby++
 		}
 	}
-	regcodes := a.store.ListRegCodes()
-	inviteCodes := a.store.ListAllInviteCodes()
+	regcodes := a.store().ListRegCodes()
+	inviteCodes := a.store().ListAllInviteCodes()
 	text := fmt.Sprintf("服务统计\n\n用户总数: %d\n活跃用户: %d\nTelegram 已绑定: %d\nEmby 已绑定: %d\n待开通 Emby: %d\n注册码: %d\n邀请码: %d", len(users), active, telegramBound, embyBound, pendingEmby, len(regcodes), len(inviteCodes))
 	_ = a.telegramSendMessage(ctx, chatID, text)
 }
@@ -439,12 +439,12 @@ func (a *App) telegramHandleGroupUser(ctx context.Context, chatID, telegramID in
 }
 
 func (a *App) telegramAdminID(telegramID int64) bool {
-	for _, id := range a.cfg.TelegramAdminIDs {
+	for _, id := range a.cfg().TelegramAdminIDs {
 		if id == telegramID {
 			return true
 		}
 	}
-	if u, okUser := a.store.FindUserByTelegramID(telegramID); okUser && u.Role == store.RoleAdmin {
+	if u, okUser := a.store().FindUserByTelegramID(telegramID); okUser && u.Role == store.RoleAdmin {
 		return true
 	}
 	return false
@@ -471,7 +471,7 @@ func (a *App) telegramCustomCommandReply(command string) (string, bool) {
 	if command == "" || !strings.HasPrefix(command, "/") {
 		return "", false
 	}
-	for _, item := range a.cfg.TelegramCustomCommands {
+	for _, item := range a.cfg().TelegramCustomCommands {
 		if telegramCommand(item.Command) == command && strings.TrimSpace(item.Reply) != "" {
 			return item.Reply, true
 		}
@@ -480,11 +480,11 @@ func (a *App) telegramCustomCommandReply(command string) (string, bool) {
 }
 
 func (a *App) telegramStartText() string {
-	if text := strings.TrimSpace(a.cfg.TelegramBotStartText); text != "" {
+	if text := strings.TrimSpace(a.cfg().TelegramBotStartText); text != "" {
 		return a.telegramRenderText(text)
 	}
-	title := firstNonEmpty(strings.TrimSpace(a.cfg.TelegramBotStartTitle), "Twilight Bot")
-	intro := firstNonEmpty(strings.TrimSpace(a.cfg.TelegramBotStartIntro), "用于绑定 Telegram、查看账号状态和接收服务通知。")
+	title := firstNonEmpty(strings.TrimSpace(a.cfg().TelegramBotStartTitle), "Twilight Bot")
+	intro := firstNonEmpty(strings.TrimSpace(a.cfg().TelegramBotStartIntro), "用于绑定 Telegram、查看账号状态和接收服务通知。")
 	return strings.Join([]string{
 		title,
 		"",
@@ -500,25 +500,25 @@ func (a *App) telegramStartText() string {
 }
 
 func (a *App) telegramGroupPrompt() string {
-	if text := strings.TrimSpace(a.cfg.TelegramBotGroupStartText); text != "" {
+	if text := strings.TrimSpace(a.cfg().TelegramBotGroupStartText); text != "" {
 		return a.telegramRenderText(text)
 	}
 	return "为避免泄露账号信息，请私聊 Bot 使用 /bind、/me、/emby 等账号命令。管理员可在群内使用 /twguser 打开用户管理面板。"
 }
 
 func (a *App) telegramBindPrompt() string {
-	if text := strings.TrimSpace(a.cfg.TelegramBotBindPromptText); text != "" {
+	if text := strings.TrimSpace(a.cfg().TelegramBotBindPromptText); text != "" {
 		return a.telegramRenderText(text)
 	}
 	return "请发送 /bind <绑定码>。绑定码需要先在 Web 端生成，有效期较短。"
 }
 
 func (a *App) telegramHelpText(admin bool) string {
-	if text := strings.TrimSpace(a.cfg.TelegramBotHelpText); text != "" {
+	if text := strings.TrimSpace(a.cfg().TelegramBotHelpText); text != "" {
 		return a.telegramRenderText(text)
 	}
 	lines := []string{}
-	if header := strings.TrimSpace(a.cfg.TelegramBotHelpHeader); header != "" {
+	if header := strings.TrimSpace(a.cfg().TelegramBotHelpHeader); header != "" {
 		lines = append(lines, a.telegramRenderText(header), "")
 	}
 	lines = append(lines,
@@ -537,28 +537,28 @@ func (a *App) telegramHelpText(admin bool) string {
 	if admin {
 		lines = append(lines, "", "管理员命令:", "/stats 服务统计", "/userinfo <关键词> 查看单个用户", "/twfind <关键词> 搜索用户", "/twishelp 管理员帮助")
 	}
-	if footer := strings.TrimSpace(a.cfg.TelegramBotHelpFooter); footer != "" {
+	if footer := strings.TrimSpace(a.cfg().TelegramBotHelpFooter); footer != "" {
 		lines = append(lines, "", a.telegramRenderText(footer))
 	}
 	return strings.Join(lines, "\n")
 }
 
 func (a *App) telegramAdminHelpText() string {
-	if text := strings.TrimSpace(a.cfg.TelegramBotAdminHelpText); text != "" {
+	if text := strings.TrimSpace(a.cfg().TelegramBotAdminHelpText); text != "" {
 		return a.telegramRenderText(text)
 	}
 	return "管理员帮助\n\n/stats 服务统计\n/userinfo <用户名/UID/关键词> 查看用户详情\n/twfind <用户名/UID/关键词> 搜索用户\n/twguser <关键词> 群组用户管理面板\n/twguser 回复群成员消息时按 Telegram 绑定关系查询\n\n群组匿名管理员使用 /twguser 时需要通过 inline 按钮验证身份；每次按钮操作都会重新鉴权。"
 }
 
 func (a *App) telegramAboutText() string {
-	if text := strings.TrimSpace(a.cfg.TelegramBotAbout); text != "" {
+	if text := strings.TrimSpace(a.cfg().TelegramBotAbout); text != "" {
 		return a.telegramRenderText(text)
 	}
-	return a.cfg.AppName + "\n\nTelegram Bot 仅用于绑定、查询、统计和通知。不会通过 Telegram 展示密码、Token、Emby ID 或服务器线路。"
+	return a.cfg().AppName + "\n\nTelegram Bot 仅用于绑定、查询、统计和通知。不会通过 Telegram 展示密码、Token、Emby ID 或服务器线路。"
 }
 
 func (a *App) telegramRenderText(text string) string {
-	text = strings.ReplaceAll(text, "{server_name}", a.cfg.AppName)
+	text = strings.ReplaceAll(text, "{server_name}", a.cfg().AppName)
 	text = strings.ReplaceAll(text, "{bot_username}", "")
 	text = strings.ReplaceAll(text, "{user_name}", "")
 	return text
@@ -574,7 +574,7 @@ func (a *App) telegramFindUsers(query string, limit int) []store.User {
 	}
 	lower := strings.ToLower(query)
 	out := []store.User{}
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if telegramUserMatches(u, lower) {
 			out = append(out, u)
 			if len(out) >= limit {

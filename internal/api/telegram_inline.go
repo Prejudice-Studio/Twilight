@@ -44,7 +44,7 @@ func (a *App) telegramResolveGroupUserTarget(fields []string, message map[string
 func (a *App) telegramResolveGroupUserTargetValues(query string, replyTelegramID int64) (store.User, string) {
 	if strings.TrimSpace(query) == "" {
 		if replyTelegramID != 0 {
-			if u, okUser := a.store.FindUserByTelegramID(replyTelegramID); okUser {
+			if u, okUser := a.store().FindUserByTelegramID(replyTelegramID); okUser {
 				return u, ""
 			}
 			return store.User{}, "目标 Telegram 尚未绑定 Twilight 账号。"
@@ -247,7 +247,7 @@ func (a *App) telegramHandleCallback(ctx context.Context, callback map[string]an
 }
 
 func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelContext, action string) {
-	target, ok := a.store.User(panel.TargetUID)
+	target, ok := a.store().User(panel.TargetUID)
 	if !ok {
 		a.telegramDeletePanel(panel.Token)
 		_ = a.telegramEditMessageText(ctx, panel.ChatID, panel.MessageID, "目标用户不存在或已被删除。", nil)
@@ -264,12 +264,12 @@ func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelC
 			a.telegramEditPanelWithNotice(ctx, panel, target, "管理员账号禁止通过 Telegram 面板禁用。")
 			return
 		}
-		updated, err := a.store.UpdateUser(target.UID, func(u *store.User) error { u.Active = enabled; return nil })
+		updated, err := a.store().UpdateUser(target.UID, func(u *store.User) error { u.Active = enabled; return nil })
 		if err != nil {
 			a.telegramEditPanelWithNotice(ctx, panel, target, "更新用户状态失败: "+err.Error())
 			return
 		}
-		if updated.EmbyID != "" && a.cfg.EmbyURL != "" {
+		if updated.EmbyID != "" && a.cfg().EmbyURL != "" {
 			_ = a.embySetUserEnabled(ctx, updated.EmbyID, a.embyShouldEnableUser(updated))
 		}
 		a.telegramEditPanelWithNotice(ctx, panel, updated, "用户状态已更新。")
@@ -286,9 +286,9 @@ func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelC
 			a.telegramEditPanelWithNotice(ctx, panel, target, fmt.Sprintf("Emby 名额已满: %d/%d。", current, limit))
 			return
 		}
-		days := a.cfg.InviteDefaultDays
+		days := a.cfg().InviteDefaultDays
 		if days == 0 {
-			days = a.cfg.EmbyDirectRegisterDays
+			days = a.cfg().EmbyDirectRegisterDays
 		}
 		if days == 0 {
 			days = 30
@@ -296,7 +296,7 @@ func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelC
 		if days < -1 {
 			days = -1
 		}
-		updated, err := a.store.UpdateUser(target.UID, func(u *store.User) error {
+		updated, err := a.store().UpdateUser(target.UID, func(u *store.User) error {
 			u.PendingEmby = true
 			u.PendingEmbyDays = &days
 			if u.Role == store.RoleUnrecognized {
@@ -326,11 +326,11 @@ func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelC
 			a.telegramEditPanelWithNotice(ctx, panel, target, "管理员账号禁止通过 Telegram 面板删除。")
 			return
 		}
-		if err := a.store.DeleteUser(target.UID); err != nil {
+		if err := a.store().DeleteUser(target.UID); err != nil {
 			a.telegramEditPanelWithNotice(ctx, panel, target, "删除用户失败: "+err.Error())
 			return
 		}
-		a.sessions.DeleteUser(ctx, target.UID)
+		a.sessions().DeleteUser(ctx, target.UID)
 		a.telegramDeletePanel(panel.Token)
 		_ = a.telegramEditMessageText(ctx, panel.ChatID, panel.MessageID, fmt.Sprintf("已删除用户 %s。", target.Username), nil)
 	case "kick", "ban":
@@ -359,7 +359,7 @@ func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelC
 }
 
 func (a *App) telegramEditPanel(ctx context.Context, panel telegramPanelContext, confirmDelete bool) {
-	target, ok := a.store.User(panel.TargetUID)
+	target, ok := a.store().User(panel.TargetUID)
 	if !ok {
 		_ = a.telegramEditMessageText(ctx, panel.ChatID, panel.MessageID, "目标用户不存在或已被删除。", nil)
 		return

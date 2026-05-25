@@ -8,7 +8,7 @@ import (
 )
 
 func (a *App) searchBangumi(ctx context.Context, query string, limit int) ([]map[string]any, error) {
-	endpoint, err := bangumiEndpoint(a.cfg.BangumiAPIURL, "/search/subjects", url.Values{
+	endpoint, err := bangumiEndpoint(a.cfg().BangumiAPIURL, "/search/subjects", url.Values{
 		"limit":  {fmt.Sprint(limit)},
 		"offset": {"0"},
 	})
@@ -36,7 +36,7 @@ func (a *App) searchBangumi(ctx context.Context, query string, limit int) ([]map
 }
 
 func (a *App) getBangumi(ctx context.Context, id string) (map[string]any, error) {
-	endpoint, err := bangumiEndpoint(a.cfg.BangumiAPIURL, "/subjects/"+id, nil)
+	endpoint, err := bangumiEndpoint(a.cfg().BangumiAPIURL, "/subjects/"+id, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -49,8 +49,8 @@ func (a *App) getBangumi(ctx context.Context, id string) (map[string]any, error)
 
 func (a *App) bangumiHeaders() map[string]string {
 	headers := map[string]string{"User-Agent": "Twilight/1.0", "Accept": "application/json"}
-	if a.cfg.BangumiToken != "" {
-		headers["Authorization"] = "Bearer " + a.cfg.BangumiToken
+	if a.cfg().BangumiToken != "" {
+		headers["Authorization"] = "Bearer " + a.cfg().BangumiToken
 	}
 	return headers
 }

@@ -11,7 +11,7 @@ import (
 )
 
 func (a *App) handleBangumiWebhook(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.cfg.BangumiEnabled {
+	if !a.cfg().BangumiEnabled {
 		failWithCode(w, http.StatusBadRequest, ErrBangumiSyncDisabled, "Bangumi 同步未启用")
 		return
 	}
@@ -30,7 +30,7 @@ func (a *App) handleBangumiWebhook(w http.ResponseWriter, r *http.Request, _ Par
 	// 任何未鉴权的请求都能让 server 把 body（受 MaxUploadSize 上限约束）读完并构建
 	// 完整 map[string]any，攻击者可以无凭据投递大体积 JSON 触发 GC 放大。改为只允许
 	// header / query token；body-token 废弃后整个 hot path 不再读 body。
-	if a.cfg.BangumiWebhookSecret == "" || subtle.ConstantTimeCompare([]byte(secret), []byte(a.cfg.BangumiWebhookSecret)) != 1 {
+	if a.cfg().BangumiWebhookSecret == "" || subtle.ConstantTimeCompare([]byte(secret), []byte(a.cfg().BangumiWebhookSecret)) != 1 {
 		failWithCode(w, http.StatusForbidden, ErrUnauthorized, "Webhook 密钥无效")
 		return
 	}
@@ -55,12 +55,12 @@ func (a *App) handleBangumiWebhook(w http.ResponseWriter, r *http.Request, _ Par
 				userID = firstNonEmpty(asString(sessionData["UserId"]), asString(sessionData["UserID"]))
 			}
 		}
-		if local, okUser := a.store.FindUserByEmbyID(userID); okUser {
+		if local, okUser := a.store().FindUserByEmbyID(userID); okUser {
 			duration := numeric(payload["PlaybackPositionTicks"]) / 10000000
 			if duration <= 0 {
 				duration = numeric(item["RunTimeTicks"]) / 10000000
 			}
-			if err := a.store.AddPlaybackRecord(store.PlaybackRecord{
+			if err := a.store().AddPlaybackRecord(store.PlaybackRecord{
 				UID:       local.UID,
 				ItemID:    firstNonEmpty(asString(item["Id"]), asString(item["ID"])),
 				Title:     firstNonEmpty(asString(item["Name"]), asString(item["SeriesName"])),

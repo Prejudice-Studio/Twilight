@@ -12,16 +12,16 @@ import (
 )
 
 func (a *App) enforceTelegramMembership(ctx context.Context) (map[string]any, []string, error) {
-	chats := telegramChatIDs(a.cfg.TelegramGroupIDs)
+	chats := telegramChatIDs(a.cfg().TelegramGroupIDs)
 	result := map[string]any{
 		"enabled": false, "telegram_available": a.telegramAvailable(), "groups": chats,
 		"scanned": 0, "disabled": 0, "emby_disabled": 0, "banned": 0, "rejoined_enabled": 0,
 		"rejoined_pending_review": 0, "rejoin_candidates": 0, "skipped": 0, "failed": 0,
-		"auto_enable_rejoined": a.cfg.TelegramAutoEnableRejoined,
+		"auto_enable_rejoined": a.cfg().TelegramAutoEnableRejoined,
 	}
 	rejoinCandidates := []map[string]any{}
 	logs := []string{}
-	if !a.cfg.TelegramRequireMembership || len(chats) == 0 {
+	if !a.cfg().TelegramRequireMembership || len(chats) == 0 {
 		logs = append(logs, "Telegram membership enforcement disabled")
 		return result, logs, nil
 	}
@@ -31,7 +31,7 @@ func (a *App) enforceTelegramMembership(ctx context.Context) (map[string]any, []
 		return result, logs, nil
 	}
 	now := time.Now().Unix()
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if u.TelegramID == 0 || u.Role == store.RoleAdmin || u.Role == store.RoleWhitelist {
 			result["skipped"] = int(numeric(result["skipped"])) + 1
 			continue
@@ -46,19 +46,19 @@ func (a *App) enforceTelegramMembership(ctx context.Context) (map[string]any, []
 			continue
 		}
 		if u.Active && len(missing) > 0 {
-			updated, err := a.store.UpdateUser(u.UID, func(u *store.User) error { u.Active = false; return nil })
+			updated, err := a.store().UpdateUser(u.UID, func(u *store.User) error { u.Active = false; return nil })
 			if err != nil {
 				result["failed"] = int(numeric(result["failed"])) + 1
 				continue
 			}
 			// 立即清除该用户所有 session（redis + memory + PG）。否则 stale token
 			// 在 SessionTTL 到期前都还能访问受保护接口。
-			a.sessions.DeleteUser(ctx, updated.UID)
+			a.sessions().DeleteUser(ctx, updated.UID)
 			result["disabled"] = int(numeric(result["disabled"])) + 1
 			if updated.EmbyID != "" && a.embySetUserEnabled(ctx, updated.EmbyID, false) == nil {
 				result["emby_disabled"] = int(numeric(result["emby_disabled"])) + 1
 			}
-			if a.cfg.TelegramBanOnLeave {
+			if a.cfg().TelegramBanOnLeave {
 				for _, chatID := range chats {
 					if err := a.telegramBanChatMember(ctx, chatID, updated.TelegramID); err == nil {
 						result["banned"] = int(numeric(result["banned"])) + 1
@@ -71,8 +71,8 @@ func (a *App) enforceTelegramMembership(ctx context.Context) (map[string]any, []
 			continue
 		}
 		if !u.Active && len(missing) == 0 && (u.ExpiredAt <= 0 || u.ExpiredAt > now) {
-			if a.cfg.TelegramAutoEnableRejoined && !a.cfg.TelegramBanOnLeave {
-				updated, err := a.store.UpdateUser(u.UID, func(u *store.User) error { u.Active = true; return nil })
+			if a.cfg().TelegramAutoEnableRejoined && !a.cfg().TelegramBanOnLeave {
+				updated, err := a.store().UpdateUser(u.UID, func(u *store.User) error { u.Active = true; return nil })
 				if err != nil {
 					result["failed"] = int(numeric(result["failed"])) + 1
 					continue
@@ -104,14 +104,14 @@ func (a *App) enforceTelegramMembership(ctx context.Context) (map[string]any, []
 
 func (a *App) cleanupUnusedUploadAssets(maxAge time.Duration) map[string]any {
 	result := map[string]any{"scanned": 0, "deleted": 0, "skipped_recent": 0, "failed": 0}
-	root, err := filepath.Abs(a.cfg.UploadDir)
+	root, err := filepath.Abs(a.cfg().UploadDir)
 	if err != nil {
 		result["failed"] = 1
 		result["error"] = err.Error()
 		return result
 	}
 	referenced := map[string]bool{}
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		addUploadReference(referenced, u.Avatar)
 		addUploadReference(referenced, u.Background)
 	}

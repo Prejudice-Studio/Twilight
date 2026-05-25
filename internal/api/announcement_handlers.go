@@ -23,18 +23,18 @@ import (
 )
 
 func (a *App) handleAdminAnnouncements(w http.ResponseWriter, r *http.Request, _ Params) {
-	anns := a.store.ListAnnouncements(true)
+	anns := a.store().ListAnnouncements(true)
 	ok(w, "OK", map[string]any{"announcements": anns, "total": len(anns)})
 }
 
 func (a *App) handleAnnouncements(w http.ResponseWriter, r *http.Request, _ Params) {
-	anns := a.store.ListAnnouncements(false)
+	anns := a.store().ListAnnouncements(false)
 	ok(w, "OK", map[string]any{"announcements": anns, "total": len(anns)})
 }
 
 func (a *App) handleCreateAnnouncement(w http.ResponseWriter, r *http.Request, _ Params) {
 	payload := decodeMap(r)
-	ann, err := a.store.UpsertAnnouncement(store.Announcement{
+	ann, err := a.store().UpsertAnnouncement(store.Announcement{
 		Title:        firstNonEmpty(stringValue(payload, "title"), "鍏憡"),
 		Content:      stringValue(payload, "content"),
 		Visible:      boolValue(payload, "visible", true),
@@ -54,13 +54,13 @@ func (a *App) handleUpdateAnnouncement(w http.ResponseWriter, r *http.Request, p
 	id, _ := int64Param(params, "announcement_id")
 	payload := decodeMap(r)
 	existing := store.Announcement{ID: id, Title: "鍏憡", Level: "info", Visible: true, RenderMode: "plain"}
-	for _, ann := range a.store.ListAnnouncements(true) {
+	for _, ann := range a.store().ListAnnouncements(true) {
 		if ann.ID == id {
 			existing = ann
 			break
 		}
 	}
-	ann, err := a.store.UpsertAnnouncement(store.Announcement{
+	ann, err := a.store().UpsertAnnouncement(store.Announcement{
 		ID:           id,
 		Title:        firstNonEmpty(stringValue(payload, "title"), existing.Title, "鍏憡"),
 		Content:      firstNonEmpty(stringValue(payload, "content"), existing.Content),
@@ -96,7 +96,7 @@ func int64Value(payload map[string]any, key string, fallback int64) int64 {
 
 func (a *App) handleDeleteAnnouncement(w http.ResponseWriter, r *http.Request, params Params) {
 	id, _ := int64Param(params, "announcement_id")
-	if statusFromError(w, a.store.DeleteAnnouncement(id)) {
+	if statusFromError(w, a.store().DeleteAnnouncement(id)) {
 		return
 	}
 	ok(w, "announcement deleted", nil)

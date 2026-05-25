@@ -30,7 +30,7 @@ var telegramPublicUsernamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{4,
 const generatedPasswordHexLen = 32
 
 func (a *App) handleRoot(w http.ResponseWriter, r *http.Request, _ Params) {
-	ok(w, "Twilight API", map[string]any{"name": a.cfg.AppName, "version": a.cfg.Version, "docs": "/api/v1/docs"})
+	ok(w, "Twilight API", map[string]any{"name": a.cfg().AppName, "version": a.cfg().Version, "docs": "/api/v1/docs"})
 }
 
 func (a *App) handleOpenAPI(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -43,7 +43,7 @@ func (a *App) handleOpenAPI(w http.ResponseWriter, r *http.Request, _ Params) {
 		}
 		pathItem[strings.ToLower(route.Method)] = map[string]any{"responses": map[string]any{"200": map[string]string{"description": "OK"}}}
 	}
-	ok(w, "OK", map[string]any{"openapi": "3.0.3", "info": map[string]string{"title": "Twilight Go API", "version": a.cfg.Version}, "paths": paths})
+	ok(w, "OK", map[string]any{"openapi": "3.0.3", "info": map[string]string{"title": "Twilight Go API", "version": a.cfg().Version}, "paths": paths})
 }
 
 func (a *App) handleDocs(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -57,7 +57,7 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 		return
 	}
 	payload := decodeMap(r)
-	if !a.cfg.BangumiEnabled {
+	if !a.cfg().BangumiEnabled {
 		if _, ok := payload["bgm_mode"]; ok {
 			failWithCode(w, http.StatusForbidden, ErrBangumiSyncDisabled, "Bangumi 同步未开启")
 			return
@@ -75,7 +75,7 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 		failWithCode(w, http.StatusBadRequest, ErrBangumiTokenMissing, "启用 Bangumi 同步前请先填写个人 Token")
 		return
 	}
-	u, err := a.store.UpdateUser(p.User.UID, func(u *store.User) error {
+	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error {
 		if email := stringValue(payload, "email"); email != "" {
 			if len(email) > 256 || strings.ContainsAny(email, "<>\"'\x00") {
 				return fmt.Errorf("invalid email format")
@@ -117,7 +117,7 @@ func (a *App) handleUpdateUsername(w http.ResponseWriter, r *http.Request, _ Par
 		failWithCode(w, http.StatusBadRequest, ErrUsernameInvalid, err.Error())
 		return
 	}
-	u, err := a.store.UpdateUser(p.User.UID, func(u *store.User) error {
+	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error {
 		u.Username = username
 		return nil
 	})
@@ -148,7 +148,7 @@ func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request, _ Par
 		failWithCode(w, http.StatusInternalServerError, ErrPasswordHashFailed, "密码处理失败")
 		return
 	}
-	_, err = a.store.UpdateUser(p.User.UID, func(u *store.User) error { u.PasswordHash = hash; return nil })
+	_, err = a.store().UpdateUser(p.User.UID, func(u *store.User) error { u.PasswordHash = hash; return nil })
 	if statusFromError(w, err) {
 		return
 	}
@@ -168,7 +168,7 @@ func (a *App) handleGeneratedPassword(w http.ResponseWriter, r *http.Request, _ 
 		failWithCode(w, http.StatusInternalServerError, ErrPasswordHashFailed, "密码处理失败")
 		return
 	}
-	_, err = a.store.UpdateUser(p.User.UID, func(u *store.User) error { u.PasswordHash = hash; return nil })
+	_, err = a.store().UpdateUser(p.User.UID, func(u *store.User) error { u.PasswordHash = hash; return nil })
 	if statusFromError(w, err) {
 		return
 	}
@@ -232,11 +232,11 @@ func (a *App) handleBindEmby(w http.ResponseWriter, r *http.Request, _ Params) {
 			return
 		}
 	}
-	if existing, okExisting := a.store.FindUserByEmbyID(embyID); okExisting && existing.UID != p.User.UID {
+	if existing, okExisting := a.store().FindUserByEmbyID(embyID); okExisting && existing.UID != p.User.UID {
 		failWithCode(w, http.StatusConflict, ErrEmbyLinkedOtherUser, "该 Emby 账号已关联其他用户")
 		return
 	}
-	u, err := a.store.UpdateUser(p.User.UID, func(u *store.User) error {
+	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error {
 		u.EmbyUsername = firstNonEmpty(asString(embyUser["Name"]), embyUsername)
 		u.EmbyID = embyID
 		u.PendingEmby = false
@@ -257,7 +257,7 @@ func (a *App) handleRegisterEmby(w http.ResponseWriter, r *http.Request, params 
 		failWithCode(w, http.StatusBadRequest, ErrEmbyAlreadyLinked, "当前账号已关联 Emby 账号")
 		return
 	}
-	if !p.User.PendingEmby && !a.cfg.EmbyDirectRegisterEnabled {
+	if !p.User.PendingEmby && !a.cfg().EmbyDirectRegisterEnabled {
 		failWithCode(w, http.StatusBadRequest, ErrEmbyNoRegistrationGrant, "当前账号没有 Emby 注册资格")
 		return
 	}
@@ -289,14 +289,14 @@ func (a *App) handleRegisterEmby(w http.ResponseWriter, r *http.Request, params 
 		return
 	}
 	embyID := asString(createdUser["Id"])
-	days := a.cfg.EmbyDirectRegisterDays
+	days := a.cfg().EmbyDirectRegisterDays
 	if p.User.PendingEmbyDays != nil {
 		days = *p.User.PendingEmbyDays
 	}
 	if days == 0 {
 		days = 30
 	}
-	u, err := a.store.UpdateUser(p.User.UID, func(u *store.User) error {
+	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error {
 		u.EmbyID = embyID
 		u.EmbyUsername = firstNonEmpty(asString(createdUser["Name"]), embyUsername)
 		u.PendingEmby = false
@@ -325,7 +325,7 @@ func (a *App) handleUnbindEmby(w http.ResponseWriter, r *http.Request, _ Params)
 	if a.requireNonEmbyAdmin(w, r, p.User) {
 		return
 	}
-	u, err := a.store.UpdateUser(p.User.UID, func(u *store.User) error { u.EmbyID = ""; u.EmbyUsername = ""; return nil })
+	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error { u.EmbyID = ""; u.EmbyUsername = ""; return nil })
 	if statusFromError(w, err) {
 		return
 	}
@@ -353,7 +353,7 @@ func (a *App) handleRenew(w http.ResponseWriter, r *http.Request, _ Params) {
 		return
 	}
 	// Consume the reg code (validates active, use count, expiry)
-	code, err := a.store.ConsumeRegCode(regCode, p.User.UID, p.User.TelegramID)
+	code, err := a.store().ConsumeRegCode(regCode, p.User.UID, p.User.TelegramID)
 	if err != nil {
 		failWithCode(w, http.StatusBadRequest, ErrRegcodeInvalid, "注册码无效、已用完或已过期")
 		return
@@ -362,7 +362,7 @@ func (a *App) handleRenew(w http.ResponseWriter, r *http.Request, _ Params) {
 	if days <= 0 {
 		days = 30
 	}
-	u, err := a.store.UpdateUser(p.User.UID, func(u *store.User) error {
+	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error {
 		u.ExpiredAt = addDaysToExpiry(u.ExpiredAt, int(days), time.Now())
 		return nil
 	})
@@ -377,7 +377,7 @@ func (a *App) handleQueueStatus(w http.ResponseWriter, r *http.Request, _ Params
 }
 
 func (a *App) handleRegisterBindCode(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.allowRate(r.Context(), rateKey("register-bind-code:", a.clientIP(r)), a.cfg.RateLimitRegisterPer10m, 10*time.Minute) {
+	if !a.allowRate(r.Context(), rateKey("register-bind-code:", a.clientIP(r)), a.cfg().RateLimitRegisterPer10m, 10*time.Minute) {
 		failWithCode(w, http.StatusTooManyRequests, ErrBindCodeRateLimited, "绑定码请求过于频繁")
 		return
 	}
@@ -385,7 +385,7 @@ func (a *App) handleRegisterBindCode(w http.ResponseWriter, r *http.Request, _ P
 }
 
 func (a *App) handleUserBindCode(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.allowRate(r.Context(), rateKey("user-bind-code:", current(r).User.UID), a.cfg.RateLimitLoginPerMinute, time.Minute) {
+	if !a.allowRate(r.Context(), rateKey("user-bind-code:", current(r).User.UID), a.cfg().RateLimitLoginPerMinute, time.Minute) {
 		failWithCode(w, http.StatusTooManyRequests, ErrBindCodeRateLimited, "绑定码请求过于频繁")
 		return
 	}
@@ -393,11 +393,11 @@ func (a *App) handleUserBindCode(w http.ResponseWriter, r *http.Request, _ Param
 }
 
 func (a *App) createBindCode(w http.ResponseWriter, uid int64, scene string) {
-	_, _ = a.store.CleanupExpiredBindCodes(time.Now().Unix())
+	_, _ = a.store().CleanupExpiredBindCodes(time.Now().Unix())
 	code := ""
 	for attempt := 0; attempt < 20; attempt++ {
 		candidate := strings.ToUpper(randomCode(12))
-		if _, exists := a.store.BindCode(candidate); exists {
+		if _, exists := a.store().BindCode(candidate); exists {
 			continue
 		}
 		code = candidate
@@ -408,7 +408,7 @@ func (a *App) createBindCode(w http.ResponseWriter, uid int64, scene string) {
 		return
 	}
 	now := time.Now().Unix()
-	_ = a.store.UpsertBindCode(store.BindCode{Code: code, Scene: scene, UID: uid, CreatedAt: now, ExpiresAt: now + 600})
+	_ = a.store().UpsertBindCode(store.BindCode{Code: code, Scene: scene, UID: uid, CreatedAt: now, ExpiresAt: now + 600})
 	ok(w, "OK", map[string]any{"bind_code": code, "expires_in": 600})
 }
 
@@ -418,10 +418,10 @@ func (a *App) handleBindCodeStatus(w http.ResponseWriter, r *http.Request, _ Par
 		ok(w, "OK", map[string]any{"code": code, "confirmed": false, "invalid": true, "terminal": true})
 		return
 	}
-	bind, okBind := a.store.BindCode(code)
+	bind, okBind := a.store().BindCode(code)
 	if !okBind || bind.ExpiresAt < time.Now().Unix() {
 		if okBind {
-			_ = a.store.DeleteBindCode(code)
+			_ = a.store().DeleteBindCode(code)
 		}
 		ok(w, "OK", map[string]any{"code": code, "confirmed": false, "invalid": true, "terminal": true})
 		return
@@ -432,31 +432,31 @@ func (a *App) handleBindCodeStatus(w http.ResponseWriter, r *http.Request, _ Par
 func (a *App) handleBindConfirm(w http.ResponseWriter, r *http.Request, _ Params) {
 	payload := decodeMap(r)
 	code := strings.ToUpper(stringValue(payload, "code"))
-	bind, okBind := a.store.BindCode(code)
+	bind, okBind := a.store().BindCode(code)
 	if !okBind {
 		failWithCode(w, http.StatusNotFound, ErrBindCodeNotFound, "绑定码不存在")
 		return
 	}
 	bind.Confirmed = true
 	bind.TelegramID = int64(intValue(payload, "telegram_id", 0))
-	_ = a.store.UpsertBindCode(bind)
+	_ = a.store().UpsertBindCode(bind)
 	ok(w, "bind confirmed", map[string]any{"code": code, "confirmed": true})
 }
 
 func (a *App) handleTelegramStatus(w http.ResponseWriter, r *http.Request, _ Params) {
 	u := current(r).User
-	canUnbind := !a.cfg.ForceBindTelegram || u.Role == store.RoleAdmin
-	ok(w, "OK", map[string]any{"bound": u.TelegramID != 0, "telegram_id": nullableInt(u.TelegramID), "telegram_id_full": nullableInt(u.TelegramID), "telegram_username": u.TelegramUsername, "force_bind": a.cfg.ForceBindTelegram, "can_unbind": canUnbind, "can_change": canUnbind})
+	canUnbind := !a.cfg().ForceBindTelegram || u.Role == store.RoleAdmin
+	ok(w, "OK", map[string]any{"bound": u.TelegramID != 0, "telegram_id": nullableInt(u.TelegramID), "telegram_id_full": nullableInt(u.TelegramID), "telegram_username": u.TelegramUsername, "force_bind": a.cfg().ForceBindTelegram, "can_unbind": canUnbind, "can_change": canUnbind})
 }
 
 func (a *App) handleUnbindTelegram(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
 	// Enforce force-bind policy: non-admin users cannot unbind when force_bind_telegram is enabled
-	if a.cfg.ForceBindTelegram && p.User.Role != store.RoleAdmin {
+	if a.cfg().ForceBindTelegram && p.User.Role != store.RoleAdmin {
 		failWithCode(w, http.StatusForbidden, ErrTGUnbindForbidden, "当前系统要求强制绑定 Telegram，无法解绑")
 		return
 	}
-	u, err := a.store.UpdateUser(p.User.UID, func(u *store.User) error { u.TelegramID = 0; u.TelegramUsername = ""; return nil })
+	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error { u.TelegramID = 0; u.TelegramUsername = ""; return nil })
 	if statusFromError(w, err) {
 		return
 	}
@@ -469,7 +469,7 @@ func (a *App) handleTelegramRebindRequest(w http.ResponseWriter, r *http.Request
 		failWithCode(w, http.StatusBadRequest, ErrTGNotBound, "当前账号未绑定 Telegram")
 		return
 	}
-	req, err := a.store.CreateRebindRequest(store.RebindRequest{UID: u.UID, Username: u.Username, OldTelegramID: u.TelegramID, Reason: truncateString(stringValue(decodeMap(r), "reason"), 500)})
+	req, err := a.store().CreateRebindRequest(store.RebindRequest{UID: u.UID, Username: u.Username, OldTelegramID: u.TelegramID, Reason: truncateString(stringValue(decodeMap(r), "reason"), 500)})
 	if statusFromError(w, err) {
 		return
 	}
@@ -480,9 +480,9 @@ func (a *App) handleUserSettings(w http.ResponseWriter, r *http.Request, _ Param
 	u := current(r).User
 	ok(w, "OK", map[string]any{
 		"bgm_mode": u.BGMMode, "bgm_token_set": u.BGMToken != "", "api_key_enabled": u.LegacyAPIKeyStatus,
-		"telegram":      map[string]any{"bound": u.TelegramID != 0, "force_bind": a.cfg.ForceBindTelegram, "can_unbind": !a.cfg.ForceBindTelegram, "can_change": true, "pending_rebind_request": false, "rebind_request_status": nil, "rebind_request_id": nil},
+		"telegram":      map[string]any{"bound": u.TelegramID != 0, "force_bind": a.cfg().ForceBindTelegram, "can_unbind": !a.cfg().ForceBindTelegram, "can_change": true, "pending_rebind_request": false, "rebind_request_status": nil, "rebind_request_id": nil},
 		"emby_status":   map[string]any{"is_synced": u.EmbyID != "", "is_active": u.Active, "active_sessions": 0, "message": "OK"},
-		"system_config": map[string]any{"device_limit_enabled": a.cfg.DeviceLimitEnabled, "max_devices": a.cfg.MaxDevices, "max_streams": a.cfg.MaxStreams, "bangumi_sync_enabled": a.cfg.BangumiEnabled},
+		"system_config": map[string]any{"device_limit_enabled": a.cfg().DeviceLimitEnabled, "max_devices": a.cfg().MaxDevices, "max_streams": a.cfg().MaxStreams, "bangumi_sync_enabled": a.cfg().BangumiEnabled},
 	})
 }
 
@@ -495,14 +495,14 @@ func (a *App) handleDevices(w http.ResponseWriter, r *http.Request, params Param
 		}
 	}
 	items := []map[string]any{}
-	for _, d := range a.store.ListDevices(uid) {
+	for _, d := range a.store().ListDevices(uid) {
 		items = append(items, map[string]any{"device_id": d.DeviceID, "device_name": d.DeviceName, "client": d.Client, "first_seen": d.FirstSeen, "last_seen": d.LastSeen, "is_trusted": d.Trusted})
 	}
 	ok(w, "OK", items)
 }
 
 func (a *App) handleSessions(w http.ResponseWriter, r *http.Request, _ Params) {
-	if a.cfg.EmbyURL == "" {
+	if a.cfg().EmbyURL == "" {
 		ok(w, "OK", []any{})
 		return
 	}
@@ -523,7 +523,7 @@ func (a *App) handleSessions(w http.ResponseWriter, r *http.Request, _ Params) {
 			nowPlaying = map[string]any{"id": item["Id"], "name": item["Name"], "type": item["Type"]}
 		}
 		local := any(nil)
-		if u, okUser := a.store.FindUserByEmbyID(asString(session["UserId"])); okUser {
+		if u, okUser := a.store().FindUserByEmbyID(asString(session["UserId"])); okUser {
 			local = map[string]any{"uid": u.UID, "username": u.Username, "telegram_id": nullableInt(u.TelegramID)}
 		}
 		items = append(items, map[string]any{
@@ -551,7 +551,7 @@ func (a *App) handleLoginHistory(w http.ResponseWriter, r *http.Request, _ Param
 		}
 	}
 	limit := clamp(queryInt(r, "limit", 50), 1, 100)
-	logs := a.store.LoginHistory(uid, false, 0, limit)
+	logs := a.store().LoginHistory(uid, false, 0, limit)
 	items := make([]map[string]any, 0, len(logs))
 	for _, log := range logs {
 		items = append(items, map[string]any{"id": log.ID, "ip": log.IP, "device": log.DeviceName, "client": log.Client, "time": log.Time, "blocked": log.Blocked, "country": log.Country, "city": log.City})
@@ -569,7 +569,7 @@ func (a *App) handleBlockDevice(w http.ResponseWriter, r *http.Request, params P
 		failWithCode(w, http.StatusBadRequest, ErrDeviceIDRequired, "设备 ID 不能为空")
 		return
 	}
-	if err := a.store.UpdateDevice(uid, deviceID, func(d *store.Device) { d.Blocked = true; d.Trusted = false }); statusFromError(w, err) {
+	if err := a.store().UpdateDevice(uid, deviceID, func(d *store.Device) { d.Blocked = true; d.Trusted = false }); statusFromError(w, err) {
 		return
 	}
 	ok(w, "device blocked", nil)
@@ -578,7 +578,7 @@ func (a *App) handleBlockDevice(w http.ResponseWriter, r *http.Request, params P
 func (a *App) handleTrustDevice(w http.ResponseWriter, r *http.Request, params Params) {
 	uid := current(r).User.UID
 	deviceID := params["device_id"]
-	if err := a.store.UpdateDevice(uid, deviceID, func(d *store.Device) { d.Trusted = true; d.Blocked = false }); statusFromError(w, err) {
+	if err := a.store().UpdateDevice(uid, deviceID, func(d *store.Device) { d.Trusted = true; d.Blocked = false }); statusFromError(w, err) {
 		return
 	}
 	ok(w, "device trusted", nil)
@@ -590,14 +590,14 @@ func (a *App) handleDeleteDevice(w http.ResponseWriter, r *http.Request, params 
 		failWithCode(w, http.StatusBadRequest, ErrDeviceIDRequired, "设备 ID 不能为空")
 		return
 	}
-	if err := a.store.DeleteDevice(current(r).User.UID, deviceID); statusFromError(w, err) {
+	if err := a.store().DeleteDevice(current(r).User.UID, deviceID); statusFromError(w, err) {
 		return
 	}
 	ok(w, "device removed", nil)
 }
 
 func (a *App) handleIPBlacklist(w http.ResponseWriter, r *http.Request, _ Params) {
-	ok(w, "OK", a.store.ListIPBlacklist())
+	ok(w, "OK", a.store().ListIPBlacklist())
 }
 
 func (a *App) handleAddIPBlacklist(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -612,7 +612,7 @@ func (a *App) handleAddIPBlacklist(w http.ResponseWriter, r *http.Request, _ Par
 	if hours > 0 {
 		expireAt = time.Now().Add(time.Duration(hours) * time.Hour).Unix()
 	}
-	if err := a.store.AddIPBlacklist(ip, stringValue(payload, "reason"), expireAt); statusFromError(w, err) {
+	if err := a.store().AddIPBlacklist(ip, stringValue(payload, "reason"), expireAt); statusFromError(w, err) {
 		return
 	}
 	ok(w, "IP 已加入黑名单", nil)
@@ -624,7 +624,7 @@ func (a *App) handleDeleteIPBlacklist(w http.ResponseWriter, r *http.Request, _ 
 		failWithCode(w, http.StatusBadRequest, ErrIPRequired, "IP 不能为空")
 		return
 	}
-	if err := a.store.RemoveIPBlacklist(ip); statusFromError(w, err) {
+	if err := a.store().RemoveIPBlacklist(ip); statusFromError(w, err) {
 		return
 	}
 	ok(w, "IP 已移出黑名单", nil)
@@ -632,7 +632,7 @@ func (a *App) handleDeleteIPBlacklist(w http.ResponseWriter, r *http.Request, _ 
 
 func (a *App) handleSuspicious(w http.ResponseWriter, r *http.Request, _ Params) {
 	hours := queryInt(r, "hours", 24)
-	logs := a.store.LoginHistory(0, true, time.Now().Add(-time.Duration(hours)*time.Hour).Unix(), 100)
+	logs := a.store().LoginHistory(0, true, time.Now().Add(-time.Duration(hours)*time.Hour).Unix(), 100)
 	items := make([]map[string]any, 0, len(logs))
 	for _, log := range logs {
 		items = append(items, map[string]any{"uid": log.UID, "ip": log.IP, "device": log.DeviceName, "time": log.Time, "reason": firstNonEmpty(log.Reason, "blocked")})
@@ -642,47 +642,47 @@ func (a *App) handleSuspicious(w http.ResponseWriter, r *http.Request, _ Params)
 
 func (a *App) handleSystemInfo(w http.ResponseWriter, r *http.Request, _ Params) {
 	ok(w, "OK", map[string]any{
-		"name":        a.cfg.AppName,
+		"name":        a.cfg().AppName,
 		"icon":        a.publicServerIconURL(),
-		"version":     a.cfg.Version,
+		"version":     a.cfg().Version,
 		"api_version": "v1",
 		// 把 session / csrf cookie 名公开给前端，让 CSRF 提取按精确名匹配
 		// 而不是 *_csrf 后缀启发式。同域 / 父域第三方应用
 		// 能下发 xx_csrf cookie 时，旧策略会取错；前端按 systemInfo 拿到的
 		// 精确名后必然只命中后端真正下发的那一个。
-		"session_cookie_name": a.cfg.SessionCookie,
-		"csrf_cookie_name":    a.cfg.SessionCookie + "_csrf",
+		"session_cookie_name": a.cfg().SessionCookie,
+		"csrf_cookie_name":    a.cfg().SessionCookie + "_csrf",
 		"features": map[string]any{
-			"register":             a.cfg.RegisterEnabled,
-			"emby_direct_register": a.cfg.EmbyDirectRegisterEnabled,
-			"telegram":             a.cfg.TelegramMode,
-			"force_bind_telegram":  a.cfg.ForceBindTelegram,
-			"force_bind_group":     a.cfg.TelegramForceBindGroup,
-			"force_bind_channel":   a.cfg.TelegramForceBindChannel,
-			"bangumi_sync":         a.cfg.BangumiEnabled,
-			"media_request":        a.cfg.MediaRequestEnabled,
-			"signin":               a.cfg.SigninEnabled,
-			"invite":               a.cfg.InviteEnabled,
+			"register":             a.cfg().RegisterEnabled,
+			"emby_direct_register": a.cfg().EmbyDirectRegisterEnabled,
+			"telegram":             a.cfg().TelegramMode,
+			"force_bind_telegram":  a.cfg().ForceBindTelegram,
+			"force_bind_group":     a.cfg().TelegramForceBindGroup,
+			"force_bind_channel":   a.cfg().TelegramForceBindChannel,
+			"bangumi_sync":         a.cfg().BangumiEnabled,
+			"media_request":        a.cfg().MediaRequestEnabled,
+			"signin":               a.cfg().SigninEnabled,
+			"invite":               a.cfg().InviteEnabled,
 		},
-		"limits":         map[string]any{"user_limit": a.cfg.UserLimit, "stream_limit": a.cfg.MaxStreams},
+		"limits":         map[string]any{"user_limit": a.cfg().UserLimit, "stream_limit": a.cfg().MaxStreams},
 		"telegram_bot":   a.publicTelegramBotInfo(r.Context()),
-		"telegram_links": publicTelegramLinks(a.cfg.TelegramGroupIDs, a.cfg.TelegramChannelIDs),
+		"telegram_links": publicTelegramLinks(a.cfg().TelegramGroupIDs, a.cfg().TelegramChannelIDs),
 		"required_telegram_links": publicTelegramLinks(
-			requiredTelegramLinkIDs(a.cfg.TelegramGroupIDs, a.cfg.TelegramForceBindGroup),
-			requiredTelegramLinkIDs(a.cfg.TelegramChannelIDs, a.cfg.TelegramForceBindChannel),
+			requiredTelegramLinkIDs(a.cfg().TelegramGroupIDs, a.cfg().TelegramForceBindGroup),
+			requiredTelegramLinkIDs(a.cfg().TelegramChannelIDs, a.cfg().TelegramForceBindChannel),
 		),
-		"telegram_mode":        a.cfg.TelegramMode,
-		"bangumi_sync_enabled": a.cfg.BangumiEnabled,
+		"telegram_mode":        a.cfg().TelegramMode,
+		"bangumi_sync_enabled": a.cfg().BangumiEnabled,
 	})
 }
 
 func (a *App) publicTelegramBotInfo(ctx context.Context) map[string]any {
-	empty := map[string]any{"username": nil, "url": nil, "enabled": a.cfg.TelegramMode, "configured": strings.TrimSpace(a.cfg.TelegramBotToken) != "", "ok": false, "error": ""}
+	empty := map[string]any{"username": nil, "url": nil, "enabled": a.cfg().TelegramMode, "configured": strings.TrimSpace(a.cfg().TelegramBotToken) != "", "ok": false, "error": ""}
 	if !a.telegramAvailable() {
 		empty["error"] = "Telegram 未启用或未配置 Bot Token"
 		return empty
 	}
-	token := strings.TrimSpace(a.cfg.TelegramBotToken)
+	token := strings.TrimSpace(a.cfg().TelegramBotToken)
 	now := time.Now()
 	a.telegramBotMu.Lock()
 	if a.telegramBotCacheToken == token && now.Before(a.telegramBotCacheUntil) && a.telegramBotCache != nil {
@@ -699,7 +699,7 @@ func (a *App) publicTelegramBotInfo(ctx context.Context) map[string]any {
 	if err == nil {
 		username := strings.TrimPrefix(asString(me["username"]), "@")
 		if telegramPublicUsernamePattern.MatchString(username) {
-			bot = map[string]any{"username": username, "url": "https://t.me/" + username, "enabled": a.cfg.TelegramMode, "configured": true, "ok": true, "error": ""}
+			bot = map[string]any{"username": username, "url": "https://t.me/" + username, "enabled": a.cfg().TelegramMode, "configured": true, "ok": true, "error": ""}
 		}
 	} else {
 		bot["error"] = err.Error()
@@ -799,7 +799,7 @@ func (a *App) handleServerIcon(w http.ResponseWriter, r *http.Request, _ Params)
 }
 
 func (a *App) publicServerIconURL() string {
-	value := strings.TrimSpace(a.cfg.ServerIcon)
+	value := strings.TrimSpace(a.cfg().ServerIcon)
 	if value == "" {
 		return "/api/v1/system/server-icon"
 	}
@@ -818,7 +818,7 @@ func (a *App) publicServerIconURL() string {
 }
 
 func (a *App) configuredServerIconPath() (string, string, bool) {
-	value := strings.TrimSpace(a.cfg.ServerIcon)
+	value := strings.TrimSpace(a.cfg().ServerIcon)
 	if value == "" {
 		return "", "", false
 	}
@@ -841,7 +841,7 @@ func (a *App) configuredServerIconPath() (string, string, bool) {
 	}
 	path := value
 	if !filepath.IsAbs(path) {
-		path = filepath.Join(firstNonEmpty(a.cfg.UploadDir, "uploads"), path)
+		path = filepath.Join(firstNonEmpty(a.cfg().UploadDir, "uploads"), path)
 	}
 	info, err := os.Lstat(path)
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > 2*1024*1024 {
@@ -852,20 +852,20 @@ func (a *App) configuredServerIconPath() (string, string, bool) {
 
 func (a *App) handleHealth(w http.ResponseWriter, r *http.Request, _ Params) {
 	emby := a.embyOverview(r.Context())
-	sessionFallback := a.sessions.FallbackCount()
-	rateFallback := a.limiter.FallbackCount()
+	sessionFallback := a.sessions().FallbackCount()
+	rateFallback := a.limiter().FallbackCount()
 	data := map[string]any{
 		"status":           "healthy",
 		"time":             time.Now().Unix(),
 		"api":              true,
-		"database":         a.store != nil,
+		"database":         a.store() != nil,
 		"emby":             boolValue(emby, "online", false),
-		"emby_configured":  a.cfg.EmbyURL != "",
-		"redis":            a.redis != nil,
-		"redis_degraded":   a.redis != nil && (sessionFallback > 0 || rateFallback > 0),
-		"storage":          a.store.Backend(),
-		"active_database":  a.store.Backend(),
-		"config_database":  strings.ToLower(a.cfg.DatabaseDriver),
+		"emby_configured":  a.cfg().EmbyURL != "",
+		"redis":            a.redis() != nil,
+		"redis_degraded":   a.redis() != nil && (sessionFallback > 0 || rateFallback > 0),
+		"storage":          a.store().Backend(),
+		"active_database":  a.store().Backend(),
+		"config_database":  strings.ToLower(a.cfg().DatabaseDriver),
 		"storage_mismatch": a.runtimeDatabaseMismatch(),
 		"storage_warning":  a.databaseMismatchWarning(),
 	}
@@ -873,9 +873,9 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request, _ Params) {
 }
 
 func (a *App) handleSystemStats(w http.ResponseWriter, r *http.Request, _ Params) {
-	users := a.store.ListUsers()
+	users := a.store().ListUsers()
 	activeUsers := countActive(users)
-	regcodes := a.store.ListRegCodes()
+	regcodes := a.store().ListRegCodes()
 	activeRegcodes := 0
 	for _, code := range regcodes {
 		if code.Active {
@@ -883,21 +883,21 @@ func (a *App) handleSystemStats(w http.ResponseWriter, r *http.Request, _ Params
 		}
 	}
 	usage := 0
-	if a.cfg.UserLimit > 0 {
-		usage = int(float64(len(users)) / float64(a.cfg.UserLimit) * 100)
+	if a.cfg().UserLimit > 0 {
+		usage = int(float64(len(users)) / float64(a.cfg().UserLimit) * 100)
 	}
 	ok(w, "OK", map[string]any{
 		"timestamp":     time.Now().Unix(),
 		"cpu_count":     nil,
-		"users":         map[string]any{"active": activeUsers, "total": len(users), "limit": zeroNil(int64(a.cfg.UserLimit)), "usage_percent": usage},
+		"users":         map[string]any{"active": activeUsers, "total": len(users), "limit": zeroNil(int64(a.cfg().UserLimit)), "usage_percent": usage},
 		"regcodes":      map[string]any{"active": activeRegcodes, "total": len(regcodes)},
 		"emby":          a.embyOverview(r.Context()),
 		"total_users":   len(users),
 		"active_users":  activeUsers,
-		"redis_enabled": a.redis != nil,
+		"redis_enabled": a.redis() != nil,
 		"redis_fallback": map[string]any{
-			"session": a.sessions.FallbackCount(),
-			"rate":    a.limiter.FallbackCount(),
+			"session": a.sessions().FallbackCount(),
+			"rate":    a.limiter().FallbackCount(),
 		},
 		"routes": len(a.routes),
 		"uptime": int64(time.Since(runtimeStartedAt).Seconds()),
@@ -918,8 +918,8 @@ func (a *App) embyOverview(ctx context.Context) map[string]any {
 	}
 	return map[string]any{
 		"online":           online,
-		"configured":       a.cfg.EmbyURL != "",
-		"server":           a.cfg.EmbyURL,
+		"configured":       a.cfg().EmbyURL != "",
+		"server":           a.cfg().EmbyURL,
 		"server_name":      firstNonEmpty(asString(info["ServerName"]), asString(info["Name"])),
 		"version":          firstNonEmpty(asString(info["Version"]), "unknown"),
 		"operating_system": asString(info["OperatingSystem"]),
@@ -946,19 +946,19 @@ func (a *App) handleEmbyURLs(w http.ResponseWriter, r *http.Request, _ Params) {
 		return
 	}
 	lines := []map[string]string{}
-	for _, line := range a.cfg.EmbyURLList {
+	for _, line := range a.cfg().EmbyURLList {
 		lines = append(lines, map[string]string{"name": line.Name, "url": line.URL})
 	}
-	if a.cfg.EmbyPublicURL != "" {
-		lines = append(lines, map[string]string{"name": "默认线路", "url": a.cfg.EmbyPublicURL})
+	if a.cfg().EmbyPublicURL != "" {
+		lines = append(lines, map[string]string{"name": "默认线路", "url": a.cfg().EmbyPublicURL})
 	}
 	whitelist := []map[string]string{}
 	if u.Role == store.RoleAdmin || u.Role == store.RoleWhitelist {
-		for _, line := range a.cfg.EmbyWhitelistURLList {
+		for _, line := range a.cfg().EmbyWhitelistURLList {
 			whitelist = append(whitelist, map[string]string{"name": line.Name, "url": line.URL})
 		}
-		if a.cfg.EmbyWhitelistURL != "" {
-			whitelist = append(whitelist, map[string]string{"name": "whitelist route", "url": a.cfg.EmbyWhitelistURL})
+		if a.cfg().EmbyWhitelistURL != "" {
+			whitelist = append(whitelist, map[string]string{"name": "whitelist route", "url": a.cfg().EmbyWhitelistURL})
 		}
 	}
 	ok(w, "OK", map[string]any{"lines": lines, "whitelist_lines": whitelist, "requires_emby_account": false, "requires_renewal": false, "emby_disabled_by_expiry": false})
@@ -966,22 +966,22 @@ func (a *App) handleEmbyURLs(w http.ResponseWriter, r *http.Request, _ Params) {
 
 func (a *App) handlePublicConfig(w http.ResponseWriter, r *http.Request, _ Params) {
 	ok(w, "OK", map[string]any{
-		"upload_limit":          a.cfg.MaxUploadSize,
-		"bangumi_sync_enabled":  a.cfg.BangumiEnabled,
-		"telegram_mode":         a.cfg.TelegramMode,
-		"media_request_enabled": a.cfg.MediaRequestEnabled,
-		"signin_enabled":        a.cfg.SigninEnabled,
-		"invite_enabled":        a.cfg.InviteEnabled,
-		"device_limit":          map[string]any{"enabled": a.cfg.DeviceLimitEnabled, "max_devices": a.cfg.MaxDevices, "max_streams": a.cfg.MaxStreams},
-		"bangumi_sync":          map[string]any{"enabled": a.cfg.BangumiEnabled},
-		"media_request":         map[string]any{"enabled": a.cfg.MediaRequestEnabled},
-		"signin":                signinConfigPayload(a.cfg),
-		"invite":                map[string]any{"enabled": a.cfg.InviteEnabled},
+		"upload_limit":          a.cfg().MaxUploadSize,
+		"bangumi_sync_enabled":  a.cfg().BangumiEnabled,
+		"telegram_mode":         a.cfg().TelegramMode,
+		"media_request_enabled": a.cfg().MediaRequestEnabled,
+		"signin_enabled":        a.cfg().SigninEnabled,
+		"invite_enabled":        a.cfg().InviteEnabled,
+		"device_limit":          map[string]any{"enabled": a.cfg().DeviceLimitEnabled, "max_devices": a.cfg().MaxDevices, "max_streams": a.cfg().MaxStreams},
+		"bangumi_sync":          map[string]any{"enabled": a.cfg().BangumiEnabled},
+		"media_request":         map[string]any{"enabled": a.cfg().MediaRequestEnabled},
+		"signin":                signinConfigPayload(*a.cfg()),
+		"invite":                map[string]any{"enabled": a.cfg().InviteEnabled},
 	})
 }
 
 func (a *App) handleAdminConfig(w http.ResponseWriter, r *http.Request, _ Params) {
-	ok(w, "OK", map[string]any{"host": a.cfg.Host, "port": a.cfg.Port, "redis_enabled": a.redis != nil, "state_file": a.cfg.StateFile, "upload_dir": a.cfg.UploadDir})
+	ok(w, "OK", map[string]any{"host": a.cfg().Host, "port": a.cfg().Port, "redis_enabled": a.redis() != nil, "state_file": a.cfg().StateFile, "upload_dir": a.cfg().UploadDir})
 }
 
 func (a *App) handleConfigTOMLGet(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -992,7 +992,7 @@ func (a *App) handleConfigTOMLGet(w http.ResponseWriter, r *http.Request, _ Para
 		return
 	}
 	rawContent := stripProtectedAdminConfig(string(data))
-	normalizedContent := stripProtectedAdminConfig(renderConfigTOML(configValues(a.cfg)))
+	normalizedContent := stripProtectedAdminConfig(renderConfigTOML(configValues(*a.cfg())))
 	ok(w, "OK", map[string]any{"content": normalizedContent, "raw_content": rawContent, "path": path, "completed": normalizedContent != rawContent})
 }
 
@@ -1009,7 +1009,7 @@ func (a *App) handleConfigSchemaUpdate(w http.ResponseWriter, r *http.Request, _
 }
 
 func (a *App) handleConfigSweep(w http.ResponseWriter, r *http.Request, _ Params) {
-	ok(w, "config check completed", map[string]any{"changed": false, "config_file": a.cfg.ConfigFile})
+	ok(w, "config check completed", map[string]any{"changed": false, "config_file": a.cfg().ConfigFile})
 }
 
 func (a *App) handleAPIRoutes(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -1022,12 +1022,12 @@ func (a *App) handleAPIRoutes(w http.ResponseWriter, r *http.Request, _ Params) 
 
 func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request, _ Params) {
 	results := []map[string]any{}
-	if !a.cfg.TelegramMode {
+	if !a.cfg().TelegramMode {
 		results = append(results, map[string]any{"target": "配置", "success": false, "error": "telegram_mode 未启用"})
 		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatus()})
 		return
 	}
-	if strings.TrimSpace(a.cfg.TelegramBotToken) == "" {
+	if strings.TrimSpace(a.cfg().TelegramBotToken) == "" {
 		results = append(results, map[string]any{"target": "Bot Token", "success": false, "error": "未配置 Telegram Bot Token"})
 		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatus()})
 		return
@@ -1043,7 +1043,7 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request, _ Params) {
 	botID := int64(numeric(me["id"]))
 	username := strings.TrimPrefix(asString(me["username"]), "@")
 	results = append(results, map[string]any{"target": "Bot getMe", "success": true, "username": username, "bot_id": zeroNil(botID)})
-	for _, chatID := range telegramChatIDs(a.cfg.TelegramGroupIDs) {
+	for _, chatID := range telegramChatIDs(a.cfg().TelegramGroupIDs) {
 		var chat map[string]any
 		err := a.telegramPost(testCtx, "getChat", map[string]any{"chat_id": chatID}, &chat)
 		item := map[string]any{"target": " 群组 " + chatID, "success": err == nil}
@@ -1062,7 +1062,7 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request, _ Params) {
 		}
 		results = append(results, item)
 	}
-	for _, chatID := range telegramChatIDs(a.cfg.TelegramChannelIDs) {
+	for _, chatID := range telegramChatIDs(a.cfg().TelegramChannelIDs) {
 		var chat map[string]any
 		err := a.telegramPost(testCtx, "getChat", map[string]any{"chat_id": chatID}, &chat)
 		item := map[string]any{"target": "棰戦亾 " + chatID, "success": err == nil}
@@ -1094,7 +1094,7 @@ func (a *App) handleDeprecatedEmbyURLs(w http.ResponseWriter, r *http.Request, _
 }
 
 func (a *App) handleEmbyLatest(w http.ResponseWriter, r *http.Request, _ Params) {
-	if a.cfg.EmbyURL == "" {
+	if a.cfg().EmbyURL == "" {
 		ok(w, "OK", map[string]any{"items": []any{}, "total": 0})
 		return
 	}
@@ -1118,7 +1118,7 @@ func (a *App) handleEmbyLatest(w http.ResponseWriter, r *http.Request, _ Params)
 }
 
 func (a *App) handleSessionCount(w http.ResponseWriter, r *http.Request, _ Params) {
-	if a.cfg.EmbyURL == "" {
+	if a.cfg().EmbyURL == "" {
 		ok(w, "OK", map[string]any{"active": 0, "total": 0})
 		return
 	}
@@ -1137,7 +1137,7 @@ func (a *App) handleSessionCount(w http.ResponseWriter, r *http.Request, _ Param
 }
 
 func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request, _ Params) {
-	users := a.store.ListUsers()
+	users := a.store().ListUsers()
 	page := max(1, queryInt(r, "page", 1))
 	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
 	search := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
@@ -1174,7 +1174,7 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request, _ Params)
 
 func (a *App) handleAdminUser(w http.ResponseWriter, r *http.Request, params Params) {
 	uid, _ := int64Param(params, "uid")
-	u, okUser := a.store.User(uid)
+	u, okUser := a.store().User(uid)
 	if !okUser {
 		failWithCode(w, http.StatusNotFound, ErrUserNotFound, "user not found")
 		return
@@ -1239,7 +1239,7 @@ func (a *App) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request, para
 	// 计数 active admin + 写入"，避免两个 admin 并发降级两个不同 admin 时
 	// 同时通过 last-admin 校验导致 0 admin。其它字段再走 UpdateUser 闭包。
 	if hasRole {
-		if _, err := a.store.SetUserRoleAtomic(uid, desiredRole); err != nil {
+		if _, err := a.store().SetUserRoleAtomic(uid, desiredRole); err != nil {
 			if errors.Is(err, store.ErrLastAdmin) {
 				failWithCode(w, http.StatusConflict, ErrAdminLastAdminProtected, "无法移除最后一个管理员的权限，系统至少需要一个管理员")
 				return
@@ -1250,7 +1250,7 @@ func (a *App) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request, para
 		}
 	}
 	if hasActive {
-		if _, err := a.store.SetUserActiveAtomic(uid, desiredActive); err != nil {
+		if _, err := a.store().SetUserActiveAtomic(uid, desiredActive); err != nil {
 			if errors.Is(err, store.ErrLastAdmin) {
 				failWithCode(w, http.StatusConflict, ErrAdminLastAdminProtected, "无法禁用最后一个管理员，系统至少需要一个管理员")
 				return
@@ -1260,7 +1260,7 @@ func (a *App) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request, para
 			}
 		}
 	}
-	u, err := a.store.UpdateUser(uid, func(u *store.User) error {
+	u, err := a.store().UpdateUser(uid, func(u *store.User) error {
 		if username := stringValue(payload, "username"); username != "" {
 			u.Username = username
 		}
@@ -1317,7 +1317,7 @@ func (a *App) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request, para
 	skipped := []map[string]any{}
 	failed := []map[string]any{}
 	for _, targetUID := range a.collectCascadeUIDs(uid, depth) {
-		target, okUser := a.store.User(targetUID)
+		target, okUser := a.store().User(targetUID)
 		if !okUser {
 			skipped = append(skipped, map[string]any{"uid": targetUID, "reason": "not_found"})
 			continue
@@ -1327,13 +1327,13 @@ func (a *App) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request, para
 			continue
 		}
 		if mode == "emby_only" {
-			if target.EmbyID != "" && a.cfg.EmbyURL != "" {
+			if target.EmbyID != "" && a.cfg().EmbyURL != "" {
 				if err := a.embyDelete(r.Context(), "/Users/"+urlPathEscape(target.EmbyID)); err != nil {
 					failed = append(failed, map[string]any{"uid": targetUID, "reason": "delete_emby: " + err.Error()})
 					continue
 				}
 			}
-			_, err := a.store.UpdateUser(targetUID, func(u *store.User) error { u.EmbyID = ""; u.EmbyUsername = ""; return nil })
+			_, err := a.store().UpdateUser(targetUID, func(u *store.User) error { u.EmbyID = ""; u.EmbyUsername = ""; return nil })
 			if err != nil {
 				failed = append(failed, map[string]any{"uid": targetUID, "reason": err.Error()})
 			} else {
@@ -1341,13 +1341,13 @@ func (a *App) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request, para
 			}
 			continue
 		}
-		if mode == "with_emby" && target.EmbyID != "" && a.cfg.EmbyURL != "" {
+		if mode == "with_emby" && target.EmbyID != "" && a.cfg().EmbyURL != "" {
 			if err := a.embyDelete(r.Context(), "/Users/"+urlPathEscape(target.EmbyID)); err != nil {
 				failed = append(failed, map[string]any{"uid": targetUID, "reason": "delete_emby: " + err.Error()})
 				continue
 			}
 		}
-		if err := a.store.DeleteUser(targetUID); err != nil {
+		if err := a.store().DeleteUser(targetUID); err != nil {
 			failed = append(failed, map[string]any{"uid": targetUID, "reason": err.Error()})
 			continue
 		}
@@ -1366,7 +1366,7 @@ func (a *App) handleAdminToggleUser(w http.ResponseWriter, r *http.Request, para
 		failWithCode(w, http.StatusForbidden, ErrUserProtected, "无法禁用自己的账号")
 		return
 	}
-	if target, okUser := a.store.User(uid); okUser && a.userIsProtected(target) && target.UID != currentUID {
+	if target, okUser := a.store().User(uid); okUser && a.userIsProtected(target) && target.UID != currentUID {
 		failWithCode(w, http.StatusForbidden, ErrUserProtected, "cannot operate on protected user")
 		return
 	}
@@ -1376,13 +1376,13 @@ func (a *App) handleAdminToggleUser(w http.ResponseWriter, r *http.Request, para
 	skipped := []map[string]any{}
 	failed := []map[string]any{}
 	for _, targetUID := range a.collectCascadeUIDs(uid, depth) {
-		if target, okUser := a.store.User(targetUID); okUser && a.userIsProtected(target) && target.UID != currentUID {
+		if target, okUser := a.store().User(targetUID); okUser && a.userIsProtected(target) && target.UID != currentUID {
 			skipped = append(skipped, map[string]any{"uid": targetUID, "reason": a.protectedUserReason(target)})
 			continue
 		}
 		// 走 SetUserActiveAtomic：禁用最后一个 active admin 时返回 ErrLastAdmin，
 		// 在级联场景下被记入 skipped 而不是悄悄通过。
-		updated, err := a.store.SetUserActiveAtomic(targetUID, enable)
+		updated, err := a.store().SetUserActiveAtomic(targetUID, enable)
 		if err != nil {
 			if errors.Is(err, store.ErrLastAdmin) {
 				skipped = append(skipped, map[string]any{"uid": targetUID, "reason": "last_admin"})
@@ -1391,18 +1391,18 @@ func (a *App) handleAdminToggleUser(w http.ResponseWriter, r *http.Request, para
 			failed = append(failed, map[string]any{"uid": targetUID, "reason": err.Error()})
 			continue
 		}
-		if updated.EmbyID != "" && a.cfg.EmbyURL != "" {
+		if updated.EmbyID != "" && a.cfg().EmbyURL != "" {
 			_ = a.embySetUserEnabled(r.Context(), updated.EmbyID, a.embyShouldEnableUser(updated))
 		}
 		affected = append(affected, targetUID)
 	}
-	u, _ := a.store.User(uid)
+	u, _ := a.store().User(uid)
 	ok(w, "用户状态已更新", map[string]any{"user": publicUser(u), "active": enable, "affected": affected, "skipped": skipped, "failed": failed, "cascade_depth": depth, "enable": enable})
 }
 
 func (a *App) handleAdminUnbindEmby(w http.ResponseWriter, r *http.Request, params Params) {
 	uid, _ := int64Param(params, "uid")
-	u, err := a.store.UpdateUser(uid, func(u *store.User) error { u.EmbyID = ""; u.EmbyUsername = ""; return nil })
+	u, err := a.store().UpdateUser(uid, func(u *store.User) error { u.EmbyID = ""; u.EmbyUsername = ""; return nil })
 	if statusFromError(w, err) {
 		return
 	}
@@ -1412,7 +1412,7 @@ func (a *App) handleAdminUnbindEmby(w http.ResponseWriter, r *http.Request, para
 func (a *App) handleAdminForceUnbind(w http.ResponseWriter, r *http.Request, params Params) {
 	uid, _ := int64Param(params, "uid")
 	scope := stringValue(decodeMap(r), "scope")
-	u, err := a.store.UpdateUser(uid, func(u *store.User) error {
+	u, err := a.store().UpdateUser(uid, func(u *store.User) error {
 		if scope == "telegram" || scope == "both" || scope == "" {
 			u.TelegramID = 0
 			u.TelegramUsername = ""
@@ -1432,7 +1432,7 @@ func (a *App) handleAdminForceUnbind(w http.ResponseWriter, r *http.Request, par
 func (a *App) handleRegistrationQueueClear(w http.ResponseWriter, r *http.Request, params Params) {
 	if params["uid"] != "" {
 		uid, _ := int64Param(params, "uid")
-		u, err := a.store.UpdateUser(uid, func(u *store.User) error { u.PendingEmby = false; u.PendingEmbyDays = nil; return nil })
+		u, err := a.store().UpdateUser(uid, func(u *store.User) error { u.PendingEmby = false; u.PendingEmbyDays = nil; return nil })
 		if statusFromError(w, err) {
 			return
 		}
@@ -1443,7 +1443,7 @@ func (a *App) handleRegistrationQueueClear(w http.ResponseWriter, r *http.Reques
 	dryRun := boolValue(payload, "dry_run", true)
 	confirm := stringValue(payload, "confirm")
 	candidates := []int64{}
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if u.PendingEmby {
 			candidates = append(candidates, u.UID)
 		}
@@ -1455,7 +1455,7 @@ func (a *App) handleRegistrationQueueClear(w http.ResponseWriter, r *http.Reques
 	updated := 0
 	failed := []int64{}
 	for _, uid := range candidates {
-		if _, err := a.store.UpdateUser(uid, func(u *store.User) error { u.PendingEmby = false; u.PendingEmbyDays = nil; return nil }); err != nil {
+		if _, err := a.store().UpdateUser(uid, func(u *store.User) error { u.PendingEmby = false; u.PendingEmbyDays = nil; return nil }); err != nil {
 			failed = append(failed, uid)
 			continue
 		}
@@ -1470,7 +1470,7 @@ func (a *App) handleRegistrationQueueClear(w http.ResponseWriter, r *http.Reques
 
 func (a *App) handleRegistrationEntitlement(w http.ResponseWriter, r *http.Request, params Params) {
 	uid, _ := int64Param(params, "uid")
-	days := intValue(decodeMap(r), "days", a.cfg.InviteDefaultDays)
+	days := intValue(decodeMap(r), "days", a.cfg().InviteDefaultDays)
 	if days == 0 {
 		days = -1
 	}
@@ -1478,7 +1478,7 @@ func (a *App) handleRegistrationEntitlement(w http.ResponseWriter, r *http.Reque
 		failWithCode(w, http.StatusBadRequest, ErrAdminDaysOutOfRange, "days 超出允许范围")
 		return
 	}
-	u, err := a.store.UpdateUser(uid, func(u *store.User) error {
+	u, err := a.store().UpdateUser(uid, func(u *store.User) error {
 		if u.EmbyID != "" {
 			return store.ErrConflict
 		}
@@ -1499,9 +1499,9 @@ func (a *App) handleRegistrationEntitlementBulk(w http.ResponseWriter, r *http.R
 	payload := decodeMap(r)
 	dryRun := boolValue(payload, "dry_run", true)
 	confirm := stringValue(payload, "confirm")
-	days := intValue(payload, "days", a.cfg.InviteDefaultDays)
+	days := intValue(payload, "days", a.cfg().InviteDefaultDays)
 	candidates := []int64{}
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if u.PendingEmby && u.EmbyID == "" && u.Active {
 			candidates = append(candidates, u.UID)
 		}
@@ -1513,7 +1513,7 @@ func (a *App) handleRegistrationEntitlementBulk(w http.ResponseWriter, r *http.R
 	updated := 0
 	failed := []int64{}
 	for _, uid := range candidates {
-		if _, err := a.store.UpdateUser(uid, func(u *store.User) error {
+		if _, err := a.store().UpdateUser(uid, func(u *store.User) error {
 			u.PendingEmby = true
 			u.PendingEmbyDays = &days
 			if u.Role == store.RoleUnrecognized {
@@ -1538,7 +1538,7 @@ func (a *App) handleSyncBindings(w http.ResponseWriter, r *http.Request, _ Param
 	duplicates := []map[string]any{}
 	missingEmby := []int64{}
 	checked := 0
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		checked++
 		if u.TelegramID != 0 {
 			if previous, ok := seenTG[u.TelegramID]; ok {
@@ -1547,7 +1547,7 @@ func (a *App) handleSyncBindings(w http.ResponseWriter, r *http.Request, _ Param
 				seenTG[u.TelegramID] = u.UID
 			}
 		}
-		if u.EmbyID != "" && a.cfg.EmbyURL != "" {
+		if u.EmbyID != "" && a.cfg().EmbyURL != "" {
 			var remote map[string]any
 			if err := a.embyGet(r.Context(), "/Users/"+urlPathEscape(u.EmbyID), &remote); err != nil {
 				missingEmby = append(missingEmby, u.UID)
@@ -1559,13 +1559,13 @@ func (a *App) handleSyncBindings(w http.ResponseWriter, r *http.Request, _ Param
 
 func (a *App) handleKickUser(w http.ResponseWriter, r *http.Request, params Params) {
 	uid, _ := int64Param(params, "uid")
-	u, okUser := a.store.User(uid)
+	u, okUser := a.store().User(uid)
 	if !okUser {
 		failWithCode(w, http.StatusNotFound, ErrUserNotFound, "user not found")
 		return
 	}
 	kicked := 0
-	if a.cfg.EmbyURL != "" && u.EmbyID != "" {
+	if a.cfg().EmbyURL != "" && u.EmbyID != "" {
 		var sessions []map[string]any
 		if err := a.embyGet(r.Context(), "/Sessions", &sessions); err == nil {
 			for _, session := range sessions {
@@ -1586,7 +1586,7 @@ func (a *App) handleKickUser(w http.ResponseWriter, r *http.Request, params Para
 func (a *App) handleAdminRenewUser(w http.ResponseWriter, r *http.Request, params Params) {
 	uid, _ := int64Param(params, "uid")
 	days := int64(intValue(decodeMap(r), "days", 30))
-	u, err := a.store.UpdateUser(uid, func(u *store.User) error {
+	u, err := a.store().UpdateUser(uid, func(u *store.User) error {
 		base := time.Now().Unix()
 		if u.ExpiredAt > base {
 			base = u.ExpiredAt
@@ -1597,7 +1597,7 @@ func (a *App) handleAdminRenewUser(w http.ResponseWriter, r *http.Request, param
 	if statusFromError(w, err) {
 		return
 	}
-	if u.EmbyID != "" && a.cfg.EmbyURL != "" {
+	if u.EmbyID != "" && a.cfg().EmbyURL != "" {
 		_ = a.embySetUserEnabled(r.Context(), u.EmbyID, a.embyShouldEnableUser(u))
 	}
 	ok(w, "续期成功", publicUser(u))
@@ -1614,7 +1614,7 @@ func (a *App) handleAdminResetPassword(w http.ResponseWriter, r *http.Request, p
 		failWithCode(w, http.StatusBadRequest, ErrAdminPasswordResetScope, "invalid password reset scope")
 		return
 	}
-	targetUser, okUser := a.store.User(uid)
+	targetUser, okUser := a.store().User(uid)
 	if !okUser {
 		failWithCode(w, http.StatusNotFound, ErrUserNotFound, "user not found")
 		return
@@ -1646,14 +1646,14 @@ func (a *App) handleAdminResetPassword(w http.ResponseWriter, r *http.Request, p
 			failWithCode(w, http.StatusInternalServerError, ErrPasswordHashFailed, "password processing failed")
 			return
 		}
-		if _, updateErr := a.store.UpdateUser(uid, func(u *store.User) error { u.PasswordHash = hashValue; return nil }); updateErr != nil {
+		if _, updateErr := a.store().UpdateUser(uid, func(u *store.User) error { u.PasswordHash = hashValue; return nil }); updateErr != nil {
 			statusFromError(w, updateErr)
 			return
 		}
 		// 写完新密码必须立即吊销目标用户的所有会话：admin "重置密码" 的核心
 		// 用途就是止血账号接管，旧实现却没踢 cookie，被盗 token 在 SessionTTL
 		// 内仍然有效；与 handleAdminLogoutUser 保持一致，写入即吊销。
-		a.sessions.DeleteUser(r.Context(), uid)
+		a.sessions().DeleteUser(r.Context(), uid)
 	}
 	ok(w, "password reset", map[string]any{"scope": scope, "new_password": newPassword, "auto_generated": autoGenerated})
 }
@@ -1668,7 +1668,7 @@ func (a *App) handleAdminSetRole(w http.ResponseWriter, r *http.Request, params 
 	// SetUserRoleAtomic 在同一把写锁内做 last-admin 计数 + 写入。
 	// 旧实现把 ListUsers 计数与 UpdateUser 闭包分两段执行，并发降级两个不同 admin
 	// 时各自看到 adminCount=2 都通过校验，事后剩 0 admin。
-	u, err := a.store.SetUserRoleAtomic(uid, role)
+	u, err := a.store().SetUserRoleAtomic(uid, role)
 	if err != nil {
 		if errors.Is(err, store.ErrLastAdmin) {
 			failWithCode(w, http.StatusConflict, ErrAdminLastAdminProtected, "无法移除最后一个管理员的权限，系统至少需要一个管理员")
@@ -1684,7 +1684,7 @@ func (a *App) handleAdminSetRole(w http.ResponseWriter, r *http.Request, params 
 func (a *App) handleAdminUnbindTelegram(w http.ResponseWriter, r *http.Request, params Params) {
 	uid, _ := int64Param(params, "uid")
 	old := int64(0)
-	u, err := a.store.UpdateUser(uid, func(u *store.User) error {
+	u, err := a.store().UpdateUser(uid, func(u *store.User) error {
 		if u.Role == store.RoleAdmin && u.UID != current(r).User.UID {
 			return store.ErrConflict
 		}
@@ -1710,12 +1710,12 @@ func (a *App) handleAdminBindTelegram(w http.ResponseWriter, r *http.Request, pa
 	// BindUserTelegramAtomic 在同一把写锁里做唯一性 + admin 自保 + 写入，
 	// 替换旧实现里 FindUserByTelegramID(RLock) → UpdateUser(Lock) 两段独立锁，
 	// 关闭并发同 telegram_id 绑定到两个 UID 的 TOCTOU 窗口。
-	u, old, err := a.store.BindUserTelegramAtomic(uid, tgid, current(r).User.UID)
+	u, old, err := a.store().BindUserTelegramAtomic(uid, tgid, current(r).User.UID)
 	if err != nil {
 		if errors.Is(err, store.ErrConflict) {
 			// store.ErrConflict 同时承载两类语义：目标是其他 admin 不允许改写，
 			// 或 telegram_id 已被占用。优先识别后者（语义更精确）。
-			if existing, okUser := a.store.FindUserByTelegramID(tgid); okUser && existing.UID != uid {
+			if existing, okUser := a.store().FindUserByTelegramID(tgid); okUser && existing.UID != uid {
 				failWithCode(w, http.StatusConflict, ErrTGIDTaken, "Telegram ID is already bound to another user")
 				return
 			}
@@ -1729,7 +1729,7 @@ func (a *App) handleAdminBindTelegram(w http.ResponseWriter, r *http.Request, pa
 
 func (a *App) handleUserByTelegram(w http.ResponseWriter, r *http.Request, params Params) {
 	tgid, _ := int64Param(params, "telegram_id")
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if u.TelegramID == tgid {
 			ok(w, "OK", publicUser(u))
 			return
@@ -1780,12 +1780,12 @@ func (a *App) handleAdminBindEmby(w http.ResponseWriter, r *http.Request, params
 	}
 	embyID := asString(remoteUser["Id"])
 	embyName := firstNonEmpty(asString(remoteUser["Name"]), embyNameInput, embyID)
-	if existing, okExisting := a.store.FindUserByEmbyID(embyID); okExisting && existing.UID != targetUID {
+	if existing, okExisting := a.store().FindUserByEmbyID(embyID); okExisting && existing.UID != targetUID {
 		if !force {
 			ok(w, "Emby account already linked", map[string]any{"conflict": true, "conflict_uid": existing.UID, "conflict_username": existing.Username, "emby_id": embyID, "emby_username": embyName})
 			return
 		}
-		if _, err := a.store.UpdateUser(existing.UID, func(u *store.User) error {
+		if _, err := a.store().UpdateUser(existing.UID, func(u *store.User) error {
 			u.EmbyID = ""
 			u.EmbyUsername = ""
 			u.PendingEmby = true
@@ -1797,7 +1797,7 @@ func (a *App) handleAdminBindEmby(w http.ResponseWriter, r *http.Request, params
 			return
 		}
 	}
-	updatedUser, updateErr := a.store.UpdateUser(targetUID, func(u *store.User) error {
+	updatedUser, updateErr := a.store().UpdateUser(targetUID, func(u *store.User) error {
 		u.EmbyID = embyID
 		u.EmbyUsername = embyName
 		u.PendingEmby = false
@@ -1812,13 +1812,13 @@ func (a *App) handleAdminBindEmby(w http.ResponseWriter, r *http.Request, params
 }
 
 func (a *App) handleTelegramRosterStats(w http.ResponseWriter, r *http.Request, _ Params) {
-	chats := telegramChatIDs(a.cfg.TelegramGroupIDs)
+	chats := telegramChatIDs(a.cfg().TelegramGroupIDs)
 	chatID := ""
 	if len(chats) > 0 {
 		chatID = chats[0]
 	}
-	stats := a.store.TelegramRosterStats(chatID)
-	entries := a.store.TelegramRoster(chatID, true)
+	stats := a.store().TelegramRosterStats(chatID)
+	entries := a.store().TelegramRoster(chatID, true)
 	bound := 0
 	unbound := 0
 	if len(entries) > 0 {
@@ -1826,14 +1826,14 @@ func (a *App) handleTelegramRosterStats(w http.ResponseWriter, r *http.Request, 
 			if entry.IsBot {
 				continue
 			}
-			if _, okUser := a.store.FindUserByTelegramID(entry.TelegramID); okUser {
+			if _, okUser := a.store().FindUserByTelegramID(entry.TelegramID); okUser {
 				bound++
 			} else {
 				unbound++
 			}
 		}
 	} else {
-		for _, u := range a.store.ListUsers() {
+		for _, u := range a.store().ListUsers() {
 			if u.TelegramID == 0 {
 				continue
 			}
@@ -1853,7 +1853,7 @@ func (a *App) handleExportUsers(w http.ResponseWriter, r *http.Request, _ Params
 	w.Header().Set("Content-Disposition", "attachment; filename=users.csv")
 	cw := csv.NewWriter(w)
 	_ = cw.Write([]string{"uid", "username", "email", "role", "active"})
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		_ = cw.Write([]string{strconv.FormatInt(u.UID, 10), u.Username, u.Email, strconv.Itoa(u.Role), strconv.FormatBool(u.Active)})
 	}
 	cw.Flush()
@@ -1865,9 +1865,9 @@ func (a *App) handleExportPlayback(w http.ResponseWriter, r *http.Request, _ Par
 	if days > 0 {
 		since = time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
 	}
-	records := a.store.PlaybackRecords(0, since, 10000)
+	records := a.store().PlaybackRecords(0, since, 10000)
 	usernameByUID := map[int64]string{}
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		usernameByUID[u.UID] = u.Username
 	}
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
@@ -1913,7 +1913,7 @@ func (a *App) handleWatchStats(w http.ResponseWriter, r *http.Request, _ Params)
 	if days > 0 {
 		since = time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
 	}
-	records := a.store.PlaybackRecords(uid, since, 1000)
+	records := a.store().PlaybackRecords(uid, since, 1000)
 	totalDuration := int64(0)
 	typeStats := map[string]map[string]any{}
 	recent := []map[string]any{}
@@ -1941,7 +1941,7 @@ func (a *App) handleExpiringUsers(w http.ResponseWriter, r *http.Request, _ Para
 	deadline := time.Now().Add(time.Duration(days) * 24 * time.Hour).Unix()
 	now := time.Now().Unix()
 	items := []map[string]any{}
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if u.ExpiredAt > now && u.ExpiredAt <= deadline {
 			remaining := u.ExpiredAt - now
 			items = append(items, map[string]any{"uid": u.UID, "username": u.Username, "telegram_id": nullableInt(u.TelegramID), "expired_at": u.ExpiredAt, "remaining_seconds": remaining, "remaining_str": formatSeconds(remaining)})

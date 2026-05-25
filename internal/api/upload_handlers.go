@@ -44,7 +44,7 @@ func (a *App) handleGetBackground(w http.ResponseWriter, r *http.Request, params
 		failWithCode(w, http.StatusNotFound, ErrUserNotFound, "user not found")
 		return
 	}
-	u, okUser := a.store.User(uid)
+	u, okUser := a.store().User(uid)
 	if !okUser {
 		failWithCode(w, http.StatusNotFound, ErrUserNotFound, "user not found")
 		return
@@ -60,7 +60,7 @@ func (a *App) handleUpdateBackground(w http.ResponseWriter, r *http.Request, _ P
 		failWithCode(w, http.StatusBadRequest, ErrUserBackgroundInvalid, err.Error())
 		return
 	}
-	u, err := a.store.UpdateUser(p.User.UID, func(u *store.User) error { u.Background = bg; return nil })
+	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error { u.Background = bg; return nil })
 	if statusFromError(w, err) {
 		return
 	}
@@ -163,7 +163,7 @@ func mustJSON(value any) string {
 
 func (a *App) handleDeleteBackground(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
-	_, err := a.store.UpdateUser(p.User.UID, func(u *store.User) error { u.Background = ""; return nil })
+	_, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error { u.Background = ""; return nil })
 	if statusFromError(w, err) {
 		return
 	}
@@ -180,7 +180,7 @@ func (a *App) handleGetAvatar(w http.ResponseWriter, r *http.Request, params Par
 		failWithCode(w, http.StatusNotFound, ErrUserNotFound, "user not found")
 		return
 	}
-	u, okUser := a.store.User(uid)
+	u, okUser := a.store().User(uid)
 	if !okUser {
 		failWithCode(w, http.StatusNotFound, ErrUserNotFound, "user not found")
 		return
@@ -197,11 +197,11 @@ func (a *App) handleUploadAvatar(w http.ResponseWriter, r *http.Request, _ Param
 }
 
 func (a *App) handleUpload(w http.ResponseWriter, r *http.Request, kind string) {
-	if !a.allowRate(r.Context(), rateKey("upload:", current(r).User.UID), a.cfg.RateLimitUploadPerMinute, time.Minute) {
+	if !a.allowRate(r.Context(), rateKey("upload:", current(r).User.UID), a.cfg().RateLimitUploadPerMinute, time.Minute) {
 		failWithCode(w, http.StatusTooManyRequests, ErrUploadRateLimited, "上传过于频繁")
 		return
 	}
-	if err := r.ParseMultipartForm(a.cfg.MaxUploadSize); err != nil {
+	if err := r.ParseMultipartForm(a.cfg().MaxUploadSize); err != nil {
 		failWithCode(w, http.StatusBadRequest, ErrUploadInvalidPayload, "上传内容无效")
 		return
 	}
@@ -211,8 +211,8 @@ func (a *App) handleUpload(w http.ResponseWriter, r *http.Request, kind string) 
 		return
 	}
 	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, a.cfg.MaxUploadSize+1))
-	if err != nil || int64(len(data)) > a.cfg.MaxUploadSize {
+	data, err := io.ReadAll(io.LimitReader(file, a.cfg().MaxUploadSize+1))
+	if err != nil || int64(len(data)) > a.cfg().MaxUploadSize {
 		failWithCode(w, http.StatusRequestEntityTooLarge, ErrUploadFileTooLarge, "文件过大")
 		return
 	}
@@ -239,7 +239,7 @@ func (a *App) handleUpload(w http.ResponseWriter, r *http.Request, kind string) 
 	// 会让写入落到根目录之外。这里用 ResolveLeafFile 覆盖不到（kind 子目录），
 	// 所以拆成两段：先 ResolveWithinRoot 出 kind 目录，再校验文件名只允许
 	// uploadFilenamePattern。
-	uploadRoot := firstNonEmpty(a.cfg.UploadDir, "uploads")
+	uploadRoot := firstNonEmpty(a.cfg().UploadDir, "uploads")
 	dir, err := ResolveWithinRoot(uploadRoot, kind)
 	if err != nil {
 		failWithCode(w, http.StatusInternalServerError, ErrUploadDirInvalid, "上传目录无效")
@@ -270,7 +270,7 @@ func (a *App) handleUpload(w http.ResponseWriter, r *http.Request, kind string) 
 	}
 	url := "/api/v1/users/assets/" + kind + "/" + filename
 	p := current(r)
-	if _, err := a.store.UpdateUser(p.User.UID, func(u *store.User) error {
+	if _, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error {
 		if kind == "avatar" {
 			u.Avatar = url
 			return nil
@@ -340,13 +340,13 @@ func uploadImageExtension(contentType string) (string, bool) {
 
 func (a *App) handleUploadServerIcon(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
-	if !a.allowRate(r.Context(), rateKey("admin-server-icon:", p.User.UID), a.cfg.RateLimitAdminIconPerMinute, time.Minute) {
+	if !a.allowRate(r.Context(), rateKey("admin-server-icon:", p.User.UID), a.cfg().RateLimitAdminIconPerMinute, time.Minute) {
 		failWithCode(w, http.StatusTooManyRequests, ErrUploadRateLimited, "上传过于频繁")
 		return
 	}
 	limit := int64(2 * 1024 * 1024)
-	if a.cfg.MaxUploadSize > 0 && a.cfg.MaxUploadSize < limit {
-		limit = a.cfg.MaxUploadSize
+	if a.cfg().MaxUploadSize > 0 && a.cfg().MaxUploadSize < limit {
+		limit = a.cfg().MaxUploadSize
 	}
 	if err := r.ParseMultipartForm(limit); err != nil {
 		failWithCode(w, http.StatusBadRequest, ErrUploadInvalidPayload, "上传内容无效")
@@ -370,7 +370,7 @@ func (a *App) handleUploadServerIcon(w http.ResponseWriter, r *http.Request, _ P
 		return
 	}
 	filename := randomCode(16) + ext
-	filePath, okPath := resolveUploadAssetPath(a.cfg.UploadDir, "server-icon", filename)
+	filePath, okPath := resolveUploadAssetPath(a.cfg().UploadDir, "server-icon", filename)
 	if !okPath {
 		failWithCode(w, http.StatusInternalServerError, ErrUploadDirInvalid, "上传目录无效")
 		return
@@ -383,7 +383,7 @@ func (a *App) handleUploadServerIcon(w http.ResponseWriter, r *http.Request, _ P
 		failWithCode(w, http.StatusInternalServerError, ErrUploadSaveFailed, "保存文件失败")
 		return
 	}
-	values := configValues(a.cfg)
+	values := configValues(*a.cfg())
 	if values["Global"] == nil {
 		values["Global"] = map[string]any{}
 	}
@@ -414,7 +414,7 @@ func (a *App) handleAsset(w http.ResponseWriter, r *http.Request, params Params)
 		failWithCode(w, http.StatusNotFound, ErrAssetNotFound, "resource not found")
 		return
 	}
-	filePath, okPath := resolveUploadAssetPath(a.cfg.UploadDir, kind, filename)
+	filePath, okPath := resolveUploadAssetPath(a.cfg().UploadDir, kind, filename)
 	if !okPath {
 		failWithCode(w, http.StatusNotFound, ErrAssetNotFound, "resource not found")
 		return
@@ -432,7 +432,7 @@ func resolveUploadAssetPath(uploadDir, kind, filename string) (string, bool) {
 
 func (a *App) handleDeleteAvatar(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
-	_, err := a.store.UpdateUser(p.User.UID, func(u *store.User) error { u.Avatar = ""; return nil })
+	_, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error { u.Avatar = ""; return nil })
 	if statusFromError(w, err) {
 		return
 	}

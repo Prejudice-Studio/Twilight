@@ -52,8 +52,8 @@ func pages(total, perPage int) int {
 const permanentExpiryUnix int64 = 253402214400
 
 func (a *App) systemUserLimitReached() (bool, int, int) {
-	limit := a.cfg.UserLimit
-	current := a.store.UserCount()
+	limit := a.cfg().UserLimit
+	current := a.store().UserCount()
 	return limit > 0 && current >= limit, current, limit
 }
 
@@ -62,25 +62,25 @@ func (a *App) embyCapacityReached(excludeUID int64) (bool, int, int) {
 }
 
 func (a *App) embyCapacityReachedExcluding(excludeUID int64, excludeRegCode, excludeInviteCode string) (bool, int, int) {
-	limit := a.cfg.EmbyUserLimit
+	limit := a.cfg().EmbyUserLimit
 	current := 0
 	now := time.Now().Unix()
-	users := a.store.ListUsers()
+	users := a.store().ListUsers()
 	for _, u := range users {
 		if u.UID == excludeUID {
 			continue
 		}
-		if u.EmbyID != "" || u.PendingEmby || (a.cfg.EmbyDirectRegisterEnabled && u.Active) {
+		if u.EmbyID != "" || u.PendingEmby || (a.cfg().EmbyDirectRegisterEnabled && u.Active) {
 			current++
 		}
 	}
-	for _, code := range a.store.ListAllInviteCodes() {
+	for _, code := range a.store().ListAllInviteCodes() {
 		if excludeInviteCode != "" && strings.EqualFold(code.Code, excludeInviteCode) {
 			continue
 		}
 		current += remainingInviteSlots(code, now)
 	}
-	for _, code := range a.store.ListRegCodes() {
+	for _, code := range a.store().ListRegCodes() {
 		if excludeRegCode != "" && strings.EqualFold(code.Code, excludeRegCode) {
 			continue
 		}
@@ -506,7 +506,7 @@ func legacyGenerateRegCode(format string, codeType int, algorithm string) string
 }
 
 func (a *App) previewCode(code string, user store.User) (map[string]any, string, bool) {
-	if reg, ok := a.store.RegCode(code); ok {
+	if reg, ok := a.store().RegCode(code); ok {
 		// Decoy code: record violation and apply configured action
 		if reg.IsDecoy {
 			a.recordViolation(user, code, "regcode_decoy", "使用诱饵注册码")
@@ -522,11 +522,11 @@ func (a *App) previewCode(code string, user store.User) (map[string]any, string,
 		}
 		return codePreview("regcode", reg.Type, reg.Days, ""), "regcode", true
 	}
-	if invite, ok := a.store.InviteCode(code); ok {
+	if invite, ok := a.store().InviteCode(code); ok {
 		if !invite.Active || (invite.ExpiredAt > 0 && invite.ExpiredAt <= time.Now().Unix()) || (invite.UseCountLimit != -1 && invite.UseCount >= invite.UseCountLimit) {
 			return nil, "", false
 		}
-		if _, hasParent := a.store.ParentOf(user.UID); hasParent {
+		if _, hasParent := a.store().ParentOf(user.UID); hasParent {
 			return nil, "", false
 		}
 		if invite.InviterUID == user.UID {
@@ -536,7 +536,7 @@ func (a *App) previewCode(code string, user store.User) (map[string]any, string,
 			return nil, "", false
 		}
 		inviter := ""
-		if u, ok := a.store.User(invite.InviterUID); ok {
+		if u, ok := a.store().User(invite.InviterUID); ok {
 			if !u.Active {
 				return nil, "", false
 			}
@@ -555,11 +555,11 @@ func (a *App) previewCode(code string, user store.User) (map[string]any, string,
 // recordViolation logs a code violation and applies the configured punitive action.
 func (a *App) recordViolation(user store.User, code, codeType, reason string) {
 	if a.userIsProtected(user) {
-		action := strings.ToLower(strings.TrimSpace(a.cfg.DecoyAction))
+		action := strings.ToLower(strings.TrimSpace(a.cfg().DecoyAction))
 		if action == "" {
 			action = "log_only"
 		}
-		if err := a.store.AddViolationLog(store.ViolationLog{
+		if err := a.store().AddViolationLog(store.ViolationLog{
 			UID:        user.UID,
 			Username:   user.Username,
 			Code:       code,
@@ -573,11 +573,11 @@ func (a *App) recordViolation(user store.User, code, codeType, reason string) {
 		}
 		return
 	}
-	action := strings.ToLower(strings.TrimSpace(a.cfg.DecoyAction))
+	action := strings.ToLower(strings.TrimSpace(a.cfg().DecoyAction))
 	if action == "" {
 		action = "log_only"
 	}
-	if err := a.store.AddViolationLog(store.ViolationLog{
+	if err := a.store().AddViolationLog(store.ViolationLog{
 		UID:        user.UID,
 		Username:   user.Username,
 		Code:       code,
@@ -591,7 +591,7 @@ func (a *App) recordViolation(user store.User, code, codeType, reason string) {
 	}
 	switch action {
 	case "disable_user":
-		if _, err := a.store.UpdateUser(user.UID, func(u *store.User) error {
+		if _, err := a.store().UpdateUser(user.UID, func(u *store.User) error {
 			u.Active = false
 			return nil
 		}); err != nil {
@@ -599,7 +599,7 @@ func (a *App) recordViolation(user store.User, code, codeType, reason string) {
 		} else {
 			// 违规自动禁用：会话立即失效，避免 stale token 在 SessionTTL 到期前
 			// 仍可访问。
-			a.sessions.DeleteUser(context.Background(), user.UID)
+			a.sessions().DeleteUser(context.Background(), user.UID)
 		}
 	case "disable_emby":
 		if user.EmbyID != "" {
@@ -682,7 +682,7 @@ func (a *App) collectCascadeUIDs(root int64, depth int) []int64 {
 		if item.level >= maxDepth {
 			continue
 		}
-		for _, rel := range a.store.ChildrenOf(item.uid) {
+		for _, rel := range a.store().ChildrenOf(item.uid) {
 			if !seen[rel.ChildUID] {
 				seen[rel.ChildUID] = true
 				queue = append(queue, struct {
@@ -713,7 +713,7 @@ func inviteCodeDTO(code store.InviteCode) map[string]any {
 }
 
 func (a *App) maxCodeDays(user store.User) (int, string) {
-	permanentMaxDays := a.cfg.PermanentInviteMaxDays
+	permanentMaxDays := a.cfg().PermanentInviteMaxDays
 	if permanentMaxDays <= 0 {
 		permanentMaxDays = 365
 	}
@@ -734,7 +734,7 @@ func (a *App) inviteRootUID(uid int64) int64 {
 	root := uid
 	seen := map[int64]bool{uid: true}
 	for {
-		rel, ok := a.store.ParentOf(root)
+		rel, ok := a.store().ParentOf(root)
 		if !ok || seen[rel.ParentUID] {
 			return root
 		}
@@ -750,7 +750,7 @@ func (a *App) inviteDescendantCount(uid int64) int {
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
-		for _, rel := range a.store.ChildrenOf(current) {
+		for _, rel := range a.store().ChildrenOf(current) {
 			if seen[rel.ChildUID] {
 				continue
 			}
@@ -766,7 +766,7 @@ func (a *App) inviteDepth(uid int64) int {
 	depth := 1
 	seen := map[int64]bool{uid: true}
 	for {
-		rel, ok := a.store.ParentOf(uid)
+		rel, ok := a.store().ParentOf(uid)
 		if !ok || seen[rel.ParentUID] {
 			return depth
 		}
@@ -780,7 +780,7 @@ func (a *App) inviteDepth(uid int64) int {
 }
 
 func (a *App) inviteTreeNode(uid int64, depth int, seen map[int64]bool) (map[string]any, int) {
-	u, ok := a.store.User(uid)
+	u, ok := a.store().User(uid)
 	if !ok {
 		return nil, 0
 	}
@@ -802,7 +802,7 @@ func (a *App) inviteTreeNode(uid int64, depth int, seen map[int64]bool) (map[str
 
 	children := []map[string]any{}
 	count := 0
-	for _, rel := range a.store.ChildrenOf(uid) {
+	for _, rel := range a.store().ChildrenOf(uid) {
 		child, childCount := a.inviteTreeNode(rel.ChildUID, depth+1, seen)
 		if child == nil {
 			continue
@@ -842,44 +842,44 @@ func (a *App) inviteTreeFor(user store.User) map[string]any {
 }
 
 func (a *App) canInvite(user store.User) (bool, string) {
-	if !a.cfg.InviteEnabled {
+	if !a.cfg().InviteEnabled {
 		return false, "邀请系统未启用"
 	}
 	if !user.Active {
 		return false, "账号已被禁用，无法生成邀请码"
 	}
-	if a.cfg.InviteRequireEmby && user.EmbyID == "" {
+	if a.cfg().InviteRequireEmby && user.EmbyID == "" {
 		return false, "请先绑定 Emby 账号后再生成邀请码"
 	}
 	if maxDays, reason := a.maxCodeDays(user); maxDays <= 0 {
 		return false, reason
 	}
-	if a.inviteDepth(user.UID) >= a.cfg.InviteMaxDepth {
-		return false, fmt.Sprintf("已达到最大邀请层级 (%d)，不能再向下邀请", a.cfg.InviteMaxDepth)
+	if a.inviteDepth(user.UID) >= a.cfg().InviteMaxDepth {
+		return false, fmt.Sprintf("已达到最大邀请层级 (%d)，不能再向下邀请", a.cfg().InviteMaxDepth)
 	}
-	if a.cfg.InviteRootUserLimit > 0 {
+	if a.cfg().InviteRootUserLimit > 0 {
 		rootUID := a.inviteRootUID(user.UID)
-		if a.inviteDescendantCount(rootUID) >= a.cfg.InviteRootUserLimit {
-			return false, fmt.Sprintf("邀请树人数已达上限 (%d)，不能继续邀请", a.cfg.InviteRootUserLimit)
+		if a.inviteDescendantCount(rootUID) >= a.cfg().InviteRootUserLimit {
+			return false, fmt.Sprintf("邀请树人数已达上限 (%d)，不能继续邀请", a.cfg().InviteRootUserLimit)
 		}
 	}
-	if a.cfg.InviteLimit != -1 {
+	if a.cfg().InviteLimit != -1 {
 		active := 0
-		for _, code := range a.store.ListInviteCodes(user.UID) {
+		for _, code := range a.store().ListInviteCodes(user.UID) {
 			if code.Active && code.UseCount == 0 && (code.ExpiredAt <= 0 || code.ExpiredAt > time.Now().Unix()) {
 				active++
 			}
 		}
-		if active >= a.cfg.InviteLimit {
-			return false, fmt.Sprintf("未使用的邀请码已达上限 (%d)，请先撤销旧的", a.cfg.InviteLimit)
+		if active >= a.cfg().InviteLimit {
+			return false, fmt.Sprintf("未使用的邀请码已达上限 (%d)，请先撤销旧的", a.cfg().InviteLimit)
 		}
 	}
 	return true, ""
 }
 
 func (a *App) inviteForest() map[string]any {
-	rels := a.store.InviteRelations()
-	users := a.store.ListUsers()
+	rels := a.store().InviteRelations()
+	users := a.store().ListUsers()
 	userByID := map[int64]store.User{}
 	allUIDs := map[int64]bool{}
 	parentOf := map[int64]int64{}
@@ -893,7 +893,7 @@ func (a *App) inviteForest() map[string]any {
 		parentOf[rel.ChildUID] = rel.ParentUID
 		children[rel.ParentUID] = append(children[rel.ParentUID], rel.ChildUID)
 	}
-	for _, code := range a.store.ListAllInviteCodes() {
+	for _, code := range a.store().ListAllInviteCodes() {
 		allUIDs[code.InviterUID] = true
 	}
 	nodes := []map[string]any{}
@@ -918,7 +918,7 @@ func (a *App) inviteForest() map[string]any {
 	for _, root := range roots {
 		globalDepth = max(globalDepth, subtreeDepth(root, children))
 	}
-	return map[string]any{"nodes": nodes, "edges": edges, "roots": roots, "max_depth": globalDepth, "config": map[string]any{"enabled": a.cfg.InviteEnabled, "max_depth": a.cfg.InviteMaxDepth, "invite_limit": a.cfg.InviteLimit, "invite_root_user_limit": a.cfg.InviteRootUserLimit, "require_emby": a.cfg.InviteRequireEmby}}
+	return map[string]any{"nodes": nodes, "edges": edges, "roots": roots, "max_depth": globalDepth, "config": map[string]any{"enabled": a.cfg().InviteEnabled, "max_depth": a.cfg().InviteMaxDepth, "invite_limit": a.cfg().InviteLimit, "invite_root_user_limit": a.cfg().InviteRootUserLimit, "require_emby": a.cfg().InviteRequireEmby}}
 }
 
 func subtreeDepth(root int64, children map[int64][]int64) int {

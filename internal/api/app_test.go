@@ -112,7 +112,7 @@ func loginCookies(t *testing.T, app *App, username, password string) []*http.Coo
 
 func TestRegcodeWritesBlockedWhenRuntimeDatabaseMismatchesConfig(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.DatabaseDriver = store.BackendPostgres
+	app.cfg().DatabaseDriver = store.BackendPostgres
 
 	rec := httptest.NewRecorder()
 	if !app.rejectRegcodeWriteIfStorageMismatch(rec) {
@@ -122,7 +122,7 @@ func TestRegcodeWritesBlockedWhenRuntimeDatabaseMismatchesConfig(t *testing.T) {
 		t.Fatalf("expected conflict status, got %d", rec.Code)
 	}
 
-	app.cfg.DatabaseDriver = store.BackendJSON
+	app.cfg().DatabaseDriver = store.BackendJSON
 	rec = httptest.NewRecorder()
 	if app.rejectRegcodeWriteIfStorageMismatch(rec) {
 		t.Fatal("regcode writes were blocked even though active and configured databases match")
@@ -204,7 +204,7 @@ func TestAuthFlowAndCSRFMitigation(t *testing.T) {
 
 func TestCredentialedCORSRequiresExplicitOrigin(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.CORSOrigins = []string{"*"}
+	app.cfg().CORSOrigins = []string{"*"}
 
 	req := httptest.NewRequest(http.MethodOptions, "/api/v1/users/me", nil)
 	req.Header.Set("Origin", "https://evil.example")
@@ -216,7 +216,7 @@ func TestCredentialedCORSRequiresExplicitOrigin(t *testing.T) {
 		t.Fatalf("wildcard CORS origin was allowed: %q", rr.Header().Get("Access-Control-Allow-Origin"))
 	}
 
-	app.cfg.CORSOrigins = []string{"https://panel.example/"}
+	app.cfg().CORSOrigins = []string{"https://panel.example/"}
 	req = httptest.NewRequest(http.MethodOptions, "/api/v1/users/me", nil)
 	req.Header.Set("Origin", "https://panel.example")
 	req.Header.Set("Access-Control-Request-Method", "PUT")
@@ -230,7 +230,7 @@ func TestCredentialedCORSRequiresExplicitOrigin(t *testing.T) {
 		t.Fatalf("explicit CORS origin not allowed: %q", rr.Header().Get("Access-Control-Allow-Origin"))
 	}
 
-	app.cfg.CORSOrigins = []string{"https://panel.example/app"}
+	app.cfg().CORSOrigins = []string{"https://panel.example/app"}
 	req = httptest.NewRequest(http.MethodOptions, "/api/v1/users/me", nil)
 	req.Header.Set("Origin", "https://panel.example")
 	req.Header.Set("Access-Control-Request-Method", "PUT")
@@ -331,7 +331,7 @@ func TestUploadRejectsNonImage(t *testing.T) {
 
 func TestAdminServerIconUploadUpdatesConfig(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.ConfigFile = filepath.Join(app.cfg.DatabaseDir, "config.toml")
+	app.cfg().ConfigFile = filepath.Join(app.cfg().DatabaseDir, "config.toml")
 	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
 	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	cookie := findCookie(login.Result().Cookies(), "twilight_session")
@@ -358,11 +358,11 @@ func TestAdminServerIconUploadUpdatesConfig(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("server icon upload status = %d body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.HasPrefix(app.cfg.ServerIcon, "server-icon/") || !strings.HasSuffix(app.cfg.ServerIcon, ".png") {
-		t.Fatalf("server_icon was not updated to uploaded asset: %q", app.cfg.ServerIcon)
+	if !strings.HasPrefix(app.cfg().ServerIcon, "server-icon/") || !strings.HasSuffix(app.cfg().ServerIcon, ".png") {
+		t.Fatalf("server_icon was not updated to uploaded asset: %q", app.cfg().ServerIcon)
 	}
 	if _, _, ok := app.configuredServerIconPath(); !ok {
-		t.Fatalf("uploaded server icon is not readable from configured path: %q", app.cfg.ServerIcon)
+		t.Fatalf("uploaded server icon is not readable from configured path: %q", app.cfg().ServerIcon)
 	}
 }
 
@@ -398,7 +398,7 @@ func TestUploadAssetPathAndFilenameSafety(t *testing.T) {
 	_ = csrfCookie
 
 	validName := "0123456789abcdef.png"
-	avatarDir := filepath.Join(app.cfg.UploadDir, "avatar")
+	avatarDir := filepath.Join(app.cfg().UploadDir, "avatar")
 	if err := os.MkdirAll(avatarDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -427,13 +427,13 @@ func TestUploadAssetPathAndFilenameSafety(t *testing.T) {
 
 func TestProtectedAdminConfigHiddenPreservedAndApplied(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.ConfigFile = filepath.Join(app.cfg.DatabaseDir, "config.toml")
+	app.cfg().ConfigFile = filepath.Join(app.cfg().DatabaseDir, "config.toml")
 	databaseConfig := "[Database]\n" +
 		"driver = \"json\"\n" +
-		"state_file = " + strconv.Quote(app.cfg.StateFile) + "\n" +
-		"backup_dir = " + strconv.Quote(app.cfg.DatabaseBackupDir) + "\n"
+		"state_file = " + strconv.Quote(app.cfg().StateFile) + "\n" +
+		"backup_dir = " + strconv.Quote(app.cfg().DatabaseBackupDir) + "\n"
 	existing := "[Global]\nserver_name = \"old\"\n\n" + databaseConfig + "\nadmin_uids = \"2\"\nadmin_usernames = \"alice\"\n"
-	if err := os.WriteFile(app.cfg.ConfigFile, []byte(existing), 0o600); err != nil {
+	if err := os.WriteFile(app.cfg().ConfigFile, []byte(existing), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if shown := stripProtectedAdminConfig(existing); strings.Contains(shown, "admin_uids") || strings.Contains(shown, "admin_usernames") {
@@ -443,7 +443,7 @@ func TestProtectedAdminConfigHiddenPreservedAndApplied(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("saveConfigContent status=%d message=%s info=%v", status, message, info)
 	}
-	data, err := os.ReadFile(app.cfg.ConfigFile)
+	data, err := os.ReadFile(app.cfg().ConfigFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -457,7 +457,7 @@ func TestProtectedAdminConfigHiddenPreservedAndApplied(t *testing.T) {
 
 	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"owner","password":"Owner123456"}`, nil)
 	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"alice","password":"Alice123456"}`, nil)
-	alice, ok := app.store.FindUserByUsername("alice")
+	alice, ok := app.store().FindUserByUsername("alice")
 	if !ok || alice.Role != store.RoleAdmin || !alice.Active {
 		t.Fatalf("configured admin username was not applied on registration: %#v", alice)
 	}
@@ -507,8 +507,8 @@ func TestRegcodeInviteMediaAndSecurityFlows(t *testing.T) {
 	userCookie := findCookie(userLogin.Result().Cookies(), "twilight_session")
 	userCSRF := findCookie(userLogin.Result().Cookies(), "twilight_session_csrf")
 	_ = userCSRF
-	user, _ := app.store.FindUserByUsername("user")
-	_, _ = app.store.UpdateUser(user.UID, func(u *store.User) error { u.TelegramID = 12345; return nil })
+	user, _ := app.store().FindUserByUsername("user")
+	_, _ = app.store().UpdateUser(user.UID, func(u *store.User) error { u.TelegramID = 12345; return nil })
 
 	createdCodes := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/regcodes", `{"type":2,"days":15,"count":1,"random_algorithm":"hex20"}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if createdCodes.Code != http.StatusOK {
@@ -560,7 +560,7 @@ func TestRegcodeInviteMediaAndSecurityFlows(t *testing.T) {
 	if media.Code != http.StatusCreated || !strings.Contains(media.Body.String(), "require_key") {
 		t.Fatalf("media status=%d body=%s", media.Code, media.Body.String())
 	}
-	userRequests := app.store.ListMediaRequests(user.UID, false)
+	userRequests := app.store().ListMediaRequests(user.UID, false)
 	if len(userRequests) != 1 {
 		t.Fatalf("expected one media request, got %d", len(userRequests))
 	}
@@ -664,9 +664,9 @@ func TestSigninResponsesMatchFrontendContract(t *testing.T) {
 
 func TestDisabledFeatureFlagsAreExposedAndEnforced(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.MediaRequestEnabled = false
-	app.cfg.SigninEnabled = false
-	app.cfg.InviteEnabled = false
+	app.cfg().MediaRequestEnabled = false
+	app.cfg().SigninEnabled = false
+	app.cfg().InviteEnabled = false
 
 	info := doJSON(app, http.MethodGet, "/api/v1/system/info", ``, nil)
 	if info.Code != http.StatusOK {
@@ -724,7 +724,7 @@ func TestInventoryCheckUsesEmbyProviderAndSeasons(t *testing.T) {
 		_, _ = w.Write([]byte(`{"Items":[],"TotalRecordCount":0}`))
 	}))
 	defer emby.Close()
-	app.cfg.EmbyURL = emby.URL
+	app.cfg().EmbyURL = emby.URL
 
 	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
 	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
@@ -744,12 +744,12 @@ func TestInventoryCheckUsesEmbyProviderAndSeasons(t *testing.T) {
 
 func TestEmbyURLsDoNotFallbackToInternalServerURL(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.EmbyURL = "http://127.0.0.1:8096"
-	app.cfg.EmbyURLList = nil
-	app.cfg.EmbyPublicURL = ""
+	app.cfg().EmbyURL = "http://127.0.0.1:8096"
+	app.cfg().EmbyURLList = nil
+	app.cfg().EmbyPublicURL = ""
 	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
-	admin, _ := app.store.FindUserByUsername("admin")
-	_, _ = app.store.UpdateUser(admin.UID, func(u *store.User) error { u.EmbyID = "emby-admin"; return nil })
+	admin, _ := app.store().FindUserByUsername("admin")
+	_, _ = app.store().UpdateUser(admin.UID, func(u *store.User) error { u.EmbyID = "emby-admin"; return nil })
 	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	cookie := findCookie(login.Result().Cookies(), "twilight_session")
 	csrfCookie := findCookie(login.Result().Cookies(), "twilight_session_csrf")
@@ -758,7 +758,7 @@ func TestEmbyURLsDoNotFallbackToInternalServerURL(t *testing.T) {
 	if resp.Code != http.StatusOK {
 		t.Fatalf("emby urls status=%d body=%s", resp.Code, resp.Body.String())
 	}
-	if strings.Contains(resp.Body.String(), app.cfg.EmbyURL) {
+	if strings.Contains(resp.Body.String(), app.cfg().EmbyURL) {
 		t.Fatalf("internal Emby URL leaked in user route response: %s", resp.Body.String())
 	}
 }
@@ -793,7 +793,7 @@ func TestBangumiSearchUsesV0EndpointAndReturnsResults(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":[{"id":400602,"type":2,"name":"Sousou no Frieren","name_cn":"葬送的芙莉莲","date":"2023-09-29","images":{"common":"https://example.test/frieren.jpg"},"rating":{"score":8.8,"rank":10},"eps":28,"tags":[{"name":"漫画改"}]}]}`))
 	}))
 	defer bgm.Close()
-	app.cfg.BangumiAPIURL = bgm.URL
+	app.cfg().BangumiAPIURL = bgm.URL
 
 	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
 	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
@@ -812,7 +812,7 @@ func TestBangumiSearchErrorIsVisibleForBangumiSource(t *testing.T) {
 		http.Error(w, `{"description":"bad bangumi request"}`, http.StatusBadGateway)
 	}))
 	defer bgm.Close()
-	app.cfg.BangumiAPIURL = bgm.URL
+	app.cfg().BangumiAPIURL = bgm.URL
 
 	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
 	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
@@ -924,18 +924,18 @@ func TestRuntimeLoggerAppliesLevelAndCapturesStdLog(t *testing.T) {
 
 func TestConfigFileChangeHotReloadsRuntimeLogLevel(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.ConfigFile = filepath.Join(app.cfg.DatabaseDir, "config.toml")
+	app.cfg().ConfigFile = filepath.Join(app.cfg().DatabaseDir, "config.toml")
 	writeRuntimeConfig := func(level string, limit int) {
 		t.Helper()
 		content := "[Global]\n" +
-			"databases_dir = " + strconv.Quote(app.cfg.DatabaseDir) + "\n" +
+			"databases_dir = " + strconv.Quote(app.cfg().DatabaseDir) + "\n" +
 			"log_level = " + strconv.Quote(level) + "\n" +
 			"runtime_log_limit = " + strconv.Itoa(limit) + "\n\n" +
 			"[Database]\n" +
-			"driver = " + strconv.Quote(app.cfg.DatabaseDriver) + "\n" +
-			"backup_dir = " + strconv.Quote(app.cfg.DatabaseBackupDir) + "\n" +
-			"state_file = " + strconv.Quote(app.cfg.StateFile) + "\n"
-		if err := os.WriteFile(app.cfg.ConfigFile, []byte(content), 0o600); err != nil {
+			"driver = " + strconv.Quote(app.cfg().DatabaseDriver) + "\n" +
+			"backup_dir = " + strconv.Quote(app.cfg().DatabaseBackupDir) + "\n" +
+			"state_file = " + strconv.Quote(app.cfg().StateFile) + "\n"
+		if err := os.WriteFile(app.cfg().ConfigFile, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -947,16 +947,16 @@ func TestConfigFileChangeHotReloadsRuntimeLogLevel(t *testing.T) {
 	})
 	InstallRuntimeLogger(io.Discard, zapcore.ErrorLevel)
 	ConfigureRuntimeLogging(zapcore.ErrorLevel, 20)
-	app.cfg.LogLevel = "error"
+	app.cfg().LogLevel = "error"
 	writeRuntimeConfig("error", 20)
-	app.configSignature = configFileSignature(app.cfg.ConfigFile)
+	app.configSignature = configFileSignature(app.cfg().ConfigFile)
 
 	time.Sleep(5 * time.Millisecond)
 	writeRuntimeConfig("debug", 21)
 	app.reloadConfigIfChanged()
 
-	if app.cfg.LogLevel != "debug" || app.cfg.RuntimeLogLimit != 21 {
-		t.Fatalf("config was not hot reloaded: level=%q limit=%d", app.cfg.LogLevel, app.cfg.RuntimeLogLimit)
+	if app.cfg().LogLevel != "debug" || app.cfg().RuntimeLogLimit != 21 {
+		t.Fatalf("config was not hot reloaded: level=%q limit=%d", app.cfg().LogLevel, app.cfg().RuntimeLogLimit)
 	}
 	zap.L().Debug("debug after hot reload")
 	entries, _ := runtimeLogs.snapshot(20, 0)
@@ -1059,23 +1059,23 @@ func TestBindCodesPersistAcrossStoreReopen(t *testing.T) {
 func TestCleanupExpiredBindCodesKeepsValidCodes(t *testing.T) {
 	app := newTestApp(t)
 	now := time.Now().Unix()
-	if err := app.store.UpsertBindCode(store.BindCode{Code: "EXPIRED12345", Scene: "register", CreatedAt: now - 700, ExpiresAt: now - 1}); err != nil {
+	if err := app.store().UpsertBindCode(store.BindCode{Code: "EXPIRED12345", Scene: "register", CreatedAt: now - 700, ExpiresAt: now - 1}); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.store.UpsertBindCode(store.BindCode{Code: "VALID1234567", Scene: "register", CreatedAt: now, ExpiresAt: now + 600}); err != nil {
+	if err := app.store().UpsertBindCode(store.BindCode{Code: "VALID1234567", Scene: "register", CreatedAt: now, ExpiresAt: now + 600}); err != nil {
 		t.Fatal(err)
 	}
-	deleted, err := app.store.CleanupExpiredBindCodes(now)
+	deleted, err := app.store().CleanupExpiredBindCodes(now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if deleted != 1 {
 		t.Fatalf("deleted=%d, want 1", deleted)
 	}
-	if _, ok := app.store.BindCode("EXPIRED12345"); ok {
+	if _, ok := app.store().BindCode("EXPIRED12345"); ok {
 		t.Fatal("expired bind code was not deleted")
 	}
-	if _, ok := app.store.BindCode("VALID1234567"); !ok {
+	if _, ok := app.store().BindCode("VALID1234567"); !ok {
 		t.Fatal("valid bind code was deleted")
 	}
 }
@@ -1083,10 +1083,10 @@ func TestCleanupExpiredBindCodesKeepsValidCodes(t *testing.T) {
 func TestSchedulerCleanupBindCodesJob(t *testing.T) {
 	app := newTestApp(t)
 	now := time.Now().Unix()
-	if err := app.store.UpsertBindCode(store.BindCode{Code: "OLD123456789", Scene: "register", CreatedAt: now - 800, ExpiresAt: now - 1}); err != nil {
+	if err := app.store().UpsertBindCode(store.BindCode{Code: "OLD123456789", Scene: "register", CreatedAt: now - 800, ExpiresAt: now - 1}); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.store.UpsertRegCode(store.RegCode{Code: "OLD-REGCODE", Type: 1, Days: 30, ValidityTime: 1, UseCountLimit: 1, Active: true, CreatedAt: now - 7200}); err != nil {
+	if err := app.store().UpsertRegCode(store.RegCode{Code: "OLD-REGCODE", Type: 1, Days: 30, ValidityTime: 1, UseCountLimit: 1, Active: true, CreatedAt: now - 7200}); err != nil {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/scheduler", nil)
@@ -1097,25 +1097,25 @@ func TestSchedulerCleanupBindCodesJob(t *testing.T) {
 	if int(numeric(summary["deleted"])) != 1 || len(logs) == 0 {
 		t.Fatalf("unexpected cleanup summary=%v logs=%v", summary, logs)
 	}
-	if _, ok := app.store.BindCode("OLD123456789"); ok {
+	if _, ok := app.store().BindCode("OLD123456789"); ok {
 		t.Fatal("scheduler did not delete expired bind code")
 	}
-	if _, ok := app.store.RegCode("OLD-REGCODE"); !ok {
+	if _, ok := app.store().RegCode("OLD-REGCODE"); !ok {
 		t.Fatal("bind-code cleanup deleted a regcode")
 	}
 }
 
 func TestSchedulerCleanupNoEmbySkipsPendingEntitlements(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.AutoCleanupNoEmby = true
-	app.cfg.AutoCleanupNoEmbyDays = 1
+	app.cfg().AutoCleanupNoEmby = true
+	app.cfg().AutoCleanupNoEmbyDays = 1
 	old := time.Now().AddDate(0, 0, -3).Unix()
-	plain, err := app.store.CreateUser(store.User{Username: "plain-no-emby", Role: store.RoleNormal, Active: true, RegisterTime: old, CreatedAt: old})
+	plain, err := app.store().CreateUser(store.User{Username: "plain-no-emby", Role: store.RoleNormal, Active: true, RegisterTime: old, CreatedAt: old})
 	if err != nil {
 		t.Fatal(err)
 	}
 	days := 30
-	pending, err := app.store.CreateUser(store.User{Username: "pending-emby", Role: store.RoleNormal, Active: true, PendingEmby: true, PendingEmbyDays: &days, RegisterTime: old, CreatedAt: old})
+	pending, err := app.store().CreateUser(store.User{Username: "pending-emby", Role: store.RoleNormal, Active: true, PendingEmby: true, PendingEmbyDays: &days, RegisterTime: old, CreatedAt: old})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1127,26 +1127,26 @@ func TestSchedulerCleanupNoEmbySkipsPendingEntitlements(t *testing.T) {
 	if int(numeric(summary["deleted"])) != 1 || int(numeric(summary["skipped_pending_emby"])) != 1 {
 		t.Fatalf("unexpected cleanup summary: %#v", summary)
 	}
-	if _, ok := app.store.User(plain.UID); ok {
+	if _, ok := app.store().User(plain.UID); ok {
 		t.Fatal("plain no-Emby web user was not deleted")
 	}
-	if u, ok := app.store.User(pending.UID); !ok || !u.PendingEmby {
+	if u, ok := app.store().User(pending.UID); !ok || !u.PendingEmby {
 		t.Fatalf("pending Emby entitlement user was not preserved: ok=%v user=%#v", ok, u)
 	}
 }
 
 func TestSchedulerCleanupPendingEmbyEntitlementsKeepsWebAccount(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.AutoCleanupPendingEmby = true
-	app.cfg.AutoCleanupPendingEmbyDays = 1
+	app.cfg().AutoCleanupPendingEmby = true
+	app.cfg().AutoCleanupPendingEmbyDays = 1
 	old := time.Now().AddDate(0, 0, -3).Unix()
 	recent := time.Now().Unix()
 	days := 30
-	user, err := app.store.CreateUser(store.User{Username: "pending-clear", Role: store.RoleNormal, Active: true, PendingEmby: true, PendingEmbyDays: &days, RegisterTime: old, CreatedAt: old})
+	user, err := app.store().CreateUser(store.User{Username: "pending-clear", Role: store.RoleNormal, Active: true, PendingEmby: true, PendingEmbyDays: &days, RegisterTime: old, CreatedAt: old})
 	if err != nil {
 		t.Fatal(err)
 	}
-	recentUser, err := app.store.CreateUser(store.User{Username: "pending-recent-clear", Role: store.RoleNormal, Active: true, PendingEmby: true, PendingEmbyDays: &days, RegisterTime: recent, CreatedAt: recent})
+	recentUser, err := app.store().CreateUser(store.User{Username: "pending-recent-clear", Role: store.RoleNormal, Active: true, PendingEmby: true, PendingEmbyDays: &days, RegisterTime: recent, CreatedAt: recent})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1158,14 +1158,14 @@ func TestSchedulerCleanupPendingEmbyEntitlementsKeepsWebAccount(t *testing.T) {
 	if int(numeric(summary["cleared"])) != 2 || int(numeric(summary["deleted"])) != 0 || asString(summary["scope"]) != "all" {
 		t.Fatalf("unexpected entitlement cleanup summary: %#v", summary)
 	}
-	updated, ok := app.store.User(user.UID)
+	updated, ok := app.store().User(user.UID)
 	if !ok {
 		t.Fatal("web account was deleted while clearing pending Emby entitlement")
 	}
 	if updated.PendingEmby || updated.PendingEmbyDays != nil || !updated.Active {
 		t.Fatalf("pending entitlement was not cleared cleanly: %#v", updated)
 	}
-	updatedRecent, ok := app.store.User(recentUser.UID)
+	updatedRecent, ok := app.store().User(recentUser.UID)
 	if !ok || updatedRecent.PendingEmby || updatedRecent.PendingEmbyDays != nil || !updatedRecent.Active {
 		t.Fatalf("recent pending entitlement was not cleared cleanly: ok=%v user=%#v", ok, updatedRecent)
 	}
@@ -1173,7 +1173,7 @@ func TestSchedulerCleanupPendingEmbyEntitlementsKeepsWebAccount(t *testing.T) {
 
 func TestSchedulerEmbySyncRepairsPlaceholderAndMissingIDs(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.EmbyToken = "token"
+	app.cfg().EmbyToken = "token"
 	remoteUsers := []map[string]any{
 		{"Id": "real-alpha", "Name": "alpha", "Policy": map[string]any{}},
 		{"Id": "real-beta", "Name": "beta", "Policy": map[string]any{}},
@@ -1200,20 +1200,20 @@ func TestSchedulerEmbySyncRepairsPlaceholderAndMissingIDs(t *testing.T) {
 		}
 	}))
 	defer emby.Close()
-	app.cfg.EmbyURL = emby.URL
+	app.cfg().EmbyURL = emby.URL
 
-	alpha, err := app.store.CreateUser(store.User{Username: "alpha", Role: store.RoleNormal, Active: true, PendingEmby: true})
+	alpha, err := app.store().CreateUser(store.User{Username: "alpha", Role: store.RoleNormal, Active: true, PendingEmby: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = app.store.UpdateUser(alpha.UID, func(u *store.User) error {
+	_, err = app.store().UpdateUser(alpha.UID, func(u *store.User) error {
 		u.EmbyID = fmt.Sprintf("Emby_%d", alpha.UID)
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	beta, err := app.store.CreateUser(store.User{Username: "local-beta", EmbyUsername: "beta", Role: store.RoleNormal, Active: true})
+	beta, err := app.store().CreateUser(store.User{Username: "local-beta", EmbyUsername: "beta", Role: store.RoleNormal, Active: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1226,11 +1226,11 @@ func TestSchedulerEmbySyncRepairsPlaceholderAndMissingIDs(t *testing.T) {
 	if int(numeric(summary["filled_emby_ids"])) != 2 || int(numeric(summary["repaired_placeholders"])) != 1 {
 		t.Fatalf("unexpected emby sync summary: %#v", summary)
 	}
-	updatedAlpha, _ := app.store.User(alpha.UID)
+	updatedAlpha, _ := app.store().User(alpha.UID)
 	if updatedAlpha.EmbyID != "real-alpha" || updatedAlpha.EmbyUsername != "alpha" || updatedAlpha.PendingEmby {
 		t.Fatalf("placeholder Emby ID was not repaired: %#v", updatedAlpha)
 	}
-	updatedBeta, _ := app.store.User(beta.UID)
+	updatedBeta, _ := app.store().User(beta.UID)
 	if updatedBeta.EmbyID != "real-beta" || updatedBeta.EmbyUsername != "beta" {
 		t.Fatalf("missing Emby ID was not filled by username: %#v", updatedBeta)
 	}
@@ -1238,15 +1238,15 @@ func TestSchedulerEmbySyncRepairsPlaceholderAndMissingIDs(t *testing.T) {
 
 func TestTelegramMembershipRejoinManualReviewAndAutoEnable(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.TelegramMode = true
-	app.cfg.TelegramBotToken = "123:ABC"
-	app.cfg.TelegramRequireMembership = true
-	app.cfg.TelegramGroupIDs = []string{"-1001"}
-	user, err := app.store.CreateUser(store.User{Username: "rejoined", Role: store.RoleNormal, Active: false, TelegramID: 4242, EmbyID: "emby-rejoined"})
+	app.cfg().TelegramMode = true
+	app.cfg().TelegramBotToken = "123:ABC"
+	app.cfg().TelegramRequireMembership = true
+	app.cfg().TelegramGroupIDs = []string{"-1001"}
+	user, err := app.store().CreateUser(store.User{Username: "rejoined", Role: store.RoleNormal, Active: false, TelegramID: 4242, EmbyID: "emby-rejoined"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := app.store.UpdateUser(user.UID, func(u *store.User) error { u.Active = false; return nil }); err != nil {
+	if _, err := app.store().UpdateUser(user.UID, func(u *store.User) error { u.Active = false; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1256,9 +1256,9 @@ func TestTelegramMembershipRejoinManualReviewAndAutoEnable(t *testing.T) {
 		_, _ = w.Write([]byte(`{"ok":true,"result":{"status":"member","user":{"id":4242,"is_bot":false}}}`))
 	}))
 	defer tg.Close()
-	app.cfg.TelegramAPIURL = tg.URL
+	app.cfg().TelegramAPIURL = tg.URL
 
-	app.cfg.TelegramAutoEnableRejoined = false
+	app.cfg().TelegramAutoEnableRejoined = false
 	summary, _, err := app.enforceTelegramMembership(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -1266,11 +1266,11 @@ func TestTelegramMembershipRejoinManualReviewAndAutoEnable(t *testing.T) {
 	if int(numeric(summary["rejoined_pending_review"])) != 1 || int(numeric(summary["rejoin_candidates"])) != 1 {
 		t.Fatalf("manual review rejoin was not reported: %#v", summary)
 	}
-	if updated, _ := app.store.User(user.UID); updated.Active {
+	if updated, _ := app.store().User(user.UID); updated.Active {
 		t.Fatal("manual review mode should not auto-enable the web account")
 	}
 
-	app.cfg.TelegramAutoEnableRejoined = true
+	app.cfg().TelegramAutoEnableRejoined = true
 	summary, _, err = app.enforceTelegramMembership(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -1278,15 +1278,15 @@ func TestTelegramMembershipRejoinManualReviewAndAutoEnable(t *testing.T) {
 	if int(numeric(summary["rejoined_enabled"])) != 1 {
 		t.Fatalf("auto rejoin did not enable user: %#v", summary)
 	}
-	if updated, _ := app.store.User(user.UID); !updated.Active {
+	if updated, _ := app.store().User(user.UID); !updated.Active {
 		t.Fatal("auto rejoin did not enable the web account")
 	}
 }
 
 func TestRegisterConsumesConfirmedTelegramBindCode(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.BotInternalSecret = "test-secret"
-	app.cfg.ForceBindTelegram = true
+	app.cfg().BotInternalSecret = "test-secret"
+	app.cfg().ForceBindTelegram = true
 
 	codeResp := doJSON(app, http.MethodPost, "/api/v1/users/telegram/register/bind-code", `{}`, nil)
 	if codeResp.Code != http.StatusOK {
@@ -1314,34 +1314,34 @@ func TestRegisterConsumesConfirmedTelegramBindCode(t *testing.T) {
 	if registered.Code != http.StatusCreated {
 		t.Fatalf("register status=%d body=%s", registered.Code, registered.Body.String())
 	}
-	u, ok := app.store.FindUserByUsername("alice")
+	u, ok := app.store().FindUserByUsername("alice")
 	if !ok || u.TelegramID != 424242 || u.TelegramUsername != "alice_tg" {
 		t.Fatalf("telegram bind not applied to registered user: ok=%v user=%#v", ok, u)
 	}
-	if _, ok := app.store.BindCode(code); ok {
+	if _, ok := app.store().BindCode(code); ok {
 		t.Fatal("confirmed register bind code was not consumed")
 	}
 }
 
 func TestRegisterRejectsUserSceneTelegramBindCode(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.ForceBindTelegram = true
+	app.cfg().ForceBindTelegram = true
 	now := time.Now().Unix()
-	if err := app.store.UpsertBindCode(store.BindCode{Code: "USERBIND1234", Scene: "user", UID: 99, Confirmed: true, TelegramID: 999, CreatedAt: now, ExpiresAt: now + 600}); err != nil {
+	if err := app.store().UpsertBindCode(store.BindCode{Code: "USERBIND1234", Scene: "user", UID: 99, Confirmed: true, TelegramID: 999, CreatedAt: now, ExpiresAt: now + 600}); err != nil {
 		t.Fatal(err)
 	}
 	resp := doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"bob","password":"Bob123456","telegram_bind_code":"USERBIND1234"}`, nil)
 	if resp.Code != http.StatusBadRequest {
 		t.Fatalf("register with user-scene bind code status=%d body=%s", resp.Code, resp.Body.String())
 	}
-	if _, ok := app.store.FindUserByUsername("bob"); ok {
+	if _, ok := app.store().FindUserByUsername("bob"); ok {
 		t.Fatal("user was registered with a user-scene bind code")
 	}
 }
 
 func TestRegisterRejectsMalformedTelegramBindCodeBeforeLookup(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.ForceBindTelegram = true
+	app.cfg().ForceBindTelegram = true
 	resp := doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"badbind","password":"badbind123A","telegram_bind_code":"../../bad"}`, nil)
 	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), `"error_code":"TG_BIND_CODE_FORMAT_INVALID"`) {
 		t.Fatalf("malformed bind code status=%d body=%s", resp.Code, resp.Body.String())
@@ -1355,9 +1355,9 @@ func TestRegisterRejectsMalformedTelegramBindCodeBeforeLookup(t *testing.T) {
 
 func TestTelegramBindConfirmRequiresInternalSecret(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.BotInternalSecret = "test-secret"
+	app.cfg().BotInternalSecret = "test-secret"
 	now := time.Now().Unix()
-	if err := app.store.UpsertBindCode(store.BindCode{Code: "ABCDEFGH", Scene: "register", CreatedAt: now, ExpiresAt: now + 60}); err != nil {
+	if err := app.store().UpsertBindCode(store.BindCode{Code: "ABCDEFGH", Scene: "register", CreatedAt: now, ExpiresAt: now + 60}); err != nil {
 		t.Fatal(err)
 	}
 	blocked := doJSON(app, http.MethodPost, "/api/v1/users/me/telegram/bind-confirm", `{"code":"ABCDEFGH","telegram_id":42}`, nil)
@@ -1372,15 +1372,15 @@ func TestTelegramBindConfirmRequiresInternalSecret(t *testing.T) {
 
 func TestTelegramEndpointAcceptsCommonBaseURLs(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.TelegramMode = true
-	app.cfg.TelegramBotToken = "123:ABC"
+	app.cfg().TelegramMode = true
+	app.cfg().TelegramBotToken = "123:ABC"
 	cases := map[string]string{
 		"https://api.telegram.org":            "https://api.telegram.org/bot123:ABC/getMe",
 		"https://api.telegram.org/bot":        "https://api.telegram.org/bot123:ABC/getMe",
 		"https://api.telegram.org/bot123:ABC": "https://api.telegram.org/bot123:ABC/getMe",
 	}
 	for base, want := range cases {
-		app.cfg.TelegramAPIURL = base
+		app.cfg().TelegramAPIURL = base
 		if got := app.telegramEndpoint("getMe"); got != want {
 			t.Fatalf("telegramEndpoint(%q) = %q, want %q", base, got, want)
 		}
@@ -1389,7 +1389,7 @@ func TestTelegramEndpointAcceptsCommonBaseURLs(t *testing.T) {
 
 func TestTelegramErrorRedactsBotToken(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.TelegramBotToken = "123:SECRET"
+	app.cfg().TelegramBotToken = "123:SECRET"
 	raw := `Post "https://api.telegram.org/bot123:SECRET/getUpdates": context deadline exceeded 123:SECRET`
 	got := app.telegramSanitizeError(errors.New(raw))
 	if strings.Contains(got, "123:SECRET") || !strings.Contains(got, "/bot<redacted>/getUpdates") {
@@ -1404,8 +1404,8 @@ func TestTelegramErrorRedactsBotToken(t *testing.T) {
 
 func TestTelegramGetUpdatesAllowsCallbacks(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.TelegramMode = true
-	app.cfg.TelegramBotToken = "123:ABC"
+	app.cfg().TelegramMode = true
+	app.cfg().TelegramBotToken = "123:ABC"
 	var body map[string]any
 	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/bot123:ABC/getUpdates" {
@@ -1417,7 +1417,7 @@ func TestTelegramGetUpdatesAllowsCallbacks(t *testing.T) {
 		_, _ = w.Write([]byte(`{"ok":true,"result":[]}`))
 	}))
 	defer tg.Close()
-	app.cfg.TelegramAPIURL = tg.URL
+	app.cfg().TelegramAPIURL = tg.URL
 	if _, err := app.telegramGetUpdates(context.Background(), 42); err != nil {
 		t.Fatal(err)
 	}
@@ -1435,12 +1435,12 @@ func TestTelegramGetUpdatesAllowsCallbacks(t *testing.T) {
 
 func TestTelegramBindRequirementSplitsGroupAndChannel(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.TelegramMode = true
-	app.cfg.TelegramBotToken = "123:ABC"
-	app.cfg.TelegramGroupIDs = []string{"-1001"}
-	app.cfg.TelegramChannelIDs = []string{"@RequiredChannel"}
-	app.cfg.TelegramForceBindGroup = true
-	app.cfg.TelegramForceBindChannel = false
+	app.cfg().TelegramMode = true
+	app.cfg().TelegramBotToken = "123:ABC"
+	app.cfg().TelegramGroupIDs = []string{"-1001"}
+	app.cfg().TelegramChannelIDs = []string{"@RequiredChannel"}
+	app.cfg().TelegramForceBindGroup = true
+	app.cfg().TelegramForceBindChannel = false
 	requests := []map[string]any{}
 	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -1463,14 +1463,14 @@ func TestTelegramBindRequirementSplitsGroupAndChannel(t *testing.T) {
 		}
 	}))
 	defer tg.Close()
-	app.cfg.TelegramAPIURL = tg.URL
+	app.cfg().TelegramAPIURL = tg.URL
 
 	now := time.Now().Unix()
-	if err := app.store.UpsertBindCode(store.BindCode{Code: "GROUP1", Scene: "register", CreatedAt: now, ExpiresAt: now + 600}); err != nil {
+	if err := app.store().UpsertBindCode(store.BindCode{Code: "GROUP1", Scene: "register", CreatedAt: now, ExpiresAt: now + 600}); err != nil {
 		t.Fatal(err)
 	}
 	app.telegramConfirmBindCode(context.Background(), 42, 42, "tguser", "GROUP1")
-	bind, ok := app.store.BindCode("GROUP1")
+	bind, ok := app.store().BindCode("GROUP1")
 	if !ok || !bind.Confirmed {
 		t.Fatalf("group-only requirement should confirm bind code: %#v", bind)
 	}
@@ -1480,12 +1480,12 @@ func TestTelegramBindRequirementSplitsGroupAndChannel(t *testing.T) {
 		}
 	}
 
-	app.cfg.TelegramForceBindChannel = true
-	if err := app.store.UpsertBindCode(store.BindCode{Code: "CHAN01", Scene: "register", CreatedAt: now, ExpiresAt: now + 600}); err != nil {
+	app.cfg().TelegramForceBindChannel = true
+	if err := app.store().UpsertBindCode(store.BindCode{Code: "CHAN01", Scene: "register", CreatedAt: now, ExpiresAt: now + 600}); err != nil {
 		t.Fatal(err)
 	}
 	app.telegramConfirmBindCode(context.Background(), 42, 43, "tguser2", "CHAN01")
-	channelBind, ok := app.store.BindCode("CHAN01")
+	channelBind, ok := app.store().BindCode("CHAN01")
 	if !ok || channelBind.Confirmed {
 		t.Fatalf("channel requirement should reject user missing required channel: %#v", channelBind)
 	}
@@ -1493,10 +1493,10 @@ func TestTelegramBindRequirementSplitsGroupAndChannel(t *testing.T) {
 
 func TestTelegramAnonymousGroupUserRequiresInlineAuth(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.TelegramMode = true
-	app.cfg.TelegramBotToken = "123:ABC"
+	app.cfg().TelegramMode = true
+	app.cfg().TelegramBotToken = "123:ABC"
 	user := store.User{UID: 1001, Username: "target", Role: store.RoleNormal, Active: true, TelegramID: 888, CreatedAt: time.Now().Unix(), RegisterTime: time.Now().Unix()}
-	if _, err := app.store.CreateUser(user); err != nil {
+	if _, err := app.store().CreateUser(user); err != nil {
 		t.Fatal(err)
 	}
 	requests := []map[string]any{}
@@ -1510,7 +1510,7 @@ func TestTelegramAnonymousGroupUserRequiresInlineAuth(t *testing.T) {
 		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":9001}}`))
 	}))
 	defer tg.Close()
-	app.cfg.TelegramAPIURL = tg.URL
+	app.cfg().TelegramAPIURL = tg.URL
 
 	app.handleTelegramUpdate(context.Background(), map[string]any{
 		"message": map[string]any{
@@ -1549,7 +1549,7 @@ func TestSchedulerManualRunUpdatesSingleHistoryEntry(t *testing.T) {
 	if app.schedulerJobRunning("daily_stats") {
 		t.Fatal("manual scheduler job did not finish")
 	}
-	runs := app.store.SchedulerRuns("daily_stats", 10)
+	runs := app.store().SchedulerRuns("daily_stats", 10)
 	if len(runs) != 1 {
 		t.Fatalf("manual run should update one history entry, got %d: %#v", len(runs), runs)
 	}
@@ -1577,7 +1577,7 @@ func TestSchedulerManualTriggerSpecDisablesAutoRun(t *testing.T) {
 
 func TestSchedulerJobsReconcileStaleRunningHistory(t *testing.T) {
 	app := newTestApp(t)
-	run, err := app.store.AddSchedulerRunReturning(store.SchedulerRun{JobID: "enforce_group_membership", Type: "auto", Trigger: "scheduler", Status: "running", Message: "running", StartedAt: time.Now().Add(-time.Hour).Unix()})
+	run, err := app.store().AddSchedulerRunReturning(store.SchedulerRun{JobID: "enforce_group_membership", Type: "auto", Trigger: "scheduler", Status: "running", Message: "running", StartedAt: time.Now().Add(-time.Hour).Unix()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1587,7 +1587,7 @@ func TestSchedulerJobsReconcileStaleRunningHistory(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("jobs status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	runs := app.store.SchedulerRuns("enforce_group_membership", 1)
+	runs := app.store().SchedulerRuns("enforce_group_membership", 1)
 	if len(runs) != 1 || runs[0].ID != run.ID || runs[0].Status == "running" || runs[0].FinishedAt == 0 {
 		t.Fatalf("stale running history was not reconciled: %#v", runs)
 	}
@@ -1611,7 +1611,7 @@ func TestSchedulerTerminateIsIdempotentWhenJobAlreadyStopped(t *testing.T) {
 
 func TestSchedulerRuntimeParamsPersistInStoreAndDriveRunner(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.AutoCleanupPendingEmby = true
+	app.cfg().AutoCleanupPendingEmby = true
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/scheduler/jobs/cleanup_pending_emby_entitlements/schedule", strings.NewReader(`{"type":"interval","seconds":120,"runtime_params":{"enabled":false}}`))
 	rr := httptest.NewRecorder()
 	app.handleSchedulerSchedule(rr, req, Params{"job_id": "cleanup_pending_emby_entitlements"})
@@ -1647,7 +1647,7 @@ func TestSchedulerRuntimeParamsPersistInStoreAndDriveRunner(t *testing.T) {
 		t.Fatal("cleanup_pending_emby_entitlements job not returned")
 	}
 	days := 30
-	if _, err := app.store.CreateUser(store.User{Username: "pending-db-disabled", Role: store.RoleNormal, Active: true, PendingEmby: true, PendingEmbyDays: &days}); err != nil {
+	if _, err := app.store().CreateUser(store.User{Username: "pending-db-disabled", Role: store.RoleNormal, Active: true, PendingEmby: true, PendingEmbyDays: &days}); err != nil {
 		t.Fatal(err)
 	}
 	summary, _, err := app.runSchedulerJob(httptest.NewRequest(http.MethodPost, "/scheduler", nil), "cleanup_pending_emby_entitlements")
@@ -1661,12 +1661,12 @@ func TestSchedulerRuntimeParamsPersistInStoreAndDriveRunner(t *testing.T) {
 
 func TestBangumiWebhookRequiresSecretWhenEnabled(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.BangumiEnabled = true
+	app.cfg().BangumiEnabled = true
 	blocked := doJSON(app, http.MethodPost, "/api/v1/emby/bangumi/webhook", `{"Event":"PlaybackStopped"}`, nil)
 	if blocked.Code != http.StatusForbidden {
 		t.Fatalf("webhook without configured secret = %d body=%s", blocked.Code, blocked.Body.String())
 	}
-	app.cfg.BangumiWebhookSecret = "webhook-secret"
+	app.cfg().BangumiWebhookSecret = "webhook-secret"
 	allowed := doJSON(app, http.MethodPost, "/api/v1/emby/bangumi/webhook?token=webhook-secret", `{"Event":"PlaybackStopped"}`, nil)
 	if allowed.Code != http.StatusOK {
 		t.Fatalf("webhook with secret = %d body=%s", allowed.Code, allowed.Body.String())
@@ -1728,14 +1728,14 @@ func TestDatabaseAdminBackupRestoreAndAuth(t *testing.T) {
 	}
 
 	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"extra","password":"Extra123456"}`, nil)
-	if _, ok := app.store.FindUserByUsername("extra"); !ok {
+	if _, ok := app.store().FindUserByUsername("extra"); !ok {
 		t.Fatal("expected extra user before restore")
 	}
 	restorePreview := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/restore", `{"name":"`+backupName+`"}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if restorePreview.Code != http.StatusOK || !strings.Contains(restorePreview.Body.String(), `"requires_confirmation":true`) {
 		t.Fatalf("restore preview status=%d body=%s", restorePreview.Code, restorePreview.Body.String())
 	}
-	if _, ok := app.store.FindUserByUsername("extra"); !ok {
+	if _, ok := app.store().FindUserByUsername("extra"); !ok {
 		t.Fatal("restore preview mutated state")
 	}
 	restore := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/restore", `{"name":"`+backupName+`","confirm":"RESTORE_DATABASE_BACKUP"}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
@@ -1745,7 +1745,7 @@ func TestDatabaseAdminBackupRestoreAndAuth(t *testing.T) {
 	if !strings.Contains(restore.Body.String(), `"pre_operation_backup"`) {
 		t.Fatalf("restore did not report pre-operation backup body=%s", restore.Body.String())
 	}
-	if _, ok := app.store.FindUserByUsername("extra"); ok {
+	if _, ok := app.store().FindUserByUsername("extra"); ok {
 		t.Fatal("restore did not replace state")
 	}
 	traversal := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/restore", `{"name":"../state.json"}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
@@ -1756,7 +1756,7 @@ func TestDatabaseAdminBackupRestoreAndAuth(t *testing.T) {
 	if migrateDisabled.Code != http.StatusForbidden {
 		t.Fatalf("migrate disabled status=%d body=%s", migrateDisabled.Code, migrateDisabled.Body.String())
 	}
-	app.cfg.DatabaseMigrationPanelEnabled = true
+	app.cfg().DatabaseMigrationPanelEnabled = true
 	migrate := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","dry_run":true}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if migrate.Code != http.StatusOK || !strings.Contains(migrate.Body.String(), `"dry_run":true`) {
 		t.Fatalf("migrate dry-run status=%d body=%s", migrate.Code, migrate.Body.String())
@@ -1765,14 +1765,14 @@ func TestDatabaseAdminBackupRestoreAndAuth(t *testing.T) {
 	if migrateNoConfirm.Code != http.StatusOK || !strings.Contains(migrateNoConfirm.Body.String(), `"requires_confirmation":true`) || !strings.Contains(migrateNoConfirm.Body.String(), `"dry_run":true`) {
 		t.Fatalf("migrate without confirm status=%d body=%s", migrateNoConfirm.Code, migrateNoConfirm.Body.String())
 	}
-	if _, err := os.Stat(filepath.Join(app.cfg.DatabaseDir, "migrated.json")); err == nil {
+	if _, err := os.Stat(filepath.Join(app.cfg().DatabaseDir, "migrated.json")); err == nil {
 		t.Fatal("migrate without confirm wrote target file")
 	}
 	migrateExecute := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","state_file":"migrated.json","confirm":"MIGRATE_DATABASE"}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if migrateExecute.Code != http.StatusOK || !strings.Contains(migrateExecute.Body.String(), `"pre_operation_backup"`) {
 		t.Fatalf("migrate execute status=%d body=%s", migrateExecute.Code, migrateExecute.Body.String())
 	}
-	if _, err := os.Stat(filepath.Join(app.cfg.DatabaseDir, "migrated.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(app.cfg().DatabaseDir, "migrated.json")); err != nil {
 		t.Fatalf("migrate with confirm did not write target file: %v", err)
 	}
 	migrateTraversal := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","state_file":"../outside.json","dry_run":true}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
@@ -1791,10 +1791,10 @@ func TestDatabaseAdminBackupRestoreAndAuth(t *testing.T) {
 
 func TestConfigAdminBackupRestoreAndDelete(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.ConfigFile = filepath.Join(app.cfg.DatabaseDir, "config.toml")
-	original := "[Global]\ndatabases_dir = " + strconv.Quote(app.cfg.DatabaseDir) + "\n\n[Database]\ndriver = " + strconv.Quote(app.cfg.DatabaseDriver) + "\nbackup_dir = " + strconv.Quote(app.cfg.DatabaseBackupDir) + "\nstate_file = " + strconv.Quote(app.cfg.StateFile) + "\n\n[API]\nhost = \"127.0.0.1\"\nport = 5010\n"
+	app.cfg().ConfigFile = filepath.Join(app.cfg().DatabaseDir, "config.toml")
+	original := "[Global]\ndatabases_dir = " + strconv.Quote(app.cfg().DatabaseDir) + "\n\n[Database]\ndriver = " + strconv.Quote(app.cfg().DatabaseDriver) + "\nbackup_dir = " + strconv.Quote(app.cfg().DatabaseBackupDir) + "\nstate_file = " + strconv.Quote(app.cfg().StateFile) + "\n\n[API]\nhost = \"127.0.0.1\"\nport = 5010\n"
 	changed := strings.Replace(original, "port = 5010", "port = 5011", 1)
-	if err := os.WriteFile(app.cfg.ConfigFile, []byte(original), 0o600); err != nil {
+	if err := os.WriteFile(app.cfg().ConfigFile, []byte(original), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1824,21 +1824,21 @@ func TestConfigAdminBackupRestoreAndDelete(t *testing.T) {
 		t.Fatalf("config backup inspect status=%d body=%s", inspect.Code, inspect.Body.String())
 	}
 
-	if err := os.WriteFile(app.cfg.ConfigFile, []byte(changed), 0o600); err != nil {
+	if err := os.WriteFile(app.cfg().ConfigFile, []byte(changed), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	restorePreview := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/config/restore", `{"name":"`+backupName+`"}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if restorePreview.Code != http.StatusOK || !strings.Contains(restorePreview.Body.String(), `"requires_confirmation":true`) {
 		t.Fatalf("config restore preview status=%d body=%s", restorePreview.Code, restorePreview.Body.String())
 	}
-	if data, _ := os.ReadFile(app.cfg.ConfigFile); !strings.Contains(string(data), "port = 5011") {
+	if data, _ := os.ReadFile(app.cfg().ConfigFile); !strings.Contains(string(data), "port = 5011") {
 		t.Fatal("config restore preview mutated file")
 	}
 	restore := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/config/restore", `{"name":"`+backupName+`","confirm":"RESTORE_CONFIG_BACKUP"}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if restore.Code != http.StatusOK || !strings.Contains(restore.Body.String(), `"pre_operation_backup"`) {
 		t.Fatalf("config restore status=%d body=%s", restore.Code, restore.Body.String())
 	}
-	if data, _ := os.ReadFile(app.cfg.ConfigFile); !strings.Contains(string(data), "port = 5010") {
+	if data, _ := os.ReadFile(app.cfg().ConfigFile); !strings.Contains(string(data), "port = 5010") {
 		t.Fatalf("config restore did not restore original content: %s", string(data))
 	}
 
@@ -1852,9 +1852,9 @@ func TestConfigAdminBackupRestoreAndDelete(t *testing.T) {
 
 func TestConfigTOMLGetReturnsCompletedConfig(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.ConfigFile = filepath.Join(app.cfg.DatabaseDir, "config.toml")
-	minimal := "[Global]\ndatabases_dir = " + strconv.Quote(app.cfg.DatabaseDir) + "\n\n[Database]\ndriver = " + strconv.Quote(app.cfg.DatabaseDriver) + "\nstate_file = " + strconv.Quote(app.cfg.StateFile) + "\nbackup_dir = " + strconv.Quote(app.cfg.DatabaseBackupDir) + "\n\n[API]\nhost = \"127.0.0.1\"\nport = 5010\n\n[Admin]\nusernames = [\"root\"]\n"
-	if err := os.WriteFile(app.cfg.ConfigFile, []byte(minimal), 0o600); err != nil {
+	app.cfg().ConfigFile = filepath.Join(app.cfg().DatabaseDir, "config.toml")
+	minimal := "[Global]\ndatabases_dir = " + strconv.Quote(app.cfg().DatabaseDir) + "\n\n[Database]\ndriver = " + strconv.Quote(app.cfg().DatabaseDriver) + "\nstate_file = " + strconv.Quote(app.cfg().StateFile) + "\nbackup_dir = " + strconv.Quote(app.cfg().DatabaseBackupDir) + "\n\n[API]\nhost = \"127.0.0.1\"\nport = 5010\n\n[Admin]\nusernames = [\"root\"]\n"
+	if err := os.WriteFile(app.cfg().ConfigFile, []byte(minimal), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1882,19 +1882,19 @@ func TestConfigTOMLGetReturnsCompletedConfig(t *testing.T) {
 
 func TestConfigSaveMigratesLegacyTelegramForceSubscribe(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.ConfigFile = filepath.Join(app.cfg.DatabaseDir, "config.toml")
+	app.cfg().ConfigFile = filepath.Join(app.cfg().DatabaseDir, "config.toml")
 	existing := "[Global]\nserver_name = \"old\"\n\n[Admin]\nusernames = [\"root\"]\n"
-	if err := os.WriteFile(app.cfg.ConfigFile, []byte(existing), 0o600); err != nil {
+	if err := os.WriteFile(app.cfg().ConfigFile, []byte(existing), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	legacy := `[Global]
 server_name = "new"
-databases_dir = "` + strings.ReplaceAll(app.cfg.DatabaseDir, `\`, `\\`) + `"
+databases_dir = "` + strings.ReplaceAll(app.cfg().DatabaseDir, `\`, `\\`) + `"
 
 [Database]
 driver = "json"
-state_file = "` + strings.ReplaceAll(app.cfg.StateFile, `\`, `\\`) + `"
-backup_dir = "` + strings.ReplaceAll(app.cfg.DatabaseBackupDir, `\`, `\\`) + `"
+state_file = "` + strings.ReplaceAll(app.cfg().StateFile, `\`, `\\`) + `"
+backup_dir = "` + strings.ReplaceAll(app.cfg().DatabaseBackupDir, `\`, `\\`) + `"
 
 [Telegram]
 group_id = ["@group"]
@@ -1905,7 +1905,7 @@ force_subscribe = true
 	if status != http.StatusOK {
 		t.Fatalf("saveConfigContent status=%d message=%s info=%v", status, message, info)
 	}
-	data, err := os.ReadFile(app.cfg.ConfigFile)
+	data, err := os.ReadFile(app.cfg().ConfigFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1923,19 +1923,19 @@ force_subscribe = true
 
 func TestEmbyCapacityCountsPendingEntitlementsSeparatelyFromSystemLimit(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.UserLimit = 100
-	app.cfg.EmbyUserLimit = 3
+	app.cfg().UserLimit = 100
+	app.cfg().EmbyUserLimit = 3
 	now := time.Now().Unix()
-	if _, err := app.store.CreateUser(store.User{Username: "emby", Role: store.RoleNormal, Active: true, EmbyID: "emby-1"}); err != nil {
+	if _, err := app.store().CreateUser(store.User{Username: "emby", Role: store.RoleNormal, Active: true, EmbyID: "emby-1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.store.UpsertInviteCode(store.InviteCode{Code: "INV-A", UID: 1, InviterUID: 1, Days: 30, UseCountLimit: 1, Active: true, CreatedAt: now}); err != nil {
+	if err := app.store().UpsertInviteCode(store.InviteCode{Code: "INV-A", UID: 1, InviterUID: 1, Days: 30, UseCountLimit: 1, Active: true, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.store.UpsertRegCode(store.RegCode{Code: "REG-A", Type: 1, Days: 30, ValidityTime: -1, UseCountLimit: 1, Active: true, CreatedAt: now}); err != nil {
+	if err := app.store().UpsertRegCode(store.RegCode{Code: "REG-A", Type: 1, Days: 30, ValidityTime: -1, UseCountLimit: 1, Active: true, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.store.UpsertRegCode(store.RegCode{Code: "REG-RENEW", Type: 2, Days: 30, ValidityTime: -1, UseCountLimit: 100, Active: true, CreatedAt: now}); err != nil {
+	if err := app.store().UpsertRegCode(store.RegCode{Code: "REG-RENEW", Type: 2, Days: 30, ValidityTime: -1, UseCountLimit: 100, Active: true, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2009,7 +2009,7 @@ func TestTargetedRegcodesAreCreatedListedAndEnforced(t *testing.T) {
 		t.Fatal(err)
 	}
 	code := env.Data.(map[string]any)["codes"].([]any)[0].(string)
-	reg, ok := app.store.RegCode(code)
+	reg, ok := app.store().RegCode(code)
 	if !ok || reg.TargetUsername != "alpha" {
 		t.Fatalf("target username was not saved: %#v", reg)
 	}
@@ -2018,11 +2018,11 @@ func TestTargetedRegcodesAreCreatedListedAndEnforced(t *testing.T) {
 		t.Fatalf("target username was not searchable/listed, status=%d body=%s", list.Code, list.Body.String())
 	}
 
-	alpha, err := app.store.CreateUser(store.User{Username: "alpha", Role: store.RoleNormal, Active: true})
+	alpha, err := app.store().CreateUser(store.User{Username: "alpha", Role: store.RoleNormal, Active: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	beta, err := app.store.CreateUser(store.User{Username: "beta", Role: store.RoleNormal, Active: true})
+	beta, err := app.store().CreateUser(store.User{Username: "beta", Role: store.RoleNormal, Active: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2033,7 +2033,7 @@ func TestTargetedRegcodesAreCreatedListedAndEnforced(t *testing.T) {
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("non-target user should not use targeted regcode, status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	reg, _ = app.store.RegCode(code)
+	reg, _ = app.store().RegCode(code)
 	if reg.UseCount != 0 {
 		t.Fatalf("target mismatch consumed regcode, use_count=%d", reg.UseCount)
 	}
@@ -2045,7 +2045,7 @@ func TestTargetedRegcodesAreCreatedListedAndEnforced(t *testing.T) {
 		t.Fatalf("target user should use targeted regcode, status=%d body=%s", rr.Code, rr.Body.String())
 	}
 
-	if err := app.store.UpsertRegCode(store.RegCode{Code: "RENEW-ALPHA", Type: 2, Days: 5, ValidityTime: -1, UseCountLimit: 1, Active: true, TargetUsername: "alpha"}); err != nil {
+	if err := app.store().UpsertRegCode(store.RegCode{Code: "RENEW-ALPHA", Type: 2, Days: 5, ValidityTime: -1, UseCountLimit: 1, Active: true, TargetUsername: "alpha"}); err != nil {
 		t.Fatal(err)
 	}
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/users/me/renew", strings.NewReader(`{"reg_code":"RENEW-ALPHA"}`))
@@ -2055,7 +2055,7 @@ func TestTargetedRegcodesAreCreatedListedAndEnforced(t *testing.T) {
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("renew endpoint should reject non-target user, status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	reg, _ = app.store.RegCode("RENEW-ALPHA")
+	reg, _ = app.store().RegCode("RENEW-ALPHA")
 	if reg.UseCount != 0 {
 		t.Fatalf("target mismatch consumed renewal code, use_count=%d", reg.UseCount)
 	}
@@ -2070,18 +2070,18 @@ func TestTargetedRegcodesAreCreatedListedAndEnforced(t *testing.T) {
 
 func TestInviteParentCanDetachExpiredChildAndKeepWebAccountActive(t *testing.T) {
 	app := newTestApp(t)
-	parent, err := app.store.CreateUser(store.User{Username: "parent", Role: store.RoleNormal, Active: true})
+	parent, err := app.store().CreateUser(store.User{Username: "parent", Role: store.RoleNormal, Active: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := app.store.CreateUser(store.User{Username: "child", Role: store.RoleNormal, Active: true, ExpiredAt: time.Now().AddDate(0, 0, -1).Unix(), EmbyID: "emby-child", EmbyUsername: "child"})
+	child, err := app.store().CreateUser(store.User{Username: "child", Role: store.RoleNormal, Active: true, ExpiredAt: time.Now().AddDate(0, 0, -1).Unix(), EmbyID: "emby-child", EmbyUsername: "child"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.store.UpsertInviteCode(store.InviteCode{Code: "INV-CHILD", UID: parent.UID, InviterUID: parent.UID, Days: 30, UseCountLimit: 1, Active: true}); err != nil {
+	if err := app.store().UpsertInviteCode(store.InviteCode{Code: "INV-CHILD", UID: parent.UID, InviterUID: parent.UID, Days: 30, UseCountLimit: 1, Active: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := app.store.ConsumeInviteCode("INV-CHILD", child.UID); err != nil {
+	if _, err := app.store().ConsumeInviteCode("INV-CHILD", child.UID); err != nil {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/invite/children/2/detach-expired", nil)
@@ -2091,10 +2091,10 @@ func TestInviteParentCanDetachExpiredChildAndKeepWebAccountActive(t *testing.T) 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("detach status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	if _, ok := app.store.ParentOf(child.UID); ok {
+	if _, ok := app.store().ParentOf(child.UID); ok {
 		t.Fatal("child still has invite parent")
 	}
-	updated, ok := app.store.User(child.UID)
+	updated, ok := app.store().User(child.UID)
 	if !ok || !updated.Active || updated.EmbyID != "" || updated.EmbyUsername != "" || updated.PendingEmby {
 		t.Fatalf("child web account was not preserved while Emby was cleared: %#v", updated)
 	}
@@ -2102,7 +2102,7 @@ func TestInviteParentCanDetachExpiredChildAndKeepWebAccountActive(t *testing.T) 
 
 func TestRegcodeDTOAndUsersHideLegacyUsedBy(t *testing.T) {
 	app := newTestApp(t)
-	user, err := app.store.CreateUser(store.User{Username: "legacy-user", Role: store.RoleNormal, Active: true})
+	user, err := app.store().CreateUser(store.User{Username: "legacy-user", Role: store.RoleNormal, Active: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2112,7 +2112,7 @@ func TestRegcodeDTOAndUsersHideLegacyUsedBy(t *testing.T) {
 	if len(uids) != 0 || asString(dto["used_by"]) != "" {
 		t.Fatalf("legacy used_by should be hidden in dto: %#v", dto)
 	}
-	if err := app.store.UpsertRegCode(reg); err != nil {
+	if err := app.store().UpsertRegCode(reg); err != nil {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/regcodes/LEGACY-USED/users", nil)
@@ -2131,13 +2131,13 @@ func TestRegcodeDTOAndUsersHideLegacyUsedBy(t *testing.T) {
 
 func TestPendingEmbyUserCanReplaceEntitlementWithRegisterCode(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.EmbyUserLimit = 1
+	app.cfg().EmbyUserLimit = 1
 	oldDays := 90
-	user, err := app.store.CreateUser(store.User{Username: "pending-replace", Role: store.RoleNormal, Active: true})
+	user, err := app.store().CreateUser(store.User{Username: "pending-replace", Role: store.RoleNormal, Active: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	updatedUser, err := app.store.UpdateUser(user.UID, func(u *store.User) error {
+	updatedUser, err := app.store().UpdateUser(user.UID, func(u *store.User) error {
 		u.PendingEmby = true
 		u.PendingEmbyDays = &oldDays
 		u.EmbyUsername = "old-name"
@@ -2147,7 +2147,7 @@ func TestPendingEmbyUserCanReplaceEntitlementWithRegisterCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	user = updatedUser
-	if err := app.store.UpsertRegCode(store.RegCode{Code: "REG-REPLACE", Type: 1, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
+	if err := app.store().UpsertRegCode(store.RegCode{Code: "REG-REPLACE", Type: 1, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/use-code", strings.NewReader(`{"reg_code":"REG-REPLACE","emby_username":"new-name"}`))
@@ -2157,11 +2157,11 @@ func TestPendingEmbyUserCanReplaceEntitlementWithRegisterCode(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("pending entitlement replacement should use register code, status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	updated, _ := app.store.User(user.UID)
+	updated, _ := app.store().User(user.UID)
 	if !updated.PendingEmby || updated.PendingEmbyDays == nil || *updated.PendingEmbyDays != 7 || updated.EmbyUsername != "new-name" {
 		t.Fatalf("register code did not replace pending entitlement cleanly: %#v days=%#v", updated, updated.PendingEmbyDays)
 	}
-	reg, _ := app.store.RegCode("REG-REPLACE")
+	reg, _ := app.store().RegCode("REG-REPLACE")
 	if reg.UseCount != 1 || reg.UsedBy != user.UID {
 		t.Fatalf("register code usage was not recorded: %#v", reg)
 	}
@@ -2169,12 +2169,12 @@ func TestPendingEmbyUserCanReplaceEntitlementWithRegisterCode(t *testing.T) {
 
 func TestRegisterCodeCapacityExcludesCodeBeingConsumedAndRejectsBoundUser(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.EmbyUserLimit = 1
-	user, err := app.store.CreateUser(store.User{Username: "capacity-user", Role: store.RoleNormal, Active: true})
+	app.cfg().EmbyUserLimit = 1
+	user, err := app.store().CreateUser(store.User{Username: "capacity-user", Role: store.RoleNormal, Active: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.store.UpsertRegCode(store.RegCode{Code: "REG-CAPACITY", Type: 1, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
+	if err := app.store().UpsertRegCode(store.RegCode{Code: "REG-CAPACITY", Type: 1, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/use-code", strings.NewReader(`{"reg_code":"REG-CAPACITY"}`))
@@ -2185,11 +2185,11 @@ func TestRegisterCodeCapacityExcludesCodeBeingConsumedAndRejectsBoundUser(t *tes
 		t.Fatalf("register code should consume its own reserved capacity slot, status=%d body=%s", rr.Code, rr.Body.String())
 	}
 
-	bound, err := app.store.CreateUser(store.User{Username: "bound-user", Role: store.RoleNormal, Active: true, EmbyID: "emby-bound"})
+	bound, err := app.store().CreateUser(store.User{Username: "bound-user", Role: store.RoleNormal, Active: true, EmbyID: "emby-bound"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.store.UpsertRegCode(store.RegCode{Code: "REG-BOUND", Type: 1, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
+	if err := app.store().UpsertRegCode(store.RegCode{Code: "REG-BOUND", Type: 1, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
 		t.Fatal(err)
 	}
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/users/me/use-code", strings.NewReader(`{"reg_code":"REG-BOUND","check_only":true}`))
@@ -2206,12 +2206,12 @@ func TestRegisterCodeCapacityExcludesCodeBeingConsumedAndRejectsBoundUser(t *tes
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("Emby-bound user should not use register code as renewal, status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	reg, _ := app.store.RegCode("REG-BOUND")
+	reg, _ := app.store().RegCode("REG-BOUND")
 	if reg.UseCount != 0 {
 		t.Fatalf("rejected register code was consumed: %#v", reg)
 	}
 
-	if err := app.store.UpsertRegCode(store.RegCode{Code: "VIP-BOUND", Type: 3, Days: -1, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
+	if err := app.store().UpsertRegCode(store.RegCode{Code: "VIP-BOUND", Type: 3, Days: -1, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
 		t.Fatal(err)
 	}
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/users/me/use-code", strings.NewReader(`{"reg_code":"VIP-BOUND"}`))
@@ -2221,16 +2221,16 @@ func TestRegisterCodeCapacityExcludesCodeBeingConsumedAndRejectsBoundUser(t *tes
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("Emby-bound user should not use whitelist code as registration entitlement, status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	reg, _ = app.store.RegCode("VIP-BOUND")
+	reg, _ = app.store().RegCode("VIP-BOUND")
 	if reg.UseCount != 0 {
 		t.Fatalf("rejected whitelist code was consumed: %#v", reg)
 	}
 
-	parent, err := app.store.CreateUser(store.User{Username: "invite-parent-bound-check", Role: store.RoleNormal, Active: true, EmbyID: "emby-parent", ExpiredAt: time.Now().AddDate(0, 0, 30).Unix()})
+	parent, err := app.store().CreateUser(store.User{Username: "invite-parent-bound-check", Role: store.RoleNormal, Active: true, EmbyID: "emby-parent", ExpiredAt: time.Now().AddDate(0, 0, 30).Unix()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.store.UpsertInviteCode(store.InviteCode{Code: "INV-BOUND-CHECK", UID: parent.UID, InviterUID: parent.UID, Days: 7, UseCountLimit: 1, Active: true, CreatedAt: time.Now().Unix(), ExpiredAt: time.Now().Add(time.Hour).Unix()}); err != nil {
+	if err := app.store().UpsertInviteCode(store.InviteCode{Code: "INV-BOUND-CHECK", UID: parent.UID, InviterUID: parent.UID, Days: 7, UseCountLimit: 1, Active: true, CreatedAt: time.Now().Unix(), ExpiredAt: time.Now().Add(time.Hour).Unix()}); err != nil {
 		t.Fatal(err)
 	}
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/users/me/use-code", strings.NewReader(`{"reg_code":"INV-BOUND-CHECK","check_only":true}`))
@@ -2240,12 +2240,12 @@ func TestRegisterCodeCapacityExcludesCodeBeingConsumedAndRejectsBoundUser(t *tes
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("Emby-bound user should not preview invite code as usable, status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	invite, _ := app.store.InviteCode("INV-BOUND-CHECK")
+	invite, _ := app.store().InviteCode("INV-BOUND-CHECK")
 	if invite.UseCount != 0 {
 		t.Fatalf("rejected invite code was consumed: %#v", invite)
 	}
 
-	if err := app.store.UpsertRegCode(store.RegCode{Code: "RENEW-BOUND", Type: 2, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
+	if err := app.store().UpsertRegCode(store.RegCode{Code: "RENEW-BOUND", Type: 2, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
 		t.Fatal(err)
 	}
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/users/me/use-code", strings.NewReader(`{"reg_code":"RENEW-BOUND"}`))
@@ -2255,7 +2255,7 @@ func TestRegisterCodeCapacityExcludesCodeBeingConsumedAndRejectsBoundUser(t *tes
 	if rr.Code != http.StatusOK {
 		t.Fatalf("Emby-bound user should still use renewal code, status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	reg, _ = app.store.RegCode("RENEW-BOUND")
+	reg, _ = app.store().RegCode("RENEW-BOUND")
 	if reg.UseCount != 1 {
 		t.Fatalf("renewal code was not consumed: %#v", reg)
 	}
@@ -2264,15 +2264,15 @@ func TestRegisterCodeCapacityExcludesCodeBeingConsumedAndRejectsBoundUser(t *tes
 func TestExpiredInviteCannotBeUsedOrConsumed(t *testing.T) {
 	app := newTestApp(t)
 	now := time.Now()
-	parent, err := app.store.CreateUser(store.User{Username: "expired-invite-parent", Role: store.RoleNormal, Active: true, EmbyID: "emby-parent", ExpiredAt: now.AddDate(0, 0, 30).Unix()})
+	parent, err := app.store().CreateUser(store.User{Username: "expired-invite-parent", Role: store.RoleNormal, Active: true, EmbyID: "emby-parent", ExpiredAt: now.AddDate(0, 0, 30).Unix()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := app.store.CreateUser(store.User{Username: "expired-invite-child", Role: store.RoleNormal, Active: true})
+	child, err := app.store().CreateUser(store.User{Username: "expired-invite-child", Role: store.RoleNormal, Active: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.store.UpsertInviteCode(store.InviteCode{Code: "INV-EXPIRED-CODE", UID: parent.UID, InviterUID: parent.UID, Days: 7, UseCountLimit: 1, Active: true, CreatedAt: now.Add(-time.Hour).Unix(), ExpiredAt: now.Add(-time.Second).Unix()}); err != nil {
+	if err := app.store().UpsertInviteCode(store.InviteCode{Code: "INV-EXPIRED-CODE", UID: parent.UID, InviterUID: parent.UID, Days: 7, UseCountLimit: 1, Active: true, CreatedAt: now.Add(-time.Hour).Unix(), ExpiredAt: now.Add(-time.Second).Unix()}); err != nil {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/invite/use", strings.NewReader(`{"code":"INV-EXPIRED-CODE"}`))
@@ -2282,10 +2282,10 @@ func TestExpiredInviteCannotBeUsedOrConsumed(t *testing.T) {
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expired invite should be rejected, status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	if _, err := app.store.ConsumeInviteCode("INV-EXPIRED-CODE", child.UID); !errors.Is(err, store.ErrExpired) {
+	if _, err := app.store().ConsumeInviteCode("INV-EXPIRED-CODE", child.UID); !errors.Is(err, store.ErrExpired) {
 		t.Fatalf("store should reject expired invite consumption, got %v", err)
 	}
-	invite, _ := app.store.InviteCode("INV-EXPIRED-CODE")
+	invite, _ := app.store().InviteCode("INV-EXPIRED-CODE")
 	if invite.UseCount != 0 || invite.UsedByUID != 0 {
 		t.Fatalf("expired invite was consumed: %#v", invite)
 	}
@@ -2294,22 +2294,22 @@ func TestExpiredInviteCannotBeUsedOrConsumed(t *testing.T) {
 func TestInviteRenewCodeCreatesTargetedRegCode(t *testing.T) {
 	app := newTestApp(t)
 	now := time.Now()
-	parent, err := app.store.CreateUser(store.User{Username: "renew-parent", Role: store.RoleNormal, Active: true, EmbyID: "emby-parent", ExpiredAt: now.AddDate(0, 0, 30).Unix()})
+	parent, err := app.store().CreateUser(store.User{Username: "renew-parent", Role: store.RoleNormal, Active: true, EmbyID: "emby-parent", ExpiredAt: now.AddDate(0, 0, 30).Unix()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := app.store.CreateUser(store.User{Username: "renew-child", Role: store.RoleNormal, Active: true, ExpiredAt: now.AddDate(0, 0, 1).Unix()})
+	child, err := app.store().CreateUser(store.User{Username: "renew-child", Role: store.RoleNormal, Active: true, ExpiredAt: now.AddDate(0, 0, 1).Unix()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	outsider, err := app.store.CreateUser(store.User{Username: "renew-outsider", Role: store.RoleNormal, Active: true})
+	outsider, err := app.store().CreateUser(store.User{Username: "renew-outsider", Role: store.RoleNormal, Active: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.store.UpsertInviteCode(store.InviteCode{Code: "INV-RENEW-PARENT", UID: parent.UID, InviterUID: parent.UID, Days: 7, UseCountLimit: 1, Active: true, CreatedAt: now.Unix()}); err != nil {
+	if err := app.store().UpsertInviteCode(store.InviteCode{Code: "INV-RENEW-PARENT", UID: parent.UID, InviterUID: parent.UID, Days: 7, UseCountLimit: 1, Active: true, CreatedAt: now.Unix()}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := app.store.ConsumeInviteCode("INV-RENEW-PARENT", child.UID); err != nil {
+	if _, err := app.store().ConsumeInviteCode("INV-RENEW-PARENT", child.UID); err != nil {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/invite/renew-codes", strings.NewReader(fmt.Sprintf(`{"target_uid":%d,"days":5,"validity_hours":24}`, child.UID)))
@@ -2324,7 +2324,7 @@ func TestInviteRenewCodeCreatesTargetedRegCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	code := env.Data.(map[string]any)["code"].(string)
-	reg, ok := app.store.RegCode(code)
+	reg, ok := app.store().RegCode(code)
 	if !ok || reg.Type != 2 || reg.TargetUsername != child.Username || reg.ValidityTime != 24 {
 		t.Fatalf("renew code was not stored as targeted regcode: %#v", reg)
 	}
@@ -2346,7 +2346,7 @@ func TestInviteRenewCodeCreatesTargetedRegCode(t *testing.T) {
 
 func TestPublicRegcodeCheckHidesTargetedCodes(t *testing.T) {
 	app := newTestApp(t)
-	if err := app.store.UpsertRegCode(store.RegCode{Code: "TARGET-SECRET", Type: 2, Days: 5, ValidityTime: -1, UseCountLimit: 1, Active: true, TargetUsername: "alpha"}); err != nil {
+	if err := app.store().UpsertRegCode(store.RegCode{Code: "TARGET-SECRET", Type: 2, Days: 5, ValidityTime: -1, UseCountLimit: 1, Active: true, TargetUsername: "alpha"}); err != nil {
 		t.Fatal(err)
 	}
 	resp := doJSON(app, http.MethodPost, "/api/v1/users/regcode/check", `{"reg_code":"TARGET-SECRET"}`, nil)
@@ -2359,15 +2359,15 @@ func TestInviteUseRevalidatesTreeAndBoundsExpiry(t *testing.T) {
 	app := newTestApp(t)
 	now := time.Now()
 	parentExpiry := now.AddDate(0, 0, 5).Unix()
-	parent, err := app.store.CreateUser(store.User{Username: "parent", Role: store.RoleNormal, Active: true, EmbyID: "emby-parent", ExpiredAt: parentExpiry})
+	parent, err := app.store().CreateUser(store.User{Username: "parent", Role: store.RoleNormal, Active: true, EmbyID: "emby-parent", ExpiredAt: parentExpiry})
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := app.store.CreateUser(store.User{Username: "child", Role: store.RoleNormal, Active: true, ExpiredAt: now.AddDate(0, 0, 60).Unix()})
+	child, err := app.store().CreateUser(store.User{Username: "child", Role: store.RoleNormal, Active: true, ExpiredAt: now.AddDate(0, 0, 60).Unix()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.store.UpsertInviteCode(store.InviteCode{Code: "INV-BOUNDS", UID: parent.UID, InviterUID: parent.UID, Days: 30, UseCountLimit: 1, Active: true, CreatedAt: now.Unix()}); err != nil {
+	if err := app.store().UpsertInviteCode(store.InviteCode{Code: "INV-BOUNDS", UID: parent.UID, InviterUID: parent.UID, Days: 30, UseCountLimit: 1, Active: true, CreatedAt: now.Unix()}); err != nil {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/invite/use", strings.NewReader(`{"code":"INV-BOUNDS"}`))
@@ -2377,7 +2377,7 @@ func TestInviteUseRevalidatesTreeAndBoundsExpiry(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("invite use status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	updated, _ := app.store.User(child.UID)
+	updated, _ := app.store().User(child.UID)
 	if updated.ExpiredAt > parentExpiry {
 		t.Fatalf("child expiry exceeded parent expiry: child=%d parent=%d", updated.ExpiredAt, parentExpiry)
 	}
@@ -2385,11 +2385,11 @@ func TestInviteUseRevalidatesTreeAndBoundsExpiry(t *testing.T) {
 		t.Fatalf("pending emby days were not clamped to inviter expiry: %#v", updated.PendingEmbyDays)
 	}
 
-	otherParent, err := app.store.CreateUser(store.User{Username: "other-parent", Role: store.RoleNormal, Active: true, EmbyID: "emby-other", ExpiredAt: now.AddDate(0, 0, 30).Unix()})
+	otherParent, err := app.store().CreateUser(store.User{Username: "other-parent", Role: store.RoleNormal, Active: true, EmbyID: "emby-other", ExpiredAt: now.AddDate(0, 0, 30).Unix()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.store.UpsertInviteCode(store.InviteCode{Code: "INV-SECOND", UID: otherParent.UID, InviterUID: otherParent.UID, Days: 7, UseCountLimit: 1, Active: true, CreatedAt: now.Unix()}); err != nil {
+	if err := app.store().UpsertInviteCode(store.InviteCode{Code: "INV-SECOND", UID: otherParent.UID, InviterUID: otherParent.UID, Days: 7, UseCountLimit: 1, Active: true, CreatedAt: now.Unix()}); err != nil {
 		t.Fatal(err)
 	}
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/invite/use", strings.NewReader(`{"code":"INV-SECOND"}`))
@@ -2404,15 +2404,15 @@ func TestInviteUseRevalidatesTreeAndBoundsExpiry(t *testing.T) {
 func TestInviteUseRejectsExpiredInviterAndRootLimit(t *testing.T) {
 	app := newTestApp(t)
 	now := time.Now()
-	expiredParent, err := app.store.CreateUser(store.User{Username: "expired-parent", Role: store.RoleNormal, Active: true, EmbyID: "emby-expired", ExpiredAt: now.AddDate(0, 0, -1).Unix()})
+	expiredParent, err := app.store().CreateUser(store.User{Username: "expired-parent", Role: store.RoleNormal, Active: true, EmbyID: "emby-expired", ExpiredAt: now.AddDate(0, 0, -1).Unix()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate, err := app.store.CreateUser(store.User{Username: "candidate", Role: store.RoleNormal, Active: true})
+	candidate, err := app.store().CreateUser(store.User{Username: "candidate", Role: store.RoleNormal, Active: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.store.UpsertInviteCode(store.InviteCode{Code: "INV-EXPIRED-PARENT", UID: expiredParent.UID, InviterUID: expiredParent.UID, Days: 30, UseCountLimit: 1, Active: true, CreatedAt: now.Unix()}); err != nil {
+	if err := app.store().UpsertInviteCode(store.InviteCode{Code: "INV-EXPIRED-PARENT", UID: expiredParent.UID, InviterUID: expiredParent.UID, Days: 30, UseCountLimit: 1, Active: true, CreatedAt: now.Unix()}); err != nil {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/invite/use", strings.NewReader(`{"code":"INV-EXPIRED-PARENT"}`))
@@ -2423,29 +2423,29 @@ func TestInviteUseRejectsExpiredInviterAndRootLimit(t *testing.T) {
 		t.Fatalf("expired inviter should be rejected, status=%d body=%s", rr.Code, rr.Body.String())
 	}
 
-	app.cfg.InviteRootUserLimit = 1
-	root, err := app.store.CreateUser(store.User{Username: "root", Role: store.RoleNormal, Active: true, EmbyID: "emby-root", ExpiredAt: now.AddDate(0, 0, 30).Unix()})
+	app.cfg().InviteRootUserLimit = 1
+	root, err := app.store().CreateUser(store.User{Username: "root", Role: store.RoleNormal, Active: true, EmbyID: "emby-root", ExpiredAt: now.AddDate(0, 0, 30).Unix()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := app.store.CreateUser(store.User{Username: "child2", Role: store.RoleNormal, Active: true, EmbyID: "emby-child2", ExpiredAt: now.AddDate(0, 0, 20).Unix()})
+	child, err := app.store().CreateUser(store.User{Username: "child2", Role: store.RoleNormal, Active: true, EmbyID: "emby-child2", ExpiredAt: now.AddDate(0, 0, 20).Unix()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.store.UpsertInviteCode(store.InviteCode{Code: "INV-ROOT-CHILD", UID: root.UID, InviterUID: root.UID, Days: 10, UseCountLimit: 1, Active: true, CreatedAt: now.Unix()}); err != nil {
+	if err := app.store().UpsertInviteCode(store.InviteCode{Code: "INV-ROOT-CHILD", UID: root.UID, InviterUID: root.UID, Days: 10, UseCountLimit: 1, Active: true, CreatedAt: now.Unix()}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := app.store.ConsumeInviteCode("INV-ROOT-CHILD", child.UID); err != nil {
+	if _, err := app.store().ConsumeInviteCode("INV-ROOT-CHILD", child.UID); err != nil {
 		t.Fatal(err)
 	}
 	if ok, _ := app.canInvite(child); ok {
 		t.Fatal("child should not be allowed to create more invites after root tree reaches limit")
 	}
-	grandchild, err := app.store.CreateUser(store.User{Username: "grandchild", Role: store.RoleNormal, Active: true})
+	grandchild, err := app.store().CreateUser(store.User{Username: "grandchild", Role: store.RoleNormal, Active: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.store.UpsertInviteCode(store.InviteCode{Code: "INV-GRANDCHILD", UID: child.UID, InviterUID: child.UID, Days: 10, UseCountLimit: 1, Active: true, CreatedAt: now.Unix()}); err != nil {
+	if err := app.store().UpsertInviteCode(store.InviteCode{Code: "INV-GRANDCHILD", UID: child.UID, InviterUID: child.UID, Days: 10, UseCountLimit: 1, Active: true, CreatedAt: now.Unix()}); err != nil {
 		t.Fatal(err)
 	}
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/invite/use", strings.NewReader(`{"code":"INV-GRANDCHILD"}`))
@@ -2459,27 +2459,27 @@ func TestInviteUseRejectsExpiredInviterAndRootLimit(t *testing.T) {
 
 func TestTelegramGrantRegisterActionSetsPendingEntitlement(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.InviteDefaultDays = 12
-	target, err := app.store.CreateUser(store.User{Username: "tg-target", Role: store.RoleUnrecognized, Active: true})
+	app.cfg().InviteDefaultDays = 12
+	target, err := app.store().CreateUser(store.User{Username: "tg-target", Role: store.RoleUnrecognized, Active: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	panel := telegramPanelContext{Token: "grant", TargetUID: target.UID, ExpiresAt: time.Now().Add(time.Minute).Unix()}
 	app.telegramSavePanel(panel)
 	app.telegramApplyPanelAction(context.Background(), panel, "grant_register")
-	updated, _ := app.store.User(target.UID)
+	updated, _ := app.store().User(target.UID)
 	if !updated.PendingEmby || updated.PendingEmbyDays == nil || *updated.PendingEmbyDays != 12 || updated.Role != store.RoleNormal {
 		t.Fatalf("grant_register did not create pending entitlement: %#v days=%#v", updated, updated.PendingEmbyDays)
 	}
 
-	admin, err := app.store.CreateUser(store.User{Username: "protected-admin", Role: store.RoleAdmin, Active: true})
+	admin, err := app.store().CreateUser(store.User{Username: "protected-admin", Role: store.RoleAdmin, Active: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	adminPanel := telegramPanelContext{Token: "admin-grant", TargetUID: admin.UID, ExpiresAt: time.Now().Add(time.Minute).Unix()}
 	app.telegramSavePanel(adminPanel)
 	app.telegramApplyPanelAction(context.Background(), adminPanel, "grant_register")
-	protected, _ := app.store.User(admin.UID)
+	protected, _ := app.store().User(admin.UID)
 	if protected.PendingEmby {
 		t.Fatal("grant_register should not mutate protected admin accounts")
 	}
@@ -2487,19 +2487,19 @@ func TestTelegramGrantRegisterActionSetsPendingEntitlement(t *testing.T) {
 
 func TestTelegramRosterStatsUsesObservedMembers(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg.TelegramGroupIDs = []string{"-1001"}
-	if err := app.store.UpsertTelegramRoster("-1001", 100, "member", false); err != nil {
+	app.cfg().TelegramGroupIDs = []string{"-1001"}
+	if err := app.store().UpsertTelegramRoster("-1001", 100, "member", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.store.UpsertTelegramRoster("-1001", 200, "member", false); err != nil {
+	if err := app.store().UpsertTelegramRoster("-1001", 200, "member", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.store.UpsertTelegramRoster("-1001", 300, "member", true); err != nil {
+	if err := app.store().UpsertTelegramRoster("-1001", 300, "member", true); err != nil {
 		t.Fatal(err)
 	}
 	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
-	admin, _ := app.store.FindUserByUsername("admin")
-	_, _ = app.store.UpdateUser(admin.UID, func(u *store.User) error { u.TelegramID = 100; return nil })
+	admin, _ := app.store().FindUserByUsername("admin")
+	_, _ = app.store().UpdateUser(admin.UID, func(u *store.User) error { u.TelegramID = 100; return nil })
 	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	cookie := findCookie(login.Result().Cookies(), "twilight_session")
 	csrfCookie := findCookie(login.Result().Cookies(), "twilight_session_csrf")
@@ -2519,7 +2519,7 @@ func TestUserStatsEndpointRejectsOtherUser(t *testing.T) {
 	cookie := findCookie(login.Result().Cookies(), "twilight_session")
 	csrfCookie := findCookie(login.Result().Cookies(), "twilight_session_csrf")
 	_ = csrfCookie
-	beta, ok := app.store.FindUserByUsername("beta")
+	beta, ok := app.store().FindUserByUsername("beta")
 	if !ok {
 		t.Fatal("beta user not found")
 	}

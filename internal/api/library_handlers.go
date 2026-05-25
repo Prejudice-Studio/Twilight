@@ -39,7 +39,7 @@ func (a *App) handleLibraries(w http.ResponseWriter, r *http.Request, params Par
 	}
 
 	// Pre-check: Emby must be configured
-	if a.cfg.EmbyURL == "" {
+	if a.cfg().EmbyURL == "" {
 		failWithCode(w, http.StatusServiceUnavailable, ErrEmbyNotConfigured, "Emby 未配置，请先在系统配置中填写 Emby 服务地址")
 		return
 	}
@@ -48,7 +48,7 @@ func (a *App) handleLibraries(w http.ResponseWriter, r *http.Request, params Par
 	targetUser := current(r).User
 	if params["uid"] != "" {
 		uid, _ := int64Param(params, "uid")
-		if u, okUser := a.store.User(uid); okUser {
+		if u, okUser := a.store().User(uid); okUser {
 			targetUser = u
 		} else {
 			failWithCode(w, http.StatusNotFound, ErrUserNotFound, "用户不存在")
@@ -82,7 +82,7 @@ func (a *App) handleLibraries(w http.ResponseWriter, r *http.Request, params Par
 				return
 			}
 			allowed := map[string]bool{}
-			for _, name := range normalizeLibraryNames(a.cfg.EmbySelfServiceLibraries) {
+			for _, name := range normalizeLibraryNames(a.cfg().EmbySelfServiceLibraries) {
 				allowed[strings.ToLower(name)] = true
 			}
 			for _, name := range names {
@@ -109,11 +109,11 @@ func (a *App) handleBulkEnableLibrarySelfService(w http.ResponseWriter, r *http.
 		return
 	}
 	updated := 0
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if u.Role == store.RoleUnrecognized {
 			continue
 		}
-		if _, err := a.store.UpdateUser(u.UID, func(u *store.User) error { u.LibrarySelfService = true; return nil }); err == nil {
+		if _, err := a.store().UpdateUser(u.UID, func(u *store.User) error { u.LibrarySelfService = true; return nil }); err == nil {
 			updated++
 		}
 	}
@@ -123,7 +123,7 @@ func (a *App) handleBulkEnableLibrarySelfService(w http.ResponseWriter, r *http.
 func (a *App) handleAdminLibrarySelfService(w http.ResponseWriter, r *http.Request, params Params) {
 	uid, _ := int64Param(params, "uid")
 	enabled := boolValue(decodeMap(r), "enabled", true)
-	u, err := a.store.UpdateUser(uid, func(u *store.User) error { u.LibrarySelfService = enabled; return nil })
+	u, err := a.store().UpdateUser(uid, func(u *store.User) error { u.LibrarySelfService = enabled; return nil })
 	if statusFromError(w, err) {
 		return
 	}

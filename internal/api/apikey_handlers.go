@@ -30,7 +30,7 @@ func (a *App) handleLegacyAPIKeyGenerate(w http.ResponseWriter, r *http.Request,
 	p := current(r)
 	key := "key-" + randomCode(40)
 	prefix, suffix, _ := maskAPIKey(key)
-	u, err := a.store.UpdateUser(p.User.UID, func(u *store.User) error {
+	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error {
 		u.LegacyAPIKeyHash = hashAPIKey(key)
 		u.LegacyAPIKeyPrefix = prefix
 		u.LegacyAPIKeySuffix = suffix
@@ -48,7 +48,7 @@ func (a *App) handleLegacyAPIKeyGenerate(w http.ResponseWriter, r *http.Request,
 
 func (a *App) handleLegacyAPIKeyDelete(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
-	_, err := a.store.UpdateUser(p.User.UID, func(u *store.User) error { u.LegacyAPIKeyStatus = false; u.LegacyAPIKeyHash = ""; return nil })
+	_, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error { u.LegacyAPIKeyStatus = false; u.LegacyAPIKeyHash = ""; return nil })
 	if statusFromError(w, err) {
 		return
 	}
@@ -74,7 +74,7 @@ func (a *App) handleLegacyAPIKeyPermissionsUpdate(w http.ResponseWriter, r *http
 		permissions = defaultPermissions()
 	}
 	p := current(r)
-	_, err := a.store.UpdateUser(p.User.UID, func(u *store.User) error { u.LegacyPermissions = permissions; return nil })
+	_, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error { u.LegacyPermissions = permissions; return nil })
 	if statusFromError(w, err) {
 		return
 	}
@@ -82,7 +82,7 @@ func (a *App) handleLegacyAPIKeyPermissionsUpdate(w http.ResponseWriter, r *http
 }
 
 func (a *App) handleListAPIKeys(w http.ResponseWriter, r *http.Request, _ Params) {
-	keys := a.store.ListAPIKeys(current(r).User.UID)
+	keys := a.store().ListAPIKeys(current(r).User.UID)
 	items := make([]map[string]any, 0, len(keys))
 	for _, key := range keys {
 		items = append(items, publicAPIKey(key, ""))
@@ -98,7 +98,7 @@ func (a *App) handleCreateAPIKey(w http.ResponseWriter, r *http.Request, _ Param
 	if name == "" {
 		name = "Default"
 	}
-	k, err := a.store.CreateAPIKey(store.APIKey{UID: current(r).User.UID, Name: name, Hash: hashAPIKey(key), Prefix: prefix, Suffix: suffix, AllowQuery: boolValue(payload, "allow_query", false), RateLimit: intValue(payload, "rate_limit", a.cfg.RateLimitAPIKeyDefaultPerMinute), Permissions: defaultPermissions()})
+	k, err := a.store().CreateAPIKey(store.APIKey{UID: current(r).User.UID, Name: name, Hash: hashAPIKey(key), Prefix: prefix, Suffix: suffix, AllowQuery: boolValue(payload, "allow_query", false), RateLimit: intValue(payload, "rate_limit", a.cfg().RateLimitAPIKeyDefaultPerMinute), Permissions: defaultPermissions()})
 	if statusFromError(w, err) {
 		return
 	}
@@ -108,7 +108,7 @@ func (a *App) handleCreateAPIKey(w http.ResponseWriter, r *http.Request, _ Param
 func (a *App) handleUpdateAPIKey(w http.ResponseWriter, r *http.Request, params Params) {
 	id, _ := int64Param(params, "key_id")
 	payload := decodeMap(r)
-	k, err := a.store.UpdateAPIKey(current(r).User.UID, id, func(k *store.APIKey) error {
+	k, err := a.store().UpdateAPIKey(current(r).User.UID, id, func(k *store.APIKey) error {
 		if name := stringValue(payload, "name"); name != "" {
 			k.Name = name
 		}
@@ -131,7 +131,7 @@ func (a *App) handleUpdateAPIKey(w http.ResponseWriter, r *http.Request, params 
 
 func (a *App) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request, params Params) {
 	id, _ := int64Param(params, "key_id")
-	if statusFromError(w, a.store.DeleteAPIKey(current(r).User.UID, id)) {
+	if statusFromError(w, a.store().DeleteAPIKey(current(r).User.UID, id)) {
 		return
 	}
 	ok(w, "API key deleted", nil)
@@ -139,7 +139,7 @@ func (a *App) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request, params 
 
 func (a *App) handleAPIKeyEnableAccount(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
-	u, err := a.store.UpdateUser(p.User.UID, func(u *store.User) error { u.Active = true; return nil })
+	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error { u.Active = true; return nil })
 	if statusFromError(w, err) {
 		return
 	}
@@ -148,25 +148,25 @@ func (a *App) handleAPIKeyEnableAccount(w http.ResponseWriter, r *http.Request, 
 
 func (a *App) handleAPIKeyDisableAccount(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
-	u, err := a.store.UpdateUser(p.User.UID, func(u *store.User) error { u.Active = false; return nil })
+	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error { u.Active = false; return nil })
 	if statusFromError(w, err) {
 		return
 	}
 	// 用户主动禁用账号后，所有现存会话必须立即失效；否则除了发起本次请求的
 	// session，其它设备 / cookie 仍能访问受保护接口直到 SessionTTL 到期
-	a.sessions.DeleteUser(r.Context(), u.UID)
+	a.sessions().DeleteUser(r.Context(), u.UID)
 	ok(w, "account disabled", publicUser(u))
 }
 
 func (a *App) handleAPIKeyDisableKey(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
 	if p.APIKey.ID > 0 {
-		_, err := a.store.UpdateAPIKey(p.User.UID, p.APIKey.ID, func(k *store.APIKey) error { k.Enabled = false; return nil })
+		_, err := a.store().UpdateAPIKey(p.User.UID, p.APIKey.ID, func(k *store.APIKey) error { k.Enabled = false; return nil })
 		if statusFromError(w, err) {
 			return
 		}
 	} else {
-		_, err := a.store.UpdateUser(p.User.UID, func(u *store.User) error { u.LegacyAPIKeyStatus = false; return nil })
+		_, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error { u.LegacyAPIKeyStatus = false; return nil })
 		if statusFromError(w, err) {
 			return
 		}
@@ -177,7 +177,7 @@ func (a *App) handleAPIKeyDisableKey(w http.ResponseWriter, r *http.Request, _ P
 func (a *App) handleAPIKeyEnableKey(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
 	if p.APIKey.ID > 0 {
-		_, err := a.store.UpdateAPIKey(p.User.UID, p.APIKey.ID, func(k *store.APIKey) error { k.Enabled = true; return nil })
+		_, err := a.store().UpdateAPIKey(p.User.UID, p.APIKey.ID, func(k *store.APIKey) error { k.Enabled = true; return nil })
 		if statusFromError(w, err) {
 			return
 		}

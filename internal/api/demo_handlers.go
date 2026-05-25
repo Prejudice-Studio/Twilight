@@ -66,7 +66,7 @@ func (a *App) handleDemoMediaSearch(w http.ResponseWriter, r *http.Request, _ Pa
 
 func (a *App) handleDemoAction(w http.ResponseWriter, r *http.Request, params Params) {
 	setDemoHeaders(w)
-	if !a.limiter.Allow(r.Context(), rateKey("demo-action:", a.clientIP(r)), 60, time.Minute) {
+	if !a.limiter().Allow(r.Context(), rateKey("demo-action:", a.clientIP(r)), 60, time.Minute) {
 		failWithCode(w, http.StatusTooManyRequests, ErrDemoActionRateLimited, "演示操作过于频繁")
 		return
 	}

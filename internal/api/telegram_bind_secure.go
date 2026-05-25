@@ -11,7 +11,7 @@ import (
 
 func (a *App) handleBindConfirmSecure(w http.ResponseWriter, r *http.Request, _ Params) {
 	secret := firstNonEmpty(r.Header.Get("X-Internal-Secret"), strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
-	if a.cfg.BotInternalSecret == "" || subtle.ConstantTimeCompare([]byte(secret), []byte(a.cfg.BotInternalSecret)) != 1 {
+	if a.cfg().BotInternalSecret == "" || subtle.ConstantTimeCompare([]byte(secret), []byte(a.cfg().BotInternalSecret)) != 1 {
 		failWithCode(w, http.StatusForbidden, ErrInternalSecretInvalid, "内部密钥无效")
 		return
 	}
@@ -21,10 +21,10 @@ func (a *App) handleBindConfirmSecure(w http.ResponseWriter, r *http.Request, _ 
 		failWithCode(w, http.StatusBadRequest, ErrTGBindCodeFormat, "绑定码格式无效")
 		return
 	}
-	bind, okBind := a.store.BindCode(code)
+	bind, okBind := a.store().BindCode(code)
 	if !okBind || bind.ExpiresAt <= time.Now().Unix() {
 		if okBind {
-			_ = a.store.DeleteBindCode(code)
+			_ = a.store().DeleteBindCode(code)
 		}
 		failWithCode(w, http.StatusNotFound, ErrTGBindCodeNotFound, "绑定码不存在或已过期")
 		return
@@ -47,14 +47,14 @@ func (a *App) handleBindConfirmSecure(w http.ResponseWriter, r *http.Request, _ 
 		ok(w, "绑定已确认", map[string]any{"code": code, "confirmed": true})
 		return
 	}
-	if existing, okUser := a.store.FindUserByTelegramID(telegramID); okUser && (bind.UID == 0 || existing.UID != bind.UID) {
+	if existing, okUser := a.store().FindUserByTelegramID(telegramID); okUser && (bind.UID == 0 || existing.UID != bind.UID) {
 		failWithCode(w, http.StatusConflict, ErrTGBindTargetTaken, "该 Telegram 已绑定到账号 "+existing.Username)
 		return
 	}
 	// per-tg-id 速率限制：阻止用同一个 tg 账号反复 confirm 不同的合法格式 code
 	// 触发 N×getChatMember，对 bot token 做流量放大。沿用 login 桶的 per-minute
 	// 配置即可，不需要引入新字段。
-	if !a.allowRate(r.Context(), rateKey("tg-bind-confirm:", telegramID), a.cfg.RateLimitLoginPerMinute, time.Minute) {
+	if !a.allowRate(r.Context(), rateKey("tg-bind-confirm:", telegramID), a.cfg().RateLimitLoginPerMinute, time.Minute) {
 		failWithCode(w, http.StatusTooManyRequests, ErrUploadRateLimited, "操作过于频繁，请稍后再试")
 		return
 	}
@@ -68,9 +68,9 @@ func (a *App) handleBindConfirmSecure(w http.ResponseWriter, r *http.Request, _ 
 	bind.Confirmed = true
 	bind.TelegramID = telegramID
 	bind.TelegramUsername = strings.TrimSpace(stringValue(payload, "telegram_username"))
-	_ = a.store.UpsertBindCode(bind)
+	_ = a.store().UpsertBindCode(bind)
 	if bind.UID != 0 {
-		_, err := a.store.UpdateUser(bind.UID, func(u *store.User) error {
+		_, err := a.store().UpdateUser(bind.UID, func(u *store.User) error {
 			u.TelegramID = telegramID
 			u.TelegramUsername = bind.TelegramUsername
 			return nil
@@ -78,7 +78,7 @@ func (a *App) handleBindConfirmSecure(w http.ResponseWriter, r *http.Request, _ 
 		if statusFromError(w, err) {
 			return
 		}
-		_ = a.store.DeleteBindCode(code)
+		_ = a.store().DeleteBindCode(code)
 	}
 	ok(w, "绑定已确认", map[string]any{"code": code, "confirmed": true})
 }

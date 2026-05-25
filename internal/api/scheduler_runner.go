@@ -12,7 +12,7 @@ import (
 
 func (a *App) handleSendReminders(w http.ResponseWriter, r *http.Request, _ Params) {
 	payload := decodeMap(r)
-	defaultDays := a.cfg.NotificationExpiryRemindDays
+	defaultDays := a.cfg().NotificationExpiryRemindDays
 	if defaultDays <= 0 {
 		defaultDays = 3
 	}
@@ -27,12 +27,12 @@ func (a *App) sendExpiryReminders(ctx context.Context, days int) map[string]any 
 	users := []map[string]any{}
 	failedItems := []map[string]any{}
 	sent := 0
-	for _, u := range a.store.ListUsers() {
+	for _, u := range a.store().ListUsers() {
 		if u.Active && u.ExpiredAt > now && u.ExpiredAt <= deadline {
 			remaining := u.ExpiredAt - now
 			item := map[string]any{"uid": u.UID, "username": u.Username, "telegram_id": nullableInt(u.TelegramID), "expired_at": u.ExpiredAt, "remaining_seconds": remaining, "remaining_str": formatSeconds(remaining)}
 			users = append(users, item)
-			if !a.cfg.NotificationEnabled || !a.telegramAvailable() || u.TelegramID == 0 {
+			if !a.cfg().NotificationEnabled || !a.telegramAvailable() || u.TelegramID == 0 {
 				continue
 			}
 			text := fmt.Sprintf("%s，您的账号将在 %s 后到期，请及时续期。", u.Username, formatSeconds(remaining))
@@ -43,7 +43,7 @@ func (a *App) sendExpiryReminders(ctx context.Context, days int) map[string]any 
 			sent++
 		}
 	}
-	return map[string]any{"sent": sent, "total": len(users), "count": len(users), "users": users, "failed": failedItems, "telegram_enabled": a.telegramAvailable(), "notification_enabled": a.cfg.NotificationEnabled, "days": days}
+	return map[string]any{"sent": sent, "total": len(users), "count": len(users), "users": users, "failed": failedItems, "telegram_enabled": a.telegramAvailable(), "notification_enabled": a.cfg().NotificationEnabled, "days": days}
 }
 
 func (a *App) handleSchedulerRunV2(w http.ResponseWriter, r *http.Request, params Params) {
@@ -73,14 +73,14 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 	case "check_expired":
 		disabled := 0
 		embyDisabled := 0
-		for _, u := range a.store.ListUsers() {
+		for _, u := range a.store().ListUsers() {
 			if err := r.Context().Err(); err != nil {
 				return map[string]any{"success": false, "terminated": true, "disabled": disabled, "emby_disabled": embyDisabled}, []string{"job terminated"}, err
 			}
 			if u.Active && u.ExpiredAt > 0 && u.ExpiredAt < now {
 				// For invited users (have invite relation), only disable Emby access
 				// but keep the account active so they can still log in and renew
-				_, isInvited := a.store.ParentOf(u.UID)
+				_, isInvited := a.store().ParentOf(u.UID)
 				if isInvited {
 					// Only disable Emby, keep account active
 					if u.EmbyID != "" && a.embySetUserEnabled(r.Context(), u.EmbyID, false) == nil {
@@ -89,11 +89,11 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 					disabled++
 				} else {
 					// Non-invited users: disable the whole account
-					updated, err := a.store.UpdateUser(u.UID, func(u *store.User) error { u.Active = false; return nil })
+					updated, err := a.store().UpdateUser(u.UID, func(u *store.User) error { u.Active = false; return nil })
 					if err == nil {
 						// 立即清除该用户的所有会话。否则 stale
 						// token 仍可访问受保护接口直到 SessionTTL 自然到期。
-						a.sessions.DeleteUser(r.Context(), updated.UID)
+						a.sessions().DeleteUser(r.Context(), updated.UID)
 						disabled++
 						if updated.EmbyID != "" && a.embySetUserEnabled(r.Context(), updated.EmbyID, false) == nil {
 							embyDisabled++
@@ -104,7 +104,7 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		}
 		return map[string]any{"success": true, "disabled": disabled, "emby_disabled": embyDisabled}, []string{fmt.Sprintf("disabled %d expired users", disabled)}, nil
 	case "check_expiring", "expiry_reminders":
-		defaultDays := a.cfg.NotificationExpiryRemindDays
+		defaultDays := a.cfg().NotificationExpiryRemindDays
 		if defaultDays <= 0 {
 			defaultDays = 3
 		}
@@ -116,7 +116,7 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		}
 		deadline := time.Now().Add(time.Duration(days) * 24 * time.Hour).Unix()
 		count := 0
-		for _, u := range a.store.ListUsers() {
+		for _, u := range a.store().ListUsers() {
 			if err := r.Context().Err(); err != nil {
 				return map[string]any{"success": false, "terminated": true, "expiring": count, "days": days}, []string{"job terminated"}, err
 			}
@@ -126,22 +126,22 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		}
 		return map[string]any{"success": true, "expiring": count, "days": days}, []string{fmt.Sprintf("found %d expiring users", count)}, nil
 	case "daily_stats":
-		users := a.store.ListUsers()
+		users := a.store().ListUsers()
 		return map[string]any{"success": true, "users": len(users), "active": countActive(users)}, []string{"daily stats generated"}, nil
 	case "cleanup_bind_codes":
-		deleted, err := a.store.CleanupExpiredBindCodes(time.Now().Unix())
+		deleted, err := a.store().CleanupExpiredBindCodes(time.Now().Unix())
 		if err != nil {
 			return map[string]any{"success": false, "deleted": deleted}, []string{fmt.Sprintf("failed to delete expired bind codes: %v", err)}, err
 		}
 		// Also clean up expired app sessions from memory and PostgreSQL
-		expiredSessions := a.sessions.CleanupExpired()
+		expiredSessions := a.sessions().CleanupExpired()
 		logs := []string{fmt.Sprintf("deleted %d expired bind codes", deleted)}
 		if expiredSessions > 0 {
 			logs = append(logs, fmt.Sprintf("cleaned up %d expired sessions", expiredSessions))
 		}
 		return map[string]any{"success": true, "deleted": deleted, "expired_sessions": expiredSessions}, logs, nil
 	case "cleanup_sessions":
-		if a.cfg.EmbyURL == "" {
+		if a.cfg().EmbyURL == "" {
 			return map[string]any{"success": true, "configured": false, "active": 0, "total": 0}, []string{"Emby not configured"}, nil
 		}
 		var sessions []map[string]any
@@ -156,7 +156,7 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		}
 		return map[string]any{"success": true, "active": active, "total": len(sessions)}, []string{fmt.Sprintf("read %d Emby sessions", len(sessions))}, nil
 	case "emby_sync":
-		if a.cfg.EmbyURL == "" {
+		if a.cfg().EmbyURL == "" {
 			return map[string]any{"success": true, "configured": false}, []string{"Emby not configured"}, nil
 		}
 		var remote []map[string]any
@@ -181,13 +181,13 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 			delete(remoteByName, name)
 		}
 		claimedRemoteIDs := map[string]int64{}
-		for _, u := range a.store.ListUsers() {
+		for _, u := range a.store().ListUsers() {
 			if u.EmbyID != "" && !isSyntheticEmbyID(u.EmbyID, u.UID) {
 				claimedRemoteIDs[u.EmbyID] = u.UID
 			}
 		}
 		updatedNames, syncedState, missing, filledIDs, repairedPlaceholders, conflicts := 0, 0, 0, 0, 0, 0
-		for _, u := range a.store.ListUsers() {
+		for _, u := range a.store().ListUsers() {
 			if err := r.Context().Err(); err != nil {
 				return map[string]any{"success": false, "terminated": true, "updated_names": updatedNames, "synced_state": syncedState, "missing": missing, "filled_emby_ids": filledIDs, "repaired_placeholders": repairedPlaceholders, "conflicts": conflicts}, []string{"job terminated"}, err
 			}
@@ -221,7 +221,7 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 			updatedUser := u
 			if remoteID != u.EmbyID || (name != "" && name != u.EmbyUsername) || u.PendingEmby {
 				var err error
-				updatedUser, err = a.store.UpdateUser(u.UID, func(u *store.User) error {
+				updatedUser, err = a.store().UpdateUser(u.UID, func(u *store.User) error {
 					if remoteID != u.EmbyID {
 						u.EmbyID = remoteID
 					}
@@ -253,11 +253,11 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		return map[string]any{"success": true, "remote_users": len(remote), "updated_names": updatedNames, "synced_state": syncedState, "missing": missing, "filled_emby_ids": filledIDs, "repaired_placeholders": repairedPlaceholders, "conflicts": conflicts}, []string{fmt.Sprintf("read %d Emby users", len(remote))}, nil
 	case "cleanup_no_emby":
 		ignoreEnabled := jobParamBool(params, "ignore_enabled_flag", false)
-		enabled := jobParamBool(params, "enabled", jobParamBool(params, "auto_enabled", a.cfg.AutoCleanupNoEmby))
+		enabled := jobParamBool(params, "enabled", jobParamBool(params, "auto_enabled", a.cfg().AutoCleanupNoEmby))
 		if !enabled && !ignoreEnabled {
 			return map[string]any{"success": true, "enabled": false, "deleted": 0}, []string{"auto cleanup no-Emby disabled"}, nil
 		}
-		days := jobParamInt(params, "days", queryInt(r, "days", a.cfg.AutoCleanupNoEmbyDays))
+		days := jobParamInt(params, "days", queryInt(r, "days", a.cfg().AutoCleanupNoEmbyDays))
 		if days <= 0 {
 			days = 7
 		}
@@ -265,13 +265,13 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		if days > 0 {
 			threshold = time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
 		}
-		preserveTG := jobParamBool(params, "preserve_tg_bound", a.cfg.EmbyDirectRegisterEnabled)
+		preserveTG := jobParamBool(params, "preserve_tg_bound", a.cfg().EmbyDirectRegisterEnabled)
 		dryRun := jobParamBool(params, "dry_run", false)
 		candidates := 0
 		deleted := 0
 		failed := 0
 		skippedPending := 0
-		for _, u := range a.store.ListUsers() {
+		for _, u := range a.store().ListUsers() {
 			if err := r.Context().Err(); err != nil {
 				return map[string]any{"success": false, "terminated": true, "candidates": candidates, "deleted": deleted, "failed": failed, "dry_run": dryRun, "skipped_pending_emby": skippedPending}, []string{"job terminated"}, err
 			}
@@ -296,7 +296,7 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 			if dryRun {
 				continue
 			}
-			if err := a.store.DeleteUser(u.UID); err != nil {
+			if err := a.store().DeleteUser(u.UID); err != nil {
 				failed++
 			} else {
 				deleted++
@@ -305,7 +305,7 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		return map[string]any{"success": true, "enabled": true, "candidates": candidates, "deleted": deleted, "failed": failed, "dry_run": dryRun, "days": days, "days_threshold": days, "preserve_tg_bound": preserveTG, "skipped_pending_emby": skippedPending}, []string{fmt.Sprintf("processed %d no-Emby web users", candidates)}, nil
 	case "cleanup_pending_emby_entitlements":
 		ignoreEnabled := jobParamBool(params, "ignore_enabled_flag", false)
-		enabled := jobParamBool(params, "enabled", jobParamBool(params, "auto_enabled", a.cfg.AutoCleanupPendingEmby))
+		enabled := jobParamBool(params, "enabled", jobParamBool(params, "auto_enabled", a.cfg().AutoCleanupPendingEmby))
 		if !enabled && !ignoreEnabled {
 			return map[string]any{"success": true, "enabled": false, "cleared": 0}, []string{"auto cleanup pending-Emby entitlement disabled"}, nil
 		}
@@ -313,7 +313,7 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		candidates := 0
 		cleared := 0
 		failed := 0
-		for _, u := range a.store.ListUsers() {
+		for _, u := range a.store().ListUsers() {
 			if err := r.Context().Err(); err != nil {
 				return map[string]any{"success": false, "terminated": true, "candidates": candidates, "cleared": cleared, "failed": failed, "dry_run": dryRun}, []string{"job terminated"}, err
 			}
@@ -324,7 +324,7 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 			if dryRun {
 				continue
 			}
-			if _, err := a.store.UpdateUser(u.UID, func(u *store.User) error {
+			if _, err := a.store().UpdateUser(u.UID, func(u *store.User) error {
 				u.PendingEmby = false
 				u.PendingEmbyDays = nil
 				return nil
@@ -342,7 +342,7 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 	case "check_telegram_bindings":
 		seen := map[int64]int64{}
 		duplicates := 0
-		for _, u := range a.store.ListUsers() {
+		for _, u := range a.store().ListUsers() {
 			if err := r.Context().Err(); err != nil {
 				return map[string]any{"success": false, "terminated": true, "duplicates": duplicates, "bound": len(seen)}, []string{"job terminated"}, err
 			}
@@ -358,7 +358,7 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 	case "kick_unknown_group_members":
 		dryRun := jobParamBool(params, "dry_run", true)
 		maxPerRun := clamp(jobParamInt(params, "max_per_run", 200), 1, 500)
-		chats := telegramChatIDs(a.cfg.TelegramGroupIDs)
+		chats := telegramChatIDs(a.cfg().TelegramGroupIDs)
 		if len(chats) == 0 {
 			return map[string]any{"success": true, "enabled": false, "targets": 0, "dry_run": dryRun, "max_per_run": maxPerRun}, []string{"Telegram group not configured"}, nil
 		}
@@ -462,10 +462,10 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		result["success"] = true
 		return result, []string{fmt.Sprintf("scanned %d upload files, deleted %d", int(numeric(result["scanned"])), int(numeric(result["deleted"])))}, nil
 	case "system_auto_update":
-		if !a.cfg.SystemUpdateEnabled && !schedulerManualRun(r) {
+		if !a.cfg().SystemUpdateEnabled && !schedulerManualRun(r) {
 			return map[string]any{"success": true, "skipped": true, "enabled": false}, []string{"system auto update disabled"}, nil
 		}
-		result := applyGitUpdate(r.Context(), a.cfg.SystemUpdateRepoURL, a.cfg.SystemUpdateBranch, a.cfg.SystemUpdateRestartServices, false, false)
+		result := applyGitUpdate(r.Context(), a.cfg().SystemUpdateRepoURL, a.cfg().SystemUpdateBranch, a.cfg().SystemUpdateRestartServices, false, false)
 		if !boolish(result["success"]) {
 			return result, nil, fmt.Errorf("%s", asString(result["message"]))
 		}
@@ -488,7 +488,7 @@ func schedulerRequestParams(r *http.Request) map[string]any {
 
 func (a *App) schedulerEffectiveParams(r *http.Request, jobID string) map[string]any {
 	var stored map[string]any
-	if schedule, ok := a.store.SchedulerSchedule(jobID); ok {
+	if schedule, ok := a.store().SchedulerSchedule(jobID); ok {
 		stored = schedule.RuntimeParams
 	}
 	params := a.schedulerRuntimeParamsFromSchedule(jobID, stored)
