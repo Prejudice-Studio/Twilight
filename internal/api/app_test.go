@@ -2737,3 +2737,42 @@ func TestSharedHTTPClientFollowsSameHostRedirect(t *testing.T) {
 		t.Fatalf("expected ok:true, got %v", dst)
 	}
 }
+
+// TestValidateEmbyURLRejectsUnsafeTargets 锁定 Emby URL 校验：
+// 链路本地 / 元数据 IP / 非 http(s) scheme / query+fragment 必须被拒；
+// loopback / RFC1918 / 域名 + 公网必须被允许（与同机 / 同 VPC 部署兼容）。
+func TestValidateEmbyURLRejectsUnsafeTargets(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"loopback ipv4", "http://127.0.0.1:8096", false},
+		{"loopback ipv6", "http://[::1]:8096", false},
+		{"private rfc1918", "http://10.0.0.5:8096", false},
+		{"public host", "https://emby.example.com", false},
+		{"trailing slash trimmed", "http://127.0.0.1:8096/", false},
+		{"link-local ipv4", "http://169.254.0.10:8096", true},
+		{"aws metadata", "http://169.254.169.254/latest/meta-data/", true},
+		{"aliyun metadata", "http://100.100.100.200/", true},
+		{"link-local ipv6", "http://[fe80::1]:8096", true},
+		{"unspecified ipv4", "http://0.0.0.0:8096", true},
+		{"file scheme", "file:///etc/passwd", true},
+		{"ftp scheme", "ftp://example.com/", true},
+		{"missing host", "http:///path", true},
+		{"with query", "http://emby.example.com/?token=xxx", true},
+		{"with fragment", "http://emby.example.com/#frag", true},
+		{"empty", "", true},
+		{"whitespace only", "   ", true},
+		{"unparseable", "://", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := validateEmbyURL(strings.TrimSpace(tc.input))
+			gotErr := err != nil
+			if gotErr != tc.wantErr {
+				t.Fatalf("validateEmbyURL(%q) err=%v, wantErr=%v", tc.input, err, tc.wantErr)
+			}
+		})
+	}
+}
