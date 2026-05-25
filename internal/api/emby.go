@@ -194,13 +194,57 @@ func (a *App) embyCreateUser(ctx context.Context, username, password string) (ma
 
 func (a *App) embySetPassword(ctx context.Context, userID, password string) error {
 	var ignored map[string]any
+	// embySetPassword 是 Emby 标准两步：① ResetPassword=true 把账号清空成"无密码"
+	// ② NewPw 写新密码。② 一旦失败（context deadline、Emby 5xx、网络抖动），账号
+	// 会停留在"任何人 LoginByName 都能进"的危险状态。
+	//
+	// 这里加最小可用的回滚/重试：
+	//   - password=="" 走 ResetPassword 单步即可，无需第二步。
+	//   - password != ""：① 成功后 ② 用独立 ctx + 重试（最多 3 次，指数退避）
+	//     执行；如全部失败，再 fallback 走"用一个不可登陆的强随机密码挡门"
+	//     避免账号停在无密码状态，最后把原始错误返回给调用方。
 	if err := a.embyPost(ctx, "/Users/"+urlPathEscape(userID)+"/Password", map[string]any{"ResetPassword": true}, &ignored); err != nil {
 		return err
 	}
 	if password == "" {
 		return nil
 	}
-	return a.embyPost(ctx, "/Users/"+urlPathEscape(userID)+"/Password", map[string]any{"CurrentPw": "", "NewPw": password}, &ignored)
+	setPw := func(opCtx context.Context, pw string) error {
+		return a.embyPost(opCtx, "/Users/"+urlPathEscape(userID)+"/Password", map[string]any{"CurrentPw": "", "NewPw": pw}, &ignored)
+	}
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				lastErr = ctx.Err()
+			case <-time.After(time.Duration(attempt*attempt) * 200 * time.Millisecond):
+			}
+		}
+		if err := setPw(ctx, password); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
+	}
+	// 兜底：尝试用一个强随机密码堵住"无密码窗口"。这一步独立于调用方 ctx：
+	// 即便外层 ctx 已经 cancel，我们也尽力关门，再把原 lastErr 返回给调用方。
+	guardCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	guardPw := randomCode(32)
+	if err := setPw(guardCtx, guardPw); err != nil {
+		zap.L().Error("emby password rollback failed; account may be left without a password",
+			zap.String("emby_user_id", userID),
+			zap.String("guard_error", redactSensitiveText(err.Error())),
+			zap.String("origin_error", redactSensitiveText(lastErr.Error())),
+		)
+	} else {
+		zap.L().Warn("emby password write failed; account locked with random guard password",
+			zap.String("emby_user_id", userID),
+			zap.String("origin_error", redactSensitiveText(lastErr.Error())),
+		)
+	}
+	return lastErr
 }
 
 func (a *App) embyUpdatePolicy(ctx context.Context, userID string, update func(map[string]any)) error {
