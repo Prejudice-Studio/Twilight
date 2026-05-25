@@ -22,8 +22,20 @@ type Client struct {
 	tls      bool
 	timeout  time.Duration
 	pool     chan net.Conn
-	once     sync.Once
+	mu       sync.RWMutex
+	closed   bool
 }
+
+// maxBulkLen 限制单条 redis bulk-string 回复的最大长度（64MB）。
+// 没有这道闸时，对端发送 `$2147483647\r\n` 我们会立刻 `make([]byte, n+2)`
+// 直接 OOM；中间人也能用同样手法搞挂进程。64MB 远超任何 rate-limit / session
+// kv 的合理体量，但仍给 Lua 脚本回执之类的留足空间。
+const maxBulkLen = 64 * 1024 * 1024
+
+// maxArrayLen 给 multi-bulk 数组元素数加上同等约束，避免 `*2147483647\r\n` 让
+// `make([]any, 0, n)` 直接吃光内存。256K 元素够覆盖任何合理的 LRANGE/HGETALL
+// 场景。
+const maxArrayLen = 256 * 1024
 
 func New(rawURL string, poolSize int) (*Client, error) {
 	if strings.TrimSpace(rawURL) == "" {
@@ -55,15 +67,20 @@ func (c *Client) Close() error {
 	if c == nil {
 		return nil
 	}
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil
+	}
+	c.closed = true
+	close(c.pool)
+	c.mu.Unlock()
 	var err error
-	c.once.Do(func() {
-		close(c.pool)
-		for conn := range c.pool {
-			if closeErr := conn.Close(); closeErr != nil && err == nil {
-				err = closeErr
-			}
+	for conn := range c.pool {
+		if closeErr := conn.Close(); closeErr != nil && err == nil {
+			err = closeErr
 		}
-	})
+	}
 	return err
 }
 
@@ -204,6 +221,20 @@ func (c *Client) authAndSelect(ctx context.Context, conn net.Conn, args ...strin
 }
 
 func (c *Client) putConn(conn net.Conn) {
+	c.mu.RLock()
+	if c.closed {
+		c.mu.RUnlock()
+		_ = conn.Close()
+		return
+	}
+	defer c.mu.RUnlock()
+	defer func() {
+		// 与 Close() 的 close(c.pool) 竞争时，向已关闭 channel 发送会 panic；
+		// 这里 RLock 已能阻挡 Close 进入临界区，但 recover 兜底以防极端情况。
+		if r := recover(); r != nil {
+			_ = conn.Close()
+		}
+	}()
 	select {
 	case c.pool <- conn:
 	default:
@@ -253,6 +284,9 @@ func readReply(r *bufio.Reader) (any, error) {
 		if n < 0 {
 			return nil, ErrNil
 		}
+		if n > maxBulkLen {
+			return nil, fmt.Errorf("redis bulk reply exceeds limit (%d > %d)", n, maxBulkLen)
+		}
 		buf := make([]byte, n+2)
 		if _, err := io.ReadFull(r, buf); err != nil {
 			return nil, err
@@ -266,6 +300,12 @@ func readReply(r *bufio.Reader) (any, error) {
 		n, err := strconv.Atoi(line)
 		if err != nil {
 			return nil, err
+		}
+		if n < 0 {
+			return nil, ErrNil
+		}
+		if n > maxArrayLen {
+			return nil, fmt.Errorf("redis array reply exceeds limit (%d > %d)", n, maxArrayLen)
 		}
 		arr := make([]any, 0, n)
 		for i := 0; i < n; i++ {
