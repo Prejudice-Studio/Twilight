@@ -396,8 +396,16 @@ func defaults() Config {
 		TelegramAPIURL:                    "https://api.telegram.org",
 		TelegramGroupCheckConcurrency:     24,
 		TelegramGroupActionConcurrency:    8,
-		RegisterEnabled:                   true,
-		AllowPendingRegister:              true,
+		// RegisterEnabled / EmbyDirectRegisterEnabled / AllowPendingRegister 都
+		// 默认 false——secure-by-default。空配置首次启动（dev 镜像、配置被误删、
+		// docker volume 丢配置）不再"自动开放注册 + Emby 直登"。运营要让外部
+		// 用户注册必须在 production.toml 显式 `[SAR] register_mode = true`，
+		// 这样审计 / 误启动场景下没有窗口可以被陌生人抢占。
+		// 注意：handleRegister 已经有"empty DB bootstrap"通道（auth_handlers.go
+		// :214 / :328）允许首位用户在 RegisterEnabled=false 的状态下注册成为
+		// Admin，因此对首次部署 UX 几乎无影响。
+		RegisterEnabled:                   false,
+		AllowPendingRegister:              false,
 		EmbyDirectRegisterDays:            30,
 		EmbyUserLimit:                     -1,
 		RegCodeFormat:                     "TW-{type}-{random}",
