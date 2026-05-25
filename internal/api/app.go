@@ -226,26 +226,23 @@ func (a *App) reloadConfigLocked() (map[string]any, error) {
 
 	reinitialized := []string{}
 	if storeBackendChanged(previous, next) {
-		// Backend / 路径 / DSN 真的变了：必须先关旧 store 释放 flock（同 path
-		// JSON 重开会死锁在锁文件上），再开新的；但只有在新 store 打开成功
-		// 后才丢弃旧 store，避免开盘失败时把可用的 store 也一并清掉。
-		oldStore := a.store
-		if oldStore != nil {
-			_ = oldStore.Close()
-			a.store = nil
-		}
+		// Backend / 路径 / DSN 真的变了：先开新 store，确认成功后再关旧 store。
+		// 不能"先关后开"——那会留下 a.store==nil 窗口，并发 ServeHTTP 走到
+		// `a.store.IsIPBlacklisted` / `a.store.User` 等点会直接 nil panic；
+		// 失败时也无法干净回滚（旧 store 已 Close，再 Open 同一 JSON 路径
+		// 会与还在挥发的 flock 竞争）。
+		// storeBackendChanged 已经把"同 path JSON"过滤掉（normalizeStoreDriver
+		// 把 "" / "json" / "file" 归一），所以这里不会两个 JSON store 抢同一个
+		// 锁文件——对 PG → JSON、JSON 路径切换、PG DSN 切换都安全。
 		nextStore, err := openConfiguredStore(context.Background(), next)
 		if err != nil {
-			// 重开旧 store 兜底：尝试用 previous 配置再次打开，让请求路径
-			// 不至于裸露 nil。失败则交给上层（reloadConfig）回滚配置。
-			if oldStore != nil {
-				if recovered, recoverErr := openConfiguredStore(context.Background(), previous); recoverErr == nil {
-					a.store = recovered
-				}
-			}
 			return nil, err
 		}
+		oldStore := a.store
 		a.store = nextStore
+		if oldStore != nil {
+			_ = oldStore.Close()
+		}
 		reinitialized = append(reinitialized, "database")
 	}
 	if previous.RedisURL != next.RedisURL || previous.SessionTTL != next.SessionTTL {
@@ -306,11 +303,17 @@ func (a *App) reloadConfigIfChanged() {
 		return
 	}
 	info, err := a.reloadConfigLocked()
-	a.runtimeMu.Unlock()
 	if err != nil {
+		// 失败也要把 configSignature 推到当前值。否则只要 admin 写错一次配置，
+		// 每个 ServeHTTP 都会再走一次 reloadConfigLocked → config.Read →
+		// 同样的解析错误，QPS 直接归零。等 admin 真的再改一次文件、
+		// signature 再次变化，自然会触发下一轮 reload 重试。
+		a.configSignature = current
+		a.runtimeMu.Unlock()
 		zap.L().Warn("config hot reload check failed", zap.Error(err))
 		return
 	}
+	a.runtimeMu.Unlock()
 	zap.L().Info("config file change applied", zap.Any("reload", info))
 }
 
