@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/csv"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -1189,16 +1190,37 @@ func (a *App) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request, para
 	//   - admin 给用户写入未知 role（如 99），前端 roleName 落到"未识别"，
 	//     该用户无法被任何鉴权分支处理；
 	//   - admin 改写的 username 包含禁止字符 / 长度越界，导致用户后续无法登录。
+	var (
+		hasRole     bool
+		desiredRole int
+	)
 	if rawRole, ok := payload["role"]; ok {
-		if _, valid := normalizeRoleValue(rawRole); !valid {
+		role, valid := normalizeRoleValue(rawRole)
+		if !valid {
 			failWithCode(w, http.StatusBadRequest, ErrBadRequest, "role 取值非法")
 			return
 		}
+		hasRole = true
+		desiredRole = role
 	}
 	if rawUsername, ok := payload["username"]; ok {
 		if username, isStr := rawUsername.(string); isStr && username != "" {
 			if err := validate.ValidateUsername(username); err != nil {
 				failWithCode(w, http.StatusBadRequest, ErrUsernameInvalid, err.Error())
+				return
+			}
+		}
+	}
+	// role 写入走 store.SetUserRoleAtomic：在同一把锁里做"读取目标当前 role +
+	// 计数 active admin + 写入"，避免两个 admin 并发降级两个不同 admin 时
+	// 同时通过 last-admin 校验导致 0 admin。其它字段再走 UpdateUser 闭包。
+	if hasRole {
+		if _, err := a.store.SetUserRoleAtomic(uid, desiredRole); err != nil {
+			if errors.Is(err, store.ErrLastAdmin) {
+				failWithCode(w, http.StatusConflict, ErrAdminLastAdminProtected, "无法移除最后一个管理员的权限，系统至少需要一个管理员")
+				return
+			}
+			if statusFromError(w, err) {
 				return
 			}
 		}
@@ -1212,11 +1234,6 @@ func (a *App) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request, para
 		}
 		if _, ok := payload["active"]; ok {
 			u.Active = boolValue(payload, "active", u.Active)
-		}
-		if rawRole, ok := payload["role"]; ok {
-			if role, valid := normalizeRoleValue(rawRole); valid {
-				u.Role = role
-			}
 		}
 		return nil
 	})
@@ -1309,23 +1326,36 @@ func (a *App) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request, para
 
 func (a *App) handleAdminToggleUser(w http.ResponseWriter, r *http.Request, params Params) {
 	uid, _ := int64Param(params, "uid")
-	if target, okUser := a.store.User(uid); okUser && a.userIsProtected(target) && target.UID != current(r).User.UID {
+	enable := strings.HasSuffix(r.URL.Path, "/enable")
+	currentUID := current(r).User.UID
+	// admin 不允许 disable 自己：自残会让 admin 立即丢失 active 状态、踢自己下线，
+	// 同时绕开 store.SetUserActiveAtomic 的"剩余 active admin >= 1" 兜底。
+	if !enable && uid == currentUID {
+		failWithCode(w, http.StatusForbidden, ErrUserProtected, "无法禁用自己的账号")
+		return
+	}
+	if target, okUser := a.store.User(uid); okUser && a.userIsProtected(target) && target.UID != currentUID {
 		failWithCode(w, http.StatusForbidden, ErrUserProtected, "cannot operate on protected user")
 		return
 	}
-	enable := strings.HasSuffix(r.URL.Path, "/enable")
 	payload := decodeMap(r)
 	depth := intValue(payload, "cascade_depth", queryInt(r, "cascade_depth", 1))
 	affected := []int64{}
 	skipped := []map[string]any{}
 	failed := []map[string]any{}
 	for _, targetUID := range a.collectCascadeUIDs(uid, depth) {
-		if target, okUser := a.store.User(targetUID); okUser && a.userIsProtected(target) && target.UID != current(r).User.UID {
+		if target, okUser := a.store.User(targetUID); okUser && a.userIsProtected(target) && target.UID != currentUID {
 			skipped = append(skipped, map[string]any{"uid": targetUID, "reason": a.protectedUserReason(target)})
 			continue
 		}
-		updated, err := a.store.UpdateUser(targetUID, func(u *store.User) error { u.Active = enable; return nil })
+		// 走 SetUserActiveAtomic：禁用最后一个 active admin 时返回 ErrLastAdmin，
+		// 在级联场景下被记入 skipped 而不是悄悄通过。
+		updated, err := a.store.SetUserActiveAtomic(targetUID, enable)
 		if err != nil {
+			if errors.Is(err, store.ErrLastAdmin) {
+				skipped = append(skipped, map[string]any{"uid": targetUID, "reason": "last_admin"})
+				continue
+			}
 			failed = append(failed, map[string]any{"uid": targetUID, "reason": err.Error()})
 			continue
 		}
@@ -1567,11 +1597,10 @@ func (a *App) handleAdminResetPassword(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 	if (scope == "emby" || scope == "both") && targetUser.EmbyID == "" {
-		if scope == "emby" {
-			failWithCode(w, http.StatusBadRequest, ErrEmbyAccountUnlinked, "user has no linked Emby account")
-			return
-		}
-		scope = "system"
+		// 旧实现里 scope=both 在 EmbyID 空时会"静默降级为 system"，前端无法察觉
+		// 这次写入并未触达 Emby。改为返回 409 让前端显式选择"仅系统密码"或先绑 Emby。
+		failWithCode(w, http.StatusConflict, ErrEmbyAccountUnlinked, "user has no linked Emby account; choose scope=system to reset only the system password")
+		return
 	}
 	if scope == "emby" || scope == "both" {
 		if err := a.embySetPassword(r.Context(), targetUser.EmbyID, newPassword); err != nil {
@@ -1600,25 +1629,18 @@ func (a *App) handleAdminSetRole(w http.ResponseWriter, r *http.Request, params 
 	if boolValue(payload, "is_admin", boolValue(payload, "admin", false)) {
 		role = store.RoleAdmin
 	}
-	// Prevent demoting the last admin - count remaining admins
-	if role != store.RoleAdmin {
-		target, okTarget := a.store.User(uid)
-		if okTarget && target.Role == store.RoleAdmin {
-			adminCount := 0
-			for _, u := range a.store.ListUsers() {
-				if u.Role == store.RoleAdmin && u.Active {
-					adminCount++
-				}
-			}
-			if adminCount <= 1 {
-				failWithCode(w, http.StatusConflict, ErrAdminLastAdminProtected, "无法移除最后一个管理员的权限，系统至少需要一个管理员")
-				return
-			}
+	// SetUserRoleAtomic 在同一把写锁内做 last-admin 计数 + 写入。
+	// 旧实现把 ListUsers 计数与 UpdateUser 闭包分两段执行，并发降级两个不同 admin
+	// 时各自看到 adminCount=2 都通过校验，事后剩 0 admin。
+	u, err := a.store.SetUserRoleAtomic(uid, role)
+	if err != nil {
+		if errors.Is(err, store.ErrLastAdmin) {
+			failWithCode(w, http.StatusConflict, ErrAdminLastAdminProtected, "无法移除最后一个管理员的权限，系统至少需要一个管理员")
+			return
 		}
-	}
-	u, err := a.store.UpdateUser(uid, func(u *store.User) error { u.Role = role; return nil })
-	if statusFromError(w, err) {
-		return
+		if statusFromError(w, err) {
+			return
+		}
 	}
 	ok(w, "role updated", publicUser(u))
 }
@@ -1649,21 +1671,22 @@ func (a *App) handleAdminBindTelegram(w http.ResponseWriter, r *http.Request, pa
 		failWithCode(w, http.StatusBadRequest, ErrTGIDInvalid, "telegram_id 无效")
 		return
 	}
-	if existing, okUser := a.store.FindUserByTelegramID(tgid); okUser && existing.UID != uid {
-		failWithCode(w, http.StatusConflict, ErrTGIDTaken, "Telegram ID is already bound to another user")
-		return
-	}
-	old := int64(0)
-	u, err := a.store.UpdateUser(uid, func(u *store.User) error {
-		if u.Role == store.RoleAdmin && u.UID != current(r).User.UID {
-			return store.ErrConflict
+	// BindUserTelegramAtomic 在同一把写锁里做唯一性 + admin 自保 + 写入，
+	// 替换旧实现里 FindUserByTelegramID(RLock) → UpdateUser(Lock) 两段独立锁，
+	// 关闭并发同 telegram_id 绑定到两个 UID 的 TOCTOU 窗口。
+	u, old, err := a.store.BindUserTelegramAtomic(uid, tgid, current(r).User.UID)
+	if err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			// store.ErrConflict 同时承载两类语义：目标是其他 admin 不允许改写，
+			// 或 telegram_id 已被占用。优先识别后者（语义更精确）。
+			if existing, okUser := a.store.FindUserByTelegramID(tgid); okUser && existing.UID != uid {
+				failWithCode(w, http.StatusConflict, ErrTGIDTaken, "Telegram ID is already bound to another user")
+				return
+			}
 		}
-		old = u.TelegramID
-		u.TelegramID = tgid
-		return nil
-	})
-	if statusFromError(w, err) {
-		return
+		if statusFromError(w, err) {
+			return
+		}
 	}
 	ok(w, "Telegram bound", map[string]any{"uid": u.UID, "username": u.Username, "telegram_id": u.TelegramID, "old_telegram_id": zeroNil(old)})
 }

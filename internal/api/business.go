@@ -647,12 +647,23 @@ func numeric(value any) int64 {
 	}
 }
 
+// cascadeMaxResults 控制单次级联遍历返回的 UID 数量上限。原实现 depth==0 会
+// 解释成 maxDepth=1<<30，对深邀请森林一次请求可遍历整个树并对每个目标做串行
+// emby 同步删除（见 handleAdminDeleteUser），admin 自己 payload 即可拒绝服务自己。
+// 5000 这个数对最严肃的真实部署仍宽裕，且能让 4xx 比 5xx 早返回。
+const cascadeMaxResults = 5000
+
 func (a *App) collectCascadeUIDs(root int64, depth int) []int64 {
-	if depth <= 1 {
+	if depth == 1 {
 		return []int64{root}
 	}
+	// depth==0 之前等价于"全树"，调用方很容易写成默认 0 触发巨大遍历。
+	// 现在 0 收紧为 1（仅自身），调用方若真要全树需显式写 -1。
 	maxDepth := depth
-	if depth == 0 || depth >= 999 {
+	switch {
+	case depth == 0:
+		return []int64{root}
+	case depth < 0 || depth >= 999:
 		maxDepth = 1 << 30
 	}
 	result := []int64{}
@@ -662,6 +673,9 @@ func (a *App) collectCascadeUIDs(root int64, depth int) []int64 {
 	}{{root, 1}}
 	seen := map[int64]bool{root: true}
 	for len(queue) > 0 {
+		if len(result) >= cascadeMaxResults {
+			break
+		}
 		item := queue[0]
 		queue = queue[1:]
 		result = append(result, item.uid)
