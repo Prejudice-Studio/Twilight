@@ -73,6 +73,17 @@ updates:
       - dependency-name: "eslint-config-next"
         update-types:
           - "version-update:semver-major"
+      # Tailwind v4 切了 Oxide 引擎、配置改成 CSS-first、PostCSS 插件迁到
+      # `@tailwindcss/postcss`，默认主题值（shadow-sm → shadow-xs 等）也变。
+      # tailwind-merge v3 起只支持 Tailwind v4，必须跟 tailwindcss 一起升。
+      # 整个迁移要动 tailwind.config.ts / postcss.config.mjs / globals.css /
+      # tailwindcss-animate → tw-animate-css 替换 + 视觉回归，单独人工 PR。
+      - dependency-name: "tailwindcss"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "tailwind-merge"
+        update-types:
+          - "version-update:semver-major"
 
   # GitHub Actions
   - package-ecosystem: github-actions
