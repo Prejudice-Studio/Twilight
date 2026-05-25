@@ -1831,20 +1831,23 @@ func (s *Store) FindUserByTelegramID(telegramID int64) (User, bool) {
 func (s *Store) CreateAPIKey(k APIKey) (APIKey, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
+	err := s.mutateAndSaveLocked(func() error {
+		k.ID = s.state.NextAPIKeyID
+		s.state.NextAPIKeyID++
+		if k.CreatedAt == 0 {
+			k.CreatedAt = time.Now().Unix()
+		}
+		if k.RateLimit <= 0 {
+			k.RateLimit = 100
+		}
+		k.Enabled = true
+		s.state.APIKeys[k.ID] = k
+		return nil
+	})
+	if err != nil {
 		return APIKey{}, err
 	}
-	k.ID = s.state.NextAPIKeyID
-	s.state.NextAPIKeyID++
-	if k.CreatedAt == 0 {
-		k.CreatedAt = time.Now().Unix()
-	}
-	if k.RateLimit <= 0 {
-		k.RateLimit = 100
-	}
-	k.Enabled = true
-	s.state.APIKeys[k.ID] = k
-	return k, s.saveLocked()
+	return k, nil
 }
 
 func (s *Store) ListAPIKeys(uid int64) []APIKey {
@@ -1890,76 +1893,92 @@ func (s *Store) FindAPIKeyByHash(hash string) (APIKey, User, bool) {
 func (s *Store) UpdateAPIKey(uid, id int64, fn func(*APIKey) error) (APIKey, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
+	var updated APIKey
+	err := s.mutateAndSaveLocked(func() error {
+		k, ok := s.state.APIKeys[id]
+		if !ok || k.UID != uid {
+			return ErrNotFound
+		}
+		if err := fn(&k); err != nil {
+			return err
+		}
+		s.state.APIKeys[id] = k
+		updated = k
+		return nil
+	})
+	if err != nil {
 		return APIKey{}, err
 	}
-	k, ok := s.state.APIKeys[id]
-	if !ok || k.UID != uid {
-		return APIKey{}, ErrNotFound
-	}
-	if err := fn(&k); err != nil {
-		return APIKey{}, err
-	}
-	s.state.APIKeys[id] = k
-	return k, s.saveLocked()
+	return updated, nil
 }
 
 func (s *Store) RecordAPIKeyUse(id int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return err
-	}
-	k, ok := s.state.APIKeys[id]
-	if !ok {
-		return ErrNotFound
-	}
-	k.RequestCount++
-	k.LastUsed = time.Now().Unix()
-	s.state.APIKeys[id] = k
-	return s.saveLocked()
+	return s.mutateAndSaveLocked(func() error {
+		k, ok := s.state.APIKeys[id]
+		if !ok {
+			return ErrNotFound
+		}
+		k.RequestCount++
+		k.LastUsed = time.Now().Unix()
+		s.state.APIKeys[id] = k
+		return nil
+	})
 }
 
 func (s *Store) DeleteAPIKey(uid, id int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return err
-	}
-	k, ok := s.state.APIKeys[id]
-	if !ok || k.UID != uid {
-		return ErrNotFound
-	}
-	delete(s.state.APIKeys, id)
-	return s.saveLocked()
+	return s.mutateAndSaveLocked(func() error {
+		k, ok := s.state.APIKeys[id]
+		if !ok || k.UID != uid {
+			return ErrNotFound
+		}
+		delete(s.state.APIKeys, id)
+		return nil
+	})
 }
 
 func (s *Store) CreateMediaRequest(r MediaRequest) (MediaRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return MediaRequest{}, err
-	}
-	if !mediaRequestInventoryIssue(r) {
-		for _, existing := range s.state.MediaRequests {
-			if strings.EqualFold(existing.Source, r.Source) && existing.MediaID == r.MediaID && existing.Season == r.Season && isActiveMediaStatus(existing.Status) {
-				return existing, ErrConflict
+	// 冲突检查产出 existing 副本要带回给调用方（handler 用它给前端返回
+	// "已有同源同集的活跃请求"），这种"非 nil error 同时携带 payload"
+	// 的语义 mutateAndSaveLocked 不直接支持——通过闭包外的捕获变量传出。
+	var conflict MediaRequest
+	var conflictHit bool
+	err := s.mutateAndSaveLocked(func() error {
+		if !mediaRequestInventoryIssue(r) {
+			for _, existing := range s.state.MediaRequests {
+				if strings.EqualFold(existing.Source, r.Source) && existing.MediaID == r.MediaID && existing.Season == r.Season && isActiveMediaStatus(existing.Status) {
+					conflict = existing
+					conflictHit = true
+					return ErrConflict
+				}
 			}
 		}
+		now := time.Now().Unix()
+		r.ID = s.state.NextRequestID
+		s.state.NextRequestID++
+		if r.RequireKey == "" {
+			r.RequireKey = randomKey("req", r.ID, now)
+		}
+		if r.Status == "" {
+			r.Status = "UNHANDLED"
+		}
+		r.CreatedAt = now
+		r.UpdatedAt = now
+		s.state.MediaRequests[r.ID] = r
+		return nil
+	})
+	if conflictHit {
+		return conflict, ErrConflict
 	}
-	now := time.Now().Unix()
-	r.ID = s.state.NextRequestID
-	s.state.NextRequestID++
-	if r.RequireKey == "" {
-		r.RequireKey = randomKey("req", r.ID, now)
+	if err != nil {
+		return MediaRequest{}, err
 	}
-	if r.Status == "" {
-		r.Status = "UNHANDLED"
-	}
-	r.CreatedAt = now
-	r.UpdatedAt = now
-	s.state.MediaRequests[r.ID] = r
-	return r, s.saveLocked()
+	return r, nil
 }
 
 func mediaRequestInventoryIssue(r MediaRequest) bool {
@@ -2026,42 +2045,45 @@ func (s *Store) FindMediaRequestByKey(key string) (MediaRequest, bool) {
 func (s *Store) UpdateMediaRequest(id int64, fn func(*MediaRequest) error) (MediaRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
+	var updated MediaRequest
+	err := s.mutateAndSaveLocked(func() error {
+		r, ok := s.state.MediaRequests[id]
+		if !ok {
+			return ErrNotFound
+		}
+		if err := fn(&r); err != nil {
+			return err
+		}
+		r.UpdatedAt = time.Now().Unix()
+		s.state.MediaRequests[id] = r
+		updated = r
+		return nil
+	})
+	if err != nil {
 		return MediaRequest{}, err
 	}
-	r, ok := s.state.MediaRequests[id]
-	if !ok {
-		return MediaRequest{}, ErrNotFound
-	}
-	if err := fn(&r); err != nil {
-		return MediaRequest{}, err
-	}
-	r.UpdatedAt = time.Now().Unix()
-	s.state.MediaRequests[id] = r
-	return r, s.saveLocked()
+	return updated, nil
 }
 
 func (s *Store) DeleteMediaRequest(id int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return err
-	}
-	if _, ok := s.state.MediaRequests[id]; !ok {
-		return ErrNotFound
-	}
-	delete(s.state.MediaRequests, id)
-	return s.saveLocked()
+	return s.mutateAndSaveLocked(func() error {
+		if _, ok := s.state.MediaRequests[id]; !ok {
+			return ErrNotFound
+		}
+		delete(s.state.MediaRequests, id)
+		return nil
+	})
 }
 
 func (s *Store) UpsertBindCode(code BindCode) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return err
-	}
-	s.state.BindCodes[code.Code] = code
-	return s.saveLocked()
+	return s.mutateAndSaveLocked(func() error {
+		s.state.BindCodes[code.Code] = code
+		return nil
+	})
 }
 
 func (s *Store) BindCode(code string) (BindCode, bool) {
@@ -2074,63 +2096,65 @@ func (s *Store) BindCode(code string) (BindCode, bool) {
 func (s *Store) DeleteBindCode(code string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return err
-	}
-	if _, ok := s.state.BindCodes[code]; !ok {
-		return ErrNotFound
-	}
-	delete(s.state.BindCodes, code)
-	return s.saveLocked()
+	return s.mutateAndSaveLocked(func() error {
+		if _, ok := s.state.BindCodes[code]; !ok {
+			return ErrNotFound
+		}
+		delete(s.state.BindCodes, code)
+		return nil
+	})
 }
 
 func (s *Store) CleanupExpiredBindCodes(now int64) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
+	deleted := 0
+	err := s.mutateAndSaveLocked(func() error {
+		for code, bind := range s.state.BindCodes {
+			if bind.ExpiresAt > 0 && bind.ExpiresAt <= now {
+				delete(s.state.BindCodes, code)
+				deleted++
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		return 0, err
 	}
-	deleted := 0
-	for code, bind := range s.state.BindCodes {
-		if bind.ExpiresAt > 0 && bind.ExpiresAt <= now {
-			delete(s.state.BindCodes, code)
-			deleted++
-		}
-	}
-	if deleted == 0 {
-		return 0, nil
-	}
-	return deleted, s.saveLocked()
+	return deleted, nil
 }
 
 func (s *Store) UpsertAnnouncement(a Announcement) (Announcement, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
+	err := s.mutateAndSaveLocked(func() error {
+		now := time.Now().Unix()
+		if a.ID == 0 {
+			a.ID = s.state.NextAnnouncementID
+			s.state.NextAnnouncementID++
+			a.CreatedAt = now
+		} else if existing, ok := s.state.Announcements[a.ID]; ok {
+			if a.CreatedAt == 0 {
+				a.CreatedAt = existing.CreatedAt
+			}
+			if a.CreatedByUID == 0 {
+				a.CreatedByUID = existing.CreatedByUID
+			}
+		}
+		a.UpdatedAt = now
+		if a.Level == "" {
+			a.Level = "info"
+		}
+		if a.RenderMode == "" {
+			a.RenderMode = "plain"
+		}
+		s.state.Announcements[a.ID] = a
+		return nil
+	})
+	if err != nil {
 		return Announcement{}, err
 	}
-	now := time.Now().Unix()
-	if a.ID == 0 {
-		a.ID = s.state.NextAnnouncementID
-		s.state.NextAnnouncementID++
-		a.CreatedAt = now
-	} else if existing, ok := s.state.Announcements[a.ID]; ok {
-		if a.CreatedAt == 0 {
-			a.CreatedAt = existing.CreatedAt
-		}
-		if a.CreatedByUID == 0 {
-			a.CreatedByUID = existing.CreatedByUID
-		}
-	}
-	a.UpdatedAt = now
-	if a.Level == "" {
-		a.Level = "info"
-	}
-	if a.RenderMode == "" {
-		a.RenderMode = "plain"
-	}
-	s.state.Announcements[a.ID] = a
-	return a, s.saveLocked()
+	return a, nil
 }
 
 func (s *Store) ListAnnouncements(includeHidden bool) []Announcement {
@@ -2156,39 +2180,37 @@ func (s *Store) ListAnnouncements(includeHidden bool) []Announcement {
 func (s *Store) DeleteAnnouncement(id int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return err
-	}
-	if _, ok := s.state.Announcements[id]; !ok {
-		return ErrNotFound
-	}
-	delete(s.state.Announcements, id)
-	return s.saveLocked()
+	return s.mutateAndSaveLocked(func() error {
+		if _, ok := s.state.Announcements[id]; !ok {
+			return ErrNotFound
+		}
+		delete(s.state.Announcements, id)
+		return nil
+	})
 }
 
 func (s *Store) UpsertInviteCode(code InviteCode) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return err
-	}
-	if code.InviterUID == 0 {
-		code.InviterUID = code.UID
-	}
-	if code.UID == 0 {
-		code.UID = code.InviterUID
-	}
-	if code.UseCountLimit == 0 {
-		code.UseCountLimit = 1
-	}
-	if code.CreatedAt == 0 {
-		code.CreatedAt = time.Now().Unix()
-	}
-	if !code.Used && code.UseCount < code.UseCountLimit {
-		code.Active = true
-	}
-	s.state.InviteCodes[code.Code] = code
-	return s.saveLocked()
+	return s.mutateAndSaveLocked(func() error {
+		if code.InviterUID == 0 {
+			code.InviterUID = code.UID
+		}
+		if code.UID == 0 {
+			code.UID = code.InviterUID
+		}
+		if code.UseCountLimit == 0 {
+			code.UseCountLimit = 1
+		}
+		if code.CreatedAt == 0 {
+			code.CreatedAt = time.Now().Unix()
+		}
+		if !code.Used && code.UseCount < code.UseCountLimit {
+			code.Active = true
+		}
+		s.state.InviteCodes[code.Code] = code
+		return nil
+	})
 }
 
 func (s *Store) InviteCode(code string) (InviteCode, bool) {
@@ -2225,52 +2247,56 @@ func (s *Store) ListInviteCodes(uid int64) []InviteCode {
 func (s *Store) DeleteInviteCode(uid int64, code string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return err
-	}
-	c, ok := s.state.InviteCodes[code]
-	if !ok || c.UID != uid {
-		return ErrNotFound
-	}
-	if c.UseCount > 0 || c.Used {
-		c.Active = false
-		s.state.InviteCodes[code] = c
-	} else {
-		delete(s.state.InviteCodes, code)
-	}
-	return s.saveLocked()
+	return s.mutateAndSaveLocked(func() error {
+		c, ok := s.state.InviteCodes[code]
+		if !ok || c.UID != uid {
+			return ErrNotFound
+		}
+		if c.UseCount > 0 || c.Used {
+			c.Active = false
+			s.state.InviteCodes[code] = c
+		} else {
+			delete(s.state.InviteCodes, code)
+		}
+		return nil
+	})
 }
 
 func (s *Store) ConsumeInviteCode(code string, childUID int64) (InviteCode, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
+	var consumed InviteCode
+	err := s.mutateAndSaveLocked(func() error {
+		c, ok := s.state.InviteCodes[code]
+		if !ok || !c.Active {
+			return ErrNotFound
+		}
+		if c.UseCountLimit != -1 && c.UseCount >= c.UseCountLimit {
+			return ErrConflict
+		}
+		now := time.Now().Unix()
+		if c.ExpiredAt > 0 && c.ExpiredAt <= now {
+			return ErrExpired
+		}
+		if c.InviterUID != 0 && c.InviterUID == childUID {
+			return ErrConflict
+		}
+		c.UseCount++
+		c.Used = true
+		c.UsedByUID = childUID
+		c.UsedAt = now
+		if c.UseCountLimit != -1 && c.UseCount >= c.UseCountLimit {
+			c.Active = false
+		}
+		s.state.InviteCodes[code] = c
+		s.state.InviteRelations[childUID] = InviteRelation{ParentUID: c.InviterUID, ChildUID: childUID, Code: code, CreatedAt: now}
+		consumed = c
+		return nil
+	})
+	if err != nil {
 		return InviteCode{}, err
 	}
-	c, ok := s.state.InviteCodes[code]
-	if !ok || !c.Active {
-		return InviteCode{}, ErrNotFound
-	}
-	if c.UseCountLimit != -1 && c.UseCount >= c.UseCountLimit {
-		return InviteCode{}, ErrConflict
-	}
-	now := time.Now().Unix()
-	if c.ExpiredAt > 0 && c.ExpiredAt <= now {
-		return InviteCode{}, ErrExpired
-	}
-	if c.InviterUID != 0 && c.InviterUID == childUID {
-		return InviteCode{}, ErrConflict
-	}
-	c.UseCount++
-	c.Used = true
-	c.UsedByUID = childUID
-	c.UsedAt = now
-	if c.UseCountLimit != -1 && c.UseCount >= c.UseCountLimit {
-		c.Active = false
-	}
-	s.state.InviteCodes[code] = c
-	s.state.InviteRelations[childUID] = InviteRelation{ParentUID: c.InviterUID, ChildUID: childUID, Code: code, CreatedAt: now}
-	return c, s.saveLocked()
+	return consumed, nil
 }
 
 func (s *Store) InviteRelations() []InviteRelation {
@@ -2309,11 +2335,10 @@ func (s *Store) ChildrenOf(uid int64) []InviteRelation {
 func (s *Store) DetachInvite(uid int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return err
-	}
-	delete(s.state.InviteRelations, uid)
-	return s.saveLocked()
+	return s.mutateAndSaveLocked(func() error {
+		delete(s.state.InviteRelations, uid)
+		return nil
+	})
 }
 
 func (s *Store) RegCode(code string) (RegCode, bool) {
@@ -2326,72 +2351,63 @@ func (s *Store) RegCode(code string) (RegCode, bool) {
 func (s *Store) UpsertRegCode(code RegCode) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return err
-	}
-	previous, exists := s.state.RegCodes[code.Code]
-	if code.CreatedAt == 0 {
-		code.CreatedAt = time.Now().Unix()
-	}
-	if code.CreatedTime == 0 {
-		code.CreatedTime = code.CreatedAt
-	}
-	if code.ValidityTime == 0 {
-		code.ValidityTime = -1
-	}
-	if code.UseCountLimit == 0 {
-		code.UseCountLimit = 1
-	}
-	if !exists && !code.Active && code.UseCount == 0 {
-		code.Active = true
-	}
-	s.state.RegCodes[code.Code] = code
-	if err := s.saveLocked(); err != nil {
-		if exists {
-			s.state.RegCodes[code.Code] = previous
-		} else {
-			delete(s.state.RegCodes, code.Code)
+	return s.mutateAndSaveLocked(func() error {
+		_, exists := s.state.RegCodes[code.Code]
+		if code.CreatedAt == 0 {
+			code.CreatedAt = time.Now().Unix()
 		}
-		return err
-	}
-	return nil
+		if code.CreatedTime == 0 {
+			code.CreatedTime = code.CreatedAt
+		}
+		if code.ValidityTime == 0 {
+			code.ValidityTime = -1
+		}
+		if code.UseCountLimit == 0 {
+			code.UseCountLimit = 1
+		}
+		if !exists && !code.Active && code.UseCount == 0 {
+			code.Active = true
+		}
+		s.state.RegCodes[code.Code] = code
+		return nil
+	})
 }
 
 func (s *Store) ConsumeRegCode(code string, uid, telegramID int64) (RegCode, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
+	var consumed RegCode
+	err := s.mutateAndSaveLocked(func() error {
+		r, ok := s.state.RegCodes[code]
+		if !ok || !r.Active {
+			return ErrNotFound
+		}
+		if r.UseCountLimit != -1 && r.UseCount >= r.UseCountLimit {
+			return ErrConflict
+		}
+		now := time.Now().Unix()
+		if r.ValidityTime > 0 && r.CreatedAt+r.ValidityTime*3600 <= now {
+			return ErrExpired
+		}
+		r.UseCount++
+		if uid != 0 {
+			r.UsedBy = uid
+			r.UsedByUIDs = appendUniqueInt64(r.UsedByUIDs, uid)
+		}
+		if telegramID != 0 {
+			r.UsedByTelegramIDs = appendUniqueInt64(r.UsedByTelegramIDs, telegramID)
+		}
+		if r.UseCountLimit != -1 && r.UseCount >= r.UseCountLimit {
+			r.Active = false
+		}
+		s.state.RegCodes[code] = r
+		consumed = r
+		return nil
+	})
+	if err != nil {
 		return RegCode{}, err
 	}
-	r, ok := s.state.RegCodes[code]
-	if !ok || !r.Active {
-		return RegCode{}, ErrNotFound
-	}
-	previous := r
-	if r.UseCountLimit != -1 && r.UseCount >= r.UseCountLimit {
-		return RegCode{}, ErrConflict
-	}
-	now := time.Now().Unix()
-	if r.ValidityTime > 0 && r.CreatedAt+r.ValidityTime*3600 <= now {
-		return RegCode{}, ErrExpired
-	}
-	r.UseCount++
-	if uid != 0 {
-		r.UsedBy = uid
-		r.UsedByUIDs = appendUniqueInt64(r.UsedByUIDs, uid)
-	}
-	if telegramID != 0 {
-		r.UsedByTelegramIDs = appendUniqueInt64(r.UsedByTelegramIDs, telegramID)
-	}
-	if r.UseCountLimit != -1 && r.UseCount >= r.UseCountLimit {
-		r.Active = false
-	}
-	s.state.RegCodes[code] = r
-	if err := s.saveLocked(); err != nil {
-		s.state.RegCodes[code] = previous
-		return RegCode{}, err
-	}
-	return r, nil
+	return consumed, nil
 }
 
 func (s *Store) ListRegCodes() []RegCode {
@@ -2408,62 +2424,51 @@ func (s *Store) ListRegCodes() []RegCode {
 func (s *Store) DeleteRegCode(code string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return err
-	}
-	reg, ok := s.state.RegCodes[code]
-	if !ok {
-		return ErrNotFound
-	}
-	if regCodeHasUsage(reg) {
-		reg.Active = false
-		s.state.RegCodes[code] = reg
-	} else {
-		delete(s.state.RegCodes, code)
-	}
-	if err := s.saveLocked(); err != nil {
-		s.state.RegCodes[code] = reg
-		return err
-	}
-	return nil
-}
-
-func (s *Store) DeleteRegCodes(codes []string) (deleted []string, missing []string, err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return nil, nil, err
-	}
-	seen := map[string]bool{}
-	previous := map[string]RegCode{}
-	for _, code := range codes {
-		code = strings.TrimSpace(code)
-		if code == "" || seen[code] {
-			continue
-		}
-		seen[code] = true
+	return s.mutateAndSaveLocked(func() error {
 		reg, ok := s.state.RegCodes[code]
 		if !ok {
-			missing = append(missing, code)
-			continue
+			return ErrNotFound
 		}
-		previous[code] = reg
 		if regCodeHasUsage(reg) {
 			reg.Active = false
 			s.state.RegCodes[code] = reg
 		} else {
 			delete(s.state.RegCodes, code)
 		}
-		deleted = append(deleted, code)
-	}
-	if len(deleted) == 0 {
-		return deleted, missing, nil
-	}
-	if err := s.saveLocked(); err != nil {
-		for code, reg := range previous {
-			s.state.RegCodes[code] = reg
+		return nil
+	})
+}
+
+func (s *Store) DeleteRegCodes(codes []string) (deleted []string, missing []string, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	mutErr := s.mutateAndSaveLocked(func() error {
+		seen := map[string]bool{}
+		for _, code := range codes {
+			code = strings.TrimSpace(code)
+			if code == "" || seen[code] {
+				continue
+			}
+			seen[code] = true
+			reg, ok := s.state.RegCodes[code]
+			if !ok {
+				missing = append(missing, code)
+				continue
+			}
+			if regCodeHasUsage(reg) {
+				reg.Active = false
+				s.state.RegCodes[code] = reg
+			} else {
+				delete(s.state.RegCodes, code)
+			}
+			deleted = append(deleted, code)
 		}
-		return nil, nil, err
+		return nil
+	})
+	if mutErr != nil {
+		// 失败时整批回滚（mutateAndSaveLocked 已经把内存恢复到快照），
+		// 不再向调用方暴露半量结果。
+		return nil, nil, mutErr
 	}
 	return deleted, missing, nil
 }
@@ -2475,26 +2480,36 @@ func regCodeHasUsage(code RegCode) bool {
 func (s *Store) CreateRebindRequest(req RebindRequest) (RebindRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
+	var existingHit RebindRequest
+	var hit bool
+	err := s.mutateAndSaveLocked(func() error {
+		for _, existing := range s.state.RebindRequests {
+			if existing.UID == req.UID && existing.Status == "pending" {
+				existingHit = existing
+				hit = true
+				return ErrConflict
+			}
+		}
+		if req.ID == 0 {
+			req.ID = s.state.NextRebindRequestID
+			s.state.NextRebindRequestID++
+		}
+		if req.Status == "" {
+			req.Status = "pending"
+		}
+		if req.CreatedAt == 0 {
+			req.CreatedAt = time.Now().Unix()
+		}
+		s.state.RebindRequests[req.ID] = req
+		return nil
+	})
+	if hit {
+		return existingHit, ErrConflict
+	}
+	if err != nil {
 		return RebindRequest{}, err
 	}
-	for _, existing := range s.state.RebindRequests {
-		if existing.UID == req.UID && existing.Status == "pending" {
-			return existing, ErrConflict
-		}
-	}
-	if req.ID == 0 {
-		req.ID = s.state.NextRebindRequestID
-		s.state.NextRebindRequestID++
-	}
-	if req.Status == "" {
-		req.Status = "pending"
-	}
-	if req.CreatedAt == 0 {
-		req.CreatedAt = time.Now().Unix()
-	}
-	s.state.RebindRequests[req.ID] = req
-	return req, s.saveLocked()
+	return req, nil
 }
 
 func (s *Store) ListRebindRequests(status string) []RebindRequest {
@@ -2513,19 +2528,24 @@ func (s *Store) ListRebindRequests(status string) []RebindRequest {
 func (s *Store) ReviewRebindRequest(id, reviewerUID int64, status, note string) (RebindRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
+	var updated RebindRequest
+	err := s.mutateAndSaveLocked(func() error {
+		req, ok := s.state.RebindRequests[id]
+		if !ok {
+			return ErrNotFound
+		}
+		req.Status = status
+		req.AdminNote = note
+		req.ReviewerUID = reviewerUID
+		req.ReviewedAt = time.Now().Unix()
+		s.state.RebindRequests[id] = req
+		updated = req
+		return nil
+	})
+	if err != nil {
 		return RebindRequest{}, err
 	}
-	req, ok := s.state.RebindRequests[id]
-	if !ok {
-		return RebindRequest{}, ErrNotFound
-	}
-	req.Status = status
-	req.AdminNote = note
-	req.ReviewerUID = reviewerUID
-	req.ReviewedAt = time.Now().Unix()
-	s.state.RebindRequests[id] = req
-	return req, s.saveLocked()
+	return updated, nil
 }
 
 func (s *Store) UpsertTelegramRoster(chatID string, telegramID int64, status string, isBot bool) error {
@@ -2538,22 +2558,21 @@ func (s *Store) UpsertTelegramRoster(chatID string, telegramID int64, status str
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return err
-	}
-	key := telegramRosterKey(chatID, telegramID)
-	now := time.Now().Unix()
-	entry, ok := s.state.TelegramRoster[key]
-	if !ok {
-		entry = TelegramRosterEntry{ChatID: chatID, TelegramID: telegramID, FirstSeen: now}
-	}
-	entry.LastSeen = now
-	entry.LastStatus = status
-	if isBot {
-		entry.IsBot = true
-	}
-	s.state.TelegramRoster[key] = entry
-	return s.saveLocked()
+	return s.mutateAndSaveLocked(func() error {
+		key := telegramRosterKey(chatID, telegramID)
+		now := time.Now().Unix()
+		entry, ok := s.state.TelegramRoster[key]
+		if !ok {
+			entry = TelegramRosterEntry{ChatID: chatID, TelegramID: telegramID, FirstSeen: now}
+		}
+		entry.LastSeen = now
+		entry.LastStatus = status
+		if isBot {
+			entry.IsBot = true
+		}
+		s.state.TelegramRoster[key] = entry
+		return nil
+	})
 }
 
 func (s *Store) MarkTelegramRosterLeft(chatID string, telegramID int64, status string) error {
@@ -2566,18 +2585,17 @@ func (s *Store) MarkTelegramRosterLeft(chatID string, telegramID int64, status s
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return err
-	}
-	key := telegramRosterKey(chatID, telegramID)
-	entry, ok := s.state.TelegramRoster[key]
-	if !ok {
-		entry = TelegramRosterEntry{ChatID: chatID, TelegramID: telegramID, FirstSeen: time.Now().Unix()}
-	}
-	entry.LastSeen = time.Now().Unix()
-	entry.LastStatus = status
-	s.state.TelegramRoster[key] = entry
-	return s.saveLocked()
+	return s.mutateAndSaveLocked(func() error {
+		key := telegramRosterKey(chatID, telegramID)
+		entry, ok := s.state.TelegramRoster[key]
+		if !ok {
+			entry = TelegramRosterEntry{ChatID: chatID, TelegramID: telegramID, FirstSeen: time.Now().Unix()}
+		}
+		entry.LastSeen = time.Now().Unix()
+		entry.LastStatus = status
+		s.state.TelegramRoster[key] = entry
+		return nil
+	})
 }
 
 func (s *Store) TelegramRoster(chatID string, activeOnly bool) []TelegramRosterEntry {
@@ -2695,16 +2713,15 @@ func telegramRosterActive(status string) bool {
 func (s *Store) AddViolationLog(log ViolationLog) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return err
-	}
-	// 用单调递增计数器而非 len()+1：删除条目后再插入会复用旧 ID，
-	// 既会破坏外部引用（admin UI / 操作日志按 ID 关联），也会导致审计追溯
-	// 错乱。NextViolationLogID 与其他业务域计数器同款 pattern。
-	log.ID = s.state.NextViolationLogID
-	s.state.NextViolationLogID++
-	s.state.ViolationLogs = append(s.state.ViolationLogs, log)
-	return s.saveLocked()
+	return s.mutateAndSaveLocked(func() error {
+		// 用单调递增计数器而非 len()+1：删除条目后再插入会复用旧 ID,
+		// 既会破坏外部引用（admin UI / 操作日志按 ID 关联），也会导致审计追溯
+		// 错乱。NextViolationLogID 与其他业务域计数器同款 pattern。
+		log.ID = s.state.NextViolationLogID
+		s.state.NextViolationLogID++
+		s.state.ViolationLogs = append(s.state.ViolationLogs, log)
+		return nil
+	})
 }
 
 // ListViolationLogs returns all violation logs, newest first.
@@ -2723,27 +2740,25 @@ func (s *Store) ListViolationLogs() []ViolationLog {
 func (s *Store) DeleteViolationLog(id int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return err
-	}
-	for i, log := range s.state.ViolationLogs {
-		if log.ID == id {
-			s.state.ViolationLogs = append(s.state.ViolationLogs[:i], s.state.ViolationLogs[i+1:]...)
-			return s.saveLocked()
+	return s.mutateAndSaveLocked(func() error {
+		for i, log := range s.state.ViolationLogs {
+			if log.ID == id {
+				s.state.ViolationLogs = append(s.state.ViolationLogs[:i], s.state.ViolationLogs[i+1:]...)
+				return nil
+			}
 		}
-	}
-	return ErrNotFound
+		return ErrNotFound
+	})
 }
 
 // ClearViolationLogs removes all violation logs.
 func (s *Store) ClearViolationLogs() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return err
-	}
-	s.state.ViolationLogs = nil
-	return s.saveLocked()
+	return s.mutateAndSaveLocked(func() error {
+		s.state.ViolationLogs = nil
+		return nil
+	})
 }
 
 var (
