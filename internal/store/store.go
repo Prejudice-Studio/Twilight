@@ -1266,6 +1266,131 @@ func (s *Store) UpdateUser(uid int64, fn func(*User) error) (User, error) {
 	return u, s.saveLocked()
 }
 
+// SetUserRoleAtomic 在同一把写锁内做 last-admin 计数 + 写入。
+// 解决了原 handleAdminUpdateUser / handleAdminSetRole 把"读 ListUsers 计数"
+// 与"UpdateUser 闭包"分两段执行导致的 TOCTOU：两个 admin 并发降级两个不同 admin
+// 时，原先各自看到 adminCount=2 都通过校验，事后剩 0 admin。
+//
+// 当目标当前是 active admin、新 role 不是 admin 时，要求剩余 active admin >=1，
+// 否则返回 ErrLastAdmin 让 handler 转 409。
+func (s *Store) SetUserRoleAtomic(uid int64, newRole int) (User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return User{}, err
+	}
+	u, ok := s.state.Users[uid]
+	if !ok {
+		return User{}, ErrNotFound
+	}
+	if u.Role == RoleAdmin && u.Active && newRole != RoleAdmin {
+		others := 0
+		for _, other := range s.state.Users {
+			if other.UID != u.UID && other.Role == RoleAdmin && other.Active {
+				others++
+			}
+		}
+		if others == 0 {
+			return User{}, ErrLastAdmin
+		}
+	}
+	u.Role = newRole
+	s.state.Users[uid] = u
+	return u, s.saveLocked()
+}
+
+// SetUserActiveAtomic 与 SetUserRoleAtomic 同理，处理"禁用最后一个 active admin"。
+// 解决 handleAdminToggleUser 把"是否最后 admin"放在闭包外快照读取的问题。
+func (s *Store) SetUserActiveAtomic(uid int64, active bool) (User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return User{}, err
+	}
+	u, ok := s.state.Users[uid]
+	if !ok {
+		return User{}, ErrNotFound
+	}
+	if u.Active && !active && u.Role == RoleAdmin {
+		others := 0
+		for _, other := range s.state.Users {
+			if other.UID != u.UID && other.Role == RoleAdmin && other.Active {
+				others++
+			}
+		}
+		if others == 0 {
+			return User{}, ErrLastAdmin
+		}
+	}
+	u.Active = active
+	s.state.Users[uid] = u
+	return u, s.saveLocked()
+}
+
+// BindUserTelegramAtomic 同把锁内：唯一性校验 + admin 自保 + 写入。
+// 解决 handleAdminBindTelegram 闭包外 FindUserByTelegramID 与 UpdateUser
+// 闭包写之间的 TOCTOU。
+func (s *Store) BindUserTelegramAtomic(uid int64, tgid int64, currentUID int64) (User, int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return User{}, 0, err
+	}
+	u, ok := s.state.Users[uid]
+	if !ok {
+		return User{}, 0, ErrNotFound
+	}
+	if u.Role == RoleAdmin && u.UID != currentUID {
+		return User{}, 0, ErrConflict
+	}
+	if tgid != 0 {
+		for _, other := range s.state.Users {
+			if other.UID != uid && other.TelegramID == tgid {
+				return User{}, 0, ErrConflict
+			}
+		}
+	}
+	old := u.TelegramID
+	u.TelegramID = tgid
+	s.state.Users[uid] = u
+	return u, old, s.saveLocked()
+}
+
+// BindUserEmbyAtomic 同把锁内做 EmbyID 唯一性 + force rebind。
+// force=true 时若 EmbyID 已绑在另一用户身上，会先把对方解绑再绑给目标，
+// 一次写入完成；非 force 模式下冲突直接 ErrConflict。
+// 解决 handleAdminBindEmby 在两段独立锁之间被第三方再次绑定的窗口。
+func (s *Store) BindUserEmbyAtomic(uid int64, embyID, embyUsername string, force bool) (User, int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return User{}, 0, err
+	}
+	u, ok := s.state.Users[uid]
+	if !ok {
+		return User{}, 0, ErrNotFound
+	}
+	displaced := int64(0)
+	if embyID != "" {
+		for _, other := range s.state.Users {
+			if other.UID != uid && other.EmbyID == embyID {
+				if !force {
+					return User{}, 0, ErrConflict
+				}
+				other.EmbyID = ""
+				other.EmbyUsername = ""
+				s.state.Users[other.UID] = other
+				displaced = other.UID
+				break
+			}
+		}
+	}
+	u.EmbyID = embyID
+	u.EmbyUsername = embyUsername
+	s.state.Users[uid] = u
+	return u, displaced, s.saveLocked()
+}
+
 // DeleteUser 删除用户并级联清理所有 UID-键控的衍生数据。
 // 级联策略：
 //
@@ -2347,9 +2472,10 @@ func (s *Store) ClearViolationLogs() error {
 }
 
 var (
-	ErrNotFound = errors.New("not found")
-	ErrConflict = errors.New("conflict")
-	ErrExpired  = errors.New("expired")
+	ErrNotFound  = errors.New("not found")
+	ErrConflict  = errors.New("conflict")
+	ErrExpired   = errors.New("expired")
+	ErrLastAdmin = errors.New("last admin")
 )
 
 func randomKey(prefix string, id, now int64) string {
