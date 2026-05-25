@@ -29,7 +29,6 @@ import {
   BookOpen,
   Info,
   CircleDot,
-  Github,
   GitPullRequest,
   Database,
   Archive,
@@ -37,6 +36,7 @@ import {
   Upload,
   Image as ImageIcon,
 } from "lucide-react";
+import { GithubIcon } from "@/components/icons/github-icon";
 import {
   Card,
   CardContent,
@@ -1798,7 +1798,7 @@ export default function AdminConfigPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Github className="h-5 w-5" />
+                  <GithubIcon className="h-5 w-5" />
                   Git 自动更新
                 </CardTitle>
                 <CardDescription>
@@ -1860,7 +1860,7 @@ export default function AdminConfigPage() {
                     rel="noreferrer"
                     className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
                   >
-                    <Github className="h-4 w-4" />
+                    <GithubIcon className="h-4 w-4" />
                     打开 GitHub
                   </a>
                 </div>

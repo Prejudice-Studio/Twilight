@@ -13,7 +13,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { cn } from "@/lib/utils";
 import { sanitizeImageUrl } from "@/lib/safe-url";
 import { adminNavItems, filterNavItems, userNavItems } from "@/components/layout/sidebar";
-import { Github, Menu, Moon, Sparkles, Sun } from "lucide-react";
+import { Menu, Moon, Sparkles, Sun } from "lucide-react";
+import { GithubIcon } from "@/components/icons/github-icon";
 
 export function Header() {
   const pathname = usePathname();
@@ -113,7 +114,7 @@ export function Header() {
                   rel="noreferrer"
                   className="col-span-2 flex h-11 min-w-0 items-center justify-center gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
                 >
-                  <Github className="h-4 w-4 shrink-0" />
+                  <GithubIcon className="h-4 w-4 shrink-0" />
                   <span className="truncate">GitHub Project</span>
                 </a>
                 <Button

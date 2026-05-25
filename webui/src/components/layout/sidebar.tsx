@@ -28,10 +28,10 @@ import {
   GitBranch,
   Network,
   Coins,
-  Github,
   ScrollText,
   ShieldAlert,
 } from "lucide-react";
+import { GithubIcon } from "@/components/icons/github-icon";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -278,7 +278,7 @@ export function Sidebar() {
             rel="noreferrer"
             className="flex items-center justify-center gap-2 rounded-full border border-border/70 bg-background/60 px-3 py-2 text-xs font-medium text-muted-foreground transition-all hover:bg-primary/10 hover:text-primary"
           >
-            <Github className="h-4 w-4" />
+            <GithubIcon className="h-4 w-4" />
             GitHub Project
           </a>
 
