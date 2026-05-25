@@ -2618,3 +2618,51 @@ func findCookie(cookies []*http.Cookie, name string) *http.Cookie {
 	}
 	return nil
 }
+
+// TestDecodeMapEnforcesSizeAndDepthLimits 验证 decodeMap 在 256KB / 32 层
+// 边界外都返回空 map，避免攻击者通过超大 payload / 深嵌套 JSON 让单次解码
+// 吃光内存或拖慢后续遍历。
+func TestDecodeMapEnforcesSizeAndDepthLimits(t *testing.T) {
+	t.Run("rejects body over size limit", func(t *testing.T) {
+		// 构造略大于 maxJSONBodyBytes 的 payload：用一个长字符串字段顶到上限。
+		big := make([]byte, maxJSONBodyBytes+1024)
+		for i := range big {
+			big[i] = 'a'
+		}
+		body := []byte(`{"data":"`)
+		body = append(body, big...)
+		body = append(body, []byte(`"}`)...)
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		got := decodeMap(req)
+		if len(got) != 0 {
+			t.Fatalf("expected empty map for oversized body, got %v", got)
+		}
+	})
+	t.Run("rejects deeply nested payload", func(t *testing.T) {
+		var b strings.Builder
+		// 深度 = maxJSONNestingDepth + 5：一定越界。
+		depth := maxJSONNestingDepth + 5
+		for i := 0; i < depth; i++ {
+			b.WriteString(`{"a":`)
+		}
+		b.WriteString(`1`)
+		for i := 0; i < depth; i++ {
+			b.WriteString(`}`)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(b.String()))
+		req.Header.Set("Content-Type", "application/json")
+		got := decodeMap(req)
+		if len(got) != 0 {
+			t.Fatalf("expected empty map for over-nested body, got %v", got)
+		}
+	})
+	t.Run("accepts shallow payload within limits", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"a":{"b":{"c":1}}}`))
+		req.Header.Set("Content-Type", "application/json")
+		got := decodeMap(req)
+		if len(got) == 0 {
+			t.Fatalf("expected non-empty map for shallow body")
+		}
+	})
+}

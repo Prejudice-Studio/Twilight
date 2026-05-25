@@ -1106,7 +1106,11 @@ func decodeJSON(r *http.Request, dst any) error {
 	if r.Body == nil {
 		return nil
 	}
-	decoder := json.NewDecoder(r.Body)
+	// 与 decodeMap 一致地施加 256KB 上限。MaxUploadSize（默认 5MB）面向上传场景，
+	// JSON body 不应当吃到那个量级；任何接近 256KB 的请求基本是滥用 / 探测，
+	// 提早 EOF 即可。
+	body := http.MaxBytesReader(nil, r.Body, maxJSONBodyBytes)
+	decoder := json.NewDecoder(body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(dst); err != nil {
 		return err
@@ -1114,15 +1118,59 @@ func decodeJSON(r *http.Request, dst any) error {
 	return nil
 }
 
+// maxJSONBodyBytes 是 decodeMap / decodeJSON 默认接受的 JSON 上限，避免攻击者
+// 提交超大 payload 在 map[string]any 解码阶段吃光内存。256KB 远高于业务实际
+// 用到的 payload（绑定 / 注册 / 列表查询都在数 KB 量级），但又足以挡住明显
+// 异常的批量提交。需要更大的接口（如导入 / 上传）应单独走 MaxUploadSize 路径
+// 与显式的 schema，不再过 decodeMap。
+const maxJSONBodyBytes = 256 * 1024
+
+// maxJSONNestingDepth 限制 decodeMap 接受的最大嵌套层级。Go 的 encoding/json
+// 没有原生 depth guard，恶意构造的 [[[[…]]]] 在解码阶段并不会立刻报错，但会
+// 让后续基于 reflect / type assertion 的遍历放大到栈爆炸的程度。32 层对真实
+// 业务（最多嵌套对象/数组几层）远绰绰有余。
+const maxJSONNestingDepth = 32
+
 func decodeMap(r *http.Request) map[string]any {
-	var payload map[string]any
+	payload := map[string]any{}
 	if r.Body == nil {
+		return payload
+	}
+	body := http.MaxBytesReader(nil, r.Body, maxJSONBodyBytes)
+	if err := json.NewDecoder(body).Decode(&payload); err != nil {
 		return map[string]any{}
 	}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+	if jsonDepthExceeds(payload, maxJSONNestingDepth) {
 		return map[string]any{}
 	}
 	return payload
+}
+
+// jsonDepthExceeds 在解码后做后置检查，发现深度超过 limit 立即返回 true。
+// 按 map / slice 递归即可；其它叶子值（string / float64 / bool / nil）算 0 层。
+func jsonDepthExceeds(value any, limit int) bool {
+	return jsonDepth(value, 0, limit)
+}
+
+func jsonDepth(value any, current, limit int) bool {
+	if current > limit {
+		return true
+	}
+	switch v := value.(type) {
+	case map[string]any:
+		for _, child := range v {
+			if jsonDepth(child, current+1, limit) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range v {
+			if jsonDepth(child, current+1, limit) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func stringValue(payload map[string]any, key string) string {
