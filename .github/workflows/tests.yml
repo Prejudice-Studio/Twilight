@@ -15,7 +15,7 @@ jobs:
         go-version: ['1.25.10']
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Set up Go ${{ matrix.go-version }}
       uses: actions/setup-go@v5
@@ -38,7 +38,7 @@ jobs:
   go-security:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -61,7 +61,7 @@ jobs:
   nix:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Install Nix
       uses: cachix/install-nix-action@v31
@@ -80,7 +80,7 @@ jobs:
       run:
         working-directory: webui
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Setup pnpm
       # 不传 version，让 action 从 webui/package.json 的 packageManager 字段读，
