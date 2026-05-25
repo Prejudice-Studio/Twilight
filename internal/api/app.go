@@ -72,6 +72,12 @@ type App struct {
 	telegramPanels        map[string]telegramPanelContext
 	embyAdminMu           sync.Mutex
 	embyAdminCache        map[string]embyAdminCacheEntry
+	// schedulerLocks: jobID -> *schedulerProcessRun。BATCH_07 之前在 package 级
+	// 声明 (`var schedulerProcessLocks sync.Map`)，单进程 prod 不显问题，但
+	// 测试 setup 反复 New() 出多个 App 时这张表共享 → 一个 case cancel 的 job
+	// 让另一 case 的 LoadOrStore 误判为 already running，flake 出现。收回到
+	// instance 字段后每个 App 自带独立锁表。零值即可使用。
+	schedulerLocks sync.Map
 }
 
 // runtimeState 把 reload 期间会一并替换的运行时句柄打包成一个不可变快照，

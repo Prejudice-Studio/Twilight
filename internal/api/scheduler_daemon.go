@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/prejudice-studio/twilight/internal/store"
@@ -341,12 +340,15 @@ type schedulerProcessRun struct {
 	started int64
 }
 
-var schedulerProcessLocks sync.Map
+// schedulerProcessLocks 已迁移到 App.schedulerLocks（app.go）。原本是 package
+// 级 sync.Map，单进程 prod 没问题，但测试 setup 反复 New() 出多个 App 时
+// 该表跨实例共享，会让一个 case 的 cancel 影响另一 case 的 LoadOrStore，
+// 偶发 flake。改为 instance 字段后每个 App 自带独立锁。
 
 func (a *App) startSchedulerRun(ctx context.Context, jobID string) (context.Context, func(), bool) {
 	runCtx, cancel := context.WithCancel(ctx)
 	run := &schedulerProcessRun{cancel: cancel, started: time.Now().Unix()}
-	actual, loaded := schedulerProcessLocks.LoadOrStore(jobID, run)
+	actual, loaded := a.schedulerLocks.LoadOrStore(jobID, run)
 	if loaded {
 		cancel()
 		_ = actual
@@ -354,20 +356,20 @@ func (a *App) startSchedulerRun(ctx context.Context, jobID string) (context.Cont
 	}
 	finish := func() {
 		cancel()
-		if current, ok := schedulerProcessLocks.Load(jobID); ok && current == run {
-			schedulerProcessLocks.Delete(jobID)
+		if current, ok := a.schedulerLocks.Load(jobID); ok && current == run {
+			a.schedulerLocks.Delete(jobID)
 		}
 	}
 	return runCtx, finish, true
 }
 
 func (a *App) schedulerJobRunning(jobID string) bool {
-	_, ok := schedulerProcessLocks.Load(jobID)
+	_, ok := a.schedulerLocks.Load(jobID)
 	return ok
 }
 
 func (a *App) terminateSchedulerJob(jobID string) bool {
-	value, ok := schedulerProcessLocks.Load(jobID)
+	value, ok := a.schedulerLocks.Load(jobID)
 	if !ok {
 		return false
 	}
@@ -382,8 +384,8 @@ func (a *App) terminateSchedulerJob(jobID string) bool {
 	// finish() 永不执行，下一次 admin 点"重跑"被 LoadOrStore 短路成 not started。
 	// finish() 的 `current == run` 守卫保证：旧 goroutine 若日后真的醒来，
 	// 不会误删新一轮起的同名任务。
-	if current, ok := schedulerProcessLocks.Load(jobID); ok && current == run {
-		schedulerProcessLocks.Delete(jobID)
+	if current, ok := a.schedulerLocks.Load(jobID); ok && current == run {
+		a.schedulerLocks.Delete(jobID)
 	}
 	return true
 }
