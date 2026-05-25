@@ -91,8 +91,8 @@ importers:
         specifier: ^12.40.0
         version: 12.40.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       geist:
-        specifier: ^1.3.1
-        version: 1.7.0(next@16.2.6(react-dom@18.3.1(react@18.3.1))(react@18.3.1))
+        specifier: ^1.7.1
+        version: 1.7.1(next@16.2.6(react-dom@18.3.1(react@18.3.1))(react@18.3.1))
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@18.3.1)
@@ -2870,8 +2870,8 @@ packages:
   functions-have-names@1.2.3:
     resolution: {integrity: sha512-xckBUXyTIqT97tq2x2AMb+g163b5JFysYk0x4qxNFwbfQkmNZoiRHb6sPzI9/QV33WeuvVYBUIiD4NzNIyqaRQ==}
 
-  geist@1.7.0:
-    resolution: {integrity: sha512-ZaoiZwkSf0DwwB1ncdLKp+ggAldqxl5L1+SXaNIBGkPAqcu+xjVJLxlf3/S8vLt9UHx1xu5fz3lbzKCj5iOVdQ==}
+  geist@1.7.1:
+    resolution: {integrity: sha512-XF8DM30ODhDu0Ng5S2kOS8j4ZkG/6z2fKWAiFJA7wG0Hc92ZXgjYLrwbD9bVU4nGVzwboPtG+QtaPGsfgnXLaA==}
     peerDependencies:
       next: '>=13.2.0'
 
@@ -7517,7 +7517,7 @@ snapshots:
 
   functions-have-names@1.2.3: {}
 
-  geist@1.7.0(next@16.2.6(react-dom@18.3.1(react@18.3.1))(react@18.3.1)):
+  geist@1.7.1(next@16.2.6(react-dom@18.3.1(react@18.3.1))(react@18.3.1)):
     dependencies:
       next: 16.2.6(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
 
