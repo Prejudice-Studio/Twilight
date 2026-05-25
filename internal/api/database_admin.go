@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/prejudice-studio/twilight/internal/store"
 )
 
@@ -329,10 +331,13 @@ func (a *App) handleDatabaseMigrate(w http.ResponseWriter, r *http.Request, _ Pa
 }
 
 func databasePostgresErrorMessage(prefix string, err error) string {
-	if err == nil {
-		return prefix
+	// lib/pq 原始错误会带 host/port/dbname/user/SQLSTATE 等连接拓扑信息，
+	// 直接拼到响应里给前端会让任何拿到 admin token 的攻击者通过 422 文案
+	// 反推出 PG 部署细节。这里只回固定语义错，原文走 zap 仅落本地日志。
+	if err != nil {
+		zap.L().Warn("postgres connect", zap.String("stage", prefix), zap.Error(err))
 	}
-	return prefix + ": " + err.Error()
+	return prefix + "，请检查数据库连接配置"
 }
 
 func postgresTargetReadyMap(driver string, status store.PostgresTargetStatus) map[string]any {
