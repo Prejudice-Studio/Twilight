@@ -26,10 +26,10 @@ func (a *App) handleBangumiWebhook(w http.ResponseWriter, r *http.Request, _ Par
 			usingQuerySecret = true
 		}
 	}
-	payload := decodeMap(r)
-	if secret == "" {
-		secret = stringValue(payload, "token")
-	}
+	// 鉴权必须在 decodeMap 之前完成：旧实现先 `decodeMap(r)` 再 `ConstantTimeCompare`，
+	// 任何未鉴权的请求都能让 server 把 body（受 MaxUploadSize 上限约束）读完并构建
+	// 完整 map[string]any，攻击者可以无凭据投递大体积 JSON 触发 GC 放大。改为只允许
+	// header / query token；body-token 废弃后整个 hot path 不再读 body。
 	if a.cfg.BangumiWebhookSecret == "" || subtle.ConstantTimeCompare([]byte(secret), []byte(a.cfg.BangumiWebhookSecret)) != 1 {
 		failWithCode(w, http.StatusForbidden, ErrUnauthorized, "Webhook 密钥无效")
 		return
@@ -40,6 +40,7 @@ func (a *App) handleBangumiWebhook(w http.ResponseWriter, r *http.Request, _ Par
 			zap.String("remote", r.RemoteAddr),
 		)
 	}
+	payload := decodeMap(r)
 	item, _ := payload["Item"].(map[string]any)
 	eventName := strings.ToLower(firstNonEmpty(asString(payload["Event"]), asString(payload["NotificationType"]), asString(payload["Name"])))
 	if item != nil && (strings.Contains(eventName, "stop") || strings.Contains(eventName, "played") || payload["PlaybackPositionTicks"] != nil) {
