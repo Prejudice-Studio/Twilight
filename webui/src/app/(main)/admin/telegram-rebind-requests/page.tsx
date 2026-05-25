@@ -285,12 +285,24 @@ export default function AdminTelegramRebindRequestsPage() {
 
       {pages > 1 && (
         <div className="flex items-center justify-center gap-2">
-          <Button variant="outline" size="icon" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
-            <ChevronLeft className="h-4 w-4" />
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page === 1}
+            aria-label="上一页"
+          >
+            <ChevronLeft className="h-4 w-4" aria-hidden="true" />
           </Button>
           <span className="text-sm text-muted-foreground">第 {page} / {pages} 页</span>
-          <Button variant="outline" size="icon" onClick={() => setPage((p) => Math.min(pages, p + 1))} disabled={page === pages}>
-            <ChevronRight className="h-4 w-4" />
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setPage((p) => Math.min(pages, p + 1))}
+            disabled={page === pages}
+            aria-label="下一页"
+          >
+            <ChevronRight className="h-4 w-4" aria-hidden="true" />
           </Button>
         </div>
       )}

@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
+import { validateEmbyUsername } from "@/lib/validators";
 
 export default function ForgotPasswordPage() {
   const { toast } = useToast();
@@ -19,8 +20,13 @@ export default function ForgotPasswordPage() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!embyUsername.trim() || !embyPassword) {
-      toast({ title: "请填写 Emby 用户名和密码", variant: "destructive" });
+    const usernameCheck = validateEmbyUsername(embyUsername);
+    if (!usernameCheck.ok) {
+      toast({ title: usernameCheck.message, variant: "destructive" });
+      return;
+    }
+    if (!embyPassword) {
+      toast({ title: "请填写 Emby 密码", variant: "destructive" });
       return;
     }
     setIsLoading(true);
@@ -79,8 +85,14 @@ export default function ForgotPasswordPage() {
               <p className="mt-2 text-xs text-muted-foreground">新密码只显示一次，请立即复制并登录后修改。</p>
               <div className="mt-3 flex items-center gap-2">
                 <code className="min-w-0 flex-1 break-all rounded bg-background px-3 py-2 text-sm">{result.new_password}</code>
-                <Button type="button" size="icon" variant="outline" onClick={copyPassword}>
-                  <Copy className="h-4 w-4" />
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  onClick={copyPassword}
+                  aria-label="复制新密码"
+                >
+                  <Copy className="h-4 w-4" aria-hidden="true" />
                 </Button>
               </div>
             </div>

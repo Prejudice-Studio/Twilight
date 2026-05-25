@@ -36,7 +36,7 @@ import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import type { DatabaseBackup, DatabaseBackupInspectResult, DatabaseMigrationResult, DatabaseRestoreResult, DatabaseStatus } from "@/lib/api";
+import type { DatabaseBackup, DatabaseBackupInspectResult, DatabaseMigrationResult, DatabaseRestoreResult, DatabaseStatus } from "@/lib/api-types";
 
 const DATABASE_MIGRATE_CONFIRM = "MIGRATE_DATABASE";
 

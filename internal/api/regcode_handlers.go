@@ -124,6 +124,10 @@ func (a *App) handleBatchDeleteRegcodes(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	payload := decodeMap(r)
+	if stringValue(payload, "confirm") != confirmBatchDeleteRegcodes {
+		fail(w, http.StatusBadRequest, "missing confirm "+confirmBatchDeleteRegcodes)
+		return
+	}
 	codes := regcodePayloadCodes(payload["codes"])
 	if len(codes) == 0 {
 		fail(w, http.StatusBadRequest, "请选择要删除的注册码")

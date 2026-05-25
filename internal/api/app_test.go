@@ -70,6 +70,46 @@ func newTestApp(t *testing.T) *App {
 	return app
 }
 
+// registerAndLogin 注册并登录指定账户，返回 session + csrf cookie 切片。
+// 把两个 cookie 一起回传，是因为所有 mutating 请求都需要 csrf。
+func registerAndLogin(t *testing.T, app *App, username, password string) []*http.Cookie {
+	t.Helper()
+	register := doJSON(app, http.MethodPost, "/api/v1/users/register", fmt.Sprintf(`{"username":%q,"password":%q}`, username, password), nil)
+	if register.Code != http.StatusCreated {
+		t.Fatalf("register %s status = %d body=%s", username, register.Code, register.Body.String())
+	}
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", fmt.Sprintf(`{"username":%q,"password":%q}`, username, password), nil)
+	if login.Code != http.StatusOK {
+		t.Fatalf("login %s status = %d body=%s", username, login.Code, login.Body.String())
+	}
+	session := findCookie(login.Result().Cookies(), "twilight_session")
+	if session == nil {
+		t.Fatalf("missing session cookie for %s", username)
+	}
+	csrf := findCookie(login.Result().Cookies(), "twilight_session_csrf")
+	if csrf == nil {
+		t.Fatalf("missing csrf cookie for %s", username)
+	}
+	return []*http.Cookie{session, csrf}
+}
+
+// loginCookies 从已存在的账户登录，返回 session + csrf cookie 切片。
+// 仅用于 inline 登录流程（不走注册 helper）。
+func loginCookies(t *testing.T, app *App, username, password string) []*http.Cookie {
+	t.Helper()
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", fmt.Sprintf(`{"username":%q,"password":%q}`, username, password), nil)
+	if login.Code != http.StatusOK {
+		t.Fatalf("login %s status=%d body=%s", username, login.Code, login.Body.String())
+	}
+	all := login.Result().Cookies()
+	session := findCookie(all, "twilight_session")
+	csrf := findCookie(all, "twilight_session_csrf")
+	if session == nil || csrf == nil {
+		t.Fatalf("login %s missing cookies session=%v csrf=%v", username, session, csrf)
+	}
+	return []*http.Cookie{session, csrf}
+}
+
 func TestRegcodeWritesBlockedWhenRuntimeDatabaseMismatchesConfig(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg.DatabaseDriver = store.BackendPostgres
@@ -92,21 +132,29 @@ func TestRegcodeWritesBlockedWhenRuntimeDatabaseMismatchesConfig(t *testing.T) {
 func TestAuthFlowAndCSRFMitigation(t *testing.T) {
 	app := newTestApp(t)
 
-	register := doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
+	register := doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
 	if register.Code != http.StatusCreated {
 		t.Fatalf("register status = %d body=%s", register.Code, register.Body.String())
 	}
 
-	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	if login.Code != http.StatusOK {
 		t.Fatalf("login status = %d body=%s", login.Code, login.Body.String())
 	}
 	cookie := findCookie(login.Result().Cookies(), "twilight_session")
+	csrfCookie := findCookie(login.Result().Cookies(), "twilight_session_csrf")
 	if cookie == nil || !cookie.HttpOnly {
 		t.Fatalf("expected httponly session cookie, got %#v", cookie)
 	}
+	if csrfCookie == nil || csrfCookie.HttpOnly {
+		t.Fatalf("expected non-HttpOnly csrf cookie, got %#v", csrfCookie)
+	}
+	if csrfCookie.Value == "" || len(csrfCookie.Value) != 64 {
+		t.Fatalf("expected 64-char hex csrf token, got %q (len=%d)", csrfCookie.Value, len(csrfCookie.Value))
+	}
 
-	me := doJSON(app, http.MethodGet, "/api/v1/users/me", ``, []*http.Cookie{cookie})
+	// GET 不需要 CSRF。
+	me := doJSON(app, http.MethodGet, "/api/v1/users/me", ``, []*http.Cookie{cookie, csrfCookie})
 	if me.Code != http.StatusOK {
 		t.Fatalf("me status = %d body=%s", me.Code, me.Body.String())
 	}
@@ -114,14 +162,43 @@ func TestAuthFlowAndCSRFMitigation(t *testing.T) {
 		t.Fatal("missing security header")
 	}
 
-	blocked := doJSON(app, http.MethodPut, "/api/v1/users/me", `{"email":"a@example.com"}`, []*http.Cookie{cookie})
-	if blocked.Code != http.StatusForbidden {
-		t.Fatalf("csrf status = %d body=%s", blocked.Code, blocked.Body.String())
+	// 仅有 session、缺 CSRF cookie + header → 403。
+	// 直接用 httptest 构造请求绕开 doJSONWithHeaders 的自动注入。
+	build := func(extraHeaders map[string]string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/users/me", strings.NewReader(`{"email":"a@example.com"}`))
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range extraHeaders {
+			req.Header.Set(k, v)
+		}
+		for _, c := range cookies {
+			req.AddCookie(c)
+		}
+		rr := httptest.NewRecorder()
+		app.ServeHTTP(rr, req)
+		return rr
 	}
 
-	allowed := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me", `{"email":"a@example.com"}`, []*http.Cookie{cookie}, map[string]string{"X-Twilight-Client": "webui"})
+	noCSRF := build(nil, cookie)
+	if noCSRF.Code != http.StatusForbidden || !strings.Contains(noCSRF.Body.String(), `"error_code":"AUTH_CSRF_MISSING"`) {
+		t.Fatalf("expected 403 AUTH_CSRF_MISSING when no csrf cookie+header, got status=%d body=%s", noCSRF.Code, noCSRF.Body.String())
+	}
+
+	// CSRF cookie 在但 header 缺 → 403。
+	cookieOnly := build(nil, cookie, csrfCookie)
+	if cookieOnly.Code != http.StatusForbidden || !strings.Contains(cookieOnly.Body.String(), `"error_code":"AUTH_CSRF_MISSING"`) {
+		t.Fatalf("expected 403 when header missing, got status=%d body=%s", cookieOnly.Code, cookieOnly.Body.String())
+	}
+
+	// header 有但与 cookie 不一致（伪造）→ 403。
+	mismatch := build(map[string]string{"X-CSRF-Token": "0000000000000000000000000000000000000000000000000000000000000000"}, cookie, csrfCookie)
+	if mismatch.Code != http.StatusForbidden || !strings.Contains(mismatch.Body.String(), `"error_code":"AUTH_CSRF_MISSING"`) {
+		t.Fatalf("expected 403 on mismatched csrf, got status=%d body=%s", mismatch.Code, mismatch.Body.String())
+	}
+
+	// 两边一致 → 200。
+	allowed := build(map[string]string{"X-CSRF-Token": csrfCookie.Value}, cookie, csrfCookie)
 	if allowed.Code != http.StatusOK {
-		t.Fatalf("update status = %d body=%s", allowed.Code, allowed.Body.String())
+		t.Fatalf("expected 200 with matching csrf, got status=%d body=%s", allowed.Code, allowed.Body.String())
 	}
 }
 
@@ -166,11 +243,13 @@ func TestCredentialedCORSRequiresExplicitOrigin(t *testing.T) {
 
 func TestAPIKeyFlow(t *testing.T) {
 	app := newTestApp(t)
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
-	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	cookie := findCookie(login.Result().Cookies(), "twilight_session")
+	csrfCookie := findCookie(login.Result().Cookies(), "twilight_session_csrf")
+	_ = csrfCookie
 
-	created := doJSONWithHeaders(app, http.MethodPost, "/api/v1/users/me/apikeys", `{"name":"ci","rate_limit":50}`, []*http.Cookie{cookie}, map[string]string{"X-Twilight-Client": "webui"})
+	created := doJSONWithHeaders(app, http.MethodPost, "/api/v1/users/me/apikeys", `{"name":"ci","rate_limit":50}`, []*http.Cookie{cookie, csrfCookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if created.Code != http.StatusOK {
 		t.Fatalf("create key status = %d body=%s", created.Code, created.Body.String())
 	}
@@ -222,9 +301,11 @@ func TestFrontendRouteCompatibilityDoesNot404(t *testing.T) {
 
 func TestUploadRejectsNonImage(t *testing.T) {
 	app := newTestApp(t)
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
-	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	cookie := findCookie(login.Result().Cookies(), "twilight_session")
+	csrfCookie := findCookie(login.Result().Cookies(), "twilight_session_csrf")
+	_ = csrfCookie
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
@@ -238,7 +319,9 @@ func TestUploadRejectsNonImage(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/avatar/upload", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("X-Twilight-Client", "webui")
+	req.Header.Set("X-CSRF-Token", csrfCookie.Value)
 	req.AddCookie(cookie)
+	req.AddCookie(csrfCookie)
 	rr := httptest.NewRecorder()
 	app.ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadRequest {
@@ -249,9 +332,11 @@ func TestUploadRejectsNonImage(t *testing.T) {
 func TestAdminServerIconUploadUpdatesConfig(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg.ConfigFile = filepath.Join(app.cfg.DatabaseDir, "config.toml")
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
-	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	cookie := findCookie(login.Result().Cookies(), "twilight_session")
+	csrfCookie := findCookie(login.Result().Cookies(), "twilight_session_csrf")
+	_ = csrfCookie
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
@@ -265,7 +350,9 @@ func TestAdminServerIconUploadUpdatesConfig(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/system/admin/server-icon/upload", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("X-Twilight-Client", "webui")
+	req.Header.Set("X-CSRF-Token", csrfCookie.Value)
 	req.AddCookie(cookie)
+	req.AddCookie(csrfCookie)
 	rr := httptest.NewRecorder()
 	app.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -304,9 +391,11 @@ func TestUploadImageExtensionWhitelist(t *testing.T) {
 
 func TestUploadAssetPathAndFilenameSafety(t *testing.T) {
 	app := newTestApp(t)
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
-	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	cookie := findCookie(login.Result().Cookies(), "twilight_session")
+	csrfCookie := findCookie(login.Result().Cookies(), "twilight_session_csrf")
+	_ = csrfCookie
 
 	validName := "0123456789abcdef.png"
 	avatarDir := filepath.Join(app.cfg.UploadDir, "avatar")
@@ -317,7 +406,7 @@ func TestUploadAssetPathAndFilenameSafety(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	valid := doJSON(app, http.MethodGet, "/api/v1/users/assets/avatar/"+validName, ``, []*http.Cookie{cookie})
+	valid := doJSON(app, http.MethodGet, "/api/v1/users/assets/avatar/"+validName, ``, []*http.Cookie{cookie, csrfCookie})
 	if valid.Code != http.StatusOK {
 		t.Fatalf("valid asset status=%d body=%s", valid.Code, valid.Body.String())
 	}
@@ -329,7 +418,7 @@ func TestUploadAssetPathAndFilenameSafety(t *testing.T) {
 		"/api/v1/users/assets/profile/" + validName,
 	}
 	for _, path := range invalids {
-		resp := doJSON(app, http.MethodGet, path, ``, []*http.Cookie{cookie})
+		resp := doJSON(app, http.MethodGet, path, ``, []*http.Cookie{cookie, csrfCookie})
 		if resp.Code != http.StatusNotFound {
 			t.Fatalf("invalid asset %s status=%d body=%s", path, resp.Code, resp.Body.String())
 		}
@@ -366,8 +455,8 @@ func TestProtectedAdminConfigHiddenPreservedAndApplied(t *testing.T) {
 		t.Fatalf("existing protected admin config was not preserved: %s", content)
 	}
 
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"owner","password":"owner123456"}`, nil)
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"alice","password":"alice123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"owner","password":"Owner123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"alice","password":"Alice123456"}`, nil)
 	alice, ok := app.store.FindUserByUsername("alice")
 	if !ok || alice.Role != store.RoleAdmin || !alice.Active {
 		t.Fatalf("configured admin username was not applied on registration: %#v", alice)
@@ -376,12 +465,14 @@ func TestProtectedAdminConfigHiddenPreservedAndApplied(t *testing.T) {
 
 func TestBackgroundConfigIsSanitized(t *testing.T) {
 	app := newTestApp(t)
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
-	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	cookie := findCookie(login.Result().Cookies(), "twilight_session")
+	csrfCookie := findCookie(login.Result().Cookies(), "twilight_session_csrf")
+	_ = csrfCookie
 	headers := map[string]string{"X-Twilight-Client": "webui"}
 
-	valid := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me/background", `{"lightBg":"linear-gradient(135deg, #111 0%, #222 100%)","lightBgImage":"url('/api/v1/users/assets/background/0123456789abcdef.png')","lightBlur":99,"lightOpacity":1}`, []*http.Cookie{cookie}, headers)
+	valid := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me/background", `{"lightBg":"linear-gradient(135deg, #111 0%, #222 100%)","lightBgImage":"url('/api/v1/users/assets/background/0123456789abcdef.png')","lightBlur":99,"lightOpacity":1}`, []*http.Cookie{cookie, csrfCookie}, headers)
 	if valid.Code != http.StatusOK {
 		t.Fatalf("valid background status=%d body=%s", valid.Code, valid.Body.String())
 	}
@@ -393,11 +484,11 @@ func TestBackgroundConfigIsSanitized(t *testing.T) {
 	if !strings.Contains(background, `"lightBlur":30`) || !strings.Contains(background, `"lightOpacity":10`) {
 		t.Fatalf("background bounds were not enforced: %s", background)
 	}
-	blockedURL := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me/background", `{"lightBgImage":"http://127.0.0.1/private.png"}`, []*http.Cookie{cookie}, headers)
+	blockedURL := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me/background", `{"lightBgImage":"http://127.0.0.1/private.png"}`, []*http.Cookie{cookie, csrfCookie}, headers)
 	if blockedURL.Code != http.StatusBadRequest {
 		t.Fatalf("external background URL status=%d body=%s", blockedURL.Code, blockedURL.Body.String())
 	}
-	blockedCSS := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me/background", `{"lightBg":"linear-gradient(red, blue);background:url(http://127.0.0.1/x)"}`, []*http.Cookie{cookie}, headers)
+	blockedCSS := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me/background", `{"lightBg":"linear-gradient(red, blue);background:url(http://127.0.0.1/x)"}`, []*http.Cookie{cookie, csrfCookie}, headers)
 	if blockedCSS.Code != http.StatusBadRequest {
 		t.Fatalf("unsafe background CSS status=%d body=%s", blockedCSS.Code, blockedCSS.Body.String())
 	}
@@ -405,17 +496,21 @@ func TestBackgroundConfigIsSanitized(t *testing.T) {
 
 func TestRegcodeInviteMediaAndSecurityFlows(t *testing.T) {
 	app := newTestApp(t)
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
-	adminLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
+	adminLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	adminCookie := findCookie(adminLogin.Result().Cookies(), "twilight_session")
+	adminCSRF := findCookie(adminLogin.Result().Cookies(), "twilight_session_csrf")
+	_ = adminCSRF
 
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"user","password":"user123456"}`, nil)
-	userLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"user","password":"user123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"user","password":"User123456"}`, nil)
+	userLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"user","password":"User123456"}`, nil)
 	userCookie := findCookie(userLogin.Result().Cookies(), "twilight_session")
+	userCSRF := findCookie(userLogin.Result().Cookies(), "twilight_session_csrf")
+	_ = userCSRF
 	user, _ := app.store.FindUserByUsername("user")
 	_, _ = app.store.UpdateUser(user.UID, func(u *store.User) error { u.TelegramID = 12345; return nil })
 
-	createdCodes := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/regcodes", `{"type":2,"days":15,"count":1,"random_algorithm":"hex20"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	createdCodes := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/regcodes", `{"type":2,"days":15,"count":1,"random_algorithm":"hex20"}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if createdCodes.Code != http.StatusOK {
 		t.Fatalf("create regcode status=%d body=%s", createdCodes.Code, createdCodes.Body.String())
 	}
@@ -425,15 +520,15 @@ func TestRegcodeInviteMediaAndSecurityFlows(t *testing.T) {
 	}
 	code := codeEnv.Data.(map[string]any)["codes"].([]any)[0].(string)
 
-	preview := doJSONWithHeaders(app, http.MethodPost, "/api/v1/users/me/use-code", `{"reg_code":"`+code+`","check_only":true}`, []*http.Cookie{userCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	preview := doJSONWithHeaders(app, http.MethodPost, "/api/v1/users/me/use-code", `{"reg_code":"`+code+`","check_only":true}`, []*http.Cookie{userCookie, userCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if preview.Code != http.StatusOK || !strings.Contains(preview.Body.String(), "续期") {
 		t.Fatalf("preview status=%d body=%s", preview.Code, preview.Body.String())
 	}
-	used := doJSONWithHeaders(app, http.MethodPost, "/api/v1/users/me/use-code", `{"reg_code":"`+code+`"}`, []*http.Cookie{userCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	used := doJSONWithHeaders(app, http.MethodPost, "/api/v1/users/me/use-code", `{"reg_code":"`+code+`"}`, []*http.Cookie{userCookie, userCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if used.Code != http.StatusOK {
 		t.Fatalf("use code status=%d body=%s", used.Code, used.Body.String())
 	}
-	batchCodes := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/regcodes", `{"type":1,"days":3,"count":2,"random_algorithm":"hex20"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	batchCodes := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/regcodes", `{"type":1,"days":3,"count":2,"random_algorithm":"hex20"}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if batchCodes.Code != http.StatusOK {
 		t.Fatalf("create batch regcodes status=%d body=%s", batchCodes.Code, batchCodes.Body.String())
 	}
@@ -442,22 +537,26 @@ func TestRegcodeInviteMediaAndSecurityFlows(t *testing.T) {
 		t.Fatal(err)
 	}
 	rawBatchCodes := batchEnv.Data.(map[string]any)["codes"].([]any)
-	deletePayload := `{"codes":["` + rawBatchCodes[0].(string) + `","` + rawBatchCodes[1].(string) + `","missing-code"]}`
-	batchDelete := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/regcodes/batch-delete", deletePayload, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	missingConfirmDelete := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/regcodes/batch-delete", `{"codes":["`+rawBatchCodes[0].(string)+`"]}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
+	if missingConfirmDelete.Code != http.StatusBadRequest || !strings.Contains(missingConfirmDelete.Body.String(), confirmBatchDeleteRegcodes) || !strings.Contains(missingConfirmDelete.Body.String(), `"error_code":"BAD_REQUEST"`) {
+		t.Fatalf("batch delete regcodes missing confirm status=%d body=%s", missingConfirmDelete.Code, missingConfirmDelete.Body.String())
+	}
+	deletePayload := `{"codes":["` + rawBatchCodes[0].(string) + `","` + rawBatchCodes[1].(string) + `","missing-code"],"confirm":"` + confirmBatchDeleteRegcodes + `"}`
+	batchDelete := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/regcodes/batch-delete", deletePayload, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if batchDelete.Code != http.StatusOK || !strings.Contains(batchDelete.Body.String(), `"deleted":2`) || !strings.Contains(batchDelete.Body.String(), `"missing":1`) {
 		t.Fatalf("batch delete regcodes status=%d body=%s", batchDelete.Code, batchDelete.Body.String())
 	}
 
-	invite := doJSONWithHeaders(app, http.MethodPost, "/api/v1/invite/codes", `{"days":7}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	invite := doJSONWithHeaders(app, http.MethodPost, "/api/v1/invite/codes", `{"days":7}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if invite.Code != http.StatusCreated {
 		t.Fatalf("invite status=%d body=%s", invite.Code, invite.Body.String())
 	}
-	forest := doJSONWithHeaders(app, http.MethodGet, "/api/v1/admin/invite/tree", ``, []*http.Cookie{adminCookie}, nil)
+	forest := doJSONWithHeaders(app, http.MethodGet, "/api/v1/admin/invite/tree", ``, []*http.Cookie{adminCookie, adminCSRF}, nil)
 	if forest.Code != http.StatusOK || !strings.Contains(forest.Body.String(), "nodes") {
 		t.Fatalf("forest status=%d body=%s", forest.Code, forest.Body.String())
 	}
 
-	media := doJSONWithHeaders(app, http.MethodPost, "/api/v1/media/request", `{"source":"tmdb","media_id":550,"title":"Fight Club","media_type":"movie"}`, []*http.Cookie{userCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	media := doJSONWithHeaders(app, http.MethodPost, "/api/v1/media/request", `{"source":"tmdb","media_id":550,"title":"Fight Club","media_type":"movie"}`, []*http.Cookie{userCookie, userCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if media.Code != http.StatusCreated || !strings.Contains(media.Body.String(), "require_key") {
 		t.Fatalf("media status=%d body=%s", media.Code, media.Body.String())
 	}
@@ -465,20 +564,20 @@ func TestRegcodeInviteMediaAndSecurityFlows(t *testing.T) {
 	if len(userRequests) != 1 {
 		t.Fatalf("expected one media request, got %d", len(userRequests))
 	}
-	userStatusUpdate := doJSONWithHeaders(app, http.MethodPut, "/api/v1/media/request/"+strconv.FormatInt(userRequests[0].ID, 10)+"/status", `{"status":"accepted"}`, []*http.Cookie{userCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	userStatusUpdate := doJSONWithHeaders(app, http.MethodPut, "/api/v1/media/request/"+strconv.FormatInt(userRequests[0].ID, 10)+"/status", `{"status":"accepted"}`, []*http.Cookie{userCookie, userCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if userStatusUpdate.Code != http.StatusForbidden {
 		t.Fatalf("user status update should be forbidden, status=%d body=%s", userStatusUpdate.Code, userStatusUpdate.Body.String())
 	}
-	adminStatusUpdate := doJSONWithHeaders(app, http.MethodPut, "/api/v1/admin/media-requests/"+strconv.FormatInt(userRequests[0].ID, 10), `{"status":"accepted"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	adminStatusUpdate := doJSONWithHeaders(app, http.MethodPut, "/api/v1/admin/media-requests/"+strconv.FormatInt(userRequests[0].ID, 10), `{"status":"accepted"}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if adminStatusUpdate.Code != http.StatusOK || !strings.Contains(adminStatusUpdate.Body.String(), `"status":"accepted"`) {
 		t.Fatalf("admin status update status=%d body=%s", adminStatusUpdate.Code, adminStatusUpdate.Body.String())
 	}
-	adminReqs := doJSONWithHeaders(app, http.MethodGet, "/api/v1/admin/media-requests?status=all", ``, []*http.Cookie{adminCookie}, nil)
+	adminReqs := doJSONWithHeaders(app, http.MethodGet, "/api/v1/admin/media-requests?status=all", ``, []*http.Cookie{adminCookie, adminCSRF}, nil)
 	if adminReqs.Code != http.StatusOK || !strings.Contains(adminReqs.Body.String(), "Fight Club") {
 		t.Fatalf("admin reqs status=%d body=%s", adminReqs.Code, adminReqs.Body.String())
 	}
 
-	blocked := doJSONWithHeaders(app, http.MethodPost, "/api/v1/security/ip/blacklist", `{"ip":"203.0.113.9","reason":"test"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	blocked := doJSONWithHeaders(app, http.MethodPost, "/api/v1/security/ip/blacklist", `{"ip":"203.0.113.9","reason":"test"}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if blocked.Code != http.StatusOK {
 		t.Fatalf("blacklist status=%d body=%s", blocked.Code, blocked.Body.String())
 	}
@@ -486,11 +585,13 @@ func TestRegcodeInviteMediaAndSecurityFlows(t *testing.T) {
 
 func TestInviteMeReturnsStableTreeShape(t *testing.T) {
 	app := newTestApp(t)
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
-	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	cookie := findCookie(login.Result().Cookies(), "twilight_session")
+	csrfCookie := findCookie(login.Result().Cookies(), "twilight_session_csrf")
+	_ = csrfCookie
 
-	resp := doJSON(app, http.MethodGet, "/api/v1/invite/me", ``, []*http.Cookie{cookie})
+	resp := doJSON(app, http.MethodGet, "/api/v1/invite/me", ``, []*http.Cookie{cookie, csrfCookie})
 	if resp.Code != http.StatusOK {
 		t.Fatalf("invite/me status=%d body=%s", resp.Code, resp.Body.String())
 	}
@@ -518,11 +619,13 @@ func TestInviteMeReturnsStableTreeShape(t *testing.T) {
 
 func TestSigninResponsesMatchFrontendContract(t *testing.T) {
 	app := newTestApp(t)
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
-	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	cookie := findCookie(login.Result().Cookies(), "twilight_session")
+	csrfCookie := findCookie(login.Result().Cookies(), "twilight_session_csrf")
+	_ = csrfCookie
 
-	first := doJSONWithHeaders(app, http.MethodPost, "/api/v1/signin", `{}`, []*http.Cookie{cookie}, map[string]string{"X-Twilight-Client": "webui"})
+	first := doJSONWithHeaders(app, http.MethodPost, "/api/v1/signin", `{}`, []*http.Cookie{cookie, csrfCookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if first.Code != http.StatusOK {
 		t.Fatalf("signin status=%d body=%s", first.Code, first.Body.String())
 	}
@@ -536,7 +639,7 @@ func TestSigninResponsesMatchFrontendContract(t *testing.T) {
 		t.Fatalf("unexpected first signin payload: %#v", firstEnv.Data)
 	}
 
-	second := doJSONWithHeaders(app, http.MethodPost, "/api/v1/signin", `{}`, []*http.Cookie{cookie}, map[string]string{"X-Twilight-Client": "webui"})
+	second := doJSONWithHeaders(app, http.MethodPost, "/api/v1/signin", `{}`, []*http.Cookie{cookie, csrfCookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if second.Code != http.StatusOK {
 		t.Fatalf("second signin status=%d body=%s", second.Code, second.Body.String())
 	}
@@ -550,7 +653,7 @@ func TestSigninResponsesMatchFrontendContract(t *testing.T) {
 		t.Fatalf("unexpected duplicate signin payload: %#v", secondEnv.Data)
 	}
 
-	history := doJSON(app, http.MethodGet, "/api/v1/signin/history?limit=30", ``, []*http.Cookie{cookie})
+	history := doJSON(app, http.MethodGet, "/api/v1/signin/history?limit=30", ``, []*http.Cookie{cookie, csrfCookie})
 	if history.Code != http.StatusOK {
 		t.Fatalf("history status=%d body=%s", history.Code, history.Body.String())
 	}
@@ -586,18 +689,20 @@ func TestDisabledFeatureFlagsAreExposedAndEnforced(t *testing.T) {
 		t.Fatalf("signin config did not expose disabled state: status=%d body=%s", configResp.Code, configResp.Body.String())
 	}
 
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
-	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	cookie := findCookie(login.Result().Cookies(), "twilight_session")
-	signin := doJSONWithHeaders(app, http.MethodPost, "/api/v1/signin", `{}`, []*http.Cookie{cookie}, map[string]string{"X-Twilight-Client": "webui"})
+	csrfCookie := findCookie(login.Result().Cookies(), "twilight_session_csrf")
+	_ = csrfCookie
+	signin := doJSONWithHeaders(app, http.MethodPost, "/api/v1/signin", `{}`, []*http.Cookie{cookie, csrfCookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if signin.Code != http.StatusForbidden {
 		t.Fatalf("disabled signin status=%d body=%s", signin.Code, signin.Body.String())
 	}
-	inviteMe := doJSONWithHeaders(app, http.MethodGet, "/api/v1/invite/me", ``, []*http.Cookie{cookie}, map[string]string{"X-Twilight-Client": "webui"})
+	inviteMe := doJSONWithHeaders(app, http.MethodGet, "/api/v1/invite/me", ``, []*http.Cookie{cookie, csrfCookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if inviteMe.Code != http.StatusForbidden {
 		t.Fatalf("disabled invite/me status=%d body=%s", inviteMe.Code, inviteMe.Body.String())
 	}
-	inviteTree := doJSONWithHeaders(app, http.MethodGet, "/api/v1/admin/invite/tree", ``, []*http.Cookie{cookie}, map[string]string{"X-Twilight-Client": "webui"})
+	inviteTree := doJSONWithHeaders(app, http.MethodGet, "/api/v1/admin/invite/tree", ``, []*http.Cookie{cookie, csrfCookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if inviteTree.Code != http.StatusForbidden {
 		t.Fatalf("disabled admin invite tree status=%d body=%s", inviteTree.Code, inviteTree.Body.String())
 	}
@@ -621,15 +726,17 @@ func TestInventoryCheckUsesEmbyProviderAndSeasons(t *testing.T) {
 	defer emby.Close()
 	app.cfg.EmbyURL = emby.URL
 
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
-	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	cookie := findCookie(login.Result().Cookies(), "twilight_session")
+	csrfCookie := findCookie(login.Result().Cookies(), "twilight_session_csrf")
+	_ = csrfCookie
 
-	missingSeason := doJSONWithHeaders(app, http.MethodPost, "/api/v1/media/inventory/check", `{"source":"tmdb","media_id":42,"media_type":"tv","season":3}`, []*http.Cookie{cookie}, map[string]string{"X-Twilight-Client": "webui"})
+	missingSeason := doJSONWithHeaders(app, http.MethodPost, "/api/v1/media/inventory/check", `{"source":"tmdb","media_id":42,"media_type":"tv","season":3}`, []*http.Cookie{cookie, csrfCookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if missingSeason.Code != http.StatusOK || !strings.Contains(missingSeason.Body.String(), `"exists":false`) || !strings.Contains(missingSeason.Body.String(), `"seasons_available":[1,2]`) {
 		t.Fatalf("missing season status=%d body=%s", missingSeason.Code, missingSeason.Body.String())
 	}
-	existingSeason := doJSONWithHeaders(app, http.MethodPost, "/api/v1/media/inventory/check", `{"source":"tmdb","media_id":42,"media_type":"tv","season":2}`, []*http.Cookie{cookie}, map[string]string{"X-Twilight-Client": "webui"})
+	existingSeason := doJSONWithHeaders(app, http.MethodPost, "/api/v1/media/inventory/check", `{"source":"tmdb","media_id":42,"media_type":"tv","season":2}`, []*http.Cookie{cookie, csrfCookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if existingSeason.Code != http.StatusOK || !strings.Contains(existingSeason.Body.String(), `"exists":true`) || !strings.Contains(existingSeason.Body.String(), `"season_requested":2`) {
 		t.Fatalf("existing season status=%d body=%s", existingSeason.Code, existingSeason.Body.String())
 	}
@@ -640,12 +747,14 @@ func TestEmbyURLsDoNotFallbackToInternalServerURL(t *testing.T) {
 	app.cfg.EmbyURL = "http://127.0.0.1:8096"
 	app.cfg.EmbyURLList = nil
 	app.cfg.EmbyPublicURL = ""
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
 	admin, _ := app.store.FindUserByUsername("admin")
 	_, _ = app.store.UpdateUser(admin.UID, func(u *store.User) error { u.EmbyID = "emby-admin"; return nil })
-	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	cookie := findCookie(login.Result().Cookies(), "twilight_session")
-	resp := doJSONWithHeaders(app, http.MethodGet, "/api/v1/system/emby-urls", ``, []*http.Cookie{cookie}, nil)
+	csrfCookie := findCookie(login.Result().Cookies(), "twilight_session_csrf")
+	_ = csrfCookie
+	resp := doJSONWithHeaders(app, http.MethodGet, "/api/v1/system/emby-urls", ``, []*http.Cookie{cookie, csrfCookie}, nil)
 	if resp.Code != http.StatusOK {
 		t.Fatalf("emby urls status=%d body=%s", resp.Code, resp.Body.String())
 	}
@@ -686,10 +795,12 @@ func TestBangumiSearchUsesV0EndpointAndReturnsResults(t *testing.T) {
 	defer bgm.Close()
 	app.cfg.BangumiAPIURL = bgm.URL
 
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
-	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	cookie := findCookie(login.Result().Cookies(), "twilight_session")
-	resp := doJSON(app, http.MethodGet, "/api/v1/media/search?q=%E8%91%AC%E9%80%81%E7%9A%84%E8%8A%99%E8%8E%89%E8%8E%B2&source=bangumi", ``, []*http.Cookie{cookie})
+	csrfCookie := findCookie(login.Result().Cookies(), "twilight_session_csrf")
+	_ = csrfCookie
+	resp := doJSON(app, http.MethodGet, "/api/v1/media/search?q=%E8%91%AC%E9%80%81%E7%9A%84%E8%8A%99%E8%8E%89%E8%8E%B2&source=bangumi", ``, []*http.Cookie{cookie, csrfCookie})
 	if resp.Code != http.StatusOK || !strings.Contains(resp.Body.String(), `"source":"bangumi"`) || !strings.Contains(resp.Body.String(), "葬送的芙莉莲") {
 		t.Fatalf("bangumi search status=%d body=%s", resp.Code, resp.Body.String())
 	}
@@ -703,10 +814,12 @@ func TestBangumiSearchErrorIsVisibleForBangumiSource(t *testing.T) {
 	defer bgm.Close()
 	app.cfg.BangumiAPIURL = bgm.URL
 
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
-	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	cookie := findCookie(login.Result().Cookies(), "twilight_session")
-	resp := doJSON(app, http.MethodGet, "/api/v1/media/search?q=test&source=bangumi", ``, []*http.Cookie{cookie})
+	csrfCookie := findCookie(login.Result().Cookies(), "twilight_session_csrf")
+	_ = csrfCookie
+	resp := doJSON(app, http.MethodGet, "/api/v1/media/search?q=test&source=bangumi", ``, []*http.Cookie{cookie, csrfCookie})
 	if resp.Code != http.StatusBadGateway || !strings.Contains(resp.Body.String(), "Bangumi 搜索失败") {
 		t.Fatalf("bangumi failure status=%d body=%s", resp.Code, resp.Body.String())
 	}
@@ -714,10 +827,12 @@ func TestBangumiSearchErrorIsVisibleForBangumiSource(t *testing.T) {
 
 func TestSystemUpdateRejectsUnsafeRepoURL(t *testing.T) {
 	app := newTestApp(t)
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
-	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	cookie := findCookie(login.Result().Cookies(), "twilight_session")
-	resp := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/update", `{"repo_url":"https://user:pass@example.com/repo.git","branch":"main"}`, []*http.Cookie{cookie}, map[string]string{"X-Twilight-Client": "webui"})
+	csrfCookie := findCookie(login.Result().Cookies(), "twilight_session_csrf")
+	_ = csrfCookie
+	resp := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/update", `{"repo_url":"https://user:pass@example.com/repo.git","branch":"main"}`, []*http.Cookie{cookie, csrfCookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if resp.Code != http.StatusBadRequest {
 		t.Fatalf("unsafe update URL status=%d body=%s", resp.Code, resp.Body.String())
 	}
@@ -725,22 +840,26 @@ func TestSystemUpdateRejectsUnsafeRepoURL(t *testing.T) {
 
 func TestRuntimeLogsRequireAdminAndRedactSecrets(t *testing.T) {
 	app := newTestApp(t)
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
-	adminLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
+	adminLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	adminCookie := findCookie(adminLogin.Result().Cookies(), "twilight_session")
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"user","password":"user123456"}`, nil)
-	userLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"user","password":"user123456"}`, nil)
+	adminCSRF := findCookie(adminLogin.Result().Cookies(), "twilight_session_csrf")
+	_ = adminCSRF
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"user","password":"User123456"}`, nil)
+	userLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"user","password":"User123456"}`, nil)
 	userCookie := findCookie(userLogin.Result().Cookies(), "twilight_session")
+	userCSRF := findCookie(userLogin.Result().Cookies(), "twilight_session_csrf")
+	_ = userCSRF
 
 	unauth := doJSON(app, http.MethodGet, "/api/v1/system/admin/runtime/logs", ``, nil)
 	if unauth.Code != http.StatusUnauthorized {
 		t.Fatalf("runtime logs unauth = %d body=%s", unauth.Code, unauth.Body.String())
 	}
-	forbidden := doJSON(app, http.MethodGet, "/api/v1/system/admin/runtime/status", ``, []*http.Cookie{userCookie})
+	forbidden := doJSON(app, http.MethodGet, "/api/v1/system/admin/runtime/status", ``, []*http.Cookie{userCookie, userCSRF})
 	if forbidden.Code != http.StatusForbidden {
 		t.Fatalf("runtime status user = %d body=%s", forbidden.Code, forbidden.Body.String())
 	}
-	adminStatus := doJSON(app, http.MethodGet, "/api/v1/system/admin/runtime/status", ``, []*http.Cookie{adminCookie})
+	adminStatus := doJSON(app, http.MethodGet, "/api/v1/system/admin/runtime/status", ``, []*http.Cookie{adminCookie, adminCSRF})
 	if adminStatus.Code != http.StatusOK || !strings.Contains(adminStatus.Body.String(), `"goroutines"`) {
 		t.Fatalf("runtime status admin = %d body=%s", adminStatus.Code, adminStatus.Body.String())
 	}
@@ -748,7 +867,23 @@ func TestRuntimeLogsRequireAdminAndRedactSecrets(t *testing.T) {
 	if strings.Contains(redacted, "abcdefghijklmnopqrstuvwxyz") || strings.Contains(redacted, "123456789012345") {
 		t.Fatalf("secret was not redacted: %s", redacted)
 	}
-	for _, key := range []string{"apiKey", "api-key", "authorization", "postgres_dsn", "bot.token"} {
+	// Emby / MediaBrowser / CSRF / Session 变体必须被脱敏
+	for _, sample := range []string{
+		`emby_token=secret-emby-token-XYZ123`,
+		`X-Emby-Token: super-secret-emby-12345`,
+		`MediaBrowser Client="Twilight", Token="emby-token-deadbeef-9876", DeviceId="dev"`,
+		`X-CSRF-Token=csrf-token-12345-abcdef`,
+		`session_id=sess-abcdef-1234567890`,
+	} {
+		out := redactSensitiveText(sample)
+		// 任何 12+ 长度连续 alnum/-/_ 的真实值都不应残留
+		for _, leak := range []string{"secret-emby-token-XYZ123", "super-secret-emby-12345", "emby-token-deadbeef-9876", "csrf-token-12345-abcdef", "sess-abcdef-1234567890"} {
+			if strings.Contains(out, leak) {
+				t.Fatalf("variant secret was not redacted: input=%q output=%q leak=%q", sample, out, leak)
+			}
+		}
+	}
+	for _, key := range []string{"apiKey", "api-key", "authorization", "postgres_dsn", "bot.token", "X-Emby-Token", "emby_authorization", "MediaBrowserToken", "session_id", "X-CSRF-Token"} {
 		if !sensitiveLogKey(key) {
 			t.Fatalf("sensitive log key was not detected: %s", key)
 		}
@@ -1175,7 +1310,7 @@ func TestRegisterConsumesConfirmedTelegramBindCode(t *testing.T) {
 	if confirmed.Code != http.StatusOK {
 		t.Fatalf("confirm status=%d body=%s", confirmed.Code, confirmed.Body.String())
 	}
-	registered := doJSON(app, http.MethodPost, "/api/v1/users/register", fmt.Sprintf(`{"username":"alice","password":"alice123456","telegram_bind_code":%q}`, code), nil)
+	registered := doJSON(app, http.MethodPost, "/api/v1/users/register", fmt.Sprintf(`{"username":"alice","password":"Alice123456","telegram_bind_code":%q}`, code), nil)
 	if registered.Code != http.StatusCreated {
 		t.Fatalf("register status=%d body=%s", registered.Code, registered.Body.String())
 	}
@@ -1195,7 +1330,7 @@ func TestRegisterRejectsUserSceneTelegramBindCode(t *testing.T) {
 	if err := app.store.UpsertBindCode(store.BindCode{Code: "USERBIND1234", Scene: "user", UID: 99, Confirmed: true, TelegramID: 999, CreatedAt: now, ExpiresAt: now + 600}); err != nil {
 		t.Fatal(err)
 	}
-	resp := doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"bob","password":"bob123456","telegram_bind_code":"USERBIND1234"}`, nil)
+	resp := doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"bob","password":"Bob123456","telegram_bind_code":"USERBIND1234"}`, nil)
 	if resp.Code != http.StatusBadRequest {
 		t.Fatalf("register with user-scene bind code status=%d body=%s", resp.Code, resp.Body.String())
 	}
@@ -1208,7 +1343,7 @@ func TestRegisterRejectsMalformedTelegramBindCodeBeforeLookup(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg.ForceBindTelegram = true
 	resp := doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"badbind","password":"badbind123A","telegram_bind_code":"../../bad"}`, nil)
-	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), "invalid telegram bind code format") {
+	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), `"error_code":"TG_BIND_CODE_FORMAT_INVALID"`) {
 		t.Fatalf("malformed bind code status=%d body=%s", resp.Code, resp.Body.String())
 	}
 
@@ -1540,26 +1675,30 @@ func TestBangumiWebhookRequiresSecretWhenEnabled(t *testing.T) {
 
 func TestDatabaseAdminBackupRestoreAndAuth(t *testing.T) {
 	app := newTestApp(t)
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
-	adminLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
+	adminLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	adminCookie := findCookie(adminLogin.Result().Cookies(), "twilight_session")
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"user","password":"user123456"}`, nil)
-	userLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"user","password":"user123456"}`, nil)
+	adminCSRF := findCookie(adminLogin.Result().Cookies(), "twilight_session_csrf")
+	_ = adminCSRF
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"user","password":"User123456"}`, nil)
+	userLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"user","password":"User123456"}`, nil)
 	userCookie := findCookie(userLogin.Result().Cookies(), "twilight_session")
+	userCSRF := findCookie(userLogin.Result().Cookies(), "twilight_session_csrf")
+	_ = userCSRF
 
 	unauth := doJSON(app, http.MethodGet, "/api/v1/system/admin/database/status", ``, nil)
 	if unauth.Code != http.StatusUnauthorized {
 		t.Fatalf("database status unauth = %d", unauth.Code)
 	}
-	forbidden := doJSON(app, http.MethodGet, "/api/v1/system/admin/database/status", ``, []*http.Cookie{userCookie})
+	forbidden := doJSON(app, http.MethodGet, "/api/v1/system/admin/database/status", ``, []*http.Cookie{userCookie, userCSRF})
 	if forbidden.Code != http.StatusForbidden {
 		t.Fatalf("database status user = %d body=%s", forbidden.Code, forbidden.Body.String())
 	}
-	status := doJSON(app, http.MethodGet, "/api/v1/system/admin/database/status", ``, []*http.Cookie{adminCookie})
+	status := doJSON(app, http.MethodGet, "/api/v1/system/admin/database/status", ``, []*http.Cookie{adminCookie, adminCSRF})
 	if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"legacy_sqlite_detected":false`) {
 		t.Fatalf("database status did not report sqlite disabled status=%d body=%s", status.Code, status.Body.String())
 	}
-	backup := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/backup", `{"note":"before restore test"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	backup := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/backup", `{"note":"before restore test"}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if backup.Code != http.StatusOK {
 		t.Fatalf("backup status=%d body=%s", backup.Code, backup.Body.String())
 	}
@@ -1575,31 +1714,31 @@ func TestDatabaseAdminBackupRestoreAndAuth(t *testing.T) {
 	if backupData["note"] != "before restore test" {
 		t.Fatalf("backup note was not persisted: %#v", backupData["note"])
 	}
-	backupInspect := doJSONWithHeaders(app, http.MethodGet, "/api/v1/system/admin/database/backups/"+backupName, ``, []*http.Cookie{adminCookie}, nil)
+	backupInspect := doJSONWithHeaders(app, http.MethodGet, "/api/v1/system/admin/database/backups/"+backupName, ``, []*http.Cookie{adminCookie, adminCSRF}, nil)
 	if backupInspect.Code != http.StatusOK || !strings.Contains(backupInspect.Body.String(), `"counts"`) || !strings.Contains(backupInspect.Body.String(), `"note":"before restore test"`) {
 		t.Fatalf("backup inspect status=%d body=%s", backupInspect.Code, backupInspect.Body.String())
 	}
-	backupList := doJSONWithHeaders(app, http.MethodGet, "/api/v1/system/admin/database/backups", ``, []*http.Cookie{adminCookie}, nil)
+	backupList := doJSONWithHeaders(app, http.MethodGet, "/api/v1/system/admin/database/backups", ``, []*http.Cookie{adminCookie, adminCSRF}, nil)
 	if backupList.Code != http.StatusOK || strings.Contains(backupList.Body.String(), backupName+".meta.json") {
 		t.Fatalf("backup list exposed metadata file status=%d body=%s", backupList.Code, backupList.Body.String())
 	}
-	backupMetaInspect := doJSONWithHeaders(app, http.MethodGet, "/api/v1/system/admin/database/backups/"+backupName+".meta.json", ``, []*http.Cookie{adminCookie}, nil)
+	backupMetaInspect := doJSONWithHeaders(app, http.MethodGet, "/api/v1/system/admin/database/backups/"+backupName+".meta.json", ``, []*http.Cookie{adminCookie, adminCSRF}, nil)
 	if backupMetaInspect.Code != http.StatusBadRequest {
 		t.Fatalf("backup metadata inspect status=%d body=%s", backupMetaInspect.Code, backupMetaInspect.Body.String())
 	}
 
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"extra","password":"extra123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"extra","password":"Extra123456"}`, nil)
 	if _, ok := app.store.FindUserByUsername("extra"); !ok {
 		t.Fatal("expected extra user before restore")
 	}
-	restorePreview := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/restore", `{"name":"`+backupName+`"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	restorePreview := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/restore", `{"name":"`+backupName+`"}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if restorePreview.Code != http.StatusOK || !strings.Contains(restorePreview.Body.String(), `"requires_confirmation":true`) {
 		t.Fatalf("restore preview status=%d body=%s", restorePreview.Code, restorePreview.Body.String())
 	}
 	if _, ok := app.store.FindUserByUsername("extra"); !ok {
 		t.Fatal("restore preview mutated state")
 	}
-	restore := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/restore", `{"name":"`+backupName+`","confirm":"RESTORE_DATABASE_BACKUP"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	restore := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/restore", `{"name":"`+backupName+`","confirm":"RESTORE_DATABASE_BACKUP"}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if restore.Code != http.StatusOK {
 		t.Fatalf("restore status=%d body=%s", restore.Code, restore.Body.String())
 	}
@@ -1609,42 +1748,42 @@ func TestDatabaseAdminBackupRestoreAndAuth(t *testing.T) {
 	if _, ok := app.store.FindUserByUsername("extra"); ok {
 		t.Fatal("restore did not replace state")
 	}
-	traversal := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/restore", `{"name":"../state.json"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	traversal := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/restore", `{"name":"../state.json"}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if traversal.Code != http.StatusBadRequest {
 		t.Fatalf("restore traversal status=%d body=%s", traversal.Code, traversal.Body.String())
 	}
-	migrateDisabled := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","dry_run":true}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	migrateDisabled := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","dry_run":true}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if migrateDisabled.Code != http.StatusForbidden {
 		t.Fatalf("migrate disabled status=%d body=%s", migrateDisabled.Code, migrateDisabled.Body.String())
 	}
 	app.cfg.DatabaseMigrationPanelEnabled = true
-	migrate := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","dry_run":true}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	migrate := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","dry_run":true}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if migrate.Code != http.StatusOK || !strings.Contains(migrate.Body.String(), `"dry_run":true`) {
 		t.Fatalf("migrate dry-run status=%d body=%s", migrate.Code, migrate.Body.String())
 	}
-	migrateNoConfirm := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","state_file":"migrated.json"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	migrateNoConfirm := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","state_file":"migrated.json"}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if migrateNoConfirm.Code != http.StatusOK || !strings.Contains(migrateNoConfirm.Body.String(), `"requires_confirmation":true`) || !strings.Contains(migrateNoConfirm.Body.String(), `"dry_run":true`) {
 		t.Fatalf("migrate without confirm status=%d body=%s", migrateNoConfirm.Code, migrateNoConfirm.Body.String())
 	}
 	if _, err := os.Stat(filepath.Join(app.cfg.DatabaseDir, "migrated.json")); err == nil {
 		t.Fatal("migrate without confirm wrote target file")
 	}
-	migrateExecute := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","state_file":"migrated.json","confirm":"MIGRATE_DATABASE"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	migrateExecute := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","state_file":"migrated.json","confirm":"MIGRATE_DATABASE"}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if migrateExecute.Code != http.StatusOK || !strings.Contains(migrateExecute.Body.String(), `"pre_operation_backup"`) {
 		t.Fatalf("migrate execute status=%d body=%s", migrateExecute.Code, migrateExecute.Body.String())
 	}
 	if _, err := os.Stat(filepath.Join(app.cfg.DatabaseDir, "migrated.json")); err != nil {
 		t.Fatalf("migrate with confirm did not write target file: %v", err)
 	}
-	migrateTraversal := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","state_file":"../outside.json","dry_run":true}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	migrateTraversal := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","state_file":"../outside.json","dry_run":true}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if migrateTraversal.Code != http.StatusBadRequest {
 		t.Fatalf("migrate traversal status=%d body=%s", migrateTraversal.Code, migrateTraversal.Body.String())
 	}
-	migrateWrongType := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","state_file":"state.txt","dry_run":true}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	migrateWrongType := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/database/migrate", `{"target_driver":"json","state_file":"state.txt","dry_run":true}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if migrateWrongType.Code != http.StatusBadRequest {
 		t.Fatalf("migrate wrong type status=%d body=%s", migrateWrongType.Code, migrateWrongType.Body.String())
 	}
-	deleteBackup := doJSONWithHeaders(app, http.MethodDelete, "/api/v1/system/admin/database/backups/"+backupName, ``, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	deleteBackup := doJSONWithHeaders(app, http.MethodDelete, "/api/v1/system/admin/database/backups/"+backupName, ``, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if deleteBackup.Code != http.StatusOK {
 		t.Fatalf("delete backup status=%d body=%s", deleteBackup.Code, deleteBackup.Body.String())
 	}
@@ -1659,11 +1798,13 @@ func TestConfigAdminBackupRestoreAndDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
-	adminLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
+	adminLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	adminCookie := findCookie(adminLogin.Result().Cookies(), "twilight_session")
+	adminCSRF := findCookie(adminLogin.Result().Cookies(), "twilight_session_csrf")
+	_ = adminCSRF
 
-	backup := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/config/backup", `{}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	backup := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/config/backup", `{}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if backup.Code != http.StatusOK {
 		t.Fatalf("config backup status=%d body=%s", backup.Code, backup.Body.String())
 	}
@@ -1674,11 +1815,11 @@ func TestConfigAdminBackupRestoreAndDelete(t *testing.T) {
 	backupData := env.Data.(map[string]any)["backup"].(map[string]any)
 	backupName := backupData["name"].(string)
 
-	list := doJSONWithHeaders(app, http.MethodGet, "/api/v1/system/admin/config/backups", ``, []*http.Cookie{adminCookie}, nil)
+	list := doJSONWithHeaders(app, http.MethodGet, "/api/v1/system/admin/config/backups", ``, []*http.Cookie{adminCookie, adminCSRF}, nil)
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), backupName) {
 		t.Fatalf("config backup list status=%d body=%s", list.Code, list.Body.String())
 	}
-	inspect := doJSONWithHeaders(app, http.MethodGet, "/api/v1/system/admin/config/backups/"+backupName, ``, []*http.Cookie{adminCookie}, nil)
+	inspect := doJSONWithHeaders(app, http.MethodGet, "/api/v1/system/admin/config/backups/"+backupName, ``, []*http.Cookie{adminCookie, adminCSRF}, nil)
 	if inspect.Code != http.StatusOK || !strings.Contains(inspect.Body.String(), "port = 5010") {
 		t.Fatalf("config backup inspect status=%d body=%s", inspect.Code, inspect.Body.String())
 	}
@@ -1686,14 +1827,14 @@ func TestConfigAdminBackupRestoreAndDelete(t *testing.T) {
 	if err := os.WriteFile(app.cfg.ConfigFile, []byte(changed), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	restorePreview := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/config/restore", `{"name":"`+backupName+`"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	restorePreview := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/config/restore", `{"name":"`+backupName+`"}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if restorePreview.Code != http.StatusOK || !strings.Contains(restorePreview.Body.String(), `"requires_confirmation":true`) {
 		t.Fatalf("config restore preview status=%d body=%s", restorePreview.Code, restorePreview.Body.String())
 	}
 	if data, _ := os.ReadFile(app.cfg.ConfigFile); !strings.Contains(string(data), "port = 5011") {
 		t.Fatal("config restore preview mutated file")
 	}
-	restore := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/config/restore", `{"name":"`+backupName+`","confirm":"RESTORE_CONFIG_BACKUP"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	restore := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/config/restore", `{"name":"`+backupName+`","confirm":"RESTORE_CONFIG_BACKUP"}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if restore.Code != http.StatusOK || !strings.Contains(restore.Body.String(), `"pre_operation_backup"`) {
 		t.Fatalf("config restore status=%d body=%s", restore.Code, restore.Body.String())
 	}
@@ -1701,9 +1842,9 @@ func TestConfigAdminBackupRestoreAndDelete(t *testing.T) {
 		t.Fatalf("config restore did not restore original content: %s", string(data))
 	}
 
-	adminLogin = doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	adminLogin = doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	adminCookie = findCookie(adminLogin.Result().Cookies(), "twilight_session")
-	deleteBackup := doJSONWithHeaders(app, http.MethodDelete, "/api/v1/system/admin/config/backups/"+backupName, ``, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	deleteBackup := doJSONWithHeaders(app, http.MethodDelete, "/api/v1/system/admin/config/backups/"+backupName, ``, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if deleteBackup.Code != http.StatusOK {
 		t.Fatalf("config backup delete status=%d body=%s", deleteBackup.Code, deleteBackup.Body.String())
 	}
@@ -1854,10 +1995,12 @@ func TestRegCodeRandomAlgorithmsAndFormatFallback(t *testing.T) {
 
 func TestTargetedRegcodesAreCreatedListedAndEnforced(t *testing.T) {
 	app := newTestApp(t)
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
-	adminLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
+	adminLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	adminCookie := findCookie(adminLogin.Result().Cookies(), "twilight_session")
-	created := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/regcodes", `{"type":2,"days":10,"count":1,"target_username":"alpha","format":"TGT-{random}","random_algorithm":"digits-12"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
+	adminCSRF := findCookie(adminLogin.Result().Cookies(), "twilight_session_csrf")
+	_ = adminCSRF
+	created := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/regcodes", `{"type":2,"days":10,"count":1,"target_username":"alpha","format":"TGT-{random}","random_algorithm":"digits-12"}`, []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
 	if created.Code != http.StatusOK {
 		t.Fatalf("create targeted regcode status=%d body=%s", created.Code, created.Body.String())
 	}
@@ -1870,7 +2013,7 @@ func TestTargetedRegcodesAreCreatedListedAndEnforced(t *testing.T) {
 	if !ok || reg.TargetUsername != "alpha" {
 		t.Fatalf("target username was not saved: %#v", reg)
 	}
-	list := doJSONWithHeaders(app, http.MethodGet, "/api/v1/admin/regcodes?search=alpha", ``, []*http.Cookie{adminCookie}, nil)
+	list := doJSONWithHeaders(app, http.MethodGet, "/api/v1/admin/regcodes?search=alpha", ``, []*http.Cookie{adminCookie, adminCSRF}, nil)
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"target_username":"alpha"`) {
 		t.Fatalf("target username was not searchable/listed, status=%d body=%s", list.Code, list.Body.String())
 	}
@@ -2354,14 +2497,84 @@ func TestTelegramRosterStatsUsesObservedMembers(t *testing.T) {
 	if err := app.store.UpsertTelegramRoster("-1001", 300, "member", true); err != nil {
 		t.Fatal(err)
 	}
-	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"admin123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
 	admin, _ := app.store.FindUserByUsername("admin")
 	_, _ = app.store.UpdateUser(admin.UID, func(u *store.User) error { u.TelegramID = 100; return nil })
-	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	cookie := findCookie(login.Result().Cookies(), "twilight_session")
-	resp := doJSONWithHeaders(app, http.MethodGet, "/api/v1/admin/telegram/roster/stats", ``, []*http.Cookie{cookie}, nil)
+	csrfCookie := findCookie(login.Result().Cookies(), "twilight_session_csrf")
+	_ = csrfCookie
+	resp := doJSONWithHeaders(app, http.MethodGet, "/api/v1/admin/telegram/roster/stats", ``, []*http.Cookie{cookie, csrfCookie}, nil)
 	if resp.Code != http.StatusOK || !strings.Contains(resp.Body.String(), `"bound":1`) || !strings.Contains(resp.Body.String(), `"unbound":1`) || !strings.Contains(resp.Body.String(), `"bots":1`) {
 		t.Fatalf("roster stats status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestUserStatsEndpointRejectsOtherUser(t *testing.T) {
+	app := newTestApp(t)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"root","password":"Root123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"alpha","password":"Alpha123456"}`, nil)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"beta","password":"Beta123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"alpha","password":"Alpha123456"}`, nil)
+	cookie := findCookie(login.Result().Cookies(), "twilight_session")
+	csrfCookie := findCookie(login.Result().Cookies(), "twilight_session_csrf")
+	_ = csrfCookie
+	beta, ok := app.store.FindUserByUsername("beta")
+	if !ok {
+		t.Fatal("beta user not found")
+	}
+
+	resp := doJSON(app, http.MethodGet, "/api/v1/stats/user/"+strconv.FormatInt(beta.UID, 10), ``, []*http.Cookie{cookie, csrfCookie})
+	if resp.Code != http.StatusForbidden || !strings.Contains(resp.Body.String(), `"error_code":"FORBIDDEN"`) {
+		t.Fatalf("expected forbidden stats response, status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestBatchUserDangerousActionsRequireConfirm(t *testing.T) {
+	app := newTestApp(t)
+	cookies := registerAndLogin(t, app, "admin", "Admin123456")
+	headers := map[string]string{"X-Twilight-Client": "webui"}
+
+	tests := []struct {
+		name string
+		path string
+		body string
+		want string
+	}{
+		{"enable", "/api/v1/batch/users/enable", `{"uids":[1]}`, confirmBatchEnableUsers},
+		{"disable", "/api/v1/batch/users/disable", `{"uids":[1]}`, confirmBatchDisableUsers},
+		{"delete", "/api/v1/batch/users/delete", `{"uids":[1]}`, confirmBatchDeleteUsers},
+		{"library self service", "/api/v1/batch/users/library-self-service", `{"uids":[1],"enabled":true}`, confirmBatchLibrarySelfService},
+		{"libraries", "/api/v1/batch/users/libraries", `{"uids":[1],"action":"set","library_ids":[]}`, confirmBatchUserLibraries},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := doJSONWithHeaders(app, http.MethodPost, tt.path, tt.body, cookies, headers)
+			if resp.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d body=%s", resp.Code, resp.Body.String())
+			}
+			body := resp.Body.String()
+			if !strings.Contains(body, tt.want) || !strings.Contains(body, `"error_code":"BAD_REQUEST"`) {
+				t.Fatalf("missing confirm/error contract in body=%s", body)
+			}
+		})
+	}
+
+	resp := doJSONWithHeaders(app, http.MethodPost, "/api/v1/batch/users/enable", fmt.Sprintf(`{"confirm":%q}`, confirmBatchEnableUsers), cookies, headers)
+	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), "uids required") || !strings.Contains(resp.Body.String(), `"error_code":"BAD_REQUEST"`) {
+		t.Fatalf("missing uids contract, status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestOtherDangerousActionsRequireConfirm(t *testing.T) {
+	app := newTestApp(t)
+	cookies := registerAndLogin(t, app, "admin", "Admin123456")
+	headers := map[string]string{"X-Twilight-Client": "webui"}
+
+	resp := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/violations/clear", `{}`, cookies, headers)
+	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), confirmClearViolations) || !strings.Contains(resp.Body.String(), `"error_code":"BAD_REQUEST"`) {
+		t.Fatalf("clear violations missing confirm status=%d body=%s", resp.Code, resp.Body.String())
 	}
 }
 
@@ -2379,6 +2592,15 @@ func doJSONWithHeaders(app *App, method, path, body string, cookies []*http.Cook
 	}
 	for _, cookie := range cookies {
 		req.AddCookie(cookie)
+	}
+	// Auto-inject X-CSRF-Token from a *_csrf cookie if present and not explicitly set.
+	if req.Header.Get("X-CSRF-Token") == "" {
+		for _, cookie := range cookies {
+			if strings.HasSuffix(cookie.Name, "_csrf") && cookie.Value != "" {
+				req.Header.Set("X-CSRF-Token", cookie.Value)
+				break
+			}
+		}
 	}
 	rr := httptest.NewRecorder()
 	app.ServeHTTP(rr, req)

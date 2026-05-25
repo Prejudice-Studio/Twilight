@@ -97,17 +97,29 @@ func (c *Client) Del(ctx context.Context, key string) error {
 	return err
 }
 
+// incrExpireScript 在 redis 服务端单次原子完成 INCR + EXPIRE。
+// 旧实现（分两次 Do）有两类失败模式：
+//  1. 第一次 INCR 成功后进程崩溃 / 网络中断 → key 永远没 TTL，落地到 redis 重启
+//     才能清；
+//  2. 多个 worker 并发首次 INCR 时，仅 count==1 那个发 EXPIRE，若那一路因网络
+//     丢包失败但 INCR 已落库，剩下所有调用都 count>1 不再补 TTL。
+// rate-limit 桶失去 TTL 等价于"永远命中限速"，高 QPS 端点（global / apikey）
+// 单 IP 一次攻击即可让该 IP 永久被屏蔽。改用 Lua 脚本让 redis 原子串接两条命令，
+// 任一节点失败都不会留下"已 INCR 但无 TTL"的中间态。
+const incrExpireScript = `local v = redis.call('INCR', KEYS[1])
+if v == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return v`
+
 func (c *Client) IncrExpire(ctx context.Context, key string, seconds int) (int64, error) {
-	reply, err := c.Do(ctx, "INCR", key)
+	reply, err := c.Do(ctx, "EVAL", incrExpireScript, "1", key, strconv.Itoa(seconds))
 	if err != nil {
 		return 0, err
 	}
 	count, ok := reply.(int64)
 	if !ok {
-		return 0, fmt.Errorf("unexpected INCR reply %T", reply)
-	}
-	if count == 1 {
-		_, _ = c.Do(ctx, "EXPIRE", key, strconv.Itoa(seconds))
+		return 0, fmt.Errorf("unexpected EVAL reply %T", reply)
 	}
 	return count, nil
 }

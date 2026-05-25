@@ -46,6 +46,7 @@ import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
 import { api, type UserSettings, type TelegramStatus, type EmbyStatus, type EmbyLibraryAccess } from "@/lib/api";
 import { passwordStrengthLabel, validatePasswordStrength } from "@/lib/password";
+import { telegramBotUrl } from "@/lib/safe-url";
 
 const container = {
   hidden: { opacity: 0 },
@@ -73,6 +74,8 @@ export default function SettingsPage() {
   const [bindCode, setBindCode] = useState<string | null>(null);
   const [bindCodeExpiry, setBindCodeExpiry] = useState<number>(0);
   const [isTgLoading, setIsTgLoading] = useState(false);
+  const botUsername = systemInfo?.telegram_bot?.username;
+  const botUrl = telegramBotUrl(systemInfo?.telegram_bot?.username, systemInfo?.telegram_bot?.url);
   const [isRebindLoading, setIsRebindLoading] = useState(false);
   const [rebindDialogOpen, setRebindDialogOpen] = useState(false);
   const [rebindReason, setRebindReason] = useState("");
@@ -707,7 +710,7 @@ export default function SettingsPage() {
                   <div className="min-w-0">
                     <p className="font-medium">本站 Bot</p>
                     <a
-                      href={systemInfo.telegram_bot.url ?? `https://t.me/${systemInfo.telegram_bot.username}`}
+                      href={botUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="block truncate text-primary hover:underline"
@@ -718,7 +721,7 @@ export default function SettingsPage() {
                 </div>
                 <Button asChild size="sm" variant="outline">
                   <a
-                    href={systemInfo.telegram_bot.url ?? `https://t.me/${systemInfo.telegram_bot.username}`}
+                    href={botUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -821,15 +824,15 @@ export default function SettingsPage() {
                   >
                     复制命令
                   </Button>
-                  {systemInfo?.telegram_bot?.url && (
+                  {botUrl && (
                     <Button asChild variant="outline" size="sm">
                       <a
-                        href={systemInfo.telegram_bot.url}
+                        href={botUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                       >
                         <Bot className="mr-2 h-4 w-4" />
-                        打开 @{systemInfo.telegram_bot.username}
+                        打开 @{botUsername}
                       </a>
                     </Button>
                   )}
@@ -838,7 +841,7 @@ export default function SettingsPage() {
                   请在 {Math.floor(bindCodeExpiry / 60)} 分钟内向{" "}
                   {systemInfo?.telegram_bot?.username ? (
                     <a
-                      href={systemInfo.telegram_bot.url ?? `https://t.me/${systemInfo.telegram_bot.username}`}
+                      href={botUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-primary hover:underline"

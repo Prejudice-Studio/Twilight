@@ -12,6 +12,7 @@ import { useTheme } from "next-themes";
 import { api } from "@/lib/api";
 import { RegionRefreshKeys } from "@/lib/region-refresh";
 import { useRegionRefresh } from "@/hooks/use-region-refresh";
+import { normalizeBackgroundImageValue } from "@/lib/safe-url";
 
 interface BackgroundConfig {
   lightBg?: string;
@@ -26,54 +27,17 @@ interface BackgroundConfig {
   darkOpacity?: number;
 }
 
-const SAFE_BG_CSS_FUNCTION = /^(linear-gradient|radial-gradient|conic-gradient|repeating-linear-gradient|repeating-radial-gradient)\s*\(/i;
-const SAFE_BG_DATA_IMAGE = /^data:image\/(png|jpe?g|gif|webp|avif|bmp)(;|,)/i;
-
-function escapeCssUrlValue(value: string): string {
-  return value.replace(/"/g, '\\"');
-}
-
-function sanitizeBgUrl(raw: string): string {
-  const value = raw.trim();
-  if (!value || /[\u0000-\u001F\u007F]/.test(value) || value.startsWith("//")) {
-    return "";
-  }
-  if (/^https?:\/\//i.test(value) || value.startsWith("/") || value.startsWith("./") || value.startsWith("../")) {
-    return escapeCssUrlValue(value);
-  }
-  if (value.startsWith("blob:") || SAFE_BG_DATA_IMAGE.test(value)) {
-    return escapeCssUrlValue(value);
-  }
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
-    return "";
-  }
-  return escapeCssUrlValue(value);
-}
-
-// 把可能是裸 URL/路径的图片值规范化为合法且受限的 CSS background-image 值
-function normalizeBgImageValue(raw: string): string {
-  const value = (raw || "").trim();
-  if (!value) return "";
-  // 渐变类 CSS 函数不涉及外部资源，可直接使用。
-  if (SAFE_BG_CSS_FUNCTION.test(value)) {
-    return value;
-  }
-  const urlMatch = value.match(/^url\(\s*(['"]?)(.*?)\1\s*\)$/i);
-  const safeUrl = sanitizeBgUrl(urlMatch ? urlMatch[2] : value);
-  return safeUrl ? `url("${safeUrl}")` : "";
-}
-
 function buildBgStyleFromConfig(
   bgConfig: BackgroundConfig,
   isDark: boolean,
 ): Record<string, string> {
-  const css = normalizeBgImageValue((isDark ? bgConfig.darkBg : bgConfig.lightBg) || "");
+  const css = normalizeBackgroundImageValue((isDark ? bgConfig.darkBg : bgConfig.lightBg) || "");
   const imgRaw = (isDark ? bgConfig.darkBgImage : bgConfig.lightBgImage) || "";
   const flow = Boolean(isDark ? bgConfig.darkFlow : bgConfig.lightFlow);
   const blur = Number((isDark ? bgConfig.darkBlur : bgConfig.lightBlur) ?? 0);
   const opacity = Number((isDark ? bgConfig.darkOpacity : bgConfig.lightOpacity) ?? 100);
 
-  const img = normalizeBgImageValue(imgRaw);
+  const img = normalizeBackgroundImageValue(imgRaw);
   const effective = img || css;
 
   if (!effective) return {};
@@ -107,7 +71,7 @@ export default function MainLayout({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { user, isAuthenticated, isLoading, initialize, fetchUser } = useAuthStore();
+  const { user, isAuthenticated, isLoading, isHydrated, initialize, fetchUser } = useAuthStore();
   const { resolvedTheme, theme } = useTheme();
   const activeTheme = resolvedTheme || theme;
   const isAdmin = user?.role === 0;
@@ -193,8 +157,12 @@ export default function MainLayout({
   }, [computedBgStyle, applyBackgroundStyle]);
 
   useEffect(() => {
+    // persist 还原是异步的，
+    // 在 isHydrated 翻为 true 之前 store 里的 isAuthenticated 还是默认 false，
+    // 直接 initialize() 会被错判为未登录、跳掉 fetchUser。
+    if (!isHydrated) return;
     void initialize();
-  }, [initialize]);
+  }, [isHydrated, initialize]);
 
   useEffect(() => {
     return () => {
@@ -228,7 +196,8 @@ export default function MainLayout({
 
   // 加载中 / 未登录都保持 loader，等到 router.push 真的导航走再卸载，
   // 避免出现"白屏一帧 → 跳转"的肉眼可见闪烁。
-  if (isLoading || !isAuthenticated) {
+  // 同时等待 persist 还原（isHydrated）避免登录态闪烁。
+  if (!isHydrated || isLoading || !isAuthenticated) {
     return (
       <div className="flex h-screen items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -238,6 +207,15 @@ export default function MainLayout({
 
   return (
     <div className={cn("app-shell min-h-screen", !isAdmin && "hide-dev-tools")}>
+      {/* Skip-to-content：键盘第一个 Tab 焦点直达主内容，
+          满足 WCAG 2.4.1 Bypass Blocks。
+          默认 sr-only 视觉隐藏，focus-visible 时显示。 */}
+      <a
+        href="#main-content"
+        className="sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:left-4 focus-visible:top-4 focus-visible:z-[1000] focus-visible:rounded-md focus-visible:bg-background focus-visible:px-4 focus-visible:py-2 focus-visible:text-sm focus-visible:font-medium focus-visible:text-foreground focus-visible:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      >
+        跳到主内容
+      </a>
       <div className="fixed inset-0 -z-10 pointer-events-none twilight-bg-layer" style={bgStyle} />
       {nextBgStyle && (
         <div
@@ -254,7 +232,7 @@ export default function MainLayout({
         <Sidebar />
         <div className="flex min-h-screen min-w-0 flex-1 flex-col lg:pl-72">
           <Header />
-          <main className="mx-auto w-full min-w-0 max-w-[1680px] flex-1 px-2 py-3 sm:p-4 md:p-6 xl:p-8">
+          <main id="main-content" tabIndex={-1} className="mx-auto w-full min-w-0 max-w-[1680px] flex-1 px-2 py-3 sm:p-4 md:p-6 xl:p-8">
             <div className="section-surface">{children}</div>
           </main>
         </div>
@@ -263,4 +241,3 @@ export default function MainLayout({
     </div>
   );
 }
-

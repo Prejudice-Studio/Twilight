@@ -11,16 +11,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { sanitizeImageUrl } from "@/lib/safe-url";
 import { adminNavItems, filterNavItems, userNavItems } from "@/components/layout/sidebar";
 import { Github, Menu, Moon, Sparkles, Sun } from "lucide-react";
-
-const SAFE_IMAGE_URL = /^(https?:\/\/|\/|data:image\/(png|jpe?g|gif|webp|avif|bmp)(;|,))/i;
-
-function sanitizeImageUrl(url?: string | null): string | undefined {
-  const value = (url || "").trim();
-  if (!value || !SAFE_IMAGE_URL.test(value)) return undefined;
-  return value;
-}
 
 export function Header() {
   const pathname = usePathname();
@@ -52,9 +45,13 @@ export function Header() {
         <div className="flex min-w-0 items-center gap-4">
           <Dialog open={mobileOpen} onOpenChange={setMobileOpen}>
             <DialogTrigger asChild>
-              <Button variant="outline" size="icon" className="lg:hidden">
-                <Menu className="h-5 w-5" />
-                <span className="sr-only">打开菜单</span>
+              <Button
+                variant="outline"
+                size="icon"
+                className="lg:hidden"
+                aria-label="打开菜单"
+              >
+                <Menu className="h-5 w-5" aria-hidden="true" />
               </Button>
             </DialogTrigger>
             <DialogContent className="left-auto right-0 top-0 h-[100dvh] w-[min(92vw,24rem)] max-w-none translate-x-0 translate-y-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden rounded-none border-y-0 border-r-0 p-0 sm:max-h-[100dvh] sm:rounded-none sm:p-0">
@@ -174,4 +171,3 @@ export function Header() {
     </header>
   );
 }
-

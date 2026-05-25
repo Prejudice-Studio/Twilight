@@ -60,6 +60,16 @@ import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError } from "@/components/layout/page-state";
 import { api, type UserInfo, type EmbyLibraryAccess, type EmbyLibraryItem } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
+import {
+  batchDeleteConfirmConfig,
+  batchLibrarySelfServiceConfirmConfig,
+  batchToggleConfirmConfig,
+  buildUsersCacheKey,
+  hasStrongAdminPassword,
+  retainVisibleUserIds,
+  toggleSetMember,
+  usersListParams,
+} from "./admin-users-helpers";
 
 export default function AdminUsersPage() {
   const { toast } = useToast();
@@ -217,19 +227,12 @@ export default function AdminUsersPage() {
   };
 
   const toggleUserDetails = (uid: number) => {
-    setExpandedUserIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(uid)) {
-        next.delete(uid);
-      } else {
-        next.add(uid);
-      }
-      return next;
-    });
+    setExpandedUserIds((prev) => toggleSetMember(prev, uid));
   };
 
   const loadUsersResource = useCallback(async (signal?: AbortSignal) => {
-    const cacheKey = `${page}-${perPage}-${search || ""}-${roleFilter}-${activeFilter}-${embyFilter}-${sortBy}`;
+    const listState = { page, perPage, search, roleFilter, activeFilter, embyFilter, sortBy };
+    const cacheKey = buildUsersCacheKey(listState);
     const cached = usersCacheRef.current.get(cacheKey);
     if (cached) {
       setUsers(cached.users);
@@ -238,21 +241,7 @@ export default function AdminUsersPage() {
       return true;
     }
 
-    const role = roleFilter === "all" ? undefined : Number(roleFilter);
-    const active =
-      activeFilter === "all" ? undefined : activeFilter === "true";
-    const emby =
-      embyFilter === "bound" ? "bound" : embyFilter === "unbound" ? "unbound" : undefined;
-
-    const res = await api.getUsers({
-      page,
-      per_page: perPage,
-      search: search || undefined,
-      role,
-      active,
-      emby,
-      sort: sortBy || undefined,
-    }, signal);
+    const res = await api.getUsers(usersListParams(listState), signal);
     if (res.success && res.data) {
       setUsers(res.data.users);
       setTotal(res.data.total);
@@ -288,12 +277,7 @@ export default function AdminUsersPage() {
   const allPageSelected = users.length > 0 && users.every((user) => selectedUserIds.has(user.uid));
 
   const toggleSelectedUser = (uid: number) => {
-    setSelectedUserIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(uid)) next.delete(uid);
-      else next.add(uid);
-      return next;
-    });
+    setSelectedUserIds((prev) => toggleSetMember(prev, uid));
   };
 
   const toggleSelectCurrentPage = () => {
@@ -337,11 +321,7 @@ export default function AdminUsersPage() {
   }, [roleFilter, activeFilter, embyFilter, sortBy]);
 
   useEffect(() => {
-    setSelectedUserIds((prev) => {
-      const visible = new Set(users.map((user) => user.uid));
-      const next = new Set(Array.from(prev).filter((uid) => visible.has(uid)));
-      return next.size === prev.size ? prev : next;
-    });
+    setSelectedUserIds((prev) => retainVisibleUserIds(prev, users));
   }, [users]);
 
   const handleForceSetEmbyPassword = async () => {
@@ -352,7 +332,7 @@ export default function AdminUsersPage() {
     }
     if (!forcePwdAuto) {
       const pwd = forcePwdNewPwd;
-      if (pwd.length < 8 || !/[a-z]/.test(pwd) || !/[A-Z]/.test(pwd) || !/\d/.test(pwd)) {
+      if (!hasStrongAdminPassword(pwd)) {
         toast({
           title: "密码强度不足",
           description: "至少 8 位，且包含大小写字母和数字",
@@ -810,12 +790,7 @@ export default function AdminUsersPage() {
   };
 
   const toggleSelectedLibrary = (libraryId: string) => {
-    setSelectedLibraryIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(libraryId)) next.delete(libraryId);
-      else next.add(libraryId);
-      return next;
-    });
+    setSelectedLibraryIds((prev) => toggleSetMember(prev, libraryId));
   };
 
   const updateTargetLibraries = async (payload: Parameters<typeof api.updateUserLibraries>[1]) => {
@@ -904,12 +879,7 @@ export default function AdminUsersPage() {
 
   const handleSelectedToggleActive = async (enable: boolean) => {
     if (selectedUids.length === 0) return;
-    const ok = await confirmAction({
-      title: enable ? "启用所选用户？" : "禁用所选用户？",
-      description: `将作用于 ${selectedUids.length} 个已选用户。管理员账号由后端保护，会自动跳过。`,
-      tone: enable ? "warning" : "danger",
-      confirmLabel: enable ? "启用所选" : "禁用所选",
-    });
+    const ok = await confirmAction(batchToggleConfirmConfig(enable, selectedUids.length));
     if (!ok) return;
     setBatchUserLoading(true);
     try {
@@ -933,12 +903,7 @@ export default function AdminUsersPage() {
 
   const handleSelectedLibrarySelfService = async (enabled: boolean) => {
     if (selectedUids.length === 0) return;
-    const ok = await confirmAction({
-      title: enabled ? "开启媒体库自助显隐？" : "关闭媒体库自助显隐？",
-      description: `将为 ${selectedUids.length} 个已选用户${enabled ? "开启" : "关闭"}媒体库自助显隐入口。不会直接改变用户当前可见的媒体库。`,
-      tone: "warning",
-      confirmLabel: enabled ? "开启" : "关闭",
-    });
+    const ok = await confirmAction(batchLibrarySelfServiceConfirmConfig(enabled, selectedUids.length));
     if (!ok) return;
     setBatchUserLoading(true);
     try {
@@ -962,16 +927,7 @@ export default function AdminUsersPage() {
 
   const handleSelectedDelete = async () => {
     if (selectedUids.length === 0) return;
-    const action = await confirmAction({
-      title: "删除所选用户？",
-      description: `将删除 ${selectedUids.length} 个已选用户。管理员账号和当前管理员由后端保护，会自动跳过。`,
-      tone: "danger",
-      cancelLabel: "取消",
-      actions: [
-        { label: "仅删除本地账号", value: "local_only", variant: "destructive" },
-        { label: `同时删除 Emby 账号（${selectedEmbyCount} 个）`, value: "with_emby", variant: "destructive" },
-      ],
-    });
+    const action = await confirmAction(batchDeleteConfirmConfig(selectedUids.length, selectedEmbyCount));
     if (!action) return;
     const deleteEmby = action === "with_emby";
     setBatchUserLoading(true);
@@ -1015,12 +971,7 @@ export default function AdminUsersPage() {
   };
 
   const toggleBatchLibrary = (id: string) => {
-    setBatchLibrarySelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    setBatchLibrarySelectedIds((prev) => toggleSetMember(prev, id));
   };
 
   const applyBatchLibraryAction = async () => {

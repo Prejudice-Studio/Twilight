@@ -14,6 +14,8 @@ import { api, type RegisterAvailability, type RegisterData } from "@/lib/api";
 import { SITE_NAME } from "@/lib/site-config";
 import { useSystemStore } from "@/store/system";
 import { passwordStrengthLabel, validatePasswordStrength } from "@/lib/password";
+import { validateUsername } from "@/lib/validators";
+import { sanitizeExternalUrl, telegramBotUrl } from "@/lib/safe-url";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -51,7 +53,9 @@ export default function RegisterPage() {
       ...(systemInfo?.telegram_links?.groups || []),
       ...(systemInfo?.telegram_links?.channels || []),
     ]),
-  ];
+  ].map((item) => ({ ...item, url: sanitizeExternalUrl(item.url) })).filter((item): item is { label: string; url: string } => Boolean(item.url));
+  const botUsername = systemInfo?.telegram_bot?.username;
+  const botUrl = telegramBotUrl(systemInfo?.telegram_bot?.username, systemInfo?.telegram_bot?.url);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -165,17 +169,9 @@ export default function RegisterPage() {
   }, [bindCode, bindConfirmed, toast]);
 
   const validateRegisterForm = (): boolean => {
-    if (!formData.username) {
-      toast({ title: "请填写用户名", variant: "destructive" });
-      return false;
-    }
-
-    if (!/^[A-Za-z_][A-Za-z0-9_]{2,19}$/.test(formData.username.trim())) {
-      toast({
-        title: "用户名格式不正确",
-        description: "3-20 位字母数字下划线，不能以数字开头",
-        variant: "destructive",
-      });
+    const usernameCheck = validateUsername(formData.username);
+    if (!usernameCheck.ok) {
+      toast({ title: "用户名格式不正确", description: usernameCheck.message, variant: "destructive" });
       return false;
     }
 
@@ -294,7 +290,7 @@ export default function RegisterPage() {
                   <Bot className="h-3.5 w-3.5" />
                   <span>绑定 Bot：</span>
                   <a
-                    href={systemInfo.telegram_bot.url ?? `https://t.me/${systemInfo.telegram_bot.username}`}
+                    href={botUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="font-medium text-primary hover:underline"
@@ -427,7 +423,7 @@ export default function RegisterPage() {
                         <Bot className="h-3.5 w-3.5" />
                         <span>本站 Bot：</span>
                         <a
-                          href={systemInfo.telegram_bot.url ?? `https://t.me/${systemInfo.telegram_bot.username}`}
+                          href={botUrl}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="font-medium underline-offset-2 hover:underline"
@@ -454,15 +450,15 @@ export default function RegisterPage() {
                       )}
                       获取绑定码
                     </Button>
-                    {systemInfo?.telegram_bot?.url ? (
+                    {botUrl ? (
                       <Button asChild type="button" variant="outline">
                         <a
-                          href={systemInfo.telegram_bot.url}
+                          href={botUrl}
                           target="_blank"
                           rel="noopener noreferrer"
                         >
                           <Bot className="mr-2 h-4 w-4" />
-                          打开 @{systemInfo.telegram_bot.username}
+                          打开 @{botUsername}
                         </a>
                       </Button>
                     ) : null}
@@ -486,15 +482,15 @@ export default function RegisterPage() {
                           >
                             复制命令
                           </Button>
-                          {systemInfo?.telegram_bot?.url ? (
+                          {botUrl ? (
                             <Button asChild type="button" size="sm">
                               <a
-                                href={systemInfo.telegram_bot.url}
+                                href={botUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
                               >
                                 <Bot className="mr-2 h-4 w-4" />
-                                打开 @{systemInfo.telegram_bot.username}
+                                打开 @{botUsername}
                               </a>
                             </Button>
                           ) : null}

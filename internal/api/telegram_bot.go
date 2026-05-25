@@ -15,6 +15,12 @@ import (
 var telegramBindCodePattern = regexp.MustCompile(`^[A-Za-z0-9]{6,16}$`)
 
 func (a *App) RunTelegramBot(ctx context.Context) error {
+	// 协程入口加 panic recover：单条 update 处理崩溃不应让整个 bot 退出。
+	defer func() {
+		if r := recover(); r != nil {
+			zap.L().Error("telegram bot panic", zap.Any("panic", r))
+		}
+	}()
 	offset := int64(0)
 	activeConfig := ""
 	for {
@@ -68,7 +74,15 @@ func (a *App) RunTelegramBot(ctx context.Context) error {
 			if id := numeric(update["update_id"]); id >= offset {
 				offset = id + 1
 			}
-			a.handleTelegramUpdate(ctx, update)
+			func(u map[string]any) {
+				// 单条 update 处理 panic 隔离：一条坏消息不能让整个 bot 退出。
+				defer func() {
+					if r := recover(); r != nil {
+						zap.L().Error("telegram update panic", zap.Any("update_id", u["update_id"]), zap.Any("panic", r))
+					}
+				}()
+				a.handleTelegramUpdate(ctx, u)
+			}(update)
 		}
 	}
 }
@@ -108,8 +122,19 @@ func (a *App) handleTelegramUpdate(ctx context.Context, update map[string]any) {
 	privateChat := chatID == fromID || strings.EqualFold(asString(chat["type"]), "private")
 	fields := strings.Fields(text)
 	command := telegramCommand(fields[0])
+
+	// 先把"私聊 + 普通 gating"的标准命令交给注册表统一分发，dispatcher 内部
+	// 集中处理 private/admin 校验，避免每个 case 重复 telegramRequirePrivate +
+	// telegramAdminID 模板。
+	cmdCtx := telegramCommandCtx{ChatID: chatID, FromID: fromID, Username: username, Args: fields[1:]}
+	if a.telegramDispatchRegistry(ctx, command, cmdCtx, privateChat) {
+		return
+	}
+
 	switch command {
 	case "/start", "/help", "/twihelp":
+		// 群聊里这三个命令转发"请私聊"提示而不是 gating 失败，
+		// /help 还要根据是否管理员渲染不同文本，所以保留 switch 单独处理。
 		if !privateChat {
 			_ = a.telegramSendMessage(ctx, chatID, a.telegramGroupPrompt())
 			return
@@ -119,76 +144,10 @@ func (a *App) handleTelegramUpdate(ctx context.Context, update map[string]any) {
 			return
 		}
 		_ = a.telegramSendMessage(ctx, chatID, a.telegramHelpText(a.telegramAdminID(fromID)))
-	case "/twishelp":
-		if !a.telegramRequirePrivate(ctx, chatID, privateChat) {
-			return
-		}
-		if !a.telegramAdminID(fromID) {
-			_ = a.telegramSendMessage(ctx, chatID, "没有管理员权限。")
-			return
-		}
-		_ = a.telegramSendMessage(ctx, chatID, a.telegramAdminHelpText())
-	case "/about":
-		if !a.telegramRequirePrivate(ctx, chatID, privateChat) {
-			return
-		}
-		_ = a.telegramSendMessage(ctx, chatID, a.telegramAboutText())
-	case "/cancel":
-		if !a.telegramRequirePrivate(ctx, chatID, privateChat) {
-			return
-		}
-		_ = a.telegramSendMessage(ctx, chatID, "已取消当前 Bot 操作。")
-	case "/me":
-		if !a.telegramRequirePrivate(ctx, chatID, privateChat) {
-			return
-		}
-		a.telegramHandleMe(ctx, chatID, fromID)
-	case "/emby":
-		if !a.telegramRequirePrivate(ctx, chatID, privateChat) {
-			return
-		}
-		a.telegramHandleEmby(ctx, chatID, fromID)
-	case "/playinfo":
-		if !a.telegramRequirePrivate(ctx, chatID, privateChat) {
-			return
-		}
-		a.telegramHandlePlayInfo(ctx, chatID, fromID)
-	case "/resetpwd":
-		if !a.telegramRequirePrivate(ctx, chatID, privateChat) {
-			return
-		}
-		a.telegramHandleResetPassword(ctx, chatID, fromID)
-	case "/stats":
-		if !a.telegramRequirePrivate(ctx, chatID, privateChat) {
-			return
-		}
-		a.telegramHandleStats(ctx, chatID, fromID)
-	case "/admin":
-		if !a.telegramRequirePrivate(ctx, chatID, privateChat) {
-			return
-		}
-		a.telegramHandleAdmin(ctx, chatID, fromID)
-	case "/userinfo":
-		if !a.telegramRequirePrivate(ctx, chatID, privateChat) {
-			return
-		}
-		a.telegramHandleUserInfo(ctx, chatID, fromID, strings.Join(fields[1:], " "))
-	case "/twfind":
-		if !a.telegramRequirePrivate(ctx, chatID, privateChat) {
-			return
-		}
-		a.telegramHandleFind(ctx, chatID, fromID, strings.Join(fields[1:], " "))
 	case "/twguser":
+		// 群组管理命令：群内匿名管理员要走 inline 按钮二次鉴权，
+		// 私聊也允许，gating 逻辑和注册表的"private + admin"模式不一样。
 		a.telegramHandleGroupUser(ctx, chatID, fromID, fields, message)
-	case "/bind":
-		if !a.telegramRequirePrivate(ctx, chatID, privateChat) {
-			return
-		}
-		if len(fields) < 2 {
-			_ = a.telegramSendMessage(ctx, chatID, a.telegramBindPrompt())
-			return
-		}
-		a.telegramConfirmBindCode(ctx, chatID, fromID, username, fields[1])
 	default:
 		if reply, ok := a.telegramCustomCommandReply(command); ok {
 			_ = a.telegramSendMessage(ctx, chatID, a.telegramRenderText(reply))
@@ -300,14 +259,10 @@ func (a *App) telegramHandleEmby(ctx context.Context, chatID, telegramID int64) 
 	checked := false
 	if strings.TrimSpace(a.cfg.EmbyURL) != "" {
 		checked = true
-		info := map[string]any{}
+		// 5s ctx 走 embyHealth：双段 fallback 由 helper 集中处理。
 		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		if err := a.embyGet(checkCtx, "/System/Info/Public", &info); err == nil {
-			online = true
-		} else if err := a.embyGet(checkCtx, "/System/Info", &info); err == nil {
-			online = true
-		}
+		_, online = a.embyHealth(checkCtx)
 	}
 	status := "未检测"
 	if checked && online {

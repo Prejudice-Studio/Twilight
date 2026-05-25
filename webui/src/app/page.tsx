@@ -9,13 +9,17 @@ import { Sparkles } from "lucide-react";
 
 export default function Home() {
   const router = useRouter();
-  const { isAuthenticated, isLoading, initialize } = useAuthStore();
+  const { isAuthenticated, isLoading, isHydrated, initialize } = useAuthStore();
   const { info: systemInfo, fetchInfo: fetchSystemInfo } = useSystemStore();
 
   useEffect(() => {
+    // 必须等 persist 把 isAuthenticated 从
+    // localStorage 还原回来再 initialize，否则首次渲染拿到的是默认值 false，
+    // 已登录用户会被瞬间踢回 /login。
+    if (!isHydrated) return;
     void initialize();
     void fetchSystemInfo();
-  }, [initialize, fetchSystemInfo]);
+  }, [isHydrated, initialize, fetchSystemInfo]);
 
   useEffect(() => {
     if (!isLoading) {

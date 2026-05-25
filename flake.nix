@@ -20,12 +20,12 @@
         in
         {
           default = pkgs.mkShell {
-            packages = with pkgs; [
-              go_1_25
-              nodejs_22
-              pnpm
-              pkg-config
-              openssl
+            packages = [
+              pkgs.go
+              pkgs.nodejs
+              pkgs.pnpm
+              pkgs.pkg-config
+              pkgs.openssl
             ];
           };
         });

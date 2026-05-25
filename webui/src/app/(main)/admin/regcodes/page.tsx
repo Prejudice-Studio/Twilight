@@ -320,13 +320,14 @@ export default function AdminRegcodesPage() {
   };
 
   const getTypeBadge = (type: number) => {
+    // 改用语义令牌，方便统一主题切换。
     switch (type) {
       case 1:
-        return <Badge variant="secondary" className="bg-blue-500/10 text-blue-500 border-blue-500/20">注册码</Badge>;
+        return <Badge variant="secondary" className="bg-info/10 text-info border-info/20">注册码</Badge>;
       case 2:
-        return <Badge variant="default" className="bg-orange-500/10 text-orange-500 border-orange-500/20">续期码</Badge>;
+        return <Badge variant="default" className="bg-warning/10 text-warning border-warning/20">续期码</Badge>;
       case 3:
-        return <Badge variant="success" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20">白名单</Badge>;
+        return <Badge variant="success" className="bg-success/10 text-success border-success/20">白名单</Badge>;
       default:
         return <Badge variant="secondary">未知</Badge>;
     }
@@ -967,7 +968,7 @@ export default function AdminRegcodesPage() {
                 </div>
               ))}
               {usageTelegramOnly.map((item) => (
-                <div key={`tg-${item.telegram_id}`} className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm">
+                <div key={`tg-${item.telegram_id}`} className="rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm">
                   <div className="font-medium">仅记录到 Telegram 使用者</div>
                   <div className="mt-1 text-muted-foreground">TGID: {item.telegram_id}</div>
                   <div className="mt-1 text-muted-foreground">当前没有本地用户绑定该 Telegram ID。</div>

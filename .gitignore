@@ -87,6 +87,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 webui/.next-env.d.ts.lock
+# Lock 文件统一为 pnpm-lock.yaml，禁止 npm/yarn lock 重新生成
+webui/package-lock.json
+webui/yarn.lock
 
 # Go build outputs
 dist/

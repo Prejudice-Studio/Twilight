@@ -51,6 +51,9 @@ func (a *App) enforceTelegramMembership(ctx context.Context) (map[string]any, []
 				result["failed"] = int(numeric(result["failed"])) + 1
 				continue
 			}
+			// 立即清除该用户所有 session（redis + memory + PG）。否则 stale token
+			// 在 SessionTTL 到期前都还能访问受保护接口。
+			a.sessions.DeleteUser(ctx, updated.UID)
 			result["disabled"] = int(numeric(result["disabled"])) + 1
 			if updated.EmbyID != "" && a.embySetUserEnabled(ctx, updated.EmbyID, false) == nil {
 				result["emby_disabled"] = int(numeric(result["emby_disabled"])) + 1

@@ -1,0 +1,81 @@
+# Dependabot 配置 - 自动跟踪后端 / 前端 / GitHub Actions 依赖W
+version: 2
+updates:
+  # 后端 Go 模块
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - go
+    commit-message:
+      prefix: "deps(go)"
+    groups:
+      go-minor:
+        update-types:
+          - minor
+          - patch
+
+  # 前端 npm (pnpm 兼容 dependabot npm 生态)
+  - package-ecosystem: npm
+    directory: /webui
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:30"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - frontend
+    commit-message:
+      prefix: "deps(webui)"
+    groups:
+      radix-ui:
+        patterns:
+          - "@radix-ui/*"
+      typescript-eslint:
+        patterns:
+          - "@typescript-eslint/*"
+          - "eslint*"
+      types:
+        patterns:
+          - "@types/*"
+      next-react:
+        patterns:
+          - "next"
+          - "next-themes"
+          - "react"
+          - "react-dom"
+          - "@opennextjs/*"
+    ignore:
+      # 主版本升级容易出 break，单独人工 review，不走自动 PR
+      - dependency-name: "next"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "react"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "react-dom"
+        update-types:
+          - "version-update:semver-major"
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+      day: monday
+      time: "04:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: "deps(actions)"

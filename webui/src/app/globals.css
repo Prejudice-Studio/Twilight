@@ -50,6 +50,34 @@
   clip-path: polygon(-5% 0%, 130% 0%, 105% 100%, -30% 100%);
 }
 
+/*
+ * prefers-reduced-motion 全仓兜底。
+ * WCAG 2.3.3 + 前庭障碍可访问性：
+ *   - 一刀切把 animation-duration / transition-duration 压到 0.01ms，
+ *     等价于"立即到达终点"，但保留布局副作用（不破坏依赖 transitionend 的逻辑）。
+ *   - scroll-behavior 强制 auto，避免平滑滚动引发眩晕。
+ *   - 自定义关键帧（twilight-gradient-flow / twilight-bg-wipe）显式禁用，
+ *     防止 background-position / clip-path 走完整动画路径。
+ *   - 单个组件如需特殊动效（loader 旋转），可在自身样式里再用
+ *     `@media (prefers-reduced-motion: no-preference)` 反向开启。
+ */
+@media (prefers-reduced-motion: reduce) {
+  *
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .twilight-bg-layer,
+  .twilight-bg-wipe {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
 @layer base {
   :root {
     --background: 222 20% 97%;
@@ -68,6 +96,18 @@
     --accent-foreground: 258 85% 30%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 98%;
+    /*
+     * 语义状态令牌（success / warning / info）。
+     *
+     * 历史遗留代码用 bg-emerald-500 / text-amber-600 等直接 Tailwind 调色板，
+     * 新代码统一改用 bg-success / text-warning / border-info。
+     */
+    --success: 152 65% 42%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 38 96% 10%;
+    --info: 211 92% 50%;
+    --info-foreground: 0 0% 100%;
     --border: 220 19% 84%;
     --input: 220 20% 88%;
     --ring: 257 90% 58%;
@@ -92,6 +132,12 @@
     --accent-foreground: 260 90% 90%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
+    --success: 152 60% 50%;
+    --success-foreground: 152 80% 8%;
+    --warning: 38 92% 60%;
+    --warning-foreground: 38 92% 10%;
+    --info: 211 92% 60%;
+    --info-foreground: 211 92% 10%;
     --border: 230 18% 30%;
     --input: 228 18% 28%;
     --ring: 262 92% 67%;

@@ -49,12 +49,12 @@ func (a *App) sendExpiryReminders(ctx context.Context, days int) map[string]any 
 func (a *App) handleSchedulerRunV2(w http.ResponseWriter, r *http.Request, params Params) {
 	jobID := params["job_id"]
 	if !schedulerJobExists(jobID) {
-		fail(w, http.StatusNotFound, "job not found")
+		failWithCode(w, http.StatusNotFound, ErrSchedulerJobNotFound, "调度任务不存在")
 		return
 	}
 	run, okRun := a.startManualSchedulerJob(context.Background(), jobID, schedulerRequestParams(r))
 	if !okRun {
-		fail(w, http.StatusConflict, "job is already running")
+		failWithCode(w, http.StatusConflict, ErrSchedulerJobRunning, "调度任务正在运行中")
 		return
 	}
 	ok(w, "job started", map[string]any{"job_id": run.JobID, "last_run": run})
@@ -91,6 +91,9 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 					// Non-invited users: disable the whole account
 					updated, err := a.store.UpdateUser(u.UID, func(u *store.User) error { u.Active = false; return nil })
 					if err == nil {
+						// 立即清除该用户的所有会话。否则 stale
+						// token 仍可访问受保护接口直到 SessionTTL 自然到期。
+						a.sessions.DeleteUser(r.Context(), updated.UID)
 						disabled++
 						if updated.EmbyID != "" && a.embySetUserEnabled(r.Context(), updated.EmbyID, false) == nil {
 							embyDisabled++

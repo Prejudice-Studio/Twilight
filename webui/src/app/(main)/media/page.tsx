@@ -41,6 +41,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { api, type MediaItem, type MediaDetail, type InventoryCheckResult, type MediaRequest } from "@/lib/api";
 import { formatRelativeTime, cn } from "@/lib/utils";
 import { useSystemStore } from "@/store/system";
+import { mediaRequestExternalUrl } from "@/lib/media-external-url";
 
 const MAX_SEARCH_CACHE_ENTRIES = 20;
 const MAX_DETAIL_CACHE_ENTRIES = 40;
@@ -56,28 +57,6 @@ function rememberCache<K, V>(cache: Map<K, V>, key: K, value: V, limit: number) 
     if (oldestKey === undefined) break;
     cache.delete(oldestKey);
   }
-}
-
-function buildRequestExternalUrl(req: MediaRequest): string | null {
-  const source = (req.source || "").toLowerCase();
-  const rawId = req.media_id;
-  if (rawId === undefined || rawId === null || rawId === "") return null;
-
-  if (source === "bangumi") {
-    const id = String(rawId).replace(/[^0-9]/g, "");
-    return id ? `https://bgm.tv/subject/${id}` : null;
-  }
-  if (source === "tmdb") {
-    const text = String(rawId);
-    const m = text.match(/^(?:(movie|tv):)?(\d+)$/i);
-    const id = m ? m[2] : text.replace(/[^0-9]/g, "");
-    if (!id) return null;
-    const declared = (req.media_info?.media_type || req.media_type || "").toLowerCase();
-    const prefix = m && m[1] ? m[1].toLowerCase() : null;
-    const tmdbType = prefix || (declared === "tv" || declared === "anime" ? "tv" : "movie");
-    return `https://www.themoviedb.org/${tmdbType}/${id}`;
-  }
-  return null;
 }
 
 export default function MediaPage() {
@@ -770,7 +749,7 @@ export default function MediaPage() {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             {(() => {
-                              const url = buildRequestExternalUrl(req);
+                              const url = mediaRequestExternalUrl(req);
                               const title = req.media_info?.title || "未知媒体";
                               if (!url) {
                                 return <p className="font-black text-foreground truncate">{title}</p>;

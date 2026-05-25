@@ -1,11 +1,13 @@
 package api
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/prejudice-studio/twilight/internal/store"
+	"go.uber.org/zap"
 )
 
 func (a *App) handleBangumiWebhook(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -18,7 +20,7 @@ func (a *App) handleBangumiWebhook(w http.ResponseWriter, r *http.Request, _ Par
 	if secret == "" {
 		secret = stringValue(payload, "token")
 	}
-	if a.cfg.BangumiWebhookSecret == "" || secret != a.cfg.BangumiWebhookSecret {
+	if a.cfg.BangumiWebhookSecret == "" || subtle.ConstantTimeCompare([]byte(secret), []byte(a.cfg.BangumiWebhookSecret)) != 1 {
 		fail(w, http.StatusForbidden, "Webhook 密钥无效")
 		return
 	}
@@ -41,14 +43,16 @@ func (a *App) handleBangumiWebhook(w http.ResponseWriter, r *http.Request, _ Par
 			if duration <= 0 {
 				duration = numeric(item["RunTimeTicks"]) / 10000000
 			}
-			_ = a.store.AddPlaybackRecord(store.PlaybackRecord{
+			if err := a.store.AddPlaybackRecord(store.PlaybackRecord{
 				UID:       local.UID,
 				ItemID:    firstNonEmpty(asString(item["Id"]), asString(item["ID"])),
 				Title:     firstNonEmpty(asString(item["Name"]), asString(item["SeriesName"])),
 				MediaType: asString(item["Type"]),
 				Duration:  duration,
 				PlayedAt:  time.Now().Unix(),
-			})
+			}); err != nil {
+				zap.L().Warn("failed to record Bangumi playback webhook", zap.Int64("uid", local.UID), zap.Error(err))
+			}
 		}
 	}
 	ok(w, "webhook accepted", map[string]any{"accepted": true, "subject_name": stringValue(item, "SeriesName"), "episode": intValue(item, "IndexNumber", 0)})

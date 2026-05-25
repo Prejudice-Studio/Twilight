@@ -56,8 +56,8 @@ func (a *App) handleDeleteViolation(w http.ResponseWriter, r *http.Request, para
 // handleClearViolations removes all violation logs.
 func (a *App) handleClearViolations(w http.ResponseWriter, r *http.Request, _ Params) {
 	payload := decodeMap(r)
-	if stringValue(payload, "confirm") != "CLEAR_VIOLATIONS" {
-		fail(w, http.StatusBadRequest, "需要确认短语 confirm=CLEAR_VIOLATIONS")
+	if stringValue(payload, "confirm") != confirmClearViolations {
+		fail(w, http.StatusBadRequest, "需要确认短语 confirm="+confirmClearViolations)
 		return
 	}
 	if err := a.store.ClearViolationLogs(); err != nil {

@@ -158,15 +158,16 @@ func (a *App) handleEmbyTestV2(w http.ResponseWriter, r *http.Request, _ Params)
 	var info map[string]any
 	if a.cfg.EmbyURL != "" {
 		start := time.Now()
-		err := a.embyGet(r.Context(), "/System/Info/Public", &info)
-		if err != nil {
-			err = a.embyGet(r.Context(), "/System/Info", &info)
+		// 改用 embyHealth 集中处理 /System/Info/Public → /System/Info 的双段 fallback。
+		// 失败的具体 error 会在 embyGet 内部通过 zap.L() 记录，admin 看 latency_ms 即可定位是慢还是不通。
+		got, success := a.embyHealth(r.Context())
+		if got != nil {
+			info = got
 		}
-		success := err == nil
 		overall = overall && success
 		message := "OK"
-		if err != nil {
-			message = err.Error()
+		if !success {
+			message = "Emby unreachable (查看后端日志获取具体错误)"
 		}
 		tests = append(tests, map[string]any{"name": "server_info", "success": success, "latency_ms": time.Since(start).Milliseconds(), "message": message})
 	}

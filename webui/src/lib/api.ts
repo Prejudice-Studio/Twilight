@@ -1,142 +1,80 @@
-// 后端 API 地址
-const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
-
-interface ApiResponse<T = unknown> {
-  success: boolean;
-  message: string;
-  data?: T;
-}
-
-function isAbortError(error: unknown): boolean {
-  if (error instanceof DOMException && error.name === "AbortError") {
-    return true;
-  }
-  if (error instanceof Error && error.name === "AbortError") {
-    return true;
-  }
-  return false;
-}
-
-function requestMethod(options: RequestInit, fallback = "GET"): string {
-  return (options.method || fallback).toString().toUpperCase();
-}
-
-function describeApiTarget(endpoint: string, method: string): string {
-  return `${method} /api/v1${endpoint}`;
-}
-
-function buildHttpErrorMessage(
-  status: number,
-  endpoint: string,
-  method: string,
-  backendMessage?: string,
-): string {
-  const target = describeApiTarget(endpoint, method);
-  const detail = backendMessage && backendMessage !== "接口不存在" ? `后端返回：${backendMessage}` : "";
-
-  if (status === 404) {
-    if (backendMessage && backendMessage !== "接口不存在") {
-      return backendMessage;
-    }
-    return [
-      `接口不存在：${target}`,
-      detail,
-      "常见原因：后端未更新/未重启、前后端版本不一致，或当前功能在后端尚未实现。",
-    ].filter(Boolean).join("\n");
-  }
-  if (status === 405) {
-    return [
-      `请求方法不允许：${target}`,
-      detail,
-      "请确认前端调用的方法与后端路由一致，例如 GET/POST/PUT/DELETE 是否写反。",
-    ].filter(Boolean).join("\n");
-  }
-  if (status === 401) {
-    return backendMessage || "登录状态已失效，请重新登录。";
-  }
-  if (status === 403) {
-    return backendMessage || `权限不足：当前账号无权访问 ${target}。`;
-  }
-  if (status === 413) {
-    return backendMessage || "上传内容过大，请压缩文件或联系管理员调整上传上限。";
-  }
-  if (status === 429) {
-    return backendMessage || "请求过于频繁，请稍后再试。";
-  }
-  if (status === 500) {
-    return [
-      `后端接口执行失败：${target}`,
-      detail || "服务器内部错误，请查看后端日志。",
-    ].filter(Boolean).join("\n");
-  }
-  if (status === 502 || status === 503 || status === 504) {
-    return `后端服务暂不可用 (${status})：${target}\n请确认 API 服务、反向代理或网关正在运行。`;
-  }
-  return backendMessage || `请求失败 (${status})：${target}`;
-}
-
-function buildParseErrorMessage(status: number, endpoint: string, method: string): string {
-  const target = describeApiTarget(endpoint, method);
-  if (status === 404) {
-    return `接口不存在：${target}\n服务器没有返回标准 JSON，可能命中了前端页面 404、反向代理路径错误，或后端缺少该路由。`;
-  }
-  if (status >= 500) {
-    return `后端响应格式异常：${target}\nHTTP ${status} 未返回标准 JSON，请查看后端或网关日志。`;
-  }
-  return `服务器响应解析失败 (${status})：${target}\n接口没有返回标准 JSON。`;
-}
-
-async function parseApiResponse<T>(
-  response: Response,
-  endpoint: string,
-  method: string,
-): Promise<ApiResponse<T>> {
-  if (response.status === 204) {
-    return { success: true, message: "OK" };
-  }
-
-  const text = await response.text();
-  if (!text) {
-    return { success: response.ok, message: response.ok ? "OK" : response.statusText };
-  }
-
-  try {
-    return JSON.parse(text) as ApiResponse<T>;
-  } catch (error) {
-    if (!response.ok) {
-      return { success: false, message: response.statusText || `HTTP ${response.status}` };
-    }
-    console.error("JSON parse error:", error);
-    throw new Error(buildParseErrorMessage(response.status, endpoint, method));
-  }
-}
+import type {
+  AdminUserListParams,
+  AdminUserListResponse,
+  Announcement,
+  AnnouncementRenderMode,
+  ApiKeyItem,
+  ApiResponse,
+  BatchUserResult,
+  CodeUsePreview,
+  CodeUseResponse,
+  ConfigBackup,
+  ConfigBackupView,
+  ConfigCategory,
+  ConfigField,
+  ConfigFieldOption,
+  ConfigRestoreResult,
+  ConfigSchema,
+  ConfigSection,
+  CreateRegcodeData,
+  DatabaseBackup,
+  DatabaseBackupInspectResult,
+  DatabaseMigrationResult,
+  DatabaseOperationResult,
+  DatabaseRestoreResult,
+  DatabaseStatus,
+  EmbyDevice,
+  EmbyInfo,
+  EmbyLibraryAccess,
+  EmbyLibraryItem,
+  EmbyRegisterStatus,
+  EmbySession,
+  EmbyStatus,
+  InventoryCheckRequest,
+  InventoryCheckResult,
+  InviteCodeItem,
+  InviteConfig,
+  InviteForest,
+  InviteForestEdge,
+  InviteForestNode,
+  InviteMyStatus,
+  InviteTreeNode,
+  MediaDetail,
+  MediaItem,
+  MediaRequest,
+  MediaRequestData,
+  Regcode,
+  RegisterAvailability,
+  RegisterData,
+  RegisterResponse,
+  RuntimeLogEntry,
+  RuntimeLogsResponse,
+  RuntimeStatus,
+  SchedulerJobItem,
+  SchedulerJobRun,
+  SchedulerSchedulePayload,
+  SchedulerTriggerSpec,
+  SigninActionResult,
+  SigninBonusRule,
+  SigninHistoryRecord,
+  SigninPublicConfig,
+  SigninSummary,
+  SystemHealth,
+  SystemInfo,
+  SystemStats,
+  TelegramRebindRequest,
+  TelegramStatus,
+  User,
+  UserInfo,
+  UserSettings,
+  UserUpdateData,
+  ViolationLog,
+} from "./api-types";
+import { confirmPhrases } from "./confirm-phrases";
+import { API_BASE, ApiError, apiRequest, apiRequestForm } from "./api-request";
+import { normalizeMediaRequestStatus } from "./media-status";
 
 class ApiClient {
-  private normalizeRequestStatus(status?: string | null, mode: "user" | "admin" = "user"): string {
-    const raw = (status || "").trim().toLowerCase();
-    if (mode === "admin") {
-      const adminMap: Record<string, string> = {
-        pending: "pending",
-        unhandled: "pending",
-        accepted: "accepted",
-        rejected: "rejected",
-        completed: "completed",
-        downloading: "downloading",
-      };
-      return adminMap[raw] || "pending";
-    }
-
-    const userMap: Record<string, string> = {
-      pending: "UNHANDLED",
-      unhandled: "UNHANDLED",
-      accepted: "ACCEPTED",
-      rejected: "REJECTED",
-      completed: "COMPLETED",
-      downloading: "DOWNLOADING",
-    };
-    return userMap[raw] || (status || "UNHANDLED").toUpperCase();
-  }
-
   private toAbsoluteAssetUrl(url?: string | null): string | null {
     if (!url) return null;
     const value = url.trim();
@@ -208,40 +146,7 @@ class ApiClient {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
-    const headers: Record<string, string> = {
-      "Accept": "application/json; charset=utf-8",
-      "Content-Type": "application/json; charset=utf-8",
-      "X-Twilight-Client": "webui",
-      ...((options.headers as Record<string, string>) || {}),
-    };
-
-    const url = `${API_BASE}/api/v1${endpoint}`;
-    const method = requestMethod(options);
-    
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        ...options,
-        headers,
-        credentials: "include",
-      });
-    } catch (error) {
-      if (isAbortError(error)) {
-        throw error;
-      }
-      console.error("Network error:", error);
-      throw new Error(
-        `无法连接后端接口：${describeApiTarget(endpoint, method)}\n请检查后端服务是否启动、API 地址是否正确、反向代理是否可达。`
-      );
-    }
-
-    const data = await parseApiResponse<T>(response, endpoint, method);
-
-    if (!response.ok) {
-      throw new Error(buildHttpErrorMessage(response.status, endpoint, method, data?.message));
-    }
-
-    return data;
+    return apiRequest<T>(endpoint, options);
   }
 
   private async requestForm<T>(
@@ -249,39 +154,7 @@ class ApiClient {
     formData: FormData,
     method: "POST" | "PUT" = "POST"
   ): Promise<ApiResponse<T>> {
-    const headers: Record<string, string> = {
-      "Accept": "application/json; charset=utf-8",
-      "X-Twilight-Client": "webui",
-    };
-
-    const url = `${API_BASE}/api/v1${endpoint}`;
-    const methodName = method.toUpperCase();
-
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        method,
-        headers,
-        body: formData,
-        credentials: "include",
-      });
-    } catch (error) {
-      if (isAbortError(error)) {
-        throw error;
-      }
-      console.error("Network error:", error);
-      throw new Error(
-        `无法连接后端接口：${describeApiTarget(endpoint, methodName)}\n请检查后端服务是否启动、API 地址是否正确、反向代理是否可达。`
-      );
-    }
-
-    const data = await parseApiResponse<T>(response, endpoint, methodName);
-
-    if (!response.ok) {
-      throw new Error(buildHttpErrorMessage(response.status, endpoint, methodName, data?.message));
-    }
-
-    return data;
+    return apiRequestForm<T>(endpoint, formData, method);
   }
 
   // Auth
@@ -614,7 +487,7 @@ class ApiClient {
     if (res.success && Array.isArray(res.data)) {
       res.data = res.data.map((item) => ({
         ...item,
-        status: this.normalizeRequestStatus(item.status, "user"),
+        status: normalizeMediaRequestStatus(item.status, "user"),
       }));
     }
     return res;
@@ -863,21 +736,21 @@ class ApiClient {
   async batchToggleUsers(uids: number[], enable: boolean) {
     return this.request<BatchUserResult>(`/batch/users/${enable ? "enable" : "disable"}`, {
       method: "POST",
-      body: JSON.stringify({ uids }),
+      body: JSON.stringify({ uids, confirm: enable ? confirmPhrases.batchEnableUsers : confirmPhrases.batchDisableUsers }),
     });
   }
 
   async batchDeleteUsers(uids: number[], deleteEmby: boolean) {
     return this.request<BatchUserResult>("/batch/users/delete", {
       method: "POST",
-      body: JSON.stringify({ uids, delete_emby: deleteEmby }),
+      body: JSON.stringify({ uids, delete_emby: deleteEmby, confirm: confirmPhrases.batchDeleteUsers }),
     });
   }
 
   async batchSetLibrarySelfService(uids: number[], enabled: boolean) {
     return this.request<BatchUserResult & { enabled: boolean }>("/batch/users/library-self-service", {
       method: "POST",
-      body: JSON.stringify({ uids, enabled }),
+      body: JSON.stringify({ uids, enabled, confirm: confirmPhrases.batchLibrarySelfService }),
     });
   }
 
@@ -889,7 +762,7 @@ class ApiClient {
   }) {
     return this.request<BatchUserResult & { action: string }>("/batch/users/libraries", {
       method: "POST",
-      body: JSON.stringify({ uids, ...payload }),
+      body: JSON.stringify({ uids, ...payload, confirm: confirmPhrases.batchUserLibraries }),
     });
   }
 
@@ -1157,11 +1030,17 @@ class ApiClient {
     jobId: string,
     params?: Record<string, unknown>,
   ) {
+    // Body 必须用 `runtime_params` 键名 — 后端 schedulerRuntimeParamsFromPayload
+    // (internal/api/scheduler_handlers.go:160) 优先读 runtime_params；fallback
+    // 到整个 payload 是兼容路径，但管理员 dry_run / max_per_run /
+    // preserve_pending_register 这些键如果包到 `params` 下，fallback 也会把
+    // {params:{...}} 整体当作 runtime params dict，子键全部丢失，最终按默认值
+    // 跑。与 setSchedulerJobSchedule 的 payload 命名拉齐。
     return this.request<{ job_id: string; last_run: SchedulerJobRun | null }>(
       `/admin/scheduler/jobs/${encodeURIComponent(jobId)}/run`,
       {
         method: "POST",
-        body: JSON.stringify(params ? { params } : {}),
+        body: JSON.stringify({ runtime_params: params ?? {} }),
       },
     );
   }
@@ -1699,7 +1578,7 @@ class ApiClient {
       missing_codes: string[];
     }>("/admin/regcodes/batch-delete", {
       method: "POST",
-      body: JSON.stringify({ codes }),
+      body: JSON.stringify({ codes, confirm: confirmPhrases.batchDeleteRegcodes }),
     });
   }
 
@@ -1743,7 +1622,7 @@ class ApiClient {
   async clearViolations() {
     return this.request("/admin/violations/clear", {
       method: "POST",
-      body: JSON.stringify({ confirm: "CLEAR_VIOLATIONS" }),
+      body: JSON.stringify({ confirm: confirmPhrases.clearViolations }),
     });
   }
 
@@ -1758,7 +1637,7 @@ class ApiClient {
     if (res.success && res.data?.requests) {
       res.data.requests = res.data.requests.map((item) => ({
         ...item,
-        status: this.normalizeRequestStatus(item.status, "admin"),
+        status: normalizeMediaRequestStatus(item.status, "admin"),
       }));
     }
     return res;
@@ -1769,7 +1648,7 @@ class ApiClient {
    * Bangumi/TMDB 两表数值 id 撞车把操作打到错的求片。
    */
   async updateMediaRequest(requireKey: string, status: string, note?: string) {
-    const normalizedStatus = this.normalizeRequestStatus(status, "admin");
+    const normalizedStatus = normalizeMediaRequestStatus(status, "admin");
     const normalizedNote = (note || "").trim().slice(0, 1000);
     return this.request(`/admin/media-requests/by-key/${encodeURIComponent(requireKey)}`, {
       method: "PUT",
@@ -2001,839 +1880,6 @@ class ApiClient {
 
 export const api = new ApiClient();
 
-// Types
-export interface SystemInfo {
-  name: string;
-  icon: string;
-  version: string;
-  features: Record<string, boolean>;
-  limits: Record<string, number | null>;
-  telegram_bot?: {
-    username: string | null;
-    url: string | null;
-    enabled?: boolean;
-    configured?: boolean;
-    ok?: boolean;
-    error?: string;
-  };
-  telegram_links?: {
-    groups: Array<{ label: string; url: string }>;
-    channels: Array<{ label: string; url: string }>;
-  };
-  required_telegram_links?: {
-    groups: Array<{ label: string; url: string }>;
-    channels: Array<{ label: string; url: string }>;
-  };
-}
+export { ApiError } from "./api-request";
 
-export interface SystemHealth {
-  api: boolean;
-  database: boolean;
-  emby: boolean;
-}
-
-export interface User {
-  uid: number;
-  username: string;
-  role: number;
-  role_name: string;
-}
-
-export interface UserInfo {
-  uid: number;
-  username: string;
-  email?: string;
-  telegram_id?: number;
-  telegram_username?: string;  // Telegram 用户名
-  role: number;
-  role_name: string;
-  active: boolean;
-  expire_status?: string;  // 后端计算的状态文本（"永不过期"/"已过期"/"剩余 x天"）
-  expired_at?: string | number;  // 可能是时间戳或字符串，-1 表示永久
-  emby_id?: string;
-  emby_username?: string;  // 绑定的 Emby 用户名（与系统用户名独立）
-  emby_bound?: boolean;  // 后端判定的「已绑定 Emby」：EMBYID 非空
-  avatar?: string;
-  bgm_mode: boolean;
-  bgm_token_set?: boolean;
-  bgm_sync_ready?: boolean;
-  created_at?: string | number;
-  register_time?: number;
-  is_pending?: boolean;  // 是否待激活
-  pending_emby?: boolean;  // 系统账号已建但待补建 Emby
-  pending_emby_days?: number | null;  // 注册码授予的开通天数（待 Emby 补建）
-  emby_disabled_by_expiry?: boolean;  // 到期后仅禁用 Emby，系统账号仍可登录
-  library_self_service?: boolean;  // 是否允许在个人设置中自助显隐管理员开放的媒体库
-}
-
-export interface BatchUserResult {
-  total: number;
-  success: number;
-  failed: number;
-  errors: Array<{ uid: number; error: string }>;
-}
-
-export interface CodeUsePreview {
-  source: "regcode" | "invite";
-  type: number;
-  type_name: string;
-  days: number;
-  valid: boolean;
-  inviter?: string | null;
-  requires_emby_credentials: boolean;
-  confirm_title: string;
-  description: string;
-  duration_label: string;
-  submit_label?: string;
-}
-
-export interface CodeUseResponse extends Partial<CodeUsePreview> {
-  pending?: boolean;
-  request_id?: string;
-  status_token?: string;
-  status?: "queued" | "processing" | "success" | "failed";
-  queue_position?: number;
-  reused?: boolean;
-  emby_password?: string;
-  expire_status?: string;
-  expired_at?: string | number;
-  role?: number;
-  role_name?: string;
-  user?: UserInfo;
-}
-
-export interface ApiKeyItem {
-  id: number;
-  name: string;
-  key: string;            // masked, e.g. "key-xxxxxxxx…yyyyyyyy"
-  key_prefix: string;
-  key_suffix: string;
-  enabled: boolean;
-  allow_query: boolean;
-  permissions?: string[];
-  rate_limit: number;
-  request_count: number;
-  last_used: number | null;
-  created_at: number;
-  expired_at: number | null;
-}
-
-export interface UserSettings {
-  bgm_mode: boolean;
-  bgm_token_set: boolean;
-  api_key_enabled: boolean;
-  telegram: {
-    bound: boolean;
-    force_bind: boolean;
-    can_unbind: boolean;
-    can_change: boolean;
-    pending_rebind_request?: boolean;
-    rebind_request_status?: string | null;
-    rebind_request_id?: number | null;
-  };
-  emby_status: {
-    is_synced: boolean;
-    is_active: boolean;
-    active_sessions: number;
-    message: string;
-  };
-  system_config: {
-    device_limit_enabled: boolean;
-    max_devices: number;
-    max_streams: number;
-    bangumi_sync_enabled?: boolean;
-  };
-}
-
-export interface EmbyStatus {
-  is_synced: boolean;
-  is_active: boolean;
-  active_sessions: number;
-  message: string;
-}
-
-export interface TelegramStatus {
-  bound: boolean;
-  telegram_id?: string;
-  telegram_id_full?: number;
-  telegram_username?: string;  // Telegram 用户名
-  force_bind: boolean;
-  can_unbind: boolean;
-  can_change: boolean;
-  pending_rebind_request?: boolean;
-  rebind_request_status?: string | null;
-  rebind_request_id?: number | null;
-}
-
-export interface TelegramRebindRequest {
-  id: number;
-  uid: number;
-  username?: string | null;
-  old_telegram_id?: number | null;
-  status: string;
-  reason?: string | null;
-  admin_note?: string | null;
-  reviewer_uid?: number | null;
-  created_at: number;
-  reviewed_at?: number | null;
-}
-
-export interface MediaItem {
-  id: number;
-  title: string;
-  original_title?: string;
-  overview?: string;
-  poster?: string;
-  poster_url?: string;
-  year?: number;
-  release_date?: string;
-  source: string;
-  source_url?: string;
-  media_type: string;
-  rating?: number;
-  vote_average?: number;
-}
-
-export interface MediaDetail extends MediaItem {
-  backdrop?: string;
-  genres?: string[];
-  runtime?: number;
-  seasons?: number;
-  episodes?: number;
-  status?: string;
-}
-
-export interface InventoryCheckRequest {
-  source: string;
-  media_id: number;
-  media_type: string;
-  title?: string;
-  original_title?: string;
-  year?: number;
-  season?: number;
-}
-
-export interface InventoryCheckResult {
-  exists: boolean;
-  message: string;
-  media_item?: {
-    id: string;
-    name: string;
-    year?: number;
-  };
-  seasons_available?: number[];
-  season_requested?: number;
-}
-
-export interface MediaRequestData {
-  source: string;
-  media_id: number;
-  media_type: string;
-  title?: string;
-  original_title?: string;
-  poster?: string;
-  poster_url?: string;
-  overview?: string;
-  season?: number;
-  note?: string;
-  year?: number;  // 年份限制
-}
-
-export interface MediaRequest {
-  id: number;
-  source: string;
-  // Bangumi 端是 int，TMDB 端是 str（"12345" 或 "tv:12345"），所以这里宽放一些类型
-  media_id: number | string;
-  status: string; // UNHANDLED, ACCEPTED, REJECTED, COMPLETED
-  timestamp: number;
-  title: string;
-  media_type: string;
-  season?: number;
-  // 后端始终下发；用作前端 React key 与 PUT/DELETE 的路由参数。
-  require_key: string;
-  media_info?: {
-    title: string;
-    media_type: string;
-    season?: number;
-    year?: number;
-    note?: string;
-    overview?: string;
-    poster?: string;
-    poster_url?: string;
-    vote_average?: number;
-    rating?: number;
-    [key: string]: any;
-  };
-  admin_note?: string;
-  user?: {
-    telegram_id: number;
-    username?: string;
-    uid?: number;
-  };
-}
-
-export interface EmbyInfo {
-  server_name?: string;
-  version?: string;
-  user_id?: string;
-  user_name?: string;
-  online?: boolean;
-  active_sessions?: number;
-  total_sessions?: number;
-  operating_system?: string;
-  message?: string;
-}
-
-export interface EmbyLibraryItem {
-  id: string;
-  name: string;
-  type?: string;
-}
-
-export interface EmbyLibraryAccess {
-  has_emby: boolean;
-  enable_all: boolean;
-  enabled_ids: string[];
-  blocked_names: string[];
-  all_libraries: EmbyLibraryItem[];
-  libraries: EmbyLibraryItem[];
-  default_hidden_libraries: string[];
-  self_service_libraries: string[];
-  self_service_enabled: boolean;
-}
-
-export interface EmbySession {
-  id: string;
-  device_name: string;
-  client: string;
-  now_playing?: string;
-  last_activity: string;
-}
-
-export interface EmbyDevice {
-  id: string;
-  name: string;
-  app_name: string;
-  last_user?: string;
-  last_used: string;
-}
-
-export interface RegisterData {
-  telegram_bind_code?: string;
-  username: string;
-  password?: string;
-  email?: string;
-  reg_code?: string;
-}
-
-export interface RegisterResponse {
-  registration_target?: "system" | "emby";
-  uid?: number;
-  username?: string;
-  password?: string;
-  user?: UserInfo;
-  request_id?: string;
-  status_token?: string;
-  status?: "queued" | "processing" | "success" | "failed";
-  queue_position?: number;
-  reused?: boolean;
-}
-
-export interface RegisterAvailability {
-  available: boolean;
-  message: string;
-  current_users: number;
-  max_users: number;
-  register_mode: boolean;
-  allow_pending_register: boolean;
-  emby_direct_register_enabled: boolean;
-  // 管理员单值固定的开通天数（-1 永久）；客户端只读
-  emby_direct_register_days: number;
-  // 兼容老前端：等值单项数组，恒不允许自定义
-  emby_direct_register_day_options?: number[];
-  emby_direct_register_allow_custom_days?: boolean;
-  emby_user_limit?: number;
-  emby_bound_users?: number;
-}
-
-export interface EmbyRegisterStatus {
-  request_id: string;
-  status: "queued" | "processing" | "success" | "failed" | "rejected";
-  queue_position?: number;
-  message?: string;
-  created_at?: number;
-  updated_at?: number;
-  finished_at?: number;
-  data?: {
-    uid?: number;
-    username?: string;
-    emby_password?: string;
-  };
-}
-
-export interface AdminUserListParams {
-  page?: number;
-  per_page?: number;
-  role?: number | null;
-  active?: boolean | null;
-  emby?: "bound" | "unbound" | null;
-  search?: string;
-  sort?: string;
-}
-
-export interface AdminUserListResponse {
-  users: UserInfo[];
-  total: number;
-  page: number;
-  per_page: number;
-  pages: number;
-}
-
-export interface UserUpdateData {
-  role?: number;
-  active?: boolean;
-  expired_at?: string;
-}
-
-export interface SystemStats {
-  timestamp: number;
-  cpu_count: number | null;
-  cpu_percent?: number | null;
-  memory?: {
-    total: number;
-    available: number;
-    percent: number;
-    used: number;
-  } | null;
-  disk?: {
-    total: number;
-    free: number;
-    percent: number;
-  } | null;
-}
-
-export interface RuntimeLogEntry {
-  id: number;
-  time: number;
-  level: string;
-  message: string;
-  attrs?: Record<string, string>;
-}
-
-export interface RuntimeLogsResponse {
-  entries: RuntimeLogEntry[];
-  next_cursor: number;
-  limit: number;
-}
-
-export interface RuntimeStatus {
-  started_at: number;
-  uptime_seconds: number;
-  host_uptime_seconds?: number;
-  hostname?: string;
-  go_version: string;
-  goos: string;
-  goarch: string;
-  goroutines: number;
-  cpu_count: number;
-  redis_enabled: boolean;
-  routes: number;
-  active_database: string;
-  config_database: string;
-  users: number;
-  log_level?: string;
-  runtime_log_limit?: number;
-  runtime_log_entries?: number;
-  runtime_log_backend?: string;
-  load_average?: number[];
-  memory?: Record<string, number>;
-  host_memory?: Record<string, number>;
-}
-
-export interface Regcode {
-  code: string;
-  type: number;
-  type_name: string;
-  is_decoy?: boolean;
-  days: number;
-  validity_time?: number; // 注册码有效期（小时），-1 表示永久
-  use_count?: number;
-  use_count_limit?: number;
-  active?: boolean;
-  status?: "available" | "disabled" | "used_up" | "expired";
-  note?: string;
-  target_username?: string;
-  used: boolean;
-  used_by?: number | string;
-  used_by_uids?: number[];
-  used_by_telegram_ids?: number[];
-  created_at: string;
-  created_time?: number; // 创建时间戳（兼容字段）
-  used_at?: string;
-}
-
-export interface CreateRegcodeData {
-  type: number;
-  days: number;
-  validity_time?: number; // 注册码有效期（小时），-1 表示永久
-  use_count_limit?: number; // 使用次数限制，-1 表示无限
-  count?: number;
-  decoy?: boolean;
-  format?: string;
-  random_algorithm?: string;
-  target_username?: string;
-}
-
-export interface ConfigFieldOption {
-  label: string;
-  value: number | string;
-}
-
-export interface ConfigField {
-  key: string;
-  label: string;
-  type: 'string' | 'textarea' | 'int' | 'float' | 'bool' | 'secret' | 'list' | 'select' | 'command_map';
-  description: string;
-  value: unknown;
-  options?: ConfigFieldOption[];
-}
-
-export interface ConfigSection {
-  key: string;
-  title: string;
-  description: string;
-  fields: ConfigField[];
-  /** 类别 key，与 ConfigSchema.categories 中的 key 对应。后端可缺省。 */
-  category?: string;
-}
-
-export interface ConfigCategory {
-  key: string;
-  title: string;
-}
-
-export interface ConfigSchema {
-  sections: ConfigSection[];
-  /** 类别声明（顺序即渲染顺序）；后端可缺省，前端会回落为单一类别 */
-  categories?: ConfigCategory[];
-}
-
-
-export interface DatabaseBackup {
-  name: string;
-  path: string;
-  size: number;
-  created_at: number;
-  note?: string;
-}
-
-export type ConfigBackup = DatabaseBackup;
-
-export interface ConfigBackupView {
-  backup: ConfigBackup;
-  content: string;
-  config_file: string;
-}
-
-export interface ConfigRestoreResult {
-  operation: "restore_config" | string;
-  dry_run: boolean;
-  requires_confirmation?: boolean;
-  confirm?: string;
-  restored: string;
-  backup: ConfigBackup;
-  config_file: string;
-  content_bytes: number;
-  warnings?: string[];
-  pre_restore_backup?: ConfigBackup;
-  pre_operation_backup?: ConfigBackup;
-  reload?: Record<string, unknown>;
-}
-
-export interface DatabaseBackupInspectResult {
-  backup: DatabaseBackup;
-  snapshot_bytes: number;
-  counts: Record<string, number>;
-  users: number;
-  api_keys: number;
-  regcodes: number;
-  invite_codes: number;
-  media_requests: number;
-  announcements: number;
-}
-
-export interface DatabaseStatus {
-  active_driver: string;
-  configured_driver: string;
-  active_label?: string;
-  configured_label?: string;
-  supported_drivers?: Array<{ driver: string; label: string; role: string }>;
-  state_file: string;
-  backup_dir: string;
-  backup_count: number;
-  migration_panel_enabled?: boolean;
-  postgres_configured: boolean;
-  redis_enabled: boolean;
-  user_count: number;
-}
-
-export interface DatabaseOperationResult {
-  operation?: "restore" | "migrate" | string;
-  source_driver?: string;
-  configured_driver?: string;
-  target_driver?: string;
-  dry_run: boolean;
-  requires_confirmation?: boolean;
-  confirm?: string;
-  snapshot_bytes?: number;
-  target_snapshot_bytes?: number;
-  current_snapshot_bytes?: number;
-  source_ready?: Record<string, unknown>;
-  target_ready?: Record<string, unknown>;
-  backup_ready?: Record<string, unknown>;
-  warnings?: string[];
-  counts?: Record<string, number>;
-  current_counts?: Record<string, number>;
-  users: number;
-  api_keys: number;
-  regcodes: number;
-  invite_codes: number;
-  media_requests: number;
-  announcements: number;
-  state_file?: string;
-  backup?: DatabaseBackup;
-  restored?: string;
-  pre_restore_backup?: DatabaseBackup;
-  pre_migration_backup?: DatabaseBackup;
-  pre_operation_backup?: DatabaseBackup;
-}
-
-export type DatabaseMigrationResult = DatabaseOperationResult & {
-  target_driver: string;
-};
-
-export type DatabaseRestoreResult = DatabaseOperationResult & {
-  restored: string;
-  backup?: DatabaseBackup;
-};
-
-export interface SchedulerJobRun {
-  id?: number;
-  job_id?: string;
-  type?: "auto" | "manual";
-  trigger?: string;
-  status: "running" | "success" | "failed";
-  started_at: number;
-  finished_at: number | null;
-  error: string | null;
-  summary?: Record<string, unknown> | null;
-  logs?: string[];
-}
-
-export type SchedulerTriggerSpec =
-  | { type: "cron_daily"; hour: number; minute: number }
-  | { type: "interval"; seconds: number }
-  | { type: "manual" };
-
-export type SchedulerSchedulePayload = SchedulerTriggerSpec & {
-  runtime_params?: Record<string, unknown> | null;
-};
-
-export interface SchedulerJobItem {
-  id: string;
-  name: string;
-  description: string;
-  enabled: boolean;
-  schedule: string | null;
-  next_run_at: number | null;
-  last_run: SchedulerJobRun | null;
-  is_running: boolean;
-  trigger_spec: SchedulerTriggerSpec;
-  default_trigger_spec: SchedulerTriggerSpec;
-  is_custom: boolean;
-  auto_disabled?: boolean;
-  last_auto_run_at?: number | null;
-  last_manual_run_at?: number | null;
-  persisted_info?: Record<string, unknown> | null;
-  /**
-   * 手动专属任务：不接受定时触发器，仅能手动触发。
-   * 后端在 JOB_DEFINITIONS 上打的标记，下发到前端用于隐藏"编辑触发器"按钮。
-   */
-  manual_only?: boolean;
-  runtime_params?: Record<string, unknown> | null;
-}
-
-
-export type AnnouncementRenderMode = "plain" | "markdown" | "bbcode";
-
-export interface Announcement {
-  id: number;
-  title: string | null;
-  content: string;
-  level: "info" | "notice" | "warning" | "critical";
-  render_mode?: AnnouncementRenderMode;
-  pinned: boolean;
-  visible: boolean;
-  expires_at: number; // -1 = 永不过期
-  created_at: number;
-  updated_at: number;
-  created_by_uid?: number | null;
-}
-
-// ==================== 邀请树 ====================
-export interface InviteConfig {
-  enabled: boolean;
-  max_depth: number;
-  invite_limit: number;
-  require_emby: boolean;
-  default_days: number;
-  code_format?: string;
-  permanent_invite_max_days?: number;
-}
-
-export interface InviteCodeItem {
-  code: string;
-  inviter_uid: number;
-  days: number;
-  use_count_limit: number;
-  use_count: number;
-  expires_at: number;
-  active: boolean;
-  created_at: number;
-  used_by_uid?: number | null;
-  used_at?: number | null;
-  note?: string | null;
-}
-
-export interface InviteTreeNode {
-  uid: number;
-  username: string;
-  active: boolean;
-  has_emby: boolean;
-  expired_at?: number | null;
-  expire_status?: string;
-  emby_expired?: boolean;
-  depth: number;
-  children?: InviteTreeNode[];
-}
-
-export interface InviteMyStatus {
-  enabled: boolean;
-  is_root: boolean;
-  parent: { uid: number; username: string } | null;
-  children: Array<{
-    uid: number;
-    username: string;
-    active: boolean;
-    has_emby: boolean;
-    expired_at?: number | null;
-    expire_status?: string;
-    emby_expired?: boolean;
-    can_generate_renew_code?: boolean;
-  }>;
-  tree?: {
-    self: InviteTreeNode;
-    descendants: InviteTreeNode[];
-    descendant_count: number;
-  };
-  depth: number;
-  max_depth: number;
-  can_invite: boolean;
-  invite_block_reason?: string;
-  max_code_days?: number;
-  max_code_days_reason?: string;
-}
-
-export interface InviteForestNode {
-  uid: number;
-  username: string;
-  role: number;
-  emby_id?: string | null;
-  active: boolean;
-  telegram_id?: number | null;
-  register_time?: number | null;
-  expired_at?: number | null;
-  is_root: boolean;
-}
-
-export interface InviteForestEdge {
-  parent: number;
-  child: number;
-}
-
-export interface InviteForest {
-  nodes: InviteForestNode[];
-  edges: InviteForestEdge[];
-  roots: number[];
-  max_depth: number;
-  config: {
-    enabled: boolean;
-    max_depth: number;
-    invite_limit: number;
-    require_emby: boolean;
-  };
-}
-
-// ==================== 签到 / 积分 ====================
-export interface SigninSummary {
-  enabled: boolean;
-  currency_name: string;
-  current_points: number;
-  current_streak: number;
-  longest_streak: number;
-  total_points: number;
-  last_signin_date: string | null;
-  today_signed: boolean;
-  next_bonus_in_days: number | null;
-  next_bonus_points: number | null;
-}
-
-export interface SigninBonusRule {
-  streak_days: number;
-  bonus_points: number;
-}
-
-export interface SigninPublicConfig {
-  enabled: boolean;
-  currency_name: string;
-  daily_min: number;
-  daily_max: number;
-  streak_bonus_enabled: boolean;
-  bonus_table: SigninBonusRule[];
-  reset_after_miss: boolean;
-}
-
-export interface SigninActionResult {
-  created?: boolean;
-  today_signed: boolean;
-  daily_points: number;
-  bonus_points: number;
-  total_today: number;
-  current_streak: number;
-  longest_streak: number;
-  current_points: number;
-  currency_name: string;
-}
-
-export interface SigninHistoryRecord {
-  date: string;
-  daily_points: number;
-  bonus_points: number;
-  total: number;
-  streak: number;
-  created_at: number;
-}
-
-// ==================== 违规审计 ====================
-export interface ViolationLog {
-  id: number;
-  uid: number;
-  username: string;
-  code: string;
-  code_type: string;
-  reason: string;
-  action: string;
-  ip: string | null;
-  telegram_id: number | null;
-  created_at: number;
-}
+export type * from "./api-types";

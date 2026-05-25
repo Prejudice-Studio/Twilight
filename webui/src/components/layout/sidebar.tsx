@@ -40,6 +40,7 @@ import { SITE_NAME } from "@/lib/site-config";
 import { useRegionRefresh } from "@/hooks/use-region-refresh";
 import { RegionRefreshKeys } from "@/lib/region-refresh";
 import { useSystemStore } from "@/store/system";
+import { sanitizeImageUrl } from "@/lib/safe-url";
 
 export interface SidebarNavItem {
   href: string;
@@ -54,17 +55,6 @@ type ViewTransitionLike = {
 type MaybeStartViewTransition = {
   startViewTransition?: (updateCallback: () => void | Promise<void>) => ViewTransitionLike;
 };
-
-const SAFE_IMAGE_URL = /^(https?:\/\/|\/|data:image\/(png|jpe?g|gif|webp|avif|bmp)(;|,)|[a-zA-Z]:[\\/])/i;
-
-function sanitizeImageUrl(url?: string | null): string | undefined {
-  if (!url) return undefined;
-  const value = url.trim();
-  if (!value) return undefined;
-  if (!SAFE_IMAGE_URL.test(value)) return undefined;
-  if (/^[a-zA-Z]:[\\/]/.test(value)) return `/api/v1/system/server-icon`;
-  return value;
-}
 
 export const userNavItems: SidebarNavItem[] = [
   { href: "/dashboard", label: "仪表盘", icon: LayoutDashboard },

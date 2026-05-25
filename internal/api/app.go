@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -123,6 +125,11 @@ func New(cfg config.Config, st *store.Store) (*App, error) {
 	app.configSignature = configFileSignature(cfg.ConfigFile)
 	app.registerRoutes()
 	app.applyConfiguredAdmins()
+	// 启动期校验 CORS 配置一致性。
+	// applyCORS 默认就附带 Allow-Credentials: true，浏览器规范本就拒绝
+	// `*` + credentials 组合；早期管理员若误填 `*` 会得到一个静默无效的配置。
+	// 这里在启动 / reload 时强提示，配 .Error 让审计/告警系统能抓到。
+	validateCORSOriginsStartup(cfg.CORSOrigins)
 	ConfigureRuntimeLoggingStore(st, cfg.ZapLevel(), cfg.RuntimeLogLimit)
 	return app, nil
 }
@@ -168,6 +175,35 @@ func openConfiguredStore(ctx context.Context, cfg config.Config) (*store.Store, 
 	}
 }
 
+// storeBackendChanged 判定 reload 是否需要重开 store。Driver / state file
+// 路径 / Postgres DSN 任一变化就必须重开；driver 含义以归一化为准（"" / "json"
+// / "file" 视为同一 JSON 后端，避免 reload 时把同一路径的 JSON store 反复
+// 关闭重开造成 flock 重入死锁）。
+func storeBackendChanged(previous, next config.Config) bool {
+	prevDriver := normalizeStoreDriver(previous.DatabaseDriver)
+	nextDriver := normalizeStoreDriver(next.DatabaseDriver)
+	if prevDriver != nextDriver {
+		return true
+	}
+	switch nextDriver {
+	case store.BackendJSON:
+		return previous.StateFile != next.StateFile
+	case store.BackendPostgres:
+		return previous.PostgresDSN() != next.PostgresDSN()
+	}
+	return false
+}
+
+func normalizeStoreDriver(driver string) string {
+	switch driver {
+	case "", store.BackendJSON, "file":
+		return store.BackendJSON
+	case store.BackendPostgres, "postgresql":
+		return store.BackendPostgres
+	}
+	return driver
+}
+
 func (a *App) Routes() []Route {
 	out := make([]Route, len(a.routes))
 	copy(out, a.routes)
@@ -188,16 +224,27 @@ func (a *App) reloadConfigLocked() (map[string]any, error) {
 	}
 
 	reinitialized := []string{}
-	if previous.DatabaseDriver != next.DatabaseDriver || previous.StateFile != next.StateFile || previous.PostgresDSN() != next.PostgresDSN() {
+	if storeBackendChanged(previous, next) {
+		// Backend / 路径 / DSN 真的变了：必须先关旧 store 释放 flock（同 path
+		// JSON 重开会死锁在锁文件上），再开新的；但只有在新 store 打开成功
+		// 后才丢弃旧 store，避免开盘失败时把可用的 store 也一并清掉。
+		oldStore := a.store
+		if oldStore != nil {
+			_ = oldStore.Close()
+			a.store = nil
+		}
 		nextStore, err := openConfiguredStore(context.Background(), next)
 		if err != nil {
+			// 重开旧 store 兜底：尝试用 previous 配置再次打开，让请求路径
+			// 不至于裸露 nil。失败则交给上层（reloadConfig）回滚配置。
+			if oldStore != nil {
+				if recovered, recoverErr := openConfiguredStore(context.Background(), previous); recoverErr == nil {
+					a.store = recovered
+				}
+			}
 			return nil, err
 		}
-		oldStore := a.store
 		a.store = nextStore
-		if oldStore != nil && oldStore != nextStore {
-			_ = oldStore.Close()
-		}
 		reinitialized = append(reinitialized, "database")
 	}
 	if previous.RedisURL != next.RedisURL || previous.SessionTTL != next.SessionTTL {
@@ -217,6 +264,10 @@ func (a *App) reloadConfigLocked() (map[string]any, error) {
 
 	a.cfg = next
 	a.applyConfiguredAdmins()
+	// reload 也走一遍 CORS 校验，捕获 hot reload 引入的错配置。
+	if !sameStringSlice(previous.CORSOrigins, next.CORSOrigins) {
+		validateCORSOriginsStartup(next.CORSOrigins)
+	}
 	ConfigureRuntimeLoggingStore(a.store, next.ZapLevel(), next.RuntimeLogLimit)
 	reinitialized = append(reinitialized, "runtime_logger")
 	if a.store.Backend() == store.BackendPostgres && (previous.PostgresMaxOpenConns != next.PostgresMaxOpenConns || previous.PostgresMaxIdleConns != next.PostgresMaxIdleConns) {
@@ -291,8 +342,19 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var principalLog *principal
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			zap.L().Error("panic in api handler", zap.Any("panic", recovered))
-			fail(lw, http.StatusInternalServerError, "服务器内部错误")
+			// panic 值可能携带请求字段（密码 / token / Emby 凭据等），
+			// zap.Any 会原样落盘绕过日志脱敏；先 fmt + redact 再写。
+			panicMsg := redactSensitiveText(fmt.Sprintf("%v", recovered))
+			zap.L().Error("panic in api handler",
+				zap.String("panic", panicMsg),
+				zap.String("method", r.Method),
+				zap.String("path", r.URL.Path),
+			)
+			// envelope 必须带 error_code，前端才能用 errcode 而非文案匹配。
+			// status==0 表示尚未写入响应头，避免 panic 后再写一次造成 superfluous WriteHeader。
+			if lw.status == 0 {
+				failWithCode(lw, http.StatusInternalServerError, ErrInternal, "服务器内部错误")
+			}
 		}
 		status := lw.status
 		if status == 0 {
@@ -352,9 +414,11 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principalLog = principal
-	if principal != nil && principal.FromCookie && isMutating(r.Method) && r.Header.Get("X-Twilight-Client") != "webui" {
-		fail(lw, http.StatusForbidden, "缺少客户端校验头")
-		return
+	if principal != nil && principal.FromCookie && isMutating(r.Method) {
+		if !a.verifyCSRFToken(r) {
+			failWithCode(lw, http.StatusForbidden, ErrCSRFMissing, "缺少或无效的 CSRF 令牌，请刷新页面后重试")
+			return
+		}
 	}
 	if principal != nil && a.blockRestrictedEmbyAdmin(lw, r, route, principal.User) {
 		return
@@ -464,6 +528,13 @@ func (a *App) authenticateUser(r *http.Request) (*principal, bool) {
 	if !ok {
 		return nil, false
 	}
+	// Active 兜底：用户被 ban / scheduler 自动失活 / 用户主动注销后，stale token
+	// 必须立即被拒。redis 缓存的 sessionRecord 不含 active 字段，所以不能依赖
+	// 缓存层做这件事；store.User 才是 active 的唯一真相源。
+	// 与 authenticateAPIKey:495 的 `!u.Active` 检查口径一致。
+	if !u.Active {
+		return nil, false
+	}
 	return &principal{User: u, Token: token, FromCookie: fromCookie}, true
 }
 
@@ -525,6 +596,16 @@ func (a *App) applySecurityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 	w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 	w.Header().Set("X-Permitted-Cross-Domain-Policies", "none")
+	// 后端只输出 JSON / 静态上传资源，不渲染 HTML 应用本身：
+	// 限制 default-src 'none'，避免 application/json 错误识别后被注入脚本。
+	// 文档/图片仍可加载（img-src + style-src 'self'）。
+	// 前端 Next.js 的 CSP 由 webui 自身在 next.config.ts / middleware 中负责。
+	w.Header().Set("Content-Security-Policy",
+		"default-src 'none'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; "+
+			"script-src 'self'; connect-src 'self'; font-src 'self' data:; "+
+			"frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+	w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
+	w.Header().Set("Cross-Origin-Resource-Policy", "same-site")
 }
 
 func (a *App) applyCORS(w http.ResponseWriter, r *http.Request) bool {
@@ -536,6 +617,8 @@ func (a *App) applyCORS(w http.ResponseWriter, r *http.Request) bool {
 	for _, candidate := range a.cfg.CORSOrigins {
 		candidate = strings.TrimSpace(candidate)
 		if candidate == "*" {
+			// 启动期已 zap.Error 告警；运行期再次防御性跳过，
+			// 即使管理员错配置成 `*` 也不会与 Allow-Credentials 组合。
 			continue
 		}
 		if strings.EqualFold(normalizeCORSOrigin(candidate), origin) {
@@ -549,9 +632,70 @@ func (a *App) applyCORS(w http.ResponseWriter, r *http.Request) bool {
 	w.Header().Set("Access-Control-Allow-Origin", origin)
 	w.Header().Set("Vary", "Origin")
 	w.Header().Set("Access-Control-Allow-Credentials", "true")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key, X-Twilight-Client")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key, X-Twilight-Client, X-CSRF-Token")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
 	w.Header().Set("Access-Control-Max-Age", "600")
+	return true
+}
+
+// validateCORSOriginsStartup 在启动 / reload 时对 CORS 配置做静态体检：
+//   - 显式 `*` 与 Allow-Credentials: true 是浏览器规范禁止的组合，
+//     applyCORS 已运行期跳过 `*`，但管理员看不到任何反馈，
+//     因此这里强制 zap.Error 让监控/SRE 抓到错配置；
+//   - 同时把无法 normalize 的 origin（拼写错误 / 含路径 / 含 query）
+//     列出来，给运维一个可定位的失败信号。
+// 函数本身不返回 error，仅打印 —— App 不会因为 CORS 错配置启动失败，
+// 因为反代/容器重启场景下这往往是非致命的退化。
+func validateCORSOriginsStartup(origins []string) {
+	if len(origins) == 0 {
+		return
+	}
+	var hasWildcard bool
+	var invalid []string
+	cleaned := make([]string, 0, len(origins))
+	for _, raw := range origins {
+		o := strings.TrimSpace(raw)
+		if o == "" {
+			continue
+		}
+		if o == "*" {
+			hasWildcard = true
+			continue
+		}
+		if normalizeCORSOrigin(o) == "" {
+			invalid = append(invalid, o)
+			continue
+		}
+		cleaned = append(cleaned, o)
+	}
+	if hasWildcard {
+		zap.L().Error(
+			"cors_origins 包含 `*` 通配符；运行期会被忽略并禁用 Allow-Credentials："+
+				"浏览器规范禁止 `*` 与 credentials 同用，请改填具体 origin 列表",
+			zap.Strings("configured_origins", origins),
+			zap.Strings("effective_origins", cleaned),
+		)
+	}
+	if len(invalid) > 0 {
+		zap.L().Warn(
+			"cors_origins 含无法解析的条目，已忽略；条目必须是 scheme://host[:port]，无 path/query/fragment",
+			zap.Strings("invalid_entries", invalid),
+		)
+	}
+}
+
+// sameStringSlice 判断两个 string 切片在元素 + 顺序意义上完全相同。
+// reload 时仅当 CORS 配置实际变化才重跑 validateCORSOriginsStartup，
+// 避免每次 hot reload 都刷一条 Info 日志。
+func sameStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
 	return true
 }
 
@@ -592,6 +736,71 @@ func (a *App) setSessionCookie(w http.ResponseWriter, token string, expires time
 
 func (a *App) clearSessionCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{Name: a.cfg.SessionCookie, Path: "/", MaxAge: -1, Expires: time.Unix(0, 0), HttpOnly: true, Secure: a.cfg.CookieSecure, SameSite: sameSite(a.cfg.CookieSameSite)})
+	http.SetCookie(w, &http.Cookie{Name: a.csrfCookieName(), Path: "/", MaxAge: -1, Expires: time.Unix(0, 0), HttpOnly: false, Secure: a.cfg.CookieSecure, SameSite: sameSite(a.cfg.CookieSameSite)})
+}
+
+// csrfCookieName 返回 CSRF cookie 名，固定为 session cookie 名 + "_csrf" 后缀。
+func (a *App) csrfCookieName() string {
+	return a.cfg.SessionCookie + "_csrf"
+}
+
+// newCSRFToken 生成 32 字节随机 CSRF 令牌（hex 编码）。
+// 在 crypto/rand 故障时返回 error；调用方需向上层失败响应而非伪造熵。
+func newCSRFToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// setCSRFCookie 写一个非 HttpOnly 的 CSRF cookie，前端 JS 可读后塞进
+// X-CSRF-Token 请求头。配合 verifyCSRFToken 形成"双提交 cookie"模式：
+// 攻击者站点不能跨域读 cookie 也无法伪造同名 header，所以无法构造合法 mutating 请求。
+func (a *App) setCSRFCookie(w http.ResponseWriter, token string, expires time.Time) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     a.csrfCookieName(),
+		Value:    token,
+		Path:     "/",
+		Expires:  expires,
+		MaxAge:   int(time.Until(expires).Seconds()),
+		HttpOnly: false, // CRITICAL：必须可被前端 JS 读取
+		Secure:   a.cfg.CookieSecure,
+		SameSite: sameSite(a.cfg.CookieSameSite),
+	})
+}
+
+// issueSessionCookies 一次性下发 session + csrf 两个 cookie，并返回
+// CSRF 令牌字符串方便登录响应也回写到 body（前端可任选 cookie / body 来源）。
+func (a *App) issueSessionCookies(w http.ResponseWriter, sessionToken string, expires time.Time) (string, error) {
+	csrf, err := newCSRFToken()
+	if err != nil {
+		return "", err
+	}
+	a.setSessionCookie(w, sessionToken, expires)
+	a.setCSRFCookie(w, csrf, expires)
+	return csrf, nil
+}
+
+// verifyCSRFToken 校验 cookie-based mutating 请求携带合法 CSRF 令牌。
+// 校验规则：
+//  1. 必须有 csrf cookie
+//  2. 必须有 X-CSRF-Token header
+//  3. 两者使用 subtle.ConstantTimeCompare 比对
+// 任一失败返回 false。调用点应回 403 + AUTH_CSRF_MISSING。
+func (a *App) verifyCSRFToken(r *http.Request) bool {
+	cookie, err := r.Cookie(a.csrfCookieName())
+	if err != nil || cookie.Value == "" {
+		return false
+	}
+	header := strings.TrimSpace(r.Header.Get("X-CSRF-Token"))
+	if header == "" {
+		return false
+	}
+	if len(header) != len(cookie.Value) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(header)) == 1
 }
 
 func sameSite(value string) http.SameSite {

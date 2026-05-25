@@ -53,25 +53,25 @@ func applyGitUpdate(ctx context.Context, repoURL, branch string, restartServices
 	_ = allowDirty
 	repoURL, err := validateUpdateRepoURL(repoURL)
 	if err != nil {
-		return map[string]any{"success": false, "message": err.Error(), "code": 400, "results": []any{}}
+		return map[string]any{"success": false, "message": err.Error(), "error_code": ErrUpdateRepoInvalid, "code": 400, "results": []any{}}
 	}
 	branch, err = validateUpdateBranch(branch)
 	if err != nil {
-		return map[string]any{"success": false, "message": err.Error(), "code": 400, "results": []any{}}
+		return map[string]any{"success": false, "message": err.Error(), "error_code": ErrUpdateBranchInvalid, "code": 400, "results": []any{}}
 	}
 	projectRoot, err := os.Getwd()
 	if err != nil {
-		return map[string]any{"success": false, "message": err.Error(), "code": 500, "results": []any{}}
+		return map[string]any{"success": false, "message": err.Error(), "error_code": ErrInternal, "code": 500, "results": []any{}}
 	}
 	if _, err := os.Stat(filepathJoin(projectRoot, ".git")); err != nil {
-		return map[string]any{"success": false, "message": "current directory is not a Git repository", "code": 400, "project_root": projectRoot, "results": []any{}}
+		return map[string]any{"success": false, "message": "当前目录不是 Git 仓库", "error_code": ErrUpdateNotGitRepo, "code": 400, "project_root": projectRoot, "results": []any{}}
 	}
 	if _, err := exec.LookPath("git"); err != nil {
-		return map[string]any{"success": false, "message": "git executable was not found", "code": 500, "project_root": projectRoot, "results": []any{}}
+		return map[string]any{"success": false, "message": "未找到 git 可执行文件", "error_code": ErrUpdateGitMissing, "code": 500, "project_root": projectRoot, "results": []any{}}
 	}
 	before, err := gitRepositoryState(ctx, projectRoot)
 	if err != nil {
-		return map[string]any{"success": false, "message": "failed to inspect Git repository", "code": 500, "project_root": projectRoot, "error": err.Error(), "results": []any{}}
+		return map[string]any{"success": false, "message": "无法读取 Git 仓库状态", "error_code": ErrUpdateInspectFailed, "code": 500, "project_root": projectRoot, "error": err.Error(), "results": []any{}}
 	}
 	dirtyBefore := boolish(before["dirty"])
 	if dryRun {
@@ -107,7 +107,7 @@ func applyGitUpdate(ctx context.Context, repoURL, branch string, restartServices
 		stash["command"] = "git stash push --include-untracked -m " + stashMessage
 		results = append(results, stash)
 		if code, _ := stash["returncode"].(int); code != 0 {
-			return map[string]any{"success": false, "message": "automatic update failed while stashing local changes", "code": 500, "project_root": projectRoot, "repo_url": redactGitURL(repoURL), "branch": branch, "dry_run": false, "dirty_before": dirtyBefore, "stash_created": false, "stash_restored": false, "stash_conflicts": stashConflicts, "before": before, "results": results}
+			return map[string]any{"success": false, "message": "暂存本地修改失败，自动更新已中止", "error_code": ErrUpdateGitFailed, "code": 500, "project_root": projectRoot, "repo_url": redactGitURL(repoURL), "branch": branch, "dry_run": false, "dirty_before": dirtyBefore, "stash_created": false, "stash_restored": false, "stash_conflicts": stashConflicts, "before": before, "results": results}
 		}
 		stashCreated = true
 	}
@@ -132,7 +132,7 @@ func applyGitUpdate(ctx context.Context, repoURL, branch string, restartServices
 					stashConflicts = stringSlice(state["dirty_files"])
 				}
 			}
-			return map[string]any{"success": false, "message": "automatic update failed", "code": 500, "project_root": projectRoot, "repo_url": redactGitURL(repoURL), "branch": branch, "dry_run": false, "dirty_before": dirtyBefore, "stash_created": stashCreated, "stash_restored": stashRestored, "stash_conflicts": stashConflicts, "before": before, "results": results}
+			return map[string]any{"success": false, "message": "自动更新失败", "error_code": ErrUpdateGitFailed, "code": 500, "project_root": projectRoot, "repo_url": redactGitURL(repoURL), "branch": branch, "dry_run": false, "dirty_before": dirtyBefore, "stash_created": stashCreated, "stash_restored": stashRestored, "stash_conflicts": stashConflicts, "before": before, "results": results}
 		}
 	}
 
@@ -145,7 +145,7 @@ func applyGitUpdate(ctx context.Context, repoURL, branch string, restartServices
 			if state, stateErr := gitRepositoryState(ctx, projectRoot); stateErr == nil && boolish(state["dirty"]) {
 				stashConflicts = stringSlice(state["dirty_files"])
 			}
-			return map[string]any{"success": false, "message": "update pulled but local changes could not be restored cleanly", "code": 409, "project_root": projectRoot, "repo_url": redactGitURL(repoURL), "branch": branch, "dry_run": false, "dirty_before": dirtyBefore, "stash_created": stashCreated, "stash_restored": false, "stash_conflicts": stashConflicts, "before": before, "results": results}
+			return map[string]any{"success": false, "message": "更新已拉取，但本地改动恢复失败", "error_code": ErrUpdateGitFailed, "code": 409, "project_root": projectRoot, "repo_url": redactGitURL(repoURL), "branch": branch, "dry_run": false, "dirty_before": dirtyBefore, "stash_created": stashCreated, "stash_restored": false, "stash_conflicts": stashConflicts, "before": before, "results": results}
 		}
 	}
 

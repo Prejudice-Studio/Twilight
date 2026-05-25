@@ -34,9 +34,20 @@ var (
 	runtimeStartedAt = time.Now()
 	runtimeLogs      = newRuntimeLogSink(5000)
 	runtimeLogLevel  = zap.NewAtomicLevelAt(zapcore.InfoLevel)
-	sensitivePattern = regexp.MustCompile(`(?i)(authorization|cookie|token|secret|password|passwd|api[_-]?key|bot[_-]?token|dsn)\s*[:=]\s*[^ \t\r\n,;]+`)
-	bearerPattern    = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._~+/=-]{12,}`)
-	keyPattern       = regexp.MustCompile(`key-[A-Za-z0-9._~+/=-]{12,}`)
+	// 在 token / authorization 通用关键字之外，
+	// 显式列出 Emby / MediaBrowser / CSRF / Session 等高频敏感字段变体。
+	// 子串匹配本来已能兜住 emby_token 这类（包含 "token"），但显式枚举：
+	//   1) 让审计 / grep 一眼可见保护范围；
+	//   2) 杜绝未来如果通用关键字被收窄时悄悄漏过；
+	//   3) 与 sensitiveLogKey 的 normalized 子串列表保持一字段一映射。
+	sensitivePattern = regexp.MustCompile(`(?i)(authorization|cookie|csrf[_-]?token|x[_-]?csrf[_-]?token|x[_-]?xsrf[_-]?token|session[_-]?(?:id|token)|x[_-]?emby[_-]?(?:token|authorization)|emby[_-]?(?:token|authorization)|media[_-]?browser[_-]?token|token|secret|password|passwd|api[_-]?key|x[_-]?api[_-]?key|bot[_-]?token|dsn)\s*[:=]\s*[^ \t\r\n,;]+`)
+	// 引号包围的 key="value" 变体（Emby Authorization 头的标准格式：
+	//   MediaBrowser Client="Twilight", Token="xxx", DeviceId="..."
+	// 普通 sensitivePattern 的值末尾用 [^ \t\r\n,;]+ 截断，但 quoted value
+	// 内若含逗号 / 空格反而会被截掉一部分；另起一支 quoted regex 兜底。
+	sensitiveQuotedPattern = regexp.MustCompile(`(?i)(authorization|cookie|csrf[_-]?token|session[_-]?(?:id|token)|x[_-]?emby[_-]?(?:token|authorization)|emby[_-]?(?:token|authorization)|media[_-]?browser[_-]?token|token|secret|password|api[_-]?key|x[_-]?api[_-]?key|bot[_-]?token|dsn)\s*=\s*"[^"]*"`)
+	bearerPattern          = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._~+/=-]{12,}`)
+	keyPattern             = regexp.MustCompile(`key-[A-Za-z0-9._~+/=-]{12,}`)
 )
 
 type runtimeLogSink struct {
@@ -422,6 +433,12 @@ func sensitiveLogKey(key string) bool {
 		strings.Contains(normalized, "passwd") ||
 		strings.Contains(normalized, "apikey") ||
 		strings.Contains(normalized, "bottoken") ||
+		strings.Contains(normalized, "embytoken") ||         // 显式 Emby 变体
+		strings.Contains(normalized, "embyauthorization") || // 显式 Emby 变体
+		strings.Contains(normalized, "mediabrowsertoken") || // MediaBrowser
+		strings.Contains(normalized, "sessionid") ||         // 会话标识
+		strings.Contains(normalized, "csrf") ||              // CSRF
+		strings.Contains(normalized, "xsrf") ||              // XSRF 别名
 		strings.Contains(normalized, "dsn")
 }
 
@@ -431,6 +448,8 @@ func redactSensitiveText(value string) string {
 	}
 	value = bearerPattern.ReplaceAllString(value, "Bearer [REDACTED]")
 	value = keyPattern.ReplaceAllString(value, "key-[REDACTED]")
+	// 先匹配 quoted variant（保留 key 前缀 + 用 "[REDACTED]" 覆盖整段值）
+	value = sensitiveQuotedPattern.ReplaceAllString(value, `$1="[REDACTED]"`)
 	value = sensitivePattern.ReplaceAllString(value, "$1=[REDACTED]")
 	return value
 }
@@ -523,28 +542,20 @@ func (a *App) handleRuntimeLogStream(w http.ResponseWriter, r *http.Request, _ P
 		return
 	}
 	cursor = next
-	ticker := time.NewTicker(25 * time.Second)
-	defer ticker.Stop()
 	for {
-		select {
-		case <-r.Context().Done():
+		entries, next, okWait := runtimeLogs.waitAfter(r.Context(), cursor, limit)
+		if !okWait {
 			return
-		case <-ticker.C:
+		}
+		if len(entries) == 0 {
 			if !send("ping", map[string]any{"time": time.Now().Unix(), "next_cursor": cursor}) {
 				return
 			}
-		default:
-			entries, next, okWait := runtimeLogs.waitAfter(r.Context(), cursor, limit)
-			if !okWait {
-				return
-			}
-			if len(entries) == 0 {
-				continue
-			}
-			cursor = next
-			if !send("logs", map[string]any{"entries": entries, "next_cursor": next}) {
-				return
-			}
+			continue
+		}
+		cursor = next
+		if !send("logs", map[string]any{"entries": entries, "next_cursor": next}) {
+			return
 		}
 	}
 }

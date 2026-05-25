@@ -442,23 +442,8 @@ func listConfigBackups(dir string) ([]store.BackupInfo, error) {
 }
 
 func resolveConfigBackupPath(dir, name string) (string, error) {
-	name = strings.TrimSpace(name)
-	if name == "" || filepath.IsAbs(name) || filepath.Base(name) != name || strings.Contains(name, "..") || strings.ToLower(filepath.Ext(name)) != ".toml" {
-		return "", store.ErrNotFound
-	}
-	base, err := filepath.Abs(dir)
+	target, err := ResolveLeafFile(dir, name, "toml")
 	if err != nil {
-		return "", err
-	}
-	target, err := filepath.Abs(filepath.Join(base, name))
-	if err != nil {
-		return "", err
-	}
-	if filepath.Dir(target) != base {
-		return "", store.ErrNotFound
-	}
-	info, err := os.Lstat(target)
-	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 		return "", store.ErrNotFound
 	}
 	return target, nil

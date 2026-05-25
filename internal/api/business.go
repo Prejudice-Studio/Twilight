@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/prejudice-studio/twilight/internal/store"
+	"go.uber.org/zap"
 )
 
 func queryInt(r *http.Request, key string, fallback int) int {
@@ -558,7 +559,7 @@ func (a *App) recordViolation(user store.User, code, codeType, reason string) {
 		if action == "" {
 			action = "log_only"
 		}
-		_ = a.store.AddViolationLog(store.ViolationLog{
+		if err := a.store.AddViolationLog(store.ViolationLog{
 			UID:        user.UID,
 			Username:   user.Username,
 			Code:       code,
@@ -567,14 +568,16 @@ func (a *App) recordViolation(user store.User, code, codeType, reason string) {
 			Action:     action,
 			TelegramID: user.TelegramID,
 			CreatedAt:  time.Now().Unix(),
-		})
+		}); err != nil {
+			zap.L().Warn("failed to record protected code violation", zap.Int64("uid", user.UID), zap.String("code_type", codeType), zap.Error(err))
+		}
 		return
 	}
 	action := strings.ToLower(strings.TrimSpace(a.cfg.DecoyAction))
 	if action == "" {
 		action = "log_only"
 	}
-	_ = a.store.AddViolationLog(store.ViolationLog{
+	if err := a.store.AddViolationLog(store.ViolationLog{
 		UID:        user.UID,
 		Username:   user.Username,
 		Code:       code,
@@ -583,13 +586,21 @@ func (a *App) recordViolation(user store.User, code, codeType, reason string) {
 		Action:     action,
 		TelegramID: user.TelegramID,
 		CreatedAt:  time.Now().Unix(),
-	})
+	}); err != nil {
+		zap.L().Warn("failed to record code violation", zap.Int64("uid", user.UID), zap.String("code_type", codeType), zap.Error(err))
+	}
 	switch action {
 	case "disable_user":
-		_, _ = a.store.UpdateUser(user.UID, func(u *store.User) error {
+		if _, err := a.store.UpdateUser(user.UID, func(u *store.User) error {
 			u.Active = false
 			return nil
-		})
+		}); err != nil {
+			zap.L().Warn("failed to disable violating user", zap.Int64("uid", user.UID), zap.Error(err))
+		} else {
+			// 违规自动禁用：会话立即失效，避免 stale token 在 SessionTTL 到期前
+			// 仍可访问。
+			a.sessions.DeleteUser(context.Background(), user.UID)
+		}
 	case "disable_emby":
 		if user.EmbyID != "" {
 			_ = a.embySetUserEnabled(context.Background(), user.EmbyID, false)

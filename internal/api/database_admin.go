@@ -429,24 +429,8 @@ func databaseBackupInfo(path string) (store.BackupInfo, error) {
 }
 
 func resolveStateFileTarget(databaseDir, target string) (string, error) {
-	target = strings.TrimSpace(target)
-	if target == "" {
-		return "", store.ErrNotFound
-	}
-	base, err := filepath.Abs(firstNonEmpty(databaseDir, "db"))
+	joined, err := ResolveWithinRoot(firstNonEmpty(databaseDir, "db"), target)
 	if err != nil {
-		return "", err
-	}
-	candidate := target
-	if !filepath.IsAbs(candidate) {
-		candidate = filepath.Join(base, candidate)
-	}
-	joined, err := filepath.Abs(filepath.Clean(candidate))
-	if err != nil {
-		return "", err
-	}
-	rel, err := filepath.Rel(base, joined)
-	if err != nil || rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", store.ErrNotFound
 	}
 	if strings.ToLower(filepath.Ext(joined)) != ".json" {

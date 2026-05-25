@@ -45,38 +45,7 @@ import { PageError } from "@/components/layout/page-state";
 import { api, type MediaRequest } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import { useSystemStore } from "@/store/system";
-
-/**
- * 返回该求片对应的外部站点链接。
- * - source=tmdb: https://www.themoviedb.org/{movie|tv}/{id}
- * - source=bangumi: https://bgm.tv/subject/{id}
- * 数据格式不可靠时返回 null。
- */
-function buildExternalUrl(req: MediaRequest): string | null {
-  const source = (req.source || "").toLowerCase();
-  const rawId = req.media_id;
-  if (rawId === undefined || rawId === null || rawId === "") return null;
-
-  if (source === "bangumi") {
-    const id = String(rawId).replace(/[^0-9]/g, "");
-    if (!id) return null;
-    return `https://bgm.tv/subject/${id}`;
-  }
-
-  if (source === "tmdb") {
-    // tmdb_id 可能是 "12345" 或 "tv:12345" 这种形式，先剥前缀
-    const text = String(rawId);
-    const m = text.match(/^(?:(movie|tv):)?(\d+)$/i);
-    const id = m ? m[2] : text.replace(/[^0-9]/g, "");
-    if (!id) return null;
-    const declaredType = (req.media_info?.media_type || req.media_type || "").toLowerCase();
-    const prefixType = m && m[1] ? m[1].toLowerCase() : null;
-    const tmdbType = prefixType || (declaredType === "tv" || declaredType === "anime" ? "tv" : "movie");
-    return `https://www.themoviedb.org/${tmdbType}/${id}`;
-  }
-
-  return null;
-}
+import { mediaRequestExternalUrl } from "@/lib/media-external-url";
 
 export default function AdminRequestsPage() {
   const { toast } = useToast();
@@ -323,7 +292,7 @@ export default function AdminRequestsPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         {(() => {
-                          const url = buildExternalUrl(request);
+                        const url = mediaRequestExternalUrl(request);
                           const title = request.media_info?.title || request.title;
                           if (!url) return <p className="break-words font-medium">{title}</p>;
                           return (
@@ -358,7 +327,7 @@ export default function AdminRequestsPage() {
                       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                         <div className="flex items-center gap-1">
                           {(() => {
-                            const url = buildExternalUrl(request);
+                                const url = mediaRequestExternalUrl(request);
                             const inner = request.source.toLowerCase() === "tmdb" ? (
                               <Image
                                 src="https://www.themoviedb.org/assets/2/v4/logos/v2/blue_short-8e7b30f73a4020692ccca9c88bafe5dcb6f8a62a4c6bc55cd9ba82bb2cd95f6c.svg"
@@ -565,4 +534,3 @@ export default function AdminRequestsPage() {
     </div>
   );
 }
-

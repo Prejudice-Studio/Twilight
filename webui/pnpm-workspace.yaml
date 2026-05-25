@@ -1,6 +1,12 @@
 packages:
   - .
 
+allowBuilds:
+  esbuild: set this to true or false
+  sharp: set this to true or false
+  unrs-resolver: set this to true or false
+  workerd: set this to true or false
+
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver

@@ -128,6 +128,7 @@ type Config struct {
 	RateLimitEnabled                  bool
 	RateLimitGlobalPerMinute          int
 	RateLimitLoginPerMinute           int
+	RateLimitLoginUserPer5m           int
 	RateLimitRegisterPer10m           int
 	RateLimitForgotPasswordIPPer10m   int
 	RateLimitForgotPasswordUserPer30m int
@@ -220,6 +221,9 @@ func Load(path string) (Config, error) {
 	cfg.CORSOrigins = reader.stringListValue(cfg.CORSOrigins, "API.cors_origins", "cors_origins")
 	cfg.TrustProxyHeaders = reader.boolValue(cfg.TrustProxyHeaders, "API.trust_proxy_headers", "trust_proxy_headers")
 	cfg.SessionCookie = reader.stringValue(cfg.SessionCookie, "Security.session_cookie_name", "API.session_cookie_name", "session_cookie_name")
+	// CookieSecure 必须显式从 toml 读，否则 production.toml 里的
+	// `session_cookie_secure = true` 实际上从未生效。
+	cfg.CookieSecure = reader.boolValue(cfg.CookieSecure, "Security.session_cookie_secure", "API.session_cookie_secure", "session_cookie_secure")
 	cfg.BotInternalSecret = reader.stringValue(cfg.BotInternalSecret, "Security.bot_internal_secret", "bot_internal_secret")
 	cfg.EmbyURL = reader.stringValue(cfg.EmbyURL, "Emby.emby_url", "emby_url")
 	cfg.EmbyToken = reader.stringValue(cfg.EmbyToken, "Emby.emby_token", "emby_token")
@@ -308,6 +312,7 @@ func Load(path string) (Config, error) {
 	cfg.RateLimitEnabled = reader.boolValue(cfg.RateLimitEnabled, "RateLimit.enabled", "rate_limit_enabled")
 	cfg.RateLimitGlobalPerMinute = reader.intValue(cfg.RateLimitGlobalPerMinute, "RateLimit.global_per_minute", "rate_limit_global_per_minute")
 	cfg.RateLimitLoginPerMinute = reader.intValue(cfg.RateLimitLoginPerMinute, "RateLimit.login_per_minute", "rate_limit_login_per_minute")
+	cfg.RateLimitLoginUserPer5m = reader.intValue(cfg.RateLimitLoginUserPer5m, "RateLimit.login_user_per_5m", "rate_limit_login_user_per_5m")
 	cfg.RateLimitRegisterPer10m = reader.intValue(cfg.RateLimitRegisterPer10m, "RateLimit.register_per_10m", "rate_limit_register_per_10m")
 	cfg.RateLimitForgotPasswordIPPer10m = reader.intValue(cfg.RateLimitForgotPasswordIPPer10m, "RateLimit.forgot_password_ip_per_10m", "rate_limit_forgot_password_ip_per_10m")
 	cfg.RateLimitForgotPasswordUserPer30m = reader.intValue(cfg.RateLimitForgotPasswordUserPer30m, "RateLimit.forgot_password_user_per_30m", "rate_limit_forgot_password_user_per_30m")
@@ -370,6 +375,10 @@ func defaults() Config {
 		AllowCredential:                   true,
 		TrustProxyHeaders:                 false,
 		SessionCookie:                     "twilight_session",
+		// CookieSecure 默认 true：HTTPS 是生产基线，HTTP 调试场景显式
+		// 改 toml 或 env 关掉。旧默认 false 在 HTTP 部署时也不告警，
+		// 一旦运维忘改 production toml 即等于 session 明文走线。
+		CookieSecure:                      true,
 		SessionTTL:                        7 * 24 * time.Hour,
 		CookieSameSite:                    "lax",
 		TelegramAPIURL:                    "https://api.telegram.org",
@@ -388,6 +397,7 @@ func defaults() Config {
 		RateLimitEnabled:                  true,
 		RateLimitGlobalPerMinute:          1200,
 		RateLimitLoginPerMinute:           60,
+		RateLimitLoginUserPer5m:           10,
 		RateLimitRegisterPer10m:           30,
 		RateLimitForgotPasswordIPPer10m:   20,
 		RateLimitForgotPasswordUserPer30m: 10,
@@ -644,6 +654,9 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("TWILIGHT_RATE_LIMIT_LOGIN_PER_MINUTE"); v != "" {
 		cfg.RateLimitLoginPerMinute = intValue(v, cfg.RateLimitLoginPerMinute)
+	}
+	if v := os.Getenv("TWILIGHT_RATE_LIMIT_LOGIN_USER_PER_5M"); v != "" {
+		cfg.RateLimitLoginUserPer5m = intValue(v, cfg.RateLimitLoginUserPer5m)
 	}
 	if v := os.Getenv("TWILIGHT_RATE_LIMIT_REGISTER_PER_10M"); v != "" {
 		cfg.RateLimitRegisterPer10m = intValue(v, cfg.RateLimitRegisterPer10m)

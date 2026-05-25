@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/prejudice-studio/twilight/internal/store"
+	"go.uber.org/zap"
 )
 
 func (a *App) embyLibraries(ctx context.Context) ([]map[string]any, error) {
@@ -55,6 +56,24 @@ func libraryIDsByName(libraries []map[string]any, names []string) ([]string, []s
 		ids = append(ids, id)
 	}
 	return ids, missing
+}
+
+// applyDefaultHiddenLibraries 在用户首次绑定/创建 Emby 账号后执行：把
+// EmbyDefaultHiddenLibraries 配置的库一次性隐藏掉，跳过管理员/白名单角色。
+// 抽取自 handleBindEmby / handleRegisterEmby 两处重复。
+// 失败不阻断主流程：默认隐藏只是 UX 优化，绑定/创建本身已经完成；只在 logger
+// 留痕便于追踪 emby 端可能的同步异常。
+func (a *App) applyDefaultHiddenLibraries(ctx context.Context, u store.User) {
+	if len(a.cfg.EmbyDefaultHiddenLibraries) == 0 {
+		return
+	}
+	if u.Role == store.RoleAdmin || u.Role == store.RoleWhitelist {
+		return
+	}
+	if err := a.embySetLibrariesByAction(ctx, u, "hide", nil, a.cfg.EmbyDefaultHiddenLibraries, false); err != nil {
+		zap.L().Warn("apply default hidden libraries failed",
+			zap.Int64("uid", u.UID), zap.String("emby_id", u.EmbyID), zap.Error(err))
+	}
 }
 
 func (a *App) embyLibraryAccess(ctx context.Context, user store.User, includeSelfService bool) map[string]any {

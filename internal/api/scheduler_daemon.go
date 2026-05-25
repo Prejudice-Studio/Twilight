@@ -85,6 +85,12 @@ func (a *App) schedulerJobDue(jobID string, spec map[string]any, now time.Time) 
 }
 
 func (a *App) runScheduledJob(ctx context.Context, jobID string) {
+	// 协程入口加 panic recover，避免单次任务崩溃带垮整个调度器。
+	defer func() {
+		if r := recover(); r != nil {
+			zap.L().Error("scheduler job panic", zap.String("job_id", jobID), zap.Any("panic", r))
+		}
+	}()
 	runCtx, finish, ok := a.startSchedulerRun(ctx, jobID)
 	if !ok {
 		return
@@ -92,16 +98,22 @@ func (a *App) runScheduledJob(ctx context.Context, jobID string) {
 	defer finish()
 	started := time.Now().Unix()
 	run := store.SchedulerRun{JobID: jobID, Type: "auto", Trigger: "scheduler", Status: "running", Message: "running", StartedAt: started}
-	run, _ = a.store.AddSchedulerRunReturning(run)
+	run, err := a.store.AddSchedulerRunReturning(run)
+	if err != nil {
+		zap.L().Warn("scheduler job run record create failed", zap.String("job_id", jobID), zap.Error(err))
+		return
+	}
 	zap.L().Info("scheduler job started", zap.String("job_id", jobID), zap.String("type", "auto"), zap.Int64("run_id", run.ID))
 	req, _ := http.NewRequestWithContext(runCtx, http.MethodPost, "/scheduler/internal", nil)
 	summary, logs, err := a.runSchedulerJob(req, jobID)
 	finished := schedulerFinishedRun(jobID, "auto", "scheduler", started, summary, logs, err)
 	finished.ID = run.ID
-	_, _ = a.store.UpdateSchedulerRun(run.ID, func(run *store.SchedulerRun) error {
+	if _, updateErr := a.store.UpdateSchedulerRun(run.ID, func(run *store.SchedulerRun) error {
 		*run = finished
 		return nil
-	})
+	}); updateErr != nil {
+		zap.L().Warn("scheduler job run record update failed", zap.String("job_id", jobID), zap.Int64("run_id", run.ID), zap.Error(updateErr))
+	}
 	if err != nil {
 		zap.L().Warn("scheduler job failed", zap.String("job_id", jobID), zap.Error(err))
 	} else {
@@ -115,9 +127,20 @@ func (a *App) startManualSchedulerJob(ctx context.Context, jobID string, params 
 		return store.SchedulerRun{}, false
 	}
 	started := time.Now().Unix()
-	run, _ := a.store.AddSchedulerRunReturning(store.SchedulerRun{JobID: jobID, Type: "manual", Trigger: "manual", Status: "running", Message: "running", StartedAt: started})
+	run, err := a.store.AddSchedulerRunReturning(store.SchedulerRun{JobID: jobID, Type: "manual", Trigger: "manual", Status: "running", Message: "running", StartedAt: started})
+	if err != nil {
+		finish()
+		zap.L().Warn("manual scheduler job run record create failed", zap.String("job_id", jobID), zap.Error(err))
+		return store.SchedulerRun{}, false
+	}
 	zap.L().Info("scheduler job started", zap.String("job_id", jobID), zap.String("type", "manual"), zap.Int64("run_id", run.ID))
 	go func() {
+		// 同 runScheduledJob 的保护：panic 不能逃出协程。
+		defer func() {
+			if r := recover(); r != nil {
+				zap.L().Error("manual scheduler job panic", zap.String("job_id", jobID), zap.Int64("run_id", run.ID), zap.Any("panic", r))
+			}
+		}()
 		defer finish()
 		req, _ := http.NewRequestWithContext(runCtx, http.MethodPost, "/scheduler/manual", nil)
 		req = req.WithContext(context.WithValue(req.Context(), schedulerParamsContextKey, params))
@@ -125,10 +148,12 @@ func (a *App) startManualSchedulerJob(ctx context.Context, jobID string, params 
 		summary, logs, err := a.runSchedulerJob(req, jobID)
 		finished := schedulerFinishedRun(jobID, "manual", "manual", started, summary, logs, err)
 		finished.ID = run.ID
-		_, _ = a.store.UpdateSchedulerRun(run.ID, func(current *store.SchedulerRun) error {
+		if _, updateErr := a.store.UpdateSchedulerRun(run.ID, func(current *store.SchedulerRun) error {
 			*current = finished
 			return nil
-		})
+		}); updateErr != nil {
+			zap.L().Warn("manual scheduler job run record update failed", zap.String("job_id", jobID), zap.Int64("run_id", run.ID), zap.Error(updateErr))
+		}
 		if err != nil {
 			zap.L().Warn("manual scheduler job failed", zap.String("job_id", jobID), zap.Error(err))
 		} else {

@@ -60,9 +60,10 @@ const LEVEL_OPTIONS: Array<{ value: Level; label: string }> = [
 ];
 
 const LEVEL_BADGES: Record<Level, { className: string; icon: typeof Info; label: string }> = {
-  info: { className: "bg-blue-500/10 text-blue-600 border-blue-500/30 dark:text-blue-300", icon: Info, label: "通知" },
-  notice: { className: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:text-emerald-300", icon: Megaphone, label: "公告" },
-  warning: { className: "bg-amber-500/15 text-amber-600 border-amber-500/35 dark:text-amber-300", icon: AlertTriangle, label: "注意" },
+  // 使用语义令牌：bg-info/10 + text-info 等。
+  info: { className: "bg-info/10 text-info border-info/30", icon: Info, label: "通知" },
+  notice: { className: "bg-success/10 text-success border-success/30", icon: Megaphone, label: "公告" },
+  warning: { className: "bg-warning/15 text-warning border-warning/35", icon: AlertTriangle, label: "注意" },
   critical: { className: "bg-destructive/15 text-destructive border-destructive/40", icon: AlertOctagon, label: "重要" },
 };
 

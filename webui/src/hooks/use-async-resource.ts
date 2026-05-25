@@ -63,6 +63,11 @@ export function useAsyncResource<T>(
       if (mountedRef.current && currentRequestId === requestIdRef.current) {
         setIsLoading(false);
       }
+      // 仅当 abortControllerRef 仍指向自己时清空。
+      // 若期间被新的 execute() 替换为新 controller，则不触碰，避免误清新请求的引用。
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
     }
   }, [loader]);
 

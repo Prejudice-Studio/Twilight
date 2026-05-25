@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -34,6 +35,10 @@ type Store struct {
 	backend string
 	db      *sql.DB
 	state   State
+	// JSON 后端进程级排他锁。
+	// Postgres 后端为 nil；同进程内并发由 mu 已经串行化，
+	// 这里防的是多个 Twilight 进程共用同一份 state.json 时的丢更新。
+	lock *fileLock
 }
 
 const (
@@ -67,6 +72,7 @@ type State struct {
 	NextRuntimeLogID    int64                          `json:"next_runtime_log_id"`
 	NextSchedulerRunID  int64                          `json:"next_scheduler_run_id"`
 	NextRebindRequestID int64                          `json:"next_rebind_request_id"`
+	NextViolationLogID  int64                          `json:"next_violation_log_id"`
 	Users               map[int64]User                 `json:"users"`
 	APIKeys             map[int64]APIKey               `json:"api_keys"`
 	MediaRequests       map[int64]MediaRequest         `json:"media_requests"`
@@ -354,21 +360,63 @@ func Open(path string) (*Store, error) {
 	if path == "" {
 		path = filepath.Join("db", "twilight_go_state.json")
 	}
-	st := &Store{path: path, backend: BackendJSON, state: emptyState()}
+	// 先确保父目录存在，再尝试拿排他锁；锁文件是 path + ".lock"。
+	// 第二个 Twilight 进程在这里会立刻拿到 ErrLockBusy，启动失败而不是
+	// 静默与首个进程竞写 state.json。
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, fmt.Errorf("ensure state dir: %w", err)
+	}
+	// 启动期可写校验：失败立即 fail-fast，避免运行时第一次 saveLocked
+	// 才发现盘满 / 权限不对，把请求半途打断。
+	if err := probeWritable(filepath.Dir(path)); err != nil {
+		return nil, fmt.Errorf("state dir not writable: %w", err)
+	}
+	lock, err := acquireStateLock(path)
+	if err != nil {
+		if errors.Is(err, ErrLockBusy) {
+			return nil, fmt.Errorf("state file %q is locked by another Twilight process; multi-process JSON backend is not safe — use Postgres or stop the other process", path)
+		}
+		return nil, err
+	}
+	st := &Store{path: path, backend: BackendJSON, state: emptyState(), lock: lock}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return st, st.saveLocked()
 		}
+		_ = lock.Release()
 		return nil, err
 	}
 	if len(data) > 0 {
 		if err := json.Unmarshal(data, &st.state); err != nil {
-			return nil, err
+			// 主文件坏掉时尝试 .bak 兜底 —— Open 比 refreshLocked 更激进，
+			// 直接走 fallback 同时保留 lock，避免管理员被 "无法启动" 卡死。
+			if bak, bakErr := os.ReadFile(path + ".bak"); bakErr == nil && len(bak) > 0 {
+				if err := json.Unmarshal(bak, &st.state); err != nil {
+					_ = lock.Release()
+					return nil, err
+				}
+			} else {
+				_ = lock.Release()
+				return nil, err
+			}
 		}
 	}
 	st.state.ensure()
 	return st, nil
+}
+
+// probeWritable 在目标目录里写一字节 sentinel 再删除，确认 dir 实际可写。
+func probeWritable(dir string) error {
+	tmp, err := os.CreateTemp(dir, ".twilight-write-probe-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	_, _ = tmp.Write([]byte{0})
+	_ = tmp.Close()
+	_ = os.Remove(name)
+	return nil
 }
 
 func OpenPostgres(ctx context.Context, dsn string) (*Store, error) {
@@ -671,7 +719,15 @@ func configurePostgresDB(db *sql.DB, maxOpen, maxIdle int) {
 }
 
 func (s *Store) Close() error {
-	if s == nil || s.db == nil {
+	if s == nil {
+		return nil
+	}
+	// JSON 后端释放进程级 flock；Postgres 后端 lock=nil 走 noop。
+	if s.lock != nil {
+		_ = s.lock.Release()
+		s.lock = nil
+	}
+	if s.db == nil {
 		return nil
 	}
 	return s.db.Close()
@@ -742,6 +798,17 @@ func (s *State) ensure() {
 	}
 	if s.NextRebindRequestID <= 0 {
 		s.NextRebindRequestID = 1
+	}
+	// 历史 state 没有 NextViolationLogID 字段；走兜底取 max(existing IDs)+1，
+	// 避免新计数器从 1 开始与已经存在的旧 ID 撞车。
+	if s.NextViolationLogID <= 0 {
+		max := int64(0)
+		for _, log := range s.ViolationLogs {
+			if log.ID > max {
+				max = log.ID
+			}
+		}
+		s.NextViolationLogID = max + 1
 	}
 	if s.Users == nil {
 		s.Users = map[int64]User{}
@@ -829,16 +896,113 @@ func (s *Store) saveLocked() error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return err
 	}
+	// 写前先把上一份 state.json 复制到 .bak —— refreshLocked 解析失败时可
+	// 回退到 .bak（避免一次坏写盖掉所有用户数据）。
+	if existing, readErr := os.ReadFile(s.path); readErr == nil && len(existing) > 0 {
+		bakTmp := s.path + ".bak.tmp"
+		if err := os.WriteFile(bakTmp, existing, 0o600); err == nil {
+			_ = os.Rename(bakTmp, s.path+".bak")
+		} else {
+			_ = os.Remove(bakTmp)
+		}
+	}
 	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	// tmp 写完后必须 fsync 数据 + 父目录，否则 os.Rename 仅在 VFS 层原子，
+	// crash/掉电时数据可能仍在 page cache。顺序：
+	// write → fsync(file) → close → rename → chmod → fsync(dir)。
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.path)
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, s.path); err != nil {
+		return err
+	}
+	// 强制 0o600：即使外部 umask / 拷贝把权限放宽到 group/other，重写后
+	// 也立刻收敛回仅 owner 可读写，避免 state.json 被同机其它用户读取。
+	_ = os.Chmod(s.path, 0o600)
+	// 父目录 fsync 让 rename 自身的目录条目落盘。Linux 要求显式做；
+	// 若文件系统不支持（少见，例如 sysfs），忽略错误以保兼容。
+	if dir, dirErr := os.Open(filepath.Dir(s.path)); dirErr == nil {
+		_ = dir.Sync()
+		_ = dir.Close()
+	}
+	return nil
+}
+
+func (s *Store) refreshLocked() error {
+	if s == nil {
+		return nil
+	}
+	// Multiple Twilight processes can share the same state backend; refresh before
+	// writes so a stale process does not overwrite newer persisted state.
+	var data []byte
+	var err error
+	if s.db != nil {
+		err = s.db.QueryRowContext(context.Background(), `SELECT state FROM twilight_state WHERE id = 1`).Scan(&data)
+		if errors.Is(err, sql.ErrNoRows) {
+			s.state = emptyState()
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	} else {
+		if strings.TrimSpace(s.path) == "" {
+			return nil
+		}
+		data, err = os.ReadFile(s.path)
+		if errors.Is(err, os.ErrNotExist) {
+			s.state = emptyState()
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
+	var state State
+	if len(data) > 0 {
+		if err := json.Unmarshal(data, &state); err != nil {
+			// 解析失败：尝试 fallback 到 .bak（saveLocked 写前快照），
+			// 避免一次坏写或文件截断把整库拖死。日志里只暴露文件大小 +
+			// 解析错误位置，不暴露内容（state.json 可能含 token）。
+			if s.db == nil && strings.TrimSpace(s.path) != "" {
+				if bak, bakErr := os.ReadFile(s.path + ".bak"); bakErr == nil && len(bak) > 0 {
+					var bakState State
+					if json.Unmarshal(bak, &bakState) == nil {
+						bakState.ensure()
+						s.state = bakState
+						return nil
+					}
+				}
+			}
+			return err
+		}
+	}
+	state.ensure()
+	s.state = state
+	return nil
 }
 
 func (s *Store) Snapshot() ([]byte, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return nil, err
+	}
 	state := s.state
 	state.ensure()
 	return json.MarshalIndent(state, "", "  ")
@@ -1031,6 +1195,9 @@ func (s *Store) UserCount() int {
 func (s *Store) CreateUser(u User) (User, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return User{}, err
+	}
 	for _, existing := range s.state.Users {
 		if strings.EqualFold(existing.Username, u.Username) {
 			return User{}, ErrConflict
@@ -1085,6 +1252,9 @@ func (s *Store) User(uid int64) (User, bool) {
 func (s *Store) UpdateUser(uid int64, fn func(*User) error) (User, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return User{}, err
+	}
 	u, ok := s.state.Users[uid]
 	if !ok {
 		return User{}, ErrNotFound
@@ -1096,34 +1266,141 @@ func (s *Store) UpdateUser(uid int64, fn func(*User) error) (User, error) {
 	return u, s.saveLocked()
 }
 
+// DeleteUser 删除用户并级联清理所有 UID-键控的衍生数据。
+// 级联策略：
+//	删除（GDPR right-to-erasure，含个人指纹/设备/行为）：
+//	  Users / APIKeys / InviteCodes / InviteRelations / MediaRequests
+//	  Signin / Devices / LoginLogs / PlaybackRecords / BindCodes
+//	  RebindRequests
+//	匿名化（保留业务/审计载体，但抹除 UID 引用）：
+//	  RegCodes.UsedBy / RegCodes.UsedByUIDs（保留 regcode 本身的有效性）
+//	  Announcements.CreatedByUID（公告内容必须保留，不能因作者被删而消失）
+//	保留原样（安全审计 / 合规追溯）：
+//	  ViolationLogs（违规记录是安全审计 artefact，不随用户删除）
+//	  RebindRequests.ReviewerUID（保留审核者 UID，便于回溯审核轨迹；
+//	    用户作为 reviewer 被删时同样不抹除——只删 UID 字段对应的请求体）
+// 漏一处会留下"幽灵关联"：例如设备指纹被旧 UID 占住，新建同名用户登录
+// 时会被错误识别为"老设备已信任"。这条函数是用户生命周期的最终清算点。
 func (s *Store) DeleteUser(uid int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return err
+	}
 	if _, ok := s.state.Users[uid]; !ok {
 		return ErrNotFound
 	}
 	delete(s.state.Users, uid)
+
+	// API keys 与会话凭证：必须清理，否则用户被删后旧 key 仍可调用接口。
 	for id, key := range s.state.APIKeys {
 		if key.UID == uid {
 			delete(s.state.APIKeys, id)
 		}
 	}
+
+	// 邀请码：邀请人 / 接收人任一为该用户都失效。
 	for code, invite := range s.state.InviteCodes {
-		if invite.InviterUID == uid || invite.UID == uid {
+		if invite.InviterUID == uid || invite.UID == uid || invite.UsedByUID == uid {
 			delete(s.state.InviteCodes, code)
 		}
 	}
+
+	// 邀请关系：自身作为 child 与作为 parent 的关系都断开（避免邀请树留孤儿）。
 	delete(s.state.InviteRelations, uid)
 	for child, rel := range s.state.InviteRelations {
 		if rel.ParentUID == uid {
 			delete(s.state.InviteRelations, child)
 		}
 	}
+
+	// 求片记录：用户撤销，待办求片随之消失。
 	for id, req := range s.state.MediaRequests {
 		if req.UID == uid {
 			delete(s.state.MediaRequests, id)
 		}
 	}
+
+	// 签到积分 / 历史。
+	delete(s.state.Signin, uid)
+
+	// 设备指纹：要必须清，否则同 UID 重新创建（管理员复用编号）会继承
+	// 旧设备的 trusted 标记，等价于"复用 UID 直接绕过设备校验"。
+	for id, dev := range s.state.Devices {
+		if dev.UID == uid {
+			delete(s.state.Devices, id)
+		}
+	}
+
+	// 登录日志：包含 IP / 设备名 / Country 等个人信息，按 GDPR 右擦除。
+	if len(s.state.LoginLogs) > 0 {
+		filtered := s.state.LoginLogs[:0]
+		for _, log := range s.state.LoginLogs {
+			if log.UID != uid {
+				filtered = append(filtered, log)
+			}
+		}
+		s.state.LoginLogs = filtered
+	}
+
+	// 播放记录。
+	if len(s.state.PlaybackRecords) > 0 {
+		filtered := s.state.PlaybackRecords[:0]
+		for _, p := range s.state.PlaybackRecords {
+			if p.UID != uid {
+				filtered = append(filtered, p)
+			}
+		}
+		s.state.PlaybackRecords = filtered
+	}
+
+	// 待审/已审的换绑请求：业务对象随用户消亡。
+	// 注意：仅清理"作为申请者 UID"的记录；ReviewerUID 字段保留（审计轨迹）。
+	for id, req := range s.state.RebindRequests {
+		if req.UID == uid {
+			delete(s.state.RebindRequests, id)
+		}
+	}
+
+	// 绑定码（注册/绑定 telegram 流程的临时 ticket）。
+	for code, bc := range s.state.BindCodes {
+		if bc.UID == uid {
+			delete(s.state.BindCodes, code)
+		}
+	}
+
+	// RegCode：保留 regcode 本身（管理员资产），仅抹掉对该用户的 UID 引用。
+	for code, rc := range s.state.RegCodes {
+		dirty := false
+		if rc.UsedBy == uid {
+			rc.UsedBy = 0
+			dirty = true
+		}
+		if len(rc.UsedByUIDs) > 0 {
+			pruned := rc.UsedByUIDs[:0]
+			for _, u := range rc.UsedByUIDs {
+				if u != uid {
+					pruned = append(pruned, u)
+				}
+			}
+			if len(pruned) != len(rc.UsedByUIDs) {
+				rc.UsedByUIDs = pruned
+				dirty = true
+			}
+		}
+		if dirty {
+			s.state.RegCodes[code] = rc
+		}
+	}
+
+	// 公告作者匿名化：公告本体不删，只清掉 CreatedByUID 引用。
+	for id, ann := range s.state.Announcements {
+		if ann.CreatedByUID == uid {
+			ann.CreatedByUID = 0
+			s.state.Announcements[id] = ann
+		}
+	}
+
 	return s.saveLocked()
 }
 
@@ -1152,6 +1429,9 @@ func (s *Store) FindUserByTelegramID(telegramID int64) (User, bool) {
 func (s *Store) CreateAPIKey(k APIKey) (APIKey, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return APIKey{}, err
+	}
 	k.ID = s.state.NextAPIKeyID
 	s.state.NextAPIKeyID++
 	if k.CreatedAt == 0 {
@@ -1181,14 +1461,24 @@ func (s *Store) ListAPIKeys(uid int64) []APIKey {
 func (s *Store) FindAPIKeyByHash(hash string) (APIKey, User, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	// hash 用常量时间比对，避免攻击者通过响应时间差推断 hash 前缀
+	// 加速 API key 爆破。Enabled / Status 检查
+	// 仍是普通短路，因为它们不携带秘密值。
+	hashBytes := []byte(hash)
 	for _, k := range s.state.APIKeys {
-		if k.Hash == hash && k.Enabled {
+		if !k.Enabled {
+			continue
+		}
+		if subtle.ConstantTimeCompare([]byte(k.Hash), hashBytes) == 1 {
 			u, ok := s.state.Users[k.UID]
 			return k, u, ok
 		}
 	}
 	for _, u := range s.state.Users {
-		if u.LegacyAPIKeyHash == hash && u.LegacyAPIKeyStatus {
+		if !u.LegacyAPIKeyStatus {
+			continue
+		}
+		if subtle.ConstantTimeCompare([]byte(u.LegacyAPIKeyHash), hashBytes) == 1 {
 			return APIKey{UID: u.UID, Enabled: true, Permissions: u.LegacyPermissions, RateLimit: 100}, u, true
 		}
 	}
@@ -1198,6 +1488,9 @@ func (s *Store) FindAPIKeyByHash(hash string) (APIKey, User, bool) {
 func (s *Store) UpdateAPIKey(uid, id int64, fn func(*APIKey) error) (APIKey, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return APIKey{}, err
+	}
 	k, ok := s.state.APIKeys[id]
 	if !ok || k.UID != uid {
 		return APIKey{}, ErrNotFound
@@ -1212,6 +1505,9 @@ func (s *Store) UpdateAPIKey(uid, id int64, fn func(*APIKey) error) (APIKey, err
 func (s *Store) RecordAPIKeyUse(id int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return err
+	}
 	k, ok := s.state.APIKeys[id]
 	if !ok {
 		return ErrNotFound
@@ -1225,6 +1521,9 @@ func (s *Store) RecordAPIKeyUse(id int64) error {
 func (s *Store) DeleteAPIKey(uid, id int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return err
+	}
 	k, ok := s.state.APIKeys[id]
 	if !ok || k.UID != uid {
 		return ErrNotFound
@@ -1236,6 +1535,9 @@ func (s *Store) DeleteAPIKey(uid, id int64) error {
 func (s *Store) CreateMediaRequest(r MediaRequest) (MediaRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return MediaRequest{}, err
+	}
 	if !mediaRequestInventoryIssue(r) {
 		for _, existing := range s.state.MediaRequests {
 			if strings.EqualFold(existing.Source, r.Source) && existing.MediaID == r.MediaID && existing.Season == r.Season && isActiveMediaStatus(existing.Status) {
@@ -1322,6 +1624,9 @@ func (s *Store) FindMediaRequestByKey(key string) (MediaRequest, bool) {
 func (s *Store) UpdateMediaRequest(id int64, fn func(*MediaRequest) error) (MediaRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return MediaRequest{}, err
+	}
 	r, ok := s.state.MediaRequests[id]
 	if !ok {
 		return MediaRequest{}, ErrNotFound
@@ -1337,6 +1642,9 @@ func (s *Store) UpdateMediaRequest(id int64, fn func(*MediaRequest) error) (Medi
 func (s *Store) DeleteMediaRequest(id int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return err
+	}
 	if _, ok := s.state.MediaRequests[id]; !ok {
 		return ErrNotFound
 	}
@@ -1347,6 +1655,9 @@ func (s *Store) DeleteMediaRequest(id int64) error {
 func (s *Store) UpsertBindCode(code BindCode) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return err
+	}
 	s.state.BindCodes[code.Code] = code
 	return s.saveLocked()
 }
@@ -1361,6 +1672,9 @@ func (s *Store) BindCode(code string) (BindCode, bool) {
 func (s *Store) DeleteBindCode(code string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return err
+	}
 	if _, ok := s.state.BindCodes[code]; !ok {
 		return ErrNotFound
 	}
@@ -1371,6 +1685,9 @@ func (s *Store) DeleteBindCode(code string) error {
 func (s *Store) CleanupExpiredBindCodes(now int64) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return 0, err
+	}
 	deleted := 0
 	for code, bind := range s.state.BindCodes {
 		if bind.ExpiresAt > 0 && bind.ExpiresAt <= now {
@@ -1387,6 +1704,9 @@ func (s *Store) CleanupExpiredBindCodes(now int64) (int, error) {
 func (s *Store) UpsertAnnouncement(a Announcement) (Announcement, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return Announcement{}, err
+	}
 	now := time.Now().Unix()
 	if a.ID == 0 {
 		a.ID = s.state.NextAnnouncementID
@@ -1434,6 +1754,9 @@ func (s *Store) ListAnnouncements(includeHidden bool) []Announcement {
 func (s *Store) DeleteAnnouncement(id int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return err
+	}
 	if _, ok := s.state.Announcements[id]; !ok {
 		return ErrNotFound
 	}
@@ -1444,6 +1767,9 @@ func (s *Store) DeleteAnnouncement(id int64) error {
 func (s *Store) UpsertInviteCode(code InviteCode) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return err
+	}
 	if code.InviterUID == 0 {
 		code.InviterUID = code.UID
 	}
@@ -1497,6 +1823,9 @@ func (s *Store) ListInviteCodes(uid int64) []InviteCode {
 func (s *Store) DeleteInviteCode(uid int64, code string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return err
+	}
 	c, ok := s.state.InviteCodes[code]
 	if !ok || c.UID != uid {
 		return ErrNotFound
@@ -1513,6 +1842,9 @@ func (s *Store) DeleteInviteCode(uid int64, code string) error {
 func (s *Store) ConsumeInviteCode(code string, childUID int64) (InviteCode, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return InviteCode{}, err
+	}
 	c, ok := s.state.InviteCodes[code]
 	if !ok || !c.Active {
 		return InviteCode{}, ErrNotFound
@@ -1575,6 +1907,9 @@ func (s *Store) ChildrenOf(uid int64) []InviteRelation {
 func (s *Store) DetachInvite(uid int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return err
+	}
 	delete(s.state.InviteRelations, uid)
 	return s.saveLocked()
 }
@@ -1589,7 +1924,10 @@ func (s *Store) RegCode(code string) (RegCode, bool) {
 func (s *Store) UpsertRegCode(code RegCode) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, exists := s.state.RegCodes[code.Code]
+	if err := s.refreshLocked(); err != nil {
+		return err
+	}
+	previous, exists := s.state.RegCodes[code.Code]
 	if code.CreatedAt == 0 {
 		code.CreatedAt = time.Now().Unix()
 	}
@@ -1606,16 +1944,28 @@ func (s *Store) UpsertRegCode(code RegCode) error {
 		code.Active = true
 	}
 	s.state.RegCodes[code.Code] = code
-	return s.saveLocked()
+	if err := s.saveLocked(); err != nil {
+		if exists {
+			s.state.RegCodes[code.Code] = previous
+		} else {
+			delete(s.state.RegCodes, code.Code)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *Store) ConsumeRegCode(code string, uid, telegramID int64) (RegCode, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return RegCode{}, err
+	}
 	r, ok := s.state.RegCodes[code]
 	if !ok || !r.Active {
 		return RegCode{}, ErrNotFound
 	}
+	previous := r
 	if r.UseCountLimit != -1 && r.UseCount >= r.UseCountLimit {
 		return RegCode{}, ErrConflict
 	}
@@ -1635,7 +1985,11 @@ func (s *Store) ConsumeRegCode(code string, uid, telegramID int64) (RegCode, err
 		r.Active = false
 	}
 	s.state.RegCodes[code] = r
-	return r, s.saveLocked()
+	if err := s.saveLocked(); err != nil {
+		s.state.RegCodes[code] = previous
+		return RegCode{}, err
+	}
+	return r, nil
 }
 
 func (s *Store) ListRegCodes() []RegCode {
@@ -1652,6 +2006,9 @@ func (s *Store) ListRegCodes() []RegCode {
 func (s *Store) DeleteRegCode(code string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return err
+	}
 	reg, ok := s.state.RegCodes[code]
 	if !ok {
 		return ErrNotFound
@@ -1662,13 +2019,21 @@ func (s *Store) DeleteRegCode(code string) error {
 	} else {
 		delete(s.state.RegCodes, code)
 	}
-	return s.saveLocked()
+	if err := s.saveLocked(); err != nil {
+		s.state.RegCodes[code] = reg
+		return err
+	}
+	return nil
 }
 
 func (s *Store) DeleteRegCodes(codes []string) (deleted []string, missing []string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return nil, nil, err
+	}
 	seen := map[string]bool{}
+	previous := map[string]RegCode{}
 	for _, code := range codes {
 		code = strings.TrimSpace(code)
 		if code == "" || seen[code] {
@@ -1680,6 +2045,7 @@ func (s *Store) DeleteRegCodes(codes []string) (deleted []string, missing []stri
 			missing = append(missing, code)
 			continue
 		}
+		previous[code] = reg
 		if regCodeHasUsage(reg) {
 			reg.Active = false
 			s.state.RegCodes[code] = reg
@@ -1691,508 +2057,25 @@ func (s *Store) DeleteRegCodes(codes []string) (deleted []string, missing []stri
 	if len(deleted) == 0 {
 		return deleted, missing, nil
 	}
-	return deleted, missing, s.saveLocked()
+	if err := s.saveLocked(); err != nil {
+		for code, reg := range previous {
+			s.state.RegCodes[code] = reg
+		}
+		return nil, nil, err
+	}
+	return deleted, missing, nil
 }
 
 func regCodeHasUsage(code RegCode) bool {
 	return code.UseCount > 0 || code.UsedBy != 0 || len(code.UsedByUIDs) > 0 || len(code.UsedByTelegramIDs) > 0
 }
 
-func (s *Store) Signin(uid int64) Signin {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.state.Signin[uid]
-}
-
-func (s *Store) AddSignin(uid int64, points int) (Signin, bool, error) {
-	return s.AddSigninWithOptions(uid, points, nil, true)
-}
-
-func (s *Store) AddSigninWithOptions(uid int64, dailyPoints int, bonusForStreak func(int) int, resetAfterMiss bool) (Signin, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now()
-	today := now.Format("2006-01-02")
-	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
-	si := s.state.Signin[uid]
-	if si.UID == 0 {
-		si.UID = uid
-	}
-	if si.LongestStreak < si.Streak {
-		si.LongestStreak = si.Streak
-	}
-	if si.LastSignin == today {
-		return si, false, nil
-	}
-	if si.LastSignin == yesterday {
-		si.Streak++
-	} else if si.LastSignin != "" && !resetAfterMiss {
-		si.Streak++
-	} else {
-		si.Streak = 1
-	}
-	if si.Streak > si.LongestStreak {
-		si.LongestStreak = si.Streak
-	}
-	bonusPoints := 0
-	if bonusForStreak != nil {
-		bonusPoints = bonusForStreak(si.Streak)
-	}
-	totalPoints := dailyPoints + bonusPoints
-	si.LastSignin = today
-	si.Points += totalPoints
-	si.Records = append(si.Records, SigninRecord{Date: today, Points: dailyPoints, BonusPoints: bonusPoints, Total: totalPoints, Streak: si.Streak, CreatedAt: now.Unix()})
-	s.state.Signin[uid] = si
-	return si, true, s.saveLocked()
-}
-
-func (s *Store) AddSchedulerRun(run SchedulerRun) error {
-	_, err := s.AddSchedulerRunReturning(run)
-	return err
-}
-
-func (s *Store) AddSchedulerRunReturning(run SchedulerRun) (SchedulerRun, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if run.ID == 0 {
-		run.ID = s.state.NextSchedulerRunID
-		s.state.NextSchedulerRunID++
-	}
-	if run.Type == "" {
-		run.Type = "manual"
-	}
-	if run.Trigger == "" {
-		run.Trigger = "manual"
-	}
-	if run.FinishedAt == 0 && run.EndedAt != 0 {
-		run.FinishedAt = run.EndedAt
-	}
-	s.state.SchedulerRuns = append([]SchedulerRun{run}, s.state.SchedulerRuns...)
-	if len(s.state.SchedulerRuns) > 200 {
-		s.state.SchedulerRuns = s.state.SchedulerRuns[:200]
-	}
-	return run, s.saveLocked()
-}
-
-func (s *Store) UpdateSchedulerRun(id int64, fn func(*SchedulerRun) error) (SchedulerRun, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if id == 0 {
-		return SchedulerRun{}, ErrNotFound
-	}
-	for i := range s.state.SchedulerRuns {
-		if s.state.SchedulerRuns[i].ID != id {
-			continue
-		}
-		run := s.state.SchedulerRuns[i]
-		if err := fn(&run); err != nil {
-			return SchedulerRun{}, err
-		}
-		if run.FinishedAt == 0 && run.EndedAt != 0 {
-			run.FinishedAt = run.EndedAt
-		}
-		s.state.SchedulerRuns[i] = run
-		return run, s.saveLocked()
-	}
-	return SchedulerRun{}, ErrNotFound
-}
-
-func (s *Store) SchedulerRuns(jobID string, limit int) []SchedulerRun {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
-	out := make([]SchedulerRun, 0, limit)
-	for _, run := range s.state.SchedulerRuns {
-		if jobID == "" || run.JobID == jobID {
-			out = append(out, run)
-			if len(out) >= limit {
-				break
-			}
-		}
-	}
-	return out
-}
-
-func (s *Store) SetSchedulerSchedule(jobID string, spec map[string]any, custom bool) (SchedulerSchedule, error) {
-	return s.SetSchedulerScheduleWithParams(jobID, spec, nil, custom)
-}
-
-func (s *Store) SetSchedulerScheduleWithParams(jobID string, spec map[string]any, params map[string]any, custom bool) (SchedulerSchedule, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	schedule := SchedulerSchedule{JobID: jobID, TriggerSpec: spec, RuntimeParams: params, IsCustom: custom, UpdatedAt: time.Now().Unix()}
-	if !custom {
-		delete(s.state.SchedulerSchedules, jobID)
-		return schedule, s.saveLocked()
-	}
-	s.state.SchedulerSchedules[jobID] = schedule
-	return schedule, s.saveLocked()
-}
-
-func (s *Store) SchedulerSchedule(jobID string) (SchedulerSchedule, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	schedule, ok := s.state.SchedulerSchedules[jobID]
-	return schedule, ok
-}
-
-func (s *Store) UpsertDevice(d Device) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if d.FirstSeen == 0 {
-		d.FirstSeen = time.Now().Unix()
-	}
-	if d.LastSeen == 0 {
-		d.LastSeen = d.FirstSeen
-	}
-	s.state.Devices[deviceKey(d.UID, d.DeviceID)] = d
-	return s.saveLocked()
-}
-
-func (s *Store) ListDevices(uid int64) []Device {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]Device, 0)
-	for _, d := range s.state.Devices {
-		if d.UID == uid && !d.Blocked {
-			out = append(out, d)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].LastSeen > out[j].LastSeen })
-	return out
-}
-
-func (s *Store) UpdateDevice(uid int64, deviceID string, fn func(*Device)) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	key := deviceKey(uid, deviceID)
-	d, ok := s.state.Devices[key]
-	if !ok {
-		d = Device{UID: uid, DeviceID: deviceID, DeviceName: deviceID, FirstSeen: time.Now().Unix(), LastSeen: time.Now().Unix()}
-	}
-	fn(&d)
-	s.state.Devices[key] = d
-	return s.saveLocked()
-}
-
-func (s *Store) DeleteDevice(uid int64, deviceID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.state.Devices, deviceKey(uid, deviceID))
-	return s.saveLocked()
-}
-
-func (s *Store) AddLoginLog(log LoginLog) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if log.ID == 0 {
-		log.ID = s.state.NextLoginLogID
-		s.state.NextLoginLogID++
-	}
-	if log.Time == 0 {
-		log.Time = time.Now().Unix()
-	}
-	s.state.LoginLogs = append([]LoginLog{log}, s.state.LoginLogs...)
-	if len(s.state.LoginLogs) > 1000 {
-		s.state.LoginLogs = s.state.LoginLogs[:1000]
-	}
-	return s.saveLocked()
-}
-
-func (s *Store) LoginHistory(uid int64, blockedOnly bool, since int64, limit int) []LoginLog {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if limit <= 0 || limit > 100 {
-		limit = 50
-	}
-	out := make([]LoginLog, 0, limit)
-	for _, log := range s.state.LoginLogs {
-		if uid != 0 && log.UID != uid {
-			continue
-		}
-		if blockedOnly && !log.Blocked {
-			continue
-		}
-		if since > 0 && log.Time < since {
-			continue
-		}
-		out = append(out, log)
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out
-}
-
-func (s *Store) AddRuntimeLog(entry RuntimeLogEntry, limit int) (RuntimeLogEntry, error) {
-	if s == nil {
-		return entry, ErrNotFound
-	}
-	limit = clampRuntimeLogLimit(limit)
-	if entry.Time == 0 {
-		entry.Time = time.Now().Unix()
-	}
-	if s.db != nil {
-		attrs, err := json.Marshal(entry.Attrs)
-		if err != nil {
-			return entry, err
-		}
-		var id int64
-		err = s.db.QueryRowContext(
-			context.Background(),
-			`INSERT INTO twilight_runtime_logs (time, level, message, attrs) VALUES ($1, $2, $3, $4::jsonb) RETURNING id`,
-			entry.Time,
-			entry.Level,
-			entry.Message,
-			string(attrs),
-		).Scan(&id)
-		if err != nil {
-			return entry, err
-		}
-		entry.ID = id
-		_ = s.PruneRuntimeLogs(limit)
-		return entry, nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if entry.ID == 0 {
-		entry.ID = s.state.NextRuntimeLogID
-		s.state.NextRuntimeLogID++
-	}
-	if entry.Time == 0 {
-		entry.Time = time.Now().Unix()
-	}
-	s.state.RuntimeLogs = append(s.state.RuntimeLogs, entry)
-	if len(s.state.RuntimeLogs) > limit {
-		copy(s.state.RuntimeLogs, s.state.RuntimeLogs[len(s.state.RuntimeLogs)-limit:])
-		s.state.RuntimeLogs = s.state.RuntimeLogs[:limit]
-	}
-	return entry, s.saveLocked()
-}
-
-func (s *Store) RuntimeLogs(limit int, after int64) ([]RuntimeLogEntry, int64) {
-	if s == nil {
-		return nil, after
-	}
-	if s.db != nil {
-		return s.postgresRuntimeLogs(limit, after)
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	maxLimit := len(s.state.RuntimeLogs)
-	if limit <= 0 || limit > maxLimit {
-		limit = maxLimit
-	}
-	filtered := make([]RuntimeLogEntry, 0, maxLimit)
-	for _, entry := range s.state.RuntimeLogs {
-		if after <= 0 || entry.ID > after {
-			filtered = append(filtered, entry)
-		}
-	}
-	if len(filtered) > limit {
-		filtered = filtered[len(filtered)-limit:]
-	}
-	next := after
-	if s.state.NextRuntimeLogID > 1 {
-		next = s.state.NextRuntimeLogID - 1
-	}
-	if len(filtered) > 0 {
-		next = filtered[len(filtered)-1].ID
-	}
-	out := make([]RuntimeLogEntry, len(filtered))
-	copy(out, filtered)
-	return out, next
-}
-
-func (s *Store) RuntimeLogStats() (int64, int) {
-	if s == nil {
-		return 0, 0
-	}
-	if s.db != nil {
-		var next sql.NullInt64
-		var count int
-		if err := s.db.QueryRowContext(context.Background(), `SELECT max(id), count(*) FROM twilight_runtime_logs`).Scan(&next, &count); err != nil {
-			return 0, 0
-		}
-		return next.Int64, count
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	next := int64(0)
-	if s.state.NextRuntimeLogID > 1 {
-		next = s.state.NextRuntimeLogID - 1
-	}
-	return next, len(s.state.RuntimeLogs)
-}
-
-func (s *Store) PruneRuntimeLogs(limit int) error {
-	if s == nil {
-		return nil
-	}
-	limit = clampRuntimeLogLimit(limit)
-	if s.db != nil {
-		_, err := s.db.ExecContext(context.Background(), `
-DELETE FROM twilight_runtime_logs
-WHERE id NOT IN (
-	SELECT id FROM twilight_runtime_logs ORDER BY id DESC LIMIT $1
-)`, limit)
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(s.state.RuntimeLogs) <= limit {
-		return nil
-	}
-	copy(s.state.RuntimeLogs, s.state.RuntimeLogs[len(s.state.RuntimeLogs)-limit:])
-	s.state.RuntimeLogs = s.state.RuntimeLogs[:limit]
-	return s.saveLocked()
-}
-
-func (s *Store) postgresRuntimeLogs(limit int, after int64) ([]RuntimeLogEntry, int64) {
-	limit = clampRuntimeLogReadLimit(limit)
-	var (
-		rows *sql.Rows
-		err  error
-	)
-	if after > 0 {
-		rows, err = s.db.QueryContext(context.Background(), `
-SELECT id, time, level, message, COALESCE(attrs, '{}'::jsonb)::text
-FROM twilight_runtime_logs
-WHERE id > $1
-ORDER BY id ASC
-LIMIT $2`, after, limit)
-	} else {
-		rows, err = s.db.QueryContext(context.Background(), `
-SELECT id, time, level, message, COALESCE(attrs, '{}'::jsonb)::text
-FROM twilight_runtime_logs
-ORDER BY id DESC
-LIMIT $1`, limit)
-	}
-	if err != nil {
-		return nil, after
-	}
-	defer rows.Close()
-	out := []RuntimeLogEntry{}
-	for rows.Next() {
-		var entry RuntimeLogEntry
-		var attrsText string
-		if err := rows.Scan(&entry.ID, &entry.Time, &entry.Level, &entry.Message, &attrsText); err != nil {
-			continue
-		}
-		if attrsText != "" {
-			_ = json.Unmarshal([]byte(attrsText), &entry.Attrs)
-		}
-		out = append(out, entry)
-	}
-	if after <= 0 {
-		for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-			out[i], out[j] = out[j], out[i]
-		}
-	}
-	next := after
-	if len(out) > 0 {
-		next = out[len(out)-1].ID
-	} else if maxID, _ := s.RuntimeLogStats(); maxID > next {
-		next = maxID
-	}
-	return out, next
-}
-
-func clampRuntimeLogReadLimit(limit int) int {
-	if limit <= 0 {
-		return 200
-	}
-	if limit > 50000 {
-		return 50000
-	}
-	return limit
-}
-
-func clampRuntimeLogLimit(limit int) int {
-	if limit < 100 {
-		return 100
-	}
-	if limit > 50000 {
-		return 50000
-	}
-	return limit
-}
-
-func (s *Store) AddPlaybackRecord(record PlaybackRecord) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if record.PlayedAt == 0 {
-		record.PlayedAt = time.Now().Unix()
-	}
-	s.state.PlaybackRecords = append([]PlaybackRecord{record}, s.state.PlaybackRecords...)
-	if len(s.state.PlaybackRecords) > 10000 {
-		s.state.PlaybackRecords = s.state.PlaybackRecords[:10000]
-	}
-	return s.saveLocked()
-}
-
-func (s *Store) PlaybackRecords(uid int64, since int64, limit int) []PlaybackRecord {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if limit <= 0 || limit > 10000 {
-		limit = 10000
-	}
-	out := make([]PlaybackRecord, 0, minInt(limit, len(s.state.PlaybackRecords)))
-	for _, record := range s.state.PlaybackRecords {
-		if uid != 0 && record.UID != uid {
-			continue
-		}
-		if since > 0 && record.PlayedAt < since {
-			continue
-		}
-		out = append(out, record)
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out
-}
-
-func (s *Store) AddIPBlacklist(ip, reason string, expireAt int64) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.state.IPBlacklist[ip] = IPBlacklistEntry{IP: ip, Reason: reason, CreatedAt: time.Now().Unix(), ExpireAt: expireAt}
-	return s.saveLocked()
-}
-
-func (s *Store) RemoveIPBlacklist(ip string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.state.IPBlacklist, ip)
-	return s.saveLocked()
-}
-
-func (s *Store) ListIPBlacklist() []IPBlacklistEntry {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]IPBlacklistEntry, 0, len(s.state.IPBlacklist))
-	for _, entry := range s.state.IPBlacklist {
-		out = append(out, entry)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt > out[j].CreatedAt })
-	return out
-}
-
-func (s *Store) IsIPBlacklisted(ip string) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	entry, ok := s.state.IPBlacklist[ip]
-	if !ok {
-		return false
-	}
-	return entry.ExpireAt == -1 || entry.ExpireAt > time.Now().Unix()
-}
-
 func (s *Store) CreateRebindRequest(req RebindRequest) (RebindRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return RebindRequest{}, err
+	}
 	for _, existing := range s.state.RebindRequests {
 		if existing.UID == req.UID && existing.Status == "pending" {
 			return existing, ErrConflict
@@ -2228,6 +2111,9 @@ func (s *Store) ListRebindRequests(status string) []RebindRequest {
 func (s *Store) ReviewRebindRequest(id, reviewerUID int64, status, note string) (RebindRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return RebindRequest{}, err
+	}
 	req, ok := s.state.RebindRequests[id]
 	if !ok {
 		return RebindRequest{}, ErrNotFound
@@ -2250,6 +2136,9 @@ func (s *Store) UpsertTelegramRoster(chatID string, telegramID int64, status str
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return err
+	}
 	key := telegramRosterKey(chatID, telegramID)
 	now := time.Now().Unix()
 	entry, ok := s.state.TelegramRoster[key]
@@ -2275,6 +2164,9 @@ func (s *Store) MarkTelegramRosterLeft(chatID string, telegramID int64, status s
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return err
+	}
 	key := telegramRosterKey(chatID, telegramID)
 	entry, ok := s.state.TelegramRoster[key]
 	if !ok {
@@ -2384,13 +2276,6 @@ func appendUniqueInt64(values []int64, value int64) []int64 {
 	return append(values, value)
 }
 
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func telegramRosterKey(chatID string, telegramID int64) string {
 	return strings.TrimSpace(chatID) + ":" + strconv36(telegramID)
 }
@@ -2404,15 +2289,18 @@ func telegramRosterActive(status string) bool {
 	}
 }
 
-func deviceKey(uid int64, deviceID string) string {
-	return strconv36(uid) + ":" + deviceID
-}
-
 // AddViolationLog records a code violation attempt.
 func (s *Store) AddViolationLog(log ViolationLog) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	log.ID = int64(len(s.state.ViolationLogs)) + 1
+	if err := s.refreshLocked(); err != nil {
+		return err
+	}
+	// 用单调递增计数器而非 len()+1：删除条目后再插入会复用旧 ID，
+	// 既会破坏外部引用（admin UI / 操作日志按 ID 关联），也会导致审计追溯
+	// 错乱。NextViolationLogID 与其他业务域计数器同款 pattern。
+	log.ID = s.state.NextViolationLogID
+	s.state.NextViolationLogID++
 	s.state.ViolationLogs = append(s.state.ViolationLogs, log)
 	return s.saveLocked()
 }
@@ -2433,6 +2321,9 @@ func (s *Store) ListViolationLogs() []ViolationLog {
 func (s *Store) DeleteViolationLog(id int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return err
+	}
 	for i, log := range s.state.ViolationLogs {
 		if log.ID == id {
 			s.state.ViolationLogs = append(s.state.ViolationLogs[:i], s.state.ViolationLogs[i+1:]...)
@@ -2446,6 +2337,9 @@ func (s *Store) DeleteViolationLog(id int64) error {
 func (s *Store) ClearViolationLogs() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return err
+	}
 	s.state.ViolationLogs = nil
 	return s.saveLocked()
 }

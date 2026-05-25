@@ -11,6 +11,14 @@ import (
 	"go.uber.org/zap"
 )
 
+// embyAdminCacheMaxEntries 限制 embyIsAdmin 的内存缓存大小，
+// 防止任意 emby_id 输入下 map 无限增长。
+// 命中下用 LRU 风格的"超上限就丢最老"策略：写入时若超过上限，
+// 先扫一遍把过期 entry（>5min）清掉；如仍超过上限，再丢一个最早的。
+// 因为 5 分钟 TTL 已限制单条目寿命，这里用最简单的扫描淘汰即可（O(N) 但
+// 仅在写入越界时触发，且 N 受 max 控制）。
+const embyAdminCacheMaxEntries = 10000
+
 func (a *App) embyIsAdmin(ctx context.Context, embyID string) bool {
 	if embyID == "" || a.cfg.EmbyURL == "" {
 		return false
@@ -30,9 +38,64 @@ func (a *App) embyIsAdmin(ctx context.Context, embyID string) bool {
 	policy := embyPolicy(user)
 	isAdmin := boolish(policy["IsAdministrator"])
 	a.embyAdminMu.Lock()
+	a.evictEmbyAdminCacheLocked(now)
 	a.embyAdminCache[embyID] = embyAdminCacheEntry{admin: isAdmin, checked: now}
 	a.embyAdminMu.Unlock()
 	return isAdmin
+}
+
+// evictEmbyAdminCacheLocked 必须持有 embyAdminMu 调用：
+//  1. 先扫一遍淘汰过期项（>5min）
+//  2. 若仍 ≥ max，丢掉 checked 最早的一项（防 OOM 兜底）
+func (a *App) evictEmbyAdminCacheLocked(now time.Time) {
+	if len(a.embyAdminCache) < embyAdminCacheMaxEntries {
+		return
+	}
+	for k, v := range a.embyAdminCache {
+		if now.Sub(v.checked) >= 5*time.Minute {
+			delete(a.embyAdminCache, k)
+		}
+	}
+	if len(a.embyAdminCache) < embyAdminCacheMaxEntries {
+		return
+	}
+	var oldestKey string
+	var oldestAt time.Time
+	for k, v := range a.embyAdminCache {
+		if oldestKey == "" || v.checked.Before(oldestAt) {
+			oldestKey, oldestAt = k, v.checked
+		}
+	}
+	if oldestKey != "" {
+		delete(a.embyAdminCache, oldestKey)
+	}
+}
+
+// embyHealth 统一封装 emby 健康探活：先 /System/Info/Public（无需鉴权），
+// 失败再 /System/Info（带 token 鉴权），把"双段 fallback"集中一处。
+// 之前同样的 if/else 分散在 admin_extra.go / handlers.go(×2) / telegram_bot.go，
+// 而且每处超时各异（1.5s / 10s / 无超时）。统一后调用方只需选超时档位
+// （embyHealthFast 1.5s / 默认 5s / 自定义 ctx），不再自己写 fallback。
+func (a *App) embyHealth(ctx context.Context) (info map[string]any, ok bool) {
+	if a.cfg.EmbyURL == "" {
+		return nil, false
+	}
+	if err := a.embyGet(ctx, "/System/Info/Public", &info); err == nil && info != nil {
+		return info, true
+	}
+	info = nil
+	if err := a.embyGet(ctx, "/System/Info", &info); err == nil && info != nil {
+		return info, true
+	}
+	return nil, false
+}
+
+// embyHealthFast 是 embyHealth 的 1.5 秒超时版本，专用于"系统首页摘要"
+// 这类不能阻塞用户响应的场景。
+func (a *App) embyHealthFast(parent context.Context) (map[string]any, bool) {
+	ctx, cancel := context.WithTimeout(parent, 1500*time.Millisecond)
+	defer cancel()
+	return a.embyHealth(ctx)
 }
 
 func (a *App) requireNonEmbyAdmin(w http.ResponseWriter, r *http.Request, user store.User) bool {

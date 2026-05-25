@@ -14,12 +14,12 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 	payload := decodeMap(r)
 	code := firstNonEmpty(stringValue(payload, "reg_code"), stringValue(payload, "code"))
 	if code == "" {
-		fail(w, http.StatusBadRequest, "卡码不能为空")
+		failWithCode(w, http.StatusBadRequest, ErrCodeEmpty, "卡码不能为空")
 		return
 	}
 	preview, source, okPreview := a.previewCode(code, p.User)
 	if !okPreview {
-		fail(w, http.StatusBadRequest, "卡码无效或已过期")
+		failWithCode(w, http.StatusBadRequest, ErrCodeInvalid, "卡码无效或已过期")
 		return
 	}
 	days := 30
@@ -29,7 +29,7 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 	codeType := int(numeric(preview["type"]))
 	grantsEmby := codeGrantsEmbyRegistration(source, codeType)
 	if grantsEmby && p.User.EmbyID != "" {
-		fail(w, http.StatusBadRequest, "当前账号已绑定 Emby，请使用续期码")
+		failWithCode(w, http.StatusBadRequest, ErrCodeAlreadyEmbyBound, "当前账号已绑定 Emby，请使用续期码")
 		return
 	}
 	if boolValue(payload, "check_only", false) {
@@ -51,7 +51,7 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 			excludeInviteCode = code
 		}
 		if reached, current, limit := a.embyCapacityReachedExcluding(p.User.UID, excludeRegCode, excludeInviteCode); reached {
-			fail(w, http.StatusConflict, "Emby 用户数量已达上限 "+strconv.Itoa(current)+"/"+strconv.Itoa(limit))
+			failWithCode(w, http.StatusConflict, ErrEmbyCapacityReached, "Emby 用户数量已达上限 "+strconv.Itoa(current)+"/"+strconv.Itoa(limit))
 			return
 		}
 	}
@@ -59,42 +59,42 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 	if source == "invite" {
 		invite, okInvite := a.store.InviteCode(code)
 		if !okInvite || !invite.Active || (invite.ExpiredAt > 0 && invite.ExpiredAt <= time.Now().Unix()) {
-			fail(w, http.StatusNotFound, "邀请码无效或已停用")
+			failWithCode(w, http.StatusNotFound, ErrInviteNotFound, "邀请码无效或已停用")
 			return
 		}
 		inviteForUse = invite
 		if inviteForUse.InviterUID == p.User.UID {
-			fail(w, http.StatusBadRequest, "不能使用自己生成的邀请码")
+			failWithCode(w, http.StatusBadRequest, ErrInviteSelfGenerate, "不能使用自己生成的邀请码")
 			return
 		}
 		if _, hasParent := a.store.ParentOf(p.User.UID); hasParent {
-			fail(w, http.StatusBadRequest, "当前账号已存在邀请上级，不能重复加入邀请树")
+			failWithCode(w, http.StatusBadRequest, ErrInviteAlreadyHasParent, "当前账号已存在邀请上级，不能重复加入邀请树")
 			return
 		}
 		if inviteForUse.TargetUsername != "" && !strings.EqualFold(inviteForUse.TargetUsername, p.User.Username) {
-			fail(w, http.StatusForbidden, "此邀请码仅限指定用户使用")
+			failWithCode(w, http.StatusForbidden, ErrInviteTargetMismatch, "此邀请码仅限指定用户使用")
 			return
 		}
 		inviter, okInviter := a.store.User(inviteForUse.InviterUID)
 		if !okInviter || !inviter.Active {
-			fail(w, http.StatusForbidden, "邀请人状态不可用")
+			failWithCode(w, http.StatusForbidden, ErrInviterUnavailable, "邀请人状态不可用")
 			return
 		}
 		inviterForUse = inviter
 		if a.inviteDepth(inviterForUse.UID) >= a.cfg.InviteMaxDepth {
-			fail(w, http.StatusForbidden, "邀请树层级已达上限")
+			failWithCode(w, http.StatusForbidden, ErrInviteDepthExceeded, "邀请树层级已达上限")
 			return
 		}
 		if a.cfg.InviteRootUserLimit > 0 {
 			rootUID := a.inviteRootUID(inviterForUse.UID)
 			if a.inviteDescendantCount(rootUID) >= a.cfg.InviteRootUserLimit {
-				fail(w, http.StatusForbidden, "邀请树人数已达上限")
+				failWithCode(w, http.StatusForbidden, ErrInviteRootFull, "邀请树人数已达上限")
 				return
 			}
 		}
 		maxDays, reason := a.maxCodeDays(inviterForUse)
 		if maxDays <= 0 {
-			fail(w, http.StatusForbidden, firstNonEmpty(reason, "邀请人有效期不足"))
+			failWithCode(w, http.StatusForbidden, ErrInviterDaysShort, firstNonEmpty(reason, "邀请人有效期不足"))
 			return
 		}
 		if days <= 0 || days > maxDays {
@@ -183,7 +183,7 @@ func (a *App) handleRegcodeCheck(w http.ResponseWriter, r *http.Request, _ Param
 	if code != "" {
 		if reg, okReg := a.store.RegCode(code); okReg {
 			if reg.IsDecoy || reg.TargetUsername != "" {
-				fail(w, http.StatusNotFound, "注册码不存在")
+				failWithCode(w, http.StatusNotFound, ErrRegcodeNotFound, "注册码不存在")
 				return
 			}
 			status := regcodeStatus(reg)
@@ -191,5 +191,5 @@ func (a *App) handleRegcodeCheck(w http.ResponseWriter, r *http.Request, _ Param
 			return
 		}
 	}
-	fail(w, http.StatusNotFound, "注册码不存在")
+	failWithCode(w, http.StatusNotFound, ErrRegcodeNotFound, "注册码不存在")
 }

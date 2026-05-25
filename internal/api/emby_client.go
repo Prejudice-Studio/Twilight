@@ -2,11 +2,13 @@ package api
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/prejudice-studio/twilight/internal/security"
+
+	"go.uber.org/zap"
 )
 
 func (a *App) embyHeaders() map[string]string {
@@ -54,8 +56,16 @@ func (a *App) embyAuthenticateByName(ctx context.Context, username, password str
 	if a.cfg.EmbyURL == "" {
 		return nil, false, fmt.Errorf("Emby URL not configured")
 	}
-	sum := sha256.Sum256([]byte("twilight-bind-" + strings.ToLower(username)))
-	authHeader := fmt.Sprintf(`MediaBrowser Client="Twilight", Device="Twilight Bind", DeviceId="%s", Version="1.0.0"`, hex.EncodeToString(sum[:16]))
+	// DeviceId 必须是不可预测的随机值：
+	// 旧实现 sha256("twilight-bind-" + lower(username)) 完全可被第三方推算，
+	// 等价于把 bind 行为暴露成可重放的稳定指纹。
+	// crypto/rand 失败时退回到一个明确标记的占位 ID，不再静默继续。
+	deviceID, err := security.RandomHex(16)
+	if err != nil {
+		zap.L().Warn("emby bind device id rand failed", zap.Error(err))
+		return nil, false, fmt.Errorf("生成 Emby 绑定设备 ID 失败: %w", err)
+	}
+	authHeader := fmt.Sprintf(`MediaBrowser Client="Twilight", Device="Twilight Bind", DeviceId="%s", Version="1.0.0"`, deviceID)
 	headers := map[string]string{"Accept": "application/json", "X-Emby-Authorization": authHeader}
 	var payload map[string]any
 	endpoint := strings.TrimRight(a.cfg.EmbyURL, "/") + "/Users/AuthenticateByName"

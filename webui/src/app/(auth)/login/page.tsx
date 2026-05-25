@@ -13,6 +13,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
 import { SITE_NAME } from "@/lib/site-config";
+import { sanitizeExternalUrl } from "@/lib/safe-url";
+import { friendlyError } from "@/lib/validators";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -33,7 +35,7 @@ export default function LoginPage() {
       ...(systemInfo?.telegram_links?.groups || []),
       ...(systemInfo?.telegram_links?.channels || []),
     ]),
-  ];
+  ].map((item) => ({ ...item, url: sanitizeExternalUrl(item.url) })).filter((item): item is { label: string; url: string } => Boolean(item.url));
 
   useEffect(() => {
     router.prefetch("/dashboard");
@@ -62,11 +64,16 @@ export default function LoginPage() {
         });
         router.replace("/dashboard");
       } else {
-        const message = result.message || "用户名或密码错误";
-        const disabled = /禁用/.test(message);
+        // 用稳定的 error_code 决定 UI 分支，避免 /禁用/.test(message) 这种
+        // 文案级匹配在后端切英文 / 改文案时炸掉。
+        const code = result.errorCode;
+        const disabled = code === "AUTH_ACCOUNT_DISABLED";
+        const description = code
+          ? friendlyError(code, result.message)
+          : result.message || "用户名或密码错误";
         toast({
           title: disabled ? "账户已被禁用" : "登录失败",
-          description: disabled ? "请联系管理员处理" : message,
+          description: disabled ? "请联系管理员处理" : description,
           variant: "destructive",
         });
       }
@@ -195,4 +202,3 @@ export default function LoginPage() {
     </main>
   );
 }
-

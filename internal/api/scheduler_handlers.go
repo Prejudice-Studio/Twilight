@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/prejudice-studio/twilight/internal/store"
+	"go.uber.org/zap"
 )
 
 var schedulerJobs = []map[string]any{
@@ -70,7 +71,7 @@ func (a *App) handleSchedulerJobs(w http.ResponseWriter, r *http.Request, _ Para
 func (a *App) handleSchedulerTerminate(w http.ResponseWriter, r *http.Request, params Params) {
 	jobID := params["job_id"]
 	if !schedulerJobExists(jobID) {
-		fail(w, http.StatusNotFound, "job not found")
+		failWithCode(w, http.StatusNotFound, ErrSchedulerJobNotFound, "调度任务不存在")
 		return
 	}
 	if !a.terminateSchedulerJob(jobID) {
@@ -97,7 +98,7 @@ func (a *App) handleSchedulerHistory(w http.ResponseWriter, r *http.Request, par
 func (a *App) handleSchedulerSchedule(w http.ResponseWriter, r *http.Request, params Params) {
 	jobID := params["job_id"]
 	if !schedulerJobExists(jobID) {
-		fail(w, http.StatusNotFound, "job not found")
+		failWithCode(w, http.StatusNotFound, ErrSchedulerJobNotFound, "调度任务不存在")
 		return
 	}
 	if r.Method == http.MethodDelete {
@@ -202,7 +203,7 @@ func (a *App) reconcileSchedulerRunState(jobID string, running bool) {
 		if run.Status != "running" {
 			continue
 		}
-		_, _ = a.store.UpdateSchedulerRun(run.ID, func(current *store.SchedulerRun) error {
+		if _, err := a.store.UpdateSchedulerRun(run.ID, func(current *store.SchedulerRun) error {
 			if current.Status != "running" {
 				return nil
 			}
@@ -217,6 +218,8 @@ func (a *App) reconcileSchedulerRunState(jobID string, running bool) {
 			current.Summary["interrupted"] = true
 			current.Summary["success"] = false
 			return nil
-		})
+		}); err != nil {
+			zap.L().Warn("scheduler run reconciliation failed", zap.String("job_id", jobID), zap.Int64("run_id", run.ID), zap.Error(err))
+		}
 	}
 }
