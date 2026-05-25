@@ -39,6 +39,13 @@ interface SystemStore {
   lastError: SystemFetchResult | null;
   /** 上次成功 fetch 的时间戳；TTL 过期后强制重拉 */
   fetchedAt: number;
+  /**
+   * 当前正在飞行的 fetchInfo Promise。两个组件同帧 mount 都会调用 fetchInfo()，
+   * 没有这把锁就会触发两次完全相同的 GET /api/system/info：浪费请求 +
+   * 双倍 setCsrfCookieName 写入 + 任意一次失败都会污染 lastError。
+   * 拿到 promise 后 awaiter 共用同一个结果。
+   */
+  inflight: Promise<SystemFetchResult> | null;
   fetchInfo: (force?: boolean) => Promise<SystemFetchResult>;
   /**
    * 主动失效：admin 修改可能影响 systemInfo（特别是 csrf_cookie_name、
@@ -53,52 +60,66 @@ export const useSystemStore = create<SystemStore>((set, get) => ({
   loaded: false,
   lastError: null,
   fetchedAt: 0,
+  inflight: null,
   invalidate: () => {
     set({ loaded: false, fetchedAt: 0 });
   },
   fetchInfo: async (force = false) => {
-    const { loaded, fetchedAt } = get();
+    const { loaded, fetchedAt, inflight } = get();
     const fresh = loaded && Date.now() - fetchedAt < SYSTEM_INFO_TTL_MS;
     if (fresh && !force) {
       return { success: true };
     }
-    try {
-      const res = await api.getSystemInfo();
-      if (res.success && res.data) {
-        // 把后端公开的 csrf cookie 名注入到 api-request 模块缓存里。
-        // 之后 readCSRFCookie() 会按精确名匹配，避免同域 / 父域第三方
-        // 应用下发的其它 *_csrf cookie 把 token 取错。
-        setCsrfCookieName(res.data.csrf_cookie_name ?? null);
-        set({
-          info: res.data,
-          loaded: true,
-          lastError: null,
-          fetchedAt: Date.now(),
-        });
-        return { success: true };
-      }
-      const failure: SystemFetchResult = {
-        success: false,
-        errorCode: res.error_code,
-      };
-      set({ lastError: failure });
-      return failure;
-    } catch (err: unknown) {
-      // ApiError 由 lib/api-request.ts 抛出，携带 errorCode/backendMessage；
-      // 网络错误（fetch 抛 TypeError）则没有 errorCode。
-      const apiErr = err as { errorCode?: string } | null;
-      const failure: SystemFetchResult = {
-        success: false,
-        errorCode: apiErr?.errorCode,
-        networkError: !apiErr?.errorCode,
-      };
-      set({ lastError: failure });
-      if (process.env.NODE_ENV !== "production") {
-        // dev only：在生产构建里 zap 日志走后端，避免噪声。
-        // eslint-disable-next-line no-console
-        console.warn("[system] fetchInfo failed", failure, err);
-      }
-      return failure;
+    // force=true 仍然要让出给已经在飞的请求 —— 重复 force 调用是 admin
+    // 在配置页连点保存按钮时常见的边界，复用同一次拉取避免雪崩。
+    if (inflight) {
+      return inflight;
     }
+    const promise = (async (): Promise<SystemFetchResult> => {
+      try {
+        const res = await api.getSystemInfo();
+        if (res.success && res.data) {
+          // 把后端公开的 csrf cookie 名注入到 api-request 模块缓存里。
+          // 之后 readCSRFCookie() 会按精确名匹配，避免同域 / 父域第三方
+          // 应用下发的其它 *_csrf cookie 把 token 取错。
+          setCsrfCookieName(res.data.csrf_cookie_name ?? null);
+          set({
+            info: res.data,
+            loaded: true,
+            lastError: null,
+            fetchedAt: Date.now(),
+          });
+          return { success: true };
+        }
+        const failure: SystemFetchResult = {
+          success: false,
+          errorCode: res.error_code,
+        };
+        set({ lastError: failure });
+        return failure;
+      } catch (err: unknown) {
+        // ApiError 由 lib/api-request.ts 抛出，携带 errorCode/backendMessage；
+        // 网络错误（fetch 抛 TypeError）则没有 errorCode。
+        const apiErr = err as { errorCode?: string } | null;
+        const failure: SystemFetchResult = {
+          success: false,
+          errorCode: apiErr?.errorCode,
+          networkError: !apiErr?.errorCode,
+        };
+        set({ lastError: failure });
+        if (process.env.NODE_ENV !== "production") {
+          // dev only：在生产构建里 zap 日志走后端，避免噪声。
+          // eslint-disable-next-line no-console
+          console.warn("[system] fetchInfo failed", failure, err);
+        }
+        return failure;
+      } finally {
+        // 必须放 finally：无论 success 还是 throw，都必须把 inflight slot 让出来，
+        // 否则下次 fetchInfo 永远拿到同一个旧 promise，TTL 也救不回来。
+        set({ inflight: null });
+      }
+    })();
+    set({ inflight: promise });
+    return promise;
   },
 }));
