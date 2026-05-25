@@ -215,8 +215,24 @@ func (a *App) telegramConfirmBindCode(ctx context.Context, chatID, telegramID in
 		_ = a.telegramSendMessage(ctx, chatID, "绑定码无效或已过期，请在网页重新获取。")
 		return
 	}
+	// 幂等：注册流（bind.UID == 0）下 Confirm 写完不会立刻删 code，
+	// bot 命令重发可绕过 group check 反复打 Telegram getChatMember。
+	if bind.Confirmed && bind.TelegramID != 0 {
+		if bind.TelegramID != telegramID {
+			_ = a.telegramSendMessage(ctx, chatID, "该绑定码已被其它 Telegram 账号确认，无法重复使用。")
+			return
+		}
+		_ = a.telegramSendMessage(ctx, chatID, "Telegram 绑定已确认，可以回到网页继续。")
+		return
+	}
 	if existing, okUser := a.store.FindUserByTelegramID(telegramID); okUser && (bind.UID == 0 || existing.UID != bind.UID) {
 		_ = a.telegramSendMessage(ctx, chatID, fmt.Sprintf("该 Telegram 已绑定到账号 %s。", existing.Username))
+		return
+	}
+	// per-tg-id 速率限制：阻止用同一个 tg 账号反复对 bot 发未确认的合法 code，
+	// 触发对 Telegram API 的 getChatMember 流量放大。
+	if !a.allowRate(ctx, rateKey("tg-bind-confirm:", telegramID), a.cfg.RateLimitLoginPerMinute, time.Minute) {
+		_ = a.telegramSendMessage(ctx, chatID, "操作过于频繁，请稍后再试。")
 		return
 	}
 	if missing, err := a.telegramBindRequirementMissing(ctx, telegramID); err != nil {
