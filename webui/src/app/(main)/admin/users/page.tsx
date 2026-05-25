@@ -48,6 +48,8 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError } from "@/components/layout/page-state";
 import { api, type UserInfo, type EmbyLibraryAccess, type EmbyLibraryItem } from "@/lib/api";
+import { ApiError } from "@/lib/api-request";
+import { ErrCodes } from "@/lib/errcode";
 import { formatDate } from "@/lib/utils";
 import {
   batchDeleteConfirmConfig,
@@ -498,18 +500,41 @@ export default function AdminUsersPage() {
         await loadUsers();
         setBindOpen(false);
         setBindConflict(null);
-      } else if (res.data?.conflict) {
-        setBindConflict({
-          emby_id: res.data.emby_id,
-          emby_username: res.data.emby_username,
-          conflict_uid: res.data.conflict_uid!,
-          conflict_username: res.data.conflict_username!,
-        });
       } else {
         toast({ title: "绑定失败", description: res.message, variant: "destructive" });
       }
-    } catch (error: any) {
-      toast({ title: "绑定失败", description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      // 后端把"目标 emby 账号已被其它用户绑定"从 200+data.conflict 改为
+      // 409 + ErrCode=EMBY_ACCOUNT_CONFLICT，conflict 元数据塞在 envelope.data
+      // 上由 ApiError.data 透传过来。其它失败仍走默认 toast。
+      if (error instanceof ApiError && error.errorCode === ErrCodes.EmbyAccountConflict) {
+        const conflictData = error.data as
+          | {
+              emby_id?: string;
+              emby_username?: string;
+              conflict_uid?: number;
+              conflict_username?: string;
+            }
+          | null
+          | undefined;
+        if (
+          conflictData &&
+          typeof conflictData.conflict_uid === "number" &&
+          typeof conflictData.conflict_username === "string" &&
+          typeof conflictData.emby_id === "string" &&
+          typeof conflictData.emby_username === "string"
+        ) {
+          setBindConflict({
+            emby_id: conflictData.emby_id,
+            emby_username: conflictData.emby_username,
+            conflict_uid: conflictData.conflict_uid,
+            conflict_username: conflictData.conflict_username,
+          });
+          return;
+        }
+      }
+      const message = error instanceof Error ? error.message : "绑定失败";
+      toast({ title: "绑定失败", description: message, variant: "destructive" });
     } finally {
       setBindSubmitting(false);
     }

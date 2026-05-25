@@ -19,6 +19,14 @@ export class ApiError extends Error {
   readonly method: string;
   readonly errorCode?: string;
   readonly backendMessage?: string;
+  /**
+   * 后端在 envelope.data 上携带的结构化元数据。绝大多数失败响应 data 为 null
+   * 或 undefined；少数 handler（典型如 admin 绑定 Emby 冲突）会把 conflict
+   * 上下文塞进 data，让前端在拿到 errorCode 后还能读出 conflict_uid /
+   * conflict_username 这种二次决策需要的字段。无类型约束—— consumer 自己负
+   * 责类型断言（与底层 ApiResponse<T> 的 data: T | null 对齐）。
+   */
+  readonly data?: unknown;
 
   constructor(init: {
     status: number;
@@ -27,6 +35,7 @@ export class ApiError extends Error {
     errorCode?: string;
     backendMessage?: string;
     message: string;
+    data?: unknown;
   }) {
     super(init.message);
     this.name = "ApiError";
@@ -35,6 +44,7 @@ export class ApiError extends Error {
     this.method = init.method;
     this.errorCode = init.errorCode;
     this.backendMessage = init.backendMessage;
+    this.data = init.data;
   }
 
   isAuth(): boolean {
@@ -385,6 +395,7 @@ export async function apiRequest<T>(
       errorCode: data?.error_code,
       backendMessage: data?.message,
       message: buildHttpErrorMessage(response.status, endpoint, method, data?.message),
+      data: data?.data,
     });
   }
 
@@ -451,6 +462,7 @@ export async function apiRequestForm<T>(
       errorCode: data?.error_code,
       backendMessage: data?.message,
       message: buildHttpErrorMessage(response.status, endpoint, methodName, data?.message),
+      data: data?.data,
     });
   }
 

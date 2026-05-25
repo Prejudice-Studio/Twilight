@@ -320,6 +320,11 @@ const (
 	// admin 越权 → 提示联系系统管理员。
 	ErrEmbyAdminBlocked    ErrCode = "EMBY_ADMIN_BLOCKED"
 	ErrEmbyAdminRestricted ErrCode = "EMBY_ADMIN_RESTRICTED"
+	// admin 绑定 Emby 时，目标 emby_id/username 已绑给另一个 uid，且 force=false。
+	// 之前用 ok(w, ..., {conflict: true, ...}) 走 200 OK，前端只有靠 data.conflict
+	// 这种隐式约定才知道；现在改成 409 + 这条 ErrCode + envelope success=false，
+	// 前端按 res.code === EMBY_ACCOUNT_CONFLICT 判定即可。
+	ErrEmbyAccountConflict ErrCode = "EMBY_ACCOUNT_CONFLICT"
 
 	// === 批量 / 求片 / 演示 / 上传 / 运行时日志补码 ===
 	// 替换若干"裸 fail() + 中文 message"调用点，统一前端文案契约。

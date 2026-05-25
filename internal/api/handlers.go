@@ -1795,7 +1795,17 @@ func (a *App) handleAdminBindEmby(w http.ResponseWriter, r *http.Request, params
 	embyName := firstNonEmpty(asString(remoteUser["Name"]), embyNameInput, embyID)
 	if existing, okExisting := a.store().FindUserByEmbyID(embyID); okExisting && existing.UID != targetUID {
 		if !force {
-			ok(w, "Emby account already linked", map[string]any{"conflict": true, "conflict_uid": existing.UID, "conflict_username": existing.Username, "emby_id": embyID, "emby_username": embyName})
+			// 旧实现走 ok() 200 + {"conflict": true, ...}：前端只能依赖隐式
+			// 约定查 data.conflict，与其他 admin handler 的"重名/已存在"统一
+			// 走 409 + ErrCode 不一致。改为 failWithCodeData：envelope
+			// success=false + code=EMBY_ACCOUNT_CONFLICT + 同样的 conflict 元
+			// 数据。前端用 errorCode 判定即可，无需再读 data.conflict。
+			failWithCodeData(w, http.StatusConflict, ErrEmbyAccountConflict, "Emby account already linked", map[string]any{
+				"conflict_uid":      existing.UID,
+				"conflict_username": existing.Username,
+				"emby_id":           embyID,
+				"emby_username":     embyName,
+			})
 			return
 		}
 		if _, err := a.store().UpdateUser(existing.UID, func(u *store.User) error {

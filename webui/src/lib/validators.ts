@@ -160,6 +160,7 @@ export const ERROR_CODE_FRIENDLY: Partial<Record<ErrCode, string>> = {
   TG_ALREADY_BOUND: "该 Telegram 已绑定其它账号",
   EMBY_AUTH_FAILED: "Emby 用户名或密码错误",
   EMBY_ACCOUNT_UNLINKED: "Emby 账号未关联",
+  EMBY_ACCOUNT_CONFLICT: "目标 Emby 账号已被其它用户绑定",
   EMBY_CAPACITY_REACHED: "已达到 Emby 用户上限",
   EMBY_MISSING_CREDENTIALS: "请填写 Emby 用户名和密码",
   EMBY_INPUT_TOO_LONG: "Emby 用户名 / 密码长度超出限制",

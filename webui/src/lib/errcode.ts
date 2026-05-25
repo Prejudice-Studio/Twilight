@@ -51,6 +51,7 @@ export type ErrCode =
   // === Emby ===
   | "EMBY_AUTH_FAILED"
   | "EMBY_ACCOUNT_UNLINKED"
+  | "EMBY_ACCOUNT_CONFLICT"
   | "EMBY_CAPACITY_REACHED"
   | "EMBY_MISSING_CREDENTIALS"
   | "EMBY_INPUT_TOO_LONG"
@@ -320,6 +321,7 @@ export const ErrCodes = {
   // Emby
   EmbyAuthFailed: "EMBY_AUTH_FAILED",
   EmbyAccountUnlinked: "EMBY_ACCOUNT_UNLINKED",
+  EmbyAccountConflict: "EMBY_ACCOUNT_CONFLICT",
   EmbyCapacityReached: "EMBY_CAPACITY_REACHED",
   EmbyMissingCreds: "EMBY_MISSING_CREDENTIALS",
   EmbyInputTooLong: "EMBY_INPUT_TOO_LONG",
