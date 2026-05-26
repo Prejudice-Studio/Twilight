@@ -58,6 +58,13 @@ jobs:
     - name: Run go vet
       run: go vet ./...
 
+    - name: Check routes vs docs drift
+      # routes.go 注册的每条 (METHOD, PATH) 必须在 docs/*.md 里出现一次，
+      # 或在 scripts/docs_drift_baseline.txt 里被显式 grandfather。新增路由
+      # 偷懒不写 docs 会在 PR diff 上看见 baseline 增长，复审者可一眼发现。
+      # 只在 Ubuntu 跑一份；脚本是纯文本扫描，无平台差异。
+      run: go run ./scripts/check_docs_drift.go
+
   nix:
     runs-on: ubuntu-latest
     steps:
