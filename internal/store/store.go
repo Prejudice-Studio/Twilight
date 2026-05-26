@@ -960,13 +960,13 @@ func (s *Store) saveLocked() error {
 		return err
 	}
 	// 写前先把上一份 state.json 复制到 .bak —— refreshLocked 解析失败时可
-	// 回退到 .bak（避免一次坏写盖掉所有用户数据）。
+	// 回退到 .bak（避免一次坏写盖掉所有用户数据）。复用 writeFileAtomicSync
+	// 走 tmp + fsync(file) + rename + fsync(dir)：之前裸 os.WriteFile + Rename
+	// 没有 fsync，掉电后 .bak 可能仍是 page cache 里半字节状态，最坏 state.json
+	// 与 .bak 同时损坏 = 没有恢复路径。helper 失败仅 log，不影响主写入。
 	if existing, readErr := os.ReadFile(s.path); readErr == nil && len(existing) > 0 {
-		bakTmp := s.path + ".bak.tmp"
-		if err := os.WriteFile(bakTmp, existing, 0o600); err == nil {
-			_ = os.Rename(bakTmp, s.path+".bak")
-		} else {
-			_ = os.Remove(bakTmp)
+		if err := writeFileAtomicSync(s.path+".bak", existing, 0o600); err != nil {
+			zap.L().Warn("state .bak shadow copy failed", zap.String("path", s.path), zap.Error(err))
 		}
 	}
 	tmp := s.path + ".tmp"

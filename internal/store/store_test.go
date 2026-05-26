@@ -198,3 +198,44 @@ func TestCleanupExpiredBindCodesDoesNotDeleteSameValueRegCode(t *testing.T) {
 		t.Fatal("regcode with same value as bind code was deleted")
 	}
 }
+
+// TestSaveLockedBackupCopyDoesNotLeaveBakTmp 锁定 saveLocked 写 .bak 影子副
+// 本时复用 writeFileAtomicSync：tmp 文件必须在 rename 后消失（O_EXCL 保证下
+// 一次写入会因为残留 tmp 直接失败），且 .bak 内容是上一次成功写入的 state，
+// 而不是当前正在写的新版本。这条不变量保护 refreshLocked 的解析失败回退路径。
+func TestSaveLockedBackupCopyDoesNotLeaveBakTmp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 第一次写入：state.json 落盘后还没有 .bak（saveLocked 写前才会复制旧文件）。
+	if err := st.UpsertRegCode(RegCode{Code: "FIRST", Type: 2, Days: 30, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 第二次写入：触发 saveLocked 的 .bak 影子副本路径。
+	if err := st.UpsertRegCode(RegCode{Code: "SECOND", Type: 2, Days: 30, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	bak := path + ".bak"
+	bakTmp := path + ".bak.tmp"
+	if _, err := os.Stat(bakTmp); err == nil {
+		t.Fatalf(".bak.tmp leaked, writeFileAtomicSync should have renamed it: %s", bakTmp)
+	}
+	bakData, err := os.ReadFile(bak)
+	if err != nil {
+		t.Fatalf("expected .bak to exist after second save, got: %v", err)
+	}
+	// .bak 是 *上一次* 成功写入的快照——必须包含 FIRST 但不包含 SECOND。
+	s := string(bakData)
+	if !strings.Contains(s, "FIRST") {
+		t.Fatalf(".bak missing FIRST regcode: %s", s)
+	}
+	if strings.Contains(s, "SECOND") {
+		t.Fatalf(".bak unexpectedly contains current state's SECOND regcode: %s", s)
+	}
+}
