@@ -75,6 +75,36 @@ func (s *Store) SchedulerRuns(jobID string, limit int) []SchedulerRun {
 	return out
 }
 
+// LastSchedulerRunByType 返回 (jobID, runType) 命中的最新一条 SchedulerRun（按
+// StartedAt 取大者，处理乱序记录）。该方法**不**走 SchedulerRuns 的 20 条窗
+// 口——cron_daily 任务的"今天是否已经自动跑过"判定必须基于完整历史，否则
+// admin 在 30 分钟内对同 job 手动重跑 21 次就能挤掉当天的 auto 记录，导致
+// schedulerJobDue 误判 last=0、再次启动一次 auto run。
+//
+// runType 留空时按 jobID 取最新一条；否则只挑 run.Type==runType 的命中。
+// 没有匹配时返回 zero value 与 false。
+func (s *Store) LastSchedulerRunByType(jobID, runType string) (SchedulerRun, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var (
+		best  SchedulerRun
+		found bool
+	)
+	for _, run := range s.state.SchedulerRuns {
+		if jobID != "" && run.JobID != jobID {
+			continue
+		}
+		if runType != "" && run.Type != runType {
+			continue
+		}
+		if !found || run.StartedAt > best.StartedAt {
+			best = run
+			found = true
+		}
+	}
+	return best, found
+}
+
 func (s *Store) SetSchedulerSchedule(jobID string, spec map[string]any, custom bool) (SchedulerSchedule, error) {
 	return s.SetSchedulerScheduleWithParams(jobID, spec, nil, custom)
 }

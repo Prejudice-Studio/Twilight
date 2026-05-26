@@ -91,15 +91,20 @@ func schedulerJobEnabledByConfig(systemUpdateEnabled bool, job map[string]any) b
 }
 
 func (a *App) schedulerJobDue(jobID string, spec map[string]any, now time.Time) bool {
-	runs := a.store().SchedulerRuns(jobID, 20)
-	last := int64(0)
-	for _, run := range runs {
+	// 仍然扫一窗口（20 条）来检查 running 防重入——running 任务比较稀疏，
+	// 拿不到的代价就是漏判，而 LastSchedulerRunByType 自身只挑 type 命中
+	// 的最新一条，不能替代 running 检查。
+	for _, run := range a.store().SchedulerRuns(jobID, 20) {
 		if run.Status == "running" && time.Since(time.Unix(run.StartedAt, 0)) < 30*time.Minute {
 			return false
 		}
-		if run.Type == "auto" && run.StartedAt > last {
-			last = run.StartedAt
-		}
+	}
+	// 关键：last 必须从全量历史里取最新 auto run，否则 admin 在窗口内对同
+	// job 手动重跑 21 次会把 auto 记录挤出 SchedulerRuns(20)，进而把 last
+	// 退化为 0，cron_daily 路径会判定"今天还没跑过 auto"再起一次。
+	last := int64(0)
+	if run, ok := a.store().LastSchedulerRunByType(jobID, "auto"); ok {
+		last = run.StartedAt
 	}
 	switch strings.ToLower(asString(spec["type"])) {
 	case "cron_daily", "daily":
@@ -247,13 +252,12 @@ func (a *App) schedulerNextRunAt(jobID string, spec map[string]any, now time.Tim
 	if schedulerTriggerDisabled(spec) {
 		return 0
 	}
+	// 与 schedulerJobDue 对齐：从全量历史里取最新 auto run，避免被 manual
+	// 重跑挤出 SchedulerRuns(20) 时把 last 退化成 0，让前端"下次自动运行"
+	// 时间显示成 now / 当天而不是真正的次日。
 	last := int64(0)
-	if runs := a.store().SchedulerRuns(jobID, 20); len(runs) > 0 {
-		for _, run := range runs {
-			if run.Type == "auto" && run.StartedAt > last {
-				last = run.StartedAt
-			}
-		}
+	if run, ok := a.store().LastSchedulerRunByType(jobID, "auto"); ok {
+		last = run.StartedAt
 	}
 	switch strings.ToLower(asString(spec["type"])) {
 	case "cron_daily", "daily":
