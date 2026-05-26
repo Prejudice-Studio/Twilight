@@ -107,6 +107,14 @@ func (a *App) handleCreateInviteRenewCode(w http.ResponseWriter, r *http.Request
 		failWithCode(w, http.StatusForbidden, ErrInviteRenewUserDisabled, "账号已被禁用，无法生成续期码")
 		return
 	}
+	// 与 canInvite 同口径：entitlement 已过期的账号不允许给下级 mint 续期码，
+	// 哪怕 Active=true。R62-4 防御纵深，注意 maxCodeDays 后面也会再挡一次，但
+	// 让"已过期"提前给出明确错误对前端 UX 更好（避免 maxDays 兜底的"剩余天数
+	// 不足"误导文案）。
+	if !userEntitlementOK(user) {
+		failWithCode(w, http.StatusForbidden, ErrInviterDaysShort, "账号有效期已到期，无法生成续期码")
+		return
+	}
 	if a.cfg().InviteRequireEmby && user.EmbyID == "" {
 		failWithCode(w, http.StatusForbidden, ErrInviteRenewRequiresEmby, "请先绑定 Emby 账号后再生成续期码")
 		return

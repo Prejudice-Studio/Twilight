@@ -744,6 +744,34 @@ func inviteCodeDTO(code store.InviteCode) map[string]any {
 	}
 }
 
+// userEntitlementOK 是"消费 entitlement"接口（生成邀请码 / 续期码 / API Key /
+// 媒体库自助修改）共用的 gate：账号 Active 且未过期。当前 maxCodeDays 已经隐
+// 式地把第二个条件做了（ExpiredAt <= now 返回 0），但散落在 canInvite /
+// handleInviteUse / handleCreateInviteRenewCode 三处的 `maxDays<=0` 判断，
+// 重构时容易把"过期"语义和"剩余天数不足"语义搅在一起，回归路径再加 invite
+// 限速 / 库存校验 / 角色门时极易写出"Active=true & ExpiredAt<now 仍然能消
+// 费 entitlement"的洞——R62-4 审计记录的就是这一类。
+//
+// 这个 helper 把规则集中表达：
+//
+//	可以消费 entitlement ↔ Active=true && ExpiredAt 不在过去
+//
+// 注意 ExpiredAt<=0 视为"未设过期"（管理员 / 永久号），仍然 OK；ExpiredAt
+// >= permanentExpiryUnix 同样代表永久。任何把 ExpiredAt 设成"过去某秒"用
+// 来软冻结账号的运维操作（freeze），自动落入"无 entitlement"分支，哪怕
+// Active=true 也不发码——避免管理员把过期账号当成"还能用一会儿"误用。
+//
+// 与 embyAccessExpired 的差异：那条只判过期，不判 Active；本 helper 同时收。
+func userEntitlementOK(user store.User) bool {
+	if !user.Active {
+		return false
+	}
+	if user.ExpiredAt > 0 && user.ExpiredAt < permanentExpiryUnix && user.ExpiredAt <= time.Now().Unix() {
+		return false
+	}
+	return true
+}
+
 func (a *App) maxCodeDays(user store.User) (int, string) {
 	permanentMaxDays := a.cfg().PermanentInviteMaxDays
 	if permanentMaxDays <= 0 {
@@ -879,6 +907,13 @@ func (a *App) canInvite(user store.User) (bool, string) {
 	}
 	if !user.Active {
 		return false, "账号已被禁用，无法生成邀请码"
+	}
+	// userEntitlementOK 与 maxCodeDays 在"过期账号不发码"语义上重叠，但保留
+	// 显式 gate 是 R62-4 防回归的关键：未来如果某次重构改掉 maxCodeDays 的过
+	// 期分支返回值，这一行仍然挡住"Active=true & ExpiredAt<now 仍然能 mint
+	// invite"的洞。两道关同时存在，重复成本几乎为零，少一道就是一次安全事件。
+	if !userEntitlementOK(user) {
+		return false, "账号有效期已到期，无法生成邀请码"
 	}
 	if a.cfg().InviteRequireEmby && user.EmbyID == "" {
 		return false, "请先绑定 Emby 账号后再生成邀请码"

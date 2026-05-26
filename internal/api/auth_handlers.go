@@ -163,6 +163,20 @@ func (a *App) handleForgotPassword(w http.ResponseWriter, r *http.Request, _ Par
 		failWithCode(w, http.StatusForbidden, ErrAccountDisabled, "账号已被禁用")
 		return
 	}
+	// R62-7：账号 Active=true 但 entitlement 已过期（ExpiredAt < now）时不再
+	// 重置密码并往 emby 写新密码。两条原因：
+	//   1. embyShouldEnableUser 在过期态会返回 false，下面那条
+	//      embySetUserEnabled 会立即把账号 disable 掉——发出去的"new_password"
+	//      用户拿去登录会立刻被 emby 拒，UX 是"我刚改了密码就登不上"；
+	//   2. 攻击者只要凭 emby 密码就能换出一份"理论可用"的面板凭据，把已经
+	//      软冻结的账号当成绕开续费的入口。
+	// 这里返回 ErrAccountDisabled 与 !u.Active 分支同口径——前端已经按这条
+	// 错误码引导到"账号已被禁用 / 联系管理员"，对用户最不困惑。文案换成
+	// "已到期"让真实原因暴露给运维 grep 日志时能区分。
+	if !userEntitlementOK(u) {
+		failWithCode(w, http.StatusForbidden, ErrAccountDisabled, "账号有效期已到期，请先续期再重置密码")
+		return
+	}
 	newPassword := "Twilight-" + randomCode(18)
 	hash, err := security.HashPassword(newPassword)
 	if err != nil {

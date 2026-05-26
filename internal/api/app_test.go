@@ -3608,3 +3608,108 @@ func TestLoginByAPIKeyRejectsDisabledAccount(t *testing.T) {
 		t.Fatalf("expected ErrAccountDisabled in body, got %s", resp.Body.String())
 	}
 }
+
+// TestUserEntitlementOKExpiredBlocksInviteMint 锁定 R62-4 不变量：
+// 一个 Active=true 但 ExpiredAt < now 的用户不允许通过 invite_create / renew
+// code 路径继续 mint entitlement。这是新人最容易踩的一类逻辑：
+// "Active 字段为真就以为账号还能用任何接口"——R62-4 的本质是把 Active 与
+// ExpiredAt 这对 invariants 在 entitlement 决策点合并表达。
+//
+// 直接覆盖 userEntitlementOK helper（核心不变量），加一条 canInvite 验证
+// 提前给出可读 reason 文案。canInvite 已经隐式靠 maxCodeDays 挡住，但显
+// 式 gate 是防御纵深。
+func TestUserEntitlementOKExpiredBlocksInviteMint(t *testing.T) {
+	now := time.Now().Unix()
+	cases := []struct {
+		name string
+		user store.User
+		want bool
+	}{
+		{"active+future_expiry", store.User{Active: true, ExpiredAt: now + 86400}, true},
+		{"active+no_expiry", store.User{Active: true, ExpiredAt: 0}, true},
+		{"active+permanent_expiry", store.User{Active: true, ExpiredAt: 253402214400}, true},
+		{"active+past_expiry_blocks", store.User{Active: true, ExpiredAt: now - 1}, false},
+		{"inactive+future_expiry_blocks", store.User{Active: false, ExpiredAt: now + 86400}, false},
+		{"inactive+no_expiry_blocks", store.User{Active: false, ExpiredAt: 0}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := userEntitlementOK(tc.user); got != tc.want {
+				t.Fatalf("userEntitlementOK(%+v) = %v, want %v", tc.user, got, tc.want)
+			}
+		})
+	}
+
+	// 端到端：构造一个"Active=true 但已过期"的非邀请用户，调用 canInvite 必须
+	// 返回 (false, 含"到期"信号的 reason)。这一条防的是未来重构 maxCodeDays
+	// 改返回路径时静默放过 entitlement 的回归。
+	app := newTestApp(t)
+	app.cfg().InviteEnabled = true
+	user, err := app.store().CreateUser(store.User{
+		Username:  "active-but-expired",
+		Role:      store.RoleNormal,
+		Active:    true,
+		ExpiredAt: time.Now().Add(-1 * time.Hour).Unix(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	can, reason := app.canInvite(user)
+	if can {
+		t.Fatalf("R62-4 regression: canInvite returned true for Active=true & expired user")
+	}
+	if !strings.Contains(reason, "到期") {
+		t.Fatalf("expected reason to mention expiry, got %q", reason)
+	}
+}
+
+// TestForgotPasswordRejectsExpiredAccount 锁定 R62-7 不变量：
+// emby 鉴权通过但面板侧账号 entitlement 已过期（Active=true & ExpiredAt<now）
+// 时不应进入密码重置 + emby 写新密码流程。否则
+//   1) embySetUserEnabled 在过期态会立即把账号 disable，用户拿到的"new
+//      _password"登录就失败；
+//   2) 攻击者拿到 emby 密码可以反复 mint 面板凭据，把已经被运维软冻结的账号
+//      当成绕开续费的入口。
+func TestForgotPasswordRejectsExpiredAccount(t *testing.T) {
+	app := newTestApp(t)
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/Users/AuthenticateByName" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"User":{"Id":"emby-stale","Name":"stale"}}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+
+	// Active=true 但 ExpiredAt < now：典型"软冻结但还没被 check_expired 跑过"
+	// 状态，或邀请用户过期后保留 Active=true 的设计（参见 scheduler_runner.go
+	// 的 invited 分支）。
+	user, err := app.store().CreateUser(store.User{
+		Username:  "stale",
+		Role:      store.RoleNormal,
+		Active:    true,
+		EmbyID:    "emby-stale",
+		ExpiredAt: time.Now().Add(-1 * time.Hour).Unix(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = user
+
+	body := `{"emby_username":"stale","emby_password":"any-password"}`
+	resp := doJSON(app, http.MethodPost, "/api/v1/auth/forgot-password/emby", body, nil)
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("forgot-password on expired account: status=%d body=%s, want 403", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), string(ErrAccountDisabled)) {
+		t.Fatalf("expected ErrAccountDisabled in body, got %s", resp.Body.String())
+	}
+	// 确认密码哈希没有被改写：若旧实现漏掉 expired guard，UpdateUser 写哈希后
+	// PasswordHash 会变成非空。
+	updated, _ := app.store().User(user.UID)
+	if updated.PasswordHash != user.PasswordHash {
+		t.Fatalf("R62-7 regression: forgot-password modified password despite expired entitlement")
+	}
+}
