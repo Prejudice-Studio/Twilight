@@ -23,6 +23,12 @@ type telegramPanelContext struct {
 	ReplyTelegramID  int64
 	ExpiresAt        int64
 	ConfirmAction    string
+	// timer 是这个 panel 的过期定时器；同一个 panel 全程只对应一个 *time.Timer。
+	// touch 时调 Reset 而非 AfterFunc 新建一个，避免 admin 高频按按钮时 goroutine
+	// 与 closure 累积——历史实现每次 touch 都挂一个新 AfterFunc，旧的从不取消，
+	// 极端场景下单个 panel 能挂出几十个未释放的 closure。结构体被拷贝到栈 / map
+	// 时共享同一个 *Timer 实例，map 内的副本始终是定时器的"主人"。
+	timer *time.Timer
 }
 
 func telegramIsAnonymousGroupMessage(message map[string]any) bool {
@@ -117,42 +123,65 @@ func (a *App) telegramSavePanel(panel telegramPanelContext) {
 	if a.telegramPanels == nil {
 		a.telegramPanels = map[string]telegramPanelContext{}
 	}
+	// 既存 panel（同 token 极少见，但 token 复用 / 错误重发场景下要清理）：
+	// 先停掉旧 timer 再覆盖，避免泄露。
+	if existing, ok := a.telegramPanels[panel.Token]; ok && existing.timer != nil {
+		existing.timer.Stop()
+	}
+	delay := telegramPanelTTL + time.Second
+	token := panel.Token
+	panel.timer = time.AfterFunc(delay, func() { a.telegramExpirePanel(token) })
 	a.telegramPanels[panel.Token] = panel
 	a.telegramPanelMu.Unlock()
-	a.telegramSchedulePanelExpiry(panel.Token)
 }
 
-func (a *App) telegramSchedulePanelExpiry(token string) {
-	time.AfterFunc(telegramPanelTTL+time.Second, func() {
-		a.telegramPanelMu.Lock()
-		panel, ok := a.telegramPanels[token]
-		if !ok {
-			a.telegramPanelMu.Unlock()
-			return
-		}
-		delay := time.Until(time.Unix(panel.ExpiresAt, 0))
-		if delay > 0 {
-			a.telegramPanelMu.Unlock()
-			time.AfterFunc(delay+time.Second, func() { a.telegramExpirePanel(token) })
-			return
-		}
-		delete(a.telegramPanels, token)
+// telegramSchedulePanelExpiry 仅在 telegramExpirePanel 发现 panel 仍未到期
+// 时被调用，用 Reset 续上当前 panel 的 timer。touch 路径不再走这里。
+func (a *App) telegramSchedulePanelExpiry(token string, delay time.Duration) {
+	if delay <= 0 {
+		delay = time.Second
+	}
+	a.telegramPanelMu.Lock()
+	panel, ok := a.telegramPanels[token]
+	if !ok {
 		a.telegramPanelMu.Unlock()
-		_ = a.telegramDeleteMessage(context.Background(), panel.ChatID, panel.MessageID)
-	})
+		return
+	}
+	if panel.timer != nil {
+		panel.timer.Reset(delay)
+	} else {
+		panel.timer = time.AfterFunc(delay, func() { a.telegramExpirePanel(token) })
+		a.telegramPanels[token] = panel
+	}
+	a.telegramPanelMu.Unlock()
 }
 
 func (a *App) telegramExpirePanel(token string) {
 	a.telegramPanelMu.Lock()
 	panel, ok := a.telegramPanels[token]
-	if !ok || panel.ExpiresAt > time.Now().Unix() {
+	if !ok {
 		a.telegramPanelMu.Unlock()
-		if ok {
-			a.telegramSchedulePanelExpiry(token)
+		return
+	}
+	if panel.ExpiresAt > time.Now().Unix() {
+		// 还没到点（被 touch 过）——续上 timer 并退出，本次回调不删消息。
+		delay := time.Until(time.Unix(panel.ExpiresAt, 0)) + time.Second
+		if delay <= 0 {
+			delay = time.Second
 		}
+		if panel.timer != nil {
+			panel.timer.Reset(delay)
+		} else {
+			panel.timer = time.AfterFunc(delay, func() { a.telegramExpirePanel(token) })
+			a.telegramPanels[token] = panel
+		}
+		a.telegramPanelMu.Unlock()
 		return
 	}
 	delete(a.telegramPanels, token)
+	if panel.timer != nil {
+		panel.timer.Stop()
+	}
 	a.telegramPanelMu.Unlock()
 	_ = a.telegramDeleteMessage(context.Background(), panel.ChatID, panel.MessageID)
 }
@@ -163,6 +192,9 @@ func (a *App) telegramPanel(token string) (telegramPanelContext, bool) {
 	panel, ok := a.telegramPanels[token]
 	if !ok || panel.ExpiresAt < time.Now().Unix() {
 		if ok {
+			if panel.timer != nil {
+				panel.timer.Stop()
+			}
 			delete(a.telegramPanels, token)
 		}
 		return telegramPanelContext{}, false
@@ -172,15 +204,28 @@ func (a *App) telegramPanel(token string) (telegramPanelContext, bool) {
 
 func (a *App) telegramTouchPanel(panel telegramPanelContext) telegramPanelContext {
 	panel.ExpiresAt = time.Now().Add(telegramPanelTTL).Unix()
+	delay := telegramPanelTTL + time.Second
 	a.telegramPanelMu.Lock()
+	if existing, ok := a.telegramPanels[panel.Token]; ok && existing.timer != nil {
+		// 复用 map 里那把 timer：Reset 即可，不再每次 AfterFunc 新建 closure。
+		existing.timer.Reset(delay)
+		panel.timer = existing.timer
+	} else if panel.timer != nil {
+		panel.timer.Reset(delay)
+	} else {
+		token := panel.Token
+		panel.timer = time.AfterFunc(delay, func() { a.telegramExpirePanel(token) })
+	}
 	a.telegramPanels[panel.Token] = panel
 	a.telegramPanelMu.Unlock()
-	a.telegramSchedulePanelExpiry(panel.Token)
 	return panel
 }
 
 func (a *App) telegramDeletePanel(token string) {
 	a.telegramPanelMu.Lock()
+	if existing, ok := a.telegramPanels[token]; ok && existing.timer != nil {
+		existing.timer.Stop()
+	}
 	delete(a.telegramPanels, token)
 	a.telegramPanelMu.Unlock()
 }

@@ -1495,6 +1495,44 @@ func TestTelegramBindRequirementSplitsGroupAndChannel(t *testing.T) {
 	}
 }
 
+// TestTelegramTouchPanelReusesSingleTimer 锁定 R52-2：多次 touch 同一个
+// panel 不应累积 *time.Timer 实例。历史实现每次 touch 调 AfterFunc 新建
+// 一个 closure，旧定时器从不取消，admin 高频按钮场景下单 panel 能挂出
+// 几十个未释放的 closure；本测试通过对比 timer 指针来锁定"复用同一把"。
+func TestTelegramTouchPanelReusesSingleTimer(t *testing.T) {
+	app := newTestApp(t)
+	panel := telegramPanelContext{
+		Token:     "tok-test",
+		ChatID:    1001,
+		MessageID: 2002,
+		TargetUID: 3003,
+		ExpiresAt: time.Now().Add(telegramPanelTTL).Unix(),
+	}
+	app.telegramSavePanel(panel)
+	defer app.telegramDeletePanel(panel.Token)
+
+	app.telegramPanelMu.Lock()
+	saved, ok := app.telegramPanels[panel.Token]
+	app.telegramPanelMu.Unlock()
+	if !ok {
+		t.Fatalf("panel not stored after save")
+	}
+	if saved.timer == nil {
+		t.Fatalf("expected save to set up a timer")
+	}
+	firstTimer := saved.timer
+
+	for i := 0; i < 25; i++ {
+		_ = app.telegramTouchPanel(saved)
+		app.telegramPanelMu.Lock()
+		saved = app.telegramPanels[panel.Token]
+		app.telegramPanelMu.Unlock()
+		if saved.timer != firstTimer {
+			t.Fatalf("iteration %d: expected timer pointer to be reused, got fresh AfterFunc closure", i)
+		}
+	}
+}
+
 func TestTelegramAnonymousGroupUserRequiresInlineAuth(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().TelegramMode = true
