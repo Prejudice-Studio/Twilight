@@ -19,6 +19,82 @@ import (
 // 仅在写入越界时触发，且 N 受 max 控制）。
 const embyAdminCacheMaxEntries = 10000
 
+// embyRetryOn5xx 把幂等的 emby 操作（GET/PUT policy/state 同步）包一层
+// "5xx + 网络抖动重试 2 次"。
+//
+// 为什么需要：emby_sync 调度对每个本地用户都会调 embySetUserEnabled，里面
+// 走 /Users/<id>/Policy GET + POST。Emby 反代偶发 502 / 503 / connection
+// reset 在生产环境很常见——一次失败就把该用户记成"failed sync"，下一轮还
+// 要再失败一次，admin 看到的 dashboard 永远有"差几条没同步"。
+//
+// 重试策略：
+//   - 仅在 ctx 没被 cancel 且 op 返回的 error 是网络层（含 "remote status
+//     5XX"）时重试。
+//   - 4xx 不重试：那是配置错误（用户不存在 / 权限不足），重试只会刷日志。
+//   - 退避 `attempt*attempt * 300ms`：0/300/1200ms，三次合计 ~1.5s，远低
+//     于 emby 反代的 30s 健康检查超时，不会拖累上层 ctx。
+//   - 上限 3 次：再多也碰到的多半是真的 emby 死了，让 caller 认 failed
+//     比让 scheduler 跑半小时还卡在某一个 user 上对运维更友好。
+//
+// 与 embySetPassword 的 retry 段是同思路（参见 embySetPassword 注释），但
+// 那条更复杂（要兜密码 rollback），不能直接复用。
+func embyRetryOn5xx(ctx context.Context, op func(ctx context.Context) error) error {
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt*attempt) * 300 * time.Millisecond):
+			}
+		}
+		err := op(ctx)
+		if err == nil {
+			return nil
+		}
+		if !embyErrorIsRetryable(err) {
+			return err
+		}
+		lastErr = err
+	}
+	return lastErr
+}
+
+// embyErrorIsRetryable 区分"重试可能成功"vs"重试只会复读相同错误"。
+// 5xx 与连接级错误归前者；4xx / ctx-canceled / DNS 解析失败归后者。
+func embyErrorIsRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	// "remote status 5XX" 是 doJSONRequestWithTimeout 抛出来的标准格式。
+	if idx := strings.Index(msg, "remote status "); idx >= 0 {
+		// 取 status 后第一个数字字符判断。
+		tail := msg[idx+len("remote status "):]
+		if len(tail) > 0 && tail[0] == '5' {
+			return true
+		}
+		// 4xx 显式不重试。
+		return false
+	}
+	// 网络层 / TLS 抖动 / 连接 reset 走 net/http 原生 error string。
+	low := strings.ToLower(msg)
+	switch {
+	case strings.Contains(low, "context canceled"), strings.Contains(low, "context deadline"):
+		// ctx 已经死了，retry 也只会立刻拿到同样的 ctx err。
+		return false
+	case strings.Contains(low, "connection reset"),
+		strings.Contains(low, "connection refused"),
+		strings.Contains(low, "broken pipe"),
+		strings.Contains(low, "eof"),
+		strings.Contains(low, "i/o timeout"),
+		strings.Contains(low, "no such host") == false && strings.Contains(low, "timeout"):
+		return true
+	}
+	return false
+}
+
 func (a *App) embyIsAdmin(ctx context.Context, embyID string) bool {
 	if embyID == "" || a.cfg().EmbyURL == "" {
 		return false

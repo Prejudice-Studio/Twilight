@@ -214,8 +214,20 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		if a.cfg().EmbyURL == "" {
 			return map[string]any{"success": true, "configured": false}, []string{"Emby not configured"}, nil
 		}
+		// 给 emby_sync 加 30 分钟硬上限，避免 emby 反代僵死时整个调度槽被占住——
+		// 调度器是单 goroutine 串行的，emby_sync hang 住会让 check_expired /
+		// expiry_reminders 这些下游任务推迟整轮。即便 500 个用户每人 5s，仍不
+		// 到 45 分钟；超过 30min 几乎一定是 emby 不健康，让本轮 fail-fast 优于
+		// 拖到管理员手动 cancel。
+		syncCtx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
+		defer cancel()
 		var remote []map[string]any
-		if err := a.embyGet(r.Context(), "/Users", &remote); err != nil {
+		// /Users 列表是幂等 GET，遇 5xx / 连接抖动重试 2 次更划算（详见
+		// embyRetryOn5xx 的注释）。一开局拉用户列表如果直接挂掉，整轮 sync 全
+		// 部 user 都被记成 missing，下一轮还要再炸一遍。
+		if err := embyRetryOn5xx(syncCtx, func(ctx context.Context) error {
+			return a.embyGet(ctx, "/Users", &remote)
+		}); err != nil {
 			return map[string]any{"success": false}, nil, err
 		}
 		remoteByID := map[string]map[string]any{}
@@ -243,7 +255,7 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		}
 		updatedNames, syncedState, missing, filledIDs, repairedPlaceholders, conflicts := 0, 0, 0, 0, 0, 0
 		for _, u := range a.store().ListUsers() {
-			if err := r.Context().Err(); err != nil {
+			if err := syncCtx.Err(); err != nil {
 				return map[string]any{"success": false, "terminated": true, "updated_names": updatedNames, "synced_state": syncedState, "missing": missing, "filled_emby_ids": filledIDs, "repaired_placeholders": repairedPlaceholders, "conflicts": conflicts}, []string{"job terminated"}, err
 			}
 			placeholder := isSyntheticEmbyID(u.EmbyID, u.UID)
@@ -301,7 +313,9 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 					continue
 				}
 			}
-			if a.embySetUserEnabled(r.Context(), updatedUser.EmbyID, a.embyShouldEnableUser(updatedUser)) == nil {
+			if embyRetryOn5xx(syncCtx, func(ctx context.Context) error {
+				return a.embySetUserEnabled(ctx, updatedUser.EmbyID, a.embyShouldEnableUser(updatedUser))
+			}) == nil {
 				syncedState++
 			}
 		}

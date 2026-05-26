@@ -1523,6 +1523,99 @@ func TestSchedulerEmbySyncRepairsPlaceholderAndMissingIDs(t *testing.T) {
 	}
 }
 
+// TestSchedulerEmbySyncRetriesTransient5xx 验证 R61-5 的核心承诺：emby 反代偶发
+// 502 不应让 emby_sync 把用户记成 failed_sync。第一次拉 /Users 返回 502，第二次
+// 才返回正常 JSON——重试 helper 必须把第一次失败吃掉，让 sync 像无错一样完成。
+//
+// 同时校验 4xx 不会被重试：Policy POST 一旦返回 400，调用立刻 fail，重试只会
+// 复读相同错误并刷日志。
+func TestSchedulerEmbySyncRetriesTransient5xx(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().EmbyToken = "token"
+	remoteUsers := []map[string]any{
+		{"Id": "real-alpha", "Name": "alpha", "Policy": map[string]any{}},
+	}
+	usersAttempts := 0
+	policyAttempts := 0
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/Users":
+			usersAttempts++
+			if usersAttempts == 1 {
+				// 模拟反代瞬时 502（典型 nginx upstream timeout）。
+				http.Error(w, "bad gateway", http.StatusBadGateway)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(remoteUsers)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/Users/"):
+			id := strings.TrimPrefix(r.URL.Path, "/Users/")
+			for _, user := range remoteUsers {
+				if asString(user["Id"]) == id {
+					_ = json.NewEncoder(w).Encode(user)
+					return
+				}
+			}
+			http.NotFound(w, r)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/Policy"):
+			policyAttempts++
+			_, _ = io.Copy(io.Discard, r.Body)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			t.Fatalf("unexpected Emby request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+
+	alpha, err := app.store().CreateUser(store.User{Username: "alpha", EmbyUsername: "alpha", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.store().UpdateUser(alpha.UID, func(u *store.User) error {
+		u.EmbyID = "real-alpha"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/scheduler", nil)
+	summary, _, err := app.runSchedulerJob(req, "emby_sync")
+	if err != nil {
+		t.Fatalf("emby_sync should have recovered from a transient 502, got err: %v", err)
+	}
+	if !boolish(summary["success"]) {
+		t.Fatalf("emby_sync did not succeed after retry: %#v", summary)
+	}
+	if usersAttempts < 2 {
+		t.Fatalf("expected /Users to be retried at least once on 502, got attempts=%d", usersAttempts)
+	}
+	// 用户列表只有 1 条，policy 同步应当走通——证明 retry 包装没有让幂等
+	// 写路径"重试地狱"地反复 POST。
+	if int(numeric(summary["synced_state"])) != 1 {
+		t.Fatalf("expected 1 user state synced after retry, summary=%#v", summary)
+	}
+	if policyAttempts != 1 {
+		t.Fatalf("expected exactly 1 policy POST after recovery, got %d", policyAttempts)
+	}
+}
+
+// TestEmbyRetryOn5xxSkips4xx 直接覆盖 retry helper 的"4xx 不重试"分支，
+// 避免被错误的"什么错都重试"实现悄悄回归。
+func TestEmbyRetryOn5xxSkips4xx(t *testing.T) {
+	attempts := 0
+	err := embyRetryOn5xx(context.Background(), func(ctx context.Context) error {
+		attempts++
+		return fmt.Errorf("remote status 404: not found")
+	})
+	if err == nil {
+		t.Fatalf("expected 4xx error to bubble up unchanged")
+	}
+	if attempts != 1 {
+		t.Fatalf("4xx must not be retried, got attempts=%d", attempts)
+	}
+}
+
 func TestTelegramMembershipRejoinManualReviewAndAutoEnable(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().TelegramMode = true
