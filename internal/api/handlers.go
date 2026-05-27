@@ -421,15 +421,59 @@ func (a *App) handleBindCodeStatus(w http.ResponseWriter, r *http.Request, _ Par
 		ok(w, "OK", map[string]any{"code": code, "confirmed": false, "invalid": true, "terminal": true})
 		return
 	}
-	bind, okBind := a.store().BindCode(code)
-	if !okBind || bind.ExpiresAt < time.Now().Unix() {
-		if okBind {
-			_ = a.store().DeleteBindCode(code)
+
+	// Long-poll 支持：客户端传 wait=N（秒）表示愿意等待最多 N 秒。
+	// 在等待期间每 500ms 检查一次 bind code 状态，一旦变为终态立即返回。
+	// 不传 wait 或 wait<=0 时退化为即时响应（兼容旧客户端）。
+	waitSec := clamp(queryInt(r, "wait", 0), 0, 60)
+
+	respond := func() {
+		bind, okBind := a.store().BindCode(code)
+		if !okBind || bind.ExpiresAt < time.Now().Unix() {
+			if okBind {
+				_ = a.store().DeleteBindCode(code)
+			}
+			ok(w, "OK", map[string]any{"code": code, "confirmed": false, "invalid": true, "terminal": true})
+			return
 		}
-		ok(w, "OK", map[string]any{"code": code, "confirmed": false, "invalid": true, "terminal": true})
+		ok(w, "OK", map[string]any{"code": code, "confirmed": bind.Confirmed, "expires_in": bind.ExpiresAt - time.Now().Unix(), "invalid": false, "terminal": bind.Confirmed})
+	}
+
+	// 即时模式
+	if waitSec <= 0 {
+		respond()
 		return
 	}
-	ok(w, "OK", map[string]any{"code": code, "confirmed": bind.Confirmed, "expires_in": bind.ExpiresAt - time.Now().Unix(), "invalid": false, "terminal": bind.Confirmed})
+
+	// Long-poll 模式：先检查一次，如果已经是终态直接返回
+	bind, okBind := a.store().BindCode(code)
+	if !okBind || bind.ExpiresAt < time.Now().Unix() || bind.Confirmed {
+		respond()
+		return
+	}
+
+	// 挂起等待，每 500ms 轮询 store 直到终态或超时
+	deadline := time.After(time.Duration(waitSec) * time.Second)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			// 客户端断开连接
+			return
+		case <-deadline:
+			// 超时，返回当前状态（非终态）
+			respond()
+			return
+		case <-ticker.C:
+			bind, okBind = a.store().BindCode(code)
+			if !okBind || bind.ExpiresAt < time.Now().Unix() || bind.Confirmed {
+				respond()
+				return
+			}
+		}
+	}
 }
 
 func (a *App) handleBindConfirm(w http.ResponseWriter, r *http.Request, _ Params) {

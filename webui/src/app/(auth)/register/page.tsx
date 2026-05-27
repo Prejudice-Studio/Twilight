@@ -97,7 +97,8 @@ export default function RegisterPage() {
     }
   };
 
-  // 拿到绑定码后开始轮询，直到 Bot 端确认或绑定码过期。
+  // 拿到绑定码后开始长轮询，直到 Bot 端确认或绑定码过期。
+  // 使用 HTTP long-poll（wait=30s）代替 2s 短轮询，减少无效请求。
   useEffect(() => {
     if (!bindCode || bindConfirmed) return;
 
@@ -112,68 +113,66 @@ export default function RegisterPage() {
       toast({ title, description, variant: "destructive" });
     };
 
-    const tick = async () => {
-      try {
-        const res = await api.getRegisterBindCodeStatus(bindCode, controller.signal);
-        if (cancelled) return;
+    const poll = async () => {
+      while (!cancelled) {
+        try {
+          const res = await api.getRegisterBindCodeStatus(bindCode, controller.signal);
+          if (cancelled) return;
 
-        // 决定性信号：后端约定 data.terminal === true 表示"无须再轮询"。
-        // - invalid=true: 不存在 / 已过期 → 引导用户重新生成
-        // - invalid=false 但 terminal=true: 已被 Bot 确认（确认成功的终态）
-        if (res.data?.terminal) {
-          if (res.data.invalid) {
-            stopWithToast("绑定码已过期", "请重新获取绑定码");
+          // 决定性信号：后端约定 data.terminal === true 表示"无须再轮询"。
+          if (res.data?.terminal) {
+            if (res.data.invalid) {
+              stopWithToast("绑定码已过期", "请重新获取绑定码");
+              return;
+            }
+            if (!toastedConfirmed) {
+              toastedConfirmed = true;
+              setBindConfirmed(true);
+              toast({
+                title: "Telegram 绑定成功",
+                description: "点击下方「注册」按钮即可进入系统",
+                variant: "success",
+              });
+            }
             return;
           }
-          if (!toastedConfirmed) {
-            toastedConfirmed = true;
-            setBindConfirmed(true);
-            toast({
-              title: "Telegram 绑定成功",
-              description: "点击下方「注册」按钮即可进入系统",
-              variant: "success",
-            });
-          }
-          return;
-        }
 
-        if (res.success && res.data) {
-          if (typeof res.data.expires_in === "number") {
-            setBindCodeExpiry(res.data.expires_in);
+          if (res.success && res.data) {
+            if (typeof res.data.expires_in === "number") {
+              setBindCodeExpiry(res.data.expires_in);
+            }
           }
-        }
-      } catch (err) {
-        // 已经把"业务终态"挪到 HTTP 200 的 data.terminal；这里只剩
-        // 真正的异常：限速 429 / 网络异常 / 400 格式错误等。
-        if (cancelled) return;
-        // 首选 errorCode 走稳定语义码分支，message 文案改名不影响判定；
-        // 仅在非 ApiError（裸 Error / 其他抛出物）时回退到不依赖中文的 status 判断。
-        if (err instanceof ApiError) {
-          if (err.errorCode === ErrCodes.RateLimited || err.status === 429) {
-            stopWithToast(
-              "请求过于频繁",
-              "已暂停轮询，请稍后重新获取绑定码再试",
-            );
-          } else if (
-            err.errorCode === ErrCodes.TGBindCodeFormat ||
-            (err.status === 400 && err.errorCode === ErrCodes.BadRequest)
-          ) {
-            // 400 绑定码格式无效——前端 state 本身坏了，直接清掉
-            stopWithToast("绑定码格式无效", "请重新获取绑定码");
+
+          // 非终态：立即发起下一次长轮询（后端会 hold 最多 30s）
+        } catch (err) {
+          if (cancelled) return;
+          if (err instanceof ApiError) {
+            if (err.errorCode === ErrCodes.RateLimited || err.status === 429) {
+              stopWithToast(
+                "请求过于频繁",
+                "已暂停轮询，请稍后重新获取绑定码再试",
+              );
+              return;
+            } else if (
+              err.errorCode === ErrCodes.TGBindCodeFormat ||
+              (err.status === 400 && err.errorCode === ErrCodes.BadRequest)
+            ) {
+              stopWithToast("绑定码格式无效", "请重新获取绑定码");
+              return;
+            }
+            // 其它 ApiError（疑似上游异常）等待 3s 后重试
           }
-          // 其它 ApiError（疑似上游异常）保持静默重试
+          // 网络抖动等待 3s 后重试，避免紧密循环
+          await new Promise((resolve) => setTimeout(resolve, 3000));
         }
-        // 非 ApiError 视为网络抖动，保持原本的静默重试行为
       }
     };
 
-    void tick();
-    const handle = window.setInterval(tick, 2000);
+    void poll();
 
     return () => {
       cancelled = true;
       controller.abort();
-      window.clearInterval(handle);
     };
   }, [bindCode, bindConfirmed, toast]);
 

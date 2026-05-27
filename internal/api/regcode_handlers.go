@@ -165,6 +165,42 @@ func (a *App) handleRegcodeUsers(w http.ResponseWriter, r *http.Request, params 
 	ok(w, "OK", map[string]any{"users": users, "unresolved_telegram_ids": reg.UsedByTelegramIDs, "total": len(users)})
 }
 
+// handleClearRegcodeUsage 一键清理注册码的使用记录（UsedByUIDs、UsedByTelegramIDs、UseCount）。
+// 适用于因历史不兼容导致的脏数据清理场景。清理后注册码恢复为"未使用"状态，
+// 但不会影响已注册用户的账号。
+func (a *App) handleClearRegcodeUsage(w http.ResponseWriter, r *http.Request, params Params) {
+	if a.rejectRegcodeWriteIfStorageMismatch(w) {
+		return
+	}
+	payload := decodeMap(r)
+	if stringValue(payload, "confirm") != confirmClearRegcodeUsage {
+		failWithCode(w, http.StatusBadRequest, ErrRegcodeBatchConfirm, "需要确认短语 confirm="+confirmClearRegcodeUsage)
+		return
+	}
+	reg, okReg := a.store().RegCode(params["code"])
+	if !okReg {
+		failWithCode(w, http.StatusNotFound, ErrRegcodeNotFound, "注册码不存在")
+		return
+	}
+	oldUseCount := reg.UseCount
+	oldUsedByUIDs := reg.UsedByUIDs
+	oldUsedByTelegramIDs := reg.UsedByTelegramIDs
+	reg.UseCount = 0
+	reg.UsedBy = 0
+	reg.UsedByUIDs = nil
+	reg.UsedByTelegramIDs = nil
+	reg.Active = true
+	if err := a.store().UpsertRegCode(reg); statusFromError(w, err) {
+		return
+	}
+	ok(w, "使用记录已清理", map[string]any{
+		"code":                     reg.Code,
+		"cleared_use_count":        oldUseCount,
+		"cleared_used_by_uids":     oldUsedByUIDs,
+		"cleared_used_by_telegram": oldUsedByTelegramIDs,
+	})
+}
+
 func regcodePayloadCodes(value any) []string {
 	items, ok := value.([]any)
 	if !ok {

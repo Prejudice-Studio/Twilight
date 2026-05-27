@@ -246,11 +246,12 @@ class ApiClient {
   }
 
   async getRegisterBindCodeStatus(code: string, signal?: AbortSignal) {
-    const q = new URLSearchParams({ code }).toString();
+    const q = new URLSearchParams({ code, wait: "30" }).toString();
     // 后端约定：code 在 DB 不存在 / 已过期 / 已确认 都是 *终态*，
     // 通过 data.terminal === true 表示；其中 invalid 区分"不存在/过期"和"已确认"。
     // 这一端点不会再为业务无效抛 HTTP 404——上面的字段是唯一可信信号。
-    return this.request<{
+    // wait=30 启用 HTTP long-poll：后端最多 hold 30s，状态变化时立即返回。
+    return apiRequest<{
       code?: string;
       confirmed?: boolean;
       expires_in?: number;
@@ -259,6 +260,7 @@ class ApiClient {
     }>(
       `/users/telegram/register/bind-code/status?${q}`,
       { signal },
+      { timeoutMs: 45_000 },
     );
   }
 
@@ -1596,6 +1598,38 @@ class ApiClient {
       users: Array<(Partial<UserInfo> & { found: boolean; source: "uid" | "telegram" })>;
       telegram_only: Array<{ telegram_id: number; found: false; source: "telegram" }>;
     }>(`/admin/regcodes/${encodeURIComponent(code)}/users`);
+  }
+
+  async clearRegcodeUsage(code: string) {
+    return this.request<{
+      code: string;
+      cleared_use_count: number;
+      cleared_used_by_uids: number[] | null;
+      cleared_used_by_telegram: number[] | null;
+    }>(`/admin/regcodes/${encodeURIComponent(code)}/clear-usage`, {
+      method: "POST",
+      body: JSON.stringify({ confirm: "CLEAR_REGCODE_USAGE" }),
+    });
+  }
+
+  async getAdminInviteCodes() {
+    return this.request<{
+      codes: Array<{
+        code: string;
+        inviter_uid: number;
+        days: number;
+        use_count_limit: number;
+        use_count: number;
+        expires_at: number | null;
+        active: boolean;
+        created_at: number;
+        used_by_uid: number | null;
+        used_at: number | null;
+        note: string;
+        target_username: string;
+      }>;
+      total: number;
+    }>("/admin/invite/codes");
   }
 
   async forgotPasswordByEmby(data: { emby_username: string; emby_password: string }) {

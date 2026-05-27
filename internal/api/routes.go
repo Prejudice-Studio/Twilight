@@ -181,6 +181,7 @@ func (a *App) registerAdminRoutes() {
 	a.add(http.MethodPut, "/api/v1/admin/regcodes/:code", AuthAdmin, a.handleUpdateRegcode)
 	a.add(http.MethodDelete, "/api/v1/admin/regcodes/:code", AuthAdmin, a.handleDeleteRegcode)
 	a.add(http.MethodGet, "/api/v1/admin/regcodes/:code/users", AuthAdmin, a.handleRegcodeUsers)
+	a.add(http.MethodPost, "/api/v1/admin/regcodes/:code/clear-usage", AuthAdmin, a.handleClearRegcodeUsage)
 	a.add(http.MethodGet, "/api/v1/admin/media-requests", AuthAdmin, a.handleAdminMediaRequests)
 	a.add(http.MethodPut, "/api/v1/admin/media-requests/:request_id", AuthAdmin, a.handleUpdateMediaRequestStatus)
 	a.add(http.MethodDelete, "/api/v1/admin/media-requests/:request_id", AuthAdmin, a.handleDeleteMediaRequest)

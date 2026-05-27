@@ -1,19 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { motion } from "framer-motion";
 import {
   FileText,
   Plus,
   Copy,
   Trash2,
-  Check,
   Loader2,
   ChevronLeft,
   ChevronRight,
   Download,
   Save,
   Users,
+  RotateCcw,
+  Link2,
+  RefreshCw,
+  Search,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -37,7 +39,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useAsyncResource } from "@/hooks/use-async-resource";
@@ -65,6 +67,28 @@ export default function AdminRegcodesPage() {
   const [usageLoading, setUsageLoading] = useState(false);
   const [usageUsers, setUsageUsers] = useState<Array<Partial<UserInfo> & { found: boolean; source: "uid" | "telegram" }>>([]);
   const [usageTelegramOnly, setUsageTelegramOnly] = useState<Array<{ telegram_id: number; found: false; source: "telegram" }>>([]);
+  const [clearingUsage, setClearingUsage] = useState(false);
+
+  // Invite codes section
+  const [viewMode, setViewMode] = useState<"regcodes" | "invitecodes">("regcodes");
+  const [inviteCodes, setInviteCodes] = useState<Array<{
+    code: string;
+    inviter_uid: number;
+    days: number;
+    use_count_limit: number;
+    use_count: number;
+    expires_at: number | null;
+    active: boolean;
+    created_at: number;
+    used_by_uid: number | null;
+    used_at: number | null;
+    note: string;
+    target_username: string;
+  }>>([]);
+  const [inviteCodesLoading, setInviteCodesLoading] = useState(false);
+  const [inviteCodesTotal, setInviteCodesTotal] = useState(0);
+  const [inviteCodesLoaded, setInviteCodesLoaded] = useState(false);
+  const [inviteSearch, setInviteSearch] = useState("");
 
   // Create dialog
   const [createOpen, setCreateOpen] = useState(false);
@@ -281,6 +305,55 @@ export default function AdminRegcodesPage() {
     }
   };
 
+  const handleClearUsage = async (code: string) => {
+    const ok = await confirm({
+      title: "清理使用记录？",
+      description: `将清除卡码 ${code} 的所有使用记录（使用次数、使用者 UID、Telegram ID），卡码恢复为可用状态。已注册的用户账号不受影响。`,
+      tone: "danger",
+      confirmLabel: "确认清理",
+    });
+    if (!ok) return;
+    setClearingUsage(true);
+    try {
+      const res = await api.clearRegcodeUsage(code);
+      if (res.success) {
+        toast({ title: "使用记录已清理", description: `已清除 ${res.data?.cleared_use_count || 0} 次使用记录`, variant: "success" });
+        setUsageOpen(false);
+        loadRegcodes();
+      } else {
+        toast({ title: "清理失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "清理失败", description: error.message, variant: "destructive" });
+    } finally {
+      setClearingUsage(false);
+    }
+  };
+
+  const loadInviteCodes = async () => {
+    setInviteCodesLoading(true);
+    try {
+      const res = await api.getAdminInviteCodes();
+      if (res.success && res.data) {
+        setInviteCodes(res.data.codes || []);
+        setInviteCodesTotal(res.data.total || 0);
+        setInviteCodesLoaded(true);
+      } else {
+        toast({ title: "加载邀请码失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "加载邀请码失败", description: error.message, variant: "destructive" });
+    } finally {
+      setInviteCodesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (viewMode === "invitecodes" && !inviteCodesLoaded && !inviteCodesLoading) {
+      void loadInviteCodes();
+    }
+  }, [viewMode]);
+
   const selectedRegcodes = regcodes.filter((item) => selectedCodes.has(item.code));
 
   const toggleSelectAll = (checked: boolean) => {
@@ -404,20 +477,42 @@ export default function AdminRegcodesPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold">卡码管理</h1>
-          <p className="text-sm text-muted-foreground">批量生成注册码、续期码和白名单码</p>
+          <p className="text-sm text-muted-foreground">管理注册码、续期码、白名单码和邀请码</p>
         </div>
-        <Dialog open={createOpen} onOpenChange={(open) => {
-          setCreateOpen(open);
-          if (!open) {
-            setCreatedCodes([]);
-          }
-        }}>
-          <DialogTrigger asChild>
-            <Button variant="default" className="rounded-xl shadow-lg shadow-primary/20">
-              <Plus className="mr-2 h-4 w-4" />
-              生成卡码
+        <div className="flex gap-2">
+          <div className="flex rounded-lg border bg-muted/30 p-0.5">
+            <Button
+              variant={viewMode === "regcodes" ? "default" : "ghost"}
+              size="sm"
+              className="rounded-md px-3"
+              onClick={() => setViewMode("regcodes")}
+            >
+              <FileText className="mr-1.5 h-3.5 w-3.5" />
+              注册码
             </Button>
-          </DialogTrigger>
+            <Button
+              variant={viewMode === "invitecodes" ? "default" : "ghost"}
+              size="sm"
+              className="rounded-md px-3"
+              onClick={() => setViewMode("invitecodes")}
+            >
+              <Link2 className="mr-1.5 h-3.5 w-3.5" />
+              邀请码
+            </Button>
+          </div>
+          {viewMode === "regcodes" && (
+            <Dialog open={createOpen} onOpenChange={(open) => {
+              setCreateOpen(open);
+              if (!open) {
+                setCreatedCodes([]);
+              }
+            }}>
+              <DialogTrigger asChild>
+                <Button variant="default" className="rounded-xl shadow-lg shadow-primary/20">
+                  <Plus className="mr-2 h-4 w-4" />
+                  生成卡码
+                </Button>
+              </DialogTrigger>
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle>生成注册码/续期码</DialogTitle>
@@ -608,8 +703,163 @@ export default function AdminRegcodesPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+          )}
+        </div>
       </div>
 
+      {viewMode === "invitecodes" ? (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-3 pb-3">
+            <CardTitle className="text-lg">邀请码列表</CardTitle>
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="搜索邀请码 / UID"
+                  value={inviteSearch}
+                  onChange={(e) => setInviteSearch(e.target.value)}
+                  className="h-8 w-48 pl-8 text-xs"
+                />
+              </div>
+              <Button variant="outline" size="sm" onClick={() => void loadInviteCodes()} disabled={inviteCodesLoading}>
+                {inviteCodesLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+                刷新
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {inviteCodesLoading && !inviteCodesLoaded ? (
+              <div className="flex h-64 items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : inviteCodes.length === 0 ? (
+              <div className="flex h-64 items-center justify-center text-muted-foreground">
+                暂无邀请码
+              </div>
+            ) : (() => {
+              const lowerSearch = inviteSearch.toLowerCase().trim();
+              const filtered = lowerSearch
+                ? inviteCodes.filter((c) =>
+                    c.code.toLowerCase().includes(lowerSearch) ||
+                    String(c.inviter_uid).includes(lowerSearch) ||
+                    (c.target_username && c.target_username.toLowerCase().includes(lowerSearch)) ||
+                    (c.used_by_uid && String(c.used_by_uid).includes(lowerSearch))
+                  )
+                : inviteCodes;
+              if (filtered.length === 0) {
+                return (
+                  <div className="flex h-40 items-center justify-center text-muted-foreground">
+                    没有匹配的邀请码
+                  </div>
+                );
+              }
+              return (
+              <>
+                <div className="space-y-3 p-3 md:hidden">
+                  {filtered.map((code) => (
+                    <div key={code.code} className="rounded-xl border bg-background p-4 shadow-sm">
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 truncate rounded bg-muted px-2 py-1 text-sm">{code.code}</code>
+                        <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" onClick={() => copyToClipboard(code.code)}>
+                          <Copy className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <p className="text-xs text-muted-foreground">邀请者 UID</p>
+                          <p className="mt-1">{code.inviter_uid}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">天数</p>
+                          <p className="mt-1">{code.days <= 0 ? "永久" : `${code.days} 天`}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">使用次数</p>
+                          <p className="mt-1">{code.use_count} / {code.use_count_limit === -1 ? "∞" : code.use_count_limit}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">状态</p>
+                          <p className="mt-1">
+                            {code.active ? <Badge variant="success">可用</Badge> : <Badge variant="destructive">已禁用</Badge>}
+                          </p>
+                        </div>
+                        {code.target_username && (
+                          <div className="col-span-2">
+                            <p className="text-xs text-muted-foreground">指定用户</p>
+                            <p className="mt-1">{code.target_username}</p>
+                          </div>
+                        )}
+                        {code.used_by_uid && (
+                          <div>
+                            <p className="text-xs text-muted-foreground">使用者 UID</p>
+                            <p className="mt-1">{code.used_by_uid}</p>
+                          </div>
+                        )}
+                        <div>
+                          <p className="text-xs text-muted-foreground">创建时间</p>
+                          <p className="mt-1">{formatDate(code.created_at)}</p>
+                        </div>
+                        {code.expires_at && (
+                          <div>
+                            <p className="text-xs text-muted-foreground">过期时间</p>
+                            <p className="mt-1">{formatDate(code.expires_at)}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="hidden overflow-x-auto md:block">
+                  <table className="w-full min-w-[900px]">
+                    <thead>
+                      <tr className="border-b bg-muted/50">
+                        <th className="px-4 py-3 text-left text-sm font-medium">邀请码</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">邀请者 UID</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">天数</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">使用次数</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">指定用户</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">使用者</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">状态</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">过期时间</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">创建时间</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((code) => (
+                        <tr key={code.code} className="border-b hover:bg-muted/30">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <code className="rounded bg-muted px-2 py-1 text-sm">{code.code}</code>
+                              <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => copyToClipboard(code.code)}>
+                                <Copy className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-sm">{code.inviter_uid}</td>
+                          <td className="px-4 py-3 text-sm">{code.days <= 0 ? "永久" : `${code.days} 天`}</td>
+                          <td className="px-4 py-3 text-sm">{code.use_count} / {code.use_count_limit === -1 ? "∞" : code.use_count_limit}</td>
+                          <td className="px-4 py-3 text-sm">{code.target_username || "-"}</td>
+                          <td className="px-4 py-3 text-sm">{code.used_by_uid || "-"}</td>
+                          <td className="px-4 py-3">
+                            {code.active ? <Badge variant="success">可用</Badge> : <Badge variant="destructive">已禁用</Badge>}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-muted-foreground">{code.expires_at ? formatDate(code.expires_at) : "永久"}</td>
+                          <td className="px-4 py-3 text-sm text-muted-foreground">{formatDate(code.created_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="p-3 text-center text-sm text-muted-foreground">
+                  {lowerSearch ? `匹配 ${filtered.length} / ${inviteCodesTotal} 个邀请码` : `共 ${inviteCodesTotal} 个邀请码`}
+                </div>
+              </>
+              );
+            })()}
+          </CardContent>
+        </Card>
+      ) : (
+      <>
       <div className="flex flex-col gap-2 rounded-xl border bg-muted/30 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
         <span className="text-muted-foreground">
           已选择 {selectedCodes.size} 个；未选择时导出当前页全部 {regcodes.length} 个。
@@ -931,6 +1181,8 @@ export default function AdminRegcodesPage() {
           </Button>
         </div>
       )}
+      </>
+      )}
 
       <Dialog open={usageOpen} onOpenChange={setUsageOpen}>
         <DialogContent className="max-w-2xl">
@@ -976,7 +1228,18 @@ export default function AdminRegcodesPage() {
               ))}
             </div>
           )}
-          <DialogFooter>
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            {usageCode && (usageUsers.length > 0 || usageTelegramOnly.length > 0) && (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => void handleClearUsage(usageCode.code)}
+                disabled={clearingUsage}
+              >
+                {clearingUsage ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="mr-2 h-3.5 w-3.5" />}
+                一键清理使用记录
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setUsageOpen(false)}>关闭</Button>
           </DialogFooter>
         </DialogContent>

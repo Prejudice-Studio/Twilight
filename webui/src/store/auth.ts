@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { api, type UserInfo } from "@/lib/api";
-import { ApiError } from "@/lib/api-request";
+import { ApiError, setCsrfTokenFromBody } from "@/lib/api-request";
 
 /**
  * login() 后端响应轻量校验。
@@ -146,6 +146,12 @@ export const useAuthStore = create<AuthState>()(
         try {
           const res = await api.login(username, password);
           if (res.success && res.data) {
+            // 捕获后端在 body 里返回的 csrf_token（跨域部署兜底）。
+            // 后端 issueSessionCookies 同时设了 cookie，但跨域时 cookie 可能到不了前端。
+            const csrfFromBody = (res.data as { csrf_token?: string }).csrf_token;
+            if (csrfFromBody) {
+              setCsrfTokenFromBody(csrfFromBody);
+            }
             // 校验后端 user payload 的最小形状，
             // 失败时回退为登录失败 + 自定义 errorCode，避免污染 store。
             const baseUser = validateUserPayload((res.data as { user?: unknown }).user);
@@ -194,6 +200,8 @@ export const useAuthStore = create<AuthState>()(
         try {
           await api.logout();
         } finally {
+          // 清掉 CSRF body token 缓存
+          setCsrfTokenFromBody(null);
           set({ user: null, isAuthenticated: false, isLoading: false });
           // 清掉持久化快照，防止下一个用本机的人看到上一个账户的状态。
           try {

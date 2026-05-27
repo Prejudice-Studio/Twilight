@@ -157,23 +157,31 @@ function withTimeoutSignal(
 }
 
 /**
- * 读取 CSRF cookie。后端登录 / refresh 时下发非 HttpOnly 的
+ * 读取 CSRF token。后端登录 / refresh 时下发非 HttpOnly 的
  * `<session>_csrf` cookie，前端读出后塞进 X-CSRF-Token 请求头，
  * 形成"双提交 cookie"模式抵御 CSRF 攻击。
  *
  * cookie 名约定：`twilight_session_csrf`（后端 `csrfCookieName()`）。
  *
- * 名称解析优先级：
+ * Token 来源优先级：
  *   1. systemInfo 拿到的 csrf_cookie_name —— 通过 setCsrfCookieName() 注入
- *      到模块级缓存，按精确名匹配 cookie，杜绝同域 / 父域第三方应用下发
- *      其它 *_csrf cookie 时被取错；
- *   2. 缓存为空时回退到旧的"首个 *_csrf 后缀"启发式，并在开发态打印一次
- *      console.warn 提醒尽快走 systemInfo 路径；
- *   3. 都拿不到返回空串，让 mutating 请求被后端 CSRF 中间件拒绝（403），
- *      避免静默裸跑。
+ *      到模块级缓存，按精确名匹配 cookie；
+ *   2. 缓存为空时回退到默认名 `twilight_session_csrf`（后端默认 session
+ *      cookie 名 + "_csrf"），覆盖 fetchInfo 尚未完成的窗口期；
+ *   3. cookie 读不到时（跨域部署 / cookie 未到达），使用登录响应 body 里
+ *      返回的 csrf_token（通过 setCsrfTokenFromBody 注入）；
+ *   4. 都拿不到返回空串，让 mutating 请求被后端 CSRF 中间件拒绝（403）。
  */
 let cachedCsrfCookieName: string | null = null;
-let csrfFallbackWarned = false;
+/**
+ * 跨域部署兜底：后端在 login / refresh 响应 body 里返回 csrf_token，
+ * 前端存到这里。当 document.cookie 读不到 CSRF cookie 时（典型场景：
+ * 前后端不同端口 / 不同子域且未配 CookieDomain），用此值填充 X-CSRF-Token。
+ */
+let csrfTokenBody: string | null = null;
+
+/** 默认 CSRF cookie 名（后端 defaults() 里 SessionCookie="twilight_session"）。 */
+const DEFAULT_CSRF_COOKIE_NAME = "twilight_session_csrf";
 
 /**
  * 把后端 systemInfo.csrf_cookie_name 注入模块级缓存，让 readCSRFCookie()
@@ -185,42 +193,44 @@ export function setCsrfCookieName(name: string | null | undefined): void {
   cachedCsrfCookieName = name && name.length > 0 ? name : null;
 }
 
+/**
+ * 把登录 / refresh 响应 body 里的 csrf_token 注入模块缓存。
+ * 跨域部署时 document.cookie 读不到后端设的 CSRF cookie，此值作为兜底。
+ * 登出时传 null 清空。
+ */
+export function setCsrfTokenFromBody(token: string | null | undefined): void {
+  csrfTokenBody = token && token.length > 0 ? token : null;
+}
+
+function readCookieByName(all: string[], name: string): string {
+  for (const raw of all) {
+    const eq = raw.indexOf("=");
+    if (eq <= 0) continue;
+    const cookieName = raw.slice(0, eq).trim();
+    if (cookieName === name) {
+      return decodeURIComponent(raw.slice(eq + 1).trim());
+    }
+  }
+  return "";
+}
+
 function readCSRFCookie(): string {
-  if (typeof document === "undefined") return "";
+  if (typeof document === "undefined") return csrfTokenBody || "";
   const all = document.cookie ? document.cookie.split(";") : [];
 
   // 路径 1：systemInfo 已下发精确名，直接按名取，零歧义。
   if (cachedCsrfCookieName) {
-    for (const raw of all) {
-      const eq = raw.indexOf("=");
-      if (eq <= 0) continue;
-      const name = raw.slice(0, eq).trim();
-      if (name === cachedCsrfCookieName) {
-        return decodeURIComponent(raw.slice(eq + 1).trim());
-      }
-    }
-    return "";
+    const value = readCookieByName(all, cachedCsrfCookieName);
+    if (value) return value;
   }
 
-  // 路径 2：仅 dev 环境保留 "*_csrf 后缀启发式"。
-  // 在生产构建里走启发式存在两个具体风险：
-  //   1) 同域 / 父域第三方应用下发的其它 *_csrf cookie 会被错认成 token，
-  //      造成 mutating 请求带错 X-CSRF-Token 通过校验或 403；
-  //   2) admin 改了 csrf_cookie_name 后若 fetchInfo 偶发失败，启发式会
-  //      在新旧两个 cookie 之间不可控地命中。
-  // 生产里直接返回空串，让后端按预期 403，前端的失败上报路径会捕获到，
-  // 而不是默默靠启发式继续。dev 仍然保留启发式以减少初次开发链路上的摩擦。
-  if (process.env.NODE_ENV === "production") {
-    return "";
+  // 路径 2：用默认名尝试（覆盖 fetchInfo 尚未完成的窗口期）。
+  if (!cachedCsrfCookieName || cachedCsrfCookieName !== DEFAULT_CSRF_COOKIE_NAME) {
+    const value = readCookieByName(all, DEFAULT_CSRF_COOKIE_NAME);
+    if (value) return value;
   }
-  if (!csrfFallbackWarned) {
-    csrfFallbackWarned = true;
-    // eslint-disable-next-line no-console
-    console.warn(
-      "[CSRF] systemInfo.csrf_cookie_name 尚未注入，临时使用 *_csrf 后缀启发式；" +
-        "请确保进入受 CSRF 保护接口前已调用 useSystemStore.fetchInfo()。",
-    );
-  }
+
+  // 路径 3：*_csrf 后缀启发式（兼容自定义 session cookie 名场景）。
   for (const raw of all) {
     const eq = raw.indexOf("=");
     if (eq <= 0) continue;
@@ -229,6 +239,12 @@ function readCSRFCookie(): string {
       return decodeURIComponent(raw.slice(eq + 1).trim());
     }
   }
+
+  // 路径 4：跨域兜底 —— 使用登录响应 body 里缓存的 csrf_token。
+  // 典型场景：前后端不同端口 / 不同子域且未配 CookieDomain，
+  // document.cookie 永远读不到后端设的 CSRF cookie。
+  if (csrfTokenBody) return csrfTokenBody;
+
   return "";
 }
 

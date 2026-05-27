@@ -8,4 +8,5 @@ const (
 	confirmBatchLibrarySelfService = "BATCH_LIBRARY_SELF_SERVICE"
 	confirmBatchUserLibraries      = "BATCH_USER_LIBRARIES"
 	confirmClearViolations         = "CLEAR_VIOLATIONS"
+	confirmClearRegcodeUsage       = "CLEAR_REGCODE_USAGE"
 )
