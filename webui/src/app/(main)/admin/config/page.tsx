@@ -94,7 +94,7 @@ const NUMERIC_LIST_FIELD_KEYS = new Set([
   "streak_bonus_points",
 ]);
 
-const MIXED_ID_LIST_FIELD_KEYS = new Set([
+const STRING_ID_LIST_FIELD_KEYS = new Set([
   "admin_id",
   "group_id",
   "channel_id",
@@ -121,8 +121,8 @@ function serializeListValue(
     .map((v) => v.trim())
     .filter((v) => v.length > 0);
 
-  if (MIXED_ID_LIST_FIELD_KEYS.has(fieldKey)) {
-    return items.map((v) => (/^-?\d+$/.test(v) ? Number.parseInt(v, 10) : v));
+  if (STRING_ID_LIST_FIELD_KEYS.has(fieldKey)) {
+    return items;
   }
 
   const originalLooksNumeric =
