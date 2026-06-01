@@ -46,7 +46,7 @@
     "recharts": "^3.8.1",
     "tailwind-merge": "^2.5.2",
     "tailwindcss-animate": "^1.0.7",
-    "zustand": "^5.0.13"
+    "zustand": "^5.0.14"
   },
   "pnpm": {
     "overrides": {
