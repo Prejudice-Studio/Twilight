@@ -274,6 +274,22 @@ func TestAPIKeyFlow(t *testing.T) {
 	}
 }
 
+func TestAPIKeyLoginIsRateLimited(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().RateLimitEnabled = true
+	app.cfg().RateLimitLoginPerMinute = 1
+	app.cfg().RateLimitLoginUserPer5m = 1
+
+	first := doJSON(app, http.MethodPost, "/api/v1/auth/login/apikey", `{"apikey":"key-invalid-one"}`, nil)
+	if first.Code != http.StatusUnauthorized || !strings.Contains(first.Body.String(), `"error_code":"AUTH_APIKEY_INVALID"`) {
+		t.Fatalf("first invalid API key login status=%d body=%s", first.Code, first.Body.String())
+	}
+	second := doJSON(app, http.MethodPost, "/api/v1/auth/login/apikey", `{"apikey":"key-invalid-two"}`, nil)
+	if second.Code != http.StatusTooManyRequests || !strings.Contains(second.Body.String(), `"error_code":"AUTH_LOGIN_RATE_LIMITED"`) {
+		t.Fatalf("second invalid API key login status=%d body=%s", second.Code, second.Body.String())
+	}
+}
+
 // TestAPIKeyAuthSources 锁定 authenticateAPIKey 的三条入口（X-API-Key 头 /
 // Authorization Bearer/ApiKey / ?apikey= 查询串）以及 AllowQuery 门禁的回归
 // 行为：query 路径在 AllowQuery=false 时必须 401（避免 referer / log 中泄露
@@ -937,6 +953,7 @@ func TestInventoryCheckUsesEmbyProviderAndSeasons(t *testing.T) {
 	}))
 	defer emby.Close()
 	app.cfg().EmbyURL = emby.URL
+	app.cfg().EmbyToken = "test-token"
 
 	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
 	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
@@ -951,6 +968,67 @@ func TestInventoryCheckUsesEmbyProviderAndSeasons(t *testing.T) {
 	existingSeason := doJSONWithHeaders(app, http.MethodPost, "/api/v1/media/inventory/check", `{"source":"tmdb","media_id":42,"media_type":"tv","season":2}`, []*http.Cookie{cookie, csrfCookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if existingSeason.Code != http.StatusOK || !strings.Contains(existingSeason.Body.String(), `"exists":true`) || !strings.Contains(existingSeason.Body.String(), `"season_requested":2`) {
 		t.Fatalf("existing season status=%d body=%s", existingSeason.Code, existingSeason.Body.String())
+	}
+}
+
+func TestMediaRequestIgnoresUserSkipInventoryCheck(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().EmbyToken = "test-token"
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("AnyProviderIdEquals") == "Tmdb.550" {
+			_, _ = w.Write([]byte(`{"Items":[{"Id":"movie1","Name":"Existing Movie","Type":"Movie","ProductionYear":1999,"ProviderIds":{"Tmdb":"550"}}],"TotalRecordCount":1}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"Items":[],"TotalRecordCount":0}`))
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+
+	_ = registerAndLogin(t, app, "admin", "Admin123456")
+	userCookies := registerAndLogin(t, app, "requester", "User123456")
+	user, ok := app.store().FindUserByUsername("requester")
+	if !ok {
+		t.Fatal("requester not found")
+	}
+	if _, err := app.store().UpdateUser(user.UID, func(u *store.User) error { u.TelegramID = 12345; return nil }); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := doJSONWithHeaders(app, http.MethodPost, "/api/v1/media/request", `{"source":"tmdb","media_id":550,"media_type":"movie","title":"Existing Movie","skip_inventory_check":true}`, userCookies, map[string]string{"X-Twilight-Client": "webui"})
+	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), `"error_code":"MEDIA_REQUEST_ALREADY_EXISTS"`) {
+		t.Fatalf("media request status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if requests := app.store().ListMediaRequests(user.UID, false); len(requests) != 0 {
+		t.Fatalf("user bypassed inventory check and created requests: %#v", requests)
+	}
+}
+
+func TestMediaRequestStatusUpdatesRequireExplicitStatus(t *testing.T) {
+	app := newTestApp(t)
+	adminCookies := registerAndLogin(t, app, "admin", "Admin123456")
+	created, err := app.store().CreateMediaRequest(store.MediaRequest{UID: 1, TelegramID: 99, Username: "admin", Title: "Pending", Source: "tmdb", MediaID: 42, MediaType: "movie"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	adminResp := doJSONWithHeaders(app, http.MethodPut, "/api/v1/admin/media-requests/"+strconv.FormatInt(created.ID, 10), `{}`, adminCookies, map[string]string{"X-Twilight-Client": "webui"})
+	if adminResp.Code != http.StatusBadRequest || !strings.Contains(adminResp.Body.String(), `"error_code":"MEDIA_REQUEST_STATUS_INVALID"`) {
+		t.Fatalf("admin empty status update status=%d body=%s", adminResp.Code, adminResp.Body.String())
+	}
+	updated, _ := app.store().MediaRequest(created.ID)
+	if updated.Status != "UNHANDLED" {
+		t.Fatalf("empty admin status update changed status to %q", updated.Status)
+	}
+
+	app.cfg().BotInternalSecret = "secret"
+	externalResp := doJSONWithHeaders(app, http.MethodPost, "/api/v1/media/request/external/update", fmt.Sprintf(`{"key":%q}`, created.RequireKey), nil, map[string]string{"X-Internal-Secret": "secret"})
+	if externalResp.Code != http.StatusBadRequest || !strings.Contains(externalResp.Body.String(), `"error_code":"MEDIA_REQUEST_STATUS_INVALID"`) {
+		t.Fatalf("external empty status update status=%d body=%s", externalResp.Code, externalResp.Body.String())
+	}
+	updated, _ = app.store().MediaRequest(created.ID)
+	if updated.Status != "UNHANDLED" {
+		t.Fatalf("empty external status update changed status to %q", updated.Status)
 	}
 }
 
@@ -1034,6 +1112,33 @@ func TestBangumiSearchErrorIsVisibleForBangumiSource(t *testing.T) {
 	resp := doJSON(app, http.MethodGet, "/api/v1/media/search?q=test&source=bangumi", ``, []*http.Cookie{cookie, csrfCookie})
 	if resp.Code != http.StatusBadGateway || !strings.Contains(resp.Body.String(), "Bangumi 搜索失败") {
 		t.Fatalf("bangumi failure status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestMediaDetailSanitizesPathPartsBeforeUpstreamCall(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().TMDBAPIKey = "tmdb-key"
+	var gotPath string
+	tmdb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if gotPath != "/movie/123" {
+			t.Fatalf("unexpected TMDB detail path %q", gotPath)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":123,"title":"Safe Movie","media_type":"movie"}`))
+	}))
+	defer tmdb.Close()
+	app.cfg().TMDBAPIURL = tmdb.URL
+
+	cookies := registerAndLogin(t, app, "admin", "Admin123456")
+	resp := doJSON(app, http.MethodGet, "/api/v1/media/detail?source=tmdb&media_id=123&media_type=movie%2F..%2F..%2Fauthentication", ``, cookies)
+	if resp.Code != http.StatusOK || gotPath != "/movie/123" || strings.Contains(resp.Body.String(), "authentication") {
+		t.Fatalf("media detail status=%d path=%q body=%s", resp.Code, gotPath, resp.Body.String())
+	}
+
+	badID := doJSON(app, http.MethodGet, "/api/v1/media/detail?source=tmdb&media_id=123%2F..%2Fsecret&media_type=movie", ``, cookies)
+	if badID.Code != http.StatusBadRequest || !strings.Contains(badID.Body.String(), `"error_code":"MEDIA_REQUEST_PAYLOAD_EMPTY"`) {
+		t.Fatalf("bad media id status=%d body=%s", badID.Code, badID.Body.String())
 	}
 }
 
@@ -1709,6 +1814,42 @@ func TestRegisterConsumesConfirmedTelegramBindCode(t *testing.T) {
 	}
 }
 
+func TestRegisterWithTelegramBindCodeAllowsBootstrapAdminUIDOnlyConfig(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().BotInternalSecret = "test-secret"
+	app.cfg().ForceBindTelegram = true
+	app.cfg().AdminUIDs = []int64{1}
+	app.cfg().AdminUsernames = nil
+
+	codeResp := doJSON(app, http.MethodPost, "/api/v1/users/telegram/register/bind-code", `{}`, nil)
+	if codeResp.Code != http.StatusOK {
+		t.Fatalf("bind-code status=%d body=%s", codeResp.Code, codeResp.Body.String())
+	}
+	var codeBody struct {
+		Data struct {
+			BindCode string `json:"bind_code"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(codeResp.Body.Bytes(), &codeBody); err != nil {
+		t.Fatal(err)
+	}
+	code := codeBody.Data.BindCode
+	confirmPayload := fmt.Sprintf(`{"code":%q,"telegram_id":777,"telegram_username":"admin_tg"}`, code)
+	confirmed := doJSONWithHeaders(app, http.MethodPost, "/api/v1/users/me/telegram/bind-confirm", confirmPayload, nil, map[string]string{"X-Internal-Secret": "test-secret"})
+	if confirmed.Code != http.StatusOK {
+		t.Fatalf("confirm status=%d body=%s", confirmed.Code, confirmed.Body.String())
+	}
+
+	registered := doJSON(app, http.MethodPost, "/api/v1/users/register", fmt.Sprintf(`{"username":"bootstrap","password":"Admin123456","telegram_bind_code":%q}`, code), nil)
+	if registered.Code != http.StatusCreated {
+		t.Fatalf("register status=%d body=%s", registered.Code, registered.Body.String())
+	}
+	u, ok := app.store().FindUserByUsername("bootstrap")
+	if !ok || u.UID != 1 || u.Role != store.RoleAdmin || u.TelegramID != 777 {
+		t.Fatalf("bootstrap admin uid-only config not applied: ok=%v user=%#v", ok, u)
+	}
+}
+
 func TestRegisterRejectsUserSceneTelegramBindCode(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().ForceBindTelegram = true
@@ -1753,6 +1894,65 @@ func TestTelegramBindConfirmRequiresInternalSecret(t *testing.T) {
 	allowed := doJSONWithHeaders(app, http.MethodPost, "/api/v1/users/me/telegram/bind-confirm", `{"code":"ABCDEFGH","telegram_id":42}`, nil, map[string]string{"X-Internal-Secret": "test-secret"})
 	if allowed.Code != http.StatusOK {
 		t.Fatalf("bind confirm with secret = %d body=%s", allowed.Code, allowed.Body.String())
+	}
+}
+
+func TestChangeEmbyPasswordAcceptsEmptyEmbyResponses(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().EmbyToken = "test-token"
+
+	_ = registerAndLogin(t, app, "admin", "Admin123456")
+	userCookies := registerAndLogin(t, app, "embyuser", "User123456")
+	user, ok := app.store().FindUserByUsername("embyuser")
+	if !ok {
+		t.Fatal("created user not found")
+	}
+	if _, err := app.store().UpdateUser(user.UID, func(u *store.User) error {
+		u.EmbyID = "emby-user-id"
+		u.EmbyUsername = "embyuser"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	passwordCalls := 0
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/Users/emby-user-id":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"Id":"emby-user-id","Name":"embyuser","Policy":{"IsAdministrator":false}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/Users/emby-user-id/Password":
+			passwordCalls++
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			switch passwordCalls {
+			case 1:
+				if body["ResetPassword"] != true {
+					t.Fatalf("first password call body=%#v, want ResetPassword=true", body)
+				}
+			case 2:
+				if body["CurrentPw"] != "" || body["NewPw"] != "NewPass123" {
+					t.Fatalf("second password call body=%#v", body)
+				}
+			default:
+				t.Fatalf("unexpected extra password call body=%#v", body)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected Emby request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+
+	resp := doJSONWithHeaders(app, http.MethodPost, "/api/v1/users/me/password/emby", `{"new_password":"NewPass123"}`, userCookies, map[string]string{"X-Twilight-Client": "webui"})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("change Emby password status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if passwordCalls != 2 {
+		t.Fatalf("passwordCalls=%d, want 2", passwordCalls)
 	}
 }
 
@@ -3215,6 +3415,7 @@ func TestBatchUserDangerousActionsRequireConfirm(t *testing.T) {
 		{"enable", "/api/v1/batch/users/enable", `{"uids":[1]}`, confirmBatchEnableUsers},
 		{"disable", "/api/v1/batch/users/disable", `{"uids":[1]}`, confirmBatchDisableUsers},
 		{"delete", "/api/v1/batch/users/delete", `{"uids":[1]}`, confirmBatchDeleteUsers},
+		{"renew", "/api/v1/batch/users/renew", `{"uids":[1],"days":30}`, confirmBatchRenewUsers},
 		{"library self service", "/api/v1/batch/users/library-self-service", `{"uids":[1],"enabled":true}`, confirmBatchLibrarySelfService},
 		{"libraries", "/api/v1/batch/users/libraries", `{"uids":[1],"action":"set","library_ids":[]}`, confirmBatchUserLibraries},
 	}
@@ -3236,6 +3437,11 @@ func TestBatchUserDangerousActionsRequireConfirm(t *testing.T) {
 	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), "uids required") || !strings.Contains(resp.Body.String(), `"error_code":"BATCH_UIDS_REQUIRED"`) {
 		t.Fatalf("missing uids contract, status=%d body=%s", resp.Code, resp.Body.String())
 	}
+
+	tooLarge := doJSONWithHeaders(app, http.MethodPost, "/api/v1/batch/users/renew", fmt.Sprintf(`{"confirm":%q,"uids":[1],"days":36501}`, confirmBatchRenewUsers), cookies, headers)
+	if tooLarge.Code != http.StatusBadRequest || !strings.Contains(tooLarge.Body.String(), `"error_code":"BATCH_DAYS_INVALID"`) {
+		t.Fatalf("batch renew days cap status=%d body=%s", tooLarge.Code, tooLarge.Body.String())
+	}
 }
 
 func TestOtherDangerousActionsRequireConfirm(t *testing.T) {
@@ -3246,6 +3452,41 @@ func TestOtherDangerousActionsRequireConfirm(t *testing.T) {
 	resp := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/violations/clear", `{}`, cookies, headers)
 	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), confirmClearViolations) || !strings.Contains(resp.Body.String(), `"error_code":"VIOLATION_CONFIRM_REQUIRED"`) {
 		t.Fatalf("clear violations missing confirm status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestCleanupInvalidUsersDefaultsToDryRunAndRequiresConfirm(t *testing.T) {
+	app := newTestApp(t)
+	cookies := registerAndLogin(t, app, "admin", "Admin123456")
+	headers := map[string]string{"X-Twilight-Client": "webui"}
+	old := time.Now().Add(-10 * 24 * time.Hour).Unix()
+	ghost, err := app.store().CreateUser(store.User{Username: "ghost", PasswordHash: "x", Role: store.RoleNormal, Active: true, RegisterTime: old, CreatedAt: old})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	preview := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/users/cleanup-invalid", `{}`, cookies, headers)
+	if preview.Code != http.StatusOK || !strings.Contains(preview.Body.String(), `"dry_run":true`) {
+		t.Fatalf("cleanup default dry run status=%d body=%s", preview.Code, preview.Body.String())
+	}
+	if _, ok := app.store().User(ghost.UID); !ok {
+		t.Fatal("cleanup default request deleted user")
+	}
+
+	missingConfirm := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/users/cleanup-invalid", `{"dry_run":false}`, cookies, headers)
+	if missingConfirm.Code != http.StatusBadRequest || !strings.Contains(missingConfirm.Body.String(), confirmCleanupInvalidUsers) {
+		t.Fatalf("cleanup missing confirm status=%d body=%s", missingConfirm.Code, missingConfirm.Body.String())
+	}
+	if _, ok := app.store().User(ghost.UID); !ok {
+		t.Fatal("cleanup without confirm deleted user")
+	}
+
+	confirmed := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/users/cleanup-invalid", fmt.Sprintf(`{"dry_run":false,"confirm":%q}`, confirmCleanupInvalidUsers), cookies, headers)
+	if confirmed.Code != http.StatusOK || !strings.Contains(confirmed.Body.String(), `"dry_run":false`) {
+		t.Fatalf("cleanup confirmed status=%d body=%s", confirmed.Code, confirmed.Body.String())
+	}
+	if _, ok := app.store().User(ghost.UID); ok {
+		t.Fatal("confirmed cleanup did not delete user")
 	}
 }
 

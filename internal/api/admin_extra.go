@@ -331,7 +331,7 @@ func (a *App) handleCreateStandaloneEmbyV2(w http.ResponseWriter, r *http.Reques
 	}
 	var ignored map[string]any
 	_ = a.embyPost(r.Context(), "/Users/"+urlPathEscape(embyID)+"/Policy", map[string]any{"EnableContentDownloading": false}, &ignored)
-	if err := a.embyPost(r.Context(), "/Users/"+urlPathEscape(embyID)+"/Password", map[string]any{"CurrentPw": "", "NewPw": password}, &ignored); err != nil {
+	if err := a.embyPost(r.Context(), "/Users/"+urlPathEscape(embyID)+"/Password", map[string]any{"CurrentPw": "", "NewPw": password}, nil); err != nil {
 		_ = a.embyDelete(r.Context(), "/Users/"+urlPathEscape(embyID))
 		failWithCode(w, http.StatusBadGateway, ErrEmbySetPasswordFailed, "设置 Emby 用户密码失败，请稍后重试或检查上游 Emby 状态")
 		return
@@ -490,7 +490,11 @@ func (a *App) handleAdminBulkEnableDisabled(w http.ResponseWriter, r *http.Reque
 func (a *App) handleAdminCleanupInvalid(w http.ResponseWriter, r *http.Request, _ Params) {
 	payload := decodeMap(r)
 	minDays := max(1, intValue(payload, "min_days", 7))
-	dryRun := boolValue(payload, "dry_run", false)
+	dryRun := boolValue(payload, "dry_run", true)
+	if !dryRun && stringValue(payload, "confirm") != confirmCleanupInvalidUsers {
+		failWithCode(w, http.StatusBadRequest, ErrBatchConfirmRequired, "missing confirm "+confirmCleanupInvalidUsers)
+		return
+	}
 	threshold := time.Now().Add(-time.Duration(minDays) * 24 * time.Hour).Unix()
 	targets := []store.User{}
 	for _, u := range a.store().ListUsers() {

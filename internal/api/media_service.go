@@ -44,16 +44,38 @@ func (a *App) searchMedia(ctx context.Context, query, source, mediaType string, 
 
 func (a *App) mediaDetail(ctx context.Context, source, id, mediaType string) (map[string]any, bool) {
 	source = normalizeSource(source)
+	if !isPositiveNumericID(id) {
+		return nil, false
+	}
 	if source == "bangumi" {
 		if result, err := a.getBangumi(ctx, id); err == nil {
 			return result, true
 		}
 		return mediaResultFromFields("bangumi", id, "", firstNonEmpty(mediaType, "动画"), ""), true
 	}
-	if result, err := a.getTMDB(ctx, id, firstNonEmpty(mediaType, "movie")); err == nil {
+	mediaType = normalizeTMDBMediaType(mediaType)
+	if result, err := a.getTMDB(ctx, id, mediaType); err == nil {
 		return result, true
 	}
-	return mediaResultFromFields("tmdb", id, "", firstNonEmpty(mediaType, "movie"), ""), true
+	return mediaResultFromFields("tmdb", id, "", mediaType, ""), true
+}
+
+func isPositiveNumericID(id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	parsed, err := strconv.ParseInt(id, 10, 64)
+	return err == nil && parsed > 0 && strconv.FormatInt(parsed, 10) == id
+}
+
+func normalizeTMDBMediaType(mediaType string) string {
+	switch strings.ToLower(strings.TrimSpace(mediaType)) {
+	case "tv":
+		return "tv"
+	default:
+		return "movie"
+	}
 }
 
 func detectMediaID(query string) (source, id, mediaType string, ok bool) {

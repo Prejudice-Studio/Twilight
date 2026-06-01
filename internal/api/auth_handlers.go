@@ -95,13 +95,22 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request, _ Params) {
 }
 
 func (a *App) handleLoginByAPIKey(w http.ResponseWriter, r *http.Request, _ Params) {
+	if !a.allowRate(r.Context(), rateKey("login:apikey:ip:", a.clientIP(r)), a.cfg().RateLimitLoginPerMinute, time.Minute) {
+		failWithCode(w, http.StatusTooManyRequests, ErrLoginRateLimited, "登录过于频繁，请稍后再试")
+		return
+	}
 	payload := decodeMap(r)
 	key := stringValue(payload, "apikey")
 	if key == "" {
 		failWithCode(w, http.StatusBadRequest, ErrAPIKeyEmpty, "API Key 不能为空")
 		return
 	}
-	_, u, okKey := a.store().FindAPIKeyByHash(hashAPIKey(key))
+	keyHash := hashAPIKey(key)
+	if a.cfg().RateLimitLoginUserPer5m > 0 && !a.allowRate(r.Context(), rateKey("login:apikey:key:", keyHash), a.cfg().RateLimitLoginUserPer5m, 5*time.Minute) {
+		failWithCode(w, http.StatusTooManyRequests, ErrLoginRateLimited, "登录过于频繁，请稍后再试")
+		return
+	}
+	_, u, okKey := a.store().FindAPIKeyByHash(keyHash)
 	if !okKey {
 		failWithCode(w, http.StatusUnauthorized, ErrAPIKeyInvalid, "API Key 无效")
 		return
@@ -262,15 +271,13 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request, _ Params) {
 		failWithCode(w, http.StatusBadRequest, ErrUsernameInvalid, err.Error())
 		return
 	}
-	// 当 ConfiguredAdmins 配置存在时，首注册必须命中（用户名 / UID）才允许在
-	// RegisterEnabled=false 状态下走"空 DB bootstrap"通道。否则任何外部用户
-	// 都可以在 RegisterEnabled=false 的部署里抢先注册并自动成为 Admin。
-	//   - 配置了 AdminUsernames / AdminUIDs，且首注册命中 ⇒ 允许进入下游、role=Admin
-	//   - 配置了 AdminUsernames / AdminUIDs，但首注册未命中 ⇒ 直接拒绝
-	//   - 未配置 ConfiguredAdmins ⇒ 维持旧"首注册即 Admin"语义（兜底引导路径）
-	hasConfiguredAdmins := len(a.cfg().AdminUIDs) > 0 || len(a.cfg().AdminUsernames) > 0
+	// 首注册时只有 username 可在创建前验证；UID 要等 CreateUser 后才知道。
+	// 因此这里仅用 AdminUsernames 做 bootstrap 预校验，AdminUIDs 仍在创建后
+	// 通过 configuredAdminMatch 按实际 UID 应用。否则只配置 admin_uids=[1]
+	// 的常见部署会在注册前因为 uid=0 无法匹配而被永久挡住。
+	configuredAdminNames := a.configuredAdminUsernameSet()
 	bootstrapMode := a.store().UserCount() == 0
-	if bootstrapMode && hasConfiguredAdmins && !configuredAdminMatchSets(a.configuredAdminUIDSet(), a.configuredAdminUsernameSet(), 0, username) {
+	if bootstrapMode && len(configuredAdminNames) > 0 && !configuredAdminMatchSets(nil, configuredAdminNames, 0, username) {
 		failWithCode(w, http.StatusForbidden, ErrRegisterDisabled, "系统初始管理员已通过配置指定，请使用配置的用户名注册")
 		return
 	}

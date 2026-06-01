@@ -1148,6 +1148,8 @@ export function CleanupInvalidUsersDialog({
   minDays,
   onMinDaysChange,
   preview,
+  confirmText,
+  onConfirmTextChange,
   onPreview,
   onConfirm,
   isLoading,
@@ -1157,6 +1159,8 @@ export function CleanupInvalidUsersDialog({
   minDays: string;
   onMinDaysChange: (next: string) => void;
   preview: CleanupCandidate[] | null;
+  confirmText: string;
+  onConfirmTextChange: (next: string) => void;
   onPreview: () => void;
   onConfirm: () => void;
   isLoading: boolean;
@@ -1216,6 +1220,20 @@ export function CleanupInvalidUsersDialog({
               )}
             </div>
           )}
+
+          {preview !== null && preview.length > 0 && (
+            <div className="space-y-2">
+              <Label>输入「确认」以执行</Label>
+              <Input
+                value={confirmText}
+                onChange={(e) => onConfirmTextChange(e.target.value)}
+                placeholder="确认"
+              />
+              <p className="text-xs text-muted-foreground">
+                后端仍会要求确认短语，避免误触或脚本错误直接删除账号。
+              </p>
+            </div>
+          )}
         </div>
         <DialogFooter className="gap-2 sm:gap-0">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -1228,7 +1246,7 @@ export function CleanupInvalidUsersDialog({
           <Button
             variant="destructive"
             onClick={onConfirm}
-            disabled={isLoading || !preview || preview.length === 0}
+            disabled={isLoading || !preview || preview.length === 0 || confirmText.trim() !== "确认"}
           >
             {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             确认清理

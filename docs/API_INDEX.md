@@ -148,8 +148,8 @@
 | POST | `/media/request` | User | 提交求片 |
 | GET | `/media/request/my` | User | 我的求片 |
 | GET | `/media/request/pending` | User | 待处理求片 |
-| PUT | `/media/request/{request_id}/status` | User | 更新求片状态 |
-| POST | `/media/request/external/update` | User | 外部更新求片 |
+| PUT | `/media/request/{request_id}/status` | Admin | 更新求片状态（必须显式传 `status`） |
+| POST | `/media/request/external/update` | Internal Secret | 外部更新求片（必须显式传 `status`） |
 | GET | `/media/request/by-key/{require_key}` | User | 按 key 查询求片 |
 | DELETE | `/media/request/by-key/{require_key}` | User | 按 key 删除求片 |
 | GET | `/media/request/{request_id}` | User | 求片详情 |
@@ -188,6 +188,7 @@
 | GET | `/admin/regcodes/{code}/users` | Admin | 查看注册码使用者详情 |
 | PUT | `/admin/regcodes/{code}` | Admin | 更新注册码备注 |
 | DELETE | `/admin/regcodes/{code}` | Admin | 删除注册码 |
+| POST | `/admin/regcodes/{code}/clear-usage` | Admin | 清理注册码使用记录 |
 | GET | `/admin/media-requests` | Admin | 求片管理列表 |
 | PUT | `/admin/media-requests/{request_id}` | Admin | 更新求片 |
 | DELETE | `/admin/media-requests/{request_id}` | Admin | 删除求片 |
@@ -206,7 +207,7 @@
 | POST | `/admin/emby/delete-unlinked` | Admin | 删除未绑定 Emby 用户 |
 | POST | `/admin/users/bulk-expire` | Admin | 批量过期 |
 | POST | `/admin/users/bulk-enable-disabled` | Admin | 批量启用禁用用户 |
-| POST | `/admin/users/cleanup-invalid` | Admin | 清理无效用户 |
+| POST | `/admin/users/cleanup-invalid` | Admin | 预览/清理无效用户（执行需确认短语） |
 | POST | `/admin/users/kick-no-emby` | Admin | 踢出无 Emby 用户 |
 | GET | `/admin/invite/tree` | Admin | 邀请树 |
 | POST | `/admin/invite/users/{uid}/detach` | Admin | 脱离邀请关系 |
@@ -256,7 +257,7 @@
 | ---- | ---- | ---- | ---- |
 | POST | `/batch/users/disable` | Admin | 批量禁用用户 |
 | POST | `/batch/users/enable` | Admin | 批量启用用户 |
-| POST | `/batch/users/renew` | Admin | 批量续期用户 |
+| POST | `/batch/users/renew` | Admin | 批量续期用户（执行需确认短语） |
 | POST | `/batch/users/delete` | Admin | 批量删除用户 |
 | GET | `/batch/export/users` | Admin | 导出用户 |
 | GET | `/batch/export/playback` | Admin | 导出播放数据 |

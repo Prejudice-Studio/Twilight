@@ -1267,7 +1267,11 @@ class ApiClient {
     });
   }
 
-  async cleanupInvalidUsers(minDays: number = 7, dryRun: boolean = false) {
+  async cleanupInvalidUsers(minDays: number = 7, dryRun: boolean = false, confirm?: string) {
+    const body: Record<string, unknown> = { min_days: minDays, dry_run: dryRun };
+    if (!dryRun) {
+      body.confirm = confirm || confirmPhrases.cleanupInvalidUsers;
+    }
     return this.request<{
       users: Array<{
         uid: number;
@@ -1280,7 +1284,7 @@ class ApiClient {
       dry_run: boolean;
     }>("/admin/users/cleanup-invalid", {
       method: "POST",
-      body: JSON.stringify({ min_days: minDays, dry_run: dryRun }),
+      body: JSON.stringify(body),
     });
   }
 

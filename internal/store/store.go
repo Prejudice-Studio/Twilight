@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -1000,12 +1001,9 @@ func (s *Store) saveLocked() error {
 	// 强制 0o600：即使外部 umask / 拷贝把权限放宽到 group/other，重写后
 	// 也立刻收敛回仅 owner 可读写，避免 state.json 被同机其它用户读取。
 	_ = os.Chmod(s.path, 0o600)
-	// 父目录 fsync 让 rename 自身的目录条目落盘。Linux 要求显式做；
-	// 若文件系统不支持（少见，例如 sysfs），忽略错误以保兼容。
-	if dir, dirErr := os.Open(filepath.Dir(s.path)); dirErr == nil {
-		_ = dir.Sync()
-		_ = dir.Close()
-	}
+	// 父目录 fsync 让 rename 自身的目录条目落盘。Windows 不支持以这种方式
+	// 同步目录；文件内容已通过 f.Sync() 落盘，目录同步在该平台降级为 best effort。
+	_ = syncParentDir(filepath.Dir(s.path), false)
 	return nil
 }
 
@@ -1375,19 +1373,23 @@ func writeFileAtomicSync(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	_ = os.Chmod(path, perm)
-	if dir, dirErr := os.Open(filepath.Dir(path)); dirErr == nil {
-		// dir.Sync 失败仅写 stderr：rename 已经成功，重启后能从 path 找到
-		// 新内容；只是父目录元数据未必持久化，断电恢复时 path 可能短暂
-		// "消失"。多数 fs 上不会真的发生，记录下便于 ops 排障。
-		//
-		// **不能**走 zap.L()——本 helper 会被 saveLocked 在持有 s.mu 时调用，
-		// 全局 zap sink 注册了 runtime log 路由会回调 AddRuntimeLog 再次申请
-		// s.mu 形成自旋死锁。Windows 上 fsync 目录不被支持，dir.Sync 必然
-		// 进入此分支，是发现该死锁的实际触发点。
-		if syncErr := dir.Sync(); syncErr != nil {
-			fmt.Fprintf(os.Stderr, "twilight: atomic write parent dir sync failed path=%s err=%v\n", path, syncErr)
-		}
-		_ = dir.Close()
+	if err := syncParentDir(filepath.Dir(path), true); err != nil {
+		fmt.Fprintf(os.Stderr, "twilight: atomic write parent dir sync failed path=%s err=%v\n", path, err)
+	}
+	return nil
+}
+
+func syncParentDir(dirPath string, report bool) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	dir, err := os.Open(dirPath)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = dir.Close() }()
+	if err := dir.Sync(); err != nil && report {
+		return err
 	}
 	return nil
 }

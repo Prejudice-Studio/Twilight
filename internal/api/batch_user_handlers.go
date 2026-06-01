@@ -48,15 +48,21 @@ func (a *App) handleBatchToggleUsers(w http.ResponseWriter, r *http.Request, ena
 }
 
 func (a *App) handleBatchRenewUsers(w http.ResponseWriter, r *http.Request, _ Params) {
-	payload := decodeMap(r)
-	uids := int64Slice(payload["uids"])
+	payload, uids, okPayload := requireBatchPayload(w, r, confirmBatchRenewUsers, 200, "too many users in one batch")
+	if !okPayload {
+		return
+	}
 	days := intValue(payload, "days", 30)
 	if days <= 0 {
 		failWithCode(w, http.StatusBadRequest, ErrBatchDaysInvalid, "days 必须大于 0")
 		return
 	}
+	if days > 36500 {
+		failWithCode(w, http.StatusBadRequest, ErrBatchDaysInvalid, "days 不能超过 36500")
+		return
+	}
 	result := batchResult(len(uids))
-	for _, uid := range uids {
+	for _, uid := range uniqueInt64s(uids) {
 		_, err := a.store().UpdateUser(uid, func(u *store.User) error {
 			// 与 self / admin renew 对齐：批量续期同样把被 check_expired 自禁
 			// 的账号一并解禁，避免 admin 在批量页看到"成功 200"但用户登录依旧

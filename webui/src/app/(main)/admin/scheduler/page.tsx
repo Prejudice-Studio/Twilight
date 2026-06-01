@@ -454,9 +454,6 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
               </label>
             </div>
           )}
-              </label>
-            </div>
-          )}
         </div>
 
         <DialogFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">

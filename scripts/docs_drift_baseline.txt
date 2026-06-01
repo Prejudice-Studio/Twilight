@@ -15,7 +15,6 @@
 DELETE /api/v1/admin/announcements/{announcement_id}
 DELETE /api/v1/admin/media-requests/by-key/{require_key}
 DELETE /api/v1/admin/media-requests/{request_id}
-DELETE /api/v1/admin/regcodes/{code}
 DELETE /api/v1/admin/scheduler/jobs/{job_id}/schedule
 DELETE /api/v1/admin/users/{uid}
 DELETE /api/v1/admin/users/{uid}/emby
@@ -161,7 +160,6 @@ PUT /api/v1/admin/announcements/{announcement_id}
 PUT /api/v1/admin/me/update
 PUT /api/v1/admin/media-requests/by-key/{require_key}
 PUT /api/v1/admin/media-requests/{request_id}
-PUT /api/v1/admin/regcodes/{code}
 PUT /api/v1/admin/scheduler/jobs/{job_id}/schedule
 PUT /api/v1/admin/users/{uid}
 PUT /api/v1/admin/users/{uid}/admin

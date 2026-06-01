@@ -918,34 +918,39 @@ curl -X GET "http://localhost:5000/api/v1/media/request/pending" \
 
 ```bash
 curl -X PUT "http://localhost:5000/api/v1/media/request/123/status" \
-  -H "Authorization: Bearer <token>" \
+  -H "Authorization: Bearer <admin_token>" \
   -H "Content-Type: application/json" \
   -d '{"status":"approved","remarks":"已处理"}'
 ```
+
+`status` 必须显式传入；不会再把空请求体或 malformed JSON 默认视为 `accepted`。
+可用值：`pending` / `accepted` / `rejected` / `completed` / `downloading` 及兼容别名。
 
 ### 外部求片更新
 
 `POST /media/request/external/update`
 
 - 说明：外部求片更新
-- 认证：登录 Token
+- 认证：内部密钥。通过 `X-Internal-Secret: <secret>` 或 `Authorization: Bearer <secret>` 传入，值必须匹配 `bot_internal_secret`。
 - 请求体：
 
 ```json
 {
-  "request_id": 123,
-  "status": "updated",
+  "key": "req_xxx",
+  "status": "completed",
   "note": "外部系统同步"
 }
 ```
+
+`status` 必须显式传入；`key` 也可写作 `require_key`。
 
 - 示例 cURL：
 
 ```bash
 curl -X POST "http://localhost:5000/api/v1/media/request/external/update" \
-  -H "Authorization: Bearer <token>" \
+  -H "X-Internal-Secret: <secret>" \
   -H "Content-Type: application/json" \
-  -d '{"request_id":123,"status":"updated","note":"外部系统同步"}'
+  -d '{"key":"req_xxx","status":"completed","note":"外部系统同步"}'
 ```
 
 ### 查询单个求片请求
@@ -1314,9 +1319,32 @@ curl -X POST "http://localhost:5000/api/v1/admin/regcodes" \
   -d '{"type":1,"validity_time":-1,"use_count_limit":1,"days":30,"count":1}'
 ```
 
+#### 更新注册码备注
+
+`PUT /api/v1/admin/regcodes/{code}`
+
+- 认证：管理员 Token
+- 说明：更新指定注册码的备注字段。
+- 请求体：
+
+```json
+{
+  "note": "活动发放"
+}
+```
+
+- 示例 cURL：
+
+```bash
+curl -X PUT "http://localhost:5000/api/v1/admin/regcodes/code-abc123" \
+  -H "Authorization: Bearer <admin_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"note":"活动发放"}'
+```
+
 #### 删除注册码
 
-`DELETE /admin/regcodes/<code>`
+`DELETE /api/v1/admin/regcodes/{code}`
 
 - 认证：管理员 Token
 
@@ -1325,6 +1353,29 @@ curl -X POST "http://localhost:5000/api/v1/admin/regcodes" \
 ```bash
 curl -X DELETE "http://localhost:5000/api/v1/admin/regcodes/code-abc123" \
   -H "Authorization: Bearer <admin_token>"
+```
+
+#### 清理注册码使用记录
+
+`POST /api/v1/admin/regcodes/{code}/clear-usage`
+
+- 认证：管理员 Token
+- 说明：清空指定注册码的使用次数、使用者 UID 与 Telegram ID 记录，并重新激活该码；不影响已注册用户账号。
+- 请求体：`confirm` 必须为 `CLEAR_REGCODE_USAGE`
+
+```json
+{
+  "confirm": "CLEAR_REGCODE_USAGE"
+}
+```
+
+- 示例 cURL：
+
+```bash
+curl -X POST "http://localhost:5000/api/v1/admin/regcodes/code-abc123/clear-usage" \
+  -H "Authorization: Bearer <admin_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"confirm":"CLEAR_REGCODE_USAGE"}'
 ```
 
 #### 发送 Emby 广播消息
@@ -1486,12 +1537,15 @@ curl -X POST "http://localhost:5000/api/v1/admin/emby/delete-unlinked" \
 `POST /admin/users/cleanup-invalid`
 
 - 认证：管理员 Token
+- 请求体：`dry_run` 默认为 `true`，仅预览候选用户；执行删除时必须传 `{"dry_run":false,"confirm":"CLEANUP_INVALID_USERS"}`。
 
 - 示例 cURL：
 
 ```bash
 curl -X POST "http://localhost:5000/api/v1/admin/users/cleanup-invalid" \
-  -H "Authorization: Bearer <admin_token>"
+  -H "Authorization: Bearer <admin_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"min_days":7,"dry_run":true}'
 ```
 
 ### 9.4 定时任务管理

@@ -36,6 +36,9 @@ func (a *App) searchBangumi(ctx context.Context, query string, limit int) ([]map
 }
 
 func (a *App) getBangumi(ctx context.Context, id string) (map[string]any, error) {
+	if !isPositiveNumericID(id) {
+		return nil, fmt.Errorf("invalid Bangumi subject id")
+	}
 	endpoint, err := bangumiEndpoint(a.cfg().BangumiAPIURL, "/subjects/"+id, nil)
 	if err != nil {
 		return nil, err

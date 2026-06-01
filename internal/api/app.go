@@ -1287,6 +1287,10 @@ func stringValue(payload map[string]any, key string) string {
 		switch typed := v.(type) {
 		case string:
 			return strings.TrimSpace(typed)
+		case int:
+			return strconv.Itoa(typed)
+		case int64:
+			return strconv.FormatInt(typed, 10)
 		case float64:
 			return strconv.FormatInt(int64(typed), 10)
 		case bool:

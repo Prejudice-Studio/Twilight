@@ -269,7 +269,6 @@ func (a *App) embyCreateUser(ctx context.Context, username, password string) (ma
 }
 
 func (a *App) embySetPassword(ctx context.Context, userID, password string) error {
-	var ignored map[string]any
 	// embySetPassword 是 Emby 标准两步：① ResetPassword=true 把账号清空成"无密码"
 	// ② NewPw 写新密码。② 一旦失败（context deadline、Emby 5xx、网络抖动），账号
 	// 会停留在"任何人 LoginByName 都能进"的危险状态。
@@ -279,14 +278,14 @@ func (a *App) embySetPassword(ctx context.Context, userID, password string) erro
 	//   - password != ""：① 成功后 ② 用独立 ctx + 重试（最多 3 次，指数退避）
 	//     执行；如全部失败，再 fallback 走"用一个不可登陆的强随机密码挡门"
 	//     避免账号停在无密码状态，最后把原始错误返回给调用方。
-	if err := a.embyPost(ctx, "/Users/"+urlPathEscape(userID)+"/Password", map[string]any{"ResetPassword": true}, &ignored); err != nil {
+	if err := a.embyPost(ctx, "/Users/"+urlPathEscape(userID)+"/Password", map[string]any{"ResetPassword": true}, nil); err != nil {
 		return err
 	}
 	if password == "" {
 		return nil
 	}
 	setPw := func(opCtx context.Context, pw string) error {
-		return a.embyPost(opCtx, "/Users/"+urlPathEscape(userID)+"/Password", map[string]any{"CurrentPw": "", "NewPw": pw}, &ignored)
+		return a.embyPost(opCtx, "/Users/"+urlPathEscape(userID)+"/Password", map[string]any{"CurrentPw": "", "NewPw": pw}, nil)
 	}
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {

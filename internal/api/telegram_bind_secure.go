@@ -1,7 +1,6 @@
 package api
 
 import (
-	"crypto/subtle"
 	"net/http"
 	"strings"
 	"time"
@@ -11,7 +10,7 @@ import (
 
 func (a *App) handleBindConfirmSecure(w http.ResponseWriter, r *http.Request, _ Params) {
 	secret := firstNonEmpty(r.Header.Get("X-Internal-Secret"), strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
-	if a.cfg().BotInternalSecret == "" || subtle.ConstantTimeCompare([]byte(secret), []byte(a.cfg().BotInternalSecret)) != 1 {
+	if a.cfg().BotInternalSecret == "" || !constantTimeStringEqual(secret, a.cfg().BotInternalSecret) {
 		failWithCode(w, http.StatusForbidden, ErrInternalSecretInvalid, "内部密钥无效")
 		return
 	}

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -33,10 +32,17 @@ func (a *App) handleMediaSearch(w http.ResponseWriter, r *http.Request, _ Params
 func (a *App) handleMediaDetail(w http.ResponseWriter, r *http.Request, params Params) {
 	id := firstNonEmpty(params["media_id"], params["tmdb_id"], params["bgm_id"], r.URL.Query().Get("media_id"))
 	if id == "" {
-		id = firstNonEmpty(r.URL.Query().Get("id"), "0")
+		id = r.URL.Query().Get("id")
 	}
 	source := normalizeSource(firstNonEmpty(params["source_type"], r.URL.Query().Get("source"), "tmdb"))
+	if !isPositiveNumericID(id) {
+		failWithCode(w, http.StatusBadRequest, ErrMediaRequestPayloadEmpty, "media_id invalid")
+		return
+	}
 	mediaType := firstNonEmpty(r.URL.Query().Get("media_type"), r.URL.Query().Get("type"), "movie")
+	if source == "tmdb" {
+		mediaType = normalizeTMDBMediaType(mediaType)
+	}
 	result, found := a.mediaDetail(r.Context(), source, id, mediaType)
 	if !found {
 		result = mediaResultFromFields(source, id, "", mediaType, "")
@@ -104,7 +110,7 @@ func (a *App) handleCreateMediaRequest(w http.ResponseWriter, r *http.Request, _
 		mediaInfo[key] = value
 	}
 	note := truncateString(stringValue(payload, "note"), 500)
-	if !boolValue(payload, "skip_inventory_check", false) {
+	if !(p.User.Role == store.RoleAdmin && boolValue(payload, "skip_inventory_check", false)) {
 		inventoryPayload := cloneMap(mediaInfo)
 		inventoryPayload["source"] = source
 		inventoryPayload["media_id"] = mediaID
@@ -175,7 +181,12 @@ func (a *App) handleUpdateMediaRequestStatus(w http.ResponseWriter, r *http.Requ
 	}
 	id, _ := int64Param(params, "request_id")
 	payload := decodeMap(r)
-	status := normalizeMediaStatus(firstNonEmpty(stringValue(payload, "status"), "ACCEPTED"))
+	rawStatus := stringValue(payload, "status")
+	if rawStatus == "" {
+		failWithCode(w, http.StatusBadRequest, ErrMediaRequestStatusInvalid, "status required")
+		return
+	}
+	status := normalizeMediaStatus(rawStatus)
 	if status == "" {
 		failWithCode(w, http.StatusBadRequest, ErrMediaRequestStatusInvalid, "invalid status")
 		return
@@ -206,7 +217,7 @@ func (a *App) handleUpdateMediaRequestByKey(w http.ResponseWriter, r *http.Reque
 
 func (a *App) handleExternalMediaUpdate(w http.ResponseWriter, r *http.Request, _ Params) {
 	secret := firstNonEmpty(r.Header.Get("X-Internal-Secret"), strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
-	if a.cfg().BotInternalSecret == "" || subtle.ConstantTimeCompare([]byte(secret), []byte(a.cfg().BotInternalSecret)) != 1 {
+	if a.cfg().BotInternalSecret == "" || !constantTimeStringEqual(secret, a.cfg().BotInternalSecret) {
 		failWithCode(w, http.StatusForbidden, ErrInternalSecretInvalid, "内部密钥无效")
 		return
 	}
@@ -217,7 +228,12 @@ func (a *App) handleExternalMediaUpdate(w http.ResponseWriter, r *http.Request, 
 		failWithCode(w, http.StatusNotFound, ErrMediaRequestNotFound, "request not found")
 		return
 	}
-	status := normalizeMediaStatus(firstNonEmpty(stringValue(payload, "status"), "ACCEPTED"))
+	rawStatus := stringValue(payload, "status")
+	if rawStatus == "" {
+		failWithCode(w, http.StatusBadRequest, ErrMediaRequestStatusInvalid, "status required")
+		return
+	}
+	status := normalizeMediaStatus(rawStatus)
 	if status == "" {
 		failWithCode(w, http.StatusBadRequest, ErrMediaRequestStatusInvalid, "invalid status")
 		return

@@ -38,6 +38,7 @@ func (a *App) searchTMDB(ctx context.Context, query, mediaType string, limit int
 	if err != nil {
 		return nil, err
 	}
+	mediaType = normalizeTMDBMediaType(mediaType)
 	endpoint := base + "/search/multi"
 	if mediaType == "movie" || mediaType == "tv" {
 		endpoint = base + "/search/" + mediaType
@@ -67,6 +68,10 @@ func (a *App) searchTMDB(ctx context.Context, query, mediaType string, limit int
 }
 
 func (a *App) getTMDB(ctx context.Context, id, mediaType string) (map[string]any, error) {
+	if !isPositiveNumericID(id) {
+		return nil, fmt.Errorf("invalid TMDB media id")
+	}
+	mediaType = normalizeTMDBMediaType(mediaType)
 	if a.cfg().TMDBAPIKey == "" {
 		return nil, fmt.Errorf("TMDB API Key 未配置")
 	}
@@ -74,7 +79,7 @@ func (a *App) getTMDB(ctx context.Context, id, mediaType string) (map[string]any
 	if err != nil {
 		return nil, err
 	}
-	endpoint := base + "/" + firstNonEmpty(mediaType, "movie") + "/" + id
+	endpoint := base + "/" + mediaType + "/" + id
 	q := url.Values{"api_key": {a.cfg().TMDBAPIKey}, "language": {"zh-CN"}, "append_to_response": {"credits,genres,videos,images,seasons"}}
 	var payload map[string]any
 	if err := getJSON(ctx, endpoint+"?"+q.Encode(), nil, &payload); err != nil {

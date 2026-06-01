@@ -108,6 +108,7 @@ export default function AdminUsersPage() {
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [cleanupMinDays, setCleanupMinDays] = useState("7");
   const [cleanupPreview, setCleanupPreview] = useState<any[] | null>(null);
+  const [cleanupConfirmText, setCleanupConfirmText] = useState("");
   const [cleanupLoading, setCleanupLoading] = useState(false);
   const [stalePendingLoading, setStalePendingLoading] = useState(false);
   const [registrationQueueLoading, setRegistrationQueueLoading] = useState(false);
@@ -1192,6 +1193,7 @@ export default function AdminUsersPage() {
   const handleCleanupPreview = async () => {
     setCleanupLoading(true);
     setCleanupPreview(null);
+    setCleanupConfirmText("");
     try {
       const res = await api.cleanupInvalidUsers(parseInt(cleanupMinDays) || 7, true);
       if (res.success && res.data) {
@@ -1207,6 +1209,10 @@ export default function AdminUsersPage() {
   };
 
   const handleCleanupConfirm = async () => {
+    if (cleanupConfirmText.trim() !== "确认") {
+      toast({ title: "需要在文本框输入「确认」二字以继续", variant: "destructive" });
+      return;
+    }
     setCleanupLoading(true);
     try {
       const res = await api.cleanupInvalidUsers(parseInt(cleanupMinDays) || 7, false);
@@ -1218,6 +1224,7 @@ export default function AdminUsersPage() {
         });
         setCleanupOpen(false);
         setCleanupPreview(null);
+        setCleanupConfirmText("");
         invalidateUsersCache();
         loadUsers();
       } else {
@@ -2094,14 +2101,20 @@ export default function AdminUsersPage() {
         open={cleanupOpen}
         onOpenChange={(open) => {
           setCleanupOpen(open);
-          if (!open) setCleanupPreview(null);
+          if (!open) {
+            setCleanupPreview(null);
+            setCleanupConfirmText("");
+          }
         }}
         minDays={cleanupMinDays}
         onMinDaysChange={(next) => {
           setCleanupMinDays(next);
           setCleanupPreview(null);
+          setCleanupConfirmText("");
         }}
         preview={cleanupPreview}
+        confirmText={cleanupConfirmText}
+        onConfirmTextChange={setCleanupConfirmText}
         onPreview={handleCleanupPreview}
         onConfirm={handleCleanupConfirm}
         isLoading={cleanupLoading}

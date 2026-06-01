@@ -15,9 +15,9 @@ type ErrCode = string
 
 const (
 	// === 鉴权 / 会话 ===
-	ErrLoginRateLimited     ErrCode = "AUTH_LOGIN_RATE_LIMITED"
-	ErrLoginInvalid         ErrCode = "AUTH_LOGIN_INVALID"
-	ErrAccountDisabled      ErrCode = "AUTH_ACCOUNT_DISABLED"
+	ErrLoginRateLimited ErrCode = "AUTH_LOGIN_RATE_LIMITED"
+	ErrLoginInvalid     ErrCode = "AUTH_LOGIN_INVALID"
+	ErrAccountDisabled  ErrCode = "AUTH_ACCOUNT_DISABLED"
 	// ErrAccountExpired 与 ErrAccountDisabled 并列：前者是"entitlement 到期，
 	// 续费后即可恢复"，后者是"管理员手动禁用，需要联系管理员"。webui 拿到
 	// 不同 code 直接做不同 CTA：到期 → /renew；禁用 → /support。
@@ -244,6 +244,7 @@ const (
 	ErrRegcodeInvalid             ErrCode = "REGCODE_INVALID"
 	ErrBindCodeRateLimited        ErrCode = "BIND_CODE_RATE_LIMITED"
 	ErrBindCodeConflict           ErrCode = "BIND_CODE_CONFLICT"
+	ErrBindCodeSaveFailed         ErrCode = "BIND_CODE_SAVE_FAILED"
 	ErrBindCodeNotFound           ErrCode = "BIND_CODE_NOT_FOUND"
 	ErrTGUnbindForbidden          ErrCode = "TG_UNBIND_FORBIDDEN"
 	ErrTGNotBound                 ErrCode = "TG_NOT_BOUND"
@@ -301,12 +302,12 @@ const (
 	ErrConfigBackupDeleteFailed ErrCode = "CONFIG_BACKUP_DELETE_FAILED"
 
 	// === 违规 / 黑名单（violation_handlers.go / batch_helpers.go） ===
-	ErrViolationIDInvalid     ErrCode = "VIOLATION_ID_INVALID"
-	ErrViolationConfirmReq    ErrCode = "VIOLATION_CONFIRM_REQUIRED"
-	ErrViolationClearFailed   ErrCode = "VIOLATION_CLEAR_FAILED"
-	ErrBatchConfirmRequired   ErrCode = "BATCH_CONFIRM_REQUIRED"
-	ErrBatchUIDsRequired      ErrCode = "BATCH_UIDS_REQUIRED"
-	ErrBatchTooManyTargets    ErrCode = "BATCH_TOO_MANY_TARGETS"
+	ErrViolationIDInvalid   ErrCode = "VIOLATION_ID_INVALID"
+	ErrViolationConfirmReq  ErrCode = "VIOLATION_CONFIRM_REQUIRED"
+	ErrViolationClearFailed ErrCode = "VIOLATION_CLEAR_FAILED"
+	ErrBatchConfirmRequired ErrCode = "BATCH_CONFIRM_REQUIRED"
+	ErrBatchUIDsRequired    ErrCode = "BATCH_UIDS_REQUIRED"
+	ErrBatchTooManyTargets  ErrCode = "BATCH_TOO_MANY_TARGETS"
 
 	// === Telegram 内部绑定（telegram_bind_secure.go） ===
 	ErrTGBindCodeNotFound            ErrCode = "TG_BIND_CODE_NOT_FOUND"
@@ -321,10 +322,10 @@ const (
 	// forbidden"、"全局限流"和"登录限流 AUTH_LOGIN_RATE_LIMITED"，也无法
 	// 区分"路径不存在"和"用户/资源不存在 USER_NOT_FOUND"。补结构化码后，
 	// UI 可以分别给出"联系管理员解封"、"稍后重试"、"接口已下线" 等不同 CTA。
-	ErrIPBlacklisted        ErrCode = "SECURITY_IP_BLACKLISTED"
-	ErrGlobalRateLimited    ErrCode = "RATE_GLOBAL_LIMITED"
-	ErrRouteMethodNotAllow  ErrCode = "ROUTE_METHOD_NOT_ALLOWED"
-	ErrRouteNotFound        ErrCode = "ROUTE_NOT_FOUND"
+	ErrIPBlacklisted       ErrCode = "SECURITY_IP_BLACKLISTED"
+	ErrGlobalRateLimited   ErrCode = "RATE_GLOBAL_LIMITED"
+	ErrRouteMethodNotAllow ErrCode = "ROUTE_METHOD_NOT_ALLOWED"
+	ErrRouteNotFound       ErrCode = "ROUTE_NOT_FOUND"
 
 	// === 鉴权中间件 / Emby 越权拦截（app.go authenticate / emby.go） ===
 	// 这一组覆盖原本散落在中间件里的几条裸 fail() 路径。前端拿到这些码即可
@@ -340,21 +341,21 @@ const (
 
 	// === 批量 / 求片 / 演示 / 上传 / 运行时日志补码 ===
 	// 替换若干"裸 fail() + 中文 message"调用点，统一前端文案契约。
-	ErrBatchDaysInvalid              ErrCode = "BATCH_DAYS_INVALID"
-	ErrBatchLibraryActionInvalid     ErrCode = "BATCH_LIBRARY_ACTION_INVALID"
+	ErrBatchDaysInvalid          ErrCode = "BATCH_DAYS_INVALID"
+	ErrBatchLibraryActionInvalid ErrCode = "BATCH_LIBRARY_ACTION_INVALID"
 	// ErrBatchSelfTarget：批量操作命中当前 admin 自己（典型是 batch-delete
 	// 把自己也勾上）。前端拿到这条码即可在结果列表里高亮 self 行而不是把
 	// 通用的 "user not found" 文案铺满。
 	ErrBatchSelfTarget ErrCode = "BATCH_SELF_TARGET"
 	// ErrUserHasNoEmby：批量库权限 / 批量同步类操作只对绑定了 Emby 的账号
 	// 有意义；未绑定的用户被批量挑中时，前端按这条码引导到"先绑定 Emby"。
-	ErrUserHasNoEmby ErrCode = "USER_NO_EMBY"
-	ErrRegcodeStorageMismatch        ErrCode = "REGCODE_STORAGE_MISMATCH"
-	ErrRuntimeLogStreamUnsupported   ErrCode = "RUNTIME_LOG_STREAM_UNSUPPORTED"
-	ErrDemoActionRateLimited         ErrCode = "DEMO_ACTION_RATE_LIMITED"
-	ErrDemoActionInvalid             ErrCode = "DEMO_ACTION_INVALID"
-	ErrConfigSaveFailed              ErrCode = "CONFIG_SAVE_FAILED"
-	ErrAPIKeyLoginRateLimited        ErrCode = "AUTH_APIKEY_LOGIN_RATE_LIMITED"
+	ErrUserHasNoEmby               ErrCode = "USER_NO_EMBY"
+	ErrRegcodeStorageMismatch      ErrCode = "REGCODE_STORAGE_MISMATCH"
+	ErrRuntimeLogStreamUnsupported ErrCode = "RUNTIME_LOG_STREAM_UNSUPPORTED"
+	ErrDemoActionRateLimited       ErrCode = "DEMO_ACTION_RATE_LIMITED"
+	ErrDemoActionInvalid           ErrCode = "DEMO_ACTION_INVALID"
+	ErrConfigSaveFailed            ErrCode = "CONFIG_SAVE_FAILED"
+	ErrAPIKeyLoginRateLimited      ErrCode = "AUTH_APIKEY_LOGIN_RATE_LIMITED"
 )
 
 // ErrTGBindGroupMembershipMiss 是 ErrTGBindGroupMembershipRequired 的旧名。
