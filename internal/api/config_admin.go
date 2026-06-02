@@ -690,10 +690,16 @@ func regCodeRandomAlgorithmOptions() []map[string]any {
 	}
 }
 
+func inviteCodeRandomAlgorithmOptions() []map[string]any {
+	options := []map[string]any{{"label": "hex10（邀请码旧默认）", "value": "hex10"}}
+	return append(options, regCodeRandomAlgorithmOptions()...)
+}
+
 func configSectionDefs() []configSectionDef {
 	selectDriver := []map[string]any{{"label": "PostgreSQL（推荐）", "value": "postgres"}, {"label": "Go JSON 文件（兼容）", "value": "json"}}
 	selectUpdate := []map[string]any{{"label": "按间隔", "value": "interval"}, {"label": "每日固定时间", "value": "daily"}, {"label": "手动", "value": "manual"}}
 	selectRegCodeRandom := regCodeRandomAlgorithmOptions()
+	selectInviteCodeRandom := inviteCodeRandomAlgorithmOptions()
 	return []configSectionDef{
 		{Key: "Signin", Title: "签到", Description: "签到开关、每日随机奖励和连签奖励", Category: "policy", Fields: []configFieldDef{
 			{Key: "enabled", Label: "启用签到", Type: "bool", Description: "允许用户进入签到页面并领取每日积分"},
@@ -783,6 +789,7 @@ func configSectionDefs() []configSectionDef {
 			{Key: "renew_code_format", Label: "续期码专用格式", Type: "string", Description: "type=2 续期码使用；留空则回退到 regcode_format，邀请中心专属续期码留空时保持 REN-{random} 旧格式"},
 			{Key: "invite_code_format", Label: "邀请码格式", Type: "string", Description: "邀请树邀请码使用；默认 INV{random} 兼容旧码风格，支持 {random}/{type}/{days}/{index}"},
 			{Key: "regcode_random_algorithm", Label: "默认注册码随机算法", Type: "select", Description: "创建注册码未指定算法时使用；包含易抄写、URL 安全和特殊字符预设", Options: selectRegCodeRandom},
+			{Key: "invite_code_random_algorithm", Label: "默认邀请码随机算法", Type: "select", Description: "生成邀请码时使用；独立于注册码随机算法，hex10 为旧默认", Options: selectInviteCodeRandom},
 			{Key: "emby_user_limit", Label: "Emby 用户上限", Type: "int", Description: "-1 表示不限"},
 			{Key: "media_request_enabled", Label: "启用求片", Type: "bool", Description: "允许用户提交媒体请求"},
 			{Key: "max_concurrent_requests_per_user", Label: "每用户并发求片", Type: "int", Description: "-1 表示不限"},
@@ -893,7 +900,7 @@ func configValues(cfg config.Config) map[string]map[string]any {
 		"SAR": {
 			"register_mode": cfg.RegisterEnabled, "register_code_limit": cfg.RegisterCodeLimit, "allow_pending_register": cfg.AllowPendingRegister,
 			"emby_direct_register_enabled": cfg.EmbyDirectRegisterEnabled, "emby_direct_register_days": cfg.EmbyDirectRegisterDays, "emby_user_limit": cfg.EmbyUserLimit,
-			"user_limit": cfg.UserLimit, "regcode_format": cfg.RegCodeFormat, "register_code_format": cfg.RegisterCodeFormat, "renew_code_format": cfg.RenewCodeFormat, "invite_code_format": cfg.InviteCodeFormat, "regcode_random_algorithm": cfg.RegCodeRandomAlgorithm,
+			"user_limit": cfg.UserLimit, "regcode_format": cfg.RegCodeFormat, "register_code_format": cfg.RegisterCodeFormat, "renew_code_format": cfg.RenewCodeFormat, "invite_code_format": cfg.InviteCodeFormat, "regcode_random_algorithm": cfg.RegCodeRandomAlgorithm, "invite_code_random_algorithm": cfg.InviteCodeRandomAlgorithm,
 			"media_request_enabled": cfg.MediaRequestEnabled, "max_concurrent_requests_per_user": cfg.MaxConcurrentRequestsPerUser, "max_concurrent_requests_global": cfg.MaxConcurrentRequestsGlobal, "invite_enabled": cfg.InviteEnabled,
 			"invite_limit": cfg.InviteLimit, "invite_root_user_limit": cfg.InviteRootUserLimit, "invite_max_depth": cfg.InviteMaxDepth, "invite_require_emby": cfg.InviteRequireEmby,
 			"invite_code_default_days": cfg.InviteDefaultDays, "permanent_invite_max_days": cfg.PermanentInviteMaxDays, "auto_cleanup_no_emby": cfg.AutoCleanupNoEmby,

@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { api, type SystemInfo } from "@/lib/api";
-import { setCsrfCookieName } from "@/lib/api-request";
 
 /**
  * fetchInfo 不再静默吞错，
@@ -20,12 +19,8 @@ export interface SystemFetchResult {
  * SystemInfo TTL（毫秒）。loaded=true 之后默认 5 分钟内复用缓存；
  * 超过 TTL 的下一次 fetchInfo() 会自动重新拉取。
  *
- * 背景：admin 在 /admin/config 修改 csrf_cookie_name 后，其他已打开的标签页
- * 还在用旧 cookie 名读 token，POST 请求会被后端 CSRF 校验拒掉。原本 loaded
- * 一旦 true 就再也不会重拉，这些标签会一直坏到手动刷新。这里给一个上限。
- *
  * 主动失效路径走 invalidate()（admin 保存配置 / 上传 server-icon 后调用），
- * TTL 仅作为兜底，避免 admin 忘了调 invalidate 的场景。
+ * TTL 作为兜底，避免 admin 忘了调 invalidate 的场景。
  */
 const SYSTEM_INFO_TTL_MS = 5 * 60 * 1000;
 
@@ -42,14 +37,13 @@ interface SystemStore {
   /**
    * 当前正在飞行的 fetchInfo Promise。两个组件同帧 mount 都会调用 fetchInfo()，
    * 没有这把锁就会触发两次完全相同的 GET /api/system/info：浪费请求 +
-   * 双倍 setCsrfCookieName 写入 + 任意一次失败都会污染 lastError。
-   * 拿到 promise 后 awaiter 共用同一个结果。
+   * 任意一次失败都会污染 lastError。拿到 promise 后 awaiter 共用同一个结果。
    */
   inflight: Promise<SystemFetchResult> | null;
   fetchInfo: (force?: boolean) => Promise<SystemFetchResult>;
   /**
-   * 主动失效：admin 修改可能影响 systemInfo（特别是 csrf_cookie_name、
-   * server_icon、registration_enabled 等公开字段）的设置后调用。
+   * 主动失效：admin 修改可能影响 systemInfo（server_icon、registration_enabled
+   * 等公开字段）的设置后调用。
    * 不直接 fetch，下一次 fetchInfo() 会重新走网络。
    */
   invalidate: () => void;
@@ -77,13 +71,9 @@ export const useSystemStore = create<SystemStore>((set, get) => ({
     }
     const promise = (async (): Promise<SystemFetchResult> => {
       try {
-        const res = await api.getSystemInfo();
-        if (res.success && res.data) {
-          // 把后端公开的 csrf cookie 名注入到 api-request 模块缓存里。
-          // 之后 readCSRFCookie() 会按精确名匹配，避免同域 / 父域第三方
-          // 应用下发的其它 *_csrf cookie 把 token 取错。
-          setCsrfCookieName(res.data.csrf_cookie_name ?? null);
-          set({
+		const res = await api.getSystemInfo();
+		if (res.success && res.data) {
+		  set({
             info: res.data,
             loaded: true,
             lastError: null,
@@ -91,11 +81,7 @@ export const useSystemStore = create<SystemStore>((set, get) => ({
           });
           return { success: true };
         }
-        // 后端 200 但 envelope.success=false 的极少数路径：把缓存清空。
-        // 此前若 admin 已改 csrf_cookie_name 但第二次 fetchInfo 失败，
-        // 缓存仍指向旧名，所有 mutating 请求会因 X-CSRF-Token 缺失被 403。
-        // 让 readCSRFCookie() 退回 "*_csrf 后缀启发式"，至少能跑过去。
-        setCsrfCookieName(null);
+		// 后端 200 但 envelope.success=false 的极少数路径：保留失败状态。
         const failure: SystemFetchResult = {
           success: false,
           errorCode: res.error_code,
@@ -106,10 +92,7 @@ export const useSystemStore = create<SystemStore>((set, get) => ({
         // ApiError 由 lib/api-request.ts 抛出，携带 errorCode/backendMessage；
         // 网络错误（fetch 抛 TypeError）则没有 errorCode。
         const apiErr = err as { errorCode?: string } | null;
-        // 同上：异常路径也要让 csrf cookie 名缓存失效，避免 admin 改名后
-        // 因为新一次 fetchInfo 网络失败导致前端永远用旧名匹配 cookie。
-        setCsrfCookieName(null);
-        const failure: SystemFetchResult = {
+		const failure: SystemFetchResult = {
           success: false,
           errorCode: apiErr?.errorCode,
           networkError: !apiErr?.errorCode,

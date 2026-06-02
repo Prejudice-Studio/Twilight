@@ -67,7 +67,7 @@ type Config struct {
 	SessionTTL     time.Duration
 	CookieSecure   bool
 	CookieSameSite string
-	// CookieDomain 让 session / csrf cookie 显式跨子域共享。
+	// CookieDomain 让 session cookie 显式跨子域共享。
 	// 典型双子域部署：webui = https://twilight.example.com，API =
 	// https://twilightapi.example.com。后端 Set-Cookie 默认不带 Domain，
 	// 浏览器把 cookie 锁在 twilightapi.example.com，于是：
@@ -139,6 +139,7 @@ type Config struct {
 	RenewCodeFormat              string
 	InviteCodeFormat             string
 	RegCodeRandomAlgorithm       string
+	InviteCodeRandomAlgorithm    string
 	NotificationEnabled          bool
 	NotificationExpiryRemindDays int
 	AutoCleanupNoEmby            bool
@@ -317,6 +318,7 @@ func Load(path string) (Config, error) {
 	cfg.RenewCodeFormat = reader.stringValue(cfg.RenewCodeFormat, "SAR.renew_code_format", "Register.renew_code_format", "renew_code_format")
 	cfg.InviteCodeFormat = reader.stringValue(cfg.InviteCodeFormat, "SAR.invite_code_format", "Register.invite_code_format", "invite_code_format")
 	cfg.RegCodeRandomAlgorithm = reader.stringValue(cfg.RegCodeRandomAlgorithm, "SAR.regcode_random_algorithm", "Register.regcode_random_algorithm", "regcode_random_algorithm")
+	cfg.InviteCodeRandomAlgorithm = reader.stringValue(cfg.InviteCodeRandomAlgorithm, "SAR.invite_code_random_algorithm", "Register.invite_code_random_algorithm", "invite_code_random_algorithm")
 	cfg.MediaRequestEnabled = reader.boolValue(cfg.MediaRequestEnabled, "SAR.media_request_enabled", "Register.media_request_enabled", "media_request_enabled")
 	cfg.MaxConcurrentRequestsPerUser = reader.intValue(cfg.MaxConcurrentRequestsPerUser, "SAR.max_concurrent_requests_per_user", "Register.max_concurrent_requests_per_user", "max_concurrent_requests_per_user")
 	cfg.MaxConcurrentRequestsGlobal = reader.intValue(cfg.MaxConcurrentRequestsGlobal, "SAR.max_concurrent_requests_global", "Register.max_concurrent_requests_global", "max_concurrent_requests_global")
@@ -432,6 +434,7 @@ func defaults() Config {
 		RegCodeFormat:                     "TW-{type}-{random}",
 		InviteCodeFormat:                  "INV{random}",
 		RegCodeRandomAlgorithm:            "base32-20",
+		InviteCodeRandomAlgorithm:         "hex10",
 		NotificationEnabled:               true,
 		NotificationExpiryRemindDays:      3,
 		AutoCleanupNoEmbyDays:             7,
@@ -676,6 +679,9 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("TWILIGHT_REGCODE_RANDOM_ALGORITHM"); v != "" {
 		cfg.RegCodeRandomAlgorithm = strings.TrimSpace(v)
+	}
+	if v := firstNonEmpty(os.Getenv("TWILIGHT_INVITE_CODE_RANDOM_ALGORITHM"), os.Getenv("TWILIGHT_SAR_INVITE_CODE_RANDOM_ALGORITHM")); v != "" {
+		cfg.InviteCodeRandomAlgorithm = strings.TrimSpace(v)
 	}
 	if v := os.Getenv("TWILIGHT_MEDIA_REQUEST_ENABLED"); v != "" {
 		cfg.MediaRequestEnabled = boolValue(v, cfg.MediaRequestEnabled)

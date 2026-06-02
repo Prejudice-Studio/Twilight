@@ -129,22 +129,18 @@ func (a *App) handleUpdateUsername(w http.ResponseWriter, r *http.Request, _ Par
 
 // rotateSessionsAfterPasswordChange 在用户自助修改密码后吊销其全部会话（驱逐任何
 // 被盗 token），再为当前调用方签发一份新会话，使其在本设备保持登录：cookie 客户端
-// 透明续期（重写 session + csrf cookie），Bearer 客户端用返回体里的新 token 续用。
+// 透明续期（重写 session cookie），Bearer 客户端用返回体里的新 token 续用。
 // 与 handleAdminResetPassword / handleForgotPassword 的「改密即吊销旧会话」口径一致。
 // 失败时已写响应，返回 ok=false，调用方直接 return。
-func (a *App) rotateSessionsAfterPasswordChange(w http.ResponseWriter, r *http.Request, uid int64) (string, string, bool) {
+func (a *App) rotateSessionsAfterPasswordChange(w http.ResponseWriter, r *http.Request, uid int64) (string, bool) {
 	a.sessions().DeleteUser(r.Context(), uid)
 	token, expires, err := a.sessions().Create(r.Context(), uid)
 	if err != nil {
 		failWithCode(w, http.StatusInternalServerError, ErrSessionCreateFailed, "创建会话失败")
-		return "", "", false
+		return "", false
 	}
-	csrf, err := a.issueSessionCookies(w, token, expires)
-	if err != nil {
-		failWithCode(w, http.StatusInternalServerError, ErrSessionCreateFailed, "创建 CSRF 令牌失败")
-		return "", "", false
-	}
-	return token, csrf, true
+	a.issueSessionCookies(w, token, expires)
+	return token, true
 }
 
 func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -172,11 +168,11 @@ func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request, _ Par
 	if statusFromError(w, err) {
 		return
 	}
-	token, csrf, rotated := a.rotateSessionsAfterPasswordChange(w, r, p.User.UID)
+	token, rotated := a.rotateSessionsAfterPasswordChange(w, r, p.User.UID)
 	if !rotated {
 		return
 	}
-	ok(w, "password updated", map[string]any{"token": token, "csrf_token": csrf})
+	ok(w, "password updated", map[string]any{"token": token})
 }
 
 func (a *App) handleGeneratedPassword(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -196,11 +192,11 @@ func (a *App) handleGeneratedPassword(w http.ResponseWriter, r *http.Request, _ 
 	if statusFromError(w, err) {
 		return
 	}
-	token, csrf, rotated := a.rotateSessionsAfterPasswordChange(w, r, p.User.UID)
+	token, rotated := a.rotateSessionsAfterPasswordChange(w, r, p.User.UID)
 	if !rotated {
 		return
 	}
-	ok(w, "password reset", map[string]any{"new_password": password, "token": token, "csrf_token": csrf})
+	ok(w, "password reset", map[string]any{"new_password": password, "token": token})
 }
 
 func (a *App) handleChangeEmbyPassword(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -733,16 +729,11 @@ func (a *App) handleSuspicious(w http.ResponseWriter, r *http.Request, _ Params)
 
 func (a *App) handleSystemInfo(w http.ResponseWriter, r *http.Request, _ Params) {
 	ok(w, "OK", map[string]any{
-		"name":        a.cfg().AppName,
-		"icon":        a.publicServerIconURL(),
-		"version":     a.cfg().Version,
-		"api_version": "v1",
-		// 把 session / csrf cookie 名公开给前端，让 CSRF 提取按精确名匹配
-		// 而不是 *_csrf 后缀启发式。同域 / 父域第三方应用
-		// 能下发 xx_csrf cookie 时，旧策略会取错；前端按 systemInfo 拿到的
-		// 精确名后必然只命中后端真正下发的那一个。
+		"name":                a.cfg().AppName,
+		"icon":                a.publicServerIconURL(),
+		"version":             a.cfg().Version,
+		"api_version":         "v1",
 		"session_cookie_name": a.cfg().SessionCookie,
-		"csrf_cookie_name":    a.cfg().SessionCookie + "_csrf",
 		"features": map[string]any{
 			"register":             a.cfg().RegisterEnabled,
 			"emby_direct_register": a.cfg().EmbyDirectRegisterEnabled,

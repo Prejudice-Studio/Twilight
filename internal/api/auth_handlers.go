@@ -100,15 +100,11 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request, _ Params) {
 		failWithCode(w, http.StatusInternalServerError, ErrSessionCreateFailed, "创建会话失败")
 		return
 	}
-	csrf, err := a.issueSessionCookies(w, token, expires)
-	if err != nil {
-		failWithCode(w, http.StatusInternalServerError, ErrSessionCreateFailed, "创建 CSRF 令牌失败")
-		return
-	}
+	a.issueSessionCookies(w, token, expires)
 	deviceID := firstNonEmpty(r.Header.Get("X-Twilight-Device"), r.UserAgent(), a.clientIP(r))
 	_ = a.store().UpsertDevice(store.Device{UID: u.UID, DeviceID: deviceID, DeviceName: firstNonEmpty(r.UserAgent(), "unknown"), Client: "web", FirstSeen: time.Now().Unix(), LastSeen: time.Now().Unix()})
 	_ = a.store().AddLoginLog(store.LoginLog{UID: u.UID, IP: a.clientIP(r), DeviceID: deviceID, DeviceName: firstNonEmpty(r.UserAgent(), "unknown"), Client: "web", Time: time.Now().Unix()})
-	ok(w, "登录成功", map[string]any{"token": token, "csrf_token": csrf, "user": publicUser(u)})
+	ok(w, "登录成功", map[string]any{"token": token, "user": publicUser(u)})
 }
 
 func (a *App) handleLoginByAPIKey(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -151,12 +147,8 @@ func (a *App) handleLoginByAPIKey(w http.ResponseWriter, r *http.Request, _ Para
 		failWithCode(w, http.StatusInternalServerError, ErrSessionCreateFailed, "创建会话失败")
 		return
 	}
-	csrf, err := a.issueSessionCookies(w, token, expires)
-	if err != nil {
-		failWithCode(w, http.StatusInternalServerError, ErrSessionCreateFailed, "创建 CSRF 令牌失败")
-		return
-	}
-	ok(w, "登录成功", map[string]any{"token": token, "csrf_token": csrf, "user": publicUser(u)})
+	a.issueSessionCookies(w, token, expires)
+	ok(w, "登录成功", map[string]any{"token": token, "user": publicUser(u)})
 }
 
 func (a *App) handleDirectLoginUnavailable(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -259,12 +251,8 @@ func (a *App) handleRefresh(w http.ResponseWriter, r *http.Request, _ Params) {
 		failWithCode(w, http.StatusInternalServerError, ErrAuthSessionRefreshFailed, "刷新会话失败")
 		return
 	}
-	csrf, err := a.issueSessionCookies(w, token, expires)
-	if err != nil {
-		failWithCode(w, http.StatusInternalServerError, ErrAuthCSRFRefreshFailed, "刷新 CSRF 令牌失败")
-		return
-	}
-	ok(w, "刷新成功", map[string]any{"token": token, "csrf_token": csrf, "user": publicUser(p.User)})
+	a.issueSessionCookies(w, token, expires)
+	ok(w, "刷新成功", map[string]any{"token": token, "user": publicUser(p.User)})
 }
 
 func (a *App) handleCurrentUser(w http.ResponseWriter, r *http.Request, _ Params) {

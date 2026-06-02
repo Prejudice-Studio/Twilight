@@ -159,6 +159,6 @@ max_upload_size = 5242880
 
 ## 相关文档
 
-- 鉴权级别、统一响应 envelope 与 CSRF 机制：见 [Go 后端架构与配置](../reference/backend.md)。
+- 鉴权级别、统一响应 envelope 与 CORS 机制：见 [Go 后端架构与配置](../reference/backend.md)。
 - 完整 API 详参：见 [后端 API 详参](../reference/backend-api.md) 与 [API 路由索引](../reference/api-index.md)。
 - 出站 SSRF 防护与整体安全加固：见 [安全加固](../guides/security.md)。

@@ -164,9 +164,9 @@ pnpm start -p 3000
 - 不要把 `*` 作为带 Cookie 登录态接口的 CORS Origin——含 `*` 时浏览器会禁用 Cookie，登录会失败。
 - 双子域场景（如 webui `https://twilight.example.com`、API `https://twilightapi.example.com`）必须设置 `session_cookie_domain = ".example.com"`，否则浏览器把 cookie 锁在 API 子域，webui 的鉴权请求一律 401，Next 中间件也读不到登录 cookie。
 
-### CSRF 与可信代理
+### 可信代理
 
-- CSRF 采用「双提交 Cookie 令牌」：后端除了会话 cookie，还会下发一个非 HttpOnly 的 `<session_cookie_name>_csrf` cookie；前端把它的值放进 `X-CSRF-Token` 请求头，后端 `verifyCSRFToken`（`internal/api/app.go`）用常数时间比对二者。该校验仅对「Cookie 鉴权 + 变更类方法（POST/PUT/DELETE）」的请求强制。Bearer Token / API Key 鉴权的请求不走 CSRF。`X-Twilight-Client: webui` 这个头如今只出现在 CORS 允许头列表里，并不被强制校验。
+- 后端不再要求 CSRF 令牌；浏览器写请求只依赖登录会话 Cookie 鉴权。`X-Twilight-Client: webui` 只出现在 CORS 允许头列表里，并不被强制校验。
 - 反向代理后必须正确设置 `trusted_proxy_cidrs`：只有当请求的直接上游 IP 落在该列表内时，后端才会信任 `CF-Connecting-IP` / `X-Real-IP` / `X-Forwarded-For` 解析真实客户端 IP，否则一律用 `RemoteAddr`，防止任意人伪造头绕过 IP 黑名单与限流。默认只信任本机（`127.0.0.0/8`、`::1/128`）；多级代理时显式加入反代出口 IP/CIDR，不要直接填整个私网段。键名必须与代码一致（`trusted_proxy_cidrs`），写错会被静默忽略并退化到 fail-closed。
 
 更完整的安全加固见 [安全加固](./security.md)。

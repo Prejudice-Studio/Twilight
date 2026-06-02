@@ -32,8 +32,6 @@ export type ErrCode =
   | "AUTH_PASSWORD_OLD_MISMATCH"
   | "AUTH_PASSWORD_WEAK"
   | "AUTH_PASSWORD_HASH_FAILED"
-  | "AUTH_CSRF_MISSING"
-  | "AUTH_CSRF_MISMATCH"
   // === 用户 / 注册 ===
   | "USER_REGISTER_RATE_LIMITED"
   | "USER_REGISTER_DISABLED"
@@ -165,7 +163,6 @@ export type ErrCode =
   // === handlers.go 历史遗留：登录 / 资料 / 绑定 / 上传 / 管理员维护 ===
   | "AUTH_CREDENTIALS_EMPTY"
   | "AUTH_SESSION_REFRESH_FAILED"
-  | "AUTH_CSRF_REFRESH_FAILED"
   | "USER_NEW_USERNAME_REQUIRED"
   | "USER_BACKGROUND_INVALID"
   | "EMBY_ALREADY_LINKED"
@@ -307,8 +304,6 @@ export const ErrCodes = {
   PasswordOldMismatch: "AUTH_PASSWORD_OLD_MISMATCH",
   PasswordWeak: "AUTH_PASSWORD_WEAK",
   PasswordHashFailed: "AUTH_PASSWORD_HASH_FAILED",
-  CSRFMissing: "AUTH_CSRF_MISSING",
-  CSRFMismatch: "AUTH_CSRF_MISMATCH",
   // 用户 / 注册
   RegisterRateLimited: "USER_REGISTER_RATE_LIMITED",
   RegisterDisabled: "USER_REGISTER_DISABLED",
@@ -440,7 +435,6 @@ export const ErrCodes = {
   // handlers.go 历史遗留
   AuthCredentialsEmpty: "AUTH_CREDENTIALS_EMPTY",
   AuthSessionRefreshFailed: "AUTH_SESSION_REFRESH_FAILED",
-  AuthCSRFRefreshFailed: "AUTH_CSRF_REFRESH_FAILED",
   UserNewUsernameRequired: "USER_NEW_USERNAME_REQUIRED",
   UserBackgroundInvalid: "USER_BACKGROUND_INVALID",
   EmbyAlreadyLinked: "EMBY_ALREADY_LINKED",

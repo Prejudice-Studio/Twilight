@@ -194,4 +194,4 @@
 | `POST /api/v1/users/me/renew` | AuthUser | 仅接受 type=2 续期码 |
 | `GET/POST/PUT/DELETE /api/v1/admin/regcodes*` | AuthAdmin | 批量删除/清理需确认短语；写操作受数据库一致性护栏约束 |
 
-所有变更类请求若以 Cookie 会话鉴权，还需通过「双提交 CSRF 令牌」校验（`X-CSRF-Token` 请求头须等于 `<会话Cookie名>_csrf` 这个非 HttpOnly cookie 的值，`verifyCSRFToken` 用 `subtle.ConstantTimeCompare` 比对）。统一响应 envelope 为 `{ success, code, message, data, timestamp }`。鉴权级别与响应约定详见 [API 路由索引](../reference/api-index.md) 与 [后端 API 详参](../reference/backend-api.md)。
+所有变更类请求只按对应鉴权级别校验有效 Cookie 会话、Bearer Token 或 API Key，不再要求额外令牌。统一响应 envelope 为 `{ success, code, message, data, timestamp }`。鉴权级别与响应约定详见 [API 路由索引](../reference/api-index.md) 与 [后端 API 详参](../reference/backend-api.md)。

@@ -24,14 +24,14 @@
 | 响应封装 | 统一 envelope：`{ success, code, error_code, message, data, timestamp }`（见 `internal/api/response.go`，`data`/`error_code` 为空时省略） |
 | 会话鉴权 | 登录态会话 Cookie，或 `Authorization: Bearer <token>` |
 | API Key 鉴权 | `X-API-Key: <key>`、`Authorization: ApiKey <key>` / `Authorization: Bearer <key>`，或 `?apikey=<key>` 查询串（仅当该 Key 开启 `AllowQuery` 时生效，见 `internal/api/app.go` 的 `authenticateAPIKey`） |
-| CSRF 防护 | 对「Cookie 鉴权 + 变更类方法（POST/PUT/DELETE）」的请求强制双提交 Cookie 令牌：前端把名为 `<session_cookie>_csrf` 的非 HttpOnly Cookie 的值放进 `X-CSRF-Token` 请求头，后端 `verifyCSRFToken` 用 `subtle.ConstantTimeCompare` 比对二者，缺失或不匹配返回 403（`AUTH_CSRF_MISSING`）。Bearer / API Key 鉴权不触发 CSRF 校验 |
+| Cookie 写请求 | 不再要求 CSRF 令牌；Cookie 鉴权写请求只依赖有效登录会话，Bearer / API Key 按各自鉴权路径处理 |
 | 管理接口归置 | 业务管理接口归入 `/admin/*`，系统配置/运维类归入 `/system/admin/*` |
 | 用户自有资源 | 优先使用 `/users/me/*` |
 | 公开资源 | 必须显式标记为 Public，并评估限流与信息泄露风险 |
 | 线路接口 | 推荐使用 `GET /system/emby-urls`；`GET /emby/urls` 已弃用 |
 | 上传资源 | 仅允许通过 `GET /users/assets/{kind}/{filename}` 受控访问，不公开 `/uploads` 目录 |
 
-> 说明：旧文档曾写「Cookie 写请求必须带 `X-Twilight-Client: webui`，否则 403」。这一描述已过时——`X-Twilight-Client` 现在只出现在 CORS 的 `Access-Control-Allow-Headers` 列表里（与 `Content-Type, Authorization, X-API-Key, X-CSRF-Token` 并列），并不参与强制校验。真正的写请求防护是上表所述的双提交 CSRF 令牌。
+> 说明：`X-Twilight-Client` 现在只出现在 CORS 的 `Access-Control-Allow-Headers` 列表里（与 `Content-Type, Authorization, X-API-Key` 并列），不参与鉴权或写请求校验。
 
 ## 根与文档
 

@@ -37,7 +37,7 @@ Twilight 0.0.4 Go 后端重构版已更新。
 
 5. 安全加固
    - 凭据型 CORS 不再接受通配符。
-   - Cookie 变更类请求（POST/PUT/DELETE）启用双提交 CSRF 令牌：前端把 `<session_cookie>_csrf` cookie 的值放进 `X-CSRF-Token` 请求头，后端用常量时间比对二者，不一致则拒绝。
+   - Cookie 变更类请求不再要求额外令牌；浏览器端依赖 HttpOnly 会话 Cookie，机器调用使用 Bearer Token 或 API Key。
    - 管理接口统一收紧鉴权边界。
    - 上传资源、背景样式、备份恢复和 Git 更新都加强了路径、类型和输入校验。
    - 非系统管理员绑定 Emby 管理员账号时会被限制敏感操作，防止越权。
@@ -184,7 +184,7 @@ Twilight 0.0.4 Go 后端重构版已更新。
 
 - 凭据型 CORS 不再接受 `*`，生产环境必须显式配置可信前端 Origin。
 - CORS Origin 匹配增加规范化处理，允许配置尾斜杠，但拒绝带路径、查询串、片段或非法 scheme 的来源，降低跨域配置误用风险。
-- Cookie 变更类请求采用双提交 CSRF 令牌防护：前端把 `<session_cookie>_csrf`（非 HttpOnly）cookie 的值放进 `X-CSRF-Token` 请求头，后端 `verifyCSRFToken`（`internal/api/app.go`）用 `subtle.ConstantTimeCompare` 比对二者，仅对「Cookie 鉴权 + POST/PUT/DELETE」请求强制，缺失或不一致时返回 403。
+- Cookie 变更类请求不再要求额外令牌；鉴权边界收敛到有效会话、Bearer Token 或 API Key，`X-Twilight-Client` 仅保留为允许的 CORS 请求头。
 - 新增管理员实时日志与服务器状态接口；日志只来自 Go 进程内缓冲，不读取任意系统日志文件，并对 Token、Cookie、密码、API Key、DSN 等敏感内容做脱敏。
 - TestWeb 后端改为固定只读模拟接口，演示媒体搜索不再复用真实搜索链路，演示动作增加白名单校验、限流、`no-store` 和 `X-Twilight-Demo` 标识。
 - 用户背景配置改为后端结构化校验，只允许安全渐变表达式和本系统上传的背景资源，阻断任意外部 URL、复杂 CSS 函数和 `url()` 注入。
@@ -244,7 +244,7 @@ Twilight 0.0.4 Go 后端重构版已更新。
 - 增加面向公网部署的安全修复和 Emby 容量控制。
 - 增加代理感知的客户端 IP 识别，提升反向代理部署下的限流准确性。
 - 增加 Redis 限流和会话能力，支持多实例共享状态。
-- 增加 CSRF 保护和 TestWeb 相关限流。
+- 增加公网部署安全护栏和 TestWeb 相关限流。
 
 ### 数据一致性
 

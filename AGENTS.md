@@ -13,14 +13,14 @@
 ## 目录速览
 
 - `cmd/twilight`：Go CLI 入口，支持 `api`、`all`、`scheduler`、`bot`、`version`。
-- `internal/api`：HTTP 路由、鉴权、CSRF、限流、统一响应、handler、外部服务 client、调度器和运维接口。
+- `internal/api`：HTTP 路由、鉴权、限流、统一响应、handler、外部服务 client、调度器和运维接口。
 - `internal/api/routes.go`：全部后端路由的集中注册点。
 - `internal/config`：读取 `config.toml`、`config.local.toml` 和 `TWILIGHT_*` 环境变量。
 - `internal/store`：单一状态文档存储，支持 JSON 文件或 PostgreSQL。
 - `internal/redis`：Redis RESP 客户端，用于会话与限流共享。
 - `internal/security`：Token、密码哈希与安全随机数。
 - `webui/src/app`：Next.js App Router 页面。
-- `webui/src/lib/api-request.ts`：底层请求、CSRF、超时与 `ApiError`。
+- `webui/src/lib/api-request.ts`：底层请求、凭据、超时与 `ApiError`。
 - `webui/src/lib/api.ts`：前端 API 客户端，新增后端接口时通常要同步这里和 `api-types.ts`。
 - `deploy/`：systemd unit 与安装脚本。部署 unit 必须指向 `bin/twilight`。
 
@@ -68,7 +68,7 @@ pnpm build
 - 避免循环依赖和隐式副作用。不要在包初始化、全局变量或 helper 中偷偷读取/修改配置、store、环境变量或网络资源；启动、reload、scheduler、bot 的生命周期由现有入口显式管理。
 - 优化前先确认瓶颈。缓存、并发、批处理、后台任务和 Redis 使用必须有清晰失效策略、限流/超时和测试覆盖；不要为小路径引入难以验证的全局缓存或共享可变状态。
 - JSON 响应必须使用统一 envelope：`success`、`code`、`message`、`data`、`timestamp`，失败响应应带稳定 `error_code`，与前端 `ApiError` / `errcode.ts` 保持兼容。
-- Cookie 鉴权的变更类请求必须通过双提交 CSRF：前端读取 `<session_cookie>_csrf` 并发送 `X-CSRF-Token`。`X-Twilight-Client: webui` 只是允许的 CORS 头，不是鉴权或 CSRF 手段。
+- Cookie 鉴权的变更类请求不再做 CSRF 令牌校验。鉴权依赖 HttpOnly session cookie、Bearer token 或 API Key；`X-Twilight-Client: webui` 只是允许的 CORS 头，不是鉴权手段。
 - 运行时可热重载的 `cfg/store/sessions/limiter/redis` 通过 `runtimeState` 原子快照管理。读配置或 store 时优先使用 `a.cfg()`、`a.store()` 等访问器，不要缓存会跨 reload 失效的句柄。
 - 配置入口固定为工作目录下的 `config.toml`；`--config` 只接受同一个工作目录的 `config.toml`。私密覆盖使用同目录 `config.local.toml` 或 `TWILIGHT_CONFIG_LOCAL_FILE`，环境变量以 `TWILIGHT_*` 覆盖字段。
 - 存储模型是单一 `store.State` 文档。新增业务实体通常是在 `internal/store/store.go` 的 `State` 上加字段，并在 `ensure()` 中补默认值；不要为邀请、公告、注册码等业务重新创建独立 SQLite 文件或独立表。
@@ -80,7 +80,7 @@ pnpm build
 
 ## 前端约定
 
-- 所有后端调用集中维护在 `webui/src/lib/api.ts`，底层请求统一走 `webui/src/lib/api-request.ts`。不要在页面中散落裸 `fetch`，除非有明确理由并保持相同的 credentials、CSRF、超时和错误处理语义。
+- 所有后端调用集中维护在 `webui/src/lib/api.ts`，底层请求统一走 `webui/src/lib/api-request.ts`。不要在页面中散落裸 `fetch`，除非有明确理由并保持相同的 credentials、超时和错误处理语义。
 - `apiRequest` 会自动使用 `${NEXT_PUBLIC_API_URL}/api/v1`；未设置 `NEXT_PUBLIC_API_URL` 时，`next.config.mjs` 将 `/api/*` rewrite 到 `BACKEND_URL`，默认 `http://localhost:5000`。
 - 新增或调整接口时，同步检查 `api.ts`、`api-types.ts`、后端路由、请求方法、鉴权级别、错误码、确认短语和移动端展示。
 - 页面分组：`webui/src/app/(auth)` 放登录、注册、找回密码；`webui/src/app/(main)` 放用户面板与管理页。新增 UI 优先复用 `webui/src/components`、`hooks` 和 `lib` 中已有模式。

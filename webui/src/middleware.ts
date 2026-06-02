@@ -34,8 +34,7 @@ import { getSessionCookieName } from "@/lib/session-cookie";
  *
  * 同源策略 + `frame-ancestors 'none'` + `object-src 'none'` 仍然挡掉了
  * `<iframe src=>` 嵌入与 Flash/PDF object 注入；XSS 表面 = "攻击者能写
- * 进同源 DOM"，与项目其他地方（HttpOnly cookie、CSRF token、后端输入
- * 校验）的纵深防御边界一致。
+ * 进同源 DOM"，与项目其他地方（HttpOnly cookie、后端输入校验）的纵深防御边界一致。
  *
  * ## Session cookie 守卫
  *
@@ -133,7 +132,7 @@ export function middleware(request: NextRequest) {
   // （CSP3 规范要求 source-list 含 nonce-source 时忽略 'unsafe-inline'），
   // 走 'self' 'unsafe-inline' 是当前最稳的策略——同源 + frame-ancestors 'none'
   // + object-src 'none' 已挡掉框架嵌入与对象注入，纵深防御交给 HttpOnly cookie
-  // / CSRF token / 后端输入校验。
+  // / 后端输入校验。
   // static.cloudflareinsights.com 是 CF Pages 自动注入的 RUM 脚本来源；不放进
   // 允许列表会在控制台刷出 "Refused to load the script ... beacon.min.js"。
   const csp = [

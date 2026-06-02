@@ -47,29 +47,19 @@ allow_credential = true
 ```
 
 - `allow_credential = true` 同时放行 `localhost` / `127.0.0.1` / `[::1]` 在生产环境是高危（任何人在本机起 dev 前端即可携带 cookie 跨站访问），启动期会打 `Error` 提示，请仅在 dev profile 使用。
-- 允许的请求头列表为 `Content-Type, Authorization, X-API-Key, X-Twilight-Client, X-CSRF-Token`。注意 `X-Twilight-Client` 仅出现在 CORS 允许头列表里，**并不被强制校验**（详见下一节 CSRF 说明）。
+- 允许的请求头列表为 `Content-Type, Authorization, X-API-Key, X-Twilight-Client`。注意 `X-Twilight-Client` 仅出现在 CORS 允许头列表里，**并不被强制校验**。
 
 ### 3.2 会话与 Cookie
 
 - 若通过 HTTPS 对外提供服务（生产基线），保持：
   - `session_cookie_secure = true`（默认即 `true`；纯 HTTP 调试才显式关闭，否则会话明文走线）；
   - 合理的 `session_cookie_samesite`（默认 `lax`，可选 `strict` / `none`）。
-- session cookie（默认名 `twilight_session`）为 `HttpOnly`；CSRF cookie（`<session_cookie>_csrf`）为非 `HttpOnly`，供前端 JS 读取。两者共用 `session_cookie_domain`：单 origin 部署留空；双子域部署（webui 与 API 不同子域）需设为 `.example.com` 让两子域共享 cookie。
-- 会话 TTL 由 `session_cookie_ttl`（默认 7 天）控制；登出会同时清除 session 与 csrf 两个 cookie。
+- session cookie（默认名 `twilight_session`）为 `HttpOnly`。`session_cookie_domain` 单 origin 部署留空；双子域部署（webui 与 API 不同子域）需设为 `.example.com` 让两子域共享 cookie。
+- 会话 TTL 由 `session_cookie_ttl`（默认 7 天）控制；登出会清除 session cookie。
 
-### 3.3 CSRF 防护（双提交 Cookie 令牌）
+### 3.3 Cookie 写请求
 
-> 纠正：旧文档曾写「Cookie 写请求必须带 `X-Twilight-Client: webui`，否则 403」。这一机制已不存在。现行机制是**双提交 CSRF 令牌**。
-
-真实机制（`internal/api/app.go` 的 `verifyCSRFToken` / `setCSRFCookie`）：
-
-- 登录成功时后端通过 `issueSessionCookies` 一次性下发 session cookie 与一个名为 `<session_cookie>_csrf` 的**非 HttpOnly** cookie（值为 32 字节随机 hex），同时把令牌回写到登录响应 body（前端可任选 cookie / body 来源）。
-- 前端把该 cookie 的值放进 `X-CSRF-Token` 请求头。
-- 后端用 `subtle.ConstantTimeCompare` 对比「`X-CSRF-Token` 头」与「`<session_cookie>_csrf` cookie」的值；长度不符或长度低于 16 字符直接拒绝。
-- 校验**仅对「Cookie 鉴权 + 变更类方法（POST/PUT/PATCH/DELETE）」**的请求强制；Bearer Token / API Key 鉴权不经过 cookie，不受此校验。
-- 校验失败返回 `HTTP 403` + 错误码 `AUTH_CSRF_MISSING`。
-
-攻击者站点无法跨域读取 cookie，也无法伪造同名请求头，因此无法构造合法的变更请求。
+后端不再做 CSRF 令牌校验；Cookie 鉴权写请求只要求有效的 `HttpOnly` session cookie。Bearer Token / API Key 仍按各自鉴权路径处理。
 
 ## 4. 鉴权级别与统一响应
 
@@ -232,7 +222,7 @@ Git 自动更新（`internal/api/system_update.go`）：
 - [ ] `config.local.toml` 与 `.env` 未入库
 - [ ] CORS 为明确域名列表，非通配符
 - [ ] HTTPS 与安全 Cookie（`session_cookie_secure` / 合理 `samesite`）已启用
-- [ ] 双子域部署已正确设置 `session_cookie_domain`，前端能读到 `<session_cookie>_csrf`
+- [ ] 双子域部署已正确设置 `session_cookie_domain`，前端和 API 能共享 session cookie
 - [ ] `bot_internal_secret` 已配置并验证（若启用内部回调）
 - [ ] 多副本部署已配置 Redis（会话 + 限流共享）
 - [ ] `trust_proxy_headers` 与 `trusted_proxy_cidrs` 配置一致（启用代理头时 CIDR 不为空）

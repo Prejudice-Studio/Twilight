@@ -223,6 +223,8 @@ invite_require_emby = true
 invite_code_default_days = 30
 # 邀请码格式；支持 {random}/{type}/{days}/{index}，不强制固定前缀。
 invite_code_format = "inv-{random}"
+# 邀请码随机算法；独立于注册码随机算法。hex10 为旧默认。
+invite_code_random_algorithm = "hex10"
 
 # —— 长期无 Emby 的悬空用户自动清理
 auto_cleanup_no_emby = false

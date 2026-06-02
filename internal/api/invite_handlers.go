@@ -87,8 +87,9 @@ func (a *App) handleCreateInviteCode(w http.ResponseWriter, r *http.Request, _ P
 	}
 	code := ""
 	format := a.inviteCodeFormat(stringValue(payload, "format"))
+	algorithm := firstNonEmpty(stringValue(payload, "random_algorithm"), a.cfg().InviteCodeRandomAlgorithm, "hex10")
 	for attempt := 0; attempt < 20; attempt++ {
-		candidate := generateInviteCode(format, days, 1)
+		candidate := generateInviteCode(format, algorithm, days, 1)
 		if _, exists := a.store().InviteCode(candidate); exists {
 			continue
 		}

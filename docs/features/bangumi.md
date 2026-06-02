@@ -222,7 +222,7 @@ Webhook 期望接收 JSON 通知。后端从负载中按以下规则解析：
 
 ## 相对文档
 
-- 安全机制（CSRF、SSRF、鉴权级别）：[../guides/security.md](../guides/security.md)
+- 安全机制（CORS、SSRF、鉴权级别）：[../guides/security.md](../guides/security.md)
 - 后端架构与配置项：[../reference/backend.md](../reference/backend.md)
 - API 路由索引：[../reference/api-index.md](../reference/api-index.md)
 - 求片功能相关 API：[../reference/backend-api.md](../reference/backend-api.md)

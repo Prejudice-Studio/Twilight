@@ -2,7 +2,7 @@
 
 本文说明 Twilight 的全站公告：数据模型、三种渲染模式（纯文本 / Markdown / BBCode）、前端安全约束、管理员发布页与仪表盘展示位置，以及公开列表接口与管理员 CRUD 接口。
 
-公告是一种由管理员发布、面向全站用户展示的通知。它支持级别标记、置顶、过期时间，并可选用 Markdown / BBCode 等富文本渲染。其它相邻功能见 [邀请树](./invite.md)，鉴权与 CSRF 机制见 [安全加固](../guides/security.md)，完整接口契约见 [后端 API 详参](../reference/backend-api.md)。
+公告是一种由管理员发布、面向全站用户展示的通知。它支持级别标记、置顶、过期时间，并可选用 Markdown / BBCode 等富文本渲染。其它相邻功能见 [邀请树](./invite.md)，鉴权与安全机制见 [安全加固](../guides/security.md)，完整接口契约见 [后端 API 详参](../reference/backend-api.md)。
 
 ## 数据模型
 
@@ -113,7 +113,7 @@
 
 ## 接口
 
-统一响应 envelope 为 `{ success, code, message, data, timestamp }`。鉴权级别与 CSRF 详见 [安全加固](../guides/security.md)；完整字段契约见 [后端 API 详参](../reference/backend-api.md)，路由总表见 [API 路由索引](../reference/api-index.md)。
+统一响应 envelope 为 `{ success, code, message, data, timestamp }`。鉴权级别与安全约定详见 [安全加固](../guides/security.md)；完整字段契约见 [后端 API 详参](../reference/backend-api.md)，路由总表见 [API 路由索引](../reference/api-index.md)。
 
 路由注册见 `internal/api/routes.go`，handler 见 `internal/api/announcement_handlers.go`。
 
@@ -127,7 +127,7 @@
 
 ### 管理员 CRUD
 
-均为 `AuthAdmin`（登录会话且 `Role == RoleAdmin`）。其中变更类方法在 Cookie 鉴权下受双提交 CSRF 令牌保护。
+均为 `AuthAdmin`（登录会话且 `Role == RoleAdmin`）。变更类方法不要求额外令牌，只校验有效管理员会话或等价管理员鉴权。
 
 | 方法 | 路径 | 说明 |
 | ---- | ---- | ---- |

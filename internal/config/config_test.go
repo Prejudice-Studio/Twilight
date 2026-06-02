@@ -51,6 +51,7 @@ regcode_format = "OLD-{type}-{random}"
 register_code_format = "REG-{random}"
 renew_code_format = "REN-{random}"
 invite_code_format = "INV-{random}"
+invite_code_random_algorithm = "digits-12"
 `
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
@@ -60,7 +61,7 @@ invite_code_format = "INV-{random}"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.RegCodeFormat != "OLD-{type}-{random}" || cfg.RegisterCodeFormat != "REG-{random}" || cfg.RenewCodeFormat != "ENVREN-{random}" || cfg.InviteCodeFormat != "INV-{random}" {
+	if cfg.RegCodeFormat != "OLD-{type}-{random}" || cfg.RegisterCodeFormat != "REG-{random}" || cfg.RenewCodeFormat != "ENVREN-{random}" || cfg.InviteCodeFormat != "INV-{random}" || cfg.InviteCodeRandomAlgorithm != "digits-12" {
 		t.Fatalf("unexpected code formats: %#v", cfg)
 	}
 }

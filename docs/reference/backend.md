@@ -7,7 +7,7 @@
 | 路径 | 说明 |
 | ---- | ---- |
 | `cmd/twilight` | Go 后端 CLI 入口，支持 `api`、`all`、`scheduler`、`bot`、`version` 子命令。 |
-| `internal/api` | HTTP 路由、统一响应 envelope、鉴权、CSRF、限流、上传、安全头，以及按业务拆分的 handler / client / service。 |
+| `internal/api` | HTTP 路由、统一响应 envelope、鉴权、CORS、限流、上传、安全头，以及按业务拆分的 handler / client / service。 |
 | `internal/config` | 读取运行目录 `config.toml`、同目录 `config.local.toml` 与 `TWILIGHT_*` 字段级环境变量；运行入口固定使用当前目录 `config.toml`。 |
 | `internal/store` | 单一状态文档存储，默认写入 JSON 文件 `db/twilight_go_state.json`，或写入 PostgreSQL 的 `twilight_state` 表。 |
 | `internal/redis` | 无第三方依赖的 Redis RESP 客户端，用于会话和限流跨进程共享。 |
@@ -238,7 +238,7 @@ Go 后端按统一的业务状态与前端响应形状实现，主要模块：
 - 实时日志只接入 Go 进程内 `zap` 全局 logger（通过自定义 core 路由），不开放任意日志文件、journald 或路径参数读取。
 - 日志等级与保留行数由 `Global.log_level`、`Global.runtime_log_limit` 控制；保留行数会被夹在 100–50000，默认 5000。
 - 日志后端跟随状态存储：JSON 后端日志保存在 `State.RuntimeLogs`；PostgreSQL 后端落在独立表 `twilight_runtime_logs`。在状态接入前的早期日志会先缓冲在内存 fallback 缓冲区，接入后回写。
-- 日志输出会脱敏：通过正则覆盖 `Authorization`、`Cookie`、`csrf/xsrf token`、`session id/token`、Emby/MediaBrowser token、`access/refresh/id token`、`client_secret`、`private_key`、`connection_string`、`database_url`、`token`、`secret`、`password`、`api_key`、`bot_token`、`dsn`、`Bearer …`、`key-…` 等敏感片段；敏感字段名（含 `key`、`*token`、`*secret`、`csrf` 等）直接替换为 `[REDACTED]`。
+- 日志输出会脱敏：通过正则覆盖 `Authorization`、`Cookie`、`session id/token`、Emby/MediaBrowser token、`access/refresh/id token`、`client_secret`、`private_key`、`connection_string`、`database_url`、`token`、`secret`、`password`、`api_key`、`bot_token`、`dsn`、`Bearer …`、`key-…` 等敏感片段；敏感字段名（含 `key`、`*token`、`*secret` 等）直接替换为 `[REDACTED]`。
 - 状态接口只读取 Go runtime 摘要（版本、goroutine、内存、是否启用 Redis、活动数据库后端、用户数等）和 Linux `/proc` 摘要（loadavg / meminfo / uptime），不返回环境变量、配置明文、命令行参数或进程列表。
 - 实时日志流为 SSE（`text/event-stream`），按游标增量推送 `snapshot` / `logs` / `ping` 事件，单连接 25 秒空闲返回。
 
@@ -261,8 +261,7 @@ Go 后端按统一的业务状态与前端响应形状实现，主要模块：
   - `AuthUser`：登录会话（Cookie）或 Bearer Token。
   - `AuthAdmin`：登录且 `Role == RoleAdmin`。
   - `AuthAPIKey`：`X-API-Key` 头、`Authorization: ApiKey/Bearer` 或 `?apikey=` 查询参数。
-- **CSRF：双提交 Cookie 令牌**（`internal/api/app.go`）。前端把名为 `<session_cookie>_csrf`（默认 `twilight_session_csrf`）的非 HttpOnly cookie 的值放进 `X-CSRF-Token` 请求头；后端 `verifyCSRFToken` 用 `subtle.ConstantTimeCompare` 比对两者（并要求长度 ≥ 16）。仅对「Cookie 鉴权 + 变更类方法（POST/PUT/DELETE 等）」的请求强制；失败返回 403 `AUTH_CSRF_MISSING`。
-  - `X-Twilight-Client: webui` 头如今**仅出现在 CORS 允许头列表**里，并不被强制校验。旧文档「Cookie 写请求必须带 `X-Twilight-Client: webui`，否则 403」的说法已过时，应以上述双提交 CSRF 令牌为准。
+- Cookie 鉴权写请求不再要求 CSRF 令牌；`X-Twilight-Client: webui` 头仅出现在 CORS 允许头列表里，并不参与鉴权。
 - Cookie 会话默认 `HttpOnly`、`Secure=true`、`SameSite=Lax`；可通过 `CookieDomain` 跨子域共享。
 - CORS 必须显式列出可信 Origin；携带凭据接口不接受 `*`。
 - API Key 只保存哈希，明文仅创建时返回一次。

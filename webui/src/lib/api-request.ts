@@ -156,110 +156,6 @@ function withTimeoutSignal(
   };
 }
 
-/**
- * 读取 CSRF token。后端登录 / refresh 时下发非 HttpOnly 的
- * `<session>_csrf` cookie，前端读出后塞进 X-CSRF-Token 请求头，
- * 形成"双提交 cookie"模式抵御 CSRF 攻击。
- *
- * cookie 名约定：`twilight_session_csrf`（后端 `csrfCookieName()`）。
- *
- * Token 来源优先级：
- *   1. systemInfo 拿到的 csrf_cookie_name —— 通过 setCsrfCookieName() 注入
- *      到模块级缓存，按精确名匹配 cookie；
- *   2. 缓存为空时回退到默认名 `twilight_session_csrf`（后端默认 session
- *      cookie 名 + "_csrf"），覆盖 fetchInfo 尚未完成的窗口期；
- *   3. cookie 读不到时（跨域部署 / cookie 未到达），使用登录响应 body 里
- *      返回的 csrf_token（通过 setCsrfTokenFromBody 注入）；
- *   4. 都拿不到返回空串，让 mutating 请求被后端 CSRF 中间件拒绝（403）。
- */
-let cachedCsrfCookieName: string | null = null;
-/**
- * 跨域部署兜底：后端在 login / refresh 响应 body 里返回 csrf_token，
- * 前端存到这里。当 document.cookie 读不到 CSRF cookie 时（典型场景：
- * 前后端不同端口 / 不同子域且未配 CookieDomain），用此值填充 X-CSRF-Token。
- */
-let csrfTokenBody: string | null = null;
-
-/** 默认 CSRF cookie 名（后端 defaults() 里 SessionCookie="twilight_session"）。 */
-const DEFAULT_CSRF_COOKIE_NAME = "twilight_session_csrf";
-
-/**
- * 把后端 systemInfo.csrf_cookie_name 注入模块级缓存，让 readCSRFCookie()
- * 按精确名匹配。系统信息 store 拿到响应后调用一次即可。
- *
- * 传 null / 空串相当于清空缓存（用于测试或登出场景）。
- */
-export function setCsrfCookieName(name: string | null | undefined): void {
-  cachedCsrfCookieName = name && name.length > 0 ? name : null;
-}
-
-/**
- * 把登录 / refresh 响应 body 里的 csrf_token 注入模块缓存。
- * 跨域部署时 document.cookie 读不到后端设的 CSRF cookie，此值作为兜底。
- * 登出时传 null 清空。
- */
-export function setCsrfTokenFromBody(token: string | null | undefined): void {
-  csrfTokenBody = token && token.length > 0 ? token : null;
-}
-
-function readCookieByName(all: string[], name: string): string {
-  for (const raw of all) {
-    const eq = raw.indexOf("=");
-    if (eq <= 0) continue;
-    const cookieName = raw.slice(0, eq).trim();
-    if (cookieName === name) {
-      return decodeURIComponent(raw.slice(eq + 1).trim());
-    }
-  }
-  return "";
-}
-
-function readCSRFCookie(): string {
-  if (typeof document === "undefined") return csrfTokenBody || "";
-  const all = document.cookie ? document.cookie.split(";") : [];
-
-  // 路径 1：systemInfo 已下发精确名，直接按名取，零歧义。
-  if (cachedCsrfCookieName) {
-    const value = readCookieByName(all, cachedCsrfCookieName);
-    if (value) return value;
-  }
-
-  // 路径 2：用默认名尝试（覆盖 fetchInfo 尚未完成的窗口期）。
-  if (!cachedCsrfCookieName || cachedCsrfCookieName !== DEFAULT_CSRF_COOKIE_NAME) {
-    const value = readCookieByName(all, DEFAULT_CSRF_COOKIE_NAME);
-    if (value) return value;
-  }
-
-  // 路径 3：*_csrf 后缀启发式（兼容自定义 session cookie 名场景）。
-  for (const raw of all) {
-    const eq = raw.indexOf("=");
-    if (eq <= 0) continue;
-    const name = raw.slice(0, eq).trim();
-    if (name.endsWith("_csrf")) {
-      return decodeURIComponent(raw.slice(eq + 1).trim());
-    }
-  }
-
-  // 路径 4：跨域兜底 —— 使用登录响应 body 里缓存的 csrf_token。
-  // 典型场景：前后端不同端口 / 不同子域且未配 CookieDomain，
-  // document.cookie 永远读不到后端设的 CSRF cookie。
-  if (csrfTokenBody) return csrfTokenBody;
-
-  return "";
-}
-
-function isMutating(method: string): boolean {
-  switch (method.toUpperCase()) {
-    case "POST":
-    case "PUT":
-    case "PATCH":
-    case "DELETE":
-      return true;
-    default:
-      return false;
-  }
-}
-
 function describeApiTarget(endpoint: string, method: string): string {
   return `${method} /api/v1${endpoint}`;
 }
@@ -370,13 +266,6 @@ export async function apiRequest<T>(
   const url = `${API_BASE}/api/v1${endpoint}`;
   const method = requestMethod(options);
 
-  // CSRF: cookie-auth 的 mutating 请求必须带 X-CSRF-Token。
-  // 用户尚未登录时无 csrf cookie，跳过即可（公共端点不会进 CSRF 校验）。
-  if (isMutating(method) && !headers["X-CSRF-Token"]) {
-    const csrf = readCSRFCookie();
-    if (csrf) headers["X-CSRF-Token"] = csrf;
-  }
-
   const timeoutMs = extra.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const guard = withTimeoutSignal(options.signal ?? null, timeoutMs);
 
@@ -436,10 +325,6 @@ export async function apiRequestForm<T>(
     "Accept": "application/json; charset=utf-8",
     "X-Twilight-Client": "webui",
   };
-  // form upload 一定是 mutating，必须带 CSRF
-  const csrf = readCSRFCookie();
-  if (csrf) headers["X-CSRF-Token"] = csrf;
-
   const url = `${API_BASE}/api/v1${endpoint}`;
   const methodName = method.toUpperCase();
 

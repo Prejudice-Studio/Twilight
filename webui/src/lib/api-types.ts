@@ -24,15 +24,6 @@ export interface SystemInfo {
    * 前端不直接读 HttpOnly 的 session cookie，仅用于显示 / 调试。
    */
   session_cookie_name?: string;
-  /**
-   * CSRF cookie 名（默认 `<session>_csrf`）。前端读这个非 HttpOnly cookie
-   * 取出 token 塞进 X-CSRF-Token 请求头实现"双提交 cookie"。
-   *
-   * 同域 / 父域第三方应用可能也会下发 *_csrf cookie，旧的"找首个 *_csrf
-   * 后缀"启发式会取错；前端按 systemInfo 拿到的精确名后必然只命中后端
-   * 真正下发的那一个。
-   */
-  csrf_cookie_name?: string;
   features: Record<string, boolean>;
   limits: Record<string, number | null>;
   telegram_bot?: {

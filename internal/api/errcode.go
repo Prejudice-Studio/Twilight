@@ -33,8 +33,6 @@ const (
 	ErrPasswordOldMismatch  ErrCode = "AUTH_PASSWORD_OLD_MISMATCH"
 	ErrPasswordWeak         ErrCode = "AUTH_PASSWORD_WEAK"
 	ErrPasswordHashFailed   ErrCode = "AUTH_PASSWORD_HASH_FAILED"
-	ErrCSRFMissing          ErrCode = "AUTH_CSRF_MISSING"
-	ErrCSRFMismatch         ErrCode = "AUTH_CSRF_MISMATCH"
 
 	// === 用户 / 注册 ===
 	ErrRegisterRateLimited ErrCode = "USER_REGISTER_RATE_LIMITED"
@@ -225,7 +223,6 @@ const (
 	// 错误码体系；调用点在 handlers.go 内逐个迁移为 failWithCode。
 	ErrAuthCredentialsEmpty       ErrCode = "AUTH_CREDENTIALS_EMPTY"
 	ErrAuthSessionRefreshFailed   ErrCode = "AUTH_SESSION_REFRESH_FAILED"
-	ErrAuthCSRFRefreshFailed      ErrCode = "AUTH_CSRF_REFRESH_FAILED"
 	ErrUserNewUsernameRequired    ErrCode = "USER_NEW_USERNAME_REQUIRED"
 	ErrUserBackgroundInvalid      ErrCode = "USER_BACKGROUND_INVALID"
 	ErrEmbyAlreadyLinked          ErrCode = "EMBY_ALREADY_LINKED"

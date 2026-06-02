@@ -2,9 +2,7 @@ package api
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -601,12 +599,6 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principalLog = principal
-	if principal != nil && principal.FromCookie && isMutating(r.Method) {
-		if !a.verifyCSRFToken(r) {
-			failWithCode(lw, http.StatusForbidden, ErrCSRFMissing, "缺少或无效的 CSRF 令牌，请刷新页面后重试")
-			return
-		}
-	}
 	if principal != nil && a.blockRestrictedEmbyAdmin(lw, r, route, principal.User) {
 		return
 	}
@@ -831,7 +823,7 @@ func (a *App) applyCORS(w http.ResponseWriter, r *http.Request) bool {
 	if a.cfg().AllowCredential {
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 	}
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key, X-Twilight-Client, X-CSRF-Token")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key, X-Twilight-Client")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
 	w.Header().Set("Access-Control-Max-Age", "600")
 	return true
@@ -1013,92 +1005,11 @@ func (a *App) clearSessionCookie(w http.ResponseWriter) {
 	// 留下幽灵 cookie 的概率极高——这正是双子域部署里常见的"登出后再访
 	// 问还是登录态"现象。
 	http.SetCookie(w, &http.Cookie{Name: a.cfg().SessionCookie, Path: "/", Domain: a.cfg().CookieDomain, MaxAge: -1, Expires: time.Unix(0, 0), HttpOnly: true, Secure: a.cfg().CookieSecure, SameSite: sameSite(a.cfg().CookieSameSite)})
-	http.SetCookie(w, &http.Cookie{Name: a.csrfCookieName(), Path: "/", Domain: a.cfg().CookieDomain, MaxAge: -1, Expires: time.Unix(0, 0), HttpOnly: false, Secure: a.cfg().CookieSecure, SameSite: sameSite(a.cfg().CookieSameSite)})
 }
 
-// csrfCookieName 返回 CSRF cookie 名，固定为 session cookie 名 + "_csrf" 后缀。
-func (a *App) csrfCookieName() string {
-	return a.cfg().SessionCookie + "_csrf"
-}
-
-// newCSRFToken 生成 32 字节随机 CSRF 令牌（hex 编码）。
-// 在 crypto/rand 故障时返回 error；调用方需向上层失败响应而非伪造熵。
-func newCSRFToken() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
-}
-
-// setCSRFCookie 写一个非 HttpOnly 的 CSRF cookie，前端 JS 可读后塞进
-// X-CSRF-Token 请求头。配合 verifyCSRFToken 形成"双提交 cookie"模式：
-// 攻击者站点不能跨域读 cookie 也无法伪造同名 header，所以无法构造合法 mutating 请求。
-//
-// Domain 与 setSessionCookie 共用 CookieDomain：双子域部署里 webui 必须能在
-// 自己的 origin 上读到 csrf cookie，把值塞进 X-CSRF-Token 再向 API 子域发请
-// 求；不写 Domain 时该 cookie 只属于 API 子域，webui JS 永远读不到，
-// "双提交"实际上变成"单提交"，前端要么自己降级到读响应 body 里的 csrf_token
-// （我们目前的兜底），要么直接 403。
-func (a *App) setCSRFCookie(w http.ResponseWriter, token string, expires time.Time) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     a.csrfCookieName(),
-		Value:    token,
-		Path:     "/",
-		Domain:   a.cfg().CookieDomain,
-		Expires:  expires,
-		MaxAge:   int(time.Until(expires).Seconds()),
-		HttpOnly: false, // CRITICAL：必须可被前端 JS 读取
-		Secure:   a.cfg().CookieSecure,
-		SameSite: sameSite(a.cfg().CookieSameSite),
-	})
-}
-
-// issueSessionCookies 一次性下发 session + csrf 两个 cookie，并返回
-// CSRF 令牌字符串方便登录响应也回写到 body（前端可任选 cookie / body 来源）。
-func (a *App) issueSessionCookies(w http.ResponseWriter, sessionToken string, expires time.Time) (string, error) {
-	csrf, err := newCSRFToken()
-	if err != nil {
-		return "", err
-	}
+func (a *App) issueSessionCookies(w http.ResponseWriter, sessionToken string, expires time.Time) {
 	a.setSessionCookie(w, sessionToken, expires)
-	a.setCSRFCookie(w, csrf, expires)
-	return csrf, nil
 }
-
-// verifyCSRFToken 校验 cookie-based mutating 请求携带合法 CSRF 令牌。
-// 校验规则：
-//  1. 必须有 csrf cookie
-//  2. 必须有 X-CSRF-Token header
-//  3. 长度满足最小要求（防止 0 长 / 1 字符等退化值通过 ConstantTimeCompare）
-//  4. 两者使用 subtle.ConstantTimeCompare 比对
-//
-// 任一失败返回 false。调用点应回 403 + AUTH_CSRF_MISSING。
-func (a *App) verifyCSRFToken(r *http.Request) bool {
-	cookie, err := r.Cookie(a.csrfCookieName())
-	if err != nil || cookie.Value == "" {
-		return false
-	}
-	header := strings.TrimSpace(r.Header.Get("X-CSRF-Token"))
-	if header == "" {
-		return false
-	}
-	if len(header) != len(cookie.Value) {
-		return false
-	}
-	// newCSRFToken 固定输出 64 字符 hex（32 字节随机），任何 < 16 字符的输入
-	// 都不可能是合法 token，且让 ConstantTimeCompare 退化成几乎零成本路径，
-	// 攻击者通过响应时间 / 错误格式可以快速过滤候选。直接拒掉。
-	if len(header) < csrfTokenMinLen {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(header)) == 1
-}
-
-// csrfTokenMinLen 是 verifyCSRFToken 接受的 token 最小长度。当前 newCSRFToken
-// 输出 64 字符 hex；这里设 16 既覆盖任何缩短的探测尝试，也给将来切到更短编码
-// （例如 base64url 22 字符）留余量。
-const csrfTokenMinLen = 16
 
 func sameSite(value string) http.SameSite {
 	switch strings.ToLower(value) {
@@ -1205,15 +1116,6 @@ func parseClientIPHeader(value string) string {
 
 func urlPathEscape(value string) string {
 	return url.PathEscape(value)
-}
-
-func isMutating(method string) bool {
-	switch method {
-	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
-		return true
-	default:
-		return false
-	}
 }
 
 func decodeJSON(r *http.Request, dst any) error {

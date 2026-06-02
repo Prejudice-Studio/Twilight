@@ -519,7 +519,7 @@ func (a *App) inviteCodeFormat(explicit string) string {
 	return firstNonEmpty(explicit, a.cfg().InviteCodeFormat, "INV{random}")
 }
 
-func generateInviteCode(format string, days, index int) string {
+func generateInviteCode(format string, algorithm string, days, index int) string {
 	format = strings.TrimSpace(format)
 	if format == "" {
 		format = "INV{random}"
@@ -529,7 +529,7 @@ func generateInviteCode(format string, days, index int) string {
 	}
 	replacements := map[string]string{
 		"{type}":   "INV",
-		"{random}": strings.ToUpper(randomCode(10)),
+		"{random}": inviteCodeRandomPart(algorithm),
 		"{days}":   strconv.Itoa(days),
 		"{index}":  strconv.Itoa(index),
 	}
@@ -538,6 +538,15 @@ func generateInviteCode(format string, days, index int) string {
 		code = strings.ReplaceAll(code, placeholder, value)
 	}
 	return code
+}
+
+func inviteCodeRandomPart(algorithm string) string {
+	switch strings.ToLower(strings.TrimSpace(algorithm)) {
+	case "", "hex10", "legacy-hex10":
+		return strings.ToUpper(randomCode(10))
+	default:
+		return regCodeRandomPart(algorithm)
+	}
 }
 
 func generateRegCode(format string, codeType int, algorithm string, days int, index int, validity int64, useLimit int) string {

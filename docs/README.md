@@ -15,7 +15,7 @@
 | ---- | ---- |
 | [安装部署](./guides/install.md) | 后端构建、PostgreSQL、HTTPS 反代、systemd 一键脚本、运行数据与密钥 |
 | [开发指南](./guides/development.md) | 目录结构、后端/前端命令、API 与安全规范、Git 分支与发布流程 |
-| [安全加固](./guides/security.md) | 生产安全基线：CSRF、CORS、SSRF、限流、密钥、上传、自动更新检查清单 |
+| [安全加固](./guides/security.md) | 生产安全基线：CORS、SSRF、限流、密钥、上传、自动更新检查清单 |
 
 ## 参考 reference
 
@@ -45,5 +45,5 @@
 ## 说明
 
 - 若文档与代码行为冲突，以 `internal/api/`、`internal/store/`、`internal/config/` 与实际接口返回为准。
-- 全部文档已对照 Go 后端源码核对；旧 Python 时代的描述（独立 SQLite 库、`X-Twilight-Client` CSRF 等）已订正。
-- 关键架构约定（状态存储单文档模型、配置整进程重启、双提交 CSRF 等）见 [开发指南](./guides/development.md) 与 [安全加固](./guides/security.md)。
+- 全部文档已对照 Go 后端源码核对；旧 Python 时代的描述（独立 SQLite 库、`X-Twilight-Client` 写请求校验等）已订正。
+- 关键架构约定（状态存储单文档模型、配置整进程重启、CORS 与鉴权边界等）见 [开发指南](./guides/development.md) 与 [安全加固](./guides/security.md)。

@@ -2,7 +2,7 @@
 
 本文面向外部系统集成，说明 `/api/v1/apikey/*` 前缀下的 API Key 认证接口：认证方式、通用响应、权限模型、关键接口、错误码以及调用示例与安全建议。配置项与整体架构见 [Go 后端架构与配置](../reference/backend.md)，完整路由清单见 [API 路由索引](../reference/api-index.md)，逐接口字段见 [后端 API 详参](../reference/backend-api.md)。
 
-> 与浏览器端的 Cookie / Bearer 会话不同，`/apikey/*` 接口专为「机器对机器」的长期凭证设计：使用 `X-API-Key`（或 `Authorization`）携带密钥，**不涉及会话 Cookie，因此也不需要 CSRF 令牌**。
+> 与浏览器端的 Cookie / Bearer 会话不同，`/apikey/*` 接口专为「机器对机器」的长期凭证设计：使用 `X-API-Key`（或 `Authorization`）携带密钥，不依赖浏览器会话 Cookie。
 
 ## 1. 接口概览
 

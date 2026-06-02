@@ -1,6 +1,6 @@
 # 后端 API 详参
 
-本文是 Twilight 后端 REST API 的完整参考手册，覆盖鉴权方式、请求/响应规范、错误码、限流策略，以及各业务模块下逐个端点的请求体、响应示例与 cURL 调用。完整路由速查见 [API 路由索引](../reference/api-index.md)，API Key 外部接入见 [API Key 外部接入](../reference/api-key.md)，注册码与卡码规则见 [注册码与卡码](../features/regcodes.md)，安全机制（CSRF、限流、脱敏等）见 [安全加固](../guides/security.md)。
+本文是 Twilight 后端 REST API 的完整参考手册，覆盖鉴权方式、请求/响应规范、错误码、限流策略，以及各业务模块下逐个端点的请求体、响应示例与 cURL 调用。完整路由速查见 [API 路由索引](../reference/api-index.md)，API Key 外部接入见 [API Key 外部接入](../reference/api-key.md)，注册码与卡码规则见 [注册码与卡码](../features/regcodes.md)，安全机制（CORS、限流、脱敏等）见 [安全加固](../guides/security.md)。
 
 > 路由的鉴权级别、方法与路径以 `internal/api/routes.go` 为准；本文已据此校准。接口若与下方示例冲突，以后端实际行为与运行时 Swagger 为准。
 
@@ -69,19 +69,11 @@ Authorization: ApiKey <api_key>
 GET /api/v1/apikey/status?apikey=<api_key>
 ```
 
-### 2.3 CSRF 防护（双提交 Cookie 令牌）
+### 2.3 浏览器写请求
 
-当请求使用 **Cookie 鉴权** 且为 **变更类方法**（`POST` / `PUT` / `DELETE`）时，后端会强制校验 CSRF 令牌（实现：`internal/api/app.go` 的 `verifyCSRFToken`）：
+Cookie 鉴权的变更类请求（`POST` / `PUT` / `DELETE`）不再要求额外令牌。后端只校验有效登录会话、Bearer Token 或 API Key；`X-Twilight-Client: webui` 仅作为允许的 CORS 请求头保留，不参与鉴权。
 
-1. 后端在登录成功时除会话 Cookie 外，另写一个 **非 HttpOnly** 的 CSRF Cookie，名称为 `<session_cookie>_csrf`（即会话 Cookie 名加 `_csrf` 后缀）。
-2. 前端 JS 读取该 Cookie 的值，放进 `X-CSRF-Token` 请求头随变更请求一起发送。
-3. 后端用 `subtle.ConstantTimeCompare` 比对 Cookie 值与请求头值，且要求长度不小于最小阈值（防退化值通过比对）；任一不满足返回 `403`，错误码 `AUTH_CSRF_MISSING`。
-
-要点：
-
-- 仅 **Cookie 鉴权 + 变更类方法** 才强制校验。使用 `Authorization: Bearer` Token 或 API Key 的请求不触发 CSRF 校验。
-- 双子域部署时，CSRF Cookie 的 `Domain` 与会话 Cookie 共用 `CookieDomain`，以保证 webui 子域的 JS 能读到该 Cookie 并回填到请求头。
-- 历史上的 `X-Twilight-Client: webui` 头如今 **仅出现在 CORS 允许头列表** 中，**不再被强制校验**。请勿再依赖"写请求必须带 `X-Twilight-Client: webui` 否则 403"的旧说法。
+双子域部署时，只需要确保 `session_cookie_domain` 让前端站点与 API 站点能共享 `HttpOnly` session cookie。生产环境的凭据型 CORS 仍必须显式列出可信 HTTPS Origin，不能使用 `*`。
 
 更多机制说明见 [安全加固](../guides/security.md)。
 
@@ -93,7 +85,7 @@ GET /api/v1/apikey/status?apikey=<api_key>
 | ---- | ---- | ---- |
 | `success` | bool | 是否成功 |
 | `code` | int | HTTP 状态码（与响应行状态一致） |
-| `error_code` | string | 仅失败时出现，业务级错误码，如 `AUTH_CSRF_MISSING`、`USER_USERNAME_TAKEN`（见下文错误码表） |
+| `error_code` | string | 仅失败时出现，业务级错误码，如 `UNAUTHORIZED`、`USER_USERNAME_TAKEN`（见下文错误码表） |
 | `message` | string | 人类可读消息（失败消息已做敏感信息脱敏） |
 | `data` | object/null | 业务数据，成功且无数据时可省略 |
 | `timestamp` | int | 服务端 Unix 时间戳（秒） |
@@ -115,9 +107,9 @@ GET /api/v1/apikey/status?apikey=<api_key>
 ```json
 {
   "success": false,
-  "code": 403,
-  "error_code": "AUTH_CSRF_MISSING",
-  "message": "缺少或无效的 CSRF 令牌，请刷新页面后重试",
+  "code": 401,
+  "error_code": "UNAUTHORIZED",
+  "message": "未认证，请先登录",
   "data": null,
   "timestamp": 1680000000
 }
@@ -133,7 +125,7 @@ GET /api/v1/apikey/status?apikey=<api_key>
 | 201 | 创建成功（如注册） |
 | 400 | 参数错误 / 请求格式不合法 |
 | 401 | 未认证 / Token 或 API Key 无效 |
-| 403 | 权限不足 / CSRF 校验失败 / 账号或 API Key 被禁用 |
+| 403 | 权限不足 / 账号或 API Key 被禁用 |
 | 404 | 资源不存在 |
 | 409 | 冲突（如用户名已被占用、绑定冲突） |
 | 410 | 端点已弃用（如 `/emby/urls`，请改用文档指明的替代接口） |
@@ -152,7 +144,6 @@ GET /api/v1/apikey/status?apikey=<api_key>
 | `AUTH_ACCOUNT_DISABLED` | 账号被禁用 |
 | `AUTH_ACCOUNT_EXPIRED` | 账号已过期 |
 | `AUTH_APIKEY_INVALID` | API Key 无效 |
-| `AUTH_CSRF_MISSING` / `AUTH_CSRF_MISMATCH` | CSRF 令牌缺失或不匹配 |
 | `AUTH_PASSWORD_OLD_MISMATCH` | 修改密码时原密码不符 |
 | `AUTH_PASSWORD_WEAK` | 新密码强度不足 |
 | `USER_REGISTER_RATE_LIMITED` | 注册限流 |

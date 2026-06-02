@@ -148,17 +148,9 @@ bash start_backend_dev.sh
 
 被禁用账号会按到期（`AccountExpired`）与手动禁用（`AccountDisabled`）返回不同 error_code，便于前端区分「续费」与「申诉」两条引导。
 
-### CSRF：双提交 Cookie 令牌
+### Cookie 写请求
 
-Twilight 使用「双提交 Cookie 令牌」抵御 CSRF（实现见 `internal/api/app.go` 的 `verifyCSRFToken` 与 `csrfCookieName`）：
-
-- 后端在登录 / refresh 时下发一个非 HttpOnly 的 CSRF cookie，名称为「会话 cookie 名 + `_csrf`」后缀（默认 `twilight_session_csrf`）。
-- 前端读出该 cookie 的值，放进 `X-CSRF-Token` 请求头（逻辑见 `webui/src/lib/api-request.ts` 的 `readCSRFCookie`）。
-- 后端用 `subtle.ConstantTimeCompare` 比对请求头值与 cookie 值；并要求 token 满足最小长度，避免退化值通过比对。
-- 仅对「Cookie 鉴权 + 变更类方法（POST/PUT/DELETE/PATCH）」的请求强制校验；公开端点与 Bearer/API Key 鉴权的请求不进入 CSRF 校验。
-- 跨域部署（前后端不同端口 / 子域且未配置 CookieDomain）时浏览器读不到 CSRF cookie，前端会回退使用登录响应 body 里返回的 `csrf_token`。
-
-> `X-Twilight-Client: webui` 头仅出现在 CORS 允许头列表中，前端也会带上，但后端并不强制校验它；不要把它当作鉴权或 CSRF 手段。变更类请求的防护以双提交 CSRF 令牌为准。
+Twilight 不再对 Cookie 鉴权的变更类请求做 CSRF 令牌校验。登录态依赖 `HttpOnly` session cookie，机器调用可使用 Bearer Token 或 API Key。`X-Twilight-Client: webui` 仅用于 CORS 允许头，不是鉴权手段。
 
 ### 文件与路径安全
 
