@@ -128,6 +128,8 @@ channel_id = []
 force_subscribe = false
 # 是否启用完整内联面板（关闭后仅保留 /help /bind /me）
 enable_tg_panel = false
+# /twguser 群组用户面板模板；留空使用内置默认。完整占位符说明见后台配置页。
+group_user_panel_template = ""
 # 强制要求绑定/已绑定用户保持在群组内；退群会被自动禁用并同步 Emby
 require_group_membership = false
 # 上面开启时的定时巡检间隔（分钟）

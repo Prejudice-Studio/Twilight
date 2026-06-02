@@ -73,6 +73,30 @@ Bot 由二进制子命令 `bot`（或 `all`）启动，轮询逻辑见 `internal
 - 面板有效期为 1 分钟，无操作自动删除；每次操作会刷新过期时间。
 - 非管理员或匿名身份发起的越权指令，连同提示消息会在 30 秒后自动删除。
 
+面板文本可通过 `[Telegram].group_user_panel_template` 自定义，也可在 Web 后台配置页的 Telegram 分组中编辑。留空使用内置模板；未知占位符会原样保留，便于发现拼写错误。安全边界不变：模板不提供邮箱、Emby ID、Telegram ID、密码、Token 或服务器线路占位符。
+
+常用占位符：
+
+| 占位符 | 含义 |
+| ---- | ---- |
+| `{server_name}` | 站点名称。 |
+| `{username}` / `{uid}` | Web 用户名 / UID。 |
+| `{role}` / `{role_id}` | 角色名称 / 角色数字。 |
+| `{is_admin}` / `{is_protected}` | 是否管理员 / 是否受保护账号。 |
+| `{web_status}` / `{web_active}` | Web 账号启用状态。 |
+| `{expire_status}` / `{expired_at}` | 到期摘要 / 具体到期时间。 |
+| `{register_time}` / `{created_at}` | 注册时间 / 创建时间。 |
+| `{telegram_status}` / `{telegram_username}` | Telegram 绑定摘要 / Telegram 用户名。 |
+| `{emby_status}` / `{emby_username}` | 本地 Emby 绑定摘要 / 本地 Emby 用户名。 |
+| `{pending_emby}` / `{pending_emby_days}` | 是否待补建 Emby / 待补建授权天数。 |
+| `{emby_remote_block}` | 完整 Emby 远端信息块，包含远端用户名、启用状态、权限、隐藏状态与最近活动。 |
+| `{emby_remote_status}` / `{emby_remote_username}` | 远端查询状态 / 远端用户名。 |
+| `{emby_remote_enabled}` / `{emby_remote_role}` / `{emby_remote_hidden}` | 远端启用状态 / 远端权限 / 是否隐藏。 |
+| `{emby_last_activity}` | 远端最近活动时间。 |
+| `{bgm_mode}` / `{bgm_token_status}` / `{bgm_sync_status}` | BGM 同步开关 / Token 是否配置 / 同步可用状态。 |
+| `{api_key_status}` | 旧 API Key 开关。 |
+| `{panel_ttl}` / `{panel_ttl_seconds}` | 面板有效期文本 / 秒数。 |
+
 ## 绑定流程
 
 1. 用户在 Web 端生成 Telegram 绑定码。
@@ -109,6 +133,7 @@ Bot 由二进制子命令 `bot`（或 `all`）启动，轮询逻辑见 `internal
 | `bot_help_header` | `TelegramBotHelpHeader` | 追加到内置普通帮助顶部。 |
 | `bot_help_footer` | `TelegramBotHelpFooter` | 追加到内置普通帮助底部。 |
 | `bot_about` | `TelegramBotAbout` | `/about` 服务说明文案。 |
+| `group_user_panel_template` | `TelegramGroupUserPanelTemplate` | 覆盖 `/twguser` 群组用户面板文本，支持上方用户占位符。 |
 | `bot_custom_commands` | `TelegramCustomCommands` | 自定义命令应答表（见下）。 |
 
 ### 自定义命令

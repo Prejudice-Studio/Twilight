@@ -25,6 +25,28 @@ type TelegramCommandReply struct {
 	Reply   string `json:"reply"`
 }
 
+const DefaultTelegramGroupUserPanelTemplate = `Twilight 群组用户面板
+
+== 用户 ==
+用户名: {username}
+UID: {uid}
+角色: {role}
+受保护: {is_protected}
+
+== Web 账号 ==
+状态: {web_status}
+到期: {expire_status}
+注册时间: {register_time}
+
+== 绑定 ==
+Telegram: {telegram_status}
+Emby: {emby_status}
+{emby_remote_block}
+
+== 安全提示 ==
+面板 {panel_ttl} 无操作会自动删除；每次按钮操作都会重新校验管理员身份。
+群内面板不展示邮箱、Emby ID、Telegram ID、Token、密码或服务器线路。`
+
 type Config struct {
 	AppName                       string
 	Version                       string
@@ -114,6 +136,7 @@ type Config struct {
 	TelegramBotHelpHeader          string
 	TelegramBotHelpFooter          string
 	TelegramBotAbout               string
+	TelegramGroupUserPanelTemplate string
 	TelegramCustomCommands         []TelegramCommandReply
 	BotInternalSecret              string
 	BangumiEnabled                 bool
@@ -293,6 +316,7 @@ func Load(path string) (Config, error) {
 	cfg.TelegramBotHelpHeader = reader.stringValue(cfg.TelegramBotHelpHeader, "Telegram.bot_help_header", "bot_help_header")
 	cfg.TelegramBotHelpFooter = reader.stringValue(cfg.TelegramBotHelpFooter, "Telegram.bot_help_footer", "bot_help_footer")
 	cfg.TelegramBotAbout = reader.stringValue(cfg.TelegramBotAbout, "Telegram.bot_about", "bot_about")
+	cfg.TelegramGroupUserPanelTemplate = reader.stringValue(cfg.TelegramGroupUserPanelTemplate, "Telegram.group_user_panel_template", "group_user_panel_template")
 	cfg.TelegramCustomCommands = parseTelegramCommandRepliesList(reader.stringListValue(nil, "Telegram.bot_custom_commands", "bot_custom_commands"))
 	cfg.BangumiEnabled = reader.boolValue(cfg.BangumiEnabled, "BangumiSync.enabled", "bangumi_sync_enabled")
 	cfg.BangumiWebhookSecret = reader.stringValue(cfg.BangumiWebhookSecret, "BangumiSync.webhook_secret", "webhook_secret")
@@ -415,6 +439,7 @@ func defaults() Config {
 		TelegramAPIURL:                 "https://api.telegram.org",
 		TelegramGroupCheckConcurrency:  24,
 		TelegramGroupActionConcurrency: 8,
+		TelegramGroupUserPanelTemplate: DefaultTelegramGroupUserPanelTemplate,
 		// RegisterEnabled / EmbyDirectRegisterEnabled / AllowPendingRegister 都
 		// 默认 false——secure-by-default。空配置首次启动（dev 镜像、配置被误删、
 		// docker volume 丢配置）不再"自动开放注册 + Emby 直登"。运营要让外部
@@ -630,6 +655,9 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("TWILIGHT_TELEGRAM_BAN_ON_LEAVE"); v != "" {
 		cfg.TelegramBanOnLeave = boolValue(v, cfg.TelegramBanOnLeave)
+	}
+	if v := os.Getenv("TWILIGHT_TELEGRAM_GROUP_USER_PANEL_TEMPLATE"); v != "" {
+		cfg.TelegramGroupUserPanelTemplate = strings.ReplaceAll(v, `\n`, "\n")
 	}
 	if v := os.Getenv("TWILIGHT_SYSTEM_UPDATE_ENABLED"); v != "" {
 		cfg.SystemUpdateEnabled = boolValue(v, cfg.SystemUpdateEnabled)

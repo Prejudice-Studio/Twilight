@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prejudice-studio/twilight/internal/config"
 	"github.com/prejudice-studio/twilight/internal/store"
 )
 
@@ -488,53 +489,151 @@ func (a *App) telegramEditPanelWithNotice(ctx context.Context, panel telegramPan
 }
 
 func (a *App) telegramGroupUserPanelText(ctx context.Context, u store.User) string {
-	lines := []string{
-		"Twilight 群组用户面板",
-		"",
-		"== 用户 ==",
-		"用户名: " + u.Username,
-		fmt.Sprintf("UID: %d", u.UID),
-		"角色: " + roleName(u.Role),
-		"受保护: " + telegramYesNoLabel(a.telegramProtectedTarget(u)),
-		"",
-		"== Web 账号 ==",
-		"状态: " + telegramActiveLabel(u.Active),
-		"到期: " + expireStatus(u.ExpiredAt),
-		"注册时间: " + telegramUnixTimeLabel(firstNonZeroInt64(u.RegisterTime, u.CreatedAt)),
-		"",
-		"== 绑定 ==",
-		"Telegram: " + telegramTelegramBindingLabel(u),
-		"Emby: " + telegramLocalEmbyLabel(u),
+	template := strings.TrimSpace(a.cfg().TelegramGroupUserPanelTemplate)
+	if template == "" {
+		template = config.DefaultTelegramGroupUserPanelTemplate
 	}
-	lines = append(lines, a.telegramGroupUserPanelEmbyLines(ctx, u)...)
-	lines = append(lines,
-		"",
-		"== 安全提示 ==",
-		"面板 1 分钟无操作会自动删除；每次按钮操作都会重新校验管理员身份。",
-		"群内面板不展示邮箱、Emby ID、Token、密码或服务器线路。",
-	)
-	return strings.Join(lines, "\n")
+	text := telegramRenderPanelTemplate(template, a.telegramGroupUserPanelPlaceholders(ctx, u, template))
+	text = strings.TrimRight(text, "\n")
+	if len([]rune(text)) > 3900 {
+		text = truncateString(text, 3900) + "\n...(面板模板输出过长，已截断)"
+	}
+	return text
+}
+
+func telegramRenderPanelTemplate(template string, values map[string]string) string {
+	pairs := make([]string, 0, len(values)*2)
+	for key, value := range values {
+		pairs = append(pairs, "{"+key+"}", value)
+	}
+	return strings.NewReplacer(pairs...).Replace(template)
+}
+
+func (a *App) telegramGroupUserPanelPlaceholders(ctx context.Context, u store.User, template string) map[string]string {
+	remote := telegramPanelRemoteInfo{
+		Block:        "",
+		Status:       "-",
+		Username:     "-",
+		Enabled:      "-",
+		Role:         "-",
+		Hidden:       "-",
+		LastActivity: "-",
+	}
+	if telegramPanelTemplateNeedsRemote(template) {
+		remote = a.telegramGroupUserPanelRemoteInfo(ctx, u)
+	}
+	telegramUsername := strings.TrimPrefix(strings.TrimSpace(u.TelegramUsername), "@")
+	if telegramUsername == "" {
+		telegramUsername = "-"
+	} else {
+		telegramUsername = "@" + telegramUsername
+	}
+	embyUsername := strings.TrimSpace(u.EmbyUsername)
+	if embyUsername == "" {
+		embyUsername = "-"
+	}
+	bgmSyncStatus := "未启用"
+	if u.BGMMode && u.BGMToken == "" {
+		bgmSyncStatus = "缺少个人 Token"
+	} else if u.BGMMode {
+		bgmSyncStatus = "可同步"
+	}
+	return map[string]string{
+		"server_name":          a.cfg().AppName,
+		"username":             u.Username,
+		"uid":                  strconv.FormatInt(u.UID, 10),
+		"role":                 roleName(u.Role),
+		"role_id":              strconv.Itoa(u.Role),
+		"is_admin":             telegramYesNoLabel(u.Role == store.RoleAdmin),
+		"is_protected":         telegramYesNoLabel(a.telegramProtectedTarget(u)),
+		"web_status":           telegramActiveLabel(u.Active),
+		"web_active":           telegramYesNoLabel(u.Active),
+		"expire_status":        expireStatus(u.ExpiredAt),
+		"expired_at":           telegramExpiryTimeLabel(u.ExpiredAt),
+		"register_time":        telegramUnixTimeLabel(firstNonZeroInt64(u.RegisterTime, u.CreatedAt)),
+		"created_at":           telegramUnixTimeLabel(u.CreatedAt),
+		"telegram_status":      telegramTelegramBindingLabel(u),
+		"telegram_username":    telegramUsername,
+		"emby_status":          telegramLocalEmbyLabel(u),
+		"emby_username":        embyUsername,
+		"pending_emby":         telegramYesNoLabel(u.PendingEmby),
+		"pending_emby_days":    telegramPendingEmbyDaysLabel(u.PendingEmbyDays),
+		"emby_remote_block":    remote.Block,
+		"emby_remote_status":   remote.Status,
+		"emby_remote_username": remote.Username,
+		"emby_remote_enabled":  remote.Enabled,
+		"emby_remote_role":     remote.Role,
+		"emby_remote_hidden":   remote.Hidden,
+		"emby_last_activity":   remote.LastActivity,
+		"bgm_mode":             telegramEnabledLabel(u.BGMMode),
+		"bgm_token_status":     telegramConfiguredLabel(u.BGMToken != ""),
+		"bgm_sync_status":      bgmSyncStatus,
+		"api_key_status":       telegramEnabledLabel(u.LegacyAPIKeyStatus),
+		"panel_ttl":            "1 分钟",
+		"panel_ttl_seconds":    strconv.Itoa(int(telegramPanelTTL.Seconds())),
+	}
+}
+
+func telegramPanelTemplateNeedsRemote(template string) bool {
+	for _, key := range []string{
+		"{emby_remote_block}",
+		"{emby_remote_status}",
+		"{emby_remote_username}",
+		"{emby_remote_enabled}",
+		"{emby_remote_role}",
+		"{emby_remote_hidden}",
+		"{emby_last_activity}",
+	} {
+		if strings.Contains(template, key) {
+			return true
+		}
+	}
+	return false
+}
+
+type telegramPanelRemoteInfo struct {
+	Block        string
+	Status       string
+	Username     string
+	Enabled      string
+	Role         string
+	Hidden       string
+	LastActivity string
 }
 
 func (a *App) telegramGroupUserPanelEmbyLines(ctx context.Context, u store.User) []string {
+	return strings.Split(a.telegramGroupUserPanelRemoteInfo(ctx, u).Block, "\n")
+}
+
+func (a *App) telegramGroupUserPanelRemoteInfo(ctx context.Context, u store.User) telegramPanelRemoteInfo {
 	lines := []string{"", "== Emby 远端 =="}
+	info := telegramPanelRemoteInfo{Status: "-", Username: "-", Enabled: "-", Role: "-", Hidden: "-", LastActivity: "-"}
+	finish := func(lines []string) telegramPanelRemoteInfo {
+		info.Block = strings.Join(lines, "\n")
+		return info
+	}
 	if u.EmbyID == "" {
 		if u.PendingEmby {
-			lines = append(lines, "状态: 待用户创建 Emby 账号", "授权天数: "+telegramPendingEmbyDaysLabel(u.PendingEmbyDays))
+			info.Status = "待用户创建 Emby 账号"
+			lines = append(lines, "状态: "+info.Status, "授权天数: "+telegramPendingEmbyDaysLabel(u.PendingEmbyDays))
 		} else {
-			lines = append(lines, "状态: 未绑定")
+			info.Status = "未绑定"
+			lines = append(lines, "状态: "+info.Status)
 		}
-		return lines
+		return finish(lines)
 	}
 	if !a.embyConfigured() {
-		return append(lines, "状态: 本地已绑定，远端未配置或 Token 缺失，无法查询")
+		info.Status = "本地已绑定，远端未配置或 Token 缺失，无法查询"
+		return finish(append(lines, "状态: "+info.Status))
 	}
 	remote, found, err := a.embyUserByID(ctx, u.EmbyID)
 	if err != nil {
-		return append(lines, "状态: 查询失败（详情见后端日志）")
+		info.Status = "查询失败（详情见后端日志）"
+		return finish(append(lines, "状态: "+info.Status))
 	}
 	if !found {
-		return append(lines, "状态: 远端未找到，本地仍保留绑定")
+		info.Status = "远端未找到，本地仍保留绑定"
+		return finish(append(lines, "状态: "+info.Status))
 	}
 	policy := embyPolicy(remote)
 	remoteName := firstNonEmpty(asString(remote["Name"]), u.EmbyUsername, "-")
@@ -546,13 +645,19 @@ func (a *App) telegramGroupUserPanelEmbyLines(ctx context.Context, u store.User)
 	if boolish(policy["IsAdministrator"]) {
 		adminState = "管理员"
 	}
-	return append(lines,
+	info.Status = "已找到"
+	info.Username = remoteName
+	info.Enabled = remoteStatus
+	info.Role = adminState
+	info.Hidden = telegramYesNoLabel(boolish(policy["IsHidden"]))
+	info.LastActivity = telegramActivityTimeLabel(remote["LastActivityDate"], remote["DateLastActivity"], remote["LastLoginDate"])
+	return finish(append(lines,
 		"远端用户名: "+remoteName,
 		"远端状态: "+remoteStatus,
 		"远端权限: "+adminState,
-		"隐藏状态: "+telegramYesNoLabel(boolish(policy["IsHidden"])),
-		"最近活动: "+telegramActivityTimeLabel(remote["LastActivityDate"], remote["DateLastActivity"], remote["LastLoginDate"]),
-	)
+		"隐藏状态: "+info.Hidden,
+		"最近活动: "+info.LastActivity,
+	))
 }
 
 func (a *App) telegramGroupUserPanelMarkup(token string, u store.User, confirmAction string) any {
@@ -672,6 +777,13 @@ func telegramUnixTimeLabel(ts int64) string {
 		return "-"
 	}
 	return time.Unix(ts, 0).Format("2006-01-02 15:04")
+}
+
+func telegramExpiryTimeLabel(ts int64) string {
+	if ts < 0 || ts >= permanentExpiryUnix {
+		return "永久"
+	}
+	return telegramUnixTimeLabel(ts)
 }
 
 func telegramActivityTimeLabel(values ...any) string {

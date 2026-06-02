@@ -2271,6 +2271,29 @@ func TestTelegramGroupUserPanelShowsEmbyInfoAndActions(t *testing.T) {
 	}
 }
 
+func TestTelegramGroupUserPanelCustomTemplatePlaceholders(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().AppName = "Custom Twilight"
+	app.cfg().EmbyToken = "emby-token"
+	app.cfg().TelegramGroupUserPanelTemplate = "站点: {server_name}\n用户: {username} / {uid}\n角色: {role}\nWeb: {web_status}\nTG: {telegram_username}\nEmby: {emby_status}\n未知: {unknown_placeholder}"
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("custom template without remote placeholders should not query Emby: %s %s", r.Method, r.URL.Path)
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+
+	user := store.User{UID: 42, Username: "alpha", Role: store.RoleWhitelist, Active: true, TelegramUsername: "alpha_tg", EmbyID: "emby-user", EmbyUsername: "alpha-emby", RegisterTime: time.Now().Unix()}
+	text := app.telegramGroupUserPanelText(context.Background(), user)
+	for _, want := range []string{"站点: Custom Twilight", "用户: alpha / 42", "角色: 白名单", "Web: 启用", "TG: @alpha_tg", "Emby: 已绑定 (alpha-emby)", "未知: {unknown_placeholder}"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("custom panel text missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "emby-user") || strings.Contains(text, "emby-token") {
+		t.Fatalf("custom panel leaked sensitive Emby identifier/token:\n%s", text)
+	}
+}
+
 func TestTelegramPanelCloseRequiresAdminAndDeletesPanel(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().TelegramMode = true

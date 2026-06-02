@@ -695,6 +695,8 @@ func inviteCodeRandomAlgorithmOptions() []map[string]any {
 	return append(options, regCodeRandomAlgorithmOptions()...)
 }
 
+const telegramGroupUserPanelTemplateDescription = "自定义 /twguser 群组用户面板文本，支持换行；留空使用内置模板。安全限制：不会提供邮箱、Emby ID、Telegram ID、密码、Token 或服务器线路占位符。占位符：{server_name}=站点名称；{username}=Web 用户名；{uid}=用户 UID；{role}=角色名称；{role_id}=角色数字；{is_admin}=是否管理员；{is_protected}=是否受保护；{web_status}=Web 账号启用/禁用；{web_active}=Web 是否启用；{expire_status}=到期状态摘要；{expired_at}=具体到期时间；{register_time}=注册时间；{created_at}=创建时间；{telegram_status}=Telegram 绑定摘要；{telegram_username}=Telegram 用户名；{emby_status}=本地 Emby 绑定摘要；{emby_username}=本地 Emby 用户名；{pending_emby}=是否待补建 Emby；{pending_emby_days}=待补建授权天数；{emby_remote_block}=完整 Emby 远端信息块；{emby_remote_status}=远端查询状态；{emby_remote_username}=远端用户名；{emby_remote_enabled}=远端启用/禁用；{emby_remote_role}=远端权限；{emby_remote_hidden}=远端是否隐藏；{emby_last_activity}=远端最近活动；{bgm_mode}=BGM 同步开关；{bgm_token_status}=BGM Token 是否配置；{bgm_sync_status}=BGM 同步可用状态；{api_key_status}=旧 API Key 开关；{panel_ttl}=面板有效期；{panel_ttl_seconds}=面板有效秒数。"
+
 func configSectionDefs() []configSectionDef {
 	selectDriver := []map[string]any{{"label": "PostgreSQL（推荐）", "value": "postgres"}, {"label": "Go JSON 文件（兼容）", "value": "json"}}
 	selectUpdate := []map[string]any{{"label": "按间隔", "value": "interval"}, {"label": "每日固定时间", "value": "daily"}, {"label": "手动", "value": "manual"}}
@@ -758,6 +760,7 @@ func configSectionDefs() []configSectionDef {
 			{Key: "channel_id", Label: "频道 ID", Type: "list", Description: "Bot 推送和强制绑定检查的频道"},
 			{Key: "force_bind_channel", Label: "强制频道绑定检查", Type: "bool", Description: "用户在 Bot 中确认绑定码时，必须已加入配置的频道"},
 			{Key: "enable_tg_panel", Label: "启用 Bot 面板", Type: "bool", Description: "启用更多 Bot 查询命令和管理查询入口"},
+			{Key: "group_user_panel_template", Label: "/twguser 面板模板", Type: "textarea", Description: telegramGroupUserPanelTemplateDescription},
 			{Key: "require_group_membership", Label: "强制群成员", Type: "bool", Description: "巡检发现退群时禁用本地或 Emby"},
 			{Key: "ban_on_leave", Label: "退群封禁", Type: "bool", Description: "退群后在群组永久封禁"},
 			{Key: "auto_enable_rejoined", Label: "回群自动启用", Type: "bool", Description: "退群后重新加入且未过期时，巡检自动重新启用 Web 与 Emby；关闭时进入人工复核"},
@@ -884,7 +887,8 @@ func configValues(cfg config.Config) map[string]map[string]any {
 			"force_bind_group": cfg.TelegramForceBindGroup, "channel_id": cfg.TelegramChannelIDs, "force_bind_channel": cfg.TelegramForceBindChannel,
 			"require_group_membership": cfg.TelegramRequireMembership,
 			"enable_tg_panel":          cfg.TelegramEnablePanel, "ban_on_leave": cfg.TelegramBanOnLeave, "auto_enable_rejoined": cfg.TelegramAutoEnableRejoined, "group_check_concurrency": cfg.TelegramGroupCheckConcurrency, "group_action_concurrency": cfg.TelegramGroupActionConcurrency,
-			"bot_start_text": cfg.TelegramBotStartText, "bot_group_start_text": cfg.TelegramBotGroupStartText, "bot_start_title": cfg.TelegramBotStartTitle,
+			"group_user_panel_template": cfg.TelegramGroupUserPanelTemplate,
+			"bot_start_text":            cfg.TelegramBotStartText, "bot_group_start_text": cfg.TelegramBotGroupStartText, "bot_start_title": cfg.TelegramBotStartTitle,
 			"bot_start_intro": cfg.TelegramBotStartIntro, "bot_bind_prompt_text": cfg.TelegramBotBindPromptText, "bot_help_text": cfg.TelegramBotHelpText,
 			"bot_admin_help_text": cfg.TelegramBotAdminHelpText, "bot_help_header": cfg.TelegramBotHelpHeader, "bot_help_footer": cfg.TelegramBotHelpFooter,
 			"bot_about": cfg.TelegramBotAbout, "bot_custom_commands": commandRepliesToAny(cfg.TelegramCustomCommands),
