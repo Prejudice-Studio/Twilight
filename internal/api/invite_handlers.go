@@ -16,10 +16,6 @@ func (a *App) handleInviteConfig(w http.ResponseWriter, r *http.Request, _ Param
 }
 
 func (a *App) handleInviteMe(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.cfg().InviteEnabled {
-		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
-		return
-	}
 	user := current(r).User
 	codes := a.store().ListInviteCodes(user.UID)
 	codeItems := make([]map[string]any, 0, len(codes))
@@ -34,12 +30,14 @@ func (a *App) handleInviteMe(w http.ResponseWriter, r *http.Request, _ Params) {
 	}
 	children := []map[string]any{}
 	maxDays, maxReason := a.maxCodeDays(user)
+	now := time.Now().Unix()
 	for _, rel := range a.store().ChildrenOf(user.UID) {
 		if u, okUser := a.store().User(rel.ChildUID); okUser {
 			item := publicUser(u)
 			item["has_emby"] = u.EmbyID != ""
-			item["emby_expired"] = u.ExpiredAt > 0 && u.ExpiredAt < time.Now().Unix()
-			item["can_generate_renew_code"] = maxDays > 0
+			item["emby_expired"] = inviteChildEmbyExpired(u, now)
+			item["can_generate_renew_code"] = a.canGenerateInviteRenewCodeForChild(user, u, maxDays)
+			item["can_delete_emby_and_detach"] = inviteChildCanDeleteEmbyAndDetach(u, now)
 			children = append(children, item)
 		}
 	}
@@ -48,14 +46,14 @@ func (a *App) handleInviteMe(w http.ResponseWriter, r *http.Request, _ Params) {
 }
 
 func (a *App) handleCreateInviteCode(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.cfg().InviteEnabled {
-		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
-		return
-	}
 	user := current(r).User
 	payload := decodeMap(r)
 	if strings.HasSuffix(r.URL.Path, "/renew-codes") {
 		a.handleCreateInviteRenewCode(w, r, user, payload)
+		return
+	}
+	if !a.cfg().InviteEnabled {
+		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
 		return
 	}
 	// 按 UID 限速生成邀请码，防止恶意账号一次性吃满 invite_limit 配额，让
@@ -151,6 +149,10 @@ func (a *App) handleCreateInviteRenewCode(w http.ResponseWriter, r *http.Request
 		failWithCode(w, http.StatusNotFound, ErrUserNotFound, userNotFoundMessage)
 		return
 	}
+	if !child.Active {
+		failWithCode(w, http.StatusForbidden, ErrInviteRenewBadTarget, "下级 Web 账号已被禁用，无法使用续期码；请删除其 Emby 账号并断开关系")
+		return
+	}
 	maxDays, reason := a.maxCodeDays(user)
 	if maxDays <= 0 {
 		failWithCode(w, http.StatusForbidden, ErrInviterDaysShort, firstNonEmpty(reason, "当前账号有效期不足，无法生成续期码"))
@@ -188,10 +190,6 @@ func (a *App) handleCreateInviteRenewCode(w http.ResponseWriter, r *http.Request
 }
 
 func (a *App) handleInviteCodes(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.cfg().InviteEnabled {
-		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
-		return
-	}
 	codes := a.store().ListInviteCodes(current(r).User.UID)
 	items := make([]map[string]any, 0, len(codes))
 	for _, code := range codes {
@@ -208,10 +206,6 @@ func (a *App) handleDeleteInviteCode(w http.ResponseWriter, r *http.Request, par
 }
 
 func (a *App) handleDetachExpiredInviteChild(w http.ResponseWriter, r *http.Request, params Params) {
-	if !a.cfg().InviteEnabled {
-		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
-		return
-	}
 	uid, _ := int64Param(params, "uid")
 	user := current(r).User
 	rel, okRel := a.store().ParentOf(uid)
@@ -224,12 +218,17 @@ func (a *App) handleDetachExpiredInviteChild(w http.ResponseWriter, r *http.Requ
 		failWithCode(w, http.StatusNotFound, ErrUserNotFound, userNotFoundMessage)
 		return
 	}
-	if child.ExpiredAt <= 0 || child.ExpiredAt >= time.Now().Unix() {
-		failWithCode(w, http.StatusBadRequest, ErrInviteDetachNotExpired, "只能断开已到期的下级")
+	now := time.Now().Unix()
+	if !inviteChildCanDeleteEmbyAndDetach(child, now) {
+		failWithCode(w, http.StatusBadRequest, ErrInviteDetachNotExpired, "只能断开 Emby 已到期或 Web 已禁用且仍绑定 Emby 的直属下级")
 		return
 	}
 	deletedEmby := false
-	if child.EmbyID != "" && a.cfg().EmbyURL != "" {
+	if child.EmbyID != "" {
+		if !a.embyConfigured() {
+			failWithCode(w, http.StatusBadGateway, ErrEmbyDeleteFailed, "Emby 未配置，无法删除下级 Emby 账号")
+			return
+		}
 		if err := a.embyDelete(r.Context(), "/Users/"+urlPathEscape(child.EmbyID)); err != nil {
 			zap.L().Warn("detach invite child: emby delete failed", zap.Int64("uid", uid), zap.Error(err))
 			failWithCode(w, http.StatusBadGateway, ErrEmbyDeleteFailed, "删除下级 Emby 账号失败，请稍后重试或联系管理员")
@@ -238,7 +237,6 @@ func (a *App) handleDetachExpiredInviteChild(w http.ResponseWriter, r *http.Requ
 		deletedEmby = true
 	}
 	updated, err := a.store().UpdateUser(uid, func(u *store.User) error {
-		u.Active = true
 		u.EmbyID = ""
 		u.EmbyUsername = ""
 		u.PendingEmby = false
@@ -251,7 +249,25 @@ func (a *App) handleDetachExpiredInviteChild(w http.ResponseWriter, r *http.Requ
 	if err := a.store().DetachInvite(uid); statusFromError(w, err) {
 		return
 	}
-	ok(w, "已断开下级关系", map[string]any{"uid": uid, "detached": true, "deleted_emby": deletedEmby || child.EmbyID != "", "user": publicUser(updated)})
+	ok(w, "已断开下级关系", map[string]any{"uid": uid, "detached": true, "deleted_emby": deletedEmby, "user": publicUser(updated)})
+}
+
+func inviteChildEmbyExpired(child store.User, now int64) bool {
+	return child.EmbyID != "" && child.ExpiredAt > 0 && child.ExpiredAt < now
+}
+
+func inviteChildCanDeleteEmbyAndDetach(child store.User, now int64) bool {
+	return child.EmbyID != "" && (inviteChildEmbyExpired(child, now) || !child.Active)
+}
+
+func (a *App) canGenerateInviteRenewCodeForChild(parent, child store.User, maxDays int) bool {
+	if maxDays <= 0 || !child.Active || !userEntitlementOK(parent) {
+		return false
+	}
+	if a.cfg().InviteRequireEmby && parent.EmbyID == "" {
+		return false
+	}
+	return true
 }
 
 func (a *App) handleInviteCheck(w http.ResponseWriter, r *http.Request, _ Params) {

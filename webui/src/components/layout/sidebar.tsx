@@ -86,13 +86,10 @@ export function filterNavItems(
   features?: Record<string, boolean> | null,
 ) {
   return items.filter((item) => {
-    if (features?.media_request === false && (item.href === "/media" || item.href === "/admin/requests")) {
+    if (features?.media_request === false && item.href === "/media") {
       return false;
     }
     if (features?.signin === false && item.href === "/score") {
-      return false;
-    }
-    if (features?.invite === false && (item.href === "/invite" || item.href === "/admin/invite")) {
       return false;
     }
     return true;

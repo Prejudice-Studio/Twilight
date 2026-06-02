@@ -109,11 +109,6 @@ export default function InviteCenterPage() {
     try {
       const cfg = await api.getInviteConfig();
       if (cfg.success && cfg.data) setConfig(cfg.data);
-      if (!cfg.data?.enabled) {
-        setStatus(null);
-        setCodes([]);
-        return;
-      }
       const [me, list] = await Promise.all([
         api.getMyInviteStatus().catch(() => null),
         api.getMyInviteCodes().catch(() => null),
@@ -142,6 +137,10 @@ export default function InviteCenterPage() {
     setCreating(true);
     try {
       const parsedDays = Number(days);
+      if (!config?.enabled) {
+        toast({ title: "邀请系统已关闭", description: "当前不能生成新的邀请码，但仍可为已有直属下级生成专属续期码。", variant: "destructive" });
+        return;
+      }
       if (maxCodeDays <= 0) {
         toast({ title: "当前不能生成邀请码", description: status?.max_code_days_reason, variant: "destructive" });
         return;
@@ -174,6 +173,8 @@ export default function InviteCenterPage() {
       setCreating(false);
     }
   };
+
+  const canCreateInviteCode = Boolean(config?.enabled && status?.can_invite);
 
   const openRenewDialog = (child: InviteMyStatus["children"][number]) => {
     const maxDays = status?.max_code_days ?? 30;
@@ -251,13 +252,12 @@ export default function InviteCenterPage() {
   };
 
   const handleDetachExpiredChild = async (child: InviteMyStatus["children"][number]) => {
+    const reason = !child.active ? "该下级 Web 账号已被禁用，且仍绑定 Emby。" : "该下级 Emby 权益已到期。";
     const ok = await confirm({
-      title: "断开该下级关系？",
-      description: child.has_emby
-        ? "该下级已到期。操作会删除他的 Emby 账号并断开邀请关系，但保留 Web 账号登录能力。"
-        : "该下级已到期。操作会断开邀请关系，但保留 Web 账号登录能力。",
+      title: "删除 Emby 并断开关系？",
+      description: `${reason}\n\n操作会删除他的远端 Emby 账号，清空本地 Emby 绑定，并断开邀请关系。Web 账号当前启用/禁用状态会保持不变。`,
       tone: "danger",
-      confirmLabel: child.has_emby ? "删除 Emby 并断开" : "断开关系",
+      confirmLabel: "删除 Emby 并断开",
     });
     if (!ok) return;
     setDetachingChildUid(child.uid);
@@ -282,13 +282,13 @@ export default function InviteCenterPage() {
     );
   }
 
-  if (config && !config.enabled) {
+  if (config && !config.enabled && !status) {
     return (
       <Card className="border-dashed">
         <CardContent className="space-y-2 p-10 text-center">
           <GitBranch className="mx-auto h-10 w-10 text-muted-foreground" />
           <p className="font-medium">邀请系统未开启</p>
-          <p className="text-xs text-muted-foreground">如需启用，请联系管理员在配置中打开“启用邀请树”。</p>
+          <p className="text-xs text-muted-foreground">不能生成新的邀请码；如果你已有直属下级，可刷新后继续为下级生成专属续期码。</p>
         </CardContent>
       </Card>
     );
@@ -317,7 +317,7 @@ export default function InviteCenterPage() {
               setTargetUsername("");
               setCreateOpen(true);
             }}
-            disabled={!status?.can_invite}
+            disabled={!canCreateInviteCode}
           >
             <Plus className="mr-1 h-4 w-4" />
             生成邀请码
@@ -330,6 +330,18 @@ export default function InviteCenterPage() {
           <CardContent className="flex items-start gap-2 p-4 text-sm">
             <AlertTriangle className="mt-0.5 h-4 w-4 text-destructive" />
             <span>{error}</span>
+          </CardContent>
+        </Card>
+      )}
+
+      {config && !config.enabled && (
+        <Card className="border-amber-500/30 bg-amber-500/5">
+          <CardContent className="flex items-start gap-2 p-4 text-sm text-amber-700 dark:text-amber-300">
+            <AlertTriangle className="mt-0.5 h-4 w-4" />
+            <div className="space-y-1">
+              <p className="font-medium">邀请系统已关闭，不能生成新的邀请码。</p>
+              <p className="text-xs opacity-90">已有直属下级仍可生成专属续期码；Emby 已到期或 Web 已禁用且仍绑定 Emby 的下级，可删除 Emby 并断开关系。</p>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -365,7 +377,7 @@ export default function InviteCenterPage() {
             <CardContent className="space-y-1 p-4">
               <p className="text-[11px] uppercase tracking-widest text-muted-foreground">能否邀请</p>
               <p className="flex items-center gap-1 text-2xl font-bold">
-                {status.can_invite ? (
+                {canCreateInviteCode ? (
                   <>
                     <ShieldCheck className="h-5 w-5 text-emerald-500" />
                     <span>可邀请</span>
@@ -378,7 +390,7 @@ export default function InviteCenterPage() {
                 )}
               </p>
               <p className="text-xs text-muted-foreground">
-                {status.can_invite ? `最多可授权 ${status.max_code_days ?? "-"} 天` : status.invite_block_reason || status.max_code_days_reason || "条件不满足"}
+                {canCreateInviteCode ? `最多可授权 ${status.max_code_days ?? "-"} 天` : status.invite_block_reason || status.max_code_days_reason || "条件不满足"}
               </p>
             </CardContent>
           </Card>
@@ -420,7 +432,7 @@ export default function InviteCenterPage() {
                 <InviteTreeNodeList nodes={inviteTree.descendants} />
               ) : (
                 <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                  暂无下级。生成邀请码并被使用后，这里会展示完整下级树。
+                  暂无下级。{config?.enabled ? "生成邀请码并被使用后，这里会展示完整下级树。" : "邀请系统已关闭，暂不能新增下级。"}
                 </div>
               )}
             </div>
@@ -465,7 +477,7 @@ export default function InviteCenterPage() {
                         生成专属续期码
                       </Button>
                     )}
-                    {child.emby_expired && (
+                    {child.can_delete_emby_and_detach && (
                       <Button
                         size="sm"
                         variant="destructive"
@@ -474,7 +486,7 @@ export default function InviteCenterPage() {
                         disabled={detachingChildUid === child.uid}
                       >
                         {detachingChildUid === child.uid ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Trash2 className="mr-1 h-3 w-3" />}
-                        {child.has_emby ? "删除 Emby 并断开" : "断开关系"}
+                        删除 Emby 并断开
                       </Button>
                     )}
                   </div>

@@ -998,16 +998,18 @@ func (a *App) inviteTreeNode(uid int64, depth int, seen map[int64]bool) (map[str
 	if !ok {
 		return nil, 0
 	}
+	now := time.Now().Unix()
 	node := map[string]any{
-		"uid":           u.UID,
-		"username":      u.Username,
-		"active":        u.Active,
-		"has_emby":      u.EmbyID != "",
-		"expired_at":    u.ExpiredAt,
-		"expire_status": expireStatus(u.ExpiredAt),
-		"emby_expired":  u.ExpiredAt > 0 && u.ExpiredAt < time.Now().Unix(),
-		"depth":         depth,
-		"children":      []map[string]any{},
+		"uid":                        u.UID,
+		"username":                   u.Username,
+		"active":                     u.Active,
+		"has_emby":                   u.EmbyID != "",
+		"expired_at":                 u.ExpiredAt,
+		"expire_status":              expireStatus(u.ExpiredAt),
+		"emby_expired":               inviteChildEmbyExpired(u, now),
+		"can_delete_emby_and_detach": inviteChildCanDeleteEmbyAndDetach(u, now),
+		"depth":                      depth,
+		"children":                   []map[string]any{},
 	}
 	if seen[uid] {
 		return node, 0
@@ -1031,16 +1033,18 @@ func (a *App) inviteTreeNode(uid int64, depth int, seen map[int64]bool) (map[str
 func (a *App) inviteTreeFor(user store.User) map[string]any {
 	self, count := a.inviteTreeNode(user.UID, a.inviteDepth(user.UID), map[int64]bool{})
 	if self == nil {
+		now := time.Now().Unix()
 		self = map[string]any{
-			"uid":           user.UID,
-			"username":      user.Username,
-			"active":        user.Active,
-			"has_emby":      user.EmbyID != "",
-			"expired_at":    user.ExpiredAt,
-			"expire_status": expireStatus(user.ExpiredAt),
-			"emby_expired":  user.ExpiredAt > 0 && user.ExpiredAt < time.Now().Unix(),
-			"depth":         a.inviteDepth(user.UID),
-			"children":      []map[string]any{},
+			"uid":                        user.UID,
+			"username":                   user.Username,
+			"active":                     user.Active,
+			"has_emby":                   user.EmbyID != "",
+			"expired_at":                 user.ExpiredAt,
+			"expire_status":              expireStatus(user.ExpiredAt),
+			"emby_expired":               inviteChildEmbyExpired(user, now),
+			"can_delete_emby_and_detach": inviteChildCanDeleteEmbyAndDetach(user, now),
+			"depth":                      a.inviteDepth(user.UID),
+			"children":                   []map[string]any{},
 		}
 	}
 	descendants, _ := self["children"].([]map[string]any)

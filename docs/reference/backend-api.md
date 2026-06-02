@@ -1188,6 +1188,8 @@ curl -X POST "http://localhost:5000/api/v1/admin/regcodes" \
 
 `POST /admin/regcodes/batch-delete`
 
+- 说明：物理删除选中的注册码；已有使用记录的注册码也会直接移除。
+
 #### 更新注册码备注
 
 `PUT /admin/regcodes/{code}`
@@ -1201,6 +1203,8 @@ curl -X POST "http://localhost:5000/api/v1/admin/regcodes" \
 #### 删除注册码
 
 `DELETE /admin/regcodes/{code}`
+
+- 说明：物理删除指定注册码；已有使用记录的注册码也会直接移除。
 
 #### 查询注册码使用者
 
@@ -1785,11 +1789,11 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 | --------- | ---- | ---- |
 | `GET /invite/config` | `AuthPublic` | 邀请功能开关与参数 |
 | `GET /invite/me` | `AuthUser` | 我的邀请信息与下级 |
-| `POST /invite/codes` | `AuthUser` | 生成邀请码 |
-| `POST /invite/renew-codes` | `AuthUser` | 生成续期邀请码 |
+| `POST /invite/codes` | `AuthUser` | 生成邀请码；`invite_enabled=false` 时拒绝 |
+| `POST /invite/renew-codes` | `AuthUser` | 为已有直属下级生成指名续期码；`invite_enabled=false` 时仍允许 |
 | `GET /invite/codes` | `AuthUser` | 列出我的邀请码 |
 | `DELETE /invite/codes/{code}` | `AuthUser` | 删除邀请码 |
-| `POST /invite/children/{uid}/detach-expired` | `AuthUser` | 脱离已过期下级 |
+| `POST /invite/children/{uid}/detach-expired` | `AuthUser` | 删除 Emby 并断开 Emby 已到期或 Web 已禁用的直属下级 |
 | `POST /invite/check` | `AuthPublic` | 校验邀请码（IP 限流 10/60s） |
 | `POST /invite/use` | `AuthUser` | 使用邀请码 |
 

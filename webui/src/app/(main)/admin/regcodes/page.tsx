@@ -179,14 +179,11 @@ export default function AdminRegcodesPage() {
   };
 
   const handleDelete = async (code: Regcode) => {
-    const usage = usedCount(code);
     const ok = await confirm({
-      title: usage > 0 ? "停用已使用卡码？" : "删除卡码？",
-      description: usage > 0
-        ? `卡码 ${code.code} 已有 ${usage} 次使用记录。\n\n为了保留审计记录，执行后会停用该卡码而不是物理删除，列表中仍会显示为“已禁用”。`
-        : `卡码 ${code.code} 将被立即删除，且无法恢复。`,
+      title: "删除卡码？",
+      description: `卡码 ${code.code} 将被立即删除，包含已有使用记录的卡码也会从列表中移除，且无法恢复。`,
       tone: "danger",
-      confirmLabel: usage > 0 ? "停用卡码" : "删除",
+      confirmLabel: "删除",
     });
     if (!ok) return;
 
@@ -194,7 +191,7 @@ export default function AdminRegcodesPage() {
     try {
       const res = await api.deleteRegcode(code.code);
       if (res.success && (!res.data || res.data.deleted > 0)) {
-        toast({ title: usage > 0 ? "卡码已停用" : "删除成功", variant: "success" });
+        toast({ title: "删除成功", variant: "success" });
         setSelectedCodes((prev) => {
           const next = new Set(prev);
           next.delete(code.code);
@@ -218,11 +215,10 @@ export default function AdminRegcodesPage() {
       toast({ title: "请先选择要删除的注册码", variant: "destructive" });
       return;
     }
-    const usedItems = selectedItems.filter((item) => usedCount(item) > 0).length;
     const preview = codes.slice(0, 6).join("\n");
     const ok = await confirm({
       title: `批量删除 ${codes.length} 个注册码？`,
-      description: `${preview}${codes.length > 6 ? `\n... 另有 ${codes.length - 6} 个` : ""}\n\n未使用卡码会被删除；${usedItems > 0 ? `其中 ${usedItems} 个已有使用记录，会改为停用并保留审计记录。` : "已使用卡码会改为停用并保留审计记录。"}`,
+      description: `${preview}${codes.length > 6 ? `\n... 另有 ${codes.length - 6} 个` : ""}\n\n选中的注册码会被直接删除，包含已有使用记录的卡码也会从列表中移除，且无法恢复。`,
       tone: "danger",
       confirmLabel: "批量删除",
     });

@@ -741,6 +741,7 @@ export interface InviteTreeNode {
   expired_at?: number | null;
   expire_status?: string;
   emby_expired?: boolean;
+  can_delete_emby_and_detach?: boolean;
   depth: number;
   children?: InviteTreeNode[];
 }
@@ -758,6 +759,7 @@ export interface InviteMyStatus {
     expire_status?: string;
     emby_expired?: boolean;
     can_generate_renew_code?: boolean;
+    can_delete_emby_and_detach?: boolean;
   }>;
   tree?: {
     self: InviteTreeNode;

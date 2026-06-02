@@ -28,7 +28,6 @@ import { Input } from "@/components/ui/input";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { api, type InviteForest, type InviteForestNode } from "@/lib/api";
-import { useSystemStore } from "@/store/system";
 
 interface TreeRow {
   node: InviteForestNode;
@@ -94,7 +93,6 @@ function formatUnix(seconds?: number | null): string {
 export default function AdminInviteTreePage() {
   const { toast } = useToast();
   const { confirm } = useConfirm();
-  const { info: systemInfo, fetchInfo: fetchSystemInfo } = useSystemStore();
   const [forest, setForest] = useState<InviteForest | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -123,17 +121,8 @@ export default function AdminInviteTreePage() {
   }, []);
 
   useEffect(() => {
-    void fetchSystemInfo();
-  }, [fetchSystemInfo]);
-
-  useEffect(() => {
-    if (!systemInfo) return;
-    if (systemInfo.features?.invite === false) {
-      setLoading(false);
-      return;
-    }
     void reload();
-  }, [reload, systemInfo]);
+  }, [reload]);
 
   const maps = useMemo(() => (forest ? buildMaps(forest) : null), [forest]);
   const rootOptions = useMemo(() => {
@@ -314,18 +303,6 @@ export default function AdminInviteTreePage() {
       return next;
     });
   };
-
-  if (systemInfo?.features?.invite === false) {
-    return (
-      <Card className="border-dashed">
-        <CardContent className="space-y-2 p-10 text-center">
-          <GitBranch className="mx-auto h-10 w-10 text-muted-foreground" />
-          <p className="font-medium">邀请系统未开启</p>
-          <p className="text-xs text-muted-foreground">开启邀请树后才会显示邀请森林和级联操作。</p>
-        </CardContent>
-      </Card>
-    );
-  }
 
   return (
     <div className="space-y-4">

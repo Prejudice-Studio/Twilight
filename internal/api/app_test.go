@@ -706,10 +706,13 @@ func TestRegcodeInviteMediaAndSecurityFlows(t *testing.T) {
 	if missingConfirmDelete.Code != http.StatusBadRequest || !strings.Contains(missingConfirmDelete.Body.String(), confirmBatchDeleteRegcodes) || !strings.Contains(missingConfirmDelete.Body.String(), `"error_code":"REGCODE_BATCH_CONFIRM_REQUIRED"`) {
 		t.Fatalf("batch delete regcodes missing confirm status=%d body=%s", missingConfirmDelete.Code, missingConfirmDelete.Body.String())
 	}
-	deletePayload := `{"codes":["` + rawBatchCodes[0].(string) + `","` + rawBatchCodes[1].(string) + `","missing-code"],"confirm":"` + confirmBatchDeleteRegcodes + `"}`
+	deletePayload := `{"codes":["` + code + `","` + rawBatchCodes[0].(string) + `","` + rawBatchCodes[1].(string) + `","missing-code"],"confirm":"` + confirmBatchDeleteRegcodes + `"}`
 	batchDelete := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/regcodes/batch-delete", deletePayload, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
-	if batchDelete.Code != http.StatusOK || !strings.Contains(batchDelete.Body.String(), `"deleted":2`) || !strings.Contains(batchDelete.Body.String(), `"missing":1`) {
+	if batchDelete.Code != http.StatusOK || !strings.Contains(batchDelete.Body.String(), `"deleted":3`) || !strings.Contains(batchDelete.Body.String(), `"missing":1`) {
 		t.Fatalf("batch delete regcodes status=%d body=%s", batchDelete.Code, batchDelete.Body.String())
+	}
+	if _, ok := app.store().RegCode(code); ok {
+		t.Fatal("used regcode should be physically deleted by batch delete")
 	}
 
 	invite := doJSONWithHeaders(app, http.MethodPost, "/api/v1/invite/codes", `{"days":7}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
@@ -858,11 +861,15 @@ func TestDisabledFeatureFlagsAreExposedAndEnforced(t *testing.T) {
 		t.Fatalf("disabled signin status=%d body=%s", signin.Code, signin.Body.String())
 	}
 	inviteMe := doJSONWithHeaders(app, http.MethodGet, "/api/v1/invite/me", ``, []*http.Cookie{cookie}, map[string]string{"X-Twilight-Client": "webui"})
-	if inviteMe.Code != http.StatusForbidden {
+	if inviteMe.Code != http.StatusOK || !strings.Contains(inviteMe.Body.String(), `"enabled":false`) || !strings.Contains(inviteMe.Body.String(), `"can_invite":false`) {
 		t.Fatalf("disabled invite/me status=%d body=%s", inviteMe.Code, inviteMe.Body.String())
 	}
+	adminRequests := doJSONWithHeaders(app, http.MethodGet, "/api/v1/admin/media-requests", ``, []*http.Cookie{cookie}, map[string]string{"X-Twilight-Client": "webui"})
+	if adminRequests.Code != http.StatusOK {
+		t.Fatalf("disabled media admin requests status=%d body=%s", adminRequests.Code, adminRequests.Body.String())
+	}
 	inviteTree := doJSONWithHeaders(app, http.MethodGet, "/api/v1/admin/invite/tree", ``, []*http.Cookie{cookie}, map[string]string{"X-Twilight-Client": "webui"})
-	if inviteTree.Code != http.StatusForbidden {
+	if inviteTree.Code != http.StatusOK || !strings.Contains(inviteTree.Body.String(), `"enabled":false`) {
 		t.Fatalf("disabled admin invite tree status=%d body=%s", inviteTree.Code, inviteTree.Body.String())
 	}
 }
@@ -3377,6 +3384,17 @@ func TestMediaRequestGlobalLimitBlocksNonAdmins(t *testing.T) {
 
 func TestInviteParentCanDetachExpiredChildAndKeepWebAccountActive(t *testing.T) {
 	app := newTestApp(t)
+	deletedRemote := false
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/Users/emby-child" {
+			t.Fatalf("unexpected Emby request: %s %s", r.Method, r.URL.Path)
+		}
+		deletedRemote = true
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+	app.cfg().EmbyToken = "token"
 	parent, err := app.store().CreateUser(store.User{Username: "parent", Role: store.RoleNormal, Active: true})
 	if err != nil {
 		t.Fatal(err)
@@ -3401,9 +3419,61 @@ func TestInviteParentCanDetachExpiredChildAndKeepWebAccountActive(t *testing.T) 
 	if _, ok := app.store().ParentOf(child.UID); ok {
 		t.Fatal("child still has invite parent")
 	}
+	if !deletedRemote {
+		t.Fatal("remote Emby user was not deleted")
+	}
 	updated, ok := app.store().User(child.UID)
 	if !ok || !updated.Active || updated.EmbyID != "" || updated.EmbyUsername != "" || updated.PendingEmby {
 		t.Fatalf("child web account was not preserved while Emby was cleared: %#v", updated)
+	}
+}
+
+func TestInviteParentCanDetachDisabledChildWithoutReactivatingWeb(t *testing.T) {
+	app := newTestApp(t)
+	deletedRemote := false
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/Users/emby-disabled-child" {
+			t.Fatalf("unexpected Emby request: %s %s", r.Method, r.URL.Path)
+		}
+		deletedRemote = true
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+	app.cfg().EmbyToken = "token"
+	parent, err := app.store().CreateUser(store.User{Username: "disabled-parent", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := app.store().CreateUser(store.User{Username: "disabled-child", Role: store.RoleNormal, Active: false, ExpiredAt: time.Now().AddDate(0, 0, 10).Unix(), EmbyID: "emby-disabled-child", EmbyUsername: "disabled-child"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store().UpsertInviteCode(store.InviteCode{Code: "INV-DISABLED-CHILD", UID: parent.UID, InviterUID: parent.UID, Days: 30, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.store().ConsumeInviteCode("INV-DISABLED-CHILD", child.UID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.store().UpdateUser(child.UID, func(u *store.User) error { u.Active = false; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/invite/children/2/detach-expired", nil)
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, principal{User: parent}))
+	rr := httptest.NewRecorder()
+	app.handleDetachExpiredInviteChild(rr, req, Params{"uid": strconv.FormatInt(child.UID, 10)})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("detach disabled child status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !deletedRemote {
+		t.Fatal("remote Emby user was not deleted")
+	}
+	if _, ok := app.store().ParentOf(child.UID); ok {
+		t.Fatal("disabled child still has invite parent")
+	}
+	updated, ok := app.store().User(child.UID)
+	if !ok || updated.Active || updated.EmbyID != "" || updated.EmbyUsername != "" {
+		t.Fatalf("disabled child should stay disabled with Emby cleared: %#v", updated)
 	}
 }
 
@@ -3653,6 +3723,50 @@ func TestInviteRenewCodeCreatesTargetedRegCode(t *testing.T) {
 	app.handleRenew(rr, req, nil)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("target child should use renew code, status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestInviteDisabledStillAllowsExistingChildRenewCodesButBlocksNewInvites(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().InviteEnabled = false
+	now := time.Now()
+	parent, err := app.store().CreateUser(store.User{Username: "disabled-renew-parent", Role: store.RoleNormal, Active: true, EmbyID: "emby-parent", ExpiredAt: now.AddDate(0, 0, 30).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := app.store().CreateUser(store.User{Username: "disabled-renew-child", Role: store.RoleNormal, Active: true, ExpiredAt: now.AddDate(0, 0, -1).Unix(), EmbyID: "emby-child"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store().UpsertInviteCode(store.InviteCode{Code: "INV-DISABLED-RENEW", UID: parent.UID, InviterUID: parent.UID, Days: 7, UseCountLimit: 1, Active: true, CreatedAt: now.Unix()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.store().ConsumeInviteCode("INV-DISABLED-RENEW", child.UID); err != nil {
+		t.Fatal(err)
+	}
+
+	meReq := httptest.NewRequest(http.MethodGet, "/api/v1/invite/me", nil)
+	meReq = meReq.WithContext(context.WithValue(meReq.Context(), principalKey, principal{User: parent}))
+	meRR := httptest.NewRecorder()
+	app.handleInviteMe(meRR, meReq, nil)
+	if meRR.Code != http.StatusOK || !strings.Contains(meRR.Body.String(), `"enabled":false`) || !strings.Contains(meRR.Body.String(), `"can_invite":false`) || !strings.Contains(meRR.Body.String(), `"can_generate_renew_code":true`) {
+		t.Fatalf("disabled invite/me should expose existing child renewal controls, status=%d body=%s", meRR.Code, meRR.Body.String())
+	}
+
+	inviteReq := httptest.NewRequest(http.MethodPost, "/api/v1/invite/codes", strings.NewReader(`{"days":7}`))
+	inviteReq = inviteReq.WithContext(context.WithValue(inviteReq.Context(), principalKey, principal{User: parent}))
+	inviteRR := httptest.NewRecorder()
+	app.handleCreateInviteCode(inviteRR, inviteReq, nil)
+	if inviteRR.Code != http.StatusForbidden || !strings.Contains(inviteRR.Body.String(), string(ErrInviteDisabled)) {
+		t.Fatalf("disabled invite system should block new invite codes, status=%d body=%s", inviteRR.Code, inviteRR.Body.String())
+	}
+
+	renewReq := httptest.NewRequest(http.MethodPost, "/api/v1/invite/renew-codes", strings.NewReader(fmt.Sprintf(`{"target_uid":%d,"days":5,"validity_hours":24}`, child.UID)))
+	renewReq = renewReq.WithContext(context.WithValue(renewReq.Context(), principalKey, principal{User: parent}))
+	renewRR := httptest.NewRecorder()
+	app.handleCreateInviteCode(renewRR, renewReq, nil)
+	if renewRR.Code != http.StatusCreated {
+		t.Fatalf("disabled invite system should still allow child renew code, status=%d body=%s", renewRR.Code, renewRR.Body.String())
 	}
 }
 

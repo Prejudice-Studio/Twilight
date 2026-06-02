@@ -2521,16 +2521,10 @@ func (s *Store) DeleteRegCode(code string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.mutateAndSaveLocked(func() error {
-		reg, ok := s.state.RegCodes[code]
-		if !ok {
+		if _, ok := s.state.RegCodes[code]; !ok {
 			return ErrNotFound
 		}
-		if regCodeHasUsage(reg) {
-			reg.Active = false
-			s.state.RegCodes[code] = reg
-		} else {
-			delete(s.state.RegCodes, code)
-		}
+		delete(s.state.RegCodes, code)
 		return nil
 	})
 }
@@ -2546,17 +2540,11 @@ func (s *Store) DeleteRegCodes(codes []string) (deleted []string, missing []stri
 				continue
 			}
 			seen[code] = true
-			reg, ok := s.state.RegCodes[code]
-			if !ok {
+			if _, ok := s.state.RegCodes[code]; !ok {
 				missing = append(missing, code)
 				continue
 			}
-			if regCodeHasUsage(reg) {
-				reg.Active = false
-				s.state.RegCodes[code] = reg
-			} else {
-				delete(s.state.RegCodes, code)
-			}
+			delete(s.state.RegCodes, code)
 			deleted = append(deleted, code)
 		}
 		return nil
@@ -2567,10 +2555,6 @@ func (s *Store) DeleteRegCodes(codes []string) (deleted []string, missing []stri
 		return nil, nil, mutErr
 	}
 	return deleted, missing, nil
-}
-
-func regCodeHasUsage(code RegCode) bool {
-	return code.UseCount > 0 || code.UsedBy != 0 || len(code.UsedByUIDs) > 0 || len(code.UsedByTelegramIDs) > 0
 }
 
 func (s *Store) CreateRebindRequest(req RebindRequest) (RebindRequest, error) {

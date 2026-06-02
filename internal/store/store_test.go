@@ -18,7 +18,7 @@ func newJSONStoreForTest(t *testing.T) *Store {
 	return st
 }
 
-func TestDeleteRegCodePreservesUsedAudit(t *testing.T) {
+func TestDeleteRegCodePhysicallyDeletesUsedCode(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	if err := st.UpsertRegCode(RegCode{Code: "USED-REG", Type: 2, Days: 30, ValidityTime: -1, UseCountLimit: 5, UseCount: 1, UsedByUIDs: []int64{101}, UsedByTelegramIDs: []int64{202}, Active: true}); err != nil {
 		t.Fatal(err)
@@ -28,19 +28,12 @@ func TestDeleteRegCodePreservesUsedAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reg, ok := st.RegCode("USED-REG")
-	if !ok {
-		t.Fatal("used regcode was physically deleted")
-	}
-	if reg.Active {
-		t.Fatalf("used regcode should be disabled after delete: %#v", reg)
-	}
-	if reg.UseCount != 1 || len(reg.UsedByUIDs) != 1 || reg.UsedByUIDs[0] != 101 || len(reg.UsedByTelegramIDs) != 1 || reg.UsedByTelegramIDs[0] != 202 {
-		t.Fatalf("used regcode audit fields were not preserved: %#v", reg)
+	if _, ok := st.RegCode("USED-REG"); ok {
+		t.Fatal("used regcode should be physically deleted")
 	}
 }
 
-func TestBatchDeleteRegCodesDeletesUnusedAndDisablesUsed(t *testing.T) {
+func TestBatchDeleteRegCodesPhysicallyDeletesUsedAndUnused(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	if err := st.UpsertRegCode(RegCode{Code: "UNUSED-REG", Type: 1, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
 		t.Fatal(err)
@@ -59,9 +52,8 @@ func TestBatchDeleteRegCodesDeletesUnusedAndDisablesUsed(t *testing.T) {
 	if _, ok := st.RegCode("UNUSED-REG"); ok {
 		t.Fatal("unused regcode was not physically deleted")
 	}
-	used, ok := st.RegCode("USED-REG")
-	if !ok || used.Active || used.UseCount != 1 || len(used.UsedByUIDs) != 1 || used.UsedByUIDs[0] != 303 {
-		t.Fatalf("used regcode should be disabled with audit preserved: ok=%v reg=%#v", ok, used)
+	if _, ok := st.RegCode("USED-REG"); ok {
+		t.Fatal("used regcode was not physically deleted")
 	}
 }
 

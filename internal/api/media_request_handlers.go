@@ -162,10 +162,6 @@ func (a *App) handleMyMediaRequests(w http.ResponseWriter, r *http.Request, _ Pa
 }
 
 func (a *App) handleAdminMediaRequests(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.cfg().MediaRequestEnabled {
-		failWithCode(w, http.StatusForbidden, ErrMediaRequestDisabled, "media requests are disabled")
-		return
-	}
 	statusFilter := strings.ToLower(firstNonEmpty(r.URL.Query().Get("status"), "pending"))
 	page := max(1, queryInt(r, "page", 1))
 	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)

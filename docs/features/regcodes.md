@@ -157,12 +157,12 @@
 | `GET /api/v1/admin/regcodes` | `handleListRegcodes` | 分页 + 过滤（`status`/`type`/`search`）+ 排序列出注册码。 |
 | `POST /api/v1/admin/regcodes` | `handleCreateRegcodes` | 批量生成。 |
 | `PUT /api/v1/admin/regcodes/:code` | `handleUpdateRegcode` | 目前仅更新 `note` 备注。 |
-| `DELETE /api/v1/admin/regcodes/:code` | `handleDeleteRegcode` | 删除单个卡码（已被使用过的不真正删除，而是停用以保留使用记录）。 |
+| `DELETE /api/v1/admin/regcodes/:code` | `handleDeleteRegcode` | 删除单个卡码，包含已有使用记录的卡码也会直接从状态文档移除。 |
 | `POST /api/v1/admin/regcodes/batch-delete` | `handleBatchDeleteRegcodes` | 批量删除，需确认短语 `confirm=BATCH_DELETE_REGCODES`，单次上限 200。 |
 | `GET /api/v1/admin/regcodes/:code/users` | `handleRegcodeUsers` | 查看某卡码的使用者详情（按 UID / Telegram 解析）。 |
 | `POST /api/v1/admin/regcodes/:code/clear-usage` | `handleClearRegcodeUsage` | 清理使用记录（`use_count`、`used_by_*` 归零并重新启用），需确认短语 `confirm=CLEAR_REGCODE_USAGE`；不影响已注册用户的账号。 |
 
-> 删除语义：`DeleteRegCode` 对「已有使用记录」的卡码不物理删除，而是置 `active=false` 保留审计痕迹；从未使用的卡码才会真正从状态文档移除。
+> 删除语义：`DeleteRegCode` / `DeleteRegCodes` 均为物理删除；即使卡码已有使用记录，也会直接从状态文档移除。
 
 ### 数据库一致性护栏
 

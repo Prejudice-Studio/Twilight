@@ -327,11 +327,11 @@
 | ---- | ---- | ---- | ---- |
 | GET | `/api/v1/invite/config` | Public | 邀请系统公开配置 |
 | GET | `/api/v1/invite/me` | User | 我的邀请状态 |
-| POST | `/api/v1/invite/codes` | User | 生成邀请码 |
-| POST | `/api/v1/invite/renew-codes` | User | 为已到期直属下级生成专属续期码（与生成邀请码同 handler） |
+| POST | `/api/v1/invite/codes` | User | 生成邀请码（邀请系统关闭时拒绝） |
+| POST | `/api/v1/invite/renew-codes` | User | 为已有直属下级生成指名续期码（邀请系统关闭时仍允许） |
 | GET | `/api/v1/invite/codes` | User | 我的邀请码列表 |
 | DELETE | `/api/v1/invite/codes/{code}` | User | 删除/停用邀请码 |
-| POST | `/api/v1/invite/children/{uid}/detach-expired` | User | 脱离已到期的直属下级 |
+| POST | `/api/v1/invite/children/{uid}/detach-expired` | User | 删除 Emby 并断开 Emby 已到期或 Web 已禁用的直属下级 |
 | POST | `/api/v1/invite/check` | Public | 校验邀请码 |
 | POST | `/api/v1/invite/use` | User | 使用邀请码开通 Emby（兼容旧入口） |
 
