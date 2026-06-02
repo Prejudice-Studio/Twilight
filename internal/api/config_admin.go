@@ -44,9 +44,141 @@ func isSecretField(sectionKey, fieldKey string) bool {
 	return false
 }
 
+// maskConfigSecrets 把 values 中所有非空 secret 字段替换为 secretMaskValue。
+// 后端永不向管理端 UI 回传真实密钥明文——TOML GET 与 schema GET 必须同口径遮蔽，
+// 否则 raw TOML 接口会成为绕过 schema 遮蔽、把全部密钥（Postgres DSN、Emby Token、
+// Bot Token、BotInternalSecret 等）泄露到浏览器 DOM/缓存/历史的旁路。
+func maskConfigSecrets(values map[string]map[string]any) {
+	for sectionKey, fields := range values {
+		for fieldKey, v := range fields {
+			if !isSecretField(sectionKey, fieldKey) {
+				continue
+			}
+			if text, ok := v.(string); ok && text != "" {
+				fields[fieldKey] = secretMaskValue
+			}
+		}
+	}
+}
+
+// 历史说明：早期存在一个 values 维度的 restoreConfigSecretSentinels（在解析后的
+// map 上还原哨兵），但 raw TOML PUT 走的是文本路径（saveConfigContent 接收原始
+// TOML 字符串，不经过 values 往返），因此哨兵还原必须在文本层做。文本层实现见
+// restoreTOMLSecrets；schema PUT 则在 handleConfigSchemaUpdateSafe 内联还原哨兵。
+// 两条写路径都已覆盖，values 版本不再需要。
+
+// tomlSectionFieldFromLine 在按行扫描 TOML 时识别当前所处 section、以及该行是否
+// 是一个 key = value 赋值。section 头形如 [Global] / ["Quoted"]；赋值行用第一个
+// '=' 切分 key。返回的 isAssign 为 true 时 key 已 trim+lower。注释行 / 空行 /
+// section 头返回 isAssign=false。该函数仅做词法级解析，不依赖完整 TOML parser，
+// 因此可在 maskTOMLSecrets / restoreTOMLSecrets 中对"磁盘原文逐行"安全工作。
+func tomlSectionFieldFromLine(line, currentSection string) (section string, key string, isAssign bool) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return currentSection, "", false
+	}
+	if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+		name := strings.Trim(strings.TrimSpace(strings.Trim(trimmed, "[]")), `"`)
+		return name, "", false
+	}
+	rawKey, _, ok := strings.Cut(trimmed, "=")
+	if !ok {
+		return currentSection, "", false
+	}
+	return currentSection, strings.TrimSpace(rawKey), true
+}
+
+// maskTOMLSecrets 对磁盘原文 TOML 做行级密钥遮蔽：凡是落在某 section 下、且被
+// configSectionDefs 标记为 Type=="secret" 的非空字段，整行重写为 key = "<哨兵>"。
+// 与 maskConfigSecrets（作用于 values）同口径，保证 handleConfigTOMLGet 的
+// content 与 raw_content 两侧都不外泄真实密钥。section 名按大小写不敏感匹配
+// （isSecretField 内部精确匹配，这里先归一到 configSectionDefs 的规范名）。
+func maskTOMLSecrets(content string) string {
+	lines := strings.Split(content, "\n")
+	section := ""
+	for i, line := range lines {
+		nextSection, key, isAssign := tomlSectionFieldFromLine(line, section)
+		section = canonicalConfigSection(nextSection)
+		if !isAssign || key == "" {
+			continue
+		}
+		if !isSecretField(section, strings.ToLower(key)) {
+			continue
+		}
+		// 已是空值的 secret 行无需遮蔽（区分"未配置"与"已配置但遮蔽"）。
+		_, rawVal, _ := strings.Cut(line, "=")
+		if tomlScalarIsEmpty(rawVal) {
+			continue
+		}
+		indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+		lines[i] = indent + key + " = " + strconv.Quote(secretMaskValue)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// restoreTOMLSecrets 把 PUT 回传的 TOML 里仍是 secretMaskValue 哨兵的 secret 行
+// 还原为 current（内存配置 values）中的真实值。管理员未改动密钥时前端原样回传
+// 哨兵，这里防止哨兵被写盘覆盖真实密钥。非哨兵值视为显式覆盖，保持不动。
+func restoreTOMLSecrets(content string, current map[string]map[string]any) string {
+	if content == "" {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	section := ""
+	for i, line := range lines {
+		nextSection, key, isAssign := tomlSectionFieldFromLine(line, section)
+		section = canonicalConfigSection(nextSection)
+		if !isAssign || key == "" {
+			continue
+		}
+		lowerKey := strings.ToLower(key)
+		if !isSecretField(section, lowerKey) {
+			continue
+		}
+		_, rawVal, _ := strings.Cut(line, "=")
+		if strings.TrimSpace(rawVal) != strconv.Quote(secretMaskValue) {
+			continue
+		}
+		realValue := ""
+		if fields, ok := current[section]; ok {
+			if text, ok := fields[lowerKey].(string); ok {
+				realValue = text
+			}
+		}
+		indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+		lines[i] = indent + key + " = " + strconv.Quote(realValue)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// canonicalConfigSection 把 TOML 里出现的 section 名归一到 configSectionDefs 使用
+// 的规范 Key（大小写不敏感匹配）。无法匹配时原样返回，交给 isSecretField 自然
+// 落空（非 secret）。
+func canonicalConfigSection(section string) string {
+	for _, def := range configSectionDefs() {
+		if strings.EqualFold(def.Key, section) {
+			return def.Key
+		}
+	}
+	return section
+}
+
+// tomlScalarIsEmpty 判断 TOML 标量赋值的值部分是否为"空"（空串 "" / ” 或纯空白）。
+// 用于 maskTOMLSecrets 跳过未配置的 secret 字段。
+func tomlScalarIsEmpty(rawVal string) bool {
+	v := strings.TrimSpace(rawVal)
+	return v == "" || v == `""` || v == "''"
+}
+
 func (a *App) handleConfigTOMLPutSafe(w http.ResponseWriter, r *http.Request, _ Params) {
 	payload := decodeMap(r)
-	info, status, message := a.saveConfigContent(stringValue(payload, "content"))
+	// handleConfigTOMLGet 现在向前端回传遮蔽后的密钥哨兵（secretMaskValue）。
+	// 管理员若未改动密钥，提交回来的 content 里这些字段仍是哨兵串；这里在写盘
+	// 之前把哨兵还原为内存中的真实值，避免哨兵被当作真值覆盖 config.toml，
+	// 导致 Emby Token / Bot Token / Postgres 密码 / BotInternalSecret 等被清成
+	// 无效字符串。显式提交的新值（非哨兵）一律视为覆盖。
+	content := restoreTOMLSecrets(stringValue(payload, "content"), configValues(*a.cfg()))
+	info, status, message := a.saveConfigContent(content)
 	if status != http.StatusOK {
 		failWithCode(w, status, ErrConfigBackupInvalid, message)
 		return
@@ -82,7 +214,11 @@ func (a *App) handleConfigBackupInspect(w http.ResponseWriter, r *http.Request, 
 		failWithCode(w, http.StatusBadRequest, ErrConfigBackupInvalid, "配置备份无效")
 		return
 	}
-	ok(w, "OK", map[string]any{"backup": backup, "content": stripProtectedAdminConfig(string(content)), "config_file": a.configFilePath()})
+	// 备份原文同样含真实密钥（备份是 config.toml 的字节快照）。inspect 仅用于
+	// 管理端预览，必须走 maskTOMLSecrets 与 handleConfigTOMLGet 同口径遮蔽，
+	// 否则"读取任意历史备份"就成了绕过 GET 遮蔽拿明文密钥的旁路。真正的恢复
+	// （handleConfigRestore）读的是磁盘原文、不经此遮蔽，因此预览遮蔽不影响恢复。
+	ok(w, "OK", map[string]any{"backup": backup, "content": stripProtectedAdminConfig(maskTOMLSecrets(string(content))), "config_file": a.configFilePath()})
 }
 
 func (a *App) handleConfigRestore(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -642,11 +778,15 @@ func configSectionDefs() []configSectionDef {
 			{Key: "emby_direct_register_enabled", Label: "Emby 自助注册", Type: "bool", Description: "用户可自助创建 Emby 账号"},
 			{Key: "emby_direct_register_days", Label: "自助注册天数", Type: "int", Description: "Emby 自助注册默认有效期"},
 			{Key: "user_limit", Label: "系统用户上限", Type: "int", Description: "-1 表示不限；达到上限后禁止新注册"},
-			{Key: "regcode_format", Label: "默认注册码格式", Type: "string", Description: "支持 {random}/{type}/{days}/{index}/{validity}/{limit}"},
+			{Key: "regcode_format", Label: "默认卡码格式（兼容旧配置）", Type: "string", Description: "注册/续期/白名单未配置专用格式时使用；支持 {random}/{type}/{days}/{index}/{validity}/{limit}"},
+			{Key: "register_code_format", Label: "注册码专用格式", Type: "string", Description: "仅 type=1 注册码使用；留空则回退到 regcode_format"},
+			{Key: "renew_code_format", Label: "续期码专用格式", Type: "string", Description: "type=2 续期码使用；留空则回退到 regcode_format，邀请中心专属续期码留空时保持 REN-{random} 旧格式"},
+			{Key: "invite_code_format", Label: "邀请码格式", Type: "string", Description: "邀请树邀请码使用；默认 INV{random} 兼容旧码风格，支持 {random}/{type}/{days}/{index}"},
 			{Key: "regcode_random_algorithm", Label: "默认注册码随机算法", Type: "select", Description: "创建注册码未指定算法时使用；包含易抄写、URL 安全和特殊字符预设", Options: selectRegCodeRandom},
 			{Key: "emby_user_limit", Label: "Emby 用户上限", Type: "int", Description: "-1 表示不限"},
 			{Key: "media_request_enabled", Label: "启用求片", Type: "bool", Description: "允许用户提交媒体请求"},
 			{Key: "max_concurrent_requests_per_user", Label: "每用户并发求片", Type: "int", Description: "-1 表示不限"},
+			{Key: "max_concurrent_requests_global", Label: "全局并发求片", Type: "int", Description: "-1 表示不限；达到上限后所有用户的新求片都会被拒绝"},
 			{Key: "invite_enabled", Label: "启用邀请树", Type: "bool", Description: "允许用户生成邀请码或续期码"},
 			{Key: "invite_limit", Label: "邀请码数量", Type: "int", Description: "每个用户可持有的邀请码数量"},
 			{Key: "invite_root_user_limit", Label: "根邀请上限", Type: "int", Description: "单棵邀请树最多成功邀请人数"},
@@ -753,8 +893,8 @@ func configValues(cfg config.Config) map[string]map[string]any {
 		"SAR": {
 			"register_mode": cfg.RegisterEnabled, "register_code_limit": cfg.RegisterCodeLimit, "allow_pending_register": cfg.AllowPendingRegister,
 			"emby_direct_register_enabled": cfg.EmbyDirectRegisterEnabled, "emby_direct_register_days": cfg.EmbyDirectRegisterDays, "emby_user_limit": cfg.EmbyUserLimit,
-			"user_limit": cfg.UserLimit, "regcode_format": cfg.RegCodeFormat, "regcode_random_algorithm": cfg.RegCodeRandomAlgorithm,
-			"media_request_enabled": cfg.MediaRequestEnabled, "max_concurrent_requests_per_user": cfg.MaxConcurrentRequestsPerUser, "invite_enabled": cfg.InviteEnabled,
+			"user_limit": cfg.UserLimit, "regcode_format": cfg.RegCodeFormat, "register_code_format": cfg.RegisterCodeFormat, "renew_code_format": cfg.RenewCodeFormat, "invite_code_format": cfg.InviteCodeFormat, "regcode_random_algorithm": cfg.RegCodeRandomAlgorithm,
+			"media_request_enabled": cfg.MediaRequestEnabled, "max_concurrent_requests_per_user": cfg.MaxConcurrentRequestsPerUser, "max_concurrent_requests_global": cfg.MaxConcurrentRequestsGlobal, "invite_enabled": cfg.InviteEnabled,
 			"invite_limit": cfg.InviteLimit, "invite_root_user_limit": cfg.InviteRootUserLimit, "invite_max_depth": cfg.InviteMaxDepth, "invite_require_emby": cfg.InviteRequireEmby,
 			"invite_code_default_days": cfg.InviteDefaultDays, "permanent_invite_max_days": cfg.PermanentInviteMaxDays, "auto_cleanup_no_emby": cfg.AutoCleanupNoEmby,
 			"auto_cleanup_no_emby_days": cfg.AutoCleanupNoEmbyDays, "auto_cleanup_pending_emby": cfg.AutoCleanupPendingEmby,

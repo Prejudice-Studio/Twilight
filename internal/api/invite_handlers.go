@@ -12,7 +12,7 @@ import (
 )
 
 func (a *App) handleInviteConfig(w http.ResponseWriter, r *http.Request, _ Params) {
-	ok(w, "OK", map[string]any{"enabled": a.cfg().InviteEnabled, "max_depth": a.cfg().InviteMaxDepth, "invite_limit": a.cfg().InviteLimit, "invite_root_user_limit": a.cfg().InviteRootUserLimit, "require_emby": a.cfg().InviteRequireEmby, "default_days": a.cfg().InviteDefaultDays, "code_format": "INV-{random}", "permanent_invite_max_days": a.cfg().PermanentInviteMaxDays})
+	ok(w, "OK", map[string]any{"enabled": a.cfg().InviteEnabled, "max_depth": a.cfg().InviteMaxDepth, "invite_limit": a.cfg().InviteLimit, "invite_root_user_limit": a.cfg().InviteRootUserLimit, "require_emby": a.cfg().InviteRequireEmby, "default_days": a.cfg().InviteDefaultDays, "code_format": a.inviteCodeFormat(""), "permanent_invite_max_days": a.cfg().PermanentInviteMaxDays})
 }
 
 func (a *App) handleInviteMe(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -24,7 +24,7 @@ func (a *App) handleInviteMe(w http.ResponseWriter, r *http.Request, _ Params) {
 	codes := a.store().ListInviteCodes(user.UID)
 	codeItems := make([]map[string]any, 0, len(codes))
 	for _, code := range codes {
-		codeItems = append(codeItems, inviteCodeDTO(code))
+		codeItems = append(codeItems, a.inviteCodeDTO(code))
 	}
 	parent := any(nil)
 	if rel, okRel := a.store().ParentOf(user.UID); okRel {
@@ -58,6 +58,12 @@ func (a *App) handleCreateInviteCode(w http.ResponseWriter, r *http.Request, _ P
 		a.handleCreateInviteRenewCode(w, r, user, payload)
 		return
 	}
+	// 按 UID 限速生成邀请码，防止恶意账号一次性吃满 invite_limit 配额，让
+	// 邀请树受 invite_root_user_limit 控制后还是被噪声码塞满列表。
+	if !a.allowRate(r.Context(), rateKey("invite-mint:", user.UID), 10, time.Minute) {
+		failWithCode(w, http.StatusTooManyRequests, ErrRateLimited, "请求过于频繁，请稍后再试")
+		return
+	}
 	canInvite, reason := a.canInvite(user)
 	if !canInvite {
 		failWithCode(w, http.StatusForbidden, ErrInviteCannotInvite, reason)
@@ -80,9 +86,13 @@ func (a *App) handleCreateInviteCode(w http.ResponseWriter, r *http.Request, _ P
 		return
 	}
 	code := ""
+	format := a.inviteCodeFormat(stringValue(payload, "format"))
 	for attempt := 0; attempt < 20; attempt++ {
-		candidate := strings.ToUpper("INV" + randomCode(10))
+		candidate := generateInviteCode(format, days, 1)
 		if _, exists := a.store().InviteCode(candidate); exists {
+			continue
+		}
+		if _, exists := a.store().RegCode(candidate); exists {
 			continue
 		}
 		code = candidate
@@ -96,7 +106,7 @@ func (a *App) handleCreateInviteCode(w http.ResponseWriter, r *http.Request, _ P
 	if err := a.store().UpsertInviteCode(invite); statusFromError(w, err) {
 		return
 	}
-	created(w, "invite code created", inviteCodeDTO(invite))
+	created(w, "invite code created", a.inviteCodeDTO(invite))
 }
 
 func (a *App) handleCreateInviteRenewCode(w http.ResponseWriter, r *http.Request, user store.User, payload map[string]any) {
@@ -151,12 +161,15 @@ func (a *App) handleCreateInviteRenewCode(w http.ResponseWriter, r *http.Request
 		return
 	}
 	validityHours := clamp(intValue(payload, "validity_hours", 72), 1, 720)
-	format := firstNonEmpty(stringValue(payload, "format"), "REN-{random}")
+	format := firstNonEmpty(stringValue(payload, "format"), a.cfg().RenewCodeFormat, "REN-{random}")
 	algorithm := firstNonEmpty(stringValue(payload, "random_algorithm"), a.cfg().RegCodeRandomAlgorithm, "base32-20")
 	code := ""
 	for attempt := 0; attempt < 20; attempt++ {
 		candidate := generateRegCode(format, 2, algorithm, days, 1, int64(validityHours), 1)
 		if _, exists := a.store().RegCode(candidate); exists {
+			continue
+		}
+		if _, exists := a.store().InviteCode(candidate); exists {
 			continue
 		}
 		code = candidate
@@ -181,7 +194,7 @@ func (a *App) handleInviteCodes(w http.ResponseWriter, r *http.Request, _ Params
 	codes := a.store().ListInviteCodes(current(r).User.UID)
 	items := make([]map[string]any, 0, len(codes))
 	for _, code := range codes {
-		items = append(items, inviteCodeDTO(code))
+		items = append(items, a.inviteCodeDTO(code))
 	}
 	ok(w, "OK", map[string]any{"codes": items, "total": len(items)})
 }
@@ -245,6 +258,13 @@ func (a *App) handleInviteCheck(w http.ResponseWriter, r *http.Request, _ Params
 		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
 		return
 	}
+	// /invite/check 是 AuthPublic：未鉴权也能查询。如果不限速，攻击者可以
+	// 按邀请码空间扫描，命中后拿到邀请人用户名（信息泄露）。按 IP 限到
+	// 每分钟 20 次足够正常用户多次粘贴尝试，又能让扫描者明显受阻。
+	if !a.allowRate(r.Context(), rateKey("invite-check:", a.clientIP(r)), 20, time.Minute) {
+		failWithCode(w, http.StatusTooManyRequests, ErrRateLimited, "请求过于频繁，请稍后再试")
+		return
+	}
 	code := stringValue(decodeMap(r), "code")
 	invite, okInvite := a.store().InviteCode(code)
 	if !okInvite || !invite.Active || (invite.ExpiredAt > 0 && invite.ExpiredAt <= time.Now().Unix()) {
@@ -272,6 +292,12 @@ func (a *App) handleInviteCheck(w http.ResponseWriter, r *http.Request, _ Params
 func (a *App) handleInviteUse(w http.ResponseWriter, r *http.Request, _ Params) {
 	if !a.cfg().InviteEnabled {
 		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
+		return
+	}
+	// 按 UID 限速：登录用户每分钟最多 10 次使用尝试，避免被盗号后或恶意
+	// 用户脚本尝试所有可能的邀请码进入邀请树。
+	if !a.allowRate(r.Context(), rateKey("invite-use:", current(r).User.UID), 10, time.Minute) {
+		failWithCode(w, http.StatusTooManyRequests, ErrRateLimited, "请求过于频繁，请稍后再试")
 		return
 	}
 	payload := decodeMap(r)

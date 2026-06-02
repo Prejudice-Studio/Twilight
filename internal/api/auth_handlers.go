@@ -16,6 +16,7 @@ package api
 //     app.go 维护；本文件只做"业务流程编排"。
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -47,22 +48,30 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request, _ Params) {
 		failWithCode(w, http.StatusBadRequest, ErrAuthCredentialsEmpty, "用户名和密码不能为空")
 		return
 	}
-	// 双桶限速：除按 IP 之外，再按用户名维度独立计数。
-	// 仅 IP 桶时存在两类绕过：
-	//   1) NAT/CGNAT 邻居共享同一公网 IP，正常用户被恶意邻居拖累；
-	//   2) 攻击者用代理池 / IPv6 大池子各 ≤60/min 撞同一账号，单账号锁定失效。
-	// user 桶预算更紧（10 次 / 5 分钟），且必须在解析到 username 之后才能算 key；
-	// 这里把"username 是否存在"判断放在桶之后，避免攻击者通过响应时间差做账号
-	// 枚举（无论账号是否存在，都消耗 user 桶配额）。
-	if a.cfg().RateLimitLoginUserPer5m > 0 {
-		userKey := strings.ToLower(strings.TrimSpace(username))
-		if userKey != "" && !a.allowRate(r.Context(), rateKey("login:user:", userKey), a.cfg().RateLimitLoginUserPer5m, 5*time.Minute) {
-			failWithCode(w, http.StatusTooManyRequests, ErrLoginRateLimited, "登录过于频繁，请稍后再试")
-			return
-		}
-	}
 	u, okUser := a.store().FindUserByUsername(username)
-	if !okUser || !security.VerifyPassword(password, u.PasswordHash) {
+	// 常量代价校验：用户名不存在时也对占位哈希跑一次等代价 PBKDF2，抹平
+	// "不存在(快) vs 存在但密码错(慢 ~150ms)"的时序差，避免用户名枚举旁路。
+	// verifyPasswordThrottled 还把并发哈希数压到 GOMAXPROCS-1，防 CPU 饿死。
+	encoded := dummyPasswordHash()
+	if okUser {
+		encoded = u.PasswordHash
+	}
+	valid := verifyPasswordThrottled(password, encoded)
+	if !okUser || !valid {
+		// 每用户名桶（10 次 / 5 分钟）只在「认证失败」时计数。
+		// 旧实现在认证前就消耗该桶，任何人都能用垃圾请求把受害者（尤其是已知
+		// 用户名的管理员）的桶打满，造成定向账号锁定 DoS。改为仅对失败计数后：
+		//   - 攻击者的垃圾尝试只会节流攻击者自己（撞库防护保留：分布式攻击同样
+		//     按用户名累计失败，10 次/5min 后该用户名被 429）；
+		//   - 持有正确密码的受害者认证成功、不触碰该桶，永不被锁定。
+		// 计数在常量代价校验之后进行，不影响上面的时序均一性。
+		if a.cfg().RateLimitLoginUserPer5m > 0 {
+			userKey := strings.ToLower(strings.TrimSpace(username))
+			if userKey != "" && !a.allowRate(r.Context(), rateKey("login:user:", userKey), a.cfg().RateLimitLoginUserPer5m, 5*time.Minute) {
+				failWithCode(w, http.StatusTooManyRequests, ErrLoginRateLimited, "登录过于频繁，请稍后再试")
+				return
+			}
+		}
 		failWithCode(w, http.StatusUnauthorized, ErrLoginInvalid, "用户名或密码错误")
 		return
 	}
@@ -77,6 +86,14 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request, _ Params) {
 		}
 		failWithCode(w, http.StatusForbidden, ErrAccountDisabled, "账号已被禁用")
 		return
+	}
+	// 登录成功后透明升级陈旧哈希（legacy Python salt$sha256，或迭代数低于当前门槛
+	// 的 PBKDF2）。尽力而为：UpdateUser 失败不阻断本次登录。放在 VerifyPassword
+	// 成功之后，损坏哈希不可能走到这里（那会先让校验失败）。
+	if security.NeedsRehash(u.PasswordHash) {
+		if h, hErr := security.HashPassword(password); hErr == nil {
+			_, _ = a.store().UpdateUser(u.UID, func(uu *store.User) error { uu.PasswordHash = h; return nil })
+		}
 	}
 	token, expires, err := a.sessions().Create(r.Context(), u.UID)
 	if err != nil {
@@ -259,13 +276,15 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request, _ Params) {
 		failWithCode(w, http.StatusTooManyRequests, ErrRegisterRateLimited, "注册过于频繁，请稍后再试")
 		return
 	}
-	if !a.cfg().RegisterEnabled && a.store().UserCount() > 0 {
+	currentUsers := a.store().UserCount()
+	if !a.cfg().RegisterEnabled && currentUsers > 0 {
 		failWithCode(w, http.StatusForbidden, ErrRegisterDisabled, "系统注册未开启")
 		return
 	}
 	payload := decodeMap(r)
 	username := stringValue(payload, "username")
 	password := stringValue(payload, "password")
+	regCode := firstNonEmpty(stringValue(payload, "reg_code"), stringValue(payload, "code"))
 	telegramBindCode := strings.ToUpper(strings.TrimSpace(stringValue(payload, "telegram_bind_code")))
 	if err := validate.ValidateUsername(username); err != nil {
 		failWithCode(w, http.StatusBadRequest, ErrUsernameInvalid, err.Error())
@@ -276,7 +295,7 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request, _ Params) {
 	// 通过 configuredAdminMatch 按实际 UID 应用。否则只配置 admin_uids=[1]
 	// 的常见部署会在注册前因为 uid=0 无法匹配而被永久挡住。
 	configuredAdminNames := a.configuredAdminUsernameSet()
-	bootstrapMode := a.store().UserCount() == 0
+	bootstrapMode := currentUsers == 0
 	if bootstrapMode && len(configuredAdminNames) > 0 && !configuredAdminMatchSets(nil, configuredAdminNames, 0, username) {
 		failWithCode(w, http.StatusForbidden, ErrRegisterDisabled, "系统初始管理员已通过配置指定，请使用配置的用户名注册")
 		return
@@ -288,6 +307,27 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request, _ Params) {
 	if reached, current, limit := a.systemUserLimitReached(); reached {
 		failWithCode(w, http.StatusConflict, ErrUserLimitReached, fmt.Sprintf("系统用户数量已达上限 %d/%d", current, limit))
 		return
+	}
+	var registerReg store.RegCode
+	if a.cfg().RegisterCodeLimit && !bootstrapMode {
+		if regCode == "" {
+			failWithCode(w, http.StatusBadRequest, ErrCodeEmpty, "注册需要提供注册码")
+			return
+		}
+		if !a.allowRate(r.Context(), rateKey("register:regcode:", a.clientIP(r)), 10, time.Minute) {
+			failWithCode(w, http.StatusTooManyRequests, ErrRegisterRateLimited, "注册码注册尝试过于频繁，请稍后再试")
+			return
+		}
+		reg, okReg := a.store().RegCode(regCode)
+		if !okReg || reg.IsDecoy || reg.Type != 1 || reg.TargetUsername != "" && !strings.EqualFold(reg.TargetUsername, username) || regcodeStatus(reg) != "available" {
+			failWithCode(w, http.StatusBadRequest, ErrRegcodeInvalid, "注册码无效、已用完或已过期")
+			return
+		}
+		registerReg = reg
+		if reached, current, limit := a.embyCapacityReachedExcluding(0, regCode, ""); reached {
+			failWithCode(w, http.StatusConflict, ErrEmbyCapacityReached, fmt.Sprintf("Emby 用户数量已达上限 %d/%d", current, limit))
+			return
+		}
 	}
 	var telegramID int64
 	var telegramUsername string
@@ -331,7 +371,38 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request, _ Params) {
 	if a.store().UserCount() == 0 {
 		role = store.RoleAdmin
 	}
-	u, err := a.store().CreateUser(store.User{Username: username, Email: stringValue(payload, "email"), PasswordHash: passwordHash, Role: role, TelegramID: telegramID, TelegramUsername: telegramUsername})
+	newUser := store.User{Username: username, Email: stringValue(payload, "email"), PasswordHash: passwordHash, Role: role, TelegramID: telegramID, TelegramUsername: telegramUsername}
+	if registerReg.Code != "" {
+		days := normalizeRegCodeDays(registerReg.Days)
+		newUser.PendingEmby = true
+		newUser.PendingEmbyDays = &days
+		newUser.EmbyUsername = username
+	}
+	var u store.User
+	if registerReg.Code != "" {
+		var consumed store.RegCode
+		u, consumed, err = a.store().CreateUserWithRegCode(newUser, registerReg.Code, telegramID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrExpired) {
+				failWithCode(w, http.StatusBadRequest, ErrRegcodeInvalid, "注册码无效、已用完或已过期")
+				return
+			}
+			if errors.Is(err, store.ErrConflict) {
+				if _, exists := a.store().FindUserByUsername(username); exists {
+					failWithCode(w, http.StatusConflict, ErrUsernameTaken, "用户名已被使用")
+					return
+				}
+				failWithCode(w, http.StatusBadRequest, ErrRegcodeInvalid, "注册码无效、已用完或已过期")
+				return
+			}
+			if statusFromError(w, err) {
+				return
+			}
+		}
+		registerReg = consumed
+	} else {
+		u, err = a.store().CreateUser(newUser)
+	}
 	if statusFromError(w, err) {
 		return
 	}
@@ -348,7 +419,7 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request, _ Params) {
 			role = store.RoleAdmin
 		}
 	}
-	created(w, "注册成功", map[string]any{"user": publicUser(u), "first_admin": role == store.RoleAdmin})
+	created(w, "注册成功", map[string]any{"user": publicUser(u), "first_admin": role == store.RoleAdmin, "reg_code_used": registerReg.Code})
 }
 
 func (a *App) handleRegisterAvailability(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -377,14 +448,31 @@ func (a *App) handleRegisterAvailability(w http.ResponseWriter, r *http.Request,
 		available = false
 		message = fmt.Sprintf("系统用户数量已达上限 %d/%d", currentUsers, a.cfg().UserLimit)
 	}
+	embyBoundUsers := 0
+	for _, u := range a.store().ListUsers() {
+		if u.EmbyID != "" {
+			embyBoundUsers++
+		}
+	}
+	directDays := a.cfg().EmbyDirectRegisterDays
+	if directDays == 0 {
+		directDays = 30
+	}
 	ok(w, "OK", map[string]any{
-		"enabled":           a.cfg().RegisterEnabled,
-		"can_register":      canRegister,
-		"requires_reg_code": a.cfg().RegisterCodeLimit,
-		"available":         available,
-		"message":           message,
-		"current_users":     currentUsers,
-		"max_users":         a.cfg().UserLimit,
-		"emby_user_limit":   a.cfg().EmbyUserLimit,
+		"enabled":                                a.cfg().RegisterEnabled,
+		"register_mode":                          a.cfg().RegisterEnabled,
+		"can_register":                           canRegister,
+		"requires_reg_code":                      a.cfg().RegisterCodeLimit,
+		"available":                              available,
+		"message":                                message,
+		"current_users":                          currentUsers,
+		"max_users":                              a.cfg().UserLimit,
+		"allow_pending_register":                 a.cfg().AllowPendingRegister,
+		"emby_direct_register_enabled":           a.cfg().EmbyDirectRegisterEnabled,
+		"emby_direct_register_days":              directDays,
+		"emby_direct_register_day_options":       []int{directDays},
+		"emby_direct_register_allow_custom_days": false,
+		"emby_user_limit":                        a.cfg().EmbyUserLimit,
+		"emby_bound_users":                       embyBoundUsers,
 	})
 }

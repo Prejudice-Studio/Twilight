@@ -42,12 +42,12 @@ func writeJSONWithCode(w http.ResponseWriter, status int, success bool, errorCod
 // 历史实现是一连串 case 字面量，每加一个 status 就要改一处 switch；
 // 用 map 改成纯数据后：
 //
-//   1. 增删 status 只改一行字面量，避免 case 顺序与漏写；
-//   2. response_test.go 可以直接 range map 反向校验，确保 errcode.go
-//      的常量没有被静默改动；
-//   3. 5xx 不在 map 里，由 defaultErrorCode 兜底为 ErrInternal——这是
-//      经验：未知 5xx 一律算服务端故障，不要随便回成 REQUEST_FAILED
-//      让前端把它当用户输入错误重试。
+//  1. 增删 status 只改一行字面量，避免 case 顺序与漏写；
+//  2. response_test.go 可以直接 range map 反向校验，确保 errcode.go
+//     的常量没有被静默改动；
+//  3. 5xx 不在 map 里，由 defaultErrorCode 兜底为 ErrInternal——这是
+//     经验：未知 5xx 一律算服务端故障，不要随便回成 REQUEST_FAILED
+//     让前端把它当用户输入错误重试。
 var statusToErrorCode = map[int]string{
 	http.StatusBadRequest:            ErrBadRequest,
 	http.StatusUnauthorized:          ErrUnauthorized,

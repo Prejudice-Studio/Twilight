@@ -127,6 +127,26 @@ func (a *App) handleUpdateUsername(w http.ResponseWriter, r *http.Request, _ Par
 	ok(w, "用户名已更新", publicUser(u))
 }
 
+// rotateSessionsAfterPasswordChange 在用户自助修改密码后吊销其全部会话（驱逐任何
+// 被盗 token），再为当前调用方签发一份新会话，使其在本设备保持登录：cookie 客户端
+// 透明续期（重写 session + csrf cookie），Bearer 客户端用返回体里的新 token 续用。
+// 与 handleAdminResetPassword / handleForgotPassword 的「改密即吊销旧会话」口径一致。
+// 失败时已写响应，返回 ok=false，调用方直接 return。
+func (a *App) rotateSessionsAfterPasswordChange(w http.ResponseWriter, r *http.Request, uid int64) (string, string, bool) {
+	a.sessions().DeleteUser(r.Context(), uid)
+	token, expires, err := a.sessions().Create(r.Context(), uid)
+	if err != nil {
+		failWithCode(w, http.StatusInternalServerError, ErrSessionCreateFailed, "创建会话失败")
+		return "", "", false
+	}
+	csrf, err := a.issueSessionCookies(w, token, expires)
+	if err != nil {
+		failWithCode(w, http.StatusInternalServerError, ErrSessionCreateFailed, "创建 CSRF 令牌失败")
+		return "", "", false
+	}
+	return token, csrf, true
+}
+
 func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
 	if a.requireNonEmbyAdmin(w, r, p.User) {
@@ -152,7 +172,11 @@ func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request, _ Par
 	if statusFromError(w, err) {
 		return
 	}
-	ok(w, "password updated", nil)
+	token, csrf, rotated := a.rotateSessionsAfterPasswordChange(w, r, p.User.UID)
+	if !rotated {
+		return
+	}
+	ok(w, "password updated", map[string]any{"token": token, "csrf_token": csrf})
 }
 
 func (a *App) handleGeneratedPassword(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -172,7 +196,11 @@ func (a *App) handleGeneratedPassword(w http.ResponseWriter, r *http.Request, _ 
 	if statusFromError(w, err) {
 		return
 	}
-	ok(w, "password reset", map[string]any{"new_password": password})
+	token, csrf, rotated := a.rotateSessionsAfterPasswordChange(w, r, p.User.UID)
+	if !rotated {
+		return
+	}
+	ok(w, "password reset", map[string]any{"new_password": password, "token": token, "csrf_token": csrf})
 }
 
 func (a *App) handleChangeEmbyPassword(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -358,15 +386,12 @@ func (a *App) handleRenew(w http.ResponseWriter, r *http.Request, _ Params) {
 		failWithCode(w, http.StatusBadRequest, ErrRegcodeInvalid, "注册码无效、已用完或已过期")
 		return
 	}
-	days := int64(code.Days)
-	if days <= 0 {
-		days = 30
-	}
+	days := normalizeRegCodeDays(code.Days)
 	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error {
 		// 用 renewExpiryAndReactivate 而不是裸 ExpiredAt = ...：自助续费会
 		// 把曾被 check_expired 设成 Active=false 的非邀请账号同步解禁，避免
 		// "续完仍登不上"的死循环。
-		renewExpiryAndReactivate(u, addDaysToExpiry(u.ExpiredAt, int(days), time.Now()))
+		renewExpiryAndReactivate(u, addDaysToExpiry(u.ExpiredAt, days, time.Now()))
 		return nil
 	})
 	if statusFromError(w, err) {
@@ -905,9 +930,13 @@ func (a *App) configuredServerIconPath() (string, string, bool) {
 	if !ok {
 		return "", "", false
 	}
-	path := value
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(firstNonEmpty(a.cfg().UploadDir, "uploads"), path)
+	// 必须经过 ResolveWithinRoot 约束在上传目录内：server_icon 是管理员可写的
+	// 配置项，而 /api/v1/system/server-icon 是 AuthPublic。若直接接受绝对路径或
+	// 含 ".." 的相对路径，一次"管理员写配置"就会变成"任意人读主机任意图片扩展名
+	// 文件"（也可经 handleConfigRestore 用构造的备份触发）。绝对路径不再被接受。
+	path, err := ResolveWithinRoot(firstNonEmpty(a.cfg().UploadDir, "uploads"), value)
+	if err != nil {
+		return "", "", false
 	}
 	info, err := os.Lstat(path)
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > 2*1024*1024 {
@@ -1040,9 +1069,13 @@ func (a *App) handlePublicConfig(w http.ResponseWriter, r *http.Request, _ Param
 		"invite_enabled":        a.cfg().InviteEnabled,
 		"device_limit":          map[string]any{"enabled": a.cfg().DeviceLimitEnabled, "max_devices": a.cfg().MaxDevices, "max_streams": a.cfg().MaxStreams},
 		"bangumi_sync":          map[string]any{"enabled": a.cfg().BangumiEnabled},
-		"media_request":         map[string]any{"enabled": a.cfg().MediaRequestEnabled},
-		"signin":                signinConfigPayload(*a.cfg()),
-		"invite":                map[string]any{"enabled": a.cfg().InviteEnabled},
+		"media_request": map[string]any{
+			"enabled":                 a.cfg().MediaRequestEnabled,
+			"max_concurrent_per_user": a.cfg().MaxConcurrentRequestsPerUser,
+			"max_concurrent_global":   a.cfg().MaxConcurrentRequestsGlobal,
+		},
+		"signin": signinConfigPayload(*a.cfg()),
+		"invite": map[string]any{"enabled": a.cfg().InviteEnabled},
 	})
 }
 
@@ -1057,8 +1090,17 @@ func (a *App) handleConfigTOMLGet(w http.ResponseWriter, r *http.Request, _ Para
 		failWithCode(w, http.StatusNotFound, ErrConfigFileNotFound, "config file not found")
 		return
 	}
-	rawContent := stripProtectedAdminConfig(string(data))
-	normalizedContent := stripProtectedAdminConfig(renderConfigTOML(configValues(*a.cfg())))
+	// 密钥遮蔽：raw TOML GET 与 schema GET 必须同口径屏蔽真实密钥，否则本接口
+	// 会成为绕过 schema 遮蔽、把全部密钥（Postgres DSN、Emby Token、Bot Token、
+	// BotInternalSecret、Webhook Secret 等）泄露到浏览器 DOM/缓存/历史的旁路。
+	//   - content（规范化渲染）：先在 values 上 maskConfigSecrets 再 render；
+	//   - raw_content（磁盘原文）：按 section 上下文做行级 maskTOMLSecrets。
+	// 两侧用同一哨兵，completed 比较仍对非密钥字段有效。PUT 路径
+	// （handleConfigTOMLPutSafe）会把回传的哨兵还原为真实值，避免写盘覆盖。
+	maskedValues := configValues(*a.cfg())
+	maskConfigSecrets(maskedValues)
+	normalizedContent := stripProtectedAdminConfig(renderConfigTOML(maskedValues))
+	rawContent := stripProtectedAdminConfig(maskTOMLSecrets(string(data)))
 	ok(w, "OK", map[string]any{"content": normalizedContent, "raw_content": rawContent, "path": path, "completed": normalizedContent != rawContent})
 }
 

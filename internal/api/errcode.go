@@ -281,6 +281,7 @@ const (
 	ErrMediaRequestDisabled       ErrCode = "MEDIA_REQUEST_DISABLED"
 	ErrMediaRequestTGRequired     ErrCode = "MEDIA_REQUEST_TG_REQUIRED"
 	ErrMediaRequestPendingLimit   ErrCode = "MEDIA_REQUEST_PENDING_LIMIT"
+	ErrMediaRequestGlobalLimit    ErrCode = "MEDIA_REQUEST_GLOBAL_LIMIT"
 	ErrMediaRequestExists         ErrCode = "MEDIA_REQUEST_ALREADY_EXISTS"
 	ErrMediaRequestStatusInvalid  ErrCode = "MEDIA_REQUEST_STATUS_INVALID"
 	ErrMediaRequestNotFound       ErrCode = "MEDIA_REQUEST_NOT_FOUND"

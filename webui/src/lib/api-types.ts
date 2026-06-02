@@ -364,9 +364,13 @@ export interface RegisterResponse {
   status?: "queued" | "processing" | "success" | "failed";
   queue_position?: number;
   reused?: boolean;
+  reg_code_used?: string;
 }
 
 export interface RegisterAvailability {
+  enabled?: boolean;
+  can_register?: boolean;
+  requires_reg_code?: boolean;
   available: boolean;
   message: string;
   current_users: number;
@@ -490,9 +494,11 @@ export interface Regcode {
   status?: "available" | "disabled" | "used_up" | "expired";
   note?: string;
   target_username?: string;
+  target_uid?: number;
   used: boolean;
   used_by?: number | string;
   used_by_uids?: number[];
+  used_by_usernames?: string[];
   used_by_telegram_ids?: number[];
   created_at: string;
   created_time?: number; // 创建时间戳（兼容字段）
@@ -721,15 +727,19 @@ export interface InviteConfig {
 export interface InviteCodeItem {
   code: string;
   inviter_uid: number;
+  inviter_username?: string;
   days: number;
   use_count_limit: number;
   use_count: number;
-  expires_at: number;
+  expires_at: number | null;
   active: boolean;
   created_at: number;
   used_by_uid?: number | null;
+  used_by_username?: string;
   used_at?: number | null;
   note?: string | null;
+  target_username?: string;
+  target_uid?: number;
 }
 
 export interface InviteTreeNode {

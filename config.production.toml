@@ -175,10 +175,14 @@ user_limit = 200
 media_request_enabled = false
 # 每用户最多同时存在的求片数（待处理 + 下载中），-1 不限
 max_concurrent_requests_per_user = -1
-# 卡码生成格式，可包含自定义文本。
-# 占位符：{random}=随机部分，{type}=register/renew/whitelist，{days}=账号天数，{index}=批量序号，{validity}=卡码有效期小时，{limit}=次数上限。
+# 默认卡码生成格式，可包含自定义文本；注册/续期专用格式为空时回退到这里。
+# 占位符：{random}=随机部分，{type}=REG/REN/VIP，{days}=账号天数，{index}=批量序号，{validity}=卡码有效期小时，{limit}=次数上限。
 # 示例: TW-{type}-{random} / 银河列车-{days}-{random}
 regcode_format = "code-{random}"
+# 仅 type=1 注册码使用；留空沿用 regcode_format。
+register_code_format = ""
+# type=2 续期码使用；留空沿用 regcode_format。邀请中心专属续期码未配置时保持 REN-{random} 旧格式。
+renew_code_format = ""
 # 随机算法预设：hex20=20位十六进制；base32-16=易抄写大写字符；alnum-16=大写字母数字；digits-12=纯数字；uuid=UUID v4；legacy-sha1=旧版风格
 regcode_random_algorithm = "hex20"
 # 假卡码被已登录用户使用后的动作：none / disable_user / disable_user_and_deactivate_code
@@ -217,7 +221,7 @@ invite_root_user_limit = -1
 invite_max_depth = 3
 invite_require_emby = true
 invite_code_default_days = 30
-# 邀请码格式；最终强制 inv- 前缀，支持 {random}/{uid}/{days}/{index}/{timestamp}
+# 邀请码格式；支持 {random}/{type}/{days}/{index}，不强制固定前缀。
 invite_code_format = "inv-{random}"
 
 # —— 长期无 Emby 的悬空用户自动清理

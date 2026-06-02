@@ -101,6 +101,14 @@ func (a *App) handleCreateMediaRequest(w http.ResponseWriter, r *http.Request, _
 		failWithCode(w, http.StatusTooManyRequests, ErrMediaRequestPendingLimit, "pending media request limit reached")
 		return
 	}
+	// 全局并发上限：admin 不计入限制，避免管理员被普通用户的求片队列卡死无法
+	// 处理紧急情况。配置为 -1 或 0 视为不限。
+	if globalLimit := a.cfg().MaxConcurrentRequestsGlobal; globalLimit > 0 && p.User.Role != store.RoleAdmin {
+		if a.store().ActiveMediaRequestCountTotal() >= globalLimit {
+			failWithCode(w, http.StatusTooManyRequests, ErrMediaRequestGlobalLimit, fmt.Sprintf("全站求片队列已达上限 %d，请稍后再试", globalLimit))
+			return
+		}
+	}
 	payload := decodeMap(r)
 	title := firstNonEmpty(stringValue(payload, "title"), stringValue(payload, "name"), "Unknown")
 	source := normalizeSource(firstNonEmpty(stringValue(payload, "source"), "tmdb"))
@@ -283,7 +291,9 @@ func (a *App) handleMediaRequestByID(w http.ResponseWriter, r *http.Request, par
 	req, okReq := a.store().MediaRequest(id)
 	if okReq {
 		if !canAccessMediaRequest(current(r).User, req) {
-			failWithCode(w, http.StatusForbidden, ErrMediaRequestAccessDenied, "cannot access this request")
+			// 存在但无权访问时返回与"不存在"完全相同的 404，避免顺序整数
+			// request_id 被普通用户用 403/404 差异枚举出全站求片是否存在与活跃度。
+			failWithCode(w, http.StatusNotFound, ErrMediaRequestNotFound, "request not found")
 			return
 		}
 		ok(w, "OK", mediaRequestUserDTO(req))
@@ -295,7 +305,9 @@ func (a *App) handleMediaRequestByID(w http.ResponseWriter, r *http.Request, par
 func (a *App) handleDeleteMediaRequest(w http.ResponseWriter, r *http.Request, params Params) {
 	id, _ := int64Param(params, "request_id")
 	if req, okReq := a.store().MediaRequest(id); okReq && !canAccessMediaRequest(current(r).User, req) {
-		failWithCode(w, http.StatusForbidden, ErrMediaRequestDeleteDenied, "cannot delete this request")
+		// 与 handleMediaRequestByID 同口径：存在但无权时返回 404，避免用 DELETE
+		// 探针绕过 GET 的存在性 oracle 收口。
+		failWithCode(w, http.StatusNotFound, ErrMediaRequestNotFound, "request not found")
 		return
 	}
 	if statusFromError(w, a.store().DeleteMediaRequest(id)) {

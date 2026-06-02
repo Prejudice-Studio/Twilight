@@ -1483,6 +1483,49 @@ func (s *Store) CreateUser(u User) (User, error) {
 	return created, nil
 }
 
+func (s *Store) CreateUserWithRegCode(u User, regCode string, telegramID int64) (User, RegCode, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var created User
+	var consumed RegCode
+	err := s.mutateAndSaveLocked(func() error {
+		for _, existing := range s.state.Users {
+			if strings.EqualFold(existing.Username, u.Username) {
+				return ErrConflict
+			}
+		}
+		now := time.Now().Unix()
+		reg, err := s.consumableRegCodeLocked(regCode, now)
+		if err != nil {
+			return err
+		}
+		if reg.Type != 1 || reg.IsDecoy || (reg.TargetUsername != "" && !strings.EqualFold(reg.TargetUsername, u.Username)) {
+			return ErrNotFound
+		}
+
+		u.UID = s.state.NextUserID
+		s.state.NextUserID++
+		if u.CreatedAt == 0 {
+			u.CreatedAt = now
+		}
+		if u.RegisterTime == 0 {
+			u.RegisterTime = now
+		}
+		if u.ExpiredAt == 0 {
+			u.ExpiredAt = -1
+		}
+		u.Active = true
+		consumed = s.consumeRegCodeLocked(reg, u.UID, telegramID)
+		s.state.Users[u.UID] = u
+		created = u
+		return nil
+	})
+	if err != nil {
+		return User{}, RegCode{}, err
+	}
+	return created, consumed, nil
+}
+
 func (s *Store) FindUserByUsername(username string) (User, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -2028,6 +2071,23 @@ func (s *Store) ActiveMediaRequestCount(uid int64) int {
 	return count
 }
 
+// ActiveMediaRequestCountTotal 统计全站正在处理（未完成 / 未拒绝）的求片数。
+// 用于配置里 max_concurrent_requests_global 全局并发上限的判定。
+// 不区分用户 / Telegram ID，单纯按 Status 是否仍是活跃流程内（pending / accepted /
+// downloading）统计。与 ActiveMediaRequestCount(uid) 共用 isActiveMediaStatus，
+// 保证"全局看见的活跃集合 == 各 UID 累加"。
+func (s *Store) ActiveMediaRequestCountTotal() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	count := 0
+	for _, r := range s.state.MediaRequests {
+		if isActiveMediaStatus(r.Status) {
+			count++
+		}
+	}
+	return count
+}
+
 func (s *Store) MediaRequest(id int64) (MediaRequest, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -2298,6 +2358,13 @@ func (s *Store) ConsumeInviteCode(code string, childUID int64) (InviteCode, erro
 		if c.InviterUID != 0 && c.InviterUID == childUID {
 			return ErrConflict
 		}
+		// 「一个 child 至多一个上级」必须在消费的同一把写锁内复检。否则 handler
+		// 层的 ParentOf() 预检与此处消费之间存在 TOCTOU：同一 childUID 用两个不同
+		// 邀请码并发请求会双双通过预检，第二次消费覆盖关系并烧掉两个邀请人的码。
+		// 此处一旦发现已有上级即 ErrConflict，让先到者赢、后到者整体回滚。
+		if _, exists := s.state.InviteRelations[childUID]; exists {
+			return ErrConflict
+		}
 		c.UseCount++
 		c.Used = true
 		c.UsedByUID = childUID
@@ -2395,36 +2462,48 @@ func (s *Store) ConsumeRegCode(code string, uid, telegramID int64) (RegCode, err
 	defer s.mu.Unlock()
 	var consumed RegCode
 	err := s.mutateAndSaveLocked(func() error {
-		r, ok := s.state.RegCodes[code]
-		if !ok || !r.Active {
-			return ErrNotFound
-		}
-		if r.UseCountLimit != -1 && r.UseCount >= r.UseCountLimit {
-			return ErrConflict
-		}
 		now := time.Now().Unix()
-		if r.ValidityTime > 0 && r.CreatedAt+r.ValidityTime*3600 <= now {
-			return ErrExpired
+		r, err := s.consumableRegCodeLocked(code, now)
+		if err != nil {
+			return err
 		}
-		r.UseCount++
-		if uid != 0 {
-			r.UsedBy = uid
-			r.UsedByUIDs = appendUniqueInt64(r.UsedByUIDs, uid)
-		}
-		if telegramID != 0 {
-			r.UsedByTelegramIDs = appendUniqueInt64(r.UsedByTelegramIDs, telegramID)
-		}
-		if r.UseCountLimit != -1 && r.UseCount >= r.UseCountLimit {
-			r.Active = false
-		}
-		s.state.RegCodes[code] = r
-		consumed = r
+		consumed = s.consumeRegCodeLocked(r, uid, telegramID)
 		return nil
 	})
 	if err != nil {
 		return RegCode{}, err
 	}
 	return consumed, nil
+}
+
+func (s *Store) consumableRegCodeLocked(code string, now int64) (RegCode, error) {
+	r, ok := s.state.RegCodes[code]
+	if !ok || !r.Active {
+		return RegCode{}, ErrNotFound
+	}
+	if r.UseCountLimit != -1 && r.UseCount >= r.UseCountLimit {
+		return RegCode{}, ErrConflict
+	}
+	if r.ValidityTime > 0 && r.CreatedAt+r.ValidityTime*3600 <= now {
+		return RegCode{}, ErrExpired
+	}
+	return r, nil
+}
+
+func (s *Store) consumeRegCodeLocked(r RegCode, uid, telegramID int64) RegCode {
+	r.UseCount++
+	if uid != 0 {
+		r.UsedBy = uid
+		r.UsedByUIDs = appendUniqueInt64(r.UsedByUIDs, uid)
+	}
+	if telegramID != 0 {
+		r.UsedByTelegramIDs = appendUniqueInt64(r.UsedByTelegramIDs, telegramID)
+	}
+	if r.UseCountLimit != -1 && r.UseCount >= r.UseCountLimit {
+		r.Active = false
+	}
+	s.state.RegCodes[r.Code] = r
+	return r
 }
 
 func (s *Store) ListRegCodes() []RegCode {

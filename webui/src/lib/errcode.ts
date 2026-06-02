@@ -184,6 +184,7 @@ export type ErrCode =
   | "REGCODE_INVALID"
   | "BIND_CODE_RATE_LIMITED"
   | "BIND_CODE_CONFLICT"
+  | "BIND_CODE_SAVE_FAILED"
   | "BIND_CODE_NOT_FOUND"
   | "TG_UNBIND_FORBIDDEN"
   | "TG_NOT_BOUND"
@@ -219,6 +220,7 @@ export type ErrCode =
   | "MEDIA_REQUEST_DISABLED"
   | "MEDIA_REQUEST_TG_REQUIRED"
   | "MEDIA_REQUEST_PENDING_LIMIT"
+  | "MEDIA_REQUEST_GLOBAL_LIMIT"
   | "MEDIA_REQUEST_ALREADY_EXISTS"
   | "MEDIA_REQUEST_STATUS_INVALID"
   | "MEDIA_REQUEST_NOT_FOUND"
@@ -256,6 +258,8 @@ export type ErrCode =
   // === 批量 / 求片 / 演示 / 上传 / 运行时日志补码 ===
   | "BATCH_DAYS_INVALID"
   | "BATCH_LIBRARY_ACTION_INVALID"
+  | "BATCH_SELF_TARGET"
+  | "USER_NO_EMBY"
   | "REGCODE_STORAGE_MISMATCH"
   | "RUNTIME_LOG_STREAM_UNSUPPORTED"
   | "DEMO_ACTION_RATE_LIMITED"
@@ -455,6 +459,7 @@ export const ErrCodes = {
   RegcodeInvalid: "REGCODE_INVALID",
   BindCodeRateLimited: "BIND_CODE_RATE_LIMITED",
   BindCodeConflict: "BIND_CODE_CONFLICT",
+  BindCodeSaveFailed: "BIND_CODE_SAVE_FAILED",
   BindCodeNotFound: "BIND_CODE_NOT_FOUND",
   TGUnbindForbidden: "TG_UNBIND_FORBIDDEN",
   TGNotBound: "TG_NOT_BOUND",
@@ -490,6 +495,7 @@ export const ErrCodes = {
   MediaRequestDisabled: "MEDIA_REQUEST_DISABLED",
   MediaRequestTGRequired: "MEDIA_REQUEST_TG_REQUIRED",
   MediaRequestPendingLimit: "MEDIA_REQUEST_PENDING_LIMIT",
+  MediaRequestGlobalLimit: "MEDIA_REQUEST_GLOBAL_LIMIT",
   MediaRequestExists: "MEDIA_REQUEST_ALREADY_EXISTS",
   MediaRequestStatusInvalid: "MEDIA_REQUEST_STATUS_INVALID",
   MediaRequestNotFound: "MEDIA_REQUEST_NOT_FOUND",
@@ -527,6 +533,8 @@ export const ErrCodes = {
   // 批量 / 求片 / 演示 / 上传 / 运行时日志补码
   BatchDaysInvalid: "BATCH_DAYS_INVALID",
   BatchLibraryActionInvalid: "BATCH_LIBRARY_ACTION_INVALID",
+  BatchSelfTarget: "BATCH_SELF_TARGET",
+  UserHasNoEmby: "USER_NO_EMBY",
   RegcodeStorageMismatch: "REGCODE_STORAGE_MISMATCH",
   RuntimeLogStreamUnsupported: "RUNTIME_LOG_STREAM_UNSUPPORTED",
   DemoActionRateLimited: "DEMO_ACTION_RATE_LIMITED",
@@ -542,8 +550,14 @@ export const ErrCodes = {
   Unauthorized: "UNAUTHORIZED",
   Forbidden: "FORBIDDEN",
   NotFound: "NOT_FOUND",
+  MethodNotAllowed: "METHOD_NOT_ALLOWED",
   Conflict: "CONFLICT",
+  Gone: "GONE",
+  PayloadTooLarge: "PAYLOAD_TOO_LARGE",
   RateLimited: "RATE_LIMITED",
+  UpstreamError: "UPSTREAM_ERROR",
+  ServiceUnavailable: "SERVICE_UNAVAILABLE",
+  RequestFailed: "REQUEST_FAILED",
 } as const satisfies Record<string, ErrCode>;
 
 /**

@@ -43,6 +43,28 @@ max_upload_size = 1234
 	}
 }
 
+func TestLoadSplitCodeFormatsAndEnvOverrides(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := `[SAR]
+regcode_format = "OLD-{type}-{random}"
+register_code_format = "REG-{random}"
+renew_code_format = "REN-{random}"
+invite_code_format = "INV-{random}"
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TWILIGHT_RENEW_CODE_FORMAT", "ENVREN-{random}")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RegCodeFormat != "OLD-{type}-{random}" || cfg.RegisterCodeFormat != "REG-{random}" || cfg.RenewCodeFormat != "ENVREN-{random}" || cfg.InviteCodeFormat != "INV-{random}" {
+		t.Fatalf("unexpected code formats: %#v", cfg)
+	}
+}
+
 func TestLoadMultilineArraysAndPostgresConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")

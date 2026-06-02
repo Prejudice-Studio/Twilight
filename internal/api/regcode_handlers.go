@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -17,20 +18,21 @@ func (a *App) handleListRegcodes(w http.ResponseWriter, r *http.Request, _ Param
 	search := strings.ToLower(r.URL.Query().Get("search"))
 	items := make([]map[string]any, 0, len(codes))
 	for _, code := range codes {
-		dto := regcodeDTO(code)
+		dto := a.regcodeDTO(code)
 		if typeFilter != "" && strconv.Itoa(code.Type) != typeFilter {
 			continue
 		}
 		if statusFilter != "" && statusFilter != "all" && dto["status"] != statusFilter {
-			if !(statusFilter == "decoy" && code.IsDecoy) {
+			if !(statusFilter == "decoy" && code.IsDecoy) && !(statusFilter == "active" && code.Active) {
 				continue
 			}
 		}
-		if search != "" && !strings.Contains(strings.ToLower(code.Code+" "+code.Note+" "+code.TargetUsername), search) {
+		if search != "" && !strings.Contains(strings.ToLower(code.Code+" "+code.Note+" "+code.TargetUsername+" "+joinInt64(regcodeUsedByUIDs(code))+" "+joinInt64(code.UsedByTelegramIDs)), search) {
 			continue
 		}
 		items = append(items, dto)
 	}
+	sortRegcodeDTOs(items, r.URL.Query().Get("sort"), r.URL.Query().Get("order"))
 	total := len(items)
 	items = paginate(items, page, perPage)
 	ok(w, "OK", map[string]any{"regcodes": items, "total": total, "page": page, "per_page": perPage})
@@ -48,15 +50,29 @@ func (a *App) handleCreateRegcodes(w http.ResponseWriter, r *http.Request, _ Par
 	if count > 100 {
 		count = 100
 	}
-	days := intValue(payload, "days", 30)
+	days := normalizeRegCodeDays(intValue(payload, "days", 30))
 	codeType := intValue(payload, "type", 1)
 	if codeType < 1 || codeType > 3 {
 		failWithCode(w, http.StatusBadRequest, ErrRegcodeTypeInvalid, "注册码类型无效")
 		return
 	}
 	validity := int64(intValue(payload, "validity_time", -1))
+	if validity == 0 {
+		validity = -1
+	}
+	if validity < -1 {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "卡码有效期只能为 -1 或正整数小时")
+		return
+	}
 	useLimit := intValue(payload, "use_count_limit", 1)
-	format := firstNonEmpty(stringValue(payload, "format"), a.cfg().RegCodeFormat, "TW-{type}-{random}")
+	if useLimit == 0 {
+		useLimit = 1
+	}
+	if useLimit < -1 {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "使用次数上限只能为 -1 或正整数")
+		return
+	}
+	format := a.regCodeFormatForType(codeType, stringValue(payload, "format"))
 	algorithm := firstNonEmpty(stringValue(payload, "random_algorithm"), a.cfg().RegCodeRandomAlgorithm, "base32-20")
 	codes := make([]string, 0, count)
 	targetUsername := strings.TrimSpace(stringValue(payload, "target_username"))
@@ -73,6 +89,9 @@ func (a *App) handleCreateRegcodes(w http.ResponseWriter, r *http.Request, _ Par
 				continue
 			}
 			if _, exists := a.store().RegCode(candidate); exists {
+				continue
+			}
+			if _, exists := a.store().InviteCode(candidate); exists {
 				continue
 			}
 			code = candidate
@@ -101,8 +120,10 @@ func (a *App) handleUpdateRegcode(w http.ResponseWriter, r *http.Request, params
 		return
 	}
 	reg.Note = stringValue(decodeMap(r), "note")
-	_ = a.store().UpsertRegCode(reg)
-	ok(w, "注册码已更新", regcodeDTO(reg))
+	if err := a.store().UpsertRegCode(reg); statusFromError(w, err) {
+		return
+	}
+	ok(w, "注册码已更新", a.regcodeDTO(reg))
 }
 
 func (a *App) handleDeleteRegcode(w http.ResponseWriter, r *http.Request, params Params) {
@@ -157,12 +178,62 @@ func (a *App) handleRegcodeUsers(w http.ResponseWriter, r *http.Request, params 
 		return
 	}
 	users := []map[string]any{}
+	seenUID := map[int64]bool{}
 	for _, uid := range regcodeUsedByUIDs(reg) {
 		if u, okUser := a.store().User(uid); okUser {
-			users = append(users, publicUser(u))
+			item := publicUser(u)
+			item["found"] = true
+			item["source"] = "uid"
+			users = append(users, item)
+			seenUID[u.UID] = true
+		} else {
+			users = append(users, map[string]any{"uid": uid, "found": false, "source": "uid"})
 		}
 	}
-	ok(w, "OK", map[string]any{"users": users, "unresolved_telegram_ids": reg.UsedByTelegramIDs, "total": len(users)})
+	telegramOnly := []map[string]any{}
+	for _, telegramID := range reg.UsedByTelegramIDs {
+		if telegramID == 0 {
+			continue
+		}
+		if u, okUser := a.store().FindUserByTelegramID(telegramID); okUser {
+			if seenUID[u.UID] {
+				continue
+			}
+			item := publicUser(u)
+			item["found"] = true
+			item["source"] = "telegram"
+			users = append(users, item)
+			seenUID[u.UID] = true
+			continue
+		}
+		telegramOnly = append(telegramOnly, map[string]any{"telegram_id": telegramID, "found": false, "source": "telegram"})
+	}
+	ok(w, "OK", map[string]any{"code": reg.Code, "use_count": reg.UseCount, "users": users, "telegram_only": telegramOnly, "unresolved_telegram_ids": reg.UsedByTelegramIDs, "total": len(users)})
+}
+
+func sortRegcodeDTOs(items []map[string]any, sortKey, order string) {
+	sortKey = strings.ToLower(strings.TrimSpace(sortKey))
+	if sortKey == "" {
+		sortKey = "created_time"
+	}
+	desc := !strings.EqualFold(order, "asc")
+	less := func(i, j int) bool {
+		a, b := items[i], items[j]
+		switch sortKey {
+		case "code", "note", "status", "type_name", "target_username":
+			return strings.ToLower(asString(a[sortKey])) < strings.ToLower(asString(b[sortKey]))
+		case "type", "days", "use_count", "use_count_limit", "validity_time", "created_time":
+			return numeric(a[sortKey]) < numeric(b[sortKey])
+		default:
+			return numeric(a["created_time"]) < numeric(b["created_time"])
+		}
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if desc {
+			return less(j, i)
+		}
+		return less(i, j)
+	})
 }
 
 // handleClearRegcodeUsage 一键清理注册码的使用记录（UsedByUIDs、UsedByTelegramIDs、UseCount）。
@@ -183,7 +254,7 @@ func (a *App) handleClearRegcodeUsage(w http.ResponseWriter, r *http.Request, pa
 		return
 	}
 	oldUseCount := reg.UseCount
-	oldUsedByUIDs := reg.UsedByUIDs
+	oldUsedByUIDs := regcodeUsedByUIDs(reg)
 	oldUsedByTelegramIDs := reg.UsedByTelegramIDs
 	reg.UseCount = 0
 	reg.UsedBy = 0

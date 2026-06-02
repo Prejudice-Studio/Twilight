@@ -44,7 +44,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError } from "@/components/layout/page-state";
-import { api, type Regcode, type UserInfo } from "@/lib/api";
+import { api, type InviteCodeItem, type Regcode, type UserInfo } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 
 export default function AdminRegcodesPage() {
@@ -71,20 +71,7 @@ export default function AdminRegcodesPage() {
 
   // Invite codes section
   const [viewMode, setViewMode] = useState<"regcodes" | "invitecodes">("regcodes");
-  const [inviteCodes, setInviteCodes] = useState<Array<{
-    code: string;
-    inviter_uid: number;
-    days: number;
-    use_count_limit: number;
-    use_count: number;
-    expires_at: number | null;
-    active: boolean;
-    created_at: number;
-    used_by_uid: number | null;
-    used_at: number | null;
-    note: string;
-    target_username: string;
-  }>>([]);
+  const [inviteCodes, setInviteCodes] = useState<InviteCodeItem[]>([]);
   const [inviteCodesLoading, setInviteCodesLoading] = useState(false);
   const [inviteCodesTotal, setInviteCodesTotal] = useState(0);
   const [inviteCodesLoaded, setInviteCodesLoaded] = useState(false);
@@ -468,6 +455,19 @@ export default function AdminRegcodesPage() {
     return Math.max(byUid, byTg, code.use_count || 0);
   };
 
+  const userLabel = (username?: string | null, uid?: number | null) => {
+    if (username && uid) return `${username} · UID ${uid}`;
+    if (username) return username;
+    if (uid) return `UID ${uid}`;
+    return "-";
+  };
+
+  const regcodeUsedByLabel = (code: Regcode) => {
+    if (code.used_by_usernames?.length) return code.used_by_usernames.join("、");
+    if (code.used_by_uids?.length) return code.used_by_uids.map((uid) => `UID ${uid}`).join("、");
+    return "";
+  };
+
   if (error) {
     return <PageError message={error} onRetry={() => void loadRegcodes()} />;
   }
@@ -658,7 +658,7 @@ export default function AdminRegcodesPage() {
                   <p className="font-medium text-foreground">格式说明</p>
                   <p className="mt-1">可直接写自定义文本，例如 <code>VIP-{'{random}'}</code>、<code>银河列车-{'{type}'}-{'{random}'}</code>。</p>
                   <p><code>{'{random}'}</code>：按所选随机算法生成的随机部分。</p>
-                  <p><code>{'{type}'}</code>：卡码类型，register / renew / whitelist。</p>
+                  <p><code>{'{type}'}</code>：卡码类型，REG / REN / VIP。</p>
                   <p><code>{'{days}'}</code>：账号有效天数，-1 表示永久。</p>
                   <p><code>{'{index}'}</code>：本次批量生成序号，从 1 开始。</p>
                   <p><code>{'{validity}'}</code>：卡码自身有效期小时数；<code>{'{limit}'}</code>：使用次数上限。</p>
@@ -715,7 +715,7 @@ export default function AdminRegcodesPage() {
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  placeholder="搜索邀请码 / UID"
+                  placeholder="搜索邀请码 / 用户名 / UID"
                   value={inviteSearch}
                   onChange={(e) => setInviteSearch(e.target.value)}
                   className="h-8 w-48 pl-8 text-xs"
@@ -742,8 +742,11 @@ export default function AdminRegcodesPage() {
                 ? inviteCodes.filter((c) =>
                     c.code.toLowerCase().includes(lowerSearch) ||
                     String(c.inviter_uid).includes(lowerSearch) ||
+                    (c.inviter_username && c.inviter_username.toLowerCase().includes(lowerSearch)) ||
                     (c.target_username && c.target_username.toLowerCase().includes(lowerSearch)) ||
-                    (c.used_by_uid && String(c.used_by_uid).includes(lowerSearch))
+                    (c.target_uid && String(c.target_uid).includes(lowerSearch)) ||
+                    (c.used_by_uid && String(c.used_by_uid).includes(lowerSearch)) ||
+                    (c.used_by_username && c.used_by_username.toLowerCase().includes(lowerSearch))
                   )
                 : inviteCodes;
               if (filtered.length === 0) {
@@ -766,8 +769,8 @@ export default function AdminRegcodesPage() {
                       </div>
                       <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
                         <div>
-                          <p className="text-xs text-muted-foreground">邀请者 UID</p>
-                          <p className="mt-1">{code.inviter_uid}</p>
+                          <p className="text-xs text-muted-foreground">邀请者</p>
+                          <p className="mt-1">{userLabel(code.inviter_username, code.inviter_uid)}</p>
                         </div>
                         <div>
                           <p className="text-xs text-muted-foreground">天数</p>
@@ -786,13 +789,13 @@ export default function AdminRegcodesPage() {
                         {code.target_username && (
                           <div className="col-span-2">
                             <p className="text-xs text-muted-foreground">指定用户</p>
-                            <p className="mt-1">{code.target_username}</p>
+                            <p className="mt-1">{userLabel(code.target_username, code.target_uid)}</p>
                           </div>
                         )}
                         {code.used_by_uid && (
                           <div>
-                            <p className="text-xs text-muted-foreground">使用者 UID</p>
-                            <p className="mt-1">{code.used_by_uid}</p>
+                            <p className="text-xs text-muted-foreground">使用者</p>
+                            <p className="mt-1">{userLabel(code.used_by_username, code.used_by_uid)}</p>
                           </div>
                         )}
                         <div>
@@ -814,7 +817,7 @@ export default function AdminRegcodesPage() {
                     <thead>
                       <tr className="border-b bg-muted/50">
                         <th className="px-4 py-3 text-left text-sm font-medium">邀请码</th>
-                        <th className="px-4 py-3 text-left text-sm font-medium">邀请者 UID</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">邀请者</th>
                         <th className="px-4 py-3 text-left text-sm font-medium">天数</th>
                         <th className="px-4 py-3 text-left text-sm font-medium">使用次数</th>
                         <th className="px-4 py-3 text-left text-sm font-medium">指定用户</th>
@@ -835,11 +838,11 @@ export default function AdminRegcodesPage() {
                               </Button>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-sm">{code.inviter_uid}</td>
+                          <td className="px-4 py-3 text-sm">{userLabel(code.inviter_username, code.inviter_uid)}</td>
                           <td className="px-4 py-3 text-sm">{code.days <= 0 ? "永久" : `${code.days} 天`}</td>
                           <td className="px-4 py-3 text-sm">{code.use_count} / {code.use_count_limit === -1 ? "∞" : code.use_count_limit}</td>
-                          <td className="px-4 py-3 text-sm">{code.target_username || "-"}</td>
-                          <td className="px-4 py-3 text-sm">{code.used_by_uid || "-"}</td>
+                          <td className="px-4 py-3 text-sm">{userLabel(code.target_username, code.target_uid)}</td>
+                          <td className="px-4 py-3 text-sm">{userLabel(code.used_by_username, code.used_by_uid)}</td>
                           <td className="px-4 py-3">
                             {code.active ? <Badge variant="success">可用</Badge> : <Badge variant="destructive">已禁用</Badge>}
                           </td>
@@ -970,7 +973,7 @@ export default function AdminRegcodesPage() {
                         <span className="mt-2 flex flex-wrap gap-1">
                           {getTypeBadge(code.type)}
                           {getStatusBadge(code)}
-                          {code.target_username ? <Badge variant="secondary">仅 {code.target_username}</Badge> : null}
+                          {code.target_username ? <Badge variant="secondary">仅 {userLabel(code.target_username, code.target_uid)}</Badge> : null}
                           {code.is_decoy ? <Badge variant="destructive">假卡码</Badge> : <Badge variant="outline">正常卡码</Badge>}
                         </span>
                       </span>
@@ -1012,6 +1015,12 @@ export default function AdminRegcodesPage() {
                       <p className="text-xs text-muted-foreground">使用次数</p>
                       <p className="mt-1">{code.use_count || 0} / {code.use_count_limit === -1 ? "∞" : code.use_count_limit || "∞"}</p>
                     </div>
+                    {regcodeUsedByLabel(code) && (
+                      <div className="col-span-2">
+                        <p className="text-xs text-muted-foreground">使用者</p>
+                        <p className="mt-1 break-all">{regcodeUsedByLabel(code)}</p>
+                      </div>
+                    )}
                     <div>
                       <p className="text-xs text-muted-foreground">创建时间</p>
                       <p className="mt-1">{formatDate(code.created_time || code.created_at)}</p>
@@ -1097,7 +1106,7 @@ export default function AdminRegcodesPage() {
                             {getTypeBadge(code.type)}
                             {code.is_decoy ? <Badge variant="destructive">假卡码</Badge> : <Badge variant="outline">正常卡码</Badge>}
                           </div>
-                          {code.target_username ? <div className="text-xs text-muted-foreground">仅限用户：{code.target_username}</div> : null}
+                          {code.target_username ? <div className="text-xs text-muted-foreground">仅限用户：{userLabel(code.target_username, code.target_uid)}</div> : null}
                           <div className="flex gap-1">
                             <Input
                               value={noteDrafts[code.code] ?? code.note ?? ""}
@@ -1133,6 +1142,11 @@ export default function AdminRegcodesPage() {
                             <Users className="mr-1 h-3.5 w-3.5" />
                             {usedCount(code)} 人使用
                           </Button>
+                        )}
+                        {regcodeUsedByLabel(code) && (
+                          <div className="mt-1 max-w-[180px] truncate text-xs text-muted-foreground" title={regcodeUsedByLabel(code)}>
+                            {regcodeUsedByLabel(code)}
+                          </div>
                         )}
                       </td>
                       <td className="px-4 py-3 text-sm text-muted-foreground">

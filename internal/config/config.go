@@ -135,6 +135,9 @@ type Config struct {
 	EmbyUserLimit                int
 	DecoyAction                  string
 	RegCodeFormat                string
+	RegisterCodeFormat           string
+	RenewCodeFormat              string
+	InviteCodeFormat             string
 	RegCodeRandomAlgorithm       string
 	NotificationEnabled          bool
 	NotificationExpiryRemindDays int
@@ -169,6 +172,7 @@ type Config struct {
 
 	MediaRequestEnabled          bool
 	MaxConcurrentRequestsPerUser int
+	MaxConcurrentRequestsGlobal  int
 	SigninEnabled                bool
 	SigninCurrencyName           string
 	SigninDailyMin               int
@@ -309,9 +313,13 @@ func Load(path string) (Config, error) {
 	cfg.EmbyUserLimit = reader.intValue(cfg.EmbyUserLimit, "SAR.emby_user_limit", "Register.emby_user_limit", "emby_user_limit")
 	cfg.DecoyAction = reader.stringValue(cfg.DecoyAction, "SAR.regcode_decoy_action", "Register.regcode_decoy_action", "regcode_decoy_action")
 	cfg.RegCodeFormat = reader.stringValue(cfg.RegCodeFormat, "SAR.regcode_format", "Register.regcode_format", "regcode_format")
+	cfg.RegisterCodeFormat = reader.stringValue(cfg.RegisterCodeFormat, "SAR.register_code_format", "Register.register_code_format", "register_code_format")
+	cfg.RenewCodeFormat = reader.stringValue(cfg.RenewCodeFormat, "SAR.renew_code_format", "Register.renew_code_format", "renew_code_format")
+	cfg.InviteCodeFormat = reader.stringValue(cfg.InviteCodeFormat, "SAR.invite_code_format", "Register.invite_code_format", "invite_code_format")
 	cfg.RegCodeRandomAlgorithm = reader.stringValue(cfg.RegCodeRandomAlgorithm, "SAR.regcode_random_algorithm", "Register.regcode_random_algorithm", "regcode_random_algorithm")
 	cfg.MediaRequestEnabled = reader.boolValue(cfg.MediaRequestEnabled, "SAR.media_request_enabled", "Register.media_request_enabled", "media_request_enabled")
 	cfg.MaxConcurrentRequestsPerUser = reader.intValue(cfg.MaxConcurrentRequestsPerUser, "SAR.max_concurrent_requests_per_user", "Register.max_concurrent_requests_per_user", "max_concurrent_requests_per_user")
+	cfg.MaxConcurrentRequestsGlobal = reader.intValue(cfg.MaxConcurrentRequestsGlobal, "SAR.max_concurrent_requests_global", "Register.max_concurrent_requests_global", "max_concurrent_requests_global")
 	cfg.SigninEnabled = reader.boolValue(cfg.SigninEnabled, "SAR.signin_enabled", "Signin.enabled", "signin_enabled")
 	cfg.SigninCurrencyName = reader.stringValue(cfg.SigninCurrencyName, "SAR.currency_name", "Signin.currency_name", "currency_name")
 	cfg.SigninDailyMin = reader.intValue(cfg.SigninDailyMin, "SAR.daily_min", "Signin.daily_min", "daily_min")
@@ -403,12 +411,12 @@ func defaults() Config {
 		// CookieSecure 默认 true：HTTPS 是生产基线，HTTP 调试场景显式
 		// 改 toml 或 env 关掉。旧默认 false 在 HTTP 部署时也不告警，
 		// 一旦运维忘改 production toml 即等于 session 明文走线。
-		CookieSecure:                      true,
-		SessionTTL:                        7 * 24 * time.Hour,
-		CookieSameSite:                    "lax",
-		TelegramAPIURL:                    "https://api.telegram.org",
-		TelegramGroupCheckConcurrency:     24,
-		TelegramGroupActionConcurrency:    8,
+		CookieSecure:                   true,
+		SessionTTL:                     7 * 24 * time.Hour,
+		CookieSameSite:                 "lax",
+		TelegramAPIURL:                 "https://api.telegram.org",
+		TelegramGroupCheckConcurrency:  24,
+		TelegramGroupActionConcurrency: 8,
 		// RegisterEnabled / EmbyDirectRegisterEnabled / AllowPendingRegister 都
 		// 默认 false——secure-by-default。空配置首次启动（dev 镜像、配置被误删、
 		// docker volume 丢配置）不再"自动开放注册 + Emby 直登"。运营要让外部
@@ -422,6 +430,7 @@ func defaults() Config {
 		EmbyDirectRegisterDays:            30,
 		EmbyUserLimit:                     -1,
 		RegCodeFormat:                     "TW-{type}-{random}",
+		InviteCodeFormat:                  "INV{random}",
 		RegCodeRandomAlgorithm:            "base32-20",
 		NotificationEnabled:               true,
 		NotificationExpiryRemindDays:      3,
@@ -453,6 +462,7 @@ func defaults() Config {
 		BangumiAPIURL:                     "https://api.bgm.tv/v0",
 		MediaRequestEnabled:               true,
 		MaxConcurrentRequestsPerUser:      3,
+		MaxConcurrentRequestsGlobal:       -1,
 		SigninEnabled:                     true,
 		SigninCurrencyName:                "星币",
 		SigninDailyMin:                    5,
@@ -654,6 +664,15 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("TWILIGHT_REGCODE_FORMAT"); v != "" {
 		cfg.RegCodeFormat = strings.TrimSpace(v)
+	}
+	if v := firstNonEmpty(os.Getenv("TWILIGHT_REGISTER_CODE_FORMAT"), os.Getenv("TWILIGHT_SAR_REGISTER_CODE_FORMAT")); v != "" {
+		cfg.RegisterCodeFormat = strings.TrimSpace(v)
+	}
+	if v := firstNonEmpty(os.Getenv("TWILIGHT_RENEW_CODE_FORMAT"), os.Getenv("TWILIGHT_SAR_RENEW_CODE_FORMAT")); v != "" {
+		cfg.RenewCodeFormat = strings.TrimSpace(v)
+	}
+	if v := firstNonEmpty(os.Getenv("TWILIGHT_INVITE_CODE_FORMAT"), os.Getenv("TWILIGHT_SAR_INVITE_CODE_FORMAT")); v != "" {
+		cfg.InviteCodeFormat = strings.TrimSpace(v)
 	}
 	if v := os.Getenv("TWILIGHT_REGCODE_RANDOM_ALGORITHM"); v != "" {
 		cfg.RegCodeRandomAlgorithm = strings.TrimSpace(v)
@@ -1074,6 +1093,15 @@ func boolValue(value string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func normalizeLogLevel(value string) string {

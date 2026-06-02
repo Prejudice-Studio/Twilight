@@ -1,45 +1,49 @@
 # Twilight 文档导航
 
-按场景快速定位：
+按场景快速定位。文档分为三类：**指南（guides）** 面向部署与开发的操作流程，**参考（reference）** 面向接口与配置的速查，**功能专题（features）** 面向单个业务模块的设计与用法。
 
-## 新手部署
+## 新手与部署
 
 | 文档 | 适用人群 |
 | ---- | -------- |
 | [项目概览](../README.md) | 所有用户 |
-| [安装部署](./INSTALL.md) | Linux 部署运维 |
+| [安装部署](./guides/install.md) | Linux / systemd / Nginx / PostgreSQL 部署运维 |
 
-## 后端与接口
-
-| 文档 | 用途 |
-| ---- | ---- |
-| [后端 API 参考](./BACKEND_API.md) | REST API 接口规范、认证、错误码 |
-| [Go 后端说明](./GO_BACKEND.md) | Go 后端启动、配置、Redis 与验证说明 |
-| [API 路由索引](./API_INDEX.md) | `/api/v1` 完整路由清单、认证级别、模块归属 |
-| [API Key 外部接入](./API_KEY_API.md) | 第三方系统集成、权限矩阵 |
-| [注册码与卡码说明](./REGCODES.md) | 注册码、续期码、白名单码和诱饵码规则 |
-
-## 前端与开发
+## 指南 guides
 
 | 文档 | 用途 |
 | ---- | ---- |
-| [前端开发](./FRONTEND.md) | Next.js 前端本地开发与联调 |
-| [开发指南](./DEVELOPMENT.md) | 编码规范、调试、关键架构决策 |
-| [开发者流程](./DEVELOPER_WORKFLOW.md) | Git 分支、开发验证、维护者合并与发布流程 |
-| [版本更新与规划](./VERSION_HISTORY.md) | 版本号、功能地图、路线图和发布检查清单 |
+| [安装部署](./guides/install.md) | 后端构建、PostgreSQL、HTTPS 反代、systemd 一键脚本、运行数据与密钥 |
+| [开发指南](./guides/development.md) | 目录结构、后端/前端命令、API 与安全规范、Git 分支与发布流程 |
+| [安全加固](./guides/security.md) | 生产安全基线：CSRF、CORS、SSRF、限流、密钥、上传、自动更新检查清单 |
 
-## 专题
+## 参考 reference
 
-- [背景自定义](./BACKGROUND.md) — 用户自定义主题背景的实现
-- [Bangumi 点格子同步](./BANGUMI_SYNC.md) — Emby Webhook、Bangumi Token 与用户面板配置
-- [Telegram Bot 命令](./TG_BOT_COMMANDS.md) — Bot 普通命令、管理员只读查询和群聊安全边界
-- [注册码与卡码说明](./REGCODES.md) — 卡码类型、生成格式、兼容性与安全口径
-- [版本更新与规划](./VERSION_HISTORY.md) — 当前版本、功能地图和后续版本步进流程
-- [安全加固指南](./SECURITY.md) — 生产安全基线、密钥与部署检查清单
-- [安全与性能优化记录](./SECURITY_AND_PERFORMANCE_REVIEW.md) — 上传资源、注册队列、定时任务与管理接口加固
+| 文档 | 用途 |
+| ---- | ---- |
+| [Go 后端架构与配置](./reference/backend.md) | 目录结构、配置加载、环境变量、Redis、状态存储、迁移、运行日志 |
+| [API 路由索引](./reference/api-index.md) | `/api/v1` 完整路由清单、鉴权级别、模块归属（依据 `routes.go`） |
+| [后端 API 详参](./reference/backend-api.md) | REST 接口规范、认证、错误码、请求/响应示例 |
+| [API Key 外部接入](./reference/api-key.md) | 第三方系统集成、权限矩阵、调用示例 |
+
+## 功能专题 features
+
+| 文档 | 用途 |
+| ---- | ---- |
+| [注册码与卡码](./features/regcodes.md) | 注册码 / 续期码 / 白名单码 / 诱饵码规则、生成格式与随机算法 |
+| [邀请树](./features/invite.md) | 邀请森林概念、配置、用户/管理员接口、删除与启停级联语义 |
+| [公告系统](./features/announcements.md) | 公告渲染模式（plain / markdown / bbcode）与前端安全清洗 |
+| [Bangumi 同步](./features/bangumi.md) | Emby Webhook、Bangumi Token、用户个人同步规则 |
+| [背景与头像](./features/background.md) | 受控上传资源读取、背景 CSS 安全约束 |
+| [Telegram Bot 命令](./features/telegram-bot.md) | Bot 命令、权限边界、群聊安全约束与文案配置 |
+
+## 其他
+
+- [版本历史](./changelog.md) — 各版本更新记录与发布检查清单
+- Swagger 交互式文档：服务启动后访问 `/api/v1/docs`
 
 ## 说明
 
-- Swagger 交互式文档：服务启动后访问 `/api/v1/docs`
-- 若文档与代码行为冲突，以 `internal/api/` 与实际接口返回为准
-- 关键架构决策（媒体库策略、配置重启、`.gitignore` 注意点等）见 [DEVELOPMENT.md](./DEVELOPMENT.md#关键架构决策)
+- 若文档与代码行为冲突，以 `internal/api/`、`internal/store/`、`internal/config/` 与实际接口返回为准。
+- 全部文档已对照 Go 后端源码核对；旧 Python 时代的描述（独立 SQLite 库、`X-Twilight-Client` CSRF 等）已订正。
+- 关键架构约定（状态存储单文档模型、配置整进程重启、双提交 CSRF 等）见 [开发指南](./guides/development.md) 与 [安全加固](./guides/security.md)。

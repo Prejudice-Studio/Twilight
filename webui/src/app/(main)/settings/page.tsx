@@ -190,37 +190,26 @@ export default function SettingsPage() {
     return "text-xs text-destructive";
   };
 
+  // 由后端代理测速，避开浏览器 CORS / 私网混合内容拦截。
   const testSingleLineLatency = useCallback(async (rawUrl: string) => {
     const url = rawUrl.trim();
     if (!url) {
       return { status: "error" as const };
     }
-
-    const normalizedUrl = /^https?:\/\//i.test(url) ? url : `https://${url.replace(/^\/+/, "")}`;
-    const probeUrl = `${normalizedUrl}${normalizedUrl.includes("?") ? "&" : "?"}tw_ping=${Date.now()}`;
-
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 8000);
-    const startedAt = performance.now();
-
     try {
-      await fetch(probeUrl, {
-        method: "GET",
-        mode: "no-cors",
-        cache: "no-store",
-        signal: controller.signal,
-      });
-      return {
-        status: "ok" as const,
-        latencyMs: Math.max(1, Math.round(performance.now() - startedAt)),
-      };
-    } catch (error: any) {
-      if (error?.name === "AbortError") {
-        return { status: "timeout" as const };
+      const res = await api.probeEmbyUrl(url);
+      if (res.success && res.data) {
+        if (res.data.status === "ok") {
+          return { status: "ok" as const, latencyMs: Math.max(1, Math.round(res.data.latency_ms || 0)) };
+        }
+        if (res.data.status === "timeout") {
+          return { status: "timeout" as const };
+        }
+        return { status: "error" as const };
       }
       return { status: "error" as const };
-    } finally {
-      window.clearTimeout(timeout);
+    } catch {
+      return { status: "error" as const };
     }
   }, []);
 

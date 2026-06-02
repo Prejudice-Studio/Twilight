@@ -825,7 +825,12 @@ func (a *App) applyCORS(w http.ResponseWriter, r *http.Request) bool {
 	}
 	w.Header().Set("Access-Control-Allow-Origin", origin)
 	w.Header().Set("Vary", "Origin")
-	w.Header().Set("Access-Control-Allow-Credentials", "true")
+	// 仅在 allow_credential 开启时下发凭据头；否则运维显式关闭凭据共享的意图
+	// 必须被尊重（此前无条件下发，使该开关形同虚设，列入白名单的低信任 origin
+	// 仍可携带 cookie 读取已登录用户的鉴权响应）。origin 反射始终受白名单约束。
+	if a.cfg().AllowCredential {
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+	}
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key, X-Twilight-Client, X-CSRF-Token")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
 	w.Header().Set("Access-Control-Max-Age", "600")

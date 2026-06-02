@@ -29,6 +29,7 @@ export default function RegisterPage() {
     password: "",
     confirmPassword: "",
     email: "",
+    regCode: "",
   });
 
   const [registerAvailability, setRegisterAvailability] = useState<RegisterAvailability | null>(null);
@@ -58,6 +59,8 @@ export default function RegisterPage() {
   ].map((item) => ({ ...item, url: sanitizeExternalUrl(item.url) })).filter((item): item is { label: string; url: string } => Boolean(item.url));
   const botUsername = systemInfo?.telegram_bot?.username;
   const botUrl = telegramBotUrl(systemInfo?.telegram_bot?.username, systemInfo?.telegram_bot?.url);
+  const registerRequiresCode = Boolean(registerAvailability?.requires_reg_code && registerAvailability.current_users > 0);
+  const canRegister = registerAvailability?.can_register ?? registerAvailability?.available ?? true;
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -183,8 +186,13 @@ export default function RegisterPage() {
       return false;
     }
 
-    if (registerAvailability && !registerAvailability.available) {
+    if (registerAvailability && (!canRegister || !registerAvailability.available)) {
       toast({ title: "暂时无法注册", description: registerAvailability.message, variant: "destructive" });
+      return false;
+    }
+
+    if (registerRequiresCode && !formData.regCode.trim()) {
+      toast({ title: "请输入注册码", description: "当前站点开启了注册码注册限制", variant: "destructive" });
       return false;
     }
 
@@ -239,6 +247,7 @@ export default function RegisterPage() {
         email: formData.email || undefined,
         telegram_bind_code: bindCode || undefined,
         password: formData.password,
+        reg_code: registerRequiresCode ? formData.regCode.trim() : undefined,
       };
 
       const res = await api.register(payload);
@@ -283,7 +292,9 @@ export default function RegisterPage() {
               <div>
                 <h2 className="text-xl font-semibold">欢迎来到 {systemInfo?.name || SITE_NAME}</h2>
                 <p className="text-sm text-muted-foreground">
-                  先创建系统账号；登录后可在仪表盘兑换注册码/续期码并开通或续期 Emby。
+                  {registerRequiresCode
+                    ? "使用注册码创建系统账号，并获得后续补建 Emby 的资格。"
+                    : "先创建系统账号；登录后可在仪表盘兑换注册码/续期码并开通或续期 Emby。"}
                 </p>
               </div>
             </div>
@@ -291,7 +302,9 @@ export default function RegisterPage() {
             <div className="rounded-2xl border border-border/70 bg-muted/40 p-4 text-sm text-muted-foreground">
               <p className="font-semibold text-foreground">关于注册码</p>
               <p className="mt-2 leading-relaxed">
-                注册页不再直接使用注册码。请先注册并登录，再到仪表盘兑换注册码或续期码。
+                {registerRequiresCode
+                  ? "当前站点要求注册时填写注册码。注册成功后，系统会记录注册码使用情况并授予补建 Emby 资格。"
+                  : "当前站点不要求注册时填写注册码。请先注册并登录，再到仪表盘兑换注册码或续期码。"}
               </p>
               {systemInfo?.telegram_bot?.username ? (
                 <p className="mt-2 inline-flex items-center gap-1.5 text-xs">
@@ -341,7 +354,7 @@ export default function RegisterPage() {
             <div className="space-y-3">
               <CardTitle className="text-2xl font-semibold tracking-tight">创建账号</CardTitle>
               <p className="text-sm text-muted-foreground">
-                填写下面的信息即可创建系统账号。注册码兑换请登录后在仪表盘完成。
+                {registerRequiresCode ? "填写账号信息和注册码即可创建系统账号。" : "填写下面的信息即可创建系统账号。注册码兑换请登录后在仪表盘完成。"}
               </p>
             </div>
 
@@ -415,6 +428,21 @@ export default function RegisterPage() {
                   />
                 </div>
               </div>
+
+              {registerRequiresCode && (
+                <div className="space-y-2">
+                  <Label htmlFor="regCode" className="ml-1">注册码 *</Label>
+                  <Input
+                    id="regCode"
+                    name="regCode"
+                    placeholder="请输入管理员发放的注册码"
+                    value={formData.regCode}
+                    onChange={handleChange}
+                    className="h-11 font-mono"
+                  />
+                  <p className="text-xs text-muted-foreground">注册码只会在注册成功时消耗；无效、过期或已用完的码不会被消耗。</p>
+                </div>
+              )}
 
               {(forceBindTelegram || systemInfo?.features?.telegram) && (
                 <div className="space-y-2">
@@ -529,7 +557,7 @@ export default function RegisterPage() {
                   className="h-11 w-full"
                   disabled={
                     isRegisterLoading ||
-                    Boolean(registerAvailability && !registerAvailability.available) ||
+                    Boolean(registerAvailability && (!canRegister || !registerAvailability.available)) ||
                     (forceBindTelegram && !!bindCode && !bindConfirmed)
                   }
                 >

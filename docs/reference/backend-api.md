@@ -1,0 +1,1855 @@
+# 后端 API 详参
+
+本文是 Twilight 后端 REST API 的完整参考手册，覆盖鉴权方式、请求/响应规范、错误码、限流策略，以及各业务模块下逐个端点的请求体、响应示例与 cURL 调用。完整路由速查见 [API 路由索引](../reference/api-index.md)，API Key 外部接入见 [API Key 外部接入](../reference/api-key.md)，注册码与卡码规则见 [注册码与卡码](../features/regcodes.md)，安全机制（CSRF、限流、脱敏等）见 [安全加固](../guides/security.md)。
+
+> 路由的鉴权级别、方法与路径以 `internal/api/routes.go` 为准；本文已据此校准。接口若与下方示例冲突，以后端实际行为与运行时 Swagger 为准。
+
+## 1. 文档说明
+
+- Base URL：`http://localhost:5000/api/v1`
+- OpenAPI 文档：`GET /api/v1/openapi.json`
+- Swagger UI：`http://localhost:5000/api/v1/docs`
+- 响应统一为 JSON 信封（envelope），结构见下文 [2.4 响应结构](#24-响应结构)。
+- 变更接口时需同步更新 [API 路由索引](../reference/api-index.md)；若接口有请求体、响应体、限流或安全注意事项，还需更新本文对应章节。
+
+### 1.1 文档分工
+
+| 文档 | 用途 |
+| ---- | ---- |
+| 本文（`backend-api.md`） | 通用规范、鉴权、错误码、各端点请求/响应说明 |
+| [API 路由索引](../reference/api-index.md) | `/api/v1` 完整路由清单、鉴权级别、归属模块 |
+| [API Key 外部接入](../reference/api-key.md) | 外部系统 API Key 接入方式、权限矩阵、专用示例 |
+| [注册码与卡码](../features/regcodes.md) | 注册码 / 续期码 / 白名单码规则、兼容性与安全口径 |
+| `/api/v1/docs` | 运行时 Swagger UI，按当前代码自动生成 |
+
+## 2. 鉴权与请求规范
+
+> `/api/v1/apikey/*` 前缀接口的权限矩阵与完整调用示例已拆分到 [API Key 外部接入](../reference/api-key.md)。本文保留通用规范与主接口。
+
+### 2.1 鉴权级别
+
+后端在 `internal/api/routes.go` 中为每条路由声明一个鉴权级别（`AuthLevel`），由 `internal/api/app.go` 的调度器在分发前统一校验：
+
+| 级别 | 含义 | 凭据来源 |
+| ---- | ---- | ---- |
+| `AuthPublic` | 免登录，任何人可访问 | 无 |
+| `AuthUser` | 已登录用户 | 登录会话 Cookie 或 `Authorization: Bearer <token>` |
+| `AuthAdmin` | 已登录且角色为管理员（`Role == RoleAdmin`） | 同 `AuthUser`，但额外校验管理员角色 |
+| `AuthAPIKey` | 外部 API Key | `X-API-Key`，或 `Authorization: ApiKey/Bearer <key>`，或查询参数 `?apikey=` |
+
+本文各端点标注的"认证"即对应上述级别。`AuthAdmin` 路由已在调度器层拦住非管理员；部分共用 handler 还会做二次 `requireAdmin` 断言（belt-and-suspenders）。
+
+### 2.2 鉴权方式
+
+#### 登录会话 / Bearer Token（前端）
+
+前端登录后，既可使用会话 Cookie（浏览器自动携带），也可在请求头携带 Bearer Token：
+
+```http
+Authorization: Bearer <token>
+```
+
+#### API Key（外部系统）
+
+`/api/v1/apikey/*` 接口仅支持 API Key 鉴权，不接受普通登录 Token。支持以下任一形式：
+
+```http
+X-API-Key: <api_key>
+```
+
+```http
+Authorization: Bearer <api_key>
+```
+
+```http
+Authorization: ApiKey <api_key>
+```
+
+```http
+GET /api/v1/apikey/status?apikey=<api_key>
+```
+
+### 2.3 CSRF 防护（双提交 Cookie 令牌）
+
+当请求使用 **Cookie 鉴权** 且为 **变更类方法**（`POST` / `PUT` / `DELETE`）时，后端会强制校验 CSRF 令牌（实现：`internal/api/app.go` 的 `verifyCSRFToken`）：
+
+1. 后端在登录成功时除会话 Cookie 外，另写一个 **非 HttpOnly** 的 CSRF Cookie，名称为 `<session_cookie>_csrf`（即会话 Cookie 名加 `_csrf` 后缀）。
+2. 前端 JS 读取该 Cookie 的值，放进 `X-CSRF-Token` 请求头随变更请求一起发送。
+3. 后端用 `subtle.ConstantTimeCompare` 比对 Cookie 值与请求头值，且要求长度不小于最小阈值（防退化值通过比对）；任一不满足返回 `403`，错误码 `AUTH_CSRF_MISSING`。
+
+要点：
+
+- 仅 **Cookie 鉴权 + 变更类方法** 才强制校验。使用 `Authorization: Bearer` Token 或 API Key 的请求不触发 CSRF 校验。
+- 双子域部署时，CSRF Cookie 的 `Domain` 与会话 Cookie 共用 `CookieDomain`，以保证 webui 子域的 JS 能读到该 Cookie 并回填到请求头。
+- 历史上的 `X-Twilight-Client: webui` 头如今 **仅出现在 CORS 允许头列表** 中，**不再被强制校验**。请勿再依赖"写请求必须带 `X-Twilight-Client: webui` 否则 403"的旧说法。
+
+更多机制说明见 [安全加固](../guides/security.md)。
+
+### 2.4 响应结构
+
+所有响应统一为 JSON 信封，包含 `success`、`code`、`message`、`data`、`timestamp` 字段；失败时还会带一个字符串 `error_code`（业务级错误码）。
+
+| 字段 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| `success` | bool | 是否成功 |
+| `code` | int | HTTP 状态码（与响应行状态一致） |
+| `error_code` | string | 仅失败时出现，业务级错误码，如 `AUTH_CSRF_MISSING`、`USER_USERNAME_TAKEN`（见下文错误码表） |
+| `message` | string | 人类可读消息（失败消息已做敏感信息脱敏） |
+| `data` | object/null | 业务数据，成功且无数据时可省略 |
+| `timestamp` | int | 服务端 Unix 时间戳（秒） |
+
+成功示例：
+
+```json
+{
+  "success": true,
+  "code": 200,
+  "message": "操作成功",
+  "data": { },
+  "timestamp": 1680000000
+}
+```
+
+失败示例：
+
+```json
+{
+  "success": false,
+  "code": 403,
+  "error_code": "AUTH_CSRF_MISSING",
+  "message": "缺少或无效的 CSRF 令牌，请刷新页面后重试",
+  "data": null,
+  "timestamp": 1680000000
+}
+```
+
+## 3. 错误码
+
+### 3.1 HTTP 状态码
+
+| HTTP 状态码 | 含义 |
+| ---------- | ---- |
+| 200 | 请求成功 |
+| 201 | 创建成功（如注册） |
+| 400 | 参数错误 / 请求格式不合法 |
+| 401 | 未认证 / Token 或 API Key 无效 |
+| 403 | 权限不足 / CSRF 校验失败 / 账号或 API Key 被禁用 |
+| 404 | 资源不存在 |
+| 409 | 冲突（如用户名已被占用、绑定冲突） |
+| 410 | 端点已弃用（如 `/emby/urls`，请改用文档指明的替代接口） |
+| 413 | 请求体过大 |
+| 429 | 触发限流；响应 `message` 形如 `请求过于频繁，请在 N 秒后重试` |
+| 500 | 服务器内部错误 |
+
+### 3.2 业务级错误码（error_code）
+
+失败响应除 HTTP 状态码外，还在 `error_code` 字段返回业务级错误码（定义于 `internal/api/errcode.go`），前端据此区分场景。未显式指定时，按 HTTP 状态自动推导（如 401→`UNAUTHORIZED`、404→`NOT_FOUND`、429→`RATE_LIMITED`，未知 5xx→`INTERNAL_ERROR`）。常见值：
+
+| error_code | 触发场景 |
+| ---------- | -------- |
+| `AUTH_LOGIN_INVALID` | 用户名或密码错误 |
+| `AUTH_LOGIN_RATE_LIMITED` | 登录限流 |
+| `AUTH_ACCOUNT_DISABLED` | 账号被禁用 |
+| `AUTH_ACCOUNT_EXPIRED` | 账号已过期 |
+| `AUTH_APIKEY_INVALID` | API Key 无效 |
+| `AUTH_CSRF_MISSING` / `AUTH_CSRF_MISMATCH` | CSRF 令牌缺失或不匹配 |
+| `AUTH_PASSWORD_OLD_MISMATCH` | 修改密码时原密码不符 |
+| `AUTH_PASSWORD_WEAK` | 新密码强度不足 |
+| `USER_REGISTER_RATE_LIMITED` | 注册限流 |
+| `USER_USERNAME_INVALID` / `USER_USERNAME_TAKEN` | 用户名不合法 / 已被占用 |
+| `USER_NOT_FOUND` | 用户不存在 |
+| `USER_LIMIT_REACHED` | 系统用户数达上限 |
+| `TG_BIND_REQUIRED` | 需要先绑定 Telegram |
+| `TG_BIND_CODE_*` | 绑定码格式 / 过期 / 未确认 / 场景错误 |
+| `TG_ALREADY_BOUND` | Telegram 已被绑定 |
+| `EMBY_AUTH_FAILED` | Emby 账号校验失败 |
+| `EMBY_ACCOUNT_UNLINKED` | 当前用户未绑定 Emby |
+| `EMBY_CAPACITY_REACHED` | Emby 用户数达上限 |
+| `CODE_EMPTY` / `CODE_INVALID` | 卡码为空 / 无效或过期 |
+| `SCHEDULER_JOB_NOT_FOUND` / `SCHEDULER_JOB_RUNNING` | 定时任务不存在 / 正在运行 |
+| `UPDATE_*` | Git 自动更新相关（仓库 / 分支 / git 缺失 / 重启失败等） |
+| `RATE_LIMITED` | 通用限流兜底 |
+| `INTERNAL_ERROR` | 服务端内部错误 |
+
+### 3.3 速率限制
+
+为防止暴力破解与公开端点被刷，部分接口启用基于 IP / UID / 资源 key 的滑动窗口限流（实现：`internal/api/ratelimit.go`）。被限流时返回 HTTP `429`。
+
+| 接口 | 维度 | 阈值 | 说明 |
+| ---- | ---- | ---- | ---- |
+| `POST /auth/login` 系列 | IP | 滑动窗口 | 登录接口按客户端 IP 限速，详见 `internal/api/handlers.go::handleLogin` |
+| `POST /auth/forgot-password/emby` | IP + Emby 用户名 | 5/10 分钟 + 5/30 分钟 | 验证 Emby 账号密码后重置 Web 密码；新密码只返回一次 |
+| `POST /users/register` | IP | 5 / 10 分钟 | 防批量注册 |
+| `GET  /users/check-available` | IP | 60 / 60 秒 | 防扫描可用用户名 |
+| `GET  /users/register/emby/status` | request_id + IP | 60/60s + 240/60s | Emby 注册队列轮询 |
+| `POST /users/telegram/register/bind-code` | IP | 5 / 10 分钟 | 生成注册绑定码 |
+| `GET  /users/telegram/register/bind-code/status` | code + IP + 404 防御 | 90/60s + 600/60s + 失效缓存 + IP 404 封禁 | 注册绑定码轮询；详见下方 |
+| `POST /users/me/telegram/bind-code` | UID | 5 / 10 分钟 | 已登录用户生成 TG 绑定码 |
+| `POST /users/me/telegram/unbind` | UID | 5 / 10 分钟 | 防恶意频繁解绑 |
+| `POST /users/me/telegram/rebind-request` | UID | 3 / 1 小时 | 换绑申请会进管理员队列，从严限制 |
+| `POST /users/regcode/check` | IP | 10 / 60 秒 | 防注册码枚举 |
+| `POST /invite/check` | IP | 10 / 60 秒 | 邀请码校验 |
+| `POST /users/me/avatar/upload` 等上传 | UID | 10 / 60 秒 | 防滥用上传 |
+
+上传后的头像/背景通过 `GET /users/assets/{kind}/{filename}` 读取（`kind` 为 `avatar` 或 `background`）。该接口要求登录，并校验资源类型、服务端生成的文件名格式和最终文件路径；不要直接公开 `/uploads` 目录。
+
+> 限速命中只写日志告警，不会写入安全日志 / 登录历史。
+
+#### `bind-code/status` 的三层防御
+
+线上观测到攻击者会盯着一个 8 位 code 反复刷（每次都是 404），所以这个端点在普通双层限速之上又加了两层（实现：`internal/api/handlers.go`）：
+
+1. **失效 code 短路缓存**：第一次查不到该 code 时，写入内存级失效缓存（TTL 5 分钟）。期间同 code 任何请求直接 404，不查存储、不消费 code 维度限速配额。
+2. **IP 累计 404 封禁**：同 IP 60s 内累计 ≥60 次 404（含短路命中的）→ 把 IP 加入 404 封禁名单（5 分钟）。期间该 IP 任何请求直接 429。
+3. **前端配合**：`webui/src/app/(auth)/register/page.tsx` 的轮询收到 message 含"无效/过期/不存在"或"IP 已被/429/请求过于频繁"时立即停止轮询，避免合法用户被误锁。
+
+上述状态都在进程内存，重启清零；多进程部署各自独立计数，但攻击者 keep-alive 会粘在同一进程上，足以拦住。
+
+## 4. 模块总览
+
+> 完整端点列表见 [API 路由索引](../reference/api-index.md)。本节只保留模块边界和维护口径。
+
+| 模块 | 路径前缀 | 说明 |
+| ---- | -------- | ---- |
+| Auth | `/auth` | 登录、登出、会话、Token 刷新、登录端 API Key 管理 |
+| Users | `/users` | 注册、个人信息、密码、Emby 绑定、续期、设备、Telegram、头像背景、个人 API Key |
+| Media | `/media` | TMDB/Bangumi 搜索、求片、库存检查 |
+| Emby | `/emby` | Emby 账号状态、库、搜索、会话、Bangumi Webhook |
+| Admin | `/admin` | 管理用户、Emby 同步、注册码、广播、定时任务、邀请树、公告、Telegram 管理 |
+| System | `/system` | 健康、系统信息、配置、运行时状态/日志、数据库、自动更新、路由列表 |
+| API Key | `/apikey` | 外部系统专用 API Key 接口 |
+| Security | `/security` | 设备、登录历史、IP 黑名单、可疑行为 |
+| Batch | `/batch` | 批量用户操作、导出、观看统计 |
+| Stats / Invite / Signin / Announcements | `/stats` `/invite` `/signin` `/announcements` | 播放统计、邀请树、签到（装饰性）、公告 |
+| Demo | `/demo` | TestWeb 演示专用模拟接口，只返回假数据 |
+
+### 4.1 TestWeb 演示接口
+
+`/api/v1/demo/*` 仅供演示页面使用：
+
+- 认证：公开（`AuthPublic`），不读取登录态。
+- 数据：全部为后端静态预设假数据，不读取存储、不调用真实业务服务。
+- 写操作：忽略请求体，不回显用户输入，不写存储、不调用 Emby、不调用 Telegram。
+- 动作名：`/demo/action/{action_name}` 只接受安全白名单字符，拒绝路径片段、控制字符和 URL 编码绕过。
+- 生产建议：可通过反向代理限制公开访问，避免访客误以为是真实后台。
+
+### 4.2 命名与归属约定
+
+| 场景 | 约定 |
+| ---- | ---- |
+| 当前登录用户 | 使用 `/users/me/*`，不要新增 `/user/current/*` 一类别名 |
+| 管理用户 | 使用 `/admin/users/*` |
+| 系统配置管理 | 使用 `/system/admin/config/*` |
+| 定时任务管理 | 使用 `/admin/scheduler/*` |
+| 用户可见系统信息 | 使用 `/system/info` 或 `/system/config` |
+| Emby 线路下发 | 只使用 `/system/emby-urls`，按登录用户角色和 Emby 绑定状态判断 |
+| 上传头像/背景读取 | 只使用 `/users/assets/{avatar|background}/{filename}` |
+| 外部系统 API Key 调用 | 使用 `/apikey/*`，不混用登录 Token |
+| 废弃接口 | 保留时返回明确错误和替代路径，例如 `/emby/urls` 返回 410 |
+
+## 5. Auth 模块
+
+### 5.1 登录
+
+`POST /auth/login`
+
+- 说明：用户名/密码登录
+- 认证：公开（`AuthPublic`）
+- 请求头：`Content-Type: application/json`
+- 请求体：
+
+```json
+{
+  "username": "user123",
+  "password": "strongpassword"
+}
+```
+
+- 示例 cURL：
+
+```bash
+curl -X POST "http://localhost:5000/api/v1/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"user123","password":"strongpassword"}'
+```
+
+### 5.2 Emby 找回 Web 密码
+
+`POST /auth/forgot-password/emby`
+
+- 说明：用 Emby 账号密码校验身份后重置 Web 密码，新密码只返回一次。
+- 认证：公开（`AuthPublic`）
+- 限流：IP + Emby 用户名双维度（见限流表）。
+- 请求头：`Content-Type: application/json`
+
+### 5.3 Telegram 直接登录（已禁用）
+
+`POST /auth/login/telegram`
+
+- 说明：固定返回"直接登录不可用"。Telegram 仅用于绑定，不作为登录入口。
+- 认证：公开（`AuthPublic`）
+
+### 5.4 API Key 登录
+
+`POST /auth/login/apikey`
+
+- 说明：用 API Key 换取登录态。
+- 认证：公开（`AuthPublic`）
+
+### 5.5 登出
+
+`POST /auth/logout`
+
+- 说明：注销当前登录会话
+- 认证：登录用户（`AuthUser`）
+
+```bash
+curl -X POST "http://localhost:5000/api/v1/auth/logout" \
+  -H "Authorization: Bearer <token>"
+```
+
+### 5.6 登出全部会话
+
+`POST /auth/logout/all`
+
+- 说明：注销当前用户的所有会话。
+- 认证：登录用户（`AuthUser`）
+
+### 5.7 当前用户
+
+`GET /auth/me`
+
+- 说明：获取当前登录用户信息（与 `GET /users/me` 同 handler）。
+- 认证：登录用户（`AuthUser`）
+
+```bash
+curl -X GET "http://localhost:5000/api/v1/auth/me" \
+  -H "Authorization: Bearer <token>"
+```
+
+### 5.8 刷新 Token
+
+`POST /auth/refresh`
+
+- 说明：刷新用户 Token
+- 认证：登录用户（`AuthUser`）
+
+```bash
+curl -X POST "http://localhost:5000/api/v1/auth/refresh" \
+  -H "Authorization: Bearer <token>"
+```
+
+### 5.9 登录端 API Key 管理（旧版兼容）
+
+以下接口为登录态下管理"用户级 API Key"的兼容接口；新的多 Key 管理见 [6.10 个人 API Key](#610-个人-api-key)，外部接入见 [API Key 外部接入](../reference/api-key.md)。
+
+#### 获取当前用户 API Key
+
+`GET /auth/apikey`
+
+- 认证：登录用户（`AuthUser`）
+
+```bash
+curl -X GET "http://localhost:5000/api/v1/auth/apikey" \
+  -H "Authorization: Bearer <token>"
+```
+
+#### 生成 / 刷新 API Key
+
+`POST /auth/apikey`
+
+- 认证：登录用户（`AuthUser`）
+
+```bash
+curl -X POST "http://localhost:5000/api/v1/auth/apikey" \
+  -H "Authorization: Bearer <token>"
+```
+
+#### 删除当前 API Key
+
+`DELETE /auth/apikey`
+
+- 认证：登录用户（`AuthUser`）
+
+#### 启用当前 API Key
+
+`POST /auth/apikey/enable`
+
+- 认证：登录用户（`AuthUser`）
+
+#### 获取 API Key 权限列表
+
+`GET /auth/apikey/permissions`
+
+- 认证：登录用户（`AuthUser`）
+
+#### 更新 API Key 权限
+
+`PUT /auth/apikey/permissions`
+
+- 认证：登录用户（`AuthUser`）
+- 请求体：
+
+```json
+{
+  "permissions": ["account:read", "emby:read"]
+}
+```
+
+```bash
+curl -X PUT "http://localhost:5000/api/v1/auth/apikey/permissions" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"permissions":["account:read","emby:read"]}'
+```
+
+## 6. Users 模块
+
+### 6.1 注册与校验
+
+#### 新用户注册
+
+`POST /users/register`
+
+- 说明：新用户注册（成功返回 `201`）
+- 认证：公开（`AuthPublic`）
+- 限流：IP，5 / 10 分钟
+- 请求头：`Content-Type: application/json`
+- 请求体（可携带注册码 / Telegram 绑定码，视配置而定）：
+
+```json
+{
+  "username": "newuser",
+  "password": "Password123!",
+  "email": "newuser@example.com"
+}
+```
+
+```bash
+curl -X POST "http://localhost:5000/api/v1/users/register" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"newuser","password":"Password123!","email":"newuser@example.com"}'
+```
+
+#### 检查用户名是否可用
+
+`GET /users/check-available?username=<name>`
+
+- 说明：检查用户名是否可用
+- 认证：公开（`AuthPublic`）
+- 限流：IP，60 / 60 秒
+
+```bash
+curl -X GET "http://localhost:5000/api/v1/users/check-available?username=newuser"
+```
+
+#### 校验注册码
+
+`POST /users/regcode/check`
+
+- 说明：校验注册码 / 卡码是否有效，供注册页预检。
+- 认证：公开（`AuthPublic`）
+- 限流：IP，10 / 60 秒
+- 规则细节见 [注册码与卡码](../features/regcodes.md)。
+
+#### Telegram 注册绑定码
+
+`POST /users/telegram/register/bind-code` — 生成注册阶段的 Telegram 绑定码（公开，IP 限流 5/10 分钟）。
+
+`GET /users/telegram/register/bind-code/status` — 轮询绑定码状态（公开，三层防御见上文限流章节）。
+
+`POST /users/me/telegram/bind-confirm` — 注册流程中确认绑定（路由为 `AuthPublic`，由绑定码本身承载身份）。
+请求体：
+
+```json
+{ "code": "123456" }
+```
+
+#### Emby 注册队列状态
+
+`GET /users/register/emby/status`
+
+- 说明：轮询 Emby 注册队列中本次请求的结果。
+- 认证：公开（`AuthPublic`）
+- 限流：request_id + IP（见限流表）。
+
+### 6.2 当前用户信息
+
+#### 获取当前用户信息
+
+`GET /users/me`
+
+- 说明：获取当前用户详细信息
+- 认证：登录用户（`AuthUser`）
+
+```bash
+curl -X GET "http://localhost:5000/api/v1/users/me" \
+  -H "Authorization: Bearer <token>"
+```
+
+#### 更新当前用户信息
+
+`PUT /users/me`
+
+- 说明：更新当前用户信息（如邮箱、Bangumi 同步设置）
+- 认证：登录用户（`AuthUser`）
+- 请求体示例：
+
+```json
+{
+  "email": "updated@example.com",
+  "bgm_mode": true,
+  "bgm_token": "new-bgm-token"
+}
+```
+
+```bash
+curl -X PUT "http://localhost:5000/api/v1/users/me" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"updated@example.com","bgm_mode":true,"bgm_token":"new-bgm-token"}'
+```
+
+#### 修改用户名
+
+`PUT /users/me/username`
+
+- 认证：登录用户（`AuthUser`）
+- 请求体：
+
+```json
+{ "username": "newusername" }
+```
+
+#### 修改密码
+
+`PUT /users/me/password`
+
+- 说明：生成 / 修改 Web 密码。
+- 认证：登录用户（`AuthUser`）
+- 请求体：
+
+```json
+{
+  "old_password": "oldpass",
+  "new_password": "newPassword123!"
+}
+```
+
+#### 验证并修改密码
+
+`POST /users/me/password/change`（别名 `POST /users/me/password/system`）
+
+- 说明：验证当前密码并修改 Web 密码。
+- 认证：登录用户（`AuthUser`）
+- 请求体：
+
+```json
+{
+  "current_password": "oldpass",
+  "new_password": "newPassword123!"
+}
+```
+
+#### 修改 Emby 密码
+
+`POST /users/me/password/emby`
+
+- 说明：修改已绑定 Emby 账号的密码。
+- 认证：登录用户（`AuthUser`）
+
+### 6.3 Emby 绑定与设置
+
+#### 绑定 Emby 账号
+
+`POST /users/me/emby/bind`
+
+- 认证：登录用户（`AuthUser`）
+- 请求体：
+
+```json
+{
+  "emby_id": "user_emby_id",
+  "emby_password": "emby_password"
+}
+```
+
+#### 注册 Emby 账号（队列）
+
+`POST /users/me/emby/register`
+
+- 说明：为当前账号在 Emby 上创建账号，走注册队列；同步等待结果，超时降级到前端轮询 `GET /users/register/emby/status`。
+- 认证：登录用户（`AuthUser`）
+
+#### 解绑 Emby 账号
+
+`POST /users/me/emby/unbind`
+
+- 认证：登录用户（`AuthUser`）
+
+```bash
+curl -X POST "http://localhost:5000/api/v1/users/me/emby/unbind" \
+  -H "Authorization: Bearer <token>"
+```
+
+### 6.4 续期与注册码/续期码
+
+注册码、续期码、白名单码的类型、生成格式、旧码兼容与安全口径见 [注册码与卡码](../features/regcodes.md)。
+
+#### 续期当前账号
+
+`POST /users/me/renew`
+
+- 说明：用户使用续期码自助续期当前账号。**必须** 提供 `reg_code`，不接受无码续期。
+- 认证：登录用户（`AuthUser`）
+- 请求体：
+
+```json
+{
+  "reg_code": "code-abc123",
+  "emby_username": "emby_name",
+  "emby_password": "Password123"
+}
+```
+
+```bash
+curl -X POST "http://localhost:5000/api/v1/users/me/renew" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"reg_code":"code-abc123"}'
+```
+
+#### 使用注册码 / 续期码 / 白名单码
+
+`POST /users/me/use-code`
+
+- 说明：统一入口，自动识别注册码 / 续期码 / 白名单码并执行相应动作。
+- 认证：登录用户（`AuthUser`）
+- 请求体（`reg_code` 也可写作 `code`）：
+
+```json
+{
+  "reg_code": "code-abc123",
+  "emby_username": "emby_name",
+  "emby_password": "Password123"
+}
+```
+
+#### 使用卡码队列状态
+
+`GET /users/me/use-code/status`
+
+- 说明：轮询使用卡码后触发的 Emby 队列结果（与注册队列状态同 handler）。
+- 认证：登录用户（`AuthUser`）
+
+### 6.5 媒体库自助可见性
+
+`GET /users/me/libraries` — 获取当前用户的媒体库列表与可见状态（登录用户）。
+
+`PUT /users/me/libraries/visibility` — 在管理员开启自助开关后，用户自行调整可见媒体库（登录用户）。
+
+### 6.6 设备与登录历史
+
+#### 查看当前设备列表
+
+`GET /users/me/devices`
+
+- 认证：登录用户（`AuthUser`）
+
+#### 移除指定设备
+
+`DELETE /users/me/devices/{device_id}`
+
+- 认证：登录用户（`AuthUser`）
+
+```bash
+curl -X DELETE "http://localhost:5000/api/v1/users/me/devices/abc123" \
+  -H "Authorization: Bearer <token>"
+```
+
+#### 查看当前登录会话
+
+`GET /users/me/sessions`
+
+- 认证：登录用户（`AuthUser`）
+
+#### 查看登录历史
+
+`GET /users/me/login-history`
+
+- 认证：登录用户（`AuthUser`）
+
+### 6.7 Telegram 绑定
+
+#### 查询绑定状态
+
+`GET /users/me/telegram`
+
+- 认证：登录用户（`AuthUser`）
+
+#### 生成绑定验证码
+
+`POST /users/me/telegram/bind-code`
+
+- 认证：登录用户（`AuthUser`）
+- 限流：UID，5 / 10 分钟
+
+#### 申请换绑 Telegram
+
+`POST /users/me/telegram/rebind-request`
+
+- 说明：发起换绑申请，进入管理员审核队列。
+- 认证：登录用户（`AuthUser`）
+- 限流：UID，3 / 1 小时
+
+#### 解绑 Telegram
+
+`POST /users/me/telegram/unbind`
+
+- 认证：登录用户（`AuthUser`）
+- 限流：UID，5 / 10 分钟
+
+> 注册流程中的绑定确认接口是 `POST /users/me/telegram/bind-confirm`（公开，见 [6.1](#61-注册与校验)），由绑定码本身承载身份。
+
+### 6.8 个人设置
+
+`GET /users/me/settings`
+
+- 认证：登录用户（`AuthUser`）
+
+### 6.9 头像与背景
+
+| 方法/路径 | 认证 | 说明 |
+| --------- | ---- | ---- |
+| `GET /users/{uid}/avatar` | `AuthUser` | 读取指定用户头像 |
+| `POST /users/me/avatar/upload` | `AuthUser` | 上传头像（UID 限流 10/60s） |
+| `DELETE /users/me/avatar` | `AuthUser` | 删除头像 |
+| `GET /users/{uid}/background` | `AuthUser` | 读取指定用户背景 |
+| `PUT /users/me/background` | `AuthUser` | 设置背景（URL 或预设） |
+| `POST /users/me/background/upload` | `AuthUser` | 上传背景（UID 限流 10/60s） |
+| `DELETE /users/me/background` | `AuthUser` | 删除背景 |
+| `GET /users/assets/{kind}/{filename}` | `AuthUser` | 读取上传产物，`kind` ∈ `avatar`/`background` |
+
+背景与头像的存储、URL 校验（反 SSRF）见 [背景与头像](../features/background.md)。
+
+### 6.10 个人 API Key
+
+| 方法/路径 | 认证 | 说明 |
+| --------- | ---- | ---- |
+| `GET /users/me/apikeys` | `AuthUser` | 列出当前用户的 API Key |
+| `POST /users/me/apikeys` | `AuthUser` | 创建新 API Key |
+| `PUT /users/me/apikeys/{key_id}` | `AuthUser` | 更新指定 Key（权限/启用状态等） |
+| `DELETE /users/me/apikeys/{key_id}` | `AuthUser` | 删除指定 Key |
+
+外部系统如何使用这些 Key 见 [API Key 外部接入](../reference/api-key.md)。
+
+## 7. Media 模块
+
+> 求片状态更新（`PUT /media/request/{request_id}/status`、`GET /media/request/pending`）需要 **管理员**；其余检索与创建/查看自己的求片为登录用户。
+
+### 7.1 媒体检索
+
+#### 通用媒体搜索
+
+`GET /media/search?keyword=<keyword>&page=1&per_page=20`
+
+- 认证：登录用户（`AuthUser`）
+
+```bash
+curl -X GET "http://localhost:5000/api/v1/media/search?keyword=matrix&page=1&per_page=20" \
+  -H "Authorization: Bearer <token>"
+```
+
+#### TMDB 搜索
+
+`GET /media/search/tmdb?query=<query>&page=1`
+
+- 认证：登录用户（`AuthUser`）
+
+#### Bangumi 搜索
+
+`GET /media/search/bangumi?query=<query>&page=1`
+
+- 认证：登录用户（`AuthUser`）
+
+#### 通过 source_type 和 media_id 查询详情
+
+`GET /media/search/id/{source_type}/{media_id}`
+
+- 认证：登录用户（`AuthUser`）
+
+```bash
+curl -X GET "http://localhost:5000/api/v1/media/search/id/tmdb/12345" \
+  -H "Authorization: Bearer <token>"
+```
+
+#### 媒体详情
+
+`GET /media/detail?source=tmdb&id=12345`
+
+- 认证：登录用户（`AuthUser`）
+
+#### TMDB 详情
+
+`GET /media/tmdb/{tmdb_id}`
+
+- 认证：登录用户（`AuthUser`）
+
+#### Bangumi 详情
+
+`GET /media/bangumi/{bgm_id}`
+
+- 认证：登录用户（`AuthUser`）
+
+### 7.2 库存
+
+#### 库存检查
+
+`POST /media/inventory/check`
+
+- 认证：登录用户（`AuthUser`）
+- 请求体：
+
+```json
+{ "tmdb_id": 550, "source": "tmdb" }
+```
+
+#### 库存搜索
+
+`GET /media/inventory/search?keyword=<keyword>&page=1&per_page=20`
+
+- 认证：登录用户（`AuthUser`）
+
+### 7.3 求片请求
+
+#### 创建求片请求
+
+`POST /media/request`
+
+- 认证：登录用户（`AuthUser`）
+- 请求体：
+
+```json
+{
+  "title": "电影名称",
+  "source": "bangumi",
+  "remarks": "请尽快添加"
+}
+```
+
+#### 查询我的求片请求
+
+`GET /media/request/my`
+
+- 认证：登录用户（`AuthUser`）
+
+#### 查询待处理求片请求
+
+`GET /media/request/pending`
+
+- 说明：列出全部待处理求片，供管理端审批。
+- 认证：管理员（`AuthAdmin`）
+
+#### 更新求片请求状态
+
+`PUT /media/request/{request_id}/status`
+
+- 说明：更新求片状态。`status` 必须显式传入；不会把空请求体或 malformed JSON 默认视为 `accepted`。可用值：`pending` / `accepted` / `rejected` / `completed` / `downloading` 及兼容别名。
+- 认证：管理员（`AuthAdmin`）
+- 请求体：
+
+```json
+{ "status": "approved", "remarks": "已处理" }
+```
+
+```bash
+curl -X PUT "http://localhost:5000/api/v1/media/request/123/status" \
+  -H "Authorization: Bearer <admin_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"approved","remarks":"已处理"}'
+```
+
+#### 外部求片更新
+
+`POST /media/request/external/update`
+
+- 说明：供外部下载系统回写求片状态。路由级别为公开（`AuthPublic`），但 handler 内强制校验 **内部密钥**：通过 `X-Internal-Secret: <secret>` 或 `Authorization: Bearer <secret>` 传入，值必须匹配配置中的 `bot_internal_secret`。`status` 必须显式传入；`key` 也可写作 `require_key`。
+- 请求体：
+
+```json
+{
+  "key": "req_xxx",
+  "status": "completed",
+  "note": "外部系统同步"
+}
+```
+
+```bash
+curl -X POST "http://localhost:5000/api/v1/media/request/external/update" \
+  -H "X-Internal-Secret: <secret>" \
+  -H "Content-Type: application/json" \
+  -d '{"key":"req_xxx","status":"completed","note":"外部系统同步"}'
+```
+
+#### 通过 key 查询/删除求片
+
+`GET /media/request/by-key/{require_key}` — 按业务 key 查询求片（登录用户）。
+
+`DELETE /media/request/by-key/{require_key}` — 按业务 key 删除自己的求片（登录用户）。
+
+#### 查询单个求片请求
+
+`GET /media/request/{request_id}`
+
+- 认证：登录用户（`AuthUser`）
+
+#### 取消求片请求
+
+`DELETE /media/request/{request_id}`
+
+- 认证：登录用户（`AuthUser`）
+
+## 8. Emby 模块
+
+### 8.1 查询当前用户 Emby 状态
+
+`GET /emby/status`
+
+- 认证：登录用户（`AuthUser`）
+
+```bash
+curl -X GET "http://localhost:5000/api/v1/emby/status" \
+  -H "Authorization: Bearer <token>"
+```
+
+### 8.2 获取 Emby 服务 URLs（已弃用）
+
+`GET /emby/urls`
+
+- 状态：**已弃用，固定返回 `410 Gone`**。该端点早期为未鉴权返回全量线路，存在泄露风险（路由级别为 `AuthPublic`，仅用于回 410）。
+- 替代：改用 `GET /system/emby-urls`，按用户角色和 Emby 绑定状态下发线路（未绑定 Emby 的普通用户返回空列表）。
+
+### 8.3 获取 Emby 媒体库列表
+
+`GET /emby/libraries`
+
+- 认证：登录用户（`AuthUser`）
+
+### 8.4 Emby 内容搜索
+
+`GET /emby/search?query=<keyword>&page=1&per_page=20`
+
+- 认证：登录用户（`AuthUser`）
+
+### 8.5 获取最新媒体
+
+`GET /emby/latest`
+
+- 认证：登录用户（`AuthUser`）
+
+### 8.6 查询 Emby 活跃会话数量
+
+`GET /emby/sessions/count`
+
+- 认证：登录用户（`AuthUser`）
+
+### 8.7 Bangumi 观看进度 Webhook
+
+`POST /emby/bangumi/webhook`
+
+- 说明：接收 Emby 播放事件，按规则回写 Bangumi 观看进度。
+- 认证：公开（`AuthPublic`），但携带 `X-Twilight-Bangumi-Timestamp` 时会做 ±300 秒 replay-window 校验，落在窗口外的请求被拒。
+- 详见 [Bangumi 同步](../features/bangumi.md)。
+
+## 9. Admin 模块
+
+> 本模块全部为管理员级别（`AuthAdmin`）。
+
+### 9.1 用户管理
+
+#### 查询用户列表
+
+`GET /admin/users?status=active&page=1&per_page=20`
+
+```bash
+curl -X GET "http://localhost:5000/api/v1/admin/users?status=active&page=1&per_page=20" \
+  -H "Authorization: Bearer <admin_token>"
+```
+
+#### 获取单个用户信息
+
+`GET /admin/users/{uid}`
+
+#### 更新用户信息
+
+`PUT /admin/users/{uid}`
+
+#### 删除用户
+
+`DELETE /admin/users/{uid}`
+
+#### 禁用 / 启用用户
+
+`POST /admin/users/{uid}/disable` — 请求体可带 `{"reason":"违规使用"}`。
+
+`POST /admin/users/{uid}/enable`
+
+```bash
+curl -X POST "http://localhost:5000/api/v1/admin/users/123/disable" \
+  -H "Authorization: Bearer <admin_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"reason":"违规使用"}'
+```
+
+#### 解绑 / 强制解绑 Emby
+
+`DELETE /admin/users/{uid}/emby` — 解绑指定用户的 Emby 账号。
+
+`POST /admin/users/{uid}/force-unbind` — 强制解绑（处理冲突场景）。
+
+#### 续期用户 / 取消永久
+
+`POST /admin/users/{uid}/renew` — 管理员为指定用户续期。请求体：
+
+```json
+{ "days": 30 }
+```
+
+`POST /admin/users/{uid}/cancel-permanent` — 取消永久授权（与续期同 handler）。
+
+#### 重置密码
+
+`POST /admin/users/{uid}/reset-password`
+
+#### 踢出用户 Emby 会话
+
+`POST /admin/users/{uid}/kick`
+
+#### 获取 / 更新用户媒体库权限
+
+`GET /admin/users/{uid}/libraries`
+
+- 响应：
+
+```json
+{
+  "all_libraries": [{"id": "xxx", "name": "电影", "type": "movies"}],
+  "enabled_ids": ["xxx", "yyy"],
+  "enable_all": false,
+  "has_emby": true
+}
+```
+
+`PUT /admin/users/{uid}/libraries`
+
+- 说明：设置用户可访问的媒体库。`enable_all=true` 时用户可见所有库；否则仅 `library_names` / `library_ids` 列出的库可见。写入由单次 `POST /Users/{Id}/Policy` 完成（仅用 `EnableAllFolders` + `EnabledFolders` 的 GUID）。
+- 请求体（推荐使用 `library_names`）：
+
+```json
+{
+  "library_names": ["电影", "电视剧"],
+  "enable_all": false
+}
+```
+
+或按 GUID 传入：
+
+```json
+{
+  "library_ids": ["f137a2dd-21bb-c1b9-9aa5-c0f6bf02a805"],
+  "enable_all": false
+}
+```
+
+#### 媒体库自助开关
+
+`PUT /admin/users/{uid}/library-self-service` — 单用户开关自助调库权限。
+
+`POST /admin/users/library-self-service/bulk-enable` — 批量开启自助调库。
+
+#### 切换管理员身份
+
+`PUT /admin/users/{uid}/admin`
+
+- 请求体：
+
+```json
+{ "admin": true }
+```
+
+#### Telegram 绑定管理
+
+`POST /admin/users/{uid}/unbind-telegram` — 强制解绑指定用户的 Telegram。
+
+`POST /admin/users/{uid}/bind-telegram` — 为指定用户绑定 Telegram。
+
+`GET /admin/users/by-telegram/{telegram_id}` — 按 Telegram ID 反查用户。
+
+#### 注册队列与授权处理
+
+| 方法/路径 | 说明 |
+| --------- | ---- |
+| `POST /admin/users/{uid}/registration-queue/clear` | 清理单用户在飞注册队列 |
+| `POST /admin/users/registration-queue/clear` | 清理全部在飞注册队列 |
+| `POST /admin/users/registration-queue/grant-entitlement-and-clear` | 批量补发授权并清队列 |
+| `POST /admin/users/{uid}/registration-entitlement` | 为单用户补发注册授权 |
+| `POST /admin/users/{uid}/registration-entitlement/dequeue` | 补发授权并出队 |
+| `POST /admin/users/sync-bindings` | 同步本地与 Emby 的绑定关系 |
+
+### 9.2 Emby 管理
+
+| 方法/路径 | 说明 |
+| --------- | ---- |
+| `POST /admin/emby/sync` | 同步所有 Emby 用户数据 |
+| `GET /admin/emby/sessions` | 当前 Emby 会话 |
+| `GET /admin/emby/activity` | Emby 活动记录 |
+| `GET /admin/emby/users` | Emby 用户列表 |
+| `POST /admin/emby/broadcast` | 发送 Emby 广播消息 |
+| `POST /admin/emby/test` | 测试与指定 Emby 账号的连通性 |
+| `POST /admin/emby/cleanup-orphans` | 清理孤立 Emby 用户 |
+| `POST /admin/emby/import-users` | 从 Emby 导入用户 |
+| `POST /admin/emby/reset-bindings` | 重置绑定关系 |
+| `POST /admin/emby/delete-unlinked` | 删除未绑定的 Emby 用户 |
+| `POST /admin/emby/create-standalone` | 直建独立 Emby 账号（不写本地 users） |
+| `POST /admin/emby/force-set-password` | 强制设置 Emby 密码 |
+| `POST /admin/users/{uid}/bind-emby` | 管理员为用户直绑 Emby；冲突时返回 `200 + success=false` 携带冲突详情 |
+
+#### 同步所有 Emby 用户数据
+
+`POST /admin/emby/sync`
+
+```bash
+curl -X POST "http://localhost:5000/api/v1/admin/emby/sync" \
+  -H "Authorization: Bearer <admin_token>"
+```
+
+#### 发送 Emby 广播消息
+
+`POST /admin/emby/broadcast`
+
+- 请求体：
+
+```json
+{
+  "title": "系统通知",
+  "message": "Emby 服务器将在夜间维护。"
+}
+```
+
+#### 测试 Emby 连通性
+
+`POST /admin/emby/test`
+
+- 请求体：
+
+```json
+{ "emby_id": "user_emby_id" }
+```
+
+#### 导入 Emby 用户
+
+`POST /admin/emby/import-users`
+
+- 请求体：
+
+```json
+{
+  "source": "emby",
+  "user_ids": [123, 456]
+}
+```
+
+### 9.3 注册码与卡码
+
+> 规则细节见 [注册码与卡码](../features/regcodes.md)。
+
+#### 查询注册码列表
+
+`GET /admin/regcodes`
+
+#### 创建注册码
+
+`POST /admin/regcodes`
+
+- 请求体：
+
+```json
+{
+  "type": 1,
+  "validity_time": -1,
+  "use_count_limit": 1,
+  "days": 30,
+  "count": 1,
+  "format": "TW-{type}-{random}",
+  "random_algorithm": "base32-20",
+  "decoy": false
+}
+```
+
+```bash
+curl -X POST "http://localhost:5000/api/v1/admin/regcodes" \
+  -H "Authorization: Bearer <admin_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"type":1,"validity_time":-1,"use_count_limit":1,"days":30,"count":1}'
+```
+
+#### 批量删除注册码
+
+`POST /admin/regcodes/batch-delete`
+
+#### 更新注册码备注
+
+`PUT /admin/regcodes/{code}`
+
+- 请求体：
+
+```json
+{ "note": "活动发放" }
+```
+
+#### 删除注册码
+
+`DELETE /admin/regcodes/{code}`
+
+#### 查询注册码使用者
+
+`GET /admin/regcodes/{code}/users`
+
+#### 清理注册码使用记录
+
+`POST /admin/regcodes/{code}/clear-usage`
+
+- 说明：清空指定注册码的使用次数、使用者 UID 与 Telegram ID 记录，并重新激活该码；不影响已注册用户账号。
+- 请求体：`confirm` 必须为 `CLEAR_REGCODE_USAGE`
+
+```json
+{ "confirm": "CLEAR_REGCODE_USAGE" }
+```
+
+### 9.4 求片管理（Admin 别名）
+
+`GET /admin/media-requests` — 列出全部求片（与 `/media/request/pending` 同 handler）。
+
+`PUT /admin/media-requests/{request_id}` — 更新求片状态。
+
+`DELETE /admin/media-requests/{request_id}` — 删除求片。
+
+`PUT /admin/media-requests/by-key/{require_key}` — 按 key 更新。
+
+`DELETE /admin/media-requests/by-key/{require_key}` — 按 key 删除。
+
+### 9.5 白名单与统计
+
+#### 管理白名单
+
+`POST /admin/whitelist`
+
+- 请求体：
+
+```json
+{ "ip": "192.168.1.100" }
+```
+
+#### 查询管理员统计
+
+`GET /admin/stats`
+
+- 说明：管理面板汇总统计（与 `/system/stats`、`/system/admin/stats` 同 handler）。
+
+### 9.6 批量用户操作
+
+| 方法/路径 | 说明 |
+| --------- | ---- |
+| `POST /admin/users/bulk-expire` | 批量置过期 |
+| `POST /admin/users/bulk-enable-disabled` | 批量启用被禁用用户 |
+| `POST /admin/users/cleanup-invalid` | 清理无效用户（见下） |
+| `POST /admin/users/clear-stale-pending-emby` | 清理长期 `PENDING_EMBY` 用户 |
+| `POST /admin/users/kick-no-emby` | 踢出无 Emby 账号用户 |
+
+#### 清理无效用户
+
+`POST /admin/users/cleanup-invalid`
+
+- 请求体：`dry_run` 默认为 `true`，仅预览候选用户；执行删除时必须传 `{"dry_run":false,"confirm":"CLEANUP_INVALID_USERS"}`。
+
+```bash
+curl -X POST "http://localhost:5000/api/v1/admin/users/cleanup-invalid" \
+  -H "Authorization: Bearer <admin_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"min_days":7,"dry_run":true}'
+```
+
+### 9.7 邀请树管理
+
+> 邀请关系（`invite_relations`）、邀请码等均以字段形式保存在单一状态文档（`internal/store`）中，并非独立数据库或单表；详见 [邀请树](../features/invite.md)。
+
+`GET /admin/invite/tree` — 查看邀请树。
+
+`POST /admin/invite/users/{uid}/detach` — 将指定用户从邀请树脱离。
+
+`GET /admin/invite/codes` — 列出全部邀请码。
+
+### 9.8 违规与 Telegram 管理
+
+| 方法/路径 | 说明 |
+| --------- | ---- |
+| `GET /admin/violations` | 列出违规记录 |
+| `DELETE /admin/violations/{violation_id}` | 删除单条违规 |
+| `POST /admin/violations/clear` | 清空违规记录 |
+| `GET /admin/telegram/rebind-requests` | 列出换绑申请 |
+| `POST /admin/telegram/rebind-requests/{request_id}/approve` | 批准换绑 |
+| `POST /admin/telegram/rebind-requests/{request_id}/reject` | 拒绝换绑 |
+| `POST /admin/telegram/rebind-requests/batch` | 批量审核换绑 |
+| `GET /admin/telegram/roster/stats` | Telegram 群花名册统计 |
+| `POST /admin/telegram/rejoined-users/enable` | 启用重新入群用户 |
+| `POST /admin/telegram/kick-unbound` | 踢出未绑定用户 |
+
+Telegram 相关行为见 [Telegram Bot 命令](../features/telegram-bot.md)。
+
+### 9.9 定时任务管理
+
+定时任务的计划信息与执行历史持久化在状态存储中（`internal/store`）；每个 `job_id` 默认保留最近若干条执行记录，超出后自动裁剪。进程启动时会把长时间残留在 `running` 状态的记录改判为 `failed`，避免崩溃后前端永远转圈。
+
+`GET /admin/scheduler/jobs` 返回的每个 job 含触发器结构化描述：
+
+| 字段 | 说明 |
+| ---- | ---- |
+| `trigger_spec` | 当前生效的触发规则，结构同下方 PUT 请求体 |
+| `default_trigger_spec` | config.toml 算出的默认值（用于"恢复默认"按钮显示） |
+| `is_custom` | 是否已被管理员覆盖（true 时前端显示"已自定义"徽章） |
+| `last_auto_run_at` | 最近一次自动执行开始时间 |
+| `last_manual_run_at` | 最近一次手动执行开始时间 |
+
+单次运行（`SchedulerJobRun`）字段：
+
+| 字段 | 说明 |
+| ---- | ---- |
+| `id` | 运行记录主键 |
+| `job_id` | 任务标识（如 `check_expired`、`emby_sync`） |
+| `type` | 执行类型：`auto` / `manual` |
+| `trigger` | 触发来源：`scheduled` / `manual` / `startup` |
+| `status` | `running` / `success` / `failed` |
+| `started_at` | 起始时间戳（秒） |
+| `finished_at` | 结束时间戳（秒），运行中为 `null` |
+| `error` | 失败时的异常摘要 |
+| `summary` | 结构化指标，如 `{"scanned": 12, "disabled": 3, "failed": 0}` |
+| `logs` | 任务内部累积的日志行（列表接口不返回，详情接口返回） |
+
+#### 列出全部定时任务
+
+`GET /admin/scheduler/jobs`
+
+- 说明：列出内置定时任务定义、计划时间、下次执行时间和最近一次运行摘要（不含 logs 正文，体积小适合轮询）。
+- 响应示例：
+
+```json
+{
+  "success": true,
+  "data": {
+    "jobs": [
+      {
+        "id": "check_expired",
+        "name": "过期用户检查",
+        "description": "...",
+        "enabled": true,
+        "schedule": "cron[hour='4', minute='0']",
+        "next_run_at": 1715990400,
+        "is_running": false,
+        "last_run": {
+          "status": "success",
+          "started_at": 1715904000,
+          "finished_at": 1715904005,
+          "type": "auto",
+          "trigger": "scheduled",
+          "error": null,
+          "summary": {"scanned": 12, "disabled": 3, "failed": 0}
+        }
+      }
+    ]
+  }
+}
+```
+
+#### 手动触发一次任务
+
+`POST /admin/scheduler/jobs/{job_id}/run`
+
+- 说明：将指定任务排入后台执行；接口立即返回，前端通过轮询 `/admin/scheduler/jobs` 拿到结束状态。
+- 响应：`data.last_run` 是触发时的快照（通常为 `running`）。
+
+```bash
+curl -X POST "http://localhost:5000/api/v1/admin/scheduler/jobs/check_expired/run" \
+  -H "Authorization: Bearer <admin_token>"
+```
+
+#### 终止运行中的任务
+
+`POST /admin/scheduler/jobs/{job_id}/terminate`
+
+- 说明：请求终止正在运行的任务。
+
+#### 获取最近一次完整运行（含日志）
+
+`GET /admin/scheduler/jobs/{job_id}/last-run`
+
+- 说明：返回包含 `logs` 正文的完整运行记录，前端"查看日志"弹窗使用。
+
+#### 获取历史运行列表
+
+`GET /admin/scheduler/jobs/{job_id}/history?limit=20`
+
+- 说明：按时间倒序返回历史运行；`limit` 范围 1–100，默认 20。
+
+#### 修改触发器（覆盖 config.toml 默认值）
+
+`PUT /admin/scheduler/jobs/{job_id}/schedule`
+
+- 说明：把新的触发规则写入状态存储并实时重排；下次进程重启后仍生效。每个 `job_id` 至多一条覆盖。
+- 请求体（二选一）：
+
+```json
+{ "type": "cron_daily", "hour": 3, "minute": 0 }
+```
+
+```json
+{ "type": "interval", "seconds": 3600 }
+```
+
+- 约束：
+  - `cron_daily`：`hour ∈ [0, 23]`，`minute ∈ [0, 59]`
+  - `interval`：`seconds ∈ [60, 604800]`（最短 1 分钟，最长 7 天）
+- 响应示例：
+
+```json
+{
+  "success": true,
+  "data": {
+    "job_id": "emby_sync",
+    "trigger_spec": { "type": "interval", "seconds": 1800 },
+    "is_custom": true
+  }
+}
+```
+
+#### 重置触发器（恢复 config.toml 默认值）
+
+`DELETE /admin/scheduler/jobs/{job_id}/schedule`
+
+- 说明：删除该 job 的覆盖记录，并按 `default_trigger_spec` 重新排程。
+
+### 9.10 公告管理
+
+> 公告（`announcements`）以字段形式保存在单一状态文档（`internal/store`）中，不存在独立数据库或 `ALTER TABLE` 操作；前台读取见 [11.x 公告](#1112-公告)，功能说明见 [公告系统](../features/announcements.md)。
+
+`GET /admin/announcements` — 列出全部公告。
+
+`POST /admin/announcements` — 创建公告。
+
+`PUT /admin/announcements/{announcement_id}` — 更新公告。
+
+`DELETE /admin/announcements/{announcement_id}` — 删除公告。
+
+## 10. System 模块
+
+### 10.1 健康检查
+
+`GET /system/health`
+
+- 说明：返回 `api`、`database`、`emby` 布尔状态，并保留 `status/storage/redis` 等兼容字段。
+- 认证：公开（`AuthPublic`）
+
+```bash
+curl -X GET "http://localhost:5000/api/v1/system/health"
+```
+
+### 10.2 系统信息
+
+`GET /system/info`
+
+- 说明：系统公开信息。`telegram_bot` 会在 Telegram 已启用且可连通时返回 Bot 用户名；`telegram_links.groups/channels` 只返回通过白名单校验的公开 `t.me` 链接，不暴露纯数字私有群 ID。
+- 认证：公开（`AuthPublic`）
+
+```bash
+curl -X GET "http://localhost:5000/api/v1/system/info"
+```
+
+### 10.3 服务器图标
+
+`GET /system/server-icon` — 读取服务器图标（公开）。
+
+`POST /system/admin/server-icon/upload` — 上传服务器图标（管理员）。
+
+### 10.4 读取运行时配置（公开给登录用户）
+
+`GET /system/config`
+
+- 说明：获取面向登录用户的运行时配置（前端按此渲染开关）。
+- 认证：登录用户（`AuthUser`）
+
+```bash
+curl -X GET "http://localhost:5000/api/v1/system/config" \
+  -H "Authorization: Bearer <token>"
+```
+
+### 10.5 管理员配置只读视图
+
+`GET /system/admin/config`
+
+- 说明：返回完整运行时配置视图（管理面板使用）。
+- 认证：管理员（`AuthAdmin`）
+
+### 10.6 系统/管理员统计
+
+`GET /system/stats` 与 `GET /system/admin/stats` — 均为管理员级别（`AuthAdmin`），与 `/admin/stats` 同 handler，返回系统聚合统计。
+
+### 10.7 获取 Emby 服务线路（按角色下发）
+
+`GET /system/emby-urls`
+
+- 说明：替代已弃用的 `/emby/urls`。后端按当前用户的角色与 Emby 绑定状态过滤：
+  - **未绑定 Emby 的普通用户**：返回空 `lines`，响应体附带 `requires_emby_account: true`，前端据此隐藏整块线路 UI，避免在用户尚未持有 Emby 账号时先把服务器地址泄露给浏览器。
+  - **已绑定 Emby 的普通用户**：返回普通线路列表 `lines`。
+  - **白名单 / 管理员**：额外返回 `whitelist_lines` 专属线路。
+- 认证：登录用户（`AuthUser`）
+- 响应示例：
+
+```json
+{
+  "success": true,
+  "data": {
+    "lines": [
+      {"name": "Direct", "url": "https://emby.example.com"},
+      {"name": "CDN",    "url": "https://cdn.example.com"}
+    ],
+    "whitelist_lines": [
+      {"name": "Premium", "url": "https://vip.example.com"}
+    ]
+  }
+}
+```
+
+### 10.8 Emby 线路探测
+
+`POST /system/emby-urls/probe`
+
+- 说明：服务端探测 Emby 线路连通性，供前端在多线路间选择。
+- 认证：登录用户（`AuthUser`）
+
+### 10.9 管理员运行状态与实时日志
+
+`GET /system/admin/runtime/status`
+
+- 说明：返回 Go 进程、主机、内存、数据库、路由数等运行状态，供管理端实时状态卡片使用。
+- 认证：管理员（`AuthAdmin`）
+- 安全口径：只读取进程内统计和 Linux `/proc` 汇总信息，不暴露环境变量、命令行参数、配置明文或任意文件内容。
+
+`data` 主要字段：
+
+| 字段 | 说明 |
+| ---- | ---- |
+| `started_at` | Go 进程启动时间戳 |
+| `uptime_seconds` | Go 进程运行秒数 |
+| `host_uptime_seconds` | Linux 主机运行秒数，可用时返回 |
+| `go_version` / `goos` / `goarch` | Go 运行时与平台 |
+| `goroutines` / `cpu_count` | 协程数和 CPU 数 |
+| `active_database` / `config_database` | 当前存储后端与配置中的目标后端 |
+| `log_level` / `runtime_log_limit` / `runtime_log_entries` | 当前日志等级、保留行数和缓冲区已有行数 |
+| `memory` | Go runtime 内存统计 |
+| `host_memory` | `/proc/meminfo` 摘要，可用时返回 |
+| `load_average` | `/proc/loadavg` 的 1/5/15 分钟负载，可用时返回 |
+
+`GET /system/admin/runtime/logs?limit=200&after=0`
+
+- 说明：读取后端进程内最近日志快照，`limit` 受 `[Global].runtime_log_limit` 限制（默认配置 5000）。
+- 认证：管理员（`AuthAdmin`）
+- 响应：`entries` 为日志数组，`next_cursor` 用于下一次增量读取。
+
+`GET /system/admin/runtime/logs/stream?limit=100&after=0`
+
+- 说明：SSE 实时日志流，事件类型包括 `snapshot`、`logs`、`ping`。
+- 认证：管理员（`AuthAdmin`）；浏览器端使用同源 Cookie 或显式可信 CORS Origin。
+- 安全口径：日志来自 Go 进程内日志处理链，敏感键、API Key、Bearer Token、Cookie、密码、DSN 会被尽力脱敏；接口不读取 journald、系统日志文件或用户指定路径。
+
+```bash
+curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100" \
+  -H "Authorization: Bearer <admin_token>"
+```
+
+### 10.10 config.toml 读写与备份
+
+`GET /system/admin/config/toml` — 读取当前 config.toml（管理员）。
+
+`PUT /system/admin/config/toml` — 写入 config.toml（管理员）。保存前会创建备份。
+
+> 重要：配置改动 **不走热重载**。保存后由进程自身退出，依赖外部 supervisor（systemd）重新拉起后整进程生效。详见 [Go 后端架构与配置](../reference/backend.md)。
+
+- 请求体：
+
+```json
+{ "content": "[Global]\nlogging = true\n..." }
+```
+
+`GET /system/admin/config/schema` — 获取结构化配置 schema（管理员）。
+
+`PUT /system/admin/config/schema` — 按 schema 写入配置（管理员），保存前创建备份。请求体：
+
+```json
+{
+  "sections": {
+    "BangumiSync": {
+      "enabled": true,
+      "min_progress_percent": 80
+    }
+  }
+}
+```
+
+配置备份与整理：
+
+| 方法/路径 | 说明 |
+| --------- | ---- |
+| `GET /system/admin/config/backups` | 列出配置备份 |
+| `POST /system/admin/config/backup` | 创建配置备份 |
+| `GET /system/admin/config/backups/{name}` | 查看指定配置备份 |
+| `DELETE /system/admin/config/backups/{name}` | 删除指定配置备份 |
+| `POST /system/admin/config/restore` | 从备份恢复配置 |
+| `POST /system/admin/config/sweep` | 手动触发 config.toml 自动整理（迁移历史段、删孤立键、补默认值，带备份） |
+
+### 10.11 数据库状态、备份、恢复、迁移
+
+> Twilight 把全部业务状态保存在 **单一状态文档** 中：JSON 文件 `db/twilight_go_state.json` 或 PostgreSQL `twilight_state` 表（`id=1` 的一行 jsonb）；另有独立表 `twilight_sessions`、`twilight_runtime_logs`。下列接口围绕该状态文档操作。
+
+`GET /system/admin/database/status`
+
+- 说明：返回当前 active driver、配置 driver、状态文件、备份目录、PostgreSQL 配置状态和用户数。响应同时给出 `active_label/configured_label`，其中 `gojson` 表示 Go JSON 状态文件，`sqlite3` 表示旧 SQLite 迁移源，`postgresql` 表示 PostgreSQL 后端。
+- 认证：管理员（`AuthAdmin`）
+
+`GET /system/admin/database/backups` — 列出备份目录中的状态快照。
+
+`GET /system/admin/database/backups/{name}` — 查看指定备份。
+
+`DELETE /system/admin/database/backups/{name}` — 删除指定备份。
+
+`POST /system/admin/database/backup` — 创建当前状态快照备份。
+
+`POST /system/admin/database/restore`
+
+- 说明：从指定备份恢复。未传确认短语时只返回预览，不写入数据；确认执行前会自动创建保护性备份。备份名限制在配置的备份目录内。
+- 预览请求体：
+
+```json
+{"name":"twilight_state_20260522_120000_123456789.json","dry_run":true}
+```
+
+- 执行请求体：
+
+```json
+{"name":"twilight_state_20260522_120000_123456789.json","confirm":"RESTORE_DATABASE_BACKUP"}
+```
+
+`POST /system/admin/database/migrate`
+
+- 说明：迁移当前 Go 状态快照或旧 SQLite 文件集到 `json` / `postgres`。未传确认短语时只返回预检，不写入数据；确认执行前会自动创建保护性备份。
+- 预检请求体：
+
+```json
+{
+  "source_driver": "sqlite",
+  "target_driver": "postgres",
+  "dry_run": true,
+  "database_url": "postgres://user:pass@127.0.0.1:5432/twilight?sslmode=disable"
+}
+```
+
+`source_driver` 可省略，省略时表示当前 Go 状态；传 `sqlite` / `legacy_sqlite` 时，后端只扫描固定数据库目录中的旧 SQLite 文件，不接受前端传入任意路径。
+
+- 执行请求体：
+
+```json
+{
+  "target_driver": "postgres",
+  "confirm": "MIGRATE_DATABASE"
+}
+```
+
+- 预检响应 `data` 包含 `source_driver`、`configured_driver`、`target_driver`、`snapshot_bytes`、`target_ready`、`backup_ready`、`warnings`、`counts`、`requires_confirmation`、`confirm`，并保留 `users`、`regcodes`、`invite_codes` 等兼容字段。PostgreSQL 目标会在权限允许时自动创建缺失数据库并准备 `twilight_state` 状态表，`target_ready.database_created` / `target_ready.schema_ready` 反映结果。
+- 旧 SQLite 来源会额外返回 `legacy_sqlite` 与 `legacy_sqlite_import`，包含检测到的文件、表计数、已映射表和未映射表。
+- 执行响应会额外返回 `pre_operation_backup` / `pre_migration_backup`；旧 SQLite 来源还会返回 `legacy_sqlite_backup`，确认写入前已自动备份旧文件集。
+
+### 10.12 Git 自动更新
+
+`POST /system/admin/update`
+
+- 说明：从 HTTPS Git 仓库拉取指定分支。默认拒绝 dirty worktree，使用 `git pull --ff-only`，不会 reset/rebase/merge。
+- 认证：管理员（`AuthAdmin`）
+- 请求体：
+
+```json
+{
+  "repo_url": "https://github.com/Prejudice-Studio/Twilight.git",
+  "branch": "golang",
+  "dry_run": true,
+  "restart_services": true
+}
+```
+
+- 安全约束：仓库 URL 不允许携带凭据；分支名只允许安全字符；`dry_run` 只做预检；响应中 `repo_url` 与 `before.remote_url` 会移除凭据。
+- 重启策略：只有 commit 实际变化且请求 `restart_services=true` 时才调度重启；优先使用 `systemd-run --on-active=2` 延迟重启 `twilight`、`twilight-bot`、`twilight-scheduler`，失败时回退为后台 `systemctl restart`。
+- 响应字段：`updated` 表示 commit 是否变化，`restart_requested` 表示请求是否要求重启，`restart_scheduled` 表示是否成功安排重启，`restart_method` 表示使用的调度方式。
+
+### 10.13 测试 Telegram Bot 连通性
+
+`POST /system/admin/bot/test`
+
+- 说明：直接调用 Telegram Bot HTTP API（`getMe` + `sendMessage`），不复用全局运行的 Bot 实例。
+- 认证：管理员（`AuthAdmin`）
+- 请求体（可选）：
+
+```json
+{ "target": "@my_channel" }
+```
+
+不传 `target` 时会发到所有配置的 `Telegram.group_id` / `Telegram.channel_id`。
+
+- 响应示例：
+
+```json
+{
+  "success": true,
+  "message": "测试完成",
+  "data": {
+    "bot": {"id": 12345, "username": "MyBot", "first_name": "My Bot"},
+    "results": [{"target": "@my_channel", "success": true, "error": null}]
+  }
+}
+```
+
+### 10.14 获取全部路由列表
+
+`GET /system/admin/apis`
+
+- 说明：获取后端注册的全部路由列表。
+- 认证：管理员（`AuthAdmin`）
+
+### 10.15 获取 Emby 媒体库列表（System 视图）
+
+`GET /system/admin/emby/libraries`
+
+- 说明：获取 Emby 媒体库列表（与 `/emby/libraries`、`/admin/emby/libraries` 同 handler，按鉴权级别区分）。
+- 认证：管理员（`AuthAdmin`）
+
+## 11. 其它模块
+
+### 11.1 Security 模块
+
+| 方法/路径 | 认证 | 说明 |
+| --------- | ---- | ---- |
+| `GET /security/devices` | `AuthUser` | 当前用户设备列表 |
+| `POST /security/devices/{device_id}/block` | `AuthUser` | 封禁设备 |
+| `POST /security/devices/{device_id}/trust` | `AuthUser` | 信任设备 |
+| `GET /security/login-history` | `AuthUser` | 当前用户登录历史 |
+| `GET /security/login-history/{uid}` | `AuthAdmin` | 指定用户登录历史 |
+| `GET /security/ip/blacklist` | `AuthAdmin` | 查询 IP 黑名单 |
+| `POST /security/ip/blacklist` | `AuthAdmin` | 添加 IP 黑名单 |
+| `DELETE /security/ip/blacklist` | `AuthAdmin` | 删除 IP 黑名单 |
+| `GET /security/suspicious` | `AuthAdmin` | 可疑行为列表 |
+| `GET /security/users/{uid}/devices` | `AuthAdmin` | 指定用户设备列表 |
+| `POST /security/users/{uid}/devices/{device_id}/block` | `AuthAdmin` | 封禁指定用户设备 |
+
+### 11.2 Batch 模块
+
+| 方法/路径 | 认证 | 说明 |
+| --------- | ---- | ---- |
+| `POST /batch/users/disable` | `AuthAdmin` | 批量禁用 |
+| `POST /batch/users/enable` | `AuthAdmin` | 批量启用 |
+| `POST /batch/users/renew` | `AuthAdmin` | 批量续期 |
+| `POST /batch/users/delete` | `AuthAdmin` | 批量删除 |
+| `POST /batch/users/library-self-service` | `AuthAdmin` | 批量设置自助调库 |
+| `POST /batch/users/libraries` | `AuthAdmin` | 批量设置媒体库权限 |
+| `GET /batch/export/users` | `AuthAdmin` | 导出用户 |
+| `GET /batch/export/playback` | `AuthAdmin` | 导出播放记录 |
+| `GET /batch/watch-stats` | `AuthUser` | 当前用户观看统计 |
+| `GET /batch/watch-stats/{uid}` | `AuthAdmin` | 指定用户观看统计 |
+| `GET /batch/watch-stats/global` | `AuthAdmin` | 全局观看统计 |
+| `GET /batch/expiring-users` | `AuthAdmin` | 即将过期用户 |
+| `POST /batch/send-reminders` | `AuthAdmin` | 发送到期提醒 |
+
+### 11.3 Stats 模块
+
+`GET /stats/me`
+
+- 说明：当前用户观看统计（与 `/batch/watch-stats` 同 handler）。
+- 认证：登录用户（`AuthUser`）
+
+`GET /stats/user/{uid}`
+
+- 说明：指定用户观看统计。
+- 认证：登录用户（`AuthUser`），handler 内对跨用户视图做 admin 断言。
+
+### 11.4 Invite 模块
+
+> 邀请关系与邀请码均以字段形式存于单一状态文档（`internal/store`）；功能详见 [邀请树](../features/invite.md)。
+
+| 方法/路径 | 认证 | 说明 |
+| --------- | ---- | ---- |
+| `GET /invite/config` | `AuthPublic` | 邀请功能开关与参数 |
+| `GET /invite/me` | `AuthUser` | 我的邀请信息与下级 |
+| `POST /invite/codes` | `AuthUser` | 生成邀请码 |
+| `POST /invite/renew-codes` | `AuthUser` | 生成续期邀请码 |
+| `GET /invite/codes` | `AuthUser` | 列出我的邀请码 |
+| `DELETE /invite/codes/{code}` | `AuthUser` | 删除邀请码 |
+| `POST /invite/children/{uid}/detach-expired` | `AuthUser` | 脱离已过期下级 |
+| `POST /invite/check` | `AuthPublic` | 校验邀请码（IP 限流 10/60s） |
+| `POST /invite/use` | `AuthUser` | 使用邀请码 |
+
+### 11.5 Signin 模块（装饰性）
+
+> 签到为纯装饰性功能，无排行榜、无消费；详见相关配置 `[SAR].signin_enabled`。
+
+| 方法/路径 | 认证 | 说明 |
+| --------- | ---- | ---- |
+| `GET /signin/config` | `AuthPublic` | 签到功能配置 |
+| `GET /signin/me` | `AuthUser` | 我的签到状态 |
+| `POST /signin` | `AuthUser` | 执行签到 |
+| `GET /signin/history` | `AuthUser` | 签到历史 |
+
+### 11.6 公告（前台）
+
+`GET /announcements`
+
+- 说明：读取面向所有访客的公告列表。公告数据以字段形式存于单一状态文档。
+- 认证：公开（`AuthPublic`）
+- 功能详见 [公告系统](../features/announcements.md)。
+
+### 11.7 Demo 模块
+
+见上文 [4.1 TestWeb 演示接口](#41-testweb-演示接口)。全部为 `AuthPublic`，只返回静态假数据：
+
+- `GET /demo/bootstrap`、`GET /demo/auth/me`、`GET /demo/system/info`
+- `GET /demo/admin/users`、`GET /demo/admin/regcodes`、`GET /demo/media/search`
+- `POST/PUT/DELETE /demo/action/{action_name}`（动作名走安全白名单）
+
+## 12. API Key 模块（概要）
+
+`/api/v1/apikey/*` 接口仅支持 API Key 鉴权（`AuthAPIKey`），用于外部系统接入。完整权限矩阵、调用示例与禁用语义见 [API Key 外部接入](../reference/api-key.md)。端点概览：
+
+| 方法/路径 | 说明 |
+| --------- | ---- |
+| `GET /apikey/info` | API Key 与账号信息 |
+| `GET /apikey/status` | 账号/Key 状态 |
+| `POST /apikey/enable` / `POST /apikey/disable` | 启用 / 禁用账号 |
+| `POST /apikey/renew` | 续期账号 |
+| `POST /apikey/key/refresh` | 刷新 API Key |
+| `GET /apikey/permissions` | 查询权限 |
+| `PUT /apikey/permissions` | 固定拒绝（不允许自助提权） |
+| `POST /apikey/key/disable` / `POST /apikey/key/enable` | 禁用 / 启用 Key 本身 |
+| `GET /apikey/emby/status` | Emby 状态 |
+| `POST /apikey/emby/kick` | 踢出 Emby 会话 |
+| `POST /apikey/use-code` | 使用卡码 |
+
+## 13. 附录
+
+- 管理员接口需要管理员登录态（`AuthAdmin`）。
+- 外部系统推荐使用 API Key 访问 `/api/v1/apikey/*`，见 [API Key 外部接入](../reference/api-key.md)。
+- 路由速查见 [API 路由索引](../reference/api-index.md)；安全机制见 [安全加固](../guides/security.md)；后端架构与配置见 [Go 后端架构与配置](../reference/backend.md)。
+- 如果配置与接口行为不一致，以后端实际返回与运行时 Swagger 为准。

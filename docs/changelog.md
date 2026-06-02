@@ -1,4 +1,6 @@
-# 版本更新历史
+# 版本历史
+
+本文记录 Twilight 各版本的变更与发布文案，按版本从新到旧排列；文末附「发布检查清单」。术语与跨文档引用见 [文档导航](../README.md)。
 
 ## 社交平台发布文案：Go 后端重构版
 
@@ -15,7 +17,7 @@ Twilight 0.0.4 Go 后端重构版已更新。
 
 2. 数据库与迁移全面补齐
    - 生产模板默认推荐 PostgreSQL。
-   - 保留 Go JSON 存储作为兼容选项。
+   - 保留 Go JSON 状态存储作为兼容选项。
    - 新增数据库状态、备份、恢复、迁移预检和迁移执行接口。
    - 支持从旧 SQLite 数据库只读迁移用户、卡码、邀请、公告、求片、播放记录、调度记录、Telegram 花名册等数据。
    - 恢复和迁移前会自动创建保护性备份，并要求预览和二次确认。
@@ -35,7 +37,7 @@ Twilight 0.0.4 Go 后端重构版已更新。
 
 5. 安全加固
    - 凭据型 CORS 不再接受通配符。
-   - Cookie 写请求要求 `X-Twilight-Client: webui`。
+   - Cookie 变更类请求（POST/PUT/DELETE）启用双提交 CSRF 令牌：前端把 `<session_cookie>_csrf` cookie 的值放进 `X-CSRF-Token` 请求头，后端用常量时间比对二者，不一致则拒绝。
    - 管理接口统一收紧鉴权边界。
    - 上传资源、背景样式、备份恢复和 Git 更新都加强了路径、类型和输入校验。
    - 非系统管理员绑定 Emby 管理员账号时会被限制敏感操作，防止越权。
@@ -46,7 +48,7 @@ Twilight 0.0.4 Go 后端重构版已更新。
    - 邀请码支持指名用户使用。
    - 邀请制用户到期后保留登录能力，便于自行续期。
    - Emby 用户上限会计入未使用的邀请码，降低超发风险。
-   - 用户排序、移动端布局、配置页、注册码页、邀请森林和媒体页都有优化。
+   - 用户排序、移动端布局、配置页、注册码页、邀请树和媒体页都有优化。
 
 7. Telegram Bot 增强
    - 账号类命令强制私聊，减少群聊泄露风险。
@@ -92,11 +94,11 @@ Twilight 0.0.4 Go 后端重构版已更新。
 - 前端可视化配置默认推荐 PostgreSQL；SQLite 保留为手动迁移来源，不在前端作为运行后端选项展示。
 - 旧 SQLite 迁移补齐 Telegram 用户名、Emby 用户名、求片 UID/TG/状态/备注/更新时间映射，降低迁移后绑定状态与求片状态不同步的问题。
 
-### 公告与邀请森林
+### 公告与邀请树
 
-- 公告模型补齐 `render_mode`、`pinned`、`expires_at`、`created_by_uid`，Markdown / BBCode 选择会被后端持久化。
+- 公告模型补齐 `render_mode`、`pinned`、`expires_at`、`created_by_uid`，Markdown / BBCode 选择会被后端持久化。公告以字段形式保存在单一状态文档（`internal/store` 的 `Announcements` 映射）中，无需建表或迁移。
 - 公告渲染器清理控制字符转义，继续保持不使用 `dangerouslySetInnerHTML` 的安全渲染策略。
-- 管理员邀请森林星图增加鼠标动态光照、邻近节点与边高亮，保持大树场景下的轻量渲染。
+- 管理员邀请树星图增加鼠标动态光照、邻近节点与边高亮，保持大树场景下的轻量渲染。
 
 ### 用户管理与安全
 
@@ -128,7 +130,7 @@ Twilight 0.0.4 Go 后端重构版已更新。
 - **违规审计接口**：`GET /api/v1/admin/violations`（分页、筛选）、`DELETE /api/v1/admin/violations/:id`、`POST /api/v1/admin/violations/clear`。
 - **前端审计页面**：新增 `/admin/violations` 管理页面，支持按类型筛选、搜索、单条删除和全部清除。
 - **Store 层**：新增 `ViolationLog` 结构体和 `AddViolationLog`、`ListViolationLogs`、`DeleteViolationLog`、`ClearViolationLogs` 方法。
-- **数据库兼容**：新增字段均使用 `omitempty` 或 nil-safe slice，旧备份恢复到新版本无需迁移。
+- **数据库兼容**：新增字段均使用 `omitempty` 或 nil-safe slice，以字段形式存在于单一状态文档中，旧备份恢复到新版本无需迁移。
 
 ### 媒体库权限
 
@@ -171,7 +173,7 @@ Twilight 0.0.4 Go 后端重构版已更新。
 - 当配置为 PostgreSQL 但目标库尚未迁移且没有管理员时，启动阶段会检测旧 JSON 状态文件；若其中已有 active 管理员，则临时回退 JSON，保证原管理员可以登录管理端执行迁移。
 - 当 Go 状态没有 active 管理员但存在旧 Python 版 `db/users.db` 时，启动阶段可通过系统 `sqlite3` 只读导入旧库 active 管理员账号用于引导登录。
 - 数据库管理页会自动检测多份旧 SQLite 数据库；备份会同时复制 `.db`、`.db-wal`、`.db-shm` 文件集。
-- 迁移来源新增“旧 SQLite”，按固定库名映射用户、API Key、注册码、邀请码、公告、Bangumi/TMDB 求片、签到积分、登录设备、播放记录、调度记录和 Telegram 花名册，再写入 JSON 或 PostgreSQL。
+- 迁移来源新增「旧 SQLite」，按固定库名映射用户、API Key、注册码、邀请码、公告、Bangumi/TMDB 求片、签到积分、登录设备、播放记录、调度记录和 Telegram 花名册，再写入 JSON 或 PostgreSQL。
 - PostgreSQL 迁移预检会准备目标数据库和 `twilight_state` 状态表，但不会写入业务快照；目标库不存在且用户有 `CREATEDB` 权限时可自动创建。
 - 恢复和迁移执行前强制预览与二次确认；后端在缺少确认短语时只返回 `dry_run=true` 预览，不执行写入。
 - 恢复备份和执行迁移前都会自动创建保护性备份，并在响应中返回 `pre_operation_backup` 方便审计和回滚。
@@ -182,7 +184,7 @@ Twilight 0.0.4 Go 后端重构版已更新。
 
 - 凭据型 CORS 不再接受 `*`，生产环境必须显式配置可信前端 Origin。
 - CORS Origin 匹配增加规范化处理，允许配置尾斜杠，但拒绝带路径、查询串、片段或非法 scheme 的来源，降低跨域配置误用风险。
-- Cookie 写请求继续要求 `X-Twilight-Client: webui`，降低跨站表单和脚本误用风险。
+- Cookie 变更类请求采用双提交 CSRF 令牌防护：前端把 `<session_cookie>_csrf`（非 HttpOnly）cookie 的值放进 `X-CSRF-Token` 请求头，后端 `verifyCSRFToken`（`internal/api/app.go`）用 `subtle.ConstantTimeCompare` 比对二者，仅对「Cookie 鉴权 + POST/PUT/DELETE」请求强制，缺失或不一致时返回 403。
 - 新增管理员实时日志与服务器状态接口；日志只来自 Go 进程内缓冲，不读取任意系统日志文件，并对 Token、Cookie、密码、API Key、DSN 等敏感内容做脱敏。
 - TestWeb 后端改为固定只读模拟接口，演示媒体搜索不再复用真实搜索链路，演示动作增加白名单校验、限流、`no-store` 和 `X-Twilight-Demo` 标识。
 - 用户背景配置改为后端结构化校验，只允许安全渐变表达式和本系统上传的背景资源，阻断任意外部 URL、复杂 CSS 函数和 `url()` 注入。
@@ -201,12 +203,12 @@ Twilight 0.0.4 Go 后端重构版已更新。
 
 ### 前端体验
 
-- 新增管理员“实时日志”页面，可实时查看后端日志流、Go 运行时、主机负载、内存、数据库和 Redis 状态。
-- 优化移动端主布局、顶部栏、导航抽屉、配置页、注册码页、媒体页和邀请森林视图。
+- 新增管理员「实时日志」页面，可实时查看后端日志流、Go 运行时、主机负载、内存、数据库和 Redis 状态。
+- 优化移动端主布局、顶部栏、导航抽屉、配置页、注册码页、媒体页和邀请树视图。
 - TestWeb 页面改为更明确的只读安全演示模式，并优化移动端标题、表格、日志块和横向导航的溢出表现。
 - 注册码页在移动端切换为卡片列表，桌面端保留高密度表格。
 - 配置页移动端标签改为两列网格，避免内部横向滚动。
-- 邀请森林加入更适合移动端的缩放、平移和统计布局。
+- 邀请树加入更适合移动端的缩放、平移和统计布局。
 
 ### 文档与维护
 

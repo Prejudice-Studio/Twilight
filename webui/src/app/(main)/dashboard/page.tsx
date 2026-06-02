@@ -85,8 +85,6 @@ export default function DashboardPage() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [isUsingCode, setIsUsingCode] = useState(false);
   const [embyUsername, setEmbyUsername] = useState("");
-  const [embyPassword, setEmbyPassword] = useState("");
-  const [showEmbyPassword, setShowEmbyPassword] = useState(false);
   const [registerAvailability, setRegisterAvailability] = useState<RegisterAvailability | null>(null);
   const [showDirectRegisterDialog, setShowDirectRegisterDialog] = useState(false);
   const [isSubmittingDirectRegister, setIsSubmittingDirectRegister] = useState(false);
@@ -211,11 +209,26 @@ export default function DashboardPage() {
     //   - dev 环境额外打 console.warn 方便定位是哪一路接口挂了。
     // 注意：必须按位置展开调用，不能 tasks.map(t => t.run())，否则 TS 会把
     // 各路返回类型联合起来，导致 setState 的入参类型推断丢精度。
+    //
+    // 求片功能关闭时 /media/request/my 会返回 403 (MEDIA_REQUEST_DISABLED)，
+    // 之前没 gating 直接落到 reqSettled.rejected 触发"my_requests 加载失败"
+    // toast。先确保 systemInfo 加载完成再决定要不要发这一路请求。
+    const infoState = useSystemStore.getState();
+    let mediaEnabled = infoState.info?.features?.media_request !== false;
+    if (!infoState.loaded) {
+      const res = await infoState.fetchInfo();
+      if (res.success) {
+        mediaEnabled = useSystemStore.getState().info?.features?.media_request !== false;
+      }
+    }
+    const myRequestsPromise: Promise<{ success: boolean; data?: MediaRequest[] } | null> = mediaEnabled
+      ? api.getMyRequests(signal)
+      : Promise.resolve(null);
     const [tgSettled, embySettled, urlsSettled, reqSettled, signinSettled, registerSettled] = await Promise.allSettled([
       api.getTelegramStatus(),
       api.getEmbyInfo(),
       api.getEmbyUrls(),
-      api.getMyRequests(signal),
+      myRequestsPromise,
       api.getSigninSummary(),
       api.getRegisterAvailability(),
     ]);
@@ -235,7 +248,7 @@ export default function DashboardPage() {
     inspect("telegram_status", tgSettled);
     inspect("emby_info", embySettled);
     inspect("emby_urls", urlsSettled);
-    inspect("my_requests", reqSettled);
+    if (mediaEnabled) inspect("my_requests", reqSettled);
     inspect("signin_summary", signinSettled);
     inspect("register_availability", registerSettled);
 
@@ -251,8 +264,10 @@ export default function DashboardPage() {
     if (urlsSettled.status === "fulfilled" && urlsSettled.value.success && urlsSettled.value.data) {
       applyEmbyUrls(urlsSettled.value.data);
     }
-    if (reqSettled.status === "fulfilled" && reqSettled.value.success && Array.isArray(reqSettled.value.data)) {
+    if (mediaEnabled && reqSettled.status === "fulfilled" && reqSettled.value && reqSettled.value.success && Array.isArray(reqSettled.value.data)) {
       setMyRequests(reqSettled.value.data);
+    } else if (!mediaEnabled) {
+      setMyRequests([]);
     }
     if (registerSettled.status === "fulfilled" && registerSettled.value.success && registerSettled.value.data) {
       setRegisterAvailability(registerSettled.value.data);
@@ -276,32 +291,25 @@ export default function DashboardPage() {
   } = useAsyncResource(loadDashboardData, { immediate: true });
 
   // ============== 线路延迟测试 ==============
+  // 由后端 /system/emby-urls/probe 代发请求测速。前端直连 Emby 会被 CORS /
+  // 私网混合内容 / 浏览器 CORP 拦截，换成后端代理后这些问题一次解决；URL 在
+  // 后端会做白名单校验，不接受任意 URL，避免 SSRF。
   const testSingleLineLatency = useCallback(async (rawUrl: string): Promise<LineLatencyInfo> => {
     const url = rawUrl.trim();
     if (!url) {
       return { status: "error" };
     }
-    const normalizedUrl = /^https?:\/\//i.test(url) ? url : `https://${url.replace(/^\/+/, "")}`;
-    const probeUrl = `${normalizedUrl}${normalizedUrl.includes("?") ? "&" : "?"}tw_ping=${Date.now()}`;
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 8000);
-    const startedAt = performance.now();
     try {
-      await fetch(probeUrl, {
-        method: "GET",
-        mode: "no-cors",
-        cache: "no-store",
-        signal: controller.signal,
-      });
-      return {
-        status: "ok",
-        latencyMs: Math.max(1, Math.round(performance.now() - startedAt)),
-      };
-    } catch (err: any) {
-      if (err?.name === "AbortError") return { status: "timeout" };
+      const res = await api.probeEmbyUrl(url);
+      if (res.success && res.data) {
+        if (res.data.status === "ok") {
+          return { status: "ok", latencyMs: Math.max(1, Math.round(res.data.latency_ms || 0)) };
+        }
+        return { status: res.data.status };
+      }
       return { status: "error" };
-    } finally {
-      window.clearTimeout(timeout);
+    } catch {
+      return { status: "error" };
     }
   }, []);
 
@@ -451,8 +459,6 @@ export default function DashboardPage() {
       if (res.success && res.data?.source && res.data.type_name) {
         setRegCodeInfo(res.data as CodeUsePreview);
         setEmbyUsername("");
-        setEmbyPassword("");
-        setShowEmbyPassword(false);
         setShowConfirm(true);
       } else {
         toast({ title: "卡码无效", description: res.message, variant: "destructive" });
@@ -464,22 +470,10 @@ export default function DashboardPage() {
 
   const handleUseRegcode = async () => {
     if (!regCodeInfo || !regCode.trim()) return;
-    const requiresEmbyRegister = Boolean(regCodeInfo.requires_emby_credentials);
-    const validateEmbyPassword = (pwd: string) => {
-      if (pwd.length < 8) return "Emby 密码至少 8 位";
-      if (!/[a-z]/.test(pwd)) return "Emby 密码至少包含一个小写字母";
-      if (!/[A-Z]/.test(pwd)) return "Emby 密码至少包含一个大写字母";
-      if (!/\d/.test(pwd)) return "Emby 密码至少包含一个数字";
-      return "";
-    };
-    if (requiresEmbyRegister) {
+    const requiresEmbyUsername = Boolean(regCodeInfo.requires_emby_credentials);
+    if (requiresEmbyUsername) {
       if (!embyUsername.trim()) {
         toast({ title: "请输入 Emby 用户名", variant: "destructive" });
-        return;
-      }
-      const pwdErr = validateEmbyPassword(embyPassword);
-      if (pwdErr) {
-        toast({ title: "Emby 密码强度不足", description: pwdErr, variant: "destructive" });
         return;
       }
     }
@@ -487,8 +481,8 @@ export default function DashboardPage() {
     try {
       const res = await api.useCode(
         regCode.trim(),
-        requiresEmbyRegister
-          ? { embyUsername: embyUsername.trim(), embyPassword }
+        requiresEmbyUsername
+          ? { embyUsername: embyUsername.trim() }
           : undefined
       );
       if (res.success) {
@@ -508,7 +502,6 @@ export default function DashboardPage() {
               setRegCode("");
               setRegCodeInfo(null);
               setEmbyUsername("");
-              setEmbyPassword("");
               await fetchUser();
               await loadEmbyUrls();
               return;
@@ -525,7 +518,6 @@ export default function DashboardPage() {
           setRegCodeInfo(null);
           setShowConfirm(false);
           setEmbyUsername("");
-          setEmbyPassword("");
           await fetchUser();
           await loadEmbyUrls();
         }
@@ -1247,26 +1239,9 @@ export default function DashboardPage() {
                   placeholder="请输入 Emby 用户名"
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="embyPassword">Emby 密码</Label>
-                <div className="relative">
-                  <Input
-                    id="embyPassword"
-                    type={showEmbyPassword ? "text" : "password"}
-                    value={embyPassword}
-                    onChange={(e) => setEmbyPassword(e.target.value)}
-                    placeholder="至少8位，含大小写字母和数字"
-                    className="pr-10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowEmbyPassword((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  >
-                    {showEmbyPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
+              <p className="text-xs text-muted-foreground">
+                卡码兑换只授予补建 Emby 资格并预留用户名；密码会在下方 Emby 开通弹窗中设置。
+              </p>
             </div>
           )}
           <div className="flex gap-3 justify-end">

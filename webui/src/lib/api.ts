@@ -348,6 +348,17 @@ class ApiClient {
     }>(`/system/emby-urls`);
   }
 
+  async probeEmbyUrl(url: string) {
+    return this.request<{
+      status: "ok" | "timeout" | "error";
+      latency_ms: number;
+      http_status?: number;
+    }>(`/system/emby-urls/probe`, {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    });
+  }
+
   async getMyLibraries() {
     return this.request<EmbyLibraryAccess>("/users/me/libraries");
   }
@@ -1564,7 +1575,7 @@ class ApiClient {
   }
 
   async createRegcode(data: CreateRegcodeData) {
-    return this.request<{ codes: string[]; count: number; decoy?: boolean }>("/admin/regcodes", {
+    return this.request<{ codes: string[]; count: number; decoy?: boolean; target_username?: string }>("/admin/regcodes", {
       method: "POST",
       body: JSON.stringify(data),
     });
@@ -1618,20 +1629,7 @@ class ApiClient {
 
   async getAdminInviteCodes() {
     return this.request<{
-      codes: Array<{
-        code: string;
-        inviter_uid: number;
-        days: number;
-        use_count_limit: number;
-        use_count: number;
-        expires_at: number | null;
-        active: boolean;
-        created_at: number;
-        used_by_uid: number | null;
-        used_at: number | null;
-        note: string;
-        target_username: string;
-      }>;
+      codes: InviteCodeItem[];
       total: number;
     }>("/admin/invite/codes");
   }
@@ -1787,7 +1785,7 @@ class ApiClient {
     return this.request<{ codes: InviteCodeItem[]; total: number }>("/invite/codes");
   }
 
-  async createInviteCode(payload: { days?: number; expires_at?: number; note?: string }) {
+  async createInviteCode(payload: { days?: number; expires_at?: number; note?: string; target_username?: string }) {
     return this.request<InviteCodeItem>("/invite/codes", {
       method: "POST",
       body: JSON.stringify(payload || {}),

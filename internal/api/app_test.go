@@ -2751,6 +2751,81 @@ func TestConfigTOMLGetReturnsCompletedConfig(t *testing.T) {
 	}
 }
 
+// TestConfigTOMLGetMasksSecretsAndPUTPreserves 验证：
+//   - GET /system/admin/config/toml 不在 content / raw_content 中回传任何
+//     真实密钥（Emby Token / Bot Token / BotInternalSecret / Webhook Secret /
+//     Postgres 密码 / Redis URL）；非空密钥一律被替换为哨兵 secretMaskValue。
+//   - PUT 回传带哨兵的 content 时，写盘前哨兵被还原为内存中的真实值，
+//     不会把密钥清成无效字符串（防止"打开配置页再保存就把密钥清空"）。
+func TestConfigTOMLGetMasksSecretsAndPUTPreserves(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().ConfigFile = filepath.Join(app.cfg().DatabaseDir, "config.toml")
+	const embyToken = "EMBY_TOKEN_TOPSECRET_123456"
+	const botToken = "8585413194:AAFwzhD0_BOT_TOKEN_SECRET"
+	const internalSecret = "tw_internal_secret_value_abc"
+	const webhookSecret = "bangumi_webhook_secret_xyz"
+	raw := "[Global]\ndatabases_dir = " + strconv.Quote(app.cfg().DatabaseDir) + "\nredis_url = \"\"\n\n" +
+		"[Database]\ndriver = " + strconv.Quote(app.cfg().DatabaseDriver) + "\nstate_file = " + strconv.Quote(app.cfg().StateFile) + "\nbackup_dir = " + strconv.Quote(app.cfg().DatabaseBackupDir) + "\npostgres_password = \"PG_PASS_SECRET\"\n\n" +
+		"[Emby]\nemby_url = \"http://127.0.0.1:8096/\"\nemby_token = " + strconv.Quote(embyToken) + "\n\n" +
+		"[Telegram]\nbot_token = " + strconv.Quote(botToken) + "\n\n" +
+		"[Security]\nbot_internal_secret = " + strconv.Quote(internalSecret) + "\n\n" +
+		"[BangumiSync]\nwebhook_secret = " + strconv.Quote(webhookSecret) + "\n\n" +
+		"[API]\nhost = \"127.0.0.1\"\nport = 5010\n\n[Admin]\nusernames = [\"admin\"]\n"
+	if err := os.WriteFile(app.cfg().ConfigFile, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// 让 reload 把磁盘上的密钥读进内存 cfg，PUT 还原哨兵时需要它。
+	if _, err := app.reloadConfig(); err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
+	adminLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
+	adminCookie := findCookie(adminLogin.Result().Cookies(), "twilight_session")
+	adminCSRF := findCookie(adminLogin.Result().Cookies(), "twilight_session_csrf")
+
+	get := doJSONWithHeaders(app, http.MethodGet, "/api/v1/system/admin/config/toml", ``, []*http.Cookie{adminCookie, adminCSRF}, nil)
+	if get.Code != http.StatusOK {
+		t.Fatalf("config toml get status=%d body=%s", get.Code, get.Body.String())
+	}
+	body := get.Body.String()
+	for _, secret := range []string{embyToken, botToken, internalSecret, webhookSecret, "PG_PASS_SECRET"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("plaintext secret leaked in config toml GET: %q\nbody=%s", secret, body)
+		}
+	}
+	if !strings.Contains(body, secretMaskValue) {
+		t.Fatalf("expected masked secret sentinel in GET body, got: %s", body)
+	}
+
+	var env envelope
+	if err := json.Unmarshal(get.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	data := env.Data.(map[string]any)
+	maskedContent := data["content"].(string)
+
+	// PUT 回传遮蔽后的 content（管理员未改密钥），保存后磁盘必须保留真实密钥。
+	putBody, _ := json.Marshal(map[string]any{"content": maskedContent})
+	put := doJSONWithHeaders(app, http.MethodPut, "/api/v1/system/admin/config/toml", string(putBody), []*http.Cookie{adminCookie, adminCSRF}, map[string]string{"X-Twilight-Client": "webui"})
+	if put.Code != http.StatusOK {
+		t.Fatalf("config toml put status=%d body=%s", put.Code, put.Body.String())
+	}
+	saved, err := os.ReadFile(app.cfg().ConfigFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	savedContent := string(saved)
+	if strings.Contains(savedContent, secretMaskValue) {
+		t.Fatalf("sentinel was written to disk instead of real secret:\n%s", savedContent)
+	}
+	for _, secret := range []string{embyToken, botToken, internalSecret, webhookSecret} {
+		if !strings.Contains(savedContent, secret) {
+			t.Fatalf("real secret %q was lost after masked PUT round-trip:\n%s", secret, savedContent)
+		}
+	}
+}
+
 func TestConfigSaveMigratesLegacyTelegramForceSubscribe(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().ConfigFile = filepath.Join(app.cfg().DatabaseDir, "config.toml")
@@ -2864,6 +2939,85 @@ func TestRegCodeRandomAlgorithmsAndFormatFallback(t *testing.T) {
 	}
 }
 
+func TestRegcodeFormatsAreSeparatedWithLegacyFallback(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().RegCodeFormat = "OLD-{type}-{random}"
+	app.cfg().RegisterCodeFormat = ""
+	app.cfg().RenewCodeFormat = ""
+
+	create := func(codeType int) string {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/regcodes", strings.NewReader(fmt.Sprintf(`{"type":%d,"days":7,"count":1,"random_algorithm":"digits-12"}`, codeType)))
+		rr := httptest.NewRecorder()
+		app.handleCreateRegcodes(rr, req, nil)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("create type %d status=%d body=%s", codeType, rr.Code, rr.Body.String())
+		}
+		var env envelope
+		if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+			t.Fatal(err)
+		}
+		return env.Data.(map[string]any)["codes"].([]any)[0].(string)
+	}
+
+	if code := create(1); !strings.HasPrefix(code, "OLD-REG-") {
+		t.Fatalf("register code should fall back to legacy regcode_format, got %q", code)
+	}
+	if code := create(2); !strings.HasPrefix(code, "OLD-REN-") {
+		t.Fatalf("renew code should fall back to legacy regcode_format, got %q", code)
+	}
+
+	app.cfg().RegisterCodeFormat = "REGONLY-{random}"
+	app.cfg().RenewCodeFormat = "RENONLY-{days}-{random}"
+	if code := create(1); !strings.HasPrefix(code, "REGONLY-") {
+		t.Fatalf("register code should use register_code_format, got %q", code)
+	}
+	if code := create(2); !strings.HasPrefix(code, "RENONLY-7-") {
+		t.Fatalf("renew code should use renew_code_format, got %q", code)
+	}
+	if code := create(3); !strings.HasPrefix(code, "OLD-VIP-") {
+		t.Fatalf("whitelist code should keep legacy regcode_format fallback, got %q", code)
+	}
+}
+
+func TestInviteCodeFormatAndDTOUserRecords(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().InviteCodeFormat = "JOIN-{days}-{index}-{random}"
+	now := time.Now()
+	parent, err := app.store().CreateUser(store.User{Username: "invite-format-parent", Role: store.RoleNormal, Active: true, ExpiredAt: now.AddDate(0, 0, 30).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := app.store().CreateUser(store.User{Username: "invite-format-child", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/invite/codes", strings.NewReader(`{"days":7,"target_username":"invite-format-child"}`))
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, principal{User: parent}))
+	rr := httptest.NewRecorder()
+	app.handleCreateInviteCode(rr, req, nil)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create invite status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var env envelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	code := env.Data.(map[string]any)["code"].(string)
+	if !strings.HasPrefix(code, "JOIN-7-1-") {
+		t.Fatalf("invite code should use invite_code_format, got %q", code)
+	}
+	if _, err := app.store().ConsumeInviteCode(code, child.UID); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := app.store().InviteCode(code)
+	dto := app.inviteCodeDTO(stored)
+	if dto["inviter_username"] != parent.Username || dto["used_by_username"] != child.Username || numeric(dto["target_uid"]) != child.UID {
+		t.Fatalf("invite dto should include inviter, used-by and target records: %#v", dto)
+	}
+}
+
 func TestTargetedRegcodesAreCreatedListedAndEnforced(t *testing.T) {
 	app := newTestApp(t)
 	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
@@ -2939,6 +3093,124 @@ func TestTargetedRegcodesAreCreatedListedAndEnforced(t *testing.T) {
 	}
 }
 
+func TestRegisterCodeLimitConsumesRegcodeAtomically(t *testing.T) {
+	app := newTestApp(t)
+	adminResp := doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
+	if adminResp.Code != http.StatusCreated {
+		t.Fatalf("bootstrap register status=%d body=%s", adminResp.Code, adminResp.Body.String())
+	}
+	app.cfg().RegisterCodeLimit = true
+
+	missing := doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"no-code","password":"User123456"}`, nil)
+	if missing.Code != http.StatusBadRequest || !strings.Contains(missing.Body.String(), `"error_code":"CODE_EMPTY"`) {
+		t.Fatalf("register without code should be rejected, status=%d body=%s", missing.Code, missing.Body.String())
+	}
+
+	if err := app.store().UpsertRegCode(store.RegCode{Code: "REGISTER-OK", Type: 1, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	created := doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"with-code","password":"User123456","reg_code":"REGISTER-OK"}`, nil)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("register with code status=%d body=%s", created.Code, created.Body.String())
+	}
+	user, ok := app.store().FindUserByUsername("with-code")
+	if !ok || !user.PendingEmby || user.PendingEmbyDays == nil || *user.PendingEmbyDays != 7 {
+		t.Fatalf("registered user did not receive pending entitlement: %#v days=%#v", user, user.PendingEmbyDays)
+	}
+	reg, ok := app.store().RegCode("REGISTER-OK")
+	if !ok || reg.UseCount != 1 || reg.UsedBy != user.UID || reg.Active {
+		t.Fatalf("register code usage was not persisted: %#v", reg)
+	}
+
+	reuse := doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"reuse-code","password":"User123456","reg_code":"REGISTER-OK"}`, nil)
+	if reuse.Code != http.StatusBadRequest {
+		t.Fatalf("used register code should be rejected, status=%d body=%s", reuse.Code, reuse.Body.String())
+	}
+
+	if err := app.store().UpsertRegCode(store.RegCode{Code: "RENEW-NOT-REGISTER", Type: 2, Days: 30, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	wrongType := doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"wrong-type","password":"User123456","reg_code":"RENEW-NOT-REGISTER"}`, nil)
+	if wrongType.Code != http.StatusBadRequest {
+		t.Fatalf("renew code should not register users, status=%d body=%s", wrongType.Code, wrongType.Body.String())
+	}
+	reg, _ = app.store().RegCode("RENEW-NOT-REGISTER")
+	if reg.UseCount != 0 {
+		t.Fatalf("wrong type code was consumed: %#v", reg)
+	}
+}
+
+func TestRenewEndpointHonorsPermanentRegcode(t *testing.T) {
+	app := newTestApp(t)
+	user, err := app.store().CreateUser(store.User{Username: "renew-permanent", Role: store.RoleNormal, Active: true, ExpiredAt: time.Now().AddDate(0, 0, 1).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store().UpsertRegCode(store.RegCode{Code: "PERMANENT-RENEW", Type: 2, Days: -1, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/renew", strings.NewReader(`{"reg_code":"PERMANENT-RENEW"}`))
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, principal{User: user}))
+	rr := httptest.NewRecorder()
+	app.handleRenew(rr, req, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("permanent renew status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	updated, _ := app.store().User(user.UID)
+	if updated.ExpiredAt != permanentExpiryUnix {
+		t.Fatalf("permanent renew should set permanent expiry, got %d", updated.ExpiredAt)
+	}
+}
+
+// TestMediaRequestGlobalLimitBlocksNonAdmins 验证 max_concurrent_requests_global
+// 上限：达到后普通用户的新求片返回 MEDIA_REQUEST_GLOBAL_LIMIT，admin 仍可继续。
+func TestMediaRequestGlobalLimitBlocksNonAdmins(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().MaxConcurrentRequestsGlobal = 2
+	app.cfg().MaxConcurrentRequestsPerUser = -1
+	app.cfg().EmbyToken = "test-token"
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"Items":[],"TotalRecordCount":0}`))
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+
+	adminCookies := registerAndLogin(t, app, "admin", "Admin123456")
+	if admin, ok := app.store().FindUserByUsername("admin"); ok {
+		_, _ = app.store().UpdateUser(admin.UID, func(u *store.User) error { u.TelegramID = 1; return nil })
+	}
+	userCookies := registerAndLogin(t, app, "user-one", "User123456")
+	user, _ := app.store().FindUserByUsername("user-one")
+	_, _ = app.store().UpdateUser(user.UID, func(u *store.User) error { u.TelegramID = 2; return nil })
+	userCookies2 := registerAndLogin(t, app, "user-two", "User123456")
+	user2, _ := app.store().FindUserByUsername("user-two")
+	_, _ = app.store().UpdateUser(user2.UID, func(u *store.User) error { u.TelegramID = 3; return nil })
+
+	makeReq := func(cookies []*http.Cookie, mediaID int) *httptest.ResponseRecorder {
+		return doJSONWithHeaders(app, http.MethodPost, "/api/v1/media/request",
+			fmt.Sprintf(`{"source":"tmdb","media_id":%d,"title":"M%d","media_type":"movie"}`, mediaID, mediaID),
+			cookies, map[string]string{"X-Twilight-Client": "webui"})
+	}
+
+	if r := makeReq(userCookies, 100); r.Code != http.StatusCreated {
+		t.Fatalf("first user request should succeed, status=%d body=%s", r.Code, r.Body.String())
+	}
+	if r := makeReq(userCookies2, 101); r.Code != http.StatusCreated {
+		t.Fatalf("second user request should succeed, status=%d body=%s", r.Code, r.Body.String())
+	}
+	// 全局 2 已满，第三个非 admin 求片应该被挡掉
+	blocked := makeReq(userCookies, 102)
+	if blocked.Code != http.StatusTooManyRequests || !strings.Contains(blocked.Body.String(), `"error_code":"MEDIA_REQUEST_GLOBAL_LIMIT"`) {
+		t.Fatalf("third request should hit global limit, status=%d body=%s", blocked.Code, blocked.Body.String())
+	}
+	// admin 不受全局上限影响
+	adminOk := makeReq(adminCookies, 103)
+	if adminOk.Code != http.StatusCreated {
+		t.Fatalf("admin request should bypass global limit, status=%d body=%s", adminOk.Code, adminOk.Body.String())
+	}
+}
+
 func TestInviteParentCanDetachExpiredChildAndKeepWebAccountActive(t *testing.T) {
 	app := newTestApp(t)
 	parent, err := app.store().CreateUser(store.User{Username: "parent", Role: store.RoleNormal, Active: true})
@@ -2971,7 +3243,7 @@ func TestInviteParentCanDetachExpiredChildAndKeepWebAccountActive(t *testing.T) 
 	}
 }
 
-func TestRegcodeDTOAndUsersHideLegacyUsedBy(t *testing.T) {
+func TestRegcodeDTOAndUsersExposeLegacyUsedBy(t *testing.T) {
 	app := newTestApp(t)
 	user, err := app.store().CreateUser(store.User{Username: "legacy-user", Role: store.RoleNormal, Active: true})
 	if err != nil {
@@ -2980,8 +3252,8 @@ func TestRegcodeDTOAndUsersHideLegacyUsedBy(t *testing.T) {
 	reg := store.RegCode{Code: "LEGACY-USED", Type: 2, Days: 30, ValidityTime: -1, UseCountLimit: 5, UseCount: 1, UsedBy: user.UID, Active: true}
 	dto := regcodeDTO(reg)
 	uids, _ := dto["used_by_uids"].([]int64)
-	if len(uids) != 0 || asString(dto["used_by"]) != "" {
-		t.Fatalf("legacy used_by should be hidden in dto: %#v", dto)
+	if len(uids) != 1 || uids[0] != user.UID || asString(dto["used_by"]) != strconv.FormatInt(user.UID, 10) {
+		t.Fatalf("legacy used_by should be exposed in dto: %#v", dto)
 	}
 	if err := app.store().UpsertRegCode(reg); err != nil {
 		t.Fatal(err)
@@ -2989,8 +3261,13 @@ func TestRegcodeDTOAndUsersHideLegacyUsedBy(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/regcodes/LEGACY-USED/users", nil)
 	rr := httptest.NewRecorder()
 	app.handleRegcodeUsers(rr, req, Params{"code": "LEGACY-USED"})
-	if rr.Code != http.StatusOK || strings.Contains(rr.Body.String(), `"username":"legacy-user"`) {
-		t.Fatalf("legacy used_by user should not be listed, status=%d body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"username":"legacy-user"`) {
+		t.Fatalf("legacy used_by user should be listed, status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	appDTO := app.regcodeDTO(reg)
+	usernames, _ := appDTO["used_by_usernames"].([]string)
+	if len(usernames) != 1 || usernames[0] != user.Username {
+		t.Fatalf("used_by_usernames should include legacy user: %#v", appDTO)
 	}
 	reg.UsedByUIDs = []int64{user.UID}
 	dto = regcodeDTO(reg)

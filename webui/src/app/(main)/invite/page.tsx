@@ -35,7 +35,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { api, type InviteCodeItem, type InviteConfig, type InviteMyStatus, type InviteTreeNode } from "@/lib/api";
 
-function formatExpires(unix: number): string {
+function formatExpires(unix?: number | null): string {
   if (!unix || unix <= 0) return "永不过期";
   return new Date(unix * 1000).toLocaleString("zh-CN");
 }
@@ -94,6 +94,7 @@ export default function InviteCenterPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [days, setDays] = useState("30");
   const [note, setNote] = useState("");
+  const [targetUsername, setTargetUsername] = useState("");
   const [renewOpen, setRenewOpen] = useState(false);
   const [renewTarget, setRenewTarget] = useState<InviteMyStatus["children"][number] | null>(null);
   const [renewDays, setRenewDays] = useState("30");
@@ -153,11 +154,16 @@ export default function InviteCenterPage() {
         toast({ title: "天数超出上限", description: `最多可生成 ${maxCodeDays} 天`, variant: "destructive" });
         return;
       }
-      const res = await api.createInviteCode({ days: parsedDays, note: note.trim() || undefined });
+      const res = await api.createInviteCode({
+        days: parsedDays,
+        note: note.trim() || undefined,
+        target_username: targetUsername.trim() || undefined,
+      });
       if (res.success) {
         toast({ title: "邀请码已生成", variant: "success" });
         setCreateOpen(false);
         setNote("");
+        setTargetUsername("");
         await reload();
       } else {
         toast({ title: "生成失败", description: res.message, variant: "destructive" });
@@ -308,6 +314,7 @@ export default function InviteCenterPage() {
             onClick={() => {
               const defaultDays = config?.default_days && config.default_days > 0 ? config.default_days : maxCodeDays || 30;
               setDays(String(Math.min(defaultDays, maxCodeDays || defaultDays)));
+              setTargetUsername("");
               setCreateOpen(true);
             }}
             disabled={!status?.can_invite}
@@ -519,6 +526,8 @@ export default function InviteCenterPage() {
                       </div>
                       <p className="mt-1 text-[11px] text-muted-foreground">
                         {new Date(code.created_at * 1000).toLocaleString("zh-CN")} · 截止 {formatExpires(code.expires_at)}
+                        {code.target_username ? ` · 指定 ${code.target_username}` : ""}
+                        {code.used_by_username ? ` · 使用者 ${code.used_by_username}` : code.used_by_uid ? ` · 使用者 UID ${code.used_by_uid}` : ""}
                         {code.note ? ` · ${code.note}` : ""}
                       </p>
                     </div>
@@ -544,7 +553,10 @@ export default function InviteCenterPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      <Dialog open={createOpen} onOpenChange={(open) => {
+        setCreateOpen(open);
+        if (!open) setTargetUsername("");
+      }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>生成邀请码</DialogTitle>
@@ -562,6 +574,18 @@ export default function InviteCenterPage() {
               <Label>备注（可选）</Label>
               <Textarea rows={2} maxLength={255} value={note} onChange={(event) => setNote(event.target.value)} placeholder="送给谁、什么场景使用..." />
             </div>
+            <div className="space-y-1.5">
+              <Label>指定使用用户名（可选）</Label>
+              <Input value={targetUsername} onChange={(event) => setTargetUsername(event.target.value)} placeholder="留空则任何符合条件的用户都可使用" />
+              <p className="text-[10px] text-muted-foreground">
+                填写后仅该 Web 用户名可使用此邀请码，比较时不区分大小写。适合把邀请码提前分配给指定成员。
+              </p>
+            </div>
+            {config?.code_format && (
+              <div className="rounded-lg border bg-muted/30 px-3 py-2 text-[10px] text-muted-foreground">
+                当前邀请码格式：<code>{config.code_format}</code>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>

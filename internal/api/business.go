@@ -157,6 +157,25 @@ func addDaysToExpiry(current int64, days int, now time.Time) int64 {
 	return base.AddDate(0, 0, days).Unix()
 }
 
+// normalizeRegCodeDays 规范化卡码天数的历史哨兵语义，必须与 addDaysToExpiry /
+// expiryFromDays 的口径一致：
+//   - days == 0（或字段未设）：历史默认值，按 30 天处理；
+//   - days < 0：永久（-1 是唯一的"永久"哨兵）；
+//   - days > 0：原值。
+//
+// 注意：不要把 0 归一化成 -1。旧实现 `days<=0 -> -1` 会让任何 Days=0 的存量卡码
+// （以及管理员把天数留空/填 0 新建的卡码）被当成"永久"权益发放，导致静默的
+// 权益越权与计费边界失效。管理员要发永久卡码必须显式填 -1。
+func normalizeRegCodeDays(days int) int {
+	if days == 0 {
+		return 30
+	}
+	if days < 0 {
+		return -1
+	}
+	return days
+}
+
 // userExpiredOnly 判定"Active=false 是否纯由 ExpiredAt 触发"。check_expired
 // 调度对非邀请用户的处理是"同时 Active=false + 落 ExpiredAt 在过去"，与
 // admin 手动禁用（Active=false 但 ExpiredAt 仍在未来 / 永久）形成两类截然
@@ -419,7 +438,7 @@ func regcodeDTO(code store.RegCode) map[string]any {
 		"validity_time":        code.ValidityTime,
 		"use_count":            code.UseCount,
 		"use_count_limit":      code.UseCountLimit,
-		"days":                 code.Days,
+		"days":                 normalizeRegCodeDays(code.Days),
 		"active":               code.Active,
 		"status":               regcodeStatus(code),
 		"note":                 code.Note,
@@ -431,8 +450,29 @@ func regcodeDTO(code store.RegCode) map[string]any {
 	}
 }
 
+func (a *App) regcodeDTO(code store.RegCode) map[string]any {
+	item := regcodeDTO(code)
+	usedByUIDs := regcodeUsedByUIDs(code)
+	usedByUsernames := make([]string, 0, len(usedByUIDs))
+	for _, uid := range usedByUIDs {
+		if user, ok := a.store().User(uid); ok {
+			usedByUsernames = append(usedByUsernames, user.Username)
+		}
+	}
+	item["used_by_usernames"] = usedByUsernames
+	if strings.TrimSpace(code.TargetUsername) != "" {
+		if user, ok := a.store().FindUserByUsername(code.TargetUsername); ok {
+			item["target_uid"] = user.UID
+		}
+	}
+	return item
+}
+
 func regcodeUsedByUIDs(code store.RegCode) []int64 {
-	out := make([]int64, 0, len(code.UsedByUIDs))
+	out := make([]int64, 0, len(code.UsedByUIDs)+1)
+	if code.UsedBy != 0 {
+		out = appendUniqueRegcodeInt64(out, code.UsedBy)
+	}
 	for _, uid := range code.UsedByUIDs {
 		if uid != 0 {
 			out = appendUniqueRegcodeInt64(out, uid)
@@ -456,6 +496,48 @@ func joinInt64(values []int64) string {
 		parts = append(parts, strconv.FormatInt(value, 10))
 	}
 	return strings.Join(parts, ",")
+}
+
+func (a *App) regCodeFormatForType(codeType int, explicit string) string {
+	if strings.TrimSpace(explicit) != "" {
+		return strings.TrimSpace(explicit)
+	}
+	switch codeType {
+	case 1:
+		if strings.TrimSpace(a.cfg().RegisterCodeFormat) != "" {
+			return strings.TrimSpace(a.cfg().RegisterCodeFormat)
+		}
+	case 2:
+		if strings.TrimSpace(a.cfg().RenewCodeFormat) != "" {
+			return strings.TrimSpace(a.cfg().RenewCodeFormat)
+		}
+	}
+	return firstNonEmpty(a.cfg().RegCodeFormat, "TW-{type}-{random}")
+}
+
+func (a *App) inviteCodeFormat(explicit string) string {
+	return firstNonEmpty(explicit, a.cfg().InviteCodeFormat, "INV{random}")
+}
+
+func generateInviteCode(format string, days, index int) string {
+	format = strings.TrimSpace(format)
+	if format == "" {
+		format = "INV{random}"
+	}
+	if !strings.Contains(format, "{random}") {
+		format += "-{random}"
+	}
+	replacements := map[string]string{
+		"{type}":   "INV",
+		"{random}": strings.ToUpper(randomCode(10)),
+		"{days}":   strconv.Itoa(days),
+		"{index}":  strconv.Itoa(index),
+	}
+	code := format
+	for placeholder, value := range replacements {
+		code = strings.ReplaceAll(code, placeholder, value)
+	}
+	return code
 }
 
 func generateRegCode(format string, codeType int, algorithm string, days int, index int, validity int64, useLimit int) string {
@@ -595,7 +677,7 @@ func (a *App) previewCode(ctx context.Context, code string, user store.User) (ma
 		if regcodeStatus(reg) != "available" {
 			return nil, "", false
 		}
-		return codePreview("regcode", reg.Type, reg.Days, ""), "regcode", true
+		return codePreview("regcode", reg.Type, normalizeRegCodeDays(reg.Days), ""), "regcode", true
 	}
 	if invite, ok := a.store().InviteCode(code); ok {
 		if !invite.Active || (invite.ExpiredAt > 0 && invite.ExpiredAt <= time.Now().Unix()) || (invite.UseCountLimit != -1 && invite.UseCount >= invite.UseCountLimit) {
@@ -776,8 +858,8 @@ func (a *App) collectCascadeUIDs(root int64, depth int) []int64 {
 	return result
 }
 
-func inviteCodeDTO(code store.InviteCode) map[string]any {
-	return map[string]any{
+func (a *App) inviteCodeDTO(code store.InviteCode) map[string]any {
+	item := map[string]any{
 		"code":            code.Code,
 		"inviter_uid":     code.InviterUID,
 		"days":            code.Days,
@@ -791,6 +873,20 @@ func inviteCodeDTO(code store.InviteCode) map[string]any {
 		"note":            code.Note,
 		"target_username": code.TargetUsername,
 	}
+	if inviter, ok := a.store().User(code.InviterUID); ok {
+		item["inviter_username"] = inviter.Username
+	}
+	if code.UsedByUID != 0 {
+		if user, ok := a.store().User(code.UsedByUID); ok {
+			item["used_by_username"] = user.Username
+		}
+	}
+	if strings.TrimSpace(code.TargetUsername) != "" {
+		if user, ok := a.store().FindUserByUsername(code.TargetUsername); ok {
+			item["target_uid"] = user.UID
+		}
+	}
+	return item
 }
 
 // userEntitlementOK 是"消费 entitlement"接口（生成邀请码 / 续期码 / API Key /
