@@ -182,6 +182,7 @@ export default function DashboardPage() {
         if (res.data.status === "success") {
           await fetchUser();
           await loadEmbyUrls();
+          clearEmbyRegisterRequest();
         }
       } else if (!res.success) {
         clearEmbyRegisterRequest();
@@ -195,6 +196,7 @@ export default function DashboardPage() {
     if (!embyRegisterStored) return;
     void refreshStoredEmbyRegisterStatus();
     const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
       void refreshStoredEmbyRegisterStatus();
     }, 5000);
     return () => window.clearInterval(timer);

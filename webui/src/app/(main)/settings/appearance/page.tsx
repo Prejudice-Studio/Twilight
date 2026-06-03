@@ -27,6 +27,7 @@ import { PageError, PageLoading } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
 import { api } from "@/lib/api";
 import { emitRegionRefresh, RegionRefreshKeys } from "@/lib/region-refresh";
+import { normalizeBackgroundImageValue } from "@/lib/safe-url";
 
 const container = {
   hidden: { opacity: 0 },
@@ -86,21 +87,6 @@ const gradientPresets = [
   },
 ];
 
-function normalizeBgImage(raw: string): string {
-  const value = (raw || "").trim();
-  if (!value) return "";
-  if (/^(linear-gradient|radial-gradient|conic-gradient|repeating-linear-gradient|repeating-radial-gradient)\s*\(/i.test(value)) {
-    return value;
-  }
-  const match = value.match(/^url\(\s*(['"]?)(.*?)\1\s*\)$/i);
-  const url = (match ? match[2] : value).trim();
-  if (!url || /[\u0000-\u001F\u007F]/.test(url) || url.startsWith("//")) return "";
-  if (/^[a-z][a-z0-9+.-]*:/i.test(url) && !/^https?:\/\//i.test(url) && !url.startsWith("blob:") && !/^data:image\/(png|jpe?g|gif|webp|avif|bmp)(;|,)/i.test(url)) {
-    return "";
-  }
-  return `url("${url.replace(/"/g, '\\"')}")`;
-}
-
 export default function AppearanceSettingsPage() {
   const { user } = useAuthStore();
   const { toast } = useToast();
@@ -133,7 +119,7 @@ export default function AppearanceSettingsPage() {
   const [activeTab, setActiveTab] = useState<"background" | "avatar">("background");
 
   const updatePreview = useCallback((css: string, img: string, type: "light" | "dark") => {
-    const combined = normalizeBgImage(img) || normalizeBgImage(css);
+    const combined = normalizeBackgroundImageValue(img) || normalizeBackgroundImageValue(css);
 
     if (type === "light") {
       setLightPreview(combined);

@@ -86,6 +86,19 @@ function requestMethod(options: RequestInit, fallback = "GET"): string {
   return (options.method || fallback).toString().toUpperCase();
 }
 
+function headersInitToRecord(init?: HeadersInit): Record<string, string> {
+  if (!init) return {};
+  const out: Record<string, string> = {};
+  new Headers(init).forEach((value, key) => {
+    out[key] = value;
+  });
+  return out;
+}
+
+function hasHeader(headers: Record<string, string>, name: string): boolean {
+  return Object.keys(headers).some((key) => key.toLowerCase() === name.toLowerCase());
+}
+
 /** 默认 fetch 超时（毫秒）。慢响应或 socket 挂起时让 Promise 不至于永挂。 */
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 /** 表单 / multipart 上传放宽到 2 分钟，覆盖较大背景图 / 头像。 */
@@ -256,15 +269,19 @@ export async function apiRequest<T>(
   options: RequestInit = {},
   extra: ApiRequestExtraOptions = {},
 ): Promise<ApiResponse<T>> {
+  const method = requestMethod(options);
   const headers: Record<string, string> = {
     "Accept": "application/json; charset=utf-8",
-    "Content-Type": "application/json; charset=utf-8",
-    "X-Twilight-Client": "webui",
-    ...((options.headers as Record<string, string>) || {}),
+    ...headersInitToRecord(options.headers),
   };
+  if (options.body !== undefined && !hasHeader(headers, "content-type")) {
+    headers["Content-Type"] = "application/json; charset=utf-8";
+  }
+  if ((options.body !== undefined || (method !== "GET" && method !== "HEAD")) && !hasHeader(headers, "x-twilight-client")) {
+    headers["X-Twilight-Client"] = "webui";
+  }
 
   const url = `${API_BASE}/api/v1${endpoint}`;
-  const method = requestMethod(options);
 
   const timeoutMs = extra.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const guard = withTimeoutSignal(options.signal ?? null, timeoutMs);
@@ -274,6 +291,7 @@ export async function apiRequest<T>(
     response = await fetch(url, {
       ...options,
       headers,
+      cache: options.cache ?? "no-store",
       credentials: "include",
       signal: guard.signal ?? options.signal ?? null,
     });
@@ -337,6 +355,7 @@ export async function apiRequestForm<T>(
       method,
       headers,
       body: formData,
+      cache: "no-store",
       credentials: "include",
       signal: guard.signal ?? null,
     });

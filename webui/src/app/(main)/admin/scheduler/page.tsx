@@ -643,6 +643,7 @@ export default function AdminSchedulerPage() {
     }
     if (pollTimerRef.current) return;
     pollTimerRef.current = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
       void refresh();
     }, 2000);
     return () => {

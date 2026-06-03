@@ -58,6 +58,7 @@ pnpm build
 ## 后端约定
 
 - 新路由统一在 `internal/api/routes.go` 注册，使用 `a.add(method, pattern, auth, handler)` 声明方法、路径、鉴权级别和 handler。
+- 不要新增或恢复 `TestWeb`、`demo`、mock、调试绕过或临时公开测试路由。保留的连通性测试接口（如 Emby/Telegram test）必须是正式功能，走明确鉴权，使用统一响应并脱敏错误。
 - 鉴权级别为 `AuthPublic`、`AuthUser`、`AuthAdmin`、`AuthAPIKey`。管理员破坏性操作必须明确权限边界，优先支持 `dry_run`、确认短语和结构化结果。
 - Handler 负责参数校验、鉴权上下文读取、调用业务逻辑和整理响应；可复用业务逻辑放在对应领域文件，外部服务调用走独立 client/helper，不要散落在 handler 中。
 - 后端新增能力优先按业务域组织代码：路由只做入口，handler 只做 HTTP 适配，核心业务放在领域 service/helper，外部系统访问放在 client，持久化只通过 `internal/store` 暴露的方法完成。
@@ -69,27 +70,38 @@ pnpm build
 - 优化前先确认瓶颈。缓存、并发、批处理、后台任务和 Redis 使用必须有清晰失效策略、限流/超时和测试覆盖；不要为小路径引入难以验证的全局缓存或共享可变状态。
 - JSON 响应必须使用统一 envelope：`success`、`code`、`message`、`data`、`timestamp`，失败响应应带稳定 `error_code`，与前端 `ApiError` / `errcode.ts` 保持兼容。
 - Cookie 鉴权的变更类请求不再做 CSRF 令牌校验。鉴权依赖 HttpOnly session cookie、Bearer token 或 API Key；`X-Twilight-Client: webui` 只是允许的 CORS 头，不是鉴权手段。
+- Telegram 直接登录当前不可用。Telegram 只用于绑定、通知、管理员工具和 Bot 交互，不要重新引入 Telegram 一键登录或信任 Telegram ID 的免密登录。
+- Telegram Bot 账号类操作优先私聊；群聊只保留必要管理员工具。Bot/面板输出不得展示密码、Token、Emby ID、服务器线路、API Key 等敏感信息，按钮/面板操作必须重新校验管理员身份、目标权限和面板过期时间。
+- Emby/Jellyfin 外部副作用必须先完成本地权限、容量、过期状态和绑定冲突校验；非系统管理员不得绑定或操作 Emby 管理员账号。Emby 线路下发统一走 `/api/v1/system/emby-urls` 并按用户状态/权限过滤。
 - 运行时可热重载的 `cfg/store/sessions/limiter/redis` 通过 `runtimeState` 原子快照管理。读配置或 store 时优先使用 `a.cfg()`、`a.store()` 等访问器，不要缓存会跨 reload 失效的句柄。
 - 配置入口固定为工作目录下的 `config.toml`；`--config` 只接受同一个工作目录的 `config.toml`。私密覆盖使用同目录 `config.local.toml` 或 `TWILIGHT_CONFIG_LOCAL_FILE`，环境变量以 `TWILIGHT_*` 覆盖字段。
 - 存储模型是单一 `store.State` 文档。新增业务实体通常是在 `internal/store/store.go` 的 `State` 上加字段，并在 `ensure()` 中补默认值；不要为邀请、公告、注册码等业务重新创建独立 SQLite 文件或独立表。
 - PostgreSQL 后端只把主状态存为 `twilight_state` 的单行 `jsonb`，并有独立 `twilight_sessions` 与 `twilight_runtime_logs`。迁移、备份、恢复必须保持快照完整性。
+- PostgreSQL 除现有 `twilight_sessions` 与 `twilight_runtime_logs` 外，不为业务实体新增独立表，除非先更新架构文档并说明快照一致性、迁移和备份恢复方案。
 - JSON 后端是单进程独占，依赖 state 文件锁；多进程或多实例部署使用 PostgreSQL。
+- 旧 SQLite 只允许用于显式只读迁移/引导兼容；不要在启动流程中新增隐式迁移、自动建表或旧 Python 后端兼容入口。
 - 写入状态时复用 store 层已有原子写、备份、回滚和锁语义，不要绕过 `Store` 直接改 `db/twilight_go_state.json`。
 - 上传、备份、恢复、迁移、Git 更新、systemd 操作等高风险路径必须做服务端边界校验。路径必须约束在允许目录内，拒绝绝对路径、`..`、符号链接和任意外部 URL。
 - 执行外部命令必须使用 `exec.Command` 参数数组，禁止拼接 shell 字符串。Git remote URL、日志和响应中不得泄露凭据。
+- 新增缓存必须说明作用域（App 实例/进程/Redis）、TTL、容量上限、热重载失效条件和降级行为；避免包级可变缓存导致测试串扰或 reload 后读旧配置。
+- 高频外部调用（Emby/TMDB/Bangumi/Telegram）必须设置超时、限流/退避和必要短缓存；不要为低频路径引入难以验证的全局缓存或后台 goroutine。
 
 ## 前端约定
 
 - 所有后端调用集中维护在 `webui/src/lib/api.ts`，底层请求统一走 `webui/src/lib/api-request.ts`。不要在页面中散落裸 `fetch`，除非有明确理由并保持相同的 credentials、超时和错误处理语义。
 - `apiRequest` 会自动使用 `${NEXT_PUBLIC_API_URL}/api/v1`；未设置 `NEXT_PUBLIC_API_URL` 时，`next.config.mjs` 将 `/api/*` rewrite 到 `BACKEND_URL`，默认 `http://localhost:5000`。
 - 新增或调整接口时，同步检查 `api.ts`、`api-types.ts`、后端路由、请求方法、鉴权级别、错误码、确认短语和移动端展示。
+- 新增前端 API 错误码时同步 `webui/src/lib/errcode.ts` 和友好文案；移除后端错误码或路由时同步删除前端类型、客户端方法、页面引用和文档索引。
 - 页面分组：`webui/src/app/(auth)` 放登录、注册、找回密码；`webui/src/app/(main)` 放用户面板与管理页。新增 UI 优先复用 `webui/src/components`、`hooks` 和 `lib` 中已有模式。
 - 保持现有中文文案、暗色/亮色主题、Tailwind token 和组件风格。前端改动必须兼顾桌面与移动端。
 - 资产 URL、背景 CSS、头像、上传结果等必须沿用 `api.ts` 中的安全归一化逻辑，不允许保存任意外部 `url()` 或不受控协议。
+- 前端资产、背景、头像和外链跳转必须复用 `safe-url` / API 客户端归一化逻辑，不要把后端返回值直接拼进 CSS `url()`、`href` 或图片地址。
+- 轮询、SSE、后台刷新和批量操作必须有停止条件、可见性判断或退避策略；终态任务要及时清理本地轮询状态，避免隐藏标签页持续请求。
 
 ## 安全与敏感信息
 
 - 当前工作区的 `config.toml` 可能包含真实 Token、密码、API Key、Telegram ID、Emby 凭据等。不要在回答、日志、测试输出、文档或提交中复制这些值。
+- 除非任务明确需要配置分析，不要读取或引用本地 `config.toml`。需要配置示例时使用 `.env.example`、`config.production.toml` 或脱敏占位符。
 - 不要读取或展示非必要的运行数据：`db/`、`uploads/`、`memory/`、`tmp/`、`.venv/`、`bin/`、`twilight.exe` 等通常是本地运行产物或敏感数据来源。
 - 示例配置使用 `.env.example`、`config.production.toml` 或占位符；新增文档中的密钥必须写成 `<PLACEHOLDER>` 或脱敏形式。
 - 除一次性创建/重置密码、API Key 的既有响应外，不返回密钥明文。日志必须脱敏 `token`、`secret`、`password`、`api_key`、`Authorization`、`Cookie`、DSN 等字段。
@@ -111,5 +123,5 @@ pnpm build
 
 - 后端改动提交前检查：`gofmt -w ./cmd ./internal`、`go test ./...`、`go vet ./...`。
 - 前端改动提交前检查：`cd webui && pnpm lint`，涉及构建、路由、Next 配置或 API 契约时运行 `pnpm build`。
-- 涉及鉴权、上传、路径、配置保存、数据库迁移、Git 更新、实时日志、限流或会话的改动必须补充聚焦测试或明确说明无法测试的边界。
+- 涉及鉴权、Telegram、Emby、API Key、上传、路径、配置保存、数据库迁移、Git 更新、systemd、实时日志、限流、会话、缓存或并发的改动必须补充聚焦测试或明确说明无法测试的边界。
 - 不要修改用户未要求的本地配置、数据库、上传文件、生成产物或部署状态。不要执行破坏性命令，不要重置工作区，不要替用户提交或推送，除非用户明确要求。

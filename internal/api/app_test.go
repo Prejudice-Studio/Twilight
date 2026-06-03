@@ -476,6 +476,36 @@ func TestFrontendRouteCompatibilityDoesNot404(t *testing.T) {
 	}
 }
 
+func TestStatusResponseWriterForwardsFlush(t *testing.T) {
+	rr := httptest.NewRecorder()
+	w := &statusResponseWriter{ResponseWriter: rr}
+	if _, ok := any(w).(http.Flusher); !ok {
+		t.Fatal("statusResponseWriter must preserve http.Flusher for SSE handlers")
+	}
+	w.Flush()
+	if w.status != http.StatusOK {
+		t.Fatalf("flush should mark status OK, got %d", w.status)
+	}
+}
+
+func TestPostJSONWithTimeoutReturnsMarshalError(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	err := postJSONWithTimeout(context.Background(), srv.URL, nil, map[string]any{"bad": func() {}}, nil, time.Second)
+	if err == nil {
+		t.Fatal("expected marshal error")
+	}
+	if called {
+		t.Fatal("request should not be sent after marshal error")
+	}
+}
+
 func TestUploadRejectsNonImage(t *testing.T) {
 	app := newTestApp(t)
 	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
@@ -532,6 +562,16 @@ func TestAdminServerIconUploadUpdatesConfig(t *testing.T) {
 	}
 	if _, _, ok := app.configuredServerIconPath(); !ok {
 		t.Fatalf("uploaded server icon is not readable from configured path: %q", app.cfg().ServerIcon)
+	}
+	icon := doJSON(app, http.MethodGet, "/api/v1/system/server-icon", ``, nil)
+	if icon.Code != http.StatusOK {
+		t.Fatalf("server icon read status = %d body=%s", icon.Code, icon.Body.String())
+	}
+	if icon.Header().Get("Content-Type") != "image/png" || icon.Header().Get("Cache-Control") != "public, max-age=300" {
+		t.Fatalf("server icon headers mismatch: content-type=%q cache=%q", icon.Header().Get("Content-Type"), icon.Header().Get("Cache-Control"))
+	}
+	if !bytes.HasPrefix(icon.Body.Bytes(), []byte{0x89, 'P', 'N', 'G'}) {
+		t.Fatalf("server icon body does not start with PNG signature: %x", icon.Body.Bytes())
 	}
 }
 

@@ -164,6 +164,7 @@ export default function AdminRuntimeLogsPage() {
 
   useEffect(() => {
     const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
       void loadStatus().catch(() => undefined);
     }, 15000);
     return () => window.clearInterval(timer);
@@ -218,6 +219,8 @@ export default function AdminRuntimeLogsPage() {
   useEffect(() => {
     if (paused || connected) return;
     const timer = window.setInterval(async () => {
+      if (document.visibilityState !== "visible") return;
+      if (eventRef.current?.readyState === EventSource.CONNECTING) return;
       try {
         const res = await api.getRuntimeLogs(200, cursorRef.current);
         if (res.success && res.data) {

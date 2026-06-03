@@ -281,7 +281,7 @@ export function Sidebar() {
 
           <div className="profile-card">
             <Avatar className="h-10 w-10 border border-border/60">
-              {safeProfileAvatar && <AvatarImage src={safeProfileAvatar} alt={user?.username} />}
+              {safeProfileAvatar && <AvatarImage src={safeProfileAvatar} alt={user?.username} referrerPolicy="no-referrer" />}
               <AvatarFallback className="bg-primary/15 text-primary text-xs font-semibold">
                 {user?.username?.slice(0, 2).toUpperCase() || "U"}
               </AvatarFallback>

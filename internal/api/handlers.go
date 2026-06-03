@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -877,11 +878,18 @@ func publicTelegramLink(raw string) (map[string]string, bool) {
 func (a *App) handleServerIcon(w http.ResponseWriter, r *http.Request, _ Params) {
 	iconPath, contentType, okIcon := a.configuredServerIconPath()
 	if okIcon {
-		data, err := os.ReadFile(iconPath)
+		file, err := os.Open(iconPath)
 		if err == nil {
+			defer file.Close()
+			if info, statErr := file.Stat(); statErr == nil {
+				w.Header().Set("Content-Type", contentType)
+				w.Header().Set("Cache-Control", "public, max-age=300")
+				http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+				return
+			}
 			w.Header().Set("Content-Type", contentType)
 			w.Header().Set("Cache-Control", "public, max-age=300")
-			_, _ = w.Write(data)
+			_, _ = io.Copy(w, file)
 			return
 		}
 	}

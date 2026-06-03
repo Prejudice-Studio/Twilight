@@ -14,6 +14,12 @@ import (
 // 后台 prune（异步、带自身 ctx），写入路径只做 INSERT。
 const pgRuntimeLogPruneEvery = 256
 
+const (
+	pgRuntimeLogWriteTimeout = 5 * time.Second
+	pgRuntimeLogReadTimeout  = 5 * time.Second
+	pgRuntimeLogPruneTimeout = 10 * time.Second
+)
+
 // pgRuntimeLogPruneCounter 用 atomic 共享自增计数；触发阈值时跳一次
 // goroutine 异步 prune。pruneInFlight 互斥锁防止多 goroutine 同时跑同一个
 // DELETE，避免在 burst 时叠加成 N 个并发全表扫描。
@@ -35,9 +41,11 @@ func (s *Store) AddRuntimeLog(entry RuntimeLogEntry, limit int) (RuntimeLogEntry
 		if err != nil {
 			return entry, err
 		}
+		ctx, cancel := context.WithTimeout(context.Background(), pgRuntimeLogWriteTimeout)
+		defer cancel()
 		var id int64
 		err = s.db.QueryRowContext(
-			context.Background(),
+			ctx,
 			`INSERT INTO twilight_runtime_logs (time, level, message, attrs) VALUES ($1, $2, $3, $4::jsonb) RETURNING id`,
 			entry.Time,
 			entry.Level,
@@ -90,7 +98,7 @@ func (s *Store) maybeAsyncPrunePGRuntimeLogs(limit int) {
 			// 异步 goroutine 入口加 recover：prune SQL 异常不能反向拖垮调用 zap.Info 的协程。
 			_ = recover()
 		}()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), pgRuntimeLogPruneTimeout)
 		defer cancel()
 		_, _ = s.db.ExecContext(ctx, `
 DELETE FROM twilight_runtime_logs
@@ -139,9 +147,11 @@ func (s *Store) RuntimeLogStats() (int64, int) {
 		return 0, 0
 	}
 	if s.db != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), pgRuntimeLogReadTimeout)
+		defer cancel()
 		var next sql.NullInt64
 		var count int
-		if err := s.db.QueryRowContext(context.Background(), `SELECT max(id), count(*) FROM twilight_runtime_logs`).Scan(&next, &count); err != nil {
+		if err := s.db.QueryRowContext(ctx, `SELECT max(id), count(*) FROM twilight_runtime_logs`).Scan(&next, &count); err != nil {
 			return 0, 0
 		}
 		return next.Int64, count
@@ -161,7 +171,9 @@ func (s *Store) PruneRuntimeLogs(limit int) error {
 	}
 	limit = clampRuntimeLogLimit(limit)
 	if s.db != nil {
-		_, err := s.db.ExecContext(context.Background(), `
+		ctx, cancel := context.WithTimeout(context.Background(), pgRuntimeLogPruneTimeout)
+		defer cancel()
+		_, err := s.db.ExecContext(ctx, `
 DELETE FROM twilight_runtime_logs
 WHERE id NOT IN (
 	SELECT id FROM twilight_runtime_logs ORDER BY id DESC LIMIT $1
@@ -187,15 +199,17 @@ func (s *Store) postgresRuntimeLogs(limit int, after int64) ([]RuntimeLogEntry, 
 		rows *sql.Rows
 		err  error
 	)
+	ctx, cancel := context.WithTimeout(context.Background(), pgRuntimeLogReadTimeout)
+	defer cancel()
 	if after > 0 {
-		rows, err = s.db.QueryContext(context.Background(), `
+		rows, err = s.db.QueryContext(ctx, `
 SELECT id, time, level, message, COALESCE(attrs, '{}'::jsonb)::text
 FROM twilight_runtime_logs
 WHERE id > $1
 ORDER BY id ASC
 LIMIT $2`, after, limit)
 	} else {
-		rows, err = s.db.QueryContext(context.Background(), `
+		rows, err = s.db.QueryContext(ctx, `
 SELECT id, time, level, message, COALESCE(attrs, '{}'::jsonb)::text
 FROM twilight_runtime_logs
 ORDER BY id DESC

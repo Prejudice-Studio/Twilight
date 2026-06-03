@@ -40,6 +40,7 @@ type HandlerFunc func(http.ResponseWriter, *http.Request, Params)
 type Route struct {
 	Method  string
 	Pattern string
+	Parts   []string
 	Auth    AuthLevel
 	Handler HandlerFunc
 }
@@ -169,6 +170,19 @@ func (w *statusResponseWriter) Write(data []byte) (int, error) {
 	n, err := w.ResponseWriter.Write(data)
 	w.bytes += n
 	return n, err
+}
+
+func (w *statusResponseWriter) Flush() {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (w *statusResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
 type contextKey string
@@ -615,14 +629,15 @@ func (a *App) allowRate(ctx context.Context, key string, limit int, window time.
 	return a.limiter().Allow(ctx, key, limit, window)
 }
 func (a *App) add(method, pattern string, auth AuthLevel, handler HandlerFunc) {
-	a.routes = append(a.routes, Route{Method: method, Pattern: pattern, Auth: auth, Handler: handler})
+	a.routes = append(a.routes, Route{Method: method, Pattern: pattern, Parts: splitPath(pattern), Auth: auth, Handler: handler})
 }
 
 func (a *App) match(method, requestPath string) (*Route, Params, bool) {
 	methodAllowed := false
+	requestParts := splitPath(requestPath)
 	for i := range a.routes {
 		route := &a.routes[i]
-		params, ok := matchPattern(route.Pattern, requestPath)
+		params, ok := matchPattern(route.Parts, requestParts)
 		if !ok {
 			continue
 		}
@@ -635,19 +650,17 @@ func (a *App) match(method, requestPath string) (*Route, Params, bool) {
 	return nil, nil, methodAllowed
 }
 
-func matchPattern(pattern, requestPath string) (Params, bool) {
-	pp := splitPath(pattern)
-	rp := splitPath(requestPath)
-	if len(pp) != len(rp) {
+func matchPattern(patternParts, requestParts []string) (Params, bool) {
+	if len(patternParts) != len(requestParts) {
 		return nil, false
 	}
 	params := Params{}
-	for i := range pp {
-		if strings.HasPrefix(pp[i], ":") {
-			params[strings.TrimPrefix(pp[i], ":")] = rp[i]
+	for i := range patternParts {
+		if strings.HasPrefix(patternParts[i], ":") {
+			params[strings.TrimPrefix(patternParts[i], ":")] = requestParts[i]
 			continue
 		}
-		if pp[i] != rp[i] {
+		if patternParts[i] != requestParts[i] {
 			return nil, false
 		}
 	}
