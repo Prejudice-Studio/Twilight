@@ -83,19 +83,27 @@ func (a *App) telegramSendGroupAdminAuth(ctx context.Context, chatID, commandMes
 	a.telegramSavePanel(panel)
 }
 
-func (a *App) telegramSendGroupUserPanel(ctx context.Context, chatID, commandMessageID int64, target store.User, requireAuth bool) {
+func (a *App) telegramSendGroupUserPanel(ctx context.Context, chatID, commandMessageID int64, target store.User, requireAuth bool) bool {
 	panel := a.telegramCreatePanel(chatID, commandMessageID, target)
 	text := a.telegramGroupUserPanelTextForChat(ctx, chatID, target)
 	markup := a.telegramGroupUserPanelMarkup(panel.Token, target, panel.ConfirmAction)
 	messageID, err := a.telegramSendMessageWithMarkup(ctx, chatID, text, markup)
 	if err != nil {
-		return
+		return false
 	}
 	panel.MessageID = messageID
 	if requireAuth {
 		panel.ConfirmAction = "auth"
 	}
 	a.telegramSavePanel(panel)
+	return true
+}
+
+func (a *App) telegramDeleteGroupUserCommandMessage(ctx context.Context, chatID, commandMessageID int64) {
+	if chatID == 0 || commandMessageID == 0 {
+		return
+	}
+	_ = a.telegramDeleteMessage(ctx, chatID, commandMessageID)
 }
 
 func (a *App) telegramCreatePanel(chatID, commandMessageID int64, target store.User) telegramPanelContext {
@@ -282,7 +290,9 @@ func (a *App) telegramHandleCallback(ctx context.Context, callback map[string]an
 			panel.TargetUID = target.UID
 			panel = a.telegramTouchPanel(panel)
 		}
-		a.telegramEditPanel(ctx, panel)
+		if a.telegramEditPanel(ctx, panel) {
+			a.telegramDeleteGroupUserCommandMessage(ctx, panel.ChatID, panel.CommandMessageID)
+		}
 		return
 	}
 	if len(parts) < 4 || parts[1] != "act" {
@@ -469,13 +479,13 @@ func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelC
 	}
 }
 
-func (a *App) telegramEditPanel(ctx context.Context, panel telegramPanelContext) {
+func (a *App) telegramEditPanel(ctx context.Context, panel telegramPanelContext) bool {
 	target, ok := a.store().User(panel.TargetUID)
 	if !ok {
 		_ = a.telegramEditMessageText(ctx, panel.ChatID, panel.MessageID, "目标用户不存在或已被删除。", nil)
-		return
+		return false
 	}
-	_ = a.telegramEditMessageText(ctx, panel.ChatID, panel.MessageID, a.telegramGroupUserPanelTextForChat(ctx, panel.ChatID, target), a.telegramGroupUserPanelMarkup(panel.Token, target, panel.ConfirmAction))
+	return a.telegramEditMessageText(ctx, panel.ChatID, panel.MessageID, a.telegramGroupUserPanelTextForChat(ctx, panel.ChatID, target), a.telegramGroupUserPanelMarkup(panel.Token, target, panel.ConfirmAction)) == nil
 }
 
 func (a *App) telegramEditPanelWithNotice(ctx context.Context, panel telegramPanelContext, target store.User, notice string) {

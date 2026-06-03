@@ -2236,6 +2236,132 @@ func TestTelegramAnonymousGroupUserRequiresInlineAuth(t *testing.T) {
 	}
 }
 
+func TestTelegramGroupUserPanelDeletesCommandMessageAfterSend(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().TelegramMode = true
+	app.cfg().TelegramBotToken = "123:ABC"
+	app.cfg().TelegramAdminIDs = []int64{9001}
+	user := store.User{UID: 1001, Username: "target", Role: store.RoleNormal, Active: true, TelegramID: 888, CreatedAt: time.Now().Unix(), RegisterTime: time.Now().Unix()}
+	if _, err := app.store().CreateUser(user); err != nil {
+		t.Fatal(err)
+	}
+	requests := []map[string]any{}
+	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		body["_path"] = r.URL.Path
+		requests = append(requests, body)
+		if r.URL.Path == "/bot123:ABC/sendMessage" {
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":9001}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	}))
+	defer tg.Close()
+	app.cfg().TelegramAPIURL = tg.URL
+
+	app.handleTelegramUpdate(context.Background(), map[string]any{
+		"message": map[string]any{
+			"message_id": 77,
+			"text":       "/twguser target",
+			"chat":       map[string]any{"id": -1001, "type": "supergroup"},
+			"from":       map[string]any{"id": 9001},
+		},
+	})
+
+	if len(requests) != 2 {
+		t.Fatalf("expected sendMessage and deleteMessage, got %#v", requests)
+	}
+	if requests[0]["_path"] != "/bot123:ABC/sendMessage" {
+		t.Fatalf("expected first request to send panel, got %#v", requests[0])
+	}
+	deleteReq := requests[1]
+	if deleteReq["_path"] != "/bot123:ABC/deleteMessage" || numeric(deleteReq["chat_id"]) != -1001 || numeric(deleteReq["message_id"]) != 77 {
+		t.Fatalf("expected command delete request, got %#v", deleteReq)
+	}
+}
+
+func TestTelegramAnonymousGroupUserAuthDeletesCommandMessageAfterPanel(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().TelegramMode = true
+	app.cfg().TelegramBotToken = "123:ABC"
+	app.cfg().TelegramAdminIDs = []int64{9001}
+	user := store.User{UID: 1001, Username: "target", Role: store.RoleNormal, Active: true, TelegramID: 888, CreatedAt: time.Now().Unix(), RegisterTime: time.Now().Unix()}
+	if _, err := app.store().CreateUser(user); err != nil {
+		t.Fatal(err)
+	}
+	requests := []map[string]any{}
+	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		body["_path"] = r.URL.Path
+		requests = append(requests, body)
+		if r.URL.Path == "/bot123:ABC/sendMessage" {
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":9001}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	}))
+	defer tg.Close()
+	app.cfg().TelegramAPIURL = tg.URL
+
+	app.handleTelegramUpdate(context.Background(), map[string]any{
+		"message": map[string]any{
+			"message_id": 77,
+			"text":       "/twguser target",
+			"chat":       map[string]any{"id": -1001, "type": "supergroup"},
+			"from":       map[string]any{"id": 1087968824, "is_bot": true},
+			"sender_chat": map[string]any{
+				"id": -1001,
+			},
+		},
+	})
+
+	app.telegramPanelMu.Lock()
+	var panel telegramPanelContext
+	for _, saved := range app.telegramPanels {
+		panel = saved
+		break
+	}
+	app.telegramPanelMu.Unlock()
+	if panel.Token == "" {
+		t.Fatal("anonymous /twguser did not create auth panel")
+	}
+
+	app.handleTelegramUpdate(context.Background(), map[string]any{
+		"callback_query": map[string]any{
+			"id":   "cb-auth",
+			"data": "gadm:auth:" + panel.Token,
+			"from": map[string]any{"id": 9001},
+			"message": map[string]any{
+				"message_id": panel.MessageID,
+				"chat":       map[string]any{"id": panel.ChatID},
+			},
+		},
+	})
+
+	foundEdit := false
+	foundDelete := false
+	for _, req := range requests {
+		if req["_path"] == "/bot123:ABC/editMessageText" && strings.Contains(asString(req["text"]), "target") {
+			foundEdit = true
+		}
+		if req["_path"] == "/bot123:ABC/deleteMessage" && numeric(req["chat_id"]) == -1001 && numeric(req["message_id"]) == 77 {
+			foundDelete = true
+		}
+	}
+	if !foundEdit {
+		t.Fatalf("auth did not render user panel: %#v", requests)
+	}
+	if !foundDelete {
+		t.Fatalf("auth did not delete original /twguser command: %#v", requests)
+	}
+}
+
 func TestTelegramGroupUserPanelShowsEmbyInfoAndActions(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().EmbyToken = "emby-token"

@@ -453,7 +453,9 @@ func (a *App) telegramHandleGroupUser(ctx context.Context, chatID, telegramID in
 		_ = a.telegramSendMessage(ctx, chatID, reason)
 		return
 	}
-	a.telegramSendGroupUserPanel(ctx, chatID, messageID, user, false)
+	if a.telegramSendGroupUserPanel(ctx, chatID, messageID, user, false) {
+		a.telegramDeleteGroupUserCommandMessage(ctx, chatID, messageID)
+	}
 }
 
 func (a *App) telegramAdminID(telegramID int64) bool {
