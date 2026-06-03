@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -378,10 +379,10 @@ func (a *App) handleInviteUse(w http.ResponseWriter, r *http.Request, _ Params) 
 		failWithCode(w, http.StatusConflict, ErrEmbyCapacityReached, fmt.Sprintf("Emby 用户数量已达上限 %d/%d", current, limit))
 		return
 	}
-	if _, err := a.store().ConsumeInviteCode(code, user.UID); statusFromError(w, err) {
-		return
-	}
-	u, err := a.store().UpdateUser(user.UID, func(u *store.User) error {
+	u, _, err := a.store().ConsumeInviteCodeAndUpdateUser(code, user.UID, func(u *store.User, _ store.InviteCode) error {
+		if u.EmbyID == "" && u.EmbyGrantLocked && !user.PendingEmby {
+			return store.ErrGrantLocked
+		}
 		u.EmbyUsername = firstNonEmpty(stringValue(payload, "emby_username"), u.Username)
 		u.PendingEmby = true
 		u.PendingEmbyDays = &effectiveDays
@@ -389,6 +390,10 @@ func (a *App) handleInviteUse(w http.ResponseWriter, r *http.Request, _ Params) 
 		u.ExpiredAt = boundedInviteExpiry(addDaysToExpiry(u.ExpiredAt, effectiveDays, time.Now()), inviter.ExpiredAt)
 		return nil
 	})
+	if errors.Is(err, store.ErrGrantLocked) {
+		failWithCode(w, http.StatusBadRequest, ErrCodeRegistrationGrantAlreadyUsed, "当前账号已经使用过 Emby 注册资格，不能重复使用邀请码")
+		return
+	}
 	if statusFromError(w, err) {
 		return
 	}

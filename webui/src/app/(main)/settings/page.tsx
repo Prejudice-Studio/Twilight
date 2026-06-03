@@ -93,7 +93,7 @@ export default function SettingsPage() {
     user?.pending_emby_days !== null &&
     user?.pending_emby_days !== undefined;
   const canUnbindEmby =
-    embyStatus?.can_unbind ?? !(user?.registration_source || user?.registration_code);
+    embyStatus?.can_unbind ?? !user?.emby_grant_locked;
 
   // Email dialog
   const [editEmailOpen, setEditEmailOpen] = useState(false);

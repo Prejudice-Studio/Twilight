@@ -256,17 +256,11 @@ func (a *App) handleBindEmby(w http.ResponseWriter, r *http.Request, _ Params) {
 			return
 		}
 	}
-	if existing, okExisting := a.store().FindUserByEmbyID(embyID); okExisting && existing.UID != p.User.UID {
+	u, _, err := a.store().BindUserEmbyAtomic(p.User.UID, embyID, firstNonEmpty(asString(embyUser["Name"]), embyUsername), false)
+	if errors.Is(err, store.ErrConflict) {
 		failWithCode(w, http.StatusConflict, ErrEmbyLinkedOtherUser, "该 Emby 账号已关联其他用户")
 		return
 	}
-	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error {
-		u.EmbyUsername = firstNonEmpty(asString(embyUser["Name"]), embyUsername)
-		u.EmbyID = embyID
-		u.PendingEmby = false
-		u.PendingEmbyDays = nil
-		return nil
-	})
 	if statusFromError(w, err) {
 		return
 	}
@@ -281,6 +275,10 @@ func (a *App) handleRegisterEmby(w http.ResponseWriter, r *http.Request, params 
 	}
 	if !p.User.PendingEmby && !a.cfg().EmbyDirectRegisterEnabled {
 		failWithCode(w, http.StatusBadRequest, ErrEmbyNoRegistrationGrant, "当前账号没有 Emby 注册资格")
+		return
+	}
+	if !p.User.PendingEmby && a.userHasEmbyGrantHistory(p.User) {
+		failWithCode(w, http.StatusBadRequest, ErrCodeRegistrationGrantAlreadyUsed, "当前账号已经使用过 Emby 注册资格，不能重复自助开通 Emby")
 		return
 	}
 	payload := decodeMap(r)
@@ -323,6 +321,11 @@ func (a *App) handleRegisterEmby(w http.ResponseWriter, r *http.Request, params 
 		u.EmbyUsername = firstNonEmpty(asString(createdUser["Name"]), embyUsername)
 		u.PendingEmby = false
 		u.PendingEmbyDays = nil
+		if p.User.PendingEmby {
+			markRegistrationGrant(u, firstNonEmpty(u.RegistrationSource, registrationSourceRegCode), u.RegistrationCode)
+		} else {
+			markRegistrationGrant(u, registrationSourceRegCode, "")
+		}
 		if u.Role == store.RoleUnrecognized {
 			u.Role = store.RoleNormal
 		}
@@ -343,18 +346,38 @@ func (a *App) handleRegisterEmby(w http.ResponseWriter, r *http.Request, params 
 
 func (a *App) handleUnbindEmby(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
-	if a.requireNonEmbyAdmin(w, r, p.User) {
+	user, okUser := a.store().User(p.User.UID)
+	if !okUser {
+		failWithCode(w, http.StatusNotFound, ErrUserNotFound, userNotFoundMessage)
 		return
 	}
-	if !a.userCanSelfUnbindEmby(p.User) {
+	if a.requireNonEmbyAdmin(w, r, user) {
+		return
+	}
+	if !a.userCanSelfUnbindEmby(user) {
 		failWithCode(w, http.StatusForbidden, ErrEmbyUnbindForbidden, "当前账号的 Emby 注册资格来自注册码、邀请码或管理员授予，不能自助解绑后重复注册")
 		return
 	}
-	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error { u.EmbyID = ""; u.EmbyUsername = ""; return nil })
+	embyID := user.EmbyID
+	remoteDisabled, proceed := a.disableRemoteEmbyForUnbind(w, r, embyID)
+	if !proceed {
+		return
+	}
+	u, err := a.store().UpdateUser(user.UID, func(u *store.User) error {
+		if embyID != "" && u.EmbyID != "" && u.EmbyID != embyID {
+			return store.ErrConflict
+		}
+		u.EmbyID = ""
+		u.EmbyUsername = ""
+		return nil
+	})
 	if statusFromError(w, err) {
 		return
 	}
-	ok(w, "Emby account unbound", publicUser(u))
+	data := publicUser(u)
+	data["remote_emby_disabled"] = remoteDisabled
+	data["old_emby_id"] = embyID
+	ok(w, "Emby account unbound", data)
 }
 
 func (a *App) handleRenew(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -377,21 +400,20 @@ func (a *App) handleRenew(w http.ResponseWriter, r *http.Request, _ Params) {
 	if a.rejectRegcodeWriteIfStorageMismatch(w) {
 		return
 	}
-	// Consume the reg code (validates active, use count, expiry)
-	code, err := a.store().ConsumeRegCode(regCode, p.User.UID, p.User.TelegramID)
-	if err != nil {
-		failWithCode(w, http.StatusBadRequest, ErrRegcodeInvalid, "注册码无效、已用完或已过期")
-		return
-	}
-	days := normalizeRegCodeDays(code.Days)
-	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error {
+	u, _, err := a.store().ConsumeRegCodeAndUpdateUser(regCode, p.User.UID, p.User.TelegramID, func(u *store.User, code store.RegCode) error {
+		days := normalizeRegCodeDays(code.Days)
 		// 用 renewExpiryAndReactivate 而不是裸 ExpiredAt = ...：自助续费会
 		// 把曾被 check_expired 设成 Active=false 的非邀请账号同步解禁，避免
 		// "续完仍登不上"的死循环。
 		renewExpiryAndReactivate(u, addDaysToExpiry(u.ExpiredAt, days, time.Now()))
 		return nil
 	})
-	if statusFromError(w, err) {
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) && !errors.Is(err, store.ErrExpired) && !errors.Is(err, store.ErrConflict) {
+			statusFromError(w, err)
+			return
+		}
+		failWithCode(w, http.StatusBadRequest, ErrRegcodeInvalid, "注册码无效、已用完或已过期")
 		return
 	}
 	ok(w, "续期成功", map[string]any{"expire_status": expireStatus(u.ExpiredAt), "expired_at": publicExpiryUnix(u.ExpiredAt), "user": publicUser(u)})
@@ -1399,6 +1421,10 @@ func (a *App) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request, para
 	}
 	payload := decodeMap(r)
 	mode := firstNonEmpty(stringValue(payload, "mode"), "local_only")
+	if mode != "local_only" && mode != "with_emby" && mode != "emby_only" {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "mode 必须是 local_only、with_emby 或 emby_only")
+		return
+	}
 	depth := intValue(payload, "cascade_depth", queryInt(r, "cascade_depth", 1))
 	deleted := []int64{}
 	skipped := []map[string]any{}
@@ -1414,8 +1440,12 @@ func (a *App) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request, para
 			continue
 		}
 		if mode == "emby_only" {
-			if target.EmbyID != "" && a.cfg().EmbyURL != "" {
-				if err := a.embyDelete(r.Context(), "/Users/"+urlPathEscape(target.EmbyID)); err != nil {
+			if target.EmbyID != "" {
+				if !a.embyConfigured() {
+					failed = append(failed, map[string]any{"uid": targetUID, "reason": "delete_emby: emby not configured"})
+					continue
+				}
+				if err := a.embyDelete(r.Context(), "/Users/"+urlPathEscape(target.EmbyID)); err != nil && !strings.Contains(err.Error(), "remote status 404") {
 					failed = append(failed, map[string]any{"uid": targetUID, "reason": "delete_emby: " + err.Error()})
 					continue
 				}
@@ -1428,8 +1458,12 @@ func (a *App) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request, para
 			}
 			continue
 		}
-		if mode == "with_emby" && target.EmbyID != "" && a.cfg().EmbyURL != "" {
-			if err := a.embyDelete(r.Context(), "/Users/"+urlPathEscape(target.EmbyID)); err != nil {
+		if mode == "with_emby" && target.EmbyID != "" {
+			if !a.embyConfigured() {
+				failed = append(failed, map[string]any{"uid": targetUID, "reason": "delete_emby: emby not configured"})
+				continue
+			}
+			if err := a.embyDelete(r.Context(), "/Users/"+urlPathEscape(target.EmbyID)); err != nil && !strings.Contains(err.Error(), "remote status 404") {
 				failed = append(failed, map[string]any{"uid": targetUID, "reason": "delete_emby: " + err.Error()})
 				continue
 			}
@@ -1489,22 +1523,69 @@ func (a *App) handleAdminToggleUser(w http.ResponseWriter, r *http.Request, para
 
 func (a *App) handleAdminUnbindEmby(w http.ResponseWriter, r *http.Request, params Params) {
 	uid, _ := int64Param(params, "uid")
-	u, err := a.store().UpdateUser(uid, func(u *store.User) error { u.EmbyID = ""; u.EmbyUsername = ""; return nil })
+	target, okUser := a.store().User(uid)
+	if !okUser {
+		failWithCode(w, http.StatusNotFound, ErrUserNotFound, userNotFoundMessage)
+		return
+	}
+	embyID := target.EmbyID
+	remoteDisabled, proceed := a.disableRemoteEmbyForUnbind(w, r, embyID)
+	if !proceed {
+		return
+	}
+	u, err := a.store().UpdateUser(uid, func(u *store.User) error {
+		if embyID != "" && u.EmbyID != "" && u.EmbyID != embyID {
+			return store.ErrConflict
+		}
+		u.EmbyID = ""
+		u.EmbyUsername = ""
+		return nil
+	})
 	if statusFromError(w, err) {
 		return
 	}
-	ok(w, "Emby unbound", publicUser(u))
+	data := publicUser(u)
+	data["remote_emby_disabled"] = remoteDisabled
+	data["old_emby_id"] = embyID
+	ok(w, "Emby unbound", data)
 }
 
 func (a *App) handleAdminForceUnbind(w http.ResponseWriter, r *http.Request, params Params) {
 	uid, _ := int64Param(params, "uid")
-	scope := stringValue(decodeMap(r), "scope")
+	target, okUser := a.store().User(uid)
+	if !okUser {
+		failWithCode(w, http.StatusNotFound, ErrUserNotFound, userNotFoundMessage)
+		return
+	}
+	scope := strings.ToLower(stringValue(decodeMap(r), "scope"))
+	if scope == "" {
+		scope = "both"
+	}
+	if scope != "telegram" && scope != "emby" && scope != "both" {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "scope 必须是 telegram、emby 或 both")
+		return
+	}
+	unbindTelegram := scope == "telegram" || scope == "both"
+	unbindEmby := scope == "emby" || scope == "both"
+	oldTelegramID := target.TelegramID
+	oldEmbyID := target.EmbyID
+	remoteDisabled := false
+	if unbindEmby {
+		var proceed bool
+		remoteDisabled, proceed = a.disableRemoteEmbyForUnbind(w, r, oldEmbyID)
+		if !proceed {
+			return
+		}
+	}
 	u, err := a.store().UpdateUser(uid, func(u *store.User) error {
-		if scope == "telegram" || scope == "both" || scope == "" {
+		if unbindTelegram {
 			u.TelegramID = 0
 			u.TelegramUsername = ""
 		}
-		if scope == "emby" || scope == "both" || scope == "" {
+		if unbindEmby {
+			if oldEmbyID != "" && u.EmbyID != "" && u.EmbyID != oldEmbyID {
+				return store.ErrConflict
+			}
 			u.EmbyID = ""
 			u.EmbyUsername = ""
 		}
@@ -1513,7 +1594,20 @@ func (a *App) handleAdminForceUnbind(w http.ResponseWriter, r *http.Request, par
 	if statusFromError(w, err) {
 		return
 	}
-	ok(w, "unbound", map[string]any{"changed": true, "user": publicUser(u)})
+	changed := []string{}
+	if unbindTelegram && oldTelegramID != 0 {
+		changed = append(changed, "telegram")
+	}
+	if unbindEmby && oldEmbyID != "" {
+		changed = append(changed, "emby")
+	}
+	ok(w, "unbound", map[string]any{
+		"changed":              changed,
+		"changed_any":          len(changed) > 0,
+		"old":                  map[string]any{"telegram_id": nullableInt(oldTelegramID), "emby_id": emptyNil(oldEmbyID)},
+		"remote_emby_disabled": remoteDisabled,
+		"user":                 publicUser(u),
+	})
 }
 
 func (a *App) handleRegistrationQueueClear(w http.ResponseWriter, r *http.Request, params Params) {
@@ -1557,10 +1651,7 @@ func (a *App) handleRegistrationQueueClear(w http.ResponseWriter, r *http.Reques
 
 func (a *App) handleRegistrationEntitlement(w http.ResponseWriter, r *http.Request, params Params) {
 	uid, _ := int64Param(params, "uid")
-	days := intValue(decodeMap(r), "days", a.cfg().InviteDefaultDays)
-	if days == 0 {
-		days = -1
-	}
+	days := normalizeRegCodeDays(intValue(decodeMap(r), "days", a.cfg().InviteDefaultDays))
 	if days < -1 || days > 3650 {
 		failWithCode(w, http.StatusBadRequest, ErrAdminDaysOutOfRange, "days 超出允许范围")
 		return
@@ -1587,7 +1678,11 @@ func (a *App) handleRegistrationEntitlementBulk(w http.ResponseWriter, r *http.R
 	payload := decodeMap(r)
 	dryRun := boolValue(payload, "dry_run", true)
 	confirm := stringValue(payload, "confirm")
-	days := intValue(payload, "days", a.cfg().InviteDefaultDays)
+	days := normalizeRegCodeDays(intValue(payload, "days", a.cfg().InviteDefaultDays))
+	if days < -1 || days > 3650 {
+		failWithCode(w, http.StatusBadRequest, ErrAdminDaysOutOfRange, "days 超出允许范围")
+		return
+	}
 	candidates := []int64{}
 	for _, u := range a.store().ListUsers() {
 		if u.PendingEmby && u.EmbyID == "" && u.Active {
@@ -1673,12 +1768,12 @@ func (a *App) handleKickUser(w http.ResponseWriter, r *http.Request, params Para
 func (a *App) handleAdminRenewUser(w http.ResponseWriter, r *http.Request, params Params) {
 	uid, _ := int64Param(params, "uid")
 	payload := decodeMap(r)
-	days := int64(intValue(payload, "days", 30))
+	days := int64(normalizeRegCodeDays(intValue(payload, "days", 30)))
 	if expiredAt := numeric(payload["expired_at"]); expiredAt < 0 || expiryIsPermanent(expiredAt) {
 		days = -1
 	}
 	u, err := a.store().UpdateUser(uid, func(u *store.User) error {
-		if days <= 0 {
+		if days < 0 {
 			renewExpiryAndReactivate(u, permanentExpiryUnix)
 			return nil
 		}
@@ -1885,45 +1980,31 @@ func (a *App) handleAdminBindEmby(w http.ResponseWriter, r *http.Request, params
 	}
 	embyID := asString(remoteUser["Id"])
 	embyName := firstNonEmpty(asString(remoteUser["Name"]), embyNameInput, embyID)
-	if existing, okExisting := a.store().FindUserByEmbyID(embyID); okExisting && existing.UID != targetUID {
-		if !force {
-			// 旧实现走 ok() 200 + {"conflict": true, ...}：前端只能依赖隐式
-			// 约定查 data.conflict，与其他 admin handler 的"重名/已存在"统一
-			// 走 409 + ErrCode 不一致。改为 failWithCodeData：envelope
-			// success=false + code=EMBY_ACCOUNT_CONFLICT + 同样的 conflict 元
-			// 数据。前端用 errorCode 判定即可，无需再读 data.conflict。
-			failWithCodeData(w, http.StatusConflict, ErrEmbyAccountConflict, "Emby account already linked", map[string]any{
-				"conflict_uid":      existing.UID,
-				"conflict_username": existing.Username,
-				"emby_id":           embyID,
-				"emby_username":     embyName,
-			})
-			return
-		}
-		if _, err := a.store().UpdateUser(existing.UID, func(u *store.User) error {
-			u.EmbyID = ""
-			u.EmbyUsername = ""
-			u.PendingEmby = true
-			return nil
-		}); err != nil {
-			if statusFromError(w, err) {
-				return
-			}
-			return
-		}
+	updatedUser, displacedUID, updateErr := a.store().BindUserEmbyAtomic(targetUID, embyID, embyName, force)
+	if errors.Is(updateErr, store.ErrConflict) {
+		existing, _ := a.store().FindUserByEmbyID(embyID)
+		// 旧实现走 ok() 200 + {"conflict": true, ...}：前端只能依赖隐式
+		// 约定查 data.conflict，与其他 admin handler 的"重名/已存在"统一
+		// 走 409 + ErrCode 不一致。改为 failWithCodeData：envelope
+		// success=false + code=EMBY_ACCOUNT_CONFLICT + 同样的 conflict 元
+		// 数据。前端用 errorCode 判定即可，无需再读 data.conflict。
+		failWithCodeData(w, http.StatusConflict, ErrEmbyAccountConflict, "Emby account already linked", map[string]any{
+			"conflict_uid":      existing.UID,
+			"conflict_username": existing.Username,
+			"emby_id":           embyID,
+			"emby_username":     embyName,
+		})
+		return
 	}
-	updatedUser, updateErr := a.store().UpdateUser(targetUID, func(u *store.User) error {
-		u.EmbyID = embyID
-		u.EmbyUsername = embyName
-		u.PendingEmby = false
-		u.PendingEmbyDays = nil
-		return nil
-	})
 	if statusFromError(w, updateErr) {
 		return
 	}
 	_ = a.embySetUserEnabled(r.Context(), updatedUser.EmbyID, a.embyShouldEnableUser(updatedUser))
-	ok(w, "Emby account linked", map[string]any{"uid": updatedUser.UID, "emby_id": updatedUser.EmbyID, "emby_username": updatedUser.EmbyUsername, "force_taken": force, "previous_uid": nil, "user": publicUser(updatedUser)})
+	previousUID := any(nil)
+	if displacedUID != 0 {
+		previousUID = displacedUID
+	}
+	ok(w, "Emby account linked", map[string]any{"uid": updatedUser.UID, "emby_id": updatedUser.EmbyID, "emby_username": updatedUser.EmbyUsername, "force_taken": displacedUID != 0, "previous_uid": previousUID, "user": publicUser(updatedUser)})
 }
 
 func (a *App) handleTelegramRosterStats(w http.ResponseWriter, r *http.Request, _ Params) {

@@ -173,15 +173,15 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 7. 若 `invite_root_user_limit > 0`，整棵树的后代数量未达上限（`inviteDescendantCount(rootUID)`）。
 8. 若 `invite_limit != -1`，未使用的邀请码数量未达 `invite_limit`（仅统计 `active && use_count==0 && 未过期` 的码）。
 
-### 使用邀请码（`handleInviteUse` / `ConsumeInviteCode`）
+### 使用邀请码（`handleInviteUse` / `ConsumeInviteCodeAndUpdateUser`）
 
 校验顺序（`handleInviteUse`）：UID 限速 → 邀请码非空 → 当前账号未绑定 Emby（`INVITE_EMBY_ALREADY_BOUND`）→ 邀请码存在且 `active` 且未过期 → 若码限定了 `target_username` 则必须匹配 → 不能使用自己生成的邀请码（`INVITE_SELF_GENERATE`）→ 当前账号尚无上级（`INVITE_ALREADY_HAS_PARENT`，一个用户只能加入一棵树一次）→ 邀请人存在且 `Active` → 邀请人层级未达 `invite_max_depth`（`INVITE_DEPTH_EXCEEDED`）→ 若设了 `invite_root_user_limit` 则树未满（`INVITE_ROOT_FULL`）→ 邀请人 `maxCodeDays > 0`（`INVITER_DAYS_SHORT`）→ Emby 容量未达上限（`EMBY_CAPACITY_REACHED`）。
 
 通过后：
 
 - 实际开通天数 `effectiveDays` 取邀请码的 `days`，若 `<=0` 或超过邀请人剩余天数则收敛到 `maxDays`。
-- **原子消费**：`store.ConsumeInviteCode` 在一次加锁的状态变更里完成「`use_count++` / 标记 `used` / 达到 `use_count_limit` 时置 `active=false`」并写入 `invite_relations[childUID]`（指向邀请人）。其中再次校验邀请码 `active`、未超用量上限、未过期、邀请人不等于使用者，任一不满足即整体失败回滚。
-- 被邀请人随后被标记为 `PendingEmby`（待开通），并把过期时间按 `effectiveDays` 顺延，且不会超过邀请人的过期时间（`boundedInviteExpiry`）。
+- **原子消费**：`store.ConsumeInviteCodeAndUpdateUser` 在一次加锁的状态变更里完成「`use_count++` / 标记 `used` / 达到 `use_count_limit` 时置 `active=false`」、写入 `invite_relations[childUID]`（指向邀请人）以及更新被邀请人权益。其中再次校验邀请码 `active`、未超用量上限、未过期、邀请人不等于使用者，任一不满足即整体失败回滚。
+- 被邀请人会被标记为 `PendingEmby`（待开通），写入用户级 `emby_grant_locked=true`，并把过期时间按 `effectiveDays` 顺延，且不会超过邀请人的过期时间（`boundedInviteExpiry`）。该锁不会因后续删除邀请码或断开邀请关系而解除。
 
 > 邀请码生成时即固定 `use_count_limit = 1`，因此每张邀请码只能被使用一次；用过的码自动失效。被本人撤销时，若已被使用过则保留记录并置 `active=false`，否则直接从状态文档删除（`store.DeleteInviteCode`）。
 

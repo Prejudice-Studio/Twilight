@@ -352,26 +352,35 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request, _ Params) {
 		role = store.RoleAdmin
 	}
 	newUser := store.User{Username: username, Email: stringValue(payload, "email"), PasswordHash: passwordHash, Role: role, TelegramID: telegramID, TelegramUsername: telegramUsername}
-	if registerReg.Code != "" {
-		days := normalizeRegCodeDays(registerReg.Days)
-		newUser.PendingEmby = true
-		newUser.PendingEmbyDays = &days
-		newUser.EmbyUsername = username
-		newUser.RegistrationSource = registrationSourceRegCode
-		newUser.RegistrationCode = registerReg.Code
-	}
 	var u store.User
-	if registerReg.Code != "" {
+	if registerReg.Code != "" || telegramBindCode != "" {
 		var consumed store.RegCode
-		u, consumed, err = a.store().CreateUserWithRegCode(newUser, registerReg.Code, telegramID)
+		u, consumed, _, err = a.store().CreateUserForRegistration(newUser, registerReg.Code, telegramBindCode, time.Now().Unix(), func(user *store.User, consumed store.RegCode, _ store.BindCode) error {
+			if consumed.Code != "" {
+				days := normalizeRegCodeDays(consumed.Days)
+				user.PendingEmby = true
+				user.PendingEmbyDays = &days
+				user.EmbyUsername = username
+				markRegistrationGrant(user, registrationSourceRegCode, consumed.Code)
+			}
+			return nil
+		})
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrExpired) {
-				failWithCode(w, http.StatusBadRequest, ErrRegcodeInvalid, "注册码无效、已用完或已过期")
+				if registerReg.Code != "" {
+					failWithCode(w, http.StatusBadRequest, ErrRegcodeInvalid, "注册码无效、已用完或已过期")
+				} else {
+					failWithCode(w, http.StatusBadRequest, ErrTGBindCodeNotFound, "绑定码不存在或已过期")
+				}
 				return
 			}
 			if errors.Is(err, store.ErrConflict) {
 				if _, exists := a.store().FindUserByUsername(username); exists {
 					failWithCode(w, http.StatusConflict, ErrUsernameTaken, "用户名已被使用")
+					return
+				}
+				if telegramBindCode != "" {
+					failWithCode(w, http.StatusConflict, ErrTGBindTargetTaken, "该 Telegram 已绑定到其他账号或绑定码状态已变化")
 					return
 				}
 				failWithCode(w, http.StatusBadRequest, ErrRegcodeInvalid, "注册码无效、已用完或已过期")
@@ -387,9 +396,6 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request, _ Params) {
 	}
 	if statusFromError(w, err) {
 		return
-	}
-	if telegramBindCode != "" {
-		_ = a.store().DeleteBindCode(telegramBindCode)
 	}
 	if a.configuredAdminMatch(u.UID, u.Username) {
 		if promoted, err := a.store().UpdateUser(u.UID, func(user *store.User) error {
@@ -441,20 +447,18 @@ func (a *App) handleRegisterAvailability(w http.ResponseWriter, r *http.Request,
 		directDays = 30
 	}
 	ok(w, "OK", map[string]any{
-		"enabled":                                a.cfg().RegisterEnabled,
-		"register_mode":                          a.cfg().RegisterEnabled,
-		"can_register":                           canRegister,
-		"requires_reg_code":                      a.cfg().RegisterCodeLimit,
-		"available":                              available,
-		"message":                                message,
-		"current_users":                          currentUsers,
-		"max_users":                              a.cfg().UserLimit,
-		"allow_pending_register":                 a.cfg().AllowPendingRegister,
-		"emby_direct_register_enabled":           a.cfg().EmbyDirectRegisterEnabled,
-		"emby_direct_register_days":              directDays,
-		"emby_direct_register_day_options":       []int{directDays},
-		"emby_direct_register_allow_custom_days": false,
-		"emby_user_limit":                        a.cfg().EmbyUserLimit,
-		"emby_bound_users":                       embyBoundUsers,
+		"enabled":                      a.cfg().RegisterEnabled,
+		"register_mode":                a.cfg().RegisterEnabled,
+		"can_register":                 canRegister,
+		"requires_reg_code":            a.cfg().RegisterCodeLimit,
+		"available":                    available,
+		"message":                      message,
+		"current_users":                currentUsers,
+		"max_users":                    a.cfg().UserLimit,
+		"allow_pending_register":       a.cfg().AllowPendingRegister,
+		"emby_direct_register_enabled": a.cfg().EmbyDirectRegisterEnabled,
+		"emby_direct_register_days":    directDays,
+		"emby_user_limit":              a.cfg().EmbyUserLimit,
+		"emby_bound_users":             embyBoundUsers,
 	})
 }

@@ -80,7 +80,7 @@
 | POST | `/api/v1/users/me/password/emby` | User | 修改 Emby 密码 |
 | POST | `/api/v1/users/me/emby/bind` | User | 绑定已有 Emby 账号 |
 | POST | `/api/v1/users/me/emby/register` | User | 登录后补建 Emby 账号（PENDING_EMBY 流程） |
-| POST | `/api/v1/users/me/emby/unbind` | User | 解绑 Emby 账号 |
+| POST | `/api/v1/users/me/emby/unbind` | User | 禁用远端后解绑 Emby 账号 |
 | POST | `/api/v1/users/me/renew` | User | 使用续期码续期 |
 | POST | `/api/v1/users/me/use-code` | User | 统一预检/使用注册码、续期码、白名单码、邀请码 |
 | GET | `/api/v1/users/me/use-code/status` | User | 查询 use-code 异步队列状态 |

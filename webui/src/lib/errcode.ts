@@ -51,6 +51,7 @@ export type ErrCode =
   | "EMBY_AUTH_FAILED"
   | "EMBY_ACCOUNT_UNLINKED"
   | "EMBY_UNBIND_FORBIDDEN"
+  | "EMBY_DISABLE_FAILED"
   | "EMBY_ACCOUNT_CONFLICT"
   | "EMBY_CAPACITY_REACHED"
   | "EMBY_MISSING_CREDENTIALS"
@@ -322,6 +323,7 @@ export const ErrCodes = {
   EmbyAuthFailed: "EMBY_AUTH_FAILED",
   EmbyAccountUnlinked: "EMBY_ACCOUNT_UNLINKED",
   EmbyUnbindForbidden: "EMBY_UNBIND_FORBIDDEN",
+  EmbyDisableFailed: "EMBY_DISABLE_FAILED",
   EmbyAccountConflict: "EMBY_ACCOUNT_CONFLICT",
   EmbyCapacityReached: "EMBY_CAPACITY_REACHED",
   EmbyMissingCreds: "EMBY_MISSING_CREDENTIALS",

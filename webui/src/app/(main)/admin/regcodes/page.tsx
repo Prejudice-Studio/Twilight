@@ -97,6 +97,8 @@ export default function AdminRegcodesPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [createdCodes, setCreatedCodes] = useState<string[]>([]);
 
+  const formatRegcodeDays = (days: number) => (days < 0 ? "永久" : `${days || 30} 天`);
+
   const loadRegcodesResource = useCallback(async () => {
     const res = await api.getRegcodes(page, { type: filterType, status: filterStatus, search, sort, order });
     if (res.success && res.data) {
@@ -585,12 +587,12 @@ export default function AdminRegcodesPage() {
                   <div className="font-medium text-foreground">{activeTypeDescription.title}</div>
                   <p className="mt-1">{activeTypeDescription.description}</p>
                   <p className="mt-1">{activeTypeDescription.defaults}</p>
-                  <p className="mt-1">类型值：注册=1、续期=2、白名单=3；0 或 -1 天数均表示永久。</p>
+                  <p className="mt-1">类型值：注册=1、续期=2、白名单=3；-1 天数表示永久，0 按 30 天处理。</p>
                 </div>
                 <div className="space-y-2">
                   <Label>{activeTab === "3" ? "白名单有效天数" : "账号天数"}</Label>
                   <div className="flex items-center justify-between rounded-md border border-border/80 bg-muted/40 px-3 py-2">
-                    <span className="text-xs text-muted-foreground">设为永久（0 或 -1 都视为永久）</span>
+                    <span className="text-xs text-muted-foreground">设为永久（写入 -1）</span>
                     <Switch
                       checked={isPermanentDays}
                       onCheckedChange={(checked) => {
@@ -608,7 +610,7 @@ export default function AdminRegcodesPage() {
                     disabled={isPermanentDays}
                   />
                   <p className="text-[11px] text-muted-foreground">
-                    {activeTab === "3" ? "白名单用户的有效时长，0 和 -1 均为永久" : "使用此码后账号增加的有效天数，0 和 -1 均为永久"}
+                    {activeTab === "3" ? "白名单用户的有效时长，-1 为永久，0 按 30 天处理" : "使用此码后账号增加的有效天数，-1 为永久，0 按 30 天处理"}
                   </p>
                 </div>
                 
@@ -850,7 +852,7 @@ export default function AdminRegcodesPage() {
                         </div>
                         <div>
                           <p className="text-xs text-muted-foreground">天数</p>
-                          <p className="mt-1">{code.days <= 0 ? "永久" : `${code.days} 天`}</p>
+                          <p className="mt-1">{formatRegcodeDays(code.days)}</p>
                         </div>
                         <div>
                           <p className="text-xs text-muted-foreground">使用次数</p>
@@ -915,7 +917,7 @@ export default function AdminRegcodesPage() {
                             </div>
                           </td>
                           <td className="px-4 py-3 text-sm">{userLabel(code.inviter_username, code.inviter_uid)}</td>
-                          <td className="px-4 py-3 text-sm">{code.days <= 0 ? "永久" : `${code.days} 天`}</td>
+                          <td className="px-4 py-3 text-sm">{formatRegcodeDays(code.days)}</td>
                           <td className="px-4 py-3 text-sm">{code.use_count} / {code.use_count_limit === -1 ? "∞" : code.use_count_limit}</td>
                           <td className="px-4 py-3 text-sm">{userLabel(code.target_username, code.target_uid)}</td>
                           <td className="px-4 py-3 text-sm">{userLabel(code.used_by_username, code.used_by_uid)}</td>
@@ -1078,7 +1080,7 @@ export default function AdminRegcodesPage() {
                   <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
                     <div>
                       <p className="text-xs text-muted-foreground">账号有效</p>
-                      <p className="mt-1">{code.days <= 0 ? "永久" : `${code.days} 天`}</p>
+                      <p className="mt-1">{formatRegcodeDays(code.days)}</p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">卡码有效</p>
@@ -1209,7 +1211,7 @@ export default function AdminRegcodesPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 align-top text-sm">{code.days <= 0 ? "永久" : `${code.days} 天`}</td>
+                      <td className="whitespace-nowrap px-4 py-3 align-top text-sm">{formatRegcodeDays(code.days)}</td>
                       <td className="whitespace-nowrap px-4 py-3 align-top text-sm">
                         {code.validity_time === -1 || code.validity_time === undefined 
                           ? '永久有效' 

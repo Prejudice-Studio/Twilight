@@ -347,6 +347,31 @@ func (a *App) embySetUserEnabled(ctx context.Context, userID string, enabled boo
 	})
 }
 
+func (a *App) embyDisableUserForUnbind(ctx context.Context, userID string) (bool, error) {
+	if strings.TrimSpace(userID) == "" {
+		return false, nil
+	}
+	user, found, err := a.embyUserByID(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return false, nil
+	}
+	policy := map[string]any{}
+	if existing, ok := user["Policy"].(map[string]any); ok {
+		for key, value := range existing {
+			policy[key] = value
+		}
+	}
+	policy["IsDisabled"] = true
+	var ignored map[string]any
+	if err := a.embyPost(ctx, "/Users/"+urlPathEscape(userID)+"/Policy", policy, &ignored); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (a *App) embyShouldEnableUser(u store.User) bool {
 	return u.Active && !embyAccessExpired(u)
 }

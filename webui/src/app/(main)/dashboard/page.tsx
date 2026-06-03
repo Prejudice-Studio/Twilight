@@ -542,7 +542,7 @@ export default function DashboardPage() {
     return raw;
   }, [hasGrantedEmbyRegisterEntitlement, registerAvailability?.emby_direct_register_days, user?.pending_emby_days]);
 
-  const directRegisterDaysLabel = directRegisterDays <= 0 ? "永久" : `${directRegisterDays} 天`;
+  const directRegisterDaysLabel = directRegisterDays < 0 ? "永久" : `${directRegisterDays} 天`;
 
   const directRegisterBlockedReason = useMemo<string | null>(() => {
     if (!registerAvailability) return null;
@@ -628,7 +628,7 @@ export default function DashboardPage() {
                     clearEmbyRegisterRequest();
                     toast({
                       title: "Emby 账号已开通",
-                      description: directRegisterDays <= 0 ? "永久" : `开通时长 ${directRegisterDays} 天`,
+                      description: directRegisterDays < 0 ? "永久" : `开通时长 ${directRegisterDays} 天`,
                       variant: "success",
                     });
                     await fetchUser();
@@ -658,7 +658,7 @@ export default function DashboardPage() {
           clearEmbyRegisterRequest();
           toast({
             title: "Emby 账号已开通",
-            description: directRegisterDays <= 0 ? "永久" : `开通时长 ${directRegisterDays} 天`,
+            description: directRegisterDays < 0 ? "永久" : `开通时长 ${directRegisterDays} 天`,
             variant: "success",
           });
           setShowDirectRegisterDialog(false);

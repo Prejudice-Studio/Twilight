@@ -533,7 +533,7 @@ export default function InviteCenterPage() {
                           </Badge>
                         )}
                         <Badge variant="outline" className="text-[10px]">
-                          {code.days <= 0 ? "永久" : `${code.days} 天`}
+                          {code.days <= 0 ? "按上限" : `${code.days} 天`}
                         </Badge>
                       </div>
                       <p className="mt-1 text-[11px] text-muted-foreground">

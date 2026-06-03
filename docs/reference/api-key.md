@@ -186,7 +186,7 @@ curl -X GET "https://your-domain.com/api/v1/apikey/status" \
 }
 ```
 
-> `expired_at` 为 0 表示永久 / 未设置到期。是否已过期可由调用方对照当前时间判断；账号被管理员禁用或到期失活时，`active` 会为 `false`，且后续认证会直接返回 403/401。
+> `expired_at=-1` 表示永久；`expired_at=0` 表示未设置到期 / 无 Emby 权益哨兵；正数为 Unix 秒。是否已过期可由调用方对照当前时间判断；账号被管理员禁用或到期失活时，`active` 会为 `false`，且后续认证会直接返回 403/401。
 
 ### 5.2 账号管理
 

@@ -77,6 +77,7 @@ export interface UserInfo {
   bgm_sync_ready?: boolean;
   created_at?: string | number;
   register_time?: number;
+  emby_grant_locked?: boolean;
   registration_source?: string;
   registration_source_name?: string;
   registration_code?: string;
@@ -356,9 +357,6 @@ export interface RegisterAvailability {
   emby_direct_register_enabled: boolean;
   // 管理员单值固定的开通天数（-1 永久）；客户端只读
   emby_direct_register_days: number;
-  // 兼容老前端：等值单项数组，恒不允许自定义
-  emby_direct_register_day_options?: number[];
-  emby_direct_register_allow_custom_days?: boolean;
   emby_user_limit?: number;
   emby_bound_users?: number;
 }

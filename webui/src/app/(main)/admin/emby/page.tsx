@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Server,
@@ -356,10 +356,6 @@ export default function AdminEmbyPage() {
     );
   };
 
-  useEffect(() => {
-    void handleLoadUsers();
-  }, [handleLoadUsers]);
-
   return (
     <motion.div
       variants={container}
@@ -612,7 +608,7 @@ export default function AdminEmbyPage() {
               </div>
             </div>
           </CardHeader>
-          {embyData && (
+          {embyData ? (
             <CardContent className="space-y-4">
               {/* Summary */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -776,6 +772,12 @@ export default function AdminEmbyPage() {
                   </div>
                 </div>
               )}
+            </CardContent>
+          ) : (
+            <CardContent>
+              <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                Emby 用户列表不会自动拉取。需要对比或清理时，点击“拉取数据”手动加载。
+              </div>
             </CardContent>
           )}
         </Card>

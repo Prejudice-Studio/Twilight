@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/prejudice-studio/twilight/internal/store"
@@ -97,9 +98,13 @@ func (a *App) handleBatchDeleteUsers(w http.ResponseWriter, r *http.Request, _ P
 			addBatchOutcomeWithCode(result, uid, ErrUserProtected, fmt.Errorf("cannot batch delete protected account: %s", a.protectedUserReason(target)))
 			continue
 		}
-		if deleteEmby && a.cfg().EmbyURL != "" {
-			if target.EmbyID != "" {
-				if err := a.embyDelete(r.Context(), "/Users/"+urlPathEscape(target.EmbyID)); err != nil {
+		if deleteEmby && target.EmbyID != "" {
+			if !a.embyConfigured() {
+				addBatchOutcomeWithCode(result, uid, ErrEmbyNotConfigured, fmt.Errorf("delete_emby: emby not configured"))
+				continue
+			}
+			if err := a.embyDelete(r.Context(), "/Users/"+urlPathEscape(target.EmbyID)); err != nil {
+				if !strings.Contains(err.Error(), "remote status 404") {
 					addBatchOutcome(result, uid, err)
 					continue
 				}

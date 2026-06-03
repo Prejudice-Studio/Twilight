@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -64,20 +65,17 @@ func (a *App) handleBindConfirmSecure(w http.ResponseWriter, r *http.Request, _ 
 		failWithCode(w, http.StatusForbidden, ErrTGBindGroupMembershipRequired, "绑定前需要先加入指定 Telegram 群组/频道: "+strings.Join(missing, ", "))
 		return
 	}
-	bind.Confirmed = true
-	bind.TelegramID = telegramID
-	bind.TelegramUsername = strings.TrimSpace(stringValue(payload, "telegram_username"))
-	_ = a.store().UpsertBindCode(bind)
-	if bind.UID != 0 {
-		_, err := a.store().UpdateUser(bind.UID, func(u *store.User) error {
-			u.TelegramID = telegramID
-			u.TelegramUsername = bind.TelegramUsername
-			return nil
-		})
-		if statusFromError(w, err) {
-			return
-		}
-		_ = a.store().DeleteBindCode(code)
+	_, _, _, err := a.store().ConfirmBindCodeAtomic(code, telegramID, stringValue(payload, "telegram_username"), time.Now().Unix())
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrExpired) {
+		failWithCode(w, http.StatusNotFound, ErrTGBindCodeNotFound, "绑定码不存在或已过期")
+		return
+	}
+	if errors.Is(err, store.ErrConflict) {
+		failWithCode(w, http.StatusConflict, ErrTGBindTargetTaken, "该 Telegram 已绑定到其他账号或绑定码状态已变化")
+		return
+	}
+	if statusFromError(w, err) {
+		return
 	}
 	ok(w, "绑定已确认", map[string]any{"code": code, "confirmed": true})
 }

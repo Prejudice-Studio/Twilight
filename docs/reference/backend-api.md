@@ -449,6 +449,8 @@ curl -X GET "http://localhost:5000/api/v1/users/check-available?username=newuser
 
 `GET /users/telegram/register/bind-code/status` — 轮询绑定码状态（公开，三层防御见上文限流章节）。
 
+常见响应字段：`status`（`waiting` / `confirmed` / `expired` / `not_found` / `invalid_format` / `invalid_scene`）、`confirmed`、`terminal`、`expires_in`、`telegram_id`、`telegram_username`、`message`。过期绑定码会被清理；注册提交时，后端会在同一把 store 写锁内消费已确认绑定码、复检 Telegram ID 唯一性并创建用户。
+
 `POST /users/me/telegram/bind-confirm` — 注册流程中确认绑定（路由为 `AuthPublic`，由绑定码本身承载身份）。
 请求体：
 
@@ -577,6 +579,9 @@ curl -X PUT "http://localhost:5000/api/v1/users/me" \
 `POST /users/me/emby/unbind`
 
 - 认证：登录用户（`AuthUser`）
+- 限制：如果用户记录 `emby_grant_locked=true`，说明该账号曾通过注册码、白名单码、邀请码、后台授予、Telegram 面板授予或自助创建获得 Emby 注册资格，自助解绑会返回 `403` + `EMBY_UNBIND_FORBIDDEN`。该判定只看用户自身字段，不依赖注册码使用记录或邀请关系，删除卡码、清理卡码使用记录、断开邀请关系都不会解除锁。
+- 自助解绑会先调用 Emby API 禁用远端账号。远端账号不存在时允许清理本地绑定；远端存在但禁用失败时返回 `502` + `EMBY_DISABLE_FAILED`，并保留本地绑定，避免产生仍可登录的孤儿 Emby 账号。
+- 管理员解绑 / 强制解绑仍是管理员特权，也会同步禁用远端 Emby；这些操作不会清除 `emby_grant_locked`，被解绑用户不能借此再次自助创建远端 Emby。
 
 ```bash
 curl -X POST "http://localhost:5000/api/v1/users/me/emby/unbind" \
@@ -986,9 +991,11 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/123/disable" \
 
 `POST /admin/users/{uid}/force-unbind` — 强制解绑（处理冲突场景）。
 
+管理员解绑 / 强制解绑属于管理员特权操作，会先禁用远端 Emby 账号，再清空本地绑定字段；远端存在但禁用失败时不会清本地绑定。该操作不会清除用户记录上的 `emby_grant_locked`。因此被解绑用户若原本来自注册码、邀请码、后台授予、Telegram 授予或自助创建，仍不能通过自助解绑/自助开通流程重复创建 Emby 账号。
+
 #### 续期用户 / 取消永久
 
-`POST /admin/users/{uid}/renew` — 管理员为指定用户续期。请求体：
+`POST /admin/users/{uid}/renew` — 管理员为指定用户续期。`days=-1` 表示永久，`days=0` 按 30 天处理。请求体：
 
 ```json
 { "days": 30 }

@@ -119,6 +119,7 @@ type User struct {
 	BGMToken           string   `json:"bgm_token,omitempty"`
 	CreatedAt          int64    `json:"created_at"`
 	RegisterTime       int64    `json:"register_time"`
+	EmbyGrantLocked    bool     `json:"emby_grant_locked"`
 	RegistrationSource string   `json:"registration_source,omitempty"`
 	RegistrationCode   string   `json:"registration_code,omitempty"`
 	PendingEmby        bool     `json:"pending_emby"`
@@ -824,6 +825,12 @@ func (s *State) ensure() {
 	if s.Users == nil {
 		s.Users = map[int64]User{}
 	}
+	for uid, u := range s.Users {
+		if !u.EmbyGrantLocked && (u.PendingEmby || strings.TrimSpace(u.RegistrationSource) != "" || strings.TrimSpace(u.RegistrationCode) != "") {
+			u.EmbyGrantLocked = true
+			s.Users[uid] = u
+		}
+	}
 	if s.APIKeys == nil {
 		s.APIKeys = map[int64]APIKey{}
 	}
@@ -1458,10 +1465,8 @@ func (s *Store) CreateUser(u User) (User, error) {
 	defer s.mu.Unlock()
 	var created User
 	err := s.mutateAndSaveLocked(func() error {
-		for _, existing := range s.state.Users {
-			if strings.EqualFold(existing.Username, u.Username) {
-				return ErrConflict
-			}
+		if s.usernameExistsLocked(u.Username) || s.telegramIDTakenLocked(u.TelegramID, 0) {
+			return ErrConflict
 		}
 		now := time.Now().Unix()
 		u.UID = s.state.NextUserID
@@ -1486,16 +1491,35 @@ func (s *Store) CreateUser(u User) (User, error) {
 	return created, nil
 }
 
+func (s *Store) usernameExistsLocked(username string) bool {
+	for _, existing := range s.state.Users {
+		if strings.EqualFold(existing.Username, username) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Store) telegramIDTakenLocked(telegramID, allowedUID int64) bool {
+	if telegramID == 0 {
+		return false
+	}
+	for _, existing := range s.state.Users {
+		if existing.TelegramID == telegramID && existing.UID != allowedUID {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Store) CreateUserWithRegCode(u User, regCode string, telegramID int64) (User, RegCode, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var created User
 	var consumed RegCode
 	err := s.mutateAndSaveLocked(func() error {
-		for _, existing := range s.state.Users {
-			if strings.EqualFold(existing.Username, u.Username) {
-				return ErrConflict
-			}
+		if s.usernameExistsLocked(u.Username) || s.telegramIDTakenLocked(u.TelegramID, 0) || s.telegramIDTakenLocked(telegramID, 0) {
+			return ErrConflict
 		}
 		now := time.Now().Unix()
 		reg, err := s.consumableRegCodeLocked(regCode, now)
@@ -1527,6 +1551,85 @@ func (s *Store) CreateUserWithRegCode(u User, regCode string, telegramID int64) 
 		return User{}, RegCode{}, err
 	}
 	return created, consumed, nil
+}
+
+func (s *Store) CreateUserForRegistration(u User, regCode, telegramBindCode string, now int64, fn func(*User, RegCode, BindCode) error) (User, RegCode, BindCode, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var created User
+	var consumed RegCode
+	var consumedBind BindCode
+	err := s.mutateAndSaveLocked(func() error {
+		if s.usernameExistsLocked(u.Username) {
+			return ErrConflict
+		}
+		if now == 0 {
+			now = time.Now().Unix()
+		}
+		if telegramBindCode != "" {
+			bind, ok := s.state.BindCodes[telegramBindCode]
+			if !ok {
+				return ErrNotFound
+			}
+			if bind.ExpiresAt > 0 && bind.ExpiresAt <= now {
+				delete(s.state.BindCodes, telegramBindCode)
+				return ErrExpired
+			}
+			if bind.Scene != "register" || !bind.Confirmed || bind.TelegramID == 0 {
+				return ErrConflict
+			}
+			if s.telegramIDTakenLocked(bind.TelegramID, 0) {
+				return ErrConflict
+			}
+			u.TelegramID = bind.TelegramID
+			u.TelegramUsername = bind.TelegramUsername
+			consumedBind = bind
+		} else if s.telegramIDTakenLocked(u.TelegramID, 0) {
+			return ErrConflict
+		}
+
+		if regCode != "" {
+			reg, err := s.consumableRegCodeLocked(regCode, now)
+			if err != nil {
+				return err
+			}
+			if reg.Type != 1 || reg.IsDecoy || !regCodeMatchesUser(reg, u) {
+				return ErrNotFound
+			}
+			consumed = reg
+		}
+
+		u.UID = s.state.NextUserID
+		s.state.NextUserID++
+		if u.CreatedAt == 0 {
+			u.CreatedAt = now
+		}
+		if u.RegisterTime == 0 {
+			u.RegisterTime = now
+		}
+		if u.ExpiredAt == 0 {
+			u.ExpiredAt = -1
+		}
+		u.Active = true
+		if consumed.Code != "" {
+			consumed = s.consumeRegCodeLocked(consumed, u.UID, u.TelegramID)
+		}
+		if fn != nil {
+			if err := fn(&u, consumed, consumedBind); err != nil {
+				return err
+			}
+		}
+		if telegramBindCode != "" {
+			delete(s.state.BindCodes, telegramBindCode)
+		}
+		s.state.Users[u.UID] = u
+		created = u
+		return nil
+	})
+	if err != nil {
+		return User{}, RegCode{}, BindCode{}, err
+	}
+	return created, consumed, consumedBind, nil
 }
 
 func regCodeMatchesUser(reg RegCode, user User) bool {
@@ -1731,6 +1834,7 @@ func (s *Store) BindUserEmbyAtomic(uid int64, embyID, embyUsername string, force
 					}
 					other.EmbyID = ""
 					other.EmbyUsername = ""
+					other.PendingEmby = true
 					s.state.Users[other.UID] = other
 					displaced = other.UID
 					break
@@ -1739,6 +1843,10 @@ func (s *Store) BindUserEmbyAtomic(uid int64, embyID, embyUsername string, force
 		}
 		u.EmbyID = embyID
 		u.EmbyUsername = embyUsername
+		if embyID != "" {
+			u.PendingEmby = false
+			u.PendingEmbyDays = nil
+		}
 		s.state.Users[uid] = u
 		updated = u
 		return nil
@@ -2192,6 +2300,63 @@ func (s *Store) BindCode(code string) (BindCode, bool) {
 	return b, ok
 }
 
+func (s *Store) ConfirmBindCodeAtomic(code string, telegramID int64, telegramUsername string, now int64) (BindCode, User, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var confirmed BindCode
+	var updated User
+	var userUpdated bool
+	err := s.mutateAndSaveLocked(func() error {
+		bind, ok := s.state.BindCodes[code]
+		if !ok {
+			return ErrNotFound
+		}
+		if now == 0 {
+			now = time.Now().Unix()
+		}
+		if bind.ExpiresAt > 0 && bind.ExpiresAt <= now {
+			delete(s.state.BindCodes, code)
+			return ErrExpired
+		}
+		if telegramID == 0 {
+			return ErrConflict
+		}
+		if bind.Confirmed && bind.TelegramID != 0 {
+			if bind.TelegramID != telegramID {
+				return ErrConflict
+			}
+			confirmed = bind
+			return nil
+		}
+		if s.telegramIDTakenLocked(telegramID, bind.UID) {
+			return ErrConflict
+		}
+		bind.Confirmed = true
+		bind.TelegramID = telegramID
+		bind.TelegramUsername = strings.TrimSpace(telegramUsername)
+		confirmed = bind
+		if bind.UID != 0 {
+			u, ok := s.state.Users[bind.UID]
+			if !ok {
+				return ErrNotFound
+			}
+			u.TelegramID = telegramID
+			u.TelegramUsername = bind.TelegramUsername
+			s.state.Users[u.UID] = u
+			updated = u
+			userUpdated = true
+			delete(s.state.BindCodes, code)
+			return nil
+		}
+		s.state.BindCodes[code] = bind
+		return nil
+	})
+	if err != nil {
+		return BindCode{}, User{}, false, err
+	}
+	return confirmed, updated, userUpdated, nil
+}
+
 func (s *Store) DeleteBindCode(code string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2405,6 +2570,58 @@ func (s *Store) ConsumeInviteCode(code string, childUID int64) (InviteCode, erro
 	return consumed, nil
 }
 
+func (s *Store) ConsumeInviteCodeAndUpdateUser(code string, childUID int64, fn func(*User, InviteCode) error) (User, InviteCode, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var updated User
+	var consumed InviteCode
+	err := s.mutateAndSaveLocked(func() error {
+		u, okUser := s.state.Users[childUID]
+		if !okUser {
+			return ErrNotFound
+		}
+		c, ok := s.state.InviteCodes[code]
+		if !ok || !c.Active {
+			return ErrNotFound
+		}
+		if c.UseCountLimit != -1 && c.UseCount >= c.UseCountLimit {
+			return ErrConflict
+		}
+		now := time.Now().Unix()
+		if c.ExpiredAt > 0 && c.ExpiredAt <= now {
+			return ErrExpired
+		}
+		if c.InviterUID != 0 && c.InviterUID == childUID {
+			return ErrConflict
+		}
+		if _, exists := s.state.InviteRelations[childUID]; exists {
+			return ErrConflict
+		}
+		c.UseCount++
+		c.Used = true
+		c.UsedByUID = childUID
+		c.UsedAt = now
+		if c.UseCountLimit != -1 && c.UseCount >= c.UseCountLimit {
+			c.Active = false
+		}
+		s.state.InviteCodes[code] = c
+		s.state.InviteRelations[childUID] = InviteRelation{ParentUID: c.InviterUID, ChildUID: childUID, Code: code, CreatedAt: now}
+		if fn != nil {
+			if err := fn(&u, c); err != nil {
+				return err
+			}
+		}
+		s.state.Users[childUID] = u
+		updated = u
+		consumed = c
+		return nil
+	})
+	if err != nil {
+		return User{}, InviteCode{}, err
+	}
+	return updated, consumed, nil
+}
+
 func (s *Store) InviteRelations() []InviteRelation {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -2496,6 +2713,40 @@ func (s *Store) ConsumeRegCode(code string, uid, telegramID int64) (RegCode, err
 		return RegCode{}, err
 	}
 	return consumed, nil
+}
+
+func (s *Store) ConsumeRegCodeAndUpdateUser(code string, uid, telegramID int64, fn func(*User, RegCode) error) (User, RegCode, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var updated User
+	var consumed RegCode
+	err := s.mutateAndSaveLocked(func() error {
+		u, ok := s.state.Users[uid]
+		if !ok {
+			return ErrNotFound
+		}
+		now := time.Now().Unix()
+		r, err := s.consumableRegCodeLocked(code, now)
+		if err != nil {
+			return err
+		}
+		if telegramID == 0 {
+			telegramID = u.TelegramID
+		}
+		consumed = s.consumeRegCodeLocked(r, uid, telegramID)
+		if fn != nil {
+			if err := fn(&u, consumed); err != nil {
+				return err
+			}
+		}
+		s.state.Users[uid] = u
+		updated = u
+		return nil
+	})
+	if err != nil {
+		return User{}, RegCode{}, err
+	}
+	return updated, consumed, nil
 }
 
 func (s *Store) consumableRegCodeLocked(code string, now int64) (RegCode, error) {
@@ -2903,10 +3154,11 @@ func (s *Store) ResetTelegramBotOffset() error {
 }
 
 var (
-	ErrNotFound  = errors.New("not found")
-	ErrConflict  = errors.New("conflict")
-	ErrExpired   = errors.New("expired")
-	ErrLastAdmin = errors.New("last admin")
+	ErrNotFound    = errors.New("not found")
+	ErrConflict    = errors.New("conflict")
+	ErrExpired     = errors.New("expired")
+	ErrLastAdmin   = errors.New("last admin")
+	ErrGrantLocked = errors.New("emby grant locked")
 )
 
 func randomKey(prefix string, id, now int64) string {

@@ -246,12 +246,32 @@ func (a *App) handleEmbyResetBindings(w http.ResponseWriter, r *http.Request, _ 
 		failWithCode(w, http.StatusBadRequest, ErrAdminEmbyResetConfirm, "请输入确认短语 RESET_ALL_EMBY 后再执行")
 		return
 	}
-	count := 0
+	targets := []store.User{}
 	for _, u := range a.store().ListUsers() {
 		if u.EmbyID == "" && u.EmbyUsername == "" && !u.PendingEmby {
 			continue
 		}
-		if _, err := a.store().UpdateUser(u.UID, func(u *store.User) error {
+		targets = append(targets, u)
+	}
+	remoteDisabledByUID := map[int64]bool{}
+	for _, u := range targets {
+		disabled, proceed := a.disableRemoteEmbyForUnbind(w, r, u.EmbyID)
+		if !proceed {
+			return
+		}
+		remoteDisabledByUID[u.UID] = disabled
+	}
+	count := 0
+	remoteDisabled := 0
+	failedItems := []map[string]any{}
+	for _, target := range targets {
+		if remoteDisabledByUID[target.UID] {
+			remoteDisabled++
+		}
+		if _, err := a.store().UpdateUser(target.UID, func(u *store.User) error {
+			if target.EmbyID != "" && u.EmbyID != "" && u.EmbyID != target.EmbyID {
+				return store.ErrConflict
+			}
 			u.EmbyID = ""
 			u.EmbyUsername = ""
 			u.PendingEmby = false
@@ -259,9 +279,11 @@ func (a *App) handleEmbyResetBindings(w http.ResponseWriter, r *http.Request, _ 
 			return nil
 		}); err == nil {
 			count++
+		} else {
+			failedItems = append(failedItems, map[string]any{"uid": target.UID, "username": target.Username, "error": err.Error()})
 		}
 	}
-	ok(w, "bindings reset", map[string]any{"count": count})
+	ok(w, "bindings reset", map[string]any{"count": count, "remote_disabled": remoteDisabled, "failed": failedItems})
 }
 
 func (a *App) handleEmbyDeleteUnlinked(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -368,23 +390,27 @@ func (a *App) handleAdminBulkExpire(w http.ResponseWriter, r *http.Request, _ Pa
 		failWithCode(w, http.StatusBadRequest, ErrAdminBulkExpireConfirm, "请输入确认短语 BULK_EXPIRE_OK 后再执行")
 		return
 	}
-	expiredAt := int64(intValue(payload, "expired_at", 0))
+	expiredAt := numeric(payload["expired_at"])
 	if expiredAt == 0 {
-		days := intValue(payload, "days", 0)
-		if days <= 0 {
-			expiredAt = -1
+		if _, ok := payload["days"]; !ok {
+			failWithCode(w, http.StatusBadRequest, ErrAdminBulkExpireInvalid, "必须提供 expired_at 或 days")
+			return
+		}
+		days := normalizeRegCodeDays(intValue(payload, "days", 0))
+		if days > 36500 {
+			failWithCode(w, http.StatusBadRequest, ErrAdminBulkExpireDaysTooLarge, "过期天数超出允许范围")
+			return
+		}
+		if days < 0 {
+			expiredAt = permanentExpiryUnix
 		} else {
-			if days > 36500 {
-				failWithCode(w, http.StatusBadRequest, ErrAdminBulkExpireDaysTooLarge, "过期天数超出允许范围")
-				return
-			}
 			expiredAt = time.Now().AddDate(0, 0, days).Unix()
 		}
 	}
 	if expiryIsPermanent(expiredAt) {
 		expiredAt = permanentExpiryUnix
 	}
-	if expiredAt == 0 || (expiredAt < -1) {
+	if expiredAt == 0 || expiredAt < -1 {
 		failWithCode(w, http.StatusBadRequest, ErrAdminBulkExpireInvalid, "过期时间不合法")
 		return
 	}

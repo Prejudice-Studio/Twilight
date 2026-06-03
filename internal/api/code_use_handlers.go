@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -114,19 +115,11 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 		if days <= 0 || days > maxDays {
 			days = maxDays
 		}
-		if _, err := a.store().ConsumeInviteCode(code, p.User.UID); statusFromError(w, err) {
-			return
-		}
 	}
-	var reg store.RegCode
-	if source == "regcode" {
-		var err error
-		reg, err = a.store().ConsumeRegCode(code, p.User.UID, p.User.TelegramID)
-		if statusFromError(w, err) {
-			return
+	updateUser := func(u *store.User, reg store.RegCode) error {
+		if grantsEmby && u.EmbyID == "" && u.EmbyGrantLocked && !p.User.PendingEmby {
+			return store.ErrGrantLocked
 		}
-	}
-	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error {
 		if replacesPendingEntitlement {
 			u.PendingEmby = false
 			u.PendingEmbyDays = nil
@@ -168,7 +161,20 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 			renewExpiryAndReactivate(u, addDaysToExpiry(u.ExpiredAt, days, time.Now()))
 		}
 		return nil
-	})
+	}
+	var u store.User
+	var err error
+	if source == "invite" {
+		u, inviteForUse, err = a.store().ConsumeInviteCodeAndUpdateUser(code, p.User.UID, func(u *store.User, _ store.InviteCode) error {
+			return updateUser(u, store.RegCode{})
+		})
+	} else {
+		u, _, err = a.store().ConsumeRegCodeAndUpdateUser(code, p.User.UID, p.User.TelegramID, updateUser)
+	}
+	if errors.Is(err, store.ErrGrantLocked) {
+		failWithCode(w, http.StatusBadRequest, ErrCodeRegistrationGrantAlreadyUsed, "当前账号已经使用过 Emby 注册资格，不能重复使用注册码或邀请码")
+		return
+	}
 	if statusFromError(w, err) {
 		return
 	}

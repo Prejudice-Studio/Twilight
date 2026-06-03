@@ -160,6 +160,7 @@ export const ERROR_CODE_FRIENDLY: Partial<Record<ErrCode, string>> = {
   EMBY_AUTH_FAILED: "Emby 用户名或密码错误",
   EMBY_ACCOUNT_UNLINKED: "Emby 账号未关联",
   EMBY_UNBIND_FORBIDDEN: "当前账号不能自助解绑 Emby",
+  EMBY_DISABLE_FAILED: "禁用远端 Emby 账号失败，已保留本地绑定",
   EMBY_ACCOUNT_CONFLICT: "目标 Emby 账号已被其它用户绑定",
   EMBY_CAPACITY_REACHED: "已达到 Emby 用户上限",
   EMBY_MISSING_CREDENTIALS: "请填写 Emby 用户名和密码",

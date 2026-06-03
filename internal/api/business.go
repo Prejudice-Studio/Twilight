@@ -197,6 +197,7 @@ func normalizeRegCodeDays(days int) int {
 func markRegistrationGrant(u *store.User, source, code string) {
 	source = strings.TrimSpace(source)
 	code = strings.TrimSpace(code)
+	u.EmbyGrantLocked = true
 	if source != "" && u.RegistrationSource == "" {
 		u.RegistrationSource = source
 	}
@@ -223,34 +224,27 @@ func registrationSourceLabel(source string) string {
 }
 
 func (a *App) userHasEmbyGrantHistory(u store.User) bool {
-	if strings.TrimSpace(u.RegistrationSource) != "" || strings.TrimSpace(u.RegistrationCode) != "" {
-		return true
-	}
-	if _, ok := a.store().ParentOf(u.UID); ok {
-		return true
-	}
-	for _, code := range a.store().ListRegCodes() {
-		if code.Type != 1 && code.Type != 3 {
-			continue
-		}
-		for _, uid := range regcodeUsedByUIDs(code) {
-			if uid == u.UID {
-				return true
-			}
-		}
-		if u.TelegramID != 0 {
-			for _, telegramID := range code.UsedByTelegramIDs {
-				if telegramID == u.TelegramID {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	return u.EmbyGrantLocked
 }
 
 func (a *App) userCanSelfUnbindEmby(u store.User) bool {
 	return !a.userHasEmbyGrantHistory(u)
+}
+
+func (a *App) disableRemoteEmbyForUnbind(w http.ResponseWriter, r *http.Request, embyID string) (bool, bool) {
+	if strings.TrimSpace(embyID) == "" {
+		return false, true
+	}
+	if !a.embyConfigured() {
+		failWithCode(w, http.StatusBadGateway, ErrEmbyNotConfigured, "Emby 未配置，无法安全解绑远端账号")
+		return false, false
+	}
+	disabled, err := a.embyDisableUserForUnbind(r.Context(), embyID)
+	if err != nil {
+		failWithCode(w, http.StatusBadGateway, ErrEmbyDisableFailed, "禁用 Emby 账号失败，已保留本地绑定以避免产生可继续登录的孤儿账号")
+		return false, false
+	}
+	return disabled, true
 }
 
 // userExpiredOnly 判定"Active=false 是否纯由 ExpiredAt 触发"。check_expired

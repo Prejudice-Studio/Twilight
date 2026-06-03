@@ -3496,7 +3496,7 @@ func TestRegisterCodeLimitConsumesRegcodeAtomically(t *testing.T) {
 	if !ok || !user.PendingEmby || user.PendingEmbyDays == nil || *user.PendingEmbyDays != 7 {
 		t.Fatalf("registered user did not receive pending entitlement: %#v days=%#v", user, user.PendingEmbyDays)
 	}
-	if user.RegistrationSource != registrationSourceRegCode || user.RegistrationCode != "REGISTER-OK" {
+	if !user.EmbyGrantLocked || user.RegistrationSource != registrationSourceRegCode || user.RegistrationCode != "REGISTER-OK" {
 		t.Fatalf("register code source was not persisted on user: %#v", user)
 	}
 	reg, ok := app.store().RegCode("REGISTER-OK")
@@ -3524,7 +3524,7 @@ func TestRegisterCodeLimitConsumesRegcodeAtomically(t *testing.T) {
 
 func TestRegcodeGrantHistoryBlocksSelfUnbindAndRepeatRegistrationGrant(t *testing.T) {
 	app := newTestApp(t)
-	user, err := app.store().CreateUser(store.User{Username: "grant-user", Role: store.RoleNormal, Active: true, EmbyID: "emby-old", EmbyUsername: "grant-user", RegistrationSource: registrationSourceRegCode, RegistrationCode: "REG-OLD"})
+	user, err := app.store().CreateUser(store.User{Username: "grant-user", Role: store.RoleNormal, Active: true, EmbyID: "emby-old", EmbyUsername: "grant-user", EmbyGrantLocked: true, RegistrationSource: registrationSourceRegCode, RegistrationCode: "REG-OLD"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3564,6 +3564,163 @@ func TestRegcodeGrantHistoryBlocksSelfUnbindAndRepeatRegistrationGrant(t *testin
 	reg, _ := app.store().RegCode("REG-NEW-GRANT")
 	if reg.UseCount != 0 || !reg.Active {
 		t.Fatalf("blocked repeat register code was consumed: %#v", reg)
+	}
+}
+
+func TestRegcodeUsageRecordsDoNotBlockSelfUnbindWithoutUserGrantLock(t *testing.T) {
+	app := newTestApp(t)
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/Users/emby-usage":
+			_, _ = w.Write([]byte(`{"Id":"emby-usage","Name":"usage-only","Policy":{"IsDisabled":false}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/Users/emby-usage/Policy":
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+	app.cfg().EmbyToken = "test-token"
+	user, err := app.store().CreateUser(store.User{Username: "usage-only", Role: store.RoleNormal, Active: true, EmbyID: "emby-usage", EmbyUsername: "usage-only"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store().UpsertRegCode(store.RegCode{Code: "OLD-USAGE", Type: 1, Days: 30, ValidityTime: -1, UseCountLimit: 1, UseCount: 1, UsedBy: user.UID, UsedByUIDs: []int64{user.UID}, Active: false}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/emby/unbind", nil)
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, principal{User: user}))
+	rr := httptest.NewRecorder()
+	app.handleUnbindEmby(rr, req, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("usage records alone should not block self-unbind, status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	updated, _ := app.store().User(user.UID)
+	if updated.EmbyID != "" {
+		t.Fatalf("self-unbind did not clear Emby binding: %#v", updated)
+	}
+}
+
+func TestDirectEmbyRegistrationRecordsRegcodeEquivalentGrant(t *testing.T) {
+	app := newTestApp(t)
+	policyPosts := 0
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/Users":
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/Users/New":
+			_, _ = w.Write([]byte(`{"Id":"direct-emby","Name":"direct-emby"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/Users/direct-emby":
+			_, _ = w.Write([]byte(`{"Id":"direct-emby","Name":"direct-emby","Policy":{}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/Users/direct-emby/Password":
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/Users/direct-emby/Policy":
+			policyPosts++
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+	app.cfg().EmbyToken = "test-token"
+	app.cfg().EmbyDirectRegisterEnabled = true
+	app.cfg().EmbyDirectRegisterDays = 7
+
+	user, err := app.store().CreateUser(store.User{Username: "direct-user", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/emby/register", strings.NewReader(`{"emby_username":"direct-emby","emby_password":"Strong123"}`))
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, principal{User: user}))
+	rr := httptest.NewRecorder()
+	app.handleRegisterEmby(rr, req, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("direct register status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	updated, _ := app.store().User(user.UID)
+	if updated.EmbyID != "direct-emby" || !updated.EmbyGrantLocked || updated.RegistrationSource != registrationSourceRegCode {
+		t.Fatalf("direct register did not persist regcode-equivalent grant: %#v", updated)
+	}
+	if policyPosts == 0 {
+		t.Fatal("direct register did not sync Emby policy")
+	}
+}
+
+func TestSelfUnbindDisablesRemoteEmbyBeforeClearingLocalBinding(t *testing.T) {
+	app := newTestApp(t)
+	remoteDisabled := false
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/Users/emby-unbind":
+			_, _ = w.Write([]byte(`{"Id":"emby-unbind","Name":"unbind","Policy":{"IsDisabled":false}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/Users/emby-unbind/Policy":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			remoteDisabled = boolish(payload["IsDisabled"])
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+	app.cfg().EmbyToken = "test-token"
+	user, err := app.store().CreateUser(store.User{Username: "unbind-user", Role: store.RoleNormal, Active: true, EmbyID: "emby-unbind", EmbyUsername: "unbind"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/emby/unbind", nil)
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, principal{User: user}))
+	rr := httptest.NewRecorder()
+	app.handleUnbindEmby(rr, req, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("self unbind status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !remoteDisabled {
+		t.Fatal("self unbind did not disable remote Emby user")
+	}
+	updated, _ := app.store().User(user.UID)
+	if updated.EmbyID != "" || updated.EmbyUsername != "" {
+		t.Fatalf("self unbind did not clear local binding: %#v", updated)
+	}
+}
+
+func TestSelfUnbindKeepsLocalBindingWhenRemoteDisableFails(t *testing.T) {
+	app := newTestApp(t)
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/Users/emby-fail":
+			_, _ = w.Write([]byte(`{"Id":"emby-fail","Name":"fail","Policy":{"IsDisabled":false}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/Users/emby-fail/Policy":
+			http.Error(w, `{"error":"boom"}`, http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+	app.cfg().EmbyToken = "test-token"
+	user, err := app.store().CreateUser(store.User{Username: "unbind-fail", Role: store.RoleNormal, Active: true, EmbyID: "emby-fail", EmbyUsername: "fail"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/emby/unbind", nil)
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, principal{User: user}))
+	rr := httptest.NewRecorder()
+	app.handleUnbindEmby(rr, req, nil)
+	if rr.Code != http.StatusBadGateway || !strings.Contains(rr.Body.String(), string(ErrEmbyDisableFailed)) {
+		t.Fatalf("remote disable failure should block unbind, status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	updated, _ := app.store().User(user.UID)
+	if updated.EmbyID != "emby-fail" || updated.EmbyUsername != "fail" {
+		t.Fatalf("failed remote disable cleared local binding: %#v", updated)
 	}
 }
 

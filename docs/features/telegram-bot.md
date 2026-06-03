@@ -61,7 +61,7 @@ Bot 由二进制子命令 `bot`（或 `all`）启动，轮询逻辑见 `internal
 | ---- | ---- |
 | 刷新 | 重新拉取并展示用户当前状态。 |
 | 启用 / 禁用 Web 账号 | 切换账号 `Active`；如已绑定 Emby 且配置了服务器，会同步调整 Emby 用户启用状态。 |
-| 授予注册资格 | 为未绑定 Emby 的用户标记 `PendingEmby` 并设置有效天数（取自邀请默认天数 / 自由注册天数 / 兜底 30 天），仅在用户未绑定 Emby、未待开通且非受保护账号时出现。 |
+| 授予 7 天 / 30 天 / 365 天 / 永久 | 为未绑定 Emby 的用户标记 `PendingEmby`，写入 `emby_grant_locked=true`，并设置对应待补建天数；仅在用户未绑定 Emby、未待开通且非受保护账号时出现。 |
 | 删除用户 / 确认删除用户 | 两步确认；确认后删除用户并清除其会话。 |
 | 移出群组 / 封禁群组 | 对已绑定 Telegram 的目标执行群组踢出 / 封禁，仅在目标已绑定 Telegram 时出现。 |
 
@@ -72,6 +72,7 @@ Bot 由二进制子命令 `bot`（或 `all`）启动，轮询逻辑见 `internal
 - 每次按钮点击都会重新执行 `telegramAdminID` 校验；非管理员点击会被拒绝并清理消息。
 - 面板有效期为 1 分钟，无操作自动删除；每次操作会刷新过期时间。
 - 非管理员或匿名身份发起的越权指令，连同提示消息会在 30 秒后自动删除。
+- 删除 Emby 账号类操作会尊重用户记录上的 `emby_grant_locked`。通过注册码、白名单码、邀请码、后台授予、Telegram 授予或自助创建获得过 Emby 注册资格的账号，不能通过面板删除 Emby 后再次自助注册。
 
 面板文本可通过 `[Telegram].group_user_panel_template` 自定义，也可在 Web 后台配置页的 Telegram 分组中编辑。留空使用内置模板；未知占位符会原样保留，便于发现拼写错误。安全边界不变：模板不提供邮箱、Emby ID、Telegram ID、密码、Token 或服务器线路占位符。
 
@@ -88,7 +89,10 @@ Bot 由二进制子命令 `bot`（或 `all`）启动，轮询逻辑见 `internal
 | `{register_time}` / `{created_at}` | 注册时间 / 创建时间。 |
 | `{telegram_status}` / `{telegram_username}` | Telegram 绑定摘要 / Telegram 用户名。 |
 | `{emby_status}` / `{emby_username}` | 本地 Emby 绑定摘要 / 本地 Emby 用户名。 |
+| `{emby_bound_status}` / `{emby_bound}` | 本地 Emby 绑定状态 / 是否已绑定。 |
+| `{emby_unbind_allowed}` | 是否允许用户自助解绑 Emby。 |
 | `{pending_emby}` / `{pending_emby_days}` | 是否待补建 Emby / 待补建授权天数。 |
+| `{registration_source}` / `{registration_code}` | Emby 注册资格来源 / 对应卡码。 |
 | `{emby_remote_block}` | 完整 Emby 远端信息块，包含远端用户名、启用状态、权限、隐藏状态与最近活动。 |
 | `{emby_remote_status}` / `{emby_remote_username}` | 远端查询状态 / 远端用户名。 |
 | `{emby_remote_enabled}` / `{emby_remote_role}` / `{emby_remote_hidden}` | 远端启用状态 / 远端权限 / 是否隐藏。 |

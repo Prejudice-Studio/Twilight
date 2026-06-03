@@ -246,7 +246,7 @@ function AdminPanel({ active, data }: { active: string; data: DemoData }) {
     );
   }
   if (active === "regcodes") {
-    return <Card><CardHeader><CardTitle>注册码管理</CardTitle><CardDescription>模拟展示注册码、续期码、白名单码，不会创建或删除真实卡码。</CardDescription></CardHeader><CardContent className="space-y-3">{data.regcodes.map((code) => <div key={code.code} className="grid min-w-0 gap-2 rounded-xl border p-3 text-sm md:grid-cols-[minmax(0,1fr)_90px_90px_120px_auto]"><code className="break-all">{code.code}</code><Badge variant="outline">{code.type_name}</Badge><Badge variant={statusVariant(code.status)}>{code.status}</Badge><span>{code.days <= 0 ? "永久" : `${code.days} 天`}</span><Button size="sm" variant="outline" onClick={() => void postDemoAction("regcode-copy")}>模拟操作</Button></div>)}</CardContent></Card>;
+    return <Card><CardHeader><CardTitle>注册码管理</CardTitle><CardDescription>模拟展示注册码、续期码、白名单码，不会创建或删除真实卡码。</CardDescription></CardHeader><CardContent className="space-y-3">{data.regcodes.map((code) => <div key={code.code} className="grid min-w-0 gap-2 rounded-xl border p-3 text-sm md:grid-cols-[minmax(0,1fr)_90px_90px_120px_auto]"><code className="break-all">{code.code}</code><Badge variant="outline">{code.type_name}</Badge><Badge variant={statusVariant(code.status)}>{code.status}</Badge><span>{code.days < 0 ? "永久" : `${code.days || 30} 天`}</span><Button size="sm" variant="outline" onClick={() => void postDemoAction("regcode-copy")}>模拟操作</Button></div>)}</CardContent></Card>;
   }
   if (active === "scheduler") {
     return (

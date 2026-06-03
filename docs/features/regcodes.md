@@ -15,7 +15,7 @@
 | type / 来源 | 名称 | 使用入口 | 行为 |
 | ---- | ---- | -------- | ---- |
 | `1` | 注册码 | `POST /api/v1/users/register`、`POST /api/v1/users/me/use-code` | 公开注册时建系统账号并标记 `PendingEmby`（待补建 Emby）；已登录且未绑定 Emby 的用户用它将角色置为普通用户、按 `days` 写入 `PendingEmbyDays`，并续期账号有效期。 |
-| `2` | 续期码 | `POST /api/v1/users/me/renew`、`POST /api/v1/users/me/use-code` | 已登录用户续期；按 `days` 在原有效期基础上叠加，`days<=0` 表示永久。 |
+| `2` | 续期码 | `POST /api/v1/users/me/renew`、`POST /api/v1/users/me/use-code` | 已登录用户续期；按 `days` 在原有效期基础上叠加，`days<0` 表示永久，`days=0` 按 30 天处理。 |
 | `3` | 白名单码 | `POST /api/v1/users/me/use-code` | 将角色升为白名单（`RoleWhitelist`）、`Active=true`、有效期置为永久；未绑定 Emby 时同时标记 `PendingEmby`（永久天数）以补建 Emby 账号。 |
 | 邀请码（`source=invite`） | 邀请码 | `POST /api/v1/users/me/use-code` | 已登录且未绑定 Emby 的用户创建 Emby 账号并加入邀请树；天数受邀请人剩余有效期约束。详见 [邀请树](./invite.md)。 |
 
@@ -29,7 +29,7 @@
 | ---- | ---- |
 | `code` | 卡码字符串，状态文档中的键。新格式可由 `format` + `random_algorithm` 生成；旧卡码字符串继续原样可用。 |
 | `type` | 卡码类型：`1` 注册、`2` 续期、`3` 白名单。 |
-| `days` | 授予或增加的账号天数；读出时经 `normalizeRegCodeDays` 规范化，`0` 与负数统一返回 `-1`（永久）。 |
+| `days` | 授予或增加的账号天数；读出与消费时经 `normalizeRegCodeDays` 规范化，`0` 按 30 天处理，负数统一为 `-1`（永久）。 |
 | `validity_time` | 卡码自身有效期，单位「小时」；`-1` 表示永久。判定过期：`created_at + validity_time*3600 <= now`。 |
 | `use_count_limit` | 使用次数上限；`-1` 表示不限次数，正整数表示固定次数。 |
 | `use_count` | 已使用次数。 |
@@ -48,7 +48,7 @@
 创建接口 `handleCreateRegcodes`（`internal/api/regcode_handlers.go`）的校验口径：
 
 - `type`：必须在 `1`-`3` 之间，否则返回 `REGCODE_TYPE_INVALID`。
-- `days`：经 `normalizeRegCodeDays` 处理，`<=0` 一律规范化为 `-1`（永久）；正整数原样保留。
+- `days`：经 `normalizeRegCodeDays` 处理，`0` 规范化为 30 天，负数规范化为 `-1`（永久）；正整数原样保留。管理员要发永久码必须显式传 `-1`。
 - `validity_time`：传 `0` 自动转 `-1`；小于 `-1` 报错「卡码有效期只能为 -1 或正整数小时」。
 - `use_count_limit`：传 `0` 自动转 `1`；小于 `-1` 报错「使用次数上限只能为 -1 或正整数」。
 - `count`：批量生成数量，自动夹取到 `1`-`100`。
@@ -121,7 +121,8 @@
 - `ConsumeRegCode`（`internal/store/store.go`）先 `s.mu.Lock()`，再在 `mutateAndSaveLocked` 内依次调用 `consumableRegCodeLocked` 与 `consumeRegCodeLocked`，两步在同一把锁内不可分割。
 - `consumableRegCodeLocked` 校验：卡码存在且 `active`，否则 `ErrNotFound`；`use_count_limit != -1 && use_count >= use_count_limit` 则 `ErrConflict`（已用满）；`validity_time > 0 && created_at + validity_time*3600 <= now` 则 `ErrExpired`（已过期）。
 - `consumeRegCodeLocked` 执行：`use_count++`，记录 `used_by` / 去重写入 `used_by_uids` / `used_by_telegram_ids`；若达到次数上限则把 `active` 置为 `false`。
-- 公开注册路径用 `CreateUserWithRegCode`，把「用户名查重 + 建账号 + 消费注册码（仅限 type=1、非诱饵、用户名匹配）」也合并在同一把锁内一次完成。
+- 公开注册路径用 `CreateUserForRegistration`，把「用户名 / Telegram 唯一性查重 + 注册绑定码消费 + 建账号 + 消费注册码（仅限 type=1、非诱饵、用户名匹配）+ 写入用户级 Emby 授权锁」合并在同一把锁内一次完成。
+- 登录后使用卡码的路径使用 `ConsumeRegCodeAndUpdateUser` / `ConsumeInviteCodeAndUpdateUser`，把「卡码消费 + 邀请关系创建 + 用户权益更新」合并为一次状态写入；保存失败会整体回滚，不会留下“码已消耗但用户没拿到权益”的半状态。
 
 ## 使用入口
 
@@ -130,9 +131,10 @@
 `handleUseCode`（`internal/api/code_use_handlers.go`）接受 `reg_code` 或 `code` 字段，支持注册码、续期码、白名单码与邀请码，后端自动识别来源：
 
 - `check_only=true`：仅返回预览（类型、天数、确认文案、是否需要 Emby 用户名/密码 `requires_emby_credentials` 等），**不消费**卡码、不改账号。
-- 正式使用时按来源消费：邀请码走 `ConsumeInviteCode` 并建立邀请关系；注册码走 `ConsumeRegCode`。随后在一次 `UpdateUser` 内按 `type` 修改角色、`PendingEmby`/`PendingEmbyDays`、有效期等。
+- 正式使用时按来源消费：邀请码走 `ConsumeInviteCodeAndUpdateUser` 并建立邀请关系；注册码走 `ConsumeRegCodeAndUpdateUser`。消费、邀请关系和用户字段更新在同一次 store 写锁内完成。
 - 授予 Emby 资格的卡码（注册/白名单/邀请）在消费前会做 Emby 容量检查（`embyCapacityReachedExcluding`），超限返回 `EMBY_CAPACITY_REACHED`。
 - 已绑定 Emby 的账号使用注册/白名单/邀请码会被拒绝（`CODE_ALREADY_EMBY_BOUND`），应改用续期码。
+- 注册码、白名单码、邀请码、后台授予、Telegram 面板授予以及自助创建 Emby 都会在用户记录写入 `emby_grant_locked=true` 和来源字段。自助创建 Emby 按 `registration_source=regcode` 的注册资格处理，即使没有实际卡码字符串也会被视为已使用过注册类资格。后续是否允许自助解绑 Emby 只看用户自身字段，不再依赖 `RegCode.used_by_*` 或 `InviteRelations`；删除注册码、清理使用记录、断开邀请关系不会解除这个锁。
 
 同一处理逻辑也挂在 `POST /api/v1/apikey/use-code`（鉴权：AuthAPIKey），供外部系统接入，见 [API Key 外部接入](../reference/api-key.md)。
 
@@ -146,7 +148,7 @@
 
 ### 旧续期入口 `POST /api/v1/users/me/renew`（鉴权：AuthUser）
 
-`handleRenew`（`internal/api/handlers.go`）保留为兼容入口：必须提供 `reg_code`，且预览结果必须是 `source=regcode` 且 `type==2`（续期码），否则报错。续期同样经 `ConsumeRegCode` 走与统一入口一致的启用、次数、过期校验，并用 `renewExpiryAndReactivate` 在续期时顺带解禁因到期被停用的非邀请账号。
+`handleRenew`（`internal/api/handlers.go`）保留为兼容入口：必须提供 `reg_code`，且预览结果必须是 `source=regcode` 且 `type==2`（续期码），否则报错。续期经 `ConsumeRegCodeAndUpdateUser` 在同一把锁内完成卡码消费与用户续期，并用 `renewExpiryAndReactivate` 顺带解禁因到期被停用的非邀请账号。
 
 ### 公开注册 `POST /api/v1/users/register`（鉴权：AuthPublic）
 
@@ -154,7 +156,7 @@
 
 - 注册整体按 IP 限流（`rate_limit_register_per_10m`）；带注册码时再叠加一道 `register:regcode:<ip>` 限流，每分钟 10 次。
 - 注册码校验同样排除诱饵码、`type!=1`、指名目标不匹配与不可用状态。若注册卡码指定了 TG 用户名或 TG ID，注册请求必须携带已确认的 `telegram_bind_code`，后端用绑定码中的 Telegram 身份做匹配。
-- 建账号与消费注册码经 `CreateUserWithRegCode` 在同一把锁内原子完成，规避并发重复注册。
+- 建账号、消费注册码、消费已确认 Telegram 注册绑定码经 `CreateUserForRegistration` 在同一把锁内原子完成，规避并发重复注册与同一 Telegram ID 被创建到多个账号。
 
 ## 管理接口（鉴权：AuthAdmin）
 
@@ -166,7 +168,7 @@
 | `DELETE /api/v1/admin/regcodes/:code` | `handleDeleteRegcode` | 删除单个卡码，包含已有使用记录的卡码也会直接从状态文档移除。 |
 | `POST /api/v1/admin/regcodes/batch-delete` | `handleBatchDeleteRegcodes` | 批量删除，需确认短语 `confirm=BATCH_DELETE_REGCODES`，单次上限 200。 |
 | `GET /api/v1/admin/regcodes/:code/users` | `handleRegcodeUsers` | 查看某卡码的使用者详情（按 UID / Telegram 解析）。 |
-| `POST /api/v1/admin/regcodes/:code/clear-usage` | `handleClearRegcodeUsage` | 清理使用记录（`use_count`、`used_by_*` 归零并重新启用），需确认短语 `confirm=CLEAR_REGCODE_USAGE`；不影响已注册用户的账号。 |
+| `POST /api/v1/admin/regcodes/:code/clear-usage` | `handleClearRegcodeUsage` | 清理使用记录（`use_count`、`used_by_*` 归零并重新启用），需确认短语 `confirm=CLEAR_REGCODE_USAGE`；不影响已注册用户的账号，也不会解除用户记录上的 `emby_grant_locked`。 |
 
 > 删除语义：`DeleteRegCode` / `DeleteRegCodes` 均为物理删除；即使卡码已有使用记录，也会直接从状态文档移除。
 
@@ -178,7 +180,7 @@
 
 - 旧卡码不需要迁移：消费按 `code` 字符串精确查表，字符串格式不影响使用。
 - 随机算法只影响新生成卡码的随机部分样式，不改变旧卡码的校验逻辑。
-- 历史 `days` 为空/为 0/为负时统一按 `-1`（永久）处理。
+- 历史 `days` 为空/为 0 时按 30 天处理；负数按 `-1`（永久）处理。
 - 前端在删除、更新、查看使用者时会对路径中的卡码做 URL 编码，兼容含 `:`、`.`、`_`、`-` 的新格式卡码。
 
 ## 诱饵码（蜜罐）
@@ -194,8 +196,8 @@
 | 入口 | 鉴权级别 | 限流 / 防护 |
 | ---- | ---- | ---- |
 | `POST /api/v1/users/regcode/check` | AuthPublic | 每 IP 10 次/分钟；不返回使用者；隐藏诱饵码与指名码 |
-| `POST /api/v1/users/register` | AuthPublic | 注册整体按 IP 限流；带注册码时叠加每 IP 10 次/分钟；建账号与消费同锁原子 |
-| `POST /api/v1/users/me/use-code` | AuthUser | `check_only` 预览不消费；消费在全局锁下原子完成 |
+| `POST /api/v1/users/register` | AuthPublic | 注册整体按 IP 限流；带注册码时叠加每 IP 10 次/分钟；建账号、绑定码消费与注册码消费同锁原子 |
+| `POST /api/v1/users/me/use-code` | AuthUser | `check_only` 预览不消费；消费与用户权益更新在全局锁下原子完成 |
 | `POST /api/v1/apikey/use-code` | AuthAPIKey | 同 use-code 逻辑，供外部接入 |
 | `POST /api/v1/users/me/renew` | AuthUser | 仅接受 type=2 续期码 |
 | `GET/POST/PUT/DELETE /api/v1/admin/regcodes*` | AuthAdmin | 批量删除/清理需确认短语；写操作受数据库一致性护栏约束 |

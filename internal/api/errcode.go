@@ -55,6 +55,7 @@ const (
 	ErrEmbyAuthFailed      ErrCode = "EMBY_AUTH_FAILED"
 	ErrEmbyAccountUnlinked ErrCode = "EMBY_ACCOUNT_UNLINKED"
 	ErrEmbyUnbindForbidden ErrCode = "EMBY_UNBIND_FORBIDDEN"
+	ErrEmbyDisableFailed   ErrCode = "EMBY_DISABLE_FAILED"
 	ErrEmbyCapacityReached ErrCode = "EMBY_CAPACITY_REACHED"
 	ErrEmbyMissingCreds    ErrCode = "EMBY_MISSING_CREDENTIALS"
 	ErrEmbyInputTooLong    ErrCode = "EMBY_INPUT_TOO_LONG"

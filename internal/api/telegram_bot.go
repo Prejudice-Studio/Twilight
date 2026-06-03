@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"go.uber.org/zap"
 	"regexp"
@@ -263,21 +264,17 @@ func (a *App) telegramConfirmBindCode(ctx context.Context, chatID, telegramID in
 		_ = a.telegramSendMessage(ctx, chatID, "绑定前需要先加入指定 Telegram 群组/频道："+strings.Join(missing, ", "))
 		return
 	}
-	bind.Confirmed = true
-	bind.TelegramID = telegramID
-	bind.TelegramUsername = username
-	_ = a.store().UpsertBindCode(bind)
-	if bind.UID != 0 {
-		defer func() { _ = a.store().DeleteBindCode(code) }()
-		_, err := a.store().UpdateUser(bind.UID, func(u *store.User) error {
-			u.TelegramID = telegramID
-			u.TelegramUsername = username
-			return nil
-		})
-		if err != nil {
-			_ = a.telegramSendMessage(ctx, chatID, "绑定失败：系统用户不存在。")
+	if _, _, _, err := a.store().ConfirmBindCodeAtomic(code, telegramID, username, time.Now().Unix()); err != nil {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrExpired) {
+			_ = a.telegramSendMessage(ctx, chatID, "绑定码无效或已过期，请在网页重新获取。")
 			return
 		}
+		if errors.Is(err, store.ErrConflict) {
+			_ = a.telegramSendMessage(ctx, chatID, "该 Telegram 已绑定到其他账号或绑定码状态已变化。")
+			return
+		}
+		_ = a.telegramSendMessage(ctx, chatID, "绑定失败：系统写入失败，请稍后再试。")
+		return
 	}
 	_ = a.telegramSendMessage(ctx, chatID, "Telegram 绑定已确认，可以回到网页继续。")
 }

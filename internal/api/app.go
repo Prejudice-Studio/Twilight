@@ -1292,6 +1292,7 @@ func publicUser(u store.User) map[string]any {
 		"bgm_sync_ready":           u.BGMMode && u.BGMToken != "",
 		"created_at":               u.CreatedAt,
 		"register_time":            u.RegisterTime,
+		"emby_grant_locked":        u.EmbyGrantLocked,
 		"is_pending":               u.Role == store.RoleUnrecognized,
 		"pending_emby":             u.PendingEmby,
 		"pending_emby_days":        u.PendingEmbyDays,
