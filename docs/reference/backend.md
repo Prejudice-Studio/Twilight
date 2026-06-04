@@ -201,7 +201,7 @@ Go 后端按统一的业务状态与前端响应形状实现，主要模块：
 
 ## 数据库与状态模型
 
-后端把**全部业务状态保存在单一状态文档**里（`internal/store/store.go` 的 `State` 结构）。该文档包含用户、API Key、求片、公告、邀请码、邀请关系（`invite_relations`）、注册码、绑定码、签到、调度记录、设备、登录日志、IP 黑名单、播放记录、改绑申请、Telegram 花名册、违规日志等所有实体——它们都是同一份 `State` 里的字段（map / slice），而**不是各自独立的数据库或表**。
+后端把**全部持久业务状态保存在单一状态文档**里（`internal/store/store.go` 的 `State` 结构）。该文档包含用户、API Key、求片、公告、邀请码、邀请关系（`invite_relations`）、注册码、签到、调度记录、设备、登录日志、IP 黑名单、播放记录、改绑申请、Telegram 花名册、违规日志等实体——它们都是同一份 `State` 里的字段（map / slice），而**不是各自独立的数据库或表**。Telegram 注册/绑定码是当前 App 进程内存中的临时票据，旧 `bind_codes` 字段只作为历史状态字段保留，运行期不再用于新绑定码持久化。
 
 > 旧文档把邀请、公告等描述为「新增 `db/invites.db` / `announcements.db`」「`invite_relations` 单表」「`ALTER TABLE announcements 增列`」「自动建表」等，均为过时说法。当前实现中这些都是单一状态文档（`internal/store`）里的字段。
 

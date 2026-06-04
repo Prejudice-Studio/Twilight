@@ -118,10 +118,10 @@
 
 注册码的「校验 + 计数 + 标记使用者」全程在状态存储的全局写锁下原子完成，避免同一码并发使用导致超额消费：
 
-- `ConsumeRegCode`（`internal/store/store.go`）先 `s.mu.Lock()`，再在 `mutateAndSaveLocked` 内依次调用 `consumableRegCodeLocked` 与 `consumeRegCodeLocked`，两步在同一把锁内不可分割。
+- `ConsumeRegCode`（`internal/store/store.go`）先 `s.mu.Lock()`，再在 `mutateAndSaveLocked` 内依次调用 `consumableRegCodeLocked` 与 `consumeRegCodeLocked`，两步在同一把锁内不可分割。注册码写入状态文档并跨重启保留。
 - `consumableRegCodeLocked` 校验：卡码存在且 `active`，否则 `ErrNotFound`；`use_count_limit != -1 && use_count >= use_count_limit` 则 `ErrConflict`（已用满）；`validity_time > 0 && created_at + validity_time*3600 <= now` 则 `ErrExpired`（已过期）。
 - `consumeRegCodeLocked` 执行：`use_count++`，记录 `used_by` / 去重写入 `used_by_uids` / `used_by_telegram_ids`；若达到次数上限则把 `active` 置为 `false`。
-- 公开注册路径用 `CreateUserForRegistration`，把「用户名 / Telegram 唯一性查重 + 注册绑定码消费 + 建账号 + 消费注册码（仅限 type=1、非诱饵、用户名匹配）+ 写入用户级 Emby 授权锁」合并在同一把锁内一次完成。
+- 公开注册路径先在 API 层校验并消费当前进程内存中的 Telegram 注册绑定码，再用 `CreateUserForRegistration` 把「用户名 / Telegram 唯一性查重 + 建账号 + 消费注册码（仅限 type=1、非诱饵、目标匹配）+ 写入用户级 Emby 授权锁」合并在同一把 store 写锁内一次完成。绑定码不是注册码，不写入状态文档，服务重启后失效。
 - 登录后使用卡码的路径使用 `ConsumeRegCodeAndUpdateUser` / `ConsumeInviteCodeAndUpdateUser`，把「卡码消费 + 邀请关系创建 + 用户权益更新」合并为一次状态写入；保存失败会整体回滚，不会留下“码已消耗但用户没拿到权益”的半状态。
 
 ## 使用入口
@@ -156,7 +156,7 @@
 
 - 注册整体按 IP 限流（`rate_limit_register_per_10m`）；带注册码时再叠加一道 `register:regcode:<ip>` 限流，每分钟 10 次。
 - 注册码校验同样排除诱饵码、`type!=1`、指名目标不匹配与不可用状态。若注册卡码指定了 TG 用户名或 TG ID，注册请求必须携带已确认的 `telegram_bind_code`，后端用绑定码中的 Telegram 身份做匹配。
-- 建账号、消费注册码、消费已确认 Telegram 注册绑定码经 `CreateUserForRegistration` 在同一把锁内原子完成，规避并发重复注册与同一 Telegram ID 被创建到多个账号。
+- API 层先确认内存绑定码并复检 Telegram 身份唯一性；随后建账号与消费注册码经 `CreateUserForRegistration` 在同一把 store 写锁内原子完成，规避并发重复注册与同一 Telegram ID 被创建到多个账号。
 
 ## 管理接口（鉴权：AuthAdmin）
 
@@ -174,7 +174,7 @@
 
 ### 数据库一致性护栏
 
-当运行时实际后端与配置声明的后端不一致（`runtimeDatabaseMismatch`，见 `internal/api/storage_guard.go`）时，所有注册码「写入类」操作（创建、更新、删除、批量删除、清理使用、以及通过 use-code/renew 消费注册码）都会被拦截，返回 `409` + `REGCODE_STORAGE_MISMATCH`，提示先完成数据库迁移并重启，确认前后端一致后再操作，以免写到错误的存储里。
+当运行时实际后端与配置声明的后端不一致，或 JSON 后端当前运行的 `state_file` 与配置中的 `state_file` 不一致（`runtimeDatabaseMismatch`，见 `internal/api/storage_guard.go`）时，所有注册码「写入类」操作（创建、更新、删除、批量删除、清理使用、以及通过 use-code/renew 消费注册码）都会被拦截，返回 `409` + `REGCODE_STORAGE_MISMATCH`，提示先完成数据库迁移并重启，确认前后端一致后再操作，以免写到错误的存储里。
 
 ## 兼容性
 

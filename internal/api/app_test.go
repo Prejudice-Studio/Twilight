@@ -123,6 +123,15 @@ func TestRegcodeWritesBlockedWhenRuntimeDatabaseMismatchesConfig(t *testing.T) {
 	if app.rejectRegcodeWriteIfStorageMismatch(rec) {
 		t.Fatal("regcode writes were blocked even though active and configured databases match")
 	}
+
+	app.cfg().StateFile = filepath.Join(t.TempDir(), "other-state.json")
+	rec = httptest.NewRecorder()
+	if !app.rejectRegcodeWriteIfStorageMismatch(rec) {
+		t.Fatal("expected regcode writes to be blocked when configured state_file differs from active store path")
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected state_file mismatch conflict status, got %d", rec.Code)
+	}
 }
 
 func TestAuthFlowWithoutCSRF(t *testing.T) {
@@ -224,6 +233,77 @@ func TestBindCodeCreationGETRequiresWebUIIntent(t *testing.T) {
 	}
 	if created.Header().Get("Cache-Control") != "no-store, private" {
 		t.Fatalf("bind-code response is cacheable: %q", created.Header().Get("Cache-Control"))
+	}
+}
+
+func TestRegcodesPersistAcrossAppRestartButBindCodesDoNot(t *testing.T) {
+	app := newTestApp(t)
+	adminCookies := registerAndLogin(t, app, "admin", "Admin123456")
+	headers := map[string]string{"X-Twilight-Client": "webui"}
+
+	createdRegcode := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/regcodes", `{"type":1,"days":7,"count":1,"format":"PERSIST-{random}","random_algorithm":"digits-12"}`, adminCookies, headers)
+	if createdRegcode.Code != http.StatusOK {
+		t.Fatalf("create regcode status=%d body=%s", createdRegcode.Code, createdRegcode.Body.String())
+	}
+	var regEnv envelope
+	if err := json.Unmarshal(createdRegcode.Body.Bytes(), &regEnv); err != nil {
+		t.Fatalf("decode regcode response: %v", err)
+	}
+	regData, _ := regEnv.Data.(map[string]any)
+	regcodes, _ := regData["codes"].([]any)
+	if len(regcodes) != 1 {
+		t.Fatalf("expected one regcode in response: %#v", regEnv.Data)
+	}
+	regcode, _ := regcodes[0].(string)
+	if regcode == "" {
+		t.Fatalf("empty regcode in response: %#v", regEnv.Data)
+	}
+	if _, ok := app.store().RegCode(regcode); !ok {
+		t.Fatalf("created regcode was not written to store: %s", regcode)
+	}
+
+	createdBindCode := doJSONWithHeaders(app, http.MethodGet, "/api/v1/users/telegram/register/bind-code", ``, nil, bindCodeCreateTestHeaders())
+	if createdBindCode.Code != http.StatusOK {
+		t.Fatalf("create bind code status=%d body=%s", createdBindCode.Code, createdBindCode.Body.String())
+	}
+	var bindEnv envelope
+	if err := json.Unmarshal(createdBindCode.Body.Bytes(), &bindEnv); err != nil {
+		t.Fatalf("decode bind code response: %v", err)
+	}
+	bindData, _ := bindEnv.Data.(map[string]any)
+	bindCode, _ := bindData["bind_code"].(string)
+	if bindCode == "" {
+		t.Fatalf("empty bind code in response: %#v", bindEnv.Data)
+	}
+	if _, ok := app.bindCode(bindCode); !ok {
+		t.Fatalf("created bind code was not present in memory hub: %s", bindCode)
+	}
+	if _, ok := app.store().BindCode(bindCode); ok {
+		t.Fatalf("bind code leaked into persistent store: %s", bindCode)
+	}
+
+	cfg := *app.cfg()
+	if err := app.store().Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := store.Open(cfg.StateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := New(cfg, reopened)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.store().Close()
+
+	if _, ok := restarted.store().RegCode(regcode); !ok {
+		t.Fatalf("regcode disappeared after app restart: %s", regcode)
+	}
+	if _, ok := restarted.bindCode(bindCode); ok {
+		t.Fatalf("bind code survived app restart but must be memory-only: %s", bindCode)
+	}
+	if _, ok := restarted.store().BindCode(bindCode); ok {
+		t.Fatalf("bind code was persisted after app restart: %s", bindCode)
 	}
 }
 
