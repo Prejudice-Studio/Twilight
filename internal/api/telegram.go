@@ -212,8 +212,12 @@ func (a *App) telegramAnswerCallbackQuery(ctx context.Context, callbackID, text 
 }
 
 func (a *App) telegramGetChatMember(ctx context.Context, chatID string, userID int64) (map[string]any, error) {
+	return a.telegramGetChatMemberWithTimeout(ctx, chatID, userID, 20*time.Second)
+}
+
+func (a *App) telegramGetChatMemberWithTimeout(ctx context.Context, chatID string, userID int64, timeout time.Duration) (map[string]any, error) {
 	var result map[string]any
-	err := a.telegramPost(ctx, "getChatMember", map[string]any{"chat_id": chatID, "user_id": userID}, &result)
+	err := a.telegramPostWithTimeout(ctx, "getChatMember", map[string]any{"chat_id": chatID, "user_id": userID}, &result, timeout)
 	return result, err
 }
 
@@ -264,6 +268,9 @@ func (a *App) telegramMembershipMissingForChats(ctx context.Context, telegramID 
 	for _, chatID := range chats {
 		member, err := a.telegramGetChatMember(ctx, chatID, telegramID)
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return missing, ctxErr
+			}
 			msg := strings.ToLower(err.Error())
 			if strings.Contains(msg, "not found") || strings.Contains(msg, "participant") || strings.Contains(msg, "user not found") {
 				missing = append(missing, chatID)
@@ -273,7 +280,9 @@ func (a *App) telegramMembershipMissingForChats(ctx context.Context, telegramID 
 			if strict {
 				return missing, err
 			}
-			telegramRateLimitPause(err)
+			if !telegramRateLimitPauseContext(ctx, err) {
+				return missing, ctx.Err()
+			}
 			continue
 		}
 		status := strings.ToLower(asString(member["status"]))
@@ -472,18 +481,31 @@ func telegramMemberIsAdminOrBot(member map[string]any) bool {
 // 已经被 telegram 临时禁言，重试再多也是失败，让本轮 batch 提前 fail 反而
 // 让上层的 failedCount 阈值更早触发。
 func telegramRateLimitPause(err error) {
+	_ = telegramRateLimitPauseContext(context.Background(), err)
+}
+
+func telegramRateLimitPauseContext(ctx context.Context, err error) bool {
 	if err == nil {
-		return
+		return true
 	}
+	d := time.Duration(0)
 	if d, ok := telegramRetryAfterFromError(err); ok {
 		if d > 60*time.Second {
 			d = 60 * time.Second
 		}
-		time.Sleep(d)
-		return
+	} else if strings.Contains(strings.ToLower(err.Error()), "too many requests") {
+		d = 2 * time.Second
 	}
-	if strings.Contains(strings.ToLower(err.Error()), "too many requests") {
-		time.Sleep(2 * time.Second)
+	if d <= 0 {
+		return true
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 

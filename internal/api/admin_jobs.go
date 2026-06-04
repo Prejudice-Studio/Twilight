@@ -6,10 +6,23 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/prejudice-studio/twilight/internal/store"
 )
+
+const (
+	telegramMembershipSchedulerCheckTimeout = 8 * time.Second
+	telegramMembershipMaxCheckConcurrency   = 64
+)
+
+type telegramMembershipCheckResult struct {
+	telegramID int64
+	missing    []string
+	updates    []store.TelegramRosterUpdate
+	err        error
+}
 
 func (a *App) enforceTelegramMembership(ctx context.Context, autoEnableRejoined bool) (map[string]any, []string, error) {
 	chats := telegramChatIDs(a.cfg().TelegramGroupIDs)
@@ -31,13 +44,53 @@ func (a *App) enforceTelegramMembership(ctx context.Context, autoEnableRejoined 
 		return result, logs, nil
 	}
 	now := time.Now().Unix()
+	candidates := []store.User{}
+	uniqueTelegramIDs := []int64{}
+	seenTelegramIDs := map[int64]bool{}
 	for _, u := range a.store().ListUsers() {
+		if err := ctx.Err(); err != nil {
+			result["terminated"] = true
+			return result, append(logs, "job terminated"), err
+		}
 		if u.TelegramID == 0 || a.userIsProtected(u) {
 			result["skipped"] = int(numeric(result["skipped"])) + 1
 			continue
 		}
 		result["scanned"] = int(numeric(result["scanned"])) + 1
-		missing, err := a.telegramMembershipMissing(ctx, u.TelegramID, false)
+		candidates = append(candidates, u)
+		if !seenTelegramIDs[u.TelegramID] {
+			seenTelegramIDs[u.TelegramID] = true
+			uniqueTelegramIDs = append(uniqueTelegramIDs, u.TelegramID)
+		}
+	}
+	concurrency := a.telegramMembershipCheckConcurrency(len(uniqueTelegramIDs))
+	result["unique_telegram_ids"] = len(uniqueTelegramIDs)
+	result["concurrency"] = concurrency
+	checks, rosterUpdates, err := a.checkTelegramMemberships(ctx, uniqueTelegramIDs, chats, concurrency)
+	if err != nil {
+		result["terminated"] = true
+		return result, append(logs, "job terminated"), err
+	}
+	if err := a.store().ApplyTelegramRosterUpdates(rosterUpdates); err != nil {
+		result["failed"] = int(numeric(result["failed"])) + 1
+		if len(logs) < 50 {
+			logs = append(logs, "failed to update telegram roster: "+err.Error())
+		}
+	}
+	for _, u := range candidates {
+		if err := ctx.Err(); err != nil {
+			result["terminated"] = true
+			return result, append(logs, "job terminated"), err
+		}
+		check, ok := checks[u.TelegramID]
+		if !ok {
+			result["failed"] = int(numeric(result["failed"])) + 1
+			if len(logs) < 50 {
+				logs = append(logs, fmt.Sprintf("failed to check uid=%d tg=%d: missing check result", u.UID, u.TelegramID))
+			}
+			continue
+		}
+		missing, err := check.missing, check.err
 		if err != nil {
 			result["failed"] = int(numeric(result["failed"])) + 1
 			if len(logs) < 50 {
@@ -99,6 +152,109 @@ func (a *App) enforceTelegramMembership(ctx context.Context, autoEnableRejoined 
 		result["rejoin_candidate_users"] = rejoinCandidates
 	}
 	return result, logs, nil
+}
+
+func (a *App) telegramMembershipCheckConcurrency(total int) int {
+	if total <= 0 {
+		return 0
+	}
+	concurrency := a.cfg().TelegramGroupCheckConcurrency
+	if concurrency <= 0 {
+		concurrency = 24
+	}
+	concurrency = clamp(concurrency, 1, telegramMembershipMaxCheckConcurrency)
+	if concurrency > total {
+		return total
+	}
+	return concurrency
+}
+
+func (a *App) checkTelegramMemberships(ctx context.Context, telegramIDs []int64, chats []string, concurrency int) (map[int64]telegramMembershipCheckResult, []store.TelegramRosterUpdate, error) {
+	checks := make(map[int64]telegramMembershipCheckResult, len(telegramIDs))
+	if len(telegramIDs) == 0 {
+		return checks, nil, nil
+	}
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	jobs := make(chan int64)
+	results := make(chan telegramMembershipCheckResult, len(telegramIDs))
+	var wg sync.WaitGroup
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for telegramID := range jobs {
+				if err := ctx.Err(); err != nil {
+					results <- telegramMembershipCheckResult{telegramID: telegramID, err: err}
+					continue
+				}
+				missing, updates, err := a.telegramMembershipMissingForScheduler(ctx, telegramID, chats)
+				results <- telegramMembershipCheckResult{telegramID: telegramID, missing: missing, updates: updates, err: err}
+			}
+		}()
+	}
+	go func() {
+		defer close(jobs)
+		for _, telegramID := range telegramIDs {
+			select {
+			case <-ctx.Done():
+				return
+			case jobs <- telegramID:
+			}
+		}
+	}()
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+	rosterUpdates := []store.TelegramRosterUpdate{}
+	for result := range results {
+		checks[result.telegramID] = result
+		rosterUpdates = append(rosterUpdates, result.updates...)
+	}
+	if err := ctx.Err(); err != nil {
+		return checks, rosterUpdates, err
+	}
+	return checks, rosterUpdates, nil
+}
+
+func (a *App) telegramMembershipMissingForScheduler(ctx context.Context, telegramID int64, chats []string) ([]string, []store.TelegramRosterUpdate, error) {
+	missing := []string{}
+	updates := []store.TelegramRosterUpdate{}
+	if len(chats) == 0 || telegramID == 0 {
+		return missing, updates, nil
+	}
+	for _, chatID := range chats {
+		if err := ctx.Err(); err != nil {
+			return missing, updates, err
+		}
+		member, err := a.telegramGetChatMemberWithTimeout(ctx, chatID, telegramID, telegramMembershipSchedulerCheckTimeout)
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return missing, updates, ctxErr
+			}
+			msg := strings.ToLower(err.Error())
+			if strings.Contains(msg, "not found") || strings.Contains(msg, "participant") || strings.Contains(msg, "user not found") {
+				missing = append(missing, chatID)
+				updates = append(updates, store.TelegramRosterUpdate{ChatID: chatID, TelegramID: telegramID, Status: "left"})
+				continue
+			}
+			if !telegramRateLimitPauseContext(ctx, err) {
+				return missing, updates, ctx.Err()
+			}
+			return missing, updates, err
+		}
+		status := strings.ToLower(asString(member["status"]))
+		if status == "left" || status == "kicked" {
+			missing = append(missing, chatID)
+			updates = append(updates, store.TelegramRosterUpdate{ChatID: chatID, TelegramID: telegramID, Status: status})
+			continue
+		}
+		user, _ := member["user"].(map[string]any)
+		updates = append(updates, store.TelegramRosterUpdate{ChatID: chatID, TelegramID: telegramID, Status: firstNonEmpty(status, "member"), IsBot: boolish(user["is_bot"])})
+	}
+	return missing, updates, nil
 }
 
 func (a *App) cleanupUnusedUploadAssets(maxAge time.Duration) map[string]any {

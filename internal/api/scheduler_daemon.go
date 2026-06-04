@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go.uber.org/zap"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/prejudice-studio/twilight/internal/store"
 )
@@ -133,7 +135,7 @@ func (a *App) runScheduledJob(ctx context.Context, jobID string) {
 	// 之前整个函数运行在 `go a.runScheduledJob` 里，慢 PG 上 INSERT 还没落
 	// 盘 ticker 就推进了，schedulerJobDue 看不到 last → 又一次判定 due → 同
 	// job 并发起跑。重活仍在内层 goroutine 跑，daemon 主循环不会被堵住。
-	runCtx, finish, ok := a.startSchedulerRun(ctx, jobID)
+	runCtx, processRun, finish, ok := a.startSchedulerRun(ctx, jobID)
 	if !ok {
 		return
 	}
@@ -144,12 +146,16 @@ func (a *App) runScheduledJob(ctx context.Context, jobID string) {
 		zap.L().Warn("scheduler job run record create failed", zap.String("job_id", jobID), zap.Error(err))
 		return
 	}
+	processRun.runID.Store(run.ID)
+	if processRun.terminated.Load() {
+		a.markSchedulerRunTerminated(run.ID)
+	}
 	zap.L().Info("scheduler job started", zap.String("job_id", jobID), zap.String("type", "auto"), zap.Int64("run_id", run.ID))
 	go a.executeSchedulerRun(runCtx, run, jobID, "auto", "scheduler", "/scheduler/internal", started, nil, false, finish)
 }
 
 func (a *App) startManualSchedulerJob(ctx context.Context, jobID string, params map[string]any) (store.SchedulerRun, bool) {
-	runCtx, finish, ok := a.startSchedulerRun(ctx, jobID)
+	runCtx, processRun, finish, ok := a.startSchedulerRun(ctx, jobID)
 	if !ok {
 		return store.SchedulerRun{}, false
 	}
@@ -159,6 +165,10 @@ func (a *App) startManualSchedulerJob(ctx context.Context, jobID string, params 
 		finish()
 		zap.L().Warn("manual scheduler job run record create failed", zap.String("job_id", jobID), zap.Error(err))
 		return store.SchedulerRun{}, false
+	}
+	processRun.runID.Store(run.ID)
+	if processRun.terminated.Load() {
+		a.markSchedulerRunTerminated(run.ID)
 	}
 	zap.L().Info("scheduler job started", zap.String("job_id", jobID), zap.String("type", "manual"), zap.Int64("run_id", run.ID))
 	go a.executeSchedulerRun(runCtx, run, jobID, "manual", "manual", "/scheduler/manual", started, params, true, finish)
@@ -182,6 +192,9 @@ func (a *App) executeSchedulerRun(runCtx context.Context, run store.SchedulerRun
 		finished := schedulerFinishedRun(jobID, runType, trigger, started, summary, logs, jobErr)
 		finished.ID = run.ID
 		if _, updateErr := a.store().UpdateSchedulerRun(run.ID, func(current *store.SchedulerRun) error {
+			if schedulerRunTerminatedByAdministrator(*current) {
+				return nil
+			}
 			*current = finished
 			return nil
 		}); updateErr != nil {
@@ -217,6 +230,11 @@ func schedulerFinishedRun(jobID, runType, trigger string, started int64, summary
 		if errors.Is(err, context.Canceled) {
 			message = "job terminated by administrator"
 			errText = message
+			if summary == nil {
+				summary = map[string]any{}
+			}
+			summary["success"] = false
+			summary["terminated"] = true
 		}
 	}
 	finished := time.Now().Unix()
@@ -399,8 +417,10 @@ func parseClock(value string, fallbackHour, fallbackMinute int) (int, int) {
 }
 
 type schedulerProcessRun struct {
-	cancel  context.CancelFunc
-	started int64
+	cancel     context.CancelFunc
+	started    int64
+	runID      atomic.Int64
+	terminated atomic.Bool
 }
 
 // schedulerProcessLocks 已迁移到 App.schedulerLocks（app.go）。原本是 package
@@ -408,14 +428,14 @@ type schedulerProcessRun struct {
 // 该表跨实例共享，会让一个 case 的 cancel 影响另一 case 的 LoadOrStore，
 // 偶发 flake。改为 instance 字段后每个 App 自带独立锁。
 
-func (a *App) startSchedulerRun(ctx context.Context, jobID string) (context.Context, func(), bool) {
+func (a *App) startSchedulerRun(ctx context.Context, jobID string) (context.Context, *schedulerProcessRun, func(), bool) {
 	runCtx, cancel := context.WithCancel(ctx)
 	run := &schedulerProcessRun{cancel: cancel, started: time.Now().Unix()}
 	actual, loaded := a.schedulerLocks.LoadOrStore(jobID, run)
 	if loaded {
 		cancel()
 		_ = actual
-		return ctx, func() {}, false
+		return ctx, nil, func() {}, false
 	}
 	finish := func() {
 		cancel()
@@ -423,7 +443,7 @@ func (a *App) startSchedulerRun(ctx context.Context, jobID string) (context.Cont
 			a.schedulerLocks.Delete(jobID)
 		}
 	}
-	return runCtx, finish, true
+	return runCtx, run, finish, true
 }
 
 func (a *App) schedulerJobRunning(jobID string) bool {
@@ -440,7 +460,9 @@ func (a *App) terminateSchedulerJob(jobID string) bool {
 	if !ok || run.cancel == nil {
 		return false
 	}
+	run.terminated.Store(true)
 	run.cancel()
+	a.markSchedulerRunTerminated(run.runID.Load())
 	// 立即把 jobID 从注册表里摘掉。原实现只 cancel，依赖 runSchedulerJob 自己
 	// 的 finish() 闭包在 deferred 里 Delete；但被取消的任务若卡在不响应 ctx
 	// 的远端调用（emby 慢响应、git pull 远端无应答、Bangumi 5xx 无超时），
@@ -451,4 +473,33 @@ func (a *App) terminateSchedulerJob(jobID string) bool {
 		a.schedulerLocks.Delete(jobID)
 	}
 	return true
+}
+
+func (a *App) markSchedulerRunTerminated(runID int64) {
+	if runID == 0 {
+		return
+	}
+	now := time.Now().Unix()
+	if _, err := a.store().UpdateSchedulerRun(runID, func(current *store.SchedulerRun) error {
+		if current.Status != "running" {
+			return nil
+		}
+		current.Status = "failed"
+		current.Message = "job terminated by administrator"
+		current.Error = current.Message
+		current.FinishedAt = now
+		current.EndedAt = now
+		if current.Summary == nil {
+			current.Summary = map[string]any{}
+		}
+		current.Summary["success"] = false
+		current.Summary["terminated"] = true
+		return nil
+	}); err != nil && !errors.Is(err, store.ErrNotFound) {
+		zap.L().Warn("scheduler job run termination update failed", zap.Int64("run_id", runID), zap.Error(err))
+	}
+}
+
+func schedulerRunTerminatedByAdministrator(run store.SchedulerRun) bool {
+	return run.Status != "running" && run.Message == "job terminated by administrator" && boolish(run.Summary["terminated"])
 }

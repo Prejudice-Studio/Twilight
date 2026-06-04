@@ -368,6 +368,13 @@ type TelegramRosterEntry struct {
 	LastSeen   int64  `json:"last_seen_at"`
 }
 
+type TelegramRosterUpdate struct {
+	ChatID     string
+	TelegramID int64
+	Status     string
+	IsBot      bool
+}
+
 func Open(path string) (*Store, error) {
 	if path == "" {
 		path = filepath.Join("db", "twilight_go_state.json")
@@ -3014,6 +3021,39 @@ func (s *Store) MarkTelegramRosterLeft(chatID string, telegramID int64, status s
 		entry.LastSeen = time.Now().Unix()
 		entry.LastStatus = status
 		s.state.TelegramRoster[key] = entry
+		return nil
+	})
+}
+
+func (s *Store) ApplyTelegramRosterUpdates(updates []TelegramRosterUpdate) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mutateAndSaveLocked(func() error {
+		now := time.Now().Unix()
+		for _, update := range updates {
+			chatID := strings.TrimSpace(update.ChatID)
+			if chatID == "" || update.TelegramID <= 0 {
+				continue
+			}
+			status := strings.TrimSpace(update.Status)
+			if status == "" {
+				status = "member"
+			}
+			key := telegramRosterKey(chatID, update.TelegramID)
+			entry, ok := s.state.TelegramRoster[key]
+			if !ok {
+				entry = TelegramRosterEntry{ChatID: chatID, TelegramID: update.TelegramID, FirstSeen: now}
+			}
+			entry.LastSeen = now
+			entry.LastStatus = status
+			if update.IsBot {
+				entry.IsBot = true
+			}
+			s.state.TelegramRoster[key] = entry
+		}
 		return nil
 	})
 }

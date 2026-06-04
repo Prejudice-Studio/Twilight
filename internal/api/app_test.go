@@ -1986,6 +1986,53 @@ func TestTelegramMembershipRejoinManualReviewAndAutoEnable(t *testing.T) {
 	}
 }
 
+func TestTelegramMembershipEnforcementUsesConfiguredConcurrency(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().TelegramMode = true
+	app.cfg().TelegramBotToken = "123:ABC"
+	app.cfg().TelegramRequireMembership = true
+	app.cfg().TelegramGroupIDs = []string{"-1001"}
+	app.cfg().TelegramGroupCheckConcurrency = 4
+	for i := 0; i < 6; i++ {
+		if _, err := app.store().CreateUser(store.User{Username: fmt.Sprintf("tgcheck-%d", i), Role: store.RoleNormal, Active: true, TelegramID: int64(9000 + i), EmbyID: fmt.Sprintf("emby-%d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var activeRequests int32
+	var maxActiveRequests int32
+	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/bot123:ABC/getChatMember" {
+			t.Fatalf("unexpected telegram path: %s", r.URL.Path)
+		}
+		current := atomic.AddInt32(&activeRequests, 1)
+		defer atomic.AddInt32(&activeRequests, -1)
+		for {
+			maxActive := atomic.LoadInt32(&maxActiveRequests)
+			if current <= maxActive || atomic.CompareAndSwapInt32(&maxActiveRequests, maxActive, current) {
+				break
+			}
+		}
+		time.Sleep(80 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"status":"member","user":{"id":9000,"is_bot":false}}}`))
+	}))
+	defer tg.Close()
+	app.cfg().TelegramAPIURL = tg.URL
+
+	summary, logs, err := app.enforceTelegramMembership(context.Background(), false)
+	if err != nil {
+		t.Fatalf("enforceTelegramMembership err=%v logs=%v summary=%#v", err, logs, summary)
+	}
+	if got := atomic.LoadInt32(&maxActiveRequests); got < 2 {
+		t.Fatalf("membership checks did not run concurrently, max active requests=%d summary=%#v", got, summary)
+	}
+	if int(numeric(summary["scanned"])) != 6 || int(numeric(summary["unique_telegram_ids"])) != 6 || int(numeric(summary["concurrency"])) != 4 {
+		t.Fatalf("unexpected membership summary: %#v", summary)
+	}
+	if int(numeric(summary["failed"])) != 0 || int(numeric(summary["disabled"])) != 0 {
+		t.Fatalf("membership enforcement should not fail or disable users: %#v", summary)
+	}
+}
+
 func TestRegisterConsumesConfirmedTelegramBindCode(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().BotInternalSecret = "test-secret"
@@ -3009,6 +3056,64 @@ func TestSchedulerTerminateIsIdempotentWhenJobAlreadyStopped(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), `"already_stopped":true`) {
 		t.Fatalf("terminate response did not mark already_stopped: %s", rr.Body.String())
+	}
+}
+
+func TestSchedulerTerminateMarksRunningRunImmediately(t *testing.T) {
+	app := newTestApp(t)
+	runCtx, processRun, finish, ok := app.startSchedulerRun(context.Background(), "enforce_group_membership")
+	if !ok {
+		t.Fatal("scheduler run did not start")
+	}
+	defer finish()
+	run, err := app.store().AddSchedulerRunReturning(store.SchedulerRun{JobID: "enforce_group_membership", Type: "manual", Trigger: "manual", Status: "running", Message: "running", StartedAt: time.Now().Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processRun.runID.Store(run.ID)
+	if !app.terminateSchedulerJob("enforce_group_membership") {
+		t.Fatal("terminateSchedulerJob returned false")
+	}
+	select {
+	case <-runCtx.Done():
+	default:
+		t.Fatal("terminate did not cancel run context")
+	}
+	if app.schedulerJobRunning("enforce_group_membership") {
+		t.Fatal("terminated job should be removed from process lock table")
+	}
+	runs := app.store().SchedulerRuns("enforce_group_membership", 1)
+	if len(runs) != 1 || runs[0].ID != run.ID {
+		t.Fatalf("unexpected scheduler runs: %#v", runs)
+	}
+	if runs[0].Status != "failed" || runs[0].Message != "job terminated by administrator" || runs[0].FinishedAt == 0 || !boolish(runs[0].Summary["terminated"]) {
+		t.Fatalf("terminated run was not persisted immediately: %#v", runs[0])
+	}
+}
+
+func TestSchedulerTerminatedRunNotOverwrittenByLateCompletion(t *testing.T) {
+	app := newTestApp(t)
+	started := time.Now().Unix()
+	run, err := app.store().AddSchedulerRunReturning(store.SchedulerRun{
+		JobID:     "daily_stats",
+		Type:      "manual",
+		Trigger:   "manual",
+		Status:    "failed",
+		Message:   "job terminated by administrator",
+		Error:     "job terminated by administrator",
+		StartedAt: started,
+		Summary:   map[string]any{"success": false, "terminated": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.executeSchedulerRun(context.Background(), run, "daily_stats", "manual", "manual", "/scheduler/manual", started, nil, true, func() {})
+	runs := app.store().SchedulerRuns("daily_stats", 1)
+	if len(runs) != 1 || runs[0].ID != run.ID {
+		t.Fatalf("unexpected scheduler runs: %#v", runs)
+	}
+	if runs[0].Status != "failed" || runs[0].Message != "job terminated by administrator" || !boolish(runs[0].Summary["terminated"]) {
+		t.Fatalf("late completion overwrote terminated run: %#v", runs[0])
 	}
 }
 
