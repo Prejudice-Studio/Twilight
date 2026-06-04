@@ -71,7 +71,9 @@ GET /api/v1/apikey/status?apikey=<api_key>
 
 ### 2.3 浏览器写请求
 
-Cookie 鉴权的变更类请求（`POST` / `PUT` / `DELETE`）不再要求额外令牌。后端只校验有效登录会话、Bearer Token 或 API Key；`X-Twilight-Client: webui` 仅作为允许的 CORS 请求头保留，不参与鉴权。
+Cookie 鉴权的变更类请求（`POST` / `PUT` / `DELETE`）不再要求 CSRF 令牌，但后端会校验 `Origin` / `Referer` / `Sec-Fetch-Site`，拒绝跨站 Cookie 写请求。Bearer Token 与 API Key 不走 Cookie CSRF 防线，按各自鉴权路径处理。
+
+`X-Twilight-Client: webui` 仅作为前端请求识别与 CORS 允许头保留，不参与鉴权。少数有副作用的 `GET`（例如绑定码创建）还要求 `X-Twilight-Intent: create-bind-code` 显式声明操作意图，用于拦截浏览器预取、链接探测或代理误触发。
 
 双子域部署时，如需两个子域都能携带同一登录会话，应设置 `session_cookie_domain` 让前端站点与 API 站点共享 `HttpOnly` session cookie。生产环境的凭据型 CORS 仍必须显式列出可信 HTTPS Origin，不能使用 `*`。WebUI 登录态以浏览器请求 `/users/me` 的后端响应为准。
 
@@ -173,28 +175,25 @@ Cookie 鉴权的变更类请求（`POST` / `PUT` / `DELETE`）不再要求额外
 | `POST /users/register` | IP | 5 / 10 分钟 | 防批量注册 |
 | `GET  /users/check-available` | IP | 60 / 60 秒 | 防扫描可用用户名 |
 | `GET  /users/register/emby/status` | request_id + IP | 60/60s + 240/60s | Emby 注册队列轮询 |
-| `POST /users/telegram/register/bind-code` | IP | 5 / 10 分钟 | 生成注册绑定码 |
-| `GET  /users/telegram/register/bind-code/status` | code + IP + 404 防御 | 90/60s + 600/60s + 失效缓存 + IP 404 封禁 | 注册绑定码轮询；详见下方 |
-| `POST /users/me/telegram/bind-code` | UID | 5 / 10 分钟 | 已登录用户生成 TG 绑定码 |
+| `GET  /users/telegram/register/bind-code` | IP | 5 / 10 分钟 | 生成注册绑定码；需 `X-Twilight-Intent: create-bind-code` |
+| `GET  /users/telegram/register/bind-code/status` | code + IP | 10s timeout / 进程内状态 | 注册绑定码 GET fallback 查询；主流程使用 WebSocket |
+| `GET  /users/telegram/register/bind-code/ws` | IP | 30/min 或登录限流配置较大者 | WebSocket 订阅注册绑定码状态；校验 Origin |
+| `GET  /users/me/telegram/bind-code` | UID | 5 / 10 分钟 | 已登录用户生成 TG 绑定码；需 `X-Twilight-Intent: create-bind-code` |
 | `POST /users/me/telegram/unbind` | UID | 5 / 10 分钟 | 防恶意频繁解绑 |
 | `POST /users/me/telegram/rebind-request` | UID | 3 / 1 小时 | 换绑申请会进管理员队列，从严限制 |
-| `POST /users/regcode/check` | IP | 10 / 60 秒 | 防注册码枚举 |
-| `POST /invite/check` | IP | 10 / 60 秒 | 邀请码校验 |
+| `GET  /users/regcode/check` | IP | 10 / 60 秒 | 防注册码枚举 |
+| `GET  /invite/check` | IP | 10 / 60 秒 | 邀请码校验 |
 | `POST /users/me/avatar/upload` 等上传 | UID | 10 / 60 秒 | 防滥用上传 |
 
 上传后的头像/背景通过 `GET /users/assets/{kind}/{filename}` 读取（`kind` 为 `avatar` 或 `background`）。该接口要求登录，并校验资源类型、服务端生成的文件名格式和最终文件路径；不要直接公开 `/uploads` 目录。
 
 > 限速命中只写日志告警，不会写入安全日志 / 登录历史。
 
-#### `bind-code/status` 的三层防御
+#### Telegram 注册绑定码状态通道
 
-线上观测到攻击者会盯着一个 8 位 code 反复刷（每次都是 404），所以这个端点在普通双层限速之上又加了两层（实现：`internal/api/handlers.go`）：
+注册绑定码状态主通道是 `GET /users/telegram/register/bind-code/ws` WebSocket，后端会在握手前校验绑定码格式与 `Origin`，防止第三方站点跨站监听。`GET /users/telegram/register/bind-code/status` 只作为 WebSocket 不可用或提交前的 fallback 查询。
 
-1. **失效 code 短路缓存**：第一次查不到该 code 时，写入内存级失效缓存（TTL 5 分钟）。期间同 code 任何请求直接 404，不查存储、不消费 code 维度限速配额。
-2. **IP 累计 404 封禁**：同 IP 60s 内累计 ≥60 次 404（含短路命中的）→ 把 IP 加入 404 封禁名单（5 分钟）。期间该 IP 任何请求直接 429。
-3. **前端配合**：`webui/src/app/(auth)/register/page.tsx` 的轮询收到 message 含"无效/过期/不存在"或"IP 已被/429/请求过于频繁"时立即停止轮询，避免合法用户被误锁。
-
-上述状态都在进程内存，重启清零；多进程部署各自独立计数，但攻击者 keep-alive 会粘在同一进程上，足以拦住。
+绑定码本身只保存在当前 App 进程内存中，重启后失效；多进程部署时 Web API 与 Bot 需要运行在同一 App 实例内才能共享绑定码状态。
 
 ## 4. 模块总览
 
@@ -425,7 +424,7 @@ curl -X GET "http://localhost:5000/api/v1/users/check-available?username=newuser
 
 #### 校验注册码
 
-`POST /users/regcode/check`
+`GET /users/regcode/check?reg_code=<code>`
 
 - 说明：校验注册码 / 卡码是否有效，供注册页预检。
 - 认证：公开（`AuthPublic`）
@@ -434,11 +433,13 @@ curl -X GET "http://localhost:5000/api/v1/users/check-available?username=newuser
 
 #### Telegram 注册绑定码
 
-`POST /users/telegram/register/bind-code` — 生成注册阶段的 Telegram 绑定码（公开，IP 限流 5/10 分钟）。
+`GET /users/telegram/register/bind-code` — 生成注册阶段的 Telegram 绑定码（公开，IP 限流 5/10 分钟）。该 GET 有副作用，调用方必须带 `X-Twilight-Client: webui` 与 `X-Twilight-Intent: create-bind-code`，后端会拒绝预取请求。
 
-`GET /users/telegram/register/bind-code/status` — 轮询绑定码状态（公开，三层防御见上文限流章节）。
+`GET /users/telegram/register/bind-code/ws?code=<code>` — WebSocket 订阅绑定码状态（公开，校验 `Origin`）。这是 Web 注册页主路径。
 
-常见响应字段：`status`（`waiting` / `confirmed` / `expired` / `not_found` / `invalid_format` / `invalid_scene`）、`confirmed`、`terminal`、`expires_in`、`telegram_id`、`telegram_username`、`message`。过期绑定码会被清理；注册提交时，后端会在同一把 store 写锁内消费已确认绑定码、复检 Telegram ID 唯一性并创建用户。
+`GET /users/telegram/register/bind-code/status?code=<code>` — GET fallback 查询绑定码状态（公开，主要用于 WebSocket 不可用或提交前兜底）。
+
+常见响应字段：`status`（`pending` / `confirmed` / `expired` / `not_found` / `invalid_format` / `wrong_scene` / `telegram_taken`）、`confirmed`、`terminal`、`expires_in`、`telegram_id`、`telegram_username`、`message`。绑定码只保存在当前 App 进程内存，服务重启后失效；注册提交时，后端会消费已确认绑定码、复检 Telegram ID 唯一性并创建用户。
 
 `POST /users/me/telegram/bind-confirm` — 注册流程中确认绑定（路由为 `AuthPublic`，由绑定码本身承载身份）。
 请求体：
@@ -669,10 +670,11 @@ curl -X DELETE "http://localhost:5000/api/v1/users/me/devices/abc123" \
 
 #### 生成绑定验证码
 
-`POST /users/me/telegram/bind-code`
+`GET /users/me/telegram/bind-code`
 
 - 认证：登录用户（`AuthUser`）
 - 限流：UID，5 / 10 分钟
+- 请求头：`X-Twilight-Client: webui`、`X-Twilight-Intent: create-bind-code`
 
 #### 申请换绑 Telegram
 
@@ -961,6 +963,8 @@ curl -X GET "http://localhost:5000/api/v1/admin/users?status=active&page=1&per_p
 #### 删除用户
 
 `DELETE /admin/users/{uid}`
+
+`POST /admin/users/{uid}/delete` — 推荐用于需要 JSON body 的删除操作，支持 `mode` 与 `cascade_depth`，避免依赖 `DELETE` body 被代理/WAF 保留。
 
 #### 禁用 / 启用用户
 
@@ -1738,7 +1742,7 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 | `GET /invite/codes` | `AuthUser` | 列出我的邀请码 |
 | `DELETE /invite/codes/{code}` | `AuthUser` | 删除邀请码 |
 | `POST /invite/children/{uid}/detach-expired` | `AuthUser` | 删除 Emby 并断开 Emby 已到期或 Web 已禁用的直属下级 |
-| `POST /invite/check` | `AuthPublic` | 校验邀请码（IP 限流 10/60s） |
+| `GET /invite/check` | `AuthPublic` | 校验邀请码（IP 限流 10/60s） |
 | `POST /invite/use` | `AuthUser` | 使用邀请码 |
 
 ### 11.5 Signin 模块（装饰性）

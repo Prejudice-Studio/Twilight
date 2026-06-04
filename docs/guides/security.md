@@ -47,7 +47,7 @@ allow_credential = true
 ```
 
 - `allow_credential = true` 同时放行 `localhost` / `127.0.0.1` / `[::1]` 在生产环境是高危（任何人在本机起 dev 前端即可携带 cookie 跨站访问），启动期会打 `Error` 提示，请仅在 dev profile 使用。
-- 允许的请求头列表为 `Content-Type, Authorization, X-API-Key, X-Twilight-Client`。注意 `X-Twilight-Client` 仅出现在 CORS 允许头列表里，**并不被强制校验**。
+- 允许的请求头列表为 `Content-Type, Authorization, X-API-Key, X-Twilight-Client, X-Twilight-Intent`。`X-Twilight-Client` 不参与鉴权；`X-Twilight-Intent` 仅用于少数有副作用 GET 的显式意图校验。
 
 ### 3.2 会话与 Cookie
 
@@ -60,7 +60,7 @@ allow_credential = true
 
 ### 3.3 Cookie 写请求
 
-后端不再做 CSRF 令牌校验；Cookie 鉴权写请求只要求有效的 `HttpOnly` session cookie。Bearer Token / API Key 仍按各自鉴权路径处理。
+后端不再做 CSRF 令牌校验；Cookie 鉴权写请求要求有效的 `HttpOnly` session cookie，并通过 `Origin` / `Referer` / `Sec-Fetch-Site` 拦截跨站变更请求。Bearer Token / API Key 仍按各自鉴权路径处理。
 
 ## 4. 鉴权级别与统一响应
 

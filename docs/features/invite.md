@@ -66,7 +66,7 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 | `DELETE` | `/invite/codes/:code` | AuthUser | 撤销 / 删除我生成的邀请码（仅限本人创建的码）。 |
 | `POST` | `/invite/renew-codes` | AuthUser | 为已加入邀请树的「直属下级」生成专属续期码（实际生成的是 `type=2` 续期注册码，见下）。邀请系统关闭后仍允许给既有直属下级生成。 |
 | `POST` | `/invite/children/:uid/detach-expired` | AuthUser | 删除 Emby 并断开直属下级：仅允许目标 Emby 已到期，或 Web 已禁用且仍绑定 Emby；清空绑定与待开通状态并解除上下级关系。 |
-| `POST` | `/invite/check` | AuthPublic | 公开校验邀请码是否可用，命中返回 `days` 与邀请人用户名 `inviter`。按 IP 限速 20 次/分钟，防止扫描邀请码空间泄露邀请人信息。 |
+| `GET` | `/invite/check` | AuthPublic | 公开校验邀请码是否可用，命中返回 `days` 与邀请人用户名 `inviter`。按 IP 限速 10 次/分钟，防止扫描邀请码空间泄露邀请人信息。 |
 | `POST` | `/invite/use` | AuthUser | 已登录用户使用邀请码加入邀请树并标记待开通 Emby。按 UID 限速 10 次/分钟。**Web 前端统一走 `/users/me/use-code`（兼容卡码 / 邀请码两类），此接口为兼容入口。** |
 
 ### 生成邀请码（`POST /invite/codes`）
@@ -84,13 +84,14 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 | `GET` | `/admin/invite/tree` | AuthAdmin | 返回整片森林：`nodes`（节点）+ `edges`（边）+ `roots`（树根 UID 列表）+ `max_depth`（全局最大深度）+ `config`（当前配置）。 |
 | `POST` | `/admin/invite/users/:uid/detach` | AuthAdmin | 把指定用户从上级断开（删除其作为 `child` 的边，自身晋升新树根）。返回 `changed` 表示原本是否有上级。 |
 | `GET` | `/admin/invite/codes` | AuthAdmin | 列出全部邀请码（可按邀请人在前端过滤）。 |
-| `DELETE` | `/admin/users/:uid` | AuthAdmin | 删除用户，支持 `mode` 与 `cascade_depth`（见下）。 |
+| `POST` | `/admin/users/:uid/delete` | AuthAdmin | 删除用户，支持 JSON body 的 `mode` 与 `cascade_depth`（见下，推荐）。 |
+| `DELETE` | `/admin/users/:uid` | AuthAdmin | 删除用户兼容入口，保留简单删除和旧客户端调用。 |
 | `POST` | `/admin/users/:uid/disable` | AuthAdmin | 禁用用户，支持 `cascade_depth` 级联（见下）。 |
 | `POST` | `/admin/users/:uid/enable` | AuthAdmin | 启用用户，支持 `cascade_depth` 级联（见下）。 |
 
-> `/admin/users/:uid`、`/admin/users/:uid/disable`、`/admin/users/:uid/enable` 是通用的用户管理接口，并非邀请模块专属，但其级联参数会沿邀请树展开，因此与邀请树语义强相关，下文一并说明。
+> `/admin/users/:uid/delete`、`/admin/users/:uid`、`/admin/users/:uid/disable`、`/admin/users/:uid/enable` 是通用的用户管理接口，并非邀请模块专属，但其级联参数会沿邀请树展开，因此与邀请树语义强相关，下文一并说明。
 
-### 删除用户（`DELETE /admin/users/:uid`）
+### 删除用户（`POST /admin/users/:uid/delete`）
 
 请求体扩展：
 

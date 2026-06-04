@@ -24,14 +24,14 @@
 | 响应封装 | 统一 envelope：`{ success, code, error_code, message, data, timestamp }`（见 `internal/api/response.go`，`data`/`error_code` 为空时省略） |
 | 会话鉴权 | 登录态会话 Cookie，或 `Authorization: Bearer <token>` |
 | API Key 鉴权 | `X-API-Key: <key>`、`Authorization: ApiKey <key>` / `Authorization: Bearer <key>`，或 `?apikey=<key>` 查询串（仅当该 Key 开启 `AllowQuery` 时生效，见 `internal/api/app.go` 的 `authenticateAPIKey`） |
-| Cookie 写请求 | 不再要求 CSRF 令牌；Cookie 鉴权写请求只依赖有效登录会话，Bearer / API Key 按各自鉴权路径处理 |
+| Cookie 写请求 | 不再要求 CSRF 令牌；Cookie 鉴权的变更请求会校验 `Origin` / `Referer` / `Sec-Fetch-Site`，Bearer / API Key 按各自鉴权路径处理 |
 | 管理接口归置 | 业务管理接口归入 `/admin/*`，系统配置/运维类归入 `/system/admin/*` |
 | 用户自有资源 | 优先使用 `/users/me/*` |
 | 公开资源 | 必须显式标记为 Public，并评估限流与信息泄露风险 |
 | 线路接口 | 推荐使用 `GET /system/emby-urls`；`GET /emby/urls` 已弃用 |
 | 上传资源 | 仅允许通过 `GET /users/assets/{kind}/{filename}` 受控访问，不公开 `/uploads` 目录 |
 
-> 说明：`X-Twilight-Client` 现在只出现在 CORS 的 `Access-Control-Allow-Headers` 列表里（与 `Content-Type, Authorization, X-API-Key` 并列），不参与鉴权或写请求校验。
+> 说明：`X-Twilight-Client` 只用于前端请求识别与 CORS 允许头，不参与鉴权。少数有副作用的 `GET`（如绑定码创建）还要求 `X-Twilight-Intent` 显式声明操作意图，用于拦截预取/探测误触发。
 
 ## 根与文档
 
@@ -66,9 +66,10 @@
 | ---- | ---- | ---- | ---- |
 | POST | `/api/v1/users/register` | Public | 注册系统账号 |
 | GET | `/api/v1/users/check-available` | Public | 注册可用性检查（用户名等） |
-| POST | `/api/v1/users/regcode/check` | Public | 预检注册码/续期码/卡码 |
-| POST | `/api/v1/users/telegram/register/bind-code` | Public | 生成注册用 Telegram 绑定码 |
+| GET | `/api/v1/users/regcode/check` | Public | 预检注册码/续期码/卡码 |
+| GET | `/api/v1/users/telegram/register/bind-code` | Public | 生成注册用 Telegram 绑定码（需 `X-Twilight-Intent: create-bind-code`） |
 | GET | `/api/v1/users/telegram/register/bind-code/status` | Public | 查询注册用 Telegram 绑定码状态 |
+| GET | `/api/v1/users/telegram/register/bind-code/ws` | Public | WebSocket 订阅注册用 Telegram 绑定码状态 |
 | POST | `/api/v1/users/me/telegram/bind-confirm` | Public | 确认 Telegram 绑定（安全确认流程） |
 | GET | `/api/v1/users/register/emby/status` | Public | 查询 Emby 注册队列状态 |
 | GET | `/api/v1/users/me` | User | 当前用户资料 |
@@ -91,7 +92,7 @@
 | GET | `/api/v1/users/me/telegram` | User | Telegram 绑定状态 |
 | POST | `/api/v1/users/me/telegram/rebind-request` | User | 提交 Telegram 换绑申请 |
 | POST | `/api/v1/users/me/telegram/unbind` | User | 解绑 Telegram |
-| POST | `/api/v1/users/me/telegram/bind-code` | User | 生成登录用户的 Telegram 绑定码 |
+| GET | `/api/v1/users/me/telegram/bind-code` | User | 生成登录用户的 Telegram 绑定码（需 `X-Twilight-Intent: create-bind-code`） |
 | GET | `/api/v1/users/me/settings` | User | 当前用户设置聚合 |
 | GET | `/api/v1/users/{uid}/background` | User | 获取指定用户背景（本人或管理员） |
 | PUT | `/api/v1/users/me/background` | User | 更新背景配置 |
@@ -189,6 +190,7 @@
 | GET | `/api/v1/admin/users/{uid}` | Admin | 用户详情 |
 | PUT | `/api/v1/admin/users/{uid}` | Admin | 更新用户 |
 | DELETE | `/api/v1/admin/users/{uid}` | Admin | 删除用户 |
+| POST | `/api/v1/admin/users/{uid}/delete` | Admin | 删除用户（推荐；支持 JSON body 的 `mode` 与 `cascade_depth`） |
 | POST | `/api/v1/admin/users/{uid}/disable` | Admin | 禁用用户 |
 | POST | `/api/v1/admin/users/{uid}/enable` | Admin | 启用用户 |
 | DELETE | `/api/v1/admin/users/{uid}/emby` | Admin | 删除用户的 Emby 账号 |
@@ -323,7 +325,7 @@
 | GET | `/api/v1/invite/codes` | User | 我的邀请码列表 |
 | DELETE | `/api/v1/invite/codes/{code}` | User | 删除/停用邀请码 |
 | POST | `/api/v1/invite/children/{uid}/detach-expired` | User | 删除 Emby 并断开 Emby 已到期或 Web 已禁用的直属下级 |
-| POST | `/api/v1/invite/check` | Public | 校验邀请码 |
+| GET | `/api/v1/invite/check` | Public | 校验邀请码 |
 | POST | `/api/v1/invite/use` | User | 使用邀请码开通 Emby（兼容旧入口） |
 
 > 邀请关系与邀请码同样以字段形式存在于单一状态文档中（`invite_relations`、邀请码等），不存在独立的 `db/invites.db` 或单独的邀请关系表。

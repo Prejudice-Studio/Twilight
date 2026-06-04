@@ -37,7 +37,7 @@ Twilight 0.0.4 Go 后端重构版已更新。
 
 5. 安全加固
    - 凭据型 CORS 不再接受通配符。
-   - Cookie 变更类请求不再要求额外令牌；浏览器端依赖 HttpOnly 会话 Cookie，机器调用使用 Bearer Token 或 API Key。
+   - Cookie 变更类请求不再要求额外令牌；浏览器端依赖 HttpOnly 会话 Cookie，并通过 Origin / Fetch Metadata 拦截跨站写请求，机器调用使用 Bearer Token 或 API Key。
    - 管理接口统一收紧鉴权边界。
    - 上传资源、背景样式、备份恢复和 Git 更新都加强了路径、类型和输入校验。
    - 非系统管理员绑定 Emby 管理员账号时会被限制敏感操作，防止越权。
@@ -180,7 +180,7 @@ Twilight 0.0.4 Go 后端重构版已更新。
 
 - 凭据型 CORS 不再接受 `*`，生产环境必须显式配置可信前端 Origin。
 - CORS Origin 匹配增加规范化处理，允许配置尾斜杠，但拒绝带路径、查询串、片段或非法 scheme 的来源，降低跨域配置误用风险。
-- Cookie 变更类请求不再要求额外令牌；鉴权边界收敛到有效会话、Bearer Token 或 API Key，`X-Twilight-Client` 仅保留为允许的 CORS 请求头。
+- Cookie 变更类请求不再要求额外令牌；Cookie 写请求增加 Origin / Referer / Fetch Metadata 防线，Bearer Token 与 API Key 按各自鉴权路径处理，`X-Twilight-Client` 不参与鉴权。
 - 新增管理员实时日志与服务器状态接口；日志只来自 Go 进程内缓冲，不读取任意系统日志文件，并对 Token、Cookie、密码、API Key、DSN 等敏感内容做脱敏。
 - 用户背景配置改为后端结构化校验，只允许安全渐变表达式和本系统上传的背景资源，阻断任意外部 URL、复杂 CSS 函数和 `url()` 注入。
 - 标准前端部署禁用 Next 服务端图片优化器，避免特殊部署环境中由图片优化器代拉任意远程 URL。

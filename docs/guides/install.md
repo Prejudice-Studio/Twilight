@@ -166,7 +166,7 @@ pnpm start -p 3000
 
 ### 可信代理
 
-- 后端不再要求 CSRF 令牌；浏览器写请求只依赖登录会话 Cookie 鉴权。`X-Twilight-Client: webui` 只出现在 CORS 允许头列表里，并不被强制校验。
+- 后端不再要求 CSRF 令牌；浏览器写请求依赖登录会话 Cookie 鉴权，并通过 `Origin` / `Referer` / `Sec-Fetch-Site` 拦截跨站变更请求。`X-Twilight-Client: webui` 不参与鉴权。
 - 反向代理后必须正确设置 `trusted_proxy_cidrs`：只有当请求的直接上游 IP 落在该列表内时，后端才会信任 `CF-Connecting-IP` / `X-Real-IP` / `X-Forwarded-For` 解析真实客户端 IP，否则一律用 `RemoteAddr`，防止任意人伪造头绕过 IP 黑名单与限流。默认只信任本机（`127.0.0.0/8`、`::1/128`）；多级代理时显式加入反代出口 IP/CIDR，不要直接填整个私网段。键名必须与代码一致（`trusted_proxy_cidrs`），写错会被静默忽略并退化到 fail-closed。
 
 更完整的安全加固见 [安全加固](./security.md)。

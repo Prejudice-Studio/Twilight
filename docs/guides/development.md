@@ -150,7 +150,7 @@ bash start_backend_dev.sh
 
 ### Cookie 写请求
 
-Twilight 不再对 Cookie 鉴权的变更类请求做 CSRF 令牌校验。登录态依赖 `HttpOnly` session cookie，机器调用可使用 Bearer Token 或 API Key。`X-Twilight-Client: webui` 仅用于 CORS 允许头，不是鉴权手段。
+Twilight 不再对 Cookie 鉴权的变更类请求做 CSRF 令牌校验。登录态依赖 `HttpOnly` session cookie，同时写请求会校验 `Origin` / `Referer` / `Sec-Fetch-Site` 以拦截跨站变更；机器调用可使用 Bearer Token 或 API Key。`X-Twilight-Client: webui` 仅用于前端请求识别/CORS，不是鉴权手段。
 
 ### 文件与路径安全
 

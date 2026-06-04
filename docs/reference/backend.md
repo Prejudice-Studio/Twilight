@@ -262,7 +262,7 @@ Go 后端按统一的业务状态与前端响应形状实现，主要模块：
   - `AuthUser`：登录会话（Cookie）或 Bearer Token。
   - `AuthAdmin`：登录且 `Role == RoleAdmin`。
   - `AuthAPIKey`：`X-API-Key` 头、`Authorization: ApiKey/Bearer` 或 `?apikey=` 查询参数。
-- Cookie 鉴权写请求不再要求 CSRF 令牌；`X-Twilight-Client: webui` 头仅出现在 CORS 允许头列表里，并不参与鉴权。
+- Cookie 鉴权写请求不再要求 CSRF 令牌，但会校验 `Origin` / `Referer` / `Sec-Fetch-Site` 拦截跨站变更请求；`X-Twilight-Client: webui` 不参与鉴权。
 - Cookie 会话默认 `HttpOnly`、`Secure=true`、`SameSite=Lax`；可通过 `CookieDomain` 跨子域共享。
 - CORS 必须显式列出可信 Origin；携带凭据接口不接受 `*`。
 - API Key 只保存哈希，明文仅创建时返回一次。

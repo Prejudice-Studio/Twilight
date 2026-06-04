@@ -138,7 +138,7 @@
 
 同一处理逻辑也挂在 `POST /api/v1/apikey/use-code`（鉴权：AuthAPIKey），供外部系统接入，见 [API Key 外部接入](../reference/api-key.md)。
 
-### 公开校验 `POST /api/v1/users/regcode/check`（鉴权：AuthPublic）
+### 公开校验 `GET /api/v1/users/regcode/check`（鉴权：AuthPublic）
 
 `handleRegcodeCheck` 仅用于注册前的卡码预览，输入 `reg_code`，返回 `type`、`type_name`、`days`、`valid`：
 
@@ -195,11 +195,11 @@
 
 | 入口 | 鉴权级别 | 限流 / 防护 |
 | ---- | ---- | ---- |
-| `POST /api/v1/users/regcode/check` | AuthPublic | 每 IP 10 次/分钟；不返回使用者；隐藏诱饵码与指名码 |
+| `GET /api/v1/users/regcode/check` | AuthPublic | 每 IP 10 次/分钟；不返回使用者；隐藏诱饵码与指名码 |
 | `POST /api/v1/users/register` | AuthPublic | 注册整体按 IP 限流；带注册码时叠加每 IP 10 次/分钟；建账号、绑定码消费与注册码消费同锁原子 |
 | `POST /api/v1/users/me/use-code` | AuthUser | `check_only` 预览不消费；消费与用户权益更新在全局锁下原子完成 |
 | `POST /api/v1/apikey/use-code` | AuthAPIKey | 同 use-code 逻辑，供外部接入 |
 | `POST /api/v1/users/me/renew` | AuthUser | 仅接受 type=2 续期码 |
 | `GET/POST/PUT/DELETE /api/v1/admin/regcodes*` | AuthAdmin | 批量删除/清理需确认短语；写操作受数据库一致性护栏约束 |
 
-所有变更类请求只按对应鉴权级别校验有效 Cookie 会话、Bearer Token 或 API Key，不再要求额外令牌。统一响应 envelope 为 `{ success, code, message, data, timestamp }`。鉴权级别与响应约定详见 [API 路由索引](../reference/api-index.md) 与 [后端 API 详参](../reference/backend-api.md)。
+Cookie 鉴权的变更类请求不再要求 CSRF 令牌，但会校验浏览器来源；Bearer Token 与 API Key 按各自鉴权路径处理。统一响应 envelope 为 `{ success, code, message, data, timestamp }`。鉴权级别与响应约定详见 [API 路由索引](../reference/api-index.md) 与 [后端 API 详参](../reference/backend-api.md)。
