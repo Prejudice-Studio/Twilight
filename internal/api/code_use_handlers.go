@@ -209,8 +209,11 @@ func (a *App) handleRegcodeCheck(w http.ResponseWriter, r *http.Request, _ Param
 		failWithCode(w, http.StatusTooManyRequests, ErrRateLimited, "请求过于频繁，请稍后再试")
 		return
 	}
-	payload := decodeMap(r)
-	code := stringValue(payload, "reg_code")
+	code := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("reg_code"), r.URL.Query().Get("code")))
+	if code == "" {
+		payload := decodeMap(r)
+		code = stringValue(payload, "reg_code")
+	}
 	if code != "" {
 		if reg, okReg := a.store().RegCode(code); okReg {
 			if reg.IsDecoy || reg.TargetUsername != "" || reg.TargetTelegramUsername != "" || reg.TargetTelegramID != 0 {

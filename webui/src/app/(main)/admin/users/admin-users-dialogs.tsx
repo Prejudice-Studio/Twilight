@@ -117,6 +117,106 @@ export function EditUserDialog({
   );
 }
 
+export interface WebUserCreateForm {
+  username: string;
+  password: string;
+  email: string;
+  role: number;
+}
+
+export function WebUserCreateDialog({
+  open,
+  onOpenChange,
+  form,
+  onFormChange,
+  onSubmit,
+  isSubmitting,
+}: {
+  open: boolean;
+  onOpenChange: (next: boolean) => void;
+  form: WebUserCreateForm;
+  onFormChange: (next: WebUserCreateForm) => void;
+  onSubmit: () => void;
+  isSubmitting: boolean;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <UserPlus className="h-5 w-5" />
+            新建 Web 账号
+          </DialogTitle>
+          <DialogDescription>
+            仅创建 Twilight 本地账号，不创建或绑定 Emby 账号。密码留空时后端会生成一次性强密码。
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="space-y-2">
+            <Label htmlFor="web-user-username">用户名</Label>
+            <Input
+              id="web-user-username"
+              value={form.username}
+              onChange={(e) => onFormChange({ ...form, username: e.target.value })}
+              placeholder="如 alice"
+              disabled={isSubmitting}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="web-user-password">密码（可选）</Label>
+            <Input
+              id="web-user-password"
+              type="password"
+              value={form.password}
+              onChange={(e) => onFormChange({ ...form, password: e.target.value })}
+              placeholder="留空自动生成"
+              disabled={isSubmitting}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="web-user-email">邮箱（可选）</Label>
+            <Input
+              id="web-user-email"
+              value={form.email}
+              onChange={(e) => onFormChange({ ...form, email: e.target.value })}
+              placeholder="user@example.com"
+              disabled={isSubmitting}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>角色</Label>
+            <Select
+              value={String(form.role)}
+              onValueChange={(value) => onFormChange({ ...form, role: Number(value) })}
+              disabled={isSubmitting}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1">普通用户</SelectItem>
+                <SelectItem value="2">白名单</SelectItem>
+                <SelectItem value="0">管理员</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
+            取消
+          </Button>
+          <Button onClick={onSubmit} disabled={isSubmitting}>
+            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            创建
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /**
  * 新建独立 Emby 账号对话框：直接调用 Emby API 创建账号，不写入本地用户表，
  * 不参与到期 / 权限管理。仅做受控输入 + 提交按钮，加载态由父组件控制。

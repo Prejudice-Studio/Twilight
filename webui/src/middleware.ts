@@ -47,6 +47,16 @@ function safeOrigin(raw: string | undefined): string {
   }
 }
 
+function webSocketOriginFromHTTPOrigin(origin: string): string {
+  try {
+    const u = new URL(origin);
+    u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
+    return u.origin;
+  } catch {
+    return "";
+  }
+}
+
 export function middleware(request: NextRequest) {
   void request;
   const isDev = process.env.NODE_ENV !== "production";
@@ -68,9 +78,13 @@ export function middleware(request: NextRequest) {
   //   - NEXT_PUBLIC_CSP_CONNECT 留作运维兜底，可塞额外白名单（如对接的第三方
   //     metrics / sentry / OAuth 跳转回调）。
   const apiOrigin = safeOrigin(process.env.NEXT_PUBLIC_API_URL);
+  const selfWsOrigin = webSocketOriginFromHTTPOrigin(request.nextUrl.origin);
+  const apiWsOrigin = apiOrigin ? webSocketOriginFromHTTPOrigin(apiOrigin) : "";
   const extraConnect = process.env.NEXT_PUBLIC_CSP_CONNECT?.trim();
   const connectParts = new Set<string>(["'self'"]);
   if (apiOrigin) connectParts.add(apiOrigin);
+  if (selfWsOrigin) connectParts.add(selfWsOrigin);
+  if (apiWsOrigin) connectParts.add(apiWsOrigin);
   connectParts.add("https://cloudflareinsights.com");
   if (extraConnect) {
     // 允许 NEXT_PUBLIC_CSP_CONNECT，但每条都要过 safeOrigin 校验：

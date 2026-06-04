@@ -27,13 +27,13 @@ func (a *App) registerTelegramBindCodeState(code string, now int64, cleanupExpir
 	if !telegramBindCodePattern.MatchString(code) {
 		return registerTelegramBindCodeState{Code: code, Status: "invalid_format", ErrorCode: ErrTGBindCodeFormat, HTTPStatus: http.StatusBadRequest, Message: "Telegram 绑定码格式不正确", Invalid: true, Terminal: true}
 	}
-	bind, okBind := a.store().BindCode(code)
+	bind, okBind := a.bindCode(code)
 	if !okBind {
 		return registerTelegramBindCodeState{Code: code, Status: "not_found", ErrorCode: ErrTGBindCodeNotFound, HTTPStatus: http.StatusBadRequest, Message: "绑定码不存在", Invalid: true, Terminal: true}
 	}
 	if bind.ExpiresAt <= now {
 		if cleanupExpired {
-			_ = a.store().DeleteBindCode(code)
+			_ = a.deleteBindCode(code)
 		}
 		return registerTelegramBindCodeState{Code: code, Status: "expired", ErrorCode: ErrTGBindCodeExpired, HTTPStatus: http.StatusBadRequest, Message: "绑定码无效或已过期", Bind: bind, Invalid: true, Terminal: true}
 	}
@@ -48,6 +48,18 @@ func (a *App) registerTelegramBindCodeState(code string, now int64, cleanupExpir
 		return state
 	}
 	if !bind.Confirmed || bind.TelegramID == 0 {
+		if a.bindStatus != nil {
+			if failure, ok := a.bindStatus.failure(code, now); ok {
+				state.Status = failure.Status
+				state.ErrorCode = failure.ErrorCode
+				state.HTTPStatus = failure.HTTPStatus
+				state.Message = failure.Message
+				state.Confirmed = false
+				state.Invalid = true
+				state.Terminal = true
+				return state
+			}
+		}
 		state.Status = "pending"
 		state.ErrorCode = ErrTGBindCodeNotConfirm
 		state.HTTPStatus = http.StatusBadRequest
@@ -71,6 +83,81 @@ func (a *App) registerTelegramBindCodeState(code string, now int64, cleanupExpir
 	state.Confirmed = true
 	state.Terminal = true
 	return state
+}
+
+func writeRegisterTelegramBindCodeState(w http.ResponseWriter, state registerTelegramBindCodeState) {
+	data := state.response()
+	if state.Invalid {
+		writeJSONWithCode(w, http.StatusOK, false, state.ErrorCode, state.Message, data)
+		return
+	}
+	ok(w, "OK", data)
+}
+
+func (a *App) recordRegisterBindFailure(bind store.BindCode, code string, status string, errorCode ErrCode, httpStatus int, message string) {
+	if a.bindStatus == nil || bind.Scene != "register" || bind.UID != 0 {
+		return
+	}
+	a.bindStatus.fail(code, bindCodeFailure{Status: status, ErrorCode: errorCode, HTTPStatus: httpStatus, Message: message, ExpiresAt: bind.ExpiresAt})
+}
+
+func (a *App) clearRegisterBindFailure(code string) {
+	if a.bindStatus == nil {
+		return
+	}
+	a.bindStatus.clear(code)
+}
+
+func (a *App) bindCode(code string) (store.BindCode, bool) {
+	if a.bindStatus == nil {
+		return store.BindCode{}, false
+	}
+	return a.bindStatus.bindCode(code)
+}
+
+func (a *App) upsertBindCode(bind store.BindCode) error {
+	if a.bindStatus == nil {
+		return store.ErrNotFound
+	}
+	return a.bindStatus.upsertBindCode(bind)
+}
+
+func (a *App) deleteBindCode(code string) error {
+	if a.bindStatus == nil {
+		return store.ErrNotFound
+	}
+	return a.bindStatus.deleteBindCode(code)
+}
+
+func (a *App) cleanupExpiredBindCodes(now int64) int {
+	if a.bindStatus == nil {
+		return 0
+	}
+	return a.bindStatus.cleanupExpiredBindCodes(now)
+}
+
+func (a *App) confirmBindCodeAtomic(code string, telegramID int64, telegramUsername string, now int64) (store.BindCode, store.User, bool, error) {
+	if a.bindStatus == nil {
+		return store.BindCode{}, store.User{}, false, store.ErrNotFound
+	}
+	return a.bindStatus.confirmBindCodeAtomic(code, telegramID, telegramUsername, now, func(tgid, allowedUID int64) bool {
+		if existing, ok := a.store().FindUserByTelegramID(tgid); ok && existing.UID != allowedUID {
+			return true
+		}
+		return false
+	}, func(bind store.BindCode) (store.User, error) {
+		updated, _, err := a.store().BindUserTelegramAtomic(bind.UID, bind.TelegramID, bind.UID)
+		if err != nil {
+			return store.User{}, err
+		}
+		if strings.TrimSpace(bind.TelegramUsername) == "" {
+			return updated, nil
+		}
+		return a.store().UpdateUser(bind.UID, func(u *store.User) error {
+			u.TelegramUsername = strings.TrimSpace(bind.TelegramUsername)
+			return nil
+		})
+	})
 }
 
 func (s registerTelegramBindCodeState) response() map[string]any {

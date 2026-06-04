@@ -9,7 +9,6 @@ import (
 )
 
 var schedulerJobs = []map[string]any{
-	{"id": "cleanup_bind_codes", "name": "清理过期绑定码", "description": "删除过期 Telegram 绑定码，避免重启后残留无效凭据。", "manual_only": false, "enabled": true},
 	{"id": "check_expired", "name": "检查已过期用户", "description": "扫描已过期账号，并按规则禁用系统或 Emby 访问。", "manual_only": false, "enabled": true},
 	{"id": "check_expiring", "name": "检查即将到期用户", "description": "统计近期即将到期的用户，供管理员确认续期风险。", "manual_only": false, "enabled": true},
 	{"id": "expiry_reminders", "name": "发送到期提醒", "description": "向即将到期且已绑定 Telegram 的用户发送续期提醒。", "manual_only": false, "enabled": true},

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/csv"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -424,6 +425,9 @@ func (a *App) handleQueueStatus(w http.ResponseWriter, r *http.Request, _ Params
 }
 
 func (a *App) handleRegisterBindCode(w http.ResponseWriter, r *http.Request, _ Params) {
+	if !requireWebUIIntent(w, r, twilightIntentCreateBindCode) {
+		return
+	}
 	if !a.allowRate(r.Context(), rateKey("register-bind-code:", a.clientIP(r)), a.cfg().RateLimitRegisterPer10m, 10*time.Minute) {
 		failWithCode(w, http.StatusTooManyRequests, ErrBindCodeRateLimited, "绑定码请求过于频繁")
 		return
@@ -432,6 +436,9 @@ func (a *App) handleRegisterBindCode(w http.ResponseWriter, r *http.Request, _ P
 }
 
 func (a *App) handleUserBindCode(w http.ResponseWriter, r *http.Request, _ Params) {
+	if !requireWebUIIntent(w, r, twilightIntentCreateBindCode) {
+		return
+	}
 	if !a.allowRate(r.Context(), rateKey("user-bind-code:", current(r).User.UID), a.cfg().RateLimitLoginPerMinute, time.Minute) {
 		failWithCode(w, http.StatusTooManyRequests, ErrBindCodeRateLimited, "绑定码请求过于频繁")
 		return
@@ -440,11 +447,11 @@ func (a *App) handleUserBindCode(w http.ResponseWriter, r *http.Request, _ Param
 }
 
 func (a *App) createBindCode(w http.ResponseWriter, uid int64, scene string) {
-	_, _ = a.store().CleanupExpiredBindCodes(time.Now().Unix())
+	a.cleanupExpiredBindCodes(time.Now().Unix())
 	code := ""
 	for attempt := 0; attempt < 20; attempt++ {
 		candidate := strings.ToUpper(randomCode(12))
-		if _, exists := a.store().BindCode(candidate); exists {
+		if _, exists := a.bindCode(candidate); exists {
 			continue
 		}
 		code = candidate
@@ -455,7 +462,7 @@ func (a *App) createBindCode(w http.ResponseWriter, uid int64, scene string) {
 		return
 	}
 	now := time.Now().Unix()
-	if err := a.store().UpsertBindCode(store.BindCode{Code: code, Scene: scene, UID: uid, CreatedAt: now, ExpiresAt: now + 600}); err != nil {
+	if err := a.upsertBindCode(store.BindCode{Code: code, Scene: scene, UID: uid, CreatedAt: now, ExpiresAt: now + 600}); err != nil {
 		failWithCode(w, http.StatusInternalServerError, ErrBindCodeSaveFailed, "绑定码保存失败，请稍后重试")
 		return
 	}
@@ -471,7 +478,7 @@ func (a *App) handleBindCodeStatus(w http.ResponseWriter, r *http.Request, _ Par
 
 	respond := func() {
 		state := a.registerTelegramBindCodeState(code, time.Now().Unix(), true)
-		ok(w, "OK", state.response())
+		writeRegisterTelegramBindCodeState(w, state)
 	}
 
 	// 即时模式
@@ -511,17 +518,105 @@ func (a *App) handleBindCodeStatus(w http.ResponseWriter, r *http.Request, _ Par
 	}
 }
 
+func (a *App) handleBindCodeStatusWS(w http.ResponseWriter, r *http.Request, _ Params) {
+	if !a.allowRate(r.Context(), rateKey("register-bind-status-ws:", a.clientIP(r)), max(30, a.cfg().RateLimitLoginPerMinute), time.Minute) {
+		failWithCode(w, http.StatusTooManyRequests, ErrRateLimited, "请求过于频繁，请稍后再试")
+		return
+	}
+	code := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("code")))
+	if !telegramBindCodePattern.MatchString(code) {
+		failWithCode(w, http.StatusBadRequest, ErrTGBindCodeFormat, "Telegram 绑定码格式不正确")
+		return
+	}
+	if !a.validateWebSocketOrigin(w, r) {
+		return
+	}
+	conn, err := acceptWebSocket(w, r)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	sendState := func(state registerTelegramBindCodeState) bool {
+		data := state.response()
+		data["type"] = "status"
+		payload, err := json.Marshal(data)
+		if err != nil {
+			return true
+		}
+		return writeWebSocketText(conn, payload) == nil
+	}
+
+	updates, unsubscribe := a.bindStatus.subscribe(code)
+	defer unsubscribe()
+
+	state := a.registerTelegramBindCodeState(code, time.Now().Unix(), true)
+	if !sendState(state) || state.Terminal {
+		writeWebSocketClose(conn)
+		return
+	}
+
+	expiryTimer := time.NewTimer(bindStateExpiryWait(state))
+	defer expiryTimer.Stop()
+	heartbeat := time.NewTicker(30 * time.Second)
+	defer heartbeat.Stop()
+
+	resetExpiryTimer := func(next registerTelegramBindCodeState) {
+		if !expiryTimer.Stop() {
+			select {
+			case <-expiryTimer.C:
+			default:
+			}
+		}
+		expiryTimer.Reset(bindStateExpiryWait(next))
+	}
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-updates:
+			state = a.registerTelegramBindCodeState(code, time.Now().Unix(), true)
+			if !sendState(state) || state.Terminal {
+				writeWebSocketClose(conn)
+				return
+			}
+			resetExpiryTimer(state)
+		case <-expiryTimer.C:
+			state = a.registerTelegramBindCodeState(code, time.Now().Unix(), true)
+			if !sendState(state) || state.Terminal {
+				writeWebSocketClose(conn)
+				return
+			}
+			resetExpiryTimer(state)
+		case <-heartbeat.C:
+			state = a.registerTelegramBindCodeState(code, time.Now().Unix(), true)
+			if !sendState(state) || state.Terminal {
+				writeWebSocketClose(conn)
+				return
+			}
+		}
+	}
+}
+
+func bindStateExpiryWait(state registerTelegramBindCodeState) time.Duration {
+	if state.ExpiresIn <= 0 {
+		return time.Second
+	}
+	return time.Duration(state.ExpiresIn)*time.Second + time.Second
+}
+
 func (a *App) handleBindConfirm(w http.ResponseWriter, r *http.Request, _ Params) {
 	payload := decodeMap(r)
 	code := strings.ToUpper(stringValue(payload, "code"))
-	bind, okBind := a.store().BindCode(code)
+	bind, okBind := a.bindCode(code)
 	if !okBind {
 		failWithCode(w, http.StatusNotFound, ErrBindCodeNotFound, "绑定码不存在")
 		return
 	}
 	bind.Confirmed = true
 	bind.TelegramID = int64(intValue(payload, "telegram_id", 0))
-	_ = a.store().UpsertBindCode(bind)
+	_ = a.upsertBindCode(bind)
 	ok(w, "bind confirmed", map[string]any{"code": code, "confirmed": true})
 }
 
@@ -1288,6 +1383,81 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request, _ Params)
 	total := len(items)
 	items = paginate(items, page, perPage)
 	ok(w, "OK", map[string]any{"users": items, "total": total, "page": page, "per_page": perPage, "pages": pages(total, perPage)})
+}
+
+func (a *App) handleAdminCreateUser(w http.ResponseWriter, r *http.Request, _ Params) {
+	payload := decodeMap(r)
+	username := strings.TrimSpace(stringValue(payload, "username"))
+	if err := validate.ValidateUsername(username); err != nil {
+		failWithCode(w, http.StatusBadRequest, ErrUsernameInvalid, err.Error())
+		return
+	}
+	if _, exists := a.store().FindUserByUsername(username); exists {
+		failWithCode(w, http.StatusConflict, ErrUsernameTaken, "用户名已被占用，请换一个用户名")
+		return
+	}
+	role := store.RoleNormal
+	if rawRole, ok := payload["role"]; ok {
+		parsed, valid := normalizeRoleValue(rawRole)
+		if !valid || parsed == store.RoleUnrecognized {
+			failWithCode(w, http.StatusBadRequest, ErrBadRequest, "role 取值非法")
+			return
+		}
+		role = parsed
+	}
+	telegramID := int64(intValue(payload, "telegram_id", 0))
+	if telegramID < 0 {
+		failWithCode(w, http.StatusBadRequest, ErrTGBindTGIDInvalid, "Telegram ID 无效")
+		return
+	}
+	if telegramID != 0 {
+		if existing, okUser := a.store().FindUserByTelegramID(telegramID); okUser {
+			failWithCode(w, http.StatusConflict, ErrTGAlreadyBound, "该 Telegram 已绑定到账号 "+existing.Username)
+			return
+		}
+	}
+	password := stringValue(payload, "password")
+	autoGenerated := password == ""
+	if autoGenerated {
+		password = "Twilight-" + randomCode(generatedPasswordHexLen)
+	} else if err := validate.ValidatePasswordStrength(password); err != nil {
+		failWithCode(w, http.StatusBadRequest, ErrPasswordWeak, err.Error())
+		return
+	}
+	hash, err := security.HashPassword(password)
+	if err != nil {
+		failWithCode(w, http.StatusInternalServerError, ErrPasswordHashFailed, "密码处理失败")
+		return
+	}
+	expiredAt := numeric(payload["expired_at"])
+	if _, ok := payload["days"]; ok {
+		days := intValue(payload, "days", -1)
+		if days < 0 {
+			expiredAt = permanentExpiryUnix
+		} else {
+			expiredAt = time.Now().AddDate(0, 0, days).Unix()
+		}
+	}
+	if expiryIsPermanent(expiredAt) {
+		expiredAt = permanentExpiryUnix
+	}
+	createdUser, err := a.store().CreateUser(store.User{
+		Username:         username,
+		Email:            stringValue(payload, "email"),
+		PasswordHash:     hash,
+		Role:             role,
+		ExpiredAt:        expiredAt,
+		TelegramID:       telegramID,
+		TelegramUsername: strings.TrimPrefix(strings.TrimSpace(stringValue(payload, "telegram_username")), "@"),
+	})
+	if errors.Is(err, store.ErrConflict) {
+		failWithCode(w, http.StatusConflict, ErrUsernameTaken, "用户名或 Telegram 已被占用")
+		return
+	}
+	if statusFromError(w, err) {
+		return
+	}
+	created(w, "Web account created", map[string]any{"user": publicUser(createdUser), "password": password, "auto_generated": autoGenerated})
 }
 
 func (a *App) handleAdminUser(w http.ResponseWriter, r *http.Request, params Params) {

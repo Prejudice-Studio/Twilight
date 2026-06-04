@@ -75,6 +75,7 @@ import {
   ResetPasswordDialog,
   StandaloneEmbyCreateDialog,
   ToggleActiveDialog,
+  WebUserCreateDialog,
 } from "./admin-users-dialogs";
 
 type UserSelectionScope = "manual" | "emby" | "all";
@@ -125,6 +126,14 @@ export default function AdminUsersPage() {
   const [selectionScopeCount, setSelectionScopeCount] = useState(0);
   const [selectEmbyLoading, setSelectEmbyLoading] = useState(false);
   const [batchUserLoading, setBatchUserLoading] = useState(false);
+
+  // 新建 Web 账号（只写本地 users 表）
+  const [webUserOpen, setWebUserOpen] = useState(false);
+  const [webUserName, setWebUserName] = useState("");
+  const [webUserPwd, setWebUserPwd] = useState("");
+  const [webUserEmail, setWebUserEmail] = useState("");
+  const [webUserRole, setWebUserRole] = useState(1);
+  const [webUserSubmitting, setWebUserSubmitting] = useState(false);
 
   // 删除（含邀请树级联）对话框
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -539,6 +548,42 @@ export default function AdminUsersPage() {
       toast({ title: "创建出错", description: err?.message, variant: "destructive" });
     } finally {
       setStandaloneSubmitting(false);
+    }
+  };
+
+  const handleCreateWebUser = async () => {
+    if (!webUserName.trim()) {
+      toast({ title: "请填写用户名", variant: "destructive" });
+      return;
+    }
+    setWebUserSubmitting(true);
+    try {
+      const res = await api.adminCreateUser({
+        username: webUserName.trim(),
+        password: webUserPwd || undefined,
+        email: webUserEmail.trim() || undefined,
+        role: webUserRole,
+      });
+      if (res.success && res.data) {
+        toast({
+          title: "Web 账号已创建",
+          description: `用户名：${res.data.user.username}，初始密码：${res.data.password}`,
+          variant: "success",
+        });
+        setWebUserOpen(false);
+        setWebUserName("");
+        setWebUserPwd("");
+        setWebUserEmail("");
+        setWebUserRole(1);
+        invalidateUsersCache();
+        await loadUsers();
+      } else {
+        toast({ title: "创建失败", description: res.message, variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "创建出错", description: err?.message || "网络异常", variant: "destructive" });
+    } finally {
+      setWebUserSubmitting(false);
     }
   };
 
@@ -1392,6 +1437,19 @@ export default function AdminUsersPage() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem
+                onClick={() => {
+                  setWebUserName("");
+                  setWebUserPwd("");
+                  setWebUserEmail("");
+                  setWebUserRole(1);
+                  setWebUserOpen(true);
+                }}
+              >
+                <UserPlus className="mr-2 h-4 w-4" />
+                新建 Web 账号
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>
                   <Key className="mr-2 h-4 w-4" />
@@ -2231,6 +2289,21 @@ export default function AdminUsersPage() {
         blocked={bulkEnableBlocked}
         onSubmit={handleBulkEnableDisabled}
         isLoading={bulkEnableLoading}
+      />
+
+      {/* 新建 Web 账号 */}
+      <WebUserCreateDialog
+        open={webUserOpen}
+        onOpenChange={setWebUserOpen}
+        form={{ username: webUserName, password: webUserPwd, email: webUserEmail, role: webUserRole }}
+        onFormChange={(next) => {
+          setWebUserName(next.username);
+          setWebUserPwd(next.password);
+          setWebUserEmail(next.email);
+          setWebUserRole(next.role);
+        }}
+        onSubmit={handleCreateWebUser}
+        isSubmitting={webUserSubmitting}
       />
 
       {/* 新建独立 Emby 账号 */}

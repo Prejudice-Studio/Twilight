@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -71,6 +72,7 @@ type App struct {
 	telegramPanels        map[string]telegramPanelContext
 	embyAdminMu           sync.Mutex
 	embyAdminCache        map[string]embyAdminCacheEntry
+	bindStatus            *bindStatusHub
 	// schedulerLocks: jobID -> *schedulerProcessRun。BATCH_07 之前在 package 级
 	// 声明 (`var schedulerProcessLocks sync.Map`)，单进程 prod 不显问题，但
 	// 测试 setup 反复 New() 出多个 App 时这张表共享 → 一个 case cancel 的 job
@@ -185,9 +187,26 @@ func (w *statusResponseWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
 
+func (w *statusResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if w.status == 0 {
+		w.status = http.StatusSwitchingProtocols
+	}
+	h, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	return h.Hijack()
+}
+
 type contextKey string
 
 const principalKey contextKey = "principal"
+
+const (
+	twilightClientHeader         = "X-Twilight-Client"
+	twilightIntentHeader         = "X-Twilight-Intent"
+	twilightIntentCreateBindCode = "create-bind-code"
+)
 
 func New(cfg config.Config, st *store.Store) (*App, error) {
 	redisClient, err := newRedisClient(cfg)
@@ -197,6 +216,7 @@ func New(cfg config.Config, st *store.Store) (*App, error) {
 	app := &App{
 		telegramPanels: map[string]telegramPanelContext{},
 		embyAdminCache: map[string]embyAdminCacheEntry{},
+		bindStatus:     newBindStatusHub(),
 	}
 	app.runtime.Store(&runtimeState{
 		cfg:      cfg,
@@ -616,6 +636,9 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if principal != nil && a.blockRestrictedEmbyAdmin(lw, r, route, principal.User) {
 		return
 	}
+	if principal != nil && principal.FromCookie && !a.validateCookieMutationRequest(lw, r) {
+		return
+	}
 	if principal != nil {
 		r = r.WithContext(context.WithValue(r.Context(), principalKey, *principal))
 	}
@@ -812,20 +835,7 @@ func (a *App) applyCORS(w http.ResponseWriter, r *http.Request) bool {
 	if origin == "" {
 		return false
 	}
-	allowed := false
-	for _, candidate := range a.cfg().CORSOrigins {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "*" {
-			// 启动期已 zap.Error 告警；运行期再次防御性跳过，
-			// 即使管理员错配置成 `*` 也不会与 Allow-Credentials 组合。
-			continue
-		}
-		if strings.EqualFold(normalizeCORSOrigin(candidate), origin) {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
+	if !a.corsOriginAllowed(origin) {
 		return false
 	}
 	w.Header().Set("Access-Control-Allow-Origin", origin)
@@ -836,10 +846,120 @@ func (a *App) applyCORS(w http.ResponseWriter, r *http.Request) bool {
 	if a.cfg().AllowCredential {
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 	}
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key, X-Twilight-Client")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key, X-Twilight-Client, X-Twilight-Intent")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
 	w.Header().Set("Access-Control-Max-Age", "600")
 	return true
+}
+
+func (a *App) corsOriginAllowed(origin string) bool {
+	origin = normalizeCORSOrigin(origin)
+	if origin == "" || origin == "*" {
+		return false
+	}
+	for _, candidate := range a.cfg().CORSOrigins {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "*" {
+			// 启动期已 zap.Error 告警；运行期再次防御性跳过，
+			// 即使管理员错配置成 `*` 也不会与 Allow-Credentials 组合。
+			continue
+		}
+		if strings.EqualFold(normalizeCORSOrigin(candidate), origin) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) validateWebSocketOrigin(w http.ResponseWriter, r *http.Request) bool {
+	origin := normalizeCORSOrigin(r.Header.Get("Origin"))
+	if origin == "" {
+		failWithCode(w, http.StatusForbidden, ErrForbidden, "WebSocket Origin 缺失或无效")
+		return false
+	}
+	if a.corsOriginAllowed(origin) || requestHostMatchesOrigin(r, origin) {
+		return true
+	}
+	failWithCode(w, http.StatusForbidden, ErrForbidden, "WebSocket Origin 不允许")
+	return false
+}
+
+func requestHostMatchesOrigin(r *http.Request, origin string) bool {
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Host == "" || r.Host == "" {
+		return false
+	}
+	return strings.EqualFold(parsed.Host, r.Host)
+}
+
+func requireWebUIIntent(w http.ResponseWriter, r *http.Request, intent string) bool {
+	if !strings.EqualFold(strings.TrimSpace(r.Header.Get(twilightClientHeader)), "webui") ||
+		!strings.EqualFold(strings.TrimSpace(r.Header.Get(twilightIntentHeader)), intent) {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "缺少显式前端操作意图")
+		return false
+	}
+	if isPrefetchRequest(r) {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "预取请求不能创建绑定码")
+		return false
+	}
+	return true
+}
+
+func isPrefetchRequest(r *http.Request) bool {
+	for _, name := range []string{"Purpose", "Sec-Purpose", "X-Moz"} {
+		if strings.Contains(strings.ToLower(r.Header.Get(name)), "prefetch") {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) validateCookieMutationRequest(w http.ResponseWriter, r *http.Request) bool {
+	if isSafeMethod(r.Method) {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "cross-site") {
+		failWithCode(w, http.StatusForbidden, ErrForbidden, "跨站请求不允许使用 Cookie 执行变更操作")
+		return false
+	}
+	if origin := normalizeCORSOrigin(r.Header.Get("Origin")); origin != "" {
+		if a.corsOriginAllowed(origin) || requestHostMatchesOrigin(r, origin) {
+			return true
+		}
+		failWithCode(w, http.StatusForbidden, ErrForbidden, "请求来源不允许使用 Cookie 执行变更操作")
+		return false
+	}
+	if referer := refererOrigin(r.Header.Get("Referer")); referer != "" {
+		if a.corsOriginAllowed(referer) || requestHostMatchesOrigin(r, referer) {
+			return true
+		}
+		failWithCode(w, http.StatusForbidden, ErrForbidden, "请求来源不允许使用 Cookie 执行变更操作")
+		return false
+	}
+	return true
+}
+
+func isSafeMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	default:
+		return false
+	}
+}
+
+func refererOrigin(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	parsed.Path = ""
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return normalizeCORSOrigin(parsed.String())
 }
 
 // validateCORSOriginsStartup 在启动 / reload 时对 CORS 配置做静态体检：

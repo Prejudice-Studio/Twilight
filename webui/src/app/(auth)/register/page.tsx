@@ -16,8 +16,23 @@ import { ErrCodes } from "@/lib/errcode";
 import { SITE_NAME } from "@/lib/site-config";
 import { useSystemStore } from "@/store/system";
 import { passwordStrengthLabel, validatePasswordStrength } from "@/lib/password";
-import { validateUsername } from "@/lib/validators";
+import { friendlyError, validateUsername } from "@/lib/validators";
 import { sanitizeExternalUrl, telegramBotUrl } from "@/lib/safe-url";
+
+type RegisterBindCodeStatusMessage = {
+  type?: string;
+  code?: string;
+  status?: string;
+  error_code?: string;
+  message?: string;
+  confirmed?: boolean;
+  expires_in?: number;
+  invalid?: boolean;
+  terminal?: boolean;
+  telegram_bound?: boolean;
+  telegram_id?: number;
+  telegram_username?: string;
+};
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -100,88 +115,104 @@ export default function RegisterPage() {
     }
   };
 
-  // 拿到绑定码后短轮询，直到 Bot 端确认或绑定码过期。
+  // 拿到绑定码后通过 WebSocket 等待 Bot 端确认或失败终态。
   useEffect(() => {
     if (!bindCode || bindConfirmed) return;
 
     let cancelled = false;
     let toastedConfirmed = false;
-    let timer: number | null = null;
-    let inFlight = false;
+    let retryTimer: number | null = null;
+    let socket: WebSocket | null = null;
+    let terminal = false;
 
     const stopWithToast = (title: string, description: string) => {
+      terminal = true;
       setBindCode("");
       setBindCodeExpiry(0);
       setBindConfirmed(false);
       toast({ title, description, variant: "destructive" });
     };
 
-    const scheduleNext = (delayMs: number) => {
-      if (cancelled) return;
-      timer = window.setTimeout(() => void poll(), delayMs);
-    };
-
-    const poll = async () => {
-      if (cancelled || inFlight) return;
-      inFlight = true;
-      try {
-        const res = await api.getRegisterBindCodeStatus(bindCode);
-        if (cancelled) return;
-
-        // 决定性信号：后端约定 data.terminal === true 表示"无须再轮询"。
-        if (res.data?.terminal) {
-          if (res.data.invalid) {
-            stopWithToast("绑定码已过期", "请重新获取绑定码");
-            return;
-          }
-          if (!toastedConfirmed) {
-            toastedConfirmed = true;
-            setBindConfirmed(true);
-            toast({
-              title: "Telegram 绑定成功",
-              description: "点击下方「注册」按钮即可进入系统",
-              variant: "success",
-            });
-          }
-          return;
-        }
-
-        if (res.success && res.data && typeof res.data.expires_in === "number") {
-          setBindCodeExpiry(res.data.expires_in);
-        }
-        scheduleNext(2000);
-      } catch (err) {
-        if (cancelled) return;
-        if (err instanceof ApiError) {
-          if (err.errorCode === ErrCodes.RateLimited || err.status === 429) {
-            stopWithToast(
-              "请求过于频繁",
-              "已暂停轮询，请稍后重新获取绑定码再试",
-            );
-            return;
-          }
-          if (
-            err.errorCode === ErrCodes.TGBindCodeFormat ||
-            (err.status === 400 && err.errorCode === ErrCodes.BadRequest)
-          ) {
-            stopWithToast("绑定码格式无效", "请重新获取绑定码");
-            return;
-          }
-        }
-        // 网络抖动等待 3s 后重试，避免紧密循环。
-        scheduleNext(3000);
-      } finally {
-        inFlight = false;
+    const markConfirmed = () => {
+      terminal = true;
+      if (!toastedConfirmed) {
+        toastedConfirmed = true;
+        setBindConfirmed(true);
+        toast({
+          title: "Telegram 绑定成功",
+          description: "点击下方「注册」按钮即可进入系统",
+          variant: "success",
+        });
       }
     };
 
-    void poll();
+    const handleStatus = (data: RegisterBindCodeStatusMessage) => {
+      if (typeof data.expires_in === "number") {
+        setBindCodeExpiry(data.expires_in);
+      }
+      if (!data.terminal) return;
+      if (data.status === "confirmed" || (data.confirmed && !data.invalid)) {
+        markConfirmed();
+        return;
+      }
+      const description = friendlyError(data.error_code, data.message) || data.message || "请重新获取绑定码后再试";
+      stopWithToast("Telegram 绑定未完成", description);
+    };
+
+    const connect = () => {
+      if (cancelled || terminal) return;
+      try {
+        socket = new WebSocket(api.getRegisterBindCodeStatusWebSocketUrl(bindCode));
+      } catch (error) {
+        stopWithToast("绑定状态连接失败", error instanceof Error ? error.message : "浏览器无法建立 WebSocket 连接");
+        return;
+      }
+
+      socket.onmessage = (event) => {
+        if (cancelled) return;
+        try {
+          handleStatus(JSON.parse(String(event.data)) as RegisterBindCodeStatusMessage);
+        } catch {
+          // 忽略无法识别的服务端帧，等待下一条状态。
+        }
+      };
+      socket.onerror = () => {
+        socket?.close();
+      };
+      socket.onclose = () => {
+        if (cancelled || terminal || bindConfirmed) return;
+        retryTimer = window.setTimeout(connect, 2000);
+      };
+    };
+
+    connect();
 
     return () => {
       cancelled = true;
-      if (timer !== null) window.clearTimeout(timer);
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+      socket?.close();
     };
   }, [bindCode, bindConfirmed, toast]);
+
+  const refreshBindConfirmedBeforeSubmit = async (): Promise<boolean> => {
+    if (!bindCode) return false;
+    try {
+      const res = await api.getRegisterBindCodeStatus(bindCode);
+      if (res.data?.status === "confirmed" || (res.data?.confirmed && !res.data.invalid)) {
+        setBindConfirmed(true);
+        return true;
+      }
+      if (res.data?.terminal && res.data.invalid) {
+        const description = friendlyError(res.data.error_code, res.data.message) || res.data.message || "请重新获取绑定码";
+        setBindCode("");
+        setBindCodeExpiry(0);
+        toast({ title: "Telegram 绑定未完成", description, variant: "destructive" });
+      }
+    } catch {
+      // 提交路径保持原有提示，不把临时网络问题误判成绑定失败。
+    }
+    return false;
+  };
 
   const validateRegisterForm = (): boolean => {
     const usernameCheck = validateUsername(formData.username);
@@ -225,15 +256,6 @@ export default function RegisterPage() {
       return false;
     }
 
-    if (forceBindTelegram && bindCode && !bindConfirmed) {
-      toast({
-        title: "请先在 Telegram 完成绑定验证",
-        description: `请去 Bot 私聊发送 /bind ${bindCode}`,
-        variant: "destructive",
-      });
-      return false;
-    }
-
     return true;
   };
 
@@ -242,6 +264,18 @@ export default function RegisterPage() {
 
     if (!validateRegisterForm()) {
       return;
+    }
+
+    if (bindCode && !bindConfirmed) {
+      const confirmed = await refreshBindConfirmedBeforeSubmit();
+      if (!confirmed) {
+        toast({
+          title: "请先在 Telegram 完成绑定验证",
+          description: `请去 Bot 私聊发送 /bind ${bindCode}`,
+          variant: "destructive",
+        });
+        return;
+      }
     }
 
     setIsRegisterLoading(true);
@@ -565,7 +599,7 @@ export default function RegisterPage() {
                   disabled={
                     isRegisterLoading ||
                     Boolean(registerAvailability && (!canRegister || !registerAvailability.available)) ||
-                    (forceBindTelegram && !!bindCode && !bindConfirmed)
+                    (!!bindCode && !bindConfirmed)
                   }
                 >
                   {isRegisterLoading ? (

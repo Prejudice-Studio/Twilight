@@ -357,9 +357,9 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request, _ Params) {
 	}
 	newUser := store.User{Username: username, Email: stringValue(payload, "email"), PasswordHash: passwordHash, Role: role, TelegramID: telegramID, TelegramUsername: telegramUsername}
 	var u store.User
-	if registerReg.Code != "" || telegramBindCode != "" {
+	if registerReg.Code != "" {
 		var consumed store.RegCode
-		u, consumed, _, err = a.store().CreateUserForRegistration(newUser, registerReg.Code, telegramBindCode, time.Now().Unix(), func(user *store.User, consumed store.RegCode, _ store.BindCode) error {
+		u, consumed, _, err = a.store().CreateUserForRegistration(newUser, registerReg.Code, "", time.Now().Unix(), func(user *store.User, consumed store.RegCode, _ store.BindCode) error {
 			if consumed.Code != "" {
 				days := normalizeRegCodeDays(consumed.Days)
 				user.PendingEmby = true
@@ -371,11 +371,7 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request, _ Params) {
 		})
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrExpired) {
-				if registerReg.Code != "" {
-					failWithCode(w, http.StatusBadRequest, ErrRegcodeInvalid, "注册码无效、已用完或已过期")
-				} else {
-					failWithCode(w, http.StatusBadRequest, ErrTGBindCodeNotFound, "绑定码不存在或已过期")
-				}
+				failWithCode(w, http.StatusBadRequest, ErrRegcodeInvalid, "注册码无效、已用完或已过期")
 				return
 			}
 			if errors.Is(err, store.ErrConflict) {
@@ -403,9 +399,16 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request, _ Params) {
 			failWithCode(w, http.StatusConflict, ErrUsernameTaken, "用户名已被占用，请换一个用户名")
 			return
 		}
+		if telegramBindCode != "" {
+			failWithCode(w, http.StatusConflict, ErrTGBindTargetTaken, "该 Telegram 已绑定到其他账号或绑定码状态已变化")
+			return
+		}
 	}
 	if statusFromError(w, err) {
 		return
+	}
+	if telegramBindCode != "" {
+		_ = a.deleteBindCode(telegramBindCode)
 	}
 	if a.configuredAdminMatch(u.UID, u.Username) {
 		if promoted, err := a.store().UpdateUser(u.UID, func(user *store.User) error {

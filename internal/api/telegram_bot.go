@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"go.uber.org/zap"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -229,10 +230,10 @@ func (a *App) telegramConfirmBindCode(ctx context.Context, chatID, telegramID in
 		_ = a.telegramSendMessage(ctx, chatID, "绑定码格式无效，请在 Web 端重新生成后再发送。")
 		return
 	}
-	bind, okBind := a.store().BindCode(code)
+	bind, okBind := a.bindCode(code)
 	if !okBind || bind.ExpiresAt <= time.Now().Unix() {
 		if okBind {
-			_ = a.store().DeleteBindCode(code)
+			_ = a.deleteBindCode(code)
 		}
 		_ = a.telegramSendMessage(ctx, chatID, "绑定码无效或已过期，请在网页重新获取。")
 		return
@@ -241,6 +242,7 @@ func (a *App) telegramConfirmBindCode(ctx context.Context, chatID, telegramID in
 	// bot 命令重发可绕过 group check 反复打 Telegram getChatMember。
 	if bind.Confirmed && bind.TelegramID != 0 {
 		if bind.TelegramID != telegramID {
+			a.recordRegisterBindFailure(bind, code, "telegram_taken", ErrTGBindTargetTaken, http.StatusConflict, "该绑定码已被其它 Telegram 账号确认，无法重复使用。")
 			_ = a.telegramSendMessage(ctx, chatID, "该绑定码已被其它 Telegram 账号确认，无法重复使用。")
 			return
 		}
@@ -248,34 +250,42 @@ func (a *App) telegramConfirmBindCode(ctx context.Context, chatID, telegramID in
 		return
 	}
 	if existing, okUser := a.store().FindUserByTelegramID(telegramID); okUser && (bind.UID == 0 || existing.UID != bind.UID) {
+		a.recordRegisterBindFailure(bind, code, "telegram_taken", ErrTGBindTargetTaken, http.StatusConflict, fmt.Sprintf("该 Telegram 已绑定到账号 %s。", existing.Username))
 		_ = a.telegramSendMessage(ctx, chatID, fmt.Sprintf("该 Telegram 已绑定到账号 %s。", existing.Username))
 		return
 	}
 	// per-tg-id 速率限制：阻止用同一个 tg 账号反复对 bot 发未确认的合法 code，
 	// 触发对 Telegram API 的 getChatMember 流量放大。
 	if !a.allowRate(ctx, rateKey("tg-bind-confirm:", telegramID), a.cfg().RateLimitLoginPerMinute, time.Minute) {
+		a.recordRegisterBindFailure(bind, code, "rate_limited", ErrUploadRateLimited, http.StatusTooManyRequests, "操作过于频繁，请稍后再试。")
 		_ = a.telegramSendMessage(ctx, chatID, "操作过于频繁，请稍后再试。")
 		return
 	}
 	if missing, err := a.telegramBindRequirementMissing(ctx, telegramID); err != nil {
-		_ = a.telegramSendMessage(ctx, chatID, "Telegram 加群/频道校验失败，请稍后重试或联系管理员："+a.telegramSanitizeError(err))
+		msg := "Telegram 加群/频道校验失败，请稍后重试或联系管理员：" + a.telegramSanitizeError(err)
+		a.recordRegisterBindFailure(bind, code, "group_check_failed", ErrTGBindGroupCheckFailed, http.StatusBadGateway, msg)
+		_ = a.telegramSendMessage(ctx, chatID, msg)
 		return
 	} else if len(missing) > 0 {
-		_ = a.telegramSendMessage(ctx, chatID, "绑定前需要先加入指定 Telegram 群组/频道："+strings.Join(missing, ", "))
+		msg := "绑定前需要先加入指定 Telegram 群组/频道：" + strings.Join(missing, ", ")
+		a.recordRegisterBindFailure(bind, code, "group_membership_required", ErrTGBindGroupMembershipRequired, http.StatusForbidden, msg)
+		_ = a.telegramSendMessage(ctx, chatID, msg)
 		return
 	}
-	if _, _, _, err := a.store().ConfirmBindCodeAtomic(code, telegramID, username, time.Now().Unix()); err != nil {
+	if _, _, _, err := a.confirmBindCodeAtomic(code, telegramID, username, time.Now().Unix()); err != nil {
 		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrExpired) {
 			_ = a.telegramSendMessage(ctx, chatID, "绑定码无效或已过期，请在网页重新获取。")
 			return
 		}
 		if errors.Is(err, store.ErrConflict) {
+			a.recordRegisterBindFailure(bind, code, "conflict", ErrTGBindTargetTaken, http.StatusConflict, "该 Telegram 已绑定到其他账号或绑定码状态已变化。")
 			_ = a.telegramSendMessage(ctx, chatID, "该 Telegram 已绑定到其他账号或绑定码状态已变化。")
 			return
 		}
 		_ = a.telegramSendMessage(ctx, chatID, "绑定失败：系统写入失败，请稍后再试。")
 		return
 	}
+	a.clearRegisterBindFailure(code)
 	_ = a.telegramSendMessage(ctx, chatID, "Telegram 绑定已确认，可以回到网页继续。")
 }
 

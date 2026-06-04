@@ -283,7 +283,10 @@ func (a *App) handleInviteCheck(w http.ResponseWriter, r *http.Request, _ Params
 		failWithCode(w, http.StatusTooManyRequests, ErrRateLimited, "请求过于频繁，请稍后再试")
 		return
 	}
-	code := stringValue(decodeMap(r), "code")
+	code := strings.TrimSpace(r.URL.Query().Get("code"))
+	if code == "" {
+		code = stringValue(decodeMap(r), "code")
+	}
 	invite, okInvite := a.store().InviteCode(code)
 	if !okInvite || !invite.Active || (invite.ExpiredAt > 0 && invite.ExpiredAt <= time.Now().Unix()) {
 		failWithCode(w, http.StatusNotFound, ErrInviteNotFound, "邀请码无效或已停用")

@@ -192,21 +192,10 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 	case "daily_stats":
 		users := a.store().ListUsers()
 		return map[string]any{"success": true, "users": len(users), "active": countActive(users)}, []string{"daily stats generated"}, nil
-	case "cleanup_bind_codes":
-		deleted, err := a.store().CleanupExpiredBindCodes(time.Now().Unix())
-		if err != nil {
-			return map[string]any{"success": false, "deleted": deleted}, []string{fmt.Sprintf("failed to delete expired bind codes: %v", err)}, err
-		}
-		// Also clean up expired app sessions from memory and PostgreSQL
-		expiredSessions := a.sessions().CleanupExpired(r.Context())
-		logs := []string{fmt.Sprintf("deleted %d expired bind codes", deleted)}
-		if expiredSessions > 0 {
-			logs = append(logs, fmt.Sprintf("cleaned up %d expired sessions", expiredSessions))
-		}
-		return map[string]any{"success": true, "deleted": deleted, "expired_sessions": expiredSessions}, logs, nil
 	case "cleanup_sessions":
+		expiredSessions := a.sessions().CleanupExpired(r.Context())
 		if !a.embyConfigured() {
-			return map[string]any{"success": true, "configured": false, "active": 0, "total": 0}, []string{"Emby not configured"}, nil
+			return map[string]any{"success": true, "configured": false, "active": 0, "total": 0, "expired_sessions": expiredSessions}, []string{"Emby not configured", fmt.Sprintf("cleaned up %d expired sessions", expiredSessions)}, nil
 		}
 		var sessions []map[string]any
 		if err := a.embyGet(r.Context(), "/Sessions", &sessions); err != nil {
@@ -218,7 +207,7 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 				active++
 			}
 		}
-		return map[string]any{"success": true, "active": active, "total": len(sessions)}, []string{fmt.Sprintf("read %d Emby sessions", len(sessions))}, nil
+		return map[string]any{"success": true, "active": active, "total": len(sessions), "expired_sessions": expiredSessions}, []string{fmt.Sprintf("read %d Emby sessions", len(sessions)), fmt.Sprintf("cleaned up %d expired sessions", expiredSessions)}, nil
 	case "emby_sync":
 		if !a.embyConfigured() {
 			return map[string]any{"success": true, "configured": false}, []string{"Emby not configured"}, nil

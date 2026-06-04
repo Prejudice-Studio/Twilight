@@ -1,0 +1,224 @@
+package api
+
+import (
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/prejudice-studio/twilight/internal/store"
+)
+
+type bindCodeFailure struct {
+	Code       string
+	Status     string
+	ErrorCode  ErrCode
+	HTTPStatus int
+	Message    string
+	ExpiresAt  int64
+}
+
+type bindStatusHub struct {
+	mu       sync.Mutex
+	codes    map[string]store.BindCode
+	watchers map[string]map[chan struct{}]struct{}
+	failures map[string]bindCodeFailure
+}
+
+func newBindStatusHub() *bindStatusHub {
+	return &bindStatusHub{
+		codes:    map[string]store.BindCode{},
+		watchers: map[string]map[chan struct{}]struct{}{},
+		failures: map[string]bindCodeFailure{},
+	}
+}
+
+func (h *bindStatusHub) upsertBindCode(bind store.BindCode) error {
+	bind.Code = normalizeBindStatusCode(bind.Code)
+	if bind.Code == "" {
+		return store.ErrNotFound
+	}
+	h.mu.Lock()
+	h.codes[bind.Code] = bind
+	delete(h.failures, bind.Code)
+	h.notifyLocked(bind.Code)
+	h.mu.Unlock()
+	return nil
+}
+
+func (h *bindStatusHub) bindCode(code string) (store.BindCode, bool) {
+	code = normalizeBindStatusCode(code)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	bind, ok := h.codes[code]
+	return bind, ok
+}
+
+func (h *bindStatusHub) deleteBindCode(code string) error {
+	code = normalizeBindStatusCode(code)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, ok := h.codes[code]; !ok {
+		return store.ErrNotFound
+	}
+	delete(h.codes, code)
+	delete(h.failures, code)
+	h.notifyLocked(code)
+	return nil
+}
+
+func (h *bindStatusHub) cleanupExpiredBindCodes(now int64) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	deleted := 0
+	for code, bind := range h.codes {
+		if bind.ExpiresAt > 0 && bind.ExpiresAt <= now {
+			delete(h.codes, code)
+			delete(h.failures, code)
+			h.notifyLocked(code)
+			deleted++
+		}
+	}
+	for code, failure := range h.failures {
+		if failure.ExpiresAt <= now {
+			delete(h.failures, code)
+		}
+	}
+	return deleted
+}
+
+func (h *bindStatusHub) confirmBindCodeAtomic(code string, telegramID int64, telegramUsername string, now int64, telegramIDTaken func(telegramID, allowedUID int64) bool, bindUser func(store.BindCode) (store.User, error)) (store.BindCode, store.User, bool, error) {
+	code = normalizeBindStatusCode(code)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	bind, ok := h.codes[code]
+	if !ok {
+		return store.BindCode{}, store.User{}, false, store.ErrNotFound
+	}
+	if now == 0 {
+		now = time.Now().Unix()
+	}
+	if bind.ExpiresAt > 0 && bind.ExpiresAt <= now {
+		delete(h.codes, code)
+		delete(h.failures, code)
+		h.notifyLocked(code)
+		return store.BindCode{}, store.User{}, false, store.ErrExpired
+	}
+	if telegramID == 0 {
+		return store.BindCode{}, store.User{}, false, store.ErrConflict
+	}
+	if bind.Confirmed && bind.TelegramID != 0 {
+		if bind.TelegramID != telegramID {
+			return store.BindCode{}, store.User{}, false, store.ErrConflict
+		}
+		return bind, store.User{}, false, nil
+	}
+	if telegramIDTaken != nil && telegramIDTaken(telegramID, bind.UID) {
+		return store.BindCode{}, store.User{}, false, store.ErrConflict
+	}
+	bind.Confirmed = true
+	bind.TelegramID = telegramID
+	bind.TelegramUsername = strings.TrimSpace(telegramUsername)
+	if bind.UID != 0 {
+		var updated store.User
+		if bindUser != nil {
+			user, err := bindUser(bind)
+			if err != nil {
+				return store.BindCode{}, store.User{}, false, err
+			}
+			updated = user
+		}
+		delete(h.codes, code)
+		delete(h.failures, code)
+		h.notifyLocked(code)
+		return bind, updated, true, nil
+	}
+	h.codes[code] = bind
+	delete(h.failures, code)
+	h.notifyLocked(code)
+	return bind, store.User{}, false, nil
+}
+
+func (h *bindStatusHub) subscribe(code string) (<-chan struct{}, func()) {
+	code = normalizeBindStatusCode(code)
+	ch := make(chan struct{}, 1)
+	h.mu.Lock()
+	if h.watchers[code] == nil {
+		h.watchers[code] = map[chan struct{}]struct{}{}
+	}
+	h.watchers[code][ch] = struct{}{}
+	h.mu.Unlock()
+	return ch, func() {
+		h.mu.Lock()
+		if watchers := h.watchers[code]; watchers != nil {
+			delete(watchers, ch)
+			if len(watchers) == 0 {
+				delete(h.watchers, code)
+			}
+		}
+		h.mu.Unlock()
+	}
+}
+
+func (h *bindStatusHub) fail(code string, failure bindCodeFailure) {
+	code = normalizeBindStatusCode(code)
+	if code == "" {
+		return
+	}
+	if failure.ExpiresAt <= time.Now().Unix() {
+		failure.ExpiresAt = time.Now().Add(10 * time.Minute).Unix()
+	}
+	failure.Code = code
+	h.mu.Lock()
+	h.failures[code] = failure
+	h.notifyLocked(code)
+	h.mu.Unlock()
+}
+
+func (h *bindStatusHub) clear(code string) {
+	code = normalizeBindStatusCode(code)
+	if code == "" {
+		return
+	}
+	h.mu.Lock()
+	delete(h.failures, code)
+	h.notifyLocked(code)
+	h.mu.Unlock()
+}
+
+func (h *bindStatusHub) notify(code string) {
+	code = normalizeBindStatusCode(code)
+	if code == "" {
+		return
+	}
+	h.mu.Lock()
+	h.notifyLocked(code)
+	h.mu.Unlock()
+}
+
+func (h *bindStatusHub) failure(code string, now int64) (bindCodeFailure, bool) {
+	code = normalizeBindStatusCode(code)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	failure, ok := h.failures[code]
+	if !ok {
+		return bindCodeFailure{}, false
+	}
+	if failure.ExpiresAt <= now {
+		delete(h.failures, code)
+		return bindCodeFailure{}, false
+	}
+	return failure, true
+}
+
+func (h *bindStatusHub) notifyLocked(code string) {
+	for ch := range h.watchers[code] {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func normalizeBindStatusCode(code string) string {
+	return strings.ToUpper(strings.TrimSpace(code))
+}

@@ -23,6 +23,12 @@ func writeJSON(w http.ResponseWriter, status int, success bool, message string, 
 // 当 errorCode 为空时回落到按 HTTP status 自动推导（defaultErrorCode）。
 func writeJSONWithCode(w http.ResponseWriter, status int, success bool, errorCode, message string, data any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if w.Header().Get("Cache-Control") == "" {
+		w.Header().Set("Cache-Control", "no-store, private")
+	}
+	if w.Header().Get("Pragma") == "" {
+		w.Header().Set("Pragma", "no-cache")
+	}
 	w.WriteHeader(status)
 	resolvedCode := errorCode
 	if resolvedCode == "" {

@@ -603,7 +603,7 @@ export default function AppearanceSettingsPage() {
                 <Label htmlFor={`${theme}-bg-url`}>背景图片 URL</Label>
                 <Input
                   id={`${theme}-bg-url`}
-                  placeholder="https://example.com/image.jpg 或 url(https://...)"
+                  placeholder="上传后自动填入 /api/v1/users/assets/background/..."
                   value={imageValue}
                   onChange={(e) => handleBgChange(imageField, e.target.value)}
                   className="font-mono text-sm"

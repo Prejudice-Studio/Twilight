@@ -73,6 +73,11 @@ import { confirmPhrases } from "./confirm-phrases";
 import { API_BASE, ApiError, apiRequest, apiRequestForm, type ApiRequestExtraOptions } from "./api-request";
 import { normalizeMediaRequestStatus } from "./media-status";
 
+const BIND_CODE_CREATE_HEADERS = {
+  "X-Twilight-Client": "webui",
+  "X-Twilight-Intent": "create-bind-code",
+};
+
 class ApiClient {
   private toAbsoluteAssetUrl(url?: string | null): string | null {
     if (!url) return null;
@@ -235,13 +240,13 @@ class ApiClient {
 
   async getBindCode() {
     return this.request<{ bind_code: string; expires_in: number }>("/users/me/telegram/bind-code", {
-      method: "POST",
+      headers: BIND_CODE_CREATE_HEADERS,
     });
   }
 
   async getRegisterBindCode() {
     return this.request<{ bind_code: string; expires_in: number }>("/users/telegram/register/bind-code", {
-      method: "POST",
+      headers: BIND_CODE_CREATE_HEADERS,
     });
   }
 
@@ -267,6 +272,14 @@ class ApiClient {
       { signal },
       { timeoutMs: 10_000 },
     );
+  }
+
+  getRegisterBindCodeStatusWebSocketUrl(code: string) {
+    const base = API_BASE || (typeof window !== "undefined" ? window.location.origin : "http://localhost");
+    const url = new URL("/api/v1/users/telegram/register/bind-code/ws", base);
+    url.searchParams.set("code", code);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    return url.toString();
   }
 
   async getRegisterAvailability() {
@@ -365,10 +378,8 @@ class ApiClient {
   }
 
   async checkRegcode(regCode: string) {
-    return this.request<{ type: number; type_name: string; days: number; valid: boolean }>("/users/regcode/check", {
-      method: "POST",
-      body: JSON.stringify({ reg_code: regCode }),
-    });
+    const query = new URLSearchParams({ reg_code: regCode });
+    return this.request<{ type: number; type_name: string; days: number; valid: boolean }>(`/users/regcode/check?${query.toString()}`);
   }
 
   async renewWithRegcode(regCode: string) {
@@ -540,6 +551,13 @@ class ApiClient {
     return this.request(`/admin/users/${uid}`, {
       method: "PUT",
       body: JSON.stringify(data),
+    });
+  }
+
+  async adminCreateUser(payload: { username: string; password?: string; email?: string; role?: number; expired_at?: number; days?: number }) {
+    return this.request<{ user: UserInfo; password: string; auto_generated: boolean }>("/admin/users", {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   }
 
@@ -1795,10 +1813,8 @@ class ApiClient {
   }
 
   async checkInviteCode(code: string) {
-    return this.request<{ days: number; inviter: string | null }>("/invite/check", {
-      method: "POST",
-      body: JSON.stringify({ code }),
-    });
+    const query = new URLSearchParams({ code });
+    return this.request<{ days: number; inviter: string | null }>(`/invite/check?${query.toString()}`);
   }
 
   // 管理员：邀请森林
@@ -1861,8 +1877,8 @@ class ApiClient {
       failed: Array<{ uid: number; reason: string }>;
       mode: string;
       cascade_depth: number | string;
-    }>(`/admin/users/${uid}`, {
-      method: "DELETE",
+    }>(`/admin/users/${uid}/delete`, {
+      method: "POST",
       body: JSON.stringify({ mode: options.mode, cascade_depth: cascadeDepth }),
     });
   }

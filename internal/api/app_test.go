@@ -152,6 +152,9 @@ func TestAuthFlowWithoutCSRF(t *testing.T) {
 	if me.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatal("missing security header")
 	}
+	if me.Header().Get("Cache-Control") != "no-store, private" || me.Header().Get("Pragma") != "no-cache" {
+		t.Fatalf("missing no-store headers: cache=%q pragma=%q", me.Header().Get("Cache-Control"), me.Header().Get("Pragma"))
+	}
 
 	allowed := doJSON(app, http.MethodPut, "/api/v1/users/me", `{"email":"a@example.com"}`, []*http.Cookie{cookie})
 	if allowed.Code != http.StatusOK {
@@ -195,6 +198,93 @@ func TestCredentialedCORSRequiresExplicitOrigin(t *testing.T) {
 	app.ServeHTTP(rr, req)
 	if rr.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Fatalf("path-bearing CORS origin was allowed: %q", rr.Header().Get("Access-Control-Allow-Origin"))
+	}
+}
+
+func TestCookieMutationRejectsCrossSiteOrigin(t *testing.T) {
+	app := newTestApp(t)
+	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
+	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
+	cookie := findCookie(login.Result().Cookies(), "twilight_session")
+	if cookie == nil {
+		t.Fatal("missing session cookie")
+	}
+
+	blocked := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me", `{"email":"evil@example.com"}`, []*http.Cookie{cookie}, map[string]string{"Origin": "https://evil.example"})
+	if blocked.Code != http.StatusForbidden || !strings.Contains(blocked.Body.String(), "请求来源不允许") {
+		t.Fatalf("cross-site cookie mutation status=%d body=%s", blocked.Code, blocked.Body.String())
+	}
+
+	fetchBlocked := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me", `{"email":"evil@example.com"}`, []*http.Cookie{cookie}, map[string]string{"Sec-Fetch-Site": "cross-site"})
+	if fetchBlocked.Code != http.StatusForbidden || !strings.Contains(fetchBlocked.Body.String(), "跨站请求") {
+		t.Fatalf("cross-site fetch metadata status=%d body=%s", fetchBlocked.Code, fetchBlocked.Body.String())
+	}
+
+	allowed := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me", `{"email":"admin@example.com"}`, []*http.Cookie{cookie}, map[string]string{"Origin": "http://localhost:3000"})
+	if allowed.Code != http.StatusOK {
+		t.Fatalf("allowed cookie mutation status=%d body=%s", allowed.Code, allowed.Body.String())
+	}
+
+	bearerAllowed := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me", `{"email":"bearer@example.com"}`, nil, map[string]string{"Origin": "https://evil.example", "Authorization": "Bearer " + cookie.Value})
+	if bearerAllowed.Code != http.StatusOK {
+		t.Fatalf("bearer mutation should not use cookie CSRF guard: status=%d body=%s", bearerAllowed.Code, bearerAllowed.Body.String())
+	}
+}
+
+func TestBindCodeCreationGETRequiresWebUIIntent(t *testing.T) {
+	app := newTestApp(t)
+
+	missing := doJSON(app, http.MethodGet, "/api/v1/users/telegram/register/bind-code", ``, nil)
+	if missing.Code != http.StatusBadRequest || !strings.Contains(missing.Body.String(), "显式前端操作意图") {
+		t.Fatalf("bind-code without intent status=%d body=%s", missing.Code, missing.Body.String())
+	}
+
+	prefetch := doJSONWithHeaders(app, http.MethodGet, "/api/v1/users/telegram/register/bind-code", ``, nil, map[string]string{
+		"X-Twilight-Client": "webui",
+		"X-Twilight-Intent": "create-bind-code",
+		"Purpose":           "prefetch",
+	})
+	if prefetch.Code != http.StatusBadRequest || !strings.Contains(prefetch.Body.String(), "预取请求") {
+		t.Fatalf("bind-code prefetch status=%d body=%s", prefetch.Code, prefetch.Body.String())
+	}
+
+	created := doJSONWithHeaders(app, http.MethodGet, "/api/v1/users/telegram/register/bind-code", ``, nil, bindCodeCreateTestHeaders())
+	if created.Code != http.StatusOK {
+		t.Fatalf("bind-code with intent status=%d body=%s", created.Code, created.Body.String())
+	}
+	if created.Header().Get("Cache-Control") != "no-store, private" {
+		t.Fatalf("bind-code response is cacheable: %q", created.Header().Get("Cache-Control"))
+	}
+}
+
+func TestBindCodeWebSocketRequiresAllowedOrigin(t *testing.T) {
+	app := newTestApp(t)
+	path := "/api/v1/users/telegram/register/bind-code/ws?code=ABCDEFGH1234"
+
+	missing := doJSONWithHeaders(app, http.MethodGet, path, ``, nil, map[string]string{
+		"Connection":            "Upgrade",
+		"Upgrade":               "websocket",
+		"Sec-WebSocket-Version": "13",
+		"Sec-WebSocket-Key":     "dGhlIHNhbXBsZSBub25jZQ==",
+	})
+	if missing.Code != http.StatusForbidden {
+		t.Fatalf("ws without origin status=%d body=%s", missing.Code, missing.Body.String())
+	}
+
+	denied := doJSONWithHeaders(app, http.MethodGet, path, ``, nil, map[string]string{
+		"Origin":                "https://evil.example",
+		"Connection":            "Upgrade",
+		"Upgrade":               "websocket",
+		"Sec-WebSocket-Version": "13",
+		"Sec-WebSocket-Key":     "dGhlIHNhbXBsZSBub25jZQ==",
+	})
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("ws with disallowed origin status=%d body=%s", denied.Code, denied.Body.String())
+	}
+
+	allowedOrigin := doJSONWithHeaders(app, http.MethodGet, path, ``, nil, map[string]string{"Origin": "http://localhost:3000"})
+	if allowedOrigin.Code != http.StatusBadRequest {
+		t.Fatalf("ws allowed origin should proceed to upgrade validation, got status=%d body=%s", allowedOrigin.Code, allowedOrigin.Body.String())
 	}
 }
 
@@ -1374,75 +1464,47 @@ func TestSystemUpdateValidationHelpers(t *testing.T) {
 	}
 }
 
-func TestBindCodesPersistAcrossStoreReopen(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.json")
-	st, err := store.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestBindCodesAreMemoryOnly(t *testing.T) {
+	app := newTestApp(t)
 	now := time.Now().Unix()
-	if err := st.UpsertBindCode(store.BindCode{Code: "PERSIST12345", Scene: "register", Confirmed: true, TelegramID: 12345, TelegramUsername: "persist", CreatedAt: now, ExpiresAt: now + 600}); err != nil {
+	if err := app.upsertBindCode(store.BindCode{Code: "MEMORY12345", Scene: "register", Confirmed: true, TelegramID: 12345, TelegramUsername: "memory", CreatedAt: now, ExpiresAt: now + 600}); err != nil {
 		t.Fatal(err)
 	}
-	_ = st.Close()
-
-	reopened, err := store.Open(path)
-	if err != nil {
-		t.Fatal(err)
+	if _, ok := app.store().BindCode("MEMORY12345"); ok {
+		t.Fatal("bind code should not be written to store")
 	}
-	defer reopened.Close()
-	bind, ok := reopened.BindCode("PERSIST12345")
-	if !ok || bind.TelegramID != 12345 || !bind.Confirmed || bind.TelegramUsername != "persist" {
-		t.Fatalf("bind code did not persist correctly: ok=%v bind=%#v", ok, bind)
+	bind, ok := app.bindCode("MEMORY12345")
+	if !ok || bind.TelegramID != 12345 || !bind.Confirmed || bind.TelegramUsername != "memory" {
+		t.Fatalf("bind code did not stay in memory correctly: ok=%v bind=%#v", ok, bind)
 	}
 }
 
 func TestCleanupExpiredBindCodesKeepsValidCodes(t *testing.T) {
 	app := newTestApp(t)
 	now := time.Now().Unix()
-	if err := app.store().UpsertBindCode(store.BindCode{Code: "EXPIRED12345", Scene: "register", CreatedAt: now - 700, ExpiresAt: now - 1}); err != nil {
+	if err := app.upsertBindCode(store.BindCode{Code: "EXPIRED12345", Scene: "register", CreatedAt: now - 700, ExpiresAt: now - 1}); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.store().UpsertBindCode(store.BindCode{Code: "VALID1234567", Scene: "register", CreatedAt: now, ExpiresAt: now + 600}); err != nil {
+	if err := app.upsertBindCode(store.BindCode{Code: "VALID1234567", Scene: "register", CreatedAt: now, ExpiresAt: now + 600}); err != nil {
 		t.Fatal(err)
 	}
-	deleted, err := app.store().CleanupExpiredBindCodes(now)
-	if err != nil {
-		t.Fatal(err)
-	}
+	deleted := app.cleanupExpiredBindCodes(now)
 	if deleted != 1 {
 		t.Fatalf("deleted=%d, want 1", deleted)
 	}
-	if _, ok := app.store().BindCode("EXPIRED12345"); ok {
+	if _, ok := app.bindCode("EXPIRED12345"); ok {
 		t.Fatal("expired bind code was not deleted")
 	}
-	if _, ok := app.store().BindCode("VALID1234567"); !ok {
+	if _, ok := app.bindCode("VALID1234567"); !ok {
 		t.Fatal("valid bind code was deleted")
 	}
 }
 
-func TestSchedulerCleanupBindCodesJob(t *testing.T) {
+func TestSchedulerCleanupBindCodesJobRemoved(t *testing.T) {
 	app := newTestApp(t)
-	now := time.Now().Unix()
-	if err := app.store().UpsertBindCode(store.BindCode{Code: "OLD123456789", Scene: "register", CreatedAt: now - 800, ExpiresAt: now - 1}); err != nil {
-		t.Fatal(err)
-	}
-	if err := app.store().UpsertRegCode(store.RegCode{Code: "OLD-REGCODE", Type: 1, Days: 30, ValidityTime: 1, UseCountLimit: 1, Active: true, CreatedAt: now - 7200}); err != nil {
-		t.Fatal(err)
-	}
 	req := httptest.NewRequest(http.MethodPost, "/scheduler", nil)
-	summary, logs, err := app.runSchedulerJob(req, "cleanup_bind_codes")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if int(numeric(summary["deleted"])) != 1 || len(logs) == 0 {
-		t.Fatalf("unexpected cleanup summary=%v logs=%v", summary, logs)
-	}
-	if _, ok := app.store().BindCode("OLD123456789"); ok {
-		t.Fatal("scheduler did not delete expired bind code")
-	}
-	if _, ok := app.store().RegCode("OLD-REGCODE"); !ok {
-		t.Fatal("bind-code cleanup deleted a regcode")
+	if _, _, err := app.runSchedulerJob(req, "cleanup_bind_codes"); err == nil || !strings.Contains(err.Error(), "job not found") {
+		t.Fatalf("cleanup_bind_codes should be removed, got err=%v", err)
 	}
 }
 
@@ -1768,7 +1830,7 @@ func TestRegisterConsumesConfirmedTelegramBindCode(t *testing.T) {
 	app.cfg().BotInternalSecret = "test-secret"
 	app.cfg().ForceBindTelegram = true
 
-	codeResp := doJSON(app, http.MethodPost, "/api/v1/users/telegram/register/bind-code", `{}`, nil)
+	codeResp := doJSONWithHeaders(app, http.MethodGet, "/api/v1/users/telegram/register/bind-code", ``, nil, bindCodeCreateTestHeaders())
 	if codeResp.Code != http.StatusOK {
 		t.Fatalf("bind-code status=%d body=%s", codeResp.Code, codeResp.Body.String())
 	}
@@ -1798,7 +1860,7 @@ func TestRegisterConsumesConfirmedTelegramBindCode(t *testing.T) {
 	if !ok || u.TelegramID != 424242 || u.TelegramUsername != "alice_tg" {
 		t.Fatalf("telegram bind not applied to registered user: ok=%v user=%#v", ok, u)
 	}
-	if _, ok := app.store().BindCode(code); ok {
+	if _, ok := app.bindCode(code); ok {
 		t.Fatal("confirmed register bind code was not consumed")
 	}
 }
@@ -1810,7 +1872,7 @@ func TestRegisterWithTelegramBindCodeAllowsBootstrapAdminUIDOnlyConfig(t *testin
 	app.cfg().AdminUIDs = []int64{1}
 	app.cfg().AdminUsernames = nil
 
-	codeResp := doJSON(app, http.MethodPost, "/api/v1/users/telegram/register/bind-code", `{}`, nil)
+	codeResp := doJSONWithHeaders(app, http.MethodGet, "/api/v1/users/telegram/register/bind-code", ``, nil, bindCodeCreateTestHeaders())
 	if codeResp.Code != http.StatusOK {
 		t.Fatalf("bind-code status=%d body=%s", codeResp.Code, codeResp.Body.String())
 	}
@@ -1843,7 +1905,7 @@ func TestRegisterRejectsUserSceneTelegramBindCode(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().ForceBindTelegram = true
 	now := time.Now().Unix()
-	if err := app.store().UpsertBindCode(store.BindCode{Code: "USERBIND1234", Scene: "user", UID: 99, Confirmed: true, TelegramID: 999, CreatedAt: now, ExpiresAt: now + 600}); err != nil {
+	if err := app.upsertBindCode(store.BindCode{Code: "USERBIND1234", Scene: "user", UID: 99, Confirmed: true, TelegramID: 999, CreatedAt: now, ExpiresAt: now + 600}); err != nil {
 		t.Fatal(err)
 	}
 	resp := doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"bob","password":"Bob123456","telegram_bind_code":"USERBIND1234"}`, nil)
@@ -1873,7 +1935,7 @@ func TestTelegramBindConfirmRequiresInternalSecret(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().BotInternalSecret = "test-secret"
 	now := time.Now().Unix()
-	if err := app.store().UpsertBindCode(store.BindCode{Code: "ABCDEFGH", Scene: "register", CreatedAt: now, ExpiresAt: now + 60}); err != nil {
+	if err := app.upsertBindCode(store.BindCode{Code: "ABCDEFGH", Scene: "register", CreatedAt: now, ExpiresAt: now + 60}); err != nil {
 		t.Fatal(err)
 	}
 	blocked := doJSON(app, http.MethodPost, "/api/v1/users/me/telegram/bind-confirm", `{"code":"ABCDEFGH","telegram_id":42}`, nil)
@@ -2148,11 +2210,11 @@ func TestTelegramBindRequirementSplitsGroupAndChannel(t *testing.T) {
 	app.cfg().TelegramAPIURL = tg.URL
 
 	now := time.Now().Unix()
-	if err := app.store().UpsertBindCode(store.BindCode{Code: "GROUP1", Scene: "register", CreatedAt: now, ExpiresAt: now + 600}); err != nil {
+	if err := app.upsertBindCode(store.BindCode{Code: "GROUP1", Scene: "register", CreatedAt: now, ExpiresAt: now + 600}); err != nil {
 		t.Fatal(err)
 	}
 	app.telegramConfirmBindCode(context.Background(), 42, 42, "tguser", "GROUP1")
-	bind, ok := app.store().BindCode("GROUP1")
+	bind, ok := app.bindCode("GROUP1")
 	if !ok || !bind.Confirmed {
 		t.Fatalf("group-only requirement should confirm bind code: %#v", bind)
 	}
@@ -2163,11 +2225,11 @@ func TestTelegramBindRequirementSplitsGroupAndChannel(t *testing.T) {
 	}
 
 	app.cfg().TelegramForceBindChannel = true
-	if err := app.store().UpsertBindCode(store.BindCode{Code: "CHAN01", Scene: "register", CreatedAt: now, ExpiresAt: now + 600}); err != nil {
+	if err := app.upsertBindCode(store.BindCode{Code: "CHAN01", Scene: "register", CreatedAt: now, ExpiresAt: now + 600}); err != nil {
 		t.Fatal(err)
 	}
 	app.telegramConfirmBindCode(context.Background(), 42, 43, "tguser2", "CHAN01")
-	channelBind, ok := app.store().BindCode("CHAN01")
+	channelBind, ok := app.bindCode("CHAN01")
 	if !ok || channelBind.Confirmed {
 		t.Fatalf("channel requirement should reject user missing required channel: %#v", channelBind)
 	}
@@ -3605,7 +3667,7 @@ func TestRegisterCodeLimitHonorsTelegramTarget(t *testing.T) {
 	}
 
 	now := time.Now().Unix()
-	if err := app.store().UpsertBindCode(store.BindCode{Code: "TGREG123456", Scene: "register", Confirmed: true, TelegramID: 424242, TelegramUsername: "target_tg", CreatedAt: now, ExpiresAt: now + 600}); err != nil {
+	if err := app.upsertBindCode(store.BindCode{Code: "TGREG123456", Scene: "register", Confirmed: true, TelegramID: 424242, TelegramUsername: "target_tg", CreatedAt: now, ExpiresAt: now + 600}); err != nil {
 		t.Fatal(err)
 	}
 	created := doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"tg-target","password":"User123456","reg_code":"TG-REGISTER","telegram_bind_code":"TGREG123456"}`, nil)
@@ -4364,7 +4426,7 @@ func TestPublicRegcodeCheckHidesTargetedCodes(t *testing.T) {
 	if err := app.store().UpsertRegCode(store.RegCode{Code: "TARGET-SECRET", Type: 2, Days: 5, ValidityTime: -1, UseCountLimit: 1, Active: true, TargetUsername: "alpha"}); err != nil {
 		t.Fatal(err)
 	}
-	resp := doJSON(app, http.MethodPost, "/api/v1/users/regcode/check", `{"reg_code":"TARGET-SECRET"}`, nil)
+	resp := doJSON(app, http.MethodGet, "/api/v1/users/regcode/check?reg_code=TARGET-SECRET", ``, nil)
 	if resp.Code != http.StatusNotFound {
 		t.Fatalf("public regcode check should hide targeted codes, status=%d body=%s", resp.Code, resp.Body.String())
 	}
@@ -4681,6 +4743,13 @@ func TestCleanupInvalidUsersDefaultsToDryRunAndRequiresConfirm(t *testing.T) {
 
 func doJSON(app *App, method, path, body string, cookies []*http.Cookie) *httptest.ResponseRecorder {
 	return doJSONWithHeaders(app, method, path, body, cookies, nil)
+}
+
+func bindCodeCreateTestHeaders() map[string]string {
+	return map[string]string{
+		"X-Twilight-Client": "webui",
+		"X-Twilight-Intent": "create-bind-code",
+	}
 }
 
 func doJSONWithHeaders(app *App, method, path, body string, cookies []*http.Cookie, headers map[string]string) *httptest.ResponseRecorder {
