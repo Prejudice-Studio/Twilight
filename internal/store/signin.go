@@ -54,3 +54,41 @@ func (s *Store) AddSigninWithOptions(uid int64, dailyPoints int, bonusForStreak 
 	s.state.Signin[uid] = si
 	return si, true, s.saveLocked()
 }
+
+func (s *Store) SpendSigninPointsAndUpdateUser(uid int64, cost int, fn func(*User) error) (User, Signin, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var updated User
+	var updatedSignin Signin
+	err := s.mutateAndSaveLocked(func() error {
+		u, ok := s.state.Users[uid]
+		if !ok {
+			return ErrNotFound
+		}
+		si := s.state.Signin[uid]
+		if si.UID == 0 {
+			si.UID = uid
+		}
+		if cost <= 0 {
+			return ErrConflict
+		}
+		if si.Points < cost {
+			return ErrInsufficientPoints
+		}
+		si.Points -= cost
+		if fn != nil {
+			if err := fn(&u); err != nil {
+				return err
+			}
+		}
+		s.state.Signin[uid] = si
+		s.state.Users[uid] = u
+		updated = u
+		updatedSignin = si
+		return nil
+	})
+	if err != nil {
+		return User{}, Signin{}, err
+	}
+	return updated, updatedSignin, nil
+}

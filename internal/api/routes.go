@@ -189,6 +189,7 @@ func (a *App) registerAdminRoutes() {
 	a.add(http.MethodPost, "/api/v1/admin/users/bulk-enable-disabled", AuthAdmin, a.handleAdminBulkEnableDisabled)
 	a.add(http.MethodPost, "/api/v1/admin/users/cleanup-invalid", AuthAdmin, a.handleAdminCleanupInvalid)
 	a.add(http.MethodPost, "/api/v1/admin/users/clear-stale-pending-emby", AuthAdmin, a.handleAdminClearStalePendingEmby)
+	a.add(http.MethodPost, "/api/v1/admin/users/clear-emails", AuthAdmin, a.handleAdminClearUserEmails)
 	a.add(http.MethodPost, "/api/v1/admin/users/kick-no-emby", AuthAdmin, a.handleAdminKickNoEmby)
 	a.add(http.MethodGet, "/api/v1/admin/invite/tree", AuthAdmin, a.handleInviteTree)
 	a.add(http.MethodPost, "/api/v1/admin/invite/users/:uid/detach", AuthAdmin, a.handleInviteDetach)
@@ -276,6 +277,7 @@ func (a *App) registerStatsInviteSigninAnnouncementRoutes() {
 	a.add(http.MethodGet, "/api/v1/signin/config", AuthPublic, a.handleSigninConfig)
 	a.add(http.MethodGet, "/api/v1/signin/me", AuthUser, a.handleSigninMe)
 	a.add(http.MethodPost, "/api/v1/signin", AuthUser, a.handleSignin)
+	a.add(http.MethodPost, "/api/v1/signin/renew", AuthUser, a.handleSigninRenew)
 	a.add(http.MethodGet, "/api/v1/signin/history", AuthUser, a.handleSigninHistory)
 	a.add(http.MethodGet, "/api/v1/announcements", AuthPublic, a.handleAnnouncements)
 }

@@ -156,7 +156,9 @@ const (
 	ErrRegcodeBatchFailed      ErrCode = "REGCODE_BATCH_DELETE_FAILED"
 
 	// === 签到 ===
-	ErrSigninDisabled ErrCode = "SIGNIN_DISABLED"
+	ErrSigninDisabled           ErrCode = "SIGNIN_DISABLED"
+	ErrSigninRenewalDisabled    ErrCode = "SIGNIN_RENEWAL_DISABLED"
+	ErrSigninInsufficientPoints ErrCode = "SIGNIN_INSUFFICIENT_POINTS"
 
 	// === 数据库迁移 / 备份 ===
 	// database_admin.go 的 fail() 全部是中文裸串；前端目前只能 toast 后端
@@ -211,6 +213,7 @@ const (
 	ErrAdminKickNoEmbyConfirm       ErrCode = "ADMIN_KICK_NO_EMBY_CONFIRM_REQUIRED"
 	ErrAdminEnableRejoinedConfirm   ErrCode = "ADMIN_ENABLE_REJOINED_CONFIRM_REQUIRED"
 	ErrAdminKickUnboundConfirm      ErrCode = "ADMIN_KICK_UNBOUND_CONFIRM_REQUIRED"
+	ErrAdminClearEmailsConfirm      ErrCode = "ADMIN_CLEAR_EMAILS_CONFIRM_REQUIRED"
 	ErrAdminWhitelistUsernameEmpty  ErrCode = "ADMIN_WHITELIST_USERNAME_REQUIRED"
 
 	// === Rebind 申请审核 ===

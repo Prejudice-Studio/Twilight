@@ -987,6 +987,85 @@ func TestSigninResponsesMatchFrontendContract(t *testing.T) {
 	}
 }
 
+func TestSigninRenewalSpendsPointsWhenEnabled(t *testing.T) {
+	app := newTestApp(t)
+	cookies := registerAndLogin(t, app, "renew-points", "Admin123456")
+	user, ok := app.store().FindUserByUsername("renew-points")
+	if !ok {
+		t.Fatal("missing test user")
+	}
+	expiresAt := time.Now().AddDate(0, 0, 1).Unix()
+	if _, err := app.store().UpdateUser(user.UID, func(u *store.User) error { u.ExpiredAt = expiresAt; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := app.store().AddSigninWithOptions(user.UID, 100, nil, true); err != nil || !created {
+		t.Fatalf("seed signin points created=%v err=%v", created, err)
+	}
+
+	disabled := doJSONWithHeaders(app, http.MethodPost, "/api/v1/signin/renew", `{}`, cookies, map[string]string{"X-Twilight-Client": "webui"})
+	if disabled.Code != http.StatusForbidden || !strings.Contains(disabled.Body.String(), string(ErrSigninRenewalDisabled)) {
+		t.Fatalf("disabled renewal status=%d body=%s", disabled.Code, disabled.Body.String())
+	}
+
+	app.cfg().SigninRenewalEnabled = true
+	app.cfg().SigninRenewalCost = 40
+	app.cfg().SigninRenewalDays = 10
+	renewed := doJSONWithHeaders(app, http.MethodPost, "/api/v1/signin/renew", `{}`, cookies, map[string]string{"X-Twilight-Client": "webui"})
+	if renewed.Code != http.StatusOK {
+		t.Fatalf("renewal status=%d body=%s", renewed.Code, renewed.Body.String())
+	}
+	updated, _ := app.store().User(user.UID)
+	if updated.ExpiredAt < expiresAt+10*86400-2 || !updated.Active {
+		t.Fatalf("unexpected renewed user: %#v old_expiry=%d", updated, expiresAt)
+	}
+	points := app.store().Signin(user.UID).Points
+	if points != 60 {
+		t.Fatalf("expected 60 remaining points, got %d", points)
+	}
+	var env struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(renewed.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	if got := numeric(env.Data["remaining_points"]); got != 60 {
+		t.Fatalf("unexpected remaining_points: %#v", env.Data)
+	}
+}
+
+func TestAdminClearUserEmails(t *testing.T) {
+	app := newTestApp(t)
+	adminCookies := registerAndLogin(t, app, "admin", "Admin123456")
+	if _, err := app.store().CreateUser(store.User{Username: "email-a", Email: "a@example.com", Role: store.RoleNormal, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.store().CreateUser(store.User{Username: "email-b", Email: "b@example.com", Role: store.RoleNormal, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.store().CreateUser(store.User{Username: "email-empty", Role: store.RoleNormal, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	headers := map[string]string{"X-Twilight-Client": "webui"}
+	preview := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/users/clear-emails", `{"dry_run":true}`, adminCookies, headers)
+	if preview.Code != http.StatusOK || !strings.Contains(preview.Body.String(), `"count":2`) {
+		t.Fatalf("preview status=%d body=%s", preview.Code, preview.Body.String())
+	}
+	missingConfirm := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/users/clear-emails", `{"dry_run":false}`, adminCookies, headers)
+	if missingConfirm.Code != http.StatusBadRequest || !strings.Contains(missingConfirm.Body.String(), string(ErrAdminClearEmailsConfirm)) {
+		t.Fatalf("missing confirm status=%d body=%s", missingConfirm.Code, missingConfirm.Body.String())
+	}
+	confirmed := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/users/clear-emails", fmt.Sprintf(`{"dry_run":false,"confirm":%q}`, confirmClearAllEmails), adminCookies, headers)
+	if confirmed.Code != http.StatusOK || !strings.Contains(confirmed.Body.String(), `"cleared":2`) {
+		t.Fatalf("confirmed status=%d body=%s", confirmed.Code, confirmed.Body.String())
+	}
+	for _, username := range []string{"email-a", "email-b"} {
+		u, ok := app.store().FindUserByUsername(username)
+		if !ok || u.Email != "" {
+			t.Fatalf("email not cleared for %s: %#v", username, u)
+		}
+	}
+}
+
 func TestDisabledFeatureFlagsAreExposedAndEnforced(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().MediaRequestEnabled = false

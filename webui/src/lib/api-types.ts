@@ -802,6 +802,13 @@ export interface InviteForest {
 }
 
 // ==================== 签到 / 积分 ====================
+export interface SigninRenewalConfig {
+  enabled: boolean;
+  cost: number;
+  days: number;
+  affordable?: boolean;
+}
+
 export interface SigninSummary {
   enabled: boolean;
   currency_name: string;
@@ -813,6 +820,7 @@ export interface SigninSummary {
   today_signed: boolean;
   next_bonus_in_days: number | null;
   next_bonus_points: number | null;
+  renewal?: SigninRenewalConfig;
 }
 
 export interface SigninBonusRule {
@@ -828,6 +836,7 @@ export interface SigninPublicConfig {
   streak_bonus_enabled: boolean;
   bonus_table: SigninBonusRule[];
   reset_after_miss: boolean;
+  renewal?: SigninRenewalConfig;
 }
 
 export interface SigninActionResult {
@@ -840,6 +849,17 @@ export interface SigninActionResult {
   longest_streak: number;
   current_points: number;
   currency_name: string;
+  renewal?: SigninRenewalConfig;
+}
+
+export interface SigninRenewalResult {
+  currency_name: string;
+  spent_points: number;
+  remaining_points: number;
+  renewal: SigninRenewalConfig;
+  expire_status: string;
+  expired_at: string | number;
+  user?: UserInfo;
 }
 
 export interface SigninHistoryRecord {

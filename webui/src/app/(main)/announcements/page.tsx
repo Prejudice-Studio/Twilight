@@ -3,8 +3,11 @@
 import { motion } from "framer-motion";
 import { Megaphone } from "lucide-react";
 import { AnnouncementBoard } from "@/components/announcement-board";
+import { useI18n } from "@/lib/i18n";
 
 export default function UserAnnouncementsPage() {
+  const { t } = useI18n();
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -14,10 +17,10 @@ export default function UserAnnouncementsPage() {
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <Megaphone className="h-5 w-5" />
-          全站公告
+          {t("announcements.pageTitle")}
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          管理员发布的全部公告与历史记录，按置顶与发布时间排序。
+          {t("announcements.pageDescription")}
         </p>
       </div>
 

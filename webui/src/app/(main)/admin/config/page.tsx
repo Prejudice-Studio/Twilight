@@ -37,6 +37,7 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import { GithubIcon } from "@/components/icons/github-icon";
+import { GithubProjectLink } from "@/components/github-project-link";
 import {
   Card,
   CardContent,
@@ -55,6 +56,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError } from "@/components/layout/page-state";
 import { api } from "@/lib/api";
+import { useI18n, type MessageKey, type MessageParams } from "@/lib/i18n";
 import { useSystemStore } from "@/store/system";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -87,7 +89,9 @@ import type {
 } from "@/lib/api";
 
 // 没有声明 categories 时的回退：所有 section 归到「全部」一类，保持原来的扁平体验
-const FALLBACK_CATEGORY: ConfigCategory = { key: "_all", title: "全部" };
+const FALLBACK_CATEGORY: ConfigCategory = { key: "_all", title: "all" };
+
+type Translate = (key: MessageKey, params?: MessageParams) => string;
 
 const NUMERIC_LIST_FIELD_KEYS = new Set([
   "streak_bonus_days",
@@ -177,6 +181,46 @@ function formatUnixTime(value?: number): string {
   return new Date(value * 1000).toLocaleString("zh-CN");
 }
 
+interface ConfigChangeItem {
+  sectionKey: string;
+  sectionTitle: string;
+  field: ConfigField;
+  before: unknown;
+  after: unknown;
+}
+
+function isConfigValueChanged(next: unknown, prev: unknown): boolean {
+  return JSON.stringify(next) !== JSON.stringify(prev);
+}
+
+function truncateConfigPreview(value: string, emptyLabel: string): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (!compact) return emptyLabel;
+  return compact.length > 80 ? `${compact.slice(0, 77)}...` : compact;
+}
+
+function formatConfigPreviewValue(field: ConfigField, value: unknown, t: Translate): string {
+  if (field.type === "secret") {
+    return value ? t("common.setHidden") : t("common.unset");
+  }
+  if (field.type === "bool") {
+    return value ? t("common.enabled") : t("common.disabled");
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) return t("common.emptyList");
+    const sample = value
+      .slice(0, 3)
+      .map((item) => truncateConfigPreview(typeof item === "string" ? item : JSON.stringify(item), t("common.empty")))
+      .join("；");
+    return t(value.length > 3 ? "common.itemCountMore" : "common.itemCount", { count: value.length, sample });
+  }
+  if (value && typeof value === "object") {
+    return truncateConfigPreview(JSON.stringify(value), t("common.empty"));
+  }
+  if (value === null || value === undefined) return t("common.empty");
+  return truncateConfigPreview(String(value), t("common.empty"));
+}
+
 // ==================== 动画 ====================
 
 const container = {
@@ -252,6 +296,7 @@ function ListField({
   value: unknown;
   onChange: (v: unknown[]) => void;
 }) {
+  const { t } = useI18n();
   const items = toEditorList(value);
 
   const addItem = () => onChange([...items, ""]);
@@ -291,7 +336,7 @@ function ListField({
         className="w-full"
       >
         <Plus className="h-4 w-4 mr-1" />
-        添加
+        {t("adminConfig.addItem")}
       </Button>
     </div>
   );
@@ -317,6 +362,7 @@ function CommandMapField({
   value: unknown;
   onChange: (v: Array<{ command: string; reply: string }>) => void;
 }) {
+  const { t } = useI18n();
   const rows = toCommandRows(value);
   const updateRow = (idx: number, patch: Partial<{ command: string; reply: string }>) => {
     const next = [...rows];
@@ -338,7 +384,7 @@ function CommandMapField({
           />
           <Textarea
             value={row.reply}
-            placeholder="回复内容，支持换行"
+            placeholder={t("adminConfig.commandReplyPlaceholder")}
             onChange={(e) => updateRow(idx, { reply: e.target.value })}
             className="min-h-20 font-mono text-sm"
           />
@@ -355,7 +401,7 @@ function CommandMapField({
       ))}
       <Button type="button" variant="outline" size="sm" onClick={addRow} className="w-full">
         <Plus className="mr-1 h-4 w-4" />
-        添加自定义指令
+        {t("adminConfig.addCustomCommand")}
       </Button>
     </div>
   );
@@ -475,6 +521,7 @@ function FieldRow({
   onReset: () => void;
   highlight?: string;
 }) {
+  const { t } = useI18n();
   const labelRef = useRef<HTMLDivElement>(null);
   const showFullDescription = field.key === "group_user_panel_template";
 
@@ -514,7 +561,7 @@ function FieldRow({
             </code>
             {isChanged && (
               <Badge variant="warning" className="text-[10px] px-1.5 py-0 h-4">
-                已修改
+                {t("adminConfig.changed")}
               </Badge>
             )}
             <TooltipProvider delayDuration={300}>
@@ -548,7 +595,7 @@ function FieldRow({
                     <RotateCcw className="h-3.5 w-3.5" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>还原修改</TooltipContent>
+                <TooltipContent>{t("adminConfig.resetChange")}</TooltipContent>
               </Tooltip>
             </TooltipProvider>
           )}
@@ -600,6 +647,7 @@ function SectionCard({
   isExpanded: boolean;
   onToggle: () => void;
 }) {
+  const { t } = useI18n();
   const Icon = SECTION_ICONS[section.key] || CircleDot;
   const visibleFields = searchText
     ? section.fields.filter((f) => matchedFieldKeys.has(f.key))
@@ -625,7 +673,7 @@ function SectionCard({
                   <span className="truncate">{section.title}</span>
                   {changedCount > 0 && (
                     <Badge variant="warning" className="text-[10px] px-1.5 py-0">
-                      {changedCount} 项修改
+                      {t("adminConfig.changedFieldCount", { count: changedCount })}
                     </Badge>
                   )}
                 </CardTitle>
@@ -658,8 +706,7 @@ function SectionCard({
                       ? values[field.key]
                       : field.value;
                   const origVal = originalValues[field.key];
-                  const isChanged =
-                    JSON.stringify(val) !== JSON.stringify(origVal);
+                  const isChanged = isConfigValueChanged(val, origVal);
                   return (
                     <FieldRow
                       key={field.key}
@@ -698,6 +745,7 @@ function SectionNav({
   changedCounts: Record<string, number>;
   onSelect: (key: string) => void;
 }) {
+  const { t } = useI18n();
   // 把 section 按 category 分组，未声明 category 的统一归到 FALLBACK_CATEGORY。
   const grouped: Array<{ category: ConfigCategory; sections: ConfigSection[] }> = [];
   const seen = new Map<string, ConfigSection[]>();
@@ -729,12 +777,12 @@ function SectionNav({
     <nav className="hidden xl:block w-52 shrink-0">
       <div className="sticky top-20 space-y-4">
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2">
-          配置分组
+          {t("adminConfig.configGroup")}
         </p>
         {grouped.map(({ category, sections: groupSections }) => (
           <div key={category.key} className="space-y-0.5">
             <p className="px-2 text-[11px] font-medium text-muted-foreground/70">
-              {category.title}
+              {category.key === FALLBACK_CATEGORY.key ? t("adminConfig.fallbackCategoryAll") : category.title}
             </p>
             {groupSections.map((section) => {
               const Icon = SECTION_ICONS[section.key] || CircleDot;
@@ -773,6 +821,7 @@ function SectionNav({
 
 export default function AdminConfigPage() {
   const { toast } = useToast();
+  const { t } = useI18n();
   const { confirm } = useConfirm();
   const { fetchInfo: fetchSystemInfo } = useSystemStore();
 
@@ -839,7 +888,7 @@ export default function AdminConfigPage() {
       for (const field of section.fields) {
         const edited = editedValues[section.key]?.[field.key];
         const orig = originalValues[section.key]?.[field.key];
-        if (JSON.stringify(edited) !== JSON.stringify(orig)) count++;
+        if (isConfigValueChanged(edited, orig)) count++;
       }
       counts[section.key] = count;
     }
@@ -850,6 +899,26 @@ export default function AdminConfigPage() {
     () => Object.values(changedCounts).reduce((a, b) => a + b, 0),
     [changedCounts]
   );
+
+  const configChanges = useMemo<ConfigChangeItem[]>(() => {
+    if (!schema) return [];
+    const changes: ConfigChangeItem[] = [];
+    for (const section of schema.sections) {
+      for (const field of section.fields) {
+        const edited = editedValues[section.key]?.[field.key];
+        const orig = originalValues[section.key]?.[field.key];
+        if (!isConfigValueChanged(edited, orig)) continue;
+        changes.push({
+          sectionKey: section.key,
+          sectionTitle: section.title,
+          field,
+          before: orig,
+          after: edited,
+        });
+      }
+    }
+    return changes;
+  }, [schema, editedValues, originalValues]);
 
   const currentServerIcon = String(editedValues.Global?.server_icon ?? "").trim();
   const serverIconPreviewUrl =
@@ -913,10 +982,10 @@ export default function AdminConfigPage() {
       setOriginalContent(res.data.content);
       setConfigPath(res.data.path);
     } else {
-      throw new Error(res.message || "无法加载配置文件");
+      throw new Error(res.message || t("adminConfig.loadTomlError"));
     }
     return true;
-  }, []);
+  }, [t]);
 
   // 加载结构化配置
   const loadSchemaResource = useCallback(async () => {
@@ -934,10 +1003,10 @@ export default function AdminConfigPage() {
       setEditedValues(JSON.parse(JSON.stringify(initial)));
       setOriginalValues(JSON.parse(JSON.stringify(initial)));
     } else {
-      throw new Error(res.message || "无法加载配置结构");
+      throw new Error(res.message || t("adminConfig.loadSchemaError"));
     }
     return true;
-  }, []);
+  }, [t]);
 
   const {
     isLoading: isLoadingToml,
@@ -982,6 +1051,14 @@ export default function AdminConfigPage() {
     setEditedValues(JSON.parse(JSON.stringify(originalValues)));
   };
 
+  const expandAllSections = () => {
+    setExpandedSections(new Set(schema?.sections.map((section) => section.key) ?? []));
+  };
+
+  const collapseAllSections = () => {
+    setExpandedSections(new Set());
+  };
+
   const toggleSection = (key: string) => {
     setExpandedSections((prev) => {
       const next = new Set(prev);
@@ -1010,7 +1087,7 @@ export default function AdminConfigPage() {
   const handleSaveSchema = async () => {
     setShowSaveDialog(false);
     if (!hasSchemaChanges) {
-      toast({ title: "没有更改", description: "配置未修改" });
+      toast({ title: t("adminConfig.noChangesTitle"), description: t("adminConfig.noSchemaChangesDescription") });
       return;
     }
 
@@ -1040,21 +1117,21 @@ export default function AdminConfigPage() {
         // 配置保存后强制刷新 systemInfo：本次修改可能影响 server_icon 等公开字段。
         await fetchSystemInfo(true);
         toast({
-          title: "保存成功",
-          description: "配置已热重载，调度器会自动刷新任务",
+          title: t("adminConfig.saveSuccessTitle"),
+          description: t("adminConfig.saveSuccessDescription"),
           variant: "success",
         });
       } else {
         toast({
-          title: "保存失败",
-          description: res.message || "无法保存配置",
+          title: t("adminConfig.saveFailureTitle"),
+          description: res.message || t("adminConfig.saveSchemaFailureDescription"),
           variant: "destructive",
         });
       }
     } catch (error: any) {
       toast({
-        title: "保存失败",
-        description: error.message || "请检查网络连接",
+        title: t("adminConfig.saveFailureTitle"),
+        description: error.message || t("common.checkNetwork"),
         variant: "destructive",
       });
     } finally {
@@ -1065,7 +1142,7 @@ export default function AdminConfigPage() {
   // 保存源文件
   const handleSaveToml = async () => {
     if (!hasChanges) {
-      toast({ title: "没有更改", description: "配置文件未修改" });
+      toast({ title: t("adminConfig.noChangesTitle"), description: t("adminConfig.noTomlChangesDescription") });
       return;
     }
 
@@ -1079,21 +1156,21 @@ export default function AdminConfigPage() {
         // 同 schema 路径：源文件保存可能改了 server_icon 等公开字段，systemInfo 缓存必须刷新一次。
         await fetchSystemInfo(true);
         toast({
-          title: "保存成功",
-          description: "配置已热重载，调度器会自动刷新任务",
+          title: t("adminConfig.saveSuccessTitle"),
+          description: t("adminConfig.saveSuccessDescription"),
           variant: "success",
         });
       } else {
         toast({
-          title: "保存失败",
-          description: res.message || "无法保存配置文件",
+          title: t("adminConfig.saveFailureTitle"),
+          description: res.message || t("adminConfig.saveTomlFailureDescription"),
           variant: "destructive",
         });
       }
     } catch (error: any) {
       toast({
-        title: "保存失败",
-        description: error.message || "请检查网络连接",
+        title: t("adminConfig.saveFailureTitle"),
+        description: error.message || t("common.checkNetwork"),
         variant: "destructive",
       });
     } finally {
@@ -1105,8 +1182,8 @@ export default function AdminConfigPage() {
     if (!file) return;
     if (hasSchemaChanges || hasChanges) {
       toast({
-        title: "请先处理未保存配置",
-        description: "上传服务器图标会立即保存 server_icon，先保存或还原当前配置改动。",
+        title: t("adminConfig.unsavedConfigTitle"),
+        description: t("adminConfig.serverIconImmediateSaveWarning"),
         variant: "destructive",
       });
       return;
@@ -1115,7 +1192,7 @@ export default function AdminConfigPage() {
     try {
       const res = await api.uploadServerIcon(file);
       if (!res.success || !res.data) {
-        throw new Error(res.message || "服务器图标上传失败");
+        throw new Error(res.message || t("adminConfig.serverIconUploadFailed"));
       }
       await loadSchema();
       if (configContent) {
@@ -1123,14 +1200,14 @@ export default function AdminConfigPage() {
       }
       await fetchSystemInfo(true);
       toast({
-        title: "上传成功",
-        description: "服务器图标已保存并热重载。",
+        title: t("adminConfig.serverIconUploadSuccessTitle"),
+        description: t("adminConfig.serverIconUploadSuccessDescription"),
         variant: "success",
       });
     } catch (error: any) {
       toast({
-        title: "上传失败",
-        description: error.message || "请检查图片格式和网络连接",
+        title: t("adminConfig.serverIconUploadFailureTitle"),
+        description: error.message || t("adminConfig.serverIconUploadFailureDescription"),
         variant: "destructive",
       });
     } finally {
@@ -1150,27 +1227,27 @@ export default function AdminConfigPage() {
       }
     } catch (error: any) {
       toast({
-        title: "加载配置备份失败",
-        description: error.message || "请检查后端连接",
+        title: t("adminConfig.loadBackupsFailedTitle"),
+        description: error.message || t("common.checkBackendConnection"),
         variant: "destructive",
       });
     } finally {
       setIsLoadingConfigBackups(false);
     }
-  }, [toast]);
+  }, [t, toast]);
 
   const handleCreateConfigBackup = async () => {
     setIsConfigBackupBusy(true);
     try {
       const res = await api.createConfigBackup();
       if (res.success) {
-        toast({ title: "配置备份已创建", description: res.data?.backup?.name, variant: "success" });
+        toast({ title: t("adminConfig.backupCreatedTitle"), description: res.data?.backup?.name, variant: "success" });
         await loadConfigBackups();
       } else {
-        toast({ title: "配置备份失败", description: res.message, variant: "destructive" });
+        toast({ title: t("adminConfig.backupCreateFailedTitle"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "配置备份失败", description: error.message || "请检查后端日志", variant: "destructive" });
+      toast({ title: t("adminConfig.backupCreateFailedTitle"), description: error.message || t("common.checkBackendLogs"), variant: "destructive" });
     } finally {
       setIsConfigBackupBusy(false);
     }
@@ -1184,10 +1261,10 @@ export default function AdminConfigPage() {
         setConfigBackupView(res.data);
         setShowConfigBackupView(true);
       } else {
-        toast({ title: "读取配置备份失败", description: res.message, variant: "destructive" });
+        toast({ title: t("adminConfig.backupReadFailedTitle"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "读取配置备份失败", description: error.message || "请检查后端日志", variant: "destructive" });
+      toast({ title: t("adminConfig.backupReadFailedTitle"), description: error.message || t("common.checkBackendLogs"), variant: "destructive" });
     } finally {
       setIsConfigBackupBusy(false);
     }
@@ -1201,10 +1278,10 @@ export default function AdminConfigPage() {
         setConfigRestorePreview(res.data);
         setShowConfigRestoreDialog(true);
       } else {
-        toast({ title: "配置恢复预览失败", description: res.message, variant: "destructive" });
+        toast({ title: t("adminConfig.backupRestorePreviewFailedTitle"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "配置恢复预览失败", description: error.message || "请检查后端日志", variant: "destructive" });
+      toast({ title: t("adminConfig.backupRestorePreviewFailedTitle"), description: error.message || t("common.checkBackendLogs"), variant: "destructive" });
     } finally {
       setIsConfigBackupBusy(false);
     }
@@ -1221,8 +1298,10 @@ export default function AdminConfigPage() {
         setConfigRestorePreview(res.data);
         setShowConfigRestoreDialog(false);
         toast({
-          title: "配置已恢复",
-          description: res.data.pre_operation_backup ? `保护性备份：${res.data.pre_operation_backup.name}` : "已创建保护性备份",
+          title: t("adminConfig.backupRestoredTitle"),
+          description: res.data.pre_operation_backup
+            ? t("adminConfig.preOperationBackup", { name: res.data.pre_operation_backup.name })
+            : t("adminConfig.preOperationBackupCreated"),
           variant: "success",
         });
         await loadConfigBackups();
@@ -1231,10 +1310,10 @@ export default function AdminConfigPage() {
           await loadConfig();
         }
       } else {
-        toast({ title: "配置恢复失败", description: res.message, variant: "destructive" });
+        toast({ title: t("adminConfig.backupRestoreFailedTitle"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "配置恢复失败", description: error.message || "请检查后端日志", variant: "destructive" });
+      toast({ title: t("adminConfig.backupRestoreFailedTitle"), description: error.message || t("common.checkBackendLogs"), variant: "destructive" });
     } finally {
       setIsConfigBackupBusy(false);
     }
@@ -1242,10 +1321,10 @@ export default function AdminConfigPage() {
 
   const handleDeleteConfigBackup = async (backup: ConfigBackup) => {
     const accepted = await confirm({
-      title: "删除配置备份",
-      description: `确认删除配置备份 ${backup.name}？此操作不可恢复。`,
+      title: t("adminConfig.deleteBackupTitle"),
+      description: t("adminConfig.deleteBackupDescription", { name: backup.name }),
       tone: "danger",
-      confirmLabel: "删除备份",
+      confirmLabel: t("adminConfig.deleteBackupConfirmLabel"),
       confirmVariant: "destructive",
     });
     if (!accepted) return;
@@ -1253,13 +1332,13 @@ export default function AdminConfigPage() {
     try {
       const res = await api.deleteConfigBackup(backup.name);
       if (res.success) {
-        toast({ title: "配置备份已删除", description: backup.name, variant: "success" });
+        toast({ title: t("adminConfig.backupDeletedTitle"), description: backup.name, variant: "success" });
         await loadConfigBackups();
       } else {
-        toast({ title: "删除配置备份失败", description: res.message, variant: "destructive" });
+        toast({ title: t("adminConfig.deleteBackupFailedTitle"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "删除配置备份失败", description: error.message || "请检查后端日志", variant: "destructive" });
+      toast({ title: t("adminConfig.deleteBackupFailedTitle"), description: error.message || t("common.checkBackendLogs"), variant: "destructive" });
     } finally {
       setIsConfigBackupBusy(false);
     }
@@ -1290,8 +1369,8 @@ export default function AdminConfigPage() {
         });
         setUpdateOutput([...summary, ...logs]);
         toast({
-          title: dryRun ? "预检通过" : "更新完成",
-          description: res.message || "代码已更新，服务将按设置重启",
+          title: dryRun ? t("adminConfig.preflightPassedTitle") : t("adminConfig.updateCompleteTitle"),
+          description: res.message || t("adminConfig.updateCompleteDescription"),
           variant: "success",
         });
       } else {
@@ -1303,15 +1382,15 @@ export default function AdminConfigPage() {
           ...(res.data?.results || []).map((item) => `$ ${item.command}\n${item.stderr || item.stdout}`),
         ]);
         toast({
-          title: dryRun ? "预检失败" : "更新失败",
-          description: res.message || "请查看命令输出",
+          title: t("adminConfig.updateFailedTitle"),
+          description: res.message || t("adminConfig.checkCommandOutput"),
           variant: "destructive",
         });
       }
     } catch (error: any) {
       toast({
-        title: "更新失败",
-        description: error.message || "请检查网络连接",
+        title: t("adminConfig.updateFailedTitle"),
+        description: error.message || t("common.checkNetwork"),
         variant: "destructive",
       });
     } finally {
@@ -1337,9 +1416,9 @@ export default function AdminConfigPage() {
         className="space-y-6"
       >
         <div>
-          <h1 className="text-3xl font-bold">配置管理</h1>
+          <h1 className="text-3xl font-bold">{t("adminConfig.pageTitle")}</h1>
           <p className="text-muted-foreground">
-            查看和修改项目配置，支持可视化编辑和源文件编辑
+            {t("adminConfig.pageDescription")}
           </p>
         </div>
 
@@ -1359,19 +1438,19 @@ export default function AdminConfigPage() {
             <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:inline-flex sm:h-10 sm:w-auto sm:grid-cols-none">
               <TabsTrigger value="visual" className="min-w-0 gap-1.5 px-2 sm:px-4">
                 <SlidersHorizontal className="h-4 w-4" />
-                可视化编辑
+                {t("adminConfig.tabVisual")}
               </TabsTrigger>
               <TabsTrigger value="toml" className="min-w-0 gap-1.5 px-2 sm:px-4">
                 <FileText className="h-4 w-4" />
-                源文件编辑
+                {t("adminConfig.tabToml")}
               </TabsTrigger>
               <TabsTrigger value="config-backups" className="min-w-0 gap-1.5 px-2 sm:px-4">
                 <Archive className="h-4 w-4" />
-                配置备份
+                {t("adminConfig.tabBackups")}
               </TabsTrigger>
               <TabsTrigger value="update" className="min-w-0 gap-1.5 px-2 sm:px-4">
                 <GitPullRequest className="h-4 w-4" />
-                在线更新
+                {t("adminConfig.tabUpdate")}
               </TabsTrigger>
             </TabsList>
           </div>
@@ -1384,10 +1463,10 @@ export default function AdminConfigPage() {
                   <div className="min-w-0">
                     <CardTitle className="flex items-center gap-2 text-base">
                       <ImageIcon className="h-5 w-5" />
-                      服务器图标
+                      {t("adminConfig.serverIconTitle")}
                     </CardTitle>
                     <CardDescription>
-                      可继续填写 HTTPS URL 或服务器路径，也可以由管理员直接上传图片。
+                      {t("adminConfig.serverIconDescription")}
                     </CardDescription>
                   </div>
                   <div className="flex items-center gap-3">
@@ -1415,18 +1494,90 @@ export default function AdminConfigPage() {
                       ) : (
                         <Upload className="mr-2 h-4 w-4" />
                       )}
-                      上传图标
+                      {t("adminConfig.uploadIcon")}
                     </Button>
                   </div>
                 </div>
               </CardHeader>
             </Card>
+            {configChanges.length > 0 && (
+              <Card className="mb-4 border-amber-300/70 bg-amber-50/60 dark:border-amber-800/70 dark:bg-amber-950/20">
+                <CardHeader className="pb-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        <AlertTriangle className="h-5 w-5 text-amber-600" />
+                        {t("adminConfig.pendingChangesTitle")}
+                        <Badge variant="warning" className="text-[10px]">
+                          {t("adminConfig.pendingChangesBadge", { count: configChanges.length })}
+                        </Badge>
+                      </CardTitle>
+                      <CardDescription>
+                        {t("adminConfig.pendingChangesDescription")}
+                      </CardDescription>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" size="sm" onClick={handleResetAll} disabled={isSavingSchema}>
+                        <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                        {t("common.resetAll")}
+                      </Button>
+                      <Button size="sm" onClick={() => setShowSaveDialog(true)} disabled={isSavingSchema}>
+                        <Save className="mr-1.5 h-3.5 w-3.5" />
+                        {t("adminConfig.saveConfig")}
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="grid gap-2 lg:grid-cols-2">
+                    {configChanges.slice(0, 6).map((change) => (
+                      <div
+                        key={`${change.sectionKey}:${change.field.key}`}
+                        className="rounded-lg border bg-background/70 p-3 text-sm"
+                      >
+                        <div className="flex min-w-0 items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">
+                              {change.sectionTitle} / {change.field.label}
+                            </p>
+                            <code className="text-[11px] text-muted-foreground">{change.field.key}</code>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 shrink-0 px-2 text-xs"
+                            onClick={() => scrollToSection(change.sectionKey)}
+                          >
+                            {t("adminConfig.locate")}
+                          </Button>
+                        </div>
+                        <div className="mt-2 grid gap-2 text-xs sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+                          <span className="min-w-0 rounded bg-muted/70 px-2 py-1 text-muted-foreground">
+                            {formatConfigPreviewValue(change.field, change.before, t)}
+                          </span>
+                          <span className="hidden text-muted-foreground sm:inline">→</span>
+                          <span className="min-w-0 rounded bg-primary/10 px-2 py-1 text-primary">
+                            {formatConfigPreviewValue(change.field, change.after, t)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {configChanges.length > 6 && (
+                    <p className="text-xs text-muted-foreground">
+                      {t("adminConfig.remainingChanges", { count: configChanges.length - 6 })}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
             {/* 搜索与操作栏 */}
             <div className="mb-4 flex min-w-0 flex-col items-stretch gap-3 sm:flex-row sm:items-center">
               <div className="relative w-full min-w-0 sm:max-w-md sm:flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="搜索配置项..."
+                  placeholder={t("adminConfig.searchPlaceholder")}
                   value={searchText}
                   onChange={(e) => setSearchText(e.target.value)}
                   className="pl-9 pr-8"
@@ -1445,7 +1596,7 @@ export default function AdminConfigPage() {
               </div>
               {searchText && (
                 <span className="text-xs text-muted-foreground whitespace-nowrap">
-                  找到 {searchResultCount} 个匹配项
+                  {t("adminConfig.searchResultCount", { count: searchResultCount })}
                 </span>
               )}
               <div className="ml-auto flex w-full flex-wrap gap-2 sm:w-auto">
@@ -1461,7 +1612,27 @@ export default function AdminConfigPage() {
                   ) : (
                     <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
                   )}
-                  刷新
+                  {t("common.refresh")}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 sm:flex-none"
+                  onClick={expandAllSections}
+                  disabled={isLoadingSchema || !schema}
+                >
+                  <ChevronDown className="mr-1.5 h-3.5 w-3.5" />
+                  {t("adminConfig.expandAll")}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 sm:flex-none"
+                  onClick={collapseAllSections}
+                  disabled={isLoadingSchema || !schema}
+                >
+                  <ChevronRight className="mr-1.5 h-3.5 w-3.5" />
+                  {t("adminConfig.collapseAll")}
                 </Button>
                 {hasSchemaChanges && (
                   <Button
@@ -1471,7 +1642,7 @@ export default function AdminConfigPage() {
                     className="flex-1 text-muted-foreground sm:flex-none"
                   >
                     <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-                    全部还原
+                    {t("common.resetAll")}
                   </Button>
                 )}
                 <Button
@@ -1487,7 +1658,7 @@ export default function AdminConfigPage() {
                   ) : (
                     <Save className="mr-1.5 h-3.5 w-3.5" />
                   )}
-                  保存配置
+                  {t("adminConfig.saveConfig")}
                   {totalChangedCount > 0 && (
                     <Badge
                       variant="secondary"
@@ -1591,9 +1762,9 @@ export default function AdminConfigPage() {
                       Object.keys(matchedFieldsBySection).length === 0 && (
                         <div className="py-16 text-center text-muted-foreground">
                           <Search className="h-10 w-10 mx-auto mb-3 opacity-30" />
-                          <p>没有找到匹配的配置项</p>
+                          <p>{t("adminConfig.noMatchesTitle")}</p>
                           <p className="text-xs mt-1">
-                            尝试使用不同的关键词搜索
+                            {t("adminConfig.noMatchesDescription")}
                           </p>
                         </div>
                       )}
@@ -1615,7 +1786,7 @@ export default function AdminConfigPage() {
                   <div className="flex flex-wrap items-center justify-center gap-2 rounded-2xl border bg-background/95 px-3 py-2.5 shadow-lg backdrop-blur sm:flex-nowrap sm:gap-3 sm:rounded-full sm:px-5">
                     <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
                     <span className="min-w-0 text-sm">
-                      {totalChangedCount} 项配置已修改
+                      {t("adminConfig.floatingChanged", { count: totalChangedCount })}
                     </span>
                     <Button
                       variant="ghost"
@@ -1623,7 +1794,7 @@ export default function AdminConfigPage() {
                       onClick={handleResetAll}
                       className="h-7 text-xs"
                     >
-                      还原
+                      {t("common.reset")}
                     </Button>
                     <Button
                       size="sm"
@@ -1631,7 +1802,7 @@ export default function AdminConfigPage() {
                       className="h-7 text-xs"
                     >
                       <Save className="mr-1 h-3 w-3" />
-                      保存
+                      {t("common.save")}
                     </Button>
                   </div>
                 </motion.div>
@@ -1648,10 +1819,10 @@ export default function AdminConfigPage() {
                     <div>
                       <CardTitle className="flex items-center gap-2">
                         <Settings className="h-5 w-5" />
-                        config.toml
+                        {t("adminConfig.tomlTitle")}
                       </CardTitle>
                       <CardDescription>
-                        直接编辑 TOML 配置文件，保存后自动重新加载
+                        {t("adminConfig.tomlDescription")}
                       </CardDescription>
                     </div>
                     <div className="flex gap-2">
@@ -1666,7 +1837,7 @@ export default function AdminConfigPage() {
                         ) : (
                           <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
                         )}
-                        重新加载
+                        {t("common.reload")}
                       </Button>
                       <Button
                         size="sm"
@@ -1678,7 +1849,7 @@ export default function AdminConfigPage() {
                         ) : (
                           <Save className="mr-1.5 h-3.5 w-3.5" />
                         )}
-                        保存
+                        {t("common.save")}
                       </Button>
                     </div>
                   </div>
@@ -1695,7 +1866,7 @@ export default function AdminConfigPage() {
                           <FileText className="h-3.5 w-3.5 shrink-0" />
                           <span className="truncate">{configPath}</span>
                           <span className="ml-auto shrink-0">
-                            保存时自动备份为 config.toml.backup
+                            {t("adminConfig.tomlAutoBackup")}
                           </span>
                         </div>
                       )}
@@ -1703,7 +1874,7 @@ export default function AdminConfigPage() {
                         <Alert>
                           <AlertTriangle className="h-4 w-4" />
                           <AlertDescription>
-                            检测到未保存的更改，请点击保存按钮应用更改
+                            {t("adminConfig.tomlUnsavedAlert")}
                           </AlertDescription>
                         </Alert>
                       )}
@@ -1711,14 +1882,13 @@ export default function AdminConfigPage() {
                         value={configContent}
                         onChange={(e) => setConfigContent(e.target.value)}
                         className="font-mono text-sm min-h-[600px] leading-relaxed"
-                        placeholder="配置文件内容..."
+                        placeholder={t("adminConfig.tomlPlaceholder")}
                       />
                       <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
                         <span>
-                          {configContent.split("\n").length} 行 ·{" "}
-                          {configContent.length} 字符
+                          {t("adminConfig.tomlStats", { lines: configContent.split("\n").length, chars: configContent.length })}
                         </span>
-                        <span>TOML</span>
+                        <span>{t("adminConfig.tomlFormat")}</span>
                       </div>
                     </div>
                   )}
@@ -1733,41 +1903,41 @@ export default function AdminConfigPage() {
                 <div>
                   <h2 className="flex items-center gap-2 text-lg font-semibold">
                     <Archive className="h-5 w-5" />
-                    配置备份与恢复
+                    {t("adminConfig.backupsTitle")}
                   </h2>
                   <p className="text-sm text-muted-foreground">
-                    保存配置前会自动生成保护性备份；也可以手动备份、查看内容、恢复或删除历史备份。
+                    {t("adminConfig.backupsDescription")}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button variant="outline" size="sm" onClick={() => void loadConfigBackups()} disabled={isLoadingConfigBackups || isConfigBackupBusy}>
                     {isLoadingConfigBackups ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
-                    刷新
+                    {t("common.refresh")}
                   </Button>
                   <Button size="sm" onClick={() => void handleCreateConfigBackup()} disabled={isConfigBackupBusy}>
                     {isConfigBackupBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Archive className="mr-2 h-4 w-4" />}
-                    创建配置备份
+                    {t("adminConfig.createBackup")}
                   </Button>
                 </div>
               </div>
 
               <Alert>
                 <Shield className="h-4 w-4" />
-                <AlertTitle>安全机制</AlertTitle>
+                <AlertTitle>{t("adminConfig.safetyMechanismTitle")}</AlertTitle>
                 <AlertDescription>
-                  配置恢复会先校验 TOML 是否可加载，再创建当前配置的保护性备份；热重载失败会自动回滚当前配置文件。
+                  {t("adminConfig.safetyMechanismDescription")}
                 </AlertDescription>
               </Alert>
 
               <Card>
                 <CardHeader>
-                  <CardTitle>配置备份列表</CardTitle>
-                  <CardDescription>备份文件保存在数据库备份目录下的 config 子目录。</CardDescription>
+                  <CardTitle>{t("adminConfig.backupListTitle")}</CardTitle>
+                  <CardDescription>{t("adminConfig.backupListDescription")}</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {configBackups.length === 0 ? (
                     <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
-                      {isLoadingConfigBackups ? "正在加载..." : "暂无配置备份"}
+                      {isLoadingConfigBackups ? t("adminConfig.loadingBackups") : t("adminConfig.noBackups")}
                     </div>
                   ) : (
                     <div className="divide-y rounded-md border">
@@ -1781,13 +1951,13 @@ export default function AdminConfigPage() {
                           </div>
                           <div className="flex flex-wrap gap-2">
                             <Button variant="outline" size="sm" onClick={() => void handleViewConfigBackup(backup)} disabled={isConfigBackupBusy}>
-                              <Eye className="mr-2 h-4 w-4" />查看
+                              <Eye className="mr-2 h-4 w-4" />{t("common.view")}
                             </Button>
                             <Button variant="outline" size="sm" onClick={() => void handlePreviewConfigRestore(backup)} disabled={isConfigBackupBusy}>
-                              <RotateCcw className="mr-2 h-4 w-4" />恢复
+                              <RotateCcw className="mr-2 h-4 w-4" />{t("common.restore")}
                             </Button>
                             <Button variant="outline" size="sm" onClick={() => void handleDeleteConfigBackup(backup)} disabled={isConfigBackupBusy} className="text-destructive hover:text-destructive">
-                              <Trash2 className="mr-2 h-4 w-4" />删除
+                              <Trash2 className="mr-2 h-4 w-4" />{t("common.delete")}
                             </Button>
                           </div>
                         </div>
@@ -1804,24 +1974,24 @@ export default function AdminConfigPage() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <GithubIcon className="h-5 w-5" />
-                  Git 自动更新
+                  {t("adminConfig.gitUpdateTitle")}
                 </CardTitle>
                 <CardDescription>
-                  从指定仓库拉取分支，并按需自动重启 systemd 服务。请只填写可信仓库。
+                  {t("adminConfig.gitUpdateDescription")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
                 <Alert>
                   <AlertTriangle className="h-4 w-4" />
-                  <AlertTitle>生产操作</AlertTitle>
+                  <AlertTitle>{t("adminConfig.productionOperationTitle")}</AlertTitle>
                   <AlertDescription>
-                    后端会执行 git pull --ff-only，并重启 twilight / twilight-bot / twilight-scheduler。若服务器有未提交代码改动，更新会失败而不会强制覆盖。
+                    {t("adminConfig.productionOperationDescription")}
                   </AlertDescription>
                 </Alert>
 
                 <div className="grid gap-4 md:grid-cols-[1fr_180px]">
                   <div className="space-y-2">
-                    <Label htmlFor="update-repo-url">Git 仓库地址</Label>
+                    <Label htmlFor="update-repo-url">{t("adminConfig.repoUrlLabel")}</Label>
                     <Input
                       id="update-repo-url"
                       value={updateRepoUrl}
@@ -1830,7 +2000,7 @@ export default function AdminConfigPage() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="update-branch">分支</Label>
+                    <Label htmlFor="update-branch">{t("adminConfig.branchLabel")}</Label>
                     <Input
                       id="update-branch"
                       value={updateBranch}
@@ -1843,8 +2013,8 @@ export default function AdminConfigPage() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="flex items-center justify-between rounded-lg border p-3">
                     <span>
-                      <span className="block text-sm font-medium">自动重启服务</span>
-                      <span className="text-xs text-muted-foreground">systemctl restart 三个 Twilight 服务</span>
+                      <span className="block text-sm font-medium">{t("adminConfig.autoRestartServices")}</span>
+                      <span className="text-xs text-muted-foreground">{t("adminConfig.autoRestartDescription")}</span>
                     </span>
                     <Switch checked={updateRestartServices} onCheckedChange={setUpdateRestartServices} />
                   </label>
@@ -1853,21 +2023,13 @@ export default function AdminConfigPage() {
                 <div className="flex flex-wrap gap-2">
                   <Button variant="outline" onClick={() => void handleGitUpdate(true)} disabled={isUpdating || !updateRepoUrl.trim()}>
                     {isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Shield className="mr-2 h-4 w-4" />}
-                    安全预检
+                    {t("adminConfig.safePreflight")}
                   </Button>
                   <Button onClick={() => void handleGitUpdate(false)} disabled={isUpdating || !updateRepoUrl.trim()}>
                     {isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <GitPullRequest className="mr-2 h-4 w-4" />}
-                    拉取并更新
+                    {t("adminConfig.pullAndUpdate")}
                   </Button>
-                  <a
-                    href="https://github.com/Prejudice-Studio/Twilight"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
-                  >
-                    <GithubIcon className="h-4 w-4" />
-                    打开 GitHub
-                  </a>
+                  <GithubProjectLink compact className="w-full sm:w-auto" />
                 </div>
 
                 {updateOutput.length > 0 && (
@@ -1883,7 +2045,7 @@ export default function AdminConfigPage() {
         <Dialog open={showConfigBackupView} onOpenChange={setShowConfigBackupView}>
           <DialogContent className="max-h-[85vh] max-w-3xl overflow-hidden p-0">
             <DialogHeader className="border-b p-4">
-              <DialogTitle>查看配置备份</DialogTitle>
+              <DialogTitle>{t("adminConfig.viewBackupTitle")}</DialogTitle>
               <DialogDescription>
                 {configBackupView?.backup.name} · {formatBytes(configBackupView?.backup.size || 0)}
               </DialogDescription>
@@ -1892,7 +2054,7 @@ export default function AdminConfigPage() {
               {configBackupView?.content || ""}
             </pre>
             <DialogFooter className="border-t p-4">
-              <Button variant="outline" onClick={() => setShowConfigBackupView(false)}>关闭</Button>
+              <Button variant="outline" onClick={() => setShowConfigBackupView(false)}>{t("common.close")}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -1900,31 +2062,31 @@ export default function AdminConfigPage() {
         <Dialog open={showConfigRestoreDialog} onOpenChange={setShowConfigRestoreDialog}>
           <DialogContent className="max-w-lg">
             <DialogHeader>
-              <DialogTitle>确认恢复配置备份</DialogTitle>
+              <DialogTitle>{t("adminConfig.restoreDialogTitle")}</DialogTitle>
               <DialogDescription>
-                恢复会替换当前 config.toml，并立即尝试热重载；失败时会自动回滚。
+                {t("adminConfig.restoreDialogDescription")}
               </DialogDescription>
             </DialogHeader>
             {configRestorePreview && (
               <div className="space-y-3 text-sm">
                 <Alert className="border-amber-500/40 bg-amber-500/10">
                   <AlertTriangle className="h-4 w-4" />
-                  <AlertTitle>高风险操作</AlertTitle>
+                  <AlertTitle>{t("adminConfig.highRiskOperationTitle")}</AlertTitle>
                   <AlertDescription>
-                    确认后会先备份当前配置，再用备份内容覆盖当前配置文件。
+                    {t("adminConfig.restoreHighRiskDescription")}
                   </AlertDescription>
                 </Alert>
                 <div className="grid gap-2 rounded-md border p-3 text-xs">
                   <div className="flex justify-between gap-3">
-                    <span className="text-muted-foreground">目标备份</span>
+                    <span className="text-muted-foreground">{t("adminConfig.targetBackup")}</span>
                     <strong className="break-all text-right">{configRestorePreview.restored}</strong>
                   </div>
                   <div className="flex justify-between gap-3">
-                    <span className="text-muted-foreground">配置文件</span>
+                    <span className="text-muted-foreground">{t("adminConfig.configFile")}</span>
                     <strong className="break-all text-right">{configRestorePreview.config_file}</strong>
                   </div>
                   <div className="flex justify-between gap-3">
-                    <span className="text-muted-foreground">内容大小</span>
+                    <span className="text-muted-foreground">{t("adminConfig.contentSize")}</span>
                     <strong>{formatBytes(configRestorePreview.content_bytes)}</strong>
                   </div>
                 </div>
@@ -1936,10 +2098,10 @@ export default function AdminConfigPage() {
               </div>
             )}
             <DialogFooter>
-              <Button variant="outline" onClick={() => setShowConfigRestoreDialog(false)} disabled={isConfigBackupBusy}>取消</Button>
+              <Button variant="outline" onClick={() => setShowConfigRestoreDialog(false)} disabled={isConfigBackupBusy}>{t("common.cancel")}</Button>
               <Button onClick={() => void handleConfirmConfigRestore()} disabled={isConfigBackupBusy || !configRestorePreview}>
                 {isConfigBackupBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
-                确认恢复
+                {t("adminConfig.confirmRestore")}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1948,24 +2110,14 @@ export default function AdminConfigPage() {
         <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>确认保存配置</DialogTitle>
+              <DialogTitle>{t("adminConfig.saveDialogTitle")}</DialogTitle>
               <DialogDescription>
-                以下配置项将被更新，保存前将自动备份原配置文件。
+                {t("adminConfig.saveDialogDescription")}
               </DialogDescription>
             </DialogHeader>
             <div className="max-h-64 overflow-y-auto space-y-2 py-2">
               {schema?.sections.map((section) => {
-                const sectionChanges: { label: string; key: string }[] = [];
-                for (const field of section.fields) {
-                  const edited = editedValues[section.key]?.[field.key];
-                  const orig = originalValues[section.key]?.[field.key];
-                  if (JSON.stringify(edited) !== JSON.stringify(orig)) {
-                    sectionChanges.push({
-                      label: field.label,
-                      key: field.key,
-                    });
-                  }
-                }
+                const sectionChanges = configChanges.filter((change) => change.sectionKey === section.key);
                 if (sectionChanges.length === 0) return null;
                 const Icon = SECTION_ICONS[section.key] || CircleDot;
                 return (
@@ -1977,15 +2129,23 @@ export default function AdminConfigPage() {
                       <Icon className="h-4 w-4 text-primary" />
                       {section.title}
                     </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {sectionChanges.map((c) => (
-                        <Badge
-                          key={c.key}
-                          variant="secondary"
-                          className="text-xs"
-                        >
-                          {c.label}
-                        </Badge>
+                    <div className="space-y-2">
+                      {sectionChanges.map((change) => (
+                        <div key={change.field.key} className="rounded border bg-muted/30 px-2 py-2 text-xs">
+                          <div className="mb-1 flex min-w-0 flex-wrap items-center gap-2">
+                            <span className="font-medium">{change.field.label}</span>
+                            <code className="text-[11px] text-muted-foreground">{change.field.key}</code>
+                          </div>
+                          <div className="grid gap-1 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+                            <span className="rounded bg-background px-2 py-1 text-muted-foreground">
+                              {formatConfigPreviewValue(change.field, change.before, t)}
+                            </span>
+                            <span className="hidden text-muted-foreground sm:inline">→</span>
+                            <span className="rounded bg-primary/10 px-2 py-1 text-primary">
+                              {formatConfigPreviewValue(change.field, change.after, t)}
+                            </span>
+                          </div>
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -1997,7 +2157,7 @@ export default function AdminConfigPage() {
                 variant="outline"
                 onClick={() => setShowSaveDialog(false)}
               >
-                取消
+                {t("common.cancel")}
               </Button>
               <Button onClick={handleSaveSchema} disabled={isSavingSchema}>
                 {isSavingSchema ? (
@@ -2005,7 +2165,7 @@ export default function AdminConfigPage() {
                 ) : (
                   <Save className="mr-1.5 h-3.5 w-3.5" />
                 )}
-                确认保存
+                {t("adminConfig.confirmSave")}
               </Button>
             </DialogFooter>
           </DialogContent>

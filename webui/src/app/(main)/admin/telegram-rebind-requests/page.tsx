@@ -20,9 +20,11 @@ import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError } from "@/components/layout/page-state";
 import { api, type TelegramRebindRequest } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 export default function AdminTelegramRebindRequestsPage() {
   const { toast } = useToast();
+  const { t } = useI18n();
   const [requests, setRequests] = useState<TelegramRebindRequest[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -70,7 +72,7 @@ export default function AdminTelegramRebindRequestsPage() {
 
   const openBulkActionDialog = (action: "approve" | "reject") => {
     if (selectedIds.size === 0) {
-      toast({ title: "请先选择待处理请求", variant: "destructive" });
+      toast({ title: t("adminTelegramRebind.selectFirst"), variant: "destructive" });
       return;
     }
     setSelectedRequest(null);
@@ -107,8 +109,8 @@ export default function AdminTelegramRebindRequestsPage() {
       if (res.success) {
         const bulkData = isBulk ? res.data as { success: number; failed: number } | undefined : undefined;
         toast({
-          title: isBulk ? "批量操作完成" : "操作成功",
-          description: bulkData ? `成功 ${bulkData.success}，失败 ${bulkData.failed}` : undefined,
+          title: isBulk ? t("adminTelegramRebind.bulkComplete") : t("common.operationSuccess"),
+          description: bulkData ? t("adminTelegramRebind.bulkResult", { success: bulkData.success, failed: bulkData.failed }) : undefined,
           variant: "success",
         });
         setActionOpen(false);
@@ -118,10 +120,10 @@ export default function AdminTelegramRebindRequestsPage() {
         invalidateRequestsCache();
         loadRequests();
       } else {
-        toast({ title: "操作失败", description: res.message, variant: "destructive" });
+        toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "操作失败", description: error.message, variant: "destructive" });
+      toast({ title: t("common.operationFailed"), description: error.message, variant: "destructive" });
     } finally {
       setIsActioning(false);
     }
@@ -133,21 +135,21 @@ export default function AdminTelegramRebindRequestsPage() {
         return (
           <Badge variant="warning">
             <Clock className="mr-1 h-3 w-3" />
-            待处理
+            {t("adminReview.pending")}
           </Badge>
         );
       case "approved":
         return (
           <Badge variant="success">
             <Check className="mr-1 h-3 w-3" />
-            已批准
+            {t("adminReview.approved")}
           </Badge>
         );
       case "rejected":
         return (
           <Badge variant="destructive">
             <X className="mr-1 h-3 w-3" />
-            已拒绝
+            {t("adminReview.rejected")}
           </Badge>
         );
       default:
@@ -166,11 +168,11 @@ export default function AdminTelegramRebindRequestsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Telegram 换绑审核</h1>
-          <p className="text-muted-foreground">审核用户提交的 Telegram 换绑请求</p>
+          <h1 className="text-3xl font-bold">{t("adminTelegramRebind.title")}</h1>
+          <p className="text-muted-foreground">{t("adminTelegramRebind.description")}</p>
         </div>
         <Badge variant="outline" className="text-lg px-4 py-2">
-          共 {total} 条请求
+          {t("adminReview.totalRequests", { count: total })}
         </Badge>
       </div>
 
@@ -184,24 +186,24 @@ export default function AdminTelegramRebindRequestsPage() {
                 size="sm"
                 onClick={() => { setStatus(value); setPage(1); setSelectedIds(new Set()); }}
               >
-                {value === 'pending' ? '待处理' : value === 'approved' ? '已批准' : '已拒绝'}
+                {value === 'pending' ? t("adminReview.pending") : value === 'approved' ? t("adminReview.approved") : t("adminReview.rejected")}
               </Button>
             ))}
             {status === "pending" && pendingOnPage.length > 0 && (
               <>
                 <Button variant="outline" size="sm" onClick={selectCurrentPendingPage}>
-                  全选当前页
+                  {t("adminTelegramRebind.selectPage")}
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => setSelectedIds(new Set())} disabled={selectedIds.size === 0}>
-                  清空选择
+                  {t("adminTelegramRebind.clearSelection")}
                 </Button>
                 <Button size="sm" onClick={() => openBulkActionDialog("approve")} disabled={selectedIds.size === 0}>
                   <Check className="mr-1 h-4 w-4" />
-                  批量批准 ({selectedIds.size})
+                  {t("adminTelegramRebind.bulkApprove", { count: selectedIds.size })}
                 </Button>
                 <Button size="sm" variant="destructive" onClick={() => openBulkActionDialog("reject")} disabled={selectedIds.size === 0}>
                   <X className="mr-1 h-4 w-4" />
-                  批量拒绝 ({selectedIds.size})
+                  {t("adminTelegramRebind.bulkReject", { count: selectedIds.size })}
                 </Button>
               </>
             )}
@@ -213,7 +215,7 @@ export default function AdminTelegramRebindRequestsPage() {
             </div>
           ) : requests.length === 0 ? (
             <div className="flex h-64 items-center justify-center text-muted-foreground">
-              暂无{status === 'pending' ? '待处理的' : ''}请求
+              {t("adminReview.emptyRequests", { pending: status === 'pending' ? t("adminReview.pendingPrefix") : "" })}
             </div>
           ) : (
             <div className="space-y-4">
@@ -231,26 +233,26 @@ export default function AdminTelegramRebindRequestsPage() {
                               className="h-4 w-4 rounded border-border"
                               checked={selectedIds.has(request.id)}
                               onChange={(event) => toggleSelect(request.id, event.target.checked)}
-                              aria-label={`选择 ${request.username || `UID ${request.uid}`} 的换绑请求`}
+                              aria-label={t("adminTelegramRebind.selectRequest", { username: request.username || `UID ${request.uid}` })}
                             />
                           )}
                           <p className="text-lg font-medium">{request.username || `UID ${request.uid}`}</p>
                           {getStatusBadge(request.status)}
                         </div>
                         <p className="text-sm text-muted-foreground">
-                          提交时间：{formatDate(request.created_at)}
+                          {t("adminTelegramRebind.submittedAt", { time: formatDate(request.created_at) })}
                         </p>
                         <p className="text-sm">
-                          当前 Telegram ID：{request.old_telegram_id ?? '无'}
+                          {t("adminTelegramRebind.currentTelegramId", { id: request.old_telegram_id ?? t("adminTelegramRebind.none") })}
                         </p>
                         {request.reason && (
-                          <p className="text-sm text-muted-foreground">原因：{request.reason}</p>
+                          <p className="text-sm text-muted-foreground">{t("adminTelegramRebind.reason", { reason: request.reason })}</p>
                         )}
                         {request.admin_note && (
-                          <p className="text-sm text-primary">管理员备注：{request.admin_note}</p>
+                          <p className="text-sm text-primary">{t("adminTelegramRebind.adminNote", { note: request.admin_note })}</p>
                         )}
                         {request.reviewed_at && (
-                          <p className="text-sm text-muted-foreground">处理时间：{formatDate(request.reviewed_at)}</p>
+                          <p className="text-sm text-muted-foreground">{t("adminTelegramRebind.reviewedAt", { time: formatDate(request.reviewed_at) })}</p>
                         )}
                       </div>
                       {request.status === 'pending' && (
@@ -261,7 +263,7 @@ export default function AdminTelegramRebindRequestsPage() {
                             onClick={() => openActionDialog(request, 'approve')}
                           >
                             <Check className="mr-1 h-4 w-4" />
-                            批准
+                            {t("adminTelegramRebind.approve")}
                           </Button>
                           <Button
                             size="sm"
@@ -270,7 +272,7 @@ export default function AdminTelegramRebindRequestsPage() {
                             onClick={() => openActionDialog(request, 'reject')}
                           >
                             <X className="mr-1 h-4 w-4" />
-                            拒绝
+                            {t("adminTelegramRebind.reject")}
                           </Button>
                         </div>
                       )}
@@ -290,17 +292,17 @@ export default function AdminTelegramRebindRequestsPage() {
             size="icon"
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page === 1}
-            aria-label="上一页"
+            aria-label={t("common.previousPage")}
           >
             <ChevronLeft className="h-4 w-4" aria-hidden="true" />
           </Button>
-          <span className="text-sm text-muted-foreground">第 {page} / {pages} 页</span>
+          <span className="text-sm text-muted-foreground">{t("common.pageStatus", { page, pages })}</span>
           <Button
             variant="outline"
             size="icon"
             onClick={() => setPage((p) => Math.min(pages, p + 1))}
             disabled={page === pages}
-            aria-label="下一页"
+            aria-label={t("common.nextPage")}
           >
             <ChevronRight className="h-4 w-4" aria-hidden="true" />
           </Button>
@@ -312,44 +314,44 @@ export default function AdminTelegramRebindRequestsPage() {
           <DialogHeader>
             <DialogTitle>
               {selectedRequest
-                ? selectedAction === 'approve' ? '批准换绑请求' : '拒绝换绑请求'
-                : selectedAction === 'approve' ? '批量批准换绑请求' : '批量拒绝换绑请求'}
+                ? selectedAction === 'approve' ? t("adminTelegramRebind.approveTitle") : t("adminTelegramRebind.rejectTitle")
+                : selectedAction === 'approve' ? t("adminTelegramRebind.bulkApproveTitle") : t("adminTelegramRebind.bulkRejectTitle")}
             </DialogTitle>
             <DialogDescription>
               {selectedAction === 'approve'
-                ? '批准后会解绑用户当前的 Telegram 绑定，用户可重新绑定新的 Telegram 账号。'
-                : '拒绝后用户将收到管理员拒绝结果。'}
+                ? t("adminTelegramRebind.approveDescription")
+                : t("adminTelegramRebind.rejectDescription")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 pt-4">
             <div>
-              <Label>管理员备注 (可选)</Label>
+              <Label>{t("adminReview.adminNoteOptional")}</Label>
               <Input
                 value={adminNote}
                 onChange={(event) => setAdminNote(event.target.value)}
-                placeholder="填写处理说明"
+                placeholder={t("adminReview.adminNotePlaceholder")}
               />
             </div>
             <div className="rounded-lg border border-muted p-3 text-sm text-muted-foreground">
               {selectedRequest ? (
                 <>
-                  <p>用户：{selectedRequest.username || `UID ${selectedRequest.uid}`}</p>
-                  <p>旧 Telegram ID：{selectedRequest.old_telegram_id ?? '无'}</p>
-                  <p>提交时间：{formatDate(selectedRequest.created_at)}</p>
+                  <p>{t("adminTelegramRebind.user", { username: selectedRequest.username || `UID ${selectedRequest.uid}` })}</p>
+                  <p>{t("adminTelegramRebind.oldTelegramId", { id: selectedRequest.old_telegram_id ?? t("adminTelegramRebind.none") })}</p>
+                  <p>{t("adminTelegramRebind.submittedAt", { time: formatDate(selectedRequest.created_at) })}</p>
                 </>
               ) : (
-                <p>将处理已选择的 {selectedIds.size} 条待处理请求。</p>
+                <p>{t("adminTelegramRebind.bulkSelected", { count: selectedIds.size })}</p>
               )}
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setActionOpen(false)} disabled={isActioning}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button onClick={handleAction} disabled={isActioning}>
               {isActioning ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : selectedAction === 'approve' ? '批准' : '拒绝'}
+              ) : selectedAction === 'approve' ? t("adminTelegramRebind.approve") : t("adminTelegramRebind.reject")}
             </Button>
           </DialogFooter>
         </DialogContent>

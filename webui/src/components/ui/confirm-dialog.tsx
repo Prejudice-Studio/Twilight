@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button, type ButtonProps } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 export type ConfirmTone = "default" | "danger" | "warning";
 
@@ -62,6 +63,7 @@ const TONE_TITLE_CLASS: Record<ConfirmTone, string> = {
 };
 
 export function ConfirmDialogProvider({ children }: { children: React.ReactNode }) {
+  const { t } = useI18n();
   const [pending, setPending] = React.useState<PendingPrompt | null>(null);
   const [busyKey, setBusyKey] = React.useState<string | null>(null);
 
@@ -106,12 +108,12 @@ export function ConfirmDialogProvider({ children }: { children: React.ReactNode 
       pending.confirmVariant ?? (tone === "danger" ? "destructive" : "default");
     return [
       {
-        label: pending.confirmLabel ?? "确认",
+        label: pending.confirmLabel ?? t("common.confirm"),
         variant: confirmVariant,
         value: "confirm",
       },
     ];
-  }, [pending, tone]);
+  }, [pending, t, tone]);
 
   return (
     <ConfirmContext.Provider value={value}>
@@ -141,7 +143,7 @@ export function ConfirmDialogProvider({ children }: { children: React.ReactNode 
               onClick={() => close(null)}
               disabled={busyKey !== null}
             >
-              {pending?.cancelLabel ?? "取消"}
+              {pending?.cancelLabel ?? t("common.cancel")}
             </Button>
             {actions.map((action, index) => {
               const key = action.value ?? `action-${index}`;

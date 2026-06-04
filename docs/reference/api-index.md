@@ -240,6 +240,7 @@
 | POST | `/api/v1/admin/users/bulk-enable-disabled` | Admin | 批量启用被禁用用户 |
 | POST | `/api/v1/admin/users/cleanup-invalid` | Admin | 预览/清理无效用户（执行需确认短语） |
 | POST | `/api/v1/admin/users/clear-stale-pending-emby` | Admin | 清理长期 PENDING_EMBY 的陈旧用户 |
+| POST | `/api/v1/admin/users/clear-emails` | Admin | 预览/清空所有用户邮箱设置（执行需确认短语） |
 | POST | `/api/v1/admin/users/kick-no-emby` | Admin | 踢出无 Emby 账号的用户 |
 | GET | `/api/v1/admin/invite/tree` | Admin | 邀请树 |
 | POST | `/api/v1/admin/invite/users/{uid}/detach` | Admin | 将用户脱离邀请关系 |
@@ -337,6 +338,7 @@
 | GET | `/api/v1/signin/config` | Public | 签到公开配置 |
 | GET | `/api/v1/signin/me` | User | 我的签到摘要 |
 | POST | `/api/v1/signin` | User | 签到 |
+| POST | `/api/v1/signin/renew` | User | 使用签到积分续期（需管理员开启） |
 | GET | `/api/v1/signin/history` | User | 签到历史 |
 
 ## API Key

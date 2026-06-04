@@ -117,6 +117,12 @@ bash start_backend_dev.sh
 - 受保护路由由客户端 layout 调 `/users/me` 校验登录态，避免 Web 域读不到 API 域 cookie 导致登录后被踢回 `/login`。
 - `SITE_NAME` / `SITE_TITLE` / `SITE_DESCRIPTION` / `SITE_ICON` 是运行时可注入的展示文案，由 `app/layout.tsx` 每次请求读取，改完即生效，无需重新构建。
 
+### 前端文案与多语言
+
+- 轻量 i18n 入口位于 `webui/src/lib/i18n.tsx`，语言文件统一存放在 `webui/src/locales/`。
+- 主分支只提供 `zh-Hans.json`、`zh-Hant.json`、`en-US.json` 三个显示语言，文件名使用 BCP 47 风格命名。
+- 新增文案、翻译或语言时，按 [前端多语言开发与翻译指南](./i18n.md) 操作。
+
 ### 前端契约
 
 - 所有后端调用集中维护在 `webui/src/lib/api.ts`，底层请求逻辑在 `webui/src/lib/api-request.ts`。

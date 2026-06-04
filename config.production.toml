@@ -228,7 +228,7 @@ invite_code_random_algorithm = "hex10"
 auto_cleanup_no_emby = false
 auto_cleanup_no_emby_days = 7
 
-# —— 签到 / 积分（原 [Signin] 节并入此处。仅装饰用途，无排行榜）
+# —— 签到 / 积分（原 [Signin] 节并入此处。可选启用积分续期，无排行榜）
 # 命名说明：原 [Signin].enabled 改为 signin_enabled 避免与 SAR 整体开关混淆；
 # 其余字段保持原名（currency_name / daily_min / ...）。
 signin_enabled = true
@@ -239,6 +239,12 @@ streak_bonus_enabled = true
 streak_bonus_days = [3, 7, 14, 30]
 streak_bonus_points = [10, 50, 100, 300]
 reset_after_miss = true
+# 是否允许用户用签到积分续期；默认关闭，关闭时前端不显示兑换入口。
+signin_renewal_enabled = false
+# 每次积分续期消耗多少积分；仅 signin_renewal_enabled=true 时生效。
+signin_renewal_cost = 100
+# 每次积分续期增加多少天；仅 signin_renewal_enabled=true 时生效。
+signin_renewal_days = 30
 
 # ───────── 设备 / 并发流限制 ─────────
 [DeviceLimit]
@@ -355,5 +361,6 @@ min_progress_percent = 80
 #   - daily_min/daily_max  → daily_min/daily_max
 #   - streak_bonus_*       → streak_bonus_*
 #   - reset_after_miss     → reset_after_miss
+#   - renewal_*            → signin_renewal_*
 # 启动时若仍存在独立的 [Signin] 节，会被自动迁移到 [SAR] 并清理掉；
 # 无需手动改动，但模板里不再保留该节以免误导。

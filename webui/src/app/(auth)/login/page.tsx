@@ -16,6 +16,7 @@ import { SITE_NAME } from "@/lib/site-config";
 import { sanitizeExternalUrl } from "@/lib/safe-url";
 import { friendlyError } from "@/lib/validators";
 import { safeProtectedRedirectTarget } from "@/lib/auth-routes";
+import { useI18n } from "@/lib/i18n";
 
 function loginRedirectTarget(): string {
   if (typeof window === "undefined") return "/dashboard";
@@ -26,6 +27,7 @@ function loginRedirectTarget(): string {
 export default function LoginPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const { t } = useI18n();
   const { login } = useAuthStore();
   const { info: systemInfo, fetchInfo: fetchSystemInfo } = useSystemStore();
   
@@ -55,7 +57,7 @@ export default function LoginPage() {
     
     if (!username || !password) {
       toast({
-        title: "请填写完整信息",
+        title: t("auth.login.incomplete"),
         variant: "destructive",
       });
       return;
@@ -66,8 +68,8 @@ export default function LoginPage() {
       const result = await login(username, password);
       if (result.ok) {
         toast({
-          title: "登录成功",
-          description: "欢迎回来！",
+          title: t("auth.login.successTitle"),
+          description: t("auth.login.successDescription"),
           variant: "success",
         });
         router.replace(loginRedirectTarget());
@@ -84,15 +86,15 @@ export default function LoginPage() {
         const expired = code === "AUTH_ACCOUNT_EXPIRED";
         const description = code
           ? friendlyError(code, result.message)
-          : result.message || "用户名或密码错误";
-        let title = "登录失败";
+          : result.message || t("auth.login.invalidCredentials");
+        let title = t("auth.login.failed");
         let body = description;
         if (disabled) {
-          title = "账户已被禁用";
-          body = "请联系管理员处理";
+          title = t("auth.login.accountDisabled");
+          body = t("auth.login.contactAdmin");
         } else if (expired) {
-          title = "账号有效期已到期";
-          body = "请使用续期码续费后再登录";
+          title = t("auth.login.accountExpired");
+          body = t("auth.login.renewBeforeLogin");
         }
         toast({
           title,
@@ -102,8 +104,8 @@ export default function LoginPage() {
       }
     } catch (error) {
       toast({
-        title: "登录失败",
-        description: "请检查网络连接",
+        title: t("auth.login.failed"),
+        description: t("common.checkNetwork"),
         variant: "destructive",
       });
     } finally {
@@ -126,10 +128,10 @@ export default function LoginPage() {
             </div>
 
             <CardTitle className="text-2xl font-semibold tracking-tight">
-              进入 {systemInfo?.name || SITE_NAME}
+              {t("auth.login.title", { site: systemInfo?.name || SITE_NAME })}
             </CardTitle>
             <CardDescription className="text-sm">
-              访问你的媒体控制台
+              {t("auth.login.description")}
             </CardDescription>
           </CardHeader>
 
@@ -138,7 +140,7 @@ export default function LoginPage() {
               <div className="mb-5 rounded-xl border border-border/70 bg-muted/40 px-4 py-3 text-sm">
                 <div className="mb-2 flex items-center gap-2 font-medium">
                   <Send className="h-4 w-4 text-primary" />
-                  Telegram 社群
+                  {t("auth.login.telegramCommunity")}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {telegramLinks.map((item) => (
@@ -157,7 +159,7 @@ export default function LoginPage() {
             )}
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-2">
-                <Label htmlFor="username" className="ml-1">用户名</Label>
+                <Label htmlFor="username" className="ml-1">{t("common.username")}</Label>
                 <Input
                   id="username"
                   placeholder="Username"
@@ -168,7 +170,7 @@ export default function LoginPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="password" className="ml-1">密码</Label>
+                <Label htmlFor="password" className="ml-1">{t("common.password")}</Label>
                 <div className="relative">
                   <Input
                     id="password"
@@ -182,6 +184,7 @@ export default function LoginPage() {
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    aria-label={t("common.showPassword")}
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -199,24 +202,24 @@ export default function LoginPage() {
                   ) : (
                     <ArrowRight className="mr-2 h-5 w-5" />
                   )}
-                  立即登入
+                  {t("auth.login.submit")}
                 </Button>
               </div>
             </form>
  
             <div className="mt-5 text-center text-sm">
               <Link href="/forgot-password" className="font-medium text-primary hover:underline">
-                忘记密码？使用 Emby 账号验证找回
+                {t("auth.login.forgotPassword")}
               </Link>
             </div>
 
             <div className="mt-5 flex items-center justify-center gap-2 text-sm">
-              <span className="text-muted-foreground">还没有账号？</span>
+              <span className="text-muted-foreground">{t("auth.login.noAccount")}</span>
               <Link
                 href="/register"
                 className="font-medium text-primary hover:underline"
               >
-                创建新账户
+                {t("auth.login.createAccount")}
               </Link>
             </div>
           </CardContent>

@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/rand"
+	"errors"
 	"math/big"
 	"net/http"
 	"sort"
@@ -16,6 +17,15 @@ import (
 // 从 handlers.go 拆出，让"签到 + 连签奖励"这条业务线独立成文件，
 // 避免 handlers.go 持续往 3000+ 行膨胀。
 // 拆分原则：仅做「按业务域归位」，不修改任何对外行为；现有 router/路由表不变。
+
+const (
+	signinDefaultCurrencyName        = "积分"
+	signinRenewalDisabledMessage     = "积分续期功能未开启"
+	signinRenewalPermanentMessage    = "永久账号无需续期"
+	signinRenewalInsufficientMessage = "积分不足，无法续期"
+	signinRenewalUnavailableMessage  = "当前账号无需或无法使用积分续期"
+	signinRenewalSuccessMessage      = "续期成功"
+)
 
 func (a *App) handleSigninConfig(w http.ResponseWriter, r *http.Request, _ Params) {
 	ok(w, "OK", signinConfigPayload(*a.cfg()))
@@ -89,9 +99,58 @@ func (a *App) handleSigninHistory(w http.ResponseWriter, r *http.Request, _ Para
 	ok(w, "OK", map[string]any{"records": items, "currency_name": signinCurrencyName(*a.cfg())})
 }
 
+func (a *App) handleSigninRenew(w http.ResponseWriter, r *http.Request, _ Params) {
+	cfg := *a.cfg()
+	if !cfg.SigninEnabled {
+		failWithCode(w, http.StatusForbidden, ErrSigninDisabled, "签到功能未开启")
+		return
+	}
+	if !signinRenewalEnabled(cfg) {
+		failWithCode(w, http.StatusForbidden, ErrSigninRenewalDisabled, signinRenewalDisabledMessage)
+		return
+	}
+	p := current(r)
+	if a.requireNonEmbyAdmin(w, r, p.User) {
+		return
+	}
+	if expiryIsPermanent(p.User.ExpiredAt) {
+		failWithCode(w, http.StatusConflict, ErrConflict, signinRenewalPermanentMessage)
+		return
+	}
+	cost := cfg.SigninRenewalCost
+	days := cfg.SigninRenewalDays
+	u, si, err := a.store().SpendSigninPointsAndUpdateUser(p.User.UID, cost, func(u *store.User) error {
+		if expiryIsPermanent(u.ExpiredAt) {
+			return store.ErrConflict
+		}
+		renewExpiryAndReactivate(u, addDaysToExpiry(u.ExpiredAt, days, time.Now()))
+		return nil
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrInsufficientPoints):
+			failWithCode(w, http.StatusConflict, ErrSigninInsufficientPoints, signinRenewalInsufficientMessage)
+		case errors.Is(err, store.ErrConflict):
+			failWithCode(w, http.StatusConflict, ErrConflict, signinRenewalUnavailableMessage)
+		default:
+			statusFromError(w, err)
+		}
+		return
+	}
+	ok(w, signinRenewalSuccessMessage, map[string]any{
+		"currency_name":    signinCurrencyName(cfg),
+		"spent_points":     cost,
+		"remaining_points": si.Points,
+		"renewal":          signinRenewalPayload(cfg, si.Points),
+		"expire_status":    expireStatus(u.ExpiredAt),
+		"expired_at":       publicExpiryUnix(u.ExpiredAt),
+		"user":             publicUser(u),
+	})
+}
+
 func signinCurrencyName(cfg config.Config) string {
 	if strings.TrimSpace(cfg.SigninCurrencyName) == "" {
-		return "积分"
+		return signinDefaultCurrencyName
 	}
 	return strings.TrimSpace(cfg.SigninCurrencyName)
 }
@@ -105,6 +164,7 @@ func signinConfigPayload(cfg config.Config) map[string]any {
 		"streak_bonus_enabled": cfg.SigninStreakBonusEnabled,
 		"bonus_table":          signinBonusTable(cfg),
 		"reset_after_miss":     cfg.SigninResetAfterMiss,
+		"renewal":              signinRenewalPayload(cfg, 0),
 	}
 }
 
@@ -131,6 +191,7 @@ func signinSummaryPayload(cfg config.Config, si store.Signin) map[string]any {
 		"today_signed":       si.LastSignin == today,
 		"next_bonus_in_days": nextBonusInDays,
 		"next_bonus_points":  nextBonusPoints,
+		"renewal":            signinRenewalPayload(cfg, si.Points),
 	}
 }
 
@@ -158,6 +219,28 @@ func signinDailyMax(cfg config.Config) int {
 		return min
 	}
 	return cfg.SigninDailyMax
+}
+
+func signinRenewalEnabled(cfg config.Config) bool {
+	return cfg.SigninRenewalEnabled && cfg.SigninRenewalCost > 0 && cfg.SigninRenewalDays > 0
+}
+
+func signinRenewalPayload(cfg config.Config, points int) map[string]any {
+	cost := cfg.SigninRenewalCost
+	if cost < 0 {
+		cost = 0
+	}
+	days := cfg.SigninRenewalDays
+	if days < 0 {
+		days = 0
+	}
+	enabled := signinRenewalEnabled(cfg)
+	return map[string]any{
+		"enabled":    enabled,
+		"cost":       cost,
+		"days":       days,
+		"affordable": enabled && points >= cost,
+	}
 }
 
 // signinDailyPoints 用 crypto/rand 生成 [min, max] 区间内的整数。

@@ -1702,6 +1702,27 @@ func (s *Store) UpdateUser(uid int64, fn func(*User) error) (User, error) {
 	return updated, nil
 }
 
+func (s *Store) ClearUserEmails() (total int, cleared int, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	err = s.mutateAndSaveLocked(func() error {
+		total = len(s.state.Users)
+		for uid, u := range s.state.Users {
+			if u.Email == "" {
+				continue
+			}
+			u.Email = ""
+			s.state.Users[uid] = u
+			cleared++
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	return total, cleared, nil
+}
+
 // LockEmbyGrantForBoundUsers sets EmbyGrantLocked=true for bound users in one
 // store write. Users without Emby are returned as skipped instead of being
 // treated as failures so bulk UI actions can safely target broad filters.
@@ -3200,11 +3221,12 @@ func (s *Store) ResetTelegramBotOffset() error {
 }
 
 var (
-	ErrNotFound    = errors.New("not found")
-	ErrConflict    = errors.New("conflict")
-	ErrExpired     = errors.New("expired")
-	ErrLastAdmin   = errors.New("last admin")
-	ErrGrantLocked = errors.New("emby grant locked")
+	ErrNotFound           = errors.New("not found")
+	ErrConflict           = errors.New("conflict")
+	ErrExpired            = errors.New("expired")
+	ErrLastAdmin          = errors.New("last admin")
+	ErrGrantLocked        = errors.New("emby grant locked")
+	ErrInsufficientPoints = errors.New("insufficient points")
 )
 
 func randomKey(prefix string, id, now int64) string {

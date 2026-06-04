@@ -4,6 +4,7 @@ import { GeistMono } from "geist/font/mono";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/toaster";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
+import { LocaleProvider } from "@/lib/i18n";
 import {
   SITE_DESCRIPTION,
   SITE_ICON,
@@ -51,7 +52,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN" suppressHydrationWarning>
+    <html lang="zh-Hans" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
       </head>
@@ -65,10 +66,12 @@ export default function RootLayout({
           themes={["light", "dark"]}
           disableTransitionOnChange={false}
         >
-          <ConfirmDialogProvider>
-            {children}
-            <Toaster />
-          </ConfirmDialogProvider>
+          <LocaleProvider>
+            <ConfirmDialogProvider>
+              {children}
+              <Toaster />
+            </ConfirmDialogProvider>
+          </LocaleProvider>
         </ThemeProvider>
       </body>
     </html>

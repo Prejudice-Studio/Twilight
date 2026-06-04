@@ -45,10 +45,12 @@ import { PageError } from "@/components/layout/page-state";
 import { api, type MediaRequest } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import { mediaRequestExternalUrl } from "@/lib/media-external-url";
+import { useI18n } from "@/lib/i18n";
 
 export default function AdminRequestsPage() {
   const { toast } = useToast();
   const { confirm } = useConfirm();
+  const { t } = useI18n();
   const [requests, setRequests] = useState<MediaRequest[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -102,7 +104,7 @@ export default function AdminRequestsPage() {
   const handleAction = async () => {
     if (!selectedRequest) return;
     if (!selectedRequest.require_key) {
-      toast({ title: "该请求缺少 require_key，无法操作", variant: "destructive" });
+      toast({ title: t("adminRequests.missingRequireKey"), variant: "destructive" });
       return;
     }
 
@@ -112,7 +114,7 @@ export default function AdminRequestsPage() {
 
       if (res.success) {
         toast({
-          title: "操作成功",
+          title: t("common.operationSuccess"),
           variant: "success",
         });
         setActionOpen(false);
@@ -121,10 +123,10 @@ export default function AdminRequestsPage() {
         invalidateRequestsCache();
         loadRequests();
       } else {
-        toast({ title: "操作失败", description: res.message, variant: "destructive" });
+        toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "操作失败", description: error.message, variant: "destructive" });
+      toast({ title: t("common.operationFailed"), description: error.message, variant: "destructive" });
     } finally {
       setIsActioning(false);
     }
@@ -132,28 +134,28 @@ export default function AdminRequestsPage() {
 
   const handleDelete = async (requireKey: string) => {
     if (!requireKey) {
-      toast({ title: "缺少 require_key，无法删除", variant: "destructive" });
+      toast({ title: t("media.missingRequireKey"), variant: "destructive" });
       return;
     }
     const ok = await confirm({
-      title: "删除求片请求？",
-      description: "该操作不可恢复。",
+      title: t("media.deleteConfirmTitle"),
+      description: t("media.irreversible"),
       tone: "danger",
-      confirmLabel: "删除",
+      confirmLabel: t("common.delete"),
     });
     if (!ok) return;
 
     try {
       const res = await api.deleteMediaRequest(requireKey);
       if (res.success) {
-        toast({ title: "删除成功", variant: "success" });
+        toast({ title: t("media.deleteSuccess"), variant: "success" });
         invalidateRequestsCache();
         loadRequests();
       } else {
-        toast({ title: "删除失败", description: res.message, variant: "destructive" });
+        toast({ title: t("common.deleteFailed"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "删除失败", description: error.message, variant: "destructive" });
+      toast({ title: t("common.deleteFailed"), description: error.message, variant: "destructive" });
     }
   };
 
@@ -170,35 +172,35 @@ export default function AdminRequestsPage() {
         return (
           <Badge variant="warning">
             <Clock className="mr-1 h-3 w-3" />
-            待处理
+            {t("media.statusUnhandled")}
           </Badge>
         );
       case "accepted":
         return (
           <Badge variant="success">
             <Check className="mr-1 h-3 w-3" />
-            已接受
+            {t("media.statusAccepted")}
           </Badge>
         );
       case "rejected":
         return (
           <Badge variant="destructive">
             <X className="mr-1 h-3 w-3" />
-            已拒绝
+            {t("media.statusRejected")}
           </Badge>
         );
       case "downloading":
         return (
           <Badge variant="gradient">
             <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-            下载中
+            {t("media.statusDownloading")}
           </Badge>
         );
       case "completed":
         return (
           <Badge variant="success">
             <Check className="mr-1 h-3 w-3" />
-            已完成
+            {t("media.statusCompleted")}
           </Badge>
         );
       default:
@@ -216,23 +218,23 @@ export default function AdminRequestsPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold sm:text-3xl">求片审核</h1>
-          <p className="text-sm text-muted-foreground">处理用户的媒体请求</p>
+          <h1 className="text-2xl font-bold sm:text-3xl">{t("adminRequests.title")}</h1>
+          <p className="text-sm text-muted-foreground">{t("adminRequests.description")}</p>
         </div>
         <Badge variant="outline" className="self-start px-3 py-1.5 text-sm sm:self-auto sm:px-4 sm:py-2 sm:text-lg">
-          共 {total} 条请求
+          {t("adminReview.totalRequests", { count: total })}
         </Badge>
       </div>
 
       {/* Status Filter */}
       <Tabs value={status} onValueChange={(v) => { setStatus(v); setPage(1); }}>
         <TabsList className="flex w-full overflow-x-auto sm:inline-flex sm:w-auto">
-          <TabsTrigger value="pending">待处理</TabsTrigger>
-          <TabsTrigger value="accepted">已接受</TabsTrigger>
-          <TabsTrigger value="downloading">下载中</TabsTrigger>
-          <TabsTrigger value="rejected">已拒绝</TabsTrigger>
-          <TabsTrigger value="completed">已完成</TabsTrigger>
-          <TabsTrigger value="all">全部</TabsTrigger>
+          <TabsTrigger value="pending">{t("media.statusUnhandled")}</TabsTrigger>
+          <TabsTrigger value="accepted">{t("media.statusAccepted")}</TabsTrigger>
+          <TabsTrigger value="downloading">{t("media.statusDownloading")}</TabsTrigger>
+          <TabsTrigger value="rejected">{t("media.statusRejected")}</TabsTrigger>
+          <TabsTrigger value="completed">{t("media.statusCompleted")}</TabsTrigger>
+          <TabsTrigger value="all">{t("adminReview.all")}</TabsTrigger>
         </TabsList>
       </Tabs>
 
@@ -245,7 +247,7 @@ export default function AdminRequestsPage() {
             </div>
           ) : requests.length === 0 ? (
             <div className="flex h-64 items-center justify-center text-muted-foreground">
-              暂无{status === "pending" ? "待处理的" : ""}请求
+              {t("adminReview.emptyRequests", { pending: status === "pending" ? t("adminReview.pendingPrefix") : "" })}
             </div>
           ) : (
             <div className="divide-y">
@@ -281,7 +283,7 @@ export default function AdminRequestsPage() {
                               target="_blank"
                               rel="noopener noreferrer"
                               className="break-words font-medium underline decoration-dotted underline-offset-2 hover:text-primary inline-flex items-center gap-1"
-                              title={`在 ${request.source.toUpperCase()} 上查看`}
+                              title={t("media.viewOnSource", { source: request.source.toUpperCase() })}
                             >
                               {title}
                               <ExternalLink className="h-3 w-3 shrink-0 opacity-70" />
@@ -290,7 +292,7 @@ export default function AdminRequestsPage() {
                         })()}
                         {request.media_info?.season && (
                           <Badge variant="outline" className="text-xs">
-                            第 {request.media_info.season} 季
+                            {t("media.season", { season: request.media_info.season })}
                           </Badge>
                         )}
                         {request.media_info?.vote_average && (
@@ -340,7 +342,7 @@ export default function AdminRequestsPage() {
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="inline-flex items-center gap-1 hover:opacity-80"
-                                title={`在 ${request.source.toUpperCase()} 上查看`}
+                                title={t("media.viewOnSource", { source: request.source.toUpperCase() })}
                               >
                                 {inner}
                               </a>
@@ -348,7 +350,7 @@ export default function AdminRequestsPage() {
                           })()}
                         </div>
                         <span className="hidden sm:inline">•</span>
-                        <span className="flex items-center gap-0.5" title={`内部 ID（${request.source}）`}>
+                        <span className="flex items-center gap-0.5" title={t("adminRequests.internalId", { source: request.source })}>
                           <Hash className="h-3 w-3" />{request.id}
                         </span>
                         {request.media_id !== undefined && request.media_id !== null && request.media_id !== "" && (
@@ -360,7 +362,7 @@ export default function AdminRequestsPage() {
                           </>
                         )}
                         <span className="hidden sm:inline">•</span>
-                        <span className="flex min-w-0 items-center gap-0.5" title="External Update Key（点击复制）">
+                        <span className="flex min-w-0 items-center gap-0.5" title={t("media.externalKeyTitle")}>
                           <Fingerprint className="h-3 w-3 shrink-0" />
                           <code className="max-w-[10rem] truncate rounded bg-muted px-1 text-foreground sm:max-w-[16rem]">
                             {request.require_key}
@@ -370,11 +372,11 @@ export default function AdminRequestsPage() {
                             size="icon"
                             variant="ghost"
                             className="h-5 w-5 text-muted-foreground hover:text-foreground"
-                            title="复制 Key"
+                            title={t("media.copyKey")}
                             onClick={() => {
                               navigator.clipboard.writeText(request.require_key).then(
-                                () => toast({ title: "已复制 Key 到剪贴板", variant: "success" }),
-                                () => toast({ title: "复制失败", variant: "destructive" }),
+                                () => toast({ title: t("adminRequests.keyCopied"), variant: "success" }),
+                                () => toast({ title: t("common.copyFailed"), variant: "destructive" }),
                               );
                             }}
                           >
@@ -382,13 +384,13 @@ export default function AdminRequestsPage() {
                           </Button>
                         </span>
                         <span className="hidden sm:inline">•</span>
-                        <span>{request.media_info?.media_type === "movie" ? "电影" : "剧集"}</span>
+                        <span>{request.media_info?.media_type === "movie" ? t("media.movie") : t("media.tv")}</span>
                         <span className="hidden sm:inline">•</span>
                         <span>{formatDate(request.timestamp)}</span>
                         {request.user && (
                           <>
                             <span className="hidden sm:inline">•</span>
-                            <span className="truncate">用户: {request.user.username || request.user.telegram_id}</span>
+                            <span className="truncate">{t("adminRequests.user", { username: request.user.username || request.user.telegram_id })}</span>
                           </>
                         )}
                       </div>
@@ -405,7 +407,7 @@ export default function AdminRequestsPage() {
                       )}
                       {request.admin_note && (
                         <p className="mt-1 break-words text-xs text-primary">
-                          管理员备注: {request.admin_note}
+                          {t("adminRequests.adminNote", { note: request.admin_note })}
                         </p>
                       )}
                     </div>
@@ -417,14 +419,14 @@ export default function AdminRequestsPage() {
                       variant="outline"
                       onClick={() => openActionDialog(request)}
                     >
-                      处理
+                      {t("adminRequests.handle")}
                     </Button>
                     <Button
                       size="icon"
                       variant="ghost"
                       className="h-8 w-8 text-muted-foreground hover:text-destructive dark:hover:bg-destructive/15"
                       onClick={() => handleDelete(request.require_key)}
-                      title="删除请求"
+                      title={t("adminRequests.deleteRequest")}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -447,7 +449,7 @@ export default function AdminRequestsPage() {
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <span className="text-sm">
-            第 {page} 页，共 {pages} 页
+            {t("adminRequests.pageStatus", { page, pages })}
           </span>
           <Button
             variant="outline"
@@ -464,34 +466,34 @@ export default function AdminRequestsPage() {
       <Dialog open={actionOpen} onOpenChange={setActionOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>处理媒体请求</DialogTitle>
+            <DialogTitle>{t("adminRequests.dialogTitle")}</DialogTitle>
             <DialogDescription>
-              ID: {selectedRequest?.id} | 媒体 ID: {selectedRequest?.media_id}
+              {t("adminRequests.dialogDescription", { id: selectedRequest?.id, mediaId: selectedRequest?.media_id })}
               <br />
               {selectedRequest?.media_info?.title}
-              {selectedRequest?.media_info?.season && ` - 第 ${selectedRequest.media_info.season} 季`}
+              {selectedRequest?.media_info?.season && ` - ${t("media.season", { season: selectedRequest.media_info.season })}`}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>修改状态</Label>
+              <Label>{t("adminRequests.changeStatus")}</Label>
               <Select value={selectedStatus} onValueChange={setSelectedStatus}>
                 <SelectTrigger>
-                  <SelectValue placeholder="选择状态" />
+                  <SelectValue placeholder={t("adminRequests.selectStatus")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="pending">待处理</SelectItem>
-                  <SelectItem value="accepted">已接受</SelectItem>
-                  <SelectItem value="downloading">下载中</SelectItem>
-                  <SelectItem value="rejected">已拒绝</SelectItem>
-                  <SelectItem value="completed">已完成</SelectItem>
+                  <SelectItem value="pending">{t("media.statusUnhandled")}</SelectItem>
+                  <SelectItem value="accepted">{t("media.statusAccepted")}</SelectItem>
+                  <SelectItem value="downloading">{t("media.statusDownloading")}</SelectItem>
+                  <SelectItem value="rejected">{t("media.statusRejected")}</SelectItem>
+                  <SelectItem value="completed">{t("media.statusCompleted")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>管理员备注（可选）</Label>
+              <Label>{t("adminReview.adminNoteOptional")}</Label>
               <Input
-                placeholder="在此输入备注信息..."
+                placeholder={t("adminRequests.notePlaceholder")}
                 value={adminNote}
                 onChange={(e) => setAdminNote(e.target.value)}
               />
@@ -499,14 +501,14 @@ export default function AdminRequestsPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setActionOpen(false)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleAction}
               disabled={isActioning}
             >
               {isActioning && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              确认保存
+              {t("adminRequests.confirmSave")}
             </Button>
           </DialogFooter>
         </DialogContent>

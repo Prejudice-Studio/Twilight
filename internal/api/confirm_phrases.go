@@ -8,6 +8,7 @@ const (
 	confirmBatchLockEmbyUnbind = "BATCH_LOCK_EMBY_UNBIND"
 	confirmBatchDeleteRegcodes = "BATCH_DELETE_REGCODES"
 	confirmCleanupInvalidUsers = "CLEANUP_INVALID_USERS"
+	confirmClearAllEmails      = "CLEAR_ALL_EMAILS"
 	confirmClearViolations     = "CLEAR_VIOLATIONS"
 	confirmClearRegcodeUsage   = "CLEAR_REGCODE_USAGE"
 )

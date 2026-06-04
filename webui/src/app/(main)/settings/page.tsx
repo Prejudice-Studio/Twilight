@@ -32,6 +32,13 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -45,6 +52,7 @@ import { PageError, PageLoading } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
 import { api, type UserSettings, type TelegramStatus, type EmbyStatus } from "@/lib/api";
+import { localeLabels, supportedLocales, useI18n, type Locale } from "@/lib/i18n";
 import { passwordStrengthLabel, validatePasswordStrength } from "@/lib/password";
 import { telegramBotUrl } from "@/lib/safe-url";
 
@@ -60,6 +68,7 @@ const item = {
 
 export default function SettingsPage() {
   const { toast } = useToast();
+  const { locale, setLocale, t } = useI18n();
   const { user, fetchUser } = useAuthStore();
   const { info: systemInfo, fetchInfo: fetchSystemInfo } = useSystemStore();
   const [settings, setSettings] = useState<UserSettings | null>(null);
@@ -170,11 +179,11 @@ export default function SettingsPage() {
 
   const renderLatencyText = (key: string) => {
     const info = lineLatencyMap[key];
-    if (!info || info.status === "idle") return "待测速";
-    if (info.status === "testing") return "测速中...";
+    if (!info || info.status === "idle") return t("settings.latencyIdle");
+    if (info.status === "testing") return t("settings.latencyTesting");
     if (info.status === "ok") return `${info.latencyMs} ms`;
-    if (info.status === "timeout") return "超时";
-    return "不可达";
+    if (info.status === "timeout") return t("settings.latencyTimeout");
+    return t("settings.latencyUnreachable");
   };
 
   const renderLatencyClassName = (key: string) => {
@@ -274,11 +283,11 @@ export default function SettingsPage() {
   const handleSaveBgmSettings = async () => {
     const nextBgmToken = bgmToken.trim();
     if (!bangumiSyncEnabled) {
-      toast({ title: "功能未启用", description: "管理员尚未开启 Bangumi 点格子", variant: "destructive" });
+      toast({ title: t("settings.bangumiDisabledTitle"), description: t("settings.bangumiDisabledDescription"), variant: "destructive" });
       return;
     }
     if (bgmMode && !nextBgmToken && !bgmTokenSet) {
-      toast({ title: "请输入 Bangumi Token", description: "启用 BGM 同步前需要填写个人 Token", variant: "destructive" });
+      toast({ title: t("settings.bangumiTokenRequiredTitle"), description: t("settings.bangumiTokenRequiredDescription"), variant: "destructive" });
       return;
     }
 
@@ -294,12 +303,12 @@ export default function SettingsPage() {
         setBgmToken("");
         setBgmTokenSet(nextTokenSet);
         setSettings((prev) => prev ? { ...prev, bgm_mode: bgmMode, bgm_token_set: nextTokenSet } : prev);
-        toast({ title: "保存成功", description: "Bangumi 同步设置已更新", variant: "success" });
+        toast({ title: t("adminConfig.saveSuccessTitle"), description: t("settings.bangumiSavedDescription"), variant: "success" });
       } else {
-        toast({ title: "保存失败", description: res.message, variant: "destructive" });
+        toast({ title: t("adminConfig.saveFailureTitle"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "保存失败", description: error.message, variant: "destructive" });
+      toast({ title: t("adminConfig.saveFailureTitle"), description: error.message, variant: "destructive" });
     } finally {
       setIsBgmLoading(false);
     }
@@ -320,12 +329,12 @@ export default function SettingsPage() {
         setBgmToken("");
         setBgmTokenSet(false);
         setSettings((prev) => prev ? { ...prev, bgm_mode: false, bgm_token_set: false } : prev);
-        toast({ title: "已清除", description: "Bangumi Token 已移除，同步已关闭", variant: "success" });
+        toast({ title: t("settings.bangumiClearedTitle"), description: t("settings.bangumiClearedDescription"), variant: "success" });
       } else {
-        toast({ title: "清除失败", description: res.message, variant: "destructive" });
+        toast({ title: t("settings.clearFailed"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "清除失败", description: error.message, variant: "destructive" });
+      toast({ title: t("settings.clearFailed"), description: error.message, variant: "destructive" });
     } finally {
       setIsBgmLoading(false);
     }
@@ -339,15 +348,15 @@ export default function SettingsPage() {
         setBindCode(res.data.bind_code);
         setBindCodeExpiry(res.data.expires_in);
         toast({
-          title: "绑定码已生成",
-          description: `请在 ${Math.floor(res.data.expires_in / 60)} 分钟内向 Bot 发送 /bind ${res.data.bind_code}`,
+          title: t("settings.bindCodeGenerated"),
+          description: t("settings.bindCodeToastDescription", { minutes: Math.floor(res.data.expires_in / 60), code: res.data.bind_code }),
           variant: "success",
         });
       } else {
-        toast({ title: "获取绑定码失败", description: res.message, variant: "destructive" });
+        toast({ title: t("settings.getBindCodeFailed"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "获取绑定码失败", description: error.message, variant: "destructive" });
+      toast({ title: t("settings.getBindCodeFailed"), description: error.message, variant: "destructive" });
     } finally {
       setIsTgLoading(false);
     }
@@ -355,22 +364,22 @@ export default function SettingsPage() {
 
   const handleRequestTelegramRebind = async () => {
     if (rebindReason.length > 500) {
-      toast({ title: "备注过长", description: "最多 500 字符", variant: "destructive" });
+      toast({ title: t("settings.noteTooLong"), description: t("settings.max500Chars"), variant: "destructive" });
       return;
     }
     setIsRebindLoading(true);
     try {
       const res = await api.requestTelegramRebind(rebindReason.trim() || undefined);
       if (res.success) {
-        toast({ title: "换绑请求已提交", description: res.message, variant: "success" });
+        toast({ title: t("settings.rebindSubmitSuccess"), description: res.message, variant: "success" });
         setRebindDialogOpen(false);
         setRebindReason("");
         loadData();
       } else {
-        toast({ title: "换绑请求提交失败", description: res.message, variant: "destructive" });
+        toast({ title: t("settings.rebindSubmitFailed"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "换绑请求提交失败", description: error.message, variant: "destructive" });
+      toast({ title: t("settings.rebindSubmitFailed"), description: error.message, variant: "destructive" });
     } finally {
       setIsRebindLoading(false);
     }
@@ -381,15 +390,15 @@ export default function SettingsPage() {
     try {
       const res = await api.unbindTelegram();
       if (res.success) {
-        toast({ title: "解绑成功", variant: "success" });
+        toast({ title: t("settings.unbindSuccess"), variant: "success" });
         setBindCode(null);
         loadData();
         fetchUser();
       } else {
-        toast({ title: "解绑失败", description: res.message, variant: "destructive" });
+        toast({ title: t("settings.unbindFailed"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "解绑失败", description: error.message, variant: "destructive" });
+      toast({ title: t("settings.unbindFailed"), description: error.message, variant: "destructive" });
     } finally {
       setIsTgLoading(false);
     }
@@ -401,7 +410,7 @@ export default function SettingsPage() {
     const password = embyPassword;
 
     if (!username) {
-      toast({ title: "请输入 Emby 用户名", variant: "destructive" });
+      toast({ title: t("settings.embyUsernameRequired"), variant: "destructive" });
       return;
     }
 
@@ -411,7 +420,7 @@ export default function SettingsPage() {
         ? await api.completeEmbyRegistration(username, password)
         : await api.bindEmbyAccount(username, password);
       if (res.success) {
-        toast({ title: completePendingEmby ? "Emby 账号已开通" : "绑定成功", variant: "success" });
+        toast({ title: completePendingEmby ? t("settings.embyOpenedTitle") : t("settings.bindSuccess"), variant: "success" });
         setBindEmbyOpen(false);
         setCompletePendingEmby(false);
         setEmbyUsername("");
@@ -420,11 +429,11 @@ export default function SettingsPage() {
         await fetchUser();
         await loadEmbyUrls();
       } else {
-        toast({ title: completePendingEmby ? "开通失败" : "绑定失败", description: res.message, variant: "destructive" });
+        toast({ title: completePendingEmby ? t("settings.openFailed") : t("settings.bindFailed"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      console.error("绑定失败:", error);
-      toast({ title: completePendingEmby ? "开通失败" : "绑定失败", description: error.message, variant: "destructive" });
+      console.error("bind failed:", error);
+      toast({ title: completePendingEmby ? t("settings.openFailed") : t("settings.bindFailed"), description: error.message, variant: "destructive" });
     } finally {
       setIsEmbyLoading(false);
     }
@@ -436,18 +445,18 @@ export default function SettingsPage() {
       const res = await api.unbindEmbyAccount();
       if (res.success) {
         toast({
-          title: "解绑成功",
-          description: res.data?.remote_emby_disabled ? "远端 Emby 账号已禁用，并已解除本地绑定" : "远端不存在或无需禁用，已解除本地绑定",
+          title: t("settings.unbindSuccess"),
+          description: res.data?.remote_emby_disabled ? t("settings.remoteEmbyDisabledUnbound") : t("settings.remoteEmbyNotFoundUnbound"),
           variant: "success",
         });
         await loadData();
         await fetchUser();
         await loadEmbyUrls();
       } else {
-        toast({ title: "解绑失败", description: res.message, variant: "destructive" });
+        toast({ title: t("settings.unbindFailed"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "解绑失败", description: error.message, variant: "destructive" });
+      toast({ title: t("settings.unbindFailed"), description: error.message, variant: "destructive" });
     } finally {
       setIsEmbyLoading(false);
     }
@@ -455,7 +464,7 @@ export default function SettingsPage() {
 
   const handleUpdateEmail = async () => {
     if (!emailValue) {
-      toast({ title: "请输入邮箱地址", variant: "destructive" });
+      toast({ title: t("settings.emailRequired"), variant: "destructive" });
       return;
     }
 
@@ -463,14 +472,14 @@ export default function SettingsPage() {
     try {
       const res = await api.updateMe({ email: emailValue });
       if (res.success) {
-        toast({ title: "邮箱更新成功", variant: "success" });
+        toast({ title: t("settings.emailUpdated"), variant: "success" });
         setEditEmailOpen(false);
         fetchUser();
       } else {
-        toast({ title: "更新失败", description: res.message, variant: "destructive" });
+        toast({ title: t("common.updateFailed"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "更新失败", description: error.message, variant: "destructive" });
+      toast({ title: t("common.updateFailed"), description: error.message, variant: "destructive" });
     } finally {
       setIsEmailLoading(false);
     }
@@ -478,16 +487,16 @@ export default function SettingsPage() {
 
   const handleChangeSystemPassword = async () => {
     if (!oldPassword || !newPassword) {
-      toast({ title: "请填写当前密码和新密码", variant: "destructive" });
+      toast({ title: t("settings.passwordFieldsRequired"), variant: "destructive" });
       return;
     }
     const strength = validatePasswordStrength(newPassword);
     if (!strength.ok) {
-      toast({ title: "密码强度不足", description: strength.message, variant: "destructive" });
+      toast({ title: t("settings.passwordWeak"), description: strength.message, variant: "destructive" });
       return;
     }
     if (newPassword !== confirmPassword) {
-      toast({ title: "两次输入的新密码不一致", variant: "destructive" });
+      toast({ title: t("settings.passwordMismatch"), variant: "destructive" });
       return;
     }
 
@@ -495,16 +504,16 @@ export default function SettingsPage() {
     try {
       const res = await api.changeSystemPassword(oldPassword, newPassword);
       if (res.success) {
-        toast({ title: "系统密码修改成功", description: "仅系统登录密码已更新", variant: "success" });
+        toast({ title: t("settings.systemPasswordUpdated"), description: t("settings.systemPasswordUpdatedDescription"), variant: "success" });
         setChangeSystemPwdOpen(false);
         setOldPassword("");
         setNewPassword("");
         setConfirmPassword("");
       } else {
-        toast({ title: "修改失败", description: res.message, variant: "destructive" });
+        toast({ title: t("common.modifyFailed"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "修改失败", description: error.message, variant: "destructive" });
+      toast({ title: t("common.modifyFailed"), description: error.message, variant: "destructive" });
     } finally {
       setIsSystemPwdLoading(false);
     }
@@ -512,16 +521,16 @@ export default function SettingsPage() {
 
   const handleChangeEmbyPassword = async () => {
     if (!newEmbyPassword) {
-      toast({ title: "请填写新的 Emby 密码", variant: "destructive" });
+      toast({ title: t("settings.embyPasswordRequired"), variant: "destructive" });
       return;
     }
     const strength = validatePasswordStrength(newEmbyPassword);
     if (!strength.ok) {
-      toast({ title: "密码强度不足", description: strength.message, variant: "destructive" });
+      toast({ title: t("settings.passwordWeak"), description: strength.message, variant: "destructive" });
       return;
     }
     if (newEmbyPassword !== confirmEmbyPassword) {
-      toast({ title: "两次输入的新密码不一致", variant: "destructive" });
+      toast({ title: t("settings.passwordMismatch"), variant: "destructive" });
       return;
     }
 
@@ -529,15 +538,15 @@ export default function SettingsPage() {
     try {
       const res = await api.changeEmbyPassword(newEmbyPassword);
       if (res.success) {
-        toast({ title: "Emby 密码修改成功", description: "仅 Emby 密码已更新", variant: "success" });
+        toast({ title: t("settings.embyPasswordUpdated"), description: t("settings.embyPasswordUpdatedDescription"), variant: "success" });
         setChangeEmbyPwdOpen(false);
         setNewEmbyPassword("");
         setConfirmEmbyPassword("");
       } else {
-        toast({ title: "修改失败", description: res.message, variant: "destructive" });
+        toast({ title: t("common.modifyFailed"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "修改失败", description: error.message, variant: "destructive" });
+      toast({ title: t("common.modifyFailed"), description: error.message, variant: "destructive" });
     } finally {
       setIsEmbyPwdLoading(false);
     }
@@ -546,7 +555,7 @@ export default function SettingsPage() {
   const handleCopyUrl = (url: string, key: string) => {
     navigator.clipboard.writeText(url).then(() => {
       setCopiedIndex(key);
-      toast({ title: "已复制", description: "线路地址已复制到剪贴板" });
+      toast({ title: t("common.copied"), description: t("settings.lineCopiedDescription") });
       setTimeout(() => setCopiedIndex(null), 2000);
     });
   };
@@ -569,7 +578,7 @@ export default function SettingsPage() {
   }
 
   if (isLoading) {
-    return <PageLoading message="正在加载设置..." />;
+    return <PageLoading message={t("settings.loading")} />;
   }
 
   return (
@@ -580,8 +589,8 @@ export default function SettingsPage() {
       className="space-y-6"
     >
       <div>
-        <h1 className="text-3xl font-bold">个人设置</h1>
-        <p className="text-muted-foreground">管理您的账户设置和偏好</p>
+        <h1 className="text-3xl font-bold">{t("settings.title")}</h1>
+        <p className="text-muted-foreground">{t("settings.description")}</p>
       </div>
 
       {/* 快速导航 */}
@@ -594,13 +603,43 @@ export default function SettingsPage() {
                   <Palette className="h-6 w-6 text-primary" />
                 </div>
                 <div>
-                  <h3 className="font-semibold">外观设置</h3>
-                  <p className="text-sm text-muted-foreground">背景和头像</p>
+                  <h3 className="font-semibold">{t("settings.appearanceTitle")}</h3>
+                  <p className="text-sm text-muted-foreground">{t("settings.appearanceDescription")}</p>
                 </div>
               </CardContent>
             </Card>
           </a>
         </div>
+      </motion.div>
+
+      <motion.div variants={item}>
+        <Card className="glass-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Globe className="h-5 w-5" />
+              {t("settings.localeTitle")}
+            </CardTitle>
+            <CardDescription>
+              {t("settings.localeDescription")}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <Label>{t("settings.localeLabel")}</Label>
+            <Select value={locale} onValueChange={(value) => setLocale(value as Locale)}>
+              <SelectTrigger className="w-full sm:w-[240px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {supportedLocales.map((item) => (
+                  <SelectItem key={item} value={item}>
+                    {localeLabels[item]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">{t("settings.localeHelp")}</p>
+          </CardContent>
+        </Card>
       </motion.div>
 
       {/* Account Info */}
@@ -609,13 +648,13 @@ export default function SettingsPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <User className="h-5 w-5" />
-              账户信息
+              {t("settings.accountInfo")}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <Label className="text-muted-foreground">用户名</Label>
+                <Label className="text-muted-foreground">{t("settings.username")}</Label>
                 <p className="mt-1 font-medium">{user?.username}</p>
               </div>
               <div>
@@ -623,7 +662,7 @@ export default function SettingsPage() {
                 <p className="mt-1 font-medium">{user?.uid}</p>
               </div>
               <div>
-                <Label className="text-muted-foreground">角色</Label>
+                <Label className="text-muted-foreground">{t("settings.role")}</Label>
                 <div className="mt-1">
                   <Badge variant={user?.role === 0 ? "gradient" : "secondary"}>
                     {user?.role_name}
@@ -631,9 +670,9 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div>
-                <Label className="text-muted-foreground font-medium">邮箱</Label>
+                <Label className="text-muted-foreground font-medium">{t("settings.email")}</Label>
                 <div className="mt-1 flex items-center justify-between">
-                  <p className="font-medium">{user?.email || "未设置"}</p>
+                  <p className="font-medium">{user?.email || t("settings.notSet")}</p>
                   <Button 
                     variant="outline" 
                     size="sm"
@@ -642,7 +681,7 @@ export default function SettingsPage() {
                       setEditEmailOpen(true);
                     }}
                   >
-                    修改
+                    {t("settings.edit")}
                   </Button>
                 </div>
               </div>
@@ -657,10 +696,10 @@ export default function SettingsPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <MessageCircle className="h-5 w-5" />
-              Telegram 绑定
+              {t("settings.telegramTitle")}
             </CardTitle>
             <CardDescription>
-              绑定 Telegram 账号以便接收通知和使用机器人功能
+              {t("settings.telegramDescription")}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -669,7 +708,7 @@ export default function SettingsPage() {
                 <div className="flex items-center gap-2 min-w-0">
                   <Bot className="h-4 w-4 text-primary shrink-0" />
                   <div className="min-w-0">
-                    <p className="font-medium">本站 Bot</p>
+                    <p className="font-medium">{t("settings.siteBot")}</p>
                     <a
                       href={botUrl}
                       target="_blank"
@@ -686,7 +725,7 @@ export default function SettingsPage() {
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    打开 Bot
+                    {t("settings.openBot")}
                   </a>
                 </Button>
               </div>
@@ -702,7 +741,7 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <p className="font-medium">
-                    {telegramStatus?.bound ? "已绑定" : "未绑定"}
+                    {telegramStatus?.bound ? t("settings.bound") : t("settings.unbound")}
                   </p>
                   {telegramStatus?.telegram_id && (
                     <p className="text-sm text-muted-foreground">
@@ -726,7 +765,7 @@ export default function SettingsPage() {
                     ) : (
                       <LinkIcon className="mr-2 h-4 w-4" />
                     )}
-                    获取绑定码
+                    {t("settings.getBindCode")}
                   </Button>
                 ) : (
                   <>
@@ -737,7 +776,7 @@ export default function SettingsPage() {
                         disabled={isTgLoading}
                       >
                         <Unlink className="mr-2 h-4 w-4" />
-                        解绑
+                        {t("settings.unbind")}
                       </Button>
                     )}
                     {telegramStatus.can_change && (
@@ -751,12 +790,12 @@ export default function SettingsPage() {
                         ) : (
                           <LinkIcon className="mr-2 h-4 w-4" />
                         )}
-                        提交换绑请求
+                        {t("settings.submitRebindRequest")}
                       </Button>
                     )}
                     {!telegramStatus.can_change && telegramStatus.pending_rebind_request && (
                       <Badge variant="outline" className="self-center">
-                        换绑请求已提交，等待管理员处理
+                        {t("settings.rebindSubmitted")}
                       </Badge>
                     )}
                   </>
@@ -765,12 +804,12 @@ export default function SettingsPage() {
             </div>
             {telegramStatus?.force_bind && (
               <p className="text-sm text-amber-500">
-                ⚠️ 系统要求必须绑定 Telegram，无法解绑
+                {t("settings.telegramRequired")}
               </p>
             )}
             {bindCode && !telegramStatus?.bound && (
               <div className="rounded-lg bg-blue-500/10 p-4 space-y-2">
-                <p className="font-medium text-blue-500">绑定码已生成</p>
+                <p className="font-medium text-blue-500">{t("settings.bindCodeGenerated")}</p>
                 <div className="flex flex-wrap items-center gap-2">
                   <code className="text-2xl font-mono font-bold tracking-widest bg-background/50 px-4 py-2 rounded-lg">
                     {bindCode}
@@ -780,10 +819,10 @@ export default function SettingsPage() {
                     size="sm"
                     onClick={() => {
                       navigator.clipboard.writeText(`/bind ${bindCode}`);
-                      toast({ title: "已复制到剪贴板", variant: "success" });
+                      toast({ title: t("settings.copyCommand"), variant: "success" });
                     }}
                   >
-                    复制命令
+                    {t("settings.copyCommand")}
                   </Button>
                   {botUrl && (
                     <Button asChild variant="outline" size="sm">
@@ -793,29 +832,17 @@ export default function SettingsPage() {
                         rel="noopener noreferrer"
                       >
                         <Bot className="mr-2 h-4 w-4" />
-                        打开 @{botUsername}
+                        {t("settings.openBotUsername", { username: botUsername || "" })}
                       </a>
                     </Button>
                   )}
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  请在 {Math.floor(bindCodeExpiry / 60)} 分钟内向{" "}
-                  {systemInfo?.telegram_bot?.username ? (
-                    <a
-                      href={botUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-primary hover:underline"
-                    >
-                      @{systemInfo.telegram_bot.username}
-                    </a>
-                  ) : (
-                    "Telegram Bot"
-                  )}{" "}
-                  发送：<code className="bg-background/50 px-1.5 py-0.5 rounded">/bind {bindCode}</code>
+                  {t("settings.sendBindWithin", { minutes: Math.floor(bindCodeExpiry / 60), bot: systemInfo?.telegram_bot?.username ? `@${systemInfo.telegram_bot.username}` : "Telegram Bot" })}{" "}
+                  <code className="bg-background/50 px-1.5 py-0.5 rounded">/bind {bindCode}</code>
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  绑定完成后请刷新此页面确认。
+                  {t("settings.bindRefreshHint")}
                 </p>
               </div>
             )}
@@ -829,10 +856,10 @@ export default function SettingsPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Tv className="h-5 w-5" />
-              Emby 账号绑定
+              {t("settings.embyTitle")}
             </CardTitle>
             <CardDescription>
-              绑定已有的 Emby 账号以使用媒体服务
+              {t("settings.embyDescription")}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -847,7 +874,7 @@ export default function SettingsPage() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="font-medium">
-                    {user?.emby_id ? "已绑定" : "未绑定"}
+                    {user?.emby_id ? t("settings.bound") : t("settings.unbound")}
                   </p>
                   {user?.emby_id && (
                     <p className="text-sm text-muted-foreground break-all">
@@ -856,7 +883,7 @@ export default function SettingsPage() {
                   )}
                   {user?.emby_id && (user.emby_username || user.username) && (
                     <p className="text-sm text-muted-foreground break-all">
-                      Emby 用户名: {user.emby_username || user.username}
+                      {t("settings.embyUsername", { username: user.emby_username || user.username || "" })}
                     </p>
                   )}
                 </div>
@@ -872,7 +899,7 @@ export default function SettingsPage() {
                     className="w-full sm:w-auto"
                   >
                     <LinkIcon className="mr-2 h-4 w-4" />
-                    {hasEmbyRegistrationEntitlement ? "继续开通" : "绑定"}
+                    {hasEmbyRegistrationEntitlement ? t("settings.continueSetup") : t("settings.bind")}
                   </Button>
                 ) : (
                   <Button
@@ -886,7 +913,7 @@ export default function SettingsPage() {
                     ) : (
                       <Unlink className="mr-2 h-4 w-4" />
                     )}
-                    解绑
+                    {t("settings.unbind")}
                   </Button>
                 )}
               </div>
@@ -894,18 +921,18 @@ export default function SettingsPage() {
             {!user?.emby_id && (
               <p className="text-sm text-muted-foreground">
                 {hasEmbyRegistrationEntitlement
-                  ? "你已拥有 Emby 开通资格但尚未创建账号，可点击“继续开通”完成注册。"
-                  : "如果您在 Emby 服务器中已有账号，可以在此绑定。绑定后即可使用该账号访问媒体内容。"}
+                  ? t("settings.pendingEmbyHint")
+                  : t("settings.existingEmbyHint")}
               </p>
             )}
             {user?.emby_id && !canUnbindEmby && (
               <p className="text-sm text-muted-foreground">
-                该账号的 Emby 注册资格来自注册码、邀请码或管理员授予，不能自助解绑后重复注册。
+                {t("settings.embyGrantLocked")}
               </p>
             )}
             {user?.emby_id && canUnbindEmby && (
               <p className="text-sm text-muted-foreground">
-                自助解绑会先禁用远端 Emby 账号，再解除本地绑定；如果远端禁用失败，本地绑定会保留。
+                {t("settings.embyUnbindWarning")}
               </p>
             )}
           </CardContent>
@@ -919,24 +946,24 @@ export default function SettingsPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Key className="h-5 w-5" />
-                API Key 管理
+                {t("settings.apiKeyTitle")}
               </CardTitle>
               <CardDescription>
-                管理您的API Key用于外部接口控制账号
+                {t("settings.apiKeyDescription")}
               </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex items-center justify-between rounded-lg bg-accent/50 p-4">
                 <div>
-                  <p className="font-medium">API Key 管理</p>
+                  <p className="font-medium">{t("settings.apiKeyTitle")}</p>
                   <p className="text-sm text-muted-foreground">
-                    生成、启用、禁用或刷新您的API Key
+                    {t("settings.apiKeyCardDescription")}
                   </p>
                 </div>
                 <Button asChild>
                   <a href="/settings/apikey">
                     <Key className="mr-2 h-4 w-4" />
-                    管理 API Key
+                    {t("settings.manageApiKey")}
                   </a>
                 </Button>
               </div>
@@ -951,32 +978,32 @@ export default function SettingsPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Lock className="h-5 w-5" />
-              密码管理
+              {t("settings.passwordTitle")}
             </CardTitle>
             <CardDescription>
-              分别修改系统登录密码和绑定 Emby 密码。
+              {t("settings.passwordDescription")}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-xl border border-border p-4">
-                <p className="text-sm font-medium">系统密码</p>
+                <p className="text-sm font-medium">{t("settings.systemPassword")}</p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  修改网站登录密码，不会更改 Emby 账户密码。
+                  {t("settings.systemPasswordDescription")}
                 </p>
                 <Button className="mt-4" onClick={() => setChangeSystemPwdOpen(true)}>
                   <Lock className="mr-2 h-4 w-4" />
-                  修改系统密码
+                  {t("settings.changeSystemPassword")}
                 </Button>
               </div>
               <div className="rounded-xl border border-border p-4">
-                <p className="text-sm font-medium">Emby 密码</p>
+                <p className="text-sm font-medium">{t("settings.embyPassword")}</p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  只更新当前绑定的 Emby 账号密码。
+                  {t("settings.embyPasswordDescription")}
                 </p>
                 <Button className="mt-4" onClick={() => setChangeEmbyPwdOpen(true)} disabled={!user?.emby_id}>
                   <Lock className="mr-2 h-4 w-4" />
-                  修改 Emby 密码
+                  {t("settings.changeEmbyPassword")}
                 </Button>
               </div>
             </div>
@@ -990,10 +1017,10 @@ export default function SettingsPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-destructive">
                 <AlertCircle className="h-5 w-5" />
-                Emby 已到期
+                {t("settings.embyExpiredTitle")}
               </CardTitle>
               <CardDescription>
-                系统账号仍可登录；Emby 已禁用，续期后恢复线路访问。
+                {t("settings.embyExpiredDescription")}
               </CardDescription>
             </CardHeader>
           </Card>
@@ -1004,17 +1031,17 @@ export default function SettingsPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Globe className="h-5 w-5" />
-              服务器线路
+              {t("settings.serverLinesTitle")}
             </CardTitle>
             <CardDescription>
-              选择延迟最低的线路连接 Emby，点击地址可复制
+              {t("settings.serverLinesDescription")}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex justify-end">
               <Button variant="outline" size="sm" onClick={() => void runLineLatencyTests()} disabled={isLatencyTesting}>
                 {isLatencyTesting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                重新测速
+                {t("settings.testLatencyAgain")}
               </Button>
             </div>
 
@@ -1028,12 +1055,12 @@ export default function SettingsPage() {
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold">{line.name || `线路 ${index + 1}`}</p>
+                          <p className="text-sm font-semibold">{line.name || t("settings.lineName", { index: index + 1 })}</p>
                           <p className="mt-1 break-all truncate font-mono text-xs text-muted-foreground">
                             {line.url}
                           </p>
                           <p className={`mt-1 ${renderLatencyClassName(key)}`}>
-                            延迟：{renderLatencyText(key)}
+                            {t("settings.latencyLabel", { value: renderLatencyText(key) })}
                           </p>
                         </div>
                         <Button
@@ -1054,7 +1081,7 @@ export default function SettingsPage() {
                 })}
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">暂无可用线路</p>
+              <p className="text-sm text-muted-foreground">{t("settings.noLines")}</p>
             )}
 
             {sortedWhitelistLineItems.length > 0 && (
@@ -1063,7 +1090,7 @@ export default function SettingsPage() {
                 <div>
                   <p className="mb-3 flex items-center gap-1.5 text-sm font-medium">
                     <Star className="h-4 w-4 text-yellow-500" />
-                    专属线路
+                    {t("settings.dedicatedLines")}
                   </p>
                   <div className="grid gap-3 sm:grid-cols-2">
                     {sortedWhitelistLineItems.map(({ line, index, key }) => {
@@ -1074,12 +1101,12 @@ export default function SettingsPage() {
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0 flex-1">
-                              <p className="text-sm font-semibold">{line.name || `专属线路 ${index + 1}`}</p>
+                              <p className="text-sm font-semibold">{line.name || t("settings.dedicatedLineName", { index: index + 1 })}</p>
                               <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
                                 {line.url}
                               </p>
                               <p className={`mt-1 ${renderLatencyClassName(key)}`}>
-                                延迟：{renderLatencyText(key)}
+                                {t("settings.latencyLabel", { value: renderLatencyText(key) })}
                               </p>
                             </div>
                             <Button
@@ -1114,19 +1141,19 @@ export default function SettingsPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Key className="h-5 w-5" />
-              Bangumi 点格子
+              {t("settings.bangumiTitle")}
             </CardTitle>
             <CardDescription>
-              使用你自己的 Bangumi Access Token 同步观看进度，系统不会使用管理员全局 Token 代同步。
+              {t("settings.bangumiDescription")}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
-                  <Label>Bangumi 同步</Label>
+                  <Label>{t("settings.bangumiSync")}</Label>
                   <p className="text-sm text-muted-foreground">
-                    启用后会在 Emby 看完番剧时自动同步 Bangumi 点格子。Token 只保存在服务端，不会回显明文。
+                    {t("settings.bangumiSyncDescription")}
                   </p>
                 </div>
                 <Switch checked={bgmMode} onCheckedChange={setBgmMode} />
@@ -1136,7 +1163,7 @@ export default function SettingsPage() {
                   <Label>Bangumi Token</Label>
                   <Input
                     type="password"
-                    placeholder={bgmTokenSet ? "已配置 Token，留空则保留当前值" : "请输入 Bangumi Token"}
+                    placeholder={bgmTokenSet ? t("settings.bangumiTokenConfiguredPlaceholder") : t("settings.bangumiTokenPlaceholder")}
                     value={bgmToken}
                     onChange={(e) => setBgmToken(e.target.value)}
                   />
@@ -1147,7 +1174,7 @@ export default function SettingsPage() {
                       onClick={handleSaveBgmSettings}
                       disabled={isBgmLoading}
                     >
-                      {isBgmLoading ? "保存中..." : "保存 Bangumi 设置"}
+                      {isBgmLoading ? t("common.saving") : t("settings.saveBangumiSettings")}
                     </Button>
                     {bgmTokenSet && (
                       <Button
@@ -1155,13 +1182,13 @@ export default function SettingsPage() {
                         onClick={handleClearBgmToken}
                         disabled={isBgmLoading}
                       >
-                        清除 Token
+                        {t("settings.clearToken")}
                       </Button>
                     )}
                   </div>
                   {bgmTokenSet && (
                     <p className="text-sm text-muted-foreground">
-                      当前已配置 Bangumi Token，可直接启用同步。
+                      {t("settings.bangumiTokenConfigured")}
                     </p>
                   )}
                 </div>
@@ -1181,16 +1208,16 @@ export default function SettingsPage() {
       }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{completePendingEmby ? "开通 Emby 账号" : "绑定 Emby 账号"}</DialogTitle>
+            <DialogTitle>{completePendingEmby ? t("settings.embyBindDialogTitleCreate") : t("settings.embyBindDialogTitleBind")}</DialogTitle>
             <DialogDescription>
-              {completePendingEmby ? "填写要创建的 Emby 用户名和密码" : "输入您在 Emby 服务器中的用户名和密码以验证身份"}
+              {completePendingEmby ? t("settings.embyBindDialogDescriptionCreate") : t("settings.embyBindDialogDescriptionBind")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Emby 用户名</Label>
+              <Label>{t("settings.embyUsername")}</Label>
               <Input
-                placeholder="例如：myembyuser"
+                placeholder={t("settings.embyUsernamePlaceholder")}
                 value={embyUsername}
                 onChange={(e) => setEmbyUsername(e.target.value)}
                 onKeyDown={(e) => {
@@ -1201,11 +1228,11 @@ export default function SettingsPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Emby 密码 {!completePendingEmby && <span className="text-xs text-muted-foreground">（如账号无密码请留空）</span>}</Label>
+              <Label>{t("settings.embyPassword")} {!completePendingEmby && <span className="text-xs text-muted-foreground">{t("settings.embyPasswordOptionalHint")}</span>}</Label>
               <div className="relative">
                 <Input
                   type={showEmbyPassword ? "text" : "password"}
-                  placeholder="请输入 Emby 密码（可留空）"
+                  placeholder={t("settings.embyPasswordPlaceholder")}
                   value={embyPassword}
                   onChange={(e) => setEmbyPassword(e.target.value)}
                   onKeyDown={(e) => {
@@ -1229,7 +1256,7 @@ export default function SettingsPage() {
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                需要验证您的 Emby 账号凭据才能绑定（无密码账号请留空）
+                {t("settings.embyCredentialsHint")}
               </p>
             </div>
           </div>
@@ -1243,14 +1270,14 @@ export default function SettingsPage() {
                 setEmbyPassword("");
               }}
             >
-              取消
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleBindEmby}
               disabled={isEmbyLoading || !embyUsername.trim()}
             >
               {isEmbyLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {completePendingEmby ? "确认开通" : "确认绑定"}
+              {completePendingEmby ? t("settings.confirmOpen") : t("settings.confirmBind")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1260,17 +1287,17 @@ export default function SettingsPage() {
       <Dialog open={editEmailOpen} onOpenChange={setEditEmailOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>设置/修改邮箱</DialogTitle>
+            <DialogTitle>{t("settings.emailDialogTitle")}</DialogTitle>
             <DialogDescription>
-              请输入您的邮箱地址，用于找回密码或接收重要通知
+              {t("settings.emailDialogDescription")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>邮箱地址</Label>
+              <Label>{t("settings.emailAddress")}</Label>
               <Input
                 type="email"
-                placeholder="例如：example@gmail.com"
+                placeholder={t("settings.emailPlaceholder")}
                 value={emailValue}
                 onChange={(e) => setEmailValue(e.target.value)}
               />
@@ -1278,11 +1305,11 @@ export default function SettingsPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditEmailOpen(false)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button onClick={handleUpdateEmail} disabled={isEmailLoading}>
               {isEmailLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              确认保存
+              {t("adminConfig.confirmSave")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1299,18 +1326,18 @@ export default function SettingsPage() {
       }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>修改系统密码</DialogTitle>
+            <DialogTitle>{t("settings.systemPasswordDialogTitle")}</DialogTitle>
             <DialogDescription>
-              修改系统登录密码，不会同步更改 Emby 密码。
+              {t("settings.systemPasswordDialogDescription")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>当前密码</Label>
+              <Label>{t("settings.currentPassword")}</Label>
               <div className="relative">
                 <Input
                   type={showOldPwd ? "text" : "password"}
-                  placeholder="请输入当前密码"
+                  placeholder={t("settings.currentPasswordPlaceholder")}
                   value={oldPassword}
                   onChange={(e) => setOldPassword(e.target.value)}
                 />
@@ -1326,11 +1353,11 @@ export default function SettingsPage() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label>新密码</Label>
+              <Label>{t("settings.newPassword")}</Label>
               <div className="relative">
                 <Input
                   type={showNewPwd ? "text" : "password"}
-                  placeholder="至少 8 位，含大小写字母和数字"
+                  placeholder={t("settings.newPasswordPlaceholder")}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                 />
@@ -1347,16 +1374,16 @@ export default function SettingsPage() {
               {newPassword && (
                 <p className={`text-xs ${systemPwdStrength.ok ? passwordStrengthLabel(systemPwdStrength.score).className : "text-destructive"}`}>
                   {systemPwdStrength.ok
-                    ? `强度：${passwordStrengthLabel(systemPwdStrength.score).label}`
+                    ? t("settings.passwordStrength", { label: passwordStrengthLabel(systemPwdStrength.score).label })
                     : systemPwdStrength.message}
                 </p>
               )}
             </div>
             <div className="space-y-2">
-              <Label>确认新密码</Label>
+              <Label>{t("settings.confirmNewPassword")}</Label>
               <Input
                 type="password"
-                placeholder="再次输入新密码"
+                placeholder={t("settings.confirmNewPasswordPlaceholder")}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 onKeyDown={(e) => {
@@ -1366,20 +1393,20 @@ export default function SettingsPage() {
                 }}
               />
               {confirmPassword && newPassword !== confirmPassword && (
-                <p className="text-xs text-destructive">两次输入的密码不一致</p>
+                <p className="text-xs text-destructive">{t("settings.passwordMismatch")}</p>
               )}
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setChangeSystemPwdOpen(false)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleChangeSystemPassword}
               disabled={isSystemPwdLoading || !oldPassword || !systemPwdStrength.ok || newPassword !== confirmPassword}
             >
               {isSystemPwdLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              确认修改
+              {t("settings.confirmModify")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1394,18 +1421,18 @@ export default function SettingsPage() {
       }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>修改 Emby 密码</DialogTitle>
+            <DialogTitle>{t("settings.embyPasswordDialogTitle")}</DialogTitle>
             <DialogDescription>
-              只更新当前绑定的 Emby 账号密码。
+              {t("settings.embyPasswordDescription")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>新密码</Label>
+              <Label>{t("settings.newPassword")}</Label>
               <div className="relative">
                 <Input
                   type={showNewEmbyPwd ? "text" : "password"}
-                  placeholder="至少 8 位，含大小写字母和数字"
+                  placeholder={t("settings.newPasswordPlaceholder")}
                   value={newEmbyPassword}
                   onChange={(e) => setNewEmbyPassword(e.target.value)}
                 />
@@ -1422,17 +1449,17 @@ export default function SettingsPage() {
               {newEmbyPassword && (
                 <p className={`text-xs ${embyPwdStrength.ok ? passwordStrengthLabel(embyPwdStrength.score).className : "text-destructive"}`}>
                   {embyPwdStrength.ok
-                    ? `强度：${passwordStrengthLabel(embyPwdStrength.score).label}`
+                    ? t("settings.passwordStrength", { label: passwordStrengthLabel(embyPwdStrength.score).label })
                     : embyPwdStrength.message}
                 </p>
               )}
             </div>
             <div className="space-y-2">
-              <Label>确认新密码</Label>
+              <Label>{t("settings.confirmNewPassword")}</Label>
               <div className="relative">
                 <Input
                   type={showConfirmEmbyPwd ? "text" : "password"}
-                  placeholder="再次输入新密码"
+                  placeholder={t("settings.confirmNewPasswordPlaceholder")}
                   value={confirmEmbyPassword}
                   onChange={(e) => setConfirmEmbyPassword(e.target.value)}
                   onKeyDown={(e) => {
@@ -1452,20 +1479,20 @@ export default function SettingsPage() {
                 </Button>
               </div>
               {confirmEmbyPassword && newEmbyPassword !== confirmEmbyPassword && (
-                <p className="text-xs text-destructive">两次输入的密码不一致</p>
+                <p className="text-xs text-destructive">{t("settings.passwordMismatch")}</p>
               )}
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setChangeEmbyPwdOpen(false)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleChangeEmbyPassword}
               disabled={isEmbyPwdLoading || !embyPwdStrength.ok || newEmbyPassword !== confirmEmbyPassword}
             >
               {isEmbyPwdLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              确认修改
+              {t("settings.confirmModify")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1474,28 +1501,28 @@ export default function SettingsPage() {
       <Dialog open={rebindDialogOpen} onOpenChange={setRebindDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>提交 Telegram 换绑请求</DialogTitle>
+            <DialogTitle>{t("settings.telegramRebindDialogTitle")}</DialogTitle>
             <DialogDescription>
-              管理员批准后会解绑当前 Telegram，你可以重新绑定新的 Telegram 账号。
+              {t("settings.telegramRebindDialogDescription")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Label>备注给管理员（可选）</Label>
+            <Label>{t("settings.rebindReasonLabel")}</Label>
             <Textarea
               value={rebindReason}
               onChange={(event) => setRebindReason(event.target.value.slice(0, 500))}
-              placeholder="例如：原 Telegram 账号无法登录，需要换绑到新账号"
+              placeholder={t("settings.rebindReasonPlaceholder")}
               rows={4}
             />
             <p className="text-xs text-muted-foreground">{rebindReason.length}/500</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setRebindDialogOpen(false)} disabled={isRebindLoading}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button onClick={handleRequestTelegramRebind} disabled={isRebindLoading}>
               {isRebindLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              提交申请
+              {t("settings.submitApplication")}
             </Button>
           </DialogFooter>
         </DialogContent>

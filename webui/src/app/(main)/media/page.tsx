@@ -42,6 +42,7 @@ import { api, type MediaItem, type MediaDetail, type InventoryCheckResult, type 
 import { formatRelativeTime, cn } from "@/lib/utils";
 import { useSystemStore } from "@/store/system";
 import { mediaRequestExternalUrl } from "@/lib/media-external-url";
+import { useI18n } from "@/lib/i18n";
 
 const MAX_SEARCH_CACHE_ENTRIES = 20;
 const MAX_DETAIL_CACHE_ENTRIES = 40;
@@ -62,6 +63,7 @@ function rememberCache<K, V>(cache: Map<K, V>, key: K, value: V, limit: number) 
 export default function MediaPage() {
   const { toast } = useToast();
   const { confirm } = useConfirm();
+  const { t } = useI18n();
   const { info: systemInfo, fetchInfo: fetchSystemInfo } = useSystemStore();
   const [searchQuery, setSearchQuery] = useState("");
   const [source, setSource] = useState("all");
@@ -137,8 +139,8 @@ export default function MediaPage() {
         const mediaId = parseInt(normalizedQuery);
         if (isNaN(mediaId)) {
           toast({
-            title: "无效的 ID",
-            description: "请输入有效的数字 ID",
+            title: t("media.invalidId"),
+            description: t("media.invalidIdDescription"),
             variant: "destructive",
           });
           setIsSearching(false);
@@ -153,8 +155,8 @@ export default function MediaPage() {
           detailRes = await api.getMediaByBangumiId(mediaId, true, controller.signal);
         } else {
           toast({
-            title: "请选择来源",
-            description: "使用 ID 搜索时，请选择 TMDB 或 Bangumi",
+            title: t("media.selectSource"),
+            description: t("media.selectSourceDescription"),
             variant: "destructive",
           });
           setIsSearching(false);
@@ -223,8 +225,8 @@ export default function MediaPage() {
           }
         } else {
           toast({
-            title: "未找到媒体",
-            description: detailRes.message || "该 ID 不存在或已被删除",
+            title: t("media.notFound"),
+            description: detailRes.message || t("media.notFoundDescription"),
             variant: "destructive",
           });
         }
@@ -252,7 +254,7 @@ export default function MediaPage() {
           rememberCache(searchCacheRef.current, searchCacheKey, finalResults, MAX_SEARCH_CACHE_ENTRIES);
           if (res.data.warnings && Object.keys(res.data.warnings).length > 0) {
             toast({
-              title: "部分来源搜索失败",
+              title: t("media.partialSearchFailed"),
               description: Object.values(res.data.warnings).join("\n"),
               variant: "destructive",
             });
@@ -260,8 +262,8 @@ export default function MediaPage() {
           
           if (finalResults.length === 0) {
             toast({
-              title: "未找到结果",
-              description: "尝试换个关键词搜索",
+              title: t("media.noResults"),
+              description: t("media.tryAnotherKeyword"),
             });
           }
         }
@@ -269,7 +271,7 @@ export default function MediaPage() {
     } catch (error: any) {
       if (isAbortError(error)) return;
       toast({
-        title: "搜索失败",
+        title: t("media.searchFailed"),
         description: error.message,
         variant: "destructive",
       });
@@ -326,8 +328,8 @@ export default function MediaPage() {
         rememberCache(detailCacheRef.current, detailKey, detailRes.data, MAX_DETAIL_CACHE_ENTRIES);
       } else {
         toast({
-          title: "获取详情失败",
-          description: detailRes.message || "无法获取媒体详情",
+          title: t("media.detailFailed"),
+          description: detailRes.message || t("media.detailFailedDescription"),
           variant: "destructive",
         });
       }
@@ -339,8 +341,8 @@ export default function MediaPage() {
       if (isAbortError(error)) return;
       console.error(error);
       toast({
-        title: "获取详情失败",
-        description: error.message || "网络错误",
+        title: t("media.detailFailed"),
+        description: error.message || t("common.networkError"),
         variant: "destructive",
       });
     } finally {
@@ -369,22 +371,22 @@ export default function MediaPage() {
 
       if (res.success) {
         toast({
-          title: "求片成功！",
-          description: "管理员会尽快处理您的请求",
+          title: t("media.requestSuccess"),
+          description: t("media.requestSuccessDescription"),
           variant: "success",
         });
         myRequestsCacheRef.current = null;
         setSelectedMedia(null);
       } else {
         toast({
-          title: "求片失败",
+          title: t("media.requestFailed"),
           description: res.message,
           variant: "destructive",
         });
       }
     } catch (error: any) {
       toast({
-        title: "求片失败",
+        title: t("media.requestFailed"),
         description: error.message,
         variant: "destructive",
       });
@@ -395,28 +397,28 @@ export default function MediaPage() {
 
   const handleDelete = async (requireKey: string) => {
     if (!requireKey) {
-      toast({ title: "缺少 require_key，无法删除", variant: "destructive" });
+      toast({ title: t("media.missingRequireKey"), variant: "destructive" });
       return;
     }
     const ok = await confirm({
-      title: "删除求片请求？",
-      description: "该操作不可恢复。",
+      title: t("media.deleteConfirmTitle"),
+      description: t("media.irreversible"),
       tone: "danger",
-      confirmLabel: "删除",
+      confirmLabel: t("common.delete"),
     });
     if (!ok) return;
 
     try {
       const res = await api.deleteMyMediaRequest(requireKey);
       if (res.success) {
-        toast({ title: "删除成功", variant: "success" });
+        toast({ title: t("media.deleteSuccess"), variant: "success" });
         myRequestsCacheRef.current = null;
         loadMyRequests();
       } else {
-        toast({ title: "删除失败", description: res.message, variant: "destructive" });
+        toast({ title: t("common.deleteFailed"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "删除失败", description: error.message, variant: "destructive" });
+      toast({ title: t("common.deleteFailed"), description: error.message, variant: "destructive" });
     }
   };
 
@@ -452,11 +454,11 @@ export default function MediaPage() {
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case "UNHANDLED": return <Badge variant="outline" className="rounded-lg bg-gray-100/50 dark:bg-slate-900/40 dark:text-slate-100">待处理</Badge>;
-      case "ACCEPTED": return <Badge variant="default" className="rounded-lg bg-blue-500/10 text-blue-500 border-blue-200">已接受</Badge>;
-      case "DOWNLOADING": return <Badge variant="default" className="rounded-lg bg-orange-500/10 text-orange-500 border-orange-200">下载中</Badge>;
-      case "REJECTED": return <Badge variant="destructive" className="rounded-lg">已拒绝</Badge>;
-      case "COMPLETED": return <Badge variant="default" className="rounded-lg bg-emerald-500/10 text-emerald-500 border-emerald-200">已完成</Badge>;
+      case "UNHANDLED": return <Badge variant="outline" className="rounded-lg bg-gray-100/50 dark:bg-slate-900/40 dark:text-slate-100">{t("media.statusUnhandled")}</Badge>;
+      case "ACCEPTED": return <Badge variant="default" className="rounded-lg bg-blue-500/10 text-blue-500 border-blue-200">{t("media.statusAccepted")}</Badge>;
+      case "DOWNLOADING": return <Badge variant="default" className="rounded-lg bg-orange-500/10 text-orange-500 border-orange-200">{t("media.statusDownloading")}</Badge>;
+      case "REJECTED": return <Badge variant="destructive" className="rounded-lg">{t("media.statusRejected")}</Badge>;
+      case "COMPLETED": return <Badge variant="default" className="rounded-lg bg-emerald-500/10 text-emerald-500 border-emerald-200">{t("media.statusCompleted")}</Badge>;
       default: return <Badge variant="secondary" className="rounded-lg">{status}</Badge>;
     }
   };
@@ -499,8 +501,8 @@ export default function MediaPage() {
             <Film className="h-7 w-7" />
           </div>
           <div>
-            <h1 className="text-xl font-semibold">求片功能未开启</h1>
-            <p className="mt-2 text-sm text-muted-foreground">管理员关闭求片后，求片中心不会显示可操作内容。</p>
+            <h1 className="text-xl font-semibold">{t("media.disabledTitle")}</h1>
+            <p className="mt-2 text-sm text-muted-foreground">{t("media.disabledDescription")}</p>
           </div>
         </CardContent>
       </Card>
@@ -510,8 +512,8 @@ export default function MediaPage() {
   return (
     <div className="space-y-8 pb-10">
       <div className="flex flex-col gap-2">
-        <h1 className="text-3xl font-black tracking-tighter text-foreground sm:text-4xl">媒体搜索</h1>
-        <p className="text-muted-foreground font-medium">寻找你心仪的作品，我们为你带回家</p>
+        <h1 className="text-3xl font-black tracking-tighter text-foreground sm:text-4xl">{t("media.title")}</h1>
+        <p className="text-muted-foreground font-medium">{t("media.description")}</p>
       </div>
 
       {/* Navigation Tabs */}
@@ -519,11 +521,11 @@ export default function MediaPage() {
         <TabsList className="mb-8 grid w-full grid-cols-2 rounded-2xl p-1.5 glass-frosted sm:max-w-[400px]">
           <TabsTrigger value="search" className="gap-2 rounded-xl py-2 font-bold data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md">
             <Search className="h-4 w-4" />
-            媒体搜索
+            {t("media.searchTab")}
           </TabsTrigger>
           <TabsTrigger value="requests" className="gap-2 rounded-xl py-2 font-bold data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md" onClick={loadMyRequests}>
             <ListTodo className="h-4 w-4" />
-            我的求片
+            {t("media.requestsTab")}
           </TabsTrigger>
         </TabsList>
 
@@ -534,25 +536,25 @@ export default function MediaPage() {
               <div className="flex flex-col gap-6">
                 {/* 搜索模式切换 */}
                 <div className="flex items-center gap-4 flex-wrap">
-                  <span className="text-xs font-black uppercase tracking-widest text-muted-foreground">Search Mode</span>
+                  <span className="text-xs font-black uppercase tracking-widest text-muted-foreground">{t("media.searchMode")}</span>
                   <div className={compactSegmentClass}>
                     <button 
                       onClick={() => setSearchMode("name")}
                       className={cn(compactSegmentButtonClass, searchMode === "name" ? "bg-background text-primary shadow-sm dark:text-primary-foreground" : inactiveSegmentClass)}
                     >
-                      名称搜索
+                      {t("media.nameSearch")}
                     </button>
                     <button 
                       onClick={() => setSearchMode("id")}
                       className={cn(compactSegmentButtonClass, searchMode === "id" ? "bg-background text-primary shadow-sm dark:text-primary-foreground" : inactiveSegmentClass)}
                     >
-                      ID 搜索
+                      {t("media.idSearch")}
                     </button>
                   </div>
                   
                   {searchMode === "id" && (
                     <div className="text-[10px] font-bold text-primary px-3 py-1 bg-primary/5 rounded-full border border-primary/10">
-                      请选择特定来源进行精确匹配
+                      {t("media.idSearchHint")}
                     </div>
                   )}
                 </div>
@@ -564,8 +566,8 @@ export default function MediaPage() {
                     <Input
                       placeholder={
                         searchMode === "id"
-                          ? "输入媒体 ID（如 550, 400602）..."
-                          : "输入名称、TMDB URL 或 Bangumi URL..."
+                          ? t("media.idPlaceholder")
+                          : t("media.namePlaceholder")
                       }
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
@@ -580,7 +582,7 @@ export default function MediaPage() {
                         onClick={() => setSource("all")}
                         className={cn(sourceSegmentButtonClass, source === "all" ? activeSegmentClass : inactiveSegmentClass)}
                       >
-                        全部
+                        {t("media.allSources")}
                       </button>
                     )}
                     <button 
@@ -603,13 +605,13 @@ export default function MediaPage() {
                         onClick={() => setMediaType("movie")}
                         className={cn(sourceSegmentButtonClass, mediaType === "movie" ? activeSegmentClass : inactiveSegmentClass)}
                       >
-                        电影
+                        {t("media.movie")}
                       </button>
                       <button 
                         onClick={() => setMediaType("tv")}
                         className={cn(sourceSegmentButtonClass, mediaType === "tv" ? activeSegmentClass : inactiveSegmentClass)}
                       >
-                        剧集
+                        {t("media.tv")}
                       </button>
                     </div>
                   )}
@@ -620,7 +622,7 @@ export default function MediaPage() {
                     ) : (
                       <Search className="mr-2 h-5 w-5" />
                     )}
-                    探索
+                    {t("media.explore")}
                   </Button>
                 </div>
               </div>
@@ -670,7 +672,7 @@ export default function MediaPage() {
                             {media.source.toUpperCase()}
                           </Badge>
                           <Badge className="bg-black/40 backdrop-blur-xl border-0 text-white font-black text-[10px] tracking-widest px-2.5 py-1 uppercase">
-                            {media.media_type === "movie" ? "Movie" : "TV Show"}
+                            {media.media_type === "movie" ? t("media.movieBadge") : t("media.tvBadge")}
                           </Badge>
                         </div>
 
@@ -689,7 +691,7 @@ export default function MediaPage() {
                       <div className="p-5 flex-1">
                         <h3 className="font-black text-lg line-clamp-1 group-hover:text-primary transition-colors">{media.title}</h3>
                         <p className="mt-1 text-xs font-bold text-muted-foreground uppercase tracking-widest">
-                          {media.year || "未知年份"}
+                          {media.year || t("media.unknownYear")}
                         </p>
                       </div>
                     </div>
@@ -704,8 +706,8 @@ export default function MediaPage() {
           <div className="premium-card p-1">
             <div className="p-6">
               <div className="mb-6">
-                <h2 className="text-xl font-black">我的求片记录</h2>
-                <p className="text-sm text-muted-foreground font-medium">追踪您提交的求片申请状态</p>
+                <h2 className="text-xl font-black">{t("media.requestsTitle")}</h2>
+                <p className="text-sm text-muted-foreground font-medium">{t("media.requestsDescription")}</p>
               </div>
               
               {isRequestsLoading ? (
@@ -717,9 +719,9 @@ export default function MediaPage() {
                   <div className="p-4 bg-secondary rounded-full">
                     <ListTodo className="h-8 w-8 opacity-40" />
                   </div>
-                  <p className="font-bold">暂无任何求片记录</p>
+                  <p className="font-bold">{t("media.requestsEmpty")}</p>
                   <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setActiveTab("search")}>
-                    去搜索求片
+                    {t("media.goSearch")}
                   </Button>
                 </div>
               ) : (
@@ -750,7 +752,7 @@ export default function MediaPage() {
                           <div className="flex items-center gap-2 flex-wrap">
                             {(() => {
                               const url = mediaRequestExternalUrl(req);
-                              const title = req.media_info?.title || "未知媒体";
+                              const title = req.media_info?.title || t("media.unknownMedia");
                               if (!url) {
                                 return <p className="font-black text-foreground truncate">{title}</p>;
                               }
@@ -760,7 +762,7 @@ export default function MediaPage() {
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="font-black text-foreground truncate underline decoration-dotted underline-offset-2 hover:text-primary inline-flex items-center gap-1"
-                                  title={`在 ${req.source.toUpperCase()} 上查看`}
+                                  title={t("media.viewOnSource", { source: req.source.toUpperCase() })}
                                 >
                                   {title}
                                   <ExternalLink className="h-3 w-3 shrink-0 opacity-70" />
@@ -786,7 +788,7 @@ export default function MediaPage() {
                                  <span className="w-1 h-1 bg-muted-foreground/30 rounded-full" />
                                  <span
                                    className="inline-flex items-center gap-1 text-[10px] text-muted-foreground"
-                                   title="External Update Key（点击复制）"
+                                    title={t("media.externalKeyTitle")}
                                  >
                                    <Fingerprint className="h-3 w-3" />
                                    <code className="max-w-[8rem] truncate rounded bg-muted px-1 text-foreground sm:max-w-[14rem]">
@@ -796,12 +798,12 @@ export default function MediaPage() {
                                      type="button"
                                      onClick={() => {
                                        navigator.clipboard.writeText(req.require_key).then(
-                                         () => toast({ title: "已复制 Key", variant: "success" }),
-                                         () => toast({ title: "复制失败", variant: "destructive" }),
+                                          () => toast({ title: t("media.keyCopied"), variant: "success" }),
+                                          () => toast({ title: t("common.copyFailed"), variant: "destructive" }),
                                        );
                                      }}
                                      className="text-muted-foreground hover:text-foreground"
-                                     title="复制 Key"
+                                      title={t("media.copyKey")}
                                    >
                                      <Copy className="h-3 w-3" />
                                    </button>
@@ -812,7 +814,7 @@ export default function MediaPage() {
 
                           {req.admin_note && (
                             <div className="mt-2 text-[11px] font-bold text-primary bg-primary/5 px-3 py-1.5 rounded-xl border border-primary/10 dark:bg-primary/10 dark:text-primary dark:border-primary/20">
-                              💌 管理回复: {req.admin_note}
+                              {t("media.adminReply", { note: req.admin_note })}
                             </div>
                           )}
                         </div>
@@ -835,7 +837,7 @@ export default function MediaPage() {
                           <Button size="sm" variant="outline" className="h-8 rounded-lg text-[10px] font-black tracking-widest uppercase border-primary/20 hover:bg-primary hover:text-white transition-all" asChild>
                             <a href={`/search?q=${encodeURIComponent(req.media_info?.title || "")}`} target="_blank" rel="noreferrer">
                               <ExternalLink className="h-3 w-3 mr-1.5" />
-                              View Media
+                              {t("media.viewMedia")}
                             </a>
                           </Button>
                         )}
@@ -860,7 +862,7 @@ export default function MediaPage() {
             <div className="flex h-[400px] items-center justify-center">
               <div className="relative">
                 <div className="h-12 w-12 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
-                <div className="mt-4 text-xs font-black text-primary uppercase tracking-widest animate-pulse">Loading Details</div>
+                <div className="mt-4 text-xs font-black text-primary uppercase tracking-widest animate-pulse">{t("media.loadingDetails")}</div>
               </div>
             </div>
           ) : !selectedMedia ? null : mediaDetail ? (
@@ -906,7 +908,7 @@ export default function MediaPage() {
                   {/* Status & Genres */}
                   <div className="flex flex-wrap gap-2">
                     <Badge variant="outline" className="border-primary/20 text-primary font-bold px-3 py-1 rounded-xl">
-                      {mediaDetail.media_type === "movie" ? "电影作品" : "电视连续剧"}
+                      {mediaDetail.media_type === "movie" ? t("media.movieWork") : t("media.tvSeries")}
                     </Badge>
                     {mediaDetail.genres?.map(genre => (
                       <Badge key={genre} variant="secondary" className="bg-muted/80 border border-border text-muted-foreground font-bold px-3 py-1 rounded-xl">
@@ -917,9 +919,9 @@ export default function MediaPage() {
 
                   {/* Overview */}
                   <div className="space-y-2">
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">About</p>
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">{t("media.about")}</p>
                     <p className="text-sm leading-relaxed text-foreground font-medium">
-                      {mediaDetail.overview || "暂无简介内容"}
+                      {mediaDetail.overview || t("media.noOverview")}
                     </p>
                   </div>
 
@@ -940,10 +942,10 @@ export default function MediaPage() {
                         </div>
                         <div>
                           <p className="text-sm font-black text-foreground">
-                            {inventoryCheck.exists ? "库存状态：已入库" : "库存状态：未入库"}
+                            {inventoryCheck.exists ? t("media.inventoryAvailable") : t("media.inventoryMissing")}
                           </p>
                           <p className="text-[11px] font-medium text-muted-foreground">
-                            {inventoryCheck.exists ? "如遇字幕、片源或版本问题，请填写备注后提交反馈" : "提交求片后，管理员将为您安排下载"}
+                            {inventoryCheck.exists ? t("media.inventoryAvailableDescription") : t("media.inventoryMissingDescription")}
                           </p>
                         </div>
                       </div>
@@ -953,7 +955,7 @@ export default function MediaPage() {
                   {/* TV Season Selection */}
                   {mediaDetail.media_type !== "movie" && mediaDetail.seasons && (
                     <div className="space-y-3">
-                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Seasons</p>
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">{t("media.seasons")}</p>
                       <div className="flex flex-wrap gap-2">
                         <button
                           onClick={() => setSelectedSeason(undefined)}
@@ -964,7 +966,7 @@ export default function MediaPage() {
                               : "bg-card border-border text-muted-foreground hover:bg-accent"
                           )}
                         >
-                          全部季度
+                          {t("media.allSeasons")}
                         </button>
                         {Array.from({ length: mediaDetail.seasons }, (_, i) => i + 1).map((s) => {
                           const isAvailable = inventoryCheck?.seasons_available?.includes(s);
@@ -983,7 +985,7 @@ export default function MediaPage() {
                                     : "bg-background border-border text-muted-foreground hover:bg-accent"
                               )}
                             >
-                              Season {s}
+                              {t("media.season", { season: s })}
                               {isAvailable && <Check className="ml-1.5 h-3 w-3 inline-block" />}
                             </button>
                           );
@@ -994,9 +996,9 @@ export default function MediaPage() {
 
                   {/* Request Note */}
                   <div className="space-y-3">
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Instructions</p>
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">{t("media.instructions")}</p>
                     <Input
-                      placeholder={inventoryCheck?.exists ? "请说明字幕、片源、清晰度或版本问题" : "有什么特别的要求吗？（选填）"}
+                      placeholder={inventoryCheck?.exists ? t("media.issuePlaceholder") : t("media.requestPlaceholder")}
                       value={requestNote}
                       onChange={(e) => setRequestNote(e.target.value)}
                       className="rounded-[1.25rem] border-white/60 bg-white/40 shadow-inner h-12 dark:border-slate-700/70 dark:bg-slate-950/70 dark:text-slate-100"
@@ -1006,7 +1008,7 @@ export default function MediaPage() {
 
                 <div className="mt-10 flex gap-3">
                   <Button variant="outline" className="flex-1 h-12 rounded-2xl font-black border-border bg-background hover:bg-accent transition-all shadow-sm" onClick={() => setSelectedMedia(null)}>
-                    关闭
+                    {t("common.close")}
                   </Button>
                   <Button
                     onClick={handleRequest}
@@ -1018,7 +1020,7 @@ export default function MediaPage() {
                     ) : (
                       <Send className="mr-2 h-5 w-5" />
                     )}
-                    {requestBlockedByInventory ? "填写问题备注后提交" : inventoryIssueReady ? "提交问题反馈" : "立即求片"}
+                    {requestBlockedByInventory ? t("media.submitIssueAfterNote") : inventoryIssueReady ? t("media.submitIssue") : t("media.requestNow")}
                   </Button>
                 </div>
               </div>

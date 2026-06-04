@@ -6,31 +6,32 @@ import { api, type Announcement } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SafeAnnouncementContent } from "@/lib/safe-render";
+import { useI18n, type MessageKey } from "@/lib/i18n";
 
-const LEVEL_STYLES: Record<Announcement["level"], { icon: typeof Info; cardClass: string; iconClass: string; label: string }> = {
+const LEVEL_STYLES: Record<Announcement["level"], { icon: typeof Info; cardClass: string; iconClass: string; labelKey: MessageKey }> = {
   info: {
     icon: Info,
     cardClass: "border-blue-500/30 bg-blue-500/[0.04]",
     iconClass: "text-blue-500",
-    label: "通知",
+    labelKey: "announcements.levelInfo",
   },
   notice: {
     icon: Megaphone,
     cardClass: "border-emerald-500/30 bg-emerald-500/[0.04]",
     iconClass: "text-emerald-500",
-    label: "公告",
+    labelKey: "announcements.levelNotice",
   },
   warning: {
     icon: AlertTriangle,
     cardClass: "border-amber-500/35 bg-amber-500/[0.05]",
     iconClass: "text-amber-500",
-    label: "注意",
+    labelKey: "announcements.levelWarning",
   },
   critical: {
     icon: AlertOctagon,
     cardClass: "border-destructive/40 bg-destructive/[0.05]",
     iconClass: "text-destructive",
-    label: "重要",
+    labelKey: "announcements.levelCritical",
   },
 };
 
@@ -61,6 +62,7 @@ interface AnnouncementBoardProps {
 }
 
 function AnnouncementCard({ ann }: { ann: Announcement }) {
+  const { t } = useI18n();
   const style = LEVEL_STYLES[ann.level] || LEVEL_STYLES.info;
   const Icon = style.icon;
   return (
@@ -78,16 +80,16 @@ function AnnouncementCard({ ann }: { ann: Announcement }) {
               <h3 className="text-sm font-bold leading-snug">{ann.title}</h3>
             )}
             <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-              {style.label}
+              {t(style.labelKey)}
             </Badge>
           </div>
           <p className="text-xs text-muted-foreground mt-1">
             {formatTime(ann.created_at)}
             {ann.updated_at && ann.updated_at !== ann.created_at && (
-              <> · 更新于 {formatTime(ann.updated_at)}</>
+              <> · {t("announcements.updatedAt", { time: formatTime(ann.updated_at) })}</>
             )}
             {ann.expires_at > 0 && (
-              <> · 截止 {formatTime(ann.expires_at)}</>
+              <> · {t("announcements.expiresAt", { time: formatTime(ann.expires_at) })}</>
             )}
           </p>
         </div>
@@ -106,6 +108,7 @@ interface SectionProps {
 }
 
 function AnnouncementSection({ items, heading, collapseAfter }: SectionProps) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   if (items.length === 0) return null;
   const visible = expanded ? items : items.slice(0, collapseAfter);
@@ -139,12 +142,12 @@ function AnnouncementSection({ items, heading, collapseAfter }: SectionProps) {
           {expanded ? (
             <>
               <ChevronUp className="h-3.5 w-3.5" />
-              收起
+              {t("announcements.collapse")}
             </>
           ) : (
             <>
               <ChevronDown className="h-3.5 w-3.5" />
-              查看全部 {items.length} 条
+              {t("announcements.viewAllItems", { count: items.length })}
             </>
           )}
         </Button>
@@ -156,11 +159,12 @@ function AnnouncementSection({ items, heading, collapseAfter }: SectionProps) {
 export function AnnouncementBoard({
   limit = 50,
   collapseAfter = 2,
-  title = "公告板",
+  title,
   showEmptyState = false,
   splitPinned = false,
 }: AnnouncementBoardProps) {
   const [items, setItems] = useState<Announcement[]>([]);
+  const { t } = useI18n();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -173,14 +177,16 @@ export function AnnouncementBoard({
       if (res.success && Array.isArray(res.data?.announcements)) {
         setItems(res.data!.announcements);
       } else {
-        setError(res.message || "无法加载公告");
+        setError(res.message || t("announcements.loadFailed"));
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "加载公告失败");
+      setError(e instanceof Error ? e.message : t("announcements.loadFailedShort"));
     } finally {
       setLoading(false);
     }
-  }, [limit]);
+  }, [limit, t]);
+
+  const headingTitle = title === undefined ? t("announcements.boardTitle") : title;
 
   useEffect(() => {
     void load();
@@ -201,18 +207,18 @@ export function AnnouncementBoard({
   if (showEmptyState && (loading || error || items.length === 0)) {
     return (
       <section className="space-y-3">
-        {title !== null && (
+        {headingTitle !== null && (
           <h2 className="text-sm font-bold tracking-wider uppercase text-muted-foreground flex items-center gap-2">
             <Megaphone className="h-4 w-4" />
-            {title}
+            {headingTitle}
           </h2>
         )}
         <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
           {loading
-            ? "正在加载公告..."
+            ? t("announcements.loading")
             : error
-              ? `公告加载失败：${error}`
-              : "暂无公告"}
+              ? t("announcements.loadFailedWithMessage", { message: error })
+              : t("announcements.empty")}
         </div>
       </section>
     );
@@ -222,11 +228,11 @@ export function AnnouncementBoard({
   if (splitPinned) {
     return (
       <section className="space-y-4">
-        {title !== null && (
+        {headingTitle !== null && (
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold tracking-wider uppercase text-muted-foreground flex items-center gap-2">
               <Megaphone className="h-4 w-4" />
-              {title}
+              {headingTitle}
               <Badge variant="secondary" className="text-[10px] font-bold">
                 {items.length}
               </Badge>
@@ -235,12 +241,12 @@ export function AnnouncementBoard({
         )}
         <AnnouncementSection
           items={pinned}
-          heading={{ icon: Pin, label: "置顶公告", tone: "primary" }}
+          heading={{ icon: Pin, label: t("announcements.pinned"), tone: "primary" }}
           collapseAfter={collapseAfter}
         />
         <AnnouncementSection
           items={latest}
-          heading={{ icon: Clock3, label: "最新公告", tone: "muted" }}
+          heading={{ icon: Clock3, label: t("announcements.latest"), tone: "muted" }}
           collapseAfter={collapseAfter}
         />
       </section>
@@ -252,11 +258,11 @@ export function AnnouncementBoard({
   const hasMore = items.length > collapseAfter;
   return (
     <section className="space-y-3">
-      {title !== null && (
+      {headingTitle !== null && (
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-bold tracking-wider uppercase text-muted-foreground flex items-center gap-2">
             <Megaphone className="h-4 w-4" />
-            {title}
+            {headingTitle}
             <Badge variant="secondary" className="text-[10px] font-bold">
               {items.length}
             </Badge>
@@ -280,12 +286,12 @@ export function AnnouncementBoard({
           {expanded ? (
             <>
               <ChevronUp className="h-3.5 w-3.5" />
-              收起公告历史
+              {t("announcements.collapseHistory")}
             </>
           ) : (
             <>
               <ChevronDown className="h-3.5 w-3.5" />
-              查看全部 {items.length} 条公告
+              {t("announcements.viewAllAnnouncements", { count: items.length })}
             </>
           )}
         </Button>

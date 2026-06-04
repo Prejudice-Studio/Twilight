@@ -31,11 +31,13 @@ import {
   ScrollText,
   ShieldAlert,
 } from "lucide-react";
-import { GithubIcon } from "@/components/icons/github-icon";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { GithubProjectLink } from "@/components/github-project-link";
+import { LocaleSwitcher } from "@/components/locale-switcher";
 import { api } from "@/lib/api";
+import { useI18n, type MessageKey } from "@/lib/i18n";
 import { SITE_NAME } from "@/lib/site-config";
 import { useRegionRefresh } from "@/hooks/use-region-refresh";
 import { RegionRefreshKeys } from "@/lib/region-refresh";
@@ -44,7 +46,7 @@ import { sanitizeImageUrl } from "@/lib/safe-url";
 
 export interface SidebarNavItem {
   href: string;
-  label: string;
+  labelKey: MessageKey;
   icon: ComponentType<{ className?: string }>;
 }
 
@@ -57,28 +59,28 @@ type MaybeStartViewTransition = {
 };
 
 export const userNavItems: SidebarNavItem[] = [
-  { href: "/dashboard", label: "仪表盘", icon: LayoutDashboard },
-  { href: "/announcements", label: "公告", icon: Megaphone },
-  { href: "/media", label: "求片中心", icon: Film },
-  { href: "/score", label: "签到", icon: Coins },
-  { href: "/invite", label: "邀请中心", icon: GitBranch },
-  { href: "/settings", label: "个人设置", icon: Settings },
+  { href: "/dashboard", labelKey: "navigation.dashboard", icon: LayoutDashboard },
+  { href: "/announcements", labelKey: "navigation.announcements", icon: Megaphone },
+  { href: "/media", labelKey: "navigation.mediaRequest", icon: Film },
+  { href: "/score", labelKey: "navigation.signin", icon: Coins },
+  { href: "/invite", labelKey: "navigation.inviteCenter", icon: GitBranch },
+  { href: "/settings", labelKey: "navigation.settings", icon: Settings },
 ];
 
 export const adminNavItems: SidebarNavItem[] = [
-  { href: "/admin/users", label: "用户管理", icon: Users },
-  { href: "/admin/announcements", label: "公告管理", icon: Megaphone },
-  { href: "/admin/regcodes", label: "注册码", icon: FileText },
-  { href: "/admin/invite", label: "邀请森林", icon: Network },
-  { href: "/admin/requests", label: "求片审核", icon: Film },
-  { href: "/admin/violations", label: "违规审计", icon: ShieldAlert },
-  { href: "/admin/telegram-rebind-requests", label: "Telegram 换绑", icon: MessageSquare },
-  { href: "/admin/emby", label: "Emby 管理", icon: Server },
-  { href: "/admin/scheduler", label: "定时任务", icon: TimerReset },
-  { href: "/admin/database", label: "数据库备份", icon: Database },
-  { href: "/admin/config", label: "配置管理", icon: FileCode },
-  { href: "/admin/logs", label: "实时日志", icon: ScrollText },
-  { href: "/admin/test", label: "服务器信息", icon: TestTube },
+  { href: "/admin/users", labelKey: "navigation.users", icon: Users },
+  { href: "/admin/announcements", labelKey: "navigation.adminAnnouncements", icon: Megaphone },
+  { href: "/admin/regcodes", labelKey: "navigation.regcodes", icon: FileText },
+  { href: "/admin/invite", labelKey: "navigation.inviteForest", icon: Network },
+  { href: "/admin/requests", labelKey: "navigation.requestReview", icon: Film },
+  { href: "/admin/violations", labelKey: "navigation.violations", icon: ShieldAlert },
+  { href: "/admin/telegram-rebind-requests", labelKey: "navigation.telegramRebind", icon: MessageSquare },
+  { href: "/admin/emby", labelKey: "navigation.embyAdmin", icon: Server },
+  { href: "/admin/scheduler", labelKey: "navigation.scheduler", icon: TimerReset },
+  { href: "/admin/database", labelKey: "navigation.databaseBackup", icon: Database },
+  { href: "/admin/config", labelKey: "navigation.configAdmin", icon: FileCode },
+  { href: "/admin/logs", labelKey: "navigation.runtimeLogs", icon: ScrollText },
+  { href: "/admin/test", labelKey: "navigation.serverInfo", icon: TestTube },
 ];
 
 export function filterNavItems(
@@ -98,6 +100,7 @@ export function filterNavItems(
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { t } = useI18n();
   const { user, logout } = useAuthStore();
   const { setTheme, theme: rawTheme, resolvedTheme } = useTheme();
   // resolvedTheme 反映真实生效主题（含 SSR -> CSR 后的 hydration），用于图标显示
@@ -151,6 +154,7 @@ export function Sidebar() {
     () => filterNavItems(adminNavItems, systemInfo?.features),
     [systemInfo?.features],
   );
+  const themeLabel = currentTheme === "dark" ? t("common.themeDark") : t("common.themeLight");
 
   const toggleTheme = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -226,13 +230,13 @@ export function Sidebar() {
             <div className="brand-logo">{displaySiteName.slice(0, 2).toUpperCase()}</div>
           )}
           <div>
-            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Media OPS</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t("navigation.mediaOps")}</p>
             <h2 className="text-lg font-semibold">{displaySiteName}</h2>
           </div>
         </div>
 
         <nav className="sidebar-nav">
-          <p className="sidebar-label">用户菜单</p>
+          <p className="sidebar-label">{t("navigation.userMenu")}</p>
           {visibleUserNavItems.map((item) => {
             const active = pathname === item.href;
             return (
@@ -242,14 +246,14 @@ export function Sidebar() {
                 className={cn("sidebar-link", active && "sidebar-link-active")}
               >
                 <item.icon className="h-4 w-4" />
-                <span>{item.label}</span>
+                <span>{t(item.labelKey)}</span>
                 {active && <motion.div layoutId="sidebar-active" className="sidebar-dot" />}
               </Link>
             );
           })}
           {isAdmin && (
             <>
-              <p className="sidebar-label mt-5">管理菜单</p>
+              <p className="sidebar-label mt-5">{t("navigation.adminMenu")}</p>
               {visibleAdminNavItems.map((item) => {
                 const active = pathname.startsWith(item.href);
                 return (
@@ -259,7 +263,7 @@ export function Sidebar() {
                     className={cn("sidebar-link", active && "sidebar-link-active")}
                   >
                     <item.icon className="h-4 w-4" />
-                    <span>{item.label}</span>
+                    <span>{t(item.labelKey)}</span>
                     {active && <motion.div layoutId="sidebar-active-admin" className="sidebar-dot" />}
                   </Link>
                 );
@@ -269,15 +273,7 @@ export function Sidebar() {
         </nav>
 
         <div className="sidebar-footer">
-          <a
-            href="https://github.com/Prejudice-Studio/Twilight"
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center justify-center gap-2 rounded-full border border-border/70 bg-background/60 px-3 py-2 text-xs font-medium text-muted-foreground transition-all hover:bg-primary/10 hover:text-primary"
-          >
-            <GithubIcon className="h-4 w-4" />
-            GitHub Project
-          </a>
+          <GithubProjectLink className="w-full" />
 
           <div className="profile-card">
             <Avatar className="h-10 w-10 border border-border/60">
@@ -292,19 +288,30 @@ export function Sidebar() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.5rem] gap-2">
             <Button
               type="button"
               variant="outline"
               className="h-10 justify-start gap-2 overflow-hidden rounded-full border-border/70 bg-background/60 px-3 transition-all hover:bg-primary/10 hover:text-primary"
               onClick={toggleTheme}
-              title={`当前主题：${currentTheme === "dark" ? "暗色" : "浅色"} · 点击切换`}
-              aria-label="切换暗色 / 浅色主题"
+              title={`${themeLabel} · ${t("common.switchTheme")}`}
+              aria-label={t("common.switchTheme")}
             >
               {currentTheme === "dark" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
-              <span className="text-xs font-medium">{currentTheme === "dark" ? "暗色" : "浅色"}</span>
+              <span className="truncate text-xs font-medium">{themeLabel}</span>
             </Button>
-            <Button type="button" variant="outline" className="h-10" onClick={() => void logout()}>
+            <LocaleSwitcher
+              align="start"
+              className="h-10 justify-start overflow-hidden rounded-full border-border/70 bg-background/60 px-3 transition-all hover:bg-primary/10 hover:text-primary"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 rounded-full border-border/70 bg-background/60 transition-all hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => void logout()}
+              title={t("common.logout")}
+              aria-label={t("common.logout")}
+            >
               <LogOut className="h-4 w-4" />
             </Button>
           </div>

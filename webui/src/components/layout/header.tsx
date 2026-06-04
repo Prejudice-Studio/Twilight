@@ -14,17 +14,21 @@ import { cn } from "@/lib/utils";
 import { sanitizeImageUrl } from "@/lib/safe-url";
 import { adminNavItems, filterNavItems, userNavItems } from "@/components/layout/sidebar";
 import { Menu, Moon, Sparkles, Sun } from "lucide-react";
-import { GithubIcon } from "@/components/icons/github-icon";
+import { GithubProjectLink } from "@/components/github-project-link";
+import { LocaleSwitcher } from "@/components/locale-switcher";
+import { useI18n } from "@/lib/i18n";
 
 export function Header() {
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
+  const { t } = useI18n();
   const { info: systemInfo, fetchInfo: fetchSystemInfo } = useSystemStore();
   const { theme, resolvedTheme, setTheme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const isAdmin = user?.role === 0;
   const activeTheme = resolvedTheme || theme || "light";
   const isDark = activeTheme === "dark";
+  const themeLabel = isDark ? t("common.themeDark") : t("common.themeLight");
   const systemIcon = useMemo(() => sanitizeImageUrl(systemInfo?.icon), [systemInfo?.icon]);
   const displaySiteName = systemInfo?.name || "Twilight";
   const visibleUserNavItems = useMemo(
@@ -50,19 +54,19 @@ export function Header() {
                 variant="outline"
                 size="icon"
                 className="lg:hidden"
-                aria-label="打开菜单"
+                aria-label={t("navigation.openMenu")}
               >
                 <Menu className="h-5 w-5" aria-hidden="true" />
               </Button>
             </DialogTrigger>
             <DialogContent className="left-auto right-0 top-0 h-[100dvh] w-[min(92vw,24rem)] max-w-none translate-x-0 translate-y-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden rounded-none border-y-0 border-r-0 p-0 sm:max-h-[100dvh] sm:rounded-none sm:p-0">
               <DialogHeader className="border-b px-5 py-4 pr-12 text-left">
-                <DialogTitle>导航菜单</DialogTitle>
-                <DialogDescription>快速切换页面</DialogDescription>
+                <DialogTitle>{t("navigation.mobileMenuTitle")}</DialogTitle>
+                <DialogDescription>{t("navigation.mobileMenuDescription")}</DialogDescription>
               </DialogHeader>
 
               <nav className="min-h-0 space-y-2 overflow-y-auto overscroll-contain px-3 py-4">
-                <p className="px-2 text-xs uppercase tracking-[0.14em] text-muted-foreground">用户菜单</p>
+                <p className="px-2 text-xs uppercase tracking-[0.14em] text-muted-foreground">{t("navigation.userMenu")}</p>
                 {visibleUserNavItems.map((item) => {
                   const active = pathname === item.href;
                   return (
@@ -75,16 +79,16 @@ export function Header() {
                         "flex min-w-0 items-center gap-3 rounded-lg px-3 py-3 text-sm",
                         active ? "bg-primary/12 text-primary" : "hover:bg-muted"
                       )}
-                    >
-                      <item.icon className="h-4 w-4 shrink-0" />
-                      <span className="truncate">{item.label}</span>
+                      >
+                        <item.icon className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{t(item.labelKey)}</span>
                     </Link>
                   );
                 })}
 
                 {isAdmin && (
                   <>
-                    <p className="px-2 pt-2 text-xs uppercase tracking-[0.14em] text-muted-foreground">管理菜单</p>
+                    <p className="px-2 pt-2 text-xs uppercase tracking-[0.14em] text-muted-foreground">{t("navigation.adminMenu")}</p>
                     {visibleAdminNavItems.map((item) => {
                       const active = pathname.startsWith(item.href);
                       return (
@@ -97,9 +101,9 @@ export function Header() {
                             "flex min-w-0 items-center gap-3 rounded-lg px-3 py-3 text-sm",
                             active ? "bg-primary/12 text-primary" : "hover:bg-muted"
                           )}
-                        >
-                          <item.icon className="h-4 w-4 shrink-0" />
-                          <span className="truncate">{item.label}</span>
+                          >
+                            <item.icon className="h-4 w-4 shrink-0" />
+                          <span className="truncate">{t(item.labelKey)}</span>
                         </Link>
                       );
                     })}
@@ -107,34 +111,33 @@ export function Header() {
                 )}
               </nav>
 
-              <div className="grid grid-cols-2 gap-2 border-t bg-background/95 p-4">
-                <a
-                  href="https://github.com/Prejudice-Studio/Twilight"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="col-span-2 flex h-11 min-w-0 items-center justify-center gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
-                >
-                  <GithubIcon className="h-4 w-4 shrink-0" />
-                  <span className="truncate">GitHub Project</span>
-                </a>
+              <div className="grid grid-cols-3 gap-2 border-t bg-background/95 p-4">
+                <GithubProjectLink className="col-span-3" />
                 <Button
                   variant="outline"
                   className="h-11 w-full min-w-0"
                   onClick={() => setTheme(isDark ? "light" : "dark")}
-                  title={`当前主题：${isDark ? "暗色" : "浅色"}`}
+                  title={`${themeLabel} · ${t("common.switchTheme")}`}
+                  aria-label={t("common.switchTheme")}
                 >
                   {isDark ? <Moon className="mr-2 h-4 w-4 shrink-0" /> : <Sun className="mr-2 h-4 w-4 shrink-0" />}
-                  <span className="truncate">{isDark ? "暗色" : "浅色"}</span>
+                  <span className="truncate">{themeLabel}</span>
                 </Button>
+                <LocaleSwitcher
+                  align="center"
+                  className="h-11 w-full justify-center px-2"
+                  onLocaleChange={() => setMobileOpen(false)}
+                />
                 <Button
                   variant="outline"
                   className="h-11 w-full min-w-0"
+                  aria-label={t("common.logout")}
                   onClick={() => {
                     setMobileOpen(false);
                     void logout();
                   }}
                 >
-                  <span className="truncate">退出登录</span>
+                  <span className="truncate">{t("common.logout")}</span>
                 </Button>
               </div>
             </DialogContent>
@@ -156,9 +159,9 @@ export function Header() {
             </div>
           )}
           <div className="min-w-0">
-            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">DashBoard</p>
+            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{t("navigation.dashboardLabel")}</p>
             <h1 className="truncate text-base font-semibold md:text-lg">
-              欢迎回来，{user?.username}
+              {t("navigation.welcomeBack", { username: user?.username || "" })}
             </h1>
           </div>
         </div>

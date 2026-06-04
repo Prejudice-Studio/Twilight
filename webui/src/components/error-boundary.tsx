@@ -3,6 +3,7 @@
 import React, { Component, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/lib/i18n";
 
 /**
  * ErrorBoundary 给 React 渲染期抛错兜底。
@@ -54,44 +55,50 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       return this.props.fallback(error, this.reset);
     }
 
-    return (
-      <div
-        role="alert"
-        aria-live="assertive"
-        className="flex min-h-[60vh] items-center justify-center p-4"
-      >
-        <div className="w-full max-w-md rounded-lg border border-destructive/40 bg-card p-6 shadow-sm">
-          <div className="mb-3 flex items-center gap-2 text-destructive">
-            <AlertTriangle className="h-5 w-5" aria-hidden="true" />
-            <h2 className="text-base font-semibold">页面渲染出错了</h2>
-          </div>
-          <p className="mb-4 text-sm text-muted-foreground">
-            这一区域加载失败。可以先重试，如果反复失败建议刷新页面或回到首页。
-          </p>
-          {process.env.NODE_ENV !== "production" && (
-            <pre className="mb-4 max-h-40 overflow-auto rounded bg-muted px-3 py-2 text-xs text-muted-foreground">
-              {error.message}
-            </pre>
-          )}
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" onClick={this.reset}>
-              <RefreshCw className="mr-1.5 h-4 w-4" aria-hidden="true" />
-              重试
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                if (typeof window !== "undefined") {
-                  window.location.href = "/dashboard";
-                }
-              }}
-            >
-              回到首页
-            </Button>
-          </div>
+    return <DefaultErrorFallback error={error} reset={this.reset} />;
+  }
+}
+
+function DefaultErrorFallback({ error, reset }: { error: Error; reset: () => void }) {
+  const { t } = useI18n();
+
+  return (
+    <div
+      role="alert"
+      aria-live="assertive"
+      className="flex min-h-[60vh] items-center justify-center p-4"
+    >
+      <div className="w-full max-w-md rounded-lg border border-destructive/40 bg-card p-6 shadow-sm">
+        <div className="mb-3 flex items-center gap-2 text-destructive">
+          <AlertTriangle className="h-5 w-5" aria-hidden="true" />
+          <h2 className="text-base font-semibold">{t("errorBoundary.title")}</h2>
+        </div>
+        <p className="mb-4 text-sm text-muted-foreground">
+          {t("errorBoundary.description")}
+        </p>
+        {process.env.NODE_ENV !== "production" && (
+          <pre className="mb-4 max-h-40 overflow-auto rounded bg-muted px-3 py-2 text-xs text-muted-foreground">
+            {error.message}
+          </pre>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={reset}>
+            <RefreshCw className="mr-1.5 h-4 w-4" aria-hidden="true" />
+            {t("common.retry")}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              if (typeof window !== "undefined") {
+                window.location.href = "/dashboard";
+              }
+            }}
+          >
+            {t("errorBoundary.home")}
+          </Button>
         </div>
       </div>
-    );
-  }
+    </div>
+  );
 }

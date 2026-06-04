@@ -39,6 +39,7 @@ import {
   AlertDescription,
   AlertTitle,
 } from "@/components/ui/alert";
+import { useI18n } from "@/lib/i18n";
 
 interface ApiKey {
   id: number;
@@ -62,6 +63,7 @@ function isNormalOps(k: { allow_query: boolean }) {
 
 export default function ApiKeyPage() {
   const { toast } = useToast();
+  const { t } = useI18n();
   const { confirm } = useConfirm();
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [isSaving, setIsSaving] = useState(false);
@@ -90,12 +92,12 @@ export default function ApiKeyPage() {
   const loadApiKeysResource = useCallback(async () => {
     const res = await api.getMyApiKeys();
     if (!res.success) {
-      throw new Error(res.message || "无法加载 API Keys");
+      throw new Error(res.message || t("apiKey.loadFailed"));
     }
     const keys = Array.isArray(res.data?.keys) ? (res.data!.keys as ApiKey[]) : [];
     setApiKeys(keys);
     return keys;
-  }, []);
+  }, [t]);
 
   const {
     isLoading,
@@ -105,7 +107,7 @@ export default function ApiKeyPage() {
 
   const handleGenerateKey = async () => {
     if (!newKeyForm.name.trim()) {
-      toast({ title: "错误", description: "请输入 Key 名称", variant: "destructive" });
+      toast({ title: t("common.error"), description: t("apiKey.nameRequired"), variant: "destructive" });
       return;
     }
     setIsSaving(true);
@@ -123,11 +125,11 @@ export default function ApiKeyPage() {
         setNewKeyForm({ name: "", normalOps: true, rate_limit: 100 });
         await loadApiKeys();
       } else {
-        toast({ title: "创建失败", description: res.message || "无法创建 API Key", variant: "destructive" });
+        toast({ title: t("common.createFailed"), description: res.message || t("apiKey.createFailedDescription"), variant: "destructive" });
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "网络错误";
-      toast({ title: "创建失败", description: msg, variant: "destructive" });
+      const msg = err instanceof Error ? err.message : t("common.networkError");
+      toast({ title: t("common.createFailed"), description: msg, variant: "destructive" });
     } finally {
       setIsSaving(false);
     }
@@ -144,15 +146,15 @@ export default function ApiKeyPage() {
         rate_limit: editForm.rate_limit,
       });
       if (res.success) {
-        toast({ title: "成功", description: "API Key 已更新" });
+        toast({ title: t("common.success"), description: t("apiKey.updatedDescription") });
         setOpenEdit(false);
         await loadApiKeys();
       } else {
-        toast({ title: "更新失败", description: res.message || "无法更新", variant: "destructive" });
+        toast({ title: t("common.updateFailed"), description: res.message || t("apiKey.updateFailedDescription"), variant: "destructive" });
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "网络错误";
-      toast({ title: "更新失败", description: msg, variant: "destructive" });
+      const msg = err instanceof Error ? err.message : t("common.networkError");
+      toast({ title: t("common.updateFailed"), description: msg, variant: "destructive" });
     } finally {
       setIsSaving(false);
     }
@@ -160,24 +162,24 @@ export default function ApiKeyPage() {
 
   const handleDeleteKey = async (keyId: number) => {
     const ok = await confirm({
-      title: "删除 API Key？",
-      description: "删除后该 Key 将立即失效，且无法恢复。",
+      title: t("apiKey.deleteConfirmTitle"),
+      description: t("apiKey.deleteConfirmDescription"),
       tone: "danger",
-      confirmLabel: "删除",
+      confirmLabel: t("common.delete"),
     });
     if (!ok) return;
     setIsSaving(true);
     try {
       const res = await api.deleteMyApiKey(keyId);
       if (res.success) {
-        toast({ title: "成功", description: "API Key 已删除" });
+        toast({ title: t("common.success"), description: t("apiKey.deletedDescription") });
         await loadApiKeys();
       } else {
-        toast({ title: "删除失败", description: res.message || "无法删除", variant: "destructive" });
+        toast({ title: t("common.deleteFailed"), description: res.message || t("apiKey.deleteFailedDescription"), variant: "destructive" });
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "网络错误";
-      toast({ title: "删除失败", description: msg, variant: "destructive" });
+      const msg = err instanceof Error ? err.message : t("common.networkError");
+      toast({ title: t("common.deleteFailed"), description: msg, variant: "destructive" });
     } finally {
       setIsSaving(false);
     }
@@ -185,10 +187,10 @@ export default function ApiKeyPage() {
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text).catch(() => {
-      toast({ title: "复制失败", description: "浏览器拒绝访问剪贴板", variant: "destructive" });
+      toast({ title: t("common.copyFailed"), description: t("common.clipboardDenied"), variant: "destructive" });
       return;
     });
-    toast({ title: "已复制", description: "已复制到剪贴板" });
+    toast({ title: t("common.copied"), description: t("common.copiedToClipboard") });
   };
 
   const formatDate = (timestamp: number | null) => {
@@ -204,26 +206,26 @@ export default function ApiKeyPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">API Key 管理</h1>
-          <p className="text-sm text-muted-foreground">创建和管理 API Keys，用于外部系统调用</p>
+          <h1 className="text-2xl font-bold">{t("apiKey.title")}</h1>
+          <p className="text-sm text-muted-foreground">{t("apiKey.description")}</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isLoading}>
             <RefreshCw className={`h-4 w-4 mr-1 ${isLoading ? "animate-spin" : ""}`} />
-            刷新
+            {t("common.refresh")}
           </Button>
           <Button onClick={() => setOpenGenerate(true)} size="sm">
             <Plus className="h-4 w-4 mr-1" />
-            新建
+            {t("apiKey.newButton")}
           </Button>
         </div>
       </div>
 
       <Alert className="bg-blue-500/10 border-blue-500/20">
         <Key className="h-4 w-4" />
-        <AlertTitle>使用说明</AlertTitle>
+        <AlertTitle>{t("apiKey.usageTitle")}</AlertTitle>
         <AlertDescription className="text-xs mt-1">
-          API Key 用于外部系统访问你的账号。请勿泄露给他人，删除后无法恢复。
+          {t("apiKey.usageDescription")}
         </AlertDescription>
       </Alert>
 
@@ -232,14 +234,14 @@ export default function ApiKeyPage() {
           <Card className="border-destructive/40">
             <CardContent className="p-6 text-center space-y-3">
               <AlertTriangle className="h-8 w-8 mx-auto text-destructive" />
-              <p className="text-sm text-foreground font-medium">无法加载 API Keys</p>
+              <p className="text-sm text-foreground font-medium">{t("apiKey.loadFailed")}</p>
               <p className="text-xs text-muted-foreground break-words">{error}</p>
               <p className="text-[11px] text-muted-foreground">
-                若后端返回 500，请确认 Go 后端已完成数据库迁移并已重启
+                {t("apiKey.migrationHint")}
               </p>
               <Button variant="outline" size="sm" onClick={handleRefresh}>
                 <RefreshCw className="h-4 w-4 mr-1" />
-                重试
+                {t("common.retry")}
               </Button>
             </CardContent>
           </Card>
@@ -247,15 +249,15 @@ export default function ApiKeyPage() {
           <Card className="border-dashed">
             <CardContent className="p-8 text-center">
               <Loader2 className="h-8 w-8 mx-auto animate-spin text-muted-foreground mb-2" />
-              <p className="text-sm text-muted-foreground">正在加载 API Keys...</p>
+              <p className="text-sm text-muted-foreground">{t("apiKey.loading")}</p>
             </CardContent>
           </Card>
         ) : apiKeys.length === 0 ? (
           <Card className="border-dashed">
             <CardContent className="p-8 text-center">
               <Key className="h-10 w-10 mx-auto text-muted-foreground mb-2 opacity-40" />
-              <p className="font-medium">暂无 API Keys</p>
-              <p className="text-xs text-muted-foreground mt-1">点击右上角“新建”按钮来创建你的第一个 API Key</p>
+              <p className="font-medium">{t("apiKey.emptyTitle")}</p>
+              <p className="text-xs text-muted-foreground mt-1">{t("apiKey.emptyDescription")}</p>
             </CardContent>
           </Card>
         ) : (
@@ -267,7 +269,7 @@ export default function ApiKeyPage() {
                     <div className="flex items-center gap-2 min-w-0">
                       <h3 className="font-medium truncate">{apiKey.name}</h3>
                       <Badge variant={apiKey.enabled ? "default" : "secondary"} className="shrink-0 text-xs">
-                        {apiKey.enabled ? "启用" : "停用"}
+                        {apiKey.enabled ? t("apiKey.enabled") : t("apiKey.disabled")}
                       </Badge>
                     </div>
                     <div className="flex gap-1 shrink-0">
@@ -308,31 +310,31 @@ export default function ApiKeyPage() {
                     {revealedKeys[apiKey.id] && (
                       <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0"
                         onClick={() => setShowKeyId(showKeyId === apiKey.id ? null : apiKey.id)}
-                        title={showKeyId === apiKey.id ? "隐藏明文" : "显示明文（仅本次会话）"}>
+                        title={showKeyId === apiKey.id ? t("apiKey.hidePlain") : t("apiKey.showPlain")}>
                         {showKeyId === apiKey.id ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                       </Button>
                     )}
                     <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0"
                       onClick={() => copyToClipboard(revealedKeys[apiKey.id] || apiKey.key)}
-                      title={revealedKeys[apiKey.id] ? "复制明文" : "明文已不可见，仅复制掩码"}>
+                      title={revealedKeys[apiKey.id] ? t("apiKey.copyPlain") : t("apiKey.copyMasked")}>
                       <Copy className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                   {!revealedKeys[apiKey.id] && (
                     <p className="text-[10px] text-muted-foreground -mt-1">
-                      明文仅在创建时显示一次，如已遗失请删除后重新创建
+                      {t("apiKey.plaintextOnce")}
                     </p>
                   )}
 
                   <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
                     <span className="flex items-center gap-1">
                       <Shield className="h-3 w-3" />
-                      普通操作: {isNormalOps(apiKey) ? <CheckCircle2 className="h-3 w-3 text-green-500" /> : <XCircle className="h-3 w-3 text-red-500" />}
+                      {t("apiKey.normalOps")}: {isNormalOps(apiKey) ? <CheckCircle2 className="h-3 w-3 text-green-500" /> : <XCircle className="h-3 w-3 text-red-500" />}
                     </span>
                     <Separator orientation="vertical" className="h-3" />
-                    <span>{apiKey.request_count} 次请求</span>
-                    <span>限制 {apiKey.rate_limit}/h</span>
-                    {apiKey.last_used && <span>最后使用 {formatDate(apiKey.last_used)}</span>}
+                    <span>{t("apiKey.requestCount", { count: apiKey.request_count })}</span>
+                    <span>{t("apiKey.rateLimit", { limit: apiKey.rate_limit })}</span>
+                    {apiKey.last_used && <span>{t("apiKey.lastUsed", { time: formatDate(apiKey.last_used) })}</span>}
                   </div>
                 </div>
               </CardContent>
@@ -344,16 +346,16 @@ export default function ApiKeyPage() {
       <Dialog open={openGenerate} onOpenChange={(open) => { setOpenGenerate(open); if (!open) setGeneratedKey(null); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>新建 API Key</DialogTitle>
-            <DialogDescription>设置权限和限制</DialogDescription>
+            <DialogTitle>{t("apiKey.newTitle")}</DialogTitle>
+            <DialogDescription>{t("apiKey.newDescription")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             {generatedKey ? (
               <Alert className="bg-green-500/10 border-green-500/20">
                 <CheckCircle2 className="h-4 w-4 text-green-500" />
-                <AlertTitle>生成成功</AlertTitle>
+                <AlertTitle>{t("apiKey.generatedTitle")}</AlertTitle>
                 <AlertDescription className="mt-2">
-                  <p className="text-xs mb-2">请立即复制保存，关闭后无法再次查看。</p>
+                  <p className="text-xs mb-2">{t("apiKey.copyImmediately")}</p>
                   <div className="flex gap-2">
                     <Input value={generatedKey} readOnly className="font-mono text-xs" />
                     <Button size="sm" variant="outline" onClick={() => copyToClipboard(generatedKey)}>
@@ -365,26 +367,26 @@ export default function ApiKeyPage() {
             ) : (
               <>
                 <div className="space-y-2">
-                  <Label>名称</Label>
-                  <Input placeholder="例如: 自动查询脚本" value={newKeyForm.name}
+                  <Label>{t("apiKey.name")}</Label>
+                  <Input placeholder={t("apiKey.namePlaceholder")} value={newKeyForm.name}
                     onChange={(e) => setNewKeyForm({ ...newKeyForm, name: e.target.value })} />
                 </div>
                 <div className="space-y-3">
-                  <Label>权限</Label>
+                  <Label>{t("apiKey.permissions")}</Label>
                   <div className="flex items-center justify-between p-3 border rounded-md">
                     <div>
                       <div className="flex items-center gap-1.5">
                         <Shield className="h-4 w-4 text-blue-500" />
-                        <span className="text-sm font-medium">普通操作</span>
+                        <span className="text-sm font-medium">{t("apiKey.normalOps")}</span>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">查询信息等只读操作</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{t("apiKey.readonlyOpsDescription")}</p>
                     </div>
                     <Switch checked={newKeyForm.normalOps}
                       onCheckedChange={(v) => setNewKeyForm({ ...newKeyForm, normalOps: v })} />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>速率限制（请求/小时）</Label>
+                  <Label>{t("apiKey.rateLimitLabel")}</Label>
                   <Input type="number" min="0" value={newKeyForm.rate_limit}
                     onChange={(e) => setNewKeyForm({ ...newKeyForm, rate_limit: parseInt(e.target.value) || 0 })} />
                 </div>
@@ -393,11 +395,11 @@ export default function ApiKeyPage() {
           </div>
           <div className="flex justify-end gap-2 mt-2">
             <Button variant="outline" onClick={() => { setOpenGenerate(false); setGeneratedKey(null); }}>
-              {generatedKey ? "关闭" : "取消"}
+              {generatedKey ? t("common.close") : t("common.cancel")}
             </Button>
             {!generatedKey && (
               <Button onClick={handleGenerateKey} disabled={isSaving}>
-                {isSaving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />生成中...</> : "生成"}
+                {isSaving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{t("apiKey.generating")}</> : t("apiKey.generate")}
               </Button>
             )}
           </div>
@@ -407,46 +409,46 @@ export default function ApiKeyPage() {
       <Dialog open={openEdit} onOpenChange={setOpenEdit}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>编辑 API Key</DialogTitle>
-            <DialogDescription>修改名称和权限</DialogDescription>
+            <DialogTitle>{t("apiKey.editTitle")}</DialogTitle>
+            <DialogDescription>{t("apiKey.editDescription")}</DialogDescription>
           </DialogHeader>
           {editingKey && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label>名称</Label>
+                <Label>{t("apiKey.name")}</Label>
                 <Input value={editForm.name}
                   onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
               </div>
               <div className="flex items-center justify-between p-3 border rounded-md">
-                <span className="text-sm font-medium">启用</span>
+                <span className="text-sm font-medium">{t("apiKey.enabled")}</span>
                 <Switch checked={editForm.enabled}
                   onCheckedChange={(v) => setEditForm({ ...editForm, enabled: v })} />
               </div>
               <div className="space-y-3">
-                <Label>权限</Label>
+                <Label>{t("apiKey.permissions")}</Label>
                 <div className="flex items-center justify-between p-3 border rounded-md">
                   <div>
                     <div className="flex items-center gap-1.5">
                       <Shield className="h-4 w-4 text-blue-500" />
-                      <span className="text-sm font-medium">普通操作</span>
+                      <span className="text-sm font-medium">{t("apiKey.normalOps")}</span>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">查询信息等只读操作</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{t("apiKey.readonlyOpsDescription")}</p>
                   </div>
                   <Switch checked={editForm.normalOps}
                     onCheckedChange={(v) => setEditForm({ ...editForm, normalOps: v })} />
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>速率限制（请求/小时）</Label>
+                <Label>{t("apiKey.rateLimitLabel")}</Label>
                 <Input type="number" min="0" value={editForm.rate_limit}
                   onChange={(e) => setEditForm({ ...editForm, rate_limit: parseInt(e.target.value) || 0 })} />
               </div>
             </div>
           )}
           <div className="flex justify-end gap-2 mt-2">
-            <Button variant="outline" onClick={() => setOpenEdit(false)}>取消</Button>
+            <Button variant="outline" onClick={() => setOpenEdit(false)}>{t("common.cancel")}</Button>
             <Button onClick={handleUpdateKey} disabled={isSaving}>
-              {isSaving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />保存中...</> : "保存"}
+              {isSaving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{t("common.saving")}</> : t("common.save")}
             </Button>
           </div>
         </DialogContent>

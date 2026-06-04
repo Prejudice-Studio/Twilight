@@ -48,6 +48,7 @@ import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError } from "@/components/layout/page-state";
 import { api, type UserInfo } from "@/lib/api";
 import { ApiError } from "@/lib/api-request";
+import { useI18n } from "@/lib/i18n";
 import { ErrCodes } from "@/lib/errcode";
 import { formatDate } from "@/lib/utils";
 import {
@@ -83,6 +84,7 @@ type UserSelectionScope = "manual" | "emby" | "all";
 export default function AdminUsersPage() {
   const { toast } = useToast();
   const { confirmAction } = useConfirm();
+  const { t } = useI18n();
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -112,6 +114,7 @@ export default function AdminUsersPage() {
   const [cleanupLoading, setCleanupLoading] = useState(false);
   const [stalePendingLoading, setStalePendingLoading] = useState(false);
   const [registrationQueueLoading, setRegistrationQueueLoading] = useState(false);
+  const [clearEmailLoading, setClearEmailLoading] = useState(false);
 
   // Edit dialog states
   const [editOpen, setEditOpen] = useState(false);
@@ -1233,6 +1236,44 @@ export default function AdminUsersPage() {
     }
   };
 
+  const handleClearAllEmails = async () => {
+    setClearEmailLoading(true);
+    try {
+      const preview = await api.clearAllUserEmails({ dryRun: true });
+      if (!preview.success || !preview.data) {
+        toast({ title: t("adminUsers.previewFailed"), description: preview.message, variant: "destructive" });
+        return;
+      }
+      if (preview.data.count === 0) {
+        toast({ title: t("adminUsers.noEmailsTitle"), description: t("adminUsers.noEmailsDescription"), variant: "success" });
+        return;
+      }
+      const ok = await confirmAction({
+        title: t("adminUsers.clearEmailsConfirmTitle"),
+        description: t("adminUsers.clearEmailsConfirmDescription", { count: preview.data.count }),
+        tone: "warning",
+        confirmLabel: t("adminUsers.clearEmailsConfirmLabel"),
+      });
+      if (!ok) return;
+      const res = await api.clearAllUserEmails({ dryRun: false });
+      if (res.success && res.data) {
+        toast({
+          title: t("adminUsers.clearEmailsSuccessTitle", { count: res.data.cleared }),
+          description: t("adminUsers.clearEmailsSuccessDescription", { totalUsers: res.data.total_users }),
+          variant: "success",
+        });
+        invalidateUsersCache();
+        await loadUsers();
+      } else {
+        toast({ title: t("adminUsers.cleanupFailed"), description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: t("adminUsers.cleanupFailed"), description: error.message || t("common.networkError"), variant: "destructive" });
+    } finally {
+      setClearEmailLoading(false);
+    }
+  };
+
   const handleClearRegistrationQueueUsers = async () => {
     setRegistrationQueueLoading(true);
     try {
@@ -1519,6 +1560,17 @@ export default function AdminUsersPage() {
                   >
                     <UserCheck className="mr-2 h-4 w-4" />
                     批量启用禁用账号
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={clearEmailLoading}
+                    onClick={() => void handleClearAllEmails()}
+                  >
+                    {clearEmailLoading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="mr-2 h-4 w-4" />
+                    )}
+                    {t("adminUsers.clearEmailsAction")}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem

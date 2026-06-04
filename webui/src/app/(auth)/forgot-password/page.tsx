@@ -10,9 +10,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
 import { validateEmbyUsername } from "@/lib/validators";
+import { useI18n } from "@/lib/i18n";
 
 export default function ForgotPasswordPage() {
   const { toast } = useToast();
+  const { t } = useI18n();
   const [embyUsername, setEmbyUsername] = useState("");
   const [embyPassword, setEmbyPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -26,7 +28,7 @@ export default function ForgotPasswordPage() {
       return;
     }
     if (!embyPassword) {
-      toast({ title: "请填写 Emby 密码", variant: "destructive" });
+      toast({ title: t("auth.forgotPassword.embyPasswordRequired"), variant: "destructive" });
       return;
     }
     setIsLoading(true);
@@ -36,12 +38,12 @@ export default function ForgotPasswordPage() {
       if (res.success && res.data) {
         setResult(res.data);
         setEmbyPassword("");
-        toast({ title: "密码已重置", description: "新密码只显示一次，请立即保存", variant: "success" });
+        toast({ title: t("auth.forgotPassword.resetSuccess"), description: t("auth.forgotPassword.oneTimePassword"), variant: "success" });
       } else {
-        toast({ title: "找回失败", description: res.message, variant: "destructive" });
+        toast({ title: t("auth.forgotPassword.failed"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "找回失败", description: error.message || "网络异常", variant: "destructive" });
+      toast({ title: t("auth.forgotPassword.failed"), description: error.message || t("common.networkError"), variant: "destructive" });
     } finally {
       setIsLoading(false);
     }
@@ -50,7 +52,7 @@ export default function ForgotPasswordPage() {
   const copyPassword = () => {
     if (!result?.new_password) return;
     navigator.clipboard.writeText(result.new_password);
-    toast({ title: "已复制新密码" });
+    toast({ title: t("auth.forgotPassword.copied") });
   };
 
   return (
@@ -60,29 +62,29 @@ export default function ForgotPasswordPage() {
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/14 text-primary">
             <KeyRound className="h-7 w-7" />
           </div>
-          <CardTitle className="text-2xl">找回 Web 登录密码</CardTitle>
-          <CardDescription>验证你已绑定的 Emby 账号后，系统会生成一个新的 Web 登录密码。</CardDescription>
+          <CardTitle className="text-2xl">{t("auth.forgotPassword.title")}</CardTitle>
+          <CardDescription>{t("auth.forgotPassword.description")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
           <form onSubmit={submit} className="space-y-4">
             <div className="space-y-2">
-              <Label>Emby 用户名</Label>
+              <Label>{t("auth.forgotPassword.embyUsername")}</Label>
               <Input value={embyUsername} onChange={(e) => setEmbyUsername(e.target.value)} autoComplete="username" />
             </div>
             <div className="space-y-2">
-              <Label>Emby 密码</Label>
+              <Label>{t("auth.forgotPassword.embyPassword")}</Label>
               <Input type="password" value={embyPassword} onChange={(e) => setEmbyPassword(e.target.value)} autoComplete="current-password" />
             </div>
             <Button type="submit" className="w-full" disabled={isLoading}>
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              验证并重置密码
+              {t("auth.forgotPassword.submit")}
             </Button>
           </form>
 
           {result && (
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
-              <p className="text-sm font-semibold">Web 用户名：{result.username}</p>
-              <p className="mt-2 text-xs text-muted-foreground">新密码只显示一次，请立即复制并登录后修改。</p>
+              <p className="text-sm font-semibold">{t("auth.forgotPassword.webUsername", { username: result.username })}</p>
+              <p className="mt-2 text-xs text-muted-foreground">{t("auth.forgotPassword.copyHint")}</p>
               <div className="mt-3 flex items-center gap-2">
                 <code className="min-w-0 flex-1 break-all rounded bg-background px-3 py-2 text-sm">{result.new_password}</code>
                 <Button
@@ -90,7 +92,7 @@ export default function ForgotPasswordPage() {
                   size="icon"
                   variant="outline"
                   onClick={copyPassword}
-                  aria-label="复制新密码"
+                  aria-label={t("auth.forgotPassword.copyPassword")}
                 >
                   <Copy className="h-4 w-4" aria-hidden="true" />
                 </Button>
@@ -99,7 +101,7 @@ export default function ForgotPasswordPage() {
           )}
 
           <div className="text-center text-sm">
-            <Link href="/login" className="font-medium text-primary hover:underline">返回登录</Link>
+            <Link href="/login" className="font-medium text-primary hover:underline">{t("auth.forgotPassword.backToLogin")}</Link>
           </div>
         </CardContent>
       </Card>

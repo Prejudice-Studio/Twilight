@@ -116,6 +116,8 @@ export type ErrCode =
   | "REGCODE_BATCH_DELETE_FAILED"
   // === 签到 ===
   | "SIGNIN_DISABLED"
+  | "SIGNIN_RENEWAL_DISABLED"
+  | "SIGNIN_INSUFFICIENT_POINTS"
   // === 数据库迁移 / 备份 ===
   | "DB_BACKUP_LIST_FAILED"
   | "DB_BACKUP_INVALID"
@@ -156,6 +158,7 @@ export type ErrCode =
   | "ADMIN_KICK_NO_EMBY_CONFIRM_REQUIRED"
   | "ADMIN_ENABLE_REJOINED_CONFIRM_REQUIRED"
   | "ADMIN_KICK_UNBOUND_CONFIRM_REQUIRED"
+  | "ADMIN_CLEAR_EMAILS_CONFIRM_REQUIRED"
   | "ADMIN_WHITELIST_USERNAME_REQUIRED"
   // === Rebind 申请审核 ===
   | "REBIND_STATUS_INVALID"
@@ -386,6 +389,8 @@ export const ErrCodes = {
   RegcodeBatchFailed: "REGCODE_BATCH_DELETE_FAILED",
   // 签到
   SigninDisabled: "SIGNIN_DISABLED",
+  SigninRenewalDisabled: "SIGNIN_RENEWAL_DISABLED",
+  SigninInsufficientPoints: "SIGNIN_INSUFFICIENT_POINTS",
   // 数据库迁移 / 备份
   DBBackupListFailed: "DB_BACKUP_LIST_FAILED",
   DBBackupInvalid: "DB_BACKUP_INVALID",
@@ -426,6 +431,7 @@ export const ErrCodes = {
   AdminKickNoEmbyConfirm: "ADMIN_KICK_NO_EMBY_CONFIRM_REQUIRED",
   AdminEnableRejoinedConfirm: "ADMIN_ENABLE_REJOINED_CONFIRM_REQUIRED",
   AdminKickUnboundConfirm: "ADMIN_KICK_UNBOUND_CONFIRM_REQUIRED",
+  AdminClearEmailsConfirm: "ADMIN_CLEAR_EMAILS_CONFIRM_REQUIRED",
   AdminWhitelistUsernameEmpty: "ADMIN_WHITELIST_USERNAME_REQUIRED",
   // Rebind 申请审核
   RebindStatusInvalid: "REBIND_STATUS_INVALID",

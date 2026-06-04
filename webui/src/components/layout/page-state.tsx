@@ -2,13 +2,15 @@
 
 import { Loader2, RefreshCw, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/lib/i18n";
 
-export function PageLoading({ message = "加载中..." }: { message?: string }) {
+export function PageLoading({ message }: { message?: string }) {
+  const { t } = useI18n();
   return (
     <div className="flex min-h-[260px] items-center justify-center">
       <div className="flex items-center gap-3 rounded-xl border border-border/70 bg-card/70 px-4 py-3 text-muted-foreground">
         <Loader2 className="h-5 w-5 animate-spin" />
-        <span>{message}</span>
+        <span>{message || t("common.loading")}</span>
       </div>
     </div>
   );
@@ -21,6 +23,7 @@ export function PageError({
   message: string;
   onRetry?: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="flex min-h-[260px] items-center justify-center">
       <div className="max-w-md rounded-xl border border-destructive/35 bg-card/78 p-6 text-center shadow-sm">
@@ -29,7 +32,7 @@ export function PageError({
         {onRetry && (
           <Button variant="outline" onClick={onRetry}>
             <RefreshCw className="h-4 w-4 mr-2" />
-            重试
+            {t("common.retry")}
           </Button>
         )}
       </div>

@@ -14,6 +14,7 @@ import { api } from "@/lib/api";
 import { RegionRefreshKeys } from "@/lib/region-refresh";
 import { useRegionRefresh } from "@/hooks/use-region-refresh";
 import { normalizeBackgroundImageValue } from "@/lib/safe-url";
+import { useI18n } from "@/lib/i18n";
 
 interface BackgroundConfig {
   lightBg?: string;
@@ -72,6 +73,7 @@ export default function MainLayout({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const { t } = useI18n();
   const { user, isAuthenticated, isLoading, isHydrated, initialize, fetchUser } = useAuthStore();
   const { resolvedTheme, theme } = useTheme();
   const activeTheme = resolvedTheme || theme;
@@ -223,7 +225,7 @@ export default function MainLayout({
         href="#main-content"
         className="sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:left-4 focus-visible:top-4 focus-visible:z-[1000] focus-visible:rounded-md focus-visible:bg-background focus-visible:px-4 focus-visible:py-2 focus-visible:text-sm focus-visible:font-medium focus-visible:text-foreground focus-visible:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
-        跳到主内容
+        {t("accessibility.skipToContent")}
       </a>
       <div className="fixed inset-0 -z-10 pointer-events-none twilight-bg-layer" style={bgStyle} />
       {nextBgStyle && (

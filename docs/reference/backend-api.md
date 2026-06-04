@@ -1211,6 +1211,7 @@ curl -X POST "http://localhost:5000/api/v1/admin/regcodes" \
 | `POST /admin/users/bulk-enable-disabled` | 批量启用被禁用用户 |
 | `POST /admin/users/cleanup-invalid` | 清理无效用户（见下） |
 | `POST /admin/users/clear-stale-pending-emby` | 清理长期 `PENDING_EMBY` 用户 |
+| `POST /admin/users/clear-emails` | 清空所有用户邮箱设置（见下） |
 | `POST /admin/users/kick-no-emby` | 踢出无 Emby 账号用户 |
 
 #### 清理无效用户
@@ -1225,6 +1226,13 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/cleanup-invalid" \
   -H "Content-Type: application/json" \
   -d '{"min_days":7,"dry_run":true}'
 ```
+
+#### 清空所有用户邮箱
+
+`POST /admin/users/clear-emails`
+
+- 请求体：`dry_run` 默认为 `true`，仅预览当前设置了邮箱的用户数量；执行清空时必须传 `{"dry_run":false,"confirm":"CLEAR_ALL_EMAILS"}`。
+- 行为：仅把本地用户的 `email` 字段设置为空，不影响用户名、密码、Telegram 绑定、Emby 绑定或有效期。
 
 ### 9.7 邀请树管理
 
@@ -1745,16 +1753,19 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 | `GET /invite/check` | `AuthPublic` | 校验邀请码（IP 限流 10/60s） |
 | `POST /invite/use` | `AuthUser` | 使用邀请码 |
 
-### 11.5 Signin 模块（装饰性）
+### 11.5 Signin 模块
 
-> 签到为纯装饰性功能，无排行榜、无消费；详见相关配置 `[SAR].signin_enabled`。
+> 签到积分默认仅记录余额；管理员可通过 `[SAR].signin_renewal_enabled` 或 `[Signin].renewal_enabled` 开启积分续期。关闭时 `/signin/me` 的 `renewal.enabled=false`，前端不展示兑换入口。
 
 | 方法/路径 | 认证 | 说明 |
 | --------- | ---- | ---- |
 | `GET /signin/config` | `AuthPublic` | 签到功能配置 |
 | `GET /signin/me` | `AuthUser` | 我的签到状态 |
 | `POST /signin` | `AuthUser` | 执行签到 |
+| `POST /signin/renew` | `AuthUser` | 使用签到积分续期；消耗积分和续期天数由管理员配置 |
 | `GET /signin/history` | `AuthUser` | 签到历史 |
+
+`POST /signin/renew` 成功后在同一次状态写入中扣减 `signin.points` 并延长当前用户 `expired_at`；积分不足返回 `SIGNIN_INSUFFICIENT_POINTS`，功能未开启返回 `SIGNIN_RENEWAL_DISABLED`。
 
 ### 11.6 公告（前台）
 

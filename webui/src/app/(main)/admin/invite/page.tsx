@@ -28,6 +28,7 @@ import { Input } from "@/components/ui/input";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { api, type InviteForest, type InviteForestNode } from "@/lib/api";
+import { useI18n, type MessageKey } from "@/lib/i18n";
 
 interface TreeRow {
   node: InviteForestNode;
@@ -79,20 +80,21 @@ function subtreeSize(uid: number, children: Map<number, number[]>): number {
   return total;
 }
 
-function roleLabel(role: number): string {
-  if (role === 0) return "管理员";
-  if (role === 2) return "白名单";
-  return "用户";
+function roleLabelKey(role: number): MessageKey {
+  if (role === 0) return "adminInvite.roleAdmin";
+  if (role === 2) return "adminInvite.roleWhitelist";
+  return "adminInvite.roleUser";
 }
 
-function formatUnix(seconds?: number | null): string {
-  if (!seconds || seconds <= 0 || seconds >= 253402214400) return "永久";
-  return new Date(seconds * 1000).toLocaleString("zh-CN");
+function formatUnix(seconds: number | null | undefined, locale: string, permanent: string): string {
+  if (!seconds || seconds <= 0 || seconds >= 253402214400) return permanent;
+  return new Date(seconds * 1000).toLocaleString(locale);
 }
 
 export default function AdminInviteTreePage() {
   const { toast } = useToast();
   const { confirm } = useConfirm();
+  const { locale, t } = useI18n();
   const [forest, setForest] = useState<InviteForest | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -111,14 +113,14 @@ export default function AdminInviteTreePage() {
       if (res.success && res.data) {
         setForest(res.data);
       } else {
-        throw new Error(res.message || "加载失败");
+        throw new Error(res.message || t("adminInvite.loadFailed"));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "加载失败");
+      setError(err instanceof Error ? err.message : t("adminInvite.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void reload();
@@ -206,92 +208,92 @@ export default function AdminInviteTreePage() {
   const handleDetach = async () => {
     if (!selected) return;
     const ok = await confirm({
-      title: "解除该用户的上级？",
-      description: "该用户会成为新的根节点，其下级仍保留在该用户名下。",
+      title: t("adminInvite.detachTitle"),
+      description: t("adminInvite.detachDescription"),
       tone: "warning",
-      confirmLabel: "解除上级",
+      confirmLabel: t("adminInvite.detach"),
     });
     if (!ok) return;
     const res = await api.adminDetachInviteUser(selected.uid).catch((err) => ({
       success: false,
-      message: err instanceof Error ? err.message : "请求失败",
+      message: err instanceof Error ? err.message : t("adminInvite.requestFailed"),
     }));
     if (res.success) {
-      toast({ title: "已解除上级" });
+      toast({ title: t("adminInvite.detached") });
       await reload();
     } else {
-      toast({ title: "操作失败", description: res.message, variant: "destructive" });
+      toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
     }
   };
 
   const handleCascadeToggle = async (enable: boolean) => {
     if (!selected) return;
-    const action = enable ? "启用" : "禁用";
+    const action = enable ? t("adminInvite.enable") : t("adminInvite.disable");
     const raw = await requestDepth(
-      `级联${action}`,
-      "1 表示仅当前用户，N 表示当前用户加 N-1 层下级，0 表示整棵子树。",
-      `确认${action}`,
+      t("adminInvite.cascadeAction", { action }),
+      t("adminInvite.depthDescription"),
+      t("adminInvite.confirmAction", { action }),
     );
     if (raw === null) return;
     const depth = parseInt(raw, 10);
     if (!Number.isFinite(depth) || depth < 0) {
-      toast({ title: "层级必须是非负整数", variant: "destructive" });
+      toast({ title: t("adminInvite.depthInvalid"), variant: "destructive" });
       return;
     }
     const ok = await confirm({
-      title: `确认级联${action}？`,
-      description: depth === 0 ? "该操作会应用到整棵子树。" : `该操作会应用到 ${depth} 层。`,
+      title: t("adminInvite.confirmCascade", { action }),
+      description: depth === 0 ? t("adminInvite.wholeSubtree") : t("adminInvite.depthApply", { depth }),
       tone: enable ? "warning" : "danger",
-      confirmLabel: `确认${action}`,
+      confirmLabel: t("adminInvite.confirmAction", { action }),
     });
     if (!ok) return;
     const res = await api.toggleUserActive(selected.uid, { enable, cascadeDepth: depth }).catch((err) => ({
       success: false,
-      message: err instanceof Error ? err.message : "请求失败",
+      message: err instanceof Error ? err.message : t("adminInvite.requestFailed"),
       data: null,
     }));
     if (res.success) {
       toast({
-        title: "级联操作已完成",
-        description: `影响 ${res.data?.affected?.length ?? 0} 个，跳过 ${res.data?.skipped?.length ?? 0} 个`,
+        title: t("adminInvite.cascadeComplete"),
+        description: t("adminInvite.cascadeResult", { affected: res.data?.affected?.length ?? 0, skipped: res.data?.skipped?.length ?? 0 }),
         variant: "success",
       });
       await reload();
     } else {
-      toast({ title: "操作失败", description: res.message, variant: "destructive" });
+      toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
     }
   };
 
   const handleCascadeDelete = async () => {
     if (!selected) return;
     const raw = await requestDepth(
-      "级联删除",
-      "1 表示仅当前用户，N 表示当前用户加 N-1 层下级，0 表示整棵子树。",
-      "继续删除",
+      t("adminInvite.cascadeDelete"),
+      t("adminInvite.depthDescription"),
+      t("adminInvite.continueDelete"),
     );
     if (raw === null) return;
     const depth = parseInt(raw, 10);
     if (!Number.isFinite(depth) || depth < 0) {
-      toast({ title: "层级必须是非负整数", variant: "destructive" });
+      toast({ title: t("adminInvite.depthInvalid"), variant: "destructive" });
       return;
     }
     const ok = await confirm({
-      title: "确认级联删除？",
-      description: depth === 0 ? "该操作会删除整棵子树的本地账号和 Emby 账号。" : `该操作会删除 ${depth} 层内的本地账号和 Emby 账号。`,
+      title: t("adminInvite.confirmCascadeDelete"),
+      description: depth === 0 ? t("adminInvite.deleteWholeSubtree") : t("adminInvite.deleteDepth", { depth }),
       tone: "danger",
-      confirmLabel: "删除",
+      confirmLabel: t("common.delete"),
     });
     if (!ok) return;
     const res = await api.deleteUserScoped(selected.uid, { mode: "with_emby", cascadeDepth: depth }).catch((err) => ({
       success: false,
-      message: err instanceof Error ? err.message : "请求失败",
+      message: err instanceof Error ? err.message : t("adminInvite.requestFailed"),
     }));
     if (res.success) {
-      toast({ title: "已删除", variant: "success" });
+      toast({ title: t("adminInvite.deleted"), variant: "success" });
       setSelectedUid(null);
       await reload();
     } else {
-      toast({ title: "操作失败", description: res.message, variant: "destructive" });
+      toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
     }
   };
 
@@ -417,7 +419,7 @@ export default function AdminInviteTreePage() {
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-3">{roleLabel(node.role)}</td>
+                        <td className="px-4 py-3">{t(roleLabelKey(node.role))}</td>
                         <td className="px-4 py-3">
                           <Badge variant={node.active ? "success" : "destructive"}>{node.active ? "启用" : "禁用"}</Badge>
                         </td>
@@ -460,15 +462,15 @@ export default function AdminInviteTreePage() {
               <dl className="space-y-2">
                 <div className="flex justify-between gap-3">
                   <dt className="text-muted-foreground">角色</dt>
-                  <dd>{roleLabel(selected.role)}</dd>
+                  <dd>{t(roleLabelKey(selected.role))}</dd>
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="text-muted-foreground">注册时间</dt>
-                  <dd>{formatUnix(selected.register_time)}</dd>
+                  <dd>{formatUnix(selected.register_time, locale, t("adminInvite.permanent"))}</dd>
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="text-muted-foreground">到期时间</dt>
-                  <dd>{formatUnix(selected.expired_at)}</dd>
+                  <dd>{formatUnix(selected.expired_at, locale, t("adminInvite.permanent"))}</dd>
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="text-muted-foreground">根节点</dt>
@@ -516,7 +518,7 @@ export default function AdminInviteTreePage() {
           />
           <DialogFooter>
             <Button variant="outline" onClick={() => closeDepthPrompt(null)}>取消</Button>
-            <Button onClick={() => closeDepthPrompt(depthPrompt?.value || "1")}>{depthPrompt?.confirmLabel || "继续"}</Button>
+            <Button onClick={() => closeDepthPrompt(depthPrompt?.value || "1")}>{depthPrompt?.confirmLabel || t("adminInvite.continue")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

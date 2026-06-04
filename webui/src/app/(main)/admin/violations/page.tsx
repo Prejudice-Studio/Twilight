@@ -34,20 +34,22 @@ import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError } from "@/components/layout/page-state";
 import { api, type ViolationLog } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
+import { useI18n, type MessageKey } from "@/lib/i18n";
 
-const CODE_TYPE_LABELS: Record<string, string> = {
-  regcode_decoy: "诱饵注册码",
-  regcode_target_mismatch: "指名注册码越权",
+const CODE_TYPE_LABELS: Record<string, MessageKey> = {
+  regcode_decoy: "adminViolations.typeDecoy",
+  regcode_target_mismatch: "adminViolations.typeTargetMismatch",
 };
 
-const ACTION_LABELS: Record<string, string> = {
-  disable_user: "已禁用账号",
-  disable_emby: "已禁用 Emby",
-  log_only: "仅记录",
+const ACTION_LABELS: Record<string, MessageKey> = {
+  disable_user: "adminViolations.actionDisableUser",
+  disable_emby: "adminViolations.actionDisableEmby",
+  log_only: "adminViolations.actionLogOnly",
 };
 
 export default function AdminViolationsPage() {
   const { toast } = useToast();
+  const { t } = useI18n();
   const [violations, setViolations] = useState<ViolationLog[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -81,13 +83,13 @@ export default function AdminViolationsPage() {
     try {
       const res = await api.deleteViolation(id);
       if (res.success) {
-        toast({ title: "已删除", variant: "success" });
+        toast({ title: t("adminViolations.deleted"), variant: "success" });
         reload();
       } else {
-        toast({ title: "删除失败", description: res.message, variant: "destructive" });
+        toast({ title: t("common.deleteFailed"), description: res.message, variant: "destructive" });
       }
     } catch (err: unknown) {
-      toast({ title: "删除失败", description: (err as Error).message, variant: "destructive" });
+      toast({ title: t("common.deleteFailed"), description: (err as Error).message, variant: "destructive" });
     }
   };
 
@@ -96,14 +98,14 @@ export default function AdminViolationsPage() {
     try {
       const res = await api.clearViolations();
       if (res.success) {
-        toast({ title: "已清除所有违规记录", variant: "success" });
+        toast({ title: t("adminViolations.clearedAll"), variant: "success" });
         setClearOpen(false);
         reload();
       } else {
-        toast({ title: "清除失败", description: res.message, variant: "destructive" });
+        toast({ title: t("adminViolations.clearFailed"), description: res.message, variant: "destructive" });
       }
     } catch (err: unknown) {
-      toast({ title: "清除失败", description: (err as Error).message, variant: "destructive" });
+      toast({ title: t("adminViolations.clearFailed"), description: (err as Error).message, variant: "destructive" });
     } finally {
       setIsClearing(false);
     }
@@ -123,7 +125,7 @@ export default function AdminViolationsPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <ShieldAlert className="h-6 w-6 text-destructive" />
-          <h1 className="text-2xl font-bold">违规审计</h1>
+          <h1 className="text-2xl font-bold">{t("adminViolations.title")}</h1>
           {total > 0 && (
             <Badge variant="destructive" className="ml-2">
               {total}
@@ -136,30 +138,30 @@ export default function AdminViolationsPage() {
             size="sm"
             onClick={() => setClearOpen(true)}
           >
-            清除全部
+            {t("adminViolations.clearAll")}
           </Button>
         )}
       </div>
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">筛选</CardTitle>
+          <CardTitle className="text-base">{t("adminViolations.filter")}</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col sm:flex-row gap-3">
             <Select value={typeFilter} onValueChange={(v) => { setTypeFilter(v); setPage(1); }}>
               <SelectTrigger className="w-full sm:w-[200px]">
-                <SelectValue placeholder="违规类型" />
+                <SelectValue placeholder={t("adminViolations.typePlaceholder")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">全部类型</SelectItem>
-                <SelectItem value="regcode_decoy">诱饵注册码</SelectItem>
-                <SelectItem value="regcode_target_mismatch">指名码越权</SelectItem>
+                <SelectItem value="all">{t("adminViolations.allTypes")}</SelectItem>
+                <SelectItem value="regcode_decoy">{t("adminViolations.typeDecoy")}</SelectItem>
+                <SelectItem value="regcode_target_mismatch">{t("adminViolations.typeTargetMismatchShort")}</SelectItem>
               </SelectContent>
             </Select>
             <div className="flex gap-2 flex-1">
               <Input
-                placeholder="搜索用户名或卡码..."
+                placeholder={t("adminViolations.searchPlaceholder")}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSearch()}
@@ -181,7 +183,7 @@ export default function AdminViolationsPage() {
           ) : violations.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
               <AlertTriangle className="h-10 w-10 mb-3 opacity-40" />
-              <p>暂无违规记录</p>
+              <p>{t("adminViolations.empty")}</p>
             </div>
           ) : (
             <div className="divide-y">
@@ -207,7 +209,7 @@ export default function AdminViolationsPage() {
                         {v.code}
                       </span>
                       <span className="mx-2">·</span>
-                      <span>{CODE_TYPE_LABELS[v.code_type] || v.code_type}</span>
+                      <span>{CODE_TYPE_LABELS[v.code_type] ? t(CODE_TYPE_LABELS[v.code_type]) : v.code_type}</span>
                     </div>
                     <div className="text-xs text-muted-foreground">
                       {v.reason}
@@ -218,7 +220,7 @@ export default function AdminViolationsPage() {
                       variant={v.action === "log_only" ? "secondary" : "destructive"}
                       className="text-xs"
                     >
-                      {ACTION_LABELS[v.action] || v.action}
+                      {ACTION_LABELS[v.action] ? t(ACTION_LABELS[v.action]) : v.action}
                     </Badge>
                     <span className="text-xs text-muted-foreground whitespace-nowrap">
                       {formatDate(v.created_at)}
@@ -266,14 +268,14 @@ export default function AdminViolationsPage() {
       <Dialog open={clearOpen} onOpenChange={setClearOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>确认清除所有违规记录</DialogTitle>
+            <DialogTitle>{t("adminViolations.clearConfirmTitle")}</DialogTitle>
             <DialogDescription>
-              此操作不可撤销，将删除所有 {total} 条违规审计记录。
+              {t("adminViolations.clearConfirmDescription", { count: total })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setClearOpen(false)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button
               variant="destructive"
@@ -281,7 +283,7 @@ export default function AdminViolationsPage() {
               disabled={isClearing}
             >
               {isClearing && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              确认清除
+              {t("adminViolations.clearConfirm")}
             </Button>
           </DialogFooter>
         </DialogContent>

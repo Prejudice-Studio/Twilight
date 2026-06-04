@@ -10,6 +10,11 @@ import (
 	"github.com/prejudice-studio/twilight/internal/store"
 )
 
+const (
+	adminClearEmailsConfirmMessage = "请输入确认短语 " + confirmClearAllEmails + " 后再执行"
+	adminClearEmailsSuccessMessage = "user emails cleared"
+)
+
 func (a *App) handleEmbySyncV2(w http.ResponseWriter, r *http.Request, _ Params) {
 	updated := 0
 	missing := []map[string]any{}
@@ -576,6 +581,33 @@ func (a *App) handleAdminClearStalePendingEmby(w http.ResponseWriter, r *http.Re
 		}
 	}
 	ok(w, "clear pending complete", map[string]any{"users": usersSummary(targets), "count": len(targets), "cleared": cleared, "failed": failedItems, "dry_run": dryRun})
+}
+
+func (a *App) handleAdminClearUserEmails(w http.ResponseWriter, r *http.Request, _ Params) {
+	payload := decodeMap(r)
+	dryRun := boolValue(payload, "dry_run", true)
+	if !dryRun && stringValue(payload, "confirm") != confirmClearAllEmails {
+		failWithCode(w, http.StatusBadRequest, ErrAdminClearEmailsConfirm, adminClearEmailsConfirmMessage)
+		return
+	}
+	users := a.store().ListUsers()
+	totalUsers := len(users)
+	targets := []store.User{}
+	for _, u := range users {
+		if strings.TrimSpace(u.Email) != "" {
+			targets = append(targets, u)
+		}
+	}
+	cleared := 0
+	if !dryRun {
+		total, count, err := a.store().ClearUserEmails()
+		if statusFromError(w, err) {
+			return
+		}
+		cleared = count
+		totalUsers = total
+	}
+	ok(w, adminClearEmailsSuccessMessage, map[string]any{"users": usersSummary(targets), "count": len(targets), "cleared": cleared, "total_users": totalUsers, "dry_run": dryRun})
 }
 
 func (a *App) handleAdminKickNoEmby(w http.ResponseWriter, r *http.Request, _ Params) {

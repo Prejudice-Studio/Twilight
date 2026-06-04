@@ -57,6 +57,7 @@ import type {
   SigninBonusRule,
   SigninHistoryRecord,
   SigninPublicConfig,
+  SigninRenewalResult,
   SigninSummary,
   SystemHealth,
   SystemInfo,
@@ -400,6 +401,14 @@ class ApiClient {
 
   async signinNow() {
     return this.request<SigninActionResult>("/signin", { method: "POST" });
+  }
+
+  async renewWithSigninCurrency() {
+    const res = await this.request<SigninRenewalResult>("/signin/renew", { method: "POST" });
+    if (res.success && res.data?.user?.avatar) {
+      res.data.user.avatar = this.toAbsoluteAssetUrl(res.data.user.avatar) || undefined;
+    }
+    return res;
   }
 
   async getSigninHistory(limit = 30) {
@@ -1276,6 +1285,22 @@ class ApiClient {
       count: number;
       dry_run: boolean;
     }>("/admin/users/cleanup-invalid", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async clearAllUserEmails(opts: { dryRun?: boolean; confirm?: string } = {}) {
+    const dryRun = Boolean(opts.dryRun);
+    const body: Record<string, unknown> = { dry_run: dryRun };
+    if (!dryRun) body.confirm = opts.confirm || confirmPhrases.clearAllUserEmails;
+    return this.request<{
+      users: Array<{ uid: number; username: string; role: number; active: boolean; register_time: number | null }>;
+      count: number;
+      cleared: number;
+      total_users: number;
+      dry_run: boolean;
+    }>("/admin/users/clear-emails", {
       method: "POST",
       body: JSON.stringify(body),
     });

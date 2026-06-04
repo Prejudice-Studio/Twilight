@@ -203,6 +203,9 @@ type Config struct {
 	SigninStreakBonusDays        []int
 	SigninStreakBonusPoints      []int
 	SigninResetAfterMiss         bool
+	SigninRenewalEnabled         bool
+	SigninRenewalCost            int
+	SigninRenewalDays            int
 	InviteEnabled                bool
 	InviteMaxDepth               int
 	InviteLimit                  int
@@ -350,6 +353,9 @@ func Load(path string) (Config, error) {
 	cfg.SigninStreakBonusDays = reader.intListValue(cfg.SigninStreakBonusDays, "SAR.streak_bonus_days", "Signin.streak_bonus_days", "streak_bonus_days")
 	cfg.SigninStreakBonusPoints = reader.intListValue(cfg.SigninStreakBonusPoints, "SAR.streak_bonus_points", "Signin.streak_bonus_points", "streak_bonus_points")
 	cfg.SigninResetAfterMiss = reader.boolValue(cfg.SigninResetAfterMiss, "SAR.reset_after_miss", "Signin.reset_after_miss", "reset_after_miss")
+	cfg.SigninRenewalEnabled = reader.boolValue(cfg.SigninRenewalEnabled, "SAR.signin_renewal_enabled", "Signin.renewal_enabled", "signin_renewal_enabled")
+	cfg.SigninRenewalCost = reader.intValue(cfg.SigninRenewalCost, "SAR.signin_renewal_cost", "Signin.renewal_cost", "signin_renewal_cost")
+	cfg.SigninRenewalDays = reader.intValue(cfg.SigninRenewalDays, "SAR.signin_renewal_days", "Signin.renewal_days", "signin_renewal_days")
 	cfg.InviteEnabled = reader.boolValue(cfg.InviteEnabled, "SAR.invite_enabled", "Register.invite_enabled", "invite_enabled")
 	cfg.InviteMaxDepth = reader.intValue(cfg.InviteMaxDepth, "SAR.invite_max_depth", "Register.invite_max_depth", "invite_max_depth")
 	cfg.InviteLimit = reader.intValue(cfg.InviteLimit, "SAR.invite_limit", "Register.invite_limit", "invite_limit")
@@ -496,6 +502,9 @@ func defaults() Config {
 		SigninStreakBonusDays:             []int{3, 7, 14, 30},
 		SigninStreakBonusPoints:           []int{10, 50, 100, 300},
 		SigninResetAfterMiss:              true,
+		SigninRenewalEnabled:              false,
+		SigninRenewalCost:                 100,
+		SigninRenewalDays:                 30,
 		InviteEnabled:                     true,
 		InviteMaxDepth:                    3,
 		InviteLimit:                       10,
@@ -734,6 +743,15 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("TWILIGHT_SIGNIN_RESET_AFTER_MISS"); v != "" {
 		cfg.SigninResetAfterMiss = boolValue(v, cfg.SigninResetAfterMiss)
+	}
+	if v := os.Getenv("TWILIGHT_SIGNIN_RENEWAL_ENABLED"); v != "" {
+		cfg.SigninRenewalEnabled = boolValue(v, cfg.SigninRenewalEnabled)
+	}
+	if v := os.Getenv("TWILIGHT_SIGNIN_RENEWAL_COST"); v != "" {
+		cfg.SigninRenewalCost = intValue(v, cfg.SigninRenewalCost)
+	}
+	if v := os.Getenv("TWILIGHT_SIGNIN_RENEWAL_DAYS"); v != "" {
+		cfg.SigninRenewalDays = intValue(v, cfg.SigninRenewalDays)
 	}
 	if v := os.Getenv("TWILIGHT_RATE_LIMIT_ENABLED"); v != "" {
 		cfg.RateLimitEnabled = boolValue(v, cfg.RateLimitEnabled)

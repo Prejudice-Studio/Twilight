@@ -164,7 +164,7 @@ systemd 部署对应三个服务单元：`twilight`、`twilight-bot`、`twilight
 | `TWILIGHT_USER_LIMIT` / `TWILIGHT_EMBY_USER_LIMIT` | 系统用户与 Emby 用户上限（`-1` 表示不限）。 |
 | `TWILIGHT_REGCODE_FORMAT` / `TWILIGHT_REGCODE_RANDOM_ALGORITHM` | 注册码格式与随机算法。 |
 | `TWILIGHT_MEDIA_REQUEST_ENABLED` | 求片开关。 |
-| `TWILIGHT_SIGNIN_*` | 签到相关（开关、货币名、每日积分、连签奖励等）。 |
+| `TWILIGHT_SIGNIN_*` | 签到相关（开关、货币名、每日积分、连签奖励、积分续期开关/消耗/天数等）。 |
 | `TWILIGHT_NOTIFICATION_ENABLED` / `TWILIGHT_NOTIFICATION_EXPIRY_REMIND_DAYS` | 到期提醒。 |
 | `TWILIGHT_AUTO_CLEANUP_PENDING_EMBY` / `TWILIGHT_AUTO_CLEANUP_PENDING_EMBY_DAYS` | 待补建 Emby 自动清理。 |
 | `TWILIGHT_RATE_LIMIT_*` | 各类限流阈值（全局、登录、注册、找回密码、上传、管理员图标、API Key 默认）。 |

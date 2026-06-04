@@ -6,5 +6,6 @@ export const confirmPhrases = {
   batchLockEmbyUnbind: "BATCH_LOCK_EMBY_UNBIND",
   batchDeleteRegcodes: "BATCH_DELETE_REGCODES",
   cleanupInvalidUsers: "CLEANUP_INVALID_USERS",
+  clearAllUserEmails: "CLEAR_ALL_EMAILS",
   clearViolations: "CLEAR_VIOLATIONS",
 } as const;
