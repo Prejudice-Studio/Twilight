@@ -2432,7 +2432,10 @@ func TestTelegramBindRequirementSplitsGroupAndChannel(t *testing.T) {
 	if err := app.upsertBindCode(store.BindCode{Code: "GROUP1", Scene: "register", CreatedAt: now, ExpiresAt: now + 600}); err != nil {
 		t.Fatal(err)
 	}
-	app.telegramConfirmBindCode(context.Background(), 42, 42, "tguser", "GROUP1")
+	_, _, _, err := app.confirmBindCodeAtomic("GROUP1", 42, "tguser", now)
+	if err != nil {
+		t.Fatalf("confirm failed: %v", err)
+	}
 	bind, ok := app.bindCode("GROUP1")
 	if !ok || !bind.Confirmed {
 		t.Fatalf("group-only requirement should confirm bind code: %#v", bind)
