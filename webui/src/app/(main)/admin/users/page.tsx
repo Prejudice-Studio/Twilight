@@ -701,7 +701,7 @@ export default function AdminUsersPage() {
         toast({ title: "绑定失败", description: res.message, variant: "destructive" });
       }
     } catch (error: unknown) {
-      if (error instanceof ApiError && error.errorCode === ErrCodes.TG_ID_TAKEN) {
+      if (error instanceof ApiError && error.errorCode === ErrCodes.TGIDTaken) {
         toast({ title: "绑定失败", description: "该 Telegram ID 已被其他用户绑定", variant: "destructive" });
         return;
       }
