@@ -50,6 +50,18 @@ func (a *App) telegramBindCodeState(code string, uid int64, requireScene string,
 		return telegramBindCodeState{Code: code, Status: "wrong_scene", ErrorCode: ErrTGBindCodeSceneBad, HTTPStatus: http.StatusBadRequest, Message: "绑定码场景无效", Invalid: true, Terminal: true}
 	}
 	if bind.Confirmed && bind.TelegramID != 0 {
+		// 已确认的注册场景绑定码（bind.UID == 0）仍受 TTL 约束：confirm 之后若
+		// 超过有效期还没被 /register 消费，必须按过期处理。hub 没有后台清扫
+		// （仅 createBindCode 时 sweep），否则一个确认态注册码会无限期停留在
+		// "confirmed"——既能跨越 300s TTL 被重放注册，也会在静默系统里堆积不释放。
+		// user 场景（bind.UID != 0）confirm 即已写库绑定，过期由顶部 ListUsers
+		// 回退与 30s grace 兜底，这里不改其语义。
+		if bind.UID == 0 && bind.ExpiresAt > 0 && bind.ExpiresAt <= now {
+			if cleanupExpired {
+				_ = a.deleteBindCode(code)
+			}
+			return telegramBindCodeState{Code: code, Status: "expired", ErrorCode: ErrTGBindCodeExpired, HTTPStatus: http.StatusBadRequest, Message: "绑定码无效或已过期", Bind: bind, Invalid: true, Terminal: true}
+		}
 		state := telegramBindCodeState{Code: code, Bind: bind, ExpiresIn: bind.ExpiresAt - now, TelegramID: bind.TelegramID, TelegramUsername: bind.TelegramUsername}
 		state.Status = "confirmed"
 		state.Message = "绑定码已确认"

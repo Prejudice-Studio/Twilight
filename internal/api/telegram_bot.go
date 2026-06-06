@@ -232,31 +232,44 @@ func (a *App) telegramConfirmBindCode(ctx context.Context, chatID, telegramID in
 		_ = a.telegramSendMessage(ctx, chatID, "绑定码格式无效，请在 Web 端重新生成后再发送。")
 		return
 	}
+	// 绑定码只活在 API 进程的 in-memory hub 里。本进程能查到该码（all 模式：
+	// Bot 与 API 同进程共享 hub）才在本地完成 gating + confirm；查不到说明是
+	// 独立 Bot 进程，统一委托 API 进程的 HTTP 端点处理。
+	//
+	// 关键点：gating（限速 / 加群校验）只做一次。独立 Bot 进程不再本地预检——
+	// handleBindConfirmSecure 已经做同样的限速 + 加群校验，并且会把失败写回
+	// API 进程的 hub（网页端状态轮询读的就是这个 hub）。两进程各做一遍会重复
+	// getChatMember、并且 Bot 侧预检失败时根本不调 API，网页端就只能一直 pending。
+	bind, okBind := a.bindCode(code)
+	if !okBind || bind.ExpiresAt <= time.Now().Unix() {
+		a.confirmBindCodeViaHTTP(ctx, chatID, code, telegramID, username)
+		return
+	}
+	// 本进程持有该绑定码（all 模式）：就地 gating，并把 gating 失败写回 hub，
+	// 让网页端轮询看到终态失败而不是一直 pending——与 HTTP 委托路径表现一致。
 	if !a.allowRate(ctx, rateKey("tg-bind-confirm:", telegramID), a.cfg().RateLimitLoginPerMinute, time.Minute) {
+		a.recordRegisterBindFailure(bind, code, "rate_limited", ErrUploadRateLimited, http.StatusTooManyRequests, "操作过于频繁，请稍后再试")
 		_ = a.telegramSendMessage(ctx, chatID, "操作过于频繁，请稍后再试。")
 		return
 	}
 	if missing, err := a.telegramBindRequirementMissing(ctx, telegramID); err != nil {
+		a.recordRegisterBindFailure(bind, code, "group_check_failed", ErrTGBindGroupCheckFailed, http.StatusBadGateway, "Telegram 加群/频道校验失败，请稍后重试")
 		_ = a.telegramSendMessage(ctx, chatID, "Telegram 加群/频道校验失败，请稍后重试或联系管理员。")
 		return
 	} else if len(missing) > 0 {
+		a.recordRegisterBindFailure(bind, code, "group_membership_required", ErrTGBindGroupMembershipRequired, http.StatusForbidden, "绑定前需要先加入指定 Telegram 群组/频道: "+strings.Join(missing, ", "))
 		_ = a.telegramSendMessage(ctx, chatID, "绑定前需要先加入指定 Telegram 群组/频道："+strings.Join(missing, ", "))
 		return
 	}
-	// 优先使用本进程的 in‑memory bindStatusHub（all 模式共享同一个 App 实例）。
-	// 仅在本地 hub 为空（独立 Bot 进程）时回退 HTTP 调用 API 进程。
-	bind, okBind := a.bindCode(code)
-	if okBind && bind.ExpiresAt > time.Now().Unix() {
-		a.confirmBindCodeInline(ctx, chatID, bind, code, telegramID, username)
-		return
-	}
-	// 本地 hub 没有 → 委托 API 进程通过 HTTP 处理
-	a.confirmBindCodeViaHTTP(ctx, chatID, code, telegramID, username)
+	a.confirmBindCodeInline(ctx, chatID, bind, code, telegramID, username)
 }
 
 func (a *App) confirmBindCodeInline(ctx context.Context, chatID int64, bind store.BindCode, code string, telegramID int64, username string) {
 	if bind.Confirmed && bind.TelegramID != 0 {
 		if bind.TelegramID != telegramID {
+			// 与 handleBindConfirmSecure 的重放保护一致：把"已绑其他 TG"写回 hub，
+			// 让网页端状态轮询能看到终态失败而不是一直 pending。
+			a.recordRegisterBindFailure(bind, code, "telegram_taken", ErrTGBindTargetTaken, http.StatusConflict, "绑定码已绑定其他 Telegram，无法重放")
 			_ = a.telegramSendMessage(ctx, chatID, "该绑定码已被其它 Telegram 账号确认，无法重复使用。")
 			return
 		}
@@ -270,6 +283,7 @@ func (a *App) confirmBindCodeInline(ctx context.Context, chatID int64, bind stor
 			return
 		}
 		if errors.Is(err, store.ErrConflict) {
+			a.recordRegisterBindFailure(bind, code, "telegram_taken", ErrTGBindTargetTaken, http.StatusConflict, "该 Telegram 已绑定到其他账号或绑定码状态已变化")
 			_ = a.telegramSendMessage(ctx, chatID, "该 Telegram 已被其他账号绑定。")
 			return
 		}
@@ -317,6 +331,11 @@ func (a *App) confirmBindCodeViaHTTP(ctx context.Context, chatID int64, code str
 		_ = a.telegramSendMessage(ctx, chatID, "该 Telegram 已被其他账号绑定。")
 	case http.StatusTooManyRequests:
 		_ = a.telegramSendMessage(ctx, chatID, "操作过于频繁，请稍后再试。")
+	case http.StatusForbidden:
+		// 加群/频道校验未通过：透传 API 的群组列表文案（已含具体群名）。
+		_ = a.telegramSendMessage(ctx, chatID, firstNonEmpty(resp.Message, "绑定前需要先加入指定 Telegram 群组/频道。"))
+	case http.StatusBadGateway:
+		_ = a.telegramSendMessage(ctx, chatID, firstNonEmpty(resp.Message, "Telegram 加群/频道校验失败，请稍后重试。"))
 	default:
 		if resp.Message != "" {
 			_ = a.telegramSendMessage(ctx, chatID, "绑定失败："+resp.Message)

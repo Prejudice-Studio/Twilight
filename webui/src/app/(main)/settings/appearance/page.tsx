@@ -133,31 +133,39 @@ export default function AppearanceSettingsPage() {
   const loadAppearanceResource = useCallback(async () => {
     if (!user?.uid) return true;
 
-    const [bgRes, avatarRes] = await Promise.all([
+    // allSettled：背景 / 头像两个端点相互独立，任一失败都不该把整页打成错误态
+    // （旧的 Promise.all 下，头像接口 500 会连带背景一起 PageError，用户连重置都点不到）。
+    const [bgResult, avatarResult] = await Promise.allSettled([
       api.getUserBackground(user.uid),
       api.getUserAvatar(user.uid),
     ]);
 
-    if (bgRes.success && bgRes.data?.background) {
-      const config = JSON.parse(bgRes.data.background);
-      setBgConfig({
-        lightBg: config.lightBg || "",
-        darkBg: config.darkBg || "",
-        lightBgImage: config.lightBgImage || "",
-        darkBgImage: config.darkBgImage || "",
-        lightFlow: Boolean(config.lightFlow),
-        darkFlow: Boolean(config.darkFlow),
-        lightBlur: Number(config.lightBlur ?? 0),
-        darkBlur: Number(config.darkBlur ?? 0),
-        lightOpacity: Number(config.lightOpacity ?? 100),
-        darkOpacity: Number(config.darkOpacity ?? 100),
-      });
-      updatePreview(config.lightBg || "", config.lightBgImage || "", "light");
-      updatePreview(config.darkBg || "", config.darkBgImage || "", "dark");
+    if (bgResult.status === "fulfilled" && bgResult.value.success && bgResult.value.data?.background) {
+      // 存储的背景 JSON 可能因历史写入 / 截断而损坏：用 try/catch 兜住，损坏时退回
+      // 默认配置而不是让 JSON.parse 抛错冲垮整页加载。
+      try {
+        const config = JSON.parse(bgResult.value.data.background);
+        setBgConfig({
+          lightBg: config.lightBg || "",
+          darkBg: config.darkBg || "",
+          lightBgImage: config.lightBgImage || "",
+          darkBgImage: config.darkBgImage || "",
+          lightFlow: Boolean(config.lightFlow),
+          darkFlow: Boolean(config.darkFlow),
+          lightBlur: Number(config.lightBlur ?? 0),
+          darkBlur: Number(config.darkBlur ?? 0),
+          lightOpacity: Number(config.lightOpacity ?? 100),
+          darkOpacity: Number(config.darkOpacity ?? 100),
+        });
+        updatePreview(config.lightBg || "", config.lightBgImage || "", "light");
+        updatePreview(config.darkBg || "", config.darkBgImage || "", "dark");
+      } catch {
+        // 损坏数据：保持默认空配置，用户可重新设置并保存覆盖。
+      }
     }
 
-    if (avatarRes.success && avatarRes.data?.avatar) {
-      setAvatar(avatarRes.data.avatar);
+    if (avatarResult.status === "fulfilled" && avatarResult.value.success && avatarResult.value.data?.avatar) {
+      setAvatar(avatarResult.value.data.avatar);
     }
 
     return true;

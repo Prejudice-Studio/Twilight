@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Loader2, Copy, Bot, Check, AlertCircle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { useBindCodeStatus } from "@/hooks/use-bind-code-status";
 import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
 import { useI18n } from "@/lib/i18n";
@@ -23,20 +24,10 @@ export default function RebindGuard() {
   const [bindCodeExpiry, setBindCodeExpiry] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [isBound, setIsBound] = useState(false);
-  const [polling, setPolling] = useState(false);
-  const pollingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const completeRef = useRef(false);
 
   const botUsername = systemInfo?.telegram_bot?.username;
   const botUrl = telegramBotUrl(botUsername, systemInfo?.telegram_bot?.url);
-
-  const stopPolling = useCallback(() => {
-    if (pollingTimer.current) {
-      clearInterval(pollingTimer.current);
-      pollingTimer.current = null;
-    }
-    setPolling(false);
-  }, []);
 
   const completeRebind = useCallback(async () => {
     if (completeRef.current) return;
@@ -52,43 +43,25 @@ export default function RebindGuard() {
     }
   }, [fetchUser, router]);
 
-  const pollStatus = useCallback(async (code: string) => {
-    try {
-      const res = await api.getBindCodeStatus(code);
-      if (res.success && res.data) {
-        if (res.data.telegram_bound || res.data.status === "bound" || res.data.status === "confirmed") {
-          stopPolling();
-          setIsBound(true);
-          setTimeout(() => void completeRebind(), 1500);
-          return;
-        }
-        if (res.data.terminal && res.data.status !== "pending") {
-          stopPolling();
-          setBindCode(null);
-          toast({
-            title: t("settings.getBindCodeFailed"),
-            description: res.data.message,
-            variant: "destructive",
-          });
-        }
-      }
-    } catch {
-      // keep polling
-    }
-  }, [stopPolling, toast, t, completeRebind]);
-
-  const startPolling = useCallback((code: string) => {
-    stopPolling();
-    setPolling(true);
-    pollStatus(code);
-    pollingTimer.current = setInterval(() => {
-      pollStatus(code);
-    }, 2000);
-  }, [stopPolling, pollStatus]);
-
-  useEffect(() => {
-    return () => stopPolling();
-  }, [stopPolling]);
+  // 统一的绑定码状态轮询：带超时中断 + 请求中断，绑定成功即收尾换绑。
+  useBindCodeStatus({
+    code: bindCode,
+    scene: "user",
+    expiresIn: bindCodeExpiry,
+    enabled: Boolean(bindCode) && !isBound,
+    onBound: () => {
+      setIsBound(true);
+      setTimeout(() => void completeRebind(), 1500);
+    },
+    onTerminalError: (data) => {
+      setBindCode(null);
+      toast({ title: t("settings.getBindCodeFailed"), description: data.message, variant: "destructive" });
+    },
+    onTimeout: () => {
+      setBindCode(null);
+      toast({ title: t("settings.getBindCodeFailed"), description: t("settings.retryBindCode"), variant: "destructive" });
+    },
+  });
 
   const handleGetBindCode = async () => {
     setIsLoading(true);
@@ -98,7 +71,6 @@ export default function RebindGuard() {
       if (res.success && res.data?.bind_code) {
         setBindCode(res.data.bind_code);
         setBindCodeExpiry(res.data.expires_in);
-        startPolling(res.data.bind_code);
         toast({
           title: t("settings.bindCodeGenerated"),
           variant: "success",
@@ -204,7 +176,6 @@ export default function RebindGuard() {
                   variant="ghost"
                   className="w-full text-xs"
                   onClick={() => {
-                    stopPolling();
                     setBindCode(null);
                   }}
                 >

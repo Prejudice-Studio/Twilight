@@ -1651,6 +1651,31 @@ func TestBindCodesAreMemoryOnly(t *testing.T) {
 	}
 }
 
+func TestConfirmedRegisterBindCodeHonorsTTL(t *testing.T) {
+	app := newTestApp(t)
+	now := time.Now().Unix()
+	// 注册场景（UID==0）：已确认但已过 TTL 的绑定码必须按过期处理，否则
+	// 无后台清扫时它会无限期停留在 confirmed，可跨越 TTL 重放到 /register。
+	if err := app.upsertBindCode(store.BindCode{Code: "REGEXPIRED12", Scene: "register", Confirmed: true, TelegramID: 777, TelegramUsername: "ttl", CreatedAt: now - 700, ExpiresAt: now - 1}); err != nil {
+		t.Fatal(err)
+	}
+	state := app.telegramBindCodeState("REGEXPIRED12", 0, "register", now, true)
+	if state.Status != "expired" || !state.Terminal || state.Confirmed {
+		t.Fatalf("confirmed-but-expired register code should be expired, got %#v", state)
+	}
+	// cleanupExpired=true 时读路径应顺手清掉它，避免静默堆积。
+	if _, ok := app.bindCode("REGEXPIRED12"); ok {
+		t.Fatal("expired confirmed register code should be cleaned up on read")
+	}
+	// 仍在有效期内的已确认注册码继续返回 confirmed。
+	if err := app.upsertBindCode(store.BindCode{Code: "REGVALID1234", Scene: "register", Confirmed: true, TelegramID: 778, TelegramUsername: "ok", CreatedAt: now, ExpiresAt: now + 600}); err != nil {
+		t.Fatal(err)
+	}
+	if state := app.telegramBindCodeState("REGVALID1234", 0, "register", now, true); state.Status != "confirmed" {
+		t.Fatalf("in-window confirmed register code should stay confirmed, got %#v", state)
+	}
+}
+
 func TestCleanupExpiredBindCodesKeepsValidCodes(t *testing.T) {
 	app := newTestApp(t)
 	now := time.Now().Unix()

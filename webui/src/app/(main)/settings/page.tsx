@@ -48,6 +48,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAsyncResource } from "@/hooks/use-async-resource";
+import { useBindCodeStatus } from "@/hooks/use-bind-code-status";
 import { PageError, PageLoading } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
@@ -86,7 +87,6 @@ export default function SettingsPage() {
   const [bindCodeExpiry, setBindCodeExpiry] = useState<number>(0);
   const [isTgLoading, setIsTgLoading] = useState(false);
   const bindCodeRequestId = useRef(0);
-  const bindCodeExpiryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const botUsername = systemInfo?.telegram_bot?.username;
   const botUrl = telegramBotUrl(systemInfo?.telegram_bot?.username, systemInfo?.telegram_bot?.url);
   const [isRebindLoading, setIsRebindLoading] = useState(false);
@@ -284,6 +284,32 @@ export default function SettingsPage() {
     execute: loadData,
   } = useAsyncResource(loadSettingsResource, { immediate: true });
 
+  // 生成绑定码后自动轮询，不再要求用户手动刷新页面（刷新会丢掉 bindCode 这块
+  // React 状态、销毁整个绑定流程）。带超时中断 + 请求中断，见 useBindCodeStatus。
+  useBindCodeStatus({
+    code: bindCode,
+    scene: "user",
+    expiresIn: bindCodeExpiry,
+    enabled: Boolean(bindCode) && !telegramStatus?.bound,
+    onBound: () => {
+      setBindCode(null);
+      setBindCodeExpiry(0);
+      toast({ title: t("settings.rebindCompleteTitle"), variant: "success" });
+      void loadData();
+      void fetchUser();
+    },
+    onTerminalError: (data) => {
+      setBindCode(null);
+      setBindCodeExpiry(0);
+      toast({ title: t("settings.getBindCodeFailed"), description: data.message, variant: "destructive" });
+    },
+    // 绑定码 TTL 到期仍未确认：静默清掉过期码（与旧的本地过期计时器行为一致）。
+    onTimeout: () => {
+      setBindCode(null);
+      setBindCodeExpiry(0);
+    },
+  });
+
   const handleSaveBgmSettings = async () => {
     const nextBgmToken = bgmToken.trim();
     if (!bangumiSyncEnabled) {
@@ -343,21 +369,6 @@ export default function SettingsPage() {
       setIsBgmLoading(false);
     }
   };
-
-  useEffect(() => {
-    if (bindCodeExpiry > 0 && bindCode) {
-      bindCodeExpiryTimer.current = setTimeout(() => {
-        setBindCode(null);
-        setBindCodeExpiry(0);
-      }, bindCodeExpiry * 1000);
-    }
-    return () => {
-      if (bindCodeExpiryTimer.current) {
-        clearTimeout(bindCodeExpiryTimer.current);
-        bindCodeExpiryTimer.current = null;
-      }
-    };
-  }, [bindCode, bindCodeExpiry]);
 
   const handleGetBindCode = async () => {
     const requestId = ++bindCodeRequestId.current;
@@ -896,9 +907,10 @@ export default function SettingsPage() {
                   {t("settings.sendBindWithin", { minutes: Math.floor(bindCodeExpiry / 60), bot: systemInfo?.telegram_bot?.username ? `@${systemInfo.telegram_bot.username}` : "Telegram Bot" })}{" "}
                   <code className="bg-background/50 px-1.5 py-0.5 rounded">/bind {bindCode}</code>
                 </p>
-                <p className="text-xs text-muted-foreground">
-                  {t("settings.bindRefreshHint")}
-                </p>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  {t("settings.waitingForBind")}
+                </div>
               </div>
             )}
           </CardContent>

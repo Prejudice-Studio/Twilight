@@ -773,10 +773,18 @@ func (a *App) handleRebindComplete(w http.ResponseWriter, r *http.Request, _ Par
 	ok(w, "rebinding complete", publicUser(p.User))
 }
 
-func (a *App) handleTelegramStatus(w http.ResponseWriter, r *http.Request, _ Params) {
-	u := current(r).User
-	canUnbind := !a.cfg().ForceBindTelegram || u.Role == store.RoleAdmin
-	canChange := canUnbind
+// telegramStatusFields 统一计算用户 Telegram 绑定 / 换绑状态，供
+// handleTelegramStatus（/users/me/telegram，dashboard 用）与 handleUserSettings
+// （/users/me/settings，设置页用）复用。历史上两处各自手算，导致
+// can_change / can_unbind 在 "used"（换绑已消费）与管理员场景下口径不一致：
+// dashboard 端把 used 当成不能换绑、设置页端却允许；设置页端又漏了管理员可解绑。
+// can_unbind 口径与 handleUnbindTelegram 的服务端校验保持一致：强制绑定下，
+// 非管理员仅在存在 approved 换绑请求时才可解绑。
+func (a *App) telegramStatusFields(u store.User) map[string]any {
+	forceBind := a.cfg().ForceBindTelegram
+	admin := u.Role == store.RoleAdmin
+	canUnbind := !forceBind || admin
+	canChange := true
 	pendingRebind := false
 	rebindApproved := false
 	var rebindStatus any
@@ -786,23 +794,23 @@ func (a *App) handleTelegramStatus(w http.ResponseWriter, r *http.Request, _ Par
 		rebindID = latestReq.ID
 		switch latestReq.Status {
 		case "pending":
-			canChange = false
 			pendingRebind = true
+			if !admin {
+				canChange = false
+			}
 		case "approved":
 			rebindApproved = true
 			canUnbind = true
 		}
+		// "used"（解绑已消费）/ "rejected"（被驳回）不再限制 canChange：用户应能
+		// 重新生成绑定码 / 重新发起换绑请求。
 	}
-	if u.Role == store.RoleAdmin {
-		canUnbind = true
-		canChange = true
-	}
-	ok(w, "OK", map[string]any{
+	return map[string]any{
 		"bound":                  u.TelegramID != 0,
 		"telegram_id":            nullableInt(u.TelegramID),
 		"telegram_id_full":       nullableInt(u.TelegramID),
 		"telegram_username":      u.TelegramUsername,
-		"force_bind":             a.cfg().ForceBindTelegram,
+		"force_bind":             forceBind,
 		"can_unbind":             canUnbind,
 		"can_change":             canChange,
 		"rebind_approved":        rebindApproved,
@@ -810,7 +818,11 @@ func (a *App) handleTelegramStatus(w http.ResponseWriter, r *http.Request, _ Par
 		"rebind_request_status":  rebindStatus,
 		"rebind_request_id":      rebindID,
 		"rebinding_in_progress":  u.RebindingInProgress,
-	})
+	}
+}
+
+func (a *App) handleTelegramStatus(w http.ResponseWriter, r *http.Request, _ Params) {
+	ok(w, "OK", a.telegramStatusFields(current(r).User))
 }
 
 func (a *App) handleUnbindTelegram(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -864,55 +876,11 @@ func (a *App) handleTelegramRebindRequest(w http.ResponseWriter, r *http.Request
 func (a *App) handleUserSettings(w http.ResponseWriter, r *http.Request, _ Params) {
 	u := current(r).User
 
-	// Query user's latest rebind request from store to provide real status.
-	canUnbindTG := !a.cfg().ForceBindTelegram
-	canChange := true
-	pendingRebind := false
-	rebindApproved := false
-	rebindConsumed := false
-	var rebindStatus any
-	var rebindID any
-	if latestReq, hasReq := a.store().UserLatestRebindRequest(u.UID); hasReq {
-		rebindStatus = latestReq.Status
-		rebindID = latestReq.ID
-		switch latestReq.Status {
-		case "pending":
-			canChange = false
-			pendingRebind = true
-		case "approved":
-			// Admin approved the rebind: allow unbind even under force-bind policy
-			// so the user can unbind the old account and bind a new one.
-			rebindApproved = true
-			canUnbindTG = true
-		case "used":
-			// The approved rebind has been consumed (user already unbound old Telegram).
-			// User should now be able to generate a new bind code and bind a new account.
-			rebindConsumed = true
-		}
-		// "rejected" → user can submit a new request (canChange stays true)
-	}
-	// When rebind was consumed (unbind already done), force‑bind policy no longer
-	// blocks generating a new bind code; canChange remains true.
-	if rebindConsumed {
-		canChange = true
-	}
-
 	ok(w, "OK", map[string]any{
 		"bgm_mode": u.BGMMode, "bgm_token_set": u.BGMToken != "", "api_key_enabled": u.LegacyAPIKeyStatus,
-		"telegram": map[string]any{
-			"bound":                  u.TelegramID != 0,
-			"telegram_id":            nullableInt(u.TelegramID),
-			"telegram_id_full":       nullableInt(u.TelegramID),
-			"telegram_username":      u.TelegramUsername,
-			"force_bind":             a.cfg().ForceBindTelegram,
-			"can_unbind":             canUnbindTG,
-			"can_change":             canChange,
-			"rebind_approved":        rebindApproved,
-			"pending_rebind_request": pendingRebind,
-			"rebind_request_status":  rebindStatus,
-			"rebind_request_id":      rebindID,
-			"rebinding_in_progress":  u.RebindingInProgress,
-		},
+		// 与 /users/me/telegram 共用 telegramStatusFields，避免两个端点对换绑状态
+		// 给出互相矛盾的 can_change / can_unbind。
+		"telegram":      a.telegramStatusFields(u),
 		"emby_status":   map[string]any{"is_synced": u.EmbyID != "", "is_active": u.Active, "can_unbind": a.userCanSelfUnbindEmby(u), "active_sessions": 0, "message": "OK"},
 		"system_config": map[string]any{"device_limit_enabled": a.cfg().DeviceLimitEnabled, "max_devices": a.cfg().MaxDevices, "max_streams": a.cfg().MaxStreams, "bangumi_sync_enabled": a.cfg().BangumiEnabled},
 	})
