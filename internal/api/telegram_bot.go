@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go.uber.org/zap"
 	"net/http"
@@ -242,10 +243,49 @@ func (a *App) telegramConfirmBindCode(ctx context.Context, chatID, telegramID in
 		_ = a.telegramSendMessage(ctx, chatID, "绑定前需要先加入指定 Telegram 群组/频道："+strings.Join(missing, ", "))
 		return
 	}
-	// Bot 不能直接读写 API 进程的 in‑memory bindStatusHub。通过 POST localhost
-	// bind‑confirm 端点委托 API 进程做码验证 + 原子确认 + 用户绑定，保证所有
-	// 变更落在 API 进程的 store 视图中。
-	url := fmt.Sprintf("http://127.0.0.1:%d/api/v1/users/me/telegram/bind-confirm", a.cfg().Port)
+	// 优先使用本进程的 in‑memory bindStatusHub（all 模式共享同一个 App 实例）。
+	// 仅在本地 hub 为空（独立 Bot 进程）时回退 HTTP 调用 API 进程。
+	bind, okBind := a.bindCode(code)
+	if okBind && bind.ExpiresAt > time.Now().Unix() {
+		a.confirmBindCodeInline(ctx, chatID, bind, code, telegramID, username)
+		return
+	}
+	// 本地 hub 没有 → 委托 API 进程通过 HTTP 处理
+	a.confirmBindCodeViaHTTP(ctx, chatID, code, telegramID, username)
+}
+
+func (a *App) confirmBindCodeInline(ctx context.Context, chatID int64, bind store.BindCode, code string, telegramID int64, username string) {
+	if bind.Confirmed && bind.TelegramID != 0 {
+		if bind.TelegramID != telegramID {
+			_ = a.telegramSendMessage(ctx, chatID, "该绑定码已被其它 Telegram 账号确认，无法重复使用。")
+			return
+		}
+		_ = a.telegramSendMessage(ctx, chatID, "Telegram 绑定已确认，可以回到网页继续。")
+		return
+	}
+	_, _, _, err := a.confirmBindCodeAtomic(code, telegramID, username, time.Now().Unix())
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrExpired) {
+			_ = a.telegramSendMessage(ctx, chatID, "绑定码无效或已过期，请在网页重新获取。")
+			return
+		}
+		if errors.Is(err, store.ErrConflict) {
+			_ = a.telegramSendMessage(ctx, chatID, "该 Telegram 已被其他账号绑定。")
+			return
+		}
+		_ = a.telegramSendMessage(ctx, chatID, "绑定失败，请稍后重试。")
+		return
+	}
+	a.clearRegisterBindFailure(code)
+	_ = a.telegramSendMessage(ctx, chatID, "Telegram 绑定已确认，可以回到网页继续。")
+}
+
+func (a *App) confirmBindCodeViaHTTP(ctx context.Context, chatID int64, code string, telegramID int64, username string) {
+	port := a.cfg().Port
+	if port <= 0 {
+		port = 5000
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d/api/v1/users/me/telegram/bind-confirm", port)
 	reqBody := map[string]any{"code": code, "telegram_id": telegramID, "telegram_username": username}
 	b, _ := json.Marshal(reqBody)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
@@ -257,12 +297,13 @@ func (a *App) telegramConfirmBindCode(ctx context.Context, chatID, telegramID in
 	req.Header.Set("X-Internal-Secret", a.cfg().BotInternalSecret)
 
 	var resp struct {
-		Success  bool   `json:"success"`
-		Code     int    `json:"code"`
-		Message  string `json:"message"`
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Code    int    `json:"code"`
 	}
-	if err := doJSONRequestWithTimeout(req, &resp, 10*time.Second); err != nil {
-		_ = a.telegramSendMessage(ctx, chatID, "绑定请求网络异常，请确认后端服务正在运行。")
+	if err := doJSONRequestWithTimeout(req, &resp, 5*time.Second); err != nil {
+		zap.L().Warn("telegram bind code HTTP fallback failed", zap.String("code", code), zap.Int64("tgid", telegramID), zap.Error(err))
+		_ = a.telegramSendMessage(ctx, chatID, "绑定请求异常，请稍后重试。若问题持续，请联系管理员。")
 		return
 	}
 	if resp.Success {

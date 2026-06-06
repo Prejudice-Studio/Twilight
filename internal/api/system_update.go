@@ -152,7 +152,16 @@ func applyGitUpdate(ctx context.Context, repoURL, branch string, restartServices
 	}
 
 	after, stateErr := gitRepositoryState(ctx, projectRoot)
-	services := []string{"twilight", "twilight-bot", "twilight-scheduler"}
+	allServices := []string{"twilight", "twilight-bot", "twilight-scheduler"}
+	services := make([]string, 0, len(allServices))
+	for _, svc := range allServices {
+		if systemdUnitActive(svc) {
+			services = append(services, svc)
+		}
+	}
+	if len(services) == 0 {
+		services = append(services, "twilight")
+	}
 	restartScheduled := false
 	restartMethod := ""
 	updated := false
@@ -303,6 +312,14 @@ func limitStrings(values []string, limit int) []string {
 func commandExists(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
+}
+
+func systemdUnitActive(name string) bool {
+	if !commandExists("systemctl") {
+		return false
+	}
+	cmd := exec.Command("systemctl", "is-active", "--quiet", name)
+	return cmd.Run() == nil
 }
 
 func scheduleSystemdRestart(services []string) (bool, string) {

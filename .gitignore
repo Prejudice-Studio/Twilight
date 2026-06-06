@@ -157,6 +157,7 @@ docs/AUDIT_REPORT.md
 .narrafork/
 .worktrees/
 tmp/
+setup-deploy.sh
 
 .pnpm-store/
 __pycache__/

@@ -308,12 +308,22 @@ write_worker_unit "twilight-bot" "Twilight Go Telegram Bot Bridge" "bot" "512M" 
 write_worker_unit "twilight-scheduler" "Twilight Go Scheduler" "scheduler" "512M" "30"
 
 systemctl daemon-reload
-systemctl enable twilight.service twilight-bot.service twilight-scheduler.service
 
-if [[ "$RESTART" -eq 1 ]]; then
-  systemctl restart twilight.service twilight-bot.service twilight-scheduler.service
+if grep -qP 'driver\s*=\s*"?(json|)(\s|$)' "$PROJECT_ROOT/config.toml" 2>/dev/null && \
+   ! grep -qP 'driver\s*=\s*"postgres"' "$PROJECT_ROOT/config.toml" 2>/dev/null; then
+  echo ">>> Detected JSON backend (single-process). Only enabling twilight.service (all mode)."
+  echo "    twilight-bot and twilight-scheduler will NOT be enabled."
+  echo "    Use 'database.driver = \"postgres\"' for multi-process deployment."
+  sed -i 's/^ExecStart=.*$/ExecStart='"$BIN_PATH"' all --host '"$API_HOST"' --port '"$API_PORT"' --config '"$CONFIG_PATH"'/' "$UNIT_DIR/twilight.service"
+  systemctl enable twilight.service
+  systemctl restart twilight.service || systemctl start twilight.service
 else
-  systemctl start twilight.service twilight-bot.service twilight-scheduler.service
+  systemctl enable twilight.service twilight-bot.service twilight-scheduler.service
+  if [[ "$RESTART" -eq 1 ]]; then
+    systemctl restart twilight.service twilight-bot.service twilight-scheduler.service
+  else
+    systemctl start twilight.service twilight-bot.service twilight-scheduler.service
+  fi
 fi
 
 systemctl --no-pager --full status twilight.service twilight-bot.service twilight-scheduler.service || true

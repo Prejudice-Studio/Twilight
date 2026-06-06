@@ -395,7 +395,6 @@ func applyConfiguredAdmins(cfg config.Config, st *store.Store) {
 		}
 		updated, err := st.UpdateUser(user.UID, func(u *store.User) error {
 			u.Role = store.RoleAdmin
-			u.Active = true
 			return nil
 		})
 		if err == nil {
