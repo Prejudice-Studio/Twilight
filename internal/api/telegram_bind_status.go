@@ -34,6 +34,15 @@ func (a *App) telegramBindCodeState(code string, uid int64, requireScene string,
 	}
 	bind, okBind := a.bindCode(code)
 	if !okBind {
+		if storeBind, okStore := a.store().BindCode(code); okStore {
+			bind = storeBind
+			okBind = true
+			if bind.Confirmed && bind.TelegramID != 0 {
+				_ = a.upsertBindCode(bind)
+			}
+		}
+	}
+	if !okBind {
 		if uid != 0 {
 			for _, u := range a.store().ListUsers() {
 				if u.UID == uid && u.TelegramID != 0 {

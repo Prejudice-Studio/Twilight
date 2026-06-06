@@ -492,6 +492,7 @@ func (a *App) createBindCode(w http.ResponseWriter, uid int64, scene string) {
 		failWithCode(w, http.StatusInternalServerError, ErrBindCodeSaveFailed, "绑定码保存失败，请稍后重试")
 		return
 	}
+	_ = a.store().UpsertBindCode(store.BindCode{Code: code, Scene: scene, UID: uid, CreatedAt: now, ExpiresAt: now + 300})
 	ok(w, "OK", map[string]any{"bind_code": code, "expires_in": 300})
 }
 
