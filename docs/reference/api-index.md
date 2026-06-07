@@ -299,6 +299,7 @@
 | POST | `/api/v1/batch/users/renew` | Admin | 批量续期用户 |
 | POST | `/api/v1/batch/users/delete` | Admin | 批量删除用户 |
 | POST | `/api/v1/batch/users/emby-unbind-lock` | Admin | 批量禁止用户自助解绑 Emby |
+| POST | `/api/v1/batch/users/emby-grant-clear` | Admin | 批量清理无 Emby 账号用户的注册码/邀请码使用记录（解除误判的"已用过注册资格"锁定） |
 | GET | `/api/v1/batch/export/users` | Admin | 导出用户 |
 | GET | `/api/v1/batch/export/playback` | Admin | 导出播放数据 |
 | GET | `/api/v1/batch/watch-stats` | User | 当前用户播放统计 |

@@ -257,6 +257,7 @@ func (a *App) registerBatchRoutes() {
 	a.add(http.MethodPost, "/api/v1/batch/users/renew", AuthAdmin, a.handleBatchRenewUsers)
 	a.add(http.MethodPost, "/api/v1/batch/users/delete", AuthAdmin, a.handleBatchDeleteUsers)
 	a.add(http.MethodPost, "/api/v1/batch/users/emby-unbind-lock", AuthAdmin, a.handleBatchLockEmbyUnbind)
+	a.add(http.MethodPost, "/api/v1/batch/users/emby-grant-clear", AuthAdmin, a.handleBatchClearEmbyGrantUnbound)
 	a.add(http.MethodGet, "/api/v1/batch/export/users", AuthAdmin, a.handleExportUsers)
 	a.add(http.MethodGet, "/api/v1/batch/export/playback", AuthAdmin, a.handleExportPlayback)
 	a.add(http.MethodGet, "/api/v1/batch/watch-stats", AuthUser, a.handleWatchStats)

@@ -96,6 +96,12 @@ export interface BatchUserResult {
   selected_all?: boolean;
   emby_grant_locked?: boolean;
   skipped_no_emby?: number;
+  emby_grant_cleared?: boolean;
+  cleared?: number;
+  skipped_has_emby?: number;
+  skipped_pending?: number;
+  regcode_refs_removed?: number;
+  invite_refs_removed?: number;
 }
 
 export interface CodeUsePreview {

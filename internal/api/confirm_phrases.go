@@ -6,6 +6,7 @@ const (
 	confirmBatchDeleteUsers    = "BATCH_DELETE_USERS"
 	confirmBatchRenewUsers     = "BATCH_RENEW_USERS"
 	confirmBatchLockEmbyUnbind = "BATCH_LOCK_EMBY_UNBIND"
+	confirmBatchClearEmbyGrant = "BATCH_CLEAR_EMBY_GRANT"
 	confirmBatchDeleteRegcodes = "BATCH_DELETE_REGCODES"
 	confirmCleanupInvalidUsers = "CLEANUP_INVALID_USERS"
 	confirmClearAllEmails      = "CLEAR_ALL_EMAILS"

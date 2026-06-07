@@ -181,6 +181,66 @@ func (a *App) handleBatchLockEmbyUnbind(w http.ResponseWriter, r *http.Request, 
 	ok(w, "批量禁止 Emby 自助解绑完成", result)
 }
 
+// handleBatchClearEmbyGrantUnbound 批量清理"没有 Emby 账号"用户的注册码/邀请码
+// 使用记录（EmbyGrantLocked / RegistrationSource / RegistrationCode 及码侧引用），
+// 让被历史迁移误判为"已用过注册资格"的用户重新可以使用注册码 / 邀请码。
+// 已绑定 Emby 的用户与待开通(PendingEmby)用户由 store 自动跳过；管理员账号受保护。
+func (a *App) handleBatchClearEmbyGrantUnbound(w http.ResponseWriter, r *http.Request, _ Params) {
+	payload := decodeMap(r)
+	if stringValue(payload, "confirm") != confirmBatchClearEmbyGrant {
+		failWithCode(w, http.StatusBadRequest, ErrBatchConfirmRequired, "missing confirm "+confirmBatchClearEmbyGrant)
+		return
+	}
+	uids, okPayload := a.batchUnboundEmbyUserUIDsFromPayload(w, payload, 200, 5000, "too many users in one batch")
+	if !okPayload {
+		return
+	}
+	result := batchResult(len(uids))
+	usersByUID := map[int64]store.User{}
+	for _, user := range a.store().ListUsers() {
+		usersByUID[user.UID] = user
+	}
+	eligible := make([]int64, 0, len(uids))
+	for _, uid := range uids {
+		target, okUser := usersByUID[uid]
+		if !okUser {
+			addBatchOutcomeWithCode(result, uid, ErrUserNotFound, fmt.Errorf("%s", userNotFoundMessage))
+			continue
+		}
+		if a.userIsProtected(target) {
+			addBatchOutcomeWithCode(result, uid, ErrUserProtected, fmt.Errorf("cannot clear protected account: %s", a.protectedUserReason(target)))
+			continue
+		}
+		eligible = append(eligible, uid)
+	}
+	res, err := a.store().ClearEmbyGrantForUnboundUsers(eligible)
+	if err != nil {
+		for _, uid := range eligible {
+			addBatchOutcome(result, uid, err)
+		}
+		result["selected_all"] = boolValue(payload, "select_all", false)
+		ok(w, "批量清理注册资格记录完成", result)
+		return
+	}
+	for _, uid := range res.Cleared {
+		addBatchOutcome(result, uid, nil)
+	}
+	for _, uid := range res.AlreadyClean {
+		addBatchOutcome(result, uid, nil)
+	}
+	for _, uid := range res.Missing {
+		addBatchOutcomeWithCode(result, uid, ErrUserNotFound, fmt.Errorf("%s", userNotFoundMessage))
+	}
+	result["selected_all"] = boolValue(payload, "select_all", false)
+	result["emby_grant_cleared"] = true
+	result["cleared"] = len(res.Cleared)
+	result["skipped_has_emby"] = len(res.SkippedHasEmby)
+	result["skipped_pending"] = len(res.SkippedPending)
+	result["regcode_refs_removed"] = res.RegcodeRefs
+	result["invite_refs_removed"] = res.InviteRefs
+	ok(w, "批量清理注册资格记录完成", result)
+}
+
 func (a *App) batchUserUIDsFromPayload(w http.ResponseWriter, payload map[string]any, maxExplicit, maxSelectedAll int, tooManyMessage string) ([]int64, bool) {
 	if boolValue(payload, "select_all", false) {
 		uids, matched := a.filteredBatchUserUIDs(payload, maxSelectedAll)
@@ -221,6 +281,30 @@ func (a *App) batchBoundEmbyUserUIDsFromPayload(w http.ResponseWriter, payload m
 	}
 	boundPayload["filter"] = boundFilter
 	return a.batchUserUIDsFromPayload(w, boundPayload, maxExplicit, maxSelectedAll, tooManyMessage)
+}
+
+// batchUnboundEmbyUserUIDsFromPayload 与 batchBoundEmbyUserUIDsFromPayload 对偶：
+// select_all 时强制把过滤器收窄为"未绑定 Emby"，避免一次性把已绑定用户也拉进
+// 清理目标（store 仍会二次跳过已绑定用户，这里只是缩小扫描面）。
+func (a *App) batchUnboundEmbyUserUIDsFromPayload(w http.ResponseWriter, payload map[string]any, maxExplicit, maxSelectedAll int, tooManyMessage string) ([]int64, bool) {
+	if !boolValue(payload, "select_all", false) {
+		return a.batchUserUIDsFromPayload(w, payload, maxExplicit, maxSelectedAll, tooManyMessage)
+	}
+	filter, _ := payload["filter"].(map[string]any)
+	if strings.EqualFold(asString(filter["emby"]), "bound") {
+		return []int64{}, true
+	}
+	unboundFilter := map[string]any{}
+	for key, value := range filter {
+		unboundFilter[key] = value
+	}
+	unboundFilter["emby"] = "unbound"
+	unboundPayload := map[string]any{}
+	for key, value := range payload {
+		unboundPayload[key] = value
+	}
+	unboundPayload["filter"] = unboundFilter
+	return a.batchUserUIDsFromPayload(w, unboundPayload, maxExplicit, maxSelectedAll, tooManyMessage)
 }
 
 func (a *App) filteredBatchUserUIDs(payload map[string]any, limit int) ([]int64, int) {

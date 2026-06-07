@@ -20,6 +20,7 @@ import {
   CalendarClock,
   Send,
   LockKeyhole,
+  Eraser,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -61,6 +62,7 @@ import { useI18n } from "@/lib/i18n";
 import { ErrCodes } from "@/lib/errcode";
 import { formatDate } from "@/lib/utils";
 import {
+  batchClearEmbyGrantConfirmConfig,
   batchDeleteConfirmConfig,
   batchLockEmbyUnbindConfirmConfig,
   batchToggleConfirmConfig,
@@ -1023,6 +1025,33 @@ export default function AdminUsersPage() {
     }
   };
 
+  const handleSelectedClearEmbyGrant = async () => {
+    if (selectedCount === 0) return;
+    const ok = await confirmAction(batchClearEmbyGrantConfirmConfig(selectedCount, t));
+    if (!ok) return;
+    setBatchUserLoading(true);
+    try {
+      const res = await api.batchClearEmbyGrant(selectedBatchTarget());
+      if (res.success && res.data) {
+        const cleared = res.data.cleared ?? res.data.success;
+        const skippedHasEmby = res.data.skipped_has_emby || 0;
+        const skippedPending = res.data.skipped_pending || 0;
+        toast({
+          title: "已清理注册资格记录",
+          description: `清理 ${cleared} 个，跳过已绑定 Emby ${skippedHasEmby} 个，跳过待开通 ${skippedPending} 个，失败 ${res.data.failed} 个`,
+          variant: res.data.failed ? "default" : "success",
+        });
+        await refreshAfterBatch();
+      } else {
+        toast({ title: "批量操作失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "批量操作失败", description: error.message, variant: "destructive" });
+    } finally {
+      setBatchUserLoading(false);
+    }
+  };
+
   const handleSelectedDelete = async () => {
     if (selectedCount === 0) return;
     const action = await confirmAction(batchDeleteConfirmConfig(
@@ -1894,6 +1923,10 @@ export default function AdminUsersPage() {
               <Button variant="outline" size="sm" onClick={() => void handleSelectedLockEmbyUnbind()} disabled={batchUserLoading || selectedCount === 0}>
                 <LockKeyhole className="mr-2 h-4 w-4" />
                 禁止解绑 Emby
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => void handleSelectedClearEmbyGrant()} disabled={batchUserLoading || selectedCount === 0}>
+                <Eraser className="mr-2 h-4 w-4" />
+                清理注册资格记录
               </Button>
               <Button variant="destructive" size="sm" onClick={() => void handleSelectedDelete()} disabled={batchUserLoading || selectedCount === 0}>
                 {batchUserLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}

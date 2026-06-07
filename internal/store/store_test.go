@@ -57,6 +57,106 @@ func TestBatchDeleteRegCodesPhysicallyDeletesUsedAndUnused(t *testing.T) {
 	}
 }
 
+// ClearEmbyGrantForUnboundUsers 必须只解锁"无 Emby 账号"用户的注册资格，并回退其
+// 占用的注册码/邀请码使用记录；已绑定 Emby 与 PendingEmby 在飞的用户保持不动。
+func TestClearEmbyGrantForUnboundUsers(t *testing.T) {
+	st := newJSONStoreForTest(t)
+
+	// blocked：无 Emby、非 pending，被迁移误锁——应被清理。
+	blocked, err := st.CreateUser(User{Username: "blocked", PasswordHash: "x", EmbyGrantLocked: true, RegistrationSource: "regcode", RegistrationCode: "RC1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// bound：已绑定 Emby——不可重置注册资格。
+	bound, err := st.CreateUser(User{Username: "bound", PasswordHash: "x", EmbyID: "emby-x", EmbyGrantLocked: true, RegistrationSource: "regcode", RegistrationCode: "RC2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// pending：待开通在飞——保留其资格。
+	pending, err := st.CreateUser(User{Username: "pending", PasswordHash: "x", PendingEmby: true, EmbyGrantLocked: true, RegistrationSource: "invite", RegistrationCode: "INV1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 直接种入码侧记录（精确控制字段，避免 Upsert 归一化干扰）：
+	//   RC1 被 blocked 用满（Active=false），清理后回退 UseCount=0 并恢复可用。
+	//   INV1 + 邀请关系：blocked 作为被邀请者。
+	st.mu.Lock()
+	st.state.RegCodes["RC1"] = RegCode{Code: "RC1", Type: 1, Days: 30, ValidityTime: -1, UseCountLimit: 1, UseCount: 1, UsedBy: blocked.UID, UsedByUIDs: []int64{blocked.UID}, Active: false}
+	st.state.InviteCodes["INV1"] = InviteCode{Code: "INV1", InviterUID: 999, UseCountLimit: 1, UseCount: 1, Used: true, UsedByUID: blocked.UID, Active: false}
+	st.state.InviteRelations[blocked.UID] = InviteRelation{ParentUID: 999, ChildUID: blocked.UID, Code: "INV1"}
+	if err := st.saveLocked(); err != nil {
+		st.mu.Unlock()
+		t.Fatal(err)
+	}
+	st.mu.Unlock()
+
+	res, err := st.ClearEmbyGrantForUnboundUsers([]int64{blocked.UID, bound.UID, pending.UID, 4242})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !containsInt64(res.Cleared, blocked.UID) {
+		t.Fatalf("blocked must be cleared: %+v", res)
+	}
+	if !containsInt64(res.SkippedHasEmby, bound.UID) {
+		t.Fatalf("bound must be skipped (has emby): %+v", res)
+	}
+	if !containsInt64(res.SkippedPending, pending.UID) {
+		t.Fatalf("pending must be skipped (pending emby): %+v", res)
+	}
+	if !containsInt64(res.Missing, 4242) {
+		t.Fatalf("4242 must be missing: %+v", res)
+	}
+	if res.RegcodeRefs != 1 {
+		t.Fatalf("expected 1 regcode ref removed, got %d", res.RegcodeRefs)
+	}
+	if res.InviteRefs == 0 {
+		t.Fatalf("expected invite ref removed, got %d", res.InviteRefs)
+	}
+
+	// 用户侧：blocked 解锁；bound/pending 保持锁定。
+	if got, _ := st.User(blocked.UID); got.EmbyGrantLocked || got.RegistrationSource != "" || got.RegistrationCode != "" {
+		t.Fatalf("blocked grant not cleared: %+v", got)
+	}
+	if got, _ := st.User(bound.UID); !got.EmbyGrantLocked {
+		t.Fatal("bound must keep grant lock")
+	}
+	if got, _ := st.User(pending.UID); !got.EmbyGrantLocked {
+		t.Fatal("pending must keep grant lock")
+	}
+
+	// 码侧：RC1 回退并恢复可用。
+	rc, ok := st.RegCode("RC1")
+	if !ok {
+		t.Fatal("RC1 missing")
+	}
+	if rc.UseCount != 0 || rc.UsedBy != 0 || len(rc.UsedByUIDs) != 0 || !rc.Active {
+		t.Fatalf("RC1 not rolled back: %+v", rc)
+	}
+
+	// 邀请关系断开 + 邀请码回退。
+	if _, ok := st.ParentOf(blocked.UID); ok {
+		t.Fatal("invite relation should be detached")
+	}
+	inv, ok := st.InviteCode("INV1")
+	if !ok {
+		t.Fatal("INV1 missing")
+	}
+	if inv.UsedByUID != 0 || inv.Used || inv.UseCount != 0 || !inv.Active {
+		t.Fatalf("INV1 not rolled back: %+v", inv)
+	}
+}
+
+func containsInt64(xs []int64, v int64) bool {
+	for _, x := range xs {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
 func TestUpsertRegCodeDoesNotReactivateExistingDisabledCode(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	now := time.Now().Unix()

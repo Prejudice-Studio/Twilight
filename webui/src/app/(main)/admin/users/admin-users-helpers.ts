@@ -81,6 +81,15 @@ export function batchLockEmbyUnbindConfirmConfig(count: number, t: TFunc): Confi
   };
 }
 
+export function batchClearEmbyGrantConfirmConfig(count: number, t: TFunc): ConfirmOptions {
+  return {
+    title: t("adminUsers.batchClearGrantTitle"),
+    description: t("adminUsers.batchClearGrantDescription", { count }),
+    tone: "warning",
+    confirmLabel: t("adminUsers.batchClearGrantConfirm"),
+  };
+}
+
 export function batchDeleteConfirmConfig(count: number, t: TFunc, embyCount?: number): ConfirmOptions {
   const embyLabel = typeof embyCount === "number"
     ? t("adminUsers.batchDeleteEmbyWithCount", { count: embyCount })

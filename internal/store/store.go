@@ -1778,6 +1778,157 @@ func (s *Store) LockEmbyGrantForBoundUsers(uids []int64) (updated []int64, missi
 	return updated, missing, skippedNoEmby, nil
 }
 
+// ClearEmbyGrantResult 汇总一次"清理无 Emby 账号用户的注册码/邀请码使用记录"的结果。
+type ClearEmbyGrantResult struct {
+	Cleared        []int64 // 确实有记录被抹除的 UID
+	AlreadyClean   []int64 // 无 Emby 但本来就没有任何使用记录可清
+	SkippedHasEmby []int64 // 已绑定 Emby，跳过（已注册用户的注册资格不可重置）
+	SkippedPending []int64 // 处于 PendingEmby 在飞队列，保留其待开通资格
+	Missing        []int64 // UID 不存在
+	RegcodeRefs    int     // 从注册码 UsedBy/UsedByUIDs 抹除的引用数
+	InviteRefs     int     // 抹除的邀请使用记录 / 解除的邀请关系数
+}
+
+// ClearEmbyGrantForUnboundUsers 清理"没有 Emby 账号"用户的注册码/邀请码使用记录，
+// 让他们重新可以使用注册码 / 邀请码。专门针对历史迁移（refreshLocked 里把
+// PendingEmby/RegistrationSource/RegistrationCode 非空的用户一律置 EmbyGrantLocked=true）
+// 把从未真正开通过 Emby 的用户错误判定为"已用过注册资格"的脏数据场景。
+//
+// 对每个 UID：
+//   - 不存在            → Missing
+//   - 已绑定 Emby        → SkippedHasEmby（已注册用户不能重置注册资格）
+//   - PendingEmby 在飞   → SkippedPending（保留其待开通资格，避免取消进行中的注册）
+//   - 其余（无 Emby）    → 清用户侧 EmbyGrantLocked / RegistrationSource / RegistrationCode，
+//     并从注册码、邀请码及邀请关系里抹除其使用引用（码侧 UseCount 相应回退，
+//     回退后低于上限的码恢复可用）。
+func (s *Store) ClearEmbyGrantForUnboundUsers(uids []int64) (ClearEmbyGrantResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var result ClearEmbyGrantResult
+	err := s.mutateAndSaveLocked(func() error {
+		result = ClearEmbyGrantResult{}
+		seen := map[int64]bool{}
+		for _, uid := range uids {
+			if seen[uid] {
+				continue
+			}
+			seen[uid] = true
+			u, ok := s.state.Users[uid]
+			if !ok {
+				result.Missing = append(result.Missing, uid)
+				continue
+			}
+			if strings.TrimSpace(u.EmbyID) != "" {
+				result.SkippedHasEmby = append(result.SkippedHasEmby, uid)
+				continue
+			}
+			if u.PendingEmby {
+				result.SkippedPending = append(result.SkippedPending, uid)
+				continue
+			}
+			userChanged := false
+			if u.EmbyGrantLocked || strings.TrimSpace(u.RegistrationSource) != "" || strings.TrimSpace(u.RegistrationCode) != "" {
+				u.EmbyGrantLocked = false
+				u.RegistrationSource = ""
+				u.RegistrationCode = ""
+				s.state.Users[uid] = u
+				userChanged = true
+			}
+			regRefs := s.clearRegCodeRefsForUIDLocked(uid)
+			invRefs := s.clearInviteUsageForUIDLocked(uid)
+			result.RegcodeRefs += regRefs
+			result.InviteRefs += invRefs
+			if userChanged || regRefs > 0 || invRefs > 0 {
+				result.Cleared = append(result.Cleared, uid)
+			} else {
+				result.AlreadyClean = append(result.AlreadyClean, uid)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return ClearEmbyGrantResult{}, err
+	}
+	return result, nil
+}
+
+// clearRegCodeRefsForUIDLocked 从所有注册码抹除对该 UID 的使用引用，UseCount 相应
+// 回退；回退后若码因"用满次数"被自动停用且现在低于上限，则恢复 Active=true。
+// 返回抹除的引用条数（每个码对同一 UID 至多一条）。UsedByTelegramIDs 保持不动：
+// TG 维度的占用无法可靠映射回单个 UID，避免误删他人记录。
+func (s *Store) clearRegCodeRefsForUIDLocked(uid int64) int {
+	if uid == 0 {
+		return 0
+	}
+	removed := 0
+	for code, rc := range s.state.RegCodes {
+		dirty := false
+		if rc.UsedBy == uid {
+			rc.UsedBy = 0
+			dirty = true
+		}
+		if len(rc.UsedByUIDs) > 0 {
+			pruned := make([]int64, 0, len(rc.UsedByUIDs))
+			for _, u := range rc.UsedByUIDs {
+				if u == uid {
+					removed++
+					if rc.UseCount > 0 {
+						rc.UseCount--
+					}
+					continue
+				}
+				pruned = append(pruned, u)
+			}
+			if len(pruned) != len(rc.UsedByUIDs) {
+				if len(pruned) == 0 {
+					rc.UsedByUIDs = nil
+				} else {
+					rc.UsedByUIDs = pruned
+				}
+				dirty = true
+			}
+		}
+		if dirty {
+			if !rc.Active && rc.UseCountLimit != -1 && rc.UseCount < rc.UseCountLimit {
+				rc.Active = true
+			}
+			s.state.RegCodes[code] = rc
+		}
+	}
+	return removed
+}
+
+// clearInviteUsageForUIDLocked 解除该 UID 作为"被邀请者(invitee)"的邀请使用记录：
+// 断开邀请关系并抹除其在邀请码上的占用（UsedByUID/Used/UseCount/Active），使其可
+// 重新加入邀请树 / 使用邀请码。只清理其作为 child 的记录；其作为邀请人(inviter)
+// 生成、被他人使用的邀请码不受影响。返回处理的邀请记录数。
+func (s *Store) clearInviteUsageForUIDLocked(uid int64) int {
+	if uid == 0 {
+		return 0
+	}
+	handled := 0
+	if _, hasRel := s.state.InviteRelations[uid]; hasRel {
+		delete(s.state.InviteRelations, uid)
+		handled++
+	}
+	for code, c := range s.state.InviteCodes {
+		if c.UsedByUID != uid {
+			continue
+		}
+		c.UsedByUID = 0
+		c.Used = false
+		if c.UseCount > 0 {
+			c.UseCount--
+		}
+		if !c.Active && c.UseCountLimit != -1 && c.UseCount < c.UseCountLimit {
+			c.Active = true
+		}
+		s.state.InviteCodes[code] = c
+		handled++
+	}
+	return handled
+}
+
 // SetUserRoleAtomic 在同一把写锁内做 last-admin 计数 + 写入。
 // 解决了原 handleAdminUpdateUser / handleAdminSetRole 把"读 ListUsers 计数"
 // 与"UpdateUser 闭包"分两段执行导致的 TOCTOU：两个 admin 并发降级两个不同 admin

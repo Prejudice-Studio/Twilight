@@ -808,6 +808,18 @@ class ApiClient {
     });
   }
 
+  async batchClearEmbyGrant(selection: number[] | BatchUserSelection) {
+    return this.request<BatchUserResult>("/batch/users/emby-grant-clear", {
+      method: "POST",
+      body: JSON.stringify({
+        ...this.batchUserSelectionBody(selection),
+        confirm: confirmPhrases.batchClearEmbyGrant,
+      }),
+    }, {
+      timeoutMs: 600_000,
+    });
+  }
+
   async cancelUserPermanent(uid: number, days: number) {
     return this.request<{ uid: number; days: number; expired_at: number; role: number; role_name: string; downgraded_whitelist: boolean }>(`/admin/users/${uid}/cancel-permanent`, {
       method: "POST",
