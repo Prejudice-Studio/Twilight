@@ -139,6 +139,7 @@
     "menuEdit": "編輯資訊",
     "menuRenew": "續期",
     "menuCancelPermanent": "取消永久到期",
+    "menuSetExpiry": "設定到期時間",
     "menuResetPassword": "重置密碼",
     "menuBindEmby": "綁定 Emby",
     "menuBindTelegram": "綁定 Telegram",

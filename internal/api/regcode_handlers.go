@@ -51,6 +51,13 @@ func (a *App) handleCreateRegcodes(w http.ResponseWriter, r *http.Request, _ Par
 		count = 100
 	}
 	days := normalizeRegCodeDays(intValue(payload, "days", 30))
+	// 正天数封顶 36500（约百年），与 renew / set-expiry / bulk-expire 的口径一致：
+	// 否则巨大的 Days 会在用户兑换时经 addDaysToExpiry 落进永久区间，绕过显式
+	// 「-1 永久」路径静默发放永久权益。-1（永久）由 normalize 保留，放行。
+	if days > 36500 {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "days 不能超过 36500")
+		return
+	}
 	codeType := intValue(payload, "type", 1)
 	if codeType < 1 || codeType > 3 {
 		failWithCode(w, http.StatusBadRequest, ErrRegcodeTypeInvalid, "注册码类型无效")

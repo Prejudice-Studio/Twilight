@@ -114,7 +114,7 @@ export default function AdminUsersPage() {
   const [renewOpen, setRenewOpen] = useState(false);
   const [renewDays, setRenewDays] = useState("30");
   const [renewPermanent, setRenewPermanent] = useState(false);
-  const [renewMode, setRenewMode] = useState<"renew" | "cancelPermanent">("renew");
+  const [renewMode, setRenewMode] = useState<"renew" | "cancelPermanent" | "setExact">("renew");
   const [selectedUser, setSelectedUser] = useState<UserInfo | null>(null);
   const [isActionLoading, setIsActionLoading] = useState(false);
   
@@ -139,6 +139,10 @@ export default function AdminUsersPage() {
   const [selectedUserIds, setSelectedUserIds] = useState<Set<number>>(new Set());
   const [selectionScope, setSelectionScope] = useState<UserSelectionScope>("manual");
   const [selectionScopeCount, setSelectionScopeCount] = useState(0);
+  // 虚拟范围（all / emby）下被逐个取消勾选的 UID。跨页保留，使「选中全部后再
+  // 取消个别用户」「反选全部」这类操作不会塌缩成仅当前页。批量请求会把它作为
+  // exclude_uids 透传给后端。manual 范围不使用此集合。
+  const [excludedUserIds, setExcludedUserIds] = useState<Set<number>>(new Set());
   const [selectEmbyLoading, setSelectEmbyLoading] = useState(false);
   const [batchUserLoading, setBatchUserLoading] = useState(false);
 
@@ -295,7 +299,12 @@ export default function AdminUsersPage() {
     [users, selectedUserIds],
   );
   const selectedUids = useMemo(() => Array.from(selectedUserIds), [selectedUserIds]);
-  const selectedCount = selectionScope === "all" ? total : selectionScope === "emby" ? selectionScopeCount : selectedUserIds.size;
+  const selectedCount =
+    selectionScope === "all"
+      ? Math.max(0, total - excludedUserIds.size)
+      : selectionScope === "emby"
+        ? Math.max(0, selectionScopeCount - excludedUserIds.size)
+        : selectedUserIds.size;
   const selectedEmbyCount = useMemo(
     () => selectedUsers.filter((user) => Boolean(user.emby_id)).length,
     [selectedUsers],
@@ -310,14 +319,17 @@ export default function AdminUsersPage() {
   );
 
   const isUserSelected = (user: UserInfo) =>
-    selectionScope === "all" ||
-    (selectionScope === "emby" && Boolean(user.emby_id)) ||
-    selectedUserIds.has(user.uid);
+    selectionScope === "all"
+      ? !excludedUserIds.has(user.uid)
+      : selectionScope === "emby"
+        ? Boolean(user.emby_id) && !excludedUserIds.has(user.uid)
+        : selectedUserIds.has(user.uid);
 
   const allPageSelected = users.length > 0 && users.every(isUserSelected);
 
   const clearUserSelection = () => {
     setSelectedUserIds(new Set());
+    setExcludedUserIds(new Set());
     setSelectionScope("manual");
     setSelectionScopeCount(0);
   };
@@ -329,34 +341,46 @@ export default function AdminUsersPage() {
 
   const selectedBatchTarget = () => (
     selectionScope === "all"
-      ? { select_all: true, filter: usersBatchFilterParams(currentListState) }
+      ? { select_all: true, filter: usersBatchFilterParams(currentListState), exclude_uids: Array.from(excludedUserIds) }
       : selectionScope === "emby"
-        ? { select_all: true, filter: embyMatchingFilter() }
+        ? { select_all: true, filter: embyMatchingFilter(), exclude_uids: Array.from(excludedUserIds) }
       : selectedUids
   );
 
+  // 行级勾选：manual 范围维护 includes 集；all / emby 虚拟范围维护 excludes 集，
+  // 这样取消勾选某行不会丢掉其它页的选择（旧实现会塌缩成仅当前页）。
   const toggleSelectedUser = (uid: number) => {
-    if (selectionScope !== "manual") {
-      setSelectionScope("manual");
-      setSelectionScopeCount(0);
-      setSelectedUserIds(new Set(users.filter((user) => isUserSelected(user) && user.uid !== uid).map((user) => user.uid)));
+    if (selectionScope === "manual") {
+      setSelectedUserIds((prev) => toggleSetMember(prev, uid));
       return;
     }
-    setSelectedUserIds((prev) => toggleSetMember(prev, uid));
+    if (selectionScope === "emby") {
+      const target = users.find((user) => user.uid === uid);
+      if (!target || !target.emby_id) return; // emby 范围只作用于已绑定行
+    }
+    setExcludedUserIds((prev) => toggleSetMember(prev, uid));
   };
 
+  // 当前页可勾选的行：emby 范围下仅已绑定 Emby 的行参与。
+  const selectablePageRows = () =>
+    selectionScope === "emby" ? users.filter((user) => Boolean(user.emby_id)) : users;
+
   const toggleSelectCurrentPage = () => {
-    if (selectionScope !== "manual") {
-      clearUserSelection();
+    if (selectionScope === "manual") {
+      setSelectedUserIds((prev) => {
+        const next = new Set(prev);
+        if (allPageSelected) users.forEach((user) => next.delete(user.uid));
+        else users.forEach((user) => next.add(user.uid));
+        return next;
+      });
       return;
     }
-    setSelectedUserIds((prev) => {
+    // all / emby：用排除集翻转当前页，保留跨页选择
+    setExcludedUserIds((prev) => {
       const next = new Set(prev);
-      if (allPageSelected) {
-        users.forEach((user) => next.delete(user.uid));
-      } else {
-        users.forEach((user) => next.add(user.uid));
-      }
+      const rows = selectablePageRows();
+      if (allPageSelected) rows.forEach((user) => next.add(user.uid));
+      else rows.forEach((user) => next.delete(user.uid));
       return next;
     });
   };
@@ -364,28 +388,65 @@ export default function AdminUsersPage() {
   const selectCurrentPageUsers = () => {
     setSelectionScope("manual");
     setSelectionScopeCount(0);
+    setExcludedUserIds(new Set());
     setSelectedUserIds(new Set(users.map((user) => user.uid)));
   };
 
-  // 反选本页：对当前页可见行逐个翻转选中态，结果落到 manual 范围。
-  // 与点选单行 (toggleSelectedUser) 一致——非 manual 的虚拟范围（全部 / 拥有 Emby）
-  // 先按当前页可见选中态塌缩为 manual，再翻转；跨页的虚拟全选不参与。
+  // 反选本页：仅翻转当前页可见行的勾选态，不改变范围（manual 翻 includes，
+  // all / emby 翻 excludes），跨页选择保持不变。
   const invertPageSelection = () => {
     if (users.length === 0) return;
-    const base = selectionScope === "manual"
-      ? new Set(selectedUserIds)
-      : new Set(users.filter(isUserSelected).map((user) => user.uid));
-    users.forEach((user) => {
-      if (base.has(user.uid)) base.delete(user.uid);
-      else base.add(user.uid);
+    if (selectionScope === "manual") {
+      setSelectedUserIds((prev) => {
+        const next = new Set(prev);
+        users.forEach((user) => {
+          if (next.has(user.uid)) next.delete(user.uid);
+          else next.add(user.uid);
+        });
+        return next;
+      });
+      return;
+    }
+    setExcludedUserIds((prev) => {
+      const next = new Set(prev);
+      selectablePageRows().forEach((user) => {
+        if (next.has(user.uid)) next.delete(user.uid);
+        else next.add(user.uid);
+      });
+      return next;
     });
-    setSelectionScope("manual");
-    setSelectionScopeCount(0);
-    setSelectedUserIds(base);
+  };
+
+  // 反选全部：对整个筛选结果取补集（跨页）。
+  //   - all 范围：补集 =「当前被排除的具体 UID」→ 落为 manual 精确选中；排除集为空
+  //     表示全选，补集为空 → 清空。
+  //   - manual 范围：补集 =「全部匹配 − 当前选中」→ 落为 all 范围且排除当前选中集。
+  //   - emby 范围：补集无法用单一 select_all filter 精确表达（含未绑定行），按钮禁用。
+  const invertAllSelection = () => {
+    if (total === 0 || selectionScope === "emby") return;
+    if (selectionScope === "all") {
+      if (excludedUserIds.size === 0) {
+        clearUserSelection();
+        return;
+      }
+      const revived = new Set(excludedUserIds);
+      setExcludedUserIds(new Set());
+      setSelectionScope("manual");
+      setSelectionScopeCount(0);
+      setSelectedUserIds(revived);
+      return;
+    }
+    // manual → all minus 当前选中
+    const exclude = new Set(selectedUserIds);
+    setSelectedUserIds(new Set());
+    setExcludedUserIds(exclude);
+    setSelectionScope("all");
+    setSelectionScopeCount(total);
   };
 
   const selectAllMatchingUsers = () => {
-    setSelectedUserIds(new Set(users.map((user) => user.uid)));
+    setSelectedUserIds(new Set());
+    setExcludedUserIds(new Set());
     setSelectionScope("all");
     setSelectionScopeCount(total);
   };
@@ -405,7 +466,8 @@ export default function AdminUsersPage() {
         toast({ title: "没有可选择的 Emby 用户", description: "当前筛选条件下没有已绑定 Emby 的用户。" });
         return;
       }
-      setSelectedUserIds(new Set(users.filter((user) => Boolean(user.emby_id)).map((user) => user.uid)));
+      setSelectedUserIds(new Set());
+      setExcludedUserIds(new Set());
       setSelectionScope("emby");
       setSelectionScopeCount(count);
     } catch (error: any) {
@@ -503,9 +565,19 @@ export default function AdminUsersPage() {
       const days = renewPermanent ? -1 : parseInt(renewDays, 10);
       const res = renewMode === "cancelPermanent"
         ? await api.cancelUserPermanent(selectedUser.uid, days)
-        : await api.renewUser(selectedUser.uid, days);
+        : renewMode === "setExact"
+          ? await api.adminSetUserExpiry(selectedUser.uid, renewPermanent ? { permanent: true } : { days })
+          : await api.renewUser(selectedUser.uid, days);
       if (res.success) {
-        toast({ title: renewMode === "cancelPermanent" ? "已取消永久" : "续期成功", variant: "success" });
+        toast({
+          title:
+            renewMode === "cancelPermanent"
+              ? "已取消永久"
+              : renewMode === "setExact"
+                ? "到期时间已设置"
+                : "续期成功",
+          variant: "success",
+        });
         setRenewOpen(false);
         setSelectedUser(null);
         invalidateUsersCache();
@@ -1554,6 +1626,13 @@ export default function AdminUsersPage() {
           setRenewDays("30");
           setRenewOpen(true);
         },
+        onSetExpiry: (u) => {
+          setSelectedUser(u);
+          setRenewMode("setExact");
+          setRenewPermanent(false);
+          setRenewDays("30");
+          setRenewOpen(true);
+        },
         onResetPassword: handleResetPassword,
         onBindEmby: handleOpenBindEmby,
         onBindTelegram: handleOpenBindTelegram,
@@ -1891,9 +1970,13 @@ export default function AdminUsersPage() {
             <div className="space-y-1">
               <p className="font-medium">
                 {selectionScope === "all"
-                  ? `已选择全部 ${total} 个匹配用户`
+                  ? excludedUserIds.size > 0
+                    ? `已选择全部匹配用户中的 ${selectedCount} 个（排除 ${excludedUserIds.size} 个）`
+                    : `已选择全部 ${total} 个匹配用户`
                   : selectionScope === "emby"
-                    ? `已选择 ${selectionScopeCount} 个拥有 Emby 的匹配用户`
+                    ? excludedUserIds.size > 0
+                      ? `已选择拥有 Emby 的 ${selectedCount} 个（排除 ${excludedUserIds.size} 个）`
+                      : `已选择 ${selectionScopeCount} 个拥有 Emby 的匹配用户`
                     : selectedCount > 0
                       ? `已选择 ${selectedCount} 个用户`
                       : "批量选择"}
@@ -1901,10 +1984,10 @@ export default function AdminUsersPage() {
               {selectedCount > 0 ? (
                 <p className="text-xs text-muted-foreground">
                   {selectionScope === "all"
-                    ? "将按当前筛选条件作用于全部匹配用户；管理员账号会被后端自动跳过。"
+                    ? `将按当前筛选条件作用于全部匹配用户${excludedUserIds.size > 0 ? `（已排除 ${excludedUserIds.size} 个）` : ""}；管理员账号会被后端自动跳过。`
                     : selectionScope === "emby"
-                      ? "将按当前筛选条件中已绑定 Emby 的用户执行；未绑定 Emby 的用户不会进入本次选择。"
-                    : `当前页可见已选用户中 ${selectedEmbyCount} 个已绑定 Emby${selectedAdminCount > 0 ? `，${selectedAdminCount} 个管理员会被后端自动跳过` : "；管理员账号会被后端自动跳过"}。`}
+                      ? `将按当前筛选条件中已绑定 Emby 的用户执行${excludedUserIds.size > 0 ? `（已排除 ${excludedUserIds.size} 个）` : ""}；未绑定 Emby 的用户不会进入本次选择。`
+                      : `当前页可见已选用户中 ${selectedEmbyCount} 个已绑定 Emby${selectedAdminCount > 0 ? `，${selectedAdminCount} 个管理员会被后端自动跳过` : "；管理员账号会被后端自动跳过"}。`}
                 </p>
               ) : (
                 <p className="text-xs text-muted-foreground">可选择当前页、当前筛选下拥有 Emby 的用户，或当前筛选下全部用户。</p>
@@ -1926,6 +2009,16 @@ export default function AdminUsersPage() {
                 <Button variant="outline" size="sm" onClick={invertPageSelection} disabled={batchUserLoading || users.length === 0}>
                   <FlipHorizontal2 className="mr-2 h-4 w-4" />
                   反选本页
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={invertAllSelection}
+                  disabled={batchUserLoading || total === 0 || selectionScope === "emby"}
+                  title={selectionScope === "emby" ? "请先切换到「选中全部」或手动选择，再反选全部" : "对当前筛选下的全部用户取反选（跨页）"}
+                >
+                  <FlipHorizontal2 className="mr-2 h-4 w-4" />
+                  反选全部
                 </Button>
               </div>
               <Button variant="outline" size="sm" onClick={clearUserSelection} disabled={batchUserLoading || selectedCount === 0}>

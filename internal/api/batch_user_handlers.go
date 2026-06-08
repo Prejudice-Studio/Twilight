@@ -313,6 +313,13 @@ func (a *App) filteredBatchUserUIDs(payload map[string]any, limit int) ([]int64,
 	activeFilter, hasActive := filter["active"]
 	embyFilter := strings.ToLower(asString(filter["emby"]))
 	search := strings.ToLower(strings.TrimSpace(asString(filter["search"])))
+	// exclude_uids 支持「反选全部 / 全选后取消个别」：前端用排除集表达跨页选择，
+	// 这里把它从匹配集中剔除。只能缩小目标集，无法越过筛选 / 鉴权扩大目标——
+	// 后续每个 batch handler 仍会逐 UID 复核 userIsProtected 等约束。
+	excluded := map[int64]struct{}{}
+	for _, id := range int64Slice(payload["exclude_uids"]) {
+		excluded[id] = struct{}{}
+	}
 	uids := []int64{}
 	matched := 0
 	for _, u := range a.store().ListUsers() {
@@ -329,6 +336,9 @@ func (a *App) filteredBatchUserUIDs(payload map[string]any, limit int) ([]int64,
 			continue
 		}
 		if search != "" && !strings.Contains(strings.ToLower(u.Username+" "+u.Email+" "+u.EmbyID+" "+strconv.FormatInt(u.UID, 10)+" "+strconv.FormatInt(u.TelegramID, 10)), search) {
+			continue
+		}
+		if _, skip := excluded[u.UID]; skip {
 			continue
 		}
 		matched++

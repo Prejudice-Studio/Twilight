@@ -447,9 +447,12 @@ export function ToggleActiveDialog({
 }
 
 /**
- * 续期 / 取消永久对话框：复用同一表单，由 mode 决定标题和按钮文案。
- * - mode="cancelPermanent" 时隐藏"永久"复选框，仅允许填入天数
- * - mode="renew" 时支持"永久有效"开关，勾选后禁用天数输入
+ * 续期 / 取消永久 / 设置到期对话框：复用同一表单，由 mode 决定标题和文案。
+ * - mode="renew"：叠加式续期，在现有到期时间上 +N 天；支持"永久有效"开关。
+ * - mode="cancelPermanent"：把永久号改成「从现在起 N 天后」到期（绝对式覆盖）；
+ *   不显示"永久"开关。
+ * - mode="setExact"：把任意用户的剩余到期时间直接设为精确值（从现在起 N 天后，
+ *   覆盖而非叠加）；支持"永久有效"开关。这是「手动设置剩余到期时间」的入口。
  */
 export function RenewUserDialog({
   open,
@@ -466,7 +469,7 @@ export function RenewUserDialog({
   open: boolean;
   onOpenChange: (next: boolean) => void;
   user: UserInfo | null;
-  mode: "renew" | "cancelPermanent";
+  mode: "renew" | "cancelPermanent" | "setExact";
   days: string;
   onDaysChange: (next: string) => void;
   permanent: boolean;
@@ -474,6 +477,26 @@ export function RenewUserDialog({
   onSubmit: () => void;
   isLoading: boolean;
 }) {
+  const title =
+    mode === "cancelPermanent"
+      ? "取消永久有效期"
+      : mode === "setExact"
+        ? "设置到期时间"
+        : "用户续期";
+  const description =
+    mode === "cancelPermanent"
+      ? `将用户 ${user?.username} 改为指定天数后到期`
+      : mode === "setExact"
+        ? `将用户 ${user?.username} 的到期时间直接设为「从现在起 N 天后」（覆盖现有时间，而非在原有基础上叠加）`
+        : `为用户 ${user?.username} 延长账号时间`;
+  const daysLabel =
+    mode === "renew" ? "续期天数" : "从现在起多少天后到期";
+  const submitLabel =
+    mode === "cancelPermanent"
+      ? "确认取消永久"
+      : mode === "setExact"
+        ? "确认设置"
+        : "确认续期";
   return (
     <Dialog
       open={open}
@@ -484,19 +507,16 @@ export function RenewUserDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{mode === "cancelPermanent" ? "取消永久有效期" : "用户续期"}</DialogTitle>
-          <DialogDescription>
-            {mode === "cancelPermanent"
-              ? `将用户 ${user?.username} 改为指定天数后到期`
-              : `为用户 ${user?.username} 延长账号时间`}
-          </DialogDescription>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label>{mode === "cancelPermanent" ? "改为多少天后到期" : "续期天数"}</Label>
+            <Label>{daysLabel}</Label>
             <Input
               type="number"
-              placeholder="输入续期天数"
+              min={1}
+              placeholder="输入天数"
               value={days}
               onChange={(e) => onDaysChange(e.target.value)}
               disabled={permanent}
@@ -520,7 +540,7 @@ export function RenewUserDialog({
           </Button>
           <Button onClick={onSubmit} disabled={isLoading}>
             {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {mode === "cancelPermanent" ? "确认取消永久" : "确认续期"}
+            {submitLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

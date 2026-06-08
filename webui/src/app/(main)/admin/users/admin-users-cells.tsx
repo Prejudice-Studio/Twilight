@@ -87,6 +87,7 @@ export interface UserActionsMenuHandlers {
   onEdit: (user: UserInfo) => void;
   onRenew: (user: UserInfo) => void;
   onCancelPermanent: (user: UserInfo) => void;
+  onSetExpiry: (user: UserInfo) => void;
   onResetPassword: (user: UserInfo) => void;
   onBindEmby: (user: UserInfo) => void;
   onBindTelegram: (user: UserInfo) => void;
@@ -127,6 +128,10 @@ export function UserActionsMenu({
         <DropdownMenuItem onClick={() => handlers.onRenew(user)}>
           <RefreshCw className="mr-2 h-4 w-4" />
           {t("adminUsers.menuRenew")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => handlers.onSetExpiry(user)}>
+          <CalendarClock className="mr-2 h-4 w-4" />
+          {t("adminUsers.menuSetExpiry")}
         </DropdownMenuItem>
         {showCancelPermanent && (
           <DropdownMenuItem onClick={() => handlers.onCancelPermanent(user)}>

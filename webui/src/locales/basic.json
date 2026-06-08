@@ -877,6 +877,7 @@
     "menuEdit": "编辑信息",
     "menuRenew": "续期",
     "menuCancelPermanent": "取消永久到期",
+    "menuSetExpiry": "设置到期时间",
     "menuResetPassword": "重置密码",
     "menuBindEmby": "绑定 Emby",
     "menuBindTelegram": "绑定 Telegram",

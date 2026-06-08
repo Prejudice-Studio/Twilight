@@ -139,6 +139,7 @@
     "menuEdit": "Edit info",
     "menuRenew": "Renew",
     "menuCancelPermanent": "Cancel permanent expiry",
+    "menuSetExpiry": "Set expiry time",
     "menuResetPassword": "Reset password",
     "menuBindEmby": "Bind Emby",
     "menuBindTelegram": "Bind Telegram",

@@ -4537,6 +4537,73 @@ func TestPermanentExpiryNormalizesForPublicAPIAndAdminRenew(t *testing.T) {
 	}
 }
 
+// TestAdminSetUserExpiryAbsolute 锁定 Task 2 的核心修复：
+//   - cancel-permanent 必须把永久号真正改成「现在起 N 天后」，而不是因为
+//     base=max(now, ExpiredAt) 在永久哨兵上叠加而保持永久（旧 bug）。
+//   - set-expiry 是绝对覆盖：对一个还有很久到期的用户设 N 天，结果是 now+N 天，
+//     而不是在原到期时间上叠加。
+//   - permanent=true 设永久；days 越界 / 非正被拒。
+func TestAdminSetUserExpiryAbsolute(t *testing.T) {
+	app := newTestApp(t)
+	adminCtx := func(r *http.Request) *http.Request {
+		return r.WithContext(context.WithValue(r.Context(), principalKey, principal{User: store.User{UID: 999, Role: store.RoleAdmin, Active: true}}))
+	}
+	call := func(uid int64, body string) *httptest.ResponseRecorder {
+		req := adminCtx(httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(body)))
+		rr := httptest.NewRecorder()
+		app.handleAdminSetUserExpiry(rr, req, Params{"uid": strconv.FormatInt(uid, 10)})
+		return rr
+	}
+
+	// 永久号 → cancel-permanent 30 天：必须不再永久，且落在 now+30 天附近。
+	permUser, err := app.store().CreateUser(store.User{Username: "set-exp-perm", Role: store.RoleNormal, Active: true, ExpiredAt: permanentExpiryUnix, EmbyID: "e1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rr := call(permUser.UID, `{"days":30}`); rr.Code != http.StatusOK {
+		t.Fatalf("cancel-permanent status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	updated, _ := app.store().User(permUser.UID)
+	if expiryIsPermanent(updated.ExpiredAt) {
+		t.Fatalf("cancel-permanent left user permanent: ExpiredAt=%d", updated.ExpiredAt)
+	}
+	want := time.Now().Unix() + 30*86400
+	if diff := updated.ExpiredAt - want; diff < -120 || diff > 120 {
+		t.Fatalf("cancel-permanent absolute expiry off by %d (got %d want ~%d)", diff, updated.ExpiredAt, want)
+	}
+
+	// 远期到期号 → set-expiry 7 天：绝对覆盖，不叠加。
+	farUser, err := app.store().CreateUser(store.User{Username: "set-exp-far", Role: store.RoleNormal, Active: true, ExpiredAt: time.Now().AddDate(5, 0, 0).Unix(), EmbyID: "e2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rr := call(farUser.UID, `{"days":7}`); rr.Code != http.StatusOK {
+		t.Fatalf("set-expiry status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	updated, _ = app.store().User(farUser.UID)
+	want = time.Now().Unix() + 7*86400
+	if diff := updated.ExpiredAt - want; diff < -120 || diff > 120 {
+		t.Fatalf("set-expiry should overwrite not add: got %d want ~%d (diff %d)", updated.ExpiredAt, want, diff)
+	}
+
+	// permanent=true → 永久 + 复活。
+	if rr := call(farUser.UID, `{"permanent":true}`); rr.Code != http.StatusOK {
+		t.Fatalf("set permanent status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	updated, _ = app.store().User(farUser.UID)
+	if !expiryIsPermanent(updated.ExpiredAt) || !updated.Active {
+		t.Fatalf("set permanent did not stick: %#v", updated)
+	}
+
+	// 越界 / 非正天数被拒。
+	if rr := call(farUser.UID, `{"days":40000}`); rr.Code != http.StatusBadRequest {
+		t.Fatalf("days>36500 should be rejected, got %d", rr.Code)
+	}
+	if rr := call(farUser.UID, `{"days":0}`); rr.Code != http.StatusBadRequest {
+		t.Fatalf("days<=0 without permanent should be rejected, got %d", rr.Code)
+	}
+}
+
 func TestRenewEndpointHonorsPermanentRegcode(t *testing.T) {
 	app := newTestApp(t)
 	user, err := app.store().CreateUser(store.User{Username: "renew-permanent", Role: store.RoleNormal, Active: true, ExpiredAt: time.Now().AddDate(0, 0, 1).Unix()})

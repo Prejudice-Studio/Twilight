@@ -2183,6 +2183,14 @@ func (a *App) handleAdminRenewUser(w http.ResponseWriter, r *http.Request, param
 	if expiredAt := numeric(payload["expired_at"]); expiredAt < 0 || expiryIsPermanent(expiredAt) {
 		days = -1
 	}
+	// 与 handleAdminSetUserExpiry / handleBatchRenewUsers / handleAdminBulkExpire
+	// 对齐：正天数必须有上限。少了这道闸，base+days*86400 既可能因 days 巨大直接
+	// 落进 permanentExpiryUnix 区间（静默把账号变永久），更大的值还会让 int64
+	// 乘法溢出回绕成负数 → expiryIsPermanent 也判真。days<0 是显式永久路径，放行。
+	if days > 36500 {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "days 不能超过 36500")
+		return
+	}
 	u, err := a.store().UpdateUser(uid, func(u *store.User) error {
 		if days < 0 {
 			renewExpiryAndReactivate(u, permanentExpiryUnix)
@@ -2202,6 +2210,53 @@ func (a *App) handleAdminRenewUser(w http.ResponseWriter, r *http.Request, param
 		return
 	}
 	ok(w, "续期成功", publicUser(u))
+}
+
+// handleAdminSetUserExpiry 绝对式设置用户到期时间，区别于 handleAdminRenewUser 的
+// 叠加续期：这里直接把 ExpiredAt 覆盖为「从现在起 N 天后」或「永久」，不读取旧值做
+// base。它服务两条路由：
+//   - /cancel-permanent：把永久号改成 N 天后到期。旧实现复用叠加式 renew，base 取
+//     max(now, ExpiredAt)，而永久号的 ExpiredAt == permanentExpiryUnix（2534 年），
+//     于是 base+days 依旧 >= permanentExpiryUnix → expiryIsPermanent 仍为真，"取消
+//     永久"实际什么都没改。绝对式设置修掉这个静默失败。
+//   - /set-expiry：管理员手动把任意用户的剩余到期时间设为精确值（覆盖，不叠加）。
+//
+// days < 0 或 permanent=true 或 expired_at 永久哨兵 → 设永久；否则 days 必须为正整数，
+// 上限 36500（与批量续期对齐），避免溢出或意外落进永久区间。
+func (a *App) handleAdminSetUserExpiry(w http.ResponseWriter, r *http.Request, params Params) {
+	uid, _ := int64Param(params, "uid")
+	payload := decodeMap(r)
+	permanent := boolValue(payload, "permanent", false)
+	if expiredAt := numeric(payload["expired_at"]); expiredAt < 0 || expiryIsPermanent(expiredAt) {
+		permanent = true
+	}
+	rawDays := intValue(payload, "days", 0)
+	if rawDays < 0 {
+		permanent = true
+	}
+	if !permanent {
+		if rawDays <= 0 {
+			failWithCode(w, http.StatusBadRequest, ErrBadRequest, "days 必须为正整数，或选择永久")
+			return
+		}
+		if rawDays > 36500 {
+			failWithCode(w, http.StatusBadRequest, ErrBadRequest, "days 不能超过 36500")
+			return
+		}
+	}
+	u, err := a.store().UpdateUser(uid, func(u *store.User) error {
+		if permanent {
+			renewExpiryAndReactivate(u, permanentExpiryUnix)
+			return nil
+		}
+		// 绝对式：始终以 now 为基准，覆盖旧到期时间（含永久哨兵）。
+		renewExpiryAndReactivate(u, time.Now().Unix()+int64(rawDays)*86400)
+		return nil
+	})
+	if statusFromError(w, err) {
+		return
+	}
+	ok(w, "到期时间已更新", publicUser(u))
 }
 
 func (a *App) handleAdminResetPassword(w http.ResponseWriter, r *http.Request, params Params) {

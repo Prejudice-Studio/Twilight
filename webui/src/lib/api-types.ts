@@ -516,6 +516,8 @@ export interface BatchUserSelection {
   uids?: number[];
   select_all?: boolean;
   filter?: Pick<AdminUserListParams, "role" | "active" | "emby" | "search">;
+  // select_all 时从匹配集中排除的 UID（「反选全部」/「全选后取消个别」）。
+  exclude_uids?: number[];
 }
 
 export interface ConfigFieldOption {

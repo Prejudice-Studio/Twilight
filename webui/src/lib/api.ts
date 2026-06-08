@@ -827,6 +827,22 @@ class ApiClient {
     });
   }
 
+  /**
+   * 绝对式设置用户到期时间（覆盖现有，不叠加续期）。
+   * - permanent=true：设为永久；
+   * - 否则 days 必须为正整数，表示从现在起 N 天后到期。
+   * 后端路由 /admin/users/:uid/set-expiry。
+   */
+  async adminSetUserExpiry(uid: number, opts: { days?: number; permanent?: boolean }) {
+    const body: Record<string, unknown> = {};
+    if (opts.permanent) body.permanent = true;
+    else body.days = opts.days;
+    return this.request(`/admin/users/${uid}/set-expiry`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
   async resetPassword(
     uid: number,
     opts?: { scope?: "system" | "emby" | "both"; password?: string },
