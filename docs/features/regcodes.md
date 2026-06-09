@@ -166,7 +166,7 @@
 | ---- | ---- | ---- |
 | `GET /api/v1/admin/regcodes` | `handleListRegcodes` | 分页 + 过滤（`status`/`type`/`search`）+ 排序列出注册码。 |
 | `POST /api/v1/admin/regcodes` | `handleCreateRegcodes` | 批量生成。 |
-| `PUT /api/v1/admin/regcodes/:code` | `handleUpdateRegcode` | 部分更新：仅改 payload 中出现的字段，支持 `note`、`active`（停用/启用）、`validity_time`（小时，-1 永久）、`days`、`use_count_limit`。校验口径同创建（`validity_time`/`use_count_limit` 的 0 归一、`days` 封顶 36500）。DTO 另返回计算字段 `expires_at`（创建时间+有效小时，-1=永久）。 |
+| `PUT /api/v1/admin/regcodes/:code` | `handleUpdateRegcode` | 目前仅更新 `note` 备注。 |
 | `DELETE /api/v1/admin/regcodes/:code` | `handleDeleteRegcode` | 删除单个卡码，包含已有使用记录的卡码也会直接从状态文档移除。 |
 | `POST /api/v1/admin/regcodes/batch-delete` | `handleBatchDeleteRegcodes` | 批量删除，需确认短语 `confirm=BATCH_DELETE_REGCODES`，单次上限 200。 |
 | `GET /api/v1/admin/regcodes/:code/users` | `handleRegcodeUsers` | 查看某卡码的使用者详情（按 UID / Telegram 解析）。 |

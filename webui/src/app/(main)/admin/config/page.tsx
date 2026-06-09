@@ -86,7 +86,6 @@ import type {
   ConfigBackup,
   ConfigBackupView,
   ConfigRestoreResult,
-  EmailTestResult,
 } from "@/lib/api";
 
 // 没有声明 categories 时的回退：所有 section 归到「全部」一类，保持原来的扁平体验
@@ -685,7 +684,6 @@ function SectionCard({
   matchedFieldKeys,
   isExpanded,
   onToggle,
-  footer,
 }: {
   section: ConfigSection;
   values: Record<string, unknown>;
@@ -697,8 +695,6 @@ function SectionCard({
   matchedFieldKeys: Set<string>;
   isExpanded: boolean;
   onToggle: () => void;
-  // footer 用于在 section 字段之后注入自定义操作区（如 Email 的「发送测试邮件」）。
-  footer?: React.ReactNode;
 }) {
   const { t } = useI18n();
   const Icon = SECTION_ICONS[section.key] || CircleDot;
@@ -774,88 +770,12 @@ function SectionCard({
                     />
                   );
                 })}
-                {/* 搜索态下若该 section 没有命中字段，则不展示 footer，避免误导。 */}
-                {footer && (!searchText || visibleFields.length > 0) && (
-                  <div className="pt-2">{footer}</div>
-                )}
               </CardContent>
             </motion.div>
           )}
         </AnimatePresence>
       </Card>
     </motion.div>
-  );
-}
-
-// ==================== 邮箱发信测试 ====================
-
-function EmailTestPanel() {
-  const { t } = useI18n();
-  const { toast } = useToast();
-  const [to, setTo] = useState("");
-  const [sending, setSending] = useState(false);
-  const [results, setResults] = useState<EmailTestResult[] | null>(null);
-
-  const send = async () => {
-    setSending(true);
-    setResults(null);
-    try {
-      const res = await api.adminTestEmail(to.trim() || undefined);
-      if (res.success && res.data) {
-        setResults(res.data.results);
-        const allOk = res.data.results.every((r) => r.success);
-        toast({
-          title: allOk ? t("email.admin.testSuccess") : t("email.admin.testFailed"),
-          variant: allOk ? "success" : "destructive",
-        });
-      } else {
-        toast({ title: res.message || t("email.admin.testFailed"), variant: "destructive" });
-      }
-    } catch (error: any) {
-      toast({ title: error?.message || t("common.networkError"), variant: "destructive" });
-    } finally {
-      setSending(false);
-    }
-  };
-
-  return (
-    <div className="rounded-lg border border-dashed p-3">
-      <div className="flex items-center gap-2 text-sm font-medium">
-        <Send className="h-4 w-4 text-primary" />
-        {t("email.admin.testTitle")}
-      </div>
-      <p className="mt-1 text-xs text-muted-foreground">{t("email.admin.testDescription")}</p>
-      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-        <Input
-          type="email"
-          value={to}
-          onChange={(e) => setTo(e.target.value)}
-          placeholder={t("email.admin.testTo")}
-          className="flex-1"
-        />
-        <Button type="button" onClick={send} disabled={sending} className="shrink-0">
-          {sending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-          {t("email.admin.testButton")}
-        </Button>
-      </div>
-      {results && results.length > 0 && (
-        <div className="mt-3 space-y-1.5">
-          {results.map((r, idx) => (
-            <div
-              key={idx}
-              className={`flex flex-wrap items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs ${
-                r.success
-                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                  : "border-destructive/30 bg-destructive/10 text-destructive"
-              }`}
-            >
-              <span className="font-medium">{r.target}</span>
-              <span>{r.success ? (r.to ? `→ ${r.to}` : "OK") : r.error}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -1857,7 +1777,6 @@ export default function AdminConfigPage() {
                           }
                           isExpanded={expandedSections.has(section.key)}
                           onToggle={() => toggleSection(section.key)}
-                          footer={section.key === "Email" ? <EmailTestPanel /> : undefined}
                         />
                       );
 

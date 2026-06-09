@@ -56,35 +56,28 @@ function buildMaps(forest: InviteForest) {
     parent.set(edge.child, edge.parent);
   }
   for (const ids of children.values()) ids.sort((a, b) => a - b);
+  return { nodeByUid, children, parent };
+}
 
-  // 预计算每个节点的根（rootOf）与子树规模（descendants）：从各 root 做一次
-  // DFS，整体 O(n)。这样渲染时每行用 O(1) 查表，取代旧版「每行 findRoot(O 深度)
-  // + subtreeSize(O 子树)」造成的 O(n²) 重复计算。带 visited 防御环 / 重复入栈。
-  const rootOf = new Map<number, number>();
-  const descendants = new Map<number, number>();
-  for (const root of forest.roots) {
-    if (rootOf.has(root)) continue;
-    const order: number[] = [];
-    const stack = [root];
-    rootOf.set(root, root);
-    while (stack.length) {
-      const uid = stack.pop()!;
-      order.push(uid);
-      for (const child of children.get(uid) || []) {
-        if (rootOf.has(child)) continue;
-        rootOf.set(child, root);
-        stack.push(child);
-      }
-    }
-    // 叶子优先回溯累加：descendants(uid) = Σ(1 + descendants(child))。
-    for (let i = order.length - 1; i >= 0; i--) {
-      const uid = order[i];
-      let total = 0;
-      for (const child of children.get(uid) || []) total += 1 + (descendants.get(child) || 0);
-      descendants.set(uid, total);
-    }
+function findRoot(uid: number, parent: Map<number, number>): number {
+  let current = uid;
+  const seen = new Set<number>();
+  while (parent.has(current) && !seen.has(current)) {
+    seen.add(current);
+    current = parent.get(current)!;
   }
-  return { nodeByUid, children, parent, rootOf, descendants };
+  return current;
+}
+
+function subtreeSize(uid: number, children: Map<number, number[]>): number {
+  let total = 0;
+  const stack = [...(children.get(uid) || [])];
+  while (stack.length) {
+    const current = stack.pop()!;
+    total += 1;
+    stack.push(...(children.get(current) || []));
+  }
+  return total;
 }
 
 function roleLabelKey(role: number): MessageKey {
@@ -176,7 +169,7 @@ export default function AdminInviteTreePage() {
           out.push({
             node,
             depth: item.depth,
-            root: maps.rootOf.get(item.uid) ?? item.uid,
+            root: findRoot(item.uid, maps.parent),
             childCount: maps.children.get(item.uid)?.length || 0,
           });
         }
@@ -396,7 +389,7 @@ export default function AdminInviteTreePage() {
                 </thead>
                 <tbody>
                   {rows.map(({ node, depth, root, childCount }) => {
-                    const descendants = maps?.descendants.get(node.uid) ?? 0;
+                    const descendants = maps ? subtreeSize(node.uid, maps.children) : 0;
                     const isCollapsed = collapsed.has(node.uid);
                     return (
                       <tr
@@ -481,11 +474,11 @@ export default function AdminInviteTreePage() {
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="text-muted-foreground">{t("adminInvite.root")}</dt>
-                  <dd>{maps.rootOf.get(selected.uid) ?? selected.uid}</dd>
+                  <dd>{findRoot(selected.uid, maps.parent)}</dd>
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="text-muted-foreground">{t("adminInvite.subtree")}</dt>
-                  <dd>{t("adminInvite.subtreeChildren", { count: maps.descendants.get(selected.uid) ?? 0 })}</dd>
+                  <dd>{t("adminInvite.subtreeChildren", { count: subtreeSize(selected.uid, maps.children) })}</dd>
                 </div>
               </dl>
               <div className="grid gap-2 pt-2">

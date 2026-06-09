@@ -73,8 +73,6 @@ import {
   usersBatchFilterParams,
   usersListParams,
 } from "./admin-users-helpers";
-import { AdminEmailDialog } from "./admin-email-dialog";
-import { useSystemStore } from "@/store/system";
 import { renderExpireCell, renderRoleBadge, UserActionsMenu } from "./admin-users-cells";
 import {
   BindEmbyDialog,
@@ -109,7 +107,6 @@ export default function AdminUsersPage() {
   const [roleFilter, setRoleFilter] = useState<string>("all"); // "all" | "0" | "1" | "2"
   const [activeFilter, setActiveFilter] = useState<string>("all"); // "all" | "true" | "false"
   const [embyFilter, setEmbyFilter] = useState<string>("all"); // "all" | "bound" | "unbound"
-  const [emailStatusFilter, setEmailStatusFilter] = useState<string>("all"); // "all" | "verified" | "unverified" | "bound" | "none"
   const [sortBy, setSortBy] = useState<string>("uid_asc");
   const [expandedUserIds, setExpandedUserIds] = useState<Set<number>>(new Set());
 
@@ -120,12 +117,6 @@ export default function AdminUsersPage() {
   const [renewMode, setRenewMode] = useState<"renew" | "cancelPermanent" | "setExact">("renew");
   const [selectedUser, setSelectedUser] = useState<UserInfo | null>(null);
   const [isActionLoading, setIsActionLoading] = useState(false);
-
-  // 邮箱验证管理弹窗（强制绑定 / 置验证状态）
-  const { info: systemInfo, fetchInfo } = useSystemStore();
-  const emailEnabled = Boolean(systemInfo?.features?.email_enabled);
-  const [emailDialogOpen, setEmailDialogOpen] = useState(false);
-  const [emailDialogUser, setEmailDialogUser] = useState<UserInfo | null>(null);
   
   // Cleanup dialog states
   const [cleanupOpen, setCleanupOpen] = useState(false);
@@ -273,7 +264,7 @@ export default function AdminUsersPage() {
   };
 
   const loadUsersResource = useCallback(async (signal?: AbortSignal) => {
-    const listState = { page, perPage, search, roleFilter, activeFilter, embyFilter, emailStatusFilter, sortBy };
+    const listState = { page, perPage, search, roleFilter, activeFilter, embyFilter, sortBy };
     const cacheKey = buildUsersCacheKey(listState);
     const cached = usersCacheRef.current.get(cacheKey);
     if (cached) {
@@ -295,19 +286,13 @@ export default function AdminUsersPage() {
       });
     }
     return true;
-  }, [page, perPage, search, roleFilter, activeFilter, embyFilter, emailStatusFilter, sortBy]);
+  }, [page, perPage, search, roleFilter, activeFilter, embyFilter, sortBy]);
 
   const {
     isLoading,
     error,
     execute: loadUsers,
   } = useAsyncResource(loadUsersResource, { immediate: true });
-
-  // 拉取系统信息以判定邮箱功能是否启用：深链直达 /admin/users 时也能正确显示
-  // 邮箱验证筛选 / 行内状态徽标。store 自带 TTL 与在飞去重，重复调用开销可忽略。
-  useEffect(() => {
-    void fetchInfo();
-  }, [fetchInfo]);
 
   const selectedUsers = useMemo(
     () => users.filter((user) => selectedUserIds.has(user.uid)),
@@ -329,8 +314,8 @@ export default function AdminUsersPage() {
     [selectedUsers],
   );
   const currentListState = useMemo(
-    () => ({ page, perPage, search, roleFilter, activeFilter, embyFilter, emailStatusFilter, sortBy }),
-    [page, perPage, search, roleFilter, activeFilter, embyFilter, emailStatusFilter, sortBy],
+    () => ({ page, perPage, search, roleFilter, activeFilter, embyFilter, sortBy }),
+    [page, perPage, search, roleFilter, activeFilter, embyFilter, sortBy],
   );
 
   const isUserSelected = (user: UserInfo) =>
@@ -519,12 +504,12 @@ export default function AdminUsersPage() {
     setExpandedUserIds(new Set());
     void loadUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roleFilter, activeFilter, embyFilter, emailStatusFilter, sortBy]);
+  }, [roleFilter, activeFilter, embyFilter, sortBy]);
 
   useEffect(() => {
     clearUserSelection();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roleFilter, activeFilter, embyFilter, emailStatusFilter, sortBy]);
+  }, [roleFilter, activeFilter, embyFilter, sortBy]);
 
   const handleForceSetEmbyPassword = async () => {
     const emby = forcePwdEmbyName.trim();
@@ -931,13 +916,12 @@ export default function AdminUsersPage() {
       confirmLabel: "开始同步",
     });
     if (!ok) return;
-    const filter: { role?: number; active?: boolean; emby?: "bound" | "unbound"; email_status?: "verified" | "unverified" | "bound" | "none"; search?: string } = {};
+    const filter: { role?: number; active?: boolean; emby?: "bound" | "unbound"; search?: string } = {};
     if (options.currentFilter) {
       if (roleFilter !== "all") filter.role = Number(roleFilter);
       if (activeFilter !== "all") filter.active = activeFilter === "true";
       if (embyFilter === "bound") filter.emby = "bound";
       else if (embyFilter === "unbound") filter.emby = "unbound";
-      if (emailStatusFilter !== "all") filter.email_status = emailStatusFilter as "verified" | "unverified" | "bound" | "none";
       if (search.trim()) filter.search = search.trim();
     }
     try {
@@ -1209,7 +1193,6 @@ export default function AdminUsersPage() {
     if (activeFilter !== "all") filter.active = activeFilter === "true";
     if (embyFilter === "bound") filter.emby = "bound";
     else if (embyFilter === "unbound") filter.emby = "unbound";
-    if (emailStatusFilter !== "all") filter.email_status = emailStatusFilter as "verified" | "unverified" | "bound" | "none";
     if (Object.keys(filter).length > 0) payload.filter = filter;
     payload.include_admin = bulkExpireIncludeAdmin;
     payload.include_whitelist = bulkExpireIncludeWhitelist;
@@ -1260,7 +1243,6 @@ export default function AdminUsersPage() {
     if (activeFilter !== "all") filter.active = activeFilter === "true";
     if (embyFilter === "bound") filter.emby = "bound";
     else if (embyFilter === "unbound") filter.emby = "unbound";
-    if (emailStatusFilter !== "all") filter.email_status = emailStatusFilter as "verified" | "unverified" | "bound" | "none";
     if (search.trim()) filter.search = search.trim();
 
     setBulkEnableLoading(true);
@@ -1653,10 +1635,6 @@ export default function AdminUsersPage() {
         },
         onResetPassword: handleResetPassword,
         onBindEmby: handleOpenBindEmby,
-        onBindEmail: (u) => {
-          setEmailDialogUser(u);
-          setEmailDialogOpen(true);
-        },
         onBindTelegram: handleOpenBindTelegram,
         onSyncBindings: (u) => handleSyncBindings({ uid: u.uid }),
         onForceUnbind: handleForceUnbind,
@@ -1900,7 +1878,7 @@ export default function AdminUsersPage() {
           </div>
 
           {/* 筛选 / 排序 */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">角色</p>
               <Select value={roleFilter} onValueChange={setRoleFilter}>
@@ -1941,23 +1919,6 @@ export default function AdminUsersPage() {
                 </SelectContent>
               </Select>
             </div>
-            {emailEnabled && (
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">{t("email.admin.statusColumn")}</p>
-                <Select value={emailStatusFilter} onValueChange={setEmailStatusFilter}>
-                  <SelectTrigger>
-                    <SelectValue placeholder={t("email.admin.filterAll")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">{t("email.admin.filterAll")}</SelectItem>
-                    <SelectItem value="verified">{t("email.admin.filterVerified")}</SelectItem>
-                    <SelectItem value="unverified">{t("email.admin.filterUnverified")}</SelectItem>
-                    <SelectItem value="bound">{t("email.admin.filterBound")}</SelectItem>
-                    <SelectItem value="none">{t("email.admin.filterNone")}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">排序</p>
               <Select value={sortBy} onValueChange={setSortBy}>
@@ -1982,7 +1943,7 @@ export default function AdminUsersPage() {
             </div>
           </div>
 
-          {(roleFilter !== "all" || activeFilter !== "all" || embyFilter !== "all" || emailStatusFilter !== "all" || sortBy !== "uid_asc") && (
+          {(roleFilter !== "all" || activeFilter !== "all" || embyFilter !== "all" || sortBy !== "uid_asc") && (
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>已应用筛选 / 排序</span>
               <Button
@@ -1992,7 +1953,6 @@ export default function AdminUsersPage() {
                   setRoleFilter("all");
                   setActiveFilter("all");
                   setEmbyFilter("all");
-                  setEmailStatusFilter("all");
                   setSortBy("uid_asc");
                 }}
               >
@@ -2115,16 +2075,9 @@ export default function AdminUsersPage() {
                       <div className="min-w-0">
                         <p className="truncate text-base font-medium">{user.username}</p>
                         <p className="mt-1 text-xs text-muted-foreground">UID: {user.uid}</p>
-                        <div className="mt-0.5 flex items-center gap-1.5">
-                          <span className="truncate text-xs text-muted-foreground" title={user.email || "未设置"}>
-                            邮箱: {user.email || "未设置"}
-                          </span>
-                          {emailEnabled && user.email && (
-                            <Badge variant="outline" className={`shrink-0 px-1.5 py-0 text-[10px] ${user.email_verified ? "border-emerald-500/40 text-emerald-600" : "border-amber-500/40 text-amber-600"}`}>
-                              {user.email_verified ? t("email.verified") : t("email.unverified")}
-                            </Badge>
-                          )}
-                        </div>
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground" title={user.email || "未设置"}>
+                          邮箱: {user.email || "未设置"}
+                        </p>
                       </div>
                     </div>
                     {renderUserActions(user)}
@@ -2233,16 +2186,9 @@ export default function AdminUsersPage() {
                                 </span>
                               )}
                             </p>
-                            <div className="flex items-center gap-1.5">
-                              <span className="max-w-[260px] truncate text-xs text-muted-foreground" title={user.email || "未设置"}>
-                                邮箱: {user.email || "未设置"}
-                              </span>
-                              {emailEnabled && user.email && (
-                                <Badge variant="outline" className={`shrink-0 px-1.5 py-0 text-[10px] ${user.email_verified ? "border-emerald-500/40 text-emerald-600" : "border-amber-500/40 text-amber-600"}`}>
-                                  {user.email_verified ? t("email.verified") : t("email.unverified")}
-                                </Badge>
-                              )}
-                            </div>
+                            <p className="max-w-[260px] truncate text-xs text-muted-foreground" title={user.email || "未设置"}>
+                              邮箱: {user.email || "未设置"}
+                            </p>
                           </div>
                           <Button
                             variant="ghost"
@@ -2662,17 +2608,6 @@ export default function AdminUsersPage() {
         }}
         onSubmit={handleCreateStandaloneEmby}
         isSubmitting={standaloneSubmitting}
-      />
-
-      {/* 邮箱验证管理：强制绑定 / 置验证状态 */}
-      <AdminEmailDialog
-        open={emailDialogOpen}
-        onOpenChange={setEmailDialogOpen}
-        user={emailDialogUser}
-        onDone={() => {
-          invalidateUsersCache();
-          void loadUsers();
-        }}
       />
     </div>
   );

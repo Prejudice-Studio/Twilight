@@ -198,8 +198,6 @@ func (a *App) observeTelegramRoster(update map[string]any) {
 		from, _ := message["from"].(map[string]any)
 		chatID := numeric(chat["id"])
 		fromID := numeric(from["id"])
-		// 私聊 + 群聊都顺手刷新已绑定用户的 Telegram 用户名（无额外 API 调用）。
-		a.refreshTelegramUsername(fromID, asString(from["username"]))
 		if chatID != 0 && fromID > 0 && chatID != fromID {
 			_ = a.store().UpsertTelegramRoster(fmt.Sprint(chatID), fromID, "member", boolish(from["is_bot"]))
 		}
@@ -219,7 +217,6 @@ func (a *App) observeTelegramRoster(update map[string]any) {
 		if chatID == 0 || userID <= 0 {
 			return
 		}
-		a.refreshTelegramUsername(userID, asString(user["username"]))
 		if status == "left" || status == "kicked" {
 			_ = a.store().MarkTelegramRosterLeft(fmt.Sprint(chatID), userID, status)
 			return
@@ -227,27 +224,6 @@ func (a *App) observeTelegramRoster(update map[string]any) {
 		_ = a.store().UpsertTelegramRoster(fmt.Sprint(chatID), userID, firstNonEmpty(status, "member"), boolish(user["is_bot"]))
 		return
 	}
-}
-
-// refreshTelegramUsername 在收到任意来自已绑定用户的更新时被动刷新其存储的
-// Telegram 用户名。只有解析到绑定账号、且新用户名非空并与现存不同才写库，避免
-// 无谓写盘；用户名为空（对方删了 @username）时保留旧值不清空，以免破坏指名码匹配。
-func (a *App) refreshTelegramUsername(telegramID int64, rawUsername string) {
-	if telegramID <= 0 {
-		return
-	}
-	username := strings.TrimPrefix(strings.TrimSpace(rawUsername), "@")
-	if username == "" {
-		return
-	}
-	u, ok := a.store().FindUserByTelegramID(telegramID)
-	if !ok || u.TelegramUsername == username {
-		return
-	}
-	_, _ = a.store().UpdateUser(u.UID, func(cur *store.User) error {
-		cur.TelegramUsername = username
-		return nil
-	})
 }
 
 func (a *App) telegramConfirmBindCode(ctx context.Context, chatID, telegramID int64, username, code string) {

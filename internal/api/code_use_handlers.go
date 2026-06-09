@@ -12,9 +12,6 @@ import (
 
 func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
-	if a.requireEmailVerified(w, p.User) {
-		return
-	}
 	// 限速必须在任何 preview / 消费之前、且对 check_only 同样生效：否则
 	// check_only=true 会把 /users/me/use-code 变成一个不消费的"卡码有效性 + 类型 +
 	// 天数"预言机，吞吐量是全局 IP 桶（最高 1200/min）而非 regcode-check/invite-check

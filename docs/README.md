@@ -32,7 +32,6 @@
 | 文档 | 用途 |
 | ---- | ---- |
 | [注册码与卡码](./features/regcodes.md) | 注册码 / 续期码 / 白名单码 / 诱饵码规则、生成格式与随机算法 |
-| [邮箱验证与找回密码](./features/email.md) | SMTP 发信、验证码格式/有效期、强制绑定门、改密二次校验、邮箱找回、域名黑白名单、管理员邮箱管理区 |
 | [邀请树](./features/invite.md) | 邀请森林概念、配置、用户/管理员接口、删除与启停级联语义 |
 | [公告系统](./features/announcements.md) | 公告渲染模式（plain / markdown / bbcode）与前端安全清洗 |
 | [Bangumi 同步](./features/bangumi.md) | Emby Webhook、Bangumi Token、用户个人同步规则 |

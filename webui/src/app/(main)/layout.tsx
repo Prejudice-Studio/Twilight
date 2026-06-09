@@ -8,7 +8,6 @@ import { Header } from "@/components/layout/header";
 import { EmbyPendingModal } from "@/components/emby-pending-modal";
 import { ErrorBoundary } from "@/components/error-boundary";
 import RebindGuard from "@/components/rebind-guard";
-import EmailVerifyGuard from "@/components/email-verify-guard";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "next-themes";
@@ -257,7 +256,6 @@ export default function MainLayout({
         </div>
       </div>
       <EmbyPendingModal />
-      <EmailVerifyGuard />
     </div>
   );
 }

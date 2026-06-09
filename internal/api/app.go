@@ -1336,7 +1336,6 @@ func publicUser(u store.User) map[string]any {
 		"uid":                      u.UID,
 		"username":                 u.Username,
 		"email":                    u.Email,
-		"email_verified":           u.EmailVerified,
 		"telegram_id":              nullableInt(u.TelegramID),
 		"telegram_username":        u.TelegramUsername,
 		"role":                     u.Role,

@@ -194,11 +194,8 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		return map[string]any{"success": true, "users": len(users), "active": countActive(users)}, []string{"daily stats generated"}, nil
 	case "cleanup_sessions":
 		expiredSessions := a.sessions().CleanupExpired(r.Context())
-		// 顺带回收过期邮箱验证码：短 TTL，借会话清理槽周期回收，避免 state 里
-		// 堆积已失效记录。失败不阻断主流程（下一轮再清）。
-		expiredEmailCodes, _ := a.store().CleanupExpiredEmailVerifications(time.Now().Unix())
 		if !a.embyConfigured() {
-			return map[string]any{"success": true, "configured": false, "active": 0, "total": 0, "expired_sessions": expiredSessions, "expired_email_codes": expiredEmailCodes}, []string{"Emby not configured", fmt.Sprintf("cleaned up %d expired sessions", expiredSessions), fmt.Sprintf("cleaned up %d expired email codes", expiredEmailCodes)}, nil
+			return map[string]any{"success": true, "configured": false, "active": 0, "total": 0, "expired_sessions": expiredSessions}, []string{"Emby not configured", fmt.Sprintf("cleaned up %d expired sessions", expiredSessions)}, nil
 		}
 		var sessions []map[string]any
 		if err := a.embyGet(r.Context(), "/Sessions", &sessions); err != nil {
@@ -210,7 +207,7 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 				active++
 			}
 		}
-		return map[string]any{"success": true, "active": active, "total": len(sessions), "expired_sessions": expiredSessions, "expired_email_codes": expiredEmailCodes}, []string{fmt.Sprintf("read %d Emby sessions", len(sessions)), fmt.Sprintf("cleaned up %d expired sessions", expiredSessions), fmt.Sprintf("cleaned up %d expired email codes", expiredEmailCodes)}, nil
+		return map[string]any{"success": true, "active": active, "total": len(sessions), "expired_sessions": expiredSessions}, []string{fmt.Sprintf("read %d Emby sessions", len(sessions)), fmt.Sprintf("cleaned up %d expired sessions", expiredSessions)}, nil
 	case "emby_sync":
 		if !a.embyConfigured() {
 			return map[string]any{"success": true, "configured": false}, []string{"Emby not configured"}, nil

@@ -18,9 +18,6 @@ import type {
   ConfigSchema,
   ConfigSection,
   CreateRegcodeData,
-  EmailCodeProof,
-  EmailCodeSent,
-  EmailTestResult,
   DatabaseBackup,
   DatabaseBackupInspectResult,
   DatabaseMigrationResult,
@@ -31,7 +28,6 @@ import type {
   EmbyInfo,
   EmbyRegisterStatus,
   EmbySession,
-  LoginDevice,
   EmbyStatus,
   InventoryCheckRequest,
   InventoryCheckResult,
@@ -82,13 +78,6 @@ const BIND_CODE_CREATE_HEADERS = {
   "X-Twilight-Client": "webui",
   "X-Twilight-Intent": "create-bind-code",
 };
-
-// emailCodeBody 把可选的邮箱验证码凭据展开进改密请求体。强制邮箱验证开启时后端
-// 要求 verification_id + email_code；未开启时省略，保持向后兼容。
-function emailCodeBody(proof?: EmailCodeProof): Record<string, string> {
-  if (!proof?.verification_id || !proof?.code) return {};
-  return { verification_id: proof.verification_id, email_code: proof.code };
-}
 
 class ApiClient {
   private toAbsoluteAssetUrl(url?: string | null): string | null {
@@ -378,81 +367,24 @@ class ApiClient {
     });
   }
 
-  async changePassword(oldPassword: string, newPassword: string, emailCode?: EmailCodeProof) {
+  async changePassword(oldPassword: string, newPassword: string) {
     return this.request("/users/me/password/change", {
       method: "POST",
-      body: JSON.stringify({ old_password: oldPassword, new_password: newPassword, ...emailCodeBody(emailCode) }),
+      body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
     });
   }
 
-  async changeSystemPassword(oldPassword: string, newPassword: string, emailCode?: EmailCodeProof) {
+  async changeSystemPassword(oldPassword: string, newPassword: string) {
     return this.request("/users/me/password/system", {
       method: "POST",
-      body: JSON.stringify({ old_password: oldPassword, new_password: newPassword, ...emailCodeBody(emailCode) }),
+      body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
     });
   }
 
-  async changeEmbyPassword(newPassword: string, emailCode?: EmailCodeProof) {
+  async changeEmbyPassword(newPassword: string) {
     return this.request("/users/me/password/emby", {
       method: "POST",
-      body: JSON.stringify({ new_password: newPassword, ...emailCodeBody(emailCode) }),
-    });
-  }
-
-  // === 邮箱验证 ===
-  // 登录态：绑定/换绑邮箱 或 改密前获取验证码（purpose 决定收件邮箱）。
-  async sendEmailCode(data: { purpose: "bind" | "change_password" | "change_emby_password"; email?: string }) {
-    return this.request<EmailCodeSent>("/users/me/email/send-code", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  }
-
-  // 登录态：校验 bind 验证码并完成邮箱绑定（返回更新后的用户）。
-  async verifyEmailCode(data: { verification_id: string; code: string }) {
-    return this.request<UserInfo>("/users/me/email/verify", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  }
-
-  // 登出态找回：第一步请求验证码（防枚举，统一成功）。
-  async requestPasswordResetEmail(email: string) {
-    return this.request<{ resend_after: number; expires_in: number }>("/auth/password/email/request", {
-      method: "POST",
-      body: JSON.stringify({ email }),
-    });
-  }
-
-  // 登出态找回：第二步校验验证码并重置系统密码。
-  async resetPasswordByEmail(data: { email: string; code: string; new_password: string }) {
-    return this.request<{ username: string }>("/auth/password/email/reset", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  }
-
-  // 管理员：强制把用户绑定到指定邮箱（默认直接标记已验证）。
-  async adminBindUserEmail(uid: number, data: { email: string; mark_verified?: boolean; force?: boolean }) {
-    return this.request<UserInfo>(`/admin/users/${uid}/bind-email`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  }
-
-  // 管理员：手动置/撤销某用户的邮箱验证状态。
-  async adminSetUserEmailVerified(uid: number, data: { verified: boolean; force?: boolean }) {
-    return this.request<UserInfo>(`/admin/users/${uid}/email/verified`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  }
-
-  // 管理员：发送测试邮件验证 SMTP 配置。
-  async adminTestEmail(to?: string) {
-    return this.request<{ results: EmailTestResult[] }>("/admin/email/test", {
-      method: "POST",
-      body: JSON.stringify({ to: to || "" }),
+      body: JSON.stringify({ new_password: newPassword }),
     });
   }
 
@@ -629,7 +561,7 @@ class ApiClient {
   }
 
   async getMyDevices() {
-    return this.request<LoginDevice[]>("/users/me/devices");
+    return this.request<EmbyDevice[]>("/users/me/devices");
   }
 
   async removeDevice(deviceId: string) {
@@ -637,7 +569,6 @@ class ApiClient {
       method: "DELETE",
     });
   }
-
 
   // Admin
   async getUsers(params: AdminUserListParams = {}, signal?: AbortSignal) {
@@ -647,7 +578,6 @@ class ApiClient {
     if (params.role !== undefined && params.role !== null) query.set("role", String(params.role));
     if (params.active !== undefined && params.active !== null) query.set("active", String(params.active));
     if (params.emby) query.set("emby", params.emby);
-    if (params.email_status) query.set("email_status", params.email_status);
     if (params.search) query.set("search", params.search);
     if (params.sort) query.set("sort", params.sort);
     return this.request<AdminUserListResponse>(`/admin/users?${query}`, { signal });
@@ -793,7 +723,7 @@ class ApiClient {
   async syncUserBindings(payload: {
     scope?: "telegram" | "emby" | "both";
     uid?: number;
-    filter?: { role?: number; active?: boolean; emby?: "bound" | "unbound"; email_status?: "verified" | "unverified" | "bound" | "none"; search?: string };
+    filter?: { role?: number; active?: boolean; emby?: "bound" | "unbound"; search?: string };
     repair?: boolean;
   }) {
     return this.request<{
@@ -1250,27 +1180,6 @@ class ApiClient {
     }>("/admin/emby/users");
   }
 
-  // Emby 登录用户的设备 / IP 审查：设备清单（/Devices）+ 实时会话 IP（/Sessions）。
-  async adminGetEmbyDevices() {
-    return this.request<{
-      emby_configured: boolean;
-      total: number;
-      online: number;
-      devices: Array<{
-        device_id: string;
-        device_name: string;
-        app_name: string;
-        app_version: string;
-        emby_user_id: string;
-        emby_user_name: string;
-        last_activity: string;
-        ip: string;
-        online: boolean;
-        local_user: { uid: number; username: string; telegram_id: number | null } | null;
-      }>;
-    }>("/admin/emby/devices");
-  }
-
   async cleanupOrphanEmbyIds() {
     return this.request<{
       cleaned: Array<{ uid: number; username: string; old_emby_id: string }>;
@@ -1320,7 +1229,6 @@ class ApiClient {
       role?: number;
       active?: boolean;
       emby?: "bound" | "unbound";
-      email_status?: "verified" | "unverified" | "bound" | "none";
     };
     include_admin?: boolean;
     include_whitelist?: boolean;
@@ -1347,7 +1255,6 @@ class ApiClient {
       role?: number;
       active?: boolean;
       emby?: "bound" | "unbound";
-      email_status?: "verified" | "unverified" | "bound" | "none";
       search?: string;
     };
     include_admin?: boolean;
@@ -1771,13 +1678,8 @@ class ApiClient {
     });
   }
 
-  // 部分更新注册码：仅传入需要改动的字段。active 控制停用/启用，
-  // validity_time（小时，-1 永久）/ days / use_count_limit 用于编辑有效期与额度。
-  async updateRegcode(
-    code: string,
-    data: { note?: string; active?: boolean; validity_time?: number; days?: number; use_count_limit?: number },
-  ) {
-    return this.request<Regcode>(`/admin/regcodes/${encodeURIComponent(code)}`, {
+  async updateRegcode(code: string, data: { note?: string }) {
+    return this.request<{ code: string; note: string }>(`/admin/regcodes/${encodeURIComponent(code)}`, {
       method: "PUT",
       body: JSON.stringify(data),
     });

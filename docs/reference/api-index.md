@@ -47,8 +47,6 @@
 | ---- | ---- | ---- | ---- |
 | POST | `/api/v1/auth/login` | Public | 用户名密码登录 |
 | POST | `/api/v1/auth/forgot-password/emby` | Public | 通过 Emby 账号密码验证后重置 Web 登录密码 |
-| POST | `/api/v1/auth/password/email/request` | Public | 邮箱找回密码第一步：向已验证邮箱发送验证码（统一成功响应防枚举） |
-| POST | `/api/v1/auth/password/email/reset` | Public | 邮箱找回密码第二步：校验验证码并重置登录密码 |
 | POST | `/api/v1/auth/login/telegram` | Public | Telegram 直登入口（当前由 `handleDirectLoginUnavailable` 返回不可用） |
 | POST | `/api/v1/auth/login/apikey` | Public | 用 API Key 换取登录会话 |
 | POST | `/api/v1/auth/logout` | User | 注销当前会话 |
@@ -81,8 +79,6 @@
 | POST | `/api/v1/users/me/password/change` | User | 修改登录密码（兼容旧入口） |
 | POST | `/api/v1/users/me/password/system` | User | 修改系统登录密码 |
 | POST | `/api/v1/users/me/password/emby` | User | 修改 Emby 密码 |
-| POST | `/api/v1/users/me/email/send-code` | User | 发送邮箱验证码（用途 bind / change_password / change_emby_password） |
-| POST | `/api/v1/users/me/email/verify` | User | 校验 bind 验证码并完成邮箱绑定 + 标记已验证 |
 | POST | `/api/v1/users/me/emby/bind` | User | 绑定已有 Emby 账号 |
 | POST | `/api/v1/users/me/emby/register` | User | 登录后补建 Emby 账号（PENDING_EMBY 流程） |
 | POST | `/api/v1/users/me/emby/unbind` | User | 先禁用远端 Emby；成功后清理本地绑定，禁用失败则保留本地绑定 |
@@ -215,8 +211,7 @@
 | GET | `/api/v1/admin/users/by-telegram/{telegram_id}` | Admin | 按 Telegram ID 查用户 |
 | POST | `/api/v1/admin/emby/force-set-password` | Admin | 强制设置 Emby 密码（与重置密码同 handler） |
 | POST | `/api/v1/admin/emby/sync` | Admin | 同步 Emby 用户 |
-| GET | `/api/v1/admin/emby/sessions` | Admin | Emby 实时会话（含 `remote_endpoint` IP） |
-| GET | `/api/v1/admin/emby/devices` | Admin | Emby 登录用户设备/IP 审查（`/Devices` 设备清单 + 实时会话 IP，映射本地账号） |
+| GET | `/api/v1/admin/emby/sessions` | Admin | Emby 会话 |
 | GET | `/api/v1/admin/emby/activity` | Admin | Emby 活动记录 |
 | GET | `/api/v1/admin/emby/users` | Admin | Emby 用户列表 |
 | POST | `/api/v1/admin/emby/broadcast` | Admin | Emby 广播消息 |
@@ -246,9 +241,6 @@
 | POST | `/api/v1/admin/users/cleanup-invalid` | Admin | 预览/清理无效用户（执行需确认短语） |
 | POST | `/api/v1/admin/users/clear-stale-pending-emby` | Admin | 清理长期 PENDING_EMBY 的陈旧用户 |
 | POST | `/api/v1/admin/users/clear-emails` | Admin | 预览/清空所有用户邮箱设置（执行需确认短语） |
-| POST | `/api/v1/admin/users/{uid}/bind-email` | Admin | 强制把用户绑定到指定邮箱（`force` 可跳过名单/占用校验） |
-| POST | `/api/v1/admin/users/{uid}/email/verified` | Admin | 置/撤销用户邮箱验证状态（不改邮箱） |
-| POST | `/api/v1/admin/email/test` | Admin | 用当前 SMTP 配置发送测试邮件 |
 | POST | `/api/v1/admin/users/kick-no-emby` | Admin | 踢出无 Emby 账号的用户 |
 | GET | `/api/v1/admin/invite/tree` | Admin | 邀请树 |
 | POST | `/api/v1/admin/invite/users/{uid}/detach` | Admin | 将用户脱离邀请关系 |

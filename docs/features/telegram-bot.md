@@ -112,10 +112,6 @@ Bot 由二进制子命令 `bot`（或 `all`）启动，轮询逻辑见 `internal
 
 绑定码仅接受 6-16 位字母数字并统一转大写后校验。群聊内不会处理裸绑定码。绑定确认对同一 Telegram 账号做了幂等处理，并对单个 Telegram ID 施加每分钟速率限制，避免反复触发群成员校验。
 
-### Telegram 用户名自动刷新
-
-用户在 Telegram 改了 `@username` 后，已绑定账号里存的 `telegram_username` 会过时。`observeTelegramRoster`（`internal/api/telegram_bot.go`）在处理**任意**来自已绑定用户的更新（私聊 / 群消息 / `chat_member` 事件）时，顺手调用 `refreshTelegramUsername` 被动刷新：仅当能解析到绑定账号、且新用户名非空并与现存不同才写库（无额外 API 调用）；用户名为空（对方删了 `@username`）时保留旧值不清空，以免破坏指名注册码的用户名匹配。此外 `/twguser` 面板渲染时也会经 `getChatMember` 做一次按需刷新。
-
 ## 安全边界
 
 - 群聊不处理账号状态、播放统计、绑定码、管理员统计等敏感命令，仅 `/twguser` 在群内可用且受上述面板约束保护。

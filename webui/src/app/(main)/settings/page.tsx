@@ -57,8 +57,6 @@ import { ApiError } from "@/lib/api-request";
 import { ErrCodes } from "@/lib/errcode";
 import { localeLabels, supportedLocales, useI18n, type Locale } from "@/lib/i18n";
 import { passwordStrengthLabel, validatePasswordStrength } from "@/lib/password";
-import { friendlyError } from "@/lib/validators";
-import { EmailCodeInput } from "@/components/email-code-input";
 import { telegramBotUrl } from "@/lib/safe-url";
 
 const container = {
@@ -131,26 +129,6 @@ export default function SettingsPage() {
   const [showNewEmbyPwd, setShowNewEmbyPwd] = useState(false);
   const [showConfirmEmbyPwd, setShowConfirmEmbyPwd] = useState(false);
   const [isEmbyPwdLoading, setIsEmbyPwdLoading] = useState(false);
-
-  // 邮箱验证 / 强制改密
-  const emailEnabled = Boolean(systemInfo?.features?.email_enabled);
-  const forceBindEmail = Boolean(systemInfo?.features?.force_bind_email);
-  const emailVerified = Boolean(user?.email_verified);
-  // 普通/白名单且开启强制绑定时，改密需要邮箱验证码（管理员不强制）。
-  const passwordEmailGate = emailEnabled && forceBindEmail && user?.role !== 0;
-  const [emailBindStage, setEmailBindStage] = useState<"email" | "code">("email");
-  const [emailBindVerifId, setEmailBindVerifId] = useState("");
-  const [emailBindCode, setEmailBindCode] = useState("");
-  const [sysPwdVerifId, setSysPwdVerifId] = useState("");
-  const [sysPwdCode, setSysPwdCode] = useState("");
-  const [embyPwdVerifId, setEmbyPwdVerifId] = useState("");
-  const [embyPwdCode, setEmbyPwdCode] = useState("");
-
-  const resetEmailBind = () => {
-    setEmailBindStage("email");
-    setEmailBindVerifId("");
-    setEmailBindCode("");
-  };
 
   const systemPwdStrength = useMemo(
     () => validatePasswordStrength(newPassword),
@@ -551,30 +529,6 @@ export default function SettingsPage() {
     }
   };
 
-  // 邮箱启用时，绑定/换绑走「发码 → 验证」，验证通过即标记已验证。
-  const handleVerifyBindEmail = async () => {
-    if (!emailBindCode.trim()) {
-      toast({ title: t("email.enterCodeFirst"), variant: "destructive" });
-      return;
-    }
-    setIsEmailLoading(true);
-    try {
-      const res = await api.verifyEmailCode({ verification_id: emailBindVerifId, code: emailBindCode.trim() });
-      if (res.success) {
-        toast({ title: t("email.bindSuccess"), variant: "success" });
-        setEditEmailOpen(false);
-        resetEmailBind();
-        fetchUser();
-      } else {
-        toast({ title: friendlyError(res.error_code, res.message), variant: "destructive" });
-      }
-    } catch (error: any) {
-      toast({ title: error?.message || t("common.networkError"), variant: "destructive" });
-    } finally {
-      setIsEmailLoading(false);
-    }
-  };
-
   const handleChangeSystemPassword = async () => {
     if (!oldPassword || !newPassword) {
       toast({ title: t("settings.passwordFieldsRequired"), variant: "destructive" });
@@ -589,25 +543,18 @@ export default function SettingsPage() {
       toast({ title: t("settings.passwordMismatch"), variant: "destructive" });
       return;
     }
-    if (passwordEmailGate && !sysPwdCode.trim()) {
-      toast({ title: t("email.enterCodeFirst"), variant: "destructive" });
-      return;
-    }
 
     setIsSystemPwdLoading(true);
     try {
-      const proof = passwordEmailGate ? { verification_id: sysPwdVerifId, code: sysPwdCode.trim() } : undefined;
-      const res = await api.changeSystemPassword(oldPassword, newPassword, proof);
+      const res = await api.changeSystemPassword(oldPassword, newPassword);
       if (res.success) {
         toast({ title: t("settings.systemPasswordUpdated"), description: t("settings.systemPasswordUpdatedDescription"), variant: "success" });
         setChangeSystemPwdOpen(false);
         setOldPassword("");
         setNewPassword("");
         setConfirmPassword("");
-        setSysPwdCode("");
-        setSysPwdVerifId("");
       } else {
-        toast({ title: friendlyError(res.error_code, res.message), variant: "destructive" });
+        toast({ title: t("common.modifyFailed"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
       toast({ title: t("common.modifyFailed"), description: error.message, variant: "destructive" });
@@ -630,24 +577,17 @@ export default function SettingsPage() {
       toast({ title: t("settings.passwordMismatch"), variant: "destructive" });
       return;
     }
-    if (passwordEmailGate && !embyPwdCode.trim()) {
-      toast({ title: t("email.enterCodeFirst"), variant: "destructive" });
-      return;
-    }
 
     setIsEmbyPwdLoading(true);
     try {
-      const proof = passwordEmailGate ? { verification_id: embyPwdVerifId, code: embyPwdCode.trim() } : undefined;
-      const res = await api.changeEmbyPassword(newEmbyPassword, proof);
+      const res = await api.changeEmbyPassword(newEmbyPassword);
       if (res.success) {
         toast({ title: t("settings.embyPasswordUpdated"), description: t("settings.embyPasswordUpdatedDescription"), variant: "success" });
         setChangeEmbyPwdOpen(false);
         setNewEmbyPassword("");
         setConfirmEmbyPassword("");
-        setEmbyPwdCode("");
-        setEmbyPwdVerifId("");
       } else {
-        toast({ title: friendlyError(res.error_code, res.message), variant: "destructive" });
+        toast({ title: t("common.modifyFailed"), description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
       toast({ title: t("common.modifyFailed"), description: error.message, variant: "destructive" });
@@ -775,26 +715,17 @@ export default function SettingsPage() {
               </div>
               <div>
                 <Label className="text-muted-foreground font-medium">{t("settings.email")}</Label>
-                <div className="mt-1 flex items-center justify-between gap-2">
-                  <p className="font-medium flex min-w-0 items-center gap-2">
-                    <span className="truncate">{user?.email || t("settings.notSet")}</span>
-                    {user?.email && emailEnabled && (
-                      <Badge variant="outline" className={emailVerified ? "shrink-0 border-emerald-500/40 text-emerald-600" : "shrink-0 border-amber-500/40 text-amber-600"}>
-                        {emailVerified ? t("email.verified") : t("email.unverified")}
-                      </Badge>
-                    )}
-                  </p>
-                  <Button
-                    variant="outline"
+                <div className="mt-1 flex items-center justify-between">
+                  <p className="font-medium">{user?.email || t("settings.notSet")}</p>
+                  <Button 
+                    variant="outline" 
                     size="sm"
-                    className="shrink-0"
                     onClick={() => {
                       setEmailValue(user?.email || "");
-                      resetEmailBind();
                       setEditEmailOpen(true);
                     }}
                   >
-                    {emailEnabled ? (user?.email ? t("email.changeTitle") : t("email.bindTitle")) : t("settings.edit")}
+                    {t("settings.edit")}
                   </Button>
                 </div>
               </div>
@@ -1420,12 +1351,12 @@ export default function SettingsPage() {
       </Dialog>
 
       {/* Edit Email Dialog */}
-      <Dialog open={editEmailOpen} onOpenChange={(open) => { setEditEmailOpen(open); if (!open) resetEmailBind(); }}>
+      <Dialog open={editEmailOpen} onOpenChange={setEditEmailOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{emailEnabled ? t("email.bindTitle") : t("settings.emailDialogTitle")}</DialogTitle>
+            <DialogTitle>{t("settings.emailDialogTitle")}</DialogTitle>
             <DialogDescription>
-              {emailEnabled ? t("email.bindDescription") : t("settings.emailDialogDescription")}
+              {t("settings.emailDialogDescription")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -1438,31 +1369,15 @@ export default function SettingsPage() {
                 onChange={(e) => setEmailValue(e.target.value)}
               />
             </div>
-            {emailEnabled && (
-              <EmailCodeInput
-                purpose="bind"
-                email={emailValue}
-                code={emailBindCode}
-                onCodeChange={setEmailBindCode}
-                onSent={(id) => setEmailBindVerifId(id)}
-              />
-            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditEmailOpen(false)}>
               {t("common.cancel")}
             </Button>
-            {emailEnabled ? (
-              <Button onClick={handleVerifyBindEmail} disabled={isEmailLoading || !emailBindVerifId || !emailBindCode.trim()}>
-                {isEmailLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {t("email.verify")}
-              </Button>
-            ) : (
-              <Button onClick={handleUpdateEmail} disabled={isEmailLoading}>
-                {isEmailLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {t("adminConfig.confirmSave")}
-              </Button>
-            )}
+            <Button onClick={handleUpdateEmail} disabled={isEmailLoading}>
+              {isEmailLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {t("adminConfig.confirmSave")}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1474,8 +1389,6 @@ export default function SettingsPage() {
           setOldPassword("");
           setNewPassword("");
           setConfirmPassword("");
-          setSysPwdCode("");
-          setSysPwdVerifId("");
         }
       }}>
         <DialogContent>
@@ -1550,12 +1463,6 @@ export default function SettingsPage() {
                 <p className="text-xs text-destructive">{t("settings.passwordMismatch")}</p>
               )}
             </div>
-            {passwordEmailGate && (
-              <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-                <p className="text-xs text-muted-foreground">{t("email.changePasswordNotice")}</p>
-                <EmailCodeInput purpose="change_password" code={sysPwdCode} onCodeChange={setSysPwdCode} onSent={(id) => setSysPwdVerifId(id)} />
-              </div>
-            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setChangeSystemPwdOpen(false)}>
@@ -1563,7 +1470,7 @@ export default function SettingsPage() {
             </Button>
             <Button
               onClick={handleChangeSystemPassword}
-              disabled={isSystemPwdLoading || !oldPassword || !systemPwdStrength.ok || newPassword !== confirmPassword || (passwordEmailGate && (!sysPwdCode.trim() || !sysPwdVerifId))}
+              disabled={isSystemPwdLoading || !oldPassword || !systemPwdStrength.ok || newPassword !== confirmPassword}
             >
               {isSystemPwdLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {t("settings.confirmModify")}
@@ -1577,8 +1484,6 @@ export default function SettingsPage() {
         if (!open) {
           setNewEmbyPassword("");
           setConfirmEmbyPassword("");
-          setEmbyPwdCode("");
-          setEmbyPwdVerifId("");
         }
       }}>
         <DialogContent>
@@ -1644,12 +1549,6 @@ export default function SettingsPage() {
                 <p className="text-xs text-destructive">{t("settings.passwordMismatch")}</p>
               )}
             </div>
-            {passwordEmailGate && (
-              <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-                <p className="text-xs text-muted-foreground">{t("email.changePasswordNotice")}</p>
-                <EmailCodeInput purpose="change_emby_password" code={embyPwdCode} onCodeChange={setEmbyPwdCode} onSent={(id) => setEmbyPwdVerifId(id)} />
-              </div>
-            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setChangeEmbyPwdOpen(false)}>
@@ -1657,7 +1556,7 @@ export default function SettingsPage() {
             </Button>
             <Button
               onClick={handleChangeEmbyPassword}
-              disabled={isEmbyPwdLoading || !embyPwdStrength.ok || newEmbyPassword !== confirmEmbyPassword || (passwordEmailGate && (!embyPwdCode.trim() || !embyPwdVerifId))}
+              disabled={isEmbyPwdLoading || !embyPwdStrength.ok || newEmbyPassword !== confirmEmbyPassword}
             >
               {isEmbyPwdLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {t("settings.confirmModify")}

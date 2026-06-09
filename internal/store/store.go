@@ -82,7 +82,6 @@ type State struct {
 	InviteRelations     map[int64]InviteRelation       `json:"invite_relations"`
 	RegCodes            map[string]RegCode             `json:"regcodes"`
 	BindCodes           map[string]BindCode            `json:"bind_codes"`
-	EmailVerifications  map[string]EmailVerification   `json:"email_verifications"`
 	Signin              map[int64]Signin               `json:"signin"`
 	SchedulerRuns       []SchedulerRun                 `json:"scheduler_runs"`
 	SchedulerSchedules  map[string]SchedulerSchedule   `json:"scheduler_schedules"`
@@ -107,8 +106,6 @@ type User struct {
 	UID                 int64    `json:"uid"`
 	Username            string   `json:"username"`
 	Email               string   `json:"email,omitempty"`
-	EmailVerified       bool     `json:"email_verified,omitempty"`
-	EmailVerifiedAt     int64    `json:"email_verified_at,omitempty"`
 	TelegramID          int64    `json:"telegram_id,omitempty"`
 	TelegramUsername    string   `json:"telegram_username,omitempty"`
 	Role                int      `json:"role"`
@@ -315,7 +312,6 @@ type Device struct {
 	DeviceName    string `json:"device_name"`
 	Client        string `json:"client"`
 	ClientVersion string `json:"client_version,omitempty"`
-	LastIP        string `json:"last_ip,omitempty"`
 	FirstSeen     int64  `json:"first_seen"`
 	LastSeen      int64  `json:"last_seen"`
 	Trusted       bool   `json:"is_trusted"`
@@ -864,9 +860,6 @@ func (s *State) ensure() {
 	}
 	if s.BindCodes == nil {
 		s.BindCodes = map[string]BindCode{}
-	}
-	if s.EmailVerifications == nil {
-		s.EmailVerifications = map[string]EmailVerification{}
 	}
 	if s.Signin == nil {
 		s.Signin = map[int64]Signin{}

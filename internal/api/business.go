@@ -500,17 +500,6 @@ func regcodeDTO(code store.RegCode) map[string]any {
 	if created == 0 {
 		created = code.CreatedAt
 	}
-	// expires_at 给前端做「有效期计算」：validity_time<=0 视为永久（-1）；否则按
-	// 创建时间 + 有效小时数推算绝对过期时间戳（秒）。基准与 regcodeStatus 一致，
-	// 优先用 CreatedAt，缺省（历史数据）回落 CreatedTime。
-	expiresAt := int64(-1)
-	if code.ValidityTime > 0 {
-		base := code.CreatedAt
-		if base == 0 {
-			base = code.CreatedTime
-		}
-		expiresAt = base + code.ValidityTime*3600
-	}
 	usedByUIDs := regcodeUsedByUIDs(code)
 	return map[string]any{
 		"code":                     code.Code,
@@ -518,7 +507,6 @@ func regcodeDTO(code store.RegCode) map[string]any {
 		"type_name":                regcodeTypeName(code.Type),
 		"is_decoy":                 code.IsDecoy,
 		"validity_time":            code.ValidityTime,
-		"expires_at":               expiresAt,
 		"use_count":                code.UseCount,
 		"use_count_limit":          code.UseCountLimit,
 		"days":                     normalizeRegCodeDays(code.Days),

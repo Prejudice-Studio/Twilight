@@ -47,17 +47,6 @@ Emby: {emby_status}
 面板 {panel_ttl} 无操作会自动删除；每次按钮操作都会重新校验管理员身份。
 群内面板不展示邮箱、Emby ID、Telegram ID、Token、密码或服务器线路。`
 
-// DefaultEmailSubjectTemplate / DefaultEmailBodyTemplate 是邮箱验证码邮件的
-// 内置模板。占位符：{site}=站点名、{code}=验证码、{ttl}=有效期分钟数。
-// 管理员可在 [Email] section 覆写；env 覆写时用 \n 表示换行（applyEnv 会还原）。
-const DefaultEmailSubjectTemplate = "{site} 邮箱验证码"
-
-const DefaultEmailBodyTemplate = `您正在 {site} 进行邮箱验证。
-
-验证码：{code}
-
-验证码 {ttl} 分钟内有效，请勿向任何人泄露。如非本人操作，请忽略本邮件。`
-
 type Config struct {
 	AppName                       string
 	Version                       string
@@ -183,28 +172,6 @@ type Config struct {
 	EmailBlacklist      []string
 	EmailWhitelist      []string
 
-	// --- 邮箱验证 / SMTP 发信 ---
-	// EmailEnabled 是整个邮箱验证子系统的总开关：关闭时所有发码 / 找回 / 强制
-	// 绑定逻辑直接降级（前端隐藏入口、后端拒绝发码），即使 force_bind=true 也不
-	// 会把用户锁在仪表盘外（没有 SMTP 就无法验证，强制反而变成死锁）。
-	EmailEnabled               bool
-	SMTPHost                   string
-	SMTPPort                   int
-	SMTPUsername               string
-	SMTPPassword               string
-	SMTPEncryption             string // none | ssl | starttls
-	SMTPFromAddress            string
-	SMTPFromName               string
-	SMTPTimeoutSeconds         int
-	EmailForceBind             bool
-	EmailCodeLength            int
-	EmailCodeType              string // numeric | alphanumeric
-	EmailCodeTTLMinutes        int
-	EmailResendCooldownSeconds int
-	EmailMaxAttempts           int
-	EmailSubjectTemplate       string
-	EmailBodyTemplate          string
-
 	RateLimitEnabled                  bool
 	RateLimitGlobalPerMinute          int
 	RateLimitLoginPerMinute           int
@@ -212,9 +179,6 @@ type Config struct {
 	RateLimitRegisterPer10m           int
 	RateLimitForgotPasswordIPPer10m   int
 	RateLimitForgotPasswordUserPer30m int
-	RateLimitEmailCodeIPPer10m        int
-	RateLimitEmailCodeAddrPer10m      int
-	RateLimitEmailCodeUIDPer10m       int
 	RateLimitUploadPerMinute          int
 	RateLimitAdminIconPerMinute       int
 	RateLimitAPIKeyDefaultPerMinute   int
@@ -408,26 +372,9 @@ func Load(path string) (Config, error) {
 	cfg.AutoCleanupNoEmbyDays = reader.intValue(cfg.AutoCleanupNoEmbyDays, "SAR.auto_cleanup_no_emby_days", "Register.auto_cleanup_no_emby_days", "auto_cleanup_no_emby_days")
 	cfg.AutoCleanupPendingEmby = reader.boolValue(cfg.AutoCleanupPendingEmby, "SAR.auto_cleanup_pending_emby", "Register.auto_cleanup_pending_emby", "auto_cleanup_pending_emby")
 	cfg.AutoCleanupPendingEmbyDays = reader.intValue(cfg.AutoCleanupPendingEmbyDays, "SAR.auto_cleanup_pending_emby_days", "Register.auto_cleanup_pending_emby_days", "auto_cleanup_pending_emby_days")
-	cfg.EmailValidationMode = reader.stringValue(cfg.EmailValidationMode, "Email.validation_mode", "SAR.email_validation_mode", "email_validation_mode")
-	cfg.EmailBlacklist = reader.stringListValue(cfg.EmailBlacklist, "Email.blacklist", "SAR.email_blacklist", "email_blacklist")
-	cfg.EmailWhitelist = reader.stringListValue(cfg.EmailWhitelist, "Email.whitelist", "SAR.email_whitelist", "email_whitelist")
-	cfg.EmailEnabled = reader.boolValue(cfg.EmailEnabled, "Email.enabled", "email_enabled")
-	cfg.SMTPHost = reader.stringValue(cfg.SMTPHost, "Email.smtp_host", "smtp_host")
-	cfg.SMTPPort = reader.intValue(cfg.SMTPPort, "Email.smtp_port", "smtp_port")
-	cfg.SMTPUsername = reader.stringValue(cfg.SMTPUsername, "Email.smtp_username", "smtp_username")
-	cfg.SMTPPassword = reader.stringValue(cfg.SMTPPassword, "Email.smtp_password", "smtp_password")
-	cfg.SMTPEncryption = strings.ToLower(reader.stringValue(cfg.SMTPEncryption, "Email.smtp_encryption", "smtp_encryption"))
-	cfg.SMTPFromAddress = reader.stringValue(cfg.SMTPFromAddress, "Email.smtp_from_address", "smtp_from_address")
-	cfg.SMTPFromName = reader.stringValue(cfg.SMTPFromName, "Email.smtp_from_name", "smtp_from_name")
-	cfg.SMTPTimeoutSeconds = reader.intValue(cfg.SMTPTimeoutSeconds, "Email.smtp_timeout_seconds", "smtp_timeout_seconds")
-	cfg.EmailForceBind = reader.boolValue(cfg.EmailForceBind, "Email.force_bind", "Email.force_bind_email", "email_force_bind", "force_bind_email")
-	cfg.EmailCodeLength = reader.intValue(cfg.EmailCodeLength, "Email.code_length", "email_code_length")
-	cfg.EmailCodeType = strings.ToLower(reader.stringValue(cfg.EmailCodeType, "Email.code_type", "email_code_type"))
-	cfg.EmailCodeTTLMinutes = reader.intValue(cfg.EmailCodeTTLMinutes, "Email.code_ttl_minutes", "email_code_ttl_minutes")
-	cfg.EmailResendCooldownSeconds = reader.intValue(cfg.EmailResendCooldownSeconds, "Email.resend_cooldown_seconds", "email_resend_cooldown_seconds")
-	cfg.EmailMaxAttempts = reader.intValue(cfg.EmailMaxAttempts, "Email.max_attempts", "email_max_attempts")
-	cfg.EmailSubjectTemplate = reader.stringValue(cfg.EmailSubjectTemplate, "Email.subject_template", "email_subject_template")
-	cfg.EmailBodyTemplate = reader.stringValue(cfg.EmailBodyTemplate, "Email.body_template", "email_body_template")
+	cfg.EmailValidationMode = reader.stringValue(cfg.EmailValidationMode, "SAR.email_validation_mode", "email_validation_mode")
+	cfg.EmailBlacklist = reader.stringListValue(cfg.EmailBlacklist, "SAR.email_blacklist", "email_blacklist")
+	cfg.EmailWhitelist = reader.stringListValue(cfg.EmailWhitelist, "SAR.email_whitelist", "email_whitelist")
 	cfg.NotificationEnabled = reader.boolValue(cfg.NotificationEnabled, "Notification.enabled", "notification_enabled")
 	cfg.NotificationExpiryRemindDays = reader.intValue(cfg.NotificationExpiryRemindDays, "Notification.expiry_remind_days", "expiry_remind_days")
 	cfg.RateLimitEnabled = reader.boolValue(cfg.RateLimitEnabled, "RateLimit.enabled", "rate_limit_enabled")
@@ -437,9 +384,6 @@ func Load(path string) (Config, error) {
 	cfg.RateLimitRegisterPer10m = reader.intValue(cfg.RateLimitRegisterPer10m, "RateLimit.register_per_10m", "rate_limit_register_per_10m")
 	cfg.RateLimitForgotPasswordIPPer10m = reader.intValue(cfg.RateLimitForgotPasswordIPPer10m, "RateLimit.forgot_password_ip_per_10m", "rate_limit_forgot_password_ip_per_10m")
 	cfg.RateLimitForgotPasswordUserPer30m = reader.intValue(cfg.RateLimitForgotPasswordUserPer30m, "RateLimit.forgot_password_user_per_30m", "rate_limit_forgot_password_user_per_30m")
-	cfg.RateLimitEmailCodeIPPer10m = reader.intValue(cfg.RateLimitEmailCodeIPPer10m, "RateLimit.email_code_ip_per_10m", "rate_limit_email_code_ip_per_10m")
-	cfg.RateLimitEmailCodeAddrPer10m = reader.intValue(cfg.RateLimitEmailCodeAddrPer10m, "RateLimit.email_code_addr_per_10m", "rate_limit_email_code_addr_per_10m")
-	cfg.RateLimitEmailCodeUIDPer10m = reader.intValue(cfg.RateLimitEmailCodeUIDPer10m, "RateLimit.email_code_uid_per_10m", "rate_limit_email_code_uid_per_10m")
 	cfg.RateLimitUploadPerMinute = reader.intValue(cfg.RateLimitUploadPerMinute, "RateLimit.upload_per_minute", "rate_limit_upload_per_minute")
 	cfg.RateLimitAdminIconPerMinute = reader.intValue(cfg.RateLimitAdminIconPerMinute, "RateLimit.admin_icon_per_minute", "rate_limit_admin_icon_per_minute")
 	cfg.RateLimitAPIKeyDefaultPerMinute = reader.intValue(cfg.RateLimitAPIKeyDefaultPerMinute, "RateLimit.api_key_default_per_minute", "rate_limit_api_key_default_per_minute")
@@ -537,9 +481,6 @@ func defaults() Config {
 		RateLimitRegisterPer10m:           30,
 		RateLimitForgotPasswordIPPer10m:   20,
 		RateLimitForgotPasswordUserPer30m: 10,
-		RateLimitEmailCodeIPPer10m:        20,
-		RateLimitEmailCodeAddrPer10m:      5,
-		RateLimitEmailCodeUIDPer10m:       10,
 		RateLimitUploadPerMinute:          60,
 		RateLimitAdminIconPerMinute:       20,
 		RateLimitAPIKeyDefaultPerMinute:   300,
@@ -581,16 +522,6 @@ func defaults() Config {
 		UserLimit:                         -1,
 		MaxDevices:                        5,
 		MaxStreams:                        2,
-		SMTPPort:                          587,
-		SMTPEncryption:                    "starttls",
-		SMTPTimeoutSeconds:                10,
-		EmailCodeLength:                   6,
-		EmailCodeType:                     "numeric",
-		EmailCodeTTLMinutes:               10,
-		EmailResendCooldownSeconds:        60,
-		EmailMaxAttempts:                  5,
-		EmailSubjectTemplate:              DefaultEmailSubjectTemplate,
-		EmailBodyTemplate:                 DefaultEmailBodyTemplate,
 	}
 }
 
@@ -858,66 +789,6 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("TWILIGHT_RATE_LIMIT_FORGOT_PASSWORD_USER_PER_30M"); v != "" {
 		cfg.RateLimitForgotPasswordUserPer30m = intValue(v, cfg.RateLimitForgotPasswordUserPer30m)
-	}
-	if v := os.Getenv("TWILIGHT_RATE_LIMIT_EMAIL_CODE_IP_PER_10M"); v != "" {
-		cfg.RateLimitEmailCodeIPPer10m = intValue(v, cfg.RateLimitEmailCodeIPPer10m)
-	}
-	if v := os.Getenv("TWILIGHT_RATE_LIMIT_EMAIL_CODE_ADDR_PER_10M"); v != "" {
-		cfg.RateLimitEmailCodeAddrPer10m = intValue(v, cfg.RateLimitEmailCodeAddrPer10m)
-	}
-	if v := os.Getenv("TWILIGHT_RATE_LIMIT_EMAIL_CODE_UID_PER_10M"); v != "" {
-		cfg.RateLimitEmailCodeUIDPer10m = intValue(v, cfg.RateLimitEmailCodeUIDPer10m)
-	}
-	if v := os.Getenv("TWILIGHT_EMAIL_ENABLED"); v != "" {
-		cfg.EmailEnabled = boolValue(v, cfg.EmailEnabled)
-	}
-	if v := os.Getenv("TWILIGHT_SMTP_HOST"); v != "" {
-		cfg.SMTPHost = strings.TrimSpace(v)
-	}
-	if v := os.Getenv("TWILIGHT_SMTP_PORT"); v != "" {
-		cfg.SMTPPort = intValue(v, cfg.SMTPPort)
-	}
-	if v := os.Getenv("TWILIGHT_SMTP_USERNAME"); v != "" {
-		cfg.SMTPUsername = v
-	}
-	if v := os.Getenv("TWILIGHT_SMTP_PASSWORD"); v != "" {
-		cfg.SMTPPassword = v
-	}
-	if v := os.Getenv("TWILIGHT_SMTP_ENCRYPTION"); v != "" {
-		cfg.SMTPEncryption = strings.ToLower(strings.TrimSpace(v))
-	}
-	if v := os.Getenv("TWILIGHT_SMTP_FROM_ADDRESS"); v != "" {
-		cfg.SMTPFromAddress = strings.TrimSpace(v)
-	}
-	if v := os.Getenv("TWILIGHT_SMTP_FROM_NAME"); v != "" {
-		cfg.SMTPFromName = strings.TrimSpace(v)
-	}
-	if v := os.Getenv("TWILIGHT_SMTP_TIMEOUT_SECONDS"); v != "" {
-		cfg.SMTPTimeoutSeconds = intValue(v, cfg.SMTPTimeoutSeconds)
-	}
-	if v := os.Getenv("TWILIGHT_EMAIL_FORCE_BIND"); v != "" {
-		cfg.EmailForceBind = boolValue(v, cfg.EmailForceBind)
-	}
-	if v := os.Getenv("TWILIGHT_EMAIL_CODE_LENGTH"); v != "" {
-		cfg.EmailCodeLength = intValue(v, cfg.EmailCodeLength)
-	}
-	if v := os.Getenv("TWILIGHT_EMAIL_CODE_TYPE"); v != "" {
-		cfg.EmailCodeType = strings.ToLower(strings.TrimSpace(v))
-	}
-	if v := os.Getenv("TWILIGHT_EMAIL_CODE_TTL_MINUTES"); v != "" {
-		cfg.EmailCodeTTLMinutes = intValue(v, cfg.EmailCodeTTLMinutes)
-	}
-	if v := os.Getenv("TWILIGHT_EMAIL_RESEND_COOLDOWN_SECONDS"); v != "" {
-		cfg.EmailResendCooldownSeconds = intValue(v, cfg.EmailResendCooldownSeconds)
-	}
-	if v := os.Getenv("TWILIGHT_EMAIL_MAX_ATTEMPTS"); v != "" {
-		cfg.EmailMaxAttempts = intValue(v, cfg.EmailMaxAttempts)
-	}
-	if v := os.Getenv("TWILIGHT_EMAIL_SUBJECT_TEMPLATE"); v != "" {
-		cfg.EmailSubjectTemplate = v
-	}
-	if v := os.Getenv("TWILIGHT_EMAIL_BODY_TEMPLATE"); v != "" {
-		cfg.EmailBodyTemplate = strings.ReplaceAll(v, `\n`, "\n")
 	}
 	if v := os.Getenv("TWILIGHT_RATE_LIMIT_UPLOAD_PER_MINUTE"); v != "" {
 		cfg.RateLimitUploadPerMinute = intValue(v, cfg.RateLimitUploadPerMinute)

@@ -264,20 +264,6 @@ export type ErrCode =
   | "RUNTIME_LOG_STREAM_UNSUPPORTED"
   | "CONFIG_SAVE_FAILED"
   | "AUTH_APIKEY_LOGIN_RATE_LIMITED"
-  // === 邮箱验证 / 验证码 / 强制绑定 ===
-  | "EMAIL_DISABLED"
-  | "EMAIL_NOT_BOUND"
-  | "EMAIL_CODE_INVALID"
-  | "EMAIL_CODE_EXPIRED"
-  | "EMAIL_CODE_TOO_MANY"
-  | "EMAIL_CODE_REQUIRED"
-  | "EMAIL_SEND_FAILED"
-  | "EMAIL_RESEND_COOLDOWN"
-  | "EMAIL_RATE_LIMITED"
-  | "EMAIL_PURPOSE_INVALID"
-  | "USER_EMAIL_VERIFICATION_REQUIRED"
-  | "USER_EMAIL_CONFLICT"
-  | "USER_EMAIL_ALREADY_VERIFIED"
   // === 中间件层（IP 黑名单 / 全局限流 / 路由分发） ===
   // 比通用 FORBIDDEN / RATE_LIMITED / METHOD_NOT_ALLOWED / NOT_FOUND 更精确，
   // UI 可以分别给出"联系管理员解封"、"稍后重试"、"接口已下线" 等不同 CTA。
@@ -551,20 +537,6 @@ export const ErrCodes = {
   RuntimeLogStreamUnsupported: "RUNTIME_LOG_STREAM_UNSUPPORTED",
   ConfigSaveFailed: "CONFIG_SAVE_FAILED",
   APIKeyLoginRateLimited: "AUTH_APIKEY_LOGIN_RATE_LIMITED",
-  // 邮箱验证 / 验证码 / 强制绑定
-  EmailDisabled: "EMAIL_DISABLED",
-  EmailNotBound: "EMAIL_NOT_BOUND",
-  EmailCodeInvalid: "EMAIL_CODE_INVALID",
-  EmailCodeExpired: "EMAIL_CODE_EXPIRED",
-  EmailCodeTooMany: "EMAIL_CODE_TOO_MANY",
-  EmailCodeRequired: "EMAIL_CODE_REQUIRED",
-  EmailSendFailed: "EMAIL_SEND_FAILED",
-  EmailResendCooldown: "EMAIL_RESEND_COOLDOWN",
-  EmailRateLimited: "EMAIL_RATE_LIMITED",
-  EmailPurposeInvalid: "EMAIL_PURPOSE_INVALID",
-  EmailVerificationRequired: "USER_EMAIL_VERIFICATION_REQUIRED",
-  EmailConflict: "USER_EMAIL_CONFLICT",
-  EmailAlreadyVerified: "USER_EMAIL_ALREADY_VERIFIED",
   // 中间件层（IP 黑名单 / 全局限流 / 路由分发）
   IPBlacklisted: "SECURITY_IP_BLACKLISTED",
   GlobalRateLimited: "RATE_GLOBAL_LIMITED",

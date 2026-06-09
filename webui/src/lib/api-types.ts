@@ -61,7 +61,6 @@ export interface UserInfo {
   uid: number;
   username: string;
   email?: string;
-  email_verified?: boolean;  // 邮箱是否已通过验证码验证
   telegram_id?: number;
   telegram_username?: string;  // Telegram 用户名
   role: number;
@@ -87,28 +86,6 @@ export interface UserInfo {
   pending_emby_days?: number | null;  // 注册码授予的开通天数（待 Emby 补建）
   emby_disabled_by_expiry?: boolean;  // 到期后仅禁用 Emby，系统账号仍可登录
   rebinding_in_progress?: boolean;  // 是否处于强制换绑流程中
-}
-
-// EmailCodeProof 是改密时携带的邮箱验证码凭据（强制邮箱验证时必填）。
-export interface EmailCodeProof {
-  verification_id: string;
-  code: string;
-}
-
-// EmailCodeSent 是发码接口的返回：验证码 ID、遮蔽后的收件邮箱、有效期与重发冷却。
-export interface EmailCodeSent {
-  verification_id: string;
-  email: string;
-  expires_in: number;
-  resend_after: number;
-}
-
-// EmailTestResult 是管理员测试发信返回的单条结果。
-export interface EmailTestResult {
-  target: string;
-  success: boolean;
-  error?: string;
-  to?: string;
 }
 
 export interface BatchUserResult {
@@ -361,17 +338,6 @@ export interface EmbyDevice {
   last_used: string;
 }
 
-// LoginDevice 对应后端 /users/me/devices 的设备审查记录（UA / IP / 时间 / 受信任）。
-export interface LoginDevice {
-  device_id: string;
-  device_name: string; // User-Agent
-  client: string;
-  last_ip?: string;
-  first_seen: number;
-  last_seen: number;
-  is_trusted: boolean;
-}
-
 export interface RegisterData {
   telegram_bind_code?: string;
   username: string;
@@ -432,7 +398,6 @@ export interface AdminUserListParams {
   role?: number | null;
   active?: boolean | null;
   emby?: "bound" | "unbound" | null;
-  email_status?: "verified" | "unverified" | "bound" | "none" | null;
   search?: string;
   sort?: string;
 }
@@ -513,7 +478,6 @@ export interface Regcode {
   is_decoy?: boolean;
   days: number;
   validity_time?: number; // 注册码有效期（小时），-1 表示永久
-  expires_at?: number; // 后端按 创建时间+有效小时 计算的绝对过期时间戳（秒），-1 表示永久
   use_count?: number;
   use_count_limit?: number;
   active?: boolean;

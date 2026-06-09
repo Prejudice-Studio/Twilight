@@ -147,46 +147,7 @@ func (a *App) handleUpdateRegcode(w http.ResponseWriter, r *http.Request, params
 		failWithCode(w, http.StatusNotFound, ErrRegcodeNotFound, "注册码不存在")
 		return
 	}
-	payload := decodeMap(r)
-	// 部分更新：只改动 payload 中显式出现的字段，缺省字段保持原值。
-	// 支持备注、停用/启用、有效期（小时）、授予天数、使用次数上限。
-	if _, has := payload["note"]; has {
-		reg.Note = truncateString(stringValue(payload, "note"), 120)
-	}
-	if _, has := payload["active"]; has {
-		reg.Active = boolValue(payload, "active", reg.Active)
-	}
-	if _, has := payload["validity_time"]; has {
-		validity := int64(intValue(payload, "validity_time", int(reg.ValidityTime)))
-		if validity == 0 {
-			validity = -1
-		}
-		if validity < -1 {
-			failWithCode(w, http.StatusBadRequest, ErrBadRequest, "卡码有效期只能为 -1 或正整数小时")
-			return
-		}
-		reg.ValidityTime = validity
-	}
-	if _, has := payload["days"]; has {
-		days := normalizeRegCodeDays(intValue(payload, "days", reg.Days))
-		// 与创建口径一致：正天数封顶 36500，避免静默发放永久权益。
-		if days > 36500 {
-			failWithCode(w, http.StatusBadRequest, ErrBadRequest, "days 不能超过 36500")
-			return
-		}
-		reg.Days = days
-	}
-	if _, has := payload["use_count_limit"]; has {
-		useLimit := intValue(payload, "use_count_limit", reg.UseCountLimit)
-		if useLimit == 0 {
-			useLimit = 1
-		}
-		if useLimit < -1 {
-			failWithCode(w, http.StatusBadRequest, ErrBadRequest, "使用次数上限只能为 -1 或正整数")
-			return
-		}
-		reg.UseCountLimit = useLimit
-	}
+	reg.Note = stringValue(decodeMap(r), "note")
 	if err := a.store().UpsertRegCode(reg); statusFromError(w, err) {
 		return
 	}

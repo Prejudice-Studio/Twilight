@@ -102,24 +102,8 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request, _ Params) {
 	}
 	a.issueSessionCookies(w, token, expires)
 	deviceID := firstNonEmpty(r.Header.Get("X-Twilight-Device"), r.UserAgent(), a.clientIP(r))
-	ua := firstNonEmpty(r.UserAgent(), "unknown")
-	ip := a.clientIP(r)
-	now := time.Now().Unix()
-	// 用 UpdateDevice 做读改写：保留既有 FirstSeen / Trusted / Blocked，只刷新本次
-	// 的 UA / IP / 最近登录时间。此前用 UpsertDevice 直接整条覆盖，会把每次登录的
-	// FirstSeen 重置、并把受信任 / 已封禁标记清掉（被封设备再次登录即被静默解封）。
-	_ = a.store().UpdateDevice(u.UID, deviceID, func(d *store.Device) {
-		d.DeviceName = ua
-		d.Client = "web"
-		d.LastIP = ip
-		d.LastSeen = now
-	})
-	_ = a.store().AddLoginLog(store.LoginLog{UID: u.UID, IP: ip, DeviceID: deviceID, DeviceName: ua, Client: "web", Time: now})
-	// 设备数限制为可选（默认关闭）：开启后淘汰超额的未受信任旧设备，绝不踢掉本次
-	// 登录设备或受信任设备，避免把用户锁在门外。
-	if cfg := a.cfg(); cfg.DeviceLimitEnabled && cfg.MaxDevices > 0 {
-		_ = a.store().EnforceDeviceLimit(u.UID, cfg.MaxDevices)
-	}
+	_ = a.store().UpsertDevice(store.Device{UID: u.UID, DeviceID: deviceID, DeviceName: firstNonEmpty(r.UserAgent(), "unknown"), Client: "web", FirstSeen: time.Now().Unix(), LastSeen: time.Now().Unix()})
+	_ = a.store().AddLoginLog(store.LoginLog{UID: u.UID, IP: a.clientIP(r), DeviceID: deviceID, DeviceName: firstNonEmpty(r.UserAgent(), "unknown"), Client: "web", Time: time.Now().Unix()})
 	ok(w, "登录成功", map[string]any{"token": token, "user": publicUser(u)})
 }
 

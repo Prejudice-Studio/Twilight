@@ -201,13 +201,6 @@ emby_direct_register_status_ttl = 1800
 # —— Emby 用户总上限（所有绑定了 Emby 的本地账号 + 标记 PENDING 的待补建数总和），-1 = 不限制
 emby_user_limit = -1
 
-# —— 注册 / 绑定邮箱的域名校验（与 [Email] 邮箱验证发码共用同一份名单）
-# validation_mode：whitelist=仅允许名单内域名；blacklist=禁止名单内域名；留空=不限制。
-# 白名单优先于黑名单。域名匹配大小写不敏感，且会匹配子域（如 example.com 命中 a.example.com）。
-email_validation_mode = ""
-email_whitelist = []
-email_blacklist = []
-
 # —— 管理员 / 白名单（优先 UID，逗号分隔）
 # ⚠ 请改成你的真实 UID；空字符串表示"无管理员"
 admin_uids = ""
@@ -303,37 +296,6 @@ apikey_direct_login_enabled = false
 # 生成示例：openssl rand -base64 48 | tr -d '\n'
 bot_internal_secret = ""
 
-# ───────── 速率限制 ─────────
-# 所有阈值单位为「次数 / 时间窗」，0 或负数表示不限制。也可在后台「系统配置 →
-# 限流策略」可视化调整（热重载）。
-[RateLimit]
-# 总开关：关闭后后端不执行任何限流
-enabled = true
-# 同一 IP 每分钟总请求数（进路由前的第一道闸）
-global_per_minute = 1200
-# 同一 IP 每分钟登录 / API Key 登录请求数
-login_per_minute = 60
-# 同一账号 5 分钟内登录尝试数（在用户名是否存在之前判定，防枚举时序差）
-login_user_per_5m = 10
-# 同一 IP 每 10 分钟注册请求数
-register_per_10m = 30
-# 找回密码：同一 IP 每 10 分钟（含邮箱找回两步）
-forgot_password_ip_per_10m = 20
-# 找回密码：同一账号每 30 分钟
-forgot_password_user_per_30m = 10
-# 邮箱发码：同一 IP 每 10 分钟
-email_code_ip_per_10m = 20
-# 邮箱发码：同一收件邮箱每 10 分钟（防对单一邮箱轰炸）
-email_code_addr_per_10m = 5
-# 邮箱发码：同一登录账号每 10 分钟（防同一账号轮换收件邮箱滥刷）
-email_code_uid_per_10m = 10
-# 头像 / 背景上传：同一用户每分钟
-upload_per_minute = 60
-# 站点图标上传：同一管理员每分钟
-admin_icon_per_minute = 20
-# API Key 未单独设置时的默认每分钟额度
-api_key_default_per_minute = 300
-
 # ───────── 定时任务 ─────────
 # 各 job 的触发时间 / 间隔现在统一在「定时任务」页面按 job 维度调整，
 # 下方字段仅作为「首次拉起或重置」时的默认值；运行时被 DB 中的 schedule 覆盖。
@@ -387,57 +349,6 @@ private_collection = true
 block_keywords = []
 # 播放进度达到多少 % 才算"看完"
 min_progress_percent = 80
-
-# ───────── 邮箱验证 / SMTP 发信 ─────────
-# 邮箱验证子系统：登录态绑定/验证邮箱、登出态找回密码、强制绑定门、改密二次校验。
-# 验证码只存服务端 HMAC 哈希（不存明文），带尝试上限 + 有效期 + 多重限流。
-[Email]
-# 总开关：关闭后所有发码 / 邮箱找回 / 强制绑定均降级，前端隐藏入口。
-# ⚠ 开启 force_bind 但 SMTP 未配置完整时，强制门会自动失效，避免把用户锁在仪表盘外。
-enabled = false
-
-# —— SMTP 发信服务器 ——
-# 发信服务器地址，如 smtp.gmail.com / smtp.qq.com / smtp.office365.com
-smtp_host = ""
-# 端口：465（SSL）、587（STARTTLS，推荐）、25（明文，不推荐）
-smtp_port = 587
-# 登录用户名，通常即发件邮箱；留空表示不认证（仅适用于内网中继）
-smtp_username = ""
-# 密码或授权码（多数邮箱服务要求使用「应用专用密码 / 授权码」而非登录密码）
-smtp_password = ""
-# 加密方式：ssl=隐式 TLS（465）；starttls=显式 TLS（587）；none=明文（25，不推荐）
-smtp_encryption = "starttls"
-# From 发件地址；留空时回落到 smtp_username
-smtp_from_address = ""
-# From 显示名称；留空时回落到站点名称 server_name
-smtp_from_name = ""
-# 单次发信超时秒数
-smtp_timeout_seconds = 10
-
-# —— 强制绑定 ——
-# 开启后普通用户 / 白名单进入仪表盘前必须先验证邮箱（管理员仅提示、不阻断），
-# 且改系统密码 / 改 Emby 密码都会要求邮箱验证码。服务端强制（非仅前端守卫）。
-force_bind = false
-
-# —— 验证码格式与有效期 ——
-# 验证码长度（取值夹取到 4-12，默认 6）
-code_length = 6
-# 验证码类型：numeric=纯数字；alphanumeric=大写字母+数字（去除 0/1/I/O 等易混淆字符）
-code_type = "numeric"
-# 验证码有效期（分钟）
-code_ttl_minutes = 10
-# 同一邮箱两次发码的最小间隔（秒），防轰炸
-resend_cooldown_seconds = 60
-# 单个验证码允许的错误尝试次数，超过即作废（防在线爆破）
-max_attempts = 5
-
-# —— 邮件模板（占位符：{site}=站点名、{code}=验证码、{ttl}=有效分钟数）——
-subject_template = "{site} 邮箱验证码"
-body_template = """您正在 {site} 进行邮箱验证。
-
-验证码：{code}
-
-验证码 {ttl} 分钟内有效，请勿向任何人泄露。如非本人操作，请忽略本邮件。"""
 
 # ───────── 签到 / 积分（已并入 [SAR] 节，本段保留为旧版升级提示）─────────
 # 原 [Signin] 节自 v1.x 起已并入 [SAR]：

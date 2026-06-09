@@ -93,9 +93,6 @@ func (a *App) handleCreateMediaRequest(w http.ResponseWriter, r *http.Request, _
 		return
 	}
 	p := current(r)
-	if a.requireEmailVerified(w, p.User) {
-		return
-	}
 	if p.User.TelegramID == 0 {
 		failWithCode(w, http.StatusBadRequest, ErrMediaRequestTGRequired, "请先在个人设置中绑定 Telegram 账号后再进行求片")
 		return

@@ -100,18 +100,13 @@ allow_credential = true
 | 登录（每 IP） | `login_per_minute` | 60 | 登录 / API Key 登录 |
 | 登录（每账号 5 分钟） | `login_user_per_5m` | 10 | 桶判定在「用户名是否存在」之前消耗，避免账号枚举时序差 |
 | 注册（每 IP 10 分钟） | `register_per_10m` | 30 | |
-| 找回密码（每 IP 10 分钟） | `forgot_password_ip_per_10m` | 20 | 含邮箱找回两步 |
+| 找回密码（每 IP 10 分钟） | `forgot_password_ip_per_10m` | 20 | |
 | 找回密码（每账号 30 分钟） | `forgot_password_user_per_30m` | 10 | |
-| 邮箱发码（每 IP 10 分钟） | `email_code_ip_per_10m` | 20 | 绑定 / 改密 / 找回发码 |
-| 邮箱发码（每收件地址 10 分钟） | `email_code_addr_per_10m` | 5 | 防对单一邮箱轰炸 |
-| 邮箱发码（每登录账号 10 分钟） | `email_code_uid_per_10m` | 10 | 防同一账号轮换收件邮箱滥刷 |
 | 上传（每用户每分钟） | `upload_per_minute` | 60 | 头像 / 背景上传 |
 | 管理员服务器图标（每用户每分钟） | `admin_icon_per_minute` | 20 | |
 | API Key 默认配额（每分钟） | `api_key_default_per_minute` | 300 | 单 Key 可在管理端覆盖 |
 
 注册队列状态查询另保留 request 与 IP 双维度限流。
-
-邮箱验证子系统的安全模型（验证码只存 HMAC 哈希 + 常量时间比较、尝试上限、有效期、防枚举找回、SMTP 未配好时强制门自动失效防锁死）详见 [邮箱验证与找回密码](../features/email.md)。
 
 ## 7. 多进程与限流一致性
 
@@ -147,7 +142,6 @@ allow_credential = true
 - 该脱敏在 5xx envelope、panic 日志、配置热重载日志、Git 自动更新输出（含 stderr 里可能出现的 `https://user:PAT@host`）等路径上兜底。
 - 不要在自建日志里打印 Token、密码、密钥原文或完整 `Authorization` 头。
 - 建议保留并审计：管理员关键操作日志、登录失败与封禁日志、API Key 调用轨迹。
-- 设备 / IP 审查有两套来源，勿混淆：**Emby 登录用户**的设备与真实登录 IP 来自 Emby API——`GET /api/v1/admin/emby/devices`（`handleAdminEmbyDevices`）以 `/Devices` 设备清单为基底、用实时 `/Sessions` 的 `RemoteEndPoint` 补当前 IP 与在线状态并映射回本地账号，管理后台「Emby 管理 → 设备 / IP 审查」可查（IP 仅在设备当前在线时可得，Emby API 不可靠地暴露历史登录 IP）；**Web 面板自身**的登录设备记录在本地 `store.Device`（含 UA / `LastIP` / 首末时间 / 信任 / 封禁），登录写入走 `UpdateDevice` 读改写以保留信任/封禁标记，`GET /api/v1/security/login-history` 另有按 IP 的登录历史。
 
 ## 11. 最小权限原则
 
@@ -234,7 +228,6 @@ Git 自动更新（`internal/api/system_update.go`）：
 - [ ] 多副本部署已配置 Redis（会话 + 限流共享）
 - [ ] `trust_proxy_headers` 与 `trusted_proxy_cidrs` 配置一致（启用代理头时 CIDR 不为空）
 - [ ] 公开端点的速率限制阈值已按预期流量评估
-- [ ] 若启用邮箱验证：SMTP 已用后台「发送测试邮件」验证连通，再开 `[Email].enabled`；强制绑定 `force_bind` 在确认普通账号能正常收码后再开启
 - [ ] `Telegram.ban_on_leave` 已评估：开启前确认 Bot 在每个群有封禁权限，并备好「误封解除」运维流程
 - [ ] 数据库备份 / 恢复 / 迁移预检已在测试环境跑过
 - [ ] Git 自动更新预检显示行为可接受（worktree 状态、stash 策略），且仓库 URL 不含凭据

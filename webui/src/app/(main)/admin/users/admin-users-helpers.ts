@@ -8,9 +8,6 @@ type TFunc = (key: MessageKey, params?: MessageParams) => string;
 
 export type BatchDeleteAction = "local_only" | "with_emby";
 
-// EmailStatusFilter 与后端 listUsers / filteredBatchUserUIDs 的 email_status 取值对齐。
-export type EmailStatusFilter = "verified" | "unverified" | "bound" | "none";
-
 export interface UsersListState {
   page: number;
   perPage: number;
@@ -18,7 +15,6 @@ export interface UsersListState {
   roleFilter: string;
   activeFilter: string;
   embyFilter: string;
-  emailStatusFilter: string;
   sortBy: string;
 }
 
@@ -30,7 +26,6 @@ export function buildUsersCacheKey(state: UsersListState): string {
     state.roleFilter,
     state.activeFilter,
     state.embyFilter,
-    state.emailStatusFilter,
     state.sortBy,
   ].join("-");
 }
@@ -43,7 +38,6 @@ export function usersListParams(state: UsersListState): AdminUserListParams {
     role: state.roleFilter === "all" ? undefined : Number(state.roleFilter),
     active: state.activeFilter === "all" ? undefined : state.activeFilter === "true",
     emby: state.embyFilter === "bound" ? "bound" : state.embyFilter === "unbound" ? "unbound" : undefined,
-    email_status: state.emailStatusFilter === "all" ? undefined : (state.emailStatusFilter as EmailStatusFilter),
     sort: state.sortBy || undefined,
   };
 }
@@ -54,7 +48,6 @@ export function usersBatchFilterParams(state: UsersListState) {
     role: params.role,
     active: params.active,
     emby: params.emby,
-    email_status: params.email_status,
     search: params.search,
   };
 }

@@ -83,12 +83,6 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 		failWithCode(w, http.StatusBadRequest, ErrBangumiTokenMissing, "启用 Bangumi 同步前请先填写个人 Token")
 		return
 	}
-	// 强制邮箱验证开启时，普通/白名单用户不能再走通用资料更新随意改邮箱（那会绕过
-	// 验证码校验），必须到邮箱验证区用验证码绑定 / 换绑。
-	if email := strings.TrimSpace(stringValue(payload, "email")); email != "" && !strings.EqualFold(email, p.User.Email) && a.emailGateActive(p.User) {
-		failWithCode(w, http.StatusForbidden, ErrEmailVerificationRequired, "已开启强制邮箱验证，请在邮箱验证区通过验证码绑定或更换邮箱")
-		return
-	}
 	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error {
 		if email := stringValue(payload, "email"); email != "" {
 			if err := validate.ValidateEmailFormat(email); err != nil {
@@ -100,12 +94,6 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 			}
 			if len(a.cfg().EmailWhitelist) > 0 && !validate.CheckEmailWhitelist(email, a.cfg().EmailWhitelist) {
 				return fmt.Errorf("该邮箱域名不在允许范围内")
-			}
-			// 邮箱发生变化即视为未验证：通用资料更新不经过验证码，不能保留旧的
-			// 已验证状态，否则用户改成任意邮箱后仍显示"已验证"。
-			if !strings.EqualFold(email, u.Email) {
-				u.EmailVerified = false
-				u.EmailVerifiedAt = 0
 			}
 			u.Email = email
 		}
@@ -186,10 +174,6 @@ func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request, _ Par
 		failWithCode(w, http.StatusForbidden, ErrPasswordOldMismatch, "原密码不正确")
 		return
 	}
-	// 强制邮箱验证开启时，改系统密码需先通过邮箱验证码（未强制则直接放行）。
-	if !a.consumePasswordChangeEmailCode(w, payload, p.User, emailPurposeChangePass) {
-		return
-	}
 	if err := validate.ValidatePasswordStrength(newPassword); err != nil {
 		failWithCode(w, http.StatusBadRequest, ErrPasswordWeak, err.Error())
 		return
@@ -253,10 +237,6 @@ func (a *App) handleChangeEmbyPassword(w http.ResponseWriter, r *http.Request, _
 		failWithCode(w, http.StatusBadRequest, ErrPasswordWeak, msg)
 		return
 	}
-	// 强制邮箱验证开启时，改 Emby 密码需先通过邮箱验证码（未强制则直接放行）。
-	if !a.consumePasswordChangeEmailCode(w, payload, p.User, emailPurposeChangeEmby) {
-		return
-	}
 	if err := a.embySetPassword(r.Context(), p.User.EmbyID, newPassword); err != nil {
 		failWithCode(w, http.StatusBadGateway, ErrEmbyPasswordUpdateFailed, "更新 Emby 密码失败，请稍后重试")
 		return
@@ -266,9 +246,6 @@ func (a *App) handleChangeEmbyPassword(w http.ResponseWriter, r *http.Request, _
 
 func (a *App) handleBindEmby(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
-	if a.requireEmailVerified(w, p.User) {
-		return
-	}
 	if p.User.EmbyID != "" {
 		failWithCode(w, http.StatusBadRequest, ErrEmbyAlreadyLinked, "当前账号已关联 Emby 账号")
 		return
@@ -315,9 +292,6 @@ func (a *App) handleBindEmby(w http.ResponseWriter, r *http.Request, _ Params) {
 }
 func (a *App) handleRegisterEmby(w http.ResponseWriter, r *http.Request, params Params) {
 	p := current(r)
-	if a.requireEmailVerified(w, p.User) {
-		return
-	}
 	if p.User.EmbyID != "" {
 		failWithCode(w, http.StatusBadRequest, ErrEmbyAlreadyLinked, "当前账号已关联 Emby 账号")
 		return
@@ -431,9 +405,6 @@ func (a *App) handleUnbindEmby(w http.ResponseWriter, r *http.Request, _ Params)
 
 func (a *App) handleRenew(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
-	if a.requireEmailVerified(w, p.User) {
-		return
-	}
 	// Self-service renewal requires a reg_code; bare renewal without code is forbidden
 	payload := decodeMap(r)
 	regCode := stringValue(payload, "reg_code")
@@ -927,7 +898,7 @@ func (a *App) handleDevices(w http.ResponseWriter, r *http.Request, params Param
 	}
 	items := []map[string]any{}
 	for _, d := range a.store().ListDevices(uid) {
-		items = append(items, map[string]any{"device_id": d.DeviceID, "device_name": d.DeviceName, "client": d.Client, "last_ip": d.LastIP, "first_seen": d.FirstSeen, "last_seen": d.LastSeen, "is_trusted": d.Trusted})
+		items = append(items, map[string]any{"device_id": d.DeviceID, "device_name": d.DeviceName, "client": d.Client, "first_seen": d.FirstSeen, "last_seen": d.LastSeen, "is_trusted": d.Trusted})
 	}
 	ok(w, "OK", items)
 }
@@ -969,7 +940,6 @@ func (a *App) handleSessions(w http.ResponseWriter, r *http.Request, _ Params) {
 			"client":              asString(session["Client"]),
 			"device_name":         asString(session["DeviceName"]),
 			"device_id":           asString(session["DeviceId"]),
-			"remote_endpoint":     asString(session["RemoteEndPoint"]),
 			"application_version": asString(session["ApplicationVersion"]),
 			"is_active":           boolish(session["IsActive"]),
 			"now_playing":         nowPlaying,
@@ -977,67 +947,6 @@ func (a *App) handleSessions(w http.ResponseWriter, r *http.Request, _ Params) {
 		})
 	}
 	ok(w, "OK", items)
-}
-
-// handleAdminEmbyDevices 汇总「Emby 登录用户的设备 / IP 审查」：以 Emby `/Devices`
-// 设备清单（含 LastUser / 最近活跃）为基底，用实时 `/Sessions` 的 RemoteEndPoint
-// 补充当前 IP 与在线状态，并把每台设备的 Emby 用户映射回本地账号。供管理员核查
-// 谁在用什么设备、从什么 IP 登录。仅 AuthAdmin。
-func (a *App) handleAdminEmbyDevices(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.embyConfigured() {
-		ok(w, "OK", map[string]any{"emby_configured": false, "devices": []any{}, "total": 0, "online": 0})
-		return
-	}
-	ctx := r.Context()
-	// 实时会话：DeviceId -> { ip, client }。读取失败不致命，降级为「无在线信息」。
-	var sessions []map[string]any
-	_ = a.embyGet(ctx, "/Sessions", &sessions)
-	live := make(map[string]map[string]string, len(sessions))
-	online := 0
-	for _, s := range sessions {
-		did := asString(s["DeviceId"])
-		if did == "" {
-			continue
-		}
-		live[did] = map[string]string{"ip": asString(s["RemoteEndPoint"]), "client": asString(s["Client"])}
-		online++
-	}
-	// 设备清单（QueryResult: { Items: [...] }）。
-	var devResp struct {
-		Items []map[string]any `json:"Items"`
-	}
-	if err := a.embyGet(ctx, "/Devices", &devResp); err != nil {
-		failWithCode(w, http.StatusBadGateway, ErrEmbyRemoteSessionsFail, "读取 Emby 设备列表失败")
-		return
-	}
-	devices := make([]map[string]any, 0, len(devResp.Items))
-	for _, d := range devResp.Items {
-		deviceID := asString(d["Id"])
-		userID := asString(d["LastUserId"])
-		var localUser any
-		if u, okUser := a.store().FindUserByEmbyID(userID); okUser {
-			localUser = map[string]any{"uid": u.UID, "username": u.Username, "telegram_id": nullableInt(u.TelegramID)}
-		}
-		ip := ""
-		isOnline := false
-		if l, okLive := live[deviceID]; okLive {
-			ip = l["ip"]
-			isOnline = true
-		}
-		devices = append(devices, map[string]any{
-			"device_id":      deviceID,
-			"device_name":    asString(d["Name"]),
-			"app_name":       asString(d["AppName"]),
-			"app_version":    asString(d["AppVersion"]),
-			"emby_user_id":   userID,
-			"emby_user_name": asString(d["LastUserName"]),
-			"last_activity":  asString(d["DateLastActivity"]),
-			"ip":             ip,
-			"online":         isOnline,
-			"local_user":     localUser,
-		})
-	}
-	ok(w, "OK", map[string]any{"emby_configured": true, "devices": devices, "total": len(devices), "online": online})
 }
 
 func (a *App) handleLoginHistory(w http.ResponseWriter, r *http.Request, params Params) {
@@ -1172,8 +1081,6 @@ func (a *App) handleSystemInfo(w http.ResponseWriter, r *http.Request, _ Params)
 			"media_request":        a.cfg().MediaRequestEnabled,
 			"signin":               a.cfg().SigninEnabled,
 			"invite":               a.cfg().InviteEnabled,
-			"email_enabled":        emailConfigured(a.cfg()),
-			"force_bind_email":     a.cfg().EmailForceBind,
 		},
 		"limits":         map[string]any{"user_limit": a.cfg().UserLimit, "stream_limit": a.cfg().MaxStreams},
 		"telegram_bot":   a.publicTelegramBotInfo(r.Context()),
@@ -1503,7 +1410,6 @@ func (a *App) handlePublicConfig(w http.ResponseWriter, r *http.Request, _ Param
 		},
 		"signin": signinConfigPayload(*a.cfg()),
 		"invite": map[string]any{"enabled": a.cfg().InviteEnabled},
-		"email":  map[string]any{"enabled": emailConfigured(a.cfg()), "force_bind": a.cfg().EmailForceBind},
 	})
 }
 
@@ -1681,7 +1587,6 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request, _ Params)
 	roleFilter := r.URL.Query().Get("role")
 	activeFilter := r.URL.Query().Get("active")
 	embyFilter := r.URL.Query().Get("emby")
-	emailFilter := r.URL.Query().Get("email_status")
 	items := make([]map[string]any, 0, len(users))
 	for _, u := range users {
 		if roleFilter != "" && strconv.Itoa(u.Role) != roleFilter {
@@ -1698,26 +1603,6 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request, _ Params)
 		}
 		if embyFilter == "unbound" && u.EmbyID != "" {
 			continue
-		}
-		// 邮箱验证管理区筛选：verified=已验证；unverified=已填邮箱但未验证；
-		// bound=已填邮箱（不论验证）；none=未填邮箱。
-		switch emailFilter {
-		case "verified":
-			if !u.EmailVerified {
-				continue
-			}
-		case "unverified":
-			if u.EmailVerified || strings.TrimSpace(u.Email) == "" {
-				continue
-			}
-		case "bound":
-			if strings.TrimSpace(u.Email) == "" {
-				continue
-			}
-		case "none":
-			if strings.TrimSpace(u.Email) != "" {
-				continue
-			}
 		}
 		if search != "" && !strings.Contains(strings.ToLower(u.Username+" "+u.Email+" "+u.EmbyID+" "+strconv.FormatInt(u.UID, 10)+" "+strconv.FormatInt(u.TelegramID, 10)), search) {
 			continue

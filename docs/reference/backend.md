@@ -79,7 +79,7 @@ systemd 部署对应三个服务单元：`twilight`、`twilight-bot`、`twilight
 
 > 运行入口不会读取 `TWILIGHT_CONFIG_FILE` 指向的其它路径；这保证 1Panel、systemd 与手动启动都默认使用项目目录下的 `config.toml`。需要临时测试其它配置时，请切换到对应测试目录后再启动进程。
 
-配置项使用 TOML 分段（如 `[Global]`、`[API]`、`[Database]`、`[Emby]`、`[Telegram]`、`[SAR]`、`[Email]`、`[RateLimit]`、`[Scheduler]`、`[SystemUpdate]`、`[Security]` 等）。读取时对每个字段都准备了多个候选键（含分段键、历史扁平键和裸键），存在历史命名兼容；例如签到相关项同时识别 `SAR.*` 与历史的 `Signin.*`。
+配置项使用 TOML 分段（如 `[Global]`、`[API]`、`[Database]`、`[Emby]`、`[Telegram]`、`[SAR]`、`[RateLimit]`、`[Scheduler]`、`[SystemUpdate]`、`[Security]` 等）。读取时对每个字段都准备了多个候选键（含分段键、历史扁平键和裸键），存在历史命名兼容；例如签到相关项同时识别 `SAR.*` 与历史的 `Signin.*`。
 
 ### 关键默认值
 
@@ -105,8 +105,6 @@ systemd 部署对应三个服务单元：`twilight`、`twilight-bot`、`twilight
 生产环境若前端与 API 跨 origin 部署，必须把 `API.cors_origins` / `TWILIGHT_API_CORS_ORIGINS` 显式设置为前端 HTTPS 域名。后端不会把 `*` 当作携带凭据接口的可信 Origin，避免低信任页面通过浏览器 JS 读取凭据接口响应。Origin 只允许协议 + 主机 + 端口；尾斜杠会被规范化，带路径、查询串或片段的值会被拒绝。
 
 ## 常用环境变量
-
-> **配置优先级与建议**：`config.toml`（参考 `config.production.toml`，后台「系统配置」可视化编辑 + 热重载）是**唯一推荐的配置源**，敏感密钥放同目录 `config.local.toml`。`.env` 仅建议保留后端监听地址、站点名称等极少数部署级项目（见 `.env.example`），**不要**在 `.env` 里堆叠邮箱 / Telegram / 注册 / 限流等功能配置。下表列出的 `TWILIGHT_*` 变量仍可在配置文件之上覆盖对应字段（容器 / CI 等场景备用），但默认部署以 `config.toml` 为准。
 
 所有键以 `TWILIGHT_` 前缀开头，由 `applyEnv` 在配置文件之上覆盖。下表与 `internal/config/config.go` 对齐，仅列出常用项。
 
@@ -171,26 +169,9 @@ systemd 部署对应三个服务单元：`twilight`、`twilight-bot`、`twilight
 | `TWILIGHT_SIGNIN_*` | 签到相关（开关、货币名、每日积分、连签奖励、积分续期开关/消耗/天数等）。 |
 | `TWILIGHT_NOTIFICATION_ENABLED` / `TWILIGHT_NOTIFICATION_EXPIRY_REMIND_DAYS` | 到期提醒。 |
 | `TWILIGHT_AUTO_CLEANUP_PENDING_EMBY` / `TWILIGHT_AUTO_CLEANUP_PENDING_EMBY_DAYS` | 待补建 Emby 自动清理。 |
-| `TWILIGHT_RATE_LIMIT_*` | 各类限流阈值（全局、登录、注册、找回密码、邮箱发码、上传、管理员图标、API Key 默认）。 |
+| `TWILIGHT_RATE_LIMIT_*` | 各类限流阈值（全局、登录、注册、找回密码、上传、管理员图标、API Key 默认）。 |
 
-### 邮箱验证 / SMTP
-
-| 变量 | 说明 |
-| ---- | ---- |
-| `TWILIGHT_EMAIL_ENABLED` | 邮箱验证子系统总开关。 |
-| `TWILIGHT_SMTP_HOST` / `TWILIGHT_SMTP_PORT` | 发信服务器地址与端口（465/587/25）。 |
-| `TWILIGHT_SMTP_USERNAME` / `TWILIGHT_SMTP_PASSWORD` | SMTP 登录用户名与密码/授权码。 |
-| `TWILIGHT_SMTP_ENCRYPTION` | `ssl` / `starttls` / `none`。 |
-| `TWILIGHT_SMTP_FROM_ADDRESS` / `TWILIGHT_SMTP_FROM_NAME` | 发件地址与显示名（留空回落到用户名/站点名）。 |
-| `TWILIGHT_SMTP_TIMEOUT_SECONDS` | 单次发信超时秒数。 |
-| `TWILIGHT_EMAIL_FORCE_BIND` | 强制绑定邮箱（管理员豁免；SMTP 未配好时自动失效）。 |
-| `TWILIGHT_EMAIL_CODE_LENGTH` / `TWILIGHT_EMAIL_CODE_TYPE` | 验证码长度（4-12）与类型（`numeric` / `alphanumeric`）。 |
-| `TWILIGHT_EMAIL_CODE_TTL_MINUTES` / `TWILIGHT_EMAIL_RESEND_COOLDOWN_SECONDS` / `TWILIGHT_EMAIL_MAX_ATTEMPTS` | 验证码有效期、重发冷却、尝试上限。 |
-| `TWILIGHT_EMAIL_SUBJECT_TEMPLATE` / `TWILIGHT_EMAIL_BODY_TEMPLATE` | 邮件标题 / 正文模板（占位符 `{site}`/`{code}`/`{ttl}`；正文换行用 `\n`）。 |
-| `TWILIGHT_EMAIL_VALIDATION_MODE` / `TWILIGHT_EMAIL_WHITELIST` / `TWILIGHT_EMAIL_BLACKLIST` | 邮箱域名校验模式与黑白名单（与注册共用，逗号分隔）。 |
-| `TWILIGHT_RATE_LIMIT_EMAIL_CODE_IP_PER_10M` / `TWILIGHT_RATE_LIMIT_EMAIL_CODE_ADDR_PER_10M` / `TWILIGHT_RATE_LIMIT_EMAIL_CODE_UID_PER_10M` | 发码限流（每 IP / 每收件地址 / 每登录账号）。 |
-
-更多按业务划分的配置项见各功能文档：[注册码与卡码](../features/regcodes.md)、[邮箱验证与找回密码](../features/email.md)、[邀请树](../features/invite.md)、[Telegram Bot 命令](../features/telegram-bot.md)、[Bangumi 同步](../features/bangumi.md)、[背景与头像](../features/background.md)。
+更多按业务划分的配置项见各功能文档：[注册码与卡码](../features/regcodes.md)、[邀请树](../features/invite.md)、[Telegram Bot 命令](../features/telegram-bot.md)、[Bangumi 同步](../features/bangumi.md)、[背景与头像](../features/background.md)。
 
 ## Redis 优化
 

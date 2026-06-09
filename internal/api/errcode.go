@@ -351,23 +351,6 @@ const (
 	ErrRuntimeLogStreamUnsupported ErrCode = "RUNTIME_LOG_STREAM_UNSUPPORTED"
 	ErrConfigSaveFailed            ErrCode = "CONFIG_SAVE_FAILED"
 	ErrAPIKeyLoginRateLimited      ErrCode = "AUTH_APIKEY_LOGIN_RATE_LIMITED"
-
-	// === 邮箱验证 / 验证码 / 强制绑定 ===
-	// 前端按这些码做差异化引导：未启用 → 隐藏入口；码错/过期/超次 → 提示重发；
-	// 需验证 → 跳「绑定并验证邮箱」；占用冲突 → 提示换邮箱或联系管理员。
-	ErrEmailDisabled             ErrCode = "EMAIL_DISABLED"
-	ErrEmailNotBound             ErrCode = "EMAIL_NOT_BOUND"
-	ErrEmailCodeInvalid          ErrCode = "EMAIL_CODE_INVALID"
-	ErrEmailCodeExpired          ErrCode = "EMAIL_CODE_EXPIRED"
-	ErrEmailCodeTooMany          ErrCode = "EMAIL_CODE_TOO_MANY"
-	ErrEmailCodeRequired         ErrCode = "EMAIL_CODE_REQUIRED"
-	ErrEmailSendFailed           ErrCode = "EMAIL_SEND_FAILED"
-	ErrEmailResendCooldown       ErrCode = "EMAIL_RESEND_COOLDOWN"
-	ErrEmailRateLimited          ErrCode = "EMAIL_RATE_LIMITED"
-	ErrEmailPurposeInvalid       ErrCode = "EMAIL_PURPOSE_INVALID"
-	ErrEmailVerificationRequired ErrCode = "USER_EMAIL_VERIFICATION_REQUIRED"
-	ErrEmailConflict             ErrCode = "USER_EMAIL_CONFLICT"
-	ErrEmailAlreadyVerified      ErrCode = "USER_EMAIL_ALREADY_VERIFIED"
 )
 
 // ErrTGBindGroupMembershipMiss 是 ErrTGBindGroupMembershipRequired 的旧名。

@@ -145,19 +145,6 @@ export const ERROR_CODE_FRIENDLY: Partial<Record<ErrCode, string>> = {
   AUTH_PASSWORD_RESET_TOO_MANY: "密码重置过于频繁，请稍后再试",
   AUTH_PASSWORD_OLD_MISMATCH: "原密码不正确",
   AUTH_PASSWORD_WEAK: "密码强度不足",
-  EMAIL_DISABLED: "邮箱功能未启用",
-  EMAIL_NOT_BOUND: "请先绑定并验证邮箱",
-  EMAIL_CODE_INVALID: "验证码错误或已失效，请重新获取",
-  EMAIL_CODE_EXPIRED: "验证码已过期，请重新获取",
-  EMAIL_CODE_TOO_MANY: "验证码错误次数过多，请重新获取",
-  EMAIL_CODE_REQUIRED: "请先获取并填写邮箱验证码",
-  EMAIL_SEND_FAILED: "验证码发送失败，请稍后再试或联系管理员",
-  EMAIL_RESEND_COOLDOWN: "发送过于频繁，请稍后再试",
-  EMAIL_RATE_LIMITED: "验证码请求过于频繁，请稍后再试",
-  EMAIL_PURPOSE_INVALID: "验证用途无效",
-  USER_EMAIL_VERIFICATION_REQUIRED: "请先绑定并验证邮箱后再继续操作",
-  USER_EMAIL_CONFLICT: "该邮箱已被其他账号绑定",
-  USER_EMAIL_ALREADY_VERIFIED: "该邮箱已验证",
   USER_REGISTER_RATE_LIMITED: "注册过于频繁，请稍后再试",
   USER_REGISTER_DISABLED: "已关闭新用户注册",
   USER_USERNAME_INVALID: "用户名格式不正确",
@@ -332,17 +319,4 @@ export function friendlyError(code: string | undefined, fallback?: string): stri
     if (mapped) return mapped;
   }
   return fallback || "操作失败";
-}
-
-// 触发「限流 / 冷却」类的后端错误码集合。命中后前端应启动一段本地冷却，
-// 让发送/重发按钮自禁，避免用户继续无效点击放大滥刷压力（与后端单账号/IP/
-// 地址多维限流配合）。覆盖邮箱发码与邮箱找回密码两条链路。
-const THROTTLE_ERROR_CODES = new Set<string>([
-  "EMAIL_RATE_LIMITED",
-  "EMAIL_RESEND_COOLDOWN",
-  "AUTH_PASSWORD_RESET_TOO_MANY",
-]);
-
-export function isThrottleErrorCode(code: string | undefined): boolean {
-  return !!code && THROTTLE_ERROR_CODES.has(code);
 }

@@ -61,51 +61,6 @@ func (s *Store) DeleteDevice(uid int64, deviceID string) error {
 	return s.saveLocked()
 }
 
-// EnforceDeviceLimit 仅保留某用户最近活跃的 max 台设备（按 LastSeen 倒序），淘汰
-// 更旧的「未受信任」设备。约定（防误踢/防锁死）：
-//   - max<=0 视为不限制，直接返回；
-//   - 受信任设备（Trusted）永不淘汰，即使超出名额；
-//   - 刚登录的设备 LastSeen 最新，必在保留区，不会把当前会话踢掉；
-//   - 已 Blocked 的设备不计入活跃集，也不参与淘汰（保持封禁状态）。
-//
-// 仅在 DeviceLimitEnabled 时由登录路径调用。
-func (s *Store) EnforceDeviceLimit(uid int64, max int) error {
-	if max <= 0 {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return err
-	}
-	type keyed struct {
-		key string
-		dev Device
-	}
-	active := make([]keyed, 0)
-	for key, d := range s.state.Devices {
-		if d.UID == uid && !d.Blocked {
-			active = append(active, keyed{key, d})
-		}
-	}
-	if len(active) <= max {
-		return nil
-	}
-	sort.Slice(active, func(i, j int) bool { return active[i].dev.LastSeen > active[j].dev.LastSeen })
-	changed := false
-	for i, item := range active {
-		if i < max || item.dev.Trusted {
-			continue // 在名额内，或受信任 → 保留
-		}
-		delete(s.state.Devices, item.key)
-		changed = true
-	}
-	if !changed {
-		return nil
-	}
-	return s.saveLocked()
-}
-
 func deviceKey(uid int64, deviceID string) string {
 	return strconv36(uid) + ":" + deviceID
 }

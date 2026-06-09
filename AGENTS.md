@@ -24,36 +24,6 @@
 - `webui/src/lib/api.ts`：前端 API 客户端，新增后端接口时通常要同步这里和 `api-types.ts`。
 - `deploy/`：systemd unit 与安装脚本。部署 unit 必须指向 `bin/twilight`。
 
-## 功能与代码定位（速查）
-
-定位某功能时：先在本表找到「功能域」→ 看后端文件（handler/业务/外部 client）与 `internal/store` 方法 → 路由在 `internal/api/routes.go` 按前缀搜 → 前端在 `webui/src/app` 找页面、`webui/src/lib/api.ts` 找客户端方法。文案键见 `webui/src/locales/`（基底 `basic.json`）。路径前缀省略：后端 `internal/api/`、存储 `internal/store/`、页面 `webui/src/app/`、组件 `webui/src/components/`。
-
-| 功能域 | 后端（handler / 业务 / client） | store | 路由前缀 | 前端页面 / 组件 | 配置段 · 专题文档 |
-| ---- | ---- | ---- | ---- | ---- | ---- |
-| 登录 / 会话 / 找回密码 | `auth_handlers.go`、`password_verify.go`、`session.go` | `login_log.go`、sessions() | `/auth/*` | `(auth)/login`、`(auth)/forgot-password` | `[Security]` |
-| 用户自助（资料/改密/头像/背景） | `handlers.go`、`upload_handlers.go`、`safepath.go` | `store.go`(User) | `/users/me/*` | `(main)/settings`、`settings/background`、`settings/appearance` | [背景与头像](docs/features/background.md) |
-| 邮箱验证 / 找回 / 强制绑定 | `email_handlers.go`、`email_verify_service.go`、`email_client.go` | `email_verification.go` | `/users/me/email/*`、`/auth/password/email/*`、`/admin/email/*` | `components/email-*.tsx`、`admin/users/admin-email-dialog.tsx` | `[Email]`/`[SAR]`名单/`[RateLimit]` · [邮箱](docs/features/email.md) |
-| Emby 绑定/注册/同步/设备·IP 审查 | `emby.go`、`emby_client.go`、`emby_inventory.go`、`emby_url_probe.go`、`handlers.go`(`handleAdminEmbyDevices`/`handleSessions`) | `store.go`(User.EmbyID) | `/emby/*`、`/admin/emby/*` | `(main)/admin/emby`、`(main)/dashboard` | `[Emby]` |
-| Telegram Bot / 绑定 / 花名册 / 换绑 | `telegram_bot.go`、`telegram.go`、`telegram_commands.go`、`telegram_inline.go`、`telegram_bind_*.go`、`bind_status_hub.go` | `store.go`(roster/rebind) | `/users/me/telegram/*`、`/admin/telegram/*` | `admin/telegram-rebind-requests` | `[Telegram]` · [Bot](docs/features/telegram-bot.md) |
-| 注册码 / 续期码 / 白名单码 | `regcode_handlers.go`、`code_use_handlers.go`、`business.go`(生成/消费) | `store.go`(RegCode) | `/admin/regcodes/*`、`/users/me/use-code` | `(main)/admin/regcodes` | `[SAR]` · [卡码](docs/features/regcodes.md) |
-| 邀请树 | `invite_handlers.go`、`invite_admin_handlers.go`、`business.go`(`inviteForest`) | `store.go`(InviteCode/Relations) | `/invite/*`、`/admin/invite/*` | `(main)/invite`、`(main)/admin/invite` | `[SAR]` · [邀请树](docs/features/invite.md) |
-| 求片 | `media_request_handlers.go`、`media_service.go`、`tmdb_client.go`、`bangumi_client.go`、`emby_inventory.go` | `store.go`(MediaRequest) | `/media/*` | `(main)/media`、`(main)/admin/requests` | `[SAR]` |
-| 签到 / 积分 | `signin_handlers.go` | `signin.go` | `/signin/*` | `(main)/score` | `[SAR]` signin_* |
-| 公告 | `announcement_handlers.go` | `store.go`(Announcement) | `/announcements`、`/admin/announcements/*` | `(main)/announcements`、`admin/announcements` | [公告](docs/features/announcements.md) |
-| 设备 / 登录历史 / IP 黑名单 | `handlers.go`(`handleDevices`/`handleLoginHistory`)、`auth_handlers.go`(登录写设备) | `device.go`、`login_log.go`、`ip_blacklist.go` | `/security/*`、`/users/me/devices` | （并入 settings/admin） | `[DeviceLimit]` |
-| Bangumi 同步 | `bangumi_webhook.go`、`bangumi_client.go` | `store.go`(User.BgmToken) | `/emby/bangumi/webhook` | — | `[BangumiSync]` · [Bangumi](docs/features/bangumi.md) |
-| API Key | `apikey_handlers.go` | `store.go`(APIKey) | `/apikey/*`、`/users/me/apikeys` | `settings/apikey` | [API Key](docs/reference/api-key.md) |
-| 批量用户操作 | `batch_user_handlers.go`、`batch_helpers.go`、`handlers.go`(`filteredBatchUserUIDs`) | `store.go`(Users) | `/batch/*`、`/admin/users/bulk-*` | `(main)/admin/users` | — |
-| 调度任务 | `scheduler_handlers.go`、`scheduler_daemon.go`、`scheduler_runner.go`、`admin_jobs.go` | `scheduler.go` | `/admin/scheduler/*` | `(main)/admin/scheduler` | `[Scheduler]` |
-| 配置管理（可视化/TOML/备份） | `config_admin.go`、`internal/config` | — | `/system/admin/config/*` | `(main)/admin/config` | `config.production.toml` |
-| 数据库 / 备份 / 迁移 | `database_admin.go`、`storage_guard.go` | `internal/store`(postgres/json) | `/system/admin/database/*` | `(main)/admin/database` | `[Database]` |
-| 实时日志 / 运行状态 | `runtime_logs.go`、`app.go`(状态) | `runtime_log.go` | `/system/admin/runtime/*` | `(main)/admin/logs` | `[Global]` log_* |
-| 违规审计（诱饵码等） | `violation_handlers.go` | `store.go`(ViolationLog) | `/admin/violations/*` | `(main)/admin/violations` | `[SAR]` decoy_action |
-| 系统自动更新（Git） | `system_update.go`、`system_update_handler.go` | — | `/system/admin/update` | `admin/config`(更新页) | `[SystemUpdate]` |
-| 统计 / 服务器状态 | `handlers.go`(`handleSystemStats`/`handleWatchStats`) | `playback.go` | `/system/admin/stats`、`/batch/watch-stats/*` | `(main)/admin/stats` | — |
-
-> 通用约定：错误码定义 `internal/api/errcode.go` ↔ 前端 `webui/src/lib/errcode.ts`/`validators.ts`；确认短语 `internal/api/confirm_phrases.go` ↔ `webui/src/lib/confirm-phrases.ts`；校验规则 `internal/validate` ↔ `webui/src/lib/password.ts`/`validators.ts`；全局状态 `webui/src/store/{auth,system}.ts`。完整路由清单见 [API 路由索引](docs/reference/api-index.md)。
-
 ## 常用命令
 
 后端：
@@ -104,7 +74,7 @@ pnpm build
 - Telegram Bot 账号类操作优先私聊；群聊只保留必要管理员工具。Bot/面板输出不得展示密码、Token、Emby ID、服务器线路、API Key 等敏感信息，按钮/面板操作必须重新校验管理员身份、目标权限和面板过期时间。
 - Emby/Jellyfin 外部副作用必须先完成本地权限、容量、过期状态和绑定冲突校验；非系统管理员不得绑定或操作 Emby 管理员账号。Emby 线路下发统一走 `/api/v1/system/emby-urls` 并按用户状态/权限过滤。
 - 运行时可热重载的 `cfg/store/sessions/limiter/redis` 通过 `runtimeState` 原子快照管理。读配置或 store 时优先使用 `a.cfg()`、`a.store()` 等访问器，不要缓存会跨 reload 失效的句柄。
-- 配置入口固定为工作目录下的 `config.toml`；`--config` 只接受同一个工作目录的 `config.toml`。私密覆盖使用同目录 `config.local.toml` 或 `TWILIGHT_CONFIG_LOCAL_FILE`，环境变量以 `TWILIGHT_*` 覆盖字段。新增配置项一律落到 `config.toml`（在 `config.production.toml` 模板与后台 schema 中体现），**不要**把功能配置写进 `.env.example`——后端 `.env` 仅保留后端监听地址、站点名称等极少数部署级项目，前端展示项（API 基址 / 站点名 / 介绍 / 图标）走 `webui/.env`。
+- 配置入口固定为工作目录下的 `config.toml`；`--config` 只接受同一个工作目录的 `config.toml`。私密覆盖使用同目录 `config.local.toml` 或 `TWILIGHT_CONFIG_LOCAL_FILE`，环境变量以 `TWILIGHT_*` 覆盖字段。
 - 存储模型是单一 `store.State` 文档。新增业务实体通常是在 `internal/store/store.go` 的 `State` 上加字段，并在 `ensure()` 中补默认值；不要为邀请、公告、注册码等业务重新创建独立 SQLite 文件或独立表。
 - PostgreSQL 后端只把主状态存为 `twilight_state` 的单行 `jsonb`，并有独立 `twilight_sessions` 与 `twilight_runtime_logs`。迁移、备份、恢复必须保持快照完整性。
 - PostgreSQL 除现有 `twilight_sessions` 与 `twilight_runtime_logs` 外，不为业务实体新增独立表，除非先更新架构文档并说明快照一致性、迁移和备份恢复方案。
@@ -115,11 +85,6 @@ pnpm build
 - 执行外部命令必须使用 `exec.Command` 参数数组，禁止拼接 shell 字符串。Git remote URL、日志和响应中不得泄露凭据。
 - 新增缓存必须说明作用域（App 实例/进程/Redis）、TTL、容量上限、热重载失效条件和降级行为；避免包级可变缓存导致测试串扰或 reload 后读旧配置。
 - 高频外部调用（Emby/TMDB/Bangumi/Telegram）必须设置超时、限流/退避和必要短缓存；不要为低频路径引入难以验证的全局缓存或后台 goroutine。
-- 验证码 / 发信 / 找回密码这类「可外发或易被滥刷」的接口遵循既有邮箱验证模式（`internal/api/email_*.go`、`internal/store/email_verification.go`，详见 [邮箱验证文档](docs/features/email.md)）：验证码只存服务端 HMAC 哈希（不存明文）+ 常量时间比较 + 尝试上限 + TTL；发码限流必须多维（IP + 登录账号 uid + 目标地址）并叠加重发冷却，新增发信入口不要只做单一维度限流；登出态找回走统一成功响应防枚举。强制验证门（如 `requireEmailVerified`）必须是服务端硬门、前端守卫只做体验，且依赖的外部能力（SMTP 等）未配置完整时强制门要自动失效，避免把用户锁死在面板外。
-- 列表筛选若同时用于「跨页全选 + 批量操作」，筛选口径必须在列表 handler 与 `filteredBatchUserUIDs` 两处完全一致（如 `email_status`），否则「按筛选全选」会把筛选外用户卷入批量操作。
-- 设备 / 登录 / IP 数据有**两套互不相同的来源**，不要混淆：① Emby 侧——登录用户的真实设备与 IP 由 Emby API 提供（`/Sessions` 的 `RemoteEndPoint`=客户端 IP、`DeviceName`/`Client`/`UserId`；`/Devices` 为设备清单 + `LastUserId`/`DateLastActivity`），用于管理员审查 Emby 用户的设备/IP；② 本地侧——`store.Device` 只记录 **Web 面板**自身的登录设备。涉及「Emby 用户设备/IP 审查」必须查 Emby API，不要拿本地 `store.Device` 充当 Emby 数据。
-- 写本地 Web 登录设备用 `UpdateDevice`（读改写，保留 `FirstSeen`/`Trusted`/`Blocked`），不要用 `UpsertDevice` 整条覆盖（会把信任/封禁标记和首次时间冲掉）。
-- 注册码更新走 `PUT /admin/regcodes/:code` 的**部分更新**（仅改 payload 中出现的字段：`note`/`active`/`validity_time`/`days`/`use_count_limit`），`UpsertRegCode` 的「强制 active=true」兜底只对新建码生效，更新已存在码可正常停用。
 
 ## 前端约定
 
@@ -127,8 +92,6 @@ pnpm build
 - `apiRequest` 会自动使用 `${NEXT_PUBLIC_API_URL}/api/v1`；未设置 `NEXT_PUBLIC_API_URL` 时，`next.config.mjs` 将 `/api/*` rewrite 到 `BACKEND_URL`，默认 `http://localhost:5000`。
 - 新增或调整接口时，同步检查 `api.ts`、`api-types.ts`、后端路由、请求方法、鉴权级别、错误码、确认短语和移动端展示。
 - 新增前端 API 错误码时同步 `webui/src/lib/errcode.ts` 和友好文案；移除后端错误码或路由时同步删除前端类型、客户端方法、页面引用和文档索引。
-- 限流 / 冷却类错误码（见 `isThrottleErrorCode`）命中后，发送 / 重发按钮应本地起一段冷却自禁，避免无效重试放大滥刷压力。
-- 新增面向用户的文案必须走 `t()` i18n。locale 文件架构（见 `i18n.tsx`）：`basic.json` 是**全键兜底基底**（简体），`zh-Hant.json` / `en-US.json` 是**完整镜像**，`zh-Hans.json` 是**稀疏覆盖**（缺的键回退 basic）。新增键只加到 `basic.json` + `zh-Hant.json` + `en-US.json` 三份并保持键对齐，**不要**加到 `zh-Hans.json`；漏键回退到 basic.json（不是英文）。
 - 页面分组：`webui/src/app/(auth)` 放登录、注册、找回密码；`webui/src/app/(main)` 放用户面板与管理页。新增 UI 优先复用 `webui/src/components`、`hooks` 和 `lib` 中已有模式。
 - 保持现有中文文案、暗色/亮色主题、Tailwind token 和组件风格。前端改动必须兼顾桌面与移动端。
 - 资产 URL、背景 CSS、头像、上传结果等必须沿用 `api.ts` 中的安全归一化逻辑，不允许保存任意外部 `url()` 或不受控协议。

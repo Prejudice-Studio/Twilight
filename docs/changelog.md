@@ -2,43 +2,6 @@
 
 本文记录 Twilight 各版本的变更与发布文案，按版本从新到旧排列；文末附「发布检查清单」。术语与跨文档引用见 [文档导航](../README.md)。
 
-## 未发布（开发中）
-
-### 邮箱验证与找回密码（新增）
-
-- 新增邮箱验证子系统：SMTP 发信、绑定/验证邮箱、登出态邮箱找回密码、改密二次校验、强制绑定门。详见 [邮箱验证与找回密码](./features/email.md)。
-- **配置**：新增 `[Email]` 段（SMTP 主机/端口/凭据/加密、`force_bind`、验证码长度/类型/有效期/重发冷却/尝试上限、邮件标题/正文模板）；邮箱域名黑白名单 `email_validation_mode` / `email_whitelist` / `email_blacklist` 归在 `[SAR]` 段，与注册校验共用。配置模板见 `config.production.toml`（功能配置统一在 `config.toml`，不走 `.env`；密钥放 `config.local.toml`），后台「系统配置 → 邮箱验证」可视化修改并热重载。
-- **验证码安全**：只存服务端 HMAC-SHA256 哈希（不存明文）+ 定长常量时间比较；带尝试上限、有效期、IP/收件地址双发码限流与重发冷却；过期码由调度任务清理。HMAC 密钥优先由 `bot_internal_secret` 派生，缺省回退进程级随机密钥（重启即作废，fail-closed）。
-- **强制绑定**：`force_bind` 开启时普通用户/白名单进仪表盘前须验证邮箱（管理员豁免仅提示），改系统/Emby 密码也要求邮箱验证码；服务端 `requireEmailVerified` 硬门，价值型接口不可绕过。SMTP 未配置完整时强制门自动失效，防止把用户锁在仪表盘外。
-- **找回密码防枚举**：邮箱找回统一成功响应、仅命中已验证邮箱账号、吞掉内部失败；按 IP 限流。
-- **管理员邮箱管理区**：用户管理页新增邮箱验证状态筛选（已验证/未验证/已填/未填）与行内状态徽标；可强制把用户绑定到指定邮箱、置/撤销验证状态；配置页内置「发送测试邮件」验证 SMTP 连通性。
-- **前端与 i18n**：注册/登录忘记密码页支持邮箱验证码重置（与 Emby 找回并列），`email.*` 文案三语（basic / en-US / zh-Hant）对齐。
-- **发码多维限流**：发码依次过 IP → 登录账号(uid) → 收件地址三道闸 + 重发冷却；`email_code_uid_per_10m` 防同一账号轮换收件邮箱滥刷。前端收到限流/冷却错误码会本地起冷却自禁发送按钮。
-
-### Emby 登录用户设备 / IP 审查（新增）
-
-- 新增 `GET /api/v1/admin/emby/devices`（`handleAdminEmbyDevices`）：以 Emby `/Devices` 设备清单为基底，用实时 `/Sessions` 的 `RemoteEndPoint` 补当前 IP 与在线状态，并把每台设备的 Emby 用户映射回本地账号；管理后台「Emby 管理 → 设备 / IP 审查」可搜索查看。实时会话 DTO 也补上了 `remote_endpoint`(IP)。详见 [安全加固 §10](./guides/security.md)。
-
-### 注册码 / 续期码管理增强
-
-- `PUT /api/v1/admin/regcodes/:code` 由「仅改备注」扩展为部分更新：支持停用/启用（`active`）、有效期（`validity_time` 小时，-1 永久）、授予天数、使用次数上限；DTO 新增计算字段 `expires_at`。管理页提供编辑弹窗（启用开关 + 有效期 + 额度）。详见 [注册码与卡码](./features/regcodes.md)。
-
-### Telegram 用户名自动刷新
-
-- Bot 处理任意来自已绑定用户的更新（私聊 / 群消息 / chat_member）时被动刷新存储的 `telegram_username`（无额外 API 调用，空用户名不清空）。详见 [Telegram Bot](./features/telegram-bot.md)。
-
-### 本地登录设备记录修复
-
-- Web 登录改用 `UpdateDevice` 读改写，修复此前每次登录用 `UpsertDevice` 整条覆盖、把设备的「受信任 / 已封禁」标记与首次登录时间冲掉的问题；设备记录新增 `LastIP`。新增可选设备数上限 `EnforceDeviceLimit`（受 `[DeviceLimit].device_limit_enabled` 开关，淘汰最旧的未受信任设备，绝不踢当前/受信任设备）。
-
-### 配置方式收敛到 config.toml
-
-- 功能配置一律放 `config.toml`（参考 `config.production.toml`，含新增 `[RateLimit]` 段），密钥放 `config.local.toml`；后端 `.env.example` 精简为仅保留监听地址 / 站点名，前端展示项（API 基址 / 站点名 / 介绍 / 图标）走 `webui/.env`。
-
-### 管理员邀请树性能
-
-- 邀请树渲染由「每行重复 `findRoot`/`subtreeSize`」的 O(n²) 优化为一次 O(n) 预计算 `rootOf` / `descendants` 查表，大树场景明显更流畅。
-
 ## 社交平台发布文案：Go 后端重构版
 
 Twilight 0.0.4 Go 后端重构版已更新。

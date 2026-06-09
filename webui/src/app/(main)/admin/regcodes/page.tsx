@@ -17,7 +17,6 @@ import {
   RefreshCw,
   Search,
   FlipHorizontal2,
-  Pencil,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -306,49 +305,6 @@ export default function AdminRegcodesPage() {
       toast({ title: t("adminRegcodes.saveFailed"), description: error.message, variant: "destructive" });
     } finally {
       setSavingNote(null);
-    }
-  };
-
-  // 编辑注册码：停用/启用 + 有效期（小时）+ 授予天数 + 使用次数上限。
-  const [editCode, setEditCode] = useState<Regcode | null>(null);
-  const [editForm, setEditForm] = useState({ active: true, validityTime: "-1", days: "30", useCountLimit: "1" });
-  const [editSaving, setEditSaving] = useState(false);
-
-  const openEditDialog = (code: Regcode) => {
-    setEditForm({
-      active: code.active !== false,
-      validityTime: String(code.validity_time ?? -1),
-      days: String(code.days ?? 0),
-      useCountLimit: String(code.use_count_limit ?? -1),
-    });
-    setEditCode(code);
-  };
-
-  const applyRegcodeUpdate = (updated: Regcode) => {
-    setRegcodes((prev) => prev.map((item) => (item.code === updated.code ? { ...item, ...updated } : item)));
-  };
-
-  const handleSaveEdit = async () => {
-    if (!editCode) return;
-    setEditSaving(true);
-    try {
-      const res = await api.updateRegcode(editCode.code, {
-        active: editForm.active,
-        validity_time: parseInt(editForm.validityTime, 10) || -1,
-        days: parseInt(editForm.days, 10) || 0,
-        use_count_limit: parseInt(editForm.useCountLimit, 10) || -1,
-      });
-      if (res.success && res.data) {
-        applyRegcodeUpdate(res.data);
-        toast({ title: t("adminRegcodes.editSaved"), variant: "success" });
-        setEditCode(null);
-      } else {
-        toast({ title: t("adminRegcodes.saveFailed"), description: res.message, variant: "destructive" });
-      }
-    } catch (error: any) {
-      toast({ title: t("adminRegcodes.saveFailed"), description: error.message, variant: "destructive" });
-    } finally {
-      setEditSaving(false);
     }
   };
 
@@ -1093,15 +1049,6 @@ export default function AdminRegcodesPage() {
                       <Button
                         size="icon"
                         variant="ghost"
-                        className="h-8 w-8"
-                        title={t("adminRegcodes.editAction")}
-                        onClick={() => openEditDialog(code)}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
                         className="h-8 w-8 text-destructive hover:text-destructive"
                         onClick={() => void handleDelete(code)}
                         disabled={deletingCode === code.code}
@@ -1277,26 +1224,15 @@ export default function AdminRegcodesPage() {
                         {formatDate(code.created_time || code.created_at)}
                       </td>
                       <td className="px-4 py-3 text-right align-top">
-                        <div className="flex items-center justify-end gap-1">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8"
-                            title={t("adminRegcodes.editAction")}
-                            onClick={() => openEditDialog(code)}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="text-destructive hover:text-destructive"
-                            onClick={() => void handleDelete(code)}
-                            disabled={deletingCode === code.code}
-                          >
-                            {deletingCode === code.code ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                          </Button>
-                        </div>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => void handleDelete(code)}
+                          disabled={deletingCode === code.code}
+                        >
+                          {deletingCode === code.code ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                        </Button>
                       </td>
                     </tr>
                   ))}
@@ -1391,69 +1327,6 @@ export default function AdminRegcodesPage() {
               </Button>
             )}
             <Button variant="outline" onClick={() => setUsageOpen(false)}>{t("common.close")}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* 编辑注册码：停用/启用 + 有效期 + 天数 + 次数上限 */}
-      <Dialog open={editCode !== null} onOpenChange={(open) => { if (!open) setEditCode(null); }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t("adminRegcodes.editTitle")}</DialogTitle>
-            <DialogDescription>
-              {editCode ? <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{editCode.code}</code> : null}
-              <span className="ml-1">{t("adminRegcodes.editDescription")}</span>
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <div>
-                <p className="text-sm font-medium">{t("adminRegcodes.editEnabled")}</p>
-                <p className="text-xs text-muted-foreground">{t("adminRegcodes.editEnabledHelp")}</p>
-              </div>
-              <Switch checked={editForm.active} onCheckedChange={(v) => setEditForm((f) => ({ ...f, active: v }))} />
-            </div>
-            <div className="space-y-2">
-              <Label>{t("adminRegcodes.validityLabel")}</Label>
-              <Input
-                type="number"
-                value={editForm.validityTime}
-                onChange={(e) => setEditForm((f) => ({ ...f, validityTime: e.target.value }))}
-              />
-              <p className="text-xs text-muted-foreground">
-                {t("adminRegcodes.validityHelp")}
-                {editCode && parseInt(editForm.validityTime, 10) > 0 && editCode.created_time ? (
-                  <span className="ml-1">
-                    {t("adminRegcodes.colExpiresAt")}: {formatDate(editCode.created_time + parseInt(editForm.validityTime, 10) * 3600)}
-                  </span>
-                ) : null}
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>{t("adminRegcodes.editDaysLabel")}</Label>
-                <Input
-                  type="number"
-                  value={editForm.days}
-                  onChange={(e) => setEditForm((f) => ({ ...f, days: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>{t("adminRegcodes.editUseLimitLabel")}</Label>
-                <Input
-                  type="number"
-                  value={editForm.useCountLimit}
-                  onChange={(e) => setEditForm((f) => ({ ...f, useCountLimit: e.target.value }))}
-                />
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditCode(null)}>{t("common.cancel")}</Button>
-            <Button onClick={() => void handleSaveEdit()} disabled={editSaving}>
-              {editSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {t("common.save")}
-            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
