@@ -19,7 +19,6 @@ import {
   WifiOff,
   Send,
   MessageCircle,
-  MonitorSmartphone,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -94,19 +93,6 @@ interface OrphanItem {
   telegram_id: number | null;
 }
 
-interface EmbyDeviceAudit {
-  device_id: string;
-  device_name: string;
-  app_name: string;
-  app_version: string;
-  emby_user_id: string;
-  emby_user_name: string;
-  last_activity: string;
-  ip: string;
-  online: boolean;
-  local_user: { uid: number; username: string; telegram_id: number | null } | null;
-}
-
 interface EmbyUsersData {
   emby_users: EmbyUserItem[];
   orphans: OrphanItem[];
@@ -161,37 +147,6 @@ export default function AdminEmbyPage() {
       return true;
     });
   }, [embyData, userSearch, linkFilter, attrFilter]);
-
-  // Emby 设备 / IP 审查
-  const [deviceData, setDeviceData] = useState<{ devices: EmbyDeviceAudit[]; total: number; online: number; emby_configured: boolean } | null>(null);
-  const [isLoadingDevices, setIsLoadingDevices] = useState(false);
-  const [deviceSearch, setDeviceSearch] = useState("");
-
-  const filteredDevices = useMemo<EmbyDeviceAudit[]>(() => {
-    if (!deviceData) return [];
-    const q = deviceSearch.trim().toLowerCase();
-    if (!q) return deviceData.devices;
-    return deviceData.devices.filter((d) =>
-      [d.emby_user_name, d.device_name, d.app_name, d.ip, d.local_user?.username || "", d.local_user ? String(d.local_user.uid) : ""]
-        .some((h) => h.toLowerCase().includes(q)),
-    );
-  }, [deviceData, deviceSearch]);
-
-  const handleLoadDevices = useCallback(async () => {
-    setIsLoadingDevices(true);
-    try {
-      const res = await api.adminGetEmbyDevices();
-      if (res.success && res.data) {
-        setDeviceData(res.data);
-      } else {
-        toast({ title: t("adminEmby.devLoadFailed"), description: res.message, variant: "destructive" });
-      }
-    } catch (err: any) {
-      toast({ title: t("adminEmby.devLoadFailed"), description: err.message, variant: "destructive" });
-    } finally {
-      setIsLoadingDevices(false);
-    }
-  }, [toast, t]);
 
   // Action loading states
   const [isImporting, setIsImporting] = useState(false);
@@ -824,108 +779,6 @@ export default function AdminEmbyPage() {
             <CardContent>
               <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
                 {t("adminEmby.usersNotAutoLoaded")}
-              </div>
-            </CardContent>
-          )}
-        </Card>
-      </motion.div>
-
-      {/* Emby 设备 / IP 审查 */}
-      <motion.div variants={item}>
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between flex-wrap gap-4">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <MonitorSmartphone className="h-5 w-5" />
-                  {t("adminEmby.devTitle")}
-                </CardTitle>
-                <CardDescription>{t("adminEmby.devDesc")}</CardDescription>
-              </div>
-              <Button variant="outline" onClick={handleLoadDevices} disabled={isLoadingDevices}>
-                {isLoadingDevices ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                {t("adminEmby.devFetch")}
-              </Button>
-            </div>
-          </CardHeader>
-          {deviceData ? (
-            <CardContent className="space-y-3">
-              {!deviceData.emby_configured ? (
-                <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-                  {t("adminEmby.devNotConfigured")}
-                </div>
-              ) : (
-                <>
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <Badge variant="outline" className="text-xs">
-                      {t("adminEmby.devSummary", { total: deviceData.total, online: deviceData.online })}
-                    </Badge>
-                    <Input
-                      className="md:max-w-xs"
-                      placeholder={t("adminEmby.devSearchPlaceholder")}
-                      value={deviceSearch}
-                      onChange={(e) => setDeviceSearch(e.target.value)}
-                    />
-                  </div>
-                  <div className="rounded-lg border overflow-hidden">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead className="bg-muted/50">
-                          <tr>
-                            <th className="text-left p-3 font-medium">{t("adminEmby.devColUser")}</th>
-                            <th className="text-left p-3 font-medium">{t("adminEmby.devColDevice")}</th>
-                            <th className="text-left p-3 font-medium">{t("adminEmby.devColApp")}</th>
-                            <th className="text-left p-3 font-medium">{t("adminEmby.devColIp")}</th>
-                            <th className="text-left p-3 font-medium">{t("adminEmby.devColLastActivity")}</th>
-                            <th className="text-left p-3 font-medium">{t("adminEmby.devColStatus")}</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                          {filteredDevices.map((d) => (
-                            <tr key={d.device_id} className="hover:bg-muted/30">
-                              <td className="p-3">
-                                <div className="font-medium">{d.emby_user_name || "—"}</div>
-                                <div className="text-xs text-muted-foreground">
-                                  {d.local_user ? `${d.local_user.username} (UID ${d.local_user.uid})` : t("adminEmby.devUnlinked")}
-                                </div>
-                              </td>
-                              <td className="p-3">
-                                <div className="font-medium">{d.device_name || "—"}</div>
-                                <div className="text-xs text-muted-foreground font-mono">{d.device_id.slice(0, 12)}…</div>
-                              </td>
-                              <td className="p-3">
-                                <span>{d.app_name || "—"}</span>
-                                {d.app_version && <span className="ml-1 text-xs text-muted-foreground">{d.app_version}</span>}
-                              </td>
-                              <td className="p-3 font-mono">{d.ip || "—"}</td>
-                              <td className="p-3 text-xs text-muted-foreground">
-                                {d.last_activity ? new Date(d.last_activity).toLocaleString() : "—"}
-                              </td>
-                              <td className="p-3">
-                                {d.online ? (
-                                  <Badge variant="default" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20">{t("adminEmby.devOnline")}</Badge>
-                                ) : (
-                                  <Badge variant="secondary">{t("adminEmby.devOffline")}</Badge>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                          {filteredDevices.length === 0 && (
-                            <tr>
-                              <td colSpan={6} className="p-6 text-center text-muted-foreground">{t("adminEmby.devEmpty")}</td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </>
-              )}
-            </CardContent>
-          ) : (
-            <CardContent>
-              <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-                {t("adminEmby.devNotLoaded")}
               </div>
             </CardContent>
           )}

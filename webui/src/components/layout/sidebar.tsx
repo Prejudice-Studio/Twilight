@@ -30,6 +30,8 @@ import {
   Coins,
   ScrollText,
   ShieldAlert,
+  MonitorSmartphone,
+  Mail,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
@@ -74,8 +76,10 @@ export const adminNavItems: SidebarNavItem[] = [
   { href: "/admin/invite", labelKey: "navigation.inviteForest", icon: Network },
   { href: "/admin/requests", labelKey: "navigation.requestReview", icon: Film },
   { href: "/admin/violations", labelKey: "navigation.violations", icon: ShieldAlert },
+  { href: "/admin/email", labelKey: "navigation.emailAdmin", icon: Mail },
   { href: "/admin/telegram-rebind-requests", labelKey: "navigation.telegramRebind", icon: MessageSquare },
   { href: "/admin/emby", labelKey: "navigation.embyAdmin", icon: Server },
+  { href: "/admin/device-audit", labelKey: "navigation.embyDeviceAudit", icon: MonitorSmartphone },
   { href: "/admin/scheduler", labelKey: "navigation.scheduler", icon: TimerReset },
   { href: "/admin/database", labelKey: "navigation.databaseBackup", icon: Database },
   { href: "/admin/config", labelKey: "navigation.configAdmin", icon: FileCode },

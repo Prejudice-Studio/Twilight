@@ -216,7 +216,7 @@
 | POST | `/api/v1/admin/emby/force-set-password` | Admin | 强制设置 Emby 密码（与重置密码同 handler） |
 | POST | `/api/v1/admin/emby/sync` | Admin | 同步 Emby 用户 |
 | GET | `/api/v1/admin/emby/sessions` | Admin | Emby 实时会话（含 `remote_endpoint` IP） |
-| GET | `/api/v1/admin/emby/devices` | Admin | Emby 登录用户设备/IP 审查（`/Devices` 设备清单 + 实时会话 IP，映射本地账号） |
+| GET | `/api/v1/admin/emby/device-audit` | Admin | Emby 登录用户设备/IP 审查（按用户聚合）：`/Devices` 设备清单 + 实时会话 IP（解析掉端口）+ 活动日志历史登录 IP，映射完整本地账号（网页/Emby/Telegram） |
 | GET | `/api/v1/admin/emby/activity` | Admin | Emby 活动记录 |
 | GET | `/api/v1/admin/emby/users` | Admin | Emby 用户列表 |
 | POST | `/api/v1/admin/emby/broadcast` | Admin | Emby 广播消息 |
@@ -249,6 +249,9 @@
 | POST | `/api/v1/admin/users/{uid}/bind-email` | Admin | 强制把用户绑定到指定邮箱（`force` 可跳过名单/占用校验） |
 | POST | `/api/v1/admin/users/{uid}/email/verified` | Admin | 置/撤销用户邮箱验证状态（不改邮箱） |
 | POST | `/api/v1/admin/email/test` | Admin | 用当前 SMTP 配置发送测试邮件 |
+| GET | `/api/v1/admin/email/verifications` | Admin | 邮箱验证记录审查：在用验证码（脱敏，不含验证码/哈希）+ 已绑邮箱账号及验证状态 + 统计 |
+| POST | `/api/v1/admin/email/verifications/cleanup` | Admin | 手动清理所有已过期的在用验证码 |
+| DELETE | `/api/v1/admin/email/verifications/{id}` | Admin | 撤销指定在用验证码记录（立即失效） |
 | POST | `/api/v1/admin/users/kick-no-emby` | Admin | 踢出无 Emby 账号的用户 |
 | GET | `/api/v1/admin/invite/tree` | Admin | 邀请树 |
 | POST | `/api/v1/admin/invite/users/{uid}/detach` | Admin | 将用户脱离邀请关系 |

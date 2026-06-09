@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -350,4 +351,107 @@ func (a *App) handleAdminEmailTest(w http.ResponseWriter, r *http.Request, _ Par
 	}
 	results = append(results, map[string]any{"target": "SMTP 发信", "success": true, "to": maskEmail(to)})
 	ok(w, "测试完成", map[string]any{"results": results})
+}
+
+// emailVerificationDTO 把一条在用验证码记录脱敏成管理员可见的审查 DTO：
+// 永不下发 CodeHash（HMAC 摘要也不外泄），解析关联本地账号用户名，标注是否已过期。
+func (a *App) emailVerificationDTO(v store.EmailVerification, now int64) map[string]any {
+	username := ""
+	if v.UID != 0 {
+		if u, okUser := a.store().User(v.UID); okUser {
+			username = u.Username
+		}
+	}
+	return map[string]any{
+		"id":           v.ID,
+		"purpose":      v.Purpose,
+		"email":        v.Email,
+		"email_masked": maskEmail(v.Email),
+		"uid":          nullableInt(v.UID),
+		"username":     emptyNil(username),
+		"attempts":     v.Attempts,
+		"max_attempts": v.MaxAttempts,
+		"created_at":   v.CreatedAt,
+		"expires_at":   v.ExpiresAt,
+		"last_sent_at": v.LastSentAt,
+		"expired":      v.ExpiresAt > 0 && v.ExpiresAt <= now,
+	}
+}
+
+// handleAdminEmailVerifications 汇总邮箱管理审查数据：在用验证码记录（脱敏）+ 已设置
+// 邮箱的账号清单（含验证状态/时间）+ 统计与 SMTP/强制策略状态。仅 AuthAdmin。
+func (a *App) handleAdminEmailVerifications(w http.ResponseWriter, r *http.Request, _ Params) {
+	cfg := a.cfg()
+	now := time.Now().Unix()
+
+	records := a.store().ListEmailVerifications()
+	// 按最近发码时间倒序，最新的在前；前端可再排序。
+	sort.SliceStable(records, func(i, j int) bool { return records[i].LastSentAt > records[j].LastSentAt })
+	pending := make([]map[string]any, 0, len(records))
+	expiredPending := 0
+	for _, v := range records {
+		if v.ExpiresAt > 0 && v.ExpiresAt <= now {
+			expiredPending++
+		}
+		pending = append(pending, a.emailVerificationDTO(v, now))
+	}
+
+	accounts := []map[string]any{}
+	verified := 0
+	for _, u := range a.store().ListUsers() {
+		if strings.TrimSpace(u.Email) == "" {
+			continue
+		}
+		if u.EmailVerified {
+			verified++
+		}
+		accounts = append(accounts, map[string]any{
+			"uid":               u.UID,
+			"username":          u.Username,
+			"email":             u.Email,
+			"email_verified":    u.EmailVerified,
+			"email_verified_at": zeroNil(u.EmailVerifiedAt),
+			"telegram_id":       nullableInt(u.TelegramID),
+			"telegram_username": emptyNil(u.TelegramUsername),
+			"role":              u.Role,
+			"active":            u.Active,
+		})
+	}
+
+	ok(w, "OK", map[string]any{
+		"smtp_configured": emailConfigured(cfg),
+		"email_enabled":   cfg.EmailEnabled,
+		"force_bind":      cfg.EmailForceBind,
+		"pending":         pending,
+		"accounts":        accounts,
+		"summary": map[string]any{
+			"total_pending":    len(pending),
+			"expired_pending":  expiredPending,
+			"total_with_email": len(accounts),
+			"verified":         verified,
+			"unverified":       len(accounts) - verified,
+		},
+	})
+}
+
+// handleAdminDeleteEmailVerification 撤销一条在用验证码记录（让对应验证码立即失效）。仅 AuthAdmin。
+func (a *App) handleAdminDeleteEmailVerification(w http.ResponseWriter, r *http.Request, params Params) {
+	id := strings.TrimSpace(params["id"])
+	if id == "" {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "缺少验证记录 id")
+		return
+	}
+	if err := a.store().DeleteEmailVerification(id); statusFromError(w, err) {
+		return
+	}
+	ok(w, "已撤销验证记录", map[string]any{"id": id})
+}
+
+// handleAdminCleanupEmailVerifications 手动清理所有已过期的在用验证码（与调度任务同口径）。仅 AuthAdmin。
+func (a *App) handleAdminCleanupEmailVerifications(w http.ResponseWriter, r *http.Request, _ Params) {
+	deleted, err := a.store().CleanupExpiredEmailVerifications(time.Now().Unix())
+	if statusFromError(w, err) {
+		return
+	}
+	ok(w, "已清理过期验证码", map[string]any{"deleted": deleted})
 }

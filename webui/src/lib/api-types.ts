@@ -111,6 +111,54 @@ export interface EmailTestResult {
   to?: string;
 }
 
+// ----- 管理员邮箱管理 / 验证记录审查（对应 /admin/email/verifications） -----
+
+// EmailVerificationRecord 是一条在用验证码记录的脱敏视图：永不含验证码或其哈希。
+export interface EmailVerificationRecord {
+  id: string;
+  purpose: string;
+  email: string;
+  email_masked: string;
+  uid: number | null;
+  username: string | null;
+  attempts: number;
+  max_attempts: number;
+  created_at: number;
+  expires_at: number;
+  last_sent_at: number;
+  expired: boolean;
+}
+
+// EmailAccountRecord 是已设置邮箱的账号及其验证状态。
+export interface EmailAccountRecord {
+  uid: number;
+  username: string;
+  email: string;
+  email_verified: boolean;
+  email_verified_at: number | null;
+  telegram_id: number | null;
+  telegram_username: string | null;
+  role: number;
+  active: boolean;
+}
+
+export interface EmailAdminSummary {
+  total_pending: number;
+  expired_pending: number;
+  total_with_email: number;
+  verified: number;
+  unverified: number;
+}
+
+export interface EmailAdminData {
+  smtp_configured: boolean;
+  email_enabled: boolean;
+  force_bind: boolean;
+  pending: EmailVerificationRecord[];
+  accounts: EmailAccountRecord[];
+  summary: EmailAdminSummary;
+}
+
 export interface BatchUserResult {
   total: number;
   success: number;
@@ -370,6 +418,65 @@ export interface LoginDevice {
   first_seen: number;
   last_seen: number;
   is_trusted: boolean;
+}
+
+// ----- Emby 设备 / IP 审查（按用户聚合，对应 /admin/emby/device-audit） -----
+
+// EmbyAuditDevice 是一台 Emby 设备的审查信息。ip 已在后端解析掉端口（仅当该设备
+// 当前在线、或能从实时会话匹配到时才有值），离线设备的来源 IP 体现在用户级 ips。
+export interface EmbyAuditDevice {
+  device_id: string;
+  device_name: string;
+  app_name: string;
+  app_version: string;
+  last_activity: string;
+  ip: string;
+  online: boolean;
+}
+
+// EmbyAuditLocalUser 是设备审查里携带的完整本地账号信息：网页账号 + Emby 账号 +
+// Telegram 绑定一处呈现，便于核对同一个人的全部身份。
+export interface EmbyAuditLocalUser {
+  uid: number;
+  username: string;
+  email: string | null;
+  email_verified: boolean;
+  telegram_id: number | null;
+  telegram_username: string | null;
+  emby_username: string | null;
+  role: number;
+  active: boolean;
+  expired_at: number;
+  register_time: number;
+  created_at: number;
+  pending_emby: boolean;
+}
+
+export interface EmbyAuditUser {
+  emby_user_id: string;
+  emby_user_name: string;
+  device_count: number;
+  online_count: number;
+  ip_count: number;
+  ips: string[];
+  last_activity: string | null;
+  devices: EmbyAuditDevice[];
+  local_user: EmbyAuditLocalUser | null;
+}
+
+export interface EmbyDeviceAuditSummary {
+  total_users: number;
+  linked_users: number;
+  total_devices: number;
+  online_devices: number;
+  total_ips: number;
+  activity_available: boolean;
+}
+
+export interface EmbyDeviceAuditData {
+  emby_configured: boolean;
+  users: EmbyAuditUser[];
+  summary: EmbyDeviceAuditSummary;
 }
 
 export interface RegisterData {

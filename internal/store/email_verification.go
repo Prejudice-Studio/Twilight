@@ -140,6 +140,18 @@ func (s *Store) ConsumeEmailVerificationAtomic(id, candidateHash string, now int
 	return out, result, nil
 }
 
+// ListEmailVerifications 返回当前所有在用验证码记录的拷贝（含已过期但尚未被调度
+// 清理的），供管理员审查。记录里仍带 CodeHash，api 层负责脱敏后再下发。
+func (s *Store) ListEmailVerifications() []EmailVerification {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]EmailVerification, 0, len(s.state.EmailVerifications))
+	for _, v := range s.state.EmailVerifications {
+		out = append(out, v)
+	}
+	return out
+}
+
 func (s *Store) EmailVerification(id string) (EmailVerification, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

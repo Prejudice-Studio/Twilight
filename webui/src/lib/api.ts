@@ -18,6 +18,7 @@ import type {
   ConfigSchema,
   ConfigSection,
   CreateRegcodeData,
+  EmailAdminData,
   EmailCodeProof,
   EmailCodeSent,
   EmailTestResult,
@@ -28,6 +29,7 @@ import type {
   DatabaseRestoreResult,
   DatabaseStatus,
   EmbyDevice,
+  EmbyDeviceAuditData,
   EmbyInfo,
   EmbyRegisterStatus,
   EmbySession,
@@ -445,6 +447,25 @@ class ApiClient {
     return this.request<UserInfo>(`/admin/users/${uid}/email/verified`, {
       method: "POST",
       body: JSON.stringify(data),
+    });
+  }
+
+  // 管理员：邮箱管理审查——在用验证码记录（脱敏）+ 已绑邮箱账号 + 统计。
+  async adminGetEmailVerifications() {
+    return this.request<EmailAdminData>("/admin/email/verifications");
+  }
+
+  // 管理员：撤销一条在用验证码记录（让该验证码立即失效）。
+  async adminRevokeEmailVerification(id: string) {
+    return this.request<{ id: string }>(`/admin/email/verifications/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  // 管理员：手动清理所有已过期的在用验证码。
+  async adminCleanupEmailVerifications() {
+    return this.request<{ deleted: number }>("/admin/email/verifications/cleanup", {
+      method: "POST",
     });
   }
 
@@ -1250,25 +1271,10 @@ class ApiClient {
     }>("/admin/emby/users");
   }
 
-  // Emby 登录用户的设备 / IP 审查：设备清单（/Devices）+ 实时会话 IP（/Sessions）。
-  async adminGetEmbyDevices() {
-    return this.request<{
-      emby_configured: boolean;
-      total: number;
-      online: number;
-      devices: Array<{
-        device_id: string;
-        device_name: string;
-        app_name: string;
-        app_version: string;
-        emby_user_id: string;
-        emby_user_name: string;
-        last_activity: string;
-        ip: string;
-        online: boolean;
-        local_user: { uid: number; username: string; telegram_id: number | null } | null;
-      }>;
-    }>("/admin/emby/devices");
+  // Emby 登录用户的设备 / IP 审查（按用户聚合）：
+  // /Devices 设备清单 + 实时 /Sessions IP + 活动日志历史登录 IP，映射完整本地账号。
+  async adminGetEmbyDeviceAudit() {
+    return this.request<EmbyDeviceAuditData>("/admin/emby/device-audit");
   }
 
   async cleanupOrphanEmbyIds() {

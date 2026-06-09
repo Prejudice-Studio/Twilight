@@ -979,67 +979,6 @@ func (a *App) handleSessions(w http.ResponseWriter, r *http.Request, _ Params) {
 	ok(w, "OK", items)
 }
 
-// handleAdminEmbyDevices 汇总「Emby 登录用户的设备 / IP 审查」：以 Emby `/Devices`
-// 设备清单（含 LastUser / 最近活跃）为基底，用实时 `/Sessions` 的 RemoteEndPoint
-// 补充当前 IP 与在线状态，并把每台设备的 Emby 用户映射回本地账号。供管理员核查
-// 谁在用什么设备、从什么 IP 登录。仅 AuthAdmin。
-func (a *App) handleAdminEmbyDevices(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.embyConfigured() {
-		ok(w, "OK", map[string]any{"emby_configured": false, "devices": []any{}, "total": 0, "online": 0})
-		return
-	}
-	ctx := r.Context()
-	// 实时会话：DeviceId -> { ip, client }。读取失败不致命，降级为「无在线信息」。
-	var sessions []map[string]any
-	_ = a.embyGet(ctx, "/Sessions", &sessions)
-	live := make(map[string]map[string]string, len(sessions))
-	online := 0
-	for _, s := range sessions {
-		did := asString(s["DeviceId"])
-		if did == "" {
-			continue
-		}
-		live[did] = map[string]string{"ip": asString(s["RemoteEndPoint"]), "client": asString(s["Client"])}
-		online++
-	}
-	// 设备清单（QueryResult: { Items: [...] }）。
-	var devResp struct {
-		Items []map[string]any `json:"Items"`
-	}
-	if err := a.embyGet(ctx, "/Devices", &devResp); err != nil {
-		failWithCode(w, http.StatusBadGateway, ErrEmbyRemoteSessionsFail, "读取 Emby 设备列表失败")
-		return
-	}
-	devices := make([]map[string]any, 0, len(devResp.Items))
-	for _, d := range devResp.Items {
-		deviceID := asString(d["Id"])
-		userID := asString(d["LastUserId"])
-		var localUser any
-		if u, okUser := a.store().FindUserByEmbyID(userID); okUser {
-			localUser = map[string]any{"uid": u.UID, "username": u.Username, "telegram_id": nullableInt(u.TelegramID)}
-		}
-		ip := ""
-		isOnline := false
-		if l, okLive := live[deviceID]; okLive {
-			ip = l["ip"]
-			isOnline = true
-		}
-		devices = append(devices, map[string]any{
-			"device_id":      deviceID,
-			"device_name":    asString(d["Name"]),
-			"app_name":       asString(d["AppName"]),
-			"app_version":    asString(d["AppVersion"]),
-			"emby_user_id":   userID,
-			"emby_user_name": asString(d["LastUserName"]),
-			"last_activity":  asString(d["DateLastActivity"]),
-			"ip":             ip,
-			"online":         isOnline,
-			"local_user":     localUser,
-		})
-	}
-	ok(w, "OK", map[string]any{"emby_configured": true, "devices": devices, "total": len(devices), "online": online})
-}
-
 func (a *App) handleLoginHistory(w http.ResponseWriter, r *http.Request, params Params) {
 	// 路由表把 /security/login-history（AuthUser）和 /security/login-history/:uid
 	// （AuthAdmin）挂到同 handler。原实现完全靠 splitPath + Contains 推断 uid，

@@ -147,7 +147,7 @@ allow_credential = true
 - 该脱敏在 5xx envelope、panic 日志、配置热重载日志、Git 自动更新输出（含 stderr 里可能出现的 `https://user:PAT@host`）等路径上兜底。
 - 不要在自建日志里打印 Token、密码、密钥原文或完整 `Authorization` 头。
 - 建议保留并审计：管理员关键操作日志、登录失败与封禁日志、API Key 调用轨迹。
-- 设备 / IP 审查有两套来源，勿混淆：**Emby 登录用户**的设备与真实登录 IP 来自 Emby API——`GET /api/v1/admin/emby/devices`（`handleAdminEmbyDevices`）以 `/Devices` 设备清单为基底、用实时 `/Sessions` 的 `RemoteEndPoint` 补当前 IP 与在线状态并映射回本地账号，管理后台「Emby 管理 → 设备 / IP 审查」可查（IP 仅在设备当前在线时可得，Emby API 不可靠地暴露历史登录 IP）；**Web 面板自身**的登录设备记录在本地 `store.Device`（含 UA / `LastIP` / 首末时间 / 信任 / 封禁），登录写入走 `UpdateDevice` 读改写以保留信任/封禁标记，`GET /api/v1/security/login-history` 另有按 IP 的登录历史。
+- 设备 / IP 审查有两套来源，勿混淆：**Emby 登录用户**的设备与真实登录 IP 来自 Emby API——`GET /api/v1/admin/emby/device-audit`（`emby_device_audit.go`）按用户聚合：以 `/Devices` 设备清单为基底、用实时 `/Sessions` 的 `RemoteEndPoint`（经 `parseRemoteIP` 剥离端口，覆盖 IPv4/IPv6）补当前 IP 与在线状态，并从 `/System/ActivityLog` 抽取历史登录 IP（离线设备也能审查来源 IP），映射回完整本地账号（网页/Emby/Telegram），独立页「设备 / IP 审查」可归类/排序/搜索；**Web 面板自身**的登录设备记录在本地 `store.Device`（含 UA / `LastIP` / 首末时间 / 信任 / 封禁），登录写入走 `UpdateDevice` 读改写以保留信任/封禁标记，`GET /api/v1/security/login-history` 另有按 IP 的登录历史。
 
 ## 11. 最小权限原则
 
