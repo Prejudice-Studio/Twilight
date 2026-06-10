@@ -16,6 +16,11 @@ import {
   AppWindow,
   LayoutList,
   X,
+  Ban,
+  UserCheck,
+  MonitorX,
+  MonitorCheck,
+  LogOut,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,6 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n, type MessageKey, type MessageParams } from "@/lib/i18n";
 import { api } from "@/lib/api";
@@ -137,6 +143,7 @@ function deviceMatchesCategory(
 export default function AdminDeviceAuditPage() {
   const { t, locale } = useI18n();
   const { toast } = useToast();
+  const { confirmAction } = useConfirm();
 
   const [data, setData] = useState<EmbyDeviceAuditData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -180,6 +187,75 @@ export default function AdminDeviceAuditPage() {
       return next;
     });
   }, []);
+
+  // 审查页快速处置：禁用/启用 Web、禁用/启用 Emby、踢出会话。统一走确认弹窗 + 成功后
+  // 重载审查数据。Emby 启停按 emby_user_id 下发，后端对已关联本地用户会复用保护/有效期
+  // 约束并同步镜像；未关联也可直接处置可疑账号。
+  const runAuditAction = useCallback(
+    async (
+      title: string,
+      name: string,
+      fn: () => Promise<{ success: boolean; message?: string }>,
+    ) => {
+      const confirmed = await confirmAction({
+        title,
+        description: t("deviceAudit.actionConfirm", { name }),
+        tone: "warning",
+        confirmLabel: title,
+      });
+      if (!confirmed) return;
+      try {
+        const res = await fn();
+        if (res.success) {
+          toast({ title: t("deviceAudit.actionSuccess"), variant: "success" });
+          await reload();
+        } else {
+          toast({ title: t("deviceAudit.actionFailed"), description: res.message, variant: "destructive" });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        toast({ title: t("deviceAudit.actionFailed"), description: message, variant: "destructive" });
+      }
+    },
+    [confirmAction, t, toast, reload],
+  );
+
+  const auditName = useCallback(
+    (u: EmbyAuditUser) => u.emby_user_name || u.local_user?.username || t("deviceAudit.unknownUser"),
+    [t],
+  );
+
+  const onWebToggle = useCallback(
+    (u: EmbyAuditUser, enable: boolean) => {
+      if (!u.local_user) return;
+      void runAuditAction(
+        enable ? t("deviceAudit.actionEnableWeb") : t("deviceAudit.actionDisableWeb"),
+        auditName(u),
+        () => api.toggleUserActive(u.local_user!.uid, { enable }),
+      );
+    },
+    [runAuditAction, auditName, t],
+  );
+
+  const onEmbyToggle = useCallback(
+    (u: EmbyAuditUser, enable: boolean) => {
+      void runAuditAction(
+        enable ? t("deviceAudit.actionEnableEmby") : t("deviceAudit.actionDisableEmby"),
+        auditName(u),
+        () => api.setEmbyUserEnabledById(u.emby_user_id, enable),
+      );
+    },
+    [runAuditAction, auditName, t],
+  );
+
+  const onKick = useCallback(
+    (u: EmbyAuditUser) => {
+      void runAuditAction(t("deviceAudit.actionKick"), auditName(u), () =>
+        api.kickEmbyUserById(u.emby_user_id),
+      );
+    },
+    [runAuditAction, auditName, t],
+  );
 
   const summary = data?.summary;
   const embyConfigured = data?.emby_configured ?? true;
@@ -494,6 +570,9 @@ export default function AdminDeviceAuditPage() {
               clientLabel={clientFilterLabel}
               open={expanded.has(userKey(u, index))}
               onToggle={() => toggleExpand(userKey(u, index))}
+              onWebToggle={onWebToggle}
+              onEmbyToggle={onEmbyToggle}
+              onKick={onKick}
               t={t}
               locale={locale}
             />
@@ -515,6 +594,9 @@ function UserAuditCard({
   clientLabel,
   open,
   onToggle,
+  onWebToggle,
+  onEmbyToggle,
+  onKick,
   t,
   locale,
 }: {
@@ -524,6 +606,9 @@ function UserAuditCard({
   clientLabel: string;
   open: boolean;
   onToggle: () => void;
+  onWebToggle: (u: EmbyAuditUser, enable: boolean) => void;
+  onEmbyToggle: (u: EmbyAuditUser, enable: boolean) => void;
+  onKick: (u: EmbyAuditUser) => void;
   t: TFunc;
   locale: string;
 }) {
@@ -593,6 +678,42 @@ function UserAuditCard({
 
       {open && (
         <div className="space-y-4 border-t bg-muted/20 p-4">
+          {/* 快速处置：禁用/启用 Web（仅已关联本地账号）、禁用/启用 Emby、踢出会话 */}
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-dashed bg-background p-2.5">
+            <span className="mr-1 text-xs font-medium text-muted-foreground">
+              {t("deviceAudit.quickActions")}
+            </span>
+            {u.local_user &&
+              (u.local_user.active ? (
+                <Button size="sm" variant="outline" className="h-7" onClick={() => onWebToggle(u, false)}>
+                  <Ban className="mr-1.5 h-3.5 w-3.5" />
+                  {t("deviceAudit.actionDisableWeb")}
+                </Button>
+              ) : (
+                <Button size="sm" variant="outline" className="h-7" onClick={() => onWebToggle(u, true)}>
+                  <UserCheck className="mr-1.5 h-3.5 w-3.5" />
+                  {t("deviceAudit.actionEnableWeb")}
+                </Button>
+              ))}
+            <Button size="sm" variant="outline" className="h-7" onClick={() => onEmbyToggle(u, false)}>
+              <MonitorX className="mr-1.5 h-3.5 w-3.5" />
+              {t("deviceAudit.actionDisableEmby")}
+            </Button>
+            <Button size="sm" variant="outline" className="h-7" onClick={() => onEmbyToggle(u, true)}>
+              <MonitorCheck className="mr-1.5 h-3.5 w-3.5" />
+              {t("deviceAudit.actionEnableEmby")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7"
+              onClick={() => onKick(u)}
+              disabled={u.online_count === 0}
+            >
+              <LogOut className="mr-1.5 h-3.5 w-3.5" />
+              {t("deviceAudit.actionKick")}
+            </Button>
+          </div>
           <div className="grid gap-4 md:grid-cols-3">
             <AccountPanel title={t("deviceAudit.webAccount")}>
               {u.local_user ? (

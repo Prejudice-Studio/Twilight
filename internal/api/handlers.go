@@ -310,7 +310,7 @@ func (a *App) handleBindEmby(w http.ResponseWriter, r *http.Request, _ Params) {
 	if statusFromError(w, err) {
 		return
 	}
-	_ = a.embySetUserEnabled(r.Context(), u.EmbyID, a.embyShouldEnableUser(u))
+	_ = a.embyApplyEnabledState(r.Context(), u.UID, u.EmbyID, a.embyShouldEnableUser(u))
 	ok(w, "Emby account linked", map[string]any{"emby_id": u.EmbyID, "emby_username": u.EmbyUsername, "user": publicUser(u)})
 }
 func (a *App) handleRegisterEmby(w http.ResponseWriter, r *http.Request, params Params) {
@@ -389,7 +389,7 @@ func (a *App) handleRegisterEmby(w http.ResponseWriter, r *http.Request, params 
 		_ = a.embyDelete(r.Context(), "/Users/"+urlPathEscape(embyID))
 		return
 	}
-	_ = a.embySetUserEnabled(r.Context(), u.EmbyID, a.embyShouldEnableUser(u))
+	_ = a.embyApplyEnabledState(r.Context(), u.UID, u.EmbyID, a.embyShouldEnableUser(u))
 	ok(w, "Emby account created", map[string]any{"user": publicUser(u), "emby_id": u.EmbyID, "emby_username": u.EmbyUsername, "request_id": ""})
 }
 
@@ -2028,7 +2028,7 @@ func (a *App) handleAdminToggleEmby(w http.ResponseWriter, r *http.Request, para
 		failWithCode(w, http.StatusConflict, ErrConflict, "Web 账号已禁用或已过期，禁止绕过有效期直接启用 Emby")
 		return
 	}
-	if err := a.embySetUserEnabled(r.Context(), target.EmbyID, enable); err != nil {
+	if err := a.embyApplyEnabledState(r.Context(), target.UID, target.EmbyID, enable); err != nil {
 		failWithCode(w, http.StatusBadGateway, ErrEmbyDisableFailed, "Emby 状态更新失败")
 		return
 	}
@@ -2260,22 +2260,7 @@ func (a *App) handleKickUser(w http.ResponseWriter, r *http.Request, params Para
 	if !okUser {
 		return
 	}
-	kicked := 0
-	if a.cfg().EmbyURL != "" && u.EmbyID != "" {
-		var sessions []map[string]any
-		if err := a.embyGet(r.Context(), "/Sessions", &sessions); err == nil {
-			for _, session := range sessions {
-				if asString(session["UserId"]) == u.EmbyID {
-					if sid := asString(session["Id"]); sid != "" {
-						var ignored map[string]any
-						if err := a.embyPost(r.Context(), "/Sessions/"+urlPathEscape(sid)+"/Logout", nil, &ignored); err == nil {
-							kicked++
-						}
-					}
-				}
-			}
-		}
-	}
+	kicked := a.kickEmbySessions(r.Context(), u.EmbyID)
 	ok(w, "会话踢出完成", map[string]any{"kicked_count": kicked})
 }
 
@@ -2568,7 +2553,7 @@ func (a *App) handleAdminBindEmby(w http.ResponseWriter, r *http.Request, params
 	if statusFromError(w, updateErr) {
 		return
 	}
-	_ = a.embySetUserEnabled(r.Context(), updatedUser.EmbyID, a.embyShouldEnableUser(updatedUser))
+	_ = a.embyApplyEnabledState(r.Context(), updatedUser.UID, updatedUser.EmbyID, a.embyShouldEnableUser(updatedUser))
 	previousUID := any(nil)
 	if displacedUID != 0 {
 		previousUID = displacedUID

@@ -216,8 +216,13 @@ func TestAdminToggleEmbyOnly(t *testing.T) {
 	if lastDisabled == nil || !*lastDisabled {
 		t.Fatal("expected Emby IsDisabled=true")
 	}
-	if updated, _ := app.store().User(user.UID); !updated.Active {
+	updated, _ := app.store().User(user.UID)
+	if !updated.Active {
 		t.Fatal("web account should remain active after Emby-only disable")
+	}
+	// 本地镜像必须反映「Emby 已被单独禁用」，让用户列表无需查远端即可展示。
+	if !updated.EmbyDisabled {
+		t.Fatal("EmbyDisabled mirror should be true after Emby-only disable")
 	}
 }
 

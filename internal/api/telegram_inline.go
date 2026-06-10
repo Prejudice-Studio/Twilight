@@ -358,7 +358,7 @@ func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelC
 			a.telegramEditPanelWithNotice(ctx, panel, target, "Web 账号已禁用或已过期，禁止绕过有效期直接启用 Emby。")
 			return
 		}
-		if err := a.embySetUserEnabled(ctx, target.EmbyID, enableEmby); err != nil {
+		if err := a.embyApplyEnabledState(ctx, target.UID, target.EmbyID, enableEmby); err != nil {
 			a.telegramEditPanelWithNotice(ctx, panel, target, "Emby 状态更新失败: "+telegramPanelSafeError(err))
 			return
 		}

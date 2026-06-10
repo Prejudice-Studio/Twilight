@@ -347,6 +347,31 @@ func (a *App) embySetUserEnabled(ctx context.Context, userID string, enabled boo
 	})
 }
 
+// embyApplyEnabledState 启停 Emby 后把状态镜像回本地 EmbyDisabled，让用户列表无需逐行
+// 查 Emby 即可展示真实的 Emby 启停。uid 已知时走 O(1) 的 UpdateUser，刻意不用按 EmbyID
+// 的线性扫描，避免在批量/调度场景退化成 O(n^2)。远端失败时不写镜像（保持旧值）。
+func (a *App) embyApplyEnabledState(ctx context.Context, uid int64, embyID string, enabled bool) error {
+	if err := a.embySetUserEnabled(ctx, embyID, enabled); err != nil {
+		return err
+	}
+	a.mirrorEmbyDisabled(uid, !enabled)
+	return nil
+}
+
+// mirrorEmbyDisabled 仅在值变化时回写 EmbyDisabled，避免无谓写盘。
+func (a *App) mirrorEmbyDisabled(uid int64, disabled bool) {
+	if uid == 0 {
+		return
+	}
+	if cur, ok := a.store().User(uid); ok && cur.EmbyDisabled == disabled {
+		return
+	}
+	_, _ = a.store().UpdateUser(uid, func(u *store.User) error {
+		u.EmbyDisabled = disabled
+		return nil
+	})
+}
+
 func (a *App) disableRemoteEmbyForWebState(ctx context.Context, u store.User) (bool, error) {
 	if strings.TrimSpace(u.EmbyID) == "" || !embyShouldDisableForWebState(u) || strings.TrimSpace(a.cfg().EmbyURL) == "" {
 		return false, nil
@@ -354,6 +379,7 @@ func (a *App) disableRemoteEmbyForWebState(ctx context.Context, u store.User) (b
 	if err := a.embySetUserEnabled(ctx, u.EmbyID, false); err != nil {
 		return false, err
 	}
+	a.mirrorEmbyDisabled(u.UID, true)
 	return true, nil
 }
 

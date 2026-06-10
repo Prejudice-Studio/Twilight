@@ -94,10 +94,11 @@ export function renderWebStatusBadge(user: UserInfo) {
 }
 
 /**
- * Emby 账号状态单元格：独立于 Web 账号状态，按绑定 / 待开通 / 启用 / 到期禁用区分。
+ * Emby 账号状态单元格：独立于 Web 账号状态，按绑定 / 待开通 / 启用 / 禁用区分。
  * - pending_emby → 待开通（系统账号已建，等首次登录补建 Emby）
  * - 无 emby_id → 未绑定
  * - emby_disabled_by_expiry → 已禁用（到期）
+ * - emby_disabled → 已禁用（管理员单独禁用，Web 仍正常）
  * - 其余已绑定 → 已启用，并展示绑定的 Emby 用户名
  */
 export function renderEmbyStatusCell(user: UserInfo) {
@@ -116,11 +117,16 @@ export function renderEmbyStatusCell(user: UserInfo) {
     );
   }
   const disabledByExpiry = Boolean(user.emby_disabled_by_expiry);
+  const manuallyDisabled = Boolean(user.emby_disabled);
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
       {disabledByExpiry ? (
         <Badge variant="destructive" className="w-fit text-[10px]">
           已禁用（到期）
+        </Badge>
+      ) : manuallyDisabled ? (
+        <Badge variant="destructive" className="w-fit text-[10px]">
+          已禁用
         </Badge>
       ) : (
         <Badge variant="success" className="w-fit text-[10px]">
@@ -155,7 +161,7 @@ export interface UserActionsMenuHandlers {
   onBindEmail: (user: UserInfo) => void;
   onBindTelegram: (user: UserInfo) => void;
   onSyncBindings: (user: UserInfo) => void;
-  onRefreshStatus: (user: UserInfo) => void;
+  onRefreshStatus: (user: UserInfo, scope: "telegram" | "emby") => void;
   onForceUnbind: (user: UserInfo) => void;
   onClearRegistrationQueue: (user: UserInfo) => void;
   onGrantRegistrationEntitlement: (user: UserInfo) => void;
@@ -235,9 +241,13 @@ export function UserActionsMenu({
           <RefreshCw className="mr-2 h-4 w-4" />
           {t("adminUsers.menuSyncBindings")}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => handlers.onRefreshStatus(user)}>
+        <DropdownMenuItem onClick={() => handlers.onRefreshStatus(user, "telegram")}>
           <RefreshCcw className="mr-2 h-4 w-4" />
-          {t("adminUsers.menuRefreshStatus")}
+          {t("adminUsers.menuRefreshTelegram")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => handlers.onRefreshStatus(user, "emby")}>
+          <RefreshCcw className="mr-2 h-4 w-4" />
+          {t("adminUsers.menuRefreshEmby")}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => handlers.onForceUnbind(user)}>
           <Unlink className="mr-2 h-4 w-4" />

@@ -291,7 +291,7 @@ func (a *App) handleBatchToggleEmby(w http.ResponseWriter, r *http.Request, enab
 			addBatchOutcomeWithCode(result, uid, ErrConflict, fmt.Errorf("web account disabled or expired; refusing to enable Emby"))
 			continue
 		}
-		addBatchOutcome(result, uid, a.embySetUserEnabled(r.Context(), target.EmbyID, enable))
+		addBatchOutcome(result, uid, a.embyApplyEnabledState(r.Context(), uid, target.EmbyID, enable))
 	}
 	result["selected_all"] = boolValue(payload, "select_all", false)
 	result["emby_enabled"] = enable
@@ -300,13 +300,14 @@ func (a *App) handleBatchToggleEmby(w http.ResponseWriter, r *http.Request, enab
 }
 
 // handleBatchRefreshStatus 批量强制刷新外部状态（Telegram 用户名 + Emby 启停核对），
-// 是 handleAdminRefreshUserStatus 的批量版。属于非破坏性核对/收紧，不要求确认短语；
-// 但每个用户都会触发 getChat + Emby 读取（可能再加一次关停），为避免对 Telegram /
-// Emby 造成流量放大，目标上限收得比其它批量操作更紧（显式 200 / select_all 200），
-// 超出请缩小筛选范围分批执行。
+// 是 handleAdminRefreshUserStatus 的批量版。属于非破坏性核对/收紧，不要求确认短语。
+// 按需求不限制目标数量（maxExplicit / maxSelectedAll 传 0 即不设上限），对所选用户全量
+// 处理。注意：每个用户都会顺序触发 getChat + Emby 读取（可能再加一次关停），目标极大时
+// 整体耗时较长并可能触达 Telegram 限流——单侧外部失败会降级记录、不阻断整体。
 func (a *App) handleBatchRefreshStatus(w http.ResponseWriter, r *http.Request, _ Params) {
 	payload := decodeMap(r)
-	uids, okPayload := a.batchUserUIDsFromPayload(w, payload, 200, 200, "too many users in one batch; narrow the filter and refresh in smaller batches")
+	scope := normalizeRefreshScope(stringValue(payload, "scope"))
+	uids, okPayload := a.batchUserUIDsFromPayload(w, payload, 0, 0, "too many users in one batch")
 	if !okPayload {
 		return
 	}
@@ -318,7 +319,7 @@ func (a *App) handleBatchRefreshStatus(w http.ResponseWriter, r *http.Request, _
 			addBatchOutcomeWithCode(result, uid, ErrUserNotFound, fmt.Errorf("%s", userNotFoundMessage))
 			continue
 		}
-		summary := a.refreshUserExternalStatus(r.Context(), target)
+		summary := a.refreshUserExternalStatus(r.Context(), target, scope)
 		if boolish(summary["telegram_username_updated"]) {
 			tgUpdated++
 		}

@@ -836,7 +836,8 @@ class ApiClient {
   // 强制从 Telegram / Emby 拉取单个用户的当前状态并回写：刷新 telegram_username、
   // emby_username，并把「Web 已禁用/过期但 Emby 仍启用」的越权漂移关停。返回刷新后的
   // 用户对象（UserInfo 同口径）+ refresh 同步差异摘要。
-  async refreshUserStatus(uid: number) {
+  // scope: telegram 仅刷新 TG 用户名、emby 仅核对 Emby、both 两者都刷（默认）。
+  async refreshUserStatus(uid: number, scope: "telegram" | "emby" | "both" = "both") {
     return this.request<
       UserInfo & {
         refresh?: {
@@ -853,7 +854,7 @@ class ApiClient {
           emby_error?: string;
         };
       }
-    >(`/admin/users/${uid}/refresh-status`, { method: "POST" });
+    >(`/admin/users/${uid}/refresh-status`, { method: "POST", body: JSON.stringify({ scope }) });
   }
 
   async adminCreateStandaloneEmby(payload: { username: string; password: string; email?: string }) {
@@ -909,13 +910,13 @@ class ApiClient {
     );
   }
 
-  // 批量强制刷新外部状态（Telegram 用户名 + Emby 启停核对）。非破坏性、无需确认短语。
-  async batchRefreshStatus(selection: number[] | BatchUserSelection) {
+  // 批量强制刷新外部状态。scope 控制只刷 TG / 只刷 Emby / 两者。非破坏性、无需确认短语。
+  async batchRefreshStatus(selection: number[] | BatchUserSelection, scope: "telegram" | "emby" | "both" = "both") {
     return this.request<BatchUserResult & { telegram_updated?: number; emby_disabled?: number }>(
       `/batch/users/refresh-status`,
       {
         method: "POST",
-        body: JSON.stringify(this.batchUserSelectionBody(selection)),
+        body: JSON.stringify({ ...this.batchUserSelectionBody(selection), scope }),
       },
       { timeoutMs: 600_000 },
     );
@@ -1334,6 +1335,23 @@ class ApiClient {
   // /Devices 设备清单 + 实时 /Sessions IP + 活动日志历史登录 IP，映射完整本地账号。
   async adminGetEmbyDeviceAudit() {
     return this.request<EmbyDeviceAuditData>("/admin/emby/device-audit");
+  }
+
+  // 设备/IP 审查页的快速处置：按 Emby 用户 ID 单独启停 Emby（已关联本地用户时后端会
+  // 沿用本地保护/有效期约束并同步镜像；未关联也可直接处置可疑 Emby 账号）。
+  async setEmbyUserEnabledById(embyId: string, enable: boolean) {
+    return this.request<{ emby_user_id: string; emby_enabled: boolean }>(
+      `/admin/emby/users/${encodeURIComponent(embyId)}/${enable ? "enable" : "disable"}`,
+      { method: "POST" },
+    );
+  }
+
+  // 按 Emby 用户 ID 踢出其全部在线会话。
+  async kickEmbyUserById(embyId: string) {
+    return this.request<{ emby_user_id: string; kicked_count: number }>(
+      `/admin/emby/users/${encodeURIComponent(embyId)}/kick`,
+      { method: "POST" },
+    );
   }
 
   async cleanupOrphanEmbyIds() {

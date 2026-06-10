@@ -17,7 +17,8 @@ func (a *App) handleAdminRefreshUserStatus(w http.ResponseWriter, r *http.Reques
 	if !okUser {
 		return
 	}
-	refresh := a.refreshUserExternalStatus(r.Context(), u)
+	scope := normalizeRefreshScope(stringValue(decodeMap(r), "scope"))
+	refresh := a.refreshUserExternalStatus(r.Context(), u, scope)
 	// 刷新过程中可能写入了 TelegramUsername / EmbyUsername / Emby 启停，重新读取最新值
 	// 让响应与列表展示一致。
 	if latest, found := a.store().User(u.UID); found {
@@ -28,6 +29,19 @@ func (a *App) handleAdminRefreshUserStatus(w http.ResponseWriter, r *http.Reques
 	ok(w, "用户状态已刷新", data)
 }
 
+// normalizeRefreshScope 归一化刷新范围：telegram 仅刷新 TG 用户名、emby 仅核对 Emby
+// 状态、其余（含空）默认 both 两者都刷。让 TG 同步与 Emby 同步可以分开触发。
+func normalizeRefreshScope(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "telegram", "tg":
+		return "telegram"
+	case "emby":
+		return "emby"
+	default:
+		return "both"
+	}
+}
+
 // refreshUserExternalStatus 主动核对并回写用户在 Telegram 与 Emby 的当前状态：
 //   - Telegram：用 getChat 拉最新 @username（被动刷新只在用户给 Bot 发消息时触发，
 //     这里给管理员一个强制拉取入口）；取不到用户名时保留旧值不清空，避免破坏指名码匹配。
@@ -36,12 +50,16 @@ func (a *App) handleAdminRefreshUserStatus(w http.ResponseWriter, r *http.Reques
 //
 // 任一外部系统失败都降级为结果字段（telegram_error / emby_error，已脱敏），不阻断另一侧、
 // 也不阻断整体响应。返回的 map 直接挂到响应的 refresh 字段，供前端提示同步差异。
-func (a *App) refreshUserExternalStatus(ctx context.Context, u store.User) map[string]any {
+func (a *App) refreshUserExternalStatus(ctx context.Context, u store.User, scope string) map[string]any {
 	out := map[string]any{}
-	a.refreshTelegramUsernameForUser(ctx, u, out)
+	if scope != "emby" {
+		a.refreshTelegramUsernameForUser(ctx, u, out)
+	}
 	// Emby 段可能在 Telegram 段之后写过库，但两段写的是不同字段（用户名互不影响 Emby
 	// 判定），用入参 u 的副本即可；Emby 自身的判定只依赖 Active / ExpiredAt / EmbyID。
-	a.refreshEmbyStatusForUser(ctx, u, out)
+	if scope != "telegram" {
+		a.refreshEmbyStatusForUser(ctx, u, out)
+	}
 	return out
 }
 
@@ -108,6 +126,8 @@ func (a *App) refreshEmbyStatusForUser(ctx context.Context, u store.User, out ma
 		remoteDisabled = boolish(policy["IsDisabled"])
 	}
 	out["emby_remote_disabled"] = remoteDisabled
+	// 刷新即「以远端为准」校正本地 EmbyDisabled 镜像，修掉任何历史漂移，让列表展示真值。
+	a.mirrorEmbyDisabled(u.UID, remoteDisabled)
 	// 只收紧：Web 账号已禁用或已过期、而 Emby 仍处于启用态时强制关停，消除越权窗口。
 	if embyShouldDisableForWebState(u) && !remoteDisabled {
 		if changed, err := a.disableRemoteEmbyForWebState(ctx, u); err != nil {

@@ -972,12 +972,11 @@ export default function AdminUsersPage() {
     }
   };
 
-  // 强制刷新单个用户的外部状态：主动从 Telegram 拉取最新用户名、从 Emby 核对账号
-  // 启停并回写本地。区别于"同步绑定"（全量清理重复/失效绑定），这里只针对一个用户、
-  // 不做破坏性清理，用于管理员核对单人时拿到实时的 TG 用户名与 Emby 状态。
-  const handleRefreshStatus = async (user: UserInfo) => {
+  // 强制刷新单个用户的外部状态：scope=telegram 仅拉取最新 TG 用户名、scope=emby 仅核对
+  // Emby 启停。TG 同步与 Emby 同步分开触发，便于管理员只刷需要的那一侧。
+  const handleRefreshStatus = async (user: UserInfo, scope: "telegram" | "emby") => {
     try {
-      const res = await api.refreshUserStatus(user.uid);
+      const res = await api.refreshUserStatus(user.uid, scope);
       if (res.success && res.data) {
         const r = res.data.refresh ?? {};
         const notes: string[] = [];
@@ -1276,23 +1275,29 @@ export default function AdminUsersPage() {
     }
   };
 
-  // 批量强制刷新外部状态（TG 用户名 + Emby 启停核对）。后端单次上限 200，避免外发放大。
-  const handleSelectedRefreshStatus = async () => {
+  // 批量强制刷新外部状态。scope 分开触发：telegram 仅刷 TG 用户名、emby 仅核对 Emby 启停。
+  // 不限制数量，对所选全部用户处理；顺序外发，目标较多时耗时较长。
+  const handleSelectedRefreshStatus = async (scope: "telegram" | "emby") => {
     if (selectedCount === 0) return;
+    const label = scope === "telegram" ? "Telegram 用户名" : "Emby 启停状态";
     const confirmed = await confirmAction({
-      title: "批量刷新外部状态？",
-      description: `将对 ${selectedCount} 个已选用户从 Telegram 拉取最新用户名、核对 Emby 启停（单次最多 200 个）。这会对外发起请求，请耐心等待。`,
+      title: scope === "telegram" ? "批量刷新 Telegram 用户名？" : "批量刷新 Emby 状态？",
+      description: `将对 ${selectedCount} 个已选用户刷新${label}。这会对外发起请求，目标较多时耗时较长，请耐心等待。`,
       tone: "warning",
       confirmLabel: "开始刷新",
     });
     if (!confirmed) return;
     setBatchUserLoading(true);
     try {
-      const res = await api.batchRefreshStatus(selectedBatchTarget());
+      const res = await api.batchRefreshStatus(selectedBatchTarget(), scope);
       if (res.success && res.data) {
+        const parts = [`处理 ${res.data.success} 个`];
+        if (scope !== "emby") parts.push(`TG 更新 ${res.data.telegram_updated ?? 0}`);
+        if (scope !== "telegram") parts.push(`Emby 关停 ${res.data.emby_disabled ?? 0}`);
+        parts.push(`失败 ${res.data.failed} 个`);
         toast({
           title: "批量刷新完成",
-          description: `处理 ${res.data.success} 个，TG 更新 ${res.data.telegram_updated ?? 0}，Emby 关停 ${res.data.emby_disabled ?? 0}，失败 ${res.data.failed} 个`,
+          description: parts.join("，"),
           variant: res.data.failed ? "default" : "success",
         });
         await refreshAfterBatch();
@@ -2237,10 +2242,17 @@ export default function AdminUsersPage() {
                   禁用
                 </Button>
               </div>
-              <Button variant="outline" size="sm" onClick={() => void handleSelectedRefreshStatus()} disabled={batchUserLoading || selectedCount === 0}>
-                <RefreshCcw className="mr-2 h-4 w-4" />
-                刷新状态
-              </Button>
+              <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/20 p-1">
+                <span className="px-2 text-xs text-muted-foreground">刷新</span>
+                <Button variant="outline" size="sm" onClick={() => void handleSelectedRefreshStatus("telegram")} disabled={batchUserLoading || selectedCount === 0}>
+                  <RefreshCcw className="mr-2 h-4 w-4" />
+                  TG 用户名
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => void handleSelectedRefreshStatus("emby")} disabled={batchUserLoading || selectedCount === 0}>
+                  <RefreshCcw className="mr-2 h-4 w-4" />
+                  Emby 状态
+                </Button>
+              </div>
               <Button variant="outline" size="sm" onClick={() => void handleSelectedLockEmbyUnbind()} disabled={batchUserLoading || selectedCount === 0}>
                 <LockKeyhole className="mr-2 h-4 w-4" />
                 禁止解绑 Emby

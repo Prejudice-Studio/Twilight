@@ -890,7 +890,7 @@ func (a *App) recordViolation(ctx context.Context, user store.User, code, codeTy
 		}
 	case "disable_emby":
 		if user.EmbyID != "" {
-			_ = a.embySetUserEnabled(context.WithoutCancel(ctx), user.EmbyID, false)
+			_ = a.embyApplyEnabledState(context.WithoutCancel(ctx), user.UID, user.EmbyID, false)
 		}
 	}
 }
