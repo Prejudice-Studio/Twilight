@@ -2,6 +2,8 @@
 Description=Twilight Go API
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=exec
@@ -19,8 +21,6 @@ MemoryHigh=768M
 
 Restart=always
 RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=5
 
 TimeoutStopSec=30
 KillMode=mixed

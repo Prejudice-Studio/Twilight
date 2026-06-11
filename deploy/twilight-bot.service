@@ -3,6 +3,8 @@ Description=Twilight Go Telegram Bot Bridge
 After=network-online.target twilight.service
 Wants=network-online.target
 PartOf=twilight.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=exec
@@ -19,8 +21,6 @@ MemoryHigh=384M
 
 Restart=always
 RestartSec=10
-StartLimitIntervalSec=300
-StartLimitBurst=5
 
 TimeoutStopSec=15
 KillMode=mixed

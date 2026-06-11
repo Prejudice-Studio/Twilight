@@ -221,6 +221,8 @@ write_api_unit() {
 Description=Twilight Go API
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=exec
@@ -237,8 +239,6 @@ MemoryHigh=768M
 
 Restart=always
 RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=5
 
 TimeoutStopSec=30
 KillMode=mixed
@@ -265,6 +265,8 @@ Description=$description
 After=network-online.target twilight.service
 Wants=network-online.target
 PartOf=twilight.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=exec
@@ -280,8 +282,6 @@ MemoryHigh=384M
 
 Restart=always
 RestartSec=10
-StartLimitIntervalSec=300
-StartLimitBurst=5
 
 TimeoutStopSec=$timeout
 KillMode=mixed
@@ -314,7 +314,7 @@ if grep -qP 'driver\s*=\s*"?(json|)(\s|$)' "$PROJECT_ROOT/config.toml" 2>/dev/nu
   echo ">>> Detected JSON backend (single-process). Only enabling twilight.service (all mode)."
   echo "    twilight-bot and twilight-scheduler will NOT be enabled."
   echo "    Use 'database.driver = \"postgres\"' for multi-process deployment."
-  sed -i 's/^ExecStart=.*$/ExecStart='"$BIN_PATH"' all --host '"$API_HOST"' --port '"$API_PORT"' --config '"$CONFIG_PATH"'/' "$UNIT_DIR/twilight.service"
+  sed -i 's/^ExecStart=.*$/ExecStart='"$BIN_PATH"' all --host '"$API_HOST"' --port '"$API_PORT"' --config config.toml/' "$UNIT_DIR/twilight.service"
   systemctl enable twilight.service
   systemctl restart twilight.service || systemctl start twilight.service
 else
