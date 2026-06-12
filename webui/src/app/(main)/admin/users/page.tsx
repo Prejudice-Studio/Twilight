@@ -118,6 +118,7 @@ export default function AdminUsersPage() {
   const [roleFilter, setRoleFilter] = useState<string>("all"); // "all" | "0" | "1" | "2"
   const [activeFilter, setActiveFilter] = useState<string>("all"); // "all" | "true" | "false"
   const [embyFilter, setEmbyFilter] = useState<string>("all"); // "all" | "bound" | "unbound"
+  const [embyStatusFilter, setEmbyStatusFilter] = useState<string>("all"); // "all" | "active" | "disabled"
   const [emailStatusFilter, setEmailStatusFilter] = useState<string>("all"); // "all" | "verified" | "unverified" | "bound" | "none"
   const [sortBy, setSortBy] = useState<string>("uid_asc");
   const [expandedUserIds, setExpandedUserIds] = useState<Set<number>>(new Set());
@@ -282,7 +283,7 @@ export default function AdminUsersPage() {
   };
 
   const loadUsersResource = useCallback(async (signal?: AbortSignal) => {
-    const listState = { page, perPage, search, roleFilter, activeFilter, embyFilter, emailStatusFilter, sortBy };
+    const listState = { page, perPage, search, roleFilter, activeFilter, embyFilter, embyStatusFilter, emailStatusFilter, sortBy };
     const cacheKey = buildUsersCacheKey(listState);
     const cached = usersCacheRef.current.get(cacheKey);
     if (cached) {
@@ -304,7 +305,7 @@ export default function AdminUsersPage() {
       });
     }
     return true;
-  }, [page, perPage, search, roleFilter, activeFilter, embyFilter, emailStatusFilter, sortBy]);
+  }, [page, perPage, search, roleFilter, activeFilter, embyFilter, embyStatusFilter, emailStatusFilter, sortBy]);
 
   const {
     isLoading,
@@ -338,8 +339,8 @@ export default function AdminUsersPage() {
     [selectedUsers],
   );
   const currentListState = useMemo(
-    () => ({ page, perPage, search, roleFilter, activeFilter, embyFilter, emailStatusFilter, sortBy }),
-    [page, perPage, search, roleFilter, activeFilter, embyFilter, emailStatusFilter, sortBy],
+    () => ({ page, perPage, search, roleFilter, activeFilter, embyFilter, embyStatusFilter, emailStatusFilter, sortBy }),
+    [page, perPage, search, roleFilter, activeFilter, embyFilter, embyStatusFilter, emailStatusFilter, sortBy],
   );
 
   const isUserSelected = (user: UserInfo) =>
@@ -528,12 +529,12 @@ export default function AdminUsersPage() {
     setExpandedUserIds(new Set());
     void loadUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roleFilter, activeFilter, embyFilter, emailStatusFilter, sortBy]);
+  }, [roleFilter, activeFilter, embyFilter, embyStatusFilter, emailStatusFilter, sortBy]);
 
   useEffect(() => {
     clearUserSelection();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roleFilter, activeFilter, embyFilter, emailStatusFilter, sortBy]);
+  }, [roleFilter, activeFilter, embyFilter, embyStatusFilter, emailStatusFilter, sortBy]);
 
   const handleForceSetEmbyPassword = async () => {
     const emby = forcePwdEmbyName.trim();
@@ -2097,6 +2098,19 @@ export default function AdminUsersPage() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">Emby 状态</p>
+              <Select value={embyStatusFilter} onValueChange={setEmbyStatusFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="全部" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部</SelectItem>
+                  <SelectItem value="active">Emby 正常</SelectItem>
+                  <SelectItem value="disabled">Emby 已禁用</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             {emailEnabled && (
               <div className="space-y-1">
                 <p className="text-xs text-muted-foreground">{t("email.admin.statusColumn")}</p>
@@ -2129,7 +2143,6 @@ export default function AdminUsersPage() {
                   <SelectItem value="register_time_asc">注册时间 旧→新</SelectItem>
                   <SelectItem value="expired_at_asc">到期时间 近→远</SelectItem>
                   <SelectItem value="expired_at_desc">到期时间 远→近</SelectItem>
-                  <SelectItem value="last_login_time_desc">最近登录 新→旧</SelectItem>
                   <SelectItem value="role_asc">角色 管理→普通</SelectItem>
                   <SelectItem value="active_desc">状态 启用优先</SelectItem>
                   <SelectItem value="active_asc">状态 禁用优先</SelectItem>
@@ -2138,7 +2151,7 @@ export default function AdminUsersPage() {
             </div>
           </div>
 
-          {(roleFilter !== "all" || activeFilter !== "all" || embyFilter !== "all" || emailStatusFilter !== "all" || sortBy !== "uid_asc") && (
+          {(roleFilter !== "all" || activeFilter !== "all" || embyFilter !== "all" || embyStatusFilter !== "all" || emailStatusFilter !== "all" || sortBy !== "uid_asc") && (
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>已应用筛选 / 排序</span>
               <Button

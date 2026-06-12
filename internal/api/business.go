@@ -924,6 +924,12 @@ func sortUsers(items []map[string]any, sortKey string) {
 		sort.Slice(items, func(i, j int) bool { return numeric(items[i]["expired_at"]) < numeric(items[j]["expired_at"]) })
 	case "expired_at_desc", "expire_desc":
 		sort.Slice(items, func(i, j int) bool { return numeric(items[i]["expired_at"]) > numeric(items[j]["expired_at"]) })
+	case "role_asc":
+		sort.Slice(items, func(i, j int) bool { return numeric(items[i]["role"]) < numeric(items[j]["role"]) })
+	case "active_desc":
+		sort.Slice(items, func(i, j int) bool { return toBool(items[i]["active"]) && !toBool(items[j]["active"]) })
+	case "active_asc":
+		sort.Slice(items, func(i, j int) bool { return !toBool(items[i]["active"]) && toBool(items[j]["active"]) })
 	default:
 		sort.Slice(items, func(i, j int) bool { return numeric(items[i]["uid"]) > numeric(items[j]["uid"]) })
 	}
@@ -942,6 +948,17 @@ func numeric(value any) int64 {
 		return parsed
 	default:
 		return 0
+	}
+}
+
+func toBool(value any) bool {
+	switch v := value.(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(v, "true")
+	default:
+		return false
 	}
 }
 

@@ -550,6 +550,7 @@ export interface AdminUserListParams {
   role?: number | null;
   active?: boolean | null;
   emby?: "bound" | "unbound" | null;
+  emby_status?: "active" | "disabled" | null;
   email_status?: "verified" | "unverified" | "bound" | "none" | null;
   search?: string;
   sort?: string;

@@ -420,6 +420,7 @@ func (a *App) filteredBatchUserUIDs(payload map[string]any, limit int) ([]int64,
 	roleFilter, hasRole := filter["role"]
 	activeFilter, hasActive := filter["active"]
 	embyFilter := strings.ToLower(asString(filter["emby"]))
+	embyStatusFilter := strings.ToLower(asString(filter["emby_status"]))
 	emailFilter := strings.ToLower(strings.TrimSpace(asString(filter["email_status"])))
 	search := strings.ToLower(strings.TrimSpace(asString(filter["search"])))
 	// exclude_uids 支持「反选全部 / 全选后取消个别」：前端用排除集表达跨页选择，
@@ -443,6 +444,26 @@ func (a *App) filteredBatchUserUIDs(payload map[string]any, limit int) ([]int64,
 		}
 		if embyFilter == "unbound" && u.EmbyID != "" {
 			continue
+		}
+		switch embyStatusFilter {
+		case "active":
+			if u.EmbyID == "" || u.EmbyDisabled {
+				continue
+			}
+			if u.Role == store.RoleNormal && u.ExpiredAt > 0 && u.ExpiredAt < time.Now().Unix() {
+				continue
+			}
+		case "disabled":
+			if u.EmbyID == "" {
+				continue
+			}
+			disabled := u.EmbyDisabled
+			if !disabled && u.Role == store.RoleNormal && u.ExpiredAt > 0 && u.ExpiredAt < time.Now().Unix() {
+				disabled = true
+			}
+			if !disabled {
+				continue
+			}
 		}
 		// 邮箱验证筛选必须与列表展示口径一致（handlers.go listUsers），否则
 		// 「在邮箱筛选下全选跨页」会把筛选外的用户卷进批量操作。

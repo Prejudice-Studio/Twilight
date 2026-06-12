@@ -18,6 +18,7 @@ export interface UsersListState {
   roleFilter: string;
   activeFilter: string;
   embyFilter: string;
+  embyStatusFilter: string;
   emailStatusFilter: string;
   sortBy: string;
 }
@@ -30,6 +31,7 @@ export function buildUsersCacheKey(state: UsersListState): string {
     state.roleFilter,
     state.activeFilter,
     state.embyFilter,
+    state.embyStatusFilter,
     state.emailStatusFilter,
     state.sortBy,
   ].join("-");
@@ -43,6 +45,7 @@ export function usersListParams(state: UsersListState): AdminUserListParams {
     role: state.roleFilter === "all" ? undefined : Number(state.roleFilter),
     active: state.activeFilter === "all" ? undefined : state.activeFilter === "true",
     emby: state.embyFilter === "bound" ? "bound" : state.embyFilter === "unbound" ? "unbound" : undefined,
+    emby_status: state.embyStatusFilter === "all" ? undefined : (state.embyStatusFilter as "active" | "disabled"),
     email_status: state.emailStatusFilter === "all" ? undefined : (state.emailStatusFilter as EmailStatusFilter),
     sort: state.sortBy || undefined,
   };
@@ -54,6 +57,7 @@ export function usersBatchFilterParams(state: UsersListState) {
     role: params.role,
     active: params.active,
     emby: params.emby,
+    emby_status: params.emby_status,
     email_status: params.email_status,
     search: params.search,
   };

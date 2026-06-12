@@ -669,6 +669,7 @@ class ApiClient {
     if (params.role !== undefined && params.role !== null) query.set("role", String(params.role));
     if (params.active !== undefined && params.active !== null) query.set("active", String(params.active));
     if (params.emby) query.set("emby", params.emby);
+    if (params.emby_status) query.set("emby_status", params.emby_status);
     if (params.email_status) query.set("email_status", params.email_status);
     if (params.search) query.set("search", params.search);
     if (params.sort) query.set("sort", params.sort);
