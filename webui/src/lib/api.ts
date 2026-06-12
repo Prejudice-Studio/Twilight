@@ -2080,7 +2080,7 @@ class ApiClient {
     });
   }
 
-  async createInviteRenewCode(payload: { target_uid: number; days: number; validity_hours?: number; note?: string }) {
+  async createInviteRenewCode(payload: { target_uid: number; days: number; validity_hours?: number; note?: string; format?: string; random_algorithm?: string }) {
     return this.request<{
       code: string;
       target_uid: number;

@@ -102,6 +102,8 @@ export default function InviteCenterPage() {
   const [renewTarget, setRenewTarget] = useState<InviteMyStatus["children"][number] | null>(null);
   const [renewDays, setRenewDays] = useState("30");
   const [renewNote, setRenewNote] = useState("");
+  const [renewFormat, setRenewFormat] = useState("");
+  const [renewAlgo, setRenewAlgo] = useState("");
   const [renewing, setRenewing] = useState(false);
   const [generatedRenewCode, setGeneratedRenewCode] = useState<null | { code: string; target_username: string; days: number; validity_hours: number }>(null);
   const [detachingChildUid, setDetachingChildUid] = useState<number | null>(null);
@@ -205,6 +207,8 @@ export default function InviteCenterPage() {
         target_uid: renewTarget.uid,
         days: parsedDays,
         note: renewNote.trim() || undefined,
+        format: renewFormat.trim() || undefined,
+        random_algorithm: renewAlgo || undefined,
       });
       if (res.success && res.data) {
         setGeneratedRenewCode({
@@ -651,6 +655,15 @@ export default function InviteCenterPage() {
               <div className="space-y-1.5">
                 <Label>{t("invite.noteOptional")}</Label>
                 <Textarea rows={2} maxLength={120} value={renewNote} onChange={(event) => setRenewNote(event.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>{t("invite.customFormat")}</Label>
+                <Input value={renewFormat} onChange={(event) => setRenewFormat(event.target.value)} placeholder={t("invite.formatPlaceholder")} />
+                <p className="text-[10px] text-muted-foreground">{t("invite.formatHint")}</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label>{t("invite.randomAlgorithm")}</Label>
+                <Input value={renewAlgo} onChange={(event) => setRenewAlgo(event.target.value)} placeholder={t("invite.algoPlaceholder")} />
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setRenewOpen(false)}>

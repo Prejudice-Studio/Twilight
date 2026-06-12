@@ -126,6 +126,10 @@ func (a *App) handleSendEmailCode(w http.ResponseWriter, r *http.Request, _ Para
 // handleVerifyEmailCode 登录态校验 bind 验证码并完成邮箱绑定 + 标记已验证。
 func (a *App) handleVerifyEmailCode(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
+	if !emailConfigured(a.cfg()) {
+		failWithCode(w, http.StatusServiceUnavailable, ErrEmailDisabled, "邮箱功能未启用")
+		return
+	}
 	payload := decodeMap(r)
 	id := stringValue(payload, "verification_id")
 	code := firstNonEmpty(stringValue(payload, "code"), stringValue(payload, "email_code"))

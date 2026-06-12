@@ -432,7 +432,12 @@
     "renewUidWarning": "该码绑定目标 UID #{uid}，不要发给其他人。",
     "renewDays": "续期天数",
     "renewDaysHelp": "最多 {days} 天，由你的剩余有效期决定。",
-    "generateRenew": "生成续期码"
+    "generateRenew": "生成续期码",
+    "customFormat": "自定义码格式（可选）",
+    "formatPlaceholder": "留空使用默认配置，如 REN-{random}",
+    "formatHint": "支持 {random} 随机串、{ty} 类型、{d} 天数、{idx} 序号",
+    "randomAlgorithm": "随机算法（可选）",
+    "algoPlaceholder": "留空使用配置默认"
   },
   "media": {
     "invalidId": "无效的 ID",
@@ -1331,6 +1336,7 @@
     "updatedAt": "更新于 {time}",
     "expiresAt": "截止 {time}",
     "collapse": "收起",
+    "expand": "展开",
     "viewAllItems": "查看全部 {count} 条",
     "boardTitle": "公告板",
     "loadFailed": "无法加载公告",

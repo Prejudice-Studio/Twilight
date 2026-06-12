@@ -655,7 +655,12 @@
     "renewUidWarning": "This code is bound to target UID #{uid}; do not share it with anyone else.",
     "renewDays": "Renewal days",
     "renewDaysHelp": "Up to {days} days, determined by your remaining validity.",
-    "generateRenew": "Generate renewal code"
+    "generateRenew": "Generate renewal code",
+    "customFormat": "Custom format (optional)",
+    "formatPlaceholder": "Leave empty to use default, e.g. REN-{random}",
+    "formatHint": "Supports {random}, {ty}, {d}, {idx} placeholders",
+    "randomAlgorithm": "Random algorithm (optional)",
+    "algoPlaceholder": "Leave empty to use config default"
   },
   "media": {
     "invalidId": "Invalid ID",
@@ -1331,6 +1336,7 @@
     "updatedAt": "Updated {time}",
     "expiresAt": "Until {time}",
     "collapse": "Collapse",
+    "expand": "Expand",
     "viewAllItems": "View all {count}",
     "boardTitle": "Announcement board",
     "loadFailed": "Unable to load announcements",

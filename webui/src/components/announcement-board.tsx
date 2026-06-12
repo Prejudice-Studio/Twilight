@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Clock3, Pin, Megaphone, Info, AlertTriangle, AlertOctagon } from "lucide-react";
 import { api, type Announcement } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
@@ -61,10 +61,20 @@ interface AnnouncementBoardProps {
   splitPinned?: boolean;
 }
 
-function AnnouncementCard({ ann }: { ann: Announcement }) {
+function AnnouncementCard({ ann, maxContentHeight = 300 }: { ann: Announcement; maxContentHeight?: number }) {
   const { t } = useI18n();
   const style = LEVEL_STYLES[ann.level] || LEVEL_STYLES.info;
   const Icon = style.icon;
+  const [contentExpanded, setContentExpanded] = useState(false);
+  const [needsCollapse, setNeedsCollapse] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (contentRef.current) {
+      setNeedsCollapse(contentRef.current.scrollHeight > maxContentHeight + 8);
+    }
+  }, [ann.content, maxContentHeight]);
+
   return (
     <article className={`rounded-xl border p-4 ${style.cardClass}`}>
       <header className="flex items-start gap-3">
@@ -94,9 +104,23 @@ function AnnouncementCard({ ann }: { ann: Announcement }) {
           </p>
         </div>
       </header>
-      <div className="mt-3 text-sm leading-relaxed break-words">
+      <div
+        ref={contentRef}
+        className="mt-3 text-sm leading-relaxed break-words"
+        style={needsCollapse && !contentExpanded ? { maxHeight: maxContentHeight, overflow: "hidden" } : undefined}
+      >
         <SafeAnnouncementContent content={ann.content} mode={ann.render_mode} />
       </div>
+      {needsCollapse && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="mt-1 h-7 text-xs text-muted-foreground"
+          onClick={() => setContentExpanded(!contentExpanded)}
+        >
+          {contentExpanded ? t("announcements.collapse") : t("announcements.expand")}
+        </Button>
+      )}
     </article>
   );
 }

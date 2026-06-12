@@ -1649,8 +1649,8 @@ func TestConfigSchemaRoundTripsEmailLists(t *testing.T) {
 		EmailWhitelist:      []string{"gmail.com", "outlook.com"},
 		EmailBlacklist:      []string{"mailinator.com"},
 	})
-	if values["SAR"]["email_validation_mode"] != "whitelist" {
-		t.Fatalf("configValues 未包含 email_validation_mode: %#v", values["SAR"]["email_validation_mode"])
+	if values["Email"]["email_validation_mode"] != "whitelist" {
+		t.Fatalf("configValues 未包含 email_validation_mode: %#v", values["Email"]["email_validation_mode"])
 	}
 	content := renderConfigTOML(values)
 	for _, want := range []string{

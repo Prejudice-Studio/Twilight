@@ -856,8 +856,8 @@ export default function AdminRegcodesPage() {
                   className="h-8 w-48 pl-8 text-xs"
                 />
               </div>
-              <Button variant="outline" size="sm" onClick={() => void loadInviteCodes()} disabled={inviteCodesLoading}>
-                {inviteCodesLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+              <Button variant="outline" size="sm" onClick={() => { void loadInviteCodes(); void loadInviteRegcodes(); }} disabled={inviteCodesLoading}>
+                {(inviteCodesLoading || inviteRegcodesLoading) ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
                 {t("adminRegcodes.refresh")}
               </Button>
             </div>
@@ -867,23 +867,67 @@ export default function AdminRegcodesPage() {
               <div className="flex h-64 items-center justify-center">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
               </div>
-            ) : inviteCodes.length === 0 ? (
+            ) : inviteCodes.length === 0 && inviteRegcodes.length === 0 ? (
               <div className="flex h-64 items-center justify-center text-muted-foreground">
                 {t("adminRegcodes.noInviteCodes")}
               </div>
             ) : (() => {
               const lowerSearch = inviteSearch.toLowerCase().trim();
+              // Merge invite codes and invite-sourced regcodes into one list
+              interface UnifiedInviteRow {
+                _kind: "invite" | "regcode";
+                code: string;
+                type?: number;
+                days: number;
+                use_count: number;
+                use_count_limit: number;
+                active: boolean;
+                status?: string;
+                note?: string;
+                inviter_uid?: number;
+                inviter_username?: string;
+                target_username?: string;
+                target_uid?: number;
+                used_by_uid?: number | null;
+                used_by_username?: string;
+                creator_username?: string;
+                creator_uid?: number;
+                created_at: string | number;
+                created_time?: number;
+                expires_at?: number | string | null;
+                validity_time?: number;
+              }
+              const unified: UnifiedInviteRow[] = [
+                ...inviteCodes.map((c): UnifiedInviteRow => ({
+                  _kind: "invite", code: c.code, days: c.days, use_count: c.use_count,
+                  use_count_limit: c.use_count_limit, active: c.active,
+                  inviter_uid: c.inviter_uid, inviter_username: c.inviter_username,
+                  target_username: c.target_username, target_uid: c.target_uid,
+                  used_by_uid: c.used_by_uid, used_by_username: c.used_by_username,
+                  created_at: c.created_at, expires_at: c.expires_at,
+                })),
+                ...inviteRegcodes.map((c): UnifiedInviteRow => ({
+                  _kind: "regcode", code: c.code, type: c.type, days: c.days,
+                  use_count: c.use_count || 0, use_count_limit: c.use_count_limit || 0,
+                  active: c.active !== false, status: c.status,
+                  target_username: c.target_username,
+                  creator_username: c.creator_username, creator_uid: c.creator_uid,
+                  created_at: c.created_time || c.created_at, created_time: c.created_time,
+                  validity_time: c.validity_time,
+                })),
+              ];
               const filtered = lowerSearch
-                ? inviteCodes.filter((c) =>
-                    c.code.toLowerCase().includes(lowerSearch) ||
-                    String(c.inviter_uid).includes(lowerSearch) ||
-                    (c.inviter_username && c.inviter_username.toLowerCase().includes(lowerSearch)) ||
-                    (c.target_username && c.target_username.toLowerCase().includes(lowerSearch)) ||
-                    (c.target_uid && String(c.target_uid).includes(lowerSearch)) ||
-                    (c.used_by_uid && String(c.used_by_uid).includes(lowerSearch)) ||
-                    (c.used_by_username && c.used_by_username.toLowerCase().includes(lowerSearch))
+                ? unified.filter((u) =>
+                    u.code.toLowerCase().includes(lowerSearch) ||
+                    String(u.inviter_uid || "").includes(lowerSearch) ||
+                    (u.inviter_username && u.inviter_username.toLowerCase().includes(lowerSearch)) ||
+                    (u.target_username && u.target_username.toLowerCase().includes(lowerSearch)) ||
+                    (u.target_uid && String(u.target_uid).includes(lowerSearch)) ||
+                    (u.used_by_uid && String(u.used_by_uid).includes(lowerSearch)) ||
+                    (u.used_by_username && u.used_by_username.toLowerCase().includes(lowerSearch)) ||
+                    (u.creator_username && u.creator_username.toLowerCase().includes(lowerSearch))
                   )
-                : inviteCodes;
+                : unified;
               if (filtered.length === 0) {
                 return (
                   <div className="flex h-40 items-center justify-center text-muted-foreground">
@@ -894,53 +938,74 @@ export default function AdminRegcodesPage() {
               return (
               <>
                 <div className="space-y-3 p-3 md:hidden">
-                  {filtered.map((code) => (
-                    <div key={code.code} className="rounded-xl border bg-background p-4 shadow-sm">
+                  {filtered.map((u) => (
+                    <div key={u.code + u._kind} className="rounded-xl border bg-background p-4 shadow-sm">
                       <div className="flex items-center gap-2">
-                        <code className="flex-1 truncate rounded bg-muted px-2 py-1 text-sm">{code.code}</code>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" onClick={() => copyToClipboard(code.code)}>
+                        <code className="flex-1 truncate rounded bg-muted px-2 py-1 text-sm">{u.code}</code>
+                        <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" onClick={() => copyToClipboard(u.code)}>
                           <Copy className="h-3.5 w-3.5" />
                         </Button>
                       </div>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {u._kind === "invite" && <Badge variant="secondary" className="bg-info/10 text-info border-info/20">{t("adminRegcodes.badgeRegcode")}</Badge>}
+                        {u._kind === "regcode" && u.type && getTypeBadge(u.type)}
+                        {u._kind === "invite" && (
+                          u.active ? <Badge variant="success">{t("adminRegcodes.statusAvailable")}</Badge> : <Badge variant="destructive">{t("adminRegcodes.statusDisabled")}</Badge>
+                        )}
+                        {u._kind === "regcode" && u.status && (
+                          u.status === "disabled" ? <Badge variant="destructive">{t("adminRegcodes.statusDisabled")}</Badge> :
+                          u.status === "used_up" ? <Badge variant="warning">{t("adminRegcodes.badgeUsedUp")}</Badge> :
+                          u.status === "expired" ? <Badge variant="secondary">{t("adminRegcodes.badgeExpired")}</Badge> :
+                          <Badge variant="success">{t("adminRegcodes.badgeAvailable")}</Badge>
+                        )}
+                      </div>
                       <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                        <div>
-                          <p className="text-xs text-muted-foreground">{t("adminRegcodes.colInviter")}</p>
-                          <p className="mt-1">{userLabel(code.inviter_username, code.inviter_uid)}</p>
-                        </div>
+                        {u.inviter_uid ? (
+                          <div>
+                            <p className="text-xs text-muted-foreground">{t("adminRegcodes.colInviter")}</p>
+                            <p className="mt-1">{userLabel(u.inviter_username, u.inviter_uid)}</p>
+                          </div>
+                        ) : null}
                         <div>
                           <p className="text-xs text-muted-foreground">{t("adminRegcodes.colDays")}</p>
-                          <p className="mt-1">{formatRegcodeDays(code.days)}</p>
+                          <p className="mt-1">{formatRegcodeDays(u.days)}</p>
                         </div>
                         <div>
                           <p className="text-xs text-muted-foreground">{t("adminRegcodes.colUseCount")}</p>
-                          <p className="mt-1">{code.use_count} / {code.use_count_limit === -1 ? "∞" : code.use_count_limit}</p>
+                          <p className="mt-1">{u.use_count} / {u.use_count_limit === -1 ? "∞" : u.use_count_limit}</p>
                         </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground">{t("adminRegcodes.colStatus")}</p>
-                          <p className="mt-1">
-                            {code.active ? <Badge variant="success">{t("adminRegcodes.statusAvailable")}</Badge> : <Badge variant="destructive">{t("adminRegcodes.statusDisabled")}</Badge>}
-                          </p>
-                        </div>
-                        {code.target_username && (
+                        {u.target_username && (
                           <div className="col-span-2">
                             <p className="text-xs text-muted-foreground">{t("adminRegcodes.colTargetUser")}</p>
-                            <p className="mt-1">{userLabel(code.target_username, code.target_uid)}</p>
+                            <p className="mt-1">{userLabel(u.target_username, u.target_uid || null)}</p>
                           </div>
                         )}
-                        {code.used_by_uid && (
+                        {u.used_by_uid && (
                           <div>
                             <p className="text-xs text-muted-foreground">{t("adminRegcodes.colUsedBy")}</p>
-                            <p className="mt-1">{userLabel(code.used_by_username, code.used_by_uid)}</p>
+                            <p className="mt-1">{userLabel(u.used_by_username, u.used_by_uid)}</p>
+                          </div>
+                        )}
+                        {u.creator_username && (
+                          <div className="col-span-2">
+                            <p className="text-xs text-muted-foreground">{t("adminRegcodes.colCreatedBy")}</p>
+                            <p className="mt-1">{u.creator_username}{u.creator_uid ? ` · UID ${u.creator_uid}` : ""}</p>
                           </div>
                         )}
                         <div>
                           <p className="text-xs text-muted-foreground">{t("adminRegcodes.createdAt")}</p>
-                          <p className="mt-1">{formatDate(code.created_at)}</p>
+                          <p className="mt-1">{formatDate(u.created_at)}</p>
                         </div>
-                        {code.expires_at && (
+                        {u.expires_at && !(u._kind === "regcode") && (
                           <div>
                             <p className="text-xs text-muted-foreground">{t("adminRegcodes.colExpiresAt")}</p>
-                            <p className="mt-1">{formatDate(code.expires_at)}</p>
+                            <p className="mt-1">{formatDate(u.expires_at as string | number)}</p>
+                          </div>
+                        )}
+                        {u._kind === "regcode" && u.validity_time != null && (
+                          <div>
+                            <p className="text-xs text-muted-foreground">{t("adminRegcodes.colCodeValidity")}</p>
+                            <p className="mt-1">{u.validity_time === -1 ? t("adminRegcodes.permanentValid") : t("adminRegcodes.hoursValue", { hours: u.validity_time })}</p>
                           </div>
                         )}
                       </div>
@@ -948,154 +1013,74 @@ export default function AdminRegcodesPage() {
                   ))}
                 </div>
                 <div className="hidden overflow-x-auto md:block">
-                  <table className="w-full min-w-[900px]">
+                  <table className="w-full min-w-[1000px]">
                     <thead>
                       <tr className="border-b bg-muted/50">
                         <th className="px-4 py-3 text-left text-sm font-medium">{t("adminRegcodes.colInviteCode")}</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">{t("adminRegcodes.colTypeNote")}</th>
                         <th className="px-4 py-3 text-left text-sm font-medium">{t("adminRegcodes.colInviter")}</th>
                         <th className="px-4 py-3 text-left text-sm font-medium">{t("adminRegcodes.colDays")}</th>
                         <th className="px-4 py-3 text-left text-sm font-medium">{t("adminRegcodes.colUseCount")}</th>
                         <th className="px-4 py-3 text-left text-sm font-medium">{t("adminRegcodes.colTargetUser")}</th>
                         <th className="px-4 py-3 text-left text-sm font-medium">{t("adminRegcodes.colUsedBy")}</th>
                         <th className="px-4 py-3 text-left text-sm font-medium">{t("adminRegcodes.colStatus")}</th>
-                        <th className="px-4 py-3 text-left text-sm font-medium">{t("adminRegcodes.colExpiresAt")}</th>
                         <th className="px-4 py-3 text-left text-sm font-medium">{t("adminRegcodes.colCreatedAt")}</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {filtered.map((code) => (
-                        <tr key={code.code} className="border-b hover:bg-muted/30">
+                      {filtered.map((u) => (
+                        <tr key={u.code + u._kind} className="border-b hover:bg-muted/30">
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
-                              <code className="rounded bg-muted px-2 py-1 text-sm">{code.code}</code>
-                              <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => copyToClipboard(code.code)}>
+                              <code className="rounded bg-muted px-2 py-1 text-sm">{u.code}</code>
+                              <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => copyToClipboard(u.code)}>
                                 <Copy className="h-3 w-3" />
                               </Button>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-sm">{userLabel(code.inviter_username, code.inviter_uid)}</td>
-                          <td className="px-4 py-3 text-sm">{formatRegcodeDays(code.days)}</td>
-                          <td className="px-4 py-3 text-sm">{code.use_count} / {code.use_count_limit === -1 ? "∞" : code.use_count_limit}</td>
-                          <td className="px-4 py-3 text-sm">{userLabel(code.target_username, code.target_uid)}</td>
-                          <td className="px-4 py-3 text-sm">{userLabel(code.used_by_username, code.used_by_uid)}</td>
                           <td className="px-4 py-3">
-                            {code.active ? <Badge variant="success">{t("adminRegcodes.statusAvailable")}</Badge> : <Badge variant="destructive">{t("adminRegcodes.statusDisabled")}</Badge>}
+                            <div className="flex flex-wrap gap-1">
+                              {u._kind === "invite" && <Badge variant="secondary" className="bg-info/10 text-info border-info/20">{t("adminRegcodes.badgeRegcode")}</Badge>}
+                              {u._kind === "regcode" && u.type && getTypeBadge(u.type)}
+                              {u._kind === "invite" && (
+                                u.active ? <Badge variant="success">{t("adminRegcodes.statusAvailable")}</Badge> : <Badge variant="destructive">{t("adminRegcodes.statusDisabled")}</Badge>
+                              )}
+                              {u._kind === "regcode" && u.status && (
+                                u.status === "disabled" ? <Badge variant="destructive">{t("adminRegcodes.statusDisabled")}</Badge> :
+                                u.status === "used_up" ? <Badge variant="warning">{t("adminRegcodes.badgeUsedUp")}</Badge> :
+                                u.status === "expired" ? <Badge variant="secondary">{t("adminRegcodes.badgeExpired")}</Badge> :
+                                <Badge variant="success">{t("adminRegcodes.badgeAvailable")}</Badge>
+                              )}
+                            </div>
                           </td>
-                          <td className="px-4 py-3 text-sm text-muted-foreground">{code.expires_at ? formatDate(code.expires_at) : t("adminRegcodes.permanent")}</td>
-                          <td className="px-4 py-3 text-sm text-muted-foreground">{formatDate(code.created_at)}</td>
+                          <td className="px-4 py-3 text-sm">{u.inviter_uid ? userLabel(u.inviter_username, u.inviter_uid) : (u.creator_username ? `${u.creator_username} · UID ${u.creator_uid}` : "-")}</td>
+                          <td className="px-4 py-3 text-sm">{formatRegcodeDays(u.days)}</td>
+                          <td className="px-4 py-3 text-sm">{u.use_count} / {u.use_count_limit === -1 ? "∞" : u.use_count_limit}</td>
+                          <td className="px-4 py-3 text-sm">{u.target_username ? userLabel(u.target_username, u.target_uid || null) : "-"}</td>
+                          <td className="px-4 py-3 text-sm">{u.used_by_uid ? userLabel(u.used_by_username, u.used_by_uid) : "-"}</td>
+                          <td className="px-4 py-3">
+                            {u._kind === "invite" && (
+                              u.active ? <Badge variant="success">{t("adminRegcodes.statusAvailable")}</Badge> : <Badge variant="destructive">{t("adminRegcodes.statusDisabled")}</Badge>
+                            )}
+                            {u._kind === "regcode" && u.status && (
+                              u.status === "disabled" ? <Badge variant="destructive">{t("adminRegcodes.statusDisabled")}</Badge> :
+                              u.status === "used_up" ? <Badge variant="warning">{t("adminRegcodes.badgeUsedUp")}</Badge> :
+                              u.status === "expired" ? <Badge variant="secondary">{t("adminRegcodes.badgeExpired")}</Badge> :
+                              <Badge variant="success">{t("adminRegcodes.badgeAvailable")}</Badge>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-muted-foreground">{formatDate(u.created_at)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
                 <div className="p-3 text-center text-sm text-muted-foreground">
-                  {lowerSearch ? t("adminRegcodes.matchInviteCount", { count: filtered.length, total: inviteCodesTotal }) : t("adminRegcodes.totalInviteCount", { total: inviteCodesTotal })}
+                  {lowerSearch ? t("adminRegcodes.matchInviteCount", { count: filtered.length, total: unified.length }) : t("adminRegcodes.totalInviteCount", { total: unified.length })}
                 </div>
               </>
               );
             })()}
-          </CardContent>
-        </Card>
-        {/* Invite-sourced RegCodes (renewal codes auto-generated by invite system) */}
-        <Card className="mt-6">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg">{t("adminRegcodes.inviteRegcodeTitle")}</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {inviteRegcodesLoading && !inviteRegcodesLoaded ? (
-              <div className="flex h-32 items-center justify-center">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              </div>
-            ) : inviteRegcodes.length === 0 ? (
-              <div className="flex h-32 items-center justify-center text-muted-foreground">
-                {t("adminRegcodes.noInviteRegcodes")}
-              </div>
-            ) : (
-              <>
-                <div className="space-y-3 p-3 md:hidden">
-                  {inviteRegcodes.map((code) => (
-                    <div key={code.code} className="rounded-xl border bg-background p-4 shadow-sm">
-                      <div className="flex items-center gap-2">
-                        <code className="flex-1 truncate rounded bg-muted px-2 py-1 text-sm">{code.code}</code>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" onClick={() => copyToClipboard(code.code)}>
-                          <Copy className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {getTypeBadge(code.type)}
-                        {getStatusBadge(code)}
-                      </div>
-                      <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                        <div>
-                          <p className="text-xs text-muted-foreground">{t("adminRegcodes.colDays")}</p>
-                          <p className="mt-1">{formatRegcodeDays(code.days)}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground">{t("adminRegcodes.createdAt")}</p>
-                          <p className="mt-1">{formatDate(code.created_time || code.created_at)}</p>
-                        </div>
-                        {code.target_username && (
-                          <div className="col-span-2">
-                            <p className="text-xs text-muted-foreground">{t("adminRegcodes.colTargetUser")}</p>
-                            <p className="mt-1">{code.target_username}</p>
-                          </div>
-                        )}
-                        {code.creator_username && (
-                          <div className="col-span-2">
-                            <p className="text-xs text-muted-foreground">{t("adminRegcodes.colCreatedBy")}</p>
-                            <p className="mt-1">{code.creator_username}{code.creator_uid ? ` · UID ${code.creator_uid}` : ""}</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="hidden overflow-x-auto md:block">
-                  <table className="w-full min-w-[800px]">
-                    <thead>
-                      <tr className="border-b bg-muted/50">
-                        <th className="px-4 py-3 text-left text-sm font-medium">{t("adminRegcodes.colRegcode")}</th>
-                        <th className="px-4 py-3 text-left text-sm font-medium">{t("adminRegcodes.colTypeNote")}</th>
-                        <th className="px-4 py-3 text-left text-sm font-medium">{t("adminRegcodes.colDays")}</th>
-                        <th className="px-4 py-3 text-left text-sm font-medium">{t("adminRegcodes.colTargetUser")}</th>
-                        <th className="px-4 py-3 text-left text-sm font-medium">{t("adminRegcodes.colCreatedBy")}</th>
-                        <th className="px-4 py-3 text-left text-sm font-medium">{t("adminRegcodes.colStatus")}</th>
-                        <th className="px-4 py-3 text-left text-sm font-medium">{t("adminRegcodes.colCreatedAt")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {inviteRegcodes.map((code) => (
-                        <tr key={code.code} className="border-b hover:bg-muted/30">
-                          <td className="px-4 py-3">
-                            <code className="rounded bg-muted px-2 py-1 text-sm">{code.code}</code>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex flex-wrap gap-1">
-                              {getTypeBadge(code.type)}
-                              {getStatusBadge(code)}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-sm">{formatRegcodeDays(code.days)}</td>
-                          <td className="px-4 py-3 text-sm">{code.target_username || "-"}</td>
-                          <td className="px-4 py-3 text-sm text-muted-foreground">
-                            {code.creator_username ? `${code.creator_username} · UID ${code.creator_uid}` : `UID ${code.creator_uid}` || "-"}
-                          </td>
-                          <td className="px-4 py-3">
-                            {getStatusBadge(code)}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-muted-foreground">
-                            {formatDate(code.created_time || code.created_at)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="p-3 text-center text-sm text-muted-foreground">
-                  {t("adminRegcodes.inviteRegcodeCount", { count: inviteRegcodes.length })}
-                </div>
-              </>
-            )}
           </CardContent>
         </Card>
         </>

@@ -208,6 +208,10 @@ func (a *App) handleCreateInviteRenewCode(w http.ResponseWriter, r *http.Request
 }
 
 func (a *App) handleInviteCodes(w http.ResponseWriter, r *http.Request, _ Params) {
+	if !a.cfg().InviteEnabled {
+		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
+		return
+	}
 	codes := a.store().ListInviteCodes(current(r).User.UID)
 	items := make([]map[string]any, 0, len(codes))
 	for _, code := range codes {
@@ -217,6 +221,10 @@ func (a *App) handleInviteCodes(w http.ResponseWriter, r *http.Request, _ Params
 }
 
 func (a *App) handleDeleteInviteCode(w http.ResponseWriter, r *http.Request, params Params) {
+	if !a.cfg().InviteEnabled {
+		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
+		return
+	}
 	if statusFromError(w, a.store().DeleteInviteCode(current(r).User.UID, params["code"])) {
 		return
 	}
@@ -224,6 +232,10 @@ func (a *App) handleDeleteInviteCode(w http.ResponseWriter, r *http.Request, par
 }
 
 func (a *App) handleDetachExpiredInviteChild(w http.ResponseWriter, r *http.Request, params Params) {
+	if !a.cfg().InviteEnabled {
+		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
+		return
+	}
 	uid, _ := int64Param(params, "uid")
 	user := current(r).User
 	rel, okRel := a.store().ParentOf(uid)

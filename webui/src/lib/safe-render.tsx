@@ -253,7 +253,7 @@ function renderMarkdown(content: string): React.ReactNode {
       }
       const ListTag = orderedList ? "ol" : "ul";
       blocks.push(
-        <ListTag key={`list-${blocks.length}`} className={`${orderedList ? "list-decimal" : "list-disc"} my-2 space-y-1 pl-5`}>
+        <ListTag key={`list-${blocks.length}`} className={`${orderedList ? "list-decimal" : "list-disc"} list-inside my-2 space-y-1`}>
           {items.map((item, index) => (
             <li key={`li-${blocks.length}-${index}`} className="leading-relaxed">
               {renderInline(item, `li-${blocks.length}-${index}`)}

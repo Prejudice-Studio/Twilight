@@ -75,6 +75,10 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 	}
 
 	if source == "invite" {
+		if !a.cfg().InviteEnabled {
+			failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
+			return
+		}
 		invite, okInvite := a.store().InviteCode(code)
 		if !okInvite || !invite.Active || (invite.ExpiredAt > 0 && invite.ExpiredAt <= time.Now().Unix()) {
 			failWithCode(w, http.StatusNotFound, ErrInviteNotFound, "邀请码无效或已停用")
