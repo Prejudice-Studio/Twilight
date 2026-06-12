@@ -160,6 +160,15 @@
 | GET | `/api/v1/emby/sessions/count` | User | 当前会话数量 |
 | POST | `/api/v1/emby/bangumi/webhook` | Public | Bangumi Webhook 回调入口（按时间戳/签名校验，见 `internal/api/bangumi_webhook.go`） |
 
+## Bangumi Sync
+
+| 方法 | 路径 | 鉴权 | 说明 |
+| ---- | ---- | ---- | ---- |
+| GET | `/api/v1/bangumi/sync/status` | User | 获取当前用户的 Bangumi 同步状态与最近日志 |
+| POST | `/api/v1/bangumi/sync/trigger` | User | 手动触发一次 Bangumi 同步 |
+| GET | `/api/v1/bangumi/sync/history` | User | 获取同步历史日志（`?limit=`） |
+| DELETE | `/api/v1/bangumi/sync/history` | User | 清除当前用户的同步历史 |
+
 ## Media
 
 | 方法 | 路径 | 鉴权 | 说明 |
@@ -262,6 +271,11 @@
 | GET | `/api/v1/admin/audit-logs` | Admin | 操作审计日志列表（支持 category/action/uid/search 筛选与分页） |
 | DELETE | `/api/v1/admin/audit-logs/{log_id}` | Admin | 删除单条操作审计日志 |
 | POST | `/api/v1/admin/audit-logs/clear` | Admin | 清空全部审计日志（需确认短语 `CLEAR_AUDIT_LOGS`） |
+| GET | `/api/v1/admin/bangumi/users` | Admin | 列出所有用户的 Bangumi 同步状态 |
+| GET | `/api/v1/admin/bangumi/records/{uid}` | Admin | 查看某用户的播放记录 |
+| POST | `/api/v1/admin/bangumi/sync/{uid}` | Admin | 为某用户触发 Bangumi 同步 |
+| GET | `/api/v1/admin/bangumi/logs/{uid}` | Admin | 查看某用户的 Bangumi 同步日志 |
+| DELETE | `/api/v1/admin/bangumi/logs/{uid}` | Admin | 清除某用户的 Bangumi 同步日志 |
 | GET | `/api/v1/admin/telegram/rebind-requests` | Admin | Telegram 换绑申请列表 |
 | POST | `/api/v1/admin/telegram/rebind-requests/{request_id}/approve` | Admin | 通过换绑申请 |
 | POST | `/api/v1/admin/telegram/rebind-requests/{request_id}/reject` | Admin | 拒绝换绑申请 |

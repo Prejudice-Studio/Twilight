@@ -43,7 +43,7 @@
 | 签到 / 积分 | `signin_handlers.go` | `signin.go` | `/signin/*` | `(main)/score` | `[SAR]` signin_* |
 | 公告 | `announcement_handlers.go` | `store.go`(Announcement) | `/announcements`、`/admin/announcements/*` | `(main)/announcements`、`admin/announcements` | [公告](docs/features/announcements.md) |
 | 设备 / 登录历史 / IP 黑名单 | `handlers.go`(`handleDevices`/`handleLoginHistory`)、`auth_handlers.go`(登录写设备) | `device.go`、`login_log.go`、`ip_blacklist.go` | `/security/*`、`/users/me/devices` | （并入 settings/admin） | `[DeviceLimit]` |
-| Bangumi 同步 | `bangumi_webhook.go`、`bangumi_client.go` | `store.go`(User.BgmToken) | `/emby/bangumi/webhook` | — | `[BangumiSync]` · [Bangumi](docs/features/bangumi.md) |
+| Bangumi 同步 | `bangumi_webhook.go`、`bangumi_client.go`、`bangumi_sync_service.go`、`bangumi_sync_handlers.go` | `store.go`(User.BgmToken, BangumiSyncLog)、`playback.go` | `/bangumi/sync/*`、`/admin/bangumi/*`、`/emby/bangumi/webhook` | `(main)/bangumi`、`(main)/admin/bangumi` | `[BangumiSync]` · [Bangumi](docs/features/bangumi.md) |
 | API Key | `apikey_handlers.go` | `store.go`(APIKey) | `/apikey/*`、`/users/me/apikeys` | `settings/apikey` | [API Key](docs/reference/api-key.md) |
 | 批量用户操作 | `batch_user_handlers.go`、`batch_helpers.go`、`handlers.go`(`filteredBatchUserUIDs`) | `store.go`(Users) | `/batch/*`、`/admin/users/bulk-*` | `(main)/admin/users` | — |
 | 调度任务 | `scheduler_handlers.go`、`scheduler_daemon.go`、`scheduler_runner.go`、`admin_jobs.go` | `scheduler.go` | `/admin/scheduler/*` | `(main)/admin/scheduler` | `[Scheduler]` |
@@ -71,6 +71,9 @@
 | `email_handlers.go` | `handleSendEmailCode`、`handleVerifyEmailCode`、`handleForgotPasswordEmailRequest`、`handleForgotPasswordEmailReset`、`handleAdminBindUserEmail`、`handleAdminSetUserEmailVerified`、`handleAdminEmailTest`、`handleAdminEmailVerifications` |
 | `announcement_handlers.go` | `handleListAnnouncements`、`handleAdminAnnouncements`、`handleCreateAnnouncement`、`handleUpdateAnnouncement`、`handleDeleteAnnouncement` |
 | `audit_handlers.go` | `audit(r, action, category, targetUID, detail)`(行12)、`handleListAuditLogs`、`handleDeleteAuditLog`、`handleClearAuditLogs` |
+| `audit_handlers.go` | `audit(r, action, category, targetUID, detail)`(行12)、`handleListAuditLogs`、`handleDeleteAuditLog`、`handleClearAuditLogs` |
+| `bangumi_webhook.go` | `handleBangumiWebhook`、`constantTimeStringEqual` |
+| `bangumi_sync_handlers.go` | `handleBangumiSyncStatus`、`handleBangumiSyncTrigger`、`handleBangumiSyncHistory`、`handleBangumiClearHistory`、`handleAdminBangumiUsers`、`handleAdminBangumiRecords`、`handleAdminBangumiSyncUser`、`handleAdminBangumiSyncLogs`、`handleAdminBangumiClearLogs` |
 | `batch_user_handlers.go` | `handleBatchToggleUsers`、`handleBatchRenewUsers`、`handleBatchDeleteUsers`、`handleBatchLockEmbyUnbind`、`handleBatchClearEmbyGrant`、`filteredBatchUserUIDs`(行418) |
 | `app.go` | `ServeHTTP`(行558)、`authenticate`(行698)、`current(r)`(行800)、`clientIP`、`principal`(行147) |
 
@@ -81,6 +84,7 @@
 | `emby_client.go` | `embyGet`、`embyPost`、`embyDelete`、`embyConfigured` |
 | `email_client.go` | `emailConfigured`(行21) |
 | `email_verify_service.go` | `issueEmailCode`、`verifyEmailCodeByID` |
+| `bangumi_sync_service.go` | `syncBangumiForUser`、`matchBangumiSubject`、`ensureBangumiCollection`、`markBangumiEpisode` |
 | `scheduler_runner.go` | `runCheckExpired`、`runExpiryReminder`、`runDailyStats` |
 | `config_admin.go` | `configSectionDefs()`(行847)、`configValues()`(行973) |
 
@@ -127,7 +131,7 @@
 | `SigninEnabled` | `handleSignin`、`handleSigninRenew` | `SIGNIN_DISABLED` |
 | `MediaRequestEnabled` | `handleCreateMediaRequest`、`handleMyMediaRequests` | — |
 | `emailConfigured()` | 所有发码/验证/找回密码 handler | `EMAIL_DISABLED` |
-| `BangumiEnabled` | `handleBangumiWebhook`、`handleUpdateMe`(bgm 字段) | `BANGUMI_DISABLED` |
+| `BangumiEnabled` | `handleBangumiWebhook`、`handleUpdateMe`(bgm 字段)、`handleBangumiSyncTrigger`、`handleAdminBangumiSyncUser` | `BANGUMI_SYNC_DISABLED` |
 | `RegisterEnabled` | `handleRegister` | — |
 
 注意：`TelegramMode` 控制的是 **Bot 模式**（`Global.telegram_mode`），不是 Telegram 绑定功能。用户自助绑定/解绑/换绑的 handler **不应**受 `TelegramMode` 限制。Bot 相关 handler 本身已有独立的 `telegramConfigured()` 检查。
