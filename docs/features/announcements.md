@@ -111,6 +111,18 @@
 
 两处都通过公开接口 `GET /announcements` 拉取数据，并用 `SafeAnnouncementContent` 渲染正文。
 
+### 长内容折叠
+
+`AnnouncementCard` 组件（`announcement-board.tsx` 行64）支持单条公告的长内容折叠：
+- 默认 maxHeight 300px，内容超出自动截断隐藏
+- 使用 `useRef` + `useEffect` 检测实际内容高度（`scrollHeight > maxHeight + 8`）
+- 超出时自动显示「展开 / 收起」按钮
+- 按钮文案通过 i18n 键 `announcements.expand` / `announcements.collapse` 控制
+
+### Markdown 列表渲染
+
+`safe-render.tsx` 使用 `list-inside`（非默认的 `list-outside`）保证 `•` 圆点始终在容器内可见，避免被父级 `overflow: hidden` 裁剪。
+
 ## 接口
 
 统一响应 envelope 为 `{ success, code, message, data, timestamp }`。鉴权级别与安全约定详见 [安全加固](../guides/security.md)；完整字段契约见 [后端 API 详参](../reference/backend-api.md)，路由总表见 [API 路由索引](../reference/api-index.md)。

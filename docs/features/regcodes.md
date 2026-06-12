@@ -40,8 +40,19 @@
 | `target_telegram_username` / `target_telegram_id` | 指名卡码：非空时仅限匹配的 Telegram 用户名或 Telegram ID 使用；注册时需提供已确认的 Telegram 注册绑定码。 |
 | `created_at` / `created_time` | 创建时间戳（秒）；`created_time` 缺省时回落到 `created_at`。 |
 | `note` | 管理员备注（创建时截断到 120 字符）。 |
+| `source` | 卡码来源：`"admin"`（管理员手动创建）或 `"invite"`（邀请系统自动生成续期码）。历史数据为空字符串，视作 `"admin"`。 |
+| `creator_uid` | 创建者 UID。管理员创建时为管理员 UID，邀请续期码为邀请人 UID。 |
 
 > `OTHER`（JSON 元数据）是旧 Python 实现的字段，Go 版本已将 `decoy`、`target_username`、`target_telegram_username`、`target_telegram_id`、`note` 提升为结构体一级字段，不再有 `OTHER` 包裹。
+
+### 来源区分（Source 字段）
+
+`source` 字段区分卡码的创建来源：
+
+- **`"admin"`**：管理员在后台卡码管理页手动生成（`POST /admin/regcodes`）。列表中属于注册码 Tab，默认筛选 `source=admin`。
+- **`"invite"`**：邀请系统自动生成（`POST /invite/renew-codes`），邀请人为下级创建续期码时写入 `Source: "invite"`。前端在邀请码 Tab 以合并视图展示（与 `InviteCode` 条目同列渲染）。
+
+管理员列表接口 `GET /admin/regcodes` 支持 `?source=admin|invite` 筛选参数。后端 `handleListRegcodes` 中，`sourceFilter=admin` 会匹配显式 `"admin"` 和历史空值；`sourceFilter=invite` 仅匹配 `"invite"`。
 
 ### 取值校验与规范化
 

@@ -23,6 +23,8 @@
 - `webui/src/lib/api-request.ts`：底层请求、凭据、超时与 `ApiError`。
 - `webui/src/lib/api.ts`：前端 API 客户端，新增后端接口时通常要同步这里和 `api-types.ts`。
 - `deploy/`：systemd unit 与安装脚本。部署 unit 必须指向 `bin/twilight`。
+- `webui/src/lib/safe-render.tsx`：公告 Markdown / BBCode / plain 三种渲染模式的手写安全解析器，含 URL 白名单过滤。
+- `webui/src/components/announcement-board.tsx`：可复用公告板组件（仪表盘 + 独立公告页），支持置顶拆分、折叠和长内容截断。
 
 ## 功能与代码定位（速查）
 
@@ -51,8 +53,119 @@
 | 违规审计（诱饵码等） | `violation_handlers.go` | `store.go`(ViolationLog) | `/admin/violations/*` | `(main)/admin/violations` | `[SAR]` decoy_action |
 | 系统自动更新（Git） | `system_update.go`、`system_update_handler.go` | — | `/system/admin/update` | `admin/config`(更新页) | `[SystemUpdate]` |
 | 统计 / 服务器状态 | `handlers.go`(`handleSystemStats`/`handleWatchStats`) | `playback.go` | `/system/admin/stats`、`/batch/watch-stats/*` | `(main)/admin/stats` | — |
+| 操作审计日志 | `audit_handlers.go`(含 `audit()` helper) | `store.go`(AuditLog) | `/admin/audit-logs/*` | `(main)/admin/audit-logs` | — |
+
+### 关键函数速查（按文件）
+
+**`internal/api/` — HTTP 层：**
+| 文件 | 主要函数 |
+|------|---------|
+| `routes.go` | `registerAllRoutes()`、`registerAPIRoutes()`、`registerAdminRoutes()`、`registerAPIKeyRoutes()`、`registerSecurityRoutes()`、`registerBatchRoutes()` |
+| `auth_handlers.go` | `handleLogin`、`handleRegister`、`handleLogout`、`handleAuthMe`、`handleForgotPasswordByEmby` |
+| `handlers.go` | `handleAdminUsers`(行1624)、`handleAdminCreateUser`(行1681)、`handleAdminUpdateUser`(行1755)、`handleAdminDeleteUser`(行1888)、`handleAdminToggleUser`(行1956)、`handleAdminToggleEmby`(行2021)、`handleAdminForceUnbind`(行2096)、`handleAdminRenewUser`(行2296)、`handleAdminSetUserExpiry`(行2344)、`handleAdminResetPassword`(行2381)、`handleAdminSetRole`(行2420)、`handleAdminUnbindTelegram`(行2466)、`handleUpdateMe`(行62)、`handleUpdateUsername`、`handleChangePassword`、`handleGeneratedPassword`、`handleBindEmby`、`handleRegisterEmby`、`handleUnbindEmby`、`handleRenew`、`handleTelegramStatus`、`handleUnbindTelegram`、`handleTelegramRebindRequest` |
+| `regcode_handlers.go` | `handleListRegcodes`、`handleCreateRegcodes`、`handleUpdateRegcode`、`handleDeleteRegcode`、`handleBatchDeleteRegcodes`、`handleRegcodeUsers`、`handleClearRegcodeUsage` |
+| `code_use_handlers.go` | `handleUseCode`、`handleQueueStatus` |
+| `invite_handlers.go` | `handleInviteConfig`、`handleInviteMe`、`handleCreateInviteCode`、`handleCreateInviteRenewCode`、`handleInviteCodes`、`handleDeleteInviteCode`、`handleDetachExpiredInviteChild`、`handleInviteCheck`、`handleInviteUse` |
+| `media_request_handlers.go` | `handleMediaSearch`、`handleMediaDetail`、`handleCreateMediaRequest`、`handleMyMediaRequests`、`handleAdminMediaRequests`、`handleUpdateMediaRequestStatus`、`handleExternalMediaUpdate` |
+| `signin_handlers.go` | `handleSigninConfig`、`handleSigninSummary`、`handleSignin`、`handleSigninRenew`、`handleSigninHistory` |
+| `email_handlers.go` | `handleSendEmailCode`、`handleVerifyEmailCode`、`handleForgotPasswordEmailRequest`、`handleForgotPasswordEmailReset`、`handleAdminBindUserEmail`、`handleAdminSetUserEmailVerified`、`handleAdminEmailTest`、`handleAdminEmailVerifications` |
+| `announcement_handlers.go` | `handleListAnnouncements`、`handleAdminAnnouncements`、`handleCreateAnnouncement`、`handleUpdateAnnouncement`、`handleDeleteAnnouncement` |
+| `audit_handlers.go` | `audit(r, action, category, targetUID, detail)`(行12)、`handleListAuditLogs`、`handleDeleteAuditLog`、`handleClearAuditLogs` |
+| `batch_user_handlers.go` | `handleBatchToggleUsers`、`handleBatchRenewUsers`、`handleBatchDeleteUsers`、`handleBatchLockEmbyUnbind`、`handleBatchClearEmbyGrant`、`filteredBatchUserUIDs`(行418) |
+| `app.go` | `ServeHTTP`(行558)、`authenticate`(行698)、`current(r)`(行800)、`clientIP`、`principal`(行147) |
+
+**`internal/api/` — 业务/客户端层：**
+| 文件 | 主要函数 |
+|------|---------|
+| `business.go` | `regcodeDTO`(行498+544)、`regcodeStatus`(行484)、`generateRegCode`(行628)、`generateInviteCode`、`previewCode`、`inviteForest`(行1226)、`inviteTreeFor`(行1154)、`canInvite`(行1183)、`maxCodeDays`(行1050)、`sortUsers`(行909)、`batchResult`(行1324)、`addBatchOutcome`(行1331) |
+| `emby_client.go` | `embyGet`、`embyPost`、`embyDelete`、`embyConfigured` |
+| `email_client.go` | `emailConfigured`(行21) |
+| `email_verify_service.go` | `issueEmailCode`、`verifyEmailCodeByID` |
+| `scheduler_runner.go` | `runCheckExpired`、`runExpiryReminder`、`runDailyStats` |
+| `config_admin.go` | `configSectionDefs()`(行847)、`configValues()`(行973) |
+
+**`internal/store/store.go` — 状态模型：**
+| 实体 | 类型/字段 | 行 |
+|------|---------|-----|
+| `State` | 单一状态文档，含所有实体 map | 行55-99 |
+| `User` | UID, Username, Email, PasswordHash, Role, Active, EmbyID, EmbyDisabled, TelegramID, ExpiredAt, BgmToken… | 行101-145 |
+| `RegCode` | Code, Type, Days, ValidityTime, UseCount, Active, Source, CreatorUID… | 行215-239 |
+| `InviteCode` | Code, UID, InviterUID, Days, UseCount, Active… | 行198-213 |
+| `InviteRelation` | ParentUID, ChildUID, Code, CreatedAt | 行241-246 |
+| `AuditLog` | ID, UID, Username, Action, Category, TargetUID, Detail, IP, CreatedAt | 行274-285 |
+| `ViolationLog` | ID, UID, Username, Code, CodeType, Reason, Action, IP… | 行259-272 |
+| `Announcement` | ID, Title, Content, Level, RenderMode, Pinned, Visible… | 行248-257 |
+| `Device` | UID, DeviceID, DeviceName, Client, LastIP, Trusted, Blocked… | 行336-347 |
+| `LoginLog` | ID, UID, IP, DeviceID, DeviceName, Client, Time, Blocked… | 行349-361 |
+| `SchedulerRun` | ID, JobID, Type, Trigger, Status, Message, Summary, Logs… | 行313-326 |
+
+**`internal/store/store.go` — 关键方法：**
+| 方法 | 行 | 说明 |
+|------|-----|------|
+| `ListUsers()` → `[]User` | — | 所有用户 |
+| `User(uid)` → `(User, bool)` | — | 按 UID 查找 |
+| `FindUserByUsername` / `FindUserByTelegramID` | — | 按用户名/TG ID 查找 |
+| `CreateUser` / `UpdateUser` / `DeleteUser` | — | 用户 CRUD |
+| `SetUserActiveAtomic` / `SetUserRoleAtomic` | 行2015/1982 | 原子启停/角色（含 last-admin 保护） |
+| `UpsertRegCode` / `RegCode` / `DeleteRegCode` / `ConsumeRegCodeAndUpdateUser` | 行2944/2937/3063/2988 | 注册码管理 |
+| `UpsertInviteCode` / `InviteCode` / `ConsumeInviteCodeAndUpdateUser` | 行2726/2750/2843 | 邀请码管理 |
+| `ParentOf` / `ChildrenOf` / `DetachInvite` | 行2908/2915/2928 | 邀请关系 |
+| `AddAuditLog` / `ListAuditLogs` / `ClearAuditLogs` | 行3502/3520/3547 | 审计日志 |
+| `AddViolationLog` / `ListViolationLogs` | 行3445/3460 | 违规日志 |
+| `AddLoginLog` / `LoginHistory` | —/— | 登录历史 |
+| `ListDevices` / `UpdateDevice` / `DeleteDevice` | —/—/— | 设备管理 |
 
 > 通用约定：错误码定义 `internal/api/errcode.go` ↔ 前端 `webui/src/lib/errcode.ts`/`validators.ts`；确认短语 `internal/api/confirm_phrases.go` ↔ `webui/src/lib/confirm-phrases.ts`；校验规则 `internal/validate` ↔ `webui/src/lib/password.ts`/`validators.ts`；全局状态 `webui/src/store/{auth,system}.ts`。完整路由清单见 [API 路由索引](docs/reference/api-index.md)。
+
+### Feature Gate 约定
+
+功能开关（`InviteEnabled`、`EmailEnabled`、`MediaRequestEnabled`、`SigninEnabled` 等）必须在**所有相关 handler 入口**处进行检查，不仅是前端隐藏 UI。关闭功能时后端接口必须返回明确错误（如 `INVITE_DISABLED`、`EMAIL_DISABLED`），不允许"前端隐藏但接口仍可用"。
+
+| 开关 | 检查位置 | 错误码 |
+|------|---------|--------|
+| `InviteEnabled` | `handleCreateInviteCode`、`handleInviteCheck`、`handleInviteUse`、`handleInviteCodes`、`handleDeleteInviteCode`、`handleDetachExpiredInviteChild`、`handleUseCode`(邀请码路径) | `INVITE_DISABLED` |
+| `SigninEnabled` | `handleSignin`、`handleSigninRenew` | `SIGNIN_DISABLED` |
+| `MediaRequestEnabled` | `handleCreateMediaRequest`、`handleMyMediaRequests` | — |
+| `emailConfigured()` | 所有发码/验证/找回密码 handler | `EMAIL_DISABLED` |
+| `BangumiEnabled` | `handleBangumiWebhook`、`handleUpdateMe`(bgm 字段) | `BANGUMI_DISABLED` |
+| `RegisterEnabled` | `handleRegister` | — |
+
+注意：`TelegramMode` 控制的是 **Bot 模式**（`Global.telegram_mode`），不是 Telegram 绑定功能。用户自助绑定/解绑/换绑的 handler **不应**受 `TelegramMode` 限制。Bot 相关 handler 本身已有独立的 `telegramConfigured()` 检查。
+
+续期码（`POST /invite/renew-codes`）在 `InviteEnabled=false` 时**仍可用**——这是刻意设计（测试 `TestInviteDisabledStillAllowsExistingChildRenewCodes` 验证），续期码是已有邀请树的维护功能，不是新邀请入口。
+
+### 操作审计日志约定
+
+`internal/api/audit_handlers.go` 提供 `a.audit(r, action, category, targetUID, detail)` 便捷方法：
+- 自动从 `current(r)` 提取操作者 UID/Username
+- 自动记录客户端 IP
+- category: `"admin"` / `"user"` / `"system"`
+- 保留上限 10000 条，超出自动裁剪
+- 所有**状态变更操作**（创建/更新/删除/启停）都应在成功后调用 `a.audit()`
+- 只读类接口（list/get/search）不需要审计
+
+已覆盖的审计点：注册码 CRUD、邀请码生成/消费、用户自助（改资料/改密/绑定Emby/签到/使用卡码）、管理员（启停用户/删除/改角色/改到期/重置密码/解绑 Telegram/强制解绑）、批量操作等。
+
+### RegCode Source 字段约定
+
+`RegCode.Source` 区分卡码来源：
+- `"admin"` — 管理员在后台手动生成（`POST /admin/regcodes`）
+- `"invite"` — 邀请系统自动生成（`POST /invite/renew-codes`，邀请人为下级生成续期码）
+- 空字符串（历史数据）— 视作 `"admin"`
+
+前端管理员卡码页面：注册码 Tab 默认筛选 `source=admin`；邀请码 Tab 展示 `source=invite` 的 RegCode 与 InviteCode 条目合并显示。
+
+### 用户列表筛选约定
+
+管理员用户列表 `/admin/users` 支持多维独立筛选，`filteredBatchUserUIDs` 必须保持口径一致：
+
+| 参数 | 含义 | 可选值 |
+|------|------|--------|
+| `role` | 角色 | `0`(管理员) / `1`(普通) / `2`(白名单) |
+| `active` | Web 账号启停 | `true` / `false` |
+| `emby` | Emby 绑定状态 | `bound` / `unbound` |
+| `emby_status` | Emby 启停状态（独立于 Web） | `active` / `disabled` |
+| `email_status` | 邮箱验证状态 | `verified` / `unverified` / `bound` / `none` |
 
 ## 常用命令
 
@@ -134,6 +247,8 @@ pnpm build
 - 资产 URL、背景 CSS、头像、上传结果等必须沿用 `api.ts` 中的安全归一化逻辑，不允许保存任意外部 `url()` 或不受控协议。
 - 前端资产、背景、头像和外链跳转必须复用 `safe-url` / API 客户端归一化逻辑，不要把后端返回值直接拼进 CSS `url()`、`href` 或图片地址。
 - 轮询、SSE、后台刷新和批量操作必须有停止条件、可见性判断或退避策略；终态任务要及时清理本地轮询状态，避免隐藏标签页持续请求。
+- 公告内容渲染统一走 `SafeAnnouncementContent`（`webui/src/lib/safe-render.tsx`），支持 Markdown / BBCode / plain 三种模式。Markdown 解析器为手写实现（无第三方 MD 库），仅支持安全子集（标题、列表、代码块、引用、分割线、行内格式、链接、图片）。列表项使用 `list-inside` 避免圆点被容器裁剪。公告板组件 `AnnouncementBoard` 支持长内容折叠（maxHeight + Expand/Collapse）。
+- 新增配置项时：后端 config struct 加字段 → `defaults()` 补默认值 → `config_admin.go` 的 `configSectionDefs()` 加 schema 定义 + `configValues()` 加值映射 → `config.production.toml` 模板中体现。邮箱白名单/黑名单/验证模式属于 Email section，不属于 SAR/Register section。
 
 ## 安全与敏感信息
 

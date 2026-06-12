@@ -259,6 +259,9 @@
 | GET | `/api/v1/admin/violations` | Admin | 违规记录列表 |
 | DELETE | `/api/v1/admin/violations/{violation_id}` | Admin | 删除单条违规记录 |
 | POST | `/api/v1/admin/violations/clear` | Admin | 清空违规记录 |
+| GET | `/api/v1/admin/audit-logs` | Admin | 操作审计日志列表（支持 category/action/uid/search 筛选与分页） |
+| DELETE | `/api/v1/admin/audit-logs/{log_id}` | Admin | 删除单条操作审计日志 |
+| POST | `/api/v1/admin/audit-logs/clear` | Admin | 清空全部审计日志（需确认短语 `CLEAR_AUDIT_LOGS`） |
 | GET | `/api/v1/admin/telegram/rebind-requests` | Admin | Telegram 换绑申请列表 |
 | POST | `/api/v1/admin/telegram/rebind-requests/{request_id}/approve` | Admin | 通过换绑申请 |
 | POST | `/api/v1/admin/telegram/rebind-requests/{request_id}/reject` | Admin | 拒绝换绑申请 |
