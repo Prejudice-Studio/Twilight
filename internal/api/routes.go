@@ -241,6 +241,11 @@ func (a *App) registerAdminRoutes() {
 	a.add(http.MethodPost, "/api/v1/admin/announcements", AuthAdmin, a.handleCreateAnnouncement)
 	a.add(http.MethodPut, "/api/v1/admin/announcements/:announcement_id", AuthAdmin, a.handleUpdateAnnouncement)
 	a.add(http.MethodDelete, "/api/v1/admin/announcements/:announcement_id", AuthAdmin, a.handleDeleteAnnouncement)
+
+	// 工单管理
+	a.add(http.MethodGet, "/api/v1/admin/tickets", AuthAdmin, a.handleAdminTickets)
+	a.add(http.MethodPut, "/api/v1/admin/tickets/:ticket_id", AuthAdmin, a.handleAdminUpdateTicket)
+	a.add(http.MethodDelete, "/api/v1/admin/tickets/:ticket_id", AuthAdmin, a.handleAdminDeleteTicket)
 	a.add(http.MethodGet, "/api/v1/admin/audit-logs", AuthAdmin, a.handleListAuditLogs)
 	a.add(http.MethodDelete, "/api/v1/admin/audit-logs/:log_id", AuthAdmin, a.handleDeleteAuditLog)
 	a.add(http.MethodPost, "/api/v1/admin/audit-logs/clear", AuthAdmin, a.handleClearAuditLogs)
@@ -318,4 +323,8 @@ func (a *App) registerStatsInviteSigninAnnouncementRoutes() {
 	a.add(http.MethodPost, "/api/v1/signin/renew", AuthUser, a.handleSigninRenew)
 	a.add(http.MethodGet, "/api/v1/signin/history", AuthUser, a.handleSigninHistory)
 	a.add(http.MethodGet, "/api/v1/announcements", AuthPublic, a.handleAnnouncements)
+
+	// 工单
+	a.add(http.MethodGet, "/api/v1/tickets", AuthUser, a.handleMyTickets)
+	a.add(http.MethodPost, "/api/v1/tickets", AuthUser, a.handleCreateTicket)
 }

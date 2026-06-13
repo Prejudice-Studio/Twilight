@@ -1123,3 +1123,21 @@ export interface PlaybackRecordWithSync {
   played_at: number;
   synced_name?: string;
 }
+
+// ==================== Tickets ====================
+
+export interface Ticket {
+  id: number;
+  uid: number;
+  username: string;
+  title: string;
+  content: string;
+  type: string;
+  status: "open" | "in_progress" | "resolved" | "closed";
+  priority: "low" | "medium" | "high" | "urgent";
+  admin_note?: string;
+  created_at: number;
+  updated_at: number;
+  resolved_at?: number;
+  closed_at?: number;
+}

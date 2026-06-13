@@ -927,10 +927,15 @@ func configSectionDefs() []configSectionDef {
 		}},
 		{Key: "Scheduler", Title: "调度器", Description: "后台任务计划", Category: "ops", Fields: []configFieldDef{
 			{Key: "enabled", Label: "启用调度", Type: "bool", Description: "启用后台任务"},
+			{Key: "tick_interval_seconds", Label: "调度间隔(秒)", Type: "int", Description: "调度器主循环检查间隔，默认 30 秒，范围 10-300"},
 			{Key: "expired_check_time", Label: "过期检查", Type: "string", Description: "每日 HH:MM"},
 			{Key: "expiring_check_time", Label: "到期提醒检查", Type: "string", Description: "每日 HH:MM"},
 			{Key: "daily_stats_time", Label: "每日统计", Type: "string", Description: "每日 HH:MM"},
 			{Key: "session_cleanup_interval", Label: "会话检查间隔", Type: "int", Description: "小时"},
+			{Key: "cleanup_no_emby_time", Label: "无Emby清理时间", Type: "string", Description: "每日 HH:MM，清理注册后长期未绑定 Emby 的账号"},
+			{Key: "cleanup_pending_emby_time", Label: "未使用资格清理时间", Type: "string", Description: "每日 HH:MM，收回长期未使用的 Emby 开通资格"},
+			{Key: "cleanup_unused_uploads_time", Label: "未使用上传清理时间", Type: "string", Description: "每日 HH:MM，清理未被引用的历史上传文件"},
+			{Key: "cleanup_audit_logs_time", Label: "审计日志清理时间", Type: "string", Description: "每日 HH:MM，按保留策略清理过期审计日志"},
 		}},
 		{Key: "SystemUpdate", Title: "自动更新", Description: "Git 拉取和服务重启", Category: "ops", Fields: []configFieldDef{
 			{Key: "auto_update_enabled", Label: "启用自动更新", Type: "bool", Description: "允许调度任务自动拉取更新"},
@@ -948,6 +953,18 @@ func configSectionDefs() []configSectionDef {
 		{Key: "BangumiSync", Title: "Bangumi 同步", Description: "Bangumi webhook 和收藏策略", Category: "integration", Fields: []configFieldDef{
 			{Key: "enabled", Label: "启用同步", Type: "bool", Description: "启用 Bangumi 同步"},
 			{Key: "webhook_secret", Label: "Webhook 密钥", Type: "secret", Description: "Bangumi webhook 校验密钥"},
+		}},
+		{Key: "Ticket", Title: "工单系统", Description: "用户提交工单与管理员处理", Category: "policy", Fields: []configFieldDef{
+			{Key: "enabled", Label: "启用工单系统", Type: "bool", Description: "开启后用户可提交工单，管理员可在后台管理"},
+			{Key: "types", Label: "工单类型", Type: "list", Description: "自定义工单类型列表，默认：bug, feature, question, account, other"},
+		}},
+		{Key: "AuditLog", Title: "操作审计", Description: "审计日志记录与自动清理策略", Category: "security", Fields: []configFieldDef{
+			{Key: "enabled", Label: "启用审计日志", Type: "bool", Description: "关闭后不再记录新的审计日志；已有日志不受影响"},
+			{Key: "auto_cleanup_enabled", Label: "启用自动清理", Type: "bool", Description: "开启后调度任务按下方策略自动清理过期审计日志；默认关闭"},
+			{Key: "retention_days", Label: "保留天数", Type: "int", Description: "超出此天数的日志将被清理；0=不限天数"},
+			{Key: "max_entries", Label: "最大保留条数", Type: "int", Description: "超出此条数时保留最新 N 条；0=不限条数"},
+			{Key: "preserve_admin", Label: "保留管理员操作", Type: "bool", Description: "按天数清理时跳过管理员 (category=admin) 的操作日志"},
+			{Key: "cleanup_check_time", Label: "清理检查时间", Type: "string", Description: "每日执行清理检查的时间 HH:MM"},
 		}},
 		{Key: "Email", Title: "邮箱验证", Description: "SMTP 发信、验证码与强制绑定策略", Category: "integration", Fields: []configFieldDef{
 			{Key: "enabled", Label: "启用邮箱验证", Type: "bool", Description: "总开关：关闭后所有发码 / 邮箱找回 / 强制绑定均降级，前端隐藏入口"},
@@ -1035,10 +1052,16 @@ func configValues(cfg config.Config) map[string]map[string]any {
 			"email_validation_mode": cfg.EmailValidationMode, "email_whitelist": cfg.EmailWhitelist, "email_blacklist": cfg.EmailBlacklist,
 		},
 		"Security":     {"forgot_password_enabled": cfg.ForgotPasswordEnabled, "forgot_password_emby_enabled": cfg.ForgotPasswordEmbyEnabled, "forgot_password_email_enabled": cfg.ForgotPasswordEmailEnabled, "bot_internal_secret": cfg.BotInternalSecret},
-		"Scheduler":    {"enabled": cfg.SchedulerEnabled, "expired_check_time": cfg.SchedulerExpiredCheckTime, "expiring_check_time": cfg.SchedulerExpiringCheckTime, "daily_stats_time": cfg.SchedulerDailyStatsTime, "session_cleanup_interval": cfg.SchedulerSessionCleanupInterval},
+		"Scheduler":    {"enabled": cfg.SchedulerEnabled, "tick_interval_seconds": cfg.SchedulerTickIntervalSeconds, "expired_check_time": cfg.SchedulerExpiredCheckTime, "expiring_check_time": cfg.SchedulerExpiringCheckTime, "daily_stats_time": cfg.SchedulerDailyStatsTime, "session_cleanup_interval": cfg.SchedulerSessionCleanupInterval, "cleanup_no_emby_time": cfg.SchedulerCleanupNoEmbyTime, "cleanup_pending_emby_time": cfg.SchedulerCleanupPendingEmbyTime, "cleanup_unused_uploads_time": cfg.SchedulerCleanupUnusedUploadsTime, "cleanup_audit_logs_time": cfg.SchedulerCleanupAuditLogsTime},
 		"SystemUpdate": {"auto_update_enabled": cfg.SystemUpdateEnabled, "repo_url": cfg.SystemUpdateRepoURL, "branch": cfg.SystemUpdateBranch, "restart_services": cfg.SystemUpdateRestartServices, "auto_update_trigger_type": cfg.SystemUpdateTriggerType, "auto_update_interval_hours": cfg.SystemUpdateIntervalHours, "auto_update_time": cfg.SystemUpdateTime},
 		"Notification": {"enabled": cfg.NotificationEnabled, "expiry_remind_days": cfg.NotificationExpiryRemindDays},
 		"BangumiSync":  {"enabled": cfg.BangumiEnabled, "webhook_secret": cfg.BangumiWebhookSecret},
+		"Ticket":       {"enabled": cfg.TicketSystemEnabled, "types": cfg.TicketTypes},
+		"AuditLog": {
+			"enabled": cfg.AuditLogEnabled, "auto_cleanup_enabled": cfg.AuditLogAutoCleanupEnabled,
+			"retention_days": cfg.AuditLogRetentionDays, "max_entries": cfg.AuditLogMaxEntries,
+			"preserve_admin": cfg.AuditLogPreserveAdmin, "cleanup_check_time": cfg.AuditLogCleanupCheckTime,
+		},
 	}
 }
 

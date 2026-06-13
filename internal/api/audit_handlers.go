@@ -9,7 +9,12 @@ import (
 )
 
 // audit 是写入操作审计日志的便捷方法。category 为 "admin" / "user" / "system"。
+// AuditLog.enabled=false 时静默跳过记录。
 func (a *App) audit(r *http.Request, action, category string, targetUID int64, detail map[string]any) {
+	cfg := a.cfg()
+	if !cfg.AuditLogEnabled {
+		return
+	}
 	p := current(r)
 	entry := store.AuditLog{
 		UID:       p.User.UID,
@@ -20,8 +25,11 @@ func (a *App) audit(r *http.Request, action, category string, targetUID int64, d
 		Detail:    detail,
 		IP:        a.clientIP(r),
 	}
-	// 保留上限 10000 条，超出自动裁剪旧数据。
-	_ = a.store().AddAuditLog(entry, 10000)
+	if cfg.AuditLogMaxEntries > 0 {
+		_ = a.store().AddAuditLog(entry, cfg.AuditLogMaxEntries)
+	} else {
+		_ = a.store().AddAuditLog(entry, 10000)
+	}
 }
 
 func (a *App) handleListAuditLogs(w http.ResponseWriter, r *http.Request, _ Params) {

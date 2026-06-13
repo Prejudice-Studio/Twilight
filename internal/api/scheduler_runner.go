@@ -559,6 +559,24 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 			return result, nil, fmt.Errorf("%s", asString(result["message"]))
 		}
 		return result, []string{asString(result["message"])}, nil
+	case "cleanup_audit_logs":
+		cfg := a.cfg()
+		if !cfg.AuditLogAutoCleanupEnabled {
+			return map[string]any{"success": true, "skipped": true, "reason": "auto cleanup disabled"}, nil, nil
+		}
+		logs := []string{}
+		// 按条数裁剪（保留最新 N 条）
+		if cfg.AuditLogMaxEntries > 0 {
+			_ = a.store().PruneAuditLogs(cfg.AuditLogMaxEntries)
+			logs = append(logs, fmt.Sprintf("enforced max %d entries (current: %d)", cfg.AuditLogMaxEntries, a.store().AuditLogCount()))
+		}
+		// 按天数裁剪
+		if cfg.AuditLogRetentionDays > 0 {
+			cutoff := time.Now().Add(-time.Duration(cfg.AuditLogRetentionDays) * 24 * time.Hour).Unix()
+			removed := a.store().PruneAuditLogsByAge(cutoff, cfg.AuditLogPreserveAdmin)
+			logs = append(logs, fmt.Sprintf("removed %d entries older than %d days (preserve_admin=%v)", removed, cfg.AuditLogRetentionDays, cfg.AuditLogPreserveAdmin))
+		}
+		return map[string]any{"success": true, "current": a.store().AuditLogCount()}, logs, nil
 	default:
 		return map[string]any{"success": false}, nil, fmt.Errorf("unknown scheduler job: %s", jobID)
 	}

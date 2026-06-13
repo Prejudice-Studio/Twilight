@@ -80,6 +80,7 @@ const SUMMARY_LABEL_KEYS = [
   "roster_size", "bots_in_roster", "admins_excluded", "excluded_total", "targets",
   "dry_run", "not_in_group", "kicked", "skipped", "telegram_bound", "invalid_telegram_id",
   "duplicate_telegram_ids", "rebind_state_mismatch",
+  "current", "removed", "reason",
 ] as const;
 
 const SUMMARY_LABEL_KEY_SET = new Set<string>(SUMMARY_LABEL_KEYS);
@@ -186,6 +187,15 @@ function cleanupSchedulerRuntimeConfig(t: TFunc, jobID: string) {
       hasAutoEnableRejoined: true,
       title: t("adminScheduler.enforceGroupTitle"),
       description: t("adminScheduler.enforceGroupDescription"),
+    };
+  }
+  if (jobID === "cleanup_audit_logs") {
+    return {
+      hasDays: true,
+      hasRetentionDays: true,
+      hasMaxEntries: true,
+      title: t("adminScheduler.cleanupAuditLogsTitle"),
+      description: t("adminScheduler.cleanupAuditLogsDescription"),
     };
   }
   return null;
@@ -541,7 +551,7 @@ function jobIsRunning(job: SchedulerJobItem, running: Record<string, boolean>) {
 }
 
 // 哪些任务在手动触发时支持参数面板
-const PARAMETERIZED_JOBS = new Set(["cleanup_no_emby", "cleanup_pending_emby_entitlements", "kick_unknown_group_members"]);
+const PARAMETERIZED_JOBS = new Set(["cleanup_no_emby", "cleanup_pending_emby_entitlements", "cleanup_audit_logs", "kick_unknown_group_members"]);
 
 export default function AdminSchedulerPage() {
   const { toast } = useToast();

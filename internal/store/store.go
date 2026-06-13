@@ -76,6 +76,7 @@ type State struct {
 	NextViolationLogID   int64                          `json:"next_violation_log_id"`
 	NextAuditLogID       int64                          `json:"next_audit_log_id"`
 	NextBangumiSyncLogID int64                          `json:"next_bangumi_sync_log_id"`
+	NextTicketID         int64                          `json:"next_ticket_id"`
 	Users                map[int64]User                 `json:"users"`
 	APIKeys              map[int64]APIKey               `json:"api_keys"`
 	MediaRequests        map[int64]MediaRequest         `json:"media_requests"`
@@ -98,6 +99,7 @@ type State struct {
 	ViolationLogs        []ViolationLog                 `json:"violation_logs"`
 	AuditLogs            []AuditLog                     `json:"audit_logs"`
 	BangumiSyncLogs      []BangumiSyncLog               `json:"bangumi_sync_logs"`
+	Tickets              map[int64]Ticket               `json:"tickets"`
 	// TelegramBotOffset 持久化最近一次成功 ack 的 update_id+1。
 	// 重启 / token 切换时直接从这个值恢复，避免对 24h backlog 重新分发。
 	// 0 表示未设置 / 历史 state，按"从 0 开始"处理（getUpdates 会拿到队列里
@@ -390,6 +392,22 @@ type BangumiSyncLog struct {
 	Status       string `json:"status"`
 	Message      string `json:"message,omitempty"`
 	CreatedAt    int64  `json:"created_at"`
+}
+
+type Ticket struct {
+	ID         int64  `json:"id"`
+	UID        int64  `json:"uid"`
+	Username   string `json:"username"`
+	Title      string `json:"title"`
+	Content    string `json:"content"`
+	Type       string `json:"type"`
+	Status     string `json:"status"`
+	Priority   string `json:"priority"`
+	AdminNote  string `json:"admin_note,omitempty"`
+	CreatedAt  int64  `json:"created_at"`
+	UpdatedAt  int64  `json:"updated_at"`
+	ResolvedAt int64  `json:"resolved_at,omitempty"`
+	ClosedAt   int64  `json:"closed_at,omitempty"`
 }
 
 type RebindRequest struct {
@@ -953,8 +971,20 @@ func (s *State) ensure() {
 		}
 		s.NextBangumiSyncLogID = max + 1
 	}
+	if s.NextTicketID <= 0 {
+		max := int64(0)
+		for _, t := range s.Tickets {
+			if t.ID > max {
+				max = t.ID
+			}
+		}
+		s.NextTicketID = max + 1
+	}
 	if s.BangumiSyncLogs == nil {
 		s.BangumiSyncLogs = []BangumiSyncLog{}
+	}
+	if s.Tickets == nil {
+		s.Tickets = map[int64]Ticket{}
 	}
 }
 
@@ -2290,6 +2320,13 @@ func (s *Store) DeleteUser(uid int64) error {
 			}
 		}
 
+		// 工单：用户删除时连带删除其提交的工单。
+		for id, ticket := range s.state.Tickets {
+			if ticket.UID == uid {
+				delete(s.state.Tickets, id)
+			}
+		}
+
 		return nil
 	})
 }
@@ -2747,6 +2784,103 @@ func (s *Store) DeleteAnnouncement(id int64) error {
 			return ErrNotFound
 		}
 		delete(s.state.Announcements, id)
+		return nil
+	})
+}
+
+// ---- Tickets ----
+
+func (s *Store) UpsertTicket(t Ticket) (Ticket, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	err := s.mutateAndSaveLocked(func() error {
+		now := time.Now().Unix()
+		if t.ID == 0 {
+			t.ID = s.state.NextTicketID
+			s.state.NextTicketID++
+			t.CreatedAt = now
+		} else if existing, ok := s.state.Tickets[t.ID]; ok {
+			if t.CreatedAt == 0 {
+				t.CreatedAt = existing.CreatedAt
+			}
+			if t.UID == 0 {
+				t.UID = existing.UID
+			}
+			if t.Username == "" {
+				t.Username = existing.Username
+			}
+			// Status transition timestamps
+			if t.Status == "resolved" && existing.Status != "resolved" && t.ResolvedAt == 0 {
+				t.ResolvedAt = now
+			}
+			if t.Status == "closed" && existing.Status != "closed" && t.ClosedAt == 0 {
+				t.ClosedAt = now
+			}
+		}
+		t.UpdatedAt = now
+		if t.Type == "" {
+			t.Type = "general"
+		}
+		if t.Status == "" {
+			t.Status = "open"
+		}
+		if t.Priority == "" {
+			t.Priority = "medium"
+		}
+		s.state.Tickets[t.ID] = t
+		return nil
+	})
+	if err != nil {
+		return Ticket{}, err
+	}
+	return t, nil
+}
+
+func (s *Store) ListTickets(filter TicketFilter) []Ticket {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]Ticket, 0)
+	for _, t := range s.state.Tickets {
+		if filter.UID > 0 && t.UID != filter.UID {
+			continue
+		}
+		if filter.Status != "" && t.Status != filter.Status {
+			continue
+		}
+		if filter.Type != "" && t.Type != filter.Type {
+			continue
+		}
+		if filter.Priority != "" && t.Priority != filter.Priority {
+			continue
+		}
+		out = append(out, t)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
+	return out
+}
+
+type TicketFilter struct {
+	UID      int64
+	Status   string
+	Type     string
+	Priority string
+}
+
+func (s *Store) Ticket(id int64) (Ticket, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	t, ok := s.state.Tickets[id]
+	return t, ok
+}
+
+func (s *Store) DeleteTicket(id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mutateAndSaveLocked(func() error {
+		if _, ok := s.state.Tickets[id]; !ok {
+			return ErrNotFound
+		}
+		delete(s.state.Tickets, id)
 		return nil
 	})
 }
@@ -3594,6 +3728,37 @@ func (s *Store) PruneAuditLogs(keep int) error {
 		}
 		return nil
 	})
+}
+
+// PruneAuditLogsByAge 删除早于 cutoff 的审计日志。preserveAdmin 为 true 时保留管理员操作。
+func (s *Store) PruneAuditLogsByAge(cutoffUnix int64, preserveAdmin bool) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	removed := 0
+	_ = s.mutateAndSaveLocked(func() error {
+		filtered := s.state.AuditLogs[:0]
+		for _, log := range s.state.AuditLogs {
+			if log.CreatedAt < cutoffUnix {
+				if preserveAdmin && log.Category == "admin" {
+					filtered = append(filtered, log)
+					continue
+				}
+				removed++
+				continue
+			}
+			filtered = append(filtered, log)
+		}
+		s.state.AuditLogs = filtered
+		return nil
+	})
+	return removed
+}
+
+// AuditLogCount 返回当前审计日志总数。
+func (s *Store) AuditLogCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.state.AuditLogs)
 }
 
 const maxStoredBangumiSyncLogs = 5000

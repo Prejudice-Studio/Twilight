@@ -346,6 +346,8 @@ api_key_default_per_minute = 300
 [Scheduler]
 timezone = "Asia/Shanghai"
 enabled = true
+# 主循环检查间隔（秒，10-300）
+tick_interval_seconds = 30
 # 过期用户清理（HH:MM，默认值）
 expired_check_time = "03:00"
 # 即将过期提醒（默认值）
@@ -356,6 +358,14 @@ daily_stats_time = "00:05"
 session_cleanup_interval = 6
 # Emby 用户同步间隔（小时，默认值）
 emby_sync_interval = 6
+# 清理无 Emby 账号（每日 HH:MM）
+cleanup_no_emby_time = "03:30"
+# 清理未使用 Emby 开通资格（每日 HH:MM）
+cleanup_pending_emby_time = "03:45"
+# 清理未使用上传文件（每日 HH:MM）
+cleanup_unused_uploads_time = "02:20"
+# 审计日志自动清理（每日 HH:MM）
+cleanup_audit_logs_time = "04:30"
 
 # ───────── 系统自动更新 ─────────
 [SystemUpdate]
@@ -393,6 +403,26 @@ private_collection = true
 block_keywords = []
 # 播放进度达到多少 % 才算"看完"
 min_progress_percent = 80
+
+# ───────── 工单系统 ─────────
+[Ticket]
+enabled = false
+types = ["bug", "feature", "question", "account", "other"]
+
+# ───────── 操作审计 ─────────
+[AuditLog]
+# 总开关：关闭后不再记录新的审计日志
+enabled = true
+# 自动清理：默认关闭，管理员可在后台手动清理
+auto_cleanup_enabled = false
+# 日志保留天数（0 = 不限）
+retention_days = 90
+# 最大保留条数（0 = 不限）
+max_entries = 10000
+# 按天数清理时保留管理员操作日志
+preserve_admin = true
+# 每日清理检查时间
+cleanup_check_time = "04:30"
 
 # ───────── 邮箱验证 / SMTP 发信 ─────────
 # 邮箱验证子系统：登录态绑定/验证邮箱、登出态找回密码、强制绑定门、改密二次校验。

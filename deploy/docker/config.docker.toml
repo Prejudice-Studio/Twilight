@@ -162,10 +162,15 @@ api_key_default_per_minute = 300
 # ───────── 调度器 ─────────
 [Scheduler]
 enabled = true
+tick_interval_seconds = 30
 expired_check_time = "03:00"
 expiring_check_time = "09:00"
 daily_stats_time = "00:05"
 session_cleanup_interval = 6
+cleanup_no_emby_time = "03:30"
+cleanup_pending_emby_time = "03:45"
+cleanup_unused_uploads_time = "02:20"
+cleanup_audit_logs_time = "04:30"
 
 # ───────── 自动更新 ─────────
 # Docker deployment should NOT use built-in git auto-update.
@@ -185,6 +190,20 @@ expiry_remind_days = 3
 [BangumiSync]
 enabled = false
 webhook_secret = ""
+
+# ───────── 工单系统 ─────────
+[Ticket]
+enabled = false
+types = ["bug", "feature", "question", "account", "other"]
+
+# ───────── 操作审计 ─────────
+[AuditLog]
+enabled = true
+auto_cleanup_enabled = false
+retention_days = 90
+max_entries = 10000
+preserve_admin = true
+cleanup_check_time = "04:30"
 
 # ───────── 邮箱验证 ─────────
 [Email]

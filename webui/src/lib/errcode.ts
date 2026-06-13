@@ -33,6 +33,12 @@ export type ErrCode =
   | "AUTH_PASSWORD_WEAK"
   | "AUTH_PASSWORD_HASH_FAILED"
   | "AUTH_FORGOT_PASSWORD_DISABLED"
+  // === 工单 ===
+  | "TICKET_DISABLED"
+  | "TICKET_NOT_FOUND"
+  | "TICKET_RATE_LIMITED"
+  // === 操作日志 ===
+  | "AUDIT_LOG_NOT_FOUND"
   // === 用户 / 注册 ===
   | "USER_REGISTER_RATE_LIMITED"
   | "USER_REGISTER_DISABLED"

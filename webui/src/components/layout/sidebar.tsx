@@ -34,6 +34,7 @@ import {
   Mail,
   ClipboardList,
   BookOpen,
+  MessageSquareMore,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
@@ -65,6 +66,7 @@ type MaybeStartViewTransition = {
 export const userNavItems: SidebarNavItem[] = [
   { href: "/dashboard", labelKey: "navigation.dashboard", icon: LayoutDashboard },
   { href: "/announcements", labelKey: "navigation.announcements", icon: Megaphone },
+  { href: "/tickets", labelKey: "navigation.tickets", icon: MessageSquareMore },
   { href: "/media", labelKey: "navigation.mediaRequest", icon: Film },
   { href: "/bangumi", labelKey: "navigation.bangumi", icon: BookOpen },
   { href: "/score", labelKey: "navigation.signin", icon: Coins },
@@ -75,6 +77,7 @@ export const userNavItems: SidebarNavItem[] = [
 export const adminNavItems: SidebarNavItem[] = [
   { href: "/admin/users", labelKey: "navigation.users", icon: Users },
   { href: "/admin/announcements", labelKey: "navigation.adminAnnouncements", icon: Megaphone },
+  { href: "/admin/tickets", labelKey: "navigation.adminTickets", icon: MessageSquareMore },
   { href: "/admin/regcodes", labelKey: "navigation.regcodes", icon: FileText },
   { href: "/admin/invite", labelKey: "navigation.inviteForest", icon: Network },
   { href: "/admin/requests", labelKey: "navigation.requestReview", icon: Film },

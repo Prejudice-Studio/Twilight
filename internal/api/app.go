@@ -764,9 +764,9 @@ func (a *App) authenticateAPIKey(r *http.Request) (*principal, bool) {
 		auth := strings.TrimSpace(r.Header.Get("Authorization"))
 		lower := strings.ToLower(auth)
 		if strings.HasPrefix(lower, "bearer ") {
-			key = strings.TrimSpace(auth[7:])
+			key = strings.TrimSpace(auth[len("bearer "):])
 		} else if strings.HasPrefix(lower, "apikey ") {
-			key = strings.TrimSpace(auth[7:])
+			key = strings.TrimSpace(auth[len("apikey "):])
 		}
 	}
 	if key == "" && r.URL.Query().Get("apikey") != "" {
@@ -804,7 +804,7 @@ func current(r *http.Request) principal {
 
 func bearerToken(header string) string {
 	if strings.HasPrefix(strings.ToLower(header), "bearer ") {
-		return strings.TrimSpace(header[7:])
+		return strings.TrimSpace(header[len("bearer "):])
 	}
 	return ""
 }
@@ -1046,11 +1046,15 @@ func normalizeCORSOrigin(raw string) string {
 }
 
 func (a *App) setSessionCookie(w http.ResponseWriter, token string, expires time.Time) {
+	domain := strings.TrimSpace(a.cfg().CookieDomain)
+	if domain != "" && (strings.Count(domain, ".") < 1 || !strings.Contains(domain, ".")) {
+		domain = ""
+	}
 	cookie := &http.Cookie{
 		Name:     a.cfg().SessionCookie,
 		Value:    token,
 		Path:     "/",
-		Domain:   a.cfg().CookieDomain,
+		Domain:   domain,
 		Expires:  expires,
 		MaxAge:   int(time.Until(expires).Seconds()),
 		HttpOnly: true,

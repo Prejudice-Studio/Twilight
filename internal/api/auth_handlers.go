@@ -115,6 +115,7 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request, _ Params) {
 		d.LastSeen = now
 	})
 	_ = a.store().AddLoginLog(store.LoginLog{UID: u.UID, IP: ip, DeviceID: deviceID, DeviceName: ua, Client: "web", Time: now})
+	a.audit(r, "login", "user", 0, map[string]any{"ip": ip, "device": deviceID})
 	// 设备数限制为可选（默认关闭）：开启后淘汰超额的未受信任旧设备，绝不踢掉本次
 	// 登录设备或受信任设备，避免把用户锁在门外。
 	if cfg := a.cfg(); cfg.DeviceLimitEnabled && cfg.MaxDevices > 0 {

@@ -74,6 +74,7 @@ import type {
   SystemHealth,
   SystemInfo,
   SystemStats,
+  Ticket,
   TelegramRebindRequest,
   TelegramStatus,
   User,
@@ -2240,6 +2241,39 @@ class ApiClient {
       mode: options?.deleteEmby === false ? "local_only" : "with_emby",
       cascadeDepth: options?.cascadeDepth ?? 1,
     });
+  }
+
+  // ==================== Tickets ====================
+
+  async getMyTickets() {
+    return this.request<{ tickets: Ticket[]; total: number; ticket_types: string[] }>("/tickets");
+  }
+
+  async createTicket(payload: { title: string; content: string; type?: string; priority?: string }) {
+    return this.request<Ticket>("/tickets", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async adminListTickets(params: { uid?: number; status?: string; type?: string; priority?: string } = {}) {
+    const query = new URLSearchParams();
+    if (params.uid) query.set("uid", String(params.uid));
+    if (params.status) query.set("status", params.status);
+    if (params.type) query.set("type", params.type);
+    if (params.priority) query.set("priority", params.priority);
+    return this.request<{ tickets: Ticket[]; total: number; ticket_types: string[] }>(`/admin/tickets?${query.toString()}`);
+  }
+
+  async adminUpdateTicket(id: number, payload: { status?: string; priority?: string; type?: string; admin_note?: string }) {
+    return this.request<Ticket>(`/admin/tickets/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async adminDeleteTicket(id: number) {
+    return this.request(`/admin/tickets/${id}`, { method: "DELETE" });
   }
 }
 

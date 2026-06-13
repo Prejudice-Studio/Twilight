@@ -51,7 +51,7 @@ func (a *App) runSchedulerLoop(ctx context.Context) (err error) {
 			err = fmt.Errorf("scheduler loop panic: %v", r)
 		}
 	}()
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(time.Duration(clamp(a.cfg().SchedulerTickIntervalSeconds, 10, 300)) * time.Second)
 	defer ticker.Stop()
 	a.runDueSchedulerJobs(ctx)
 	for {
@@ -403,9 +403,9 @@ func (a *App) schedulerDefaultTriggerSpec(jobID string) map[string]any {
 		}
 		return map[string]any{"type": "interval", "seconds": hours * 3600}
 	case "cleanup_no_emby":
-		return dailySpec("03:30", 3, 30)
+		return dailySpec(a.cfg().SchedulerCleanupNoEmbyTime, 3, 30)
 	case "cleanup_pending_emby_entitlements":
-		return dailySpec("03:45", 3, 45)
+		return dailySpec(a.cfg().SchedulerCleanupPendingEmbyTime, 3, 45)
 	case "system_auto_update":
 		switch strings.ToLower(strings.TrimSpace(a.cfg().SystemUpdateTriggerType)) {
 		case "daily", "cron_daily":
@@ -422,7 +422,9 @@ func (a *App) schedulerDefaultTriggerSpec(jobID string) map[string]any {
 	case "emby_sync", "kick_unknown_group_members":
 		return map[string]any{"type": "manual"}
 	case "cleanup_unused_uploads":
-		return dailySpec("02:20", 2, 20)
+		return dailySpec(a.cfg().SchedulerCleanupUnusedUploadsTime, 2, 20)
+	case "cleanup_audit_logs":
+		return dailySpec(a.cfg().SchedulerCleanupAuditLogsTime, 4, 30)
 	default:
 		return dailySpec("03:00", 3, 0)
 	}

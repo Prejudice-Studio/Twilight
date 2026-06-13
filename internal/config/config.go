@@ -219,18 +219,23 @@ type Config struct {
 	RateLimitAdminIconPerMinute       int
 	RateLimitAPIKeyDefaultPerMinute   int
 
-	SchedulerEnabled                bool
-	SchedulerExpiredCheckTime       string
-	SchedulerExpiringCheckTime      string
-	SchedulerDailyStatsTime         string
-	SchedulerSessionCleanupInterval int
-	SystemUpdateEnabled             bool
-	SystemUpdateRepoURL             string
-	SystemUpdateBranch              string
-	SystemUpdateRestartServices     bool
-	SystemUpdateTriggerType         string
-	SystemUpdateIntervalHours       int
-	SystemUpdateTime                string
+	SchedulerEnabled                  bool
+	SchedulerExpiredCheckTime         string
+	SchedulerExpiringCheckTime        string
+	SchedulerDailyStatsTime           string
+	SchedulerSessionCleanupInterval   int
+	SchedulerCleanupNoEmbyTime        string
+	SchedulerCleanupPendingEmbyTime   string
+	SchedulerCleanupUnusedUploadsTime string
+	SchedulerCleanupAuditLogsTime     string
+	SchedulerTickIntervalSeconds      int
+	SystemUpdateEnabled               bool
+	SystemUpdateRepoURL               string
+	SystemUpdateBranch                string
+	SystemUpdateRestartServices       bool
+	SystemUpdateTriggerType           string
+	SystemUpdateIntervalHours         int
+	SystemUpdateTime                  string
 
 	MediaRequestEnabled          bool
 	MaxConcurrentRequestsPerUser int
@@ -261,6 +266,16 @@ type Config struct {
 	ForgotPasswordEnabled      bool
 	ForgotPasswordEmbyEnabled  bool
 	ForgotPasswordEmailEnabled bool
+
+	TicketSystemEnabled bool
+	TicketTypes         []string
+
+	AuditLogEnabled            bool
+	AuditLogAutoCleanupEnabled bool
+	AuditLogRetentionDays      int
+	AuditLogMaxEntries         int
+	AuditLogPreserveAdmin      bool
+	AuditLogCleanupCheckTime   string
 
 	AuthBackgroundURL string
 
@@ -454,6 +469,11 @@ func Load(path string) (Config, error) {
 	cfg.SchedulerExpiringCheckTime = reader.stringValue(cfg.SchedulerExpiringCheckTime, "Scheduler.expiring_check_time", "expiring_check_time")
 	cfg.SchedulerDailyStatsTime = reader.stringValue(cfg.SchedulerDailyStatsTime, "Scheduler.daily_stats_time", "daily_stats_time")
 	cfg.SchedulerSessionCleanupInterval = reader.intValue(cfg.SchedulerSessionCleanupInterval, "Scheduler.session_cleanup_interval", "session_cleanup_interval")
+	cfg.SchedulerCleanupNoEmbyTime = reader.stringValue(cfg.SchedulerCleanupNoEmbyTime, "Scheduler.cleanup_no_emby_time", "cleanup_no_emby_time")
+	cfg.SchedulerCleanupPendingEmbyTime = reader.stringValue(cfg.SchedulerCleanupPendingEmbyTime, "Scheduler.cleanup_pending_emby_time", "cleanup_pending_emby_time")
+	cfg.SchedulerCleanupUnusedUploadsTime = reader.stringValue(cfg.SchedulerCleanupUnusedUploadsTime, "Scheduler.cleanup_unused_uploads_time", "cleanup_unused_uploads_time")
+	cfg.SchedulerCleanupAuditLogsTime = reader.stringValue(cfg.SchedulerCleanupAuditLogsTime, "Scheduler.cleanup_audit_logs_time", "cleanup_audit_logs_time")
+	cfg.SchedulerTickIntervalSeconds = reader.intValue(cfg.SchedulerTickIntervalSeconds, "Scheduler.tick_interval_seconds", "scheduler_tick_interval_seconds")
 	cfg.SystemUpdateEnabled = reader.boolValue(cfg.SystemUpdateEnabled, "SystemUpdate.auto_update_enabled", "auto_update_enabled")
 	cfg.SystemUpdateRepoURL = reader.stringValue(cfg.SystemUpdateRepoURL, "SystemUpdate.repo_url", "repo_url")
 	cfg.SystemUpdateBranch = reader.stringValue(cfg.SystemUpdateBranch, "SystemUpdate.branch", "branch")
@@ -467,6 +487,14 @@ func Load(path string) (Config, error) {
 	cfg.ForgotPasswordEnabled = reader.boolValue(cfg.ForgotPasswordEnabled, "Security.forgot_password_enabled", "forgot_password_enabled")
 	cfg.ForgotPasswordEmbyEnabled = reader.boolValue(cfg.ForgotPasswordEmbyEnabled, "Security.forgot_password_emby_enabled", "forgot_password_emby_enabled")
 	cfg.ForgotPasswordEmailEnabled = reader.boolValue(cfg.ForgotPasswordEmailEnabled, "Security.forgot_password_email_enabled", "forgot_password_email_enabled")
+	cfg.TicketSystemEnabled = reader.boolValue(cfg.TicketSystemEnabled, "Ticket.enabled", "SAR.ticket_enabled", "ticket_system_enabled")
+	cfg.TicketTypes = reader.stringListValue(cfg.TicketTypes, "Ticket.types", "SAR.ticket_types", "ticket_types")
+	cfg.AuditLogEnabled = reader.boolValue(cfg.AuditLogEnabled, "AuditLog.enabled", "audit_log_enabled")
+	cfg.AuditLogAutoCleanupEnabled = reader.boolValue(cfg.AuditLogAutoCleanupEnabled, "AuditLog.auto_cleanup_enabled", "audit_log_auto_cleanup_enabled")
+	cfg.AuditLogRetentionDays = reader.intValue(cfg.AuditLogRetentionDays, "AuditLog.retention_days", "audit_log_retention_days")
+	cfg.AuditLogMaxEntries = reader.intValue(cfg.AuditLogMaxEntries, "AuditLog.max_entries", "audit_log_max_entries")
+	cfg.AuditLogPreserveAdmin = reader.boolValue(cfg.AuditLogPreserveAdmin, "AuditLog.preserve_admin", "audit_log_preserve_admin")
+	cfg.AuditLogCleanupCheckTime = reader.stringValue(cfg.AuditLogCleanupCheckTime, "AuditLog.cleanup_check_time", "audit_log_cleanup_check_time")
 	cfg.AuthBackgroundURL = reader.stringValue(cfg.AuthBackgroundURL, "Global.auth_background_url", "auth_background_url")
 
 	applyEnv(&cfg)
@@ -558,6 +586,11 @@ func defaults() Config {
 		SchedulerExpiringCheckTime:        "09:00",
 		SchedulerDailyStatsTime:           "00:05",
 		SchedulerSessionCleanupInterval:   6,
+		SchedulerCleanupNoEmbyTime:        "03:30",
+		SchedulerCleanupPendingEmbyTime:   "03:45",
+		SchedulerCleanupUnusedUploadsTime: "02:20",
+		SchedulerCleanupAuditLogsTime:     "04:30",
+		SchedulerTickIntervalSeconds:      30,
 		SystemUpdateRepoURL:               "https://github.com/Prejudice-Studio/Twilight.git",
 		SystemUpdateBranch:                "main",
 		SystemUpdateRestartServices:       true,
@@ -594,6 +627,14 @@ func defaults() Config {
 		ForgotPasswordEnabled:             true,
 		ForgotPasswordEmbyEnabled:         true,
 		ForgotPasswordEmailEnabled:        true,
+		TicketSystemEnabled:               false,
+		TicketTypes:                       []string{"bug", "feature", "question", "account", "other"},
+		AuditLogEnabled:                   true,
+		AuditLogAutoCleanupEnabled:        false,
+		AuditLogRetentionDays:             90,
+		AuditLogMaxEntries:                10000,
+		AuditLogPreserveAdmin:             true,
+		AuditLogCleanupCheckTime:          "04:30",
 		SMTPPort:                          587,
 		SMTPEncryption:                    "starttls",
 		SMTPTimeoutSeconds:                10,

@@ -1126,6 +1126,7 @@ func (a *App) handleSystemInfo(w http.ResponseWriter, r *http.Request, _ Params)
 			"forgot_password_enabled":       cfg.ForgotPasswordEnabled,
 			"forgot_password_emby_enabled":  cfg.ForgotPasswordEmbyEnabled,
 			"forgot_password_email_enabled": cfg.ForgotPasswordEmailEnabled,
+			"ticket_system":                 cfg.TicketSystemEnabled,
 		},
 		"auth_background_url": cfg.AuthBackgroundURL,
 		"limits":              map[string]any{"user_limit": cfg.UserLimit, "stream_limit": cfg.MaxStreams},
@@ -1763,6 +1764,12 @@ func (a *App) handleAdminCreateUser(w http.ResponseWriter, r *http.Request, _ Pa
 	if expiryIsPermanent(expiredAt) {
 		expiredAt = permanentExpiryUnix
 	}
+	if email := stringValue(payload, "email"); email != "" {
+		if err := validate.ValidateEmailFormat(email); err != nil {
+			failWithCode(w, http.StatusBadRequest, ErrEmailInvalid, err.Error())
+			return
+		}
+	}
 	createdUser, err := a.store().CreateUser(store.User{
 		Username:         username,
 		Email:            stringValue(payload, "email"),
@@ -1816,6 +1823,14 @@ func (a *App) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request, para
 		if username, isStr := rawUsername.(string); isStr && username != "" {
 			if err := validate.ValidateUsername(username); err != nil {
 				failWithCode(w, http.StatusBadRequest, ErrUsernameInvalid, err.Error())
+				return
+			}
+		}
+	}
+	if rawEmail, ok := payload["email"]; ok {
+		if email, isStr := rawEmail.(string); isStr && email != "" {
+			if err := validate.ValidateEmailFormat(email); err != nil {
+				failWithCode(w, http.StatusBadRequest, ErrEmailInvalid, err.Error())
 				return
 			}
 		}
