@@ -78,6 +78,7 @@ func (a *App) registerRoutes() {
 
 	a.add(http.MethodGet, "/api/v1/system/info", AuthPublic, a.handleSystemInfo)
 	a.add(http.MethodGet, "/api/v1/system/server-icon", AuthPublic, a.handleServerIcon)
+	a.add(http.MethodGet, "/api/v1/system/auth-background", AuthPublic, a.handleAuthBackground)
 	a.add(http.MethodGet, "/api/v1/system/health", AuthPublic, a.handleHealth)
 	a.add(http.MethodGet, "/api/v1/system/stats", AuthAdmin, a.handleSystemStats)
 	a.add(http.MethodGet, "/api/v1/system/emby-urls", AuthUser, a.handleEmbyURLs)
@@ -90,6 +91,7 @@ func (a *App) registerRoutes() {
 	a.add(http.MethodGet, "/api/v1/system/admin/runtime/logs/stream", AuthAdmin, a.handleRuntimeLogStream)
 	a.add(http.MethodPost, "/api/v1/system/admin/update", AuthAdmin, a.handleSystemUpdate)
 	a.add(http.MethodPost, "/api/v1/system/admin/server-icon/upload", AuthAdmin, a.handleUploadServerIcon)
+	a.add(http.MethodPost, "/api/v1/system/admin/config/upload-auth-background", AuthAdmin, a.handleUploadAuthBackground)
 	a.add(http.MethodGet, "/api/v1/system/admin/database/status", AuthAdmin, a.handleDatabaseStatus)
 	a.add(http.MethodGet, "/api/v1/system/admin/database/backups", AuthAdmin, a.handleDatabaseBackups)
 	a.add(http.MethodGet, "/api/v1/system/admin/database/backups/:name", AuthAdmin, a.handleDatabaseBackupInspect)

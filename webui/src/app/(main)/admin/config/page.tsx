@@ -993,6 +993,8 @@ export default function AdminConfigPage() {
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const serverIconInputRef = useRef<HTMLInputElement | null>(null);
   const [isUploadingServerIcon, setIsUploadingServerIcon] = useState(false);
+  const authBgInputRef = useRef<HTMLInputElement | null>(null);
+  const [isUploadingAuthBg, setIsUploadingAuthBg] = useState(false);
 
   // 初始化时展开所有 sections
   useEffect(() => {
@@ -1347,6 +1349,46 @@ export default function AdminConfigPage() {
     }
   };
 
+  const handleAuthBackgroundFile = async (file?: File | null) => {
+    if (!file) return;
+    if (hasSchemaChanges || hasChanges) {
+      toast({
+        title: t("adminConfig.unsavedConfigTitle"),
+        description: t("adminConfig.unsavedChangesWarning"),
+        variant: "destructive",
+      });
+      return;
+    }
+    setIsUploadingAuthBg(true);
+    try {
+      const res = await api.uploadAuthBackground(file);
+      if (!res.success || !res.data) {
+        throw new Error(res.message || t("adminConfig.uploadFailed"));
+      }
+      await loadSchema();
+      if (configContent) {
+        await loadConfig();
+      }
+      await fetchSystemInfo(true);
+      toast({
+        title: t("adminConfig.authBgUploadSuccess"),
+        description: res.data.url,
+        variant: "success",
+      });
+    } catch (error: any) {
+      toast({
+        title: t("adminConfig.uploadFailed"),
+        description: error.message || t("adminConfig.uploadFailedHint"),
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploadingAuthBg(false);
+      if (authBgInputRef.current) {
+        authBgInputRef.current.value = "";
+      }
+    }
+  };
+
   const loadConfigBackups = useCallback(async () => {
     setIsLoadingConfigBackups(true);
     try {
@@ -1629,6 +1671,46 @@ export default function AdminConfigPage() {
                 </div>
               </CardHeader>
             </Card>
+
+            <Card className="mb-4">
+              <CardHeader className="pb-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <ImageIcon className="h-5 w-5" />
+                      {t("adminConfig.authBgTitle")}
+                    </CardTitle>
+                    <CardDescription>
+                      {t("adminConfig.authBgDescription")}
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <input
+                      ref={authBgInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/gif,image/webp,image/bmp"
+                      className="hidden"
+                      onChange={(event) => void handleAuthBackgroundFile(event.target.files?.[0])}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => authBgInputRef.current?.click()}
+                      disabled={isUploadingAuthBg || hasSchemaChanges || hasChanges}
+                    >
+                      {isUploadingAuthBg ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Upload className="mr-2 h-4 w-4" />
+                      )}
+                      {t("adminConfig.uploadBg")}
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+            </Card>
+
             {configChanges.length > 0 && (
               <Card className="mb-4 border-amber-300/70 bg-amber-50/60 dark:border-amber-800/70 dark:bg-amber-950/20">
                 <CardHeader className="pb-3">

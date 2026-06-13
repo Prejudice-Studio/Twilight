@@ -460,3 +460,88 @@ func (a *App) handleDeleteAvatar(w http.ResponseWriter, r *http.Request, _ Param
 	}
 	ok(w, "avatar deleted", nil)
 }
+
+// handleUploadAuthBackground 上传认证页背景图并自动更新配置。
+// 与 handleUploadServerIcon 同构：写盘→渲染 TOML→saveConfig→热重载。
+func (a *App) handleUploadAuthBackground(w http.ResponseWriter, r *http.Request, _ Params) {
+	p := current(r)
+	if !a.allowRate(r.Context(), rateKey("admin-auth-bg:", p.User.UID), a.cfg().RateLimitAdminIconPerMinute, time.Minute) {
+		failWithCode(w, http.StatusTooManyRequests, ErrUploadRateLimited, "上传过于频繁")
+		return
+	}
+	limit := int64(5 * 1024 * 1024)
+	if a.cfg().MaxUploadSize > 0 && a.cfg().MaxUploadSize < limit {
+		limit = a.cfg().MaxUploadSize
+	}
+	if err := r.ParseMultipartForm(limit); err != nil {
+		failWithCode(w, http.StatusBadRequest, ErrUploadInvalidPayload, "上传内容无效")
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		failWithCode(w, http.StatusBadRequest, ErrUploadFileMissing, "缺少文件")
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil || int64(len(data)) > limit {
+		failWithCode(w, http.StatusRequestEntityTooLarge, ErrUploadFileTooLarge, "文件过大")
+		return
+	}
+	contentType := strings.ToLower(strings.Split(http.DetectContentType(data), ";")[0])
+	ext, okImage := uploadImageExtension(contentType)
+	if !okImage {
+		failWithCode(w, http.StatusBadRequest, ErrUploadTypeNotAllowed, "only jpg, png, gif, webp and bmp uploads are allowed")
+		return
+	}
+	filename := "auth-bg-" + randomCode(16) + ext
+	uploadRoot := firstNonEmpty(a.cfg().UploadDir, "uploads")
+	filePath, err := ResolveWithinRoot(uploadRoot, filepath.Join("auth-background", filename))
+	if err != nil {
+		failWithCode(w, http.StatusInternalServerError, ErrUploadDirInvalid, "上传目录无效")
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o700); err != nil {
+		failWithCode(w, http.StatusInternalServerError, ErrUploadDirCreateFailed, "创建上传目录失败")
+		return
+	}
+	if err := store.WriteFileAtomicSync(filePath, data, 0o600); err != nil {
+		failWithCode(w, http.StatusInternalServerError, ErrUploadSaveFailed, "保存文件失败")
+		return
+	}
+	values := configValues(*a.cfg())
+	if values["Global"] == nil {
+		values["Global"] = map[string]any{}
+	}
+	url := filepath.ToSlash(filepath.Join("auth-background", filename))
+	values["Global"]["auth_background_url"] = url
+	info, status, message := a.saveConfigContent(renderConfigTOML(values))
+	if status != http.StatusOK {
+		_ = os.Remove(filePath)
+		failWithCode(w, status, ErrConfigSaveFailed, message)
+		return
+	}
+	ok(w, "上传成功", map[string]any{
+		"url":      "/api/v1/system/auth-background?ts=" + strconv.FormatInt(time.Now().Unix(), 10),
+		"filename": filename,
+		"reload":   info["reload"],
+	})
+}
+
+// handleAuthBackground 提供已上传的认证页背景图文件。
+func (a *App) handleAuthBackground(w http.ResponseWriter, r *http.Request, _ Params) {
+	uploadRoot := firstNonEmpty(a.cfg().UploadDir, "uploads")
+	dir, err := ResolveWithinRoot(uploadRoot, "auth-background")
+	if err != nil {
+		failWithCode(w, http.StatusNotFound, ErrAssetNotFound, "resource not found")
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) == 0 {
+		failWithCode(w, http.StatusNotFound, ErrAssetNotFound, "resource not found")
+		return
+	}
+	// 取最新的文件
+	path := filepath.Join(dir, entries[len(entries)-1].Name())
+	http.ServeFile(w, r, path)
+}

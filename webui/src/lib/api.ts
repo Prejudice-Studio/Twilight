@@ -1813,6 +1813,16 @@ class ApiClient {
     );
   }
 
+  async uploadAuthBackground(file: File) {
+    const formData = new FormData();
+    formData.append('file', file);
+    return this.requestForm<{ url: string; filename: string; reload?: unknown }>(
+      '/system/admin/config/upload-auth-background',
+      formData,
+      'POST'
+    );
+  }
+
   async terminateSchedulerJob(jobId: string) {
     return this.request<{ job_id: string; terminated: boolean }>(
       `/admin/scheduler/jobs/${encodeURIComponent(jobId)}/terminate`,
