@@ -9,16 +9,26 @@ import (
 )
 
 // audit 是写入操作审计日志的便捷方法。category 为 "admin" / "user" / "system"。
-// AuditLog.enabled=false 时静默跳过记录。
+// AuditLog.enabled=false 时静默跳过记录。从 current(r) 提取操作者身份。
 func (a *App) audit(r *http.Request, action, category string, targetUID int64, detail map[string]any) {
+	p := current(r)
+	a.auditEntry(r, p.User.UID, p.User.Username, action, category, targetUID, detail)
+}
+
+// auditWithUser 用于登录等尚无会话上下文但已知用户身份的路径。
+// 避免因为 AuthPublic 接口中 current(r) 返回零值导致审计日志 uid=0 / username=""。
+func (a *App) auditWithUser(r *http.Request, uid int64, username, action, category string, targetUID int64, detail map[string]any) {
+	a.auditEntry(r, uid, username, action, category, targetUID, detail)
+}
+
+func (a *App) auditEntry(r *http.Request, uid int64, username, action, category string, targetUID int64, detail map[string]any) {
 	cfg := a.cfg()
 	if !cfg.AuditLogEnabled {
 		return
 	}
-	p := current(r)
 	entry := store.AuditLog{
-		UID:       p.User.UID,
-		Username:  p.User.Username,
+		UID:       uid,
+		Username:  username,
 		Action:    action,
 		Category:  category,
 		TargetUID: targetUID,

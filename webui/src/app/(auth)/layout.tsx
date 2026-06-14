@@ -14,8 +14,8 @@ export default function AuthLayout({
   const bgUrl = systemInfo?.auth_background_url;
   const safeBg = useMemo(() => {
     if (!bgUrl) return undefined;
-    // 相对路径用 API_BASE 补全为绝对 URL（前后端不同域时也能加载）
-    if (bgUrl.startsWith("/")) return sanitizeImageUrl(`${API_BASE}${bgUrl}`);
+    if (bgUrl.startsWith("http")) return sanitizeImageUrl(bgUrl);
+    if (bgUrl.startsWith("/")) return sanitizeImageUrl(`${API_BASE}/api/v1${bgUrl}`);
     return sanitizeImageUrl(bgUrl);
   }, [bgUrl]);
 

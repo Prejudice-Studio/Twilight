@@ -96,7 +96,8 @@ export default function AdminTicketsPage() {
     catch (err: any) { toast({ title: err?.message || t("common.networkError"), variant: "destructive" }); }
   };
 
-  const types = data?.types?.length ? data.types : DEFAULT_TYPES.map((t) => t.value);
+  const types = Array.isArray(data?.types) && data.types.length ? data.types : DEFAULT_TYPES.map((t) => t.value);
+  const tickets = Array.isArray(data?.tickets) ? data.tickets : [];
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
@@ -130,11 +131,11 @@ export default function AdminTicketsPage() {
         <Card className="border-destructive/40"><CardContent className="p-6 text-center space-y-3"><AlertCircle className="h-8 w-8 mx-auto text-destructive" /><p className="text-sm">{error}</p><Button variant="outline" size="sm" onClick={() => void reload()}>{t("common.retry")}</Button></CardContent></Card>
       ) : isLoading && !data ? (
         <Card className="border-dashed"><CardContent className="p-8 text-center"><Loader2 className="h-6 w-6 mx-auto animate-spin text-muted-foreground" /></CardContent></Card>
-      ) : !data?.tickets?.length ? (
+      ) : tickets.length === 0 ? (
         <Card className="border-dashed"><CardContent className="p-8 text-center"><MessageSquareMore className="h-10 w-10 mx-auto text-muted-foreground mb-2 opacity-40" /><p className="font-medium">{t("adminTickets.noTickets")}</p><p className="text-xs text-muted-foreground mt-1">{t("adminTickets.noTicketsHint")}</p></CardContent></Card>
       ) : (
         <div className="space-y-4">
-          {data.tickets.map((ticket: Ticket) => {
+          {tickets.map((ticket: Ticket) => {
             const s = STATUS_MAP[ticket.status] || STATUS_MAP.open;
             const p = PRIORITY_MAP[ticket.priority] || PRIORITY_MAP.medium;
             const typeLabel = DEFAULT_TYPES.find((dt) => dt.value === ticket.type)?.labelKey;

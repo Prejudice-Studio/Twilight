@@ -115,7 +115,9 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request, _ Params) {
 		d.LastSeen = now
 	})
 	_ = a.store().AddLoginLog(store.LoginLog{UID: u.UID, IP: ip, DeviceID: deviceID, DeviceName: ua, Client: "web", Time: now})
-	a.audit(r, "login", "user", 0, map[string]any{"ip": ip, "device": deviceID})
+	// 登录是 AuthPublic 接口，此时请求上下文尚无 principal（会话 Cookie 在响应里下发），
+	// 因此必须用 auditWithUser 显式传入已认证的用户身份，避免审计日志 uid=0/username=""。
+	a.auditWithUser(r, u.UID, u.Username, "login", "user", 0, map[string]any{"ip": ip, "device": deviceID})
 	// 设备数限制为可选（默认关闭）：开启后淘汰超额的未受信任旧设备，绝不踢掉本次
 	// 登录设备或受信任设备，避免把用户锁在门外。
 	if cfg := a.cfg(); cfg.DeviceLimitEnabled && cfg.MaxDevices > 0 {
