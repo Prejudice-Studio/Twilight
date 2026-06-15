@@ -656,6 +656,8 @@ export interface Regcode {
   source?: "admin" | "invite"; // 来源：admin=管理员创建, invite=邀请系统生成
   creator_uid?: number; // 创建者 UID
   creator_username?: string; // 创建者用户名
+  paused_seconds?: number; // 累计暂停时长（秒）
+  pause_start?: number; // 当前暂停起始时间戳（秒），0 表示未暂停
 }
 
 export interface CreateRegcodeData {

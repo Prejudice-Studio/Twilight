@@ -2326,6 +2326,8 @@
     "copiedCount": "已复制 {count} 个卡码",
     "noteSaved": "备注已保存",
     "editAction": "编辑",
+    "disableAction": "停用",
+    "enableAction": "启用",
     "editTitle": "编辑注册码",
     "editDescription": "调整停用状态、有效期与使用额度。",
     "editEnabled": "启用",

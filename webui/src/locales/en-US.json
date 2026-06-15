@@ -1550,6 +1550,8 @@
     "copiedCount": "Copied {count} codes",
     "noteSaved": "Note saved",
     "editAction": "Edit",
+    "disableAction": "Disable",
+    "enableAction": "Enable",
     "editTitle": "Edit code",
     "editDescription": "Adjust enabled state, validity and usage limit.",
     "editEnabled": "Enabled",

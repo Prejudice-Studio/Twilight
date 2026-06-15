@@ -18,6 +18,8 @@ import {
   Search,
   FlipHorizontal2,
   Pencil,
+  Power,
+  PowerOff,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -60,6 +62,7 @@ export default function AdminRegcodesPage() {
   const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set());
   const [isBatchDeleting, setIsBatchDeleting] = useState(false);
   const [deletingCode, setDeletingCode] = useState<string | null>(null);
+  const [togglingCode, setTogglingCode] = useState<string | null>(null);
   const [filterType, setFilterType] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterSource, setFilterSource] = useState("admin");
@@ -311,6 +314,26 @@ export default function AdminRegcodesPage() {
       toast({ title: t("adminRegcodes.saveFailed"), description: error.message, variant: "destructive" });
     } finally {
       setSavingNote(null);
+    }
+  };
+
+  const handleToggleActive = async (code: Regcode) => {
+    setTogglingCode(code.code);
+    try {
+      const res = await api.updateRegcode(code.code, { active: !code.active });
+      if (res.success && res.data) {
+        applyRegcodeUpdate(res.data);
+        toast({
+          title: res.data.active ? t("adminRegcodes.enabledToast") : t("adminRegcodes.disabledToast"),
+          variant: "success",
+        });
+      } else {
+        toast({ title: t("adminRegcodes.saveFailed"), description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: t("adminRegcodes.saveFailed"), description: error.message, variant: "destructive" });
+    } finally {
+      setTogglingCode(null);
     }
   };
 
@@ -1226,6 +1249,16 @@ export default function AdminRegcodesPage() {
                         size="icon"
                         variant="ghost"
                         className="h-8 w-8"
+                        title={code.active !== false ? t("adminRegcodes.disableAction") : t("adminRegcodes.enableAction")}
+                        onClick={() => void handleToggleActive(code)}
+                        disabled={togglingCode === code.code}
+                      >
+                        {togglingCode === code.code ? <Loader2 className="h-4 w-4 animate-spin" /> : code.active !== false ? <PowerOff className="h-4 w-4" /> : <Power className="h-4 w-4 text-success" />}
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8"
                         title={t("adminRegcodes.editAction")}
                         onClick={() => openEditDialog(code)}
                       >
@@ -1423,6 +1456,16 @@ export default function AdminRegcodesPage() {
                       </td>
                       <td className="px-4 py-3 text-right align-top">
                         <div className="flex items-center justify-end gap-1">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                            title={code.active !== false ? t("adminRegcodes.disableAction") : t("adminRegcodes.enableAction")}
+                            onClick={() => void handleToggleActive(code)}
+                            disabled={togglingCode === code.code}
+                          >
+                            {togglingCode === code.code ? <Loader2 className="h-4 w-4 animate-spin" /> : code.active !== false ? <PowerOff className="h-4 w-4" /> : <Power className="h-4 w-4 text-success" />}
+                          </Button>
                           <Button
                             size="icon"
                             variant="ghost"

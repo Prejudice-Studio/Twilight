@@ -462,7 +462,7 @@ func (a *App) handleDeleteAvatar(w http.ResponseWriter, r *http.Request, _ Param
 }
 
 // handleUploadAuthBackground 上传认证页背景图并自动更新配置。
-// 与 handleUploadServerIcon 同构：写盘→渲染 TOML→saveConfig→热重载。
+// 上传后文件名统一为 background.<ext>（覆盖旧文件），前端通过固定路径加载。
 func (a *App) handleUploadAuthBackground(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
 	if !a.allowRate(r.Context(), rateKey("admin-auth-bg:", p.User.UID), a.cfg().RateLimitAdminIconPerMinute, time.Minute) {
@@ -494,26 +494,35 @@ func (a *App) handleUploadAuthBackground(w http.ResponseWriter, r *http.Request,
 		failWithCode(w, http.StatusBadRequest, ErrUploadTypeNotAllowed, "only jpg, png, gif, webp and bmp uploads are allowed")
 		return
 	}
-	filename := randomCode(16) + ext
+	filename := "background" + ext
 	uploadRoot := firstNonEmpty(a.cfg().UploadDir, "uploads")
-	filePath, err := ResolveWithinRoot(uploadRoot, filepath.Join("auth-background", filename))
+	dir, err := ResolveWithinRoot(uploadRoot, "auth-background")
 	if err != nil {
 		failWithCode(w, http.StatusInternalServerError, ErrUploadDirInvalid, "上传目录无效")
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(filePath), 0o700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		failWithCode(w, http.StatusInternalServerError, ErrUploadDirCreateFailed, "创建上传目录失败")
 		return
 	}
+	filePath := filepath.Join(dir, filename)
 	if err := store.WriteFileAtomicSync(filePath, data, 0o600); err != nil {
 		failWithCode(w, http.StatusInternalServerError, ErrUploadSaveFailed, "保存文件失败")
 		return
+	}
+	// 清理旧扩展名的 background 文件（如从 .png 切换到 .jpg）
+	for _, oldExt := range []string{".jpg", ".png", ".gif", ".webp", ".bmp"} {
+		if oldExt == ext {
+			continue
+		}
+		oldPath := filepath.Join(dir, "background"+oldExt)
+		_ = os.Remove(oldPath)
 	}
 	values := configValues(*a.cfg())
 	if values["Global"] == nil {
 		values["Global"] = map[string]any{}
 	}
-	values["Global"]["auth_background_url"] = "/system/auth-background?file=" + filename
+	values["Global"]["auth_background_url"] = "/system/auth-background"
 	info, status, message := a.saveConfigContent(renderConfigTOML(values))
 	if status != http.StatusOK {
 		_ = os.Remove(filePath)
@@ -521,14 +530,13 @@ func (a *App) handleUploadAuthBackground(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	ok(w, "上传成功", map[string]any{
-		"url":      "/system/auth-background?file=" + filename,
+		"url":      "/system/auth-background",
 		"filename": filename,
 		"reload":   info["reload"],
 	})
 }
 
-// handleAuthBackground 提供已上传的认证页背景图文件。
-// 支持 ?file= 参数指定文件，无参数时取最新上传的文件。
+// handleAuthBackground 提供认证页背景图文件，固定文件名 background.<ext>。
 func (a *App) handleAuthBackground(w http.ResponseWriter, r *http.Request, _ Params) {
 	uploadRoot := firstNonEmpty(a.cfg().UploadDir, "uploads")
 	dir, err := ResolveWithinRoot(uploadRoot, "auth-background")
@@ -536,25 +544,12 @@ func (a *App) handleAuthBackground(w http.ResponseWriter, r *http.Request, _ Par
 		failWithCode(w, http.StatusNotFound, ErrAssetNotFound, "resource not found")
 		return
 	}
-	fileName := strings.TrimSpace(r.URL.Query().Get("file"))
-	if fileName != "" {
-		if !uploadFilenamePattern.MatchString(fileName) {
-			failWithCode(w, http.StatusNotFound, ErrAssetNotFound, "resource not found")
+	for _, ext := range []string{".jpg", ".png", ".gif", ".webp", ".bmp"} {
+		filePath := filepath.Join(dir, "background"+ext)
+		if info, statErr := os.Stat(filePath); statErr == nil && info.Mode().IsRegular() {
+			http.ServeFile(w, r, filePath)
 			return
 		}
-		filePath, err := ResolveWithinRoot(dir, fileName)
-		if err != nil {
-			failWithCode(w, http.StatusNotFound, ErrAssetNotFound, "resource not found")
-			return
-		}
-		http.ServeFile(w, r, filePath)
-		return
 	}
-	entries, err := os.ReadDir(dir)
-	if err != nil || len(entries) == 0 {
-		failWithCode(w, http.StatusNotFound, ErrAssetNotFound, "resource not found")
-		return
-	}
-	path := filepath.Join(dir, entries[len(entries)-1].Name())
-	http.ServeFile(w, r, path)
+	failWithCode(w, http.StatusNotFound, ErrAssetNotFound, "resource not found")
 }

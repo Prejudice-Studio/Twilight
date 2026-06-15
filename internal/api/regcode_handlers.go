@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/prejudice-studio/twilight/internal/store"
 )
@@ -169,7 +170,17 @@ func (a *App) handleUpdateRegcode(w http.ResponseWriter, r *http.Request, params
 		reg.Note = truncateString(stringValue(payload, "note"), 120)
 	}
 	if _, has := payload["active"]; has {
+		was := reg.Active
 		reg.Active = boolValue(payload, "active", reg.Active)
+		now := time.Now().Unix()
+		if was && !reg.Active {
+			reg.PauseStart = now
+		} else if !was && reg.Active {
+			if reg.PauseStart > 0 {
+				reg.PausedSeconds += now - reg.PauseStart
+			}
+			reg.PauseStart = 0
+		}
 	}
 	if _, has := payload["validity_time"]; has {
 		validity := int64(intValue(payload, "validity_time", int(reg.ValidityTime)))
@@ -370,6 +381,11 @@ func (a *App) handleClearRegcodeUsage(w http.ResponseWriter, r *http.Request, pa
 	reg.UsedByUIDs = nil
 	reg.UsedByTelegramIDs = nil
 	reg.Active = true
+	now := time.Now().Unix()
+	if reg.PauseStart > 0 {
+		reg.PausedSeconds += now - reg.PauseStart
+	}
+	reg.PauseStart = 0
 	if err := a.store().UpsertRegCode(reg); statusFromError(w, err) {
 		return
 	}

@@ -1549,6 +1549,8 @@
     "copiedCount": "已複製 {count} 個卡碼",
     "noteSaved": "備註已儲存",
     "editAction": "編輯",
+    "disableAction": "停用",
+    "enableAction": "啟用",
     "invertSelection": "反選",
     "editTitle": "編輯註冊碼",
     "editDescription": "調整停用狀態、有效期與使用額度。",

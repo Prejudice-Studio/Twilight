@@ -483,14 +483,20 @@ func regcodeTypeName(codeType int) string {
 
 func regcodeStatus(code store.RegCode) string {
 	now := time.Now().Unix()
+	if code.UseCountLimit != -1 && code.UseCount >= code.UseCountLimit {
+		return "used_up"
+	}
 	if !code.Active {
 		return "disabled"
 	}
-	if code.ValidityTime > 0 && code.CreatedAt+code.ValidityTime*3600 <= now {
-		return "expired"
-	}
-	if code.UseCountLimit != -1 && code.UseCount >= code.UseCountLimit {
-		return "used_up"
+	if code.ValidityTime > 0 {
+		elapsed := now - code.CreatedAt - code.PausedSeconds
+		if code.PauseStart > 0 {
+			elapsed = code.PauseStart - code.CreatedAt - code.PausedSeconds
+		}
+		if elapsed >= code.ValidityTime*3600 {
+			return "expired"
+		}
 	}
 	return "available"
 }
@@ -501,7 +507,7 @@ func regcodeDTO(code store.RegCode) map[string]any {
 		created = code.CreatedAt
 	}
 	// expires_at 给前端做「有效期计算」：validity_time<=0 视为永久（-1）；否则按
-	// 创建时间 + 有效小时数推算绝对过期时间戳（秒）。基准与 regcodeStatus 一致，
+	// 创建时间 + 累计暂停秒数 + 有效小时数推算绝对过期时间戳（秒）。基准与 regcodeStatus 一致，
 	// 优先用 CreatedAt，缺省（历史数据）回落 CreatedTime。
 	expiresAt := int64(-1)
 	if code.ValidityTime > 0 {
@@ -509,7 +515,7 @@ func regcodeDTO(code store.RegCode) map[string]any {
 		if base == 0 {
 			base = code.CreatedTime
 		}
-		expiresAt = base + code.ValidityTime*3600
+		expiresAt = base + code.PausedSeconds + code.ValidityTime*3600
 	}
 	usedByUIDs := regcodeUsedByUIDs(code)
 	source := code.Source
@@ -528,6 +534,8 @@ func regcodeDTO(code store.RegCode) map[string]any {
 		"days":                     normalizeRegCodeDays(code.Days),
 		"active":                   code.Active,
 		"status":                   regcodeStatus(code),
+		"paused_seconds":           code.PausedSeconds,
+		"pause_start":              code.PauseStart,
 		"note":                     code.Note,
 		"target_username":          code.TargetUsername,
 		"target_telegram_username": code.TargetTelegramUsername,

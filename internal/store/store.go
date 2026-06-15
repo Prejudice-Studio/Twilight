@@ -235,6 +235,10 @@ type RegCode struct {
 	CreatedAt              int64   `json:"created_at"`
 	CreatedTime            int64   `json:"created_time"`
 	ExpiredAt              int64   `json:"expired_at,omitempty"`
+	// PausedSeconds 累计暂停时长（秒），停用期间暂停计算有效期。
+	PausedSeconds int64 `json:"paused_seconds,omitempty"`
+	// PauseStart 当前暂停起始时间戳（秒），0 表示未处于暂停状态。
+	PauseStart int64 `json:"pause_start,omitempty"`
 	// Source 区分卡码来源："admin" 管理员手动创建、"invite" 邀请系统自动生成。
 	// 历史数据该字段为空字符串，视作 "admin"。
 	Source string `json:"source,omitempty"`
@@ -3181,6 +3185,17 @@ func (s *Store) ConsumeRegCodeAndUpdateUser(code string, uid, telegramID int64, 
 	return updated, consumed, nil
 }
 
+func isRegCodeExpiredLocked(r RegCode, now int64) bool {
+	if r.ValidityTime <= 0 {
+		return false
+	}
+	elapsed := now - r.CreatedAt - r.PausedSeconds
+	if r.PauseStart > 0 {
+		elapsed = r.PauseStart - r.CreatedAt - r.PausedSeconds
+	}
+	return elapsed >= r.ValidityTime*3600
+}
+
 func (s *Store) consumableRegCodeLocked(code string, now int64) (RegCode, error) {
 	r, ok := s.state.RegCodes[code]
 	if !ok || !r.Active {
@@ -3189,7 +3204,7 @@ func (s *Store) consumableRegCodeLocked(code string, now int64) (RegCode, error)
 	if r.UseCountLimit != -1 && r.UseCount >= r.UseCountLimit {
 		return RegCode{}, ErrConflict
 	}
-	if r.ValidityTime > 0 && r.CreatedAt+r.ValidityTime*3600 <= now {
+	if isRegCodeExpiredLocked(r, now) {
 		return RegCode{}, ErrExpired
 	}
 	return r, nil
