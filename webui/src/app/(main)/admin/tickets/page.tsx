@@ -63,10 +63,18 @@ export default function AdminTicketsPage() {
 
   // 工单类型管理
   const [typeMgmtOpen, setTypeMgmtOpen] = useState(false);
+  const [typeMgmtTypes, setTypeMgmtTypes] = useState<string[]>([]);
   const [newTypeName, setNewTypeName] = useState("");
   const [editingTypeName, setEditingTypeName] = useState<string | null>(null);
   const [editTypeValue, setEditTypeValue] = useState("");
   const [typeMgmtSaving, setTypeMgmtSaving] = useState(false);
+
+  const refreshTypeMgmtTypes = async () => {
+    try {
+      const res = await api.adminGetTicketTypes();
+      if (res.success && res.data) setTypeMgmtTypes(res.data.types);
+    } catch { /* ignore */ }
+  };
 
   const handleAddType = async () => {
     const name = newTypeName.trim();
@@ -74,7 +82,7 @@ export default function AdminTicketsPage() {
     setTypeMgmtSaving(true);
     try {
       const res = await api.adminAddTicketType(name);
-      if (res.success) { toast({ title: t("adminTickets.typeAdded") }); setNewTypeName(""); await reload(); }
+      if (res.success) { toast({ title: t("adminTickets.typeAdded") }); setNewTypeName(""); await reload(); await refreshTypeMgmtTypes(); }
       else toast({ title: res.message, variant: "destructive" });
     } catch (err: any) { toast({ title: err?.message || t("common.networkError"), variant: "destructive" }); }
     finally { setTypeMgmtSaving(false); }
@@ -85,7 +93,7 @@ export default function AdminTicketsPage() {
     if (!ok) return;
     try {
       const res = await api.adminDeleteTicketType(name);
-      if (res.success) { toast({ title: t("adminTickets.typeDeleted") }); await reload(); }
+      if (res.success) { toast({ title: t("adminTickets.typeDeleted") }); await reload(); await refreshTypeMgmtTypes(); }
       else toast({ title: res.message, variant: "destructive" });
     } catch (err: any) { toast({ title: err?.message || t("common.networkError"), variant: "destructive" }); }
   };
@@ -95,7 +103,7 @@ export default function AdminTicketsPage() {
     setTypeMgmtSaving(true);
     try {
       const res = await api.adminRenameTicketType(editingTypeName, editTypeValue.trim());
-      if (res.success) { toast({ title: t("adminTickets.typeRenamed") }); setEditingTypeName(null); setEditTypeValue(""); await reload(); }
+      if (res.success) { toast({ title: t("adminTickets.typeRenamed") }); setEditingTypeName(null); setEditTypeValue(""); await reload(); await refreshTypeMgmtTypes(); }
       else toast({ title: res.message, variant: "destructive" });
     } catch (err: any) { toast({ title: err?.message || t("common.networkError"), variant: "destructive" }); }
     finally { setTypeMgmtSaving(false); }
@@ -170,7 +178,13 @@ export default function AdminTicketsPage() {
           </SelectContent>
         </Select>
         <span className="text-xs text-muted-foreground ml-auto">{t("adminTickets.total", { count: data?.tickets?.length ?? 0 })}</span>
-        <Button variant="outline" size="sm" onClick={() => setTypeMgmtOpen(true)}><Settings2 className="mr-1 h-3.5 w-3.5" />{t("adminTickets.manageTypes")}</Button>
+        <Button variant="outline" size="sm" onClick={async () => {
+          try {
+            const res = await api.adminGetTicketTypes();
+            setTypeMgmtTypes(res.success && res.data ? res.data.types : []);
+          } catch { setTypeMgmtTypes([]); }
+          setTypeMgmtOpen(true);
+        }}><Settings2 className="mr-1 h-3.5 w-3.5" />{t("adminTickets.manageTypes")}</Button>
       </div>
 
       {error ? (
@@ -318,7 +332,7 @@ export default function AdminTicketsPage() {
             </div>
             {/* 已有类型列表 */}
             <div className="max-h-60 space-y-1 overflow-y-auto">
-              {types.map((tp: string) => (
+              {typeMgmtTypes.map((tp: string) => (
                 <div key={tp} className="flex items-center gap-2 rounded-md border px-3 py-2">
                   {editingTypeName === tp ? (
                     <>
@@ -350,8 +364,8 @@ export default function AdminTicketsPage() {
                       <Button
                         size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive"
                         onClick={() => void handleDeleteType(tp)}
-                        disabled={types.length <= 1}
-                        title={types.length <= 1 ? "Cannot delete last type" : "Delete"}
+                        disabled={typeMgmtTypes.length <= 1}
+                        title={typeMgmtTypes.length <= 1 ? "Cannot delete last type" : "Delete"}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>

@@ -34,26 +34,38 @@ export default function AuthLayout({
       }
     : undefined;
 
-  const textStyle = authTextColor ? { color: authTextColor } : undefined;
-
   return (
-    <div
-      className="relative min-h-screen overflow-hidden bg-background"
-      style={backgroundStyle}
-    >
-      {!safeBg && (
-        <>
-          <div className="shell-glow shell-glow-left" />
-          <div className="shell-glow shell-glow-right" />
-          <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_20%_10%,hsl(var(--primary)/0.12),transparent_35%),radial-gradient(circle_at_80%_90%,hsl(var(--primary)/0.08),transparent_30%)]" />
-        </>
+    <>
+      {authTextColor && (
+        <style>{`
+          .auth-custom-color,
+          .auth-custom-color h1, .auth-custom-color h2, .auth-custom-color h3,
+          .auth-custom-color p, .auth-custom-color span, .auth-custom-color label,
+          .auth-custom-color code, .auth-custom-color div, .auth-custom-color li,
+          .auth-custom-color [class*="text-foreground"],
+          .auth-custom-color [class*="text-muted-foreground"] {
+            color: ${authTextColor} !important;
+          }
+        `}</style>
       )}
-      {safeBg && (
-        <div className="pointer-events-none absolute inset-0 -z-10 bg-background/50 backdrop-blur-[2px]" />
-      )}
-      <div className="relative z-10 min-h-screen auth-card-text" style={textStyle}>
-        {children}
+      <div
+        className="relative min-h-screen overflow-hidden bg-background"
+        style={backgroundStyle}
+      >
+        {!safeBg && (
+          <>
+            <div className="shell-glow shell-glow-left" />
+            <div className="shell-glow shell-glow-right" />
+            <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_20%_10%,hsl(var(--primary)/0.12),transparent_35%),radial-gradient(circle_at_80%_90%,hsl(var(--primary)/0.08),transparent_30%)]" />
+          </>
+        )}
+        {safeBg && (
+          <div className="pointer-events-none absolute inset-0 -z-10 bg-background/50 backdrop-blur-[2px]" />
+        )}
+        <div className={`relative z-10 min-h-screen auth-card-text ${authTextColor ? "auth-custom-color" : ""}`}>
+          {children}
+        </div>
       </div>
-    </div>
+    </>
   );
 }

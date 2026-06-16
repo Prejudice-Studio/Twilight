@@ -991,7 +991,7 @@ func (s *State) ensure() {
 	if s.Tickets == nil {
 		s.Tickets = map[int64]Ticket{}
 	}
-	if s.TicketTypes == nil {
+	if s.TicketTypes == nil || len(s.TicketTypes) == 0 {
 		s.TicketTypes = []string{"bug", "feature", "question", "account", "other"}
 	}
 }
