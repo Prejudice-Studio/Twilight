@@ -118,6 +118,17 @@ bash start_backend_dev.sh
 - 受保护路由由客户端 layout 调 `/users/me` 校验登录态，避免 Web 域读不到 API 域 cookie 导致登录后被踢回 `/login`。
 - `SITE_NAME` / `SITE_TITLE` / `SITE_DESCRIPTION` / `SITE_ICON` 是运行时可注入的展示文案，由 `app/layout.tsx` 每次请求读取，改完即生效，无需重新构建。
 
+**认证页外观定制**（全部可选，`NEXT_PUBLIC_*` 前缀，构建时注入）：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `NEXT_PUBLIC_AUTH_TEXT_COLOR` | — | 登录/注册页文字颜色（CSS 颜色值），经正则防注入 |
+| `NEXT_PUBLIC_AUTH_ICON_URL` | — | 认证页品牌图标，优先于后端 `server_icon` |
+| `NEXT_PUBLIC_AUTH_BG_OVERLAY_OPACITY` | `0.4` | 背景图叠加层不透明度（0-1） |
+| `NEXT_PUBLIC_AUTH_PANEL_OPACITY` | `0.82` | 右侧面板毛玻璃不透明度（0-1），有背景图自动 +0.08 |
+
+> 所有前置变量均在 `webui/.env.example` 中列出，可直接复制到 `.env.local` 按需开启。
+
 ### 前端文案与多语言
 
 - 轻量 i18n 入口位于 `webui/src/lib/i18n.tsx`，语言文件统一存放在 `webui/src/locales/`。
@@ -129,6 +140,8 @@ bash start_backend_dev.sh
 - 所有后端调用集中维护在 `webui/src/lib/api.ts`，底层请求逻辑在 `webui/src/lib/api-request.ts`。
 - 响应统一为 envelope 结构 `{ success, code, message, data, timestamp }`；前端按 HTTP 状态码与 `error_code` 分流处理（401 跳登录、403 权限提示、429 退避、5xx 通用故障，以及自定义业务 error_code）。
 - 新增或调整接口时，需同步检查前端调用路径、请求方法、鉴权等级、错误提示文案与移动端展示。
+- 登录支持用户名和邮箱两种方式：`api.ts` 的 `login()` 自动检测 `@` 将 payload 从 `{username}` 切换为 `{email}`，后端 `handleLogin` 对应走 `FindUserByEmail`。
+- 认证页采用右侧固定面板布局：面板外壳由 `(auth)/layout.tsx` 渲染（跨页持久化，无闪动），各页面仅提供表单内容；共享样式常量与组件定义在 `(auth)/auth-ui.tsx`。
 - 页面按目录分组：`webui/src/app/(auth)`（登录 / 注册 / 找回密码）、`webui/src/app/(main)`（用户面板与各管理页）。新增页面时优先复用 `webui/src/components` 下的既有组件。
 
 ## API 与安全规范

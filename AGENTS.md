@@ -203,22 +203,39 @@
 
 ### 认证页 UI 约定
 
-认证页（登录/注册/找回密码）采用毛玻璃卡片 + 可选自定义背景图设计：
+认证页（登录/注册/找回密码）采用右侧固定毛玻璃面板 + 左侧背景图/装饰布局：
+
+**布局结构：**
+- 面板由 `AuthLayout`（`webui/src/app/(auth)/layout.tsx`）直接渲染 `<main className="auth-panel">`，不放在各页面组件内
+- 因为 Next.js App Router 的 layout 跨页面导航持久化，面板本身不随页面切换重新挂载——无闪动
+- 各页面（login / register / forgot-password）仅返回表单内容，共享 `webui/src/app/(auth)/auth-ui.tsx` 中的 `AuthBrand`、`AuthStepDots`、按钮/链接样式常量
+- 桌面端面板宽度 `clamp(440px, 38vw, 560px)`，移动端全宽
+
+**环境变量定制（全部可选的 `NEXT_PUBLIC_*`，构建时注入）：**
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `NEXT_PUBLIC_AUTH_TEXT_COLOR` | — | 覆盖文字颜色（CSS 颜色值），经正则防注入 |
+| `NEXT_PUBLIC_AUTH_ICON_URL` | — | 覆盖品牌图标 URL，优先于后端 `server_icon` |
+| `NEXT_PUBLIC_AUTH_BG_OVERLAY_OPACITY` | `0.4` | 背景图叠加层不透明度（0-1） |
+| `NEXT_PUBLIC_AUTH_PANEL_OPACITY` | `0.82` | 右侧面板毛玻璃不透明度（0-1），有背景图时自动 +0.08 |
 
 **背景与可读性：**
-- 有自定义背景图时，AuthLayout 添加 `auth-has-bg` 类，CSS 自动增强卡片不透明度（`.auth-card-inner` 从 78% 提升到 88%/85%）
-- 文字使用多层 `text-shadow` 确保在任何背景上可读（`.auth-card-text`）
-- 背景叠加层使用 `z-[1]`（正值），内容使用 `z-10`，确保叠加层可见
-- 可选 `NEXT_PUBLIC_AUTH_TEXT_COLOR` 环境变量覆盖文字颜色，经过 CSS 颜色正则校验防注入
+- 有自定义背景图时，叠加层 `opacity` 由 `NEXT_PUBLIC_AUTH_BG_OVERLAY_OPACITY` 控制，面板不透明度由 `NEXT_PUBLIC_AUTH_PANEL_OPACITY` 叠加 +0.08 控制
+- 文字使用多层 `text-shadow`（`.auth-card-text`）确保在任何背景上可读
+- 注册向导使用 `.auth-step-dot` 进度点指示当前步骤
 
 **动画与过渡：**
-- 使用 `animate-auth-enter` 进场（`translateY(8px) → 0` + `opacity 0 → 1`），不使用纯 opacity fade-in
-- `backdrop-filter` 和 `background` 在动画期间保持静态（`animation-fill-mode: backwards; backdrop-filter` 不参与过渡），避免磨砂"逐渐变清晰"的不自然效果
+- `animate-auth-enter` 仅首屏触发，页面内导航时不重播
 - `prefers-reduced-motion` 时所有动画降级为瞬态
 
-**卡片风格统一：**
-- 所有认证页卡片使用 `auth-card-inner` 类 + `bg-card/78 backdrop-blur-xl border-border/70 shadow-2xl`
-- 登录/注册/找回密码页切换时保持一致的视觉重量
+### 邮箱登录约定
+
+后端 `handleLogin` 同时支持用户名和邮箱登录：
+- 请求体含 `email` 字段时走 `FindUserByEmail`（`internal/store/store.go`）
+- `username` 字段含 `@` 也自动走邮箱查找（前端 `api.ts` 的 `login()` 自动检测）
+- 邮箱查找大小写不敏感（`strings.EqualFold`）
+- 失败时统一返回 `AUTH_LOGIN_INVALID`，不区分"用户不存在"与"密码错误"（防枚举）
 
 ### 邮箱 SMTP 发件限制处理
 
