@@ -66,9 +66,9 @@ export default function AuthLayout({
           </>
         )}
         {safeBg && (
-          <div className="pointer-events-none absolute inset-0 z-[1] bg-background/50 backdrop-blur-[2px]" />
+          <div className="pointer-events-none absolute inset-0 z-[1] bg-background/40 backdrop-blur-[2px]" />
         )}
-        <div className={`relative z-10 min-h-screen auth-card-text ${authTextColor ? "auth-custom-color" : ""}`}>
+        <div className={`relative z-10 flex min-h-dvh auth-card-text ${authTextColor ? "auth-custom-color" : ""}`}>
           {children}
         </div>
       </div>

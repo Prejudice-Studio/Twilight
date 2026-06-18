@@ -232,6 +232,82 @@
     backdrop-filter: blur(24px);
   }
 
+  /*
+   * Auth split layout: a fixed full-height panel pinned to the right edge on
+   * desktop, collapsing to a centered full-width sheet on mobile / tablet.
+   * The panel scrolls internally so long forms (register wizard) never push
+   * the whole viewport.
+   */
+  .auth-panel {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    min-height: 100dvh;
+    margin-left: auto;
+    overflow-y: auto;
+    background: hsl(var(--card) / 0.82);
+    -webkit-backdrop-filter: blur(28px);
+    backdrop-filter: blur(28px);
+    border-left: 1px solid hsl(var(--border) / 0.6);
+    box-shadow: -16px 0 48px rgba(0, 0, 0, 0.12);
+  }
+
+  .dark .auth-panel {
+    background: hsl(var(--card) / 0.8);
+    box-shadow: -16px 0 48px rgba(0, 0, 0, 0.35);
+  }
+
+  /* No custom background: keep the panel flush with the page background so
+     the decorative glow shows through the rest of the viewport. */
+  .auth-has-bg .auth-panel {
+    background: hsl(var(--card) / 0.9);
+  }
+
+  .dark .auth-has-bg .auth-panel {
+    background: hsl(var(--card) / 0.88);
+  }
+
+  @media (min-width: 1024px) {
+    .auth-panel {
+      width: clamp(440px, 38vw, 560px);
+    }
+  }
+
+  /* Inner content column: keeps the form at a comfortable reading width and
+     vertically centered within the panel. */
+  .auth-panel-inner {
+    margin: auto;
+    width: 100%;
+    max-width: 420px;
+    padding: 2.5rem 1.5rem;
+  }
+
+  @media (min-width: 640px) {
+    .auth-panel-inner {
+      padding: 3rem 2.5rem;
+    }
+  }
+
+  /* Step progress dots for the register wizard. */
+  .auth-step-dot {
+    height: 0.5rem;
+    border-radius: 9999px;
+    background: hsl(var(--muted-foreground) / 0.35);
+    transition: width 240ms ease, background-color 240ms ease;
+    width: 0.5rem;
+  }
+
+  .auth-step-dot-active {
+    width: 1.5rem;
+    background: hsl(var(--foreground));
+  }
+
+  .auth-step-dot-done {
+    background: hsl(var(--foreground) / 0.7);
+  }
+
   .section-surface {
     min-height: calc(100dvh - 120px);
     min-width: 0;
