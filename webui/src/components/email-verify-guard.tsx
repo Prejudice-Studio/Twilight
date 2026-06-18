@@ -13,7 +13,7 @@ import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
 import { useI18n } from "@/lib/i18n";
 import { api } from "@/lib/api";
-import { validateEmailOptional, friendlyError, isThrottleErrorCode } from "@/lib/validators";
+import { validateEmailOptional, friendlyError, isThrottleErrorCode, throttleCooldownSeconds } from "@/lib/validators";
 
 // EmailVerifyGuard 在开启「强制绑定邮箱」时介入仪表盘：
 //   - 普通用户 / 白名单且未验证邮箱 → 全屏接管，必须完成绑定+验证才能继续；
@@ -64,8 +64,9 @@ export default function EmailVerifyGuard() {
         setCooldown(res.data.resend_after || 60);
         toast({ title: t("email.codeSentTo", { email: res.data.email }), variant: "success" });
       } else if (isThrottleErrorCode(res.error_code)) {
-        setCooldown((c) => (c > 0 ? c : 60));
-        toast({ title: t("email.rateLimited"), variant: "destructive" });
+        const cd = throttleCooldownSeconds(res.error_code);
+        setCooldown((c) => (c > 0 ? c : cd));
+        toast({ title: friendlyError(res.error_code, res.message), variant: "destructive" });
       } else {
         toast({ title: friendlyError(res.error_code, res.message), variant: "destructive" });
       }

@@ -124,8 +124,8 @@ export default function LoginPage() {
 
   return (
     <main className="relative flex min-h-screen w-full items-center justify-center p-4">
-      <div className="relative z-10 w-full max-w-[440px] animate-fade-in">
-        <Card className="border-border/70 bg-card/78 shadow-2xl backdrop-blur-xl">
+      <div className="relative z-10 w-full max-w-[440px] animate-auth-enter">
+        <Card className="auth-card-inner border-border/70 bg-card/78 shadow-2xl backdrop-blur-xl">
           <CardHeader className="space-y-2 pb-6 pt-8 text-center">
             {systemInfo?.server_icon ? (
               <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-muted overflow-hidden relative">
@@ -163,7 +163,7 @@ export default function LoginPage() {
                       href={item.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="rounded-md border border-border/70 bg-background px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/10"
+                      className="rounded-md border border-border/70 bg-background px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted"
                     >
                       {item.label}
                     </a>
@@ -223,7 +223,7 @@ export default function LoginPage() {
  
             {forgotPasswordEnabled && (
             <div className="mt-5 text-center text-sm">
-              <Link href="/forgot-password" className="font-medium text-primary hover:underline">
+              <Link href="/forgot-password" className="font-medium text-foreground/80 hover:text-foreground hover:underline">
                 {t("auth.login.forgotPassword")}
               </Link>
             </div>
@@ -233,7 +233,7 @@ export default function LoginPage() {
               <span className="text-foreground">{t("auth.login.noAccount")}</span>
               <Link
                 href="/register"
-                className="font-medium text-primary hover:underline"
+                className="font-medium text-foreground/80 hover:text-foreground hover:underline"
               >
                 {t("auth.login.createAccount")}
               </Link>

@@ -319,13 +319,10 @@ export default function RegisterPage() {
 
   return (
     <main className="relative flex min-h-screen w-full items-center justify-center p-4">
-      <div className="relative z-10 w-full max-w-[1100px] animate-fade-in">
-        <Card className="grid gap-6 overflow-hidden border-border/70 bg-card/78 shadow-2xl backdrop-blur-xl lg:grid-cols-[300px_minmax(0,1fr)]">
+      <div className="relative z-10 w-full max-w-[1100px] animate-auth-enter">
+        <Card className="auth-card-inner grid gap-6 overflow-hidden border-border/70 bg-card/78 shadow-2xl backdrop-blur-xl lg:grid-cols-[300px_minmax(0,1fr)]">
           <div className="space-y-6 border-b border-border/70 p-6 lg:border-b-0 lg:border-r lg:p-8">
             <div className="space-y-2">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/14 text-primary">
-                <ShieldPlus className="h-7 w-7" />
-              </div>
               <div>
                 <h2 className="text-xl font-semibold">{t("auth.register.welcome", { site: systemInfo?.name || SITE_NAME })}</h2>
                 <p className="text-sm text-foreground">
@@ -351,7 +348,7 @@ export default function RegisterPage() {
                     href={botUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="font-medium text-primary hover:underline"
+                    className="font-medium text-foreground hover:underline"
                   >
                     @{systemInfo.telegram_bot.username}
                   </a>
@@ -369,7 +366,7 @@ export default function RegisterPage() {
             {telegramLinks.length > 0 && (
               <div className="rounded-2xl border border-border/70 bg-muted/40 p-4 text-sm">
                 <div className="mb-3 flex items-center gap-2 font-semibold text-foreground">
-                  <Send className="h-4 w-4 text-primary" />
+                  <Send className="h-4 w-4 text-muted-foreground" />
                   {t("auth.register.telegramCommunity")}
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -379,7 +376,7 @@ export default function RegisterPage() {
                       href={item.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="rounded-md border border-border/70 bg-background px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/10"
+                      className="rounded-md border border-border/70 bg-background px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted"
                     >
                       {item.label}
                     </a>

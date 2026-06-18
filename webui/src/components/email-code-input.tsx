@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n } from "@/lib/i18n";
 import { api } from "@/lib/api";
-import { friendlyError, isThrottleErrorCode } from "@/lib/validators";
+import { friendlyError, isThrottleErrorCode, throttleCooldownSeconds } from "@/lib/validators";
 
 interface EmailCodeInputProps {
   purpose: "bind" | "change_password" | "change_emby_password";
@@ -48,9 +48,12 @@ export function EmailCodeInput({ purpose, email, code, onCodeChange, onSent, dis
         setCooldown(res.data.resend_after || 60);
         toast({ title: t("email.codeSentTo", { email: res.data.email }), variant: "success" });
       } else if (isThrottleErrorCode(res.error_code)) {
-        // 被限流：本地起 60s 冷却让按钮自禁，避免继续无效点击。
-        setCooldown((c) => (c > 0 ? c : 60));
-        toast({ title: t("email.rateLimited"), variant: "destructive" });
+        // 被限流或发送失败：本地起冷却让按钮自禁，避免继续无效点击。
+        // EMAIL_SEND_FAILED 通常是 SMTP 服务商限流（如每小时发件上限），
+        // 给予较长冷却（120s）减少无效重试。
+        const cd = throttleCooldownSeconds(res.error_code);
+        setCooldown((c) => (c > 0 ? c : cd));
+        toast({ title: friendlyError(res.error_code, res.message), variant: "destructive" });
       } else {
         toast({ title: friendlyError(res.error_code, res.message), variant: "destructive" });
       }

@@ -164,6 +164,25 @@
 
 过期验证码由调度任务周期清理：`scheduler_runner.go` 调用 `CleanupExpiredEmailVerifications` 删除所有 `ExpiresAt` 已过期的记录，避免状态文档堆积废码。
 
+## SMTP 服务商发件限额
+
+常见 SMTP 服务商有每小时/每日发件数量限制（如 QQ 邮箱约 50 封/小时、Outlook 约 300 封/日）。当服务商拒绝发信时：
+
+**后端行为：**
+- `smtpDeliver` 返回任何错误（含 `421 Too many messages` 等限流拒绝）均归入 `EMAIL_SEND_FAILED`（HTTP 502）
+- 原始 SMTP 拒绝原因经 `redactSensitiveText` 脱敏后记入日志，不向用户暴露
+- 后端不做 SMTP 层重试：服务商限流期间重试无意义，只会浪费配额
+
+**前端行为：**
+- `EMAIL_SEND_FAILED` 加入 `isThrottleErrorCode` 集合，命中后触发 120 秒本地冷却（高于普通限流的 60 秒）
+- `throttleCooldownSeconds(code)` 根据不同错误码返回差异化冷却时长
+- 友好文案提示用户"邮件服务暂时不可用，可能是发件数量达到上限"，引导稍后重试或联系管理员
+
+**运维建议：**
+- 在 `[RateLimit]` 段设置应用侧限流（`email_code_ip_per_10m` / `email_code_uid_per_10m` / `email_code_addr_per_10m`），使应用侧限流**严于** SMTP 服务商限额，避免大量请求打到 SMTP 被服务商拒绝
+- 若发件量大，考虑使用专业发件服务（SendGrid / Mailgun / 阿里云邮件推送）替代个人邮箱 SMTP
+- 监控后端日志中 `send email verification code failed` 告警频率，持续出现说明需要调低应用侧限流或更换 SMTP 服务
+
 ## 部署提示
 
 - 常见 587/STARTTLS 组合：Gmail（需「应用专用密码」）、QQ 邮箱（需「授权码」）、Office365。465 则用 `smtp_encryption=ssl`。

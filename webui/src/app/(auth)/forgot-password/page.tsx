@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
-import { validateEmbyUsername, validateEmailOptional, friendlyError, isThrottleErrorCode } from "@/lib/validators";
+import { validateEmbyUsername, validateEmailOptional, friendlyError, isThrottleErrorCode, throttleCooldownSeconds } from "@/lib/validators";
 import { validatePasswordStrength } from "@/lib/password";
 import { useI18n } from "@/lib/i18n";
 import { useSystemStore } from "@/store/system";
@@ -97,8 +97,9 @@ export default function ForgotPasswordPage() {
         setCooldown(res.data?.resend_after || 60);
         toast({ title: t("email.forgot.requestSent"), variant: "success" });
       } else if (isThrottleErrorCode(res.error_code)) {
-        // 被 IP 限流：本地起冷却让按钮自禁，减少无效重试。
-        setCooldown((c) => (c > 0 ? c : 60));
+        // 被限流或 SMTP 服务商限制：按错误码决定冷却时长，减少无效重试。
+        const cd = throttleCooldownSeconds(res.error_code);
+        setCooldown((c) => (c > 0 ? c : cd));
         toast({ title: friendlyError(res.error_code, res.message), variant: "destructive" });
       } else {
         toast({ title: friendlyError(res.error_code, res.message), variant: "destructive" });
@@ -177,7 +178,7 @@ export default function ForgotPasswordPage() {
   const emailForm = emailDone ? (
     <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-center text-sm">
       <p className="font-semibold">{t("email.forgot.resetSuccess")}</p>
-      <Link href="/login" className="mt-3 inline-block font-medium text-primary hover:underline">
+      <Link href="/login" className="mt-3 inline-block font-medium text-emerald-700 hover:underline dark:text-emerald-300">
         {t("auth.forgotPassword.backToLogin")}
       </Link>
     </div>
@@ -223,9 +224,9 @@ export default function ForgotPasswordPage() {
 
   return (
     <main className="relative flex min-h-screen w-full items-center justify-center p-4">
-      <Card className="w-full max-w-[460px] border-border/70 bg-card/78 shadow-2xl backdrop-blur-xl">
+      <Card className="auth-card-inner w-full max-w-[460px] animate-auth-enter border-border/70 bg-card/78 shadow-2xl backdrop-blur-xl">
         <CardHeader className="space-y-2 text-center">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/14 text-primary">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-foreground">
             <KeyRound className="h-7 w-7" />
           </div>
           <CardTitle className="text-2xl">{t("auth.forgotPassword.title")}</CardTitle>
@@ -255,7 +256,7 @@ export default function ForgotPasswordPage() {
           ) : null}
 
           <div className="text-center text-sm">
-            <Link href="/login" className="font-medium text-primary hover:underline">{t("auth.forgotPassword.backToLogin")}</Link>
+            <Link href="/login" className="font-medium text-foreground hover:underline">{t("auth.forgotPassword.backToLogin")}</Link>
           </div>
         </CardContent>
       </Card>

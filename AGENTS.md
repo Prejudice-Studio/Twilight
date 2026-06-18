@@ -71,7 +71,6 @@
 | `email_handlers.go` | `handleSendEmailCode`、`handleVerifyEmailCode`、`handleForgotPasswordEmailRequest`、`handleForgotPasswordEmailReset`、`handleAdminBindUserEmail`、`handleAdminSetUserEmailVerified`、`handleAdminEmailTest`、`handleAdminEmailVerifications` |
 | `announcement_handlers.go` | `handleListAnnouncements`、`handleAdminAnnouncements`、`handleCreateAnnouncement`、`handleUpdateAnnouncement`、`handleDeleteAnnouncement` |
 | `audit_handlers.go` | `audit(r, action, category, targetUID, detail)`(行12)、`handleListAuditLogs`、`handleDeleteAuditLog`、`handleClearAuditLogs` |
-| `audit_handlers.go` | `audit(r, action, category, targetUID, detail)`(行12)、`handleListAuditLogs`、`handleDeleteAuditLog`、`handleClearAuditLogs` |
 | `bangumi_webhook.go` | `handleBangumiWebhook`、`constantTimeStringEqual` |
 | `bangumi_sync_handlers.go` | `handleBangumiSyncStatus`、`handleBangumiSyncTrigger`、`handleBangumiSyncHistory`、`handleBangumiClearHistory`、`handleAdminBangumiUsers`、`handleAdminBangumiRecords`、`handleAdminBangumiSyncUser`、`handleAdminBangumiSyncLogs`、`handleAdminBangumiClearLogs` |
 | `batch_user_handlers.go` | `handleBatchToggleUsers`、`handleBatchRenewUsers`、`handleBatchDeleteUsers`、`handleBatchLockEmbyUnbind`、`handleBatchClearEmbyGrant`、`filteredBatchUserUIDs`(行418) |
@@ -201,6 +200,38 @@
 - 验证码发送失败不影响注册结果（仅记录日志）
 - 响应中包含 `email_verification_sent` 字段（验证记录 ID，发送失败时为空）
 - 邮箱管理页面支持一键清空未验证邮箱（`POST /admin/email/verifications/clear-unverified`）
+
+### 认证页 UI 约定
+
+认证页（登录/注册/找回密码）采用毛玻璃卡片 + 可选自定义背景图设计：
+
+**背景与可读性：**
+- 有自定义背景图时，AuthLayout 添加 `auth-has-bg` 类，CSS 自动增强卡片不透明度（`.auth-card-inner` 从 78% 提升到 88%/85%）
+- 文字使用多层 `text-shadow` 确保在任何背景上可读（`.auth-card-text`）
+- 背景叠加层使用 `z-[1]`（正值），内容使用 `z-10`，确保叠加层可见
+- 可选 `NEXT_PUBLIC_AUTH_TEXT_COLOR` 环境变量覆盖文字颜色，经过 CSS 颜色正则校验防注入
+
+**动画与过渡：**
+- 使用 `animate-auth-enter` 进场（`translateY(8px) → 0` + `opacity 0 → 1`），不使用纯 opacity fade-in
+- `backdrop-filter` 和 `background` 在动画期间保持静态（`animation-fill-mode: backwards; backdrop-filter` 不参与过渡），避免磨砂"逐渐变清晰"的不自然效果
+- `prefers-reduced-motion` 时所有动画降级为瞬态
+
+**卡片风格统一：**
+- 所有认证页卡片使用 `auth-card-inner` 类 + `bg-card/78 backdrop-blur-xl border-border/70 shadow-2xl`
+- 登录/注册/找回密码页切换时保持一致的视觉重量
+
+### 邮箱 SMTP 发件限制处理
+
+SMTP 服务商（如 QQ 邮箱、Outlook 等）通常有每小时/每日发件数量限制。后端处理：
+- `smtpDeliver` 返回错误时，`issueEmailCode` 使用 `ErrEmailSendFailed`（HTTP 502）
+- 错误日志经 `redactSensitiveText` 脱敏，不向用户暴露 SMTP 原始拒绝原因
+- 后端不做 SMTP 层面重试（服务商限流期间重试无意义）
+
+前端处理：
+- `EMAIL_SEND_FAILED` 加入 `isThrottleErrorCode` 集合，触发本地冷却（120s，高于普通限流的 60s）
+- `throttleCooldownSeconds(code)` 函数返回不同错误码对应的冷却时长
+- 友好文案提示用户"邮件服务暂时不可用，可能是发件数量达到上限"，引导稍后重试或联系管理员
+- 管理员应在 `config.toml` 的 `[RateLimit]` 段合理设置 `email_code_ip_per_10m` / `email_code_uid_per_10m` / `email_code_addr_per_10m`，使应用侧限流严于 SMTP 服务商限额
 
 ### 线路测速约定
 

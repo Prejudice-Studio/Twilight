@@ -158,7 +158,7 @@ export const ERROR_CODE_FRIENDLY: Partial<Record<ErrCode, string>> = {
   EMAIL_CODE_EXPIRED: "验证码已过期，请重新获取",
   EMAIL_CODE_TOO_MANY: "验证码错误次数过多，请重新获取",
   EMAIL_CODE_REQUIRED: "请先获取并填写邮箱验证码",
-  EMAIL_SEND_FAILED: "验证码发送失败，请稍后再试或联系管理员",
+  EMAIL_SEND_FAILED: "验证码发送失败（可能是邮件服务商发信限制），请稍后再试或联系管理员",
   EMAIL_RESEND_COOLDOWN: "发送过于频繁，请稍后再试",
   EMAIL_RATE_LIMITED: "验证码请求过于频繁，请稍后再试",
   EMAIL_PURPOSE_INVALID: "验证用途无效",
@@ -344,12 +344,22 @@ export function friendlyError(code: string | undefined, fallback?: string): stri
 // 触发「限流 / 冷却」类的后端错误码集合。命中后前端应启动一段本地冷却，
 // 让发送/重发按钮自禁，避免用户继续无效点击放大滥刷压力（与后端单账号/IP/
 // 地址多维限流配合）。覆盖邮箱发码与邮箱找回密码两条链路。
+// EMAIL_SEND_FAILED 也加入：SMTP 提供商可能有每小时发件限制，重复尝试只会
+// 持续失败，应给用户一段冷却期。
 const THROTTLE_ERROR_CODES = new Set<string>([
   "EMAIL_RATE_LIMITED",
   "EMAIL_RESEND_COOLDOWN",
+  "EMAIL_SEND_FAILED",
   "AUTH_PASSWORD_RESET_TOO_MANY",
 ]);
 
 export function isThrottleErrorCode(code: string | undefined): boolean {
   return !!code && THROTTLE_ERROR_CODES.has(code);
+}
+
+// EMAIL_SEND_FAILED 需要比普通限流更长的冷却：SMTP 提供商的每小时配额通常
+// 需要数分钟才能恢复，短周期重试只会堆积失败。
+export function throttleCooldownSeconds(code: string | undefined): number {
+  if (code === "EMAIL_SEND_FAILED") return 120;
+  return 60;
 }

@@ -117,6 +117,11 @@ const config: Config = {
           from: { opacity: "0", transform: "translateY(10px)" },
           to: { opacity: "1", transform: "translateY(0)" },
         },
+        "auth-enter": {
+          "0%": { opacity: "0", transform: "translateY(12px) scale(0.98)" },
+          "40%": { opacity: "1" },
+          "100%": { opacity: "1", transform: "translateY(0) scale(1)" },
+        },
         "slide-in-right": {
           from: { transform: "translateX(100%)" },
           to: { transform: "translateX(0)" },
@@ -132,6 +137,7 @@ const config: Config = {
         shimmer: "shimmer 2s infinite",
         "fade-in": "fade-in 0.3s ease-out",
         "fade-up": "fade-up 0.4s ease-out",
+        "auth-enter": "auth-enter 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards",
         "slide-in-right": "slide-in-right 0.3s ease-out",
         glow: "glow 2s ease-in-out infinite",
       },
