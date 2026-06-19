@@ -29,7 +29,8 @@ export function Header() {
   const activeTheme = resolvedTheme || theme || "light";
   const isDark = activeTheme === "dark";
   const themeLabel = isDark ? t("common.themeDark") : t("common.themeLight");
-  const systemIcon = useMemo(() => sanitizeImageUrl(systemInfo?.icon), [systemInfo?.icon]);
+  const envIcon = process.env.NEXT_PUBLIC_AUTH_ICON_URL?.trim();
+  const systemIcon = useMemo(() => sanitizeImageUrl(envIcon || systemInfo?.icon), [envIcon, systemInfo?.icon]);
   const displaySiteName = systemInfo?.name || "Twilight";
   const visibleUserNavItems = useMemo(
     () => filterNavItems(userNavItems, systemInfo?.features),

@@ -162,7 +162,8 @@ export function Sidebar() {
   );
 
   const displaySiteName = systemInfo?.name || SITE_NAME;
-  const safeSystemIcon = useMemo(() => sanitizeImageUrl(systemInfo?.icon), [systemInfo?.icon]);
+  const envIcon = process.env.NEXT_PUBLIC_AUTH_ICON_URL?.trim();
+  const safeSystemIcon = useMemo(() => sanitizeImageUrl(envIcon || systemInfo?.icon), [envIcon, systemInfo?.icon]);
   const safeProfileAvatar = useMemo(() => sanitizeImageUrl(profileAvatar), [profileAvatar]);
   const visibleUserNavItems = useMemo(
     () => filterNavItems(userNavItems, systemInfo?.features),
