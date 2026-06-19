@@ -2446,7 +2446,9 @@
     "algoDesc_symbols-16": "16 位混合字符，包含特殊字符，适合复制粘贴场景。",
     "algoDesc_symbols-24": "24 位混合字符，包含特殊字符，随机性更高。",
     "algoDesc_uuid": "标准 UUID v4，长度较长，唯一性强，适合系统间导入导出。",
-    "algoDesc_legacy-sha1": "旧版 SHA1 截断格式，用于兼容历史卡码风格。"
+    "algoDesc_legacy-sha1": "旧版 SHA1 截断格式，用于兼容历史卡码风格。",
+    "deselectAll": "取消全选",
+    "jumpToPage": "跳转："
   },
   "validators": {
     "usernameRequired": "请填写用户名",

@@ -1907,7 +1907,7 @@ class ApiClient {
     return this.request<{ codes: string[]; count: number; decoy?: boolean; target_username?: string; target_telegram_username?: string; target_telegram_id?: number }>("/admin/regcodes", {
       method: "POST",
       body: JSON.stringify(data),
-    });
+    }, { timeoutMs: 120000 }); // 大量生成时可能较慢，给 120s 避免超时
   }
 
   async deleteRegcode(code: string) {

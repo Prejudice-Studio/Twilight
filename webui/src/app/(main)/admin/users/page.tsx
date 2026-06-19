@@ -2529,25 +2529,18 @@ export default function AdminUsersPage() {
       {/* Pagination */}
       {pages > 1 && (
         <div className="flex items-center justify-center gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page === 1}
-          >
+          <Button variant="outline" size="icon" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <span className="text-sm">
-            第 {page} 页，共 {pages} 页
-          </span>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setPage((p) => Math.min(pages, p + 1))}
-            disabled={page === pages}
-          >
+          <span className="text-sm">第 {page} 页，共 {pages} 页</span>
+          <Button variant="outline" size="icon" onClick={() => setPage((p) => Math.min(pages, p + 1))} disabled={page === pages}>
             <ChevronRight className="h-4 w-4" />
           </Button>
+          <div className="flex items-center gap-1 ml-2">
+            <span className="text-xs text-muted-foreground">跳转：</span>
+            <Input type="number" min={1} max={pages} className="h-8 w-16 text-xs"
+              onKeyDown={(e) => { if (e.key === "Enter") { const v = parseInt((e.target as HTMLInputElement).value, 10); if (v >= 1 && v <= pages) setPage(v); }}} />
+          </div>
         </div>
       )}
 

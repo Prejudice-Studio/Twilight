@@ -1754,7 +1754,9 @@
     "algoDesc_symbols-16": "16 位混合字元，包含特殊字元，適合複製貼上場景。",
     "algoDesc_symbols-24": "24 位混合字元，包含特殊字元，隨機性更高。",
     "algoDesc_uuid": "標準 UUID v4，長度較長，唯一性強，適合系統間匯入匯出。",
-    "algoDesc_legacy-sha1": "舊版 SHA1 截斷格式，用於相容歷史卡碼風格。"
+    "algoDesc_legacy-sha1": "舊版 SHA1 截斷格式，用於相容歷史卡碼風格。",
+    "deselectAll": "取消全選",
+    "jumpToPage": "跳轉："
   },
   "validators": {
     "usernameRequired": "請填寫使用者名稱",

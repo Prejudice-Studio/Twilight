@@ -468,21 +468,21 @@ export default function AdminRegcodesPage() {
     }
   }, [viewMode, inviteCodesLoaded, inviteCodesLoading, inviteRegcodesLoaded, inviteRegcodesLoading, loadInviteCodes, loadInviteRegcodes]);
 
-  useEffect(() => {
-    const visibleCodes = new Set(regcodes.map((item) => item.code));
-    setSelectedCodes((prev) => {
-      const next = new Set(Array.from(prev).filter((code) => visibleCodes.has(code)));
-      return next.size === prev.size ? prev : next;
-    });
-  }, [regcodes]);
-
   const selectedRegcodes = regcodes.filter((item) => selectedCodes.has(item.code));
 
   const toggleSelectAll = (checked: boolean) => {
-    setSelectedCodes(checked ? new Set(regcodes.map((item) => item.code)) : new Set());
+    if (checked) {
+      setSelectedCodes((prev) => {
+        const next = new Set(prev);
+        regcodes.forEach((item) => next.add(item.code));
+        return next;
+      });
+    } else {
+      setSelectedCodes(new Set());
+    }
   };
 
-  // 反选：对当前页可见卡码逐个翻转选中态（选中列表已被 useEffect 收窄到当前页）。
+  // 反选：对当前页可见卡码逐个翻转选中态。
   const invertSelection = () => {
     setSelectedCodes((prev) => {
       const next = new Set<string>();
@@ -826,12 +826,36 @@ export default function AdminRegcodesPage() {
                   <div className="mt-4 space-y-2 p-3 bg-muted/50 rounded-xl border border-border">
                     <div className="flex items-center justify-between gap-2">
                       <Label className="text-xs">{t("adminRegcodes.generatedCodesLabel")}</Label>
-                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => {
-                        navigator.clipboard.writeText(createdCodes.join("\n"));
-                        toast({ title: t("adminRegcodes.copiedCount", { count: createdCodes.length }) });
-                      }}>
-                        <Copy className="mr-1 h-3.5 w-3.5" /> {t("adminRegcodes.copyAll")}
-                      </Button>
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => {
+                          const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+                          const blob = new Blob([createdCodes.join("\n")], { type: "text/plain;charset=utf-8" });
+                          const url = URL.createObjectURL(blob);
+                          const link = document.createElement("a");
+                          link.href = url; link.download = `regcodes-${stamp}.txt`;
+                          document.body.appendChild(link); link.click(); link.remove();
+                          URL.revokeObjectURL(url);
+                        }}>
+                          <FileText className="mr-1 h-3.5 w-3.5" /> TXT
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => {
+                          const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+                          const blob = new Blob([JSON.stringify(createdCodes, null, 2)], { type: "application/json;charset=utf-8" });
+                          const url = URL.createObjectURL(blob);
+                          const link = document.createElement("a");
+                          link.href = url; link.download = `regcodes-${stamp}.json`;
+                          document.body.appendChild(link); link.click(); link.remove();
+                          URL.revokeObjectURL(url);
+                        }}>
+                          <FileText className="mr-1 h-3.5 w-3.5" /> JSON
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => {
+                          navigator.clipboard.writeText(createdCodes.join("\n"));
+                          toast({ title: t("adminRegcodes.copiedCount", { count: createdCodes.length }) });
+                        }}>
+                          <Copy className="mr-1 h-3.5 w-3.5" /> {t("adminRegcodes.copyAll")}
+                        </Button>
+                      </div>
                     </div>
                     <div className="max-h-40 overflow-y-auto space-y-2 pr-1">
                       {createdCodes.map((code) => (
@@ -1109,14 +1133,22 @@ export default function AdminRegcodesPage() {
         </>
       ) : (
       <>
-      <div className="flex flex-col gap-2 rounded-xl border bg-muted/30 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
-        <span className="text-muted-foreground">
-          {t("adminRegcodes.selectionSummary", { selected: selectedRegcodes.length, total: regcodes.length })}
-        </span>
-        <div className="flex w-full flex-wrap gap-2 sm:w-auto">
-          <Button className="flex-1 sm:flex-none" variant="outline" size="sm" onClick={invertSelection} disabled={regcodes.length === 0}>
-            <FlipHorizontal2 className="mr-2 h-4 w-4" /> {t("adminRegcodes.invertSelection")}
-          </Button>
+          <div className="flex flex-col gap-2 rounded-xl border bg-muted/30 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-muted-foreground">
+              {t("adminRegcodes.selectionSummary", { selected: selectedRegcodes.length, total: regcodes.length })}
+              {selectedCodes.size > regcodes.length && (
+                <span className="ml-2 text-xs">（跨页共 {selectedCodes.size} 条）</span>
+              )}
+            </span>
+            <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+              {selectedCodes.size > 0 && (
+                <Button className="flex-1 sm:flex-none" variant="ghost" size="sm" onClick={() => setSelectedCodes(new Set())}>
+                  {t("adminRegcodes.deselectAll")}
+                </Button>
+              )}
+              <Button className="flex-1 sm:flex-none" variant="outline" size="sm" onClick={invertSelection} disabled={regcodes.length === 0}>
+                <FlipHorizontal2 className="mr-2 h-4 w-4" /> {t("adminRegcodes.invertSelection")}
+              </Button>
           <Button className="flex-1 sm:flex-none" variant="outline" size="sm" onClick={() => copyRegcodes(selectedRegcodes.length > 0 ? selectedRegcodes : regcodes)} disabled={regcodes.length === 0}>
             <Copy className="mr-2 h-4 w-4" /> {t("adminRegcodes.copyCodes")}
           </Button>
@@ -1498,25 +1530,28 @@ export default function AdminRegcodesPage() {
 
       {pages > 1 && (
         <div className="flex items-center justify-center gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page === 1}
-          >
+          <Button variant="outline" size="icon" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <span className="text-sm">
-            {t("adminRegcodes.pageStatus", { page, pages })}
-          </span>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setPage((p) => Math.min(pages, p + 1))}
-            disabled={page === pages}
-          >
+          <span className="text-sm">{t("adminRegcodes.pageStatus", { page, pages })}</span>
+          <Button variant="outline" size="icon" onClick={() => setPage((p) => Math.min(pages, p + 1))} disabled={page === pages}>
             <ChevronRight className="h-4 w-4" />
           </Button>
+          <div className="flex items-center gap-1 ml-2">
+            <span className="text-xs text-muted-foreground">{t("adminRegcodes.jumpToPage")}</span>
+            <Input
+              type="number"
+              min={1}
+              max={pages}
+              className="h-8 w-16 text-xs"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const val = parseInt((e.target as HTMLInputElement).value, 10);
+                  if (val >= 1 && val <= pages) setPage(val);
+                }
+              }}
+            />
+          </div>
         </div>
       )}
       </>

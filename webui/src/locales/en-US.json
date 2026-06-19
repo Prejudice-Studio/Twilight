@@ -1754,7 +1754,9 @@
     "algoDesc_symbols-16": "16 mixed characters including symbols, good for copy-paste scenarios.",
     "algoDesc_symbols-24": "24 mixed characters including symbols, higher randomness.",
     "algoDesc_uuid": "Standard UUID v4, long and highly unique, good for import/export between systems.",
-    "algoDesc_legacy-sha1": "Legacy truncated SHA1 format, for compatibility with historical code styles."
+    "algoDesc_legacy-sha1": "Legacy truncated SHA1 format, for compatibility with historical code styles.",
+    "deselectAll": "Deselect All",
+    "jumpToPage": "Go to:"
   },
   "validators": {
     "usernameRequired": "Please enter a username",
