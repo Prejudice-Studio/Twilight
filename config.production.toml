@@ -479,6 +479,13 @@ resend_cooldown_seconds = 60
 # 单个验证码允许的错误尝试次数，超过即作废（防在线爆破）
 max_attempts = 5
 
+# 自动清理已过期邮箱验证码记录（随调度器会话巡检执行）
+auto_cleanup_expired_verifications = true
+# 自动清理长期未验证邮箱字段，释放邮箱地址给其他账号使用；不会影响已验证邮箱
+auto_cleanup_unverified = true
+# 账号创建超过该天数仍未验证邮箱时自动清空邮箱字段
+auto_cleanup_unverified_days = 1
+
 # —— 邮件模板（占位符：{site}=站点名、{code}=验证码、{ttl}=有效分钟数）——
 subject_template = "{site} 邮箱验证码"
 body_template = """您正在 {site} 进行邮箱验证。

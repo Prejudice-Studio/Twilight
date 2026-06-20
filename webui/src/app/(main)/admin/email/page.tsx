@@ -498,8 +498,34 @@ export default function AdminEmailPage() {
           {tab === "config" && (
             <div className="mt-4">
               <AdminConfigSections
-                sectionKeys={["Email", "Notification", "RateLimit"]}
+                sectionKeys={["Email", "Scheduler", "Notification", "RateLimit"]}
                 sectionFieldKeys={{
+                  Email: [
+                    "enabled",
+                    "smtp_host",
+                    "smtp_port",
+                    "smtp_username",
+                    "smtp_password",
+                    "smtp_encryption",
+                    "smtp_from_address",
+                    "smtp_from_name",
+                    "smtp_timeout_seconds",
+                    "force_bind",
+                    "code_length",
+                    "code_type",
+                    "code_ttl_minutes",
+                    "resend_cooldown_seconds",
+                    "max_attempts",
+                    "auto_cleanup_expired_verifications",
+                    "auto_cleanup_unverified",
+                    "auto_cleanup_unverified_days",
+                    "email_validation_mode",
+                    "email_whitelist",
+                    "email_blacklist",
+                    "subject_template",
+                    "body_template",
+                  ],
+                  Scheduler: ["session_cleanup_interval"],
                   RateLimit: ["email_code_ip_per_10m", "email_code_uid_per_10m", "email_code_addr_per_10m"],
                 }}
                 title={t("emailAdmin.configTitle")}

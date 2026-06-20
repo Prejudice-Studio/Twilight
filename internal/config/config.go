@@ -208,23 +208,26 @@ type Config struct {
 	// EmailEnabled 是整个邮箱验证子系统的总开关：关闭时所有发码 / 找回 / 强制
 	// 绑定逻辑直接降级（前端隐藏入口、后端拒绝发码），即使 force_bind=true 也不
 	// 会把用户锁在仪表盘外（没有 SMTP 就无法验证，强制反而变成死锁）。
-	EmailEnabled               bool
-	SMTPHost                   string
-	SMTPPort                   int
-	SMTPUsername               string
-	SMTPPassword               string
-	SMTPEncryption             string // none | ssl | starttls
-	SMTPFromAddress            string
-	SMTPFromName               string
-	SMTPTimeoutSeconds         int
-	EmailForceBind             bool
-	EmailCodeLength            int
-	EmailCodeType              string // numeric | alphanumeric
-	EmailCodeTTLMinutes        int
-	EmailResendCooldownSeconds int
-	EmailMaxAttempts           int
-	EmailSubjectTemplate       string
-	EmailBodyTemplate          string
+	EmailEnabled                         bool
+	SMTPHost                             string
+	SMTPPort                             int
+	SMTPUsername                         string
+	SMTPPassword                         string
+	SMTPEncryption                       string // none | ssl | starttls
+	SMTPFromAddress                      string
+	SMTPFromName                         string
+	SMTPTimeoutSeconds                   int
+	EmailForceBind                       bool
+	EmailCodeLength                      int
+	EmailCodeType                        string // numeric | alphanumeric
+	EmailCodeTTLMinutes                  int
+	EmailResendCooldownSeconds           int
+	EmailMaxAttempts                     int
+	EmailSubjectTemplate                 string
+	EmailBodyTemplate                    string
+	EmailAutoCleanupExpiredVerifications bool
+	EmailAutoCleanupUnverified           bool
+	EmailAutoCleanupUnverifiedDays       int
 
 	RateLimitEnabled                  bool
 	RateLimitGlobalPerMinute          int
@@ -471,6 +474,9 @@ func Load(path string) (Config, error) {
 	cfg.EmailMaxAttempts = reader.intValue(cfg.EmailMaxAttempts, "Email.max_attempts", "email_max_attempts")
 	cfg.EmailSubjectTemplate = reader.stringValue(cfg.EmailSubjectTemplate, "Email.subject_template", "email_subject_template")
 	cfg.EmailBodyTemplate = reader.stringValue(cfg.EmailBodyTemplate, "Email.body_template", "email_body_template")
+	cfg.EmailAutoCleanupExpiredVerifications = reader.boolValue(cfg.EmailAutoCleanupExpiredVerifications, "Email.auto_cleanup_expired_verifications", "email_auto_cleanup_expired_verifications")
+	cfg.EmailAutoCleanupUnverified = reader.boolValue(cfg.EmailAutoCleanupUnverified, "Email.auto_cleanup_unverified", "email_auto_cleanup_unverified")
+	cfg.EmailAutoCleanupUnverifiedDays = reader.intValue(cfg.EmailAutoCleanupUnverifiedDays, "Email.auto_cleanup_unverified_days", "email_auto_cleanup_unverified_days")
 	cfg.NotificationEnabled = reader.boolValue(cfg.NotificationEnabled, "Notification.enabled", "notification_enabled")
 	cfg.NotificationExpiryRemindDays = reader.intValue(cfg.NotificationExpiryRemindDays, "Notification.expiry_remind_days", "expiry_remind_days")
 	cfg.LoginNotifyTelegramTemplate = reader.stringValue(cfg.LoginNotifyTelegramTemplate, "Notification.login_notify_telegram_template", "login_notify_telegram_template")
@@ -579,99 +585,102 @@ func defaults() Config {
 		// 这样审计 / 误启动场景下没有窗口可以被陌生人抢占。
 		// 首次部署由网页初始化向导（/api/v1/setup/*）一次性创建管理员并写入
 		// [Admin].usernames；普通注册路径不会因为空数据库而自动获得管理员权限。
-		RegisterEnabled:                   false,
-		AllowPendingRegister:              false,
-		EmbyDirectRegisterDays:            30,
-		EmbyUserLimit:                     -1,
-		DecoyAction:                       "log_only",
-		RegCodeFormat:                     "TW-{type}-{random}",
-		InviteCodeFormat:                  "INV{random}",
-		RegCodeRandomAlgorithm:            "base32-20",
-		InviteCodeRandomAlgorithm:         "hex10",
-		NotificationEnabled:               true,
-		NotificationExpiryRemindDays:      3,
-		LoginNotifyTelegramTemplate:       DefaultLoginNotifyTelegramTemplate,
-		LoginNotifyEmailSubjectTemplate:   DefaultLoginNotifyEmailSubjectTemplate,
-		LoginNotifyEmailBodyTemplate:      DefaultLoginNotifyEmailBodyTemplate,
-		AutoCleanupNoEmbyDays:             7,
-		AutoCleanupPendingEmbyDays:        7,
-		RateLimitEnabled:                  true,
-		RateLimitGlobalPerMinute:          1200,
-		RateLimitLoginPerMinute:           60,
-		RateLimitLoginUserPer5m:           10,
-		RateLimitRegisterPer10m:           30,
-		RateLimitForgotPasswordIPPer10m:   20,
-		RateLimitForgotPasswordUserPer30m: 10,
-		RateLimitEmailCodeIPPer10m:        20,
-		RateLimitEmailCodeAddrPer10m:      5,
-		RateLimitEmailCodeUIDPer10m:       10,
-		RateLimitUploadPerMinute:          60,
-		RateLimitAdminIconPerMinute:       20,
-		RateLimitAPIKeyDefaultPerMinute:   300,
-		SchedulerEnabled:                  true,
-		SchedulerExpiredCheckTime:         "03:00",
-		SchedulerExpiringCheckTime:        "09:00",
-		SchedulerDailyStatsTime:           "00:05",
-		SchedulerSessionCleanupInterval:   6,
-		SchedulerCleanupNoEmbyTime:        "03:30",
-		SchedulerCleanupPendingEmbyTime:   "03:45",
-		SchedulerCleanupUnusedUploadsTime: "02:20",
-		SchedulerCleanupAuditLogsTime:     "04:30",
-		SchedulerTickIntervalSeconds:      30,
-		SystemUpdateRepoURL:               "https://github.com/Prejudice-Studio/Twilight.git",
-		SystemUpdateBranch:                "main",
-		SystemUpdateRestartServices:       true,
-		SystemUpdateTriggerType:           "interval",
-		SystemUpdateIntervalHours:         24,
-		SystemUpdateTime:                  "04:00",
-		TMDBAPIURL:                        "https://api.themoviedb.org/3",
-		TMDBImageURL:                      "https://image.tmdb.org/t/p",
-		BangumiAPIURL:                     "https://api.bgm.tv/v0",
-		MediaRequestEnabled:               true,
-		MaxConcurrentRequestsPerUser:      3,
-		MaxConcurrentRequestsGlobal:       -1,
-		SigninEnabled:                     true,
-		SigninCurrencyName:                "星币",
-		SigninDailyMin:                    5,
-		SigninDailyMax:                    20,
-		SigninStreakBonusEnabled:          true,
-		SigninStreakBonusDays:             []int{3, 7, 14, 30},
-		SigninStreakBonusPoints:           []int{10, 50, 100, 300},
-		SigninResetAfterMiss:              true,
-		SigninRenewalEnabled:              false,
-		SigninRenewalCost:                 100,
-		SigninRenewalDays:                 30,
-		InviteEnabled:                     true,
-		InviteMaxDepth:                    3,
-		InviteLimit:                       10,
-		InviteRootUserLimit:               -1,
-		InviteRequireEmby:                 false,
-		InviteDefaultDays:                 30,
-		PermanentInviteMaxDays:            365,
-		UserLimit:                         -1,
-		MaxDevices:                        5,
-		MaxStreams:                        2,
-		ForgotPasswordEnabled:             true,
-		ForgotPasswordEmbyEnabled:         true,
-		ForgotPasswordEmailEnabled:        true,
-		TicketSystemEnabled:               false,
-		TicketTypes:                       []string{"all"},
-		AuditLogEnabled:                   true,
-		AuditLogAutoCleanupEnabled:        false,
-		AuditLogRetentionDays:             90,
-		AuditLogMaxEntries:                10000,
-		AuditLogPreserveAdmin:             true,
-		AuditLogCleanupCheckTime:          "04:30",
-		SMTPPort:                          587,
-		SMTPEncryption:                    "starttls",
-		SMTPTimeoutSeconds:                10,
-		EmailCodeLength:                   6,
-		EmailCodeType:                     "numeric",
-		EmailCodeTTLMinutes:               10,
-		EmailResendCooldownSeconds:        60,
-		EmailMaxAttempts:                  5,
-		EmailSubjectTemplate:              DefaultEmailSubjectTemplate,
-		EmailBodyTemplate:                 DefaultEmailBodyTemplate,
+		RegisterEnabled:                      false,
+		AllowPendingRegister:                 false,
+		EmbyDirectRegisterDays:               30,
+		EmbyUserLimit:                        -1,
+		DecoyAction:                          "log_only",
+		RegCodeFormat:                        "TW-{type}-{random}",
+		InviteCodeFormat:                     "INV{random}",
+		RegCodeRandomAlgorithm:               "base32-20",
+		InviteCodeRandomAlgorithm:            "hex10",
+		NotificationEnabled:                  true,
+		NotificationExpiryRemindDays:         3,
+		LoginNotifyTelegramTemplate:          DefaultLoginNotifyTelegramTemplate,
+		LoginNotifyEmailSubjectTemplate:      DefaultLoginNotifyEmailSubjectTemplate,
+		LoginNotifyEmailBodyTemplate:         DefaultLoginNotifyEmailBodyTemplate,
+		AutoCleanupNoEmbyDays:                7,
+		AutoCleanupPendingEmbyDays:           7,
+		RateLimitEnabled:                     true,
+		RateLimitGlobalPerMinute:             1200,
+		RateLimitLoginPerMinute:              60,
+		RateLimitLoginUserPer5m:              10,
+		RateLimitRegisterPer10m:              30,
+		RateLimitForgotPasswordIPPer10m:      20,
+		RateLimitForgotPasswordUserPer30m:    10,
+		RateLimitEmailCodeIPPer10m:           20,
+		RateLimitEmailCodeAddrPer10m:         5,
+		RateLimitEmailCodeUIDPer10m:          10,
+		RateLimitUploadPerMinute:             60,
+		RateLimitAdminIconPerMinute:          20,
+		RateLimitAPIKeyDefaultPerMinute:      300,
+		SchedulerEnabled:                     true,
+		SchedulerExpiredCheckTime:            "03:00",
+		SchedulerExpiringCheckTime:           "09:00",
+		SchedulerDailyStatsTime:              "00:05",
+		SchedulerSessionCleanupInterval:      6,
+		SchedulerCleanupNoEmbyTime:           "03:30",
+		SchedulerCleanupPendingEmbyTime:      "03:45",
+		SchedulerCleanupUnusedUploadsTime:    "02:20",
+		SchedulerCleanupAuditLogsTime:        "04:30",
+		SchedulerTickIntervalSeconds:         30,
+		SystemUpdateRepoURL:                  "https://github.com/Prejudice-Studio/Twilight.git",
+		SystemUpdateBranch:                   "main",
+		SystemUpdateRestartServices:          true,
+		SystemUpdateTriggerType:              "interval",
+		SystemUpdateIntervalHours:            24,
+		SystemUpdateTime:                     "04:00",
+		TMDBAPIURL:                           "https://api.themoviedb.org/3",
+		TMDBImageURL:                         "https://image.tmdb.org/t/p",
+		BangumiAPIURL:                        "https://api.bgm.tv/v0",
+		MediaRequestEnabled:                  true,
+		MaxConcurrentRequestsPerUser:         3,
+		MaxConcurrentRequestsGlobal:          -1,
+		SigninEnabled:                        true,
+		SigninCurrencyName:                   "星币",
+		SigninDailyMin:                       5,
+		SigninDailyMax:                       20,
+		SigninStreakBonusEnabled:             true,
+		SigninStreakBonusDays:                []int{3, 7, 14, 30},
+		SigninStreakBonusPoints:              []int{10, 50, 100, 300},
+		SigninResetAfterMiss:                 true,
+		SigninRenewalEnabled:                 false,
+		SigninRenewalCost:                    100,
+		SigninRenewalDays:                    30,
+		InviteEnabled:                        true,
+		InviteMaxDepth:                       3,
+		InviteLimit:                          10,
+		InviteRootUserLimit:                  -1,
+		InviteRequireEmby:                    false,
+		InviteDefaultDays:                    30,
+		PermanentInviteMaxDays:               365,
+		UserLimit:                            -1,
+		MaxDevices:                           5,
+		MaxStreams:                           2,
+		ForgotPasswordEnabled:                true,
+		ForgotPasswordEmbyEnabled:            true,
+		ForgotPasswordEmailEnabled:           true,
+		TicketSystemEnabled:                  false,
+		TicketTypes:                          []string{"all"},
+		AuditLogEnabled:                      true,
+		AuditLogAutoCleanupEnabled:           false,
+		AuditLogRetentionDays:                90,
+		AuditLogMaxEntries:                   10000,
+		AuditLogPreserveAdmin:                true,
+		AuditLogCleanupCheckTime:             "04:30",
+		SMTPPort:                             587,
+		SMTPEncryption:                       "starttls",
+		SMTPTimeoutSeconds:                   10,
+		EmailCodeLength:                      6,
+		EmailCodeType:                        "numeric",
+		EmailCodeTTLMinutes:                  10,
+		EmailResendCooldownSeconds:           60,
+		EmailMaxAttempts:                     5,
+		EmailSubjectTemplate:                 DefaultEmailSubjectTemplate,
+		EmailBodyTemplate:                    DefaultEmailBodyTemplate,
+		EmailAutoCleanupExpiredVerifications: true,
+		EmailAutoCleanupUnverified:           true,
+		EmailAutoCleanupUnverifiedDays:       1,
 	}
 }
 
@@ -1011,6 +1020,15 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("TWILIGHT_EMAIL_BODY_TEMPLATE"); v != "" {
 		cfg.EmailBodyTemplate = strings.ReplaceAll(v, `\n`, "\n")
+	}
+	if v := os.Getenv("TWILIGHT_EMAIL_AUTO_CLEANUP_EXPIRED_VERIFICATIONS"); v != "" {
+		cfg.EmailAutoCleanupExpiredVerifications = boolValue(v, cfg.EmailAutoCleanupExpiredVerifications)
+	}
+	if v := os.Getenv("TWILIGHT_EMAIL_AUTO_CLEANUP_UNVERIFIED"); v != "" {
+		cfg.EmailAutoCleanupUnverified = boolValue(v, cfg.EmailAutoCleanupUnverified)
+	}
+	if v := os.Getenv("TWILIGHT_EMAIL_AUTO_CLEANUP_UNVERIFIED_DAYS"); v != "" {
+		cfg.EmailAutoCleanupUnverifiedDays = intValue(v, cfg.EmailAutoCleanupUnverifiedDays)
 	}
 	if v := os.Getenv("TWILIGHT_RATE_LIMIT_UPLOAD_PER_MINUTE"); v != "" {
 		cfg.RateLimitUploadPerMinute = intValue(v, cfg.RateLimitUploadPerMinute)

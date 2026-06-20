@@ -1098,6 +1098,9 @@ func configSectionDefs() []configSectionDef {
 			{Key: "max_attempts", Label: "最大尝试次数", Type: "int", Description: "单个验证码允许的错误尝试次数，超过即失效"},
 			{Key: "subject_template", Label: "邮件标题模板", Type: "string", Description: "占位符：{site} 站点名、{code} 验证码、{ttl} 有效分钟数"},
 			{Key: "body_template", Label: "邮件正文模板", Type: "textarea", Description: "占位符：{site} 站点名、{code} 验证码、{ttl} 有效分钟数；支持换行"},
+			{Key: "auto_cleanup_expired_verifications", Label: "自动清理过期验证记录", Type: "bool", Description: "随调度器会话巡检清理已过期的邮箱验证码记录，避免状态文件堆积"},
+			{Key: "auto_cleanup_unverified", Label: "自动清理未验证邮箱", Type: "bool", Description: "清空长期未验证账号的邮箱字段，释放邮箱地址；不会影响已验证邮箱"},
+			{Key: "auto_cleanup_unverified_days", Label: "未验证邮箱保留天数", Type: "int", Description: "账号创建超过该天数仍未验证邮箱时自动清空；最小建议 1 天"},
 		}},
 	}
 }
@@ -1160,6 +1163,7 @@ func configValues(cfg config.Config) map[string]map[string]any {
 			"smtp_encryption": firstNonEmpty(cfg.SMTPEncryption, "starttls"), "smtp_from_address": cfg.SMTPFromAddress, "smtp_from_name": cfg.SMTPFromName, "smtp_timeout_seconds": cfg.SMTPTimeoutSeconds,
 			"force_bind": cfg.EmailForceBind, "code_length": cfg.EmailCodeLength, "code_type": firstNonEmpty(cfg.EmailCodeType, "numeric"), "code_ttl_minutes": cfg.EmailCodeTTLMinutes,
 			"resend_cooldown_seconds": cfg.EmailResendCooldownSeconds, "max_attempts": cfg.EmailMaxAttempts, "subject_template": cfg.EmailSubjectTemplate, "body_template": cfg.EmailBodyTemplate,
+			"auto_cleanup_expired_verifications": cfg.EmailAutoCleanupExpiredVerifications, "auto_cleanup_unverified": cfg.EmailAutoCleanupUnverified, "auto_cleanup_unverified_days": cfg.EmailAutoCleanupUnverifiedDays,
 			"email_validation_mode": cfg.EmailValidationMode, "email_whitelist": cfg.EmailWhitelist, "email_blacklist": cfg.EmailBlacklist,
 		},
 		"Security":     {"forgot_password_enabled": cfg.ForgotPasswordEnabled, "forgot_password_emby_enabled": cfg.ForgotPasswordEmbyEnabled, "forgot_password_email_enabled": cfg.ForgotPasswordEmailEnabled, "bot_internal_secret": cfg.BotInternalSecret},

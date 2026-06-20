@@ -43,6 +43,33 @@ max_upload_size = 1234
 	}
 }
 
+func TestLoadEmailCleanupConfigAndEnvOverride(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	content := `[Email]
+auto_cleanup_expired_verifications = false
+auto_cleanup_unverified = true
+auto_cleanup_unverified_days = 3
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TWILIGHT_EMAIL_AUTO_CLEANUP_UNVERIFIED_DAYS", "5")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.EmailAutoCleanupExpiredVerifications {
+		t.Fatal("expected expired verification cleanup to be disabled from TOML")
+	}
+	if !cfg.EmailAutoCleanupUnverified {
+		t.Fatal("expected unverified email cleanup to be enabled from TOML")
+	}
+	if cfg.EmailAutoCleanupUnverifiedDays != 5 {
+		t.Fatalf("expected env override for unverified cleanup days, got %d", cfg.EmailAutoCleanupUnverifiedDays)
+	}
+}
+
 func TestLoadSetupModeFromAnySection(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	content := `[Bootstrap]

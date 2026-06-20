@@ -44,6 +44,9 @@
 | `code_ttl_minutes`（`TWILIGHT_EMAIL_CODE_TTL_MINUTES`） | `10` | 验证码有效期（分钟）；`<=0` 回落 10。 |
 | `resend_cooldown_seconds`（`TWILIGHT_EMAIL_RESEND_COOLDOWN_SECONDS`） | `60` | 同一邮箱两次发码的最小间隔（秒）。 |
 | `max_attempts`（`TWILIGHT_EMAIL_MAX_ATTEMPTS`） | `5` | 单个验证码允许的错误尝试次数，超过即作废；`<=0` 回落 5。 |
+| `auto_cleanup_expired_verifications`（`TWILIGHT_EMAIL_AUTO_CLEANUP_EXPIRED_VERIFICATIONS`） | `true` | 随调度器会话巡检自动删除已过期邮箱验证码记录。 |
+| `auto_cleanup_unverified`（`TWILIGHT_EMAIL_AUTO_CLEANUP_UNVERIFIED`） | `true` | 自动清空长期未验证账号的邮箱字段，释放邮箱地址；不影响已验证邮箱。 |
+| `auto_cleanup_unverified_days`（`TWILIGHT_EMAIL_AUTO_CLEANUP_UNVERIFIED_DAYS`） | `1` | 账号创建超过该天数仍未验证邮箱时自动清空邮箱字段。 |
 | `subject_template`（`TWILIGHT_EMAIL_SUBJECT_TEMPLATE`） | `{site} 邮箱验证码` | 邮件标题模板。 |
 | `body_template`（`TWILIGHT_EMAIL_BODY_TEMPLATE`） | 见下 | 邮件正文模板；env 覆写用字面量 `\n` 表示换行（加载时自动还原）。 |
 
@@ -162,7 +165,11 @@
 
 ## 定时清理
 
-过期验证码由调度任务周期清理：`scheduler_runner.go` 调用 `CleanupExpiredEmailVerifications` 删除所有 `ExpiresAt` 已过期的记录，避免状态文档堆积废码。
+过期验证码和未验证邮箱由 `cleanup_sessions` 调度任务顺带清理，执行间隔由 `[Scheduler].session_cleanup_interval` 控制（小时）。后台「邮箱管理 → 邮箱配置」会同时展示 `[Email]` 的清理开关和该调度间隔。
+
+- `auto_cleanup_expired_verifications=true` 时，`scheduler_runner.go` 调用 `CleanupExpiredEmailVerifications` 删除所有 `ExpiresAt` 已过期的记录，避免状态文档堆积废码。
+- `auto_cleanup_unverified=true` 时，`CleanupUnverifiedEmailsByAge` 会清空创建超过 `auto_cleanup_unverified_days` 天且仍未验证的用户邮箱字段，释放邮箱地址；不会清空已验证邮箱，也不会删除账号。
+- 手动按钮仍保留在邮箱管理页：「清理过期」立即清理已过期验证码，「清空未验证邮箱」用于管理员显式执行一次全量未验证邮箱清空。
 
 ## SMTP 服务商发件限额
 
