@@ -16,6 +16,10 @@ import (
 // 设备审查是管理员按需触发的低频操作，取较大窗口以尽量覆盖离线设备的来源 IP。
 const embyDeviceAuditActivityLimit = 500
 
+// embyDeviceAuditCacheTTL protects Emby from repeated admin refreshes while
+// keeping quick moderation actions fresh via ?refresh=1.
+const embyDeviceAuditCacheTTL = 15 * time.Second
+
 // embyDeviceIPCorrelationWindow 限定「用历史登录事件回填离线设备 IP」时，设备最近
 // 活跃时间与登录事件时间的最大允许间隔。Emby 的 /Devices 不返回 IP，离线设备也拿不到
 // 实时会话 IP；当某用户有多个历史登录 IP 时，只把时间上最接近设备最近活跃、且落在窗口
@@ -411,10 +415,26 @@ func (a *App) handleAdminEmbyDeviceAudit(w http.ResponseWriter, r *http.Request,
 		})
 		return
 	}
+	refresh := r.URL.Query().Get("refresh") == "1" || strings.EqualFold(r.URL.Query().Get("refresh"), "true")
+	if !refresh {
+		now := time.Now()
+		a.embyDeviceAuditMu.Lock()
+		if a.embyDeviceAuditCache != nil && now.Before(a.embyDeviceAuditUntil) {
+			data := a.embyDeviceAuditCache
+			a.embyDeviceAuditMu.Unlock()
+			ok(w, "OK", data)
+			return
+		}
+		a.embyDeviceAuditMu.Unlock()
+	}
 	data, err := a.buildEmbyDeviceAudit(r.Context())
 	if err != nil {
 		failWithCode(w, http.StatusBadGateway, ErrEmbyRemoteSessionsFail, "读取 Emby 设备列表失败")
 		return
 	}
+	a.embyDeviceAuditMu.Lock()
+	a.embyDeviceAuditCache = data
+	a.embyDeviceAuditUntil = time.Now().Add(embyDeviceAuditCacheTTL)
+	a.embyDeviceAuditMu.Unlock()
 	ok(w, "OK", data)
 }

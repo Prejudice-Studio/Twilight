@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTheme } from "next-themes";
 import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
@@ -22,7 +22,7 @@ export function Header() {
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
   const { t } = useI18n();
-  const { info: systemInfo, fetchInfo: fetchSystemInfo } = useSystemStore();
+  const { info: systemInfo } = useSystemStore();
   const { theme, resolvedTheme, setTheme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const isAdmin = user?.role === 0;
@@ -40,10 +40,6 @@ export function Header() {
     () => filterNavItems(adminNavItems, systemInfo?.features),
     [systemInfo?.features],
   );
-
-  useEffect(() => {
-    void fetchSystemInfo();
-  }, [fetchSystemInfo]);
 
   return (
     <header className="sticky top-0 z-30 mx-auto w-full max-w-[1680px] px-2 pt-3 sm:px-4 sm:pt-4 md:px-6 md:pt-6 xl:px-8">
@@ -74,6 +70,7 @@ export function Header() {
                     <Link
                       key={item.href}
                       href={item.href}
+                      prefetch={false}
                       onClick={() => setMobileOpen(false)}
                       aria-current={active ? "page" : undefined}
                       className={cn(
@@ -96,6 +93,7 @@ export function Header() {
                         <Link
                           key={item.href}
                           href={item.href}
+                          prefetch={false}
                           onClick={() => setMobileOpen(false)}
                           aria-current={active ? "page" : undefined}
                           className={cn(

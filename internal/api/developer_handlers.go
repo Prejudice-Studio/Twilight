@@ -73,8 +73,9 @@ func appendStringAny(value any, item string) []string {
 func validateDeveloperJSCommand(code string) map[string]any {
 	trimmed := strings.TrimSpace(code)
 	warnings := []string{
-		"Preview only: custom JavaScript commands are not executed by the production Bot runtime.",
-		"Allowed APIs are limited to ctx, args, user, reply(text), and log(text).",
+		"Preview only: saving to bot_custom_commands is required before production Bot runtime can use this script.",
+		"Allowed APIs are limited to ctx, args, user, constants, reply(text), log(text), auth(role), config(key), and env(key).",
+		"config(key) and env(key) are read-only allowlists; sensitive values always return an empty string.",
 	}
 	if trimmed == "" {
 		return map[string]any{"ok": false, "errors": []string{"code is empty"}, "warnings": warnings}
@@ -99,6 +100,6 @@ func validateDeveloperJSCommand(code string) map[string]any {
 		"errors":   errors,
 		"warnings": warnings,
 		"example":  "reply('Hello ' + (user.username || 'user'));",
-		"bindings": []string{"ctx", "args", "user", "reply(text)", "log(text)"},
+		"bindings": []string{"ctx", "args", "user", "constants", "reply(text)", "log(text)", "auth(role)", "config(key)", "env(key)"},
 	}
 }

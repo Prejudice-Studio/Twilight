@@ -17,6 +17,7 @@ import { RegionRefreshKeys } from "@/lib/region-refresh";
 import { useRegionRefresh } from "@/hooks/use-region-refresh";
 import { normalizeBackgroundImageValue } from "@/lib/safe-url";
 import { useI18n } from "@/lib/i18n";
+import { useSystemStore } from "@/store/system";
 
 interface BackgroundConfig {
   lightBg?: string;
@@ -77,6 +78,7 @@ export default function MainLayout({
   const pathname = usePathname();
   const { t } = useI18n();
   const { user, isAuthenticated, isLoading, isHydrated, initialize, fetchUser } = useAuthStore();
+  const { fetchInfo: fetchSystemInfo } = useSystemStore();
   const { resolvedTheme, theme } = useTheme();
   const activeTheme = resolvedTheme || theme;
   const isAdmin = user?.role === 0;
@@ -169,6 +171,11 @@ export default function MainLayout({
     if (!isHydrated) return;
     void initialize();
   }, [isHydrated, initialize]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    void fetchSystemInfo();
+  }, [fetchSystemInfo, isAuthenticated]);
 
   useEffect(() => {
     return () => {

@@ -10,7 +10,7 @@ const securityLinks = [
   { href: "/admin/audit-logs", titleKey: "adminSecurity.auditTitle", descriptionKey: "adminSecurity.auditDescription", icon: ClipboardList },
   { href: "/admin/logs", titleKey: "adminSecurity.logsTitle", descriptionKey: "adminSecurity.logsDescription", icon: ScrollText },
   { href: "/admin/violations", titleKey: "adminSecurity.riskTitle", descriptionKey: "adminSecurity.riskDescription", icon: ShieldAlert },
-  { href: "/admin/device-audit", titleKey: "adminSecurity.deviceTitle", descriptionKey: "adminSecurity.deviceDescription", icon: MonitorSmartphone },
+  { href: "/admin/emby?tab=devices", titleKey: "adminSecurity.deviceTitle", descriptionKey: "adminSecurity.deviceDescription", icon: MonitorSmartphone },
 ] as const;
 
 export default function AdminSecurityCenterPage() {
@@ -27,7 +27,7 @@ export default function AdminSecurityCenterPage() {
         {securityLinks.map((item) => {
           const Icon = item.icon;
           return (
-            <Link key={item.href} href={item.href}>
+            <Link key={item.href} href={item.href} prefetch={false}>
               <Card className="h-full transition-colors hover:border-primary/50 hover:bg-accent/30">
                 <CardContent className="flex min-h-[112px] gap-3 p-4">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">

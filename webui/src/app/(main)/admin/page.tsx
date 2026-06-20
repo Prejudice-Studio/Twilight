@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import {
   Users, Megaphone, MessageSquareMore, FileText, Network, Film, ShieldAlert,
-  ClipboardList, BookOpen, Mail, MessageSquare, Server, MonitorSmartphone,
+  ClipboardList, BookOpen, Mail, MessageSquare, Server,
   TimerReset, Database, FileCode, ScrollText, TestTube,
   AlertTriangle, Settings, Shield, Code2,
 } from "lucide-react";
@@ -30,7 +30,6 @@ const adminPages: AdminNavEntry[] = [
   { href: "/admin/bangumi", labelKey: "navigation.bangumiAdmin", icon: BookOpen, category: "content" },
   { href: "/admin/security", labelKey: "navigation.securityCenter", icon: Shield, category: "security" },
   { href: "/admin/audit-logs", labelKey: "navigation.auditLogs", icon: ClipboardList, category: "security" },
-  { href: "/admin/device-audit", labelKey: "navigation.embyDeviceAudit", icon: MonitorSmartphone, category: "security" },
   { href: "/admin/scheduler", labelKey: "navigation.scheduler", icon: TimerReset, category: "ops" },
   { href: "/admin/database", labelKey: "navigation.databaseBackup", icon: Database, category: "ops" },
   { href: "/admin/config", labelKey: "navigation.configAdmin", icon: FileCode, category: "ops" },
@@ -87,7 +86,7 @@ export default function AdminIndexPage() {
                 const Icon = page.icon;
                 return (
                   <motion.div key={page.href} variants={item}>
-                    <Link href={page.href}>
+                    <Link href={page.href} prefetch={false}>
                       <Card className="glass-card cursor-pointer transition-colors hover:border-primary/50 hover:bg-accent/30">
                         <CardContent className="flex items-center gap-3 p-4">
                           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">

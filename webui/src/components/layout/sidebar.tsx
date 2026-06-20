@@ -30,7 +30,6 @@ import {
   Coins,
   ScrollText,
   ShieldAlert,
-  MonitorSmartphone,
   Mail,
   ClipboardList,
   BookOpen,
@@ -92,7 +91,6 @@ export const adminNavItems: SidebarNavItem[] = [
   { href: "/admin/security", labelKey: "navigation.securityCenter", icon: Shield },
   { href: "/admin/developer", labelKey: "navigation.developerMode", icon: Code2 },
   { href: "/admin/emby", labelKey: "navigation.embyAdmin", icon: Server },
-  { href: "/admin/device-audit", labelKey: "navigation.embyDeviceAudit", icon: MonitorSmartphone },
   { href: "/admin/scheduler", labelKey: "navigation.scheduler", icon: TimerReset },
   { href: "/admin/database", labelKey: "navigation.databaseBackup", icon: Database },
   { href: "/admin/config", labelKey: "navigation.configAdmin", icon: FileCode },
@@ -132,9 +130,11 @@ function isActivePath(pathname: string, href: string) {
       pathname.startsWith(`${href}/`) ||
       pathname.startsWith("/admin/audit-logs") ||
       pathname.startsWith("/admin/logs") ||
-      pathname.startsWith("/admin/violations") ||
-      pathname.startsWith("/admin/device-audit")
+      pathname.startsWith("/admin/violations")
     );
+  }
+  if (href === "/admin/emby") {
+    return pathname === href || pathname.startsWith(`${href}/`) || pathname.startsWith("/admin/device-audit");
   }
   return pathname === href || pathname.startsWith(`${href}/`);
 }
@@ -148,11 +148,7 @@ export function Sidebar() {
   const currentTheme = resolvedTheme || rawTheme || "light";
   const isAdmin = user?.role === 0;
   const [profileAvatar, setProfileAvatar] = useState<string | null>(user?.avatar || null);
-  const { info: systemInfo, fetchInfo: fetchSystemInfo } = useSystemStore();
-
-  useEffect(() => {
-    void fetchSystemInfo();
-  }, [fetchSystemInfo]);
+  const { info: systemInfo } = useSystemStore();
 
   const loadProfileAvatar = useCallback(async () => {
     if (!user?.uid) {
@@ -161,6 +157,10 @@ export function Sidebar() {
     }
 
     try {
+      if (user.avatar) {
+        setProfileAvatar(user.avatar);
+        return;
+      }
       const res = await api.getUserAvatar(user.uid);
       if (res.success) {
         setProfileAvatar(res.data?.avatar || user.avatar || null);
@@ -286,6 +286,7 @@ export function Sidebar() {
                 <Link
                   key={item.href}
                   href={item.href}
+                  prefetch={false}
                   className={cn("sidebar-link", active && "sidebar-link-active")}
                 >
                   {active && (
@@ -318,6 +319,7 @@ export function Sidebar() {
                     <Link
                       key={item.href}
                       href={item.href}
+                      prefetch={false}
                       className={cn("sidebar-link", active && "sidebar-link-active")}
                     >
                       {active && (

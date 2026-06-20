@@ -1,57 +1,385 @@
 "use client";
 
-import { useState } from "react";
-import { AlertTriangle, Code2, Loader2, Play, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  BookOpen,
+  Code2,
+  Copy,
+  FileCode2,
+  Loader2,
+  Play,
+  Plus,
+  Save,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, type MessageKey } from "@/lib/i18n";
 
-const example = `// Custom Telegram command preview
-// Available bindings: ctx, args, user, reply(text), log(text)
+const CUSTOM_TEMPLATE_STORAGE_KEY = "twilight:developer-js-templates";
+
+type DeveloperTemplate = {
+  id: string;
+  title: MessageKey | string;
+  description: MessageKey | string;
+  command: string;
+  code: string;
+  builtin?: boolean;
+  updatedAt?: number;
+};
+
+type DocRow = {
+  name: string;
+  descriptionKey: MessageKey;
+  example?: string;
+};
+
+const helloTemplate = `// Greeting command
 const name = user.username || "user";
 reply("Hello " + name + ". Args: " + args.join(", "));`;
 
-const statsExample = `// Reply with a compact user summary
+const statsTemplate = `// Compact user summary
 const name = user.username || "user";
 const uid = user.uid || "unknown";
-reply("User: " + name + "\\nUID: " + uid + "\\nArgs: " + args.join(", "));`;
+reply([
+  "User: " + name,
+  "UID: " + uid,
+  "Role: " + user.role,
+  "Has Emby: " + (user.has_emby ? "yes" : "no")
+].join("\\n"));`;
 
-const guardExample = `// Guard an admin-only command
-if (!user || user.role !== 0) {
+const adminGuardTemplate = `// Admin-only command
+if (!auth("admin")) {
   reply("Permission denied");
   return;
 }
-log("admin command from " + user.username);
+log("admin command accepted for " + user.username);
 reply("Admin command accepted");`;
 
-const bindingRows = [
-  ["ctx", "adminDeveloper.bindingCtx"],
-  ["args", "adminDeveloper.bindingArgs"],
-  ["user", "adminDeveloper.bindingUser"],
+const configTemplate = `// Read safe, non-secret system configuration
+const siteName = config("app.name");
+const inviteEnabled = config("invite.enabled");
+const maxDepth = config("invite.max_depth");
+
+reply([
+  "Site: " + siteName,
+  "Invite enabled: " + inviteEnabled,
+  "Invite max depth: " + maxDepth
+].join("\\n"));`;
+
+const envTemplate = `// Read allowlisted non-secret environment variables
+const host = env("TWILIGHT_HOST") || "not set";
+const port = env("TWILIGHT_PORT") || "not set";
+reply("API bind: " + host + ":" + port);`;
+
+const argsRouterTemplate = `// Route by first argument
+const action = (args[0] || "help").toLowerCase();
+if (action === "ping") {
+  reply("pong");
+} else if (action === "me") {
+  reply("You are " + (user.username || "unknown"));
+} else {
+  reply("Usage: /tool ping | me");
+}`;
+
+const builtInTemplates: DeveloperTemplate[] = [
+  {
+    id: "hello",
+    title: "adminDeveloper.exampleHello",
+    description: "adminDeveloper.exampleHelloDesc",
+    command: "/hello",
+    code: helloTemplate,
+    builtin: true,
+  },
+  {
+    id: "stats",
+    title: "adminDeveloper.exampleStats",
+    description: "adminDeveloper.exampleStatsDesc",
+    command: "/me",
+    code: statsTemplate,
+    builtin: true,
+  },
+  {
+    id: "admin-guard",
+    title: "adminDeveloper.exampleGuard",
+    description: "adminDeveloper.exampleGuardDesc",
+    command: "/admin_tool",
+    code: adminGuardTemplate,
+    builtin: true,
+  },
+  {
+    id: "config",
+    title: "adminDeveloper.exampleConfig",
+    description: "adminDeveloper.exampleConfigDesc",
+    command: "/site",
+    code: configTemplate,
+    builtin: true,
+  },
+  {
+    id: "env",
+    title: "adminDeveloper.exampleEnv",
+    description: "adminDeveloper.exampleEnvDesc",
+    command: "/runtime",
+    code: envTemplate,
+    builtin: true,
+  },
+  {
+    id: "router",
+    title: "adminDeveloper.exampleRouter",
+    description: "adminDeveloper.exampleRouterDesc",
+    command: "/tool",
+    code: argsRouterTemplate,
+    builtin: true,
+  },
+];
+
+const snippetRows = [
+  {
+    labelKey: "adminDeveloper.snippetReply",
+    code: `reply("message");`,
+  },
+  {
+    labelKey: "adminDeveloper.snippetLog",
+    code: `log("debug message");`,
+  },
+  {
+    labelKey: "adminDeveloper.snippetAdminGuard",
+    code: `if (!auth("admin")) {
+  reply("Permission denied");
+  return;
+}
+`,
+  },
+  {
+    labelKey: "adminDeveloper.snippetConfig",
+    code: `const siteName = config("app.name");`,
+  },
+  {
+    labelKey: "adminDeveloper.snippetEnv",
+    code: `const host = env("TWILIGHT_HOST");`,
+  },
+  {
+    labelKey: "adminDeveloper.snippetArgs",
+    code: `const firstArg = args[0] || "";`,
+  },
 ] as const;
 
-const functionRows = [
-  ["reply(text)", "adminDeveloper.functionReply"],
-  ["log(text)", "adminDeveloper.functionLog"],
-] as const;
+const bindingRows: DocRow[] = [
+  { name: "ctx.private_chat", descriptionKey: "adminDeveloper.bindingCtxPrivate", example: "true" },
+  { name: "ctx.command_time", descriptionKey: "adminDeveloper.bindingCtxTime", example: "Unix seconds" },
+  { name: "args", descriptionKey: "adminDeveloper.bindingArgs", example: '["a", "b"]' },
+  { name: "user.uid", descriptionKey: "adminDeveloper.bindingUserUid", example: "10001" },
+  { name: "user.username", descriptionKey: "adminDeveloper.bindingUserName", example: "alice" },
+  { name: "user.role", descriptionKey: "adminDeveloper.bindingUserRole", example: "0 admin, 1 user, 2 whitelist" },
+  { name: "user.active", descriptionKey: "adminDeveloper.bindingUserActive", example: "true" },
+  { name: "user.has_emby", descriptionKey: "adminDeveloper.bindingUserHasEmby", example: "true" },
+];
 
-const exampleRows = [
-  ["adminDeveloper.exampleHello", example],
-  ["adminDeveloper.exampleStats", statsExample],
-  ["adminDeveloper.exampleGuard", guardExample],
-] as const;
+const constantRows: DocRow[] = [
+  { name: "constants.roles.admin", descriptionKey: "adminDeveloper.constantRoleAdmin", example: "0" },
+  { name: "constants.roles.user", descriptionKey: "adminDeveloper.constantRoleUser", example: "1" },
+  { name: "constants.roles.whitelist", descriptionKey: "adminDeveloper.constantRoleWhitelist", example: "2" },
+  { name: "constants.limits.max_replies", descriptionKey: "adminDeveloper.constantMaxReplies", example: "4" },
+  { name: "constants.limits.max_logs", descriptionKey: "adminDeveloper.constantMaxLogs", example: "8" },
+];
+
+const functionRows: DocRow[] = [
+  { name: "reply(text)", descriptionKey: "adminDeveloper.functionReply", example: 'reply("hello")' },
+  { name: "log(text)", descriptionKey: "adminDeveloper.functionLog", example: 'log("step reached")' },
+  { name: "auth(role)", descriptionKey: "adminDeveloper.functionAuth", example: 'auth("admin")' },
+  { name: "config(key)", descriptionKey: "adminDeveloper.functionConfig", example: 'config("invite.enabled")' },
+  { name: "env(key)", descriptionKey: "adminDeveloper.functionEnv", example: 'env("TWILIGHT_HOST")' },
+];
+
+const configRows: DocRow[] = [
+  { name: "app.name", descriptionKey: "adminDeveloper.configAppName" },
+  { name: "app.version", descriptionKey: "adminDeveloper.configAppVersion" },
+  { name: "telegram.enabled", descriptionKey: "adminDeveloper.configTelegramEnabled" },
+  { name: "telegram.require_membership", descriptionKey: "adminDeveloper.configTelegramMembership" },
+  { name: "telegram.ban_on_leave", descriptionKey: "adminDeveloper.configTelegramBan" },
+  { name: "invite.enabled", descriptionKey: "adminDeveloper.configInviteEnabled" },
+  { name: "invite.max_depth", descriptionKey: "adminDeveloper.configInviteDepth" },
+  { name: "email.enabled", descriptionKey: "adminDeveloper.configEmailEnabled" },
+  { name: "signin.enabled", descriptionKey: "adminDeveloper.configSigninEnabled" },
+  { name: "ticket.enabled", descriptionKey: "adminDeveloper.configTicketEnabled" },
+];
+
+const envRows: DocRow[] = [
+  { name: "TWILIGHT_APP_NAME", descriptionKey: "adminDeveloper.envAppName" },
+  { name: "TWILIGHT_SERVER_NAME", descriptionKey: "adminDeveloper.envServerName" },
+  { name: "TWILIGHT_HOST", descriptionKey: "adminDeveloper.envHost" },
+  { name: "TWILIGHT_PORT", descriptionKey: "adminDeveloper.envPort" },
+  { name: "TWILIGHT_DATABASE_DRIVER", descriptionKey: "adminDeveloper.envDatabaseDriver" },
+  { name: "TWILIGHT_EMAIL_ENABLED", descriptionKey: "adminDeveloper.envEmailEnabled" },
+  { name: "TWILIGHT_INVITE_ENABLED", descriptionKey: "adminDeveloper.envInviteEnabled" },
+];
+
+function templateText(value: MessageKey | string, t: (key: MessageKey) => string): string {
+  return value.startsWith("adminDeveloper.") ? t(value as MessageKey) : value;
+}
+
+function commandReply(command: string, code: string): string {
+  const normalized = command.trim().startsWith("/") ? command.trim() : `/${command.trim() || "custom"}`;
+  return `${normalized} = js:${code.trim()}`;
+}
+
+function loadCustomTemplates(): DeveloperTemplate[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(CUSTOM_TEMPLATE_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item): DeveloperTemplate | null => {
+        if (!item || typeof item !== "object") return null;
+        const name = String(item.title || "").trim();
+        const code = String(item.code || "").trim();
+        if (!name || !code) return null;
+        return {
+          id: String(item.id || `custom-${Date.now()}`),
+          title: name.slice(0, 80),
+          description: String(item.description || "").slice(0, 160),
+          command: String(item.command || "/custom").slice(0, 40),
+          code,
+          updatedAt: Number(item.updatedAt || Date.now()),
+        };
+      })
+      .filter(Boolean) as DeveloperTemplate[];
+  } catch {
+    return [];
+  }
+}
+
+function saveCustomTemplates(templates: DeveloperTemplate[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(CUSTOM_TEMPLATE_STORAGE_KEY, JSON.stringify(templates));
+}
+
+function DocRows({ rows }: { rows: DocRow[] }) {
+  const { t } = useI18n();
+  return (
+    <div className="space-y-2">
+      {rows.map((row) => (
+        <div key={row.name} className="rounded-md border bg-muted/20 p-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="font-mono text-xs">{row.name}</code>
+            {row.example ? <Badge variant="outline" className="text-[10px]">{row.example}</Badge> : null}
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">{t(row.descriptionKey)}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function AdminDeveloperPage() {
   const { toast } = useToast();
   const { t } = useI18n();
-  const [code, setCode] = useState(example);
+  const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const [code, setCode] = useState(helloTemplate);
+  const [command, setCommand] = useState("/hello");
   const [running, setRunning] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [templateDescription, setTemplateDescription] = useState("");
+  const [customTemplates, setCustomTemplates] = useState<DeveloperTemplate[]>([]);
+  const [activeTemplateId, setActiveTemplateId] = useState("hello");
   const [result, setResult] = useState<Awaited<ReturnType<typeof api.previewDeveloperJSCommand>>["data"] | null>(null);
+
+  useEffect(() => {
+    setCustomTemplates(loadCustomTemplates());
+  }, []);
+
+  const allTemplates = useMemo(() => [...builtInTemplates, ...customTemplates], [customTemplates]);
+  const activeTemplate = allTemplates.find((item) => item.id === activeTemplateId) || allTemplates[0];
+  const commandPreview = useMemo(() => commandReply(command, code), [code, command]);
+
+  const applyTemplate = useCallback((template: DeveloperTemplate) => {
+    setActiveTemplateId(template.id);
+    setCode(template.code);
+    setCommand(template.command || "/custom");
+    setTemplateName(template.builtin ? "" : String(template.title));
+    setTemplateDescription(template.builtin ? "" : String(template.description || ""));
+    setResult(null);
+  }, []);
+
+  const insertSnippet = useCallback((snippet: string) => {
+    const textarea = editorRef.current;
+    if (!textarea) {
+      setCode((current) => `${current}\n${snippet}`);
+      return;
+    }
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const next = `${code.slice(0, start)}${snippet}${code.slice(end)}`;
+    setCode(next);
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const cursor = start + snippet.length;
+      textarea.setSelectionRange(cursor, cursor);
+    });
+  }, [code]);
+
+  const persistCustomTemplates = useCallback((templates: DeveloperTemplate[]) => {
+    setCustomTemplates(templates);
+    saveCustomTemplates(templates);
+  }, []);
+
+  const saveAsTemplate = useCallback(() => {
+    const name = templateName.trim();
+    if (!name || !code.trim()) {
+      toast({ title: t("adminDeveloper.templateNameRequired"), variant: "destructive" });
+      return;
+    }
+    const next: DeveloperTemplate = {
+      id: `custom-${Date.now()}`,
+      title: name,
+      description: templateDescription.trim(),
+      command,
+      code,
+      updatedAt: Date.now(),
+    };
+    persistCustomTemplates([next, ...customTemplates]);
+    setActiveTemplateId(next.id);
+    toast({ title: t("adminDeveloper.templateSaved"), variant: "success" });
+  }, [code, command, customTemplates, persistCustomTemplates, t, templateDescription, templateName, toast]);
+
+  const updateTemplate = useCallback(() => {
+    const target = customTemplates.find((item) => item.id === activeTemplateId);
+    if (!target) return;
+    const next = customTemplates.map((item) => item.id === target.id
+      ? { ...item, title: templateName.trim() || item.title, description: templateDescription.trim(), command, code, updatedAt: Date.now() }
+      : item);
+    persistCustomTemplates(next);
+    toast({ title: t("adminDeveloper.templateUpdated"), variant: "success" });
+  }, [activeTemplateId, code, command, customTemplates, persistCustomTemplates, t, templateDescription, templateName, toast]);
+
+  const deleteTemplate = useCallback(() => {
+    const target = customTemplates.find((item) => item.id === activeTemplateId);
+    if (!target) return;
+    const next = customTemplates.filter((item) => item.id !== target.id);
+    persistCustomTemplates(next);
+    applyTemplate(builtInTemplates[0]);
+    toast({ title: t("adminDeveloper.templateDeleted"), variant: "success" });
+  }, [activeTemplateId, applyTemplate, customTemplates, persistCustomTemplates, t, toast]);
+
+  const copyCommandReply = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(commandPreview);
+      toast({ title: t("common.copied"), variant: "success" });
+    } catch {
+      toast({ title: t("common.copyFailed"), variant: "destructive" });
+    }
+  }, [commandPreview, t, toast]);
 
   const preview = async () => {
     setRunning(true);
@@ -73,96 +401,151 @@ export default function AdminDeveloperPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="flex items-center gap-2 text-2xl font-bold">
-          <Code2 className="h-6 w-6" />
-          {t("adminDeveloper.title")}
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">{t("adminDeveloper.description")}</p>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <h1 className="flex items-center gap-2 text-2xl font-bold">
+            <Code2 className="h-6 w-6" />
+            {t("adminDeveloper.title")}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">{t("adminDeveloper.description")}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant="outline">{t("adminDeveloper.authBadge")}</Badge>
+          <Badge variant="warning">{t("adminDeveloper.sandboxBadge")}</Badge>
+        </div>
       </div>
 
       <Alert className="border-amber-500/40 bg-amber-500/10">
         <AlertTriangle className="h-4 w-4" />
         <AlertTitle>{t("adminDeveloper.riskTitle")}</AlertTitle>
-        <AlertDescription>
-          {t("adminDeveloper.riskDescription")}
-        </AlertDescription>
+        <AlertDescription>{t("adminDeveloper.riskDescription")}</AlertDescription>
       </Alert>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)]">
+      <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)_380px]">
         <Card>
           <CardHeader>
-            <CardTitle>{t("adminDeveloper.sandboxTitle")}</CardTitle>
-            <CardDescription>{t("adminDeveloper.sandboxDescription")}</CardDescription>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <FileCode2 className="h-4 w-4" />
+              {t("adminDeveloper.templatesTitle")}
+            </CardTitle>
+            <CardDescription>{t("adminDeveloper.templatesDescription")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            <div className="space-y-2">
+              {allTemplates.map((template) => (
+                <button
+                  key={template.id}
+                  type="button"
+                  onClick={() => applyTemplate(template)}
+                  className={`w-full rounded-lg border p-3 text-left transition-colors ${
+                    activeTemplate?.id === template.id ? "border-primary bg-primary/10" : "hover:bg-muted/40"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="truncate text-sm font-medium">{templateText(template.title, t)}</p>
+                    <Badge variant={template.builtin ? "outline" : "secondary"} className="text-[10px]">
+                      {template.builtin ? t("adminDeveloper.builtin") : t("adminDeveloper.custom")}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{templateText(template.description, t)}</p>
+                  <code className="mt-2 block truncate text-[11px] text-muted-foreground">{template.command}</code>
+                </button>
+              ))}
+            </div>
+
+            <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+              <p className="text-sm font-medium">{t("adminDeveloper.saveTemplateTitle")}</p>
+              <Input value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder={t("adminDeveloper.templateName")} inputSize="sm" />
+              <Input value={templateDescription} onChange={(event) => setTemplateDescription(event.target.value)} placeholder={t("adminDeveloper.templateDescription")} inputSize="sm" />
+              <div className="grid gap-2">
+                <Button size="sm" onClick={saveAsTemplate} className="min-h-9 whitespace-normal leading-tight">
+                  <Plus className="mr-2 h-4 w-4" />
+                  {t("adminDeveloper.saveAsTemplate")}
+                </Button>
+                {!activeTemplate?.builtin && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button size="sm" variant="outline" onClick={updateTemplate}>
+                      <Save className="mr-2 h-4 w-4" />
+                      {t("common.save")}
+                    </Button>
+                    <Button size="sm" variant="destructive" onClick={deleteTemplate}>
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      {t("common.delete")}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("adminDeveloper.editorTitle")}</CardTitle>
+            <CardDescription>{t("adminDeveloper.editorDescription")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px]">
+              <Input value={command} onChange={(event) => setCommand(event.target.value)} placeholder="/hello" />
+              <Button variant="outline" onClick={copyCommandReply} className="min-h-10 whitespace-normal leading-tight">
+                <Copy className="mr-2 h-4 w-4" />
+                {t("adminDeveloper.copyCommandReply")}
+              </Button>
+            </div>
             <Textarea
+              ref={editorRef}
               value={code}
               onChange={(event) => setCode(event.target.value)}
-              className="min-h-[360px] font-mono text-sm"
+              className="min-h-[440px] font-mono text-sm"
+              spellCheck={false}
             />
-            <Button onClick={() => void preview()} disabled={running} className="min-h-10 whitespace-normal leading-tight">
-              {running ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-              {t("adminDeveloper.runPreview")}
-            </Button>
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <p className="mb-2 text-xs font-medium text-muted-foreground">{t("adminDeveloper.commandReplyPreview")}</p>
+              <pre className="max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background p-2 text-xs">{commandPreview}</pre>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => void preview()} disabled={running} className="min-h-10 whitespace-normal leading-tight">
+                {running ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                {t("adminDeveloper.runPreview")}
+              </Button>
+              {snippetRows.map((snippet) => (
+                <Button key={snippet.labelKey} type="button" variant="outline" size="sm" onClick={() => insertSnippet(snippet.code)}>
+                  {t(snippet.labelKey)}
+                </Button>
+              ))}
+            </div>
           </CardContent>
         </Card>
 
         <div className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>{t("adminDeveloper.apiTitle")}</CardTitle>
-              <CardDescription>{t("adminDeveloper.apiDescription")}</CardDescription>
+              <CardTitle className="flex items-center gap-2">
+                <BookOpen className="h-5 w-5" />
+                {t("adminDeveloper.docsTitle")}
+              </CardTitle>
+              <CardDescription>{t("adminDeveloper.docsDescription")}</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex flex-wrap gap-2">
-                {["ctx", "args", "user", "reply(text)", "log(text)", "js:"].map((item) => (
-                  <Badge key={item} variant="outline">{item}</Badge>
-                ))}
-              </div>
-              <div className="space-y-2 text-sm">
-                <p className="font-medium">{t("adminDeveloper.bindingsTitle")}</p>
-                {bindingRows.map(([name, key]) => (
-                  <div key={name} className="rounded-md border bg-muted/20 p-2">
-                    <code className="font-mono text-xs">{name}</code>
-                    <p className="mt-1 text-xs text-muted-foreground">{t(key)}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="space-y-2 text-sm">
-                <p className="font-medium">{t("adminDeveloper.functionsTitle")}</p>
-                {functionRows.map(([name, key]) => (
-                  <div key={name} className="rounded-md border bg-muted/20 p-2">
-                    <code className="font-mono text-xs">{name}</code>
-                    <p className="mt-1 text-xs text-muted-foreground">{t(key)}</p>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("adminDeveloper.examplesTitle")}</CardTitle>
-              <CardDescription>{t("adminDeveloper.examplesDescription")}</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-2">
-              {exampleRows.map(([key, sample]) => (
-                <Button
-                  key={key}
-                  variant="outline"
-                  className="h-auto justify-start whitespace-normal py-2 text-left"
-                  onClick={() => {
-                    setCode(sample);
-                    setResult(null);
-                  }}
-                >
-                  <span>
-                    <span className="block font-medium">{t(key)}</span>
-                    <span className="block text-xs text-muted-foreground">{t("adminDeveloper.exampleApply")}</span>
-                  </span>
-                </Button>
-              ))}
+            <CardContent>
+              <Tabs defaultValue="bindings" className="space-y-3">
+                <TabsList className="i18n-stable-tabs grid h-auto w-full grid-cols-3">
+                  <TabsTrigger value="bindings">{t("adminDeveloper.bindingsTitle")}</TabsTrigger>
+                  <TabsTrigger value="functions">{t("adminDeveloper.functionsTitle")}</TabsTrigger>
+                  <TabsTrigger value="config">{t("adminDeveloper.configEnvTitle")}</TabsTrigger>
+                </TabsList>
+                <TabsContent value="bindings" className="space-y-3">
+                  <DocRows rows={bindingRows} />
+                  <DocRows rows={constantRows} />
+                </TabsContent>
+                <TabsContent value="functions">
+                  <DocRows rows={functionRows} />
+                </TabsContent>
+                <TabsContent value="config" className="space-y-3">
+                  <p className="text-xs text-muted-foreground">{t("adminDeveloper.configEnvNotice")}</p>
+                  <DocRows rows={configRows} />
+                  <DocRows rows={envRows} />
+                </TabsContent>
+              </Tabs>
             </CardContent>
           </Card>
 

@@ -47,7 +47,7 @@ export default function RegisterPage() {
   const router = useRouter();
   const { toast } = useToast();
   const { t } = useI18n();
-  const { info: systemInfo, fetchInfo: fetchSystemInfo } = useSystemStore();
+  const { info: systemInfo } = useSystemStore();
 
   // --- Account form state ---
   const [formData, setFormData] = useState({
@@ -106,9 +106,8 @@ export default function RegisterPage() {
 
   // Init
   useEffect(() => {
-    void fetchSystemInfo();
     void refreshRegisterAvailability();
-  }, [fetchSystemInfo]);
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData((p) => ({ ...p, [e.target.name]: e.target.value }));

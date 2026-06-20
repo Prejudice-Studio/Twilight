@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, ArrowRight, Loader2, Send } from "lucide-react";
@@ -27,7 +27,7 @@ export default function LoginPage() {
   const { toast } = useToast();
   const { t } = useI18n();
   const { login } = useAuthStore();
-  const { info: systemInfo, fetchInfo: fetchSystemInfo } = useSystemStore();
+  const { info: systemInfo } = useSystemStore();
   const forgotPasswordEnabled = Boolean(systemInfo?.features?.forgot_password_enabled);
 
   const [username, setUsername] = useState("");
@@ -49,10 +49,6 @@ export default function LoginPage() {
   ]
     .map((item) => ({ ...item, url: sanitizeExternalUrl(item.url) }))
     .filter((item): item is { label: string; url: string } => Boolean(item.url));
-
-  useEffect(() => {
-    void fetchSystemInfo();
-  }, [fetchSystemInfo]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

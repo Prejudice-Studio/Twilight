@@ -823,7 +823,7 @@ func configSectionDefs() []configSectionDef {
 	selectInviteCodeRandom := inviteCodeRandomAlgorithmOptions()
 	selectRegcodeDecoyAction := regcodeDecoyActionOptions()
 	return []configSectionDef{
-		{Key: "Global", Title: "全局", Description: "基础运行参数", Category: "runtime", Fields: []configFieldDef{
+		{Key: "Global", Title: "全局", Description: "基础运行参数", Category: "runtime", Collapsed: true, Fields: []configFieldDef{
 			{Key: "server_name", Label: "服务器名称", Type: "string", Description: "前端展示的站点或服务器名称"},
 			{Key: "server_icon", Label: "服务器图标", Type: "string", Description: "HTTPS 图片 URL 或本地图片路径；留空使用内置图标"},
 			{Key: "auth_background_url", Label: "认证页背景图", Type: "string", Description: "内置路径 /system/auth-background；由上传接口自动写入，留空使用默认渐变背景"},
@@ -839,7 +839,7 @@ func configSectionDefs() []configSectionDef {
 			{Key: "bangumi_token", Label: "Bangumi Token", Type: "secret", Description: "Bangumi 全局 Token"},
 			{Key: "bangumi_api_url", Label: "Bangumi API URL", Type: "string", Description: "Bangumi API 基础地址"},
 		}},
-		{Key: "Database", Title: "数据库", Description: "JSON/PostgreSQL 存储和备份配置", Category: "ops", Fields: []configFieldDef{
+		{Key: "Database", Title: "数据库", Description: "JSON/PostgreSQL 存储和备份配置", Category: "ops", Collapsed: true, Fields: []configFieldDef{
 			{Key: "driver", Label: "存储后端", Type: "select", Description: "可视化配置仅提供 PostgreSQL 与 Go JSON；SQLite 已禁用", Options: selectDriver},
 			{Key: "state_file", Label: "JSON 状态文件", Type: "string", Description: "Go JSON 状态文件路径，留空使用数据目录中的 twilight_go_state.json"},
 			{Key: "backup_dir", Label: "备份目录", Type: "string", Description: "数据库快照备份目录"},
@@ -854,7 +854,7 @@ func configSectionDefs() []configSectionDef {
 			{Key: "postgres_max_open_conns", Label: "PG 最大连接", Type: "int", Description: "PostgreSQL 最大打开连接数"},
 			{Key: "postgres_max_idle_conns", Label: "PG 空闲连接", Type: "int", Description: "PostgreSQL 最大空闲连接数"},
 		}},
-		{Key: "Emby", Title: "Emby", Description: "Emby 连接和线路", Category: "integration", Fields: []configFieldDef{
+		{Key: "Emby", Title: "Emby", Description: "Emby 连接和线路", Category: "integration", Collapsed: true, Fields: []configFieldDef{
 			{Key: "emby_url", Label: "Emby URL", Type: "string", Description: "后端访问的 Emby/Jellyfin 地址"},
 			{Key: "emby_token", Label: "Emby Token", Type: "secret", Description: "Emby API Key"},
 			{Key: "emby_username", Label: "管理员用户名", Type: "string", Description: "备用鉴权用户名"},
@@ -887,9 +887,9 @@ func configSectionDefs() []configSectionDef {
 			{Key: "bot_help_header", Label: "帮助页前缀", Type: "textarea", Description: "追加到内置用户帮助顶部，支持换行"},
 			{Key: "bot_help_footer", Label: "帮助页后缀", Type: "textarea", Description: "追加到内置用户帮助底部，支持换行"},
 			{Key: "bot_about", Label: "Bot 关于文案", Type: "textarea", Description: "/about 的服务说明，支持换行"},
-			{Key: "bot_custom_commands", Label: "Bot 自定义指令回复", Type: "command_map", Description: "自定义 /command 与回复内容的映射，回复支持换行；以 js: 开头时进入受控 JS 沙箱"},
+			{Key: "bot_custom_commands", Label: "Bot 自定义指令回复", Type: "command_map", Description: "自定义 /command 与回复内容的映射；以 js: 开头时进入受控 JS 沙箱，建议先在开发者模式预检"},
 		}},
-		{Key: "SAR", Title: "注册/邀请", Description: "注册、卡码、邀请树和求片\n推荐在「注册码管理」和「邀请森林」页面操作", Category: "policy", Collapsed: true, Fields: []configFieldDef{
+		{Key: "SAR", Title: "注册/邀请", Description: "注册、卡码、邀请关系和求片\n推荐在「注册码管理」和「邀请系统管理」页面操作", Category: "policy", Collapsed: true, Fields: []configFieldDef{
 			{Key: "register_mode", Label: "开放注册", Type: "bool", Description: "是否允许注册系统账号"},
 			{Key: "register_code_limit", Label: "注册必须用码", Type: "bool", Description: "注册时必须提供注册码"},
 			{Key: "allow_pending_register", Label: "允许待补建", Type: "bool", Description: "允许无 Emby 账号先注册"},
@@ -930,7 +930,7 @@ func configSectionDefs() []configSectionDef {
 			{Key: "signin_renewal_cost", Label: "续期消耗积分", Type: "int", Description: "每次积分续期需要消耗的积分数，必须大于 0"},
 			{Key: "signin_renewal_days", Label: "续期天数", Type: "int", Description: "每次积分续期增加的天数，必须大于 0"},
 		}},
-		{Key: "DeviceLimit", Title: "设备限制", Description: "设备和并发播放限制\n推荐在「安全中心」页面维护", Category: "policy", Collapsed: true, Fields: []configFieldDef{
+		{Key: "DeviceLimit", Title: "设备限制", Description: "设备和并发播放限制\n推荐在「安全中心」页面维护", Category: "security", Collapsed: true, Fields: []configFieldDef{
 			{Key: "device_limit_enabled", Label: "启用设备限制", Type: "bool", Description: "限制设备数量"},
 			{Key: "max_devices", Label: "最大设备数", Type: "int", Description: "每个用户最大设备数"},
 			{Key: "max_streams", Label: "最大播放流", Type: "int", Description: "每个用户最大并发流"},
@@ -950,7 +950,7 @@ func configSectionDefs() []configSectionDef {
 			{Key: "admin_icon_per_minute", Label: "站点图标每分钟", Type: "int", Description: "同一管理员上传站点图标请求数"},
 			{Key: "api_key_default_per_minute", Label: "API Key 默认每分钟", Type: "int", Description: "API Key 未单独设置时的默认额度"},
 		}},
-		{Key: "API", Title: "API", Description: "监听、跨域、上传和 Cookie", Category: "runtime", Fields: []configFieldDef{
+		{Key: "API", Title: "API", Description: "监听、跨域、上传和 Cookie", Category: "runtime", Collapsed: true, Fields: []configFieldDef{
 			{Key: "host", Label: "监听地址", Type: "string", Description: "修改后需要重启监听器"},
 			{Key: "port", Label: "监听端口", Type: "int", Description: "修改后需要重启监听器"},
 			{Key: "cors_origins", Label: "CORS Origins", Type: "list", Description: "允许的前端 Origin；生产环境必须显式填写 HTTPS 域名"},
@@ -963,13 +963,13 @@ func configSectionDefs() []configSectionDef {
 			{Key: "trust_proxy_headers", Label: "信任代理 IP", Type: "bool", Description: "仅在可信反代后开启"},
 			{Key: "trusted_proxy_cidrs", Label: "可信反代 CIDR", Type: "list", Description: "上游反代的 IP / CIDR；启用 trust_proxy_headers 时必须配置，否则任何客户端都可伪造 X-Forwarded-For"},
 		}},
-		{Key: "Security", Title: "安全", Description: "内部密钥和安全开关\n推荐在「安全中心」页面维护", Category: "ops", Collapsed: true, Fields: []configFieldDef{
+		{Key: "Security", Title: "安全", Description: "内部密钥和安全开关\n推荐在「安全中心」页面维护", Category: "security", Collapsed: true, Fields: []configFieldDef{
 			{Key: "forgot_password_enabled", Label: "启用找回密码", Type: "bool", Description: "总开关：关闭后所有找回密码途径均不可用"},
 			{Key: "forgot_password_emby_enabled", Label: "Emby 找回密码", Type: "bool", Description: "允许通过 Emby 账号验证重置 Web 面板密码；依赖上图总开关"},
 			{Key: "forgot_password_email_enabled", Label: "邮箱找回密码", Type: "bool", Description: "允许通过绑定邮箱验证码重置 Web 面板密码；依赖上图总开关"},
 			{Key: "bot_internal_secret", Label: "Bot 内部密钥", Type: "secret", Description: "外部更新回调共享密钥"},
 		}},
-		{Key: "Scheduler", Title: "调度器", Description: "后台任务计划", Category: "ops", Fields: []configFieldDef{
+		{Key: "Scheduler", Title: "调度器", Description: "后台任务计划", Category: "ops", Collapsed: true, Fields: []configFieldDef{
 			{Key: "enabled", Label: "启用调度", Type: "bool", Description: "启用后台任务"},
 			{Key: "tick_interval_seconds", Label: "调度间隔(秒)", Type: "int", Description: "调度器主循环检查间隔，默认 30 秒，范围 10-300"},
 			{Key: "expired_check_time", Label: "过期检查", Type: "string", Description: "每日 HH:MM"},
@@ -981,7 +981,7 @@ func configSectionDefs() []configSectionDef {
 			{Key: "cleanup_unused_uploads_time", Label: "未使用上传清理时间", Type: "string", Description: "每日 HH:MM，清理未被引用的历史上传文件"},
 			{Key: "cleanup_audit_logs_time", Label: "审计日志清理时间", Type: "string", Description: "每日 HH:MM，按保留策略清理过期审计日志"},
 		}},
-		{Key: "SystemUpdate", Title: "自动更新", Description: "Git 拉取和服务重启", Category: "ops", Fields: []configFieldDef{
+		{Key: "SystemUpdate", Title: "自动更新", Description: "Git 拉取和服务重启", Category: "ops", Collapsed: true, Fields: []configFieldDef{
 			{Key: "auto_update_enabled", Label: "启用自动更新", Type: "bool", Description: "允许调度任务自动拉取更新"},
 			{Key: "repo_url", Label: "仓库 URL", Type: "string", Description: "仅支持无凭据 HTTPS 仓库"},
 			{Key: "branch", Label: "分支", Type: "string", Description: "目标分支"},
@@ -990,14 +990,14 @@ func configSectionDefs() []configSectionDef {
 			{Key: "auto_update_interval_hours", Label: "更新间隔", Type: "int", Description: "小时"},
 			{Key: "auto_update_time", Label: "更新时间", Type: "string", Description: "每日 HH:MM"},
 		}},
-		{Key: "Notification", Title: "通知", Description: "用户通知策略与登录通知模板", Category: "policy", Fields: []configFieldDef{
+		{Key: "Notification", Title: "通知", Description: "用户通知策略与登录通知模板", Category: "policy", Collapsed: true, Fields: []configFieldDef{
 			{Key: "enabled", Label: "启用通知", Type: "bool", Description: "允许系统通知"},
 			{Key: "expiry_remind_days", Label: "到期提醒天数", Type: "int", Description: "提前多少天提醒"},
 			{Key: "login_notify_telegram_template", Label: "登录通知 TG 模板", Type: "textarea", Description: "Telegram 通知模板。占位符：{username}、{time}、{ip}、{device}；留空使用内置默认；支持换行"},
 			{Key: "login_notify_email_subject_template", Label: "登录通知邮件标题", Type: "string", Description: "邮件通知标题。占位符：{server_name}、{username}、{time}、{ip}、{device}"},
 			{Key: "login_notify_email_body_template", Label: "登录通知邮件正文", Type: "textarea", Description: "邮件通知正文。占位符：{username}、{time}、{ip}、{device}；留空使用内置默认；支持换行"},
 		}},
-		{Key: "BangumiSync", Title: "Bangumi 同步", Description: "Bangumi webhook 和收藏策略", Category: "integration", Fields: []configFieldDef{
+		{Key: "BangumiSync", Title: "Bangumi 同步", Description: "Bangumi webhook 和收藏策略", Category: "integration", Collapsed: true, Fields: []configFieldDef{
 			{Key: "enabled", Label: "启用同步", Type: "bool", Description: "启用 Bangumi 同步"},
 			{Key: "webhook_secret", Label: "Webhook 密钥", Type: "secret", Description: "Bangumi webhook 校验密钥"},
 		}},

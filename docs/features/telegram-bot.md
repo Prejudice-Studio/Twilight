@@ -167,12 +167,17 @@ bot_custom_commands = [
 | `ctx` | 当前 Telegram 上下文摘要：`private_chat`、`command_time`。不向脚本暴露 Telegram ID 或群组 ID。 |
 | `args` | 命令参数数组。 |
 | `user` | 绑定的 Twilight 用户摘要：`uid`、`username`、`role`、`active`、`has_emby`，不含邮箱、Token、Emby ID、密码。 |
+| `constants` | 受控常量：`roles.admin/user/whitelist`、`limits.max_replies/max_logs`。 |
 | `reply(text)` | 追加一段回复文本，最多 4 段，最终用换行合并发送。 |
 | `log(text)` | 写入本次执行的审计详情，最多 8 条。 |
+| `auth(role)` | 角色鉴权辅助函数。`admin` 仅管理员；`whitelist` 包含管理员和白名单；`user` 包含所有有效角色。 |
+| `config(key)` | 只读白名单系统配置读取。只返回非敏感键，未允许或敏感键返回空字符串并写入沙箱日志。 |
+| `env(key)` | 只读白名单环境变量读取。只返回非敏感 `TWILIGHT_*` 键，未允许或敏感键返回空字符串并写入沙箱日志。 |
 
 安全约束：
 
-- 不提供 `fetch`、`require`、文件系统、进程、环境变量或配置读取能力。
+- 不提供 `fetch`、`require`、文件系统或进程能力；配置与环境变量只能通过白名单函数读取非敏感值。
+- Token、Secret、密码、API Key、数据库 URL、服务器线路等敏感信息不会注入沙箱，也不会通过 `config` / `env` 返回。
 - 后端会静态拒绝危险 token，并用 200ms 超时中断长循环。
 - 每次执行都会写入 `telegram_js_command_execute` 审计日志；开发者页面的沙箱预检写入 `developer_js_sandbox_preview`。
 - 纯文本自定义命令保持原行为；只有 `js:` 前缀会启用脚本执行，避免破坏历史配置。

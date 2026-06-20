@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Server,
@@ -17,14 +16,15 @@ import {
   Link2Off,
   Shield,
   MonitorSmartphone,
-  Network,
   Wifi,
   WifiOff,
 } from "lucide-react";
+import AdminDeviceAuditPanel from "@/components/admin/emby-device-audit-panel";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -105,6 +105,15 @@ interface EmbyUsersData {
 export default function AdminEmbyPage() {
   const { toast } = useToast();
   const { t } = useI18n();
+  const [activeTab, setActiveTab] = useState("accounts");
+  const [deviceAuditVisited, setDeviceAuditVisited] = useState(false);
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("tab") === "devices") {
+      setActiveTab("devices");
+      setDeviceAuditVisited(true);
+    }
+  }, []);
 
   // Connectivity test state
   const [testResult, setTestResult] = useState<ConnectivityResult | null>(null);
@@ -341,6 +350,26 @@ export default function AdminEmbyPage() {
         </p>
       </div>
 
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => {
+          setActiveTab(value);
+          if (value === "devices") setDeviceAuditVisited(true);
+        }}
+        className="space-y-5"
+      >
+        <TabsList className="i18n-stable-tabs grid h-auto w-full grid-cols-2 sm:w-fit">
+          <TabsTrigger value="accounts" className="gap-2">
+            <Server className="h-4 w-4" />
+            {t("adminEmby.accountsTab")}
+          </TabsTrigger>
+          <TabsTrigger value="devices" className="gap-2">
+            <MonitorSmartphone className="h-4 w-4" />
+            {t("adminEmby.deviceAuditTab")}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="accounts" className="mt-0 space-y-6">
       {/* Connectivity Test */}
       <motion.div variants={item}>
         <Card>
@@ -437,34 +466,6 @@ export default function AdminEmbyPage() {
               </div>
             </CardContent>
           )}
-        </Card>
-      </motion.div>
-
-      {/* Device / IP audit entry */}
-      <motion.div variants={item}>
-        <Card>
-          <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex min-w-0 gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <MonitorSmartphone className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <h2 className="flex items-center gap-2 text-base font-semibold">
-                  {t("adminEmby.deviceAuditTitle")}
-                  <Badge variant="outline" className="text-[10px]">{t("adminEmby.integratedBadge")}</Badge>
-                </h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t("adminEmby.deviceAuditDesc")}
-                </p>
-              </div>
-            </div>
-            <Button asChild variant="outline" className="min-h-10 whitespace-normal leading-tight">
-              <Link href="/admin/device-audit">
-                <Network className="mr-2 h-4 w-4" />
-                {t("adminEmby.openDeviceAudit")}
-              </Link>
-            </Button>
-          </CardContent>
         </Card>
       </motion.div>
 
@@ -758,6 +759,12 @@ export default function AdminEmbyPage() {
           </CardContent>
         </Card>
       </motion.div>
+        </TabsContent>
+
+        <TabsContent value="devices" className="mt-0">
+          {deviceAuditVisited && <AdminDeviceAuditPanel embedded />}
+        </TabsContent>
+      </Tabs>
 
       {/* Reset confirmation dialog */}
       <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>

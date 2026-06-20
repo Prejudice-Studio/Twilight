@@ -35,7 +35,7 @@
 | 登录 / 会话 / 找回密码 | `auth_handlers.go`、`password_verify.go`、`session.go` | `login_log.go`、sessions() | `/auth/*` | `(auth)/login`、`(auth)/forgot-password` | `[Security]` |
 | 用户自助（资料/改密/头像/背景/登录通知） | `handlers.go`、`upload_handlers.go`、`safepath.go` | `store.go`(User) | `/users/me/*` | `(main)/settings`、`settings/background`、`settings/appearance` | [背景与头像](docs/features/background.md) |
 | 邮箱验证 / 找回 / 强制绑定 / 验证记录审查 / 自动清理 | `email_handlers.go`、`email_verify_service.go`、`email_client.go` | `email_verification.go` | `/users/me/email/*`、`/auth/password/email/*`、`/admin/email/*` | `components/email-*.tsx`、`admin/users/admin-email-dialog.tsx`、`(main)/admin/email` | `[Email]`/`[SAR]`名单/`[RateLimit]` · [邮箱](docs/features/email.md) |
-| Emby 绑定/注册/同步/设备·IP 审查 | `emby.go`、`emby_client.go`、`emby_inventory.go`、`emby_url_probe.go`、`emby_device_audit.go`(`handleAdminEmbyDeviceAudit`/`buildEmbyDeviceAudit`/`parseRemoteIP`)、`handlers.go`(`handleSessions`) | `store.go`(User.EmbyID) | `/emby/*`、`/admin/emby/*` | `(main)/admin/emby`、`(main)/admin/device-audit`、`(main)/dashboard` | `[Emby]` |
+| Emby 绑定/注册/同步/设备·IP 审查 | `emby.go`、`emby_client.go`、`emby_inventory.go`、`emby_url_probe.go`、`emby_device_audit.go`(`handleAdminEmbyDeviceAudit`/`buildEmbyDeviceAudit`/`parseRemoteIP`)、`handlers.go`(`handleSessions`) | `store.go`(User.EmbyID) | `/emby/*`、`/admin/emby/*` | `(main)/admin/emby`（含设备/IP 审查页签；`(main)/admin/device-audit` 仅兼容旧入口）、`(main)/dashboard` | `[Emby]` |
 | Telegram Bot / 绑定 / 花名册 / 换绑 | `telegram_bot.go`、`telegram.go`、`telegram_commands.go`、`telegram_inline.go`、`telegram_bind_*.go`、`bind_status_hub.go` | `store.go`(roster/rebind) | `/users/me/telegram/*`、`/admin/telegram/*` | `admin/telegram-rebind-requests` | `[Telegram]` · [Bot](docs/features/telegram-bot.md) |
 | 注册码 / 续期码 / 白名单码 | `regcode_handlers.go`、`code_use_handlers.go`、`business.go`(生成/消费) | `store.go`(RegCode) | `/admin/regcodes/*`、`/users/me/use-code` | `(main)/admin/regcodes` | `[SAR]` · [卡码](docs/features/regcodes.md) |
 | 邀请树 | `invite_handlers.go`、`invite_admin_handlers.go`、`business.go`(`inviteForest`) | `store.go`(InviteCode/Relations) | `/invite/*`、`/admin/invite/*` | `(main)/invite`、`(main)/admin/invite` | `[SAR]` · [邀请树](docs/features/invite.md) |
@@ -340,6 +340,9 @@ pnpm build
 
 ## 前端约定
 
+- Emby 管理与设备/IP 审查共用 `/admin/emby`，设备审查是页签级入口；`/admin/device-audit` 仅作为兼容直达页面保留。
+- 后台重型面板应按需加载，非默认页签不得首屏自动请求大接口；公共系统信息复用 `useSystemStore.fetchInfo()` 的 TTL 与 inflight 缓存，配置保存后调用 `invalidate()`。
+- 侧边栏、移动菜单、管理导航这类密集导航区域的 `Link` 默认设置 `prefetch={false}`，避免首屏预载大量后台页面 chunk；仅对明确高频下一跳保留预取。
 - 所有后端调用集中维护在 `webui/src/lib/api.ts`，底层请求统一走 `webui/src/lib/api-request.ts`。不要在页面中散落裸 `fetch`，除非有明确理由并保持相同的 credentials、超时和错误处理语义。
 - `apiRequest` 会自动使用 `${NEXT_PUBLIC_API_URL}/api/v1`；未设置 `NEXT_PUBLIC_API_URL` 时，`next.config.mjs` 将 `/api/*` rewrite 到 `BACKEND_URL`，默认 `http://localhost:5000`。
 - 新增或调整接口时，同步检查 `api.ts`、`api-types.ts`、后端路由、请求方法、鉴权级别、错误码、确认短语和移动端展示。

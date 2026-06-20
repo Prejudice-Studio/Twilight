@@ -1036,6 +1036,8 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/123/disable" \
 
 ### 9.2 Emby 管理
 
+前端主入口为「Emby 管理」，设备/IP 审查已整合为该页面的独立页签；旧 `/admin/device-audit` 页面保留为兼容入口。
+
 | 方法/路径 | 说明 |
 | --------- | ---- |
 | `POST /admin/emby/sync` | 同步所有 Emby 用户数据 |
@@ -1702,7 +1704,7 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 
 `POST /admin/developer/js-sandbox`
 
-- 说明：在受控 Goja 沙箱中预检/执行 Telegram JS 自定义指令片段。沙箱仅暴露 `ctx`、`args`、`user`、`reply(text)`、`log(text)`，不提供网络、文件、进程或配置访问能力。
+- 说明：在受控 Goja 沙箱中预检/执行 Telegram JS 自定义指令片段。沙箱仅暴露 `ctx`、`args`、`user`、`constants`、`reply(text)`、`log(text)`、`auth(role)`、`config(key)`、`env(key)`；配置与环境变量读取为只读白名单，敏感值不会返回，不提供网络、文件或进程能力。
 - 认证：管理员（`AuthAdmin`）
 - 审计：每次预检写入 `developer_js_sandbox_preview`；Bot 命中 `js:` 自定义命令时写入 `telegram_js_command_execute`。
 

@@ -24,7 +24,7 @@ import { AuthBrand, AUTH_PRIMARY_BTN, AUTH_GHOST_LINK } from "../auth-ui";
 export default function ForgotPasswordPage() {
   const { toast } = useToast();
   const { t } = useI18n();
-  const { info: systemInfo, fetchInfo } = useSystemStore();
+  const { info: systemInfo } = useSystemStore();
   const features = systemInfo?.features;
   const forgotPasswordEnabled = Boolean(features?.forgot_password_enabled);
   const embyAvailable = Boolean(features?.forgot_password_emby_enabled);
@@ -48,10 +48,6 @@ export default function ForgotPasswordPage() {
   const [emailLoading, setEmailLoading] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [emailDone, setEmailDone] = useState(false);
-
-  useEffect(() => {
-    void fetchInfo();
-  }, [fetchInfo]);
 
   useEffect(() => {
     if (cooldown <= 0) return;

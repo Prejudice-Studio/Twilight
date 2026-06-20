@@ -100,6 +100,23 @@ function emailCodeBody(proof?: EmailCodeProof): Record<string, string> {
 }
 
 class ApiClient {
+  private configSchemaCache: { until: number; promise: Promise<ApiResponse<ConfigSchema>> | null; value: ApiResponse<ConfigSchema> | null } = {
+    until: 0,
+    promise: null,
+    value: null,
+  };
+
+  private cloneResponse<T>(response: ApiResponse<T>): ApiResponse<T> {
+    if (typeof structuredClone === "function") {
+      return structuredClone(response);
+    }
+    return JSON.parse(JSON.stringify(response)) as ApiResponse<T>;
+  }
+
+  private invalidateConfigSchemaCache() {
+    this.configSchemaCache = { until: 0, promise: null, value: null };
+  }
+
   private toAbsoluteAssetUrl(url?: string | null): string | null {
     if (!url) return null;
     const value = url.trim();
@@ -1160,10 +1177,12 @@ class ApiClient {
   }
 
   async updateConfigToml(content: string) {
-    return this.request<{ path: string }>("/system/admin/config/toml", {
+    const res = await this.request<{ path: string }>("/system/admin/config/toml", {
       method: "PUT",
       body: JSON.stringify({ content }),
     });
+    if (res.success) this.invalidateConfigSchemaCache();
+    return res;
   }
 
   async listConfigBackups() {
@@ -1182,10 +1201,12 @@ class ApiClient {
   }
 
   async restoreConfigBackup(name: string, options?: { dry_run?: boolean; preview?: boolean; confirm?: string }) {
-    return this.request<ConfigRestoreResult>("/system/admin/config/restore", {
+    const res = await this.request<ConfigRestoreResult>("/system/admin/config/restore", {
       method: "POST",
       body: JSON.stringify({ name, ...(options || {}) }),
     });
+    if (res.success && options?.dry_run === false) this.invalidateConfigSchemaCache();
+    return res;
   }
 
   async deleteConfigBackup(name: string) {
@@ -1195,14 +1216,34 @@ class ApiClient {
   }
 
   async getConfigSchema() {
-    return this.request<ConfigSchema>("/system/admin/config/schema");
+    const now = Date.now();
+    if (this.configSchemaCache.value && now < this.configSchemaCache.until) {
+      return this.cloneResponse(this.configSchemaCache.value);
+    }
+    if (this.configSchemaCache.promise) {
+      return this.cloneResponse(await this.configSchemaCache.promise);
+    }
+    const promise = this.request<ConfigSchema>("/system/admin/config/schema");
+    this.configSchemaCache.promise = promise;
+    try {
+      const res = await promise;
+      if (res.success) {
+        this.configSchemaCache.value = this.cloneResponse(res);
+        this.configSchemaCache.until = Date.now() + 30_000;
+      }
+      return this.cloneResponse(res);
+    } finally {
+      this.configSchemaCache.promise = null;
+    }
   }
 
   async updateConfigBySchema(sections: Record<string, Record<string, unknown>>) {
-    return this.request("/system/admin/config/schema", {
+    const res = await this.request("/system/admin/config/schema", {
       method: "PUT",
       body: JSON.stringify({ sections }),
     });
+    if (res.success) this.invalidateConfigSchemaCache();
+    return res;
   }
 
   async getDatabaseStatus() {
@@ -1393,8 +1434,8 @@ class ApiClient {
 
   // Emby 登录用户的设备 / IP 审查（按用户聚合）：
   // /Devices 设备清单 + 实时 /Sessions IP + 活动日志历史登录 IP，映射完整本地账号。
-  async adminGetEmbyDeviceAudit() {
-    return this.request<EmbyDeviceAuditData>("/admin/emby/device-audit");
+  async adminGetEmbyDeviceAudit(refresh = false) {
+    return this.request<EmbyDeviceAuditData>(`/admin/emby/device-audit${refresh ? "?refresh=1" : ""}`);
   }
 
   // 设备/IP 审查页的快速处置：按 Emby 用户 ID 单独启停 Emby（已关联本地用户时后端会
@@ -1844,21 +1885,25 @@ class ApiClient {
   async uploadServerIcon(file: File) {
     const formData = new FormData();
     formData.append('file', file);
-    return this.requestForm<{ url: string; server_icon: string; filename: string; reload?: unknown }>(
+    const res = await this.requestForm<{ url: string; server_icon: string; filename: string; reload?: unknown }>(
       '/system/admin/server-icon/upload',
       formData,
       'POST'
     );
+    if (res.success) this.invalidateConfigSchemaCache();
+    return res;
   }
 
   async uploadAuthBackground(file: File) {
     const formData = new FormData();
     formData.append('file', file);
-    return this.requestForm<{ url: string; filename: string; reload?: unknown }>(
+    const res = await this.requestForm<{ url: string; filename: string; reload?: unknown }>(
       '/system/admin/config/upload-auth-background',
       formData,
       'POST'
     );
+    if (res.success) this.invalidateConfigSchemaCache();
+    return res;
   }
 
   async terminateSchedulerJob(jobId: string) {
