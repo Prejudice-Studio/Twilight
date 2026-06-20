@@ -125,7 +125,7 @@ jobs:
         package_json_file: webui/package.json
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       with:
         # 通过 .nvmrc 锁版本，docs/INSTALL.md / flake.nix / 本地 nvm 全部对齐
         node-version-file: webui/.nvmrc
