@@ -33,6 +33,7 @@ import type {
   DatabaseOperationResult,
   DatabaseRestoreResult,
   DatabaseStatus,
+  DeveloperJSPreset,
   EmbyDevice,
   EmbyDeviceAuditData,
   EmbyInfo,
@@ -1768,6 +1769,30 @@ class ApiClient {
     });
   }
 
+  async listDeveloperJSPresets() {
+    return this.request<{ presets: DeveloperJSPreset[]; total: number }>("/admin/developer/js-presets");
+  }
+
+  async createDeveloperJSPreset(payload: { name: string; description?: string; code?: string }) {
+    return this.request<DeveloperJSPreset>("/admin/developer/js-presets", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateDeveloperJSPreset(id: number, payload: { name?: string; description?: string; code?: string }) {
+    return this.request<DeveloperJSPreset>(`/admin/developer/js-presets/${encodeURIComponent(String(id))}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteDeveloperJSPreset(id: number) {
+    return this.request<{ id: number }>(`/admin/developer/js-presets/${encodeURIComponent(String(id))}`, {
+      method: "DELETE",
+    });
+  }
+
   async getApiKeyStatus() {
     return this.request<{ enabled: boolean; has_key: boolean }>("/auth/apikey");
   }
@@ -2062,13 +2087,32 @@ class ApiClient {
   }
 
   // Audit logs
-  async getAuditLogs(page = 1, params: { category?: string; action?: string; uid?: string; search?: string; per_page?: number; signal?: AbortSignal } = {}) {
+  async getAuditLogs(page = 1, params: {
+    preset?: string;
+    category?: string;
+    action?: string;
+    uid?: string;
+    target_uid?: string;
+    search?: string;
+    from?: number;
+    to?: number;
+    sort?: string;
+    order?: string;
+    per_page?: number;
+    signal?: AbortSignal;
+  } = {}) {
     const query = new URLSearchParams({ page: String(page), per_page: String(params.per_page ?? 50) });
+    if (params.preset && params.preset !== "all") query.set("preset", params.preset);
     if (params.category && params.category !== "all") query.set("category", params.category);
     if (params.action && params.action !== "all") query.set("action", params.action);
     if (params.uid) query.set("uid", params.uid);
+    if (params.target_uid) query.set("target_uid", params.target_uid);
     if (params.search) query.set("search", params.search);
-    return this.request<{ logs: AuditLog[]; total: number; page: number; per_page: number }>(
+    if (params.from) query.set("from", String(params.from));
+    if (params.to) query.set("to", String(params.to));
+    if (params.sort) query.set("sort", params.sort);
+    if (params.order) query.set("order", params.order);
+    return this.request<{ logs: AuditLog[]; total: number; page: number; per_page: number; sort?: string; order?: string }>(
       `/admin/audit-logs?${query.toString()}`,
       { signal: params.signal }
     );

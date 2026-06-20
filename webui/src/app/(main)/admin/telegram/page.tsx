@@ -230,12 +230,20 @@ export default function AdminTelegramPage() {
               ))}
             </div>
           </div>
-          <Button asChild variant="outline" className="min-h-10 self-start whitespace-normal leading-tight md:justify-self-end">
-            <Link href="/admin/developer">
-              <BookOpen className="mr-2 h-4 w-4" />
-              {t("adminTelegram.openDeveloperDocs")}
-            </Link>
-          </Button>
+          <div className="flex flex-col gap-2 md:justify-self-end">
+            <Button asChild variant="default" className="min-h-10 whitespace-normal leading-tight">
+              <Link href="/admin/telegram/commands">
+                <Code2 className="mr-2 h-4 w-4" />
+                {t("adminTelegram.openCommandManager")}
+              </Link>
+            </Button>
+            <Button asChild variant="outline" className="min-h-10 whitespace-normal leading-tight">
+              <Link href="/admin/developer">
+                <BookOpen className="mr-2 h-4 w-4" />
+                {t("adminTelegram.openDeveloperDocs")}
+              </Link>
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -245,14 +253,6 @@ export default function AdminTelegramPage() {
         title={t("adminTelegram.configTitle")}
         description={t("adminTelegram.configDescription")}
         notice={t("adminTelegram.configNotice")}
-      />
-
-      <AdminConfigSections
-        sectionKeys={["Telegram"]}
-        sectionFieldKeys={{ Telegram: ["bot_custom_commands"] }}
-        title={t("adminTelegram.customConfigTitle")}
-        description={t("adminTelegram.customConfigDescription")}
-        notice={t("adminTelegram.customConfigNotice")}
       />
     </div>
   );

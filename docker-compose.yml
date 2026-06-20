@@ -4,8 +4,9 @@
 #
 # Quick start:
 #   1. Copy config.docker.toml → config.toml and edit secrets
-#   2. Copy webui/.env.example → webui/.env and set NEXT_PUBLIC_API_URL
-#   3. docker compose up -d
+#   2. Copy deploy/docker/.env.example → .env and change secrets
+#   3. Optional: copy webui/.env.example → webui/.env for frontend overrides
+#   4. docker compose up -d
 #
 # Services:
 #   postgres  — PostgreSQL 17 (state store + sessions)
@@ -23,13 +24,26 @@
 
 name: twilight
 
+x-service-defaults: &service-defaults
+  init: true
+  stop_grace_period: 30s
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
 services:
   # ---- PostgreSQL ----
   postgres:
+    <<: *service-defaults
     image: postgres:17-alpine
     container_name: twilight-postgres
     restart: unless-stopped
     environment:
+      TZ: ${TZ:-Asia/Shanghai}
       POSTGRES_USER: twilight
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-twilight}
       POSTGRES_DB: twilight
@@ -50,10 +64,13 @@ services:
 
   # ---- Redis ----
   redis:
+    <<: *service-defaults
     image: redis:7-alpine
     container_name: twilight-redis
     restart: unless-stopped
     command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - redis_data:/data
     healthcheck:
@@ -66,6 +83,7 @@ services:
 
   # ---- Go Backend (all mode: API + scheduler + bot) ----
   twilight:
+    <<: *service-defaults
     build:
       context: .
       dockerfile: Dockerfile
@@ -78,6 +96,7 @@ services:
       redis:
         condition: service_healthy
     environment:
+      TZ: ${TZ:-Asia/Shanghai}
       # Server
       TWILIGHT_GLOBAL_SERVER_NAME: ${SITE_NAME:-Twilight}
       TWILIGHT_LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -113,7 +132,7 @@ services:
       - twilight_uploads:/app/uploads
       - twilight_backups:/app/db/backups
     healthcheck:
-      test: ["CMD", "./twilight", "version"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5000/api/v1/system/health >/dev/null || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -127,6 +146,7 @@ services:
 
   # ---- Next.js Frontend ----
   webui:
+    <<: *service-defaults
     build:
       context: ./webui
       dockerfile: Dockerfile
@@ -137,6 +157,7 @@ services:
       twilight:
         condition: service_healthy
     environment:
+      TZ: ${TZ:-Asia/Shanghai}
       NODE_ENV: production
       PORT: 3000
       # API URL — set to the backend service name for internal networking.

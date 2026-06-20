@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -218,22 +219,43 @@ func (b *runtimeLogBuffer) snapshot(limit int, after int64) ([]RuntimeLogEntry, 
 	if limit <= 0 || limit > b.limit {
 		limit = b.limit
 	}
-	filtered := make([]RuntimeLogEntry, 0, len(b.entries))
-	for _, entry := range b.entries {
-		if after <= 0 || entry.ID > after {
-			filtered = append(filtered, entry)
-		}
-	}
-	if len(filtered) > limit {
-		filtered = filtered[len(filtered)-limit:]
-	}
 	next := b.nextID
-	if len(filtered) > 0 {
-		next = filtered[len(filtered)-1].ID
+	start, end := runtimeLogBufferWindow(b.entries, limit, after)
+	if start == end {
+		return nil, next
 	}
+	filtered := b.entries[start:end]
+	next = filtered[len(filtered)-1].ID
 	out := make([]RuntimeLogEntry, len(filtered))
 	copy(out, filtered)
 	return out, next
+}
+
+func runtimeLogBufferWindow(entries []RuntimeLogEntry, limit int, after int64) (int, int) {
+	if len(entries) == 0 || limit <= 0 {
+		return 0, 0
+	}
+	if limit > len(entries) {
+		limit = len(entries)
+	}
+	if after <= 0 {
+		start := len(entries) - limit
+		if start < 0 {
+			start = 0
+		}
+		return start, len(entries)
+	}
+	start := sort.Search(len(entries), func(i int) bool {
+		return entries[i].ID > after
+	})
+	if start >= len(entries) {
+		return len(entries), len(entries)
+	}
+	end := start + limit
+	if end > len(entries) {
+		end = len(entries)
+	}
+	return start, end
 }
 
 func (b *runtimeLogBuffer) drain() []RuntimeLogEntry {
@@ -516,7 +538,15 @@ func (a *App) handleRuntimeLogs(w http.ResponseWriter, r *http.Request, _ Params
 	limit := clamp(queryInt(r, "limit", 200), 1, maxLimit)
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 	entries, next := runtimeLogs.snapshot(limit, after)
-	ok(w, "OK", map[string]any{"entries": entries, "next_cursor": next, "limit": limit})
+	ok(w, "OK", runtimeLogPayload(entries, next, limit))
+}
+
+func runtimeLogPayload(entries []RuntimeLogEntry, next int64, limit int) map[string]any {
+	return map[string]any{"entries": entries, "next_cursor": next, "limit": limit}
+}
+
+func runtimeLogEventPayload(entries []RuntimeLogEntry, next int64) map[string]any {
+	return map[string]any{"entries": entries, "next_cursor": next}
 }
 
 func (a *App) handleRuntimeLogStream(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -546,7 +576,7 @@ func (a *App) handleRuntimeLogStream(w http.ResponseWriter, r *http.Request, _ P
 	}
 
 	entries, next := runtimeLogs.snapshot(limit, cursor)
-	if !send("snapshot", map[string]any{"entries": entries, "next_cursor": next}) {
+	if !send("snapshot", runtimeLogEventPayload(entries, next)) {
 		return
 	}
 	cursor = next
@@ -562,7 +592,7 @@ func (a *App) handleRuntimeLogStream(w http.ResponseWriter, r *http.Request, _ P
 			continue
 		}
 		cursor = next
-		if !send("logs", map[string]any{"entries": entries, "next_cursor": next}) {
+		if !send("logs", runtimeLogEventPayload(entries, next)) {
 			return
 		}
 	}

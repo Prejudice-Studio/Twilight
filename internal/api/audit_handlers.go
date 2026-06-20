@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -54,37 +55,186 @@ func (a *App) handleListAuditLogs(w http.ResponseWriter, r *http.Request, _ Para
 	logs := a.store().ListAuditLogs()
 	page := max(1, queryInt(r, "page", 1))
 	perPage := clamp(queryInt(r, "per_page", 50), 1, 200)
+	presetFilter := strings.ToLower(r.URL.Query().Get("preset"))
 	categoryFilter := strings.ToLower(r.URL.Query().Get("category"))
 	actionFilter := strings.ToLower(r.URL.Query().Get("action"))
 	uidFilter := r.URL.Query().Get("uid")
+	targetUIDFilter := r.URL.Query().Get("target_uid")
 	search := strings.ToLower(r.URL.Query().Get("search"))
+	from := auditLogUnixQuery(r, "from", "start")
+	to := auditLogUnixQuery(r, "to", "end")
+	sortBy := normalizeAuditLogSort(r.URL.Query().Get("sort"))
+	order := normalizeSortOrder(r.URL.Query().Get("order"))
 
-	filtered := make([]map[string]any, 0, len(logs))
+	uid, _ := strconv.ParseInt(uidFilter, 10, 64)
+	targetUID, _ := strconv.ParseInt(targetUIDFilter, 10, 64)
+
+	filtered := make([]store.AuditLog, 0, len(logs))
 	for _, log := range logs {
-		if categoryFilter != "" && categoryFilter != "all" && log.Category != categoryFilter {
+		if !auditLogMatchesPreset(log, presetFilter) {
 			continue
 		}
-		if actionFilter != "" && actionFilter != "all" && log.Action != actionFilter {
+		if categoryFilter != "" && categoryFilter != "all" && strings.ToLower(log.Category) != categoryFilter {
 			continue
 		}
-		if uidFilter != "" {
-			uid, _ := strconv.ParseInt(uidFilter, 10, 64)
-			if uid > 0 && log.UID != uid {
-				continue
-			}
+		if actionFilter != "" && actionFilter != "all" && strings.ToLower(log.Action) != actionFilter {
+			continue
+		}
+		if uid > 0 && log.UID != uid {
+			continue
+		}
+		if targetUID > 0 && log.TargetUID != targetUID {
+			continue
+		}
+		if from > 0 && log.CreatedAt < from {
+			continue
+		}
+		if to > 0 && log.CreatedAt > to {
+			continue
 		}
 		if search != "" {
-			haystack := strings.ToLower(log.Username + " " + log.Action + " " + log.Category + " " + log.IP)
+			haystack := strings.ToLower(strings.Join([]string{
+				log.Username,
+				log.Action,
+				log.Category,
+				log.IP,
+				strconv.FormatInt(log.UID, 10),
+				strconv.FormatInt(log.TargetUID, 10),
+			}, " "))
 			if !strings.Contains(haystack, search) {
 				continue
 			}
 		}
-		filtered = append(filtered, auditLogDTO(log))
+		filtered = append(filtered, log)
 	}
 
+	sortAuditLogs(filtered, sortBy, order)
 	total := len(filtered)
-	filtered = paginate(filtered, page, perPage)
-	ok(w, "OK", map[string]any{"logs": filtered, "total": total, "page": page, "per_page": perPage})
+	paged := paginate(filtered, page, perPage)
+	dto := make([]map[string]any, 0, len(paged))
+	for _, log := range paged {
+		dto = append(dto, auditLogDTO(log))
+	}
+	ok(w, "OK", map[string]any{
+		"logs":     dto,
+		"total":    total,
+		"page":     page,
+		"per_page": perPage,
+		"sort":     sortBy,
+		"order":    order,
+	})
+}
+
+func auditLogUnixQuery(r *http.Request, names ...string) int64 {
+	for _, name := range names {
+		raw := strings.TrimSpace(r.URL.Query().Get(name))
+		if raw == "" {
+			continue
+		}
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err == nil && value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func auditLogMatchesPreset(log store.AuditLog, preset string) bool {
+	switch preset {
+	case "", "all":
+		return true
+	case "admin", "user", "system":
+		return strings.EqualFold(log.Category, preset)
+	case "destructive":
+		return isDestructiveAuditAction(log.Action)
+	case "security":
+		return isSecurityAuditAction(log.Action)
+	case "today":
+		now := time.Now()
+		start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
+		return log.CreatedAt >= start
+	case "week":
+		return log.CreatedAt >= time.Now().Add(-7*24*time.Hour).Unix()
+	default:
+		return true
+	}
+}
+
+func isDestructiveAuditAction(action string) bool {
+	action = strings.ToLower(action)
+	keywords := []string{
+		"delete", "disable", "clear", "prune", "revoke", "ban", "kick",
+		"terminate", "reset_password", "force_unbind", "unbind", "detach",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(action, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func isSecurityAuditAction(action string) bool {
+	action = strings.ToLower(action)
+	keywords := []string{
+		"login", "logout", "password", "role", "telegram", "developer",
+		"security", "audit", "violation", "ip", "device", "apikey",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(action, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeAuditLogSort(value string) string {
+	switch strings.ToLower(value) {
+	case "id", "action", "category", "username", "uid", "target_uid", "ip":
+		return strings.ToLower(value)
+	default:
+		return "created_at"
+	}
+}
+
+func normalizeSortOrder(value string) string {
+	if strings.EqualFold(value, "asc") {
+		return "asc"
+	}
+	return "desc"
+}
+
+func sortAuditLogs(logs []store.AuditLog, sortBy, order string) {
+	desc := order != "asc"
+	sort.SliceStable(logs, func(i, j int) bool {
+		left, right := logs[i], logs[j]
+		cmp := int64(0)
+		switch sortBy {
+		case "id":
+			cmp = left.ID - right.ID
+		case "action":
+			cmp = int64(strings.Compare(strings.ToLower(left.Action), strings.ToLower(right.Action)))
+		case "category":
+			cmp = int64(strings.Compare(strings.ToLower(left.Category), strings.ToLower(right.Category)))
+		case "username":
+			cmp = int64(strings.Compare(strings.ToLower(left.Username), strings.ToLower(right.Username)))
+		case "uid":
+			cmp = left.UID - right.UID
+		case "target_uid":
+			cmp = left.TargetUID - right.TargetUID
+		case "ip":
+			cmp = int64(strings.Compare(strings.ToLower(left.IP), strings.ToLower(right.IP)))
+		default:
+			cmp = left.CreatedAt - right.CreatedAt
+		}
+		if cmp == 0 {
+			cmp = left.ID - right.ID
+		}
+		if desc {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
 }
 
 func (a *App) handleDeleteAuditLog(w http.ResponseWriter, r *http.Request, params Params) {

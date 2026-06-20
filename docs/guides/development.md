@@ -7,6 +7,7 @@
 - 安装部署见 [安装部署](./install.md)。
 - Docker 部署见 [Docker 部署](./docker.md)。
 - 安全加固见 [安全加固](./security.md)。
+- 模块边界与渐进式解耦见 [模块化架构与解耦指南](./modular-architecture.md)。
 - 后端架构与配置见 [Go 后端架构与配置](../reference/backend.md)。
 - 路由总览见 [API 路由索引](../reference/api-index.md)，单接口细节见 [后端 API 详参](../reference/backend-api.md)。
 
@@ -203,7 +204,7 @@ Twilight 不对 Cookie 鉴权的变更类请求做 CSRF 令牌校验，也不做
 ### 开发者模式
 
 - 仪表盘输入 `DEBUGMODE` 时，前端必须要求管理员二次输入当前密码，并调用 `POST /admin/developer-mode/activate`；成功只在当前浏览器会话记录开发者模式状态。
-- 开发者模式页面提供 Telegram JS 自定义命令文档、示例、风险提示和 `POST /admin/developer/js-sandbox` 预检。沙箱仅暴露 `ctx`、`args`、`user`、`reply(text)`、`log(text)`，不提供网络、文件、进程、环境变量或配置读取。
+- 开发者模式页面提供 Telegram JS 自定义命令文档、示例、风险提示、服务端 JS 预设管理和 `POST /admin/developer/js-sandbox` 预检。沙箱仅暴露 `ctx`、`args`、`user`、`constants`、`reply(text)`、`log(text)`、`auth(role)`、`config(key)`、`env(key)`；`config`/`env` 只读白名单，不提供网络、文件或进程能力。
 - Bot 运行时保持向后兼容：普通 `bot_custom_commands` 仍是固定文本回复；只有回复内容以 `js:` 开头才按 JS 执行。执行结果和日志不得包含 Token、密码、API Key、服务器线路等敏感信息。
 
 ## 数据模型与迁移约定
@@ -218,6 +219,13 @@ Twilight 不对 Cookie 鉴权的变更类请求做 CSRF 令牌校验，也不做
 - **PostgreSQL 后端**：状态写入 `twilight_state` 表中 `id = 1` 的单行 `jsonb`。另有两张独立表：`twilight_sessions`（会话）与 `twilight_runtime_logs`（运行时日志）。
 
 > 不存在旧 Python 时代的 `db/invites.db`、`invite_relations` 单表，也没有「新增 xx.db / 新增表 / `ALTER TABLE announcements 增列` / 启动时自动建表」这类邀请或公告相关的迁移说法。新增邀请 / 公告字段，是在 `State` 结构体上加字段，并在加载时补默认值（见 `store.go` 中对 nil map 的初始化），不要引入独立表或单独的 SQLite 文件。
+
+### 数据库性能与接口一致性
+
+- 性能优化优先从现有访问模式入手：分页 / 游标、批量读取、索引、短超时、限流、前端按需加载和必要缓存；不要为了局部慢查询把业务实体拆成独立表，除非先更新架构文档并明确快照一致性、迁移、备份恢复方案。
+- PostgreSQL 的 `twilight_runtime_logs` 是高写入运行日志表，允许独立优化：最新快照按 `id DESC` 取最近 N 条，增量读取按 `id > after ORDER BY id ASC LIMIT N`，裁剪按 cutoff id 保留最近 N 条。JSON 后端和内存 fallback 必须保持相同 cursor 语义。
+- 新增列表接口应保持统一响应口径：数据数组放在 `items` 或既有兼容字段，增量游标使用 `next_cursor`；变更字段名或排序语义前必须同步后端 API 文档、前端 API 类型和调用方。
+- 新增缓存必须写清作用域（进程 / Redis / 前端内存）、TTL、容量上限、失效条件和降级行为；配置热重载后不能继续读取旧配置或旧 store 句柄。
 
 ### 迁移与引导
 

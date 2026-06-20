@@ -52,18 +52,20 @@ vim webui/.env
 创建 `.env` 文件在项目根目录，覆盖敏感配置：
 
 ```bash
-# .env
-POSTGRES_PASSWORD=your-secure-password
-BOT_INTERNAL_SECRET=your-random-secret
-ADMIN_USERNAMES=admin
-SITE_NAME=Twilight
+cp deploy/docker/.env.example .env
+vim .env
 ```
+
+`.env` 至少应修改 `POSTGRES_PASSWORD` 和 `BOT_INTERNAL_SECRET`。示例文件只使用占位符，不包含真实密钥。
 
 ### 4. 启动服务
 
 ```bash
 # 构建镜像并启动
 docker compose up -d --build
+
+# 生产环境建议叠加只读根文件系统与资源限制
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
 # 查看日志
 docker compose logs -f
@@ -75,7 +77,7 @@ docker compose ps
 ### 5. 初次访问
 
 - **前端界面**: http://localhost:3000
-- **后端 API**: http://localhost:5000/api/v1/system/health
+- **后端 API**: 默认不暴露到宿主机；容器内健康检查使用 `GET /api/v1/system/health`
 - **首次注册**: 打开注册页面注册第一个账号，用户名必须在 `ADMIN_USERNAMES` 中才会成为管理员
 
 ## 架构说明
@@ -121,6 +123,8 @@ docker compose ps
 - 端口: `5000` (内部)
 - 健康检查: `GET /api/v1/system/health`
 - 配置文件: `./config.toml` (只读挂载)
+- 以非 root 用户运行，并启用 `no-new-privileges`
+- Docker 日志默认按 `10m * 3` 轮转，避免宿主机日志无限增长
 - 数据卷:
   - `twilight-uploads`: 用户上传（头像/背景）
   - `twilight-backups`: 数据库备份
@@ -149,6 +153,12 @@ docker compose ps
 | `Redis.redis_url` | `redis://redis:6379/0` | 服务名即 hostname |
 | `API.host` | `0.0.0.0` | 监听所有接口 |
 | `SystemUpdate.auto_update_enabled` | `false` | Docker 通过镜像更新 |
+
+### 只读配置与后台配置管理
+
+默认 compose 将 `./config.toml` 以只读方式挂载，适合把 Docker 部署视为不可变配置：修改配置后编辑宿主机文件并重启容器。
+
+如果需要在后台配置管理页面直接保存 `config.toml`，可把挂载改为 `./config.toml:/app/config.toml:rw`，并确保宿主机文件允许容器内 UID `1001` 写入。生产环境更推荐保留只读挂载，敏感覆写放入 `config.local.toml` 或 `TWILIGHT_*` 环境变量。
 
 ### 环境变量参考
 
@@ -274,12 +284,14 @@ docker image prune -a
 # 检查服务健康状态
 docker compose ps
 
-# 手动检查后端
-curl http://localhost:5000/api/v1/system/health
+# 手动检查后端（从容器网络内）
+docker compose exec twilight curl -fsS http://127.0.0.1:5000/api/v1/system/health
 
 # 预期响应
 # {"success":true,"data":{"api":true,"database":true,"emby":true}}
 ```
+
+Compose 已为所有服务配置 `init: true`、`stop_grace_period: 30s`、`no-new-privileges` 和 Docker JSON 日志轮转。生产覆写文件额外启用后端只读根文件系统、临时 `/tmp` 与资源上限。
 
 ## 故障排查
 

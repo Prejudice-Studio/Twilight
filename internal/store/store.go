@@ -65,42 +65,44 @@ type PostgresTargetStatus struct {
 }
 
 type State struct {
-	NextUserID           int64                          `json:"next_user_id"`
-	NextAPIKeyID         int64                          `json:"next_api_key_id"`
-	NextRequestID        int64                          `json:"next_request_id"`
-	NextAnnouncementID   int64                          `json:"next_announcement_id"`
-	NextLoginLogID       int64                          `json:"next_login_log_id"`
-	NextRuntimeLogID     int64                          `json:"next_runtime_log_id"`
-	NextSchedulerRunID   int64                          `json:"next_scheduler_run_id"`
-	NextRebindRequestID  int64                          `json:"next_rebind_request_id"`
-	NextViolationLogID   int64                          `json:"next_violation_log_id"`
-	NextAuditLogID       int64                          `json:"next_audit_log_id"`
-	NextBangumiSyncLogID int64                          `json:"next_bangumi_sync_log_id"`
-	NextTicketID         int64                          `json:"next_ticket_id"`
-	Users                map[int64]User                 `json:"users"`
-	APIKeys              map[int64]APIKey               `json:"api_keys"`
-	MediaRequests        map[int64]MediaRequest         `json:"media_requests"`
-	Announcements        map[int64]Announcement         `json:"announcements"`
-	InviteCodes          map[string]InviteCode          `json:"invite_codes"`
-	InviteRelations      map[int64]InviteRelation       `json:"invite_relations"`
-	RegCodes             map[string]RegCode             `json:"regcodes"`
-	BindCodes            map[string]BindCode            `json:"bind_codes"`
-	EmailVerifications   map[string]EmailVerification   `json:"email_verifications"`
-	Signin               map[int64]Signin               `json:"signin"`
-	SchedulerRuns        []SchedulerRun                 `json:"scheduler_runs"`
-	SchedulerSchedules   map[string]SchedulerSchedule   `json:"scheduler_schedules"`
-	Devices              map[string]Device              `json:"devices"`
-	LoginLogs            []LoginLog                     `json:"login_logs"`
-	RuntimeLogs          []RuntimeLogEntry              `json:"runtime_logs"`
-	IPBlacklist          map[string]IPBlacklistEntry    `json:"ip_blacklist"`
-	PlaybackRecords      []PlaybackRecord               `json:"playback_records"`
-	RebindRequests       map[int64]RebindRequest        `json:"rebind_requests"`
-	TelegramRoster       map[string]TelegramRosterEntry `json:"telegram_roster"`
-	ViolationLogs        []ViolationLog                 `json:"violation_logs"`
-	AuditLogs            []AuditLog                     `json:"audit_logs"`
-	BangumiSyncLogs      []BangumiSyncLog               `json:"bangumi_sync_logs"`
-	Tickets              map[int64]Ticket               `json:"tickets"`
-	TicketTypes          []string                       `json:"ticket_types,omitempty"`
+	NextUserID              int64                          `json:"next_user_id"`
+	NextAPIKeyID            int64                          `json:"next_api_key_id"`
+	NextRequestID           int64                          `json:"next_request_id"`
+	NextAnnouncementID      int64                          `json:"next_announcement_id"`
+	NextLoginLogID          int64                          `json:"next_login_log_id"`
+	NextRuntimeLogID        int64                          `json:"next_runtime_log_id"`
+	NextSchedulerRunID      int64                          `json:"next_scheduler_run_id"`
+	NextRebindRequestID     int64                          `json:"next_rebind_request_id"`
+	NextViolationLogID      int64                          `json:"next_violation_log_id"`
+	NextAuditLogID          int64                          `json:"next_audit_log_id"`
+	NextBangumiSyncLogID    int64                          `json:"next_bangumi_sync_log_id"`
+	NextTicketID            int64                          `json:"next_ticket_id"`
+	NextDeveloperJSPresetID int64                          `json:"next_developer_js_preset_id"`
+	Users                   map[int64]User                 `json:"users"`
+	APIKeys                 map[int64]APIKey               `json:"api_keys"`
+	MediaRequests           map[int64]MediaRequest         `json:"media_requests"`
+	Announcements           map[int64]Announcement         `json:"announcements"`
+	InviteCodes             map[string]InviteCode          `json:"invite_codes"`
+	InviteRelations         map[int64]InviteRelation       `json:"invite_relations"`
+	RegCodes                map[string]RegCode             `json:"regcodes"`
+	BindCodes               map[string]BindCode            `json:"bind_codes"`
+	EmailVerifications      map[string]EmailVerification   `json:"email_verifications"`
+	Signin                  map[int64]Signin               `json:"signin"`
+	SchedulerRuns           []SchedulerRun                 `json:"scheduler_runs"`
+	SchedulerSchedules      map[string]SchedulerSchedule   `json:"scheduler_schedules"`
+	Devices                 map[string]Device              `json:"devices"`
+	LoginLogs               []LoginLog                     `json:"login_logs"`
+	RuntimeLogs             []RuntimeLogEntry              `json:"runtime_logs"`
+	IPBlacklist             map[string]IPBlacklistEntry    `json:"ip_blacklist"`
+	PlaybackRecords         []PlaybackRecord               `json:"playback_records"`
+	RebindRequests          map[int64]RebindRequest        `json:"rebind_requests"`
+	TelegramRoster          map[string]TelegramRosterEntry `json:"telegram_roster"`
+	ViolationLogs           []ViolationLog                 `json:"violation_logs"`
+	AuditLogs               []AuditLog                     `json:"audit_logs"`
+	BangumiSyncLogs         []BangumiSyncLog               `json:"bangumi_sync_logs"`
+	Tickets                 map[int64]Ticket               `json:"tickets"`
+	TicketTypes             []string                       `json:"ticket_types,omitempty"`
+	DeveloperJSPresets      map[int64]DeveloperJSPreset    `json:"developer_js_presets,omitempty"`
 	// TelegramBotOffset 持久化最近一次成功 ack 的 update_id+1。
 	// 重启 / token 切换时直接从这个值恢复，避免对 24h backlog 重新分发。
 	// 0 表示未设置 / 历史 state，按"从 0 开始"处理（getUpdates 会拿到队列里
@@ -200,6 +202,16 @@ type Announcement struct {
 	CreatedAt    int64  `json:"created_at"`
 	UpdatedAt    int64  `json:"updated_at"`
 	ExpiredAt    int64  `json:"expired_at,omitempty"`
+}
+
+type DeveloperJSPreset struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Code        string `json:"code"`
+	CreatorUID  int64  `json:"creator_uid,omitempty"`
+	CreatedAt   int64  `json:"created_at"`
+	UpdatedAt   int64  `json:"updated_at"`
 }
 
 type InviteCode struct {
@@ -779,6 +791,11 @@ CREATE INDEX IF NOT EXISTS twilight_runtime_logs_time_idx ON twilight_runtime_lo
 		return nil, status, describePostgresConnectionError(target, err)
 	}
 	if _, err := db.ExecContext(ctx, `
+CREATE INDEX IF NOT EXISTS twilight_runtime_logs_id_desc_idx ON twilight_runtime_logs (id DESC)`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
+	if _, err := db.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS twilight_sessions (
 	token text PRIMARY KEY,
 	uid bigint NOT NULL,
@@ -987,6 +1004,15 @@ func (s *State) ensure() {
 		}
 		s.NextTicketID = max + 1
 	}
+	if s.NextDeveloperJSPresetID <= 0 {
+		max := int64(0)
+		for _, preset := range s.DeveloperJSPresets {
+			if preset.ID > max {
+				max = preset.ID
+			}
+		}
+		s.NextDeveloperJSPresetID = max + 1
+	}
 	if s.BangumiSyncLogs == nil {
 		s.BangumiSyncLogs = []BangumiSyncLog{}
 	}
@@ -995,6 +1021,9 @@ func (s *State) ensure() {
 	}
 	if s.TicketTypes == nil || len(s.TicketTypes) == 0 {
 		s.TicketTypes = []string{"all"}
+	}
+	if s.DeveloperJSPresets == nil {
+		s.DeveloperJSPresets = map[int64]DeveloperJSPreset{}
 	}
 }
 
@@ -2808,6 +2837,70 @@ func (s *Store) DeleteAnnouncement(id int64) error {
 			return ErrNotFound
 		}
 		delete(s.state.Announcements, id)
+		return nil
+	})
+}
+
+func (s *Store) UpsertDeveloperJSPreset(p DeveloperJSPreset) (DeveloperJSPreset, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	err := s.mutateAndSaveLocked(func() error {
+		now := time.Now().Unix()
+		if p.ID == 0 {
+			p.ID = s.state.NextDeveloperJSPresetID
+			s.state.NextDeveloperJSPresetID++
+			p.CreatedAt = now
+		} else if existing, ok := s.state.DeveloperJSPresets[p.ID]; ok {
+			if p.CreatedAt == 0 {
+				p.CreatedAt = existing.CreatedAt
+			}
+			if p.CreatorUID == 0 {
+				p.CreatorUID = existing.CreatorUID
+			}
+		} else {
+			return ErrNotFound
+		}
+		p.UpdatedAt = now
+		s.state.DeveloperJSPresets[p.ID] = p
+		return nil
+	})
+	if err != nil {
+		return DeveloperJSPreset{}, err
+	}
+	return p, nil
+}
+
+func (s *Store) DeveloperJSPreset(id int64) (DeveloperJSPreset, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	preset, ok := s.state.DeveloperJSPresets[id]
+	return preset, ok
+}
+
+func (s *Store) ListDeveloperJSPresets() []DeveloperJSPreset {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]DeveloperJSPreset, 0, len(s.state.DeveloperJSPresets))
+	for _, preset := range s.state.DeveloperJSPresets {
+		out = append(out, preset)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].UpdatedAt != out[j].UpdatedAt {
+			return out[i].UpdatedAt > out[j].UpdatedAt
+		}
+		return out[i].ID > out[j].ID
+	})
+	return out
+}
+
+func (s *Store) DeleteDeveloperJSPreset(id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mutateAndSaveLocked(func() error {
+		if _, ok := s.state.DeveloperJSPresets[id]; !ok {
+			return ErrNotFound
+		}
+		delete(s.state.DeveloperJSPresets, id)
 		return nil
 	})
 }

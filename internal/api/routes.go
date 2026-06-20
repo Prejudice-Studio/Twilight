@@ -113,6 +113,10 @@ func (a *App) registerRoutes() {
 	a.add(http.MethodPost, "/api/v1/system/admin/bot/test", AuthAdmin, a.handleBotTest)
 	a.add(http.MethodPost, "/api/v1/admin/developer-mode/activate", AuthAdmin, a.handleDeveloperModeActivate)
 	a.add(http.MethodPost, "/api/v1/admin/developer/js-sandbox", AuthAdmin, a.handleDeveloperJSSandbox)
+	a.add(http.MethodGet, "/api/v1/admin/developer/js-presets", AuthAdmin, a.handleDeveloperJSPresets)
+	a.add(http.MethodPost, "/api/v1/admin/developer/js-presets", AuthAdmin, a.handleCreateDeveloperJSPreset)
+	a.add(http.MethodPut, "/api/v1/admin/developer/js-presets/:preset_id", AuthAdmin, a.handleUpdateDeveloperJSPreset)
+	a.add(http.MethodDelete, "/api/v1/admin/developer/js-presets/:preset_id", AuthAdmin, a.handleDeleteDeveloperJSPreset)
 
 	a.add(http.MethodGet, "/api/v1/emby/status", AuthUser, a.handleEmbyStatus)
 	a.add(http.MethodGet, "/api/v1/emby/urls", AuthPublic, a.handleDeprecatedEmbyURLs)

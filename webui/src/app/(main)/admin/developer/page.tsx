@@ -23,12 +23,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
+import type { DeveloperJSPreset } from "@/lib/api-types";
 import { useI18n, type MessageKey } from "@/lib/i18n";
-
-const CUSTOM_TEMPLATE_STORAGE_KEY = "twilight:developer-js-templates";
 
 type DeveloperTemplate = {
   id: string;
+  presetId?: number;
   title: MessageKey | string;
   description: MessageKey | string;
   command: string;
@@ -232,37 +232,16 @@ function commandReply(command: string, code: string): string {
   return `${normalized} = js:${code.trim()}`;
 }
 
-function loadCustomTemplates(): DeveloperTemplate[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(CUSTOM_TEMPLATE_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((item): DeveloperTemplate | null => {
-        if (!item || typeof item !== "object") return null;
-        const name = String(item.title || "").trim();
-        const code = String(item.code || "").trim();
-        if (!name || !code) return null;
-        return {
-          id: String(item.id || `custom-${Date.now()}`),
-          title: name.slice(0, 80),
-          description: String(item.description || "").slice(0, 160),
-          command: String(item.command || "/custom").slice(0, 40),
-          code,
-          updatedAt: Number(item.updatedAt || Date.now()),
-        };
-      })
-      .filter(Boolean) as DeveloperTemplate[];
-  } catch {
-    return [];
-  }
-}
-
-function saveCustomTemplates(templates: DeveloperTemplate[]) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(CUSTOM_TEMPLATE_STORAGE_KEY, JSON.stringify(templates));
+function presetToTemplate(preset: DeveloperJSPreset): DeveloperTemplate {
+  return {
+    id: `preset-${preset.id}`,
+    presetId: preset.id,
+    title: preset.name,
+    description: preset.description || "",
+    command: "/custom",
+    code: preset.code || "",
+    updatedAt: preset.updated_at,
+  };
 }
 
 function DocRows({ rows }: { rows: DocRow[] }) {
@@ -289,18 +268,31 @@ export default function AdminDeveloperPage() {
   const [code, setCode] = useState(helloTemplate);
   const [command, setCommand] = useState("/hello");
   const [running, setRunning] = useState(false);
+  const [savingTemplate, setSavingTemplate] = useState(false);
   const [templateName, setTemplateName] = useState("");
   const [templateDescription, setTemplateDescription] = useState("");
-  const [customTemplates, setCustomTemplates] = useState<DeveloperTemplate[]>([]);
+  const [serverPresets, setServerPresets] = useState<DeveloperJSPreset[]>([]);
   const [activeTemplateId, setActiveTemplateId] = useState("hello");
   const [result, setResult] = useState<Awaited<ReturnType<typeof api.previewDeveloperJSCommand>>["data"] | null>(null);
 
-  useEffect(() => {
-    setCustomTemplates(loadCustomTemplates());
-  }, []);
+  const loadPresets = useCallback(async () => {
+    try {
+      const res = await api.listDeveloperJSPresets();
+      if (res.success && res.data) {
+        setServerPresets(res.data.presets);
+      }
+    } catch (err) {
+      toast({ title: t("adminDeveloper.templatesLoadFailed"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+    }
+  }, [t, toast]);
 
+  useEffect(() => {
+    void loadPresets();
+  }, [loadPresets]);
+
+  const customTemplates = useMemo(() => serverPresets.map(presetToTemplate), [serverPresets]);
   const allTemplates = useMemo(() => [...builtInTemplates, ...customTemplates], [customTemplates]);
-  const activeTemplate = allTemplates.find((item) => item.id === activeTemplateId) || allTemplates[0];
+  const activeTemplate = allTemplates.find((item) => item.id === activeTemplateId);
   const commandPreview = useMemo(() => commandReply(command, code), [code, command]);
 
   const applyTemplate = useCallback((template: DeveloperTemplate) => {
@@ -329,48 +321,73 @@ export default function AdminDeveloperPage() {
     });
   }, [code]);
 
-  const persistCustomTemplates = useCallback((templates: DeveloperTemplate[]) => {
-    setCustomTemplates(templates);
-    saveCustomTemplates(templates);
+  const newBlankTemplate = useCallback(() => {
+    setActiveTemplateId("blank");
+    setCode("");
+    setCommand("/custom");
+    setTemplateName("");
+    setTemplateDescription("");
+    setResult(null);
+    requestAnimationFrame(() => editorRef.current?.focus());
   }, []);
 
-  const saveAsTemplate = useCallback(() => {
+  const saveAsTemplate = useCallback(async () => {
     const name = templateName.trim();
-    if (!name || !code.trim()) {
+    if (!name) {
       toast({ title: t("adminDeveloper.templateNameRequired"), variant: "destructive" });
       return;
     }
-    const next: DeveloperTemplate = {
-      id: `custom-${Date.now()}`,
-      title: name,
-      description: templateDescription.trim(),
-      command,
-      code,
-      updatedAt: Date.now(),
-    };
-    persistCustomTemplates([next, ...customTemplates]);
-    setActiveTemplateId(next.id);
-    toast({ title: t("adminDeveloper.templateSaved"), variant: "success" });
-  }, [code, command, customTemplates, persistCustomTemplates, t, templateDescription, templateName, toast]);
+    setSavingTemplate(true);
+    try {
+      const res = await api.createDeveloperJSPreset({ name, description: templateDescription.trim(), code });
+      if (!res.success || !res.data) throw new Error(res.message || t("adminDeveloper.templateSaveFailed"));
+      await loadPresets();
+      setActiveTemplateId(`preset-${res.data.id}`);
+      toast({ title: t("adminDeveloper.templateSaved"), variant: "success" });
+    } catch (err) {
+      toast({ title: t("adminDeveloper.templateSaveFailed"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+    } finally {
+      setSavingTemplate(false);
+    }
+  }, [code, loadPresets, t, templateDescription, templateName, toast]);
 
-  const updateTemplate = useCallback(() => {
-    const target = customTemplates.find((item) => item.id === activeTemplateId);
-    if (!target) return;
-    const next = customTemplates.map((item) => item.id === target.id
-      ? { ...item, title: templateName.trim() || item.title, description: templateDescription.trim(), command, code, updatedAt: Date.now() }
-      : item);
-    persistCustomTemplates(next);
-    toast({ title: t("adminDeveloper.templateUpdated"), variant: "success" });
-  }, [activeTemplateId, code, command, customTemplates, persistCustomTemplates, t, templateDescription, templateName, toast]);
+  const updateTemplate = useCallback(async () => {
+    const target = customTemplates.find((item) => item.id === activeTemplateId && item.presetId);
+    if (!target?.presetId) return;
+    const name = templateName.trim();
+    if (!name) {
+      toast({ title: t("adminDeveloper.templateNameRequired"), variant: "destructive" });
+      return;
+    }
+    setSavingTemplate(true);
+    try {
+      const res = await api.updateDeveloperJSPreset(target.presetId, { name, description: templateDescription.trim(), code });
+      if (!res.success) throw new Error(res.message || t("adminDeveloper.templateSaveFailed"));
+      await loadPresets();
+      toast({ title: t("adminDeveloper.templateUpdated"), variant: "success" });
+    } catch (err) {
+      toast({ title: t("adminDeveloper.templateSaveFailed"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+    } finally {
+      setSavingTemplate(false);
+    }
+  }, [activeTemplateId, code, customTemplates, loadPresets, t, templateDescription, templateName, toast]);
 
-  const deleteTemplate = useCallback(() => {
-    const target = customTemplates.find((item) => item.id === activeTemplateId);
-    if (!target) return;
-    const next = customTemplates.filter((item) => item.id !== target.id);
-    persistCustomTemplates(next);
-    applyTemplate(builtInTemplates[0]);
-    toast({ title: t("adminDeveloper.templateDeleted"), variant: "success" });
-  }, [activeTemplateId, applyTemplate, customTemplates, persistCustomTemplates, t, toast]);
+  const deleteTemplate = useCallback(async () => {
+    const target = customTemplates.find((item) => item.id === activeTemplateId && item.presetId);
+    if (!target?.presetId) return;
+    setSavingTemplate(true);
+    try {
+      const res = await api.deleteDeveloperJSPreset(target.presetId);
+      if (!res.success) throw new Error(res.message || t("adminDeveloper.templateSaveFailed"));
+      await loadPresets();
+      applyTemplate(builtInTemplates[0]);
+      toast({ title: t("adminDeveloper.templateDeleted"), variant: "success" });
+    } catch (err) {
+      toast({ title: t("adminDeveloper.templateSaveFailed"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+    } finally {
+      setSavingTemplate(false);
+    }
+  }, [activeTemplateId, applyTemplate, customTemplates, loadPresets, t, toast]);
 
   const copyCommandReply = useCallback(async () => {
     try {
@@ -431,6 +448,10 @@ export default function AdminDeveloperPage() {
             <CardDescription>{t("adminDeveloper.templatesDescription")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            <Button type="button" variant="outline" size="sm" className="w-full" onClick={newBlankTemplate}>
+              <Plus className="mr-2 h-4 w-4" />
+              {t("adminDeveloper.newBlankPreset")}
+            </Button>
             <div className="space-y-2">
               {allTemplates.map((template) => (
                 <button
@@ -458,17 +479,17 @@ export default function AdminDeveloperPage() {
               <Input value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder={t("adminDeveloper.templateName")} inputSize="sm" />
               <Input value={templateDescription} onChange={(event) => setTemplateDescription(event.target.value)} placeholder={t("adminDeveloper.templateDescription")} inputSize="sm" />
               <div className="grid gap-2">
-                <Button size="sm" onClick={saveAsTemplate} className="min-h-9 whitespace-normal leading-tight">
-                  <Plus className="mr-2 h-4 w-4" />
+                <Button size="sm" onClick={saveAsTemplate} disabled={savingTemplate} className="min-h-9 whitespace-normal leading-tight">
+                  {savingTemplate ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
                   {t("adminDeveloper.saveAsTemplate")}
                 </Button>
-                {!activeTemplate?.builtin && (
+                {activeTemplate?.presetId && (
                   <div className="grid grid-cols-2 gap-2">
-                    <Button size="sm" variant="outline" onClick={updateTemplate}>
-                      <Save className="mr-2 h-4 w-4" />
+                    <Button size="sm" variant="outline" onClick={updateTemplate} disabled={savingTemplate}>
+                      {savingTemplate ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                       {t("common.save")}
                     </Button>
-                    <Button size="sm" variant="destructive" onClick={deleteTemplate}>
+                    <Button size="sm" variant="destructive" onClick={deleteTemplate} disabled={savingTemplate}>
                       <Trash2 className="mr-2 h-4 w-4" />
                       {t("common.delete")}
                     </Button>

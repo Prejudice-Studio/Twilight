@@ -33,6 +33,16 @@ func TestRuntimeLogsJSONBackendCursorAndPrune(t *testing.T) {
 		t.Fatalf("unexpected cursor logs next=%d logs=%#v", next, logs)
 	}
 
+	logs, next = st.RuntimeLogs(3, 7)
+	if len(logs) != 3 || logs[0].ID != 8 || logs[1].ID != 9 || logs[2].ID != 10 || next != 10 {
+		t.Fatalf("unexpected bounded cursor logs next=%d logs=%#v", next, logs)
+	}
+
+	logs, next = st.RuntimeLogs(3, 105)
+	if len(logs) != 0 || next != 105 {
+		t.Fatalf("unexpected empty cursor logs next=%d logs=%#v", next, logs)
+	}
+
 	if err := st.PruneRuntimeLogs(100); err != nil {
 		t.Fatal(err)
 	}

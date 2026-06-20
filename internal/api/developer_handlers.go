@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -62,12 +63,108 @@ func (a *App) handleDeveloperJSSandbox(w http.ResponseWriter, r *http.Request, _
 	ok(w, "sandbox preview completed", result)
 }
 
+func (a *App) handleDeveloperJSPresets(w http.ResponseWriter, r *http.Request, _ Params) {
+	presets := a.store().ListDeveloperJSPresets()
+	ok(w, "OK", map[string]any{"presets": presets, "total": len(presets)})
+}
+
+func (a *App) handleCreateDeveloperJSPreset(w http.ResponseWriter, r *http.Request, _ Params) {
+	payload := decodeMap(r)
+	preset, okPayload := developerJSPresetFromPayload(payload, store.DeveloperJSPreset{
+		CreatorUID: current(r).User.UID,
+	})
+	if !okPayload {
+		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "preset name is required")
+		return
+	}
+	if !validateDeveloperJSPresetCode(w, preset.Code) {
+		return
+	}
+	saved, err := a.store().UpsertDeveloperJSPreset(preset)
+	if statusFromError(w, err) {
+		return
+	}
+	a.audit(r, "developer_js_preset_create", "admin", current(r).User.UID, map[string]any{"preset_id": saved.ID, "name": saved.Name, "bytes": len(saved.Code)})
+	created(w, "developer js preset created", saved)
+}
+
+func (a *App) handleUpdateDeveloperJSPreset(w http.ResponseWriter, r *http.Request, params Params) {
+	id, err := int64Param(params, "preset_id")
+	if err != nil || id <= 0 {
+		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "invalid preset id")
+		return
+	}
+	existing, found := a.store().DeveloperJSPreset(id)
+	if !found {
+		failWithCode(w, http.StatusNotFound, ErrNotFound, "resource not found")
+		return
+	}
+	payload := decodeMap(r)
+	preset, okPayload := developerJSPresetFromPayload(payload, existing)
+	if !okPayload {
+		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "preset name is required")
+		return
+	}
+	if !validateDeveloperJSPresetCode(w, preset.Code) {
+		return
+	}
+	saved, err := a.store().UpsertDeveloperJSPreset(preset)
+	if statusFromError(w, err) {
+		return
+	}
+	a.audit(r, "developer_js_preset_update", "admin", current(r).User.UID, map[string]any{"preset_id": saved.ID, "name": saved.Name, "bytes": len(saved.Code)})
+	ok(w, "developer js preset updated", saved)
+}
+
+func (a *App) handleDeleteDeveloperJSPreset(w http.ResponseWriter, r *http.Request, params Params) {
+	id, err := int64Param(params, "preset_id")
+	if err != nil || id <= 0 {
+		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "invalid preset id")
+		return
+	}
+	existing, found := a.store().DeveloperJSPreset(id)
+	if !found {
+		failWithCode(w, http.StatusNotFound, ErrNotFound, "resource not found")
+		return
+	}
+	if statusFromError(w, a.store().DeleteDeveloperJSPreset(id)) {
+		return
+	}
+	a.audit(r, "developer_js_preset_delete", "admin", current(r).User.UID, map[string]any{"preset_id": id, "name": existing.Name})
+	ok(w, "developer js preset deleted", map[string]any{"id": id})
+}
+
 func appendStringAny(value any, item string) []string {
 	out := []string{}
 	if items, ok := value.([]string); ok {
 		out = append(out, items...)
 	}
 	return append(out, item)
+}
+
+func developerJSPresetFromPayload(payload map[string]any, base store.DeveloperJSPreset) (store.DeveloperJSPreset, bool) {
+	if _, ok := payload["name"]; ok {
+		base.Name = truncateString(strings.TrimSpace(fmt.Sprint(payload["name"])), 80)
+	}
+	if _, ok := payload["description"]; ok {
+		base.Description = truncateString(strings.TrimSpace(fmt.Sprint(payload["description"])), 500)
+	}
+	if _, ok := payload["code"]; ok {
+		base.Code = strings.TrimSpace(fmt.Sprint(payload["code"]))
+	}
+	return base, base.Name != ""
+}
+
+func validateDeveloperJSPresetCode(w http.ResponseWriter, code string) bool {
+	if strings.TrimSpace(code) == "" {
+		return true
+	}
+	result := validateDeveloperJSCommand(code)
+	if ok, _ := result["ok"].(bool); ok {
+		return true
+	}
+	failWithCodeData(w, http.StatusBadRequest, ErrInvalidPayload, "developer js preset rejected", result)
+	return false
 }
 
 func validateDeveloperJSCommand(code string) map[string]any {

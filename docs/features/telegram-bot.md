@@ -149,6 +149,13 @@ Bot 由二进制子命令 `bot`（或 `all`）启动，轮询逻辑见 `internal
 
 ### 自定义命令
 
+Web 后台的入口是「Telegram 管理 → Bot 指令管理」（`/admin/telegram/commands`）。该页面只编辑 `Telegram.bot_custom_commands`，不会创建第二套 Bot 指令配置：
+
+- 纯文本类型保存为普通回复，运行时只经过 `telegramRenderText` 的基础占位符替换，例如 `{server_name}`、`{bot_username}`、`{user_name}`。
+- 自定义 JS 类型从「开发者模式」保存的 JS 预设中选择，保存时写成现有 `js:` 回复格式。
+- 开发者模式支持新建空白 JS 预设、命名、保存、更新和删除；非空脚本保存前必须通过与沙箱预览一致的安全校验。
+- Bot 执行时仍只读取 `bot_custom_commands`。修改 JS 预设后，已保存到指令中的脚本不会自动变更，需要在 Bot 指令管理页重新选择并保存。
+
 `bot_custom_commands` 允许配置一组"命令 → 固定回复"的映射，命中后直接返回对应文本（`telegramCustomCommandReply`）。每条形如 `命令 = 回复`，命令会被规范化：转小写、补 `/` 前缀、仅允许字母数字与下划线、长度不超过 32 字符（`normalizeTelegramCommand`），重复命令以首次出现为准。自定义命令在内置命令之后匹配，不会覆盖内置命令。
 
 开发者模式启用后，可把某条回复写成 `js:` 前缀脚本，让 Bot 在受控 Goja 沙箱中执行：

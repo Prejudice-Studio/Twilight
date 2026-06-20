@@ -722,6 +722,16 @@ export interface ConfigSchema {
   categories?: ConfigCategory[];
 }
 
+export interface DeveloperJSPreset {
+  id: number;
+  name: string;
+  description?: string;
+  code: string;
+  creator_uid?: number;
+  created_at: number;
+  updated_at: number;
+}
+
 
 export interface DatabaseBackup {
   name: string;

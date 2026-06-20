@@ -7,7 +7,7 @@
 - Twilight 是 Emby / Jellyfin 用户管理面板，当前主线是 Go 后端 + Next.js 前端。
 - 后端模块路径为 `github.com/prejudice-studio/twilight`，入口在 `cmd/twilight`，目标部署环境是 Linux + systemd。
 - 前端位于 `webui/`，使用 Next.js App Router、TypeScript、Tailwind CSS、Radix/shadcn 风格组件、Zustand 与 TanStack Query。
-- 重要文档优先级：`docs/guides/development.md`、`docs/reference/backend.md`、`docs/reference/api-index.md`、`docs/reference/backend-api.md`、`docs/guides/security.md`、`README.md`。
+- 重要文档优先级：`docs/guides/development.md`、`docs/guides/modular-architecture.md`、`docs/reference/backend.md`、`docs/reference/api-index.md`、`docs/reference/backend-api.md`、`docs/guides/security.md`、`README.md`。
 - 若旧文件或本地笔记提到 Python 后端、SQLite 多库、uvicorn、`requirements.txt`、旧 `db/*.db` 迁移等内容，以当前 Go 源码和 `docs/guides/development.md` 为准，不要重新引入旧后端运行入口。
 
 ## 目录速览
@@ -306,6 +306,7 @@ pnpm build
 - 避免循环依赖和隐式副作用。不要在包初始化、全局变量或 helper 中偷偷读取/修改配置、store、环境变量或网络资源；启动、reload、scheduler、bot 的生命周期由现有入口显式管理。
 - 优化前先确认瓶颈。缓存、并发、批处理、后台任务和 Redis 使用必须有清晰失效策略、限流/超时和测试覆盖；不要为小路径引入难以验证的全局缓存或共享可变状态。
 - JSON 响应必须使用统一 envelope：`success`、`code`、`message`、`data`、`timestamp`，失败响应应带稳定 `error_code`，与前端 `ApiError` / `errcode.ts` 保持兼容。
+- 游标类列表接口应保持字段稳定：`entries`/`items` 承载数据，`next_cursor` 表示下一次增量读取起点；运行日志 HTTP 响应固定为 `{entries,next_cursor,limit}`，SSE 事件固定为 `{entries,next_cursor}`，不得为短期 UI 需求改名或改变排序语义。
 - Cookie 鉴权的变更类请求不再做 CSRF 令牌校验。鉴权依赖 HttpOnly session cookie、Bearer token 或 API Key；`X-Twilight-Client: webui` 只是允许的 CORS 头，不是鉴权手段。
 - Telegram 直接登录当前不可用。Telegram 只用于绑定、通知、管理员工具和 Bot 交互，不要重新引入 Telegram 一键登录或信任 Telegram ID 的免密登录。
 - Telegram Bot 账号类操作优先私聊；群聊只保留必要管理员工具。Bot/面板输出不得展示密码、Token、Emby ID、服务器线路、API Key 等敏感信息，按钮/面板操作必须重新校验管理员身份、目标权限和面板过期时间。
@@ -314,6 +315,7 @@ pnpm build
 - 配置入口固定为工作目录下的 `config.toml`；`--config` 只接受同一个工作目录的 `config.toml`。私密覆盖使用同目录 `config.local.toml` 或 `TWILIGHT_CONFIG_LOCAL_FILE`，环境变量以 `TWILIGHT_*` 覆盖字段。新增配置项一律落到 `config.toml`（在 `config.production.toml` 模板与后台 schema 中体现），**不要**把功能配置写进 `.env.example`——后端 `.env` 仅保留后端监听地址、站点名称等极少数部署级项目，前端展示项（API 基址 / 站点名 / 介绍 / 图标）走 `webui/.env`。
 - 存储模型是单一 `store.State` 文档。新增业务实体通常是在 `internal/store/store.go` 的 `State` 上加字段，并在 `ensure()` 中补默认值；不要为邀请、公告、注册码等业务重新创建独立 SQLite 文件或独立表。
 - PostgreSQL 后端只把主状态存为 `twilight_state` 的单行 `jsonb`，并有独立 `twilight_sessions` 与 `twilight_runtime_logs`。迁移、备份、恢复必须保持快照完整性。
+- `twilight_runtime_logs` 是高写入运行日志表：读取使用 `id` 游标递增，最新快照使用最近 N 条，裁剪必须保留最近 N 条并优先使用 cutoff id / 索引友好的 SQL；不要把业务实体迁移成独立表来“优化性能”。
 - PostgreSQL 除现有 `twilight_sessions` 与 `twilight_runtime_logs` 外，不为业务实体新增独立表，除非先更新架构文档并说明快照一致性、迁移和备份恢复方案。
 - JSON 后端是单进程独占，依赖 state 文件锁；多进程或多实例部署使用 PostgreSQL。
 - 旧 SQLite 只允许用于显式只读迁移/引导兼容；不要在启动流程中新增隐式迁移、自动建表或旧 Python 后端兼容入口。
@@ -372,6 +374,7 @@ pnpm build
 - 遵守 `.editorconfig`：UTF-8、LF、文件末尾换行、去除尾随空白；Markdown 允许保留行尾空格。
 - Go 代码必须 `gofmt`，保持小而清晰的函数边界，优先复用现有 store、api、config helper。
 - Go 文件和函数要面向后续维护者组织：同一业务域的类型、校验、服务逻辑和测试尽量就近；跨领域复用的 helper 才放到更通用的位置。
+- 后端模块拆分遵循 [模块化架构与解耦指南](docs/guides/modular-architecture.md)：handler 只做 HTTP 适配，service 表达业务状态转移，client 只处理外部协议，store 只负责单一状态文档与原子写入；不要为了抽象新增空泛单方法接口。
 - 包内私有函数优先于导出符号；只有跨包确实需要使用时才导出，并为非显而易见的导出类型/函数补充说明。
 - 测试应覆盖业务边界而不是只覆盖实现细节。涉及 store 状态转移、权限分支、确认短语、外部 client 降级、并发锁和回滚时，优先写表驱动或聚焦单元测试。
 - TypeScript/React 使用 2 空格缩进，遵守现有 ESLint/Next 配置。不要无必要引入新状态库、UI 库或工具函数。

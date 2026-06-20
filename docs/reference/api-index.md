@@ -203,6 +203,10 @@
 | GET | `/api/v1/admin/users` | Admin | 用户列表 |
 | POST | `/api/v1/admin/developer-mode/activate` | Admin | 仪表盘 `DEBUGMODE` 二次验证后启用当前浏览器会话的开发者模式 |
 | POST | `/api/v1/admin/developer/js-sandbox` | Admin | 在受控沙箱中预检/执行 Telegram JS 自定义指令片段 |
+| GET | `/api/v1/admin/developer/js-presets` | Admin | 列出开发者模式 JS 预设 |
+| POST | `/api/v1/admin/developer/js-presets` | Admin | 创建开发者模式 JS 预设；允许空白代码草稿 |
+| PUT | `/api/v1/admin/developer/js-presets/{preset_id}` | Admin | 更新开发者模式 JS 预设 |
+| DELETE | `/api/v1/admin/developer/js-presets/{preset_id}` | Admin | 删除开发者模式 JS 预设 |
 | PUT | `/api/v1/admin/me/update` | Admin | 更新管理员自身信息 |
 | GET | `/api/v1/admin/users/{uid}` | Admin | 用户详情 |
 | PUT | `/api/v1/admin/users/{uid}` | Admin | 更新用户 |

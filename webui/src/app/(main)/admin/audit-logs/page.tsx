@@ -2,16 +2,18 @@
 
 import { useCallback, useState } from "react";
 import {
-  Trash2,
-  Loader2,
+  Bot,
+  CalendarDays,
   ChevronLeft,
   ChevronRight,
-  Search,
-  ScrollText,
-  User,
-  Shield,
-  Bot,
   Filter,
+  Loader2,
+  RotateCcw,
+  ScrollText,
+  Search,
+  Shield,
+  Trash2,
+  User,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -67,14 +69,44 @@ const ACTION_LABELS: Record<string, MessageKey> = {
   batch_delete_users: "adminAuditLog.actionBatchDeleteUsers",
 };
 
+const SORT_MAP: Record<string, { sort: string; order: string }> = {
+  created_desc: { sort: "created_at", order: "desc" },
+  created_asc: { sort: "created_at", order: "asc" },
+  action_asc: { sort: "action", order: "asc" },
+  action_desc: { sort: "action", order: "desc" },
+  user_asc: { sort: "username", order: "asc" },
+  user_desc: { sort: "username", order: "desc" },
+  category_asc: { sort: "category", order: "asc" },
+  uid_asc: { sort: "uid", order: "asc" },
+};
+
+function timeRangeBounds(value: string): { from?: number; to?: number } {
+  const now = Math.floor(Date.now() / 1000);
+  if (value === "today") {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    return { from: Math.floor(start.getTime() / 1000), to: now };
+  }
+  if (value === "24h") return { from: now - 24 * 60 * 60, to: now };
+  if (value === "7d") return { from: now - 7 * 24 * 60 * 60, to: now };
+  if (value === "30d") return { from: now - 30 * 24 * 60 * 60, to: now };
+  return {};
+}
+
 export default function AdminAuditLogsPage() {
   const { toast } = useToast();
   const { t } = useI18n();
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const [presetFilter, setPresetFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [actionFilter, setActionFilter] = useState("all");
+  const [timeRange, setTimeRange] = useState("all");
+  const [sortMode, setSortMode] = useState("created_desc");
+  const [perPage, setPerPage] = useState(50);
+  const [uidFilter, setUidFilter] = useState("");
+  const [targetUidFilter, setTargetUidFilter] = useState("");
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [clearOpen, setClearOpen] = useState(false);
@@ -85,14 +117,23 @@ export default function AdminAuditLogsPage() {
   const [pruneDays, setPruneDays] = useState("90");
   const [prunePreserveAdmin, setPrunePreserveAdmin] = useState(true);
   const [isPruning, setIsPruning] = useState(false);
-  const perPage = 50;
+
+  const sortQuery = SORT_MAP[sortMode] || SORT_MAP.created_desc;
 
   const loadLogs = useCallback(
     async (signal?: AbortSignal) => {
+      const bounds = timeRangeBounds(timeRange);
       const res = await api.getAuditLogs(page, {
+        preset: presetFilter !== "all" ? presetFilter : undefined,
         category: categoryFilter !== "all" ? categoryFilter : undefined,
         action: actionFilter !== "all" ? actionFilter : undefined,
+        uid: uidFilter.trim() || undefined,
+        target_uid: targetUidFilter.trim() || undefined,
         search: search || undefined,
+        from: bounds.from,
+        to: bounds.to,
+        sort: sortQuery.sort,
+        order: sortQuery.order,
         per_page: perPage,
         signal,
       });
@@ -102,13 +143,64 @@ export default function AdminAuditLogsPage() {
       }
       return true;
     },
-    [page, categoryFilter, actionFilter, search]
+    [
+      page,
+      presetFilter,
+      categoryFilter,
+      actionFilter,
+      uidFilter,
+      targetUidFilter,
+      search,
+      timeRange,
+      sortQuery.sort,
+      sortQuery.order,
+      perPage,
+    ]
   );
 
   const { isLoading, error, execute: reload } = useAsyncResource(
     loadLogs,
     { immediate: true }
   );
+
+  const handlePresetChange = (value: string) => {
+    setPresetFilter(value);
+    setPage(1);
+    if (value === "admin" || value === "user" || value === "system") {
+      setCategoryFilter(value);
+      setActionFilter("all");
+      return;
+    }
+    if (value === "today") {
+      setCategoryFilter("all");
+      setActionFilter("all");
+      setTimeRange("today");
+      return;
+    }
+    if (value === "week") {
+      setCategoryFilter("all");
+      setActionFilter("all");
+      setTimeRange("7d");
+      return;
+    }
+    setCategoryFilter("all");
+    setActionFilter("all");
+    if (value === "all") setTimeRange("all");
+  };
+
+  const resetFilters = () => {
+    setPresetFilter("all");
+    setCategoryFilter("all");
+    setActionFilter("all");
+    setTimeRange("all");
+    setSortMode("created_desc");
+    setPerPage(50);
+    setUidFilter("");
+    setTargetUidFilter("");
+    setSearch("");
+    setSearchInput("");
+    setPage(1);
+  };
 
   const handleDelete = async (id: number) => {
     try {
@@ -151,7 +243,7 @@ export default function AdminAuditLogsPage() {
         preserveAdmin: prunePreserveAdmin,
       });
       if (res.success) {
-        toast({ title: t("adminAuditLog.pruneDone"), description: res.data?.logs?.join("；"), variant: "success" });
+        toast({ title: t("adminAuditLog.pruneDone"), description: res.data?.logs?.join("; "), variant: "success" });
         setPruneOpen(false);
         reload();
       } else {
@@ -165,7 +257,7 @@ export default function AdminAuditLogsPage() {
   };
 
   const handleSearch = () => {
-    setSearch(searchInput);
+    setSearch(searchInput.trim());
     setPage(1);
   };
 
@@ -175,29 +267,34 @@ export default function AdminAuditLogsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <ScrollText className="h-6 w-6 text-primary" />
-          <h1 className="text-2xl font-bold">{t("adminAuditLog.title")}</h1>
+          <div>
+            <h1 className="text-2xl font-bold">{t("adminAuditLog.title")}</h1>
+            <p className="text-sm text-muted-foreground">{t("adminAuditLog.totalCount", { count: total })}</p>
+          </div>
+        </div>
         {total > 0 && (
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => { setPruneMode("days"); setPruneDays("90"); setPruneEntries("1000"); setPrunePreserveAdmin(true); setPruneOpen(true); }}>
-              <Filter className="h-4 w-4 mr-1" />{t("adminAuditLog.prune")}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setPruneMode("days");
+                setPruneDays("90");
+                setPruneEntries("1000");
+                setPrunePreserveAdmin(true);
+                setPruneOpen(true);
+              }}
+            >
+              <Filter className="mr-1 h-4 w-4" />
+              {t("adminAuditLog.prune")}
             </Button>
             <Button variant="destructive" size="sm" onClick={() => setClearOpen(true)}>
               {t("adminAuditLog.clearAll")}
             </Button>
           </div>
-        )}
-        </div>
-        {total > 0 && (
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => setClearOpen(true)}
-          >
-            {t("adminAuditLog.clearAll")}
-          </Button>
         )}
       </div>
 
@@ -205,10 +302,26 @@ export default function AdminAuditLogsPage() {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">{t("adminAuditLog.filter")}</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
-            <Select value={categoryFilter} onValueChange={(v) => { setCategoryFilter(v); setPage(1); }}>
-              <SelectTrigger className="w-full sm:w-[160px]">
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <Select value={presetFilter} onValueChange={handlePresetChange}>
+              <SelectTrigger>
+                <SelectValue placeholder={t("adminAuditLog.preset")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("adminAuditLog.presetAll")}</SelectItem>
+                <SelectItem value="admin">{t("adminAuditLog.presetAdmin")}</SelectItem>
+                <SelectItem value="user">{t("adminAuditLog.presetUser")}</SelectItem>
+                <SelectItem value="system">{t("adminAuditLog.presetSystem")}</SelectItem>
+                <SelectItem value="destructive">{t("adminAuditLog.presetDestructive")}</SelectItem>
+                <SelectItem value="security">{t("adminAuditLog.presetSecurity")}</SelectItem>
+                <SelectItem value="today">{t("adminAuditLog.presetToday")}</SelectItem>
+                <SelectItem value="week">{t("adminAuditLog.presetWeek")}</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={categoryFilter} onValueChange={(value) => { setCategoryFilter(value); setPage(1); }}>
+              <SelectTrigger>
                 <SelectValue placeholder={t("adminAuditLog.filterCategory")} />
               </SelectTrigger>
               <SelectContent>
@@ -218,8 +331,9 @@ export default function AdminAuditLogsPage() {
                 <SelectItem value="system">{t("adminAuditLog.categorySystem")}</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={actionFilter} onValueChange={(v) => { setActionFilter(v); setPage(1); }}>
-              <SelectTrigger className="w-full sm:w-[200px]">
+
+            <Select value={actionFilter} onValueChange={(value) => { setActionFilter(value); setPage(1); }}>
+              <SelectTrigger>
                 <SelectValue placeholder={t("adminAuditLog.filterAction")} />
               </SelectTrigger>
               <SelectContent>
@@ -243,17 +357,86 @@ export default function AdminAuditLogsPage() {
                 <SelectItem value="batch_delete_users">{t("adminAuditLog.actionBatchDeleteUsers")}</SelectItem>
               </SelectContent>
             </Select>
-            <div className="flex gap-2 flex-1 min-w-[200px]">
+
+            <Select value={timeRange} onValueChange={(value) => { setTimeRange(value); setPage(1); }}>
+              <SelectTrigger>
+                <CalendarDays className="mr-2 h-4 w-4 text-muted-foreground" />
+                <SelectValue placeholder={t("adminAuditLog.timeRange")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("adminAuditLog.timeAll")}</SelectItem>
+                <SelectItem value="today">{t("adminAuditLog.timeToday")}</SelectItem>
+                <SelectItem value="24h">{t("adminAuditLog.time24h")}</SelectItem>
+                <SelectItem value="7d">{t("adminAuditLog.time7d")}</SelectItem>
+                <SelectItem value="30d">{t("adminAuditLog.time30d")}</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={sortMode} onValueChange={(value) => { setSortMode(value); setPage(1); }}>
+              <SelectTrigger>
+                <SelectValue placeholder={t("adminAuditLog.sortBy")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="created_desc">{t("adminAuditLog.sortNewest")}</SelectItem>
+                <SelectItem value="created_asc">{t("adminAuditLog.sortOldest")}</SelectItem>
+                <SelectItem value="action_asc">{t("adminAuditLog.sortActionAsc")}</SelectItem>
+                <SelectItem value="action_desc">{t("adminAuditLog.sortActionDesc")}</SelectItem>
+                <SelectItem value="user_asc">{t("adminAuditLog.sortUserAsc")}</SelectItem>
+                <SelectItem value="user_desc">{t("adminAuditLog.sortUserDesc")}</SelectItem>
+                <SelectItem value="category_asc">{t("adminAuditLog.sortCategoryAsc")}</SelectItem>
+                <SelectItem value="uid_asc">{t("adminAuditLog.sortUidAsc")}</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={String(perPage)} onValueChange={(value) => { setPerPage(Number(value)); setPage(1); }}>
+              <SelectTrigger>
+                <SelectValue placeholder={t("adminAuditLog.perPage")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="25">25 / {t("adminAuditLog.perPage")}</SelectItem>
+                <SelectItem value="50">50 / {t("adminAuditLog.perPage")}</SelectItem>
+                <SelectItem value="100">100 / {t("adminAuditLog.perPage")}</SelectItem>
+                <SelectItem value="200">200 / {t("adminAuditLog.perPage")}</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Input
+              inputMode="numeric"
+              placeholder={t("adminAuditLog.uidPlaceholder")}
+              value={uidFilter}
+              onChange={(event) => {
+                setUidFilter(event.target.value.replace(/[^\d]/g, ""));
+                setPage(1);
+              }}
+            />
+
+            <Input
+              inputMode="numeric"
+              placeholder={t("adminAuditLog.targetUidPlaceholder")}
+              value={targetUidFilter}
+              onChange={(event) => {
+                setTargetUidFilter(event.target.value.replace(/[^\d]/g, ""));
+                setPage(1);
+              }}
+            />
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="flex min-w-0 flex-1 gap-2">
               <Input
                 placeholder={t("adminAuditLog.searchPlaceholder")}
                 value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                onChange={(event) => setSearchInput(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && handleSearch()}
               />
-              <Button variant="outline" size="icon" onClick={handleSearch}>
+              <Button variant="outline" size="icon" onClick={handleSearch} aria-label={t("common.search")}>
                 <Search className="h-4 w-4" />
               </Button>
             </div>
+            <Button variant="outline" onClick={resetFilters}>
+              <RotateCcw className="mr-2 h-4 w-4" />
+              {t("adminAuditLog.resetFilters")}
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -266,7 +449,7 @@ export default function AdminAuditLogsPage() {
             </div>
           ) : logs.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-              <ScrollText className="h-10 w-10 mb-3 opacity-40" />
+              <ScrollText className="mb-3 h-10 w-10 opacity-40" />
               <p>{t("adminAuditLog.empty")}</p>
             </div>
           ) : (
@@ -274,10 +457,10 @@ export default function AdminAuditLogsPage() {
               {logs.map((log) => (
                 <div
                   key={log.id}
-                  className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 p-4"
+                  className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:gap-4"
                 >
-                  <div className="flex-1 min-w-0 space-y-1">
-                    <div className="flex items-center gap-2 flex-wrap">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
                       {CATEGORY_ICONS[log.category] && (
                         <span className="text-muted-foreground">
                           {CATEGORY_ICONS[log.category]}
@@ -304,12 +487,12 @@ export default function AdminAuditLogsPage() {
                       </span>
                       {log.target_uid != null && log.target_uid > 0 && (
                         <span className="ml-2 text-muted-foreground">
-                          → UID: {log.target_uid}
+                          -&gt; UID: {log.target_uid}
                         </span>
                       )}
                     </div>
                     {log.detail && Object.keys(log.detail).length > 0 && (
-                      <div className="text-xs text-muted-foreground">
+                      <div className="break-all text-xs text-muted-foreground">
                         {JSON.stringify(log.detail)}
                       </div>
                     )}
@@ -320,7 +503,7 @@ export default function AdminAuditLogsPage() {
                     )}
                   </div>
                   <div className="flex items-center gap-3 sm:flex-shrink-0">
-                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                    <span className="whitespace-nowrap text-xs text-muted-foreground">
                       {formatDate(log.created_at)}
                     </span>
                     <Button
@@ -380,14 +563,13 @@ export default function AdminAuditLogsPage() {
               onClick={handleClearAll}
               disabled={isClearing}
             >
-              {isClearing && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {isClearing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {t("adminAuditLog.clearConfirm")}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* 条件清理 */}
       <Dialog open={pruneOpen} onOpenChange={setPruneOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -426,7 +608,7 @@ export default function AdminAuditLogsPage() {
               {t("common.cancel")}
             </Button>
             <Button variant="destructive" onClick={handlePrune} disabled={isPruning}>
-              {isPruning && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {isPruning && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {t("adminAuditLog.pruneConfirm")}
             </Button>
           </DialogFooter>

@@ -237,7 +237,8 @@ Go 后端按统一的业务状态与前端响应形状实现，主要模块：
 
 - **JSON 后端**写盘走原子写 + fsync（tmp → fsync → rename → fsync 父目录），写前把上一份复制为 `.bak`；启动 / 刷新解析失败时回退到 `.bak`。文件权限收敛到 `0o600`。
 - **JSON 后端为单进程独占**：启动时对 `state.json` 加进程级文件锁（`*.lock`），第二个进程会拿到 busy 错误并启动失败。多进程 / 多实例部署应使用 PostgreSQL。
-- **PostgreSQL 后端**：目标库不存在时，会尝试用同一连接用户连接 `postgres` / `template1` 维护库执行 `CREATE DATABASE`（连接用户需要 `CREATEDB` 权限，已存在则不重复创建）；随后自动建表 `twilight_state`、`twilight_runtime_logs`、`twilight_sessions` 及相关索引（`CREATE TABLE IF NOT EXISTS`，幂等）。
+- **PostgreSQL 后端**：目标库不存在时，会尝试用同一连接用户连接 `postgres` / `template1` 维护库执行 `CREATE DATABASE`（连接用户需要 `CREATEDB` 权限，已存在则不重复创建）；随后自动建表 `twilight_state`、`twilight_runtime_logs`、`twilight_sessions` 及相关索引（`CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`，幂等）。
+- **运行日志表性能口径**：`twilight_runtime_logs` 只服务 Go 进程运行日志，按 `id` 游标读取增量，按 `id DESC` 读取最新快照，并用 cutoff id 删除旧行以保留最近 N 条；主业务状态仍保持 `twilight_state` 单行 jsonb，不因性能优化拆出业务表。
 - DSN 优先级：`Database.url` / `TWILIGHT_DATABASE_URL` / `TWILIGHT_POSTGRES_DSN` 最高，否则由 host/port/user/password/database/sslmode 拼出 DSN。
 
 ### Web 端数据库运维
@@ -259,7 +260,8 @@ Go 后端按统一的业务状态与前端响应形状实现，主要模块：
 
 - 实时日志只接入 Go 进程内 `zap` 全局 logger（通过自定义 core 路由），不开放任意日志文件、journald 或路径参数读取。
 - 日志等级与保留行数由 `Global.log_level`、`Global.runtime_log_limit` 控制；保留行数会被夹在 100–50000，默认 5000。
-- 日志后端跟随状态存储：JSON 后端日志保存在 `State.RuntimeLogs`；PostgreSQL 后端落在独立表 `twilight_runtime_logs`。在状态接入前的早期日志会先缓冲在内存 fallback 缓冲区，接入后回写。
+- 日志后端跟随状态存储：JSON 后端日志保存在 `State.RuntimeLogs`；PostgreSQL 后端落在独立表 `twilight_runtime_logs`。在状态接入前的早期日志会先缓冲在内存 fallback 缓冲区，接入后回写。`after=0` 返回最近 N 条快照；`after>0` 返回该游标之后的前 N 条，保持升序，避免增量读取跳过积压日志。
+- PostgreSQL 后端写入路径只做 INSERT，并按固定节奏异步裁剪；手动裁剪和异步裁剪都按 cutoff id 保留最近 N 条，避免 `NOT IN + ORDER BY LIMIT` 形式造成高写入期反复全表反扫。
 - 日志输出会脱敏：通过正则覆盖 `Authorization`、`Cookie`、`session id/token`、Emby/MediaBrowser token、`access/refresh/id token`、`client_secret`、`private_key`、`connection_string`、`database_url`、`token`、`secret`、`password`、`api_key`、`bot_token`、`dsn`、`Bearer …`、`key-…` 等敏感片段；敏感字段名（含 `key`、`*token`、`*secret` 等）直接替换为 `[REDACTED]`。
 - 状态接口只读取 Go runtime 摘要（版本、goroutine、内存、是否启用 Redis、活动数据库后端、用户数等）和 Linux `/proc` 摘要（loadavg / meminfo / uptime），不返回环境变量、配置明文、命令行参数或进程列表。
 - 实时日志流为 SSE（`text/event-stream`），按游标增量推送 `snapshot` / `logs` / `ping` 事件，单连接 25 秒空闲返回。

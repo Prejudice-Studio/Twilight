@@ -1519,12 +1519,13 @@ curl -X GET "http://localhost:5000/api/v1/system/config" \
 
 - 说明：读取后端进程内最近日志快照，`limit` 受 `[Global].runtime_log_limit` 限制（默认配置 5000）。
 - 认证：管理员（`AuthAdmin`）
-- 响应：`entries` 为日志数组，`next_cursor` 用于下一次增量读取。
+- 响应：`entries` 为日志数组，`next_cursor` 用于下一次增量读取，`limit` 为本次实际读取上限。`after=0` 返回最近 N 条并按 `id` 升序排列；`after>0` 返回游标之后的前 N 条，同样按 `id` 升序排列。
 
 `GET /system/admin/runtime/logs/stream?limit=100&after=0`
 
 - 说明：SSE 实时日志流，事件类型包括 `snapshot`、`logs`、`ping`。
 - 认证：管理员（`AuthAdmin`）；浏览器端使用同源 Cookie 或显式可信 CORS Origin。
+- 事件数据：`snapshot` / `logs` 均返回 `{ "entries": [...], "next_cursor": 123 }`；`ping` 返回 `{ "time": 1234567890, "next_cursor": 123 }`。客户端应保存 `next_cursor` 作为断线重连的 `after` 参数。
 - 安全口径：日志来自 Go 进程内日志处理链，敏感键、API Key、Bearer Token、Cookie、密码、DSN 会被尽力脱敏；接口不读取 journald、系统日志文件或用户指定路径。
 
 ```bash
@@ -1574,7 +1575,7 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 
 ### 10.11 数据库状态、备份、恢复、迁移
 
-> Twilight 把全部业务状态保存在 **单一状态文档** 中：JSON 文件 `db/twilight_go_state.json` 或 PostgreSQL `twilight_state` 表（`id=1` 的一行 jsonb）；另有独立表 `twilight_sessions`、`twilight_runtime_logs`。下列接口围绕该状态文档操作。
+> Twilight 把全部业务状态保存在 **单一状态文档** 中：JSON 文件 `db/twilight_go_state.json` 或 PostgreSQL `twilight_state` 表（`id=1` 的一行 jsonb）；另有独立表 `twilight_sessions`、`twilight_runtime_logs`。`twilight_runtime_logs` 仅用于高写入运行日志，并按 `id` 游标、索引和 cutoff id 裁剪优化；业务实体仍不得拆成独立表。下列接口围绕该状态文档操作。
 
 `GET /system/admin/database/status`
 
@@ -1713,6 +1714,33 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 ```json
 { "code": "reply('hello ' + (user.username || 'user'));" }
 ```
+
+`GET /admin/developer/js-presets`
+
+- 说明：列出开发者模式中保存的 JS 预设，供开发者编辑器和 Telegram Bot 指令管理页选择。
+- 认证：管理员（`AuthAdmin`）
+
+`POST /admin/developer/js-presets`
+
+- 说明：创建 JS 预设。`name` 必填；`code` 允许为空，用于创建空白草稿。非空 `code` 必须通过同一套 JS 沙箱静态校验。
+- 认证：管理员（`AuthAdmin`）
+- 审计：成功写入 `developer_js_preset_create`。
+
+```json
+{
+  "name": "hello",
+  "description": "Greeting command",
+  "code": "reply('Hello ' + (user.username || 'user'));"
+}
+```
+
+`PUT /admin/developer/js-presets/{preset_id}` / `DELETE /admin/developer/js-presets/{preset_id}`
+
+- 说明：更新或删除指定 JS 预设。更新时仍允许空白 `code`，非空代码必须通过校验。
+- 认证：管理员（`AuthAdmin`）
+- 审计：成功分别写入 `developer_js_preset_update` / `developer_js_preset_delete`。
+
+Telegram 管理中的「Bot 指令管理」页面不会创建第二套指令存储；纯文本和 JS 预设最终都保存回 `Telegram.bot_custom_commands`。选择 JS 预设时，前端把预设代码写成现有 `js:` 回复格式，因此 Bot 运行时仍只读取统一配置源。
 
 ## 11. 其它模块
 

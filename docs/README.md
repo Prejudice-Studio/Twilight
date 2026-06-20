@@ -15,6 +15,7 @@
 | ---- | ---- |
 | [安装部署](./guides/install.md) | 后端构建、PostgreSQL、HTTPS 反代、systemd 一键脚本、运行数据与密钥 |
 | [开发指南](./guides/development.md) | 目录结构、后端/前端命令、API 与安全规范、Git 分支与发布流程 |
+| [模块化架构与解耦指南](./guides/modular-architecture.md) | 后端/前端分层边界、依赖方向、大文件拆分顺序与 review 清单 |
 | [前端多语言开发](./guides/i18n.md) | WebUI locale 命名、语言文件、翻译接入与新增语言流程 |
 | [安全加固](./guides/security.md) | 生产安全基线：CORS、SSRF、限流、密钥、上传、自动更新检查清单 |
 
@@ -47,4 +48,4 @@
 
 - 若文档与代码行为冲突，以 `internal/api/`、`internal/store/`、`internal/config/` 与实际接口返回为准。
 - 全部文档已对照 Go 后端源码核对；旧 Python 时代的描述（独立 SQLite 库、`X-Twilight-Client` 写请求校验等）已订正。
-- 关键架构约定（状态存储单文档模型、配置整进程重启、CORS 与鉴权边界等）见 [开发指南](./guides/development.md) 与 [安全加固](./guides/security.md)。
+- 关键架构约定（状态存储单文档模型、PostgreSQL 仅保留 `twilight_state`/`twilight_sessions`/`twilight_runtime_logs`、配置热重载、CORS 与鉴权边界等）见 [开发指南](./guides/development.md) 与 [安全加固](./guides/security.md)。

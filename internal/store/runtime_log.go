@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"sort"
 	"sync/atomic"
 	"time"
 )
@@ -19,6 +20,16 @@ const (
 	pgRuntimeLogReadTimeout  = 5 * time.Second
 	pgRuntimeLogPruneTimeout = 10 * time.Second
 )
+
+const pgRuntimeLogPruneSQL = `
+WITH keep AS (
+	SELECT MIN(id) AS min_id
+	FROM (
+		SELECT id FROM twilight_runtime_logs ORDER BY id DESC LIMIT $1
+	) latest
+)
+DELETE FROM twilight_runtime_logs
+WHERE id < COALESCE((SELECT min_id FROM keep), 0)`
 
 // pgRuntimeLogPruneCounter 用 atomic 共享自增计数；触发阈值时跳一次
 // goroutine 异步 prune。pruneInFlight 互斥锁防止多 goroutine 同时跑同一个
@@ -100,11 +111,7 @@ func (s *Store) maybeAsyncPrunePGRuntimeLogs(limit int) {
 		}()
 		ctx, cancel := context.WithTimeout(context.Background(), pgRuntimeLogPruneTimeout)
 		defer cancel()
-		_, _ = s.db.ExecContext(ctx, `
-DELETE FROM twilight_runtime_logs
-WHERE id NOT IN (
-	SELECT id FROM twilight_runtime_logs ORDER BY id DESC LIMIT $1
-)`, clampRuntimeLogLimit(limit))
+		_, _ = s.db.ExecContext(ctx, pgRuntimeLogPruneSQL, clampRuntimeLogLimit(limit))
 	}()
 }
 
@@ -121,25 +128,46 @@ func (s *Store) RuntimeLogs(limit int, after int64) ([]RuntimeLogEntry, int64) {
 	if limit <= 0 || limit > maxLimit {
 		limit = maxLimit
 	}
-	filtered := make([]RuntimeLogEntry, 0, maxLimit)
-	for _, entry := range s.state.RuntimeLogs {
-		if after <= 0 || entry.ID > after {
-			filtered = append(filtered, entry)
-		}
-	}
-	if len(filtered) > limit {
-		filtered = filtered[len(filtered)-limit:]
-	}
 	next := after
 	if s.state.NextRuntimeLogID > 1 {
 		next = s.state.NextRuntimeLogID - 1
 	}
-	if len(filtered) > 0 {
-		next = filtered[len(filtered)-1].ID
+	start, end := runtimeLogWindow(s.state.RuntimeLogs, limit, after)
+	if start == end {
+		return nil, next
 	}
+	filtered := s.state.RuntimeLogs[start:end]
+	next = filtered[len(filtered)-1].ID
 	out := make([]RuntimeLogEntry, len(filtered))
 	copy(out, filtered)
 	return out, next
+}
+
+func runtimeLogWindow(entries []RuntimeLogEntry, limit int, after int64) (int, int) {
+	if len(entries) == 0 || limit <= 0 {
+		return 0, 0
+	}
+	if limit > len(entries) {
+		limit = len(entries)
+	}
+	if after <= 0 {
+		start := len(entries) - limit
+		if start < 0 {
+			start = 0
+		}
+		return start, len(entries)
+	}
+	start := sort.Search(len(entries), func(i int) bool {
+		return entries[i].ID > after
+	})
+	if start >= len(entries) {
+		return len(entries), len(entries)
+	}
+	end := start + limit
+	if end > len(entries) {
+		end = len(entries)
+	}
+	return start, end
 }
 
 func (s *Store) RuntimeLogStats() (int64, int) {
@@ -173,11 +201,7 @@ func (s *Store) PruneRuntimeLogs(limit int) error {
 	if s.db != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), pgRuntimeLogPruneTimeout)
 		defer cancel()
-		_, err := s.db.ExecContext(ctx, `
-DELETE FROM twilight_runtime_logs
-WHERE id NOT IN (
-	SELECT id FROM twilight_runtime_logs ORDER BY id DESC LIMIT $1
-)`, limit)
+		_, err := s.db.ExecContext(ctx, pgRuntimeLogPruneSQL, limit)
 		return err
 	}
 	s.mu.Lock()
@@ -239,10 +263,20 @@ LIMIT $1`, limit)
 	next := after
 	if len(out) > 0 {
 		next = out[len(out)-1].ID
-	} else if maxID, _ := s.RuntimeLogStats(); maxID > next {
+	} else if maxID := s.postgresRuntimeLogMaxID(); maxID > next {
 		next = maxID
 	}
 	return out, next
+}
+
+func (s *Store) postgresRuntimeLogMaxID() int64 {
+	ctx, cancel := context.WithTimeout(context.Background(), pgRuntimeLogReadTimeout)
+	defer cancel()
+	var next sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `SELECT max(id) FROM twilight_runtime_logs`).Scan(&next); err != nil {
+		return 0
+	}
+	return next.Int64
 }
 
 func clampRuntimeLogReadLimit(limit int) int {
