@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -19,11 +20,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
-import type { DeveloperJSDocEntry, DeveloperJSDocs, DeveloperJSPreset } from "@/lib/api-types";
+import type { DeveloperJSPreset } from "@/lib/api-types";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 
 type DeveloperTemplate = {
@@ -35,17 +35,6 @@ type DeveloperTemplate = {
   code: string;
   builtin?: boolean;
   updatedAt?: number;
-};
-
-type DocRow = {
-  name: string;
-  descriptionKey?: MessageKey;
-  description?: string;
-  example?: string;
-  type?: string;
-  mutates?: boolean;
-  scope?: string;
-  fields?: string[];
 };
 
 const helloTemplate = `// Greeting command
@@ -230,56 +219,6 @@ reply(text.truncate(text.joinLines(lines), 1200));`,
   },
 ] as const;
 
-const bindingRows: DocRow[] = [
-  { name: "ctx.private_chat", descriptionKey: "adminDeveloper.bindingCtxPrivate", example: "true" },
-  { name: "ctx.command_time", descriptionKey: "adminDeveloper.bindingCtxTime", example: "Unix seconds" },
-  { name: "args", descriptionKey: "adminDeveloper.bindingArgs", example: '["a", "b"]' },
-  { name: "user.uid", descriptionKey: "adminDeveloper.bindingUserUid", example: "10001" },
-  { name: "user.username", descriptionKey: "adminDeveloper.bindingUserName", example: "alice" },
-  { name: "user.role", descriptionKey: "adminDeveloper.bindingUserRole", example: "0 admin, 1 user, 2 whitelist" },
-  { name: "user.active", descriptionKey: "adminDeveloper.bindingUserActive", example: "true" },
-  { name: "user.has_emby", descriptionKey: "adminDeveloper.bindingUserHasEmby", example: "true" },
-];
-
-const constantRows: DocRow[] = [
-  { name: "constants.roles.admin", descriptionKey: "adminDeveloper.constantRoleAdmin", example: "0" },
-  { name: "constants.roles.user", descriptionKey: "adminDeveloper.constantRoleUser", example: "1" },
-  { name: "constants.roles.whitelist", descriptionKey: "adminDeveloper.constantRoleWhitelist", example: "2" },
-  { name: "constants.limits.max_replies", descriptionKey: "adminDeveloper.constantMaxReplies", example: "4" },
-  { name: "constants.limits.max_logs", descriptionKey: "adminDeveloper.constantMaxLogs", example: "8" },
-];
-
-const functionRows: DocRow[] = [
-  { name: "reply(text)", descriptionKey: "adminDeveloper.functionReply", example: 'reply("hello")' },
-  { name: "log(text)", descriptionKey: "adminDeveloper.functionLog", example: 'log("step reached")' },
-  { name: "auth(role)", descriptionKey: "adminDeveloper.functionAuth", example: 'auth("admin")' },
-  { name: "config(key)", descriptionKey: "adminDeveloper.functionConfig", example: 'config("invite.enabled")' },
-  { name: "env(key)", descriptionKey: "adminDeveloper.functionEnv", example: 'env("TWILIGHT_HOST")' },
-];
-
-const configRows: DocRow[] = [
-  { name: "app.name", descriptionKey: "adminDeveloper.configAppName" },
-  { name: "app.version", descriptionKey: "adminDeveloper.configAppVersion" },
-  { name: "telegram.enabled", descriptionKey: "adminDeveloper.configTelegramEnabled" },
-  { name: "telegram.require_membership", descriptionKey: "adminDeveloper.configTelegramMembership" },
-  { name: "telegram.ban_on_leave", descriptionKey: "adminDeveloper.configTelegramBan" },
-  { name: "invite.enabled", descriptionKey: "adminDeveloper.configInviteEnabled" },
-  { name: "invite.max_depth", descriptionKey: "adminDeveloper.configInviteDepth" },
-  { name: "email.enabled", descriptionKey: "adminDeveloper.configEmailEnabled" },
-  { name: "signin.enabled", descriptionKey: "adminDeveloper.configSigninEnabled" },
-  { name: "ticket.enabled", descriptionKey: "adminDeveloper.configTicketEnabled" },
-];
-
-const envRows: DocRow[] = [
-  { name: "TWILIGHT_APP_NAME", descriptionKey: "adminDeveloper.envAppName" },
-  { name: "TWILIGHT_SERVER_NAME", descriptionKey: "adminDeveloper.envServerName" },
-  { name: "TWILIGHT_HOST", descriptionKey: "adminDeveloper.envHost" },
-  { name: "TWILIGHT_PORT", descriptionKey: "adminDeveloper.envPort" },
-  { name: "TWILIGHT_DATABASE_DRIVER", descriptionKey: "adminDeveloper.envDatabaseDriver" },
-  { name: "TWILIGHT_EMAIL_ENABLED", descriptionKey: "adminDeveloper.envEmailEnabled" },
-  { name: "TWILIGHT_INVITE_ENABLED", descriptionKey: "adminDeveloper.envInviteEnabled" },
-];
-
 function templateText(value: MessageKey | string, t: (key: MessageKey) => string): string {
   return value.startsWith("adminDeveloper.") ? t(value as MessageKey) : value;
 }
@@ -301,39 +240,6 @@ function presetToTemplate(preset: DeveloperJSPreset): DeveloperTemplate {
   };
 }
 
-function docRowsFromKeys(keys: string[], category: string): DocRow[] {
-  return keys.map((key) => ({ name: key, category, description: "" }) as DocRow);
-}
-
-function DocRows({ rows }: { rows: Array<DocRow | DeveloperJSDocEntry> }) {
-  const { t } = useI18n();
-  return (
-    <div className="space-y-2">
-      {rows.map((row) => {
-        const descriptionKey = "descriptionKey" in row ? row.descriptionKey : undefined;
-        const description = descriptionKey ? t(descriptionKey) : row.description;
-        return (
-          <div key={row.name} className="rounded-md border bg-muted/20 p-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <code className="font-mono text-xs">{row.name}</code>
-              {row.type ? <Badge variant="secondary" className="text-[10px]">{row.type}</Badge> : null}
-              {row.mutates ? <Badge variant="warning" className="text-[10px]">{t("adminDeveloper.mutatesBadge")}</Badge> : null}
-              {row.scope ? <Badge variant="outline" className="text-[10px]">{row.scope}</Badge> : null}
-              {row.example ? <Badge variant="outline" className="text-[10px]">{row.example}</Badge> : null}
-            </div>
-            {description ? <p className="mt-1 text-xs text-muted-foreground">{description}</p> : null}
-            {row.fields && row.fields.length > 0 ? (
-              <p className="mt-1 break-words text-[11px] text-muted-foreground">
-                {t("adminDeveloper.fieldsLabel")}: {row.fields.join(", ")}
-              </p>
-            ) : null}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 export default function AdminDeveloperPage() {
   const { toast } = useToast();
   const { t } = useI18n();
@@ -345,8 +251,6 @@ export default function AdminDeveloperPage() {
   const [templateName, setTemplateName] = useState("");
   const [templateDescription, setTemplateDescription] = useState("");
   const [serverPresets, setServerPresets] = useState<DeveloperJSPreset[]>([]);
-  const [docs, setDocs] = useState<DeveloperJSDocs | null>(null);
-  const [docsLoading, setDocsLoading] = useState(false);
   const [activeTemplateId, setActiveTemplateId] = useState("hello");
   const [result, setResult] = useState<Awaited<ReturnType<typeof api.previewDeveloperJSCommand>>["data"] | null>(null);
 
@@ -361,31 +265,14 @@ export default function AdminDeveloperPage() {
     }
   }, [t, toast]);
 
-  const loadDocs = useCallback(async () => {
-    setDocsLoading(true);
-    try {
-      const res = await api.getDeveloperJSDocs();
-      if (res.success && res.data) {
-        setDocs(res.data);
-      }
-    } catch (err) {
-      toast({ title: t("adminDeveloper.docsLoadFailed"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
-    } finally {
-      setDocsLoading(false);
-    }
-  }, [t, toast]);
-
   useEffect(() => {
     void loadPresets();
-    void loadDocs();
-  }, [loadDocs, loadPresets]);
+  }, [loadPresets]);
 
   const customTemplates = useMemo(() => serverPresets.map(presetToTemplate), [serverPresets]);
   const allTemplates = useMemo(() => [...builtInTemplates, ...customTemplates], [customTemplates]);
   const activeTemplate = allTemplates.find((item) => item.id === activeTemplateId);
   const commandPreview = useMemo(() => commandReply(command, code), [code, command]);
-  const configDocRows = useMemo(() => docRowsFromKeys(docs?.config_keys || configRows.map((row) => row.name), "config"), [docs]);
-  const envDocRows = useMemo(() => docRowsFromKeys(docs?.env_keys || envRows.map((row) => row.name), "env"), [docs]);
 
   const applyTemplate = useCallback((template: DeveloperTemplate) => {
     setActiveTemplateId(template.id);
@@ -635,81 +522,18 @@ export default function AdminDeveloperPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <BookOpen className="h-5 w-5" />
-                {t("adminDeveloper.docsTitle")}
+                {t("adminDeveloper.docsPageTitle")}
               </CardTitle>
-              <CardDescription>{t("adminDeveloper.docsDescription")}</CardDescription>
+              <CardDescription>{t("adminDeveloper.docsPageDescription")}</CardDescription>
             </CardHeader>
-            <CardContent>
-              <Tabs defaultValue="engine" className="space-y-3">
-                <TabsList className="i18n-stable-tabs grid h-auto w-full grid-cols-4">
-                  <TabsTrigger value="engine">{t("adminDeveloper.engineTitle")}</TabsTrigger>
-                  <TabsTrigger value="bindings">{t("adminDeveloper.bindingsTitle")}</TabsTrigger>
-                  <TabsTrigger value="functions">{t("adminDeveloper.functionsTitle")}</TabsTrigger>
-                  <TabsTrigger value="config">{t("adminDeveloper.configEnvTitle")}</TabsTrigger>
-                </TabsList>
-                <TabsContent value="engine" className="space-y-3">
-                  {docsLoading && !docs ? (
-                    <p className="text-xs text-muted-foreground">{t("adminDeveloper.loadingDocs")}</p>
-                  ) : docs ? (
-                    <div className="space-y-3">
-                      <div className="rounded-md border bg-muted/20 p-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="secondary">{docs.engine.name}</Badge>
-                          <Badge variant="outline">{docs.engine.timeout_ms}ms</Badge>
-                        </div>
-                        <p className="mt-2 text-xs text-muted-foreground">{docs.engine.description}</p>
-                        <code className="mt-2 block break-words text-[11px] text-muted-foreground">{docs.engine.module}@{docs.engine.version}</code>
-                        <p className="mt-2 text-xs text-muted-foreground">{docs.engine.language}</p>
-                      </div>
-                      <DocRows rows={docs.native_objects} />
-                      <div className="rounded-md border bg-muted/20 p-3">
-                        <p className="mb-2 text-xs font-medium">{t("adminDeveloper.blockedTokensTitle")}</p>
-                        <div className="flex flex-wrap gap-1">
-                          {docs.blocked_tokens.map((token) => <Badge key={token} variant="outline" className="text-[10px]">{token}</Badge>)}
-                        </div>
-                      </div>
-                      <div className="rounded-md border bg-muted/20 p-3">
-                        <p className="mb-2 text-xs font-medium">{t("adminDeveloper.examplesApiTitle")}</p>
-                        <div className="space-y-2">
-                          {docs.examples.map((example) => (
-                            <button
-                              key={example.id}
-                              type="button"
-                              className="w-full rounded-md border bg-background p-2 text-left hover:bg-muted/40"
-                              onClick={() => insertSnippet(`\n${example.code}\n`)}
-                            >
-                              <p className="text-xs font-medium">{example.title}</p>
-                              <p className="mt-1 text-[11px] text-muted-foreground">{example.description}</p>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">{t("adminDeveloper.docsDescription")}</p>
-                  )}
-                </TabsContent>
-                <TabsContent value="bindings" className="space-y-3">
-                  <DocRows rows={docs?.bindings || bindingRows} />
-                  {!docs && <DocRows rows={constantRows} />}
-                </TabsContent>
-                <TabsContent value="functions" className="space-y-3">
-                  <DocRows rows={docs?.functions || functionRows} />
-                  {docs?.namespaces ? (
-                    <>
-                      <p className="text-xs font-medium text-muted-foreground">{t("adminDeveloper.namespacesTitle")}</p>
-                      <DocRows rows={docs.namespaces} />
-                    </>
-                  ) : null}
-                </TabsContent>
-                <TabsContent value="config" className="space-y-3">
-                  <p className="text-xs text-muted-foreground">{t("adminDeveloper.configEnvNotice")}</p>
-                  <p className="text-xs font-medium text-muted-foreground">{t("adminDeveloper.configKeysTitle")}</p>
-                  <DocRows rows={docs ? configDocRows : configRows} />
-                  <p className="text-xs font-medium text-muted-foreground">{t("adminDeveloper.envKeysTitle")}</p>
-                  <DocRows rows={docs ? envDocRows : envRows} />
-                </TabsContent>
-              </Tabs>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">{t("adminDeveloper.docsStandaloneNotice")}</p>
+              <Button asChild className="w-full">
+                <Link href="/admin/developer/js-docs">
+                  <BookOpen className="mr-2 h-4 w-4" />
+                  {t("adminDeveloper.openDocsPage")}
+                </Link>
+              </Button>
             </CardContent>
           </Card>
 
