@@ -103,6 +103,7 @@ type State struct {
 	Tickets                 map[int64]Ticket               `json:"tickets"`
 	TicketTypes             []string                       `json:"ticket_types,omitempty"`
 	DeveloperJSPresets      map[int64]DeveloperJSPreset    `json:"developer_js_presets,omitempty"`
+	DeveloperModeEnabled    bool                           `json:"developer_mode_enabled,omitempty"`
 	// TelegramBotOffset 持久化最近一次成功 ack 的 update_id+1。
 	// 重启 / token 切换时直接从这个值恢复，避免对 24h backlog 重新分发。
 	// 0 表示未设置 / 历史 state，按"从 0 开始"处理（getUpdates 会拿到队列里
@@ -3095,6 +3096,21 @@ func (s *Store) SyncTicketTypesFromConfig(cfgTypes []string) {
 	})
 }
 
+func (s *Store) DeveloperModeEnabled() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.state.DeveloperModeEnabled
+}
+
+func (s *Store) SetDeveloperModeEnabled(enabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mutateAndSaveLocked(func() error {
+		s.state.DeveloperModeEnabled = enabled
+		return nil
+	})
+}
+
 func (s *Store) UpsertInviteCode(code InviteCode) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -3148,6 +3164,12 @@ func (s *Store) ListInviteCodes(uid int64) []InviteCode {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt > out[j].CreatedAt })
 	return out
+}
+
+func (s *Store) CountInviteCodes() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.state.InviteCodes)
 }
 
 func (s *Store) DeleteInviteCode(uid int64, code string) error {

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/prejudice-studio/twilight/internal/config"
 	"github.com/prejudice-studio/twilight/internal/store"
 )
 
@@ -215,6 +216,9 @@ func TestDeveloperJSSetLoginNotifyDryRunAndRuntimeMutation(t *testing.T) {
 
 func TestDeveloperJSInlineCallbackOwnerAndEdit(t *testing.T) {
 	app := newTestApp(t)
+	if err := app.store().SetDeveloperModeEnabled(true); err != nil {
+		t.Fatal(err)
+	}
 	app.cfg().AuditLogEnabled = true
 	app.cfg().TelegramMode = true
 	app.cfg().TelegramBotToken = "123:ABC"
@@ -288,6 +292,9 @@ func TestDeveloperJSInlineCallbackOwnerAndEdit(t *testing.T) {
 
 func TestDeveloperJSWaitTextConsumesSameUserPlainText(t *testing.T) {
 	app := newTestApp(t)
+	if err := app.store().SetDeveloperModeEnabled(true); err != nil {
+		t.Fatal(err)
+	}
 	app.cfg().AuditLogEnabled = true
 	app.cfg().TelegramMode = true
 	app.cfg().TelegramBotToken = "123:ABC"
@@ -335,6 +342,99 @@ func TestDeveloperJSWaitTextConsumesSameUserPlainText(t *testing.T) {
 	}
 	if !hasAuditAction(app, "telegram_js_interaction_wait_text") {
 		t.Fatalf("missing audit log for developer js waitText, audits=%+v", app.store().ListAuditLogs())
+	}
+}
+
+func TestDeveloperJSRiskTokensWarnButDoNotReject(t *testing.T) {
+	result := validateDeveloperJSCommand(`function test(){ return eval("1+1"); } globalThis.x = fetch; setTimeout(function(){ reply(String(test())); }, 1);`)
+	if ok, _ := result["ok"].(bool); !ok {
+		t.Fatalf("expected risky compatibility tokens to pass validation: %#v", result)
+	}
+	hits, _ := result["risk_tokens"].([]string)
+	if len(hits) == 0 {
+		t.Fatalf("expected risk token hits: %#v", result)
+	}
+	blocked := validateDeveloperJSCommand(`reply(process.env.SECRET);`)
+	if ok, _ := blocked["ok"].(bool); ok {
+		t.Fatalf("expected process access to remain blocked: %#v", blocked)
+	}
+}
+
+func TestDeveloperJSPresetReferenceUsesLatestPresetCode(t *testing.T) {
+	app := newTestApp(t)
+	if err := app.store().SetDeveloperModeEnabled(true); err != nil {
+		t.Fatal(err)
+	}
+	app.cfg().TelegramMode = true
+	app.cfg().TelegramBotToken = "123:ABC"
+	requests := []map[string]any{}
+	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		body["_path"] = r.URL.Path
+		requests = append(requests, body)
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":301}}`))
+	}))
+	defer tg.Close()
+	app.cfg().TelegramAPIURL = tg.URL
+
+	preset, err := app.store().UpsertDeveloperJSPreset(store.DeveloperJSPreset{Name: "hello", Code: `reply("old");`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.cfg().TelegramCustomCommands = []config.TelegramCommandReply{{Command: "/hello", Reply: fmt.Sprintf("js:preset:%d", preset.ID)}}
+	if !app.telegramHandleCustomCommand(context.Background(), "/hello", telegramCommandCtx{ChatID: 9001, FromID: 42, Command: "/hello"}, true) {
+		t.Fatal("custom command was not handled")
+	}
+	if len(requests) == 0 || asString(requests[len(requests)-1]["text"]) != "old" {
+		t.Fatalf("expected old preset output, got %#v", requests)
+	}
+
+	preset.Code = `reply("new");`
+	if _, err := app.store().UpsertDeveloperJSPreset(preset); err != nil {
+		t.Fatal(err)
+	}
+	if !app.telegramHandleCustomCommand(context.Background(), "/hello", telegramCommandCtx{ChatID: 9001, FromID: 42, Command: "/hello"}, true) {
+		t.Fatal("custom command was not handled after update")
+	}
+	if asString(requests[len(requests)-1]["text"]) != "new" {
+		t.Fatalf("expected updated preset output, got %#v", requests[len(requests)-1])
+	}
+}
+
+func TestDeveloperModeDisabledBlocksJSButKeepsPlainTextCommands(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().TelegramMode = true
+	app.cfg().TelegramBotToken = "123:ABC"
+	app.cfg().TelegramCustomCommands = []config.TelegramCommandReply{
+		{Command: "/js", Reply: `js:reply("blocked");`},
+		{Command: "/text", Reply: `plain ok`},
+	}
+	requests := []map[string]any{}
+	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		requests = append(requests, body)
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":302}}`))
+	}))
+	defer tg.Close()
+	app.cfg().TelegramAPIURL = tg.URL
+
+	if !app.telegramHandleCustomCommand(context.Background(), "/js", telegramCommandCtx{ChatID: 9002, FromID: 43, Command: "/js"}, true) {
+		t.Fatal("js command was not handled")
+	}
+	if len(requests) != 1 || asString(requests[0]["text"]) == "blocked" {
+		t.Fatalf("developer mode disabled should block JS output, got %#v", requests)
+	}
+	if !app.telegramHandleCustomCommand(context.Background(), "/text", telegramCommandCtx{ChatID: 9002, FromID: 43, Command: "/text"}, true) {
+		t.Fatal("text command was not handled")
+	}
+	if len(requests) != 2 || asString(requests[1]["text"]) != "plain ok" {
+		t.Fatalf("plain command should still work, got %#v", requests)
 	}
 }
 

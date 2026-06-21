@@ -295,3 +295,10 @@ Go Bot 使用纯文本发送消息，不依赖 Markdown 转义。
 ## 相关配置与扩展
 
 强制加群 / 订阅、退群封禁（`ban_on_leave`）、重新入群自动恢复（`auto_enable_rejoined`）、群成员校验并发度等行为属于 Bot 运行策略而非命令，配置字段集中在 `[Telegram]` 段，详见 [Go 后端架构与配置](../reference/backend.md)。其它功能文档参见 [文档导航](../README.md)。
+### 开发者 JS 指令补充
+
+- 开发者模式由仪表盘输入 `DEBUGMODE` 后二次验证管理员密码开启；再次输入 `DEBUGMODE` 并验证会关闭。关闭后服务端会阻断所有 `js:` / `js:preset:<id>` 指令、inline callback 和 waitText 等 JS 交互，但不会删除 JS 预设或 Telegram 指令配置。纯文本自定义命令继续可用。
+- 推荐在 Telegram 管理的 Bot 指令中保存 `js:preset:<id>`。该格式动态引用开发者模式中保存的预设，预设更新后已绑定指令会读取最新代码；旧格式 `js:<code>` 仍兼容，但属于静态代码快照。
+- JS 运行时会自动注入 `ctx`、`command`、`args`、`user`、`constants`、`users`、`db`、`text`、`arrays`、`time`、`interactions`、`reply()`、`log()`、`auth()`、`authAdmin()`、`getUser()`、`config()`、`env()`、`fetch()`、`setTimeout()`、`setInterval()`。
+- `db.*` 是受控数据库接口，只提供 `schema()`、`collections()`、`count(name)`、`currentUser()`、`getUser(uid)`、`updateCurrentUser(patch)`。它不暴露原始 state、SQL、邮箱明文、Telegram ID、Emby ID、Token、密码、用户名/邮箱/TG ID 搜索或跨用户写入；写入仅限当前绑定用户的登录通知偏好，预览模式为 dry-run。
+- `fetch()` 为受限同步能力，仅支持 `http/https` 的 `GET` / `POST` / `HEAD`，阻断 localhost、内网、链路本地目标，禁用跳转和凭据，响应体限长并脱敏。`eval`、`Function`、`globalThis`、`fetch`、`setTimeout`、`setInterval` 会被标记为高风险但不再静态拒绝；`require`、`process`、浏览器对象、本地存储、cookie、`constructor.constructor` 等仍会被阻断。

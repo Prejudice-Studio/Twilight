@@ -92,6 +92,10 @@ func (a *App) telegramHandleDeveloperJSCallback(ctx context.Context, callback ma
 	if len(parts) != 3 || parts[0] != "djs" {
 		return false
 	}
+	if !a.store().DeveloperModeEnabled() {
+		_ = a.telegramAnswerCallbackQuery(ctx, asString(callback["id"]), "Developer mode is disabled.", true)
+		return true
+	}
 	token := parts[1]
 	idx := int(numeric(parts[2]))
 	callbackID := asString(callback["id"])
@@ -195,6 +199,10 @@ func (a *App) takeDeveloperJSWaiter(chatID, fromID int64) (developerJSMessageWai
 
 func (a *App) telegramConsumeDeveloperJSWaiter(ctx context.Context, chatID, fromID int64, text string) bool {
 	if strings.HasPrefix(strings.TrimSpace(text), "/") {
+		return false
+	}
+	if !a.store().DeveloperModeEnabled() {
+		_, _ = a.takeDeveloperJSWaiter(chatID, fromID)
 		return false
 	}
 	item, ok := a.takeDeveloperJSWaiter(chatID, fromID)

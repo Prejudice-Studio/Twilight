@@ -161,7 +161,7 @@ func (a *App) handleTelegramUpdate(ctx context.Context, update map[string]any) {
 	// 先把"私聊 + 普通 gating"的标准命令交给注册表统一分发，dispatcher 内部
 	// 集中处理 private/admin 校验，避免每个 case 重复 telegramRequirePrivate +
 	// telegramAdminID 模板。
-	cmdCtx := telegramCommandCtx{ChatID: chatID, FromID: fromID, Username: username, Args: fields[1:]}
+	cmdCtx := telegramCommandCtx{ChatID: chatID, FromID: fromID, Username: username, Command: command, Args: fields[1:]}
 	if a.telegramDispatchRegistry(ctx, command, cmdCtx, privateChat) {
 		return
 	}

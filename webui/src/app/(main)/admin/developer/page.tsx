@@ -154,6 +154,14 @@ const snippetRows = [
 `,
   },
   {
+    labelKey: "adminDeveloper.snippetAuthAdmin",
+    code: `if (!authAdmin()) {
+  reply("Admin only");
+  return;
+}
+`,
+  },
+  {
     labelKey: "adminDeveloper.snippetConfig",
     code: `const siteName = config("app.name");`,
   },
@@ -194,6 +202,25 @@ reply(text.truncate(text.joinLines(lines), 1200));`,
     code: `const result = users.setLoginNotify({ telegram: true });`,
   },
   {
+    labelKey: "adminDeveloper.snippetDbSchema",
+    code: `const schema = db.schema();
+reply(schema.users.fields.join(", "));`,
+  },
+  {
+    labelKey: "adminDeveloper.snippetDbCount",
+    code: `reply("Users: " + db.count("users"));`,
+  },
+  {
+    labelKey: "adminDeveloper.snippetDbUpdate",
+    code: `const result = db.updateCurrentUser({ notify_on_login_telegram: true });
+reply(JSON.stringify(result));`,
+  },
+  {
+    labelKey: "adminDeveloper.snippetFetch",
+    code: `const res = fetch("https://example.com");
+reply(res.ok ? text.truncate(res.text, 200) : ("fetch failed: " + (res.error || res.status)));`,
+  },
+  {
     labelKey: "adminDeveloper.snippetText",
     code: `reply(text.truncate(args.join(" "), 120));`,
   },
@@ -223,8 +250,9 @@ function templateText(value: MessageKey | string, t: (key: MessageKey) => string
   return value.startsWith("adminDeveloper.") ? t(value as MessageKey) : value;
 }
 
-function commandReply(command: string, code: string): string {
+function commandReply(command: string, code: string, presetId?: number): string {
   const normalized = command.trim().startsWith("/") ? command.trim() : `/${command.trim() || "custom"}`;
+  if (presetId) return `${normalized} = js:preset:${presetId}`;
   return `${normalized} = js:${code.trim()}`;
 }
 
@@ -272,7 +300,7 @@ export default function AdminDeveloperPage() {
   const customTemplates = useMemo(() => serverPresets.map(presetToTemplate), [serverPresets]);
   const allTemplates = useMemo(() => [...builtInTemplates, ...customTemplates], [customTemplates]);
   const activeTemplate = allTemplates.find((item) => item.id === activeTemplateId);
-  const commandPreview = useMemo(() => commandReply(command, code), [code, command]);
+  const commandPreview = useMemo(() => commandReply(command, code, activeTemplate?.presetId), [activeTemplate?.presetId, code, command]);
 
   const applyTemplate = useCallback((template: DeveloperTemplate) => {
     setActiveTemplateId(template.id);

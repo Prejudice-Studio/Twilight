@@ -30,18 +30,33 @@ func (a *App) handleDeveloperModeActivate(w http.ResponseWriter, r *http.Request
 		failWithCode(w, http.StatusUnauthorized, ErrLoginInvalid, "administrator verification failed")
 		return
 	}
-	a.audit(r, "developer_mode_activate", "admin", p.User.UID, map[string]any{"entry": "dashboard_code"})
-	ok(w, "developer mode enabled", map[string]any{
-		"enabled": true,
-		"scope":   "browser_session",
+	enabled := !a.store().DeveloperModeEnabled()
+	if statusFromError(w, a.store().SetDeveloperModeEnabled(enabled)) {
+		return
+	}
+	action := "developer_mode_activate"
+	message := "developer mode enabled"
+	if !enabled {
+		action = "developer_mode_deactivate"
+		message = "developer mode disabled"
+	}
+	a.audit(r, action, "admin", p.User.UID, map[string]any{"entry": "dashboard_code", "enabled": enabled})
+	ok(w, message, map[string]any{
+		"enabled": enabled,
+		"scope":   "global_server_gate",
 		"features": []string{
 			"telegram_js_command_docs",
 			"telegram_js_sandbox_preview",
+			"telegram_js_runtime_gate",
 		},
 	})
 }
 
 func (a *App) handleDeveloperJSSandbox(w http.ResponseWriter, r *http.Request, _ Params) {
+	if !a.store().DeveloperModeEnabled() {
+		failWithCode(w, http.StatusForbidden, ErrForbidden, "developer mode is disabled")
+		return
+	}
 	payload := decodeMap(r)
 	code := stringValue(payload, "code")
 	result := validateDeveloperJSCommand(code)
@@ -50,6 +65,7 @@ func (a *App) handleDeveloperJSSandbox(w http.ResponseWriter, r *http.Request, _
 			ChatID:   0,
 			FromID:   current(r).User.TelegramID,
 			Username: current(r).User.Username,
+			Command:  "/preview",
 			Args:     []string{"preview"},
 		}, true, developerJSRunOptions{Preview: true})
 		if err != nil {
@@ -70,7 +86,7 @@ func (a *App) handleDeveloperJSDocs(w http.ResponseWriter, r *http.Request, _ Pa
 
 func (a *App) handleDeveloperJSPresets(w http.ResponseWriter, r *http.Request, _ Params) {
 	presets := a.store().ListDeveloperJSPresets()
-	ok(w, "OK", map[string]any{"presets": presets, "total": len(presets)})
+	ok(w, "OK", map[string]any{"presets": presets, "total": len(presets), "developer_mode_enabled": a.store().DeveloperModeEnabled()})
 }
 
 func (a *App) handleCreateDeveloperJSPreset(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -176,8 +192,9 @@ func validateDeveloperJSCommand(code string) map[string]any {
 	trimmed := strings.TrimSpace(code)
 	warnings := []string{
 		"Preview only: saving to bot_custom_commands is required before production Bot runtime can use this script.",
-		"Allowed APIs are limited to the documented ctx, args, user, constants, users, text, arrays, time, interactions, getUser(uid), reply(text), log(text), auth(role), config(key), and env(key) bindings.",
+		"Allowed APIs are limited to the documented ctx, command, args, user, constants, db, users, text, arrays, time, interactions, getUser(uid), reply(text), log(text), auth(role), authAdmin(), fetch(url), config(key), and env(key) bindings.",
 		"config(key) and env(key) are read-only allowlists; sensitive values always return an empty string.",
+		"Risky JavaScript features such as eval, Function, globalThis, fetch, and timers are available for compatibility and should be used only in administrator-reviewed presets.",
 	}
 	if trimmed == "" {
 		return map[string]any{"ok": false, "errors": []string{"code is empty"}, "warnings": warnings}
@@ -187,10 +204,8 @@ func validateDeveloperJSCommand(code string) map[string]any {
 	}
 	lower := strings.ToLower(trimmed)
 	blocked := []string{
-		"fetch(", "xmlhttprequest", "websocket", "eval(", "function(", "new function",
-		"import(", "require(", "process.", "globalthis", "window.", "document.",
+		"xmlhttprequest", "websocket", "import(", "require(", "process.", "window.", "document.",
 		"localstorage", "sessionstorage", "cookie", "constructor.constructor",
-		"settimeout", "setinterval",
 	}
 	errors := []string{}
 	for _, token := range blocked {
@@ -198,12 +213,21 @@ func validateDeveloperJSCommand(code string) map[string]any {
 			errors = append(errors, "blocked token: "+token)
 		}
 	}
+	risky := []string{"fetch(", "eval(", "function", "new function", "globalthis", "settimeout", "setinterval"}
+	riskHits := []string{}
+	for _, token := range risky {
+		if strings.Contains(lower, token) {
+			riskHits = append(riskHits, token)
+			warnings = append(warnings, "risk token present: "+token)
+		}
+	}
 	return map[string]any{
-		"ok":       len(errors) == 0,
-		"errors":   errors,
-		"warnings": warnings,
-		"example":  "reply('Hello ' + (user.username || 'user'));",
-		"bindings": developerJSBindingNames(),
+		"ok":          len(errors) == 0,
+		"errors":      errors,
+		"warnings":    warnings,
+		"risk_tokens": riskHits,
+		"example":     "reply('Hello ' + (user.username || 'user'));",
+		"bindings":    developerJSBindingNames(),
 	}
 }
 
@@ -220,8 +244,8 @@ type developerJSDocEntry struct {
 
 func developerJSBindingNames() []string {
 	return []string{
-		"ctx", "args", "user", "constants", "users", "text", "arrays", "time", "interactions",
-		"getUser(uid)", "reply(text)", "log(text)", "auth(role)", "config(key)", "env(key)",
+		"ctx", "command", "args", "user", "constants", "db", "users", "text", "arrays", "time", "interactions",
+		"getUser(uid)", "reply(text)", "log(text)", "auth(role)", "authAdmin()", "fetch(url)", "config(key)", "env(key)",
 	}
 }
 
@@ -231,7 +255,7 @@ func developerJSDocs() map[string]any {
 			"id":          "command-context",
 			"title":       "Command input context",
 			"description": "Show every non-sensitive value available when a Telegram user triggers this command.",
-			"code":        "const me = users.current();\nconst lines = [\n  'private_chat=' + ctx.private_chat,\n  'preview=' + ctx.preview,\n  'command_time=' + time.formatUnix(ctx.command_time),\n  'args=' + JSON.stringify(args),\n  'uid=' + me.uid,\n  'username=' + (me.username || 'unbound'),\n  'role=' + me.role,\n  'active=' + me.active,\n  'has_emby=' + me.has_emby,\n  'email_verified=' + me.email_verified,\n  'telegram_bound=' + me.telegram_bound,\n  'notify_tg=' + me.notify_on_login_telegram,\n  'notify_email=' + me.notify_on_login_email\n];\nreply(text.truncate(text.joinLines(lines), 1200));",
+			"code":        "const me = users.current();\nconst lines = [\n  'command=' + command.name,\n  'command_text=' + command.text,\n  'private_chat=' + ctx.private_chat,\n  'preview=' + ctx.preview,\n  'command_time=' + time.formatUnix(ctx.command_time),\n  'args=' + JSON.stringify(args),\n  'uid=' + me.uid,\n  'username=' + (me.username || 'unbound'),\n  'role=' + me.role,\n  'active=' + me.active,\n  'has_emby=' + me.has_emby,\n  'email_verified=' + me.email_verified,\n  'telegram_bound=' + me.telegram_bound,\n  'notify_tg=' + me.notify_on_login_telegram,\n  'notify_email=' + me.notify_on_login_email\n];\nreply(text.truncate(text.joinLines(lines), 1200));",
 		},
 		{
 			"id":          "current-user",
@@ -240,16 +264,34 @@ func developerJSDocs() map[string]any {
 			"code":        "const me = users.current();\nreply('User: ' + (me.username || 'unbound') + '\\nActive: ' + me.active);",
 		},
 		{
+			"id":          "db-summary",
+			"title":       "Controlled database summary",
+			"description": "Use controlled database helpers to inspect safe schema metadata and allowed counts.",
+			"code":        "const schema = db.schema();\nconst lines = [\n  'collections=' + db.collections().join(', '),\n  'users=' + db.count('users'),\n  'announcements=' + db.count('announcements'),\n  'user_fields=' + schema.users.fields.join(', ')\n];\nreply(text.truncate(lines.join('\\n'), 1200));",
+		},
+		{
 			"id":          "admin-get-user",
 			"title":       "Admin exact UID lookup",
 			"description": "Read a sanitized user snapshot by exact UID. Other users require the current Telegram-bound user to be an administrator.",
-			"code":        "if (!auth('admin')) {\n  reply('Admin only');\n  return;\n}\nconst target = getUser(Number(args[0] || 0));\nif (!target) {\n  reply('User not found or permission denied');\n  return;\n}\nreply([\n  'UID: ' + target.uid,\n  'Username: ' + target.username,\n  'Active: ' + target.active,\n  'Role: ' + target.role,\n  'Has Emby: ' + target.has_emby,\n  'Email verified: ' + target.email_verified\n].join('\\n'));",
+			"code":        "if (!authAdmin()) {\n  reply('Admin only');\n  return;\n}\nconst target = getUser(Number(args[0] || 0));\nif (!target) {\n  reply('User not found or permission denied');\n  return;\n}\nreply([\n  'UID: ' + target.uid,\n  'Username: ' + target.username,\n  'Active: ' + target.active,\n  'Role: ' + target.role,\n  'Has Emby: ' + target.has_emby,\n  'Email verified: ' + target.email_verified\n].join('\\n'));",
 		},
 		{
 			"id":          "login-notify",
 			"title":       "Toggle login notifications",
 			"description": "Enable Telegram login notifications for the current bound user. Sandbox preview returns dry_run and does not write state.",
 			"code":        "const result = users.setLoginNotify({ telegram: true });\nreply(result.dry_run ? 'Preview only' : 'Telegram login notifications enabled');",
+		},
+		{
+			"id":          "db-update-current-user",
+			"title":       "Controlled current-user write",
+			"description": "Update only the current bound user's allowed notification fields. Preview returns dry_run.",
+			"code":        "const result = db.updateCurrentUser({ notify_on_login_telegram: true, notify_on_login_email: false });\nreply(JSON.stringify(result));",
+		},
+		{
+			"id":          "risk-fetch",
+			"title":       "Risky compatibility fetch",
+			"description": "Fetch is synchronous, bounded, blocks private hosts, and should be used only in reviewed admin presets.",
+			"code":        "const res = fetch('https://example.com');\nif (!res.ok) {\n  reply('fetch failed: ' + (res.error || res.status));\n} else {\n  reply(text.truncate(res.text, 200));\n}",
 		},
 		{
 			"id":          "array-tools",
@@ -279,7 +321,9 @@ func developerJSDocs() map[string]any {
 			"language":    "ECMAScript 5.1-oriented JavaScript with Goja-supported extensions; prefer plain synchronous JavaScript.",
 			"timeout_ms":  200,
 			"sandbox": []string{
-				"No network, filesystem, process, timers, module loader, browser globals, or broad environment access is injected.",
+				"No filesystem, process, module loader, browser globals, or broad environment access is injected.",
+				"fetch is synchronous and bounded; it blocks localhost/private/link-local targets, redirects, credentials, and large responses.",
+				"setTimeout/setInterval are compatibility wrappers that execute callbacks synchronously inside the same 200ms run.",
 				"Config and environment access are explicit read-only allowlists; sensitive keys return an empty string.",
 				"Sandbox preview is dry-run for state-changing and Telegram interaction helper APIs.",
 			},
@@ -288,6 +332,8 @@ func developerJSDocs() map[string]any {
 			{Name: "ctx.private_chat", Category: "context", Type: "boolean", Description: "Whether the command was received in a private chat.", Example: "if (!ctx.private_chat) reply('Please DM me');"},
 			{Name: "ctx.command_time", Category: "context", Type: "number", Description: "Unix timestamp in seconds when the command entered the sandbox."},
 			{Name: "ctx.preview", Category: "context", Type: "boolean", Description: "True when running from the admin sandbox preview endpoint."},
+			{Name: "ctx.command", Category: "context", Type: "string", Description: "Normalized command name, such as /hello."},
+			{Name: "command", Category: "context", Type: "object", Description: "Auto-initialized command trigger object.", Fields: []string{"name", "args", "text", "private_chat", "preview", "from_id"}},
 			{Name: "args", Category: "context", Type: "string[]", Description: "Command arguments excluding the command name.", Example: "const action = (args[0] || 'help').toLowerCase();"},
 			{Name: "user", Category: "user", Type: "object", Description: "Sanitized snapshot of the Telegram-bound Twilight user.", Fields: []string{"uid", "username", "role", "active", "expired_at", "created_at", "register_time", "has_emby", "emby_disabled", "email_verified", "email_verified_at", "telegram_bound", "notify_on_login_telegram", "notify_on_login_email"}},
 			{Name: "constants.roles", Category: "constants", Type: "object", Description: "Role constants: admin=0, user=1, whitelist=2."},
@@ -297,11 +343,21 @@ func developerJSDocs() map[string]any {
 			{Name: "reply(text)", Category: "output", Type: "function", Description: "Append one reply segment. At most four segments are collected and joined with newlines.", Example: "reply('hello')"},
 			{Name: "log(text)", Category: "output", Type: "function", Description: "Append one audit/debug log line for this execution. At most eight lines are collected.", Example: "log('branch=help')"},
 			{Name: "auth(role)", Category: "auth", Type: "function", Description: "Check the current user role. Accepts admin, whitelist, user, or numeric role strings.", Example: "if (!auth('admin')) return;"},
+			{Name: "authAdmin()", Category: "auth", Type: "function", Description: "Shortcut that returns true when the current Telegram-bound user is an administrator.", Example: "if (!authAdmin()) return;"},
 			{Name: "getUser(uid)", Category: "users", Type: "function", Description: "Global shortcut for exact UID lookup. Returns a sanitized snapshot or null. Other-user lookup requires administrator role; non-admin users can only read themselves.", Example: "const u = getUser(10001); if (u) reply(u.username);"},
+			{Name: "fetch(url, options)", Category: "network", Type: "function", Description: "Risky synchronous compatibility helper. Supports GET/POST/HEAD, blocks localhost/private/link-local targets, does not send credentials, disables redirects, times out quickly, and returns { ok, status, statusText, text, truncated, error, blocked }.", Example: "const res = fetch('https://example.com');"},
+			{Name: "setTimeout(fn, ms)", Category: "runtime", Type: "function", Description: "Compatibility helper. Executes fn synchronously and records a log warning; it does not schedule async work.", Example: "setTimeout(function(){ reply('done'); }, 1);"},
+			{Name: "setInterval(fn, ms)", Category: "runtime", Type: "function", Description: "Compatibility helper. Executes fn once synchronously and records a log warning; it does not schedule repeated async work."},
 			{Name: "config(key)", Category: "config", Type: "function", Description: "Read one non-sensitive allowlisted config value. Denied keys return an empty string.", Example: "config('invite.enabled')"},
 			{Name: "env(key)", Category: "config", Type: "function", Description: "Read one non-sensitive allowlisted TWILIGHT_* environment value. Denied keys return an empty string.", Example: "env('TWILIGHT_HOST')"},
 		},
 		"namespaces": []developerJSDocEntry{
+			{Name: "db.schema()", Category: "db", Type: "function", Description: "Return safe database collection metadata and allowed field names. This does not expose raw state.", Example: "const schema = db.schema(); reply(schema.users.fields.join(', '));"},
+			{Name: "db.collections()", Category: "db", Type: "function", Description: "Return the controlled collection names available to the JS sandbox.", Example: "db.collections().join(', ')"},
+			{Name: "db.count(name)", Category: "db", Type: "function", Description: "Return an allowed collection count. Admin-only collections return -1 for non-admin users.", Example: "db.count('announcements')"},
+			{Name: "db.currentUser()", Category: "db", Type: "function", Description: "Return the same sanitized snapshot as users.current().", Example: "db.currentUser().username"},
+			{Name: "db.getUser(uid)", Category: "db", Type: "function", Description: "Exact UID lookup with the same permission rules and sanitized fields as getUser(uid).", Example: "db.getUser(10001)"},
+			{Name: "db.updateCurrentUser(patch)", Category: "db", Type: "function", Description: "Controlled write for the current user only. Accepted fields: notify_on_login_telegram / notify_on_login_email, or telegram / email aliases.", Example: "db.updateCurrentUser({ notify_on_login_telegram: true })", Mutates: true, Scope: "current_user_only"},
 			{Name: "users.current()", Category: "users", Type: "function", Description: "Return the sanitized current Telegram-bound user snapshot.", Example: "const me = users.current(); reply(me.username || 'unbound');"},
 			{Name: "users.describe()", Category: "users", Type: "function", Description: "Alias of users.current() for readable scripts.", Example: "JSON.stringify(users.describe())"},
 			{Name: "users.get(uid)", Category: "users", Type: "function", Description: "Exact UID lookup returning the same sanitized snapshot as getUser(uid). Other-user lookup requires administrator role.", Example: "const target = users.get(10001);"},
@@ -328,6 +384,8 @@ func developerJSDocs() map[string]any {
 			{Name: "JSON", Category: "native", Type: "object", Description: "Native JSON parse/stringify support.", Example: "JSON.stringify(users.current())"},
 			{Name: "Math", Category: "native", Type: "object", Description: "Native Math helpers."},
 			{Name: "Date", Category: "native", Type: "constructor", Description: "Native Date object support. Prefer time.now/time.formatUnix for stable command output."},
+			{Name: "Function / eval", Category: "native", Type: "runtime", Description: "Available through Goja for compatibility. Risky; use only in administrator-reviewed presets."},
+			{Name: "globalThis", Category: "native", Type: "object", Description: "Bound to the Goja global object for compatibility. Does not provide browser or Node.js globals."},
 			{Name: "String / Number / Boolean", Category: "native", Type: "constructors", Description: "Native primitive wrappers and prototype methods supported by Goja."},
 		},
 		"config_keys": []string{
@@ -342,10 +400,11 @@ func developerJSDocs() map[string]any {
 		},
 		"examples": examples,
 		"blocked_tokens": []string{
-			"fetch(", "xmlhttprequest", "websocket", "eval(", "function(", "new function",
-			"import(", "require(", "process.", "globalthis", "window.", "document.",
+			"xmlhttprequest", "websocket", "import(", "require(", "process.", "window.", "document.",
 			"localstorage", "sessionstorage", "cookie", "constructor.constructor",
-			"settimeout", "setinterval",
+		},
+		"risk_tokens": []string{
+			"fetch(", "eval(", "function", "new function", "globalthis", "settimeout", "setinterval",
 		},
 	}
 }

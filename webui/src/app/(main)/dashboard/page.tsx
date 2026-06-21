@@ -751,12 +751,17 @@ export default function DashboardPage() {
     try {
       const res = await api.activateDeveloperMode({ code: "DEBUGMODE", password: developerPassword });
       if (res.success) {
-        sessionStorage.setItem("twilight:developer-mode", "1");
-        toast({ title: t("dashboard.developerEnabled"), variant: "success" });
+        if (res.data?.enabled) {
+          sessionStorage.setItem("twilight:developer-mode", "1");
+          toast({ title: t("dashboard.developerEnabled"), variant: "success" });
+        } else {
+          sessionStorage.removeItem("twilight:developer-mode");
+          toast({ title: t("dashboard.developerDisabled"), variant: "success" });
+        }
         setShowDeveloperDialog(false);
         setDeveloperPassword("");
         setRegCode("");
-        router.push("/admin/developer");
+        if (res.data?.enabled) router.push("/admin/developer");
       } else {
         toast({ title: t("dashboard.developerEnableFailed"), description: res.message, variant: "destructive" });
       }

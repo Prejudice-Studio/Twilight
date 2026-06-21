@@ -28,6 +28,7 @@ type CommandRow = {
 };
 
 const jsPrefix = "js:";
+const jsPresetPrefix = "preset:";
 const nonePreset = "__none";
 
 function rowID() {
@@ -48,6 +49,16 @@ function commandRows(value: unknown, presets: DeveloperJSPreset[]): CommandRow[]
     const trimmed = reply.trim();
     if (trimmed.toLowerCase().startsWith(jsPrefix)) {
       const code = trimmed.slice(jsPrefix.length).trim();
+      if (code.toLowerCase().startsWith(jsPresetPrefix)) {
+        const presetId = code.slice(jsPresetPrefix.length).trim();
+        return {
+          id: rowID(),
+          command,
+          type: "js",
+          text: "",
+          presetId,
+        };
+      }
       const preset = presets.find((candidate) => candidate.code.trim() === code);
       return {
         id: rowID(),
@@ -72,7 +83,8 @@ function rowsToConfig(rows: CommandRow[], presets: DeveloperJSPreset[]) {
         return reply ? { command, reply } : null;
       }
       const preset = presets.find((item) => String(item.id) === row.presetId);
-      const code = preset?.code.trim() || row.inlineCode?.trim() || "";
+      if (preset) return { command, reply: `${jsPrefix}${jsPresetPrefix}${preset.id}` };
+      const code = row.inlineCode?.trim() || "";
       return code ? { command, reply: `${jsPrefix}${code}` } : null;
     })
     .filter(Boolean);
@@ -252,7 +264,7 @@ export default function AdminTelegramCommandsPage() {
               </div>
               <div className="rounded-md border bg-muted/20 p-3">
                 <p className="font-medium">{t("adminTelegramCommands.jsExampleTitle")}</p>
-                <code className="mt-2 block whitespace-pre-wrap text-xs">/hello = js:reply(&quot;Hello &quot; + (user.username || &quot;user&quot;));</code>
+                <code className="mt-2 block whitespace-pre-wrap text-xs">/hello = js:preset:1</code>
               </div>
               <div className="flex flex-wrap gap-2">
                 {["{server_name}", "{bot_username}", "{user_name}"].map((item) => (

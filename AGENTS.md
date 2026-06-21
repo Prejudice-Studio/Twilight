@@ -341,9 +341,10 @@ pnpm build
 - `Ticket.types` 不在配置管理中编辑，统一使用「工单处理 → 工单类型配置」。工单类型变更需要同步写回 `config.toml`，避免热重载或重启后回退。
 - 配置查看、schema 编辑和备份查看不得泄露 API Key、Token、密码、Secret 等敏感字段；未修改的 secret 必须使用服务端哨兵保留，禁止明文回显。
 - 新增后台接口默认使用 `AuthAdmin`；所有创建、更新、删除、启停、沙箱执行等状态变更成功后必须写审计日志。无 HTTP 上下文的 Bot 路径使用 `a.auditEntryIP("telegram", ...)`。
-- 开发者模式入口固定为仪表盘输入 `DEBUGMODE`，再调用 `POST /admin/developer-mode/activate` 做管理员密码二次验证。Telegram JS 自定义命令仅允许 `bot_custom_commands` 中 `js:` 前缀脚本，必须运行在受控 Goja 沙箱中，不得暴露网络、文件、进程、模块加载器、浏览器全局对象、任意环境变量或任意配置读取能力。
-- 开发者 JS 沙箱文档接口固定为 `GET /admin/developer/js-docs`（`AuthAdmin`），用于下发引擎、内置对象、函数、命名空间、配置键、环境变量、示例和阻止 token。新增沙箱 API 必须同步更新该端点、开发者页面、`docs/features/telegram-bot.md` 和 `docs/reference/backend-api.md`。
-- Telegram JS 沙箱只允许通过受控白名单访问配置与环境变量。`users.*` 默认仅可读取/操作当前 Telegram 绑定的 Twilight 用户脱敏数据；`getUser(uid)` / `users.get(uid)` / `users.byUID(uid)` 仅允许按精确 UID 返回脱敏快照，普通用户只能读取自己，跨用户读取必须要求当前绑定用户为管理员。不得提供用户名/邮箱/Telegram ID 任意搜索、邮箱明文、Telegram ID、Emby ID、Token、密码、管理员批量操作或跨用户写入。预览接口必须 dry-run 状态变更类函数。
+- 开发者模式入口固定为仪表盘输入 `DEBUGMODE`，再调用 `POST /admin/developer-mode/activate` 做管理员密码二次验证。该接口是服务端全局开关：关闭时调用开启，开启时再次调用关闭；关闭后所有 `js:` / `js:preset:<id>` 指令、inline callback 和 waitText 等相关 JS 交互必须被服务端阻断，但模板和指令配置不得删除。Telegram JS 自定义命令仅允许 `bot_custom_commands` 中 `js:` 前缀脚本；推荐使用 `js:preset:<id>` 动态引用保存的 JS 预设，旧 `js:<code>` 静态代码格式保留兼容。脚本必须运行在受控 Goja 沙箱中，不得暴露文件、进程、模块加载器、浏览器全局对象、任意环境变量或任意配置读取能力。
+- 开发者 JS 沙箱文档接口固定为 `GET /admin/developer/js-docs`（`AuthAdmin`），用于下发引擎、内置对象、函数、命名空间、配置键、环境变量、示例、阻止 token 和允许但高风险 token。新增沙箱 API 必须同步更新该端点、开发者页面、`docs/features/telegram-bot.md` 和 `docs/reference/backend-api.md`。
+- Telegram JS 沙箱只允许通过受控白名单访问配置与环境变量。`users.*` 默认仅可读取/操作当前 Telegram 绑定的 Twilight 用户脱敏数据；`getUser(uid)` / `users.get(uid)` / `users.byUID(uid)` / `db.getUser(uid)` 仅允许按精确 UID 返回脱敏快照，普通用户只能读取自己，跨用户读取必须要求当前绑定用户为管理员。`db.*` 只能提供受控结构、计数、当前用户脱敏读取和当前用户登录通知偏好写入；不得提供 SQL、原始 state、用户名/邮箱/Telegram ID 任意搜索、邮箱明文、Telegram ID、Emby ID、Token、密码、管理员批量操作或跨用户写入。预览接口必须 dry-run 状态变更类函数。
+- `fetch`、`eval`、`Function`、`globalThis`、`setTimeout`、`setInterval` 为兼容性能力，必须在文档和校验结果中提示风险；`fetch` 必须同步、短超时、限响应体、禁用凭据与跳转，并阻断 localhost、内网和链路本地目标。`require`、`process`、浏览器对象、本地存储、cookie、`constructor.constructor` 等仍必须静态阻断。
 - Telegram JS 的 `interactions.*` 只能提供受控同步编排：inline callback 使用静态 `answer/edit/reply` 动作，必须绑定同一 chat、message 和 Telegram 用户并设置 TTL；等待文本只能消费同一用户的下一条非命令文本，必须限制等待秒数、长度、脱敏和审计，不得引入异步 JS 继续执行、任意事件监听或跨用户会话状态。
 
 ## 前端约定

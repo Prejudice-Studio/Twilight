@@ -1780,6 +1780,7 @@ class ApiClient {
       ok: boolean;
       errors: string[];
       warnings: string[];
+      risk_tokens?: string[];
       example: string;
       bindings: string[];
       output?: string;
@@ -1795,7 +1796,7 @@ class ApiClient {
   }
 
   async listDeveloperJSPresets() {
-    return this.request<{ presets: DeveloperJSPreset[]; total: number }>("/admin/developer/js-presets");
+    return this.request<{ presets: DeveloperJSPreset[]; total: number; developer_mode_enabled?: boolean }>("/admin/developer/js-presets");
   }
 
   async createDeveloperJSPreset(payload: { name: string; description?: string; code?: string }) {

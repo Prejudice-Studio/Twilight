@@ -146,9 +146,57 @@ const exampleText: Record<Exclude<Locale, "en-US">, Record<string, { title: stri
   },
 };
 
+const extraEntryText: Record<Exclude<Locale, "en-US">, Record<string, string>> = {
+  "zh-Hans": {
+    "ctx.command": "标准化后的指令名称，例如 /hello。",
+    command: "指令触发时自动初始化的对象，包含指令名、参数、参数文本、是否私聊、是否预览等非敏感信息。",
+    "authAdmin()": "管理员快捷鉴权函数，当前 Telegram 绑定用户是管理员时返回 true。",
+    "fetch(url, options)": "高风险同步兼容函数。仅允许受限 HTTP(S) 请求，阻断本机、内网、链路本地目标，不发送凭据并限制响应长度。",
+    "setTimeout(fn, ms)": "兼容包装器，会在当前执行窗口内同步执行回调，不创建异步任务。",
+    "setInterval(fn, ms)": "兼容包装器，会同步执行一次回调，不创建重复异步任务。",
+    "db.schema()": "返回受控数据库集合结构和允许字段，不暴露原始 state。",
+    "db.collections()": "返回 JS 沙箱允许查看的受控集合名称。",
+    "db.count(name)": "返回允许的集合计数；管理员专属集合对非管理员返回 -1。",
+    "db.currentUser()": "返回与 users.current() 相同的当前用户脱敏快照。",
+    "db.getUser(uid)": "按精确 UID 查询脱敏用户快照，权限规则与 getUser(uid) 相同。",
+    "db.updateCurrentUser(patch)": "仅允许修改当前绑定用户的登录通知偏好；预览模式返回 dry_run。",
+    "Function / eval": "Goja 兼容能力，风险较高，仅建议在管理员审核后的预设中使用。",
+    globalThis: "绑定到 Goja 全局对象；不会提供浏览器或 Node.js 全局对象。",
+  },
+  "zh-Hant": {
+    "ctx.command": "標準化後的指令名稱，例如 /hello。",
+    command: "指令觸發時自動初始化的物件，包含指令名、參數、參數文字、是否私聊、是否預覽等非敏感資訊。",
+    "authAdmin()": "管理員快捷鑑權函式，當前 Telegram 綁定使用者是管理員時返回 true。",
+    "fetch(url, options)": "高風險同步相容函式。僅允許受限 HTTP(S) 請求，阻斷本機、內網、鏈路本地目標，不傳送憑據並限制回應長度。",
+    "setTimeout(fn, ms)": "相容包裝器，會在當前執行視窗內同步執行回呼，不建立非同步任務。",
+    "setInterval(fn, ms)": "相容包裝器，會同步執行一次回呼，不建立重複非同步任務。",
+    "db.schema()": "返回受控資料庫集合結構和允許欄位，不暴露原始 state。",
+    "db.collections()": "返回 JS 沙箱允許查看的受控集合名稱。",
+    "db.count(name)": "返回允許的集合計數；管理員專屬集合對非管理員返回 -1。",
+    "db.currentUser()": "返回與 users.current() 相同的當前使用者脫敏快照。",
+    "db.getUser(uid)": "按精確 UID 查詢脫敏使用者快照，權限規則與 getUser(uid) 相同。",
+    "db.updateCurrentUser(patch)": "僅允許修改當前綁定使用者的登入通知偏好；預覽模式返回 dry_run。",
+    "Function / eval": "Goja 相容能力，風險較高，僅建議在管理員審核後的預設中使用。",
+    globalThis: "綁定到 Goja 全域物件；不會提供瀏覽器或 Node.js 全域物件。",
+  },
+};
+
+const extraExampleText: Record<Exclude<Locale, "en-US">, Record<string, { title: string; description: string }>> = {
+  "zh-Hans": {
+    "db-summary": { title: "受控数据库摘要", description: "使用受控数据库函数查看安全结构元数据和允许的计数。" },
+    "db-update-current-user": { title: "受控当前用户写入", description: "仅更新当前绑定用户允许的通知字段；预览模式返回 dry_run。" },
+    "risk-fetch": { title: "高风险兼容 fetch", description: "fetch 为同步受限能力，会阻断内网目标，仅建议用于审核后的管理员预设。" },
+  },
+  "zh-Hant": {
+    "db-summary": { title: "受控資料庫摘要", description: "使用受控資料庫函式查看安全結構中繼資料和允許的計數。" },
+    "db-update-current-user": { title: "受控當前使用者寫入", description: "僅更新當前綁定使用者允許的通知欄位；預覽模式返回 dry_run。" },
+    "risk-fetch": { title: "高風險相容 fetch", description: "fetch 為同步受限能力，會阻斷內網目標，僅建議用於審核後的管理員預設。" },
+  },
+};
+
 function localizeEntry(locale: Locale, row: DeveloperJSDocEntry): LocalizedDocEntry {
   if (locale === "en-US") return row;
-  return { ...row, description: entryText[locale][row.name] || row.description };
+  return { ...row, description: entryText[locale][row.name] || extraEntryText[locale][row.name] || row.description };
 }
 
 function rowsFromKeys(keys: string[], category: string): LocalizedDocEntry[] {
@@ -218,9 +266,10 @@ export function DeveloperJSDocsPanel({ className, onInsertSnippet }: DeveloperJS
       envKeys: rowsFromKeys(docs.env_keys, "env"),
       examples: docs.examples.map((example) => {
         if (locale === "en-US") return example;
-        return { ...example, ...(exampleText[locale][example.id] || {}) };
+        return { ...example, ...(exampleText[locale][example.id] || extraExampleText[locale][example.id] || {}) };
       }),
       blockedTokens: docs.blocked_tokens,
+      riskTokens: docs.risk_tokens || [],
     };
   }, [docs, locale]);
 
@@ -269,6 +318,14 @@ export function DeveloperJSDocsPanel({ className, onInsertSnippet }: DeveloperJS
                   {view.blockedTokens.map((token) => <Badge key={token} variant="outline" className="text-[10px]">{token}</Badge>)}
                 </div>
               </div>
+              {view.riskTokens.length > 0 ? (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
+                  <p className="mb-2 text-xs font-medium">{t("adminDeveloper.riskTokensTitle")}</p>
+                  <div className="flex flex-wrap gap-1">
+                    {view.riskTokens.map((token) => <Badge key={token} variant="warning" className="text-[10px]">{token}</Badge>)}
+                  </div>
+                </div>
+              ) : null}
               <div className="rounded-md border bg-muted/20 p-3">
                 <p className="mb-2 text-xs font-medium">{t("adminDeveloper.examplesApiTitle")}</p>
                 <div className="grid gap-3 lg:grid-cols-2">

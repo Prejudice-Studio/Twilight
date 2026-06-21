@@ -821,6 +821,7 @@ export interface DeveloperJSDocs {
     code: string;
   }>;
   blocked_tokens: string[];
+  risk_tokens?: string[];
 }
 
 

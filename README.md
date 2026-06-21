@@ -117,6 +117,10 @@ pnpm build
 
 ## 安全提示
 
+### 开发者模式
+
+开发者模式通过仪表盘输入 `DEBUGMODE` 并二次验证管理员密码开启；再次输入 `DEBUGMODE` 可关闭。关闭后已保存的 JS 预设和 Telegram 指令配置会保留，但所有 `js:` / `js:preset:<id>` 指令及相关 JS 交互会被服务端阻断。JS 沙箱使用 Goja，提供受控 `users.*`、`db.*`、`interactions.*`、受限 `fetch()` 和风险提示；不会暴露原始数据库、敏感配置、Token、密码、Telegram ID 或 Emby ID。
+
 - 生产环境请启用 HTTPS，并设置安全的 session cookie。
 - 首次部署请在配置文件临时启用 `setup_mode = true` 后使用网页初始化向导，或直接在配置文件中明确指定管理员；普通首个注册用户不会自动成为管理员。
 - Token、密码、API Key、数据库 URL 等敏感信息不要写入公开 issue、日志或截图。

@@ -3,7 +3,12 @@ package api
 import (
 	"context"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,7 +17,10 @@ import (
 	"github.com/prejudice-studio/twilight/internal/store"
 )
 
-const telegramJSPrefix = "js:"
+const (
+	telegramJSPrefix       = "js:"
+	telegramJSPresetPrefix = "preset:"
+)
 
 type developerJSRunOptions struct {
 	Preview     bool
@@ -31,9 +39,33 @@ func (a *App) telegramHandleCustomCommand(ctx context.Context, command string, c
 		return true
 	}
 
-	text, logs, err := a.telegramRunJSCustomCommandWithContext(ctx, strings.TrimSpace(trimmed[len(telegramJSPrefix):]), c, privateChat)
 	user, _ := a.store().FindUserByTelegramID(c.FromID)
+	if !a.store().DeveloperModeEnabled() {
+		a.auditEntryIP("telegram", user.UID, user.Username, "telegram_js_command_blocked", "system", user.UID, map[string]any{
+			"command":      telegramCommand(command),
+			"reason":       "developer_mode_disabled",
+			"private_chat": privateChat,
+		})
+		_ = a.telegramSendMessage(ctx, c.ChatID, "Developer mode is disabled. Custom JS commands are blocked.")
+		return true
+	}
+	script, presetID, err := a.telegramResolveJSCustomCommand(strings.TrimSpace(trimmed[len(telegramJSPrefix):]))
+	if err != nil {
+		a.auditEntryIP("telegram", user.UID, user.Username, "telegram_js_command_blocked", "system", user.UID, map[string]any{
+			"command":      telegramCommand(command),
+			"reason":       err.Error(),
+			"preset_id":    valueOrNilInt64(presetID),
+			"private_chat": privateChat,
+		})
+		_ = a.telegramSendMessage(ctx, c.ChatID, "Custom JS command is not available. Please contact an administrator.")
+		return true
+	}
+	c.Command = telegramCommand(command)
+	text, logs, err := a.telegramRunJSCustomCommandWithContext(ctx, script, c, privateChat)
 	detail := map[string]any{"command": telegramCommand(command), "ok": err == nil, "private_chat": privateChat}
+	if presetID > 0 {
+		detail["preset_id"] = presetID
+	}
 	if len(logs) > 0 {
 		detail["logs"] = logs
 	}
@@ -47,6 +79,29 @@ func (a *App) telegramHandleCustomCommand(ctx context.Context, command string, c
 	}
 	_ = a.telegramSendMessage(ctx, c.ChatID, a.telegramRenderText(text))
 	return true
+}
+
+func (a *App) telegramResolveJSCustomCommand(script string) (string, int64, error) {
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(script)), telegramJSPresetPrefix) {
+		return strings.TrimSpace(script), 0, nil
+	}
+	rawID := strings.TrimSpace(script[len(telegramJSPresetPrefix):])
+	id, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil || id <= 0 {
+		return "", 0, fmt.Errorf("invalid_preset_reference")
+	}
+	preset, ok := a.store().DeveloperJSPreset(id)
+	if !ok || strings.TrimSpace(preset.Code) == "" {
+		return "", id, fmt.Errorf("preset_not_found")
+	}
+	return strings.TrimSpace(preset.Code), id, nil
+}
+
+func valueOrNilInt64(value int64) any {
+	if value == 0 {
+		return nil
+	}
+	return value
 }
 
 func (a *App) telegramRunJSCustomCommand(code string, c telegramCommandCtx, privateChat bool) (string, []string, error) {
@@ -79,12 +134,23 @@ func (a *App) telegramRunJSCustomCommandWithOptions(code string, c telegramComma
 	vm := goja.New()
 	replies := make([]string, 0, 4)
 	logs = make([]string, 0, 8)
+	commandName := telegramCommand(c.Command)
 	_ = vm.Set("ctx", map[string]any{
 		"private_chat": privateChat,
 		"command_time": time.Now().Unix(),
 		"preview":      opts.Preview,
+		"command":      commandName,
+	})
+	_ = vm.Set("command", map[string]any{
+		"name":         commandName,
+		"args":         c.Args,
+		"text":         strings.Join(c.Args, " "),
+		"private_chat": privateChat,
+		"preview":      opts.Preview,
+		"from_id":      c.FromID != 0,
 	})
 	_ = vm.Set("args", c.Args)
+	_ = vm.Set("globalThis", vm.GlobalObject())
 	_ = vm.Set("user", developerJSUserSnapshot(user))
 	_ = vm.Set("constants", map[string]any{
 		"roles": map[string]int{
@@ -98,6 +164,7 @@ func (a *App) telegramRunJSCustomCommandWithOptions(code string, c telegramComma
 		},
 	})
 	opts.PrivateChat = privateChat
+	_ = vm.Set("db", a.developerJSDBAPI(vm, &user, opts, &logs))
 	_ = vm.Set("users", a.developerJSUsersAPI(vm, &user, opts, &logs))
 	_ = vm.Set("getUser", func(call goja.FunctionCall) goja.Value {
 		return a.developerJSGetUserByUID(vm, &user, call.Argument(0), &logs)
@@ -133,6 +200,14 @@ func (a *App) telegramRunJSCustomCommandWithOptions(code string, c telegramComma
 		}
 		return vm.ToValue(allowed)
 	})
+	_ = vm.Set("authAdmin", func(goja.FunctionCall) goja.Value {
+		return vm.ToValue(user.Role == store.RoleAdmin)
+	})
+	_ = vm.Set("fetch", a.developerJSFetchAPI(vm, opts, &logs))
+	_ = vm.Set("setTimeout", developerJSTimerAPI(vm, &logs, "setTimeout"))
+	_ = vm.Set("setInterval", developerJSTimerAPI(vm, &logs, "setInterval"))
+	_ = vm.Set("clearTimeout", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
+	_ = vm.Set("clearInterval", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
 	_ = vm.Set("config", func(call goja.FunctionCall) goja.Value {
 		key := call.Argument(0).String()
 		value, ok := developerJSConfigValue(a.cfg(), key)
@@ -300,6 +375,161 @@ func (a *App) developerJSUsersAPI(vm *goja.Runtime, user *store.User, opts devel
 			return vm.ToValue(result)
 		},
 	}
+}
+
+func (a *App) developerJSDBAPI(vm *goja.Runtime, user *store.User, opts developerJSRunOptions, logs *[]string) map[string]any {
+	return map[string]any{
+		"schema": func(goja.FunctionCall) goja.Value {
+			return vm.ToValue(developerJSDBSchema())
+		},
+		"collections": func(goja.FunctionCall) goja.Value {
+			return vm.ToValue([]string{"users", "regcodes", "invite_codes", "media_requests", "announcements", "tickets", "developer_js_presets"})
+		},
+		"count": func(call goja.FunctionCall) goja.Value {
+			name := strings.ToLower(strings.TrimSpace(call.Argument(0).String()))
+			count, ok := a.developerJSDBCount(name, user)
+			if !ok {
+				if len(*logs) < 8 {
+					*logs = append(*logs, "db.count denied: "+name)
+				}
+				return vm.ToValue(-1)
+			}
+			return vm.ToValue(count)
+		},
+		"currentUser": func(goja.FunctionCall) goja.Value {
+			return vm.ToValue(developerJSUserSnapshot(*user))
+		},
+		"getUser": func(call goja.FunctionCall) goja.Value {
+			return a.developerJSGetUserByUID(vm, user, call.Argument(0), logs)
+		},
+		"updateCurrentUser": func(call goja.FunctionCall) goja.Value {
+			return a.developerJSUpdateCurrentUser(vm, user, opts, logs, call.Argument(0).Export())
+		},
+	}
+}
+
+func developerJSDBSchema() map[string]any {
+	userFields := []string{
+		"uid", "username", "role", "active", "expired_at", "created_at", "register_time",
+		"has_emby", "emby_disabled", "email_verified", "email_verified_at", "telegram_bound",
+		"notify_on_login_telegram", "notify_on_login_email",
+	}
+	return map[string]any{
+		"users": map[string]any{
+			"read":   "current user, or exact UID lookup when current user is admin",
+			"write":  "current user notification preferences only",
+			"fields": userFields,
+		},
+		"regcodes":             map[string]any{"read": "admin count only", "write": "not available"},
+		"invite_codes":         map[string]any{"read": "admin count only", "write": "not available"},
+		"media_requests":       map[string]any{"read": "current user count; admin count", "write": "not available"},
+		"announcements":        map[string]any{"read": "visible count", "write": "not available"},
+		"tickets":              map[string]any{"read": "current user count; admin count", "write": "not available"},
+		"developer_js_presets": map[string]any{"read": "admin count only", "write": "manage through developer preset APIs"},
+	}
+}
+
+func (a *App) developerJSDBCount(name string, user *store.User) (int, bool) {
+	admin := user != nil && user.Role == store.RoleAdmin
+	switch name {
+	case "users":
+		if !admin {
+			return 0, false
+		}
+		return len(a.store().ListUsers()), true
+	case "regcodes":
+		if !admin {
+			return 0, false
+		}
+		return len(a.store().ListRegCodes()), true
+	case "invite_codes":
+		if !admin {
+			return 0, false
+		}
+		return a.store().CountInviteCodes(), true
+	case "media_requests":
+		if admin {
+			return len(a.store().ListMediaRequests(0, true)), true
+		}
+		if user == nil || user.UID == 0 {
+			return 0, false
+		}
+		return len(a.store().ListMediaRequests(user.UID, false)), true
+	case "announcements":
+		return len(a.store().ListAnnouncements(false)), true
+	case "tickets":
+		if admin {
+			return len(a.store().ListTickets(store.TicketFilter{})), true
+		}
+		if user == nil || user.UID == 0 {
+			return 0, false
+		}
+		return len(a.store().ListTickets(store.TicketFilter{UID: user.UID})), true
+	case "developer_js_presets":
+		if !admin {
+			return 0, false
+		}
+		return len(a.store().ListDeveloperJSPresets()), true
+	default:
+		return 0, false
+	}
+}
+
+func (a *App) developerJSUpdateCurrentUser(vm *goja.Runtime, user *store.User, opts developerJSRunOptions, logs *[]string, patch any) goja.Value {
+	result := map[string]any{"ok": false}
+	if user == nil || user.UID == 0 {
+		result["error"] = "no_bound_user"
+		return vm.ToValue(result)
+	}
+	telegram, hasTelegram := developerJSBoolOption(patch, "notify_on_login_telegram")
+	if !hasTelegram {
+		telegram, hasTelegram = developerJSBoolOption(patch, "telegram")
+	}
+	email, hasEmail := developerJSBoolOption(patch, "notify_on_login_email")
+	if !hasEmail {
+		email, hasEmail = developerJSBoolOption(patch, "email")
+	}
+	if !hasTelegram && !hasEmail {
+		result["error"] = "invalid_patch"
+		return vm.ToValue(result)
+	}
+	result["uid"] = user.UID
+	if hasTelegram {
+		result["notify_on_login_telegram"] = telegram
+	}
+	if hasEmail {
+		result["notify_on_login_email"] = email
+	}
+	if opts.Preview {
+		result["dry_run"] = true
+		result["ok"] = true
+		return vm.ToValue(result)
+	}
+	updated, err := a.store().UpdateUser(user.UID, func(u *store.User) error {
+		if hasTelegram {
+			u.NotifyOnLoginTelegram = telegram
+		}
+		if hasEmail {
+			u.NotifyOnLoginEmail = email
+		}
+		return nil
+	})
+	if err != nil {
+		result["error"] = err.Error()
+		return vm.ToValue(result)
+	}
+	*user = updated
+	result["ok"] = true
+	if len(*logs) < 8 {
+		*logs = append(*logs, "db.updateCurrentUser updated current user")
+	}
+	a.auditEntryIP("telegram", updated.UID, updated.Username, "telegram_js_db_user_update", "user", updated.UID, map[string]any{
+		"telegram":     valueOrNil(hasTelegram, telegram),
+		"email":        valueOrNil(hasEmail, email),
+		"script_api":   "db.updateCurrentUser",
+		"private_chat": opts.PrivateChat,
+	})
+	return vm.ToValue(result)
 }
 
 func developerJSBoolOption(input any, key string) (bool, bool) {
@@ -546,6 +776,117 @@ func developerJSTimeAPI(vm *goja.Runtime) map[string]any {
 			return vm.ToValue(time.Unix(ts, 0).UTC().Format(time.RFC3339))
 		},
 	}
+}
+
+func developerJSTimerAPI(vm *goja.Runtime, logs *[]string, name string) func(goja.FunctionCall) goja.Value {
+	return func(call goja.FunctionCall) goja.Value {
+		fn, ok := goja.AssertFunction(call.Argument(0))
+		if !ok {
+			return vm.ToValue(0)
+		}
+		delay := call.Argument(1).ToInteger()
+		if len(*logs) < 8 {
+			*logs = append(*logs, fmt.Sprintf("%s executed synchronously; requested delay=%dms", name, delay))
+		}
+		_, _ = fn(goja.Undefined())
+		return vm.ToValue(1)
+	}
+}
+
+func (a *App) developerJSFetchAPI(vm *goja.Runtime, opts developerJSRunOptions, logs *[]string) func(goja.FunctionCall) goja.Value {
+	return func(call goja.FunctionCall) goja.Value {
+		rawURL := strings.TrimSpace(call.Argument(0).String())
+		if rawURL == "" {
+			return vm.ToValue(map[string]any{"ok": false, "blocked": true, "error": "empty_url"})
+		}
+		if len(*logs) < 8 {
+			*logs = append(*logs, "fetch called")
+		}
+		parsed, err := url.Parse(rawURL)
+		if err != nil || parsed.Hostname() == "" {
+			return vm.ToValue(map[string]any{"ok": false, "blocked": true, "error": "invalid_url"})
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return vm.ToValue(map[string]any{"ok": false, "blocked": true, "error": "scheme_not_allowed"})
+		}
+		if err := developerJSValidateFetchHost(opts.Context, parsed.Hostname()); err != nil {
+			return vm.ToValue(map[string]any{"ok": false, "blocked": true, "error": err.Error()})
+		}
+		method := "GET"
+		if options, ok := call.Argument(1).Export().(map[string]any); ok {
+			if rawMethod, ok := options["method"]; ok {
+				method = strings.ToUpper(strings.TrimSpace(fmt.Sprint(rawMethod)))
+			}
+		}
+		if method == "" {
+			method = "GET"
+		}
+		if method != "GET" && method != "POST" && method != "HEAD" {
+			return vm.ToValue(map[string]any{"ok": false, "blocked": true, "error": "method_not_allowed"})
+		}
+		ctx := opts.Context
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		reqCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+		defer cancel()
+		req, err := http.NewRequestWithContext(reqCtx, method, parsed.String(), nil)
+		if err != nil {
+			return vm.ToValue(map[string]any{"ok": false, "blocked": true, "error": "request_failed"})
+		}
+		req.Header.Set("User-Agent", "TwilightDeveloperJS/1.0")
+		client := http.Client{
+			Timeout: 1500 * time.Millisecond,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return vm.ToValue(map[string]any{"ok": false, "error": developerJSSafeError(err).Error()})
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		return vm.ToValue(map[string]any{
+			"ok":         resp.StatusCode >= 200 && resp.StatusCode < 300,
+			"status":     resp.StatusCode,
+			"statusText": resp.Status,
+			"text":       developerJSLimitText(string(body), 4096),
+			"truncated":  len(body) >= 8192,
+		})
+	}
+}
+
+func developerJSValidateFetchHost(ctx context.Context, host string) error {
+	lower := strings.ToLower(strings.TrimSpace(host))
+	if lower == "localhost" || strings.HasSuffix(lower, ".localhost") {
+		return fmt.Errorf("host_not_allowed")
+	}
+	if ip := net.ParseIP(lower); ip != nil {
+		if developerJSPrivateIP(ip) {
+			return fmt.Errorf("host_not_allowed")
+		}
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	ips, err := net.DefaultResolver.LookupIPAddr(lookupCtx, host)
+	if err != nil || len(ips) == 0 {
+		return fmt.Errorf("host_lookup_failed")
+	}
+	for _, addr := range ips {
+		if developerJSPrivateIP(addr.IP) {
+			return fmt.Errorf("host_not_allowed")
+		}
+	}
+	return nil
+}
+
+func developerJSPrivateIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalMulticast() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()
 }
 
 func developerJSAnySlice(input any) []any {

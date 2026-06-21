@@ -32,6 +32,7 @@ type telegramCommandCtx struct {
 	ChatID   int64
 	FromID   int64
 	Username string
+	Command  string
 	// Args 是 fields[1:]，handler 自行选择 strings.Join 还是按位置取。
 	Args []string
 }
