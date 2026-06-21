@@ -2,12 +2,14 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +29,8 @@ type developerJSRunOptions struct {
 	PrivateChat bool
 	Context     context.Context
 }
+
+type developerJSExitSignal struct{}
 
 func (a *App) telegramHandleCustomCommand(ctx context.Context, command string, c telegramCommandCtx, privateChat bool) bool {
 	reply, ok := a.telegramCustomCommandReply(command)
@@ -122,7 +126,7 @@ func (a *App) telegramRunJSCustomCommandWithOptions(code string, c telegramComma
 	if ok, _ := result["ok"].(bool); !ok {
 		return "", nil, fmt.Errorf("developer js command rejected: %v", result["errors"])
 	}
-	program, err := goja.Compile("telegram_custom_command.js", code, false)
+	program, err := goja.Compile("telegram_custom_command.js", "(function(){\n"+code+"\n})();", false)
 	if err != nil {
 		return "", nil, developerJSSafeError(err)
 	}
@@ -151,33 +155,69 @@ func (a *App) telegramRunJSCustomCommandWithOptions(code string, c telegramComma
 	})
 	_ = vm.Set("args", c.Args)
 	_ = vm.Set("globalThis", vm.GlobalObject())
-	_ = vm.Set("user", developerJSUserSnapshot(user))
+	userSnapshot := developerJSUserSnapshot(user)
+	roles := map[string]int{
+		"admin":     int(store.RoleAdmin),
+		"user":      int(store.RoleNormal),
+		"whitelist": int(store.RoleWhitelist),
+	}
+	_ = vm.Set("user", userSnapshot)
+	_ = vm.Set("me", userSnapshot)
 	_ = vm.Set("constants", map[string]any{
-		"roles": map[string]int{
-			"admin":     int(store.RoleAdmin),
-			"user":      int(store.RoleNormal),
-			"whitelist": int(store.RoleWhitelist),
-		},
+		"roles": roles,
 		"limits": map[string]int{
 			"max_replies": 4,
 			"max_logs":    8,
 		},
 	})
+	_ = vm.Set("roles", roles)
 	opts.PrivateChat = privateChat
 	_ = vm.Set("db", a.developerJSDBAPI(vm, &user, opts, &logs))
 	_ = vm.Set("users", a.developerJSUsersAPI(vm, &user, opts, &logs))
+	_ = vm.Set("admin", a.developerJSAdminAPI(vm, &user, opts, &logs))
+	_ = vm.Set("system", a.developerJSSystemAPI(vm, &user))
+	_ = vm.Set("input", developerJSInputAPI(vm, c.Args, commandName, privateChat, opts.Preview))
 	_ = vm.Set("getUser", func(call goja.FunctionCall) goja.Value {
 		return a.developerJSGetUserByUID(vm, &user, call.Argument(0), &logs)
 	})
 	_ = vm.Set("text", developerJSTextAPI(vm))
 	_ = vm.Set("arrays", developerJSArraysAPI(vm))
 	_ = vm.Set("time", developerJSTimeAPI(vm))
+	_ = vm.Set("format", developerJSFormatAPI(vm))
 	_ = vm.Set("interactions", a.developerJSInteractionsAPI(vm, c, opts, &logs))
 	_ = vm.Set("reply", func(call goja.FunctionCall) goja.Value {
 		if len(replies) < 4 {
 			replies = append(replies, developerJSLimitText(call.Argument(0).String(), 1200))
 		}
 		return goja.Undefined()
+	})
+	exitWithMessage := func(message string) {
+		if strings.TrimSpace(message) != "" && len(replies) < 4 {
+			replies = append(replies, developerJSLimitText(message, 1200))
+		}
+		if len(logs) < 8 {
+			logs = append(logs, "exit called")
+		}
+		vm.Interrupt(developerJSExitSignal{})
+	}
+	_ = vm.Set("exit", func(call goja.FunctionCall) goja.Value {
+		message := ""
+		if len(call.Arguments) > 0 && !goja.IsUndefined(call.Argument(0)) && !goja.IsNull(call.Argument(0)) {
+			message = call.Argument(0).String()
+		}
+		exitWithMessage(message)
+		return goja.Undefined()
+	})
+	_ = vm.Set("assert", func(call goja.FunctionCall) goja.Value {
+		if boolish(call.Argument(0).Export()) {
+			return vm.ToValue(true)
+		}
+		message := "assertion failed"
+		if len(call.Arguments) > 1 && !goja.IsUndefined(call.Argument(1)) && !goja.IsNull(call.Argument(1)) {
+			message = call.Argument(1).String()
+		}
+		exitWithMessage(message)
+		return vm.ToValue(false)
 	})
 	_ = vm.Set("log", func(call goja.FunctionCall) goja.Value {
 		if len(logs) < 8 {
@@ -230,9 +270,21 @@ func (a *App) telegramRunJSCustomCommandWithOptions(code string, c telegramComma
 	})
 	defer timer.Stop()
 	if _, err := vm.RunProgram(program); err != nil {
+		if developerJSWasExit(err) {
+			return strings.Join(replies, "\n"), logs, nil
+		}
 		return "", logs, developerJSSafeError(err)
 	}
 	return strings.Join(replies, "\n"), logs, nil
+}
+
+func developerJSWasExit(err error) bool {
+	var interrupted *goja.InterruptedError
+	if !errors.As(err, &interrupted) {
+		return false
+	}
+	_, ok := interrupted.Value().(developerJSExitSignal)
+	return ok
 }
 
 func developerJSSafeError(err error) error {
@@ -250,21 +302,114 @@ func developerJSLimitText(value string, limit int) string {
 }
 
 func developerJSUserSnapshot(user store.User) map[string]any {
+	hasEmail := strings.TrimSpace(user.Email) != ""
 	return map[string]any{
 		"uid":                      user.UID,
 		"username":                 user.Username,
+		"email":                    user.Email,
+		"email_masked":             maskEmail(user.Email),
+		"has_email":                hasEmail,
 		"role":                     user.Role,
+		"role_name":                roleName(user.Role),
 		"active":                   user.Active,
 		"expired_at":               zeroNil(user.ExpiredAt),
+		"expire_status":            expireStatus(user.ExpiredAt),
 		"created_at":               zeroNil(user.CreatedAt),
 		"register_time":            zeroNil(user.RegisterTime),
 		"has_emby":                 strings.TrimSpace(user.EmbyID) != "",
+		"emby_username":            user.EmbyUsername,
 		"emby_disabled":            user.EmbyDisabled,
+		"avatar":                   user.Avatar,
+		"background":               user.Background,
+		"bgm_mode":                 user.BGMMode,
+		"bgm_token_set":            strings.TrimSpace(user.BGMToken) != "",
+		"emby_grant_locked":        user.EmbyGrantLocked,
+		"registration_source":      user.RegistrationSource,
+		"pending_emby":             user.PendingEmby,
+		"pending_emby_days":        user.PendingEmbyDays,
 		"email_verified":           user.EmailVerified,
 		"email_verified_at":        zeroNil(user.EmailVerifiedAt),
 		"telegram_bound":           user.TelegramID != 0,
+		"telegram_id":              zeroNil(user.TelegramID),
+		"telegram_username":        user.TelegramUsername,
 		"notify_on_login_telegram": user.NotifyOnLoginTelegram,
 		"notify_on_login_email":    user.NotifyOnLoginEmail,
+		"legacy_api_key_enabled":   user.LegacyAPIKeyStatus,
+		"rebinding_in_progress":    user.RebindingInProgress,
+		"rebinding_since":          zeroNil(user.RebindingSince),
+	}
+}
+
+func developerJSInputAPI(vm *goja.Runtime, args []string, commandName string, privateChat bool, preview bool) map[string]any {
+	textValue := strings.Join(args, " ")
+	first := ""
+	if len(args) > 0 {
+		first = args[0]
+	}
+	rest := []string{}
+	if len(args) > 1 {
+		rest = append(rest, args[1:]...)
+	}
+	return map[string]any{
+		"command":      commandName,
+		"args":         args,
+		"text":         textValue,
+		"count":        len(args),
+		"first":        first,
+		"rest":         rest,
+		"private_chat": privateChat,
+		"preview":      preview,
+		"arg": func(call goja.FunctionCall) goja.Value {
+			index := int(call.Argument(0).ToInteger())
+			fallback := ""
+			if len(call.Arguments) > 1 {
+				fallback = call.Argument(1).String()
+			}
+			if index < 0 || index >= len(args) {
+				return vm.ToValue(fallback)
+			}
+			return vm.ToValue(args[index])
+		},
+		"has": func(call goja.FunctionCall) goja.Value {
+			index := int(call.Argument(0).ToInteger())
+			return vm.ToValue(index >= 0 && index < len(args) && strings.TrimSpace(args[index]) != "")
+		},
+		"flag": func(call goja.FunctionCall) goja.Value {
+			name := strings.TrimLeft(strings.ToLower(strings.TrimSpace(call.Argument(0).String())), "-")
+			if name == "" {
+				return vm.ToValue(false)
+			}
+			for _, arg := range args {
+				trimmed := strings.TrimSpace(arg)
+				if strings.EqualFold(trimmed, "--"+name) || strings.EqualFold(trimmed, "-"+name) {
+					return vm.ToValue(true)
+				}
+			}
+			return vm.ToValue(false)
+		},
+		"named": func(call goja.FunctionCall) goja.Value {
+			name := strings.TrimLeft(strings.ToLower(strings.TrimSpace(call.Argument(0).String())), "-")
+			fallback := ""
+			if len(call.Arguments) > 1 {
+				fallback = call.Argument(1).String()
+			}
+			if name == "" {
+				return vm.ToValue(fallback)
+			}
+			for i, arg := range args {
+				trimmed := strings.TrimSpace(arg)
+				lower := strings.ToLower(trimmed)
+				for _, prefix := range []string{"--" + name + "=", "-" + name + "="} {
+					if strings.HasPrefix(lower, prefix) {
+						return vm.ToValue(trimmed[len(prefix):])
+					}
+				}
+				if (strings.EqualFold(trimmed, "--"+name) || strings.EqualFold(trimmed, "-"+name)) && i+1 < len(args) {
+					return vm.ToValue(args[i+1])
+				}
+			}
+			return vm.ToValue(fallback)
+		},
 	}
 }
 
@@ -317,6 +462,12 @@ func (a *App) developerJSUsersAPI(vm *goja.Runtime, user *store.User, opts devel
 		},
 		"byUID": func(call goja.FunctionCall) goja.Value {
 			return a.developerJSGetUserByUID(vm, user, call.Argument(0), logs)
+		},
+		"search": func(call goja.FunctionCall) goja.Value {
+			return vm.ToValue(a.developerJSSearchUsers(user, call.Argument(0).String(), int(call.Argument(1).ToInteger()), logs))
+		},
+		"list": func(call goja.FunctionCall) goja.Value {
+			return vm.ToValue(a.developerJSListUsers(user, call.Argument(0).Export(), logs))
 		},
 		"hasRole": func(call goja.FunctionCall) goja.Value {
 			return vm.ToValue(hasRole(call.Argument(0).String()))
@@ -374,6 +525,50 @@ func (a *App) developerJSUsersAPI(vm *goja.Runtime, user *store.User, opts devel
 			})
 			return vm.ToValue(result)
 		},
+		"setActive": func(call goja.FunctionCall) goja.Value {
+			return a.developerJSSetUserActive(vm, user, opts, logs, call.Argument(0), call.Argument(1).Export())
+		},
+		"setRole": func(call goja.FunctionCall) goja.Value {
+			return a.developerJSSetUserRole(vm, user, opts, logs, call.Argument(0), call.Argument(1))
+		},
+		"setExpiry": func(call goja.FunctionCall) goja.Value {
+			return a.developerJSSetUserExpiry(vm, user, opts, logs, call.Argument(0), call.Argument(1))
+		},
+		"update": func(call goja.FunctionCall) goja.Value {
+			return a.developerJSUpdateUser(vm, user, opts, logs, call.Argument(0), call.Argument(1).Export())
+		},
+	}
+}
+
+func (a *App) developerJSAdminAPI(vm *goja.Runtime, user *store.User, opts developerJSRunOptions, logs *[]string) map[string]any {
+	return map[string]any{
+		"ok": func(goja.FunctionCall) goja.Value {
+			return vm.ToValue(user != nil && user.Role == store.RoleAdmin)
+		},
+		"ensure": func(goja.FunctionCall) goja.Value {
+			return vm.ToValue(developerJSAdminUser(user, logs, "admin.ensure"))
+		},
+		"searchUsers": func(call goja.FunctionCall) goja.Value {
+			return vm.ToValue(a.developerJSSearchUsers(user, call.Argument(0).String(), int(call.Argument(1).ToInteger()), logs))
+		},
+		"listUsers": func(call goja.FunctionCall) goja.Value {
+			return vm.ToValue(a.developerJSListUsers(user, call.Argument(0).Export(), logs))
+		},
+		"updateUser": func(call goja.FunctionCall) goja.Value {
+			return a.developerJSUpdateUser(vm, user, opts, logs, call.Argument(0), call.Argument(1).Export())
+		},
+		"setActive": func(call goja.FunctionCall) goja.Value {
+			return a.developerJSSetUserActive(vm, user, opts, logs, call.Argument(0), call.Argument(1).Export())
+		},
+		"setRole": func(call goja.FunctionCall) goja.Value {
+			return a.developerJSSetUserRole(vm, user, opts, logs, call.Argument(0), call.Argument(1))
+		},
+		"setExpiry": func(call goja.FunctionCall) goja.Value {
+			return a.developerJSSetUserExpiry(vm, user, opts, logs, call.Argument(0), call.Argument(1))
+		},
+		"stats": func(goja.FunctionCall) goja.Value {
+			return vm.ToValue(a.developerJSSystemStats(user))
+		},
 	}
 }
 
@@ -402,8 +597,17 @@ func (a *App) developerJSDBAPI(vm *goja.Runtime, user *store.User, opts develope
 		"getUser": func(call goja.FunctionCall) goja.Value {
 			return a.developerJSGetUserByUID(vm, user, call.Argument(0), logs)
 		},
+		"findUsers": func(call goja.FunctionCall) goja.Value {
+			return vm.ToValue(a.developerJSSearchUsers(user, call.Argument(0).String(), int(call.Argument(1).ToInteger()), logs))
+		},
+		"listUsers": func(call goja.FunctionCall) goja.Value {
+			return vm.ToValue(a.developerJSListUsers(user, call.Argument(0).Export(), logs))
+		},
 		"updateCurrentUser": func(call goja.FunctionCall) goja.Value {
 			return a.developerJSUpdateCurrentUser(vm, user, opts, logs, call.Argument(0).Export())
+		},
+		"updateUser": func(call goja.FunctionCall) goja.Value {
+			return a.developerJSUpdateUser(vm, user, opts, logs, call.Argument(0), call.Argument(1).Export())
 		},
 	}
 }
@@ -411,13 +615,17 @@ func (a *App) developerJSDBAPI(vm *goja.Runtime, user *store.User, opts develope
 func developerJSDBSchema() map[string]any {
 	userFields := []string{
 		"uid", "username", "role", "active", "expired_at", "created_at", "register_time",
-		"has_emby", "emby_disabled", "email_verified", "email_verified_at", "telegram_bound",
-		"notify_on_login_telegram", "notify_on_login_email",
+		"email", "email_masked", "has_email", "role_name", "expire_status", "has_emby",
+		"emby_username", "emby_disabled", "avatar", "background", "bgm_mode", "bgm_token_set",
+		"emby_grant_locked", "registration_source", "pending_emby", "pending_emby_days",
+		"email_verified", "email_verified_at", "telegram_bound", "telegram_id", "telegram_username",
+		"notify_on_login_telegram", "notify_on_login_email", "legacy_api_key_enabled",
+		"rebinding_in_progress", "rebinding_since",
 	}
 	return map[string]any{
 		"users": map[string]any{
-			"read":   "current user, or exact UID lookup when current user is admin",
-			"write":  "current user notification preferences only",
+			"read":   "current user, self lookup, admin exact UID lookup, admin list/search",
+			"write":  "current user notification preferences; admin controlled active/role/expiry/notification updates",
 			"fields": userFields,
 		},
 		"regcodes":             map[string]any{"read": "admin count only", "write": "not available"},
@@ -473,6 +681,372 @@ func (a *App) developerJSDBCount(name string, user *store.User) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func developerJSAdminUser(user *store.User, logs *[]string, action string) bool {
+	if user == nil || user.UID == 0 {
+		if logs != nil && len(*logs) < 8 {
+			*logs = append(*logs, action+" denied: no bound user")
+		}
+		return false
+	}
+	if user.Role != store.RoleAdmin {
+		if logs != nil && len(*logs) < 8 {
+			*logs = append(*logs, action+" denied: admin role required")
+		}
+		return false
+	}
+	return true
+}
+
+func developerJSUserMatches(u store.User, query string) bool {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return false
+	}
+	if strconv.FormatInt(u.UID, 10) == query {
+		return true
+	}
+	fields := []string{u.Username, u.Email, u.TelegramUsername, u.EmbyUsername}
+	if u.TelegramID != 0 {
+		fields = append(fields, strconv.FormatInt(u.TelegramID, 10))
+	}
+	for _, field := range fields {
+		if strings.Contains(strings.ToLower(strings.TrimSpace(field)), query) {
+			return true
+		}
+	}
+	return false
+}
+
+func developerJSLimit(limit int, fallback int, max int) int {
+	if limit <= 0 {
+		limit = fallback
+	}
+	if limit > max {
+		limit = max
+	}
+	return limit
+}
+
+func (a *App) developerJSSearchUsers(user *store.User, query string, limit int, logs *[]string) []map[string]any {
+	if !developerJSAdminUser(user, logs, "users.search") {
+		return nil
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return []map[string]any{}
+	}
+	limit = developerJSLimit(limit, 10, 50)
+	users := a.store().ListUsers()
+	sort.Slice(users, func(i, j int) bool { return users[i].UID < users[j].UID })
+	out := make([]map[string]any, 0, limit)
+	for _, u := range users {
+		if !developerJSUserMatches(u, query) {
+			continue
+		}
+		out = append(out, developerJSUserSnapshot(u))
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func (a *App) developerJSListUsers(user *store.User, options any, logs *[]string) []map[string]any {
+	if user == nil || user.UID == 0 {
+		if logs != nil && len(*logs) < 8 {
+			*logs = append(*logs, "users.list denied: no bound user")
+		}
+		return nil
+	}
+	if user.Role != store.RoleAdmin {
+		return []map[string]any{developerJSUserSnapshot(*user)}
+	}
+	values, _ := options.(map[string]any)
+	limit := 20
+	offset := 0
+	roleFilter := ""
+	activeFilter := ""
+	if values != nil {
+		limit = int(numeric(values["limit"]))
+		offset = int(numeric(values["offset"]))
+		if raw, ok := values["role"]; ok {
+			roleFilter = strings.TrimSpace(fmt.Sprint(raw))
+		}
+		if raw, ok := values["active"]; ok {
+			activeFilter = strings.ToLower(strings.TrimSpace(fmt.Sprint(raw)))
+		}
+	}
+	limit = developerJSLimit(limit, 20, 50)
+	if offset < 0 {
+		offset = 0
+	}
+	users := a.store().ListUsers()
+	sort.Slice(users, func(i, j int) bool { return users[i].UID < users[j].UID })
+	out := make([]map[string]any, 0, limit)
+	skipped := 0
+	for _, u := range users {
+		if roleFilter != "" && strconv.Itoa(u.Role) != roleFilter && strings.ToLower(roleName(u.Role)) != strings.ToLower(roleFilter) {
+			continue
+		}
+		if activeFilter != "" && strconv.FormatBool(u.Active) != activeFilter {
+			continue
+		}
+		if skipped < offset {
+			skipped++
+			continue
+		}
+		out = append(out, developerJSUserSnapshot(u))
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func (a *App) developerJSSetUserActive(vm *goja.Runtime, actor *store.User, opts developerJSRunOptions, logs *[]string, uidValue goja.Value, activeValue any) goja.Value {
+	result := map[string]any{"ok": false}
+	if !developerJSAdminUser(actor, logs, "users.setActive") {
+		result["error"] = "admin_required"
+		return vm.ToValue(result)
+	}
+	uid := uidValue.ToInteger()
+	if uid <= 0 {
+		result["error"] = "invalid_uid"
+		return vm.ToValue(result)
+	}
+	active, ok := activeValue.(bool)
+	if !ok {
+		result["error"] = "invalid_active"
+		return vm.ToValue(result)
+	}
+	result["uid"] = uid
+	result["active"] = active
+	if opts.Preview {
+		result["dry_run"] = true
+		result["ok"] = true
+		return vm.ToValue(result)
+	}
+	updated, err := a.store().SetUserActiveAtomic(uid, active)
+	if err != nil {
+		result["error"] = err.Error()
+		return vm.ToValue(result)
+	}
+	result["ok"] = true
+	result["user"] = developerJSUserSnapshot(updated)
+	if logs != nil && len(*logs) < 8 {
+		*logs = append(*logs, "users.setActive updated user")
+	}
+	a.auditEntryIP("telegram", actor.UID, actor.Username, "telegram_js_admin_user_active_update", "admin", updated.UID, map[string]any{
+		"active":       active,
+		"script_api":   "users.setActive",
+		"private_chat": opts.PrivateChat,
+	})
+	return vm.ToValue(result)
+}
+
+func (a *App) developerJSSetUserRole(vm *goja.Runtime, actor *store.User, opts developerJSRunOptions, logs *[]string, uidValue goja.Value, roleValue goja.Value) goja.Value {
+	result := map[string]any{"ok": false}
+	if !developerJSAdminUser(actor, logs, "users.setRole") {
+		result["error"] = "admin_required"
+		return vm.ToValue(result)
+	}
+	uid := uidValue.ToInteger()
+	role := int(roleValue.ToInteger())
+	if uid <= 0 || (role != store.RoleAdmin && role != store.RoleNormal && role != store.RoleWhitelist) {
+		result["error"] = "invalid_payload"
+		return vm.ToValue(result)
+	}
+	result["uid"] = uid
+	result["role"] = role
+	if opts.Preview {
+		result["dry_run"] = true
+		result["ok"] = true
+		return vm.ToValue(result)
+	}
+	updated, err := a.store().SetUserRoleAtomic(uid, role)
+	if err != nil {
+		result["error"] = err.Error()
+		return vm.ToValue(result)
+	}
+	result["ok"] = true
+	result["user"] = developerJSUserSnapshot(updated)
+	if logs != nil && len(*logs) < 8 {
+		*logs = append(*logs, "users.setRole updated user")
+	}
+	a.auditEntryIP("telegram", actor.UID, actor.Username, "telegram_js_admin_user_role_update", "admin", updated.UID, map[string]any{
+		"role":         role,
+		"script_api":   "users.setRole",
+		"private_chat": opts.PrivateChat,
+	})
+	return vm.ToValue(result)
+}
+
+func (a *App) developerJSSetUserExpiry(vm *goja.Runtime, actor *store.User, opts developerJSRunOptions, logs *[]string, uidValue goja.Value, expiryValue goja.Value) goja.Value {
+	result := map[string]any{"ok": false}
+	if !developerJSAdminUser(actor, logs, "users.setExpiry") {
+		result["error"] = "admin_required"
+		return vm.ToValue(result)
+	}
+	uid := uidValue.ToInteger()
+	expiredAt := expiryValue.ToInteger()
+	if uid <= 0 || expiredAt < -1 {
+		result["error"] = "invalid_payload"
+		return vm.ToValue(result)
+	}
+	if expiryIsPermanent(expiredAt) {
+		expiredAt = permanentExpiryUnix
+	}
+	result["uid"] = uid
+	result["expired_at"] = publicExpiryUnix(expiredAt)
+	if opts.Preview {
+		result["dry_run"] = true
+		result["ok"] = true
+		return vm.ToValue(result)
+	}
+	updated, err := a.store().UpdateUser(uid, func(u *store.User) error {
+		u.ExpiredAt = expiredAt
+		if expiredAt == permanentExpiryUnix || expiredAt > time.Now().Unix() {
+			u.Active = true
+		}
+		return nil
+	})
+	if err != nil {
+		result["error"] = err.Error()
+		return vm.ToValue(result)
+	}
+	result["ok"] = true
+	result["user"] = developerJSUserSnapshot(updated)
+	if logs != nil && len(*logs) < 8 {
+		*logs = append(*logs, "users.setExpiry updated user")
+	}
+	a.auditEntryIP("telegram", actor.UID, actor.Username, "telegram_js_admin_user_expiry_update", "admin", updated.UID, map[string]any{
+		"expired_at":   publicExpiryUnix(expiredAt),
+		"script_api":   "users.setExpiry",
+		"private_chat": opts.PrivateChat,
+	})
+	return vm.ToValue(result)
+}
+
+func (a *App) developerJSUpdateUser(vm *goja.Runtime, actor *store.User, opts developerJSRunOptions, logs *[]string, uidValue goja.Value, patch any) goja.Value {
+	result := map[string]any{"ok": false}
+	if !developerJSAdminUser(actor, logs, "users.update") {
+		result["error"] = "admin_required"
+		return vm.ToValue(result)
+	}
+	uid := uidValue.ToInteger()
+	values, ok := patch.(map[string]any)
+	if uid <= 0 || !ok {
+		result["error"] = "invalid_payload"
+		return vm.ToValue(result)
+	}
+	allowed := map[string]any{}
+	active, hasActive := developerJSBoolOption(values, "active")
+	roleRaw, hasRole := values["role"]
+	expiryRaw, hasExpiry := values["expired_at"]
+	telegram, hasTelegram := developerJSBoolOption(values, "notify_on_login_telegram")
+	if !hasTelegram {
+		telegram, hasTelegram = developerJSBoolOption(values, "telegram")
+	}
+	email, hasEmail := developerJSBoolOption(values, "notify_on_login_email")
+	if !hasEmail {
+		email, hasEmail = developerJSBoolOption(values, "email")
+	}
+	if hasActive {
+		allowed["active"] = active
+	}
+	if hasRole {
+		role := int(numeric(roleRaw))
+		if role != store.RoleAdmin && role != store.RoleNormal && role != store.RoleWhitelist {
+			result["error"] = "invalid_role"
+			return vm.ToValue(result)
+		}
+		allowed["role"] = role
+	}
+	if hasExpiry {
+		expiredAt := int64(numeric(expiryRaw))
+		if expiredAt < -1 {
+			result["error"] = "invalid_expired_at"
+			return vm.ToValue(result)
+		}
+		allowed["expired_at"] = expiredAt
+	}
+	if hasTelegram {
+		allowed["notify_on_login_telegram"] = telegram
+	}
+	if hasEmail {
+		allowed["notify_on_login_email"] = email
+	}
+	if len(allowed) == 0 {
+		result["error"] = "empty_patch"
+		return vm.ToValue(result)
+	}
+	result["uid"] = uid
+	result["patch"] = allowed
+	if opts.Preview {
+		result["dry_run"] = true
+		result["ok"] = true
+		return vm.ToValue(result)
+	}
+	var (
+		updated store.User
+		err     error
+	)
+	if hasActive {
+		updated, err = a.store().SetUserActiveAtomic(uid, active)
+		if err != nil {
+			result["error"] = err.Error()
+			return vm.ToValue(result)
+		}
+	}
+	if hasRole {
+		role := int(numeric(roleRaw))
+		updated, err = a.store().SetUserRoleAtomic(uid, role)
+		if err != nil {
+			result["error"] = err.Error()
+			return vm.ToValue(result)
+		}
+	}
+	if hasExpiry || hasTelegram || hasEmail {
+		updated, err = a.store().UpdateUser(uid, func(u *store.User) error {
+			if hasExpiry {
+				expiredAt := int64(numeric(expiryRaw))
+				if expiredAt < -1 {
+					return fmt.Errorf("invalid_expired_at")
+				}
+				if expiryIsPermanent(expiredAt) {
+					expiredAt = permanentExpiryUnix
+				}
+				u.ExpiredAt = expiredAt
+				if expiredAt == permanentExpiryUnix || expiredAt > time.Now().Unix() {
+					u.Active = true
+				}
+			}
+			if hasTelegram {
+				u.NotifyOnLoginTelegram = telegram
+			}
+			if hasEmail {
+				u.NotifyOnLoginEmail = email
+			}
+			return nil
+		})
+		if err != nil {
+			result["error"] = err.Error()
+			return vm.ToValue(result)
+		}
+	}
+	result["ok"] = true
+	result["user"] = developerJSUserSnapshot(updated)
+	if logs != nil && len(*logs) < 8 {
+		*logs = append(*logs, "users.update updated user")
+	}
+	a.auditEntryIP("telegram", actor.UID, actor.Username, "telegram_js_admin_user_update", "admin", updated.UID, map[string]any{
+		"patch":        allowed,
+		"script_api":   "users.update",
+		"private_chat": opts.PrivateChat,
+	})
+	return vm.ToValue(result)
 }
 
 func (a *App) developerJSUpdateCurrentUser(vm *goja.Runtime, user *store.User, opts developerJSRunOptions, logs *[]string, patch any) goja.Value {
@@ -545,6 +1119,114 @@ func developerJSBoolOption(input any, key string) (bool, bool) {
 	return typed, ok
 }
 
+func (a *App) developerJSSystemAPI(vm *goja.Runtime, user *store.User) map[string]any {
+	return map[string]any{
+		"info": func(goja.FunctionCall) goja.Value {
+			cfg := a.cfg()
+			return vm.ToValue(map[string]any{
+				"name":    cfg.AppName,
+				"version": cfg.Version,
+				"features": map[string]any{
+					"telegram_mode":       cfg.TelegramMode,
+					"telegram_force_bind": cfg.ForceBindTelegram,
+					"telegram_panel":      cfg.TelegramEnablePanel,
+					"invite_enabled":      cfg.InviteEnabled,
+					"email_enabled":       cfg.EmailEnabled,
+					"email_force_bind":    cfg.EmailForceBind,
+					"media_request":       cfg.MediaRequestEnabled,
+					"signin_enabled":      cfg.SigninEnabled,
+					"ticket_enabled":      cfg.TicketSystemEnabled,
+					"developer_mode":      a.store().DeveloperModeEnabled(),
+				},
+				"limits": map[string]any{
+					"user":              cfg.UserLimit,
+					"emby_user":         cfg.EmbyUserLimit,
+					"invite_depth":      cfg.InviteMaxDepth,
+					"invite_limit":      cfg.InviteLimit,
+					"reply_segments":    4,
+					"log_lines":         8,
+					"script_timeout_ms": 200,
+				},
+			})
+		},
+		"feature": func(call goja.FunctionCall) goja.Value {
+			key := strings.ToLower(strings.TrimSpace(call.Argument(0).String()))
+			cfg := a.cfg()
+			values := map[string]bool{
+				"telegram_mode":       cfg.TelegramMode,
+				"telegram_force_bind": cfg.ForceBindTelegram,
+				"telegram_panel":      cfg.TelegramEnablePanel,
+				"invite_enabled":      cfg.InviteEnabled,
+				"email_enabled":       cfg.EmailEnabled,
+				"email_force_bind":    cfg.EmailForceBind,
+				"media_request":       cfg.MediaRequestEnabled,
+				"signin_enabled":      cfg.SigninEnabled,
+				"ticket_enabled":      cfg.TicketSystemEnabled,
+				"developer_mode":      a.store().DeveloperModeEnabled(),
+			}
+			return vm.ToValue(values[key])
+		},
+		"stats": func(call goja.FunctionCall) goja.Value {
+			return vm.ToValue(a.developerJSSystemStats(user))
+		},
+	}
+}
+
+func (a *App) developerJSSystemStats(user *store.User) map[string]any {
+	admin := user != nil && user.Role == store.RoleAdmin
+	users := a.store().ListUsers()
+	active := 0
+	admins := 0
+	telegramBound := 0
+	embyBound := 0
+	emailBound := 0
+	emailVerified := 0
+	for _, u := range users {
+		if u.Active {
+			active++
+		}
+		if u.Role == store.RoleAdmin {
+			admins++
+		}
+		if u.TelegramID != 0 {
+			telegramBound++
+		}
+		if strings.TrimSpace(u.EmbyID) != "" {
+			embyBound++
+		}
+		if strings.TrimSpace(u.Email) != "" {
+			emailBound++
+		}
+		if u.EmailVerified {
+			emailVerified++
+		}
+	}
+	result := map[string]any{
+		"users": map[string]any{
+			"total":             len(users),
+			"active":            active,
+			"admins":            admins,
+			"telegram_bound":    telegramBound,
+			"emby_bound":        embyBound,
+			"email_bound":       emailBound,
+			"email_verified":    emailVerified,
+			"admin_detail_view": admin,
+		},
+		"visible_announcements": len(a.store().ListAnnouncements(false)),
+		"developer_mode":        a.store().DeveloperModeEnabled(),
+	}
+	if admin {
+		result["admin_counts"] = map[string]any{
+			"regcodes":             len(a.store().ListRegCodes()),
+			"invite_codes":         a.store().CountInviteCodes(),
+			"media_requests":       len(a.store().ListMediaRequests(0, true)),
+			"tickets":              len(a.store().ListTickets(store.TicketFilter{})),
+			"developer_js_presets": len(a.store().ListDeveloperJSPresets()),
+		}
+	}
+	return result
+}
+
 func valueOrNil(ok bool, value bool) any {
 	if !ok {
 		return nil
@@ -577,6 +1259,31 @@ func developerJSTextAPI(vm *goja.Runtime) map[string]any {
 				lines = append(lines, fmt.Sprintf("%d. %s", i+1, item))
 			}
 			return vm.ToValue(strings.Join(lines, "\n"))
+		},
+		"trim": func(call goja.FunctionCall) goja.Value {
+			return vm.ToValue(strings.TrimSpace(call.Argument(0).String()))
+		},
+		"lower": func(call goja.FunctionCall) goja.Value {
+			return vm.ToValue(strings.ToLower(call.Argument(0).String()))
+		},
+		"upper": func(call goja.FunctionCall) goja.Value {
+			return vm.ToValue(strings.ToUpper(call.Argument(0).String()))
+		},
+		"contains": func(call goja.FunctionCall) goja.Value {
+			return vm.ToValue(strings.Contains(strings.ToLower(call.Argument(0).String()), strings.ToLower(call.Argument(1).String())))
+		},
+		"split": func(call goja.FunctionCall) goja.Value {
+			sep := call.Argument(1).String()
+			if sep == "" {
+				sep = " "
+			}
+			return vm.ToValue(strings.Split(call.Argument(0).String(), sep))
+		},
+		"maskEmail": func(call goja.FunctionCall) goja.Value {
+			return vm.ToValue(maskEmail(call.Argument(0).String()))
+		},
+		"template": func(call goja.FunctionCall) goja.Value {
+			return vm.ToValue(developerJSTemplate(call.Argument(0).String(), call.Argument(1).Export()))
 		},
 	}
 }
@@ -624,6 +1331,31 @@ func developerJSArraysAPI(vm *goja.Runtime) map[string]any {
 				limit = len(items)
 			}
 			return vm.ToValue(items[:limit])
+		},
+		"last": func(call goja.FunctionCall) goja.Value {
+			items := developerJSAnySlice(call.Argument(0).Export())
+			if len(items) == 0 {
+				return goja.Undefined()
+			}
+			return vm.ToValue(items[len(items)-1])
+		},
+		"join": func(call goja.FunctionCall) goja.Value {
+			sep := call.Argument(1).String()
+			return vm.ToValue(strings.Join(developerJSStringSlice(call.Argument(0).Export()), sep))
+		},
+		"includes": func(call goja.FunctionCall) goja.Value {
+			needle := call.Argument(1).String()
+			for _, item := range developerJSStringSlice(call.Argument(0).Export()) {
+				if item == needle {
+					return vm.ToValue(true)
+				}
+			}
+			return vm.ToValue(false)
+		},
+		"sortStrings": func(call goja.FunctionCall) goja.Value {
+			items := developerJSStringSlice(call.Argument(0).Export())
+			sort.Strings(items)
+			return vm.ToValue(items)
 		},
 	}
 }
@@ -775,6 +1507,77 @@ func developerJSTimeAPI(vm *goja.Runtime) map[string]any {
 			}
 			return vm.ToValue(time.Unix(ts, 0).UTC().Format(time.RFC3339))
 		},
+		"fromNow": func(call goja.FunctionCall) goja.Value {
+			seconds := call.Argument(0).ToInteger()
+			return vm.ToValue(time.Now().Add(time.Duration(seconds) * time.Second).Unix())
+		},
+		"addDays": func(call goja.FunctionCall) goja.Value {
+			base := call.Argument(0).ToInteger()
+			if base <= 0 {
+				base = time.Now().Unix()
+			}
+			days := int(call.Argument(1).ToInteger())
+			return vm.ToValue(time.Unix(base, 0).AddDate(0, 0, days).Unix())
+		},
+		"duration": func(call goja.FunctionCall) goja.Value {
+			return vm.ToValue(formatSeconds(call.Argument(0).ToInteger()))
+		},
+	}
+}
+
+func developerJSFormatAPI(vm *goja.Runtime) map[string]any {
+	return map[string]any{
+		"bool": func(call goja.FunctionCall) goja.Value {
+			yes := "yes"
+			no := "no"
+			if len(call.Arguments) > 1 {
+				yes = call.Argument(1).String()
+			}
+			if len(call.Arguments) > 2 {
+				no = call.Argument(2).String()
+			}
+			return vm.ToValue(map[bool]string{true: yes, false: no}[boolish(call.Argument(0).Export())])
+		},
+		"role": func(call goja.FunctionCall) goja.Value {
+			return vm.ToValue(roleName(int(call.Argument(0).ToInteger())))
+		},
+		"date": func(call goja.FunctionCall) goja.Value {
+			ts := call.Argument(0).ToInteger()
+			if ts <= 0 {
+				return vm.ToValue("")
+			}
+			if expiryIsPermanent(ts) {
+				return vm.ToValue(expireStatus(ts))
+			}
+			return vm.ToValue(time.Unix(ts, 0).UTC().Format(time.RFC3339))
+		},
+		"expiry": func(call goja.FunctionCall) goja.Value {
+			return vm.ToValue(expireStatus(call.Argument(0).ToInteger()))
+		},
+		"duration": func(call goja.FunctionCall) goja.Value {
+			return vm.ToValue(formatSeconds(call.Argument(0).ToInteger()))
+		},
+		"user": func(call goja.FunctionCall) goja.Value {
+			values, _ := call.Argument(0).Export().(map[string]any)
+			if values == nil {
+				return vm.ToValue("")
+			}
+			uid := int64(numeric(values["uid"]))
+			username := strings.TrimSpace(fmt.Sprint(values["username"]))
+			role := fmt.Sprint(values["role_name"])
+			if strings.TrimSpace(role) == "" || role == "<nil>" {
+				role = roleName(int(numeric(values["role"])))
+			}
+			active := boolish(values["active"])
+			expiry := fmt.Sprint(values["expire_status"])
+			if strings.TrimSpace(expiry) == "" || expiry == "<nil>" {
+				expiry = expireStatus(int64(numeric(values["expired_at"])))
+			}
+			return vm.ToValue(fmt.Sprintf("#%d %s / %s / %s / %s", uid, username, role, map[bool]string{true: "active", false: "disabled"}[active], expiry))
+		},
+		"json": func(call goja.FunctionCall) goja.Value {
+			return vm.ToValue(developerJSLimitText(fmt.Sprint(call.Argument(0).String()), 1200))
+		},
 	}
 }
 
@@ -890,9 +1693,33 @@ func developerJSPrivateIP(ip net.IP) bool {
 }
 
 func developerJSAnySlice(input any) []any {
-	values, ok := input.([]any)
-	if ok {
+	switch values := input.(type) {
+	case []any:
 		return values
+	case []string:
+		out := make([]any, 0, len(values))
+		for _, item := range values {
+			out = append(out, item)
+		}
+		return out
+	case []int:
+		out := make([]any, 0, len(values))
+		for _, item := range values {
+			out = append(out, item)
+		}
+		return out
+	case []int64:
+		out := make([]any, 0, len(values))
+		for _, item := range values {
+			out = append(out, item)
+		}
+		return out
+	case []float64:
+		out := make([]any, 0, len(values))
+		for _, item := range values {
+			out = append(out, item)
+		}
+		return out
 	}
 	return nil
 }
@@ -904,6 +1731,23 @@ func developerJSStringSlice(input any) []string {
 		out = append(out, fmt.Sprint(value))
 	}
 	return out
+}
+
+func developerJSTemplate(template string, data any) string {
+	values, ok := data.(map[string]any)
+	if !ok || strings.TrimSpace(template) == "" {
+		return developerJSLimitText(template, 1200)
+	}
+	out := template
+	for key, value := range values {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		replacement := developerJSLimitText(fmt.Sprint(value), 240)
+		out = strings.ReplaceAll(out, "{"+key+"}", replacement)
+	}
+	return developerJSLimitText(out, 1200)
 }
 
 func developerJSConfigValue(cfg *config.Config, key string) (any, bool) {

@@ -208,9 +208,9 @@
 | 方法 | 路径 | 鉴权 | 说明 |
 | ---- | ---- | ---- | ---- |
 | GET | `/api/v1/admin/users` | Admin | 用户列表 |
-| POST | `/api/v1/admin/developer-mode/activate` | Admin | 仪表盘 `DEBUGMODE` 二次验证后启用当前浏览器会话的开发者模式 |
+| POST | `/api/v1/admin/developer-mode/activate` | Admin | 仪表盘 `DEBUGMODE` 二次验证后切换全局开发者模式 |
 | POST | `/api/v1/admin/developer/js-sandbox` | Admin | 在受控沙箱中预检/执行 Telegram JS 自定义指令片段 |
-| GET | `/api/v1/admin/developer/js-docs` | Admin | 获取 Telegram JS 沙箱引擎、内置对象、函数、命名空间、示例和限制说明 |
+| GET | `/api/v1/admin/developer/js-docs` | Admin | 获取 Telegram JS 沙箱引擎、内置对象、函数参数表、返回说明、示例和限制说明 |
 | GET | `/api/v1/admin/developer/js-presets` | Admin | 列出开发者模式 JS 预设 |
 | POST | `/api/v1/admin/developer/js-presets` | Admin | 创建开发者模式 JS 预设；允许空白代码草稿 |
 | PUT | `/api/v1/admin/developer/js-presets/{preset_id}` | Admin | 更新开发者模式 JS 预设 |

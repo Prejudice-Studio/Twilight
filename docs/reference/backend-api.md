@@ -1736,7 +1736,7 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 
 `POST /admin/developer/js-sandbox`
 
-- 说明：在受控 Goja（`github.com/dop251/goja`）沙箱中预检/执行 Telegram JS 自定义指令片段。脚本同步执行，单次运行 200ms 超时。沙箱仅暴露文档列出的 `ctx`、`command`、`args`、`user`、`constants`、`users`、`db`、`text`、`arrays`、`time`、`interactions`、`getUser(uid)`、`reply(text)`、`log(text)`、`auth(role)`、`authAdmin()`、`fetch(url)`、`config(key)`、`env(key)`；配置与环境变量读取为只读白名单，敏感值不会返回，不提供文件、进程、模块加载器或浏览器全局对象。
+- 说明：在受控 Goja（`github.com/dop251/goja`）沙箱中预检/执行 Telegram JS 自定义指令片段。脚本同步执行，单次运行 200ms 超时。沙箱仅暴露文档列出的 `ctx`、`command`、`input`、`args`、`user`、`me`、`constants`、`roles`、`db`、`users`、`admin`、`system`、`text`、`arrays`、`time`、`format`、`interactions`、`getUser(uid)`、`reply(text)`、`exit(text?)`、`assert(condition, text?)`、`log(text)`、`auth(role)`、`authAdmin()`、`fetch(url)`、`config(key)`、`env(key)`、`setTimeout()`、`setInterval()`；配置与环境变量读取为只读白名单，敏感值不会返回，不提供文件、进程、模块加载器或浏览器全局对象。
 - 门控：开发者模式关闭时返回 `403`，Bot 运行时也会阻断 `js:` / `js:preset:<id>` 相关指令与交互。
 - 预览：`ctx.preview=true`；状态变更类辅助函数仅 dry-run，例如 `users.setLoginNotify(...)` 会返回 `dry_run=true`，不会写入用户数据。
 - 认证：管理员（`AuthAdmin`）
@@ -1750,12 +1750,12 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 
 `GET /admin/developer/js-docs`
 
-- 说明：返回开发者模式独立 JS 文档页使用的结构化接口文档，包含 JS 引擎、内置对象、受控函数、命名空间、配置键、环境变量、示例脚本、静态阻止 token 和允许但高风险 token，前端以类似 Swagger 的方式展示。
+- 说明：返回开发者模式独立 JS 文档页使用的结构化接口文档，包含 JS 引擎、内置对象、受控函数、命名空间、配置键、环境变量、示例脚本、静态阻止 token 和允许但高风险 token，前端以类似 Swagger 的方式展示。每个函数条目包含 `example` 示例代码，并可包含 `params` 参数表与 `returns` 返回说明；示例集中包含 `exit-and-assert`，用于说明 `exit()` / `assert()` 的正常提前退出语义。
 - 认证：管理员（`AuthAdmin`）
-- 响应：`{ engine, bindings, functions, namespaces, native_objects, config_keys, env_keys, examples, blocked_tokens, risk_tokens }`
-- 用户数据接口：`users.current()` / `users.describe()` 返回当前 Telegram 绑定用户脱敏快照；`getUser(uid)` / `users.get(uid)` / `users.byUID(uid)` 只允许按精确 UID 读取脱敏快照，普通用户只能读取自己，读取其他用户必须当前绑定用户为管理员；`users.hasRole(role)` / `users.requireActive()` 用于判断当前用户；`users.setLoginNotify({ telegram?, email? })` 仅修改当前用户登录通知偏好。不提供用户名、邮箱、Telegram ID 任意搜索，不返回邮箱明文、Telegram ID、Emby ID、Token、密码，也不提供管理员批量操作或跨用户写入。
-- 数据库接口：`db.schema()` / `db.collections()` / `db.count(name)` / `db.currentUser()` / `db.getUser(uid)` / `db.updateCurrentUser(patch)` 只暴露受控结构和脱敏数据；不提供 SQL、原始 state、敏感字段、任意搜索或跨用户写入。`db.updateCurrentUser` 仅可修改当前绑定用户的登录通知偏好，预览模式为 dry-run。
-- 指令上下文：示例 `command-context` 展示用户输入指令时可读取的全部非敏感字段，包括 `ctx.private_chat`、`ctx.preview`、`ctx.command_time`、`args`、当前绑定用户的 `uid`、`username`、`role`、`active`、`expired_at`、`created_at`、`register_time`、`has_emby`、`emby_disabled`、`email_verified`、`email_verified_at`、`telegram_bound`、登录通知开关；不返回 Telegram ID、chat ID、message ID、群组 ID、邮箱、Emby ID、Token 或密码。
+- 响应：`{ engine, bindings, functions, namespaces, native_objects, config_keys, env_keys, examples, blocked_tokens, risk_tokens }`。`functions` / `namespaces` / `bindings` / `native_objects` 中的条目结构为 `{ name, category, type?, description, example?, mutates?, scope?, fields?, params?, returns? }`，其中 `params[]` 为 `{ name, type?, required?, description, default? }`。
+- 用户数据接口：`users.current()` / `users.describe()` 返回当前 Telegram 绑定用户脱敏快照；`getUser(uid)` / `users.get(uid)` / `users.byUID(uid)` 只允许按精确 UID 读取脱敏快照，普通用户只能读取自己，读取其他用户必须当前绑定用户为管理员；`users.search(query, limit)`、`users.list(options)`、`admin.searchUsers()`、`admin.listUsers()` 为管理员受控搜索/列表；`users.setLoginNotify({ telegram?, email? })` 仅修改当前用户登录通知偏好；`users.setActive`、`users.setRole`、`users.setExpiry`、`users.update` 及 `admin.*` 对应快捷写接口仅管理员可用，运行时写审计日志并保持最后管理员保护。
+- 数据库接口：`db.schema()` / `db.collections()` / `db.count(name)` / `db.currentUser()` / `db.getUser(uid)` / `db.findUsers(query, limit)` / `db.listUsers(options)` / `db.updateCurrentUser(patch)` / `db.updateUser(uid, patch)` 只暴露受控结构、脱敏快照、受控计数和受控写入；不提供 SQL、原始 state、密码、Token、API Key、BGM Token 明文、Emby 内部 ID 或数据库连接信息。`db.updateCurrentUser` 仅可修改当前绑定用户的登录通知偏好，预览模式为 dry-run。
+- 指令上下文：示例 `command-context` 展示用户输入指令时可读取的全部非敏感字段，包括 `ctx.private_chat`、`ctx.preview`、`ctx.command_time`、`args`、`input.*`、当前绑定用户的 `uid`、`username`、`email`、`email_masked`、`role`、`role_name`、`active`、`expired_at`、`expire_status`、`created_at`、`register_time`、`has_emby`、`emby_username`、`emby_disabled`、`email_verified`、`email_verified_at`、`telegram_bound`、`telegram_id`、`telegram_username`、登录通知开关等；不返回 chat ID、message ID、群组 ID、密码、Token、API Key、BGM Token 明文、Emby 内部 ID 或数据库连接信息。
 - 风险兼容能力：`fetch`、`eval`、`Function`、`globalThis`、`setTimeout`、`setInterval` 不再作为静态错误；`fetch` 是同步受限请求，阻断 localhost/内网/链路本地目标、禁用跳转和凭据、限制响应长度；计时器包装器同步执行回调，不创建异步任务。
 - Telegram 交互：`interactions.inline(text, actions)` 支持最多 8 个静态按钮，callback 仅限创建消息的同一 Telegram 用户、同一 chat、同一 message，并在 2 分钟后过期；`interactions.waitText(options)` 只消费同一用户在 1-60 秒内发送的下一条非命令文本，支持 `prompt`、`reply_prefix`、`timeout_reply`、`max_chars`、`numbered`。
 - 审计：文档接口为只读；通过 Bot 实际执行 `users.setLoginNotify` 成功写入时额外记录 `telegram_js_user_notify_update`；callback 与等待文本消费分别记录 `telegram_js_interaction_callback` / `telegram_js_interaction_wait_text`，拒绝的 callback 记录 `telegram_js_interaction_callback_denied`。

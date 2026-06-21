@@ -796,6 +796,16 @@ export interface DeveloperJSDocEntry {
   mutates?: boolean;
   scope?: string;
   fields?: string[];
+  params?: DeveloperJSDocParam[];
+  returns?: string;
+}
+
+export interface DeveloperJSDocParam {
+  name: string;
+  type?: string;
+  required?: boolean;
+  description: string;
+  default?: string;
 }
 
 export interface DeveloperJSDocs {

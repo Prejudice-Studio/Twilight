@@ -109,6 +109,7 @@ pnpm build
 | [API 路由索引](docs/reference/api-index.md) | `/api/v1` 路由清单与鉴权级别 |
 | [后端 API 详参](docs/reference/backend-api.md) | REST API 规范、认证、错误码、示例 |
 | [API Key 外部接入](docs/reference/api-key.md) | 第三方集成与权限矩阵 |
+| [开发者 JS 沙箱参考](docs/reference/developer-js.md) | Telegram Bot 自定义 JS 的内置对象、函数、权限边界与示例 |
 | [邮箱验证](docs/features/email.md) | SMTP、验证码、强制绑定、找回密码和邮箱管理 |
 | [注册码与卡码](docs/features/regcodes.md) | 注册码、续期码、白名单码算法和使用规则 |
 | [邀请系统](docs/features/invite.md) | 邀请关系管理、级联删除与启停语义 |
@@ -119,7 +120,7 @@ pnpm build
 
 ### 开发者模式
 
-开发者模式通过仪表盘输入 `DEBUGMODE` 并二次验证管理员密码开启；再次输入 `DEBUGMODE` 可关闭。关闭后已保存的 JS 预设和 Telegram 指令配置会保留，但所有 `js:` / `js:preset:<id>` 指令及相关 JS 交互会被服务端阻断。JS 沙箱使用 Goja，提供受控 `users.*`、`db.*`、`interactions.*`、受限 `fetch()` 和风险提示；不会暴露原始数据库、敏感配置、Token、密码、Telegram ID 或 Emby ID。
+开发者模式通过仪表盘输入 `DEBUGMODE` 并二次验证管理员密码开启；再次输入 `DEBUGMODE` 可关闭。关闭后已保存的 JS 预设和 Telegram 指令配置会保留，但所有 `js:` / `js:preset:<id>` 指令及相关 JS 交互会被服务端阻断。JS 沙箱使用 Goja，提供受控 `users.*`、`db.*`、`interactions.*`、`exit()`、`assert()`、受限 `fetch()` 和风险提示；不会暴露原始数据库、敏感配置、Token、密码、Telegram ID 或 Emby ID。完整接口见 [开发者 JS 沙箱参考](docs/reference/developer-js.md)。
 
 - 生产环境请启用 HTTPS，并设置安全的 session cookie。
 - 首次部署请在配置文件临时启用 `setup_mode = true` 后使用网页初始化向导，或直接在配置文件中明确指定管理员；普通首个注册用户不会自动成为管理员。

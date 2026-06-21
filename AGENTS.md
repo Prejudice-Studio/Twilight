@@ -7,7 +7,7 @@
 - Twilight 是 Emby / Jellyfin 用户管理面板，当前主线是 Go 后端 + Next.js 前端。
 - 后端模块路径为 `github.com/prejudice-studio/twilight`，入口在 `cmd/twilight`，目标部署环境是 Linux + systemd。
 - 前端位于 `webui/`，使用 Next.js App Router、TypeScript、Tailwind CSS、Radix/shadcn 风格组件、Zustand 与 TanStack Query。
-- 重要文档优先级：`docs/guides/development.md`、`docs/guides/modular-architecture.md`、`docs/reference/backend.md`、`docs/reference/api-index.md`、`docs/reference/backend-api.md`、`docs/guides/security.md`、`README.md`。
+- 重要文档优先级：`docs/guides/development.md`、`docs/guides/modular-architecture.md`、`docs/reference/backend.md`、`docs/reference/api-index.md`、`docs/reference/backend-api.md`、`docs/reference/developer-js.md`、`docs/guides/security.md`、`README.md`。
 - 若旧文件或本地笔记提到 Python 后端、SQLite 多库、uvicorn、`requirements.txt`、旧 `db/*.db` 迁移等内容，以当前 Go 源码和 `docs/guides/development.md` 为准，不要重新引入旧后端运行入口。
 
 ## 目录速览
@@ -342,8 +342,8 @@ pnpm build
 - 配置查看、schema 编辑和备份查看不得泄露 API Key、Token、密码、Secret 等敏感字段；未修改的 secret 必须使用服务端哨兵保留，禁止明文回显。
 - 新增后台接口默认使用 `AuthAdmin`；所有创建、更新、删除、启停、沙箱执行等状态变更成功后必须写审计日志。无 HTTP 上下文的 Bot 路径使用 `a.auditEntryIP("telegram", ...)`。
 - 开发者模式入口固定为仪表盘输入 `DEBUGMODE`，再调用 `POST /admin/developer-mode/activate` 做管理员密码二次验证。该接口是服务端全局开关：关闭时调用开启，开启时再次调用关闭；关闭后所有 `js:` / `js:preset:<id>` 指令、inline callback 和 waitText 等相关 JS 交互必须被服务端阻断，但模板和指令配置不得删除。Telegram JS 自定义命令仅允许 `bot_custom_commands` 中 `js:` 前缀脚本；推荐使用 `js:preset:<id>` 动态引用保存的 JS 预设，旧 `js:<code>` 静态代码格式保留兼容。脚本必须运行在受控 Goja 沙箱中，不得暴露文件、进程、模块加载器、浏览器全局对象、任意环境变量或任意配置读取能力。
-- 开发者 JS 沙箱文档接口固定为 `GET /admin/developer/js-docs`（`AuthAdmin`），用于下发引擎、内置对象、函数、命名空间、配置键、环境变量、示例、阻止 token 和允许但高风险 token。新增沙箱 API 必须同步更新该端点、开发者页面、`docs/features/telegram-bot.md` 和 `docs/reference/backend-api.md`。
-- Telegram JS 沙箱只允许通过受控白名单访问配置与环境变量。`users.*` 默认仅可读取/操作当前 Telegram 绑定的 Twilight 用户脱敏数据；`getUser(uid)` / `users.get(uid)` / `users.byUID(uid)` / `db.getUser(uid)` 仅允许按精确 UID 返回脱敏快照，普通用户只能读取自己，跨用户读取必须要求当前绑定用户为管理员。`db.*` 只能提供受控结构、计数、当前用户脱敏读取和当前用户登录通知偏好写入；不得提供 SQL、原始 state、用户名/邮箱/Telegram ID 任意搜索、邮箱明文、Telegram ID、Emby ID、Token、密码、管理员批量操作或跨用户写入。预览接口必须 dry-run 状态变更类函数。
+- 开发者 JS 沙箱文档接口固定为 `GET /admin/developer/js-docs`（`AuthAdmin`），用于下发引擎、内置对象、函数、命名空间、配置键、环境变量、示例、阻止 token 和允许但高风险 token。新增沙箱 API 必须同步更新该端点、开发者页面、`docs/features/telegram-bot.md`、`docs/reference/backend-api.md` 和 `docs/reference/developer-js.md`。
+- Telegram JS 沙箱只允许通过受控白名单访问配置与环境变量。脚本运行在 Goja 函数作用域中，允许顶层 `return`、`exit(message?)` 和 `assert(condition, message?)` 做同步提前结束；这类控制流必须按正常结束处理，不得绕过超时、鉴权、审计或开发者模式总开关。`users.*` 默认仅可读取/操作当前 Telegram 绑定的 Twilight 用户脱敏数据；`getUser(uid)` / `users.get(uid)` / `users.byUID(uid)` / `db.getUser(uid)` 仅允许按精确 UID 返回脱敏快照，普通用户只能读取自己，跨用户读取必须要求当前绑定用户为管理员。管理员可使用受控 `users.search/list`、`admin.*` 与 `db.*` 进行有上限的用户搜索/列表和单用户允许字段写入；写操作必须支持预览 dry-run、写入审计日志，并保持 last-admin 保护。不得提供 SQL、原始 state、密码、Token、API Key、BGM Token 明文、Emby 内部 ID、数据库连接信息、原始敏感配置、管理员批量操作或任意字段跨用户写入。
 - `fetch`、`eval`、`Function`、`globalThis`、`setTimeout`、`setInterval` 为兼容性能力，必须在文档和校验结果中提示风险；`fetch` 必须同步、短超时、限响应体、禁用凭据与跳转，并阻断 localhost、内网和链路本地目标。`require`、`process`、浏览器对象、本地存储、cookie、`constructor.constructor` 等仍必须静态阻断。
 - Telegram JS 的 `interactions.*` 只能提供受控同步编排：inline callback 使用静态 `answer/edit/reply` 动作，必须绑定同一 chat、message 和 Telegram 用户并设置 TTL；等待文本只能消费同一用户的下一条非命令文本，必须限制等待秒数、长度、脱敏和审计，不得引入异步 JS 继续执行、任意事件监听或跨用户会话状态。
 

@@ -27,6 +27,7 @@
 | [API 路由索引](./reference/api-index.md) | `/api/v1` 完整路由清单、鉴权级别、模块归属（依据 `routes.go`） |
 | [后端 API 详参](./reference/backend-api.md) | REST 接口规范、认证、错误码、请求/响应示例 |
 | [API Key 外部接入](./reference/api-key.md) | 第三方系统集成、权限矩阵、调用示例 |
+| [开发者 JS 沙箱参考](./reference/developer-js.md) | Telegram Bot 自定义 JS 的运行模型、内置对象、函数、权限边界与示例 |
 
 ## 功能专题 features
 

@@ -32,6 +32,16 @@ func TestDeveloperJSDocsEndpointRequiresAdminAndDescribesGoja(t *testing.T) {
 	if !strings.Contains(resp.Body.String(), `"users.setLoginNotify(options)"`) {
 		t.Fatalf("docs response does not include users.setLoginNotify: %s", resp.Body.String())
 	}
+	if !strings.Contains(resp.Body.String(), `"users.search(query, limit)"`) ||
+		!strings.Contains(resp.Body.String(), `"system.info()"`) ||
+		!strings.Contains(resp.Body.String(), `"input"`) ||
+		!strings.Contains(resp.Body.String(), `"exit(text)"`) ||
+		!strings.Contains(resp.Body.String(), `"assert(condition, text)"`) ||
+		!strings.Contains(resp.Body.String(), `"id":"exit-and-assert"`) ||
+		!strings.Contains(resp.Body.String(), `"format.user(user)"`) ||
+		!strings.Contains(resp.Body.String(), `"admin.searchUsers(query, limit)"`) {
+		t.Fatalf("docs response does not include expanded JS APIs: %s", resp.Body.String())
+	}
 }
 
 func TestAdminRoutesRequireAdminAuth(t *testing.T) {
@@ -88,10 +98,13 @@ func TestDeveloperJSUsersAPISanitizesCurrentUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run js: %v logs=%v", err, logs)
 	}
-	if strings.Contains(output, "secret@example.com") || strings.Contains(output, "emby-sensitive-id") {
+	if !strings.Contains(output, "secret@example.com") {
+		t.Fatalf("user output should include email after expanded JS user snapshot: %s", output)
+	}
+	if strings.Contains(output, "emby-sensitive-id") || strings.Contains(output, "unused") {
 		t.Fatalf("sanitized user output leaked sensitive fields: %s", output)
 	}
-	if !strings.Contains(output, `"username":"tg-user"`) || !strings.Contains(output, `"email_verified":true`) {
+	if !strings.Contains(output, `"username":"tg-user"`) || !strings.Contains(output, `"email_verified":true`) || !strings.Contains(output, `"email_masked":"se***@example.com"`) {
 		t.Fatalf("sanitized user output missing expected safe fields: %s", output)
 	}
 }
@@ -131,7 +144,10 @@ func TestDeveloperJSGetUserByUIDIsSanitizedAndAdminScoped(t *testing.T) {
 	if !strings.Contains(output, `"username":"lookup-target"`) || !strings.Contains(output, `"email_verified":true`) {
 		t.Fatalf("admin getUser output missing safe fields: %s", output)
 	}
-	if strings.Contains(output, "target-secret@example.com") || strings.Contains(output, "emby-sensitive-target-id") || strings.Contains(output, "333444") {
+	if !strings.Contains(output, "target-secret@example.com") || !strings.Contains(output, "333444") {
+		t.Fatalf("admin getUser output should include expanded user contact fields: %s", output)
+	}
+	if strings.Contains(output, "emby-sensitive-target-id") || strings.Contains(output, "unused") {
 		t.Fatalf("admin getUser leaked sensitive fields: %s", output)
 	}
 
@@ -157,6 +173,168 @@ func TestDeveloperJSGetUserByUIDIsSanitizedAndAdminScoped(t *testing.T) {
 	}
 	if strings.TrimSpace(self) != "lookup-target" {
 		t.Fatalf("user should read self by UID, output=%s", self)
+	}
+}
+
+func TestDeveloperJSAdminUserSearchAndControlledUpdate(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().AuditLogEnabled = true
+	admin, err := app.store().CreateUser(store.User{
+		Username:     "js-admin",
+		Role:         store.RoleAdmin,
+		TelegramID:   900001,
+		PasswordHash: "unused",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := app.store().CreateUser(store.User{
+		Username:         "search-target",
+		Email:            "target@example.com",
+		Role:             store.RoleNormal,
+		Active:           false,
+		TelegramID:       900002,
+		TelegramUsername: "target_tg",
+		EmbyID:           "emby-secret-id",
+		EmbyUsername:     "emby-target",
+		BGMToken:         "bgm-secret-token",
+		PasswordHash:     "password-secret-hash",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code := fmt.Sprintf(`
+const rows = users.search("target@example.com", 3);
+const result = users.update(%d, { active: true, notify_on_login_email: true });
+reply(rows[0].email + "|" + rows[0].telegram_id + "|ok=" + result.ok + "|email_enabled=" + system.info().features.email_enabled);
+`, target.UID)
+	output, logs, err := app.telegramRunJSCustomCommand(code, telegramCommandCtx{FromID: admin.TelegramID}, true)
+	if err != nil {
+		t.Fatalf("admin js failed: %v logs=%v", err, logs)
+	}
+	if !strings.Contains(output, "target@example.com") || !strings.Contains(output, "ok=true") || !strings.Contains(output, "900002") {
+		t.Fatalf("expanded admin APIs missing expected output: %s", output)
+	}
+	if strings.Contains(output, "emby-secret-id") || strings.Contains(output, "bgm-secret-token") || strings.Contains(output, "password-secret-hash") {
+		t.Fatalf("expanded admin APIs leaked sensitive fields: %s", output)
+	}
+	updated, _ := app.store().User(target.UID)
+	if !updated.Active || !updated.NotifyOnLoginEmail {
+		t.Fatalf("users.update did not mutate allowed fields: %+v", updated)
+	}
+	if !hasAuditAction(app, "telegram_js_admin_user_update") {
+		t.Fatalf("missing audit log for admin JS user update, audits=%+v", app.store().ListAuditLogs())
+	}
+}
+
+func TestDeveloperJSConvenienceObjectsAndHelpers(t *testing.T) {
+	app := newTestApp(t)
+	admin, err := app.store().CreateUser(store.User{
+		Username:     "helper-admin",
+		Email:        "helper@example.com",
+		Role:         store.RoleAdmin,
+		Active:       true,
+		TelegramID:   910001,
+		PasswordHash: "unused",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := app.store().CreateUser(store.User{
+		Username:     "helper-target",
+		Email:        "target-helper@example.com",
+		Role:         store.RoleWhitelist,
+		Active:       true,
+		TelegramID:   910002,
+		PasswordHash: "unused",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code := `
+if (!admin.ensure()) {
+  reply("admin denied");
+  return;
+}
+const q = input.named("q", input.first);
+const rows = admin.searchUsers(q, 2);
+const picked = rows[0];
+reply([
+  "me=" + me.email,
+  "arg=" + input.arg(0),
+  "flag=" + input.flag("force"),
+  "named=" + q,
+  "role=" + format.role(roles.whitelist),
+  "user=" + format.user(picked),
+  "email=" + text.maskEmail(picked.email),
+  "array=" + arrays.join(arrays.sortStrings(["b", "a"]), ","),
+  "stats=" + system.stats().users.total
+].join("\n"));
+`
+	output, logs, err := app.telegramRunJSCustomCommand(code, telegramCommandCtx{
+		FromID:  admin.TelegramID,
+		Command: "/lookup",
+		Args:    []string{"--q", target.Email, "--force"},
+	}, true)
+	if err != nil {
+		t.Fatalf("convenience js failed: %v logs=%v", err, logs)
+	}
+	for _, want := range []string{
+		"me=helper@example.com",
+		"arg=--q",
+		"flag=true",
+		"named=target-helper@example.com",
+		"user=#2 helper-target",
+		"email=ta***@example.com",
+		"array=a,b",
+		"stats=2",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("convenience output missing %q: %s", want, output)
+		}
+	}
+}
+
+func TestDeveloperJSExitAndAssertStopWithoutRuntimeError(t *testing.T) {
+	app := newTestApp(t)
+	user, err := app.store().CreateUser(store.User{
+		Username:     "exit-user",
+		Role:         store.RoleNormal,
+		Active:       true,
+		TelegramID:   920001,
+		PasswordHash: "unused",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	output, logs, err := app.telegramRunJSCustomCommand(`reply("before"); exit("stopped"); reply("after");`, telegramCommandCtx{FromID: user.TelegramID}, true)
+	if err != nil {
+		t.Fatalf("exit should stop without runtime error: %v logs=%v", err, logs)
+	}
+	if strings.TrimSpace(output) != "before\nstopped" {
+		t.Fatalf("exit output mismatch: %q logs=%v", output, logs)
+	}
+	if len(logs) == 0 || logs[len(logs)-1] != "exit called" {
+		t.Fatalf("exit should append audit-safe runtime log, logs=%v", logs)
+	}
+
+	output, logs, err = app.telegramRunJSCustomCommand(`assert(false, "bad input"); reply("after");`, telegramCommandCtx{FromID: user.TelegramID}, true)
+	if err != nil {
+		t.Fatalf("assert(false) should stop without runtime error: %v logs=%v", err, logs)
+	}
+	if strings.TrimSpace(output) != "bad input" {
+		t.Fatalf("assert(false) output mismatch: %q logs=%v", output, logs)
+	}
+
+	output, logs, err = app.telegramRunJSCustomCommand(`assert(true, "unused"); reply("continued");`, telegramCommandCtx{FromID: user.TelegramID}, true)
+	if err != nil {
+		t.Fatalf("assert(true) should continue: %v logs=%v", err, logs)
+	}
+	if strings.TrimSpace(output) != "continued" {
+		t.Fatalf("assert(true) output mismatch: %q logs=%v", output, logs)
 	}
 }
 
