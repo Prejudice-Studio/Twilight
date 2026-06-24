@@ -81,7 +81,7 @@ type CodeCheckInfo = CodeUsePreview;
 export default function DashboardPage() {
   const router = useRouter();
   const { user, fetchUser } = useAuthStore();
-  const { info: systemInfo, fetchInfo: fetchSystemInfo } = useSystemStore();
+  const { info: systemInfo, fetchInfo: fetchSystemInfo, invalidate: invalidateSystemStore } = useSystemStore();
   const { toast } = useToast();
   const { t } = useI18n();
   const [regCode, setRegCode] = useState("");
@@ -751,6 +751,8 @@ export default function DashboardPage() {
     try {
       const res = await api.activateDeveloperMode({ code: "DEBUGMODE", password: developerPassword });
       if (res.success) {
+        invalidateSystemStore();
+        await fetchSystemInfo(true).catch(() => null);
         if (res.data?.enabled) {
           sessionStorage.setItem("twilight:developer-mode", "1");
           toast({ title: t("dashboard.developerEnabled"), variant: "success" });
@@ -1369,18 +1371,37 @@ export default function DashboardPage() {
       </Dialog>
 
       <Dialog open={showDeveloperDialog} onOpenChange={setShowDeveloperDialog}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[480px]">
           <DialogHeader>
-            <DialogTitle>{t("dashboard.developerDialogTitle")}</DialogTitle>
+            <DialogTitle>
+              {systemInfo?.features?.developer_mode 
+                ? "关闭开发者模式" 
+                : "启用开发者模式"}
+            </DialogTitle>
             <DialogDescription>
-              {t("dashboard.developerDialogDescription")}
+              {systemInfo?.features?.developer_mode
+                ? "输入当前管理员密码验证，以全面关闭服务端开发者 JS 运行沙箱。"
+                : "输入当前管理员密码验证，以开启开发预编译沙箱及 Telegram 自定义脚本配置。"}
             </DialogDescription>
           </DialogHeader>
+
+          <div className="rounded-lg border-2 border-red-500/50 bg-red-500/5 p-4 text-xs font-semibold leading-relaxed text-red-500 space-y-2">
+            <p className="text-sm font-black uppercase tracking-wider text-red-600 dark:text-red-400">
+              ⚠️ 免责声明与最高安全警告 / DISCLAIMER & WARNING
+            </p>
+            <p className="font-extrabold text-xs">
+              {systemInfo?.features?.developer_mode
+                ? "警告：关闭开发者模式后，全站所有「js:」前缀的自定义指令脚本、辅助 sandbox 运行、inline callback 等 JS 交互都会立即被服务端全面阻断。由此带来的线上交互故障需要管理员自行检查，关闭操作产生的最终后果由系统管理员承担。"
+                : "重要声明：启用开发者模式（自定义 JS 沙箱）允许管理员部署和预览动态脚本。在此期间的所有代码编写、脚本执行以及与 Telegram 交互所产生的一切权限穿透、配置使用、异常流、运行行为与数据变动等，以及导致的一切安全防线穿透或数据风险，均由系统管理员自愿承担全部技术和法律风险与最终后果！"}
+            </p>
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="developerPassword">{t("dashboard.developerPasswordLabel")}</Label>
             <Input
               id="developerPassword"
               type="password"
+              placeholder="请输入管理员密码完成验证"
               value={developerPassword}
               onChange={(event) => setDeveloperPassword(event.target.value)}
               onKeyDown={(event) => {
@@ -1396,9 +1417,13 @@ export default function DashboardPage() {
             <Button variant="outline" onClick={() => setShowDeveloperDialog(false)} disabled={activatingDeveloper}>
               {t("common.cancel")}
             </Button>
-            <Button onClick={() => void handleActivateDeveloperMode()} disabled={activatingDeveloper}>
+            <Button
+              variant={systemInfo?.features?.developer_mode ? "destructive" : "default"}
+              onClick={() => void handleActivateDeveloperMode()}
+              disabled={activatingDeveloper}
+            >
               {activatingDeveloper && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {t("dashboard.developerEnable")}
+              {systemInfo?.features?.developer_mode ? "立即关闭 (Deactivate)" : "立即启用 (Activate)"}
             </Button>
           </DialogFooter>
         </DialogContent>

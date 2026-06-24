@@ -569,6 +569,29 @@ export default function AdminDeveloperPage() {
         </div>
       </div>
 
+      <div className="rounded-xl border-2 border-red-600 bg-red-500/10 p-6 shadow-lg">
+        <div className="flex items-start gap-4">
+          <div className="rounded-xl bg-red-600 p-3 text-white">
+            <AlertTriangle className="h-6 w-6 animate-pulse" />
+          </div>
+          <div className="space-y-2 min-w-0">
+            <h2 className="text-xl font-extrabold tracking-tight text-red-600 dark:text-red-400">
+              最高级别安全警示与管理员免责声明 / SYSTEM SECURITY WARNING & DISCLAIMER
+            </h2>
+            <p className="text-sm font-black text-foreground uppercase tracking-wide leading-relaxed">
+              ⚠️ 开发者模式（动态代码沙箱）目前处于「已开启 (ACTIVE)」状态！
+            </p>
+            <p className="text-xs font-bold text-muted-foreground leading-relaxed">
+              重要提示：在此状态下，任何已被绑定的「js:」或「js:preset:」自定义脚本将可直接在线上被触发并调用 Goja 执行引擎。
+              <span className="font-extrabold text-red-500 underline mx-1">
+                特此声明：对于在开发者模式启用期间由于自定义执行脚本带来的所有系统稳定性异常、数据回写失误、Telegram 命令泛滥、以及由此可能引发的网络与权限防线穿透风险，系统管理员（您自己）自愿承诺承担一切直接和间接的技术及法律全部风险后果！
+              </span>
+              如果这些指令无需继续调试，请务必立即通过在仪表盘兑换框输入「DEBUGMODE」并进行密码验证以全面将本模式关闭、阻断此类调用！
+            </p>
+          </div>
+        </div>
+      </div>
+
       <Alert className="border-amber-500/40 bg-amber-500/10">
         <AlertTriangle className="h-4 w-4" />
         <AlertTitle>{t("adminDeveloper.riskTitle")}</AlertTitle>

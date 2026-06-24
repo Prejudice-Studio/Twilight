@@ -14,11 +14,10 @@ import (
 const developerModeCode = "DEBUGMODE"
 
 func (a *App) handleDeveloperModeActivate(w http.ResponseWriter, r *http.Request, _ Params) {
-	p := current(r)
-	if p.User.Role != store.RoleAdmin {
-		failWithCode(w, http.StatusForbidden, ErrForbidden, "developer mode requires administrator privileges")
+	if requireAdmin(w, r) {
 		return
 	}
+	p := current(r)
 	payload := decodeMap(r)
 	code := strings.TrimSpace(stringValue(payload, "code"))
 	password := stringValue(payload, "password")
@@ -54,6 +53,9 @@ func (a *App) handleDeveloperModeActivate(w http.ResponseWriter, r *http.Request
 }
 
 func (a *App) handleDeveloperJSSandbox(w http.ResponseWriter, r *http.Request, _ Params) {
+	if requireAdmin(w, r) {
+		return
+	}
 	if !a.store().DeveloperModeEnabled() {
 		failWithCode(w, http.StatusForbidden, ErrForbidden, "developer mode is disabled")
 		return
@@ -82,15 +84,24 @@ func (a *App) handleDeveloperJSSandbox(w http.ResponseWriter, r *http.Request, _
 }
 
 func (a *App) handleDeveloperJSDocs(w http.ResponseWriter, r *http.Request, _ Params) {
+	if requireAdmin(w, r) {
+		return
+	}
 	ok(w, "OK", developerJSDocs())
 }
 
 func (a *App) handleDeveloperJSPresets(w http.ResponseWriter, r *http.Request, _ Params) {
+	if requireAdmin(w, r) {
+		return
+	}
 	presets := a.store().ListDeveloperJSPresets()
 	ok(w, "OK", map[string]any{"presets": presets, "total": len(presets), "developer_mode_enabled": a.store().DeveloperModeEnabled()})
 }
 
 func (a *App) handleCreateDeveloperJSPreset(w http.ResponseWriter, r *http.Request, _ Params) {
+	if requireAdmin(w, r) {
+		return
+	}
 	payload := decodeMap(r)
 	preset, okPayload := developerJSPresetFromPayload(payload, store.DeveloperJSPreset{
 		CreatorUID: current(r).User.UID,
@@ -111,6 +122,9 @@ func (a *App) handleCreateDeveloperJSPreset(w http.ResponseWriter, r *http.Reque
 }
 
 func (a *App) handleUpdateDeveloperJSPreset(w http.ResponseWriter, r *http.Request, params Params) {
+	if requireAdmin(w, r) {
+		return
+	}
 	id, err := int64Param(params, "preset_id")
 	if err != nil || id <= 0 {
 		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "invalid preset id")
@@ -139,6 +153,9 @@ func (a *App) handleUpdateDeveloperJSPreset(w http.ResponseWriter, r *http.Reque
 }
 
 func (a *App) handleDeleteDeveloperJSPreset(w http.ResponseWriter, r *http.Request, params Params) {
+	if requireAdmin(w, r) {
+		return
+	}
 	id, err := int64Param(params, "preset_id")
 	if err != nil || id <= 0 {
 		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "invalid preset id")
