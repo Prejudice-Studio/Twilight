@@ -70,6 +70,7 @@ var telegramCommandRegistry = map[string]telegramCommandSpec{
 	"/cancel": {
 		private: true,
 		handler: func(a *App, ctx context.Context, c telegramCommandCtx) {
+			a.clearDelAccountPending(c.ChatID, c.FromID)
 			_ = a.telegramSendMessage(ctx, c.ChatID, "已取消当前 Bot 操作。")
 		},
 	},
@@ -146,7 +147,7 @@ var telegramCommandRegistry = map[string]telegramCommandSpec{
 			a.telegramHandleBanEmby(ctx, c.ChatID, c.FromID, c.Args)
 		},
 	},
-	"/delAccount": {
+	"/delaccount": {
 		private: true,
 		handler: func(a *App, ctx context.Context, c telegramCommandCtx) {
 			a.telegramHandleDelAccount(ctx, c.ChatID, c.FromID, c.Args)
