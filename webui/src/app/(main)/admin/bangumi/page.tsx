@@ -2,11 +2,12 @@
 
 import { useCallback, useState } from "react";
 import { motion } from "framer-motion";
-import { BookOpen, RefreshCw, Trash2, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Eye } from "lucide-react";
+import { BookOpen, RefreshCw, Trash2, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Eye, Search } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useAsyncResource } from "@/hooks/use-async-resource";
@@ -40,16 +41,31 @@ export default function AdminBangumiPage() {
   const [logs, setLogs] = useState<BangumiSyncLog[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
 
+  // 分页与搜索状态
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalUsers, setTotalUsers] = useState(0);
+
   const loadResource = useCallback(async () => {
-    const res = await api.adminBangumiUsers();
+    const res = await api.adminBangumiUsers(page, 20, search);
     if (res.success && res.data) {
       setUsers(res.data.users || []);
+      setTotalUsers(res.data.total ?? 0);
+      setTotalPages(res.data.pages ?? 1);
       return true;
     }
     throw new Error(res.message || "加载失败");
-  }, []);
+  }, [page, search]);
 
   const { isLoading, error, execute: reload } = useAsyncResource(loadResource, { immediate: true });
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSearch(searchQuery);
+    setPage(1);
+  };
 
   const handleSyncUser = async (uid: number) => {
     setSyncingUID(uid);
@@ -119,32 +135,6 @@ export default function AdminBangumiPage() {
     }
   };
 
-  if (error) {
-    return (
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-        <Card>
-          <CardContent className="pt-6 flex flex-col items-center gap-3">
-            <AlertCircle className="h-8 w-8 text-destructive" />
-            <p className="text-sm text-muted-foreground">{String(error)}</p>
-            <Button variant="outline" onClick={() => { void reload(); }}>{t("common.retry")}</Button>
-          </CardContent>
-        </Card>
-      </motion.div>
-    );
-  }
-
-  if (isLoading) {
-    return (
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-        <Card>
-          <CardContent className="pt-6 flex items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-primary" />
-          </CardContent>
-        </Card>
-      </motion.div>
-    );
-  }
-
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
       <div>
@@ -157,11 +147,55 @@ export default function AdminBangumiPage() {
         </p>
       </div>
 
-      {users.length === 0 ? (
+      <div className="flex items-center gap-2">
+        <form onSubmit={handleSearchSubmit} className="flex flex-1 max-w-sm items-center gap-2">
+          <Input
+            placeholder="搜索用户名..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="h-9"
+          />
+          <Button type="submit" size="sm" className="h-9">
+            <Search className="h-4 w-4 mr-1" />
+            搜索
+          </Button>
+          {(searchQuery || search) && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setSearchQuery("");
+                setSearch("");
+                setPage(1);
+              }}
+              className="h-9 px-2"
+            >
+              清除
+            </Button>
+          )}
+        </form>
+      </div>
+
+      {error ? (
+        <Card>
+          <CardContent className="pt-6 flex flex-col items-center gap-3">
+            <AlertCircle className="h-8 w-8 text-destructive" />
+            <p className="text-sm text-muted-foreground">{String(error)}</p>
+            <Button variant="outline" onClick={() => { void reload(); }}>{t("common.retry")}</Button>
+          </CardContent>
+        </Card>
+      ) : isLoading ? (
+        <Card>
+          <CardContent className="pt-6 flex items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          </CardContent>
+        </Card>
+      ) : users.length === 0 ? (
         <Card>
           <CardContent className="pt-6 flex flex-col items-center gap-3">
             <BookOpen className="h-8 w-8 text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">{t("bangumi.noUsers")}</p>
+            <p className="text-sm text-muted-foreground">没有找到 Bangumi 用户</p>
           </CardContent>
         </Card>
       ) : (
@@ -174,14 +208,17 @@ export default function AdminBangumiPage() {
                     <div className="text-sm font-medium truncate">{u.username}</div>
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <Badge variant="outline" className="text-xs">
-                        {u.bgm_mode ? t("bangumi.syncOn") : t("bangumi.syncOff")}
+                        {u.bgm_mode ? "同步:开" : "同步:关"}
+                      </Badge>
+                      <Badge variant={u.bgm_manage_mode ? "default" : "secondary"} className="text-xs">
+                        {u.bgm_manage_mode ? "管理:开" : "管理:关"}
                       </Badge>
                       <Badge variant={u.token_set ? "default" : "secondary"} className="text-xs">
-                        {u.token_set ? t("bangumi.tokenSet") : t("bangumi.tokenNotSet")}
+                        {u.token_set ? "Token 已设" : "Token 未设"}
                       </Badge>
                       {u.sync_ready && (
                         <Badge variant="default" className="text-xs bg-green-600">
-                          {t("bangumi.ready")}
+                          就绪
                         </Badge>
                       )}
                     </div>
@@ -235,6 +272,31 @@ export default function AdminBangumiPage() {
               </CardContent>
             </Card>
           ))}
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between border-t border-border/40 pt-4 mt-4 bg-transparent">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1}
+                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+              >
+                上一页
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                第 {page} / {totalPages} 页 (共 {totalUsers} 个用户)
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages}
+                onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+              >
+                下一页
+              </Button>
+            </div>
+          )}
         </div>
       )}
 

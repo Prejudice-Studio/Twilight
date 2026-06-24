@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
  * 例如 layout/page 里 throw new Error 时 RootLayout 仍然渲染，避免白屏到 Next.js dev overlay。
  *
  * 注意：global-error.tsx 才能截 RootLayout 自身的错误，那里不能依赖 ThemeProvider 等
- * client provider；因此我们留一份内联的最小样式。
+ * client provider；因此留一份内联的最小样式。
  */
 export default function GlobalError({
   error,

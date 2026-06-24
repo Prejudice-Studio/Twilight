@@ -13,7 +13,7 @@ import (
 
 // bangumiWebhookReplayWindowSeconds 是 X-Twilight-Bangumi-Timestamp 的容忍窗
 // 口。攻击者抓到一份合法请求后，在窗口外重放会被直接拒绝；窗口内的重放仍然
-// 由 store 层的 (UID, ItemID, PlayedAt) 幂等键挡住——双层防御。
+// 由 store 层的 (UID, ItemID, PlayedAt) 幂等键挡住的双层防御。
 //
 // 客户端时钟漂移最常见在 ±60s，留 5 分钟避免合法请求被误杀。Header 缺失时
 // 走旧的兼容路径（仅校验 secret），日志会打 Warn 提示运维补上。

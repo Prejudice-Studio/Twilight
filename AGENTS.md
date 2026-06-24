@@ -62,6 +62,7 @@
 ### 关键函数速查（按文件）
 
 **`internal/api/` — HTTP 层：**
+
 | 文件 | 主要函数 |
 |------|---------|
 | `routes.go` | `registerAllRoutes()`、`registerAPIRoutes()`、`registerAdminRoutes()`、`registerAPIKeyRoutes()`、`registerSecurityRoutes()`、`registerBatchRoutes()` |
@@ -77,11 +78,12 @@
 | `announcement_handlers.go` | `handleListAnnouncements`、`handleAdminAnnouncements`、`handleCreateAnnouncement`、`handleUpdateAnnouncement`、`handleDeleteAnnouncement` |
 | `audit_handlers.go` | `audit(r, action, category, targetUID, detail)`(行12)、`auditEntryIP`(行30)、`handleListAuditLogs`、`handleDeleteAuditLog`、`handleClearAuditLogs`、`handlePruneAuditLogs`(行112) |
 | `bangumi_webhook.go` | `handleBangumiWebhook`、`constantTimeStringEqual` |
-| `bangumi_sync_handlers.go` | `handleBangumiSyncStatus`、`handleBangumiSyncTrigger`、`handleBangumiSyncHistory`、`handleBangumiClearHistory`、`handleAdminBangumiUsers`、`handleAdminBangumiRecords`、`handleAdminBangumiSyncUser`、`handleAdminBangumiSyncLogs`、`handleAdminBangumiClearLogs` |
+| `bangumi_sync_handlers.go` | `handleBangumiSyncStatus`、`handleBangumiSyncTrigger`、`handleBangumiSyncHistory`、`handleBangumiClearHistory`、`handleBangumiMe`、`handleBangumiCollections`、`handleUpdateBangumiCollection`、`handleAdminBangumiUsers`、`handleAdminBangumiRecords`、`handleAdminBangumiSyncUser`、`handleAdminBangumiSyncLogs`、`handleAdminBangumiClearLogs` |
 | `batch_user_handlers.go` | `handleBatchToggleUsers`、`handleBatchRenewUsers`、`handleBatchDeleteUsers`、`handleBatchLockEmbyUnbind`、`handleBatchClearEmbyGrant`、`filteredBatchUserUIDs`(行418) |
 | `app.go` | `ServeHTTP`(行558)、`authenticate`(行698)、`current(r)`(行800)、`clientIP`、`principal`(行147) |
 
 **`internal/api/` — 业务/客户端层：**
+
 | 文件 | 主要函数 |
 |------|---------|
 | `business.go` | `regcodeDTO`(行498+544)、`regcodeStatus`(行484)、`generateRegCode`(行628)、`generateInviteCode`、`previewCode`、`inviteForest`(行1226)、`inviteTreeFor`(行1154)、`canInvite`(行1183)、`maxCodeDays`(行1050)、`sortUsers`(行909)、`batchResult`(行1324)、`addBatchOutcome`(行1331) |
@@ -93,6 +95,7 @@
 | `config_admin.go` | `configSectionDefs()`(行847)、`configValues()`(行973) |
 
 **`internal/store/store.go` — 状态模型：**
+
 | 实体 | 类型/字段 | 行 |
 |------|---------|-----|
 | `State` | 单一状态文档，含所有实体 map | 行55-99 |
@@ -108,6 +111,7 @@
 | `SchedulerRun` | ID, JobID, Type, Trigger, Status, Message, Summary, Logs… | 行313-326 |
 
 **`internal/store/store.go` — 关键方法：**
+
 | 方法 | 行 | 说明 |
 |------|-----|------|
 | `ListUsers()` → `[]User` | — | 所有用户 |
@@ -136,7 +140,8 @@
 | `SigninEnabled` | `handleSignin`、`handleSigninRenew` | `SIGNIN_DISABLED` |
 | `MediaRequestEnabled` | `handleCreateMediaRequest`、`handleMyMediaRequests` | — |
 | `emailConfigured()` | 所有发码/验证/找回密码 handler | `EMAIL_DISABLED` |
-| `BangumiEnabled` | `handleBangumiWebhook`、`handleUpdateMe`(bgm 字段)、`handleBangumiSyncTrigger`、`handleAdminBangumiSyncUser` | `BANGUMI_SYNC_DISABLED` |
+| `BangumiEnabled` | `handleBangumiWebhook`、`handleUpdateMe`(bgm_mode/bgm_token)、`handleBangumiSyncTrigger`、`handleAdminBangumiSyncUser`、`handleBangumiSyncHistory`、`handleBangumiClearHistory` | `BANGUMI_SYNC_DISABLED` |
+| `BangumiManageEnabled` | `handleUpdateMe`(bgm_manage_mode)、`handleBangumiMe`、`handleBangumiCollections`、`handleUpdateBangumiCollection` | `BANGUMI_MANAGE_DISABLED` |
 | `RegisterEnabled` | `handleRegister` | — |
 
 注意：`TelegramMode` 控制的是 **Bot 模式**（`Global.telegram_mode`），不是 Telegram 绑定功能。用户自助绑定/解绑/换绑的 handler **不应**受 `TelegramMode` 限制。Bot 相关 handler 本身已有独立的 `telegramConfigured()` 检查。
@@ -146,6 +151,7 @@
 ### 操作审计日志约定
 
 `internal/api/audit_handlers.go` 提供 `a.audit(r, action, category, targetUID, detail)` 便捷方法：
+
 - 自动从 `current(r)` 提取操作者 UID/Username
 - 自动记录客户端 IP
 - category: `"admin"` / `"user"` / `"system"`
@@ -158,6 +164,7 @@
 ### RegCode Source 字段约定
 
 `RegCode.Source` 区分卡码来源：
+
 - `"admin"` — 管理员在后台手动生成（`POST /admin/regcodes`）
 - `"invite"` — 邀请系统自动生成（`POST /invite/renew-codes`，邀请人为下级生成续期码）
 - 空字符串（历史数据）— 视作 `"admin"`
@@ -179,6 +186,7 @@
 ### RegCode 有效期暂停约定
 
 `RegCode` 支持停用期间暂停计算有效期：
+
 - `PausedSeconds` — 累计暂停时长（秒），停用期间暂停计算 `ValidityTime` 倒计时
 - `PauseStart` — 当前暂停起始时间戳（秒），0 表示未处于暂停状态
 - `handleUpdateRegcode` 在 `active` 变化时自动记录/结算暂停时间
@@ -188,6 +196,7 @@
 ### 认证页背景图约定
 
 认证页（登录/注册）背景图：
+
 - 上传接口：`POST /admin/config/upload-auth-background`，文件名固定为 `background.<ext>`
 - 提供接口：`GET /system/auth-background`，优先返回 `background.<ext>`，不存在时兼容旧版 `?file=` 参数
 - 配置键：`Global.auth_background_url`，默认空，支持环境变量 `TWILIGHT_AUTH_BACKGROUND_URL` 覆盖
@@ -196,12 +205,14 @@
 ### 工单类型保护
 
 `Ticket.types` 配置受最小保护：
+
 - 通过配置保存页面（schema 编辑器或原始 TOML 编辑器）保存时，`ensureTicketDefaults` 自动确保至少保留一个类型（默认 `"all"`），防止管理员清空所有类型导致 fallback 失效
 - 管理员可在工单管理页自由增删改类型，默认仅含 `"all"` 一个类型。在此页面编辑工单类型时，修改会首先经过 `ensureTicketDefaults` 守护，接着原子写入 `internal/store` 内存状态并同步将其持久化保存回 `config.toml` 中，保障系统重启或执行高风险热重载时其配置不会发生意外丢失。
 
 ### 工单关闭状态保护
 
 当工单状态处于 `closed`（已关闭）时：
+
 - 服务端在上传/删除图片 handler (`handleUploadTicketImage` / `handleDeleteTicketImage`) 通过安全拦截检测：如果是普通用户所属的关闭工单，则强制拒绝并返回 `ErrTicketClosed` (HTTP 403 Forbidden)，阻止其修改、剔除或销毁证据性历史图片。
 - 系统管理员 (`AuthAdmin`) 拥有不受限的调试特权，允许继续添加、编辑或剔除该特定关闭工单的内容。
 - 前端对应地将 `canDelete` 控制属性注入并下发给 [webui/src/components/ticket-images.tsx](webui/src/components/ticket-images.tsx)，联动工单主控，普通用户不可交互已结单图片。
@@ -215,6 +226,7 @@
 ### 注册邮箱验证约定
 
 注册时如果填写了邮箱且 SMTP 已配置，自动发送验证邮件：
+
 - `handleRegister` 在创建用户成功后调用 `issueEmailCode` 发送绑定验证码
 - 验证码发送失败不影响注册结果（仅记录日志）
 - 响应中包含 `email_verification_sent` 字段（验证记录 ID，发送失败时为空）
@@ -225,6 +237,7 @@
 认证页（登录/注册/找回密码）采用右侧固定毛玻璃面板 + 左侧背景图/装饰布局：
 
 **布局结构：**
+
 - 面板由 `AuthLayout`（`webui/src/app/(auth)/layout.tsx`）直接渲染 `<main className="auth-panel">`，不放在各页面组件内
 - 因为 Next.js App Router 的 layout 跨页面导航持久化，面板本身不随页面切换重新挂载——无闪动
 - 各页面（login / register / forgot-password）仅返回表单内容，共享 `webui/src/app/(auth)/auth-ui.tsx` 中的 `AuthBrand`、`AuthStepDots`、按钮/链接样式常量
@@ -240,17 +253,20 @@
 | `NEXT_PUBLIC_AUTH_PANEL_OPACITY` | `0.82` | 右侧面板毛玻璃不透明度（0-1），有背景图时自动 +0.08 |
 
 **背景与可读性：**
+
 - 有自定义背景图时，叠加层 `opacity` 由 `NEXT_PUBLIC_AUTH_BG_OVERLAY_OPACITY` 控制，面板不透明度由 `NEXT_PUBLIC_AUTH_PANEL_OPACITY` 叠加 +0.08 控制
 - 文字使用多层 `text-shadow`（`.auth-card-text`）确保在任何背景上可读
 - 注册向导使用 `.auth-step-dot` 进度点指示当前步骤
 
 **动画与过渡：**
+
 - `animate-auth-enter` 仅首屏触发，页面内导航时不重播
 - `prefers-reduced-motion` 时所有动画降级为瞬态
 
 ### 邮箱登录约定
 
 后端 `handleLogin` 同时支持用户名和邮箱登录：
+
 - 请求体含 `email` 字段时走 `FindUserByEmail`（`internal/store/store.go`）
 - `username` 字段含 `@` 也自动走邮箱查找（前端 `api.ts` 的 `login()` 自动检测）
 - 邮箱查找大小写不敏感（`strings.EqualFold`）
@@ -259,11 +275,13 @@
 ### 邮箱 SMTP 发件限制处理
 
 SMTP 服务商（如 QQ 邮箱、Outlook 等）通常有每小时/每日发件数量限制。后端处理：
+
 - `smtpDeliver` 返回错误时，`issueEmailCode` 使用 `ErrEmailSendFailed`（HTTP 502）
 - 错误日志经 `redactSensitiveText` 脱敏，不向用户暴露 SMTP 原始拒绝原因
 - 后端不做 SMTP 层面重试（服务商限流期间重试无意义）
 
 前端处理：
+
 - `EMAIL_SEND_FAILED` 加入 `isThrottleErrorCode` 集合，触发本地冷却（120s，高于普通限流的 60s）
 - `throttleCooldownSeconds(code)` 函数返回不同错误码对应的冷却时长
 - 友好文案提示用户"邮件服务暂时不可用，可能是发件数量达到上限"，引导稍后重试或联系管理员

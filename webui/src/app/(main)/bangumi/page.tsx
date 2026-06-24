@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { motion } from "framer-motion";
-import { BookOpen, RefreshCw, Trash2, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Heart, Tv, ExternalLink, Edit, User as UserIcon } from "lucide-react";
+import { BookOpen, RefreshCw, Trash2, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Heart, Tv, ExternalLink, Edit, User as UserIcon, Star } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +21,37 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 function formatTime(unix: number): string {
   return new Date(unix * 1000).toLocaleString();
+}
+
+function StarRating({ value }: { value: number }) {
+  if (value <= 0) return null;
+  return (
+    <span className="inline-flex items-center gap-0.5 text-yellow-500 text-[10px]">
+      <Star className="h-3 w-3 fill-current" />
+      {value}
+    </span>
+  );
+}
+
+function RateInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="flex gap-1">
+      {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((v) => (
+        <button
+          key={v}
+          type="button"
+          onClick={() => onChange(value === v ? 0 : v)}
+          className={`w-7 h-7 rounded text-[10px] font-bold transition-colors ${
+            value === v
+              ? "bg-yellow-500 text-black"
+              : "bg-accent/30 text-muted-foreground hover:bg-accent/60"
+          }`}
+        >
+          {v}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 export default function BangumiPage() {
@@ -81,6 +112,7 @@ export default function BangumiPage() {
   const [editingItem, setEditingItem] = useState<any>(null);
   const [editType, setEditType] = useState<number>(3);
   const [editEpStatus, setEditEpStatus] = useState<number>(0);
+  const [editRate, setEditRate] = useState<number>(0);
   const [updating, setUpdating] = useState(false);
 
   const loadViewAll = async (type: number, offset: number, reset = false) => {
@@ -126,14 +158,24 @@ export default function BangumiPage() {
     setEditingItem(item);
     setEditType(item.type ?? 3);
     setEditEpStatus(item.ep_status ?? 0);
+    setEditRate(item.rate ?? 0);
     setEditOpen(true);
+  };
+
+  const handleEditTypeChange = (val: string) => {
+    const t = Number(val);
+    setEditType(t);
+    // 非在看/看过状态下清除 ep_status，避免 Bangumi API 拒绝不一致请求
+    if (t !== 2 && t !== 3) {
+      setEditEpStatus(0);
+    }
   };
 
   const handleSaveProgress = async () => {
     if (!editingItem) return;
     setUpdating(true);
     try {
-      const res = await api.updateBangumiCollection(editingItem.subject_id, editType, editEpStatus);
+      const res = await api.updateBangumiCollection(editingItem.subject_id, editType, editEpStatus, editRate);
       if (res.success) {
         toast({ title: "更新成功" });
         setEditOpen(false);
@@ -401,6 +443,9 @@ export default function BangumiPage() {
                               {item.ep_status ? (
                                 <Badge variant="secondary" className="text-[10px] mt-2 px-1.5 py-0.5">看到 {item.ep_status} 话</Badge>
                               ) : <Badge variant="outline" className="text-[10px] mt-2 px-1.5 py-0.5 text-muted-foreground">尚无进度</Badge>}
+                              {item.rate > 0 && (
+                                <div className="mt-1"><StarRating value={item.rate} /></div>
+                              )}
                             </div>
                             <div className="flex items-center justify-between gap-1.5 mt-2 border-t border-border/20 pt-1.5">
                               <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-primary flex items-center gap-1" onClick={() => handleOpenEdit(item)}>
@@ -455,6 +500,9 @@ export default function BangumiPage() {
                               <h4 className="text-xs font-bold truncate text-foreground" title={name}>{name}</h4>
                               <p className="text-[10px] text-muted-foreground truncate">{item.subject?.name}</p>
                               <Badge variant="outline" className="text-[10px] mt-2 px-1.5 py-0.5 text-green-600 bg-green-500/5 border-green-500/20">已看完</Badge>
+                              {item.rate > 0 && (
+                                <div className="mt-1"><StarRating value={item.rate} /></div>
+                              )}
                             </div>
                             <div className="flex items-center justify-between gap-1.5 mt-2 border-t border-border/20 pt-1.5">
                               <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-primary flex items-center gap-1" onClick={() => handleOpenEdit(item)}>
@@ -509,6 +557,9 @@ export default function BangumiPage() {
                               <h4 className="text-xs font-bold truncate text-foreground" title={name}>{name}</h4>
                               <p className="text-[10px] text-muted-foreground truncate">{item.subject?.name}</p>
                               <Badge variant="outline" className="text-[10px] mt-2 px-1.5 py-0.5 text-red-500 bg-red-500/5 border-red-500/20">想看</Badge>
+                              {item.rate > 0 && (
+                                <div className="mt-1"><StarRating value={item.rate} /></div>
+                              )}
                             </div>
                             <div className="flex items-center justify-between gap-1.5 mt-2 border-t border-border/20 pt-1.5">
                               <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-primary flex items-center gap-1" onClick={() => handleOpenEdit(item)}>
@@ -716,7 +767,7 @@ export default function BangumiPage() {
                 <Label htmlFor="status_type">观看状态</Label>
                 <Select
                   value={String(editType)}
-                  onValueChange={(val) => setEditType(Number(val))}
+                  onValueChange={handleEditTypeChange}
                 >
                   <SelectTrigger id="status_type">
                     <SelectValue placeholder="选择状态" />
@@ -757,6 +808,12 @@ export default function BangumiPage() {
                   </div>
                 </div>
               )}
+
+              <div className="space-y-1.5">
+                <Label>评分</Label>
+                <RateInput value={editRate} onChange={setEditRate} />
+                <p className="text-[10px] text-muted-foreground">点击数字设置评分（0=不评分），再点击取消评分</p>
+              </div>
             </div>
           )}
           <DialogFooter>
@@ -813,6 +870,9 @@ export default function BangumiPage() {
                             <Badge variant="outline" className="text-[10px] mt-2 px-1.5 py-0.5 text-green-600 bg-green-500/5 border-green-500/20">已看完</Badge>
                           ) : (
                             <Badge variant="outline" className="text-[10px] mt-2 px-1.5 py-0.5 text-red-500 bg-red-500/5 border-red-500/20">想看</Badge>
+                          )}
+                          {item.rate > 0 && (
+                            <div className="mt-1"><StarRating value={item.rate} /></div>
                           )}
                         </div>
                         <div className="flex items-center justify-between gap-1.5 mt-2 border-t border-border/20 pt-1.5">

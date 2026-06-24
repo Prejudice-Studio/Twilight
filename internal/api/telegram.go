@@ -47,7 +47,7 @@ func (a *App) telegramEndpoint(method string) (string, error) {
 	// 之前是 "TrimRight + 拼字符串"，scheme=javascript: 或 host=元数据 IP 都
 	// 会原样喂给 net/http，bot token 直接泄漏到攻击者控制的目标。
 	//
-	// 在 base 已经带 "/bot<TOKEN>" 路径时，我们要校验的仍然只是 host+scheme，
+	// 在 base 已经带 "/bot<TOKEN>" 路径时，要校验的仍然只是 host+scheme，
 	// 所以校验前剥掉 path（与 bangumiEndpoint 同样套路）。
 	probeBase := rawBase
 	if pb, err := url.Parse(rawBase); err == nil {

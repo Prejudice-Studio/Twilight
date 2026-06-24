@@ -28,7 +28,7 @@ func acquireStateLock(path string) (*fileLock, error) {
 		return nil, nil
 	}
 	// 用一个独立的 .lock 文件而不是 state.json 本身：
-	//   - 我们后续 saveLocked 会做 rename(tmp → state.json)，
+	//   - 后续 saveLocked 会做 rename(tmp → state.json)，
 	//     rename 会让 state.json 的 inode 变；锁挂在 state.json fd 上会失效。
 	//   - 而 .lock 文件是常驻 inode，flock 一直有效。
 	lockPath := path + ".lock"

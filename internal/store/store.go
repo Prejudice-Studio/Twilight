@@ -127,7 +127,7 @@ type User struct {
 	EmbyID           string `json:"emby_id,omitempty"`
 	EmbyUsername     string `json:"emby_username,omitempty"`
 	// EmbyDisabled 是远端 Emby 账号「当前是否被禁用」的尽力镜像（true=已禁用）。
-	// 由我们每次启停 Emby 时回写、并在强制刷新时按远端真值校正。让用户列表无需逐行
+	// 由每次启停 Emby 时回写、并在强制刷新时按远端真值校正。让用户列表无需逐行
 	// 查 Emby 即可区分「Web 正常但 Emby 被单独禁用」。仅在 EmbyID 非空时有意义。
 	EmbyDisabled          bool     `json:"emby_disabled"`
 	Avatar                string   `json:"avatar,omitempty"`

@@ -257,7 +257,7 @@ func (a *App) handleUpload(w http.ResponseWriter, r *http.Request, kind string) 
 		return
 	}
 	// 起始期再 lstat 一次：MkdirAll 后如果有人 race 把目录换成 symlink，
-	// 我们仍然要拒掉。Lstat 不跟随 symlink，方便检测。
+	// 仍然要拒掉。Lstat 不跟随 symlink，方便检测。
 	if info, lerr := os.Lstat(dir); lerr != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		failWithCode(w, http.StatusInternalServerError, ErrUploadDirInvalid, "上传目录无效")
 		return

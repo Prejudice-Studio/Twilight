@@ -27,7 +27,7 @@ type Client struct {
 }
 
 // maxBulkLen 限制单条 redis bulk-string 回复的最大长度（64MB）。
-// 没有这道闸时，对端发送 `$2147483647\r\n` 我们会立刻 `make([]byte, n+2)`
+// 没有这道闸时，对端发送 `$2147483647\r\n` 会立刻 `make([]byte, n+2)`
 // 直接 OOM；中间人也能用同样手法搞挂进程。64MB 远超任何 rate-limit / session
 // kv 的合理体量，但仍给 Lua 脚本回执之类的留足空间。
 const maxBulkLen = 64 * 1024 * 1024

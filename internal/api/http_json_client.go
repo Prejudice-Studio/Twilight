@@ -129,7 +129,7 @@ func doJSONRequest(req *http.Request, dst any) error {
 // doJSONRequestWithTimeout 把 timeout 包成 context deadline 后用共享 client 发送，
 // 既能复用连接池又能保留每端点不同的超时语义。
 // 边界：req 已经携带 ctx（NewRequestWithContext），如果调用方 ctx 已带 deadline
-// 且早于 timeout，会沿用调用方的 ctx；否则我们 wrap 一层确保有上界。
+// 且早于 timeout，会沿用调用方的 ctx；否则 wrap 一层确保有上界。
 func doJSONRequestWithTimeout(req *http.Request, dst any, timeout time.Duration) error {
 	if timeout <= 0 {
 		timeout = 10 * time.Second

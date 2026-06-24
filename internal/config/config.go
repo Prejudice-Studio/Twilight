@@ -169,6 +169,7 @@ type Config struct {
 	TelegramCustomCommands         []TelegramCommandReply
 	BotInternalSecret              string
 	BangumiEnabled                 bool
+	BangumiManageEnabled           bool
 	BangumiWebhookSecret           string
 	TMDBAPIKey                     string
 	TMDBAPIURL                     string
@@ -414,6 +415,7 @@ func Load(path string) (Config, error) {
 	cfg.TelegramGroupUserPanelTemplate = reader.stringValue(cfg.TelegramGroupUserPanelTemplate, "Telegram.group_user_panel_template", "group_user_panel_template")
 	cfg.TelegramCustomCommands = parseTelegramCommandRepliesList(reader.stringListValue(nil, "Telegram.bot_custom_commands", "bot_custom_commands"))
 	cfg.BangumiEnabled = reader.boolValue(cfg.BangumiEnabled, "BangumiSync.enabled", "bangumi_sync_enabled")
+	cfg.BangumiManageEnabled = reader.boolValue(cfg.BangumiManageEnabled, "BangumiSync.manage_enabled", "bangumi_sync_manage_enabled")
 	cfg.BangumiWebhookSecret = reader.stringValue(cfg.BangumiWebhookSecret, "BangumiSync.webhook_secret", "webhook_secret")
 	cfg.TMDBAPIKey = reader.stringValue(cfg.TMDBAPIKey, "Global.tmdb_api_key", "tmdb_api_key")
 	cfg.TMDBAPIURL = reader.stringValue(cfg.TMDBAPIURL, "Global.tmdb_api_url", "tmdb_api_url")

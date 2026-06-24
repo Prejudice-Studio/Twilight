@@ -46,18 +46,36 @@ Emby/Jellyfin 播放停止
 
 ## 功能开关
 
-总开关由配置项 `BangumiSync.enabled` 控制（对应后端配置字段 `BangumiEnabled`）。开启后：
+Bangumi 功能有两个独立开关，互不影响：
 
-- 侧边栏出现「Bangumi 同步」导航项（用户端）和「Bangumi 管理」导航项（管理员端）。
-- 用户可在 Bangumi 仪表盘或设置页写入 `bgm_mode` / `bgm_token`（关闭时写入会返回 `BANGUMI_SYNC_DISABLED`，HTTP 403）。
-- Webhook 入口 `POST /api/v1/emby/bangumi/webhook` 才会处理请求；总开关关闭时返回 `BANGUMI_SYNC_DISABLED`，HTTP 400。
-- 同步触发 API（`POST /api/v1/bangumi/sync/trigger` 和管理员端 `POST /api/v1/admin/bangumi/sync/:uid`）才能执行实际同步。
+### 同步开关 `BangumiSync.enabled`
+
+对应后端配置字段 `BangumiEnabled`，仅控制同步相关功能：
+
+- Webhook 入口 `POST /api/v1/emby/bangumi/webhook` 处理请求（关闭时返回 `BANGUMI_SYNC_DISABLED`，HTTP 400）。
+- 同步触发 API（`POST /api/v1/bangumi/sync/trigger` 和管理员 `POST /api/v1/admin/bangumi/sync/:uid`）。
+- 同步历史查看和清除（`GET/DELETE /api/v1/bangumi/sync/history`）。
+- 用户设置中的 `bgm_mode` / `bgm_token` 写入（关闭时返回 `BANGUMI_SYNC_DISABLED`，HTTP 403）。
+
+**不影响**：个人收藏查看/管理、收藏修改等管理功能。
+
+### 管理开关 `BangumiSync.manage_enabled`
+
+对应后端配置字段 `BangumiManageEnabled`，仅控制管理相关功能：
+
+- 用户 Bangumi 个人页（`GET /api/v1/bangumi/me`），关闭时返回 `bgm_manage_disabled: true`。
+- 收藏列表查看（`GET /api/v1/bangumi/collections`），关闭时返回 `BANGUMI_MANAGE_DISABLED`。
+- 收藏状态/进度/评分修改（`PATCH /api/v1/bangumi/collections/:subject_id`），关闭时返回 `BANGUMI_MANAGE_DISABLED`。
+- 用户设置中 `bgm_manage_mode` 写入（关闭时返回 `BANGUMI_MANAGE_DISABLED`，HTTP 403）。
+
+**不影响**：Webhook、同步触发、同步历史等同步功能。
 
 `config.toml` 示例：
 
 ```toml
 [BangumiSync]
 enabled = true
+manage_enabled = true
 webhook_secret = "replace-with-random-secret"
 ```
 
@@ -365,8 +383,13 @@ Webhook 期望接收 JSON 通知。后端从负载中按以下规则解析：
 
 - **同步状态卡片**：四格统计（总记录数 / 已同步数 / 就绪状态 / Token 配置状态）。
 - **同步操作**：「开始同步」按钮手动触发同步；「清除历史」按钮清除同步日志。
-- **Bangumi 设置**：开启/关闭同步开关 + 填写 / 清除个人 Access Token。
+- **Bangumi 设置**：开启/关闭同步开关；开启/关闭管理功能开关；填写 / 清除个人 Access Token。
 - **同步历史**：最近 50 条同步日志，含状态图标（成功/失败/跳过）、匹配的 Bangumi 条目名、时间。
+- **个人收藏视图**（需开启管理功能）：显示 Bangumi 账号关联信息（头像、昵称、签名）、在看/想看/看过三列精选卡片（每类 8 条）。
+  - 卡片显示：封面、标题、进度话数、评分（StarRating 组件）。
+  - 「进度/状态」按钮打开编辑对话框，支持修改：观看状态（想看/看过/在看）、观看进度（话数）、评分（0-10 点选）。
+  - 「查看全部」打开分页对话框浏览该分类所有条目。
+  - 每张卡片底部显示 Bangumi 详情链接，点击跳转 Bangumi 条目页。
 
 ### 管理员端：Bangumi 管理
 
@@ -374,7 +397,7 @@ Webhook 期望接收 JSON 通知。后端从负载中按以下规则解析：
 
 功能：
 
-- **用户列表**：所有用户及其 Bangumi 同步状态（开关 / Token 配置 / 就绪 / 播放记录数 / 已同步数）。
+- **用户列表**（分页展示，默认每页 20 条，支持搜索用户名/UID 和上下翻页）：所有用户及其 Bangumi 同步状态（同步开关 / 管理开关 / Token 配置 / 就绪 / 播放记录数 / 已同步数）。
 - **逐用户操作**：
   - 「播放记录」按钮：弹窗查看该用户的播放记录列表，已同步条目标注匹配的 Bangumi 条目名。
   - 「同步日志」按钮：弹窗查看该用户的同步历史。
@@ -402,6 +425,9 @@ Webhook 期望接收 JSON 通知。后端从负载中按以下规则解析：
 | `POST` | `/api/v1/bangumi/sync/trigger` | `AuthUser` | 手动触发一次同步 |
 | `GET` | `/api/v1/bangumi/sync/history` | `AuthUser` | 获取同步历史日志（`?limit=`） |
 | `DELETE` | `/api/v1/bangumi/sync/history` | `AuthUser` | 清除当前用户的同步历史 |
+| `GET` | `/api/v1/bangumi/me` | `AuthUser` | 获取 Bangumi 用户资料 + 在看/想看/看过精选（各 8 条） |
+| `GET` | `/api/v1/bangumi/collections` | `AuthUser` | 分页获取 Bangumi 收藏列表（`?type=&limit=&offset=`） |
+| `PATCH` | `/api/v1/bangumi/collections/:subject_id` | `AuthUser` | 修改收藏状态/进度/评分（优先 PATCH，404 时回退 POST） |
 
 ### 管理员端
 
@@ -423,12 +449,30 @@ Webhook 期望接收 JSON 通知。后端从负载中按以下规则解析：
 
 | 错误码 | HTTP | 触发场景 |
 | --- | --- | --- |
-| `BANGUMI_SYNC_DISABLED` | 400 / 403 | 总开关未开启（Webhook 400；写入用户设置 / 触发同步 403） |
+| `BANGUMI_SYNC_DISABLED` | 400 / 403 | 同步开关未开启（Webhook / 触发同步 / 同步历史 / 写入同步设置） |
+| `BANGUMI_MANAGE_DISABLED` | 400 / 403 | 管理开关未开启（收藏查看 / 收藏修改 / 写入管理设置） |
 | `UNAUTHORIZED` | 403 | Webhook 密钥为空或不匹配 |
 | `UNAUTHORIZED` | 410 | 时间戳超出重放窗口（"Webhook 请求已过期"） |
 | `UNAUTHORIZED` | 400 | 时间戳非法（"Webhook timestamp 非法"） |
 | `BANGUMI_TOKEN_TOO_LONG` | 400 | 个人 `bgm_token` 超过 4096 字节 |
 | `BANGUMI_TOKEN_MISSING` | 400 | 开启 `bgm_mode` 或触发同步但未提供个人 Token |
+
+### 收藏管理约束
+
+Bangumi API 对 `ep_status`（完成度）的修改有限制：**只能用于修改书籍类条目（subject_type=1）的完成度**。对于动画/剧集（subject_type=2）修改 `ep_status` 会返回 400。因此：
+
+- 后端 `updateBangumiCollection` 仅当 `ep_status > 0` 时才将其包含在请求体中。
+- 前端编辑对话框在切换收藏类型为非「在看」（type=3）或「看过」（type=2）时自动将 `ep_status` 置为 0 并阻止发送。
+- 如需修改动画/剧集的剧集进度，请直接使用 Bangumi 网站操作。
+
+### 收藏修改请求处理
+
+`PATCH /api/v1/bangumi/collections/:subject_id` 处理流程：
+
+1. 先尝试 `PATCH /v0/users/-/collections/{subject_id}`（修改已有收藏）。
+2. 若收到 404（条目未收藏），回退 `POST /v0/users/-/collections/{subject_id}`（新建收藏）。
+3. `ep_status` 仅当 > 0 时才包含在请求体中（适配 Bangumi API 约束）。
+4. 请求体固定包含 `type`（收藏类型）和 `rate`（评分）。
 
 ## 排错
 

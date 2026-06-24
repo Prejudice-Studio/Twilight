@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/prejudice-studio/twilight/internal/store"
 	"go.uber.org/zap"
 )
 
@@ -17,7 +19,7 @@ func (a *App) handleBangumiSyncStatus(w http.ResponseWriter, r *http.Request, _ 
 	records := a.store().PlaybackRecords(u.UID, 0, 0)
 	totalRecords := len(records)
 	syncedCount := 0
-	for _, log := range a.store().ListBangumiSyncLogs(u.UID, 5000) {
+	for _, log := range logs {
 		if log.Status == "success" {
 			syncedCount++
 		}
@@ -56,6 +58,10 @@ func (a *App) handleBangumiSyncTrigger(w http.ResponseWriter, r *http.Request, _
 }
 
 func (a *App) handleBangumiSyncHistory(w http.ResponseWriter, r *http.Request, _ Params) {
+	if !a.cfg().BangumiEnabled {
+		failWithCode(w, http.StatusBadRequest, ErrBangumiSyncDisabled, "Bangumi 同步未启用")
+		return
+	}
 	p := current(r)
 	limit := queryInt(r, "limit", 50)
 	if limit <= 0 || limit > 200 {
@@ -69,6 +75,10 @@ func (a *App) handleBangumiSyncHistory(w http.ResponseWriter, r *http.Request, _
 }
 
 func (a *App) handleBangumiClearHistory(w http.ResponseWriter, r *http.Request, _ Params) {
+	if !a.cfg().BangumiEnabled {
+		failWithCode(w, http.StatusBadRequest, ErrBangumiSyncDisabled, "Bangumi 同步未启用")
+		return
+	}
 	p := current(r)
 	if err := a.store().ClearBangumiSyncLogs(p.User.UID); err != nil {
 		failWithCode(w, http.StatusInternalServerError, ErrInternal, "清除失败: "+err.Error())
@@ -79,25 +89,46 @@ func (a *App) handleBangumiClearHistory(w http.ResponseWriter, r *http.Request, 
 
 func (a *App) handleAdminBangumiUsers(w http.ResponseWriter, r *http.Request, _ Params) {
 	users := a.store().ListUsers()
-	type BangumiUserInfo struct {
-		UID         int64  `json:"uid"`
-		Username    string `json:"username"`
-		BGMMode     bool   `json:"bgm_mode"`
-		TokenSet    bool   `json:"token_set"`
-		SyncReady   bool   `json:"sync_ready"`
-		SyncCount   int    `json:"sync_count"`
-		RecordCount int    `json:"record_count"`
-	}
-	result := make([]BangumiUserInfo, 0, len(users))
+	page := max(1, queryInt(r, "page", 1))
+	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
+	search := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
+
+	filteredUsers := make([]store.User, 0)
 	for _, u := range users {
-		info := BangumiUserInfo{
-			UID:       u.UID,
-			Username:  u.Username,
-			BGMMode:   u.BGMMode,
-			TokenSet:  u.BGMToken != "",
-			SyncReady: u.BGMMode && u.BGMToken != "",
+		if search != "" {
+			uidStr := strconv.FormatInt(u.UID, 10)
+			if !strings.Contains(strings.ToLower(u.Username), search) && !strings.Contains(uidStr, search) {
+				continue
+			}
 		}
-		syncLogs := a.store().ListBangumiSyncLogs(u.UID, 5000)
+		filteredUsers = append(filteredUsers, u)
+	}
+
+	total := len(filteredUsers)
+	paginatedUsers := paginate(filteredUsers, page, perPage)
+
+	type BangumiUserInfo struct {
+		UID           int64  `json:"uid"`
+		Username      string `json:"username"`
+		BGMMode       bool   `json:"bgm_mode"`
+		BGMManageMode bool   `json:"bgm_manage_mode"`
+		TokenSet      bool   `json:"token_set"`
+		SyncReady     bool   `json:"sync_ready"`
+		SyncCount     int    `json:"sync_count"`
+		RecordCount   int    `json:"record_count"`
+	}
+
+	result := make([]BangumiUserInfo, 0, len(paginatedUsers))
+	for _, u := range paginatedUsers {
+		info := BangumiUserInfo{
+			UID:           u.UID,
+			Username:      u.Username,
+			BGMMode:       u.BGMMode,
+			BGMManageMode: u.BGMManageMode,
+			TokenSet:      u.BGMToken != "",
+			SyncReady:     u.BGMMode && u.BGMToken != "",
+		}
+		syncLogs := a.store().ListBangumiSyncLogs(u.UID, 100)
 		for _, log := range syncLogs {
 			if log.Status == "success" {
 				info.SyncCount++
@@ -106,7 +137,15 @@ func (a *App) handleAdminBangumiUsers(w http.ResponseWriter, r *http.Request, _ 
 		info.RecordCount = len(a.store().PlaybackRecords(u.UID, 0, 0))
 		result = append(result, info)
 	}
-	ok(w, "OK", map[string]any{"users": result, "total": len(result)})
+
+	totalPages := (total + perPage - 1) / perPage
+	ok(w, "OK", map[string]any{
+		"users":    result,
+		"total":    total,
+		"page":     page,
+		"per_page": perPage,
+		"pages":    totalPages,
+	})
 }
 
 func (a *App) handleAdminBangumiRecords(w http.ResponseWriter, r *http.Request, ps Params) {
@@ -211,6 +250,7 @@ func (a *App) handleAdminBangumiClearLogs(w http.ResponseWriter, r *http.Request
 func (a *App) handleBangumiMe(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
 	u := p.User
+
 	if u.BGMToken == "" {
 		ok(w, "Token not set", map[string]any{
 			"bgm_token_set": false,
@@ -218,7 +258,7 @@ func (a *App) handleBangumiMe(w http.ResponseWriter, r *http.Request, _ Params) 
 		return
 	}
 
-	if !u.BGMManageMode {
+	if !a.cfg().BangumiManageEnabled || !u.BGMManageMode {
 		ok(w, "Management disabled", map[string]any{
 			"bgm_token_set":       true,
 			"bgm_manage_disabled": true,
@@ -268,6 +308,10 @@ func (a *App) handleBangumiMe(w http.ResponseWriter, r *http.Request, _ Params) 
 }
 
 func (a *App) handleBangumiCollections(w http.ResponseWriter, r *http.Request, _ Params) {
+	if !a.cfg().BangumiManageEnabled {
+		failWithCode(w, http.StatusBadRequest, ErrBangumiManageDisabled, "Bangumi 管理功能未启用")
+		return
+	}
 	p := current(r)
 	u := p.User
 	if u.BGMToken == "" {
@@ -311,6 +355,10 @@ func (a *App) handleBangumiCollections(w http.ResponseWriter, r *http.Request, _
 }
 
 func (a *App) handleUpdateBangumiCollection(w http.ResponseWriter, r *http.Request, ps Params) {
+	if !a.cfg().BangumiManageEnabled {
+		failWithCode(w, http.StatusBadRequest, ErrBangumiManageDisabled, "Bangumi 管理功能未启用")
+		return
+	}
 	subjectID := ps["subject_id"]
 	if subjectID == "" {
 		failWithCode(w, http.StatusBadRequest, ErrInternal, "缺少 Subject ID")
@@ -331,21 +379,30 @@ func (a *App) handleUpdateBangumiCollection(w http.ResponseWriter, r *http.Reque
 	payload := decodeMap(r)
 	collectType := int(numeric(payload["type"])) // 1: 想看, 2: 看过, 3: 在看, 4: 搁置, 5: 抛弃
 	epStatus := int(numeric(payload["ep_status"]))
+	rate := int(numeric(payload["rate"]))
 
 	if collectType <= 0 || collectType > 5 {
 		failWithCode(w, http.StatusBadRequest, ErrInternal, "收藏状态不合法 (应为 1-5)")
 		return
 	}
+	if rate < 0 || rate > 10 {
+		failWithCode(w, http.StatusBadRequest, ErrInternal, "评分分值不合法 (应为 0-10)")
+		return
+	}
+	// 非在看/看过状态下清除 ep_status，避免 Bangumi API 拒绝不一致的请求
+	if collectType != 2 && collectType != 3 {
+		epStatus = 0
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	err := a.updateBangumiCollection(ctx, subjectID, u.BGMToken, collectType, epStatus)
+	err := a.updateBangumiCollection(ctx, subjectID, u.BGMToken, collectType, epStatus, rate)
 	if err != nil {
 		failWithCode(w, http.StatusBadGateway, ErrInternal, "更新 Bangumi 收藏失败: "+err.Error())
 		return
 	}
 
-	a.audit(r, "update_bangumi_collection", "user", 0, map[string]any{"subject_id": subjectID, "type": collectType, "ep_status": epStatus})
+	a.audit(r, "update_bangumi_collection", "user", 0, map[string]any{"subject_id": subjectID, "type": collectType, "ep_status": epStatus, "rate": rate})
 	ok(w, "更新成功", nil)
 }

@@ -2465,7 +2465,7 @@ func TestSendExpiryRemindersAbortsOnConsecutiveRateLimits(t *testing.T) {
 		}
 	}
 
-	// 真实 sleep 60s × 5 太慢——这里我们 ctx 超时 6s 让 retry_after sleep
+	// 真实 sleep 60s × 5 太慢——这里 ctx 超时 6s 让 retry_after sleep
 	// 提前返回；目的是验证 abort 路径，不是验证准确 sleep。
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
@@ -5491,7 +5491,7 @@ func TestDecodeMapEnforcesSizeAndDepthLimits(t *testing.T) {
 // 让 token / api_key 等自定义凭据被 Go 默认 follow 行为发到第三方。
 func TestSharedHTTPClientRefusesCrossHostRedirect(t *testing.T) {
 	// attacker 模拟外部恶意目标：如果 Go 真的 follow，会把 X-Emby-Token 这类
-	// 自定义头原样转发过来。我们靠 onAttacker 计数器断言 *没有* 命中。
+	// 自定义头原样转发过来。靠 onAttacker 计数器断言 *没有* 命中。
 	var hitAttacker int32
 	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&hitAttacker, 1)

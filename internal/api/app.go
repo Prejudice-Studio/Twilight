@@ -74,6 +74,8 @@ type App struct {
 	developerJSMu         sync.Mutex
 	developerJSCallbacks  map[string]developerJSCallbackContext
 	developerJSWaiters    map[string]developerJSMessageWaiter
+	delAccountPendingMu   sync.Mutex
+	delAccountPending     map[string]*delAccountPendingState
 	embyAdminMu           sync.Mutex
 	embyAdminCache        map[string]embyAdminCacheEntry
 	embyDeviceAuditMu     sync.Mutex
@@ -1131,7 +1133,7 @@ func (a *App) clientIP(r *http.Request) string {
 			}
 		}
 		// XFF 右向左剥离：直接对端是受信代理，但代理本身可能再被另一层
-		// 受信代理转发；攻击者控制的客户端在最左端塞任何字符串。我们从
+		// 受信代理转发；攻击者控制的客户端在最左端塞任何字符串。从
 		// 最右一跳开始，逐跳验证是否仍处于 TrustedProxyCIDRs 范围内，
 		// 第一个不在范围内的 IP 才是真实客户端 IP。
 		// 例：XFF = "spoofed, 1.1.1.1, 10.0.0.5"，RemoteAddr=10.0.0.1，

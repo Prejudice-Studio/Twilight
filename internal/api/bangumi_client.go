@@ -171,7 +171,7 @@ func (a *App) getBangumiUserCollections(ctx context.Context, username string, to
 		limit = 8
 	}
 	values := url.Values{
-		"subject_type": {"2"}, // 2 for anime
+		"subject_type": {"2"},                       // 2 for anime
 		"type":         {strconv.Itoa(collectType)}, // 1:想看, 2:看过, 3:在看
 		"limit":        {strconv.Itoa(limit)},
 		"offset":       {strconv.Itoa(offset)},
@@ -201,14 +201,19 @@ func (a *App) getBangumiUserCollections(ctx context.Context, username string, to
 	return results, total, nil
 }
 
-func (a *App) updateBangumiCollection(ctx context.Context, subjectID string, token string, collectType int, epStatus int) error {
+func (a *App) updateBangumiCollection(ctx context.Context, subjectID string, token string, collectType int, epStatus int, rate int) error {
 	endpoint, err := bangumiEndpoint(a.cfg().BangumiAPIURL, "/users/-/collections/"+subjectID, nil)
 	if err != nil {
 		return err
 	}
+	// Bangumi API 的 ep_status 仅允许修改书籍类条目 (subject_type=1)，
+	// 对动画/剧集修改 ep_status 会返回 400。因此仅当 ep_status > 0 时才包含。
 	body := map[string]any{
-		"type":      collectType,
-		"ep_status": epStatus,
+		"type": collectType,
+		"rate": rate,
+	}
+	if epStatus > 0 {
+		body["ep_status"] = epStatus
 	}
 	headers := map[string]string{
 		"User-Agent":    "Twilight/1.0",
@@ -216,8 +221,14 @@ func (a *App) updateBangumiCollection(ctx context.Context, subjectID string, tok
 		"Authorization": "Bearer " + token,
 	}
 	var result map[string]any
+	// 先尝试 PATCH（修改已有收藏），若返回 404 则回退 POST（新建收藏）
 	if err := patchJSON(ctx, endpoint, headers, body, &result); err != nil {
-		// Fallback to checking if POST also works, just in case
+		if strings.Contains(err.Error(), "remote status 404") {
+			if err2 := postJSON(ctx, endpoint, headers, body, &result); err2 != nil {
+				return err2
+			}
+			return nil
+		}
 		return err
 	}
 	return nil

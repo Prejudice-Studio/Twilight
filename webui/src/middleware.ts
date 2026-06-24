@@ -19,7 +19,7 @@ import { NextRequest, NextResponse } from "next/server";
  *      整片报"Executing inline script violates ..."然后死透。
  *   3. 现在退到 `'self' 'unsafe-inline'`：与 Next 16 的内联 bootstrap +
  *      `_next/static/chunks` 共存的最简形式。等 Next 把 auto-nonce 修稳
- *      （或我们升级到内联脚本全 hash 化的版本）再回头收紧。
+ *      （或升级到内联脚本全 hash 化的版本）再回头收紧。
  *
  * 同源策略 + `frame-ancestors 'none'` + `object-src 'none'` 仍然挡掉了
  * `<iframe src=>` 嵌入与 Flash/PDF object 注入；XSS 表面 = "攻击者能写

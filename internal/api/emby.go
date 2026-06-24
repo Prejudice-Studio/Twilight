@@ -303,7 +303,7 @@ func (a *App) embySetPassword(ctx context.Context, userID, password string) erro
 		return nil
 	}
 	// 兜底：尝试用一个强随机密码堵住"无密码窗口"。这一步独立于调用方 ctx：
-	// 即便外层 ctx 已经 cancel，我们也尽力关门，再把原 lastErr 返回给调用方。
+	// 即便外层 ctx 已经 cancel，也尽力关门，再把原 lastErr 返回给调用方。
 	guardCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	guardPw := randomCode(32)

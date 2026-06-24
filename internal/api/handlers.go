@@ -75,6 +75,12 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 			return
 		}
 	}
+	if !a.cfg().BangumiManageEnabled {
+		if _, ok := payload["bgm_manage_mode"]; ok {
+			failWithCode(w, http.StatusForbidden, ErrBangumiManageDisabled, "Bangumi 管理功能未开启")
+			return
+		}
+	}
 	if token := stringValue(payload, "bgm_token"); len(token) > 4096 {
 		failWithCode(w, http.StatusBadRequest, ErrBangumiTokenTooLong, "Bangumi Token 过长")
 		return

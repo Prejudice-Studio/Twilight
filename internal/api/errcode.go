@@ -76,9 +76,10 @@ const (
 	ErrEmbyInputTooLong    ErrCode = "EMBY_INPUT_TOO_LONG"
 
 	// === Bangumi ===
-	ErrBangumiSyncDisabled ErrCode = "BANGUMI_SYNC_DISABLED"
-	ErrBangumiTokenTooLong ErrCode = "BANGUMI_TOKEN_TOO_LONG"
-	ErrBangumiTokenMissing ErrCode = "BANGUMI_TOKEN_MISSING"
+	ErrBangumiSyncDisabled   ErrCode = "BANGUMI_SYNC_DISABLED"
+	ErrBangumiManageDisabled ErrCode = "BANGUMI_MANAGE_DISABLED"
+	ErrBangumiTokenTooLong   ErrCode = "BANGUMI_TOKEN_TOO_LONG"
+	ErrBangumiTokenMissing   ErrCode = "BANGUMI_TOKEN_MISSING"
 
 	// === 调度器 ===
 	ErrSchedulerJobNotFound ErrCode = "SCHEDULER_JOB_NOT_FOUND"

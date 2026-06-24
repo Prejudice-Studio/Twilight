@@ -334,10 +334,10 @@ class ApiClient {
     }>(`/bangumi/collections?type=${type}&limit=${limit}&offset=${offset}`);
   }
 
-  async updateBangumiCollection(subjectId: string, type: number, epStatus: number) {
+  async updateBangumiCollection(subjectId: string, type: number, epStatus: number, rate?: number) {
     return this.request(`/bangumi/collections/${subjectId}`, {
       method: "PATCH",
-      body: JSON.stringify({ type, ep_status: epStatus }),
+      body: JSON.stringify({ type, ep_status: epStatus, rate }),
     });
   }
 
@@ -353,8 +353,11 @@ class ApiClient {
     return this.request("/bangumi/sync/history", { method: "DELETE" });
   }
 
-  async adminBangumiUsers() {
-    return this.request<{ users: BangumiUserInfo[]; total: number }>("/admin/bangumi/users");
+  async adminBangumiUsers(page = 1, perPage = 20, search = "") {
+    const encodedSearch = encodeURIComponent(search);
+    return this.request<{ users: BangumiUserInfo[]; total: number; page: number; per_page: number; pages: number }>(
+      `/admin/bangumi/users?page=${page}&per_page=${perPage}&search=${encodedSearch}`
+    );
   }
 
   async adminBangumiRecords(uid: number, limit = 100) {

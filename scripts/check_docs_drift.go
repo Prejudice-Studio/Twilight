@@ -51,7 +51,7 @@ import (
 //	      AuthAdmin, a.handleY)
 //	a.add(http.MethodDelete, "/api/.../:id", AuthAdmin, a.handleZ) // docs:skip
 //
-// 多行调用我们做不了真正的 AST 解析（避免引入额外依赖），但 routes.go 当前
+// 多行调用做不了真正的 AST 解析（避免引入额外依赖），但 routes.go 当前
 // 100% 是单行 a.add，加 sanity check 兜底：解析后总数 != grep 计数 → 报错。
 var addPattern = regexp.MustCompile(`a\.add\(http\.Method([A-Z][a-zA-Z]+),\s*"([^"]+)"`)
 
