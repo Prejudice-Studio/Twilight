@@ -1227,6 +1227,7 @@ export interface BangumiUserInfo {
   uid: number;
   username: string;
   bgm_mode: boolean;
+  bgm_manage_mode: boolean;
   token_set: boolean;
   sync_ready: boolean;
   sync_count: number;
