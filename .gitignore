@@ -230,7 +230,6 @@ opencode.json
 docs/AUDIT_REPORT.md
 .narrafork/
 .worktrees/
-setup-deploy.sh
 
 # ─── Cloud / Infrastructure ───
 # Terraform / Pulumi 本地状态
