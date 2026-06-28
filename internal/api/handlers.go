@@ -825,7 +825,25 @@ func (a *App) handleRebindComplete(w http.ResponseWriter, r *http.Request, _ Par
 		failWithCode(w, http.StatusBadRequest, ErrTGNotBound, "尚未完成 Telegram 绑定")
 		return
 	}
-	_, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error {
+	// 换绑完成后检查新 Telegram 账号是否在要求的群组/频道中
+	if missing, err := a.telegramBindRequirementMissing(r.Context(), p.User.TelegramID); err != nil {
+		_, _ = a.store().UpdateUser(p.User.UID, func(u *store.User) error {
+			u.RebindingInProgress = true
+			u.RebindingSince = time.Now().Unix()
+			return nil
+		})
+		failWithCode(w, http.StatusForbidden, ErrTGBindGroupCheckFailed, "Telegram 账号未加入要求的群组/频道，换绑失败")
+		return
+	} else if len(missing) > 0 {
+		_, _ = a.store().UpdateUser(p.User.UID, func(u *store.User) error {
+			u.RebindingInProgress = true
+			u.RebindingSince = time.Now().Unix()
+			return nil
+		})
+		failWithCode(w, http.StatusForbidden, ErrTGBindGroupCheckFailed, "Telegram 账号未加入要求的群组/频道："+strings.Join(missing, "、"))
+		return
+	}
+	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error {
 		u.RebindingInProgress = false
 		u.RebindingSince = 0
 		return nil
@@ -833,7 +851,7 @@ func (a *App) handleRebindComplete(w http.ResponseWriter, r *http.Request, _ Par
 	if statusFromError(w, err) {
 		return
 	}
-	ok(w, "rebinding complete", publicUser(p.User))
+	ok(w, "rebinding complete", publicUser(u))
 }
 
 // telegramStatusFields 统一计算用户 Telegram 绑定 / 换绑状态，供

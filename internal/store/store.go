@@ -2222,6 +2222,7 @@ func (s *Store) BindUserTelegramAtomic(uid int64, tgid int64, currentUID int64) 
 		old = u.TelegramID
 		u.TelegramID = tgid
 		s.state.Users[uid] = u
+		s.maintainTelegramIDIndex(old, tgid, uid)
 		updated = u
 		return nil
 	})
