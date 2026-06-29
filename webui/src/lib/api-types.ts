@@ -498,6 +498,7 @@ export interface EmbyAuditDevice {
   ip: string;
   ip_approx: boolean; // true=由历史登录记录推断（非实时会话），前端弱化展示并加提示
   online: boolean;
+  count?: number; // 后端按 device_name+app_name 聚合后的设备数量
 }
 
 // EmbyAuditClientStat 是按客户端类型（AppName）归类的统计：设备数 / 在线数 / 去重用户数。

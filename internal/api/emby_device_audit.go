@@ -96,6 +96,7 @@ type embyAuditUser struct {
 	embyID     string
 	embyName   string
 	devices    []map[string]any
+	deviceAgg  map[string]map[string]any // device_name|app_name -> device，用于聚合
 	ipSet      map[string]bool
 	authEvents []embyAuthEvent
 	online     int
@@ -192,7 +193,7 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 	getUser := func(id string) *embyAuditUser {
 		u := users[id]
 		if u == nil {
-			u = &embyAuditUser{embyID: id, ipSet: map[string]bool{}}
+			u = &embyAuditUser{embyID: id, ipSet: map[string]bool{}, deviceAgg: map[string]map[string]any{}}
 			users[id] = u
 		}
 		return u
@@ -257,16 +258,32 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 			u.online++
 			onlineDevices++
 		}
-		u.devices = append(u.devices, map[string]any{
-			"device_id":     deviceID,
-			"device_name":   asString(d["Name"]),
-			"app_name":      app,
-			"app_version":   asString(d["AppVersion"]),
-			"last_activity": last,
-			"ip":            ip,
-			"ip_approx":     false,
-			"online":        isOnline,
-		})
+		// 按 device_name + app_name 聚合相同设备，前端以 count 字段展示批量。
+		aggKey := asString(d["Name"]) + "|" + app
+		if existing, ok := u.deviceAgg[aggKey]; ok {
+			existing["count"] = int(numeric(existing["count"])) + 1
+			existing["device_id"] = deviceID
+			if last > asString(existing["last_activity"]) {
+				existing["last_activity"] = last
+				existing["ip"] = ip
+			}
+			if isOnline {
+				existing["online"] = true
+			}
+		} else {
+			u.deviceAgg[aggKey] = map[string]any{
+				"device_id":     deviceID,
+				"device_name":   asString(d["Name"]),
+				"app_name":      app,
+				"app_version":   asString(d["AppVersion"]),
+				"last_activity": last,
+				"ip":            ip,
+				"ip_approx":     false,
+				"online":        isOnline,
+				"count":         1,
+			}
+			u.devices = append(u.devices, u.deviceAgg[aggKey])
+		}
 		cs := clientStats[app]
 		if cs == nil {
 			cs = &clientStat{users: map[string]bool{}}

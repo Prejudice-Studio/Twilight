@@ -1016,22 +1016,6 @@ function DeviceTableView({
   t: TFunc;
   locale: string;
 }) {
-  // 按 device_name + app_name + user 聚合
-  const groups = new Map<string, { user: EmbyAuditUser; device: EmbyAuditDevice; rowKey: string; count: number }>();
-  for (const row of rows) {
-    const key = row.rowKey.split("::")[0] + "::" + (row.device.device_name || "") + "::" + (row.device.app_name || "");
-    const existing = groups.get(key);
-    if (existing) {
-      existing.count++;
-      if ((row.device.last_activity || "") > (existing.device.last_activity || "")) {
-        existing.device = row.device;
-      }
-    } else {
-      groups.set(key, { ...row, count: 1 });
-    }
-  }
-  const aggregated = Array.from(groups.values());
-
   if (rows.length === 0) {
     return (
       <Card>
@@ -1044,11 +1028,6 @@ function DeviceTableView({
   return (
     <Card>
       <CardContent className="p-0">
-        {aggregated.length < rows.length && (
-          <div className="border-b px-4 py-2 text-xs text-muted-foreground">
-            {t("deviceAudit.deviceMatchCount", { count: aggregated.length })}（原始 {rows.length} 条）
-          </div>
-        )}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-muted/50">
@@ -1062,8 +1041,9 @@ function DeviceTableView({
               </tr>
             </thead>
             <tbody className="divide-y">
-              {aggregated.map(({ user: u, device: d, rowKey, count }) => {
+              {rows.map(({ user: u, device: d, rowKey }) => {
                 const name = u.emby_user_name || u.local_user?.username || t("deviceAudit.unknownUser");
+                const count = (d as any).count || 1;
                 return (
                   <tr key={rowKey} className="hover:bg-muted/30">
                     <td className="p-2.5">
@@ -1090,9 +1070,6 @@ function DeviceTableView({
                           ×{count}
                         </Badge>
                       )}
-                      <div className="font-mono text-[11px] text-muted-foreground">
-                        {d.device_id ? (d.device_id.length > 12 ? `${d.device_id.slice(0, 12)}…` : d.device_id) : "—"}
-                      </div>
                     </td>
                     <td className="p-2.5">
                       <ClientCell device={d} />
