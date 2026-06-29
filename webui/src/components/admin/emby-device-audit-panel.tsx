@@ -85,7 +85,15 @@ function userKey(u: EmbyAuditUser, index: number): string {
 
 // 安全访问 devices 数组——后端在某些边缘情况下可能返回 null 而非 []。
 function safeDevices(u: EmbyAuditUser): EmbyAuditDevice[] {
-  return u.devices ?? [];
+  const devs = u.devices ?? [];
+  // 排除 Twilight 自身（绑定 Bot 产生的设备记录），不对管理员展示
+  return devs.filter((d) => {
+    const app = (d.app_name || "").toLowerCase();
+    const dev = (d.device_name || "").toLowerCase();
+    if (app.includes("twilight")) return false;
+    if (dev.includes("twilight")) return false;
+    return true;
+  });
 }
 
 // 用户级搜索命中字段：Emby 名 / EmbyID / 本地用户名 / UID / 邮箱 / Telegram / 任意 IP。
@@ -452,7 +460,10 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
               {t("deviceAudit.clientsTitle")}
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {summary.clients.map((c) => {
+              {summary.clients.filter((c) => {
+                const name = (c.name || "").toLowerCase();
+                return !name.includes("twilight");
+              }).map((c) => {
                 const value = clientFilterValue(c.name);
                 const active = clientFilter === value;
                 const label = c.name || t("deviceAudit.clientUnknown");
@@ -1005,6 +1016,25 @@ function DeviceTableView({
   t: TFunc;
   locale: string;
 }) {
+  // 按 device_name + app_name 聚合，相同设备/客户端合并为一行
+  const aggregated = useMemo(() => {
+    const groups = new Map<string, { user: EmbyAuditUser; device: EmbyAuditDevice; rowKey: string; count: number; latest: string }>();
+    for (const row of rows) {
+      const key = (row.device.device_name || "") + "||" + (row.device.app_name || "");
+      const existing = groups.get(key);
+      if (existing) {
+        existing.count++;
+        if (row.device.last_activity && row.device.last_activity > existing.latest) {
+          existing.latest = row.device.last_activity;
+          existing.device = row.device;
+        }
+      } else {
+        groups.set(key, { ...row, count: 1, latest: row.device.last_activity || "" });
+      }
+    }
+    return Array.from(groups.values());
+  }, [rows]);
+
   if (rows.length === 0) {
     return (
       <Card>
@@ -1018,7 +1048,7 @@ function DeviceTableView({
     <Card>
       <CardContent className="p-0">
         <div className="border-b px-4 py-2 text-xs text-muted-foreground">
-          {t("deviceAudit.deviceMatchCount", { count: rows.length })}
+          {t("deviceAudit.deviceMatchCount", { count: aggregated.length })}（原 {rows.length} 条）
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -1033,7 +1063,7 @@ function DeviceTableView({
               </tr>
             </thead>
             <tbody className="divide-y">
-              {rows.map(({ user: u, device: d, rowKey }) => {
+              {aggregated.map(({ user: u, device: d, rowKey, count }) => {
                 const name = u.emby_user_name || u.local_user?.username || t("deviceAudit.unknownUser");
                 return (
                   <tr key={rowKey} className="hover:bg-muted/30">
@@ -1056,6 +1086,11 @@ function DeviceTableView({
                     </td>
                     <td className="p-2.5">
                       <div className="font-medium">{d.device_name || "—"}</div>
+                      {count > 1 && (
+                        <Badge variant="secondary" className="mt-0.5 text-[10px]">
+                          ×{count}
+                        </Badge>
+                      )}
                       <div className="font-mono text-[11px] text-muted-foreground">
                         {d.device_id ? (d.device_id.length > 12 ? `${d.device_id.slice(0, 12)}…` : d.device_id) : "—"}
                       </div>
