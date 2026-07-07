@@ -59,6 +59,8 @@
 | 系统自动更新（Git） | `system_update.go`、`system_update_handler.go` | — | `/system/admin/update` | `admin/config`(更新页) | `[SystemUpdate]` |
 | 统计 / 服务器状态 | `handlers.go`(`handleSystemStats`/`handleWatchStats`) | `playback.go` | `/system/admin/stats`、`/batch/watch-stats/*` | `(main)/admin/stats` | — |
 | 操作审计日志 | `audit_handlers.go`(含 `audit()` helper) | `store.go`(AuditLog) | `/admin/audit-logs/*` | `(main)/admin/audit-logs` | — |
+| 设备 / IP 审查 | `emby_device_audit.go`(buildEmbyDeviceAudit/handleAdminEmbyDeviceAudit) | — | `/admin/emby/device-audit` | `(main)/admin/emby`(设备审查页签) | — |
+| 开发者模式 / JS 沙箱 | `developer_handlers.go`、`telegram_js_commands.go`、`telegram_js_interactions.go` | `store.go`(DeveloperModeEnabled) | `/admin/developer/*` | `(main)/admin/developer` | — |
 
 ### 关键函数速查（按文件）
 
@@ -460,3 +462,48 @@ pnpm build
 - 前端改动提交前检查：`cd webui && pnpm lint`，涉及构建、路由、Next 配置或 API 契约时运行 `pnpm build`。
 - 涉及鉴权、Telegram、Emby、API Key、上传、路径、配置保存、数据库迁移、Git 更新、systemd、实时日志、限流、会话、缓存或并发的改动必须补充聚焦测试或明确说明无法测试的边界。
 - 不要修改用户未要求的本地配置、数据库、上传文件、生成产物或部署状态。不要执行破坏性命令，不要重置工作区，不要替用户提交或推送，除非用户明确要求。
+
+### 设备 / IP 审查约定
+
+- 设备审查（`/admin/emby` → 设备审查页签）通过 `buildEmbyDeviceAudit` 汇总 Emby `/Devices` 设备清单、`/Sessions` 实时会话 IP、`/System/ActivityLog` 历史登录 IP。
+- 设备在后端按 `device_name + app_name` 聚合，`count` 字段标记数量。前端设备表/型号分布图均使用后端聚合数据。
+- 前端过滤排除 `app_name` 或 `device_name` 含 `twilight` 的条目（Twilight 绑定 Bot 产生的记录）。
+- `POST /admin/emby/sessions/kick-all` 批量删除全部 Emby 设备记录（关联会话一并清除）。管理员操作需确认弹窗。
+- 设备审查结果有 15 秒缓存（`embyDeviceAuditCacheTTL`），传 `?refresh=1` 跳过缓存。
+
+### 开发者模式约定
+
+- 开发者模式总开关通过 `store.DeveloperModeEnabled()` 判定，值持久化在 state 中。
+- 关闭后阻断的路径：JS 沙箱执行、JS 预设 CRUD、JS 文档接口、TG 自定义 JS 指令、TG inline callback、TG waitText。
+- 前端侧边栏和管理导航在 `developer_mode=false` 时隐藏开发者入口。
+- TG 自定义 JS 指令被禁时写 `telegram_js_command_blocked` 审计日志，原因 `developer_mode_disabled`。
+- 预设 CRUD 和文档接口仍响应 403（`FORBIDDEN`），不暴露敏感信息。
+
+### Emby 同步调度任务约定
+
+`emby_sync` 任务每次运行时记录每用户的详细变更：
+- `emby_id` 变更（含占位 ID 修复）
+- `emby_username` 变更
+- `pending_emby` 清除
+- 远端 Emby 账号禁用策略命中
+- 同一 Emby ID 被多个本地用户声明时的冲突记录
+
+### 清理孤立 Emby 账号约定
+
+`cleanup_unlinked_emby` 调度任务：
+- 从 Emby `/Users` 拉取所有远程用户，与本地用户的 `EmbyID` 比对
+- 默认 `enabled: false`，需管理员手动在调度页开启
+- 运行时参数：`dry_run=true`（仅扫描不删除，默认）、`delete=true`（实际执行删除）
+- 删除调用 `DELETE /Users/{id}`，仅影响未绑定任何 Web 账号的孤立 Emby 用户
+
+### 换绑 Telegram 约定
+
+`handleUnbindTelegram`（解绑）：
+- 解绑后立即调用 `disableRemoteEmbyForWebState` 禁用关联的 Emby 账号
+- 将 `RebindingInProgress` 置为 true，允许后续绑定新 TG
+
+`handleRebindComplete`（换绑完成）：
+- 先检查新 Telegram 账号是否在要求的群组/频道中（`telegramBindRequirementMissing`）
+- 不满足时回退 `RebindingInProgress=true` 并返回 `ErrTGBindGroupCheckFailed`
+- 满足时清除 `RebindingInProgress`，调用 `embyApplyEnabledState` 按用户状态恢复 Emby 账号
+- 响应使用 `UpdateUser` 返回的新鲜用户数据而非 `current(r)` 的旧数据
