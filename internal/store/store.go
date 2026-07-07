@@ -105,6 +105,7 @@ type State struct {
 	AuditLogs               []AuditLog                             `json:"audit_logs"`
 	BangumiSyncLogs         []BangumiSyncLog                       `json:"bangumi_sync_logs"`
 	BangumiCollectionCache  map[string]BangumiCollectionCacheEntry `json:"bangumi_collection_cache,omitempty"`
+	BangumiSubjectCache     map[string]BangumiSubjectCacheEntry    `json:"bangumi_subject_cache,omitempty"`
 	Tickets                 map[int64]Ticket                       `json:"tickets"`
 	TicketTypes             []string                               `json:"ticket_types,omitempty"`
 	DeveloperJSPresets      map[int64]DeveloperJSPreset            `json:"developer_js_presets,omitempty"`
@@ -422,15 +423,24 @@ type BangumiSyncLog struct {
 }
 
 type BangumiCollectionCacheEntry struct {
-	UID         int64            `json:"uid"`
-	Username    string           `json:"username,omitempty"`
-	Type        int              `json:"type"`
+	UID      int64  `json:"uid"`
+	Username string `json:"username,omitempty"`
+	Type     int    `json:"type"`
+	// Entries stores user-scoped collection data only. Subject details are
+	// de-duplicated in State.BangumiSubjectCache and hydrated on read.
 	Entries     []map[string]any `json:"entries"`
 	Total       int              `json:"total"`
 	UpdatedAt   int64            `json:"updated_at"`
 	ExpiresAt   int64            `json:"expires_at,omitempty"`
 	LastError   string           `json:"last_error,omitempty"`
 	LastErrorAt int64            `json:"last_error_at,omitempty"`
+}
+
+type BangumiSubjectCacheEntry struct {
+	SubjectID int64          `json:"subject_id"`
+	Subject   map[string]any `json:"subject"`
+	UpdatedAt int64          `json:"updated_at"`
+	ExpiresAt int64          `json:"expires_at,omitempty"`
 }
 
 type Ticket struct {
@@ -1062,6 +1072,10 @@ func (s *State) ensure() {
 	if s.BangumiCollectionCache == nil {
 		s.BangumiCollectionCache = map[string]BangumiCollectionCacheEntry{}
 	}
+	if s.BangumiSubjectCache == nil {
+		s.BangumiSubjectCache = map[string]BangumiSubjectCacheEntry{}
+	}
+	s.normalizeBangumiCollectionSubjectCache()
 	if s.Tickets == nil {
 		s.Tickets = map[int64]Ticket{}
 	}
@@ -4418,27 +4432,175 @@ func bangumiCollectionCacheKey(uid int64, collectType int) string {
 	return strconv.FormatInt(uid, 10) + ":" + strconv.Itoa(collectType)
 }
 
-func cloneBangumiCollectionCacheEntry(entry BangumiCollectionCacheEntry) BangumiCollectionCacheEntry {
-	if entry.Entries == nil {
-		return entry
+const maxBangumiSubjectCacheEntries = 20000
+
+func bangumiSubjectCacheKey(subjectID int64) string {
+	return strconv.FormatInt(subjectID, 10)
+}
+
+func bangumiSubjectIDFromValue(value any) int64 {
+	switch v := value.(type) {
+	case int:
+		return int64(v)
+	case int64:
+		return v
+	case int32:
+		return int64(v)
+	case float64:
+		return int64(v)
+	case float32:
+		return int64(v)
+	case json.Number:
+		n, _ := v.Int64()
+		return n
+	case string:
+		n, _ := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		return n
+	default:
+		return 0
 	}
-	var copied []map[string]any
-	data, err := json.Marshal(entry.Entries)
+}
+
+func bangumiCollectionSubjectID(item map[string]any) int64 {
+	if item == nil {
+		return 0
+	}
+	if id := bangumiSubjectIDFromValue(item["subject_id"]); id > 0 {
+		return id
+	}
+	if subject, ok := item["subject"].(map[string]any); ok {
+		return bangumiSubjectIDFromValue(subject["id"])
+	}
+	return 0
+}
+
+func cloneBangumiMap(value map[string]any) map[string]any {
+	if value == nil {
+		return nil
+	}
+	var copied map[string]any
+	data, err := json.Marshal(value)
 	if err == nil {
 		_ = json.Unmarshal(data, &copied)
 	}
-	if copied == nil {
-		copied = make([]map[string]any, len(entry.Entries))
-		for i, item := range entry.Entries {
-			row := make(map[string]any, len(item))
-			for key, value := range item {
-				row[key] = value
-			}
-			copied[i] = row
+	if copied != nil {
+		return copied
+	}
+	copied = make(map[string]any, len(value))
+	for key, item := range value {
+		copied[key] = item
+	}
+	return copied
+}
+
+func cloneBangumiMapSlice(entries []map[string]any) []map[string]any {
+	if entries == nil {
+		return nil
+	}
+	copied := make([]map[string]any, len(entries))
+	for i, item := range entries {
+		copied[i] = cloneBangumiMap(item)
+	}
+	return copied
+}
+
+func cloneBangumiCollectionCacheEntry(entry BangumiCollectionCacheEntry) BangumiCollectionCacheEntry {
+	entry.Entries = cloneBangumiMapSlice(entry.Entries)
+	return entry
+}
+
+func hydrateBangumiCollectionCacheEntry(entry BangumiCollectionCacheEntry, subjects map[string]BangumiSubjectCacheEntry) BangumiCollectionCacheEntry {
+	entry = cloneBangumiCollectionCacheEntry(entry)
+	for i, item := range entry.Entries {
+		if item == nil {
+			continue
+		}
+		if _, ok := item["subject"]; ok {
+			continue
+		}
+		subjectID := bangumiCollectionSubjectID(item)
+		if subjectID <= 0 {
+			continue
+		}
+		if cached, ok := subjects[bangumiSubjectCacheKey(subjectID)]; ok && cached.Subject != nil {
+			item["subject"] = cloneBangumiMap(cached.Subject)
+			entry.Entries[i] = item
 		}
 	}
-	entry.Entries = copied
 	return entry
+}
+
+func normalizeBangumiCollectionCacheEntry(entry BangumiCollectionCacheEntry, now int64, subjects map[string]BangumiSubjectCacheEntry) BangumiCollectionCacheEntry {
+	entry = cloneBangumiCollectionCacheEntry(entry)
+	for i, item := range entry.Entries {
+		if item == nil {
+			continue
+		}
+		subjectID := bangumiCollectionSubjectID(item)
+		if subjectID <= 0 {
+			continue
+		}
+		if _, ok := item["subject_id"]; !ok {
+			item["subject_id"] = subjectID
+		}
+		if subject, ok := item["subject"].(map[string]any); ok && subject != nil {
+			subjectCopy := cloneBangumiMap(subject)
+			if _, ok := subjectCopy["id"]; !ok {
+				subjectCopy["id"] = subjectID
+			}
+			subjects[bangumiSubjectCacheKey(subjectID)] = BangumiSubjectCacheEntry{
+				SubjectID: subjectID,
+				Subject:   subjectCopy,
+				UpdatedAt: now,
+				ExpiresAt: entry.ExpiresAt,
+			}
+			delete(item, "subject")
+		}
+		entry.Entries[i] = item
+	}
+	return entry
+}
+
+func (s *State) normalizeBangumiCollectionSubjectCache() {
+	if s.BangumiCollectionCache == nil {
+		return
+	}
+	if s.BangumiSubjectCache == nil {
+		s.BangumiSubjectCache = map[string]BangumiSubjectCacheEntry{}
+	}
+	now := time.Now().Unix()
+	for key, entry := range s.BangumiCollectionCache {
+		updatedAt := entry.UpdatedAt
+		if updatedAt == 0 {
+			updatedAt = now
+		}
+		s.BangumiCollectionCache[key] = normalizeBangumiCollectionCacheEntry(entry, updatedAt, s.BangumiSubjectCache)
+	}
+	pruneBangumiSubjectCacheLocked(s.BangumiSubjectCache)
+}
+
+func pruneBangumiSubjectCacheLocked(subjects map[string]BangumiSubjectCacheEntry) {
+	if len(subjects) <= maxBangumiSubjectCacheEntries {
+		return
+	}
+	type cacheItem struct {
+		key       string
+		updatedAt int64
+	}
+	items := make([]cacheItem, 0, len(subjects))
+	for key, entry := range subjects {
+		items = append(items, cacheItem{key: key, updatedAt: entry.UpdatedAt})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].updatedAt == items[j].updatedAt {
+			return items[i].key < items[j].key
+		}
+		return items[i].updatedAt < items[j].updatedAt
+	})
+	for len(subjects) > maxBangumiSubjectCacheEntries && len(items) > 0 {
+		delete(subjects, items[0].key)
+		items = items[1:]
+	}
 }
 
 func (s *Store) BangumiCollectionCache(uid int64, collectType int) (BangumiCollectionCacheEntry, bool) {
@@ -4448,7 +4610,7 @@ func (s *Store) BangumiCollectionCache(uid int64, collectType int) (BangumiColle
 	if !ok {
 		return BangumiCollectionCacheEntry{}, false
 	}
-	return cloneBangumiCollectionCacheEntry(entry), true
+	return hydrateBangumiCollectionCacheEntry(entry, s.state.BangumiSubjectCache), true
 }
 
 func (s *Store) UpsertBangumiCollectionCache(entry BangumiCollectionCacheEntry) error {
@@ -4461,10 +4623,15 @@ func (s *Store) UpsertBangumiCollectionCache(entry BangumiCollectionCacheEntry) 
 		if s.state.BangumiCollectionCache == nil {
 			s.state.BangumiCollectionCache = map[string]BangumiCollectionCacheEntry{}
 		}
+		if s.state.BangumiSubjectCache == nil {
+			s.state.BangumiSubjectCache = map[string]BangumiSubjectCacheEntry{}
+		}
 		if entry.UpdatedAt == 0 {
 			entry.UpdatedAt = time.Now().Unix()
 		}
-		s.state.BangumiCollectionCache[bangumiCollectionCacheKey(entry.UID, entry.Type)] = cloneBangumiCollectionCacheEntry(entry)
+		entry = normalizeBangumiCollectionCacheEntry(entry, entry.UpdatedAt, s.state.BangumiSubjectCache)
+		s.state.BangumiCollectionCache[bangumiCollectionCacheKey(entry.UID, entry.Type)] = entry
+		pruneBangumiSubjectCacheLocked(s.state.BangumiSubjectCache)
 		return nil
 	})
 }

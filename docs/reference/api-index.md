@@ -177,6 +177,9 @@
 | POST | `/api/v1/bangumi/sync/trigger` | User | 手动触发一次 Bangumi 同步 |
 | GET | `/api/v1/bangumi/sync/history` | User | 获取同步历史日志（`?limit=`） |
 | DELETE | `/api/v1/bangumi/sync/history` | User | 清除当前用户的同步历史 |
+| GET | `/api/v1/bangumi/me` | User | 获取 Bangumi 用户资料与收藏精选（管理开关控制） |
+| GET | `/api/v1/bangumi/collections` | User | 分页获取收藏列表（`?type=&limit=&offset=&refresh=1`，可返回缓存） |
+| PATCH | `/api/v1/bangumi/collections/{subject_id}` | User | 修改收藏状态、进度与评分，并失效当前用户收藏缓存 |
 
 ## Media
 

@@ -44,7 +44,7 @@
 | 签到 / 积分 | `signin_handlers.go` | `signin.go` | `/signin/*` | `(main)/score` | `[SAR]` signin_* |
 | 公告 | `announcement_handlers.go` | `store.go`(Announcement) | `/announcements`、`/admin/announcements/*` | `(main)/announcements`、`admin/announcements` | [公告](docs/features/announcements.md) |
 | 设备 / 登录历史 / IP 黑名单 | `handlers.go`(`handleDevices`/`handleLoginHistory`)、`auth_handlers.go`(登录写设备) | `device.go`、`login_log.go`、`ip_blacklist.go` | `/security/*`、`/users/me/devices` | （并入 settings/admin） | `[DeviceLimit]` |
-| Bangumi 同步 | `bangumi_webhook.go`、`bangumi_client.go`、`bangumi_sync_service.go`、`bangumi_sync_handlers.go` | `store.go`(User.BgmToken, BangumiSyncLog)、`playback.go` | `/bangumi/sync/*`、`/admin/bangumi/*`、`/emby/bangumi/webhook` | `(main)/bangumi`、`(main)/admin/bangumi` | `[BangumiSync]` · [Bangumi](docs/features/bangumi.md) |
+| Bangumi 同步 / 收藏管理 | `bangumi_webhook.go`、`bangumi_client.go`、`bangumi_sync_service.go`、`bangumi_sync_handlers.go` | `store.go`(User.BgmToken, BangumiSyncLog, BangumiCollectionCache, BangumiSubjectCache)、`playback.go` | `/bangumi/sync/*`、`/bangumi/collections*`、`/admin/bangumi/*`、`/emby/bangumi/webhook` | `(main)/bangumi`、`(main)/bangumi/collections/[type]`、`(main)/admin/bangumi` | `[BangumiSync]` · [Bangumi](docs/features/bangumi.md) |
 | API Key | `apikey_handlers.go` | `store.go`(APIKey) | `/apikey/*`、`/users/me/apikeys` | `settings/apikey` | [API Key](docs/reference/api-key.md) |
 | 登录通知 | `auth_handlers.go`(登录发通知)、`email_client.go`、`telegram.go` | `store.go`(User.NotifyOnLoginTelegram/Email) | — | `(main)/settings` | `[Notification]` · config 模板字段 |
 | 工单变动通知（TG） | `ticket_handlers.go`(`notifyTicketOwner`) | `store.go`(User.NotifyOnTicketTelegram, Ticket.NotifyTelegram) | — | `(main)/settings`、`(main)/tickets` | `[Ticket]` notify_telegram_template |
@@ -112,6 +112,8 @@
 | `Device` | UID, DeviceID, DeviceName, Client, LastIP, Trusted, Blocked… | 行336-347 |
 | `LoginLog` | ID, UID, IP, DeviceID, DeviceName, Client, Time, Blocked… | 行349-361 |
 | `SchedulerRun` | ID, JobID, Type, Trigger, Status, Message, Summary, Logs… | 行313-326 |
+| `BangumiCollectionCache` | UID, Type, Entries(仅用户收藏态字段), Total, UpdatedAt, ExpiresAt… | — |
+| `BangumiSubjectCache` | SubjectID, Subject, UpdatedAt, ExpiresAt；按 Bangumi subject_id 全局去重作品详情 | — |
 
 **`internal/store/store.go` — 关键方法：**
 
@@ -130,6 +132,7 @@
 | `AddViolationLog` / `ListViolationLogs` | 行3445/3460 | 违规日志 |
 | `AddLoginLog` / `LoginHistory` | —/— | 登录历史 |
 | `ListDevices` / `UpdateDevice` / `DeleteDevice` | —/—/— | 设备管理 |
+| `BangumiCollectionCache` / `UpsertBangumiCollectionCache` / `DeleteBangumiCollectionCache` | —/—/— | BGM 收藏缓存读取、写入与用户级失效 |
 
 > 通用约定：错误码定义 `internal/api/errcode.go` ↔ 前端 `webui/src/lib/errcode.ts`/`validators.ts`；确认短语 `internal/api/confirm_phrases.go` ↔ `webui/src/lib/confirm-phrases.ts`；校验规则 `internal/validate` ↔ `webui/src/lib/password.ts`/`validators.ts`；全局状态 `webui/src/store/{auth,system}.ts`。完整路由清单见 [API 路由索引](docs/reference/api-index.md)。
 
@@ -236,6 +239,18 @@
 - `maxSigninRecords = 730` — 最多保留 730 条签到记录（约 2 年），超出部分从头部切除
 - 不依赖调度任务，签到请求到达时内联执行裁剪
 - `handleSigninHistory` 已限制返回上限 365 条，裁剪后 state JSON 体积可控
+
+### Bangumi 收藏缓存约定
+
+Bangumi 收藏管理缓存持久化在 `internal/store.State`，不是包级内存缓存：
+
+- `BangumiSubjectCache` 是全局作品缓存，key 为 Bangumi `subject_id`（BGMID），只保存作品详情 `subject`，不同用户引用同一作品时必须复用同一份缓存，避免在每个用户列表里重复保存封面、评分、标签等大对象。
+- `BangumiCollectionCache` 是用户收藏索引缓存，key 为 `uid:type`，`Entries` 只保存用户态字段（如 `subject_id`、收藏 `type`、`ep_status`、`rate` 等），读取时由 `BangumiCollectionCache()` 按 `subject_id` 从 `BangumiSubjectCache` 回填 `subject`，对 API 返回保持兼容。
+- `UpsertBangumiCollectionCache` 必须负责拆分：写入完整 Bangumi API entries 时，将 `subject` 抽入 `BangumiSubjectCache`，并从用户 `Entries` 删除；不要在 handler 里手写第二套拆分逻辑。
+- 旧 state 若已有内嵌 `subject` 的用户收藏缓存，`State.ensure()` 会迁移到全局作品缓存；后续正常保存会落成新结构。
+- TTL 由 `bangumiCollectionCacheTTLSeconds` 控制（当前 3600 秒）；`refresh_bangumi_collections` 调度任务每小时为开启管理且配置 Token 的用户刷新 `想看/看过/在看` 三类缓存。
+- 全局作品缓存容量上限为 `maxBangumiSubjectCacheEntries`（当前 20000），超过后按 `UpdatedAt` 淘汰最旧作品。删除/更新某个用户收藏或 Token 变更时只失效该用户的 `BangumiCollectionCache`，不要删除全局作品缓存，因为其他用户可能仍在引用。
+- `GET /bangumi/collections?refresh=1` 必须绕过用户收藏缓存重新拉取；Bangumi API 失败时允许降级返回仍可覆盖请求范围的旧用户缓存。
 
 ### 注册邮箱验证约定
 

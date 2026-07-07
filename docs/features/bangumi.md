@@ -12,10 +12,11 @@
 | Bangumi API 客户端（求片搜索 / 详情） | `internal/api/bangumi_client.go` |
 | Webhook 路由注册 | `internal/api/routes.go` |
 | 观看记录存储与去重 | `internal/store/playback.go` |
-| 同步日志存储（`BangumiSyncLog`） | `internal/store/store.go` |
+| 同步日志与收藏缓存存储（`BangumiSyncLog` / `BangumiCollectionCache` / `BangumiSubjectCache`） | `internal/store/store.go` |
 | 配置项解析 | `internal/config/config.go` |
 | 用户级 `bgm_mode` / `bgm_token` 处理 | `internal/api/handlers.go` |
 | 用户端 Bangumi 仪表盘页面 | `webui/src/app/(main)/bangumi/page.tsx` |
+| 用户端 Bangumi 收藏分页页面 | `webui/src/app/(main)/bangumi/collections/[type]/page.tsx` |
 | 管理员 Bangumi 管理页面 | `webui/src/app/(main)/admin/bangumi/page.tsx` |
 | 前端 API 客户端 | `webui/src/lib/api.ts` |
 | 前端类型定义 | `webui/src/lib/api-types.ts` |
@@ -373,6 +374,32 @@ Webhook 期望接收 JSON 通知。后端从负载中按以下规则解析：
 - 管理员导出 CSV（`/api/v1/...` 播放统计导出）。
 - Telegram Bot 的个人观看汇总。
 
+## 收藏管理与缓存
+
+收藏查看与修改由 `BangumiSync.manage_enabled` 控制。后端通过用户个人 Token 访问 Bangumi `/users/-/collections`，并在本地维护两层持久化缓存，减少重复外部请求和 state 体积：
+
+| 缓存 | Key | 内容 | 作用域 |
+| --- | --- | --- | --- |
+| `BangumiSubjectCache` | Bangumi `subject_id`（BGMID） | 作品详情 `subject`（标题、图片、评分、标签等） | 全局共享 |
+| `BangumiCollectionCache` | `uid:type` | 用户收藏态字段（`subject_id`、收藏 `type`、`ep_status`、`rate` 等） | 单用户单收藏类型 |
+
+写入缓存时，`UpsertBangumiCollectionCache` 会把 Bangumi API 返回条目中的 `subject` 抽入全局 `BangumiSubjectCache`，用户收藏 `Entries` 只保存 `subject_id` 和用户态字段。读取缓存时，`BangumiCollectionCache()` 再按 `subject_id` 回填作品详情，因此 API 响应仍保持前端需要的完整 `entries[].subject` 结构。这样不同用户收藏同一作品时只保存一份作品详情，避免重复存封面、评分、标签等大对象。
+
+### 缓存 TTL 与刷新
+
+- TTL：`bangumiCollectionCacheTTLSeconds = 3600` 秒。
+- 容量：全局 `BangumiSubjectCache` 上限 `maxBangumiSubjectCacheEntries = 20000`，超出后按 `UpdatedAt` 淘汰最旧作品。
+- 后台任务：`refresh_bangumi_collections` 每小时为开启 `BGMManageMode` 且配置个人 Token 的用户刷新 `想看(type=1)`、`看过(type=2)`、`在看(type=3)` 三类缓存。
+- 手动刷新：`GET /api/v1/bangumi/collections?refresh=1` 绕过用户收藏缓存，直接拉取 Bangumi 并重建缓存。
+- 降级行为：实时拉取 Bangumi 失败时，如果已有缓存能覆盖请求范围，接口会返回旧缓存并标记 `cached=true`，避免收藏页完全不可用。
+
+### 缓存失效
+
+- `PATCH /api/v1/bangumi/collections/:subject_id` 修改收藏后，会删除该用户所有 `BangumiCollectionCache`，下一次读取重新拉取。
+- 用户修改或清空个人 `bgm_token` 后，会删除该用户所有 `BangumiCollectionCache`，避免新 Token 继续读取旧账号收藏索引。
+- 删除用户时会清理该用户 `BangumiCollectionCache`；全局 `BangumiSubjectCache` 不随用户删除，因为其他用户可能仍引用同一作品。
+- 旧版 state 如果已经存了“用户缓存内嵌 subject”的条目，`State.ensure()` 会在加载时迁移到全局作品缓存，后续保存会落成新结构。
+
 ## 前端页面
 
 ### 用户端：Bangumi 仪表盘
@@ -388,7 +415,7 @@ Webhook 期望接收 JSON 通知。后端从负载中按以下规则解析：
 - **个人收藏视图**（需开启管理功能）：显示 Bangumi 账号关联信息（头像、昵称、签名）、在看/想看/看过三列精选卡片（每类 8 条）。
   - 卡片显示：封面、标题、进度话数、评分（StarRating 组件）。
   - 「进度/状态」按钮打开编辑对话框，支持修改：观看状态（想看/看过/在看）、观看进度（话数）、评分（0-10 点选）。
-  - 「查看全部」打开分页对话框浏览该分类所有条目。
+  - 「查看全部」跳转到 `/bangumi/collections/[type]` 独立分页页浏览该分类所有条目，并支持手动刷新绕过缓存。
   - 每张卡片底部显示 Bangumi 详情链接，点击跳转 Bangumi 条目页。
 
 ### 管理员端：Bangumi 管理
@@ -426,7 +453,7 @@ Webhook 期望接收 JSON 通知。后端从负载中按以下规则解析：
 | `GET` | `/api/v1/bangumi/sync/history` | `AuthUser` | 获取同步历史日志（`?limit=`） |
 | `DELETE` | `/api/v1/bangumi/sync/history` | `AuthUser` | 清除当前用户的同步历史 |
 | `GET` | `/api/v1/bangumi/me` | `AuthUser` | 获取 Bangumi 用户资料 + 在看/想看/看过精选（各 8 条） |
-| `GET` | `/api/v1/bangumi/collections` | `AuthUser` | 分页获取 Bangumi 收藏列表（`?type=&limit=&offset=`） |
+| `GET` | `/api/v1/bangumi/collections` | `AuthUser` | 分页获取 Bangumi 收藏列表（`?type=&limit=&offset=&refresh=1`，响应含 `cached` / `cache_updated_at`） |
 | `PATCH` | `/api/v1/bangumi/collections/:subject_id` | `AuthUser` | 修改收藏状态/进度/评分（优先 PATCH，404 时回退 POST） |
 
 ### 管理员端
