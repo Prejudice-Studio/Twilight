@@ -128,7 +128,7 @@ jobs:
     - name: Setup pnpm
       # 不传 version，让 action 从 webui/package.json 的 packageManager 字段读，
       # 与本地 corepack / docs / Nix 保持单一事实源。
-      uses: pnpm/action-setup@v4
+      uses: pnpm/action-setup@v6
       with:
         package_json_file: webui/package.json
 
