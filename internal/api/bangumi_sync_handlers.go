@@ -12,6 +12,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const bangumiCollectionCacheTTLSeconds = 3600
+
 func (a *App) handleBangumiSyncStatus(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
 	u := p.User
@@ -29,6 +31,8 @@ func (a *App) handleBangumiSyncStatus(w http.ResponseWriter, r *http.Request, _ 
 		"bgm_manage_mode": u.BGMManageMode,
 		"bgm_token_set":   u.BGMToken != "",
 		"sync_ready":      u.BGMMode && u.BGMToken != "",
+		"sync_enabled":    a.cfg().BangumiEnabled,
+		"manage_enabled":  a.cfg().BangumiManageEnabled,
 		"total_records":   totalRecords,
 		"synced_count":    syncedCount,
 		"recent_logs":     logs,
@@ -287,12 +291,9 @@ func (a *App) handleBangumiMe(w http.ResponseWriter, r *http.Request, _ Params) 
 		username = fmt.Sprint(me["id"])
 	}
 
-	// Fetch watching collections (type 3 - 在看)
-	watching, watchingTotal, _ := a.getBangumiUserCollections(ctx, username, u.BGMToken, 3, 8, 0)
-	// Fetch wishlist collections (type 1 - 想看)
-	wishlist, wishlistTotal, _ := a.getBangumiUserCollections(ctx, username, u.BGMToken, 1, 8, 0)
-	// Fetch collected collections (type 2 - 看过)
-	collected, collectedTotal, _ := a.getBangumiUserCollections(ctx, username, u.BGMToken, 2, 8, 0)
+	watching, watchingTotal, watchingCached, watchingUpdated, _ := a.bangumiCollectionsCached(ctx, u, username, 3, 8, 0, false)
+	wishlist, wishlistTotal, wishlistCached, wishlistUpdated, _ := a.bangumiCollectionsCached(ctx, u, username, 1, 8, 0, false)
+	collected, collectedTotal, collectedCached, collectedUpdated, _ := a.bangumiCollectionsCached(ctx, u, username, 2, 8, 0, false)
 
 	ok(w, "OK", map[string]any{
 		"bgm_token_set":   true,
@@ -304,6 +305,14 @@ func (a *App) handleBangumiMe(w http.ResponseWriter, r *http.Request, _ Params) 
 		"wishlist_total":  wishlistTotal,
 		"collected":       collected,
 		"collected_total": collectedTotal,
+		"cache": map[string]any{
+			"watching_cached":   watchingCached,
+			"wishlist_cached":   wishlistCached,
+			"collected_cached":  collectedCached,
+			"watching_updated":  zeroNil(watchingUpdated),
+			"wishlist_updated":  zeroNil(wishlistUpdated),
+			"collected_updated": zeroNil(collectedUpdated),
+		},
 	})
 }
 
@@ -337,20 +346,27 @@ func (a *App) handleBangumiCollections(w http.ResponseWriter, r *http.Request, _
 	}
 
 	collectType := queryInt(r, "type", 3) // 1:想看, 2:看过, 3:在看
-	limit := queryInt(r, "limit", 20)
-	offset := queryInt(r, "offset", 0)
+	if collectType < 1 || collectType > 5 {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "收藏类型不合法")
+		return
+	}
+	limit := clamp(queryInt(r, "limit", 20), 1, 100)
+	offset := max(0, queryInt(r, "offset", 0))
+	refresh := r.URL.Query().Get("refresh") == "1" || r.URL.Query().Get("refresh") == "true"
 
-	entries, total, err := a.getBangumiUserCollections(ctx, username, u.BGMToken, collectType, limit, offset)
+	entries, total, cached, updatedAt, err := a.bangumiCollectionsCached(ctx, u, username, collectType, limit, offset, refresh)
 	if err != nil {
 		failWithCode(w, http.StatusBadGateway, ErrInternal, "获取 Bangumi 收藏列表失败: "+err.Error())
 		return
 	}
 
 	ok(w, "OK", map[string]any{
-		"entries": entries,
-		"total":   total,
-		"limit":   limit,
-		"offset":  offset,
+		"entries":          entries,
+		"total":            total,
+		"limit":            limit,
+		"offset":           offset,
+		"cached":           cached,
+		"cache_updated_at": zeroNil(updatedAt),
 	})
 }
 
@@ -407,6 +423,17 @@ func (a *App) handleUpdateBangumiCollection(w http.ResponseWriter, r *http.Reque
 		failWithCode(w, http.StatusBadGateway, ErrInternal, "更新 Bangumi 收藏失败: "+err.Error())
 		return
 	}
+	if collectType == 2 && !hasEpStatus {
+		fullEpStatus, err := a.bangumiSubjectMainEpisodeCount(ctx, subjectID, u.BGMToken)
+		if err != nil {
+			failWithCode(w, http.StatusBadGateway, ErrInternal, "读取 Bangumi 总集数失败: "+err.Error())
+			return
+		}
+		if fullEpStatus > 0 {
+			epStatus = fullEpStatus
+			hasEpStatus = true
+		}
+	}
 	if hasEpStatus {
 		if err := a.updateBangumiEpisodeProgress(ctx, subjectID, u.BGMToken, epStatus); err != nil {
 			failWithCode(w, http.StatusBadGateway, ErrInternal, "更新 Bangumi 观看进度失败: "+err.Error())
@@ -422,5 +449,118 @@ func (a *App) handleUpdateBangumiCollection(w http.ResponseWriter, r *http.Reque
 		detail["rate"] = rate
 	}
 	a.audit(r, "update_bangumi_collection", "user", 0, detail)
+	_ = a.store().DeleteBangumiCollectionCache(u.UID, 0)
 	ok(w, "更新成功", nil)
+}
+
+func (a *App) bangumiCollectionsCached(ctx context.Context, u store.User, username string, collectType, limit, offset int, refresh bool) ([]map[string]any, int, bool, int64, error) {
+	now := time.Now().Unix()
+	if !refresh {
+		if cached, ok := a.store().BangumiCollectionCache(u.UID, collectType); ok && cached.ExpiresAt > now && offset+limit <= len(cached.Entries) {
+			return sliceBangumiCollectionEntries(cached.Entries, offset, limit), cached.Total, true, cached.UpdatedAt, nil
+		}
+	}
+	entries, total, err := a.getBangumiUserCollections(ctx, username, u.BGMToken, collectType, limit, offset)
+	if err != nil {
+		if cached, ok := a.store().BangumiCollectionCache(u.UID, collectType); ok && len(cached.Entries) > 0 && offset < len(cached.Entries) {
+			return sliceBangumiCollectionEntries(cached.Entries, offset, limit), cached.Total, true, cached.UpdatedAt, nil
+		}
+		return nil, 0, false, 0, err
+	}
+	if offset == 0 && total <= len(entries) {
+		_ = a.store().UpsertBangumiCollectionCache(store.BangumiCollectionCacheEntry{
+			UID:       u.UID,
+			Username:  username,
+			Type:      collectType,
+			Entries:   entries,
+			Total:     total,
+			UpdatedAt: now,
+			ExpiresAt: now + bangumiCollectionCacheTTLSeconds,
+		})
+	}
+	return entries, total, false, 0, nil
+}
+
+func sliceBangumiCollectionEntries(entries []map[string]any, offset, limit int) []map[string]any {
+	if offset < 0 {
+		offset = 0
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if offset >= len(entries) {
+		return []map[string]any{}
+	}
+	end := offset + limit
+	if end > len(entries) {
+		end = len(entries)
+	}
+	out := make([]map[string]any, end-offset)
+	copy(out, entries[offset:end])
+	return out
+}
+
+func (a *App) refreshBangumiCollectionCacheForUser(ctx context.Context, u store.User) (int, int, error) {
+	if u.BGMToken == "" || !u.BGMManageMode {
+		return 0, 0, nil
+	}
+	me, expired, err := a.getBangumiMe(ctx, u.BGMToken)
+	if err != nil {
+		return 0, 0, err
+	}
+	if expired {
+		return 0, 0, fmt.Errorf("bangumi token expired")
+	}
+	username := asString(me["username"])
+	if username == "" {
+		username = fmt.Sprint(me["id"])
+	}
+	refreshed := 0
+	totalEntries := 0
+	for _, collectType := range []int{1, 2, 3} {
+		entries, total, err := a.fetchAllBangumiCollections(ctx, username, u.BGMToken, collectType)
+		if err != nil {
+			_ = a.store().MarkBangumiCollectionCacheError(u.UID, collectType, truncateString(err.Error(), 200))
+			return refreshed, totalEntries, err
+		}
+		now := time.Now().Unix()
+		if err := a.store().UpsertBangumiCollectionCache(store.BangumiCollectionCacheEntry{
+			UID:       u.UID,
+			Username:  username,
+			Type:      collectType,
+			Entries:   entries,
+			Total:     total,
+			UpdatedAt: now,
+			ExpiresAt: now + bangumiCollectionCacheTTLSeconds,
+		}); err != nil {
+			return refreshed, totalEntries, err
+		}
+		refreshed++
+		totalEntries += len(entries)
+	}
+	return refreshed, totalEntries, nil
+}
+
+func (a *App) fetchAllBangumiCollections(ctx context.Context, username string, token string, collectType int) ([]map[string]any, int, error) {
+	const pageLimit = 50
+	const maxCachedEntriesPerType = 1000
+	all := make([]map[string]any, 0)
+	total := 0
+	for offset := 0; offset < maxCachedEntriesPerType; offset += pageLimit {
+		entries, gotTotal, err := a.getBangumiUserCollections(ctx, username, token, collectType, pageLimit, offset)
+		if err != nil {
+			return nil, 0, err
+		}
+		if gotTotal > 0 {
+			total = gotTotal
+		}
+		all = append(all, entries...)
+		if len(entries) < pageLimit || (total > 0 && len(all) >= total) {
+			break
+		}
+	}
+	if total == 0 {
+		total = len(all)
+	}
+	return all, total, nil
 }

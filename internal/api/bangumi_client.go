@@ -283,6 +283,20 @@ func (a *App) markBangumiEpisodesThrough(ctx context.Context, subjectID string, 
 	return a.patchBangumiEpisodes(ctx, subjectID, token, ids, 2)
 }
 
+func (a *App) bangumiSubjectMainEpisodeCount(ctx context.Context, subjectID string, token string) (int, error) {
+	episodes, err := a.bangumiEpisodes(ctx, subjectID, token)
+	if err != nil {
+		return 0, err
+	}
+	maxEpisode := 0
+	for _, episode := range episodes {
+		if episode.Number > maxEpisode {
+			maxEpisode = episode.Number
+		}
+	}
+	return maxEpisode, nil
+}
+
 func (a *App) patchBangumiEpisodes(ctx context.Context, subjectID string, token string, ids []int, collectType int) error {
 	endpoint, err := bangumiEndpoint(a.cfg().BangumiAPIURL, "/users/-/collections/"+subjectID+"/episodes", nil)
 	if err != nil {

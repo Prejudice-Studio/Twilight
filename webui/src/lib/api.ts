@@ -325,13 +325,21 @@ class ApiClient {
     }>("/bangumi/me");
   }
 
-  async getBangumiCollections(type: number, limit = 20, offset = 0) {
+  async getBangumiCollections(type: number, limit = 20, offset = 0, refresh = false) {
+    const params = new URLSearchParams({
+      type: String(type),
+      limit: String(limit),
+      offset: String(offset),
+    });
+    if (refresh) params.set("refresh", "1");
     return this.request<{
       entries: any[];
       total: number;
       limit: number;
       offset: number;
-    }>(`/bangumi/collections?type=${type}&limit=${limit}&offset=${offset}`);
+      cached?: boolean;
+      cache_updated_at?: number | null;
+    }>(`/bangumi/collections?${params.toString()}`);
   }
 
   async updateBangumiCollection(subjectId: string, data: { type: number; ep_status?: number; rate?: number }) {

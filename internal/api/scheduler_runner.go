@@ -682,6 +682,42 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		}
 		return map[string]any{"success": true, "tickets": cleanedTickets, "images": removedImages},
 			[]string{fmt.Sprintf("cleaned %d tickets, %d images older than %d days", cleanedTickets, removedImages, retentionDays)}, nil
+	case "refresh_bangumi_collections":
+		if !a.cfg().BangumiManageEnabled {
+			return map[string]any{"success": true, "enabled": false, "refreshed_users": 0}, []string{"Bangumi manage disabled"}, nil
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
+		defer cancel()
+		scanned := 0
+		eligible := 0
+		refreshedUsers := 0
+		refreshedLists := 0
+		cachedEntries := 0
+		failed := 0
+		logs := []string{}
+		for _, u := range a.store().ListUsers() {
+			if err := ctx.Err(); err != nil {
+				return map[string]any{"success": false, "terminated": true, "scanned": scanned, "eligible": eligible, "refreshed_users": refreshedUsers, "failed": failed}, logs, err
+			}
+			scanned++
+			if u.BGMToken == "" || !u.BGMManageMode {
+				continue
+			}
+			eligible++
+			lists, entries, err := a.refreshBangumiCollectionCacheForUser(ctx, u)
+			if err != nil {
+				failed++
+				logs = append(logs, fmt.Sprintf("user #%d (%s): %s", u.UID, u.Username, truncateString(err.Error(), 120)))
+				continue
+			}
+			if lists > 0 {
+				refreshedUsers++
+				refreshedLists += lists
+				cachedEntries += entries
+			}
+		}
+		return map[string]any{"success": failed == 0, "enabled": true, "scanned": scanned, "eligible": eligible, "refreshed_users": refreshedUsers, "refreshed_lists": refreshedLists, "cached_entries": cachedEntries, "failed": failed},
+			append(logs, fmt.Sprintf("refreshed %d users, %d lists, %d entries", refreshedUsers, refreshedLists, cachedEntries)), nil
 	default:
 		return map[string]any{"success": false}, nil, fmt.Errorf("unknown scheduler job: %s", jobID)
 	}

@@ -286,6 +286,7 @@ export interface ApiKeyItem {
 
 export interface UserSettings {
   bgm_mode: boolean;
+  bgm_manage_mode?: boolean;
   bgm_token_set: boolean;
   api_key_enabled: boolean;
   notify_on_login_telegram?: boolean;
@@ -315,6 +316,7 @@ export interface UserSettings {
     max_devices: number;
     max_streams: number;
     bangumi_sync_enabled?: boolean;
+    bangumi_manage_enabled?: boolean;
   };
 }
 
@@ -1204,6 +1206,8 @@ export interface BangumiSyncStatus {
   bgm_manage_mode: boolean;
   bgm_token_set: boolean;
   sync_ready: boolean;
+  sync_enabled?: boolean;
+  manage_enabled?: boolean;
   total_records: number;
   synced_count: number;
   recent_logs: BangumiSyncLog[];

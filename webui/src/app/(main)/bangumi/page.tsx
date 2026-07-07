@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { motion } from "framer-motion";
+import Link from "next/link";
 import { BookOpen, RefreshCw, Trash2, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Heart, Tv, ExternalLink, Edit, User as UserIcon, Star } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -98,15 +99,6 @@ export default function BangumiPage() {
 
   const { isLoading, error, execute: reload } = useAsyncResource(loadResource, { immediate: true });
 
-  // "查看全部" 状态以及分页数据
-  const [viewAllOpen, setViewAllOpen] = useState(false);
-  const [viewAllType, setViewAllType] = useState<number>(3);
-  const [viewAllTitle, setViewAllTitle] = useState("");
-  const [viewAllItems, setViewAllItems] = useState<any[]>([]);
-  const [viewAllTotal, setViewAllTotal] = useState(0);
-  const [viewAllOffset, setViewAllOffset] = useState(0);
-  const [viewAllLoading, setViewAllLoading] = useState(false);
-
   // "编辑进度" 状态
   const [editOpen, setEditOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
@@ -114,45 +106,6 @@ export default function BangumiPage() {
   const [editEpStatus, setEditEpStatus] = useState<number>(0);
   const [editRate, setEditRate] = useState<number>(0);
   const [updating, setUpdating] = useState(false);
-
-  const loadViewAll = async (type: number, offset: number, reset = false) => {
-    setViewAllLoading(true);
-    try {
-      const res = await api.getBangumiCollections(type, 12, offset);
-      if (res.success && res.data) {
-        const entries = res.data.entries || [];
-        const total = res.data.total ?? 0;
-        if (reset) {
-          setViewAllItems(entries);
-        } else {
-          setViewAllItems((prev) => [...prev, ...entries]);
-        }
-        setViewAllTotal(total);
-        setViewAllOffset(offset);
-      }
-    } catch (e) {
-      console.error(e);
-      toast({ title: "加载失败", variant: "destructive" });
-    } finally {
-      setViewAllLoading(false);
-    }
-  };
-
-  const handleViewAllPage = async (dir: number) => {
-    const nextOffset = viewAllOffset + dir * 12;
-    if (nextOffset < 0 || nextOffset >= viewAllTotal) return;
-    await loadViewAll(viewAllType, nextOffset, true);
-  };
-
-  const handleOpenViewAll = (type: number, title: string) => {
-    setViewAllType(type);
-    setViewAllTitle(title);
-    setViewAllItems([]);
-    setViewAllTotal(0);
-    setViewAllOffset(0);
-    setViewAllOpen(true);
-    void loadViewAll(type, 0, true);
-  };
 
   const handleOpenEdit = (item: any) => {
     setEditingItem(item);
@@ -184,9 +137,6 @@ export default function BangumiPage() {
         toast({ title: "更新成功" });
         setEditOpen(false);
         await reload();
-        if (viewAllOpen) {
-          void loadViewAll(viewAllType, 0, true);
-        }
       } else {
         toast({ title: "更新失败", description: res.message, variant: "destructive" });
       }
@@ -215,13 +165,18 @@ export default function BangumiPage() {
   };
 
   const handleSaveSettings = async () => {
-    if (bgmMode && !bgmToken && !status?.bgm_token_set) {
+    const syncEnabled = status?.sync_enabled === true;
+    const manageEnabled = status?.manage_enabled === true;
+    if ((syncEnabled && bgmMode || manageEnabled && bgmManageMode) && !bgmToken && !status?.bgm_token_set) {
       toast({ title: t("bangumi.tokenRequired"), variant: "destructive" });
       return;
     }
     setSaving(true);
     try {
-      const res = await api.updateMySettings({ bgm_mode: bgmMode, bgm_manage_mode: bgmManageMode, bgm_token: bgmToken || undefined });
+      const payload: Parameters<typeof api.updateMySettings>[0] = { bgm_token: bgmToken || undefined };
+      if (syncEnabled) payload.bgm_mode = bgmMode;
+      if (manageEnabled) payload.bgm_manage_mode = bgmManageMode;
+      const res = await api.updateMySettings(payload);
       if (res.success) {
         toast({ title: t("bangumi.settingsSaved") });
         await fetchUser();
@@ -281,6 +236,9 @@ export default function BangumiPage() {
       default: return <AlertCircle className="h-4 w-4 text-muted-foreground" />;
     }
   };
+
+  const syncEnabled = status?.sync_enabled === true;
+  const manageEnabled = status?.manage_enabled === true;
 
   if (error) {
     return (
@@ -424,8 +382,10 @@ export default function BangumiPage() {
                     <Tv className="h-3.5 w-3.5 text-primary" />
                     在看动画 ({bgmMe.watching_total ?? bgmMe.watching?.length ?? 0})
                   </h3>
-                  <Button variant="link" className="text-xs h-auto p-0 text-primary font-bold hover:underline" onClick={() => handleOpenViewAll(3, "精选在看番剧")}>
+                  <Button asChild variant="link" className="text-xs h-auto p-0 text-primary font-bold hover:underline">
+                    <Link href="/bangumi/collections/3" prefetch={false}>
                     查看全部 ({bgmMe.watching_total ?? bgmMe.watching?.length ?? 0}) →
+                    </Link>
                   </Button>
                 </div>
                 {bgmMe.watching && bgmMe.watching.length > 0 ? (
@@ -483,8 +443,10 @@ export default function BangumiPage() {
                     <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
                     最近看过 ({bgmMe.collected_total ?? bgmMe.collected?.length ?? 0})
                   </h3>
-                  <Button variant="link" className="text-xs h-auto p-0 text-primary font-bold hover:underline" onClick={() => handleOpenViewAll(2, "精选看过番剧")}>
+                  <Button asChild variant="link" className="text-xs h-auto p-0 text-primary font-bold hover:underline">
+                    <Link href="/bangumi/collections/2" prefetch={false}>
                     查看全部 ({bgmMe.collected_total ?? bgmMe.collected?.length ?? 0}) →
+                    </Link>
                   </Button>
                 </div>
                 {bgmMe.collected && bgmMe.collected.length > 0 ? (
@@ -540,8 +502,10 @@ export default function BangumiPage() {
                     <Heart className="h-3.5 w-3.5 text-red-500" />
                     想看动画 ({bgmMe.wishlist_total ?? bgmMe.wishlist?.length ?? 0})
                   </h3>
-                  <Button variant="link" className="text-xs h-auto p-0 text-primary font-bold hover:underline" onClick={() => handleOpenViewAll(1, "精选想看番剧")}>
+                  <Button asChild variant="link" className="text-xs h-auto p-0 text-primary font-bold hover:underline">
+                    <Link href="/bangumi/collections/1" prefetch={false}>
                     查看全部 ({bgmMe.wishlist_total ?? bgmMe.wishlist?.length ?? 0}) →
+                    </Link>
                   </Button>
                 </div>
                 {bgmMe.wishlist && bgmMe.wishlist.length > 0 ? (
@@ -595,6 +559,7 @@ export default function BangumiPage() {
         </motion.div>
       )}
 
+      {syncEnabled && (
       <motion.div variants={{ hidden: {}, show: {} }}>
         <Card className="glass-card">
           <CardHeader>
@@ -638,6 +603,7 @@ export default function BangumiPage() {
           </CardContent>
         </Card>
       </motion.div>
+      )}
 
       <motion.div variants={{ hidden: {}, show: {} }}>
         <Card className="glass-card">
@@ -649,6 +615,7 @@ export default function BangumiPage() {
             <CardDescription>{t("settings.bangumiDescription")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {syncEnabled && (
             <div className="flex items-center justify-between border-b border-border/40 pb-4">
               <div>
                 <Label className="text-sm font-bold">{t("settings.bangumiSync")}</Label>
@@ -656,7 +623,9 @@ export default function BangumiPage() {
               </div>
               <Switch checked={bgmMode} onCheckedChange={setBgmMode} disabled={saving} />
             </div>
+            )}
 
+            {manageEnabled && (
             <div className="flex items-center justify-between border-b border-border/40 pb-4">
               <div>
                 <Label className="text-sm font-bold">{t("settings.bangumiManage")}</Label>
@@ -664,6 +633,7 @@ export default function BangumiPage() {
               </div>
               <Switch checked={bgmManageMode} onCheckedChange={setBgmManageMode} disabled={saving} />
             </div>
+            )}
 
             <div className="space-y-2">
               <Label className="text-sm font-bold">{t("bangumi.accessToken")}</Label>
@@ -838,105 +808,6 @@ export default function BangumiPage() {
         </DialogContent>
       </Dialog>
 
-      {/* View-All Dialog */}
-      <Dialog open={viewAllOpen} onOpenChange={setViewAllOpen}>
-        <DialogContent className="sm:max-w-[700px] max-h-[85vh] flex flex-col p-6">
-          <DialogHeader className="pb-2 border-b border-border/40">
-            <DialogTitle className="flex justify-between items-center pr-6">
-              <span>{viewAllTitle}</span>
-              <Badge variant="secondary" className="text-xs font-semibold ml-2">全部项目数: {viewAllTotal}</Badge>
-            </DialogTitle>
-            <DialogDescription>
-              浏览您在 Bangumi 下的所有该分类下的番剧条目。
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex-1 overflow-y-auto py-4 pr-1 min-h-[300px]">
-            {viewAllLoading ? (
-              <div className="flex h-48 w-full items-center justify-center">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              </div>
-            ) : viewAllItems && viewAllItems.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {viewAllItems.map((item: any) => {
-                  const name = item.subject?.name_cn || item.subject?.name || "未知番剧";
-                  const poster = item.subject?.images?.medium || item.subject?.images?.common || item.subject?.images?.small;
-                  return (
-                    <div key={item.subject_id} className="flex gap-3 bg-accent/20 border border-border/20 rounded-lg p-3 hover:bg-accent/30 transition shadow-sm">
-                      {poster ? (
-                        // eslint-disable-next-line @next/next/no-img-element -- User-provided Bangumi poster URLs
-                        <img src={poster} className="h-28 w-20 rounded-md object-cover flex-shrink-0 shadow-sm border border-border/40" alt={name} loading="lazy" decoding="async" referrerPolicy="no-referrer" />
-                      ) : (
-                        <div className="h-28 w-20 rounded-md bg-muted flex items-center justify-center text-[10px] text-muted-foreground flex-shrink-0 border border-border/40">无封面</div>
-                      )}
-                      <div className="min-w-0 flex-1 flex flex-col justify-between py-0.5">
-                        <div>
-                          <h4 className="text-xs font-bold truncate text-foreground" title={name}>{name}</h4>
-                          <p className="text-[10px] text-muted-foreground truncate">{item.subject?.name}</p>
-                          {item.type === 3 ? (
-                            item.ep_status ? (
-                              <Badge variant="secondary" className="text-[10px] mt-2 px-1.5 py-0.5">看到 {item.ep_status} 话</Badge>
-                            ) : <Badge variant="outline" className="text-[10px] mt-2 px-1.5 py-0.5 text-muted-foreground">尚无进度</Badge>
-                          ) : item.type === 2 ? (
-                            <Badge variant="outline" className="text-[10px] mt-2 px-1.5 py-0.5 text-green-600 bg-green-500/5 border-green-500/20">已看完</Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-[10px] mt-2 px-1.5 py-0.5 text-red-500 bg-red-500/5 border-red-500/20">想看</Badge>
-                          )}
-                          {item.rate > 0 && (
-                            <div className="mt-1"><StarRating value={item.rate} /></div>
-                          )}
-                        </div>
-                        <div className="flex items-center justify-between gap-1.5 mt-2 border-t border-border/20 pt-1.5">
-                          <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-primary flex items-center gap-1" onClick={() => {
-                            setViewAllOpen(false);
-                            handleOpenEdit(item);
-                          }}>
-                            <Edit className="h-3 w-3" />
-                            进度/状态
-                          </Button>
-                          <a
-                            href={`https://bgm.tv/subject/${item.subject_id}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[10px] text-primary flex items-center gap-0.5 hover:underline px-1.5 py-1"
-                          >
-                            详情
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground text-center py-8">暂无条目</p>
-            )}
-          </div>
-
-          <div className="flex justify-between items-center pt-4 border-t border-border/40 bg-background">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={viewAllOffset === 0 || viewAllLoading}
-              onClick={() => handleViewAllPage(-1)}
-            >
-              上一页
-            </Button>
-            <span className="text-xs text-muted-foreground">
-              第 {Math.floor(viewAllOffset / 12) + 1} 页
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={viewAllOffset + 12 >= viewAllTotal || viewAllLoading}
-              onClick={() => handleViewAllPage(1)}
-            >
-              下一页
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </motion.div>
   );
 }

@@ -70,10 +70,6 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 			failWithCode(w, http.StatusForbidden, ErrBangumiSyncDisabled, "Bangumi 同步未开启")
 			return
 		}
-		if token := stringValue(payload, "bgm_token"); token != "" {
-			failWithCode(w, http.StatusForbidden, ErrBangumiSyncDisabled, "Bangumi 同步未开启")
-			return
-		}
 	}
 	if !a.cfg().BangumiManageEnabled {
 		if _, ok := payload["bgm_manage_mode"]; ok {
@@ -81,13 +77,29 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 			return
 		}
 	}
+	if token := stringValue(payload, "bgm_token"); token != "" && !a.cfg().BangumiEnabled && !a.cfg().BangumiManageEnabled {
+		failWithCode(w, http.StatusForbidden, ErrBangumiSyncDisabled, "Bangumi 功能未开启")
+		return
+	}
 	if token := stringValue(payload, "bgm_token"); len(token) > 4096 {
 		failWithCode(w, http.StatusBadRequest, ErrBangumiTokenTooLong, "Bangumi Token 过长")
 		return
 	}
-	if boolValue(payload, "bgm_mode", false) && p.User.BGMToken == "" && stringValue(payload, "bgm_token") == "" {
+	nextToken := p.User.BGMToken
+	if _, ok := payload["bgm_token"]; ok {
+		nextToken = stringValue(payload, "bgm_token")
+	}
+	if a.cfg().BangumiEnabled && boolValue(payload, "bgm_mode", false) && nextToken == "" {
 		failWithCode(w, http.StatusBadRequest, ErrBangumiTokenMissing, "启用 Bangumi 同步前请先填写个人 Token")
 		return
+	}
+	if a.cfg().BangumiManageEnabled && boolValue(payload, "bgm_manage_mode", false) && nextToken == "" {
+		failWithCode(w, http.StatusBadRequest, ErrBangumiTokenMissing, "启用 Bangumi 管理前请先填写个人 Token")
+		return
+	}
+	bgmTokenChanged := false
+	if _, ok := payload["bgm_token"]; ok {
+		bgmTokenChanged = nextToken != p.User.BGMToken
 	}
 	// 强制邮箱验证开启时，普通/白名单用户不能再走通用资料更新随意改邮箱（那会绕过
 	// 验证码校验），必须到邮箱验证区用验证码绑定 / 换绑。
@@ -127,8 +139,13 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 		if _, ok := payload["bgm_manage_mode"]; ok {
 			u.BGMManageMode = boolValue(payload, "bgm_manage_mode", u.BGMManageMode)
 		}
-		if token := stringValue(payload, "bgm_token"); token != "" {
+		if _, ok := payload["bgm_token"]; ok {
+			token := stringValue(payload, "bgm_token")
 			u.BGMToken = token
+			if token == "" {
+				u.BGMMode = false
+				u.BGMManageMode = false
+			}
 		}
 		if _, ok := payload["notify_on_login_telegram"]; ok {
 			u.NotifyOnLoginTelegram = boolValue(payload, "notify_on_login_telegram", u.NotifyOnLoginTelegram)
@@ -143,6 +160,9 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 	})
 	if statusFromError(w, err) {
 		return
+	}
+	if bgmTokenChanged {
+		_ = a.store().DeleteBangumiCollectionCache(u.UID, 0)
 	}
 	a.audit(r, "update_profile", "user", 0, nil)
 	ok(w, "更新成功", publicUser(u))
@@ -981,7 +1001,7 @@ func (a *App) handleUserSettings(w http.ResponseWriter, r *http.Request, _ Param
 		// 给出互相矛盾的 can_change / can_unbind。
 		"telegram":      a.telegramStatusFields(u),
 		"emby_status":   map[string]any{"is_synced": u.EmbyID != "", "is_active": u.Active, "can_unbind": a.userCanSelfUnbindEmby(u), "active_sessions": 0, "message": "OK"},
-		"system_config": map[string]any{"device_limit_enabled": a.cfg().DeviceLimitEnabled, "max_devices": a.cfg().MaxDevices, "max_streams": a.cfg().MaxStreams, "bangumi_sync_enabled": a.cfg().BangumiEnabled},
+		"system_config": map[string]any{"device_limit_enabled": a.cfg().DeviceLimitEnabled, "max_devices": a.cfg().MaxDevices, "max_streams": a.cfg().MaxStreams, "bangumi_sync_enabled": a.cfg().BangumiEnabled, "bangumi_manage_enabled": a.cfg().BangumiManageEnabled},
 	})
 }
 

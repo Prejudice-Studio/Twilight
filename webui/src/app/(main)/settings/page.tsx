@@ -82,6 +82,7 @@ export default function SettingsPage() {
   const [telegramStatus, setTelegramStatus] = useState<TelegramStatus | null>(null);
   const [bgmTokenSet, setBgmTokenSet] = useState(false);
   const [bgmMode, setBgmMode] = useState(false);
+  const [bgmManageMode, setBgmManageMode] = useState(false);
   const [bgmToken, setBgmToken] = useState("");
   const [isBgmLoading, setIsBgmLoading] = useState(false);
   const [embyStatus, setEmbyStatus] = useState<EmbyStatus | null>(null);
@@ -172,6 +173,8 @@ export default function SettingsPage() {
     [newEmbyPassword]
   );
   const bangumiSyncEnabled = Boolean(settings?.system_config?.bangumi_sync_enabled);
+  const bangumiManageEnabled = Boolean(settings?.system_config?.bangumi_manage_enabled);
+  const bangumiAnyEnabled = bangumiSyncEnabled || bangumiManageEnabled;
 
   // Emby URLs
   const [embyLines, setEmbyLines] = useState<Array<{ name: string; url: string }>>([]);
@@ -319,6 +322,7 @@ export default function SettingsPage() {
     if (settingsRes.success && settingsRes.data) {
       setSettings(settingsRes.data);
       setBgmMode(settingsRes.data.bgm_mode);
+      setBgmManageMode(Boolean(settingsRes.data.bgm_manage_mode));
       setBgmTokenSet(settingsRes.data.bgm_token_set ?? false);
       setEmbyStatus(settingsRes.data.emby_status ?? null);
       setTelegramStatus(settingsRes.data.telegram as TelegramStatus);
@@ -363,27 +367,29 @@ export default function SettingsPage() {
 
   const handleSaveBgmSettings = async () => {
     const nextBgmToken = bgmToken.trim();
-    if (!bangumiSyncEnabled) {
+    if (!bangumiAnyEnabled) {
       toast({ title: t("settings.bangumiDisabledTitle"), description: t("settings.bangumiDisabledDescription"), variant: "destructive" });
       return;
     }
-    if (bgmMode && !nextBgmToken && !bgmTokenSet) {
+    if ((bgmMode || bgmManageMode) && !nextBgmToken && !bgmTokenSet) {
       toast({ title: t("settings.bangumiTokenRequiredTitle"), description: t("settings.bangumiTokenRequiredDescription"), variant: "destructive" });
       return;
     }
 
     setIsBgmLoading(true);
     try {
-      const res = await api.updateMySettings({
-        bgm_mode: bgmMode,
+      const payload: Parameters<typeof api.updateMySettings>[0] = {
         bgm_token: nextBgmToken || undefined,
-      });
+      };
+      if (bangumiSyncEnabled) payload.bgm_mode = bgmMode;
+      if (bangumiManageEnabled) payload.bgm_manage_mode = bgmManageMode;
+      const res = await api.updateMySettings(payload);
 
       if (res.success) {
         const nextTokenSet = bgmTokenSet || Boolean(nextBgmToken);
         setBgmToken("");
         setBgmTokenSet(nextTokenSet);
-        setSettings((prev) => prev ? { ...prev, bgm_mode: bgmMode, bgm_token_set: nextTokenSet } : prev);
+        setSettings((prev) => prev ? { ...prev, bgm_mode: bgmMode, bgm_manage_mode: bgmManageMode, bgm_token_set: nextTokenSet } : prev);
         toast({ title: t("adminConfig.saveSuccessTitle"), description: t("settings.bangumiSavedDescription"), variant: "success" });
       } else {
         toast({ title: t("adminConfig.saveFailureTitle"), description: res.message, variant: "destructive" });
@@ -402,14 +408,16 @@ export default function SettingsPage() {
     try {
       const res = await api.updateMySettings({
         bgm_mode: false,
+        bgm_manage_mode: false,
         bgm_token: "",
       });
 
       if (res.success) {
         setBgmMode(false);
+        setBgmManageMode(false);
         setBgmToken("");
         setBgmTokenSet(false);
-        setSettings((prev) => prev ? { ...prev, bgm_mode: false, bgm_token_set: false } : prev);
+        setSettings((prev) => prev ? { ...prev, bgm_mode: false, bgm_manage_mode: false, bgm_token_set: false } : prev);
         toast({ title: t("settings.bangumiClearedTitle"), description: t("settings.bangumiClearedDescription"), variant: "success" });
       } else {
         toast({ title: t("settings.clearFailed"), description: res.message, variant: "destructive" });
@@ -1299,8 +1307,8 @@ export default function SettingsPage() {
       </motion.div>
       )}
 
-      {/* Bangumi Sync */}
-      {bangumiSyncEnabled && (
+      {/* Bangumi */}
+      {bangumiAnyEnabled && (
       <motion.div variants={item}>
         <Card className="glass-card">
           <CardHeader>
@@ -1314,15 +1322,28 @@ export default function SettingsPage() {
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>{t("settings.bangumiSync")}</Label>
-                  <p className="text-sm text-muted-foreground">
-                    {t("settings.bangumiSyncDescription")}
-                  </p>
+              {bangumiSyncEnabled && (
+                <div className="flex items-center justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <Label>{t("settings.bangumiSync")}</Label>
+                    <p className="text-sm text-muted-foreground">
+                      {t("settings.bangumiSyncDescription")}
+                    </p>
+                  </div>
+                  <Switch checked={bgmMode} onCheckedChange={setBgmMode} />
                 </div>
-                <Switch checked={bgmMode} onCheckedChange={setBgmMode} />
-              </div>
+              )}
+              {bangumiManageEnabled && (
+                <div className="flex items-center justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <Label>{t("settings.bangumiManage")}</Label>
+                    <p className="text-sm text-muted-foreground">
+                      {t("settings.bangumiManageDescription")}
+                    </p>
+                  </div>
+                  <Switch checked={bgmManageMode} onCheckedChange={setBgmManageMode} />
+                </div>
+              )}
               <div className="space-y-2">
                 <div className="space-y-2">
                   <Label>Bangumi Token</Label>

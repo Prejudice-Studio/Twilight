@@ -69,45 +69,46 @@ type PostgresTargetStatus struct {
 }
 
 type State struct {
-	NextUserID              int64                          `json:"next_user_id"`
-	NextAPIKeyID            int64                          `json:"next_api_key_id"`
-	NextRequestID           int64                          `json:"next_request_id"`
-	NextAnnouncementID      int64                          `json:"next_announcement_id"`
-	NextLoginLogID          int64                          `json:"next_login_log_id"`
-	NextRuntimeLogID        int64                          `json:"next_runtime_log_id"`
-	NextSchedulerRunID      int64                          `json:"next_scheduler_run_id"`
-	NextRebindRequestID     int64                          `json:"next_rebind_request_id"`
-	NextViolationLogID      int64                          `json:"next_violation_log_id"`
-	NextAuditLogID          int64                          `json:"next_audit_log_id"`
-	NextBangumiSyncLogID    int64                          `json:"next_bangumi_sync_log_id"`
-	NextTicketID            int64                          `json:"next_ticket_id"`
-	NextDeveloperJSPresetID int64                          `json:"next_developer_js_preset_id"`
-	Users                   map[int64]User                 `json:"users"`
-	APIKeys                 map[int64]APIKey               `json:"api_keys"`
-	MediaRequests           map[int64]MediaRequest         `json:"media_requests"`
-	Announcements           map[int64]Announcement         `json:"announcements"`
-	InviteCodes             map[string]InviteCode          `json:"invite_codes"`
-	InviteRelations         map[int64]InviteRelation       `json:"invite_relations"`
-	RegCodes                map[string]RegCode             `json:"regcodes"`
-	BindCodes               map[string]BindCode            `json:"bind_codes"`
-	EmailVerifications      map[string]EmailVerification   `json:"email_verifications"`
-	Signin                  map[int64]Signin               `json:"signin"`
-	SchedulerRuns           []SchedulerRun                 `json:"scheduler_runs"`
-	SchedulerSchedules      map[string]SchedulerSchedule   `json:"scheduler_schedules"`
-	Devices                 map[string]Device              `json:"devices"`
-	LoginLogs               []LoginLog                     `json:"login_logs"`
-	RuntimeLogs             []RuntimeLogEntry              `json:"runtime_logs"`
-	IPBlacklist             map[string]IPBlacklistEntry    `json:"ip_blacklist"`
-	PlaybackRecords         []PlaybackRecord               `json:"playback_records"`
-	RebindRequests          map[int64]RebindRequest        `json:"rebind_requests"`
-	TelegramRoster          map[string]TelegramRosterEntry `json:"telegram_roster"`
-	ViolationLogs           []ViolationLog                 `json:"violation_logs"`
-	AuditLogs               []AuditLog                     `json:"audit_logs"`
-	BangumiSyncLogs         []BangumiSyncLog               `json:"bangumi_sync_logs"`
-	Tickets                 map[int64]Ticket               `json:"tickets"`
-	TicketTypes             []string                       `json:"ticket_types,omitempty"`
-	DeveloperJSPresets      map[int64]DeveloperJSPreset    `json:"developer_js_presets,omitempty"`
-	DeveloperModeEnabled    bool                           `json:"developer_mode_enabled,omitempty"`
+	NextUserID              int64                                  `json:"next_user_id"`
+	NextAPIKeyID            int64                                  `json:"next_api_key_id"`
+	NextRequestID           int64                                  `json:"next_request_id"`
+	NextAnnouncementID      int64                                  `json:"next_announcement_id"`
+	NextLoginLogID          int64                                  `json:"next_login_log_id"`
+	NextRuntimeLogID        int64                                  `json:"next_runtime_log_id"`
+	NextSchedulerRunID      int64                                  `json:"next_scheduler_run_id"`
+	NextRebindRequestID     int64                                  `json:"next_rebind_request_id"`
+	NextViolationLogID      int64                                  `json:"next_violation_log_id"`
+	NextAuditLogID          int64                                  `json:"next_audit_log_id"`
+	NextBangumiSyncLogID    int64                                  `json:"next_bangumi_sync_log_id"`
+	NextTicketID            int64                                  `json:"next_ticket_id"`
+	NextDeveloperJSPresetID int64                                  `json:"next_developer_js_preset_id"`
+	Users                   map[int64]User                         `json:"users"`
+	APIKeys                 map[int64]APIKey                       `json:"api_keys"`
+	MediaRequests           map[int64]MediaRequest                 `json:"media_requests"`
+	Announcements           map[int64]Announcement                 `json:"announcements"`
+	InviteCodes             map[string]InviteCode                  `json:"invite_codes"`
+	InviteRelations         map[int64]InviteRelation               `json:"invite_relations"`
+	RegCodes                map[string]RegCode                     `json:"regcodes"`
+	BindCodes               map[string]BindCode                    `json:"bind_codes"`
+	EmailVerifications      map[string]EmailVerification           `json:"email_verifications"`
+	Signin                  map[int64]Signin                       `json:"signin"`
+	SchedulerRuns           []SchedulerRun                         `json:"scheduler_runs"`
+	SchedulerSchedules      map[string]SchedulerSchedule           `json:"scheduler_schedules"`
+	Devices                 map[string]Device                      `json:"devices"`
+	LoginLogs               []LoginLog                             `json:"login_logs"`
+	RuntimeLogs             []RuntimeLogEntry                      `json:"runtime_logs"`
+	IPBlacklist             map[string]IPBlacklistEntry            `json:"ip_blacklist"`
+	PlaybackRecords         []PlaybackRecord                       `json:"playback_records"`
+	RebindRequests          map[int64]RebindRequest                `json:"rebind_requests"`
+	TelegramRoster          map[string]TelegramRosterEntry         `json:"telegram_roster"`
+	ViolationLogs           []ViolationLog                         `json:"violation_logs"`
+	AuditLogs               []AuditLog                             `json:"audit_logs"`
+	BangumiSyncLogs         []BangumiSyncLog                       `json:"bangumi_sync_logs"`
+	BangumiCollectionCache  map[string]BangumiCollectionCacheEntry `json:"bangumi_collection_cache,omitempty"`
+	Tickets                 map[int64]Ticket                       `json:"tickets"`
+	TicketTypes             []string                               `json:"ticket_types,omitempty"`
+	DeveloperJSPresets      map[int64]DeveloperJSPreset            `json:"developer_js_presets,omitempty"`
+	DeveloperModeEnabled    bool                                   `json:"developer_mode_enabled,omitempty"`
 	// TelegramBotOffset 持久化最近一次成功 ack 的 update_id+1。
 	// 重启 / token 切换时直接从这个值恢复，避免对 24h backlog 重新分发。
 	// 0 表示未设置 / 历史 state，按"从 0 开始"处理（getUpdates 会拿到队列里
@@ -418,6 +419,18 @@ type BangumiSyncLog struct {
 	Status       string `json:"status"`
 	Message      string `json:"message,omitempty"`
 	CreatedAt    int64  `json:"created_at"`
+}
+
+type BangumiCollectionCacheEntry struct {
+	UID         int64            `json:"uid"`
+	Username    string           `json:"username,omitempty"`
+	Type        int              `json:"type"`
+	Entries     []map[string]any `json:"entries"`
+	Total       int              `json:"total"`
+	UpdatedAt   int64            `json:"updated_at"`
+	ExpiresAt   int64            `json:"expires_at,omitempty"`
+	LastError   string           `json:"last_error,omitempty"`
+	LastErrorAt int64            `json:"last_error_at,omitempty"`
 }
 
 type Ticket struct {
@@ -1045,6 +1058,9 @@ func (s *State) ensure() {
 	}
 	if s.BangumiSyncLogs == nil {
 		s.BangumiSyncLogs = []BangumiSyncLog{}
+	}
+	if s.BangumiCollectionCache == nil {
+		s.BangumiCollectionCache = map[string]BangumiCollectionCacheEntry{}
 	}
 	if s.Tickets == nil {
 		s.Tickets = map[int64]Ticket{}
@@ -2420,6 +2436,12 @@ func (s *Store) DeleteUser(uid int64) error {
 		for id, ticket := range s.state.Tickets {
 			if ticket.UID == uid {
 				delete(s.state.Tickets, id)
+			}
+		}
+
+		for key, entry := range s.state.BangumiCollectionCache {
+			if entry.UID == uid {
+				delete(s.state.BangumiCollectionCache, key)
 			}
 		}
 
@@ -4388,6 +4410,105 @@ func (s *Store) ClearBangumiSyncLogs(uid int64) error {
 			}
 		}
 		s.state.BangumiSyncLogs = filtered
+		return nil
+	})
+}
+
+func bangumiCollectionCacheKey(uid int64, collectType int) string {
+	return strconv.FormatInt(uid, 10) + ":" + strconv.Itoa(collectType)
+}
+
+func cloneBangumiCollectionCacheEntry(entry BangumiCollectionCacheEntry) BangumiCollectionCacheEntry {
+	if entry.Entries == nil {
+		return entry
+	}
+	var copied []map[string]any
+	data, err := json.Marshal(entry.Entries)
+	if err == nil {
+		_ = json.Unmarshal(data, &copied)
+	}
+	if copied == nil {
+		copied = make([]map[string]any, len(entry.Entries))
+		for i, item := range entry.Entries {
+			row := make(map[string]any, len(item))
+			for key, value := range item {
+				row[key] = value
+			}
+			copied[i] = row
+		}
+	}
+	entry.Entries = copied
+	return entry
+}
+
+func (s *Store) BangumiCollectionCache(uid int64, collectType int) (BangumiCollectionCacheEntry, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	entry, ok := s.state.BangumiCollectionCache[bangumiCollectionCacheKey(uid, collectType)]
+	if !ok {
+		return BangumiCollectionCacheEntry{}, false
+	}
+	return cloneBangumiCollectionCacheEntry(entry), true
+}
+
+func (s *Store) UpsertBangumiCollectionCache(entry BangumiCollectionCacheEntry) error {
+	if entry.UID <= 0 || entry.Type <= 0 {
+		return fmt.Errorf("invalid bangumi collection cache key")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mutateAndSaveLocked(func() error {
+		if s.state.BangumiCollectionCache == nil {
+			s.state.BangumiCollectionCache = map[string]BangumiCollectionCacheEntry{}
+		}
+		if entry.UpdatedAt == 0 {
+			entry.UpdatedAt = time.Now().Unix()
+		}
+		s.state.BangumiCollectionCache[bangumiCollectionCacheKey(entry.UID, entry.Type)] = cloneBangumiCollectionCacheEntry(entry)
+		return nil
+	})
+}
+
+func (s *Store) MarkBangumiCollectionCacheError(uid int64, collectType int, message string) error {
+	if uid <= 0 || collectType <= 0 {
+		return fmt.Errorf("invalid bangumi collection cache key")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mutateAndSaveLocked(func() error {
+		if s.state.BangumiCollectionCache == nil {
+			s.state.BangumiCollectionCache = map[string]BangumiCollectionCacheEntry{}
+		}
+		key := bangumiCollectionCacheKey(uid, collectType)
+		entry := s.state.BangumiCollectionCache[key]
+		entry.UID = uid
+		entry.Type = collectType
+		entry.LastError = message
+		entry.LastErrorAt = time.Now().Unix()
+		s.state.BangumiCollectionCache[key] = entry
+		return nil
+	})
+}
+
+func (s *Store) DeleteBangumiCollectionCache(uid int64, collectType int) error {
+	if uid <= 0 {
+		return fmt.Errorf("invalid bangumi collection cache key")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mutateAndSaveLocked(func() error {
+		if s.state.BangumiCollectionCache == nil {
+			return nil
+		}
+		if collectType > 0 {
+			delete(s.state.BangumiCollectionCache, bangumiCollectionCacheKey(uid, collectType))
+			return nil
+		}
+		for key, entry := range s.state.BangumiCollectionCache {
+			if entry.UID == uid {
+				delete(s.state.BangumiCollectionCache, key)
+			}
+		}
 		return nil
 	})
 }
