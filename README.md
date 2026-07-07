@@ -90,6 +90,7 @@ cd webui
 pnpm install --frozen-lockfile
 pnpm dev
 pnpm lint
+pnpm typecheck
 pnpm build
 ```
 
@@ -135,7 +136,7 @@ pnpm build
 ```bash
 gofmt -w ./cmd ./internal
 go test ./...
-cd webui && pnpm lint && pnpm build
+cd webui && pnpm lint && pnpm typecheck && pnpm build
 ```
 
 涉及架构、权限、配置、审计、缓存或外部副作用的改动，请先阅读 [模块化架构与解耦指南](docs/guides/modular-architecture.md)。

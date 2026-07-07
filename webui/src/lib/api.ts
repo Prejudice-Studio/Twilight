@@ -334,10 +334,10 @@ class ApiClient {
     }>(`/bangumi/collections?type=${type}&limit=${limit}&offset=${offset}`);
   }
 
-  async updateBangumiCollection(subjectId: string, type: number, epStatus: number, rate?: number) {
+  async updateBangumiCollection(subjectId: string, data: { type: number; ep_status?: number; rate?: number }) {
     return this.request(`/bangumi/collections/${subjectId}`, {
       method: "PATCH",
-      body: JSON.stringify({ type, ep_status: epStatus, rate }),
+      body: JSON.stringify(data),
     });
   }
 

@@ -14,12 +14,11 @@ overrides:
   "minimatch@>=9.0.0 <9.0.7": "^9.0.7"
   "flatted@<3.4.2": "^3.4.2"
 
+# pnpm 10+ 在 CI / 非交互环境默认阻断依赖 postinstall，必须显式批准。
+# esbuild: Next / OpenNext 构建工具链；sharp: Next 图片相关可选原生依赖；
+# unrs-resolver: ESLint/Next 解析器；workerd: Cloudflare/OpenNext 预览与部署。
 allowBuilds:
-  esbuild: set this to true or false
-  sharp: set this to true or false
-  unrs-resolver: set this to true or false
-  workerd: set this to true or false
-
-ignoredBuiltDependencies:
-  - sharp
-  - unrs-resolver
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
+  workerd: true

@@ -1303,6 +1303,103 @@ func TestBangumiSearchErrorIsVisibleForBangumiSource(t *testing.T) {
 	}
 }
 
+func TestUpdateBangumiCollectionUsesV0RatingAndEpisodeAPIs(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().BangumiManageEnabled = true
+
+	var collectionBody map[string]any
+	var markBody map[string]any
+	var clearBody map[string]any
+	bgm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPatch && r.URL.Path == "/v0/users/-/collections/123":
+			if err := json.NewDecoder(r.Body).Decode(&collectionBody); err != nil {
+				t.Fatalf("decode collection body: %v", err)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/v0/episodes":
+			if got := r.URL.Query().Get("subject_id"); got != "123" {
+				t.Fatalf("episodes subject_id=%q", got)
+			}
+			_, _ = w.Write([]byte(`{"data":[{"id":1001,"type":0,"ep":1,"sort":1},{"id":1002,"type":0,"ep":2,"sort":2},{"id":1003,"type":0,"ep":3,"sort":3}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v0/users/-/collections/123/episodes":
+			_, _ = w.Write([]byte(`{"data":[{"episode":{"id":1003},"type":2}]}`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/v0/users/-/collections/123/episodes":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode episode body: %v", err)
+			}
+			if int(numeric(body["type"])) == 2 {
+				markBody = body
+			} else {
+				clearBody = body
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected Bangumi request %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer bgm.Close()
+	app.cfg().BangumiAPIURL = bgm.URL
+
+	cookies := registerAndLogin(t, app, "bgm-user", "User123456")
+	user, ok := app.store().FindUserByUsername("bgm-user")
+	if !ok {
+		t.Fatal("missing bgm user")
+	}
+	if _, err := app.store().UpdateUser(user.UID, func(u *store.User) error {
+		u.BGMToken = "user-token"
+		u.BGMManageMode = true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := doJSON(app, http.MethodPatch, "/api/v1/bangumi/collections/123", `{"type":3,"ep_status":2,"rate":0}`, cookies)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("update collection status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if collectionBody["type"] != float64(3) {
+		t.Fatalf("collection type body=%#v", collectionBody)
+	}
+	if rate, ok := collectionBody["rate"]; !ok || rate != float64(0) {
+		t.Fatalf("rate=0 must be sent explicitly, body=%#v", collectionBody)
+	}
+	if _, ok := collectionBody["ep_status"]; ok {
+		t.Fatalf("anime ep_status must not be sent on subject collection PATCH, body=%#v", collectionBody)
+	}
+	if got := fmt.Sprint(markBody["episode_id"]); got != "[1001 1002]" || int(numeric(markBody["type"])) != 2 {
+		t.Fatalf("mark episodes body=%#v", markBody)
+	}
+	if got := fmt.Sprint(clearBody["episode_id"]); got != "[1003]" || int(numeric(clearBody["type"])) != 0 {
+		t.Fatalf("clear episodes body=%#v", clearBody)
+	}
+}
+
+func TestAdminBangumiLogsUsesPathUID(t *testing.T) {
+	app := newTestApp(t)
+	adminCookies := registerAndLogin(t, app, "admin", "Admin123456")
+	user, err := app.store().CreateUser(store.User{Username: "bgm-log-user", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store().AddBangumiSyncLog(store.BangumiSyncLog{
+		UID:         user.UID,
+		SubjectID:   "123",
+		SubjectName: "Path UID Subject",
+		Status:      "success",
+		CreatedAt:   time.Now().Unix(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := doJSON(app, http.MethodGet, "/api/v1/admin/bangumi/logs/"+strconv.FormatInt(user.UID, 10), ``, adminCookies)
+	if resp.Code != http.StatusOK || !strings.Contains(resp.Body.String(), "Path UID Subject") {
+		t.Fatalf("admin bangumi logs status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
 func TestMediaDetailSanitizesPathPartsBeforeUpstreamCall(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().TMDBAPIKey = "tmdb-key"

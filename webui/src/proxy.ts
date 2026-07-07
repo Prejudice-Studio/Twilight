@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 /**
- * Middleware：只注入 CSP，不再根据 session cookie 做服务端跳转。
+ * Proxy：只注入 CSP，不再根据 session cookie 做服务端跳转。
  *
  * ## CSP（脚本部分）
  *
@@ -25,7 +25,7 @@ import { NextRequest, NextResponse } from "next/server";
  * `<iframe src=>` 嵌入与 Flash/PDF object 注入；XSS 表面 = "攻击者能写
  * 进同源 DOM"，与项目其他地方（HttpOnly cookie、后端输入校验）的纵深防御边界一致。
  *
- * 登录态只由客户端 layout 调 `/users/me` 让后端权威判定。过去在 middleware / root
+ * 登录态只由客户端 layout 调 `/users/me` 让后端权威判定。过去在 proxy / root
  * / auth layout 多处用 Web 域 cookie 猜测登录态，遇到跨域 API、Cookie Domain、
  * SameSite 或浏览器持久化差异时容易把已登录用户反复送回 `/login`。
  */
@@ -57,7 +57,7 @@ function webSocketOriginFromHTTPOrigin(origin: string): string {
   }
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   void request;
   const isDev = process.env.NODE_ENV !== "production";
   // dev 下 Next 用 eval 做 HMR / RSC payload 解析；生产构建后丢掉 unsafe-eval。
@@ -132,10 +132,10 @@ export function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     // 跳过 _next 静态资源、图片优化、favicon 各格式、其它静态资产；
-    // 这些请求永远不会触发脚本执行，跳过 middleware 节省每请求 CPU。
+    // 这些请求永远不会触发脚本执行，跳过 proxy 节省每请求 CPU。
     // favicon.png 单独列出：iOS Safari / Android Chrome 都会无视 SVG 偏好直
     // 接发 GET /favicon.png 探活；如果它没在 matcher 排除里，每次浏览器开标
-    // 签都要走一次 middleware（CSP 头注入 + cookie 解析），白白浪费 edge 算力。
+    // 签都要走一次 proxy（CSP 头注入 + cookie 解析），白白浪费 edge 算力。
     "/((?!_next/static|_next/image|favicon\\.ico|favicon\\.svg|favicon\\.png|images/|api/).*)",
   ],
 };

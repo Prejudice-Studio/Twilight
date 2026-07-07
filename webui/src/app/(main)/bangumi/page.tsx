@@ -175,7 +175,11 @@ export default function BangumiPage() {
     if (!editingItem) return;
     setUpdating(true);
     try {
-      const res = await api.updateBangumiCollection(editingItem.subject_id, editType, editEpStatus, editRate);
+      const payload: { type: number; ep_status?: number; rate: number } = { type: editType, rate: editRate };
+      if (editType === 2 || editType === 3) {
+        payload.ep_status = editEpStatus;
+      }
+      const res = await api.updateBangumiCollection(editingItem.subject_id, payload);
       if (res.success) {
         toast({ title: "更新成功" });
         setEditOpen(false);
@@ -747,11 +751,13 @@ export default function BangumiPage() {
             <div className="grid gap-4 py-4">
               <div className="flex gap-4 items-start bg-accent/20 p-3 rounded-lg border border-border/30">
                 {editingItem.subject?.images?.medium || editingItem.subject?.images?.common ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- User-provided Bangumi poster URLs
                   <img
                     src={editingItem.subject?.images?.medium || editingItem.subject?.images?.common}
                     className="h-24 w-16 rounded object-cover shadow-sm border border-border/40"
                     alt={editingItem.subject?.name_cn || editingItem.subject?.name}
                     loading="lazy"
+                    decoding="async"
                     referrerPolicy="no-referrer"
                   />
                 ) : (
@@ -858,8 +864,9 @@ export default function BangumiPage() {
                   return (
                     <div key={item.subject_id} className="flex gap-3 bg-accent/20 border border-border/20 rounded-lg p-3 hover:bg-accent/30 transition shadow-sm">
                       {poster ? (
-                            <img src={poster} className="h-28 w-20 rounded-md object-cover flex-shrink-0 shadow-sm border border-border/40" alt={name} loading="lazy" referrerPolicy="no-referrer" />
-                          ) : (
+                        // eslint-disable-next-line @next/next/no-img-element -- User-provided Bangumi poster URLs
+                        <img src={poster} className="h-28 w-20 rounded-md object-cover flex-shrink-0 shadow-sm border border-border/40" alt={name} loading="lazy" decoding="async" referrerPolicy="no-referrer" />
+                      ) : (
                         <div className="h-28 w-20 rounded-md bg-muted flex items-center justify-center text-[10px] text-muted-foreground flex-shrink-0 border border-border/40">无封面</div>
                       )}
                       <div className="min-w-0 flex-1 flex flex-col justify-between py-0.5">

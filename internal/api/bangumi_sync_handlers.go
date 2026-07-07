@@ -149,7 +149,7 @@ func (a *App) handleAdminBangumiUsers(w http.ResponseWriter, r *http.Request, _ 
 }
 
 func (a *App) handleAdminBangumiRecords(w http.ResponseWriter, r *http.Request, ps Params) {
-	uid, err := strconv.ParseInt(ps[":uid"], 10, 64)
+	uid, err := strconv.ParseInt(ps["uid"], 10, 64)
 	if err != nil || uid <= 0 {
 		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "无效的用户 ID")
 		return
@@ -194,7 +194,7 @@ func (a *App) handleAdminBangumiSyncUser(w http.ResponseWriter, r *http.Request,
 		failWithCode(w, http.StatusBadRequest, ErrBangumiSyncDisabled, "Bangumi 同步未启用")
 		return
 	}
-	uid, err := strconv.ParseInt(ps[":uid"], 10, 64)
+	uid, err := strconv.ParseInt(ps["uid"], 10, 64)
 	if err != nil || uid <= 0 {
 		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "无效的用户 ID")
 		return
@@ -221,7 +221,7 @@ func (a *App) handleAdminBangumiSyncUser(w http.ResponseWriter, r *http.Request,
 }
 
 func (a *App) handleAdminBangumiSyncLogs(w http.ResponseWriter, r *http.Request, ps Params) {
-	uid, err := strconv.ParseInt(ps[":uid"], 10, 64)
+	uid, err := strconv.ParseInt(ps["uid"], 10, 64)
 	if err != nil || uid <= 0 {
 		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "无效的用户 ID")
 		return
@@ -235,7 +235,7 @@ func (a *App) handleAdminBangumiSyncLogs(w http.ResponseWriter, r *http.Request,
 }
 
 func (a *App) handleAdminBangumiClearLogs(w http.ResponseWriter, r *http.Request, ps Params) {
-	uid, err := strconv.ParseInt(ps[":uid"], 10, 64)
+	uid, err := strconv.ParseInt(ps["uid"], 10, 64)
 	if err != nil || uid <= 0 {
 		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "无效的用户 ID")
 		return
@@ -360,8 +360,8 @@ func (a *App) handleUpdateBangumiCollection(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	subjectID := ps["subject_id"]
-	if subjectID == "" {
-		failWithCode(w, http.StatusBadRequest, ErrInternal, "缺少 Subject ID")
+	if !isPositiveNumericID(subjectID) {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "无效的 Subject ID")
 		return
 	}
 
@@ -378,31 +378,49 @@ func (a *App) handleUpdateBangumiCollection(w http.ResponseWriter, r *http.Reque
 
 	payload := decodeMap(r)
 	collectType := int(numeric(payload["type"])) // 1: 想看, 2: 看过, 3: 在看, 4: 搁置, 5: 抛弃
+	_, hasEpStatus := payload["ep_status"]
 	epStatus := int(numeric(payload["ep_status"]))
+	_, hasRate := payload["rate"]
 	rate := int(numeric(payload["rate"]))
 
 	if collectType <= 0 || collectType > 5 {
-		failWithCode(w, http.StatusBadRequest, ErrInternal, "收藏状态不合法 (应为 1-5)")
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "收藏状态不合法 (应为 1-5)")
 		return
 	}
-	if rate < 0 || rate > 10 {
-		failWithCode(w, http.StatusBadRequest, ErrInternal, "评分分值不合法 (应为 0-10)")
+	if hasRate && (rate < 0 || rate > 10) {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "评分分值不合法 (应为 0-10)")
 		return
 	}
-	// 非在看/看过状态下清除 ep_status，避免 Bangumi API 拒绝不一致的请求
+	if hasEpStatus && epStatus < 0 {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "观看进度不能小于 0")
+		return
+	}
 	if collectType != 2 && collectType != 3 {
 		epStatus = 0
+		hasEpStatus = false
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	err := a.updateBangumiCollection(ctx, subjectID, u.BGMToken, collectType, epStatus, rate)
-	if err != nil {
+	if err := a.updateBangumiCollection(ctx, subjectID, u.BGMToken, collectType, rate, hasRate); err != nil {
 		failWithCode(w, http.StatusBadGateway, ErrInternal, "更新 Bangumi 收藏失败: "+err.Error())
 		return
 	}
+	if hasEpStatus {
+		if err := a.updateBangumiEpisodeProgress(ctx, subjectID, u.BGMToken, epStatus); err != nil {
+			failWithCode(w, http.StatusBadGateway, ErrInternal, "更新 Bangumi 观看进度失败: "+err.Error())
+			return
+		}
+	}
 
-	a.audit(r, "update_bangumi_collection", "user", 0, map[string]any{"subject_id": subjectID, "type": collectType, "ep_status": epStatus, "rate": rate})
+	detail := map[string]any{"subject_id": subjectID, "type": collectType}
+	if hasEpStatus {
+		detail["ep_status"] = epStatus
+	}
+	if hasRate {
+		detail["rate"] = rate
+	}
+	a.audit(r, "update_bangumi_collection", "user", 0, detail)
 	ok(w, "更新成功", nil)
 }

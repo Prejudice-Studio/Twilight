@@ -37,6 +37,7 @@
 
 ```bash
 cd webui
+corepack enable
 pnpm install --frozen-lockfile
 ```
 
@@ -84,6 +85,7 @@ pnpm dev
 ### 构建生产版本
 
 ```bash
+pnpm typecheck
 pnpm build
 pnpm start
 ```

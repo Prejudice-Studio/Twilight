@@ -100,9 +100,14 @@ pnpm dev
 # 代码检查（eslint src --ext .ts,.tsx）
 pnpm lint
 
+# TypeScript 类型检查
+pnpm typecheck
+
 # 生产构建（next build，输出 standalone）
 pnpm build
 ```
+
+> CI / 非交互环境说明：`webui/.npmrc` 关闭了 `node_modules` 重建确认，避免 `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`；`webui/pnpm-workspace.yaml` 显式批准 `esbuild`、`sharp`、`unrs-resolver`、`workerd` 的构建脚本。新增带 postinstall 的依赖时，必须同步更新该白名单或说明为什么应阻断，不能只在本机交互式运行 `pnpm approve-builds` 后不提交配置。
 
 后端可单独启动配合调试：
 
@@ -282,7 +287,7 @@ cd webui && pnpm dev
 - [ ] `gofmt` 已执行（无格式化 diff）。
 - [ ] `go test ./...` 已通过。
 - [ ] `go vet ./...` 已通过。
-- [ ] 前端或 API 客户端有变更时，在 `webui/` 执行 `pnpm lint` 与 `pnpm build`。
+- [ ] 前端或 API 客户端有变更时，在 `webui/` 执行 `pnpm lint`、`pnpm typecheck` 与 `pnpm build`。
 - [ ] 已扫描敏感信息（密钥、token、明文密码）。
 - [ ] 已扫描旧后端残留，确认 `start_backend_prod.sh` 与 `deploy/*.service` 指向 `bin/twilight`，未重新引入旧后端运行入口。
 - [ ] 已检查鉴权级别、路径穿越、文件类型白名单与 CORS 配置。

@@ -344,10 +344,18 @@ cd webui
 pnpm install --frozen-lockfile
 pnpm dev
 pnpm lint
+pnpm typecheck
 pnpm build
 ```
 
-按改动范围选择验证命令。涉及 Go 代码至少运行 `gofmt` 和相关 `go test`；涉及前端或 API 客户端时运行 `pnpm lint`，必要时运行 `pnpm build`。如果本机缺依赖或外部服务不可用，必须在回复中明确说明未执行的验证和原因。
+按改动范围选择验证命令。涉及 Go 代码至少运行 `gofmt` 和相关 `go test`；涉及前端或 API 客户端时运行 `pnpm lint`、`pnpm typecheck`，必要时运行 `pnpm build`。如果本机缺依赖或外部服务不可用，必须在回复中明确说明未执行的验证和原因。
+
+前端 CI 依赖安装约定：
+
+- `webui/package.json` 的 `packageManager` 是 pnpm 版本单一事实源；GitHub Actions 使用该字段安装 pnpm。
+- `webui/.npmrc` 必须保留 `confirm-modules-purge=false`，否则非交互环境重建 `node_modules` 时会因无 TTY 失败。
+- `webui/pnpm-workspace.yaml` 的 `allowBuilds` 是 pnpm 10+ 构建脚本审批白名单。新增带 postinstall 的依赖时必须同步维护该白名单或明确加入阻断列表，不要只在本机交互式运行 `pnpm approve-builds` 后遗漏配置。
+- GitHub Actions 前端 job 必须至少执行 `pnpm install --frozen-lockfile`、`pnpm lint`、`pnpm typecheck`、`pnpm build`；涉及 Cloudflare/OpenNext 的部署只能走显式手动触发或受保护环境，不要在普通 PR 上消耗部署 secret。
 
 ## 后端约定
 

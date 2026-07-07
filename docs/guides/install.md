@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | Go | 1.25 或更高 | 仅构建后端二进制时需要；运行时不依赖 Go。 |
 | Node.js | 22 或更高 | 构建并运行 Next.js 前端。 |
-| pnpm | 最新稳定版 | 前端包管理与构建。 |
+| pnpm | `webui/package.json` 的 `packageManager` 指定版本 | 前端包管理与构建，建议通过 Corepack 启用。 |
 | PostgreSQL | 推荐生产使用 | 默认存储后端；也可改用 JSON 状态文件做小型/迁移部署。 |
 | Emby / Jellyfin | 可访问的实例 | 后端通过 API Token 调用，需在 Emby 后台生成 API 密钥。 |
 | Redis | 可选，生产建议 | 用于会话缓存与分布式速率限制计数；留空时退化为进程内内存。 |
@@ -139,6 +139,7 @@ TWILIGHT_DATABASES_DIR=/opt/Twilight/db
 
 ```bash
 cd webui
+corepack enable
 pnpm install --frozen-lockfile
 pnpm build
 pnpm start -p 3000

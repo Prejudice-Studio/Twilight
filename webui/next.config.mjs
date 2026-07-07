@@ -27,7 +27,7 @@ const nextConfig = {
     ];
   },
   async headers() {
-    // CSP 在 src/middleware.ts 按请求生成（包含 per-request nonce），
+    // CSP 在 src/proxy.ts 按请求生成（包含 per-request nonce），
     // 这里只放与请求上下文无关的静态安全响应头，避免重复设置或被动态 CSP 覆盖。
     const securityHeaders = [
       { key: 'X-Content-Type-Options', value: 'nosniff' },

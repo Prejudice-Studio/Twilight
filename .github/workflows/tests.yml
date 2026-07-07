@@ -5,6 +5,7 @@ on:
     branches: [ main, golang, develop ]
   pull_request:
     branches: [ main, golang, develop ]
+  workflow_dispatch:
 
 # 最小权限：CI 只需读取仓库内容。显式收口避免默认的宽松 GITHUB_TOKEN 权限
 # （写 contents / packages / id-token 等）被某个被攻陷的第三方 action 滥用。
@@ -19,6 +20,7 @@ concurrency:
 jobs:
   go-test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
@@ -54,6 +56,7 @@ jobs:
 
   go-security:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
     - uses: actions/checkout@v4
 
@@ -95,6 +98,7 @@ jobs:
 
   nix:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
 
@@ -111,9 +115,13 @@ jobs:
   # 前端 lint / type-check / build
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: webui
+    env:
+      CI: 'true'
+      NEXT_TELEMETRY_DISABLED: '1'
     steps:
     - uses: actions/checkout@v4
 
@@ -133,15 +141,16 @@ jobs:
         cache-dependency-path: webui/pnpm-lock.yaml
 
     - name: Install dependencies
-      run: pnpm install --frozen-lockfile
+      run: pnpm install --frozen-lockfile --prefer-offline
 
     - name: Lint
       run: pnpm lint
 
+    - name: Type check
+      run: pnpm typecheck
+
     - name: Build
       run: pnpm build
-      env:
-        NEXT_TELEMETRY_DISABLED: '1'
 
     - name: Audit (high+ fails)
       run: pnpm audit --registry=https://registry.npmjs.org --audit-level=high --prod

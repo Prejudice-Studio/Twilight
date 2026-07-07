@@ -74,7 +74,7 @@ func (a *App) syncBangumiForUser(ctx context.Context, uid int64) (synced int, sk
 			collectionCache[subjectID] = true
 		}
 		if record.IndexNumber > 0 {
-			if err := a.markBangumiEpisode(ctx, subjectID, record.IndexNumber, headers); err != nil {
+			if err := a.markBangumiEpisode(ctx, subjectID, record.IndexNumber, u.BGMToken); err != nil {
 				failed++
 				msg := fmt.Sprintf("标记剧集失败 [%s #%d]: %v", subjectName, record.IndexNumber, err)
 				logs = append(logs, msg)
@@ -163,18 +163,6 @@ func (a *App) ensureBangumiCollection(ctx context.Context, subjectID string, hea
 	return nil
 }
 
-func (a *App) markBangumiEpisode(ctx context.Context, subjectID string, episode int, headers map[string]string) error {
-	endpoint, err := bangumiEndpoint(a.cfg().BangumiAPIURL, "/users/-/collections/"+subjectID+"/episodes", nil)
-	if err != nil {
-		return err
-	}
-	body := map[string]any{
-		"episode_id": []int{episode},
-		"type":       2,
-	}
-	var result map[string]any
-	if err := postJSON(ctx, endpoint, headers, body, &result); err != nil {
-		return err
-	}
-	return nil
+func (a *App) markBangumiEpisode(ctx context.Context, subjectID string, episode int, token string) error {
+	return a.markBangumiEpisodesThrough(ctx, subjectID, token, episode)
 }

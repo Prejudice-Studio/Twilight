@@ -201,29 +201,26 @@ func (a *App) getBangumiUserCollections(ctx context.Context, username string, to
 	return results, total, nil
 }
 
-func (a *App) updateBangumiCollection(ctx context.Context, subjectID string, token string, collectType int, epStatus int, rate int) error {
-	endpoint, err := bangumiEndpoint(a.cfg().BangumiAPIURL, "/users/-/collections/"+subjectID, nil)
-	if err != nil {
-		return err
-	}
-	// Bangumi API 仅对包含的字段进行修改，未包含的字段保持不变。
-	// - type: 始终发送（收藏状态变更）
-	// - rate: 仅当 > 0 时发送，避免误清已有评分
-	// - ep_status: 仅当 > 0 时发送（Bangumi API 限制仅书籍类可修改完成度）
-	body := map[string]any{
-		"type": collectType,
-	}
-	if rate > 0 {
-		body["rate"] = rate
-	}
-	if epStatus > 0 {
-		body["ep_status"] = epStatus
-	}
-	headers := map[string]string{
+func (a *App) bangumiUserHeaders(token string) map[string]string {
+	return map[string]string{
 		"User-Agent":    "Twilight/1.0",
 		"Accept":        "application/json",
 		"Authorization": "Bearer " + token,
 	}
+}
+
+func (a *App) updateBangumiCollection(ctx context.Context, subjectID string, token string, collectType int, rate int, hasRate bool) error {
+	endpoint, err := bangumiEndpoint(a.cfg().BangumiAPIURL, "/users/-/collections/"+subjectID, nil)
+	if err != nil {
+		return err
+	}
+	body := map[string]any{
+		"type": collectType,
+	}
+	if hasRate {
+		body["rate"] = rate
+	}
+	headers := a.bangumiUserHeaders(token)
 	var result map[string]any
 	// 先尝试 PATCH（修改已有收藏），若返回 404 则回退 POST（新建收藏）
 	if err := patchJSON(ctx, endpoint, headers, body, &result); err != nil {
@@ -236,4 +233,150 @@ func (a *App) updateBangumiCollection(ctx context.Context, subjectID string, tok
 		return err
 	}
 	return nil
+}
+
+func (a *App) updateBangumiEpisodeProgress(ctx context.Context, subjectID string, token string, epStatus int) error {
+	episodes, err := a.bangumiEpisodes(ctx, subjectID, token)
+	if err != nil {
+		return err
+	}
+	watchedIDs := bangumiEpisodeIDsThrough(episodes, epStatus)
+	if epStatus > 0 && len(watchedIDs) == 0 {
+		return fmt.Errorf("未找到 Bangumi 第 %d 话以内的本篇章节", epStatus)
+	}
+	if len(watchedIDs) > 0 {
+		if err := a.patchBangumiEpisodes(ctx, subjectID, token, watchedIDs, 2); err != nil {
+			return err
+		}
+	}
+	currentDone, err := a.bangumiDoneEpisodeIDSet(ctx, subjectID, token)
+	if err != nil {
+		return err
+	}
+	clearIDs := make([]int, 0)
+	for _, episode := range episodes {
+		if episode.Number <= epStatus || !currentDone[episode.ID] {
+			continue
+		}
+		clearIDs = append(clearIDs, episode.ID)
+	}
+	if len(clearIDs) > 0 {
+		if err := a.patchBangumiEpisodes(ctx, subjectID, token, clearIDs, 0); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *App) markBangumiEpisodesThrough(ctx context.Context, subjectID string, token string, epStatus int) error {
+	if epStatus <= 0 {
+		return nil
+	}
+	episodes, err := a.bangumiEpisodes(ctx, subjectID, token)
+	if err != nil {
+		return err
+	}
+	ids := bangumiEpisodeIDsThrough(episodes, epStatus)
+	if len(ids) == 0 {
+		return fmt.Errorf("未找到 Bangumi 第 %d 话以内的本篇章节", epStatus)
+	}
+	return a.patchBangumiEpisodes(ctx, subjectID, token, ids, 2)
+}
+
+func (a *App) patchBangumiEpisodes(ctx context.Context, subjectID string, token string, ids []int, collectType int) error {
+	endpoint, err := bangumiEndpoint(a.cfg().BangumiAPIURL, "/users/-/collections/"+subjectID+"/episodes", nil)
+	if err != nil {
+		return err
+	}
+	body := map[string]any{
+		"episode_id": ids,
+		"type":       collectType,
+	}
+	return patchJSON(ctx, endpoint, a.bangumiUserHeaders(token), body, nil)
+}
+
+type bangumiEpisodeRef struct {
+	ID     int
+	Number int
+}
+
+func (a *App) bangumiEpisodes(ctx context.Context, subjectID string, token string) ([]bangumiEpisodeRef, error) {
+	const pageLimit = 200
+	episodes := make([]bangumiEpisodeRef, 0)
+	for offset := 0; ; offset += pageLimit {
+		values := url.Values{
+			"subject_id": {subjectID},
+			"type":       {"0"},
+			"limit":      {strconv.Itoa(pageLimit)},
+			"offset":     {strconv.Itoa(offset)},
+		}
+		endpoint, err := bangumiEndpoint(a.cfg().BangumiAPIURL, "/episodes", values)
+		if err != nil {
+			return nil, err
+		}
+		var payload map[string]any
+		if err := getJSON(ctx, endpoint, a.bangumiUserHeaders(token), &payload); err != nil {
+			return nil, err
+		}
+		rows, _ := payload["data"].([]any)
+		for _, row := range rows {
+			item, _ := row.(map[string]any)
+			if item == nil {
+				continue
+			}
+			episodeNumber := int(numeric(item["ep"]))
+			if episodeNumber <= 0 {
+				episodeNumber = int(numeric(item["sort"]))
+			}
+			id := int(numeric(item["id"]))
+			if id > 0 && episodeNumber > 0 {
+				episodes = append(episodes, bangumiEpisodeRef{ID: id, Number: episodeNumber})
+			}
+		}
+		total := int(numeric(payload["total"]))
+		if len(rows) < pageLimit || (total > 0 && offset+len(rows) >= total) {
+			break
+		}
+	}
+	return episodes, nil
+}
+
+func bangumiEpisodeIDsThrough(episodes []bangumiEpisodeRef, epStatus int) []int {
+	ids := make([]int, 0, min(epStatus, len(episodes)))
+	for _, episode := range episodes {
+		if episode.Number > 0 && episode.Number <= epStatus {
+			ids = append(ids, episode.ID)
+		}
+	}
+	return ids
+}
+
+func (a *App) bangumiDoneEpisodeIDSet(ctx context.Context, subjectID string, token string) (map[int]bool, error) {
+	values := url.Values{
+		"episode_type": {"0"},
+		"limit":        {"1000"},
+		"offset":       {"0"},
+	}
+	endpoint, err := bangumiEndpoint(a.cfg().BangumiAPIURL, "/users/-/collections/"+subjectID+"/episodes", values)
+	if err != nil {
+		return nil, err
+	}
+	var payload map[string]any
+	if err := getJSON(ctx, endpoint, a.bangumiUserHeaders(token), &payload); err != nil {
+		return nil, err
+	}
+	rows, _ := payload["data"].([]any)
+	out := make(map[int]bool, len(rows))
+	for _, row := range rows {
+		item, _ := row.(map[string]any)
+		if item == nil || int(numeric(item["type"])) != 2 {
+			continue
+		}
+		episode, _ := item["episode"].(map[string]any)
+		id := int(numeric(episode["id"]))
+		if id > 0 {
+			out[id] = true
+		}
+	}
+	return out, nil
 }
