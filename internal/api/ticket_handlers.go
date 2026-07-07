@@ -99,6 +99,7 @@ func (a *App) handleCreateTicket(w http.ResponseWriter, r *http.Request, _ Param
 		return
 	}
 	a.audit(r, "create_ticket", "user", 0, map[string]any{"ticket_id": ticket.ID, "type": ticketType, "priority": priority})
+	a.notifyTicketAdmins(r.Context(), "created", ticket, p.User)
 	created(w, "工单已提交", ticketDTO(ticket))
 }
 
@@ -135,6 +136,7 @@ func (a *App) handleCloseOwnTicket(w http.ResponseWriter, r *http.Request, param
 		return
 	}
 	a.audit(r, "close_ticket", "user", 0, map[string]any{"ticket_id": id})
+	a.notifyTicketAdmins(r.Context(), "closed", ticket, p.User)
 	ok(w, "工单已关闭", ticketDTO(ticket))
 }
 
@@ -171,6 +173,7 @@ func (a *App) handleReopenOwnTicket(w http.ResponseWriter, r *http.Request, para
 		return
 	}
 	a.audit(r, "reopen_ticket", "user", 0, map[string]any{"ticket_id": id})
+	a.notifyTicketAdmins(r.Context(), "reopened", ticket, p.User)
 	ok(w, "工单已重开", ticketDTO(ticket))
 }
 
@@ -275,6 +278,7 @@ func (a *App) handleAdminUpdateTicket(w http.ResponseWriter, r *http.Request, pa
 
 	// 工单变动后通知工单所属用户（如果用户开启了 TG 通知）
 	a.notifyTicketOwner(r.Context(), ticket, existing)
+	a.notifyTicketAdmins(r.Context(), "updated", ticket, current(r).User)
 
 	ok(w, "工单已更新", ticketDTO(ticket))
 }
@@ -282,13 +286,17 @@ func (a *App) handleAdminUpdateTicket(w http.ResponseWriter, r *http.Request, pa
 // handleAdminDeleteTicket 管理员删除工单。管理端接口不受 TicketSystemEnabled 开关限制。
 func (a *App) handleAdminDeleteTicket(w http.ResponseWriter, r *http.Request, params Params) {
 	id, _ := int64Param(params, "ticket_id")
+	existing, found := a.store().Ticket(id)
 	if statusFromError(w, a.store().DeleteTicket(id)) {
 		return
+	}
+	a.audit(r, "delete_ticket", "admin", 0, map[string]any{"ticket_id": id})
+	if found {
+		a.notifyTicketAdmins(r.Context(), "deleted", existing, current(r).User)
 	}
 	// 工单删除后立即清掉其图片目录，避免遗留孤儿附件。删除失败仅记日志，
 	// 不影响工单删除结果（store 层已删除记录，文件可由清理任务兜底）。
 	a.removeTicketAttachmentDir(id)
-	a.audit(r, "delete_ticket", "admin", 0, map[string]any{"ticket_id": id})
 	ok(w, "工单已删除", nil)
 }
 
@@ -439,6 +447,7 @@ func (a *App) handleUploadTicketImage(w http.ResponseWriter, r *http.Request, pa
 		}
 	}
 	a.audit(r, "upload_ticket_image", auditCategoryForRole(p.User.Role), ticket.UID, map[string]any{"ticket_id": id, "filename": filename})
+	a.notifyTicketAdmins(r.Context(), "image_uploaded", updated, p.User)
 	created(w, "图片已上传", map[string]any{
 		"ticket_id":   id,
 		"attachment":  ticketAttachmentDTO(id, att),
@@ -701,6 +710,109 @@ func (a *App) persistTicketTypesFromStore() {
 	}
 }
 
+// notifyTicketAdmins 在新工单 / 工单变动后向已在个人设置中开启工单 TG 通知的管理员推送。
+func (a *App) notifyTicketAdmins(ctx context.Context, event string, ticket store.Ticket, actor store.User) {
+	if !a.telegramAvailable() {
+		return
+	}
+	admins := make([]store.User, 0)
+	for _, user := range a.store().ListUsers() {
+		if user.Role != store.RoleAdmin || !user.NotifyOnTicketTelegram || user.TelegramID == 0 {
+			continue
+		}
+		admins = append(admins, user)
+	}
+	if len(admins) == 0 {
+		return
+	}
+	text := a.ticketAdminNotificationText(event, ticket, actor)
+	photoName, photoType, photoData := a.ticketNotificationPhoto(ticket)
+	for _, admin := range admins {
+		if len(photoData) > 0 {
+			if err := a.telegramSendPhoto(ctx, admin.TelegramID, photoName, photoType, photoData, text); err == nil {
+				continue
+			} else {
+				zap.L().Warn("发送管理员工单图片通知失败，降级为纯文本", zap.Int64("ticket_id", ticket.ID), zap.Int64("admin_uid", admin.UID), zap.Error(err))
+			}
+		}
+		if err := a.telegramSendPlainMessage(ctx, admin.TelegramID, text); err != nil {
+			zap.L().Warn("发送管理员工单通知失败", zap.Int64("ticket_id", ticket.ID), zap.Int64("admin_uid", admin.UID), zap.Error(err))
+		}
+	}
+}
+
+func (a *App) ticketAdminNotificationText(event string, ticket store.Ticket, actor store.User) string {
+	lines := []string{
+		"工单通知 - " + ticketEventLabel(event),
+		"",
+		"站点：" + a.cfg().AppName,
+		"工单：#" + strconv.FormatInt(ticket.ID, 10) + " " + strings.TrimSpace(ticket.Title),
+		"状态：" + statusLabel(ticket.Status),
+		"优先级：" + ticket.Priority,
+		"类型：" + ticket.Type,
+		"提交人：" + ticket.Username + " (UID " + strconv.FormatInt(ticket.UID, 10) + ")",
+	}
+	if actor.UID != 0 {
+		lines = append(lines, "操作者："+actor.Username+" (UID "+strconv.FormatInt(actor.UID, 10)+")")
+	}
+	if note := strings.TrimSpace(ticket.AdminNote); note != "" {
+		lines = append(lines, "", "回复摘要："+truncateString(note, 220))
+	} else if content := strings.TrimSpace(ticket.Content); content != "" {
+		lines = append(lines, "", "内容摘要："+truncateString(content, 220))
+	}
+	if len(ticket.Attachments) > 0 {
+		lines = append(lines, "", "附件图片："+strconv.Itoa(len(ticket.Attachments))+" 张")
+	}
+	lines = append(lines, "时间："+time.Now().Format("2006-01-02 15:04:05"))
+	return strings.Join(lines, "\n")
+}
+
+func ticketEventLabel(event string) string {
+	switch event {
+	case "created":
+		return "新工单"
+	case "updated":
+		return "工单更新"
+	case "closed":
+		return "用户关闭"
+	case "reopened":
+		return "用户重开"
+	case "image_uploaded":
+		return "新增图片"
+	case "deleted":
+		return "工单删除"
+	default:
+		return "工单变动"
+	}
+}
+
+func (a *App) ticketNotificationPhoto(ticket store.Ticket) (string, string, []byte) {
+	if len(ticket.Attachments) == 0 {
+		return "", "", nil
+	}
+	att := ticket.Attachments[len(ticket.Attachments)-1]
+	if !ticketImageFilenamePattern.MatchString(att.Filename) {
+		return "", "", nil
+	}
+	dir, err := a.ticketAttachmentDir(ticket.ID)
+	if err != nil {
+		return "", "", nil
+	}
+	target, err := ResolveWithinRoot(dir, att.Filename)
+	if err != nil {
+		return "", "", nil
+	}
+	info, err := os.Lstat(target)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > 10*1024*1024 {
+		return "", "", nil
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		return "", "", nil
+	}
+	return att.Filename, att.ContentType, data
+}
+
 // notifyTicketOwner 工单变动后向工单所属用户发送 Telegram 通知。
 func (a *App) notifyTicketOwner(ctx context.Context, updated, existing store.Ticket) {
 	owner, found := a.store().User(updated.UID)
@@ -740,7 +852,7 @@ func (a *App) notifyTicketOwner(ctx context.Context, updated, existing store.Tic
 		tmpl = config.DefaultTicketNotifyTelegramTemplate
 	}
 	text := replaceNotifPlaceholders(tmpl, notifValues)
-	if err := a.telegramSendMessage(ctx, owner.TelegramID, text); err != nil {
+	if err := a.telegramSendPlainMessage(ctx, owner.TelegramID, text); err != nil {
 		zap.L().Warn("发送工单变动通知失败", zap.Int64("ticket_id", updated.ID), zap.Int64("uid", owner.UID), zap.Error(err))
 	}
 }

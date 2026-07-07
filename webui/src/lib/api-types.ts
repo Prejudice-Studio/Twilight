@@ -235,6 +235,8 @@ export interface BatchUserResult {
   skipped_pending?: number;
   regcode_refs_removed?: number;
   invite_refs_removed?: number;
+  all_libraries_granted?: boolean;
+  skipped_remote_admin?: number;
 }
 
 export interface CodeUsePreview {

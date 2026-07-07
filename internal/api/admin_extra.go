@@ -356,8 +356,11 @@ func (a *App) handleCreateStandaloneEmbyV2(w http.ResponseWriter, r *http.Reques
 		failWithCode(w, http.StatusBadGateway, ErrEmbyCreateNoID, "Emby 未返回用户 ID，请检查上游 Emby 状态")
 		return
 	}
-	var ignored map[string]any
-	_ = a.embyPost(r.Context(), "/Users/"+urlPathEscape(embyID)+"/Policy", map[string]any{"EnableContentDownloading": false}, &ignored)
+	if err := a.embyUpdatePolicy(r.Context(), embyID, func(policy map[string]any) {}); err != nil {
+		_ = a.embyDelete(r.Context(), "/Users/"+urlPathEscape(embyID))
+		failWithCode(w, http.StatusBadGateway, ErrEmbyCreateFailed, "设置 Emby 用户权限失败，请稍后重试或检查上游 Emby 状态")
+		return
+	}
 	if err := a.embyPost(r.Context(), "/Users/"+urlPathEscape(embyID)+"/Password", map[string]any{"CurrentPw": "", "NewPw": password}, nil); err != nil {
 		_ = a.embyDelete(r.Context(), "/Users/"+urlPathEscape(embyID))
 		failWithCode(w, http.StatusBadGateway, ErrEmbySetPasswordFailed, "设置 Emby 用户密码失败，请稍后重试或检查上游 Emby 状态")

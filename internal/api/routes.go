@@ -316,6 +316,7 @@ func (a *App) registerBatchRoutes() {
 	a.add(http.MethodPost, "/api/v1/batch/users/emby-grant-clear", AuthAdmin, a.handleBatchClearEmbyGrantUnbound)
 	a.add(http.MethodPost, "/api/v1/batch/users/emby/enable", AuthAdmin, a.handleBatchEmbyEnable)
 	a.add(http.MethodPost, "/api/v1/batch/users/emby/disable", AuthAdmin, a.handleBatchEmbyDisable)
+	a.add(http.MethodPost, "/api/v1/batch/users/emby/grant-all-libraries", AuthAdmin, a.handleBatchGrantAllLibraries)
 	a.add(http.MethodPost, "/api/v1/batch/users/refresh-status", AuthAdmin, a.handleBatchRefreshStatus)
 	a.add(http.MethodGet, "/api/v1/batch/export/users", AuthAdmin, a.handleExportUsers)
 	a.add(http.MethodGet, "/api/v1/batch/export/playback", AuthAdmin, a.handleExportPlayback)

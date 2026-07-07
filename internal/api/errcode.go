@@ -285,6 +285,7 @@ const (
 	ErrAdminQueueClearPartial     ErrCode = "ADMIN_QUEUE_CLEAR_PARTIAL"
 	ErrAdminDaysOutOfRange        ErrCode = "ADMIN_DAYS_OUT_OF_RANGE"
 	ErrAdminEntitlementPartial    ErrCode = "ADMIN_ENTITLEMENT_PARTIAL"
+	ErrAdminBulkLibraryConfirm    ErrCode = "ADMIN_BULK_LIBRARY_CONFIRM_REQUIRED"
 	ErrAdminPasswordResetScope    ErrCode = "ADMIN_PASSWORD_RESET_SCOPE_INVALID"
 	ErrAdminEmbyPasswordReset     ErrCode = "ADMIN_EMBY_PASSWORD_RESET_FAILED"
 	ErrAdminLastAdminProtected    ErrCode = "ADMIN_LAST_ADMIN_PROTECTED"
@@ -323,6 +324,7 @@ const (
 	ErrBatchConfirmRequired ErrCode = "BATCH_CONFIRM_REQUIRED"
 	ErrBatchUIDsRequired    ErrCode = "BATCH_UIDS_REQUIRED"
 	ErrBatchTooManyTargets  ErrCode = "BATCH_TOO_MANY_TARGETS"
+	ErrBatchLibraryActionInvalid ErrCode = "BATCH_LIBRARY_ACTION_INVALID"
 
 	// === Telegram 内部绑定（telegram_bind_secure.go） ===
 	ErrTGBindCodeNotFound            ErrCode = "TG_BIND_CODE_NOT_FOUND"

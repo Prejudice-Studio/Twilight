@@ -25,6 +25,7 @@ import {
   MonitorCheck,
   MonitorX,
   RefreshCcw,
+  BookOpen,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1339,6 +1340,42 @@ export default function AdminUsersPage() {
     }
   };
 
+  const handleSelectedGrantAllLibraries = async () => {
+    if (selectedCount === 0) return;
+    const confirmed = await confirmAction({
+      title: t("adminUsers.batchGrantLibrariesTitle"),
+      description: t("adminUsers.batchGrantLibrariesDescription", { count: selectedCount }),
+      tone: "warning",
+      confirmLabel: t("adminUsers.batchGrantLibrariesConfirm"),
+    });
+    if (!confirmed) return;
+    setBatchUserLoading(true);
+    try {
+      const res = await api.batchGrantAllLibraries(selectedBatchTarget());
+      if (res.success && res.data) {
+        const skippedNoEmby = res.data.skipped_no_emby || 0;
+        const skippedRemoteAdmin = res.data.skipped_remote_admin || 0;
+        toast({
+          title: t("adminUsers.batchGrantLibrariesDone"),
+          description: t("adminUsers.batchGrantLibrariesResult", {
+            success: res.data.success,
+            skipped: skippedNoEmby,
+            admin: skippedRemoteAdmin,
+            failed: res.data.failed,
+          }),
+          variant: res.data.failed ? "default" : "success",
+        });
+        await refreshAfterBatch();
+      } else {
+        toast({ title: t("adminUsers.batchFailed"), description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: t("adminUsers.batchFailed"), description: error.message, variant: "destructive" });
+    } finally {
+      setBatchUserLoading(false);
+    }
+  };
+
   // 批量强制刷新外部状态。scope 分开触发：telegram 仅刷 TG 用户名、emby 仅核对 Emby 启停。
   // 不限制数量，对所选全部用户处理；顺序外发，目标较多时耗时较长。
   const handleSelectedRefreshStatus = async (scope: "telegram" | "emby") => {
@@ -2316,6 +2353,10 @@ export default function AdminUsersPage() {
                 <Button variant="outline" size="sm" onClick={() => void handleSelectedEmbyToggle(false)} disabled={batchUserLoading || selectedCount === 0}>
                   <MonitorX className="mr-2 h-4 w-4" />
                   禁用
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => void handleSelectedGrantAllLibraries()} disabled={batchUserLoading || selectedCount === 0}>
+                  <BookOpen className="mr-2 h-4 w-4" />
+                  {t("adminUsers.grantAllLibraries")}
                 </Button>
               </div>
               <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/20 p-1">

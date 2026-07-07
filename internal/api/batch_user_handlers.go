@@ -271,6 +271,66 @@ func (a *App) handleBatchEmbyDisable(w http.ResponseWriter, r *http.Request, _ P
 	a.handleBatchToggleEmby(w, r, false)
 }
 
+func (a *App) handleBatchGrantAllLibraries(w http.ResponseWriter, r *http.Request, _ Params) {
+	payload := decodeMap(r)
+	if stringValue(payload, "confirm") != confirmBatchEmbyGrantAll {
+		failWithCode(w, http.StatusBadRequest, ErrAdminBulkLibraryConfirm, "missing confirm "+confirmBatchEmbyGrantAll)
+		return
+	}
+	if !a.embyConfigured() {
+		failWithCode(w, http.StatusBadGateway, ErrEmbyNotConfigured, "Emby URL 或 API Token 未配置")
+		return
+	}
+	uids, okPayload := a.batchBoundEmbyUserUIDsFromPayload(w, payload, 200, 5000, "too many users in one batch")
+	if !okPayload {
+		return
+	}
+	result := batchResult(len(uids))
+	skippedNoEmby := 0
+	skippedRemoteAdmin := 0
+	for _, uid := range uids {
+		target, okUser := a.store().User(uid)
+		if !okUser {
+			addBatchOutcomeWithCode(result, uid, ErrUserNotFound, fmt.Errorf("%s", userNotFoundMessage))
+			continue
+		}
+		if a.userIsProtected(target) {
+			addBatchOutcomeWithCode(result, uid, ErrUserProtected, fmt.Errorf("cannot grant libraries for protected account: %s", a.protectedUserReason(target)))
+			continue
+		}
+		if strings.TrimSpace(target.EmbyID) == "" {
+			skippedNoEmby++
+			continue
+		}
+		remote, found, err := a.embyUserByID(r.Context(), target.EmbyID)
+		if err != nil {
+			addBatchOutcome(result, uid, err)
+			continue
+		}
+		if !found {
+			addBatchOutcomeWithCode(result, uid, ErrEmbyUserNotFound, fmt.Errorf("Emby user not found"))
+			continue
+		}
+		if boolish(embyPolicy(remote)["IsAdministrator"]) {
+			skippedRemoteAdmin++
+			addBatchOutcomeWithCode(result, uid, ErrEmbyAdminBlocked, fmt.Errorf("refusing to modify Emby administrator policy"))
+			continue
+		}
+		err = a.embyUpdatePolicy(r.Context(), target.EmbyID, func(policy map[string]any) {
+			embyGrantAllLibraryAccess(policy)
+		})
+		addBatchOutcome(result, uid, err)
+	}
+	result["selected_all"] = boolValue(payload, "select_all", false)
+	result["all_libraries_granted"] = true
+	result["skipped_no_emby"] = skippedNoEmby
+	result["skipped_remote_admin"] = skippedRemoteAdmin
+	a.audit(r, "batch_emby_grant_all_libraries", "admin", 0, map[string]any{
+		"success": result["success"], "failed": result["failed"], "skipped_no_emby": skippedNoEmby, "skipped_remote_admin": skippedRemoteAdmin,
+	})
+	ok(w, "批量授予媒体库访问完成", result)
+}
+
 // handleBatchToggleEmby 批量单独启停 Emby 账号，不改动 Web 账号状态——与
 // handleAdminToggleEmby 的单用户版同源，守卫一致：受保护账号跳过；未绑定 Emby 跳过
 // （计入 skipped_no_emby）；启用方向必须满足 embyShouldEnableUser，不得绕过有效期。

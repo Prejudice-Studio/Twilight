@@ -257,9 +257,7 @@ func (a *App) embyCreateUser(ctx context.Context, username, password string) (ma
 	if id == "" {
 		return nil, fmt.Errorf("Emby did not return a user id")
 	}
-	_ = a.embyUpdatePolicy(ctx, id, func(policy map[string]any) {
-		policy["EnableContentDownloading"] = false
-	})
+	_ = a.embyUpdatePolicy(ctx, id, func(policy map[string]any) {})
 	if password != "" {
 		if err := a.embySetPassword(ctx, id, password); err != nil {
 			_ = a.embyDelete(ctx, "/Users/"+urlPathEscape(id))
@@ -338,6 +336,7 @@ func (a *App) embyUpdatePolicy(ctx context.Context, userID string, update func(m
 		}
 	}
 	update(policy)
+	embyHardenManagedPolicy(policy)
 	var ignored map[string]any
 	return a.embyPost(ctx, "/Users/"+urlPathEscape(userID)+"/Policy", policy, &ignored)
 }
@@ -411,6 +410,7 @@ func (a *App) embyDisableUserForUnbind(ctx context.Context, userID string) (bool
 		}
 	}
 	policy["IsDisabled"] = true
+	embyHardenManagedPolicy(policy)
 	var ignored map[string]any
 	if err := a.embyPost(ctx, "/Users/"+urlPathEscape(userID)+"/Policy", policy, &ignored); err != nil {
 		return false, err

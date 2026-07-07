@@ -9,6 +9,7 @@ const (
 	confirmBatchClearEmbyGrant = "BATCH_CLEAR_EMBY_GRANT"
 	confirmBatchEmbyEnable     = "BATCH_EMBY_ENABLE"
 	confirmBatchEmbyDisable    = "BATCH_EMBY_DISABLE"
+	confirmBatchEmbyGrantAll   = "BATCH_EMBY_GRANT_ALL_LIBRARIES"
 	confirmBatchDeleteRegcodes = "BATCH_DELETE_REGCODES"
 	confirmCleanupInvalidUsers = "CLEANUP_INVALID_USERS"
 	confirmClearAllEmails      = "CLEAR_ALL_EMAILS"

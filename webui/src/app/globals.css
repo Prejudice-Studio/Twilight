@@ -157,6 +157,8 @@
   body {
     @apply antialiased;
     min-width: 0;
+    line-height: 1.5;
+    text-size-adjust: 100%;
     color-scheme: light;
     font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
     background-image:
@@ -168,12 +170,12 @@
 
   :lang(zh-Hans), :lang(zh-Hant) {
     word-break: keep-all;
-    line-height: 1.6;
+    overflow-wrap: anywhere;
   }
 
   :lang(en-US) {
     word-break: break-word;
-    line-height: 1.5;
+    overflow-wrap: anywhere;
   }
 
   .dark body { color-scheme: dark; }

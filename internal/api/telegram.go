@@ -1,9 +1,14 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
+	"net/textproto"
 	"net/url"
 	"strconv"
 	"strings"
@@ -161,6 +166,19 @@ func (a *App) telegramSendMessage(ctx context.Context, chatID any, text string) 
 	return err
 }
 
+func (a *App) telegramSendPlainMessage(ctx context.Context, chatID any, text string) error {
+	text = truncateString(strings.TrimSpace(text), 3900)
+	if text == "" {
+		return fmt.Errorf("message text is empty")
+	}
+	body := map[string]any{
+		"chat_id":                  chatID,
+		"text":                     text,
+		"disable_web_page_preview": true,
+	}
+	return a.telegramPost(ctx, "sendMessage", body, nil)
+}
+
 func (a *App) telegramSendMessageWithMarkup(ctx context.Context, chatID any, text string, replyMarkup any) (int64, error) {
 	text = truncateString(strings.TrimSpace(text), 3900)
 	if text == "" {
@@ -182,6 +200,77 @@ func (a *App) telegramSendMessageWithMarkup(ctx context.Context, chatID any, tex
 		return 0, err
 	}
 	return numeric(result["message_id"]), nil
+}
+
+func (a *App) telegramSendPhoto(ctx context.Context, chatID any, filename, contentType string, data []byte, caption string) error {
+	if len(data) == 0 {
+		return fmt.Errorf("photo data is empty")
+	}
+	endpoint, endpointErr := a.telegramEndpoint("sendPhoto")
+	if endpointErr != nil {
+		return fmt.Errorf("%s", a.telegramSanitizeError(endpointErr))
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("chat_id", fmt.Sprint(chatID)); err != nil {
+		return err
+	}
+	if text := truncateString(strings.TrimSpace(caption), 900); text != "" {
+		if err := writer.WriteField("caption", text); err != nil {
+			return err
+		}
+	}
+	partHeader := make(textproto.MIMEHeader)
+	partHeader.Set("Content-Disposition", fmt.Sprintf(`form-data; name="photo"; filename="%s"`, strings.ReplaceAll(filename, `"`, "")))
+	if contentType != "" {
+		partHeader.Set("Content-Type", contentType)
+	}
+	part, err := writer.CreatePart(partHeader)
+	if err != nil {
+		return err
+	}
+	if _, err := part.Write(data); err != nil {
+		return err
+	}
+	if err := writer.Close(); err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	if _, ok := req.Context().Deadline(); !ok {
+		reqCtx, cancel := context.WithTimeout(req.Context(), 20*time.Second)
+		defer cancel()
+		req = req.WithContext(reqCtx)
+	}
+	resp, err := sharedHTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("%s", a.telegramSanitizeError(err))
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+	var payload telegramResponse
+	if len(bytes.TrimSpace(raw)) > 0 {
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return err
+		}
+	}
+	if resp.StatusCode >= 400 || !payload.OK {
+		msg := strings.TrimSpace(payload.Description)
+		if msg == "" {
+			msg = strings.TrimSpace(string(raw))
+		}
+		if msg == "" {
+			msg = "Telegram API request failed"
+		}
+		return fmt.Errorf("%s", a.telegramSanitizeError(fmt.Errorf("telegram sendPhoto failed: %s", truncateString(msg, 300))))
+	}
+	return nil
 }
 
 func (a *App) telegramEditMessageText(ctx context.Context, chatID, messageID int64, text string, replyMarkup any) error {
