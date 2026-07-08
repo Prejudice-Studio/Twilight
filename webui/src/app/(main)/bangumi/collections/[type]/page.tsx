@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ArrowLeft, BookOpen, CalendarDays, Edit, ExternalLink, LayoutGrid, LayoutList, Loader2, RefreshCw, Star } from "lucide-react";
+import { ArrowLeft, BookOpen, CalendarDays, Edit, ExternalLink, Filter, LayoutGrid, LayoutList, Loader2, RefreshCw, Star } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -183,6 +183,34 @@ export default function BangumiCollectionPage() {
   const [editRate, setEditRate] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [sortBy, setSortBy] = useState("default");
+  const [tagFilter, setTagFilter] = useState("");
+
+  const displayItems = useMemo(() => {
+    let list = [...items];
+    const filter = tagFilter.trim().toLowerCase();
+    if (filter) {
+      list = list.filter((item) => {
+        const tags = subjectTags(item);
+        return tags.some((tag: string) => tag.toLowerCase().includes(filter));
+      });
+    }
+    switch (sortBy) {
+      case "ep_asc":
+        list.sort((a, b) => ((a.ep_status ?? 0) - (b.ep_status ?? 0)));
+        break;
+      case "ep_desc":
+        list.sort((a, b) => ((b.ep_status ?? 0) - (a.ep_status ?? 0)));
+        break;
+      case "date_desc":
+        list.sort((a, b) => ((b.updated_at || 0) - (a.updated_at || 0)));
+        break;
+      case "rate_desc":
+        list.sort((a, b) => ((b.rate || 0) - (a.rate || 0)));
+        break;
+    }
+    return list;
+  }, [items, sortBy, tagFilter]);
 
   const offset = (page - 1) * pageSize;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -219,9 +247,10 @@ export default function BangumiCollectionPage() {
   };
 
   const pageSummary = useMemo(() => {
+    const filtered = displayItems.length !== items.length ? `（筛选后 ${displayItems.length} 条）` : "";
     if (total === 0) return "暂无条目";
-    return `第 ${offset + 1}-${Math.min(offset + items.length, total)} 条，共 ${total} 条`;
-  }, [items.length, offset, total]);
+    return `第 ${offset + 1}-${Math.min(offset + items.length, total)} 条，共 ${total} 条${filtered}`;
+  }, [items.length, offset, total, displayItems.length]);
 
   const openEdit = (item: any) => {
     setEditingItem(item);
@@ -285,6 +314,27 @@ export default function BangumiCollectionPage() {
           </Button>
         </div>
         <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              placeholder="筛选标签..."
+              value={tagFilter}
+              onChange={(e) => setTagFilter(e.target.value)}
+              className="h-8 w-[120px] text-xs px-2"
+            />
+          </div>
+          <Select value={sortBy} onValueChange={setSortBy}>
+            <SelectTrigger className="h-8 w-[100px] text-xs">
+              <SelectValue placeholder="排序" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="default">默认排序</SelectItem>
+              <SelectItem value="ep_asc">进度 ↑</SelectItem>
+              <SelectItem value="ep_desc">进度 ↓</SelectItem>
+              <SelectItem value="date_desc">最近更新</SelectItem>
+              <SelectItem value="rate_desc">评分 ↓</SelectItem>
+            </SelectContent>
+          </Select>
           <Select value={String(pageSize)} onValueChange={handlePageSizeChange}>
             <SelectTrigger className="h-8 w-[80px] text-xs">
               <SelectValue />
@@ -331,15 +381,26 @@ export default function BangumiCollectionPage() {
         <Card>
           <CardContent className="p-10 text-center text-sm text-muted-foreground">暂无条目</CardContent>
         </Card>
+      ) : displayItems.length === 0 ? (
+        <Card>
+          <CardContent className="p-10 text-center text-sm text-muted-foreground">
+            当前筛选条件下无匹配条目
+            {tagFilter ? (
+              <Button variant="link" className="ml-2 h-auto p-0 text-xs" onClick={() => setTagFilter("")}>
+                清除筛选
+              </Button>
+            ) : null}
+          </CardContent>
+        </Card>
       ) : viewMode === "grid" ? (
         <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
-          {items.map((item) => (
+          {displayItems.map((item) => (
             <GridCard key={item.subject_id} item={item} meta={meta} onEdit={openEdit} />
           ))}
         </div>
       ) : (
         <div className="space-y-3">
-          {items.map((item) => (
+          {displayItems.map((item) => (
             <ListRow key={item.subject_id} item={item} meta={meta} onEdit={openEdit} />
           ))}
         </div>
