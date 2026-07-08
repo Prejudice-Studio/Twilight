@@ -47,6 +47,7 @@ func (a *App) handleCreateAnnouncement(w http.ResponseWriter, r *http.Request, _
 	if statusFromError(w, err) {
 		return
 	}
+	a.audit(r, "create_announcement", "admin", 0, map[string]any{"announcement_id": ann.ID, "title": ann.Title})
 	created(w, "announcement created", ann)
 }
 
@@ -75,6 +76,7 @@ func (a *App) handleUpdateAnnouncement(w http.ResponseWriter, r *http.Request, p
 	if statusFromError(w, err) {
 		return
 	}
+	a.audit(r, "update_announcement", "admin", 0, map[string]any{"announcement_id": id, "title": ann.Title})
 	ok(w, "announcement updated", ann)
 }
 
@@ -99,5 +101,6 @@ func (a *App) handleDeleteAnnouncement(w http.ResponseWriter, r *http.Request, p
 	if statusFromError(w, a.store().DeleteAnnouncement(id)) {
 		return
 	}
+	a.audit(r, "delete_announcement", "admin", 0, map[string]any{"announcement_id": id})
 	ok(w, "announcement deleted", nil)
 }

@@ -200,6 +200,7 @@ func (a *App) handleBatchLockEmbyUnbind(w http.ResponseWriter, r *http.Request, 
 	result["selected_all"] = boolValue(payload, "select_all", false)
 	result["emby_grant_locked"] = true
 	result["skipped_no_emby"] = skippedNoEmby
+	a.audit(r, "batch_lock_emby_unbind", "admin", 0, map[string]any{"total": len(uids), "updated": len(updated), "skipped_no_emby": skippedNoEmby})
 	ok(w, "批量禁止 Emby 自助解绑完成", result)
 }
 
@@ -260,6 +261,7 @@ func (a *App) handleBatchClearEmbyGrantUnbound(w http.ResponseWriter, r *http.Re
 	result["skipped_pending"] = len(res.SkippedPending)
 	result["regcode_refs_removed"] = res.RegcodeRefs
 	result["invite_refs_removed"] = res.InviteRefs
+	a.audit(r, "batch_clear_emby_grant", "admin", 0, map[string]any{"total": len(uids), "cleared": len(res.Cleared), "skipped_has_emby": len(res.SkippedHasEmby), "skipped_pending": len(res.SkippedPending)})
 	ok(w, "批量清理注册资格记录完成", result)
 }
 
@@ -378,6 +380,7 @@ func (a *App) handleBatchToggleEmby(w http.ResponseWriter, r *http.Request, enab
 	result["selected_all"] = boolValue(payload, "select_all", false)
 	result["emby_enabled"] = enable
 	result["skipped_no_emby"] = skippedNoEmby
+	a.audit(r, "batch_toggle_emby", "admin", 0, map[string]any{"enable": enable, "total": len(uids), "skipped_no_emby": skippedNoEmby})
 	ok(w, "批量 Emby 状态更新完成", result)
 }
 
@@ -415,6 +418,7 @@ func (a *App) handleBatchRefreshStatus(w http.ResponseWriter, r *http.Request, _
 	result["selected_all"] = boolValue(payload, "select_all", false)
 	result["telegram_updated"] = tgUpdated
 	result["emby_disabled"] = embyDisabled
+	a.audit(r, "batch_refresh_status", "admin", 0, map[string]any{"scope": scope, "total": len(uids), "tg_updated": tgUpdated, "emby_disabled": embyDisabled})
 	ok(w, "批量刷新状态完成", result)
 }
 

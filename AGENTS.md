@@ -588,3 +588,23 @@ pnpm build
 - 每个菜单项必须包含 `MenuTitle`（标题 + 描述）以明确告知操作含义。
 - 条件渲染项（取消永久、Emby 操作、注册资格）仅在相关时显示，减少视觉噪音。
 
+### 系统 Wiki 页面约定
+
+- Wiki 页面路径为 `/wiki`（`webui/src/app/wiki/page.tsx`），不在前端导航栏或任何页面链接中暴露入口，用户需手动在 URL 地址栏输入访问。
+- Wiki 仅展示系统功能说明和用户/管理员操作指南，严禁包含任何后端敏感信息（密钥、Token、配置密钥、数据库连接信息、API Key 等）。
+- 每次新增/修改用户可见功能时，必须同步更新 wiki 页面对应章节。章节按功能域编号（如「10. 公告系统」），新增功能追加到对应位置。
+- Wiki 使用 shadcn/ui 组件风格，与前端整体一致。
+
+### 操作审计日志约定
+
+`internal/api/audit_handlers.go` 提供 `a.audit(r, action, category, targetUID, detail)` 便捷方法：
+
+- 自动从 `current(r)` 提取操作者 UID/Username
+- 自动记录客户端 IP
+- category: `"admin"` / `"user"` / `"system"`
+- 保留上限 10000 条，超出自动裁剪
+- 所有**状态变更操作**（创建/更新/删除/启停）都应在成功后调用 `a.audit()`
+- 只读类接口（list/get/search）不需要审计
+
+已覆盖的审计点：用户管理 CRUD + 启停 + 续期 + 改密 + 绑定/解绑、注册码 CRUD + 清使用记录、邀请码生成/消费、批量操作（启停/续期/删除/Emby启停/锁解绑/清授权）、公告 CRUD、工单 CRUD、配置变更、开发者 JS 沙箱、Telegram Bot 操作等。新增状态变更操作时必须在此处追加审计调用。
+
