@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
+import { API_BASE } from "@/lib/api-request";
 
 const PAGE_SIZE = 24;
 
@@ -32,7 +33,7 @@ function itemTitle(item: any) {
 }
 
 function posterUrl(item: any) {
-  return `/api/v1/bangumi/cover/${item.subject_id}`;
+  return `${API_BASE}/api/v1/bangumi/cover/${item.subject_id}`;
 }
 
 function hasPoster(item: any) {

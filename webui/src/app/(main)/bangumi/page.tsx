@@ -15,6 +15,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { api, type BangumiSyncStatus, type BangumiSyncLog } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { API_BASE } from "@/lib/api-request";
 import { useAuthStore } from "@/store/auth";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
@@ -391,7 +392,7 @@ export default function BangumiPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {bgmMe.watching.map((item: any) => {
                       const name = item.subject?.name_cn || item.subject?.name || "未知番剧";
-                      const poster = `/api/v1/bangumi/cover/${item.subject_id}`;
+                      const poster = `${API_BASE}/api/v1/bangumi/cover/${item.subject_id}`;
                       const hasCover = item.subject?.images?.large || item.subject?.images?.common || item.subject?.images?.medium;
                       return (
                         <div key={item.subject_id} className="flex gap-3 bg-accent/20 border border-border/20 rounded-lg p-3 hover:bg-accent/30 transition shadow-sm">
@@ -453,7 +454,7 @@ export default function BangumiPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {bgmMe.collected.map((item: any) => {
                       const name = item.subject?.name_cn || item.subject?.name || "看过动画";
-                      const poster = `/api/v1/bangumi/cover/${item.subject_id}`;
+                      const poster = `${API_BASE}/api/v1/bangumi/cover/${item.subject_id}`;
                       const hasCover = item.subject?.images?.large || item.subject?.images?.common || item.subject?.images?.medium;
                       return (
                         <div key={item.subject_id} className="flex gap-3 bg-accent/20 border border-border/20 rounded-lg p-3 hover:bg-accent/30 transition shadow-sm">
@@ -513,7 +514,7 @@ export default function BangumiPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {bgmMe.wishlist.map((item: any) => {
                       const name = item.subject?.name_cn || item.subject?.name || "想看动画";
-                      const poster = `/api/v1/bangumi/cover/${item.subject_id}`;
+                      const poster = `${API_BASE}/api/v1/bangumi/cover/${item.subject_id}`;
                       const hasCover = item.subject?.images?.large || item.subject?.images?.common || item.subject?.images?.medium;
                       return (
                         <div key={item.subject_id} className="flex gap-3 bg-accent/20 border border-border/20 rounded-lg p-3 hover:bg-accent/30 transition shadow-sm">
@@ -725,7 +726,7 @@ export default function BangumiPage() {
                 {editingItem.subject?.images?.large || editingItem.subject?.images?.common ? (
                   // eslint-disable-next-line @next/next/no-img-element -- Bangumi poster served locally
                   <img
-                    src={`/api/v1/bangumi/cover/${editingItem.subject_id}`}
+                    src={`${API_BASE}/api/v1/bangumi/cover/${editingItem.subject_id}`}
                     className="h-24 w-16 rounded object-cover shadow-sm border border-border/40"
                     alt={editingItem.subject?.name_cn || editingItem.subject?.name}
                     loading="lazy"
