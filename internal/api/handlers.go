@@ -1337,18 +1337,18 @@ func (a *App) handleServerIcon(w http.ResponseWriter, r *http.Request, _ Params)
 			defer file.Close()
 			if info, statErr := file.Stat(); statErr == nil {
 				w.Header().Set("Content-Type", contentType)
-				w.Header().Set("Cache-Control", "public, max-age=300")
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 				http.ServeContent(w, r, info.Name(), info.ModTime(), file)
 				return
 			}
 			w.Header().Set("Content-Type", contentType)
-			w.Header().Set("Cache-Control", "public, max-age=300")
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 			_, _ = io.Copy(w, file)
 			return
 		}
 	}
 	w.Header().Set("Content-Type", "image/png")
-	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
 	_, _ = w.Write(serverIconPNG)
 }
 

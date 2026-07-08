@@ -703,7 +703,7 @@ func TestAdminServerIconUploadUpdatesConfig(t *testing.T) {
 	if icon.Code != http.StatusOK {
 		t.Fatalf("server icon read status = %d body=%s", icon.Code, icon.Body.String())
 	}
-	if icon.Header().Get("Content-Type") != "image/png" || icon.Header().Get("Cache-Control") != "public, max-age=300" {
+	if icon.Header().Get("Content-Type") != "image/png" || icon.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" {
 		t.Fatalf("server icon headers mismatch: content-type=%q cache=%q", icon.Header().Get("Content-Type"), icon.Header().Get("Cache-Control"))
 	}
 	if !bytes.HasPrefix(icon.Body.Bytes(), []byte{0x89, 'P', 'N', 'G'}) {

@@ -437,7 +437,7 @@ func (a *App) handleAsset(w http.ResponseWriter, r *http.Request, params Params)
 			return
 		}
 	}
-	setCacheHeader(w)
+	setImmutableCacheHeader(w)
 	http.ServeFile(w, r, filePath)
 }
 
@@ -582,5 +582,9 @@ func (a *App) handleAuthBackground(w http.ResponseWriter, r *http.Request, _ Par
 }
 
 func setCacheHeader(w http.ResponseWriter) {
-	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+}
+
+func setImmutableCacheHeader(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 }

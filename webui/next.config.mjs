@@ -41,7 +41,24 @@ const nextConfig = {
       { key: 'Cross-Origin-Resource-Policy', value: 'same-origin' },
     ];
 
+    // 静态资源的缓存头：_next/static 下的 JS/CSS 文件包含 content hash，
+    // 文件名变更即自动失效，可安全缓存一年；字体和图片同理。
+    const immutableCache = [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }];
+    const imageCache = [{ key: 'Cache-Control', value: 'public, max-age=86400' }];
+
     return [
+      {
+        source: '/_next/static/:path*',
+        headers: [...securityHeaders, ...immutableCache],
+      },
+      {
+        source: '/static/:path*',
+        headers: [...securityHeaders, ...immutableCache],
+      },
+      {
+        source: '/favicon.png',
+        headers: [...securityHeaders, ...imageCache],
+      },
       {
         source: '/:path*',
         headers: securityHeaders,

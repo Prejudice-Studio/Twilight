@@ -488,7 +488,7 @@ func (a *App) handleGetTicketImage(w http.ResponseWriter, r *http.Request, param
 		failWithCode(w, http.StatusNotFound, ErrAssetNotFound, "resource not found")
 		return
 	}
-	setCacheHeader(w)
+	setImmutableCacheHeader(w)
 	http.ServeFile(w, r, target)
 }
 
