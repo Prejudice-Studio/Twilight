@@ -2465,6 +2465,37 @@ export default function AdminUsersPage() {
             </div>
 
             <div className="hidden overflow-x-auto md:block">
+              {/* ===== 批量操作栏 ===== */}
+              {selectedCount > 0 && (
+                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-4 py-3 mb-3">
+                  <span className="text-sm font-bold text-primary mr-2">已选 {selectedCount} 个用户</span>
+                  <Button size="sm" variant="outline" onClick={() => handleSelectedToggleActive(true)} disabled={batchUserLoading}><UserCheck className="mr-1.5 h-4 w-4" />启用</Button>
+                  <Button size="sm" variant="outline" onClick={() => handleSelectedToggleActive(false)} disabled={batchUserLoading}><Ban className="mr-1.5 h-4 w-4" />禁用</Button>
+                  <Button size="sm" variant="outline" onClick={handleSelectedLockEmbyUnbind}><LockKeyhole className="mr-1.5 h-4 w-4" />锁解绑</Button>
+                  <Button size="sm" variant="outline" onClick={handleSelectedClearEmbyGrant}><Eraser className="mr-1.5 h-4 w-4" />清授权</Button>
+                  <Button size="sm" variant="outline" onClick={() => { void handleSelectedRefreshStatus("emby"); }}><RefreshCw className="mr-1.5 h-4 w-4" />刷新Emby</Button>
+                  <div className="flex-1" />
+                  <Button size="sm" variant="ghost" onClick={clearUserSelection}>取消选择</Button>
+                  <Button size="sm" variant="destructive" onClick={handleSelectedDelete} disabled={batchUserLoading}><Trash2 className="mr-1.5 h-4 w-4" />删除</Button>
+                </div>
+              )}
+              {/* ===== 全选快捷行 ===== */}
+              <div className="flex items-center gap-2 text-xs text-muted-foreground pb-2">
+                <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={toggleSelectCurrentPage} disabled={users.length === 0}>
+                  {allPageSelected ? "取消全选本页" : "全选本页"}
+                </Button>
+                <span>|</span>
+                <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={selectCurrentPageUsers} disabled={users.length === 0}>反选本页</Button>
+                <span>|</span>
+                <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={selectAllMatchingUsers} disabled={total === 0}>全选所有 ({total})</Button>
+                <span>|</span>
+                <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={selectEmbyMatchingUsers} disabled={selectEmbyLoading || total === 0}>
+                  {selectEmbyLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}选中所有 Emby 用户
+                </Button>
+                {selectionScope !== "manual" && (
+                  <><span>|</span><span>(范围: {selectionScope === "all" ? "全部" : "Emby"}, 排除 {excludedUserIds.size})</span></>
+                )}
+              </div>
               <table className="w-full">
                 <thead>
                   <tr className="border-b bg-muted/50">
