@@ -318,12 +318,12 @@ const (
 	ErrConfigBackupDeleteFailed ErrCode = "CONFIG_BACKUP_DELETE_FAILED"
 
 	// === 违规 / 黑名单（violation_handlers.go / batch_helpers.go） ===
-	ErrViolationIDInvalid   ErrCode = "VIOLATION_ID_INVALID"
-	ErrViolationConfirmReq  ErrCode = "VIOLATION_CONFIRM_REQUIRED"
-	ErrViolationClearFailed ErrCode = "VIOLATION_CLEAR_FAILED"
-	ErrBatchConfirmRequired ErrCode = "BATCH_CONFIRM_REQUIRED"
-	ErrBatchUIDsRequired    ErrCode = "BATCH_UIDS_REQUIRED"
-	ErrBatchTooManyTargets  ErrCode = "BATCH_TOO_MANY_TARGETS"
+	ErrViolationIDInvalid        ErrCode = "VIOLATION_ID_INVALID"
+	ErrViolationConfirmReq       ErrCode = "VIOLATION_CONFIRM_REQUIRED"
+	ErrViolationClearFailed      ErrCode = "VIOLATION_CLEAR_FAILED"
+	ErrBatchConfirmRequired      ErrCode = "BATCH_CONFIRM_REQUIRED"
+	ErrBatchUIDsRequired         ErrCode = "BATCH_UIDS_REQUIRED"
+	ErrBatchTooManyTargets       ErrCode = "BATCH_TOO_MANY_TARGETS"
 	ErrBatchLibraryActionInvalid ErrCode = "BATCH_LIBRARY_ACTION_INVALID"
 
 	// === Telegram 内部绑定（telegram_bind_secure.go） ===
