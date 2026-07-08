@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { BookOpen, RefreshCw, Trash2, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Heart, Tv, ExternalLink, Edit, User as UserIcon, Star } from "lucide-react";
@@ -240,6 +240,29 @@ export default function BangumiPage() {
   const syncEnabled = status?.sync_enabled === true;
   const manageEnabled = status?.manage_enabled === true;
 
+  const recentActivity = useMemo(() => {
+    const all = [
+      ...(bgmMe?.watching || []).map((item: any) => ({ ...item, _source: "在看" })),
+      ...(bgmMe?.collected || []).map((item: any) => ({ ...item, _source: "看过" })),
+      ...(bgmMe?.wishlist || []).map((item: any) => ({ ...item, _source: "想看" })),
+    ];
+    all.sort((a: any, b: any) => (b.updated_at || 0) - (a.updated_at || 0));
+    return all.slice(0, 8);
+  }, [bgmMe?.watching, bgmMe?.collected, bgmMe?.wishlist]);
+
+  const activityAction = (item: any) => {
+    const name = item.subject?.name_cn || item.subject?.name || "未知条目";
+    const src = item._source || "";
+    if (item.type === 2) return `看过了 ${name}`;
+    if (item.type === 3 && item.ep_status) return `更新 ${name} 进度到第 ${item.ep_status} 话`;
+    if (item.type === 3) return `开始看 ${name}`;
+    if (item.type === 1) return `想看了 ${name}`;
+    if (item.type === 4) return `搁置了 ${name}`;
+    if (item.type === 5) return `抛弃了 ${name}`;
+    if (src) return `${src}了 ${name}`;
+    return `更新了 ${name}`;
+  };
+
   if (error) {
     return (
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
@@ -292,14 +315,15 @@ export default function BangumiPage() {
 
       {bgmMe && !bgmMe.expired && bgmMe.me && (
         <motion.div variants={{ hidden: {}, show: {} }} className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Card className="glass-card md:col-span-1">
-            <CardHeader className="pb-4">
-              <CardTitle className="text-lg font-bold flex items-center gap-2">
-                <UserIcon className="h-4 w-4 text-primary" />
-                Bangumi 账号关联
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <div className="md:col-span-1 space-y-6">
+            <Card className="glass-card">
+              <CardHeader className="pb-4">
+                <CardTitle className="text-lg font-bold flex items-center gap-2">
+                  <UserIcon className="h-4 w-4 text-primary" />
+                  Bangumi 账号关联
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
               <div className="flex items-center gap-4">
                 {bgmMe.me.avatar?.large ? (
                   // eslint-disable-next-line @next/next/no-img-element -- User-provided avatar URLs
@@ -369,6 +393,39 @@ export default function BangumiPage() {
               </div>
             </CardContent>
           </Card>
+
+          {recentActivity.length > 0 ? (
+            <Card className="glass-card">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base font-bold flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-primary" />
+                  最近动态
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                  {recentActivity.map((item: any) => (
+                    <div key={`${item.subject_id}-${item._source}`} className="flex gap-2.5 text-xs">
+                      <div className="relative mt-1.5 flex-shrink-0">
+                        <div className="h-2 w-2 rounded-full bg-primary/50 ring-1 ring-primary/20" />
+                      </div>
+                      <div className="min-w-0 flex-1 pb-3 border-b border-border/10 last:border-0 last:pb-0">
+                        <Link href={`/bangumi/collections/${item.type === 1 ? 1 : item.type === 2 ? 2 : 3}`} className="text-muted-foreground leading-relaxed line-clamp-2 hover:text-primary transition-colors">
+                          {activityAction(item)}
+                        </Link>
+                        {item.updated_at ? (
+                          <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+                            {formatTime(item.updated_at)}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
 
           <Card className="glass-card md:col-span-2">
             <CardHeader className="pb-2">
