@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { BookOpen, RefreshCw, Trash2, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Heart, Tv, ExternalLink, Edit, User as UserIcon, Star } from "lucide-react";
+import { BookOpen, RefreshCw, Trash2, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Heart, Tv, ExternalLink, User as UserIcon, Star, ListChecks, Eye, EyeOff, BookmarkX } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,42 +18,41 @@ import { useI18n } from "@/lib/i18n";
 import { API_BASE } from "@/lib/api-request";
 import { useAuthStore } from "@/store/auth";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 function formatTime(unix: number): string {
+  if (!unix) return "";
   return new Date(unix * 1000).toLocaleString();
 }
 
-function StarRating({ value }: { value: number }) {
-  if (value <= 0) return null;
-  return (
-    <span className="inline-flex items-center gap-0.5 text-yellow-500 text-[10px]">
-      <Star className="h-3 w-3 fill-current" />
-      {value}
-    </span>
-  );
+const NAV_ITEMS = [
+  { type: 3, label: "在看", icon: Tv, color: "text-blue-500 bg-blue-500/10", href: "/bangumi/collections/3" },
+  { type: 2, label: "看过", icon: CheckCircle2, color: "text-green-500 bg-green-500/10", href: "/bangumi/collections/2" },
+  { type: 1, label: "想看", icon: Heart, color: "text-red-500 bg-red-500/10", href: "/bangumi/collections/1" },
+  { type: 4, label: "搁置", icon: BookmarkX, color: "text-yellow-500 bg-yellow-500/10", href: "/bangumi/collections/4" },
+  { type: 5, label: "抛弃", icon: EyeOff, color: "text-muted-foreground bg-accent/20", href: "/bangumi/collections/5" },
+];
+
+function activityText(item: any) {
+  const name = item.subject?.name_cn || item.subject?.name || "未知条目";
+  switch (item.type) {
+    case 1: return `想看了 ${name}`;
+    case 2: return `看过了 ${name}`;
+    case 3: return item.ep_status ? `更新 ${name} 进度到第 ${item.ep_status} 话` : `开始看 ${name}`;
+    case 4: return `搁置了 ${name}`;
+    case 5: return `抛弃了 ${name}`;
+    default: return `更新了 ${name}`;
+  }
 }
 
-function RateInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  return (
-    <div className="flex gap-1">
-      {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((v) => (
-        <button
-          key={v}
-          type="button"
-          onClick={() => onChange(value === v ? 0 : v)}
-          className={`w-7 h-7 rounded text-[10px] font-bold transition-colors ${
-            value === v
-              ? "bg-yellow-500 text-black"
-              : "bg-accent/30 text-muted-foreground hover:bg-accent/60"
-          }`}
-        >
-          {v}
-        </button>
-      ))}
-    </div>
-  );
+function activityIcon(type: number) {
+  switch (type) {
+    case 1: return <Heart className="h-3 w-3 text-red-500" />;
+    case 2: return <CheckCircle2 className="h-3 w-3 text-green-500" />;
+    case 3: return <Tv className="h-3 w-3 text-blue-500" />;
+    case 4: return <BookmarkX className="h-3 w-3 text-yellow-500" />;
+    case 5: return <EyeOff className="h-3 w-3 text-muted-foreground" />;
+    default: return <Clock className="h-3 w-3 text-muted-foreground" />;
+  }
 }
 
 export default function BangumiPage() {
@@ -100,59 +99,25 @@ export default function BangumiPage() {
 
   const { isLoading, error, execute: reload } = useAsyncResource(loadResource, { immediate: true });
 
-  // "编辑进度" 状态
-  const [editOpen, setEditOpen] = useState(false);
-  const [editingItem, setEditingItem] = useState<any>(null);
-  const [editType, setEditType] = useState<number>(3);
-  const [editEpStatus, setEditEpStatus] = useState<number>(0);
-  const [editRate, setEditRate] = useState<number>(0);
-  const [updating, setUpdating] = useState(false);
-
-  const handleOpenEdit = (item: any) => {
-    setEditingItem(item);
-    setEditType(item.type ?? 3);
-    setEditEpStatus(item.ep_status ?? 0);
-    setEditRate(item.rate ?? 0);
-    setEditOpen(true);
-  };
-
-  const handleEditTypeChange = (val: string) => {
-    const t = Number(val);
-    setEditType(t);
-    if (t !== 3) {
-      setEditEpStatus(0);
-    }
-  };
-
-  const handleSaveProgress = async () => {
-    if (!editingItem) return;
-    setUpdating(true);
-    try {
-      const payload: { type: number; ep_status?: number; rate: number } = { type: editType, rate: editRate };
-      if (editType === 3) {
-        payload.ep_status = editEpStatus;
-      }
-      const res = await api.updateBangumiCollection(editingItem.subject_id, payload);
-      if (res.success) {
-        toast({ title: "更新成功" });
-        setEditOpen(false);
-        await reload();
-      } else {
-        toast({ title: "更新失败", description: res.message, variant: "destructive" });
-      }
-    } catch {
-      toast({ title: "更新发生错误", variant: "destructive" });
-    } finally {
-      setUpdating(false);
-    }
-  };
+  const recentActivity = useMemo(() => {
+    if (!bgmMe) return [];
+    const all = [
+      ...(bgmMe.watching || []),
+      ...(bgmMe.collected || []),
+      ...(bgmMe.wishlist || []),
+      ...(bgmMe.on_hold || []),
+      ...(bgmMe.dropped || []),
+    ];
+    all.sort((a: any, b: any) => (b.updated_at || 0) - (a.updated_at || 0));
+    return all.slice(0, 8);
+  }, [bgmMe]);
 
   const handleSync = async () => {
     setSyncing(true);
     try {
       const res = await api.triggerBangumiSync();
       if (res.success && res.data) {
-        toast({ title: t("bangumi.syncCompleted"), description: `${t("bangumi.syncedCount")}: ${res.data.synced}, ${t("bangumi.skippedCount")}: ${res.data.skipped}, ${t("bangumi.failedCount")}: ${res.data.failed}` });
+        toast({ title: t("bangumi.syncCompleted"), description: `${t("bangumi.syncedCount")}: ${res.data.synced}` });
         await reload();
       } else {
         toast({ title: t("bangumi.syncFailed"), description: res.message, variant: "destructive" });
@@ -228,40 +193,8 @@ export default function BangumiPage() {
     }
   };
 
-  const statusIcon = (s: string) => {
-    switch (s) {
-      case "success": return <CheckCircle2 className="h-4 w-4 text-green-500" />;
-      case "failed": return <XCircle className="h-4 w-4 text-red-500" />;
-      case "skipped": return <Clock className="h-4 w-4 text-yellow-500" />;
-      default: return <AlertCircle className="h-4 w-4 text-muted-foreground" />;
-    }
-  };
-
   const syncEnabled = status?.sync_enabled === true;
   const manageEnabled = status?.manage_enabled === true;
-
-  const recentActivity = useMemo(() => {
-    const all = [
-      ...(bgmMe?.watching || []).map((item: any) => ({ ...item, _source: "在看" })),
-      ...(bgmMe?.collected || []).map((item: any) => ({ ...item, _source: "看过" })),
-      ...(bgmMe?.wishlist || []).map((item: any) => ({ ...item, _source: "想看" })),
-    ];
-    all.sort((a: any, b: any) => (b.updated_at || 0) - (a.updated_at || 0));
-    return all.slice(0, 8);
-  }, [bgmMe?.watching, bgmMe?.collected, bgmMe?.wishlist]);
-
-  const activityAction = (item: any) => {
-    const name = item.subject?.name_cn || item.subject?.name || "未知条目";
-    const src = item._source || "";
-    if (item.type === 2) return `看过了 ${name}`;
-    if (item.type === 3 && item.ep_status) return `更新 ${name} 进度到第 ${item.ep_status} 话`;
-    if (item.type === 3) return `开始看 ${name}`;
-    if (item.type === 1) return `想看了 ${name}`;
-    if (item.type === 4) return `搁置了 ${name}`;
-    if (item.type === 5) return `抛弃了 ${name}`;
-    if (src) return `${src}了 ${name}`;
-    return `更新了 ${name}`;
-  };
 
   if (error) {
     return (
@@ -296,9 +229,7 @@ export default function BangumiPage() {
           <BookOpen className="h-6 w-6" />
           {t("bangumi.title")}
         </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {t("bangumi.description")}
-        </p>
+        <p className="text-sm text-muted-foreground mt-1">{t("bangumi.description")}</p>
       </div>
 
       {bgmMe?.expired && (
@@ -308,94 +239,45 @@ export default function BangumiPage() {
             您的 Bangumi 访问令牌已过期 / Access Token Expired
           </AlertTitle>
           <AlertDescription className="text-xs text-muted-foreground leading-relaxed mt-1">
-            检测到当前绑定的 Bangumi (BGM) Token 凭证已失效、到期或已被其官方注销。由于 Token 失效，目前的点格子自动同步动作将被服务端暂时阻断。请在下方【设置】面板中填入重新申请的有效 Token。
+            请在下方设置面板中填入重新申请的有效 Token。
           </AlertDescription>
         </Alert>
       )}
 
       {bgmMe && !bgmMe.expired && bgmMe.me && (
-        <motion.div variants={{ hidden: {}, show: {} }} className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="md:col-span-1 space-y-6">
-            <Card className="glass-card">
-              <CardHeader className="pb-4">
-                <CardTitle className="text-lg font-bold flex items-center gap-2">
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <Card className="glass-card md:col-span-1">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base font-bold flex items-center gap-2">
                   <UserIcon className="h-4 w-4 text-primary" />
-                  Bangumi 账号关联
+                  Bangumi 账号
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
-              <div className="flex items-center gap-4">
-                {bgmMe.me.avatar?.large ? (
-                  // eslint-disable-next-line @next/next/no-img-element -- User-provided avatar URLs
-                  <img
-                    src={bgmMe.me.avatar.large}
-                    className="h-16 w-16 rounded-full border-2 border-primary object-cover"
-                    alt={bgmMe.me.nickname || bgmMe.me.username}
-                    loading="lazy"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className="h-16 w-16 rounded-full border-2 border-primary bg-muted flex items-center justify-center">
-                    <UserIcon className="h-8 w-8 text-muted-foreground" />
+              <CardContent className="space-y-3">
+                <div className="flex items-center gap-3">
+                  {bgmMe.me.avatar?.large ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- BGM user avatar URL
+                    <img src={bgmMe.me.avatar.large} className="h-14 w-14 rounded-full border-2 border-primary object-cover" alt={bgmMe.me.nickname} loading="lazy" referrerPolicy="no-referrer" />
+                  ) : (
+                    <div className="h-14 w-14 rounded-full border-2 border-primary bg-muted flex items-center justify-center"><UserIcon className="h-6 w-6 text-muted-foreground" /></div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-bold truncate text-sm">{bgmMe.me.nickname || "神秘用户"}</h3>
+                    <p className="text-xs text-muted-foreground truncate">@{bgmMe.me.username || "unknown"}</p>
+                    <p className="text-[10px] text-muted-foreground">BGM UID: {bgmMe.me.id}</p>
                   </div>
-                )}
-                <div className="min-w-0 flex-1">
-                  <h3 className="font-bold text-foreground truncate text-base">
-                    {bgmMe.me.nickname || "神秘用户"}
-                  </h3>
-                  <p className="text-xs text-muted-foreground truncate">
-                    @{bgmMe.me.username || "unknown"}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    UID: {bgmMe.me.id}
-                  </p>
                 </div>
-              </div>
-
-              {bgmMe.me.sign ? (
-                <div className="rounded-lg bg-accent/20 p-3 text-xs italic text-muted-foreground line-clamp-3">
-                  “ {bgmMe.me.sign} ”
-                </div>
-              ) : null}
-
-              <div className="grid grid-cols-3 gap-2 py-3 border-t border-b border-border/40 text-center">
-                <div className="space-y-0.5 pointer-events-none">
-                  <p className="text-[11px] text-muted-foreground">在看</p>
-                  <p className="text-base font-extrabold text-foreground">{bgmMe.watching_total ?? 0}</p>
-                </div>
-                <div className="space-y-0.5 pointer-events-none">
-                  <p className="text-[11px] text-muted-foreground">想看</p>
-                  <p className="text-base font-extrabold text-foreground">{bgmMe.wishlist_total ?? 0}</p>
-                </div>
-                <div className="space-y-0.5 pointer-events-none">
-                  <p className="text-[11px] text-muted-foreground">看过</p>
-                  <p className="text-base font-extrabold text-foreground">{bgmMe.collected_total ?? 0}</p>
-                </div>
-              </div>
-
-              <div className="pt-2 flex items-center justify-between text-xs text-muted-foreground">
-                <span>用户组</span>
-                <Badge variant="outline" className="text-[10px]">
-                  {bgmMe.me.user_group === 1 ? "普通成员" : bgmMe.me.user_group === 2 ? "管理员" : "BGM 用户"}
-                </Badge>
-              </div>
-
-              <div className="flex justify-end pt-1">
-                <a
-                  href={`https://bgm.tv/user/${bgmMe.me.username}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-primary flex items-center gap-1 hover:underline"
-                >
-                  前往 Bangumi 主页
-                  <ExternalLink className="h-3 w-3" />
+                {bgmMe.me.sign ? (
+                  <div className="rounded-lg bg-accent/20 p-2.5 text-xs italic text-muted-foreground line-clamp-2">&ldquo;{bgmMe.me.sign}&rdquo;</div>
+                ) : null}
+                <a href={`https://bgm.tv/user/${bgmMe.me.username}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                  前往 Bangumi 主页 <ExternalLink className="h-3 w-3" />
                 </a>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
 
-          {recentActivity.length > 0 ? (
-            <Card className="glass-card">
+            <Card className="glass-card md:col-span-2">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base font-bold flex items-center gap-2">
                   <Clock className="h-4 w-4 text-primary" />
@@ -403,471 +285,184 @@ export default function BangumiPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-0">
-                <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
-                  {recentActivity.map((item: any) => (
-                    <div key={`${item.subject_id}-${item._source}`} className="flex gap-2.5 text-xs">
-                      <div className="relative mt-1.5 flex-shrink-0">
-                        <div className="h-2 w-2 rounded-full bg-primary/50 ring-1 ring-primary/20" />
+                {recentActivity.length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-4">暂无动态</p>
+                ) : (
+                  <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                    {recentActivity.map((item: any, idx: number) => (
+                      <div key={`${item.subject_id}-${idx}`} className="flex gap-2.5 text-xs relative">
+                        <div className="relative flex flex-col items-center flex-shrink-0 pt-1">
+                          {activityIcon(item.type)}
+                          {idx < recentActivity.length - 1 && <div className="w-px flex-1 bg-border/20 mt-0.5" />}
+                        </div>
+                        <div className="min-w-0 flex-1 pb-2 border-b border-border/10 last:border-0">
+                          <Link href={`/bangumi/collections/${item.type > 0 && item.type <= 5 ? item.type : 3}`} className="text-muted-foreground leading-relaxed line-clamp-1 hover:text-primary transition-colors">
+                            {activityText(item)}
+                          </Link>
+                          {item.updated_at ? (
+                            <p className="text-[10px] text-muted-foreground/50 mt-0.5">{formatTime(item.updated_at)}</p>
+                          ) : null}
+                        </div>
                       </div>
-                      <div className="min-w-0 flex-1 pb-3 border-b border-border/10 last:border-0 last:pb-0">
-                        <Link href={`/bangumi/collections/${item.type === 1 ? 1 : item.type === 2 ? 2 : 3}`} className="text-muted-foreground leading-relaxed line-clamp-2 hover:text-primary transition-colors">
-                          {activityAction(item)}
-                        </Link>
-                        {item.updated_at ? (
-                          <p className="text-[10px] text-muted-foreground/60 mt-0.5">
-                            {formatTime(item.updated_at)}
-                          </p>
-                        ) : null}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
-          ) : null}
-        </div>
+          </div>
 
-          <Card className="glass-card md:col-span-2">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg font-bold">Bangumi 个人娱乐视图</CardTitle>
-              <CardDescription>您的 Bangumi 实时精选番剧同步与收藏视图</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between border-b border-border/30 pb-1.5">
-                  <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-                    <Tv className="h-3.5 w-3.5 text-primary" />
-                    在看动画 ({bgmMe.watching_total ?? bgmMe.watching?.length ?? 0})
-                  </h3>
-                  <Button asChild variant="link" className="text-xs h-auto p-0 text-primary font-bold hover:underline">
-                    <Link href="/bangumi/collections/3" prefetch={false}>
-                    查看全部 ({bgmMe.watching_total ?? bgmMe.watching?.length ?? 0}) →
-                    </Link>
-                  </Button>
-                </div>
-                {bgmMe.watching && bgmMe.watching.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {bgmMe.watching.map((item: any) => {
-                      const name = item.subject?.name_cn || item.subject?.name || "未知番剧";
-                      const poster = `${API_BASE}/api/v1/bangumi/cover/${item.subject_id}`;
-                      const hasCover = item.subject?.images?.large || item.subject?.images?.common || item.subject?.images?.medium;
-                      return (
-                        <div key={item.subject_id} className="flex gap-3 bg-accent/20 border border-border/20 rounded-lg p-3 hover:bg-accent/30 transition shadow-sm">
-                          {hasCover ? (
-                            // eslint-disable-next-line @next/next/no-img-element -- Bangumi poster served locally
-                            <img src={poster} className="h-28 w-20 rounded-md object-cover flex-shrink-0 shadow-sm border border-border/40" alt={name} loading="lazy" referrerPolicy="no-referrer" />
-                          ) : (
-                            <div className="h-28 w-20 rounded-md bg-muted flex items-center justify-center text-[10px] text-muted-foreground flex-shrink-0 border border-border/40">无封面</div>
-                          )}
-                          <div className="min-w-0 flex-1 flex flex-col justify-between py-0.5">
-                            <div>
-                              <h4 className="text-xs font-bold truncate text-foreground" title={name}>{name}</h4>
-                              <p className="text-[10px] text-muted-foreground truncate">{item.subject?.name}</p>
-                              {item.ep_status ? (
-                                <Badge variant="secondary" className="text-[10px] mt-2 px-1.5 py-0.5">看到 {item.ep_status} 话</Badge>
-                              ) : <Badge variant="outline" className="text-[10px] mt-2 px-1.5 py-0.5 text-muted-foreground">尚无进度</Badge>}
-                              {item.rate > 0 && (
-                                <div className="mt-1"><StarRating value={item.rate} /></div>
-                              )}
-                            </div>
-                            <div className="flex items-center justify-between gap-1.5 mt-2 border-t border-border/20 pt-1.5">
-                              <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-primary flex items-center gap-1" onClick={() => handleOpenEdit(item)}>
-                                <Edit className="h-3 w-3" />
-                                进度/状态
-                              </Button>
-                              <a
-                                href={`https://bgm.tv/subject/${item.subject_id}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-[10px] text-primary flex items-center gap-0.5 hover:underline px-1.5 py-1"
-                              >
-                                详情
-                                <ExternalLink className="h-3 w-3" />
-                              </a>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground italic py-2">目前没有正在观看的在看动画...</p>
-                )}
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between border-b border-border/30 pb-1.5">
-                  <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-                    最近看过 ({bgmMe.collected_total ?? bgmMe.collected?.length ?? 0})
-                  </h3>
-                  <Button asChild variant="link" className="text-xs h-auto p-0 text-primary font-bold hover:underline">
-                    <Link href="/bangumi/collections/2" prefetch={false}>
-                    查看全部 ({bgmMe.collected_total ?? bgmMe.collected?.length ?? 0}) →
-                    </Link>
-                  </Button>
-                </div>
-                {bgmMe.collected && bgmMe.collected.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {bgmMe.collected.map((item: any) => {
-                      const name = item.subject?.name_cn || item.subject?.name || "看过动画";
-                      const poster = `${API_BASE}/api/v1/bangumi/cover/${item.subject_id}`;
-                      const hasCover = item.subject?.images?.large || item.subject?.images?.common || item.subject?.images?.medium;
-                      return (
-                        <div key={item.subject_id} className="flex gap-3 bg-accent/20 border border-border/20 rounded-lg p-3 hover:bg-accent/30 transition shadow-sm">
-                          {hasCover ? (
-                            // eslint-disable-next-line @next/next/no-img-element -- Bangumi poster served locally
-                            <img src={poster} className="h-28 w-20 rounded-md object-cover flex-shrink-0 shadow-sm border border-border/40" alt={name} loading="lazy" referrerPolicy="no-referrer" />
-                          ) : (
-                            <div className="h-28 w-20 rounded-md bg-muted flex items-center justify-center text-[10px] text-muted-foreground flex-shrink-0 border border-border/40">无封面</div>
-                          )}
-                          <div className="min-w-0 flex-1 flex flex-col justify-between py-0.5">
-                            <div>
-                              <h4 className="text-xs font-bold truncate text-foreground" title={name}>{name}</h4>
-                              <p className="text-[10px] text-muted-foreground truncate">{item.subject?.name}</p>
-                              <Badge variant="outline" className="text-[10px] mt-2 px-1.5 py-0.5 text-green-600 bg-green-500/5 border-green-500/20">已看完</Badge>
-                              {item.rate > 0 && (
-                                <div className="mt-1"><StarRating value={item.rate} /></div>
-                              )}
-                            </div>
-                            <div className="flex items-center justify-between gap-1.5 mt-2 border-t border-border/20 pt-1.5">
-                              <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-primary flex items-center gap-1" onClick={() => handleOpenEdit(item)}>
-                                <Edit className="h-3 w-3" />
-                                进度/状态
-                              </Button>
-                              <a
-                                href={`https://bgm.tv/subject/${item.subject_id}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-[10px] text-primary flex items-center gap-0.5 hover:underline px-1.5 py-1"
-                              >
-                                详情
-                                <ExternalLink className="h-3 w-3" />
-                              </a>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground italic py-2">目前还没有看过的动画记录呢...</p>
-                )}
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between border-b border-border/30 pb-1.5">
-                  <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-                    <Heart className="h-3.5 w-3.5 text-red-500" />
-                    想看动画 ({bgmMe.wishlist_total ?? bgmMe.wishlist?.length ?? 0})
-                  </h3>
-                  <Button asChild variant="link" className="text-xs h-auto p-0 text-primary font-bold hover:underline">
-                    <Link href="/bangumi/collections/1" prefetch={false}>
-                    查看全部 ({bgmMe.wishlist_total ?? bgmMe.wishlist?.length ?? 0}) →
-                    </Link>
-                  </Button>
-                </div>
-                {bgmMe.wishlist && bgmMe.wishlist.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {bgmMe.wishlist.map((item: any) => {
-                      const name = item.subject?.name_cn || item.subject?.name || "想看动画";
-                      const poster = `${API_BASE}/api/v1/bangumi/cover/${item.subject_id}`;
-                      const hasCover = item.subject?.images?.large || item.subject?.images?.common || item.subject?.images?.medium;
-                      return (
-                        <div key={item.subject_id} className="flex gap-3 bg-accent/20 border border-border/20 rounded-lg p-3 hover:bg-accent/30 transition shadow-sm">
-                          {hasCover ? (
-                            // eslint-disable-next-line @next/next/no-img-element -- Bangumi poster served locally
-                            <img src={poster} className="h-28 w-20 rounded-md object-cover flex-shrink-0 shadow-sm border border-border/40" alt={name} loading="lazy" referrerPolicy="no-referrer" />
-                          ) : (
-                            <div className="h-28 w-20 rounded-md bg-muted flex items-center justify-center text-[10px] text-muted-foreground flex-shrink-0 border border-border/40">无封面</div>
-                          )}
-                          <div className="min-w-0 flex-1 flex flex-col justify-between py-0.5">
-                            <div>
-                              <h4 className="text-xs font-bold truncate text-foreground" title={name}>{name}</h4>
-                              <p className="text-[10px] text-muted-foreground truncate">{item.subject?.name}</p>
-                              <Badge variant="outline" className="text-[10px] mt-2 px-1.5 py-0.5 text-red-500 bg-red-500/5 border-red-500/20">想看</Badge>
-                              {item.rate > 0 && (
-                                <div className="mt-1"><StarRating value={item.rate} /></div>
-                              )}
-                            </div>
-                            <div className="flex items-center justify-between gap-1.5 mt-2 border-t border-border/20 pt-1.5">
-                              <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-primary flex items-center gap-1" onClick={() => handleOpenEdit(item)}>
-                                <Edit className="h-3 w-3" />
-                                进度/状态
-                              </Button>
-                              <a
-                                href={`https://bgm.tv/subject/${item.subject_id}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-[10px] text-primary flex items-center gap-0.5 hover:underline px-1.5 py-1"
-                              >
-                                详情
-                                <ExternalLink className="h-3 w-3" />
-                              </a>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground italic py-2">目前想看列表里还没有动画呢...</p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            {NAV_ITEMS.map((nav) => {
+              const total = nav.type === 1 ? bgmMe.wishlist_total
+                : nav.type === 2 ? bgmMe.collected_total
+                : nav.type === 3 ? bgmMe.watching_total
+                : nav.type === 4 ? (bgmMe.on_hold_total ?? 0)
+                : (bgmMe.dropped_total ?? 0);
+              return (
+                <Link key={nav.type} href={nav.href} prefetch={false}>
+                  <Card className="hover:bg-accent/30 transition-colors cursor-pointer border-border/40">
+                    <CardContent className="p-4 flex flex-col items-center gap-2 text-center">
+                      <div className={`h-10 w-10 rounded-full flex items-center justify-center ${nav.color}`}>
+                        <nav.icon className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-foreground">{nav.label}</p>
+                        <p className="text-lg font-extrabold text-foreground">{total ?? 0}</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </Link>
+              );
+            })}
+          </div>
+        </>
       )}
 
       {syncEnabled && (
-      <motion.div variants={{ hidden: {}, show: {} }}>
         <Card className="glass-card">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <BookOpen className="h-4 w-4" />
+            <CardTitle className="text-base flex items-center gap-2">
+              <RefreshCw className="h-4 w-4" />
               {t("bangumi.syncStatus")}
             </CardTitle>
-            <CardDescription>{t("bangumi.syncStatusDescription")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="rounded-lg bg-accent/50 p-3 text-center">
-                <div className="text-2xl font-bold">{status?.total_records ?? 0}</div>
-                <div className="text-xs text-muted-foreground">{t("bangumi.totalRecords")}</div>
+                <div className="text-xl font-bold">{status?.total_records ?? 0}</div>
+                <div className="text-xs text-muted-foreground">总记录</div>
               </div>
               <div className="rounded-lg bg-accent/50 p-3 text-center">
-                <div className="text-2xl font-bold text-green-500">{status?.synced_count ?? 0}</div>
-                <div className="text-xs text-muted-foreground">{t("bangumi.synced")}</div>
+                <div className="text-xl font-bold text-green-500">{status?.synced_count ?? 0}</div>
+                <div className="text-xs text-muted-foreground">已同步</div>
               </div>
               <div className="rounded-lg bg-accent/50 p-3 text-center">
-                <div className="text-2xl font-bold">{status?.sync_ready ? t("bangumi.ready") : t("bangumi.notReady")}</div>
-                <div className="text-xs text-muted-foreground">{t("bangumi.status")}</div>
+                <div className="text-xl font-bold">{status?.sync_ready ? "就绪" : "未就绪"}</div>
+                <div className="text-xs text-muted-foreground">状态</div>
               </div>
               <div className="rounded-lg bg-accent/50 p-3 text-center">
-                <div className="text-2xl font-bold">{status?.bgm_token_set ? t("bangumi.configured") : t("bangumi.notConfigured")}</div>
-                <div className="text-xs text-muted-foreground">{t("bangumi.token")}</div>
+                <div className="text-xl font-bold">{status?.bgm_token_set ? "已配置" : "未配置"}</div>
+                <div className="text-xs text-muted-foreground">Token</div>
               </div>
             </div>
             <div className="flex gap-2">
               <Button onClick={handleSync} disabled={syncing || !status?.sync_ready}>
                 {syncing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <RefreshCw className="h-4 w-4 mr-1" />}
-                {t("bangumi.startSync")}
+                开始同步
               </Button>
               {logs.length > 0 && (
                 <Button variant="outline" onClick={handleClearHistory}>
-                  <Trash2 className="h-4 w-4 mr-1" />
-                  {t("bangumi.clearHistory")}
+                  <Trash2 className="h-4 w-4 mr-1" />清除历史
                 </Button>
               )}
             </div>
           </CardContent>
         </Card>
-      </motion.div>
       )}
 
-      <motion.div variants={{ hidden: {}, show: {} }}>
-        <Card className="glass-card">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <BookOpen className="h-4 w-4" />
-              {t("bangumi.settings")}
-            </CardTitle>
-            <CardDescription>{t("settings.bangumiDescription")}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {syncEnabled && (
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <BookOpen className="h-4 w-4" />
+            {t("bangumi.settings")}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {syncEnabled && (
             <div className="flex items-center justify-between border-b border-border/40 pb-4">
               <div>
-                <Label className="text-sm font-bold">{t("settings.bangumiSync")}</Label>
-                <p className="text-xs text-muted-foreground">{t("settings.bangumiSyncDescription")}</p>
+                <Label className="text-sm font-bold">同步开关</Label>
+                <p className="text-xs text-muted-foreground">启用后自动将 Emby 播放记录同步到 Bangumi</p>
               </div>
               <Switch checked={bgmMode} onCheckedChange={setBgmMode} disabled={saving} />
             </div>
-            )}
-
-            {manageEnabled && (
+          )}
+          {manageEnabled && (
             <div className="flex items-center justify-between border-b border-border/40 pb-4">
               <div>
-                <Label className="text-sm font-bold">{t("settings.bangumiManage")}</Label>
-                <p className="text-xs text-muted-foreground">{t("settings.bangumiManageDescription")}</p>
+                <Label className="text-sm font-bold">收藏管理</Label>
+                <p className="text-xs text-muted-foreground">启用后可在面板管理 Bangumi 收藏状态</p>
               </div>
               <Switch checked={bgmManageMode} onCheckedChange={setBgmManageMode} disabled={saving} />
             </div>
-            )}
-
-            <div className="space-y-2">
-              <Label className="text-sm font-bold">{t("bangumi.accessToken")}</Label>
-              <Input
-                type="password"
-                placeholder={status?.bgm_token_set ? t("settings.bangumiTokenConfiguredPlaceholder") : t("settings.bangumiTokenPlaceholder")}
-                value={bgmToken}
-                onChange={(e) => setBgmToken(e.target.value)}
-                disabled={saving}
-              />
-              <p className="text-xs text-muted-foreground">
-                {t("bangumi.tokenHint")}{" "}
-                <a href="https://next.bgm.tv/demo/access-token" target="_blank" rel="noopener noreferrer" className="text-primary underline">
-                  https://next.bgm.tv/demo/access-token
-                </a>
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <Button onClick={handleSaveSettings} disabled={saving}>
-                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-                {t("settings.saveBangumiSettings")}
+          )}
+          <div className="space-y-2">
+            <Label className="text-sm font-bold">Access Token</Label>
+            <Input
+              type="password"
+              placeholder={status?.bgm_token_set ? "已配置（留空不修改）" : "粘贴 Bangumi Access Token"}
+              value={bgmToken}
+              onChange={(e) => setBgmToken(e.target.value)}
+              disabled={saving}
+            />
+            <p className="text-xs text-muted-foreground">
+              从 <a href="https://next.bgm.tv/demo/access-token" target="_blank" rel="noopener noreferrer" className="text-primary underline">https://next.bgm.tv/demo/access-token</a> 获取
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button onClick={handleSaveSettings} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+              保存设置
+            </Button>
+            {status?.bgm_token_set && (
+              <Button variant="outline" onClick={handleClearToken} disabled={saving}>
+                清除 Token
               </Button>
-              {status?.bgm_token_set && (
-                <Button variant="outline" onClick={handleClearToken} disabled={saving}>
-                  {t("settings.clearToken")}
-                </Button>
-              )}
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {logs.length > 0 && (
+        <Card className="glass-card">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <ListChecks className="h-4 w-4" />
+              同步历史
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2 max-h-80 overflow-y-auto">
+              {logs.map((log) => (
+                <div key={log.id} className="flex items-start gap-2 rounded-lg bg-accent/30 p-2 text-sm">
+                  {log.status === "success" ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : log.status === "failed" ? <XCircle className="h-4 w-4 text-red-500" /> : <Clock className="h-4 w-4 text-yellow-500" />}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {log.subject_name ? <span className="font-medium truncate">{log.subject_name}</span> : null}
+                      {log.episode ? <span className="text-muted-foreground">#{log.episode}</span> : null}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                      <Badge variant="outline" className="text-xs">{log.status === "success" ? "成功" : log.status === "failed" ? "失败" : "待处理"}</Badge>
+                      <span>{formatTime(log.created_at)}</span>
+                    </div>
+                    {log.message ? <p className="text-xs text-muted-foreground mt-0.5 truncate">{log.message}</p> : null}
+                  </div>
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>
-      </motion.div>
-
-      {logs.length > 0 && (
-        <motion.div variants={{ hidden: {}, show: {} }}>
-          <Card className="glass-card">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Clock className="h-4 w-4" />
-                {t("bangumi.syncHistory")}
-              </CardTitle>
-              <CardDescription>{t("bangumi.syncHistoryDescription")}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2 max-h-96 overflow-y-auto">
-                {logs.map((log) => (
-                  <div key={log.id} className="flex items-start gap-2 rounded-lg bg-accent/30 p-2 text-sm">
-                    {statusIcon(log.status)}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1 flex-wrap">
-                        {log.subject_name && (
-                          <span className="font-medium truncate">{log.subject_name}</span>
-                        )}
-                        {log.episode ? (
-                          <span className="text-muted-foreground">#{log.episode}</span>
-                        ) : null}
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-                        <Badge variant="outline" className="text-xs">
-                          {log.status === "success" ? t("bangumi.success") : log.status === "failed" ? t("bangumi.failed") : t("bangumi.pending")}
-                        </Badge>
-                        <span>{formatTime(log.created_at)}</span>
-                      </div>
-                      {log.message && (
-                        <p className="text-xs text-muted-foreground mt-0.5 truncate">{log.message}</p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
       )}
-
-      {/* Edit subject status/progress Dialog */}
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>编辑收藏状态</DialogTitle>
-            <DialogDescription>
-              更新您在 Bangumi 上的番剧观看状态及看到第几集。
-            </DialogDescription>
-          </DialogHeader>
-          {editingItem && (
-            <div className="grid gap-4 py-4">
-              <div className="flex gap-4 items-start bg-accent/20 p-3 rounded-lg border border-border/30">
-                {editingItem.subject?.images?.large || editingItem.subject?.images?.common ? (
-                  // eslint-disable-next-line @next/next/no-img-element -- Bangumi poster served locally
-                  <img
-                    src={`${API_BASE}/api/v1/bangumi/cover/${editingItem.subject_id}`}
-                    className="h-24 w-16 rounded object-cover shadow-sm border border-border/40"
-                    alt={editingItem.subject?.name_cn || editingItem.subject?.name}
-                    loading="lazy"
-                    decoding="async"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className="h-24 w-16 bg-muted flex items-center justify-center text-xs text-muted-foreground rounded">无封面</div>
-                )}
-                <div>
-                  <h4 className="text-sm font-bold text-foreground">
-                    {editingItem.subject?.name_cn || editingItem.subject?.name || "未知番剧"}
-                  </h4>
-                  <p className="text-xs text-muted-foreground">{editingItem.subject?.name}</p>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="status_type">观看状态</Label>
-                <Select
-                  value={String(editType)}
-                  onValueChange={handleEditTypeChange}
-                >
-                  <SelectTrigger id="status_type">
-                    <SelectValue placeholder="选择状态" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">想看</SelectItem>
-                    <SelectItem value="2">看过</SelectItem>
-                    <SelectItem value="3">在看</SelectItem>
-                    <SelectItem value="4">搁置</SelectItem>
-                    <SelectItem value="5">抛弃</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {editType === 3 && (
-                <div className="space-y-1.5">
-                  <Label htmlFor="status_episode">看到第几集</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="status_episode"
-                      type="number"
-                      min={0}
-                      value={editEpStatus}
-                      onChange={(e) => setEditEpStatus(parseInt(e.target.value) || 0)}
-                    />
-                    <Button
-                      variant="outline"
-                      type="button"
-                      onClick={() => setEditEpStatus((prev) => Math.max(0, prev - 1))}
-                    >
-                      -1
-                    </Button>
-                    <Button
-                      variant="outline"
-                      type="button"
-                      onClick={() => setEditEpStatus((prev) => prev + 1)}
-                    >
-                      +1
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              <div className="space-y-1.5">
-                <Label>评分</Label>
-                <RateInput value={editRate} onChange={setEditRate} />
-                <p className="text-[10px] text-muted-foreground">点击数字设置评分（0=不评分），再点击取消评分</p>
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={handleSaveProgress} disabled={updating}>
-              {updating && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
-              保存
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
     </motion.div>
   );
 }

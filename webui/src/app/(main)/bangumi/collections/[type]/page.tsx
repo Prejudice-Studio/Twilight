@@ -212,6 +212,14 @@ export default function BangumiCollectionPage() {
     return list;
   }, [items, sortBy, tagFilter]);
 
+  const allTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    items.forEach((item) => {
+      subjectTags(item).forEach((tag: string) => tagSet.add(tag));
+    });
+    return Array.from(tagSet).sort();
+  }, [items]);
+
   const offset = (page - 1) * pageSize;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -365,6 +373,21 @@ export default function BangumiCollectionPage() {
           </div>
         </div>
       </div>
+
+      {allTags.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {allTags.map((tag) => (
+            <Badge
+              key={tag}
+              variant={tagFilter.toLowerCase() === tag.toLowerCase() ? "default" : "outline"}
+              className="text-[10px] cursor-pointer hover:opacity-80 transition-opacity"
+              onClick={() => setTagFilter(tagFilter.toLowerCase() === tag.toLowerCase() ? "" : tag)}
+            >
+              {tag}
+            </Badge>
+          ))}
+        </div>
+      )}
 
       {error ? (
         <Alert variant="destructive">

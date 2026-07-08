@@ -294,6 +294,8 @@ func (a *App) handleBangumiMe(w http.ResponseWriter, r *http.Request, _ Params) 
 	watching, watchingTotal, watchingCached, watchingUpdated, _ := a.bangumiCollectionsCached(ctx, u, username, 3, 8, 0, false)
 	wishlist, wishlistTotal, wishlistCached, wishlistUpdated, _ := a.bangumiCollectionsCached(ctx, u, username, 1, 8, 0, false)
 	collected, collectedTotal, collectedCached, collectedUpdated, _ := a.bangumiCollectionsCached(ctx, u, username, 2, 8, 0, false)
+	onHold, onHoldTotal, _, _, _ := a.bangumiCollectionsCached(ctx, u, username, 4, 8, 0, false)
+	dropped, droppedTotal, _, _, _ := a.bangumiCollectionsCached(ctx, u, username, 5, 8, 0, false)
 
 	ok(w, "OK", map[string]any{
 		"bgm_token_set":   true,
@@ -305,6 +307,10 @@ func (a *App) handleBangumiMe(w http.ResponseWriter, r *http.Request, _ Params) 
 		"wishlist_total":  wishlistTotal,
 		"collected":       collected,
 		"collected_total": collectedTotal,
+		"on_hold":         onHold,
+		"on_hold_total":   onHoldTotal,
+		"dropped":         dropped,
+		"dropped_total":   droppedTotal,
 		"cache": map[string]any{
 			"watching_cached":   watchingCached,
 			"wishlist_cached":   wishlistCached,
