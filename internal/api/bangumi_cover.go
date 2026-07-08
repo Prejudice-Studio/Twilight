@@ -87,7 +87,7 @@ func (a *App) bangumiCoverFallbackURL(subjectID string) string {
 	if images == nil {
 		return ""
 	}
-	return firstNonEmpty(asString(images["large"]), asString(images["common"]), asString(images["medium"]))
+	return firstNonEmpty(asString(images["common"]), asString(images["large"]), asString(images["medium"]))
 }
 
 func (a *App) downloadBangumiCover(subjectID int64, imageURL string) {
@@ -168,7 +168,7 @@ func (a *App) downloadBangumiCoversForEntries(entries []map[string]any) {
 		if images == nil {
 			continue
 		}
-		imageURL := firstNonEmpty(asString(images["large"]), asString(images["common"]), asString(images["medium"]))
+		imageURL := firstNonEmpty(asString(images["common"]), asString(images["large"]), asString(images["medium"]))
 		if !isSafeBangumiImageURL(imageURL) {
 			continue
 		}
