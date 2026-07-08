@@ -423,7 +423,7 @@ func (a *App) handleUpdateBangumiCollection(w http.ResponseWriter, r *http.Reque
 		failWithCode(w, http.StatusBadGateway, ErrInternal, "更新 Bangumi 收藏失败: "+err.Error())
 		return
 	}
-	if collectType == 2 && !hasEpStatus {
+	if collectType == 2 {
 		fullEpStatus, err := a.bangumiSubjectMainEpisodeCount(ctx, subjectID, u.BGMToken)
 		if err != nil {
 			failWithCode(w, http.StatusBadGateway, ErrInternal, "读取 Bangumi 总集数失败: "+err.Error())
@@ -477,6 +477,7 @@ func (a *App) bangumiCollectionsCached(ctx context.Context, u store.User, userna
 			UpdatedAt: now,
 			ExpiresAt: now + bangumiCollectionCacheTTLSeconds,
 		})
+		a.downloadBangumiCoversForEntries(entries)
 	}
 	return entries, total, false, 0, nil
 }
@@ -535,6 +536,7 @@ func (a *App) refreshBangumiCollectionCacheForUser(ctx context.Context, u store.
 		}); err != nil {
 			return refreshed, totalEntries, err
 		}
+		a.downloadBangumiCoversForEntries(entries)
 		refreshed++
 		totalEntries += len(entries)
 	}

@@ -118,8 +118,7 @@ export default function BangumiPage() {
   const handleEditTypeChange = (val: string) => {
     const t = Number(val);
     setEditType(t);
-    // 非在看/看过状态下清除 ep_status，避免 Bangumi API 拒绝不一致请求
-    if (t !== 2 && t !== 3) {
+    if (t !== 3) {
       setEditEpStatus(0);
     }
   };
@@ -129,7 +128,7 @@ export default function BangumiPage() {
     setUpdating(true);
     try {
       const payload: { type: number; ep_status?: number; rate: number } = { type: editType, rate: editRate };
-      if (editType === 2 || editType === 3) {
+      if (editType === 3) {
         payload.ep_status = editEpStatus;
       }
       const res = await api.updateBangumiCollection(editingItem.subject_id, payload);
@@ -392,11 +391,12 @@ export default function BangumiPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {bgmMe.watching.map((item: any) => {
                       const name = item.subject?.name_cn || item.subject?.name || "未知番剧";
-                      const poster = item.subject?.images?.medium || item.subject?.images?.common || item.subject?.images?.small;
+                      const poster = `/api/v1/bangumi/cover/${item.subject_id}`;
+                      const hasCover = item.subject?.images?.large || item.subject?.images?.common || item.subject?.images?.medium;
                       return (
                         <div key={item.subject_id} className="flex gap-3 bg-accent/20 border border-border/20 rounded-lg p-3 hover:bg-accent/30 transition shadow-sm">
-                          {poster ? (
-                            // eslint-disable-next-line @next/next/no-img-element -- User-provided poster URLs
+                          {hasCover ? (
+                            // eslint-disable-next-line @next/next/no-img-element -- Bangumi poster served locally
                             <img src={poster} className="h-28 w-20 rounded-md object-cover flex-shrink-0 shadow-sm border border-border/40" alt={name} loading="lazy" referrerPolicy="no-referrer" />
                           ) : (
                             <div className="h-28 w-20 rounded-md bg-muted flex items-center justify-center text-[10px] text-muted-foreground flex-shrink-0 border border-border/40">无封面</div>
@@ -453,11 +453,12 @@ export default function BangumiPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {bgmMe.collected.map((item: any) => {
                       const name = item.subject?.name_cn || item.subject?.name || "看过动画";
-                      const poster = item.subject?.images?.medium || item.subject?.images?.common || item.subject?.images?.small;
+                      const poster = `/api/v1/bangumi/cover/${item.subject_id}`;
+                      const hasCover = item.subject?.images?.large || item.subject?.images?.common || item.subject?.images?.medium;
                       return (
                         <div key={item.subject_id} className="flex gap-3 bg-accent/20 border border-border/20 rounded-lg p-3 hover:bg-accent/30 transition shadow-sm">
-                          {poster ? (
-                            // eslint-disable-next-line @next/next/no-img-element -- User-provided poster URLs
+                          {hasCover ? (
+                            // eslint-disable-next-line @next/next/no-img-element -- Bangumi poster served locally
                             <img src={poster} className="h-28 w-20 rounded-md object-cover flex-shrink-0 shadow-sm border border-border/40" alt={name} loading="lazy" referrerPolicy="no-referrer" />
                           ) : (
                             <div className="h-28 w-20 rounded-md bg-muted flex items-center justify-center text-[10px] text-muted-foreground flex-shrink-0 border border-border/40">无封面</div>
@@ -512,11 +513,12 @@ export default function BangumiPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {bgmMe.wishlist.map((item: any) => {
                       const name = item.subject?.name_cn || item.subject?.name || "想看动画";
-                      const poster = item.subject?.images?.medium || item.subject?.images?.common || item.subject?.images?.small;
+                      const poster = `/api/v1/bangumi/cover/${item.subject_id}`;
+                      const hasCover = item.subject?.images?.large || item.subject?.images?.common || item.subject?.images?.medium;
                       return (
                         <div key={item.subject_id} className="flex gap-3 bg-accent/20 border border-border/20 rounded-lg p-3 hover:bg-accent/30 transition shadow-sm">
-                          {poster ? (
-                            // eslint-disable-next-line @next/next/no-img-element -- User-provided poster URLs
+                          {hasCover ? (
+                            // eslint-disable-next-line @next/next/no-img-element -- Bangumi poster served locally
                             <img src={poster} className="h-28 w-20 rounded-md object-cover flex-shrink-0 shadow-sm border border-border/40" alt={name} loading="lazy" referrerPolicy="no-referrer" />
                           ) : (
                             <div className="h-28 w-20 rounded-md bg-muted flex items-center justify-center text-[10px] text-muted-foreground flex-shrink-0 border border-border/40">无封面</div>
@@ -720,10 +722,10 @@ export default function BangumiPage() {
           {editingItem && (
             <div className="grid gap-4 py-4">
               <div className="flex gap-4 items-start bg-accent/20 p-3 rounded-lg border border-border/30">
-                {editingItem.subject?.images?.medium || editingItem.subject?.images?.common ? (
-                  // eslint-disable-next-line @next/next/no-img-element -- User-provided Bangumi poster URLs
+                {editingItem.subject?.images?.large || editingItem.subject?.images?.common ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- Bangumi poster served locally
                   <img
-                    src={editingItem.subject?.images?.medium || editingItem.subject?.images?.common}
+                    src={`/api/v1/bangumi/cover/${editingItem.subject_id}`}
                     className="h-24 w-16 rounded object-cover shadow-sm border border-border/40"
                     alt={editingItem.subject?.name_cn || editingItem.subject?.name}
                     loading="lazy"

@@ -4613,6 +4613,13 @@ func (s *Store) BangumiCollectionCache(uid int64, collectType int) (BangumiColle
 	return hydrateBangumiCollectionCacheEntry(entry, s.state.BangumiSubjectCache), true
 }
 
+func (s *Store) RawBangumiSubjectCache(subjectID int64) (BangumiSubjectCacheEntry, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	entry, ok := s.state.BangumiSubjectCache[bangumiSubjectCacheKey(subjectID)]
+	return entry, ok
+}
+
 func (s *Store) UpsertBangumiCollectionCache(entry BangumiCollectionCacheEntry) error {
 	if entry.UID <= 0 || entry.Type <= 0 {
 		return fmt.Errorf("invalid bangumi collection cache key")

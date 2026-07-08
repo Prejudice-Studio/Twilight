@@ -32,7 +32,11 @@ function itemTitle(item: any) {
 }
 
 function posterUrl(item: any) {
-  return item?.subject?.images?.large || item?.subject?.images?.medium || item?.subject?.images?.common || item?.subject?.images?.small;
+  return `/api/v1/bangumi/cover/${item.subject_id}`;
+}
+
+function hasPoster(item: any) {
+  return Boolean(item?.subject?.images?.large || item?.subject?.images?.medium || item?.subject?.images?.common || item?.subject?.images?.small);
 }
 
 function subjectTags(item: any) {
@@ -123,7 +127,6 @@ export default function BangumiCollectionPage() {
     try {
       const payload: { type: number; ep_status?: number; rate: number } = { type: editType, rate: editRate };
       if (editType === 3) payload.ep_status = editEpStatus;
-      if (editType === 2 && editEpStatus > 0) payload.ep_status = editEpStatus;
       const res = await api.updateBangumiCollection(String(editingItem.subject_id), payload);
       if (res.success) {
         toast({ title: "已更新收藏状态" });
@@ -195,8 +198,8 @@ export default function BangumiCollectionPage() {
             return (
               <Card key={item.subject_id} className="overflow-hidden">
                 <CardContent className="grid h-full grid-cols-[96px_1fr] gap-4 p-4">
-                  {posterUrl(item) ? (
-                    // eslint-disable-next-line @next/next/no-img-element -- Bangumi poster URL
+                  {hasPoster(item) ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- Bangumi poster served locally
                     <img src={posterUrl(item)} alt={itemTitle(item)} className="h-36 w-24 rounded-md object-cover shadow-sm" loading="lazy" referrerPolicy="no-referrer" />
                   ) : (
                     <div className="flex h-36 w-24 items-center justify-center rounded-md bg-muted text-xs text-muted-foreground">无封面</div>

@@ -68,6 +68,7 @@ func (a *App) registerRoutes() {
 	a.add(http.MethodPost, "/api/v1/bangumi/sync/trigger", AuthUser, a.handleBangumiSyncTrigger)
 	a.add(http.MethodGet, "/api/v1/bangumi/sync/history", AuthUser, a.handleBangumiSyncHistory)
 	a.add(http.MethodDelete, "/api/v1/bangumi/sync/history", AuthUser, a.handleBangumiClearHistory)
+	a.add(http.MethodGet, "/api/v1/bangumi/cover/:subject_id", AuthPublic, a.handleBangumiCover)
 	a.add(http.MethodGet, "/api/v1/users/:uid/background", AuthUser, a.handleGetBackground)
 	a.add(http.MethodPut, "/api/v1/users/me/background", AuthUser, a.handleUpdateBackground)
 	a.add(http.MethodDelete, "/api/v1/users/me/background", AuthUser, a.handleDeleteBackground)
