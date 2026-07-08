@@ -2274,113 +2274,62 @@ export default function AdminUsersPage() {
 
       {/* Users Table */}
       {users.length > 0 && (
-        <Card className="border-primary/30">
-          <CardContent className="flex flex-col gap-4 p-4 xl:flex-row xl:items-center xl:justify-between">
-            <div className="space-y-1">
-              <p className="font-medium">
-                {selectionScope === "all"
-                  ? excludedUserIds.size > 0
-                    ? `已选择全部匹配用户中的 ${selectedCount} 个（排除 ${excludedUserIds.size} 个）`
-                    : `已选择全部 ${total} 个匹配用户`
-                  : selectionScope === "emby"
-                    ? excludedUserIds.size > 0
-                      ? `已选择拥有 Emby 的 ${selectedCount} 个（排除 ${excludedUserIds.size} 个）`
-                      : `已选择 ${selectionScopeCount} 个拥有 Emby 的匹配用户`
-                    : selectedCount > 0
-                      ? `已选择 ${selectedCount} 个用户`
-                      : "批量选择"}
+        <Card>
+          <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:flex-wrap">
+            <div className="flex items-center gap-2 min-w-0">
+              <p className="text-sm font-medium whitespace-nowrap">
+                {selectedCount > 0 ? `已选 ${selectedCount} 个` : "批量选择"}
               </p>
-              {selectedCount > 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  {selectionScope === "all"
-                    ? `将按当前筛选条件作用于全部匹配用户${excludedUserIds.size > 0 ? `（已排除 ${excludedUserIds.size} 个）` : ""}；管理员账号会被后端自动跳过。`
-                    : selectionScope === "emby"
-                      ? `将按当前筛选条件中已绑定 Emby 的用户执行${excludedUserIds.size > 0 ? `（已排除 ${excludedUserIds.size} 个）` : ""}；未绑定 Emby 的用户不会进入本次选择。`
-                      : `当前页可见已选用户中 ${selectedEmbyCount} 个已绑定 Emby${selectedAdminCount > 0 ? `，${selectedAdminCount} 个管理员会被后端自动跳过` : "；管理员账号会被后端自动跳过"}。`}
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">可选择当前页、当前筛选下拥有 Emby 的用户，或当前筛选下全部用户。</p>
+              {selectedCount > 0 && selectionScope !== "manual" && (
+                <Badge variant="outline" className="text-[10px]">{selectionScope === "all" ? "全筛选" : "Emby"}</Badge>
               )}
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/20 p-1">
-                <span className="px-2 text-xs text-muted-foreground">选择范围</span>
-                <Button variant={selectionScope === "manual" && selectedCount > 0 && allPageSelected ? "default" : "outline"} size="sm" onClick={selectCurrentPageUsers} disabled={batchUserLoading || users.length === 0}>
-                  选中当前页
-                </Button>
-                <Button variant={selectionScope === "emby" ? "default" : "outline"} size="sm" onClick={() => void selectEmbyMatchingUsers()} disabled={batchUserLoading || selectEmbyLoading || total === 0}>
-                  {selectEmbyLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Link2 className="mr-2 h-4 w-4" />}
-                  选中拥有 Emby 的
-                </Button>
-                <Button variant={selectionScope === "all" ? "default" : "outline"} size="sm" onClick={selectAllMatchingUsers} disabled={batchUserLoading || total === 0}>
-                  选中全部
-                </Button>
-                <Button variant="outline" size="sm" onClick={invertPageSelection} disabled={batchUserLoading || users.length === 0}>
-                  <FlipHorizontal2 className="mr-2 h-4 w-4" />
-                  反选本页
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={invertAllSelection}
-                  disabled={batchUserLoading || total === 0 || selectionScope === "emby"}
-                  title={selectionScope === "emby" ? "请先切换到「选中全部」或手动选择，再反选全部" : "对当前筛选下的全部用户取反选（跨页）"}
-                >
-                  <FlipHorizontal2 className="mr-2 h-4 w-4" />
-                  反选全部
-                </Button>
-              </div>
-              <Button variant="outline" size="sm" onClick={clearUserSelection} disabled={batchUserLoading || selectedCount === 0}>
-                清空选择
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Button variant="ghost" size="sm" onClick={selectCurrentPageUsers} disabled={users.length === 0}>本页</Button>
+              <Button variant="ghost" size="sm" onClick={() => void selectEmbyMatchingUsers()} disabled={selectEmbyLoading || total === 0}>
+                {selectEmbyLoading ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Link2 className="mr-1 h-3.5 w-3.5" />}Emby
               </Button>
-              <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/20 p-1">
-                <span className="px-2 text-xs text-muted-foreground">账号状态</span>
-                <Button variant="outline" size="sm" onClick={() => void handleSelectedToggleActive(true)} disabled={batchUserLoading || selectedCount === 0}>
-                  <UserCheck className="mr-2 h-4 w-4" />
-                  启用
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => void handleSelectedToggleActive(false)} disabled={batchUserLoading || selectedCount === 0}>
-                  <Ban className="mr-2 h-4 w-4" />
-                  禁用
-                </Button>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/20 p-1">
-                <span className="px-2 text-xs text-muted-foreground">Emby 账号</span>
-                <Button variant="outline" size="sm" onClick={() => void handleSelectedEmbyToggle(true)} disabled={batchUserLoading || selectedCount === 0}>
-                  <MonitorCheck className="mr-2 h-4 w-4" />
-                  启用
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => void handleSelectedEmbyToggle(false)} disabled={batchUserLoading || selectedCount === 0}>
-                  <MonitorX className="mr-2 h-4 w-4" />
-                  禁用
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => void handleSelectedGrantAllLibraries()} disabled={batchUserLoading || selectedCount === 0}>
-                  <BookOpen className="mr-2 h-4 w-4" />
-                  {t("adminUsers.grantAllLibraries")}
-                </Button>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/20 p-1">
-                <span className="px-2 text-xs text-muted-foreground">刷新</span>
-                <Button variant="outline" size="sm" onClick={() => void handleSelectedRefreshStatus("telegram")} disabled={batchUserLoading || selectedCount === 0}>
-                  <RefreshCcw className="mr-2 h-4 w-4" />
-                  TG 用户名
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => void handleSelectedRefreshStatus("emby")} disabled={batchUserLoading || selectedCount === 0}>
-                  <RefreshCcw className="mr-2 h-4 w-4" />
-                  Emby 状态
-                </Button>
-              </div>
-              <Button variant="outline" size="sm" onClick={() => void handleSelectedLockEmbyUnbind()} disabled={batchUserLoading || selectedCount === 0}>
-                <LockKeyhole className="mr-2 h-4 w-4" />
-                禁止解绑 Emby
+              <Button variant="ghost" size="sm" onClick={selectAllMatchingUsers} disabled={total === 0}>全选({total})</Button>
+              <Button variant="ghost" size="sm" onClick={invertPageSelection} disabled={users.length === 0}>
+                <FlipHorizontal2 className="mr-1 h-3.5 w-3.5" />反选
               </Button>
-              <Button variant="outline" size="sm" onClick={() => void handleSelectedClearEmbyGrant()} disabled={batchUserLoading || selectedCount === 0}>
-                <Eraser className="mr-2 h-4 w-4" />
-                清理注册资格记录
+              <Button variant="ghost" size="sm" onClick={invertAllSelection} disabled={total === 0 || selectionScope === "emby"}>反选全部</Button>
+              <Button variant="ghost" size="sm" onClick={clearUserSelection} disabled={selectedCount === 0} className="text-muted-foreground">清除</Button>
+            </div>
+
+            <div className="flex-1 hidden sm:block" />
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">操作:</span>
+              <Button variant="outline" size="sm" onClick={() => void handleSelectedToggleActive(true)} disabled={selectedCount === 0}>
+                <UserCheck className="mr-1 h-3.5 w-3.5" />启用
               </Button>
-              <Button variant="destructive" size="sm" onClick={() => void handleSelectedDelete()} disabled={batchUserLoading || selectedCount === 0}>
-                {batchUserLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-                删除所选
+              <Button variant="outline" size="sm" onClick={() => void handleSelectedToggleActive(false)} disabled={selectedCount === 0}>
+                <Ban className="mr-1 h-3.5 w-3.5" />禁用
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => void handleSelectedEmbyToggle(true)} disabled={selectedCount === 0}>
+                <MonitorCheck className="mr-1 h-3.5 w-3.5" />Emby启
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => void handleSelectedEmbyToggle(false)} disabled={selectedCount === 0}>
+                <MonitorX className="mr-1 h-3.5 w-3.5" />Emby停
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => void handleSelectedGrantAllLibraries()} disabled={selectedCount === 0}>
+                <BookOpen className="mr-1 h-3.5 w-3.5" />媒体库
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => void handleSelectedRefreshStatus("telegram")} disabled={selectedCount === 0}>
+                <RefreshCcw className="mr-1 h-3.5 w-3.5" />TG
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => void handleSelectedRefreshStatus("emby")} disabled={selectedCount === 0}>
+                <RefreshCcw className="mr-1 h-3.5 w-3.5" />Emby
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => void handleSelectedLockEmbyUnbind()} disabled={selectedCount === 0}>
+                <LockKeyhole className="mr-1 h-3.5 w-3.5" />锁解绑
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => void handleSelectedClearEmbyGrant()} disabled={selectedCount === 0}>
+                <Eraser className="mr-1 h-3.5 w-3.5" />清授权
+              </Button>
+              <Button variant="destructive" size="sm" onClick={() => void handleSelectedDelete()} disabled={selectedCount === 0}>
+                <Trash2 className="mr-1 h-3.5 w-3.5" />删除({selectedCount})
               </Button>
             </div>
           </CardContent>
