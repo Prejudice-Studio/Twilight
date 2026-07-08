@@ -209,8 +209,9 @@ export default function WikiPage() {
           </div>
           <div className="border rounded p-3 text-xs space-y-1 border-amber-500/30 bg-amber-500/5">
             <p className="font-bold text-foreground inline-flex items-center gap-1"><Eraser className="h-3.5 w-3.5 text-amber-500" /> 清理注册资格记录 (清授权)</p>
-            <p>仅清理已绑定 Emby 用户的「注册码/邀请码使用记录」，使该用户可再次使用注册码。不影响其已有 Emby 账号或其他数据。</p>
-            <p className="text-amber-600 dark:text-amber-400">注意：已绑定 Emby 的用户（emby_id 非空）会被自动跳过，不会被清理。此操作目标是有资格但尚未注册 Emby 的用户。</p>
+            <p>清理对象：<strong>使用了注册码/邀请码但没有正常注册 Emby 账号</strong>的用户的码使用记录。</p>
+            <p className="text-amber-600 dark:text-amber-400">这些用户占用了码的使用次数配额但没有完成 Emby 注册，清理后他们可以再次使用注册码。已通过该码正常注册 Emby 的用户不受影响，他们不能再使用注册码（防止重复使用）。</p>
+            <p>简单说：清授权 = 释放被 &ldquo;消耗了码但未注册 Emby&rdquo; 占用的资格，让码可以真正被需要的人使用。</p>
           </div>
           <div className="border rounded p-3 text-xs space-y-1">
             <p className="font-bold text-foreground inline-flex items-center gap-1"><Trash2 className="h-3.5 w-3.5 text-destructive" /> 删除用户</p>
