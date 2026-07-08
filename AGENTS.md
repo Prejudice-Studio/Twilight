@@ -572,3 +572,19 @@ pnpm build
 - 不满足时回退 `RebindingInProgress=true` 并返回 `ErrTGBindGroupCheckFailed`
 - 满足时清除 `RebindingInProgress`，调用 `embyApplyEnabledState` 按用户状态恢复 Emby 账号
 - 响应使用 `UpdateUser` 返回的新鲜用户数据而非 `current(r)` 的旧数据
+
+### 管理员用户管理页面约定
+
+`webui/src/app/(main)/admin/users/page.tsx` 是管理员用户管理主页面，依赖以下组件：
+
+- `admin-users-cells.tsx`：表格单元格渲染器（`renderRoleBadge`、`renderWebStatusBadge`、`renderEmbyStatusCell`、`renderExpireCell`）和 `UserActionsMenu` 用户操作下拉菜单。
+- `admin-users-dialogs.tsx`：各类对话框组件（编辑、续期、删除、启停、重置密码、Emby 绑定等）。
+- `admin-users-helpers.ts`：批量操作确认配置、筛选参数构建等辅助函数。
+
+**`UserActionsMenu` 设计要求：**
+- 采用**扁平分组**结构（`DropdownMenuSeparator`），避免 `DropdownMenuSub` 深层嵌套子菜单。
+- 操作按功能域分组：编辑信息 → 时间与密码 → Emby 绑定 → 邮箱/TG → 同步刷新 → 注册资格 → 启停/删除。
+- 高危操作（禁用、删除）放在末尾并用颜色区分，管理员账号隐藏删除入口（last-admin 保护）。
+- 每个菜单项必须包含 `MenuTitle`（标题 + 描述）以明确告知操作含义。
+- 条件渲染项（取消永久、Emby 操作、注册资格）仅在相关时显示，减少视觉噪音。
+
