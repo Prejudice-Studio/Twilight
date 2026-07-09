@@ -219,14 +219,26 @@ func (a *App) handleToggleTicketNotify(w http.ResponseWriter, r *http.Request, p
 // ---- 管理员工单接口 ----
 
 // handleAdminTickets 管理员查看所有工单（支持筛选）。管理端接口不受 TicketSystemEnabled 开关限制。
+// 默认仅显示未解决的工单（open / in_progress），传 ?all=1 可查看全部包括已解决/已关闭。
 func (a *App) handleAdminTickets(w http.ResponseWriter, r *http.Request, _ Params) {
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	showAll := r.URL.Query().Get("all") == "1"
 	filter := store.TicketFilter{
 		UID:      int64(queryInt(r, "uid", 0)),
-		Status:   strings.TrimSpace(r.URL.Query().Get("status")),
+		Status:   status,
 		Type:     strings.TrimSpace(r.URL.Query().Get("type")),
 		Priority: strings.TrimSpace(r.URL.Query().Get("priority")),
 	}
 	tickets := a.store().ListTickets(filter)
+	if status == "" && !showAll {
+		filtered := make([]store.Ticket, 0, len(tickets))
+		for _, t := range tickets {
+			if t.Status != "resolved" && t.Status != "closed" {
+				filtered = append(filtered, t)
+			}
+		}
+		tickets = filtered
+	}
 	ok(w, "OK", map[string]any{"tickets": ticketDTOs(tickets), "total": len(tickets), "ticket_types": a.store().TicketTypes()})
 }
 
@@ -537,6 +549,56 @@ func (a *App) handleDeleteTicketImage(w http.ResponseWriter, r *http.Request, pa
 	ok(w, "图片已删除", map[string]any{
 		"ticket_id":   id,
 		"attachments": ticketAttachmentDTOs(id, updated.Attachments),
+	})
+}
+
+// handleReplyToTicket 用户或管理员向工单追加文字回复。每次回复独立追加到 Replies 数组中。
+func (a *App) handleReplyToTicket(w http.ResponseWriter, r *http.Request, params Params) {
+	if !a.cfg().TicketSystemEnabled {
+		failWithCode(w, http.StatusServiceUnavailable, ErrTicketDisabled, "工单系统未启用")
+		return
+	}
+	p := current(r)
+	id, _ := int64Param(params, "ticket_id")
+	ticket, okTicket := a.store().Ticket(id)
+	if !okTicket {
+		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
+		return
+	}
+	if ticket.UID != p.User.UID && p.User.Role != store.RoleAdmin {
+		failWithCode(w, http.StatusForbidden, ErrForbidden, "无权回复此工单")
+		return
+	}
+	if ticket.Status == "closed" {
+		failWithCode(w, http.StatusBadRequest, ErrTicketAlreadyClosed, "工单已关闭，无法回复")
+		return
+	}
+	payload := decodeMap(r)
+	content := strings.TrimSpace(stringValue(payload, "content"))
+	if content == "" {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "回复内容不能为空")
+		return
+	}
+	if len(content) > 5000 {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "回复内容过长（上限 5000 字符）")
+		return
+	}
+	reply := store.TicketReply{
+		UID:      p.User.UID,
+		Username: p.User.Username,
+		Role:     p.User.Role,
+		Content:  content,
+	}
+	updated, err := a.store().AddTicketReply(id, reply)
+	if statusFromError(w, err) {
+		return
+	}
+	category := auditCategoryForRole(p.User.Role)
+	a.audit(r, "reply_ticket", category, ticket.UID, map[string]any{"ticket_id": id, "reply_len": len(content)})
+	a.notifyTicketOwner(r.Context(), updated, ticket)
+	ok(w, "回复成功", map[string]any{
+		"ticket_id": id,
+		"replies":   updated.Replies,
 	})
 }
 

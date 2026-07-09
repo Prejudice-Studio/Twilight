@@ -453,12 +453,21 @@ type Ticket struct {
 	Status         string             `json:"status"`
 	Priority       string             `json:"priority"`
 	AdminNote      string             `json:"admin_note,omitempty"`
+	Replies        []TicketReply      `json:"replies,omitempty"`
 	Attachments    []TicketAttachment `json:"attachments,omitempty"`
 	NotifyTelegram *bool              `json:"notify_telegram,omitempty"`
 	CreatedAt      int64              `json:"created_at"`
 	UpdatedAt      int64              `json:"updated_at"`
 	ResolvedAt     int64              `json:"resolved_at,omitempty"`
 	ClosedAt       int64              `json:"closed_at,omitempty"`
+}
+
+type TicketReply struct {
+	UID       int64  `json:"uid"`
+	Username  string `json:"username"`
+	Role      int    `json:"role"`
+	Content   string `json:"content"`
+	CreatedAt int64  `json:"created_at"`
 }
 
 // TicketAttachment 描述挂在工单上的一张交流图片。文件按工单 ID 存放在
@@ -2414,7 +2423,7 @@ func (s *Store) DeleteUser(uid int64) error {
 			}
 		}
 
-		// RegCode：保留 regcode 本身（管理员资产），仅抹掉对该用户的 UID 引用。
+		// RegCode：删除用户时清理所有引用并回退 UseCount，释放被占用的码额度。
 		for code, rc := range s.state.RegCodes {
 			dirty := false
 			if rc.UsedBy == uid {
@@ -2424,16 +2433,27 @@ func (s *Store) DeleteUser(uid int64) error {
 			if len(rc.UsedByUIDs) > 0 {
 				pruned := rc.UsedByUIDs[:0]
 				for _, u := range rc.UsedByUIDs {
-					if u != uid {
-						pruned = append(pruned, u)
+					if u == uid {
+						if rc.UseCount > 0 {
+							rc.UseCount--
+						}
+						continue
 					}
+					pruned = append(pruned, u)
 				}
 				if len(pruned) != len(rc.UsedByUIDs) {
-					rc.UsedByUIDs = pruned
+					if len(pruned) == 0 {
+						rc.UsedByUIDs = nil
+					} else {
+						rc.UsedByUIDs = pruned
+					}
 					dirty = true
 				}
 			}
 			if dirty {
+				if !rc.Active && rc.UseCountLimit != -1 && rc.UseCount < rc.UseCountLimit {
+					rc.Active = true
+				}
 				s.state.RegCodes[code] = rc
 			}
 		}
@@ -3177,6 +3197,32 @@ func (s *Store) AddTicketAttachment(ticketID int64, att TicketAttachment) (Ticke
 		}
 		t.Attachments = append(t.Attachments, att)
 		t.UpdatedAt = time.Now().Unix()
+		s.state.Tickets[ticketID] = t
+		out = t
+		return nil
+	})
+	if err != nil {
+		return Ticket{}, err
+	}
+	return out, nil
+}
+
+// AddTicketReply 向工单追加一条回复。
+func (s *Store) AddTicketReply(ticketID int64, reply TicketReply) (Ticket, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out Ticket
+	err := s.mutateAndSaveLocked(func() error {
+		t, ok := s.state.Tickets[ticketID]
+		if !ok {
+			return ErrNotFound
+		}
+		now := time.Now().Unix()
+		if reply.CreatedAt == 0 {
+			reply.CreatedAt = now
+		}
+		t.Replies = append(t.Replies, reply)
+		t.UpdatedAt = now
 		s.state.Tickets[ticketID] = t
 		out = t
 		return nil

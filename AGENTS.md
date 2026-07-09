@@ -616,3 +616,11 @@ pnpm build
 - **已绑定 Emby 的用户（emby_id 非空）会被自动跳过**——他们的码使用记录保持不变，不能再次使用注册码
 - 目的：释放被无效使用者占用的码额度，让码能真正被需要的人消耗
 
+### 工单关闭状态保护
+
+当工单状态处于 `closed`（已关闭）时：
+
+- 服务端在上传/删除图片 handler (`handleUploadTicketImage` / `handleDeleteTicketImage`) 通过安全拦截检测：如果是普通用户所属的关闭工单，则强制拒绝并返回 `ErrTicketClosed` (HTTP 403 Forbidden)，阻止其修改、剔除或销毁证据性历史图片。
+- 系统管理员 (`AuthAdmin`) 拥有不受限的调试特权，允许继续添加、编辑或剔除该特定关闭工单的内容。
+- 前端对应地将 `canDelete` 控制属性注入并下发给 [webui/src/components/ticket-images.tsx](webui/src/components/ticket-images.tsx)，联动工单主控，普通用户不可交互已结单图片。
+

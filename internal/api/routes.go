@@ -356,4 +356,5 @@ func (a *App) registerStatsInviteSigninAnnouncementRoutes() {
 	a.add(http.MethodPost, "/api/v1/tickets/:ticket_id/images", AuthUser, a.handleUploadTicketImage)
 	a.add(http.MethodGet, "/api/v1/tickets/:ticket_id/images/:filename", AuthUser, a.handleGetTicketImage)
 	a.add(http.MethodDelete, "/api/v1/tickets/:ticket_id/images/:filename", AuthUser, a.handleDeleteTicketImage)
+	a.add(http.MethodPost, "/api/v1/tickets/:ticket_id/reply", AuthUser, a.handleReplyToTicket)
 }

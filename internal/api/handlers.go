@@ -2065,6 +2065,7 @@ func (a *App) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request, para
 			if err != nil {
 				failed = append(failed, map[string]any{"uid": targetUID, "reason": err.Error()})
 			} else {
+				a.store().ClearEmbyGrantForUnboundUsers([]int64{targetUID})
 				deleted = append(deleted, targetUID)
 			}
 			continue
