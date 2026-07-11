@@ -105,6 +105,7 @@ export default function DashboardPage() {
   const [telegramStatus, setTelegramStatus] = useState<TelegramStatus | null>(null);
   const [embyInfo, setEmbyInfo] = useState<EmbyInfo | null>(null);
   const [embyStats, setEmbyStats] = useState<any>(null);
+  const [embyViewers, setEmbyViewers] = useState(0);
   const [myRequests, setMyRequests] = useState<MediaRequest[]>([]);
   const [lineSlots, setLineSlots] = useState<LineSlot[]>([]);
   const [linesRequireEmby, setLinesRequireEmby] = useState(false);
@@ -303,9 +304,13 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!systemInfo?.features?.emby_stats) return;
     const ctrl = new AbortController();
-    fetch(`/api/v1/system/emby-stats`, { signal: ctrl.signal })
+    fetch(`/api/v1/system/emby-stats`, { signal: ctrl.signal, credentials: "include" })
       .then((r) => r.json())
       .then((data) => { if (data?.success && data?.data) setEmbyStats(data.data); })
+      .catch(() => {});
+    fetch(`/api/v1/system/emby-viewers`, { signal: ctrl.signal, credentials: "include" })
+      .then((r) => r.json())
+      .then((data) => { if (data?.success) setEmbyViewers(data.data?.viewers ?? 0); })
       .catch(() => {});
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps

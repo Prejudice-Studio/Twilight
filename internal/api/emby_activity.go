@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -12,10 +13,6 @@ import (
 )
 
 func (a *App) handleEmbyActivityLogs(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.cfg().EmbyPlaybackStatsEnabled {
-		failWithCode(w, http.StatusForbidden, ErrForbidden, "播放统计功能未启用")
-		return
-	}
 	if !a.embyConfigured() {
 		failWithCode(w, http.StatusBadGateway, ErrEmbyNotConfigured, "Emby 未配置")
 		return
@@ -93,23 +90,44 @@ func (a *App) handleEmbyPlaybackStats(w http.ResponseWriter, r *http.Request, pa
 	days := queryInt(r, "days", 30)
 	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
 
-	logs := a.store().ListEmbyActivityLogs(uid, 2000)
+	logs := a.store().ListEmbyActivityLogs(uid, 5000)
+	type userStats struct {
+		UID      int64  `json:"uid"`
+		Username string `json:"username"`
+		Plays    int    `json:"plays"`
+		Duration int64  `json:"duration"`
+	}
+	userMap := map[int64]*userStats{}
 	playCount := map[string]int{}
-	totalDuration := int64(0)
 	totalPlays := 0
+
 	for _, log := range logs {
-		if log.Date < since {
-			continue
-		}
-		if log.Type == "VideoPlayback" || log.Type == "VideoPlaybackComplete" {
-			totalPlays++
-			playCount[log.Name]++
+		if log.Date < since { continue }
+		if log.Type != "VideoPlayback" && log.Type != "VideoPlaybackComplete" { continue }
+		totalPlays++
+		playCount[log.Name]++
+
+		if log.UserID != "" {
+			u, ok := a.store().FindUserByEmbyID(log.UserID)
+			if ok {
+				if userMap[u.UID] == nil {
+					userMap[u.UID] = &userStats{UID: u.UID, Username: u.Username}
+				}
+				userMap[u.UID].Plays++
+			}
 		}
 	}
+
+	rankings := make([]userStats, 0, len(userMap))
+	for _, v := range userMap {
+		rankings = append(rankings, *v)
+	}
+	sort.Slice(rankings, func(i, j int) bool { return rankings[i].Plays > rankings[j].Plays })
+
 	ok(w, "OK", map[string]any{
-		"total_plays":    totalPlays,
-		"total_duration": totalDuration,
-		"unique_items":   len(playCount),
-		"days":           days,
+		"total_plays":   totalPlays,
+		"unique_items":  len(playCount),
+		"days":          days,
+		"user_rankings": rankings,
 	})
 }

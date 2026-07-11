@@ -541,7 +541,8 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
             try {
               const res = await api.kickAllEmbySessions();
               if (res.success) {
-                toast({ title: t("deviceAudit.kickAllDone", { count: res.data?.deleted_devices ?? 0 }), variant: "success" });
+                const data: any = res.data || {};
+                toast({ title: t("deviceAudit.kickAllDone"), description: `在线: ${data.kicked ?? 0}，设备: ${data.deleted_devices ?? 0}`, variant: "success" });
                 void reload(true);
               } else {
                 toast({ title: t("deviceAudit.actionFailed"), description: res.message, variant: "destructive" });

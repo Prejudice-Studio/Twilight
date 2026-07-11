@@ -2012,7 +2012,7 @@
     "emptyDevices": "无匹配设备",
     "kickAll": "踢出全部会话",
     "kickAllTitle": "确认踢出全部会话",
-    "kickAllDesc": "将踢出所有 Emby 用户的当前在线登录会话，操作不可撤销。",
+    "kickAllDesc": "将踢出所有在线 Emby 会话并删除所有离线设备记录，操作不可撤销。",
     "kickAllConfirm": "踢出全部",
     "kickAllDone": "已踢出 {count} 个会话并清理设备记录",
     "chartClients": "客户端分布",
