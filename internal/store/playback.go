@@ -4,6 +4,37 @@ import "time"
 
 const maxStoredPlaybackRecords = 10000
 
+const maxPlaybackSessions = 50000
+
+func (s *Store) AddPlaybackSession(session PlaybackSession) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mutateAndSaveLocked(func() error {
+		s.state.PlaybackSessions = append(s.state.PlaybackSessions, session)
+		if len(s.state.PlaybackSessions) > maxPlaybackSessions {
+			s.state.PlaybackSessions = s.state.PlaybackSessions[len(s.state.PlaybackSessions)-maxPlaybackSessions:]
+		}
+		return nil
+	})
+}
+
+func (s *Store) UserPlaybackSessions(uid int64, limit int) []PlaybackSession {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if limit <= 0 || limit > len(s.state.PlaybackSessions) {
+		limit = len(s.state.PlaybackSessions)
+	}
+	out := make([]PlaybackSession, 0, limit)
+	for i := len(s.state.PlaybackSessions) - 1; i >= 0 && len(out) < limit; i-- {
+		sess := s.state.PlaybackSessions[i]
+		if uid > 0 && sess.UID != uid {
+			continue
+		}
+		out = append(out, sess)
+	}
+	return out
+}
+
 func (s *Store) AddPlaybackRecord(record PlaybackRecord) error {
 	_, err := s.AddPlaybackRecordIdempotent(record)
 	return err

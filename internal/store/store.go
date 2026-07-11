@@ -99,6 +99,7 @@ type State struct {
 	RuntimeLogs             []RuntimeLogEntry                      `json:"runtime_logs"`
 	IPBlacklist             map[string]IPBlacklistEntry            `json:"ip_blacklist"`
 	PlaybackRecords         []PlaybackRecord                       `json:"playback_records"`
+	PlaybackSessions        []PlaybackSession                      `json:"playback_sessions,omitempty"`
 	RebindRequests          map[int64]RebindRequest                `json:"rebind_requests"`
 	TelegramRoster          map[string]TelegramRosterEntry         `json:"telegram_roster"`
 	ViolationLogs           []ViolationLog                         `json:"violation_logs"`
@@ -408,6 +409,17 @@ type PlaybackRecord struct {
 	IndexNumber int    `json:"index_number,omitempty"`
 	Duration    int64  `json:"duration"`
 	PlayedAt    int64  `json:"played_at"`
+}
+
+type PlaybackSession struct {
+	UID       int64  `json:"uid"`
+	ItemID    string `json:"item_id"`
+	ItemName  string `json:"item_name"`
+	MediaType string `json:"media_type"`
+	SessionID string `json:"session_id"`
+	StartAt   int64  `json:"start_at"`
+	EndAt     int64  `json:"end_at,omitempty"`
+	Duration  int64  `json:"duration,omitempty"`
 }
 
 type BangumiSyncLog struct {

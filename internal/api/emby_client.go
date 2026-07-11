@@ -181,3 +181,18 @@ func (a *App) handleEmbyStats(w http.ResponseWriter, r *http.Request, _ Params) 
 		"episode_count": int64(numeric(counts["EpisodeCount"])),
 	})
 }
+
+func (a *App) handleEmbyViewerCount(w http.ResponseWriter, r *http.Request, _ Params) {
+	if !a.embyConfigured() {
+		ok(w, "OK", map[string]any{"viewers": 0})
+		return
+	}
+	var sessResp struct {
+		Items []map[string]any `json:"Items"`
+	}
+	if err := a.embyGet(r.Context(), "/Sessions", &sessResp); err != nil {
+		ok(w, "OK", map[string]any{"viewers": 0})
+		return
+	}
+	ok(w, "OK", map[string]any{"viewers": len(sessResp.Items)})
+}
