@@ -35,6 +35,71 @@ func (s *Store) UserPlaybackSessions(uid int64, limit int) []PlaybackSession {
 	return out
 }
 
+const maxEmbyActivityLogs = 20000
+
+func (s *Store) SyncEmbyActivityLogs(entries []EmbyActivityLog) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	added := 0
+	err := s.mutateAndSaveLocked(func() error {
+		if s.state.NextEmbyActivityLogID <= 0 {
+			max := int64(0)
+			for _, e := range s.state.EmbyActivityLogs {
+				if e.ID > max { max = e.ID }
+			}
+			s.state.NextEmbyActivityLogID = max + 1
+		}
+		existing := map[int64]bool{}
+		for _, e := range s.state.EmbyActivityLogs {
+			existing[e.EmbyLogID] = true
+		}
+		for _, entry := range entries {
+			if existing[entry.EmbyLogID] { continue }
+			if entry.ID == 0 {
+				entry.ID = s.state.NextEmbyActivityLogID
+				s.state.NextEmbyActivityLogID++
+			}
+			if entry.CreatedAt == 0 {
+				entry.CreatedAt = time.Now().Unix()
+			}
+			s.state.EmbyActivityLogs = append(s.state.EmbyActivityLogs, entry)
+			existing[entry.EmbyLogID] = true
+			added++
+		}
+		if len(s.state.EmbyActivityLogs) > maxEmbyActivityLogs {
+			cut := len(s.state.EmbyActivityLogs) - maxEmbyActivityLogs
+			s.state.EmbyActivityLogs = s.state.EmbyActivityLogs[cut:]
+		}
+		return nil
+	})
+	return added, err
+}
+
+func (s *Store) ListEmbyActivityLogs(uid int64, limit int) []EmbyActivityLog {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if limit <= 0 || limit > len(s.state.EmbyActivityLogs) {
+		limit = len(s.state.EmbyActivityLogs)
+	}
+	out := make([]EmbyActivityLog, 0, limit)
+	for i := len(s.state.EmbyActivityLogs) - 1; i >= 0 && len(out) < limit; i-- {
+		e := s.state.EmbyActivityLogs[i]
+		if uid > 0 && e.UserID != "" {
+			uids := s.findUserByEmbyID(e.UserID)
+			if uids == nil || uids.UID != uid { continue }
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+func (s *Store) findUserByEmbyID(embyID string) *User {
+	for _, u := range s.state.Users {
+		if u.EmbyID == embyID { return &u }
+	}
+	return nil
+}
+
 func (s *Store) AddPlaybackRecord(record PlaybackRecord) error {
 	_, err := s.AddPlaybackRecordIdempotent(record)
 	return err

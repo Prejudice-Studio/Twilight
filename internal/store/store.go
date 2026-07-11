@@ -100,6 +100,8 @@ type State struct {
 	IPBlacklist             map[string]IPBlacklistEntry            `json:"ip_blacklist"`
 	PlaybackRecords         []PlaybackRecord                       `json:"playback_records"`
 	PlaybackSessions        []PlaybackSession                      `json:"playback_sessions,omitempty"`
+	EmbyActivityLogs        []EmbyActivityLog                      `json:"emby_activity_logs,omitempty"`
+	NextEmbyActivityLogID   int64                                  `json:"next_emby_activity_log_id"`
 	RebindRequests          map[int64]RebindRequest                `json:"rebind_requests"`
 	TelegramRoster          map[string]TelegramRosterEntry         `json:"telegram_roster"`
 	ViolationLogs           []ViolationLog                         `json:"violation_logs"`
@@ -420,6 +422,18 @@ type PlaybackSession struct {
 	StartAt   int64  `json:"start_at"`
 	EndAt     int64  `json:"end_at,omitempty"`
 	Duration  int64  `json:"duration,omitempty"`
+}
+
+type EmbyActivityLog struct {
+	ID          int64  `json:"id"`
+	EmbyLogID   int64  `json:"emby_log_id"`
+	Type        string `json:"type"`
+	Name        string `json:"name"`
+	UserID      string `json:"user_id"`
+	UserName    string `json:"user_name"`
+	Overview    string `json:"overview,omitempty"`
+	Date        int64  `json:"date"`
+	CreatedAt   int64  `json:"created_at"`
 }
 
 type BangumiSyncLog struct {

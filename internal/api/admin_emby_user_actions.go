@@ -98,32 +98,40 @@ func (a *App) handleAdminEmbyUserKick(w http.ResponseWriter, r *http.Request, pa
 	ok(w, "会话踢出完成", map[string]any{"emby_user_id": embyID, "kicked_count": kicked})
 }
 
-// handleAdminEmbyKickAll 终止所有当前在线 Emby 会话，保留离线设备记录不被清除。
+// handleAdminEmbyKickAll 终止所有在线会话并清理离线设备记录。
 func (a *App) handleAdminEmbyKickAll(w http.ResponseWriter, r *http.Request, _ Params) {
 	if !a.embyConfigured() {
-		ok(w, "Emby 未配置", map[string]any{"kicked": 0})
-		return
-	}
-	var sessResp struct {
-		Items []map[string]any `json:"Items"`
-	}
-	if err := a.embyGet(r.Context(), "/Sessions", &sessResp); err != nil {
-		failWithCode(w, http.StatusBadGateway, ErrEmbyRemoteSessionsFail, "获取 Emby 在线会话失败")
+		ok(w, "Emby 未配置", map[string]any{"kicked": 0, "deleted_devices": 0})
 		return
 	}
 	kicked := 0
-	failed := 0
-	for _, sess := range sessResp.Items {
-		sid := asString(sess["Id"])
-		if sid == "" {
-			continue
-		}
-		if err := a.embyPost(r.Context(), "/Sessions/"+urlPathEscape(sid)+"/Terminate", nil, nil); err != nil {
-			failed++
-		} else {
-			kicked++
+	var sessResp struct {
+		Items []map[string]any `json:"Items"`
+	}
+	if err := a.embyGet(r.Context(), "/Sessions", &sessResp); err == nil {
+		for _, sess := range sessResp.Items {
+			sid := asString(sess["Id"])
+			if sid == "" { continue }
+			if err := a.embyPost(r.Context(), "/Sessions/"+urlPathEscape(sid)+"/Terminate", nil, nil); err == nil {
+				kicked++
+			}
 		}
 	}
-	a.audit(r, "emby_kick_all_sessions", "admin", 0, map[string]any{"kicked": kicked, "failed": failed})
-	ok(w, "在线会话已终止", map[string]any{"kicked": kicked, "failed": failed})
+
+	deletedDevices := 0
+	var devResp struct {
+		Items []map[string]any `json:"Items"`
+	}
+	if err := a.embyGet(r.Context(), "/Devices", &devResp); err == nil {
+		for _, dev := range devResp.Items {
+			did := asString(dev["Id"])
+			if did == "" { continue }
+			if err := a.embyDelete(r.Context(), "/Devices/"+urlPathEscape(did)); err == nil {
+				deletedDevices++
+			}
+		}
+	}
+
+	a.audit(r, "emby_kick_all_sessions", "admin", 0, map[string]any{"kicked": kicked, "deleted_devices": deletedDevices})
+	ok(w, "操作完成", map[string]any{"kicked": kicked, "deleted_devices": deletedDevices})
 }

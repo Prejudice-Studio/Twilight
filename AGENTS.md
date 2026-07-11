@@ -10,6 +10,8 @@
 - 重要文档优先级：`docs/guides/development.md`、`docs/guides/modular-architecture.md`、`docs/reference/backend.md`、`docs/reference/api-index.md`、`docs/reference/backend-api.md`、`docs/reference/developer-js.md`、`docs/guides/security.md`、`README.md`。
 - 若旧文件或本地笔记提到 Python 后端、SQLite 多库、uvicorn、`requirements.txt`、旧 `db/*.db` 迁移等内容，以当前 Go 源码和 `docs/guides/development.md` 为准，不要重新引入旧后端运行入口。
 
+- **Docker 部署警告**: `docs/guides/docker.md`、`docker-compose.yml`、`docker-compose.prod.yml` 由 LLM 自动生成，未经测试，开发者不推荐。优先部署方式为 Linux + systemd。修改上述 Docker 文件时必须在开头保留醒目的警告提示。
+
 ## 目录速览
 
 - `cmd/twilight`：Go CLI 入口，支持 `api`、`all`、`scheduler`、`bot`、`version`。
