@@ -259,6 +259,58 @@ func TestCORSSameHostFallback(t *testing.T) {
 	}
 }
 
+func TestCORSAllowAnyOriginBypassesOriginMatching(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().CORSOrigins = nil
+	app.cfg().CORSAllowAnyOrigin = true
+
+	req := httptest.NewRequest(http.MethodOptions, "https://api.example/api/v1/users/me", nil)
+	req.Header.Set("Origin", "null")
+	req.Header.Set("Access-Control-Request-Method", "PUT")
+	rr := httptest.NewRecorder()
+	app.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("CORS bypass preflight status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "null" {
+		t.Fatalf("CORS bypass did not reflect valid origin: %q", got)
+	}
+}
+
+func TestHiddenCORSBypassIsNotExposedAndIsPreserved(t *testing.T) {
+	cfg := config.Config{CORSAllowAnyOrigin: true}
+	values := configValues(cfg)
+	if _, exposed := values["API"]["cors_allow_any_origin"]; exposed {
+		t.Fatal("hidden CORS bypass was exposed through config values")
+	}
+	for _, section := range configSectionDefs() {
+		for _, field := range section.Fields {
+			if field.Key == "cors_allow_any_origin" {
+				t.Fatal("hidden CORS bypass was exposed through config schema")
+			}
+		}
+	}
+
+	content := restoreHiddenCORSConfig(renderConfigTOML(values), cfg.CORSAllowAnyOrigin)
+	if !strings.Contains(content, "[API]") || !strings.Contains(content, "cors_allow_any_origin = true") {
+		t.Fatalf("hidden CORS bypass was not preserved while rebuilding TOML:\n%s", content)
+	}
+	if shown := stripHiddenCORSConfig(content); strings.Contains(shown, "cors_allow_any_origin") {
+		t.Fatal("hidden CORS bypass was visible in browser-safe config content")
+	}
+	if strings.Contains(renderConfigTOML(values), "cors_allow_any_origin") {
+		t.Fatal("hidden CORS bypass was written into the default rendered config")
+	}
+	if changed := restoreHiddenCORSConfig("[API]\ncors_allow_any_origin = true\n", false); strings.Contains(changed, "cors_allow_any_origin") {
+		t.Fatal("browser-submitted config enabled the hidden CORS bypass")
+	}
+	withoutAPI := restoreHiddenCORSConfig("[Global]\nserver_name = \"Twilight\"\n", true)
+	if !strings.Contains(withoutAPI, "[API]\ncors_allow_any_origin = true") {
+		t.Fatalf("hidden CORS bypass was not restored into a missing API section:\n%s", withoutAPI)
+	}
+}
+
 func TestBindCodeCreationGETRequiresWebUIIntent(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().TelegramMode = true

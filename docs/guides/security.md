@@ -40,6 +40,7 @@ CORS 由 `internal/api/app.go` 的 `applyCORS` 处理，启动 / 热重载时由
 - 生产环境不要使用 `cors_origins = ["*"]`。启用 `allow_credential` 时，浏览器规范禁止 `*` 与 credentials 同用；运行期会跳过 `*` 条目，启动期会打 `Error` 日志告警，错配置等于静默无效。
 - `cors_origins` 只填 Origin（`scheme://host[:port]`），不带路径、查询串或片段。尾斜杠会被 `normalizeCORSOrigin` 规范化；带 `path`/`query`/`fragment` 或非 `http`/`https` 的条目会被判为无效并忽略。
 - 请求的 Origin 与当前请求 Host 按 `scheme://host[:port]` 完全一致时，`corsOriginMatchesHost` 会保留同源回退，不要求把 API 自身 Origin 重复写进 `cors_origins`。协议、主机或端口任一不同都属于跨域，仍必须由 `cors_origins` 显式放行。
+- 紧急兼容开关：可仅通过直接编辑服务器磁盘上的原始 TOML，在 `[API]` 下设置 `cors_allow_any_origin = true`，跳过 Origin 格式、白名单和同源匹配并反射任意非空 Origin。该项默认关闭，不出现在结构化配置、网页原始配置编辑器和默认配置模板中；网页保存其他配置时只会保留磁盘已生效的值，不能通过网页开启或关闭。开启后若同时允许凭据，任意网站都可能通过用户浏览器读取登录态 API 响应，仅限临时排障，问题解决后必须立即删除该行或改为 `false`。
 - 只允许你的前端域名：
 
 ```toml

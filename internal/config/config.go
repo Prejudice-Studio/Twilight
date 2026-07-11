@@ -113,9 +113,10 @@ type Config struct {
 	AdminUsernames                []string
 	SetupMode                     bool
 
-	CORSOrigins       []string
-	AllowCredential   bool
-	TrustProxyHeaders bool
+	CORSOrigins        []string
+	AllowCredential    bool
+	CORSAllowAnyOrigin bool
+	TrustProxyHeaders  bool
 	// TrustedProxyCIDRs 是上游可信反代的 CIDR 列表。仅当 TrustProxyHeaders=true
 	// 且立即上游（r.RemoteAddr 取出的 host）落在这些 CIDR 内时，clientIP 才会
 	// 解析 CF-Connecting-IP / X-Real-IP / X-Forwarded-For；否则一律走 RemoteAddr，
@@ -373,6 +374,7 @@ func Load(path string) (Config, error) {
 	cfg.Port = reader.intValue(cfg.Port, "API.port", "port")
 	cfg.MaxUploadSize = reader.int64Value(cfg.MaxUploadSize, "API.max_upload_size", "max_upload_size")
 	cfg.CORSOrigins = reader.stringListValue(cfg.CORSOrigins, "API.cors_origins", "cors_origins")
+	cfg.CORSAllowAnyOrigin = reader.boolValue(cfg.CORSAllowAnyOrigin, "API.cors_allow_any_origin", "cors_allow_any_origin")
 	cfg.TrustProxyHeaders = reader.boolValue(cfg.TrustProxyHeaders, "API.trust_proxy_headers", "trust_proxy_headers")
 	cfg.TrustedProxyCIDRs = reader.stringListValue(cfg.TrustedProxyCIDRs, "API.trusted_proxy_cidrs", "trusted_proxy_cidrs")
 	cfg.SessionCookie = reader.stringValue(cfg.SessionCookie, "Security.session_cookie_name", "API.session_cookie_name", "session_cookie_name")

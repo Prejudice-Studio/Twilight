@@ -248,7 +248,7 @@ func New(cfg config.Config, st *store.Store) (*App, error) {
 	// applyCORS 默认就附带 Allow-Credentials: true，浏览器规范本就拒绝
 	// `*` + credentials 组合；早期管理员若误填 `*` 会得到一个静默无效的配置。
 	// 这里在启动 / reload 时强提示，配 .Error 让审计/告警系统能抓到。
-	validateCORSOriginsStartup(cfg.CORSOrigins, cfg.AllowCredential)
+	validateCORSOriginsStartup(cfg.CORSOrigins, cfg.AllowCredential, cfg.CORSAllowAnyOrigin)
 	validateTrustedProxyStartup(cfg.TrustProxyHeaders, cfg.TrustedProxyCIDRs)
 	ConfigureRuntimeLoggingStore(st, cfg.ZapLevel(), cfg.RuntimeLogLimit)
 	return app, nil
@@ -410,8 +410,10 @@ func (a *App) reloadConfigLocked() (map[string]any, error) {
 	}
 
 	// reload 也走一遍 CORS 校验，捕获 hot reload 引入的错配置。
-	if !sameStringSlice(previous.CORSOrigins, next.CORSOrigins) {
-		validateCORSOriginsStartup(next.CORSOrigins, next.AllowCredential)
+	if !sameStringSlice(previous.CORSOrigins, next.CORSOrigins) ||
+		previous.AllowCredential != next.AllowCredential ||
+		previous.CORSAllowAnyOrigin != next.CORSAllowAnyOrigin {
+		validateCORSOriginsStartup(next.CORSOrigins, next.AllowCredential, next.CORSAllowAnyOrigin)
 	}
 	if previous.TrustProxyHeaders != next.TrustProxyHeaders ||
 		!sameStringSlice(previous.TrustedProxyCIDRs, next.TrustedProxyCIDRs) {
@@ -506,6 +508,9 @@ func liveAppliedConfigFields(previous, next config.Config) []string {
 	}
 	if previous.AllowCredential != next.AllowCredential {
 		add("allow_credential")
+	}
+	if previous.CORSAllowAnyOrigin != next.CORSAllowAnyOrigin {
+		add("cors_allow_any_origin")
 	}
 	if previous.TrustProxyHeaders != next.TrustProxyHeaders {
 		add("trust_proxy_headers")
@@ -846,11 +851,18 @@ func (a *App) applySecurityHeaders(w http.ResponseWriter) {
 }
 
 func (a *App) applyCORS(w http.ResponseWriter, r *http.Request) bool {
-	origin := normalizeCORSOrigin(r.Header.Get("Origin"))
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
 	if origin == "" {
 		return false
 	}
-	allowed := a.corsOriginAllowed(origin) || a.corsOriginMatchesHost(origin, r)
+	allowAnyOrigin := a.cfg().CORSAllowAnyOrigin
+	if !allowAnyOrigin {
+		origin = normalizeCORSOrigin(origin)
+		if origin == "" {
+			return false
+		}
+	}
+	allowed := allowAnyOrigin || a.corsOriginAllowed(origin) || a.corsOriginMatchesHost(origin, r)
 	if !allowed {
 		return false
 	}
@@ -937,7 +949,13 @@ func isPrefetchRequest(r *http.Request) bool {
 //
 // 函数本身不返回 error，仅打印 —— App 不会因为 CORS 错配置启动失败，
 // 因为反代/容器重启场景下这往往是非致命的退化。
-func validateCORSOriginsStartup(origins []string, allowCredential bool) {
+func validateCORSOriginsStartup(origins []string, allowCredential, allowAnyOrigin bool) {
+	if allowAnyOrigin {
+		zap.L().Error(
+			"cors_allow_any_origin=true：已关闭 CORS Origin 格式、白名单和同源校验，任意非空 Origin 都可访问 API；仅限临时兼容排障使用",
+			zap.Bool("allow_credential", allowCredential),
+		)
+	}
 	if len(origins) == 0 {
 		return
 	}

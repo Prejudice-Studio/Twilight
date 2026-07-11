@@ -19,6 +19,7 @@ redis_url = "redis://localhost:6379/2"
 host = "127.0.0.1"
 port = 5050
 cors_origins = ["http://localhost:3000", "https://example.com"]
+cors_allow_any_origin = true
 max_upload_size = 1234
 `
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
@@ -40,6 +41,9 @@ max_upload_size = 1234
 	}
 	if len(cfg.CORSOrigins) != 2 || cfg.MaxUploadSize != 1234 {
 		t.Fatalf("unexpected cors/upload config: %#v %d", cfg.CORSOrigins, cfg.MaxUploadSize)
+	}
+	if !cfg.CORSAllowAnyOrigin {
+		t.Fatal("expected hidden CORS bypass setting to be loaded from TOML")
 	}
 }
 

@@ -1603,8 +1603,8 @@ func (a *App) handleConfigTOMLGet(w http.ResponseWriter, r *http.Request, _ Para
 	// （handleConfigTOMLPutSafe）会把回传的哨兵还原为真实值，避免写盘覆盖。
 	maskedValues := configValues(*a.cfg())
 	maskConfigSecrets(maskedValues)
-	normalizedContent := stripProtectedAdminConfig(renderConfigTOML(maskedValues))
-	rawContent := stripProtectedAdminConfig(maskTOMLSecrets(string(data)))
+	normalizedContent := stripHiddenCORSConfig(stripProtectedAdminConfig(renderConfigTOML(maskedValues)))
+	rawContent := stripHiddenCORSConfig(stripProtectedAdminConfig(maskTOMLSecrets(string(data))))
 	ok(w, "OK", map[string]any{"content": normalizedContent, "raw_content": rawContent, "path": path, "completed": normalizedContent != rawContent})
 }
 

@@ -220,7 +220,7 @@ func (a *App) handleConfigBackupInspect(w http.ResponseWriter, r *http.Request, 
 	// 管理端预览，必须走 maskTOMLSecrets 与 handleConfigTOMLGet 同口径遮蔽，
 	// 否则"读取任意历史备份"就成了绕过 GET 遮蔽拿明文密钥的旁路。真正的恢复
 	// （handleConfigRestore）读的是磁盘原文、不经此遮蔽，因此预览遮蔽不影响恢复。
-	ok(w, "OK", map[string]any{"backup": backup, "content": stripProtectedAdminConfig(maskTOMLSecrets(string(content))), "config_file": a.configFilePath()})
+	ok(w, "OK", map[string]any{"backup": backup, "content": stripHiddenCORSConfig(stripProtectedAdminConfig(maskTOMLSecrets(string(content)))), "config_file": a.configFilePath()})
 }
 
 func (a *App) handleConfigRestore(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -407,6 +407,7 @@ func (a *App) saveConfigContent(content string) (map[string]any, int, string) {
 	if hadExisting {
 		content = restoreProtectedRepoURL(content, string(existing))
 	}
+	content = restoreHiddenCORSConfig(content, a.cfg().CORSAllowAnyOrigin)
 	if err := validateConfigContent(configFile, []byte(content)); err != nil {
 		return nil, http.StatusBadRequest, "配置校验失败: " + err.Error()
 	}
@@ -481,6 +482,7 @@ func (a *App) saveInitialSetupConfigContent(content, adminUsername string) (map[
 	if hadExisting {
 		content = restoreProtectedRepoURL(content, string(existing))
 	}
+	content = restoreHiddenCORSConfig(content, a.cfg().CORSAllowAnyOrigin)
 	if err := validateConfigContent(configFile, []byte(content)); err != nil {
 		return nil, http.StatusBadRequest, "配置校验失败: " + err.Error()
 	}
@@ -1166,7 +1168,7 @@ func configValues(cfg config.Config) map[string]map[string]any {
 		"Emby": {
 			"emby_url": cfg.EmbyURL, "emby_token": cfg.EmbyToken, "emby_username": cfg.EmbyUsername, "emby_password": cfg.EmbyPassword,
 			"emby_url_list": linesToStrings(cfg.EmbyURLList), "emby_url_list_for_whitelist": linesToStrings(cfg.EmbyWhitelistURLList),
-			"emby_stats_enabled": cfg.EmbyStatsEnabled,
+			"emby_stats_enabled":          cfg.EmbyStatsEnabled,
 			"emby_playback_stats_enabled": cfg.EmbyPlaybackStatsEnabled,
 		},
 		"Telegram": {
@@ -1293,6 +1295,55 @@ func renderConfigTOML(values map[string]map[string]any) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+func stripHiddenCORSConfig(content string) string {
+	lines := strings.Split(content, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		key, _, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if ok && strings.EqualFold(strings.TrimSpace(key), "cors_allow_any_origin") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
+}
+
+func restoreHiddenCORSConfig(content string, enabled bool) string {
+	content = stripHiddenCORSConfig(content)
+	if !enabled {
+		return content
+	}
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	insertAt := len(lines)
+	inAPI := false
+	foundAPI := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "[") || !strings.HasSuffix(trimmed, "]") {
+			continue
+		}
+		section := strings.Trim(strings.TrimSpace(strings.Trim(trimmed, "[]")), `"`)
+		if inAPI {
+			insertAt = i
+			break
+		}
+		inAPI = strings.EqualFold(section, "API")
+		foundAPI = foundAPI || inAPI
+	}
+	if !foundAPI {
+		if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) != "" {
+			lines = append(lines, "")
+		}
+		lines = append(lines, "[API]")
+		insertAt = len(lines)
+	}
+	line := "cors_allow_any_origin = true"
+	lines = append(lines, "")
+	copy(lines[insertAt+1:], lines[insertAt:])
+	lines[insertAt] = line
+	return strings.TrimRight(strings.Join(lines, "\n"), "\n") + "\n"
 }
 
 func tomlValue(value any) string {

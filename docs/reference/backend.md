@@ -106,6 +106,8 @@ systemd 部署对应三个服务单元：`twilight`、`twilight-bot`、`twilight
 
 生产环境若前端与 API 跨 origin 部署，必须把 `API.cors_origins` / `TWILIGHT_API_CORS_ORIGINS` 显式设置为前端 HTTPS 域名。后端不会把 `*` 当作携带凭据接口的可信 Origin，避免低信任页面通过浏览器 JS 读取凭据接口响应。Origin 只允许协议 + 主机 + 端口；尾斜杠会被规范化，带路径、查询串或片段的值会被拒绝。若请求 Origin 与当前请求 Host 的协议、主机和端口完全一致，后端会按同源请求放行，无需把 API 自身 Origin 重复加入列表；该回退不会放行协议、主机或端口不同的跨域来源。
 
+仅在紧急兼容排障时，可直接编辑服务器磁盘上的 TOML，在 `[API]` 中设置 `cors_allow_any_origin = true`。此隐藏开关默认关闭，不通过环境变量、结构化配置、网页原始配置编辑器或默认模板暴露；网页配置操作不能改变它。开启后任意非空 Origin 都会被反射放行，启动和热重载会输出高风险日志。不要将它作为长期生产配置。
+
 ## 常用环境变量
 
 > **配置优先级与建议**：`config.toml`（参考 `config.production.toml`，后台「系统配置」可视化编辑 + 热重载）是**唯一推荐的配置源**，敏感密钥放同目录 `config.local.toml`。`.env` 仅建议保留后端监听地址、站点名称等极少数部署级项目（见 `.env.example`），**不要**在 `.env` 里堆叠邮箱 / Telegram / 注册 / 限流等功能配置。下表列出的 `TWILIGHT_*` 变量仍可在配置文件之上覆盖对应字段（容器 / CI 等场景备用），但默认部署以 `config.toml` 为准。
