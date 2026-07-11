@@ -1,41 +1,34 @@
-# Playback Stats
+# 播放统计
 
-Twilight playback stats are based on Emby ActivityLog entries and are independent from the Bangumi webhook playback-record path. The collector fetches playback events from Emby `/System/ActivityLog/Entries`, stores them in `store.EmbyActivityLogs`, and aggregates them by scope and time window.
+播放统计基于 Emby ActivityLog，独立于 Bangumi Webhook 的播放记录。
 
-## Feature Gate And Collection
+## 开关与采集
 
-- Config key: `[Emby] emby_playback_stats_enabled = true`.
-- Collector: `fetchAndStoreEmbyActivityLogs`, which fetches up to 500 recent Emby activity entries with user information per request.
-- Storage limit: `maxEmbyActivityLogs = 20000`; entries are deduplicated by Emby log ID and oldest entries are pruned when the cap is exceeded.
-- Auto refresh: `GET /admin/emby/activity-logs` and playback stats endpoints trigger a lightweight 2-minute throttled refresh by default. `?refresh=1` forces an immediate fetch.
-- Scheduler: `sync_emby_activity_logs` can still be configured for proactive background sync in production.
+- 配置键：`[Emby] emby_playback_stats_enabled = true`
+- 采集函数：`fetchAndStoreEmbyActivityLogs`
+- 单次最多拉取 500 条带用户信息的 Emby 活动日志。
+- 存储上限：`maxEmbyActivityLogs = 20000`
+- 日志按 Emby log ID 去重，超过上限后裁剪最旧记录。
 
-## Endpoints
+## 接口
 
-| Path | Auth | Description |
+| 路径 | 权限 | 说明 |
 | ---- | ---- | ---- |
-| `GET /api/v1/emby/playback-stats` | User | Current-user stats |
-| `GET /api/v1/admin/emby/playback-stats` | Admin | Global, self, or selected-user stats |
-| `GET /api/v1/admin/emby/playback-stats/:uid` | Admin | Stats for a specific local UID |
-| `GET /api/v1/admin/emby/activity-logs` | Admin | Raw Emby activity logs |
+| `GET /api/v1/emby/playback-stats` | User | 当前用户统计 |
+| `GET /api/v1/admin/emby/playback-stats` | Admin | 全站、自己或指定用户统计 |
+| `GET /api/v1/admin/emby/playback-stats/:uid` | Admin | 指定 UID 统计 |
+| `GET /api/v1/admin/emby/activity-logs` | Admin | 原始 Emby 活动日志 |
 
-Common query parameters:
+## 查询参数
 
-- `scope=self|global|user`: stats scope. Non-admin users can only view `self`.
-- `uid=<uid>`: local UID used when `scope=user`.
-- `days=7|30|90|365`: rolling window.
-- `today=1`: current-day window; overrides `days`.
-- `limit=10|20|50|100`: ranking size.
-- `sort=plays|name`: top-item sort mode.
-- `refresh=1`: force refresh Emby activity logs before aggregation.
+- `scope=self|global|user`：统计范围，普通用户只能查看自己。
+- `uid=<uid>`：指定本地用户。
+- `days=7|30|90|365`：滚动周期。
+- `today=1`：仅当天，优先级高于 `days`。
+- `limit=10|20|50|100`：榜单条数。
+- `sort=plays|name`：节目榜排序。
+- `refresh=1`：统计前强制刷新 Emby 活动日志。
 
-## Frontend Behavior
+## 限制
 
-- `/stats/playback` auto-loads stats and polls only while the page is visible, using the selected 30s, 60s, or 5m interval.
-- The manual refresh button force-fetches Emby activity logs before recomputing stats.
-- The `/admin/emby` activity-log panel polls every 30s by default and exposes an off switch.
-- The `/admin/emby` device/IP audit panel polls online status every 30s by default; manual refresh sends `refresh=1`.
-
-## Limitations
-
-Emby ActivityLog reliably provides playback event counts, user, item name, and timestamp. It does not reliably provide total playback duration, so `total_duration` is currently a reserved field and returns `0`. Precise duration stats should use session stop events or another Emby playback-reporting data source in a future change.
+Emby ActivityLog 能稳定提供播放事件、用户、节目名和时间，但不稳定提供完整播放时长。因此 `total_duration` 目前是保留字段，默认返回 `0`。
