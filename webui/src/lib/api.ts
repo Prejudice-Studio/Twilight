@@ -1521,6 +1521,10 @@ class ApiClient {
     return this.request<EmbyDeviceAuditData>(`/admin/emby/device-audit${refresh ? "?refresh=1" : ""}`);
   }
 
+  async adminGetEmbyActivityLogs(limit = 100, refresh = false) {
+    return this.request<{ entries: any[]; total: number }>(`/admin/emby/activity-logs?limit=${limit}${refresh ? "&refresh=1" : ""}`);
+  }
+
   // 设备/IP 审查页的快速处置：按 Emby 用户 ID 单独启停 Emby（已关联本地用户时后端会
   // 沿用本地保护/有效期约束并同步镜像；未关联也可直接处置可疑 Emby 账号）。
   async setEmbyUserEnabledById(embyId: string, enable: boolean) {

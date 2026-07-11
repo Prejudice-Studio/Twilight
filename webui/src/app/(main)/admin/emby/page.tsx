@@ -18,8 +18,10 @@ import {
   MonitorSmartphone,
   Wifi,
   WifiOff,
+  Activity,
 } from "lucide-react";
 import AdminDeviceAuditPanel from "@/components/admin/emby-device-audit-panel";
+import EmbyActivityLogs from "@/components/admin/emby-activity-logs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -358,7 +360,7 @@ export default function AdminEmbyPage() {
         }}
         className="space-y-5"
       >
-        <TabsList className="i18n-stable-tabs grid h-auto w-full grid-cols-2 sm:w-fit">
+        <TabsList className="i18n-stable-tabs grid h-auto w-full grid-cols-3 sm:w-fit">
           <TabsTrigger value="accounts" className="gap-2">
             <Server className="h-4 w-4" />
             {t("adminEmby.accountsTab")}
@@ -366,6 +368,10 @@ export default function AdminEmbyPage() {
           <TabsTrigger value="devices" className="gap-2">
             <MonitorSmartphone className="h-4 w-4" />
             {t("adminEmby.deviceAuditTab")}
+          </TabsTrigger>
+          <TabsTrigger value="activity" className="gap-2">
+            <Activity className="h-4 w-4" />
+            活动日志
           </TabsTrigger>
         </TabsList>
 
@@ -763,6 +769,9 @@ export default function AdminEmbyPage() {
 
         <TabsContent value="devices" className="mt-0">
           {deviceAuditVisited && <AdminDeviceAuditPanel embedded />}
+        </TabsContent>
+        <TabsContent value="activity" className="mt-0">
+          <EmbyActivityLogs />
         </TabsContent>
       </Tabs>
 
