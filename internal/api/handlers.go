@@ -1183,6 +1183,10 @@ func (a *App) handleSuspicious(w http.ResponseWriter, r *http.Request, _ Params)
 
 func (a *App) handleSystemInfo(w http.ResponseWriter, r *http.Request, _ Params) {
 	cfg := a.cfg()
+	if !a.allowRate(r.Context(), rateKey("system-info:", a.clientIP(r)), 30, time.Minute) {
+		failWithCode(w, http.StatusTooManyRequests, ErrRateLimited, "请求过于频繁")
+		return
+	}
 	ok(w, "OK", map[string]any{
 		"name":                cfg.AppName,
 		"icon":                a.publicServerIconURL(),
@@ -1410,23 +1414,30 @@ func (a *App) configuredServerIconPath() (string, string, bool) {
 }
 
 func (a *App) handleHealth(w http.ResponseWriter, r *http.Request, _ Params) {
-	emby := a.embyOverview(r.Context())
-	sessionFallback := a.sessions().FallbackCount()
-	rateFallback := a.limiter().FallbackCount()
+	if !a.allowRate(r.Context(), rateKey("health:", a.clientIP(r)), 60, time.Minute) {
+		failWithCode(w, http.StatusTooManyRequests, ErrRateLimited, "请求过于频繁")
+		return
+	}
+	isAuth := current(r).User.UID != 0
 	data := map[string]any{
-		"status":           "healthy",
-		"time":             time.Now().Unix(),
-		"api":              true,
-		"database":         a.store() != nil,
-		"emby":             boolValue(emby, "online", false),
-		"emby_configured":  a.cfg().EmbyURL != "",
-		"redis":            a.redis() != nil,
-		"redis_degraded":   a.redis() != nil && (sessionFallback > 0 || rateFallback > 0),
-		"storage":          a.store().Backend(),
-		"active_database":  a.store().Backend(),
-		"config_database":  strings.ToLower(a.cfg().DatabaseDriver),
-		"storage_mismatch": a.runtimeDatabaseMismatch(),
-		"storage_warning":  a.databaseMismatchWarning(),
+		"status": "healthy",
+		"time":   time.Now().Unix(),
+		"api":    true,
+	}
+	if isAuth {
+		emby := a.embyOverview(r.Context())
+		sessionFallback := a.sessions().FallbackCount()
+		rateFallback := a.limiter().FallbackCount()
+		data["database"] = a.store() != nil
+		data["emby"] = boolValue(emby, "online", false)
+		data["emby_configured"] = a.cfg().EmbyURL != ""
+		data["redis"] = a.redis() != nil
+		data["redis_degraded"] = a.redis() != nil && (sessionFallback > 0 || rateFallback > 0)
+		data["storage"] = a.store().Backend()
+		data["active_database"] = a.store().Backend()
+		data["config_database"] = strings.ToLower(a.cfg().DatabaseDriver)
+		data["storage_mismatch"] = a.runtimeDatabaseMismatch()
+		data["storage_warning"] = a.databaseMismatchWarning()
 	}
 	ok(w, "OK", data)
 }
