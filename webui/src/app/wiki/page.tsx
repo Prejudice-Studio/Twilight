@@ -222,6 +222,15 @@ export default function WikiPage() {
         </div>
       </Section>
 
+      <Section icon={Monitor} title="17. 主页 Emby 库统计">
+        <p>仪表盘 Emby 服务器卡片可显示服务器内的媒体库统计信息：</p>
+        <ul className="list-disc pl-5 space-y-1">
+          <li><strong>显示内容</strong>：电影数量、电视剧数量、剧集总数。</li>
+          <li><strong>默认关闭</strong>：管理员需在配置中启用 <Badge variant="outline">emby_stats_enabled = true</Badge>（位于 <code>[Emby]</code> 段）。</li>
+          <li>前端自动检测功能开关，开启后在 Emby 服务器卡片底部显示三列统计数据。</li>
+        </ul>
+      </Section>
+
       <Section icon={Settings} title="16. 常见问题">
         <div className="space-y-2">
           <p><strong>Q: 为什么我无法登录？</strong></p>

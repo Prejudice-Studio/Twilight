@@ -559,6 +559,10 @@ func (a *App) handleReplyToTicket(w http.ResponseWriter, r *http.Request, params
 		return
 	}
 	p := current(r)
+	if !a.allowRate(r.Context(), rateKey("ticket-reply:uid:", p.User.UID), 20, 10*time.Minute) {
+		failWithCode(w, http.StatusTooManyRequests, ErrTicketRateLimited, "回复过于频繁，请稍后再试")
+		return
+	}
 	id, _ := int64Param(params, "ticket_id")
 	ticket, okTicket := a.store().Ticket(id)
 	if !okTicket {

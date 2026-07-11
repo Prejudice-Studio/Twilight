@@ -142,6 +142,7 @@ type Config struct {
 
 	EmbyURL                        string
 	EmbyToken                      string
+	EmbyStatsEnabled               bool
 	EmbyUsername                   string
 	EmbyPassword                   string
 	EmbyURLList                    []Line
@@ -386,6 +387,7 @@ func Load(path string) (Config, error) {
 	cfg.BotInternalSecret = reader.stringValue(cfg.BotInternalSecret, "Security.bot_internal_secret", "bot_internal_secret")
 	cfg.EmbyURL = reader.stringValue(cfg.EmbyURL, "Emby.emby_url", "emby_url")
 	cfg.EmbyToken = reader.stringValue(cfg.EmbyToken, "Emby.emby_token", "emby_token")
+	cfg.EmbyStatsEnabled = reader.boolValue(cfg.EmbyStatsEnabled, "Emby.emby_stats_enabled", "emby_stats_enabled")
 	cfg.EmbyUsername = reader.stringValue(cfg.EmbyUsername, "Emby.emby_username", "emby_username")
 	cfg.EmbyPassword = reader.stringValue(cfg.EmbyPassword, "Emby.emby_password", "emby_password")
 	cfg.EmbyPublicURL = reader.stringValue(cfg.EmbyPublicURL, "Emby.emby_public_url", "emby_public_url")

@@ -89,6 +89,7 @@ func (a *App) registerRoutes() {
 	a.add(http.MethodGet, "/api/v1/system/stats", AuthAdmin, a.handleSystemStats)
 	a.add(http.MethodGet, "/api/v1/system/emby-urls", AuthUser, a.handleEmbyURLs)
 	a.add(http.MethodPost, "/api/v1/system/emby-urls/probe", AuthUser, a.handleEmbyURLProbe)
+	a.add(http.MethodGet, "/api/v1/system/emby-stats", AuthUser, a.handleEmbyStats)
 	a.add(http.MethodGet, "/api/v1/system/config", AuthUser, a.handlePublicConfig)
 	a.add(http.MethodGet, "/api/v1/system/admin/config", AuthAdmin, a.handleAdminConfig)
 	a.add(http.MethodGet, "/api/v1/system/admin/stats", AuthAdmin, a.handleSystemStats)

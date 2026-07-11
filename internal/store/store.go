@@ -1094,6 +1094,25 @@ func (s *State) ensure() {
 	if s.DeveloperJSPresets == nil {
 		s.DeveloperJSPresets = map[int64]DeveloperJSPreset{}
 	}
+
+	now := time.Now().Unix()
+	for id, t := range s.Tickets {
+		if t.AdminNote != "" && len(t.Replies) == 0 {
+			t.Replies = []TicketReply{{
+				UID:      0,
+				Username: "管理员",
+				Role:     0,
+				Content:  t.AdminNote,
+				CreatedAt: t.UpdatedAt,
+			}}
+			t.AdminNote = ""
+			s.Tickets[id] = t
+			_ = now
+		}
+	}
+	if s.TicketTypes == nil {
+		s.TicketTypes = []string{"all"}
+	}
 }
 
 func (s *State) EnsureForMigration() {

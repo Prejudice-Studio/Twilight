@@ -158,3 +158,26 @@ func (a *App) embyAuthenticateByName(ctx context.Context, username, password str
 	}
 	return nil, false, nil
 }
+
+func (a *App) handleEmbyStats(w http.ResponseWriter, r *http.Request, _ Params) {
+	if !a.cfg().EmbyStatsEnabled {
+		ok(w, "Emby 统计功能未启用", map[string]any{"enabled": false})
+		return
+	}
+	if !a.embyConfigured() {
+		ok(w, "Emby 未配置", map[string]any{"enabled": true, "configured": false})
+		return
+	}
+	var counts map[string]any
+	if err := a.embyGet(r.Context(), "/Items/Counts", &counts); err != nil {
+		failWithCode(w, http.StatusBadGateway, ErrInternal, "获取 Emby 统计失败: "+err.Error())
+		return
+	}
+	ok(w, "OK", map[string]any{
+		"enabled":       true,
+		"configured":    true,
+		"movie_count":   int64(numeric(counts["MovieCount"])),
+		"series_count":  int64(numeric(counts["SeriesCount"])),
+		"episode_count": int64(numeric(counts["EpisodeCount"])),
+	})
+}

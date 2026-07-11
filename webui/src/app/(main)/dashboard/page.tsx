@@ -104,6 +104,7 @@ export default function DashboardPage() {
 
   const [telegramStatus, setTelegramStatus] = useState<TelegramStatus | null>(null);
   const [embyInfo, setEmbyInfo] = useState<EmbyInfo | null>(null);
+  const [embyStats, setEmbyStats] = useState<any>(null);
   const [myRequests, setMyRequests] = useState<MediaRequest[]>([]);
   const [lineSlots, setLineSlots] = useState<LineSlot[]>([]);
   const [linesRequireEmby, setLinesRequireEmby] = useState(false);
@@ -283,8 +284,6 @@ export default function DashboardPage() {
       setRegisterAvailability(registerSettled.value.data);
     }
 
-    // 仅在用户没主动卸载页面（signal 没 abort）的情况下提示。
-    // 多个失败合并成一条 toast，避免雪片式通知。
     if (failed.length > 0 && !signal?.aborted) {
       toast({
         title: t("dashboard.partialLoadFailed"),
@@ -299,6 +298,18 @@ export default function DashboardPage() {
     isLoading,
     error,
   } = useAsyncResource(loadDashboardData, { immediate: true });
+
+  // 独立拉取 Emby 统计（功能开关控制，避免污染主数据加载流程）
+  useEffect(() => {
+    if (!systemInfo?.features?.emby_stats) return;
+    const ctrl = new AbortController();
+    fetch(`/api/v1/system/emby-stats`, { signal: ctrl.signal })
+      .then((r) => r.json())
+      .then((data) => { if (data?.success && data?.data) setEmbyStats(data.data); })
+      .catch(() => {});
+    return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [systemInfo?.features?.emby_stats]);
 
   // ============== 线路延迟测试 ==============
   // 由后端 /system/emby-urls/probe 代发请求测速。前端直连 Emby 会被 CORS /
@@ -947,6 +958,13 @@ export default function DashboardPage() {
                 <Activity className="h-3 w-3" />
                 {t("dashboard.activeSessions", { count: embyInfo.active_sessions })}
               </p>
+            )}
+            {embyStats?.enabled && embyStats?.configured && (
+              <div className="grid grid-cols-3 gap-1 pt-1 border-t border-border/30 mt-1">
+                <div className="text-center"><p className="text-sm font-bold">{embyStats.movie_count ?? 0}</p><p className="text-[9px] text-muted-foreground">电影</p></div>
+                <div className="text-center"><p className="text-sm font-bold">{embyStats.series_count ?? 0}</p><p className="text-[9px] text-muted-foreground">剧集</p></div>
+                <div className="text-center"><p className="text-sm font-bold">{embyStats.episode_count ?? 0}</p><p className="text-[9px] text-muted-foreground">集数</p></div>
+              </div>
             )}
             {user?.emby_id ? (
               <p className="text-xs text-muted-foreground break-all" title={user.emby_id}>
