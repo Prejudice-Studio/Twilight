@@ -4,7 +4,7 @@ import { useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   MessageSquareMore, Loader2, Trash2, Edit2, AlertCircle, Clock, User,
-  CheckCircle2, Archive, RotateCcw, PlayCircle, Wrench, Plus, Pencil, Settings2,
+  CheckCircle2, Archive, RotateCcw, PlayCircle, Wrench, Plus, Pencil, Settings2, RefreshCw,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -192,6 +192,9 @@ export default function AdminTicketsPage() {
           } catch { setTypeMgmtTypes([]); }
           setTypeMgmtOpen(true);
         }}><Settings2 className="mr-1 h-3.5 w-3.5" />{t("adminTickets.manageTypes")}</Button>
+        <Button variant="outline" size="sm" onClick={() => void reload()} disabled={isLoading}>
+          <RefreshCw className={`mr-1 h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />刷新
+        </Button>
       </div>
 
       {error ? (
