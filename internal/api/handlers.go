@@ -1052,8 +1052,8 @@ func (a *App) handleSessions(w http.ResponseWriter, r *http.Request, _ Params) {
 		ok(w, "OK", []any{})
 		return
 	}
-	var remote []map[string]any
-	if err := a.embyGet(r.Context(), "/Sessions", &remote); err != nil {
+	remote, err := a.embySessionsSnapshot(r.Context(), false)
+	if err != nil {
 		failWithCode(w, http.StatusBadGateway, ErrEmbyRemoteSessionsFail, "failed to read Emby sessions")
 		return
 	}
@@ -1127,6 +1127,7 @@ func (a *App) handleBlockDevice(w http.ResponseWriter, r *http.Request, params P
 	if err := a.store().UpdateDevice(uid, deviceID, func(d *store.Device) { d.Blocked = true; d.Trusted = false }); statusFromError(w, err) {
 		return
 	}
+	a.audit(r, "block_device", auditCategoryForRole(current(r).User.Role), uid, map[string]any{"device_id": deviceID})
 	ok(w, "device blocked", nil)
 }
 
@@ -1136,6 +1137,7 @@ func (a *App) handleTrustDevice(w http.ResponseWriter, r *http.Request, params P
 	if err := a.store().UpdateDevice(uid, deviceID, func(d *store.Device) { d.Trusted = true; d.Blocked = false }); statusFromError(w, err) {
 		return
 	}
+	a.audit(r, "trust_device", auditCategoryForRole(current(r).User.Role), uid, map[string]any{"device_id": deviceID})
 	ok(w, "device trusted", nil)
 }
 
@@ -1145,9 +1147,11 @@ func (a *App) handleDeleteDevice(w http.ResponseWriter, r *http.Request, params 
 		failWithCode(w, http.StatusBadRequest, ErrDeviceIDRequired, "设备 ID 不能为空")
 		return
 	}
-	if err := a.store().DeleteDevice(current(r).User.UID, deviceID); statusFromError(w, err) {
+	uid := current(r).User.UID
+	if err := a.store().DeleteDevice(uid, deviceID); statusFromError(w, err) {
 		return
 	}
+	a.audit(r, "delete_device", auditCategoryForRole(current(r).User.Role), uid, map[string]any{"device_id": deviceID})
 	ok(w, "device removed", nil)
 }
 
@@ -1180,9 +1184,11 @@ func (a *App) handleAddIPBlacklist(w http.ResponseWriter, r *http.Request, _ Par
 	if hours > 0 {
 		expireAt = time.Now().Add(time.Duration(hours) * time.Hour).Unix()
 	}
-	if err := a.store().AddIPBlacklist(ip, stringValue(payload, "reason"), expireAt); statusFromError(w, err) {
+	reason := stringValue(payload, "reason")
+	if err := a.store().AddIPBlacklist(ip, reason, expireAt); statusFromError(w, err) {
 		return
 	}
+	a.audit(r, "add_ip_blacklist", "admin", 0, map[string]any{"ip": ip, "expire_at": expireAt, "reason": reason})
 	ok(w, "IP 已加入黑名单", nil)
 }
 
@@ -1195,6 +1201,7 @@ func (a *App) handleDeleteIPBlacklist(w http.ResponseWriter, r *http.Request, _ 
 	if err := a.store().RemoveIPBlacklist(ip); statusFromError(w, err) {
 		return
 	}
+	a.audit(r, "delete_ip_blacklist", "admin", 0, map[string]any{"ip": ip})
 	ok(w, "IP 已移出黑名单", nil)
 }
 
@@ -1241,12 +1248,23 @@ func (a *App) handleSystemInfo(w http.ResponseWriter, r *http.Request, _ Params)
 			"developer_mode":                a.store().DeveloperModeEnabled(),
 			"emby_stats":                    cfg.EmbyStatsEnabled,
 			"emby_playback_stats":           cfg.EmbyPlaybackStatsEnabled,
+			"emby_playback_stats_user":      cfg.EmbyPlaybackStatsEnabled && cfg.EmbyPlaybackStatsUserEnabled,
+			"emby_playback_user_global":     !cfg.EmbyPlaybackStatsUserSelfOnly,
+			"emby_playback_user_rankings":   cfg.EmbyPlaybackStatsUserRankings,
+			"emby_playback_item_rankings":   cfg.EmbyPlaybackStatsItemRankings,
+			"emby_playback_daily_summary":   cfg.EmbyPlaybackStatsDailySummary,
 		},
 		"auth_background_url": cfg.AuthBackgroundURL,
-		"limits":              map[string]any{"user_limit": cfg.UserLimit, "stream_limit": cfg.MaxStreams, "ticket_image_max_size": cfg.TicketImageMaxSize, "ticket_image_max_count": cfg.TicketImageMaxCount},
-		"telegram_bot":        a.publicTelegramBotInfo(r.Context()),
-		"setup":               a.setupStatusData(),
-		"telegram_links":      publicTelegramLinks(cfg.TelegramGroupIDs, cfg.TelegramChannelIDs),
+		"limits": map[string]any{
+			"user_limit":                        cfg.UserLimit,
+			"stream_limit":                      cfg.MaxStreams,
+			"ticket_image_max_size":             cfg.TicketImageMaxSize,
+			"ticket_image_max_count":            cfg.TicketImageMaxCount,
+			"emby_playback_stats_user_max_days": clamp(cfg.EmbyPlaybackStatsUserMaxDays, 1, 365),
+		},
+		"telegram_bot":   a.publicTelegramBotInfo(r.Context()),
+		"setup":          a.setupStatusData(),
+		"telegram_links": publicTelegramLinks(cfg.TelegramGroupIDs, cfg.TelegramChannelIDs),
 		"required_telegram_links": publicTelegramLinks(
 			requiredTelegramLinkIDs(cfg.TelegramGroupIDs, cfg.TelegramForceBindGroup),
 			requiredTelegramLinkIDs(cfg.TelegramChannelIDs, cfg.TelegramForceBindChannel),
@@ -1512,7 +1530,7 @@ func (a *App) embyOverview(ctx context.Context) map[string]any {
 	if online {
 		embyCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
 		defer cancel()
-		_ = a.embyGet(embyCtx, "/Sessions", &sessions)
+		sessions, _ = a.embySessionsSnapshot(embyCtx, false)
 	}
 	return map[string]any{
 		"online":           online,
@@ -1521,7 +1539,7 @@ func (a *App) embyOverview(ctx context.Context) map[string]any {
 		"server_name":      firstNonEmpty(asString(info["ServerName"]), asString(info["Name"])),
 		"version":          firstNonEmpty(asString(info["Version"]), "unknown"),
 		"operating_system": asString(info["OperatingSystem"]),
-		"active_sessions":  len(sessions),
+		"active_sessions":  countEmbyPlayingSessions(sessions),
 		"total_sessions":   len(sessions),
 	}
 }
@@ -1563,6 +1581,7 @@ func (a *App) handleEmbyURLs(w http.ResponseWriter, r *http.Request, _ Params) {
 }
 
 func (a *App) handlePublicConfig(w http.ResponseWriter, r *http.Request, _ Params) {
+	playbackPolicy := playbackStatsViewerPolicy(*a.cfg(), current(r).User.Role == store.RoleAdmin)
 	ok(w, "OK", map[string]any{
 		"upload_limit":          a.cfg().MaxUploadSize,
 		"bangumi_sync_enabled":  a.cfg().BangumiEnabled,
@@ -1580,6 +1599,10 @@ func (a *App) handlePublicConfig(w http.ResponseWriter, r *http.Request, _ Param
 		"signin": signinConfigPayload(*a.cfg()),
 		"invite": map[string]any{"enabled": a.cfg().InviteEnabled},
 		"email":  map[string]any{"enabled": emailConfigured(a.cfg()), "force_bind": a.cfg().EmailForceBind},
+		"emby_playback_stats": map[string]any{
+			"enabled": a.cfg().EmbyPlaybackStatsEnabled && playbackPolicy.UserEnabled,
+			"policy":  playbackPolicy,
+		},
 	})
 }
 
@@ -1696,10 +1719,10 @@ func (a *App) handleEmbyStatus(w http.ResponseWriter, r *http.Request, _ Params)
 	}
 	sessions := []map[string]any{}
 	if online {
-		_ = a.embyGet(r.Context(), "/Sessions", &sessions)
+		sessions, _ = a.embySessionsSnapshot(r.Context(), false)
 	}
 	u := current(r).User
-	ok(w, "OK", map[string]any{"online": online, "server_name": firstNonEmpty(asString(info["ServerName"]), asString(info["Name"])), "version": firstNonEmpty(asString(info["Version"]), "unknown"), "operating_system": asString(info["OperatingSystem"]), "active_sessions": len(sessions), "total_sessions": len(sessions), "is_synced": u.EmbyID != "", "is_active": u.Active, "can_unbind": a.userCanSelfUnbindEmby(u), "message": "OK"})
+	ok(w, "OK", map[string]any{"online": online, "server_name": firstNonEmpty(asString(info["ServerName"]), asString(info["Name"])), "version": firstNonEmpty(asString(info["Version"]), "unknown"), "operating_system": asString(info["OperatingSystem"]), "active_sessions": countEmbyPlayingSessions(sessions), "total_sessions": len(sessions), "is_synced": u.EmbyID != "", "is_active": u.Active, "can_unbind": a.userCanSelfUnbindEmby(u), "message": "OK"})
 }
 
 func (a *App) handleDeprecatedEmbyURLs(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -1735,18 +1758,12 @@ func (a *App) handleSessionCount(w http.ResponseWriter, r *http.Request, _ Param
 		ok(w, "OK", map[string]any{"active": 0, "total": 0})
 		return
 	}
-	var sessions []map[string]any
-	if err := a.embyGet(r.Context(), "/Sessions", &sessions); err != nil {
+	sessions, err := a.embySessionsSnapshot(r.Context(), false)
+	if err != nil {
 		failWithCode(w, http.StatusBadGateway, ErrEmbyRemoteSessionsFail, "failed to read Emby sessions")
 		return
 	}
-	active := 0
-	for _, session := range sessions {
-		if boolish(session["IsActive"]) || session["NowPlayingItem"] != nil {
-			active++
-		}
-	}
-	ok(w, "OK", map[string]any{"active": active, "total": len(sessions)})
+	ok(w, "OK", map[string]any{"active": countEmbyPlayingSessions(sessions), "total": len(sessions)})
 }
 
 func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -2853,8 +2870,21 @@ func (a *App) handleExportUsers(w http.ResponseWriter, r *http.Request, _ Params
 
 func (a *App) handleExportPlayback(w http.ResponseWriter, r *http.Request, _ Params) {
 	days := queryInt(r, "days", 30)
+	fromText := strings.TrimSpace(r.URL.Query().Get("from"))
+	toText := strings.TrimSpace(r.URL.Query().Get("to"))
 	since := int64(0)
-	if days > 0 {
+	until := time.Now().Unix()
+	if fromText != "" && toText != "" {
+		from, err := time.Parse("2006-01-02", fromText)
+		if err == nil {
+			since = from.Unix()
+		}
+		to, err := time.Parse("2006-01-02", toText)
+		if err == nil {
+			until = to.AddDate(0, 0, 1).Unix()
+		}
+	}
+	if since == 0 && days > 0 {
 		since = time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
 	}
 	records := a.store().PlaybackRecords(0, since, 10000)
@@ -2864,17 +2894,25 @@ func (a *App) handleExportPlayback(w http.ResponseWriter, r *http.Request, _ Par
 	}
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", "attachment; filename=playback_stats.csv")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	cw := csv.NewWriter(w)
-	_ = cw.Write([]string{"uid", "username", "item_id", "title", "media_type", "duration_seconds", "played_at"})
+	_ = cw.Write([]string{"uid", "username", "item_id", "title", "series_name", "media_type", "duration_seconds", "duration_str", "played_at", "played_time"})
 	for _, record := range records {
+		if record.PlayedAt >= until {
+			continue
+		}
+		playedTime := time.Unix(record.PlayedAt, 0).Format("2006-01-02 15:04:05")
 		_ = cw.Write([]string{
 			strconv.FormatInt(record.UID, 10),
 			csvSafe(usernameByUID[record.UID]),
 			csvSafe(record.ItemID),
 			csvSafe(record.Title),
+			csvSafe(record.SeriesName),
 			csvSafe(record.MediaType),
 			strconv.FormatInt(record.Duration, 10),
+			formatSeconds(record.Duration),
 			strconv.FormatInt(record.PlayedAt, 10),
+			playedTime,
 		})
 	}
 	cw.Flush()

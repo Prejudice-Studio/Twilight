@@ -1,6 +1,13 @@
 package store
 
-import "time"
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+)
 
 const maxStoredPlaybackRecords = 10000
 
@@ -51,12 +58,16 @@ func (s *Store) SyncEmbyActivityLogs(entries []EmbyActivityLog) (int, error) {
 			}
 			s.state.NextEmbyActivityLogID = max + 1
 		}
-		existing := map[int64]bool{}
-		for _, e := range s.state.EmbyActivityLogs {
-			existing[e.EmbyLogID] = true
+		existing := map[int64]int{}
+		for i, e := range s.state.EmbyActivityLogs {
+			existing[e.EmbyLogID] = i
 		}
 		for _, entry := range entries {
-			if existing[entry.EmbyLogID] {
+			if index, ok := existing[entry.EmbyLogID]; ok {
+				current := s.state.EmbyActivityLogs[index]
+				entry.ID = current.ID
+				entry.CreatedAt = current.CreatedAt
+				s.state.EmbyActivityLogs[index] = entry
 				continue
 			}
 			if entry.ID == 0 {
@@ -67,9 +78,15 @@ func (s *Store) SyncEmbyActivityLogs(entries []EmbyActivityLog) (int, error) {
 				entry.CreatedAt = time.Now().Unix()
 			}
 			s.state.EmbyActivityLogs = append(s.state.EmbyActivityLogs, entry)
-			existing[entry.EmbyLogID] = true
+			existing[entry.EmbyLogID] = len(s.state.EmbyActivityLogs) - 1
 			added++
 		}
+		sort.Slice(s.state.EmbyActivityLogs, func(i, j int) bool {
+			if s.state.EmbyActivityLogs[i].Date != s.state.EmbyActivityLogs[j].Date {
+				return s.state.EmbyActivityLogs[i].Date < s.state.EmbyActivityLogs[j].Date
+			}
+			return s.state.EmbyActivityLogs[i].EmbyLogID < s.state.EmbyActivityLogs[j].EmbyLogID
+		})
 		if len(s.state.EmbyActivityLogs) > maxEmbyActivityLogs {
 			cut := len(s.state.EmbyActivityLogs) - maxEmbyActivityLogs
 			s.state.EmbyActivityLogs = s.state.EmbyActivityLogs[cut:]
@@ -132,8 +149,6 @@ func (s *Store) AddPlaybackRecordIdempotent(record PlaybackRecord) (bool, error)
 	if record.PlayedAt == 0 {
 		record.PlayedAt = time.Now().Unix()
 	}
-	// 只对 (UID, ItemID, PlayedAt) 三元组都齐的记录做幂等检查。ItemID 为空
-	// 是 admin 手动注入的特殊路径（"测试事件"），保留旧行为允许多写。
 	if record.UID != 0 && record.ItemID != "" {
 		for _, existing := range s.state.PlaybackRecords {
 			if existing.UID == record.UID && existing.ItemID == record.ItemID && existing.PlayedAt == record.PlayedAt {
@@ -148,10 +163,25 @@ func (s *Store) AddPlaybackRecordIdempotent(record PlaybackRecord) (bool, error)
 	if err := s.saveLocked(); err != nil {
 		return false, err
 	}
+	if s.db != nil && record.UID != 0 && record.ItemID != "" {
+		inserted, dbErr := insertPlaybackRecordDB(s.db, record)
+		if dbErr != nil {
+			return inserted, nil
+		}
+	}
 	return true, nil
 }
 
 func (s *Store) PlaybackRecords(uid int64, since int64, limit int) []PlaybackRecord {
+	s.mu.RLock()
+	db := s.db
+	s.mu.RUnlock()
+	if db != nil {
+		records, err := queryPlaybackRecordsDB(db, uid, since, limit)
+		if err == nil && len(records) > 0 {
+			return records
+		}
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if limit <= 0 || limit > maxStoredPlaybackRecords {
@@ -171,6 +201,94 @@ func (s *Store) PlaybackRecords(uid int64, since int64, limit int) []PlaybackRec
 		}
 	}
 	return out
+}
+
+func (s *Store) PlaybackRecordSummary(since int64) (totalPlays int, totalDuration int64, uniqueUsers int, err error) {
+	if s.db != nil {
+		err = queryPlaybackSummaryDB(s.db, since, &totalPlays, &totalDuration, &uniqueUsers)
+		if err == nil {
+			return
+		}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	users := map[int64]bool{}
+	for _, record := range s.state.PlaybackRecords {
+		if since > 0 && record.PlayedAt < since {
+			continue
+		}
+		totalPlays++
+		totalDuration += record.Duration
+		users[record.UID] = true
+	}
+	uniqueUsers = len(users)
+	return
+}
+
+func queryPlaybackRecordsDB(db *sql.DB, uid int64, since int64, limit int) ([]PlaybackRecord, error) {
+	var args []any
+	var clauses []string
+	if uid > 0 {
+		clauses = append(clauses, fmt.Sprintf("uid = $%d", len(args)+1))
+		args = append(args, uid)
+	}
+	if since > 0 {
+		clauses = append(clauses, fmt.Sprintf("played_at >= $%d", len(args)+1))
+		args = append(args, since)
+	}
+	where := ""
+	if len(clauses) > 0 {
+		where = "WHERE " + strings.Join(clauses, " AND ")
+	}
+	if limit <= 0 {
+		limit = 10000
+	}
+	query := fmt.Sprintf(`SELECT uid, item_id, title, series_name, media_type, index_number, duration, played_at
+FROM twilight_playback_records %s ORDER BY played_at DESC LIMIT $%d`, where, len(args)+1)
+	args = append(args, limit)
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var records []PlaybackRecord
+	for rows.Next() {
+		var r PlaybackRecord
+		if err := rows.Scan(&r.UID, &r.ItemID, &r.Title, &r.SeriesName, &r.MediaType, &r.IndexNumber, &r.Duration, &r.PlayedAt); err != nil {
+			return records, err
+		}
+		records = append(records, r)
+	}
+	return records, rows.Err()
+}
+
+func queryPlaybackSummaryDB(db *sql.DB, since int64, totalPlays *int, totalDuration *int64, uniqueUsers *int) error {
+	query := `SELECT COALESCE(COUNT(*), 0), COALESCE(SUM(duration), 0), COALESCE(COUNT(DISTINCT uid), 0)
+FROM twilight_playback_records WHERE played_at >= $1`
+	return db.QueryRow(query, since).Scan(totalPlays, totalDuration, uniqueUsers)
+}
+
+func insertPlaybackRecordDB(db *sql.DB, record PlaybackRecord) (bool, error) {
+	result, err := db.Exec(`INSERT INTO twilight_playback_records (uid, item_id, title, series_name, media_type, index_number, duration, played_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (uid, item_id, played_at) DO NOTHING`,
+		record.UID, record.ItemID, record.Title, record.SeriesName, record.MediaType, record.IndexNumber, record.Duration, record.PlayedAt)
+	if err != nil {
+		return false, err
+	}
+	n, _ := result.RowsAffected()
+	return n > 0, nil
+}
+
+func (s *Store) DeletePlaybackRecordsBefore(ctx context.Context, cutoff int64) (int64, error) {
+	if s.db == nil {
+		return 0, nil
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM twilight_playback_records WHERE played_at < $1`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 func minInt(a, b int) int {

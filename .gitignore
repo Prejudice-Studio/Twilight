@@ -240,3 +240,4 @@ docs/AUDIT_REPORT.md
 .pulumi/
 # Kubernetes 本地配置
 kubeconfig*
+/.codex-reference-twilight

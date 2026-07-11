@@ -127,8 +127,8 @@ func (a *App) handleEmbyBroadcast(w http.ResponseWriter, r *http.Request, _ Para
 	for _, id := range stringSlice(payload["user_ids"]) {
 		userIDs[id] = true
 	}
-	var sessions []map[string]any
-	if err := a.embyGet(r.Context(), "/Sessions", &sessions); err != nil {
+	sessions, err := a.embySessionsSnapshot(r.Context(), false)
+	if err != nil {
 		failWithCode(w, http.StatusBadGateway, ErrEmbyRemoteSessionsFail, "读取 Emby 会话失败，请稍后重试或检查上游 Emby 状态")
 		return
 	}

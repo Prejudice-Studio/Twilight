@@ -15,7 +15,16 @@ import (
 	"github.com/prejudice-studio/twilight/internal/store"
 )
 
-const schedulerRunningWindowSeconds = int64(30 * 60)
+const (
+	schedulerRunningWindowSeconds      = int64(30 * 60)
+	schedulerAutoConcurrency           = 4
+	schedulerMaxPersistedLogLines      = 100
+	schedulerMaxPersistedTextRunes     = 1024
+	schedulerMaxPersistedErrorRunes    = 2048
+	schedulerMaxPersistedSummaryItems  = 100
+	schedulerMaxPersistedSummaryDepth  = 8
+	schedulerSummaryTruncatedIndicator = "details_truncated"
+)
 
 func (a *App) RunScheduler(ctx context.Context) error {
 	zap.L().Info("scheduler runner started")
@@ -71,46 +80,58 @@ func (a *App) runDueSchedulerJobs(ctx context.Context) {
 		return
 	}
 	now := time.Now()
-	// 先做不触碰 SchedulerRuns 的廉价过滤（manual_only / enabled / trigger
-	// 类型），收集仍需判定 due 的 (jobID, spec)，再一次性 batch 拉取 run
-	// snapshot。之前对每个 job 单独调用 schedulerJobDue → 每个 job 一次
-	// SchedulerRunSnapshot（独立 RLock + 全量扫描 ≤200 条 SchedulerRuns），
-	// 13 个 job 就是 13 次 RLock + 13 次全量扫描，O(N*M)，每 30s 一轮。
-	// 改为单次 RLock + 单次扫描按 jobID 分桶（与 handleSchedulerJobs 的
-	// BatchSchedulerRunSnapshots 路径对齐），降为 O(N)。
-	type dueCandidate struct {
-		jobID string
-		spec  map[string]any
-	}
-	candidates := make([]dueCandidate, 0, len(schedulerJobs))
+	jobIDs := make([]string, 0, len(schedulerJobs))
+	activeJobIDs := make(map[string]bool)
 	for _, job := range schedulerJobs {
 		jobID := fmt.Sprint(job["id"])
 		if jobID == "" || boolish(job["manual_only"]) || !schedulerJobEnabledByConfig(cfg.SystemUpdateEnabled, job) {
 			continue
 		}
-		spec := a.schedulerTriggerSpec(jobID)
-		if strings.EqualFold(asString(spec["type"]), "manual") {
-			continue
+		jobIDs = append(jobIDs, jobID)
+		if a.schedulerJobRunning(jobID) {
+			activeJobIDs[jobID] = true
 		}
-		candidates = append(candidates, dueCandidate{jobID: jobID, spec: spec})
 	}
-	if len(candidates) == 0 {
+	if len(jobIDs) == 0 {
 		return
 	}
-	jobIDs := make([]string, 0, len(candidates))
-	for _, c := range candidates {
-		jobIDs = append(jobIDs, c.jobID)
+	overview, err := a.store().SchedulerStateOverview(jobIDs, 20, activeJobIDs, now.Unix()-schedulerRunningWindowSeconds, now.Unix())
+	if err != nil {
+		zap.L().Warn("scheduler state refresh failed", zap.Error(err))
+		return
 	}
-	snapshots := a.store().BatchSchedulerRunSnapshots(jobIDs, 20)
-	for _, c := range candidates {
-		if !schedulerJobDueFromSnapshot(c.spec, now, snapshots[c.jobID]) {
+	dueIDs := make([]string, 0, len(jobIDs))
+	for _, jobID := range jobIDs {
+		spec := a.schedulerDefaultTriggerSpec(jobID)
+		if schedule, ok := overview.Schedules[jobID]; ok && len(schedule.TriggerSpec) > 0 {
+			spec = schedule.TriggerSpec
+		}
+		if schedulerTriggerDisabled(spec) || !schedulerJobDueFromSnapshot(spec, now, overview.Runs[jobID]) {
 			continue
 		}
-		// runScheduledJob 现在自己负责 fork 内部 goroutine：daemon 在拿到锁 +
-		// 落库 auto 记录之前不返回，下一轮 tick 判定 due 时 PG 上的 auto 记录
-		// 已经可见——之前 `go a.runScheduledJob` 让 INSERT 还没落地 ticker 就
-		// 推进了 30s，慢 PG 上偶发同 job 二次起跑。
-		a.runScheduledJob(ctx, c.jobID)
+		dueIDs = append(dueIDs, jobID)
+	}
+	if len(dueIDs) == 0 {
+		return
+	}
+	sem := make(chan struct{}, schedulerAutoConcurrency)
+	for _, jobID := range dueIDs {
+		sem <- struct{}{}
+		go func(id string) {
+			defer func() {
+				<-sem
+				if r := recover(); r != nil {
+					zap.L().Error("scheduler auto job launch panic",
+						zap.String("job_id", id),
+						zap.String("panic", redactSensitiveText(fmt.Sprintf("%v", r))))
+				}
+			}()
+			a.runScheduledJob(ctx, id)
+		}(jobID)
+	}
+	// Block until all due jobs have completed their lock+insert phase.
+	for range schedulerAutoConcurrency {
+		sem <- struct{}{}
 	}
 }
 
@@ -170,10 +191,15 @@ func (a *App) runScheduledJob(ctx context.Context, jobID string) {
 		return
 	}
 	started := time.Now().Unix()
-	run, err := a.store().AddSchedulerRunReturning(store.SchedulerRun{JobID: jobID, Type: "auto", Trigger: "scheduler", Status: "running", Message: "running", StartedAt: started})
+	run, acquired, err := a.store().TryStartSchedulerRun(store.SchedulerRun{JobID: jobID, Type: "auto", Trigger: "scheduler", Status: "running", Message: "running", StartedAt: started}, started-schedulerRunningWindowSeconds, started)
 	if err != nil {
 		finish()
 		zap.L().Warn("scheduler job run record create failed", zap.String("job_id", jobID), zap.Error(err))
+		return
+	}
+	if !acquired {
+		finish()
+		zap.L().Debug("scheduler job already running in shared state", zap.String("job_id", jobID))
 		return
 	}
 	processRun.runID.Store(run.ID)
@@ -190,10 +216,14 @@ func (a *App) startManualSchedulerJob(ctx context.Context, jobID string, params 
 		return store.SchedulerRun{}, false
 	}
 	started := time.Now().Unix()
-	run, err := a.store().AddSchedulerRunReturning(store.SchedulerRun{JobID: jobID, Type: "manual", Trigger: "manual", Status: "running", Message: "running", StartedAt: started})
+	run, acquired, err := a.store().TryStartSchedulerRun(store.SchedulerRun{JobID: jobID, Type: "manual", Trigger: "manual", Status: "running", Message: "running", StartedAt: started}, started-schedulerRunningWindowSeconds, started)
 	if err != nil {
 		finish()
 		zap.L().Warn("manual scheduler job run record create failed", zap.String("job_id", jobID), zap.Error(err))
+		return store.SchedulerRun{}, false
+	}
+	if !acquired {
+		finish()
 		return store.SchedulerRun{}, false
 	}
 	processRun.runID.Store(run.ID)
@@ -255,7 +285,7 @@ func schedulerFinishedRun(jobID, runType, trigger string, started int64, summary
 		// 显示。job 内部错误链常包含 git remote URL（含明文 PAT）、emby
 		// /Auth 响应（含 password fragment）、telegram API 错误（含 bot
 		// token URL）等敏感字段。统一走 redactSensitiveText。
-		message = redactSensitiveText(err.Error())
+		message, _ = sanitizeSchedulerText(err.Error(), schedulerMaxPersistedErrorRunes)
 		errText = message
 		if errors.Is(err, context.Canceled) {
 			message = "job terminated by administrator"
@@ -287,7 +317,11 @@ func sanitizeSchedulerSummary(summary map[string]any) map[string]any {
 	if summary == nil {
 		return nil
 	}
-	sanitized, _ := sanitizeSchedulerValue(summary).(map[string]any)
+	sanitizedValue, truncated := sanitizeSchedulerValue(summary, 0)
+	sanitized, _ := sanitizedValue.(map[string]any)
+	if truncated {
+		sanitized[schedulerSummaryTruncatedIndicator] = true
+	}
 	return sanitized
 }
 
@@ -295,49 +329,98 @@ func sanitizeSchedulerLogs(logs []string) []string {
 	if len(logs) == 0 {
 		return nil
 	}
-	out := make([]string, 0, len(logs))
-	for _, logLine := range logs {
-		out = append(out, redactSensitiveText(logLine))
+	limit := len(logs)
+	if limit > schedulerMaxPersistedLogLines {
+		limit = schedulerMaxPersistedLogLines - 1
+	}
+	out := make([]string, 0, min(len(logs), schedulerMaxPersistedLogLines))
+	for _, logLine := range logs[:limit] {
+		line, _ := sanitizeSchedulerText(logLine, schedulerMaxPersistedTextRunes)
+		out = append(out, line)
+	}
+	if len(logs) > limit {
+		out = append(out, fmt.Sprintf("[truncated %d additional scheduler log lines]", len(logs)-limit))
 	}
 	return out
 }
 
-func sanitizeSchedulerValue(value any) any {
+func sanitizeSchedulerText(value string, limit int) (string, bool) {
+	value = redactSensitiveText(value)
+	if limit <= 0 || len([]rune(value)) <= limit {
+		return value, false
+	}
+	return truncateString(value, limit) + " [truncated]", true
+}
+
+func sanitizeSchedulerValue(value any, depth int) (any, bool) {
+	if depth >= schedulerMaxPersistedSummaryDepth {
+		switch value.(type) {
+		case []string:
+			return []string{"[truncated]"}, true
+		case []any:
+			return []any{"[truncated]"}, true
+		case []map[string]any:
+			return []map[string]any{{schedulerSummaryTruncatedIndicator: true}}, true
+		case map[string]any:
+			return map[string]any{schedulerSummaryTruncatedIndicator: true}, true
+		case map[string]string:
+			return map[string]string{schedulerSummaryTruncatedIndicator: "true"}, true
+		}
+	}
 	switch v := value.(type) {
 	case string:
-		return redactSensitiveText(v)
+		return sanitizeSchedulerText(v, schedulerMaxPersistedTextRunes)
 	case []string:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			out = append(out, redactSensitiveText(item))
+		limit := min(len(v), schedulerMaxPersistedSummaryItems)
+		out := make([]string, 0, limit)
+		truncated := len(v) > limit
+		for _, item := range v[:limit] {
+			sanitized, itemTruncated := sanitizeSchedulerText(item, schedulerMaxPersistedTextRunes)
+			out = append(out, sanitized)
+			truncated = truncated || itemTruncated
 		}
-		return out
+		return out, truncated
 	case []any:
-		out := make([]any, 0, len(v))
-		for _, item := range v {
-			out = append(out, sanitizeSchedulerValue(item))
+		limit := min(len(v), schedulerMaxPersistedSummaryItems)
+		out := make([]any, 0, limit)
+		truncated := len(v) > limit
+		for _, item := range v[:limit] {
+			sanitized, itemTruncated := sanitizeSchedulerValue(item, depth+1)
+			out = append(out, sanitized)
+			truncated = truncated || itemTruncated
 		}
-		return out
+		return out, truncated
 	case []map[string]any:
-		out := make([]map[string]any, 0, len(v))
-		for _, item := range v {
-			out = append(out, sanitizeSchedulerSummary(item))
+		limit := min(len(v), schedulerMaxPersistedSummaryItems)
+		out := make([]map[string]any, 0, limit)
+		truncated := len(v) > limit
+		for _, item := range v[:limit] {
+			sanitized, itemTruncated := sanitizeSchedulerValue(item, depth+1)
+			mapped, _ := sanitized.(map[string]any)
+			out = append(out, mapped)
+			truncated = truncated || itemTruncated
 		}
-		return out
+		return out, truncated
 	case map[string]any:
 		out := make(map[string]any, len(v))
+		truncated := false
 		for key, item := range v {
-			out[key] = sanitizeSchedulerValue(item)
+			sanitized, itemTruncated := sanitizeSchedulerValue(item, depth+1)
+			out[key] = sanitized
+			truncated = truncated || itemTruncated
 		}
-		return out
+		return out, truncated
 	case map[string]string:
 		out := make(map[string]string, len(v))
+		truncated := false
 		for key, item := range v {
-			out[key] = redactSensitiveText(item)
+			sanitized, itemTruncated := sanitizeSchedulerText(item, schedulerMaxPersistedTextRunes)
+			out[key] = sanitized
+			truncated = truncated || itemTruncated
 		}
-		return out
+		return out, truncated
 	default:
-		return value
+		return value, false
 	}
 }
 

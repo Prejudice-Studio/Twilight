@@ -2,6 +2,8 @@
 
 本文是 Twilight 后端 `/api/v1` 接口的速查索引，用于快速核对每条路由的请求方法、路径、鉴权级别和所属模块。本文严格依据 `internal/api/routes.go` 中 `a.add(method, path, authLevel, handler)` 的真实注册逐条整理；详细的请求/响应示例见 [后端 API 详参](../reference/backend-api.md)，外部 API Key 接入说明见 [API Key 外部接入](../reference/api-key.md)。
 
+> 播放统计接口基于已持久化的 `PlaybackRecords` 聚合；Emby ActivityLog 同步会配对播放开始/停止事件并写入数据库。在线人数只统计 Emby `/Sessions` 中带 `NowPlayingItem` 的正在播放会话。
+
 ## 鉴权标记
 
 后端在 `internal/api/app.go` 中以 `AuthLevel` 枚举区分四类鉴权来源，路由表里的级别会直接映射为本文表格中的标记。

@@ -2,6 +2,10 @@
 
 本文介绍 Twilight Go 后端的目录结构、启动方式、配置解析规则、环境变量、状态存储模型以及运行运维相关能力，供部署和二次开发参考。后端入口为 `cmd/twilight`，按 Linux + systemd 部署设计，前端调用路径统一为 `/api/v1/*`。
 
+## 播放统计持久化
+
+Emby 播放统计同步 `/System/ActivityLog/Entries` 后，会按 `playback.start` / `playback.stop` 配对并写入 `store.PlaybackRecords`。统计、导出、保留策略与 Bangumi 同步应优先读取这些持久化记录；在线人数只统计 `/Sessions` 中带 `NowPlayingItem` 的正在播放会话。
+
 ## 目录结构
 
 | 路径 | 说明 |

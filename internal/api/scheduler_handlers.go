@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/prejudice-studio/twilight/internal/store"
 	"go.uber.org/zap"
 )
 
@@ -40,13 +41,19 @@ func (a *App) handleSchedulerJobs(w http.ResponseWriter, r *http.Request, _ Para
 	for _, job := range schedulerJobs {
 		jobIDs = append(jobIDs, fmt.Sprint(job["id"]))
 	}
-	snapshots := a.store().BatchSchedulerRunSnapshots(jobIDs, 20)
+	activeJobIDs := a.schedulerActiveJobIDs(jobIDs)
+	overview, err := a.store().SchedulerStateOverview(jobIDs, 20, activeJobIDs, now.Unix()-schedulerRunningWindowSeconds, now.Unix())
+	if err != nil {
+		zap.L().Warn("scheduler overview refresh failed; using in-memory snapshot", zap.Error(err))
+		overview.Runs = a.store().BatchSchedulerRunSnapshots(jobIDs, 20)
+		overview.Schedules = a.store().SchedulerSchedules(jobIDs)
+	}
 
 	for i, job := range schedulerJobs {
 		item := cloneMap(job)
 		jobID := jobIDs[i]
 		var spec map[string]any
-		if schedule, okSchedule := a.store().SchedulerSchedule(jobID); okSchedule {
+		if schedule, okSchedule := overview.Schedules[jobID]; okSchedule {
 			spec = schedule.TriggerSpec
 			item["is_custom"] = schedule.IsCustom
 			item["runtime_params"] = a.schedulerRuntimeParamsFromSchedule(jobID, schedule.RuntimeParams)
@@ -58,17 +65,12 @@ func (a *App) handleSchedulerJobs(w http.ResponseWriter, r *http.Request, _ Para
 		item["trigger_spec"] = spec
 		item["default_trigger_spec"] = a.schedulerDefaultTriggerSpec(jobID)
 		item["last_run"] = nil
-		snapshot := snapshots[jobID]
-		running := a.schedulerJobRunning(jobID) || schedulerSnapshotRecentlyRunning(snapshot, now)
-		a.reconcileSchedulerRunState(jobID, running, now)
-		if !running {
-			// After reconciliation marks interrupted runs, re-fetch only this one.
-			snapshot = a.store().SchedulerRunSnapshot(jobID, 20)
-		}
+		snapshot := overview.Runs[jobID]
+		running := activeJobIDs[jobID] || schedulerSnapshotRecentlyRunning(snapshot, now)
 		item["next_run_at"] = zeroNil(schedulerNextRunAtFromSnapshot(spec, now, snapshot))
 		item["auto_disabled"] = schedulerTriggerDisabled(spec)
 		if runs := snapshot.Runs; len(runs) > 0 {
-			item["last_run"] = runs[0]
+			item["last_run"] = schedulerRunListView(runs[0])
 			if snapshot.HasLatestAuto {
 				item["last_auto_run_at"] = zeroNil(snapshot.LatestAuto.StartedAt)
 			}
@@ -96,8 +98,7 @@ func (a *App) handleSchedulerTerminate(w http.ResponseWriter, r *http.Request, p
 	ok(w, "job termination requested", map[string]any{"job_id": jobID, "terminated": true})
 }
 func (a *App) handleSchedulerLastRun(w http.ResponseWriter, r *http.Request, params Params) {
-	a.reconcileSchedulerRunState(params["job_id"], a.schedulerJobRunning(params["job_id"]), time.Now())
-	runs := a.store().SchedulerRuns(params["job_id"], 1)
+	runs := a.schedulerRunsForRead(params["job_id"], 1, time.Now())
 	var last any
 	if len(runs) > 0 {
 		last = runs[0]
@@ -105,8 +106,7 @@ func (a *App) handleSchedulerLastRun(w http.ResponseWriter, r *http.Request, par
 	ok(w, "OK", map[string]any{"job_id": params["job_id"], "last_run": last})
 }
 func (a *App) handleSchedulerHistory(w http.ResponseWriter, r *http.Request, params Params) {
-	a.reconcileSchedulerRunState(params["job_id"], a.schedulerJobRunning(params["job_id"]), time.Now())
-	runs := a.store().SchedulerRuns(params["job_id"], queryInt(r, "limit", 20))
+	runs := a.schedulerRunsForRead(params["job_id"], queryInt(r, "limit", 20), time.Now())
 	ok(w, "OK", map[string]any{"job_id": params["job_id"], "history": runs, "total": len(runs)})
 }
 func (a *App) handleSchedulerSchedule(w http.ResponseWriter, r *http.Request, params Params) {
@@ -217,6 +217,10 @@ func (a *App) normalizeSchedulerRuntimeParams(jobID string, params map[string]an
 		return map[string]any{"dry_run": boolValue(params, "dry_run", true), "max_per_run": clamp(intValue(params, "max_per_run", 200), 1, 500)}
 	case "enforce_group_membership":
 		return map[string]any{"auto_enable_rejoined": boolValue(params, "auto_enable_rejoined", a.cfg().TelegramAutoEnableRejoined)}
+	case "emby_sync":
+		return map[string]any{"max_users": clamp(intValue(params, "max_users", 1000), 1, 50000)}
+	case "sync_emby_activity_logs":
+		return map[string]any{"since_hours": clamp(intValue(params, "since_hours", 24), 1, 720)}
 	default:
 		return nil
 	}
@@ -231,8 +235,32 @@ func (a *App) reconcileSchedulerRunState(jobID string, running bool, now time.Ti
 	if running {
 		return
 	}
-	cutoff := now.Unix() - schedulerRunningWindowSeconds
-	if _, err := a.store().MarkInterruptedSchedulerRuns(jobID, cutoff, now.Unix()); err != nil {
+	if _, err := a.store().SchedulerStateOverview([]string{jobID}, 1, nil, now.Unix()-schedulerRunningWindowSeconds, now.Unix()); err != nil {
 		zap.L().Warn("scheduler run reconciliation failed", zap.String("job_id", jobID), zap.Error(err))
 	}
+}
+
+func (a *App) schedulerActiveJobIDs(jobIDs []string) map[string]bool {
+	active := make(map[string]bool)
+	for _, jobID := range jobIDs {
+		if a.schedulerJobRunning(jobID) {
+			active[jobID] = true
+		}
+	}
+	return active
+}
+
+func (a *App) schedulerRunsForRead(jobID string, limit int, now time.Time) []store.SchedulerRun {
+	active := a.schedulerActiveJobIDs([]string{jobID})
+	overview, err := a.store().SchedulerStateOverview([]string{jobID}, limit, active, now.Unix()-schedulerRunningWindowSeconds, now.Unix())
+	if err != nil {
+		zap.L().Warn("scheduler run refresh failed; using in-memory history", zap.String("job_id", jobID), zap.Error(err))
+		return a.store().SchedulerRuns(jobID, limit)
+	}
+	return overview.Runs[jobID].Runs
+}
+
+func schedulerRunListView(run store.SchedulerRun) store.SchedulerRun {
+	run.Logs = nil
+	return run
 }

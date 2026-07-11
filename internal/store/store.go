@@ -313,6 +313,8 @@ type AuditLog struct {
 	Username  string         `json:"username"`             // 操作者用户名（快照）
 	Action    string         `json:"action"`               // 操作动作，如 "create_regcode"、"disable_user"
 	Category  string         `json:"category"`             // 分类：admin / user / system
+	Source    string         `json:"source,omitempty"`     // 来源：http / telegram / scheduler / system
+	Method    string         `json:"method,omitempty"`     // HTTP 方法；非 HTTP 来源为空
 	TargetUID int64          `json:"target_uid,omitempty"` // 被操作对象 UID（如有）
 	Detail    map[string]any `json:"detail,omitempty"`     // 操作详情（结构化）
 	IP        string         `json:"ip,omitempty"`         // 操作者 IP
@@ -425,15 +427,16 @@ type PlaybackSession struct {
 }
 
 type EmbyActivityLog struct {
-	ID          int64  `json:"id"`
-	EmbyLogID   int64  `json:"emby_log_id"`
-	Type        string `json:"type"`
-	Name        string `json:"name"`
-	UserID      string `json:"user_id"`
-	UserName    string `json:"user_name"`
-	Overview    string `json:"overview,omitempty"`
-	Date        int64  `json:"date"`
-	CreatedAt   int64  `json:"created_at"`
+	ID        int64  `json:"id"`
+	EmbyLogID int64  `json:"emby_log_id"`
+	Type      string `json:"type"`
+	Name      string `json:"name"`
+	ItemID    string `json:"item_id,omitempty"`
+	UserID    string `json:"user_id"`
+	UserName  string `json:"user_name"`
+	Overview  string `json:"overview,omitempty"`
+	Date      int64  `json:"date"`
+	CreatedAt int64  `json:"created_at"`
 }
 
 type BangumiSyncLog struct {
@@ -894,6 +897,42 @@ CREATE INDEX IF NOT EXISTS twilight_sessions_expires_at_idx ON twilight_sessions
 		_ = db.Close()
 		return nil, status, describePostgresConnectionError(target, err)
 	}
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS twilight_playback_records (
+	id bigserial PRIMARY KEY,
+	uid bigint NOT NULL,
+	item_id text NOT NULL,
+	title text NOT NULL DEFAULT '',
+	series_name text NOT NULL DEFAULT '',
+	media_type text NOT NULL DEFAULT '',
+	index_number int NOT NULL DEFAULT 0,
+	duration bigint NOT NULL DEFAULT 0,
+	played_at bigint NOT NULL,
+	created_at timestamptz NOT NULL DEFAULT now()
+)`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
+	if _, err := db.ExecContext(ctx, `
+CREATE INDEX IF NOT EXISTS twilight_playback_records_uid_idx ON twilight_playback_records (uid)`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
+	if _, err := db.ExecContext(ctx, `
+CREATE INDEX IF NOT EXISTS twilight_playback_records_played_at_idx ON twilight_playback_records (played_at DESC)`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
+	if _, err := db.ExecContext(ctx, `
+CREATE UNIQUE INDEX IF NOT EXISTS twilight_playback_records_uid_item_played_idx ON twilight_playback_records (uid, item_id, played_at)`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
+	if _, err := db.ExecContext(ctx, `
+CREATE INDEX IF NOT EXISTS twilight_playback_records_item_id_idx ON twilight_playback_records (item_id)`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
 	status.SchemaReady = true
 	return db, status, nil
 }
@@ -1125,10 +1164,10 @@ func (s *State) ensure() {
 	for id, t := range s.Tickets {
 		if t.AdminNote != "" && len(t.Replies) == 0 {
 			t.Replies = []TicketReply{{
-				UID:      0,
-				Username: "管理员",
-				Role:     0,
-				Content:  t.AdminNote,
+				UID:       0,
+				Username:  "管理员",
+				Role:      0,
+				Content:   t.AdminNote,
 				CreatedAt: t.UpdatedAt,
 			}}
 			t.AdminNote = ""
@@ -4350,18 +4389,32 @@ func (s *Store) ClearViolationLogs() error {
 func (s *Store) AddAuditLog(entry AuditLog, limit int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.mutateAndSaveLocked(func() error {
-		entry.ID = s.state.NextAuditLogID
-		s.state.NextAuditLogID++
-		if entry.CreatedAt == 0 {
-			entry.CreatedAt = time.Now().Unix()
-		}
-		s.state.AuditLogs = append(s.state.AuditLogs, entry)
-		if limit > 0 && len(s.state.AuditLogs) > limit {
-			s.state.AuditLogs = s.state.AuditLogs[len(s.state.AuditLogs)-limit:]
-		}
-		return nil
-	})
+	if err := s.refreshLocked(); err != nil {
+		return err
+	}
+
+	// Audit logs are append-only. Keep a rollback header instead of serializing and
+	// deserializing the entire State through mutateAndSaveLocked for every audited
+	// mutation. saveLocked still persists the complete state, but this removes one
+	// full-state marshal and unmarshal from the high-frequency audit path.
+	previousLogs := s.state.AuditLogs
+	previousNextID := s.state.NextAuditLogID
+	entry.Detail = cloneAuditLogDetail(entry.Detail)
+	entry.ID = s.state.NextAuditLogID
+	s.state.NextAuditLogID++
+	if entry.CreatedAt == 0 {
+		entry.CreatedAt = time.Now().Unix()
+	}
+	s.state.AuditLogs = append(s.state.AuditLogs, entry)
+	if limit > 0 && len(s.state.AuditLogs) > limit {
+		s.state.AuditLogs = s.state.AuditLogs[len(s.state.AuditLogs)-limit:]
+	}
+	if err := s.saveLocked(); err != nil {
+		s.state.AuditLogs = previousLogs
+		s.state.NextAuditLogID = previousNextID
+		return err
+	}
+	return nil
 }
 
 // ListAuditLogs 返回所有审计日志，最新在前。
@@ -4369,7 +4422,9 @@ func (s *Store) ListAuditLogs() []AuditLog {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]AuditLog, len(s.state.AuditLogs))
-	copy(out, s.state.AuditLogs)
+	for i, entry := range s.state.AuditLogs {
+		out[i] = cloneAuditLogEntry(entry)
+	}
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
 	}

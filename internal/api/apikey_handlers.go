@@ -43,6 +43,7 @@ func (a *App) handleLegacyAPIKeyGenerate(w http.ResponseWriter, r *http.Request,
 	if statusFromError(w, err) {
 		return
 	}
+	a.audit(r, "generate_legacy_apikey", "user", p.User.UID, map[string]any{"permissions": u.LegacyPermissions})
 	ok(w, "API key generated", map[string]any{"apikey": key, "enabled": true, "user": publicUser(u)})
 }
 
@@ -52,6 +53,7 @@ func (a *App) handleLegacyAPIKeyDelete(w http.ResponseWriter, r *http.Request, _
 	if statusFromError(w, err) {
 		return
 	}
+	a.audit(r, "delete_legacy_apikey", "user", p.User.UID, nil)
 	ok(w, "API key deleted", nil)
 }
 
@@ -78,6 +80,7 @@ func (a *App) handleLegacyAPIKeyPermissionsUpdate(w http.ResponseWriter, r *http
 	if statusFromError(w, err) {
 		return
 	}
+	a.audit(r, "update_legacy_apikey_permissions", "user", p.User.UID, map[string]any{"permissions": permissions})
 	ok(w, "permissions updated", map[string]any{"permissions": permissions})
 }
 
@@ -102,6 +105,9 @@ func (a *App) handleCreateAPIKey(w http.ResponseWriter, r *http.Request, _ Param
 	if statusFromError(w, err) {
 		return
 	}
+	a.audit(r, "create_apikey", "user", k.UID, map[string]any{
+		"key_id": k.ID, "name": k.Name, "allow_query": k.AllowQuery, "rate_limit": k.RateLimit, "permissions": k.Permissions,
+	})
 	ok(w, "API key created", publicAPIKey(k, key))
 }
 
@@ -126,6 +132,9 @@ func (a *App) handleUpdateAPIKey(w http.ResponseWriter, r *http.Request, params 
 	if statusFromError(w, err) {
 		return
 	}
+	a.audit(r, "update_apikey", "user", k.UID, map[string]any{
+		"key_id": k.ID, "name": k.Name, "enabled": k.Enabled, "allow_query": k.AllowQuery, "rate_limit": k.RateLimit,
+	})
 	ok(w, "API key updated", publicAPIKey(k, ""))
 }
 
@@ -134,6 +143,7 @@ func (a *App) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request, params 
 	if statusFromError(w, a.store().DeleteAPIKey(current(r).User.UID, id)) {
 		return
 	}
+	a.audit(r, "delete_apikey", "user", current(r).User.UID, map[string]any{"key_id": id})
 	ok(w, "API key deleted", nil)
 }
 
@@ -143,6 +153,7 @@ func (a *App) handleAPIKeyEnableAccount(w http.ResponseWriter, r *http.Request, 
 	if statusFromError(w, err) {
 		return
 	}
+	a.audit(r, "enable_account_via_apikey", "user", u.UID, nil)
 	ok(w, "account enabled", publicUser(u))
 }
 
@@ -156,6 +167,7 @@ func (a *App) handleAPIKeyDisableAccount(w http.ResponseWriter, r *http.Request,
 	// session，其它设备 / cookie 仍能访问受保护接口直到 SessionTTL 到期
 	_, _ = a.disableRemoteEmbyForWebState(r.Context(), u)
 	a.sessions().DeleteUser(r.Context(), u.UID)
+	a.audit(r, "disable_account_via_apikey", "user", u.UID, nil)
 	ok(w, "account disabled", publicUser(u))
 }
 
@@ -172,6 +184,7 @@ func (a *App) handleAPIKeyDisableKey(w http.ResponseWriter, r *http.Request, _ P
 			return
 		}
 	}
+	a.audit(r, "disable_current_apikey", "user", p.User.UID, map[string]any{"key_id": p.APIKey.ID})
 	ok(w, "API key disabled", nil)
 }
 
@@ -183,6 +196,7 @@ func (a *App) handleAPIKeyEnableKey(w http.ResponseWriter, r *http.Request, _ Pa
 			return
 		}
 	}
+	a.audit(r, "enable_current_apikey", "user", p.User.UID, map[string]any{"key_id": p.APIKey.ID})
 	ok(w, "API key enabled", nil)
 }
 

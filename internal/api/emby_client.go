@@ -187,10 +187,10 @@ func (a *App) handleEmbyViewerCount(w http.ResponseWriter, r *http.Request, _ Pa
 		ok(w, "OK", map[string]any{"viewers": 0})
 		return
 	}
-	var sessions []map[string]any
-	if err := a.embyGet(r.Context(), "/Sessions", &sessions); err != nil {
+	sessions, err := a.embySessionsSnapshot(r.Context(), false)
+	if err != nil {
 		ok(w, "OK", map[string]any{"viewers": 0})
 		return
 	}
-	ok(w, "OK", map[string]any{"viewers": len(sessions)})
+	ok(w, "OK", map[string]any{"viewers": countEmbyPlayingSessions(sessions)})
 }

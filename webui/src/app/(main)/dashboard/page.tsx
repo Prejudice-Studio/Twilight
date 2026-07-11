@@ -13,6 +13,7 @@ import {
   Key,
   Loader2,
   MessageCircle,
+  Play,
   Tv,
   Activity,
   Film,
@@ -35,10 +36,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useAsyncResource } from "@/hooks/use-async-resource";
+import { useVisiblePolling } from "@/hooks/use-visible-polling";
 import { PageError } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
-import { api, type CodeUsePreview, type EmbyInfo, type MediaRequest, type TelegramStatus, type SigninSummary, type RegisterAvailability, type EmbyRegisterStatus } from "@/lib/api";
+import { api, type CodeUsePreview, type EmbyInfo, type EmbyNowPlaying, type MediaRequest, type TelegramStatus, type SigninSummary, type RegisterAvailability, type EmbyRegisterStatus } from "@/lib/api";
 import { AnnouncementBoard } from "@/components/announcement-board";
 import { useI18n } from "@/lib/i18n";
 import { validatePasswordStrength } from "@/lib/password";
@@ -106,6 +108,7 @@ export default function DashboardPage() {
   const [embyInfo, setEmbyInfo] = useState<EmbyInfo | null>(null);
   const [embyStats, setEmbyStats] = useState<any>(null);
   const [embyViewers, setEmbyViewers] = useState(0);
+  const [nowPlaying, setNowPlaying] = useState<EmbyNowPlaying | null>(null);
   const [myRequests, setMyRequests] = useState<MediaRequest[]>([]);
   const [lineSlots, setLineSlots] = useState<LineSlot[]>([]);
   const [linesRequireEmby, setLinesRequireEmby] = useState(false);
@@ -203,14 +206,9 @@ export default function DashboardPage() {
   }, [clearEmbyRegisterRequest, embyRegisterStored, fetchUser, loadEmbyUrls]);
 
   useEffect(() => {
-    if (!embyRegisterStored) return;
-    void refreshStoredEmbyRegisterStatus();
-    const timer = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      void refreshStoredEmbyRegisterStatus();
-    }, 5000);
-    return () => window.clearInterval(timer);
+    if (embyRegisterStored) void refreshStoredEmbyRegisterStatus();
   }, [embyRegisterStored, refreshStoredEmbyRegisterStatus]);
+  useVisiblePolling(refreshStoredEmbyRegisterStatus, 5000, Boolean(embyRegisterStored));
 
   const loadDashboardData = useCallback(async (signal?: AbortSignal) => {
     // 之前每个子接口都包了 .catch(() => null) + Promise.all：任何失败都会被
@@ -272,6 +270,7 @@ export default function DashboardPage() {
     }
     if (embySettled.status === "fulfilled" && embySettled.value.success && embySettled.value.data) {
       setEmbyInfo(embySettled.value.data);
+      setEmbyViewers(embySettled.value.data.active_sessions ?? 0);
     }
     if (urlsSettled.status === "fulfilled" && urlsSettled.value.success && urlsSettled.value.data) {
       applyEmbyUrls(urlsSettled.value.data);
@@ -300,14 +299,19 @@ export default function DashboardPage() {
     error,
   } = useAsyncResource(loadDashboardData, { immediate: true });
 
-  const loadEmbyStats = useCallback(async () => {
-    const [statsResult, viewersResult] = await Promise.allSettled([api.getEmbyLibraryStats(), api.getEmbyViewerCount()]);
-    if (statsResult.status === "fulfilled" && statsResult.value.success && statsResult.value.data) {
-      setEmbyStats(statsResult.value.data);
-    }
-    if (viewersResult.status === "fulfilled" && viewersResult.value.success) {
-      setEmbyViewers(viewersResult.value.data?.viewers ?? 0);
-    }
+  const loadEmbyLibraryStats = useCallback(async () => {
+    const result = await api.getEmbyLibraryStats();
+    if (result.success && result.data) setEmbyStats(result.data);
+  }, []);
+
+  const loadEmbyViewers = useCallback(async () => {
+    const result = await api.getEmbyViewerCount();
+    if (result.success) setEmbyViewers(result.data?.viewers ?? 0);
+  }, []);
+
+  const loadNowPlaying = useCallback(async () => {
+    const result = await api.getEmbyNowPlaying();
+    if (result.success && result.data) setNowPlaying(result.data);
   }, []);
 
   // 独立拉取 Emby 统计（功能开关控制，避免污染主数据加载流程）
@@ -317,13 +321,13 @@ export default function DashboardPage() {
       setEmbyViewers(0);
       return;
     }
-    void loadEmbyStats();
-    const timer = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      void loadEmbyStats();
-    }, 60000);
-    return () => window.clearInterval(timer);
-  }, [loadEmbyStats, systemInfo?.features?.emby_stats]);
+    void loadEmbyLibraryStats();
+  }, [loadEmbyLibraryStats, systemInfo?.features?.emby_stats]);
+
+  const embyStatsEnabled = systemInfo?.features?.emby_stats === true;
+  useVisiblePolling(loadEmbyViewers, 60000, embyStatsEnabled);
+  useVisiblePolling(loadEmbyLibraryStats, 300000, embyStatsEnabled);
+  useVisiblePolling(loadNowPlaying, 30000, embyStatsEnabled);
 
   // ============== 线路延迟测试 ==============
   // 由后端 /system/emby-urls/probe 代发请求测速。前端直连 Emby 会被 CORS /
@@ -853,11 +857,12 @@ export default function DashboardPage() {
                 : t("dashboard.normalDescription")}
           </p>
         </div>
-        <Badge className="bg-primary/10 text-primary border-primary/20 px-4 py-1.5 rounded-full font-black text-xs uppercase tracking-widest w-fit">
-          {user?.role_name}
-            </Badge>
-            {embyViewers > 0 && <span className="text-[10px] text-muted-foreground">{embyViewers} 人在线</span>}
-          </div>
+        <div className="flex shrink-0 flex-col items-start gap-1 md:items-end">
+          <Badge className="w-fit border-primary/20 bg-primary/10 px-4 py-1.5 text-xs font-black uppercase tracking-widest text-primary md:hidden">
+            {user?.role_name}
+          </Badge>
+        </div>
+      </div>
 
       {/* 顶部三块: 到期 / 状态 / Emby 绑定 */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -905,7 +910,7 @@ export default function DashboardPage() {
       </div>
 
       {/* 第二行: Telegram / Emby 服务器 / 我的求片 */}
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-4">
         {/* Telegram */}
         <motion.div variants={item} className="premium-card p-5 sm:p-6 flex flex-col gap-3">
           <div className="flex items-start justify-between gap-2">
@@ -968,19 +973,6 @@ export default function DashboardPage() {
             <p className="text-xs text-muted-foreground truncate">
               {t("dashboard.version", { version: embyInfo?.version || "--" })}
             </p>
-            {typeof embyInfo?.active_sessions === "number" && (
-              <p className="text-xs text-muted-foreground inline-flex items-center gap-1">
-                <Activity className="h-3 w-3" />
-                {t("dashboard.activeSessions", { count: embyInfo.active_sessions })}
-              </p>
-            )}
-            {embyStats?.enabled && embyStats?.configured && (
-              <div className="grid grid-cols-3 gap-1 pt-1 border-t border-border/30 mt-1">
-                <div className="text-center"><p className="text-sm font-bold">{embyStats.movie_count ?? 0}</p><p className="text-[9px] text-muted-foreground">电影</p></div>
-                <div className="text-center"><p className="text-sm font-bold">{embyStats.series_count ?? 0}</p><p className="text-[9px] text-muted-foreground">剧集</p></div>
-                <div className="text-center"><p className="text-sm font-bold">{embyStats.episode_count ?? 0}</p><p className="text-[9px] text-muted-foreground">集数</p></div>
-              </div>
-            )}
             {user?.emby_id ? (
               <p className="text-xs text-muted-foreground break-all" title={user.emby_id}>
                 {t("dashboard.myEmby")}<span className="font-mono">{user.emby_id}</span>
@@ -989,6 +981,31 @@ export default function DashboardPage() {
               <p className="text-xs text-amber-500">{t("dashboard.embyUnbound")}</p>
             )}
           </div>
+        </motion.div>
+
+        {/* 媒体概览 */}
+        <motion.div variants={item} className="premium-card p-5 sm:p-6 flex flex-col gap-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="p-2 bg-indigo-500/10 text-indigo-500 rounded-xl">
+                <Activity className="h-4 w-4" />
+              </div>
+              <h3 className="text-sm font-black uppercase tracking-widest text-muted-foreground">{t("dashboard.mediaOverview")}</h3>
+            </div>
+            <Badge variant={embyViewers > 0 ? "success" : "outline"} className="text-[10px] shrink-0">
+              {t("dashboard.liveNow", { count: embyViewers })}
+            </Badge>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <StatPill icon={Activity} tone="success" label={t("dashboard.onlineViewers")} value={embyViewers} />
+            <StatPill icon={Film} tone="primary" label={t("dashboard.movieCount")} value={embyStats?.movie_count ?? 0} />
+            <StatPill icon={Tv} tone="info" label={t("dashboard.seriesCount")} value={embyStats?.series_count ?? 0} />
+            <StatPill icon={Play} tone="warning" label={t("dashboard.episodeCount")} value={embyStats?.episode_count ?? 0} />
+          </div>
+          {(!embyStats?.enabled || !embyStats?.configured) && (
+            <p className="text-xs text-muted-foreground">{t("dashboard.libraryStatsUnavailable")}</p>
+          )}
         </motion.div>
 
         {/* 求片状态 */}
@@ -1097,6 +1114,52 @@ export default function DashboardPage() {
                 <Link href="/score">{t("dashboard.signinCenter")}</Link>
               </Button>
             </div>
+          </div>
+        </motion.div>
+      )}
+
+      {/* 正在观看 */}
+      {nowPlaying && nowPlaying.items.length > 0 && (
+        <motion.div variants={item} className="premium-card p-5 sm:p-6">
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-green-500/10 text-green-500 rounded-xl">
+                <Play className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-black tracking-tight">{t("dashboard.nowPlaying")}</h3>
+                <p className="text-[11px] text-muted-foreground">{t("dashboard.nowPlayingCount", { count: nowPlaying.viewers })}</p>
+              </div>
+            </div>
+            <Badge variant="success" className="text-[10px]">{t("dashboard.liveNow", { count: nowPlaying.viewers })}</Badge>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {nowPlaying.items.slice(0, 8).map((item) => (
+              <div key={item.item_id} className="flex items-center gap-3 rounded-lg bg-accent/20 p-3">
+                <div className="relative grid h-14 w-10 shrink-0 place-items-center overflow-hidden rounded bg-muted text-muted-foreground">
+                  <Play className="h-4 w-4" />
+                  {item.image_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={item.image_url}
+                      alt=""
+                      className="absolute inset-0 h-full w-full object-cover"
+                      loading="lazy"
+                      onError={(e) => { e.currentTarget.style.display = "none"; }}
+                    />
+                  ) : null}
+                </div>
+                <div className="min-w-0 text-xs">
+                  <p className="truncate font-medium">{item.series_name || item.item_name}</p>
+                  <p className="truncate text-[11px] text-muted-foreground">{item.user_name}</p>
+                  {item.total_runtime > 0 && (
+                    <p className="text-[10px] text-muted-foreground">
+                      {Math.floor(item.play_duration / 60)}m / {Math.floor(item.total_runtime / 60)}m
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         </motion.div>
       )}

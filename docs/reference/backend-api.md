@@ -2,6 +2,8 @@
 
 本文是 Twilight 后端 REST API 的完整参考手册，覆盖鉴权方式、请求/响应规范、错误码、限流策略，以及各业务模块下逐个端点的请求体、响应示例与 cURL 调用。完整路由速查见 [API 路由索引](../reference/api-index.md)，API Key 外部接入见 [API Key 外部接入](../reference/api-key.md)，注册码与卡码规则见 [注册码与卡码](../features/regcodes.md)，安全机制（CORS、限流、脱敏等）见 [安全加固](../guides/security.md)。
 
+> 播放统计实现参考 `ichinosekotomi11/Twilight`：Emby ActivityLog 同步会配对 `playback.start` / `playback.stop` 并幂等写入 `store.PlaybackRecords`；播放统计接口聚合这些持久化记录。在线人数只统计 `/Sessions` 中存在 `NowPlayingItem` 的正在播放会话。
+
 > 路由的鉴权级别、方法与路径以 `internal/api/routes.go` 为准；本文已据此校准。接口若与下方示例冲突，以后端实际行为与运行时 Swagger 为准。
 
 ## 1. 文档说明

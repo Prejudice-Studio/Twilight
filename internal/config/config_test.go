@@ -74,6 +74,44 @@ auto_cleanup_unverified_hours = 72
 	}
 }
 
+func TestLoadEmbyPlaybackStatsPolicy(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	content := `[Emby]
+emby_playback_stats_enabled = true
+emby_playback_stats_user_enabled = true
+emby_playback_stats_user_self_only = false
+emby_playback_stats_user_rankings = false
+emby_playback_stats_item_rankings = true
+emby_playback_stats_daily_summary = false
+emby_playback_stats_user_day = true
+emby_playback_stats_user_week = false
+emby_playback_stats_user_month = true
+emby_playback_stats_user_custom = false
+emby_playback_stats_user_max_days = 90
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TWILIGHT_EMBY_PLAYBACK_STATS_USER_MAX_DAYS", "45")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.EmbyPlaybackStatsEnabled || !cfg.EmbyPlaybackStatsUserEnabled || cfg.EmbyPlaybackStatsUserSelfOnly {
+		t.Fatalf("unexpected playback access policy: %#v", cfg)
+	}
+	if cfg.EmbyPlaybackStatsUserRankings || !cfg.EmbyPlaybackStatsItemRankings || cfg.EmbyPlaybackStatsDailySummary {
+		t.Fatalf("unexpected playback visibility policy: %#v", cfg)
+	}
+	if !cfg.EmbyPlaybackStatsUserDay || cfg.EmbyPlaybackStatsUserWeek || !cfg.EmbyPlaybackStatsUserMonth || cfg.EmbyPlaybackStatsUserCustom {
+		t.Fatalf("unexpected playback period policy: %#v", cfg)
+	}
+	if cfg.EmbyPlaybackStatsUserMaxDays != 45 {
+		t.Fatalf("expected env max-days override, got %d", cfg.EmbyPlaybackStatsUserMaxDays)
+	}
+}
+
 func TestLoadSetupModeFromAnySection(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	content := `[Bootstrap]

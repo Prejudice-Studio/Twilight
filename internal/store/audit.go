@@ -1,0 +1,285 @@
+package store
+
+import (
+	"encoding/json"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+// AuditLogQuery describes a bounded server-side audit log query. Offset and
+// Limit are applied after filtering and sorting; Limit <= 0 returns no rows but
+// still computes Total.
+type AuditLogQuery struct {
+	Category       string
+	Action         string
+	UID            int64
+	TargetUID      int64
+	From           int64
+	To             int64
+	Search         string
+	ActionKeywords []string
+	SortBy         string
+	Order          string
+	Offset         int
+	Limit          int
+}
+
+type AuditLogPage struct {
+	Logs  []AuditLog
+	Total int
+}
+
+// QueryAuditLogs filters and paginates while holding one read lock. The common
+// created_at order scans the append-only slice directly and copies only the
+// requested page instead of cloning and sorting the complete audit history.
+func (s *Store) QueryAuditLogs(query AuditLogQuery) AuditLogPage {
+	query = normalizeAuditLogQuery(query)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if query.SortBy == "created_at" {
+		return queryAuditLogsByTime(s.state.AuditLogs, query)
+	}
+
+	filtered := make([]AuditLog, 0, len(s.state.AuditLogs))
+	for _, entry := range s.state.AuditLogs {
+		if auditLogMatchesQuery(entry, query) {
+			filtered = append(filtered, entry)
+		}
+	}
+	sortAuditLogEntries(filtered, query.SortBy, query.Order)
+	page := AuditLogPage{Logs: []AuditLog{}, Total: len(filtered)}
+	if query.Limit <= 0 || query.Offset >= len(filtered) {
+		return page
+	}
+	end := query.Offset + query.Limit
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	page.Logs = make([]AuditLog, 0, end-query.Offset)
+	for _, entry := range filtered[query.Offset:end] {
+		page.Logs = append(page.Logs, cloneAuditLogEntry(entry))
+	}
+	return page
+}
+
+func queryAuditLogsByTime(logs []AuditLog, query AuditLogQuery) AuditLogPage {
+	page := AuditLogPage{Logs: []AuditLog{}}
+	appendMatch := func(entry AuditLog) {
+		matchIndex := page.Total
+		page.Total++
+		if query.Limit > 0 && matchIndex >= query.Offset && len(page.Logs) < query.Limit {
+			page.Logs = append(page.Logs, cloneAuditLogEntry(entry))
+		}
+	}
+	if query.Order == "asc" {
+		for _, entry := range logs {
+			if auditLogMatchesQuery(entry, query) {
+				appendMatch(entry)
+			}
+		}
+		return page
+	}
+	for i := len(logs) - 1; i >= 0; i-- {
+		if auditLogMatchesQuery(logs[i], query) {
+			appendMatch(logs[i])
+		}
+	}
+	return page
+}
+
+func normalizeAuditLogQuery(query AuditLogQuery) AuditLogQuery {
+	query.Category = strings.ToLower(strings.TrimSpace(query.Category))
+	query.Action = strings.ToLower(strings.TrimSpace(query.Action))
+	query.Search = strings.ToLower(strings.TrimSpace(query.Search))
+	query.SortBy = normalizeAuditLogSortField(query.SortBy)
+	if !strings.EqualFold(query.Order, "asc") {
+		query.Order = "desc"
+	} else {
+		query.Order = "asc"
+	}
+	if query.Offset < 0 {
+		query.Offset = 0
+	}
+	if query.Limit < 0 {
+		query.Limit = 0
+	}
+	for i, keyword := range query.ActionKeywords {
+		query.ActionKeywords[i] = strings.ToLower(strings.TrimSpace(keyword))
+	}
+	return query
+}
+
+func auditLogMatchesQuery(entry AuditLog, query AuditLogQuery) bool {
+	if query.Category != "" && !strings.EqualFold(entry.Category, query.Category) {
+		return false
+	}
+	if query.Action != "" && !strings.EqualFold(entry.Action, query.Action) {
+		return false
+	}
+	if query.UID > 0 && entry.UID != query.UID {
+		return false
+	}
+	if query.TargetUID > 0 && entry.TargetUID != query.TargetUID {
+		return false
+	}
+	if query.From > 0 && entry.CreatedAt < query.From {
+		return false
+	}
+	if query.To > 0 && entry.CreatedAt > query.To {
+		return false
+	}
+	if len(query.ActionKeywords) > 0 {
+		action := strings.ToLower(entry.Action)
+		matched := false
+		for _, keyword := range query.ActionKeywords {
+			if keyword != "" && strings.Contains(action, keyword) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	if query.Search == "" {
+		return true
+	}
+	haystack := strings.ToLower(strings.Join([]string{
+		entry.Username,
+		entry.Action,
+		entry.Category,
+		entry.Source,
+		entry.Method,
+		entry.IP,
+		formatInt64(entry.UID),
+		formatInt64(entry.TargetUID),
+	}, " "))
+	return strings.Contains(haystack, query.Search)
+}
+
+func normalizeAuditLogSortField(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "id", "action", "category", "source", "method", "username", "uid", "target_uid", "ip":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "created_at"
+	}
+}
+
+func sortAuditLogEntries(logs []AuditLog, sortBy, order string) {
+	desc := order != "asc"
+	sort.SliceStable(logs, func(i, j int) bool {
+		left, right := logs[i], logs[j]
+		cmp := 0
+		switch sortBy {
+		case "id":
+			cmp = compareInt64(left.ID, right.ID)
+		case "action":
+			cmp = strings.Compare(strings.ToLower(left.Action), strings.ToLower(right.Action))
+		case "category":
+			cmp = strings.Compare(strings.ToLower(left.Category), strings.ToLower(right.Category))
+		case "source":
+			cmp = strings.Compare(strings.ToLower(left.Source), strings.ToLower(right.Source))
+		case "method":
+			cmp = strings.Compare(strings.ToLower(left.Method), strings.ToLower(right.Method))
+		case "username":
+			cmp = strings.Compare(strings.ToLower(left.Username), strings.ToLower(right.Username))
+		case "uid":
+			cmp = compareInt64(left.UID, right.UID)
+		case "target_uid":
+			cmp = compareInt64(left.TargetUID, right.TargetUID)
+		case "ip":
+			cmp = strings.Compare(strings.ToLower(left.IP), strings.ToLower(right.IP))
+		default:
+			cmp = compareInt64(left.CreatedAt, right.CreatedAt)
+		}
+		if cmp == 0 {
+			cmp = compareInt64(left.ID, right.ID)
+		}
+		if desc {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+}
+
+func compareInt64(left, right int64) int {
+	switch {
+	case left < right:
+		return -1
+	case left > right:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func formatInt64(value int64) string {
+	return strconv.FormatInt(value, 10)
+}
+
+type AuditLogPruneOptions struct {
+	MaxEntries    int
+	CutoffUnix    int64
+	PreserveAdmin bool
+}
+
+type AuditLogPruneResult struct {
+	RemovedByLimit int
+	RemovedByAge   int
+	Current        int
+}
+
+// PruneAuditLogsWithPolicy applies count and age retention in one mutation and
+// one persistence cycle. Count retention runs first to preserve legacy behavior.
+func (s *Store) PruneAuditLogsWithPolicy(options AuditLogPruneOptions) (AuditLogPruneResult, error) {
+	result := AuditLogPruneResult{}
+	if options.MaxEntries <= 0 && options.CutoffUnix <= 0 {
+		result.Current = s.AuditLogCount()
+		return result, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	err := s.mutateAndSaveLocked(func() error {
+		if options.MaxEntries > 0 && len(s.state.AuditLogs) > options.MaxEntries {
+			result.RemovedByLimit = len(s.state.AuditLogs) - options.MaxEntries
+			s.state.AuditLogs = s.state.AuditLogs[result.RemovedByLimit:]
+		}
+		if options.CutoffUnix > 0 {
+			filtered := s.state.AuditLogs[:0]
+			for _, entry := range s.state.AuditLogs {
+				if entry.CreatedAt < options.CutoffUnix && !(options.PreserveAdmin && strings.EqualFold(entry.Category, "admin")) {
+					result.RemovedByAge++
+					continue
+				}
+				filtered = append(filtered, entry)
+			}
+			s.state.AuditLogs = filtered
+		}
+		result.Current = len(s.state.AuditLogs)
+		return nil
+	})
+	return result, err
+}
+
+func cloneAuditLogEntry(entry AuditLog) AuditLog {
+	entry.Detail = cloneAuditLogDetail(entry.Detail)
+	return entry
+}
+
+func cloneAuditLogDetail(detail map[string]any) map[string]any {
+	if len(detail) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(detail)
+	if err != nil {
+		return nil
+	}
+	var clone map[string]any
+	if err := json.Unmarshal(data, &clone); err != nil {
+		return nil
+	}
+	return clone
+}

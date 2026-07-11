@@ -3,31 +3,44 @@ package api
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
-// kickEmbySessions 踢出某 Emby 用户当前的全部在线会话（逐个 /Sessions/{id}/Logout），
-// 返回成功登出的会话数。Emby 未配置或 embyID 为空时返回 0。供按 uid / 按 emby_id 两条
-// 踢人入口共用，避免重复遍历 /Sessions 的逻辑。
+// kickEmbySessions stops active playback and revokes the devices backing the
+// user's current Emby sessions. Emby does not expose /Sessions/{id}/Logout;
+// device deletion is the administrator API that also clears offline access.
 func (a *App) kickEmbySessions(ctx context.Context, embyID string) int {
 	if !a.embyConfigured() || strings.TrimSpace(embyID) == "" {
 		return 0
 	}
-	var sessions []map[string]any
-	if err := a.embyGet(ctx, "/Sessions", &sessions); err != nil {
+	sessions, err := a.embySessionsSnapshot(ctx, true)
+	if err != nil {
 		return 0
 	}
-	kicked := 0
+	deviceIDs := map[string]struct{}{}
 	for _, session := range sessions {
 		if asString(session["UserId"]) != embyID {
 			continue
 		}
 		if sid := asString(session["Id"]); sid != "" {
-			var ignored map[string]any
-			if err := a.embyPost(ctx, "/Sessions/"+urlPathEscape(sid)+"/Logout", nil, &ignored); err == nil {
-				kicked++
+			if _, playing := embySessionNowPlaying(session); playing {
+				var ignored map[string]any
+				_ = a.embyPost(ctx, "/Sessions/"+urlPathEscape(sid)+"/Playing/Stop", map[string]any{"Command": "Stop"}, &ignored)
 			}
 		}
+		if deviceID := strings.TrimSpace(asString(session["DeviceId"])); deviceID != "" {
+			deviceIDs[deviceID] = struct{}{}
+		}
+	}
+	kicked := 0
+	for deviceID := range deviceIDs {
+		if err := a.embyDelete(ctx, "/Devices?Id="+url.QueryEscape(deviceID)); err == nil {
+			kicked++
+		}
+	}
+	if kicked > 0 {
+		a.invalidateEmbySessionsSnapshot()
 	}
 	return kicked
 }
@@ -98,47 +111,69 @@ func (a *App) handleAdminEmbyUserKick(w http.ResponseWriter, r *http.Request, pa
 	ok(w, "会话踢出完成", map[string]any{"emby_user_id": embyID, "kicked_count": kicked})
 }
 
-// handleAdminEmbyKickAll 终止所有在线会话并清理离线设备记录。
+// handleAdminEmbyKickAll stops active playback, then deletes every Emby device
+// record through the documented DELETE /Devices?Id=... administrator API.
+// Deleting devices is what revokes retained/offline sessions.
 func (a *App) handleAdminEmbyKickAll(w http.ResponseWriter, r *http.Request, _ Params) {
 	if !a.embyConfigured() {
 		ok(w, "Emby 未配置", map[string]any{"kicked": 0, "deleted_devices": 0})
 		return
 	}
-	kicked := 0
-	var sessions []map[string]any
-	if err := a.embyGet(r.Context(), "/Sessions", &sessions); err == nil {
+	stopped := 0
+	failedSessions := 0
+	sessions, sessionsErr := a.embySessionsSnapshot(r.Context(), true)
+	if sessionsErr == nil {
 		for _, sess := range sessions {
+			if _, playing := embySessionNowPlaying(sess); !playing {
+				continue
+			}
 			sid := asString(sess["Id"])
 			if sid == "" {
+				failedSessions++
 				continue
 			}
 			var ignored map[string]any
-			if err := a.embyPost(r.Context(), "/Sessions/"+urlPathEscape(sid)+"/Terminate", nil, &ignored); err == nil {
-				kicked++
-				continue
-			}
-			if err := a.embyPost(r.Context(), "/Sessions/"+urlPathEscape(sid)+"/Logout", nil, &ignored); err == nil {
-				kicked++
+			if err := a.embyPost(r.Context(), "/Sessions/"+urlPathEscape(sid)+"/Playing/Stop", map[string]any{"Command": "Stop"}, &ignored); err == nil {
+				stopped++
+			} else {
+				failedSessions++
 			}
 		}
 	}
 
 	deletedDevices := 0
+	failedDevices := 0
 	var devResp struct {
 		Items []map[string]any `json:"Items"`
 	}
-	if err := a.embyGet(r.Context(), "/Devices", &devResp); err == nil {
+	devicesErr := a.embyGet(r.Context(), "/Devices", &devResp)
+	if devicesErr == nil {
 		for _, dev := range devResp.Items {
 			did := asString(dev["Id"])
 			if did == "" {
+				failedDevices++
 				continue
 			}
-			if err := a.embyDelete(r.Context(), "/Devices/"+urlPathEscape(did)); err == nil {
+			if err := a.embyDelete(r.Context(), "/Devices?Id="+url.QueryEscape(did)); err == nil {
 				deletedDevices++
+			} else {
+				failedDevices++
 			}
 		}
 	}
+	if sessionsErr != nil && devicesErr != nil {
+		failWithCode(w, http.StatusBadGateway, ErrEmbyRemoteSessionsFail, "读取 Emby 会话与设备失败")
+		return
+	}
 
-	a.audit(r, "emby_kick_all_sessions", "admin", 0, map[string]any{"kicked": kicked, "deleted_devices": deletedDevices})
-	ok(w, "操作完成", map[string]any{"kicked": kicked, "deleted_devices": deletedDevices})
+	a.invalidateEmbySessionsSnapshot()
+	detail := map[string]any{
+		"kicked":           stopped,
+		"stopped_sessions": stopped,
+		"deleted_devices":  deletedDevices,
+		"failed_sessions":  failedSessions,
+		"failed_devices":   failedDevices,
+	}
+	a.audit(r, "emby_kick_all_sessions", "admin", 0, detail)
+	ok(w, "操作完成", detail)
 }

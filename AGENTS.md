@@ -180,7 +180,8 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Bangumi subject cache is global by subject ID; collection cache is per user and type. `UpsertBangumiCollectionCache` owns splitting full API entries.
 - Bangumi covers are cached under `uploads/bangumi/{BGMID}.{ext}` with positive numeric IDs and path/host/MIME/size validation.
 - Bangumi watched type `2` marks the full series watched and ignores frontend `ep_status`; partial progress belongs to type `3`.
-- Emby playback stats are ActivityLog-based and independent from Bangumi webhook playback records. Duration is currently a reserved field because ActivityLog does not reliably provide it.
+- Emby playback stats are ActivityLog-based and independent from Bangumi webhook playback records. Pair `playback.start` / `playback.stop` by user and item to compute duration; local playback records are fallback-only.
+- When syncing Emby ActivityLog playback events, persist paired playback results into `store.PlaybackRecords` with the existing idempotent `(uid, item_id, played_at)` behavior; stats endpoints should aggregate persisted playback records rather than relying only on transient request-time pairing.
 
 ## User Filters And Batch Consistency
 
@@ -264,8 +265,52 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - Admin stats endpoints support global, self, and selected-user scopes.
 - Supported params: `scope=self|global|user`, `uid`, `days`, `today=1`, `limit`, `sort=plays|name`, `refresh=1`.
 - Cross-user and global permissions must be enforced server-side.
-- `total_duration` is currently reserved because ActivityLog does not reliably provide playback duration.
+- `total_duration` is computed from paired start/stop events, capped at 12 hours per playback; unmatched events must not fabricate duration.
+- Emby ActivityLog sync must write paired playback records to `PlaybackRecords`; database-backed playback stats, exports, Bangumi sync, and retention checks should consume those persisted records.
 - `/stats/playback` polls only while visible and clears timers on unmount.
+
+## Scheduler Daemon Rules
+
+- `runDueSchedulerJobs` collects all due jobs first, then launches them in parallel with `schedulerAutoConcurrency=4` semaphore to prevent a slow job from delaying all subsequent due jobs in the same tick.
+- Each auto job launch goroutine has its own panic recovery; a single job panic must not crash the daemon loop.
+- `schedulerSideEffectContext` provides a 15-second detached context for side operations (session cleanup, remote Emby disable) that should not be cancelled by the main job context.
+- `check_expired` performs batch `ctx.Err()` checks every 50 users to allow early termination.
+- `sync_emby_activity_logs` accepts `since_hours` param (default 24, max 720) for flexible sync windows.
+- All state-changing scheduler operations (check_expired, cleanup_no_emby, emby_sync, cleanup_unlinked_emby, cleanup_ticket_images, cleanup_pending_emby_entitlements) must call `a.auditSystem("scheduler", action, 0, detail)` after successful mutations.
+
+## Playback Stats Database Rules
+
+- `twilight_playback_records` is a PostgreSQL table with columns `uid, item_id, title, series_name, media_type, index_number, duration, played_at` and a unique index on `(uid, item_id, played_at)` for idempotent inserts.
+- `AddPlaybackRecordIdempotent` dual-writes to both the state document (`PlaybackRecords` slice) and the PostgreSQL table when available, using `ON CONFLICT DO NOTHING`.
+- `PlaybackRecords` and `PlaybackRecordSummary` read from the database first (when available), falling back to the in-memory state document for JSON-file mode.
+- `DELETE FROM twilight_playback_records` for retention cleanup via `DeletePlaybackRecordsBefore`.
+
+## Dashboard Now Playing Rules
+
+- `GET /api/v1/emby/now-playing` returns currently playing Emby sessions with enriched item metadata (name, series name, cover image URL, user name, playback progress).
+- The endpoint reuses `embySessionsSnapshot` (5s cache TTL) and batch-enriches items via `embyPlaybackMetadata`.
+- The dashboard polls now-playing every 30s while visible via `useVisiblePolling`.
+- The "Now Playing" card shows up to 8 items with cover image thumbnails, user names, and playback progress bars.
+
+## Network Transport Rules
+
+- `sharedHTTPTransport` is the single shared transport for all external HTTP calls (Emby, Telegram, Bangumi, TMDB), configured with `MaxIdleConns=200`, `MaxIdleConnsPerHost=32`, dial timeout 5s.
+- Per-request timeouts are controlled via `context.WithTimeout`, not `http.Client.Timeout`, allowing per-endpoint timeout granularity while reusing the shared transport.
+- `sameHostRedirectPolicy` rejects cross-host redirects (max 5 hops same-host) to prevent token leakage via 302 to attacker-controlled hosts.
+- The root layout includes `<link rel="dns-prefetch">` and `<link rel="preconnect">` tags for TMDB image CDN and Bangumi API to warm connections early.
+
+## Emby Session Rules
+
+- `/Sessions` includes idle and retained client sessions. Online/current viewer counts must include only entries with `NowPlayingItem`.
+- Reuse the shared short-lived Emby session snapshot for dashboard/admin polling instead of issuing duplicate `/Sessions` requests.
+- Stop active playback with `POST /Sessions/{Id}/Playing/Stop` and `Command=Stop`.
+- Clear retained/offline device sessions with the documented administrator endpoint `DELETE /Devices?Id={DeviceId}`; do not invent `/Sessions/{id}/Logout`, `/Sessions/{id}/Terminate`, or `/Devices/{id}` routes.
+
+## Commit Message Rules
+
+- Use Chinese commit messages for repository commits unless the user explicitly requests another language.
+- Keep the first line concise and imperative, usually in the form `模块：动作与结果`, for example `播放统计：写入 Emby 播放记录`.
+- Mention behavior changes in the commit body when a change touches backend APIs, persistence, deployment, or user-visible frontend behavior.
 
 ## Wiki And API Docs Rules
 

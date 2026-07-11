@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Activity, Loader2, LogIn, LogOut, Pause, Play, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { useToast } from "@/hooks/use-toast";
+import { useVisiblePolling } from "@/hooks/use-visible-polling";
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
@@ -24,8 +25,8 @@ interface ActivityLogEntry {
 
 function activityIcon(type: string) {
   const t = type.toLowerCase();
-  if (t.includes("playback") && !t.includes("complete")) return <Play className="h-3.5 w-3.5 text-blue-500" />;
-  if (t.includes("playback")) return <Pause className="h-3.5 w-3.5 text-green-500" />;
+  if (t === "playback.stop" || t.includes("complete")) return <Pause className="h-3.5 w-3.5 text-green-500" />;
+  if (t.includes("playback")) return <Play className="h-3.5 w-3.5 text-blue-500" />;
   if (t.includes("auth") || t.includes("login")) return <LogIn className="h-3.5 w-3.5 text-yellow-500" />;
   if (t.includes("session") && t.includes("end")) return <LogOut className="h-3.5 w-3.5 text-muted-foreground" />;
   if (t.includes("session")) return <LogIn className="h-3.5 w-3.5 text-yellow-500" />;
@@ -34,8 +35,8 @@ function activityIcon(type: string) {
 
 function activityLabelKey(type: string) {
   const t = type.toLowerCase();
-  if (t === "videoplayback") return "embyActivityLogs.labelVideoPlayback" as const;
-  if (t === "videoplaybackcomplete") return "embyActivityLogs.labelVideoPlaybackComplete" as const;
+  if (t === "videoplayback" || t === "playback.start") return "embyActivityLogs.labelVideoPlayback" as const;
+  if (t === "videoplaybackcomplete" || t === "playback.stop") return "embyActivityLogs.labelVideoPlaybackComplete" as const;
   if (t === "authenticationsucceeded") return "embyActivityLogs.labelAuthenticationSucceeded" as const;
   if (t === "authenticationfailure") return "embyActivityLogs.labelAuthenticationFailure" as const;
   if (t === "sessionstarted") return "embyActivityLogs.labelSessionStarted" as const;
@@ -97,14 +98,9 @@ export default function EmbyActivityLogs() {
     }
   };
 
-  useEffect(() => {
-    if (!autoRefresh) return;
-    const timer = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      void reload();
-    }, 30000);
-    return () => window.clearInterval(timer);
-  }, [autoRefresh, reload]);
+  useVisiblePolling(async () => {
+    await reload();
+  }, 60000, autoRefresh);
 
   return (
     <div className="space-y-4">
@@ -132,7 +128,7 @@ export default function EmbyActivityLogs() {
         </div>
       </div>
 
-      {autoRefresh && <p className="text-xs text-muted-foreground">{t("embyActivityLogs.autoRefreshHint", { seconds: 30 })}</p>}
+      {autoRefresh && <p className="text-xs text-muted-foreground">{t("embyActivityLogs.autoRefreshHint", { seconds: 60 })}</p>}
 
       {error ? (
         <Card><CardContent className="p-6 text-center text-destructive">{String(error)}</CardContent></Card>

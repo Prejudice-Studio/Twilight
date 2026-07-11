@@ -21,15 +21,16 @@ import (
 var sharedHTTPTransport = &http.Transport{
 	Proxy: http.ProxyFromEnvironment,
 	DialContext: (&net.Dialer{
-		Timeout:   10 * time.Second,
+		Timeout:   5 * time.Second,
 		KeepAlive: 30 * time.Second,
 	}).DialContext,
-	ForceAttemptHTTP2:     true,
-	MaxIdleConns:          100,
-	MaxIdleConnsPerHost:   16,
-	IdleConnTimeout:       90 * time.Second,
-	TLSHandshakeTimeout:   10 * time.Second,
-	ExpectContinueTimeout: 1 * time.Second,
+	ForceAttemptHTTP2:      true,
+	MaxIdleConns:           200,
+	MaxIdleConnsPerHost:    32,
+	IdleConnTimeout:        90 * time.Second,
+	TLSHandshakeTimeout:    10 * time.Second,
+	ExpectContinueTimeout:  1 * time.Second,
+	MaxResponseHeaderBytes: 1 << 20,
 }
 
 // sharedHTTPClient 是 transport-only 共享 client，不带 client.Timeout，
@@ -179,4 +180,8 @@ func doJSONRequestWithTimeout(req *http.Request, dst any, timeout time.Duration)
 		return nil
 	}
 	return json.Unmarshal(data, dst)
+}
+
+func InitHTTPClients() {
+	sharedHTTPTransport.CloseIdleConnections()
 }

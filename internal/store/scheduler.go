@@ -1,6 +1,9 @@
 package store
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 const maxStoredSchedulerRuns = 200
 
@@ -12,6 +15,12 @@ type SchedulerRunSnapshot struct {
 	HasLatestManual  bool
 	LatestRunning    SchedulerRun
 	HasLatestRunning bool
+}
+
+type SchedulerOverview struct {
+	Runs        map[string]SchedulerRunSnapshot
+	Schedules   map[string]SchedulerSchedule
+	Interrupted int
 }
 
 func (s *Store) AddSchedulerRun(run SchedulerRun) error {
@@ -41,6 +50,68 @@ func (s *Store) AddSchedulerRunReturning(run SchedulerRun) (SchedulerRun, error)
 		s.state.SchedulerRuns = s.state.SchedulerRuns[:maxStoredSchedulerRuns]
 	}
 	return run, s.saveLocked()
+}
+
+// TryStartSchedulerRun persists a running row only when the same job has no
+// fresh persisted run. The check and insert share one store critical section,
+// so API-triggered and daemon-triggered runs cannot both pass through a stale
+// in-memory snapshot in the same process. Persisted rows also provide a guard
+// between API and scheduler processes that share the state backend.
+func (s *Store) TryStartSchedulerRun(run SchedulerRun, staleBeforeUnix, nowUnix int64) (SchedulerRun, bool, error) {
+	if run.JobID == "" {
+		return SchedulerRun{}, false, fmt.Errorf("scheduler job id is empty")
+	}
+	if nowUnix <= 0 {
+		nowUnix = time.Now().Unix()
+	}
+	if run.StartedAt <= 0 {
+		run.StartedAt = nowUnix
+	}
+	if run.Status == "" {
+		run.Status = "running"
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return SchedulerRun{}, false, err
+	}
+	for _, current := range s.state.SchedulerRuns {
+		if current.JobID == run.JobID && current.Status == "running" && current.StartedAt > staleBeforeUnix {
+			return SchedulerRun{}, false, nil
+		}
+	}
+
+	prev, err := s.snapshotStateLocked()
+	if err != nil {
+		return SchedulerRun{}, false, err
+	}
+	for i := range s.state.SchedulerRuns {
+		current := &s.state.SchedulerRuns[i]
+		if current.JobID == run.JobID && current.Status == "running" && current.StartedAt <= staleBeforeUnix {
+			markSchedulerRunInterrupted(current, nowUnix)
+		}
+	}
+	if run.ID == 0 {
+		run.ID = s.state.NextSchedulerRunID
+		s.state.NextSchedulerRunID++
+	}
+	if run.Type == "" {
+		run.Type = "manual"
+	}
+	if run.Trigger == "" {
+		run.Trigger = "manual"
+	}
+	normalizeSchedulerRunTimestamps(&run)
+	s.state.SchedulerRuns = append([]SchedulerRun{run}, s.state.SchedulerRuns...)
+	if len(s.state.SchedulerRuns) > maxStoredSchedulerRuns {
+		s.state.SchedulerRuns = s.state.SchedulerRuns[:maxStoredSchedulerRuns]
+	}
+	if err := s.saveLocked(); err != nil {
+		s.state = prev
+		return SchedulerRun{}, false, err
+	}
+	return run, true, nil
 }
 
 func (s *Store) UpdateSchedulerRun(id int64, fn func(*SchedulerRun) error) (SchedulerRun, error) {
@@ -126,6 +197,10 @@ func (s *Store) SchedulerRunSnapshot(jobID string, limit int) SchedulerRunSnapsh
 func (s *Store) BatchSchedulerRunSnapshots(jobIDs []string, limit int) map[string]SchedulerRunSnapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	return schedulerRunSnapshots(s.state.SchedulerRuns, jobIDs, limit)
+}
+
+func schedulerRunSnapshots(runs []SchedulerRun, jobIDs []string, limit int) map[string]SchedulerRunSnapshot {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
@@ -135,7 +210,7 @@ func (s *Store) BatchSchedulerRunSnapshots(jobIDs []string, limit int) map[strin
 		needed[id] = true
 		result[id] = SchedulerRunSnapshot{Runs: make([]SchedulerRun, 0, limit)}
 	}
-	for _, run := range s.state.SchedulerRuns {
+	for _, run := range runs {
 		if !needed[run.JobID] {
 			continue
 		}
@@ -162,6 +237,85 @@ func (s *Store) BatchSchedulerRunSnapshots(jobIDs []string, limit int) map[strin
 		result[run.JobID] = snap
 	}
 	return result
+}
+
+// SchedulerStateOverview refreshes shared state once, reconciles stale running
+// rows in one write, and returns run/schedule snapshots under the same lock.
+// This is the polling and daemon hot path: it avoids one refresh and full scan
+// per job while still observing updates written by another process.
+func (s *Store) SchedulerStateOverview(jobIDs []string, limit int, activeJobIDs map[string]bool, staleBeforeUnix, nowUnix int64) (SchedulerOverview, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return SchedulerOverview{}, err
+	}
+	needed := make(map[string]bool, len(jobIDs))
+	for _, jobID := range jobIDs {
+		if jobID != "" {
+			needed[jobID] = true
+		}
+	}
+	stale := make([]int, 0)
+	for i, run := range s.state.SchedulerRuns {
+		if !needed[run.JobID] || activeJobIDs[run.JobID] || run.Status != "running" || run.StartedAt > staleBeforeUnix {
+			continue
+		}
+		stale = append(stale, i)
+	}
+	if len(stale) > 0 {
+		prev, err := s.snapshotStateLocked()
+		if err != nil {
+			return SchedulerOverview{}, err
+		}
+		for _, i := range stale {
+			markSchedulerRunInterrupted(&s.state.SchedulerRuns[i], nowUnix)
+		}
+		if err := s.saveLocked(); err != nil {
+			s.state = prev
+			return SchedulerOverview{}, err
+		}
+	}
+
+	overview := SchedulerOverview{
+		Runs:        schedulerRunSnapshots(s.state.SchedulerRuns, jobIDs, limit),
+		Schedules:   make(map[string]SchedulerSchedule, len(jobIDs)),
+		Interrupted: len(stale),
+	}
+	for _, jobID := range jobIDs {
+		if schedule, ok := s.state.SchedulerSchedules[jobID]; ok {
+			overview.Schedules[jobID] = cloneSchedulerSchedule(schedule)
+		}
+	}
+	return overview, nil
+}
+
+func (s *Store) SchedulerSchedules(jobIDs []string) map[string]SchedulerSchedule {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[string]SchedulerSchedule, len(jobIDs))
+	for _, jobID := range jobIDs {
+		if schedule, ok := s.state.SchedulerSchedules[jobID]; ok {
+			out[jobID] = cloneSchedulerSchedule(schedule)
+		}
+	}
+	return out
+}
+
+func cloneSchedulerSchedule(schedule SchedulerSchedule) SchedulerSchedule {
+	schedule.TriggerSpec = cloneSchedulerMap(schedule.TriggerSpec)
+	schedule.RuntimeParams = cloneSchedulerMap(schedule.RuntimeParams)
+	return schedule
+}
+
+func cloneSchedulerMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string]any, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
 }
 
 // LastSchedulerRunByType 返回 (jobID, runType) 命中的最新一条 SchedulerRun（按
@@ -243,22 +397,26 @@ func (s *Store) MarkInterruptedSchedulerRuns(jobID string, beforeUnix int64, now
 		if run.Status != "running" || run.StartedAt > beforeUnix {
 			continue
 		}
-		run.Status = "failed"
-		run.Message = "job interrupted before completion"
-		run.Error = "job interrupted before completion"
-		run.FinishedAt = nowUnix
-		run.EndedAt = nowUnix
-		if run.Summary == nil {
-			run.Summary = map[string]any{}
-		}
-		run.Summary["interrupted"] = true
-		run.Summary["success"] = false
+		markSchedulerRunInterrupted(run, nowUnix)
 	}
 	if err := s.saveLocked(); err != nil {
 		s.state = prev
 		return 0, err
 	}
 	return changed, nil
+}
+
+func markSchedulerRunInterrupted(run *SchedulerRun, nowUnix int64) {
+	run.Status = "failed"
+	run.Message = "job interrupted before completion"
+	run.Error = "job interrupted before completion"
+	run.FinishedAt = nowUnix
+	run.EndedAt = nowUnix
+	if run.Summary == nil {
+		run.Summary = map[string]any{}
+	}
+	run.Summary["interrupted"] = true
+	run.Summary["success"] = false
 }
 
 func (s *Store) SchedulerSchedule(jobID string) (SchedulerSchedule, bool) {

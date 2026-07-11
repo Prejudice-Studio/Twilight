@@ -200,8 +200,7 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 	}
 
 	// 实时会话：DeviceId -> 解析后的 IP，并顺带收集每个 Emby 用户当前 IP 与用户名。
-	var sessions []map[string]any
-	_ = a.embyGet(ctx, "/Sessions", &sessions)
+	sessions, _ := a.embySessionsSnapshot(ctx, false)
 	liveIPByDevice := make(map[string]string, len(sessions))
 	for _, s := range sessions {
 		ip := parseRemoteIP(asString(s["RemoteEndPoint"]))
@@ -443,6 +442,8 @@ func (a *App) handleAdminEmbyDeviceAudit(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		a.embyDeviceAuditMu.Unlock()
+	} else {
+		a.invalidateEmbySessionsSnapshot()
 	}
 	data, err := a.buildEmbyDeviceAudit(r.Context())
 	if err != nil {

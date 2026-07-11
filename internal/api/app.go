@@ -55,35 +55,40 @@ type App struct {
 	//   - store / sessions / limiter / redis 接口/指针的 (type,data) 双 word
 	//     非原子赋值导致 vtable 与 data 撕裂触发 segfault；
 	//   - reload 中途读端拿到 cfg 是 next、store 仍是 prev 的混合视图。
-	runtime               atomic.Pointer[runtimeState]
-	routes                []Route
-	runtimeMu             sync.Mutex
-	setupMu               sync.Mutex
-	configSignature       string
-	telegramBotMu         sync.Mutex
-	telegramBotCacheToken string
-	telegramBotCacheUntil time.Time
-	telegramBotCache      map[string]any
-	telegramStatusMu      sync.Mutex
-	telegramLastOKAt      int64
-	telegramLastErrorAt   int64
-	telegramLastError     string
-	telegramPolling       bool
-	telegramPanelMu       sync.Mutex
-	telegramPanels        map[string]telegramPanelContext
-	developerJSMu         sync.Mutex
-	developerJSCallbacks  map[string]developerJSCallbackContext
-	developerJSWaiters    map[string]developerJSMessageWaiter
-	delAccountPendingMu   sync.Mutex
-	delAccountPending     map[string]*delAccountPendingState
-	embyAdminMu           sync.Mutex
-	embyAdminCache        map[string]embyAdminCacheEntry
-	embyDeviceAuditMu     sync.Mutex
-	embyDeviceAuditUntil  time.Time
-	embyDeviceAuditCache  map[string]any
-	embyActivityMu        sync.Mutex
-	embyActivityNextAuto  time.Time
-	bindStatus            *bindStatusHub
+	runtime                atomic.Pointer[runtimeState]
+	routes                 []Route
+	runtimeMu              sync.Mutex
+	setupMu                sync.Mutex
+	configSignature        string
+	telegramBotMu          sync.Mutex
+	telegramBotCacheToken  string
+	telegramBotCacheUntil  time.Time
+	telegramBotCache       map[string]any
+	telegramStatusMu       sync.Mutex
+	telegramLastOKAt       int64
+	telegramLastErrorAt    int64
+	telegramLastError      string
+	telegramPolling        bool
+	telegramPanelMu        sync.Mutex
+	telegramPanels         map[string]telegramPanelContext
+	developerJSMu          sync.Mutex
+	developerJSCallbacks   map[string]developerJSCallbackContext
+	developerJSWaiters     map[string]developerJSMessageWaiter
+	delAccountPendingMu    sync.Mutex
+	delAccountPending      map[string]*delAccountPendingState
+	embyAdminMu            sync.Mutex
+	embyAdminCache         map[string]embyAdminCacheEntry
+	embyDeviceAuditMu      sync.Mutex
+	embyDeviceAuditUntil   time.Time
+	embyDeviceAuditCache   map[string]any
+	embySessionsMu         sync.Mutex
+	embySessionsUntil      time.Time
+	embySessionsCache      []map[string]any
+	embyActivityMu         sync.Mutex
+	embyActivityNextAuto   time.Time
+	embyPlaybackStatsMu    sync.Mutex
+	embyPlaybackStatsCache map[string]embyPlaybackStatsCacheEntry
+	bindStatus             *bindStatusHub
 	// schedulerLocks: jobID -> *schedulerProcessRun。BATCH_07 之前在 package 级
 	// 声明 (`var schedulerProcessLocks sync.Map`)，单进程 prod 不显问题，但
 	// 测试 setup 反复 New() 出多个 App 时这张表共享 → 一个 case cancel 的 job
@@ -226,11 +231,12 @@ func New(cfg config.Config, st *store.Store) (*App, error) {
 		return nil, err
 	}
 	app := &App{
-		telegramPanels:       map[string]telegramPanelContext{},
-		developerJSCallbacks: map[string]developerJSCallbackContext{},
-		developerJSWaiters:   map[string]developerJSMessageWaiter{},
-		embyAdminCache:       map[string]embyAdminCacheEntry{},
-		bindStatus:           newBindStatusHub(),
+		telegramPanels:         map[string]telegramPanelContext{},
+		developerJSCallbacks:   map[string]developerJSCallbackContext{},
+		developerJSWaiters:     map[string]developerJSMessageWaiter{},
+		embyAdminCache:         map[string]embyAdminCacheEntry{},
+		embyPlaybackStatsCache: map[string]embyPlaybackStatsCacheEntry{},
+		bindStatus:             newBindStatusHub(),
 	}
 	app.runtime.Store(&runtimeState{
 		cfg:      cfg,

@@ -57,6 +57,9 @@ export default function RootLayout({
     <html lang="zh-Hans" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
+        <link rel="dns-prefetch" href="//image.tmdb.org" />
+        <link rel="preconnect" href="https://image.tmdb.org" crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href="//api.bgm.tv" />
       </head>
       <body
         className={`${GeistSans.variable} ${GeistMono.variable} font-sans antialiased`}

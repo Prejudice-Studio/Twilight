@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useVisiblePolling } from "@/hooks/use-visible-polling";
 import { useI18n, type MessageKey, type MessageParams } from "@/lib/i18n";
 import { api } from "@/lib/api";
 import type { EmbyAuditDevice, EmbyAuditUser, EmbyDeviceAuditData } from "@/lib/api-types";
@@ -191,14 +192,7 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
     void reload();
   }, [reload]);
 
-  useEffect(() => {
-    if (!autoRefresh) return;
-    const timer = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      void reload(false);
-    }, 30000);
-    return () => window.clearInterval(timer);
-  }, [autoRefresh, reload]);
+  useVisiblePolling(() => reload(false), 60000, autoRefresh);
 
   const toggleExpand = useCallback((id: string) => {
     setExpanded((prev) => {

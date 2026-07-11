@@ -70,3 +70,23 @@ func TestPlaybackRecordsPruneToMax(t *testing.T) {
 		t.Fatalf("unexpected latest record after prune: %#v", latest)
 	}
 }
+
+func TestSyncEmbyActivityLogsEnrichesExistingEntries(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.SyncEmbyActivityLogs([]EmbyActivityLog{{EmbyLogID: 10, Type: "playback.start", UserID: "u1", Date: 100}}); err != nil {
+		t.Fatal(err)
+	}
+	if added, err := st.SyncEmbyActivityLogs([]EmbyActivityLog{{EmbyLogID: 10, Type: "playback.start", ItemID: "item-10", UserID: "u1", Date: 100}}); err != nil {
+		t.Fatal(err)
+	} else if added != 0 {
+		t.Fatalf("added=%d want 0 for enrichment", added)
+	}
+	logs := st.ListEmbyActivityLogs(0, 10)
+	if len(logs) != 1 || logs[0].ItemID != "item-10" {
+		t.Fatalf("enriched logs = %#v", logs)
+	}
+}

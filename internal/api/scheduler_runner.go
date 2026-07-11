@@ -114,9 +114,13 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		for _, rel := range a.store().InviteRelations() {
 			invitedUIDs[rel.ChildUID] = true
 		}
+		batchCount := 0
 		for _, u := range users {
-			if err := r.Context().Err(); err != nil {
-				return map[string]any{"success": false, "terminated": true, "disabled": disabled, "emby_disabled": embyDisabled, "skipped_protected": skippedProtected}, []string{"job terminated"}, err
+			batchCount++
+			if batchCount%50 == 0 {
+				if err := r.Context().Err(); err != nil {
+					return map[string]any{"success": false, "terminated": true, "disabled": disabled, "emby_disabled": embyDisabled, "skipped_protected": skippedProtected}, []string{"job terminated"}, err
+				}
 			}
 			// 守护管理员 / 白名单不被自动禁用：运维约定"绝不会给 admin 设
 			// finite ExpiredAt"，但 demote-then-repromote 路径 / 手动 SQL /
@@ -167,6 +171,13 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 				}
 			}
 		}
+		if disabled > 0 || embyDisabled > 0 {
+			a.auditSystem("scheduler", "disable_expired_users", 0, map[string]any{
+				"disabled":          disabled,
+				"emby_disabled":     embyDisabled,
+				"skipped_protected": skippedProtected,
+			})
+		}
 		return map[string]any{"success": true, "disabled": disabled, "emby_disabled": embyDisabled, "skipped_protected": skippedProtected}, []string{fmt.Sprintf("disabled %d expired users", disabled)}, nil
 	case "check_expiring", "expiry_reminders":
 		defaultDays := a.cfg().NotificationExpiryRemindDays
@@ -216,16 +227,11 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		if !a.embyConfigured() {
 			return map[string]any{"success": true, "configured": false, "active": 0, "total": 0, "expired_sessions": expiredSessions, "expired_email_codes": expiredEmailCodes, "cleared_unverified_emails": staleCleared}, []string{"Emby not configured", fmt.Sprintf("cleaned up %d expired sessions", expiredSessions), fmt.Sprintf("cleaned up %d expired email codes", expiredEmailCodes), fmt.Sprintf("cleared %d stale unverified emails", staleCleared)}, nil
 		}
-		var sessions []map[string]any
-		if err := a.embyGet(r.Context(), "/Sessions", &sessions); err != nil {
+		sessions, err := a.embySessionsSnapshot(r.Context(), false)
+		if err != nil {
 			return map[string]any{"success": false}, nil, err
 		}
-		active := 0
-		for _, session := range sessions {
-			if session["NowPlayingItem"] != nil {
-				active++
-			}
-		}
+		active := countEmbyPlayingSessions(sessions)
 		return map[string]any{"success": true, "active": active, "total": len(sessions), "expired_sessions": expiredSessions, "expired_email_codes": expiredEmailCodes, "cleared_unverified_emails": staleCleared}, []string{fmt.Sprintf("read %d Emby sessions", len(sessions)), fmt.Sprintf("cleaned up %d expired sessions", expiredSessions), fmt.Sprintf("cleaned up %d expired email codes", expiredEmailCodes), fmt.Sprintf("cleared %d stale unverified emails", staleCleared)}, nil
 	case "emby_sync":
 		if !a.embyConfigured() {
@@ -266,6 +272,10 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 			delete(remoteByName, name)
 		}
 		users := a.store().ListUsers()
+		maxUsers := clamp(jobParamInt(params, "max_users", 1000), 1, 50000)
+		if len(users) > maxUsers {
+			users = users[:maxUsers]
+		}
 		claimedRemoteIDs := map[string]int64{}
 		for _, u := range users {
 			if u.EmbyID != "" && !isSyntheticEmbyID(u.EmbyID, u.UID) {
@@ -364,6 +374,18 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 			}
 		}
 		logs = append(logs, fmt.Sprintf("read %d Emby users, %d synced, %d unchanged, %d missing, %d conflicts", len(remote), syncedState, stateUnchanged, missing, conflicts))
+		if syncedState > 0 || filledIDs > 0 {
+			a.auditSystem("scheduler", "emby_sync", 0, map[string]any{
+				"remote_users":          len(remote),
+				"updated_names":         updatedNames,
+				"synced_state":          syncedState,
+				"state_unchanged":       stateUnchanged,
+				"filled_emby_ids":       filledIDs,
+				"repaired_placeholders": repairedPlaceholders,
+				"missing":               missing,
+				"conflicts":             conflicts,
+			})
+		}
 		return map[string]any{"success": true, "remote_users": len(remote), "updated_names": updatedNames, "synced_state": syncedState, "state_unchanged": stateUnchanged, "missing": missing, "filled_emby_ids": filledIDs, "repaired_placeholders": repairedPlaceholders, "conflicts": conflicts}, logs, nil
 	case "cleanup_no_emby":
 		ignoreEnabled := jobParamBool(params, "ignore_enabled_flag", false)
@@ -415,6 +437,13 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 			} else {
 				deleted++
 			}
+		}
+		if deleted > 0 {
+			a.auditSystem("scheduler", "delete_no_emby_users", 0, map[string]any{
+				"deleted":    deleted,
+				"candidates": candidates,
+				"failed":     failed,
+			})
 		}
 		return map[string]any{"success": true, "enabled": true, "candidates": candidates, "deleted": deleted, "failed": failed, "dry_run": dryRun, "days": days, "days_threshold": days, "preserve_tg_bound": preserveTG, "skipped_pending_emby": skippedPending}, []string{fmt.Sprintf("processed %d no-Emby web users", candidates)}, nil
 	case "cleanup_pending_emby_entitlements":
@@ -661,6 +690,13 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 				logs = append(logs, "deleted Emby user: "+id)
 			}
 		}
+		if deleted > 0 {
+			a.auditSystem("scheduler", "delete_unlinked_emby", 0, map[string]any{
+				"unlinked": len(unlinked),
+				"deleted":  deleted,
+				"dry_run":  dryRun || !delete,
+			})
+		}
 		return map[string]any{"success": true, "unlinked": len(unlinked), "deleted": deleted, "dry_run": dryRun || !delete}, logs, nil
 	case "cleanup_ticket_images":
 		retentionDays := jobParamInt(params, "retention_days", a.cfg().TicketImageRetentionDays)
@@ -679,6 +715,12 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 				continue
 			}
 			cleanedTickets++
+		}
+		if cleanedTickets > 0 || removedImages > 0 {
+			a.auditSystem("scheduler", "cleanup_ticket_images", 0, map[string]any{
+				"tickets": cleanedTickets,
+				"images":  removedImages,
+			})
 		}
 		return map[string]any{"success": true, "tickets": cleanedTickets, "images": removedImages},
 			[]string{fmt.Sprintf("cleaned %d tickets, %d images older than %d days", cleanedTickets, removedImages, retentionDays)}, nil
@@ -722,11 +764,13 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		if !a.embyConfigured() {
 			return map[string]any{"success": true, "skipped": true, "reason": "emby not configured"}, nil, nil
 		}
-		count, err := a.fetchAndStoreEmbyActivityLogs(r.Context())
+		sinceHours := clamp(jobParamInt(params, "since_hours", 24), 1, 720)
+		since := time.Now().Add(-time.Duration(sinceHours) * time.Hour)
+		count, err := a.fetchAndStoreEmbyActivityLogsSince(r.Context(), since)
 		if err != nil {
-			return map[string]any{"success": false}, nil, err
+			return map[string]any{"success": false, "since_hours": sinceHours}, nil, err
 		}
-		return map[string]any{"success": true, "new_entries": count}, nil, nil
+		return map[string]any{"success": true, "new_entries": count, "since_hours": sinceHours}, nil, nil
 	default:
 		return map[string]any{"success": false}, nil, fmt.Errorf("unknown scheduler job: %s", jobID)
 	}
