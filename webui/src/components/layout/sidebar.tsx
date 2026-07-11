@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import type { ComponentType } from "react";
 import Image from "next/image";
@@ -54,6 +54,7 @@ export interface SidebarNavItem {
   href: string;
   labelKey: MessageKey;
   icon: ComponentType<{ className?: string }>;
+  category?: string;
 }
 
 type ViewTransitionLike = {
@@ -78,24 +79,28 @@ export const userNavItems: SidebarNavItem[] = [
 export const adminNavItems: SidebarNavItem[] = [
   { href: "/admin", labelKey: "navigation.adminHome", icon: LayoutDashboard },
   { href: "/admin/users", labelKey: "navigation.users", icon: Users },
-  { href: "/admin/announcements", labelKey: "navigation.adminAnnouncements", icon: Megaphone },
-  { href: "/admin/tickets", labelKey: "navigation.adminTickets", icon: MessageSquareMore },
   { href: "/admin/regcodes", labelKey: "navigation.regcodes", icon: FileText },
   { href: "/admin/invite", labelKey: "navigation.inviteForest", icon: Network },
-  { href: "/admin/requests", labelKey: "navigation.requestReview", icon: Film },
-  { href: "/admin/violations", labelKey: "navigation.violations", icon: ShieldAlert },
-  { href: "/admin/audit-logs", labelKey: "navigation.auditLogs", icon: ClipboardList },
-  { href: "/admin/bangumi", labelKey: "navigation.bangumiAdmin", icon: BookOpen },
-  { href: "/admin/email", labelKey: "navigation.emailAdmin", icon: Mail },
-  { href: "/admin/telegram", labelKey: "navigation.telegramAdmin", icon: MessageSquare },
-  { href: "/admin/security", labelKey: "navigation.securityCenter", icon: Shield },
-  { href: "/admin/developer", labelKey: "navigation.developerMode", icon: Code2 },
-  { href: "/admin/emby", labelKey: "navigation.embyAdmin", icon: Server },
-  { href: "/admin/scheduler", labelKey: "navigation.scheduler", icon: TimerReset },
-  { href: "/admin/database", labelKey: "navigation.databaseBackup", icon: Database },
-  { href: "/admin/config", labelKey: "navigation.configAdmin", icon: FileCode },
-  { href: "/admin/logs", labelKey: "navigation.runtimeLogs", icon: ScrollText },
-  { href: "/admin/test", labelKey: "navigation.serverInfo", icon: TestTube },
+
+  { href: "/admin/emby", labelKey: "navigation.embyAdmin", icon: Server, category: "service" },
+  { href: "/admin/bangumi", labelKey: "navigation.bangumiAdmin", icon: BookOpen, category: "service" },
+  { href: "/admin/email", labelKey: "navigation.emailAdmin", icon: Mail, category: "service" },
+  { href: "/admin/telegram", labelKey: "navigation.telegramAdmin", icon: MessageSquare, category: "service" },
+
+  { href: "/admin/announcements", labelKey: "navigation.adminAnnouncements", icon: Megaphone, category: "content" },
+  { href: "/admin/tickets", labelKey: "navigation.adminTickets", icon: MessageSquareMore, category: "content" },
+  { href: "/admin/requests", labelKey: "navigation.requestReview", icon: Film, category: "content" },
+
+  { href: "/admin/security", labelKey: "navigation.securityCenter", icon: Shield, category: "security" },
+  { href: "/admin/audit-logs", labelKey: "navigation.auditLogs", icon: ClipboardList, category: "security" },
+  { href: "/admin/violations", labelKey: "navigation.violations", icon: ShieldAlert, category: "security" },
+
+  { href: "/admin/config", labelKey: "navigation.configAdmin", icon: FileCode, category: "system" },
+  { href: "/admin/database", labelKey: "navigation.databaseBackup", icon: Database, category: "system" },
+  { href: "/admin/scheduler", labelKey: "navigation.scheduler", icon: TimerReset, category: "system" },
+  { href: "/admin/logs", labelKey: "navigation.runtimeLogs", icon: ScrollText, category: "system" },
+  { href: "/admin/test", labelKey: "navigation.serverInfo", icon: TestTube, category: "system" },
+  { href: "/admin/developer", labelKey: "navigation.developerMode", icon: Code2, category: "system" },
 ];
 
 export function filterNavItems(
@@ -319,34 +324,43 @@ export function Sidebar() {
             <>
               <p className="sidebar-label mt-5">{t("navigation.adminMenu")}</p>
               <LayoutGroup>
-                {visibleAdminNavItems.map((item) => {
-                  const active = isActivePath(pathname, item.href);
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      prefetch={false}
-                      className={cn("sidebar-link", active && "sidebar-link-active")}
-                    >
-                      {active && (
-                        <motion.span
-                          layoutId="sidebar-admin-active-bg"
-                          className="sidebar-active-bg"
-                          transition={{ type: "spring", stiffness: 420, damping: 34 }}
-                        />
-                      )}
-                      <item.icon className="relative z-10 h-4 w-4 shrink-0" />
-                      <span className="relative z-10">{t(item.labelKey)}</span>
-                      {active && (
-                        <motion.span
-                          layoutId="sidebar-admin-active-dot"
-                          className="sidebar-dot"
-                          transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                        />
-                      )}
-                    </Link>
-                  );
-                })}
+                {(() => {
+                  let lastCat = "";
+                  return visibleAdminNavItems.map((item) => {
+                    const active = isActivePath(pathname, item.href);
+                    const cat = item.category || "";
+                    const showCat = cat && cat !== lastCat;
+                    lastCat = cat;
+                    const catLabels: Record<string, string> = { service: "服务集成", content: "内容管理", security: "安全审计", system: "系统运维" };
+                    return (
+                      <Fragment key={item.href}>
+                        {showCat && <p className="px-3 pt-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">{catLabels[cat] || cat}</p>}
+                        <Link
+                          href={item.href}
+                          prefetch={false}
+                          className={cn("sidebar-link", active && "sidebar-link-active")}
+                        >
+                          {active && (
+                            <motion.span
+                              layoutId="sidebar-admin-active-bg"
+                              className="sidebar-active-bg"
+                              transition={{ type: "spring", stiffness: 420, damping: 34 }}
+                            />
+                          )}
+                          <item.icon className="relative z-10 h-4 w-4 shrink-0" />
+                          <span className="relative z-10">{t(item.labelKey)}</span>
+                          {active && (
+                            <motion.span
+                              layoutId="sidebar-admin-active-dot"
+                              className="sidebar-dot"
+                              transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                            />
+                          )}
+                        </Link>
+                      </Fragment>
+                    );
+                  });
+                })()}
               </LayoutGroup>
             </>
           )}
