@@ -104,7 +104,7 @@ systemd 部署对应三个服务单元：`twilight`、`twilight-bot`、`twilight
 
 ### CORS 约束
 
-生产环境若前端与 API 跨 origin 部署，必须把 `API.cors_origins` / `TWILIGHT_API_CORS_ORIGINS` 显式设置为前端 HTTPS 域名。后端不会把 `*` 当作携带凭据接口的可信 Origin，避免低信任页面通过浏览器 JS 读取凭据接口响应。Origin 只允许协议 + 主机 + 端口；尾斜杠会被规范化，带路径、查询串或片段的值会被拒绝。
+生产环境若前端与 API 跨 origin 部署，必须把 `API.cors_origins` / `TWILIGHT_API_CORS_ORIGINS` 显式设置为前端 HTTPS 域名。后端不会把 `*` 当作携带凭据接口的可信 Origin，避免低信任页面通过浏览器 JS 读取凭据接口响应。Origin 只允许协议 + 主机 + 端口；尾斜杠会被规范化，带路径、查询串或片段的值会被拒绝。若请求 Origin 与当前请求 Host 的协议、主机和端口完全一致，后端会按同源请求放行，无需把 API 自身 Origin 重复加入列表；该回退不会放行协议、主机或端口不同的跨域来源。
 
 ## 常用环境变量
 

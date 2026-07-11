@@ -219,14 +219,43 @@ func TestCredentialedCORSRequiresExplicitOrigin(t *testing.T) {
 		t.Fatalf("path-bearing CORS origin was allowed: %q", rr.Header().Get("Access-Control-Allow-Origin"))
 	}
 
-	app.cfg().CORSOrigins = []string{"https://panel.example"}
-	req = httptest.NewRequest(http.MethodOptions, "https://api.example/api/v1/users/me", nil)
-	req.Header.Set("Origin", "https://api.example")
-	req.Header.Set("Access-Control-Request-Method", "PUT")
-	rr = httptest.NewRecorder()
-	app.ServeHTTP(rr, req)
-	if rr.Header().Get("Access-Control-Allow-Origin") != "" {
-		t.Fatalf("same-host origin bypassed explicit CORS list: %q", rr.Header().Get("Access-Control-Allow-Origin"))
+}
+
+func TestCORSSameHostFallback(t *testing.T) {
+	tests := []struct {
+		name         string
+		requestURL   string
+		origin       string
+		cookieSecure bool
+		wantAllowed  bool
+	}{
+		{name: "https", requestURL: "https://api.example/api/v1/users/me", origin: "https://api.example", cookieSecure: true, wantAllowed: true},
+		{name: "https port", requestURL: "https://api.example:8443/api/v1/users/me", origin: "https://api.example:8443", cookieSecure: true, wantAllowed: true},
+		{name: "http development", requestURL: "http://localhost:8080/api/v1/users/me", origin: "http://localhost:8080", cookieSecure: false, wantAllowed: true},
+		{name: "different host", requestURL: "https://api.example/api/v1/users/me", origin: "https://evil.example", cookieSecure: true, wantAllowed: false},
+		{name: "different port", requestURL: "https://api.example:8443/api/v1/users/me", origin: "https://api.example", cookieSecure: true, wantAllowed: false},
+		{name: "different scheme", requestURL: "https://api.example/api/v1/users/me", origin: "http://api.example", cookieSecure: true, wantAllowed: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := newTestApp(t)
+			app.cfg().CORSOrigins = []string{"https://panel.example"}
+			app.cfg().CookieSecure = tt.cookieSecure
+			req := httptest.NewRequest(http.MethodOptions, tt.requestURL, nil)
+			req.Header.Set("Origin", tt.origin)
+			req.Header.Set("Access-Control-Request-Method", "PUT")
+			rr := httptest.NewRecorder()
+			app.ServeHTTP(rr, req)
+
+			got := rr.Header().Get("Access-Control-Allow-Origin")
+			if tt.wantAllowed && got != tt.origin {
+				t.Fatalf("same-host origin was not allowed: got %q, want %q", got, tt.origin)
+			}
+			if !tt.wantAllowed && got != "" {
+				t.Fatalf("non-matching origin was allowed: %q", got)
+			}
+		})
 	}
 }
 

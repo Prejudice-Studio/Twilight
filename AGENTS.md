@@ -144,7 +144,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Reuse `ResolveWithinRoot`, upload filename allowlists, `validateOutboundBaseURL`, and shared HTTP clients.
 - Public OpenAPI output must expose only public routes. Full route inventory belongs behind admin auth at `/system/admin/apis`.
 - Preserve the safe announcement renderer and URL allowlist in `webui/src/lib/safe-render.tsx`.
-- CORS must be explicit-list only. Do not reintroduce a same-host/same-origin fallback such as `corsOriginMatchesHost`, and do not allow an `Origin` just because it equals the request `Host`. Production deployments rely on `API.cors_origins` / `TWILIGHT_API_CORS_ORIGINS` as the single source of trusted browser origins.
+- Preserve the pre-`98b1c3da811b862a87c92fdcc3db69e5e37b595b` CORS behavior: explicit `cors_origins` entries are allowed, and `corsOriginMatchesHost` must continue to allow an Origin that matches the current request host as `scheme://host[:port]`. Do not remove or replace this same-host fallback without an explicit user request, because production deployments may rely on it when browsers send an Origin header on same-origin requests.
 
 ## Feature Gate Notes
 

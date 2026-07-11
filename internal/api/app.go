@@ -850,7 +850,8 @@ func (a *App) applyCORS(w http.ResponseWriter, r *http.Request) bool {
 	if origin == "" {
 		return false
 	}
-	if !a.corsOriginAllowed(origin) {
+	allowed := a.corsOriginAllowed(origin) || a.corsOriginMatchesHost(origin, r)
+	if !allowed {
 		return false
 	}
 	w.Header().Set("Access-Control-Allow-Origin", origin)
@@ -882,6 +883,27 @@ func (a *App) corsOriginAllowed(origin string) bool {
 		}
 	}
 	return false
+}
+
+// corsOriginMatchesHost returns whether Origin matches the current request host
+// as scheme://host[:port]. This preserves the pre-98b1c3d same-host CORS
+// behavior for deployments where browsers send an Origin header on same-origin
+// requests even though the API host is not duplicated in cors_origins.
+func (a *App) corsOriginMatchesHost(origin string, r *http.Request) bool {
+	normalized := normalizeCORSOrigin(origin)
+	if normalized == "" {
+		return false
+	}
+	host := strings.TrimSpace(r.Host)
+	if host == "" {
+		return false
+	}
+	scheme := "https"
+	if !a.cfg().CookieSecure && r.TLS == nil {
+		scheme = "http"
+	}
+	hostOrigin := scheme + "://" + host
+	return strings.EqualFold(normalized, hostOrigin)
 }
 
 func requireWebUIIntent(w http.ResponseWriter, r *http.Request, intent string) bool {
