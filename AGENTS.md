@@ -84,6 +84,53 @@ Update docs in the same change when behavior changes.
 - Enforce feature gates in every relevant handler, not only in frontend visibility logic.
 - Do not read or print local secrets from config files unless explicitly requested.
 
+## Backend Function Index
+
+Use this index before broad search. Line numbers drift, so search by function name.
+
+| File | Important functions |
+| ---- | ---- |
+| `routes.go` | `registerAllRoutes`, `registerAPIRoutes`, `registerAdminRoutes`, `registerAPIKeyRoutes`, `registerSecurityRoutes`, `registerBatchRoutes` |
+| `app.go` | `ServeHTTP`, `authenticate`, `current`, `clientIP`, `principal`, CORS helpers |
+| `auth_handlers.go` | `handleLogin`, `handleRegister`, `handleLogout`, `handleAuthMe`, password reset handlers |
+| `setup_handlers.go` | `handleSetupStatus`, `handleSetupComplete`, `setupConfigValues` |
+| `handlers.go` | user self-service, admin users, Emby binding, renewal, role, password, Telegram unbind helpers |
+| `business.go` | `sortUsers`, `regcodeDTO`, `regcodeStatus`, `generateRegCode`, `inviteForest`, `inviteTreeFor`, `canInvite`, `batchResult` |
+| `regcode_handlers.go` | list/create/update/delete/batch-delete RegCodes and RegCode user history |
+| `code_use_handlers.go` | `handleUseCode`, queue status |
+| `invite_handlers.go` | invite config, invite me, create invite code, renew code, use/check invite |
+| `invite_admin_handlers.go` | admin invite forest and detach/cascade helpers |
+| `email_handlers.go` | send/verify code, password reset by email, admin email tests and cleanup |
+| `announcement_handlers.go` | public and admin announcement CRUD |
+| `audit_handlers.go` | `audit`, `auditEntryIP`, list/delete/clear/prune audit logs |
+| `bangumi_sync_handlers.go` | status, trigger, history, collections, admin records/logs, collection cache refresh |
+| `bangumi_sync_service.go` | `syncBangumiForUser`, matching, ensure collection, mark episode |
+| `bangumi_cover.go` | public cover handler, local download, safe image URL checks |
+| `batch_user_handlers.go` | batch enable/disable, renew, delete, Emby grant/lock helpers, `filteredBatchUserUIDs` |
+| `emby_activity.go` | Emby ActivityLog collection and playback stats |
+| `emby_client.go` | Emby HTTP helpers and server stats/viewer endpoints |
+| `emby_device_audit.go` | device/IP audit aggregation and refresh cache |
+| `scheduler_runner.go` | `runCheckExpired`, `runExpiryReminder`, `runDailyStats` |
+| `config_admin.go` | config schema, values, save, upload helpers |
+| `developer_handlers.go` | developer mode and JS sandbox docs endpoints |
+
+## Store Model Index
+
+`internal/store.State` is a single state document. Keep data ownership in the store layer when changing persistent behavior.
+
+| Entity | Notes |
+| ---- | ---- |
+| `User` | UID, username, email, role, active state, Emby ID, Telegram ID, expiry, Bangumi token/modes, notification flags |
+| `RegCode` | code type, days, validity, use count, source, creator, pause bookkeeping |
+| `InviteCode` / `InviteRelation` | invite tree edges, parent/child relationship, renewal flows |
+| `Announcement` | title, content, render mode, level, pinned, visible |
+| `AuditLog` / `ViolationLog` | admin/user/system mutation tracking and violation evidence |
+| `Device` / `LoginLog` | device trust/block state and login history |
+| `SchedulerRun` | job run status, logs, summaries |
+| `BangumiCollectionCache` | per-user/per-type collection state only |
+| `BangumiSubjectCache` | global Bangumi subject payload by subject ID |
+| `EmbyActivityLog` | ActivityLog entries used by playback stats |
+
 ## Frontend Rules
 
 - Use `webui/src/lib/api.ts` rather than naked `fetch` for app API calls.
@@ -100,13 +147,29 @@ Update docs in the same change when behavior changes.
 
 ## Feature Gate Notes
 
-- `InviteEnabled`: new invite entrypoints reject disabled use; renewal codes for existing invite children remain available by design.
-- `SigninEnabled`: sign-in and sign-in renewal reject disabled use.
-- `MediaRequestEnabled`: media request creation and user request listing reject disabled use.
-- `emailConfigured()`: email send, verify, and reset handlers reject disabled use.
-- `BangumiEnabled`: sync and webhook routes reject disabled use.
-- `BangumiManageEnabled`: collection management routes reject disabled use.
-- `TelegramMode` controls Bot mode only; it must not block user self-service Telegram binding.
+| Gate | Required handler behavior |
+| ---- | ---- |
+| `InviteEnabled` | Create/check/use/list/delete invite paths reject disabled use. Existing-child invite renewal codes still work by design. |
+| `SigninEnabled` | `handleSignin` and `handleSigninRenew` reject disabled use. |
+| `MediaRequestEnabled` | Media request creation and user request listing reject disabled use. |
+| `emailConfigured()` | Email send, verify, admin email test, and email password reset reject disabled use. |
+| `BangumiEnabled` | Webhook, sync status/trigger/history/clear, profile sync mode/token updates, and admin sync-user reject disabled use. |
+| `BangumiManageEnabled` | Profile manage mode updates, collection reads, and collection writes reject disabled use. |
+| `RegisterEnabled` | Registration rejects disabled use. |
+| `telegramAvailable()` | Telegram bind-code handlers reject missing Bot configuration with a clear code. |
+
+`TelegramMode` controls Bot mode only. It must not block user self-service Telegram bind, unbind, or rebind handlers.
+
+## Audit Log Rules
+
+`internal/api/audit_handlers.go` provides `a.audit(r, action, category, targetUID, detail)`.
+
+- It reads operator UID/username from `current(r)`.
+- It records client IP automatically.
+- Categories are `admin`, `user`, and `system`.
+- The store keeps a bounded audit log and prunes old entries.
+- Call it after successful state changes: create, update, delete, enable/disable, role changes, renewals, password resets, binding changes, batch operations.
+- Do not audit ordinary read-only list/get/search handlers unless the read itself is sensitive.
 
 ## Domain Rules
 
@@ -117,6 +180,107 @@ Update docs in the same change when behavior changes.
 - Bangumi covers are cached under `uploads/bangumi/{BGMID}.{ext}` with positive numeric IDs and path/host/MIME/size validation.
 - Bangumi watched type `2` marks the full series watched and ignores frontend `ep_status`; partial progress belongs to type `3`.
 - Emby playback stats are ActivityLog-based and independent from Bangumi webhook playback records. Duration is currently a reserved field because ActivityLog does not reliably provide it.
+
+## User Filters And Batch Consistency
+
+Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret filters the same way.
+
+| Parameter | Meaning | Values |
+| ---- | ---- | ---- |
+| `role` | local role | `0` admin, `1` normal, `2` whitelist |
+| `active` | Web account state | `true`, `false` |
+| `emby` | Emby binding state | `bound`, `unbound` |
+| `emby_status` | Emby access state, independent from Web account state | `active`, `disabled` |
+| `email_status` | email state | `verified`, `unverified`, `bound`, `none` |
+
+## RegCode Rules
+
+- `RegCode.Source` distinguishes admin-generated cards from invite-generated renewal cards.
+- Empty historical `Source` values are treated as `admin`.
+- The admin RegCode page defaults registration-code tabs to `source=admin`.
+- Invite-code views merge `source=invite` RegCodes and InviteCode records where needed.
+- Disabled cards pause validity countdown through `PausedSeconds` and `PauseStart`.
+- When a card is used up, status must be `used_up` even if an admin also disabled it.
+- Bulk generation should keep using `UpsertRegCodes`; do not reintroduce slow one-by-one insert loops.
+
+## Auth Background Rules
+
+- Upload route: `POST /admin/config/upload-auth-background`.
+- Public route: `GET /system/auth-background`.
+- Config key: `Global.auth_background_url`.
+- Env override: `TWILIGHT_AUTH_BACKGROUND_URL`.
+- The uploaded filename is fixed as `background.<ext>`.
+- The frontend reads `auth_background_url` from system info and lets `AuthLayout` handle path composition.
+
+## Ticket Rules
+
+- `Ticket.types` must never become empty. Config save paths use `ensureTicketDefaults`.
+- Admin ticket-type edits should be persisted back to `config.toml` so restart/hot reload does not lose them.
+- Closed tickets are evidence-preserving for normal users: upload/delete image handlers reject normal-user modifications with `ErrTicketClosed`.
+- Admins retain debugging privileges on closed tickets.
+- Frontend image components receive `canDelete` and must disable destructive interactions for closed normal-user tickets.
+
+## Sign-in Record Rules
+
+- `Signin.Records` grows over time; `internal/store/signin.go` trims records inline after appending.
+- Keep `maxSigninRecords = 730` unless there is a deliberate retention-policy change.
+- `handleSigninHistory` should keep a bounded return size.
+
+## Bangumi Rules
+
+- `BangumiSubjectCache` is global and keyed by Bangumi `subject_id` / BGMID.
+- `BangumiCollectionCache` is per `uid:type` and stores only user-state fields; subjects are hydrated on read.
+- `UpsertBangumiCollectionCache` owns the split between subject payload and user collection state.
+- Old state with embedded subjects is migrated by store ensure logic; do not add a second split path in handlers.
+- Collection cache TTL is controlled by `bangumiCollectionCacheTTLSeconds`.
+- `refresh_bangumi_collections` refreshes want/watched/watching caches for users with manage mode and tokens.
+- Do not delete global subject cache when one user token changes or one user collection invalidates.
+- `GET /bangumi/collections?refresh=1` bypasses user collection cache. If Bangumi fails, old cache fallback is allowed only when it covers the requested range.
+
+## Bangumi Cover Rules
+
+- Covers are cached under `uploads/bangumi/{BGMID}.{ext}`.
+- BGMID must pass positive numeric validation before it is used in a filename.
+- Public cover URL: `GET /api/v1/bangumi/cover/:subject_id`.
+- Handler serves the local file first and may redirect to a safe Bangumi CDN URL as fallback.
+- Safe image URLs must use HTTPS and a Bangumi/BGM host suffix.
+- Downloads must validate response size, content type, detected MIME, extension, path root, and symlink safety.
+- Use atomic writes for downloaded images.
+
+## Bangumi Watched-State Rules
+
+- Collection type `2` means watched/completed.
+- For type `2`, backend must query total main-episode count and mark the full range watched.
+- Frontend should not send `ep_status` when the edit type is watched.
+- Partial progress belongs to type `3` (watching).
+
+## Playback Stats Rules
+
+- Feature gate: `EmbyPlaybackStatsEnabled`, config key `[Emby] emby_playback_stats_enabled`.
+- Activity logs are fetched from Emby `/System/ActivityLog/Entries` into `store.EmbyActivityLogs`.
+- `GET /api/v1/admin/emby/activity-logs` is admin-only, returns raw logs, throttles automatic refresh, supports `refresh=1`, and supports `auto=0`.
+- `GET /api/v1/emby/playback-stats` is current-user only.
+- Admin stats endpoints support global, self, and selected-user scopes.
+- Supported params: `scope=self|global|user`, `uid`, `days`, `today=1`, `limit`, `sort=plays|name`, `refresh=1`.
+- Cross-user and global permissions must be enforced server-side.
+- `total_duration` is currently reserved because ActivityLog does not reliably provide playback duration.
+- `/stats/playback` polls only while visible and clears timers on unmount.
+
+## Wiki And API Docs Rules
+
+- `/wiki` is a public user-facing guide page. Keep it Chinese, practical, and free of secrets.
+- `/api/v1/docs` is a public API console embedded by the backend. It may try admin route inventory first, but must gracefully fall back to public OpenAPI when unauthorized.
+- `/api/v1/openapi.json` must remain public-route-only.
+- `/api/v1/system/admin/apis` is the full inventory and must stay admin-protected.
+- Do not expose real config secrets, tokens, API keys, database URLs, or private route maps to unauthenticated users.
+
+## Documentation Rules
+
+- `AGENTS.md` stays English for agent instructions.
+- User-facing documentation under `docs/` and `README.md` stays Simplified Chinese.
+- Preserve existing documentation depth. Do not replace long docs with short summaries unless the user explicitly asks for a summary rewrite.
+- When fixing encoding, restore content from Git first, then repair mojibake; do not discard sections to make the problem smaller.
+- Docker docs and compose files must keep the untested/LLM-generated warning.
 
 ## Validation
 
