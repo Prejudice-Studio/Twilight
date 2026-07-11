@@ -12,6 +12,10 @@ import (
 )
 
 func (a *App) handleEmbyActivityLogs(w http.ResponseWriter, r *http.Request, _ Params) {
+	if !a.cfg().EmbyPlaybackStatsEnabled {
+		failWithCode(w, http.StatusForbidden, ErrForbidden, "播放统计功能未启用")
+		return
+	}
 	if !a.embyConfigured() {
 		failWithCode(w, http.StatusBadGateway, ErrEmbyNotConfigured, "Emby 未配置")
 		return
@@ -74,6 +78,10 @@ func (a *App) parseEmbyDate(s string) int64 {
 }
 
 func (a *App) handleEmbyPlaybackStats(w http.ResponseWriter, r *http.Request, params Params) {
+	if !a.cfg().EmbyPlaybackStatsEnabled {
+		failWithCode(w, http.StatusForbidden, ErrForbidden, "播放统计功能未启用")
+		return
+	}
 	if !a.embyConfigured() {
 		failWithCode(w, http.StatusBadGateway, ErrEmbyNotConfigured, "Emby 未配置")
 		return

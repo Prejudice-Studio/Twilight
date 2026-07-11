@@ -960,6 +960,7 @@ func configSectionDefs() []configSectionDef {
 			{Key: "emby_url_list", Label: "普通线路", Type: "list", Description: "格式：名称 : URL"},
 			{Key: "emby_url_list_for_whitelist", Label: "白名单线路", Type: "list", Description: "管理员和白名单用户可见线路"},
 			{Key: "emby_stats_enabled", Label: "Emby库统计", Type: "bool", Description: "在首页仪表盘 Emby 卡片显示电影/剧集/集数统计"},
+			{Key: "emby_playback_stats_enabled", Label: "播放统计", Type: "bool", Description: "开启后记录并展示用户播放次数/时长统计"},
 		}},
 		{Key: "Telegram", Title: "Telegram", Description: "Bot、订阅校验和群组管理\n推荐在 Telegram 管理页面操作 Bot 基础设置，高级参数在此调整", Category: "integration", Collapsed: true, Fields: []configFieldDef{
 			{Key: "telegram_api_url", Label: "Bot API URL", Type: "string", Description: "Telegram Bot API 基础地址"},
@@ -1166,6 +1167,7 @@ func configValues(cfg config.Config) map[string]map[string]any {
 			"emby_url": cfg.EmbyURL, "emby_token": cfg.EmbyToken, "emby_username": cfg.EmbyUsername, "emby_password": cfg.EmbyPassword,
 			"emby_url_list": linesToStrings(cfg.EmbyURLList), "emby_url_list_for_whitelist": linesToStrings(cfg.EmbyWhitelistURLList),
 			"emby_stats_enabled": cfg.EmbyStatsEnabled,
+			"emby_playback_stats_enabled": cfg.EmbyPlaybackStatsEnabled,
 		},
 		"Telegram": {
 			"telegram_api_url": cfg.TelegramAPIURL, "bot_token": cfg.TelegramBotToken, "admin_id": int64sToAny(cfg.TelegramAdminIDs), "group_id": cfg.TelegramGroupIDs,

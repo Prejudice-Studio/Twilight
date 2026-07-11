@@ -1282,6 +1282,7 @@ func (a *App) handleSystemInfo(w http.ResponseWriter, r *http.Request, _ Params)
 			"ticket_system":                 cfg.TicketSystemEnabled,
 			"developer_mode":                a.store().DeveloperModeEnabled(),
 			"emby_stats":                    cfg.EmbyStatsEnabled,
+			"emby_playback_stats":           cfg.EmbyPlaybackStatsEnabled,
 		},
 		"auth_background_url": cfg.AuthBackgroundURL,
 		"limits":              map[string]any{"user_limit": cfg.UserLimit, "stream_limit": cfg.MaxStreams, "ticket_image_max_size": cfg.TicketImageMaxSize, "ticket_image_max_count": cfg.TicketImageMaxCount},

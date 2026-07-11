@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { BookOpen, Shield, Users, Ticket, Tv, Key, Bell, RefreshCw, Calendar, MessageCircle, Settings, UserPlus, Eye, EyeOff, Ban, Trash2, Link2, LockKeyhole, Monitor, Eraser } from "lucide-react";
+import { BookOpen, Shield, Users, Ticket, Tv, Key, Bell, RefreshCw, Calendar, MessageCircle, Settings, UserPlus, Eye, EyeOff, Ban, Trash2, Link2, LockKeyhole, Monitor, Eraser, Activity } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
@@ -226,8 +226,18 @@ export default function WikiPage() {
         <p>仪表盘 Emby 服务器卡片可显示服务器内的媒体库统计信息：</p>
         <ul className="list-disc pl-5 space-y-1">
           <li><strong>显示内容</strong>：电影数量、电视剧数量、剧集总数。</li>
-          <li><strong>默认关闭</strong>：管理员需在配置中启用 <Badge variant="outline">emby_stats_enabled = true</Badge>（位于 <code>[Emby]</code> 段）。</li>
+          <li><strong>默认关闭</strong>：管理员需在配置中启用 <Badge variant="outline">Emby库统计</Badge>（<code>[Emby] emby_stats_enabled = true</code>）。</li>
           <li>前端自动检测功能开关，开启后在 Emby 服务器卡片底部显示三列统计数据。</li>
+        </ul>
+      </Section>
+
+      <Section icon={Activity} title="18. 播放统计">
+        <p>独立于 Bangumi Webhook 的播放次数/时长统计系统：</p>
+        <ul className="list-disc pl-5 space-y-1">
+          <li><strong>默认关闭</strong>：管理员需在配置中启用 <Badge variant="outline">播放统计</Badge>（<code>[Emby] emby_playback_stats_enabled = true</code>）。</li>
+          <li>后台自动从 Emby 活动日志中采集播放记录（VideoPlayback / VideoPlaybackComplete 等事件）。</li>
+          <li>管理员可在「Emby 管理 → 活动日志」页签查看原始活动记录，手动刷新拉取最新数据。</li>
+          <li>播放次数/时长等统计数据通过 <code>GET /admin/emby/playback-stats</code> 接口查询。</li>
         </ul>
       </Section>
 

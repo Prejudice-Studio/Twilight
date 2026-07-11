@@ -143,6 +143,7 @@ type Config struct {
 	EmbyURL                        string
 	EmbyToken                      string
 	EmbyStatsEnabled               bool
+	EmbyPlaybackStatsEnabled       bool
 	EmbyUsername                   string
 	EmbyPassword                   string
 	EmbyURLList                    []Line
@@ -388,6 +389,7 @@ func Load(path string) (Config, error) {
 	cfg.EmbyURL = reader.stringValue(cfg.EmbyURL, "Emby.emby_url", "emby_url")
 	cfg.EmbyToken = reader.stringValue(cfg.EmbyToken, "Emby.emby_token", "emby_token")
 	cfg.EmbyStatsEnabled = reader.boolValue(cfg.EmbyStatsEnabled, "Emby.emby_stats_enabled", "emby_stats_enabled")
+	cfg.EmbyPlaybackStatsEnabled = reader.boolValue(cfg.EmbyPlaybackStatsEnabled, "Emby.emby_playback_stats_enabled", "emby_playback_stats_enabled")
 	cfg.EmbyUsername = reader.stringValue(cfg.EmbyUsername, "Emby.emby_username", "emby_username")
 	cfg.EmbyPassword = reader.stringValue(cfg.EmbyPassword, "Emby.emby_password", "emby_password")
 	cfg.EmbyPublicURL = reader.stringValue(cfg.EmbyPublicURL, "Emby.emby_public_url", "emby_public_url")
