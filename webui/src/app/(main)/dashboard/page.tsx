@@ -302,7 +302,8 @@ export default function DashboardPage() {
 
   // 独立拉取 Emby 统计（功能开关控制，避免污染主数据加载流程）
   useEffect(() => {
-    if (!systemInfo?.features?.emby_stats) return;
+    const st = useSystemStore.getState();
+    if (!st.loaded || !st.info?.features?.emby_stats) return;
     const ctrl = new AbortController();
     fetch(`/api/v1/system/emby-stats`, { signal: ctrl.signal, credentials: "include" })
       .then((r) => r.json())
@@ -313,8 +314,7 @@ export default function DashboardPage() {
       .then((data) => { if (data?.success) setEmbyViewers(data.data?.viewers ?? 0); })
       .catch(() => {});
     return () => ctrl.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [systemInfo?.features?.emby_stats]);
+  }, []);
 
   // ============== 线路延迟测试 ==============
   // 由后端 /system/emby-urls/probe 代发请求测速。前端直连 Emby 会被 CORS /
@@ -846,8 +846,9 @@ export default function DashboardPage() {
         </div>
         <Badge className="bg-primary/10 text-primary border-primary/20 px-4 py-1.5 rounded-full font-black text-xs uppercase tracking-widest w-fit">
           {user?.role_name}
-        </Badge>
-      </div>
+            </Badge>
+            {embyViewers > 0 && <span className="text-[10px] text-muted-foreground">{embyViewers} 人在线</span>}
+          </div>
 
       {/* 顶部三块: 到期 / 状态 / Emby 绑定 */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
