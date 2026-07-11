@@ -453,13 +453,31 @@ export interface MediaRequest {
 export interface EmbyInfo {
   server_name?: string;
   version?: string;
-  user_id?: string;
-  user_name?: string;
   online?: boolean;
   active_sessions?: number;
   total_sessions?: number;
   operating_system?: string;
   message?: string;
+  movie_count?: number;
+  series_count?: number;
+  episode_count?: number;
+  monthly_playback_seconds?: number;
+  monthly_playback_str?: string;
+}
+
+export interface EmbyOnlineInfo {
+  online: boolean;
+  current_online: number;
+  users: EmbyOnlineUser[];
+}
+
+export interface EmbyOnlineUser {
+  username: string;
+  item_name: string;
+  media_type: string;
+  client: string;
+  device_name: string;
+  last_activity: string;
 }
 
 export interface EmbySession {

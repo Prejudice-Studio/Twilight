@@ -633,6 +633,8 @@ func defaults() Config {
 		CORSOrigins:                   []string{"http://localhost:3000", "http://127.0.0.1:3000"},
 		AllowCredential:               true,
 		TrustProxyHeaders:             false,
+		EmbyStatsEnabled:              true,
+		EmbyPlaybackStatsEnabled:      true,
 		EmbyPlaybackStatsUserEnabled:  true,
 		EmbyPlaybackStatsUserSelfOnly: true,
 		EmbyPlaybackStatsUserRankings: true,

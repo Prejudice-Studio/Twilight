@@ -450,7 +450,8 @@
     "episodeCount": "Episodes",
     "libraryStatsUnavailable": "Library stats are disabled or unavailable.",
     "nowPlaying": "Now Watching",
-    "nowPlayingCount": "{count} people watching now"
+    "nowPlayingCount": "{count} people watching now",
+    "monthlyPlayback": "Monthly: "
   },
   "adminInvite": {
     "title": "Invite System Admin",

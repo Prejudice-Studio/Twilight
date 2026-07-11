@@ -714,7 +714,8 @@
     "episodeCount": "集数",
     "libraryStatsUnavailable": "媒体库统计未开启或暂不可用。",
     "nowPlaying": "正在观看",
-    "nowPlayingCount": "当前 {count} 人正在观看"
+    "nowPlayingCount": "当前 {count} 人正在观看",
+    "monthlyPlayback": "本月观看："
   },
   "adminStats": {
     "unknown": "未知",

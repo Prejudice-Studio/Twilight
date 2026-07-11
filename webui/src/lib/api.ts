@@ -40,6 +40,7 @@ import type {
   EmbyInfo,
   EmbyLibraryStats,
   EmbyNowPlaying,
+  EmbyOnlineInfo,
   EmbyPlaybackStats,
   EmbyPlaybackStatsParams,
   EmbyRegisterStatus,
@@ -1541,6 +1542,10 @@ class ApiClient {
 
   async getEmbyNowPlaying(signal?: AbortSignal) {
     return this.request<EmbyNowPlaying>("/emby/now-playing", { signal });
+  }
+
+  async getEmbyOnline(signal?: AbortSignal) {
+    return this.request<EmbyOnlineInfo>("/emby/online", { signal });
   }
 
   async getEmbyPlaybackStats(params: EmbyPlaybackStatsParams = {}, signal?: AbortSignal) {

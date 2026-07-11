@@ -271,6 +271,10 @@ export default function DashboardPage() {
     if (embySettled.status === "fulfilled" && embySettled.value.success && embySettled.value.data) {
       setEmbyInfo(embySettled.value.data);
       setEmbyViewers(embySettled.value.data.active_sessions ?? 0);
+      const ed = embySettled.value.data;
+      if (ed.movie_count !== undefined || ed.series_count !== undefined || ed.episode_count !== undefined) {
+        setEmbyStats({ enabled: true, configured: true, movie_count: ed.movie_count ?? 0, series_count: ed.series_count ?? 0, episode_count: ed.episode_count ?? 0 });
+      }
     }
     if (urlsSettled.status === "fulfilled" && urlsSettled.value.success && urlsSettled.value.data) {
       applyEmbyUrls(urlsSettled.value.data);
@@ -973,6 +977,11 @@ export default function DashboardPage() {
             <p className="text-xs text-muted-foreground truncate">
               {t("dashboard.version", { version: embyInfo?.version || "--" })}
             </p>
+            {embyInfo?.monthly_playback_str && (
+              <p className="text-xs text-muted-foreground">
+                {t("dashboard.monthlyPlayback")}{embyInfo.monthly_playback_str}
+              </p>
+            )}
             {user?.emby_id ? (
               <p className="text-xs text-muted-foreground break-all" title={user.emby_id}>
                 {t("dashboard.myEmby")}<span className="font-mono">{user.emby_id}</span>

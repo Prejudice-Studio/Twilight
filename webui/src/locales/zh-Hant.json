@@ -450,7 +450,8 @@
     "episodeCount": "集數",
     "libraryStatsUnavailable": "媒體庫統計未啟用或暫不可用。",
     "nowPlaying": "正在觀看",
-    "nowPlayingCount": "當前 {count} 人正在觀看"
+    "nowPlayingCount": "當前 {count} 人正在觀看",
+    "monthlyPlayback": "本月觀看："
   },
   "adminInvite": {
     "title": "邀請系統管理",

@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/prejudice-studio/twilight/internal/store"
 )
 
 const embySessionsCacheTTL = 5 * time.Second
@@ -160,4 +162,43 @@ func makeMetadataEvents(ids []string) []embyPlaybackEvent {
 		events[i] = embyPlaybackEvent{ItemID: id}
 	}
 	return events
+}
+
+func (a *App) handleEmbyOnline(w http.ResponseWriter, r *http.Request, _ Params) {
+	if !a.embyConfigured() {
+		ok(w, "OK", map[string]any{"online": false, "current_online": 0, "users": []any{}})
+		return
+	}
+	u := current(r).User
+	canSeeDetails := u.Role == store.RoleAdmin || u.Role == store.RoleWhitelist
+	sessions, err := a.embySessionsSnapshot(r.Context(), false)
+	if err != nil {
+		ok(w, "OK", map[string]any{"online": false, "current_online": 0, "users": []any{}})
+		return
+	}
+	currentOnline := 0
+	users := make([]map[string]any, 0, len(sessions))
+	for _, session := range sessions {
+		nowPlaying, _ := session["NowPlayingItem"].(map[string]any)
+		if nowPlaying == nil {
+			continue
+		}
+		currentOnline++
+		if !canSeeDetails {
+			continue
+		}
+		users = append(users, map[string]any{
+			"username":      firstNonEmpty(asString(session["UserName"]), asString(session["UserId"])),
+			"item_name":     firstNonEmpty(asString(nowPlaying["SeriesName"]), asString(nowPlaying["Name"])),
+			"media_type":    asString(nowPlaying["Type"]),
+			"client":        firstNonEmpty(asString(session["Client"]), asString(session["AppName"])),
+			"device_name":   asString(session["DeviceName"]),
+			"last_activity": asString(session["LastActivityDate"]),
+		})
+	}
+	ok(w, "OK", map[string]any{
+		"online":         true,
+		"current_online": currentOnline,
+		"users":          users,
+	})
 }

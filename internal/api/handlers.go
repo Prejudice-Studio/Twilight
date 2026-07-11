@@ -1712,7 +1712,6 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request, _ Params) {
 }
 
 func (a *App) handleEmbyStatus(w http.ResponseWriter, r *http.Request, _ Params) {
-	// 默认 5s ctx 走 embyHealth；调用方未设置 deadline 时由 doJSONRequestWithTimeout 兜底。
 	info, online := a.embyHealth(r.Context())
 	if info == nil {
 		info = map[string]any{}
@@ -1722,7 +1721,58 @@ func (a *App) handleEmbyStatus(w http.ResponseWriter, r *http.Request, _ Params)
 		sessions, _ = a.embySessionsSnapshot(r.Context(), false)
 	}
 	u := current(r).User
-	ok(w, "OK", map[string]any{"online": online, "server_name": firstNonEmpty(asString(info["ServerName"]), asString(info["Name"])), "version": firstNonEmpty(asString(info["Version"]), "unknown"), "operating_system": asString(info["OperatingSystem"]), "active_sessions": countEmbyPlayingSessions(sessions), "total_sessions": len(sessions), "is_synced": u.EmbyID != "", "is_active": u.Active, "can_unbind": a.userCanSelfUnbindEmby(u), "message": "OK"})
+	payload := map[string]any{
+		"online":           online,
+		"server_name":      firstNonEmpty(asString(info["ServerName"]), asString(info["Name"])),
+		"version":          firstNonEmpty(asString(info["Version"]), "unknown"),
+		"operating_system": asString(info["OperatingSystem"]),
+		"active_sessions":  countEmbyPlayingSessions(sessions),
+		"total_sessions":   len(sessions),
+		"is_synced":        u.EmbyID != "",
+		"is_active":        u.Active,
+		"can_unbind":       a.userCanSelfUnbindEmby(u),
+		"message":          "OK",
+	}
+	if online {
+		libCounts := a.embyLibraryCounts(r.Context())
+		if libCounts != nil {
+			payload["movie_count"] = libCounts["movies"]
+			payload["series_count"] = libCounts["series"]
+			payload["episode_count"] = libCounts["episodes"]
+		}
+	}
+	if u.UID > 0 {
+		monthStart := time.Now().AddDate(0, 0, -30)
+		totalSec := embyPlaybackTotalSeconds(a.store().PlaybackRecords(u.UID, monthStart.Unix(), 10000))
+		payload["monthly_playback_seconds"] = totalSec
+		payload["monthly_playback_str"] = formatSeconds(totalSec)
+	}
+	ok(w, "OK", payload)
+}
+
+func embyPlaybackTotalSeconds(records []store.PlaybackRecord) int64 {
+	var total int64
+	for _, r := range records {
+		total += r.Duration
+	}
+	return total
+}
+
+func (a *App) embyLibraryCounts(ctx context.Context) map[string]int {
+	if !a.embyConfigured() {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var payload map[string]any
+	if err := a.embyGet(ctx, "/Items/Counts", &payload); err != nil {
+		return nil
+	}
+	return map[string]int{
+		"movies":   int(int64(numeric(payload["MovieCount"]))),
+		"series":   int(int64(numeric(payload["SeriesCount"]))),
+		"episodes": int(int64(numeric(payload["EpisodeCount"]))),
+	}
 }
 
 func (a *App) handleDeprecatedEmbyURLs(w http.ResponseWriter, r *http.Request, _ Params) {
