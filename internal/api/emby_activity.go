@@ -95,10 +95,10 @@ func (a *App) handleEmbyPlaybackStats(w http.ResponseWriter, r *http.Request, pa
 		UID      int64  `json:"uid"`
 		Username string `json:"username"`
 		Plays    int    `json:"plays"`
-		Duration int64  `json:"duration"`
 	}
 	userMap := map[int64]*userStats{}
 	playCount := map[string]int{}
+	dailyMap := map[string]int{}
 	totalPlays := 0
 
 	for _, log := range logs {
@@ -106,6 +106,9 @@ func (a *App) handleEmbyPlaybackStats(w http.ResponseWriter, r *http.Request, pa
 		if log.Type != "VideoPlayback" && log.Type != "VideoPlaybackComplete" { continue }
 		totalPlays++
 		playCount[log.Name]++
+
+		dateKey := time.Unix(log.Date, 0).Format("01-02")
+		dailyMap[dateKey]++
 
 		if log.UserID != "" {
 			u, ok := a.store().FindUserByEmbyID(log.UserID)
@@ -119,15 +122,25 @@ func (a *App) handleEmbyPlaybackStats(w http.ResponseWriter, r *http.Request, pa
 	}
 
 	rankings := make([]userStats, 0, len(userMap))
-	for _, v := range userMap {
-		rankings = append(rankings, *v)
-	}
+	for _, v := range userMap { rankings = append(rankings, *v) }
 	sort.Slice(rankings, func(i, j int) bool { return rankings[i].Plays > rankings[j].Plays })
+
+	daily := make([]map[string]any, 0, len(dailyMap))
+	for d, c := range dailyMap { daily = append(daily, map[string]any{"date": d, "plays": c}) }
+	sort.Slice(daily, func(i, j int) bool { return asString(daily[i]["date"]) < asString(daily[j]["date"]) })
+
+	items := make([]map[string]any, 0, len(playCount))
+	for name, count := range playCount { items = append(items, map[string]any{"name": name, "plays": count}) }
+	sort.Slice(items, func(i, j int) bool { return numeric(items[i]["plays"]) > numeric(items[j]["plays"]) })
+	topItems := items
+	if len(topItems) > 20 { topItems = topItems[:20] }
 
 	ok(w, "OK", map[string]any{
 		"total_plays":   totalPlays,
 		"unique_items":  len(playCount),
 		"days":          days,
 		"user_rankings": rankings,
+		"daily_breakdown": daily,
+		"top_items":       topItems,
 	})
 }

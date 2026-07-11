@@ -431,6 +431,8 @@ func (a *App) schedulerDefaultTriggerSpec(jobID string) map[string]any {
 		return dailySpec(a.cfg().SchedulerCleanupTicketImagesTime, 4, 45)
 	case "refresh_bangumi_collections":
 		return map[string]any{"type": "interval", "seconds": 3600}
+	case "sync_emby_activity_logs":
+		return map[string]any{"type": "interval", "seconds": 600}
 	default:
 		return dailySpec("03:00", 3, 0)
 	}

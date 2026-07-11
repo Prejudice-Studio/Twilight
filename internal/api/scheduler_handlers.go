@@ -24,6 +24,7 @@ var schedulerJobs = []map[string]any{
 	{"id": "cleanup_audit_logs", "name": "审计日志自动清理", "description": "按保留天数/条数策略清理过期操作日志，可保留管理员记录。", "manual_only": false, "enabled": true},
 	{"id": "cleanup_ticket_images", "name": "清理过期工单图片", "description": "按保留天数清理已关闭工单的图片附件及元数据。", "manual_only": false, "enabled": true},
 	{"id": "refresh_bangumi_collections", "name": "刷新 Bangumi 收藏缓存", "description": "每小时为开启 BGM 管理且配置 Token 的用户缓存在看、想看、看过收藏列表。", "manual_only": false, "enabled": true},
+	{"id": "sync_emby_activity_logs", "name": "同步 Emby 活动日志", "description": "每10分钟从 Emby 拉取活动日志(播放/登录等)并存入数据库，用于播放统计。", "manual_only": false, "enabled": true},
 	{"id": "cleanup_unlinked_emby", "name": "清理孤立 Emby 账号", "description": "扫描 Emby 中未绑定任何 Web 账号的孤立用户，支持仅扫描与删除模式。", "manual_only": false, "enabled": false, "runtime_params": []string{"dry_run", "delete"}},
 	{"id": "kick_unknown_group_members", "name": "踢出未知 Telegram 群成员", "description": "根据观察到的群成员名册，踢出无账号/未绑定 Emby/已禁用的成员。", "manual_only": true, "enabled": true, "runtime_params": []string{"dry_run", "max_per_run"}},
 }

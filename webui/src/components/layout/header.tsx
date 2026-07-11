@@ -79,7 +79,7 @@ export function Header() {
                       )}
                       >
                         <item.icon className="h-4 w-4 shrink-0" />
-                      <span className="truncate">{t(item.labelKey)}</span>
+                      <span className="truncate">{item.label || (item.labelKey ? t(item.labelKey) : "")}</span>
                     </Link>
                   );
                 })}
@@ -102,7 +102,7 @@ export function Header() {
                           )}
                           >
                             <item.icon className="h-4 w-4 shrink-0" />
-                          <span className="truncate">{t(item.labelKey)}</span>
+                          <span className="truncate">{item.label || (item.labelKey ? t(item.labelKey) : "")}</span>
                         </Link>
                       );
                     })}

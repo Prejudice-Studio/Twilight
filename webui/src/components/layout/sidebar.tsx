@@ -36,6 +36,7 @@ import {
   MessageSquareMore,
   Shield,
   Code2,
+  BarChart3,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
@@ -52,7 +53,8 @@ import { sanitizeImageUrl } from "@/lib/safe-url";
 
 export interface SidebarNavItem {
   href: string;
-  labelKey: MessageKey;
+  labelKey?: MessageKey;
+  label?: string;
   icon: ComponentType<{ className?: string }>;
   category?: string;
 }
@@ -100,6 +102,7 @@ export const adminNavItems: SidebarNavItem[] = [
   { href: "/admin/scheduler", labelKey: "navigation.scheduler", icon: TimerReset, category: "system" },
   { href: "/admin/logs", labelKey: "navigation.runtimeLogs", icon: ScrollText, category: "system" },
   { href: "/admin/test", labelKey: "navigation.serverInfo", icon: TestTube, category: "system" },
+  { href: "/stats/playback", label: "播放统计", icon: BarChart3, category: "system" },
   { href: "/admin/developer", labelKey: "navigation.developerMode", icon: Code2, category: "system" },
 ];
 
@@ -308,7 +311,7 @@ export function Sidebar() {
                     />
                   )}
                   <item.icon className="relative z-10 h-4 w-4 shrink-0" />
-                  <span className="relative z-10">{t(item.labelKey)}</span>
+                  <span className="relative z-10">{item.label || (item.labelKey ? t(item.labelKey) : "")}</span>
                   {active && (
                     <motion.span
                       layoutId="sidebar-user-active-dot"
@@ -348,7 +351,7 @@ export function Sidebar() {
                             />
                           )}
                           <item.icon className="relative z-10 h-4 w-4 shrink-0" />
-                          <span className="relative z-10">{t(item.labelKey)}</span>
+                          <span className="relative z-10">{item.label || (item.labelKey ? t(item.labelKey) : "")}</span>
                           {active && (
                             <motion.span
                               layoutId="sidebar-admin-active-dot"

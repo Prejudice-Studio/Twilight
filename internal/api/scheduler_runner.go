@@ -718,6 +718,15 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		}
 		return map[string]any{"success": failed == 0, "enabled": true, "scanned": scanned, "eligible": eligible, "refreshed_users": refreshedUsers, "refreshed_lists": refreshedLists, "cached_entries": cachedEntries, "failed": failed},
 			append(logs, fmt.Sprintf("refreshed %d users, %d lists, %d entries", refreshedUsers, refreshedLists, cachedEntries)), nil
+	case "sync_emby_activity_logs":
+		if !a.embyConfigured() {
+			return map[string]any{"success": true, "skipped": true, "reason": "emby not configured"}, nil, nil
+		}
+		count, err := a.fetchAndStoreEmbyActivityLogs(r.Context())
+		if err != nil {
+			return map[string]any{"success": false}, nil, err
+		}
+		return map[string]any{"success": true, "new_entries": count}, nil, nil
 	default:
 		return map[string]any{"success": false}, nil, fmt.Errorf("unknown scheduler job: %s", jobID)
 	}

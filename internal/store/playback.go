@@ -85,19 +85,12 @@ func (s *Store) ListEmbyActivityLogs(uid int64, limit int) []EmbyActivityLog {
 	for i := len(s.state.EmbyActivityLogs) - 1; i >= 0 && len(out) < limit; i-- {
 		e := s.state.EmbyActivityLogs[i]
 		if uid > 0 && e.UserID != "" {
-			uids := s.findUserByEmbyID(e.UserID)
-			if uids == nil || uids.UID != uid { continue }
+			u, ok := s.FindUserByEmbyID(e.UserID)
+			if !ok || u.UID != uid { continue }
 		}
 		out = append(out, e)
 	}
 	return out
-}
-
-func (s *Store) findUserByEmbyID(embyID string) *User {
-	for _, u := range s.state.Users {
-		if u.EmbyID == embyID { return &u }
-	}
-	return nil
 }
 
 func (s *Store) AddPlaybackRecord(record PlaybackRecord) error {
