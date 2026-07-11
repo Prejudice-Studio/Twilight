@@ -218,6 +218,16 @@ func TestCredentialedCORSRequiresExplicitOrigin(t *testing.T) {
 	if rr.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Fatalf("path-bearing CORS origin was allowed: %q", rr.Header().Get("Access-Control-Allow-Origin"))
 	}
+
+	app.cfg().CORSOrigins = []string{"https://panel.example"}
+	req = httptest.NewRequest(http.MethodOptions, "https://api.example/api/v1/users/me", nil)
+	req.Header.Set("Origin", "https://api.example")
+	req.Header.Set("Access-Control-Request-Method", "PUT")
+	rr = httptest.NewRecorder()
+	app.ServeHTTP(rr, req)
+	if rr.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("same-host origin bypassed explicit CORS list: %q", rr.Header().Get("Access-Control-Allow-Origin"))
+	}
 }
 
 func TestBindCodeCreationGETRequiresWebUIIntent(t *testing.T) {
