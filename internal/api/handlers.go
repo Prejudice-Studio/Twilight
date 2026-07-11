@@ -56,8 +56,77 @@ func (a *App) handleOpenAPI(w http.ResponseWriter, r *http.Request, _ Params) {
 
 func (a *App) handleDocs(w http.ResponseWriter, r *http.Request, _ Params) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(`<!doctype html><meta charset="utf-8"><title>Twilight Go API</title><h1>Twilight Go API</h1><p>OpenAPI JSON: <a href="/api/v1/openapi.json">/api/v1/openapi.json</a></p>`))
+	_, _ = w.Write([]byte(apiConsoleHTML))
 }
+
+const apiConsoleHTML = `<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Twilight API Console</title>
+<style>
+:root{--bg:#09090b;--card:#18181b;--border:#27272a;--text:#fafafa;--muted:#a1a1aa;--primary:#6366f1;--danger:#ef4444;--green:#22c55e}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:14px/1.5 system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+.toolbar{position:sticky;top:0;z-index:10;background:var(--card);border-bottom:1px solid var(--border);padding:12px 20px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.toolbar .brand{font-weight:700;font-size:16px;margin-right:auto}
+.toolbar input{border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:13px;background:var(--bg);color:var(--text);width:280px}
+.toolbar select{border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:13px;background:var(--bg);color:var(--text)}
+.toolbar button{border:1px solid var(--border);border-radius:6px;padding:6px 14px;font-size:13px;background:var(--primary);color:#fff;cursor:pointer;font-weight:600}
+.toolbar button:disabled{opacity:.5;cursor:default}
+.layout{display:flex;height:calc(100vh - 52px)}
+.sidebar{width:340px;min-width:280px;background:var(--card);border-right:1px solid var(--border);overflow-y:auto;padding:8px 0}
+.sidebar .group{font-size:11px;text-transform:uppercase;color:var(--muted);padding:8px 16px 4px;font-weight:700;letter-spacing:.5px}
+.sidebar .route{display:block;padding:6px 16px;cursor:pointer;font-size:13px;border-left:2px solid transparent;color:var(--muted)}
+.sidebar .route:hover{background:rgba(99,102,241,.08);color:var(--text)}
+.sidebar .route.active{background:rgba(99,102,241,.12);border-left-color:var(--primary);color:var(--text)}
+.sidebar .method{display:inline-block;width:48px;font-size:11px;font-weight:700;text-align:center;margin-right:6px;border-radius:3px;padding:1px 0}
+.method.get{background:rgba(34,197,94,.15);color:var(--green)}
+.method.post{background:rgba(99,102,241,.15);color:var(--primary)}
+.method.put{background:rgba(234,179,8,.15);color:#eab308}
+.method.patch{background:rgba(168,85,247,.15);color:#a855f7}
+.method.delete{background:rgba(239,68,68,.15);color:var(--danger)}
+.main{flex:1;overflow-y:auto;padding:20px}
+.main h2{font-size:18px;margin-bottom:8px}
+.main .endpoint{font-size:13px;color:var(--muted);margin-bottom:16px;font-family:monospace}
+.main .input-row{display:flex;gap:8px;margin-bottom:16px}
+.main .input-row input{flex:1;border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:13px;background:var(--bg);color:var(--text)}
+.main textarea{width:100%;min-height:120px;border:1px solid var(--border);border-radius:6px;padding:10px;font-size:13px;background:var(--bg);color:var(--text);resize:vertical;font-family:monospace;margin-bottom:12px}
+.main .response{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px;margin-top:16px}
+.main .response pre{font-size:12px;font-family:monospace;white-space:pre-wrap;word-break:break-all;max-height:500px;overflow-y:auto;color:var(--text)}
+.main .status{display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:700;margin-bottom:8px}
+.status.ok{background:rgba(34,197,94,.15);color:var(--green)}
+.status.err{background:rgba(239,68,68,.15);color:var(--danger)}
+.empty{text-align:center;color:var(--muted);padding:60px 20px;font-size:14px}
+.empty svg{display:block;margin:0 auto 16px;opacity:.3}
+</style>
+</head>
+<body>
+<div class="toolbar">
+<div class="brand">Twilight API Console</div>
+<input id="apikey" type="password" placeholder="API Key (可选，留空使用 Cookie 鉴权)">
+<input id="baseurl" value="/api/v1" placeholder="Base URL">
+<button onclick="loadRoutes()">刷新路由</button>
+</div>
+<div class="layout">
+<div class="sidebar" id="sidebar"><div class="empty">加载中...</div></div>
+<div class="main" id="main"><div class="empty">从左侧选择路由</div></div>
+</div>
+<script>
+const AUTH_HEADER="X-Twilight-API-Key";let routes=[],active=null;
+async function loadRoutes(){try{let r=await fetch("/api/v1/system/admin/apis");if(!r.ok)r=await fetch("/api/v1/openapi.json");let j=await r.json(),d=j.data||j;let items=d.apis||d;let p=d.paths||{};if(Array.isArray(items)){p={};items.forEach(i=>{let m=i.method.toLowerCase();if(!p[i.endpoint])p[i.endpoint]={};p[i.endpoint][m]={}})}routes=Object.entries(p).map(([k,v])=>{let m=Object.keys(v)[0]||"get";return{method:m.toUpperCase(),path:k}});groups={};routes.forEach(r=>{let g=r.path.split("/")[3]||"other";if(!groups[g])groups[g]=[];groups[g].push(r)});renderSidebar()}catch(e){document.getElementById("sidebar").innerHTML='<div class=empty>加载失败: '+e.message+'</div>'}}
+function renderSidebar(){let s=document.getElementById("sidebar"),h="";let sorted=Object.keys(groups).sort();sorted.forEach(function(g){h+='<div class=group>'+g+'</div>';groups[g].forEach(function(r){h+='<div class="route" onclick="selectRoute('+JSON.stringify(r.path)+','+JSON.stringify(r.method)+')"><span class="method '+r.method.toLowerCase()+'">'+r.method+'</span>'+r.path+'</div>'})});s.innerHTML=h}
+function selectRoute(p,m){active={path:p,method:m};document.querySelectorAll(".route").forEach(function(e){e.classList.remove("active")});event.target.closest(".route").classList.add("active");renderDetail()}
+function renderDetail(){if(!active)return;var m=document.getElementById("main");m.innerHTML='<h2>'+active.method+'</h2><div class=endpoint>'+document.getElementById("baseurl").value+active.path+'</div><div class=input-row><input id="reqbody" placeholder="Request body (JSON)"></div><textarea id="reqbody_text" placeholder=\'{"key":"value"}\'></textarea><div class=input-row><button onclick="sendRequest()">发送请求</button></div><div id="response"></div>/}'
+async function sendRequest(){var u=document.getElementById("baseurl").value+active.path,b=document.getElementById("reqbody_text").value,k=document.getElementById("apikey").value,h={};if(k)h[AUTH_HEADER]=k;h["Content-Type"]="application/json";h["Accept"]="application/json";var r=document.getElementById("response");r.innerHTML='<div class=response>Sending...</div>';try{var o={method:active.method,headers:h};if(active.method!=="GET"&&active.method!=="HEAD"&&b.trim())o.body=b;var start=Date.now(),resp=await fetch(u,o),elapsed=Date.now()-start,text=await resp.text();var st=resp.status<400?"ok":"err";r.innerHTML='<div class=response><span class="status '+st+'">'+resp.status+'</span> ('+elapsed+'ms)<pre>'+esc(text)+'</pre></div>/'}catch(e){r.innerHTML='<div class=response><span class="status err">ERROR</span><pre>'+esc(e.message)+'</pre></div>/'}}
+function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
+function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
+loadRoutes();
+</script>
+</body>
+</html>`
 
 func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
