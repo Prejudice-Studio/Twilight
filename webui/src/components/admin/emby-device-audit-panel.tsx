@@ -26,6 +26,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -163,6 +164,8 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
   const [clientFilter, setClientFilter] = useState<string>(CLIENT_ALL);
   const [sortKey, setSortKey] = useState<SortKey>("devices");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [lastRefreshAt, setLastRefreshAt] = useState<number | null>(null);
 
   const reload = useCallback(async (refresh = false) => {
     setLoading(true);
@@ -171,6 +174,7 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
       const res = await api.adminGetEmbyDeviceAudit(refresh);
       if (res.success && res.data) {
         setData(res.data);
+        setLastRefreshAt(Date.now());
       } else {
         throw new Error(res.message || t("deviceAudit.loadFailed"));
       }
@@ -186,6 +190,15 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void reload(false);
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, [autoRefresh, reload]);
 
   const toggleExpand = useCallback((id: string) => {
     setExpanded((prev) => {
@@ -528,8 +541,16 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
             {t("deviceAudit.title")}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">{t("deviceAudit.description")}</p>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+            {autoRefresh && <span>{t("deviceAuditPatch.autoRefreshHint")}</span>}
+            {lastRefreshAt && <span>{t("deviceAuditPatch.refreshedAt", { time: new Date(lastRefreshAt).toLocaleTimeString(locale) })}</span>}
+          </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <label className="flex min-h-9 items-center gap-2 rounded-md border border-border/60 px-3 text-xs">
+            <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
+            <span>{t("deviceAuditPatch.autoRefresh")}</span>
+          </label>
           <Button variant="destructive" size="sm" onClick={async () => {
             const ok = await confirmAction({
               title: t("deviceAudit.kickAllTitle"),
@@ -542,7 +563,14 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
               const res = await api.kickAllEmbySessions();
               if (res.success) {
                 const data: any = res.data || {};
-                toast({ title: t("deviceAudit.kickAllDone"), description: `在线: ${data.kicked ?? 0}，设备: ${data.deleted_devices ?? 0}`, variant: "success" });
+                toast({
+                  title: t("deviceAudit.kickAllDone"),
+                  description: t("deviceAuditPatch.kickAllDone", {
+                    kicked: data.kicked ?? 0,
+                    devices: data.deleted_devices ?? 0,
+                  }),
+                  variant: "success",
+                });
                 void reload(true);
               } else {
                 toast({ title: t("deviceAudit.actionFailed"), description: res.message, variant: "destructive" });

@@ -534,6 +534,25 @@
     flex-shrink: 0;
   }
 
+  .i18n-control {
+    min-height: 2.25rem;
+    min-width: 2.5rem;
+  }
+
+  .i18n-label {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    text-wrap: balance;
+  }
+
+  .i18n-toolbar {
+    align-items: stretch;
+  }
+
+  .i18n-toolbar > * {
+    min-width: 0;
+  }
+
   .admin-section-surface {
     background: hsl(var(--card) / 0.78);
   }

@@ -105,14 +105,19 @@ func (a *App) handleAdminEmbyKickAll(w http.ResponseWriter, r *http.Request, _ P
 		return
 	}
 	kicked := 0
-	var sessResp struct {
-		Items []map[string]any `json:"Items"`
-	}
-	if err := a.embyGet(r.Context(), "/Sessions", &sessResp); err == nil {
-		for _, sess := range sessResp.Items {
+	var sessions []map[string]any
+	if err := a.embyGet(r.Context(), "/Sessions", &sessions); err == nil {
+		for _, sess := range sessions {
 			sid := asString(sess["Id"])
-			if sid == "" { continue }
-			if err := a.embyPost(r.Context(), "/Sessions/"+urlPathEscape(sid)+"/Terminate", nil, nil); err == nil {
+			if sid == "" {
+				continue
+			}
+			var ignored map[string]any
+			if err := a.embyPost(r.Context(), "/Sessions/"+urlPathEscape(sid)+"/Terminate", nil, &ignored); err == nil {
+				kicked++
+				continue
+			}
+			if err := a.embyPost(r.Context(), "/Sessions/"+urlPathEscape(sid)+"/Logout", nil, &ignored); err == nil {
 				kicked++
 			}
 		}
@@ -125,7 +130,9 @@ func (a *App) handleAdminEmbyKickAll(w http.ResponseWriter, r *http.Request, _ P
 	if err := a.embyGet(r.Context(), "/Devices", &devResp); err == nil {
 		for _, dev := range devResp.Items {
 			did := asString(dev["Id"])
-			if did == "" { continue }
+			if did == "" {
+				continue
+			}
 			if err := a.embyDelete(r.Context(), "/Devices/"+urlPathEscape(did)); err == nil {
 				deletedDevices++
 			}

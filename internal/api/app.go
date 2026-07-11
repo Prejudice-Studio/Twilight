@@ -81,6 +81,8 @@ type App struct {
 	embyDeviceAuditMu     sync.Mutex
 	embyDeviceAuditUntil  time.Time
 	embyDeviceAuditCache  map[string]any
+	embyActivityMu        sync.Mutex
+	embyActivityNextAuto  time.Time
 	bindStatus            *bindStatusHub
 	// schedulerLocks: jobID -> *schedulerProcessRun。BATCH_07 之前在 package 级
 	// 声明 (`var schedulerProcessLocks sync.Map`)，单进程 prod 不显问题，但

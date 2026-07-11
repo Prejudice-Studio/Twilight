@@ -11,14 +11,14 @@ export type Locale = (typeof supportedLocales)[number];
 export const defaultLocale: Locale = "zh-Hans";
 
 export const localeLabels: Record<Locale, string> = {
-  "zh-Hans": "简体中文",
-  "zh-Hant": "繁體中文",
+  "zh-Hans": "\u7b80\u4f53\u4e2d\u6587",
+  "zh-Hant": "\u7e41\u9ad4\u4e2d\u6587",
   "en-US": "English",
 };
 
 export const localeShortLabels: Record<Locale, string> = {
-  "zh-Hans": "简中",
-  "zh-Hant": "繁中",
+  "zh-Hans": "\u7b80\u4e2d",
+  "zh-Hant": "\u7e41\u4e2d",
   "en-US": "EN",
 };
 

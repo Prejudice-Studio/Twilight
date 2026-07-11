@@ -40,8 +40,8 @@ export function LocaleSwitcher({
         <Button
           type="button"
           variant="outline"
-          className={cn("min-w-0 gap-2", className)}
-          title={`${t("common.currentLanguage")}：${localeLabels[locale]}`}
+          className={cn("i18n-control min-w-0 gap-2", className)}
+          title={`${t("common.currentLanguage")}: ${localeLabels[locale]}`}
           aria-label={t("common.switchLanguage")}
         >
           <Globe2 className="h-4 w-4 shrink-0" />
@@ -52,7 +52,7 @@ export function LocaleSwitcher({
           )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={align} className="w-44">
+      <DropdownMenuContent align={align} className="w-48">
         <DropdownMenuLabel>{t("common.switchLanguage")}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {supportedLocales.map((item) => (

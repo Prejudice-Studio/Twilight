@@ -559,6 +559,39 @@ export interface EmbyDeviceAuditData {
   summary: EmbyDeviceAuditSummary;
 }
 
+export interface EmbyLibraryStats {
+  enabled: boolean;
+  configured?: boolean;
+  movie_count?: number;
+  series_count?: number;
+  episode_count?: number;
+}
+
+export interface EmbyPlaybackStats {
+  scope: "self" | "user" | "global";
+  uid?: number;
+  period: string;
+  total_plays: number;
+  total_duration: number;
+  unique_items: number;
+  days: number;
+  limit: number;
+  can_view_global: boolean;
+  user_rankings: Array<{ uid: number; username: string; plays: number; duration: number }>;
+  daily_breakdown: Array<{ date: string; plays: number }>;
+  top_items: Array<{ name: string; plays: number }>;
+}
+
+export interface EmbyPlaybackStatsParams {
+  scope?: "self" | "user" | "global";
+  uid?: number;
+  days?: number;
+  today?: boolean;
+  limit?: number;
+  sort?: "plays" | "name";
+  refresh?: boolean;
+}
+
 export interface RegisterData {
   telegram_bind_code?: string;
   username: string;

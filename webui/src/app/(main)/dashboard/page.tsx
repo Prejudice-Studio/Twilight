@@ -300,21 +300,30 @@ export default function DashboardPage() {
     error,
   } = useAsyncResource(loadDashboardData, { immediate: true });
 
+  const loadEmbyStats = useCallback(async () => {
+    const [statsResult, viewersResult] = await Promise.allSettled([api.getEmbyLibraryStats(), api.getEmbyViewerCount()]);
+    if (statsResult.status === "fulfilled" && statsResult.value.success && statsResult.value.data) {
+      setEmbyStats(statsResult.value.data);
+    }
+    if (viewersResult.status === "fulfilled" && viewersResult.value.success) {
+      setEmbyViewers(viewersResult.value.data?.viewers ?? 0);
+    }
+  }, []);
+
   // 独立拉取 Emby 统计（功能开关控制，避免污染主数据加载流程）
   useEffect(() => {
-    const st = useSystemStore.getState();
-    if (!st.loaded || !st.info?.features?.emby_stats) return;
-    const ctrl = new AbortController();
-    fetch(`/api/v1/system/emby-stats`, { signal: ctrl.signal, credentials: "include" })
-      .then((r) => r.json())
-      .then((data) => { if (data?.success && data?.data) setEmbyStats(data.data); })
-      .catch(() => {});
-    fetch(`/api/v1/system/emby-viewers`, { signal: ctrl.signal, credentials: "include" })
-      .then((r) => r.json())
-      .then((data) => { if (data?.success) setEmbyViewers(data.data?.viewers ?? 0); })
-      .catch(() => {});
-    return () => ctrl.abort();
-  }, []);
+    if (!systemInfo?.features?.emby_stats) {
+      setEmbyStats(null);
+      setEmbyViewers(0);
+      return;
+    }
+    void loadEmbyStats();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void loadEmbyStats();
+    }, 60000);
+    return () => window.clearInterval(timer);
+  }, [loadEmbyStats, systemInfo?.features?.emby_stats]);
 
   // ============== 线路延迟测试 ==============
   // 由后端 /system/emby-urls/probe 代发请求测速。前端直连 Emby 会被 CORS /

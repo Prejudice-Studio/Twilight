@@ -45,7 +45,9 @@ func (s *Store) SyncEmbyActivityLogs(entries []EmbyActivityLog) (int, error) {
 		if s.state.NextEmbyActivityLogID <= 0 {
 			max := int64(0)
 			for _, e := range s.state.EmbyActivityLogs {
-				if e.ID > max { max = e.ID }
+				if e.ID > max {
+					max = e.ID
+				}
 			}
 			s.state.NextEmbyActivityLogID = max + 1
 		}
@@ -54,7 +56,9 @@ func (s *Store) SyncEmbyActivityLogs(entries []EmbyActivityLog) (int, error) {
 			existing[e.EmbyLogID] = true
 		}
 		for _, entry := range entries {
-			if existing[entry.EmbyLogID] { continue }
+			if existing[entry.EmbyLogID] {
+				continue
+			}
 			if entry.ID == 0 {
 				entry.ID = s.state.NextEmbyActivityLogID
 				s.state.NextEmbyActivityLogID++
@@ -81,12 +85,21 @@ func (s *Store) ListEmbyActivityLogs(uid int64, limit int) []EmbyActivityLog {
 	if limit <= 0 || limit > len(s.state.EmbyActivityLogs) {
 		limit = len(s.state.EmbyActivityLogs)
 	}
+	embyUIDs := map[string]int64{}
+	if uid > 0 {
+		for _, u := range s.state.Users {
+			if u.EmbyID != "" {
+				embyUIDs[u.EmbyID] = u.UID
+			}
+		}
+	}
 	out := make([]EmbyActivityLog, 0, limit)
 	for i := len(s.state.EmbyActivityLogs) - 1; i >= 0 && len(out) < limit; i-- {
 		e := s.state.EmbyActivityLogs[i]
-		if uid > 0 && e.UserID != "" {
-			u, ok := s.FindUserByEmbyID(e.UserID)
-			if !ok || u.UID != uid { continue }
+		if uid > 0 {
+			if e.UserID == "" || embyUIDs[e.UserID] != uid {
+				continue
+			}
 		}
 		out = append(out, e)
 	}

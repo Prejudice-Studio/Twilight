@@ -245,6 +245,10 @@
 | POST | `/api/v1/admin/emby/sync` | Admin | 同步 Emby 用户 |
 | GET | `/api/v1/admin/emby/sessions` | Admin | Emby 实时会话（含 `remote_endpoint` IP） |
 | GET | `/api/v1/admin/emby/device-audit` | Admin | Emby 登录用户设备/IP 审查（按用户聚合）：`/Devices` 设备清单 + 实时会话 IP（解析掉端口）+ 活动日志历史登录 IP，映射完整本地账号（网页/Emby/Telegram） |
+| GET | `/api/v1/admin/emby/activity-logs` | Admin | Emby activity logs; throttled auto refresh by default, `?refresh=1` forces fetch |
+| GET | `/api/v1/admin/emby/playback-stats` | Admin | Emby ActivityLog playback stats; supports `scope`, `days`, `today`, `limit`, `sort`, `refresh` |
+| GET | `/api/v1/admin/emby/playback-stats/{uid}` | Admin | Emby ActivityLog playback stats for a specific user |
+| GET | `/api/v1/emby/playback-stats` | User | Emby ActivityLog playback stats for current user |
 | GET | `/api/v1/admin/emby/activity` | Admin | Emby 活动记录 |
 | GET | `/api/v1/admin/emby/users` | Admin | Emby 用户列表 |
 | POST | `/api/v1/admin/emby/broadcast` | Admin | Emby 广播消息 |

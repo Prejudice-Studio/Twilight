@@ -38,6 +38,9 @@ import type {
   EmbyDevice,
   EmbyDeviceAuditData,
   EmbyInfo,
+  EmbyLibraryStats,
+  EmbyPlaybackStats,
+  EmbyPlaybackStatsParams,
   EmbyRegisterStatus,
   EmbySession,
   LoginDevice,
@@ -1239,6 +1242,14 @@ class ApiClient {
     return this.request<SystemStats>("/system/admin/stats");
   }
 
+  async getEmbyLibraryStats() {
+    return this.request<EmbyLibraryStats>("/system/emby-stats");
+  }
+
+  async getEmbyViewerCount() {
+    return this.request<{ viewers: number }>("/system/emby-viewers");
+  }
+
   async getRuntimeStatus() {
     return this.request<RuntimeStatus>("/system/admin/runtime/status");
   }
@@ -1521,8 +1532,38 @@ class ApiClient {
     return this.request<EmbyDeviceAuditData>(`/admin/emby/device-audit${refresh ? "?refresh=1" : ""}`);
   }
 
-  async adminGetEmbyActivityLogs(limit = 100, refresh = false) {
-    return this.request<{ entries: any[]; total: number }>(`/admin/emby/activity-logs?limit=${limit}${refresh ? "&refresh=1" : ""}`);
+  async adminGetEmbyActivityLogs(limit = 100, refresh = false, auto = true) {
+    return this.request<{ entries: any[]; total: number; refreshed?: boolean; new_entries?: number }>(
+      `/admin/emby/activity-logs?limit=${limit}${refresh ? "&refresh=1" : ""}${auto ? "" : "&auto=0"}`,
+    );
+  }
+
+  async getEmbyPlaybackStats(params: EmbyPlaybackStatsParams = {}) {
+    const query = new URLSearchParams();
+    if (params.scope) query.set("scope", params.scope);
+    if (params.uid && params.uid > 0) query.set("uid", String(params.uid));
+    if (params.days && params.days > 0) query.set("days", String(params.days));
+    if (params.today) query.set("today", "1");
+    if (params.limit && params.limit > 0) query.set("limit", String(params.limit));
+    if (params.sort) query.set("sort", params.sort);
+    if (params.refresh) query.set("refresh", "1");
+    const suffix = query.toString();
+    return this.request<EmbyPlaybackStats>(`/emby/playback-stats${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async adminGetEmbyPlaybackStats(params: EmbyPlaybackStatsParams = {}) {
+    const query = new URLSearchParams();
+    const path = params.uid && params.uid > 0
+      ? `/admin/emby/playback-stats/${encodeURIComponent(String(params.uid))}`
+      : "/admin/emby/playback-stats";
+    if (params.scope) query.set("scope", params.scope);
+    if (params.days && params.days > 0) query.set("days", String(params.days));
+    if (params.today) query.set("today", "1");
+    if (params.limit && params.limit > 0) query.set("limit", String(params.limit));
+    if (params.sort) query.set("sort", params.sort);
+    if (params.refresh) query.set("refresh", "1");
+    const suffix = query.toString();
+    return this.request<EmbyPlaybackStats>(`${path}${suffix ? `?${suffix}` : ""}`);
   }
 
   // 设备/IP 审查页的快速处置：按 Emby 用户 ID 单独启停 Emby（已关联本地用户时后端会
