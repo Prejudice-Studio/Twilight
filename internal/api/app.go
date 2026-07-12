@@ -1397,7 +1397,46 @@ func (a *App) userFromPath(w http.ResponseWriter, params Params, key string) (st
 	return u, true
 }
 
+func adminUserActionState(u store.User, now int64) map[string]any {
+	hasEmby := strings.TrimSpace(u.EmbyID) != ""
+	protectedRole := u.Role == store.RoleAdmin || u.Role == store.RoleWhitelist
+	expiredByTime := u.Role == store.RoleNormal && u.ExpiredAt > 0 && u.ExpiredAt < now
+	canGrantRegistrationEntitlement := !hasEmby && u.Active && !u.PendingEmby
+	canEnableEmby := hasEmby && u.Active && !expiredByTime
+	reasons := map[string]string{}
+	if hasEmby {
+		reasons["grant_registration_entitlement"] = "已绑定 Emby，无需授予资格"
+	} else if !u.Active {
+		reasons["grant_registration_entitlement"] = "账号已禁用，先启用"
+	} else if u.PendingEmby {
+		reasons["grant_registration_entitlement"] = "用户已在待开通队列中"
+	}
+	if !hasEmby {
+		reasons["enable_emby"] = "用户未绑定 Emby"
+	} else if !u.Active {
+		reasons["enable_emby"] = "Web 已禁用，不能启用 Emby"
+	} else if expiredByTime {
+		reasons["enable_emby"] = "账号已到期，先调整到期时间"
+	}
+	if u.Role == store.RoleAdmin {
+		reasons["delete"] = "管理员账号受保护"
+	} else if u.Role == store.RoleWhitelist {
+		reasons["delete"] = "白名单账号受保护"
+	}
+	return map[string]any{
+		"has_emby":                           hasEmby,
+		"protected_role":                     protectedRole,
+		"can_enable_emby":                    canEnableEmby,
+		"can_disable_emby":                   hasEmby,
+		"can_grant_registration_entitlement": canGrantRegistrationEntitlement,
+		"can_clear_registration_queue":       !hasEmby && (u.PendingEmby || u.PendingEmbyDays != nil || strings.TrimSpace(u.RegistrationCode) != ""),
+		"can_delete":                         !protectedRole,
+		"reasons":                            reasons,
+	}
+}
+
 func publicUser(u store.User) map[string]any {
+	now := time.Now().Unix()
 	return map[string]any{
 		"uid":               u.UID,
 		"username":          u.Username,
@@ -1433,7 +1472,8 @@ func publicUser(u store.User) map[string]any {
 		"registration_code":        u.RegistrationCode,
 		// 与 handleEmbyURLs 同口径：普通用户到期后只禁用 Emby（系统账号仍可登录），
 		// 据此让管理列表把「Web 账号状态」与「Emby 账号状态」分开展示。
-		"emby_disabled_by_expiry":   u.Role == store.RoleNormal && u.ExpiredAt > 0 && u.ExpiredAt < time.Now().Unix(),
+		"emby_disabled_by_expiry":   u.Role == store.RoleNormal && u.ExpiredAt > 0 && u.ExpiredAt < now,
+		"admin_action_state":        adminUserActionState(u, now),
 		"rebinding_in_progress":     u.RebindingInProgress,
 		"notify_on_login_telegram":  u.NotifyOnLoginTelegram,
 		"notify_on_login_email":     u.NotifyOnLoginEmail,

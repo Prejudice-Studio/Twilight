@@ -177,6 +177,16 @@ export interface UserInfo {
   pending_emby_days?: number | null;  // 注册码授予的开通天数（待 Emby 补建）
   emby_disabled_by_expiry?: boolean;  // 到期后仅禁用 Emby，系统账号仍可登录
   emby_disabled?: boolean;  // 远端 Emby 启停的镜像：Web 正常但 Emby 被单独禁用时为 true
+  admin_action_state?: {
+    has_emby: boolean;
+    protected_role: boolean;
+    can_enable_emby: boolean;
+    can_disable_emby: boolean;
+    can_grant_registration_entitlement: boolean;
+    can_clear_registration_queue: boolean;
+    can_delete: boolean;
+    reasons?: Record<string, string>;
+  };
   notify_on_login_telegram?: boolean;  // 登录时发送 Telegram 通知
   notify_on_login_email?: boolean;  // 登录时发送邮件通知
   notify_on_ticket_telegram?: boolean;  // 工单变动时发送 Telegram 通知

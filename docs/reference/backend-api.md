@@ -958,6 +958,8 @@ curl -X GET "http://localhost:5000/api/v1/admin/users?status=active&page=1&per_p
 
 `GET /admin/users/{uid}`
 
+用户列表与用户详情返回的用户对象包含 `admin_action_state`。这是后台用户管理 UI 使用的动作可用性提示字段，当前包括 `has_emby`、`protected_role`、`can_enable_emby`、`can_disable_emby`、`can_grant_registration_entitlement`、`can_clear_registration_queue`、`can_delete` 与 `reasons`。后端仍会在真正执行变更时重新鉴权和校验；前端只应把该字段用于分组展示、禁用按钮和显示原因。
+
 #### 更新用户信息
 
 `PUT /admin/users/{uid}`

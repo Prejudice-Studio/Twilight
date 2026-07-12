@@ -2292,17 +2292,83 @@ export default function AdminUsersPage() {
             <div className="flex-1 hidden sm:block" />
 
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[11px] text-muted-foreground">操作:</span>
-              <Button variant="outline" size="sm" onClick={() => void handleSelectedToggleActive(true)} disabled={selectedCount === 0}><UserCheck className="mr-1 h-3.5 w-3.5" />启用</Button>
-              <Button variant="outline" size="sm" onClick={() => void handleSelectedToggleActive(false)} disabled={selectedCount === 0}><Ban className="mr-1 h-3.5 w-3.5" />禁用</Button>
-              <Button variant="outline" size="sm" onClick={() => void handleSelectedEmbyToggle(true)} disabled={selectedCount === 0}><MonitorCheck className="mr-1 h-3.5 w-3.5" />启用 Emby</Button>
-              <Button variant="outline" size="sm" onClick={() => void handleSelectedEmbyToggle(false)} disabled={selectedCount === 0}><MonitorX className="mr-1 h-3.5 w-3.5" />禁用 Emby</Button>
-              <Button variant="outline" size="sm" onClick={() => void handleSelectedGrantAllLibraries()} disabled={selectedCount === 0}><BookOpen className="mr-1 h-3.5 w-3.5" />修复媒体库</Button>
-              <Button variant="outline" size="sm" onClick={() => void handleSelectedRefreshStatus("telegram")} disabled={selectedCount === 0}><RefreshCcw className="mr-1 h-3.5 w-3.5" />刷新 TG</Button>
-              <Button variant="outline" size="sm" onClick={() => void handleSelectedRefreshStatus("emby")} disabled={selectedCount === 0}><RefreshCcw className="mr-1 h-3.5 w-3.5" />刷新 Emby</Button>
-              <Button variant="outline" size="sm" onClick={() => void handleSelectedLockEmbyUnbind()} disabled={selectedCount === 0}><LockKeyhole className="mr-1 h-3.5 w-3.5" />禁止解绑</Button>
-              <Button variant="outline" size="sm" onClick={() => void handleSelectedClearEmbyGrant()} disabled={selectedCount === 0}><Eraser className="mr-1 h-3.5 w-3.5" />清授权</Button>
-              <Button variant="destructive" size="sm" onClick={() => void handleSelectedDelete()} disabled={selectedCount === 0}><Trash2 className="mr-1 h-3.5 w-3.5" />删除 ({selectedCount})</Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" disabled={selectedCount === 0} title="对已选用户执行批量操作">
+                    <MoreHorizontal className="mr-1.5 h-3.5 w-3.5" />
+                    批量操作
+                    <ChevronDown className="ml-1 h-3.5 w-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-60">
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>
+                      <UserCheck className="mr-2 h-4 w-4" />
+                      Web 账号
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent className="w-56">
+                      <DropdownMenuItem onClick={() => void handleSelectedToggleActive(true)}>
+                        <UserCheck className="mr-2 h-4 w-4" />
+                        启用 Web 账号
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => void handleSelectedToggleActive(false)}>
+                        <Ban className="mr-2 h-4 w-4" />
+                        禁用 Web 账号
+                      </DropdownMenuItem>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>
+                      <MonitorCheck className="mr-2 h-4 w-4" />
+                      Emby 账号
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent className="w-60">
+                      <DropdownMenuItem onClick={() => void handleSelectedEmbyToggle(true)}>
+                        <MonitorCheck className="mr-2 h-4 w-4" />
+                        启用 Emby
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => void handleSelectedEmbyToggle(false)}>
+                        <MonitorX className="mr-2 h-4 w-4" />
+                        禁用 Emby
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => void handleSelectedGrantAllLibraries()}>
+                        <BookOpen className="mr-2 h-4 w-4" />
+                        修复媒体库权限
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => void handleSelectedLockEmbyUnbind()}>
+                        <LockKeyhole className="mr-2 h-4 w-4" />
+                        禁止用户自助解绑
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => void handleSelectedClearEmbyGrant()}>
+                        <Eraser className="mr-2 h-4 w-4" />
+                        清理 Emby 授权标记
+                      </DropdownMenuItem>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>
+                      <RefreshCcw className="mr-2 h-4 w-4" />
+                      刷新状态
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent className="w-56">
+                      <DropdownMenuItem onClick={() => void handleSelectedRefreshStatus("telegram")}>
+                        <RefreshCcw className="mr-2 h-4 w-4" />
+                        刷新 Telegram
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => void handleSelectedRefreshStatus("emby")}>
+                        <RefreshCcw className="mr-2 h-4 w-4" />
+                        刷新 Emby
+                      </DropdownMenuItem>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => void handleSelectedDelete()}>
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    删除已选用户 ({selectedCount})
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </CardContent>
         </Card>

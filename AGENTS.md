@@ -139,6 +139,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Polling should check document visibility when useful and must clear intervals on unmount.
 - Keep controls dimensionally stable across languages.
 - Dangerous admin actions need clear labels, confirmations, result toasts, and audit coverage where applicable.
+- User-management actions must stay grouped by domain (account state, Emby, identity binding, registration entitlement, destructive actions) instead of long flat menus. When adding user actions, keep `admin_action_state` and frontend `UserInfo` types aligned so the UI can disable or explain unavailable operations.
 
 ## Security Boundaries
 

@@ -25,6 +25,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -126,6 +129,15 @@ function MenuTitle({ title, desc }: { title: string; desc: string }) {
   );
 }
 
+function MenuText({ title, desc }: { title: string; desc?: string }) {
+  return (
+    <span className="flex min-w-0 flex-col">
+      <span className="leading-4 text-sm">{title}</span>
+      {desc && <span className="max-w-[190px] truncate text-[11px] leading-4 text-muted-foreground">{desc}</span>}
+    </span>
+  );
+}
+
 export function UserActionsMenu({
   user,
   handlers,
@@ -135,12 +147,23 @@ export function UserActionsMenu({
   handlers: UserActionsMenuHandlers;
   t: TFunc;
 }) {
+  const actionState = user.admin_action_state;
   const showCancelPermanent = isPermanentDateValue(user.expired_at) && user.role !== 0 && Boolean(user.emby_id);
-  const entitlementDisabled = Boolean(user.emby_id) || !user.active;
-  const entitlementReason = entitlementDisabled
-    ? Boolean(user.emby_id) ? "已绑定 Emby，无需授予资格" : "账号已禁用，先启用"
-    : "";
+  const entitlementDisabled = actionState ? !actionState.can_grant_registration_entitlement : Boolean(user.emby_id) || !user.active;
+  const entitlementReason = actionState?.reasons?.grant_registration_entitlement || (
+    entitlementDisabled
+      ? Boolean(user.emby_id) ? "已绑定 Emby，无需授予资格" : "账号已禁用，先启用"
+      : ""
+  );
+  const canClearRegistrationQueue = actionState?.can_clear_registration_queue ?? (!user.emby_id && user.active);
+  const canEnableEmby = actionState?.can_enable_emby ?? (Boolean(user.emby_id) && user.active);
+  const enableEmbyReason = actionState?.reasons?.enable_emby || (user.active ? "恢复 Emby 访问" : "Web 已禁用，不能启用 Emby");
+  const canDelete = actionState?.can_delete ?? user.role !== 0;
+  const deleteReason = actionState?.reasons?.delete || "";
+  const showRegistrationActions = canClearRegistrationQueue || !user.emby_id || user.pending_emby;
   const isAdmin = user.role === 0;
+  const toggleTitle = user.active ? "禁用此账号" : "启用此账号";
+  const toggleDesc = user.active ? "可选择级联邀请树" : "恢复 Web 登录";
 
   return (
     <DropdownMenu>
@@ -149,28 +172,15 @@ export function UserActionsMenu({
           <MoreHorizontal className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-64">
+      <DropdownMenuContent align="end" className="max-h-[min(82vh,640px)] w-72 overflow-y-auto">
         <DropdownMenuItem onClick={() => handlers.onEdit(user)}>
           <Edit className="mr-2 h-4 w-4" />
           <MenuTitle title="编辑信息" desc="角色、Emby ID 与状态" />
         </DropdownMenuItem>
-
-        <DropdownMenuSeparator />
-
         <DropdownMenuItem onClick={() => handlers.onRenew(user)}>
           <CalendarClock className="mr-2 h-4 w-4" />
           <MenuTitle title="续期" desc="在现有到期时间上追加天数" />
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => handlers.onSetExpiry(user)}>
-          <CalendarClock className="mr-2 h-4 w-4" />
-          <MenuTitle title="设定到期时间" desc="直接覆盖为指定的到期日期" />
-        </DropdownMenuItem>
-        {showCancelPermanent && (
-          <DropdownMenuItem onClick={() => handlers.onCancelPermanent(user)}>
-            <CalendarClock className="mr-2 h-4 w-4" />
-            <MenuTitle title="取消永久" desc="将永久账号改回固定到期日" />
-          </DropdownMenuItem>
-        )}
         <DropdownMenuItem onClick={() => handlers.onResetPassword(user)}>
           <Key className="mr-2 h-4 w-4" />
           <MenuTitle title="重置密码" desc="系统密码、Emby 密码或同时重置" />
@@ -178,60 +188,100 @@ export function UserActionsMenu({
 
         <DropdownMenuSeparator />
 
-        <DropdownMenuItem onClick={() => handlers.onBindEmby(user)}>
-          <ExternalLink className="mr-2 h-4 w-4" />
-          <MenuTitle title="Emby 绑定" desc="绑定或强绑远端 Emby 用户" />
-        </DropdownMenuItem>
-        {user.emby_id && (
-          <>
-            <DropdownMenuItem onClick={() => handlers.onEmbyDisable(user)}>
-              <MonitorX className="mr-2 h-4 w-4" />
-              <MenuTitle title="禁用 Emby" desc="仅禁用 Emby，不影响 Web 登录" />
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <Ban className="mr-2 h-4 w-4" />
+            <MenuText title="账号状态" desc="Web 登录与到期" />
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-64">
+            <DropdownMenuItem onClick={() => handlers.onToggleActive(user)} className={user.active ? "text-amber-600 focus:text-amber-600" : ""}>
+              <Ban className="mr-2 h-4 w-4" />
+              <MenuTitle title={toggleTitle} desc={toggleDesc} />
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handlers.onEmbyEnable(user)} disabled={!user.active}>
-              <MonitorCheck className="mr-2 h-4 w-4" />
-              <MenuTitle title="启用 Emby" desc={user.active ? "恢复 Emby 访问" : "Web 已禁用，不能启用 Emby"} />
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handlers.onForceUnbind(user)}>
-              <UserX className="mr-2 h-4 w-4" />
-              <MenuTitle title="解绑 Emby" desc="解除本地绑定，不删远端" />
-            </DropdownMenuItem>
-          </>
-        )}
-
-        <DropdownMenuSeparator />
-
-        <DropdownMenuItem onClick={() => handlers.onBindEmail(user)}>
-          <Mail className="mr-2 h-4 w-4" />
-          <MenuTitle title="邮箱管理" desc="强制绑定邮箱或调整验证状态" />
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => handlers.onBindTelegram(user)}>
-          <ExternalLink className="mr-2 h-4 w-4" />
-          <MenuTitle title="TG 绑定" desc="指定 Telegram ID 绑定" />
-        </DropdownMenuItem>
-
-        <DropdownMenuSeparator />
-
-        <DropdownMenuItem onClick={() => handlers.onSyncBindings(user)}>
-          <RefreshCw className="mr-2 h-4 w-4" />
-          <MenuTitle title="同步绑定" desc="同步该用户远端绑定" />
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => handlers.onRefreshStatus(user, "emby")}>
-          <RefreshCcw className="mr-2 h-4 w-4" />
-          <MenuTitle title="刷新 Emby 状态" desc="" />
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => handlers.onRefreshStatus(user, "telegram")}>
-          <RefreshCcw className="mr-2 h-4 w-4" />
-          <MenuTitle title="刷新 TG 状态" desc="" />
-        </DropdownMenuItem>
-
-        {!user.emby_id && user.active && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => handlers.onClearRegistrationQueue(user)}>
+            <DropdownMenuItem onClick={() => handlers.onSetExpiry(user)}>
               <CalendarClock className="mr-2 h-4 w-4" />
-              <MenuTitle title="清理注册队列" desc="" />
+              <MenuTitle title="设定到期时间" desc="直接覆盖为指定的到期日期" />
             </DropdownMenuItem>
+            {showCancelPermanent && (
+              <DropdownMenuItem onClick={() => handlers.onCancelPermanent(user)}>
+                <CalendarClock className="mr-2 h-4 w-4" />
+                <MenuTitle title="取消永久" desc="将永久账号改回固定到期日" />
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <MonitorCheck className="mr-2 h-4 w-4" />
+            <MenuText title="Emby 账号" desc="绑定、启停、解绑" />
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-64">
+            <DropdownMenuItem onClick={() => handlers.onBindEmby(user)}>
+              <ExternalLink className="mr-2 h-4 w-4" />
+              <MenuTitle title="Emby 绑定" desc="绑定或强绑远端 Emby 用户" />
+            </DropdownMenuItem>
+            {user.emby_id && (
+              <>
+                <DropdownMenuItem onClick={() => handlers.onEmbyDisable(user)}>
+                  <MonitorX className="mr-2 h-4 w-4" />
+                  <MenuTitle title="禁用 Emby" desc="仅禁用 Emby，不影响 Web 登录" />
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handlers.onEmbyEnable(user)} disabled={!canEnableEmby} title={enableEmbyReason}>
+                  <MonitorCheck className="mr-2 h-4 w-4" />
+                  <MenuTitle title="启用 Emby" desc={enableEmbyReason} />
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handlers.onForceUnbind(user)}>
+                  <UserX className="mr-2 h-4 w-4" />
+                  <MenuTitle title="解绑 Emby" desc="解除本地绑定，不删远端" />
+                </DropdownMenuItem>
+              </>
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => handlers.onRefreshStatus(user, "emby")}>
+              <RefreshCcw className="mr-2 h-4 w-4" />
+              <MenuTitle title="刷新 Emby 状态" desc="重新核对远端启停" />
+            </DropdownMenuItem>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <Mail className="mr-2 h-4 w-4" />
+            <MenuText title="身份绑定" desc="邮箱、Telegram、同步" />
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-64">
+            <DropdownMenuItem onClick={() => handlers.onBindEmail(user)}>
+              <Mail className="mr-2 h-4 w-4" />
+              <MenuTitle title="邮箱管理" desc="强制绑定邮箱或调整验证状态" />
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handlers.onBindTelegram(user)}>
+              <ExternalLink className="mr-2 h-4 w-4" />
+              <MenuTitle title="TG 绑定" desc="指定 Telegram ID 绑定" />
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => handlers.onSyncBindings(user)}>
+              <RefreshCw className="mr-2 h-4 w-4" />
+              <MenuTitle title="同步绑定" desc="同步该用户远端绑定" />
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handlers.onRefreshStatus(user, "telegram")}>
+              <RefreshCcw className="mr-2 h-4 w-4" />
+              <MenuTitle title="刷新 TG 状态" desc="重新读取 Telegram 用户名" />
+            </DropdownMenuItem>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+
+        {showRegistrationActions && (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <UserPlus className="mr-2 h-4 w-4" />
+              <MenuText title="注册资格" desc="待开通与队列" />
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="w-64">
+              <DropdownMenuItem onClick={() => handlers.onClearRegistrationQueue(user)} disabled={!canClearRegistrationQueue}>
+                <CalendarClock className="mr-2 h-4 w-4" />
+                <MenuTitle title="清理注册队列" desc={canClearRegistrationQueue ? "移除待补建 Emby 状态" : "当前用户无需清理"} />
+              </DropdownMenuItem>
             <DropdownMenuItem onClick={() => handlers.onGrantRegistrationEntitlement(user)} disabled={entitlementDisabled} title={entitlementReason}>
               <UserPlus className="mr-2 h-4 w-4" />
               <MenuTitle title="授予注册资格" desc={entitlementReason || "允许后续自助创建 Emby"} />
@@ -240,19 +290,16 @@ export function UserActionsMenu({
               <UserCheck className="mr-2 h-4 w-4" />
               <MenuTitle title="授予资格并出列" desc={entitlementReason || "授予并从等待队列移除"} />
             </DropdownMenuItem>
-          </>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
         )}
 
         <DropdownMenuSeparator />
 
-        <DropdownMenuItem onClick={() => handlers.onToggleActive(user)} className={user.active ? "text-amber-600 focus:text-amber-600" : ""}>
-          <Ban className="mr-2 h-4 w-4" />
-          <MenuTitle title={user.active ? "禁用此账号" : "启用此账号"} desc={user.active ? "可选择级联邀请树" : "恢复 Web 登录"} />
-        </DropdownMenuItem>
         {!isAdmin && (
-          <DropdownMenuItem className="text-destructive" onClick={() => handlers.onDelete(user)}>
+          <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => handlers.onDelete(user)} disabled={!canDelete} title={deleteReason}>
             <Trash2 className="mr-2 h-4 w-4" />
-            <MenuTitle title="删除用户" desc="删除本地账号" />
+            <MenuTitle title="删除用户" desc={deleteReason || "删除本地账号"} />
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>
