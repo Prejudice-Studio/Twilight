@@ -1569,7 +1569,7 @@ func TestRuntimeLogsRequireAdminAndRedactSecrets(t *testing.T) {
 func TestRuntimeLoggerAppliesLevelAndCapturesStdLog(t *testing.T) {
 	runtimeLogs = newRuntimeLogSink(20)
 	t.Cleanup(func() {
-		runtimeLogs = newRuntimeLogSink(5000)
+		runtimeLogs = newRuntimeLogSink(1000)
 		InstallRuntimeLogger(io.Discard, zapcore.InfoLevel)
 	})
 
@@ -1618,7 +1618,7 @@ func TestConfigFileChangeHotReloadsRuntimeLogLevel(t *testing.T) {
 
 	runtimeLogs = newRuntimeLogSink(20)
 	t.Cleanup(func() {
-		runtimeLogs = newRuntimeLogSink(5000)
+		runtimeLogs = newRuntimeLogSink(1000)
 		InstallRuntimeLogger(io.Discard, zapcore.InfoLevel)
 	})
 	InstallRuntimeLogger(io.Discard, zapcore.ErrorLevel)

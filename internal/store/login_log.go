@@ -19,7 +19,7 @@ func (s *Store) AddLoginLog(log LoginLog) error {
 	}
 	s.state.LoginLogs = append([]LoginLog{log}, s.state.LoginLogs...)
 	if len(s.state.LoginLogs) > maxStoredLoginLogs {
-		s.state.LoginLogs = s.state.LoginLogs[:maxStoredLoginLogs]
+		s.state.LoginLogs = compactHead(s.state.LoginLogs, maxStoredLoginLogs)
 	}
 	return s.saveLocked()
 }

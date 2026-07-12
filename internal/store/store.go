@@ -1171,6 +1171,7 @@ func (s *State) ensure() {
 		s.BangumiSubjectCache = map[string]BangumiSubjectCacheEntry{}
 	}
 	s.normalizeBangumiCollectionSubjectCache()
+	s.compactHistory()
 	if s.Tickets == nil {
 		s.Tickets = map[int64]Ticket{}
 	}
@@ -1198,6 +1199,19 @@ func (s *State) ensure() {
 	}
 	if s.TicketTypes == nil {
 		s.TicketTypes = []string{"all"}
+	}
+}
+
+func (s *State) compactHistory() {
+	s.RuntimeLogs = compactTail(s.RuntimeLogs, defaultRuntimeLogLimit)
+	s.LoginLogs = compactHead(s.LoginLogs, maxStoredLoginLogs)
+	s.PlaybackRecords = compactHead(s.PlaybackRecords, maxStoredPlaybackRecords)
+	s.PlaybackSessions = compactTail(s.PlaybackSessions, maxPlaybackSessions)
+	s.EmbyActivityLogs = compactTail(s.EmbyActivityLogs, maxEmbyActivityLogs)
+	s.BangumiSyncLogs = compactTail(s.BangumiSyncLogs, maxStoredBangumiSyncLogs)
+	for uid, signin := range s.Signin {
+		signin.Records = compactTail(signin.Records, maxSigninRecords)
+		s.Signin[uid] = signin
 	}
 }
 
@@ -4719,7 +4733,7 @@ func (s *Store) AuditLogCount() int {
 	return len(s.state.AuditLogs)
 }
 
-const maxStoredBangumiSyncLogs = 5000
+const maxStoredBangumiSyncLogs = 1000
 
 func (s *Store) AddBangumiSyncLog(entry BangumiSyncLog) error {
 	s.mu.Lock()
@@ -4732,7 +4746,7 @@ func (s *Store) AddBangumiSyncLog(entry BangumiSyncLog) error {
 		}
 		s.state.BangumiSyncLogs = append(s.state.BangumiSyncLogs, entry)
 		if len(s.state.BangumiSyncLogs) > maxStoredBangumiSyncLogs {
-			s.state.BangumiSyncLogs = s.state.BangumiSyncLogs[len(s.state.BangumiSyncLogs)-maxStoredBangumiSyncLogs:]
+			s.state.BangumiSyncLogs = compactTail(s.state.BangumiSyncLogs, maxStoredBangumiSyncLogs)
 		}
 		return nil
 	})
@@ -4795,7 +4809,7 @@ func bangumiCollectionCacheKey(uid int64, collectType int) string {
 	return strconv.FormatInt(uid, 10) + ":" + strconv.Itoa(collectType)
 }
 
-const maxBangumiSubjectCacheEntries = 20000
+const maxBangumiSubjectCacheEntries = 5000
 
 func bangumiSubjectCacheKey(subjectID int64) string {
 	return strconv.FormatInt(subjectID, 10)

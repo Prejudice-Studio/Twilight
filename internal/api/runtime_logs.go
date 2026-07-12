@@ -33,7 +33,7 @@ type runtimeLogBuffer struct {
 
 var (
 	runtimeStartedAt = time.Now()
-	runtimeLogs      = newRuntimeLogSink(5000)
+	runtimeLogs      = newRuntimeLogSink(1000)
 	runtimeLogLevel  = zap.NewAtomicLevelAt(zapcore.InfoLevel)
 	// 在 token / authorization 通用关键字之外，
 	// 显式列出 Emby / MediaBrowser / Session 等高频敏感字段变体。
@@ -92,7 +92,7 @@ func (s *runtimeLogSink) currentLimit() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.limit <= 0 {
-		return 5000
+		return 1000
 	}
 	return s.limit
 }
@@ -189,8 +189,7 @@ func (b *runtimeLogBuffer) append(entry RuntimeLogEntry) {
 	}
 	b.entries = append(b.entries, entry)
 	if len(b.entries) > b.limit {
-		copy(b.entries, b.entries[len(b.entries)-b.limit:])
-		b.entries = b.entries[:b.limit]
+		b.entries = append([]RuntimeLogEntry(nil), b.entries[len(b.entries)-b.limit:]...)
 	}
 	b.cond.Broadcast()
 	b.mu.Unlock()
@@ -201,8 +200,7 @@ func (b *runtimeLogBuffer) setLimit(limit int) {
 	b.mu.Lock()
 	b.limit = limit
 	if len(b.entries) > b.limit {
-		copy(b.entries, b.entries[len(b.entries)-b.limit:])
-		b.entries = b.entries[:b.limit]
+		b.entries = append([]RuntimeLogEntry(nil), b.entries[len(b.entries)-b.limit:]...)
 	}
 	b.mu.Unlock()
 }
@@ -489,33 +487,35 @@ func (a *App) handleRuntimeStatus(w http.ResponseWriter, r *http.Request, _ Para
 	runtime.ReadMemStats(&mem)
 	logLimit, logEntries := runtimeLogs.stats()
 	status := map[string]any{
-		"started_at":          runtimeStartedAt.Unix(),
-		"uptime_seconds":      int64(time.Since(runtimeStartedAt).Seconds()),
-		"go_version":          runtime.Version(),
-		"goos":                runtime.GOOS,
-		"goarch":              runtime.GOARCH,
-		"goroutines":          runtime.NumGoroutine(),
-		"cpu_count":           runtime.NumCPU(),
-		"redis_enabled":       a.redis() != nil,
-		"routes":              len(a.routes),
-		"active_database":     a.store().Backend(),
-		"config_database":     strings.ToLower(a.cfg().DatabaseDriver),
-		"storage_mismatch":    a.runtimeDatabaseMismatch(),
-		"storage_warning":     a.databaseMismatchWarning(),
-		"users":               a.store().UserCount(),
-		"log_level":           a.cfg().LogLevel,
-		"runtime_log_limit":   logLimit,
-		"runtime_log_entries": logEntries,
-		"runtime_log_backend": a.store().Backend(),
+		"started_at":              runtimeStartedAt.Unix(),
+		"uptime_seconds":          int64(time.Since(runtimeStartedAt).Seconds()),
+		"go_version":              runtime.Version(),
+		"goos":                    runtime.GOOS,
+		"goarch":                  runtime.GOARCH,
+		"goroutines":              runtime.NumGoroutine(),
+		"cpu_count":               runtime.NumCPU(),
+		"redis_enabled":           a.redis() != nil,
+		"routes":                  len(a.routes),
+		"active_database":         a.store().Backend(),
+		"config_database":         strings.ToLower(a.cfg().DatabaseDriver),
+		"storage_mismatch":        a.runtimeDatabaseMismatch(),
+		"storage_warning":         a.databaseMismatchWarning(),
+		"users":                   a.store().UserCount(),
+		"log_level":               a.cfg().LogLevel,
+		"runtime_log_limit":       logLimit,
+		"runtime_log_entries":     logEntries,
+		"runtime_log_backend":     a.store().Backend(),
+		"runtime_memory_limit_mb": a.cfg().RuntimeMemoryLimitMB,
 		"memory": map[string]any{
-			"alloc":       mem.Alloc,
-			"sys":         mem.Sys,
-			"heap_alloc":  mem.HeapAlloc,
-			"heap_sys":    mem.HeapSys,
-			"heap_inuse":  mem.HeapInuse,
-			"stack_inuse": mem.StackInuse,
-			"next_gc":     mem.NextGC,
-			"num_gc":      mem.NumGC,
+			"alloc":           mem.Alloc,
+			"sys":             mem.Sys,
+			"heap_alloc":      mem.HeapAlloc,
+			"heap_sys":        mem.HeapSys,
+			"heap_inuse":      mem.HeapInuse,
+			"stack_inuse":     mem.StackInuse,
+			"next_gc":         mem.NextGC,
+			"num_gc":          mem.NumGC,
+			"go_memory_limit": runtimeMemoryLimitBytes(),
 		},
 	}
 	if host := safeHostname(); host != "" {

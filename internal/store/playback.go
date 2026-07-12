@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-const maxStoredPlaybackRecords = 10000
+const maxStoredPlaybackRecords = 5000
 
-const maxPlaybackSessions = 50000
+const maxPlaybackSessions = 2000
 
 func (s *Store) AddPlaybackSession(session PlaybackSession) error {
 	s.mu.Lock()
@@ -19,7 +19,7 @@ func (s *Store) AddPlaybackSession(session PlaybackSession) error {
 	return s.mutateAndSaveLocked(func() error {
 		s.state.PlaybackSessions = append(s.state.PlaybackSessions, session)
 		if len(s.state.PlaybackSessions) > maxPlaybackSessions {
-			s.state.PlaybackSessions = s.state.PlaybackSessions[len(s.state.PlaybackSessions)-maxPlaybackSessions:]
+			s.state.PlaybackSessions = compactTail(s.state.PlaybackSessions, maxPlaybackSessions)
 		}
 		return nil
 	})
@@ -42,7 +42,7 @@ func (s *Store) UserPlaybackSessions(uid int64, limit int) []PlaybackSession {
 	return out
 }
 
-const maxEmbyActivityLogs = 20000
+const maxEmbyActivityLogs = 10000
 
 func (s *Store) SyncEmbyActivityLogs(entries []EmbyActivityLog) (int, error) {
 	s.mu.Lock()
@@ -88,8 +88,7 @@ func (s *Store) SyncEmbyActivityLogs(entries []EmbyActivityLog) (int, error) {
 			return s.state.EmbyActivityLogs[i].EmbyLogID < s.state.EmbyActivityLogs[j].EmbyLogID
 		})
 		if len(s.state.EmbyActivityLogs) > maxEmbyActivityLogs {
-			trim := len(s.state.EmbyActivityLogs) - maxEmbyActivityLogs
-			s.state.EmbyActivityLogs = s.state.EmbyActivityLogs[trim:]
+			s.state.EmbyActivityLogs = compactTail(s.state.EmbyActivityLogs, maxEmbyActivityLogs)
 		}
 		return nil
 	})
@@ -158,7 +157,7 @@ func (s *Store) AddPlaybackRecordIdempotent(record PlaybackRecord) (bool, error)
 	}
 	s.state.PlaybackRecords = append([]PlaybackRecord{record}, s.state.PlaybackRecords...)
 	if len(s.state.PlaybackRecords) > maxStoredPlaybackRecords {
-		s.state.PlaybackRecords = s.state.PlaybackRecords[:maxStoredPlaybackRecords]
+		s.state.PlaybackRecords = compactHead(s.state.PlaybackRecords, maxStoredPlaybackRecords)
 	}
 	if err := s.saveLocked(); err != nil {
 		return false, err

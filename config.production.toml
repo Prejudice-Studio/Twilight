@@ -19,7 +19,8 @@ logging = true
 # 日志级别：10=DEBUG / 20=INFO / 30=WARNING / 40=ERROR
 log_level = "info"
 # 后台实时日志保留行数，配置热重载后立即生效
-runtime_log_limit = 5000
+runtime_log_limit = 1000
+runtime_memory_limit_mb = 128
 # 是否输出 SQLAlchemy ORM 日志（极其啰嗦，调试时再开）
 sqlalchemy_log = false
 # 出站 HTTP 请求失败时的最大重试次数

@@ -14,6 +14,7 @@ import (
 // 全表反向扫描，busy 期间会反向卡住所有 zap 调用方。改成每 N 条触发一次
 // 后台 prune（异步、带自身 ctx），写入路径只做 INSERT。
 const pgRuntimeLogPruneEvery = 256
+const defaultRuntimeLogLimit = 1000
 
 const (
 	pgRuntimeLogWriteTimeout = 5 * time.Second
@@ -84,8 +85,7 @@ func (s *Store) AddRuntimeLog(entry RuntimeLogEntry, limit int) (RuntimeLogEntry
 	}
 	s.state.RuntimeLogs = append(s.state.RuntimeLogs, entry)
 	if len(s.state.RuntimeLogs) > limit {
-		copy(s.state.RuntimeLogs, s.state.RuntimeLogs[len(s.state.RuntimeLogs)-limit:])
-		s.state.RuntimeLogs = s.state.RuntimeLogs[:limit]
+		s.state.RuntimeLogs = compactTail(s.state.RuntimeLogs, limit)
 	}
 	return entry, s.saveLocked()
 }
@@ -212,8 +212,7 @@ func (s *Store) PruneRuntimeLogs(limit int) error {
 	if len(s.state.RuntimeLogs) <= limit {
 		return nil
 	}
-	copy(s.state.RuntimeLogs, s.state.RuntimeLogs[len(s.state.RuntimeLogs)-limit:])
-	s.state.RuntimeLogs = s.state.RuntimeLogs[:limit]
+	s.state.RuntimeLogs = compactTail(s.state.RuntimeLogs, limit)
 	return s.saveLocked()
 }
 

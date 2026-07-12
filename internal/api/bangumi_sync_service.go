@@ -19,7 +19,7 @@ func (a *App) syncBangumiForUser(ctx context.Context, uid int64) (synced int, sk
 	if len(records) == 0 {
 		return 0, 0, 0, []string{"没有待同步的播放记录"}
 	}
-	syncLogs := a.store().ListBangumiSyncLogs(uid, 5000)
+	syncLogs := a.store().ListBangumiSyncLogs(uid, 1000)
 	syncedSet := make(map[string]bool)
 	for _, log := range syncLogs {
 		if log.Status == "success" && log.RecordItemID != "" {

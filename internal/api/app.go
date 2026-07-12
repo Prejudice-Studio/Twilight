@@ -251,6 +251,7 @@ func New(cfg config.Config, st *store.Store) (*App, error) {
 	// 这里在启动 / reload 时强提示，配 .Error 让审计/告警系统能抓到。
 	validateCORSOriginsStartup(cfg.CORSOrigins, cfg.AllowCredential)
 	validateTrustedProxyStartup(cfg.TrustProxyHeaders, cfg.TrustedProxyCIDRs)
+	applyRuntimeMemoryLimit(cfg.RuntimeMemoryLimitMB)
 	ConfigureRuntimeLoggingStore(st, cfg.ZapLevel(), cfg.RuntimeLogLimit)
 	return app, nil
 }
@@ -418,6 +419,10 @@ func (a *App) reloadConfigLocked() (map[string]any, error) {
 	if previous.TrustProxyHeaders != next.TrustProxyHeaders ||
 		!sameStringSlice(previous.TrustedProxyCIDRs, next.TrustedProxyCIDRs) {
 		validateTrustedProxyStartup(next.TrustProxyHeaders, next.TrustedProxyCIDRs)
+	}
+	if previous.RuntimeMemoryLimitMB != next.RuntimeMemoryLimitMB {
+		applyRuntimeMemoryLimit(next.RuntimeMemoryLimitMB)
+		reinitialized = append(reinitialized, "runtime_memory_limit")
 	}
 	ConfigureRuntimeLoggingStore(nextState.store, next.ZapLevel(), next.RuntimeLogLimit)
 	reinitialized = append(reinitialized, "runtime_logger")

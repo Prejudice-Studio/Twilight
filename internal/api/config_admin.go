@@ -928,6 +928,7 @@ func configSectionDefs() []configSectionDef {
 			{Key: "databases_dir", Label: "数据目录", Type: "string", Description: "JSON 状态、备份和迁移文件目录"},
 			{Key: "log_level", Label: "日志等级", Type: "select", Description: "后端运行日志等级；兼容旧值 10/20/30/40", Options: []map[string]any{{"label": "DEBUG", "value": "debug"}, {"label": "INFO", "value": "info"}, {"label": "WARN", "value": "warn"}, {"label": "ERROR", "value": "error"}}},
 			{Key: "runtime_log_limit", Label: "实时日志保留行数", Type: "int", Description: "后台实时日志缓冲区行数，热重载生效"},
+			{Key: "runtime_memory_limit_mb", Label: "运行时内存目标", Type: "int", Description: "Go 运行时内存软上限，单位 MiB；0 表示不限制，热重载生效"},
 			{Key: "redis_url", Label: "Redis URL", Type: "secret", Description: "会话和限流 Redis，留空使用进程内存"},
 			{Key: "telegram_mode", Label: "启用 Telegram", Type: "bool", Description: "启用 Bot 和 Telegram 绑定能力"},
 			{Key: "force_bind_telegram", Label: "强制绑定 Telegram", Type: "bool", Description: "登录或注册流程要求绑定 Telegram"},
@@ -1154,7 +1155,7 @@ func configValues(cfg config.Config) map[string]map[string]any {
 	return map[string]map[string]any{
 		"Global": {
 			"server_name": cfg.AppName, "server_icon": cfg.ServerIcon, "auth_background_url": cfg.AuthBackgroundURL, "databases_dir": cfg.DatabaseDir, "redis_url": cfg.RedisURL, "telegram_mode": cfg.TelegramMode, "force_bind_telegram": cfg.ForceBindTelegram,
-			"log_level": cfg.LogLevel, "runtime_log_limit": cfg.RuntimeLogLimit,
+			"log_level": cfg.LogLevel, "runtime_log_limit": cfg.RuntimeLogLimit, "runtime_memory_limit_mb": cfg.RuntimeMemoryLimitMB,
 			"tmdb_api_key": cfg.TMDBAPIKey, "tmdb_api_url": cfg.TMDBAPIURL, "tmdb_image_url": cfg.TMDBImageURL, "bangumi_token": cfg.BangumiToken, "bangumi_api_url": cfg.BangumiAPIURL,
 		},
 		"Database": {

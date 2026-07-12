@@ -33,7 +33,7 @@ Emby/Jellyfin 播放停止
        │ 落库 PlaybackRecord (UID / ItemID / Title / SeriesName / IndexNumber / Duration / PlayedAt)
        ▼
 ┌──────────────────────┐
-│  PlaybackRecords      │  本地观看记录（最多 10000 条）
+│  PlaybackRecords      │  本地观看记录（最多 5000 条）
 └──────┬───────────────┘
        │ 用户 / 管理员触发同步
        ▼
@@ -349,7 +349,7 @@ Webhook 期望接收 JSON 通知。后端从负载中按以下规则解析：
 
 ### 同步日志
 
-同步日志以 `BangumiSyncLog` 实体持久化（`internal/store/store.go`），最多保留 5000 条，超出自动裁剪。日志字段：
+同步日志以 `BangumiSyncLog` 实体持久化（`internal/store/store.go`），最多保留 1000 条，超出自动裁剪。日志字段：
 
 | 字段 | 说明 |
 | --- | --- |
@@ -367,7 +367,7 @@ Webhook 期望接收 JSON 通知。后端从负载中按以下规则解析：
 
 ## 观看记录的去向
 
-成功落库的 `PlaybackRecord` 进入单一状态文档（`internal/store`）的 `PlaybackRecords` 列表，最多保留 10000 条（超出按时间裁剪）。这些记录用于：
+成功落库的 `PlaybackRecord` 进入单一状态文档（`internal/store`）的 `PlaybackRecords` 列表，最多保留 5000 条（超出按时间裁剪）。这些记录用于：
 
 - **Bangumi 同步**：同步服务读取未同步记录，调用 Bangumi API 点格子。
 - Telegram Bot 的个人观看汇总。
@@ -386,7 +386,7 @@ Webhook 期望接收 JSON 通知。后端从负载中按以下规则解析：
 ### 缓存 TTL 与刷新
 
 - TTL：`bangumiCollectionCacheTTLSeconds = 3600` 秒。
-- 容量：全局 `BangumiSubjectCache` 上限 `maxBangumiSubjectCacheEntries = 20000`，超出后按 `UpdatedAt` 淘汰最旧作品。
+- 容量：全局 `BangumiSubjectCache` 上限 `maxBangumiSubjectCacheEntries = 5000`，超出后按 `UpdatedAt` 淘汰最旧作品。
 - 后台任务：`refresh_bangumi_collections` 每小时为开启 `BGMManageMode` 且配置个人 Token 的用户刷新 `想看(type=1)`、`看过(type=2)`、`在看(type=3)` 三类缓存。
 - 手动刷新：`GET /api/v1/bangumi/collections?refresh=1` 绕过用户收藏缓存，直接拉取 Bangumi 并重建缓存。
 - 降级行为：实时拉取 Bangumi 失败时，如果已有缓存能覆盖请求范围，接口会返回旧缓存并标记 `cached=true`，避免收藏页完全不可用。

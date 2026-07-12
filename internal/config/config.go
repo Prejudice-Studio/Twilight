@@ -109,6 +109,7 @@ type Config struct {
 	RedisURL                      string
 	LogLevel                      string
 	RuntimeLogLimit               int
+	RuntimeMemoryLimitMB          int
 	AdminUIDs                     []int64
 	AdminUsernames                []string
 	SetupMode                     bool
@@ -350,6 +351,7 @@ func Load(path string) (Config, error) {
 	cfg.RedisURL = reader.stringValue(cfg.RedisURL, "Global.redis_url", "redis_url")
 	cfg.LogLevel = normalizeLogLevel(reader.stringValue(cfg.LogLevel, "Global.log_level", "log_level"))
 	cfg.RuntimeLogLimit = reader.intValue(cfg.RuntimeLogLimit, "Global.runtime_log_limit", "runtime_log_limit")
+	cfg.RuntimeMemoryLimitMB = reader.intValue(cfg.RuntimeMemoryLimitMB, "Global.runtime_memory_limit_mb", "runtime_memory_limit_mb")
 	cfg.AdminUIDs = reader.int64ListValue(cfg.AdminUIDs, "Admin.uids", "Admin.admin_uids", "SAR.admin_uids", "admin_uids")
 	cfg.AdminUsernames = reader.stringListValue(cfg.AdminUsernames, "Admin.usernames", "Admin.admin_usernames", "Admin.users", "SAR.admin_usernames", "admin_usernames")
 	cfg.SetupMode = reader.boolValue(cfg.SetupMode, "SetupMode", "setup_mode")
@@ -600,7 +602,8 @@ func defaults() Config {
 		UploadDir:            "uploads",
 		MaxUploadSize:        5 * 1024 * 1024,
 		LogLevel:             "info",
-		RuntimeLogLimit:      5000,
+		RuntimeLogLimit:      1000,
+		RuntimeMemoryLimitMB: 128,
 		CORSOrigins:          []string{"http://localhost:3000", "http://127.0.0.1:3000"},
 		AllowCredential:      true,
 		TrustProxyHeaders:    false,
@@ -755,6 +758,9 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("TWILIGHT_RUNTIME_LOG_LIMIT"); v != "" {
 		cfg.RuntimeLogLimit = intValue(v, cfg.RuntimeLogLimit)
+	}
+	if v := os.Getenv("TWILIGHT_RUNTIME_MEMORY_LIMIT_MB"); v != "" {
+		cfg.RuntimeMemoryLimitMB = intValue(v, cfg.RuntimeMemoryLimitMB)
 	}
 	if v := os.Getenv("TWILIGHT_ADMIN_UIDS"); v != "" {
 		cfg.AdminUIDs = int64ListValue(v)

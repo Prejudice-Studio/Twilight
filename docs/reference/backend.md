@@ -97,7 +97,7 @@ systemd 部署对应三个服务单元：`twilight`、`twilight-bot`、`twilight
 | 状态文件 | `StateFile` 为空时回退到 `<databases_dir>/twilight_go_state.json`（`databases_dir` 默认 `db`） |
 | 备份目录 | `DatabaseBackupDir` 为空时回退到 `<databases_dir>/backups` |
 | 上传目录 | `uploads`，单文件上限 5 MiB |
-| 日志 | `log_level=info`、`runtime_log_limit=5000` |
+| 日志 | `log_level=info`、`runtime_log_limit=1000`、`runtime_memory_limit_mb=128` |
 | CORS | 空列表时反射合法 `http`/`https` Origin；显式列表时只允许列表内 Origin |
 | 会话 Cookie | 名 `twilight_session`、`Secure=true`、`SameSite=lax`、TTL 7 天 |
 | 注册 | `register_mode`、`emby_direct_register_enabled`、`allow_pending_register` 均默认 `false`（secure-by-default） |
@@ -127,7 +127,8 @@ systemd 部署对应三个服务单元：`twilight`、`twilight-bot`、`twilight
 | `TWILIGHT_SERVER_NAME` / `TWILIGHT_GLOBAL_SERVER_NAME` | 站点名称。 |
 | `TWILIGHT_SERVER_ICON` | 站点图标。 |
 | `TWILIGHT_LOG_LEVEL` | 日志等级 `debug` / `info` / `warn` / `error`，兼容旧数字 `10/20/30/40`。 |
-| `TWILIGHT_RUNTIME_LOG_LIMIT` | 实时日志保留行数（最终被夹在 100–50000）。 |
+| `TWILIGHT_RUNTIME_LOG_LIMIT` | 实时日志保留行数（最终被夹在 100–50000），默认 1000。 |
+| `TWILIGHT_RUNTIME_MEMORY_LIMIT_MB` | Go 运行时内存软上限，单位 MiB；默认 128，设为 0 表示不限制。 |
 | `TWILIGHT_REDIS_URL` / `TWILIGHT_GLOBAL_REDIS_URL` | Redis URL，例如 `redis://:password@127.0.0.1:6379/0`，支持 `rediss://`。 |
 | `TWILIGHT_API_CORS_ORIGINS` | 逗号分隔的可信前端 Origin。 |
 | `TWILIGHT_TRUST_PROXY_HEADERS` | 是否信任上游反代头。 |
@@ -269,7 +270,7 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
 管理端的运行状态页对应后端 `/api/v1/system/admin/runtime/status`、`/runtime/logs`、`/runtime/logs/stream`（`internal/api/runtime_logs.go`）：
 
 - 实时日志只接入 Go 进程内 `zap` 全局 logger（通过自定义 core 路由），不开放任意日志文件、journald 或路径参数读取。
-- 日志等级与保留行数由 `Global.log_level`、`Global.runtime_log_limit` 控制；保留行数会被夹在 100–50000，默认 5000。
+- 日志等级、保留行数与 Go 运行时内存目标由 `Global.log_level`、`Global.runtime_log_limit`、`Global.runtime_memory_limit_mb` 控制；日志保留行数会被夹在 100–50000，默认 1000；内存目标默认 128 MiB，设为 0 表示不限制。
 - 日志后端跟随状态存储：JSON 后端日志保存在 `State.RuntimeLogs`；PostgreSQL 后端落在独立表 `twilight_runtime_logs`。在状态接入前的早期日志会先缓冲在内存 fallback 缓冲区，接入后回写。`after=0` 返回最近 N 条快照；`after>0` 返回该游标之后的前 N 条，保持升序，避免增量读取跳过积压日志。
 - PostgreSQL 后端写入路径只做 INSERT，并按固定节奏异步裁剪；手动裁剪和异步裁剪都按 cutoff id 保留最近 N 条，避免 `NOT IN + ORDER BY LIMIT` 形式造成高写入期反复全表反扫。
 - 日志输出会脱敏：通过正则覆盖 `Authorization`、`Cookie`、`session id/token`、Emby/MediaBrowser token、`access/refresh/id token`、`client_secret`、`private_key`、`connection_string`、`database_url`、`token`、`secret`、`password`、`api_key`、`bot_token`、`dsn`、`Bearer …`、`key-…` 等敏感片段；敏感字段名（含 `key`、`*token`、`*secret` 等）直接替换为 `[REDACTED]`。

@@ -367,4 +367,7 @@ func TestProductionTemplateIncludesPostgresDatabaseSection(t *testing.T) {
 	if cfg.PostgresUser != "twilight" || cfg.PostgresDatabase != "twilight" || cfg.PostgresMaxOpenConns != 8 || cfg.PostgresMaxIdleConns != 4 {
 		t.Fatalf("production template postgres fields were not loaded: %#v", cfg)
 	}
+	if cfg.RuntimeLogLimit != 1000 || cfg.RuntimeMemoryLimitMB != 128 {
+		t.Fatalf("production template runtime defaults were not loaded: log_limit=%d memory_limit_mb=%d", cfg.RuntimeLogLimit, cfg.RuntimeMemoryLimitMB)
+	}
 }

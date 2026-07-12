@@ -16,7 +16,8 @@
 server_name = "Twilight"
 server_icon = ""
 log_level = "info"
-runtime_log_limit = 5000
+runtime_log_limit = 1000
+runtime_memory_limit_mb = 128
 redis_url = "redis://redis:6379/0"
 telegram_mode = true
 force_bind_telegram = false
