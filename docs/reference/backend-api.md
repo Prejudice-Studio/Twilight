@@ -2,7 +2,7 @@
 
 本文是 Twilight 后端 REST API 的完整参考手册，覆盖鉴权方式、请求/响应规范、错误码、限流策略，以及各业务模块下逐个端点的请求体、响应示例与 cURL 调用。完整路由速查见 [API 路由索引](../reference/api-index.md)，API Key 外部接入见 [API Key 外部接入](../reference/api-key.md)，注册码与卡码规则见 [注册码与卡码](../features/regcodes.md)，安全机制（CORS、限流、脱敏等）见 [安全加固](../guides/security.md)。
 
-> Emby ActivityLog 同步会配对 `playback.start` / `playback.stop` 并幂等写入 `store.PlaybackRecords`，供 Bangumi 同步等内部流程复用。播放统计页面、统计 API 与导出入口已移除；在线人数只统计 `/Sessions` 中存在 `NowPlayingItem` 的正在播放会话。
+> Emby ActivityLog 同步会配对 `playback.start` / `playback.stop` 并幂等写入 `store.PlaybackRecords`，供 Bangumi 同步等内部流程复用。播放统计页面、统计 API 与导出入口已移除；仪表盘在线人数只显示总数，且只统计 `/Sessions` 中存在 `NowPlayingItem` 的正在播放会话，不展示观看用户或媒体条目。
 
 > 路由的鉴权级别、方法与路径以 `internal/api/routes.go` 为准；本文已据此校准。接口若与下方示例冲突，以后端实际行为与运行时 Swagger 为准。
 
@@ -1040,7 +1040,7 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/123/disable" \
 
 前端主入口为「Emby 管理」，设备/IP 审查已整合为该页面的独立页签；旧 `/admin/device-audit` 页面保留为兼容入口。
 
-`GET /admin/emby/device-audit` 返回按 Emby 用户聚合的设备、在线会话 IP、活动日志登录 IP 与本地账号关联。`summary.devices_available`、`summary.sessions_available` 和 `summary.activity_available` 分别表示 `/Devices`、`/Sessions`、`/System/ActivityLog` 来源是否可用；其中任一来源失败时接口会尽量返回其余可用数据，并在对应 `*_error` 字段写入脱敏后的简短错误。
+`GET /admin/emby/device-audit` 返回按 Emby 用户聚合的设备、在线会话 IP、活动日志登录 IP 与本地账号关联。离线保留设备会按同一 Emby 用户下的设备名、客户端名、客户端版本聚合，返回 `count` 与最新活动时间，避免同一手机/客户端的多条历史 DeviceId 刷屏；在线设备保留实时独立行。`summary.devices_available`、`summary.sessions_available` 和 `summary.activity_available` 分别表示 `/Devices`、`/Sessions`、`/System/ActivityLog` 来源是否可用；其中任一来源失败时接口会尽量返回其余可用数据，并在对应 `*_error` 字段写入脱敏后的简短错误。
 
 | 方法/路径 | 说明 |
 | --------- | ---- |

@@ -297,6 +297,24 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 			cs.users[userKey] = true
 		}
 	}
+	deviceAggKey := func(name, app, version string) string {
+		name = strings.ToLower(strings.TrimSpace(name))
+		app = strings.ToLower(strings.TrimSpace(app))
+		version = strings.ToLower(strings.TrimSpace(version))
+		return name + "|" + app + "|" + version
+	}
+	deviceCount := func(record map[string]any) int {
+		switch value := record["count"].(type) {
+		case int:
+			return value
+		case int64:
+			return int(value)
+		case float64:
+			return int(value)
+		default:
+			return 1
+		}
+	}
 	addDevice := func(device map[string]any, live liveSession, online bool) {
 		deviceID := firstNonEmpty(asString(device["Id"]), live.deviceID)
 		uid := firstNonEmpty(asString(device["LastUserId"]), live.userID)
@@ -304,6 +322,7 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 		u := getUser(uid, uname)
 		last := firstNonEmpty(asString(device["DateLastActivity"]), live.lastActivity)
 		app := firstNonEmpty(asString(device["AppName"]), live.client, "Unknown")
+		version := firstNonEmpty(asString(device["AppVersion"]), live.appVersion)
 		name := firstNonEmpty(asString(device["Name"]), live.deviceName, deviceID, "Unknown")
 		if live.ip != "" {
 			u.ipSet[live.ip] = true
@@ -319,16 +338,36 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 			"device_id":     deviceID,
 			"device_name":   name,
 			"app_name":      app,
-			"app_version":   firstNonEmpty(asString(device["AppVersion"]), live.appVersion),
+			"app_version":   version,
 			"last_activity": last,
 			"ip":            live.ip,
 			"ip_approx":     false,
 			"online":        online,
 			"count":         1,
 		}
-		u.devices = append(u.devices, record)
-		addClient(app, online, firstNonEmpty(uid, uname))
-		totalDevices++
+		if !online {
+			key := deviceAggKey(name, app, version)
+			if existing := u.deviceAgg[key]; existing != nil {
+				existing["count"] = deviceCount(existing) + 1
+				if last > asString(existing["last_activity"]) {
+					existing["device_id"] = deviceID
+					existing["last_activity"] = last
+				}
+				if asString(existing["ip"]) == "" && live.ip != "" {
+					existing["ip"] = live.ip
+					existing["ip_approx"] = false
+				}
+			} else {
+				u.deviceAgg[key] = record
+				u.devices = append(u.devices, record)
+				addClient(app, online, firstNonEmpty(uid, uname))
+				totalDevices++
+			}
+		} else {
+			u.devices = append(u.devices, record)
+			addClient(app, online, firstNonEmpty(uid, uname))
+			totalDevices++
+		}
 		if deviceID != "" {
 			seenDevices[deviceID] = true
 		}

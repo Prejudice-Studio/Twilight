@@ -40,7 +40,7 @@ import { useVisiblePolling } from "@/hooks/use-visible-polling";
 import { PageError } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
-import { api, type CodeUsePreview, type EmbyInfo, type EmbyNowPlaying, type MediaRequest, type TelegramStatus, type SigninSummary, type RegisterAvailability, type EmbyRegisterStatus } from "@/lib/api";
+import { api, type CodeUsePreview, type EmbyInfo, type MediaRequest, type TelegramStatus, type SigninSummary, type RegisterAvailability, type EmbyRegisterStatus } from "@/lib/api";
 import { AnnouncementBoard } from "@/components/announcement-board";
 import { useI18n } from "@/lib/i18n";
 import { validatePasswordStrength } from "@/lib/password";
@@ -108,7 +108,6 @@ export default function DashboardPage() {
   const [embyInfo, setEmbyInfo] = useState<EmbyInfo | null>(null);
   const [embyStats, setEmbyStats] = useState<any>(null);
   const [embyViewers, setEmbyViewers] = useState(0);
-  const [nowPlaying, setNowPlaying] = useState<EmbyNowPlaying | null>(null);
   const [embyStatsRefreshing, setEmbyStatsRefreshing] = useState(false);
   const [myRequests, setMyRequests] = useState<MediaRequest[]>([]);
   const [lineSlots, setLineSlots] = useState<LineSlot[]>([]);
@@ -326,12 +325,6 @@ export default function DashboardPage() {
     if (result.success) setEmbyViewers(result.data?.viewers ?? 0);
   }, []);
 
-  const loadNowPlaying = useCallback(async (signal?: AbortSignal) => {
-    const result = await api.getEmbyNowPlaying(signal);
-    if (signal?.aborted) return;
-    if (result.success && result.data) setNowPlaying(result.data);
-  }, []);
-
   // 独立拉取 Emby 统计（功能开关控制，避免污染主数据加载流程）
   useEffect(() => {
     if (!systemInfo?.features?.emby_stats) {
@@ -346,7 +339,6 @@ export default function DashboardPage() {
 
   const embyStatsEnabled = systemInfo?.features?.emby_stats === true;
   useVisiblePolling(loadEmbyViewers, 60000, embyStatsEnabled);
-  useVisiblePolling(loadNowPlaying, 30000, embyStatsEnabled);
 
   // ============== 线路延迟测试 ==============
   // 由后端 /system/emby-urls/probe 代发请求测速。前端直连 Emby 会被 CORS /
@@ -1139,52 +1131,6 @@ export default function DashboardPage() {
                 <Link href="/score">{t("dashboard.signinCenter")}</Link>
               </Button>
             </div>
-          </div>
-        </motion.div>
-      )}
-
-      {/* 正在观看 */}
-      {nowPlaying && nowPlaying.items.length > 0 && (
-        <motion.div variants={item} className="premium-card p-5 sm:p-6">
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-green-500/10 text-green-500 rounded-xl">
-                <Play className="h-5 w-5" />
-              </div>
-              <div>
-                <h3 className="text-base font-black tracking-tight">{t("dashboard.nowPlaying")}</h3>
-                <p className="text-[11px] text-muted-foreground">{t("dashboard.nowPlayingCount", { count: nowPlaying.viewers })}</p>
-              </div>
-            </div>
-            <Badge variant="success" className="text-[10px]">{t("dashboard.liveNow", { count: nowPlaying.viewers })}</Badge>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {nowPlaying.items.slice(0, 8).map((item) => (
-              <div key={item.item_id} className="flex items-center gap-3 rounded-lg bg-accent/20 p-3">
-                <div className="relative grid h-14 w-10 shrink-0 place-items-center overflow-hidden rounded bg-muted text-muted-foreground">
-                  <Play className="h-4 w-4" />
-                  {item.image_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={item.image_url}
-                      alt=""
-                      className="absolute inset-0 h-full w-full object-cover"
-                      loading="lazy"
-                      onError={(e) => { e.currentTarget.style.display = "none"; }}
-                    />
-                  ) : null}
-                </div>
-                <div className="min-w-0 text-xs">
-                  <p className="truncate font-medium">{item.series_name || item.item_name}</p>
-                  <p className="truncate text-[11px] text-muted-foreground">{item.user_name}</p>
-                  {item.total_runtime > 0 && (
-                    <p className="text-[10px] text-muted-foreground">
-                      {Math.floor(item.play_duration / 60)}m / {Math.floor(item.total_runtime / 60)}m
-                    </p>
-                  )}
-                </div>
-              </div>
-            ))}
           </div>
         </motion.div>
       )}

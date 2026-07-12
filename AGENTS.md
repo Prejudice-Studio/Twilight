@@ -281,12 +281,11 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - `PlaybackRecords` reads from the database first (when available), falling back to the in-memory state document for JSON-file mode.
 - `DELETE FROM twilight_playback_records` for retention cleanup via `DeletePlaybackRecordsBefore`.
 
-## Dashboard Now Playing Rules
+## Dashboard Online Viewer Rules
 
-- `GET /api/v1/emby/now-playing` returns currently playing Emby sessions with enriched item metadata (name, series name, cover image URL, user name, playback progress).
-- The endpoint reuses `embySessionsSnapshot` (5s cache TTL) and batch-enriches items via `embyItemMetadata`.
-- The dashboard polls now-playing every 30s while visible via `useVisiblePolling`.
-- The "Now Playing" card shows up to 8 items with cover image thumbnails, user names, and playback progress bars.
+- The dashboard may show only the current Emby online viewer count from `/system/emby-viewers`.
+- Do not display who is watching, item names, covers, progress, or other now-playing details on the dashboard.
+- `/api/v1/emby/now-playing` may exist for authenticated tooling, but the dashboard must not poll it or render its item/user details.
 
 ## Network Transport Rules
 
@@ -307,6 +306,7 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 
 - Device/IP audit is manual-refresh only in the frontend. Do not add automatic polling or visible auto-refresh controls without an explicit user request.
 - `/admin/emby/device-audit` should degrade gracefully when one Emby source fails. `/Devices`, `/Sessions`, and `/System/ActivityLog` availability is reported in `summary`; one failed source must not hide data from the remaining sources.
+- Offline Emby device rows should be aggregated per Emby user by device name, client name, and client version. Preserve a `count` field and latest activity/device id so repeated retained device records do not flood the audit UI.
 
 ## Commit Message Rules
 
