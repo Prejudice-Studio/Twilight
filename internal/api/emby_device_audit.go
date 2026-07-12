@@ -58,6 +58,19 @@ func parseRemoteIP(endpoint string) string {
 	return strings.Trim(endpoint, "[]")
 }
 
+func isTwilightEmbyDevice(deviceID, deviceName, appName string) bool {
+	for _, value := range []string{deviceID, deviceName, appName} {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" {
+			continue
+		}
+		if value == "twilight-client" || strings.Contains(value, "twilight") {
+			return true
+		}
+	}
+	return false
+}
+
 // activityEntryIPs 从一条 Emby 活动日志的 ShortOverview 中提取所有合法 IP。
 // 登录类事件（如 AuthenticationSucceeded）会把客户端 IP 写进 ShortOverview，
 // 不同 Emby 版本可能是裸 IP、"IP:port" 或带前缀文字，这里按分隔符拆词后逐个用
@@ -250,6 +263,9 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 			ip:           parseRemoteIP(asString(s["RemoteEndPoint"])),
 			lastActivity: firstNonEmpty(asString(s["LastActivityDate"]), asString(s["DateLastActivity"])),
 		}
+		if isTwilightEmbyDevice(ls.deviceID, ls.deviceName, ls.client) {
+			continue
+		}
 		if ls.deviceID != "" {
 			liveByDevice[ls.deviceID] = ls
 		}
@@ -373,7 +389,10 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 		}
 	}
 	for _, d := range devResp.Items {
-		deviceID := asString(d["Id"])
+		deviceID := firstNonEmpty(asString(d["Id"]), asString(d["ReportedId"]))
+		if isTwilightEmbyDevice(deviceID, asString(d["Name"]), asString(d["AppName"])) {
+			continue
+		}
 		live, online := liveByDevice[deviceID]
 		addDevice(d, live, online)
 	}

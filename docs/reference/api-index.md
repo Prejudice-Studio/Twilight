@@ -249,7 +249,7 @@
 | POST | `/api/v1/admin/emby/force-set-password` | Admin | 强制设置 Emby 密码（与重置密码同 handler） |
 | POST | `/api/v1/admin/emby/sync` | Admin | 同步 Emby 用户 |
 | GET | `/api/v1/admin/emby/sessions` | Admin | Emby 实时会话（含 `remote_endpoint` IP） |
-| GET | `/api/v1/admin/emby/device-audit` | Admin | Emby 登录用户设备/IP 审查（按用户聚合）：`/Devices` 设备清单 + 实时会话 IP（解析掉端口）+ 活动日志历史登录 IP，映射完整本地账号；离线设备按设备名/客户端/版本聚合并返回 count，单个来源失败时降级返回其余数据 |
+| GET | `/api/v1/admin/emby/device-audit` | Admin | Emby 登录用户设备/IP 审查（按用户聚合）：`/Devices` 设备清单 + 实时会话 IP（解析掉端口）+ 活动日志历史登录 IP，映射完整本地账号；过滤 Twilight 自身 Emby 客户端；离线设备按设备名/客户端/版本聚合并返回 count，单个来源失败时降级返回其余数据 |
 | GET | `/api/v1/admin/emby/activity-logs` | Admin | 本地 Emby 活动日志；`?refresh=1` 手动从 Emby 拉取并入库 |
 | GET | `/api/v1/admin/emby/activity` | Admin | Emby 活动记录 |
 | GET | `/api/v1/admin/emby/users` | Admin | Emby 用户列表 |
@@ -309,7 +309,7 @@
 | POST | `/api/v1/admin/telegram/rejoined-users/enable` | Admin | 启用重新入群用户 |
 | POST | `/api/v1/admin/telegram/kick-unbound` | Admin | 踢出未绑定 Telegram 的用户 |
 | GET | `/api/v1/admin/scheduler/jobs` | Admin | 定时任务列表 |
-| POST | `/api/v1/admin/scheduler/jobs/{job_id}/run` | Admin | 手动执行任务 |
+| POST | `/api/v1/admin/scheduler/jobs/{job_id}/run` | Admin | 手动执行任务；`cleanup_emby_devices` 用于清理 Emby 历史设备记录，支持 `dry_run`、`max_workers`、`skip_usernames` |
 | POST | `/api/v1/admin/scheduler/jobs/{job_id}/terminate` | Admin | 终止正在运行的任务 |
 | GET | `/api/v1/admin/scheduler/jobs/{job_id}/last-run` | Admin | 最近执行结果 |
 | GET | `/api/v1/admin/scheduler/jobs/{job_id}/history` | Admin | 执行历史 |

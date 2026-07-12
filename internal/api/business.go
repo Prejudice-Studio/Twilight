@@ -1450,7 +1450,7 @@ func defaultTriggerSpec(jobID string) map[string]any {
 	switch jobID {
 	case "cleanup_sessions":
 		return map[string]any{"type": "interval", "seconds": 3600}
-	case "emby_sync", "kick_unknown_group_members":
+	case "emby_sync", "cleanup_emby_devices", "kick_unknown_group_members":
 		return map[string]any{"type": "manual"}
 	default:
 		return map[string]any{"type": "cron_daily", "hour": 3, "minute": 0}

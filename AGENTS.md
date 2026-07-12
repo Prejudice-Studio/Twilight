@@ -272,7 +272,7 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - `schedulerSideEffectContext` provides a 15-second detached context for side operations (session cleanup, remote Emby disable) that should not be cancelled by the main job context.
 - `check_expired` performs batch `ctx.Err()` checks every 50 users to allow early termination.
 - `sync_emby_activity_logs` accepts `since_hours` param (default 24, max 720) for flexible sync windows.
-- All state-changing scheduler operations (check_expired, cleanup_no_emby, emby_sync, cleanup_unlinked_emby, cleanup_ticket_images, cleanup_pending_emby_entitlements) must call `a.auditSystem("scheduler", action, 0, detail)` after successful mutations.
+- All state-changing scheduler operations (check_expired, cleanup_no_emby, emby_sync, cleanup_unlinked_emby, cleanup_emby_devices, cleanup_ticket_images, cleanup_pending_emby_entitlements) must call `a.auditSystem("scheduler", action, 0, detail)` after successful mutations.
 
 ## Playback Records Database Rules
 
@@ -307,6 +307,8 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - Device/IP audit is manual-refresh only in the frontend. Do not add automatic polling or visible auto-refresh controls without an explicit user request.
 - `/admin/emby/device-audit` should degrade gracefully when one Emby source fails. `/Devices`, `/Sessions`, and `/System/ActivityLog` availability is reported in `summary`; one failed source must not hide data from the remaining sources.
 - Offline Emby device rows should be aggregated per Emby user by device name, client name, and client version. Preserve a `count` field and latest activity/device id so repeated retained device records do not flood the audit UI.
+- Device/IP audit must exclude Twilight's own Emby client devices/sessions (`Twilight`, `Twilight Bind`, `twilight-client`) from users, IPs, client stats, and device totals.
+- Global Emby device cleanup is a Scheduler job (`cleanup_emby_devices`) only. Do not add all-device cleanup buttons or direct "kick all" routes to the Device/IP audit UI; per-user kick actions remain allowed for targeted moderation.
 
 ## Commit Message Rules
 

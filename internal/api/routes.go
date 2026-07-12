@@ -213,7 +213,6 @@ func (a *App) registerAdminRoutes() {
 	a.add(http.MethodPost, "/api/v1/admin/emby/users/:embyId/enable", AuthAdmin, a.handleAdminEmbyUserToggle)
 	a.add(http.MethodPost, "/api/v1/admin/emby/users/:embyId/disable", AuthAdmin, a.handleAdminEmbyUserToggle)
 	a.add(http.MethodPost, "/api/v1/admin/emby/users/:embyId/kick", AuthAdmin, a.handleAdminEmbyUserKick)
-	a.add(http.MethodPost, "/api/v1/admin/emby/sessions/kick-all", AuthAdmin, a.handleAdminEmbyKickAll)
 	a.add(http.MethodPost, "/api/v1/admin/users/:uid/bind-emby", AuthAdmin, a.handleAdminBindEmby)
 	a.add(http.MethodGet, "/api/v1/admin/regcodes", AuthAdmin, a.handleListRegcodes)
 	a.add(http.MethodPost, "/api/v1/admin/regcodes", AuthAdmin, a.handleCreateRegcodes)

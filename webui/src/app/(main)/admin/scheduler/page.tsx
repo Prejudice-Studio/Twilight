@@ -79,7 +79,8 @@ const SUMMARY_LABEL_KEYS = [
   "reason_no_account", "reason_no_emby", "reason_disabled", "preserved_bound",
   "roster_size", "bots_in_roster", "admins_excluded", "excluded_total", "targets",
   "dry_run", "not_in_group", "kicked", "skipped", "telegram_bound", "invalid_telegram_id",
-  "duplicate_telegram_ids", "rebind_state_mismatch",
+  "duplicate_telegram_ids", "rebind_state_mismatch", "configured", "candidates",
+  "max_workers", "skipped_no_id", "skipped_twilight", "skipped_protected",
   "current", "removed", "reason",
 ] as const;
 
@@ -206,6 +207,14 @@ function cleanupSchedulerRuntimeConfig(t: TFunc, jobID: string) {
       description: t("adminScheduler.cleanupUnlinkedEmbyDescription"),
     };
   }
+  if (jobID === "cleanup_emby_devices") {
+    return {
+      hasDays: false,
+      hasDeviceCleanup: true,
+      title: t("adminScheduler.cleanupEmbyDevicesTitle"),
+      description: t("adminScheduler.cleanupEmbyDevicesDescription"),
+    };
+  }
   return null;
 }
 
@@ -221,6 +230,7 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
   const [cleanupEnabled, setCleanupEnabled] = useState(false);
   const [cleanupDryRun, setCleanupDryRun] = useState(true);
   const [cleanupDelete, setCleanupDelete] = useState(false);
+  const [cleanupMaxWorkers, setCleanupMaxWorkers] = useState("10");
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
 
@@ -239,6 +249,7 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
       setCleanupEnabled(job.id === "enforce_group_membership" ? Boolean(rp.auto_enable_rejoined) : Boolean(rp.enabled ?? rp.auto_enabled));
       setCleanupDryRun(Boolean(rp.dry_run ?? true));
       setCleanupDelete(Boolean(rp.delete));
+      setCleanupMaxWorkers(String(Number(rp.max_workers ?? 10) || 10));
       return;
     }
     setType(spec.type);
@@ -246,6 +257,7 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
     setCleanupEnabled(job.id === "enforce_group_membership" ? Boolean(rp.auto_enable_rejoined) : Boolean(rp.enabled ?? rp.auto_enabled));
     setCleanupDryRun(Boolean(rp.dry_run ?? true));
     setCleanupDelete(Boolean(rp.delete));
+    setCleanupMaxWorkers(String(Number(rp.max_workers ?? 10) || 10));
     if (spec.type === "cron_daily") {
       setHour(spec.hour);
       setMinute(spec.minute);
@@ -291,7 +303,15 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
       }
       if (cleanupConfig) {
         const runtimeParams: Record<string, unknown> = {};
-        if ("hasDryRunDelete" in cleanupConfig && cleanupConfig.hasDryRunDelete) {
+        if ("hasDeviceCleanup" in cleanupConfig && cleanupConfig.hasDeviceCleanup) {
+          const maxWorkers = Number(cleanupMaxWorkers);
+          if (!Number.isFinite(maxWorkers) || maxWorkers < 1 || maxWorkers > 10) {
+            toast({ title: t("adminScheduler.cleanupParamInvalidTitle"), description: t("adminScheduler.maxWorkersInvalidDescription"), variant: "destructive" });
+            return;
+          }
+          runtimeParams.dry_run = cleanupDryRun;
+          runtimeParams.max_workers = Math.trunc(maxWorkers);
+        } else if ("hasDryRunDelete" in cleanupConfig && cleanupConfig.hasDryRunDelete) {
           runtimeParams.dry_run = cleanupDryRun;
           runtimeParams.delete = cleanupDelete;
         } else if ("hasAutoEnableRejoined" in cleanupConfig && cleanupConfig.hasAutoEnableRejoined) {
@@ -451,7 +471,33 @@ function ScheduleEditor({ job, open, onOpenChange, onSaved }: ScheduleEditorProp
                   {cleanupConfig.description}
                 </p>
               </div>
-              {"hasDryRunDelete" in cleanupConfig && cleanupConfig.hasDryRunDelete ? (
+              {"hasDeviceCleanup" in cleanupConfig && cleanupConfig.hasDeviceCleanup ? (
+                <>
+                  <label className="flex items-start gap-2 rounded-lg border border-border/60 bg-background/60 p-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={cleanupDryRun}
+                      onChange={(e) => setCleanupDryRun(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-border accent-primary"
+                    />
+                    <span>
+                      {t("adminScheduler.dryRunLabel")}
+                      <span className="block text-xs text-muted-foreground">{t("adminScheduler.dryRunHint")}</span>
+                    </span>
+                  </label>
+                  <div className="space-y-2">
+                    <Label>{t("adminScheduler.maxWorkersLabel")}</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={cleanupMaxWorkers}
+                      onChange={(e) => setCleanupMaxWorkers(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">{t("adminScheduler.maxWorkersHint")}</p>
+                  </div>
+                </>
+              ) : "hasDryRunDelete" in cleanupConfig && cleanupConfig.hasDryRunDelete ? (
                 <>
                   <label className="flex items-start gap-2 rounded-lg border border-border/60 bg-background/60 p-2 text-sm">
                     <input
@@ -601,7 +647,7 @@ function jobIsRunning(job: SchedulerJobItem, running: Record<string, boolean>) {
 }
 
 // 哪些任务在手动触发时支持参数面板
-const PARAMETERIZED_JOBS = new Set(["cleanup_no_emby", "cleanup_pending_emby_entitlements", "cleanup_audit_logs", "kick_unknown_group_members", "cleanup_unlinked_emby"]);
+const PARAMETERIZED_JOBS = new Set(["cleanup_no_emby", "cleanup_pending_emby_entitlements", "cleanup_audit_logs", "kick_unknown_group_members", "cleanup_unlinked_emby", "cleanup_emby_devices"]);
 
 export default function AdminSchedulerPage() {
   const { toast } = useToast();
@@ -734,8 +780,8 @@ export default function AdminSchedulerPage() {
       ];
       setParamPreserveTg(lastPreserveTg === undefined ? true : Boolean(lastPreserveTg));
       setParamIgnoreEnabled(Boolean((job.runtime_params as Record<string, unknown> | undefined)?.["enabled"] ?? (job.runtime_params as Record<string, unknown> | undefined)?.["auto_enabled"] ?? true));
-      setParamKickDryRun(true);
-      setParamKickMaxPerRun("200");
+      setParamKickDryRun(Boolean((job.runtime_params as Record<string, unknown> | undefined)?.["dry_run"] ?? true));
+      setParamKickMaxPerRun(String(Number((job.runtime_params as Record<string, unknown> | undefined)?.[job.id === "cleanup_emby_devices" ? "max_workers" : "max_per_run"] ?? (job.id === "cleanup_emby_devices" ? 10 : 200)) || (job.id === "cleanup_emby_devices" ? 10 : 200)));
       setParamJob(job);
       return;
     }
@@ -766,7 +812,17 @@ export default function AdminSchedulerPage() {
     if (!paramJob) return;
     let params: Record<string, unknown> = {};
     const cleanupConfig = cleanupSchedulerRuntimeConfig(t, paramJob.id);
-    if (cleanupConfig) {
+    if (paramJob.id === "cleanup_emby_devices") {
+      const workers = Number(paramKickMaxPerRun);
+      if (!Number.isFinite(workers) || workers < 1 || workers > 10) {
+        toast({ title: t("adminScheduler.cleanupParamInvalidTitle"), description: t("adminScheduler.maxWorkersInvalidDescription"), variant: "destructive" });
+        return;
+      }
+      params = {
+        dry_run: paramKickDryRun,
+        max_workers: Math.trunc(workers),
+      };
+    } else if (cleanupConfig) {
       params = {
         ignore_enabled_flag: paramIgnoreEnabled,
       };
@@ -1112,7 +1168,7 @@ export default function AdminSchedulerPage() {
             </DialogDescription>
           </DialogHeader>
 
-          {paramJob && cleanupSchedulerRuntimeConfig(t, paramJob.id) && (
+          {paramJob && paramJob.id !== "cleanup_emby_devices" && cleanupSchedulerRuntimeConfig(t, paramJob.id) && (
             <div className="space-y-4">
               {cleanupSchedulerRuntimeConfig(t, paramJob.id)?.hasDays ? (
                 <div className="space-y-2">
@@ -1168,7 +1224,7 @@ export default function AdminSchedulerPage() {
             </div>
           )}
 
-          {paramJob?.id === "kick_unknown_group_members" && (
+          {(paramJob?.id === "kick_unknown_group_members" || paramJob?.id === "cleanup_emby_devices") && (
             <div className="space-y-4">
               <label className="flex items-start gap-2 text-sm">
                 <input
@@ -1185,20 +1241,20 @@ export default function AdminSchedulerPage() {
                 </span>
               </label>
               <div className="space-y-2">
-                <Label>{t("adminScheduler.maxPerRunLabel")}</Label>
+                <Label>{paramJob?.id === "cleanup_emby_devices" ? t("adminScheduler.maxWorkersLabel") : t("adminScheduler.maxPerRunLabel")}</Label>
                 <Input
                   type="number"
                   min={1}
-                  max={500}
+                  max={paramJob?.id === "cleanup_emby_devices" ? 10 : 500}
                   value={paramKickMaxPerRun}
                   onChange={(e) => setParamKickMaxPerRun(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  {t("adminScheduler.maxPerRunHint")}
+                  {paramJob?.id === "cleanup_emby_devices" ? t("adminScheduler.maxWorkersHint") : t("adminScheduler.maxPerRunHint")}
                 </p>
               </div>
               <p className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                {t("adminScheduler.kickWarning")}
+                {paramJob?.id === "cleanup_emby_devices" ? t("adminScheduler.cleanupEmbyDevicesWarning") : t("adminScheduler.kickWarning")}
               </p>
             </div>
           )}

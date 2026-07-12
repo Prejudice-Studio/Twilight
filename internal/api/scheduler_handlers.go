@@ -27,6 +27,7 @@ var schedulerJobs = []map[string]any{
 	{"id": "refresh_bangumi_collections", "name": "刷新 Bangumi 收藏缓存", "description": "每小时为开启 BGM 管理且配置 Token 的用户缓存在看、想看、看过收藏列表。", "manual_only": false, "enabled": true},
 	{"id": "sync_emby_activity_logs", "name": "同步 Emby 活动日志", "description": "每 10 分钟从 Emby 拉取活动日志并存入本地，用于活动审计与播放记录入库。", "manual_only": false, "enabled": true, "runtime_params": []string{"since_hours"}},
 	{"id": "cleanup_unlinked_emby", "name": "清理孤立 Emby 账号", "description": "扫描 Emby 中未绑定任何 Web 账号的孤立用户，支持仅扫描与删除模式。", "manual_only": false, "enabled": false, "runtime_params": []string{"dry_run", "delete"}},
+	{"id": "cleanup_emby_devices", "name": "清理 Emby 设备记录", "description": "通过 Emby 管理员接口删除历史设备记录，自动跳过 Twilight 自身设备与受保护用户。", "manual_only": true, "enabled": true, "runtime_params": []string{"dry_run", "max_workers", "skip_usernames"}},
 	{"id": "kick_unknown_group_members", "name": "踢出未知 Telegram 群成员", "description": "根据观察到的群成员名册，踢出无账号/未绑定 Emby/已禁用的成员。", "manual_only": true, "enabled": true, "runtime_params": []string{"dry_run", "max_per_run"}},
 }
 
@@ -160,6 +161,8 @@ func (a *App) schedulerDefaultRuntimeParams(jobID string) map[string]any {
 		return map[string]any{"since_hours": 24}
 	case "cleanup_unlinked_emby":
 		return map[string]any{"dry_run": true, "delete": false}
+	case "cleanup_emby_devices":
+		return map[string]any{"dry_run": true, "max_workers": embyDeviceCleanupDefaultWorkers, "skip_usernames": []string{}}
 	case "kick_unknown_group_members":
 		return map[string]any{"dry_run": true, "max_per_run": 200}
 	case "enforce_group_membership":
@@ -223,6 +226,12 @@ func (a *App) normalizeSchedulerRuntimeParams(jobID string, params map[string]an
 		return map[string]any{"max_users": clamp(intValue(params, "max_users", 1000), 1, 50000)}
 	case "sync_emby_activity_logs":
 		return map[string]any{"since_hours": clamp(intValue(params, "since_hours", 24), 1, 720)}
+	case "cleanup_emby_devices":
+		return map[string]any{
+			"dry_run":        boolValue(params, "dry_run", true),
+			"max_workers":    clamp(intValue(params, "max_workers", embyDeviceCleanupDefaultWorkers), 1, embyDeviceCleanupMaxWorkers),
+			"skip_usernames": embyDeviceCleanupSkipList(params["skip_usernames"]),
+		}
 	default:
 		return nil
 	}

@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"sort"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/prejudice-studio/twilight/internal/store"
@@ -67,27 +68,35 @@ func TestAdminEmbyUserToggleByIdLinked(t *testing.T) {
 	}
 }
 
-func TestAdminEmbyKickAllUsesDocumentedSessionAndDeviceAPIs(t *testing.T) {
+func TestSchedulerCleanupEmbyDevicesUsesDocumentedDeviceAPI(t *testing.T) {
 	app := newTestApp(t)
-	adminCookies := registerAndLogin(t, app, "admin", "Admin123456")
+	_ = registerAndLogin(t, app, "admin", "Admin123456")
+	if _, err := app.store().CreateUser(store.User{
+		Username:     "protected",
+		Role:         store.RoleAdmin,
+		Active:       true,
+		EmbyID:       "emby-protected",
+		EmbyUsername: "protected",
+	}); err != nil {
+		t.Fatal(err)
+	}
 
-	stopped := []string{}
 	deleted := []string{}
+	var deletedMu sync.Mutex
 	app.cfg().EmbyToken = "emby-token"
 	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/Sessions":
-			_, _ = w.Write([]byte(`[
-				{"Id":"playing-session","DeviceId":"device-playing","NowPlayingItem":{"Id":"item-1"}},
-				{"Id":"idle-session","DeviceId":"device-idle"}
-			]`))
-		case r.Method == http.MethodPost && r.URL.Path == "/Sessions/playing-session/Playing/Stop":
-			stopped = append(stopped, r.URL.Path)
-			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && r.URL.Path == "/Devices":
-			_, _ = w.Write([]byte(`{"Items":[{"Id":"device-playing"},{"Id":"offline device"}]}`))
+			_, _ = w.Write([]byte(`{"Items":[
+				{"Id":"device-playing","Name":"TV","AppName":"Emby Theater","LastUserId":"emby-user","LastUserName":"normal"},
+				{"ReportedId":"reported-device","Name":"Phone","AppName":"CineDock","LastUserId":"emby-user","LastUserName":"normal"},
+				{"Id":"twilight-client","Name":"Twilight","AppName":"Twilight","LastUserId":"emby-user","LastUserName":"normal"},
+				{"Id":"protected-device","Name":"Admin Phone","AppName":"Emby","LastUserId":"emby-protected","LastUserName":"protected"}
+			]}`))
 		case r.Method == http.MethodDelete && r.URL.Path == "/Devices":
+			deletedMu.Lock()
 			deleted = append(deleted, r.URL.Query().Get("Id"))
+			deletedMu.Unlock()
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			t.Fatalf("unexpected Emby request: %s %s", r.Method, r.URL.RequestURI())
@@ -96,28 +105,19 @@ func TestAdminEmbyKickAllUsesDocumentedSessionAndDeviceAPIs(t *testing.T) {
 	defer emby.Close()
 	app.cfg().EmbyURL = emby.URL
 
-	resp := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/emby/sessions/kick-all", "", adminCookies, map[string]string{"X-Twilight-Client": "webui"})
-	if resp.Code != http.StatusOK {
-		t.Fatalf("kick-all status=%d body=%s", resp.Code, resp.Body.String())
+	req := httptest.NewRequest(http.MethodPost, "/scheduler", strings.NewReader(`{"runtime_params":{"dry_run":false,"max_workers":2}}`))
+	summary, _, err := app.runSchedulerJob(req, "cleanup_emby_devices")
+	if err != nil {
+		t.Fatalf("cleanup_emby_devices returned err: %v", err)
 	}
-	if len(stopped) != 1 || stopped[0] != "/Sessions/playing-session/Playing/Stop" {
-		t.Fatalf("stopped paths = %#v", stopped)
+	if int(numeric(summary["deleted"])) != 2 || int(numeric(summary["skipped_twilight"])) != 1 || int(numeric(summary["skipped_protected"])) != 1 {
+		t.Fatalf("unexpected summary: %+v", summary)
 	}
-	sort.Strings(deleted)
-	if got, want := fmt.Sprint(deleted), fmt.Sprint([]string{"device-playing", "offline device"}); got != want {
-		t.Fatalf("deleted device ids = %s, want %s", got, want)
-	}
-	var payload struct {
-		Data struct {
-			StoppedSessions int `json:"stopped_sessions"`
-			DeletedDevices  int `json:"deleted_devices"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload.Data.StoppedSessions != 1 || payload.Data.DeletedDevices != 2 {
-		t.Fatalf("unexpected result: %+v", payload.Data)
+	deletedMu.Lock()
+	got := strings.Join(deleted, ",")
+	deletedMu.Unlock()
+	if !strings.Contains(got, "device-playing") || !strings.Contains(got, "reported-device") || strings.Contains(got, "twilight-client") || strings.Contains(got, "protected-device") {
+		t.Fatalf("deleted device ids = %#v", deleted)
 	}
 }
 

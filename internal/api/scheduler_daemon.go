@@ -504,7 +504,7 @@ func (a *App) schedulerDefaultTriggerSpec(jobID string) map[string]any {
 		}
 	case "cleanup_unlinked_emby":
 		return dailySpec("05:00", 5, 0)
-	case "emby_sync", "kick_unknown_group_members":
+	case "emby_sync", "cleanup_emby_devices", "kick_unknown_group_members":
 		return map[string]any{"type": "manual"}
 	case "cleanup_unused_uploads":
 		return dailySpec(a.cfg().SchedulerCleanupUnusedUploadsTime, 2, 20)

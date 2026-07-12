@@ -1728,6 +1728,8 @@
     "enforceGroupDescription": "When a user rejoins the group and the account has not expired, whether to auto-unban and enable their Emby and system account. When off, only marks for review. Note: auto-unban does not apply when ban_on_leave is on.",
     "cleanupAuditLogsTitle": "Audit Log Cleanup Parameters",
     "cleanupAuditLogsDescription": "Clean up expired audit logs based on configured retention days and max entries, with option to preserve admin actions.",
+    "cleanupEmbyDevicesTitle": "Emby device cleanup params",
+    "cleanupEmbyDevicesDescription": "Scans Emby /Devices history, skips Twilight's own devices and protected users, and deletes with DELETE /Devices?Id= when dry_run is off.",
     "triggerMode": "Trigger mode",
     "modeManual": "Disable auto, manual only",
     "modeDaily": "Daily at fixed time",
@@ -1839,10 +1841,14 @@
     "ignoreEnabledLabel": "Ignore auto-cleanup switch",
     "ignoreEnabledHint": "When checked, you can run once manually even if auto cleanup is disabled in config.",
     "dryRunLabel": "Dry run only",
-    "dryRunHint": "When checked, only counts kick targets without actually kicking. See the summary for results.",
+    "dryRunHint": "When checked, only counts targets without deleting or kicking. See the summary for results.",
+    "maxWorkersLabel": "Concurrency",
+    "maxWorkersHint": "Concurrent requests for deleting Emby device records. Default 10, max 10.",
+    "maxWorkersInvalidDescription": "Concurrency must be between 1 and 10",
     "maxPerRunLabel": "Max kicks per run",
     "maxPerRunHint": "Avoids Telegram rate limits; default 200, max 500.",
     "kickWarning": "⚠️ Using the group roster as the baseline, cross-checks the users table and kicks members with no system account / disabled / no Emby.",
+    "cleanupEmbyDevicesWarning": "Deletes Emby historical device records and invalidates retained devices. Preview with dry_run first.",
     "executeNow": "Execute now",
     "runLogsTitle": "{name} · Run logs",
     "lastLog": "Latest log",
@@ -1895,7 +1901,13 @@
       "telegram_bound": "TG bound",
       "invalid_telegram_id": "Invalid TGID",
       "duplicate_telegram_ids": "Duplicate TGID",
-      "rebind_state_mismatch": "Rebind state mismatch"
+      "rebind_state_mismatch": "Rebind state mismatch",
+      "configured": "Configured",
+      "candidates": "Candidates",
+      "max_workers": "Concurrency",
+      "skipped_no_id": "No device ID",
+      "skipped_twilight": "Skipped Twilight",
+      "skipped_protected": "Skipped protected"
     }
   },
   "adminRegcodes": {
@@ -2283,7 +2295,6 @@
     "labelSessionEnded": "Session ended"
   },
   "deviceAuditPatch": {
-    "kickAllDone": "Kicked {kicked} online sessions and cleared {devices} device records",
     "refreshedAt": "Updated {time}"
   }
 }

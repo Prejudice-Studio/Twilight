@@ -616,6 +616,13 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		summary["not_in_group"] = notInGroup
 		summary["scanned"] = scanned
 		return summary, logs, nil
+	case "cleanup_emby_devices":
+		result, logs, err := a.cleanupEmbyDevices(r.Context(), embyDeviceCleanupOptions{
+			DryRun:        jobParamBool(params, "dry_run", true),
+			MaxWorkers:    jobParamInt(params, "max_workers", embyDeviceCleanupDefaultWorkers),
+			SkipUsernames: embyDeviceCleanupSkipList(params["skip_usernames"]),
+		})
+		return result, logs, err
 	case "cleanup_unused_uploads":
 		result := a.cleanupUnusedUploadAssets(24 * time.Hour)
 		result["success"] = true

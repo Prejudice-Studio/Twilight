@@ -557,37 +557,6 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="destructive" size="sm" onClick={async () => {
-            const ok = await confirmAction({
-              title: t("deviceAudit.kickAllTitle"),
-              description: t("deviceAudit.kickAllDesc"),
-              tone: "danger",
-              confirmLabel: t("deviceAudit.kickAllConfirm"),
-            });
-            if (!ok) return;
-            try {
-              const res = await api.kickAllEmbySessions();
-              if (res.success) {
-                const data: any = res.data || {};
-                toast({
-                  title: t("deviceAudit.kickAllDone"),
-                  description: t("deviceAuditPatch.kickAllDone", {
-                    kicked: data.kicked ?? 0,
-                    devices: data.deleted_devices ?? 0,
-                  }),
-                  variant: "success",
-                });
-                void reload(true);
-              } else {
-                toast({ title: t("deviceAudit.actionFailed"), description: res.message, variant: "destructive" });
-              }
-            } catch (err) {
-              toast({ title: t("deviceAudit.actionFailed"), description: err instanceof Error ? err.message : String(err), variant: "destructive" });
-            }
-          }}>
-            <LogOut className="mr-1.5 h-4 w-4" />
-            {t("deviceAudit.kickAll")}
-          </Button>
           <Button variant="outline" size="sm" onClick={() => void reload(true)} disabled={loading}>
             {loading ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />

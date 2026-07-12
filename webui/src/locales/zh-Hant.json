@@ -1728,6 +1728,8 @@
     "enforceGroupDescription": "偵測到使用者回到群裡且帳號未過期時，是否自動解禁並啟用其 Emby 和系統帳號。關閉時僅標記為待審核。注意：ban_on_leave 開啟時自動解禁不會生效。",
     "cleanupAuditLogsTitle": "審計日誌清理參數",
     "cleanupAuditLogsDescription": "按配置的保留天數和最大條數策略清理過期操作日誌，可選擇保留管理員操作。",
+    "cleanupEmbyDevicesTitle": "Emby 裝置記錄清理參數",
+    "cleanupEmbyDevicesDescription": "掃描 Emby /Devices 歷史裝置記錄，跳過 Twilight 自身裝置和受保護使用者裝置；關閉 dry_run 後透過 DELETE /Devices?Id= 刪除。",
     "triggerMode": "觸發模式",
     "modeManual": "關閉自動執行，僅手動",
     "modeDaily": "每日固定時間",
@@ -1839,10 +1841,14 @@
     "ignoreEnabledLabel": "忽略自動清理總開關",
     "ignoreEnabledHint": "勾選後即便 config 裡沒啟用自動清理，也能手動跑一次。",
     "dryRunLabel": "僅試執行 (dry_run)",
-    "dryRunHint": "勾選後只統計待踢的目標，不會真正踢人。結果在 summary 中查看。",
+    "dryRunHint": "勾選後只統計目標，不會真正執行刪除或踢出。結果在 summary 中查看。",
+    "maxWorkersLabel": "並發數",
+    "maxWorkersHint": "刪除 Emby 裝置記錄的並發請求數，預設 10，上限 10。",
+    "maxWorkersInvalidDescription": "並發數必須在 1-10 之間",
     "maxPerRunLabel": "單次最多踢出",
     "maxPerRunHint": "避免觸發 Telegram 限流；預設 200，上限 500。",
     "kickWarning": "⚠️ 以群花名冊為基準反查 users 表，踢出無系統帳號 / 已停用 / 未綁 Emby 的成員。",
+    "cleanupEmbyDevicesWarning": "會刪除 Emby 的歷史裝置記錄並使保留裝置失效。建議先用 dry_run 預覽。",
     "executeNow": "立即執行",
     "runLogsTitle": "{name} · 執行日誌",
     "lastLog": "最近一次日誌",
@@ -1895,7 +1901,13 @@
       "telegram_bound": "TG綁定",
       "invalid_telegram_id": "非法TGID",
       "duplicate_telegram_ids": "重複TGID",
-      "rebind_state_mismatch": "換綁狀態異常"
+      "rebind_state_mismatch": "換綁狀態異常",
+      "configured": "已配置",
+      "candidates": "候選",
+      "max_workers": "並發數",
+      "skipped_no_id": "無裝置ID",
+      "skipped_twilight": "跳過Twilight",
+      "skipped_protected": "跳過受保護"
     }
   },
   "adminRegcodes": {
@@ -2283,7 +2295,6 @@
     "labelSessionEnded": "會話結束"
   },
   "deviceAuditPatch": {
-    "kickAllDone": "已踢出 {kicked} 個線上會話，清理 {devices} 筆裝置記錄",
     "refreshedAt": "更新於 {time}"
   }
 }

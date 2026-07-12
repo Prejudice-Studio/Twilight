@@ -1040,7 +1040,9 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/123/disable" \
 
 前端主入口为「Emby 管理」，设备/IP 审查已整合为该页面的独立页签；旧 `/admin/device-audit` 页面保留为兼容入口。
 
-`GET /admin/emby/device-audit` 返回按 Emby 用户聚合的设备、在线会话 IP、活动日志登录 IP 与本地账号关联。离线保留设备会按同一 Emby 用户下的设备名、客户端名、客户端版本聚合，返回 `count` 与最新活动时间，避免同一手机/客户端的多条历史 DeviceId 刷屏；在线设备保留实时独立行。`summary.devices_available`、`summary.sessions_available` 和 `summary.activity_available` 分别表示 `/Devices`、`/Sessions`、`/System/ActivityLog` 来源是否可用；其中任一来源失败时接口会尽量返回其余可用数据，并在对应 `*_error` 字段写入脱敏后的简短错误。
+`GET /admin/emby/device-audit` 返回按 Emby 用户聚合的设备、在线会话 IP、活动日志登录 IP 与本地账号关联。接口会过滤 Twilight 自身连接 Emby 时产生的设备/会话（如 `Twilight`、`Twilight Bind`、`twilight-client`），避免把面板自身计入用户、IP、客户端和设备统计。离线保留设备会按同一 Emby 用户下的设备名、客户端名、客户端版本聚合，返回 `count` 与最新活动时间，避免同一手机/客户端的多条历史 DeviceId 刷屏；在线设备保留实时独立行。`summary.devices_available`、`summary.sessions_available` 和 `summary.activity_available` 分别表示 `/Devices`、`/Sessions`、`/System/ActivityLog` 来源是否可用；其中任一来源失败时接口会尽量返回其余可用数据，并在对应 `*_error` 字段写入脱敏后的简短错误。
+
+全量清理 Emby 历史设备记录不在设备/IP 审查页提供按钮，也不提供独立的“踢出全部”管理接口；请使用定时任务 `cleanup_emby_devices`。该任务通过 Emby 管理员接口 `DELETE /Devices?Id={DeviceId}` 删除设备记录，兼容 `Id` 与 `ReportedId`，默认 `dry_run=true`，并自动跳过 Twilight 自身设备和本地受保护用户设备。
 
 | 方法/路径 | 说明 |
 | --------- | ---- |
@@ -1335,6 +1337,10 @@ Telegram 相关行为见 [Telegram Bot 命令](../features/telegram-bot.md)。
 
 - 说明：将指定任务排入后台执行；接口立即返回，前端通过轮询 `/admin/scheduler/jobs` 拿到结束状态。
 - 响应：`data.last_run` 是触发时的快照（通常为 `running`）。
+- `cleanup_emby_devices` 运行参数：
+  - `dry_run`：默认 `true`，只统计候选设备并写入运行日志，不删除。
+  - `max_workers`：并发删除请求数，范围 `1-10`，默认 `10`。
+  - `skip_usernames`：额外保护的 Emby 最近登录用户名，可传数组或逗号/分号/换行分隔字符串；本地管理员/白名单/配置管理员会自动保护。
 
 ```bash
 curl -X POST "http://localhost:5000/api/v1/admin/scheduler/jobs/check_expired/run" \

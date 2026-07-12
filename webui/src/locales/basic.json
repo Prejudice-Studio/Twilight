@@ -1696,10 +1696,15 @@
     "cleanupAuditLogsDescription": "按配置的保留天数和最大条数策略清理过期操作日志，可选择保留管理员操作。",
     "cleanupUnlinkedEmbyTitle": "孤立 Emby 账号清理参数",
     "cleanupUnlinkedEmbyDescription": "扫描 Emby 中未绑定任何 Web 账号的孤立用户。仅扫描模式仅列出不执行删除。",
+    "cleanupEmbyDevicesTitle": "Emby 设备记录清理参数",
+    "cleanupEmbyDevicesDescription": "扫描 Emby /Devices 历史设备记录，跳过 Twilight 自身设备和受保护用户设备；关闭 dry_run 后通过 DELETE /Devices?Id= 删除。",
     "dryRunLabel": "仅试运行 (dry_run)",
-    "dryRunHint": "勾选后只统计待踢的目标，不会真正踢人。结果在 summary 中查看。",
+    "dryRunHint": "勾选后只统计目标，不会真正执行删除或踢出。结果在 summary 中查看。",
     "deleteLabel": "允许删除",
     "deleteHint": "开启后在扫描的基础上实际删除未绑定的 Emby 用户。同时开启仅扫描时不会执行删除。",
+    "maxWorkersLabel": "并发数",
+    "maxWorkersHint": "删除 Emby 设备记录的并发请求数，默认 10，上限 10。",
+    "maxWorkersInvalidDescription": "并发数必须在 1-10 之间",
     "triggerMode": "触发模式",
     "modeManual": "关闭自动执行，仅手动",
     "modeDaily": "每日固定时间",
@@ -1813,6 +1818,7 @@
     "maxPerRunLabel": "单次最多踢出",
     "maxPerRunHint": "避免触发 Telegram 限流；默认 200，上限 500。",
     "kickWarning": "⚠️ 以群花名册为基准反查 users 表，踢出无系统账号 / 已禁用 / 未绑 Emby 的成员。",
+    "cleanupEmbyDevicesWarning": "会删除 Emby 的历史设备记录并使保留设备失效。建议先用 dry_run 预览。",
     "executeNow": "立即执行",
     "runLogsTitle": "{name} · 运行日志",
     "lastLog": "最近一次日志",
@@ -1865,7 +1871,13 @@
       "telegram_bound": "TG绑定",
       "invalid_telegram_id": "非法TGID",
       "duplicate_telegram_ids": "重复TGID",
-      "rebind_state_mismatch": "换绑状态异常"
+      "rebind_state_mismatch": "换绑状态异常",
+      "configured": "已配置",
+      "candidates": "候选",
+      "max_workers": "并发数",
+      "skipped_no_id": "无设备ID",
+      "skipped_twilight": "跳过Twilight",
+      "skipped_protected": "跳过受保护"
     }
   },
   "emailAdmin": {
@@ -2019,11 +2031,6 @@
     "clientFilterActiveHint": "已按客户端「{name}」筛选，仅显示匹配设备",
     "deviceMatchCount": "匹配 {count} 台设备",
     "emptyDevices": "无匹配设备",
-    "kickAll": "踢出全部会话",
-    "kickAllTitle": "确认踢出全部会话",
-    "kickAllDesc": "将踢出所有在线 Emby 会话并删除所有离线设备记录，操作不可撤销。",
-    "kickAllConfirm": "踢出全部",
-    "kickAllDone": "已踢出 {count} 个会话并清理设备记录",
     "chartClients": "客户端分布",
     "chartStatus": "在线状态",
     "chartDevices": "设备型号分布",
@@ -2952,7 +2959,6 @@
     "labelSessionEnded": "会话结束"
   },
   "deviceAuditPatch": {
-    "kickAllDone": "已踢出 {kicked} 个在线会话，清理 {devices} 条设备记录",
     "refreshedAt": "更新于 {time}"
   }
 }
