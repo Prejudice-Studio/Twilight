@@ -4,7 +4,7 @@ import { useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   MessageSquareMore, Loader2, Trash2, Edit2, AlertCircle, Clock, User,
-  CheckCircle2, Archive, RotateCcw, PlayCircle, Wrench, Plus, Pencil, Settings2, RefreshCw,
+  CheckCircle2, Archive, RotateCcw, PlayCircle, Plus, Pencil, Settings2, RefreshCw,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -257,13 +257,38 @@ export default function AdminTicketsPage() {
                     onChange={() => void reload()}
                   />
 
-                  {ticket.admin_note && (
-                    <div className="rounded-lg bg-info/5 border border-info/20 p-4 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <Wrench className="h-4 w-4 text-info" />
-                        <span className="text-xs font-semibold text-info">{t("tickets.adminReply")}</span>
+                  {((ticket.replies && ticket.replies.length > 0) || ticket.admin_note) && (
+                    <div className="rounded-lg border border-border/60 bg-muted/20 p-4 space-y-3">
+                      <div className="flex items-center gap-2 text-xs font-semibold">
+                        <MessageSquareMore className="h-3.5 w-3.5 text-info" />
+                        {t("tickets.conversation")}
                       </div>
-                      <p className="text-sm whitespace-pre-wrap break-words">{ticket.admin_note}</p>
+                      {ticket.replies && ticket.replies.length > 0 ? (
+                        <div className="space-y-3">
+                          {ticket.replies.map((reply, index) => {
+                            const isAdminReply = reply.author === "admin" || reply.role === 0;
+                            return (
+                              <div key={`${reply.created_at}-${reply.uid}-${index}`} className={`rounded-md border p-3 ${isAdminReply ? "border-info/20 bg-info/5" : "border-border bg-background/70"}`}>
+                                <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                                  <span className={isAdminReply ? "font-semibold text-info" : "font-semibold text-foreground"}>
+                                    {isAdminReply ? t("tickets.adminReply") : t("tickets.userReply")}
+                                  </span>
+                                  <span>{reply.username}</span>
+                                  <span className="ml-auto">{new Date(reply.created_at * 1000).toLocaleString()}</span>
+                                </div>
+                                <p className="whitespace-pre-wrap break-words text-sm">{reply.content}</p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="rounded-md border border-info/20 bg-info/5 p-3">
+                          <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                            <span className="font-semibold text-info">{t("tickets.adminReply")}</span>
+                          </div>
+                          <p className="whitespace-pre-wrap break-words text-sm">{ticket.admin_note}</p>
+                        </div>
+                      )}
                     </div>
                   )}
 

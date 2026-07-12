@@ -220,6 +220,8 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 
 - `Ticket.types` must never become empty. Config save paths use `ensureTicketDefaults`.
 - Admin ticket-type edits should be persisted back to `config.toml` so restart/hot reload does not lose them.
+- Ticket status, priority, type normalization, status timestamps, open-ticket quota checks, and reply-preserving updates belong in `internal/store`; handlers should use store helpers instead of rebuilding whole ticket structs.
+- Ticket replies are the source of truth for two-sided conversation history. `admin_note` is only the latest admin summary / compatibility field and must not replace or clear `Ticket.Replies`.
 - Closed tickets are evidence-preserving for normal users: upload/delete image handlers reject normal-user modifications with `ErrTicketClosed`.
 - Admins retain debugging privileges on closed tickets.
 - Frontend image components receive `canDelete` and must disable destructive interactions for closed normal-user tickets.

@@ -509,6 +509,27 @@ type TicketAttachment struct {
 	CreatedAt   int64  `json:"created_at"`
 }
 
+const (
+	TicketStatusOpen       = "open"
+	TicketStatusInProgress = "in_progress"
+	TicketStatusResolved   = "resolved"
+	TicketStatusClosed     = "closed"
+
+	TicketPriorityLow    = "low"
+	TicketPriorityMedium = "medium"
+	TicketPriorityHigh   = "high"
+	TicketPriorityUrgent = "urgent"
+
+	TicketTypeDefault = "all"
+)
+
+type TicketUpdate struct {
+	Status    *string
+	Priority  *string
+	Type      *string
+	AdminNote *string
+}
+
 type RebindRequest struct {
 	ID            int64  `json:"id"`
 	UID           int64  `json:"uid"`
@@ -3126,11 +3147,117 @@ func (s *Store) DeleteDeveloperJSPreset(id int64) error {
 
 // ---- Tickets ----
 
+func NormalizeTicketStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case TicketStatusInProgress:
+		return TicketStatusInProgress
+	case TicketStatusResolved:
+		return TicketStatusResolved
+	case TicketStatusClosed:
+		return TicketStatusClosed
+	default:
+		return TicketStatusOpen
+	}
+}
+
+func ValidTicketStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case TicketStatusOpen, TicketStatusInProgress, TicketStatusResolved, TicketStatusClosed:
+		return true
+	}
+	return false
+}
+
+func NormalizeTicketPriority(priority string) string {
+	switch strings.ToLower(strings.TrimSpace(priority)) {
+	case TicketPriorityLow:
+		return TicketPriorityLow
+	case TicketPriorityHigh:
+		return TicketPriorityHigh
+	case TicketPriorityUrgent:
+		return TicketPriorityUrgent
+	default:
+		return TicketPriorityMedium
+	}
+}
+
+func ValidTicketPriority(priority string) bool {
+	switch strings.ToLower(strings.TrimSpace(priority)) {
+	case TicketPriorityLow, TicketPriorityMedium, TicketPriorityHigh, TicketPriorityUrgent:
+		return true
+	}
+	return false
+}
+
+func NormalizeTicketType(types []string, input string) string {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		trimmed = TicketTypeDefault
+	}
+	for _, t := range types {
+		if strings.EqualFold(strings.TrimSpace(t), trimmed) {
+			return strings.TrimSpace(t)
+		}
+	}
+	for _, t := range types {
+		if strings.EqualFold(strings.TrimSpace(t), TicketTypeDefault) {
+			return strings.TrimSpace(t)
+		}
+	}
+	if len(types) > 0 {
+		if first := strings.TrimSpace(types[0]); first != "" {
+			return first
+		}
+	}
+	return TicketTypeDefault
+}
+
+func TicketStatusOpenForQuota(status string) bool {
+	switch NormalizeTicketStatus(status) {
+	case TicketStatusOpen, TicketStatusInProgress:
+		return true
+	}
+	return false
+}
+
+func TicketStatusAllowsConversation(status string) bool {
+	return NormalizeTicketStatus(status) != TicketStatusClosed
+}
+
+func applyTicketStatusTimestamps(t *Ticket, existing Ticket, now int64) {
+	previousStatus := NormalizeTicketStatus(existing.Status)
+	nextStatus := NormalizeTicketStatus(t.Status)
+	t.Status = nextStatus
+	if t.ResolvedAt == 0 {
+		t.ResolvedAt = existing.ResolvedAt
+	}
+	if t.ClosedAt == 0 {
+		t.ClosedAt = existing.ClosedAt
+	}
+	if nextStatus == TicketStatusResolved {
+		if previousStatus != TicketStatusResolved || t.ResolvedAt == 0 {
+			t.ResolvedAt = now
+		}
+	} else {
+		t.ResolvedAt = 0
+	}
+	if nextStatus == TicketStatusClosed {
+		if previousStatus != TicketStatusClosed || t.ClosedAt == 0 {
+			t.ClosedAt = now
+		}
+	} else {
+		t.ClosedAt = 0
+	}
+}
+
 func (s *Store) UpsertTicket(t Ticket) (Ticket, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	err := s.mutateAndSaveLocked(func() error {
 		now := time.Now().Unix()
+		t.Type = NormalizeTicketType(s.state.TicketTypes, t.Type)
+		t.Status = NormalizeTicketStatus(t.Status)
+		t.Priority = NormalizeTicketPriority(t.Priority)
 		if t.ID == 0 {
 			t.ID = s.state.NextTicketID
 			s.state.NextTicketID++
@@ -3150,28 +3277,19 @@ func (s *Store) UpsertTicket(t Ticket) (Ticket, error) {
 			if t.Attachments == nil {
 				t.Attachments = existing.Attachments
 			}
+			if t.Replies == nil {
+				t.Replies = existing.Replies
+			}
 			// NotifyTelegram nil 表示沿用已有值，避免更新其他字段时意外重置。
 			if t.NotifyTelegram == nil {
 				t.NotifyTelegram = existing.NotifyTelegram
 			}
-			// Status transition timestamps
-			if t.Status == "resolved" && existing.Status != "resolved" && t.ResolvedAt == 0 {
-				t.ResolvedAt = now
-			}
-			if t.Status == "closed" && existing.Status != "closed" && t.ClosedAt == 0 {
-				t.ClosedAt = now
-			}
+			applyTicketStatusTimestamps(&t, existing, now)
+		} else {
+			empty := Ticket{Status: TicketStatusOpen}
+			applyTicketStatusTimestamps(&t, empty, now)
 		}
 		t.UpdatedAt = now
-		if t.Type == "" {
-			t.Type = "all"
-		}
-		if t.Status == "" {
-			t.Status = "open"
-		}
-		if t.Priority == "" {
-			t.Priority = "medium"
-		}
 		s.state.Tickets[t.ID] = t
 		return nil
 	})
@@ -3198,6 +3316,9 @@ func (s *Store) ListTickets(filter TicketFilter) []Ticket {
 		if filter.Priority != "" && t.Priority != filter.Priority {
 			continue
 		}
+		if filter.ActiveOnly && !TicketStatusOpenForQuota(t.Status) {
+			continue
+		}
 		out = append(out, t)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
@@ -3205,10 +3326,11 @@ func (s *Store) ListTickets(filter TicketFilter) []Ticket {
 }
 
 type TicketFilter struct {
-	UID      int64
-	Status   string
-	Type     string
-	Priority string
+	UID        int64
+	Status     string
+	Type       string
+	Priority   string
+	ActiveOnly bool
 }
 
 func (s *Store) Ticket(id int64) (Ticket, bool) {
@@ -3230,23 +3352,13 @@ func (s *Store) DeleteTicket(id int64) error {
 	})
 }
 
-// ticketOpen 判断工单是否处于"占用配额"的活跃状态（待处理 / 处理中）。
-// resolved / closed 不计入用户和全局并发上限。
-func ticketOpen(status string) bool {
-	switch status {
-	case "open", "in_progress":
-		return true
-	}
-	return false
-}
-
 // CountUserOpenTickets 统计某用户当前处于待处理 / 处理中的工单数量。
 func (s *Store) CountUserOpenTickets(uid int64) int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	count := 0
 	for _, t := range s.state.Tickets {
-		if t.UID == uid && ticketOpen(t.Status) {
+		if t.UID == uid && TicketStatusOpenForQuota(t.Status) {
 			count++
 		}
 	}
@@ -3259,11 +3371,67 @@ func (s *Store) CountOpenTickets() int {
 	defer s.mu.RUnlock()
 	count := 0
 	for _, t := range s.state.Tickets {
-		if ticketOpen(t.Status) {
+		if TicketStatusOpenForQuota(t.Status) {
 			count++
 		}
 	}
 	return count
+}
+
+func (s *Store) UpdateTicket(ticketID int64, patch TicketUpdate) (Ticket, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out Ticket
+	err := s.mutateAndSaveLocked(func() error {
+		t, ok := s.state.Tickets[ticketID]
+		if !ok {
+			return ErrNotFound
+		}
+		now := time.Now().Unix()
+		existing := t
+		if patch.Status != nil {
+			t.Status = NormalizeTicketStatus(*patch.Status)
+		}
+		if patch.Priority != nil {
+			t.Priority = NormalizeTicketPriority(*patch.Priority)
+		}
+		if patch.Type != nil {
+			t.Type = NormalizeTicketType(s.state.TicketTypes, *patch.Type)
+		}
+		if patch.AdminNote != nil {
+			t.AdminNote = strings.TrimSpace(*patch.AdminNote)
+		}
+		applyTicketStatusTimestamps(&t, existing, now)
+		t.UpdatedAt = now
+		s.state.Tickets[ticketID] = t
+		out = t
+		return nil
+	})
+	if err != nil {
+		return Ticket{}, err
+	}
+	return out, nil
+}
+
+func (s *Store) SetTicketNotify(ticketID int64, enabled bool) (Ticket, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out Ticket
+	err := s.mutateAndSaveLocked(func() error {
+		t, ok := s.state.Tickets[ticketID]
+		if !ok {
+			return ErrNotFound
+		}
+		t.NotifyTelegram = &enabled
+		t.UpdatedAt = time.Now().Unix()
+		s.state.Tickets[ticketID] = t
+		out = t
+		return nil
+	})
+	if err != nil {
+		return Ticket{}, err
+	}
+	return out, nil
 }
 
 // AddTicketAttachment 给工单追加一张图片元数据。返回更新后的工单。
@@ -3306,6 +3474,13 @@ func (s *Store) AddTicketReply(ticketID int64, reply TicketReply) (Ticket, error
 			reply.CreatedAt = now
 		}
 		t.Replies = append(t.Replies, reply)
+		if reply.Role == RoleAdmin && NormalizeTicketStatus(t.Status) == TicketStatusOpen {
+			t.Status = TicketStatusInProgress
+		}
+		if reply.Role != RoleAdmin && NormalizeTicketStatus(t.Status) == TicketStatusResolved {
+			t.Status = TicketStatusOpen
+			t.ResolvedAt = 0
+		}
 		t.UpdatedAt = now
 		s.state.Tickets[ticketID] = t
 		out = t
@@ -3356,7 +3531,7 @@ func (s *Store) ClosedTicketsWithAttachmentsBefore(cutoff int64) []Ticket {
 	defer s.mu.RUnlock()
 	out := make([]Ticket, 0)
 	for _, t := range s.state.Tickets {
-		if t.Status == "closed" && t.ClosedAt > 0 && t.ClosedAt < cutoff && len(t.Attachments) > 0 {
+		if NormalizeTicketStatus(t.Status) == TicketStatusClosed && t.ClosedAt > 0 && t.ClosedAt < cutoff && len(t.Attachments) > 0 {
 			out = append(out, t)
 		}
 	}
@@ -3395,12 +3570,13 @@ func (s *Store) TicketTypes() []string {
 func (s *Store) SetTicketTypes(types []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	normalized := normalizeTicketTypeList(types)
 	// 确保至少一个类型
-	if len(types) == 0 {
-		types = []string{"other"}
+	if len(normalized) == 0 {
+		normalized = []string{TicketTypeDefault}
 	}
 	return s.mutateAndSaveLocked(func() error {
-		s.state.TicketTypes = types
+		s.state.TicketTypes = normalized
 		return nil
 	})
 }
@@ -3409,6 +3585,7 @@ func (s *Store) SetTicketTypes(types []string) error {
 func (s *Store) AddTicketType(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	name = strings.TrimSpace(name)
 	return s.mutateAndSaveLocked(func() error {
 		for _, t := range s.state.TicketTypes {
 			if strings.EqualFold(t, name) {
@@ -3424,6 +3601,7 @@ func (s *Store) AddTicketType(name string) error {
 func (s *Store) DeleteTicketType(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	name = strings.TrimSpace(name)
 	return s.mutateAndSaveLocked(func() error {
 		if len(s.state.TicketTypes) <= 1 {
 			return ErrConflict
@@ -3448,15 +3626,35 @@ func (s *Store) RenameTicketType(oldName, newName string) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	count := 0
+	oldName = strings.TrimSpace(oldName)
+	newName = strings.TrimSpace(newName)
 	err := s.mutateAndSaveLocked(func() error {
+		for _, t := range s.state.TicketTypes {
+			if strings.EqualFold(t, newName) && !strings.EqualFold(t, oldName) {
+				return ErrConflict
+			}
+		}
+		found := false
 		for i, t := range s.state.TicketTypes {
 			if strings.EqualFold(t, oldName) {
 				s.state.TicketTypes[i] = newName
-				count++
-				return nil
+				found = true
+				break
 			}
 		}
-		return ErrNotFound
+		if !found {
+			return ErrNotFound
+		}
+		now := time.Now().Unix()
+		for id, ticket := range s.state.Tickets {
+			if strings.EqualFold(ticket.Type, oldName) {
+				ticket.Type = newName
+				ticket.UpdatedAt = now
+				s.state.Tickets[id] = ticket
+				count++
+			}
+		}
+		return nil
 	})
 	return count, err
 }
@@ -3466,13 +3664,32 @@ func (s *Store) RenameTicketType(oldName, newName string) (int, error) {
 func (s *Store) SyncTicketTypesFromConfig(cfgTypes []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(cfgTypes) == 0 {
+	types := normalizeTicketTypeList(cfgTypes)
+	if len(types) == 0 {
 		return
 	}
 	_ = s.mutateAndSaveLocked(func() error {
-		s.state.TicketTypes = cfgTypes
+		s.state.TicketTypes = types
 		return nil
 	})
+}
+
+func normalizeTicketTypeList(types []string) []string {
+	out := make([]string, 0, len(types))
+	seen := map[string]bool{}
+	for _, raw := range types {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, name)
+	}
+	return out
 }
 
 func (s *Store) DeveloperModeEnabled() bool {

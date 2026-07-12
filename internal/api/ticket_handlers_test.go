@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+
+	"github.com/prejudice-studio/twilight/internal/store"
 )
 
 // enableTicketSystem 在运行时打开工单系统并按需覆盖并发上限 / 图片限制。
@@ -375,5 +377,91 @@ func TestClosedTicketsWithAttachmentsBefore(t *testing.T) {
 		if tk.ID == id {
 			t.Fatalf("ticket %d should be excluded once attachments cleared", id)
 		}
+	}
+}
+
+func TestTicketRepliesSurviveStatusUpdatesAndReopenResolved(t *testing.T) {
+	app := newTestApp(t)
+	enableTicketSystem(t, app, nil)
+	admin := registerAndLogin(t, app, "admin", "Admin123456")
+	user := registerAndLogin(t, app, "user", "User12345678")
+	id := createTicket(t, app, "conversation", "initial content", user)
+
+	replyPath := "/api/v1/tickets/" + strconv.FormatInt(id, 10) + "/reply"
+	if rr := doJSON(app, http.MethodPost, replyPath, `{"content":"user adds detail"}`, user); rr.Code != http.StatusOK {
+		t.Fatalf("user reply status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	adminUpdate := doJSON(app, http.MethodPut, "/api/v1/admin/tickets/"+strconv.FormatInt(id, 10), `{"status":"resolved","priority":"high","type":"all","admin_note":"admin resolution"}`, admin)
+	if adminUpdate.Code != http.StatusOK {
+		t.Fatalf("admin update status=%d body=%s", adminUpdate.Code, adminUpdate.Body.String())
+	}
+	ticket, found := app.store().Ticket(id)
+	if !found {
+		t.Fatalf("ticket not found after update")
+	}
+	if ticket.Status != store.TicketStatusResolved || ticket.ResolvedAt <= 0 {
+		t.Fatalf("expected resolved ticket with timestamp, got status=%q resolved_at=%d", ticket.Status, ticket.ResolvedAt)
+	}
+	if len(ticket.Replies) != 2 {
+		t.Fatalf("expected user reply plus admin reply, got %#v", ticket.Replies)
+	}
+	if ticket.Replies[0].Content != "user adds detail" || ticket.Replies[1].Content != "admin resolution" {
+		t.Fatalf("unexpected replies: %#v", ticket.Replies)
+	}
+
+	if rr := doJSON(app, http.MethodPost, replyPath, `{"content":"still broken"}`, user); rr.Code != http.StatusOK {
+		t.Fatalf("user reply to resolved ticket status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	ticket, found = app.store().Ticket(id)
+	if !found {
+		t.Fatalf("ticket not found after reopen reply")
+	}
+	if ticket.Status != store.TicketStatusOpen || ticket.ResolvedAt != 0 {
+		t.Fatalf("user reply should reopen resolved ticket, got status=%q resolved_at=%d", ticket.Status, ticket.ResolvedAt)
+	}
+	if len(ticket.Replies) != 3 {
+		t.Fatalf("expected third reply retained, got %#v", ticket.Replies)
+	}
+}
+
+func TestTicketTypeNormalizeAndRenameUpdatesExistingTickets(t *testing.T) {
+	app := newTestApp(t)
+	enableTicketSystem(t, app, nil)
+	if err := app.store().AddTicketType("BugReport"); err != nil {
+		t.Fatalf("AddTicketType: %v", err)
+	}
+	user := registerAndLogin(t, app, "user", "User12345678")
+
+	rr := doJSON(app, http.MethodPost, "/api/v1/tickets", `{"title":"typed","content":"content","type":"bugreport"}`, user)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create typed ticket status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Data struct {
+			ID   int64  `json:"id"`
+			Type string `json:"type"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode typed ticket: %v body=%s", err, rr.Body.String())
+	}
+	if resp.Data.Type != "BugReport" {
+		t.Fatalf("expected configured type casing, got %q", resp.Data.Type)
+	}
+
+	count, err := app.store().RenameTicketType("bugreport", "Incident")
+	if err != nil {
+		t.Fatalf("RenameTicketType: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one existing ticket updated, got %d", count)
+	}
+	ticket, found := app.store().Ticket(resp.Data.ID)
+	if !found {
+		t.Fatalf("ticket not found after type rename")
+	}
+	if ticket.Type != "Incident" {
+		t.Fatalf("expected existing ticket type renamed, got %q", ticket.Type)
 	}
 }

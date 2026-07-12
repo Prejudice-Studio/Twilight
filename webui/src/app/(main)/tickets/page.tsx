@@ -4,7 +4,8 @@ import { useState, useCallback, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
   MessageSquareMore, Plus, Loader2, Clock, AlertCircle,
-  CheckCircle2, XCircle, RotateCcw, Archive, Bell, BellOff,
+  CheckCircle2, RotateCcw, Archive, Bell, BellOff,
+  Send,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -60,6 +61,8 @@ export default function UserTicketsPage() {
   const [priority, setPriority] = useState("medium");
   const [notifyTelegram, setNotifyTelegram] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [replyDrafts, setReplyDrafts] = useState<Record<number, string>>({});
+  const [replyingId, setReplyingId] = useState<number | null>(null);
 
   const loadTickets = useCallback(async () => {
     const res = await api.getMyTickets();
@@ -101,6 +104,23 @@ export default function UserTicketsPage() {
       if (res.success) { toast({ title: t("tickets.reopened") }); await reload(); }
       else toast({ title: res.message, variant: "destructive" });
     } catch (err: any) { toast({ title: err?.message || t("common.networkError"), variant: "destructive" }); }
+  };
+
+  const handleReply = async (id: number) => {
+    const text = (replyDrafts[id] || "").trim();
+    if (!text) { toast({ title: t("tickets.replyRequired"), variant: "destructive" }); return; }
+    setReplyingId(id);
+    try {
+      const res = await api.replyTicket(id, text);
+      if (res.success) {
+        toast({ title: t("tickets.replySent") });
+        setReplyDrafts((current) => ({ ...current, [id]: "" }));
+        await reload();
+      } else {
+        toast({ title: res.message, variant: "destructive" });
+      }
+    } catch (err: any) { toast({ title: err?.message || t("common.networkError"), variant: "destructive" }); }
+    finally { setReplyingId(null); }
   };
 
   if (!ticketEnabled) {
@@ -214,18 +234,58 @@ export default function UserTicketsPage() {
                     onChange={() => void reload()}
                   />
 
-                  {ticket.admin_note && (
-                    <div className="rounded-lg bg-info/5 border border-info/20 p-4 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-info/15 text-info">
-                          <MessageSquareMore className="h-3.5 w-3.5" />
-                        </div>
-                        <span className="text-xs font-semibold text-info">{t("tickets.adminReply")}</span>
-                        <span className="text-[10px] text-muted-foreground ml-auto">
-                          {t("tickets.updatedAt", { time: new Date(ticket.updated_at * 1000).toLocaleString() })}
-                        </span>
+                  {((ticket.replies && ticket.replies.length > 0) || ticket.admin_note) && (
+                    <div className="rounded-lg border border-border/60 bg-muted/20 p-4 space-y-3">
+                      <div className="flex items-center gap-2 text-xs font-semibold">
+                        <MessageSquareMore className="h-3.5 w-3.5 text-info" />
+                        {t("tickets.conversation")}
                       </div>
-                      <p className="text-sm whitespace-pre-wrap break-words pl-8">{ticket.admin_note}</p>
+                      {ticket.replies && ticket.replies.length > 0 ? (
+                        <div className="space-y-3">
+                          {ticket.replies.map((reply, index) => {
+                            const isAdminReply = reply.author === "admin" || reply.role === 0;
+                            return (
+                              <div key={`${reply.created_at}-${reply.uid}-${index}`} className={`rounded-md border p-3 ${isAdminReply ? "border-info/20 bg-info/5" : "border-border bg-background/70"}`}>
+                                <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                                  <span className={isAdminReply ? "font-semibold text-info" : "font-semibold text-foreground"}>
+                                    {isAdminReply ? t("tickets.adminReply") : t("tickets.userReply")}
+                                  </span>
+                                  <span>{reply.username}</span>
+                                  <span className="ml-auto">{new Date(reply.created_at * 1000).toLocaleString()}</span>
+                                </div>
+                                <p className="whitespace-pre-wrap break-words text-sm">{reply.content}</p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="rounded-md border border-info/20 bg-info/5 p-3">
+                          <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                            <span className="font-semibold text-info">{t("tickets.adminReply")}</span>
+                            <span className="ml-auto">{t("tickets.updatedAt", { time: new Date(ticket.updated_at * 1000).toLocaleString() })}</span>
+                          </div>
+                          <p className="whitespace-pre-wrap break-words text-sm">{ticket.admin_note}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {!isClosed && (
+                    <div className="space-y-2 rounded-lg border border-border/60 bg-background p-3">
+                      <Textarea
+                        value={replyDrafts[ticket.id] || ""}
+                        onChange={(event) => setReplyDrafts((current) => ({ ...current, [ticket.id]: event.target.value }))}
+                        placeholder={t("tickets.replyPlaceholder")}
+                        rows={3}
+                        maxLength={5000}
+                        className="resize-y"
+                      />
+                      <div className="flex justify-end">
+                        <Button size="sm" onClick={() => void handleReply(ticket.id)} disabled={replyingId === ticket.id}>
+                          {replyingId === ticket.id ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-1.5 h-3.5 w-3.5" />}
+                          {t("tickets.replySubmit")}
+                        </Button>
+                      </div>
                     </div>
                   )}
 

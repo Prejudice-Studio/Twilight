@@ -2577,6 +2577,13 @@ class ApiClient {
     });
   }
 
+  async replyTicket(id: number, content: string) {
+    return this.request<{ ticket_id: number; ticket: Ticket; replies: Ticket["replies"] }>(`/tickets/${id}/reply`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    });
+  }
+
   // 工单交流图片
   async uploadTicketImage(ticketId: number, file: File) {
     const formData = new FormData();

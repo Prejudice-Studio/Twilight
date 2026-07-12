@@ -211,6 +211,20 @@
 
 > 注：`/media/request/external/update` 路由本身注册为 Public，真正的访问控制来自请求体/请求头携带的内部密钥（`X-Internal-Secret` 或 `Authorization: Bearer`，见 `internal/api/media_request_handlers.go`），并非登录会话。
 
+## Tickets
+
+| 方法 | 路径 | 鉴权 | 说明 |
+| ---- | ---- | ---- | ---- |
+| GET | `/api/v1/tickets` | User | 当前用户工单列表，返回 `replies` 双方回复时间线 |
+| POST | `/api/v1/tickets` | User | 创建工单 |
+| POST | `/api/v1/tickets/{ticket_id}/reply` | User | 追加工单回复；用户回复已解决工单会重新进入待处理 |
+| POST | `/api/v1/tickets/{ticket_id}/close` | User | 用户关闭自己的工单 |
+| POST | `/api/v1/tickets/{ticket_id}/reopen` | User | 用户重开已关闭工单 |
+| PUT | `/api/v1/tickets/{ticket_id}/notify-telegram` | User | 切换单工单 Telegram 通知 |
+| POST | `/api/v1/tickets/{ticket_id}/images` | User | 上传工单交流图片 |
+| GET | `/api/v1/tickets/{ticket_id}/images/{filename}` | User | 读取工单图片 |
+| DELETE | `/api/v1/tickets/{ticket_id}/images/{filename}` | User | 删除工单图片；关闭后普通用户不可删除 |
+
 ## Admin
 
 | 方法 | 路径 | 鉴权 | 说明 |
@@ -273,6 +287,13 @@
 | DELETE | `/api/v1/admin/media-requests/{request_id}` | Admin | 删除求片 |
 | PUT | `/api/v1/admin/media-requests/by-key/{require_key}` | Admin | 按 key 更新求片 |
 | DELETE | `/api/v1/admin/media-requests/by-key/{require_key}` | Admin | 按 key 删除求片 |
+| GET | `/api/v1/admin/tickets` | Admin | 工单管理列表；默认仅返回待处理/处理中，`all=1` 返回全部 |
+| PUT | `/api/v1/admin/tickets/{ticket_id}` | Admin | 更新工单状态、优先级、类型和管理员摘要；新摘要会追加管理员回复 |
+| DELETE | `/api/v1/admin/tickets/{ticket_id}` | Admin | 删除工单并清理附件目录 |
+| GET | `/api/v1/admin/ticket-types` | Admin | 获取工单类型 |
+| POST | `/api/v1/admin/ticket-types` | Admin | 新增工单类型 |
+| PUT | `/api/v1/admin/ticket-types` | Admin | 重命名工单类型，并同步已有工单 |
+| DELETE | `/api/v1/admin/ticket-types` | Admin | 删除工单类型；已有工单保留历史类型 |
 | POST | `/api/v1/admin/whitelist` | Admin | 设置白名单 |
 | GET | `/api/v1/admin/stats` | Admin | 管理统计 |
 | POST | `/api/v1/admin/users/bulk-expire` | Admin | 批量过期用户 |

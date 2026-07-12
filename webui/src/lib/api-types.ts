@@ -1373,6 +1373,15 @@ export interface TicketAttachment {
   url: string;
 }
 
+export interface TicketReply {
+  uid: number;
+  username: string;
+  role: number;
+  author?: "admin" | "user";
+  content: string;
+  created_at: number;
+}
+
 export interface Ticket {
   id: number;
   uid: number;
@@ -1383,6 +1392,7 @@ export interface Ticket {
   status: "open" | "in_progress" | "resolved" | "closed";
   priority: "low" | "medium" | "high" | "urgent";
   admin_note?: string;
+  replies?: TicketReply[];
   attachments?: TicketAttachment[];
   notify_telegram: boolean;
   created_at: number;

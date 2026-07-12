@@ -153,6 +153,7 @@ bash start_backend_dev.sh
 - 独立管理页若需要编辑配置，必须复用 `/system/admin/config/schema` 与 `api.updateConfigBySchema()`，写回同一个 `config.toml`；不要在前端或 store 中复制第二套配置源。
 - 用户管理页的单用户与批量操作必须按领域分组展示（账号状态、Emby、身份绑定、注册资格、危险操作），避免把所有操作平铺成过长菜单或按钮栏；新增用户操作时同步维护后端返回的 `admin_action_state` 与前端 `UserInfo` 类型，让前端能显示禁用原因。
 - Emby 管理与设备/IP 审查共用 `webui/src/app/(main)/admin/emby`，设备审查是页签级入口；`/admin/device-audit` 只作为兼容直达页面保留。设备审查不展示 Twilight 自身连接 Emby 时产生的设备/会话；全量 Emby 设备记录清理只放在调度器 `cleanup_emby_devices`，不要在审查页重新添加“清理全部/踢出全部”入口。
+- 工单页必须展示 `replies` 双方回复时间线；`admin_note` 仅作为最新管理员摘要和旧数据兼容字段。状态、优先级、类型归一、关闭/重开时间戳、开放工单计数与“更新时保留 replies/附件”逻辑统一放在 `internal/store`，前端和 handler 不要重复判断。
 - 后台重型面板应按需加载：非默认页签不要在首屏自动请求大接口；公共系统信息走 `useSystemStore.fetchInfo()` 的 TTL 与 inflight 复用，配置保存后调用 `invalidate()`。
 - 侧边栏、移动菜单、管理导航等密集导航区域使用 `Link prefetch={false}`，避免首屏预载大量不一定访问的后台页面 chunk；只对明确的高频下一步保留预取。
 

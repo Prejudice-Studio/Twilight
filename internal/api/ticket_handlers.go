@@ -53,8 +53,8 @@ func (a *App) handleCreateTicket(w http.ResponseWriter, r *http.Request, _ Param
 	payload := decodeMap(r)
 	title := strings.TrimSpace(stringValue(payload, "title"))
 	content := strings.TrimSpace(stringValue(payload, "content"))
-	ticketType := strings.ToLower(strings.TrimSpace(firstNonEmpty(stringValue(payload, "type"), "all")))
-	priority := strings.ToLower(strings.TrimSpace(firstNonEmpty(stringValue(payload, "priority"), "medium")))
+	ticketType := store.NormalizeTicketType(a.store().TicketTypes(), firstNonEmpty(stringValue(payload, "type"), store.TicketTypeDefault))
+	priority := store.NormalizeTicketPriority(firstNonEmpty(stringValue(payload, "priority"), store.TicketPriorityMedium))
 
 	if title == "" {
 		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "请填写工单标题")
@@ -72,13 +72,6 @@ func (a *App) handleCreateTicket(w http.ResponseWriter, r *http.Request, _ Param
 		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "工单内容过长")
 		return
 	}
-	if !validTicketType(a.store().TicketTypes(), ticketType) {
-		ticketType = "all"
-	}
-	if !validTicketPriority(priority) {
-		priority = "medium"
-	}
-
 	var notifyTG *bool
 	if _, ok := payload["notify_telegram"]; ok {
 		b := boolValue(payload, "notify_telegram", true)
@@ -92,7 +85,7 @@ func (a *App) handleCreateTicket(w http.ResponseWriter, r *http.Request, _ Param
 		Content:        content,
 		Type:           ticketType,
 		Priority:       priority,
-		Status:         "open",
+		Status:         store.TicketStatusOpen,
 		NotifyTelegram: notifyTG,
 	})
 	if statusFromError(w, err) {
@@ -116,22 +109,12 @@ func (a *App) handleCloseOwnTicket(w http.ResponseWriter, r *http.Request, param
 		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
 		return
 	}
-	if existing.Status == "closed" {
+	if !store.TicketStatusAllowsConversation(existing.Status) {
 		failWithCode(w, http.StatusBadRequest, ErrTicketAlreadyClosed, "工单已关闭")
 		return
 	}
-	ticket, err := a.store().UpsertTicket(store.Ticket{
-		ID:        id,
-		UID:       existing.UID,
-		Username:  existing.Username,
-		Title:     existing.Title,
-		Content:   existing.Content,
-		Type:      existing.Type,
-		Priority:  existing.Priority,
-		Status:    "closed",
-		AdminNote: existing.AdminNote,
-		CreatedAt: existing.CreatedAt,
-	})
+	status := store.TicketStatusClosed
+	ticket, err := a.store().UpdateTicket(id, store.TicketUpdate{Status: &status})
 	if statusFromError(w, err) {
 		return
 	}
@@ -153,22 +136,12 @@ func (a *App) handleReopenOwnTicket(w http.ResponseWriter, r *http.Request, para
 		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
 		return
 	}
-	if existing.Status != "closed" {
+	if store.NormalizeTicketStatus(existing.Status) != store.TicketStatusClosed {
 		failWithCode(w, http.StatusBadRequest, ErrTicketNotClosed, "只有已关闭的工单可以重开")
 		return
 	}
-	ticket, err := a.store().UpsertTicket(store.Ticket{
-		ID:        id,
-		UID:       existing.UID,
-		Username:  existing.Username,
-		Title:     existing.Title,
-		Content:   existing.Content,
-		Type:      existing.Type,
-		Priority:  existing.Priority,
-		Status:    "open",
-		AdminNote: existing.AdminNote,
-		CreatedAt: existing.CreatedAt,
-	})
+	status := store.TicketStatusOpen
+	ticket, err := a.store().UpdateTicket(id, store.TicketUpdate{Status: &status})
 	if statusFromError(w, err) {
 		return
 	}
@@ -196,19 +169,7 @@ func (a *App) handleToggleTicketNotify(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 	enabled := boolValue(payload, "enabled", true)
-	ticket, err := a.store().UpsertTicket(store.Ticket{
-		ID:             id,
-		UID:            existing.UID,
-		Username:       existing.Username,
-		Title:          existing.Title,
-		Content:        existing.Content,
-		Type:           existing.Type,
-		Priority:       existing.Priority,
-		Status:         existing.Status,
-		AdminNote:      existing.AdminNote,
-		NotifyTelegram: &enabled,
-		CreatedAt:      existing.CreatedAt,
-	})
+	ticket, err := a.store().SetTicketNotify(id, enabled)
 	if statusFromError(w, err) {
 		return
 	}
@@ -223,22 +184,33 @@ func (a *App) handleToggleTicketNotify(w http.ResponseWriter, r *http.Request, p
 func (a *App) handleAdminTickets(w http.ResponseWriter, r *http.Request, _ Params) {
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
 	showAll := r.URL.Query().Get("all") == "1"
+	if status != "" && !store.ValidTicketStatus(status) {
+		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的工单状态")
+		return
+	}
+	ticketType := strings.TrimSpace(r.URL.Query().Get("type"))
+	if ticketType != "" {
+		ticketType = store.NormalizeTicketType(a.store().TicketTypes(), ticketType)
+	}
+	priority := strings.TrimSpace(r.URL.Query().Get("priority"))
+	if priority != "" {
+		if !store.ValidTicketPriority(priority) {
+			failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的优先级")
+			return
+		}
+		priority = store.NormalizeTicketPriority(priority)
+	}
 	filter := store.TicketFilter{
-		UID:      int64(queryInt(r, "uid", 0)),
-		Status:   status,
-		Type:     strings.TrimSpace(r.URL.Query().Get("type")),
-		Priority: strings.TrimSpace(r.URL.Query().Get("priority")),
+		UID:        int64(queryInt(r, "uid", 0)),
+		Status:     store.NormalizeTicketStatus(status),
+		Type:       ticketType,
+		Priority:   priority,
+		ActiveOnly: status == "" && !showAll,
+	}
+	if status == "" {
+		filter.Status = ""
 	}
 	tickets := a.store().ListTickets(filter)
-	if status == "" && !showAll {
-		filtered := make([]store.Ticket, 0, len(tickets))
-		for _, t := range tickets {
-			if t.Status != "resolved" && t.Status != "closed" {
-				filtered = append(filtered, t)
-			}
-		}
-		tickets = filtered
-	}
 	ok(w, "OK", map[string]any{"tickets": ticketDTOs(tickets), "total": len(tickets), "ticket_types": a.store().TicketTypes()})
 }
 
@@ -254,37 +226,51 @@ func (a *App) handleAdminUpdateTicket(w http.ResponseWriter, r *http.Request, pa
 	}
 
 	status := strings.TrimSpace(firstNonEmpty(stringValue(payload, "status"), existing.Status))
-	if !validTicketStatus(status) {
+	if !store.ValidTicketStatus(status) {
 		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的工单状态")
 		return
 	}
+	status = store.NormalizeTicketStatus(status)
 
 	priority := strings.TrimSpace(firstNonEmpty(stringValue(payload, "priority"), existing.Priority))
-	if !validTicketPriority(priority) {
-		priority = existing.Priority
+	if !store.ValidTicketPriority(priority) {
+		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的优先级")
+		return
 	}
+	priority = store.NormalizeTicketPriority(priority)
 
 	ticketType := strings.TrimSpace(firstNonEmpty(stringValue(payload, "type"), existing.Type))
 	if !validTicketType(a.store().TicketTypes(), ticketType) {
-		ticketType = existing.Type
+		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的工单类型")
+		return
 	}
-	adminNote := strings.TrimSpace(stringValue(payload, "admin_note"))
+	ticketType = store.NormalizeTicketType(a.store().TicketTypes(), ticketType)
+	var adminNote *string
+	if _, ok := payload["admin_note"]; ok {
+		value := strings.TrimSpace(stringValue(payload, "admin_note"))
+		adminNote = &value
+	}
 
-	// 管理员更新时保护已有字段
-	ticket, err := a.store().UpsertTicket(store.Ticket{
-		ID:        id,
-		UID:       existing.UID,
-		Username:  existing.Username,
-		Title:     existing.Title,
-		Content:   existing.Content,
-		Type:      ticketType,
-		Status:    status,
-		Priority:  priority,
+	ticket, err := a.store().UpdateTicket(id, store.TicketUpdate{
+		Status:    &status,
+		Priority:  &priority,
+		Type:      &ticketType,
 		AdminNote: adminNote,
-		CreatedAt: existing.CreatedAt,
 	})
 	if statusFromError(w, err) {
 		return
+	}
+	if adminNote != nil && *adminNote != "" && *adminNote != strings.TrimSpace(existing.AdminNote) {
+		reply := store.TicketReply{
+			UID:      current(r).User.UID,
+			Username: current(r).User.Username,
+			Role:     current(r).User.Role,
+			Content:  *adminNote,
+		}
+		ticket, err = a.store().AddTicketReply(id, reply)
+		if statusFromError(w, err) {
+			return
+		}
 	}
 	a.audit(r, "update_ticket", "admin", ticket.UID, map[string]any{"ticket_id": ticket.ID, "new_status": status})
 
@@ -366,7 +352,7 @@ func (a *App) handleUploadTicketImage(w http.ResponseWriter, r *http.Request, pa
 		return
 	}
 	// 已关闭工单不再允许追加图片，避免清理任务删除目录后又被写入。
-	if ticket.Status == "closed" {
+	if !store.TicketStatusAllowsConversation(ticket.Status) {
 		failWithCode(w, http.StatusBadRequest, ErrTicketAlreadyClosed, "工单已关闭，无法上传图片")
 		return
 	}
@@ -525,7 +511,7 @@ func (a *App) handleDeleteTicketImage(w http.ResponseWriter, r *http.Request, pa
 		return
 	}
 	// 工单关闭后冻结历史图片：普通用户不能再删除自己的图片，仅管理员可清理。
-	if ticket.Status == "closed" && p.User.Role != store.RoleAdmin {
+	if !store.TicketStatusAllowsConversation(ticket.Status) && p.User.Role != store.RoleAdmin {
 		failWithCode(w, http.StatusForbidden, ErrTicketAlreadyClosed, "工单已关闭，无法删除图片")
 		return
 	}
@@ -573,7 +559,7 @@ func (a *App) handleReplyToTicket(w http.ResponseWriter, r *http.Request, params
 		failWithCode(w, http.StatusForbidden, ErrForbidden, "无权回复此工单")
 		return
 	}
-	if ticket.Status == "closed" {
+	if !store.TicketStatusAllowsConversation(ticket.Status) {
 		failWithCode(w, http.StatusBadRequest, ErrTicketAlreadyClosed, "工单已关闭，无法回复")
 		return
 	}
@@ -599,10 +585,15 @@ func (a *App) handleReplyToTicket(w http.ResponseWriter, r *http.Request, params
 	}
 	category := auditCategoryForRole(p.User.Role)
 	a.audit(r, "reply_ticket", category, ticket.UID, map[string]any{"ticket_id": id, "reply_len": len(content)})
-	a.notifyTicketOwner(r.Context(), updated, ticket)
+	if p.User.Role == store.RoleAdmin {
+		a.notifyTicketOwner(r.Context(), updated, ticket)
+	} else {
+		a.notifyTicketAdmins(r.Context(), "replied", updated, p.User)
+	}
 	ok(w, "回复成功", map[string]any{
 		"ticket_id": id,
-		"replies":   updated.Replies,
+		"ticket":    ticketDTO(updated),
+		"replies":   ticketReplyDTOs(updated.Replies),
 	})
 }
 
@@ -638,6 +629,32 @@ func ticketAttachmentDTOs(ticketID int64, atts []store.TicketAttachment) []map[s
 	return out
 }
 
+func ticketReplyDTO(reply store.TicketReply) map[string]any {
+	return map[string]any{
+		"uid":        reply.UID,
+		"username":   reply.Username,
+		"role":       reply.Role,
+		"author":     ticketReplyAuthor(reply.Role),
+		"content":    reply.Content,
+		"created_at": reply.CreatedAt,
+	}
+}
+
+func ticketReplyDTOs(replies []store.TicketReply) []map[string]any {
+	out := make([]map[string]any, 0, len(replies))
+	for _, reply := range replies {
+		out = append(out, ticketReplyDTO(reply))
+	}
+	return out
+}
+
+func ticketReplyAuthor(role int) string {
+	if role == store.RoleAdmin {
+		return "admin"
+	}
+	return "user"
+}
+
 // ticketDTO 把单个工单序列化为响应 map，并为每张附件补上可访问的 url 字段。
 func ticketDTO(t store.Ticket) map[string]any {
 	notifyTelegram := true
@@ -654,6 +671,7 @@ func ticketDTO(t store.Ticket) map[string]any {
 		"status":          t.Status,
 		"priority":        t.Priority,
 		"admin_note":      t.AdminNote,
+		"replies":         ticketReplyDTOs(t.Replies),
 		"attachments":     ticketAttachmentDTOs(t.ID, t.Attachments),
 		"notify_telegram": notifyTelegram,
 		"created_at":      t.CreatedAt,
@@ -681,22 +699,6 @@ func auditCategoryForRole(role int) string {
 }
 
 // ---- 校验工具 ----
-
-func validTicketStatus(status string) bool {
-	switch status {
-	case "open", "in_progress", "resolved", "closed":
-		return true
-	}
-	return false
-}
-
-func validTicketPriority(priority string) bool {
-	switch priority {
-	case "low", "medium", "high", "urgent":
-		return true
-	}
-	return false
-}
 
 func validTicketType(types []string, input string) bool {
 	for _, t := range types {
@@ -845,6 +847,8 @@ func ticketEventLabel(event string) string {
 		return "用户重开"
 	case "image_uploaded":
 		return "新增图片"
+	case "replied":
+		return "用户回复"
 	case "deleted":
 		return "工单删除"
 	default:
@@ -926,13 +930,13 @@ func (a *App) notifyTicketOwner(ctx context.Context, updated, existing store.Tic
 // statusLabel 返回工单状态的中文描述。
 func statusLabel(status string) string {
 	switch status {
-	case "open":
+	case store.TicketStatusOpen:
 		return "待处理"
-	case "in_progress":
+	case store.TicketStatusInProgress:
 		return "处理中"
-	case "resolved":
+	case store.TicketStatusResolved:
 		return "已解决"
-	case "closed":
+	case store.TicketStatusClosed:
 		return "已关闭"
 	}
 	return status
