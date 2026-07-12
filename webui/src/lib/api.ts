@@ -81,6 +81,7 @@ import type {
   SetupResult,
   SetupStatus,
   SystemHealth,
+  SystemHealthDetail,
   SystemInfo,
   SystemStats,
   Ticket,
@@ -275,6 +276,18 @@ class ApiClient {
 
   async getSystemHealth() {
     return this.request<SystemHealth>("/system/health");
+  }
+
+  async getSystemHealthApi() {
+    return this.request<SystemHealthDetail>("/system/health/api");
+  }
+
+  async getSystemHealthDatabase() {
+    return this.request<SystemHealthDetail>("/system/health/database");
+  }
+
+  async getSystemHealthEmby() {
+    return this.request<SystemHealthDetail>("/system/health/emby");
   }
 
   // User

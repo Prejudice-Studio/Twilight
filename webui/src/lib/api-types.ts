@@ -108,6 +108,38 @@ export interface SystemHealth {
   emby: boolean;
 }
 
+export interface SystemHealthDetail {
+  ok?: boolean;
+  online?: boolean;
+  configured?: boolean;
+  status?: string;
+  error?: string;
+  error_detail?: string;
+  warning?: string;
+  backend?: string;
+  configured_driver?: string;
+  storage_mismatch?: boolean;
+  storage_warning?: string;
+  state_read_ok?: boolean;
+  user_count?: number;
+  ping_ok?: boolean;
+  ping_error?: string;
+  open_connections?: number;
+  in_use?: number;
+  idle?: number;
+  server?: string;
+  server_name?: string;
+  version?: string;
+  operating_system?: string;
+  active_sessions?: number;
+  total_sessions?: number;
+  sessions_error?: string;
+  sessions_error_detail?: string;
+  routes?: number;
+  uptime?: number;
+  timestamp?: number;
+}
+
 export interface User {
   uid: number;
   username: string;

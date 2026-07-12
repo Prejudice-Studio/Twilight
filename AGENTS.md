@@ -83,6 +83,7 @@ Update docs in the same change when behavior changes.
 - Read-only list/get/search endpoints usually do not need audit entries.
 - Enforce feature gates in every relevant handler, not only in frontend visibility logic.
 - Do not read or print local secrets from config files unless explicitly requested.
+- Server status health checks are split across `/system/health/api`, `/system/health/database`, and `/system/health/emby`; keep `/system/health` as a compatibility aggregate and avoid adding database/Emby probes back into `/system/stats`.
 
 ## Backend Function Index
 
@@ -300,6 +301,7 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - Reuse the shared short-lived Emby session snapshot for dashboard/admin polling instead of issuing duplicate `/Sessions` requests.
 - Stop active playback with `POST /Sessions/{Id}/Playing/Stop` and `Command=Stop`.
 - Clear retained/offline device sessions with the documented administrator endpoint `DELETE /Devices?Id={DeviceId}`; do not invent `/Sessions/{id}/Logout`, `/Sessions/{id}/Terminate`, or `/Devices/{id}` routes.
+- Admin Emby connectivity testing must be a backend-origin test. It checks the configured Emby URL and may also try fixed loopback candidates such as `127.0.0.1:8096` for same-host deployments, without accepting arbitrary user-supplied probe URLs.
 
 ## Emby Device Audit Rules
 

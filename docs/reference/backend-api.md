@@ -1050,7 +1050,7 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/123/disable" \
 | `GET /admin/emby/activity` | Emby 活动记录 |
 | `GET /admin/emby/users` | Emby 用户列表 |
 | `POST /admin/emby/broadcast` | 发送 Emby 广播消息 |
-| `POST /admin/emby/test` | 测试与指定 Emby 账号的连通性 |
+| `POST /admin/emby/test` | 后端测试 Emby 连通性、用户列表、媒体库列表，并尝试本机 Emby 候选地址 |
 | `POST /admin/emby/cleanup-orphans` | 清理孤立 Emby 用户 |
 | `POST /admin/emby/import-users` | 从 Emby 导入用户 |
 | `POST /admin/emby/reset-bindings` | 重置绑定关系 |
@@ -1085,11 +1085,8 @@ curl -X POST "http://localhost:5000/api/v1/admin/emby/sync" \
 
 `POST /admin/emby/test`
 
-- 请求体：
-
-```json
-{ "emby_id": "user_emby_id" }
-```
+- 请求体：无需请求体，使用当前后端配置中的 `Emby.emby_url` 与 `Emby.emby_token`。
+- 行为：从 Twilight 后端发起检测，依次验证配置、系统信息、用户列表、媒体库列表；同时尝试 `http://127.0.0.1:8096` 与 `http://localhost:8096` 这两个后端本机候选地址（若与已配置地址相同则跳过），用于排查「公网/反代地址不可达但同机 Emby 可达」的部署问题。
 
 #### 导入 Emby 用户
 
@@ -1417,7 +1414,10 @@ curl -X POST "http://localhost:5000/api/v1/admin/scheduler/jobs/check_expired/ru
 
 `GET /system/health`
 
-- 说明：返回 `api`、`database`、`emby` 布尔状态，并保留 `status/storage/redis` 等兼容字段。登录用户会额外收到 `database_detail` 与 `emby_detail`；数据库状态以当前 store 可读为主，PostgreSQL `ping` 失败会作为 `warning/ping_error` 诊断返回，不再单独把可读数据库判为异常。
+- 说明：兼容聚合健康接口，返回 `api`、`database`、`emby` 布尔状态，并保留 `status/storage/redis` 等兼容字段。登录用户会额外收到 `api_detail`、`database_detail` 与 `emby_detail`；数据库状态以当前 store 可读为主，PostgreSQL `ping` 失败会作为 `warning/ping_error` 诊断返回，不再单独把可读数据库判为异常。后台服务器状态页使用下列三个管理员接口分别检测，避免一次请求内重复探测：
+  - `GET /system/health/api`
+  - `GET /system/health/database`
+  - `GET /system/health/emby`
 - 认证：公开（`AuthPublic`）
 
 ```bash
@@ -1493,7 +1493,7 @@ curl -X GET "http://localhost:5000/api/v1/system/config" \
 
 ### 10.7 系统/管理员统计
 
-`GET /system/stats` 与 `GET /system/admin/stats` — 均为管理员级别（`AuthAdmin`），与 `/admin/stats` 同 handler，返回系统聚合统计。
+`GET /system/stats` 与 `GET /system/admin/stats` — 均为管理员级别（`AuthAdmin`），与 `/admin/stats` 同 handler，返回系统聚合统计；健康检测由 `/system/health/*` 单项接口负责，本接口不再顺带探测数据库或 Emby。
 
 ### 10.8 获取 Emby 服务线路（按角色下发）
 

@@ -1458,16 +1458,18 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request, _ Params) {
 		return
 	}
 	isAuth := current(r).User.UID != 0
+	api := a.apiHealth()
 	database := a.databaseHealth(r.Context())
 	emby := a.embyStatusSnapshot(r.Context(), false)
 	data := map[string]any{
 		"status": "healthy",
 		"time":   time.Now().Unix(),
-		"api":    true,
+		"api":    boolValue(api, "ok", false),
 	}
 	if isAuth {
 		sessionFallback := a.sessions().FallbackCount()
 		rateFallback := a.limiter().FallbackCount()
+		data["api_detail"] = api
 		data["database"] = boolValue(database, "ok", false)
 		data["database_detail"] = database
 		data["emby"] = boolValue(emby, "online", false)
@@ -1483,6 +1485,29 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request, _ Params) {
 	}
 	ok(w, "OK", data)
 }
+
+func (a *App) apiHealth() map[string]any {
+	return map[string]any{
+		"ok":        true,
+		"status":    "online",
+		"routes":    len(a.routes),
+		"uptime":    int64(time.Since(runtimeStartedAt).Seconds()),
+		"timestamp": time.Now().Unix(),
+	}
+}
+
+func (a *App) handleHealthAPI(w http.ResponseWriter, r *http.Request, _ Params) {
+	ok(w, "OK", a.apiHealth())
+}
+
+func (a *App) handleHealthDatabase(w http.ResponseWriter, r *http.Request, _ Params) {
+	ok(w, "OK", a.databaseHealth(r.Context()))
+}
+
+func (a *App) handleHealthEmby(w http.ResponseWriter, r *http.Request, _ Params) {
+	ok(w, "OK", a.embyStatusSnapshot(r.Context(), true))
+}
+
 func (a *App) handleSystemStats(w http.ResponseWriter, r *http.Request, _ Params) {
 	users := a.store().ListUsers()
 	activeUsers := countActive(users)
@@ -1502,8 +1527,6 @@ func (a *App) handleSystemStats(w http.ResponseWriter, r *http.Request, _ Params
 		"cpu_count":     nil,
 		"users":         map[string]any{"active": activeUsers, "total": len(users), "limit": zeroNil(int64(a.cfg().UserLimit)), "usage_percent": usage},
 		"regcodes":      map[string]any{"active": activeRegcodes, "total": len(regcodes)},
-		"database":      a.databaseHealth(r.Context()),
-		"emby":          a.embyStatusSnapshot(r.Context(), true),
 		"total_users":   len(users),
 		"active_users":  activeUsers,
 		"redis_enabled": a.redis() != nil,
@@ -2822,7 +2845,7 @@ func (a *App) handleAdminEmbyUsers(w http.ResponseWriter, r *http.Request, _ Par
 	a.handleAdminEmbyUsersV2(w, r, nil)
 }
 func (a *App) handleEmbyTest(w http.ResponseWriter, r *http.Request, _ Params) {
-	a.handleEmbyTestV2(w, r, nil)
+	a.handleEmbyConnectivityTest(w, r, nil)
 }
 func (a *App) handleCountZero(w http.ResponseWriter, r *http.Request, _ Params) {
 	result := a.cleanupUnusedUploadAssets(24 * time.Hour)

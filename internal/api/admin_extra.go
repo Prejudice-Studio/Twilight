@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -154,26 +155,120 @@ func (a *App) handleEmbyBroadcast(w http.ResponseWriter, r *http.Request, _ Para
 	ok(w, "broadcast complete", map[string]any{"sent_count": sent, "failed": failedItems})
 }
 
-func (a *App) handleEmbyTestV2(w http.ResponseWriter, r *http.Request, _ Params) {
-	tests := []map[string]any{{"name": "configuration", "success": a.cfg().EmbyURL != "", "message": "Emby URL configured"}}
-	overall := a.cfg().EmbyURL != ""
+func (a *App) handleEmbyConnectivityTest(w http.ResponseWriter, r *http.Request, _ Params) {
+	configuredURL := strings.TrimSpace(a.cfg().EmbyURL) != ""
+	configuredToken := strings.TrimSpace(a.cfg().EmbyToken) != ""
+	tests := []map[string]any{
+		{"name": "configuration_url", "success": configuredURL, "message": "Emby URL configured"},
+		{"name": "configuration_token", "success": configuredToken, "message": "Emby API token configured"},
+	}
+	overall := configuredURL && configuredToken
 	var info map[string]any
-	if a.cfg().EmbyURL != "" {
+	if configuredURL && configuredToken {
 		start := time.Now()
-		// 改用 embyHealth 集中处理 /System/Info/Public → /System/Info 的双段 fallback。
-		// 失败的具体 error 会在 embyGet 内部通过 zap.L() 记录，admin 看 latency_ms 即可定位是慢还是不通。
-		got, success := a.embyHealth(r.Context())
-		if got != nil {
-			info = got
-		}
+		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+		got, err := a.embyHealthDetailed(ctx)
+		cancel()
+		success := err == nil
 		overall = overall && success
 		message := "OK"
 		if !success {
-			message = "Emby unreachable (查看后端日志获取具体错误)"
+			message = truncateString(redactSensitiveText(err.Error()), 180)
+		} else if got != nil {
+			info = got
 		}
-		tests = append(tests, map[string]any{"name": "server_info", "success": success, "latency_ms": time.Since(start).Milliseconds(), "message": message})
+		tests = append(tests, map[string]any{"name": "backend_server_info", "success": success, "latency_ms": time.Since(start).Milliseconds(), "message": message})
+
+		start = time.Now()
+		var users []map[string]any
+		ctx, cancel = context.WithTimeout(r.Context(), 8*time.Second)
+		usersErr := a.embyGet(ctx, "/Users", &users)
+		cancel()
+		usersOK := usersErr == nil
+		overall = overall && usersOK
+		usersMessage := "OK"
+		if usersErr != nil {
+			usersMessage = truncateString(redactSensitiveText(usersErr.Error()), 180)
+		}
+		tests = append(tests, map[string]any{"name": "backend_users", "success": usersOK, "latency_ms": time.Since(start).Milliseconds(), "message": usersMessage, "count": len(users)})
+
+		start = time.Now()
+		var libraries []map[string]any
+		ctx, cancel = context.WithTimeout(r.Context(), 8*time.Second)
+		libraryErr := a.embyGet(ctx, "/Library/VirtualFolders", &libraries)
+		cancel()
+		libraryOK := libraryErr == nil
+		overall = overall && libraryOK
+		libraryMessage := "OK"
+		if libraryErr != nil {
+			libraryMessage = truncateString(redactSensitiveText(libraryErr.Error()), 180)
+		}
+		tests = append(tests, map[string]any{"name": "backend_libraries", "success": libraryOK, "latency_ms": time.Since(start).Milliseconds(), "message": libraryMessage, "count": len(libraries)})
+
+		for _, candidate := range a.embyBackendLocalProbeCandidates() {
+			start = time.Now()
+			ctx, cancel = context.WithTimeout(r.Context(), 4*time.Second)
+			localInfo, localErr := a.embyHealthAt(ctx, candidate)
+			cancel()
+			localOK := localErr == nil
+			localMessage := "OK"
+			if localErr != nil {
+				localMessage = truncateString(redactSensitiveText(localErr.Error()), 180)
+			}
+			tests = append(tests, map[string]any{
+				"name":       "backend_local_" + candidate,
+				"success":    localOK,
+				"latency_ms": time.Since(start).Milliseconds(),
+				"message":    localMessage,
+				"server":     firstNonEmpty(asString(localInfo["ServerName"]), asString(localInfo["Name"])),
+				"version":    asString(localInfo["Version"]),
+			})
+		}
 	}
 	ok(w, "OK", map[string]any{"success": overall, "url": a.cfg().EmbyURL, "emby_url": a.cfg().EmbyURL, "tests": tests, "overall": overall, "server_info": info})
+}
+
+func (a *App) embyBackendLocalProbeCandidates() []string {
+	configured := normalizeProbeURL(a.cfg().EmbyURL)
+	candidates := []string{"http://127.0.0.1:8096", "http://localhost:8096"}
+	out := make([]string, 0, len(candidates))
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		normalized := normalizeProbeURL(candidate)
+		if normalized == "" || normalized == configured || seen[normalized] {
+			continue
+		}
+		seen[normalized] = true
+		out = append(out, normalized)
+	}
+	return out
+}
+
+func (a *App) embyHealthAt(ctx context.Context, base string) (map[string]any, error) {
+	target, err := validateEmbyURL(base)
+	if err != nil {
+		return nil, err
+	}
+	var info map[string]any
+	publicErr := getJSON(ctx, target+"/System/Info/Public", a.embyHeaders(), &info)
+	if publicErr == nil && info != nil {
+		return info, nil
+	}
+	info = nil
+	infoErr := getJSON(ctx, target+"/System/Info", a.embyHeaders(), &info)
+	if infoErr == nil && info != nil {
+		return info, nil
+	}
+	if publicErr != nil && infoErr != nil {
+		return nil, publicErr
+	}
+	if publicErr != nil {
+		return nil, publicErr
+	}
+	if infoErr != nil {
+		return nil, infoErr
+	}
+	return nil, context.Canceled
 }
 
 func (a *App) handleEmbyCleanupOrphans(w http.ResponseWriter, r *http.Request, _ Params) {

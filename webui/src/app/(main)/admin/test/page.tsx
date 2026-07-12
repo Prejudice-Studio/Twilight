@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { api, type SystemStats } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n, type MessageKey } from "@/lib/i18n";
+import type { SystemHealthDetail } from "@/lib/api-types";
 
 const FEATURE_LABELS: Record<string, string | MessageKey> = {
   register: "adminStatus.featureRegister",
@@ -21,9 +22,9 @@ const LIMIT_LABELS: Record<string, MessageKey> = {
 };
 
 interface SystemHealthInfo {
-  api: boolean;
-  database: boolean;
-  emby: boolean;
+  api?: SystemHealthDetail;
+  database?: SystemHealthDetail;
+  emby?: SystemHealthDetail;
 }
 
 interface ExtendedSystemStats extends SystemStats {
@@ -61,14 +62,22 @@ export default function AdminStatusPage() {
     setError(null);
 
     try {
-      const [healthRes, infoRes, statsRes] = await Promise.all([
-        api.getSystemHealth(),
+      const [apiHealthRes, databaseHealthRes, embyHealthRes, infoRes, statsRes] = await Promise.all([
+        api.getSystemHealthApi(),
+        api.getSystemHealthDatabase(),
+        api.getSystemHealthEmby(),
         api.getSystemInfo(),
         api.getSystemStats(),
       ]);
 
-      if (!healthRes.success) {
-        throw new Error(healthRes.message || t("adminStatus.healthFailed"));
+      if (!apiHealthRes.success) {
+        throw new Error(apiHealthRes.message || t("adminStatus.healthFailed"));
+      }
+      if (!databaseHealthRes.success) {
+        throw new Error(databaseHealthRes.message || t("adminStatus.healthFailed"));
+      }
+      if (!embyHealthRes.success) {
+        throw new Error(embyHealthRes.message || t("adminStatus.healthFailed"));
       }
       if (!infoRes.success) {
         throw new Error(infoRes.message || t("adminStatus.infoFailed"));
@@ -77,7 +86,11 @@ export default function AdminStatusPage() {
         throw new Error(statsRes.message || t("adminStatus.statsFailed"));
       }
 
-      setHealth(healthRes.data || null);
+      setHealth({
+        api: apiHealthRes.data,
+        database: databaseHealthRes.data,
+        emby: embyHealthRes.data,
+      });
       setInfo(infoRes.data || null);
       setStats(statsRes.data || null);
       toast({ title: t("adminStatus.updated"), variant: "success" });
@@ -88,6 +101,8 @@ export default function AdminStatusPage() {
       setLoading(false);
     }
   }, [t, toast]);
+
+  const embyHealth = health?.emby;
 
   useEffect(() => {
     void loadStatus();
@@ -144,9 +159,9 @@ export default function AdminStatusPage() {
           <CardContent className="space-y-4">
             {health ? (
               <div className="space-y-3">
-                {renderStatusItem(health.api, t("adminStatus.apiService"))}
-                {renderStatusItem(health.database, t("adminLogs.database"))}
-                {renderStatusItem(health.emby, t("adminStatus.embyService"))}
+                {renderStatusItem(health.api?.ok, t("adminStatus.apiService"))}
+                {renderStatusItem(health.database?.ok, t("adminLogs.database"))}
+                {renderStatusItem(health.emby?.online, t("adminStatus.embyService"))}
               </div>
             ) : (
               <div className="flex h-40 items-center justify-center">
@@ -234,29 +249,29 @@ export default function AdminStatusPage() {
                   <div className="mt-3 grid gap-2">
                     <div className="flex items-center justify-between gap-2 rounded-lg border border-muted/20 bg-muted/20 px-3 py-2">
                       <span>{t("adminStatus.serverName")}</span>
-                      <span>{stats.emby?.server_name ?? t("adminStats.unknown")}</span>
+                      <span>{embyHealth?.server_name ?? t("adminStats.unknown")}</span>
                     </div>
                     <div className="flex items-center justify-between gap-2 rounded-lg border border-muted/20 bg-muted/20 px-3 py-2">
                       <span>{t("adminStatus.version")}</span>
-                      <span>{stats.emby?.version ?? t("adminStats.unknown")}</span>
+                      <span>{embyHealth?.version ?? t("adminStats.unknown")}</span>
                     </div>
                     <div className="flex items-center justify-between gap-2 rounded-lg border border-muted/20 bg-muted/20 px-3 py-2">
                       <span>{t("adminStatus.onlineStatus")}</span>
-                      <Badge variant={stats.emby?.online ? "success" : "destructive"}>
-                        {stats.emby?.online ? t("dashboard.online") : t("dashboard.offline")}
+                      <Badge variant={embyHealth?.online ? "success" : "destructive"}>
+                        {embyHealth?.online ? t("dashboard.online") : t("dashboard.offline")}
                       </Badge>
                     </div>
                     <div className="flex items-center justify-between gap-2 rounded-lg border border-muted/20 bg-muted/20 px-3 py-2">
                       <span>{t("adminStatus.activeSessions")}</span>
-                      <span>{stats.emby?.active_sessions ?? 0}</span>
+                      <span>{embyHealth?.active_sessions ?? 0}</span>
                     </div>
                     <div className="flex items-center justify-between gap-2 rounded-lg border border-muted/20 bg-muted/20 px-3 py-2">
                       <span>{t("adminStatus.totalSessions")}</span>
-                      <span>{stats.emby?.total_sessions ?? 0}</span>
+                      <span>{embyHealth?.total_sessions ?? 0}</span>
                     </div>
                     <div className="flex items-center justify-between gap-2 rounded-lg border border-muted/20 bg-muted/20 px-3 py-2">
                       <span>{t("adminStatus.platform")}</span>
-                      <span>{stats.emby?.operating_system ?? t("adminStats.unknown")}</span>
+                      <span>{embyHealth?.operating_system ?? t("adminStats.unknown")}</span>
                     </div>
                   </div>
                 </div>

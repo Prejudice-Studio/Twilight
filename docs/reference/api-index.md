@@ -127,6 +127,9 @@
 | GET | `/api/v1/system/info` | Public | 系统公开信息 |
 | GET | `/api/v1/system/server-icon` | Public | 服务器图标 |
 | GET | `/api/v1/system/health` | Public | 健康检查 |
+| GET | `/api/v1/system/health/api` | Admin | API 服务健康检查（状态页单项检测） |
+| GET | `/api/v1/system/health/database` | Admin | 数据库健康检查（状态页单项检测） |
+| GET | `/api/v1/system/health/emby` | Admin | Emby 健康检查（状态页单项检测） |
 | GET | `/api/v1/system/stats` | Admin | 系统运行时统计 |
 | GET | `/api/v1/system/emby-urls` | User | 按权限下发 Emby 线路 |
 | POST | `/api/v1/system/emby-urls/probe` | User | 探测 Emby 线路连通性 |
@@ -251,7 +254,7 @@
 | GET | `/api/v1/admin/emby/activity` | Admin | Emby 活动记录 |
 | GET | `/api/v1/admin/emby/users` | Admin | Emby 用户列表 |
 | POST | `/api/v1/admin/emby/broadcast` | Admin | Emby 广播消息 |
-| POST | `/api/v1/admin/emby/test` | Admin | 测试 Emby 连接 |
+| POST | `/api/v1/admin/emby/test` | Admin | 后端测试 Emby 连接、用户列表、媒体库列表，并尝试本机 Emby 候选地址 |
 | POST | `/api/v1/admin/emby/cleanup-orphans` | Admin | 清理孤儿绑定 |
 | POST | `/api/v1/admin/emby/import-users` | Admin | 导入 Emby 用户 |
 | POST | `/api/v1/admin/emby/reset-bindings` | Admin | 重置 Emby 绑定 |
