@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 
 export function useVisiblePolling(
-  callback: () => void | Promise<void>,
+  callback: (signal?: AbortSignal) => void | Promise<void>,
   intervalMs: number,
   enabled = true,
 ) {
@@ -16,6 +16,7 @@ export function useVisiblePolling(
     let cancelled = false;
     let running = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let controller: AbortController | null = null;
 
     function schedule() {
       if (cancelled) return;
@@ -29,18 +30,24 @@ export function useVisiblePolling(
         return;
       }
       running = true;
+      controller = new AbortController();
       try {
-        await callbackRef.current();
+        await callbackRef.current(controller.signal);
       } catch {
         // Polling callers keep their own last-known data and error UI.
       } finally {
+        controller = null;
         running = false;
         schedule();
       }
     }
 
     const handleVisibility = () => {
-      if (document.visibilityState !== "visible" || running) return;
+      if (document.visibilityState !== "visible") {
+        controller?.abort();
+        return;
+      }
+      if (running) return;
       if (timer) clearTimeout(timer);
       timer = null;
       void run();
@@ -50,6 +57,7 @@ export function useVisiblePolling(
     document.addEventListener("visibilitychange", handleVisibility);
     return () => {
       cancelled = true;
+      controller?.abort();
       if (timer) clearTimeout(timer);
       document.removeEventListener("visibilitychange", handleVisibility);
     };

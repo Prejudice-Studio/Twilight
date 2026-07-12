@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { motion } from "framer-motion";
 import {
-  Activity,
   Bell,
   BookOpen,
   Calendar,
@@ -29,7 +28,6 @@ const quickLinks = [
   { href: "/invite", label: "邀请", icon: UserPlus },
   { href: "/tickets", label: "工单", icon: Ticket },
   { href: "/announcements", label: "公告", icon: Bell },
-  { href: "/stats/playback", label: "播放统计", icon: Activity },
 ];
 
 const userFlows = [
@@ -79,11 +77,6 @@ const concepts = [
     icon: Shield,
     title: "禁用 Web 与禁用 Emby",
     text: "禁用 Web 会阻止登录面板；禁用 Emby 只影响媒体访问。两者可独立控制。",
-  },
-  {
-    icon: Activity,
-    title: "播放统计",
-    text: "基于 Emby 活动日志统计播放次数、排行和每日趋势。ActivityLog 不稳定提供时长，因此总时长目前为保留字段。",
   },
 ];
 

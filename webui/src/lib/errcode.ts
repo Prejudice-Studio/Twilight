@@ -230,7 +230,6 @@ export type ErrCode =
   | "ADMIN_EMBY_PASSWORD_RESET_FAILED"
   | "ADMIN_LAST_ADMIN_PROTECTED"
   | "API_KEY_SELF_PERMISSION_FORBIDDEN"
-  | "WATCH_STATS_FORBIDDEN"
   // === 求片 / 库存 / 媒体（media_request_handlers.go） ===
   | "MEDIA_REQUEST_DISABLED"
   | "MEDIA_REQUEST_TG_REQUIRED"
@@ -518,7 +517,6 @@ export const ErrCodes = {
   AdminEmbyPasswordReset: "ADMIN_EMBY_PASSWORD_RESET_FAILED",
   AdminLastAdminProtected: "ADMIN_LAST_ADMIN_PROTECTED",
   APIKeySelfPermForbidden: "API_KEY_SELF_PERMISSION_FORBIDDEN",
-  WatchStatsForbidden: "WATCH_STATS_FORBIDDEN",
   // 求片 / 库存 / 媒体
   MediaRequestDisabled: "MEDIA_REQUEST_DISABLED",
   MediaRequestTGRequired: "MEDIA_REQUEST_TG_REQUIRED",

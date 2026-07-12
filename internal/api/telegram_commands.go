@@ -87,12 +87,6 @@ var telegramCommandRegistry = map[string]telegramCommandSpec{
 			a.telegramHandleEmby(ctx, c.ChatID, c.FromID)
 		},
 	},
-	"/playinfo": {
-		private: true,
-		handler: func(a *App, ctx context.Context, c telegramCommandCtx) {
-			a.telegramHandlePlayInfo(ctx, c.ChatID, c.FromID)
-		},
-	},
 	"/resetpwd": {
 		private: true,
 		handler: func(a *App, ctx context.Context, c telegramCommandCtx) {

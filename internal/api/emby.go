@@ -154,17 +154,34 @@ func (a *App) evictEmbyAdminCacheLocked(now time.Time) {
 // 而且每处超时各异（1.5s / 10s / 无超时）。统一后调用方只需选超时档位
 // （embyHealthFast 1.5s / 默认 5s / 自定义 ctx），不再自己写 fallback。
 func (a *App) embyHealth(ctx context.Context) (info map[string]any, ok bool) {
-	if a.cfg().EmbyURL == "" {
-		return nil, false
+	info, err := a.embyHealthDetailed(ctx)
+	return info, err == nil
+}
+
+func (a *App) embyHealthDetailed(ctx context.Context) (map[string]any, error) {
+	if !a.embyConfigured() {
+		return nil, fmt.Errorf("Emby not configured")
 	}
-	if err := a.embyGet(ctx, "/System/Info/Public", &info); err == nil && info != nil {
-		return info, true
+	var info map[string]any
+	publicErr := a.embyGet(ctx, "/System/Info/Public", &info)
+	if publicErr == nil && info != nil {
+		return info, nil
 	}
 	info = nil
-	if err := a.embyGet(ctx, "/System/Info", &info); err == nil && info != nil {
-		return info, true
+	infoErr := a.embyGet(ctx, "/System/Info", &info)
+	if infoErr == nil && info != nil {
+		return info, nil
 	}
-	return nil, false
+	if publicErr != nil && infoErr != nil {
+		return nil, fmt.Errorf("public info failed: %v; system info failed: %w", publicErr, infoErr)
+	}
+	if publicErr != nil {
+		return nil, publicErr
+	}
+	if infoErr != nil {
+		return nil, infoErr
+	}
+	return nil, fmt.Errorf("Emby returned empty system info")
 }
 
 // embyHealthFast 是 embyHealth 的 1.5 秒超时版本，专用于"系统首页摘要"

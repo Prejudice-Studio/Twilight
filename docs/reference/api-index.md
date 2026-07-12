@@ -2,7 +2,7 @@
 
 本文是 Twilight 后端 `/api/v1` 接口的速查索引，用于快速核对每条路由的请求方法、路径、鉴权级别和所属模块。本文严格依据 `internal/api/routes.go` 中 `a.add(method, path, authLevel, handler)` 的真实注册逐条整理；详细的请求/响应示例见 [后端 API 详参](../reference/backend-api.md)，外部 API Key 接入说明见 [API Key 外部接入](../reference/api-key.md)。
 
-> 播放统计接口基于已持久化的 `PlaybackRecords` 聚合；Emby ActivityLog 同步会配对播放开始/停止事件并写入数据库。在线人数只统计 Emby `/Sessions` 中带 `NowPlayingItem` 的正在播放会话。
+> Emby ActivityLog 同步会配对播放开始/停止事件并幂等写入 `PlaybackRecords`，供 Bangumi 同步等内部流程复用。播放统计页面、统计 API 与导出入口已移除；在线人数只统计 Emby `/Sessions` 中带 `NowPlayingItem` 的正在播放会话。
 
 ## 鉴权标记
 
@@ -247,10 +247,7 @@
 | POST | `/api/v1/admin/emby/sync` | Admin | 同步 Emby 用户 |
 | GET | `/api/v1/admin/emby/sessions` | Admin | Emby 实时会话（含 `remote_endpoint` IP） |
 | GET | `/api/v1/admin/emby/device-audit` | Admin | Emby 登录用户设备/IP 审查（按用户聚合）：`/Devices` 设备清单 + 实时会话 IP（解析掉端口）+ 活动日志历史登录 IP，映射完整本地账号（网页/Emby/Telegram） |
-| GET | `/api/v1/admin/emby/activity-logs` | Admin | Emby 活动日志；默认节流自动刷新，`?refresh=1` 强制拉取 |
-| GET | `/api/v1/admin/emby/playback-stats` | Admin | Emby ActivityLog playback stats; supports `scope`, `days`, `today`, `limit`, `sort`, `refresh` |
-| GET | `/api/v1/admin/emby/playback-stats/{uid}` | Admin | 指定用户的 Emby ActivityLog 播放统计 |
-| GET | `/api/v1/emby/playback-stats` | User | 当前用户的 Emby ActivityLog 播放统计 |
+| GET | `/api/v1/admin/emby/activity-logs` | Admin | 本地 Emby 活动日志；`?refresh=1` 手动从 Emby 拉取并入库 |
 | GET | `/api/v1/admin/emby/activity` | Admin | Emby 活动记录 |
 | GET | `/api/v1/admin/emby/users` | Admin | Emby 用户列表 |
 | POST | `/api/v1/admin/emby/broadcast` | Admin | Emby 广播消息 |
@@ -320,13 +317,6 @@
 | PUT | `/api/v1/admin/announcements/{announcement_id}` | Admin | 更新公告 |
 | DELETE | `/api/v1/admin/announcements/{announcement_id}` | Admin | 删除公告 |
 
-## Stats
-
-| 方法 | 路径 | 鉴权 | 说明 |
-| ---- | ---- | ---- | ---- |
-| GET | `/api/v1/stats/me` | User | 当前用户播放统计 |
-| GET | `/api/v1/stats/user/{uid}` | User | 指定用户播放统计（handler 内部对跨用户视图做 admin 兜底） |
-
 ## Security
 
 | 方法 | 路径 | 鉴权 | 说明 |
@@ -354,10 +344,6 @@
 | POST | `/api/v1/batch/users/emby-unbind-lock` | Admin | 批量禁止用户自助解绑 Emby |
 | POST | `/api/v1/batch/users/emby-grant-clear` | Admin | 批量清理无 Emby 账号用户的注册码/邀请码使用记录（解除误判的"已用过注册资格"锁定） |
 | GET | `/api/v1/batch/export/users` | Admin | 导出用户 |
-| GET | `/api/v1/batch/export/playback` | Admin | 导出播放数据 |
-| GET | `/api/v1/batch/watch-stats` | User | 当前用户播放统计 |
-| GET | `/api/v1/batch/watch-stats/{uid}` | Admin | 指定用户播放统计 |
-| GET | `/api/v1/batch/watch-stats/global` | Admin | 全局播放统计 |
 | GET | `/api/v1/batch/expiring-users` | Admin | 临期用户 |
 | POST | `/api/v1/batch/send-reminders` | Admin | 发送到期提醒 |
 

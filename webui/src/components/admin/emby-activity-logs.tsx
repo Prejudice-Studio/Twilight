@@ -5,23 +5,11 @@ import { Activity, Loader2, LogIn, LogOut, Pause, Play, RefreshCw } from "lucide
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Switch } from "@/components/ui/switch";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { useToast } from "@/hooks/use-toast";
-import { useVisiblePolling } from "@/hooks/use-visible-polling";
 import { api } from "@/lib/api";
+import type { EmbyActivityLogEntry } from "@/lib/api-types";
 import { useI18n } from "@/lib/i18n";
-
-interface ActivityLogEntry {
-  id: number;
-  emby_log_id: number;
-  type: string;
-  name: string;
-  user_id: string;
-  user_name: string;
-  overview: string;
-  date: number;
-}
 
 function activityIcon(type: string) {
   const t = type.toLowerCase();
@@ -48,7 +36,6 @@ export default function EmbyActivityLogs() {
   const { toast } = useToast();
   const { locale, t } = useI18n();
   const [refreshing, setRefreshing] = useState(false);
-  const [autoRefresh, setAutoRefresh] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [lastNewEntries, setLastNewEntries] = useState<number | null>(null);
 
@@ -63,7 +50,7 @@ export default function EmbyActivityLogs() {
   }, []);
 
   const load = useCallback(async () => {
-    const res = await api.adminGetEmbyActivityLogs(100, false, true);
+    const res = await api.adminGetEmbyActivityLogs(100, false);
     if (res.success && res.data) {
       applyMeta(res.data);
       return res.data.entries || [];
@@ -76,7 +63,7 @@ export default function EmbyActivityLogs() {
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      const res = await api.adminGetEmbyActivityLogs(100, true, false);
+      const res = await api.adminGetEmbyActivityLogs(100, true, 24);
       if (!res.success || !res.data) {
         throw new Error(res.message || t("embyActivityLogs.refreshFailed"));
       }
@@ -98,10 +85,6 @@ export default function EmbyActivityLogs() {
     }
   };
 
-  useVisiblePolling(async () => {
-    await reload();
-  }, 60000, autoRefresh);
-
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -117,28 +100,26 @@ export default function EmbyActivityLogs() {
           </div>
         </div>
         <div className="i18n-toolbar flex flex-wrap items-center gap-2">
-          <label className="flex min-h-9 items-center gap-2 rounded-md border border-border/60 px-3 text-xs">
-            <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
-            <span>{t("embyActivityLogs.autoRefresh")}</span>
-          </label>
-          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing || isLoading}>
-            {refreshing || isLoading ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-1.5 h-4 w-4" />}
+          <Button variant="outline" size="sm" onClick={() => void reload()} disabled={isLoading || refreshing}>
+            {isLoading && !refreshing ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-1.5 h-4 w-4" />}
+            {t("common.refresh")}
+          </Button>
+          <Button size="sm" onClick={handleRefresh} disabled={refreshing || isLoading}>
+            {refreshing ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-1.5 h-4 w-4" />}
             {t("embyActivityLogs.refresh")}
           </Button>
         </div>
       </div>
 
-      {autoRefresh && <p className="text-xs text-muted-foreground">{t("embyActivityLogs.autoRefreshHint", { seconds: 60 })}</p>}
-
       {error ? (
         <Card><CardContent className="p-6 text-center text-destructive">{String(error)}</CardContent></Card>
       ) : isLoading && !logs ? (
-        <Card><CardContent className="flex p-8 justify-center"><Loader2 className="h-6 w-6 animate-spin" /></CardContent></Card>
+        <Card><CardContent className="flex justify-center p-8"><Loader2 className="h-6 w-6 animate-spin" /></CardContent></Card>
       ) : !logs || logs.length === 0 ? (
         <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">{t("embyActivityLogs.empty")}</CardContent></Card>
       ) : (
         <div className="space-y-1.5">
-          {logs.map((log: ActivityLogEntry, idx: number) => {
+          {logs.map((log: EmbyActivityLogEntry, idx: number) => {
             const labelKey = activityLabelKey(log.type);
             return (
               <div key={log.id || idx} className="flex items-start gap-3 rounded-lg border border-border/40 bg-accent/10 p-3 text-sm transition-colors hover:bg-accent/20">

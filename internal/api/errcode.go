@@ -290,7 +290,6 @@ const (
 	ErrAdminEmbyPasswordReset     ErrCode = "ADMIN_EMBY_PASSWORD_RESET_FAILED"
 	ErrAdminLastAdminProtected    ErrCode = "ADMIN_LAST_ADMIN_PROTECTED"
 	ErrAPIKeySelfPermForbidden    ErrCode = "API_KEY_SELF_PERMISSION_FORBIDDEN"
-	ErrWatchStatsForbidden        ErrCode = "WATCH_STATS_FORBIDDEN"
 
 	// === 求片 / 库存 / 媒体（media_request_handlers.go） ===
 	ErrMediaRequestDisabled       ErrCode = "MEDIA_REQUEST_DISABLED"

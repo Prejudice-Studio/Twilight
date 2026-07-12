@@ -39,7 +39,6 @@ const BUILTIN_COMMANDS: { command: string; label: string; admin: boolean; descri
   { command: "cancel", label: "/cancel", admin: false, description: "取消当前操作" },
   { command: "me", label: "/me", admin: false, description: "查看当前绑定信息" },
   { command: "emby", label: "/emby", admin: false, description: "查看 Emby 状态" },
-  { command: "playinfo", label: "/playinfo", admin: false, description: "近 30 天播放统计" },
   { command: "resetpwd", label: "/resetpwd", admin: false, description: "密码重置指引" },
   { command: "delaccount", label: "/delaccount", admin: false, description: "自助销号" },
   { command: "version", label: "/version", admin: false, description: "显示版本号" },

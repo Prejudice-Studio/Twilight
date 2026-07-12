@@ -371,7 +371,7 @@ export default function AdminEmbyPage() {
           </TabsTrigger>
           <TabsTrigger value="activity" className="gap-2">
             <Activity className="h-4 w-4" />
-            活动日志
+            {t("embyActivityLogs.title")}
           </TabsTrigger>
         </TabsList>
 
@@ -560,7 +560,7 @@ export default function AdminEmbyPage() {
                   </Badge>
                 </div>
 
-                <div className="mb-3 grid gap-2 md:grid-cols-3">
+                <div className="mb-3 grid gap-2 md:grid-cols-2">
                   <Input
                     placeholder={t("adminEmby.searchPlaceholder")}
                     value={userSearch}

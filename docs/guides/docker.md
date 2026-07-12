@@ -382,7 +382,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 - [ ] PostgreSQL 密码已从默认值更改
 - [ ] `bot_internal_secret` 已生成高熵随机字符串
 - [ ] `session_cookie_secure` 设为 `true`（HTTPS 部署）
-- [ ] `cors_origins` 已设置为明确的 HTTPS 域名（非 `*`）
+- [ ] `cors_origins` 策略符合部署预期：留空/`*` 为兼容模式，限制模式填写明确 HTTPS 域名
 - [ ] `trusted_proxy_cidrs` 已配置可信反代 CIDR
 - [ ] `SystemUpdate.auto_update_enabled` 设为 `false`（Docker 不需要）
 - [ ] 反向代理已配置 HTTPS 和 HSTS

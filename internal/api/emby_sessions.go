@@ -111,7 +111,7 @@ func (a *App) handleEmbyNowPlaying(w http.ResponseWriter, r *http.Request, _ Par
 			ItemName:     itemName,
 			SeriesName:   seriesName,
 			MediaType:    mediaType,
-			ImageURL:     embyPlaybackImageURL(imgID),
+			ImageURL:     embyItemImageURL(imgID),
 			UserName:     userName,
 			PlayDuration: posTicks / 10000000,
 			TotalRuntime: runTicks / 10000000,
@@ -126,7 +126,7 @@ func (a *App) handleEmbyNowPlaying(w http.ResponseWriter, r *http.Request, _ Par
 	}
 	if len(itemIDs) > 0 {
 		maxItems := min(len(itemIDs), 50)
-		metadata := a.embyPlaybackMetadata(r.Context(), makeMetadataEvents(itemIDs[:maxItems]))
+		metadata := a.embyItemMetadata(r.Context(), itemIDs[:maxItems])
 		enriched := make([]map[string]any, 0, len(items))
 		for _, entry := range items {
 			meta, ok := metadata[entry.ItemID]
@@ -147,21 +147,13 @@ func (a *App) handleEmbyNowPlaying(w http.ResponseWriter, r *http.Request, _ Par
 				mapped["item_name"] = meta.Name
 			}
 			if ok && meta.SeriesID != "" && entry.ImageURL == "" {
-				mapped["image_url"] = embyPlaybackImageURL(meta.SeriesID)
+				mapped["image_url"] = embyItemImageURL(meta.SeriesID)
 			}
 			enriched = append(enriched, mapped)
 		}
 		resp["items"] = enriched
 	}
 	ok(w, "OK", resp)
-}
-
-func makeMetadataEvents(ids []string) []embyPlaybackEvent {
-	events := make([]embyPlaybackEvent, len(ids))
-	for i, id := range ids {
-		events[i] = embyPlaybackEvent{ItemID: id}
-	}
-	return events
 }
 
 func (a *App) handleEmbyOnline(w http.ResponseWriter, r *http.Request, _ Params) {

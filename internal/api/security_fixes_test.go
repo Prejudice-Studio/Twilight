@@ -16,7 +16,7 @@ import (
 
 // TestCSVSafeNeutralizesFormulaInjection 验证导出列经过 csvSafe 中和后，
 // 以 = + - @ / Tab / CR / LF 开头的值会被前置单引号，普通文本与空串原样保留。
-// 防回归点：handleExportUsers / handleExportPlayback 的用户名、邮箱、媒体标题
+// 防回归点：handleExportUsers 的用户名、邮箱
 // 直接写进 CSV，恶意用户名形如 "=HYPERLINK(...)" 会在管理员用电子表格打开时执行。
 func TestCSVSafeNeutralizesFormulaInjection(t *testing.T) {
 	cases := []struct {

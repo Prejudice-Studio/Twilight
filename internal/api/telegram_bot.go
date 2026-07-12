@@ -476,38 +476,6 @@ func (a *App) telegramHandleEmby(ctx context.Context, chatID, telegramID int64) 
 	_ = a.telegramSendMessage(ctx, chatID, strings.Join(lines, "\n"))
 }
 
-func (a *App) telegramHandlePlayInfo(ctx context.Context, chatID, telegramID int64) {
-	u, okUser := a.store().FindUserByTelegramID(telegramID)
-	if !okUser {
-		_ = a.telegramSendMessage(ctx, chatID, "当前 Telegram 尚未绑定 Twilight 账号。")
-		return
-	}
-	since := time.Now().AddDate(0, 0, -30).Unix()
-	records := a.store().PlaybackRecords(u.UID, since, 1000)
-	totalDuration := int64(0)
-	for _, record := range records {
-		totalDuration += record.Duration
-	}
-	lines := []string{
-		"近 30 天播放统计",
-		"",
-		"账号: " + u.Username,
-		"播放次数: " + strconv.Itoa(len(records)),
-		"播放时长: " + formatSeconds(totalDuration),
-	}
-	if len(records) > 0 {
-		lines = append(lines, "", "最近播放:")
-		for i, record := range records {
-			if i >= 5 {
-				break
-			}
-			title := firstNonEmpty(record.Title, record.ItemID, "未知条目")
-			lines = append(lines, fmt.Sprintf("- %s / %s / %s", truncateString(title, 48), firstNonEmpty(record.MediaType, "unknown"), formatSeconds(record.Duration)))
-		}
-	}
-	_ = a.telegramSendMessage(ctx, chatID, strings.Join(lines, "\n"))
-}
-
 func (a *App) telegramHandleResetPassword(ctx context.Context, chatID, telegramID int64) {
 	if _, okUser := a.store().FindUserByTelegramID(telegramID); !okUser {
 		_ = a.telegramSendMessage(ctx, chatID, "当前 Telegram 尚未绑定 Twilight 账号。")
@@ -1031,7 +999,6 @@ func (a *App) telegramStartText() string {
 		"/bind <绑定码> 绑定 Telegram",
 		"/me 查看当前绑定",
 		"/emby 查看 Emby 状态",
-		"/playinfo 查看播放统计",
 		"/help 查看完整帮助",
 	}, "\n")
 }
@@ -1066,7 +1033,6 @@ func (a *App) telegramHelpText(admin bool) string {
 		"/bind <绑定码> 绑定 Telegram",
 		"/me 查看当前绑定",
 		"/emby 查看 Emby 状态",
-		"/playinfo 查看近 30 天播放统计",
 		"/resetpwd 查看密码修改说明",
 		"/cancel 取消当前 Bot 操作",
 		"/about 查看服务说明",

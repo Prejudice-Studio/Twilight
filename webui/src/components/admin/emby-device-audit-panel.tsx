@@ -165,14 +165,15 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
   const [clientFilter, setClientFilter] = useState<string>(CLIENT_ALL);
   const [sortKey, setSortKey] = useState<SortKey>("devices");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [autoRefresh, setAutoRefresh] = useState(false);
   const [lastRefreshAt, setLastRefreshAt] = useState<number | null>(null);
 
-  const reload = useCallback(async (refresh = false) => {
+  const reload = useCallback(async (refresh = false, signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await api.adminGetEmbyDeviceAudit(refresh);
+      const res = await api.adminGetEmbyDeviceAudit(refresh, signal);
+      if (signal?.aborted) return;
       if (res.success && res.data) {
         setData(res.data);
         setLastRefreshAt(Date.now());
@@ -180,19 +181,22 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
         throw new Error(res.message || t("deviceAudit.loadFailed"));
       }
     } catch (err) {
+      if (signal?.aborted) return;
       const message = err instanceof Error ? err.message : t("deviceAudit.loadFailed");
       setError(message);
       toast({ title: t("deviceAudit.loadFailed"), description: message, variant: "destructive" });
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, [t, toast]);
 
   useEffect(() => {
-    void reload();
+    const controller = new AbortController();
+    void reload(false, controller.signal);
+    return () => controller.abort();
   }, [reload]);
 
-  useVisiblePolling(() => reload(false), 60000, autoRefresh);
+  useVisiblePolling((signal) => reload(false, signal), 60000, autoRefresh);
 
   const toggleExpand = useCallback((id: string) => {
     setExpanded((prev) => {

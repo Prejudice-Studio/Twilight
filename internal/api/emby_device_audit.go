@@ -190,115 +190,152 @@ func embyAuditLocalUser(u store.User) map[string]any {
 // 均降级处理（分别退化为「无在线信息」「无历史 IP」），不阻断整体审查。
 func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) {
 	users := map[string]*embyAuditUser{}
-	getUser := func(id string) *embyAuditUser {
-		u := users[id]
+	userOrderKey := func(id, name string) string {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			return "id:" + id
+		}
+		name = strings.TrimSpace(name)
+		if name != "" {
+			return "name:" + strings.ToLower(name)
+		}
+		return "unknown"
+	}
+	getUser := func(id, name string) *embyAuditUser {
+		key := userOrderKey(id, name)
+		u := users[key]
 		if u == nil {
-			u = &embyAuditUser{embyID: id, ipSet: map[string]bool{}, deviceAgg: map[string]map[string]any{}}
-			users[id] = u
+			u = &embyAuditUser{embyID: strings.TrimSpace(id), embyName: strings.TrimSpace(name), ipSet: map[string]bool{}, deviceAgg: map[string]map[string]any{}}
+			users[key] = u
+		}
+		if u.embyID == "" && strings.TrimSpace(id) != "" {
+			u.embyID = strings.TrimSpace(id)
+		}
+		if u.embyName == "" && strings.TrimSpace(name) != "" {
+			u.embyName = strings.TrimSpace(name)
 		}
 		return u
 	}
-
-	// 实时会话：DeviceId -> 解析后的 IP，并顺带收集每个 Emby 用户当前 IP 与用户名。
-	sessions, _ := a.embySessionsSnapshot(ctx, false)
-	liveIPByDevice := make(map[string]string, len(sessions))
-	for _, s := range sessions {
-		ip := parseRemoteIP(asString(s["RemoteEndPoint"]))
-		if did := asString(s["DeviceId"]); did != "" {
-			liveIPByDevice[did] = ip
-		}
-		uid := asString(s["UserId"])
-		if uid == "" {
-			continue
-		}
-		u := getUser(uid)
-		if name := asString(s["UserName"]); name != "" && u.embyName == "" {
-			u.embyName = name
-		}
-		if ip != "" {
-			u.ipSet[ip] = true
+	for _, local := range a.store().ListUsers() {
+		if local.EmbyID != "" {
+			getUser(local.EmbyID, local.EmbyUsername)
 		}
 	}
 
-	// 设备清单（QueryResult: { Items: [...] }）。
+	type liveSession struct {
+		deviceID     string
+		deviceName   string
+		client       string
+		appVersion   string
+		userID       string
+		userName     string
+		ip           string
+		lastActivity string
+	}
+	sessions, _ := a.embySessionsSnapshot(ctx, false)
+	liveByDevice := map[string]liveSession{}
+	for _, s := range sessions {
+		ls := liveSession{
+			deviceID:     firstNonEmpty(asString(s["DeviceId"]), asString(s["DeviceID"]), asString(s["Id"])),
+			deviceName:   firstNonEmpty(asString(s["DeviceName"]), asString(s["Device"])),
+			client:       firstNonEmpty(asString(s["Client"]), asString(s["AppName"])),
+			appVersion:   firstNonEmpty(asString(s["ApplicationVersion"]), asString(s["AppVersion"])),
+			userID:       asString(s["UserId"]),
+			userName:     asString(s["UserName"]),
+			ip:           parseRemoteIP(asString(s["RemoteEndPoint"])),
+			lastActivity: firstNonEmpty(asString(s["LastActivityDate"]), asString(s["DateLastActivity"])),
+		}
+		if ls.deviceID != "" {
+			liveByDevice[ls.deviceID] = ls
+		}
+		u := getUser(ls.userID, ls.userName)
+		if ls.ip != "" {
+			u.ipSet[ls.ip] = true
+		}
+		if ls.lastActivity > u.lastSeen {
+			u.lastSeen = ls.lastActivity
+		}
+	}
+
 	var devResp struct {
 		Items []map[string]any `json:"Items"`
 	}
 	if err := a.embyGet(ctx, "/Devices", &devResp); err != nil {
 		return nil, err
 	}
-	// 客户端类型聚合：按 AppName 统计设备数 / 在线数 / 去重用户数，给前端做归类与筛选。
+
 	type clientStat struct {
 		devices int
 		online  int
 		users   map[string]bool
 	}
 	clientStats := map[string]*clientStat{}
-
+	seenDevices := map[string]bool{}
 	totalDevices := 0
 	onlineDevices := 0
-	for _, d := range devResp.Items {
-		deviceID := asString(d["Id"])
-		uid := asString(d["LastUserId"])
-		last := asString(d["DateLastActivity"])
-		app := asString(d["AppName"])
-		u := getUser(uid)
-		if name := asString(d["LastUserName"]); name != "" && u.embyName == "" {
-			u.embyName = name
-		}
-		ip, isOnline := liveIPByDevice[deviceID]
-		if ip != "" {
-			u.ipSet[ip] = true
-		}
-		if last > u.lastSeen {
-			u.lastSeen = last
-		}
-		if isOnline {
-			u.online++
-			onlineDevices++
-		}
-		// 按 device_name + app_name 聚合相同设备，前端以 count 字段展示批量。
-		aggKey := asString(d["Name"]) + "|" + app
-		if existing, ok := u.deviceAgg[aggKey]; ok {
-			existing["count"] = int(numeric(existing["count"])) + 1
-			existing["device_id"] = deviceID
-			if last > asString(existing["last_activity"]) {
-				existing["last_activity"] = last
-				existing["ip"] = ip
-			}
-			if isOnline {
-				existing["online"] = true
-			}
-		} else {
-			u.deviceAgg[aggKey] = map[string]any{
-				"device_id":     deviceID,
-				"device_name":   asString(d["Name"]),
-				"app_name":      app,
-				"app_version":   asString(d["AppVersion"]),
-				"last_activity": last,
-				"ip":            ip,
-				"ip_approx":     false,
-				"online":        isOnline,
-				"count":         1,
-			}
-			u.devices = append(u.devices, u.deviceAgg[aggKey])
-		}
+	addClient := func(app string, online bool, userKey string) {
+		app = firstNonEmpty(strings.TrimSpace(app), "Unknown")
 		cs := clientStats[app]
 		if cs == nil {
 			cs = &clientStat{users: map[string]bool{}}
 			clientStats[app] = cs
 		}
 		cs.devices++
-		if isOnline {
+		if online {
 			cs.online++
 		}
-		if uid != "" {
-			cs.users[uid] = true
+		if userKey != "" {
+			cs.users[userKey] = true
 		}
+	}
+	addDevice := func(device map[string]any, live liveSession, online bool) {
+		deviceID := firstNonEmpty(asString(device["Id"]), live.deviceID)
+		uid := firstNonEmpty(asString(device["LastUserId"]), live.userID)
+		uname := firstNonEmpty(asString(device["LastUserName"]), live.userName)
+		u := getUser(uid, uname)
+		last := firstNonEmpty(asString(device["DateLastActivity"]), live.lastActivity)
+		app := firstNonEmpty(asString(device["AppName"]), live.client, "Unknown")
+		name := firstNonEmpty(asString(device["Name"]), live.deviceName, deviceID, "Unknown")
+		if live.ip != "" {
+			u.ipSet[live.ip] = true
+		}
+		if last > u.lastSeen {
+			u.lastSeen = last
+		}
+		if online {
+			u.online++
+			onlineDevices++
+		}
+		record := map[string]any{
+			"device_id":     deviceID,
+			"device_name":   name,
+			"app_name":      app,
+			"app_version":   firstNonEmpty(asString(device["AppVersion"]), live.appVersion),
+			"last_activity": last,
+			"ip":            live.ip,
+			"ip_approx":     false,
+			"online":        online,
+			"count":         1,
+		}
+		u.devices = append(u.devices, record)
+		addClient(app, online, firstNonEmpty(uid, uname))
 		totalDevices++
+		if deviceID != "" {
+			seenDevices[deviceID] = true
+		}
+	}
+	for _, d := range devResp.Items {
+		deviceID := asString(d["Id"])
+		live, online := liveByDevice[deviceID]
+		addDevice(d, live, online)
+	}
+	for deviceID, live := range liveByDevice {
+		if seenDevices[deviceID] {
+			continue
+		}
+		addDevice(map[string]any{"Id": deviceID, "Name": live.deviceName, "AppName": live.client, "AppVersion": live.appVersion, "LastUserId": live.userID, "LastUserName": live.userName, "DateLastActivity": live.lastActivity}, live, true)
 	}
 
-	// 历史登录 IP：活动日志失败降级为「无历史 IP」。
 	activityAvailable := false
 	var actResp struct {
 		Items []map[string]any `json:"Items"`
@@ -307,14 +344,12 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 		activityAvailable = true
 		for _, e := range actResp.Items {
 			uid := asString(e["UserId"])
-			if uid == "" {
-				continue
-			}
+			uname := asString(e["UserName"])
 			ips := activityEntryIPs(asString(e["ShortOverview"]))
 			if len(ips) == 0 {
 				continue
 			}
-			u := getUser(uid)
+			u := getUser(uid, uname)
 			date := asString(e["Date"])
 			eventAt, hasAt := parseEmbyTime(date)
 			for _, ip := range ips {
@@ -333,13 +368,9 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 	allIPs := map[string]bool{}
 	out := make([]map[string]any, 0, len(users))
 	for _, u := range users {
-		// 确保 devices 非 nil——用户可能仅出现在 Sessions/ActivityLog 而不在
-		// /Devices 列表中（如已删除设备），nil slice 序列化为 JSON null 会导致
-		// 前端对 .filter()/.some() 调用崩溃。
 		if u.devices == nil {
 			u.devices = []map[string]any{}
 		}
-		// 先用历史登录 IP 回填离线设备，再展开 IP 列表与设备排序。
 		fillDeviceIPsFromHistory(u)
 		ips := make([]string, 0, len(u.ipSet))
 		for ip := range u.ipSet {
@@ -347,16 +378,17 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 			allIPs[ip] = true
 		}
 		sort.Strings(ips)
-		// 设备按最近活跃倒序，方便审查最新登录。
 		sort.SliceStable(u.devices, func(i, j int) bool {
 			return asString(u.devices[i]["last_activity"]) > asString(u.devices[j]["last_activity"])
 		})
 		var local any
-		if lu, okUser := a.store().FindUserByEmbyID(u.embyID); okUser {
-			linked++
-			local = embyAuditLocalUser(lu)
-			if u.embyName == "" {
-				u.embyName = lu.EmbyUsername
+		if u.embyID != "" {
+			if lu, okUser := a.store().FindUserByEmbyID(u.embyID); okUser {
+				linked++
+				local = embyAuditLocalUser(lu)
+				if u.embyName == "" {
+					u.embyName = lu.EmbyUsername
+				}
 			}
 		}
 		out = append(out, map[string]any{
@@ -371,7 +403,6 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 			"local_user":     local,
 		})
 	}
-	// 默认按设备数量倒序（设备多者优先审查），并列时按 IP 数量倒序；前端可再排序。
 	sort.SliceStable(out, func(i, j int) bool {
 		di, _ := out[i]["device_count"].(int)
 		dj, _ := out[j]["device_count"].(int)
@@ -380,18 +411,15 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 		}
 		ii, _ := out[i]["ip_count"].(int)
 		ij, _ := out[j]["ip_count"].(int)
-		return ii > ij
+		if ii != ij {
+			return ii > ij
+		}
+		return asString(out[i]["emby_user_name"]) < asString(out[j]["emby_user_name"])
 	})
 
-	// 客户端归类：按设备数量倒序，并列按名称升序，便于前端做分布展示与下拉筛选。
 	clients := make([]map[string]any, 0, len(clientStats))
 	for name, cs := range clientStats {
-		clients = append(clients, map[string]any{
-			"name":    name,
-			"devices": cs.devices,
-			"online":  cs.online,
-			"users":   len(cs.users),
-		})
+		clients = append(clients, map[string]any{"name": name, "devices": cs.devices, "online": cs.online, "users": len(cs.users)})
 	}
 	sort.SliceStable(clients, func(i, j int) bool {
 		di, _ := clients[i]["devices"].(int)

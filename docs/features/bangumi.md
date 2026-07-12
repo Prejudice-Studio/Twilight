@@ -370,8 +370,6 @@ Webhook 期望接收 JSON 通知。后端从负载中按以下规则解析：
 成功落库的 `PlaybackRecord` 进入单一状态文档（`internal/store`）的 `PlaybackRecords` 列表，最多保留 10000 条（超出按时间裁剪）。这些记录用于：
 
 - **Bangumi 同步**：同步服务读取未同步记录，调用 Bangumi API 点格子。
-- 观看统计接口（`handlers.go` 的观看统计 / 全站统计）。
-- 管理员导出 CSV（`/api/v1/...` 播放统计导出）。
 - Telegram Bot 的个人观看汇总。
 
 ## 收藏管理与缓存

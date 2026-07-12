@@ -204,6 +204,16 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 	case "daily_stats":
 		users := a.store().ListUsers()
 		return map[string]any{"success": true, "users": len(users), "active": countActive(users)}, []string{"daily stats generated"}, nil
+	case "sync_emby_activity_logs":
+		if !a.embyConfigured() {
+			return map[string]any{"success": true, "configured": false, "new_entries": 0}, []string{"Emby not configured"}, nil
+		}
+		sinceHours := clamp(jobParamInt(params, "since_hours", 24), 1, 720)
+		count, err := a.fetchAndStoreEmbyActivityLogsSince(r.Context(), time.Now().Add(-time.Duration(sinceHours)*time.Hour))
+		if err != nil {
+			return map[string]any{"success": false, "since_hours": sinceHours}, nil, err
+		}
+		return map[string]any{"success": true, "configured": true, "new_entries": count, "since_hours": sinceHours}, []string{fmt.Sprintf("synced %d Emby activity log entries from the last %d hours", count, sinceHours)}, nil
 	case "cleanup_sessions":
 		expiredSessions := a.sessions().CleanupExpired(r.Context())
 		cfg := a.cfg()
@@ -760,17 +770,6 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		}
 		return map[string]any{"success": failed == 0, "enabled": true, "scanned": scanned, "eligible": eligible, "refreshed_users": refreshedUsers, "refreshed_lists": refreshedLists, "cached_entries": cachedEntries, "failed": failed},
 			append(logs, fmt.Sprintf("refreshed %d users, %d lists, %d entries", refreshedUsers, refreshedLists, cachedEntries)), nil
-	case "sync_emby_activity_logs":
-		if !a.embyConfigured() {
-			return map[string]any{"success": true, "skipped": true, "reason": "emby not configured"}, nil, nil
-		}
-		sinceHours := clamp(jobParamInt(params, "since_hours", 24), 1, 720)
-		since := time.Now().Add(-time.Duration(sinceHours) * time.Hour)
-		count, err := a.fetchAndStoreEmbyActivityLogsSince(r.Context(), since)
-		if err != nil {
-			return map[string]any{"success": false, "since_hours": sinceHours}, nil, err
-		}
-		return map[string]any{"success": true, "new_entries": count, "since_hours": sinceHours}, nil, nil
 	default:
 		return map[string]any{"success": false}, nil, fmt.Errorf("unknown scheduler job: %s", jobID)
 	}

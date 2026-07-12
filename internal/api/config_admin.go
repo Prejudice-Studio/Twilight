@@ -220,7 +220,7 @@ func (a *App) handleConfigBackupInspect(w http.ResponseWriter, r *http.Request, 
 	// 管理端预览，必须走 maskTOMLSecrets 与 handleConfigTOMLGet 同口径遮蔽，
 	// 否则"读取任意历史备份"就成了绕过 GET 遮蔽拿明文密钥的旁路。真正的恢复
 	// （handleConfigRestore）读的是磁盘原文、不经此遮蔽，因此预览遮蔽不影响恢复。
-	ok(w, "OK", map[string]any{"backup": backup, "content": stripHiddenCORSConfig(stripProtectedAdminConfig(maskTOMLSecrets(string(content)))), "config_file": a.configFilePath()})
+	ok(w, "OK", map[string]any{"backup": backup, "content": stripProtectedAdminConfig(maskTOMLSecrets(string(content))), "config_file": a.configFilePath()})
 }
 
 func (a *App) handleConfigRestore(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -407,7 +407,6 @@ func (a *App) saveConfigContent(content string) (map[string]any, int, string) {
 	if hadExisting {
 		content = restoreProtectedRepoURL(content, string(existing))
 	}
-	content = restoreHiddenCORSConfig(content, a.cfg().CORSAllowAnyOrigin)
 	if err := validateConfigContent(configFile, []byte(content)); err != nil {
 		return nil, http.StatusBadRequest, "配置校验失败: " + err.Error()
 	}
@@ -482,7 +481,6 @@ func (a *App) saveInitialSetupConfigContent(content, adminUsername string) (map[
 	if hadExisting {
 		content = restoreProtectedRepoURL(content, string(existing))
 	}
-	content = restoreHiddenCORSConfig(content, a.cfg().CORSAllowAnyOrigin)
 	if err := validateConfigContent(configFile, []byte(content)); err != nil {
 		return nil, http.StatusBadRequest, "配置校验失败: " + err.Error()
 	}
@@ -962,17 +960,6 @@ func configSectionDefs() []configSectionDef {
 			{Key: "emby_url_list", Label: "普通线路", Type: "list", Description: "格式：名称 : URL"},
 			{Key: "emby_url_list_for_whitelist", Label: "白名单线路", Type: "list", Description: "管理员和白名单用户可见线路"},
 			{Key: "emby_stats_enabled", Label: "Emby库统计", Type: "bool", Description: "在首页仪表盘 Emby 卡片显示电影/剧集/集数统计"},
-			{Key: "emby_playback_stats_enabled", Label: "播放统计", Type: "bool", Description: "开启后记录并展示用户播放次数/时长统计"},
-			{Key: "emby_playback_stats_user_enabled", Label: "用户可查看播放统计", Type: "bool", Description: "关闭后普通用户无法访问播放统计，管理员仍可使用管理统计"},
-			{Key: "emby_playback_stats_user_self_only", Label: "用户仅可查看自己", Type: "bool", Description: "开启后普通用户只能查询自己的统计；关闭后可查询全站或指定用户"},
-			{Key: "emby_playback_stats_user_rankings", Label: "向用户显示用户排行", Type: "bool", Description: "控制普通用户响应中的用户播放排行；管理员始终可见"},
-			{Key: "emby_playback_stats_item_rankings", Label: "向用户显示节目排行", Type: "bool", Description: "控制普通用户响应中的电影/剧集排行与封面；管理员始终可见"},
-			{Key: "emby_playback_stats_daily_summary", Label: "向用户显示趋势统计", Type: "bool", Description: "控制普通用户响应中的按日/周/月趋势；管理员始终可见"},
-			{Key: "emby_playback_stats_user_day", Label: "允许用户按日统计", Type: "bool", Description: "允许普通用户使用今日周期及按日聚合"},
-			{Key: "emby_playback_stats_user_week", Label: "允许用户按周统计", Type: "bool", Description: "允许普通用户使用本周周期及按周聚合"},
-			{Key: "emby_playback_stats_user_month", Label: "允许用户按月统计", Type: "bool", Description: "允许普通用户使用本月周期及按月聚合"},
-			{Key: "emby_playback_stats_user_custom", Label: "允许用户自定义周期", Type: "bool", Description: "允许普通用户使用 days 或 from/to 自定义统计区间"},
-			{Key: "emby_playback_stats_user_max_days", Label: "用户最大统计天数", Type: "int", Description: "普通用户可查询的最大区间，最小 1 天、最大 365 天"},
 		}},
 		{Key: "Telegram", Title: "Telegram", Description: "Bot、订阅校验和群组管理\n推荐在 Telegram 管理页面操作 Bot 基础设置，高级参数在此调整", Category: "integration", Collapsed: true, Fields: []configFieldDef{
 			{Key: "telegram_api_url", Label: "Bot API URL", Type: "string", Description: "Telegram Bot API 基础地址"},
@@ -1067,7 +1054,7 @@ func configSectionDefs() []configSectionDef {
 		{Key: "API", Title: "API", Description: "监听、跨域、上传和 Cookie", Category: "runtime", Collapsed: true, Fields: []configFieldDef{
 			{Key: "host", Label: "监听地址", Type: "string", Description: "修改后需要重启监听器"},
 			{Key: "port", Label: "监听端口", Type: "int", Description: "修改后需要重启监听器"},
-			{Key: "cors_origins", Label: "CORS Origins", Type: "list", Description: "允许的前端 Origin；生产环境必须显式填写 HTTPS 域名"},
+			{Key: "cors_origins", Label: "CORS Origins", Type: "list", Description: "留空时自动允许合法 http/https Origin；填写后仅允许列表内 Origin；可用 * 表示兼容模式"},
 			{Key: "upload_folder", Label: "上传目录", Type: "string", Description: "头像或背景上传目录"},
 			{Key: "max_upload_size", Label: "上传上限", Type: "int", Description: "单文件最大字节数"},
 			{Key: "session_cookie_name", Label: "Cookie 名称", Type: "string", Description: "会话 Cookie 名称"},
@@ -1178,18 +1165,7 @@ func configValues(cfg config.Config) map[string]map[string]any {
 		"Emby": {
 			"emby_url": cfg.EmbyURL, "emby_token": cfg.EmbyToken, "emby_username": cfg.EmbyUsername, "emby_password": cfg.EmbyPassword,
 			"emby_url_list": linesToStrings(cfg.EmbyURLList), "emby_url_list_for_whitelist": linesToStrings(cfg.EmbyWhitelistURLList),
-			"emby_stats_enabled":                 cfg.EmbyStatsEnabled,
-			"emby_playback_stats_enabled":        cfg.EmbyPlaybackStatsEnabled,
-			"emby_playback_stats_user_enabled":   cfg.EmbyPlaybackStatsUserEnabled,
-			"emby_playback_stats_user_self_only": cfg.EmbyPlaybackStatsUserSelfOnly,
-			"emby_playback_stats_user_rankings":  cfg.EmbyPlaybackStatsUserRankings,
-			"emby_playback_stats_item_rankings":  cfg.EmbyPlaybackStatsItemRankings,
-			"emby_playback_stats_daily_summary":  cfg.EmbyPlaybackStatsDailySummary,
-			"emby_playback_stats_user_day":       cfg.EmbyPlaybackStatsUserDay,
-			"emby_playback_stats_user_week":      cfg.EmbyPlaybackStatsUserWeek,
-			"emby_playback_stats_user_month":     cfg.EmbyPlaybackStatsUserMonth,
-			"emby_playback_stats_user_custom":    cfg.EmbyPlaybackStatsUserCustom,
-			"emby_playback_stats_user_max_days":  cfg.EmbyPlaybackStatsUserMaxDays,
+			"emby_stats_enabled": cfg.EmbyStatsEnabled,
 		},
 		"Telegram": {
 			"telegram_api_url": cfg.TelegramAPIURL, "bot_token": cfg.TelegramBotToken, "admin_id": int64sToAny(cfg.TelegramAdminIDs), "group_id": cfg.TelegramGroupIDs,
@@ -1315,55 +1291,6 @@ func renderConfigTOML(values map[string]map[string]any) string {
 		b.WriteString("\n")
 	}
 	return b.String()
-}
-
-func stripHiddenCORSConfig(content string) string {
-	lines := strings.Split(content, "\n")
-	out := make([]string, 0, len(lines))
-	for _, line := range lines {
-		key, _, ok := strings.Cut(strings.TrimSpace(line), "=")
-		if ok && strings.EqualFold(strings.TrimSpace(key), "cors_allow_any_origin") {
-			continue
-		}
-		out = append(out, line)
-	}
-	return strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
-}
-
-func restoreHiddenCORSConfig(content string, enabled bool) string {
-	content = stripHiddenCORSConfig(content)
-	if !enabled {
-		return content
-	}
-	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
-	insertAt := len(lines)
-	inAPI := false
-	foundAPI := false
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "[") || !strings.HasSuffix(trimmed, "]") {
-			continue
-		}
-		section := strings.Trim(strings.TrimSpace(strings.Trim(trimmed, "[]")), `"`)
-		if inAPI {
-			insertAt = i
-			break
-		}
-		inAPI = strings.EqualFold(section, "API")
-		foundAPI = foundAPI || inAPI
-	}
-	if !foundAPI {
-		if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) != "" {
-			lines = append(lines, "")
-		}
-		lines = append(lines, "[API]")
-		insertAt = len(lines)
-	}
-	line := "cors_allow_any_origin = true"
-	lines = append(lines, "")
-	copy(lines[insertAt+1:], lines[insertAt:])
-	lines[insertAt] = line
-	return strings.TrimRight(strings.Join(lines, "\n"), "\n") + "\n"
 }
 
 func tomlValue(value any) string {

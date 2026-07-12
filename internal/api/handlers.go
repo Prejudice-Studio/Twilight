@@ -1247,20 +1247,13 @@ func (a *App) handleSystemInfo(w http.ResponseWriter, r *http.Request, _ Params)
 			"ticket_system":                 cfg.TicketSystemEnabled,
 			"developer_mode":                a.store().DeveloperModeEnabled(),
 			"emby_stats":                    cfg.EmbyStatsEnabled,
-			"emby_playback_stats":           cfg.EmbyPlaybackStatsEnabled,
-			"emby_playback_stats_user":      cfg.EmbyPlaybackStatsEnabled && cfg.EmbyPlaybackStatsUserEnabled,
-			"emby_playback_user_global":     !cfg.EmbyPlaybackStatsUserSelfOnly,
-			"emby_playback_user_rankings":   cfg.EmbyPlaybackStatsUserRankings,
-			"emby_playback_item_rankings":   cfg.EmbyPlaybackStatsItemRankings,
-			"emby_playback_daily_summary":   cfg.EmbyPlaybackStatsDailySummary,
 		},
 		"auth_background_url": cfg.AuthBackgroundURL,
 		"limits": map[string]any{
-			"user_limit":                        cfg.UserLimit,
-			"stream_limit":                      cfg.MaxStreams,
-			"ticket_image_max_size":             cfg.TicketImageMaxSize,
-			"ticket_image_max_count":            cfg.TicketImageMaxCount,
-			"emby_playback_stats_user_max_days": clamp(cfg.EmbyPlaybackStatsUserMaxDays, 1, 365),
+			"user_limit":             cfg.UserLimit,
+			"stream_limit":           cfg.MaxStreams,
+			"ticket_image_max_size":  cfg.TicketImageMaxSize,
+			"ticket_image_max_count": cfg.TicketImageMaxCount,
 		},
 		"telegram_bot":   a.publicTelegramBotInfo(r.Context()),
 		"setup":          a.setupStatusData(),
@@ -1465,18 +1458,21 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request, _ Params) {
 		return
 	}
 	isAuth := current(r).User.UID != 0
+	database := a.databaseHealth(r.Context())
+	emby := a.embyStatusSnapshot(r.Context(), false)
 	data := map[string]any{
 		"status": "healthy",
 		"time":   time.Now().Unix(),
 		"api":    true,
 	}
 	if isAuth {
-		emby := a.embyOverview(r.Context())
 		sessionFallback := a.sessions().FallbackCount()
 		rateFallback := a.limiter().FallbackCount()
-		data["database"] = a.store() != nil
+		data["database"] = boolValue(database, "ok", false)
+		data["database_detail"] = database
 		data["emby"] = boolValue(emby, "online", false)
-		data["emby_configured"] = a.cfg().EmbyURL != ""
+		data["emby_detail"] = emby
+		data["emby_configured"] = boolValue(emby, "configured", false)
 		data["redis"] = a.redis() != nil
 		data["redis_degraded"] = a.redis() != nil && (sessionFallback > 0 || rateFallback > 0)
 		data["storage"] = a.store().Backend()
@@ -1487,7 +1483,6 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request, _ Params) {
 	}
 	ok(w, "OK", data)
 }
-
 func (a *App) handleSystemStats(w http.ResponseWriter, r *http.Request, _ Params) {
 	users := a.store().ListUsers()
 	activeUsers := countActive(users)
@@ -1507,7 +1502,8 @@ func (a *App) handleSystemStats(w http.ResponseWriter, r *http.Request, _ Params
 		"cpu_count":     nil,
 		"users":         map[string]any{"active": activeUsers, "total": len(users), "limit": zeroNil(int64(a.cfg().UserLimit)), "usage_percent": usage},
 		"regcodes":      map[string]any{"active": activeRegcodes, "total": len(regcodes)},
-		"emby":          a.embyOverview(r.Context()),
+		"database":      a.databaseHealth(r.Context()),
+		"emby":          a.embyStatusSnapshot(r.Context(), true),
 		"total_users":   len(users),
 		"active_users":  activeUsers,
 		"redis_enabled": a.redis() != nil,
@@ -1520,30 +1516,95 @@ func (a *App) handleSystemStats(w http.ResponseWriter, r *http.Request, _ Params
 	})
 }
 
+func (a *App) databaseHealth(parent context.Context) map[string]any {
+	st := a.store()
+	if st == nil {
+		return map[string]any{
+			"ok":                false,
+			"backend":           "none",
+			"configured_driver": strings.ToLower(a.cfg().DatabaseDriver),
+			"error":             "store is not initialized",
+		}
+	}
+	backend := st.Backend()
+	result := map[string]any{
+		"ok":                true,
+		"backend":           backend,
+		"configured_driver": strings.ToLower(a.cfg().DatabaseDriver),
+		"storage_mismatch":  a.runtimeDatabaseMismatch(),
+		"storage_warning":   a.databaseMismatchWarning(),
+	}
+	ctx, cancel := context.WithTimeout(parent, 1500*time.Millisecond)
+	defer cancel()
+	if db := st.DB(); db != nil || backend == store.BackendPostgres {
+		if db == nil {
+			result["ok"] = false
+			result["error"] = "postgres backend has no active connection"
+			return result
+		}
+		if err := db.PingContext(ctx); err != nil {
+			result["ok"] = false
+			result["error"] = "database ping failed"
+			return result
+		}
+		stats := db.Stats()
+		result["open_connections"] = stats.OpenConnections
+		result["in_use"] = stats.InUse
+		result["idle"] = stats.Idle
+		return result
+	}
+	if _, err := st.Snapshot(); err != nil {
+		result["ok"] = false
+		result["error"] = "state snapshot failed"
+	}
+	return result
+}
+
 func (a *App) embyOverview(ctx context.Context) map[string]any {
-	// 系统首页摘要：1.5s 快速探活，避免 emby 故障时阻塞用户响应。
-	info, online := a.embyHealthFast(ctx)
+	return a.embyStatusSnapshot(ctx, true)
+}
+
+func (a *App) embyStatusSnapshot(parent context.Context, includeSessions bool) map[string]any {
+	result := map[string]any{
+		"online":          false,
+		"configured":      a.embyConfigured(),
+		"server":          a.cfg().EmbyURL,
+		"active_sessions": 0,
+		"total_sessions":  0,
+	}
+	if !a.embyConfigured() {
+		result["status"] = "not_configured"
+		return result
+	}
+	ctx, cancel := context.WithTimeout(parent, 1500*time.Millisecond)
+	info, err := a.embyHealthDetailed(ctx)
+	cancel()
+	if err != nil {
+		result["status"] = "unreachable"
+		result["error"] = "Emby status request failed"
+		return result
+	}
 	if info == nil {
 		info = map[string]any{}
 	}
-	sessions := []map[string]any{}
-	if online {
-		embyCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
-		defer cancel()
-		sessions, _ = a.embySessionsSnapshot(embyCtx, false)
+	result["online"] = true
+	result["status"] = "online"
+	result["server_name"] = firstNonEmpty(asString(info["ServerName"]), asString(info["Name"]))
+	result["version"] = firstNonEmpty(asString(info["Version"]), "unknown")
+	result["operating_system"] = asString(info["OperatingSystem"])
+	if includeSessions {
+		sessionCtx, sessionCancel := context.WithTimeout(parent, 1500*time.Millisecond)
+		sessions, sessionErr := a.embySessionsSnapshot(sessionCtx, false)
+		sessionCancel()
+		if sessionErr == nil {
+			result["active_sessions"] = countEmbyPlayingSessions(sessions)
+			result["total_sessions"] = len(sessions)
+		} else {
+			result["sessions_error"] = "Emby sessions request failed"
+		}
 	}
-	return map[string]any{
-		"online":           online,
-		"configured":       a.cfg().EmbyURL != "",
-		"server":           a.cfg().EmbyURL,
-		"server_name":      firstNonEmpty(asString(info["ServerName"]), asString(info["Name"])),
-		"version":          firstNonEmpty(asString(info["Version"]), "unknown"),
-		"operating_system": asString(info["OperatingSystem"]),
-		"active_sessions":  countEmbyPlayingSessions(sessions),
-		"total_sessions":   len(sessions),
-	}
+	return result
 }
-
 func (a *App) handleEmbyURLs(w http.ResponseWriter, r *http.Request, _ Params) {
 	u := current(r).User
 	// No Emby account and not pending: hide URLs
@@ -1581,7 +1642,6 @@ func (a *App) handleEmbyURLs(w http.ResponseWriter, r *http.Request, _ Params) {
 }
 
 func (a *App) handlePublicConfig(w http.ResponseWriter, r *http.Request, _ Params) {
-	playbackPolicy := playbackStatsViewerPolicy(*a.cfg(), current(r).User.Role == store.RoleAdmin)
 	ok(w, "OK", map[string]any{
 		"upload_limit":          a.cfg().MaxUploadSize,
 		"bangumi_sync_enabled":  a.cfg().BangumiEnabled,
@@ -1599,10 +1659,6 @@ func (a *App) handlePublicConfig(w http.ResponseWriter, r *http.Request, _ Param
 		"signin": signinConfigPayload(*a.cfg()),
 		"invite": map[string]any{"enabled": a.cfg().InviteEnabled},
 		"email":  map[string]any{"enabled": emailConfigured(a.cfg()), "force_bind": a.cfg().EmailForceBind},
-		"emby_playback_stats": map[string]any{
-			"enabled": a.cfg().EmbyPlaybackStatsEnabled && playbackPolicy.UserEnabled,
-			"policy":  playbackPolicy,
-		},
 	})
 }
 
@@ -1626,8 +1682,8 @@ func (a *App) handleConfigTOMLGet(w http.ResponseWriter, r *http.Request, _ Para
 	// （handleConfigTOMLPutSafe）会把回传的哨兵还原为真实值，避免写盘覆盖。
 	maskedValues := configValues(*a.cfg())
 	maskConfigSecrets(maskedValues)
-	normalizedContent := stripHiddenCORSConfig(stripProtectedAdminConfig(renderConfigTOML(maskedValues)))
-	rawContent := stripHiddenCORSConfig(stripProtectedAdminConfig(maskTOMLSecrets(string(data))))
+	normalizedContent := stripProtectedAdminConfig(renderConfigTOML(maskedValues))
+	rawContent := stripProtectedAdminConfig(maskTOMLSecrets(string(data)))
 	ok(w, "OK", map[string]any{"content": normalizedContent, "raw_content": rawContent, "path": path, "completed": normalizedContent != rawContent})
 }
 
@@ -1712,28 +1768,13 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request, _ Params) {
 }
 
 func (a *App) handleEmbyStatus(w http.ResponseWriter, r *http.Request, _ Params) {
-	info, online := a.embyHealth(r.Context())
-	if info == nil {
-		info = map[string]any{}
-	}
-	sessions := []map[string]any{}
-	if online {
-		sessions, _ = a.embySessionsSnapshot(r.Context(), false)
-	}
 	u := current(r).User
-	payload := map[string]any{
-		"online":           online,
-		"server_name":      firstNonEmpty(asString(info["ServerName"]), asString(info["Name"])),
-		"version":          firstNonEmpty(asString(info["Version"]), "unknown"),
-		"operating_system": asString(info["OperatingSystem"]),
-		"active_sessions":  countEmbyPlayingSessions(sessions),
-		"total_sessions":   len(sessions),
-		"is_synced":        u.EmbyID != "",
-		"is_active":        u.Active,
-		"can_unbind":       a.userCanSelfUnbindEmby(u),
-		"message":          "OK",
-	}
-	if online {
+	payload := a.embyStatusSnapshot(r.Context(), true)
+	payload["is_synced"] = u.EmbyID != ""
+	payload["is_active"] = u.Active
+	payload["can_unbind"] = a.userCanSelfUnbindEmby(u)
+	payload["message"] = "OK"
+	if boolValue(payload, "online", false) {
 		libCounts := a.embyLibraryCounts(r.Context())
 		if libCounts != nil {
 			payload["movie_count"] = libCounts["movies"]
@@ -1741,40 +1782,29 @@ func (a *App) handleEmbyStatus(w http.ResponseWriter, r *http.Request, _ Params)
 			payload["episode_count"] = libCounts["episodes"]
 		}
 	}
-	if u.UID > 0 {
-		monthStart := time.Now().AddDate(0, 0, -30)
-		totalSec := embyPlaybackTotalSeconds(a.store().PlaybackRecords(u.UID, monthStart.Unix(), 10000))
-		payload["monthly_playback_seconds"] = totalSec
-		payload["monthly_playback_str"] = formatSeconds(totalSec)
-	}
 	ok(w, "OK", payload)
-}
-
-func embyPlaybackTotalSeconds(records []store.PlaybackRecord) int64 {
-	var total int64
-	for _, r := range records {
-		total += r.Duration
-	}
-	return total
 }
 
 func (a *App) embyLibraryCounts(ctx context.Context) map[string]int {
 	if !a.embyConfigured() {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
 	defer cancel()
-	var payload map[string]any
+	var payload struct {
+		MovieCount   int `json:"MovieCount"`
+		SeriesCount  int `json:"SeriesCount"`
+		EpisodeCount int `json:"EpisodeCount"`
+	}
 	if err := a.embyGet(ctx, "/Items/Counts", &payload); err != nil {
 		return nil
 	}
 	return map[string]int{
-		"movies":   int(int64(numeric(payload["MovieCount"]))),
-		"series":   int(int64(numeric(payload["SeriesCount"]))),
-		"episodes": int(int64(numeric(payload["EpisodeCount"]))),
+		"movies":   max(payload.MovieCount, 0),
+		"series":   max(payload.SeriesCount, 0),
+		"episodes": max(payload.EpisodeCount, 0),
 	}
 }
-
 func (a *App) handleDeprecatedEmbyURLs(w http.ResponseWriter, r *http.Request, _ Params) {
 	failWithCode(w, http.StatusGone, ErrAPIDeprecated, "该接口已废弃，请使用 /api/v1/system/emby-urls")
 }
@@ -2916,116 +2946,6 @@ func (a *App) handleExportUsers(w http.ResponseWriter, r *http.Request, _ Params
 		_ = cw.Write([]string{strconv.FormatInt(u.UID, 10), csvSafe(u.Username), csvSafe(u.Email), strconv.Itoa(u.Role), strconv.FormatBool(u.Active)})
 	}
 	cw.Flush()
-}
-
-func (a *App) handleExportPlayback(w http.ResponseWriter, r *http.Request, _ Params) {
-	days := queryInt(r, "days", 30)
-	fromText := strings.TrimSpace(r.URL.Query().Get("from"))
-	toText := strings.TrimSpace(r.URL.Query().Get("to"))
-	since := int64(0)
-	until := time.Now().Unix()
-	if fromText != "" && toText != "" {
-		from, err := time.Parse("2006-01-02", fromText)
-		if err == nil {
-			since = from.Unix()
-		}
-		to, err := time.Parse("2006-01-02", toText)
-		if err == nil {
-			until = to.AddDate(0, 0, 1).Unix()
-		}
-	}
-	if since == 0 && days > 0 {
-		since = time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
-	}
-	records := a.store().PlaybackRecords(0, since, 10000)
-	usernameByUID := map[int64]string{}
-	for _, u := range a.store().ListUsers() {
-		usernameByUID[u.UID] = u.Username
-	}
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", "attachment; filename=playback_stats.csv")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	cw := csv.NewWriter(w)
-	_ = cw.Write([]string{"uid", "username", "item_id", "title", "series_name", "media_type", "duration_seconds", "duration_str", "played_at", "played_time"})
-	for _, record := range records {
-		if record.PlayedAt >= until {
-			continue
-		}
-		playedTime := time.Unix(record.PlayedAt, 0).Format("2006-01-02 15:04:05")
-		_ = cw.Write([]string{
-			strconv.FormatInt(record.UID, 10),
-			csvSafe(usernameByUID[record.UID]),
-			csvSafe(record.ItemID),
-			csvSafe(record.Title),
-			csvSafe(record.SeriesName),
-			csvSafe(record.MediaType),
-			strconv.FormatInt(record.Duration, 10),
-			formatSeconds(record.Duration),
-			strconv.FormatInt(record.PlayedAt, 10),
-			playedTime,
-		})
-	}
-	cw.Flush()
-}
-
-func (a *App) handleWatchStats(w http.ResponseWriter, r *http.Request, params Params) {
-	caller := current(r).User
-	uid := caller.UID
-	global := false
-	// 路由表把 /stats/me、/stats/user/:uid（AuthUser）、/batch/watch-stats、
-	// /batch/watch-stats/:uid（AuthAdmin）、/batch/watch-stats/global（AuthAdmin）
-	// 都映射到本 handler。原实现 splitPath + Contains 推断既不直观也容易在
-	// 增减路由时漏判。改为：global 走最后一段是 "global" 的硬约定，:uid 走
-	// params；最后用 caller.Role == admin || uid == self 做统一鉴权。
-	if parts := splitPath(r.URL.Path); len(parts) > 0 && parts[len(parts)-1] == "global" {
-		global = true
-		uid = 0
-	} else if params["uid"] != "" {
-		paramUID, err := int64Param(params, "uid")
-		if err == nil && paramUID > 0 {
-			uid = paramUID
-		}
-	}
-	// belt-and-suspenders：global / 跨用户视图必须是 admin。AuthAdmin 已挡住
-	// 主流量，但 path-string 之前是真实存在的鉴权依据，整改后保留显式断言
-	// 防止路由表手抖。
-	if global && caller.Role != store.RoleAdmin {
-		failWithCode(w, http.StatusForbidden, ErrUserProtected, "权限不足")
-		return
-	}
-	if uid != caller.UID && caller.Role != store.RoleAdmin {
-		failWithCode(w, http.StatusForbidden, ErrWatchStatsForbidden, "cannot view another user's watch stats")
-		return
-	}
-	days := queryInt(r, "days", 0)
-	if global && days <= 0 {
-		days = 7
-	}
-	since := int64(0)
-	if days > 0 {
-		since = time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
-	}
-	records := a.store().PlaybackRecords(uid, since, 1000)
-	totalDuration := int64(0)
-	typeStats := map[string]map[string]any{}
-	recent := []map[string]any{}
-	activeUsers := map[int64]bool{}
-	for _, record := range records {
-		totalDuration += record.Duration
-		activeUsers[record.UID] = true
-		mediaType := firstNonEmpty(record.MediaType, "unknown")
-		stat := typeStats[mediaType]
-		if stat == nil {
-			stat = map[string]any{"count": 0, "duration": int64(0)}
-			typeStats[mediaType] = stat
-		}
-		stat["count"] = stat["count"].(int) + 1
-		stat["duration"] = stat["duration"].(int64) + record.Duration
-		if len(recent) < 10 {
-			recent = append(recent, map[string]any{"item_id": record.ItemID, "item_name": record.Title, "item_type": record.MediaType, "duration": record.Duration, "duration_str": formatSeconds(record.Duration), "start_time": record.PlayedAt})
-		}
-	}
-	ok(w, "OK", map[string]any{"period_days": days, "total_play_count": len(records), "play_count": len(records), "plays": len(records), "total_duration": totalDuration, "duration": totalDuration, "total_duration_str": formatSeconds(totalDuration), "active_user_count": len(activeUsers), "type_stats": typeStats, "recent_plays": recent, "items": recent})
 }
 
 func (a *App) handleExpiringUsers(w http.ResponseWriter, r *http.Request, _ Params) {

@@ -37,10 +37,9 @@
 
 CORS 由 `internal/api/app.go` 的 `applyCORS` 处理，启动 / 热重载时由 `validateCORSOriginsStartup` 体检。
 
-- 生产环境不要使用 `cors_origins = ["*"]`。启用 `allow_credential` 时，浏览器规范禁止 `*` 与 credentials 同用；运行期会跳过 `*` 条目，启动期会打 `Error` 日志告警，错配置等于静默无效。
+- `cors_origins` 留空时，后端会反射任意合法的 `http`/`https` Origin，便于自托管和反代排障；填写显式列表后，跨 origin 请求只允许列表内 Origin；`*` 等价于兼容模式。
 - `cors_origins` 只填 Origin（`scheme://host[:port]`），不带路径、查询串或片段。尾斜杠会被 `normalizeCORSOrigin` 规范化；带 `path`/`query`/`fragment` 或非 `http`/`https` 的条目会被判为无效并忽略。
-- 请求的 Origin 与当前请求 Host 按 `scheme://host[:port]` 完全一致时，`corsOriginMatchesHost` 会保留同源回退，不要求把 API 自身 Origin 重复写进 `cors_origins`。协议、主机或端口任一不同都属于跨域，仍必须由 `cors_origins` 显式放行。
-- 紧急兼容开关：可仅通过直接编辑服务器磁盘上的原始 TOML，在 `[API]` 下设置 `cors_allow_any_origin = true`，跳过 Origin 格式、白名单和同源匹配并反射任意非空 Origin。该项默认关闭，不出现在结构化配置、网页原始配置编辑器和默认配置模板中；网页保存其他配置时只会保留磁盘已生效的值，不能通过网页开启或关闭。开启后若同时允许凭据，任意网站都可能通过用户浏览器读取登录态 API 响应，仅限临时排障，问题解决后必须立即删除该行或改为 `false`。
+- 请求的 Origin 与当前请求 Host 按 `scheme://host[:port]` 完全一致时，`corsOriginMatchesHost` 会保留同源回退，不要求把 API 自身 Origin 重复写进 `cors_origins`。旧的隐藏 `cors_allow_any_origin` 开关已移除。
 - 只允许你的前端域名：
 
 ```toml
@@ -49,7 +48,7 @@ cors_origins = ["https://app.example.com"]
 allow_credential = true
 ```
 
-- `allow_credential = true` 同时放行 `localhost` / `127.0.0.1` / `[::1]` 在生产环境是高危（任何人在本机起 dev 前端即可携带 cookie 跨站访问），启动期会打 `Error` 提示，请仅在 dev profile 使用。
+- `allow_credential = true` 同时放行 `localhost` / `127.0.0.1` / `[::1]` 时，启动期会打 `Warn` 提示。请只在开发、可信内网或你明确接受的自托管场景使用。
 - 允许的请求头列表为 `Content-Type, Authorization, X-API-Key, X-Twilight-Client, X-Twilight-Intent`。`X-Twilight-Client` 不参与鉴权；`X-Twilight-Intent` 仅用于少数有副作用 GET 的显式意图校验。
 
 ### 3.2 会话与 Cookie
@@ -237,7 +236,7 @@ Git 自动更新（`internal/api/system_update.go`）：
 
 - [ ] 所有默认 / 示例密钥已替换
 - [ ] `config.local.toml` 与 `.env` 未入库
-- [ ] CORS 为明确域名列表，非通配符
+- [ ] CORS 策略符合部署预期：兼容模式留空/`*`，限制模式填写可信 Origin 列表
 - [ ] HTTPS 与安全 Cookie（`session_cookie_secure` / 合理 `samesite`）已启用
 - [ ] 双子域部署已正确设置 `session_cookie_domain`，前端和 API 能共享 session cookie
 - [ ] `bot_internal_secret` 已配置并验证（若启用内部回调）

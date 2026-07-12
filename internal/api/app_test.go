@@ -181,25 +181,40 @@ func TestAuthFlowWithoutCSRF(t *testing.T) {
 	}
 }
 
-func TestCredentialedCORSRequiresExplicitOrigin(t *testing.T) {
+func TestRelaxedCORSReflectsValidOriginWhenNoWhitelist(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg().CORSOrigins = []string{"*"}
+	app.cfg().CORSOrigins = nil
 
 	req := httptest.NewRequest(http.MethodOptions, "/api/v1/users/me", nil)
-	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Origin", "https://panel.example")
 	req.Header.Set("Access-Control-Request-Method", "PUT")
 	rr := httptest.NewRecorder()
 	app.ServeHTTP(rr, req)
 
-	if rr.Header().Get("Access-Control-Allow-Origin") != "" {
-		t.Fatalf("wildcard CORS origin was allowed: %q", rr.Header().Get("Access-Control-Allow-Origin"))
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("relaxed CORS preflight status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "https://panel.example" {
+		t.Fatalf("relaxed CORS did not reflect valid origin: %q", got)
 	}
 
-	app.cfg().CORSOrigins = []string{"https://panel.example/"}
 	req = httptest.NewRequest(http.MethodOptions, "/api/v1/users/me", nil)
-	req.Header.Set("Origin", "https://panel.example")
+	req.Header.Set("Origin", "null")
 	req.Header.Set("Access-Control-Request-Method", "PUT")
 	rr = httptest.NewRecorder()
+	app.ServeHTTP(rr, req)
+	if rr.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("invalid CORS origin was allowed: %q", rr.Header().Get("Access-Control-Allow-Origin"))
+	}
+}
+
+func TestConfiguredCORSOriginsRestrictCrossOrigin(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().CORSOrigins = []string{"https://panel.example/"}
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/users/me", nil)
+	req.Header.Set("Origin", "https://panel.example")
+	req.Header.Set("Access-Control-Request-Method", "PUT")
+	rr := httptest.NewRecorder()
 	app.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusNoContent {
@@ -207,6 +222,15 @@ func TestCredentialedCORSRequiresExplicitOrigin(t *testing.T) {
 	}
 	if rr.Header().Get("Access-Control-Allow-Origin") != "https://panel.example" {
 		t.Fatalf("explicit CORS origin not allowed: %q", rr.Header().Get("Access-Control-Allow-Origin"))
+	}
+
+	req = httptest.NewRequest(http.MethodOptions, "/api/v1/users/me", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Access-Control-Request-Method", "PUT")
+	rr = httptest.NewRecorder()
+	app.ServeHTTP(rr, req)
+	if rr.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("unlisted CORS origin was allowed: %q", rr.Header().Get("Access-Control-Allow-Origin"))
 	}
 
 	app.cfg().CORSOrigins = []string{"https://panel.example/app"}
@@ -259,55 +283,21 @@ func TestCORSSameHostFallback(t *testing.T) {
 	}
 }
 
-func TestCORSAllowAnyOriginBypassesOriginMatching(t *testing.T) {
+func TestWildcardCORSUsesRelaxedValidOriginReflection(t *testing.T) {
 	app := newTestApp(t)
-	app.cfg().CORSOrigins = nil
-	app.cfg().CORSAllowAnyOrigin = true
+	app.cfg().CORSOrigins = []string{"*"}
 
 	req := httptest.NewRequest(http.MethodOptions, "https://api.example/api/v1/users/me", nil)
-	req.Header.Set("Origin", "null")
+	req.Header.Set("Origin", "https://panel.example")
 	req.Header.Set("Access-Control-Request-Method", "PUT")
 	rr := httptest.NewRecorder()
 	app.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusNoContent {
-		t.Fatalf("CORS bypass preflight status = %d body=%s", rr.Code, rr.Body.String())
+		t.Fatalf("wildcard CORS preflight status = %d body=%s", rr.Code, rr.Body.String())
 	}
-	if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "null" {
-		t.Fatalf("CORS bypass did not reflect valid origin: %q", got)
-	}
-}
-
-func TestHiddenCORSBypassIsNotExposedAndIsPreserved(t *testing.T) {
-	cfg := config.Config{CORSAllowAnyOrigin: true}
-	values := configValues(cfg)
-	if _, exposed := values["API"]["cors_allow_any_origin"]; exposed {
-		t.Fatal("hidden CORS bypass was exposed through config values")
-	}
-	for _, section := range configSectionDefs() {
-		for _, field := range section.Fields {
-			if field.Key == "cors_allow_any_origin" {
-				t.Fatal("hidden CORS bypass was exposed through config schema")
-			}
-		}
-	}
-
-	content := restoreHiddenCORSConfig(renderConfigTOML(values), cfg.CORSAllowAnyOrigin)
-	if !strings.Contains(content, "[API]") || !strings.Contains(content, "cors_allow_any_origin = true") {
-		t.Fatalf("hidden CORS bypass was not preserved while rebuilding TOML:\n%s", content)
-	}
-	if shown := stripHiddenCORSConfig(content); strings.Contains(shown, "cors_allow_any_origin") {
-		t.Fatal("hidden CORS bypass was visible in browser-safe config content")
-	}
-	if strings.Contains(renderConfigTOML(values), "cors_allow_any_origin") {
-		t.Fatal("hidden CORS bypass was written into the default rendered config")
-	}
-	if changed := restoreHiddenCORSConfig("[API]\ncors_allow_any_origin = true\n", false); strings.Contains(changed, "cors_allow_any_origin") {
-		t.Fatal("browser-submitted config enabled the hidden CORS bypass")
-	}
-	withoutAPI := restoreHiddenCORSConfig("[Global]\nserver_name = \"Twilight\"\n", true)
-	if !strings.Contains(withoutAPI, "[API]\ncors_allow_any_origin = true") {
-		t.Fatalf("hidden CORS bypass was not restored into a missing API section:\n%s", withoutAPI)
+	if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "https://panel.example" {
+		t.Fatalf("wildcard CORS did not reflect valid origin: %q", got)
 	}
 }
 
@@ -5428,7 +5418,7 @@ func TestTelegramRosterStatsUsesObservedMembers(t *testing.T) {
 	}
 }
 
-func TestUserStatsEndpointRejectsOtherUser(t *testing.T) {
+func TestUserStatsEndpointRemoved(t *testing.T) {
 	app := newTestApp(t)
 	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"root","password":"Root123456"}`, nil)
 	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"alpha","password":"Alpha123456"}`, nil)
@@ -5441,8 +5431,8 @@ func TestUserStatsEndpointRejectsOtherUser(t *testing.T) {
 	}
 
 	resp := doJSON(app, http.MethodGet, "/api/v1/stats/user/"+strconv.FormatInt(beta.UID, 10), ``, []*http.Cookie{cookie})
-	if resp.Code != http.StatusForbidden {
-		t.Fatalf("expected forbidden stats response, status=%d body=%s", resp.Code, resp.Body.String())
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("expected removed stats route, status=%d body=%s", resp.Code, resp.Body.String())
 	}
 }
 

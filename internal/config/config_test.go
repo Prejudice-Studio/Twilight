@@ -19,7 +19,6 @@ redis_url = "redis://localhost:6379/2"
 host = "127.0.0.1"
 port = 5050
 cors_origins = ["http://localhost:3000", "https://example.com"]
-cors_allow_any_origin = true
 max_upload_size = 1234
 `
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
@@ -41,9 +40,6 @@ max_upload_size = 1234
 	}
 	if len(cfg.CORSOrigins) != 2 || cfg.MaxUploadSize != 1234 {
 		t.Fatalf("unexpected cors/upload config: %#v %d", cfg.CORSOrigins, cfg.MaxUploadSize)
-	}
-	if !cfg.CORSAllowAnyOrigin {
-		t.Fatal("expected hidden CORS bypass setting to be loaded from TOML")
 	}
 }
 
@@ -71,44 +67,6 @@ auto_cleanup_unverified_hours = 72
 	}
 	if cfg.EmailAutoCleanupUnverifiedHours != 120 {
 		t.Fatalf("expected env override for unverified cleanup hours, got %d", cfg.EmailAutoCleanupUnverifiedHours)
-	}
-}
-
-func TestLoadEmbyPlaybackStatsPolicy(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.toml")
-	content := `[Emby]
-emby_playback_stats_enabled = true
-emby_playback_stats_user_enabled = true
-emby_playback_stats_user_self_only = false
-emby_playback_stats_user_rankings = false
-emby_playback_stats_item_rankings = true
-emby_playback_stats_daily_summary = false
-emby_playback_stats_user_day = true
-emby_playback_stats_user_week = false
-emby_playback_stats_user_month = true
-emby_playback_stats_user_custom = false
-emby_playback_stats_user_max_days = 90
-`
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("TWILIGHT_EMBY_PLAYBACK_STATS_USER_MAX_DAYS", "45")
-
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !cfg.EmbyPlaybackStatsEnabled || !cfg.EmbyPlaybackStatsUserEnabled || cfg.EmbyPlaybackStatsUserSelfOnly {
-		t.Fatalf("unexpected playback access policy: %#v", cfg)
-	}
-	if cfg.EmbyPlaybackStatsUserRankings || !cfg.EmbyPlaybackStatsItemRankings || cfg.EmbyPlaybackStatsDailySummary {
-		t.Fatalf("unexpected playback visibility policy: %#v", cfg)
-	}
-	if !cfg.EmbyPlaybackStatsUserDay || cfg.EmbyPlaybackStatsUserWeek || !cfg.EmbyPlaybackStatsUserMonth || cfg.EmbyPlaybackStatsUserCustom {
-		t.Fatalf("unexpected playback period policy: %#v", cfg)
-	}
-	if cfg.EmbyPlaybackStatsUserMaxDays != 45 {
-		t.Fatalf("expected env max-days override, got %d", cfg.EmbyPlaybackStatsUserMaxDays)
 	}
 }
 

@@ -8,7 +8,7 @@ Bot 由二进制子命令 `bot`（或 `all`）启动，轮询逻辑见 `internal
 
 | 规则 | 说明 |
 | ---- | ---- |
-| 私聊优先 | `/bind`、`/me`、`/emby`、`/playinfo`、`/resetpwd`、`/cancel`、`/about` 以及管理员命令 `/stats`、`/admin`、`/userinfo`、`/twfind`、`/twishelp` 仅在私聊生效。 |
+| 私聊优先 | `/bind`、`/me`、`/emby`、`/resetpwd`、`/cancel`、`/about` 以及管理员命令 `/stats`、`/admin`、`/userinfo`、`/twfind`、`/twishelp` 仅在私聊生效。 |
 | 群聊保护 | 在群聊使用上述账号类命令时，Bot 只回复"请私聊使用"提示，不展示账号状态。`/start`、`/help`、`/twihelp` 在群聊会被替换为群聊提示文案。 |
 | 管理员判定 | `telegramAdminID` 判定逻辑：Telegram ID 命中 `[Telegram].admin_id` 列表，或该 Telegram ID 已绑定到一个 `Role == admin` 的 Twilight 账号。 |
 | 敏感信息边界 | Bot 默认不展示密码、Token、Emby ID、Telegram ID、服务器线路/地址、数据库连接串等敏感信息；管理员自定义 `/twguser` 模板时可显式使用 `{telegram_userid}`。 |
@@ -29,7 +29,6 @@ Bot 由二进制子命令 `bot`（或 `all`）启动，轮询逻辑见 `internal
 | `<绑定码>` | 私聊里直接发送 6-16 位字母数字绑定码（不带 `/`）也可完成绑定。 |
 | `/me` | 查看当前 Telegram 绑定的 Twilight 账号摘要。 |
 | `/emby` | 查看账号本地状态、到期、Emby 绑定、服务器是否配置以及连通性（不展示服务器地址）。 |
-| `/playinfo` | 查看近 30 天播放次数、总时长与最近 5 条播放摘要。 |
 | `/resetpwd` | 提示前往 Web 端修改密码；Bot 不接收、不生成也不发送密码。 |
 | `/cancel` | 回复"已取消当前 Bot 操作"。 |
 | `/delAccount [原因]` | 删除自己的账号。验证优先级：已绑定邮箱→邮箱验证码；已绑定 Emby→Web密码+Emby密码两步验证；无绑定→直接确认。可附带可选删除原因（记录到审计日志）。禁用状态的 Web/Emby 账号不可自删。示例：`/delAccount 不再使用本服务` 或 `/delAccount emby`。 |
@@ -121,11 +120,10 @@ Bot 由二进制子命令 `bot`（或 `all`）启动，轮询逻辑见 `internal
 
 ## 安全边界
 
-- 群聊不处理账号状态、播放统计、绑定码、管理员统计等敏感命令，仅 `/twguser` 在群内可用且受上述面板约束保护。
+- 群聊不处理账号状态、观看记录汇总、绑定码、管理员统计等敏感命令，仅 `/twguser` 在群内可用且受上述面板约束保护。
 - 管理员查询摘要仅展示用户名、UID、角色、启用状态、到期状态、Telegram 是否绑定、Emby 是否绑定、是否待开通 Emby。
 - Bot 默认模板不展示 Emby ID、Telegram ID、密码、Token、服务线路、数据库连接串；管理员自定义 `/twguser` 模板时可显式使用 `{telegram_userid}`。
 - `/emby` 只展示是否配置、是否可连通，不展示服务器地址。
-- `/playinfo` 只展示播放摘要，不展示外部服务凭据。
 - Bot 处理过程对每条 update 做 panic 隔离，日志中的 panic 文本与敏感内容都会经脱敏处理。
 
 ## 文案配置项

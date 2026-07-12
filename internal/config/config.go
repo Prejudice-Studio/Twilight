@@ -113,10 +113,9 @@ type Config struct {
 	AdminUsernames                []string
 	SetupMode                     bool
 
-	CORSOrigins        []string
-	AllowCredential    bool
-	CORSAllowAnyOrigin bool
-	TrustProxyHeaders  bool
+	CORSOrigins       []string
+	AllowCredential   bool
+	TrustProxyHeaders bool
 	// TrustedProxyCIDRs 是上游可信反代的 CIDR 列表。仅当 TrustProxyHeaders=true
 	// 且立即上游（r.RemoteAddr 取出的 host）落在这些 CIDR 内时，clientIP 才会
 	// 解析 CF-Connecting-IP / X-Real-IP / X-Forwarded-For；否则一律走 RemoteAddr，
@@ -144,17 +143,6 @@ type Config struct {
 	EmbyURL                        string
 	EmbyToken                      string
 	EmbyStatsEnabled               bool
-	EmbyPlaybackStatsEnabled       bool
-	EmbyPlaybackStatsUserEnabled   bool
-	EmbyPlaybackStatsUserSelfOnly  bool
-	EmbyPlaybackStatsUserRankings  bool
-	EmbyPlaybackStatsItemRankings  bool
-	EmbyPlaybackStatsDailySummary  bool
-	EmbyPlaybackStatsUserDay       bool
-	EmbyPlaybackStatsUserWeek      bool
-	EmbyPlaybackStatsUserMonth     bool
-	EmbyPlaybackStatsUserCustom    bool
-	EmbyPlaybackStatsUserMaxDays   int
 	EmbyUsername                   string
 	EmbyPassword                   string
 	EmbyURLList                    []Line
@@ -384,7 +372,6 @@ func Load(path string) (Config, error) {
 	cfg.Port = reader.intValue(cfg.Port, "API.port", "port")
 	cfg.MaxUploadSize = reader.int64Value(cfg.MaxUploadSize, "API.max_upload_size", "max_upload_size")
 	cfg.CORSOrigins = reader.stringListValue(cfg.CORSOrigins, "API.cors_origins", "cors_origins")
-	cfg.CORSAllowAnyOrigin = reader.boolValue(cfg.CORSAllowAnyOrigin, "API.cors_allow_any_origin", "cors_allow_any_origin")
 	cfg.TrustProxyHeaders = reader.boolValue(cfg.TrustProxyHeaders, "API.trust_proxy_headers", "trust_proxy_headers")
 	cfg.TrustedProxyCIDRs = reader.stringListValue(cfg.TrustedProxyCIDRs, "API.trusted_proxy_cidrs", "trusted_proxy_cidrs")
 	cfg.SessionCookie = reader.stringValue(cfg.SessionCookie, "Security.session_cookie_name", "API.session_cookie_name", "session_cookie_name")
@@ -401,22 +388,6 @@ func Load(path string) (Config, error) {
 	cfg.EmbyURL = reader.stringValue(cfg.EmbyURL, "Emby.emby_url", "emby_url")
 	cfg.EmbyToken = reader.stringValue(cfg.EmbyToken, "Emby.emby_token", "emby_token")
 	cfg.EmbyStatsEnabled = reader.boolValue(cfg.EmbyStatsEnabled, "Emby.emby_stats_enabled", "emby_stats_enabled")
-	cfg.EmbyPlaybackStatsEnabled = reader.boolValue(cfg.EmbyPlaybackStatsEnabled, "Emby.emby_playback_stats_enabled", "emby_playback_stats_enabled")
-	cfg.EmbyPlaybackStatsUserEnabled = reader.boolValue(cfg.EmbyPlaybackStatsUserEnabled, "Emby.emby_playback_stats_user_enabled", "emby_playback_stats_user_enabled")
-	cfg.EmbyPlaybackStatsUserSelfOnly = reader.boolValue(cfg.EmbyPlaybackStatsUserSelfOnly, "Emby.emby_playback_stats_user_self_only", "emby_playback_stats_user_self_only")
-	cfg.EmbyPlaybackStatsUserRankings = reader.boolValue(cfg.EmbyPlaybackStatsUserRankings, "Emby.emby_playback_stats_user_rankings", "emby_playback_stats_user_rankings")
-	cfg.EmbyPlaybackStatsItemRankings = reader.boolValue(cfg.EmbyPlaybackStatsItemRankings, "Emby.emby_playback_stats_item_rankings", "emby_playback_stats_item_rankings")
-	cfg.EmbyPlaybackStatsDailySummary = reader.boolValue(cfg.EmbyPlaybackStatsDailySummary, "Emby.emby_playback_stats_daily_summary", "emby_playback_stats_daily_summary")
-	cfg.EmbyPlaybackStatsUserDay = reader.boolValue(cfg.EmbyPlaybackStatsUserDay, "Emby.emby_playback_stats_user_day", "emby_playback_stats_user_day")
-	cfg.EmbyPlaybackStatsUserWeek = reader.boolValue(cfg.EmbyPlaybackStatsUserWeek, "Emby.emby_playback_stats_user_week", "emby_playback_stats_user_week")
-	cfg.EmbyPlaybackStatsUserMonth = reader.boolValue(cfg.EmbyPlaybackStatsUserMonth, "Emby.emby_playback_stats_user_month", "emby_playback_stats_user_month")
-	cfg.EmbyPlaybackStatsUserCustom = reader.boolValue(cfg.EmbyPlaybackStatsUserCustom, "Emby.emby_playback_stats_user_custom", "emby_playback_stats_user_custom")
-	cfg.EmbyPlaybackStatsUserMaxDays = reader.intValue(cfg.EmbyPlaybackStatsUserMaxDays, "Emby.emby_playback_stats_user_max_days", "emby_playback_stats_user_max_days")
-	if cfg.EmbyPlaybackStatsUserMaxDays <= 0 {
-		cfg.EmbyPlaybackStatsUserMaxDays = 365
-	} else if cfg.EmbyPlaybackStatsUserMaxDays > 365 {
-		cfg.EmbyPlaybackStatsUserMaxDays = 365
-	}
 	cfg.EmbyUsername = reader.stringValue(cfg.EmbyUsername, "Emby.emby_username", "emby_username")
 	cfg.EmbyPassword = reader.stringValue(cfg.EmbyPassword, "Emby.emby_password", "emby_password")
 	cfg.EmbyPublicURL = reader.stringValue(cfg.EmbyPublicURL, "Emby.emby_public_url", "emby_public_url")
@@ -613,39 +584,28 @@ func defaultConfigPath() string {
 
 func defaults() Config {
 	return Config{
-		AppName:                       "Twilight",
-		Version:                       "0.0.6",
-		Host:                          "0.0.0.0",
-		Port:                          5000,
-		DatabaseDir:                   "db",
-		DatabaseDriver:                "postgres",
-		PostgresHost:                  "127.0.0.1",
-		PostgresPort:                  5432,
-		PostgresUser:                  "twilight",
-		PostgresDatabase:              "twilight",
-		PostgresSSLMode:               "prefer",
-		PostgresMaxOpenConns:          8,
-		PostgresMaxIdleConns:          4,
-		UploadDir:                     "uploads",
-		MaxUploadSize:                 5 * 1024 * 1024,
-		LogLevel:                      "info",
-		RuntimeLogLimit:               5000,
-		CORSOrigins:                   []string{"http://localhost:3000", "http://127.0.0.1:3000"},
-		AllowCredential:               true,
-		TrustProxyHeaders:             false,
-		EmbyStatsEnabled:              true,
-		EmbyPlaybackStatsEnabled:      true,
-		EmbyPlaybackStatsUserEnabled:  true,
-		EmbyPlaybackStatsUserSelfOnly: true,
-		EmbyPlaybackStatsUserRankings: true,
-		EmbyPlaybackStatsItemRankings: true,
-		EmbyPlaybackStatsDailySummary: true,
-		EmbyPlaybackStatsUserDay:      true,
-		EmbyPlaybackStatsUserWeek:     true,
-		EmbyPlaybackStatsUserMonth:    true,
-		EmbyPlaybackStatsUserCustom:   true,
-		EmbyPlaybackStatsUserMaxDays:  365,
-		SessionCookie:                 "twilight_session",
+		AppName:              "Twilight",
+		Version:              "0.0.6",
+		Host:                 "0.0.0.0",
+		Port:                 5000,
+		DatabaseDir:          "db",
+		DatabaseDriver:       "postgres",
+		PostgresHost:         "127.0.0.1",
+		PostgresPort:         5432,
+		PostgresUser:         "twilight",
+		PostgresDatabase:     "twilight",
+		PostgresSSLMode:      "prefer",
+		PostgresMaxOpenConns: 8,
+		PostgresMaxIdleConns: 4,
+		UploadDir:            "uploads",
+		MaxUploadSize:        5 * 1024 * 1024,
+		LogLevel:             "info",
+		RuntimeLogLimit:      5000,
+		CORSOrigins:          []string{"http://localhost:3000", "http://127.0.0.1:3000"},
+		AllowCredential:      true,
+		TrustProxyHeaders:    false,
+		EmbyStatsEnabled:     true,
+		SessionCookie:        "twilight_session",
 		// CookieSecure 默认 true：HTTPS 是生产基线，HTTP 调试场景显式
 		// 改 toml 或 env 关掉。旧默认 false 在 HTTP 部署时也不告警，
 		// 一旦运维忘改 production toml 即等于 session 明文走线。
@@ -889,44 +849,6 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("TWILIGHT_EMBY_TOKEN"); v != "" {
 		cfg.EmbyToken = v
-	}
-	if v := os.Getenv("TWILIGHT_EMBY_PLAYBACK_STATS_ENABLED"); v != "" {
-		cfg.EmbyPlaybackStatsEnabled = boolValue(v, cfg.EmbyPlaybackStatsEnabled)
-	}
-	if v := os.Getenv("TWILIGHT_EMBY_PLAYBACK_STATS_USER_ENABLED"); v != "" {
-		cfg.EmbyPlaybackStatsUserEnabled = boolValue(v, cfg.EmbyPlaybackStatsUserEnabled)
-	}
-	if v := os.Getenv("TWILIGHT_EMBY_PLAYBACK_STATS_USER_SELF_ONLY"); v != "" {
-		cfg.EmbyPlaybackStatsUserSelfOnly = boolValue(v, cfg.EmbyPlaybackStatsUserSelfOnly)
-	}
-	if v := os.Getenv("TWILIGHT_EMBY_PLAYBACK_STATS_USER_RANKINGS"); v != "" {
-		cfg.EmbyPlaybackStatsUserRankings = boolValue(v, cfg.EmbyPlaybackStatsUserRankings)
-	}
-	if v := os.Getenv("TWILIGHT_EMBY_PLAYBACK_STATS_ITEM_RANKINGS"); v != "" {
-		cfg.EmbyPlaybackStatsItemRankings = boolValue(v, cfg.EmbyPlaybackStatsItemRankings)
-	}
-	if v := os.Getenv("TWILIGHT_EMBY_PLAYBACK_STATS_DAILY_SUMMARY"); v != "" {
-		cfg.EmbyPlaybackStatsDailySummary = boolValue(v, cfg.EmbyPlaybackStatsDailySummary)
-	}
-	if v := os.Getenv("TWILIGHT_EMBY_PLAYBACK_STATS_USER_DAY"); v != "" {
-		cfg.EmbyPlaybackStatsUserDay = boolValue(v, cfg.EmbyPlaybackStatsUserDay)
-	}
-	if v := os.Getenv("TWILIGHT_EMBY_PLAYBACK_STATS_USER_WEEK"); v != "" {
-		cfg.EmbyPlaybackStatsUserWeek = boolValue(v, cfg.EmbyPlaybackStatsUserWeek)
-	}
-	if v := os.Getenv("TWILIGHT_EMBY_PLAYBACK_STATS_USER_MONTH"); v != "" {
-		cfg.EmbyPlaybackStatsUserMonth = boolValue(v, cfg.EmbyPlaybackStatsUserMonth)
-	}
-	if v := os.Getenv("TWILIGHT_EMBY_PLAYBACK_STATS_USER_CUSTOM"); v != "" {
-		cfg.EmbyPlaybackStatsUserCustom = boolValue(v, cfg.EmbyPlaybackStatsUserCustom)
-	}
-	if v := os.Getenv("TWILIGHT_EMBY_PLAYBACK_STATS_USER_MAX_DAYS"); v != "" {
-		cfg.EmbyPlaybackStatsUserMaxDays = intValue(v, cfg.EmbyPlaybackStatsUserMaxDays)
-		if cfg.EmbyPlaybackStatsUserMaxDays <= 0 {
-			cfg.EmbyPlaybackStatsUserMaxDays = 365
-		} else if cfg.EmbyPlaybackStatsUserMaxDays > 365 {
-			cfg.EmbyPlaybackStatsUserMaxDays = 365
-		}
 	}
 	if v := os.Getenv("TWILIGHT_TELEGRAM_BOT_TOKEN"); v != "" {
 		cfg.TelegramBotToken = v

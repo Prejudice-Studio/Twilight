@@ -148,7 +148,7 @@ pnpm start -p 3000
 部署形态：
 
 - 同域部署：前端把 `/api/*` 反代到后端时，`NEXT_PUBLIC_API_URL` 可以留空。
-- 分离域名部署：必须把 `NEXT_PUBLIC_API_URL` 设为后端的 HTTPS 地址，并在后端 `cors_origins` 中逐项列出前端域名。
+- 分离域名部署：把 `NEXT_PUBLIC_API_URL` 设为后端的 HTTPS 地址；`cors_origins` 留空或设为 `["*"]` 时会反射合法 Origin，填写列表后只允许列表内前端域名。
 - 登录态由客户端 layout 调 `/users/me` 校验，避免 Web 域无法读取 API 域 cookie 时误判。
 
 `cors_origins` 只能填写协议、主机和端口，例如 `https://panel.example.com`；尾斜杠会被自动处理，但不要带 `/admin` 这类路径。
@@ -160,11 +160,11 @@ pnpm start -p 3000
 | 配置项 | 取值 | 说明 |
 | --- | --- | --- |
 | `session_cookie_secure` / `TWILIGHT_SESSION_COOKIE_SECURE` | `true` | 生产基线，默认即为 `true`；只有 HTTP 调试时才临时关闭。 |
-| `cors_origins` / `TWILIGHT_API_CORS_ORIGINS` | 前端 HTTPS 域名 | 显式逐项列出，例如 `https://app.example.com`。 |
+| `cors_origins` / `TWILIGHT_API_CORS_ORIGINS` | 前端 Origin 策略 | 留空为兼容模式；生产限制模式可逐项列出，例如 `https://app.example.com`。 |
 | `session_cookie_samesite` / `TWILIGHT_SESSION_COOKIE_SAMESITE` | `Strict` 或 `None` | 同站部署用 `Strict`；前后端跨域必须用 `None`（且 `secure=true`）。 |
 | `session_cookie_domain` / `TWILIGHT_SESSION_COOKIE_DOMAIN` | `.example.com` | 仅在前端与 API 是不同子域时设置为共同顶级域，让会话 cookie 跨子域共享；单 origin 部署应留空，写 Domain 反而扩大暴露面。 |
 
-- 不要把 `*` 作为带 Cookie 登录态接口的 CORS Origin——含 `*` 时浏览器会禁用 Cookie，登录会失败。
+- `*` 在 Twilight 中等价于兼容模式：后端反射具体合法 Origin，而不是向浏览器返回 `Access-Control-Allow-Origin: *`，因此仍可配合 Cookie 凭据使用。需要收紧来源时，请改为显式 Origin 列表。
 - 双子域场景（如 webui `https://twilight.example.com`、API `https://twilightapi.example.com`）若希望浏览器对两个子域都携带会话，必须设置 `session_cookie_domain = ".example.com"`。未共享 cookie 时，API 鉴权请求会返回 401，WebUI 会按 `/users/me` 的 401 清理登录态。
 
 ### 可信代理

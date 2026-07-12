@@ -35,14 +35,13 @@ import type {
   DatabaseStatus,
   DeveloperJSDocs,
   DeveloperJSPreset,
+  EmbyActivityLogsResponse,
   EmbyDevice,
   EmbyDeviceAuditData,
   EmbyInfo,
   EmbyLibraryStats,
   EmbyNowPlaying,
   EmbyOnlineInfo,
-  EmbyPlaybackStats,
-  EmbyPlaybackStatsParams,
   EmbyRegisterStatus,
   EmbySession,
   LoginDevice,
@@ -1244,12 +1243,12 @@ class ApiClient {
     return this.request<SystemStats>("/system/admin/stats");
   }
 
-  async getEmbyLibraryStats() {
-    return this.request<EmbyLibraryStats>("/system/emby-stats");
+  async getEmbyLibraryStats(signal?: AbortSignal) {
+    return this.request<EmbyLibraryStats>("/system/emby-stats", { signal });
   }
 
-  async getEmbyViewerCount() {
-    return this.request<{ viewers: number }>("/system/emby-viewers");
+  async getEmbyViewerCount(signal?: AbortSignal) {
+    return this.request<{ viewers: number }>("/system/emby-viewers", { signal });
   }
 
   async getRuntimeStatus() {
@@ -1530,14 +1529,17 @@ class ApiClient {
 
   // Emby 登录用户的设备 / IP 审查（按用户聚合）：
   // /Devices 设备清单 + 实时 /Sessions IP + 活动日志历史登录 IP，映射完整本地账号。
-  async adminGetEmbyDeviceAudit(refresh = false) {
-    return this.request<EmbyDeviceAuditData>(`/admin/emby/device-audit${refresh ? "?refresh=1" : ""}`);
+  async adminGetEmbyDeviceAudit(refresh = false, signal?: AbortSignal) {
+    return this.request<EmbyDeviceAuditData>(`/admin/emby/device-audit${refresh ? "?refresh=1" : ""}`, { signal });
   }
 
-  async adminGetEmbyActivityLogs(limit = 100, refresh = false, auto = true) {
-    return this.request<{ entries: any[]; total: number; refreshed?: boolean; new_entries?: number }>(
-      `/admin/emby/activity-logs?limit=${limit}${refresh ? "&refresh=1" : ""}${auto ? "" : "&auto=0"}`,
-    );
+  async adminGetEmbyActivityLogs(limit = 100, refresh = false, sinceHours = 24) {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (refresh) {
+      params.set("refresh", "1");
+      params.set("since_hours", String(sinceHours));
+    }
+    return this.request<EmbyActivityLogsResponse>(`/admin/emby/activity-logs?${params.toString()}`);
   }
 
   async getEmbyNowPlaying(signal?: AbortSignal) {
@@ -1546,48 +1548,6 @@ class ApiClient {
 
   async getEmbyOnline(signal?: AbortSignal) {
     return this.request<EmbyOnlineInfo>("/emby/online", { signal });
-  }
-
-  async getEmbyPlaybackStats(params: EmbyPlaybackStatsParams = {}, signal?: AbortSignal) {
-    const query = new URLSearchParams();
-    if (params.scope) query.set("scope", params.scope);
-    if (params.uid && params.uid > 0) query.set("uid", String(params.uid));
-    if (params.period) query.set("period", params.period);
-    if (params.from) query.set("from", params.from);
-    if (params.to) query.set("to", params.to);
-    if (params.days && params.days > 0) query.set("days", String(params.days));
-    if (params.today) query.set("today", "1");
-    if (params.group_by) query.set("group_by", params.group_by);
-    if (params.media_type) query.set("media_type", params.media_type);
-    if (params.query) query.set("query", params.query);
-    if (params.min_duration && params.min_duration > 0) query.set("min_duration", String(params.min_duration));
-    if (params.limit && params.limit > 0) query.set("limit", String(params.limit));
-    if (params.sort) query.set("sort", params.sort);
-    if (params.refresh) query.set("refresh", "1");
-    const suffix = query.toString();
-    return this.request<EmbyPlaybackStats>(`/emby/playback-stats${suffix ? `?${suffix}` : ""}`, { signal });
-  }
-
-  async adminGetEmbyPlaybackStats(params: EmbyPlaybackStatsParams = {}, signal?: AbortSignal) {
-    const query = new URLSearchParams();
-    const path = params.uid && params.uid > 0
-      ? `/admin/emby/playback-stats/${encodeURIComponent(String(params.uid))}`
-      : "/admin/emby/playback-stats";
-    if (params.scope) query.set("scope", params.scope);
-    if (params.period) query.set("period", params.period);
-    if (params.from) query.set("from", params.from);
-    if (params.to) query.set("to", params.to);
-    if (params.days && params.days > 0) query.set("days", String(params.days));
-    if (params.today) query.set("today", "1");
-    if (params.group_by) query.set("group_by", params.group_by);
-    if (params.media_type) query.set("media_type", params.media_type);
-    if (params.query) query.set("query", params.query);
-    if (params.min_duration && params.min_duration > 0) query.set("min_duration", String(params.min_duration));
-    if (params.limit && params.limit > 0) query.set("limit", String(params.limit));
-    if (params.sort) query.set("sort", params.sort);
-    if (params.refresh) query.set("refresh", "1");
-    const suffix = query.toString();
-    return this.request<EmbyPlaybackStats>(`${path}${suffix ? `?${suffix}` : ""}`, { signal });
   }
 
   // 设备/IP 审查页的快速处置：按 Emby 用户 ID 单独启停 Emby（已关联本地用户时后端会

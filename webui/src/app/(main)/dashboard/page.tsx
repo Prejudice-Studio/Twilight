@@ -109,6 +109,7 @@ export default function DashboardPage() {
   const [embyStats, setEmbyStats] = useState<any>(null);
   const [embyViewers, setEmbyViewers] = useState(0);
   const [nowPlaying, setNowPlaying] = useState<EmbyNowPlaying | null>(null);
+  const [embyStatsRefreshing, setEmbyStatsRefreshing] = useState(false);
   const [myRequests, setMyRequests] = useState<MediaRequest[]>([]);
   const [lineSlots, setLineSlots] = useState<LineSlot[]>([]);
   const [linesRequireEmby, setLinesRequireEmby] = useState(false);
@@ -303,18 +304,31 @@ export default function DashboardPage() {
     error,
   } = useAsyncResource(loadDashboardData, { immediate: true });
 
-  const loadEmbyLibraryStats = useCallback(async () => {
-    const result = await api.getEmbyLibraryStats();
-    if (result.success && result.data) setEmbyStats(result.data);
-  }, []);
+  const loadEmbyLibraryStats = useCallback(async (notify = false, signal?: AbortSignal) => {
+    setEmbyStatsRefreshing(true);
+    try {
+      const result = await api.getEmbyLibraryStats(signal);
+      if (signal?.aborted) return;
+      if (result.success && result.data) {
+        setEmbyStats(result.data);
+        if (notify) toast({ title: t("adminStatus.updated"), variant: "success" });
+      } else if (notify) {
+        toast({ title: t("dashboard.libraryStatsUnavailable"), description: result.message, variant: "destructive" });
+      }
+    } finally {
+      if (!signal?.aborted) setEmbyStatsRefreshing(false);
+    }
+  }, [t, toast]);
 
-  const loadEmbyViewers = useCallback(async () => {
-    const result = await api.getEmbyViewerCount();
+  const loadEmbyViewers = useCallback(async (signal?: AbortSignal) => {
+    const result = await api.getEmbyViewerCount(signal);
+    if (signal?.aborted) return;
     if (result.success) setEmbyViewers(result.data?.viewers ?? 0);
   }, []);
 
-  const loadNowPlaying = useCallback(async () => {
-    const result = await api.getEmbyNowPlaying();
+  const loadNowPlaying = useCallback(async (signal?: AbortSignal) => {
+    const result = await api.getEmbyNowPlaying(signal);
+    if (signal?.aborted) return;
     if (result.success && result.data) setNowPlaying(result.data);
   }, []);
 
@@ -325,12 +339,13 @@ export default function DashboardPage() {
       setEmbyViewers(0);
       return;
     }
-    void loadEmbyLibraryStats();
+    const controller = new AbortController();
+    void loadEmbyLibraryStats(false, controller.signal);
+    return () => controller.abort();
   }, [loadEmbyLibraryStats, systemInfo?.features?.emby_stats]);
 
   const embyStatsEnabled = systemInfo?.features?.emby_stats === true;
   useVisiblePolling(loadEmbyViewers, 60000, embyStatsEnabled);
-  useVisiblePolling(loadEmbyLibraryStats, 300000, embyStatsEnabled);
   useVisiblePolling(loadNowPlaying, 30000, embyStatsEnabled);
 
   // ============== 线路延迟测试 ==============
@@ -977,11 +992,6 @@ export default function DashboardPage() {
             <p className="text-xs text-muted-foreground truncate">
               {t("dashboard.version", { version: embyInfo?.version || "--" })}
             </p>
-            {embyInfo?.monthly_playback_str && (
-              <p className="text-xs text-muted-foreground">
-                {t("dashboard.monthlyPlayback")}{embyInfo.monthly_playback_str}
-              </p>
-            )}
             {user?.emby_id ? (
               <p className="text-xs text-muted-foreground break-all" title={user.emby_id}>
                 {t("dashboard.myEmby")}<span className="font-mono">{user.emby_id}</span>
@@ -1001,9 +1011,15 @@ export default function DashboardPage() {
               </div>
               <h3 className="text-sm font-black uppercase tracking-widest text-muted-foreground">{t("dashboard.mediaOverview")}</h3>
             </div>
-            <Badge variant={embyViewers > 0 ? "success" : "outline"} className="text-[10px] shrink-0">
-              {t("dashboard.liveNow", { count: embyViewers })}
-            </Badge>
+            <div className="flex shrink-0 items-center gap-2">
+              <Badge variant={embyViewers > 0 ? "success" : "outline"} className="text-[10px]">
+                {t("dashboard.liveNow", { count: embyViewers })}
+              </Badge>
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => void loadEmbyLibraryStats(true)} disabled={embyStatsRefreshing}>
+                {embyStatsRefreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                <span className="sr-only">{t("common.refresh")}</span>
+              </Button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2 text-xs">

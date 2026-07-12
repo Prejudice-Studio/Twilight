@@ -36,7 +36,6 @@ import {
   MessageSquareMore,
   Shield,
   Code2,
-  BarChart3,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
@@ -102,7 +101,6 @@ export const adminNavItems: SidebarNavItem[] = [
   { href: "/admin/scheduler", labelKey: "navigation.scheduler", icon: TimerReset, category: "system" },
   { href: "/admin/logs", labelKey: "navigation.runtimeLogs", icon: ScrollText, category: "system" },
   { href: "/admin/test", labelKey: "navigation.serverInfo", icon: TestTube, category: "system" },
-  { href: "/stats/playback", label: "播放统计", icon: BarChart3, category: "system" },
   { href: "/admin/developer", labelKey: "navigation.developerMode", icon: Code2, category: "system" },
 ];
 

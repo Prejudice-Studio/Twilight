@@ -38,7 +38,6 @@
 | [邀请树](./features/invite.md) | 邀请关系管理、配置、用户/管理员接口、删除与启停级联语义 |
 | [公告系统](./features/announcements.md) | 公告渲染模式（plain / markdown / bbcode）与前端安全清洗 |
 | [Bangumi 同步](./features/bangumi.md) | Emby Webhook、Bangumi Token、用户个人同步规则 |
-| [播放统计](./features/playback-stats.md) | Emby 活动日志采集、播放统计接口、自动刷新策略与当前时长限制 |
 | [背景与头像](./features/background.md) | 受控上传资源读取、背景 CSS 安全约束 |
 | [Telegram Bot 命令](./features/telegram-bot.md) | Bot 命令、权限边界、群聊安全约束与文案配置 |
 

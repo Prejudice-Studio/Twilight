@@ -2,9 +2,9 @@
 
 本文介绍 Twilight Go 后端的目录结构、启动方式、配置解析规则、环境变量、状态存储模型以及运行运维相关能力，供部署和二次开发参考。后端入口为 `cmd/twilight`，按 Linux + systemd 部署设计，前端调用路径统一为 `/api/v1/*`。
 
-## 播放统计持久化
+## Emby 活动日志与播放记录
 
-Emby 播放统计同步 `/System/ActivityLog/Entries` 后，会按 `playback.start` / `playback.stop` 配对并写入 `store.PlaybackRecords`。统计、导出、保留策略与 Bangumi 同步应优先读取这些持久化记录；在线人数只统计 `/Sessions` 中带 `NowPlayingItem` 的正在播放会话。
+Emby 活动日志同步 `/System/ActivityLog/Entries` 后，会按 `playback.start` / `playback.stop` 配对并幂等写入 `store.PlaybackRecords`，供 Bangumi 同步等内部流程复用。播放统计页面、统计 API 与导出入口已移除；在线人数只统计 `/Sessions` 中带 `NowPlayingItem` 的正在播放会话。
 
 ## 目录结构
 
@@ -98,7 +98,7 @@ systemd 部署对应三个服务单元：`twilight`、`twilight-bot`、`twilight
 | 备份目录 | `DatabaseBackupDir` 为空时回退到 `<databases_dir>/backups` |
 | 上传目录 | `uploads`，单文件上限 5 MiB |
 | 日志 | `log_level=info`、`runtime_log_limit=5000` |
-| CORS | `http://localhost:3000`、`http://127.0.0.1:3000`（生产必须改成 HTTPS 域名） |
+| CORS | 空列表时反射合法 `http`/`https` Origin；显式列表时只允许列表内 Origin |
 | 会话 Cookie | 名 `twilight_session`、`Secure=true`、`SameSite=lax`、TTL 7 天 |
 | 注册 | `register_mode`、`emby_direct_register_enabled`、`allow_pending_register` 均默认 `false`（secure-by-default） |
 | 限流 | 默认开启，全局 1200/分钟、登录 60/分钟等 |
@@ -108,9 +108,9 @@ systemd 部署对应三个服务单元：`twilight`、`twilight-bot`、`twilight
 
 ### CORS 约束
 
-生产环境若前端与 API 跨 origin 部署，必须把 `API.cors_origins` / `TWILIGHT_API_CORS_ORIGINS` 显式设置为前端 HTTPS 域名。后端不会把 `*` 当作携带凭据接口的可信 Origin，避免低信任页面通过浏览器 JS 读取凭据接口响应。Origin 只允许协议 + 主机 + 端口；尾斜杠会被规范化，带路径、查询串或片段的值会被拒绝。若请求 Origin 与当前请求 Host 的协议、主机和端口完全一致，后端会按同源请求放行，无需把 API 自身 Origin 重复加入列表；该回退不会放行协议、主机或端口不同的跨域来源。
+`API.cors_origins` / `TWILIGHT_API_CORS_ORIGINS` 留空时，后端会反射任意合法的 `http`/`https` Origin，便于自托管、反代和双子域部署排障。填写显式列表后，跨 origin 请求只允许列表内 Origin；`*` 等价于兼容模式。Origin 只允许协议 + 主机 + 端口；尾斜杠会被规范化，带路径、查询串或片段的值会被拒绝。若请求 Origin 与当前请求 Host 的协议、主机和端口完全一致，后端会按同源请求放行，无需把 API 自身 Origin 重复加入列表。
 
-仅在紧急兼容排障时，可直接编辑服务器磁盘上的 TOML，在 `[API]` 中设置 `cors_allow_any_origin = true`。此隐藏开关默认关闭，不通过环境变量、结构化配置、网页原始配置编辑器或默认模板暴露；网页配置操作不能改变它。开启后任意非空 Origin 都会被反射放行，启动和热重载会输出高风险日志。不要将它作为长期生产配置。
+旧的隐藏 `cors_allow_any_origin` 开关已移除；请使用空 `cors_origins` 或 `["*"]` 进入兼容模式，或填写可信 Origin 列表进入限制模式。
 
 ## 常用环境变量
 
@@ -297,7 +297,7 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
   - `AuthAPIKey`：`X-API-Key` 头、`Authorization: ApiKey/Bearer` 或 `?apikey=` 查询参数。
 - Cookie 鉴权写请求不要求 CSRF 令牌，也不做额外来源校验；`X-Twilight-Client: webui` 不参与鉴权。
 - Cookie 会话默认 `HttpOnly`、`Secure=true`、`SameSite=Lax`；可通过 `CookieDomain` 跨子域共享。
-- CORS 必须显式列出可信 Origin；携带凭据接口不接受 `*`。
+- CORS 留空或 `*` 时进入兼容模式并反射合法 Origin；填写列表后只允许可信 Origin。
 - API Key 只保存哈希，明文仅创建时返回一次。
 - 上传接口只接受白名单内的栅格图片 MIME，写入受控目录；读取只接受服务端生成的文件名格式，并在返回前重新校验绝对路径仍位于上传目录内。
 - 数据库备份/状态迁移路径经过目录约束，拒绝路径穿越、绝对路径与符号链接。

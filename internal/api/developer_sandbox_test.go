@@ -82,7 +82,7 @@ func routeShouldRequireAdmin(pattern string) bool {
 	if strings.Contains(pattern, "/system/admin/") || strings.Contains(pattern, "/admin/") {
 		return true
 	}
-	if pattern == "/api/v1/system/stats" || pattern == "/api/v1/stats/user/:uid" {
+	if pattern == "/api/v1/system/stats" {
 		return true
 	}
 	if pattern == "/api/v1/media/request/pending" || pattern == "/api/v1/media/request/:request_id/status" {
@@ -95,7 +95,7 @@ func routeShouldRequireAdmin(pattern string) bool {
 			strings.HasPrefix(pattern, "/api/v1/security/users/")
 	}
 	if strings.HasPrefix(pattern, "/api/v1/batch/") {
-		return pattern != "/api/v1/batch/watch-stats"
+		return true
 	}
 	return false
 }

@@ -461,8 +461,6 @@ export interface EmbyInfo {
   movie_count?: number;
   series_count?: number;
   episode_count?: number;
-  monthly_playback_seconds?: number;
-  monthly_playback_str?: string;
 }
 
 export interface EmbyOnlineInfo {
@@ -577,6 +575,26 @@ export interface EmbyDeviceAuditData {
   summary: EmbyDeviceAuditSummary;
 }
 
+export interface EmbyActivityLogEntry {
+  id: number;
+  emby_log_id: number;
+  type: string;
+  name: string;
+  item_id?: string;
+  user_id: string;
+  user_name: string;
+  overview?: string;
+  date: number;
+  created_at: number;
+}
+
+export interface EmbyActivityLogsResponse {
+  entries: EmbyActivityLogEntry[];
+  total: number;
+  refreshed?: boolean;
+  new_entries?: number;
+}
+
 export interface EmbyLibraryStats {
   enabled: boolean;
   configured?: boolean;
@@ -585,57 +603,6 @@ export interface EmbyLibraryStats {
   episode_count?: number;
 }
 
-export interface EmbyPlaybackStats {
-  scope: "self" | "user" | "global";
-  uid?: number;
-  period: string;
-  from: string;
-  to: string;
-  group_by: "day" | "week" | "month";
-  media_type: "all" | "movie" | "series" | "other";
-  query?: string;
-  min_duration: number;
-  total_plays: number;
-  total_duration: number;
-  unique_items: number;
-  days: number;
-  limit: number;
-  can_view_global: boolean;
-  can_view_others: boolean;
-  source?: "playback_records" | "emby_activity_log" | "local_playback_records";
-  policy: {
-    user_enabled: boolean;
-    self_only: boolean;
-    can_view_global: boolean;
-    can_view_others: boolean;
-    show_user_rankings: boolean;
-    show_item_rankings: boolean;
-    show_daily_summary: boolean;
-    allowed_periods: Array<"day" | "week" | "month" | "custom">;
-    allowed_groupings: Array<"day" | "week" | "month">;
-    max_days: number;
-  };
-  user_rankings: Array<{ uid: number; username: string; plays: number; duration: number }>;
-  daily_breakdown: Array<{ date: string; plays: number; duration: number }>;
-  top_items: Array<{ id?: string; name: string; media_type?: string; image_url?: string; plays: number; duration: number }>;
-}
-
-export interface EmbyPlaybackStatsParams {
-  scope?: "self" | "user" | "global";
-  uid?: number;
-  period?: "today" | "day" | "week" | "month" | "custom" | "days";
-  from?: string;
-  to?: string;
-  days?: number;
-  today?: boolean;
-  group_by?: "day" | "week" | "month";
-  media_type?: "all" | "movie" | "series" | "other";
-  query?: string;
-  min_duration?: number;
-  limit?: number;
-  sort?: "plays" | "name" | "duration";
-  refresh?: boolean;
-}
 
 export interface EmbyNowPlayingItem {
   item_id: string;

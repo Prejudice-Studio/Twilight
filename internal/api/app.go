@@ -55,40 +55,36 @@ type App struct {
 	//   - store / sessions / limiter / redis 接口/指针的 (type,data) 双 word
 	//     非原子赋值导致 vtable 与 data 撕裂触发 segfault；
 	//   - reload 中途读端拿到 cfg 是 next、store 仍是 prev 的混合视图。
-	runtime                atomic.Pointer[runtimeState]
-	routes                 []Route
-	runtimeMu              sync.Mutex
-	setupMu                sync.Mutex
-	configSignature        string
-	telegramBotMu          sync.Mutex
-	telegramBotCacheToken  string
-	telegramBotCacheUntil  time.Time
-	telegramBotCache       map[string]any
-	telegramStatusMu       sync.Mutex
-	telegramLastOKAt       int64
-	telegramLastErrorAt    int64
-	telegramLastError      string
-	telegramPolling        bool
-	telegramPanelMu        sync.Mutex
-	telegramPanels         map[string]telegramPanelContext
-	developerJSMu          sync.Mutex
-	developerJSCallbacks   map[string]developerJSCallbackContext
-	developerJSWaiters     map[string]developerJSMessageWaiter
-	delAccountPendingMu    sync.Mutex
-	delAccountPending      map[string]*delAccountPendingState
-	embyAdminMu            sync.Mutex
-	embyAdminCache         map[string]embyAdminCacheEntry
-	embyDeviceAuditMu      sync.Mutex
-	embyDeviceAuditUntil   time.Time
-	embyDeviceAuditCache   map[string]any
-	embySessionsMu         sync.Mutex
-	embySessionsUntil      time.Time
-	embySessionsCache      []map[string]any
-	embyActivityMu         sync.Mutex
-	embyActivityNextAuto   time.Time
-	embyPlaybackStatsMu    sync.Mutex
-	embyPlaybackStatsCache map[string]embyPlaybackStatsCacheEntry
-	bindStatus             *bindStatusHub
+	runtime               atomic.Pointer[runtimeState]
+	routes                []Route
+	runtimeMu             sync.Mutex
+	setupMu               sync.Mutex
+	configSignature       string
+	telegramBotMu         sync.Mutex
+	telegramBotCacheToken string
+	telegramBotCacheUntil time.Time
+	telegramBotCache      map[string]any
+	telegramStatusMu      sync.Mutex
+	telegramLastOKAt      int64
+	telegramLastErrorAt   int64
+	telegramLastError     string
+	telegramPolling       bool
+	telegramPanelMu       sync.Mutex
+	telegramPanels        map[string]telegramPanelContext
+	developerJSMu         sync.Mutex
+	developerJSCallbacks  map[string]developerJSCallbackContext
+	developerJSWaiters    map[string]developerJSMessageWaiter
+	delAccountPendingMu   sync.Mutex
+	delAccountPending     map[string]*delAccountPendingState
+	embyAdminMu           sync.Mutex
+	embyAdminCache        map[string]embyAdminCacheEntry
+	embyDeviceAuditMu     sync.Mutex
+	embyDeviceAuditUntil  time.Time
+	embyDeviceAuditCache  map[string]any
+	embySessionsMu        sync.Mutex
+	embySessionsUntil     time.Time
+	embySessionsCache     []map[string]any
+	bindStatus            *bindStatusHub
 	// schedulerLocks: jobID -> *schedulerProcessRun。BATCH_07 之前在 package 级
 	// 声明 (`var schedulerProcessLocks sync.Map`)，单进程 prod 不显问题，但
 	// 测试 setup 反复 New() 出多个 App 时这张表共享 → 一个 case cancel 的 job
@@ -231,12 +227,11 @@ func New(cfg config.Config, st *store.Store) (*App, error) {
 		return nil, err
 	}
 	app := &App{
-		telegramPanels:         map[string]telegramPanelContext{},
-		developerJSCallbacks:   map[string]developerJSCallbackContext{},
-		developerJSWaiters:     map[string]developerJSMessageWaiter{},
-		embyAdminCache:         map[string]embyAdminCacheEntry{},
-		embyPlaybackStatsCache: map[string]embyPlaybackStatsCacheEntry{},
-		bindStatus:             newBindStatusHub(),
+		telegramPanels:       map[string]telegramPanelContext{},
+		developerJSCallbacks: map[string]developerJSCallbackContext{},
+		developerJSWaiters:   map[string]developerJSMessageWaiter{},
+		embyAdminCache:       map[string]embyAdminCacheEntry{},
+		bindStatus:           newBindStatusHub(),
 	}
 	app.runtime.Store(&runtimeState{
 		cfg:      cfg,
@@ -254,7 +249,7 @@ func New(cfg config.Config, st *store.Store) (*App, error) {
 	// applyCORS 默认就附带 Allow-Credentials: true，浏览器规范本就拒绝
 	// `*` + credentials 组合；早期管理员若误填 `*` 会得到一个静默无效的配置。
 	// 这里在启动 / reload 时强提示，配 .Error 让审计/告警系统能抓到。
-	validateCORSOriginsStartup(cfg.CORSOrigins, cfg.AllowCredential, cfg.CORSAllowAnyOrigin)
+	validateCORSOriginsStartup(cfg.CORSOrigins, cfg.AllowCredential)
 	validateTrustedProxyStartup(cfg.TrustProxyHeaders, cfg.TrustedProxyCIDRs)
 	ConfigureRuntimeLoggingStore(st, cfg.ZapLevel(), cfg.RuntimeLogLimit)
 	return app, nil
@@ -417,9 +412,8 @@ func (a *App) reloadConfigLocked() (map[string]any, error) {
 
 	// reload 也走一遍 CORS 校验，捕获 hot reload 引入的错配置。
 	if !sameStringSlice(previous.CORSOrigins, next.CORSOrigins) ||
-		previous.AllowCredential != next.AllowCredential ||
-		previous.CORSAllowAnyOrigin != next.CORSAllowAnyOrigin {
-		validateCORSOriginsStartup(next.CORSOrigins, next.AllowCredential, next.CORSAllowAnyOrigin)
+		previous.AllowCredential != next.AllowCredential {
+		validateCORSOriginsStartup(next.CORSOrigins, next.AllowCredential)
 	}
 	if previous.TrustProxyHeaders != next.TrustProxyHeaders ||
 		!sameStringSlice(previous.TrustedProxyCIDRs, next.TrustedProxyCIDRs) {
@@ -514,9 +508,6 @@ func liveAppliedConfigFields(previous, next config.Config) []string {
 	}
 	if previous.AllowCredential != next.AllowCredential {
 		add("allow_credential")
-	}
-	if previous.CORSAllowAnyOrigin != next.CORSAllowAnyOrigin {
-		add("cors_allow_any_origin")
 	}
 	if previous.TrustProxyHeaders != next.TrustProxyHeaders {
 		add("trust_proxy_headers")
@@ -861,14 +852,11 @@ func (a *App) applyCORS(w http.ResponseWriter, r *http.Request) bool {
 	if origin == "" {
 		return false
 	}
-	allowAnyOrigin := a.cfg().CORSAllowAnyOrigin
-	if !allowAnyOrigin {
-		origin = normalizeCORSOrigin(origin)
-		if origin == "" {
-			return false
-		}
+	origin = normalizeCORSOrigin(origin)
+	if origin == "" {
+		return false
 	}
-	allowed := allowAnyOrigin || a.corsOriginAllowed(origin) || a.corsOriginMatchesHost(origin, r)
+	allowed := a.corsOriginAllowed(origin) || a.corsOriginMatchesHost(origin, r) || a.corsOriginRelaxed()
 	if !allowed {
 		return false
 	}
@@ -901,6 +889,17 @@ func (a *App) corsOriginAllowed(origin string) bool {
 		}
 	}
 	return false
+}
+
+func (a *App) corsOriginRelaxed() bool {
+	for _, candidate := range a.cfg().CORSOrigins {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		return candidate == "*"
+	}
+	return true
 }
 
 // corsOriginMatchesHost returns whether Origin matches the current request host
@@ -955,14 +954,12 @@ func isPrefetchRequest(r *http.Request) bool {
 //
 // 函数本身不返回 error，仅打印 —— App 不会因为 CORS 错配置启动失败，
 // 因为反代/容器重启场景下这往往是非致命的退化。
-func validateCORSOriginsStartup(origins []string, allowCredential, allowAnyOrigin bool) {
-	if allowAnyOrigin {
-		zap.L().Error(
-			"cors_allow_any_origin=true：已关闭 CORS Origin 格式、白名单和同源校验，任意非空 Origin 都可访问 API；仅限临时兼容排障使用",
+func validateCORSOriginsStartup(origins []string, allowCredential bool) {
+	if len(origins) == 0 {
+		zap.L().Info(
+			"cors_origins is empty; valid http/https Origins will be reflected for easier self-hosting setup",
 			zap.Bool("allow_credential", allowCredential),
 		)
-	}
-	if len(origins) == 0 {
 		return
 	}
 	var hasWildcard bool
@@ -989,11 +986,11 @@ func validateCORSOriginsStartup(origins []string, allowCredential, allowAnyOrigi
 		cleaned = append(cleaned, o)
 	}
 	if hasWildcard {
-		zap.L().Error(
-			"cors_origins 包含 `*` 通配符；运行期会被忽略并禁用 Allow-Credentials："+
-				"浏览器规范禁止 `*` 与 credentials 同用，请改填具体 origin 列表",
+		zap.L().Info(
+			"cors_origins contains `*`; valid http/https Origins will be reflected for compatibility",
 			zap.Strings("configured_origins", origins),
 			zap.Strings("effective_origins", cleaned),
+			zap.Bool("allow_credential", allowCredential),
 		)
 	}
 	if len(invalid) > 0 {
@@ -1006,9 +1003,8 @@ func validateCORSOriginsStartup(origins []string, allowCredential, allowAnyOrigi
 	// 任何用户在本机起 dev 前端就能携带 cookie 跨站访问。dev 场景应通过显式 dev profile
 	// 而不是默认放行。
 	if allowCredential && hasLocalhost {
-		zap.L().Error(
-			"cors_origins 中包含 localhost/127.0.0.1，且 allow_credential=true。"+
-				"生产部署请移除本地回环 origin，或将 allow_credential 设为 false。",
+		zap.L().Warn(
+			"cors_origins includes localhost/127.0.0.1 while allow_credential=true; keep this only for development or trusted local deployments",
 			zap.Strings("configured_origins", origins),
 		)
 	}
@@ -1500,7 +1496,7 @@ func maskAPIKey(key string) (prefix, suffix, masked string) {
 //
 //  1. 路由表手抖把 admin handler 挂到 AuthUser；
 //  2. 同一 handler 同时挂在 AuthUser / AuthAdmin 两条路由（典型如
-//     handleLoginHistory / handleWatchStats / handleDevices），handler 内部
+//     handleLoginHistory / handleDevices），handler 内部
 //     靠 path string 推断鉴权时漏判；
 //  3. 未来引入 ApiKey / TG webhook 等新鉴权来源时绕过 AuthAdmin。
 //

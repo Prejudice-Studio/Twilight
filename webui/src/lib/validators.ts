@@ -318,7 +318,6 @@ export const ERROR_CODE_FRIENDLY: Partial<Record<ErrCode, string>> = {
   ADMIN_EMBY_PASSWORD_RESET_FAILED: "重置 Emby 密码失败，请稍后重试",
   ADMIN_LAST_ADMIN_PROTECTED: "无法移除最后一个管理员的权限，系统至少需要一个管理员",
   API_KEY_SELF_PERMISSION_FORBIDDEN: "不允许通过当前 API Key 修改自身权限",
-  WATCH_STATS_FORBIDDEN: "无权查看其它用户的观看统计",
   // 中间件层（IP 黑名单 / 全局限流 / 路由分发）
   SECURITY_IP_BLACKLISTED: "当前 IP 已被封禁，请联系管理员申请解封",
   RATE_GLOBAL_LIMITED: "全局请求过于频繁，请稍后再试",

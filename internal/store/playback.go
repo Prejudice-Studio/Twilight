@@ -50,17 +50,17 @@ func (s *Store) SyncEmbyActivityLogs(entries []EmbyActivityLog) (int, error) {
 	added := 0
 	err := s.mutateAndSaveLocked(func() error {
 		if s.state.NextEmbyActivityLogID <= 0 {
-			max := int64(0)
-			for _, e := range s.state.EmbyActivityLogs {
-				if e.ID > max {
-					max = e.ID
+			maxID := int64(0)
+			for _, entry := range s.state.EmbyActivityLogs {
+				if entry.ID > maxID {
+					maxID = entry.ID
 				}
 			}
-			s.state.NextEmbyActivityLogID = max + 1
+			s.state.NextEmbyActivityLogID = maxID + 1
 		}
 		existing := map[int64]int{}
-		for i, e := range s.state.EmbyActivityLogs {
-			existing[e.EmbyLogID] = i
+		for i, entry := range s.state.EmbyActivityLogs {
+			existing[entry.EmbyLogID] = i
 		}
 		for _, entry := range entries {
 			if index, ok := existing[entry.EmbyLogID]; ok {
@@ -88,8 +88,8 @@ func (s *Store) SyncEmbyActivityLogs(entries []EmbyActivityLog) (int, error) {
 			return s.state.EmbyActivityLogs[i].EmbyLogID < s.state.EmbyActivityLogs[j].EmbyLogID
 		})
 		if len(s.state.EmbyActivityLogs) > maxEmbyActivityLogs {
-			cut := len(s.state.EmbyActivityLogs) - maxEmbyActivityLogs
-			s.state.EmbyActivityLogs = s.state.EmbyActivityLogs[cut:]
+			trim := len(s.state.EmbyActivityLogs) - maxEmbyActivityLogs
+			s.state.EmbyActivityLogs = s.state.EmbyActivityLogs[trim:]
 		}
 		return nil
 	})
@@ -104,21 +104,21 @@ func (s *Store) ListEmbyActivityLogs(uid int64, limit int) []EmbyActivityLog {
 	}
 	embyUIDs := map[string]int64{}
 	if uid > 0 {
-		for _, u := range s.state.Users {
-			if u.EmbyID != "" {
-				embyUIDs[u.EmbyID] = u.UID
+		for _, user := range s.state.Users {
+			if user.EmbyID != "" {
+				embyUIDs[user.EmbyID] = user.UID
 			}
 		}
 	}
 	out := make([]EmbyActivityLog, 0, limit)
 	for i := len(s.state.EmbyActivityLogs) - 1; i >= 0 && len(out) < limit; i-- {
-		e := s.state.EmbyActivityLogs[i]
+		entry := s.state.EmbyActivityLogs[i]
 		if uid > 0 {
-			if e.UserID == "" || embyUIDs[e.UserID] != uid {
+			if entry.UserID == "" || embyUIDs[entry.UserID] != uid {
 				continue
 			}
 		}
-		out = append(out, e)
+		out = append(out, entry)
 	}
 	return out
 }
