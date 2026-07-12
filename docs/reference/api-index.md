@@ -246,7 +246,7 @@
 | POST | `/api/v1/admin/emby/force-set-password` | Admin | 强制设置 Emby 密码（与重置密码同 handler） |
 | POST | `/api/v1/admin/emby/sync` | Admin | 同步 Emby 用户 |
 | GET | `/api/v1/admin/emby/sessions` | Admin | Emby 实时会话（含 `remote_endpoint` IP） |
-| GET | `/api/v1/admin/emby/device-audit` | Admin | Emby 登录用户设备/IP 审查（按用户聚合）：`/Devices` 设备清单 + 实时会话 IP（解析掉端口）+ 活动日志历史登录 IP，映射完整本地账号（网页/Emby/Telegram） |
+| GET | `/api/v1/admin/emby/device-audit` | Admin | Emby 登录用户设备/IP 审查（按用户聚合）：`/Devices` 设备清单 + 实时会话 IP（解析掉端口）+ 活动日志历史登录 IP，映射完整本地账号（网页/Emby/Telegram）；单个来源失败时降级返回其余数据并在 summary 标记 |
 | GET | `/api/v1/admin/emby/activity-logs` | Admin | 本地 Emby 活动日志；`?refresh=1` 手动从 Emby 拉取并入库 |
 | GET | `/api/v1/admin/emby/activity` | Admin | Emby 活动记录 |
 | GET | `/api/v1/admin/emby/users` | Admin | Emby 用户列表 |

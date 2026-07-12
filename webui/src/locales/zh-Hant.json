@@ -1034,6 +1034,8 @@
     "statOnline": "{count} 線上",
     "statIps": "{count} 個 IP",
     "activityUnavailable": "活動記錄不可用，歷史登入 IP 可能不完整",
+    "devicesUnavailable": "裝置列表不可用，僅顯示線上會話線索",
+    "sessionsUnavailable": "線上會話不可用，僅顯示裝置列表線索",
     "deviceCountBadge": "{count} 台裝置",
     "ipCountBadge": "{count} 個 IP",
     "onlineBadge": "{count} 線上",
@@ -2282,8 +2284,6 @@
   },
   "deviceAuditPatch": {
     "kickAllDone": "已踢出 {kicked} 個線上會話，清理 {devices} 筆裝置記錄",
-    "autoRefresh": "自動刷新",
-    "autoRefreshHint": "頁面可見時每 60 秒刷新線上狀態。",
     "refreshedAt": "更新於 {time}"
   }
 }

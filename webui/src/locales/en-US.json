@@ -1034,6 +1034,8 @@
     "statOnline": "{count} online",
     "statIps": "{count} IPs",
     "activityUnavailable": "Activity log unavailable; historical login IPs may be incomplete",
+    "devicesUnavailable": "Device list unavailable; showing online-session clues only",
+    "sessionsUnavailable": "Online sessions unavailable; showing device-list clues only",
     "deviceCountBadge": "{count} devices",
     "ipCountBadge": "{count} IPs",
     "onlineBadge": "{count} online",
@@ -2282,8 +2284,6 @@
   },
   "deviceAuditPatch": {
     "kickAllDone": "Kicked {kicked} online sessions and cleared {devices} device records",
-    "autoRefresh": "Auto refresh",
-    "autoRefreshHint": "Refreshes online state every 60 seconds while this page is visible.",
     "refreshedAt": "Updated {time}"
   }
 }

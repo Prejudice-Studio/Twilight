@@ -1527,14 +1527,17 @@ func (a *App) databaseHealth(parent context.Context) map[string]any {
 		}
 	}
 	backend := st.Backend()
+	userCount := st.UserCount()
 	result := map[string]any{
 		"ok":                true,
 		"backend":           backend,
 		"configured_driver": strings.ToLower(a.cfg().DatabaseDriver),
 		"storage_mismatch":  a.runtimeDatabaseMismatch(),
 		"storage_warning":   a.databaseMismatchWarning(),
+		"state_read_ok":     true,
+		"user_count":        userCount,
 	}
-	ctx, cancel := context.WithTimeout(parent, 1500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
 	defer cancel()
 	if db := st.DB(); db != nil || backend == store.BackendPostgres {
 		if db == nil {
@@ -1543,10 +1546,12 @@ func (a *App) databaseHealth(parent context.Context) map[string]any {
 			return result
 		}
 		if err := db.PingContext(ctx); err != nil {
-			result["ok"] = false
-			result["error"] = "database ping failed"
+			result["ping_ok"] = false
+			result["ping_error"] = truncateString(redactSensitiveText(err.Error()), 180)
+			result["warning"] = "database ping failed; active store remains readable"
 			return result
 		}
+		result["ping_ok"] = true
 		stats := db.Stats()
 		result["open_connections"] = stats.OpenConnections
 		result["in_use"] = stats.InUse
@@ -1576,12 +1581,13 @@ func (a *App) embyStatusSnapshot(parent context.Context, includeSessions bool) m
 		result["status"] = "not_configured"
 		return result
 	}
-	ctx, cancel := context.WithTimeout(parent, 1500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	info, err := a.embyHealthDetailed(ctx)
 	cancel()
 	if err != nil {
 		result["status"] = "unreachable"
 		result["error"] = "Emby status request failed"
+		result["error_detail"] = truncateString(redactSensitiveText(err.Error()), 180)
 		return result
 	}
 	if info == nil {
@@ -1593,7 +1599,7 @@ func (a *App) embyStatusSnapshot(parent context.Context, includeSessions bool) m
 	result["version"] = firstNonEmpty(asString(info["Version"]), "unknown")
 	result["operating_system"] = asString(info["OperatingSystem"])
 	if includeSessions {
-		sessionCtx, sessionCancel := context.WithTimeout(parent, 1500*time.Millisecond)
+		sessionCtx, sessionCancel := context.WithTimeout(parent, 5*time.Second)
 		sessions, sessionErr := a.embySessionsSnapshot(sessionCtx, false)
 		sessionCancel()
 		if sessionErr == nil {
@@ -1601,6 +1607,7 @@ func (a *App) embyStatusSnapshot(parent context.Context, includeSessions bool) m
 			result["total_sessions"] = len(sessions)
 		} else {
 			result["sessions_error"] = "Emby sessions request failed"
+			result["sessions_error_detail"] = truncateString(redactSensitiveText(sessionErr.Error()), 180)
 		}
 	}
 	return result

@@ -1958,6 +1958,8 @@
     "statOnline": "{count} 在线",
     "statIps": "{count} 个 IP",
     "activityUnavailable": "活动日志不可用，历史登录 IP 可能不完整",
+    "devicesUnavailable": "设备列表不可用，仅显示在线会话线索",
+    "sessionsUnavailable": "在线会话不可用，仅显示设备列表线索",
     "deviceCountBadge": "{count} 台设备",
     "ipCountBadge": "{count} 个 IP",
     "onlineBadge": "{count} 在线",
@@ -2951,8 +2953,6 @@
   },
   "deviceAuditPatch": {
     "kickAllDone": "已踢出 {kicked} 个在线会话，清理 {devices} 条设备记录",
-    "autoRefresh": "自动刷新",
-    "autoRefreshHint": "页面可见时每 60 秒刷新在线状态。",
     "refreshedAt": "更新于 {time}"
   }
 }

@@ -26,7 +26,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -36,7 +35,6 @@ import {
 } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { useVisiblePolling } from "@/hooks/use-visible-polling";
 import { useI18n, type MessageKey, type MessageParams } from "@/lib/i18n";
 import { api } from "@/lib/api";
 import type { EmbyAuditDevice, EmbyAuditUser, EmbyDeviceAuditData } from "@/lib/api-types";
@@ -165,7 +163,6 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
   const [clientFilter, setClientFilter] = useState<string>(CLIENT_ALL);
   const [sortKey, setSortKey] = useState<SortKey>("devices");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [autoRefresh, setAutoRefresh] = useState(false);
   const [lastRefreshAt, setLastRefreshAt] = useState<number | null>(null);
 
   const reload = useCallback(async (refresh = false, signal?: AbortSignal) => {
@@ -195,8 +192,6 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
     void reload(false, controller.signal);
     return () => controller.abort();
   }, [reload]);
-
-  useVisiblePolling((signal) => reload(false, signal), 60000, autoRefresh);
 
   const toggleExpand = useCallback((id: string) => {
     setExpanded((prev) => {
@@ -461,6 +456,24 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
                 {t("deviceAudit.activityUnavailable")}
               </Badge>
             )}
+            {summary.devices_available === false && (
+              <Badge
+                variant="outline"
+                className="border-amber-500/30 text-amber-500"
+                title={summary.devices_error || undefined}
+              >
+                {t("deviceAudit.devicesUnavailable")}
+              </Badge>
+            )}
+            {summary.sessions_available === false && (
+              <Badge
+                variant="outline"
+                className="border-amber-500/30 text-amber-500"
+                title={summary.sessions_error || undefined}
+              >
+                {t("deviceAudit.sessionsUnavailable")}
+              </Badge>
+            )}
           </div>
         )}
 
@@ -540,15 +553,10 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">{t("deviceAudit.description")}</p>
           <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
-            {autoRefresh && <span>{t("deviceAuditPatch.autoRefreshHint")}</span>}
             {lastRefreshAt && <span>{t("deviceAuditPatch.refreshedAt", { time: new Date(lastRefreshAt).toLocaleTimeString(locale) })}</span>}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <label className="flex min-h-9 items-center gap-2 rounded-md border border-border/60 px-3 text-xs">
-            <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
-            <span>{t("deviceAuditPatch.autoRefresh")}</span>
-          </label>
           <Button variant="destructive" size="sm" onClick={async () => {
             const ok = await confirmAction({
               title: t("deviceAudit.kickAllTitle"),

@@ -565,6 +565,10 @@ export interface EmbyDeviceAuditSummary {
   total_devices: number;
   online_devices: number;
   total_ips: number;
+  sessions_available?: boolean;
+  sessions_error?: string | null;
+  devices_available?: boolean;
+  devices_error?: string | null;
   activity_available: boolean;
   clients: EmbyAuditClientStat[];
 }

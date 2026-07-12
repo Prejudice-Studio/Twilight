@@ -232,7 +232,12 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 		ip           string
 		lastActivity string
 	}
-	sessions, _ := a.embySessionsSnapshot(ctx, false)
+	sessions, sessionsErr := a.embySessionsSnapshot(ctx, false)
+	sessionsAvailable := sessionsErr == nil
+	sessionsError := ""
+	if sessionsErr != nil {
+		sessionsError = truncateString(redactSensitiveText(sessionsErr.Error()), 180)
+	}
 	liveByDevice := map[string]liveSession{}
 	for _, s := range sessions {
 		ls := liveSession{
@@ -260,8 +265,12 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 	var devResp struct {
 		Items []map[string]any `json:"Items"`
 	}
+	devicesAvailable := true
+	devicesError := ""
 	if err := a.embyGet(ctx, "/Devices", &devResp); err != nil {
-		return nil, err
+		devicesAvailable = false
+		devicesError = truncateString(redactSensitiveText(err.Error()), 180)
+		devResp.Items = nil
 	}
 
 	type clientStat struct {
@@ -439,6 +448,10 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 			"total_devices":      totalDevices,
 			"online_devices":     onlineDevices,
 			"total_ips":          len(allIPs),
+			"sessions_available": sessionsAvailable,
+			"sessions_error":     emptyNil(sessionsError),
+			"devices_available":  devicesAvailable,
+			"devices_error":      emptyNil(devicesError),
 			"activity_available": activityAvailable,
 			"clients":            clients,
 		},
@@ -454,6 +467,8 @@ func (a *App) handleAdminEmbyDeviceAudit(w http.ResponseWriter, r *http.Request,
 			"summary": map[string]any{
 				"total_users": 0, "linked_users": 0, "total_devices": 0,
 				"online_devices": 0, "total_ips": 0, "activity_available": false,
+				"sessions_available": false, "devices_available": false,
+				"sessions_error": nil, "devices_error": nil,
 				"clients": []any{},
 			},
 		})

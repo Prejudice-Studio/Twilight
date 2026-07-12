@@ -1040,6 +1040,8 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/123/disable" \
 
 前端主入口为「Emby 管理」，设备/IP 审查已整合为该页面的独立页签；旧 `/admin/device-audit` 页面保留为兼容入口。
 
+`GET /admin/emby/device-audit` 返回按 Emby 用户聚合的设备、在线会话 IP、活动日志登录 IP 与本地账号关联。`summary.devices_available`、`summary.sessions_available` 和 `summary.activity_available` 分别表示 `/Devices`、`/Sessions`、`/System/ActivityLog` 来源是否可用；其中任一来源失败时接口会尽量返回其余可用数据，并在对应 `*_error` 字段写入脱敏后的简短错误。
+
 | 方法/路径 | 说明 |
 | --------- | ---- |
 | `POST /admin/emby/sync` | 同步所有 Emby 用户数据 |
@@ -1415,7 +1417,7 @@ curl -X POST "http://localhost:5000/api/v1/admin/scheduler/jobs/check_expired/ru
 
 `GET /system/health`
 
-- 说明：返回 `api`、`database`、`emby` 布尔状态，并保留 `status/storage/redis` 等兼容字段。
+- 说明：返回 `api`、`database`、`emby` 布尔状态，并保留 `status/storage/redis` 等兼容字段。登录用户会额外收到 `database_detail` 与 `emby_detail`；数据库状态以当前 store 可读为主，PostgreSQL `ping` 失败会作为 `warning/ping_error` 诊断返回，不再单独把可读数据库判为异常。
 - 认证：公开（`AuthPublic`）
 
 ```bash

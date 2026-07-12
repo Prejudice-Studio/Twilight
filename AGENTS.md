@@ -301,6 +301,11 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - Stop active playback with `POST /Sessions/{Id}/Playing/Stop` and `Command=Stop`.
 - Clear retained/offline device sessions with the documented administrator endpoint `DELETE /Devices?Id={DeviceId}`; do not invent `/Sessions/{id}/Logout`, `/Sessions/{id}/Terminate`, or `/Devices/{id}` routes.
 
+## Emby Device Audit Rules
+
+- Device/IP audit is manual-refresh only in the frontend. Do not add automatic polling or visible auto-refresh controls without an explicit user request.
+- `/admin/emby/device-audit` should degrade gracefully when one Emby source fails. `/Devices`, `/Sessions`, and `/System/ActivityLog` availability is reported in `summary`; one failed source must not hide data from the remaining sources.
+
 ## Commit Message Rules
 
 - Use Chinese commit messages for repository commits unless the user explicitly requests another language.
