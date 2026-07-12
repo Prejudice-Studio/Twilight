@@ -308,6 +308,7 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - `/admin/emby/device-audit` should degrade gracefully when one Emby source fails. `/Devices`, `/Sessions`, and `/System/ActivityLog` availability is reported in `summary`; one failed source must not hide data from the remaining sources.
 - Offline Emby device rows should be aggregated per Emby user by device name, client name, and client version. Preserve a `count` field and latest activity/device id so repeated retained device records do not flood the audit UI.
 - Device/IP audit must exclude Twilight's own Emby client devices/sessions (`Twilight`, `Twilight Bind`, `twilight-client`) from users, IPs, client stats, and device totals.
+- Normalize Emby display fields before returning or aggregating audit rows: decode HTML entities such as `&quot;`, trim stray quote/backslash suffixes from device/client names, and keep this limited to display text rather than IDs.
 - Global Emby device cleanup is a Scheduler job (`cleanup_emby_devices`) only. Do not add all-device cleanup buttons or direct "kick all" routes to the Device/IP audit UI; per-user kick actions remain allowed for targeted moderation.
 
 ## Commit Message Rules

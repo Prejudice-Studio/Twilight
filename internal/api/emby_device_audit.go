@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"html"
 	"net"
 	"net/http"
 	"sort"
@@ -58,8 +59,30 @@ func parseRemoteIP(endpoint string) string {
 	return strings.Trim(endpoint, "[]")
 }
 
+func normalizeEmbyDisplayText(value string) string {
+	value = strings.TrimSpace(value)
+	for i := 0; i < 3; i++ {
+		decoded := strings.TrimSpace(html.UnescapeString(value))
+		if decoded == value {
+			break
+		}
+		value = decoded
+	}
+	value = strings.ReplaceAll(value, `\"`, `"`)
+	for {
+		trimmed := strings.TrimSpace(value)
+		trimmed = strings.TrimSuffix(trimmed, `\`)
+		trimmed = strings.TrimSuffix(trimmed, `"`)
+		trimmed = strings.TrimSpace(trimmed)
+		if trimmed == value {
+			return value
+		}
+		value = trimmed
+	}
+}
+
 func isTwilightEmbyDevice(deviceID, deviceName, appName string) bool {
-	for _, value := range []string{deviceID, deviceName, appName} {
+	for _, value := range []string{deviceID, normalizeEmbyDisplayText(deviceName), normalizeEmbyDisplayText(appName)} {
 		value = strings.ToLower(strings.TrimSpace(value))
 		if value == "" {
 			continue
@@ -215,6 +238,7 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 		return "unknown"
 	}
 	getUser := func(id, name string) *embyAuditUser {
+		name = normalizeEmbyDisplayText(name)
 		key := userOrderKey(id, name)
 		u := users[key]
 		if u == nil {
@@ -255,11 +279,11 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 	for _, s := range sessions {
 		ls := liveSession{
 			deviceID:     firstNonEmpty(asString(s["DeviceId"]), asString(s["DeviceID"]), asString(s["Id"])),
-			deviceName:   firstNonEmpty(asString(s["DeviceName"]), asString(s["Device"])),
-			client:       firstNonEmpty(asString(s["Client"]), asString(s["AppName"])),
-			appVersion:   firstNonEmpty(asString(s["ApplicationVersion"]), asString(s["AppVersion"])),
+			deviceName:   normalizeEmbyDisplayText(firstNonEmpty(asString(s["DeviceName"]), asString(s["Device"]))),
+			client:       normalizeEmbyDisplayText(firstNonEmpty(asString(s["Client"]), asString(s["AppName"]))),
+			appVersion:   normalizeEmbyDisplayText(firstNonEmpty(asString(s["ApplicationVersion"]), asString(s["AppVersion"]))),
 			userID:       asString(s["UserId"]),
-			userName:     asString(s["UserName"]),
+			userName:     normalizeEmbyDisplayText(asString(s["UserName"])),
 			ip:           parseRemoteIP(asString(s["RemoteEndPoint"])),
 			lastActivity: firstNonEmpty(asString(s["LastActivityDate"]), asString(s["DateLastActivity"])),
 		}
@@ -299,7 +323,7 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 	totalDevices := 0
 	onlineDevices := 0
 	addClient := func(app string, online bool, userKey string) {
-		app = firstNonEmpty(strings.TrimSpace(app), "Unknown")
+		app = firstNonEmpty(normalizeEmbyDisplayText(app), "Unknown")
 		cs := clientStats[app]
 		if cs == nil {
 			cs = &clientStat{users: map[string]bool{}}
@@ -334,12 +358,12 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 	addDevice := func(device map[string]any, live liveSession, online bool) {
 		deviceID := firstNonEmpty(asString(device["Id"]), live.deviceID)
 		uid := firstNonEmpty(asString(device["LastUserId"]), live.userID)
-		uname := firstNonEmpty(asString(device["LastUserName"]), live.userName)
+		uname := normalizeEmbyDisplayText(firstNonEmpty(asString(device["LastUserName"]), live.userName))
 		u := getUser(uid, uname)
 		last := firstNonEmpty(asString(device["DateLastActivity"]), live.lastActivity)
-		app := firstNonEmpty(asString(device["AppName"]), live.client, "Unknown")
-		version := firstNonEmpty(asString(device["AppVersion"]), live.appVersion)
-		name := firstNonEmpty(asString(device["Name"]), live.deviceName, deviceID, "Unknown")
+		app := normalizeEmbyDisplayText(firstNonEmpty(asString(device["AppName"]), live.client, "Unknown"))
+		version := normalizeEmbyDisplayText(firstNonEmpty(asString(device["AppVersion"]), live.appVersion))
+		name := normalizeEmbyDisplayText(firstNonEmpty(asString(device["Name"]), live.deviceName, deviceID, "Unknown"))
 		if live.ip != "" {
 			u.ipSet[live.ip] = true
 		}

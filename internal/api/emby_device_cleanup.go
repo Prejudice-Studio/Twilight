@@ -51,7 +51,7 @@ func (a *App) embyDeviceCleanupProtection(skipUsernames []string) (map[string]bo
 	skipNames := map[string]bool{}
 	protectedIDs := map[string]bool{}
 	addName := func(name string) {
-		name = strings.ToLower(strings.TrimSpace(name))
+		name = strings.ToLower(normalizeEmbyDisplayText(name))
 		if name != "" {
 			skipNames[name] = true
 		}
@@ -102,11 +102,11 @@ func embyDeviceCleanupSkipList(value any) []string {
 func embyDeviceCleanupTargetFromMap(dev map[string]any) embyDeviceCleanupTarget {
 	return embyDeviceCleanupTarget{
 		ID:           firstNonEmpty(asString(dev["Id"]), asString(dev["ReportedId"])),
-		Name:         asString(dev["Name"]),
-		AppName:      asString(dev["AppName"]),
-		AppVersion:   asString(dev["AppVersion"]),
+		Name:         normalizeEmbyDisplayText(asString(dev["Name"])),
+		AppName:      normalizeEmbyDisplayText(asString(dev["AppName"])),
+		AppVersion:   normalizeEmbyDisplayText(asString(dev["AppVersion"])),
 		LastUserID:   asString(dev["LastUserId"]),
-		LastUserName: asString(dev["LastUserName"]),
+		LastUserName: normalizeEmbyDisplayText(asString(dev["LastUserName"])),
 	}
 }
 

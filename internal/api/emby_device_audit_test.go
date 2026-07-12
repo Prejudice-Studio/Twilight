@@ -1,6 +1,9 @@
 package api
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"testing"
 	"time"
@@ -128,5 +131,52 @@ func TestActivityEntryIPs(t *testing.T) {
 				t.Fatalf("activityEntryIPs(%q) = %v, want %v", c.in, got, c.want)
 			}
 		})
+	}
+}
+
+func TestBuildEmbyDeviceAuditNormalizesDeviceDisplayNames(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().EmbyToken = "emby-token"
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/Sessions":
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/Devices":
+			_, _ = w.Write([]byte(`{"Items":[{"Id":"device-1","Name":"iPhone\"\\","AppName":"VidHub&quot;\\","AppVersion":"1.0&quot;\\","LastUserId":"emby-user","LastUserName":"user","DateLastActivity":"2026-05-16T12:13:40Z"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/System/ActivityLog/Entries":
+			_, _ = w.Write([]byte(`{"Items":[]}`))
+		default:
+			t.Fatalf("unexpected Emby request: %s %s", r.Method, r.URL.RequestURI())
+		}
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+
+	data, err := app.buildEmbyDeviceAudit(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	users, _ := data["users"].([]map[string]any)
+	if len(users) != 1 {
+		t.Fatalf("users len=%d data=%#v", len(users), data["users"])
+	}
+	devices, _ := users[0]["devices"].([]map[string]any)
+	if len(devices) != 1 {
+		t.Fatalf("devices len=%d user=%#v", len(devices), users[0])
+	}
+	device := devices[0]
+	if got := asString(device["device_name"]); got != "iPhone" {
+		t.Fatalf("device_name=%q, want iPhone", got)
+	}
+	if got := asString(device["app_name"]); got != "VidHub" {
+		t.Fatalf("app_name=%q, want VidHub", got)
+	}
+	if got := asString(device["app_version"]); got != "1.0" {
+		t.Fatalf("app_version=%q, want 1.0", got)
+	}
+	summary, _ := data["summary"].(map[string]any)
+	clients, _ := summary["clients"].([]map[string]any)
+	if len(clients) != 1 || asString(clients[0]["name"]) != "VidHub" {
+		t.Fatalf("clients=%#v, want one VidHub client", clients)
 	}
 }
