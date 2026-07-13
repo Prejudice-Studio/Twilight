@@ -104,8 +104,11 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 /** 表单 / multipart 上传放宽到 2 分钟，覆盖较大背景图 / 头像。 */
 const FORM_REQUEST_TIMEOUT_MS = 120_000;
 const READ_REQUEST_DEDUPE_WINDOW_MS = 750;
+const READ_RESPONSE_CACHE_TTL_MS = 3_000;
+const READ_RESPONSE_CACHE_MAX_ENTRIES = 80;
 
 const inFlightReadRequests = new Map<string, { promise: Promise<ApiResponse<unknown>>; startedAt: number }>();
+const readResponseCache = new Map<string, { data: ApiResponse<unknown>; cachedAt: number }>();
 
 function headerCacheKey(headers: Record<string, string>): string {
   return Object.entries(headers)
@@ -117,6 +120,54 @@ function headerCacheKey(headers: Record<string, string>): string {
 
 function readRequestDedupeKey(url: string, method: string, headers: Record<string, string>): string {
   return `${method} ${url} ${headerCacheKey(headers)}`;
+}
+
+function requestCacheKey(url: string, method: string, headers: Record<string, string>): string {
+  return readRequestDedupeKey(url, method, headers);
+}
+
+function isCacheableRead(url: string, method: string, headers: Record<string, string>, cache?: RequestCache): boolean {
+  if (method !== "GET" && method !== "HEAD") return false;
+  if (cache === "no-store" || cache === "reload") return false;
+  if (hasHeader(headers, "x-twilight-intent")) return false;
+  try {
+    const parsed = new URL(url, typeof window !== "undefined" ? window.location.origin : "http://localhost");
+    if (parsed.searchParams.has("refresh")) return false;
+    if (parsed.pathname.endsWith("/api/v1/users/me")) return false;
+  } catch {
+    if (url.includes("refresh=")) return false;
+    if (url.endsWith("/api/v1/users/me")) return false;
+  }
+  return true;
+}
+
+function cloneApiResponse<T>(data: ApiResponse<T>): ApiResponse<T> {
+  if (typeof structuredClone === "function") {
+    return structuredClone(data);
+  }
+  return JSON.parse(JSON.stringify(data)) as ApiResponse<T>;
+}
+
+function getCachedReadResponse<T>(key: string, now = Date.now()): ApiResponse<T> | null {
+  const cached = readResponseCache.get(key);
+  if (!cached) return null;
+  if (now - cached.cachedAt > READ_RESPONSE_CACHE_TTL_MS) {
+    readResponseCache.delete(key);
+    return null;
+  }
+  return cloneApiResponse(cached.data as ApiResponse<T>);
+}
+
+function setCachedReadResponse(key: string, data: ApiResponse<unknown>): void {
+  if (readResponseCache.size >= READ_RESPONSE_CACHE_MAX_ENTRIES) {
+    const oldest = readResponseCache.keys().next().value;
+    if (oldest) readResponseCache.delete(oldest);
+  }
+  readResponseCache.set(key, { data: cloneApiResponse(data), cachedAt: Date.now() });
+}
+
+function clearReadResponseCache(): void {
+  readResponseCache.clear();
 }
 
 /**
@@ -279,6 +330,8 @@ export interface ApiRequestExtraOptions {
   timeoutMs?: number;
   /** Disable same-tick GET/HEAD request coalescing for endpoints that must be fetched independently. */
   dedupe?: boolean;
+  /** Disable the short successful GET/HEAD memory cache. Writes always clear this cache. */
+  cacheRead?: boolean;
 }
 
 export async function apiRequest<T>(
@@ -300,6 +353,13 @@ export async function apiRequest<T>(
 
   const url = `${API_BASE}/api/v1${endpoint}`;
   const isReadRequest = (method === "GET" || method === "HEAD") && options.body === undefined;
+  const effectiveCache = options.cache ?? (isReadRequest ? "no-cache" : "no-store");
+  const canUseReadCache = isReadRequest && !options.signal?.aborted && extra.cacheRead !== false && isCacheableRead(url, method, headers, effectiveCache);
+  const cacheKey = canUseReadCache ? requestCacheKey(url, method, headers) : "";
+  if (cacheKey) {
+    const cached = getCachedReadResponse<T>(cacheKey);
+    if (cached) return cached;
+  }
   if (isReadRequest && options.signal === undefined && extra.dedupe !== false) {
     const key = readRequestDedupeKey(url, method, headers);
     const now = Date.now();
@@ -316,6 +376,9 @@ export async function apiRequest<T>(
     }).catch(() => undefined);
     return promise as Promise<ApiResponse<T>>;
   }
+  if (!isReadRequest) {
+    clearReadResponseCache();
+  }
 
   const timeoutMs = extra.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const guard = withTimeoutSignal(options.signal ?? null, timeoutMs);
@@ -325,7 +388,7 @@ export async function apiRequest<T>(
     response = await fetch(url, {
       ...options,
       headers,
-      cache: options.cache ?? (isReadRequest ? "no-cache" : "no-store"),
+      cache: effectiveCache,
       credentials: "include",
       signal: guard.signal ?? options.signal ?? null,
     });
@@ -351,6 +414,9 @@ export async function apiRequest<T>(
   }
 
   const data = await parseApiResponse<T>(response, endpoint, method);
+  if (isReadRequest && response.ok && data?.success !== false && cacheKey) {
+    setCachedReadResponse(cacheKey, data as ApiResponse<unknown>);
+  }
 
   if (!response.ok) {
     throw new ApiError({

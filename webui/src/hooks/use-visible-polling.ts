@@ -17,10 +17,12 @@ export function useVisiblePolling(
     let running = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let controller: AbortController | null = null;
+    let lastRunAt = 0;
 
-    function schedule() {
+    function schedule(delay = intervalMs) {
       if (cancelled) return;
-      timer = setTimeout(() => void run(), intervalMs);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => void run(), Math.max(0, delay));
     }
 
     async function run() {
@@ -30,6 +32,7 @@ export function useVisiblePolling(
         return;
       }
       running = true;
+      lastRunAt = Date.now();
       controller = new AbortController();
       try {
         await callbackRef.current(controller.signal);
@@ -50,7 +53,12 @@ export function useVisiblePolling(
       if (running) return;
       if (timer) clearTimeout(timer);
       timer = null;
-      void run();
+      const elapsed = Date.now() - lastRunAt;
+      if (elapsed >= intervalMs) {
+        void run();
+      } else {
+        schedule(intervalMs - elapsed);
+      }
     };
 
     schedule();

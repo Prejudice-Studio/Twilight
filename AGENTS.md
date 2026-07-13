@@ -138,7 +138,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - User-facing copy belongs in `basic.json`, `zh-Hant.json`, and `en-US.json`; `zh-Hans.json` remains sparse and falls back to `basic.json`.
 - Polling should check document visibility when useful and must clear intervals on unmount.
 - Keep controls dimensionally stable across languages.
-- Coalesce duplicate in-flight `GET` / `HEAD` requests only in `webui/src/lib/api-request.ts`; never dedupe writes, caller-abortable requests, or endpoints that opt out with `dedupe: false`.
+- Coalesce duplicate in-flight `GET` / `HEAD` requests only in `webui/src/lib/api-request.ts`; never dedupe writes, caller-abortable requests, or endpoints that opt out with `dedupe: false`. The same wrapper owns the short successful-read memory cache; keep `/users/me`, `refresh=1`, `X-Twilight-Intent`, `no-store` / `reload`, and `cacheRead: false` out of that cache.
 - Admin tables, dialogs, dropdowns, and selects must stay usable in phone, tablet, and narrow desktop devtools viewports. Prefer stable dimensions, horizontal table overflow, wrapping button labels, and mobile card views over cramped desktop tables.
 - Dangerous admin actions need clear labels, confirmations, result toasts, and audit coverage where applicable.
 - User-management actions must stay grouped by domain (account state, Emby, identity binding, registration entitlement, destructive actions) instead of long flat menus. When adding user actions, keep `admin_action_state` and frontend `UserInfo` types aligned so the UI can disable or explain unavailable operations.

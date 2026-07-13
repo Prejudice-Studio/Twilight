@@ -332,10 +332,11 @@ export default function DashboardPage() {
       setEmbyViewers(0);
       return;
     }
+    if (isLoading || embyStats) return;
     const controller = new AbortController();
     void loadEmbyLibraryStats(false, controller.signal);
     return () => controller.abort();
-  }, [loadEmbyLibraryStats, systemInfo?.features?.emby_stats]);
+  }, [embyStats, isLoading, loadEmbyLibraryStats, systemInfo?.features?.emby_stats]);
 
   const embyStatsEnabled = systemInfo?.features?.emby_stats === true;
   useVisiblePolling(loadEmbyViewers, 60000, embyStatsEnabled);
