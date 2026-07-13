@@ -1779,8 +1779,22 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 请求体：
 
 ```json
-{ "code": "reply('hello ' + (user.username || 'user'));" }
+{
+  "code": "reply('hello ' + (user.username || 'user'));",
+  "command": "/hello",
+  "args_text": "alice --force",
+  "private_chat": true
+}
 ```
+
+`command` / `args_text` / `private_chat` 可选，用于模拟真实 Telegram 指令上下文；省略时回落为 `/preview`、空参数和私聊。响应除 `ok`、`errors`、`warnings`、`risk_tokens`、`output`、`logs` 外，还包含：
+
+| 字段 | 说明 |
+| ---- | ---- |
+| `metrics` | `{ bytes, chars, lines, max_bytes, timeout_ms, reply_limit, log_limit }`，用于前端展示大小和运行限制 |
+| `diagnostics` | `{ severity, blocked_count, risk_count, requires_review }`，用于区分通过、需复核、阻止 |
+| `duration_ms` | 实际预检执行耗时（仅通过静态校验并进入运行时后返回） |
+| `preview_context` | 实际注入沙箱的 `{ command, args, private_chat }` |
 
 `GET /admin/developer/js-docs`
 

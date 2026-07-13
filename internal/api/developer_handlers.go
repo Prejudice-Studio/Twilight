@@ -62,15 +62,26 @@ func (a *App) handleDeveloperJSSandbox(w http.ResponseWriter, r *http.Request, _
 	}
 	payload := decodeMap(r)
 	code := stringValue(payload, "code")
+	command := telegramCommand(firstNonEmpty(stringValue(payload, "command"), "/preview"))
+	if command == "" || command == "/" {
+		command = "/preview"
+	}
+	args := developerJSSandboxArgs(payload["args"], stringValue(payload, "args_text"))
+	privateChat := true
+	if rawPrivate, ok := payload["private_chat"]; ok {
+		privateChat = boolish(rawPrivate)
+	}
 	result := validateDeveloperJSCommand(code)
 	if ok, _ := result["ok"].(bool); ok {
+		start := time.Now()
 		output, logs, err := a.telegramRunJSCustomCommandWithOptions(code, telegramCommandCtx{
 			ChatID:   0,
 			FromID:   current(r).User.TelegramID,
 			Username: current(r).User.Username,
-			Command:  "/preview",
-			Args:     []string{"preview"},
-		}, true, developerJSRunOptions{Preview: true})
+			Command:  command,
+			Args:     args,
+		}, privateChat, developerJSRunOptions{Preview: true, Context: r.Context()})
+		result["duration_ms"] = time.Since(start).Milliseconds()
 		if err != nil {
 			result["ok"] = false
 			result["errors"] = appendStringAny(result["errors"], err.Error())
@@ -79,7 +90,8 @@ func (a *App) handleDeveloperJSSandbox(w http.ResponseWriter, r *http.Request, _
 			result["logs"] = logs
 		}
 	}
-	a.audit(r, "developer_js_sandbox_preview", "admin", 0, map[string]any{"ok": result["ok"], "bytes": len(code)})
+	result["preview_context"] = map[string]any{"command": command, "args": args, "private_chat": privateChat}
+	a.audit(r, "developer_js_sandbox_preview", "admin", 0, map[string]any{"ok": result["ok"], "bytes": len(code), "command": command, "args_count": len(args), "private_chat": privateChat})
 	ok(w, "sandbox preview completed", result)
 }
 
@@ -198,6 +210,31 @@ func appendStringAny(value any, item string) []string {
 	return append(out, item)
 }
 
+func developerJSSandboxArgs(value any, argsText string) []string {
+	out := []string{}
+	if values, ok := value.([]any); ok {
+		for _, item := range values {
+			text := strings.TrimSpace(fmt.Sprint(item))
+			if text != "" {
+				out = append(out, truncateString(text, 120))
+			}
+			if len(out) >= 20 {
+				return out
+			}
+		}
+		return out
+	}
+	for _, item := range strings.Fields(argsText) {
+		if item != "" {
+			out = append(out, truncateString(item, 120))
+		}
+		if len(out) >= 20 {
+			break
+		}
+	}
+	return out
+}
+
 func developerJSPresetFromPayload(payload map[string]any, base store.DeveloperJSPreset) (store.DeveloperJSPreset, bool) {
 	if _, ok := payload["name"]; ok {
 		base.Name = truncateString(strings.TrimSpace(fmt.Sprint(payload["name"])), 80)
@@ -225,6 +262,10 @@ func validateDeveloperJSPresetCode(w http.ResponseWriter, code string) bool {
 
 func validateDeveloperJSCommand(code string) map[string]any {
 	trimmed := strings.TrimSpace(code)
+	lineCount := 0
+	if trimmed != "" {
+		lineCount = strings.Count(trimmed, "\n") + 1
+	}
 	warnings := []string{
 		"Preview only: saving to bot_custom_commands is required before production Bot runtime can use this script.",
 		"Allowed APIs are limited to the documented ctx, command, input, args, user, me, constants, roles, db, users, admin, system, text, arrays, time, format, interactions, getUser(uid), reply(text), exit(text), assert(condition, text), log(text), auth(role), authAdmin(), fetch(url), config(key), and env(key) bindings.",
@@ -232,10 +273,10 @@ func validateDeveloperJSCommand(code string) map[string]any {
 		"Risky JavaScript features such as eval, Function, globalThis, fetch, and timers are available for compatibility and should be used only in administrator-reviewed presets.",
 	}
 	if trimmed == "" {
-		return map[string]any{"ok": false, "errors": []string{"code is empty"}, "warnings": warnings}
+		return map[string]any{"ok": false, "errors": []string{"code is empty"}, "warnings": warnings, "metrics": developerJSCodeMetrics(trimmed, lineCount), "diagnostics": developerJSDiagnostics(nil, nil)}
 	}
 	if len(trimmed) > 8000 {
-		return map[string]any{"ok": false, "errors": []string{"code exceeds 8000 bytes"}, "warnings": warnings}
+		return map[string]any{"ok": false, "errors": []string{"code exceeds 8000 bytes"}, "warnings": warnings, "metrics": developerJSCodeMetrics(trimmed, lineCount), "diagnostics": developerJSDiagnostics(nil, nil)}
 	}
 	lower := strings.ToLower(trimmed)
 	blocked := []string{
@@ -261,8 +302,38 @@ func validateDeveloperJSCommand(code string) map[string]any {
 		"errors":      errors,
 		"warnings":    warnings,
 		"risk_tokens": riskHits,
+		"metrics":     developerJSCodeMetrics(trimmed, lineCount),
+		"diagnostics": developerJSDiagnostics(errors, riskHits),
 		"example":     "reply('Hello ' + (user.username || 'user'));",
 		"bindings":    developerJSBindingNames(),
+	}
+}
+
+func developerJSCodeMetrics(code string, lineCount int) map[string]any {
+	return map[string]any{
+		"bytes":       len(code),
+		"chars":       len([]rune(code)),
+		"lines":       lineCount,
+		"max_bytes":   8000,
+		"timeout_ms":  int(developerJSExecutionTimeout / time.Millisecond),
+		"reply_limit": 4,
+		"log_limit":   8,
+	}
+}
+
+func developerJSDiagnostics(errors, riskHits []string) map[string]any {
+	severity := "ok"
+	if len(riskHits) > 0 {
+		severity = "warning"
+	}
+	if len(errors) > 0 {
+		severity = "blocked"
+	}
+	return map[string]any{
+		"severity":        severity,
+		"blocked_count":   len(errors),
+		"risk_count":      len(riskHits),
+		"requires_review": len(riskHits) > 0,
 	}
 }
 

@@ -78,6 +78,48 @@ func TestAdminRoutesRequireAdminAuth(t *testing.T) {
 	}
 }
 
+func TestDeveloperJSSandboxPreviewAcceptsCommandContextAndReportsMetrics(t *testing.T) {
+	app := newTestApp(t)
+	cookies := registerAndLogin(t, app, "admin", "Password123!")
+	if err := app.store().SetDeveloperModeEnabled(true); err != nil {
+		t.Fatal(err)
+	}
+	payload := `{
+		"code":"reply(command.name + '|' + input.arg(0) + '|' + ctx.private_chat);",
+		"command":"/lookup",
+		"args_text":"alice --force",
+		"private_chat":false
+	}`
+	resp := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/developer/js-sandbox", payload, cookies, map[string]string{"X-Twilight-Client": "webui"})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("sandbox status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var env envelope
+	if err := json.Unmarshal(resp.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode sandbox response: %v", err)
+	}
+	data, _ := env.Data.(map[string]any)
+	if data["ok"] != true {
+		t.Fatalf("sandbox did not pass: %#v", data)
+	}
+	if output, _ := data["output"].(string); output != "/lookup|alice|false" {
+		t.Fatalf("unexpected sandbox output: %q data=%#v", output, data)
+	}
+	if _, ok := data["metrics"].(map[string]any); !ok {
+		t.Fatalf("missing metrics in sandbox response: %#v", data)
+	}
+	if _, ok := data["diagnostics"].(map[string]any); !ok {
+		t.Fatalf("missing diagnostics in sandbox response: %#v", data)
+	}
+	if _, ok := data["duration_ms"].(float64); !ok {
+		t.Fatalf("missing duration_ms in sandbox response: %#v", data)
+	}
+	previewCtx, _ := data["preview_context"].(map[string]any)
+	if previewCtx["command"] != "/lookup" || previewCtx["private_chat"] != false {
+		t.Fatalf("unexpected preview context: %#v", previewCtx)
+	}
+}
+
 func routeShouldRequireAdmin(pattern string) bool {
 	if strings.Contains(pattern, "/system/admin/") || strings.Contains(pattern, "/admin/") {
 		return true

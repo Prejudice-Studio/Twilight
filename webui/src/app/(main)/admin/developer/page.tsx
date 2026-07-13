@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   BookOpen,
+  Ban,
   ChevronDown,
   ChevronRight,
   Code2,
@@ -23,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { JsCodeEditor } from "@/components/js-code-editor";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
 import type { DeveloperJSPreset, DeveloperJSDocs, DeveloperJSDocEntry } from "@/lib/api-types";
@@ -338,8 +340,29 @@ reply(list.map(function (a) { return "- " + a.title; }).join("\\n"));`,
   },
 ] as const;
 
+const blockedStaticTokens = [
+  "xmlhttprequest",
+  "websocket",
+  "import(",
+  "require(",
+  "process.",
+  "window.",
+  "document.",
+  "localstorage",
+  "sessionstorage",
+  "cookie",
+  "constructor.constructor",
+];
+
+const riskyStaticTokens = ["fetch(", "eval(", "function", "new function", "globalthis", "settimeout", "setinterval"];
+
 function templateText(value: MessageKey | string, t: (key: MessageKey) => string): string {
   return value.startsWith("adminDeveloper.") ? t(value as MessageKey) : value;
+}
+
+function normalizePreviewCommand(value: string) {
+  const name = value.trim().replace(/^\/+/, "").toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 32);
+  return name ? `/${name}` : "/preview";
 }
 
 function presetToTemplate(preset: DeveloperJSPreset): DeveloperTemplate {
@@ -359,6 +382,7 @@ export default function AdminDeveloperPage() {
   const { info: systemInfo } = useSystemStore();
   const devModeEnabled = Boolean(systemInfo?.features?.developer_mode);
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const previewAbortRef = useRef<AbortController | null>(null);
   const [code, setCode] = useState(helloTemplate);
   const [running, setRunning] = useState(false);
   const [savingTemplate, setSavingTemplate] = useState(false);
@@ -370,6 +394,9 @@ export default function AdminDeveloperPage() {
   const [docs, setDocs] = useState<DeveloperJSDocs | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
+  const [previewCommand, setPreviewCommand] = useState("/preview");
+  const [previewArgs, setPreviewArgs] = useState("preview");
+  const [previewPrivateChat, setPreviewPrivateChat] = useState(true);
 
   const loadPresets = useCallback(async () => {
     try {
@@ -433,9 +460,27 @@ export default function AdminDeveloperPage() {
     void loadDocs();
   }, [loadDocs]);
 
+  useEffect(() => () => previewAbortRef.current?.abort(), []);
+
   const customTemplates = useMemo(() => serverPresets.map(presetToTemplate), [serverPresets]);
   const allTemplates = useMemo(() => [...builtInTemplates, ...customTemplates], [customTemplates]);
   const activeTemplate = allTemplates.find((item) => item.id === activeTemplateId);
+  const codeAnalysis = useMemo(() => {
+    const normalized = code.trim();
+    const lower = normalized.toLowerCase();
+    const blocked = blockedStaticTokens.filter((token) => lower.includes(token));
+    const risky = riskyStaticTokens.filter((token) => lower.includes(token));
+    return {
+      bytes: new Blob([normalized]).size,
+      chars: normalized.length,
+      lines: normalized ? normalized.split(/\r\n|\r|\n/).length : 0,
+      blocked,
+      risky,
+      overLimit: new Blob([normalized]).size > 8000,
+      empty: normalized.length === 0,
+    };
+  }, [code]);
+  const canPreview = !running && !codeAnalysis.empty && !codeAnalysis.overLimit && codeAnalysis.blocked.length === 0;
 
   const applyTemplate = useCallback((template: DeveloperTemplate) => {
     setActiveTemplateId(template.id);
@@ -477,6 +522,10 @@ export default function AdminDeveloperPage() {
       toast({ title: t("adminDeveloper.templateNameRequired"), variant: "destructive" });
       return;
     }
+    if (codeAnalysis.empty || codeAnalysis.overLimit || codeAnalysis.blocked.length > 0) {
+      toast({ title: t("adminDeveloper.localValidationFailed"), description: t("adminDeveloper.localValidationFailedDesc"), variant: "destructive" });
+      return;
+    }
     setSavingTemplate(true);
     try {
       const res = await api.createDeveloperJSPreset({ name, description: templateDescription.trim(), code });
@@ -489,7 +538,7 @@ export default function AdminDeveloperPage() {
     } finally {
       setSavingTemplate(false);
     }
-  }, [code, loadPresets, t, templateDescription, templateName, toast]);
+  }, [code, codeAnalysis, loadPresets, t, templateDescription, templateName, toast]);
 
   const updateTemplate = useCallback(async () => {
     const target = customTemplates.find((item) => item.id === activeTemplateId && item.presetId);
@@ -497,6 +546,10 @@ export default function AdminDeveloperPage() {
     const name = templateName.trim();
     if (!name) {
       toast({ title: t("adminDeveloper.templateNameRequired"), variant: "destructive" });
+      return;
+    }
+    if (codeAnalysis.empty || codeAnalysis.overLimit || codeAnalysis.blocked.length > 0) {
+      toast({ title: t("adminDeveloper.localValidationFailed"), description: t("adminDeveloper.localValidationFailedDesc"), variant: "destructive" });
       return;
     }
     setSavingTemplate(true);
@@ -510,7 +563,7 @@ export default function AdminDeveloperPage() {
     } finally {
       setSavingTemplate(false);
     }
-  }, [activeTemplateId, code, customTemplates, loadPresets, t, templateDescription, templateName, toast]);
+  }, [activeTemplateId, code, codeAnalysis, customTemplates, loadPresets, t, templateDescription, templateName, toast]);
 
   const deleteTemplate = useCallback(async () => {
     const target = customTemplates.find((item) => item.id === activeTemplateId && item.presetId);
@@ -539,10 +592,22 @@ export default function AdminDeveloperPage() {
   }, [code, t, toast]);
 
   const preview = async () => {
+    if (!canPreview) {
+      toast({ title: t("adminDeveloper.localValidationFailed"), description: t("adminDeveloper.localValidationFailedDesc"), variant: "destructive" });
+      return;
+    }
+    previewAbortRef.current?.abort();
+    const controller = new AbortController();
+    previewAbortRef.current = controller;
     setRunning(true);
     setResult(null);
     try {
-      const res = await api.previewDeveloperJSCommand(code);
+      const res = await api.previewDeveloperJSCommand(code, {
+        command: normalizePreviewCommand(previewCommand),
+        args_text: previewArgs,
+        private_chat: previewPrivateChat,
+        signal: controller.signal,
+      });
       if (res.success && res.data) {
         setResult(res.data);
         toast({ title: res.data.ok ? t("adminDeveloper.previewPassed") : t("adminDeveloper.previewBlocked"), variant: res.data.ok ? "success" : "destructive" });
@@ -550,11 +615,22 @@ export default function AdminDeveloperPage() {
         toast({ title: t("adminDeveloper.previewFailed"), description: res.message, variant: "destructive" });
       }
     } catch (err) {
-      toast({ title: t("adminDeveloper.previewFailed"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      if (err instanceof DOMException && err.name === "AbortError") {
+        toast({ title: t("adminDeveloper.previewCancelled") });
+      } else {
+        toast({ title: t("adminDeveloper.previewFailed"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      }
     } finally {
+      if (previewAbortRef.current === controller) {
+        previewAbortRef.current = null;
+      }
       setRunning(false);
     }
   };
+
+  const cancelPreview = useCallback(() => {
+    previewAbortRef.current?.abort();
+  }, []);
 
   if (!devModeEnabled) {
     return (
@@ -723,6 +799,69 @@ export default function AdminDeveloperPage() {
               spellCheck={false}
               ariaLabel={t("adminDeveloper.editorTitle")}
             />
+            <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 md:grid-cols-[180px_minmax(0,1fr)_auto]">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">{t("adminDeveloper.previewCommand")}</label>
+                <Input
+                  value={previewCommand}
+                  onChange={(event) => setPreviewCommand(event.target.value)}
+                  onBlur={() => setPreviewCommand((value) => normalizePreviewCommand(value))}
+                  placeholder="/preview"
+                  inputSize="sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">{t("adminDeveloper.previewArgs")}</label>
+                <Input
+                  value={previewArgs}
+                  onChange={(event) => setPreviewArgs(event.target.value)}
+                  placeholder="uid --force"
+                  inputSize="sm"
+                />
+              </div>
+              <label className="flex items-center gap-2 self-end rounded-md border bg-background px-3 py-2 text-xs font-medium">
+                <Switch checked={previewPrivateChat} onCheckedChange={setPreviewPrivateChat} />
+                {t("adminDeveloper.previewPrivate")}
+              </label>
+            </div>
+            <div className="grid gap-2 rounded-lg border p-3 text-xs sm:grid-cols-3">
+              <div>
+                <p className="text-muted-foreground">{t("adminDeveloper.codeSize")}</p>
+                <p className={codeAnalysis.overLimit ? "font-semibold text-destructive" : "font-semibold"}>
+                  {codeAnalysis.bytes} / 8000 B
+                </p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">{t("adminDeveloper.codeLines")}</p>
+                <p className="font-semibold">{codeAnalysis.lines}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">{t("adminDeveloper.localRisk")}</p>
+                <p className={codeAnalysis.blocked.length > 0 ? "font-semibold text-destructive" : codeAnalysis.risky.length > 0 ? "font-semibold text-amber-600" : "font-semibold text-emerald-600"}>
+                  {codeAnalysis.blocked.length > 0
+                    ? t("adminDeveloper.localRiskBlocked")
+                    : codeAnalysis.risky.length > 0
+                      ? t("adminDeveloper.localRiskReview")
+                      : t("adminDeveloper.localRiskOk")}
+                </p>
+              </div>
+              {codeAnalysis.blocked.length > 0 ? (
+                <div className="sm:col-span-3">
+                  <p className="mb-1 font-medium text-destructive">{t("adminDeveloper.blockedTokensTitle")}</p>
+                  <div className="flex flex-wrap gap-1">
+                    {codeAnalysis.blocked.map((token) => <Badge key={token} variant="destructive" className="text-[10px]">{token}</Badge>)}
+                  </div>
+                </div>
+              ) : null}
+              {codeAnalysis.risky.length > 0 ? (
+                <div className="sm:col-span-3">
+                  <p className="mb-1 font-medium text-amber-600">{t("adminDeveloper.riskTokensTitle")}</p>
+                  <div className="flex flex-wrap gap-1">
+                    {codeAnalysis.risky.map((token) => <Badge key={token} variant="warning" className="text-[10px]">{token}</Badge>)}
+                  </div>
+                </div>
+              ) : null}
+            </div>
             <Alert className="border-sky-500/40 bg-sky-500/10">
               <BookOpen className="h-4 w-4" />
               <AlertDescription className="flex flex-col gap-2 text-xs">
@@ -735,10 +874,16 @@ export default function AdminDeveloperPage() {
               </AlertDescription>
             </Alert>
             <div className="flex flex-wrap gap-2">
-              <Button onClick={() => void preview()} disabled={running} className="min-h-10 whitespace-normal leading-tight">
+              <Button onClick={() => void preview()} disabled={!canPreview} className="min-h-10 whitespace-normal leading-tight">
                 {running ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                 {t("adminDeveloper.runPreview")}
               </Button>
+              {running ? (
+                <Button type="button" variant="outline" onClick={cancelPreview}>
+                  <Ban className="mr-2 h-4 w-4" />
+                  {t("adminDeveloper.cancelPreview")}
+                </Button>
+              ) : null}
               {snippetRows.map((snippet) => (
                 <Button key={snippet.labelKey} type="button" variant="outline" size="sm" onClick={() => insertSnippet(snippet.code)}>
                   {t(snippet.labelKey)}
@@ -1117,7 +1262,37 @@ export default function AdminDeveloperPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
-                <Badge variant={result.ok ? "success" : "destructive"}>{result.ok ? t("adminDeveloper.resultPassed") : t("adminDeveloper.resultBlocked")}</Badge>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={result.ok ? "success" : "destructive"}>{result.ok ? t("adminDeveloper.resultPassed") : t("adminDeveloper.resultBlocked")}</Badge>
+                  {typeof result.duration_ms === "number" ? <Badge variant="outline">{result.duration_ms} ms</Badge> : null}
+                  {result.diagnostics?.severity ? <Badge variant={result.diagnostics.severity === "blocked" ? "destructive" : result.diagnostics.severity === "warning" ? "warning" : "secondary"}>{result.diagnostics.severity}</Badge> : null}
+                </div>
+                {result.preview_context ? (
+                  <div className="rounded-md border bg-muted/20 p-2 text-xs">
+                    <p className="font-medium">{t("adminDeveloper.previewContext")}</p>
+                    <p className="mt-1 text-muted-foreground">
+                      {result.preview_context.command} {result.preview_context.args.join(" ")}
+                      {" · "}
+                      {result.preview_context.private_chat ? t("adminDeveloper.previewPrivateChat") : t("adminDeveloper.previewGroupChat")}
+                    </p>
+                  </div>
+                ) : null}
+                {result.metrics ? (
+                  <div className="grid gap-2 rounded-md border bg-muted/20 p-2 text-xs sm:grid-cols-3">
+                    <div>
+                      <p className="text-muted-foreground">{t("adminDeveloper.codeSize")}</p>
+                      <p className="font-medium">{result.metrics.bytes} / {result.metrics.max_bytes} B</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">{t("adminDeveloper.codeLines")}</p>
+                      <p className="font-medium">{result.metrics.lines}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">{t("adminDeveloper.runtimeLimits")}</p>
+                      <p className="font-medium">{result.metrics.timeout_ms} ms · reply {result.metrics.reply_limit} · log {result.metrics.log_limit}</p>
+                    </div>
+                  </div>
+                ) : null}
                 {result.errors?.length > 0 && (
                   <div>
                     <p className="mb-1 font-medium">{t("adminDeveloper.errors")}</p>
@@ -1132,6 +1307,14 @@ export default function AdminDeveloperPage() {
                     <ul className="list-inside list-disc text-muted-foreground">
                       {result.warnings.map((item) => <li key={item}>{item}</li>)}
                     </ul>
+                  </div>
+                )}
+                {result.risk_tokens && result.risk_tokens.length > 0 && (
+                  <div>
+                    <p className="mb-1 font-medium">{t("adminDeveloper.riskTokensTitle")}</p>
+                    <div className="flex flex-wrap gap-1">
+                      {result.risk_tokens.map((item) => <Badge key={item} variant="warning" className="text-[10px]">{item}</Badge>)}
+                    </div>
                   </div>
                 )}
                 {result.output && (

@@ -34,6 +34,7 @@ import type {
   DatabaseRestoreResult,
   DatabaseStatus,
   DeveloperJSDocs,
+  DeveloperJSPreviewResult,
   DeveloperJSPreset,
   EmbyActivityLogsResponse,
   EmbyDevice,
@@ -1883,20 +1884,20 @@ class ApiClient {
     });
   }
 
-  async previewDeveloperJSCommand(code: string) {
-    return this.request<{
-      ok: boolean;
-      errors: string[];
-      warnings: string[];
-      risk_tokens?: string[];
-      example: string;
-      bindings: string[];
-      output?: string;
-      logs?: string[];
-    }>("/admin/developer/js-sandbox", {
+  async previewDeveloperJSCommand(
+    code: string,
+    options: { command?: string; args_text?: string; private_chat?: boolean; signal?: AbortSignal } = {},
+  ) {
+    return this.request<DeveloperJSPreviewResult>("/admin/developer/js-sandbox", {
       method: "POST",
-      body: JSON.stringify({ code }),
-    });
+      signal: options.signal,
+      body: JSON.stringify({
+        code,
+        command: options.command,
+        args_text: options.args_text,
+        private_chat: options.private_chat,
+      }),
+    }, { timeoutMs: 15_000 });
   }
 
   async getDeveloperJSDocs() {

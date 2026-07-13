@@ -919,6 +919,42 @@ export interface DeveloperJSPreset {
   updated_at: number;
 }
 
+export interface DeveloperJSPreviewMetrics {
+  bytes: number;
+  chars: number;
+  lines: number;
+  max_bytes: number;
+  timeout_ms: number;
+  reply_limit: number;
+  log_limit: number;
+}
+
+export interface DeveloperJSPreviewDiagnostics {
+  severity: "ok" | "warning" | "blocked" | (string & {});
+  blocked_count: number;
+  risk_count: number;
+  requires_review: boolean;
+}
+
+export interface DeveloperJSPreviewResult {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  risk_tokens?: string[];
+  example: string;
+  bindings: string[];
+  output?: string;
+  logs?: string[];
+  duration_ms?: number;
+  metrics?: DeveloperJSPreviewMetrics;
+  diagnostics?: DeveloperJSPreviewDiagnostics;
+  preview_context?: {
+    command: string;
+    args: string[];
+    private_chat: boolean;
+  };
+}
+
 export interface DeveloperJSDocEntry {
   name: string;
   category: string;
