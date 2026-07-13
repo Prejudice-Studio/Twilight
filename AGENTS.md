@@ -170,6 +170,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - `internal/api/telegram_commands.go` is the authoritative built-in command registry. Keep command metadata (`description`, `usage`, `category`, `private`, `admin`) there and expose it through `/api/v1/admin/telegram/commands/catalog`; do not hard-code built-in command lists in the WebUI.
 - Disabling a built-in command through `Telegram.disabled_commands` must be terminal: the Bot should tell the user the command is disabled and must not fall through to a same-name custom command.
 - Custom commands may not override built-in or fixed special commands such as `/start`, `/help`, `/twihelp`, and `/twguser`.
+- Telegram bind codes are runtime tickets held in `bindStatusHub`, not durable account bindings. Startup and config reload must run the legacy bind-code residue repair so old persisted `state.bind_codes` entries cannot make Telegram look confirmed while no `User.TelegramID` exists.
 
 ## Audit Log Rules
 

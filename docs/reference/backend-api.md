@@ -441,7 +441,7 @@ curl -X GET "http://localhost:5000/api/v1/users/check-available?username=newuser
 
 `GET /users/telegram/register/bind-code/status?code=<code>` — GET fallback 查询绑定码状态（公开，主要用于 WebSocket 不可用或提交前兜底）。
 
-常见响应字段：`status`（`pending` / `confirmed` / `expired` / `not_found` / `invalid_format` / `wrong_scene` / `telegram_taken`）、`confirmed`、`terminal`、`expires_in`、`telegram_id`、`telegram_username`、`message`。绑定码只保存在当前 App 进程内存，服务重启后失效；注册提交时，后端会消费已确认绑定码、复检 Telegram ID 唯一性并创建用户。
+常见响应字段：`status`（`pending` / `confirmed` / `expired` / `not_found` / `invalid_format` / `wrong_scene` / `telegram_taken`）、`confirmed`、`terminal`、`expires_in`、`telegram_id`、`telegram_username`、`message`。绑定码只保存在当前 App 进程内存，服务重启后失效；注册提交时，后端会消费已确认绑定码、复检 Telegram ID 唯一性并创建用户。启动和配置热重载会清理历史版本遗留在状态文档里的 `bind_codes`，避免出现 Telegram 侧显示确认但本地没有用户记录的残留状态。
 
 `POST /users/me/telegram/bind-confirm` — 注册流程中确认绑定（路由为 `AuthPublic`，由绑定码本身承载身份）。
 请求体：

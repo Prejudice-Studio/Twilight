@@ -3030,6 +3030,33 @@ func (s *Store) CleanupExpiredBindCodes(now int64) (int, error) {
 	return deleted, nil
 }
 
+// RepairLegacyTelegramBindResidue removes bind codes persisted by old builds.
+// Current Telegram bind codes live only in the in-memory bindStatusHub; a
+// persisted confirmed register code can otherwise make Telegram look confirmed
+// while no User row exists.
+func (s *Store) RepairLegacyTelegramBindResidue() (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.state.BindCodes) == 0 {
+		return 0, nil
+	}
+	deleted := 0
+	err := s.mutateAndSaveLocked(func() error {
+		for code := range s.state.BindCodes {
+			delete(s.state.BindCodes, code)
+			deleted++
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	if deleted > 0 {
+		s.rebuildTelegramIDIndex()
+	}
+	return deleted, nil
+}
+
 func (s *Store) UpsertAnnouncement(a Announcement) (Announcement, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

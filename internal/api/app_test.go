@@ -1942,6 +1942,32 @@ func TestCleanupExpiredBindCodesKeepsValidCodes(t *testing.T) {
 	}
 }
 
+func TestRepairTelegramBindResidueClearsLegacyStoreAndExpiredMemoryCodes(t *testing.T) {
+	app := newTestApp(t)
+	now := time.Now().Unix()
+	if err := app.store().UpsertBindCode(store.BindCode{Code: "LEGACYTG1", Scene: "register", Confirmed: true, TelegramID: 12345, CreatedAt: now - 3600, ExpiresAt: now - 3500}); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.upsertBindCode(store.BindCode{Code: "MEMEXPIRED1", Scene: "register", Confirmed: true, TelegramID: 67890, CreatedAt: now - 3600, ExpiresAt: now - 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.upsertBindCode(store.BindCode{Code: "MEMVALID123", Scene: "register", Confirmed: true, TelegramID: 67891, CreatedAt: now, ExpiresAt: now + 300}); err != nil {
+		t.Fatal(err)
+	}
+
+	app.repairTelegramBindResidue("test")
+
+	if _, ok := app.store().BindCode("LEGACYTG1"); ok {
+		t.Fatal("legacy persisted bind code should be removed by repair")
+	}
+	if _, ok := app.bindCode("MEMEXPIRED1"); ok {
+		t.Fatal("expired in-memory bind code should be removed by repair")
+	}
+	if _, ok := app.bindCode("MEMVALID123"); !ok {
+		t.Fatal("valid in-memory bind code should remain")
+	}
+}
+
 func TestSchedulerCleanupBindCodesJobRemoved(t *testing.T) {
 	app := newTestApp(t)
 	req := httptest.NewRequest(http.MethodPost, "/scheduler", nil)

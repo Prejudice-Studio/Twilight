@@ -253,7 +253,25 @@ func New(cfg config.Config, st *store.Store) (*App, error) {
 	validateTrustedProxyStartup(cfg.TrustProxyHeaders, cfg.TrustedProxyCIDRs)
 	applyRuntimeMemoryLimit(cfg.RuntimeMemoryLimitMB)
 	ConfigureRuntimeLoggingStore(st, cfg.ZapLevel(), cfg.RuntimeLogLimit)
+	app.repairTelegramBindResidue("startup")
 	return app, nil
+}
+
+func (a *App) repairTelegramBindResidue(source string) {
+	now := time.Now().Unix()
+	memoryExpired := a.cleanupExpiredBindCodes(now)
+	persistedLegacy := 0
+	if st := a.store(); st != nil {
+		deleted, err := st.RepairLegacyTelegramBindResidue()
+		if err != nil {
+			zap.L().Warn("telegram bind residue repair failed", zap.String("source", source), zap.Error(err))
+			return
+		}
+		persistedLegacy = deleted
+	}
+	if memoryExpired > 0 || persistedLegacy > 0 {
+		zap.L().Info("telegram bind residue repaired", zap.String("source", source), zap.Int("memory_expired", memoryExpired), zap.Int("persisted_legacy", persistedLegacy))
+	}
 }
 
 func newRedisClient(cfg config.Config) (*redis.Client, error) {
@@ -426,6 +444,7 @@ func (a *App) reloadConfigLocked() (map[string]any, error) {
 	}
 	ConfigureRuntimeLoggingStore(nextState.store, next.ZapLevel(), next.RuntimeLogLimit)
 	reinitialized = append(reinitialized, "runtime_logger")
+	a.repairTelegramBindResidue("config_reload")
 
 	restartRequired := []string{}
 	if previous.Host != next.Host || previous.Port != next.Port {

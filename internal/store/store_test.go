@@ -291,6 +291,36 @@ func TestCleanupExpiredBindCodesDoesNotDeleteSameValueRegCode(t *testing.T) {
 	}
 }
 
+func TestRepairLegacyTelegramBindResidueClearsPersistedBindCodes(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	if err := st.UpsertBindCode(BindCode{Code: "LEGACYTG1", Scene: "register", Confirmed: true, TelegramID: 12345, CreatedAt: 1, ExpiresAt: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertBindCode(BindCode{Code: "LEGACYTG2", Scene: "user", UID: 99, Confirmed: true, TelegramID: 67890, CreatedAt: 1, ExpiresAt: 2}); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := st.RepairLegacyTelegramBindResidue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 2 {
+		t.Fatalf("deleted=%d, want 2", deleted)
+	}
+	if _, ok := st.BindCode("LEGACYTG1"); ok {
+		t.Fatal("legacy register bind code should be removed")
+	}
+	if _, ok := st.BindCode("LEGACYTG2"); ok {
+		t.Fatal("legacy user bind code should be removed")
+	}
+	deleted, err = st.RepairLegacyTelegramBindResidue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 0 {
+		t.Fatalf("second repair should be idempotent, deleted=%d", deleted)
+	}
+}
+
 // TestSaveLockedBackupCopyDoesNotLeaveBakTmp 锁定 saveLocked 写 .bak 影子副
 // 本时复用 writeFileAtomicSync：tmp 文件必须在 rename 后消失（O_EXCL 保证下
 // 一次写入会因为残留 tmp 直接失败），且 .bak 内容是上一次成功写入的 state，
