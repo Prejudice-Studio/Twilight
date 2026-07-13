@@ -148,6 +148,36 @@ func TestClearEmbyGrantForUnboundUsers(t *testing.T) {
 	}
 }
 
+func TestDetachInviteClearsInviteCodeUsage(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	child, err := st.CreateUser(User{Username: "detach-child", PasswordHash: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.mu.Lock()
+	st.state.InviteCodes["INV-DETACH"] = InviteCode{Code: "INV-DETACH", InviterUID: 999, UseCountLimit: 1, UseCount: 1, Used: true, UsedByUID: child.UID, Active: false}
+	st.state.InviteRelations[child.UID] = InviteRelation{ParentUID: 999, ChildUID: child.UID, Code: "INV-DETACH"}
+	if err := st.saveLocked(); err != nil {
+		st.mu.Unlock()
+		t.Fatal(err)
+	}
+	st.mu.Unlock()
+
+	if err := st.DetachInvite(child.UID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.ParentOf(child.UID); ok {
+		t.Fatal("invite relation should be detached")
+	}
+	invite, ok := st.InviteCode("INV-DETACH")
+	if !ok {
+		t.Fatal("invite code should remain after detach")
+	}
+	if invite.UsedByUID != 0 || invite.Used || invite.UseCount != 0 || !invite.Active {
+		t.Fatalf("invite code usage should be cleared after detach: %#v", invite)
+	}
+}
+
 func containsInt64(xs []int64, v int64) bool {
 	for _, x := range xs {
 		if x == v {

@@ -13,7 +13,7 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 | 树根（root） | 邀请关系图中没有上级（在 `invite_relations` 中没有以自己为 `child` 的关系）的节点。 |
 | 层级（depth） | 从该节点向上回溯到根的层数，根本身 = 1。示例 `C → A → B`（C 邀请了 A，A 邀请了 B）：C=1，A=2，B=3，整树深度为 3。 |
 | 子树（subtree） | 以某节点为根、向下递归的所有后代集合。 |
-| 断开（detach） | 删除某用户作为 `child` 的那条边（即抹掉它的上级指向）。它名下的子节点不变，但它自己晋升为新的树根。 |
+| 断开（detach） | 删除某用户作为 `child` 的那条边（即抹掉它的上级指向），同时清理其占用的邀请码使用记录，避免后续按旧邀请码使用痕迹重建关系。它名下的子节点不变，但它自己晋升为新的树根。 |
 | 级联删除（cascade delete） | 以某节点为起点，按指定层级（`cascade_depth`）一并删除若干代后代。 |
 
 数据模型（`internal/store/store.go`）：
@@ -158,9 +158,9 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 | 仅停用 / 启用（`cascade_depth=1`） | 邀请关系完全不变；仅翻转 `Active` 并同步 Emby。 |
 | 级联禁用 / 启用（`cascade_depth>=2` 或 `<0`/`>=999`） | 仅翻转层级内各用户的 `Active` 并同步 Emby；邀请关系完全不动；受保护管理员自动跳过。 |
 | `mode=emby_only`（任意 `cascade_depth`） | 仅删除 Emby 账号并清空绑定字段；本地账号、上下级、邀请码全部保留。 |
-| 下级自助断开（`POST /invite/me/detach-expired`） | 仅当自己存在邀请上级，且 Emby 已到期，或 Web 已禁用且仍绑定 Emby 时，完全删除自己的 Emby 账号、清空本地 Emby 绑定与待开通状态，并解除自己的上级关系；不改变 Web 账号的启用 / 禁用状态。 |
-| 上级清理下级（`POST /invite/children/:uid/detach-expired`） | 仅当目标是 Emby 已到期，或 Web 已禁用且仍绑定 Emby 的直属下级时，完全删除其 Emby 账号、清空绑定与待开通状态，并解除上下级关系；不改变目标 Web 账号的启用 / 禁用状态。 |
-| 管理员断开（`POST /admin/invite/users/:uid/detach`） | 仅删除该用户作为 `child` 的边，自身晋升新树根；不动其 Emby 账号与下级。`invite_enabled=false` 时仍可执行，用于维护历史关系。 |
+| 下级自助断开（`POST /invite/me/detach-expired`） | 仅当自己存在邀请上级，且 Emby 已到期，或 Web 已禁用且仍绑定 Emby 时，完全删除自己的 Emby 账号、清空本地 Emby 绑定与待开通状态，并解除自己的上级关系；同时清理对应邀请码的使用占用，避免刷新后恢复；不改变 Web 账号的启用 / 禁用状态。 |
+| 上级清理下级（`POST /invite/children/:uid/detach-expired`） | 仅当目标是 Emby 已到期，或 Web 已禁用且仍绑定 Emby 的直属下级时，完全删除其 Emby 账号、清空绑定与待开通状态，并解除上下级关系；同时清理对应邀请码的使用占用，避免刷新后恢复；不改变目标 Web 账号的启用 / 禁用状态。 |
+| 管理员断开（`POST /admin/invite/users/:uid/detach`） | 删除该用户作为 `child` 的边并清理其占用的邀请码使用记录，自身晋升新树根；不动其 Emby 账号与下级。`invite_enabled=false` 时仍可执行，用于维护历史关系。 |
 
 ## 核心校验
 

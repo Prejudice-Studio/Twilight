@@ -5148,6 +5148,16 @@ func TestInviteChildCanDetachSelfAfterExpiryAndDeleteOwnEmby(t *testing.T) {
 	if _, ok := app.store().ParentOf(child.UID); ok {
 		t.Fatal("self-detached child still has invite parent")
 	}
+	if status := app.inviteTreeFor(child); int(numeric(status["self"].(map[string]any)["depth"])) != 1 {
+		t.Fatalf("self-detached child should become root after refresh: %#v", status)
+	}
+	invite, ok := app.store().InviteCode("INV-SELF-DETACH")
+	if !ok {
+		t.Fatal("invite code should remain after self detach")
+	}
+	if invite.UsedByUID != 0 || invite.Used || invite.UseCount != 0 || !invite.Active {
+		t.Fatalf("self detach should clear invite code usage so relation cannot be rebuilt: %#v", invite)
+	}
 	updated, ok := app.store().User(child.UID)
 	if !ok || !updated.Active || updated.EmbyID != "" || updated.EmbyUsername != "" || updated.EmbyDisabled || updated.PendingEmby {
 		t.Fatalf("self detach should keep web account active and clear Emby binding: %#v", updated)

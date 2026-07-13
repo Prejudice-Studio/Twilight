@@ -190,6 +190,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Admin user listing and `filteredBatchUserUIDs` must keep filter semantics aligned.
 - `InviteEnabled=false` stops new invite flow only. It must not block admin invite-tree maintenance, existing child renewal codes, `POST /invite/children/:uid/detach-expired`, or `POST /invite/me/detach-expired`.
 - Expired invited users who actively detach must fully delete their own remote Emby account, clear local Emby binding/pending state, and detach their parent relation. Do not implement this as merely disabling Emby.
+- Invite detach must remove both `InviteRelations[uid]` and that user's consumed invite-code usage (`UsedByUID`, `Used`, `UseCount`, `Active`) through the store helper, so refreshes or repair paths cannot recreate the parent relation from stale code usage.
 - Bangumi subject cache is global by subject ID; collection cache is per user and type. `UpsertBangumiCollectionCache` owns splitting full API entries.
 - Bangumi covers are cached under `uploads/bangumi/{BGMID}.{ext}` with positive numeric IDs and path/host/MIME/size validation.
 - Bangumi watched type `2` marks the full series watched and ignores frontend `ep_status`; partial progress belongs to type `3`.

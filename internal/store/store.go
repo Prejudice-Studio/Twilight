@@ -4027,7 +4027,7 @@ func (s *Store) DetachInvite(uid int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.mutateAndSaveLocked(func() error {
-		delete(s.state.InviteRelations, uid)
+		s.clearInviteUsageForUIDLocked(uid)
 		return nil
 	})
 }
