@@ -154,7 +154,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 
 | Gate | Required handler behavior |
 | ---- | ---- |
-| `InviteEnabled` | Create/check/use/list/delete invite paths reject disabled use. Existing-child invite renewal codes still work by design. |
+| `InviteEnabled` | Create/check/use/list/delete invite paths reject disabled use. Existing-child invite renewal codes, expired-child Emby deletion/detach cleanup, and admin historical relation maintenance still work by design. |
 | `SigninEnabled` | `handleSignin` and `handleSigninRenew` reject disabled use. |
 | `MediaRequestEnabled` | Media request creation and user request listing reject disabled use. |
 | `emailConfigured()` | Email send, verify, admin email test, and email password reset reject disabled use. |
@@ -187,6 +187,8 @@ Use this index before broad search. Line numbers drift, so search by function na
 - `RegCode.Source`: `admin`, `invite`, or empty historical values treated as `admin`.
 - Disabled RegCodes pause validity countdown; used-up status takes priority over manual disabled status.
 - Admin user listing and `filteredBatchUserUIDs` must keep filter semantics aligned.
+- `InviteEnabled=false` stops new invite flow only. It must not block admin invite-tree maintenance, existing child renewal codes, `POST /invite/children/:uid/detach-expired`, or `POST /invite/me/detach-expired`.
+- Expired invited users who actively detach must fully delete their own remote Emby account, clear local Emby binding/pending state, and detach their parent relation. Do not implement this as merely disabling Emby.
 - Bangumi subject cache is global by subject ID; collection cache is per user and type. `UpsertBangumiCollectionCache` owns splitting full API entries.
 - Bangumi covers are cached under `uploads/bangumi/{BGMID}.{ext}` with positive numeric IDs and path/host/MIME/size validation.
 - Bangumi watched type `2` marks the full series watched and ignores frontend `ep_status`; partial progress belongs to type `3`.

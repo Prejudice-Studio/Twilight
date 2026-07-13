@@ -2618,6 +2618,92 @@ func TestTelegramRetryAfterFromError(t *testing.T) {
 	}
 }
 
+func TestTelegramDelAccountAllowsExpiredInviteCleanupWithWebPassword(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().TelegramMode = true
+	app.cfg().TelegramBotToken = "123:ABC"
+	messages := []map[string]any{}
+	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/bot123:ABC/sendMessage" {
+			t.Fatalf("unexpected telegram path: %s", r.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		messages = append(messages, body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
+	}))
+	defer tg.Close()
+	app.cfg().TelegramAPIURL = tg.URL
+
+	var deletedRemote int32
+	var authAttempts int32
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == "/Users/emby-expired-tg":
+			atomic.AddInt32(&deletedRemote, 1)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/Users/AuthenticateByName":
+			atomic.AddInt32(&authAttempts, 1)
+			http.Error(w, "should not authenticate deleted expired invite user", http.StatusForbidden)
+		default:
+			t.Fatalf("unexpected Emby request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+	app.cfg().EmbyToken = "token"
+
+	hash, err := security.HashPassword("Password123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := app.store().CreateUser(store.User{Username: "tg-parent", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := app.store().CreateUser(store.User{
+		Username:     "tg-child",
+		PasswordHash: hash,
+		Role:         store.RoleNormal,
+		Active:       true,
+		ExpiredAt:    time.Now().AddDate(0, 0, -1).Unix(),
+		EmbyID:       "emby-expired-tg",
+		EmbyUsername: "tg-child",
+		EmbyDisabled: true,
+		TelegramID:   424242,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store().UpsertInviteCode(store.InviteCode{Code: "INV-TG-CLEANUP", UID: parent.UID, InviterUID: parent.UID, Days: 30, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.store().ConsumeInviteCode("INV-TG-CLEANUP", child.UID); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	app.telegramHandleDelAccount(ctx, 10001, child.TelegramID, []string{"emby"})
+	if len(messages) == 0 || !strings.Contains(asString(messages[len(messages)-1]["text"]), "邀请到期清理已启动") {
+		t.Fatalf("expected expired invite cleanup prompt, messages=%#v", messages)
+	}
+	if !app.telegramConsumeDelAccountPending(ctx, 10001, child.TelegramID, "Password123456") {
+		t.Fatal("expected pending delAccount state to consume Web password")
+	}
+	if atomic.LoadInt32(&authAttempts) != 0 {
+		t.Fatal("expired invite cleanup should not require Emby password authentication")
+	}
+	if atomic.LoadInt32(&deletedRemote) != 1 {
+		t.Fatal("expired invite cleanup did not delete remote Emby user")
+	}
+	if _, ok := app.store().User(child.UID); ok {
+		t.Fatal("user should be deleted after Telegram delAccount cleanup")
+	}
+}
+
 // TestSendExpiryRemindersAbortsOnConsecutiveRateLimits 锁定 R61-4 不变量：
 // 提醒批触发连续 5 次 429 后必须 break、把已发送条数 commit 到 result，并在
 // summary 中暴露 aborted=rate_limited——避免 100 用户提醒一次性把全局 quota
@@ -4950,6 +5036,7 @@ func TestMediaRequestGlobalLimitBlocksNonAdmins(t *testing.T) {
 
 func TestInviteParentCanDetachExpiredChildAndKeepWebAccountActive(t *testing.T) {
 	app := newTestApp(t)
+	app.cfg().InviteEnabled = false
 	deletedRemote := false
 	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete || r.URL.Path != "/Users/emby-child" {
@@ -4991,6 +5078,53 @@ func TestInviteParentCanDetachExpiredChildAndKeepWebAccountActive(t *testing.T) 
 	updated, ok := app.store().User(child.UID)
 	if !ok || !updated.Active || updated.EmbyID != "" || updated.EmbyUsername != "" || updated.PendingEmby {
 		t.Fatalf("child web account was not preserved while Emby was cleared: %#v", updated)
+	}
+}
+
+func TestInviteChildCanDetachSelfAfterExpiryAndDeleteOwnEmby(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().InviteEnabled = false
+	deletedRemote := false
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/Users/emby-self-detach" {
+			t.Fatalf("unexpected Emby request: %s %s", r.Method, r.URL.Path)
+		}
+		deletedRemote = true
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+	app.cfg().EmbyToken = "token"
+	parent, err := app.store().CreateUser(store.User{Username: "self-parent", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := app.store().CreateUser(store.User{Username: "self-child", Role: store.RoleNormal, Active: true, ExpiredAt: time.Now().AddDate(0, 0, -1).Unix(), EmbyID: "emby-self-detach", EmbyUsername: "self-child", EmbyDisabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store().UpsertInviteCode(store.InviteCode{Code: "INV-SELF-DETACH", UID: parent.UID, InviterUID: parent.UID, Days: 30, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.store().ConsumeInviteCode("INV-SELF-DETACH", child.UID); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/invite/me/detach-expired", nil)
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, principal{User: child}))
+	rr := httptest.NewRecorder()
+	app.handleDetachMyExpiredInvite(rr, req, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("self detach status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !deletedRemote {
+		t.Fatal("self detach did not delete remote Emby user")
+	}
+	if _, ok := app.store().ParentOf(child.UID); ok {
+		t.Fatal("self-detached child still has invite parent")
+	}
+	updated, ok := app.store().User(child.UID)
+	if !ok || !updated.Active || updated.EmbyID != "" || updated.EmbyUsername != "" || updated.EmbyDisabled || updated.PendingEmby {
+		t.Fatalf("self detach should keep web account active and clear Emby binding: %#v", updated)
 	}
 }
 
@@ -5333,6 +5467,39 @@ func TestInviteDisabledStillAllowsExistingChildRenewCodesButBlocksNewInvites(t *
 	app.handleCreateInviteCode(renewRR, renewReq, nil)
 	if renewRR.Code != http.StatusCreated {
 		t.Fatalf("disabled invite system should still allow child renew code, status=%d body=%s", renewRR.Code, renewRR.Body.String())
+	}
+}
+
+func TestAdminCanDetachInviteRelationWhenInviteDisabled(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().InviteEnabled = false
+	admin, err := app.store().CreateUser(store.User{Username: "admin", Role: store.RoleAdmin, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := app.store().CreateUser(store.User{Username: "admin-detach-parent", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := app.store().CreateUser(store.User{Username: "admin-detach-child", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store().UpsertInviteCode(store.InviteCode{Code: "INV-ADMIN-DETACH", UID: parent.UID, InviterUID: parent.UID, Days: 30, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.store().ConsumeInviteCode("INV-ADMIN-DETACH", child.UID); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/invite/users/3/detach", nil)
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, principal{User: admin}))
+	rr := httptest.NewRecorder()
+	app.handleInviteDetach(rr, req, Params{"uid": strconv.FormatInt(child.UID, 10)})
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"changed":true`) {
+		t.Fatalf("admin detach should work while invite disabled, status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if _, ok := app.store().ParentOf(child.UID); ok {
+		t.Fatal("child still has invite parent after admin detach")
 	}
 }
 

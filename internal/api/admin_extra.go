@@ -794,10 +794,6 @@ func (a *App) handleAdminKickNoEmby(w http.ResponseWriter, r *http.Request, _ Pa
 }
 
 func (a *App) handleInviteDetach(w http.ResponseWriter, r *http.Request, params Params) {
-	if !a.cfg().InviteEnabled {
-		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
-		return
-	}
 	if _, okUser := a.userFromPath(w, params, "uid"); !okUser {
 		return
 	}
@@ -806,6 +802,7 @@ func (a *App) handleInviteDetach(w http.ResponseWriter, r *http.Request, params 
 	if err := a.store().DetachInvite(uid); statusFromError(w, err) {
 		return
 	}
+	a.audit(r, "invite_detach", "admin", uid, map[string]any{"changed": hadParent})
 	ok(w, "detached", map[string]any{"uid": uid, "is_root": true, "changed": hadParent})
 }
 

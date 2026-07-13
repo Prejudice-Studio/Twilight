@@ -24,6 +24,7 @@ type delAccountPendingState struct {
 	ChatID      int64
 	UserUID     int64
 	WebVerified bool
+	SkipEmby    bool
 	ExpiresAt   int64
 	Reason      string // 用户可选的删除原因
 }
@@ -502,6 +503,11 @@ func (a *App) telegramConsumeDelAccountPending(ctx context.Context, chatID, from
 			_ = a.telegramSendMessage(ctx, chatID, "Web 密码错误，请重试。发送 /cancel 取消操作。")
 			return true
 		}
+		if state.SkipEmby {
+			a.clearDelAccountPending(chatID, fromID)
+			a.telegramExecuteDelAccount(ctx, chatID, u, state.Reason)
+			return true
+		}
 		state.WebVerified = true
 		state.ExpiresAt = time.Now().Add(60 * time.Second).Unix()
 		a.saveDelAccountPending(state)
@@ -533,7 +539,8 @@ func (a *App) telegramConsumeDelAccountPending(ctx context.Context, chatID, from
 //
 // 安全约束：
 //   - 管理员/白名单账号拒绝删除
-//   - Web 或 Emby 被禁用时拒绝删除，防止通过删号绕过封禁
+//   - Web 被禁用时拒绝删除，防止通过删号绕过封禁
+//   - Emby 被禁用时默认拒绝；邀请关系中的已到期账号可用 Web 密码完成退出清理
 //
 // 用法：
 //
@@ -558,7 +565,8 @@ func (a *App) telegramHandleDelAccount(ctx context.Context, chatID, telegramID i
 		_ = a.telegramSendMessage(ctx, chatID, "你的 Web 账号已被禁用，不允许通过 Telegram 删除。请联系管理员。")
 		return
 	}
-	if u.EmbyDisabled {
+	expiredInviteCleanup := a.inviteExpiredSelfCleanupAllowed(u, time.Now().Unix())
+	if u.EmbyDisabled && !expiredInviteCleanup {
 		_ = a.telegramSendMessage(ctx, chatID, "你的 Emby 账号已被禁用，不允许通过 Telegram 删除。请联系管理员。")
 		return
 	}
@@ -571,6 +579,8 @@ func (a *App) telegramHandleDelAccount(ctx context.Context, chatID, telegramID i
 		msg := "⚠️ 账号删除确认\n\n此操作将永久删除你的账号，不可恢复！\n你的所有数据（播放记录、设备、邀请关系等）将被删除，注册码使用记录将被匿名化。\n\n"
 		if hasEmail && emailConfigured {
 			msg += "📧 你已绑定已验证邮箱，必须使用邮箱验证码删除。\n发送 /delAccount email 将验证码发送到你的绑定邮箱。\n\n可选：附带删除原因 /delAccount email 原因说明"
+		} else if expiredInviteCleanup {
+			msg += "🎬 你的邀请关系 Emby 权益已到期，可通过 Web 密码验证后删除本地账号并完全删除 Emby 账号。\n发送 /delAccount emby 开始验证。\n\n可选：附带删除原因 /delAccount emby 原因说明"
 		} else if hasEmby {
 			msg += "🎬 你已绑定 Emby 账号，必须通过 Web 密码 + Emby 密码两步验证删除。\n发送 /delAccount emby 开始验证。\n\n可选：附带删除原因 /delAccount emby 原因说明"
 		} else {
@@ -590,6 +600,8 @@ func (a *App) telegramHandleDelAccount(ctx context.Context, chatID, telegramID i
 		actionArgs = []string{}
 		if hasEmail && emailConfigured {
 			actionArgs = []string{"email"}
+		} else if expiredInviteCleanup {
+			actionArgs = []string{"emby"}
 		} else if hasEmby {
 			actionArgs = []string{"emby"}
 		} else {
@@ -663,11 +675,15 @@ func (a *App) telegramHandleDelAccount(ctx context.Context, chatID, telegramID i
 			ChatID:      chatID,
 			UserUID:     u.UID,
 			WebVerified: false,
+			SkipEmby:    expiredInviteCleanup,
 			ExpiresAt:   time.Now().Add(180 * time.Second).Unix(),
 			Reason:      reason,
 		}
 		a.saveDelAccountPending(state)
 		msg := "两步验证已启动。请在 3 分钟内发送你的 Web 登录密码以进行第一步验证。\n\n密码不会记录或分享，仅用于验证身份。\n发送 /cancel 取消操作。"
+		if expiredInviteCleanup {
+			msg = "邀请到期清理已启动。请在 3 分钟内发送你的 Web 登录密码；验证通过后将删除本地账号并完全删除对应 Emby 账号。\n\n密码不会记录或分享，仅用于验证身份。\n发送 /cancel 取消操作。"
+		}
 		if reason != "" {
 			msg += "\n\n删除原因：" + truncateString(reason, 200)
 		}
@@ -676,6 +692,10 @@ func (a *App) telegramHandleDelAccount(ctx context.Context, chatID, telegramID i
 	case "confirm", "force":
 		if hasEmail && emailConfigured {
 			_ = a.telegramSendMessage(ctx, chatID, "你绑定了已验证邮箱，必须使用邮箱验证码删除。发送 /delAccount email 开始。")
+			return
+		}
+		if expiredInviteCleanup {
+			_ = a.telegramSendMessage(ctx, chatID, "你的邀请关系 Emby 权益已到期，需要先验证 Web 密码。发送 /delAccount emby 开始。")
 			return
 		}
 		if hasEmby {
@@ -714,7 +734,11 @@ func (a *App) telegramExecuteDelAccount(ctx context.Context, chatID int64, u sto
 		return
 	}
 	if u.EmbyID != "" && a.embyConfigured() {
-		_ = a.embyDelete(ctx, "/Users/"+urlPathEscape(u.EmbyID))
+		if err := a.embyDelete(ctx, "/Users/"+urlPathEscape(u.EmbyID)); err != nil && !strings.Contains(err.Error(), "remote status 404") {
+			zap.L().Warn("telegram delAccount: emby delete failed", zap.Int64("uid", u.UID), zap.Error(err))
+			_ = a.telegramSendMessage(ctx, chatID, "删除 Emby 账号失败，请稍后重试或联系管理员。你的本地账号尚未删除。")
+			return
+		}
 	}
 	if err := a.store().DeleteUser(u.UID); err != nil {
 		_ = a.telegramSendMessage(ctx, chatID, "删除账号失败："+err.Error())

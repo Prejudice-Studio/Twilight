@@ -232,10 +232,6 @@ func (a *App) handleDeleteInviteCode(w http.ResponseWriter, r *http.Request, par
 }
 
 func (a *App) handleDetachExpiredInviteChild(w http.ResponseWriter, r *http.Request, params Params) {
-	if !a.cfg().InviteEnabled {
-		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
-		return
-	}
 	uid, _ := int64Param(params, "uid")
 	user := current(r).User
 	rel, okRel := a.store().ParentOf(uid)
@@ -253,33 +249,67 @@ func (a *App) handleDetachExpiredInviteChild(w http.ResponseWriter, r *http.Requ
 		failWithCode(w, http.StatusBadRequest, ErrInviteDetachNotExpired, "只能断开 Emby 已到期或 Web 已禁用且仍绑定 Emby 的直属下级")
 		return
 	}
+	updated, deletedEmby, okDelete := a.deleteEmbyAndDetachInviteUser(w, r, child, "invite_child_detach_expired")
+	if !okDelete {
+		return
+	}
+	ok(w, "已断开下级关系", map[string]any{"uid": uid, "detached": true, "deleted_emby": deletedEmby, "user": publicUser(updated)})
+}
+
+func (a *App) handleDetachMyExpiredInvite(w http.ResponseWriter, r *http.Request, _ Params) {
+	user := current(r).User
+	if _, okRel := a.store().ParentOf(user.UID); !okRel {
+		failWithCode(w, http.StatusForbidden, ErrInviteDetachNotDirect, "当前账号没有邀请上级关系")
+		return
+	}
+	latest, okUser := a.store().User(user.UID)
+	if !okUser {
+		failWithCode(w, http.StatusNotFound, ErrUserNotFound, userNotFoundMessage)
+		return
+	}
+	now := time.Now().Unix()
+	if !inviteChildCanDeleteEmbyAndDetach(latest, now) {
+		failWithCode(w, http.StatusBadRequest, ErrInviteDetachNotExpired, "只能在自己的 Emby 已到期或 Web 已禁用且仍绑定 Emby 时主动断开")
+		return
+	}
+	updated, deletedEmby, okDelete := a.deleteEmbyAndDetachInviteUser(w, r, latest, "invite_self_detach_expired")
+	if !okDelete {
+		return
+	}
+	ok(w, "已断开邀请关系并删除 Emby 账号", map[string]any{"uid": latest.UID, "detached": true, "deleted_emby": deletedEmby, "user": publicUser(updated)})
+}
+
+func (a *App) deleteEmbyAndDetachInviteUser(w http.ResponseWriter, r *http.Request, child store.User, auditAction string) (store.User, bool, bool) {
 	deletedEmby := false
 	if child.EmbyID != "" {
 		if !a.embyConfigured() {
-			failWithCode(w, http.StatusBadGateway, ErrEmbyDeleteFailed, "Emby 未配置，无法删除下级 Emby 账号")
-			return
+			failWithCode(w, http.StatusBadGateway, ErrEmbyDeleteFailed, "Emby 未配置，无法删除 Emby 账号")
+			return store.User{}, false, false
 		}
-		if err := a.embyDelete(r.Context(), "/Users/"+urlPathEscape(child.EmbyID)); err != nil {
-			zap.L().Warn("detach invite child: emby delete failed", zap.Int64("uid", uid), zap.Error(err))
-			failWithCode(w, http.StatusBadGateway, ErrEmbyDeleteFailed, "删除下级 Emby 账号失败，请稍后重试或联系管理员")
-			return
+		err := a.embyDelete(r.Context(), "/Users/"+urlPathEscape(child.EmbyID))
+		if err != nil && !strings.Contains(err.Error(), "remote status 404") {
+			zap.L().Warn("detach invite child: emby delete failed", zap.Int64("uid", child.UID), zap.Error(err))
+			failWithCode(w, http.StatusBadGateway, ErrEmbyDeleteFailed, "删除 Emby 账号失败，请稍后重试或联系管理员")
+			return store.User{}, false, false
 		}
 		deletedEmby = true
 	}
-	updated, err := a.store().UpdateUser(uid, func(u *store.User) error {
+	updated, err := a.store().UpdateUser(child.UID, func(u *store.User) error {
 		u.EmbyID = ""
 		u.EmbyUsername = ""
+		u.EmbyDisabled = false
 		u.PendingEmby = false
 		u.PendingEmbyDays = nil
 		return nil
 	})
 	if statusFromError(w, err) {
-		return
+		return store.User{}, false, false
 	}
-	if err := a.store().DetachInvite(uid); statusFromError(w, err) {
-		return
+	if err := a.store().DetachInvite(child.UID); statusFromError(w, err) {
+		return store.User{}, false, false
 	}
-	ok(w, "已断开下级关系", map[string]any{"uid": uid, "detached": true, "deleted_emby": deletedEmby, "user": publicUser(updated)})
+	a.audit(r, auditAction, "user", child.UID, map[string]any{"deleted_emby": deletedEmby})
+	return updated, deletedEmby, true
 }
 
 func inviteChildEmbyExpired(child store.User, now int64) bool {
@@ -288,6 +318,14 @@ func inviteChildEmbyExpired(child store.User, now int64) bool {
 
 func inviteChildCanDeleteEmbyAndDetach(child store.User, now int64) bool {
 	return child.EmbyID != "" && (inviteChildEmbyExpired(child, now) || !child.Active)
+}
+
+func (a *App) inviteExpiredSelfCleanupAllowed(u store.User, now int64) bool {
+	if !inviteChildEmbyExpired(u, now) {
+		return false
+	}
+	_, hasParent := a.store().ParentOf(u.UID)
+	return hasParent
 }
 
 func (a *App) canGenerateInviteRenewCodeForChild(parent, child store.User, maxDays int) bool {

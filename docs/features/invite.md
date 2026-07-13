@@ -27,7 +27,7 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 
 | 字段 | 默认 | 说明 |
 | ---- | ---- | ---- |
-| `invite_enabled` | `true` | 邀请系统总开关。关闭后不能生成 / 使用新的邀请码；已有直属下级仍可查看，并可继续生成专属续期码或清理到期 Emby 绑定。 |
+| `invite_enabled` | `true` | 邀请系统总开关。关闭后不能生成 / 使用新的邀请码；已有直属下级仍可查看，并可继续生成专属续期码或清理到期 Emby 绑定；管理员强制维护历史邀请关系不受此开关限制。 |
 | `invite_max_depth` | `3` | 整棵邀请树允许的最大层级。生成 / 使用邀请码时，若邀请人当前层级已 `>= invite_max_depth` 则拒绝（无法再向下扩展一层）。 |
 | `invite_limit` | `10` | 每位用户**未使用**邀请码的上限（已使用 / 已失效 / 已过期的不计入）。`-1` 表示无限制。 |
 | `invite_root_user_limit` | `-1` | 每棵邀请树最多可成功邀请多少用户（按整棵子树后代计数，不含树根本人）。`-1` 表示无限制；仅当 `> 0` 时生效。 |
@@ -47,11 +47,12 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
   - 查看自己的层级、直属上级、完整下级树（不返回多层上级信息）。
   - 生成 / 复制 / 撤销邀请码（仅当邀请系统开启）。
   - 为已有直属下级生成专属续期码；对 Emby 已到期或 Web 已禁用且仍绑定 Emby 的直属下级，可删除其 Emby 账号并断开关系。
+  - 自己作为被邀请下级且 Emby 已到期或 Web 已禁用仍绑定 Emby 时，可通过后端自助接口删除自己的 Emby 账号并断开上级关系。
 - **管理员**：侧边栏「邀请系统管理」`/admin/invite`（`webui/src/app/(main)/admin/invite/page.tsx`）
   - 查看邀请关系、根用户、直属下级与总下级统计。
   - 点击用户查看详情、解除上级关系、级联启停或删除。
 
-当 `invite_enabled` 为关闭时，前端会禁用「生成邀请码」，但保留已有下级的续期码与 Emby 清理入口；管理员「邀请系统管理」入口和后端关系接口不随开关隐藏，便于继续审计和维护既有关系。
+当 `invite_enabled` 为关闭时，前端会禁用「生成邀请码」，但保留已有下级的续期码与 Emby 清理入口；管理员「邀请系统管理」入口和后端关系接口不随开关隐藏，便于继续审计和维护既有关系。管理员断开、级联启停、级联删除等强制操作仍可用于历史邀请关系，开关只用于停止新邀请流量。
 
 ## 用户接口
 
@@ -65,6 +66,7 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 | `GET` | `/invite/codes` | AuthUser | 列出我生成的邀请码。 |
 | `DELETE` | `/invite/codes/:code` | AuthUser | 撤销 / 删除我生成的邀请码（仅限本人创建的码）。 |
 | `POST` | `/invite/renew-codes` | AuthUser | 为已加入邀请树的「直属下级」生成专属续期码（实际生成的是 `type=2` 续期注册码，见下）。邀请系统关闭后仍允许给既有直属下级生成。 |
+| `POST` | `/invite/me/detach-expired` | AuthUser | 自助删除自己的 Emby 账号并断开上级关系：仅允许自己存在邀请上级，且 Emby 已到期，或 Web 已禁用且仍绑定 Emby；清空绑定与待开通状态。 |
 | `POST` | `/invite/children/:uid/detach-expired` | AuthUser | 删除 Emby 并断开直属下级：仅允许目标 Emby 已到期，或 Web 已禁用且仍绑定 Emby；清空绑定与待开通状态并解除上下级关系。 |
 | `GET` | `/invite/check` | AuthPublic | 公开校验邀请码是否可用，命中返回 `days` 与邀请人用户名 `inviter`。按 IP 限速 10 次/分钟，防止扫描邀请码空间泄露邀请人信息。 |
 | `POST` | `/invite/use` | AuthUser | 已登录用户使用邀请码加入邀请树并标记待开通 Emby。按 UID 限速 10 次/分钟。**Web 前端统一走 `/users/me/use-code`（兼容卡码 / 邀请码两类），此接口为兼容入口。** |
@@ -75,7 +77,7 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 
 ### 续期码（`POST /invite/renew-codes`）
 
-为「直属下级」签发的实际上是一张一次性、指名的续期注册码（`type=2`，`target_username` 固定为下级用户名，默认格式 `REN-{random}`），见 [注册码与卡码](./regcodes.md)。校验要点（`handleCreateInviteRenewCode`）：邀请人账号需 `Active`、未过期（`userEntitlementOK`）、若 `invite_require_emby=true` 则需已绑定 Emby；目标必须是当前用户的直属下级且 Web 账号仍启用；续期天数受 `maxCodeDays` 封顶；`validity_hours` 限制在 `1-720` 小时。`invite_enabled=false` 只禁止新邀请码，不阻止既有直属下级续期码。
+为「直属下级」签发的实际上是一张一次性、指名的续期注册码（`type=2`，`target_username` 固定为下级用户名，默认格式 `REN-{random}`），见 [注册码与卡码](./regcodes.md)。校验要点（`handleCreateInviteRenewCode`）：邀请人账号需 `Active`、未过期（`userEntitlementOK`）、若 `invite_require_emby=true` 则需已绑定 Emby；目标必须是当前用户的直属下级且 Web 账号仍启用；续期天数受 `maxCodeDays` 封顶；`validity_hours` 限制在 `1-720` 小时。`invite_enabled=false` 只禁止新邀请码，不阻止既有直属下级续期码，也不阻止到期下级或上级对历史关系做 Emby 删除与断开善后。
 
 ## 管理员接口
 
@@ -156,8 +158,9 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 | 仅停用 / 启用（`cascade_depth=1`） | 邀请关系完全不变；仅翻转 `Active` 并同步 Emby。 |
 | 级联禁用 / 启用（`cascade_depth>=2` 或 `<0`/`>=999`） | 仅翻转层级内各用户的 `Active` 并同步 Emby；邀请关系完全不动；受保护管理员自动跳过。 |
 | `mode=emby_only`（任意 `cascade_depth`） | 仅删除 Emby 账号并清空绑定字段；本地账号、上下级、邀请码全部保留。 |
-| 用户自助断开（`POST /invite/children/:uid/detach-expired`） | 仅当目标是 Emby 已到期，或 Web 已禁用且仍绑定 Emby 的直属下级时，删除其 Emby 账号、清空绑定与待开通状态，并解除上下级关系；不改变目标 Web 账号的启用 / 禁用状态。 |
-| 管理员断开（`POST /admin/invite/users/:uid/detach`） | 仅删除该用户作为 `child` 的边，自身晋升新树根；不动其 Emby 账号与下级。 |
+| 下级自助断开（`POST /invite/me/detach-expired`） | 仅当自己存在邀请上级，且 Emby 已到期，或 Web 已禁用且仍绑定 Emby 时，完全删除自己的 Emby 账号、清空本地 Emby 绑定与待开通状态，并解除自己的上级关系；不改变 Web 账号的启用 / 禁用状态。 |
+| 上级清理下级（`POST /invite/children/:uid/detach-expired`） | 仅当目标是 Emby 已到期，或 Web 已禁用且仍绑定 Emby 的直属下级时，完全删除其 Emby 账号、清空绑定与待开通状态，并解除上下级关系；不改变目标 Web 账号的启用 / 禁用状态。 |
+| 管理员断开（`POST /admin/invite/users/:uid/detach`） | 仅删除该用户作为 `child` 的边，自身晋升新树根；不动其 Emby 账号与下级。`invite_enabled=false` 时仍可执行，用于维护历史关系。 |
 
 ## 核心校验
 
