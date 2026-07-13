@@ -172,7 +172,7 @@ export function UserActionsMenu({
           <MoreHorizontal className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="max-h-[min(82vh,640px)] w-72 overflow-y-auto">
+      <DropdownMenuContent align="end" className="max-h-[min(82vh,640px)] w-[min(20rem,calc(100vw-1.5rem))] overflow-y-auto">
         <DropdownMenuItem onClick={() => handlers.onEdit(user)}>
           <Edit className="mr-2 h-4 w-4" />
           <MenuTitle title="编辑信息" desc="角色、Emby ID 与状态" />
@@ -193,7 +193,7 @@ export function UserActionsMenu({
             <Ban className="mr-2 h-4 w-4" />
             <MenuText title="账号状态" desc="Web 登录与到期" />
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="w-64">
+          <DropdownMenuSubContent className="w-[min(18rem,calc(100vw-1.5rem))]">
             <DropdownMenuItem onClick={() => handlers.onToggleActive(user)} className={user.active ? "text-amber-600 focus:text-amber-600" : ""}>
               <Ban className="mr-2 h-4 w-4" />
               <MenuTitle title={toggleTitle} desc={toggleDesc} />
@@ -216,7 +216,7 @@ export function UserActionsMenu({
             <MonitorCheck className="mr-2 h-4 w-4" />
             <MenuText title="Emby 账号" desc="绑定、启停、解绑" />
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="w-64">
+          <DropdownMenuSubContent className="w-[min(18rem,calc(100vw-1.5rem))]">
             <DropdownMenuItem onClick={() => handlers.onBindEmby(user)}>
               <ExternalLink className="mr-2 h-4 w-4" />
               <MenuTitle title="Emby 绑定" desc="绑定或强绑远端 Emby 用户" />
@@ -250,7 +250,7 @@ export function UserActionsMenu({
             <Mail className="mr-2 h-4 w-4" />
             <MenuText title="身份绑定" desc="邮箱、Telegram、同步" />
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="w-64">
+          <DropdownMenuSubContent className="w-[min(18rem,calc(100vw-1.5rem))]">
             <DropdownMenuItem onClick={() => handlers.onBindEmail(user)}>
               <Mail className="mr-2 h-4 w-4" />
               <MenuTitle title="邮箱管理" desc="强制绑定邮箱或调整验证状态" />
@@ -277,7 +277,7 @@ export function UserActionsMenu({
               <UserPlus className="mr-2 h-4 w-4" />
               <MenuText title="注册资格" desc="待开通与队列" />
             </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="w-64">
+            <DropdownMenuSubContent className="w-[min(18rem,calc(100vw-1.5rem))]">
               <DropdownMenuItem onClick={() => handlers.onClearRegistrationQueue(user)} disabled={!canClearRegistrationQueue}>
                 <CalendarClock className="mr-2 h-4 w-4" />
                 <MenuTitle title="清理注册队列" desc={canClearRegistrationQueue ? "移除待补建 Emby 状态" : "当前用户无需清理"} />

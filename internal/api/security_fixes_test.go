@@ -272,3 +272,32 @@ func TestRepoURLCannotBeChangedViaWebConfig(t *testing.T) {
 		t.Fatalf("original repo_url was not preserved: %s", content)
 	}
 }
+
+func TestAPIDocsConsoleUsesPublicFallbackAndRealAPIKeyHeader(t *testing.T) {
+	app := newTestApp(t)
+	resp := doJSON(app, http.MethodGet, "/api/v1/docs", "", nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("docs status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	body := resp.Body.String()
+	for _, want := range []string{
+		"Twilight API 控制台",
+		"/api/v1/openapi.json",
+		"/api/v1/system/admin/apis",
+		"X-API-Key",
+		"公开 OpenAPI",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("docs page missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"X-Twilight-API-Key",
+		"replace(//$",
+		"replace(/^/api/v1/",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("docs page contains stale/broken snippet %q", forbidden)
+		}
+	}
+}

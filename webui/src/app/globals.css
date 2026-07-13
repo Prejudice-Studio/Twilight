@@ -576,8 +576,13 @@
     min-width: 100%;
   }
 
+  .admin-section-surface :where(.overflow-x-auto > table) {
+    min-width: min(860px, max-content);
+  }
+
   .admin-section-surface :where(th, td) {
     vertical-align: middle;
+    max-width: min(34rem, 55vw);
   }
 
   .admin-section-surface :where(.overflow-x-auto) {
@@ -592,8 +597,55 @@
     min-width: 0;
   }
 
+  .admin-section-surface :where(button:not([role="combobox"])) {
+    white-space: normal;
+    text-wrap: balance;
+  }
+
+  .admin-section-surface :where([role="combobox"]) {
+    min-width: 0;
+  }
+
+  .admin-section-surface :where(.inline-flex, .flex) {
+    min-width: 0;
+  }
+
+  .admin-section-surface :where(.badge, [data-slot="badge"]) {
+    max-width: 100%;
+  }
+
   .admin-section-surface :where(.truncate) {
     min-width: 0;
+  }
+
+  .admin-section-surface :where(.whitespace-nowrap) {
+    max-width: 100%;
+  }
+
+  .admin-section-surface :where(code, pre) {
+    max-width: 100%;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  @media (max-width: 1023px) {
+    .admin-section-surface :where(th, td) {
+      max-width: 22rem;
+    }
+  }
+
+  @media (max-width: 767px) {
+    .admin-section-surface :where(.overflow-x-auto > table) {
+      min-width: 760px;
+    }
+
+    .admin-section-surface :where(.grid-cols-2, .grid-cols-3, .grid-cols-4, .grid-cols-5) {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .admin-section-surface :where(.text-right) {
+      text-align: left;
+    }
   }
 
   @media (max-width: 639px) {

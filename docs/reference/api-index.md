@@ -41,7 +41,7 @@
 | ---- | ---- | ---- | ---- |
 | GET | `/` | Public | 根路由 |
 | GET | `/api/v1/openapi.json` | Public | OpenAPI 规范文档 |
-| GET | `/api/v1/docs` | Public | 在线 API 文档页 |
+| GET | `/api/v1/docs` | Public | 在线 API 控制台；未登录只显示公开 OpenAPI，管理员登录后显示完整路由清单 |
 
 ## Auth
 

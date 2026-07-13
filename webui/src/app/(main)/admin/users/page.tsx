@@ -2382,7 +2382,7 @@ export default function AdminUsersPage() {
             </div>
           ) : (
             <>
-            <div className="space-y-3 p-3 md:hidden">
+            <div className="space-y-3 p-3 lg:hidden">
               {users.map((user) => (
                 <div key={user.uid} className="rounded-xl border bg-background p-4 shadow-sm">
                   <div className="flex items-start justify-between gap-2">
@@ -2451,8 +2451,8 @@ export default function AdminUsersPage() {
               ))}
             </div>
 
-            <div className="hidden overflow-x-auto md:block">
-              <table className="w-full">
+            <div className="hidden overflow-x-auto lg:block">
+              <table className="w-full min-w-[980px]">
                 <thead>
                   <tr className="border-b bg-muted/50">
                     <th className="w-10 px-4 py-3 text-left text-sm font-medium">

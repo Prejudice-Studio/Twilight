@@ -103,6 +103,21 @@ function hasHeader(headers: Record<string, string>, name: string): boolean {
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 /** 表单 / multipart 上传放宽到 2 分钟，覆盖较大背景图 / 头像。 */
 const FORM_REQUEST_TIMEOUT_MS = 120_000;
+const READ_REQUEST_DEDUPE_WINDOW_MS = 750;
+
+const inFlightReadRequests = new Map<string, { promise: Promise<ApiResponse<unknown>>; startedAt: number }>();
+
+function headerCacheKey(headers: Record<string, string>): string {
+  return Object.entries(headers)
+    .map(([key, value]) => [key.toLowerCase(), value] as const)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}:${value}`)
+    .join("|");
+}
+
+function readRequestDedupeKey(url: string, method: string, headers: Record<string, string>): string {
+  return `${method} ${url} ${headerCacheKey(headers)}`;
+}
 
 /**
  * 把"调用方 signal"与"超时 signal"合并成一个：任一触发都 abort。
@@ -262,6 +277,8 @@ async function parseApiResponse<T>(
 export interface ApiRequestExtraOptions {
   /** 自定义超时（毫秒）；传 0 / Infinity 表示不加超时（SSE / 长轮询场景）。 */
   timeoutMs?: number;
+  /** Disable same-tick GET/HEAD request coalescing for endpoints that must be fetched independently. */
+  dedupe?: boolean;
 }
 
 export async function apiRequest<T>(
@@ -282,6 +299,23 @@ export async function apiRequest<T>(
   }
 
   const url = `${API_BASE}/api/v1${endpoint}`;
+  const isReadRequest = (method === "GET" || method === "HEAD") && options.body === undefined;
+  if (isReadRequest && options.signal === undefined && extra.dedupe !== false) {
+    const key = readRequestDedupeKey(url, method, headers);
+    const now = Date.now();
+    const existing = inFlightReadRequests.get(key);
+    if (existing && now - existing.startedAt <= READ_REQUEST_DEDUPE_WINDOW_MS) {
+      return existing.promise as Promise<ApiResponse<T>>;
+    }
+    const promise = apiRequest<T>(endpoint, options, { ...extra, dedupe: false }) as Promise<ApiResponse<unknown>>;
+    inFlightReadRequests.set(key, { promise, startedAt: now });
+    void promise.finally(() => {
+      if (inFlightReadRequests.get(key)?.promise === promise) {
+        inFlightReadRequests.delete(key);
+      }
+    }).catch(() => undefined);
+    return promise as Promise<ApiResponse<T>>;
+  }
 
   const timeoutMs = extra.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const guard = withTimeoutSignal(options.signal ?? null, timeoutMs);
@@ -291,7 +325,7 @@ export async function apiRequest<T>(
     response = await fetch(url, {
       ...options,
       headers,
-      cache: options.cache ?? "no-store",
+      cache: options.cache ?? (isReadRequest ? "no-cache" : "no-store"),
       credentials: "include",
       signal: guard.signal ?? options.signal ?? null,
     });

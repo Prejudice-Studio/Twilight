@@ -167,32 +167,32 @@ export default function AdminTicketsPage() {
         <p className="text-sm text-muted-foreground mt-1">{t("adminTickets.description")}</p>
       </div>
 
-      <div className="flex items-center gap-3 flex-wrap">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[repeat(3,minmax(0,12rem))_1fr_auto_auto] xl:items-end">
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-28"><SelectValue placeholder={t("adminTickets.filterAll")} /></SelectTrigger>
+          <SelectTrigger className="w-full"><SelectValue placeholder={t("adminTickets.filterAll")} /></SelectTrigger>
           <SelectContent>{Object.entries(STATUS_MAP).map(([v, s]) => <SelectItem key={v} value={v}>{t(s.labelKey as any)}</SelectItem>)}<SelectItem value="all">{t("adminTickets.filterAll")}</SelectItem></SelectContent>
         </Select>
         <Select value={typeFilter} onValueChange={setTypeFilter}>
-          <SelectTrigger className="w-28"><SelectValue placeholder={t("adminTickets.filterAllTypes")} /></SelectTrigger>
+          <SelectTrigger className="w-full"><SelectValue placeholder={t("adminTickets.filterAllTypes")} /></SelectTrigger>
           <SelectContent><SelectItem value="all">{t("adminTickets.filterAllTypes")}</SelectItem>
             {types.map((tp: string) => <SelectItem key={tp} value={tp}>{typeLabelFor(tp)}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-          <SelectTrigger className="w-28"><SelectValue placeholder={t("adminTickets.filterAllPriorities")} /></SelectTrigger>
+          <SelectTrigger className="w-full"><SelectValue placeholder={t("adminTickets.filterAllPriorities")} /></SelectTrigger>
           <SelectContent><SelectItem value="all">{t("adminTickets.filterAllPriorities")}</SelectItem>
             {Object.entries(PRIORITY_MAP).map(([v, p]) => <SelectItem key={v} value={v}>{t(p.labelKey as any)}</SelectItem>)}
           </SelectContent>
         </Select>
-        <span className="text-xs text-muted-foreground ml-auto">{t("adminTickets.total", { count: data?.tickets?.length ?? 0 })}</span>
+        <span className="text-xs text-muted-foreground xl:ml-auto">{t("adminTickets.total", { count: data?.tickets?.length ?? 0 })}</span>
         <Button variant="outline" size="sm" onClick={async () => {
           try {
             const res = await api.adminGetTicketTypes();
             setTypeMgmtTypes(res.success && res.data ? res.data.types : []);
           } catch { setTypeMgmtTypes([]); }
           setTypeMgmtOpen(true);
-        }}><Settings2 className="mr-1 h-3.5 w-3.5" />{t("adminTickets.manageTypes")}</Button>
-        <Button variant="outline" size="sm" onClick={() => void reload()} disabled={isLoading}>
+        }} className="w-full sm:w-auto"><Settings2 className="mr-1 h-3.5 w-3.5" />{t("adminTickets.manageTypes")}</Button>
+        <Button variant="outline" size="sm" onClick={() => void reload()} disabled={isLoading} className="w-full sm:w-auto">
           <RefreshCw className={`mr-1 h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />刷新
         </Button>
       </div>
@@ -320,7 +320,7 @@ export default function AdminTicketsPage() {
               <div className="rounded-lg bg-muted/30 p-3 text-sm whitespace-pre-wrap break-words border max-h-32 overflow-y-auto">
                 {editingTicket.content}
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 <div className="space-y-2"><Label>{t("adminTickets.changeStatus")}</Label>
                   <Select value={editStatus} onValueChange={setEditStatus}>
                     <SelectTrigger><SelectValue /></SelectTrigger>

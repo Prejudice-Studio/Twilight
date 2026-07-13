@@ -65,23 +65,364 @@ const apiConsoleHTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Twilight API &#25511;&#21046;&#21488;</title>
+<title>Twilight API 控制台</title>
 <style>
-:root{--bg:#09090b;--panel:#111114;--card:#18181b;--border:#27272a;--text:#fafafa;--muted:#a1a1aa;--primary:#6366f1;--danger:#ef4444;--green:#22c55e;--amber:#f59e0b}
-*{box-sizing:border-box;margin:0;padding:0}body{font:14px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);min-height:100vh}button,input,select,textarea{font:inherit}.toolbar{position:sticky;top:0;z-index:10;background:var(--panel);border-bottom:1px solid var(--border);padding:14px 20px;display:grid;grid-template-columns:minmax(220px,1fr) minmax(220px,320px) minmax(160px,220px) auto;gap:10px;align-items:center}.brand strong{display:block;font-size:16px}.brand span{display:block;color:var(--muted);font-size:12px}.toolbar input{border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--bg);color:var(--text);min-width:0}.toolbar button,.detail button{border:1px solid var(--border);border-radius:8px;padding:8px 14px;background:var(--primary);color:#fff;cursor:pointer;font-weight:600;white-space:nowrap}.layout{display:grid;grid-template-columns:360px 1fr;height:calc(100vh - 72px)}.sidebar{background:var(--panel);border-right:1px solid var(--border);overflow-y:auto}.filters{border-bottom:1px solid var(--border);padding:12px;display:grid;gap:8px}.filters input,.filters select{width:100%;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);padding:8px 10px}.summary{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:12px;padding:8px 12px;border-bottom:1px solid var(--border)}.group{font-size:11px;text-transform:uppercase;color:var(--muted);padding:12px 14px 5px;font-weight:700;letter-spacing:.5px}.route{display:block;width:100%;text-align:left;padding:8px 14px;cursor:pointer;font-size:13px;border:0;border-left:3px solid transparent;background:transparent;color:var(--muted)}.route:hover{background:rgba(99,102,241,.08);color:var(--text)}.route.active{background:rgba(99,102,241,.14);border-left-color:var(--primary);color:var(--text)}.method{display:inline-block;width:54px;font-size:11px;font-weight:800;text-align:center;margin-right:8px;border-radius:4px;padding:2px 0}.method.get{background:rgba(34,197,94,.15);color:var(--green)}.method.post{background:rgba(99,102,241,.15);color:var(--primary)}.method.put{background:rgba(234,179,8,.15);color:#eab308}.method.patch{background:rgba(168,85,247,.15);color:#a855f7}.method.delete{background:rgba(239,68,68,.15);color:var(--danger)}.main{overflow-y:auto;padding:20px}.hero,.detail,.notice{border:1px solid var(--border);background:var(--card);border-radius:10px}.hero{padding:20px;margin-bottom:18px}.hero h1{font-size:22px;margin-bottom:6px}.hero p{color:var(--muted);max-width:760px}.notice{border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.08);color:#fde68a;padding:10px 12px;font-size:13px;margin-top:12px}.detail{padding:18px}.detail h2{font-size:20px;margin-bottom:8px;display:flex;align-items:center;gap:8px}.endpoint{font-size:13px;color:var(--muted);margin-bottom:16px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;word-break:break-all}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}.field label{display:block;color:var(--muted);font-size:12px;margin-bottom:5px}.field input,.field textarea{width:100%;border:1px solid var(--border);border-radius:8px;padding:9px 10px;background:var(--bg);color:var(--text)}.field textarea{min-height:150px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.actions button.secondary{background:transparent;color:var(--text)}.response{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;margin-top:16px}.response pre{font-size:12px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;word-break:break-word;max-height:520px;overflow:auto}.status{display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:800;margin-bottom:8px}.status.ok{background:rgba(34,197,94,.15);color:var(--green)}.status.err{background:rgba(239,68,68,.15);color:var(--danger)}.empty{text-align:center;color:var(--muted);padding:60px 20px;font-size:14px}@media(max-width:860px){.toolbar{grid-template-columns:1fr}.layout{grid-template-columns:1fr;height:auto}.sidebar{max-height:45vh;border-right:0;border-bottom:1px solid var(--border)}.grid{grid-template-columns:1fr}}
+:root{--bg:#0b0f14;--panel:#111821;--card:#17202b;--soft:#1f2b38;--border:#2b3948;--text:#eef4fa;--muted:#a8b3bf;--primary:#38bdf8;--green:#34d399;--amber:#fbbf24;--red:#fb7185;--violet:#a78bfa}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text)}body{font:14px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input,select,textarea{font:inherit}button{cursor:pointer}.topbar{position:sticky;top:0;z-index:10;display:grid;grid-template-columns:minmax(220px,1fr) minmax(160px,240px) minmax(180px,260px) auto;gap:10px;align-items:center;border-bottom:1px solid var(--border);background:rgba(17,24,33,.96);padding:14px 18px;backdrop-filter:blur(10px)}.brand strong{display:block;font-size:17px}.brand span{display:block;color:var(--muted);font-size:12px}.control,input,select,textarea{min-width:0;width:100%;border:1px solid var(--border);border-radius:8px;background:#0d131a;color:var(--text);padding:9px 10px}.btn{border:1px solid var(--border);border-radius:8px;background:var(--primary);color:#001018;font-weight:700;padding:9px 13px;white-space:nowrap}.btn.secondary{background:transparent;color:var(--text)}.layout{display:grid;grid-template-columns:minmax(280px,370px) minmax(0,1fr);height:calc(100vh - 69px)}.sidebar{min-width:0;overflow:auto;border-right:1px solid var(--border);background:var(--panel)}.filters{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px;border-bottom:1px solid var(--border)}.filters input{grid-column:1/-1}.summary{display:flex;justify-content:space-between;gap:8px;padding:9px 12px;border-bottom:1px solid var(--border);color:var(--muted);font-size:12px}.routes{padding-bottom:18px}.group{padding:13px 14px 5px;color:var(--muted);font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase}.route{display:grid;grid-template-columns:62px minmax(0,1fr);gap:8px;align-items:center;width:100%;border:0;border-left:3px solid transparent;background:transparent;color:var(--muted);padding:8px 12px;text-align:left}.route:hover,.route.active{background:rgba(56,189,248,.1);color:var(--text)}.route.active{border-left-color:var(--primary)}.path{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.method{display:inline-flex;align-items:center;justify-content:center;width:56px;border-radius:5px;padding:2px 0;font-size:11px;font-weight:900}.get{background:rgba(52,211,153,.14);color:var(--green)}.post{background:rgba(56,189,248,.14);color:var(--primary)}.put{background:rgba(251,191,36,.14);color:var(--amber)}.patch{background:rgba(167,139,250,.16);color:var(--violet)}.delete{background:rgba(251,113,133,.15);color:var(--red)}.main{min-width:0;overflow:auto;padding:20px}.hero,.panel,.notice{border:1px solid var(--border);border-radius:10px;background:var(--card)}.hero{padding:20px;margin-bottom:16px}.hero h1{margin:0 0 8px;font-size:22px}.hero p{max-width:820px;margin:0;color:var(--muted)}.notice{margin-top:12px;padding:10px 12px;border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.08);color:#fde68a}.panel{padding:18px}.panel h2{display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:20px}.endpoint{margin-bottom:14px;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}.meta{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}.pill{border:1px solid var(--border);border-radius:999px;padding:3px 9px;color:var(--muted);font-size:12px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}.field label{display:block;margin-bottom:5px;color:var(--muted);font-size:12px}.field textarea{min-height:132px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.actions{display:flex;flex-wrap:wrap;gap:8px}.response{margin-top:14px;border:1px solid var(--border);border-radius:10px;background:#0d131a;padding:14px}.response pre{max-height:520px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:8px 0 0;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}.status{display:inline-flex;border-radius:5px;padding:2px 8px;font-size:12px;font-weight:900}.ok{background:rgba(52,211,153,.14);color:var(--green)}.err{background:rgba(251,113,133,.15);color:var(--red)}.empty{padding:48px 18px;text-align:center;color:var(--muted)}@media(max-width:920px){.topbar{grid-template-columns:1fr}.layout{display:block;height:auto}.sidebar{max-height:48vh;border-right:0;border-bottom:1px solid var(--border)}.grid{grid-template-columns:1fr}.main{padding:14px}.path{white-space:normal;overflow-wrap:anywhere}}
 </style>
 </head>
 <body>
-<div class="toolbar"><div class="brand"><strong>Twilight API &#25511;&#21046;&#21488;</strong><span>&#26410;&#30331;&#24405;&#26102;&#21482;&#26174;&#31034;&#20844;&#24320;&#36335;&#30001;&#65292;&#31649;&#29702;&#21592;&#30331;&#24405;&#21518;&#21487;&#26597;&#30475;&#23436;&#25972;&#28165;&#21333;</span></div><input id="baseurl" value="/api/v1" placeholder="&#22522;&#30784;&#36335;&#24452;"><input id="apikey" type="password" placeholder="API Key&#65288;&#21487;&#36873;&#65292;&#30041;&#31354;&#20351;&#29992; Cookie&#65289;"><button id="reload" type="button">&#21047;&#26032;&#36335;&#30001;</button></div>
-<div class="layout"><aside class="sidebar"><div class="filters"><input id="search" placeholder="&#25628;&#32034;&#36335;&#24452;&#12289;&#20998;&#32452;&#25110;&#26041;&#27861;"><select id="methodFilter"><option value="">&#20840;&#37096;&#26041;&#27861;</option><option value="GET">GET</option><option value="POST">POST</option><option value="PUT">PUT</option><option value="PATCH">PATCH</option><option value="DELETE">DELETE</option></select></div><div class="summary"><span id="source">&#27491;&#22312;&#21152;&#36733;</span><span id="count">0 &#26465;</span></div><div id="sidebar"><div class="empty">&#27491;&#22312;&#21152;&#36733;&#36335;&#30001;...</div></div></aside><main class="main" id="main"><div class="hero"><h1>API Explorer</h1><p>&#20174;&#24038;&#20391;&#36873;&#25321;&#25509;&#21475;&#21518;&#21487;&#21457;&#36865;&#27979;&#35797;&#35831;&#27714;&#12290;&#26410;&#30331;&#24405;&#26102;&#21482;&#26174;&#31034;&#20844;&#24320; OpenAPI&#65307;&#31649;&#29702;&#21592;&#30331;&#24405;&#21518;&#20250;&#20248;&#20808;&#21152;&#36733;&#23436;&#25972;&#36335;&#30001;&#28165;&#21333;&#12290;</p><div class="notice">&#25552;&#31034;&#65306;&#19981;&#35201;&#22312;&#20849;&#20139;&#23631;&#24149;&#25110;&#26085;&#24535;&#20013;&#26292;&#38706; API Key&#12289;Cookie&#12289;Token &#25110;&#30495;&#23454;&#29992;&#25143;&#25968;&#25454;&#12290;</div></div></main></div>
+<header class="topbar">
+  <div class="brand">
+    <strong>Twilight API 控制台</strong>
+    <span>未登录只显示公开 OpenAPI；管理员登录后优先显示完整路由清单。</span>
+  </div>
+  <input id="baseurl" class="control" value="/api/v1" aria-label="Base URL">
+  <input id="apikey" class="control" type="password" autocomplete="off" placeholder="API Key（可选，留空使用 Cookie）" aria-label="API Key">
+  <button id="reload" class="btn" type="button">刷新路由</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" aria-label="API 路由列表">
+    <div class="filters">
+      <input id="search" placeholder="搜索路径、分组、方法或鉴权级别" aria-label="搜索路由">
+      <select id="methodFilter" aria-label="方法过滤">
+        <option value="">全部方法</option>
+        <option value="GET">GET</option>
+        <option value="POST">POST</option>
+        <option value="PUT">PUT</option>
+        <option value="PATCH">PATCH</option>
+        <option value="DELETE">DELETE</option>
+      </select>
+      <select id="authFilter" aria-label="鉴权过滤">
+        <option value="">全部鉴权</option>
+        <option value="Public">Public</option>
+        <option value="User">User</option>
+        <option value="Admin">Admin</option>
+        <option value="API Key">API Key</option>
+      </select>
+    </div>
+    <div class="summary"><span id="source">正在加载</span><span id="count">0 条</span></div>
+    <div id="routes" class="routes"><div class="empty">正在加载路由...</div></div>
+  </aside>
+  <main id="main" class="main">
+    <section class="hero">
+      <h1>API Explorer</h1>
+      <p>从左侧选择接口后，可查看鉴权级别并发送测试请求。公开视图只来自 /api/v1/openapi.json；完整路由清单仅在当前会话具有管理员权限时从 /api/v1/system/admin/apis 加载。</p>
+      <div class="notice">提示：不要在共享屏幕、截图或日志中暴露 API Key、Cookie、Token、真实用户资料或数据库信息。</div>
+    </section>
+  </main>
+</div>
 <script>
-const AUTH_HEADER="X-Twilight-API-Key";let routes=[],active=null,sourceLabel="公开路由";const $=(id)=>document.getElementById(id);function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}function methodClass(m){return String(m||"GET").toLowerCase()}function groupOf(path){const parts=String(path).split("/").filter(Boolean);return parts[2]||parts[1]||"root"}function normalizePath(path){return String(path||"").replace(/^/api/v1/,"")||"/"}function prettyJSON(text){try{return JSON.stringify(JSON.parse(text),null,2)}catch{return text}}function showError(message){$("response").innerHTML='<div class="response"><span class="status err">ERROR</span><pre>'+esc(message)+'</pre></div>'}
-async function loadRoutes(){$("sidebar").innerHTML='<div class="empty">正在加载路由...</div>';routes=[];sourceLabel="公开路由";try{let resp=await fetch("/api/v1/system/admin/apis",{credentials:"include"});if(resp.ok){const json=await resp.json();const items=(json.data&&json.data.apis)||[];routes=items.map((item)=>({method:String(item.method||"GET").toUpperCase(),path:normalizePath(item.full_path||item.endpoint||item.path),auth:item.auth||"Admin"}));sourceLabel="管理员完整路由"}else{resp=await fetch("/api/v1/openapi.json",{credentials:"include"});const json=await resp.json();const data=json.data||json;const paths=data.paths||{};routes=Object.entries(paths).flatMap(([path,methods])=>Object.keys(methods||{}).map((method)=>({method:method.toUpperCase(),path:normalizePath(path),auth:"Public"})));sourceLabel="公开路由"}routes.sort((a,b)=>a.path.localeCompare(b.path)||a.method.localeCompare(b.method));renderSidebar()}catch(err){$("sidebar").innerHTML='<div class="empty">加载失败：'+esc(err.message)+'</div>'}}
-function filteredRoutes(){const q=$("search").value.trim().toLowerCase();const method=$("methodFilter").value;return routes.filter((r)=>{if(method&&r.method!==method)return false;if(!q)return true;return r.path.toLowerCase().includes(q)||r.method.toLowerCase().includes(q)||groupOf(r.path).toLowerCase().includes(q)})}
-function renderSidebar(){const items=filteredRoutes();$("source").textContent=sourceLabel;$("count").textContent=items.length+" 条";if(!items.length){$("sidebar").innerHTML='<div class="empty">没有匹配的接口</div>';return}const groups={};for(const route of items){const g=groupOf(route.path);if(!groups[g])groups[g]=[];groups[g].push(route)}let html="";for(const name of Object.keys(groups).sort()){html+='<div class="group">'+esc(name)+'</div>';for(const route of groups[name]){const isActive=active&&active.path===route.path&&active.method===route.method;html+='<button type="button" class="route '+(isActive?'active':'')+'" data-method="'+esc(route.method)+'" data-path="'+esc(route.path)+'"><span class="method '+methodClass(route.method)+'">'+esc(route.method)+'</span>'+esc(route.path)+'</button>'}}$("sidebar").innerHTML=html;document.querySelectorAll(".route").forEach((el)=>{el.addEventListener("click",()=>{active={method:el.dataset.method,path:el.dataset.path};renderSidebar();renderDetail()})})}
-function renderDetail(){if(!active)return;const base=$("baseurl").value.replace(//$/,"");const url=base+active.path;const needsBody=!["GET","HEAD"].includes(active.method);$("main").innerHTML='<div class="detail"><h2><span class="method '+methodClass(active.method)+'">'+esc(active.method)+'</span> 请求详情</h2><div class="endpoint">'+esc(url)+'</div><div class="grid"><div class="field"><label>查询字符串（可选，不含 ?）</label><input id="query" placeholder="limit=20&refresh=1"></div><div class="field"><label>额外请求头（JSON，可选）</label><input id="headers" placeholder="{&quot;X-Trace-ID&quot;:&quot;demo&quot;}"></div></div><div class="field"><label>请求体 JSON'+(needsBody?'':'（GET/HEAD 会忽略）')+'</label><textarea id="body" placeholder="{&quot;key&quot;:&quot;value&quot;}"></textarea></div><div class="actions"><button type="button" id="send">发送请求</button><button type="button" id="copy" class="secondary">复制 URL</button></div><div id="response"></div></div>';$("send").addEventListener("click",sendRequest);$("copy").addEventListener("click",()=>navigator.clipboard&&navigator.clipboard.writeText(url))}
-async function sendRequest(){if(!active)return;const base=$("baseurl").value.replace(//$/,"");const query=$("query").value.trim();const url=base+active.path+(query?(query.startsWith("?")?query:"?"+query):"");const headers={"Accept":"application/json"};const key=$("apikey").value.trim();if(key)headers[AUTH_HEADER]=key;let extra={};if($("headers").value.trim()){try{extra=JSON.parse($("headers").value)}catch(err){return showError("请求头不是合法 JSON："+err.message)}}Object.assign(headers,extra);const body=$("body").value.trim();const opts={method:active.method,headers,credentials:"include"};if(!["GET","HEAD"].includes(active.method)&&body){headers["Content-Type"]="application/json";opts.body=body}$("response").innerHTML='<div class="response">请求中...</div>';try{const start=performance.now();const resp=await fetch(url,opts);const elapsed=Math.round(performance.now()-start);const text=await resp.text();const cls=resp.status<400?"ok":"err";$("response").innerHTML='<div class="response"><span class="status '+cls+'">'+resp.status+'</span> '+elapsed+'ms<pre>'+esc(prettyJSON(text))+'</pre></div>'}catch(err){showError(err.message)}}
-$("reload").addEventListener("click",loadRoutes);$("search").addEventListener("input",renderSidebar);$("methodFilter").addEventListener("change",renderSidebar);$("baseurl").addEventListener("change",()=>{if(active)renderDetail()});loadRoutes();
+"use strict";
+const API_KEY_HEADER = "X-API-Key";
+const state = { routes: [], active: null, sourceLabel: "公开路由" };
+const $ = (id) => document.getElementById(id);
+
+function methodClass(method) {
+  return String(method || "GET").toLowerCase();
+}
+
+function normalizePath(path) {
+  const value = String(path || "/").trim().replace(/^\/api\/v1(?=\/|$)/, "");
+  return value.startsWith("/") ? value : "/" + value;
+}
+
+function normalizeAuth(auth) {
+  const value = String(auth || "Public").replace(/^Auth/, "");
+  if (/api.?key/i.test(value)) return "API Key";
+  if (/admin/i.test(value)) return "Admin";
+  if (/user/i.test(value)) return "User";
+  return "Public";
+}
+
+function groupOf(path) {
+  const parts = normalizePath(path).split("/").filter(Boolean);
+  return parts[0] || "root";
+}
+
+function baseURL() {
+  return ($("baseurl").value || "/api/v1").trim().replace(/\/+$/, "") || "/api/v1";
+}
+
+function endpointURL(route) {
+  return baseURL() + normalizePath(route.path);
+}
+
+function prettyJSON(text) {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
+}
+
+function setLoading(message) {
+  const box = document.createElement("div");
+  box.className = "empty";
+  box.textContent = message;
+  $("routes").replaceChildren(box);
+}
+
+function filteredRoutes() {
+  const q = $("search").value.trim().toLowerCase();
+  const method = $("methodFilter").value;
+  const auth = $("authFilter").value;
+  return state.routes.filter((route) => {
+    if (method && route.method !== method) return false;
+    if (auth && route.auth !== auth) return false;
+    if (!q) return true;
+    return route.path.toLowerCase().includes(q) ||
+      route.method.toLowerCase().includes(q) ||
+      route.auth.toLowerCase().includes(q) ||
+      groupOf(route.path).toLowerCase().includes(q);
+  });
+}
+
+function routeButton(route) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "route";
+  if (state.active && state.active.method === route.method && state.active.path === route.path) {
+    button.className += " active";
+  }
+  const method = document.createElement("span");
+  method.className = "method " + methodClass(route.method);
+  method.textContent = route.method;
+  const path = document.createElement("span");
+  path.className = "path";
+  path.textContent = route.path;
+  button.append(method, path);
+  button.addEventListener("click", () => {
+    state.active = route;
+    renderRoutes();
+    renderDetail();
+  });
+  return button;
+}
+
+function renderRoutes() {
+  const items = filteredRoutes();
+  $("source").textContent = state.sourceLabel;
+  $("count").textContent = items.length + " 条";
+  if (!items.length) {
+    setLoading("没有匹配的接口");
+    return;
+  }
+  const groups = new Map();
+  for (const route of items) {
+    const key = groupOf(route.path);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(route);
+  }
+  const fragment = document.createDocumentFragment();
+  for (const name of Array.from(groups.keys()).sort()) {
+    const title = document.createElement("div");
+    title.className = "group";
+    title.textContent = name;
+    fragment.appendChild(title);
+    for (const route of groups.get(name)) fragment.appendChild(routeButton(route));
+  }
+  $("routes").replaceChildren(fragment);
+}
+
+function field(label, element) {
+  const wrap = document.createElement("div");
+  wrap.className = "field";
+  const lab = document.createElement("label");
+  lab.textContent = label;
+  wrap.append(lab, element);
+  return wrap;
+}
+
+function responseBox(status, text, ok, elapsed) {
+  const box = document.createElement("div");
+  box.className = "response";
+  const badge = document.createElement("span");
+  badge.className = "status " + (ok ? "ok" : "err");
+  badge.textContent = status;
+  box.appendChild(badge);
+  if (elapsed) box.appendChild(document.createTextNode(" " + elapsed + "ms"));
+  const pre = document.createElement("pre");
+  pre.textContent = text;
+  box.appendChild(pre);
+  return box;
+}
+
+function renderDetail() {
+  const route = state.active;
+  if (!route) return;
+  const panel = document.createElement("section");
+  panel.className = "panel";
+  const title = document.createElement("h2");
+  const method = document.createElement("span");
+  method.className = "method " + methodClass(route.method);
+  method.textContent = route.method;
+  title.append(method, document.createTextNode(" 请求详情"));
+  const endpoint = document.createElement("div");
+  endpoint.className = "endpoint";
+  endpoint.textContent = endpointURL(route);
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  for (const value of ["鉴权：" + route.auth, "分组：" + groupOf(route.path), "来源：" + state.sourceLabel]) {
+    const pill = document.createElement("span");
+    pill.className = "pill";
+    pill.textContent = value;
+    meta.appendChild(pill);
+  }
+  const query = document.createElement("input");
+  query.id = "query";
+  query.placeholder = "limit=20&refresh=1";
+  const headers = document.createElement("input");
+  headers.id = "headers";
+  headers.placeholder = "{\"X-Trace-ID\":\"demo\"}";
+  const grid = document.createElement("div");
+  grid.className = "grid";
+  grid.append(field("查询字符串（可选，不含 ?）", query), field("额外请求头（JSON，可选）", headers));
+  const body = document.createElement("textarea");
+  body.id = "body";
+  body.placeholder = "{\"key\":\"value\"}";
+  const needsBody = !["GET", "HEAD"].includes(route.method);
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const send = document.createElement("button");
+  send.type = "button";
+  send.className = "btn";
+  send.textContent = "发送请求";
+  send.addEventListener("click", sendRequest);
+  const copyURL = document.createElement("button");
+  copyURL.type = "button";
+  copyURL.className = "btn secondary";
+  copyURL.textContent = "复制 URL";
+  copyURL.addEventListener("click", () => navigator.clipboard && navigator.clipboard.writeText(endpointURL(route)));
+  const copyCurl = document.createElement("button");
+  copyCurl.type = "button";
+  copyCurl.className = "btn secondary";
+  copyCurl.textContent = "复制 cURL";
+  copyCurl.addEventListener("click", () => navigator.clipboard && navigator.clipboard.writeText(buildCurl()));
+  actions.append(send, copyURL, copyCurl);
+  const response = document.createElement("div");
+  response.id = "response";
+  panel.append(title, endpoint, meta, grid, field("请求体 JSON" + (needsBody ? "" : "（GET/HEAD 会忽略）"), body), actions, response);
+  $("main").replaceChildren(panel);
+}
+
+function currentURL() {
+  const route = state.active;
+  if (!route) return "";
+  const query = ($("query") && $("query").value.trim()) || "";
+  return endpointURL(route) + (query ? (query.startsWith("?") ? query : "?" + query) : "");
+}
+
+function parseExtraHeaders() {
+  const raw = ($("headers") && $("headers").value.trim()) || "";
+  if (!raw) return {};
+  const parsed = JSON.parse(raw);
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new Error("请求头必须是 JSON 对象");
+  }
+  return parsed;
+}
+
+function buildHeaders() {
+  const headers = { "Accept": "application/json" };
+  const key = $("apikey").value.trim();
+  if (key) headers[API_KEY_HEADER] = key;
+  Object.assign(headers, parseExtraHeaders());
+  return headers;
+}
+
+function shellQuote(value) {
+  return "'" + String(value).replace(/'/g, "'\\''") + "'";
+}
+
+function buildCurl() {
+  if (!state.active) return "";
+  const headers = buildHeaders();
+  const parts = ["curl", "-i", "-X", state.active.method, shellQuote(currentURL())];
+  for (const [key, value] of Object.entries(headers)) {
+    parts.push("-H", shellQuote(key + ": " + value));
+  }
+  const body = ($("body") && $("body").value.trim()) || "";
+  if (!["GET", "HEAD"].includes(state.active.method) && body) {
+    parts.push("-H", shellQuote("Content-Type: application/json"), "--data", shellQuote(body));
+  }
+  return parts.join(" ");
+}
+
+function showError(message) {
+  $("response").replaceChildren(responseBox("ERROR", message, false, 0));
+}
+
+async function sendRequest() {
+  if (!state.active) return;
+  let headers;
+  try {
+    headers = buildHeaders();
+  } catch (err) {
+    showError(err.message || String(err));
+    return;
+  }
+  const opts = { method: state.active.method, headers, credentials: "include" };
+  const body = $("body").value.trim();
+  if (!["GET", "HEAD"].includes(state.active.method) && body) {
+    headers["Content-Type"] = "application/json";
+    opts.body = body;
+  }
+  $("response").replaceChildren(responseBox("PENDING", "请求中...", true, 0));
+  try {
+    const start = performance.now();
+    const resp = await fetch(currentURL(), opts);
+    const elapsed = Math.round(performance.now() - start);
+    const text = await resp.text();
+    $("response").replaceChildren(responseBox(String(resp.status), prettyJSON(text), resp.status < 400, elapsed));
+  } catch (err) {
+    showError(err.message || String(err));
+  }
+}
+
+async function loadRoutes() {
+  setLoading("正在加载路由...");
+  state.routes = [];
+  state.active = null;
+  state.sourceLabel = "公开路由";
+  try {
+    let resp = await fetch("/api/v1/system/admin/apis", { credentials: "include" });
+    if (resp.ok) {
+      const json = await resp.json();
+      const items = (json.data && json.data.apis) || [];
+      state.routes = items.map((item) => ({
+        method: String(item.method || "GET").toUpperCase(),
+        path: normalizePath(item.full_path || item.endpoint || item.path),
+        auth: normalizeAuth(item.auth),
+      }));
+      state.sourceLabel = "管理员完整路由";
+    } else {
+      resp = await fetch("/api/v1/openapi.json", { credentials: "include" });
+      const json = await resp.json();
+      const data = json.data || json;
+      const paths = data.paths || {};
+      state.routes = Object.entries(paths).flatMap(([path, methods]) =>
+        Object.keys(methods || {}).map((method) => ({
+          method: method.toUpperCase(),
+          path: normalizePath(path),
+          auth: "Public",
+        }))
+      );
+      state.sourceLabel = "公开路由";
+    }
+    state.routes.sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method));
+    renderRoutes();
+  } catch (err) {
+    setLoading("加载失败：" + (err.message || String(err)));
+  }
+}
+
+$("reload").addEventListener("click", loadRoutes);
+$("search").addEventListener("input", renderRoutes);
+$("methodFilter").addEventListener("change", renderRoutes);
+$("authFilter").addEventListener("change", renderRoutes);
+$("baseurl").addEventListener("change", () => { if (state.active) renderDetail(); });
+loadRoutes();
 </script>
 </body>
 </html>`

@@ -194,6 +194,13 @@ bash start_backend_dev.sh
 
 Twilight 不对 Cookie 鉴权的变更类请求做 CSRF 令牌校验，也不做额外来源校验。登录态依赖 `HttpOnly` session cookie，机器调用可使用 Bearer Token 或 API Key。`X-Twilight-Client: webui` 仅用于前端请求识别/CORS，不是鉴权手段。
 
+### 前端网络与布局性能
+
+- WebUI 统一通过 `webui/src/lib/api-request.ts` 发起应用 API 请求。无请求体的 `GET` / `HEAD` 会在短时间窗口内合并相同的在途请求，降低重复刷新、多个组件同时挂载和窄屏重排时的额外网络压力；写请求、带调用方 `signal` 的请求和显式 `dedupe: false` 的请求不参与合并。
+- 读请求默认使用浏览器 `no-cache` 语义，允许复用连接但仍向服务端确认 freshness；写请求继续使用 `no-store`。
+- 管理后台页面要优先使用稳定尺寸、可换行按钮、可横向滚动表格和移动端卡片视图，避免手机、平板或浏览器打开开发者工具后的窄比例下文字越界、按钮互相覆盖。
+- 下拉菜单、弹窗和 Select 内容应限制到视口宽度内，危险操作保持明确标签、二次确认和结果反馈。
+
 ### 文件与路径安全
 
 - 上传文件必须使用 `http.MaxBytesReader` 与 `io.LimitReader` 双层限制大小。

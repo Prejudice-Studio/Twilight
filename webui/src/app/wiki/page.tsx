@@ -25,6 +25,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 const quickLinks = [
   { href: "/dashboard", label: "仪表盘", icon: Monitor },
   { href: "/settings", label: "账号设置", icon: Shield },
+  { href: "/api/v1/docs", label: "API 文档", icon: BookOpen },
   { href: "/invite", label: "邀请", icon: UserPlus },
   { href: "/tickets", label: "工单", icon: Ticket },
   { href: "/announcements", label: "公告", icon: Bell },
@@ -56,10 +57,11 @@ const userFlows = [
 const adminFeatures = [
   ["用户管理", "筛选、编辑、续期、禁用、删除、重置密码、角色调整和批量操作。"],
   ["卡码管理", "批量生成注册码、续期码、白名单码，查看使用记录并管理有效期。"],
-  ["Emby 管理", "同步用户、查看活动日志、踢出在线会话、审查设备与 IP。"],
-  ["工单与公告", "处理用户工单、管理公告内容、控制置顶和可见性。"],
-  ["系统运维", "配置管理、数据库备份、运行日志、调度任务和系统更新。"],
+  ["Emby 管理", "同步用户、查看活动日志、踢出在线会话、手动审查设备与 IP。"],
+  ["工单与公告", "按类型、状态、优先级处理用户工单，管理公告置顶和可见性。"],
+  ["系统运维", "配置管理、数据库备份、运行日志、调度任务、健康检测和系统更新。"],
   ["安全审计", "查看操作审计、违规日志、登录历史、IP 黑名单和设备风险。"],
+  ["API 文档", "访问 /api/v1/docs 查看运行时接口；未登录只显示公开接口，管理员可查看完整清单。"],
 ];
 
 const concepts = [
@@ -78,6 +80,16 @@ const concepts = [
     title: "禁用 Web 与禁用 Emby",
     text: "禁用 Web 会阻止登录面板；禁用 Emby 只影响媒体访问。两者可独立控制。",
   },
+  {
+    icon: RefreshCw,
+    title: "手动刷新优先",
+    text: "设备/IP 审查、健康检测、数据库状态等管理视图应以手动刷新为主，避免后台持续轮询造成误判和额外负载。",
+  },
+  {
+    icon: BookOpen,
+    title: "运行时 API 文档",
+    text: "API 控制台会先尝试读取管理员完整路由；没有管理员会话时自动降级到公开 OpenAPI，不会暴露后台路由清单。",
+  },
 ];
 
 const faqs = [
@@ -85,6 +97,23 @@ const faqs = [
   ["Emby 密码错误怎么办？", "可在设置页修改 Emby 密码；如果账号由管理员统一管理，请提交工单。"],
   ["如何获取注册码？", "注册码由管理员发放。已有用户也可能通过邀请页生成邀请码给新用户。"],
   ["Telegram 绑定失败怎么办？", "确认 Bot 已启动、自己已加入要求的群组，并且 Telegram ID 没有被其他账号绑定。"],
+  ["在哪里查看接口？", "打开 /api/v1/docs。未登录时只能看到公开接口；管理员登录后可查看完整路由并进行受控测试。"],
+  ["设备/IP 审查为什么没有自动刷新？", "这是有意设计。审查类页面适合按需刷新，避免频繁请求 Emby 造成状态抖动和额外负载。"],
+];
+
+const adminWorkflow = [
+  ["日常巡检", "先看服务器状态、数据库状态和 Emby 检测；异常时使用对应的单项检测按钮，不要把多个问题混在一起判断。"],
+  ["用户处理", "优先通过用户管理的分组操作处理账号状态、Emby 绑定、身份绑定和注册资格；危险操作需要二次确认。"],
+  ["设备/IP 审查", "手动刷新后按用户、设备、客户端和 IP 聚合查看；只对明确异常的用户执行定向踢出或封禁。"],
+  ["工单处理", "以回复记录作为沟通历史，状态、类型和优先级用于流程判断；关闭后普通用户不能再修改证据图片。"],
+  ["接口调试", "使用 /api/v1/docs 的 API Key 或当前 Cookie 测试接口；不要把真实密钥写入工单、公告、截图或日志。"],
+];
+
+const safetyNotes = [
+  "公开页面不会展示数据库连接、Token、API Key、Emby 管理员凭据或 Telegram Bot Token。",
+  "上传图片、背景和封面等资源由服务端限制大小、类型和路径，不要尝试手工拼接 uploads 路径。",
+  "外部系统接入请使用专门的 API Key 权限矩阵，普通登录会话和管理员 Cookie 不适合作为长期集成凭据。",
+  "遇到状态不一致时优先手动刷新对应单项，再查看运行日志和审计日志定位原因。",
 ];
 
 function Section({ title, icon: Icon, children }: { title: string; icon: typeof BookOpen; children: React.ReactNode }) {
@@ -160,6 +189,19 @@ export default function WikiPage() {
         </div>
       </Section>
 
+      <Section title="管理员日常流程" icon={Monitor}>
+        <div className="grid gap-3 md:grid-cols-2">
+          {adminWorkflow.map(([title, text]) => (
+            <Card key={title}>
+              <CardContent className="space-y-2 p-4">
+                <h3 className="font-semibold">{title}</h3>
+                <p className="text-sm leading-6 text-muted-foreground">{text}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </Section>
+
       <Section title="关键概念" icon={HelpCircle}>
         <div className="grid gap-3 md:grid-cols-2">
           {concepts.map(({ icon: Icon, title, text }) => (
@@ -174,6 +216,18 @@ export default function WikiPage() {
             </Card>
           ))}
         </div>
+      </Section>
+
+      <Section title="安全与隐私" icon={Shield}>
+        <Card>
+          <CardContent className="p-4">
+            <ul className="space-y-2 text-sm leading-6 text-muted-foreground">
+              {safetyNotes.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
       </Section>
 
       <Section title="扩展功能" icon={MessageCircle}>

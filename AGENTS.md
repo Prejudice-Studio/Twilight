@@ -138,6 +138,8 @@ Use this index before broad search. Line numbers drift, so search by function na
 - User-facing copy belongs in `basic.json`, `zh-Hant.json`, and `en-US.json`; `zh-Hans.json` remains sparse and falls back to `basic.json`.
 - Polling should check document visibility when useful and must clear intervals on unmount.
 - Keep controls dimensionally stable across languages.
+- Coalesce duplicate in-flight `GET` / `HEAD` requests only in `webui/src/lib/api-request.ts`; never dedupe writes, caller-abortable requests, or endpoints that opt out with `dedupe: false`.
+- Admin tables, dialogs, dropdowns, and selects must stay usable in phone, tablet, and narrow desktop devtools viewports. Prefer stable dimensions, horizontal table overflow, wrapping button labels, and mobile card views over cramped desktop tables.
 - Dangerous admin actions need clear labels, confirmations, result toasts, and audit coverage where applicable.
 - User-management actions must stay grouped by domain (account state, Emby, identity binding, registration entitlement, destructive actions) instead of long flat menus. When adding user actions, keep `admin_action_state` and frontend `UserInfo` types aligned so the UI can disable or explain unavailable operations.
 
@@ -323,7 +325,7 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 ## Wiki And API Docs Rules
 
 - `/wiki` is a public user-facing guide page. Keep it Chinese, practical, and free of secrets.
-- `/api/v1/docs` is a public API console embedded by the backend. It may try admin route inventory first, but must gracefully fall back to public OpenAPI when unauthorized.
+- `/api/v1/docs` is a public API console embedded by the backend. It may try admin route inventory first, but must gracefully fall back to public OpenAPI when unauthorized. Dynamic route data must be rendered with DOM text nodes or explicit escaping, and API Key testing must use the real `X-API-Key` header.
 - `/api/v1/openapi.json` must remain public-route-only.
 - `/api/v1/system/admin/apis` is the full inventory and must stay admin-protected.
 - Do not expose real config secrets, tokens, API keys, database URLs, or private route maps to unauthenticated users.
