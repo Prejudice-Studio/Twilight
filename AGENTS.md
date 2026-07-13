@@ -297,7 +297,8 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - `sharedHTTPTransport` is the single shared transport for all external HTTP calls (Emby, Telegram, Bangumi, TMDB), configured with `MaxIdleConns=64`, `MaxIdleConnsPerHost=8`, dial timeout 5s.
 - Per-request timeouts are controlled via `context.WithTimeout`, not `http.Client.Timeout`, allowing per-endpoint timeout granularity while reusing the shared transport.
 - `sameHostRedirectPolicy` rejects cross-host redirects (max 5 hops same-host) to prevent token leakage via 302 to attacker-controlled hosts.
-- The root layout includes `<link rel="dns-prefetch">` and `<link rel="preconnect">` tags for TMDB image CDN and Bangumi API to warm connections early.
+- The root layout includes `<link rel="dns-prefetch">` and `<link rel="preconnect">` tags for configured API origin, TMDB image CDN, and Bangumi API to warm connections early.
+- Next owns `Cache-Control` for `/_next/static` hashed build assets. Do not override that path from `webui/next.config.mjs`; keep explicit cache headers limited to app-owned public assets such as `favicon.png`.
 
 ## Emby Session Rules
 

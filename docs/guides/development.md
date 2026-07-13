@@ -121,8 +121,9 @@ bash start_backend_dev.sh
 
 - 设置了 `NEXT_PUBLIC_API_URL` 时，浏览器端直连该后端地址。
 - 未设置 `NEXT_PUBLIC_API_URL` 时（典型的本地开发），Next 的 `rewrites` 会把 `/api/*` 代理到 `BACKEND_URL`（默认 `http://localhost:5000`），避免跨域。
+- 设置了 `NEXT_PUBLIC_API_URL` 时，根布局会为该 API origin 注入 `dns-prefetch` / `preconnect`，减少分离域名部署下登录与首批数据请求的握手延迟。
 - 受保护路由由客户端 layout 调 `/users/me` 校验登录态，避免 Web 域读不到 API 域 cookie 导致登录后被踢回 `/login`。
-- `SITE_NAME` / `SITE_TITLE` / `SITE_DESCRIPTION` / `SITE_ICON` 是运行时可注入的展示文案，由 `app/layout.tsx` 每次请求读取，改完即生效，无需重新构建。
+- `SITE_NAME` / `SITE_TITLE` / `SITE_DESCRIPTION` / `SITE_ICON` 是运行时可注入的展示文案，由 `app/layout.tsx` 每次请求读取，改完即生效，无需重新构建；默认图标路径是 `/favicon.png`，不要写成源码目录形式的 `public/favicon.png`。
 
 **认证页外观定制**（全部可选，`NEXT_PUBLIC_*` 前缀，构建时注入）：
 
@@ -198,6 +199,8 @@ Twilight 不对 Cookie 鉴权的变更类请求做 CSRF 令牌校验，也不做
 
 - WebUI 统一通过 `webui/src/lib/api-request.ts` 发起应用 API 请求。无请求体的 `GET` / `HEAD` 会在短时间窗口内合并相同的在途请求，降低重复刷新、多个组件同时挂载和窄屏重排时的额外网络压力；写请求、带调用方 `signal` 的请求和显式 `dedupe: false` 的请求不参与合并。
 - 读请求默认使用浏览器 `no-cache` 语义，允许复用连接但仍向服务端确认 freshness；写请求继续使用 `no-store`。
+- Next 自己管理 `/_next/static` 下 hashed 构建产物的 `Cache-Control`。不要在 `next.config.mjs` 的 `headers()` 里覆盖这一路径，否则会触发 Next 构建警告并可能破坏开发模式缓存行为。
+- 默认 `favicon.png` 应保持小尺寸和合理压缩，避免每个新访客为浏览器图标下载数百 KB 资源；需要高清品牌图时优先通过后台 `server_icon` 或环境变量覆盖。
 - 管理后台页面要优先使用稳定尺寸、可换行按钮、可横向滚动表格和移动端卡片视图，避免手机、平板或浏览器打开开发者工具后的窄比例下文字越界、按钮互相覆盖。
 - 下拉菜单、弹窗和 Select 内容应限制到视口宽度内，危险操作保持明确标签、二次确认和结果反馈。
 

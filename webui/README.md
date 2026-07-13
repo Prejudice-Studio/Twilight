@@ -58,8 +58,8 @@ NEXT_PUBLIC_SITE_TITLE=Twilight - Emby 管理系统
 # 浏览器描述（未配置时默认: ${NEXT_PUBLIC_SITE_NAME} 的 Emby/Jellyfin 管理系统）
 NEXT_PUBLIC_SITE_DESCRIPTION=一个功能完善的 Emby/Jellyfin 用户管理系统
 
-# 浏览器图标（可填 /favicon.ico 或完整 URL）
-NEXT_PUBLIC_SITE_ICON=/favicon.ico
+# 浏览器图标（可填 /favicon.png 或完整 URL）
+NEXT_PUBLIC_SITE_ICON=/favicon.png
 ```
 
 环境变量说明：
@@ -70,7 +70,7 @@ NEXT_PUBLIC_SITE_ICON=/favicon.ico
 | NEXT_PUBLIC_SITE_NAME | 否 | Twilight | 站点名称，用于登录/注册/首页等页面信息 fallback |
 | NEXT_PUBLIC_SITE_TITLE | 否 | ${NEXT_PUBLIC_SITE_NAME} - Emby 管理系统 | 浏览器标签标题（title） |
 | NEXT_PUBLIC_SITE_DESCRIPTION | 否 | ${NEXT_PUBLIC_SITE_NAME} 的 Emby/Jellyfin 管理系统 | 页面描述（meta description） |
-| NEXT_PUBLIC_SITE_ICON | 否 | 空 | 浏览器图标 URL，会写入 metadata icons |
+| NEXT_PUBLIC_SITE_ICON | 否 | /favicon.png | 浏览器图标 URL，会写入 metadata icons |
 
 修改 `.env.local` 后请重启开发服务器（`pnpm dev`）使其生效。
 

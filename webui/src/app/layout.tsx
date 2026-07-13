@@ -15,6 +15,18 @@ import {
 } from "../lib/site-config";
 import "./globals.css";
 
+function safeHTTPOrigin(raw: string | undefined): string {
+  const value = raw?.trim();
+  if (!value) return "";
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    return url.origin;
+  } catch {
+    return "";
+  }
+}
+
 // 注意：`NEXT_PUBLIC_*` 在 `next build` 时会被静态替换，运行时无法再覆盖。
 // 这里同时接受不带前缀的同名环境变量（在 Cloudflare Worker 通过 wrangler `vars`
 // 或 Pages/Workers 的 Runtime 环境变量注入），交给 `generateMetadata` 在请求时读取，
@@ -53,13 +65,22 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const apiOrigin = safeHTTPOrigin(process.env.NEXT_PUBLIC_API_URL);
+
   return (
     <html lang="zh-Hans" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
+        {apiOrigin ? (
+          <>
+            <link rel="dns-prefetch" href={`//${new URL(apiOrigin).host}`} />
+            <link rel="preconnect" href={apiOrigin} crossOrigin="anonymous" />
+          </>
+        ) : null}
         <link rel="dns-prefetch" href="//image.tmdb.org" />
         <link rel="preconnect" href="https://image.tmdb.org" crossOrigin="anonymous" />
         <link rel="dns-prefetch" href="//api.bgm.tv" />
+        <link rel="preconnect" href="https://api.bgm.tv" crossOrigin="anonymous" />
       </head>
       <body
         className={`${GeistSans.variable} ${GeistMono.variable} font-sans antialiased`}
