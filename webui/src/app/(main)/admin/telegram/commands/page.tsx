@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, BookOpen, Code2, Loader2, Plus, RotateCcw, Save, Shield, Trash2 } from "lucide-react";
+import { AlertTriangle, BookOpen, Code2, Loader2, Plus, RotateCcw, Save, Search, Shield, Trash2 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
-import type { DeveloperJSPreset } from "@/lib/api-types";
+import type { DeveloperJSPreset, TelegramCommandCatalogItem } from "@/lib/api-types";
 import { useI18n } from "@/lib/i18n";
 
 type CommandType = "text" | "js";
@@ -32,35 +32,20 @@ const jsPrefix = "js:";
 const jsPresetPrefix = "preset:";
 const nonePreset = "__none";
 
-// 内置指令列表与分类
-const BUILTIN_COMMANDS: { command: string; label: string; admin: boolean; description: string }[] = [
-  { command: "bind", label: "/bind", admin: false, description: "绑定 Telegram 账号到 Web 账户" },
-  { command: "about", label: "/about", admin: false, description: "服务说明" },
-  { command: "cancel", label: "/cancel", admin: false, description: "取消当前操作" },
-  { command: "me", label: "/me", admin: false, description: "查看当前绑定信息" },
-  { command: "emby", label: "/emby", admin: false, description: "查看 Emby 状态" },
-  { command: "resetpwd", label: "/resetpwd", admin: false, description: "密码重置指引" },
-  { command: "delaccount", label: "/delaccount", admin: false, description: "自助销号" },
-  { command: "version", label: "/version", admin: false, description: "显示版本号" },
-  { command: "ping", label: "/ping", admin: false, description: "连通性测试" },
-  { command: "notice", label: "/notice", admin: false, description: "查看最新公告" },
-  { command: "stats", label: "/stats", admin: true, description: "服务统计" },
-  { command: "admin", label: "/admin", admin: true, description: "管理员查询入口" },
-  { command: "userinfo", label: "/userinfo", admin: true, description: "查看指定用户详情" },
-  { command: "twfind", label: "/twfind", admin: true, description: "搜索用户" },
-  { command: "twishelp", label: "/twishelp", admin: true, description: "管理员帮助" },
-  { command: "banweb", label: "/banweb", admin: true, description: "禁用 Web 账号" },
-  { command: "banemby", label: "/banemby", admin: true, description: "禁用 Emby 账号" },
-  { command: "broadcast", label: "/broadcast", admin: true, description: "向用户广播消息" },
-];
-
 function rowID() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `cmd-${crypto.randomUUID()}`;
+  }
   return `cmd-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function normalizeCommand(value: string) {
-  const trimmed = value.trim().replace(/^\/+/, "").toLowerCase();
+  const trimmed = value.trim().replace(/^\/+/, "").toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 32);
   return trimmed ? `/${trimmed}` : "/";
+}
+
+function commandName(value: string) {
+  return normalizeCommand(value).replace(/^\/+/, "");
 }
 
 function commandRows(value: unknown, presets: DeveloperJSPreset[]): CommandRow[] {
@@ -117,28 +102,39 @@ export default function AdminTelegramCommandsPage() {
   const { t } = useI18n();
   const { toast } = useToast();
   const [presets, setPresets] = useState<DeveloperJSPreset[]>([]);
+  const [catalog, setCatalog] = useState<TelegramCommandCatalogItem[]>([]);
   const [rows, setRows] = useState<CommandRow[]>([]);
   const [original, setOriginal] = useState<CommandRow[]>([]);
   const [disabledCommands, setDisabledCommands] = useState<string[]>([]);
   const [originalDisabled, setOriginalDisabled] = useState<string[]>([]);
+  const [builtinQuery, setBuiltinQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [schemaRes, presetRes] = await Promise.all([
+      const [schemaRes, presetRes, commandCatalogRes] = await Promise.all([
         api.getConfigSchema(),
         api.listDeveloperJSPresets(),
+        api.getTelegramCommandCatalog(),
       ]);
       if (!schemaRes.success || !schemaRes.data) throw new Error(schemaRes.message || t("adminTelegramCommands.loadFailed"));
       const nextPresets = presetRes.success && presetRes.data ? presetRes.data.presets : [];
+      if (!commandCatalogRes.success || !commandCatalogRes.data) throw new Error(commandCatalogRes.message || t("adminTelegramCommands.loadFailed"));
       const telegram = schemaRes.data.sections.find((section) => section.key === "Telegram");
       const field = telegram?.fields.find((item) => item.key === "bot_custom_commands");
       const nextRows = commandRows(field?.value ?? [], nextPresets);
       const disabledField = telegram?.fields.find((item) => item.key === "disabled_commands");
-      const nextDisabled = Array.isArray(disabledField?.value) ? (disabledField!.value as string[]).map((s: string) => s.trim().toLowerCase()).filter(Boolean) : [];
+      const schemaDisabled = Array.isArray(disabledField?.value) ? (disabledField!.value as string[]).map((s: string) => commandName(s)).filter(Boolean) : [];
+      const disableableNames = new Set(commandCatalogRes.data.commands.filter((item) => item.disableable).map((item) => commandName(item.command)));
+      const catalogDisabled = commandCatalogRes.data.commands
+        .filter((item) => item.disableable && item.disabled)
+        .map((item) => commandName(item.command))
+        .filter(Boolean);
+      const nextDisabled = (catalogDisabled.length > 0 ? catalogDisabled : schemaDisabled).filter((name) => disableableNames.has(name));
       setPresets(nextPresets);
+      setCatalog(commandCatalogRes.data.commands);
       setRows(nextRows);
       setOriginal(JSON.parse(JSON.stringify(nextRows)));
       setDisabledCommands(nextDisabled);
@@ -164,13 +160,71 @@ export default function AdminTelegramCommandsPage() {
     setRows((current) => [...current, { id: rowID(), command: "/", type: "text", text: "", presetId: "" }]);
   };
 
-  const changedDisabled = useMemo(() => JSON.stringify(disabledCommands) !== JSON.stringify(originalDisabled), [disabledCommands, originalDisabled]);
+  const builtinNames = useMemo(() => new Set(catalog.map((item) => commandName(item.command))), [catalog]);
+  const filteredCatalog = useMemo(() => {
+    const builtinQueryText = builtinQuery.trim().toLowerCase();
+    if (!builtinQueryText) return catalog;
+    return catalog.filter((item) => {
+      const haystack = `${item.command} ${item.name} ${item.description} ${item.usage} ${item.category}`.toLowerCase();
+      return haystack.includes(builtinQueryText);
+    });
+  }, [builtinQuery, catalog]);
+
+  const rowErrors = useMemo(() => {
+    const errors = new Map<string, string>();
+    const seen = new Map<string, string>();
+    for (const row of rows) {
+      const name = commandName(row.command);
+      if (!name) continue;
+      if (builtinNames.has(name)) {
+        errors.set(row.id, t("adminTelegramCommands.errorBuiltinConflict"));
+        continue;
+      }
+      if (seen.has(name)) {
+        errors.set(row.id, t("adminTelegramCommands.errorDuplicate"));
+        const first = seen.get(name);
+        if (first) errors.set(first, t("adminTelegramCommands.errorDuplicate"));
+        continue;
+      }
+      seen.set(name, row.id);
+      if (row.type === "text" && !row.text.trim()) {
+        errors.set(row.id, t("adminTelegramCommands.errorEmptyReply"));
+      }
+      if (row.type === "js" && !row.presetId && !row.inlineCode?.trim()) {
+        errors.set(row.id, t("adminTelegramCommands.errorMissingScript"));
+      }
+    }
+    return errors;
+  }, [builtinNames, rows, t]);
+
+  const validationError = rowErrors.size > 0 ? Array.from(rowErrors.values())[0] : "";
+
+  const categoryLabel = useCallback((category: string) => {
+    switch (category) {
+      case "user":
+        return t("adminTelegramCommands.category.user");
+      case "admin":
+        return t("adminTelegramCommands.category.admin");
+      case "system":
+        return t("adminTelegramCommands.category.system");
+      case "group":
+        return t("adminTelegramCommands.category.group");
+      default:
+        return category;
+    }
+  }, [t]);
 
   const save = async () => {
+    if (validationError) {
+      toast({ title: t("adminTelegramCommands.validationFailed"), description: validationError, variant: "destructive" });
+      return;
+    }
     setSaving(true);
     try {
       const payload = rowsToConfig(rows, presets);
-      const res = await api.updateConfigBySchema({ Telegram: { bot_custom_commands: payload, disabled_commands: disabledCommands } });
+      const disableableNames = new Set(catalog.filter((item) => item.disableable).map((item) => commandName(item.command)));
+      const normalizedDisabled = Array.from(new Set(disabledCommands.map(commandName).filter((name) => name && disableableNames.has(name)))).sort();
+      const res = await api.updateConfigBySchema({ Telegram: { bot_custom_commands: payload, disabled_commands: normalizedDisabled } });
       if (!res.success) throw new Error(res.message || t("adminTelegramCommands.saveFailed"));
       toast({ title: t("adminTelegramCommands.saved"), variant: "success" });
       await load();
@@ -202,7 +256,14 @@ export default function AdminTelegramCommandsPage() {
               {t("adminTelegramCommands.openDeveloper")}
             </Link>
           </Button>
-          <Button variant="outline" onClick={() => setRows(JSON.parse(JSON.stringify(original)))} disabled={!changed || saving}>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setRows(JSON.parse(JSON.stringify(original)));
+              setDisabledCommands([...originalDisabled]);
+            }}
+            disabled={!changed || saving}
+          >
             <RotateCcw className="mr-2 h-4 w-4" />
             {t("common.reset")}
           </Button>
@@ -221,36 +282,58 @@ export default function AdminTelegramCommandsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Shield className="h-5 w-5" />{t("adminTelegramCommands.builtinTitle")}</CardTitle>
-          <CardDescription>{t("adminTelegramCommands.builtinDescription")}</CardDescription>
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2"><Shield className="h-5 w-5" />{t("adminTelegramCommands.builtinTitle")}</CardTitle>
+              <CardDescription>{t("adminTelegramCommands.builtinDescription")}</CardDescription>
+            </div>
+            <div className="relative w-full md:w-72">
+              <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                value={builtinQuery}
+                onChange={(event) => setBuiltinQuery(event.target.value)}
+                className="pl-8"
+                placeholder={t("adminTelegramCommands.searchBuiltin")}
+              />
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {BUILTIN_COMMANDS.map((cmd) => {
-              const isDisabled = disabledCommands.includes(cmd.command);
+            {filteredCatalog.map((cmd) => {
+              const name = commandName(cmd.command);
+              const isDisabled = disabledCommands.includes(name);
               return (
-                <div key={cmd.command} className="flex items-center justify-between gap-2 rounded-lg border p-2.5">
+                <div key={cmd.command} className="flex min-h-24 items-start justify-between gap-2 rounded-lg border p-2.5">
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       <code className="text-sm font-medium">{cmd.label}</code>
                       {cmd.admin && <Badge variant="outline" className="text-[9px] px-1 py-0">{t("adminTelegramCommands.adminBadge")}</Badge>}
+                      <Badge variant="secondary" className="px-1 py-0 text-[9px]">{categoryLabel(cmd.category)}</Badge>
+                      {!cmd.disableable && <Badge variant="outline" className="px-1 py-0 text-[9px]">{t("adminTelegramCommands.fixedBadge")}</Badge>}
                     </div>
-                    <p className="text-[11px] text-muted-foreground truncate">{cmd.description}</p>
+                    <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{cmd.description}</p>
+                    <code className="mt-1 block truncate text-[11px] text-muted-foreground">{cmd.usage}</code>
                   </div>
                   <Switch
                     checked={!isDisabled}
+                    disabled={!cmd.disableable}
                     onCheckedChange={(v) => {
                       setDisabledCommands((prev) => {
                         const next = new Set(prev);
-                        if (v) next.delete(cmd.command);
-                        else next.add(cmd.command);
+                        if (v) next.delete(name);
+                        else next.add(name);
                         return Array.from(next).sort();
                       });
                     }}
+                    aria-label={`${cmd.label} ${t("adminTelegramCommands.enabled")}`}
                   />
                 </div>
               );
             })}
+            {filteredCatalog.length === 0 ? (
+              <p className="col-span-full rounded-md border border-dashed p-4 text-sm text-muted-foreground">{t("adminTelegramCommands.noBuiltinMatches")}</p>
+            ) : null}
           </div>
         </CardContent>
       </Card>
@@ -267,6 +350,7 @@ export default function AdminTelegramCommandsPage() {
                 <div className="space-y-2">
                   <Label>{t("adminTelegramCommands.command")}</Label>
                   <Input value={row.command} onChange={(event) => updateRow(row.id, { command: event.target.value })} onBlur={() => updateRow(row.id, { command: normalizeCommand(row.command) })} placeholder="/hello" />
+                  {rowErrors.get(row.id) ? <p className="text-xs text-destructive">{rowErrors.get(row.id)}</p> : null}
                 </div>
                 <div className="space-y-2">
                   <Label>{t("adminTelegramCommands.type")}</Label>
@@ -305,7 +389,7 @@ export default function AdminTelegramCommandsPage() {
                 </div>
                 <div className="flex items-start justify-between gap-2 lg:flex-col">
                   <Badge variant="outline">#{index + 1}</Badge>
-                  <Button type="button" variant="ghost" size="icon" onClick={() => setRows((current) => current.filter((item) => item.id !== row.id))}>
+                  <Button type="button" variant="ghost" size="icon" aria-label={t("common.delete")} onClick={() => setRows((current) => current.filter((item) => item.id !== row.id))}>
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>

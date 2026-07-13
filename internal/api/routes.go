@@ -252,6 +252,7 @@ func (a *App) registerAdminRoutes() {
 	a.add(http.MethodPost, "/api/v1/admin/telegram/rebind-requests/:request_id/reject", AuthAdmin, a.handleReviewRebindRequest)
 	a.add(http.MethodPost, "/api/v1/admin/telegram/rebind-requests/batch", AuthAdmin, a.handleBatchReviewRebindRequests)
 	a.add(http.MethodPost, "/api/v1/admin/telegram/rebind-requests/revoke-approved", AuthAdmin, a.handleRevokeAllRebindApprovals)
+	a.add(http.MethodGet, "/api/v1/admin/telegram/commands/catalog", AuthAdmin, a.handleTelegramCommandCatalog)
 	a.add(http.MethodGet, "/api/v1/admin/telegram/roster/stats", AuthAdmin, a.handleTelegramRosterStats)
 	a.add(http.MethodPost, "/api/v1/admin/telegram/rejoined-users/enable", AuthAdmin, a.handleTelegramRejoinedEnable)
 	a.add(http.MethodPost, "/api/v1/admin/telegram/kick-unbound", AuthAdmin, a.handleTelegramKickUnbound)

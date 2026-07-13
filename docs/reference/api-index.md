@@ -326,6 +326,7 @@
 | POST | `/api/v1/admin/telegram/rebind-requests/{request_id}/approve` | Admin | 通过换绑申请 |
 | POST | `/api/v1/admin/telegram/rebind-requests/{request_id}/reject` | Admin | 拒绝换绑申请 |
 | POST | `/api/v1/admin/telegram/rebind-requests/batch` | Admin | 批量审核换绑申请 |
+| GET | `/api/v1/admin/telegram/commands/catalog` | Admin | Telegram Bot 内置指令目录与禁用状态 |
 | GET | `/api/v1/admin/telegram/roster/stats` | Admin | Telegram 花名册统计 |
 | POST | `/api/v1/admin/telegram/rejoined-users/enable` | Admin | 启用重新入群用户 |
 | POST | `/api/v1/admin/telegram/kick-unbound` | Admin | 踢出未绑定 Telegram 的用户 |

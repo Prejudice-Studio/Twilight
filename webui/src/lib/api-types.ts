@@ -398,6 +398,24 @@ export interface TelegramRebindRequest {
   reviewed_at?: number | null;
 }
 
+export interface TelegramCommandCatalogItem {
+  command: string;
+  name: string;
+  label: string;
+  description: string;
+  usage: string;
+  category: "user" | "admin" | "system" | "group" | (string & {});
+  private: boolean;
+  admin: boolean;
+  disableable: boolean;
+  disabled: boolean;
+}
+
+export interface TelegramCommandCatalog {
+  commands: TelegramCommandCatalogItem[];
+  disabled_commands: string[];
+}
+
 export interface MediaItem {
   id: number;
   title: string;

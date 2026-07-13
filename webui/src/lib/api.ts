@@ -84,6 +84,7 @@ import type {
   SystemHealthDetail,
   SystemInfo,
   SystemStats,
+  TelegramCommandCatalog,
   Ticket,
   TicketAttachment,
   TelegramRebindRequest,
@@ -1250,6 +1251,10 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify({ admin_note }),
     });
+  }
+
+  async getTelegramCommandCatalog() {
+    return this.request<TelegramCommandCatalog>("/admin/telegram/commands/catalog");
   }
 
   async getSystemStats() {

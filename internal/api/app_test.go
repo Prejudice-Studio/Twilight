@@ -2842,6 +2842,88 @@ func TestTelegramAnonymousGroupUserRequiresInlineAuth(t *testing.T) {
 	}
 }
 
+func TestTelegramCommandCatalogIncludesBackendMetadata(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().TelegramDisabledCommands = []string{"/Ping", "version"}
+	adminCookies := registerAndLogin(t, app, "admin", "Admin123456")
+
+	resp := doJSONWithHeaders(app, http.MethodGet, "/api/v1/admin/telegram/commands/catalog", ``, adminCookies, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("catalog status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var env envelope
+	if err := json.Unmarshal(resp.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode catalog response: %v", err)
+	}
+	data, _ := env.Data.(map[string]any)
+	rawCommands, _ := data["commands"].([]any)
+	if len(rawCommands) < 10 {
+		t.Fatalf("expected built-in command metadata, got %#v", data)
+	}
+	byCommand := map[string]map[string]any{}
+	for _, raw := range rawCommands {
+		item, _ := raw.(map[string]any)
+		command, _ := item["command"].(string)
+		if command != "" {
+			byCommand[command] = item
+		}
+	}
+	if byCommand["/ping"] == nil || byCommand["/ping"]["disabled"] != true {
+		t.Fatalf("expected /ping to be present and disabled, got %#v", byCommand["/ping"])
+	}
+	if byCommand["/start"] == nil || byCommand["/start"]["disableable"] != false {
+		t.Fatalf("expected /start to be fixed special command, got %#v", byCommand["/start"])
+	}
+	if byCommand["/twguser"] == nil || byCommand["/twguser"]["category"] != "group" {
+		t.Fatalf("expected /twguser group metadata, got %#v", byCommand["/twguser"])
+	}
+	rawDisabled, _ := data["disabled_commands"].([]any)
+	disabled := map[string]bool{}
+	for _, raw := range rawDisabled {
+		disabled[asString(raw)] = true
+	}
+	if !disabled["ping"] || !disabled["version"] {
+		t.Fatalf("disabled command names were not normalized: %#v", rawDisabled)
+	}
+}
+
+func TestTelegramDisabledBuiltinDoesNotFallThroughToCustomCommand(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().TelegramMode = true
+	app.cfg().TelegramBotToken = "123:ABC"
+	app.cfg().TelegramDisabledCommands = []string{"ping"}
+	app.cfg().TelegramCustomCommands = []config.TelegramCommandReply{{Command: "/ping", Reply: "custom pong"}}
+
+	requests := []map[string]any{}
+	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		body["_path"] = r.URL.Path
+		requests = append(requests, body)
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":9001}}`))
+	}))
+	defer tg.Close()
+	app.cfg().TelegramAPIURL = tg.URL
+
+	app.handleTelegramUpdate(context.Background(), map[string]any{
+		"message": map[string]any{
+			"message_id": 88,
+			"text":       "/ping",
+			"chat":       map[string]any{"id": 42, "type": "private"},
+			"from":       map[string]any{"id": 42},
+		},
+	})
+	if len(requests) != 1 {
+		t.Fatalf("expected one disabled-command reply, got %#v", requests)
+	}
+	text := asString(requests[0]["text"])
+	if !strings.Contains(text, "停用") || strings.Contains(text, "custom pong") {
+		t.Fatalf("disabled built-in command fell through to custom reply: %#v", requests[0])
+	}
+}
+
 func TestTelegramGroupUserPanelDeletesCommandMessageAfterSend(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().TelegramMode = true

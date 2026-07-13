@@ -147,12 +147,14 @@ Bot 由二进制子命令 `bot`（或 `all`）启动，轮询逻辑见 `internal
 
 ### 自定义命令
 
-Web 后台的入口是「Telegram 管理 → Bot 指令管理」（`/admin/telegram/commands`）。该页面只编辑 `Telegram.bot_custom_commands`，不会创建第二套 Bot 指令配置：
+Web 后台的入口是「Telegram 管理 → Bot 指令管理」（`/admin/telegram/commands`）。该页面从后端 `GET /admin/telegram/commands/catalog` 读取内置指令目录和开关状态，再编辑 `Telegram.bot_custom_commands` 与 `Telegram.disabled_commands`，不会创建第二套 Bot 指令配置：
 
 - 纯文本类型保存为普通回复，运行时只经过 `telegramRenderText` 的基础占位符替换，例如 `{server_name}`、`{bot_username}`、`{user_name}`。
 - 自定义 JS 类型从「开发者模式」保存的 JS 预设中选择，推荐保存为 `js:preset:<id>` 动态引用格式。
 - 开发者模式支持新建空白 JS 预设、命名、保存、更新和删除；非空脚本保存前必须通过与沙箱预览一致的安全校验。
 - Bot 执行时仍只读取 `bot_custom_commands`。使用 `js:preset:<id>` 时会在执行时按预设 ID 读取最新代码；旧格式 `js:<code>` 属于静态代码快照，只有重新保存指令才会改变。
+- 内置指令的说明、用法、分类、管理员权限和是否可禁用均由后端注册表生成，前端不再硬编码内置指令清单。
+- `disabled_commands` 只保存不带 `/` 的规范化命令名。内置指令被禁用后，Bot 会明确提示该指令已停用，并且不会继续落到同名自定义指令，避免绕过管理员开关。
 
 `bot_custom_commands` 允许配置一组"命令 → 固定回复"的映射，命中后直接返回对应文本（`telegramCustomCommandReply`）。每条形如 `命令 = 回复`，命令会被规范化：转小写、补 `/` 前缀、仅允许字母数字与下划线、长度不超过 32 字符（`normalizeTelegramCommand`），重复命令以首次出现为准。自定义命令在内置命令之后匹配，不会覆盖内置命令。
 

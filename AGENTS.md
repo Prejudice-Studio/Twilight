@@ -165,6 +165,12 @@ Use this index before broad search. Line numbers drift, so search by function na
 
 `TelegramMode` controls Bot mode only. It must not block user self-service Telegram bind, unbind, or rebind handlers.
 
+## Telegram Bot Command Rules
+
+- `internal/api/telegram_commands.go` is the authoritative built-in command registry. Keep command metadata (`description`, `usage`, `category`, `private`, `admin`) there and expose it through `/api/v1/admin/telegram/commands/catalog`; do not hard-code built-in command lists in the WebUI.
+- Disabling a built-in command through `Telegram.disabled_commands` must be terminal: the Bot should tell the user the command is disabled and must not fall through to a same-name custom command.
+- Custom commands may not override built-in or fixed special commands such as `/start`, `/help`, `/twihelp`, and `/twguser`.
+
 ## Audit Log Rules
 
 `internal/api/audit_handlers.go` provides `a.audit(r, action, category, targetUID, detail)`.

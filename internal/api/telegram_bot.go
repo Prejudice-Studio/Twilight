@@ -1029,16 +1029,21 @@ func (a *App) telegramHelpText(admin bool) string {
 		"Twilight Bot 帮助",
 		"",
 		"用户命令:",
-		"/start 打开帮助入口",
-		"/bind <绑定码> 绑定 Telegram",
-		"/me 查看当前绑定",
-		"/emby 查看 Emby 状态",
-		"/resetpwd 查看密码修改说明",
-		"/cancel 取消当前 Bot 操作",
-		"/about 查看服务说明",
 	)
+	for _, item := range a.telegramCommandCatalog() {
+		if item.Admin || item.Category != "user" || item.Disabled {
+			continue
+		}
+		lines = append(lines, telegramCommandHelpLine(item))
+	}
 	if admin {
-		lines = append(lines, "", "管理员命令:", "/stats 服务统计", "/userinfo <关键词> 查看单个用户", "/twfind <关键词> 搜索用户", "/banweb <用户> [理由] 禁用 Web 账号", "/banemby <用户> [理由] 禁用 Emby 账号", "/twishelp 管理员帮助")
+		lines = append(lines, "", "管理员命令:")
+		for _, item := range a.telegramCommandCatalog() {
+			if !item.Admin || item.Category != "admin" || item.Disabled {
+				continue
+			}
+			lines = append(lines, telegramCommandHelpLine(item))
+		}
 	}
 	if footer := strings.TrimSpace(a.cfg().TelegramBotHelpFooter); footer != "" {
 		lines = append(lines, "", a.telegramRenderText(footer))
@@ -1050,7 +1055,32 @@ func (a *App) telegramAdminHelpText() string {
 	if text := strings.TrimSpace(a.cfg().TelegramBotAdminHelpText); text != "" {
 		return a.telegramRenderText(text)
 	}
-	return "管理员帮助\n\n/stats 服务统计\n/userinfo <用户名/UID/关键词> 查看用户详情\n/twfind <用户名/UID/关键词> 搜索用户\n/banweb <用户名/UID/关键词> [理由] 禁用 Web 账号（可选理由，记入操作审计日志）\n/banemby <用户名/UID/关键词> [理由] 禁用 Emby 账号（可选理由，记入操作审计日志）\n/twguser <关键词> 群组用户管理面板\n/twguser 回复群成员消息时按 Telegram 绑定关系查询\n\n/twguser 面板支持启用/禁用 Web 账号、启用/禁用 Emby、删除 Emby、本地删除用户、移出/封禁群组和授予 7/30/365 天或永久 Emby 注册资格。删除类操作需要二次确认；每次按钮操作都会重新鉴权。群组匿名管理员使用 /twguser 时需要先通过 inline 按钮验证身份。"
+	lines := []string{"管理员帮助", ""}
+	for _, item := range a.telegramCommandCatalog() {
+		if (!item.Admin && item.Category != "group") || item.Disabled {
+			continue
+		}
+		lines = append(lines, telegramCommandHelpLine(item))
+	}
+	lines = append(lines,
+		"",
+		"/twguser 回复群成员消息时按 Telegram 绑定关系查询",
+		"",
+		"/twguser 面板支持启用/禁用 Web 账号、启用/禁用 Emby、删除 Emby、本地删除用户、移出/封禁群组和授予 7/30/365 天或永久 Emby 注册资格。删除类操作需要二次确认；每次按钮操作都会重新鉴权。群组匿名管理员使用 /twguser 时需要先通过 inline 按钮验证身份。",
+	)
+	return strings.Join(lines, "\n")
+}
+
+func telegramCommandHelpLine(item telegramCommandCatalogItem) string {
+	usage := strings.TrimSpace(item.Usage)
+	if usage == "" {
+		usage = item.Label
+	}
+	desc := strings.TrimSpace(item.Description)
+	if desc == "" {
+		return usage
+	}
+	return usage + " " + desc
 }
 
 func (a *App) telegramAboutText() string {

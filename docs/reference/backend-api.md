@@ -1271,11 +1271,24 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/cleanup-invalid" \
 | `POST /admin/telegram/rebind-requests/{request_id}/approve` | 批准换绑 |
 | `POST /admin/telegram/rebind-requests/{request_id}/reject` | 拒绝换绑 |
 | `POST /admin/telegram/rebind-requests/batch` | 批量审核换绑 |
+| `GET /admin/telegram/commands/catalog` | Telegram Bot 内置指令目录与禁用状态 |
 | `GET /admin/telegram/roster/stats` | Telegram 群花名册统计 |
 | `POST /admin/telegram/rejoined-users/enable` | 启用重新入群用户 |
 | `POST /admin/telegram/kick-unbound` | 踢出未绑定用户 |
 
 Telegram 相关行为见 [Telegram Bot 命令](../features/telegram-bot.md)。
+
+`GET /admin/telegram/commands/catalog` 是 Bot 指令管理页的后端权威数据源，返回 `commands` 与 `disabled_commands`。`commands` 内每项包含：
+
+| 字段 | 说明 |
+| ---- | ---- |
+| `command` / `name` / `label` | `/command` 原文、不带 `/` 的配置名、显示标签 |
+| `description` / `usage` | 指令说明和用法 |
+| `category` | `user`、`admin`、`system` 或 `group` |
+| `private` / `admin` | 是否要求私聊、是否要求管理员 |
+| `disableable` / `disabled` | 是否允许在后台禁用、当前是否已禁用 |
+
+禁用内置指令后，Bot 会明确提示该指令已停用，不会继续尝试同名自定义指令。
 
 ### 9.9 定时任务管理
 
