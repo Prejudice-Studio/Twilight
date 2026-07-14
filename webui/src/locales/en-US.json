@@ -740,6 +740,10 @@
     "pasteImageHint": "Paste images directly in the reply box. Global ticket image limits still apply.",
     "pasteImageUploading": "Uploading image",
     "pasteImageUploaded": "Pasted image uploaded",
+    "replyImagesCount": "Images {count}/{max}",
+    "replyImagesHint": "Images are attached to this ticket. Click to preview, or use the top-right close button to remove them from this reply and the ticket attachments.",
+    "previewReplyImage": "Preview image",
+    "removeReplyImage": "Remove image",
     "saveMetadata": "Save ticket info",
     "deleteAndBack": "Delete and return"
   },

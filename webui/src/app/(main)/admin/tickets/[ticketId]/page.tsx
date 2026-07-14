@@ -9,6 +9,7 @@ import {
   ArrowRight,
   CheckCircle2,
   Clock,
+  ImagePlus,
   Loader2,
   MessageSquareMore,
   PlayCircle,
@@ -16,10 +17,12 @@ import {
   Send,
   Trash2,
   User,
+  X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogOverlay } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -27,7 +30,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { TicketImages } from "@/components/ticket-images";
 import { useToast } from "@/hooks/use-toast";
-import { api, type Ticket, type TicketReply } from "@/lib/api";
+import { api, type Ticket, type TicketAttachment, type TicketReply } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { friendlyError } from "@/lib/validators";
 import { useSystemStore } from "@/store/system";
@@ -94,6 +97,9 @@ export default function AdminTicketDetailPage() {
   const [sending, setSending] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploadingPaste, setUploadingPaste] = useState(false);
+  const [deletingReplyImage, setDeletingReplyImage] = useState<string | null>(null);
+  const [replyAttachments, setReplyAttachments] = useState<TicketAttachment[]>([]);
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const [jumpId, setJumpId] = useState("");
   const [statusDraft, setStatusDraft] = useState("");
   const [priorityDraft, setPriorityDraft] = useState("");
@@ -113,6 +119,7 @@ export default function AdminTicketDetailPage() {
       if (res.success && res.data) {
         setTicket(res.data.ticket);
         setTypes(res.data.ticket_types || []);
+        setReplyAttachments([]);
       } else {
         throw new Error(res.message || t("adminTickets.loadFailed"));
       }
@@ -154,6 +161,12 @@ export default function AdminTicketDetailPage() {
     if (ticket?.type && !list.includes(ticket.type)) list.push(ticket.type);
     return list;
   }, [ticket?.type, types]);
+
+  const syncTicketAttachments = useCallback((attachments: TicketAttachment[]) => {
+    setTicket((current) => current ? { ...current, attachments } : current);
+    const existing = new Set(attachments.map((item) => item.filename));
+    setReplyAttachments((current) => current.filter((item) => existing.has(item.filename)));
+  }, []);
 
   useEffect(() => {
     const node = conversationRef.current;
@@ -206,6 +219,7 @@ export default function AdminTicketDetailPage() {
       if (res.success && res.data?.ticket) {
         setTicket(res.data.ticket);
         setReply("");
+        setReplyAttachments([]);
         toast({ title: t("tickets.replySent") });
       } else {
         toast({ title: res.message || t("common.operationFailed"), variant: "destructive" });
@@ -240,7 +254,11 @@ export default function AdminTicketDetailPage() {
         const res = await api.uploadTicketImage(ticket.id, file);
         if (res.success && res.data) {
           uploaded++;
-          setTicket((current) => current ? { ...current, attachments: res.data!.attachments } : current);
+          syncTicketAttachments(res.data.attachments);
+          setReplyAttachments((current) => {
+            if (current.some((item) => item.filename === res.data!.attachment.filename)) return current;
+            return [...current, res.data!.attachment];
+          });
         } else {
           toast({ title: friendlyError(res.error_code, res.message), variant: "destructive" });
         }
@@ -255,6 +273,25 @@ export default function AdminTicketDetailPage() {
       toast({ title: friendlyError(err?.errorCode, err?.message), variant: "destructive" });
     } finally {
       setUploadingPaste(false);
+    }
+  };
+
+  const handleDeleteReplyImage = async (attachment: TicketAttachment) => {
+    if (!ticket) return;
+    setDeletingReplyImage(attachment.filename);
+    try {
+      const res = await api.deleteTicketImage(ticket.id, attachment.filename);
+      if (res.success && res.data) {
+        syncTicketAttachments(res.data.attachments);
+        if (previewSrc === api.ticketImageSrc(attachment.url)) setPreviewSrc(null);
+        toast({ title: t("tickets.imageDeleted") });
+      } else {
+        toast({ title: friendlyError(res.error_code, res.message), variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: friendlyError(err?.errorCode, err?.message), variant: "destructive" });
+    } finally {
+      setDeletingReplyImage(null);
     }
   };
 
@@ -366,7 +403,51 @@ export default function AdminTicketDetailPage() {
               })}
             </div>
             <div className="border-t bg-background p-4">
-              <div className="mb-2 text-xs text-muted-foreground">{t("adminTickets.pasteImageHint")}</div>
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span>{t("adminTickets.pasteImageHint")}</span>
+                {replyAttachments.length > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 font-medium text-foreground">
+                    <ImagePlus className="h-3.5 w-3.5" />
+                    {t("adminTickets.replyImagesCount", { count: replyAttachments.length, max: imageMaxCount })}
+                  </span>
+                )}
+              </div>
+              {replyAttachments.length > 0 && (
+                <div className="mb-3 rounded-lg border bg-muted/20 p-2">
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {replyAttachments.map((attachment) => {
+                      const src = api.ticketImageSrc(attachment.url);
+                      if (!src) return null;
+                      return (
+                        <div
+                          key={attachment.filename}
+                          className="group relative h-20 w-20 shrink-0 overflow-hidden rounded-md border border-border/70 bg-background"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setPreviewSrc(src)}
+                            className="block h-full w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                            title={t("adminTickets.previewReplyImage")}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={src} alt={attachment.filename} className="h-full w-full object-cover" loading="lazy" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteReplyImage(attachment)}
+                            disabled={deletingReplyImage === attachment.filename}
+                            title={t("adminTickets.removeReplyImage")}
+                            className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white opacity-100 transition hover:bg-destructive sm:opacity-0 sm:group-hover:opacity-100"
+                          >
+                            {deletingReplyImage === attachment.filename ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-1 text-[11px] text-muted-foreground">{t("adminTickets.replyImagesHint")}</p>
+                </div>
+              )}
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Textarea
                   value={reply}
@@ -447,7 +528,7 @@ export default function AdminTicketDetailPage() {
                 canDelete
                 maxSize={imageMaxSize}
                 maxCount={imageMaxCount}
-                onChange={(attachments) => setTicket((current) => current ? { ...current, attachments } : current)}
+                onChange={syncTicketAttachments}
               />
             </CardContent>
           </Card>
@@ -482,6 +563,22 @@ export default function AdminTicketDetailPage() {
           </Card>
         </div>
       </div>
+
+      <Dialog open={!!previewSrc} onOpenChange={(open) => { if (!open) setPreviewSrc(null); }}>
+        <DialogOverlay className="bg-black/70" />
+        <DialogContent className="max-h-[90dvh] max-w-[90vw] border-0 bg-transparent p-0 shadow-none">
+          <button
+            type="button"
+            onClick={() => setPreviewSrc(null)}
+            className="absolute right-0 top-0 z-50 flex h-9 w-9 -translate-y-12 items-center justify-center rounded-full bg-black/60 text-white transition hover:bg-black/80"
+            aria-label={t("common.close")}
+          >
+            <X className="h-5 w-5" />
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          {previewSrc && <img src={previewSrc} alt="" className="mx-auto max-h-[85dvh] w-auto rounded-lg object-contain" />}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -740,6 +740,10 @@
     "pasteImageHint": "可在回覆框直接貼上圖片，數量和大小受全域工單圖片限制。",
     "pasteImageUploading": "圖片上傳中",
     "pasteImageUploaded": "貼上的圖片已上傳",
+    "replyImagesCount": "本次圖片 {count}/{max}",
+    "replyImagesHint": "圖片已加入此工單附件，可點擊預覽，點右上角關閉可從本次回覆和附件中移除。",
+    "previewReplyImage": "預覽圖片",
+    "removeReplyImage": "移除圖片",
     "saveMetadata": "儲存工單資訊",
     "deleteAndBack": "刪除工單並返回"
   },

@@ -120,7 +120,11 @@ export function TicketImages({
               {allowDelete && (
                 <button
                   type="button"
-                  onClick={() => handleDelete(att.filename)}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    void handleDelete(att.filename);
+                  }}
                   disabled={deleting === att.filename}
                   title={t("tickets.deleteImage")}
                   className="absolute top-0.5 right-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive disabled:opacity-100"
