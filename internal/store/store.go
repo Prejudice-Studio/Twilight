@@ -2259,12 +2259,19 @@ func (s *Store) clearInviteUsageForUIDLocked(uid int64) int {
 		return 0
 	}
 	handled := 0
-	if _, hasRel := s.state.InviteRelations[uid]; hasRel {
-		delete(s.state.InviteRelations, uid)
+	detachedCodes := map[string]bool{}
+	for key, rel := range s.state.InviteRelations {
+		if key != uid && rel.ChildUID != uid {
+			continue
+		}
+		if rel.Code != "" {
+			detachedCodes[rel.Code] = true
+		}
+		delete(s.state.InviteRelations, key)
 		handled++
 	}
 	for code, c := range s.state.InviteCodes {
-		if c.UsedByUID != uid {
+		if c.UsedByUID != uid && !detachedCodes[code] {
 			continue
 		}
 		c.UsedByUID = 0
@@ -3850,7 +3857,7 @@ func (s *Store) ConsumeInviteCode(code string, childUID int64) (InviteCode, erro
 		// 层的 ParentOf() 预检与此处消费之间存在 TOCTOU：同一 childUID 用两个不同
 		// 邀请码并发请求会双双通过预检，第二次消费覆盖关系并烧掉两个邀请人的码。
 		// 此处一旦发现已有上级即 ErrConflict，让先到者赢、后到者整体回滚。
-		if _, exists := s.state.InviteRelations[childUID]; exists {
+		if _, exists := s.parentOfLocked(childUID); exists {
 			return ErrConflict
 		}
 		c.UseCount++
@@ -3895,7 +3902,7 @@ func (s *Store) ConsumeInviteCodeAndUpdateUser(code string, childUID int64, maxD
 		if c.InviterUID != 0 && c.InviterUID == childUID {
 			return ErrConflict
 		}
-		if _, exists := s.state.InviteRelations[childUID]; exists {
+		if _, exists := s.parentOfLocked(childUID); exists {
 			return ErrConflict
 		}
 		// 锁内重检邀请树深度与根用户上限，防止并发绕过
@@ -3954,8 +3961,7 @@ func (s *Store) InviteRelations() []InviteRelation {
 func (s *Store) ParentOf(uid int64) (InviteRelation, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	rel, ok := s.state.InviteRelations[uid]
-	return rel, ok
+	return s.parentOfLocked(uid)
 }
 
 func (s *Store) ChildrenOf(uid int64) []InviteRelation {
@@ -3977,7 +3983,7 @@ func (s *Store) inviteDepthLocked(uid int64, maxDepth int) int {
 	depth := 0
 	current := uid
 	for depth < maxDepth {
-		rel, ok := s.state.InviteRelations[current]
+		rel, ok := s.parentOfLocked(current)
 		if !ok {
 			break
 		}
@@ -3990,7 +3996,7 @@ func (s *Store) inviteDepthLocked(uid int64, maxDepth int) int {
 func (s *Store) inviteRootLocked(uid int64) int64 {
 	current := uid
 	for {
-		rel, ok := s.state.InviteRelations[current]
+		rel, ok := s.parentOfLocked(current)
 		if !ok {
 			break
 		}
@@ -4012,7 +4018,7 @@ func (s *Store) inviteDescendantCountLocked(rootUID int64) int {
 func (s *Store) isDescendantLocked(uid, ancestor int64) bool {
 	current := uid
 	for {
-		rel, ok := s.state.InviteRelations[current]
+		rel, ok := s.parentOfLocked(current)
 		if !ok {
 			return false
 		}
@@ -4030,6 +4036,21 @@ func (s *Store) DetachInvite(uid int64) error {
 		s.clearInviteUsageForUIDLocked(uid)
 		return nil
 	})
+}
+
+func (s *Store) parentOfLocked(uid int64) (InviteRelation, bool) {
+	if uid == 0 {
+		return InviteRelation{}, false
+	}
+	if rel, ok := s.state.InviteRelations[uid]; ok {
+		return rel, true
+	}
+	for _, rel := range s.state.InviteRelations {
+		if rel.ChildUID == uid {
+			return rel, true
+		}
+	}
+	return InviteRelation{}, false
 }
 
 func (s *Store) RegCode(code string) (RegCode, bool) {

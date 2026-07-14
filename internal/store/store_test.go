@@ -178,6 +178,65 @@ func TestDetachInviteClearsInviteCodeUsage(t *testing.T) {
 	}
 }
 
+func TestDetachInviteClearsLegacyRelationByChildUID(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	child, err := st.CreateUser(User{Username: "legacy-detach-child", PasswordHash: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.mu.Lock()
+	st.state.InviteCodes["INV-LEGACY-DETACH"] = InviteCode{Code: "INV-LEGACY-DETACH", InviterUID: 999, UseCountLimit: 1, UseCount: 1, Used: true, UsedByUID: child.UID, Active: false}
+	st.state.InviteRelations[424242] = InviteRelation{ParentUID: 999, ChildUID: child.UID, Code: "INV-LEGACY-DETACH"}
+	if err := st.saveLocked(); err != nil {
+		st.mu.Unlock()
+		t.Fatal(err)
+	}
+	st.mu.Unlock()
+
+	if _, ok := st.ParentOf(child.UID); !ok {
+		t.Fatal("legacy relation should be visible before detach")
+	}
+	if children := st.ChildrenOf(999); len(children) != 1 || children[0].ChildUID != child.UID {
+		t.Fatalf("legacy child should be visible before detach: %#v", children)
+	}
+	if err := st.DetachInvite(child.UID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.ParentOf(child.UID); ok {
+		t.Fatal("legacy relation should be detached")
+	}
+	if children := st.ChildrenOf(999); len(children) != 0 {
+		t.Fatalf("legacy child should not reappear after refresh: %#v", children)
+	}
+	invite, ok := st.InviteCode("INV-LEGACY-DETACH")
+	if !ok {
+		t.Fatal("invite code should remain after legacy detach")
+	}
+	if invite.UsedByUID != 0 || invite.Used || invite.UseCount != 0 || !invite.Active {
+		t.Fatalf("legacy invite code usage should be cleared after detach: %#v", invite)
+	}
+}
+
+func TestConsumeInviteRejectsLegacyRelationByChildUID(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	child, err := st.CreateUser(User{Username: "legacy-consume-child", PasswordHash: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.mu.Lock()
+	st.state.InviteCodes["INV-NEW-PARENT"] = InviteCode{Code: "INV-NEW-PARENT", InviterUID: 1000, UseCountLimit: 1, Active: true}
+	st.state.InviteRelations[424243] = InviteRelation{ParentUID: 999, ChildUID: child.UID, Code: "INV-OLD-PARENT"}
+	if err := st.saveLocked(); err != nil {
+		st.mu.Unlock()
+		t.Fatal(err)
+	}
+	st.mu.Unlock()
+
+	if _, _, err := st.ConsumeInviteCodeAndUpdateUser("INV-NEW-PARENT", child.UID, 10, 0, nil); err != ErrConflict {
+		t.Fatalf("expected ErrConflict for legacy parent relation, got %v", err)
+	}
+}
+
 func containsInt64(xs []int64, v int64) bool {
 	for _, x := range xs {
 		if x == v {
