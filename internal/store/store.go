@@ -3517,7 +3517,7 @@ func (s *Store) SetTicketNotify(ticketID int64, enabled bool) (Ticket, error) {
 }
 
 // AddTicketAttachment 给工单追加一张图片元数据。返回更新后的工单。
-func (s *Store) AddTicketAttachment(ticketID int64, att TicketAttachment) (Ticket, error) {
+func (s *Store) AddTicketAttachment(ticketID int64, att TicketAttachment, actorRole int) (Ticket, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out Ticket
@@ -3525,6 +3525,9 @@ func (s *Store) AddTicketAttachment(ticketID int64, att TicketAttachment) (Ticke
 		t, ok := s.state.Tickets[ticketID]
 		if !ok {
 			return ErrNotFound
+		}
+		if !TicketStatusAllowsConversation(t.Status) && actorRole != RoleAdmin {
+			return ErrTicketClosed
 		}
 		if att.CreatedAt == 0 {
 			att.CreatedAt = time.Now().Unix()
@@ -3550,6 +3553,9 @@ func (s *Store) AddTicketReply(ticketID int64, reply TicketReply) (Ticket, error
 		t, ok := s.state.Tickets[ticketID]
 		if !ok {
 			return ErrNotFound
+		}
+		if !TicketStatusAllowsConversation(t.Status) && reply.Role != RoleAdmin {
+			return ErrTicketClosed
 		}
 		now := time.Now().Unix()
 		applyTicketReplyLocked(&t, reply, now)
@@ -3579,7 +3585,7 @@ func applyTicketReplyLocked(t *Ticket, reply TicketReply, now int64) {
 }
 
 // RemoveTicketAttachment 从工单移除指定文件名的图片元数据。返回更新后的工单。
-func (s *Store) RemoveTicketAttachment(ticketID int64, filename string) (Ticket, error) {
+func (s *Store) RemoveTicketAttachment(ticketID int64, filename string, actorRole int) (Ticket, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out Ticket
@@ -3587,6 +3593,9 @@ func (s *Store) RemoveTicketAttachment(ticketID int64, filename string) (Ticket,
 		t, ok := s.state.Tickets[ticketID]
 		if !ok {
 			return ErrNotFound
+		}
+		if !TicketStatusAllowsConversation(t.Status) && actorRole != RoleAdmin {
+			return ErrTicketClosed
 		}
 		idx := -1
 		for i, att := range t.Attachments {
@@ -5187,6 +5196,7 @@ var (
 	ErrExpired               = errors.New("expired")
 	ErrLastAdmin             = errors.New("last admin")
 	ErrGrantLocked           = errors.New("emby grant locked")
+	ErrTicketClosed          = errors.New("ticket closed")
 	ErrTicketUserOpenLimit   = errors.New("ticket user open limit reached")
 	ErrTicketGlobalOpenLimit = errors.New("ticket global open limit reached")
 	ErrInsufficientPoints    = errors.New("insufficient points")

@@ -237,8 +237,8 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - User ticket creation must use the store atomic creation helper so per-user and global open-ticket quota checks happen under the same lock as insertion; do not reintroduce handler-side `Count*` then `UpsertTicket` flows.
 - Admin ticket updates that add an admin reply must pass the reply through the store update helper in the same mutation; do not update status/admin_note first and append the reply in a second store call.
 - Ticket replies are the source of truth for two-sided conversation history. `admin_note` is only the latest admin summary / compatibility field and must not replace or clear `Ticket.Replies`.
-- Closed tickets are evidence-preserving for normal users: upload/delete image handlers reject normal-user modifications with `ErrTicketClosed`.
-- Admins retain debugging privileges on closed tickets.
+- Closed tickets are evidence-preserving for normal users: store helpers and handlers reject normal-user replies and attachment mutations with the ticket-closed error path.
+- Admins retain debugging privileges on closed tickets and may still append diagnostic replies or maintain attachments.
 - Frontend image components receive `canDelete` and must disable destructive interactions for closed normal-user tickets.
 
 ## Sign-in Record Rules

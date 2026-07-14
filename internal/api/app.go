@@ -1610,6 +1610,10 @@ func statusFromError(w http.ResponseWriter, err error) bool {
 		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "资源已过期")
 		return true
 	}
+	if errors.Is(err, store.ErrTicketClosed) {
+		failWithCode(w, http.StatusBadRequest, ErrTicketAlreadyClosed, "工单已关闭")
+		return true
+	}
 	// ErrLastAdmin 之前由各 handler 单独 errors.Is 分支判，漏一处就直接降级
 	// 到下面的 ErrInternal/500，前端拿到泛化错误码无法 routing 到"最后一个
 	// 管理员"提示。集中映射后所有调用 statusFromError 的路径自动获得正确的

@@ -349,8 +349,8 @@ func (a *App) handleUploadTicketImage(w http.ResponseWriter, r *http.Request, pa
 		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
 		return
 	}
-	// 已关闭工单不再允许追加图片，避免清理任务删除目录后又被写入。
-	if !store.TicketStatusAllowsConversation(ticket.Status) {
+	// 已关闭工单冻结普通用户侧变更；管理员仍可补充排查图片。
+	if !store.TicketStatusAllowsConversation(ticket.Status) && p.User.Role != store.RoleAdmin {
 		failWithCode(w, http.StatusBadRequest, ErrTicketAlreadyClosed, "工单已关闭，无法上传图片")
 		return
 	}
@@ -434,10 +434,14 @@ func (a *App) handleUploadTicketImage(w http.ResponseWriter, r *http.Request, pa
 		Size:        int64(len(data)),
 		UploadedUID: p.User.UID,
 	}
-	updated, err := a.store().AddTicketAttachment(id, att)
+	updated, err := a.store().AddTicketAttachment(id, att, p.User.Role)
 	if err != nil {
 		// 落库失败则回滚已写入的文件，避免产生孤儿文件。
 		_ = os.Remove(target)
+		if errors.Is(err, store.ErrTicketClosed) {
+			failWithCode(w, http.StatusBadRequest, ErrTicketAlreadyClosed, "工单已关闭，无法上传图片")
+			return
+		}
 		if statusFromError(w, err) {
 			return
 		}
@@ -517,7 +521,11 @@ func (a *App) handleDeleteTicketImage(w http.ResponseWriter, r *http.Request, pa
 		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "图片不存在")
 		return
 	}
-	updated, err := a.store().RemoveTicketAttachment(id, filename)
+	updated, err := a.store().RemoveTicketAttachment(id, filename, p.User.Role)
+	if errors.Is(err, store.ErrTicketClosed) {
+		failWithCode(w, http.StatusForbidden, ErrTicketAlreadyClosed, "工单已关闭，无法删除图片")
+		return
+	}
 	if statusFromError(w, err) {
 		return
 	}
@@ -557,7 +565,7 @@ func (a *App) handleReplyToTicket(w http.ResponseWriter, r *http.Request, params
 		failWithCode(w, http.StatusForbidden, ErrForbidden, "无权回复此工单")
 		return
 	}
-	if !store.TicketStatusAllowsConversation(ticket.Status) {
+	if !store.TicketStatusAllowsConversation(ticket.Status) && p.User.Role != store.RoleAdmin {
 		failWithCode(w, http.StatusBadRequest, ErrTicketAlreadyClosed, "工单已关闭，无法回复")
 		return
 	}
@@ -578,6 +586,10 @@ func (a *App) handleReplyToTicket(w http.ResponseWriter, r *http.Request, params
 		Content:  content,
 	}
 	updated, err := a.store().AddTicketReply(id, reply)
+	if errors.Is(err, store.ErrTicketClosed) {
+		failWithCode(w, http.StatusBadRequest, ErrTicketAlreadyClosed, "工单已关闭，无法回复")
+		return
+	}
 	if statusFromError(w, err) {
 		return
 	}

@@ -392,6 +392,34 @@ func TestUpdateTicketCanAppendReplyAtomically(t *testing.T) {
 	}
 }
 
+func TestClosedTicketStorePolicyAllowsAdminOnly(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	ticket, err := st.CreateTicket(Ticket{UID: 1, Username: "user", Title: "closed", Content: "content", Type: TicketTypeDefault}, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := TicketStatusClosed
+	if _, err := st.UpdateTicket(ticket.ID, TicketUpdate{Status: &closed}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddTicketReply(ticket.ID, TicketReply{UID: 1, Username: "user", Role: RoleNormal, Content: "user reply"}); !errors.Is(err, ErrTicketClosed) {
+		t.Fatalf("expected user reply to closed ticket to fail with ErrTicketClosed, got %v", err)
+	}
+	if _, err := st.AddTicketAttachment(ticket.ID, TicketAttachment{Filename: "a.png"}, RoleNormal); !errors.Is(err, ErrTicketClosed) {
+		t.Fatalf("expected user attachment to closed ticket to fail with ErrTicketClosed, got %v", err)
+	}
+	updated, err := st.AddTicketReply(ticket.ID, TicketReply{UID: 2, Username: "admin", Role: RoleAdmin, Content: "admin note"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != TicketStatusClosed || len(updated.Replies) != 1 {
+		t.Fatalf("admin reply should preserve closed status and append reply: %#v", updated)
+	}
+	if _, err := st.AddTicketAttachment(ticket.ID, TicketAttachment{Filename: "admin.png"}, RoleAdmin); err != nil {
+		t.Fatalf("admin attachment should be allowed on closed ticket: %v", err)
+	}
+}
+
 func containsInt64(xs []int64, v int64) bool {
 	for _, x := range xs {
 		if x == v {

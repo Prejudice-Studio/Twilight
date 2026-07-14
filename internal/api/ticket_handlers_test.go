@@ -253,6 +253,7 @@ func TestClosedTicketRejectsImageUpload(t *testing.T) {
 	app := newTestApp(t)
 	enableTicketSystem(t, app, nil)
 	cookies := registerAndLogin(t, app, "user", "User12345678")
+	admin := registerAndLogin(t, app, "admin", "Admin123456")
 	id := createTicket(t, app, "to-close", "will be closed", cookies)
 
 	closeRR := doJSON(app, http.MethodPost, "/api/v1/tickets/"+strconv.FormatInt(id, 10)+"/close", ``, cookies)
@@ -266,6 +267,10 @@ func TestClosedTicketRejectsImageUpload(t *testing.T) {
 	}
 	if !bytes.Contains(rr.Body.Bytes(), []byte(ErrTicketAlreadyClosed)) {
 		t.Fatalf("expected %s for closed ticket, body=%s", ErrTicketAlreadyClosed, rr.Body.String())
+	}
+	adminUpload := uploadTicketImage(t, app, id, "admin.png", pngBytes(), admin)
+	if adminUpload.Code != http.StatusCreated {
+		t.Fatalf("expected admin upload to closed ticket to succeed, got %d body=%s", adminUpload.Code, adminUpload.Body.String())
 	}
 }
 
@@ -422,6 +427,39 @@ func TestTicketRepliesSurviveStatusUpdatesAndReopenResolved(t *testing.T) {
 	}
 	if len(ticket.Replies) != 3 {
 		t.Fatalf("expected third reply retained, got %#v", ticket.Replies)
+	}
+}
+
+func TestClosedTicketReplyPolicyAllowsAdminOnly(t *testing.T) {
+	app := newTestApp(t)
+	enableTicketSystem(t, app, nil)
+	admin := registerAndLogin(t, app, "admin", "Admin123456")
+	user := registerAndLogin(t, app, "user", "User12345678")
+	id := createTicket(t, app, "closed-reply", "initial content", user)
+	if rr := doJSON(app, http.MethodPost, "/api/v1/tickets/"+strconv.FormatInt(id, 10)+"/close", ``, user); rr.Code != http.StatusOK {
+		t.Fatalf("close ticket status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	replyPath := "/api/v1/tickets/" + strconv.FormatInt(id, 10) + "/reply"
+	userReply := doJSON(app, http.MethodPost, replyPath, `{"content":"user after close"}`, user)
+	if userReply.Code != http.StatusBadRequest {
+		t.Fatalf("expected user reply to closed ticket to fail, got %d body=%s", userReply.Code, userReply.Body.String())
+	}
+	if !bytes.Contains(userReply.Body.Bytes(), []byte(ErrTicketAlreadyClosed)) {
+		t.Fatalf("expected %s, body=%s", ErrTicketAlreadyClosed, userReply.Body.String())
+	}
+	adminReply := doJSON(app, http.MethodPost, replyPath, `{"content":"admin diagnostic note"}`, admin)
+	if adminReply.Code != http.StatusOK {
+		t.Fatalf("expected admin reply to closed ticket to succeed, got %d body=%s", adminReply.Code, adminReply.Body.String())
+	}
+	ticket, found := app.store().Ticket(id)
+	if !found {
+		t.Fatal("ticket not found after admin reply")
+	}
+	if ticket.Status != store.TicketStatusClosed {
+		t.Fatalf("admin reply should keep closed status, got %q", ticket.Status)
+	}
+	if len(ticket.Replies) != 1 || ticket.Replies[0].Content != "admin diagnostic note" {
+		t.Fatalf("unexpected replies after admin closed-ticket reply: %#v", ticket.Replies)
 	}
 }
 
