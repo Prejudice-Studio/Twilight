@@ -1199,6 +1199,8 @@ curl -X POST "http://localhost:5000/api/v1/admin/regcodes" \
 
 管理员接口：`GET /admin/tickets`、`PUT /admin/tickets/{ticket_id}`、`DELETE /admin/tickets/{ticket_id}`、`GET|POST|PUT|DELETE /admin/ticket-types`。
 
+`GET /admin/tickets` 默认只返回待处理 / 处理中工单，便于管理端聚焦当前队列；传 `all=1` 或 `status=all` 时返回全部状态，传具体 `status` 时按该状态过滤。
+
 工单对象返回 `replies` 双方回复时间线，回复项包含 `uid`、`username`、`role`、`author`、`content`、`created_at`。`admin_note` 仅表示最新管理员摘要，用于旧客户端兼容；管理员更新 `admin_note` 时后端会追加一条管理员回复，并与状态/优先级/类型更新在同一次 store mutation 中完成。状态、优先级、类型归一和关闭/解决时间戳由 store 层统一维护。用户回复已解决但未关闭的工单会重新进入待处理状态；已关闭工单拒绝普通用户继续回复或修改附件，管理员仍可追加排查回复并维护附件。创建工单的用户/全局打开工单限额在 store 层与插入同锁检查，避免并发请求绕过限额。
 
 ### 9.5 白名单与统计

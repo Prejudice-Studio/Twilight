@@ -115,6 +115,7 @@ export default function AdminTicketsPage() {
 
   const loadTickets = useCallback(async () => {
     const res = await api.adminListTickets({
+      all: statusFilter === "all",
       status: statusFilter !== "all" ? statusFilter : undefined,
       type: typeFilter !== "all" ? typeFilter : undefined,
       priority: priorityFilter !== "all" ? priorityFilter : undefined,

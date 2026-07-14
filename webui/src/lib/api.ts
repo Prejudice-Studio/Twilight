@@ -2613,9 +2613,10 @@ class ApiClient {
     return this.toAbsoluteAssetUrl(url) || "";
   }
 
-  async adminListTickets(params: { uid?: number; status?: string; type?: string; priority?: string } = {}) {
+  async adminListTickets(params: { uid?: number; status?: string; type?: string; priority?: string; all?: boolean } = {}) {
     const query = new URLSearchParams();
     if (params.uid) query.set("uid", String(params.uid));
+    if (params.all) query.set("all", "1");
     if (params.status) query.set("status", params.status);
     if (params.type) query.set("type", params.type);
     if (params.priority) query.set("priority", params.priority);

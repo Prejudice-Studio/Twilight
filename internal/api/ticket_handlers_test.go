@@ -430,6 +430,90 @@ func TestTicketRepliesSurviveStatusUpdatesAndReopenResolved(t *testing.T) {
 	}
 }
 
+func TestAdminTicketsAllFilterIncludesResolvedAndClosed(t *testing.T) {
+	app := newTestApp(t)
+	enableTicketSystem(t, app, nil)
+	admin := registerAndLogin(t, app, "admin", "Admin123456")
+	user := registerAndLogin(t, app, "user", "User12345678")
+
+	openID := createTicket(t, app, "open ticket", "still open", user)
+	resolvedID := createTicket(t, app, "resolved ticket", "done", user)
+	closedID := createTicket(t, app, "closed ticket", "closed", user)
+
+	if rr := doJSON(app, http.MethodPut, "/api/v1/admin/tickets/"+strconv.FormatInt(resolvedID, 10), `{"status":"resolved"}`, admin); rr.Code != http.StatusOK {
+		t.Fatalf("resolve ticket status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if rr := doJSON(app, http.MethodPost, "/api/v1/tickets/"+strconv.FormatInt(closedID, 10)+"/close", ``, user); rr.Code != http.StatusOK {
+		t.Fatalf("close ticket status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	decodeIDs := func(rr *httptest.ResponseRecorder) map[int64]bool {
+		t.Helper()
+		if rr.Code != http.StatusOK {
+			t.Fatalf("admin list status=%d body=%s", rr.Code, rr.Body.String())
+		}
+		var resp struct {
+			Data struct {
+				Tickets []struct {
+					ID int64 `json:"id"`
+				} `json:"tickets"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode admin tickets: %v body=%s", err, rr.Body.String())
+		}
+		ids := map[int64]bool{}
+		for _, ticket := range resp.Data.Tickets {
+			ids[ticket.ID] = true
+		}
+		return ids
+	}
+
+	defaultIDs := decodeIDs(doJSON(app, http.MethodGet, "/api/v1/admin/tickets", ``, admin))
+	if !defaultIDs[openID] || defaultIDs[resolvedID] || defaultIDs[closedID] {
+		t.Fatalf("default admin list should include only active tickets, got %#v", defaultIDs)
+	}
+
+	allIDs := decodeIDs(doJSON(app, http.MethodGet, "/api/v1/admin/tickets?all=1", ``, admin))
+	if !allIDs[openID] || !allIDs[resolvedID] || !allIDs[closedID] {
+		t.Fatalf("all=1 admin list should include every status, got %#v", allIDs)
+	}
+
+	statusAllIDs := decodeIDs(doJSON(app, http.MethodGet, "/api/v1/admin/tickets?status=all", ``, admin))
+	if !statusAllIDs[openID] || !statusAllIDs[resolvedID] || !statusAllIDs[closedID] {
+		t.Fatalf("status=all admin list should include every status, got %#v", statusAllIDs)
+	}
+}
+
+func TestTicketAdminNotificationTargetsSkipActor(t *testing.T) {
+	app := newTestApp(t)
+	actor, err := app.store().CreateUser(store.User{Username: "actor-admin", Role: store.RoleAdmin, Active: true, NotifyOnTicketTelegram: true, TelegramID: 1001})
+	if err != nil {
+		t.Fatalf("create actor admin: %v", err)
+	}
+	other, err := app.store().CreateUser(store.User{Username: "other-admin", Role: store.RoleAdmin, Active: true, NotifyOnTicketTelegram: true, TelegramID: 1002})
+	if err != nil {
+		t.Fatalf("create other admin: %v", err)
+	}
+	if _, err := app.store().CreateUser(store.User{Username: "disabled-notify-admin", Role: store.RoleAdmin, Active: true, NotifyOnTicketTelegram: false, TelegramID: 1003}); err != nil {
+		t.Fatalf("create disabled notify admin: %v", err)
+	}
+	if _, err := app.store().CreateUser(store.User{Username: "normal-user", Role: store.RoleNormal, Active: true, NotifyOnTicketTelegram: true, TelegramID: 1004}); err != nil {
+		t.Fatalf("create normal user: %v", err)
+	}
+
+	targets := app.ticketAdminNotificationTargets(actor)
+	if len(targets) != 1 || targets[0].UID != other.UID {
+		t.Fatalf("expected only the other subscribed admin, actor=%d other=%d targets=%#v", actor.UID, other.UID, targets)
+	}
+
+	userActor := store.User{UID: 9999, Username: "ticket-owner", Role: store.RoleNormal}
+	targets = app.ticketAdminNotificationTargets(userActor)
+	if len(targets) != 2 {
+		t.Fatalf("user-origin events should notify subscribed admins, got %#v", targets)
+	}
+}
+
 func TestClosedTicketReplyPolicyAllowsAdminOnly(t *testing.T) {
 	app := newTestApp(t)
 	enableTicketSystem(t, app, nil)

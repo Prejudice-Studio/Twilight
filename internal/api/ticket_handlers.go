@@ -182,8 +182,12 @@ func (a *App) handleToggleTicketNotify(w http.ResponseWriter, r *http.Request, p
 // handleAdminTickets 管理员查看所有工单（支持筛选）。管理端接口不受 TicketSystemEnabled 开关限制。
 // 默认仅显示未解决的工单（open / in_progress），传 ?all=1 可查看全部包括已解决/已关闭。
 func (a *App) handleAdminTickets(w http.ResponseWriter, r *http.Request, _ Params) {
-	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status")))
 	showAll := r.URL.Query().Get("all") == "1"
+	if status == "all" {
+		showAll = true
+		status = ""
+	}
 	if status != "" && !store.ValidTicketStatus(status) {
 		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的工单状态")
 		return
@@ -793,13 +797,7 @@ func (a *App) notifyTicketAdmins(ctx context.Context, event string, ticket store
 	if !a.telegramAvailable() {
 		return
 	}
-	admins := make([]store.User, 0)
-	for _, user := range a.store().ListUsers() {
-		if user.Role != store.RoleAdmin || !user.NotifyOnTicketTelegram || user.TelegramID == 0 {
-			continue
-		}
-		admins = append(admins, user)
-	}
+	admins := a.ticketAdminNotificationTargets(actor)
 	if len(admins) == 0 {
 		return
 	}
@@ -817,6 +815,20 @@ func (a *App) notifyTicketAdmins(ctx context.Context, event string, ticket store
 			zap.L().Warn("发送管理员工单通知失败", zap.Int64("ticket_id", ticket.ID), zap.Int64("admin_uid", admin.UID), zap.Error(err))
 		}
 	}
+}
+
+func (a *App) ticketAdminNotificationTargets(actor store.User) []store.User {
+	admins := make([]store.User, 0)
+	for _, user := range a.store().ListUsers() {
+		if user.Role != store.RoleAdmin || !user.NotifyOnTicketTelegram || user.TelegramID == 0 {
+			continue
+		}
+		if actor.Role == store.RoleAdmin && actor.UID != 0 && user.UID == actor.UID {
+			continue
+		}
+		admins = append(admins, user)
+	}
+	return admins
 }
 
 func (a *App) ticketAdminNotificationText(event string, ticket store.Ticket, actor store.User) string {

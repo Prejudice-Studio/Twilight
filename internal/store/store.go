@@ -3681,6 +3681,9 @@ func (s *Store) AddTicketType(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	name = strings.TrimSpace(name)
+	if !validTicketTypeName(name) {
+		return ErrInvalid
+	}
 	return s.mutateAndSaveLocked(func() error {
 		for _, t := range s.state.TicketTypes {
 			if strings.EqualFold(t, name) {
@@ -3697,6 +3700,9 @@ func (s *Store) DeleteTicketType(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	name = strings.TrimSpace(name)
+	if !validTicketTypeName(name) {
+		return ErrInvalid
+	}
 	return s.mutateAndSaveLocked(func() error {
 		if len(s.state.TicketTypes) <= 1 {
 			return ErrConflict
@@ -3723,6 +3729,9 @@ func (s *Store) RenameTicketType(oldName, newName string) (int, error) {
 	count := 0
 	oldName = strings.TrimSpace(oldName)
 	newName = strings.TrimSpace(newName)
+	if !validTicketTypeName(oldName) || !validTicketTypeName(newName) {
+		return 0, ErrInvalid
+	}
 	err := s.mutateAndSaveLocked(func() error {
 		for _, t := range s.state.TicketTypes {
 			if strings.EqualFold(t, newName) && !strings.EqualFold(t, oldName) {
@@ -3785,6 +3794,11 @@ func normalizeTicketTypeList(types []string) []string {
 		out = append(out, name)
 	}
 	return out
+}
+
+func validTicketTypeName(name string) bool {
+	name = strings.TrimSpace(name)
+	return name != "" && len(name) <= 50
 }
 
 func (s *Store) DeveloperModeEnabled() bool {

@@ -420,6 +420,27 @@ func TestClosedTicketStorePolicyAllowsAdminOnly(t *testing.T) {
 	}
 }
 
+func TestTicketTypeStoreRejectsInvalidNames(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	before := st.TicketTypes()
+	if err := st.AddTicketType("   "); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected ErrInvalid for empty ticket type, got %v", err)
+	}
+	if err := st.AddTicketType(strings.Repeat("x", 51)); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected ErrInvalid for long ticket type, got %v", err)
+	}
+	if err := st.DeleteTicketType(""); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected ErrInvalid deleting empty ticket type, got %v", err)
+	}
+	if _, err := st.RenameTicketType(TicketTypeDefault, ""); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected ErrInvalid renaming to empty ticket type, got %v", err)
+	}
+	after := st.TicketTypes()
+	if len(after) != len(before) || after[0] != before[0] {
+		t.Fatalf("invalid type operations should not mutate types, before=%v after=%v", before, after)
+	}
+}
+
 func containsInt64(xs []int64, v int64) bool {
 	for _, x := range xs {
 		if x == v {

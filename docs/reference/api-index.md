@@ -287,7 +287,7 @@
 | DELETE | `/api/v1/admin/media-requests/{request_id}` | Admin | 删除求片 |
 | PUT | `/api/v1/admin/media-requests/by-key/{require_key}` | Admin | 按 key 更新求片 |
 | DELETE | `/api/v1/admin/media-requests/by-key/{require_key}` | Admin | 按 key 删除求片 |
-| GET | `/api/v1/admin/tickets` | Admin | 工单管理列表；默认仅返回待处理/处理中，`all=1` 返回全部 |
+| GET | `/api/v1/admin/tickets` | Admin | 工单管理列表；默认仅返回待处理/处理中，`all=1` 或 `status=all` 返回全部 |
 | PUT | `/api/v1/admin/tickets/{ticket_id}` | Admin | 更新工单状态、优先级、类型和管理员摘要；新摘要会追加管理员回复 |
 | DELETE | `/api/v1/admin/tickets/{ticket_id}` | Admin | 删除工单并清理附件目录 |
 | GET | `/api/v1/admin/ticket-types` | Admin | 获取工单类型 |

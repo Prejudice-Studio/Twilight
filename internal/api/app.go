@@ -1610,6 +1610,10 @@ func statusFromError(w http.ResponseWriter, err error) bool {
 		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "资源已过期")
 		return true
 	}
+	if errors.Is(err, store.ErrInvalid) {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "请求参数无效")
+		return true
+	}
 	if errors.Is(err, store.ErrTicketClosed) {
 		failWithCode(w, http.StatusBadRequest, ErrTicketAlreadyClosed, "工单已关闭")
 		return true
