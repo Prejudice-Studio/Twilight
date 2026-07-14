@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,15 +42,6 @@ func (a *App) handleCreateTicket(w http.ResponseWriter, r *http.Request, _ Param
 		failWithCode(w, http.StatusTooManyRequests, ErrTicketRateLimited, "提交工单过于频繁，请稍后再试")
 		return
 	}
-	// 并发上限校验：服务端硬门，不仅靠前端隐藏入口。0 表示不限。
-	if cfg.TicketUserOpenLimit > 0 && a.store().CountUserOpenTickets(p.User.UID) >= cfg.TicketUserOpenLimit {
-		failWithCode(w, http.StatusConflict, ErrTicketUserLimit, "您当前待处理 / 处理中的工单已达上限，请先关闭部分工单后再提交")
-		return
-	}
-	if cfg.TicketGlobalOpenLimit > 0 && a.store().CountOpenTickets() >= cfg.TicketGlobalOpenLimit {
-		failWithCode(w, http.StatusConflict, ErrTicketGlobalLimit, "系统当前待处理 / 处理中的工单已达上限，请稍后再提交")
-		return
-	}
 	payload := decodeMap(r)
 	title := strings.TrimSpace(stringValue(payload, "title"))
 	content := strings.TrimSpace(stringValue(payload, "content"))
@@ -78,7 +70,7 @@ func (a *App) handleCreateTicket(w http.ResponseWriter, r *http.Request, _ Param
 		notifyTG = &b
 	}
 
-	ticket, err := a.store().UpsertTicket(store.Ticket{
+	ticket, err := a.store().CreateTicket(store.Ticket{
 		UID:            p.User.UID,
 		Username:       p.User.Username,
 		Title:          title,
@@ -87,7 +79,15 @@ func (a *App) handleCreateTicket(w http.ResponseWriter, r *http.Request, _ Param
 		Priority:       priority,
 		Status:         store.TicketStatusOpen,
 		NotifyTelegram: notifyTG,
-	})
+	}, cfg.TicketUserOpenLimit, cfg.TicketGlobalOpenLimit)
+	if errors.Is(err, store.ErrTicketUserOpenLimit) {
+		failWithCode(w, http.StatusConflict, ErrTicketUserLimit, "您当前待处理 / 处理中的工单已达上限，请先关闭部分工单后再提交")
+		return
+	}
+	if errors.Is(err, store.ErrTicketGlobalOpenLimit) {
+		failWithCode(w, http.StatusConflict, ErrTicketGlobalLimit, "系统当前待处理 / 处理中的工单已达上限，请稍后再提交")
+		return
+	}
 	if statusFromError(w, err) {
 		return
 	}

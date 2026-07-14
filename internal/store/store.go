@@ -3307,49 +3307,76 @@ func (s *Store) UpsertTicket(t Ticket) (Ticket, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	err := s.mutateAndSaveLocked(func() error {
-		now := time.Now().Unix()
-		t.Type = NormalizeTicketType(s.state.TicketTypes, t.Type)
-		t.Status = NormalizeTicketStatus(t.Status)
-		t.Priority = NormalizeTicketPriority(t.Priority)
-		if t.ID == 0 {
-			t.ID = s.state.NextTicketID
-			s.state.NextTicketID++
-			t.CreatedAt = now
-		} else if existing, ok := s.state.Tickets[t.ID]; ok {
-			if t.CreatedAt == 0 {
-				t.CreatedAt = existing.CreatedAt
-			}
-			if t.UID == 0 {
-				t.UID = existing.UID
-			}
-			if t.Username == "" {
-				t.Username = existing.Username
-			}
-			// 附件由专用方法维护，普通 upsert 不携带附件时保留原有列表，
-			// 避免管理员更新状态 / 用户改内容时把交流图片清空。
-			if t.Attachments == nil {
-				t.Attachments = existing.Attachments
-			}
-			if t.Replies == nil {
-				t.Replies = existing.Replies
-			}
-			// NotifyTelegram nil 表示沿用已有值，避免更新其他字段时意外重置。
-			if t.NotifyTelegram == nil {
-				t.NotifyTelegram = existing.NotifyTelegram
-			}
-			applyTicketStatusTimestamps(&t, existing, now)
-		} else {
-			empty := Ticket{Status: TicketStatusOpen}
-			applyTicketStatusTimestamps(&t, empty, now)
-		}
-		t.UpdatedAt = now
-		s.state.Tickets[t.ID] = t
+		t = s.upsertTicketLocked(t, time.Now().Unix())
 		return nil
 	})
 	if err != nil {
 		return Ticket{}, err
 	}
 	return t, nil
+}
+
+func (s *Store) CreateTicket(t Ticket, userOpenLimit, globalOpenLimit int) (Ticket, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	err := s.mutateAndSaveLocked(func() error {
+		if userOpenLimit > 0 && s.countOpenTicketsLocked(t.UID) >= userOpenLimit {
+			return ErrTicketUserOpenLimit
+		}
+		if globalOpenLimit > 0 && s.countOpenTicketsLocked(0) >= globalOpenLimit {
+			return ErrTicketGlobalOpenLimit
+		}
+		t.ID = 0
+		if strings.TrimSpace(t.Status) == "" {
+			t.Status = TicketStatusOpen
+		}
+		t = s.upsertTicketLocked(t, time.Now().Unix())
+		return nil
+	})
+	if err != nil {
+		return Ticket{}, err
+	}
+	return t, nil
+}
+
+func (s *Store) upsertTicketLocked(t Ticket, now int64) Ticket {
+	t.Type = NormalizeTicketType(s.state.TicketTypes, t.Type)
+	t.Status = NormalizeTicketStatus(t.Status)
+	t.Priority = NormalizeTicketPriority(t.Priority)
+	if t.ID == 0 {
+		t.ID = s.state.NextTicketID
+		s.state.NextTicketID++
+		t.CreatedAt = now
+	} else if existing, ok := s.state.Tickets[t.ID]; ok {
+		if t.CreatedAt == 0 {
+			t.CreatedAt = existing.CreatedAt
+		}
+		if t.UID == 0 {
+			t.UID = existing.UID
+		}
+		if t.Username == "" {
+			t.Username = existing.Username
+		}
+		// 附件由专用方法维护，普通 upsert 不携带附件时保留原有列表，
+		// 避免管理员更新状态 / 用户改内容时把交流图片清空。
+		if t.Attachments == nil {
+			t.Attachments = existing.Attachments
+		}
+		if t.Replies == nil {
+			t.Replies = existing.Replies
+		}
+		// NotifyTelegram nil 表示沿用已有值，避免更新其他字段时意外重置。
+		if t.NotifyTelegram == nil {
+			t.NotifyTelegram = existing.NotifyTelegram
+		}
+		applyTicketStatusTimestamps(&t, existing, now)
+	} else {
+		empty := Ticket{Status: TicketStatusOpen}
+		applyTicketStatusTimestamps(&t, empty, now)
+	}
+	t.UpdatedAt = now
+	s.state.Tickets[t.ID] = t
+	return t
 }
 
 func (s *Store) ListTickets(filter TicketFilter) []Ticket {
@@ -3409,22 +3436,20 @@ func (s *Store) DeleteTicket(id int64) error {
 func (s *Store) CountUserOpenTickets(uid int64) int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	count := 0
-	for _, t := range s.state.Tickets {
-		if t.UID == uid && TicketStatusOpenForQuota(t.Status) {
-			count++
-		}
-	}
-	return count
+	return s.countOpenTicketsLocked(uid)
 }
 
 // CountOpenTickets 统计全局处于待处理 / 处理中的工单数量。
 func (s *Store) CountOpenTickets() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	return s.countOpenTicketsLocked(0)
+}
+
+func (s *Store) countOpenTicketsLocked(uid int64) int {
 	count := 0
 	for _, t := range s.state.Tickets {
-		if TicketStatusOpenForQuota(t.Status) {
+		if (uid == 0 || t.UID == uid) && TicketStatusOpenForQuota(t.Status) {
 			count++
 		}
 	}
@@ -5148,13 +5173,15 @@ func (s *Store) ResetTelegramBotOffset() error {
 }
 
 var (
-	ErrNotFound           = errors.New("not found")
-	ErrInvalid            = errors.New("invalid")
-	ErrConflict           = errors.New("conflict")
-	ErrExpired            = errors.New("expired")
-	ErrLastAdmin          = errors.New("last admin")
-	ErrGrantLocked        = errors.New("emby grant locked")
-	ErrInsufficientPoints = errors.New("insufficient points")
+	ErrNotFound              = errors.New("not found")
+	ErrInvalid               = errors.New("invalid")
+	ErrConflict              = errors.New("conflict")
+	ErrExpired               = errors.New("expired")
+	ErrLastAdmin             = errors.New("last admin")
+	ErrGrantLocked           = errors.New("emby grant locked")
+	ErrTicketUserOpenLimit   = errors.New("ticket user open limit reached")
+	ErrTicketGlobalOpenLimit = errors.New("ticket global open limit reached")
+	ErrInsufficientPoints    = errors.New("insufficient points")
 )
 
 func randomKey(prefix string, id, now int64) string {

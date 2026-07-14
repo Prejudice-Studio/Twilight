@@ -1,10 +1,12 @@
 package store
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -305,6 +307,58 @@ func TestCreateMediaRequestRejectsInvalidStatus(t *testing.T) {
 	}
 	if req.Status != MediaRequestStatusUnhandled {
 		t.Fatalf("empty create status should default to unhandled, got %q", req.Status)
+	}
+}
+
+func TestCreateTicketEnforcesUserOpenLimitAtomically(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	const attempts = 20
+	var wg sync.WaitGroup
+	errs := make(chan error, attempts)
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := st.CreateTicket(Ticket{
+				UID:      100,
+				Username: "user",
+				Title:    "ticket",
+				Content:  "content",
+				Type:     TicketTypeDefault,
+				Priority: TicketPriorityMedium,
+			}, 1, 0)
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	success := 0
+	userLimited := 0
+	for err := range errs {
+		switch {
+		case err == nil:
+			success++
+		case errors.Is(err, ErrTicketUserOpenLimit):
+			userLimited++
+		default:
+			t.Fatalf("unexpected create ticket error: %v", err)
+		}
+	}
+	if success != 1 || userLimited != attempts-1 {
+		t.Fatalf("expected one success and %d user-limit errors, got success=%d limit=%d", attempts-1, success, userLimited)
+	}
+	if got := st.CountUserOpenTickets(100); got != 1 {
+		t.Fatalf("expected one persisted open ticket, got %d", got)
+	}
+}
+
+func TestCreateTicketEnforcesGlobalOpenLimit(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	if _, err := st.CreateTicket(Ticket{UID: 1, Username: "a", Title: "one", Content: "content", Type: TicketTypeDefault}, 0, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateTicket(Ticket{UID: 2, Username: "b", Title: "two", Content: "content", Type: TicketTypeDefault}, 0, 1); !errors.Is(err, ErrTicketGlobalOpenLimit) {
+		t.Fatalf("expected global limit error, got %v", err)
 	}
 }
 

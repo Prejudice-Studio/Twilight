@@ -199,7 +199,7 @@ systemd 部署对应三个服务单元：`twilight`、`twilight-bot`、`twilight
 | `TWILIGHT_EMAIL_VALIDATION_MODE` / `TWILIGHT_EMAIL_WHITELIST` / `TWILIGHT_EMAIL_BLACKLIST` | 邮箱域名校验模式与黑白名单（与注册共用，逗号分隔）。 |
 | `TWILIGHT_RATE_LIMIT_EMAIL_CODE_IP_PER_10M` / `TWILIGHT_RATE_LIMIT_EMAIL_CODE_ADDR_PER_10M` / `TWILIGHT_RATE_LIMIT_EMAIL_CODE_UID_PER_10M` | 发码限流（每 IP / 每收件地址 / 每登录账号）。 |
 
-更多按业务划分的配置项见各功能文档：[注册码与卡码](../features/regcodes.md)、[邮箱验证与找回密码](../features/email.md)、[邀请树](../features/invite.md)、[求片系统](../features/media-requests.md)、[Telegram Bot 命令](../features/telegram-bot.md)、[Bangumi 同步](../features/bangumi.md)、[背景与头像](../features/background.md)。
+更多按业务划分的配置项见各功能文档：[注册码与卡码](../features/regcodes.md)、[邮箱验证与找回密码](../features/email.md)、[邀请树](../features/invite.md)、[求片系统](../features/media-requests.md)、[工单系统](../features/tickets.md)、[Telegram Bot 命令](../features/telegram-bot.md)、[Bangumi 同步](../features/bangumi.md)、[背景与头像](../features/background.md)。
 
 ## Redis 优化
 
