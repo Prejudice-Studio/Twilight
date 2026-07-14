@@ -930,6 +930,7 @@
     "missingRequireKey": "该请求缺少 require_key，无法操作",
     "title": "求片审核",
     "description": "处理用户的媒体请求",
+    "activeQueue": "活跃队列",
     "user": "用户: {username}",
     "internalId": "内部 ID（{source}）",
     "keyCopied": "已复制 Key 到剪贴板",

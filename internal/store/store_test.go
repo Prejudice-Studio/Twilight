@@ -256,8 +256,11 @@ func TestMediaRequestStatusHelpers(t *testing.T) {
 	if got := NormalizeMediaRequestStatus(""); got != "" {
 		t.Fatalf("empty status should be invalid outside create defaulting, got %q", got)
 	}
-	if !MediaRequestStatusMatches(MediaRequestStatusDownloading, "pending") {
-		t.Fatal("pending filter should include downloading requests")
+	if !MediaRequestStatusMatches(MediaRequestStatusDownloading, "active") {
+		t.Fatal("active filter should include downloading requests")
+	}
+	if MediaRequestStatusMatches(MediaRequestStatusDownloading, "pending") {
+		t.Fatal("pending filter should include only unhandled requests")
 	}
 	if IsActiveMediaRequestStatus(MediaRequestStatusCompleted) {
 		t.Fatal("completed request should not be active")

@@ -54,7 +54,7 @@ export default function AdminRequestsPage() {
   const [requests, setRequests] = useState<MediaRequest[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [status, setStatus] = useState("pending");
+  const [status, setStatus] = useState("active");
 
   // Action dialog
   const [actionOpen, setActionOpen] = useState(false);
@@ -229,6 +229,7 @@ export default function AdminRequestsPage() {
       {/* Status Filter */}
       <Tabs value={status} onValueChange={(v) => { setStatus(v); setPage(1); }}>
         <TabsList className="flex w-full overflow-x-auto sm:inline-flex sm:w-auto">
+          <TabsTrigger value="active">{t("adminRequests.activeQueue")}</TabsTrigger>
           <TabsTrigger value="pending">{t("media.statusUnhandled")}</TabsTrigger>
           <TabsTrigger value="accepted">{t("media.statusAccepted")}</TabsTrigger>
           <TabsTrigger value="downloading">{t("media.statusDownloading")}</TabsTrigger>

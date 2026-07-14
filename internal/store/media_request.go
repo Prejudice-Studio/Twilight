@@ -57,13 +57,16 @@ func MediaRequestStatusMatches(status, filter string) bool {
 	if filter == "" || filter == "all" {
 		return true
 	}
-	if filter == "pending" {
+	if filter == "active" {
 		switch NormalizeMediaRequestStatus(status) {
 		case MediaRequestStatusUnhandled, MediaRequestStatusAccepted, MediaRequestStatusDownloading:
 			return true
 		default:
 			return false
 		}
+	}
+	if filter == "pending" || filter == "unhandled" {
+		return NormalizeMediaRequestStatus(status) == MediaRequestStatusUnhandled
 	}
 	return MediaRequestAdminStatus(status) == filter
 }

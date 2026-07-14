@@ -1186,6 +1186,8 @@ curl -X POST "http://localhost:5000/api/v1/admin/regcodes" \
 
 `GET /admin/media-requests` — 列出全部求片（与 `/media/request/pending` 同 handler）。
 
+默认筛选为 `status=active`，即 `UNHANDLED` / `ACCEPTED` / `DOWNLOADING` 活跃队列；`status=pending` 或 `status=unhandled` 仅返回真正待处理的 `UNHANDLED`，`status=all` 返回全部。
+
 `PUT /admin/media-requests/{request_id}` — 更新求片状态。
 
 `DELETE /admin/media-requests/{request_id}` — 删除求片。

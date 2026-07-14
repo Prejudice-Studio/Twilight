@@ -1307,6 +1307,57 @@ func TestMediaRequestStatusUpdatesRequireExplicitStatus(t *testing.T) {
 	}
 }
 
+func TestAdminMediaRequestFiltersSeparateActiveAndPending(t *testing.T) {
+	app := newTestApp(t)
+	adminCookies := registerAndLogin(t, app, "admin", "Admin123456")
+	seeds := []store.MediaRequest{
+		{UID: 1, TelegramID: 99, Username: "admin", Title: "Unhandled", Source: "tmdb", MediaID: 101, MediaType: "movie", Status: store.MediaRequestStatusUnhandled},
+		{UID: 1, TelegramID: 99, Username: "admin", Title: "Accepted", Source: "tmdb", MediaID: 102, MediaType: "movie", Status: store.MediaRequestStatusAccepted},
+		{UID: 1, TelegramID: 99, Username: "admin", Title: "Downloading", Source: "tmdb", MediaID: 103, MediaType: "movie", Status: store.MediaRequestStatusDownloading},
+		{UID: 1, TelegramID: 99, Username: "admin", Title: "Completed", Source: "tmdb", MediaID: 104, MediaType: "movie", Status: store.MediaRequestStatusCompleted},
+	}
+	for _, seed := range seeds {
+		if _, err := app.store().CreateMediaRequest(seed); err != nil {
+			t.Fatalf("seed %s: %v", seed.Title, err)
+		}
+	}
+	titlesFor := func(path string) map[string]bool {
+		t.Helper()
+		rr := doJSONWithHeaders(app, http.MethodGet, path, ``, adminCookies, nil)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, rr.Code, rr.Body.String())
+		}
+		var resp struct {
+			Data struct {
+				Requests []struct {
+					Title string `json:"title"`
+				} `json:"requests"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode %s: %v body=%s", path, err, rr.Body.String())
+		}
+		out := map[string]bool{}
+		for _, req := range resp.Data.Requests {
+			out[req.Title] = true
+		}
+		return out
+	}
+
+	defaultTitles := titlesFor("/api/v1/admin/media-requests")
+	if !defaultTitles["Unhandled"] || !defaultTitles["Accepted"] || !defaultTitles["Downloading"] || defaultTitles["Completed"] {
+		t.Fatalf("default filter should be active queue, got %#v", defaultTitles)
+	}
+	pendingTitles := titlesFor("/api/v1/admin/media-requests?status=pending")
+	if !pendingTitles["Unhandled"] || pendingTitles["Accepted"] || pendingTitles["Downloading"] || pendingTitles["Completed"] {
+		t.Fatalf("pending filter should include only unhandled requests, got %#v", pendingTitles)
+	}
+	acceptedTitles := titlesFor("/api/v1/admin/media-requests?status=accepted")
+	if !acceptedTitles["Accepted"] || acceptedTitles["Unhandled"] || acceptedTitles["Downloading"] || acceptedTitles["Completed"] {
+		t.Fatalf("accepted filter should include only accepted requests, got %#v", acceptedTitles)
+	}
+}
+
 func TestEmbyURLsDoNotFallbackToInternalServerURL(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().EmbyURL = "http://127.0.0.1:8096"

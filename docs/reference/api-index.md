@@ -282,7 +282,7 @@
 | DELETE | `/api/v1/admin/regcodes/{code}` | Admin | 删除注册码 |
 | GET | `/api/v1/admin/regcodes/{code}/users` | Admin | 查看注册码使用者 |
 | POST | `/api/v1/admin/regcodes/{code}/clear-usage` | Admin | 清理注册码使用记录 |
-| GET | `/api/v1/admin/media-requests` | Admin | 求片管理列表 |
+| GET | `/api/v1/admin/media-requests` | Admin | 求片管理列表；默认 `status=active`，`pending` 仅待处理，`all` 全部 |
 | PUT | `/api/v1/admin/media-requests/{request_id}` | Admin | 更新求片状态 |
 | DELETE | `/api/v1/admin/media-requests/{request_id}` | Admin | 删除求片 |
 | PUT | `/api/v1/admin/media-requests/by-key/{require_key}` | Admin | 按 key 更新求片 |

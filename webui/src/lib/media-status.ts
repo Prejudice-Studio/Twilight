@@ -1,6 +1,7 @@
 export type MediaRequestStatusMode = "user" | "admin";
 
 const ADMIN_STATUS_MAP: Record<string, string> = {
+  active: "active",
   pending: "pending",
   unhandled: "pending",
   accepted: "accepted",

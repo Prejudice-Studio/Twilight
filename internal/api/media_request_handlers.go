@@ -188,7 +188,7 @@ func (a *App) handleMyMediaRequests(w http.ResponseWriter, r *http.Request, _ Pa
 }
 
 func (a *App) handleAdminMediaRequests(w http.ResponseWriter, r *http.Request, _ Params) {
-	statusFilter := strings.ToLower(firstNonEmpty(r.URL.Query().Get("status"), "pending"))
+	statusFilter := strings.ToLower(firstNonEmpty(r.URL.Query().Get("status"), "active"))
 	page := max(1, queryInt(r, "page", 1))
 	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
 	requests := a.store().ListMediaRequests(0, true)
