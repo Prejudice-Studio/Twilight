@@ -388,51 +388,6 @@ func normalizeSource(source string) string {
 	}
 }
 
-func normalizeMediaStatus(status string) string {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "pending", "unhandled", "pending_review":
-		return "UNHANDLED"
-	case "accepted", "approved":
-		return "ACCEPTED"
-	case "rejected", "reject":
-		return "REJECTED"
-	case "completed", "complete", "done":
-		return "COMPLETED"
-	case "downloading", "download":
-		return "DOWNLOADING"
-	default:
-		return ""
-	}
-}
-
-func adminMediaStatus(status string) string {
-	switch normalizeMediaStatus(status) {
-	case "UNHANDLED":
-		return "pending"
-	case "ACCEPTED":
-		return "accepted"
-	case "REJECTED":
-		return "rejected"
-	case "COMPLETED":
-		return "completed"
-	case "DOWNLOADING":
-		return "downloading"
-	default:
-		return "pending"
-	}
-}
-
-func mediaStatusMatches(status, filter string) bool {
-	filter = strings.ToLower(strings.TrimSpace(filter))
-	if filter == "" || filter == "all" {
-		return true
-	}
-	if filter == "pending" {
-		return normalizeMediaStatus(status) == "UNHANDLED" || normalizeMediaStatus(status) == "ACCEPTED" || normalizeMediaStatus(status) == "DOWNLOADING"
-	}
-	return adminMediaStatus(status) == filter
-}
-
 func canAccessMediaRequest(user store.User, req store.MediaRequest) bool {
 	return user.Role == store.RoleAdmin || req.UID == user.UID || (user.TelegramID != 0 && req.TelegramID == user.TelegramID)
 }
@@ -451,16 +406,16 @@ func mediaRequestUserDTO(req store.MediaRequest) map[string]any {
 	if _, ok := mediaInfo["media_type"]; !ok {
 		mediaInfo["media_type"] = req.MediaType
 	}
-	status := normalizeMediaStatus(req.Status)
+	status := store.NormalizeMediaRequestStatus(req.Status)
 	if status == "" {
-		status = "UNHANDLED"
+		status = store.MediaRequestStatusUnhandled
 	}
 	return map[string]any{
 		"id":          req.ID,
 		"media_id":    req.MediaID,
 		"source":      req.Source,
 		"status":      status,
-		"status_text": mediaStatusText(status),
+		"status_text": store.MediaRequestStatusText(status),
 		"timestamp":   req.CreatedAt,
 		"title":       req.Title,
 		"season":      zeroNil(int64(req.Season)),
@@ -474,30 +429,13 @@ func mediaRequestUserDTO(req store.MediaRequest) map[string]any {
 
 func mediaRequestAdminDTO(req store.MediaRequest, st *store.Store) map[string]any {
 	dto := mediaRequestUserDTO(req)
-	dto["status"] = adminMediaStatus(req.Status)
+	dto["status"] = store.MediaRequestAdminStatus(req.Status)
 	userData := map[string]any{"telegram_id": req.TelegramID, "username": req.Username, "uid": req.UID}
 	if u, ok := st.User(req.UID); ok {
 		userData = map[string]any{"telegram_id": u.TelegramID, "username": u.Username, "uid": u.UID}
 	}
 	dto["user"] = userData
 	return dto
-}
-
-func mediaStatusText(status string) string {
-	switch normalizeMediaStatus(status) {
-	case "UNHANDLED":
-		return "待处理"
-	case "ACCEPTED":
-		return "已接受"
-	case "REJECTED":
-		return "已拒绝"
-	case "COMPLETED":
-		return "已完成"
-	case "DOWNLOADING":
-		return "正在下载"
-	default:
-		return "未知"
-	}
 }
 
 func regcodeTypeName(codeType int) string {

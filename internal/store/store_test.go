@@ -237,6 +237,77 @@ func TestConsumeInviteRejectsLegacyRelationByChildUID(t *testing.T) {
 	}
 }
 
+func TestMediaRequestStatusHelpers(t *testing.T) {
+	cases := map[string]string{
+		"pending":        MediaRequestStatusUnhandled,
+		"pending_review": MediaRequestStatusUnhandled,
+		"approved":       MediaRequestStatusAccepted,
+		"reject":         MediaRequestStatusRejected,
+		"done":           MediaRequestStatusCompleted,
+		"download":       MediaRequestStatusDownloading,
+	}
+	for input, want := range cases {
+		if got := NormalizeMediaRequestStatus(input); got != want {
+			t.Fatalf("NormalizeMediaRequestStatus(%q)=%q want %q", input, got, want)
+		}
+	}
+	if got := NormalizeMediaRequestStatus(""); got != "" {
+		t.Fatalf("empty status should be invalid outside create defaulting, got %q", got)
+	}
+	if !MediaRequestStatusMatches(MediaRequestStatusDownloading, "pending") {
+		t.Fatal("pending filter should include downloading requests")
+	}
+	if IsActiveMediaRequestStatus(MediaRequestStatusCompleted) {
+		t.Fatal("completed request should not be active")
+	}
+}
+
+func TestUpdateMediaRequestStatusNoteModes(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	req, err := st.CreateMediaRequest(MediaRequest{UID: 1, Title: "Movie", Source: "tmdb", MediaID: 42, MediaType: "movie"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := st.UpdateMediaRequestStatus(req.ID, "accepted", "first note", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != MediaRequestStatusAccepted || updated.AdminNote != "first note" {
+		t.Fatalf("unexpected first status update: %#v", updated)
+	}
+	updated, err = st.UpdateMediaRequestStatus(req.ID, "downloading", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != MediaRequestStatusDownloading || updated.AdminNote != "first note" {
+		t.Fatalf("empty admin note should preserve existing note: %#v", updated)
+	}
+	updated, err = st.UpdateMediaRequestStatus(req.ID, "completed", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != MediaRequestStatusCompleted || updated.AdminNote != "" {
+		t.Fatalf("replace note mode should clear note: %#v", updated)
+	}
+	if _, err := st.UpdateMediaRequestStatus(req.ID, "", "", true); err != ErrInvalid {
+		t.Fatalf("expected ErrInvalid for empty status update, got %v", err)
+	}
+}
+
+func TestCreateMediaRequestRejectsInvalidStatus(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	if _, err := st.CreateMediaRequest(MediaRequest{UID: 1, Title: "Movie", Source: "tmdb", MediaID: 42, MediaType: "movie", Status: "wat"}); err != ErrInvalid {
+		t.Fatalf("expected ErrInvalid for bad create status, got %v", err)
+	}
+	req, err := st.CreateMediaRequest(MediaRequest{UID: 1, Title: "Movie", Source: "tmdb", MediaID: 43, MediaType: "movie"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Status != MediaRequestStatusUnhandled {
+		t.Fatalf("empty create status should default to unhandled, got %q", req.Status)
+	}
+}
+
 func containsInt64(xs []int64, v int64) bool {
 	for _, x := range xs {
 		if x == v {

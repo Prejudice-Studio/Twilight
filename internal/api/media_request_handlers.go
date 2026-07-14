@@ -171,7 +171,7 @@ func (a *App) handleAdminMediaRequests(w http.ResponseWriter, r *http.Request, _
 	requests := a.store().ListMediaRequests(0, true)
 	items := make([]map[string]any, 0, len(requests))
 	for _, req := range requests {
-		if !mediaStatusMatches(req.Status, statusFilter) {
+		if !store.MediaRequestStatusMatches(req.Status, statusFilter) {
 			continue
 		}
 		items = append(items, mediaRequestAdminDTO(req, a.store()))
@@ -193,19 +193,13 @@ func (a *App) handleUpdateMediaRequestStatus(w http.ResponseWriter, r *http.Requ
 		failWithCode(w, http.StatusBadRequest, ErrMediaRequestStatusInvalid, "status required")
 		return
 	}
-	status := normalizeMediaStatus(rawStatus)
+	status := store.NormalizeMediaRequestStatus(rawStatus)
 	if status == "" {
 		failWithCode(w, http.StatusBadRequest, ErrMediaRequestStatusInvalid, "invalid status")
 		return
 	}
 	note := truncateString(firstNonEmpty(stringValue(payload, "note"), stringValue(payload, "admin_note")), 1000)
-	req, err := a.store().UpdateMediaRequest(id, func(req *store.MediaRequest) error {
-		req.Status = status
-		if note != "" {
-			req.AdminNote = note
-		}
-		return nil
-	})
+	req, err := a.store().UpdateMediaRequestStatus(id, status, note, false)
 	if statusFromError(w, err) {
 		return
 	}
@@ -240,16 +234,12 @@ func (a *App) handleExternalMediaUpdate(w http.ResponseWriter, r *http.Request, 
 		failWithCode(w, http.StatusBadRequest, ErrMediaRequestStatusInvalid, "status required")
 		return
 	}
-	status := normalizeMediaStatus(rawStatus)
+	status := store.NormalizeMediaRequestStatus(rawStatus)
 	if status == "" {
 		failWithCode(w, http.StatusBadRequest, ErrMediaRequestStatusInvalid, "invalid status")
 		return
 	}
-	req, err := a.store().UpdateMediaRequest(req.ID, func(req *store.MediaRequest) error {
-		req.Status = status
-		req.AdminNote = truncateString(stringValue(payload, "note"), 1000)
-		return nil
-	})
+	req, err := a.store().UpdateMediaRequestStatus(req.ID, status, truncateString(stringValue(payload, "note"), 1000), true)
 	if statusFromError(w, err) {
 		return
 	}

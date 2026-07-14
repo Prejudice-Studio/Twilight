@@ -2803,8 +2803,13 @@ func (s *Store) CreateMediaRequest(r MediaRequest) (MediaRequest, error) {
 		if r.RequireKey == "" {
 			r.RequireKey = randomKey("req", r.ID, now)
 		}
-		if r.Status == "" {
-			r.Status = "UNHANDLED"
+		if strings.TrimSpace(r.Status) == "" {
+			r.Status = MediaRequestStatusUnhandled
+		} else {
+			r.Status = NormalizeMediaRequestStatus(r.Status)
+			if r.Status == "" {
+				return ErrInvalid
+			}
 		}
 		r.CreatedAt = now
 		r.UpdatedAt = now
@@ -4573,15 +4578,6 @@ func (s *Store) CountUsersBy(predicate func(User) bool) int {
 	return count
 }
 
-func isActiveMediaStatus(status string) bool {
-	switch strings.ToUpper(status) {
-	case "UNHANDLED", "PENDING", "ACCEPTED", "DOWNLOADING":
-		return true
-	default:
-		return false
-	}
-}
-
 func appendUniqueInt64(values []int64, value int64) []int64 {
 	if value == 0 {
 		return values
@@ -5153,6 +5149,7 @@ func (s *Store) ResetTelegramBotOffset() error {
 
 var (
 	ErrNotFound           = errors.New("not found")
+	ErrInvalid            = errors.New("invalid")
 	ErrConflict           = errors.New("conflict")
 	ErrExpired            = errors.New("expired")
 	ErrLastAdmin          = errors.New("last admin")

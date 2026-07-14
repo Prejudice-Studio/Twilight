@@ -115,6 +115,7 @@ pnpm build
 | [注册码与卡码](docs/features/regcodes.md) | 注册码、续期码、白名单码算法和使用规则 |
 | [邀请系统](docs/features/invite.md) | 邀请关系管理、级联删除与启停语义 |
 | [邀请历史脏数据修复](docs/features/invite-data-repair.md) | 防止断开上下级后被旧关系或旧邀请码占用记录恢复 |
+| [求片系统](docs/features/media-requests.md) | 状态流转、活跃队列、管理员审核与外部回调语义 |
 | [Telegram Bot 命令](docs/features/telegram-bot.md) | Bot 命令、权限边界、JS 自定义命令 |
 | [Bangumi 同步](docs/features/bangumi.md) | Emby Webhook 与 Bangumi Token 配置 |
 
