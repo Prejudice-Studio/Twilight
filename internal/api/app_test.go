@@ -4701,6 +4701,69 @@ func TestRegcodeUsageRecordsDoNotBlockSelfUnbindWithoutUserGrantLock(t *testing.
 	}
 }
 
+func TestBindExistingEmbyConsumesPendingEntitlement(t *testing.T) {
+	app := newTestApp(t)
+	var policyPosts int32
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/Users/AuthenticateByName":
+			_, _ = w.Write([]byte(`{"User":{"Id":"emby-existing","Name":"existing-user","Policy":{"IsAdministrator":false}}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/Users/emby-existing":
+			_, _ = w.Write([]byte(`{"Id":"emby-existing","Name":"existing-user","Policy":{"IsDisabled":false}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/Users/emby-existing/Policy":
+			atomic.AddInt32(&policyPosts, 1)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+	app.cfg().EmbyToken = "test-token"
+
+	days := 7
+	user, err := app.store().CreateUser(store.User{
+		Username:           "pending-bind",
+		Role:               store.RoleUnrecognized,
+		Active:             true,
+		PendingEmby:        true,
+		PendingEmbyDays:    &days,
+		EmbyGrantLocked:    true,
+		RegistrationSource: registrationSourceRegCode,
+		RegistrationCode:   "REG-BIND",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/emby/bind", strings.NewReader(`{"emby_username":"existing-user","emby_password":"secret"}`))
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, principal{User: user}))
+	rr := httptest.NewRecorder()
+	app.handleBindEmby(rr, req, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("bind existing Emby status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	updated, _ := app.store().User(user.UID)
+	if updated.EmbyID != "emby-existing" || updated.EmbyUsername != "existing-user" {
+		t.Fatalf("existing Emby binding was not persisted: %#v", updated)
+	}
+	if updated.PendingEmby || updated.PendingEmbyDays != nil {
+		t.Fatalf("pending entitlement was not consumed on bind: %#v", updated)
+	}
+	if !updated.EmbyGrantLocked || updated.RegistrationSource != registrationSourceRegCode || updated.RegistrationCode != "REG-BIND" {
+		t.Fatalf("grant provenance was not preserved on bind: %#v", updated)
+	}
+	if updated.Role != store.RoleNormal {
+		t.Fatalf("pending unrecognized user was not promoted to normal after bind: %#v", updated)
+	}
+	if updated.ExpiredAt <= time.Now().Unix() || updated.ExpiredAt > time.Now().AddDate(0, 0, 8).Unix() {
+		t.Fatalf("pending entitlement days were not applied to expiry: %#v", updated)
+	}
+	if atomic.LoadInt32(&policyPosts) == 0 {
+		t.Fatal("bind did not sync Emby policy")
+	}
+}
+
 func TestDirectEmbyRegistrationRecordsRegcodeEquivalentGrant(t *testing.T) {
 	app := newTestApp(t)
 	policyPosts := 0

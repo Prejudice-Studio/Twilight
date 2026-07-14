@@ -712,7 +712,10 @@ func (a *App) handleBindEmby(w http.ResponseWriter, r *http.Request, _ Params) {
 			return
 		}
 	}
-	u, _, err := a.store().BindUserEmbyAtomic(p.User.UID, embyID, firstNonEmpty(asString(embyUser["Name"]), embyUsername), false)
+	u, _, err := a.store().BindUserEmbyAtomicWithUpdate(p.User.UID, embyID, firstNonEmpty(asString(embyUser["Name"]), embyUsername), false, func(u *store.User, before store.User) error {
+		a.consumePendingEmbyEntitlementOnBind(u, before)
+		return nil
+	})
 	if errors.Is(err, store.ErrConflict) {
 		failWithCode(w, http.StatusConflict, ErrEmbyLinkedOtherUser, "该 Emby 账号已关联其他用户")
 		return
@@ -724,6 +727,29 @@ func (a *App) handleBindEmby(w http.ResponseWriter, r *http.Request, _ Params) {
 	a.audit(r, "bind_emby", "user", 0, nil)
 	ok(w, "Emby account linked", map[string]any{"emby_id": u.EmbyID, "emby_username": u.EmbyUsername, "user": publicUser(u)})
 }
+
+func (a *App) consumePendingEmbyEntitlementOnBind(u *store.User, before store.User) {
+	if !before.PendingEmby {
+		return
+	}
+	days := a.cfg().EmbyDirectRegisterDays
+	if before.PendingEmbyDays != nil {
+		days = *before.PendingEmbyDays
+	}
+	if days == 0 {
+		days = 30
+	}
+	markRegistrationGrant(u, firstNonEmpty(before.RegistrationSource, registrationSourceRegCode), before.RegistrationCode)
+	if u.Role == store.RoleUnrecognized {
+		u.Role = store.RoleNormal
+	}
+	if u.Role == store.RoleAdmin || u.Role == store.RoleWhitelist || days < 0 {
+		u.ExpiredAt = permanentExpiryUnix
+	} else {
+		u.ExpiredAt = expiryFromDays(days, time.Now())
+	}
+}
+
 func (a *App) handleRegisterEmby(w http.ResponseWriter, r *http.Request, params Params) {
 	p := current(r)
 	if a.requireEmailVerified(w, p.User) {
@@ -769,19 +795,20 @@ func (a *App) handleRegisterEmby(w http.ResponseWriter, r *http.Request, params 
 		return
 	}
 	embyID := asString(createdUser["Id"])
-	days := a.cfg().EmbyDirectRegisterDays
-	if p.User.PendingEmbyDays != nil {
-		days = *p.User.PendingEmbyDays
-	}
-	if days == 0 {
-		days = 30
-	}
 	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error {
+		days := a.cfg().EmbyDirectRegisterDays
+		if u.PendingEmbyDays != nil {
+			days = *u.PendingEmbyDays
+		}
+		if days == 0 {
+			days = 30
+		}
+		hadPendingEmby := u.PendingEmby
 		u.EmbyID = embyID
 		u.EmbyUsername = firstNonEmpty(asString(createdUser["Name"]), embyUsername)
 		u.PendingEmby = false
 		u.PendingEmbyDays = nil
-		if p.User.PendingEmby {
+		if hadPendingEmby {
 			markRegistrationGrant(u, firstNonEmpty(u.RegistrationSource, registrationSourceRegCode), u.RegistrationCode)
 		} else {
 			markRegistrationGrant(u, registrationSourceRegCode, "")
@@ -3228,7 +3255,10 @@ func (a *App) handleAdminBindEmby(w http.ResponseWriter, r *http.Request, params
 	}
 	embyID := asString(remoteUser["Id"])
 	embyName := firstNonEmpty(asString(remoteUser["Name"]), embyNameInput, embyID)
-	updatedUser, displacedUID, updateErr := a.store().BindUserEmbyAtomic(targetUID, embyID, embyName, force)
+	updatedUser, displacedUID, updateErr := a.store().BindUserEmbyAtomicWithUpdate(targetUID, embyID, embyName, force, func(u *store.User, before store.User) error {
+		a.consumePendingEmbyEntitlementOnBind(u, before)
+		return nil
+	})
 	if errors.Is(updateErr, store.ErrConflict) {
 		existing, _ := a.store().FindUserByEmbyID(embyID)
 		// 旧实现走 ok() 200 + {"conflict": true, ...}：前端只能依赖隐式

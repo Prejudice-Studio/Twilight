@@ -2403,6 +2403,10 @@ func (s *Store) BindUserTelegramAtomic(uid int64, tgid int64, currentUID int64) 
 // 一次写入完成；非 force 模式下冲突直接 ErrConflict。
 // 解决 handleAdminBindEmby 在两段独立锁之间被第三方再次绑定的窗口。
 func (s *Store) BindUserEmbyAtomic(uid int64, embyID, embyUsername string, force bool) (User, int64, error) {
+	return s.BindUserEmbyAtomicWithUpdate(uid, embyID, embyUsername, force, nil)
+}
+
+func (s *Store) BindUserEmbyAtomicWithUpdate(uid int64, embyID, embyUsername string, force bool, fn func(*User, User) error) (User, int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var (
@@ -2414,6 +2418,7 @@ func (s *Store) BindUserEmbyAtomic(uid int64, embyID, embyUsername string, force
 		if !ok {
 			return ErrNotFound
 		}
+		before := u
 		if embyID != "" {
 			for _, other := range s.state.Users {
 				if other.UID != uid && other.EmbyID == embyID {
@@ -2434,6 +2439,11 @@ func (s *Store) BindUserEmbyAtomic(uid int64, embyID, embyUsername string, force
 		if embyID != "" {
 			u.PendingEmby = false
 			u.PendingEmbyDays = nil
+		}
+		if fn != nil {
+			if err := fn(&u, before); err != nil {
+				return err
+			}
 		}
 		s.state.Users[uid] = u
 		updated = u

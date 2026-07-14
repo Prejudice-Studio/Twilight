@@ -508,7 +508,7 @@ class ApiClient {
   }
 
   async bindEmbyAccount(embyUsername: string, embyPassword: string) {
-    return this.request<{ emby_id: string; emby_username: string }>("/users/me/emby/bind", {
+    return this.request<{ emby_id: string; emby_username: string; user?: UserInfo }>("/users/me/emby/bind", {
       method: "POST",
       body: JSON.stringify({
         emby_username: embyUsername,

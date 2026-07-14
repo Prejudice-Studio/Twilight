@@ -14,12 +14,12 @@
 
 | type / 来源 | 名称 | 使用入口 | 行为 |
 | ---- | ---- | -------- | ---- |
-| `1` | 注册码 | `POST /api/v1/users/register`、`POST /api/v1/users/me/use-code` | 公开注册时建系统账号并标记 `PendingEmby`（待补建 Emby）；已登录且未绑定 Emby 的用户用它将角色置为普通用户、按 `days` 写入 `PendingEmbyDays`，并续期账号有效期。 |
+| `1` | 注册码 | `POST /api/v1/users/register`、`POST /api/v1/users/me/use-code` | 公开注册时建系统账号并标记 `PendingEmby`（待开通 Emby）；已登录且未绑定 Emby 的用户用它将角色置为普通用户、按 `days` 写入 `PendingEmbyDays`，并续期账号有效期。后续既可创建新的 Emby 账号，也可绑定已有 Emby 账号并消耗该资格。 |
 | `2` | 续期码 | `POST /api/v1/users/me/renew`、`POST /api/v1/users/me/use-code` | 已登录用户续期；按 `days` 在原有效期基础上叠加，`days<0` 表示永久，`days=0` 按 30 天处理。 |
 | `3` | 白名单码 | `POST /api/v1/users/me/use-code` | 将角色升为白名单（`RoleWhitelist`）、`Active=true`、有效期置为永久；未绑定 Emby 时同时标记 `PendingEmby`（永久天数）以补建 Emby 账号。 |
-| 邀请码（`source=invite`） | 邀请码 | `POST /api/v1/users/me/use-code` | 已登录且未绑定 Emby 的用户创建 Emby 账号并加入邀请树；天数受邀请人剩余有效期约束。详见 [邀请树](./invite.md)。 |
+| 邀请码（`source=invite`） | 邀请码 | `POST /api/v1/users/me/use-code` | 已登录且未绑定 Emby 的用户获得 Emby 开通资格并加入邀请树；后续可创建新的 Emby 账号或绑定已有 Emby 账号。天数受邀请人剩余有效期约束。详见 [邀请树](./invite.md)。 |
 
-> 说明：`previewCode` 把邀请码统一映射为「注册码 type=1」的预览形态（`source=invite`），所以前端只需调一个接口。注册（type=1）、白名单（type=3）以及邀请码都会授予 Emby 注册资格（`codeGrantsEmbyRegistration`）；若当前账号已绑定 Emby，使用这三类会被拒绝并提示改用续期码。
+> 说明：`previewCode` 把邀请码统一映射为「注册码 type=1」的预览形态（`source=invite`），所以前端只需调一个接口。注册（type=1）、白名单（type=3）以及邀请码都会授予 Emby 开通资格（`codeGrantsEmbyRegistration`）；若当前账号已绑定 Emby，使用这三类会被拒绝并提示改用续期码。待开通资格完成时，无论用户选择创建新 Emby 账号还是绑定已有 Emby 账号，后端都会清理 `PendingEmby` 并按资格天数设置账号有效期。
 
 ## 字段
 

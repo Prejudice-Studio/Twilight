@@ -120,6 +120,12 @@ export default function SettingsPage() {
   const canUnbindEmby =
     embyStatus?.can_unbind ?? !user?.emby_grant_locked;
 
+  const openEmbyDialog = (mode: "bind" | "create") => {
+    setCompletePendingEmby(mode === "create");
+    setEmbyUsername(user?.username || "");
+    setBindEmbyOpen(true);
+  };
+
   // Email dialog
   const [editEmailOpen, setEditEmailOpen] = useState(false);
   const [emailValue, setEmailValue] = useState("");
@@ -1061,19 +1067,35 @@ export default function SettingsPage() {
                   )}
                 </div>
               </div>
-              <div className="flex gap-2 shrink-0 sm:justify-end">
+              <div className="flex flex-col gap-2 shrink-0 sm:flex-row sm:justify-end">
                 {!user?.emby_id ? (
-                  <Button
-                    onClick={() => {
-                      setCompletePendingEmby(hasEmbyRegistrationEntitlement);
-                      setEmbyUsername(user?.username || "");
-                      setBindEmbyOpen(true);
-                    }}
-                    className="w-full sm:w-auto"
-                  >
-                    <LinkIcon className="mr-2 h-4 w-4" />
-                    {hasEmbyRegistrationEntitlement ? t("settings.continueSetup") : t("settings.bind")}
-                  </Button>
+                  hasEmbyRegistrationEntitlement ? (
+                    <>
+                      <Button
+                        onClick={() => openEmbyDialog("create")}
+                        className="w-full sm:w-auto"
+                      >
+                        <Tv className="mr-2 h-4 w-4" />
+                        {t("settings.createEmbyAccount")}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => openEmbyDialog("bind")}
+                        className="w-full sm:w-auto"
+                      >
+                        <LinkIcon className="mr-2 h-4 w-4" />
+                        {t("settings.bindExistingEmby")}
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      onClick={() => openEmbyDialog("bind")}
+                      className="w-full sm:w-auto"
+                    >
+                      <LinkIcon className="mr-2 h-4 w-4" />
+                      {t("settings.bind")}
+                    </Button>
+                  )
                 ) : (
                   <Button
                     variant="destructive"
@@ -1094,7 +1116,7 @@ export default function SettingsPage() {
             {!user?.emby_id && (
               <p className="text-sm text-muted-foreground">
                 {hasEmbyRegistrationEntitlement
-                  ? t("settings.pendingEmbyHint")
+                  ? t("settings.pendingEmbyHintWithBind")
                   : t("settings.existingEmbyHint")}
               </p>
             )}
@@ -1466,7 +1488,11 @@ export default function SettingsPage() {
           <DialogHeader>
             <DialogTitle>{completePendingEmby ? t("settings.embyBindDialogTitleCreate") : t("settings.embyBindDialogTitleBind")}</DialogTitle>
             <DialogDescription>
-              {completePendingEmby ? t("settings.embyBindDialogDescriptionCreate") : t("settings.embyBindDialogDescriptionBind")}
+              {completePendingEmby
+                ? t("settings.embyBindDialogDescriptionCreate")
+                : hasEmbyRegistrationEntitlement
+                  ? t("settings.embyBindDialogDescriptionBindWithEntitlement")
+                  : t("settings.embyBindDialogDescriptionBind")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">

@@ -566,6 +566,13 @@ curl -X PUT "http://localhost:5000/api/v1/users/me" \
 - 说明：为当前账号在 Emby 上创建账号，走注册队列；同步等待结果，超时降级到前端轮询 `GET /users/register/emby/status`。
 - 认证：登录用户（`AuthUser`）
 
+#### 绑定已有 Emby 账号
+
+`POST /users/me/emby/bind`
+
+- 说明：验证已有 Emby 用户名/密码并绑定到当前 Web 账号。若当前账号带有 `PendingEmby` 开通资格（来自注册码、白名单码、邀请码、管理员授予等），绑定成功会视为完成开通：清理 `PendingEmby` / `PendingEmbyDays`，保留用户级 `emby_grant_locked` 和来源字段，并按资格天数设置账号有效期。
+- 认证：登录用户（`AuthUser`）
+
 #### 解绑 Emby 账号
 
 `POST /users/me/emby/unbind`
