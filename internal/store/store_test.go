@@ -362,6 +362,36 @@ func TestCreateTicketEnforcesGlobalOpenLimit(t *testing.T) {
 	}
 }
 
+func TestUpdateTicketCanAppendReplyAtomically(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	ticket, err := st.CreateTicket(Ticket{UID: 1, Username: "user", Title: "need help", Content: "content", Type: TicketTypeDefault}, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	note := "admin is checking"
+	updated, err := st.UpdateTicket(ticket.ID, TicketUpdate{
+		AdminNote: &note,
+		Reply: &TicketReply{
+			UID:      2,
+			Username: "admin",
+			Role:     RoleAdmin,
+			Content:  note,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.AdminNote != note {
+		t.Fatalf("admin note not updated: %#v", updated)
+	}
+	if updated.Status != TicketStatusInProgress {
+		t.Fatalf("admin reply should move open ticket to in_progress, got %q", updated.Status)
+	}
+	if len(updated.Replies) != 1 || updated.Replies[0].Content != note || updated.Replies[0].CreatedAt == 0 {
+		t.Fatalf("reply should be appended with timestamp: %#v", updated.Replies)
+	}
+}
+
 func containsInt64(xs []int64, v int64) bool {
 	for _, x := range xs {
 		if x == v {

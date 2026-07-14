@@ -528,6 +528,7 @@ type TicketUpdate struct {
 	Priority  *string
 	Type      *string
 	AdminNote *string
+	Reply     *TicketReply
 }
 
 type RebindRequest struct {
@@ -3480,6 +3481,9 @@ func (s *Store) UpdateTicket(ticketID int64, patch TicketUpdate) (Ticket, error)
 			t.AdminNote = strings.TrimSpace(*patch.AdminNote)
 		}
 		applyTicketStatusTimestamps(&t, existing, now)
+		if patch.Reply != nil {
+			applyTicketReplyLocked(&t, *patch.Reply, now)
+		}
 		t.UpdatedAt = now
 		s.state.Tickets[ticketID] = t
 		out = t
@@ -3548,17 +3552,7 @@ func (s *Store) AddTicketReply(ticketID int64, reply TicketReply) (Ticket, error
 			return ErrNotFound
 		}
 		now := time.Now().Unix()
-		if reply.CreatedAt == 0 {
-			reply.CreatedAt = now
-		}
-		t.Replies = append(t.Replies, reply)
-		if reply.Role == RoleAdmin && NormalizeTicketStatus(t.Status) == TicketStatusOpen {
-			t.Status = TicketStatusInProgress
-		}
-		if reply.Role != RoleAdmin && NormalizeTicketStatus(t.Status) == TicketStatusResolved {
-			t.Status = TicketStatusOpen
-			t.ResolvedAt = 0
-		}
+		applyTicketReplyLocked(&t, reply, now)
 		t.UpdatedAt = now
 		s.state.Tickets[ticketID] = t
 		out = t
@@ -3568,6 +3562,20 @@ func (s *Store) AddTicketReply(ticketID int64, reply TicketReply) (Ticket, error
 		return Ticket{}, err
 	}
 	return out, nil
+}
+
+func applyTicketReplyLocked(t *Ticket, reply TicketReply, now int64) {
+	if reply.CreatedAt == 0 {
+		reply.CreatedAt = now
+	}
+	t.Replies = append(t.Replies, reply)
+	if reply.Role == RoleAdmin && NormalizeTicketStatus(t.Status) == TicketStatusOpen {
+		t.Status = TicketStatusInProgress
+	}
+	if reply.Role != RoleAdmin && NormalizeTicketStatus(t.Status) == TicketStatusResolved {
+		t.Status = TicketStatusOpen
+		t.ResolvedAt = 0
+	}
 }
 
 // RemoveTicketAttachment 从工单移除指定文件名的图片元数据。返回更新后的工单。

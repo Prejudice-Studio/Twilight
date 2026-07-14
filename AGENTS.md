@@ -235,6 +235,7 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - Admin ticket-type edits should be persisted back to `config.toml` so restart/hot reload does not lose them.
 - Ticket status, priority, type normalization, status timestamps, open-ticket quota checks, and reply-preserving updates belong in `internal/store`; handlers should use store helpers instead of rebuilding whole ticket structs.
 - User ticket creation must use the store atomic creation helper so per-user and global open-ticket quota checks happen under the same lock as insertion; do not reintroduce handler-side `Count*` then `UpsertTicket` flows.
+- Admin ticket updates that add an admin reply must pass the reply through the store update helper in the same mutation; do not update status/admin_note first and append the reply in a second store call.
 - Ticket replies are the source of truth for two-sided conversation history. `admin_note` is only the latest admin summary / compatibility field and must not replace or clear `Ticket.Replies`.
 - Closed tickets are evidence-preserving for normal users: upload/delete image handlers reject normal-user modifications with `ErrTicketClosed`.
 - Admins retain debugging privileges on closed tickets.

@@ -250,27 +250,25 @@ func (a *App) handleAdminUpdateTicket(w http.ResponseWriter, r *http.Request, pa
 		value := strings.TrimSpace(stringValue(payload, "admin_note"))
 		adminNote = &value
 	}
+	var adminReply *store.TicketReply
+	if adminNote != nil && *adminNote != "" && *adminNote != strings.TrimSpace(existing.AdminNote) {
+		adminReply = &store.TicketReply{
+			UID:      current(r).User.UID,
+			Username: current(r).User.Username,
+			Role:     current(r).User.Role,
+			Content:  *adminNote,
+		}
+	}
 
 	ticket, err := a.store().UpdateTicket(id, store.TicketUpdate{
 		Status:    &status,
 		Priority:  &priority,
 		Type:      &ticketType,
 		AdminNote: adminNote,
+		Reply:     adminReply,
 	})
 	if statusFromError(w, err) {
 		return
-	}
-	if adminNote != nil && *adminNote != "" && *adminNote != strings.TrimSpace(existing.AdminNote) {
-		reply := store.TicketReply{
-			UID:      current(r).User.UID,
-			Username: current(r).User.Username,
-			Role:     current(r).User.Role,
-			Content:  *adminNote,
-		}
-		ticket, err = a.store().AddTicketReply(id, reply)
-		if statusFromError(w, err) {
-			return
-		}
 	}
 	a.audit(r, "update_ticket", "admin", ticket.UID, map[string]any{"ticket_id": ticket.ID, "new_status": status})
 
