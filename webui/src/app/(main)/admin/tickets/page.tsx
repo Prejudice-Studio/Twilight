@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   MessageSquareMore, Loader2, Trash2, Edit2, AlertCircle, Clock, User,
   CheckCircle2, Archive, RotateCcw, PlayCircle, Plus, Pencil, Settings2, RefreshCw,
+  ArrowRight,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -49,6 +51,7 @@ export default function AdminTicketsPage() {
   const { toast } = useToast();
   const { confirm } = useConfirm();
   const { t } = useI18n();
+  const router = useRouter();
   const { info: systemInfo } = useSystemStore();
   const imageMaxSize = Number(systemInfo?.limits?.ticket_image_max_size) || DEFAULT_TICKET_IMAGE_MAX_SIZE;
   const imageMaxCount = Number(systemInfo?.limits?.ticket_image_max_count) || DEFAULT_TICKET_IMAGE_MAX_COUNT;
@@ -56,6 +59,7 @@ export default function AdminTicketsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
+  const [jumpId, setJumpId] = useState("");
 
   const [editOpen, setEditOpen] = useState(false);
   const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
@@ -127,6 +131,16 @@ export default function AdminTicketsPage() {
   const { data, isLoading, error, execute: reload } = useAsyncResource(loadTickets, { immediate: true });
 
   const openEdit = (ticket: Ticket) => { setEditingTicket(ticket); setEditStatus(ticket.status); setEditPriority(ticket.priority); setEditType(ticket.type); setEditNote(ticket.admin_note || ""); setEditOpen(true); };
+  const openConversation = (id: number) => router.push(`/admin/tickets/${id}`);
+
+  const handleJump = () => {
+    const id = Number(jumpId.trim());
+    if (!Number.isInteger(id) || id <= 0) {
+      toast({ title: t("adminTickets.invalidTicketId"), variant: "destructive" });
+      return;
+    }
+    openConversation(id);
+  };
 
   const handleSave = async () => {
     if (!editingTicket) return;
@@ -168,7 +182,7 @@ export default function AdminTicketsPage() {
         <p className="text-sm text-muted-foreground mt-1">{t("adminTickets.description")}</p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[repeat(3,minmax(0,12rem))_1fr_auto_auto] xl:items-end">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[repeat(3,minmax(0,12rem))_minmax(13rem,18rem)_1fr_auto_auto] xl:items-end">
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-full"><SelectValue placeholder={t("adminTickets.filterAll")} /></SelectTrigger>
           <SelectContent>{Object.entries(STATUS_MAP).map(([v, s]) => <SelectItem key={v} value={v}>{t(s.labelKey as any)}</SelectItem>)}<SelectItem value="all">{t("adminTickets.filterAll")}</SelectItem></SelectContent>
@@ -185,6 +199,24 @@ export default function AdminTicketsPage() {
             {Object.entries(PRIORITY_MAP).map(([v, p]) => <SelectItem key={v} value={v}>{t(p.labelKey as any)}</SelectItem>)}
           </SelectContent>
         </Select>
+        <form
+          className="flex min-w-0 gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            handleJump();
+          }}
+        >
+          <Input
+            value={jumpId}
+            onChange={(event) => setJumpId(event.target.value)}
+            inputMode="numeric"
+            placeholder={t("adminTickets.jumpPlaceholder")}
+            className="min-w-0"
+          />
+          <Button type="submit" variant="outline" size="icon" className="h-10 w-10 shrink-0" title={t("adminTickets.jump")}>
+            <ArrowRight className="h-4 w-4" />
+          </Button>
+        </form>
         <span className="text-xs text-muted-foreground xl:ml-auto">{t("adminTickets.total", { count: data?.tickets?.length ?? 0 })}</span>
         <Button variant="outline" size="sm" onClick={async () => {
           try {
@@ -194,7 +226,7 @@ export default function AdminTicketsPage() {
           setTypeMgmtOpen(true);
         }} className="w-full sm:w-auto"><Settings2 className="mr-1 h-3.5 w-3.5" />{t("adminTickets.manageTypes")}</Button>
         <Button variant="outline" size="sm" onClick={() => void reload()} disabled={isLoading} className="w-full sm:w-auto">
-          <RefreshCw className={`mr-1 h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />刷新
+          <RefreshCw className={`mr-1 h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />{t("common.refresh")}
         </Button>
       </div>
 
@@ -224,9 +256,14 @@ export default function AdminTicketsPage() {
                         <Badge variant="secondary" className="text-[10px] font-mono">#{ticket.id}</Badge>
                       </div>
                       <p className="text-xs text-muted-foreground flex items-center gap-1"><User className="h-3 w-3" />{ticket.username} (UID: {ticket.uid})</p>
-                      <h3 className="font-bold text-base">{ticket.title}</h3>
+                      <button className="block min-w-0 text-left" onClick={() => openConversation(ticket.id)}>
+                        <h3 className="font-bold text-base hover:underline">{ticket.title}</h3>
+                      </button>
                     </div>
                     <div className="flex gap-1 shrink-0 flex-wrap">
+                      <Button variant="default" size="sm" className="h-8 text-xs" onClick={() => openConversation(ticket.id)}>
+                        <MessageSquareMore className="h-3.5 w-3.5 mr-1" />{t("adminTickets.openConversation")}
+                      </Button>
                       {ticket.status === "open" && (
                         <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => quickStatus(ticket, "in_progress")}><PlayCircle className="h-3.5 w-3.5 mr-1" />{t("adminTickets.markInProgress")}</Button>
                       )}

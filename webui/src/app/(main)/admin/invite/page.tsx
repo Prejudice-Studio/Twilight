@@ -4,6 +4,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "rea
 import {
   AlertTriangle,
   Ban,
+  CheckSquare2,
   ChevronDown,
   ChevronRight,
   GitBranch,
@@ -11,11 +12,13 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  Square,
   Trash2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -111,6 +114,7 @@ export default function AdminInviteTreePage() {
   const [rootFilter, setRootFilter] = useState<number | "all">("all");
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [selectedUid, setSelectedUid] = useState<number | null>(null);
+  const [selectedUids, setSelectedUids] = useState<Set<number>>(new Set());
   const [depthPrompt, setDepthPrompt] = useState<DepthPromptState | null>(null);
 
   const reload = useCallback(async () => {
@@ -191,6 +195,10 @@ export default function AdminInviteTreePage() {
   }, [collapsed, deferredQuery, forest, includedBySearch, maps, rootFilter]);
 
   const selected = selectedUid && maps?.nodeByUid.get(selectedUid) ? maps.nodeByUid.get(selectedUid)! : null;
+  const visibleUids = useMemo(() => rows.map((row) => row.node.uid), [rows]);
+  const allVisibleSelected = visibleUids.length > 0 && visibleUids.every((uid) => selectedUids.has(uid));
+  const someVisibleSelected = visibleUids.some((uid) => selectedUids.has(uid));
+  const selectedCount = selectedUids.size;
 
   useEffect(() => {
     if (forest && rootFilter !== "all" && !forest.roots.includes(rootFilter)) setRootFilter("all");
@@ -199,6 +207,14 @@ export default function AdminInviteTreePage() {
   useEffect(() => {
     if (selectedUid && maps && !maps.nodeByUid.has(selectedUid)) setSelectedUid(null);
   }, [maps, selectedUid]);
+
+  useEffect(() => {
+    const visible = new Set(visibleUids);
+    setSelectedUids((prev) => {
+      const next = new Set([...prev].filter((uid) => visible.has(uid)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [visibleUids]);
 
   const requestDepth = useCallback((title: string, description: string, confirmLabel: string) => {
     return new Promise<string | null>((resolve) => {
@@ -228,6 +244,79 @@ export default function AdminInviteTreePage() {
     }));
     if (res.success) {
       toast({ title: t("adminInvite.detached") });
+      await reload();
+    } else {
+      toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
+    }
+  };
+
+  const handleDetachAndDeleteEmby = async () => {
+    if (!selected) return;
+    const ok = await confirm({
+      title: t("adminInvite.detachDeleteEmbyTitle"),
+      description: t("adminInvite.detachDeleteEmbyDescription", { username: selected.username, uid: selected.uid }),
+      tone: "danger",
+      confirmLabel: t("adminInvite.detachDeleteEmby"),
+    });
+    if (!ok) return;
+    const res = await api.adminDetachInviteUserAndDeleteEmby(selected.uid).catch((err) => ({
+      success: false,
+      message: err instanceof Error ? err.message : t("adminInvite.requestFailed"),
+    }));
+    if (res.success) {
+      toast({ title: t("adminInvite.detachedAndDeletedEmby") });
+      setSelectedUid(null);
+      await reload();
+    } else {
+      toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
+    }
+  };
+
+  const toggleSelected = (uid: number, checked: boolean) => {
+    setSelectedUids((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(uid);
+      else next.delete(uid);
+      return next;
+    });
+  };
+
+  const toggleVisibleSelection = (checked: boolean) => {
+    setSelectedUids((prev) => {
+      const next = new Set(prev);
+      for (const uid of visibleUids) {
+        if (checked) next.add(uid);
+        else next.delete(uid);
+      }
+      return next;
+    });
+  };
+
+  const handleBulkDetach = async (deleteEmby: boolean) => {
+    const uids = [...selectedUids];
+    if (uids.length === 0) {
+      toast({ title: t("adminInvite.noBulkSelection"), variant: "destructive" });
+      return;
+    }
+    const ok = await confirm({
+      title: deleteEmby ? t("adminInvite.bulkDetachDeleteEmbyTitle") : t("adminInvite.bulkDetachTitle"),
+      description: deleteEmby ? t("adminInvite.bulkDetachDeleteEmbyDescription", { count: uids.length }) : t("adminInvite.bulkDetachDescription", { count: uids.length }),
+      tone: deleteEmby ? "danger" : "warning",
+      confirmLabel: deleteEmby ? t("adminInvite.detachDeleteEmby") : t("adminInvite.detach"),
+    });
+    if (!ok) return;
+    const res = await api.adminBatchDetachInviteUsers(uids, { deleteEmby }).catch((err) => ({
+      success: false,
+      message: err instanceof Error ? err.message : t("adminInvite.requestFailed"),
+      data: null,
+    }));
+    if (res.success && res.data) {
+      toast({
+        title: t("adminInvite.bulkComplete"),
+        description: t("adminInvite.bulkResult", { success: res.data.success, failed: res.data.failed, deleted: res.data.deleted_emby || 0 }),
+        variant: res.data.failed > 0 ? "default" : "success",
+      });
+      setSelectedUids(new Set());
       await reload();
     } else {
       toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
@@ -360,6 +449,35 @@ export default function AdminInviteTreePage() {
         </CardContent>
       </Card>
 
+      {selectedCount > 0 && (
+        <Card className="border-primary/30 bg-primary/5">
+          <CardContent className="flex flex-col gap-3 p-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+              <CheckSquare2 className="h-4 w-4 text-primary" />
+              <span>{t("adminInvite.selectedCount", { count: selectedCount })}</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={() => toggleVisibleSelection(true)} disabled={allVisibleSelected || visibleUids.length === 0}>
+                <CheckSquare2 className="mr-2 h-4 w-4" />
+                {t("adminInvite.selectVisible")}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setSelectedUids(new Set())}>
+                <Square className="mr-2 h-4 w-4" />
+                {t("adminInvite.clearSelection")}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => void handleBulkDetach(false)}>
+                <Ban className="mr-2 h-4 w-4" />
+                {t("adminInvite.bulkDetach")}
+              </Button>
+              <Button variant="destructive" size="sm" onClick={() => void handleBulkDetach(true)}>
+                <Trash2 className="mr-2 h-4 w-4" />
+                {t("adminInvite.bulkDetachDeleteEmby")}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {error ? (
         <Card className="border-destructive/40">
           <CardContent className="flex items-center gap-2 p-4 text-sm text-destructive">
@@ -386,6 +504,13 @@ export default function AdminInviteTreePage() {
               <table className="w-full min-w-[920px] text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
+                    <th className="w-12 px-4 py-3 text-left font-medium">
+                      <Checkbox
+                        checked={allVisibleSelected ? true : someVisibleSelected ? "indeterminate" : false}
+                        onCheckedChange={(checked) => toggleVisibleSelection(checked === true)}
+                        aria-label={t("adminInvite.selectVisible")}
+                      />
+                    </th>
                     <th className="px-4 py-3 text-left font-medium">{t("adminInvite.user")}</th>
                     <th className="px-4 py-3 text-left font-medium">{t("adminInvite.role")}</th>
                     <th className="px-4 py-3 text-left font-medium">{t("adminInvite.status")}</th>
@@ -408,6 +533,13 @@ export default function AdminInviteTreePage() {
                           setSelectedUid(node.uid);
                         }}
                       >
+                        <td className="px-4 py-3">
+                          <Checkbox
+                            checked={selectedUids.has(node.uid)}
+                            onCheckedChange={(checked) => toggleSelected(node.uid, checked === true)}
+                            aria-label={t("adminInvite.selectUser", { username: node.username })}
+                          />
+                        </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2" style={{ paddingLeft: depth * 18 }}>
                             {childCount > 0 ? (
@@ -493,6 +625,10 @@ export default function AdminInviteTreePage() {
                 <Button variant="outline" size="sm" onClick={() => void handleDetach()} disabled={selected.is_root}>
                   <Ban className="mr-2 h-4 w-4" />
                   {selected.is_root ? t("adminInvite.alreadyRoot") : t("adminInvite.detach")}
+                </Button>
+                <Button variant="destructive" size="sm" onClick={() => void handleDetachAndDeleteEmby()} disabled={selected.role === 0}>
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  {t("adminInvite.detachDeleteEmby")}
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => void handleCascadeToggle(false)}>
                   <Ban className="mr-2 h-4 w-4" />

@@ -2490,6 +2490,28 @@ class ApiClient {
     });
   }
 
+  async adminDetachInviteUserAndDeleteEmby(uid: number) {
+    return this.request<{ uid: number; detached: boolean; deleted_emby: boolean; user?: UserInfo }>(
+      `/admin/invite/users/${uid}/detach-delete-emby`,
+      { method: "POST" },
+    );
+  }
+
+  async adminBatchDetachInviteUsers(uids: number[], options: { deleteEmby?: boolean } = {}) {
+    return this.request<{
+      total: number;
+      success: number;
+      failed: number;
+      detached: number;
+      delete_emby: boolean;
+      deleted_emby: number;
+      errors: Array<{ uid: number; error: string; code?: string }>;
+    }>("/admin/invite/users/detach-batch", {
+      method: "POST",
+      body: JSON.stringify({ uids, delete_emby: Boolean(options.deleteEmby) }),
+    });
+  }
+
   /**
    * 邀请树级联的禁用/启用。
    * cascadeDepth：1=仅本人；N=本人+下 N-1 层；0=整棵子树。
@@ -2623,10 +2645,21 @@ class ApiClient {
     return this.request<{ tickets: Ticket[]; total: number; ticket_types: string[] }>(`/admin/tickets?${query.toString()}`);
   }
 
+  async adminGetTicket(id: number) {
+    return this.request<{ ticket: Ticket; ticket_types: string[] }>(`/admin/tickets/${id}`);
+  }
+
   async adminUpdateTicket(id: number, payload: { status?: string; priority?: string; type?: string; admin_note?: string }) {
     return this.request<Ticket>(`/admin/tickets/${id}`, {
       method: "PUT",
       body: JSON.stringify(payload),
+    });
+  }
+
+  async adminReplyTicket(id: number, content: string) {
+    return this.request<{ ticket_id: number; ticket: Ticket; replies: Ticket["replies"] }>(`/admin/tickets/${id}/reply`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
     });
   }
 

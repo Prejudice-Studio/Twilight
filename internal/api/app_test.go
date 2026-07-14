@@ -5590,6 +5590,53 @@ func TestAdminCanDetachInviteRelationWhenInviteDisabled(t *testing.T) {
 	}
 }
 
+func TestAdminBatchDetachInviteRelation(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().InviteEnabled = false
+	admin := registerAndLogin(t, app, "admin", "Admin123456")
+	parent, err := app.store().CreateUser(store.User{Username: "batch-detach-parent", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := app.store().CreateUser(store.User{Username: "batch-detach-child", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store().UpsertInviteCode(store.InviteCode{Code: "INV-BATCH-DETACH", UID: parent.UID, InviterUID: parent.UID, Days: 30, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.store().ConsumeInviteCode("INV-BATCH-DETACH", child.UID); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := doJSON(app, http.MethodPost, "/api/v1/admin/invite/users/detach-batch", fmt.Sprintf(`{"uids":[%d],"delete_emby":false}`, child.UID), admin)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("batch detach status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Data struct {
+			Success int `json:"success"`
+			Failed  int `json:"failed"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode batch detach: %v body=%s", err, rr.Body.String())
+	}
+	if resp.Data.Success != 1 || resp.Data.Failed != 0 {
+		t.Fatalf("unexpected batch result: %#v body=%s", resp.Data, rr.Body.String())
+	}
+	if _, ok := app.store().ParentOf(child.UID); ok {
+		t.Fatal("child still has invite parent after batch detach")
+	}
+	invite, ok := app.store().InviteCode("INV-BATCH-DETACH")
+	if !ok {
+		t.Fatal("invite code should remain")
+	}
+	if invite.UsedByUID != 0 || invite.Used || invite.UseCount != 0 || !invite.Active {
+		t.Fatalf("invite usage should be rolled back after batch detach: %#v", invite)
+	}
+}
+
 func TestPublicRegcodeCheckHidesTargetedCodes(t *testing.T) {
 	app := newTestApp(t)
 	if err := app.store().UpsertRegCode(store.RegCode{Code: "TARGET-SECRET", Type: 2, Days: 5, ValidityTime: -1, UseCountLimit: 1, Active: true, TargetUsername: "alpha"}); err != nil {

@@ -485,6 +485,50 @@ func TestAdminTicketsAllFilterIncludesResolvedAndClosed(t *testing.T) {
 	}
 }
 
+func TestAdminTicketDetailAndReplyEndpoint(t *testing.T) {
+	app := newTestApp(t)
+	enableTicketSystem(t, app, nil)
+	admin := registerAndLogin(t, app, "admin", "Admin123456")
+	user := registerAndLogin(t, app, "ticket-owner", "Owner123456")
+	id := createTicket(t, app, "chat ticket", "initial content", user)
+	path := "/api/v1/admin/tickets/" + strconv.FormatInt(id, 10)
+
+	detail := doJSON(app, http.MethodGet, path, ``, admin)
+	if detail.Code != http.StatusOK {
+		t.Fatalf("admin ticket detail status=%d body=%s", detail.Code, detail.Body.String())
+	}
+	var detailResp struct {
+		Data struct {
+			Ticket struct {
+				ID      int64  `json:"id"`
+				Content string `json:"content"`
+			} `json:"ticket"`
+			Types []string `json:"ticket_types"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(detail.Body.Bytes(), &detailResp); err != nil {
+		t.Fatalf("decode admin detail: %v body=%s", err, detail.Body.String())
+	}
+	if detailResp.Data.Ticket.ID != id || detailResp.Data.Ticket.Content != "initial content" || len(detailResp.Data.Types) == 0 {
+		t.Fatalf("unexpected admin ticket detail: %#v", detailResp.Data)
+	}
+
+	reply := doJSON(app, http.MethodPost, path+"/reply", `{"content":"admin chat reply"}`, admin)
+	if reply.Code != http.StatusOK {
+		t.Fatalf("admin reply endpoint status=%d body=%s", reply.Code, reply.Body.String())
+	}
+	ticket, found := app.store().Ticket(id)
+	if !found {
+		t.Fatal("ticket not found after admin reply")
+	}
+	if ticket.AdminNote != "admin chat reply" {
+		t.Fatalf("expected admin_note to track latest reply, got %q", ticket.AdminNote)
+	}
+	if len(ticket.Replies) != 1 || ticket.Replies[0].Content != "admin chat reply" || ticket.Replies[0].Role != store.RoleAdmin {
+		t.Fatalf("unexpected replies after admin reply endpoint: %#v", ticket.Replies)
+	}
+}
+
 func TestTicketAdminNotificationTargetsSkipActor(t *testing.T) {
 	app := newTestApp(t)
 	actor, err := app.store().CreateUser(store.User{Username: "actor-admin", Role: store.RoleAdmin, Active: true, NotifyOnTicketTelegram: true, TelegramID: 1001})

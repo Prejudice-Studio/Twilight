@@ -1200,11 +1200,11 @@ curl -X POST "http://localhost:5000/api/v1/admin/regcodes" \
 
 用户接口：`GET /tickets`、`POST /tickets`、`POST /tickets/{ticket_id}/reply`、`POST /tickets/{ticket_id}/close`、`POST /tickets/{ticket_id}/reopen`、`PUT /tickets/{ticket_id}/notify-telegram`、`POST|DELETE /tickets/{ticket_id}/images`。
 
-管理员接口：`GET /admin/tickets`、`PUT /admin/tickets/{ticket_id}`、`DELETE /admin/tickets/{ticket_id}`、`GET|POST|PUT|DELETE /admin/ticket-types`。
+管理员接口：`GET /admin/tickets`、`GET /admin/tickets/{ticket_id}`、`PUT /admin/tickets/{ticket_id}`、`POST /admin/tickets/{ticket_id}/reply`、`DELETE /admin/tickets/{ticket_id}`、`GET|POST|PUT|DELETE /admin/ticket-types`。
 
 `GET /admin/tickets` 默认只返回待处理 / 处理中工单，便于管理端聚焦当前队列；传 `all=1` 或 `status=all` 时返回全部状态，传具体 `status` 时按该状态过滤。
 
-工单对象返回 `replies` 双方回复时间线，回复项包含 `uid`、`username`、`role`、`author`、`content`、`created_at`。`admin_note` 仅表示最新管理员摘要，用于旧客户端兼容；管理员更新 `admin_note` 时后端会追加一条管理员回复，并与状态/优先级/类型更新在同一次 store mutation 中完成。状态、优先级、类型归一和关闭/解决时间戳由 store 层统一维护。用户回复已解决但未关闭的工单会重新进入待处理状态；已关闭工单拒绝普通用户继续回复或修改附件，管理员仍可追加排查回复并维护附件。创建工单的用户/全局打开工单限额在 store 层与插入同锁检查，避免并发请求绕过限额。
+工单对象返回 `replies` 双方回复时间线，回复项包含 `uid`、`username`、`role`、`author`、`content`、`created_at`。`admin_note` 仅表示最新管理员摘要，用于旧客户端兼容；管理员更新 `admin_note` 时后端会追加一条管理员回复，并与状态/优先级/类型更新在同一次 store mutation 中完成。`GET /admin/tickets/{ticket_id}` 返回单个工单和类型列表，供管理端会话式处理页使用；`POST /admin/tickets/{ticket_id}/reply` 只追加管理员文字回复，不要求同时提交状态、优先级或类型。状态、优先级、类型归一和关闭/解决时间戳由 store 层统一维护。用户回复已解决但未关闭的工单会重新进入待处理状态；已关闭工单拒绝普通用户继续回复或修改附件，管理员仍可追加排查回复并维护附件。创建工单的用户/全局打开工单限额在 store 层与插入同锁检查，避免并发请求绕过限额。
 
 ### 9.5 白名单与统计
 
@@ -1262,6 +1262,10 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/cleanup-invalid" \
 `GET /admin/invite/tree` — 查看邀请树。
 
 `POST /admin/invite/users/{uid}/detach` — 将指定用户从邀请树脱离。
+
+`POST /admin/invite/users/{uid}/detach-delete-emby` — 将指定用户从邀请树脱离，并删除其远端 Emby 账号；管理员账号受保护。
+
+`POST /admin/invite/users/detach-batch` — 批量断开邀请关系。请求体为 `{"uids":[1,2,3],"delete_emby":false}`；当 `delete_emby=true` 时同时删除远端 Emby 账号并清空本地 Emby 绑定字段。响应遵循批量操作格式：`total`、`success`、`failed`、`errors`，并返回 `deleted_emby` 计数。
 
 `GET /admin/invite/codes` — 列出全部邀请码。
 

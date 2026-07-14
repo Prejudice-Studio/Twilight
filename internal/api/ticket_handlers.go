@@ -218,6 +218,17 @@ func (a *App) handleAdminTickets(w http.ResponseWriter, r *http.Request, _ Param
 	ok(w, "OK", map[string]any{"tickets": ticketDTOs(tickets), "total": len(tickets), "ticket_types": a.store().TicketTypes()})
 }
 
+// handleAdminTicket 返回单个工单及完整对话。管理端接口不受 TicketSystemEnabled 开关限制。
+func (a *App) handleAdminTicket(w http.ResponseWriter, r *http.Request, params Params) {
+	id, _ := int64Param(params, "ticket_id")
+	ticket, found := a.store().Ticket(id)
+	if !found {
+		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
+		return
+	}
+	ok(w, "OK", map[string]any{"ticket": ticketDTO(ticket), "ticket_types": a.store().TicketTypes()})
+}
+
 // handleAdminUpdateTicket 管理员更新工单状态 / 回复。管理端接口不受 TicketSystemEnabled 开关限制。
 func (a *App) handleAdminUpdateTicket(w http.ResponseWriter, r *http.Request, params Params) {
 	id, _ := int64Param(params, "ticket_id")
@@ -281,6 +292,49 @@ func (a *App) handleAdminUpdateTicket(w http.ResponseWriter, r *http.Request, pa
 	a.notifyTicketAdmins(r.Context(), "updated", ticket, current(r).User)
 
 	ok(w, "工单已更新", ticketDTO(ticket))
+}
+
+// handleAdminReplyTicket 追加管理员文字回复，不要求提交状态 / 类型 / 优先级表单。
+func (a *App) handleAdminReplyTicket(w http.ResponseWriter, r *http.Request, params Params) {
+	id, _ := int64Param(params, "ticket_id")
+	existing, foundTicket := a.store().Ticket(id)
+	if !foundTicket {
+		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
+		return
+	}
+	payload := decodeMap(r)
+	content := strings.TrimSpace(stringValue(payload, "content"))
+	if content == "" {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "回复内容不能为空")
+		return
+	}
+	if len(content) > 5000 {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "回复内容过长（上限 5000 字符）")
+		return
+	}
+	p := current(r)
+	adminNote := content
+	reply := store.TicketReply{
+		UID:      p.User.UID,
+		Username: p.User.Username,
+		Role:     p.User.Role,
+		Content:  content,
+	}
+	ticket, err := a.store().UpdateTicket(id, store.TicketUpdate{
+		AdminNote: &adminNote,
+		Reply:     &reply,
+	})
+	if statusFromError(w, err) {
+		return
+	}
+	a.audit(r, "reply_ticket", "admin", ticket.UID, map[string]any{"ticket_id": id, "reply_len": len(content)})
+	a.notifyTicketOwner(r.Context(), ticket, existing)
+	a.notifyTicketAdmins(r.Context(), "updated", ticket, p.User)
+	ok(w, "回复成功", map[string]any{
+		"ticket_id": id,
+		"ticket":    ticketDTO(ticket),
+		"replies":   ticketReplyDTOs(ticket.Replies),
+	})
 }
 
 // handleAdminDeleteTicket 管理员删除工单。管理端接口不受 TicketSystemEnabled 开关限制。

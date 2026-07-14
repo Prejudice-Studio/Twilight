@@ -243,6 +243,8 @@ func (a *App) registerAdminRoutes() {
 	a.add(http.MethodPost, "/api/v1/admin/users/kick-no-emby", AuthAdmin, a.handleAdminKickNoEmby)
 	a.add(http.MethodGet, "/api/v1/admin/invite/tree", AuthAdmin, a.handleInviteTree)
 	a.add(http.MethodPost, "/api/v1/admin/invite/users/:uid/detach", AuthAdmin, a.handleInviteDetach)
+	a.add(http.MethodPost, "/api/v1/admin/invite/users/:uid/detach-delete-emby", AuthAdmin, a.handleAdminInviteDetachDeleteEmby)
+	a.add(http.MethodPost, "/api/v1/admin/invite/users/detach-batch", AuthAdmin, a.handleAdminInviteDetachBatch)
 	a.add(http.MethodGet, "/api/v1/admin/invite/codes", AuthAdmin, a.handleAdminInviteCodes)
 	a.add(http.MethodGet, "/api/v1/admin/violations", AuthAdmin, a.handleListViolations)
 	a.add(http.MethodDelete, "/api/v1/admin/violations/:violation_id", AuthAdmin, a.handleDeleteViolation)
@@ -270,7 +272,9 @@ func (a *App) registerAdminRoutes() {
 
 	// 工单管理
 	a.add(http.MethodGet, "/api/v1/admin/tickets", AuthAdmin, a.handleAdminTickets)
+	a.add(http.MethodGet, "/api/v1/admin/tickets/:ticket_id", AuthAdmin, a.handleAdminTicket)
 	a.add(http.MethodPut, "/api/v1/admin/tickets/:ticket_id", AuthAdmin, a.handleAdminUpdateTicket)
+	a.add(http.MethodPost, "/api/v1/admin/tickets/:ticket_id/reply", AuthAdmin, a.handleAdminReplyTicket)
 	a.add(http.MethodDelete, "/api/v1/admin/tickets/:ticket_id", AuthAdmin, a.handleAdminDeleteTicket)
 	a.add(http.MethodGet, "/api/v1/admin/ticket-types", AuthAdmin, a.handleAdminTicketTypes)
 	a.add(http.MethodPost, "/api/v1/admin/ticket-types", AuthAdmin, a.handleAdminAddTicketType)

@@ -85,6 +85,8 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 | ------ | ---- | ---- | ---- |
 | `GET` | `/admin/invite/tree` | AuthAdmin | 返回整片森林：`nodes`（节点）+ `edges`（边）+ `roots`（树根 UID 列表）+ `max_depth`（全局最大深度）+ `config`（当前配置）。 |
 | `POST` | `/admin/invite/users/:uid/detach` | AuthAdmin | 把指定用户从上级断开（删除其作为 `child` 的边，自身晋升新树根）。返回 `changed` 表示原本是否有上级。 |
+| `POST` | `/admin/invite/users/:uid/detach-delete-emby` | AuthAdmin | 把指定用户从上级断开，并删除其远端 Emby 账号、清空本地 Emby 绑定字段。管理员账号受保护。 |
+| `POST` | `/admin/invite/users/detach-batch` | AuthAdmin | 批量断开邀请关系；请求体 `uids` 为目标 UID 列表，`delete_emby=true` 时同时删除远端 Emby 账号。返回 `total/success/failed/errors/deleted_emby`。 |
 | `GET` | `/admin/invite/codes` | AuthAdmin | 列出全部邀请码（可按邀请人在前端过滤）。 |
 | `POST` | `/admin/users/:uid/delete` | AuthAdmin | 删除用户，支持 JSON body 的 `mode` 与 `cascade_depth`（见下，推荐）。 |
 | `DELETE` | `/admin/users/:uid` | AuthAdmin | 删除用户兼容入口，保留简单删除和旧客户端调用。 |
