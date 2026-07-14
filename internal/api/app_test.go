@@ -2484,6 +2484,72 @@ func TestRegisterConsumesConfirmedTelegramBindCode(t *testing.T) {
 	}
 }
 
+func TestTelegramUserBindWritesAuditLog(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().AuditLogEnabled = true
+	user, err := app.store().CreateUser(store.User{Username: "tg-audit", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	if err := app.upsertBindCode(store.BindCode{Code: "AUDITBIND1", Scene: "user", UID: user.UID, CreatedAt: now, ExpiresAt: now + 300}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := app.confirmBindCodeAtomic("AUDITBIND1", 919191, "audit_user", now); err != nil {
+		t.Fatal(err)
+	}
+	logs := app.store().ListAuditLogs()
+	if len(logs) == 0 || logs[0].Action != "bind_telegram_via_telegram" || logs[0].Source != "telegram" || logs[0].TargetUID != user.UID {
+		t.Fatalf("telegram bind audit log missing: %#v", logs)
+	}
+}
+
+func TestClearAuditLogsDoesNotRecreateAuditEntry(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().AuditLogEnabled = true
+	admin, err := app.store().CreateUser(store.User{Username: "audit-admin", Role: store.RoleAdmin, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.auditEntryIP("telegram", admin.UID, admin.Username, "sample_action", "admin", 0, nil)
+	if count := app.store().AuditLogCount(); count != 1 {
+		t.Fatalf("expected seed audit log, got %d", count)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/audit-logs/clear", strings.NewReader(`{"confirm":"`+confirmClearAuditLogs+`"}`))
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, principal{User: admin}))
+	rr := httptest.NewRecorder()
+	app.handleClearAuditLogs(rr, req, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("clear audit status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if count := app.store().AuditLogCount(); count != 0 {
+		t.Fatalf("clear audit recreated an audit entry, count=%d logs=%#v", count, app.store().ListAuditLogs())
+	}
+}
+
+func TestTelegramInlinePanelActionWritesAuditLog(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().AuditLogEnabled = true
+	admin, err := app.store().CreateUser(store.User{Username: "panel-admin", Role: store.RoleAdmin, Active: true, TelegramID: 70001})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := app.store().CreateUser(store.User{Username: "panel-target", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	panel := telegramPanelContext{Token: "panel-audit", ChatID: -100123, MessageID: 55, TargetUID: target.UID, ExpiresAt: time.Now().Add(time.Minute).Unix()}
+	app.telegramApplyPanelAction(context.Background(), panel, "disable", admin.TelegramID)
+	updated, _ := app.store().User(target.UID)
+	if updated.Active {
+		t.Fatal("inline panel disable did not update target")
+	}
+	logs := app.store().ListAuditLogs()
+	if len(logs) == 0 || logs[0].Action != "telegram_panel_disable_user" || logs[0].Source != "telegram" || logs[0].UID != admin.UID || logs[0].TargetUID != target.UID {
+		t.Fatalf("inline panel audit log missing: %#v", logs)
+	}
+}
+
 func TestRegisterWithTelegramBindCodeAllowsBootstrapAdminUIDOnlyConfig(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().TelegramMode = true
@@ -3436,7 +3502,7 @@ func TestTelegramPanelEmbyDeleteRequiresConfirmAndClearsLocalBinding(t *testing.
 	app.telegramSavePanel(panel)
 	defer app.telegramDeletePanel(panel.Token)
 
-	app.telegramApplyPanelAction(context.Background(), panel, "emby_delete_confirm")
+	app.telegramApplyPanelAction(context.Background(), panel, "emby_delete_confirm", 0)
 	if deleteCount != 0 {
 		t.Fatalf("Emby was deleted without confirmation")
 	}
@@ -3447,7 +3513,7 @@ func TestTelegramPanelEmbyDeleteRequiresConfirmAndClearsLocalBinding(t *testing.
 
 	panel.ConfirmAction = "emby_delete"
 	panel = app.telegramTouchPanel(panel)
-	app.telegramApplyPanelAction(context.Background(), panel, "emby_delete_confirm")
+	app.telegramApplyPanelAction(context.Background(), panel, "emby_delete_confirm", 0)
 	if deleteCount != 1 {
 		t.Fatalf("expected one Emby delete request, got %d", deleteCount)
 	}
@@ -5968,7 +6034,7 @@ func TestTelegramGrantRegisterActionSetsPendingEntitlement(t *testing.T) {
 	}
 	panel := telegramPanelContext{Token: "grant", TargetUID: target.UID, ExpiresAt: time.Now().Add(time.Minute).Unix()}
 	app.telegramSavePanel(panel)
-	app.telegramApplyPanelAction(context.Background(), panel, "grant_register")
+	app.telegramApplyPanelAction(context.Background(), panel, "grant_register", 0)
 	updated, _ := app.store().User(target.UID)
 	if !updated.PendingEmby || updated.PendingEmbyDays == nil || *updated.PendingEmbyDays != 12 || updated.Role != store.RoleNormal {
 		t.Fatalf("grant_register did not create pending entitlement: %#v days=%#v", updated, updated.PendingEmbyDays)
@@ -5980,7 +6046,7 @@ func TestTelegramGrantRegisterActionSetsPendingEntitlement(t *testing.T) {
 	}
 	adminPanel := telegramPanelContext{Token: "admin-grant", TargetUID: admin.UID, ExpiresAt: time.Now().Add(time.Minute).Unix()}
 	app.telegramSavePanel(adminPanel)
-	app.telegramApplyPanelAction(context.Background(), adminPanel, "grant_register")
+	app.telegramApplyPanelAction(context.Background(), adminPanel, "grant_register", 0)
 	protected, _ := app.store().User(admin.UID)
 	if protected.PendingEmby {
 		t.Fatal("grant_register should not mutate protected admin accounts")

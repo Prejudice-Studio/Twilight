@@ -183,6 +183,8 @@ Use this index before broad search. Line numbers drift, so search by function na
 - The store keeps a bounded audit log and prunes old entries.
 - Call it after successful state changes: create, update, delete, enable/disable, role changes, renewals, password resets, binding changes, batch operations.
 - Do not audit ordinary read-only list/get/search handlers unless the read itself is sensitive.
+- Telegram Bot and inline-panel state changes must write audit entries with `source=telegram` via `auditEntryIP` / `auditTelegramAction`, including user binding, Web/Emby enable-disable, grant, delete, and group kick/ban actions.
+- Audit-log maintenance endpoints (`delete`, `clear`, `prune`) must not append a new record into the same audit log after deleting records; otherwise users can never fully clear or reduce the log count.
 
 ## Domain Rules
 

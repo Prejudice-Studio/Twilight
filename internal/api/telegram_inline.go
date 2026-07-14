@@ -307,10 +307,10 @@ func (a *App) telegramHandleCallback(ctx context.Context, callback map[string]an
 	}
 	panel = a.telegramTouchPanel(panel)
 	_ = a.telegramAnswerCallbackQuery(ctx, callbackID, "操作处理中。", false)
-	a.telegramApplyPanelAction(ctx, panel, action)
+	a.telegramApplyPanelAction(ctx, panel, action, actorID)
 }
 
-func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelContext, action string) {
+func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelContext, action string, actorID int64) {
 	target, ok := a.store().User(panel.TargetUID)
 	if !ok {
 		a.telegramDeletePanel(panel.Token)
@@ -339,6 +339,10 @@ func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelC
 		if !enabled {
 			_, _ = a.disableRemoteEmbyForWebState(ctx, updated)
 		}
+		a.auditTelegramAction(actorID, "telegram_panel_"+action+"_user", "admin", target.UID, map[string]any{
+			"chat_id": panel.ChatID,
+			"enabled": enabled,
+		})
 		a.telegramEditPanelWithNotice(ctx, panel, updated, "用户状态已更新。")
 	case "emby_disable", "emby_enable":
 		if a.telegramProtectedTarget(target) {
@@ -366,6 +370,11 @@ func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelC
 		if enableEmby {
 			verb = "启用"
 		}
+		a.auditTelegramAction(actorID, "telegram_panel_"+action, "admin", target.UID, map[string]any{
+			"chat_id":      panel.ChatID,
+			"emby_enabled": enableEmby,
+			"emby_id":      target.EmbyID,
+		})
 		a.telegramEditPanelWithNotice(ctx, panel, target, "Emby 账号已"+verb+"。")
 	case "grant_register", "grant_register_7", "grant_register_30", "grant_register_365", "grant_register_perm":
 		if a.telegramProtectedTarget(target) {
@@ -394,6 +403,10 @@ func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelC
 			a.telegramEditPanelWithNotice(ctx, panel, target, "授予注册资格失败: "+err.Error())
 			return
 		}
+		a.auditTelegramAction(actorID, "telegram_panel_grant_register", "admin", target.UID, map[string]any{
+			"chat_id": panel.ChatID,
+			"days":    days,
+		})
 		a.telegramEditPanelWithNotice(ctx, panel, updated, "已授予 Emby 注册资格，有效天数: "+telegramGrantRegisterDaysLabel(days)+"。")
 	case "delete":
 		if a.telegramProtectedTarget(target) {
@@ -416,6 +429,10 @@ func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelC
 			a.telegramEditPanelWithNotice(ctx, panel, target, "删除用户失败: "+err.Error())
 			return
 		}
+		a.auditTelegramAction(actorID, "telegram_panel_delete_user", "admin", target.UID, map[string]any{
+			"chat_id":         panel.ChatID,
+			"target_username": target.Username,
+		})
 		a.telegramDeletePanel(panel.Token)
 		_ = a.telegramEditMessageText(ctx, panel.ChatID, panel.MessageID, fmt.Sprintf("已删除用户 %s。", target.Username), nil)
 	case "emby_delete":
@@ -452,6 +469,10 @@ func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelC
 			a.telegramEditPanelWithNotice(ctx, panel, target, "删除 Emby 账号失败: "+telegramPanelSafeError(err))
 			return
 		}
+		a.auditTelegramAction(actorID, "telegram_panel_delete_emby", "admin", target.UID, map[string]any{
+			"chat_id": panel.ChatID,
+			"emby_id": target.EmbyID,
+		})
 		a.telegramEditPanelWithNotice(ctx, panel, updated, "Emby 账号已删除，本地账号保留。")
 	case "kick", "ban":
 		if target.TelegramID == 0 {
@@ -472,6 +493,10 @@ func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelC
 			a.telegramEditPanelWithNotice(ctx, panel, target, "Telegram 群组操作失败: "+a.telegramSanitizeError(err))
 			return
 		}
+		a.auditTelegramAction(actorID, "telegram_panel_"+action+"_telegram_group", "admin", target.UID, map[string]any{
+			"chat_id":            panel.ChatID,
+			"target_telegram_id": target.TelegramID,
+		})
 		a.telegramEditPanelWithNotice(ctx, panel, target, "Telegram 群组操作已完成。")
 	default:
 		a.telegramEditPanelWithNotice(ctx, panel, target, "未知操作。")

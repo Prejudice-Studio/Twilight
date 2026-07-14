@@ -95,6 +95,20 @@ func (a *App) auditSystem(source, action string, targetUID int64, detail map[str
 	})
 }
 
+func (a *App) auditTelegramAction(telegramID int64, action, category string, targetUID int64, detail map[string]any) {
+	uid, username := a.telegramAdminIdentity(telegramID)
+	if username == "" && telegramID != 0 {
+		username = fmt.Sprintf("telegram:%d", telegramID)
+	}
+	if detail == nil {
+		detail = map[string]any{}
+	}
+	if telegramID != 0 {
+		detail["telegram_id"] = telegramID
+	}
+	a.auditEntryIP("telegram", uid, username, action, category, targetUID, detail)
+}
+
 func (a *App) writeAuditEntry(entry store.AuditLog) {
 	cfg := a.cfg()
 	if !cfg.AuditLogEnabled {
@@ -478,7 +492,6 @@ func (a *App) handleDeleteAuditLog(w http.ResponseWriter, r *http.Request, param
 		failWithCode(w, http.StatusNotFound, ErrNotFound, "日志不存在")
 		return
 	}
-	a.audit(r, "delete_audit_log", "admin", 0, map[string]any{"audit_log_id": id})
 	ok(w, "已删除", nil)
 }
 
@@ -493,8 +506,7 @@ func (a *App) handleClearAuditLogs(w http.ResponseWriter, r *http.Request, _ Par
 		failWithCode(w, http.StatusInternalServerError, ErrInternal, "清空失败")
 		return
 	}
-	a.audit(r, "clear_audit_logs", "admin", 0, map[string]any{"removed": removed})
-	ok(w, "审计日志已清空", nil)
+	ok(w, "审计日志已清空", map[string]any{"removed": removed})
 }
 
 // handlePruneAuditLogs 条件清理审计日志：支持按条数裁剪（max_entries）和按天数裁剪（retention_days），
@@ -533,14 +545,6 @@ func (a *App) handlePruneAuditLogs(w http.ResponseWriter, r *http.Request, _ Par
 	if retentionDays > 0 {
 		logs = append(logs, fmt.Sprintf("删除 %d 天前 %d 条（保留管理员=%v）", retentionDays, result.RemovedByAge, preserveAdmin))
 	}
-	a.audit(r, "prune_audit_logs", "admin", 0, map[string]any{
-		"max_entries":      maxEntries,
-		"retention_days":   retentionDays,
-		"preserve_admin":   preserveAdmin,
-		"removed_by_limit": result.RemovedByLimit,
-		"removed_by_age":   result.RemovedByAge,
-	})
-
 	ok(w, "审计日志已清理", map[string]any{
 		"current": a.store().AuditLogCount(),
 		"logs":    logs,

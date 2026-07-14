@@ -168,13 +168,17 @@ func (a *App) confirmBindCodeAtomic(code string, telegramID int64, telegramUsern
 		if err != nil {
 			return store.User{}, err
 		}
-		if strings.TrimSpace(bind.TelegramUsername) == "" {
-			return updated, nil
+		if strings.TrimSpace(bind.TelegramUsername) != "" {
+			updated, err = a.store().UpdateUser(bind.UID, func(u *store.User) error {
+				u.TelegramUsername = strings.TrimSpace(bind.TelegramUsername)
+				return nil
+			})
+			if err != nil {
+				return store.User{}, err
+			}
 		}
-		return a.store().UpdateUser(bind.UID, func(u *store.User) error {
-			u.TelegramUsername = strings.TrimSpace(bind.TelegramUsername)
-			return nil
-		})
+		a.auditTelegramAction(bind.TelegramID, "bind_telegram_via_telegram", "user", updated.UID, map[string]any{"scene": bind.Scene})
+		return updated, nil
 	})
 }
 
