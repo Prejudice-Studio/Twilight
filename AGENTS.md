@@ -196,7 +196,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Bangumi watched type `2` marks the full series watched and ignores frontend `ep_status`; partial progress belongs to type `3`.
 - Emby ActivityLog sync is independent from Bangumi webhook playback records. Pair `playback.start` / `playback.stop` by user and item when possible; do not fabricate duration for unmatched events.
 - When syncing Emby ActivityLog playback events, persist paired playback results into `store.PlaybackRecords` with the existing idempotent `(uid, item_id, played_at)` behavior. Playback stats UI/API/export routes have been removed; keep ActivityLog storage because Bangumi sync and audit/history still use the records.
-- Media request statuses, aliases, active-queue checks, admin/user status labels, filters, and status updates belong in `internal/store/media_request.go`. Handlers must call store helpers such as `NormalizeMediaRequestStatus`, `MediaRequestStatusMatches`, and `UpdateMediaRequestStatus` instead of mutating status fields with ad hoc closures.
+- Media request statuses, aliases, active-queue checks, admin/user status labels, filters, creation quota checks, duplicate-active checks, and status updates belong in `internal/store/media_request.go` / store helpers. Handlers must call helpers such as `CreateMediaRequestWithOptions`, `NormalizeMediaRequestStatus`, `MediaRequestStatusMatches`, and `UpdateMediaRequestStatus` instead of mutating status fields or doing handler-side count-then-insert flows.
 
 ## User Filters And Batch Consistency
 

@@ -262,6 +262,9 @@ func TestMediaRequestStatusHelpers(t *testing.T) {
 	if IsActiveMediaRequestStatus(MediaRequestStatusCompleted) {
 		t.Fatal("completed request should not be active")
 	}
+	if got := MediaRequestStatusText(MediaRequestStatusAccepted); got != "已接受" {
+		t.Fatalf("MediaRequestStatusText accepted=%q", got)
+	}
 }
 
 func TestUpdateMediaRequestStatusNoteModes(t *testing.T) {
@@ -307,6 +310,58 @@ func TestCreateMediaRequestRejectsInvalidStatus(t *testing.T) {
 	}
 	if req.Status != MediaRequestStatusUnhandled {
 		t.Fatalf("empty create status should default to unhandled, got %q", req.Status)
+	}
+}
+
+func TestCreateMediaRequestEnforcesUserActiveLimitAtomically(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	const attempts = 20
+	var wg sync.WaitGroup
+	errs := make(chan error, attempts)
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, err := st.CreateMediaRequestWithOptions(MediaRequest{
+				UID:       42,
+				Title:     "Movie",
+				Source:    "tmdb",
+				MediaID:   int64(1000 + i),
+				MediaType: "movie",
+			}, MediaRequestCreateOptions{UserActiveLimit: 1})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+
+	success := 0
+	limited := 0
+	for err := range errs {
+		switch {
+		case err == nil:
+			success++
+		case errors.Is(err, ErrMediaRequestUserActiveLimit):
+			limited++
+		default:
+			t.Fatalf("unexpected create error: %v", err)
+		}
+	}
+	if success != 1 || limited != attempts-1 {
+		t.Fatalf("expected 1 success and %d limited, got success=%d limited=%d", attempts-1, success, limited)
+	}
+	if got := st.ActiveMediaRequestCount(42); got != 1 {
+		t.Fatalf("active request count=%d want 1", got)
+	}
+}
+
+func TestCreateMediaRequestEnforcesGlobalActiveLimit(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	if _, err := st.CreateMediaRequestWithOptions(MediaRequest{UID: 1, Title: "One", Source: "tmdb", MediaID: 1, MediaType: "movie"}, MediaRequestCreateOptions{GlobalActiveLimit: 1}); err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+	if _, err := st.CreateMediaRequestWithOptions(MediaRequest{UID: 2, Title: "Two", Source: "tmdb", MediaID: 2, MediaType: "movie"}, MediaRequestCreateOptions{GlobalActiveLimit: 1}); !errors.Is(err, ErrMediaRequestGlobalActiveLimit) {
+		t.Fatalf("expected global active limit, got %v", err)
 	}
 }
 

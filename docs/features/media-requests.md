@@ -14,7 +14,13 @@
 | `COMPLETED` | `completed`, `complete`, `done` | 已完成 |
 | `REJECTED` | `rejected`, `reject` | 已拒绝 |
 
-活跃队列只包含 `UNHANDLED`、`ACCEPTED`、`DOWNLOADING`。用户并发上限和全站并发上限都必须使用同一套活跃状态判断。
+活跃队列只包含 `UNHANDLED`、`ACCEPTED`、`DOWNLOADING`。用户并发上限、全站并发上限、重复活跃求片检查都必须使用同一套活跃状态判断。
+
+## 创建语义
+
+创建求片必须通过 `store.CreateMediaRequestWithOptions` 完成。用户活跃求片上限、全站活跃求片上限、同源同季活跃求片去重和插入必须在 store 的同一把写锁内完成，避免多个并发请求同时通过 handler 预检后超额写入。
+
+管理员创建求片时仍不受全站活跃队列上限约束，便于在普通用户队列占满时处理紧急情况；该豁免只影响全站上限，不绕过重复活跃求片检查。
 
 ## 更新语义
 

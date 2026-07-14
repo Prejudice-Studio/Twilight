@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -100,22 +101,13 @@ func (a *App) handleCreateMediaRequest(w http.ResponseWriter, r *http.Request, _
 		failWithCode(w, http.StatusBadRequest, ErrMediaRequestTGRequired, "请先在个人设置中绑定 Telegram 账号后再进行求片")
 		return
 	}
-	if a.cfg().MaxConcurrentRequestsPerUser > 0 && a.store().ActiveMediaRequestCount(p.User.UID) >= a.cfg().MaxConcurrentRequestsPerUser {
-		failWithCode(w, http.StatusTooManyRequests, ErrMediaRequestPendingLimit, "pending media request limit reached")
-		return
-	}
-	// 全局并发上限：admin 不计入限制，避免管理员被普通用户的求片队列卡死无法
-	// 处理紧急情况。配置为 -1 或 0 视为不限。
-	if globalLimit := a.cfg().MaxConcurrentRequestsGlobal; globalLimit > 0 && p.User.Role != store.RoleAdmin {
-		if a.store().ActiveMediaRequestCountTotal() >= globalLimit {
-			failWithCode(w, http.StatusTooManyRequests, ErrMediaRequestGlobalLimit, fmt.Sprintf("全站求片队列已达上限 %d，请稍后再试", globalLimit))
-			return
-		}
-	}
+
 	payload := decodeMap(r)
 	title := firstNonEmpty(stringValue(payload, "title"), stringValue(payload, "name"), "Unknown")
 	source := normalizeSource(firstNonEmpty(stringValue(payload, "source"), "tmdb"))
 	mediaID, _ := strconv.ParseInt(firstNonEmpty(stringValue(payload, "media_id"), stringValue(payload, "tmdb_id"), stringValue(payload, "bgm_id"), "0"), 10, 64)
+	mediaType := firstNonEmpty(stringValue(payload, "media_type"), stringValue(payload, "type"), "movie")
+	season := intValue(payload, "season", 0)
 	mediaInfo := map[string]any{"title": title, "source": source}
 	for key, value := range payload {
 		mediaInfo[key] = value
@@ -125,8 +117,8 @@ func (a *App) handleCreateMediaRequest(w http.ResponseWriter, r *http.Request, _
 		inventoryPayload := cloneMap(mediaInfo)
 		inventoryPayload["source"] = source
 		inventoryPayload["media_id"] = mediaID
-		inventoryPayload["media_type"] = firstNonEmpty(stringValue(payload, "media_type"), stringValue(payload, "type"), "movie")
-		inventoryPayload["season"] = intValue(payload, "season", 0)
+		inventoryPayload["media_type"] = mediaType
+		inventoryPayload["season"] = season
 		inventory := a.embyCheckInventory(r.Context(), inventoryPayload)
 		if boolish(inventory["exists"]) {
 			if strings.TrimSpace(note) == "" {
@@ -144,7 +136,38 @@ func (a *App) handleCreateMediaRequest(w http.ResponseWriter, r *http.Request, _
 	if mediaID == 0 {
 		mediaID = int64(time.Now().UnixNano())
 	}
-	req, err := a.store().CreateMediaRequest(store.MediaRequest{UID: p.User.UID, TelegramID: p.User.TelegramID, Username: p.User.Username, Title: title, OriginalTitle: stringValue(payload, "original_title"), Source: source, MediaID: mediaID, MediaType: firstNonEmpty(stringValue(payload, "media_type"), stringValue(payload, "type"), "movie"), Season: intValue(payload, "season", 0), Year: stringValue(payload, "year"), Note: note, MediaInfo: mediaInfo})
+
+	createOpts := store.MediaRequestCreateOptions{UserActiveLimit: a.cfg().MaxConcurrentRequestsPerUser}
+	// Global queue limit does not apply to admins so they can still handle urgent requests.
+	if globalLimit := a.cfg().MaxConcurrentRequestsGlobal; globalLimit > 0 && p.User.Role != store.RoleAdmin {
+		createOpts.GlobalActiveLimit = globalLimit
+	}
+	req, err := a.store().CreateMediaRequestWithOptions(store.MediaRequest{
+		UID:           p.User.UID,
+		TelegramID:    p.User.TelegramID,
+		Username:      p.User.Username,
+		Title:         title,
+		OriginalTitle: stringValue(payload, "original_title"),
+		Source:        source,
+		MediaID:       mediaID,
+		MediaType:     mediaType,
+		Season:        season,
+		Year:          stringValue(payload, "year"),
+		Note:          note,
+		MediaInfo:     mediaInfo,
+	}, createOpts)
+	if errors.Is(err, store.ErrMediaRequestUserActiveLimit) {
+		failWithCode(w, http.StatusTooManyRequests, ErrMediaRequestPendingLimit, "pending media request limit reached")
+		return
+	}
+	if errors.Is(err, store.ErrMediaRequestGlobalActiveLimit) {
+		failWithCode(w, http.StatusTooManyRequests, ErrMediaRequestGlobalLimit, fmt.Sprintf("全站求片队列已达上限 %d，请稍后再试", createOpts.GlobalActiveLimit))
+		return
+	}
+	if errors.Is(err, store.ErrConflict) && req.ID != 0 {
+		failWithCode(w, http.StatusBadRequest, ErrMediaRequestExists, "已有同源同季的活跃求片请求")
+		return
+	}
 	if statusFromError(w, err) {
 		return
 	}
@@ -280,8 +303,7 @@ func (a *App) handleMediaRequestByID(w http.ResponseWriter, r *http.Request, par
 	req, okReq := a.store().MediaRequest(id)
 	if okReq {
 		if !canAccessMediaRequest(current(r).User, req) {
-			// 存在但无权访问时返回与"不存在"完全相同的 404，避免顺序整数
-			// request_id 被普通用户用 403/404 差异枚举出全站求片是否存在与活跃度。
+			// Return the same 404 as a missing row to avoid request-id enumeration.
 			failWithCode(w, http.StatusNotFound, ErrMediaRequestNotFound, "request not found")
 			return
 		}
@@ -297,8 +319,7 @@ func (a *App) handleDeleteMediaRequest(w http.ResponseWriter, r *http.Request, p
 		failWithCode(w, http.StatusNotFound, ErrMediaRequestNotFound, "request not found")
 		return
 	} else if !canAccessMediaRequest(current(r).User, req) {
-		// 与 handleMediaRequestByID 同口径：存在但无权时返回 404，避免用 DELETE
-		// 探针绕过 GET 的存在性 oracle 收口。
+		// Match GET by id: existing-but-forbidden rows are hidden as 404.
 		failWithCode(w, http.StatusNotFound, ErrMediaRequestNotFound, "request not found")
 		return
 	}

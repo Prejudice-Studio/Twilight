@@ -13,6 +13,11 @@ const (
 	MediaRequestStatusDownloading = "DOWNLOADING"
 )
 
+type MediaRequestCreateOptions struct {
+	UserActiveLimit   int
+	GlobalActiveLimit int
+}
+
 func NormalizeMediaRequestStatus(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "pending", "unhandled", "pending_review":

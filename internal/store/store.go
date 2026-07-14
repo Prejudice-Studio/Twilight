@@ -2781,6 +2781,10 @@ func (s *Store) DeleteAPIKey(uid, id int64) error {
 }
 
 func (s *Store) CreateMediaRequest(r MediaRequest) (MediaRequest, error) {
+	return s.CreateMediaRequestWithOptions(r, MediaRequestCreateOptions{})
+}
+
+func (s *Store) CreateMediaRequestWithOptions(r MediaRequest, opts MediaRequestCreateOptions) (MediaRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// 冲突检查产出 existing 副本要带回给调用方（handler 用它给前端返回
@@ -2789,6 +2793,12 @@ func (s *Store) CreateMediaRequest(r MediaRequest) (MediaRequest, error) {
 	var conflict MediaRequest
 	var conflictHit bool
 	err := s.mutateAndSaveLocked(func() error {
+		if opts.UserActiveLimit > 0 && s.countActiveMediaRequestsLocked(r.UID) >= opts.UserActiveLimit {
+			return ErrMediaRequestUserActiveLimit
+		}
+		if opts.GlobalActiveLimit > 0 && s.countActiveMediaRequestsLocked(0) >= opts.GlobalActiveLimit {
+			return ErrMediaRequestGlobalActiveLimit
+		}
 		if !mediaRequestInventoryIssue(r) {
 			for _, existing := range s.state.MediaRequests {
 				if strings.EqualFold(existing.Source, r.Source) && existing.MediaID == r.MediaID && existing.Season == r.Season && isActiveMediaStatus(existing.Status) {
@@ -2847,13 +2857,7 @@ func mediaRequestInventoryIssue(r MediaRequest) bool {
 func (s *Store) ActiveMediaRequestCount(uid int64) int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	count := 0
-	for _, r := range s.state.MediaRequests {
-		if r.UID == uid && isActiveMediaStatus(r.Status) {
-			count++
-		}
-	}
-	return count
+	return s.countActiveMediaRequestsLocked(uid)
 }
 
 // ActiveMediaRequestCountTotal 统计全站正在处理（未完成 / 未拒绝）的求片数。
@@ -2864,9 +2868,13 @@ func (s *Store) ActiveMediaRequestCount(uid int64) int {
 func (s *Store) ActiveMediaRequestCountTotal() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	return s.countActiveMediaRequestsLocked(0)
+}
+
+func (s *Store) countActiveMediaRequestsLocked(uid int64) int {
 	count := 0
 	for _, r := range s.state.MediaRequests {
-		if isActiveMediaStatus(r.Status) {
+		if (uid == 0 || r.UID == uid) && isActiveMediaStatus(r.Status) {
 			count++
 		}
 	}
@@ -5204,16 +5212,18 @@ func (s *Store) ResetTelegramBotOffset() error {
 }
 
 var (
-	ErrNotFound              = errors.New("not found")
-	ErrInvalid               = errors.New("invalid")
-	ErrConflict              = errors.New("conflict")
-	ErrExpired               = errors.New("expired")
-	ErrLastAdmin             = errors.New("last admin")
-	ErrGrantLocked           = errors.New("emby grant locked")
-	ErrTicketClosed          = errors.New("ticket closed")
-	ErrTicketUserOpenLimit   = errors.New("ticket user open limit reached")
-	ErrTicketGlobalOpenLimit = errors.New("ticket global open limit reached")
-	ErrInsufficientPoints    = errors.New("insufficient points")
+	ErrNotFound                      = errors.New("not found")
+	ErrInvalid                       = errors.New("invalid")
+	ErrConflict                      = errors.New("conflict")
+	ErrExpired                       = errors.New("expired")
+	ErrLastAdmin                     = errors.New("last admin")
+	ErrGrantLocked                   = errors.New("emby grant locked")
+	ErrTicketClosed                  = errors.New("ticket closed")
+	ErrTicketUserOpenLimit           = errors.New("ticket user open limit reached")
+	ErrTicketGlobalOpenLimit         = errors.New("ticket global open limit reached")
+	ErrMediaRequestUserActiveLimit   = errors.New("media request user active limit reached")
+	ErrMediaRequestGlobalActiveLimit = errors.New("media request global active limit reached")
+	ErrInsufficientPoints            = errors.New("insufficient points")
 )
 
 func randomKey(prefix string, id, now int64) string {

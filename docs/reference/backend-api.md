@@ -811,6 +811,7 @@ curl -X GET "http://localhost:5000/api/v1/media/search/id/tmdb/12345" \
 `POST /media/request`
 
 - 认证：登录用户（`AuthUser`）
+- 说明：创建时会在 store 层同一把写锁内完成用户活跃求片上限、全站活跃求片上限、同源同季活跃求片去重和插入。命中用户上限返回 `MEDIA_REQUEST_PENDING_LIMIT`，命中全站上限返回 `MEDIA_REQUEST_GLOBAL_LIMIT`，重复活跃求片返回 `MEDIA_REQUEST_ALREADY_EXISTS`。
 - 请求体：
 
 ```json
