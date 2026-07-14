@@ -254,6 +254,7 @@ func New(cfg config.Config, st *store.Store) (*App, error) {
 	applyRuntimeMemoryLimit(cfg.RuntimeMemoryLimitMB)
 	ConfigureRuntimeLoggingStore(st, cfg.ZapLevel(), cfg.RuntimeLogLimit)
 	app.repairTelegramBindResidue("startup")
+	app.repairRegistrationResidue("startup")
 	return app, nil
 }
 
@@ -272,6 +273,26 @@ func (a *App) repairTelegramBindResidue(source string) {
 	}
 	if memoryExpired > 0 || memoryOrphaned > 0 || persistedLegacy > 0 {
 		zap.L().Info("telegram bind residue repaired", zap.String("source", source), zap.Int("memory_expired", memoryExpired), zap.Int("memory_orphaned", memoryOrphaned), zap.Int("persisted_legacy", persistedLegacy))
+	}
+}
+
+func (a *App) repairRegistrationResidue(source string) {
+	st := a.store()
+	if st == nil {
+		return
+	}
+	result, err := st.RepairRegistrationResidue()
+	if err != nil {
+		zap.L().Warn("registration residue repair failed", zap.String("source", source), zap.Error(err))
+		return
+	}
+	if result.Total() > 0 {
+		zap.L().Info("registration residue repaired",
+			zap.String("source", source),
+			zap.Int("cleared_bound_pending", result.ClearedBoundPending),
+			zap.Int("restored_grant_locks", result.RestoredGrantLocks),
+			zap.Int("restored_pending_entitlements", result.RestoredPendingEntitlement),
+		)
 	}
 }
 
@@ -446,6 +467,7 @@ func (a *App) reloadConfigLocked() (map[string]any, error) {
 	ConfigureRuntimeLoggingStore(nextState.store, next.ZapLevel(), next.RuntimeLogLimit)
 	reinitialized = append(reinitialized, "runtime_logger")
 	a.repairTelegramBindResidue("config_reload")
+	a.repairRegistrationResidue("config_reload")
 
 	restartRequired := []string{}
 	if previous.Host != next.Host || previous.Port != next.Port {

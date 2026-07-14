@@ -150,6 +150,40 @@ func TestClearEmbyGrantForUnboundUsers(t *testing.T) {
 	}
 }
 
+func TestRepairRegistrationResidueRestoresGrantAndPendingState(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	dirtyBound, err := st.CreateUser(User{Username: "dirty-bound", PasswordHash: "x", EmbyID: "emby-bound", PendingEmby: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lostGrant, err := st.CreateUser(User{Username: "lost-grant", PasswordHash: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertRegCode(RegCode{Code: "USED-REG", Type: 1, Days: 14, Active: false, UseCountLimit: 1, UseCount: 1, UsedBy: lostGrant.UID, UsedByUIDs: []int64{lostGrant.UID}}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := st.RepairRegistrationResidue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ClearedBoundPending != 1 || result.RestoredGrantLocks != 1 || result.RestoredPendingEntitlement != 1 {
+		t.Fatalf("unexpected repair result: %#v", result)
+	}
+	updatedBound, _ := st.User(dirtyBound.UID)
+	if updatedBound.PendingEmby || updatedBound.PendingEmbyDays != nil {
+		t.Fatalf("bound user pending state was not cleared: %#v", updatedBound)
+	}
+	updatedLost, _ := st.User(lostGrant.UID)
+	if !updatedLost.EmbyGrantLocked || updatedLost.RegistrationSource != "regcode" || updatedLost.RegistrationCode != "USED-REG" {
+		t.Fatalf("grant provenance was not restored: %#v", updatedLost)
+	}
+	if !updatedLost.PendingEmby || updatedLost.PendingEmbyDays == nil || *updatedLost.PendingEmbyDays != 14 {
+		t.Fatalf("pending entitlement was not restored: %#v days=%#v", updatedLost, updatedLost.PendingEmbyDays)
+	}
+}
+
 func TestDetachInviteClearsInviteCodeUsage(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	child, err := st.CreateUser(User{Username: "detach-child", PasswordHash: "x"})

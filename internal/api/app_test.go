@@ -4764,6 +4764,46 @@ func TestBindExistingEmbyConsumesPendingEntitlement(t *testing.T) {
 	}
 }
 
+func TestBindExistingEmbyDoesNotOverwriteConcurrentBinding(t *testing.T) {
+	app := newTestApp(t)
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/Users/AuthenticateByName":
+			_, _ = w.Write([]byte(`{"User":{"Id":"emby-new","Name":"new-remote","Policy":{"IsAdministrator":false}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+	app.cfg().EmbyToken = "test-token"
+
+	user, err := app.store().CreateUser(store.User{Username: "race-bind", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := user
+	if _, err := app.store().UpdateUser(user.UID, func(u *store.User) error {
+		u.EmbyID = "emby-existing"
+		u.EmbyUsername = "existing"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/emby/bind", strings.NewReader(`{"emby_username":"new-remote","emby_password":"secret"}`))
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, principal{User: stale}))
+	rr := httptest.NewRecorder()
+	app.handleBindEmby(rr, req, nil)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("stale bind should be rejected, status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	updated, _ := app.store().User(user.UID)
+	if updated.EmbyID != "emby-existing" || updated.EmbyUsername != "existing" {
+		t.Fatalf("stale bind overwrote existing binding: %#v", updated)
+	}
+}
+
 func TestDirectEmbyRegistrationRecordsRegcodeEquivalentGrant(t *testing.T) {
 	app := newTestApp(t)
 	policyPosts := 0
@@ -4808,6 +4848,60 @@ func TestDirectEmbyRegistrationRecordsRegcodeEquivalentGrant(t *testing.T) {
 	}
 	if policyPosts == 0 {
 		t.Fatal("direct register did not sync Emby policy")
+	}
+}
+
+func TestRegisterEmbyDoesNotOverwriteConcurrentBinding(t *testing.T) {
+	app := newTestApp(t)
+	var created bool
+	var deleted bool
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/Users":
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/Users/New":
+			created = true
+			_, _ = w.Write([]byte(`{"Id":"race-created","Name":"race-created"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/Users/race-created/Password":
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/Users/race-created":
+			deleted = true
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+	app.cfg().EmbyToken = "test-token"
+	app.cfg().EmbyDirectRegisterEnabled = true
+
+	user, err := app.store().CreateUser(store.User{Username: "race-register", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := user
+	if _, err := app.store().UpdateUser(user.UID, func(u *store.User) error {
+		u.EmbyID = "already-bound"
+		u.EmbyUsername = "already"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/emby/register", strings.NewReader(`{"emby_username":"race-created","emby_password":"Strong123"}`))
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, principal{User: stale}))
+	rr := httptest.NewRecorder()
+	app.handleRegisterEmby(rr, req, nil)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("stale register should be rejected, status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	updated, _ := app.store().User(user.UID)
+	if updated.EmbyID != "already-bound" || updated.EmbyUsername != "already" {
+		t.Fatalf("stale register overwrote existing binding: %#v", updated)
+	}
+	if !created || !deleted {
+		t.Fatalf("created remote account should be cleaned up on stale local bind, created=%v deleted=%v", created, deleted)
 	}
 }
 

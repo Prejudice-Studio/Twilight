@@ -124,10 +124,14 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 		}
 	}
 	updateUser := func(u *store.User, reg store.RegCode) error {
-		if grantsEmby && u.EmbyID == "" && u.EmbyGrantLocked && !p.User.PendingEmby {
+		currentReplacesPendingEntitlement := source == "regcode" && u.EmbyID == "" && u.PendingEmby && codeGrantsEmbyRegistration(source, codeType)
+		if grantsEmby && u.EmbyID != "" {
+			return store.ErrConflict
+		}
+		if grantsEmby && u.EmbyID == "" && u.EmbyGrantLocked && !u.PendingEmby {
 			return store.ErrGrantLocked
 		}
-		if replacesPendingEntitlement {
+		if currentReplacesPendingEntitlement {
 			u.PendingEmby = false
 			u.PendingEmbyDays = nil
 		}
@@ -181,6 +185,12 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 	if errors.Is(err, store.ErrGrantLocked) {
 		failWithCode(w, http.StatusBadRequest, ErrCodeRegistrationGrantAlreadyUsed, "当前账号已经使用过 Emby 注册资格，不能重复使用注册码或邀请码")
 		return
+	}
+	if errors.Is(err, store.ErrConflict) && grantsEmby {
+		if latest, ok := a.store().User(p.User.UID); ok && latest.EmbyID != "" {
+			failWithCode(w, http.StatusBadRequest, ErrCodeAlreadyEmbyBound, "当前账号已绑定 Emby，请使用续期码")
+			return
+		}
 	}
 	if statusFromError(w, err) {
 		return

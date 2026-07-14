@@ -132,7 +132,7 @@
 - `ConsumeRegCode`（`internal/store/store.go`）先 `s.mu.Lock()`，再在 `mutateAndSaveLocked` 内依次调用 `consumableRegCodeLocked` 与 `consumeRegCodeLocked`，两步在同一把锁内不可分割。注册码写入状态文档并跨重启保留。
 - `consumableRegCodeLocked` 校验：卡码存在且 `active`，否则 `ErrNotFound`；`use_count_limit != -1 && use_count >= use_count_limit` 则 `ErrConflict`（已用满）；`validity_time > 0 && created_at + validity_time*3600 <= now` 则 `ErrExpired`（已过期）。
 - `consumeRegCodeLocked` 执行：`use_count++`，记录 `used_by` / 去重写入 `used_by_uids` / `used_by_telegram_ids`；若达到次数上限则把 `active` 置为 `false`。
-- 公开注册路径先在 API 层校验并消费当前进程内存中的 Telegram 注册绑定码，再用 `CreateUserForRegistration` 把「用户名 / Telegram 唯一性查重 + 建账号 + 消费注册码（仅限 type=1、非诱饵、目标匹配）+ 写入用户级 Emby 授权锁」合并在同一把 store 写锁内一次完成。绑定码不是注册码，不写入状态文档，服务重启后失效。
+- 公开注册路径会在提交注册时通过 `bindStatusHub` 原子消费已确认的 Telegram 注册绑定码，并在同一个闭包中创建本地 Web 账号；随后 `CreateUserForRegistration` 把「用户名 / 邮箱 / Telegram 唯一性查重 + 建账号 + 消费注册码（仅限 type=1、非诱饵、目标匹配）+ 写入用户级 Emby 授权锁」合并在同一把 store 写锁内一次完成。绑定码不是注册码，不写入状态文档，服务重启后失效。
 - 登录后使用卡码的路径使用 `ConsumeRegCodeAndUpdateUser` / `ConsumeInviteCodeAndUpdateUser`，把「卡码消费 + 邀请关系创建 + 用户权益更新」合并为一次状态写入；保存失败会整体回滚，不会留下“码已消耗但用户没拿到权益”的半状态。
 
 ## 使用入口
@@ -169,7 +169,8 @@
 
 - 注册整体按 IP 限流（`rate_limit_register_per_10m`）；带注册码时再叠加一道 `register:regcode:<ip>` 限流，每分钟 10 次。
 - 注册码校验同样排除诱饵码、`type!=1`、指名目标不匹配与不可用状态。若注册卡码指定了 TG 用户名或 TG ID，注册请求必须携带已确认的 `telegram_bind_code`，后端用绑定码中的 Telegram 身份做匹配。
-- API 层先确认内存绑定码并复检 Telegram 身份唯一性；随后建账号与消费注册码经 `CreateUserForRegistration` 在同一把 store 写锁内原子完成，规避并发重复注册与同一 Telegram ID 被创建到多个账号。
+- 注册提交会再次确认内存绑定码仍处于 `register` 场景、已确认且未过期，并在绑定码 hub 的消费流程内创建账号；创建成功后绑定码立即删除，创建失败则保留绑定码以便用户修正用户名、邮箱或注册码后重试。
+- 启动和配置热重载会自适应修复历史残留：已绑定 Emby 但仍带 `PendingEmby` 的用户会清掉待开通状态；已记录注册码/邀请码使用但用户侧缺失 `emby_grant_locked`、来源或待开通资格的账号，会从既有使用记录恢复这些字段，不会额外消费新卡码或重建邀请关系。
 
 ## 管理接口（鉴权：AuthAdmin）
 

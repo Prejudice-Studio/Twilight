@@ -1803,7 +1803,7 @@ func (s *Store) CreateUser(u User) (User, error) {
 	defer s.mu.Unlock()
 	var created User
 	err := s.mutateAndSaveLocked(func() error {
-		if s.usernameExistsLocked(u.Username) || s.telegramIDTakenLocked(u.TelegramID, 0) {
+		if s.usernameExistsLocked(u.Username) || s.emailTakenLocked(u.Email, 0) || s.telegramIDTakenLocked(u.TelegramID, 0) {
 			return ErrConflict
 		}
 		now := time.Now().Unix()
@@ -1839,6 +1839,19 @@ func (s *Store) usernameExistsLocked(username string) bool {
 	return false
 }
 
+func (s *Store) emailTakenLocked(email string, allowedUID int64) bool {
+	target := normalizeEmailKey(email)
+	if target == "" {
+		return false
+	}
+	for _, existing := range s.state.Users {
+		if existing.UID != allowedUID && normalizeEmailKey(existing.Email) == target {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Store) telegramIDTakenLocked(telegramID, allowedUID int64) bool {
 	if telegramID == 0 {
 		return false
@@ -1864,7 +1877,7 @@ func (s *Store) CreateUserWithRegCode(u User, regCode string, telegramID int64) 
 	var created User
 	var consumed RegCode
 	err := s.mutateAndSaveLocked(func() error {
-		if s.usernameExistsLocked(u.Username) || s.telegramIDTakenLocked(u.TelegramID, 0) || s.telegramIDTakenLocked(telegramID, 0) {
+		if s.usernameExistsLocked(u.Username) || s.emailTakenLocked(u.Email, 0) || s.telegramIDTakenLocked(u.TelegramID, 0) || s.telegramIDTakenLocked(telegramID, 0) {
 			return ErrConflict
 		}
 		now := time.Now().Unix()
@@ -1906,7 +1919,7 @@ func (s *Store) CreateUserForRegistration(u User, regCode, telegramBindCode stri
 	var consumed RegCode
 	var consumedBind BindCode
 	err := s.mutateAndSaveLocked(func() error {
-		if s.usernameExistsLocked(u.Username) {
+		if s.usernameExistsLocked(u.Username) || s.emailTakenLocked(u.Email, 0) {
 			return ErrConflict
 		}
 		if now == 0 {
@@ -3086,6 +3099,118 @@ func (s *Store) RepairLegacyTelegramBindResidue() (int, error) {
 		s.rebuildTelegramIDIndex()
 	}
 	return deleted, nil
+}
+
+type RegistrationResidueRepair struct {
+	ClearedBoundPending        int
+	RestoredGrantLocks         int
+	RestoredPendingEntitlement int
+}
+
+func (r RegistrationResidueRepair) Total() int {
+	return r.ClearedBoundPending + r.RestoredGrantLocks + r.RestoredPendingEntitlement
+}
+
+// RepairRegistrationResidue fixes historical registration/Emby entitlement
+// residues left by older flows. It is intentionally conservative: it does not
+// create invite relations or consume new codes, only reconciles user-side grant
+// fields from already-recorded code usage and clears impossible bound+pending
+// states.
+func (s *Store) RepairRegistrationResidue() (RegistrationResidueRepair, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var result RegistrationResidueRepair
+	err := s.mutateAndSaveLocked(func() error {
+		result = RegistrationResidueRepair{}
+		grants := map[int64]struct {
+			source string
+			code   string
+			days   int
+		}{}
+		addGrant := func(uid int64, source, code string, days int) {
+			if uid == 0 {
+				return
+			}
+			if _, exists := grants[uid]; exists {
+				return
+			}
+			grants[uid] = struct {
+				source string
+				code   string
+				days   int
+			}{source: source, code: code, days: days}
+		}
+		for _, reg := range s.state.RegCodes {
+			if reg.IsDecoy || (reg.Type != 1 && reg.Type != 3) {
+				continue
+			}
+			days := normalizeRegistrationGrantDays(reg.Days)
+			if reg.Type == 3 {
+				days = -1
+			}
+			addGrant(reg.UsedBy, "regcode", reg.Code, days)
+			for _, uid := range reg.UsedByUIDs {
+				addGrant(uid, "regcode", reg.Code, days)
+			}
+		}
+		for _, invite := range s.state.InviteCodes {
+			days := normalizeRegistrationGrantDays(invite.Days)
+			addGrant(invite.UsedByUID, "invite", invite.Code, days)
+		}
+		for _, rel := range s.state.InviteRelations {
+			if rel.ChildUID != 0 && strings.TrimSpace(rel.Code) != "" {
+				days := 30
+				if invite, ok := s.state.InviteCodes[rel.Code]; ok {
+					days = normalizeRegistrationGrantDays(invite.Days)
+				}
+				addGrant(rel.ChildUID, "invite", rel.Code, days)
+			}
+		}
+		for uid, u := range s.state.Users {
+			changed := false
+			if strings.TrimSpace(u.EmbyID) != "" && (u.PendingEmby || u.PendingEmbyDays != nil) {
+				u.PendingEmby = false
+				u.PendingEmbyDays = nil
+				result.ClearedBoundPending++
+				changed = true
+			}
+			if grant, ok := grants[uid]; ok {
+				if !u.EmbyGrantLocked || strings.TrimSpace(u.RegistrationSource) == "" || strings.TrimSpace(u.RegistrationCode) == "" {
+					u.EmbyGrantLocked = true
+					if strings.TrimSpace(u.RegistrationSource) == "" {
+						u.RegistrationSource = grant.source
+					}
+					if strings.TrimSpace(u.RegistrationCode) == "" {
+						u.RegistrationCode = grant.code
+					}
+					result.RestoredGrantLocks++
+					changed = true
+				}
+				if strings.TrimSpace(u.EmbyID) == "" && !u.PendingEmby {
+					days := grant.days
+					u.PendingEmby = true
+					u.PendingEmbyDays = &days
+					result.RestoredPendingEntitlement++
+					changed = true
+				}
+			}
+			if changed {
+				s.state.Users[uid] = u
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return RegistrationResidueRepair{}, err
+	}
+	return result, nil
+}
+
+func normalizeRegistrationGrantDays(days int) int {
+	if days == 0 {
+		return 30
+	}
+	return days
 }
 
 func (s *Store) UpsertAnnouncement(a Announcement) (Announcement, error) {

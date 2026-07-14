@@ -348,6 +348,7 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request, _ Params) {
 	password := stringValue(payload, "password")
 	regCode := firstNonEmpty(stringValue(payload, "reg_code"), stringValue(payload, "code"))
 	telegramBindCode := strings.ToUpper(strings.TrimSpace(stringValue(payload, "telegram_bind_code")))
+	email := strings.TrimSpace(stringValue(payload, "email"))
 	if err := validate.ValidateUsername(username); err != nil {
 		failWithCode(w, http.StatusBadRequest, ErrUsernameInvalid, err.Error())
 		return
@@ -364,12 +365,11 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request, _ Params) {
 		failWithCode(w, http.StatusBadRequest, ErrPasswordWeak, err.Error())
 		return
 	}
-	if email := stringValue(payload, "email"); email != "" {
+	if email != "" {
 		if err := validate.ValidateEmailFormat(email); err != nil {
 			failWithCode(w, http.StatusBadRequest, ErrEmailInvalid, err.Error())
 			return
 		}
-		email = strings.TrimSpace(email)
 		if len(a.cfg().EmailBlacklist) > 0 && validate.CheckEmailBlacklist(email, a.cfg().EmailBlacklist) {
 			failWithCode(w, http.StatusBadRequest, ErrEmailInvalid, "该邮箱域名不在允许范围内")
 			return
@@ -444,11 +444,75 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request, _ Params) {
 	// /register 即可拿到 Admin。现在首注册者只是普通用户，除非其 UID/用户名命中
 	// 配置列表才会在创建后被提升。默认不配置列表 = 无人是管理员。
 	role := store.RoleNormal
-	newUser := store.User{Username: username, Email: stringValue(payload, "email"), PasswordHash: passwordHash, Role: role, TelegramID: telegramID, TelegramUsername: telegramUsername}
+	newUser := store.User{Username: username, Email: email, PasswordHash: passwordHash, Role: role, TelegramID: telegramID, TelegramUsername: telegramUsername}
+	now := time.Now().Unix()
+	applyRegistrationGrant := func(user *store.User, consumed store.RegCode, _ store.BindCode) error {
+		if consumed.Code != "" {
+			days := normalizeRegCodeDays(consumed.Days)
+			user.PendingEmby = true
+			user.PendingEmbyDays = &days
+			user.EmbyUsername = username
+			markRegistrationGrant(user, registrationSourceRegCode, consumed.Code)
+		}
+		return nil
+	}
+	createUser := func(base store.User) (store.User, store.RegCode, error) {
+		if registerReg.Code != "" {
+			user, consumed, _, createErr := a.store().CreateUserForRegistration(base, registerReg.Code, "", now, applyRegistrationGrant)
+			return user, consumed, createErr
+		}
+		user, createErr := a.store().CreateUser(base)
+		return user, store.RegCode{}, createErr
+	}
 	var u store.User
-	if registerReg.Code != "" {
+	if telegramBindCode != "" {
 		var consumed store.RegCode
-		u, consumed, _, err = a.store().CreateUserForRegistration(newUser, registerReg.Code, "", time.Now().Unix(), func(user *store.User, consumed store.RegCode, _ store.BindCode) error {
+		var consumedBind store.BindCode
+		u, consumed, consumedBind, err = a.consumeConfirmedRegisterBindCode(telegramBindCode, now, func(bind store.BindCode) (store.User, store.RegCode, error) {
+			base := newUser
+			base.TelegramID = bind.TelegramID
+			base.TelegramUsername = bind.TelegramUsername
+			return createUser(base)
+		})
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrExpired) {
+				if consumedBind.Code != "" {
+					failWithCode(w, http.StatusBadRequest, ErrRegcodeInvalid, "注册码无效、已用完或已过期")
+					return
+				}
+				failWithCode(w, http.StatusBadRequest, ErrTGBindCodeExpired, "绑定码无效或已过期")
+				return
+			}
+			if errors.Is(err, store.ErrConflict) {
+				if _, exists := a.store().FindUserByUsername(username); exists {
+					failWithCode(w, http.StatusConflict, ErrUsernameTaken, "用户名已被占用，请换一个用户名")
+					return
+				}
+				if newUser.Email != "" && a.store().EmailAlreadyUsed(newUser.Email) {
+					failWithCode(w, http.StatusConflict, ErrEmailConflict, "该邮箱已被其他账号使用")
+					return
+				}
+				if consumedBind.TelegramID != 0 {
+					if _, exists := a.store().FindUserByTelegramID(consumedBind.TelegramID); exists {
+						failWithCode(w, http.StatusConflict, ErrTGBindTargetTaken, "该 Telegram 已绑定到其他账号或绑定码状态已变化")
+						return
+					}
+				}
+				if registerReg.Code != "" {
+					failWithCode(w, http.StatusBadRequest, ErrRegcodeInvalid, "注册码无效、已用完或已过期")
+					return
+				}
+				failWithCode(w, http.StatusConflict, ErrTGBindTargetTaken, "该 Telegram 已绑定到其他账号或绑定码状态已变化")
+				return
+			}
+			if statusFromError(w, err) {
+				return
+			}
+		}
+		registerReg = consumed
+	} else if registerReg.Code != "" {
+		var consumed store.RegCode
+		u, consumed, _, err = a.store().CreateUserForRegistration(newUser, registerReg.Code, "", now, func(user *store.User, consumed store.RegCode, _ store.BindCode) error {
 			if consumed.Code != "" {
 				days := normalizeRegCodeDays(consumed.Days)
 				user.PendingEmby = true
@@ -481,7 +545,7 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request, _ Params) {
 		}
 		registerReg = consumed
 	} else {
-		u, err = a.store().CreateUser(newUser)
+		u, _, err = createUser(newUser)
 	}
 	if errors.Is(err, store.ErrConflict) {
 		if _, exists := a.store().FindUserByUsername(username); exists {
@@ -496,9 +560,6 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request, _ Params) {
 	if statusFromError(w, err) {
 		return
 	}
-	if telegramBindCode != "" {
-		_ = a.deleteBindCode(telegramBindCode)
-	}
 	if a.configuredAdminMatch(u.UID, u.Username) {
 		if promoted, err := a.store().UpdateUser(u.UID, func(user *store.User) error {
 			user.Role = store.RoleAdmin
@@ -509,7 +570,7 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request, _ Params) {
 			role = store.RoleAdmin
 		}
 	}
-	created(w, "注册成功", map[string]any{"user": publicUser(u), "first_admin": role == store.RoleAdmin, "reg_code_used": registerReg.Code, "email_verification_sent": sendRegistrationEmailVerification(a, r, u, stringValue(payload, "email"))})
+	created(w, "注册成功", map[string]any{"user": publicUser(u), "first_admin": role == store.RoleAdmin, "reg_code_used": registerReg.Code, "email_verification_sent": sendRegistrationEmailVerification(a, r, u, email)})
 }
 
 func sendRegistrationEmailVerification(a *App, r *http.Request, u store.User, email string) string {

@@ -120,6 +120,39 @@ func (h *bindStatusHub) cleanupExpiredBindCodes(now int64) int {
 	return deleted
 }
 
+func (h *bindStatusHub) consumeConfirmedRegisterBindCode(code string, now int64, create func(store.BindCode) (store.User, store.RegCode, error)) (store.User, store.RegCode, store.BindCode, error) {
+	code = normalizeBindStatusCode(code)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	bind, ok := h.codes[code]
+	if !ok {
+		return store.User{}, store.RegCode{}, store.BindCode{}, store.ErrNotFound
+	}
+	if now == 0 {
+		now = time.Now().Unix()
+	}
+	if bind.ExpiresAt > 0 && bind.ExpiresAt <= now {
+		delete(h.codes, code)
+		delete(h.failures, code)
+		h.notifyLocked(code)
+		return store.User{}, store.RegCode{}, store.BindCode{}, store.ErrExpired
+	}
+	if bind.Scene != "register" || !bind.Confirmed || bind.TelegramID == 0 {
+		return store.User{}, store.RegCode{}, store.BindCode{}, store.ErrConflict
+	}
+	if create == nil {
+		return store.User{}, store.RegCode{}, store.BindCode{}, store.ErrConflict
+	}
+	user, consumed, err := create(bind)
+	if err != nil {
+		return store.User{}, store.RegCode{}, bind, err
+	}
+	delete(h.codes, code)
+	delete(h.failures, code)
+	h.notifyLocked(code)
+	return user, consumed, bind, nil
+}
+
 // confirmBindCodeAtomic atomically marks a bind code as confirmed. For user-scene
 // codes (bind.UID != 0), it also calls bindUser to immediately bind the user, then
 // keeps the confirmed code in the hub for a 30‑second grace period so that status

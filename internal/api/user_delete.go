@@ -7,10 +7,10 @@ import (
 )
 
 func (a *App) deleteLocalUser(ctx context.Context, u store.User) error {
+	a.cleanupDeletedUserTelegramResidue(u)
 	if err := a.store().DeleteUser(u.UID); err != nil {
 		return err
 	}
-	a.cleanupDeletedUserTelegramResidue(u)
 	if ctx != nil {
 		a.sessions().DeleteUser(ctx, u.UID)
 	}

@@ -713,10 +713,17 @@ func (a *App) handleBindEmby(w http.ResponseWriter, r *http.Request, _ Params) {
 		}
 	}
 	u, _, err := a.store().BindUserEmbyAtomicWithUpdate(p.User.UID, embyID, firstNonEmpty(asString(embyUser["Name"]), embyUsername), false, func(u *store.User, before store.User) error {
+		if strings.TrimSpace(before.EmbyID) != "" {
+			return store.ErrConflict
+		}
 		a.consumePendingEmbyEntitlementOnBind(u, before)
 		return nil
 	})
 	if errors.Is(err, store.ErrConflict) {
+		if latest, ok := a.store().User(p.User.UID); ok && strings.TrimSpace(latest.EmbyID) != "" {
+			failWithCode(w, http.StatusBadRequest, ErrEmbyAlreadyLinked, "当前账号已关联 Emby 账号")
+			return
+		}
 		failWithCode(w, http.StatusConflict, ErrEmbyLinkedOtherUser, "该 Emby 账号已关联其他用户")
 		return
 	}
@@ -796,6 +803,9 @@ func (a *App) handleRegisterEmby(w http.ResponseWriter, r *http.Request, params 
 	}
 	embyID := asString(createdUser["Id"])
 	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error {
+		if strings.TrimSpace(u.EmbyID) != "" {
+			return store.ErrConflict
+		}
 		days := a.cfg().EmbyDirectRegisterDays
 		if u.PendingEmbyDays != nil {
 			days = *u.PendingEmbyDays
@@ -823,6 +833,11 @@ func (a *App) handleRegisterEmby(w http.ResponseWriter, r *http.Request, params 
 		}
 		return nil
 	})
+	if errors.Is(err, store.ErrConflict) {
+		_ = a.embyDelete(r.Context(), "/Users/"+urlPathEscape(embyID))
+		failWithCode(w, http.StatusBadRequest, ErrEmbyAlreadyLinked, "当前账号已关联 Emby 账号")
+		return
+	}
 	if statusFromError(w, err) {
 		_ = a.embyDelete(r.Context(), "/Users/"+urlPathEscape(embyID))
 		return

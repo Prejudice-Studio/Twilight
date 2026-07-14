@@ -147,6 +147,13 @@ func (a *App) cleanupExpiredBindCodes(now int64) int {
 	return a.bindStatus.cleanupExpiredBindCodes(now)
 }
 
+func (a *App) consumeConfirmedRegisterBindCode(code string, now int64, create func(store.BindCode) (store.User, store.RegCode, error)) (store.User, store.RegCode, store.BindCode, error) {
+	if a.bindStatus == nil {
+		return store.User{}, store.RegCode{}, store.BindCode{}, store.ErrNotFound
+	}
+	return a.bindStatus.consumeConfirmedRegisterBindCode(code, now, create)
+}
+
 func (a *App) confirmBindCodeAtomic(code string, telegramID int64, telegramUsername string, now int64) (store.BindCode, store.User, bool, error) {
 	if a.bindStatus == nil {
 		return store.BindCode{}, store.User{}, false, store.ErrNotFound
