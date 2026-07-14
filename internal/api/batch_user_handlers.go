@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -141,7 +142,7 @@ func (a *App) handleBatchDeleteUsers(w http.ResponseWriter, r *http.Request, _ P
 				}
 			}
 		}
-		addBatchOutcome(result, uid, a.store().DeleteUser(uid))
+		addBatchOutcome(result, uid, a.deleteLocalUser(context.WithoutCancel(r.Context()), target))
 	}
 	result["selected_all"] = boolValue(payload, "select_all", false)
 	a.audit(r, "batch_delete_users", "admin", 0, map[string]any{

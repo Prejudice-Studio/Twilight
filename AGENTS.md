@@ -171,6 +171,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Disabling a built-in command through `Telegram.disabled_commands` must be terminal: the Bot should tell the user the command is disabled and must not fall through to a same-name custom command.
 - Custom commands may not override built-in or fixed special commands such as `/start`, `/help`, `/twihelp`, and `/twguser`.
 - Telegram bind codes are runtime tickets held in `bindStatusHub`, not durable account bindings. Startup and config reload must run the legacy bind-code residue repair so old persisted `state.bind_codes` entries cannot make Telegram look confirmed while no `User.TelegramID` exists.
+- Any App-layer user deletion path must go through `deleteLocalUser` or perform the same cleanup: `store.DeleteUser`, session removal, and `bindStatusHub` cleanup by deleted UID / Telegram ID. Do not call `store.DeleteUser` directly from handlers, scheduler jobs, or Telegram actions.
 
 ## Audit Log Rules
 

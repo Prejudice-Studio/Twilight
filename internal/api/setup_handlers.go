@@ -106,7 +106,7 @@ func (a *App) handleSetupComplete(w http.ResponseWriter, r *http.Request, _ Para
 
 	info, saveStatus, message := a.saveInitialSetupConfigContent(renderConfigTOML(values), u.Username)
 	if saveStatus != http.StatusOK {
-		if err := a.store().DeleteUser(u.UID); err != nil {
+		if err := a.deleteLocalUser(r.Context(), u); err != nil {
 			zap.L().Error("rollback setup admin user failed", zap.Int64("uid", u.UID), zap.Error(err))
 		}
 		failWithCode(w, saveStatus, ErrInvalidPayload, message)

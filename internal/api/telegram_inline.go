@@ -412,11 +412,10 @@ func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelC
 			a.telegramEditPanelWithNotice(ctx, panel, target, "管理员账号禁止通过 Telegram 面板删除。")
 			return
 		}
-		if err := a.store().DeleteUser(target.UID); err != nil {
+		if err := a.deleteLocalUser(ctx, target); err != nil {
 			a.telegramEditPanelWithNotice(ctx, panel, target, "删除用户失败: "+err.Error())
 			return
 		}
-		a.sessions().DeleteUser(ctx, target.UID)
 		a.telegramDeletePanel(panel.Token)
 		_ = a.telegramEditMessageText(ctx, panel.ChatID, panel.MessageID, fmt.Sprintf("已删除用户 %s。", target.Username), nil)
 	case "emby_delete":

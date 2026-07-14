@@ -2588,7 +2588,7 @@ func (a *App) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request, para
 				continue
 			}
 		}
-		if err := a.store().DeleteUser(targetUID); err != nil {
+		if err := a.deleteLocalUser(context.WithoutCancel(r.Context()), target); err != nil {
 			failed = append(failed, map[string]any{"uid": targetUID, "reason": err.Error()})
 			continue
 		}

@@ -2019,6 +2019,58 @@ func TestRepairTelegramBindResidueClearsLegacyStoreAndExpiredMemoryCodes(t *test
 	}
 }
 
+func TestDeleteLocalUserClearsTelegramBindCodeResidue(t *testing.T) {
+	app := newTestApp(t)
+	now := time.Now().Unix()
+	user, err := app.store().CreateUser(store.User{Username: "tg-delete", TelegramID: 24680})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.upsertBindCode(store.BindCode{Code: "TGDELETE1", Scene: "register", Confirmed: true, TelegramID: user.TelegramID, CreatedAt: now, ExpiresAt: now + 300}); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.upsertBindCode(store.BindCode{Code: "USERDELETE1", Scene: "user", UID: user.UID, Confirmed: true, TelegramID: user.TelegramID, CreatedAt: now, ExpiresAt: now + 30}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := app.deleteLocalUser(context.Background(), user); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := app.bindCode("TGDELETE1"); ok {
+		t.Fatal("register bind code for deleted telegram id should be removed")
+	}
+	if _, ok := app.bindCode("USERDELETE1"); ok {
+		t.Fatal("user bind code for deleted user should be removed")
+	}
+}
+
+func TestRepairTelegramBindResidueClearsOrphanedUserBindCodes(t *testing.T) {
+	app := newTestApp(t)
+	now := time.Now().Unix()
+	user, err := app.store().CreateUser(store.User{Username: "orphan-source", TelegramID: 35791})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.upsertBindCode(store.BindCode{Code: "ORPHANUSER1", Scene: "user", UID: user.UID, Confirmed: true, TelegramID: user.TelegramID, CreatedAt: now, ExpiresAt: now + 300}); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.upsertBindCode(store.BindCode{Code: "REGKEEP123", Scene: "register", Confirmed: true, TelegramID: 35792, CreatedAt: now, ExpiresAt: now + 300}); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store().DeleteUser(user.UID); err != nil {
+		t.Fatal(err)
+	}
+
+	app.repairTelegramBindResidue("test")
+
+	if _, ok := app.bindCode("ORPHANUSER1"); ok {
+		t.Fatal("orphaned user-scene bind code should be removed by repair")
+	}
+	if _, ok := app.bindCode("REGKEEP123"); !ok {
+		t.Fatal("valid register-scene bind code should remain")
+	}
+}
+
 func TestSchedulerCleanupBindCodesJobRemoved(t *testing.T) {
 	app := newTestApp(t)
 	req := httptest.NewRequest(http.MethodPost, "/scheduler", nil)

@@ -66,6 +66,40 @@ func (h *bindStatusHub) deleteBindCode(code string) error {
 	return nil
 }
 
+func (h *bindStatusHub) deleteBindCodesForUser(uid int64, telegramID int64) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	deleted := 0
+	for code, bind := range h.codes {
+		if (uid != 0 && bind.UID == uid) || (telegramID != 0 && bind.TelegramID == telegramID) {
+			delete(h.codes, code)
+			delete(h.failures, code)
+			h.notifyLocked(code)
+			deleted++
+		}
+	}
+	return deleted
+}
+
+func (h *bindStatusHub) cleanupOrphanedUserBindCodes(userExists func(uid int64) bool) int {
+	if userExists == nil {
+		return 0
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	deleted := 0
+	for code, bind := range h.codes {
+		if bind.UID == 0 || userExists(bind.UID) {
+			continue
+		}
+		delete(h.codes, code)
+		delete(h.failures, code)
+		h.notifyLocked(code)
+		deleted++
+	}
+	return deleted
+}
+
 func (h *bindStatusHub) cleanupExpiredBindCodes(now int64) int {
 	h.mu.Lock()
 	defer h.mu.Unlock()

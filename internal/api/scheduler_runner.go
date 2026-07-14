@@ -442,9 +442,12 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 			if dryRun {
 				continue
 			}
-			if err := a.store().DeleteUser(u.UID); err != nil {
+			sideCtx, cancel := schedulerSideEffectContext(r.Context())
+			if err := a.deleteLocalUser(sideCtx, u); err != nil {
+				cancel()
 				failed++
 			} else {
+				cancel()
 				deleted++
 			}
 		}

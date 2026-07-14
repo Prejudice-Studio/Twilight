@@ -672,7 +672,7 @@ func (a *App) handleAdminCleanupInvalid(w http.ResponseWriter, r *http.Request, 
 	deleted := 0
 	if !dryRun {
 		for _, u := range targets {
-			if err := a.store().DeleteUser(u.UID); err == nil {
+			if err := a.deleteLocalUser(context.WithoutCancel(r.Context()), u); err == nil {
 				deleted++
 			}
 		}
@@ -783,7 +783,7 @@ func (a *App) handleAdminKickNoEmby(w http.ResponseWriter, r *http.Request, _ Pa
 	failedItems := []map[string]any{}
 	if !dryRun {
 		for _, u := range targets {
-			if err := a.store().DeleteUser(u.UID); err == nil {
+			if err := a.deleteLocalUser(context.WithoutCancel(r.Context()), u); err == nil {
 				deleted++
 			} else {
 				failedItems = append(failedItems, map[string]any{"uid": u.UID, "username": u.Username, "error": err.Error()})

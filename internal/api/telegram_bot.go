@@ -740,11 +740,10 @@ func (a *App) telegramExecuteDelAccount(ctx context.Context, chatID int64, u sto
 			return
 		}
 	}
-	if err := a.store().DeleteUser(u.UID); err != nil {
+	if err := a.deleteLocalUser(ctx, u); err != nil {
 		_ = a.telegramSendMessage(ctx, chatID, "删除账号失败："+err.Error())
 		return
 	}
-	a.sessions().DeleteUser(ctx, u.UID)
 	detail := map[string]any{"source": "telegram"}
 	if reason != "" {
 		detail["reason"] = truncateString(reason, 200)
