@@ -77,7 +77,7 @@ Cookie 鉴权的变更类请求（`POST` / `PUT` / `DELETE`）不要求 CSRF 令
 
 `X-Twilight-Client: webui` 仅作为前端请求识别与 CORS 允许头保留，不参与鉴权。少数有副作用的 `GET`（例如绑定码创建）还要求 `X-Twilight-Intent: create-bind-code` 显式声明操作意图，用于拦截浏览器预取、链接探测或代理误触发。
 
-双子域部署时，如需两个子域都能携带同一登录会话，应设置 `session_cookie_domain` 让前端站点与 API 站点共享 `HttpOnly` session cookie。CORS 留空或 `*` 时会反射合法 Origin；填写 `cors_origins` 后仅允许列表内 Origin。WebUI 登录态以浏览器请求 `/users/me` 的后端响应为准。
+双子域部署时，如需两个子域都能携带同一登录会话，应设置 `session_cookie_domain` 让前端站点与 API 站点共享 `HttpOnly` session cookie。CORS 留空或 `*` 时会反射合法 Origin；填写 `cors_origins` 后仅允许列表内 Origin。WebUI 登录态以浏览器请求 `/users/me` 的后端响应为准；`/users/me` 与 `/auth/me` 不应被浏览器、代理或前端请求层缓存/合流，登录和登出后必须重新确认当前用户，避免多账号切换时旧响应覆盖新会话。
 
 更多机制说明见 [安全加固](../guides/security.md)。
 
@@ -302,6 +302,7 @@ curl -X POST "http://localhost:5000/api/v1/auth/logout" \
 
 - 说明：获取当前登录用户信息（与 `GET /users/me` 同 handler）。
 - 认证：登录用户（`AuthUser`）
+- 缓存：身份响应为会话作用域数据，服务端返回 `Cache-Control: no-store, private`；客户端不得对该响应做共享缓存或 in-flight 复用。
 
 ```bash
 curl -X GET "http://localhost:5000/api/v1/auth/me" \

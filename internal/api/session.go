@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,6 +15,8 @@ import (
 	"github.com/prejudice-studio/twilight/internal/security"
 	"github.com/prejudice-studio/twilight/internal/store"
 )
+
+const maxSessionTokenCreateAttempts = 8
 
 type sessionStore struct {
 	mu     sync.RWMutex
@@ -109,47 +112,76 @@ func (s *sessionStore) pgDB() *sql.DB {
 }
 
 func (s *sessionStore) Create(ctx context.Context, uid int64) (string, time.Time, error) {
-	token, err := security.RandomHex(32)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	expires := time.Now().Add(s.ttl)
-	record := sessionRecord{UID: uid, ExpiresAt: expires.Unix()}
-
-	redisOK := false
-	if s.redis != nil {
-		payload, _ := json.Marshal(record)
-		if err := s.redis.SetEX(ctx, s.prefix+token, int(s.ttl/time.Second), string(payload)); err == nil {
-			redisOK = true
-		} else {
-			s.fallbackCount.Add(1)
-			zap.L().Warn("redis session create failed; using memory+pg fallback", zap.Error(err))
+	for attempt := 0; attempt < maxSessionTokenCreateAttempts; attempt++ {
+		token, err := security.RandomHex(32)
+		if err != nil {
+			return "", time.Time{}, err
 		}
-	}
+		expires := time.Now().Add(s.ttl)
+		record := sessionRecord{UID: uid, ExpiresAt: expires.Unix()}
 
-	if !redisOK {
-		// Memory fallback when Redis is unavailable
-		s.mu.Lock()
-		s.items[token] = record
-		s.mu.Unlock()
-	}
+		if !s.persistToPostgres(ctx, token, record) {
+			zap.L().Warn("session token collision in PostgreSQL; retrying")
+			continue
+		}
 
-	// Always persist to PostgreSQL for durability (survives both Redis and process restart)
-	s.persistToPostgres(ctx, token, record)
-	return token, expires, nil
+		redisOK := false
+		if s.redis != nil {
+			payload, _ := json.Marshal(record)
+			ok, err := s.redis.SetEXNX(ctx, s.prefix+token, int(s.ttl/time.Second), string(payload))
+			if err == nil && ok {
+				redisOK = true
+			} else if err == nil {
+				s.deletePostgresToken(ctx, token)
+				zap.L().Warn("session token collision in Redis; retrying")
+				continue
+			} else {
+				s.fallbackCount.Add(1)
+				zap.L().Warn("redis session create failed; using memory+pg fallback", zap.Error(err))
+			}
+		}
+
+		if !redisOK {
+			// Memory fallback when Redis is unavailable. Check again under the
+			// write lock so concurrent fallback writers cannot reuse a token.
+			s.mu.Lock()
+			if _, exists := s.items[token]; exists {
+				s.mu.Unlock()
+				s.deletePostgresToken(ctx, token)
+				zap.L().Warn("session token collision in memory fallback; retrying")
+				continue
+			}
+			s.items[token] = record
+			s.mu.Unlock()
+		}
+
+		return token, expires, nil
+	}
+	return "", time.Time{}, errors.New("failed to create unique session token")
 }
 
-func (s *sessionStore) persistToPostgres(ctx context.Context, token string, record sessionRecord) {
+func (s *sessionStore) persistToPostgres(ctx context.Context, token string, record sessionRecord) bool {
 	db := s.pgDB()
 	if db == nil {
-		return
+		return true
 	}
-	_, err := db.ExecContext(ctx,
+	result, err := db.ExecContext(ctx,
 		`INSERT INTO twilight_sessions (token, uid, expires_at) VALUES ($1, $2, $3)
-		 ON CONFLICT (token) DO UPDATE SET uid = EXCLUDED.uid, expires_at = EXCLUDED.expires_at`,
+		 ON CONFLICT (token) DO NOTHING`,
 		token, record.UID, record.ExpiresAt)
 	if err != nil {
 		zap.L().Warn("failed to persist session to PostgreSQL", zap.Error(err))
+		return true
+	}
+	if rows, err := result.RowsAffected(); err == nil && rows == 0 {
+		return false
+	}
+	return true
+}
+
+func (s *sessionStore) deletePostgresToken(ctx context.Context, token string) {
+	if db := s.pgDB(); db != nil {
+		_, _ = db.ExecContext(ctx, `DELETE FROM twilight_sessions WHERE token = $1`, token)
 	}
 }
 

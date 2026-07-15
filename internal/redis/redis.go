@@ -109,6 +109,18 @@ func (c *Client) SetEX(ctx context.Context, key string, seconds int, value strin
 	return err
 }
 
+func (c *Client) SetEXNX(ctx context.Context, key string, seconds int, value string) (bool, error) {
+	reply, err := c.Do(ctx, "SET", key, value, "EX", strconv.Itoa(seconds), "NX")
+	if err != nil {
+		if errors.Is(err, ErrNil) {
+			return false, nil
+		}
+		return false, err
+	}
+	text, ok := reply.(string)
+	return ok && strings.EqualFold(text, "OK"), nil
+}
+
 func (c *Client) Del(ctx context.Context, key string) error {
 	_, err := c.Do(ctx, "DEL", key)
 	return err

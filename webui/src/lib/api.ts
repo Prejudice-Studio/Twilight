@@ -223,6 +223,7 @@ class ApiClient {
     const isEmail = username.includes("@");
     const res = await this.request<{ user: Partial<UserInfo> }>("/auth/login", {
       method: "POST",
+      cache: "no-store",
       body: JSON.stringify(
         isEmail
           ? { email: username.trim(), username: "", password }
@@ -244,7 +245,7 @@ class ApiClient {
 
   async logout() {
     try {
-      await this.request("/auth/logout", { method: "POST" });
+      await this.request("/auth/logout", { method: "POST", cache: "no-store" });
     } catch {
       // 忽略网络异常，前端仍会清理本地状态
     }
@@ -294,7 +295,7 @@ class ApiClient {
 
   // User
   async getMe() {
-    const res = await this.request<UserInfo>("/users/me");
+    const res = await this.request<UserInfo>("/users/me", { cache: "no-store" }, { cacheRead: false, dedupe: false });
     if (res.success && res.data?.avatar) {
       res.data.avatar = this.toAbsoluteAssetUrl(res.data.avatar) || undefined;
     }

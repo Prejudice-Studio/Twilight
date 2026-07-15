@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { api, type UserInfo } from "@/lib/api";
-import { ApiError } from "@/lib/api-request";
+import { ApiError, clearApiRequestCaches } from "@/lib/api-request";
 
 /**
  * login() 后端响应轻量校验。
@@ -92,9 +92,18 @@ interface AuthState {
 interface AuthInFlightSlots {
   initialize: Promise<void> | null;
   fetchUser: Promise<FetchUserResult> | null;
+  generation: number;
 }
 
-const inFlight: AuthInFlightSlots = { initialize: null, fetchUser: null };
+const inFlight: AuthInFlightSlots = { initialize: null, fetchUser: null, generation: 0 };
+
+function bumpAuthGeneration(): number {
+  inFlight.generation += 1;
+  inFlight.initialize = null;
+  inFlight.fetchUser = null;
+  clearApiRequestCaches();
+  return inFlight.generation;
+}
 
 /**
  * resetAuthInFlight 仅供测试 setup/teardown 使用：把 in-flight 槽位清空，确保
@@ -103,6 +112,7 @@ const inFlight: AuthInFlightSlots = { initialize: null, fetchUser: null };
 export function resetAuthInFlight(): void {
   inFlight.initialize = null;
   inFlight.fetchUser = null;
+  inFlight.generation = 0;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -132,15 +142,23 @@ export const useAuthStore = create<AuthState>()(
           // 但 HttpOnly session cookie 仍然有效。
           await get().fetchUser();
         })();
-        inFlight.initialize = run.finally(() => {
-          inFlight.initialize = null;
+        let tracked: Promise<void>;
+        tracked = run.finally(() => {
+          if (inFlight.initialize === tracked) {
+            inFlight.initialize = null;
+          }
         });
-        return inFlight.initialize;
+        inFlight.initialize = tracked;
+        return tracked;
       },
 
       login: async (username: string, password: string) => {
+        const generation = bumpAuthGeneration();
         try {
           const res = await api.login(username, password);
+          if (generation !== inFlight.generation) {
+            return { ok: false, message: "登录状态已变化，请重新确认", errorCode: "AUTH_SESSION_CHANGED" };
+          }
           if (res.success && res.data) {
             // 校验后端 user payload 的最小形状，
             // 失败时回退为登录失败 + 自定义 errorCode，避免污染 store。
@@ -187,6 +205,7 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout: async () => {
+        bumpAuthGeneration();
         try {
           await api.logout();
         } finally {
@@ -202,6 +221,7 @@ export const useAuthStore = create<AuthState>()(
 
       fetchUser: async (options) => {
         const silent = options?.silent ?? false;
+        const generation = inFlight.generation;
         // 已有 in-flight /users/me：合流复用。
         // 注意 silent 语义：即使本次是 silent，若已有 non-silent 在跑也直接复用结果。
         if (inFlight.fetchUser) {
@@ -213,6 +233,9 @@ export const useAuthStore = create<AuthState>()(
               set({ isLoading: true });
             }
             const userRes = await api.getMe();
+            if (generation !== inFlight.generation) {
+              return { success: false, errorCode: "AUTH_SESSION_CHANGED" };
+            }
             if (userRes.success && userRes.data) {
               set({ user: userRes.data, isAuthenticated: true, isLoading: false });
               return { success: true };
@@ -228,6 +251,13 @@ export const useAuthStore = create<AuthState>()(
             // 用户回来还得重新输密码，体验上比"先卡一下再恢复"差得多。
             const apiErr = err instanceof ApiError ? err : null;
             const isAuthFailure = apiErr?.isAuth() ?? false;
+            if (generation !== inFlight.generation) {
+              return {
+                success: false,
+                errorCode: "AUTH_SESSION_CHANGED",
+                networkError: apiErr === null,
+              };
+            }
             if (isAuthFailure) {
               // 服务端权威 401：会话真的失效了，清持久化 + 内存态。
               set({ user: null, isAuthenticated: false, isLoading: false });
@@ -253,10 +283,14 @@ export const useAuthStore = create<AuthState>()(
             return failure;
           }
         })();
-        inFlight.fetchUser = run.finally(() => {
-          inFlight.fetchUser = null;
+        let tracked: Promise<FetchUserResult>;
+        tracked = run.finally(() => {
+          if (inFlight.fetchUser === tracked) {
+            inFlight.fetchUser = null;
+          }
         }) as Promise<FetchUserResult>;
-        return inFlight.fetchUser;
+        inFlight.fetchUser = tracked;
+        return tracked;
       },
 
       setUser: (user) => {

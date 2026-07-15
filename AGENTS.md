@@ -139,6 +139,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Polling should check document visibility when useful and must clear intervals on unmount.
 - Keep controls dimensionally stable across languages.
 - Coalesce duplicate in-flight `GET` / `HEAD` requests only in `webui/src/lib/api-request.ts`; never dedupe writes, caller-abortable requests, or endpoints that opt out with `dedupe: false`. The same wrapper owns the short successful-read memory cache; keep `/users/me`, `refresh=1`, `X-Twilight-Intent`, `no-store` / `reload`, and `cacheRead: false` out of that cache.
+- Current-user identity endpoints (`/users/me` and `/auth/me`) must also stay out of in-flight read dedupe. Login, logout, and session-changing frontend flows must clear request caches and invalidate stale auth-store promises before writing user state.
 - Admin tables, dialogs, dropdowns, and selects must stay usable in phone, tablet, and narrow desktop devtools viewports. Prefer stable dimensions, horizontal table overflow, wrapping button labels, and mobile card views over cramped desktop tables.
 - Dangerous admin actions need clear labels, confirmations, result toasts, and audit coverage where applicable.
 - User-management actions must stay grouped by domain (account state, Emby, identity binding, registration entitlement, destructive actions) instead of long flat menus. When adding user actions, keep `admin_action_state` and frontend `UserInfo` types aligned so the UI can disable or explain unavailable operations.
@@ -146,6 +147,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 ## Security Boundaries
 
 - Reuse `ResolveWithinRoot`, upload filename allowlists, `validateOutboundBaseURL`, and shared HTTP clients.
+- Session tokens are bearer credentials. Creating a session must never remap an existing token to another UID; token collisions are retried, and frontend current-user responses must be treated as session-scoped, no-store data.
 - Public OpenAPI output must expose only public routes. Full route inventory belongs behind admin auth at `/system/admin/apis`.
 - Preserve the safe announcement renderer and URL allowlist in `webui/src/lib/safe-render.tsx`.
 - CORS behavior: an empty `cors_origins` list reflects any valid `http`/`https` Origin to reduce self-hosting misconfiguration pain; a non-empty list restricts cross-origin requests to those entries; `*` is accepted as the same relaxed mode. `corsOriginMatchesHost` must continue to allow an Origin that matches the current request host as `scheme://host[:port]`. There is no hidden `cors_allow_any_origin` bypass.

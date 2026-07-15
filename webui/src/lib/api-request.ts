@@ -126,17 +126,25 @@ function requestCacheKey(url: string, method: string, headers: Record<string, st
   return readRequestDedupeKey(url, method, headers);
 }
 
-function isCacheableRead(url: string, method: string, headers: Record<string, string>, cache?: RequestCache): boolean {
+function isSessionIdentityRead(url: string): boolean {
+  try {
+    const parsed = new URL(url, typeof window !== "undefined" ? window.location.origin : "http://localhost");
+    return parsed.pathname.endsWith("/api/v1/users/me") || parsed.pathname.endsWith("/api/v1/auth/me");
+  } catch {
+    return url.endsWith("/api/v1/users/me") || url.endsWith("/api/v1/auth/me");
+  }
+}
+
+function isSharedReadAllowed(url: string, method: string, headers: Record<string, string>, cache?: RequestCache): boolean {
   if (method !== "GET" && method !== "HEAD") return false;
   if (cache === "no-store" || cache === "reload") return false;
   if (hasHeader(headers, "x-twilight-intent")) return false;
+  if (isSessionIdentityRead(url)) return false;
   try {
     const parsed = new URL(url, typeof window !== "undefined" ? window.location.origin : "http://localhost");
     if (parsed.searchParams.has("refresh")) return false;
-    if (parsed.pathname.endsWith("/api/v1/users/me")) return false;
   } catch {
     if (url.includes("refresh=")) return false;
-    if (url.endsWith("/api/v1/users/me")) return false;
   }
   return true;
 }
@@ -168,6 +176,11 @@ function setCachedReadResponse(key: string, data: ApiResponse<unknown>): void {
 
 function clearReadResponseCache(): void {
   readResponseCache.clear();
+}
+
+export function clearApiRequestCaches(): void {
+  readResponseCache.clear();
+  inFlightReadRequests.clear();
 }
 
 /**
@@ -354,13 +367,14 @@ export async function apiRequest<T>(
   const url = `${API_BASE}/api/v1${endpoint}`;
   const isReadRequest = (method === "GET" || method === "HEAD") && options.body === undefined;
   const effectiveCache = options.cache ?? (isReadRequest ? "no-cache" : "no-store");
-  const canUseReadCache = isReadRequest && !options.signal?.aborted && extra.cacheRead !== false && isCacheableRead(url, method, headers, effectiveCache);
+  const canShareRead = isReadRequest && !options.signal?.aborted && isSharedReadAllowed(url, method, headers, effectiveCache);
+  const canUseReadCache = canShareRead && extra.cacheRead !== false;
   const cacheKey = canUseReadCache ? requestCacheKey(url, method, headers) : "";
   if (cacheKey) {
     const cached = getCachedReadResponse<T>(cacheKey);
     if (cached) return cached;
   }
-  if (isReadRequest && options.signal === undefined && extra.dedupe !== false) {
+  if (canShareRead && options.signal === undefined && extra.dedupe !== false) {
     const key = readRequestDedupeKey(url, method, headers);
     const now = Date.now();
     const existing = inFlightReadRequests.get(key);
