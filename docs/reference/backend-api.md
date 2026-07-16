@@ -732,7 +732,7 @@ curl -X DELETE "http://localhost:5000/api/v1/users/me/devices/abc123" \
   - `emby_password_old_password_required`：修改 Emby 密码是否需要当前 Web 密码。
   - `password_change_email_forced` / `emby_password_email_forced`：是否因管理员全局强制邮箱验证而不可关闭。
 
-`PUT /users/me` 可更新上述三个用户级偏好。关闭邮箱验证码保护必须附带对应用途的 `verification_id` + `email_code`；关闭 Emby 旧密码保护必须附带当前 Web 密码 `old_password`。
+`PUT /users/me` 可更新上述三个用户级偏好。三个安全偏好字段必须使用 JSON boolean（`true` / `false`），字符串或数字会被拒绝。关闭邮箱验证码保护必须附带对应用途的 `verification_id` + `email_code`；关闭 Emby 旧密码保护必须附带当前 Web 密码 `old_password`。
 
 ### 6.8 头像与背景
 

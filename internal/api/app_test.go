@@ -2746,6 +2746,52 @@ func TestChangeEmbyPasswordRequiresCurrentPasswordWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestPasswordSecuritySettingsRejectNonBooleanPayload(t *testing.T) {
+	app := newTestApp(t)
+	_ = registerAndLogin(t, app, "admin", "Admin123456")
+	userCookies := registerAndLogin(t, app, "strictprefs", "User123456")
+	user, ok := app.store().FindUserByUsername("strictprefs")
+	if !ok {
+		t.Fatal("created user not found")
+	}
+
+	resp := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me", `{"emby_password_old_password_required":"true"}`, userCookies, map[string]string{"X-Twilight-Client": "webui"})
+	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), string(ErrInvalidPayload)) {
+		t.Fatalf("non-boolean security preference status=%d body=%s, want invalid payload", resp.Code, resp.Body.String())
+	}
+	updated, _ := app.store().User(user.UID)
+	if updated.RequireOldPasswordForEmbyPasswordChange {
+		t.Fatal("non-boolean security preference should not be persisted")
+	}
+}
+
+func TestPasswordChangesEnforceStrengthServerSide(t *testing.T) {
+	app := newTestApp(t)
+	_ = registerAndLogin(t, app, "admin", "Admin123456")
+	userCookies := registerAndLogin(t, app, "strengthguard", "User123456")
+	user, ok := app.store().FindUserByUsername("strengthguard")
+	if !ok {
+		t.Fatal("created user not found")
+	}
+	if _, err := app.store().UpdateUser(user.UID, func(u *store.User) error {
+		u.EmbyID = "emby-strength-id"
+		u.EmbyUsername = "strengthguard"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	systemResp := doJSONWithHeaders(app, http.MethodPost, "/api/v1/users/me/password/system", `{"old_password":"User123456","new_password":"short"}`, userCookies, map[string]string{"X-Twilight-Client": "webui"})
+	if systemResp.Code != http.StatusBadRequest || !strings.Contains(systemResp.Body.String(), string(ErrPasswordWeak)) {
+		t.Fatalf("weak system password status=%d body=%s, want password weak", systemResp.Code, systemResp.Body.String())
+	}
+
+	embyResp := doJSONWithHeaders(app, http.MethodPost, "/api/v1/users/me/password/emby", `{"new_password":"short"}`, userCookies, map[string]string{"X-Twilight-Client": "webui"})
+	if embyResp.Code != http.StatusBadRequest || !strings.Contains(embyResp.Body.String(), string(ErrPasswordWeak)) {
+		t.Fatalf("weak Emby password status=%d body=%s, want password weak", embyResp.Code, embyResp.Body.String())
+	}
+}
+
 func TestPasswordSecuritySettingsRequireProofBeforeDisable(t *testing.T) {
 	app := newTestApp(t)
 	_ = registerAndLogin(t, app, "admin", "Admin123456")

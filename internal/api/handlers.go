@@ -475,8 +475,16 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 		failWithCode(w, http.StatusForbidden, ErrEmailVerificationRequired, "已开启强制邮箱验证，请在邮箱验证区通过验证码绑定或更换邮箱")
 		return
 	}
+	passwordChangeEmailRequiredSet := false
+	passwordChangeEmailRequiredNext := p.User.RequireEmailForPasswordChange
 	if _, ok := payload["password_change_email_required"]; ok {
-		next := boolValue(payload, "password_change_email_required", p.User.RequireEmailForPasswordChange)
+		next, valid := strictBoolValue(payload, "password_change_email_required")
+		if !valid {
+			failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "password_change_email_required 必须是布尔值")
+			return
+		}
+		passwordChangeEmailRequiredSet = true
+		passwordChangeEmailRequiredNext = next
 		if next {
 			if !emailConfigured(a.cfg()) {
 				failWithCode(w, http.StatusServiceUnavailable, ErrEmailDisabled, "邮箱功能未启用")
@@ -497,8 +505,16 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 			}
 		}
 	}
+	embyPasswordEmailRequiredSet := false
+	embyPasswordEmailRequiredNext := p.User.RequireEmailForEmbyPasswordChange
 	if _, ok := payload["emby_password_email_required"]; ok {
-		next := boolValue(payload, "emby_password_email_required", p.User.RequireEmailForEmbyPasswordChange)
+		next, valid := strictBoolValue(payload, "emby_password_email_required")
+		if !valid {
+			failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "emby_password_email_required 必须是布尔值")
+			return
+		}
+		embyPasswordEmailRequiredSet = true
+		embyPasswordEmailRequiredNext = next
 		if next {
 			if !emailConfigured(a.cfg()) {
 				failWithCode(w, http.StatusServiceUnavailable, ErrEmailDisabled, "邮箱功能未启用")
@@ -519,8 +535,16 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 			}
 		}
 	}
+	embyPasswordOldPasswordRequiredSet := false
+	embyPasswordOldPasswordRequiredNext := p.User.RequireOldPasswordForEmbyPasswordChange
 	if _, ok := payload["emby_password_old_password_required"]; ok {
-		next := boolValue(payload, "emby_password_old_password_required", p.User.RequireOldPasswordForEmbyPasswordChange)
+		next, valid := strictBoolValue(payload, "emby_password_old_password_required")
+		if !valid {
+			failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "emby_password_old_password_required 必须是布尔值")
+			return
+		}
+		embyPasswordOldPasswordRequiredSet = true
+		embyPasswordOldPasswordRequiredNext = next
 		if p.User.RequireOldPasswordForEmbyPasswordChange && !next {
 			if !security.VerifyPassword(stringValue(payload, "old_password"), p.User.PasswordHash) {
 				failWithCode(w, http.StatusForbidden, ErrPasswordOldMismatch, "原密码不正确")
@@ -577,14 +601,14 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 		if _, ok := payload["notify_on_ticket_telegram"]; ok {
 			u.NotifyOnTicketTelegram = boolValue(payload, "notify_on_ticket_telegram", u.NotifyOnTicketTelegram)
 		}
-		if _, ok := payload["password_change_email_required"]; ok {
-			u.RequireEmailForPasswordChange = boolValue(payload, "password_change_email_required", u.RequireEmailForPasswordChange)
+		if passwordChangeEmailRequiredSet {
+			u.RequireEmailForPasswordChange = passwordChangeEmailRequiredNext
 		}
-		if _, ok := payload["emby_password_email_required"]; ok {
-			u.RequireEmailForEmbyPasswordChange = boolValue(payload, "emby_password_email_required", u.RequireEmailForEmbyPasswordChange)
+		if embyPasswordEmailRequiredSet {
+			u.RequireEmailForEmbyPasswordChange = embyPasswordEmailRequiredNext
 		}
-		if _, ok := payload["emby_password_old_password_required"]; ok {
-			u.RequireOldPasswordForEmbyPasswordChange = boolValue(payload, "emby_password_old_password_required", u.RequireOldPasswordForEmbyPasswordChange)
+		if embyPasswordOldPasswordRequiredSet {
+			u.RequireOldPasswordForEmbyPasswordChange = embyPasswordOldPasswordRequiredNext
 		}
 		return nil
 	})

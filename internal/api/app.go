@@ -1407,6 +1407,15 @@ func boolValue(payload map[string]any, key string, fallback bool) bool {
 	return fallback
 }
 
+func strictBoolValue(payload map[string]any, key string) (bool, bool) {
+	v, ok := payload[key]
+	if !ok {
+		return false, false
+	}
+	typed, ok := v.(bool)
+	return typed, ok
+}
+
 func int64Param(params Params, key string) (int64, error) {
 	return strconv.ParseInt(params[key], 10, 64)
 }
