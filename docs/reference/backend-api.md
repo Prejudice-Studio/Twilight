@@ -532,10 +532,14 @@ curl -X PUT "http://localhost:5000/api/v1/users/me" \
 
 ```json
 {
-  "current_password": "oldpass",
-  "new_password": "newPassword123!"
+  "old_password": "oldpass",
+  "new_password": "newPassword123!",
+  "verification_id": "email-code-id",
+  "email_code": "123456"
 }
 ```
+
+`old_password` 始终为当前 Web 密码；当全局强制邮箱验证或用户开启“修改系统密码需要邮箱验证码”时，还必须附带 `verification_id` + `email_code`（用途 `change_password`）。
 
 #### 修改 Emby 密码
 
@@ -543,6 +547,18 @@ curl -X PUT "http://localhost:5000/api/v1/users/me" \
 
 - 说明：修改已绑定 Emby 账号的密码。
 - 认证：登录用户（`AuthUser`）
+- 请求体：
+
+```json
+{
+  "new_password": "newPassword123!",
+  "old_password": "current-web-password",
+  "verification_id": "email-code-id",
+  "email_code": "123456"
+}
+```
+
+`old_password` 仅在用户开启“修改 Emby 密码需要当前 Web 密码”时必填；邮箱验证码仅在全局强制邮箱验证或用户开启“修改 Emby 密码需要邮箱验证码”时必填（用途 `change_emby_password`）。
 
 ### 6.3 Emby 绑定与设置
 
@@ -710,6 +726,13 @@ curl -X DELETE "http://localhost:5000/api/v1/users/me/devices/abc123" \
 `GET /users/me/settings`
 
 - 认证：登录用户（`AuthUser`）
+- 返回的个人安全偏好包含：
+  - `password_change_email_required`：修改系统密码是否实际需要邮箱验证码（含全局强制后的生效值）。
+  - `emby_password_email_required`：修改 Emby 密码是否实际需要邮箱验证码（含全局强制后的生效值）。
+  - `emby_password_old_password_required`：修改 Emby 密码是否需要当前 Web 密码。
+  - `password_change_email_forced` / `emby_password_email_forced`：是否因管理员全局强制邮箱验证而不可关闭。
+
+`PUT /users/me` 可更新上述三个用户级偏好。关闭邮箱验证码保护必须附带对应用途的 `verification_id` + `email_code`；关闭 Emby 旧密码保护必须附带当前 Web 密码 `old_password`。
 
 ### 6.8 头像与背景
 

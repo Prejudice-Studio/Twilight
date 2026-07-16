@@ -313,7 +313,7 @@ class ApiClient {
     return this.request<UserSettings>("/users/me/settings");
   }
 
-  async updateMySettings(data: { bgm_mode?: boolean; bgm_manage_mode?: boolean; bgm_token?: string; email?: string; notify_on_login_telegram?: boolean; notify_on_login_email?: boolean; notify_on_ticket_telegram?: boolean }) {
+  async updateMySettings(data: { bgm_mode?: boolean; bgm_manage_mode?: boolean; bgm_token?: string; email?: string; notify_on_login_telegram?: boolean; notify_on_login_email?: boolean; notify_on_ticket_telegram?: boolean; password_change_email_required?: boolean; emby_password_email_required?: boolean; emby_password_old_password_required?: boolean; old_password?: string; verification_id?: string; email_code?: string; code?: string }) {
     return this.request<UserInfo>("/users/me", {
       method: "PUT",
       body: JSON.stringify(data),
@@ -550,10 +550,10 @@ class ApiClient {
     });
   }
 
-  async changeEmbyPassword(newPassword: string, emailCode?: EmailCodeProof) {
+  async changeEmbyPassword(newPassword: string, emailCode?: EmailCodeProof, oldPassword?: string) {
     return this.request("/users/me/password/emby", {
       method: "POST",
-      body: JSON.stringify({ new_password: newPassword, ...emailCodeBody(emailCode) }),
+      body: JSON.stringify({ new_password: newPassword, ...(oldPassword ? { old_password: oldPassword } : {}), ...emailCodeBody(emailCode) }),
     });
   }
 

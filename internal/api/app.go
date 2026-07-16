@@ -1519,12 +1519,15 @@ func publicUser(u store.User) map[string]any {
 		"registration_code":        u.RegistrationCode,
 		// 与 handleEmbyURLs 同口径：普通用户到期后只禁用 Emby（系统账号仍可登录），
 		// 据此让管理列表把「Web 账号状态」与「Emby 账号状态」分开展示。
-		"emby_disabled_by_expiry":   u.Role == store.RoleNormal && u.ExpiredAt > 0 && u.ExpiredAt < now,
-		"admin_action_state":        adminUserActionState(u, now),
-		"rebinding_in_progress":     u.RebindingInProgress,
-		"notify_on_login_telegram":  u.NotifyOnLoginTelegram,
-		"notify_on_login_email":     u.NotifyOnLoginEmail,
-		"notify_on_ticket_telegram": u.NotifyOnTicketTelegram,
+		"emby_disabled_by_expiry":             u.Role == store.RoleNormal && u.ExpiredAt > 0 && u.ExpiredAt < now,
+		"admin_action_state":                  adminUserActionState(u, now),
+		"rebinding_in_progress":               u.RebindingInProgress,
+		"notify_on_login_telegram":            u.NotifyOnLoginTelegram,
+		"notify_on_login_email":               u.NotifyOnLoginEmail,
+		"notify_on_ticket_telegram":           u.NotifyOnTicketTelegram,
+		"password_change_email_required":      u.RequireEmailForPasswordChange,
+		"emby_password_email_required":        u.RequireEmailForEmbyPasswordChange,
+		"emby_password_old_password_required": u.RequireOldPasswordForEmbyPasswordChange,
 	}
 }
 

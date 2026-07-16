@@ -190,6 +190,9 @@ export interface UserInfo {
   notify_on_login_telegram?: boolean;  // 登录时发送 Telegram 通知
   notify_on_login_email?: boolean;  // 登录时发送邮件通知
   notify_on_ticket_telegram?: boolean;  // 工单变动时发送 Telegram 通知
+  password_change_email_required?: boolean;
+  emby_password_email_required?: boolean;
+  emby_password_old_password_required?: boolean;
   rebinding_in_progress?: boolean;  // 是否处于强制换绑流程中
 }
 
@@ -334,6 +337,11 @@ export interface UserSettings {
   notify_on_login_telegram?: boolean;
   notify_on_login_email?: boolean;
   notify_on_ticket_telegram?: boolean;
+  password_change_email_required?: boolean;
+  emby_password_email_required?: boolean;
+  emby_password_old_password_required?: boolean;
+  password_change_email_forced?: boolean;
+  emby_password_email_forced?: boolean;
   telegram: {
     bound: boolean;
     telegram_id?: string;

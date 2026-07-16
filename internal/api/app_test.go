@@ -2723,6 +2723,67 @@ func TestChangeEmbyPasswordAcceptsEmptyEmbyResponses(t *testing.T) {
 	}
 }
 
+func TestChangeEmbyPasswordRequiresCurrentPasswordWhenEnabled(t *testing.T) {
+	app := newTestApp(t)
+	_ = registerAndLogin(t, app, "admin", "Admin123456")
+	userCookies := registerAndLogin(t, app, "embyguard", "User123456")
+	user, ok := app.store().FindUserByUsername("embyguard")
+	if !ok {
+		t.Fatal("created user not found")
+	}
+	if _, err := app.store().UpdateUser(user.UID, func(u *store.User) error {
+		u.EmbyID = "emby-guard-id"
+		u.EmbyUsername = "embyguard"
+		u.RequireOldPasswordForEmbyPasswordChange = true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := doJSONWithHeaders(app, http.MethodPost, "/api/v1/users/me/password/emby", `{"new_password":"NewPass123"}`, userCookies, map[string]string{"X-Twilight-Client": "webui"})
+	if resp.Code != http.StatusForbidden || !strings.Contains(resp.Body.String(), string(ErrPasswordOldMismatch)) {
+		t.Fatalf("change Emby password without current password status=%d body=%s, want old-password mismatch", resp.Code, resp.Body.String())
+	}
+}
+
+func TestPasswordSecuritySettingsRequireProofBeforeDisable(t *testing.T) {
+	app := newTestApp(t)
+	_ = registerAndLogin(t, app, "admin", "Admin123456")
+	userCookies := registerAndLogin(t, app, "securityprefs", "User123456")
+	user, ok := app.store().FindUserByUsername("securityprefs")
+	if !ok {
+		t.Fatal("created user not found")
+	}
+	if _, err := app.store().UpdateUser(user.UID, func(u *store.User) error {
+		u.Email = "securityprefs@example.com"
+		u.EmailVerified = true
+		u.RequireEmailForPasswordChange = true
+		u.RequireOldPasswordForEmbyPasswordChange = true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	noCode := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me", `{"password_change_email_required":false}`, userCookies, map[string]string{"X-Twilight-Client": "webui"})
+	if noCode.Code != http.StatusBadRequest || !strings.Contains(noCode.Body.String(), string(ErrEmailCodeRequired)) {
+		t.Fatalf("disable email guard without code status=%d body=%s", noCode.Code, noCode.Body.String())
+	}
+
+	wrongPassword := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me", `{"emby_password_old_password_required":false,"old_password":"wrong"}`, userCookies, map[string]string{"X-Twilight-Client": "webui"})
+	if wrongPassword.Code != http.StatusForbidden || !strings.Contains(wrongPassword.Body.String(), string(ErrPasswordOldMismatch)) {
+		t.Fatalf("disable old-password guard with wrong password status=%d body=%s", wrongPassword.Code, wrongPassword.Body.String())
+	}
+
+	okResp := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me", `{"emby_password_old_password_required":false,"old_password":"User123456"}`, userCookies, map[string]string{"X-Twilight-Client": "webui"})
+	if okResp.Code != http.StatusOK {
+		t.Fatalf("disable old-password guard with correct password status=%d body=%s", okResp.Code, okResp.Body.String())
+	}
+	updated, _ := app.store().User(user.UID)
+	if updated.RequireOldPasswordForEmbyPasswordChange {
+		t.Fatal("old-password guard should be disabled after verified update")
+	}
+}
+
 func TestTelegramEndpointAcceptsCommonBaseURLs(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().TelegramMode = true

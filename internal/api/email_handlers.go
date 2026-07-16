@@ -43,7 +43,7 @@ func (a *App) requireEmailVerified(w http.ResponseWriter, user store.User) bool 
 // 未强制时直接放行（向后兼容直接改密）。强制时要求 verification_id + email_code
 // 命中一条属于本人(uid)、用途匹配的验证记录。返回 true 表示通过。
 func (a *App) consumePasswordChangeEmailCode(w http.ResponseWriter, payload map[string]any, user store.User, purpose string) bool {
-	if !a.emailGateActive(user) {
+	if !a.passwordChangeEmailRequired(user, purpose) {
 		return true
 	}
 	if !user.EmailVerified || strings.TrimSpace(user.Email) == "" {
@@ -67,6 +67,20 @@ func (a *App) consumePasswordChangeEmailCode(w http.ResponseWriter, payload map[
 		return false
 	}
 	return true
+}
+
+func (a *App) passwordChangeEmailRequired(user store.User, purpose string) bool {
+	if a.emailGateActive(user) {
+		return true
+	}
+	switch purpose {
+	case emailPurposeChangePass:
+		return user.RequireEmailForPasswordChange
+	case emailPurposeChangeEmby:
+		return user.RequireEmailForEmbyPasswordChange
+	default:
+		return false
+	}
 }
 
 // handleSendEmailCode 登录态发码：purpose=bind 给新邮箱发码，change_password /

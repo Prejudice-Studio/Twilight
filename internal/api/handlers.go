@@ -475,6 +475,59 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 		failWithCode(w, http.StatusForbidden, ErrEmailVerificationRequired, "已开启强制邮箱验证，请在邮箱验证区通过验证码绑定或更换邮箱")
 		return
 	}
+	if _, ok := payload["password_change_email_required"]; ok {
+		next := boolValue(payload, "password_change_email_required", p.User.RequireEmailForPasswordChange)
+		if next {
+			if !emailConfigured(a.cfg()) {
+				failWithCode(w, http.StatusServiceUnavailable, ErrEmailDisabled, "邮箱功能未启用")
+				return
+			}
+			if !p.User.EmailVerified || strings.TrimSpace(p.User.Email) == "" {
+				failWithCode(w, http.StatusForbidden, ErrEmailVerificationRequired, "请先绑定并验证邮箱")
+				return
+			}
+		}
+		if !next {
+			if a.emailGateActive(p.User) {
+				failWithCode(w, http.StatusForbidden, ErrEmailVerificationRequired, "全局已强制邮箱验证，不能关闭该项")
+				return
+			}
+			if p.User.RequireEmailForPasswordChange && !a.consumePasswordChangeEmailCode(w, payload, p.User, emailPurposeChangePass) {
+				return
+			}
+		}
+	}
+	if _, ok := payload["emby_password_email_required"]; ok {
+		next := boolValue(payload, "emby_password_email_required", p.User.RequireEmailForEmbyPasswordChange)
+		if next {
+			if !emailConfigured(a.cfg()) {
+				failWithCode(w, http.StatusServiceUnavailable, ErrEmailDisabled, "邮箱功能未启用")
+				return
+			}
+			if !p.User.EmailVerified || strings.TrimSpace(p.User.Email) == "" {
+				failWithCode(w, http.StatusForbidden, ErrEmailVerificationRequired, "请先绑定并验证邮箱")
+				return
+			}
+		}
+		if !next {
+			if a.emailGateActive(p.User) {
+				failWithCode(w, http.StatusForbidden, ErrEmailVerificationRequired, "全局已强制邮箱验证，不能关闭该项")
+				return
+			}
+			if p.User.RequireEmailForEmbyPasswordChange && !a.consumePasswordChangeEmailCode(w, payload, p.User, emailPurposeChangeEmby) {
+				return
+			}
+		}
+	}
+	if _, ok := payload["emby_password_old_password_required"]; ok {
+		next := boolValue(payload, "emby_password_old_password_required", p.User.RequireOldPasswordForEmbyPasswordChange)
+		if p.User.RequireOldPasswordForEmbyPasswordChange && !next {
+			if !security.VerifyPassword(stringValue(payload, "old_password"), p.User.PasswordHash) {
+				failWithCode(w, http.StatusForbidden, ErrPasswordOldMismatch, "原密码不正确")
+				return
+			}
+		}
+	}
 	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error {
 		if email := stringValue(payload, "email"); email != "" {
 			if err := validate.ValidateEmailFormat(email); err != nil {
@@ -523,6 +576,15 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 		}
 		if _, ok := payload["notify_on_ticket_telegram"]; ok {
 			u.NotifyOnTicketTelegram = boolValue(payload, "notify_on_ticket_telegram", u.NotifyOnTicketTelegram)
+		}
+		if _, ok := payload["password_change_email_required"]; ok {
+			u.RequireEmailForPasswordChange = boolValue(payload, "password_change_email_required", u.RequireEmailForPasswordChange)
+		}
+		if _, ok := payload["emby_password_email_required"]; ok {
+			u.RequireEmailForEmbyPasswordChange = boolValue(payload, "emby_password_email_required", u.RequireEmailForEmbyPasswordChange)
+		}
+		if _, ok := payload["emby_password_old_password_required"]; ok {
+			u.RequireOldPasswordForEmbyPasswordChange = boolValue(payload, "emby_password_old_password_required", u.RequireOldPasswordForEmbyPasswordChange)
 		}
 		return nil
 	})
@@ -658,6 +720,12 @@ func (a *App) handleChangeEmbyPassword(w http.ResponseWriter, r *http.Request, _
 	}
 	payload := decodeMap(r)
 	newPassword := stringValue(payload, "new_password")
+	if p.User.RequireOldPasswordForEmbyPasswordChange {
+		if !security.VerifyPassword(stringValue(payload, "old_password"), p.User.PasswordHash) {
+			failWithCode(w, http.StatusForbidden, ErrPasswordOldMismatch, "原密码不正确")
+			return
+		}
+	}
 	if okPass, msg := validateStrongPassword(newPassword, "Emby password"); !okPass {
 		failWithCode(w, http.StatusBadRequest, ErrPasswordWeak, msg)
 		return
@@ -1407,6 +1475,11 @@ func (a *App) handleUserSettings(w http.ResponseWriter, r *http.Request, _ Param
 	ok(w, "OK", map[string]any{
 		"bgm_mode": u.BGMMode, "bgm_token_set": u.BGMToken != "", "api_key_enabled": u.LegacyAPIKeyStatus,
 		"notify_on_login_telegram": u.NotifyOnLoginTelegram, "notify_on_login_email": u.NotifyOnLoginEmail, "notify_on_ticket_telegram": u.NotifyOnTicketTelegram,
+		"password_change_email_required":      a.passwordChangeEmailRequired(u, emailPurposeChangePass),
+		"emby_password_email_required":        a.passwordChangeEmailRequired(u, emailPurposeChangeEmby),
+		"emby_password_old_password_required": u.RequireOldPasswordForEmbyPasswordChange,
+		"password_change_email_forced":        a.emailGateActive(u),
+		"emby_password_email_forced":          a.emailGateActive(u),
 		// 与 /users/me/telegram 共用 telegramStatusFields，避免两个端点对换绑状态
 		// 给出互相矛盾的 can_change / can_unbind。
 		"telegram":      a.telegramStatusFields(u),

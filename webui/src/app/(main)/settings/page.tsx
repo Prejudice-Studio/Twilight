@@ -89,6 +89,9 @@ export default function SettingsPage() {
   const [notifyLoginTelegram, setNotifyLoginTelegram] = useState(false);
   const [notifyLoginEmail, setNotifyLoginEmail] = useState(false);
   const [notifyTicketTelegram, setNotifyTicketTelegram] = useState(false);
+  const [passwordChangeEmailRequired, setPasswordChangeEmailRequired] = useState(false);
+  const [embyPasswordEmailRequired, setEmbyPasswordEmailRequired] = useState(false);
+  const [embyPasswordOldPasswordRequired, setEmbyPasswordOldPasswordRequired] = useState(false);
 
   // 仅首次挂载播放进场动画；切语言不再重播
   const [hasAppeared, setHasAppeared] = useState(false);
@@ -143,6 +146,7 @@ export default function SettingsPage() {
   const [isSystemPwdLoading, setIsSystemPwdLoading] = useState(false);
 
   const [newEmbyPassword, setNewEmbyPassword] = useState("");
+  const [oldEmbyPassword, setOldEmbyPassword] = useState("");
   const [confirmEmbyPassword, setConfirmEmbyPassword] = useState("");
   const [showNewEmbyPwd, setShowNewEmbyPwd] = useState(false);
   const [showConfirmEmbyPwd, setShowConfirmEmbyPwd] = useState(false);
@@ -154,8 +158,10 @@ export default function SettingsPage() {
   const emailVerified = Boolean(user?.email_verified);
   const hasTelegramBinding = Boolean(telegramStatus?.bound);
   const hasVerifiedEmail = emailVerified;
-  // 普通/白名单且开启强制绑定时，改密需要邮箱验证码（管理员不强制）。
-  const passwordEmailGate = emailEnabled && forceBindEmail && user?.role !== 0;
+  const systemPasswordEmailGate = passwordChangeEmailRequired;
+  const embyPasswordEmailGate = embyPasswordEmailRequired;
+  const passwordEmailForced = Boolean(settings?.password_change_email_forced) || (emailEnabled && forceBindEmail && user?.role !== 0);
+  const embyPasswordEmailForced = Boolean(settings?.emby_password_email_forced) || (emailEnabled && forceBindEmail && user?.role !== 0);
   const [emailBindStage, setEmailBindStage] = useState<"email" | "code">("email");
   const [emailBindVerifId, setEmailBindVerifId] = useState("");
   const [emailBindCode, setEmailBindCode] = useState("");
@@ -163,6 +169,16 @@ export default function SettingsPage() {
   const [sysPwdCode, setSysPwdCode] = useState("");
   const [embyPwdVerifId, setEmbyPwdVerifId] = useState("");
   const [embyPwdCode, setEmbyPwdCode] = useState("");
+  const [securityConfirm, setSecurityConfirm] = useState<null | {
+    field: "password_change_email_required" | "emby_password_email_required" | "emby_password_old_password_required";
+    label: string;
+    purpose?: "change_password" | "change_emby_password";
+    next: boolean;
+  }>(null);
+  const [securityConfirmPassword, setSecurityConfirmPassword] = useState("");
+  const [securityConfirmCode, setSecurityConfirmCode] = useState("");
+  const [securityConfirmVerifId, setSecurityConfirmVerifId] = useState("");
+  const [isSecuritySaving, setIsSecuritySaving] = useState(false);
 
   const resetEmailBind = () => {
     setEmailBindStage("email");
@@ -335,6 +351,9 @@ export default function SettingsPage() {
       setNotifyLoginTelegram(Boolean(settingsRes.data.notify_on_login_telegram));
       setNotifyLoginEmail(Boolean(settingsRes.data.notify_on_login_email));
       setNotifyTicketTelegram(Boolean(settingsRes.data.notify_on_ticket_telegram));
+      setPasswordChangeEmailRequired(Boolean(settingsRes.data.password_change_email_required));
+      setEmbyPasswordEmailRequired(Boolean(settingsRes.data.emby_password_email_required));
+      setEmbyPasswordOldPasswordRequired(Boolean(settingsRes.data.emby_password_old_password_required));
     }
     return true;
   }, []);
@@ -632,14 +651,14 @@ export default function SettingsPage() {
       toast({ title: t("settings.passwordMismatch"), variant: "destructive" });
       return;
     }
-    if (passwordEmailGate && !sysPwdCode.trim()) {
+    if (systemPasswordEmailGate && !sysPwdCode.trim()) {
       toast({ title: t("email.enterCodeFirst"), variant: "destructive" });
       return;
     }
 
     setIsSystemPwdLoading(true);
     try {
-      const proof = passwordEmailGate ? { verification_id: sysPwdVerifId, code: sysPwdCode.trim() } : undefined;
+      const proof = systemPasswordEmailGate ? { verification_id: sysPwdVerifId, code: sysPwdCode.trim() } : undefined;
       const res = await api.changeSystemPassword(oldPassword, newPassword, proof);
       if (res.success) {
         toast({ title: t("settings.systemPasswordUpdated"), description: t("settings.systemPasswordUpdatedDescription"), variant: "success" });
@@ -660,6 +679,10 @@ export default function SettingsPage() {
   };
 
   const handleChangeEmbyPassword = async () => {
+    if (embyPasswordOldPasswordRequired && !oldEmbyPassword) {
+      toast({ title: t("settings.currentPasswordRequired"), variant: "destructive" });
+      return;
+    }
     if (!newEmbyPassword) {
       toast({ title: t("settings.embyPasswordRequired"), variant: "destructive" });
       return;
@@ -673,18 +696,19 @@ export default function SettingsPage() {
       toast({ title: t("settings.passwordMismatch"), variant: "destructive" });
       return;
     }
-    if (passwordEmailGate && !embyPwdCode.trim()) {
+    if (embyPasswordEmailGate && !embyPwdCode.trim()) {
       toast({ title: t("email.enterCodeFirst"), variant: "destructive" });
       return;
     }
 
     setIsEmbyPwdLoading(true);
     try {
-      const proof = passwordEmailGate ? { verification_id: embyPwdVerifId, code: embyPwdCode.trim() } : undefined;
-      const res = await api.changeEmbyPassword(newEmbyPassword, proof);
+      const proof = embyPasswordEmailGate ? { verification_id: embyPwdVerifId, code: embyPwdCode.trim() } : undefined;
+      const res = await api.changeEmbyPassword(newEmbyPassword, proof, embyPasswordOldPasswordRequired ? oldEmbyPassword : undefined);
       if (res.success) {
         toast({ title: t("settings.embyPasswordUpdated"), description: t("settings.embyPasswordUpdatedDescription"), variant: "success" });
         setChangeEmbyPwdOpen(false);
+        setOldEmbyPassword("");
         setNewEmbyPassword("");
         setConfirmEmbyPassword("");
         setEmbyPwdCode("");
@@ -696,6 +720,96 @@ export default function SettingsPage() {
       toast({ title: t("common.modifyFailed"), description: error.message, variant: "destructive" });
     } finally {
       setIsEmbyPwdLoading(false);
+    }
+  };
+
+  const resetSecurityConfirm = () => {
+    setSecurityConfirm(null);
+    setSecurityConfirmPassword("");
+    setSecurityConfirmCode("");
+    setSecurityConfirmVerifId("");
+  };
+
+  const setLocalPasswordSecurity = (field: NonNullable<typeof securityConfirm>["field"], value: boolean) => {
+    if (field === "password_change_email_required") setPasswordChangeEmailRequired(value);
+    if (field === "emby_password_email_required") setEmbyPasswordEmailRequired(value);
+    if (field === "emby_password_old_password_required") setEmbyPasswordOldPasswordRequired(value);
+  };
+
+  const savePasswordSecurity = async (
+    field: NonNullable<typeof securityConfirm>["field"],
+    value: boolean,
+    options: { oldPassword?: string; verificationId?: string; code?: string } = {},
+  ) => {
+    const previous = {
+      password_change_email_required: passwordChangeEmailRequired,
+      emby_password_email_required: embyPasswordEmailRequired,
+      emby_password_old_password_required: embyPasswordOldPasswordRequired,
+    }[field];
+    setLocalPasswordSecurity(field, value);
+    const payload: Parameters<typeof api.updateMySettings>[0] = { [field]: value };
+    if (options.oldPassword) payload.old_password = options.oldPassword;
+    if (options.verificationId && options.code) {
+      payload.verification_id = options.verificationId;
+      payload.email_code = options.code;
+    }
+    try {
+      const res = await api.updateMySettings(payload);
+      if (res.success) {
+        toast({ title: t("settings.securityPreferenceSaved"), variant: "success" });
+        void loadData();
+        void fetchUser();
+        return true;
+      }
+      setLocalPasswordSecurity(field, previous);
+      toast({ title: friendlyError(res.error_code, res.message), variant: "destructive" });
+      return false;
+    } catch (error: any) {
+      setLocalPasswordSecurity(field, previous);
+      toast({ title: t("common.modifyFailed"), description: error.message, variant: "destructive" });
+      return false;
+    }
+  };
+
+  const handlePasswordSecurityToggle = async (
+    field: NonNullable<typeof securityConfirm>["field"],
+    value: boolean,
+    label: string,
+    purpose?: "change_password" | "change_emby_password",
+  ) => {
+    if (value) {
+      if ((field === "password_change_email_required" || field === "emby_password_email_required") && !hasVerifiedEmail) {
+        toast({ title: t("settings.verifyEmailBeforeEnableSecurity"), variant: "destructive" });
+        return;
+      }
+      await savePasswordSecurity(field, true);
+      return;
+    }
+    setSecurityConfirm({ field, label, purpose, next: false });
+  };
+
+  const handleConfirmPasswordSecurity = async () => {
+    if (!securityConfirm) return;
+    const needsPassword = securityConfirm.field === "emby_password_old_password_required";
+    const needsEmail = securityConfirm.field === "password_change_email_required" || securityConfirm.field === "emby_password_email_required";
+    if (needsPassword && !securityConfirmPassword) {
+      toast({ title: t("settings.currentPasswordRequired"), variant: "destructive" });
+      return;
+    }
+    if (needsEmail && (!securityConfirmCode.trim() || !securityConfirmVerifId)) {
+      toast({ title: t("email.enterCodeFirst"), variant: "destructive" });
+      return;
+    }
+    setIsSecuritySaving(true);
+    try {
+      const ok = await savePasswordSecurity(securityConfirm.field, securityConfirm.next, {
+        oldPassword: needsPassword ? securityConfirmPassword : undefined,
+        verificationId: needsEmail ? securityConfirmVerifId : undefined,
+        code: needsEmail ? securityConfirmCode.trim() : undefined,
+      });
+      if (ok) resetSecurityConfirm();
+    } finally {
+      setIsSecuritySaving(false);
     }
   };
 
@@ -1409,6 +1523,60 @@ export default function SettingsPage() {
       </motion.div>
       )}
 
+      <motion.div variants={item}>
+        <Card className="glass-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Lock className="h-5 w-5" />
+              {t("settings.passwordSecurityTitle")}
+            </CardTitle>
+            <CardDescription>{t("settings.passwordSecurityDescription")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <Label>{t("settings.requireEmailForSystemPassword")}</Label>
+                <p className="text-sm text-muted-foreground">
+                  {passwordEmailForced ? t("settings.securityForcedByAdmin") : t("settings.requireEmailForSystemPasswordDesc")}
+                </p>
+              </div>
+              <Switch
+                checked={passwordChangeEmailRequired}
+                onCheckedChange={(v) => void handlePasswordSecurityToggle("password_change_email_required", v, t("settings.requireEmailForSystemPassword"), "change_password")}
+                disabled={passwordEmailForced || !emailEnabled || !hasVerifiedEmail}
+                aria-readonly={passwordEmailForced || !emailEnabled || !hasVerifiedEmail}
+              />
+            </div>
+            <Separator />
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <Label>{t("settings.requireOldPasswordForEmbyPassword")}</Label>
+                <p className="text-sm text-muted-foreground">{t("settings.requireOldPasswordForEmbyPasswordDesc")}</p>
+              </div>
+              <Switch
+                checked={embyPasswordOldPasswordRequired}
+                onCheckedChange={(v) => void handlePasswordSecurityToggle("emby_password_old_password_required", v, t("settings.requireOldPasswordForEmbyPassword"))}
+              />
+            </div>
+            <Separator />
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <Label>{t("settings.requireEmailForEmbyPassword")}</Label>
+                <p className="text-sm text-muted-foreground">
+                  {embyPasswordEmailForced ? t("settings.securityForcedByAdmin") : t("settings.requireEmailForEmbyPasswordDesc")}
+                </p>
+              </div>
+              <Switch
+                checked={embyPasswordEmailRequired}
+                onCheckedChange={(v) => void handlePasswordSecurityToggle("emby_password_email_required", v, t("settings.requireEmailForEmbyPassword"), "change_emby_password")}
+                disabled={embyPasswordEmailForced || !emailEnabled || !hasVerifiedEmail}
+                aria-readonly={embyPasswordEmailForced || !emailEnabled || !hasVerifiedEmail}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+
       {/* 登录通知 */}
       <motion.div variants={item}>
         <Card className="glass-card">
@@ -1696,7 +1864,7 @@ export default function SettingsPage() {
                 <p className="text-xs text-destructive">{t("settings.passwordMismatch")}</p>
               )}
             </div>
-            {passwordEmailGate && (
+            {systemPasswordEmailGate && (
               <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
                 <p className="text-xs text-muted-foreground">{t("email.changePasswordNotice")}</p>
                 <EmailCodeInput purpose="change_password" code={sysPwdCode} onCodeChange={setSysPwdCode} onSent={(id) => setSysPwdVerifId(id)} />
@@ -1709,7 +1877,7 @@ export default function SettingsPage() {
             </Button>
             <Button
               onClick={handleChangeSystemPassword}
-              disabled={isSystemPwdLoading || !oldPassword || !systemPwdStrength.ok || newPassword !== confirmPassword || (passwordEmailGate && (!sysPwdCode.trim() || !sysPwdVerifId))}
+              disabled={isSystemPwdLoading || !oldPassword || !systemPwdStrength.ok || newPassword !== confirmPassword || (systemPasswordEmailGate && (!sysPwdCode.trim() || !sysPwdVerifId))}
             >
               {isSystemPwdLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {t("settings.confirmModify")}
@@ -1721,6 +1889,7 @@ export default function SettingsPage() {
       <Dialog open={changeEmbyPwdOpen} onOpenChange={(open) => {
         setChangeEmbyPwdOpen(open);
         if (!open) {
+          setOldEmbyPassword("");
           setNewEmbyPassword("");
           setConfirmEmbyPassword("");
           setEmbyPwdCode("");
@@ -1735,6 +1904,17 @@ export default function SettingsPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
+            {embyPasswordOldPasswordRequired && (
+              <div className="space-y-2">
+                <Label>{t("settings.currentPassword")}</Label>
+                <Input
+                  type="password"
+                  placeholder={t("settings.currentPasswordPlaceholder")}
+                  value={oldEmbyPassword}
+                  onChange={(e) => setOldEmbyPassword(e.target.value)}
+                />
+              </div>
+            )}
             <div className="space-y-2">
               <Label>{t("settings.newPassword")}</Label>
               <div className="relative">
@@ -1790,7 +1970,7 @@ export default function SettingsPage() {
                 <p className="text-xs text-destructive">{t("settings.passwordMismatch")}</p>
               )}
             </div>
-            {passwordEmailGate && (
+            {embyPasswordEmailGate && (
               <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
                 <p className="text-xs text-muted-foreground">{t("email.changePasswordNotice")}</p>
                 <EmailCodeInput purpose="change_emby_password" code={embyPwdCode} onCodeChange={setEmbyPwdCode} onSent={(id) => setEmbyPwdVerifId(id)} />
@@ -1803,10 +1983,60 @@ export default function SettingsPage() {
             </Button>
             <Button
               onClick={handleChangeEmbyPassword}
-              disabled={isEmbyPwdLoading || !embyPwdStrength.ok || newEmbyPassword !== confirmEmbyPassword || (passwordEmailGate && (!embyPwdCode.trim() || !embyPwdVerifId))}
+              disabled={isEmbyPwdLoading || (embyPasswordOldPasswordRequired && !oldEmbyPassword) || !embyPwdStrength.ok || newEmbyPassword !== confirmEmbyPassword || (embyPasswordEmailGate && (!embyPwdCode.trim() || !embyPwdVerifId))}
             >
               {isEmbyPwdLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {t("settings.confirmModify")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(securityConfirm)} onOpenChange={(open) => { if (!open) resetSecurityConfirm(); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("settings.disableSecurityConfirmTitle")}</DialogTitle>
+            <DialogDescription>
+              {t("settings.disableSecurityConfirmDescription", { item: securityConfirm?.label || "" })}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {securityConfirm?.field === "emby_password_old_password_required" && (
+              <div className="space-y-2">
+                <Label>{t("settings.currentPassword")}</Label>
+                <Input
+                  type="password"
+                  value={securityConfirmPassword}
+                  onChange={(e) => setSecurityConfirmPassword(e.target.value)}
+                  placeholder={t("settings.currentPasswordPlaceholder")}
+                  autoComplete="current-password"
+                />
+              </div>
+            )}
+            {(securityConfirm?.field === "password_change_email_required" || securityConfirm?.field === "emby_password_email_required") && securityConfirm.purpose && (
+              <EmailCodeInput
+                purpose={securityConfirm.purpose}
+                code={securityConfirmCode}
+                onCodeChange={setSecurityConfirmCode}
+                onSent={(id) => setSecurityConfirmVerifId(id)}
+              />
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={resetSecurityConfirm}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmPasswordSecurity}
+              disabled={
+                isSecuritySaving ||
+                (securityConfirm?.field === "emby_password_old_password_required" && !securityConfirmPassword) ||
+                ((securityConfirm?.field === "password_change_email_required" || securityConfirm?.field === "emby_password_email_required") && (!securityConfirmCode.trim() || !securityConfirmVerifId))
+              }
+            >
+              {isSecuritySaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {t("settings.confirmDisableSecurity")}
             </Button>
           </DialogFooter>
         </DialogContent>
