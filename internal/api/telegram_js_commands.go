@@ -757,12 +757,12 @@ func (a *App) developerJSDBCount(name string, user *store.User) (int, bool) {
 		if !admin {
 			return 0, false
 		}
-		return len(a.store().ListUsers()), true
+		return a.store().UserCount(), true
 	case "regcodes":
 		if !admin {
 			return 0, false
 		}
-		return len(a.store().ListRegCodes()), true
+		return a.store().CountRegCodes(), true
 	case "invite_codes":
 		if !admin {
 			return 0, false
@@ -777,7 +777,7 @@ func (a *App) developerJSDBCount(name string, user *store.User) (int, bool) {
 		}
 		return a.store().CountMediaRequests(user.UID, false), true
 	case "announcements":
-		return len(a.store().ListAnnouncements(false)), true
+		return a.store().CountAnnouncements(false), true
 	case "tickets":
 		if admin {
 			return a.store().CountTickets(store.TicketFilter{}), true
@@ -790,7 +790,7 @@ func (a *App) developerJSDBCount(name string, user *store.User) (int, bool) {
 		if !admin {
 			return 0, false
 		}
-		return len(a.store().ListDeveloperJSPresets()), true
+		return a.store().CountDeveloperJSPresets(), true
 	default:
 		return 0, false
 	}
@@ -1610,16 +1610,16 @@ func (a *App) developerJSSystemStats(user *store.User) map[string]any {
 			"email_verified":    emailVerified,
 			"admin_detail_view": admin,
 		},
-		"visible_announcements": len(a.store().ListAnnouncements(false)),
+		"visible_announcements": a.store().CountAnnouncements(false),
 		"developer_mode":        a.store().DeveloperModeEnabled(),
 	}
 	if admin {
 		result["admin_counts"] = map[string]any{
-			"regcodes":             len(a.store().ListRegCodes()),
+			"regcodes":             a.store().CountRegCodes(),
 			"invite_codes":         a.store().CountInviteCodes(),
 			"media_requests":       a.store().CountMediaRequests(0, true),
 			"tickets":              a.store().CountTickets(store.TicketFilter{}),
-			"developer_js_presets": len(a.store().ListDeveloperJSPresets()),
+			"developer_js_presets": a.store().CountDeveloperJSPresets(),
 		}
 	}
 	return result

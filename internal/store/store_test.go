@@ -306,6 +306,46 @@ func TestDeleteRegCodePhysicallyDeletesUsedCode(t *testing.T) {
 	}
 }
 
+func TestStoreCountHelpersMatchListSemantics(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	now := time.Now().Unix()
+	if err := st.UpsertRegCode(RegCode{Code: "REG-1", Type: 1, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertRegCode(RegCode{Code: "REG-2", Type: 2, Days: 30, ValidityTime: -1, UseCountLimit: 1, Active: false}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := st.CountRegCodes(), len(st.ListRegCodes()); got != want {
+		t.Fatalf("regcode count=%d want list len %d", got, want)
+	}
+
+	if _, err := st.UpsertAnnouncement(Announcement{Title: "visible", Content: "ok", Visible: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertAnnouncement(Announcement{Title: "hidden", Content: "hidden", Visible: false}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertAnnouncement(Announcement{Title: "expired", Content: "old", Visible: true, ExpiredAt: now - 10}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := st.CountAnnouncements(false), len(st.ListAnnouncements(false)); got != want || got != 1 {
+		t.Fatalf("visible announcement count=%d want list len %d and visible=1", got, want)
+	}
+	if got, want := st.CountAnnouncements(true), len(st.ListAnnouncements(true)); got != want || got != 3 {
+		t.Fatalf("all announcement count=%d want list len %d and all=3", got, want)
+	}
+
+	if _, err := st.UpsertDeveloperJSPreset(DeveloperJSPreset{Name: "one", Code: "return 1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertDeveloperJSPreset(DeveloperJSPreset{Name: "two", Code: "return 2"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := st.CountDeveloperJSPresets(), len(st.ListDeveloperJSPresets()); got != want {
+		t.Fatalf("developer preset count=%d want list len %d", got, want)
+	}
+}
+
 func TestBatchDeleteRegCodesPhysicallyDeletesUsedAndUnused(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	if err := st.UpsertRegCode(RegCode{Code: "UNUSED-REG", Type: 1, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {

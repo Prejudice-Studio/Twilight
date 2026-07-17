@@ -3532,10 +3532,9 @@ func (s *Store) ListAnnouncements(includeHidden bool) []Announcement {
 	now := time.Now().Unix()
 	out := make([]Announcement, 0)
 	for _, a := range s.state.Announcements {
-		if !includeHidden && (!a.Visible || (a.ExpiredAt > 0 && a.ExpiredAt < now)) {
-			continue
+		if announcementVisibleForList(a, includeHidden, now) {
+			out = append(out, a)
 		}
-		out = append(out, a)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Pinned != out[j].Pinned {
@@ -3544,6 +3543,23 @@ func (s *Store) ListAnnouncements(includeHidden bool) []Announcement {
 		return out[i].ID > out[j].ID
 	})
 	return out
+}
+
+func (s *Store) CountAnnouncements(includeHidden bool) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	now := time.Now().Unix()
+	count := 0
+	for _, a := range s.state.Announcements {
+		if announcementVisibleForList(a, includeHidden, now) {
+			count++
+		}
+	}
+	return count
+}
+
+func announcementVisibleForList(a Announcement, includeHidden bool, now int64) bool {
+	return includeHidden || (a.Visible && (a.ExpiredAt <= 0 || a.ExpiredAt >= now))
 }
 
 func (s *Store) DeleteAnnouncement(id int64) error {
@@ -3608,6 +3624,12 @@ func (s *Store) ListDeveloperJSPresets() []DeveloperJSPreset {
 		return out[i].ID > out[j].ID
 	})
 	return out
+}
+
+func (s *Store) CountDeveloperJSPresets() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.state.DeveloperJSPresets)
 }
 
 func (s *Store) DeleteDeveloperJSPreset(id int64) error {
@@ -4732,6 +4754,12 @@ func (s *Store) ListRegCodes() []RegCode {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt > out[j].CreatedAt })
 	return out
+}
+
+func (s *Store) CountRegCodes() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.state.RegCodes)
 }
 
 func (s *Store) DeleteRegCode(code string) error {
