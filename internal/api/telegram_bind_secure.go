@@ -72,15 +72,22 @@ func (a *App) handleBindConfirmSecure(w http.ResponseWriter, r *http.Request, _ 
 	//   - 不同 telegramID → 拒绝，避免转绑攻击。
 	if bind.Confirmed && bind.TelegramID != 0 {
 		if bind.TelegramID != telegramID {
-			a.recordRegisterBindFailure(bind, code, "telegram_taken", ErrTGBindTargetTaken, http.StatusConflict, "绑定码已绑定其他 Telegram，无法重放")
+			a.rejectRegisterBindCode(bind, code, "telegram_taken", ErrTGBindTargetTaken, http.StatusConflict, "绑定码已绑定其他 Telegram，无法重放")
 			failWithCode(w, http.StatusConflict, ErrTGBindTargetTaken, "绑定码已绑定其他 Telegram，无法重放")
 			return
+		}
+		if bind.UID == 0 {
+			if existing, okUser := a.store().FindUserByTelegramID(telegramID); okUser {
+				a.rejectRegisterBindCode(bind, code, "telegram_taken", ErrTGBindTargetTaken, http.StatusConflict, "该 Telegram 已绑定到账号 "+existing.Username)
+				failWithCode(w, http.StatusConflict, ErrTGBindTargetTaken, "该 Telegram 已绑定到账号 "+existing.Username)
+				return
+			}
 		}
 		ok(w, "绑定已确认", map[string]any{"code": code, "confirmed": true})
 		return
 	}
 	if existing, okUser := a.store().FindUserByTelegramID(telegramID); okUser && (bind.UID == 0 || existing.UID != bind.UID) {
-		a.recordRegisterBindFailure(bind, code, "telegram_taken", ErrTGBindTargetTaken, http.StatusConflict, "该 Telegram 已绑定到账号 "+existing.Username)
+		a.rejectRegisterBindCode(bind, code, "telegram_taken", ErrTGBindTargetTaken, http.StatusConflict, "该 Telegram 已绑定到账号 "+existing.Username)
 		failWithCode(w, http.StatusConflict, ErrTGBindTargetTaken, "该 Telegram 已绑定到账号 "+existing.Username)
 		return
 	}
@@ -107,7 +114,7 @@ func (a *App) handleBindConfirmSecure(w http.ResponseWriter, r *http.Request, _ 
 		return
 	}
 	if errors.Is(err, store.ErrConflict) {
-		a.recordRegisterBindFailure(bind, code, "conflict", ErrTGBindTargetTaken, http.StatusConflict, "该 Telegram 已绑定到其他账号或绑定码状态已变化")
+		a.rejectRegisterBindCode(bind, code, "conflict", ErrTGBindTargetTaken, http.StatusConflict, "该 Telegram 已绑定到其他账号或绑定码状态已变化")
 		failWithCode(w, http.StatusConflict, ErrTGBindTargetTaken, "该 Telegram 已绑定到其他账号或绑定码状态已变化")
 		return
 	}

@@ -75,6 +75,28 @@ func (a *App) telegramBindCodeState(code string, uid int64, requireScene string,
 			}
 			return telegramBindCodeState{Code: code, Status: "expired", ErrorCode: ErrTGBindCodeExpired, HTTPStatus: http.StatusBadRequest, Message: "绑定码无效或已过期", Bind: bind, Invalid: true, Terminal: true}
 		}
+		if bind.UID == 0 {
+			if existing, okUser := a.store().FindUserByTelegramID(bind.TelegramID); okUser {
+				if cleanupExpired {
+					a.rejectRegisterBindCode(bind, code, "telegram_taken", ErrTGBindTargetTaken, http.StatusConflict, "该 Telegram 已绑定到账号 "+existing.Username)
+				}
+				return telegramBindCodeState{Code: code, Status: "telegram_taken", ErrorCode: ErrTGBindTargetTaken, HTTPStatus: http.StatusConflict, Message: "该 Telegram 已绑定到账号 " + existing.Username, Bind: bind, Invalid: true, Terminal: true, TelegramID: bind.TelegramID, TelegramUsername: bind.TelegramUsername}
+			}
+		} else {
+			u, okUser := a.store().User(bind.UID)
+			if !okUser {
+				if cleanupExpired {
+					_ = a.deleteBindCode(code)
+				}
+				return telegramBindCodeState{Code: code, Status: "not_found", ErrorCode: ErrTGBindCodeNotFound, HTTPStatus: http.StatusBadRequest, Message: "绑定码不存在", Bind: bind, Invalid: true, Terminal: true}
+			}
+			if u.TelegramID != bind.TelegramID {
+				if cleanupExpired {
+					_ = a.deleteBindCode(code)
+				}
+				return telegramBindCodeState{Code: code, Status: "telegram_taken", ErrorCode: ErrTGBindTargetTaken, HTTPStatus: http.StatusConflict, Message: "绑定状态已变化，请重新获取绑定码", Bind: bind, Invalid: true, Terminal: true}
+			}
+		}
 		state := telegramBindCodeState{Code: code, Bind: bind, ExpiresIn: bind.ExpiresAt - now, TelegramID: bind.TelegramID, TelegramUsername: bind.TelegramUsername}
 		state.Status = "confirmed"
 		state.Message = "绑定码已确认"
@@ -111,6 +133,13 @@ func (a *App) recordRegisterBindFailure(bind store.BindCode, code string, status
 		return
 	}
 	a.bindStatus.fail(code, bindCodeFailure{Status: status, ErrorCode: errorCode, HTTPStatus: httpStatus, Message: message, ExpiresAt: bind.ExpiresAt})
+}
+
+func (a *App) rejectRegisterBindCode(bind store.BindCode, code string, status string, errorCode ErrCode, httpStatus int, message string) {
+	if bind.UID == 0 {
+		_ = a.deleteBindCode(code)
+	}
+	a.recordRegisterBindFailure(bind, code, status, errorCode, httpStatus, message)
 }
 
 func (a *App) clearRegisterBindFailure(code string) {

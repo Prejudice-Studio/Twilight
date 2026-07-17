@@ -2521,6 +2521,75 @@ func TestRegisterBindCodeCreateFailureClearsConfirmedState(t *testing.T) {
 	}
 }
 
+func TestConfirmedRegisterBindCodeDetectsTelegramTakenBeforeSubmit(t *testing.T) {
+	app := newTestApp(t)
+	now := time.Now().Unix()
+	code := "REGTAKEN123"
+	if err := app.upsertBindCode(store.BindCode{
+		Code:             code,
+		Scene:            "register",
+		Confirmed:        true,
+		TelegramID:       555001,
+		TelegramUsername: "taken_tg",
+		CreatedAt:        now,
+		ExpiresAt:        now + 600,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.store().CreateUser(store.User{Username: "owner", TelegramID: 555001}); err != nil {
+		t.Fatal(err)
+	}
+
+	state := app.telegramBindCodeState(code, 0, "register", now, true)
+	if state.Status != "telegram_taken" || !state.Invalid || !state.Terminal || state.Confirmed {
+		t.Fatalf("confirmed register bind should become terminal when Telegram is taken, got %#v", state)
+	}
+	if _, ok := app.bindCode(code); ok {
+		t.Fatal("telegram-taken register bind code should be cleared")
+	}
+	state = app.telegramBindCodeState(code, 0, "register", now, false)
+	if state.Status != "telegram_taken" || !state.Invalid || !state.Terminal {
+		t.Fatalf("cleared telegram-taken bind should keep failure detail briefly, got %#v", state)
+	}
+}
+
+func TestConfirmedUserBindCodeDetectsDatabaseMismatch(t *testing.T) {
+	app := newTestApp(t)
+	user, err := app.store().CreateUser(store.User{Username: "stale-bind", TelegramID: 777001})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	code := "USERSTALE12"
+	if err := app.upsertBindCode(store.BindCode{
+		Code:             code,
+		Scene:            "user",
+		UID:              user.UID,
+		Confirmed:        true,
+		TelegramID:       777001,
+		TelegramUsername: "old_tg",
+		CreatedAt:        now,
+		ExpiresAt:        now + 30,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.store().UpdateUser(user.UID, func(u *store.User) error {
+		u.TelegramID = 0
+		u.TelegramUsername = ""
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	state := app.telegramBindCodeState(code, user.UID, "user", now, true)
+	if state.Status != "telegram_taken" || !state.Invalid || !state.Terminal || state.TelegramBound {
+		t.Fatalf("stale user bind code should not report bound, got %#v", state)
+	}
+	if _, ok := app.bindCode(code); ok {
+		t.Fatal("stale user bind code should be cleared")
+	}
+}
+
 func TestTelegramUserBindWritesAuditLog(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().AuditLogEnabled = true

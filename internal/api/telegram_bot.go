@@ -358,9 +358,16 @@ func (a *App) confirmBindCodeInline(ctx context.Context, chatID int64, bind stor
 		if bind.TelegramID != telegramID {
 			// 与 handleBindConfirmSecure 的重放保护一致：把"已绑其他 TG"写回 hub，
 			// 让网页端状态轮询能看到终态失败而不是一直 pending。
-			a.recordRegisterBindFailure(bind, code, "telegram_taken", ErrTGBindTargetTaken, http.StatusConflict, "绑定码已绑定其他 Telegram，无法重放")
+			a.rejectRegisterBindCode(bind, code, "telegram_taken", ErrTGBindTargetTaken, http.StatusConflict, "绑定码已绑定其他 Telegram，无法重放")
 			_ = a.telegramSendMessage(ctx, chatID, "该绑定码已被其它 Telegram 账号确认，无法重复使用。")
 			return
+		}
+		if bind.UID == 0 {
+			if existing, okUser := a.store().FindUserByTelegramID(telegramID); okUser {
+				a.rejectRegisterBindCode(bind, code, "telegram_taken", ErrTGBindTargetTaken, http.StatusConflict, "该 Telegram 已绑定到账号 "+existing.Username)
+				_ = a.telegramSendMessage(ctx, chatID, "该 Telegram 已绑定到账号 "+existing.Username+"，请在网页重新获取绑定码。")
+				return
+			}
 		}
 		_ = a.telegramSendMessage(ctx, chatID, "Telegram 绑定已确认，可以回到网页继续。")
 		return
@@ -372,7 +379,7 @@ func (a *App) confirmBindCodeInline(ctx context.Context, chatID int64, bind stor
 			return
 		}
 		if errors.Is(err, store.ErrConflict) {
-			a.recordRegisterBindFailure(bind, code, "telegram_taken", ErrTGBindTargetTaken, http.StatusConflict, "该 Telegram 已绑定到其他账号或绑定码状态已变化")
+			a.rejectRegisterBindCode(bind, code, "telegram_taken", ErrTGBindTargetTaken, http.StatusConflict, "该 Telegram 已绑定到其他账号或绑定码状态已变化")
 			_ = a.telegramSendMessage(ctx, chatID, "该 Telegram 已被其他账号绑定。")
 			return
 		}
