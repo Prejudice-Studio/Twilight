@@ -1271,14 +1271,14 @@ class ApiClient {
     return this.request<{ viewers: number }>("/system/emby-viewers", { signal });
   }
 
-  async getRuntimeStatus() {
-    return this.request<RuntimeStatus>("/system/admin/runtime/status");
+  async getRuntimeStatus(signal?: AbortSignal) {
+    return this.request<RuntimeStatus>("/system/admin/runtime/status", { signal });
   }
 
-  async getRuntimeLogs(limit = 200, after?: number) {
+  async getRuntimeLogs(limit = 200, after?: number, signal?: AbortSignal) {
     const query = new URLSearchParams({ limit: String(limit) });
     if (after && after > 0) query.set("after", String(after));
-    return this.request<RuntimeLogsResponse>(`/system/admin/runtime/logs?${query}`);
+    return this.request<RuntimeLogsResponse>(`/system/admin/runtime/logs?${query}`, { signal });
   }
 
   runtimeLogStreamURL(limit = 100, after?: number) {

@@ -22,6 +22,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api, type RuntimeLogEntry, type RuntimeStatus } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n } from "@/lib/i18n";
+import { useVisiblePolling } from "@/hooks/use-visible-polling";
 
 function formatTime(seconds: number | undefined, unknown: string) {
   if (!seconds) return unknown;
@@ -126,8 +127,8 @@ export default function AdminRuntimeLogsPage() {
     setNextCursor(nextCursor);
   }, [logLimit, setNextCursor]);
 
-  const loadStatus = useCallback(async () => {
-    const res = await api.getRuntimeStatus();
+  const loadStatus = useCallback(async (signal?: AbortSignal) => {
+    const res = await api.getRuntimeStatus(signal);
     if (res.success) setStatus(res.data || null);
   }, []);
 
@@ -170,13 +171,7 @@ export default function AdminRuntimeLogsPage() {
     void loadSnapshot();
   }, [loadSnapshot]);
 
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      void loadStatus().catch(() => undefined);
-    }, 15000);
-    return () => window.clearInterval(timer);
-  }, [loadStatus]);
+  useVisiblePolling(loadStatus, 15000);
 
   useEffect(() => {
     if (paused) {
@@ -224,23 +219,22 @@ export default function AdminRuntimeLogsPage() {
     };
   }, [appendLogs, paused, t]);
 
-  useEffect(() => {
-    if (paused || connected) return;
-    const timer = window.setInterval(async () => {
-      if (document.visibilityState !== "visible") return;
+  useVisiblePolling(
+    async (signal?: AbortSignal) => {
       if (eventRef.current?.readyState === EventSource.CONNECTING) return;
       try {
-        const res = await api.getRuntimeLogs(200, cursorRef.current);
+        const res = await api.getRuntimeLogs(200, cursorRef.current, signal);
         if (res.success && res.data) {
           appendLogs(res.data.entries || [], res.data.next_cursor);
           setError(null);
         }
       } catch {
-        setError(t("adminLogs.pollFailed"));
+        if (!signal?.aborted) setError(t("adminLogs.pollFailed"));
       }
-    }, 2500);
-    return () => window.clearInterval(timer);
-  }, [appendLogs, connected, paused, t]);
+    },
+    2500,
+    !paused && !connected,
+  );
 
   useEffect(() => {
     if (!paused) bottomRef.current?.scrollIntoView({ block: "end" });
