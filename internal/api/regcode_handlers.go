@@ -39,7 +39,7 @@ func (a *App) handleListRegcodes(w http.ResponseWriter, r *http.Request, _ Param
 				continue
 			}
 		}
-		if search != "" && !strings.Contains(strings.ToLower(code.Code+" "+code.Note+" "+code.TargetUsername+" "+code.TargetTelegramUsername+" "+strconv.FormatInt(code.TargetTelegramID, 10)+" "+joinInt64(regcodeUsedByUIDs(code))+" "+joinInt64(code.UsedByTelegramIDs)), search) {
+		if !regcodeMatchesSearch(code, search) {
 			continue
 		}
 		items = append(items, dto)
@@ -479,7 +479,7 @@ func (a *App) filteredBatchRegcodeCodes(payload map[string]any, limit int) []str
 				continue
 			}
 		}
-		if search != "" && !strings.Contains(strings.ToLower(code.Code+" "+code.Note+" "+code.TargetUsername+" "+code.TargetTelegramUsername+" "+strconv.FormatInt(code.TargetTelegramID, 10)+" "+joinInt64(regcodeUsedByUIDs(code))+" "+joinInt64(code.UsedByTelegramIDs)), search) {
+		if !regcodeMatchesSearch(code, search) {
 			continue
 		}
 		if excluded[code.Code] {

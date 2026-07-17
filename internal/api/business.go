@@ -587,6 +587,57 @@ func joinInt64(values []int64) string {
 	return strings.Join(parts, ",")
 }
 
+func regcodeMatchesSearch(code store.RegCode, search string) bool {
+	search = strings.ToLower(strings.TrimSpace(search))
+	if search == "" {
+		return true
+	}
+	if strings.ContainsAny(search, " ,") {
+		return strings.Contains(regcodeSearchHaystack(code), search)
+	}
+	return regcodeContainsLower(code.Code, search) ||
+		regcodeContainsLower(code.Note, search) ||
+		regcodeContainsLower(code.TargetUsername, search) ||
+		regcodeContainsLower(code.TargetTelegramUsername, search) ||
+		strings.Contains(strconv.FormatInt(code.TargetTelegramID, 10), search) ||
+		regcodeInt64SliceContains(regcodeUsedByUIDs(code), search) ||
+		regcodeInt64SliceContains(code.UsedByTelegramIDs, search)
+}
+
+func regcodeContainsLower(value, search string) bool {
+	return value != "" && strings.Contains(strings.ToLower(value), search)
+}
+
+func regcodeInt64SliceContains(values []int64, search string) bool {
+	for _, value := range values {
+		if strings.Contains(strconv.FormatInt(value, 10), search) {
+			return true
+		}
+	}
+	return false
+}
+
+func regcodeSearchHaystack(code store.RegCode) string {
+	usedByUIDs := joinInt64(regcodeUsedByUIDs(code))
+	usedByTelegramIDs := joinInt64(code.UsedByTelegramIDs)
+	var b strings.Builder
+	b.Grow(len(code.Code) + len(code.Note) + len(code.TargetUsername) + len(code.TargetTelegramUsername) + len(usedByUIDs) + len(usedByTelegramIDs) + 40)
+	b.WriteString(code.Code)
+	b.WriteByte(' ')
+	b.WriteString(code.Note)
+	b.WriteByte(' ')
+	b.WriteString(code.TargetUsername)
+	b.WriteByte(' ')
+	b.WriteString(code.TargetTelegramUsername)
+	b.WriteByte(' ')
+	b.WriteString(strconv.FormatInt(code.TargetTelegramID, 10))
+	b.WriteByte(' ')
+	b.WriteString(usedByUIDs)
+	b.WriteByte(' ')
+	b.WriteString(usedByTelegramIDs)
+	return strings.ToLower(b.String())
+}
+
 func (a *App) regCodeFormatForType(codeType int, explicit string) string {
 	if strings.TrimSpace(explicit) != "" {
 		return strings.TrimSpace(explicit)
