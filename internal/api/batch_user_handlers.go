@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -491,12 +490,17 @@ func (a *App) batchUnboundEmbyUserUIDsFromPayload(w http.ResponseWriter, payload
 
 func (a *App) filteredBatchUserUIDs(payload map[string]any, limit int) ([]int64, int) {
 	filter, _ := payload["filter"].(map[string]any)
-	roleFilter, hasRole := filter["role"]
-	activeFilter, hasActive := filter["active"]
-	embyFilter := strings.ToLower(asString(filter["emby"]))
-	embyStatusFilter := strings.ToLower(asString(filter["emby_status"]))
-	emailFilter := strings.ToLower(strings.TrimSpace(asString(filter["email_status"])))
-	search := strings.ToLower(strings.TrimSpace(asString(filter["search"])))
+	listFilter := adminUserListFilter{
+		roleFilter:       filter["role"],
+		hasRole:          filter["role"] != nil,
+		activeFilter:     filter["active"],
+		hasActive:        filter["active"] != nil,
+		embyFilter:       strings.ToLower(strings.TrimSpace(asString(filter["emby"]))),
+		embyStatusFilter: strings.ToLower(strings.TrimSpace(asString(filter["emby_status"]))),
+		emailFilter:      strings.ToLower(strings.TrimSpace(asString(filter["email_status"]))),
+		search:           strings.ToLower(strings.TrimSpace(asString(filter["search"]))),
+		now:              time.Now().Unix(),
+	}
 	// exclude_uids 支持「反选全部 / 全选后取消个别」：前端用排除集表达跨页选择，
 	// 这里把它从匹配集中剔除。只能缩小目标集，无法越过筛选 / 鉴权扩大目标——
 	// 后续每个 batch handler 仍会逐 UID 复核 userIsProtected 等约束。
@@ -507,59 +511,7 @@ func (a *App) filteredBatchUserUIDs(payload map[string]any, limit int) ([]int64,
 	uids := []int64{}
 	matched := 0
 	for _, u := range a.store().ListUsers() {
-		if hasRole && strconv.Itoa(u.Role) != asString(roleFilter) {
-			continue
-		}
-		if hasActive && u.Active != boolish(activeFilter) {
-			continue
-		}
-		if embyFilter == "bound" && u.EmbyID == "" {
-			continue
-		}
-		if embyFilter == "unbound" && u.EmbyID != "" {
-			continue
-		}
-		switch embyStatusFilter {
-		case "active":
-			if u.EmbyID == "" || u.EmbyDisabled {
-				continue
-			}
-			if u.Role == store.RoleNormal && u.ExpiredAt > 0 && u.ExpiredAt < time.Now().Unix() {
-				continue
-			}
-		case "disabled":
-			if u.EmbyID == "" {
-				continue
-			}
-			disabled := u.EmbyDisabled
-			if !disabled && u.Role == store.RoleNormal && u.ExpiredAt > 0 && u.ExpiredAt < time.Now().Unix() {
-				disabled = true
-			}
-			if !disabled {
-				continue
-			}
-		}
-		// 邮箱验证筛选必须与列表展示口径一致（handlers.go listUsers），否则
-		// 「在邮箱筛选下全选跨页」会把筛选外的用户卷进批量操作。
-		switch emailFilter {
-		case "verified":
-			if !u.EmailVerified {
-				continue
-			}
-		case "unverified":
-			if u.EmailVerified || strings.TrimSpace(u.Email) == "" {
-				continue
-			}
-		case "bound":
-			if strings.TrimSpace(u.Email) == "" {
-				continue
-			}
-		case "none":
-			if strings.TrimSpace(u.Email) != "" {
-				continue
-			}
-		}
-		if search != "" && !strings.Contains(strings.ToLower(u.Username+" "+u.Email+" "+u.EmbyID+" "+strconv.FormatInt(u.UID, 10)+" "+strconv.FormatInt(u.TelegramID, 10)), search) {
+		if !adminUserMatchesListFilters(u, listFilter) {
 			continue
 		}
 		if _, skip := excluded[u.UID]; skip {

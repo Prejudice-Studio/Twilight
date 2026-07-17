@@ -2360,73 +2360,21 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request, _ Params)
 	users := a.store().ListUsers()
 	page := max(1, queryInt(r, "page", 1))
 	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
-	search := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
-	roleFilter := r.URL.Query().Get("role")
-	activeFilter := r.URL.Query().Get("active")
-	embyFilter := r.URL.Query().Get("emby")
-	embyStatusFilter := r.URL.Query().Get("emby_status")
-	emailFilter := r.URL.Query().Get("email_status")
+	filter := adminUserListFilter{
+		roleFilter:        r.URL.Query().Get("role"),
+		hasRole:           r.URL.Query().Get("role") != "",
+		activeFilter:      r.URL.Query().Get("active"),
+		hasActive:         r.URL.Query().Get("active") != "",
+		strictQueryActive: true,
+		embyFilter:        strings.ToLower(strings.TrimSpace(r.URL.Query().Get("emby"))),
+		embyStatusFilter:  strings.ToLower(strings.TrimSpace(r.URL.Query().Get("emby_status"))),
+		emailFilter:       strings.ToLower(strings.TrimSpace(r.URL.Query().Get("email_status"))),
+		search:            strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search"))),
+		now:               time.Now().Unix(),
+	}
 	items := make([]map[string]any, 0, len(users))
 	for _, u := range users {
-		if roleFilter != "" && strconv.Itoa(u.Role) != roleFilter {
-			continue
-		}
-		if activeFilter == "true" && !u.Active {
-			continue
-		}
-		if activeFilter == "false" && u.Active {
-			continue
-		}
-		if embyFilter == "bound" && u.EmbyID == "" {
-			continue
-		}
-		if embyFilter == "unbound" && u.EmbyID != "" {
-			continue
-		}
-		// emby_status 筛选 Emby 账号的启停状态（与 Web 账号 active 独立）：
-		// active  = Emby 已绑定且未被禁用（远端 + 到期均未禁用）
-		// disabled = Emby 已绑定但被禁用（远端禁用 或 到期自动禁用）
-		switch embyStatusFilter {
-		case "active":
-			if u.EmbyID == "" || u.EmbyDisabled {
-				continue
-			}
-			if u.Role == store.RoleNormal && u.ExpiredAt > 0 && u.ExpiredAt < time.Now().Unix() {
-				continue
-			}
-		case "disabled":
-			if u.EmbyID == "" {
-				continue
-			}
-			disabled := u.EmbyDisabled
-			if !disabled && u.Role == store.RoleNormal && u.ExpiredAt > 0 && u.ExpiredAt < time.Now().Unix() {
-				disabled = true
-			}
-			if !disabled {
-				continue
-			}
-		}
-		// 邮箱验证管理区筛选：verified=已验证；unverified=已填邮箱但未验证；
-		// bound=已填邮箱（不论验证）；none=未填邮箱。
-		switch emailFilter {
-		case "verified":
-			if !u.EmailVerified {
-				continue
-			}
-		case "unverified":
-			if u.EmailVerified || strings.TrimSpace(u.Email) == "" {
-				continue
-			}
-		case "bound":
-			if strings.TrimSpace(u.Email) == "" {
-				continue
-			}
-		case "none":
-			if strings.TrimSpace(u.Email) != "" {
-				continue
-			}
-		}
-		if search != "" && !strings.Contains(strings.ToLower(u.Username+" "+u.Email+" "+u.EmbyID+" "+strconv.FormatInt(u.UID, 10)+" "+strconv.FormatInt(u.TelegramID, 10)), search) {
+		if !adminUserMatchesListFilters(u, filter) {
 			continue
 		}
 		items = append(items, publicUser(u))

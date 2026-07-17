@@ -1124,6 +1124,85 @@ func adminUserFilterHaystack(u store.User) string {
 	return strings.ToLower(u.Username + " " + u.Email + " " + u.EmbyID + " " + strconv.FormatInt(u.UID, 10) + " " + strconv.FormatInt(u.TelegramID, 10))
 }
 
+type adminUserListFilter struct {
+	roleFilter        any
+	hasRole           bool
+	activeFilter      any
+	hasActive         bool
+	strictQueryActive bool
+	embyFilter        string
+	embyStatusFilter  string
+	emailFilter       string
+	search            string
+	now               int64
+}
+
+func adminUserMatchesListFilters(u store.User, filter adminUserListFilter) bool {
+	if filter.hasRole && strconv.Itoa(u.Role) != asString(filter.roleFilter) {
+		return false
+	}
+	if filter.hasActive {
+		if filter.strictQueryActive {
+			active := asString(filter.activeFilter)
+			if active == "true" && !u.Active {
+				return false
+			}
+			if active == "false" && u.Active {
+				return false
+			}
+		} else if u.Active != boolish(filter.activeFilter) {
+			return false
+		}
+	}
+	if filter.embyFilter == "bound" && u.EmbyID == "" {
+		return false
+	}
+	if filter.embyFilter == "unbound" && u.EmbyID != "" {
+		return false
+	}
+	if !adminUserMatchesEmbyStatusFilter(u, filter.embyStatusFilter, filter.now) {
+		return false
+	}
+	if !adminUserMatchesEmailStatusFilter(u, filter.emailFilter) {
+		return false
+	}
+	if filter.search != "" && !strings.Contains(adminUserFilterHaystack(u), filter.search) {
+		return false
+	}
+	return true
+}
+
+func adminUserMatchesEmbyStatusFilter(u store.User, filter string, now int64) bool {
+	switch filter {
+	case "active":
+		return u.EmbyID != "" && !adminUserEmbyDisabledForFilter(u, now)
+	case "disabled":
+		return u.EmbyID != "" && adminUserEmbyDisabledForFilter(u, now)
+	default:
+		return true
+	}
+}
+
+func adminUserEmbyDisabledForFilter(u store.User, now int64) bool {
+	return u.EmbyDisabled || (u.Role == store.RoleNormal && u.ExpiredAt > 0 && u.ExpiredAt < now)
+}
+
+func adminUserMatchesEmailStatusFilter(u store.User, filter string) bool {
+	emailBound := strings.TrimSpace(u.Email) != ""
+	switch filter {
+	case "verified":
+		return u.EmailVerified
+	case "unverified":
+		return !u.EmailVerified && emailBound
+	case "bound":
+		return emailBound
+	case "none":
+		return !emailBound
+	default:
+		return true
+	}
+}
+
 func int64SliceFromAnyMap(value any, key string) []int64 {
 	if payload, ok := value.(map[string]any); ok {
 		return int64Slice(payload[key])
