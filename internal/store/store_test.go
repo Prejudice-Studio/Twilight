@@ -229,6 +229,64 @@ func TestUserIdentityIndexesTrackUsernameAndEmailLifecycle(t *testing.T) {
 	}
 }
 
+func TestListUsersKeepsUIDOrderAcrossUserLifecycle(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	alpha, err := st.CreateUser(User{Username: "alpha", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	beta, err := st.CreateUser(User{Username: "beta", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gamma, err := st.CreateUser(User{Username: "gamma", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := userUIDsFromList(st.ListUsers()); !sameInt64s(got, []int64{alpha.UID, beta.UID, gamma.UID}) {
+		t.Fatalf("initial ListUsers order=%v", got)
+	}
+	if got := append([]int64(nil), st.userUIDs...); !sameInt64s(got, []int64{alpha.UID, beta.UID, gamma.UID}) {
+		t.Fatalf("initial userUIDs index=%v", got)
+	}
+
+	if err := st.DeleteUser(beta.UID); err != nil {
+		t.Fatal(err)
+	}
+	delta, err := st.CreateUser(User{Username: "delta", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []int64{alpha.UID, gamma.UID, delta.UID}
+	if got := userUIDsFromList(st.ListUsers()); !sameInt64s(got, want) {
+		t.Fatalf("ListUsers order after delete/create=%v want=%v", got, want)
+	}
+	if got := append([]int64(nil), st.userUIDs...); !sameInt64s(got, want) {
+		t.Fatalf("userUIDs index after delete/create=%v want=%v", got, want)
+	}
+}
+
+func userUIDsFromList(users []User) []int64 {
+	out := make([]int64, 0, len(users))
+	for _, u := range users {
+		out = append(out, u.UID)
+	}
+	return out
+}
+
+func sameInt64s(left, right []int64) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestDeleteRegCodePhysicallyDeletesUsedCode(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	if err := st.UpsertRegCode(RegCode{Code: "USED-REG", Type: 2, Days: 30, ValidityTime: -1, UseCountLimit: 5, UseCount: 1, UsedByUIDs: []int64{101}, UsedByTelegramIDs: []int64{202}, Active: true}); err != nil {

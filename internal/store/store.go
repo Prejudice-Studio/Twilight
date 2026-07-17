@@ -51,6 +51,8 @@ type Store struct {
 	telegramIDMap map[int64]int64
 	// embyIDMap 是 emby_id → UID 的二级索引，服务 Emby webhook / 会话 / 管理操作等高频反查。
 	embyIDMap map[string]int64
+	// userUIDs 按 UID 升序保存现有用户 ID，让 ListUsers 避免每次读都排序 Users map。
+	userUIDs []int64
 }
 
 const (
@@ -2774,6 +2776,18 @@ func (s *Store) DeleteUser(uid int64) error {
 func (s *Store) ListUsers() []User {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if len(s.userUIDs) == len(s.state.Users) {
+		users := make([]User, 0, len(s.userUIDs))
+		for _, uid := range s.userUIDs {
+			if u, ok := s.state.Users[uid]; ok {
+				users = append(users, u)
+			}
+		}
+		if len(users) == len(s.state.Users) {
+			return users
+		}
+	}
+
 	users := make([]User, 0, len(s.state.Users))
 	for _, u := range s.state.Users {
 		users = append(users, u)
@@ -2790,7 +2804,9 @@ func (s *Store) rebuildUserIndexes() {
 	verifiedEmailMap := make(map[string]int64, len(s.state.Users))
 	telegramIDMap := make(map[int64]int64, len(s.state.Users))
 	embyIDMap := make(map[string]int64, len(s.state.Users))
+	userUIDs := make([]int64, 0, len(s.state.Users))
 	for _, u := range s.state.Users {
+		userUIDs = append(userUIDs, u.UID)
 		if key := normalizeUsernameKey(u.Username); key != "" {
 			usernameMap[key] = u.UID
 		}
@@ -2807,21 +2823,46 @@ func (s *Store) rebuildUserIndexes() {
 			embyIDMap[u.EmbyID] = u.UID
 		}
 	}
+	sort.Slice(userUIDs, func(i, j int) bool { return userUIDs[i] < userUIDs[j] })
 	s.usernameMap = usernameMap
 	s.emailMap = emailMap
 	s.verifiedEmailMap = verifiedEmailMap
 	s.telegramIDMap = telegramIDMap
 	s.embyIDMap = embyIDMap
+	s.userUIDs = userUIDs
 }
 
 func (s *Store) maintainUserIndexes(oldUser, newUser User, uid int64) {
-	if s.usernameMap == nil || s.emailMap == nil || s.verifiedEmailMap == nil || s.telegramIDMap == nil || s.embyIDMap == nil {
+	if s.usernameMap == nil || s.emailMap == nil || s.verifiedEmailMap == nil || s.telegramIDMap == nil || s.embyIDMap == nil || s.userUIDs == nil {
 		s.rebuildUserIndexes()
 	}
+	s.maintainUserOrderIndex(oldUser.UID, newUser.UID, uid)
 	s.maintainUsernameIndex(oldUser.Username, newUser.Username, uid)
 	s.maintainEmailIndexes(oldUser, newUser, uid)
 	s.maintainTelegramIDIndex(oldUser.TelegramID, newUser.TelegramID, uid)
 	s.maintainEmbyIDIndex(oldUser.EmbyID, newUser.EmbyID, uid)
+}
+
+func (s *Store) maintainUserOrderIndex(oldUID, newUID, uid int64) {
+	if s.userUIDs == nil {
+		s.rebuildUserIndexes()
+	}
+	if oldUID != 0 && newUID == 0 {
+		index := sort.Search(len(s.userUIDs), func(i int) bool { return s.userUIDs[i] >= uid })
+		if index < len(s.userUIDs) && s.userUIDs[index] == uid {
+			s.userUIDs = append(s.userUIDs[:index], s.userUIDs[index+1:]...)
+		}
+		return
+	}
+	if oldUID == 0 && newUID != 0 {
+		index := sort.Search(len(s.userUIDs), func(i int) bool { return s.userUIDs[i] >= uid })
+		if index < len(s.userUIDs) && s.userUIDs[index] == uid {
+			return
+		}
+		s.userUIDs = append(s.userUIDs, 0)
+		copy(s.userUIDs[index+1:], s.userUIDs[index:])
+		s.userUIDs[index] = uid
+	}
 }
 
 func (s *Store) maintainUsernameIndex(oldUsername, newUsername string, uid int64) {
