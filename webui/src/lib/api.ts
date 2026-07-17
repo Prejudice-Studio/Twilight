@@ -98,6 +98,7 @@ import type {
 } from "./api-types";
 import { confirmPhrases } from "./confirm-phrases";
 import { API_BASE, ApiError, apiRequest, apiRequestForm, type ApiRequestExtraOptions } from "./api-request";
+import { deepClone } from "./deep-clone";
 import { normalizeMediaRequestStatus } from "./media-status";
 
 const BIND_CODE_CREATE_HEADERS = {
@@ -125,10 +126,7 @@ class ApiClient {
   };
 
   private cloneResponse<T>(response: ApiResponse<T>): ApiResponse<T> {
-    if (typeof structuredClone === "function") {
-      return structuredClone(response);
-    }
-    return JSON.parse(JSON.stringify(response)) as ApiResponse<T>;
+    return deepClone(response);
   }
 
   private invalidateConfigSchemaCache() {

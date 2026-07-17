@@ -56,6 +56,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError } from "@/components/layout/page-state";
 import { api } from "@/lib/api";
+import { deepClone } from "@/lib/deep-clone";
 import { useI18n, type MessageKey, type MessageParams } from "@/lib/i18n";
 import { useSystemStore } from "@/store/system";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -1160,8 +1161,8 @@ export default function AdminConfigPage() {
             field.type === "list" ? toEditorList(field.value) : field.value;
         }
       }
-      setEditedValues(JSON.parse(JSON.stringify(initial)));
-      setOriginalValues(JSON.parse(JSON.stringify(initial)));
+      setEditedValues(deepClone(initial));
+      setOriginalValues(deepClone(initial));
     } else {
       throw new Error(res.message || t("adminConfig.loadSchemaError"));
     }
@@ -1201,14 +1202,14 @@ export default function AdminConfigPage() {
         ...prev,
         [sectionKey]: {
           ...prev[sectionKey],
-          [fieldKey]: JSON.parse(JSON.stringify(origVal)),
+          [fieldKey]: deepClone(origVal),
         },
       }));
     }
   };
 
   const handleResetAll = () => {
-    setEditedValues(JSON.parse(JSON.stringify(originalValues)));
+    setEditedValues(deepClone(originalValues));
   };
 
   const expandAllSections = () => {
@@ -1269,7 +1270,7 @@ export default function AdminConfigPage() {
 
       const res = await api.updateConfigBySchema(sectionsPayload);
       if (res.success) {
-        setOriginalValues(JSON.parse(JSON.stringify(editedValues)));
+        setOriginalValues(deepClone(editedValues));
         await loadSchema();
         if (configContent) {
           await loadConfig();

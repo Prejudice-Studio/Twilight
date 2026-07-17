@@ -15,6 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
 import type { DeveloperJSPreset, TelegramCommandCatalogItem } from "@/lib/api-types";
+import { deepClone } from "@/lib/deep-clone";
 import { useI18n } from "@/lib/i18n";
 
 type CommandType = "text" | "js";
@@ -136,7 +137,7 @@ export default function AdminTelegramCommandsPage() {
       setPresets(nextPresets);
       setCatalog(commandCatalogRes.data.commands);
       setRows(nextRows);
-      setOriginal(JSON.parse(JSON.stringify(nextRows)));
+      setOriginal(deepClone(nextRows));
       setDisabledCommands(nextDisabled);
       setOriginalDisabled([...nextDisabled]);
     } catch (err) {
@@ -259,7 +260,7 @@ export default function AdminTelegramCommandsPage() {
           <Button
             variant="outline"
             onClick={() => {
-              setRows(JSON.parse(JSON.stringify(original)));
+              setRows(deepClone(original));
               setDisabledCommands([...originalDisabled]);
             }}
             disabled={!changed || saving}

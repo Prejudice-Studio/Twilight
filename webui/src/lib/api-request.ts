@@ -1,4 +1,5 @@
 import type { ApiResponse } from "./api-types";
+import { deepClone } from "./deep-clone";
 
 export const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
 
@@ -151,10 +152,7 @@ function isSharedReadAllowed(url: string, method: string, headers: Record<string
 }
 
 function cloneApiResponse<T>(data: ApiResponse<T>): ApiResponse<T> {
-  if (typeof structuredClone === "function") {
-    return structuredClone(data);
-  }
-  return JSON.parse(JSON.stringify(data)) as ApiResponse<T>;
+  return deepClone(data);
 }
 
 function getCachedReadResponse<T>(key: string, now = Date.now()): ApiResponse<T> | null {

@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
 import type { ConfigField, ConfigSchema, ConfigSection } from "@/lib/api-types";
+import { deepClone } from "@/lib/deep-clone";
 import { useI18n } from "@/lib/i18n";
 
 function toEditorList(value: unknown): string[] {
@@ -246,8 +247,8 @@ export function AdminConfigSections({
         }
       }
       setSchema(res.data);
-      setValues(JSON.parse(JSON.stringify(nextValues)));
-      setOriginal(JSON.parse(JSON.stringify(nextValues)));
+      setValues(deepClone(nextValues));
+      setOriginal(deepClone(nextValues));
     } catch (err) {
       setError(err instanceof Error ? err.message : t("adminConfig.sectionEditor.loadFailed"));
     } finally {
@@ -328,7 +329,7 @@ export function AdminConfigSections({
           <p className="mt-1 text-sm text-muted-foreground">{description}</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setValues(JSON.parse(JSON.stringify(original)))} disabled={saving || changedCount === 0}>
+          <Button variant="outline" onClick={() => setValues(deepClone(original))} disabled={saving || changedCount === 0}>
             <RotateCcw className="mr-2 h-4 w-4" />
             {t("common.reset")}
           </Button>
