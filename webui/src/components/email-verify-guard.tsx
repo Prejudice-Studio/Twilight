@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Loader2, Mail, ShieldCheck, X } from "lucide-react";
@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useCountdownState } from "@/hooks/use-countdown-state";
 import { useToast } from "@/hooks/use-toast";
 import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
@@ -34,13 +35,7 @@ export default function EmailVerifyGuard() {
   const [verificationId, setVerificationId] = useState("");
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
-  const [cooldown, setCooldown] = useState(0);
-
-  useEffect(() => {
-    if (cooldown <= 0) return;
-    const timer = setInterval(() => setCooldown((s) => (s > 0 ? s - 1 : 0)), 1000);
-    return () => clearInterval(timer);
-  }, [cooldown]);
+  const [cooldown, setCooldown] = useCountdownState(0);
 
   const emailEnabled = Boolean(info?.features?.email_enabled);
   const forceBind = Boolean(info?.features?.force_bind_email);

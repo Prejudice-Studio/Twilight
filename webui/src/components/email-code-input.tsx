@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { useCountdownState } from "@/hooks/use-countdown-state";
 import { useI18n } from "@/lib/i18n";
 import { api } from "@/lib/api";
 import { friendlyError, isThrottleErrorCode, throttleCooldownSeconds } from "@/lib/validators";
@@ -27,13 +28,7 @@ export function EmailCodeInput({ purpose, email, code, onCodeChange, onSent, dis
   const { t } = useI18n();
   const { toast } = useToast();
   const [sending, setSending] = useState(false);
-  const [cooldown, setCooldown] = useState(0);
-
-  useEffect(() => {
-    if (cooldown <= 0) return;
-    const timer = setInterval(() => setCooldown((s) => (s > 0 ? s - 1 : 0)), 1000);
-    return () => clearInterval(timer);
-  }, [cooldown]);
+  const [cooldown, setCooldown] = useCountdownState(0);
 
   const send = async () => {
     if (purpose === "bind" && !email?.trim()) {
