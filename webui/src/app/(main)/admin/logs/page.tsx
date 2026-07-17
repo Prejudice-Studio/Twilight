@@ -132,14 +132,15 @@ export default function AdminRuntimeLogsPage() {
     if (res.success) setStatus(res.data || null);
   }, []);
 
-  const loadSnapshot = useCallback(async () => {
+  const loadSnapshot = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
     try {
       const [statusRes, logsRes] = await Promise.all([
-        api.getRuntimeStatus(),
-        api.getRuntimeLogs(logLimit),
+        api.getRuntimeStatus(signal),
+        api.getRuntimeLogs(logLimit, undefined, signal),
       ]);
+      if (signal?.aborted) return;
       if (statusRes.success) setStatus(statusRes.data || null);
       if (logsRes.success && logsRes.data) {
         const entries = [...(logsRes.data.entries || [])].sort((a, b) => a.id - b.id);
@@ -149,11 +150,12 @@ export default function AdminRuntimeLogsPage() {
         setNextCursor(logsRes.data.next_cursor || 0);
       }
     } catch (err: any) {
+      if (signal?.aborted || err?.name === "AbortError") return;
       const message = err?.message || t("adminLogs.loadStatusFailed");
       setError(message);
       toast({ title: t("adminLogs.loadFailed"), description: message, variant: "destructive" });
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, [logLimit, setNextCursor, t, toast]);
 
@@ -168,7 +170,9 @@ export default function AdminRuntimeLogsPage() {
   }, [logLimit, setNextCursor, status?.runtime_log_limit]);
 
   useEffect(() => {
-    void loadSnapshot();
+    const controller = new AbortController();
+    void loadSnapshot(controller.signal);
+    return () => controller.abort();
   }, [loadSnapshot]);
 
   useVisiblePolling(loadStatus, 15000);
@@ -266,7 +270,7 @@ export default function AdminRuntimeLogsPage() {
             {paused ? <CirclePlay className="mr-2 h-4 w-4" /> : <CirclePause className="mr-2 h-4 w-4" />}
             {paused ? t("adminLogs.resume") : t("adminLogs.pause")}
           </Button>
-          <Button variant="outline" onClick={loadSnapshot} disabled={loading}>
+          <Button variant="outline" onClick={() => void loadSnapshot()} disabled={loading}>
             {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
             {t("common.refresh")}
           </Button>
