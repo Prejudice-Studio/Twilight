@@ -1,7 +1,6 @@
 package store
 
 import (
-	"encoding/json"
 	"sort"
 	"strconv"
 	"strings"
@@ -319,13 +318,34 @@ func cloneAuditLogDetail(detail map[string]any) map[string]any {
 	if len(detail) == 0 {
 		return nil
 	}
-	data, err := json.Marshal(detail)
-	if err != nil {
-		return nil
-	}
-	var clone map[string]any
-	if err := json.Unmarshal(data, &clone); err != nil {
-		return nil
+	clone := make(map[string]any, len(detail))
+	for key, value := range detail {
+		clone[key] = cloneAuditLogDetailValue(value)
 	}
 	return clone
+}
+
+func cloneAuditLogDetailValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneAuditLogDetail(typed)
+	case []any:
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			out[i] = cloneAuditLogDetailValue(item)
+		}
+		return out
+	case []string:
+		return append([]string(nil), typed...)
+	case []int:
+		return append([]int(nil), typed...)
+	case []int64:
+		return append([]int64(nil), typed...)
+	case []float64:
+		return append([]float64(nil), typed...)
+	case []bool:
+		return append([]bool(nil), typed...)
+	default:
+		return value
+	}
 }

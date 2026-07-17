@@ -34,6 +34,42 @@ func TestQueryAuditLogsStringSortUsesCaseInsensitiveOrder(t *testing.T) {
 	}
 }
 
+func TestQueryAuditLogsReturnsDeepCopiedDetails(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	st.mu.Lock()
+	st.state.AuditLogs = []AuditLog{
+		{
+			ID:        1,
+			Action:    "update",
+			CreatedAt: 10,
+			Detail: map[string]any{
+				"nested": map[string]any{"name": "before"},
+				"items":  []any{map[string]any{"id": float64(1)}},
+			},
+		},
+	}
+	if err := st.saveLocked(); err != nil {
+		st.mu.Unlock()
+		t.Fatal(err)
+	}
+	st.mu.Unlock()
+
+	page := st.QueryAuditLogs(AuditLogQuery{Limit: 1})
+	if len(page.Logs) != 1 {
+		t.Fatalf("expected one audit log, got %#v", page.Logs)
+	}
+	page.Logs[0].Detail["nested"].(map[string]any)["name"] = "mutated"
+	page.Logs[0].Detail["items"].([]any)[0].(map[string]any)["id"] = float64(99)
+
+	again := st.QueryAuditLogs(AuditLogQuery{Limit: 1})
+	if got := again.Logs[0].Detail["nested"].(map[string]any)["name"]; got != "before" {
+		t.Fatalf("nested detail should be copied, got %v", got)
+	}
+	if got := again.Logs[0].Detail["items"].([]any)[0].(map[string]any)["id"]; got != float64(1) {
+		t.Fatalf("slice detail should be copied, got %v", got)
+	}
+}
+
 func auditLogIDs(logs []AuditLog) []int64 {
 	out := make([]int64, 0, len(logs))
 	for _, log := range logs {
