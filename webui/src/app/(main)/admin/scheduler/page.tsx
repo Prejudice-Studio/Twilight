@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -41,6 +41,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useAsyncResource } from "@/hooks/use-async-resource";
+import { useVisiblePolling } from "@/hooks/use-visible-polling";
 import { PageError } from "@/components/layout/page-state";
 import { useI18n, type MessageKey, type MessageParams } from "@/lib/i18n";
 import {
@@ -657,7 +658,6 @@ export default function AdminSchedulerPage() {
   const [terminating, setTerminating] = useState<Record<string, boolean>>({});
   const [rejoinEnabling, setRejoinEnabling] = useState(false);
   const [jobView, setJobView] = useState<JobView>("all");
-  const pollTimerRef = useRef<number | null>(null);
 
   // 日志/历史弹窗
   const [logsJob, setLogsJob] = useState<SchedulerJobItem | null>(null);
@@ -676,8 +676,8 @@ export default function AdminSchedulerPage() {
   const [paramKickDryRun, setParamKickDryRun] = useState(true);
   const [paramKickMaxPerRun, setParamKickMaxPerRun] = useState("200");
 
-  const loadJobs = useCallback(async () => {
-    const res = await api.listSchedulerJobs();
+  const loadJobs = useCallback(async (signal?: AbortSignal) => {
+    const res = await api.listSchedulerJobs(signal);
     if (res.success && res.data) {
       setJobs(res.data.jobs || []);
       setRunning({});
@@ -721,26 +721,13 @@ export default function AdminSchedulerPage() {
     return jobs;
   }, [jobView, jobs, running]);
 
-  useEffect(() => {
-    if (!anyRunning) {
-      if (pollTimerRef.current) {
-        window.clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
-      }
-      return;
-    }
-    if (pollTimerRef.current) return;
-    pollTimerRef.current = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      void refresh();
-    }, 2000);
-    return () => {
-      if (pollTimerRef.current) {
-        window.clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
-      }
-    };
-  }, [anyRunning, refresh]);
+  useVisiblePolling(
+    async (signal?: AbortSignal) => {
+      await loadJobs(signal);
+    },
+    2000,
+    anyRunning,
+  );
 
   const runJob = useCallback(
     async (job: SchedulerJobItem, params?: Record<string, unknown>) => {

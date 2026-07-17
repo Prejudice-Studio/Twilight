@@ -1467,8 +1467,8 @@ class ApiClient {
 
   // ==================== 定时任务管理 ====================
 
-  async listSchedulerJobs() {
-    return this.request<{ jobs: SchedulerJobItem[] }>(`/admin/scheduler/jobs`);
+  async listSchedulerJobs(signal?: AbortSignal) {
+    return this.request<{ jobs: SchedulerJobItem[] }>(`/admin/scheduler/jobs`, { signal });
   }
 
   async triggerSchedulerJob(
