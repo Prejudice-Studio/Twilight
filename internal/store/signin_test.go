@@ -155,3 +155,39 @@ func TestAddSigninTrimsExcessRecords(t *testing.T) {
 		t.Fatalf("expected exactly %d records after trim, got %d", maxSigninRecords, len(si.Records))
 	}
 }
+
+func TestSigninHistoryRecordsReturnsLatestWindow(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	uid := int64(11)
+	st.mu.Lock()
+	st.state.Signin[uid] = Signin{
+		UID: uid,
+		Records: []SigninRecord{
+			{Date: "2026-01-01", CreatedAt: 1},
+			{Date: "2026-01-02", CreatedAt: 2},
+			{Date: "2026-01-03", CreatedAt: 3},
+		},
+	}
+	st.mu.Unlock()
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	records := st.SigninHistoryRecords(uid, 2)
+	if len(records) != 2 || records[0].Date != "2026-01-03" || records[1].Date != "2026-01-02" {
+		t.Fatalf("unexpected history window: %#v", records)
+	}
+	records[0].Date = "mutated"
+	again := st.SigninHistoryRecords(uid, 1)
+	if len(again) != 1 || again[0].Date != "2026-01-03" {
+		t.Fatalf("history records should be returned as copies, got %#v", again)
+	}
+	if empty := st.SigninHistoryRecords(999, 30); len(empty) != 0 {
+		t.Fatalf("missing user history should be empty, got %#v", empty)
+	}
+}

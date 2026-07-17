@@ -433,14 +433,34 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 		return
 	}
 	payload := decodeMap(r)
+	bgmModeNext, bgmModeSet, okBool := requireStrictBoolValue(w, payload, "bgm_mode")
+	if !okBool {
+		return
+	}
+	bgmManageModeNext, bgmManageModeSet, okBool := requireStrictBoolValue(w, payload, "bgm_manage_mode")
+	if !okBool {
+		return
+	}
+	notifyLoginTelegramNext, notifyLoginTelegramSet, okBool := requireStrictBoolValue(w, payload, "notify_on_login_telegram")
+	if !okBool {
+		return
+	}
+	notifyLoginEmailNext, notifyLoginEmailSet, okBool := requireStrictBoolValue(w, payload, "notify_on_login_email")
+	if !okBool {
+		return
+	}
+	notifyTicketTelegramNext, notifyTicketTelegramSet, okBool := requireStrictBoolValue(w, payload, "notify_on_ticket_telegram")
+	if !okBool {
+		return
+	}
 	if !a.cfg().BangumiEnabled {
-		if _, ok := payload["bgm_mode"]; ok {
+		if bgmModeSet {
 			failWithCode(w, http.StatusForbidden, ErrBangumiSyncDisabled, "Bangumi 同步未开启")
 			return
 		}
 	}
 	if !a.cfg().BangumiManageEnabled {
-		if _, ok := payload["bgm_manage_mode"]; ok {
+		if bgmManageModeSet {
 			failWithCode(w, http.StatusForbidden, ErrBangumiManageDisabled, "Bangumi 管理功能未开启")
 			return
 		}
@@ -457,11 +477,11 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 	if _, ok := payload["bgm_token"]; ok {
 		nextToken = stringValue(payload, "bgm_token")
 	}
-	if a.cfg().BangumiEnabled && boolValue(payload, "bgm_mode", false) && nextToken == "" {
+	if a.cfg().BangumiEnabled && bgmModeSet && bgmModeNext && nextToken == "" {
 		failWithCode(w, http.StatusBadRequest, ErrBangumiTokenMissing, "启用 Bangumi 同步前请先填写个人 Token")
 		return
 	}
-	if a.cfg().BangumiManageEnabled && boolValue(payload, "bgm_manage_mode", false) && nextToken == "" {
+	if a.cfg().BangumiManageEnabled && bgmManageModeSet && bgmManageModeNext && nextToken == "" {
 		failWithCode(w, http.StatusBadRequest, ErrBangumiTokenMissing, "启用 Bangumi 管理前请先填写个人 Token")
 		return
 	}
@@ -478,9 +498,8 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 	passwordChangeEmailRequiredSet := false
 	passwordChangeEmailRequiredNext := p.User.RequireEmailForPasswordChange
 	if _, ok := payload["password_change_email_required"]; ok {
-		next, valid := strictBoolValue(payload, "password_change_email_required")
-		if !valid {
-			failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "password_change_email_required 必须是布尔值")
+		next, _, okBool := requireStrictBoolValue(w, payload, "password_change_email_required")
+		if !okBool {
 			return
 		}
 		passwordChangeEmailRequiredSet = true
@@ -508,9 +527,8 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 	embyPasswordEmailRequiredSet := false
 	embyPasswordEmailRequiredNext := p.User.RequireEmailForEmbyPasswordChange
 	if _, ok := payload["emby_password_email_required"]; ok {
-		next, valid := strictBoolValue(payload, "emby_password_email_required")
-		if !valid {
-			failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "emby_password_email_required 必须是布尔值")
+		next, _, okBool := requireStrictBoolValue(w, payload, "emby_password_email_required")
+		if !okBool {
 			return
 		}
 		embyPasswordEmailRequiredSet = true
@@ -538,9 +556,8 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 	embyPasswordOldPasswordRequiredSet := false
 	embyPasswordOldPasswordRequiredNext := p.User.RequireOldPasswordForEmbyPasswordChange
 	if _, ok := payload["emby_password_old_password_required"]; ok {
-		next, valid := strictBoolValue(payload, "emby_password_old_password_required")
-		if !valid {
-			failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "emby_password_old_password_required 必须是布尔值")
+		next, _, okBool := requireStrictBoolValue(w, payload, "emby_password_old_password_required")
+		if !okBool {
 			return
 		}
 		embyPasswordOldPasswordRequiredSet = true
@@ -578,11 +595,11 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 			}
 			u.Username = username
 		}
-		if _, ok := payload["bgm_mode"]; ok {
-			u.BGMMode = boolValue(payload, "bgm_mode", u.BGMMode)
+		if bgmModeSet {
+			u.BGMMode = bgmModeNext
 		}
-		if _, ok := payload["bgm_manage_mode"]; ok {
-			u.BGMManageMode = boolValue(payload, "bgm_manage_mode", u.BGMManageMode)
+		if bgmManageModeSet {
+			u.BGMManageMode = bgmManageModeNext
 		}
 		if _, ok := payload["bgm_token"]; ok {
 			token := stringValue(payload, "bgm_token")
@@ -592,14 +609,14 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 				u.BGMManageMode = false
 			}
 		}
-		if _, ok := payload["notify_on_login_telegram"]; ok {
-			u.NotifyOnLoginTelegram = boolValue(payload, "notify_on_login_telegram", u.NotifyOnLoginTelegram)
+		if notifyLoginTelegramSet {
+			u.NotifyOnLoginTelegram = notifyLoginTelegramNext
 		}
-		if _, ok := payload["notify_on_login_email"]; ok {
-			u.NotifyOnLoginEmail = boolValue(payload, "notify_on_login_email", u.NotifyOnLoginEmail)
+		if notifyLoginEmailSet {
+			u.NotifyOnLoginEmail = notifyLoginEmailNext
 		}
-		if _, ok := payload["notify_on_ticket_telegram"]; ok {
-			u.NotifyOnTicketTelegram = boolValue(payload, "notify_on_ticket_telegram", u.NotifyOnTicketTelegram)
+		if notifyTicketTelegramSet {
+			u.NotifyOnTicketTelegram = notifyTicketTelegramNext
 		}
 		if passwordChangeEmailRequiredSet {
 			u.RequireEmailForPasswordChange = passwordChangeEmailRequiredNext

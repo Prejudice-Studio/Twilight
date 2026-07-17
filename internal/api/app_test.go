@@ -2772,6 +2772,34 @@ func TestPasswordSecuritySettingsRejectNonBooleanPayload(t *testing.T) {
 	}
 }
 
+func TestUpdateMeRejectsNonBooleanPreferencePayload(t *testing.T) {
+	app := newTestApp(t)
+	_ = registerAndLogin(t, app, "admin", "Admin123456")
+	userCookies := registerAndLogin(t, app, "strictprofile", "User123456")
+	user, ok := app.store().FindUserByUsername("strictprofile")
+	if !ok {
+		t.Fatal("created user not found")
+	}
+
+	cases := []string{
+		`{"bgm_mode":"true"}`,
+		`{"bgm_manage_mode":1}`,
+		`{"notify_on_login_telegram":"yes"}`,
+		`{"notify_on_login_email":"false"}`,
+		`{"notify_on_ticket_telegram":1}`,
+	}
+	for _, body := range cases {
+		resp := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me", body, userCookies, map[string]string{"X-Twilight-Client": "webui"})
+		if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), string(ErrInvalidPayload)) {
+			t.Fatalf("non-boolean profile preference body=%s status=%d response=%s, want invalid payload", body, resp.Code, resp.Body.String())
+		}
+		updated, _ := app.store().User(user.UID)
+		if updated.BGMMode || updated.BGMManageMode || updated.NotifyOnLoginTelegram || updated.NotifyOnLoginEmail || updated.NotifyOnTicketTelegram {
+			t.Fatalf("non-boolean profile preference should not be persisted after body=%s: %#v", body, updated)
+		}
+	}
+}
+
 func TestPasswordChangesEnforceStrengthServerSide(t *testing.T) {
 	app := newTestApp(t)
 	_ = registerAndLogin(t, app, "admin", "Admin123456")

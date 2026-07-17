@@ -5,7 +5,6 @@ import (
 	"errors"
 	"math/big"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -68,16 +67,11 @@ func (a *App) handleSignin(w http.ResponseWriter, r *http.Request, _ Params) {
 }
 
 func (a *App) handleSigninHistory(w http.ResponseWriter, r *http.Request, _ Params) {
-	si := a.store().Signin(current(r).User.UID)
-	records := append([]store.SigninRecord(nil), si.Records...)
-	sort.Slice(records, func(i, j int) bool { return records[i].CreatedAt > records[j].CreatedAt })
 	limit := queryInt(r, "limit", 30)
 	if limit <= 0 || limit > 365 {
 		limit = 30
 	}
-	if len(records) > limit {
-		records = records[:limit]
-	}
+	records := a.store().SigninHistoryRecords(current(r).User.UID, limit)
 	items := make([]map[string]any, 0, len(records))
 	for _, record := range records {
 		total := record.Total

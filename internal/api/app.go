@@ -1416,6 +1416,18 @@ func strictBoolValue(payload map[string]any, key string) (bool, bool) {
 	return typed, ok
 }
 
+func requireStrictBoolValue(w http.ResponseWriter, payload map[string]any, key string) (value bool, present bool, ok bool) {
+	if _, exists := payload[key]; !exists {
+		return false, false, true
+	}
+	value, valid := strictBoolValue(payload, key)
+	if !valid {
+		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, key+" 必须是布尔值")
+		return false, true, false
+	}
+	return value, true, true
+}
+
 func int64Param(params Params, key string) (int64, error) {
 	return strconv.ParseInt(params[key], 10, 64)
 }

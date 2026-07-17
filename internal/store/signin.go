@@ -11,6 +11,26 @@ func (s *Store) Signin(uid int64) Signin {
 	return s.state.Signin[uid]
 }
 
+func (s *Store) SigninHistoryRecords(uid int64, limit int) []SigninRecord {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if limit <= 0 || limit > maxSigninRecords {
+		limit = 30
+	}
+	records := s.state.Signin[uid].Records
+	if len(records) == 0 {
+		return nil
+	}
+	if limit > len(records) {
+		limit = len(records)
+	}
+	out := make([]SigninRecord, 0, limit)
+	for i := len(records) - 1; i >= 0 && len(out) < limit; i-- {
+		out = append(out, records[i])
+	}
+	return out
+}
+
 func (s *Store) AddSignin(uid int64, points int) (Signin, bool, error) {
 	return s.AddSigninWithOptions(uid, points, nil, true)
 }
