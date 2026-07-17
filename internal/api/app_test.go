@@ -2484,6 +2484,43 @@ func TestRegisterConsumesConfirmedTelegramBindCode(t *testing.T) {
 	}
 }
 
+func TestRegisterBindCodeCreateFailureClearsConfirmedState(t *testing.T) {
+	app := newTestApp(t)
+	now := time.Now().Unix()
+	code := "REGFAIL1234"
+	if err := app.upsertBindCode(store.BindCode{
+		Code:             code,
+		Scene:            "register",
+		Confirmed:        true,
+		TelegramID:       424242,
+		TelegramUsername: "ghost_tg",
+		CreatedAt:        now,
+		ExpiresAt:        now + 600,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, consumedBind, err := app.consumeConfirmedRegisterBindCode(code, now, func(bind store.BindCode) (store.User, store.RegCode, error) {
+		return store.User{}, store.RegCode{}, store.ErrConflict
+	})
+	if !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("consume error=%v want ErrConflict", err)
+	}
+	if consumedBind.Code != code || consumedBind.TelegramID != 424242 {
+		t.Fatalf("consume should return the failed bind for diagnostics: %#v", consumedBind)
+	}
+	if _, ok := app.bindCode(code); ok {
+		t.Fatal("failed register consumption should not leave a confirmed bind code behind")
+	}
+	state := app.telegramBindCodeState(code, 0, "register", now, false)
+	if state.Status != "register_failed" || !state.Invalid || !state.Terminal || state.Confirmed {
+		t.Fatalf("failed register bind code should be terminal failure, got %#v", state)
+	}
+	if _, ok := app.store().FindUserByTelegramID(424242); ok {
+		t.Fatal("failed register consumption should not create a user with the Telegram ID")
+	}
+}
+
 func TestTelegramUserBindWritesAuditLog(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().AuditLogEnabled = true

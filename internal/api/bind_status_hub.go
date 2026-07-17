@@ -145,6 +145,16 @@ func (h *bindStatusHub) consumeConfirmedRegisterBindCode(code string, now int64,
 	}
 	user, consumed, err := create(bind)
 	if err != nil {
+		delete(h.codes, code)
+		h.failures[code] = bindCodeFailure{
+			Code:       code,
+			Status:     "register_failed",
+			ErrorCode:  ErrBindCodeConflict,
+			HTTPStatus: 409,
+			Message:    "注册未完成，请重新获取 Telegram 绑定码后再试",
+			ExpiresAt:  bind.ExpiresAt,
+		}
+		h.notifyLocked(code)
 		return store.User{}, store.RegCode{}, bind, err
 	}
 	delete(h.codes, code)

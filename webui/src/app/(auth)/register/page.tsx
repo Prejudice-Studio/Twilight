@@ -250,6 +250,21 @@ export default function RegisterPage() {
     return false;
   };
 
+  const reconcileBindCodeAfterRegisterFailure = async () => {
+    if (!bindCode) return;
+    try {
+      const res = await api.getRegisterBindCodeStatus(bindCode);
+      const data = res.data;
+      if (data?.terminal && data.invalid) {
+        setBindCode("");
+        setBindCodeExpiry(0);
+        setBindConfirmed(false);
+      }
+    } catch {
+      // Keep current UI state on a transient status-check failure.
+    }
+  };
+
   // ---- Validation ----
 
   const validateAccountStep = (): boolean => {
@@ -339,6 +354,7 @@ export default function RegisterPage() {
       };
       const res = await api.register(payload);
       if (!res.success) {
+        await reconcileBindCodeAfterRegisterFailure();
         toast({
           title: t("auth.register.failed"),
           description:
@@ -360,6 +376,7 @@ export default function RegisterPage() {
         error instanceof ApiError && error.errorCode === ErrCodes.UsernameTaken
           ? t("auth.register.usernameTaken")
           : error.message || t("common.checkNetwork");
+      await reconcileBindCodeAfterRegisterFailure();
       toast({ title: t("auth.register.failed"), description: message, variant: "destructive" });
     } finally {
       setIsRegisterLoading(false);

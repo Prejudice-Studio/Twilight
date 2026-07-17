@@ -32,6 +32,19 @@ func (a *App) telegramBindCodeState(code string, uid int64, requireScene string,
 	if !telegramBindCodePattern.MatchString(code) {
 		return telegramBindCodeState{Code: code, Status: "invalid_format", ErrorCode: ErrTGBindCodeFormat, HTTPStatus: http.StatusBadRequest, Message: "Telegram 绑定码格式不正确", Invalid: true, Terminal: true}
 	}
+	if a.bindStatus != nil {
+		if failure, ok := a.bindStatus.failure(code, now); ok {
+			return telegramBindCodeState{
+				Code:       code,
+				Status:     failure.Status,
+				ErrorCode:  failure.ErrorCode,
+				HTTPStatus: failure.HTTPStatus,
+				Message:    failure.Message,
+				Invalid:    true,
+				Terminal:   true,
+			}
+		}
+	}
 	bind, okBind := a.bindCode(code)
 	if !okBind {
 		if uid != 0 {
@@ -77,18 +90,6 @@ func (a *App) telegramBindCodeState(code string, uid int64, requireScene string,
 		return telegramBindCodeState{Code: code, Status: "expired", ErrorCode: ErrTGBindCodeExpired, HTTPStatus: http.StatusBadRequest, Message: "绑定码无效或已过期", Bind: bind, Invalid: true, Terminal: true}
 	}
 	state := telegramBindCodeState{Code: code, Bind: bind, ExpiresIn: bind.ExpiresAt - now, TelegramID: bind.TelegramID, TelegramUsername: bind.TelegramUsername}
-	if a.bindStatus != nil {
-		if failure, ok := a.bindStatus.failure(code, now); ok {
-			state.Status = failure.Status
-			state.ErrorCode = failure.ErrorCode
-			state.HTTPStatus = failure.HTTPStatus
-			state.Message = failure.Message
-			state.Confirmed = false
-			state.Invalid = true
-			state.Terminal = true
-			return state
-		}
-	}
 	state.Status = "pending"
 	state.Message = "绑定码尚未在 Telegram 中确认"
 	state.Confirmed = false
