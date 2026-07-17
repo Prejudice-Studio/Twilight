@@ -2755,13 +2755,20 @@ func TestPasswordSecuritySettingsRejectNonBooleanPayload(t *testing.T) {
 		t.Fatal("created user not found")
 	}
 
-	resp := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me", `{"emby_password_old_password_required":"true"}`, userCookies, map[string]string{"X-Twilight-Client": "webui"})
-	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), string(ErrInvalidPayload)) {
-		t.Fatalf("non-boolean security preference status=%d body=%s, want invalid payload", resp.Code, resp.Body.String())
+	cases := []string{
+		`{"password_change_email_required":"true"}`,
+		`{"emby_password_email_required":"true"}`,
+		`{"emby_password_old_password_required":"true"}`,
 	}
-	updated, _ := app.store().User(user.UID)
-	if updated.RequireOldPasswordForEmbyPasswordChange {
-		t.Fatal("non-boolean security preference should not be persisted")
+	for _, body := range cases {
+		resp := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me", body, userCookies, map[string]string{"X-Twilight-Client": "webui"})
+		if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), string(ErrInvalidPayload)) {
+			t.Fatalf("non-boolean security preference body=%s status=%d response=%s, want invalid payload", body, resp.Code, resp.Body.String())
+		}
+		updated, _ := app.store().User(user.UID)
+		if updated.RequireEmailForPasswordChange || updated.RequireEmailForEmbyPasswordChange || updated.RequireOldPasswordForEmbyPasswordChange {
+			t.Fatalf("non-boolean security preference should not be persisted after body=%s: %#v", body, updated)
+		}
 	}
 }
 

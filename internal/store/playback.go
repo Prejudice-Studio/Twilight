@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -44,11 +45,17 @@ func (s *Store) UserPlaybackSessions(uid int64, limit int) []PlaybackSession {
 
 const maxEmbyActivityLogs = 10000
 
+var errNoEmbyActivityLogChange = errors.New("emby activity logs unchanged")
+
 func (s *Store) SyncEmbyActivityLogs(entries []EmbyActivityLog) (int, error) {
+	if len(entries) == 0 {
+		return 0, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	added := 0
 	err := s.mutateAndSaveLocked(func() error {
+		changed := false
 		if s.state.NextEmbyActivityLogID <= 0 {
 			maxID := int64(0)
 			for _, entry := range s.state.EmbyActivityLogs {
@@ -57,6 +64,7 @@ func (s *Store) SyncEmbyActivityLogs(entries []EmbyActivityLog) (int, error) {
 				}
 			}
 			s.state.NextEmbyActivityLogID = maxID + 1
+			changed = true
 		}
 		existing := map[int64]int{}
 		for i, entry := range s.state.EmbyActivityLogs {
@@ -67,7 +75,11 @@ func (s *Store) SyncEmbyActivityLogs(entries []EmbyActivityLog) (int, error) {
 				current := s.state.EmbyActivityLogs[index]
 				entry.ID = current.ID
 				entry.CreatedAt = current.CreatedAt
+				if entry == current {
+					continue
+				}
 				s.state.EmbyActivityLogs[index] = entry
+				changed = true
 				continue
 			}
 			if entry.ID == 0 {
@@ -80,6 +92,10 @@ func (s *Store) SyncEmbyActivityLogs(entries []EmbyActivityLog) (int, error) {
 			s.state.EmbyActivityLogs = append(s.state.EmbyActivityLogs, entry)
 			existing[entry.EmbyLogID] = len(s.state.EmbyActivityLogs) - 1
 			added++
+			changed = true
+		}
+		if !changed {
+			return errNoEmbyActivityLogChange
 		}
 		sort.Slice(s.state.EmbyActivityLogs, func(i, j int) bool {
 			if s.state.EmbyActivityLogs[i].Date != s.state.EmbyActivityLogs[j].Date {
@@ -92,6 +108,9 @@ func (s *Store) SyncEmbyActivityLogs(entries []EmbyActivityLog) (int, error) {
 		}
 		return nil
 	})
+	if errors.Is(err, errNoEmbyActivityLogChange) {
+		return added, nil
+	}
 	return added, err
 }
 

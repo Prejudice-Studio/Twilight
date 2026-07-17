@@ -172,6 +172,96 @@ func TestListEmbyActivityLogsFiltersByTargetUserEmbyID(t *testing.T) {
 	}
 }
 
+func TestSyncEmbyActivityLogsEmptyInputIsNoop(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	added, err := st.SyncEmbyActivityLogs(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != 0 {
+		t.Fatalf("empty input added=%d, want 0", added)
+	}
+	if logs := st.ListEmbyActivityLogs(0, 10); len(logs) != 0 {
+		t.Fatalf("empty sync should not create logs: %#v", logs)
+	}
+}
+
+func TestSyncEmbyActivityLogsSkipsUnchangedDuplicates(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	entry := EmbyActivityLog{EmbyLogID: 1001, UserID: "emby-user", Name: "playback.start", Date: 100}
+	added, err := st.SyncEmbyActivityLogs([]EmbyActivityLog{entry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != 1 {
+		t.Fatalf("first sync added=%d, want 1", added)
+	}
+	before := st.ListEmbyActivityLogs(0, 10)
+	if len(before) != 1 {
+		t.Fatalf("first sync logs=%#v", before)
+	}
+
+	added, err = st.SyncEmbyActivityLogs([]EmbyActivityLog{entry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != 0 {
+		t.Fatalf("duplicate sync added=%d, want 0", added)
+	}
+	after := st.ListEmbyActivityLogs(0, 10)
+	if len(after) != 1 {
+		t.Fatalf("duplicate sync should keep one log: %#v", after)
+	}
+	if after[0] != before[0] {
+		t.Fatalf("unchanged duplicate should preserve stored fields: before=%#v after=%#v", before[0], after[0])
+	}
+}
+
+func TestSyncEmbyActivityLogsUpdatesExistingWithoutCountingAdded(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	entry := EmbyActivityLog{EmbyLogID: 2001, UserID: "emby-user", Name: "old", Date: 100}
+	if added, err := st.SyncEmbyActivityLogs([]EmbyActivityLog{entry}); err != nil || added != 1 {
+		t.Fatalf("first sync added=%d err=%v, want 1 nil", added, err)
+	}
+	before := st.ListEmbyActivityLogs(0, 10)[0]
+
+	updated := entry
+	updated.Name = "updated"
+	updated.Date = 200
+	added, err := st.SyncEmbyActivityLogs([]EmbyActivityLog{updated})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != 0 {
+		t.Fatalf("updated existing added=%d, want 0", added)
+	}
+	after := st.ListEmbyActivityLogs(0, 10)
+	if len(after) != 1 {
+		t.Fatalf("updated existing should keep one log: %#v", after)
+	}
+	if after[0].Name != "updated" || after[0].Date != 200 {
+		t.Fatalf("existing log was not updated: %#v", after[0])
+	}
+	if after[0].ID != before.ID || after[0].CreatedAt != before.CreatedAt {
+		t.Fatalf("existing log should preserve local identity fields: before=%#v after=%#v", before, after[0])
+	}
+}
+
 func TestStateEnsureCompactsHistory(t *testing.T) {
 	state := State{
 		LoginLogs:        make([]LoginLog, maxStoredLoginLogs+1),
