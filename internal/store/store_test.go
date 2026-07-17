@@ -904,6 +904,66 @@ func TestCountTicketsMatchesListFilters(t *testing.T) {
 	}
 }
 
+func TestListTicketsPageFiltersAndPaginates(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	var tickets []Ticket
+	for i := 0; i < 6; i++ {
+		ticket, err := st.CreateTicket(Ticket{
+			UID:      int64(1 + i%2),
+			Username: "user",
+			Title:    "Ticket",
+			Content:  "content",
+			Type:     TicketTypeDefault,
+			Status:   TicketStatusOpen,
+			Priority: TicketPriorityMedium,
+		}, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tickets = append(tickets, ticket)
+	}
+	for _, item := range []struct {
+		index  int
+		status string
+	}{
+		{1, TicketStatusResolved},
+		{2, TicketStatusInProgress},
+		{3, TicketStatusClosed},
+		{4, TicketStatusInProgress},
+	} {
+		status := item.status
+		if _, err := st.UpdateTicket(tickets[item.index].ID, TicketUpdate{Status: &status}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	active := st.ListTicketsPage(TicketFilter{ActiveOnly: true}, 2, 2)
+	if active.Total != 4 {
+		t.Fatalf("active total=%d want 4", active.Total)
+	}
+	if got, want := ticketIDs(active.Tickets), []int64{tickets[2].ID, tickets[0].ID}; !sameInt64s(got, want) {
+		t.Fatalf("active page IDs=%v want %v", got, want)
+	}
+
+	resolved := st.ListTicketsPage(TicketFilter{Status: TicketStatusResolved}, 1, 10)
+	if resolved.Total != 1 || len(resolved.Tickets) != 1 || resolved.Tickets[0].ID != tickets[1].ID {
+		t.Fatalf("resolved page=%#v want ticket %d", resolved, tickets[1].ID)
+	}
+
+	empty := st.ListTicketsPage(TicketFilter{ActiveOnly: true}, 99, 10)
+	if empty.Total != 4 || len(empty.Tickets) != 0 {
+		t.Fatalf("out-of-range page=%#v want total 4 and no rows", empty)
+	}
+}
+
+func ticketIDs(tickets []Ticket) []int64 {
+	ids := make([]int64, 0, len(tickets))
+	for _, ticket := range tickets {
+		ids = append(ids, ticket.ID)
+	}
+	return ids
+}
+
 func TestUpdateTicketCanAppendReplyAtomically(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	ticket, err := st.CreateTicket(Ticket{UID: 1, Username: "user", Title: "need help", Content: "content", Type: TicketTypeDefault}, 0, 0)

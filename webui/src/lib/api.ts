@@ -2634,14 +2634,16 @@ class ApiClient {
     return this.toAbsoluteAssetUrl(url) || "";
   }
 
-  async adminListTickets(params: { uid?: number; status?: string; type?: string; priority?: string; all?: boolean } = {}) {
+  async adminListTickets(params: { uid?: number; status?: string; type?: string; priority?: string; all?: boolean; page?: number; per_page?: number } = {}) {
     const query = new URLSearchParams();
     if (params.uid) query.set("uid", String(params.uid));
     if (params.all) query.set("all", "1");
     if (params.status) query.set("status", params.status);
     if (params.type) query.set("type", params.type);
     if (params.priority) query.set("priority", params.priority);
-    return this.request<{ tickets: Ticket[]; total: number; ticket_types: string[] }>(`/admin/tickets?${query.toString()}`);
+    if (params.page) query.set("page", String(params.page));
+    if (params.per_page) query.set("per_page", String(params.per_page));
+    return this.request<{ tickets: Ticket[]; total: number; page?: number; per_page?: number; ticket_types: string[] }>(`/admin/tickets?${query.toString()}`);
   }
 
   async adminGetTicket(id: number) {

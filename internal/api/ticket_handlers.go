@@ -184,6 +184,8 @@ func (a *App) handleToggleTicketNotify(w http.ResponseWriter, r *http.Request, p
 func (a *App) handleAdminTickets(w http.ResponseWriter, r *http.Request, _ Params) {
 	status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status")))
 	showAll := r.URL.Query().Get("all") == "1"
+	page := clamp(queryInt(r, "page", 1), 1, 1000000)
+	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
 	if status == "all" {
 		showAll = true
 		status = ""
@@ -214,8 +216,14 @@ func (a *App) handleAdminTickets(w http.ResponseWriter, r *http.Request, _ Param
 	if status == "" {
 		filter.Status = ""
 	}
-	tickets := a.store().ListTickets(filter)
-	ok(w, "OK", map[string]any{"tickets": ticketDTOs(tickets), "total": len(tickets), "ticket_types": a.store().TicketTypes()})
+	result := a.store().ListTicketsPage(filter, page, perPage)
+	ok(w, "OK", map[string]any{
+		"tickets":      ticketDTOs(result.Tickets),
+		"total":        result.Total,
+		"page":         page,
+		"per_page":     perPage,
+		"ticket_types": a.store().TicketTypes(),
+	})
 }
 
 // handleAdminTicket 返回单个工单及完整对话。管理端接口不受 TicketSystemEnabled 开关限制。

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
@@ -28,6 +28,7 @@ import { TicketImages } from "@/components/ticket-images";
 
 const DEFAULT_TICKET_IMAGE_MAX_SIZE = 5 * 1024 * 1024;
 const DEFAULT_TICKET_IMAGE_MAX_COUNT = 5;
+const ADMIN_TICKET_PAGE_SIZE = 20;
 
 const STATUS_MAP: Record<string, { labelKey: string; className: string; icon: typeof AlertCircle }> = {
   open: { labelKey: "tickets.statusOpen", className: "bg-warning/10 text-warning border-warning/30", icon: AlertCircle },
@@ -59,6 +60,7 @@ export default function AdminTicketsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
+  const [page, setPage] = useState(1);
   const [jumpId, setJumpId] = useState("");
 
   const [editOpen, setEditOpen] = useState(false);
@@ -123,10 +125,20 @@ export default function AdminTicketsPage() {
       status: statusFilter !== "all" ? statusFilter : undefined,
       type: typeFilter !== "all" ? typeFilter : undefined,
       priority: priorityFilter !== "all" ? priorityFilter : undefined,
+      page,
+      per_page: ADMIN_TICKET_PAGE_SIZE,
     });
-    if (res.success && res.data) return { tickets: res.data.tickets, types: res.data.ticket_types || [] };
+    if (res.success && res.data) {
+      return {
+        tickets: res.data.tickets,
+        total: res.data.total || 0,
+        page: res.data.page || page,
+        perPage: res.data.per_page || ADMIN_TICKET_PAGE_SIZE,
+        types: res.data.ticket_types || [],
+      };
+    }
     throw new Error(res.message || t("common.networkError"));
-  }, [statusFilter, typeFilter, priorityFilter, t]);
+  }, [page, statusFilter, typeFilter, priorityFilter, t]);
 
   const { data, isLoading, error, execute: reload } = useAsyncResource(loadTickets, { immediate: true });
 
@@ -170,6 +182,24 @@ export default function AdminTicketsPage() {
 
   const types = Array.isArray(data?.types) && data.types.length ? data.types : DEFAULT_TYPES.map((d) => d.value);
   const tickets = Array.isArray(data?.tickets) ? data.tickets : [];
+  const totalTickets = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalTickets / ADMIN_TICKET_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+  const updateStatusFilter = (value: string) => {
+    setPage(1);
+    setStatusFilter(value);
+  };
+  const updateTypeFilter = (value: string) => {
+    setPage(1);
+    setTypeFilter(value);
+  };
+  const updatePriorityFilter = (value: string) => {
+    setPage(1);
+    setPriorityFilter(value);
+  };
   const typeLabelFor = (value: string) => {
     const known = DEFAULT_TYPES.find((d) => d.value === value);
     return known ? t(known.labelKey as any) : value;
@@ -183,17 +213,17 @@ export default function AdminTicketsPage() {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[repeat(3,minmax(0,12rem))_minmax(13rem,18rem)_1fr_auto_auto] xl:items-end">
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
+        <Select value={statusFilter} onValueChange={updateStatusFilter}>
           <SelectTrigger className="w-full"><SelectValue placeholder={t("adminTickets.filterAll")} /></SelectTrigger>
           <SelectContent>{Object.entries(STATUS_MAP).map(([v, s]) => <SelectItem key={v} value={v}>{t(s.labelKey as any)}</SelectItem>)}<SelectItem value="all">{t("adminTickets.filterAll")}</SelectItem></SelectContent>
         </Select>
-        <Select value={typeFilter} onValueChange={setTypeFilter}>
+        <Select value={typeFilter} onValueChange={updateTypeFilter}>
           <SelectTrigger className="w-full"><SelectValue placeholder={t("adminTickets.filterAllTypes")} /></SelectTrigger>
           <SelectContent><SelectItem value="all">{t("adminTickets.filterAllTypes")}</SelectItem>
             {types.map((tp: string) => <SelectItem key={tp} value={tp}>{typeLabelFor(tp)}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+        <Select value={priorityFilter} onValueChange={updatePriorityFilter}>
           <SelectTrigger className="w-full"><SelectValue placeholder={t("adminTickets.filterAllPriorities")} /></SelectTrigger>
           <SelectContent><SelectItem value="all">{t("adminTickets.filterAllPriorities")}</SelectItem>
             {Object.entries(PRIORITY_MAP).map(([v, p]) => <SelectItem key={v} value={v}>{t(p.labelKey as any)}</SelectItem>)}
@@ -217,7 +247,7 @@ export default function AdminTicketsPage() {
             <ArrowRight className="h-4 w-4" />
           </Button>
         </form>
-        <span className="text-xs text-muted-foreground xl:ml-auto">{t("adminTickets.total", { count: data?.tickets?.length ?? 0 })}</span>
+        <span className="text-xs text-muted-foreground xl:ml-auto">{t("adminTickets.total", { count: totalTickets })}</span>
         <Button variant="outline" size="sm" onClick={async () => {
           try {
             const res = await api.adminGetTicketTypes();
@@ -340,6 +370,30 @@ export default function AdminTicketsPage() {
               </Card>
             );
           })}
+        </div>
+      )}
+
+      {totalPages > 1 && (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((value) => Math.max(1, value - 1))}
+            disabled={isLoading || currentPage <= 1}
+          >
+            {t("common.previousPage")}
+          </Button>
+          <span className="min-w-[6rem] text-center text-xs text-muted-foreground">
+            {t("common.pageStatus", { page: currentPage, pages: totalPages })}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+            disabled={isLoading || currentPage >= totalPages}
+          >
+            {t("common.nextPage")}
+          </Button>
         </div>
       )}
 
