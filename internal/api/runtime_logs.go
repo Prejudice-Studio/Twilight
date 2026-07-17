@@ -189,7 +189,7 @@ func (b *runtimeLogBuffer) append(entry RuntimeLogEntry) {
 	}
 	b.entries = append(b.entries, entry)
 	if len(b.entries) > b.limit {
-		b.entries = append([]RuntimeLogEntry(nil), b.entries[len(b.entries)-b.limit:]...)
+		b.entries = trimRuntimeLogBufferEntries(b.entries, b.limit)
 	}
 	b.cond.Broadcast()
 	b.mu.Unlock()
@@ -200,9 +200,29 @@ func (b *runtimeLogBuffer) setLimit(limit int) {
 	b.mu.Lock()
 	b.limit = limit
 	if len(b.entries) > b.limit {
-		b.entries = append([]RuntimeLogEntry(nil), b.entries[len(b.entries)-b.limit:]...)
+		b.entries = trimRuntimeLogBufferEntries(b.entries, b.limit)
 	}
 	b.mu.Unlock()
+}
+
+func trimRuntimeLogBufferEntries(entries []RuntimeLogEntry, limit int) []RuntimeLogEntry {
+	if limit <= 0 {
+		clear(entries)
+		return nil
+	}
+	if len(entries) <= limit {
+		return entries
+	}
+	start := len(entries) - limit
+	if cap(entries) > limit*2 {
+		out := make([]RuntimeLogEntry, limit)
+		copy(out, entries[start:])
+		clear(entries)
+		return out
+	}
+	copy(entries, entries[start:])
+	clear(entries[limit:])
+	return entries[:limit]
 }
 
 func (b *runtimeLogBuffer) stats() (int, int) {
