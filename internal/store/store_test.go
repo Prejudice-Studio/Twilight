@@ -20,6 +20,130 @@ func newJSONStoreForTest(t *testing.T) *Store {
 	return st
 }
 
+func TestEmbyIDIndexTracksUserLifecycle(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	alpha, err := st.CreateUser(User{Username: "alpha", EmbyID: "emby-alpha", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := st.FindUserByEmbyID("emby-alpha"); !ok || got.UID != alpha.UID {
+		t.Fatalf("created user not found by emby index: ok=%v got=%#v", ok, got)
+	}
+	if _, err := st.CreateUser(User{Username: "duplicate", EmbyID: "emby-alpha", Role: RoleNormal}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate emby id should conflict, got %v", err)
+	}
+
+	updated, err := st.UpdateUser(alpha.UID, func(u *User) error {
+		u.EmbyID = "emby-alpha-new"
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.FindUserByEmbyID("emby-alpha"); ok {
+		t.Fatal("old emby id remained indexed after update")
+	}
+	if got, ok := st.FindUserByEmbyID("emby-alpha-new"); !ok || got.UID != updated.UID {
+		t.Fatalf("updated user not found by new emby id: ok=%v got=%#v", ok, got)
+	}
+
+	beta, err := st.CreateUser(User{Username: "beta", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpdateUser(beta.UID, func(u *User) error {
+		u.EmbyID = "emby-alpha-new"
+		return nil
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("UpdateUser duplicate emby id should conflict, got %v", err)
+	}
+
+	bound, displaced, err := st.BindUserEmbyAtomic(beta.UID, "emby-alpha-new", "beta", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if displaced != alpha.UID || bound.UID != beta.UID {
+		t.Fatalf("unexpected force bind result: displaced=%d bound=%#v", displaced, bound)
+	}
+	if got, ok := st.FindUserByEmbyID("emby-alpha-new"); !ok || got.UID != beta.UID {
+		t.Fatalf("force-bound emby id points to wrong user: ok=%v got=%#v", ok, got)
+	}
+	if alphaAfter, ok := st.User(alpha.UID); !ok || alphaAfter.EmbyID != "" || !alphaAfter.PendingEmby {
+		t.Fatalf("displaced user not unbound correctly: ok=%v user=%#v", ok, alphaAfter)
+	}
+
+	if err := st.DeleteUser(beta.UID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.FindUserByEmbyID("emby-alpha-new"); ok {
+		t.Fatal("deleted user's emby id remained indexed")
+	}
+}
+
+func TestEmbyIDIndexTracksCodeConsumptionCallbacks(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	owner, err := st.CreateUser(User{Username: "owner", EmbyID: "emby-owner", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := st.CreateUser(User{Username: "code-user", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertRegCode(RegCode{Code: "REG-EMBY", Type: 1, Days: 30, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, _, err := st.ConsumeRegCodeAndUpdateUser("REG-EMBY", user.UID, 0, func(u *User, _ RegCode) error {
+		u.EmbyID = "emby-code-user"
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := st.FindUserByEmbyID("emby-code-user"); !ok || got.UID != updated.UID {
+		t.Fatalf("regcode callback emby id not indexed: ok=%v got=%#v", ok, got)
+	}
+
+	conflictUser, err := st.CreateUser(User{Username: "conflict-user", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertRegCode(RegCode{Code: "REG-CONFLICT", Type: 1, Days: 30, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.ConsumeRegCodeAndUpdateUser("REG-CONFLICT", conflictUser.UID, 0, func(u *User, _ RegCode) error {
+		u.EmbyID = owner.EmbyID
+		return nil
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate emby id from regcode callback should conflict, got %v", err)
+	}
+	if rc, ok := st.RegCode("REG-CONFLICT"); !ok || rc.UseCount != 0 || !rc.Active || rc.UsedBy != 0 || len(rc.UsedByUIDs) != 0 {
+		t.Fatalf("conflicting regcode consumption should be rolled back: ok=%v rc=%#v", ok, rc)
+	}
+	if got, ok := st.FindUserByEmbyID(owner.EmbyID); !ok || got.UID != owner.UID {
+		t.Fatalf("owner emby id index changed after rollback: ok=%v got=%#v", ok, got)
+	}
+
+	inviteUser, err := st.CreateUser(User{Username: "invite-user", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertInviteCode(InviteCode{Code: "INV-EMBY", InviterUID: owner.UID, Days: 30, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	inviteUpdated, _, err := st.ConsumeInviteCodeAndUpdateUser("INV-EMBY", inviteUser.UID, 3, 0, func(u *User, _ InviteCode) error {
+		u.EmbyID = "emby-invite-user"
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := st.FindUserByEmbyID("emby-invite-user"); !ok || got.UID != inviteUpdated.UID {
+		t.Fatalf("invite callback emby id not indexed: ok=%v got=%#v", ok, got)
+	}
+}
+
 func TestDeleteRegCodePhysicallyDeletesUsedCode(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	if err := st.UpsertRegCode(RegCode{Code: "USED-REG", Type: 2, Days: 30, ValidityTime: -1, UseCountLimit: 5, UseCount: 1, UsedByUIDs: []int64{101}, UsedByTelegramIDs: []int64{202}, Active: true}); err != nil {

@@ -79,14 +79,24 @@ func (s *Store) SpendSigninPointsAndUpdateUser(uid int64, cost int, fn func(*Use
 		if si.Points < cost {
 			return ErrInsufficientPoints
 		}
+		oldTGID := u.TelegramID
+		oldEmbyID := u.EmbyID
 		si.Points -= cost
 		if fn != nil {
 			if err := fn(&u); err != nil {
 				return err
 			}
 		}
+		if u.TelegramID != oldTGID && s.telegramIDTakenLocked(u.TelegramID, uid) {
+			return ErrConflict
+		}
+		if u.EmbyID != oldEmbyID && s.embyIDTakenLocked(u.EmbyID, uid) {
+			return ErrConflict
+		}
 		s.state.Signin[uid] = si
 		s.state.Users[uid] = u
+		s.maintainTelegramIDIndex(oldTGID, u.TelegramID, uid)
+		s.maintainEmbyIDIndex(oldEmbyID, u.EmbyID, uid)
 		updated = u
 		updatedSignin = si
 		return nil
