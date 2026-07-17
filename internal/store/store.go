@@ -3187,6 +3187,18 @@ func (s *Store) ListMediaRequests(uid int64, all bool) []MediaRequest {
 	return out
 }
 
+func (s *Store) CountMediaRequests(uid int64, all bool) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	count := 0
+	for _, r := range s.state.MediaRequests {
+		if all || r.UID == uid {
+			count++
+		}
+	}
+	return count
+}
+
 func (s *Store) FindMediaRequestByKey(key string) (MediaRequest, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -3796,25 +3808,43 @@ func (s *Store) ListTickets(filter TicketFilter) []Ticket {
 	defer s.mu.RUnlock()
 	out := make([]Ticket, 0)
 	for _, t := range s.state.Tickets {
-		if filter.UID > 0 && t.UID != filter.UID {
-			continue
+		if ticketMatchesFilter(t, filter) {
+			out = append(out, t)
 		}
-		if filter.Status != "" && t.Status != filter.Status {
-			continue
-		}
-		if filter.Type != "" && t.Type != filter.Type {
-			continue
-		}
-		if filter.Priority != "" && t.Priority != filter.Priority {
-			continue
-		}
-		if filter.ActiveOnly && !TicketStatusOpenForQuota(t.Status) {
-			continue
-		}
-		out = append(out, t)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
 	return out
+}
+
+func (s *Store) CountTickets(filter TicketFilter) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	count := 0
+	for _, t := range s.state.Tickets {
+		if ticketMatchesFilter(t, filter) {
+			count++
+		}
+	}
+	return count
+}
+
+func ticketMatchesFilter(t Ticket, filter TicketFilter) bool {
+	if filter.UID > 0 && t.UID != filter.UID {
+		return false
+	}
+	if filter.Status != "" && t.Status != filter.Status {
+		return false
+	}
+	if filter.Type != "" && t.Type != filter.Type {
+		return false
+	}
+	if filter.Priority != "" && t.Priority != filter.Priority {
+		return false
+	}
+	if filter.ActiveOnly && !TicketStatusOpenForQuota(t.Status) {
+		return false
+	}
+	return true
 }
 
 type TicketFilter struct {

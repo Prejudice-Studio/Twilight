@@ -287,6 +287,10 @@ func sameInt64s(left, right []int64) bool {
 	return true
 }
 
+func stringPtr(value string) *string {
+	return &value
+}
+
 func TestDeleteRegCodePhysicallyDeletesUsedCode(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	if err := st.UpsertRegCode(RegCode{Code: "USED-REG", Type: 2, Days: 30, ValidityTime: -1, UseCountLimit: 5, UseCount: 1, UsedByUIDs: []int64{101}, UsedByTelegramIDs: []int64{202}, Active: true}); err != nil {
@@ -669,6 +673,26 @@ func TestCreateMediaRequestEnforcesGlobalActiveLimit(t *testing.T) {
 	}
 }
 
+func TestCountMediaRequestsMatchesListFilters(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	if _, err := st.CreateMediaRequestWithOptions(MediaRequest{UID: 1, Title: "One", Source: "tmdb", MediaID: 1, MediaType: "movie"}, MediaRequestCreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateMediaRequestWithOptions(MediaRequest{UID: 1, Title: "Two", Source: "tmdb", MediaID: 2, MediaType: "movie"}, MediaRequestCreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateMediaRequestWithOptions(MediaRequest{UID: 2, Title: "Other", Source: "tmdb", MediaID: 3, MediaType: "movie"}, MediaRequestCreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := st.CountMediaRequests(1, false), len(st.ListMediaRequests(1, false)); got != want {
+		t.Fatalf("user media request count=%d want list len %d", got, want)
+	}
+	if got, want := st.CountMediaRequests(0, true), len(st.ListMediaRequests(0, true)); got != want {
+		t.Fatalf("all media request count=%d want list len %d", got, want)
+	}
+}
+
 func TestCreateTicketEnforcesUserOpenLimitAtomically(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	const attempts = 20
@@ -718,6 +742,38 @@ func TestCreateTicketEnforcesGlobalOpenLimit(t *testing.T) {
 	}
 	if _, err := st.CreateTicket(Ticket{UID: 2, Username: "b", Title: "two", Content: "content", Type: TicketTypeDefault}, 0, 1); !errors.Is(err, ErrTicketGlobalOpenLimit) {
 		t.Fatalf("expected global limit error, got %v", err)
+	}
+}
+
+func TestCountTicketsMatchesListFilters(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	first, err := st.CreateTicket(Ticket{UID: 1, Username: "a", Title: "one", Content: "content", Type: TicketTypeDefault, Priority: TicketPriorityMedium}, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateTicket(Ticket{UID: 1, Username: "a", Title: "two", Content: "content", Type: "bug", Priority: TicketPriorityHigh}, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateTicket(Ticket{UID: 2, Username: "b", Title: "three", Content: "content", Type: TicketTypeDefault, Priority: TicketPriorityLow}, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpdateTicket(first.ID, TicketUpdate{Status: stringPtr(TicketStatusClosed)}); err != nil {
+		t.Fatal(err)
+	}
+
+	filters := []TicketFilter{
+		{},
+		{UID: 1},
+		{Type: TicketTypeDefault},
+		{Priority: TicketPriorityHigh},
+		{Status: TicketStatusClosed},
+		{ActiveOnly: true},
+		{UID: 1, Type: "bug", Priority: TicketPriorityHigh, ActiveOnly: true},
+	}
+	for _, filter := range filters {
+		if got, want := st.CountTickets(filter), len(st.ListTickets(filter)); got != want {
+			t.Fatalf("ticket count for filter=%#v got=%d want list len %d", filter, got, want)
+		}
 	}
 }
 

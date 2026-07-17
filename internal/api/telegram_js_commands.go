@@ -770,22 +770,22 @@ func (a *App) developerJSDBCount(name string, user *store.User) (int, bool) {
 		return a.store().CountInviteCodes(), true
 	case "media_requests":
 		if admin {
-			return len(a.store().ListMediaRequests(0, true)), true
+			return a.store().CountMediaRequests(0, true), true
 		}
 		if user == nil || user.UID == 0 {
 			return 0, false
 		}
-		return len(a.store().ListMediaRequests(user.UID, false)), true
+		return a.store().CountMediaRequests(user.UID, false), true
 	case "announcements":
 		return len(a.store().ListAnnouncements(false)), true
 	case "tickets":
 		if admin {
-			return len(a.store().ListTickets(store.TicketFilter{})), true
+			return a.store().CountTickets(store.TicketFilter{}), true
 		}
 		if user == nil || user.UID == 0 {
 			return 0, false
 		}
-		return len(a.store().ListTickets(store.TicketFilter{UID: user.UID})), true
+		return a.store().CountTickets(store.TicketFilter{UID: user.UID}), true
 	case "developer_js_presets":
 		if !admin {
 			return 0, false
@@ -1617,8 +1617,8 @@ func (a *App) developerJSSystemStats(user *store.User) map[string]any {
 		result["admin_counts"] = map[string]any{
 			"regcodes":             len(a.store().ListRegCodes()),
 			"invite_codes":         a.store().CountInviteCodes(),
-			"media_requests":       len(a.store().ListMediaRequests(0, true)),
-			"tickets":              len(a.store().ListTickets(store.TicketFilter{})),
+			"media_requests":       a.store().CountMediaRequests(0, true),
+			"tickets":              a.store().CountTickets(store.TicketFilter{}),
 			"developer_js_presets": len(a.store().ListDeveloperJSPresets()),
 		}
 	}
