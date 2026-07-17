@@ -70,6 +70,32 @@ func TestQueryAuditLogsReturnsDeepCopiedDetails(t *testing.T) {
 	}
 }
 
+func TestQueryAuditLogsSearchMatchesFieldsWithoutJoinedHaystack(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	st.mu.Lock()
+	st.state.AuditLogs = []AuditLog{
+		{ID: 1, UID: 42, TargetUID: 99, Username: "Alice", Action: "delete_user", Category: "admin", IP: "203.0.113.9", CreatedAt: 10},
+		{ID: 2, UID: 7, Username: "Bob", Action: "login", Category: "user", IP: "198.51.100.8", CreatedAt: 20},
+	}
+	if err := st.saveLocked(); err != nil {
+		st.mu.Unlock()
+		t.Fatal(err)
+	}
+	st.mu.Unlock()
+
+	for _, query := range []string{"alice", "DELETE", "203.0.113", "42", "99"} {
+		page := st.QueryAuditLogs(AuditLogQuery{Search: query, Limit: 10})
+		if page.Total != 1 || len(page.Logs) != 1 || page.Logs[0].ID != 1 {
+			t.Fatalf("search %q returned total=%d logs=%#v, want only audit #1", query, page.Total, page.Logs)
+		}
+	}
+
+	compat := st.QueryAuditLogs(AuditLogQuery{Search: "alice delete_user", Limit: 10})
+	if compat.Total != 1 || len(compat.Logs) != 1 || compat.Logs[0].ID != 1 {
+		t.Fatalf("multi-token search should keep joined-field compatibility, got total=%d logs=%#v", compat.Total, compat.Logs)
+	}
+}
+
 func auditLogIDs(logs []AuditLog) []int64 {
 	out := make([]int64, 0, len(logs))
 	for _, log := range logs {

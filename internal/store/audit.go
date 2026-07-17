@@ -145,17 +145,46 @@ func auditLogMatchesQuery(entry AuditLog, query AuditLogQuery) bool {
 	if query.Search == "" {
 		return true
 	}
-	haystack := strings.ToLower(strings.Join([]string{
-		entry.Username,
-		entry.Action,
-		entry.Category,
-		entry.Source,
-		entry.Method,
-		entry.IP,
-		formatInt64(entry.UID),
-		formatInt64(entry.TargetUID),
-	}, " "))
-	return strings.Contains(haystack, query.Search)
+	return auditLogMatchesSearch(entry, query.Search)
+}
+
+func auditLogMatchesSearch(entry AuditLog, search string) bool {
+	if strings.Contains(search, " ") {
+		return strings.Contains(auditLogSearchHaystack(entry), search)
+	}
+	return containsLower(entry.Username, search) ||
+		containsLower(entry.Action, search) ||
+		containsLower(entry.Category, search) ||
+		containsLower(entry.Source, search) ||
+		containsLower(entry.Method, search) ||
+		containsLower(entry.IP, search) ||
+		strings.Contains(formatInt64(entry.UID), search) ||
+		strings.Contains(formatInt64(entry.TargetUID), search)
+}
+
+func containsLower(value, search string) bool {
+	return value != "" && strings.Contains(strings.ToLower(value), search)
+}
+
+func auditLogSearchHaystack(entry AuditLog) string {
+	var b strings.Builder
+	b.Grow(len(entry.Username) + len(entry.Action) + len(entry.Category) + len(entry.Source) + len(entry.Method) + len(entry.IP) + 44)
+	b.WriteString(entry.Username)
+	b.WriteByte(' ')
+	b.WriteString(entry.Action)
+	b.WriteByte(' ')
+	b.WriteString(entry.Category)
+	b.WriteByte(' ')
+	b.WriteString(entry.Source)
+	b.WriteByte(' ')
+	b.WriteString(entry.Method)
+	b.WriteByte(' ')
+	b.WriteString(entry.IP)
+	b.WriteByte(' ')
+	b.WriteString(formatInt64(entry.UID))
+	b.WriteByte(' ')
+	b.WriteString(formatInt64(entry.TargetUID))
+	return strings.ToLower(b.String())
 }
 
 func normalizeAuditLogSortField(value string) string {
