@@ -1572,42 +1572,16 @@ func (a *App) developerJSSystemAPI(vm *goja.Runtime, user *store.User) map[strin
 
 func (a *App) developerJSSystemStats(user *store.User) map[string]any {
 	admin := user != nil && user.Role == store.RoleAdmin
-	users := a.store().ListUsers()
-	active := 0
-	admins := 0
-	telegramBound := 0
-	embyBound := 0
-	emailBound := 0
-	emailVerified := 0
-	for _, u := range users {
-		if u.Active {
-			active++
-		}
-		if u.Role == store.RoleAdmin {
-			admins++
-		}
-		if u.TelegramID != 0 {
-			telegramBound++
-		}
-		if strings.TrimSpace(u.EmbyID) != "" {
-			embyBound++
-		}
-		if strings.TrimSpace(u.Email) != "" {
-			emailBound++
-		}
-		if u.EmailVerified {
-			emailVerified++
-		}
-	}
+	userCounts := a.store().UserSummaryCounts()
 	result := map[string]any{
 		"users": map[string]any{
-			"total":             len(users),
-			"active":            active,
-			"admins":            admins,
-			"telegram_bound":    telegramBound,
-			"emby_bound":        embyBound,
-			"email_bound":       emailBound,
-			"email_verified":    emailVerified,
+			"total":             userCounts.Total,
+			"active":            userCounts.Active,
+			"admins":            userCounts.Admins,
+			"telegram_bound":    userCounts.TelegramBound,
+			"emby_bound":        userCounts.EmbyBound,
+			"email_bound":       userCounts.EmailBound,
+			"email_verified":    userCounts.EmailVerified,
 			"admin_detail_view": admin,
 		},
 		"visible_announcements": a.store().CountAnnouncements(false),

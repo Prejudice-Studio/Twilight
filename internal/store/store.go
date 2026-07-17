@@ -176,6 +176,16 @@ type User struct {
 	RebindingSince                          int64    `json:"rebinding_since,omitempty"`
 }
 
+type UserSummaryCounts struct {
+	Total         int
+	Active        int
+	Admins        int
+	TelegramBound int
+	EmbyBound     int
+	EmailBound    int
+	EmailVerified int
+}
+
 type APIKey struct {
 	ID           int64    `json:"id"`
 	UID          int64    `json:"uid"`
@@ -5107,6 +5117,33 @@ func (s *Store) CountUsersBy(predicate func(User) bool) int {
 		}
 	}
 	return count
+}
+
+func (s *Store) UserSummaryCounts() UserSummaryCounts {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	counts := UserSummaryCounts{Total: len(s.state.Users)}
+	for _, u := range s.state.Users {
+		if u.Active {
+			counts.Active++
+		}
+		if u.Role == RoleAdmin {
+			counts.Admins++
+		}
+		if u.TelegramID != 0 {
+			counts.TelegramBound++
+		}
+		if strings.TrimSpace(u.EmbyID) != "" {
+			counts.EmbyBound++
+		}
+		if strings.TrimSpace(u.Email) != "" {
+			counts.EmailBound++
+		}
+		if u.EmailVerified {
+			counts.EmailVerified++
+		}
+	}
+	return counts
 }
 
 func appendUniqueInt64(values []int64, value int64) []int64 {

@@ -229,6 +229,34 @@ func TestUserIdentityIndexesTrackUsernameAndEmailLifecycle(t *testing.T) {
 	}
 }
 
+func TestUserSummaryCountsScansWithoutListSemantics(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	if _, err := st.CreateUser(User{Username: "admin", Role: RoleAdmin, TelegramID: 1001, EmbyID: "emby-admin", Email: "admin@example.com", EmailVerified: true}); err != nil {
+		t.Fatal(err)
+	}
+	inactive, err := st.CreateUser(User{Username: "inactive", Role: RoleNormal, Email: "inactive@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpdateUser(inactive.UID, func(u *User) error {
+		u.Active = false
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateUser(User{Username: "blank", Role: RoleNormal, EmbyID: "   ", Email: "   "}); err != nil {
+		t.Fatal(err)
+	}
+
+	counts := st.UserSummaryCounts()
+	if counts.Total != 3 || counts.Active != 2 || counts.Admins != 1 {
+		t.Fatalf("unexpected base user counts: %#v", counts)
+	}
+	if counts.TelegramBound != 1 || counts.EmbyBound != 1 || counts.EmailBound != 2 || counts.EmailVerified != 1 {
+		t.Fatalf("unexpected binding counts: %#v", counts)
+	}
+}
+
 func TestListUsersKeepsUIDOrderAcrossUserLifecycle(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	alpha, err := st.CreateUser(User{Username: "alpha", Role: RoleNormal})
