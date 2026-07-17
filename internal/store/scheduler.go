@@ -45,10 +45,7 @@ func (s *Store) AddSchedulerRunReturning(run SchedulerRun) (SchedulerRun, error)
 		run.Trigger = "manual"
 	}
 	normalizeSchedulerRunTimestamps(&run)
-	s.state.SchedulerRuns = append([]SchedulerRun{run}, s.state.SchedulerRuns...)
-	if len(s.state.SchedulerRuns) > maxStoredSchedulerRuns {
-		s.state.SchedulerRuns = s.state.SchedulerRuns[:maxStoredSchedulerRuns]
-	}
+	s.state.SchedulerRuns = prependBoundedHead(s.state.SchedulerRuns, run, maxStoredSchedulerRuns)
 	return run, s.saveLocked()
 }
 
@@ -103,10 +100,7 @@ func (s *Store) TryStartSchedulerRun(run SchedulerRun, staleBeforeUnix, nowUnix 
 		run.Trigger = "manual"
 	}
 	normalizeSchedulerRunTimestamps(&run)
-	s.state.SchedulerRuns = append([]SchedulerRun{run}, s.state.SchedulerRuns...)
-	if len(s.state.SchedulerRuns) > maxStoredSchedulerRuns {
-		s.state.SchedulerRuns = s.state.SchedulerRuns[:maxStoredSchedulerRuns]
-	}
+	s.state.SchedulerRuns = prependBoundedHead(s.state.SchedulerRuns, run, maxStoredSchedulerRuns)
 	if err := s.saveLocked(); err != nil {
 		s.state = prev
 		return SchedulerRun{}, false, err

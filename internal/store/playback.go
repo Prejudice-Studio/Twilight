@@ -155,7 +155,7 @@ func (s *Store) AddPlaybackRecordIdempotent(record PlaybackRecord) (bool, error)
 			}
 		}
 	}
-	s.prependPlaybackRecordLocked(record)
+	s.state.PlaybackRecords = prependBoundedHead(s.state.PlaybackRecords, record, maxStoredPlaybackRecords)
 	if err := s.saveLocked(); err != nil {
 		return false, err
 	}
@@ -166,31 +166,6 @@ func (s *Store) AddPlaybackRecordIdempotent(record PlaybackRecord) (bool, error)
 		}
 	}
 	return true, nil
-}
-
-func (s *Store) prependPlaybackRecordLocked(record PlaybackRecord) {
-	records := s.state.PlaybackRecords
-	if len(records) >= maxStoredPlaybackRecords {
-		if maxStoredPlaybackRecords <= 0 {
-			s.state.PlaybackRecords = nil
-			return
-		}
-		if cap(records) > maxStoredPlaybackRecords {
-			compacted := make([]PlaybackRecord, maxStoredPlaybackRecords)
-			copy(compacted, records[:maxStoredPlaybackRecords])
-			records = compacted
-		} else {
-			records = records[:maxStoredPlaybackRecords]
-		}
-		copy(records[1:], records[:maxStoredPlaybackRecords-1])
-		records[0] = record
-		s.state.PlaybackRecords = records
-		return
-	}
-	records = append(records, PlaybackRecord{})
-	copy(records[1:], records[:len(records)-1])
-	records[0] = record
-	s.state.PlaybackRecords = records
 }
 
 func (s *Store) PlaybackRecords(uid int64, since int64, limit int) []PlaybackRecord {

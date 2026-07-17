@@ -17,10 +17,7 @@ func (s *Store) AddLoginLog(log LoginLog) error {
 	if log.Time == 0 {
 		log.Time = time.Now().Unix()
 	}
-	s.state.LoginLogs = append([]LoginLog{log}, s.state.LoginLogs...)
-	if len(s.state.LoginLogs) > maxStoredLoginLogs {
-		s.state.LoginLogs = compactHead(s.state.LoginLogs, maxStoredLoginLogs)
-	}
+	s.state.LoginLogs = prependBoundedHead(s.state.LoginLogs, log, maxStoredLoginLogs)
 	return s.saveLocked()
 }
 

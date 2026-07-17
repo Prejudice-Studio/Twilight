@@ -28,6 +28,38 @@ func TestAddSchedulerRunNormalizesDefaultsAndLegacyEndedAt(t *testing.T) {
 	}
 }
 
+func TestSchedulerRunPrependCompactsOversizedCapacity(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	st.mu.Lock()
+	st.state.SchedulerRuns = make([]SchedulerRun, maxStoredSchedulerRuns, maxStoredSchedulerRuns*2)
+	for i := range st.state.SchedulerRuns {
+		st.state.SchedulerRuns[i] = SchedulerRun{ID: int64(i + 1), JobID: "bulk", Status: "success", StartedAt: int64(maxStoredSchedulerRuns - i)}
+	}
+	st.mu.Unlock()
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := st.AddSchedulerRunReturning(SchedulerRun{JobID: "new", Status: "success", StartedAt: int64(maxStoredSchedulerRuns + 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(st.state.SchedulerRuns); got != maxStoredSchedulerRuns {
+		t.Fatalf("expected prune to %d runs, got %d", maxStoredSchedulerRuns, got)
+	}
+	if got := cap(st.state.SchedulerRuns); got != maxStoredSchedulerRuns {
+		t.Fatalf("expected compacted capacity %d, got %d", maxStoredSchedulerRuns, got)
+	}
+	if got := st.state.SchedulerRuns[0].ID; got != run.ID {
+		t.Fatalf("expected newest run at head, got id=%d want=%d", got, run.ID)
+	}
+}
+
 func TestSetSchedulerScheduleDeletesCustomWhenDefault(t *testing.T) {
 	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
 	if err != nil {

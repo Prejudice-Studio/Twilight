@@ -64,3 +64,34 @@ func TestLoginLogDefaultsAndPrunes(t *testing.T) {
 		t.Fatalf("expected prune to %d logs, got %d", maxStoredLoginLogs, got)
 	}
 }
+
+func TestLoginLogPrependCompactsOversizedCapacity(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	st.mu.Lock()
+	st.state.LoginLogs = make([]LoginLog, maxStoredLoginLogs, maxStoredLoginLogs*2)
+	for i := range st.state.LoginLogs {
+		st.state.LoginLogs[i] = LoginLog{UID: 1, DeviceName: "bulk", Time: int64(maxStoredLoginLogs - i)}
+	}
+	st.mu.Unlock()
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.AddLoginLog(LoginLog{UID: 1, DeviceName: "new", Time: int64(maxStoredLoginLogs + 1)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(st.state.LoginLogs); got != maxStoredLoginLogs {
+		t.Fatalf("expected prune to %d logs, got %d", maxStoredLoginLogs, got)
+	}
+	if got := cap(st.state.LoginLogs); got != maxStoredLoginLogs {
+		t.Fatalf("expected compacted capacity %d, got %d", maxStoredLoginLogs, got)
+	}
+	if got := st.state.LoginLogs[0].DeviceName; got != "new" {
+		t.Fatalf("expected newest log at head, got %q", got)
+	}
+}
