@@ -109,6 +109,7 @@ const READ_RESPONSE_CACHE_MAX_ENTRIES = 80;
 
 const inFlightReadRequests = new Map<string, { promise: Promise<ApiResponse<unknown>>; startedAt: number }>();
 const readResponseCache = new Map<string, { data: ApiResponse<unknown>; cachedAt: number }>();
+let readCacheEpoch = 0;
 
 function headerCacheKey(headers: Record<string, string>): string {
   return Object.entries(headers)
@@ -174,13 +175,14 @@ function setCachedReadResponse(key: string, data: ApiResponse<unknown>): void {
   readResponseCache.set(key, { data: cloneApiResponse(data), cachedAt: Date.now() });
 }
 
-function clearReadResponseCache(): void {
+function invalidateReadCaches(): void {
   readResponseCache.clear();
+  inFlightReadRequests.clear();
+  readCacheEpoch++;
 }
 
 export function clearApiRequestCaches(): void {
-  readResponseCache.clear();
-  inFlightReadRequests.clear();
+  invalidateReadCaches();
 }
 
 /**
@@ -367,6 +369,7 @@ export async function apiRequest<T>(
   const url = `${API_BASE}/api/v1${endpoint}`;
   const isReadRequest = (method === "GET" || method === "HEAD") && options.body === undefined;
   const effectiveCache = options.cache ?? (isReadRequest ? "no-cache" : "no-store");
+  const requestReadCacheEpoch = readCacheEpoch;
   const canShareRead = isReadRequest && !options.signal?.aborted && isSharedReadAllowed(url, method, headers, effectiveCache);
   const canUseReadCache = canShareRead && extra.cacheRead !== false;
   const cacheKey = canUseReadCache ? requestCacheKey(url, method, headers) : "";
@@ -391,7 +394,7 @@ export async function apiRequest<T>(
     return promise as Promise<ApiResponse<T>>;
   }
   if (!isReadRequest) {
-    clearReadResponseCache();
+    invalidateReadCaches();
   }
 
   const timeoutMs = extra.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
@@ -428,7 +431,7 @@ export async function apiRequest<T>(
   }
 
   const data = await parseApiResponse<T>(response, endpoint, method);
-  if (isReadRequest && response.ok && data?.success !== false && cacheKey) {
+  if (isReadRequest && response.ok && data?.success !== false && cacheKey && requestReadCacheEpoch === readCacheEpoch) {
     setCachedReadResponse(cacheKey, data as ApiResponse<unknown>);
   }
 
