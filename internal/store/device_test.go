@@ -52,4 +52,34 @@ func TestDeviceLifecycleDefaultsSortsAndDeletes(t *testing.T) {
 			t.Fatal("device was not deleted")
 		}
 	}
+	if err := st.DeleteDevice(uid, "missing"); err != nil {
+		t.Fatalf("deleting a missing device should be idempotent, got %v", err)
+	}
+}
+
+func TestUpdateDeviceKeepsKeyIdentityStable(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	if err := st.UpdateDevice(7, "browser", func(d *Device) {
+		d.UID = 999
+		d.DeviceID = "other"
+		d.DeviceName = "Browser"
+		d.LastSeen = 123
+	}); err != nil {
+		t.Fatal(err)
+	}
+	devices := st.ListDevices(7)
+	if len(devices) != 1 {
+		t.Fatalf("expected one device for original uid, got %#v", devices)
+	}
+	if devices[0].UID != 7 || devices[0].DeviceID != "browser" {
+		t.Fatalf("device update must keep key identity stable, got %#v", devices[0])
+	}
+	if other := st.ListDevices(999); len(other) != 0 {
+		t.Fatalf("device should not leak to mutated uid: %#v", other)
+	}
 }

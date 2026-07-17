@@ -17,8 +17,21 @@ func (s *Store) UpsertDevice(d Device) error {
 	if d.LastSeen == 0 {
 		d.LastSeen = d.FirstSeen
 	}
-	s.state.Devices[deviceKey(d.UID, d.DeviceID)] = d
-	return s.saveLocked()
+	key := deviceKey(d.UID, d.DeviceID)
+	previous, existed := s.state.Devices[key]
+	if existed && previous == d {
+		return nil
+	}
+	s.state.Devices[key] = d
+	if err := s.saveLocked(); err != nil {
+		if existed {
+			s.state.Devices[key] = previous
+		} else {
+			delete(s.state.Devices, key)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *Store) ListDevices(uid int64) []Device {
@@ -41,14 +54,28 @@ func (s *Store) UpdateDevice(uid int64, deviceID string, fn func(*Device)) error
 		return err
 	}
 	key := deviceKey(uid, deviceID)
-	d, ok := s.state.Devices[key]
-	if !ok {
+	d, existed := s.state.Devices[key]
+	if !existed {
 		now := time.Now().Unix()
 		d = Device{UID: uid, DeviceID: deviceID, DeviceName: deviceID, FirstSeen: now, LastSeen: now}
 	}
+	previous := d
 	fn(&d)
+	d.UID = uid
+	d.DeviceID = deviceID
+	if existed && previous == d {
+		return nil
+	}
 	s.state.Devices[key] = d
-	return s.saveLocked()
+	if err := s.saveLocked(); err != nil {
+		if existed {
+			s.state.Devices[key] = previous
+		} else {
+			delete(s.state.Devices, key)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *Store) DeleteDevice(uid int64, deviceID string) error {
@@ -57,8 +84,17 @@ func (s *Store) DeleteDevice(uid int64, deviceID string) error {
 	if err := s.refreshLocked(); err != nil {
 		return err
 	}
-	delete(s.state.Devices, deviceKey(uid, deviceID))
-	return s.saveLocked()
+	key := deviceKey(uid, deviceID)
+	previous, existed := s.state.Devices[key]
+	if !existed {
+		return nil
+	}
+	delete(s.state.Devices, key)
+	if err := s.saveLocked(); err != nil {
+		s.state.Devices[key] = previous
+		return err
+	}
+	return nil
 }
 
 // EnforceDeviceLimit 仅保留某用户最近活跃的 max 台设备（按 LastSeen 倒序），淘汰
@@ -92,18 +128,29 @@ func (s *Store) EnforceDeviceLimit(uid int64, max int) error {
 		return nil
 	}
 	sort.Slice(active, func(i, j int) bool { return active[i].dev.LastSeen > active[j].dev.LastSeen })
+	var previous map[string]Device
 	changed := false
 	for i, item := range active {
 		if i < max || item.dev.Trusted {
 			continue // 在名额内，或受信任 → 保留
 		}
+		if previous == nil {
+			previous = make(map[string]Device)
+		}
+		previous[item.key] = item.dev
 		delete(s.state.Devices, item.key)
 		changed = true
 	}
 	if !changed {
 		return nil
 	}
-	return s.saveLocked()
+	if err := s.saveLocked(); err != nil {
+		for key, dev := range previous {
+			s.state.Devices[key] = dev
+		}
+		return err
+	}
+	return nil
 }
 
 func deviceKey(uid int64, deviceID string) string {
