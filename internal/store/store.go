@@ -5467,19 +5467,38 @@ func cloneBangumiMap(value map[string]any) map[string]any {
 	if value == nil {
 		return nil
 	}
-	var copied map[string]any
-	data, err := json.Marshal(value)
-	if err == nil {
-		_ = json.Unmarshal(data, &copied)
-	}
-	if copied != nil {
-		return copied
-	}
-	copied = make(map[string]any, len(value))
+	copied := make(map[string]any, len(value))
 	for key, item := range value {
-		copied[key] = item
+		copied[key] = cloneBangumiValue(item)
 	}
 	return copied
+}
+
+func cloneBangumiValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneBangumiMap(typed)
+	case []any:
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			out[i] = cloneBangumiValue(item)
+		}
+		return out
+	case []map[string]any:
+		return cloneBangumiMapSlice(typed)
+	case []string:
+		return append([]string(nil), typed...)
+	case []int:
+		return append([]int(nil), typed...)
+	case []int64:
+		return append([]int64(nil), typed...)
+	case []float64:
+		return append([]float64(nil), typed...)
+	case []bool:
+		return append([]bool(nil), typed...)
+	default:
+		return value
+	}
 }
 
 func cloneBangumiMapSlice(entries []map[string]any) []map[string]any {

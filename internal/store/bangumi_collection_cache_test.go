@@ -25,6 +25,9 @@ func TestBangumiCollectionCacheCloneAndDelete(t *testing.T) {
 			"subject_id": float64(1001),
 			"subject": map[string]any{
 				"name": "demo",
+				"images": []any{
+					map[string]any{"url": "before"},
+				},
 			},
 		}},
 	}
@@ -45,6 +48,7 @@ func TestBangumiCollectionCacheCloneAndDelete(t *testing.T) {
 	}
 	cached.Entries[0]["subject_id"] = float64(9999)
 	cached.Entries[0]["subject"].(map[string]any)["name"] = "mutated"
+	cached.Entries[0]["subject"].(map[string]any)["images"].([]any)[0].(map[string]any)["url"] = "mutated"
 
 	cachedAgain, ok := st.BangumiCollectionCache(42, 3)
 	if !ok {
@@ -55,6 +59,9 @@ func TestBangumiCollectionCacheCloneAndDelete(t *testing.T) {
 	}
 	if got := cachedAgain.Entries[0]["subject"].(map[string]any)["name"]; got != "demo" {
 		t.Fatalf("nested cache entry was not cloned: name=%v", got)
+	}
+	if got := cachedAgain.Entries[0]["subject"].(map[string]any)["images"].([]any)[0].(map[string]any)["url"]; got != "before" {
+		t.Fatalf("nested cache slice was not cloned: url=%v", got)
 	}
 
 	if err := st.UpsertBangumiCollectionCache(BangumiCollectionCacheEntry{UID: 42, Type: 1, Entries: []map[string]any{{
