@@ -25,7 +25,7 @@ func TestEmailVerificationDTOSanitizes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dto := app.emailVerificationDTO(rec, now)
+	dto := app.emailVerificationDTO(rec, now, "alice")
 	if _, leaked := dto["code_hash"]; leaked {
 		t.Fatal("DTO must not expose a code_hash field")
 	}
@@ -43,7 +43,7 @@ func TestEmailVerificationDTOSanitizes(t *testing.T) {
 
 	expiredRec := rec
 	expiredRec.ExpiresAt = now - 1
-	if app.emailVerificationDTO(expiredRec, now)["expired"] != true {
+	if app.emailVerificationDTO(expiredRec, now, "alice")["expired"] != true {
 		t.Fatal("record past ExpiresAt should be flagged expired")
 	}
 

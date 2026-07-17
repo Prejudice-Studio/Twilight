@@ -3,6 +3,7 @@ package store
 import (
 	"crypto/subtle"
 	"errors"
+	"sort"
 	"strings"
 )
 
@@ -28,6 +29,26 @@ type EmailVerification struct {
 	CreatedAt   int64  `json:"created_at"`
 	ExpiresAt   int64  `json:"expires_at"`
 	LastSentAt  int64  `json:"last_sent_at"`
+}
+
+type EmailVerificationAccountSnapshot struct {
+	UID              int64
+	Username         string
+	Email            string
+	EmailVerified    bool
+	EmailVerifiedAt  int64
+	TelegramID       int64
+	TelegramUsername string
+	Role             int
+	Active           bool
+}
+
+type EmailVerificationAdminSnapshot struct {
+	Records        []EmailVerification
+	UsernamesByUID map[int64]string
+	Accounts       []EmailVerificationAccountSnapshot
+	Verified       int
+	ExpiredPending int
 }
 
 // EmailVerificationResult 是 ConsumeEmailVerificationAtomic 的判定结果。
@@ -150,6 +171,64 @@ func (s *Store) ListEmailVerifications() []EmailVerification {
 		out = append(out, v)
 	}
 	return out
+}
+
+func (s *Store) EmailVerificationAdminSnapshot(now int64) EmailVerificationAdminSnapshot {
+	s.mu.RLock()
+	records := make([]EmailVerification, 0, len(s.state.EmailVerifications))
+	var usernames map[int64]string
+	expiredPending := 0
+	for _, v := range s.state.EmailVerifications {
+		if v.ExpiresAt > 0 && v.ExpiresAt <= now {
+			expiredPending++
+		}
+		if v.UID != 0 {
+			if u, ok := s.state.Users[v.UID]; ok {
+				if usernames == nil {
+					usernames = make(map[int64]string)
+				}
+				usernames[v.UID] = u.Username
+			}
+		}
+		records = append(records, v)
+	}
+	accounts := make([]EmailVerificationAccountSnapshot, 0)
+	verified := 0
+	for _, uid := range s.userUIDs {
+		u, ok := s.state.Users[uid]
+		if !ok || strings.TrimSpace(u.Email) == "" {
+			continue
+		}
+		if u.EmailVerified {
+			verified++
+		}
+		accounts = append(accounts, EmailVerificationAccountSnapshot{
+			UID:              u.UID,
+			Username:         u.Username,
+			Email:            u.Email,
+			EmailVerified:    u.EmailVerified,
+			EmailVerifiedAt:  u.EmailVerifiedAt,
+			TelegramID:       u.TelegramID,
+			TelegramUsername: u.TelegramUsername,
+			Role:             u.Role,
+			Active:           u.Active,
+		})
+	}
+	s.mu.RUnlock()
+
+	sort.SliceStable(records, func(i, j int) bool {
+		if records[i].LastSentAt == records[j].LastSentAt {
+			return records[i].ID < records[j].ID
+		}
+		return records[i].LastSentAt > records[j].LastSentAt
+	})
+	return EmailVerificationAdminSnapshot{
+		Records:        records,
+		UsernamesByUID: usernames,
+		Accounts:       accounts,
+		Verified:       verified,
+		ExpiredPending: expiredPending,
+	}
 }
 
 func (s *Store) EmailVerification(id string) (EmailVerification, bool) {

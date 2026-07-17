@@ -94,6 +94,47 @@ func TestCleanupExpiredEmailVerifications(t *testing.T) {
 	}
 }
 
+func TestEmailVerificationAdminSnapshot(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	now := int64(1000)
+	alice, err := st.CreateUser(User{Username: "alice", Email: "alice@example.com", EmailVerified: true, EmailVerifiedAt: now - 10, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := st.CreateUser(User{Username: "bob", Email: "bob@example.com", Active: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateUser(User{Username: "carol", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.PutEmailVerification(EmailVerification{ID: "old", Purpose: "bind", Email: "alice@example.com", UID: alice.UID, CodeHash: "h1", ExpiresAt: now - 1, LastSentAt: now - 10})
+	_ = st.PutEmailVerification(EmailVerification{ID: "new", Purpose: "bind", Email: "bob@example.com", UID: bob.UID, CodeHash: "h2", ExpiresAt: now + 600, LastSentAt: now + 10})
+
+	snapshot := st.EmailVerificationAdminSnapshot(now)
+	if len(snapshot.Records) != 2 {
+		t.Fatalf("records len = %d, want 2", len(snapshot.Records))
+	}
+	if snapshot.Records[0].ID != "new" || snapshot.Records[1].ID != "old" {
+		t.Fatalf("records not sorted by LastSentAt desc: %#v", snapshot.Records)
+	}
+	if snapshot.UsernamesByUID[alice.UID] != "alice" || snapshot.UsernamesByUID[bob.UID] != "bob" {
+		t.Fatalf("username map = %#v", snapshot.UsernamesByUID)
+	}
+	if snapshot.ExpiredPending != 1 {
+		t.Fatalf("expired pending = %d, want 1", snapshot.ExpiredPending)
+	}
+	if snapshot.Verified != 1 {
+		t.Fatalf("verified accounts = %d, want 1", snapshot.Verified)
+	}
+	if len(snapshot.Accounts) != 2 {
+		t.Fatalf("accounts len = %d, want 2", len(snapshot.Accounts))
+	}
+	if snapshot.Accounts[0].UID != alice.UID || snapshot.Accounts[1].UID != bob.UID {
+		t.Fatalf("accounts should follow user UID order and skip empty emails: %#v", snapshot.Accounts)
+	}
+}
+
 func TestSetUserEmailVerifiedConflictAndForce(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	now := int64(1000)

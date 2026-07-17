@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -389,13 +388,7 @@ func (a *App) handleAdminEmailTest(w http.ResponseWriter, r *http.Request, _ Par
 
 // emailVerificationDTO 把一条在用验证码记录脱敏成管理员可见的审查 DTO：
 // 永不下发 CodeHash（HMAC 摘要也不外泄），解析关联本地账号用户名，标注是否已过期。
-func (a *App) emailVerificationDTO(v store.EmailVerification, now int64) map[string]any {
-	username := ""
-	if v.UID != 0 {
-		if u, okUser := a.store().User(v.UID); okUser {
-			username = u.Username
-		}
-	}
+func (a *App) emailVerificationDTO(v store.EmailVerification, now int64, username string) map[string]any {
 	return map[string]any{
 		"id":           v.ID,
 		"purpose":      v.Purpose,
@@ -418,27 +411,18 @@ func (a *App) handleAdminEmailVerifications(w http.ResponseWriter, r *http.Reque
 	cfg := a.cfg()
 	now := time.Now().Unix()
 
-	records := a.store().ListEmailVerifications()
-	// 按最近发码时间倒序，最新的在前；前端可再排序。
-	sort.SliceStable(records, func(i, j int) bool { return records[i].LastSentAt > records[j].LastSentAt })
-	pending := make([]map[string]any, 0, len(records))
-	expiredPending := 0
-	for _, v := range records {
-		if v.ExpiresAt > 0 && v.ExpiresAt <= now {
-			expiredPending++
+	snapshot := a.store().EmailVerificationAdminSnapshot(now)
+	pending := make([]map[string]any, 0, len(snapshot.Records))
+	for _, v := range snapshot.Records {
+		username := ""
+		if snapshot.UsernamesByUID != nil {
+			username = snapshot.UsernamesByUID[v.UID]
 		}
-		pending = append(pending, a.emailVerificationDTO(v, now))
+		pending = append(pending, a.emailVerificationDTO(v, now, username))
 	}
 
-	accounts := []map[string]any{}
-	verified := 0
-	for _, u := range a.store().ListUsers() {
-		if strings.TrimSpace(u.Email) == "" {
-			continue
-		}
-		if u.EmailVerified {
-			verified++
-		}
+	accounts := make([]map[string]any, 0, len(snapshot.Accounts))
+	for _, u := range snapshot.Accounts {
 		accounts = append(accounts, map[string]any{
 			"uid":               u.UID,
 			"username":          u.Username,
@@ -460,10 +444,10 @@ func (a *App) handleAdminEmailVerifications(w http.ResponseWriter, r *http.Reque
 		"accounts":        accounts,
 		"summary": map[string]any{
 			"total_pending":    len(pending),
-			"expired_pending":  expiredPending,
+			"expired_pending":  snapshot.ExpiredPending,
 			"total_with_email": len(accounts),
-			"verified":         verified,
-			"unverified":       len(accounts) - verified,
+			"verified":         snapshot.Verified,
+			"unverified":       len(accounts) - snapshot.Verified,
 		},
 	})
 }
