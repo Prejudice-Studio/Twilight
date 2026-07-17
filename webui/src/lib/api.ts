@@ -404,8 +404,8 @@ class ApiClient {
     return this.request(`/admin/bangumi/logs/${uid}`, { method: "DELETE" });
   }
 
-  async getTelegramStatus() {
-    return this.request<TelegramStatus>("/users/me/telegram");
+  async getTelegramStatus(signal?: AbortSignal) {
+    return this.request<TelegramStatus>("/users/me/telegram", { signal });
   }
 
   async getBindCode() {
@@ -481,8 +481,8 @@ class ApiClient {
     return url.toString();
   }
 
-  async getRegisterAvailability() {
-    return this.request<RegisterAvailability>("/users/check-available");
+  async getRegisterAvailability(signal?: AbortSignal) {
+    return this.request<RegisterAvailability>("/users/check-available", { signal });
   }
 
   async getEmbyRegisterStatus(requestId: string, statusToken: string) {
@@ -640,14 +640,14 @@ class ApiClient {
     });
   }
 
-  async getEmbyUrls() {
+  async getEmbyUrls(signal?: AbortSignal) {
     return this.request<{
       lines: Array<{ name: string; url: string }>;
       whitelist_lines?: Array<{ name: string; url: string }>;
       requires_emby_account?: boolean;
       requires_renewal?: boolean;
       emby_disabled_by_expiry?: boolean;
-    }>(`/system/emby-urls`);
+    }>(`/system/emby-urls`, { signal });
   }
 
   async probeEmbyUrl(url: string) {
@@ -674,8 +674,8 @@ class ApiClient {
   }
 
   // Signin (签到 / 积分)
-  async getSigninSummary() {
-    return this.request<SigninSummary>("/signin/me");
+  async getSigninSummary(signal?: AbortSignal) {
+    return this.request<SigninSummary>("/signin/me", { signal });
   }
 
   async getSigninPublicConfig() {
@@ -804,8 +804,8 @@ class ApiClient {
   }
 
   // Emby
-  async getEmbyInfo() {
-    return this.request<EmbyInfo>("/emby/status");
+  async getEmbyInfo(signal?: AbortSignal) {
+    return this.request<EmbyInfo>("/emby/status", { signal });
   }
 
   async getMySessions() {

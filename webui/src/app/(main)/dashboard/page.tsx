@@ -235,12 +235,12 @@ export default function DashboardPage() {
       ? api.getMyRequests(signal)
       : Promise.resolve(null);
     const [tgSettled, embySettled, urlsSettled, reqSettled, signinSettled, registerSettled] = await Promise.allSettled([
-      api.getTelegramStatus(),
-      api.getEmbyInfo(),
-      api.getEmbyUrls(),
+      api.getTelegramStatus(signal),
+      api.getEmbyInfo(signal),
+      api.getEmbyUrls(signal),
       myRequestsPromise,
-      api.getSigninSummary(),
-      api.getRegisterAvailability(),
+      api.getSigninSummary(signal),
+      api.getRegisterAvailability(signal),
     ]);
 
     const failed: string[] = [];
