@@ -78,8 +78,9 @@ func (a *App) handleAdminEmbyUsersV2(w http.ResponseWriter, r *http.Request, _ P
 		failWithCode(w, http.StatusBadGateway, ErrEmbyRemoteUsersFailed, "读取 Emby 用户列表失败，请稍后重试或检查上游 Emby 状态")
 		return
 	}
+	users := a.store().ListUsers()
 	localByEmbyID := map[string]store.User{}
-	for _, u := range a.store().ListUsers() {
+	for _, u := range users {
 		if u.EmbyID != "" {
 			localByEmbyID[u.EmbyID] = u
 		}
@@ -108,7 +109,7 @@ func (a *App) handleAdminEmbyUsersV2(w http.ResponseWriter, r *http.Request, _ P
 		})
 	}
 	orphans := []map[string]any{}
-	for _, u := range a.store().ListUsers() {
+	for _, u := range users {
 		if u.EmbyID != "" && !seen[u.EmbyID] {
 			orphans = append(orphans, map[string]any{"uid": u.UID, "username": u.Username, "emby_id": u.EmbyID, "telegram_id": nullableInt(u.TelegramID)})
 		}
@@ -1054,25 +1055,7 @@ func (a *App) updateFilteredUsers(filterValue any, include func(store.User) (boo
 	embyFilter := strings.ToLower(asString(filter["emby"]))
 	search := strings.ToLower(asString(filter["search"]))
 	for _, u := range a.store().ListUsers() {
-		if len(uidSet) > 0 && !uidSet[u.UID] {
-			continue
-		}
-		if hasRole && strconv.Itoa(u.Role) != asString(roleFilter) {
-			continue
-		}
-		if hasActive {
-			wantActive := boolish(activeFilter)
-			if u.Active != wantActive {
-				continue
-			}
-		}
-		if embyFilter == "bound" && u.EmbyID == "" {
-			continue
-		}
-		if embyFilter == "unbound" && u.EmbyID != "" {
-			continue
-		}
-		if search != "" && !strings.Contains(strings.ToLower(u.Username+" "+u.Email+" "+u.EmbyID+" "+strconv.FormatInt(u.UID, 10)+" "+strconv.FormatInt(u.TelegramID, 10)), search) {
+		if !adminUserMatchesFilter(u, uidSet, roleFilter, hasRole, activeFilter, hasActive, embyFilter, search) {
 			continue
 		}
 		matched++
@@ -1104,22 +1087,7 @@ func (a *App) filteredUsers(payload map[string]any) []store.User {
 	search := strings.ToLower(asString(filter["search"]))
 	out := []store.User{}
 	for _, u := range a.store().ListUsers() {
-		if len(uidSet) > 0 && !uidSet[u.UID] {
-			continue
-		}
-		if hasRole && strconv.Itoa(u.Role) != asString(roleFilter) {
-			continue
-		}
-		if hasActive && u.Active != boolish(activeFilter) {
-			continue
-		}
-		if embyFilter == "bound" && u.EmbyID == "" {
-			continue
-		}
-		if embyFilter == "unbound" && u.EmbyID != "" {
-			continue
-		}
-		if search != "" && !strings.Contains(strings.ToLower(u.Username+" "+u.Email+" "+u.EmbyID+" "+strconv.FormatInt(u.UID, 10)+" "+strconv.FormatInt(u.TelegramID, 10)), search) {
+		if !adminUserMatchesFilter(u, uidSet, roleFilter, hasRole, activeFilter, hasActive, embyFilter, search) {
 			continue
 		}
 		out = append(out, u)
@@ -1128,6 +1096,32 @@ func (a *App) filteredUsers(payload map[string]any) []store.User {
 		}
 	}
 	return out
+}
+
+func adminUserMatchesFilter(u store.User, uidSet map[int64]bool, roleFilter any, hasRole bool, activeFilter any, hasActive bool, embyFilter string, search string) bool {
+	if len(uidSet) > 0 && !uidSet[u.UID] {
+		return false
+	}
+	if hasRole && strconv.Itoa(u.Role) != asString(roleFilter) {
+		return false
+	}
+	if hasActive && u.Active != boolish(activeFilter) {
+		return false
+	}
+	if embyFilter == "bound" && u.EmbyID == "" {
+		return false
+	}
+	if embyFilter == "unbound" && u.EmbyID != "" {
+		return false
+	}
+	if search != "" && !strings.Contains(adminUserFilterHaystack(u), search) {
+		return false
+	}
+	return true
+}
+
+func adminUserFilterHaystack(u store.User) string {
+	return strings.ToLower(u.Username + " " + u.Email + " " + u.EmbyID + " " + strconv.FormatInt(u.UID, 10) + " " + strconv.FormatInt(u.TelegramID, 10))
 }
 
 func int64SliceFromAnyMap(value any, key string) []int64 {
