@@ -170,28 +170,20 @@ func normalizeAuditLogSortField(value string) string {
 
 func sortAuditLogEntries(logs []AuditLog, sortBy, order string) {
 	desc := order != "asc"
+	if stringAuditLogSortField(sortBy) {
+		sortAuditLogEntriesByString(logs, sortBy, desc)
+		return
+	}
 	sort.SliceStable(logs, func(i, j int) bool {
 		left, right := logs[i], logs[j]
 		cmp := 0
 		switch sortBy {
 		case "id":
 			cmp = compareInt64(left.ID, right.ID)
-		case "action":
-			cmp = strings.Compare(strings.ToLower(left.Action), strings.ToLower(right.Action))
-		case "category":
-			cmp = strings.Compare(strings.ToLower(left.Category), strings.ToLower(right.Category))
-		case "source":
-			cmp = strings.Compare(strings.ToLower(left.Source), strings.ToLower(right.Source))
-		case "method":
-			cmp = strings.Compare(strings.ToLower(left.Method), strings.ToLower(right.Method))
-		case "username":
-			cmp = strings.Compare(strings.ToLower(left.Username), strings.ToLower(right.Username))
 		case "uid":
 			cmp = compareInt64(left.UID, right.UID)
 		case "target_uid":
 			cmp = compareInt64(left.TargetUID, right.TargetUID)
-		case "ip":
-			cmp = strings.Compare(strings.ToLower(left.IP), strings.ToLower(right.IP))
 		default:
 			cmp = compareInt64(left.CreatedAt, right.CreatedAt)
 		}
@@ -203,6 +195,60 @@ func sortAuditLogEntries(logs []AuditLog, sortBy, order string) {
 		}
 		return cmp < 0
 	})
+}
+
+func stringAuditLogSortField(sortBy string) bool {
+	switch sortBy {
+	case "action", "category", "source", "method", "username", "ip":
+		return true
+	default:
+		return false
+	}
+}
+
+type auditLogStringSortEntry struct {
+	log AuditLog
+	key string
+}
+
+func sortAuditLogEntriesByString(logs []AuditLog, sortBy string, desc bool) {
+	items := make([]auditLogStringSortEntry, len(logs))
+	for i, entry := range logs {
+		items[i] = auditLogStringSortEntry{log: entry, key: auditLogStringSortKey(entry, sortBy)}
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		left, right := items[i], items[j]
+		cmp := strings.Compare(left.key, right.key)
+		if cmp == 0 {
+			cmp = compareInt64(left.log.ID, right.log.ID)
+		}
+		if desc {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+	for i, item := range items {
+		logs[i] = item.log
+	}
+}
+
+func auditLogStringSortKey(entry AuditLog, sortBy string) string {
+	switch sortBy {
+	case "action":
+		return strings.ToLower(entry.Action)
+	case "category":
+		return strings.ToLower(entry.Category)
+	case "source":
+		return strings.ToLower(entry.Source)
+	case "method":
+		return strings.ToLower(entry.Method)
+	case "username":
+		return strings.ToLower(entry.Username)
+	case "ip":
+		return strings.ToLower(entry.IP)
+	default:
+		return ""
+	}
 }
 
 func compareInt64(left, right int64) int {
