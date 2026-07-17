@@ -144,6 +144,74 @@ func TestEmbyIDIndexTracksCodeConsumptionCallbacks(t *testing.T) {
 	}
 }
 
+func TestUserIdentityIndexesTrackUsernameAndEmailLifecycle(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	alpha, err := st.CreateUser(User{Username: "Alpha", Email: "Alpha@Example.com", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := st.FindUserByUsername("alpha"); !ok || got.UID != alpha.UID {
+		t.Fatalf("created user not found by username index: ok=%v got=%#v", ok, got)
+	}
+	if got, ok := st.FindUserByEmail(" alpha@example.com "); !ok || got.UID != alpha.UID {
+		t.Fatalf("created user not found by email index: ok=%v got=%#v", ok, got)
+	}
+	if _, err := st.CreateUser(User{Username: "ALPHA", Role: RoleNormal}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate username should conflict, got %v", err)
+	}
+	if _, err := st.CreateUser(User{Username: "mail-dup", Email: "alpha@example.com", Role: RoleNormal}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate email should conflict, got %v", err)
+	}
+
+	beta, err := st.CreateUser(User{Username: "beta", Email: "beta@example.com", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpdateUser(beta.UID, func(u *User) error {
+		u.Username = "alpha"
+		return nil
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("UpdateUser duplicate username should conflict, got %v", err)
+	}
+	if _, err := st.UpdateUser(beta.UID, func(u *User) error {
+		u.Email = "ALPHA@example.com"
+		return nil
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("UpdateUser duplicate email should conflict, got %v", err)
+	}
+
+	updated, err := st.UpdateUser(alpha.UID, func(u *User) error {
+		u.Username = "alpha-renamed"
+		u.Email = "alpha-renamed@example.com"
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.FindUserByUsername("alpha"); ok {
+		t.Fatal("old username remained indexed after update")
+	}
+	if _, ok := st.FindUserByEmail("alpha@example.com"); ok {
+		t.Fatal("old email remained indexed after update")
+	}
+	if got, ok := st.FindUserByUsername("ALPHA-RENAMED"); !ok || got.UID != updated.UID {
+		t.Fatalf("updated username not indexed: ok=%v got=%#v", ok, got)
+	}
+	if got, ok := st.FindUserByEmail("Alpha-Renamed@Example.com"); !ok || got.UID != updated.UID {
+		t.Fatalf("updated email not indexed: ok=%v got=%#v", ok, got)
+	}
+
+	if err := st.DeleteUser(alpha.UID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.FindUserByUsername("alpha-renamed"); ok {
+		t.Fatal("deleted user's username remained indexed")
+	}
+	if _, ok := st.FindUserByEmail("alpha-renamed@example.com"); ok {
+		t.Fatal("deleted user's email remained indexed")
+	}
+}
+
 func TestDeleteRegCodePhysicallyDeletesUsedCode(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	if err := st.UpsertRegCode(RegCode{Code: "USED-REG", Type: 2, Days: 30, ValidityTime: -1, UseCountLimit: 5, UseCount: 1, UsedByUIDs: []int64{101}, UsedByTelegramIDs: []int64{202}, Active: true}); err != nil {

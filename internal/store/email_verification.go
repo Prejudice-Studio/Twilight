@@ -198,9 +198,11 @@ func (s *Store) ClearUnverifiedEmails() (total int, cleared int, err error) {
 	err = s.mutateAndSaveLocked(func() error {
 		for uid, u := range s.state.Users {
 			if u.Email != "" && !u.EmailVerified {
+				old := u
 				total++
 				u.Email = ""
 				s.state.Users[uid] = u
+				s.maintainUserIndexes(old, u, uid)
 				cleared++
 			}
 		}
@@ -218,9 +220,11 @@ func (s *Store) CleanupUnverifiedEmailsByAge(cutoffUnix int64) (total int, clear
 	err = s.mutateAndSaveLocked(func() error {
 		for uid, u := range s.state.Users {
 			if u.Email != "" && !u.EmailVerified && u.CreatedAt > 0 && u.CreatedAt < cutoffUnix {
+				old := u
 				total++
 				u.Email = ""
 				s.state.Users[uid] = u
+				s.maintainUserIndexes(old, u, uid)
 				cleared++
 			}
 		}
@@ -236,6 +240,25 @@ func (s *Store) EmailVerifiedOwner(email string, excludeUID int64) (User, bool) 
 	defer s.mu.RUnlock()
 	target := normalizeEmailKey(email)
 	if target == "" {
+		return User{}, false
+	}
+	if s.verifiedEmailMap != nil {
+		if uid, ok := s.verifiedEmailMap[target]; ok {
+			if uid != excludeUID {
+				u, found := s.state.Users[uid]
+				if found && u.EmailVerified && normalizeEmailKey(u.Email) == target {
+					return u, true
+				}
+			}
+			for otherUID, u := range s.state.Users {
+				if otherUID == excludeUID {
+					continue
+				}
+				if u.EmailVerified && normalizeEmailKey(u.Email) == target {
+					return u, true
+				}
+			}
+		}
 		return User{}, false
 	}
 	for uid, u := range s.state.Users {
@@ -258,6 +281,13 @@ func (s *Store) EmailAlreadyUsed(email string) bool {
 	if target == "" {
 		return false
 	}
+	if s.emailMap != nil {
+		if uid, ok := s.emailMap[target]; ok {
+			u, found := s.state.Users[uid]
+			return found && normalizeEmailKey(u.Email) == target
+		}
+		return false
+	}
 	for _, u := range s.state.Users {
 		if u.Email != "" && normalizeEmailKey(u.Email) == target {
 			return true
@@ -274,6 +304,15 @@ func (s *Store) FindUserByEmailVerified(email string) (User, bool) {
 	defer s.mu.RUnlock()
 	target := normalizeEmailKey(email)
 	if target == "" {
+		return User{}, false
+	}
+	if s.verifiedEmailMap != nil {
+		if uid, ok := s.verifiedEmailMap[target]; ok {
+			u, found := s.state.Users[uid]
+			if found && u.EmailVerified && normalizeEmailKey(u.Email) == target {
+				return u, true
+			}
+		}
 		return User{}, false
 	}
 	for _, u := range s.state.Users {
@@ -297,6 +336,7 @@ func (s *Store) SetUserEmailVerifiedAtomic(uid int64, email string, verified, fo
 		if !ok {
 			return ErrNotFound
 		}
+		old := u
 		targetEmail := u.Email
 		if strings.TrimSpace(email) != "" {
 			targetEmail = strings.TrimSpace(email)
@@ -304,12 +344,28 @@ func (s *Store) SetUserEmailVerifiedAtomic(uid int64, email string, verified, fo
 		if verified && !force {
 			norm := normalizeEmailKey(targetEmail)
 			if norm != "" {
-				for otherUID, other := range s.state.Users {
-					if otherUID == uid {
-						continue
+				if s.verifiedEmailMap != nil {
+					if otherUID, exists := s.verifiedEmailMap[norm]; exists {
+						if otherUID != uid {
+							return ErrConflict
+						}
+						for scanUID, other := range s.state.Users {
+							if scanUID == uid {
+								continue
+							}
+							if other.EmailVerified && normalizeEmailKey(other.Email) == norm {
+								return ErrConflict
+							}
+						}
 					}
-					if other.EmailVerified && normalizeEmailKey(other.Email) == norm {
-						return ErrConflict
+				} else {
+					for otherUID, other := range s.state.Users {
+						if otherUID == uid {
+							continue
+						}
+						if other.EmailVerified && normalizeEmailKey(other.Email) == norm {
+							return ErrConflict
+						}
 					}
 				}
 			}
@@ -322,6 +378,7 @@ func (s *Store) SetUserEmailVerifiedAtomic(uid int64, email string, verified, fo
 			u.EmailVerifiedAt = 0
 		}
 		s.state.Users[uid] = u
+		s.maintainUserIndexes(old, u, uid)
 		updated = u
 		return nil
 	})

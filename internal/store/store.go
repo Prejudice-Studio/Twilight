@@ -41,6 +41,11 @@ type Store struct {
 	// 这里防的是多个 Twilight 进程共用同一份 state.json 时的丢更新。
 	lock *fileLock
 
+	// usernameMap / emailMap / verifiedEmailMap 是用户身份字段的二级索引，
+	// 让登录、注册冲突检查、密码找回等高频路径避免全量扫描 Users。
+	usernameMap      map[string]int64
+	emailMap         map[string]int64
+	verifiedEmailMap map[string]int64
 	// telegramIDMap 是 telegram_id → UID 的二级索引，避免每次都全表扫描 Users。
 	// 在 Open/OpenPostgres 时重建，后续通过 maintainTelegramIDIndex 增量维护。
 	telegramIDMap map[int64]int64
@@ -612,8 +617,7 @@ func Open(path string) (*Store, error) {
 		}
 	}
 	st.state.ensure()
-	st.rebuildTelegramIDIndex()
-	st.rebuildEmbyIDIndex()
+	st.rebuildUserIndexes()
 	return st, nil
 }
 
@@ -653,8 +657,7 @@ func OpenPostgres(ctx context.Context, dsn string) (*Store, error) {
 		}
 	}
 	st.state.ensure()
-	st.rebuildTelegramIDIndex()
-	st.rebuildEmbyIDIndex()
+	st.rebuildUserIndexes()
 	return st, nil
 }
 
@@ -1384,6 +1387,7 @@ func (s *Store) refreshLocked() error {
 		err = s.db.QueryRowContext(ctx, `SELECT state FROM twilight_state WHERE id = 1`).Scan(&data)
 		if errors.Is(err, sql.ErrNoRows) {
 			s.state = emptyState()
+			s.rebuildUserIndexes()
 			return nil
 		}
 		if err != nil {
@@ -1396,6 +1400,7 @@ func (s *Store) refreshLocked() error {
 		data, err = os.ReadFile(s.path)
 		if errors.Is(err, os.ErrNotExist) {
 			s.state = emptyState()
+			s.rebuildUserIndexes()
 			return nil
 		}
 		if err != nil {
@@ -1414,6 +1419,7 @@ func (s *Store) refreshLocked() error {
 					if json.Unmarshal(bak, &bakState) == nil {
 						bakState.ensure()
 						s.state = bakState
+						s.rebuildUserIndexes()
 						return nil
 					}
 				}
@@ -1423,6 +1429,7 @@ func (s *Store) refreshLocked() error {
 	}
 	state.ensure()
 	s.state = state
+	s.rebuildUserIndexes()
 	return nil
 }
 
@@ -1829,8 +1836,7 @@ func (s *Store) CreateUser(u User) (User, error) {
 		}
 		u.Active = true
 		s.state.Users[u.UID] = u
-		s.maintainTelegramIDIndex(0, u.TelegramID, u.UID)
-		s.maintainEmbyIDIndex("", u.EmbyID, u.UID)
+		s.maintainUserIndexes(User{}, u, u.UID)
 		created = u
 		return nil
 	})
@@ -1841,8 +1847,29 @@ func (s *Store) CreateUser(u User) (User, error) {
 }
 
 func (s *Store) usernameExistsLocked(username string) bool {
+	return s.usernameTakenLocked(username, 0)
+}
+
+func (s *Store) usernameTakenLocked(username string, allowedUID int64) bool {
+	target := normalizeUsernameKey(username)
+	if target == "" {
+		return false
+	}
+	if s.usernameMap != nil {
+		if uid, ok := s.usernameMap[target]; ok {
+			if uid != allowedUID {
+				return true
+			}
+			for _, existing := range s.state.Users {
+				if existing.UID != allowedUID && normalizeUsernameKey(existing.Username) == target {
+					return true
+				}
+			}
+		}
+		return false
+	}
 	for _, existing := range s.state.Users {
-		if strings.EqualFold(existing.Username, username) {
+		if existing.UID != allowedUID && normalizeUsernameKey(existing.Username) == target {
 			return true
 		}
 	}
@@ -1852,6 +1879,19 @@ func (s *Store) usernameExistsLocked(username string) bool {
 func (s *Store) emailTakenLocked(email string, allowedUID int64) bool {
 	target := normalizeEmailKey(email)
 	if target == "" {
+		return false
+	}
+	if s.emailMap != nil {
+		if uid, ok := s.emailMap[target]; ok {
+			if uid != allowedUID {
+				return true
+			}
+			for _, existing := range s.state.Users {
+				if existing.UID != allowedUID && normalizeEmailKey(existing.Email) == target {
+					return true
+				}
+			}
+		}
 		return false
 	}
 	for _, existing := range s.state.Users {
@@ -1913,8 +1953,7 @@ func (s *Store) CreateUserWithRegCode(u User, regCode string, telegramID int64) 
 		u.Active = true
 		consumed = s.consumeRegCodeLocked(reg, u.UID, telegramID)
 		s.state.Users[u.UID] = u
-		s.maintainTelegramIDIndex(0, u.TelegramID, u.UID)
-		s.maintainEmbyIDIndex("", u.EmbyID, u.UID)
+		s.maintainUserIndexes(User{}, u, u.UID)
 		created = u
 		return nil
 	})
@@ -1997,8 +2036,7 @@ func (s *Store) CreateUserForRegistration(u User, regCode, telegramBindCode stri
 			delete(s.state.BindCodes, telegramBindCode)
 		}
 		s.state.Users[u.UID] = u
-		s.maintainTelegramIDIndex(0, u.TelegramID, u.UID)
-		s.maintainEmbyIDIndex("", u.EmbyID, u.UID)
+		s.maintainUserIndexes(User{}, u, u.UID)
 		created = u
 		return nil
 	})
@@ -2023,15 +2061,48 @@ func regCodeMatchesUser(reg RegCode, user User) bool {
 	return true
 }
 
+func normalizeUsernameKey(username string) string {
+	return strings.ToLower(strings.TrimSpace(username))
+}
+
 func normalizeTelegramUsername(username string) string {
 	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(username), "@"))
 }
 
+func (s *Store) userIdentityConflictLocked(oldUser, newUser User, allowedUID int64) error {
+	if normalizeUsernameKey(oldUser.Username) != normalizeUsernameKey(newUser.Username) && s.usernameTakenLocked(newUser.Username, allowedUID) {
+		return ErrConflict
+	}
+	if normalizeEmailKey(oldUser.Email) != normalizeEmailKey(newUser.Email) && s.emailTakenLocked(newUser.Email, allowedUID) {
+		return ErrConflict
+	}
+	if oldUser.TelegramID != newUser.TelegramID && s.telegramIDTakenLocked(newUser.TelegramID, allowedUID) {
+		return ErrConflict
+	}
+	if oldUser.EmbyID != newUser.EmbyID && s.embyIDTakenLocked(newUser.EmbyID, allowedUID) {
+		return ErrConflict
+	}
+	return nil
+}
+
 func (s *Store) FindUserByUsername(username string) (User, bool) {
+	target := normalizeUsernameKey(username)
+	if target == "" {
+		return User{}, false
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, u := range s.state.Users {
-		if strings.EqualFold(u.Username, username) {
+	if s.usernameMap == nil {
+		for _, u := range s.state.Users {
+			if normalizeUsernameKey(u.Username) == target {
+				return u, true
+			}
+		}
+		return User{}, false
+	}
+	if uid, ok := s.usernameMap[target]; ok {
+		u, found := s.state.Users[uid]
+		if found && normalizeUsernameKey(u.Username) == target {
 			return u, true
 		}
 	}
@@ -2039,13 +2110,23 @@ func (s *Store) FindUserByUsername(username string) (User, bool) {
 }
 
 func (s *Store) FindUserByEmail(email string) (User, bool) {
-	if email == "" {
+	target := normalizeEmailKey(email)
+	if target == "" {
 		return User{}, false
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, u := range s.state.Users {
-		if strings.EqualFold(strings.TrimSpace(u.Email), email) {
+	if s.emailMap == nil {
+		for _, u := range s.state.Users {
+			if normalizeEmailKey(u.Email) == target {
+				return u, true
+			}
+		}
+		return User{}, false
+	}
+	if uid, ok := s.emailMap[target]; ok {
+		u, found := s.state.Users[uid]
+		if found && normalizeEmailKey(u.Email) == target {
 			return u, true
 		}
 	}
@@ -2109,17 +2190,15 @@ func (s *Store) UpdateUser(uid int64, fn func(*User) error) (User, error) {
 		if !ok {
 			return ErrNotFound
 		}
-		oldTGID := u.TelegramID
-		oldEmbyID := u.EmbyID
+		old := u
 		if err := fn(&u); err != nil {
 			return err
 		}
-		if u.EmbyID != oldEmbyID && s.embyIDTakenLocked(u.EmbyID, uid) {
+		if err := s.userIdentityConflictLocked(old, u, uid); err != nil {
 			return ErrConflict
 		}
 		s.state.Users[uid] = u
-		s.maintainTelegramIDIndex(oldTGID, u.TelegramID, uid)
-		s.maintainEmbyIDIndex(oldEmbyID, u.EmbyID, uid)
+		s.maintainUserIndexes(old, u, uid)
 		updated = u
 		return nil
 	})
@@ -2138,8 +2217,10 @@ func (s *Store) ClearUserEmails() (total int, cleared int, err error) {
 			if u.Email == "" {
 				continue
 			}
+			old := u
 			u.Email = ""
 			s.state.Users[uid] = u
+			s.maintainUserIndexes(old, u, uid)
 			cleared++
 		}
 		return nil
@@ -2443,17 +2524,14 @@ func (s *Store) BindUserTelegramAtomic(uid int64, tgid int64, currentUID int64) 
 		if u.Role == RoleAdmin && u.UID != currentUID {
 			return ErrConflict
 		}
-		if tgid != 0 {
-			for _, other := range s.state.Users {
-				if other.UID != uid && other.TelegramID == tgid {
-					return ErrConflict
-				}
-			}
+		if s.telegramIDTakenLocked(tgid, uid) {
+			return ErrConflict
 		}
+		oldUser := u
 		old = u.TelegramID
 		u.TelegramID = tgid
 		s.state.Users[uid] = u
-		s.maintainTelegramIDIndex(old, tgid, uid)
+		s.maintainUserIndexes(oldUser, u, uid)
 		updated = u
 		return nil
 	})
@@ -2486,7 +2564,7 @@ func (s *Store) BindUserEmbyAtomicWithUpdate(uid int64, embyID, embyUsername str
 		before := u
 		if embyID != "" {
 			if s.embyIDMap == nil {
-				s.rebuildEmbyIDIndex()
+				s.rebuildUserIndexes()
 			}
 			if otherUID, ok := s.embyIDMap[embyID]; ok && otherUID != uid {
 				if !force {
@@ -2502,7 +2580,7 @@ func (s *Store) BindUserEmbyAtomicWithUpdate(uid int64, embyID, embyUsername str
 				displaced = other.UID
 			}
 		}
-		oldEmbyID := u.EmbyID
+		old := u
 		u.EmbyID = embyID
 		u.EmbyUsername = embyUsername
 		if embyID != "" {
@@ -2514,11 +2592,11 @@ func (s *Store) BindUserEmbyAtomicWithUpdate(uid int64, embyID, embyUsername str
 				return err
 			}
 		}
-		if u.EmbyID != oldEmbyID && s.embyIDTakenLocked(u.EmbyID, uid) {
+		if err := s.userIdentityConflictLocked(old, u, uid); err != nil {
 			return ErrConflict
 		}
 		s.state.Users[uid] = u
-		s.maintainEmbyIDIndex(oldEmbyID, u.EmbyID, uid)
+		s.maintainUserIndexes(old, u, uid)
 		updated = u
 		return nil
 	})
@@ -2553,8 +2631,7 @@ func (s *Store) DeleteUser(uid int64) error {
 		if !ok {
 			return ErrNotFound
 		}
-		s.maintainTelegramIDIndex(u.TelegramID, 0, uid)
-		s.maintainEmbyIDIndex(u.EmbyID, "", uid)
+		s.maintainUserIndexes(u, User{}, uid)
 		delete(s.state.Users, uid)
 
 		// API keys 与会话凭证：必须清理，否则用户被删后旧 key 仍可调用接口。
@@ -2705,57 +2782,110 @@ func (s *Store) ListUsers() []User {
 	return users
 }
 
-// rebuildTelegramIDIndex 从当前 Users map 重建 telegramID → UID 索引。
+// rebuildUserIndexes 从当前 Users map 一次性重建所有用户身份字段索引。
 // 在 Open / OpenPostgres 加载 state 后调用，无需持锁（调用方已持有写锁或尚未暴露引用）。
-func (s *Store) rebuildTelegramIDIndex() {
-	m := make(map[int64]int64, len(s.state.Users))
+func (s *Store) rebuildUserIndexes() {
+	usernameMap := make(map[string]int64, len(s.state.Users))
+	emailMap := make(map[string]int64, len(s.state.Users))
+	verifiedEmailMap := make(map[string]int64, len(s.state.Users))
+	telegramIDMap := make(map[int64]int64, len(s.state.Users))
+	embyIDMap := make(map[string]int64, len(s.state.Users))
 	for _, u := range s.state.Users {
+		if key := normalizeUsernameKey(u.Username); key != "" {
+			usernameMap[key] = u.UID
+		}
+		if key := normalizeEmailKey(u.Email); key != "" {
+			emailMap[key] = u.UID
+			if u.EmailVerified {
+				verifiedEmailMap[key] = u.UID
+			}
+		}
 		if u.TelegramID != 0 {
-			m[u.TelegramID] = u.UID
+			telegramIDMap[u.TelegramID] = u.UID
+		}
+		if u.EmbyID != "" {
+			embyIDMap[u.EmbyID] = u.UID
 		}
 	}
-	s.telegramIDMap = m
+	s.usernameMap = usernameMap
+	s.emailMap = emailMap
+	s.verifiedEmailMap = verifiedEmailMap
+	s.telegramIDMap = telegramIDMap
+	s.embyIDMap = embyIDMap
+}
+
+func (s *Store) maintainUserIndexes(oldUser, newUser User, uid int64) {
+	if s.usernameMap == nil || s.emailMap == nil || s.verifiedEmailMap == nil || s.telegramIDMap == nil || s.embyIDMap == nil {
+		s.rebuildUserIndexes()
+	}
+	s.maintainUsernameIndex(oldUser.Username, newUser.Username, uid)
+	s.maintainEmailIndexes(oldUser, newUser, uid)
+	s.maintainTelegramIDIndex(oldUser.TelegramID, newUser.TelegramID, uid)
+	s.maintainEmbyIDIndex(oldUser.EmbyID, newUser.EmbyID, uid)
+}
+
+func (s *Store) maintainUsernameIndex(oldUsername, newUsername string, uid int64) {
+	if s.usernameMap == nil {
+		s.rebuildUserIndexes()
+	}
+	if key := normalizeUsernameKey(oldUsername); key != "" {
+		if s.usernameMap[key] == uid {
+			delete(s.usernameMap, key)
+		}
+	}
+	if key := normalizeUsernameKey(newUsername); key != "" {
+		s.usernameMap[key] = uid
+	}
+}
+
+func (s *Store) maintainEmailIndexes(oldUser, newUser User, uid int64) {
+	if s.emailMap == nil || s.verifiedEmailMap == nil {
+		s.rebuildUserIndexes()
+	}
+	oldKey := normalizeEmailKey(oldUser.Email)
+	if oldKey != "" {
+		if s.emailMap[oldKey] == uid {
+			delete(s.emailMap, oldKey)
+		}
+		if oldUser.EmailVerified && s.verifiedEmailMap[oldKey] == uid {
+			delete(s.verifiedEmailMap, oldKey)
+		}
+	}
+	newKey := normalizeEmailKey(newUser.Email)
+	if newKey != "" {
+		s.emailMap[newKey] = uid
+		if newUser.EmailVerified {
+			s.verifiedEmailMap[newKey] = uid
+		}
+	}
 }
 
 // maintainTelegramIDIndex 在用户变更后增量维护 telegramID → UID 索引。
 // 调用方须持有 s.mu 写锁。索引为空时自动从 state 重建。
 func (s *Store) maintainTelegramIDIndex(oldTGID, newTGID int64, uid int64) {
 	if s.telegramIDMap == nil {
-		s.rebuildTelegramIDIndex()
+		s.rebuildUserIndexes()
 	}
 	if oldTGID != 0 {
-		delete(s.telegramIDMap, oldTGID)
+		if s.telegramIDMap[oldTGID] == uid {
+			delete(s.telegramIDMap, oldTGID)
+		}
 	}
 	if newTGID != 0 {
 		s.telegramIDMap[newTGID] = uid
 	}
 }
 
-func (s *Store) rebuildUserIndexes() {
-	s.rebuildTelegramIDIndex()
-	s.rebuildEmbyIDIndex()
-}
-
-// rebuildEmbyIDIndex 从当前 Users map 重建 embyID → UID 索引。
-// 在 Open / OpenPostgres 加载 state 后调用，无需持锁（调用方已持有写锁或尚未暴露引用）。
-func (s *Store) rebuildEmbyIDIndex() {
-	m := make(map[string]int64, len(s.state.Users))
-	for _, u := range s.state.Users {
-		if u.EmbyID != "" {
-			m[u.EmbyID] = u.UID
-		}
-	}
-	s.embyIDMap = m
-}
-
 // maintainEmbyIDIndex 在用户变更后增量维护 embyID → UID 索引。
 // 调用方必须已持有 s.mu 写锁。
 func (s *Store) maintainEmbyIDIndex(oldEmbyID, newEmbyID string, uid int64) {
 	if s.embyIDMap == nil {
-		s.rebuildEmbyIDIndex()
+		s.rebuildUserIndexes()
 	}
 	if oldEmbyID != "" {
-		delete(s.embyIDMap, oldEmbyID)
+		if s.embyIDMap[oldEmbyID] == uid {
+			delete(s.embyIDMap, oldEmbyID)
+		}
 	}
 	if newEmbyID != "" {
 		s.embyIDMap[newEmbyID] = uid
@@ -3118,9 +3248,14 @@ func (s *Store) ConfirmBindCodeAtomic(code string, telegramID int64, telegramUse
 			if !ok {
 				return ErrNotFound
 			}
+			old := u
 			u.TelegramID = telegramID
 			u.TelegramUsername = bind.TelegramUsername
+			if err := s.userIdentityConflictLocked(old, u, u.UID); err != nil {
+				return ErrConflict
+			}
 			s.state.Users[u.UID] = u
+			s.maintainUserIndexes(old, u, u.UID)
 			updated = u
 			userUpdated = true
 			delete(s.state.BindCodes, code)
@@ -3188,7 +3323,7 @@ func (s *Store) RepairLegacyTelegramBindResidue() (int, error) {
 		return 0, err
 	}
 	if deleted > 0 {
-		s.rebuildTelegramIDIndex()
+		s.rebuildUserIndexes()
 	}
 	return deleted, nil
 }
@@ -4223,22 +4358,17 @@ func (s *Store) ConsumeInviteCodeAndUpdateUser(code string, childUID int64, maxD
 		}
 		s.state.InviteCodes[code] = c
 		s.state.InviteRelations[childUID] = InviteRelation{ParentUID: c.InviterUID, ChildUID: childUID, Code: code, CreatedAt: now}
-		oldTGID := u.TelegramID
-		oldEmbyID := u.EmbyID
+		old := u
 		if fn != nil {
 			if err := fn(&u, c); err != nil {
 				return err
 			}
 		}
-		if u.TelegramID != oldTGID && s.telegramIDTakenLocked(u.TelegramID, childUID) {
-			return ErrConflict
-		}
-		if u.EmbyID != oldEmbyID && s.embyIDTakenLocked(u.EmbyID, childUID) {
+		if err := s.userIdentityConflictLocked(old, u, childUID); err != nil {
 			return ErrConflict
 		}
 		s.state.Users[childUID] = u
-		s.maintainTelegramIDIndex(oldTGID, u.TelegramID, childUID)
-		s.maintainEmbyIDIndex(oldEmbyID, u.EmbyID, childUID)
+		s.maintainUserIndexes(old, u, childUID)
 		updated = u
 		consumed = c
 		return nil
@@ -4461,22 +4591,17 @@ func (s *Store) ConsumeRegCodeAndUpdateUser(code string, uid, telegramID int64, 
 			telegramID = u.TelegramID
 		}
 		consumed = s.consumeRegCodeLocked(r, uid, telegramID)
-		oldTGID := u.TelegramID
-		oldEmbyID := u.EmbyID
+		old := u
 		if fn != nil {
 			if err := fn(&u, consumed); err != nil {
 				return err
 			}
 		}
-		if u.TelegramID != oldTGID && s.telegramIDTakenLocked(u.TelegramID, uid) {
-			return ErrConflict
-		}
-		if u.EmbyID != oldEmbyID && s.embyIDTakenLocked(u.EmbyID, uid) {
+		if err := s.userIdentityConflictLocked(old, u, uid); err != nil {
 			return ErrConflict
 		}
 		s.state.Users[uid] = u
-		s.maintainTelegramIDIndex(oldTGID, u.TelegramID, uid)
-		s.maintainEmbyIDIndex(oldEmbyID, u.EmbyID, uid)
+		s.maintainUserIndexes(old, u, uid)
 		updated = u
 		return nil
 	})

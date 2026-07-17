@@ -139,4 +139,10 @@ func TestFindUserByEmailVerifiedRequiresVerified(t *testing.T) {
 	if !ok || got.UID != u.UID {
 		t.Fatalf("verified email should resolve case-insensitively, got ok=%v", ok)
 	}
+	if _, err := st.SetUserEmailVerifiedAtomic(u.UID, "", false, false, now+1); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.FindUserByEmailVerified("carol@example.com"); ok {
+		t.Fatal("revoked verified email remained indexed")
+	}
 }
