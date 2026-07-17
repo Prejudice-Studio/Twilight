@@ -19,16 +19,22 @@ export function useVisiblePolling(
     let controller: AbortController | null = null;
     let lastRunAt = 0;
 
+    function clearTimer() {
+      if (!timer) return;
+      clearTimeout(timer);
+      timer = null;
+    }
+
     function schedule(delay = intervalMs) {
       if (cancelled) return;
-      if (timer) clearTimeout(timer);
+      clearTimer();
       timer = setTimeout(() => void run(), Math.max(0, delay));
     }
 
     async function run() {
       if (cancelled || running) return;
+      clearTimer();
       if (document.visibilityState !== "visible") {
-        schedule();
         return;
       }
       running = true;
@@ -41,18 +47,20 @@ export function useVisiblePolling(
       } finally {
         controller = null;
         running = false;
-        schedule();
+        if (document.visibilityState === "visible") {
+          schedule();
+        }
       }
     }
 
     const handleVisibility = () => {
       if (document.visibilityState !== "visible") {
+        clearTimer();
         controller?.abort();
         return;
       }
       if (running) return;
-      if (timer) clearTimeout(timer);
-      timer = null;
+      clearTimer();
       const elapsed = Date.now() - lastRunAt;
       if (elapsed >= intervalMs) {
         void run();
@@ -61,12 +69,14 @@ export function useVisiblePolling(
       }
     };
 
-    schedule();
     document.addEventListener("visibilitychange", handleVisibility);
+    if (document.visibilityState === "visible") {
+      schedule();
+    }
     return () => {
       cancelled = true;
       controller?.abort();
-      if (timer) clearTimeout(timer);
+      clearTimer();
       document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [enabled, intervalMs]);
