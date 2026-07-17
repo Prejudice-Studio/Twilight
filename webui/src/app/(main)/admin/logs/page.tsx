@@ -63,6 +63,46 @@ function levelVariant(level: string): "default" | "secondary" | "outline" | "des
   return "outline";
 }
 
+interface RuntimeLogState {
+  entries: RuntimeLogEntry[];
+  ids: Set<number>;
+}
+
+function runtimeLogState(entries: RuntimeLogEntry[], limit: number): RuntimeLogState {
+  const ordered = [...entries].sort((a, b) => a.id - b.id).slice(-limit);
+  return {
+    entries: ordered,
+    ids: new Set(ordered.map((entry) => entry.id)),
+  };
+}
+
+function appendRuntimeLogs(current: RuntimeLogState, entries: RuntimeLogEntry[], limit: number): RuntimeLogState {
+  if (entries.length === 0) return current;
+  const ids = new Set(current.ids);
+  const merged = [...current.entries];
+  let changed = false;
+  let ordered = true;
+  let lastId = merged.length > 0 ? merged[merged.length - 1].id : Number.NEGATIVE_INFINITY;
+
+  for (const entry of entries) {
+    if (ids.has(entry.id)) continue;
+    ids.add(entry.id);
+    merged.push(entry);
+    changed = true;
+    if (entry.id < lastId) ordered = false;
+    if (entry.id > lastId) lastId = entry.id;
+  }
+  if (!changed) return current;
+  if (!ordered) merged.sort((a, b) => a.id - b.id);
+  if (merged.length <= limit) return { entries: merged, ids };
+
+  const trimmed = merged.slice(-limit);
+  return {
+    entries: trimmed,
+    ids: new Set(trimmed.map((entry) => entry.id)),
+  };
+}
+
 function RuntimeStat({
   icon: Icon,
   label,
@@ -95,7 +135,8 @@ export default function AdminRuntimeLogsPage() {
     day: t("adminLogs.days", { value: "{value}" }),
   }), [t]);
   const [status, setStatus] = useState<RuntimeStatus | null>(null);
-  const [logs, setLogs] = useState<RuntimeLogEntry[]>([]);
+  const [logState, setLogState] = useState<RuntimeLogState>(() => runtimeLogState([], 500));
+  const logs = logState.entries;
   const [cursor, setCursor] = useState(0);
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
@@ -114,15 +155,7 @@ export default function AdminRuntimeLogsPage() {
 
   const appendLogs = useCallback((entries: RuntimeLogEntry[], nextCursor?: number) => {
     if (entries.length > 0) {
-      setLogs((current) => {
-        const seen = new Set(current.map((entry) => entry.id));
-        const merged = [...current];
-        for (const entry of entries) {
-          if (!seen.has(entry.id)) merged.push(entry);
-        }
-        merged.sort((a, b) => a.id - b.id);
-        return merged.slice(-logLimit);
-      });
+      setLogState((current) => appendRuntimeLogs(current, entries, logLimit));
     }
     setNextCursor(nextCursor);
   }, [logLimit, setNextCursor]);
@@ -143,8 +176,7 @@ export default function AdminRuntimeLogsPage() {
       if (signal?.aborted) return;
       if (statusRes.success) setStatus(statusRes.data || null);
       if (logsRes.success && logsRes.data) {
-        const entries = [...(logsRes.data.entries || [])].sort((a, b) => a.id - b.id);
-        setLogs(entries);
+        setLogState(runtimeLogState(logsRes.data.entries || [], logLimit));
         cursorRef.current = logsRes.data.next_cursor || 0;
         setCursor(logsRes.data.next_cursor || 0);
         setNextCursor(logsRes.data.next_cursor || 0);
@@ -164,7 +196,7 @@ export default function AdminRuntimeLogsPage() {
     setLogLimit(nextLimit);
     const res = await api.getRuntimeLogs(nextLimit);
     if (res.success && res.data) {
-      setLogs(res.data.entries || []);
+      setLogState(runtimeLogState(res.data.entries || [], nextLimit));
       setNextCursor(res.data.next_cursor || 0);
     }
   }, [logLimit, setNextCursor, status?.runtime_log_limit]);
@@ -277,7 +309,7 @@ export default function AdminRuntimeLogsPage() {
           <Button variant="outline" onClick={loadMore} disabled={loading || (status?.runtime_log_limit ? logLimit >= status.runtime_log_limit : false)}>
             {t("adminLogs.more")}
           </Button>
-          <Button variant="outline" onClick={() => setLogs([])}>
+          <Button variant="outline" onClick={() => setLogState(runtimeLogState([], logLimit))}>
             <Trash2 className="mr-2 h-4 w-4" />
             {t("adminLogs.clearScreen")}
           </Button>
