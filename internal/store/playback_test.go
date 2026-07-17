@@ -101,6 +101,77 @@ func TestPlaybackSessionsPruneCompactsCapacity(t *testing.T) {
 	}
 }
 
+func TestPlaybackRecordPrependCompactsOversizedCapacity(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	st.mu.Lock()
+	st.state.PlaybackRecords = make([]PlaybackRecord, maxStoredPlaybackRecords, maxStoredPlaybackRecords*2)
+	for i := range st.state.PlaybackRecords {
+		st.state.PlaybackRecords[i] = PlaybackRecord{UID: 1, ItemID: "bulk", PlayedAt: int64(maxStoredPlaybackRecords - i)}
+	}
+	st.mu.Unlock()
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.AddPlaybackRecord(PlaybackRecord{UID: 1, ItemID: "new", PlayedAt: int64(maxStoredPlaybackRecords + 1)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(st.state.PlaybackRecords); got != maxStoredPlaybackRecords {
+		t.Fatalf("expected prune to %d records, got %d", maxStoredPlaybackRecords, got)
+	}
+	if got := cap(st.state.PlaybackRecords); got != maxStoredPlaybackRecords {
+		t.Fatalf("expected compacted capacity %d, got %d", maxStoredPlaybackRecords, got)
+	}
+	if got := st.state.PlaybackRecords[0].ItemID; got != "new" {
+		t.Fatalf("expected newest record at head, got %q", got)
+	}
+}
+
+func TestListEmbyActivityLogsFiltersByTargetUserEmbyID(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	alpha, err := st.CreateUser(User{Username: "alpha", EmbyID: "emby-alpha", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	beta, err := st.CreateUser(User{Username: "beta", EmbyID: "emby-beta", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unbound, err := st.CreateUser(User{Username: "unbound", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SyncEmbyActivityLogs([]EmbyActivityLog{
+		{EmbyLogID: 1, UserID: "emby-alpha", Name: "alpha-old", Date: 10},
+		{EmbyLogID: 2, UserID: "emby-beta", Name: "beta", Date: 20},
+		{EmbyLogID: 3, UserID: "emby-alpha", Name: "alpha-new", Date: 30},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	alphaLogs := st.ListEmbyActivityLogs(alpha.UID, 10)
+	if len(alphaLogs) != 2 || alphaLogs[0].Name != "alpha-new" || alphaLogs[1].Name != "alpha-old" {
+		t.Fatalf("unexpected alpha logs: %#v", alphaLogs)
+	}
+	betaLogs := st.ListEmbyActivityLogs(beta.UID, 10)
+	if len(betaLogs) != 1 || betaLogs[0].Name != "beta" {
+		t.Fatalf("unexpected beta logs: %#v", betaLogs)
+	}
+	if logs := st.ListEmbyActivityLogs(unbound.UID, 10); len(logs) != 0 {
+		t.Fatalf("unbound user should not match activity logs: %#v", logs)
+	}
+}
+
 func TestStateEnsureCompactsHistory(t *testing.T) {
 	state := State{
 		LoginLogs:        make([]LoginLog, maxStoredLoginLogs+1),

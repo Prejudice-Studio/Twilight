@@ -101,19 +101,19 @@ func (s *Store) ListEmbyActivityLogs(uid int64, limit int) []EmbyActivityLog {
 	if limit <= 0 || limit > len(s.state.EmbyActivityLogs) {
 		limit = len(s.state.EmbyActivityLogs)
 	}
-	embyUIDs := map[string]int64{}
+	targetEmbyID := ""
 	if uid > 0 {
-		for _, user := range s.state.Users {
-			if user.EmbyID != "" {
-				embyUIDs[user.EmbyID] = user.UID
-			}
+		user, ok := s.state.Users[uid]
+		if !ok || user.EmbyID == "" {
+			return nil
 		}
+		targetEmbyID = user.EmbyID
 	}
 	out := make([]EmbyActivityLog, 0, limit)
 	for i := len(s.state.EmbyActivityLogs) - 1; i >= 0 && len(out) < limit; i-- {
 		entry := s.state.EmbyActivityLogs[i]
 		if uid > 0 {
-			if entry.UserID == "" || embyUIDs[entry.UserID] != uid {
+			if entry.UserID != targetEmbyID {
 				continue
 			}
 		}
@@ -155,10 +155,7 @@ func (s *Store) AddPlaybackRecordIdempotent(record PlaybackRecord) (bool, error)
 			}
 		}
 	}
-	s.state.PlaybackRecords = append([]PlaybackRecord{record}, s.state.PlaybackRecords...)
-	if len(s.state.PlaybackRecords) > maxStoredPlaybackRecords {
-		s.state.PlaybackRecords = compactHead(s.state.PlaybackRecords, maxStoredPlaybackRecords)
-	}
+	s.prependPlaybackRecordLocked(record)
 	if err := s.saveLocked(); err != nil {
 		return false, err
 	}
@@ -169,6 +166,31 @@ func (s *Store) AddPlaybackRecordIdempotent(record PlaybackRecord) (bool, error)
 		}
 	}
 	return true, nil
+}
+
+func (s *Store) prependPlaybackRecordLocked(record PlaybackRecord) {
+	records := s.state.PlaybackRecords
+	if len(records) >= maxStoredPlaybackRecords {
+		if maxStoredPlaybackRecords <= 0 {
+			s.state.PlaybackRecords = nil
+			return
+		}
+		if cap(records) > maxStoredPlaybackRecords {
+			compacted := make([]PlaybackRecord, maxStoredPlaybackRecords)
+			copy(compacted, records[:maxStoredPlaybackRecords])
+			records = compacted
+		} else {
+			records = records[:maxStoredPlaybackRecords]
+		}
+		copy(records[1:], records[:maxStoredPlaybackRecords-1])
+		records[0] = record
+		s.state.PlaybackRecords = records
+		return
+	}
+	records = append(records, PlaybackRecord{})
+	copy(records[1:], records[:len(records)-1])
+	records[0] = record
+	s.state.PlaybackRecords = records
 }
 
 func (s *Store) PlaybackRecords(uid int64, since int64, limit int) []PlaybackRecord {
