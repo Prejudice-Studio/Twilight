@@ -5603,10 +5603,15 @@ func strconv36(v int64) string {
 	if v == 0 {
 		return "0"
 	}
-	var out []byte
+	if v < 0 {
+		return ""
+	}
+	var buf [13]byte
+	i := len(buf)
 	for v > 0 {
-		out = append([]byte{alphabet[v%36]}, out...)
+		i--
+		buf[i] = alphabet[v%36]
 		v /= 36
 	}
-	return string(out)
+	return string(buf[i:])
 }

@@ -20,6 +20,23 @@ func newJSONStoreForTest(t *testing.T) *Store {
 	return st
 }
 
+func TestStrconv36(t *testing.T) {
+	cases := map[int64]string{
+		-1:   "",
+		0:    "0",
+		1:    "1",
+		35:   "z",
+		36:   "10",
+		1295: "zz",
+		1296: "100",
+	}
+	for input, want := range cases {
+		if got := strconv36(input); got != want {
+			t.Fatalf("strconv36(%d)=%q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestEmbyIDIndexTracksUserLifecycle(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	alpha, err := st.CreateUser(User{Username: "alpha", EmbyID: "emby-alpha", Role: RoleNormal})
