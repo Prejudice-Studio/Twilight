@@ -74,9 +74,13 @@ export function useBindCodeStatus(options: UseBindCodeStatusOptions): void {
     if (!trimmed || !enabled) return;
 
     let stopped = false;
+    let running = false;
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
     let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
     let controller: AbortController | null = null;
+    let lastRunAt = 0;
+
+    const isVisible = () => document.visibilityState === "visible";
 
     const fetchStatus = (signal: AbortSignal) =>
       scene === "register"
@@ -94,6 +98,16 @@ export function useBindCodeStatus(options: UseBindCodeStatusOptions): void {
       controller = null;
     };
 
+    const schedule = (delay = pollIntervalMs) => {
+      if (stopped) return;
+      if (pollTimer) clearTimeout(pollTimer);
+      pollTimer = null;
+      if (!isVisible()) return;
+      pollTimer = setTimeout(() => {
+        void poll();
+      }, Math.max(0, delay));
+    };
+
     const handle = (data: BindCodeStatusData) => {
       if (stopped) return;
       if (isBoundStatus(data)) {
@@ -109,7 +123,14 @@ export function useBindCodeStatus(options: UseBindCodeStatusOptions): void {
     };
 
     const poll = async () => {
-      if (stopped) return;
+      if (stopped || running) return;
+      if (!isVisible()) {
+        if (pollTimer) clearTimeout(pollTimer);
+        pollTimer = null;
+        return;
+      }
+      running = true;
+      lastRunAt = Date.now();
       controller = new AbortController();
       try {
         const res = await fetchStatus(controller.signal);
@@ -119,10 +140,26 @@ export function useBindCodeStatus(options: UseBindCodeStatusOptions): void {
       } catch {
         // 网络抖动 / 单次超时：忽略，保持轮询直到 deadline。
       }
+      controller = null;
+      running = false;
+      schedule();
+    };
+
+    const handleVisibility = () => {
       if (stopped) return;
-      pollTimer = setTimeout(() => {
+      if (!isVisible()) {
+        if (pollTimer) clearTimeout(pollTimer);
+        pollTimer = null;
+        controller?.abort();
+        return;
+      }
+      if (running) return;
+      const elapsed = Date.now() - lastRunAt;
+      if (elapsed >= pollIntervalMs) {
         void poll();
-      }, pollIntervalMs);
+      } else {
+        schedule(pollIntervalMs - elapsed);
+      }
     };
 
     // 整体看护上限：绑定码 TTL + 5s 宽限。expiresIn 缺省按后端默认 300s。
@@ -133,8 +170,12 @@ export function useBindCodeStatus(options: UseBindCodeStatusOptions): void {
       optionsRef.current.onTimeout?.();
     }, ttlSeconds * 1000 + 5000);
 
+    document.addEventListener("visibilitychange", handleVisibility);
     void poll();
 
-    return stop;
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      stop();
+    };
   }, [code, scene, expiresIn, enabled, pollIntervalMs]);
 }

@@ -200,6 +200,7 @@ Twilight 不对 Cookie 鉴权的变更类请求做 CSRF 令牌校验，也不做
 - WebUI 统一通过 `webui/src/lib/api-request.ts` 发起应用 API 请求。无请求体的 `GET` / `HEAD` 会在短时间窗口内合并相同的在途请求，降低重复刷新、多个组件同时挂载和窄屏重排时的额外网络压力；写请求、带调用方 `signal` 的请求和显式 `dedupe: false` 的请求不参与合并。
 - 成功的普通读请求会进入 3 秒内存短缓存，覆盖路由切换、组件重挂载和相邻组件重复读；任意写请求返回后会清空该缓存。`/users/me`、带 `refresh=1` 的请求、带 `X-Twilight-Intent` 的有意图 GET、`no-store` / `reload` 请求和显式 `cacheRead: false` 的调用不进入短缓存。
 - 读请求默认使用浏览器 `no-cache` 语义，允许复用连接但仍向服务端确认 freshness；写请求继续使用 `no-store`。
+- 绑定码、状态卡片等轮询必须在页面不可见时暂停请求并中断在途请求，回到前台再按上次执行时间补跑；绑定码 TTL / deadline 可继续计时，但后台页签不应持续打状态接口。
 - Next 自己管理 `/_next/static` 下 hashed 构建产物的 `Cache-Control`。不要在 `next.config.mjs` 的 `headers()` 里覆盖这一路径，否则会触发 Next 构建警告并可能破坏开发模式缓存行为。
 - 默认 `favicon.png` 应保持小尺寸和合理压缩，避免每个新访客为浏览器图标下载数百 KB 资源；需要高清品牌图时优先通过后台 `server_icon` 或环境变量覆盖。
 - 管理后台页面要优先使用稳定尺寸、可换行按钮、可横向滚动表格和移动端卡片视图，避免手机、平板或浏览器打开开发者工具后的窄比例下文字越界、按钮互相覆盖。
