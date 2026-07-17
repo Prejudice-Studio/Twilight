@@ -1,6 +1,8 @@
 package store
 
 import (
+	"container/heap"
+	"sort"
 	"strings"
 	"time"
 )
@@ -16,6 +18,29 @@ const (
 type MediaRequestCreateOptions struct {
 	UserActiveLimit   int
 	GlobalActiveLimit int
+}
+
+type MediaRequestPage struct {
+	Requests []MediaRequest
+	Total    int
+}
+
+type mediaRequestIDMinHeap []MediaRequest
+
+func (h mediaRequestIDMinHeap) Len() int           { return len(h) }
+func (h mediaRequestIDMinHeap) Less(i, j int) bool { return h[i].ID < h[j].ID }
+func (h mediaRequestIDMinHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+
+func (h *mediaRequestIDMinHeap) Push(x any) {
+	*h = append(*h, x.(MediaRequest))
+}
+
+func (h *mediaRequestIDMinHeap) Pop() any {
+	old := *h
+	n := len(old)
+	item := old[n-1]
+	*h = old[:n-1]
+	return item
 }
 
 func NormalizeMediaRequestStatus(status string) string {
@@ -99,6 +124,62 @@ func IsActiveMediaRequestStatus(status string) bool {
 
 func isActiveMediaStatus(status string) bool {
 	return IsActiveMediaRequestStatus(status)
+}
+
+func (s *Store) ListMediaRequestsPage(uid int64, all bool, statusFilter string, page, perPage int) MediaRequestPage {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 20
+	}
+	offset := (page - 1) * perPage
+	window := offset + perPage
+	if window < perPage {
+		return MediaRequestPage{}
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var top mediaRequestIDMinHeap
+	total := 0
+	heapReady := false
+	for _, r := range s.state.MediaRequests {
+		if !all && r.UID != uid {
+			continue
+		}
+		if !MediaRequestStatusMatches(r.Status, statusFilter) {
+			continue
+		}
+		total++
+		if len(top) < window {
+			top = append(top, r)
+			if len(top) == window {
+				heap.Init(&top)
+				heapReady = true
+			}
+			continue
+		}
+		if !heapReady {
+			heap.Init(&top)
+			heapReady = true
+		}
+		if len(top) > 0 && r.ID > top[0].ID {
+			top[0] = r
+			heap.Fix(&top, 0)
+		}
+	}
+	if total == 0 || offset >= len(top) {
+		return MediaRequestPage{Total: total}
+	}
+	sort.Slice(top, func(i, j int) bool { return top[i].ID > top[j].ID })
+	end := offset + perPage
+	if end > len(top) {
+		end = len(top)
+	}
+	requests := make([]MediaRequest, end-offset)
+	copy(requests, top[offset:end])
+	return MediaRequestPage{Requests: requests, Total: total}
 }
 
 func (s *Store) UpdateMediaRequestStatus(id int64, rawStatus string, adminNote string, replaceNote bool) (MediaRequest, error) {

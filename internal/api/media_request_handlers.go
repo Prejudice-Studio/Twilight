@@ -189,19 +189,14 @@ func (a *App) handleMyMediaRequests(w http.ResponseWriter, r *http.Request, _ Pa
 
 func (a *App) handleAdminMediaRequests(w http.ResponseWriter, r *http.Request, _ Params) {
 	statusFilter := strings.ToLower(firstNonEmpty(r.URL.Query().Get("status"), "active"))
-	page := max(1, queryInt(r, "page", 1))
+	page := clamp(queryInt(r, "page", 1), 1, 1000000)
 	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
-	requests := a.store().ListMediaRequests(0, true)
-	items := make([]map[string]any, 0, len(requests))
-	for _, req := range requests {
-		if !store.MediaRequestStatusMatches(req.Status, statusFilter) {
-			continue
-		}
+	result := a.store().ListMediaRequestsPage(0, true, statusFilter, page, perPage)
+	items := make([]map[string]any, 0, len(result.Requests))
+	for _, req := range result.Requests {
 		items = append(items, mediaRequestAdminDTO(req, a.store()))
 	}
-	total := len(items)
-	items = paginate(items, page, perPage)
-	ok(w, "OK", map[string]any{"requests": items, "total": total, "page": page, "per_page": perPage})
+	ok(w, "OK", map[string]any{"requests": items, "total": result.Total, "page": page, "per_page": perPage})
 }
 
 func (a *App) handleUpdateMediaRequestStatus(w http.ResponseWriter, r *http.Request, params Params) {

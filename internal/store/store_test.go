@@ -761,6 +761,65 @@ func TestCountMediaRequestsMatchesListFilters(t *testing.T) {
 	}
 }
 
+func TestListMediaRequestsPageFiltersAndPaginates(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	var requests []MediaRequest
+	for i := 0; i < 6; i++ {
+		req, err := st.CreateMediaRequestWithOptions(MediaRequest{
+			UID:       int64(1 + i%2),
+			Title:     "Movie",
+			Source:    "tmdb",
+			MediaID:   int64(100 + i),
+			MediaType: "movie",
+		}, MediaRequestCreateOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		requests = append(requests, req)
+	}
+	if _, err := st.UpdateMediaRequestStatus(requests[1].ID, MediaRequestStatusCompleted, "", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpdateMediaRequestStatus(requests[2].ID, MediaRequestStatusDownloading, "", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpdateMediaRequestStatus(requests[3].ID, MediaRequestStatusRejected, "", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpdateMediaRequestStatus(requests[4].ID, MediaRequestStatusAccepted, "", true); err != nil {
+		t.Fatal(err)
+	}
+
+	active := st.ListMediaRequestsPage(0, true, "active", 2, 2)
+	if active.Total != 4 {
+		t.Fatalf("active total=%d want 4", active.Total)
+	}
+	if got, want := mediaRequestIDs(active.Requests), []int64{requests[2].ID, requests[0].ID}; !sameInt64s(got, want) {
+		t.Fatalf("active page IDs=%v want %v", got, want)
+	}
+
+	pending := st.ListMediaRequestsPage(0, true, "pending", 1, 10)
+	if pending.Total != 2 {
+		t.Fatalf("pending total=%d want 2", pending.Total)
+	}
+	if got, want := mediaRequestIDs(pending.Requests), []int64{requests[5].ID, requests[0].ID}; !sameInt64s(got, want) {
+		t.Fatalf("pending IDs=%v want %v", got, want)
+	}
+
+	empty := st.ListMediaRequestsPage(0, true, "active", 99, 10)
+	if empty.Total != 4 || len(empty.Requests) != 0 {
+		t.Fatalf("out-of-range page=%#v want total 4 and no rows", empty)
+	}
+}
+
+func mediaRequestIDs(requests []MediaRequest) []int64 {
+	ids := make([]int64, 0, len(requests))
+	for _, req := range requests {
+		ids = append(ids, req.ID)
+	}
+	return ids
+}
+
 func TestCreateTicketEnforcesUserOpenLimitAtomically(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	const attempts = 20
