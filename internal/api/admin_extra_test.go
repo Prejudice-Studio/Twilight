@@ -39,7 +39,9 @@ func TestAdminUserMatchesFilterSharedSemantics(t *testing.T) {
 		{name: "emby bound matches", embyFilter: "bound", want: true},
 		{name: "emby unbound rejects", embyFilter: "unbound", want: false},
 		{name: "search username matches", search: "ali", want: true},
+		{name: "search uppercase matches", search: "ALICE", want: true},
 		{name: "search email matches", search: "example.com", want: true},
+		{name: "search multi-token matches", search: "alice alice@example.com", want: true},
 		{name: "search emby matches", search: "emby-alice", want: true},
 		{name: "search uid matches", search: "42", want: true},
 		{name: "search telegram matches", search: "9001", want: true},
@@ -99,6 +101,7 @@ func TestAdminUserMatchesListFiltersSharedSemantics(t *testing.T) {
 		{name: "expired normal not emby active", user: boundExpired, filter: adminUserListFilter{embyStatusFilter: "active", now: now}, want: false},
 		{name: "verified email matches", user: boundActive, filter: adminUserListFilter{emailFilter: "verified", now: now}, want: true},
 		{name: "none email matches", user: noEmail, filter: adminUserListFilter{emailFilter: "none", now: now}, want: true},
+		{name: "search multi-token matches", user: boundActive, filter: adminUserListFilter{search: "active-user active@example.com", now: now}, want: true},
 		{name: "search includes telegram", user: boundActive, filter: adminUserListFilter{search: "5001", now: now}, want: true},
 		{name: "search rejects", user: boundActive, filter: adminUserListFilter{search: "missing", now: now}, want: false},
 	}

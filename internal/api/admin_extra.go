@@ -1114,14 +1114,44 @@ func adminUserMatchesFilter(u store.User, uidSet map[int64]bool, roleFilter any,
 	if embyFilter == "unbound" && u.EmbyID != "" {
 		return false
 	}
-	if search != "" && !strings.Contains(adminUserFilterHaystack(u), search) {
+	if !adminUserMatchesSearch(u, search) {
 		return false
 	}
 	return true
 }
 
+func adminUserMatchesSearch(u store.User, search string) bool {
+	search = strings.ToLower(strings.TrimSpace(search))
+	if search == "" {
+		return true
+	}
+	if strings.Contains(search, " ") {
+		return strings.Contains(adminUserFilterHaystack(u), search)
+	}
+	return adminUserContainsLower(u.Username, search) ||
+		adminUserContainsLower(u.Email, search) ||
+		adminUserContainsLower(u.EmbyID, search) ||
+		strings.Contains(strconv.FormatInt(u.UID, 10), search) ||
+		strings.Contains(strconv.FormatInt(u.TelegramID, 10), search)
+}
+
+func adminUserContainsLower(value, search string) bool {
+	return value != "" && strings.Contains(strings.ToLower(value), search)
+}
+
 func adminUserFilterHaystack(u store.User) string {
-	return strings.ToLower(u.Username + " " + u.Email + " " + u.EmbyID + " " + strconv.FormatInt(u.UID, 10) + " " + strconv.FormatInt(u.TelegramID, 10))
+	var b strings.Builder
+	b.Grow(len(u.Username) + len(u.Email) + len(u.EmbyID) + 42)
+	b.WriteString(u.Username)
+	b.WriteByte(' ')
+	b.WriteString(u.Email)
+	b.WriteByte(' ')
+	b.WriteString(u.EmbyID)
+	b.WriteByte(' ')
+	b.WriteString(strconv.FormatInt(u.UID, 10))
+	b.WriteByte(' ')
+	b.WriteString(strconv.FormatInt(u.TelegramID, 10))
+	return strings.ToLower(b.String())
 }
 
 type adminUserListFilter struct {
@@ -1166,7 +1196,7 @@ func adminUserMatchesListFilters(u store.User, filter adminUserListFilter) bool 
 	if !adminUserMatchesEmailStatusFilter(u, filter.emailFilter) {
 		return false
 	}
-	if filter.search != "" && !strings.Contains(adminUserFilterHaystack(u), filter.search) {
+	if !adminUserMatchesSearch(u, filter.search) {
 		return false
 	}
 	return true
