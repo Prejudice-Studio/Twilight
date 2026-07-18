@@ -2276,7 +2276,8 @@ class ApiClient {
     if (params.order) query.set("order", params.order);
     return this.request<{ logs: AuditLog[]; total: number; page: number; per_page: number; sort?: string; order?: string }>(
       `/admin/audit-logs?${query.toString()}`,
-      { signal: params.signal }
+      { signal: params.signal, cache: "no-store" },
+      { cacheRead: false, dedupe: false },
     );
   }
 
@@ -2579,7 +2580,7 @@ class ApiClient {
   // ==================== Tickets ====================
 
   async getMyTickets() {
-    return this.request<{ tickets: Ticket[]; total: number; ticket_types: string[] }>("/tickets");
+    return this.request<{ tickets: Ticket[]; total: number; ticket_types: string[] }>("/tickets", { cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
   async createTicket(payload: { title: string; content: string; type?: string; priority?: string; notify_telegram?: boolean }) {
@@ -2643,7 +2644,11 @@ class ApiClient {
     if (params.priority) query.set("priority", params.priority);
     if (params.page) query.set("page", String(params.page));
     if (params.per_page) query.set("per_page", String(params.per_page));
-    return this.request<{ tickets: Ticket[]; total: number; page?: number; per_page?: number; ticket_types: string[] }>(`/admin/tickets?${query.toString()}`);
+    return this.request<{ tickets: Ticket[]; total: number; page?: number; per_page?: number; ticket_types: string[] }>(
+      `/admin/tickets?${query.toString()}`,
+      { cache: "no-store" },
+      { cacheRead: false, dedupe: false },
+    );
   }
 
   async adminGetTicket(id: number) {

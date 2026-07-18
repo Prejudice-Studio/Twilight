@@ -485,6 +485,82 @@ func TestAdminTicketsAllFilterIncludesResolvedAndClosed(t *testing.T) {
 	}
 }
 
+func TestCreateTicketPersistsForAdminListAndAudit(t *testing.T) {
+	app := newTestApp(t)
+	enableTicketSystem(t, app, nil)
+	admin := registerAndLogin(t, app, "admin", "Admin123456")
+	user := registerAndLogin(t, app, "ticket-user", "User12345678")
+	app.cfg().AuditLogEnabled = true
+
+	id := createTicket(t, app, "visible ticket", "created from user", user)
+	ticket, found := app.store().Ticket(id)
+	if !found {
+		t.Fatalf("created ticket %d is missing from store", id)
+	}
+
+	decodeAdminTickets := func(path string) (int, map[int64]bool) {
+		t.Helper()
+		rr := doJSON(app, http.MethodGet, path, ``, admin)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("admin tickets %s status=%d body=%s", path, rr.Code, rr.Body.String())
+		}
+		var resp struct {
+			Data struct {
+				Tickets []struct {
+					ID int64 `json:"id"`
+				} `json:"tickets"`
+				Total int `json:"total"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode admin tickets %s: %v body=%s", path, err, rr.Body.String())
+		}
+		ids := map[int64]bool{}
+		for _, item := range resp.Data.Tickets {
+			ids[item.ID] = true
+		}
+		return resp.Data.Total, ids
+	}
+
+	total, defaultIDs := decodeAdminTickets("/api/v1/admin/tickets?page=1&per_page=20")
+	if total < 1 || !defaultIDs[id] {
+		t.Fatalf("created open ticket should appear in default admin list, total=%d ids=%#v", total, defaultIDs)
+	}
+	total, allIDs := decodeAdminTickets("/api/v1/admin/tickets?all=1&page=1&per_page=20")
+	if total < 1 || !allIDs[id] {
+		t.Fatalf("created ticket should appear in all admin list, total=%d ids=%#v", total, allIDs)
+	}
+
+	auditPath := "/api/v1/admin/audit-logs?action=create_ticket&target_uid=" + strconv.FormatInt(ticket.UID, 10)
+	auditRR := doJSON(app, http.MethodGet, auditPath, ``, admin)
+	if auditRR.Code != http.StatusOK {
+		t.Fatalf("audit list status=%d body=%s", auditRR.Code, auditRR.Body.String())
+	}
+	var auditResp struct {
+		Data struct {
+			Logs []struct {
+				Action    string `json:"action"`
+				UID       int64  `json:"uid"`
+				TargetUID int64  `json:"target_uid"`
+				Detail    struct {
+					TicketID float64 `json:"ticket_id"`
+				} `json:"detail"`
+			} `json:"logs"`
+			Total int `json:"total"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(auditRR.Body.Bytes(), &auditResp); err != nil {
+		t.Fatalf("decode audit logs: %v body=%s", err, auditRR.Body.String())
+	}
+	if auditResp.Data.Total < 1 || len(auditResp.Data.Logs) == 0 {
+		t.Fatalf("create_ticket audit log missing: %#v", auditResp.Data)
+	}
+	log := auditResp.Data.Logs[0]
+	if log.Action != "create_ticket" || log.UID != ticket.UID || log.TargetUID != ticket.UID || int64(log.Detail.TicketID) != id {
+		t.Fatalf("unexpected create_ticket audit log: %#v ticket=%#v", log, ticket)
+	}
+}
+
 func TestAdminTicketDetailAndReplyEndpoint(t *testing.T) {
 	app := newTestApp(t)
 	enableTicketSystem(t, app, nil)

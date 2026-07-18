@@ -91,7 +91,14 @@ func (a *App) handleCreateTicket(w http.ResponseWriter, r *http.Request, _ Param
 	if statusFromError(w, err) {
 		return
 	}
-	a.audit(r, "create_ticket", "user", 0, map[string]any{"ticket_id": ticket.ID, "type": ticketType, "priority": priority})
+	zap.L().Info("工单已创建",
+		zap.Int64("ticket_id", ticket.ID),
+		zap.Int64("uid", ticket.UID),
+		zap.String("username", ticket.Username),
+		zap.String("type", ticket.Type),
+		zap.String("priority", ticket.Priority),
+	)
+	a.audit(r, "create_ticket", "user", p.User.UID, map[string]any{"ticket_id": ticket.ID, "type": ticketType, "priority": priority})
 	a.notifyTicketAdmins(r.Context(), "created", ticket, p.User)
 	created(w, "工单已提交", ticketDTO(ticket))
 }
