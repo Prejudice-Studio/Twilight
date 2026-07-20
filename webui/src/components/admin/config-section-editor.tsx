@@ -159,11 +159,45 @@ function FieldEditor({
   value: unknown;
   onChange: (value: unknown) => void;
 }) {
+  const hints = field.placeholder_hints ?? [];
+  const insertHint = (hint: string) => {
+    const active = document.activeElement;
+    if (!(active instanceof HTMLTextAreaElement) && !(active instanceof HTMLInputElement)) return;
+    const start = active.selectionStart ?? 0;
+    const end = active.selectionEnd ?? 0;
+    const val = active.value;
+    active.value = val.slice(0, start) + hint + val.slice(end);
+    active.selectionStart = active.selectionEnd = start + hint.length;
+    active.dispatchEvent(new Event("input", { bubbles: true }));
+    active.focus();
+  };
+
+  const PlaceholderRow = hints.length > 0 ? (
+    <div className="flex flex-wrap gap-1">
+      {hints.map((hint) => (
+        <button
+          key={hint}
+          type="button"
+          className="inline-flex items-center rounded-md border bg-muted/30 px-1.5 py-0.5 font-mono text-[11px] leading-tight hover:bg-muted cursor-pointer transition-colors"
+          onClick={() => insertHint(hint)}
+          title={`插入 ${hint}`}
+        >
+          {hint}
+        </button>
+      ))}
+    </div>
+  ) : null;
+
   if (field.type === "bool") {
     return <Switch checked={Boolean(value)} onCheckedChange={onChange} />;
   }
   if (field.type === "textarea") {
-    return <Textarea value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} className="min-h-28 font-mono text-sm" />;
+    return (
+      <div className="space-y-2">
+        {PlaceholderRow}
+        <Textarea value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} className="min-h-28 font-mono text-sm" />
+      </div>
+    );
   }
   if (field.type === "secret") {
     return <SecretInput value={String(value ?? "")} onChange={onChange} />;
@@ -192,12 +226,15 @@ function FieldEditor({
     );
   }
   return (
-    <Input
-      type={field.type === "int" || field.type === "float" ? "number" : "text"}
-      step={field.type === "float" ? "0.01" : undefined}
-      value={String(value ?? "")}
-      onChange={(event) => onChange(event.target.value)}
-    />
+    <div className="space-y-2">
+      {PlaceholderRow}
+      <Input
+        type={field.type === "int" || field.type === "float" ? "number" : "text"}
+        step={field.type === "float" ? "0.01" : undefined}
+        value={String(value ?? "")}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </div>
   );
 }
 

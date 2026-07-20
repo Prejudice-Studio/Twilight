@@ -895,6 +895,7 @@ export interface ConfigField {
   description: string;
   value: unknown;
   options?: ConfigFieldOption[];
+  placeholder_hints?: string[];
 }
 
 export interface ConfigSection {
@@ -1166,6 +1167,8 @@ export interface Announcement {
   render_mode?: AnnouncementRenderMode;
   pinned: boolean;
   visible: boolean;
+  force_read?: boolean;
+  force_read_seconds?: number;
   expires_at: number; // -1 = 永不过期
   created_at: number;
   updated_at: number;

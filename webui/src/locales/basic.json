@@ -709,6 +709,7 @@
     "mediaOverview": "媒体概览",
     "liveNow": "正在播放：{count}",
     "onlineViewers": "在线人数",
+    "viewerDetails": "观看详情",
     "movieCount": "电影",
     "seriesCount": "剧集",
     "episodeCount": "集数",
@@ -1727,7 +1728,14 @@
     "collapseHistory": "收起公告历史",
     "viewAllAnnouncements": "查看全部 {count} 条公告",
     "pageTitle": "全站公告",
-    "pageDescription": "管理员发布的全部公告与历史记录，按置顶与发布时间排序。"
+    "pageDescription": "管理员发布的全部公告与历史记录，按置顶与发布时间排序。",
+    "title": "公告",
+    "forceReadHint": "请仔细阅读此公告",
+    "forceReadRemaining": "还需等待 {seconds} 秒",
+    "forceReadDone": "阅读完毕",
+    "forceReadPleaseWait": "请先阅读公告",
+    "iHaveRead": "我已阅读",
+    "nextPage": "下一条"
   },
   "accessibility": {
     "skipToContent": "跳到主内容"
@@ -2559,6 +2567,12 @@
     "presetTitle": "当前 JS 预设",
     "presetDescription": "来自开发者模式的服务端预设，可被 JS 类型指令选择。",
     "noPresets": "还没有 JS 预设。请先到开发者模式创建空白预设或保存示例。",
+    "placeholderTitle": "可用占位符",
+    "placeholderDescription": "点击占位符将其插入到已聚焦的回复文本框光标位置。",
+    "placeholderCategoryBasic": "基础",
+    "placeholderCategoryTG": "Telegram 上下文",
+    "placeholderCategoryUser": "用户信息（仅 JS 命令有效）",
+    "clickToInsert": "点击插入此占位符",
     "loadFailed": "加载 Bot 指令失败",
     "saveFailed": "保存 Bot 指令失败",
     "saved": "Bot 指令已保存"

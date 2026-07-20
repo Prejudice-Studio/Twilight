@@ -600,6 +600,7 @@ func (a *App) telegramGroupUserPanelPlaceholders(ctx context.Context, chatID int
 		"emby_status":          telegramLocalEmbyLabel(u),
 		"emby_bound_status":    telegramLocalEmbyBindingStatusLabel(u),
 		"emby_bound":           telegramYesNoLabel(u.EmbyID != ""),
+		"emby_enabled_status":  telegramEmbyEnabledStatusLabel(u),
 		"emby_username":        embyUsername,
 		"emby_unbind_allowed":  telegramYesNoLabel(a.userCanSelfUnbindEmby(u)),
 		"registration_source":  registrationSourceLabel(u.RegistrationSource),
@@ -888,6 +889,19 @@ func telegramPendingEmbyDaysLabel(days *int) string {
 		return "永久"
 	}
 	return fmt.Sprintf("%d 天", *days)
+}
+
+func telegramEmbyEnabledStatusLabel(u store.User) string {
+	if u.EmbyID == "" || u.EmbyDisabled {
+		return "已禁用"
+	}
+	if !u.Active {
+		return "已禁用 (Web 禁用)"
+	}
+	if embyAccessExpired(u) {
+		return "已禁用 (已过期)"
+	}
+	return "已启用"
 }
 
 func telegramEnabledLabel(ok bool) string {

@@ -445,6 +445,7 @@
     "mediaOverview": "媒體概覽",
     "liveNow": "正在播放：{count}",
     "onlineViewers": "線上人數",
+    "viewerDetails": "觀看詳情",
     "movieCount": "電影",
     "seriesCount": "劇集",
     "episodeCount": "集數",
@@ -996,7 +997,14 @@
     "collapseHistory": "收起公告歷史",
     "viewAllAnnouncements": "查看全部 {count} 條公告",
     "pageTitle": "全站公告",
-    "pageDescription": "管理員發布的全部公告與歷史記錄，按置頂與發布時間排序。"
+    "pageDescription": "管理員發布的全部公告與歷史記錄，按置頂與發布時間排序。",
+    "title": "公告",
+    "forceReadHint": "請仔細閱讀此公告",
+    "forceReadRemaining": "還需等待 {seconds} 秒",
+    "forceReadDone": "閱讀完畢",
+    "forceReadPleaseWait": "請先閱讀公告",
+    "iHaveRead": "我已閱讀",
+    "nextPage": "下一條"
   },
   "accessibility": {
     "skipToContent": "跳到主內容"
@@ -1616,6 +1624,12 @@
     "presetTitle": "目前 JS 預設",
     "presetDescription": "來自開發者模式的服務端預設，可被 JS 類型指令選擇。",
     "noPresets": "還沒有 JS 預設。請先到開發者模式建立空白預設或儲存範例。",
+    "placeholderTitle": "可用佔位符",
+    "placeholderDescription": "點擊佔位符將其插入到已聚焦的回覆文字框游標位置。",
+    "placeholderCategoryBasic": "基礎",
+    "placeholderCategoryTG": "Telegram 上下文",
+    "placeholderCategoryUser": "使用者資訊（僅 JS 指令有效）",
+    "clickToInsert": "點擊插入此佔位符",
     "loadFailed": "載入 Bot 指令失敗",
     "saveFailed": "儲存 Bot 指令失敗",
     "saved": "Bot 指令已儲存"

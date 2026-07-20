@@ -445,6 +445,7 @@
     "mediaOverview": "Media Overview",
     "liveNow": "Playing now: {count}",
     "onlineViewers": "Viewers",
+    "viewerDetails": "Viewer Details",
     "movieCount": "Movies",
     "seriesCount": "Series",
     "episodeCount": "Episodes",
@@ -996,7 +997,14 @@
     "collapseHistory": "Collapse announcement history",
     "viewAllAnnouncements": "View all {count} announcements",
     "pageTitle": "Site Announcements",
-    "pageDescription": "All announcements and history published by admins, sorted by pinning and publish time."
+    "pageDescription": "All announcements and history published by admins, sorted by pinning and publish time.",
+    "title": "Announcement",
+    "forceReadHint": "Please read this announcement carefully",
+    "forceReadRemaining": "Wait {seconds} more seconds",
+    "forceReadDone": "Done reading",
+    "forceReadPleaseWait": "Please read first",
+    "iHaveRead": "I have read",
+    "nextPage": "Next"
   },
   "accessibility": {
     "skipToContent": "Skip to main content"
@@ -1616,6 +1624,12 @@
     "presetTitle": "Current JS presets",
     "presetDescription": "Server-side presets from Developer Mode. JS commands can select these presets.",
     "noPresets": "No JS presets yet. Create a blank preset or save an example in Developer Mode first.",
+    "placeholderTitle": "Available Placeholders",
+    "placeholderDescription": "Click a placeholder to insert it at the cursor position in the focused text field.",
+    "placeholderCategoryBasic": "Basic",
+    "placeholderCategoryTG": "Telegram Context",
+    "placeholderCategoryUser": "User Info (JS commands only)",
+    "clickToInsert": "Click to insert this placeholder",
     "loadFailed": "Failed to load bot commands",
     "saveFailed": "Failed to save bot commands",
     "saved": "Bot commands saved"

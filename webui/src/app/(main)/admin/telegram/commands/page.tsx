@@ -418,10 +418,91 @@ export default function AdminTelegramCommandsPage() {
                 <p className="font-medium">{t("adminTelegramCommands.jsExampleTitle")}</p>
                 <code className="mt-2 block whitespace-pre-wrap text-xs">/hello = js:preset:1</code>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {["{server_name}", "{bot_username}", "{user_name}"].map((item) => (
-                  <Badge key={item} variant="outline">{item}</Badge>
-                ))}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>{t("adminTelegramCommands.placeholderTitle")}</CardTitle>
+              <CardDescription>{t("adminTelegramCommands.placeholderDescription")}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="space-y-2 text-xs">
+                <p className="font-medium text-muted-foreground">{t("adminTelegramCommands.placeholderCategoryBasic")}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {["{server_name}", "{bot_username}", "{user_name}"].map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      className="inline-flex items-center rounded-md border bg-muted/30 px-2 py-0.5 font-mono text-[11px] hover:bg-muted cursor-pointer"
+                      onClick={() => {
+                        const active = document.activeElement;
+                        if (active instanceof HTMLTextAreaElement) {
+                          const start = active.selectionStart;
+                          const end = active.selectionEnd;
+                          const val = active.value;
+                          active.value = val.slice(0, start) + item + val.slice(end);
+                          active.selectionStart = active.selectionEnd = start + item.length;
+                          active.dispatchEvent(new Event("input", { bubbles: true }));
+                          active.focus();
+                        }
+                      }}
+                      title={t("adminTelegramCommands.clickToInsert")}
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
+                <p className="font-medium text-muted-foreground mt-3">{t("adminTelegramCommands.placeholderCategoryTG")}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {["{tg_chat_id}", "{tg_from_id}", "{tg_username}", "{tg_first_name}"].map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      className="inline-flex items-center rounded-md border bg-muted/30 px-2 py-0.5 font-mono text-[11px] hover:bg-muted cursor-pointer"
+                      onClick={() => {
+                        const active = document.activeElement;
+                        if (active instanceof HTMLTextAreaElement) {
+                          const start = active.selectionStart;
+                          const end = active.selectionEnd;
+                          const val = active.value;
+                          active.value = val.slice(0, start) + item + val.slice(end);
+                          active.selectionStart = active.selectionEnd = start + item.length;
+                          active.dispatchEvent(new Event("input", { bubbles: true }));
+                          active.focus();
+                        }
+                      }}
+                      title={t("adminTelegramCommands.clickToInsert")}
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
+                <p className="font-medium text-muted-foreground mt-3">{t("adminTelegramCommands.placeholderCategoryUser")}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {["{web_status}", "{expire_status}", "{emby_status}", "{emby_enabled_status}", "{role}", "{register_time}", "{registration_source}", "{bgm_sync_status}"].map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      className="inline-flex items-center rounded-md border bg-muted/30 px-2 py-0.5 font-mono text-[11px] hover:bg-muted cursor-pointer"
+                      onClick={() => {
+                        const active = document.activeElement;
+                        if (active instanceof HTMLTextAreaElement) {
+                          const start = active.selectionStart;
+                          const end = active.selectionEnd;
+                          const val = active.value;
+                          active.value = val.slice(0, start) + item + val.slice(end);
+                          active.selectionStart = active.selectionEnd = start + item.length;
+                          active.dispatchEvent(new Event("input", { bubbles: true }));
+                          active.focus();
+                        }
+                      }}
+                      title={t("adminTelegramCommands.clickToInsert")}
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
               </div>
             </CardContent>
           </Card>
