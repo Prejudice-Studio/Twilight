@@ -309,7 +309,7 @@ export function StandaloneEmbyCreateDialog({
 
 /**
  * 启停用户对话框：禁用 / 启用 + 邀请树级联深度。
- * - cascadeDepth=1 仅处理本人；=0 整棵子树；其他正整数表示向下 N 层
+ * - cascadeDepth=1 仅处理本人；=-1 整棵子树；其他正整数表示向下 N 层
  * - 自定义输入框被钳制在 [0, 999]
  * - 仅在禁用场景显示"原因"输入框（启用不需要理由）
  */
@@ -370,12 +370,12 @@ export function ToggleActiveDialog({
                 邀请树级联深度
               </Label>
               <span className="text-[10px] text-muted-foreground">
-                当前：{cascadeDepth === 0 ? "整棵子树" : `${cascadeDepth} 层`}
+                当前：{cascadeDepth === -1 ? "整棵子树" : `${cascadeDepth} 层`}
               </span>
             </div>
 
             <div className="flex flex-wrap gap-1.5">
-              {[1, 2, 3, 5, 0].map((preset) => (
+              {[1, 2, 3, 5, -1].map((preset) => (
                 <Button
                   key={preset}
                   type="button"
@@ -384,7 +384,7 @@ export function ToggleActiveDialog({
                   className="h-7 px-2 text-[11px]"
                   onClick={() => onCascadeDepthChange(preset)}
                 >
-                  {preset === 0 ? "全部" : `${preset} 层`}
+                  {preset === -1 ? "全部" : `${preset} 层`}
                 </Button>
               ))}
             </div>
@@ -392,7 +392,7 @@ export function ToggleActiveDialog({
             <Input
               type="number"
               inputMode="numeric"
-              min={0}
+              min={-1}
               max={999}
               value={cascadeDepth}
               onChange={(e) => {
@@ -400,17 +400,17 @@ export function ToggleActiveDialog({
                 if (Number.isNaN(v)) {
                   onCascadeDepthChange(1);
                 } else {
-                  onCascadeDepthChange(Math.max(0, Math.min(999, v)));
+                  onCascadeDepthChange(Math.max(-1, Math.min(999, v)));
                 }
               }}
-              placeholder="自定义层级，输入 0 表示整棵子树"
+              placeholder="自定义层级，输入 -1 表示整棵子树"
               className="h-9"
             />
 
             <p className="text-[11px] text-muted-foreground leading-relaxed">
               {cascadeDepth === 1 ? (
                 <>仅处理该用户本人；下级账号不受影响。</>
-              ) : cascadeDepth === 0 ? (
+              ) : cascadeDepth === -1 ? (
                 <>
                   将
                   <span className="font-semibold text-foreground">
@@ -848,7 +848,7 @@ export function BulkEnableDialog({
  * 删除用户对话框（支持邀请树级联）。
  * - scope: with_emby（含 Emby）/ local_only（仅本地）/ emby_only（仅 Emby）
  *   只有目标已绑定 Emby 时才显示 with_emby / emby_only 选项
- * - cascadeDepth=0 全子树；=1 仅本人；其他正整数表示向下 N 层
+ * - cascadeDepth=1 仅本人；=-1 全子树；其他正整数表示向下 N 层
  * - emby_only + cascadeDepth!==1 时给出二次提醒（仅删 Emby，本地保留）
  */
 export type DeleteScope = "with_emby" | "local_only" | "emby_only";
@@ -912,12 +912,12 @@ export function DeleteUserDialog({
                 邀请树级联深度
               </Label>
               <span className="text-[10px] text-muted-foreground">
-                当前：{cascadeDepth === 0 ? "整棵子树" : `${cascadeDepth} 层`}
+                当前：{cascadeDepth === -1 ? "整棵子树" : `${cascadeDepth} 层`}
               </span>
             </div>
 
             <div className="flex flex-wrap gap-1.5">
-              {[1, 2, 3, 5, 0].map((preset) => (
+              {[1, 2, 3, 5, -1].map((preset) => (
                 <Button
                   key={preset}
                   type="button"
@@ -926,7 +926,7 @@ export function DeleteUserDialog({
                   className="h-7 px-2 text-[11px]"
                   onClick={() => onCascadeDepthChange(preset)}
                 >
-                  {preset === 0 ? "全部" : `${preset} 层`}
+                  {preset === -1 ? "全部" : `${preset} 层`}
                 </Button>
               ))}
             </div>
@@ -935,7 +935,7 @@ export function DeleteUserDialog({
               <Input
                 type="number"
                 inputMode="numeric"
-                min={0}
+                min={-1}
                 max={999}
                 value={cascadeDepth}
                 onChange={(e) => {
@@ -943,10 +943,10 @@ export function DeleteUserDialog({
                   if (Number.isNaN(v)) {
                     onCascadeDepthChange(1);
                   } else {
-                    onCascadeDepthChange(Math.max(0, Math.min(999, v)));
+                    onCascadeDepthChange(Math.max(-1, Math.min(999, v)));
                   }
                 }}
-                placeholder="自定义层级，输入 0 表示整棵子树"
+                placeholder="自定义层级，输入 -1 表示整棵子树"
                 className="h-9"
               />
             </div>
@@ -954,7 +954,7 @@ export function DeleteUserDialog({
             <p className="text-[11px] text-muted-foreground leading-relaxed">
               {cascadeDepth === 1 ? (
                 <>仅处理该用户本人；被他邀请的下级会自动成为新树根，互相之间不再有上下级关系。</>
-              ) : cascadeDepth === 0 ? (
+              ) : cascadeDepth === -1 ? (
                 <>
                   将沿邀请关系，一路处理该用户及其
                   <span className="font-semibold text-foreground"> 全部后代</span>

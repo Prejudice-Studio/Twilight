@@ -491,15 +491,16 @@ func (a *App) batchUnboundEmbyUserUIDsFromPayload(w http.ResponseWriter, payload
 func (a *App) filteredBatchUserUIDs(payload map[string]any, limit int) ([]int64, int) {
 	filter, _ := payload["filter"].(map[string]any)
 	listFilter := adminUserListFilter{
-		roleFilter:       filter["role"],
-		hasRole:          filter["role"] != nil,
-		activeFilter:     filter["active"],
-		hasActive:        filter["active"] != nil,
-		embyFilter:       strings.ToLower(strings.TrimSpace(asString(filter["emby"]))),
-		embyStatusFilter: strings.ToLower(strings.TrimSpace(asString(filter["emby_status"]))),
-		emailFilter:      strings.ToLower(strings.TrimSpace(asString(filter["email_status"]))),
-		search:           strings.ToLower(strings.TrimSpace(asString(filter["search"]))),
-		now:              time.Now().Unix(),
+		roleFilter:        filter["role"],
+		hasRole:           filter["role"] != nil,
+		activeFilter:      filter["active"],
+		hasActive:         filter["active"] != nil,
+		strictQueryActive: true,
+		embyFilter:        strings.ToLower(strings.TrimSpace(asString(filter["emby"]))),
+		embyStatusFilter:  strings.ToLower(strings.TrimSpace(asString(filter["emby_status"]))),
+		emailFilter:       strings.ToLower(strings.TrimSpace(asString(filter["email_status"]))),
+		search:            strings.ToLower(strings.TrimSpace(asString(filter["search"]))),
+		now:               time.Now().Unix(),
 	}
 	// exclude_uids 支持「反选全部 / 全选后取消个别」：前端用排除集表达跨页选择，
 	// 这里把它从匹配集中剔除。只能缩小目标集，无法越过筛选 / 鉴权扩大目标——

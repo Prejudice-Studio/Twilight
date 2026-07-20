@@ -1117,7 +1117,7 @@ export default function AdminUsersPage() {
         const affected = res.data?.affected?.length ?? 0;
         const skipped = res.data?.skipped?.length ?? 0;
         const desc = toggleCascadeDepth !== 1
-          ? `成功 ${affected}，跳过 ${skipped}（层级 ${toggleCascadeDepth === 0 ? "整棵子树" : toggleCascadeDepth}）`
+          ? `成功 ${affected}，跳过 ${skipped}（层级 ${toggleCascadeDepth === -1 ? "整棵子树" : toggleCascadeDepth}）`
           : undefined;
         toast({ title: `已${action}`, description: desc, variant: "success" });
         // 本地禁用成功但 Emby 远端关停失败时，后端会返回 emby_failed 让管理员知晓
@@ -1156,7 +1156,7 @@ export default function AdminUsersPage() {
     try {
       const res = await api.deleteUserScoped(deleteTarget.uid, {
         mode: deleteScope,
-        cascadeDepth, // 0 表示整棵子树
+        cascadeDepth, // -1 表示整棵子树
       });
 
       if (res.success) {
@@ -1170,7 +1170,7 @@ export default function AdminUsersPage() {
           emby_only: "Emby 账户已删除（本地与邀请关系保留）",
         };
         toast({
-          title: cascadeDepth !== 1 ? `级联完成（层级 ${cascadeDepth === 0 ? "整棵子树" : cascadeDepth}）` : titles[deleteScope],
+          title: cascadeDepth !== 1 ? `级联完成（层级 ${cascadeDepth === -1 ? "整棵子树" : cascadeDepth}）` : titles[deleteScope],
           description: summary,
           variant: "success",
         });

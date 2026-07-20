@@ -2357,6 +2357,22 @@ class ApiClient {
     );
   }
 
+  async getMyAnnouncements() {
+    return this.request<{
+      announcements: Announcement[];
+      total: number;
+      unseen_force_read: Announcement[];
+      unseen_force_read_ids: number[];
+    }>("/users/me/announcements");
+  }
+
+  async ackAnnouncements(ids: number[]) {
+    return this.request<{ acknowledged: number }>("/users/me/announcements/ack", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    });
+  }
+
   /** 管理员视角列表，含历史与隐藏条目。 */
   async adminListAnnouncements(params: {
     page?: number;
@@ -2385,6 +2401,8 @@ class ApiClient {
     render_mode?: AnnouncementRenderMode;
     pinned?: boolean;
     visible?: boolean;
+    force_read?: boolean;
+    force_read_seconds?: number;
     expires_at?: number;
   }) {
     return this.request<Announcement>(`/admin/announcements`, {
@@ -2400,6 +2418,8 @@ class ApiClient {
     render_mode?: AnnouncementRenderMode;
     pinned?: boolean;
     visible?: boolean;
+    force_read?: boolean;
+    force_read_seconds?: number;
     expires_at?: number;
   }) {
     return this.request<Announcement>(`/admin/announcements/${id}`, {
@@ -2523,7 +2543,7 @@ class ApiClient {
     cascadeDepth?: number;
     reason?: string;
   }) {
-    const cascadeDepth = Math.max(0, Math.floor(options.cascadeDepth ?? 1));
+    const cascadeDepth = Math.max(-1, Math.floor(options.cascadeDepth ?? 1));
     const path = options.enable ? "enable" : "disable";
     return this.request<{
       affected: number[];
@@ -2556,7 +2576,7 @@ class ApiClient {
       cascadeDepth?: number;
     },
   ) {
-    const cascadeDepth = Math.max(0, Math.floor(options.cascadeDepth ?? 1));
+    const cascadeDepth = Math.max(-1, Math.floor(options.cascadeDepth ?? 1));
     return this.request<{
       deleted: number[];
       skipped: Array<{ uid: number; reason: string }>;

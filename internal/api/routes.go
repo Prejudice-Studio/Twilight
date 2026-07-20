@@ -193,7 +193,7 @@ func (a *App) registerAdminRoutes() {
 	a.add(http.MethodPost, "/api/v1/admin/users/:uid/unbind-telegram", AuthAdmin, a.handleAdminUnbindTelegram)
 	a.add(http.MethodPost, "/api/v1/admin/users/:uid/bind-telegram", AuthAdmin, a.handleAdminBindTelegram)
 	a.add(http.MethodGet, "/api/v1/admin/users/by-telegram/:telegram_id", AuthAdmin, a.handleUserByTelegram)
-	a.add(http.MethodPost, "/api/v1/admin/emby/force-set-password", AuthAdmin, a.handleAdminResetPassword)
+	a.add(http.MethodPost, "/api/v1/admin/emby/force-set-password", AuthAdmin, a.handleAdminEmbyForceSetPassword)
 	a.add(http.MethodPost, "/api/v1/admin/emby/sync", AuthAdmin, a.handleEmbySyncV2)
 	a.add(http.MethodGet, "/api/v1/admin/emby/sessions", AuthAdmin, a.handleSessions)
 	a.add(http.MethodGet, "/api/v1/admin/emby/device-audit", AuthAdmin, a.handleAdminEmbyDeviceAudit)
@@ -354,6 +354,8 @@ func (a *App) registerStatsInviteSigninAnnouncementRoutes() {
 	a.add(http.MethodPost, "/api/v1/signin/renew", AuthUser, a.handleSigninRenew)
 	a.add(http.MethodGet, "/api/v1/signin/history", AuthUser, a.handleSigninHistory)
 	a.add(http.MethodGet, "/api/v1/announcements", AuthPublic, a.handleAnnouncements)
+	a.add(http.MethodGet, "/api/v1/users/me/announcements", AuthUser, a.handleAnnouncementsMe)
+	a.add(http.MethodPost, "/api/v1/users/me/announcements/ack", AuthUser, a.handleAckAnnouncements)
 
 	// 工单
 	a.add(http.MethodGet, "/api/v1/tickets", AuthUser, a.handleMyTickets)

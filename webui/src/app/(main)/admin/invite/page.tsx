@@ -333,13 +333,13 @@ export default function AdminInviteTreePage() {
     );
     if (raw === null) return;
     const depth = parseInt(raw, 10);
-    if (!Number.isFinite(depth) || depth < 0) {
+    if (!Number.isFinite(depth) || depth < -1) {
       toast({ title: t("adminInvite.depthInvalid"), variant: "destructive" });
       return;
     }
     const ok = await confirm({
       title: t("adminInvite.confirmCascade", { action }),
-      description: depth === 0 ? t("adminInvite.wholeSubtree") : t("adminInvite.depthApply", { depth }),
+      description: depth === -1 ? t("adminInvite.wholeSubtree") : t("adminInvite.depthApply", { depth }),
       tone: enable ? "warning" : "danger",
       confirmLabel: t("adminInvite.confirmAction", { action }),
     });
