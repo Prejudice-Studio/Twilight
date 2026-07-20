@@ -174,6 +174,7 @@ type User struct {
 	PasswordHash                            string   `json:"password_hash"`
 	RebindingInProgress                     bool     `json:"rebinding_in_progress"`
 	RebindingSince                          int64    `json:"rebinding_since,omitempty"`
+	SeenAnnouncementIDs                     []int64  `json:"seen_announcement_ids,omitempty"`
 }
 
 type UserSummaryCounts struct {
@@ -225,17 +226,19 @@ type MediaRequest struct {
 }
 
 type Announcement struct {
-	ID           int64  `json:"id"`
-	Title        string `json:"title"`
-	Content      string `json:"content"`
-	Visible      bool   `json:"visible"`
-	Level        string `json:"level"`
-	RenderMode   string `json:"render_mode,omitempty"`
-	Pinned       bool   `json:"pinned"`
-	CreatedByUID int64  `json:"created_by_uid,omitempty"`
-	CreatedAt    int64  `json:"created_at"`
-	UpdatedAt    int64  `json:"updated_at"`
-	ExpiredAt    int64  `json:"expired_at,omitempty"`
+	ID              int64  `json:"id"`
+	Title           string `json:"title"`
+	Content         string `json:"content"`
+	Visible         bool   `json:"visible"`
+	Level           string `json:"level"`
+	RenderMode      string `json:"render_mode,omitempty"`
+	Pinned          bool   `json:"pinned"`
+	ForceRead       bool   `json:"force_read"`
+	ForceReadSeconds int   `json:"force_read_seconds,omitempty"`
+	CreatedByUID    int64  `json:"created_by_uid,omitempty"`
+	CreatedAt       int64  `json:"created_at"`
+	UpdatedAt       int64  `json:"updated_at"`
+	ExpiredAt       int64  `json:"expired_at,omitempty"`
 }
 
 type DeveloperJSPreset struct {
@@ -3527,6 +3530,9 @@ func (s *Store) UpsertAnnouncement(a Announcement) (Announcement, error) {
 		if a.RenderMode == "" {
 			a.RenderMode = "plain"
 		}
+		if a.ForceRead && a.ForceReadSeconds <= 0 {
+			a.ForceReadSeconds = 10
+		}
 		s.state.Announcements[a.ID] = a
 		return nil
 	})
@@ -3580,6 +3586,59 @@ func (s *Store) DeleteAnnouncement(id int64) error {
 			return ErrNotFound
 		}
 		delete(s.state.Announcements, id)
+		return nil
+	})
+}
+
+func (s *Store) UnseenForceReadAnnouncements(uid int64) []Announcement {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	now := time.Now().Unix()
+	seen := map[int64]bool{}
+	if u, ok := s.state.Users[uid]; ok {
+		for _, id := range u.SeenAnnouncementIDs {
+			seen[id] = true
+		}
+	}
+	out := make([]Announcement, 0)
+	for _, a := range s.state.Announcements {
+		if !a.Visible || (a.ExpiredAt > 0 && a.ExpiredAt < now) {
+			continue
+		}
+		if !a.ForceRead {
+			continue
+		}
+		if seen[a.ID] {
+			continue
+		}
+		out = append(out, a)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
+	return out
+}
+
+func (s *Store) MarkAnnouncementsSeen(uid int64, ids []int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mutateAndSaveLocked(func() error {
+		u, ok := s.state.Users[uid]
+		if !ok {
+			return ErrNotFound
+		}
+		existingSet := map[int64]bool{}
+		for _, id := range u.SeenAnnouncementIDs {
+			existingSet[id] = true
+		}
+		for _, id := range ids {
+			existingSet[id] = true
+		}
+		seen := make([]int64, 0, len(existingSet))
+		for id := range existingSet {
+			seen = append(seen, id)
+		}
+		sort.Slice(seen, func(i, j int) bool { return seen[i] < seen[j] })
+		u.SeenAnnouncementIDs = seen
+		s.state.Users[uid] = u
 		return nil
 	})
 }

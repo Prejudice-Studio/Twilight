@@ -32,17 +32,49 @@ func (a *App) handleAnnouncements(w http.ResponseWriter, r *http.Request, _ Para
 	ok(w, "OK", map[string]any{"announcements": anns, "total": len(anns)})
 }
 
+func (a *App) handleAnnouncementsMe(w http.ResponseWriter, r *http.Request, _ Params) {
+	u := current(r).User
+	anns := a.store().ListAnnouncements(false)
+	unseen := a.store().UnseenForceReadAnnouncements(u.UID)
+	unseenIDs := make([]int64, 0, len(unseen))
+	for _, a := range unseen {
+		unseenIDs = append(unseenIDs, a.ID)
+	}
+	ok(w, "OK", map[string]any{
+		"announcements":        anns,
+		"total":                len(anns),
+		"unseen_force_read":    unseen,
+		"unseen_force_read_ids": unseenIDs,
+	})
+}
+
+func (a *App) handleAckAnnouncements(w http.ResponseWriter, r *http.Request, _ Params) {
+	u := current(r).User
+	body := decodeMap(r)
+	ids := int64Slice(body["ids"])
+	if len(ids) == 0 {
+		ok(w, "OK", map[string]any{"acknowledged": 0})
+		return
+	}
+	if statusFromError(w, a.store().MarkAnnouncementsSeen(u.UID, ids)) {
+		return
+	}
+	ok(w, "OK", map[string]any{"acknowledged": len(ids)})
+}
+
 func (a *App) handleCreateAnnouncement(w http.ResponseWriter, r *http.Request, _ Params) {
 	payload := decodeMap(r)
 	ann, err := a.store().UpsertAnnouncement(store.Announcement{
-		Title:        firstNonEmpty(stringValue(payload, "title"), "鍏憡"),
-		Content:      stringValue(payload, "content"),
-		Visible:      boolValue(payload, "visible", true),
-		Level:        firstNonEmpty(stringValue(payload, "level"), "info"),
-		RenderMode:   safeAnnouncementRenderMode(stringValue(payload, "render_mode")),
-		Pinned:       boolValue(payload, "pinned", false),
-		CreatedByUID: current(r).User.UID,
-		ExpiredAt:    int64Value(payload, "expires_at", int64Value(payload, "expired_at", 0)),
+		Title:            firstNonEmpty(stringValue(payload, "title"), "公告"),
+		Content:          stringValue(payload, "content"),
+		Visible:          boolValue(payload, "visible", true),
+		Level:            firstNonEmpty(stringValue(payload, "level"), "info"),
+		RenderMode:       safeAnnouncementRenderMode(stringValue(payload, "render_mode")),
+		Pinned:           boolValue(payload, "pinned", false),
+		ForceRead:        boolValue(payload, "force_read", false),
+		ForceReadSeconds: int(numeric(payload["force_read_seconds"])),
+		CreatedByUID:     current(r).User.UID,
+		ExpiredAt:        int64Value(payload, "expires_at", int64Value(payload, "expired_at", 0)),
 	})
 	if statusFromError(w, err) {
 		return
@@ -62,16 +94,18 @@ func (a *App) handleUpdateAnnouncement(w http.ResponseWriter, r *http.Request, p
 		}
 	}
 	ann, err := a.store().UpsertAnnouncement(store.Announcement{
-		ID:           id,
-		Title:        firstNonEmpty(stringValue(payload, "title"), existing.Title, "鍏憡"),
-		Content:      firstNonEmpty(stringValue(payload, "content"), existing.Content),
-		Visible:      boolValue(payload, "visible", existing.Visible),
-		Level:        firstNonEmpty(stringValue(payload, "level"), existing.Level, "info"),
-		RenderMode:   safeAnnouncementRenderMode(firstNonEmpty(stringValue(payload, "render_mode"), existing.RenderMode)),
-		Pinned:       boolValue(payload, "pinned", existing.Pinned),
-		CreatedByUID: existing.CreatedByUID,
-		CreatedAt:    existing.CreatedAt,
-		ExpiredAt:    int64Value(payload, "expires_at", int64Value(payload, "expired_at", existing.ExpiredAt)),
+		ID:              id,
+		Title:           firstNonEmpty(stringValue(payload, "title"), existing.Title, "公告"),
+		Content:         firstNonEmpty(stringValue(payload, "content"), existing.Content),
+		Visible:         boolValue(payload, "visible", existing.Visible),
+		Level:           firstNonEmpty(stringValue(payload, "level"), existing.Level, "info"),
+		RenderMode:      safeAnnouncementRenderMode(firstNonEmpty(stringValue(payload, "render_mode"), existing.RenderMode)),
+		Pinned:          boolValue(payload, "pinned", existing.Pinned),
+		ForceRead:       boolValue(payload, "force_read", existing.ForceRead),
+		ForceReadSeconds: int(numeric(payload["force_read_seconds"])),
+		CreatedByUID:    existing.CreatedByUID,
+		CreatedAt:       existing.CreatedAt,
+		ExpiredAt:       int64Value(payload, "expires_at", int64Value(payload, "expired_at", existing.ExpiredAt)),
 	})
 	if statusFromError(w, err) {
 		return

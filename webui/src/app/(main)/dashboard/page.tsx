@@ -40,8 +40,9 @@ import { useVisiblePolling } from "@/hooks/use-visible-polling";
 import { PageError } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
-import { api, type CodeUsePreview, type EmbyInfo, type MediaRequest, type TelegramStatus, type SigninSummary, type RegisterAvailability, type EmbyRegisterStatus } from "@/lib/api";
+import { api, type CodeUsePreview, type EmbyInfo, type EmbyOnlineInfo, type MediaRequest, type TelegramStatus, type SigninSummary, type RegisterAvailability, type EmbyRegisterStatus } from "@/lib/api";
 import { AnnouncementBoard } from "@/components/announcement-board";
+import { ForceReadAnnouncementModal } from "@/components/force-read-announcement-modal";
 import { useI18n } from "@/lib/i18n";
 import { validatePasswordStrength } from "@/lib/password";
 
@@ -108,6 +109,7 @@ export default function DashboardPage() {
   const [embyInfo, setEmbyInfo] = useState<EmbyInfo | null>(null);
   const [embyStats, setEmbyStats] = useState<any>(null);
   const [embyViewers, setEmbyViewers] = useState(0);
+  const [embyOnlineUsers, setEmbyOnlineUsers] = useState<EmbyOnlineInfo["users"]>([]);
   const [embyStatsRefreshing, setEmbyStatsRefreshing] = useState(false);
   const [myRequests, setMyRequests] = useState<MediaRequest[]>([]);
   const [lineSlots, setLineSlots] = useState<LineSlot[]>([]);
@@ -118,6 +120,7 @@ export default function DashboardPage() {
   const [signinSummary, setSigninSummary] = useState<SigninSummary | null>(null);
   const [signingIn, setSigningIn] = useState(false);
   const [renewingWithPoints, setRenewingWithPoints] = useState(false);
+  const [forceReadDone, setForceReadDone] = useState(false);
   const mediaRequestEnabled = systemInfo?.features?.media_request !== false;
 
   const embyRegisterStorageKey = user?.uid ? `twilight:emby-register:${user.uid}` : null;
@@ -325,6 +328,14 @@ export default function DashboardPage() {
     if (result.success) setEmbyViewers(result.data?.viewers ?? 0);
   }, []);
 
+  const loadEmbyOnlineUsers = useCallback(async (signal?: AbortSignal) => {
+    const result = await api.getEmbyOnline(signal);
+    if (signal?.aborted) return;
+    if (result.success && result.data) {
+      setEmbyOnlineUsers(result.data.users ?? []);
+    }
+  }, []);
+
   // 独立拉取 Emby 统计（功能开关控制，避免污染主数据加载流程）
   useEffect(() => {
     if (!systemInfo?.features?.emby_stats) {
@@ -340,6 +351,8 @@ export default function DashboardPage() {
 
   const embyStatsEnabled = systemInfo?.features?.emby_stats === true;
   useVisiblePolling(loadEmbyViewers, 60000, embyStatsEnabled);
+
+  useVisiblePolling(loadEmbyOnlineUsers, 60000, embyStatsEnabled && user?.role === 0);
 
   // ============== 线路延迟测试 ==============
   // 由后端 /system/emby-urls/probe 代发请求测速。前端直连 Emby 会被 CORS /
@@ -1004,15 +1017,10 @@ export default function DashboardPage() {
               </div>
               <h3 className="text-sm font-black uppercase tracking-widest text-muted-foreground">{t("dashboard.mediaOverview")}</h3>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <Badge variant={embyViewers > 0 ? "success" : "outline"} className="text-[10px]">
-                {t("dashboard.liveNow", { count: embyViewers })}
-              </Badge>
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => void loadEmbyLibraryStats(true)} disabled={embyStatsRefreshing}>
-                {embyStatsRefreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                <span className="sr-only">{t("common.refresh")}</span>
-              </Button>
-            </div>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => void loadEmbyLibraryStats(true)} disabled={embyStatsRefreshing}>
+              {embyStatsRefreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              <span className="sr-only">{t("common.refresh")}</span>
+            </Button>
           </div>
 
           <div className="grid grid-cols-2 gap-2 text-xs">
@@ -1021,6 +1029,18 @@ export default function DashboardPage() {
             <StatPill icon={Tv} tone="info" label={t("dashboard.seriesCount")} value={embyStats?.series_count ?? 0} />
             <StatPill icon={Play} tone="warning" label={t("dashboard.episodeCount")} value={embyStats?.episode_count ?? 0} />
           </div>
+          {isAdmin && embyOnlineUsers.length > 0 && (
+            <div className="border-t pt-2 space-y-1.5">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">{t("dashboard.viewerDetails")}</p>
+              {embyOnlineUsers.map((u, i) => (
+                <div key={i} className="flex items-center gap-2 rounded-md bg-muted/40 px-2.5 py-1.5 text-[11px]">
+                  <span className="font-medium truncate">{u.username}</span>
+                  <span className="text-muted-foreground truncate">{u.item_name || "-"}</span>
+                  <Badge variant="outline" className="ml-auto shrink-0 text-[9px]">{u.client || u.device_name || "-"}</Badge>
+                </div>
+              ))}
+            </div>
+          )}
           {(!embyStats?.enabled || !embyStats?.configured) && (
             <p className="text-xs text-muted-foreground">{t("dashboard.libraryStatsUnavailable")}</p>
           )}
@@ -1496,6 +1516,13 @@ export default function DashboardPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {user && !forceReadDone && (
+        <ForceReadAnnouncementModal
+          userId={user.uid}
+          onAllAcknowledged={() => setForceReadDone(true)}
+        />
+      )}
     </motion.div>
   );
 }
