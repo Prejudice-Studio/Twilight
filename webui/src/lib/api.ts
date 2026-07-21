@@ -2125,7 +2125,9 @@ class ApiClient {
     if (params.order) query.set("order", params.order);
     if (params.per_page) query.set("per_page", String(params.per_page));
     return this.request<{ regcodes: Regcode[]; total: number }>(
-      `/admin/regcodes?${query.toString()}`
+      `/admin/regcodes?${query.toString()}`,
+      {},
+      { cacheRead: false }
     );
   }
 
@@ -2198,7 +2200,7 @@ class ApiClient {
       use_count: number;
       users: Array<(Partial<UserInfo> & { found: boolean; source: "uid" | "telegram" })>;
       telegram_only: Array<{ telegram_id: number; found: false; source: "telegram" }>;
-    }>(`/admin/regcodes/${encodeURIComponent(code)}/users`);
+    }>(`/admin/regcodes/${encodeURIComponent(code)}/users`, {}, { cacheRead: false });
   }
 
   async clearRegcodeUsage(code: string) {

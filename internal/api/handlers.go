@@ -1761,6 +1761,8 @@ func (a *App) handleSystemInfo(w http.ResponseWriter, r *http.Request, _ Params)
 		),
 		"telegram_mode":        cfg.TelegramMode,
 		"bangumi_sync_enabled": cfg.BangumiEnabled,
+		"storage_mismatch":     a.runtimeDatabaseMismatch(),
+		"storage_warning":      a.databaseMismatchWarning(),
 	})
 }
 

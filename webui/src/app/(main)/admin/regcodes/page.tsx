@@ -21,6 +21,7 @@ import {
   Pencil,
   Power,
   PowerOff,
+  AlertTriangle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -52,6 +53,7 @@ import { PageError } from "@/components/layout/page-state";
 import { api, type InviteCodeItem, type Regcode, type UserInfo } from "@/lib/api";
 import { formatDate, readStoredPerPage, storePerPage } from "@/lib/utils";
 import { useI18n, type MessageKey } from "@/lib/i18n";
+import { useSystemStore } from "@/store/system";
 
 const REGCODES_PER_PAGE_OPTIONS = [20, 50, 100];
 const REGCODES_PER_PAGE_STORAGE_KEY = "twilight.admin.regcodes.perPage";
@@ -60,6 +62,7 @@ export default function AdminRegcodesPage() {
   const { toast } = useToast();
   const { confirm } = useConfirm();
   const { t } = useI18n();
+  const { info: systemInfo } = useSystemStore();
   const [regcodes, setRegcodes] = useState<Regcode[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -725,6 +728,15 @@ export default function AdminRegcodesPage() {
 
   return (
     <div className="space-y-6">
+      {systemInfo?.storage_mismatch && (
+        <div className="flex items-start gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+          <div className="text-sm">
+            <p className="font-semibold text-amber-600 dark:text-amber-400">存储后端不匹配</p>
+            <p className="text-muted-foreground">{systemInfo.storage_warning || "当前运行存储后端与配置不一致，注册码写入操作已暂停。请先在数据库迁移页完成迁移并重启。"}</p>
+          </div>
+        </div>
+      )}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold">{t("adminRegcodes.pageTitle")}</h1>
