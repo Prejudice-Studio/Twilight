@@ -875,6 +875,7 @@ export interface CreateRegcodeData {
   target_username?: string;
   target_telegram_username?: string;
   target_telegram_id?: number;
+  target_uid?: number;
 }
 
 export interface BatchUserSelection {

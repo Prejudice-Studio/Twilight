@@ -115,6 +115,7 @@ export default function AdminRegcodesPage() {
     targetUsername: "",
     targetTelegramUsername: "",
     targetTelegramId: "",
+    targetUid: "",
   });
   const [createDecoy, setCreateDecoy] = useState(false);
   const [isPermanentDays, setIsPermanentDays] = useState(false);
@@ -166,13 +167,13 @@ export default function AdminRegcodesPage() {
     setCreateDecoy(false);
     if (activeTab === "1") {
       setIsPermanentDays(false);
-      setCreateData({ days: "30", validityTime: "-1", useCountLimit: "1", count: "1", format: "", randomAlgorithm: "", targetUsername: "", targetTelegramUsername: "", targetTelegramId: "" });
+      setCreateData({ days: "30", validityTime: "-1", useCountLimit: "1", count: "1", format: "", randomAlgorithm: "", targetUsername: "", targetTelegramUsername: "", targetTelegramId: "", targetUid: "" });
     } else if (activeTab === "2") {
       setIsPermanentDays(false);
-      setCreateData({ days: "30", validityTime: "72", useCountLimit: "1", count: "1", format: "", randomAlgorithm: "", targetUsername: "", targetTelegramUsername: "", targetTelegramId: "" });
+      setCreateData({ days: "30", validityTime: "72", useCountLimit: "1", count: "1", format: "", randomAlgorithm: "", targetUsername: "", targetTelegramUsername: "", targetTelegramId: "", targetUid: "" });
     } else {
       setIsPermanentDays(true);
-      setCreateData({ days: "-1", validityTime: "-1", useCountLimit: "-1", count: "1", format: "", randomAlgorithm: "", targetUsername: "", targetTelegramUsername: "", targetTelegramId: "" });
+      setCreateData({ days: "-1", validityTime: "-1", useCountLimit: "-1", count: "1", format: "", randomAlgorithm: "", targetUsername: "", targetTelegramUsername: "", targetTelegramId: "", targetUid: "" });
     }
   }, [activeTab, createOpen]);
 
@@ -185,7 +186,8 @@ export default function AdminRegcodesPage() {
     const targetUsername = createData.targetUsername.trim();
     const targetTelegramUsername = createData.targetTelegramUsername.trim().replace(/^@+/, "");
     const targetTelegramIdText = createData.targetTelegramId.trim();
-    const targetCount = [targetUsername, targetTelegramUsername, targetTelegramIdText].filter(Boolean).length;
+    const targetUidText = createData.targetUid.trim();
+    const targetCount = [targetUsername, targetTelegramUsername, targetTelegramIdText, targetUidText].filter(Boolean).length;
     if (targetCount > 1) {
       toast({ title: t("adminRegcodes.targetConflict"), description: t("adminRegcodes.targetConflictDesc"), variant: "destructive" });
       return;
@@ -193,6 +195,11 @@ export default function AdminRegcodesPage() {
     const targetTelegramId = targetTelegramIdText ? Number.parseInt(targetTelegramIdText, 10) : undefined;
     if (targetTelegramIdText && (!/^\d+$/.test(targetTelegramIdText) || !targetTelegramId || targetTelegramId <= 0)) {
       toast({ title: t("adminRegcodes.paramError"), description: t("adminRegcodes.tgIdMustBePositive"), variant: "destructive" });
+      return;
+    }
+    const targetUid = targetUidText ? Number.parseInt(targetUidText, 10) : undefined;
+    if (targetUidText && (!/^\d+$/.test(targetUidText) || !targetUid || targetUid <= 0)) {
+      toast({ title: t("adminRegcodes.paramError"), description: t("adminRegcodes.uidMustBePositive"), variant: "destructive" });
       return;
     }
     setIsCreating(true);
@@ -212,6 +219,7 @@ export default function AdminRegcodesPage() {
         target_username: targetUsername || undefined,
         target_telegram_username: targetTelegramUsername || undefined,
         target_telegram_id: targetTelegramId,
+        target_uid: targetUid,
       });
 
       if (res.success && res.data) {
@@ -865,6 +873,19 @@ export default function AdminRegcodesPage() {
                   <p className="text-[11px] text-muted-foreground">
                     {t("adminRegcodes.targetUsernameHelp")}
                   </p>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>{t("adminRegcodes.targetUidLabel")}</Label>
+                    <Input
+                      value={createData.targetUid}
+                      onChange={(e) => setCreateData({ ...createData, targetUid: e.target.value })}
+                      placeholder={t("adminRegcodes.targetUidPlaceholder")}
+                      inputMode="numeric"
+                    />
+                    <p className="text-[11px] text-muted-foreground">{t("adminRegcodes.targetUidHelp")}</p>
+                  </div>
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2">

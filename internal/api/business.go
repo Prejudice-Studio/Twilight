@@ -553,6 +553,11 @@ func (a *App) regcodeDTO(code store.RegCode) map[string]any {
 				break
 			}
 		}
+	} else if code.TargetUID > 0 {
+		if user, ok := a.store().User(code.TargetUID); ok {
+			item["target_uid"] = user.UID
+			item["target_resolved_username"] = user.Username
+		}
 	}
 	return item
 }
@@ -867,6 +872,9 @@ func (a *App) previewCode(ctx context.Context, code string, user store.User) (ma
 }
 
 func regcodeTargetMismatchReason(reg store.RegCode, user store.User) string {
+	if reg.TargetUID != 0 && reg.TargetUID != user.UID {
+		return "目标用户 UID: " + strconv.FormatInt(reg.TargetUID, 10)
+	}
 	if reg.TargetUsername != "" && !strings.EqualFold(reg.TargetUsername, user.Username) {
 		return "目标用户: " + reg.TargetUsername
 	}

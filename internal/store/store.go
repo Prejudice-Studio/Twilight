@@ -284,6 +284,7 @@ type RegCode struct {
 	TargetUsername         string  `json:"target_username,omitempty"`
 	TargetTelegramUsername string  `json:"target_telegram_username,omitempty"`
 	TargetTelegramID       int64   `json:"target_telegram_id,omitempty"`
+	TargetUID              int64   `json:"target_uid,omitempty"`
 	CreatedAt              int64   `json:"created_at"`
 	CreatedTime            int64   `json:"created_time"`
 	ExpiredAt              int64   `json:"expired_at,omitempty"`
@@ -4839,6 +4840,7 @@ func (s *Store) DeleteRegCode(code string) error {
 			return ErrNotFound
 		}
 		delete(s.state.RegCodes, code)
+		s.clearRegistrationCodeReferencesLocked(code)
 		return nil
 	})
 }
@@ -4846,6 +4848,7 @@ func (s *Store) DeleteRegCode(code string) error {
 func (s *Store) DeleteRegCodes(codes []string) (deleted []string, missing []string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	deletedSet := map[string]bool{}
 	mutErr := s.mutateAndSaveLocked(func() error {
 		seen := map[string]bool{}
 		for _, code := range codes {
@@ -4860,6 +4863,10 @@ func (s *Store) DeleteRegCodes(codes []string) (deleted []string, missing []stri
 			}
 			delete(s.state.RegCodes, code)
 			deleted = append(deleted, code)
+			deletedSet[code] = true
+		}
+		for code := range deletedSet {
+			s.clearRegistrationCodeReferencesLocked(code)
 		}
 		return nil
 	})
@@ -4869,6 +4876,15 @@ func (s *Store) DeleteRegCodes(codes []string) (deleted []string, missing []stri
 		return nil, nil, mutErr
 	}
 	return deleted, missing, nil
+}
+
+func (s *Store) clearRegistrationCodeReferencesLocked(code string) {
+	for uid, user := range s.state.Users {
+		if user.RegistrationCode == code {
+			user.RegistrationCode = ""
+			s.state.Users[uid] = user
+		}
+	}
 }
 
 func (s *Store) CreateRebindRequest(req RebindRequest) (RebindRequest, error) {

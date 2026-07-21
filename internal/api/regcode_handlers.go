@@ -98,6 +98,7 @@ func (a *App) handleCreateRegcodes(w http.ResponseWriter, r *http.Request, _ Par
 	targetTelegramUsername := normalizeRegcodeTargetTelegramUsername(firstNonEmpty(stringValue(payload, "target_telegram_username"), stringValue(payload, "target_tg_username"), stringValue(payload, "target_tgusername"), stringValue(payload, "tgusername")))
 	rawTargetTelegramID := firstNonEmpty(stringValue(payload, "target_telegram_id"), stringValue(payload, "target_tg_id"), stringValue(payload, "target_tg_userid"), stringValue(payload, "target_tguserid"), stringValue(payload, "tguserid"))
 	targetTelegramID := numeric(rawTargetTelegramID)
+	targetUID := int64(numeric(payload["target_uid"]))
 	if targetUsername != "" && !validRegcodeTargetUsername(targetUsername) {
 		failWithCode(w, http.StatusBadRequest, ErrRegcodeTargetBad, "目标用户名长度需为 3-32 个字符，且不能包含特殊路径或注入字符")
 		return
@@ -110,14 +111,20 @@ func (a *App) handleCreateRegcodes(w http.ResponseWriter, r *http.Request, _ Par
 		failWithCode(w, http.StatusBadRequest, ErrRegcodeTargetBad, "目标 Telegram ID 必须为正整数")
 		return
 	}
+	if targetUID > 0 {
+		if _, ok := a.store().User(targetUID); !ok {
+			failWithCode(w, http.StatusBadRequest, ErrRegcodeTargetBad, "目标 UID 对应的用户不存在")
+			return
+		}
+	}
 	targetCount := 0
-	for _, hasTarget := range []bool{targetUsername != "", targetTelegramUsername != "", targetTelegramID > 0} {
+	for _, hasTarget := range []bool{targetUsername != "", targetTelegramUsername != "", targetTelegramID > 0, targetUID > 0} {
 		if hasTarget {
 			targetCount++
 		}
 	}
 	if targetCount > 1 {
-		failWithCode(w, http.StatusBadRequest, ErrRegcodeTargetBad, "指名卡码只能指定一个目标：用户名、Telegram 用户名或 Telegram ID")
+		failWithCode(w, http.StatusBadRequest, ErrRegcodeTargetBad, "指名卡码只能指定一个目标：用户名、Telegram 用户名、Telegram ID 或 Web 账号 UID")
 		return
 	}
 	seen := map[string]bool{}
@@ -156,7 +163,7 @@ func (a *App) handleCreateRegcodes(w http.ResponseWriter, r *http.Request, _ Par
 			return
 		}
 		seen[code] = true
-		pending = append(pending, store.RegCode{Code: code, Type: codeType, ValidityTime: validity, UseCountLimit: useLimit, Days: days, Note: note, IsDecoy: isDecoy, TargetUsername: targetUsername, TargetTelegramUsername: targetTelegramUsername, TargetTelegramID: targetTelegramID, Active: true, Source: "admin", CreatorUID: admin.UID})
+		pending = append(pending, store.RegCode{Code: code, Type: codeType, ValidityTime: validity, UseCountLimit: useLimit, Days: days, Note: note, IsDecoy: isDecoy, TargetUsername: targetUsername, TargetTelegramUsername: targetTelegramUsername, TargetTelegramID: targetTelegramID, TargetUID: targetUID, Active: true, Source: "admin", CreatorUID: admin.UID})
 		codes = append(codes, code)
 	}
 	// 一次性落盘：避免逐条 UpsertRegCode 触发 count 次全量状态序列化写入。
@@ -166,7 +173,7 @@ func (a *App) handleCreateRegcodes(w http.ResponseWriter, r *http.Request, _ Par
 	a.audit(r, "create_regcode", "admin", 0, map[string]any{
 		"count": len(codes), "type": codeType, "days": days, "codes": codes,
 	})
-	ok(w, "注册码已创建", map[string]any{"codes": codes, "count": len(codes), "decoy": boolValue(payload, "decoy", false), "target_username": targetUsername, "target_telegram_username": targetTelegramUsername, "target_telegram_id": zeroNil(targetTelegramID)})
+	ok(w, "注册码已创建", map[string]any{"codes": codes, "count": len(codes), "decoy": boolValue(payload, "decoy", false), "target_username": targetUsername, "target_telegram_username": targetTelegramUsername, "target_telegram_id": zeroNil(targetTelegramID), "target_uid": zeroNil(targetUID)})
 }
 
 func (a *App) handleUpdateRegcode(w http.ResponseWriter, r *http.Request, params Params) {
@@ -241,14 +248,28 @@ func (a *App) handleDeleteRegcode(w http.ResponseWriter, r *http.Request, params
 	if a.rejectRegcodeWriteIfStorageMismatch(w) {
 		return
 	}
-	reg, _ := a.store().RegCode(params["code"])
-	if statusFromError(w, a.store().DeleteRegCode(params["code"])) {
+	code := strings.TrimSpace(params["code"])
+	if code == "" {
+		failWithCode(w, http.StatusBadRequest, ErrRegcodeNotFound, "注册码不能为空")
+		return
+	}
+	reg, okReg := a.store().RegCode(code)
+	if !okReg {
+		failWithCode(w, http.StatusNotFound, ErrRegcodeNotFound, "注册码不存在")
+		return
+	}
+	if statusFromError(w, a.store().DeleteRegCode(code)) {
 		return
 	}
 	a.audit(r, "delete_regcode", "admin", 0, map[string]any{
-		"code": params["code"], "type": reg.Type, "days": reg.Days,
+		"code": code, "type": reg.Type, "days": reg.Days,
 	})
-	ok(w, "注册码已删除", nil)
+	ok(w, "注册码已删除", map[string]any{
+		"deleted":       1,
+		"deleted_codes": []string{code},
+		"missing":       0,
+		"missing_codes": []string{},
+	})
 }
 
 func validRegcodeTargetUsername(username string) bool {
@@ -296,6 +317,10 @@ func (a *App) handleBatchDeleteRegcodes(w http.ResponseWriter, r *http.Request, 
 	}
 	if !selectAll && len(codes) > 200 {
 		failWithCode(w, http.StatusBadRequest, ErrRegcodeBatchTooLarge, "单次最多删除 200 个注册码")
+		return
+	}
+	if selectAll && len(codes) > 5000 {
+		failWithCode(w, http.StatusBadRequest, ErrRegcodeBatchTooLarge, "选中全部匹配时最多删除 5000 个注册码，请缩小筛选范围")
 		return
 	}
 	deleted, missing, err := a.store().DeleteRegCodes(codes)
