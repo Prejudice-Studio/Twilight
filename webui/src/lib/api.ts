@@ -661,7 +661,11 @@ class ApiClient {
 
   async checkRegcode(regCode: string) {
     const query = new URLSearchParams({ reg_code: regCode });
-    return this.request<{ type: number; type_name: string; days: number; valid: boolean }>(`/users/regcode/check?${query.toString()}`);
+    return this.request<{ type: number; type_name: string; days: number; valid: boolean }>(
+      `/users/regcode/check?${query.toString()}`,
+      { cache: "no-store" },
+      { cacheRead: false, dedupe: false },
+    );
   }
 
   async renewWithRegcode(regCode: string) {
@@ -2126,8 +2130,8 @@ class ApiClient {
     if (params.per_page) query.set("per_page", String(params.per_page));
     return this.request<{ regcodes: Regcode[]; total: number }>(
       `/admin/regcodes?${query.toString()}`,
-      {},
-      { cacheRead: false }
+      { cache: "no-store" },
+      { cacheRead: false, dedupe: false },
     );
   }
 
@@ -2200,7 +2204,7 @@ class ApiClient {
       use_count: number;
       users: Array<(Partial<UserInfo> & { found: boolean; source: "uid" | "telegram" })>;
       telegram_only: Array<{ telegram_id: number; found: false; source: "telegram" }>;
-    }>(`/admin/regcodes/${encodeURIComponent(code)}/users`, {}, { cacheRead: false });
+    }>(`/admin/regcodes/${encodeURIComponent(code)}/users`, { cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
   async clearRegcodeUsage(code: string) {
@@ -2674,7 +2678,11 @@ class ApiClient {
   }
 
   async adminGetTicket(id: number) {
-    return this.request<{ ticket: Ticket; ticket_types: string[] }>(`/admin/tickets/${id}`);
+    return this.request<{ ticket: Ticket; ticket_types: string[] }>(
+      `/admin/tickets/${id}`,
+      { cache: "no-store" },
+      { cacheRead: false, dedupe: false },
+    );
   }
 
   async adminUpdateTicket(id: number, payload: { status?: string; priority?: string; type?: string; admin_note?: string }) {

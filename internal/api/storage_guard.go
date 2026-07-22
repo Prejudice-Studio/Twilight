@@ -56,6 +56,17 @@ func (a *App) rejectRegcodeWriteIfStorageMismatch(w http.ResponseWriter) bool {
 	return true
 }
 
+func (a *App) refreshStoreForRequest(w http.ResponseWriter) bool {
+	if a == nil || a.store() == nil {
+		return false
+	}
+	if err := a.store().Refresh(); err != nil {
+		failWithCode(w, http.StatusInternalServerError, ErrInternal, "读取最新数据库状态失败")
+		return true
+	}
+	return false
+}
+
 func (a *App) databaseMismatchWarning() string {
 	if !a.runtimeDatabaseMismatch() {
 		return ""

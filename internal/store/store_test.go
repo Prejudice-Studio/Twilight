@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -395,6 +396,76 @@ func TestBatchDeleteRegCodesPhysicallyDeletesUsedAndUnused(t *testing.T) {
 	}
 	if _, ok := st.RegCode("USED-REG"); ok {
 		t.Fatal("used regcode was not physically deleted")
+	}
+}
+
+func TestUpsertRegCodesRejectsExistingCodeAtomically(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	if err := st.UpsertRegCode(RegCode{Code: "EXISTING-REG", Type: 1, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true, Note: "keep"}); err != nil {
+		t.Fatal(err)
+	}
+	err := st.UpsertRegCodes([]RegCode{
+		{Code: "EXISTING-REG", Type: 2, Days: 30, ValidityTime: -1, UseCountLimit: 1, Active: true, Note: "overwrite"},
+		{Code: "NEW-REG", Type: 1, Days: 30, ValidityTime: -1, UseCountLimit: 1, Active: true},
+	})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("expected ErrConflict for existing bulk regcode, got %v", err)
+	}
+	existing, ok := st.RegCode("EXISTING-REG")
+	if !ok || existing.Type != 1 || existing.Note != "keep" {
+		t.Fatalf("existing regcode was overwritten: ok=%v reg=%#v", ok, existing)
+	}
+	if _, ok := st.RegCode("NEW-REG"); ok {
+		t.Fatal("bulk regcode conflict should roll back the whole batch")
+	}
+}
+
+func TestRefreshLoadsExternallyChangedRegCodesAndTickets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.UpsertRegCode(RegCode{Code: "STALE-REG", Type: 1, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := st.CreateTicket(Ticket{UID: 1, Username: "user", Title: "stale", Content: "content", Type: TicketTypeDefault, Status: TicketStatusOpen}, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := st.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state State
+	if err := json.Unmarshal(raw, &state); err != nil {
+		t.Fatal(err)
+	}
+	delete(state.RegCodes, "STALE-REG")
+	delete(state.Tickets, ticket.ID)
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFileAtomicSync(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := st.RegCode("STALE-REG"); !ok {
+		t.Fatal("test setup expected stale in-memory regcode before refresh")
+	}
+	if _, ok := st.Ticket(ticket.ID); !ok {
+		t.Fatal("test setup expected stale in-memory ticket before refresh")
+	}
+	if err := st.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.RegCode("STALE-REG"); ok {
+		t.Fatal("refresh did not remove externally deleted regcode from memory")
+	}
+	if _, ok := st.Ticket(ticket.ID); ok {
+		t.Fatal("refresh did not remove externally deleted ticket from memory")
 	}
 }
 

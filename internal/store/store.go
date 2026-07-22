@@ -226,19 +226,19 @@ type MediaRequest struct {
 }
 
 type Announcement struct {
-	ID              int64  `json:"id"`
-	Title           string `json:"title"`
-	Content         string `json:"content"`
-	Visible         bool   `json:"visible"`
-	Level           string `json:"level"`
-	RenderMode      string `json:"render_mode,omitempty"`
-	Pinned          bool   `json:"pinned"`
-	ForceRead       bool   `json:"force_read"`
-	ForceReadSeconds int   `json:"force_read_seconds,omitempty"`
-	CreatedByUID    int64  `json:"created_by_uid,omitempty"`
-	CreatedAt       int64  `json:"created_at"`
-	UpdatedAt       int64  `json:"updated_at"`
-	ExpiredAt       int64  `json:"expired_at,omitempty"`
+	ID               int64  `json:"id"`
+	Title            string `json:"title"`
+	Content          string `json:"content"`
+	Visible          bool   `json:"visible"`
+	Level            string `json:"level"`
+	RenderMode       string `json:"render_mode,omitempty"`
+	Pinned           bool   `json:"pinned"`
+	ForceRead        bool   `json:"force_read"`
+	ForceReadSeconds int    `json:"force_read_seconds,omitempty"`
+	CreatedByUID     int64  `json:"created_by_uid,omitempty"`
+	CreatedAt        int64  `json:"created_at"`
+	UpdatedAt        int64  `json:"updated_at"`
+	ExpiredAt        int64  `json:"expired_at,omitempty"`
 }
 
 type DeveloperJSPreset struct {
@@ -1250,6 +1250,19 @@ func (s *Store) Save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.saveLocked()
+}
+
+// Refresh reloads the persisted state document into memory.
+// Mutating paths call refreshLocked through mutateAndSaveLocked; admin list/detail
+// handlers use this explicit read refresh when cross-process or PostgreSQL state
+// changes must be visible before serving a response.
+func (s *Store) Refresh() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.refreshLocked()
 }
 
 // snapshotStateLocked 把当前 s.state 序列化再反序列化得到一份独立副本，
@@ -4682,9 +4695,11 @@ func (s *Store) UpsertRegCode(code RegCode) error {
 	})
 }
 
-// UpsertRegCodes 在一次状态写入中批量插入/更新注册码。批量生成注册码时用它替代
+// UpsertRegCodes 在一次状态写入中批量创建注册码。批量生成注册码时用它替代
 // 逐条 UpsertRegCode，避免每条都触发一次全量状态落盘（saveLocked 每次序列化整个
-// state，逐条写入时磁盘开销随数量线性放大）。单条字段默认值与 UpsertRegCode 保持一致。
+// state，逐条写入时磁盘开销随数量线性放大）。批量生成必须是 create-only：
+// 如果持久化 state 在 handler 预检之后已经出现同名码，整批拒绝，避免覆盖旧码。
+// 单条字段默认值与 UpsertRegCode 保持一致。
 func (s *Store) UpsertRegCodes(codes []RegCode) error {
 	if len(codes) == 0 {
 		return nil
@@ -4693,8 +4708,17 @@ func (s *Store) UpsertRegCodes(codes []RegCode) error {
 	defer s.mu.Unlock()
 	return s.mutateAndSaveLocked(func() error {
 		now := time.Now().Unix()
+		seen := map[string]bool{}
+		normalized := make([]RegCode, 0, len(codes))
 		for _, code := range codes {
-			_, exists := s.state.RegCodes[code.Code]
+			code.Code = strings.TrimSpace(code.Code)
+			if code.Code == "" || seen[code.Code] {
+				return ErrConflict
+			}
+			seen[code.Code] = true
+			if _, exists := s.state.RegCodes[code.Code]; exists {
+				return ErrConflict
+			}
 			if code.CreatedAt == 0 {
 				code.CreatedAt = now
 			}
@@ -4707,9 +4731,12 @@ func (s *Store) UpsertRegCodes(codes []RegCode) error {
 			if code.UseCountLimit == 0 {
 				code.UseCountLimit = 1
 			}
-			if !exists && !code.Active && code.UseCount == 0 {
+			if !code.Active && code.UseCount == 0 {
 				code.Active = true
 			}
+			normalized = append(normalized, code)
+		}
+		for _, code := range normalized {
 			s.state.RegCodes[code.Code] = code
 		}
 		return nil

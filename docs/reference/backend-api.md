@@ -1144,6 +1144,8 @@ curl -X POST "http://localhost:5000/api/v1/admin/emby/sync" \
 
 > 规则细节见 [注册码与卡码](../features/regcodes.md)。
 
+注册码管理接口读取前会刷新持久化的单一状态文档；公开校验和写入类接口的前置读取也会刷新最新状态。批量生成保持 store 层原子 create-only 语义：同批重复或最新持久化状态中已有同名码时整批失败，不覆盖旧码。
+
 #### 查询注册码列表
 
 `GET /admin/regcodes`
@@ -1239,6 +1241,8 @@ curl -X POST "http://localhost:5000/api/v1/admin/regcodes" \
 `GET /admin/tickets` 默认只返回待处理 / 处理中工单，便于管理端聚焦当前队列；传 `all=1` 或 `status=all` 时返回全部状态，传具体 `status` 时按该状态过滤。
 
 工单对象返回 `replies` 双方回复时间线，回复项包含 `uid`、`username`、`role`、`author`、`content`、`created_at`。`admin_note` 仅表示最新管理员摘要，用于旧客户端兼容；管理员更新 `admin_note` 时后端会追加一条管理员回复，并与状态/优先级/类型更新在同一次 store mutation 中完成。`GET /admin/tickets/{ticket_id}` 返回单个工单和类型列表，供管理端会话式处理页使用；`POST /admin/tickets/{ticket_id}/reply` 只追加管理员文字回复，不要求同时提交状态、优先级或类型。状态、优先级、类型归一和关闭/解决时间戳由 store 层统一维护。用户回复已解决但未关闭的工单会重新进入待处理状态；已关闭工单拒绝普通用户继续回复或修改附件，管理员仍可追加排查回复并维护附件。创建工单的用户/全局打开工单限额在 store 层与插入同锁检查，避免并发请求绕过限额。创建成功后会写入 `create_ticket` 审计日志（目标 UID 为提交人），并向运行日志追加不含正文的创建摘要，便于和 Telegram 通知顺序交叉排查。
+
+用户 / 管理员工单列表、单个工单详情，以及回复、关闭、重开、附件上传 / 查看 / 删除等依赖当前工单状态的操作，会在读取前刷新持久化的单一状态文档，避免 PostgreSQL state、JSON state 或外部维护进程已经删除 / 修改工单后仍按旧内存快照处理。
 
 ### 9.5 白名单与统计
 

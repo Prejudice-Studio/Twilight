@@ -25,6 +25,9 @@ func (a *App) handleMyTickets(w http.ResponseWriter, r *http.Request, _ Params) 
 		failWithCode(w, http.StatusServiceUnavailable, ErrTicketDisabled, "工单系统未启用")
 		return
 	}
+	if a.refreshStoreForRequest(w) {
+		return
+	}
 	p := current(r)
 	tickets := a.store().ListTickets(store.TicketFilter{UID: p.User.UID})
 	ok(w, "OK", map[string]any{"tickets": ticketDTOs(tickets), "total": len(tickets), "ticket_types": a.store().TicketTypes()})
@@ -111,6 +114,9 @@ func (a *App) handleCloseOwnTicket(w http.ResponseWriter, r *http.Request, param
 	}
 	id, _ := int64Param(params, "ticket_id")
 	p := current(r)
+	if a.refreshStoreForRequest(w) {
+		return
+	}
 	existing, found := a.store().Ticket(id)
 	if !found || existing.UID != p.User.UID {
 		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
@@ -138,6 +144,9 @@ func (a *App) handleReopenOwnTicket(w http.ResponseWriter, r *http.Request, para
 	}
 	id, _ := int64Param(params, "ticket_id")
 	p := current(r)
+	if a.refreshStoreForRequest(w) {
+		return
+	}
 	existing, found := a.store().Ticket(id)
 	if !found || existing.UID != p.User.UID {
 		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
@@ -165,6 +174,9 @@ func (a *App) handleToggleTicketNotify(w http.ResponseWriter, r *http.Request, p
 	}
 	id, _ := int64Param(params, "ticket_id")
 	p := current(r)
+	if a.refreshStoreForRequest(w) {
+		return
+	}
 	existing, found := a.store().Ticket(id)
 	if !found || existing.UID != p.User.UID {
 		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
@@ -189,6 +201,9 @@ func (a *App) handleToggleTicketNotify(w http.ResponseWriter, r *http.Request, p
 // handleAdminTickets 管理员查看所有工单（支持筛选）。管理端接口不受 TicketSystemEnabled 开关限制。
 // 默认仅显示未解决的工单（open / in_progress），传 ?all=1 可查看全部包括已解决/已关闭。
 func (a *App) handleAdminTickets(w http.ResponseWriter, r *http.Request, _ Params) {
+	if a.refreshStoreForRequest(w) {
+		return
+	}
 	status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status")))
 	showAll := r.URL.Query().Get("all") == "1"
 	page := clamp(queryInt(r, "page", 1), 1, 1000000)
@@ -235,6 +250,9 @@ func (a *App) handleAdminTickets(w http.ResponseWriter, r *http.Request, _ Param
 
 // handleAdminTicket 返回单个工单及完整对话。管理端接口不受 TicketSystemEnabled 开关限制。
 func (a *App) handleAdminTicket(w http.ResponseWriter, r *http.Request, params Params) {
+	if a.refreshStoreForRequest(w) {
+		return
+	}
 	id, _ := int64Param(params, "ticket_id")
 	ticket, found := a.store().Ticket(id)
 	if !found {
@@ -249,6 +267,9 @@ func (a *App) handleAdminUpdateTicket(w http.ResponseWriter, r *http.Request, pa
 	id, _ := int64Param(params, "ticket_id")
 	payload := decodeMap(r)
 
+	if a.refreshStoreForRequest(w) {
+		return
+	}
 	existing, foundTicket := a.store().Ticket(id)
 	if !foundTicket {
 		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
@@ -312,6 +333,9 @@ func (a *App) handleAdminUpdateTicket(w http.ResponseWriter, r *http.Request, pa
 // handleAdminReplyTicket 追加管理员文字回复，不要求提交状态 / 类型 / 优先级表单。
 func (a *App) handleAdminReplyTicket(w http.ResponseWriter, r *http.Request, params Params) {
 	id, _ := int64Param(params, "ticket_id")
+	if a.refreshStoreForRequest(w) {
+		return
+	}
 	existing, foundTicket := a.store().Ticket(id)
 	if !foundTicket {
 		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
@@ -355,6 +379,9 @@ func (a *App) handleAdminReplyTicket(w http.ResponseWriter, r *http.Request, par
 // handleAdminDeleteTicket 管理员删除工单。管理端接口不受 TicketSystemEnabled 开关限制。
 func (a *App) handleAdminDeleteTicket(w http.ResponseWriter, r *http.Request, params Params) {
 	id, _ := int64Param(params, "ticket_id")
+	if a.refreshStoreForRequest(w) {
+		return
+	}
 	existing, found := a.store().Ticket(id)
 	if statusFromError(w, a.store().DeleteTicket(id)) {
 		return
@@ -417,6 +444,9 @@ func (a *App) handleUploadTicketImage(w http.ResponseWriter, r *http.Request, pa
 		return
 	}
 	id, _ := int64Param(params, "ticket_id")
+	if a.refreshStoreForRequest(w) {
+		return
+	}
 	ticket, allowed := a.ticketAccessible(p, id)
 	if !allowed {
 		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
@@ -537,6 +567,9 @@ func (a *App) handleGetTicketImage(w http.ResponseWriter, r *http.Request, param
 		failWithCode(w, http.StatusNotFound, ErrAssetNotFound, "resource not found")
 		return
 	}
+	if a.refreshStoreForRequest(w) {
+		return
+	}
 	ticket, allowed := a.ticketAccessible(p, id)
 	if !allowed {
 		failWithCode(w, http.StatusNotFound, ErrAssetNotFound, "resource not found")
@@ -578,6 +611,9 @@ func (a *App) handleDeleteTicketImage(w http.ResponseWriter, r *http.Request, pa
 	filename := params["filename"]
 	if !ticketImageFilenamePattern.MatchString(filename) {
 		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "图片不存在")
+		return
+	}
+	if a.refreshStoreForRequest(w) {
 		return
 	}
 	ticket, allowed := a.ticketAccessible(p, id)
@@ -629,6 +665,9 @@ func (a *App) handleReplyToTicket(w http.ResponseWriter, r *http.Request, params
 		return
 	}
 	id, _ := int64Param(params, "ticket_id")
+	if a.refreshStoreForRequest(w) {
+		return
+	}
 	ticket, okTicket := a.store().Ticket(id)
 	if !okTicket {
 		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")

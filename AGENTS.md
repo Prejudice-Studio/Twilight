@@ -229,7 +229,8 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - Invite-code views merge `source=invite` RegCodes and InviteCode records where needed.
 - Disabled cards pause validity countdown through `PausedSeconds` and `PauseStart`.
 - When a card is used up, status must be `used_up` even if an admin also disabled it.
-- Bulk generation should keep using `UpsertRegCodes`; do not reintroduce slow one-by-one insert loops.
+- Bulk generation should keep using `UpsertRegCodes`; do not reintroduce slow one-by-one insert loops. `UpsertRegCodes` is create-only: duplicate codes inside the same batch or codes already present in the latest persisted state must reject the whole batch with `ErrConflict`, never overwrite an existing RegCode.
+- RegCode admin list/detail/user-history/check and state-changing prechecks must refresh the persisted single-state document before reading, so PostgreSQL-backed state, JSON state, and multi-process maintenance do not serve stale deleted or edited codes. WebUI RegCode reads must bypass the short read cache and in-flight GET dedupe.
 
 ## Auth Background Rules
 
@@ -249,7 +250,8 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - Admin ticket list defaults to active tickets only; `all=1` and `status=all` must both mean all statuses, and the WebUI "all status" filter must send the explicit all flag.
 - Ticket Telegram admin notifications must skip the acting admin themselves while still notifying other subscribed admins; keep target selection testable outside the send loop.
 - User ticket creation must use the store atomic creation helper so per-user and global open-ticket quota checks happen under the same lock as insertion; do not reintroduce handler-side `Count*` then `UpsertTicket` flows.
-- After successful user ticket creation, the ticket must be immediately visible to `GET /admin/tickets`, recorded as `create_ticket` audit with the submitting UID as target, and logged to runtime logs without including ticket content. Frontend ticket and audit list reads must not use the short in-memory read cache.
+- After successful user ticket creation, the ticket must be immediately visible to `GET /admin/tickets`, recorded as `create_ticket` audit with the submitting UID as target, and logged to runtime logs without including ticket content. Frontend ticket list/detail and audit list reads must not use the short in-memory read cache.
+- Ticket list/detail endpoints and mutations that pre-read ticket state must refresh the persisted single-state document before reading, including replies and image attachment paths. This avoids stale admin/user views when another process, PostgreSQL-backed state, or direct JSON maintenance has changed or removed a ticket.
 - Admin ticket updates that add an admin reply must pass the reply through the store update helper in the same mutation; do not update status/admin_note first and append the reply in a second store call.
 - Admin ticket chat handling uses `GET /admin/tickets/:ticket_id` for a single ticket and `POST /admin/tickets/:ticket_id/reply` for text-only admin replies. Keep the attachment path on `/tickets/:ticket_id/images` so image limits and closed-ticket role rules stay centralized.
 - Ticket replies are the source of truth for two-sided conversation history. `admin_note` is only the latest admin summary / compatibility field and must not replace or clear `Ticket.Replies`.

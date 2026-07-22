@@ -31,6 +31,15 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 		failWithCode(w, http.StatusBadRequest, ErrCodeEmpty, "卡码不能为空")
 		return
 	}
+	if a.refreshStoreForRequest(w) {
+		return
+	}
+	if freshUser, ok := a.store().User(p.User.UID); ok {
+		p.User = freshUser
+	} else {
+		failWithCode(w, http.StatusUnauthorized, ErrUnauthorized, "登录状态已失效")
+		return
+	}
 	preview, source, okPreview := a.previewCode(r.Context(), code, p.User)
 	if !okPreview {
 		failWithCode(w, http.StatusBadRequest, ErrCodeInvalid, "卡码无效或已过期")
@@ -233,6 +242,9 @@ func (a *App) handleRegcodeCheck(w http.ResponseWriter, r *http.Request, _ Param
 	if code == "" {
 		payload := decodeMap(r)
 		code = stringValue(payload, "reg_code")
+	}
+	if a.refreshStoreForRequest(w) {
+		return
 	}
 	if code != "" {
 		if reg, okReg := a.store().RegCode(code); okReg {

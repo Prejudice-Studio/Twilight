@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"sort"
 	"strconv"
@@ -11,6 +12,9 @@ import (
 )
 
 func (a *App) handleListRegcodes(w http.ResponseWriter, r *http.Request, _ Params) {
+	if a.refreshStoreForRequest(w) {
+		return
+	}
 	codes := a.store().ListRegCodes()
 	page := max(1, queryInt(r, "page", 1))
 	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
@@ -52,6 +56,9 @@ func (a *App) handleListRegcodes(w http.ResponseWriter, r *http.Request, _ Param
 
 func (a *App) handleCreateRegcodes(w http.ResponseWriter, r *http.Request, _ Params) {
 	if a.rejectRegcodeWriteIfStorageMismatch(w) {
+		return
+	}
+	if a.refreshStoreForRequest(w) {
 		return
 	}
 	payload := decodeMap(r)
@@ -167,8 +174,14 @@ func (a *App) handleCreateRegcodes(w http.ResponseWriter, r *http.Request, _ Par
 		codes = append(codes, code)
 	}
 	// 一次性落盘：避免逐条 UpsertRegCode 触发 count 次全量状态序列化写入。
-	if err := a.store().UpsertRegCodes(pending); statusFromError(w, err) {
-		return
+	if err := a.store().UpsertRegCodes(pending); err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			failWithCode(w, http.StatusConflict, ErrRegcodeGenerateConflict, "注册码生成冲突，请调整格式或随机算法后重试")
+			return
+		}
+		if statusFromError(w, err) {
+			return
+		}
 	}
 	a.audit(r, "create_regcode", "admin", 0, map[string]any{
 		"count": len(codes), "type": codeType, "days": days, "codes": codes,
@@ -178,6 +191,9 @@ func (a *App) handleCreateRegcodes(w http.ResponseWriter, r *http.Request, _ Par
 
 func (a *App) handleUpdateRegcode(w http.ResponseWriter, r *http.Request, params Params) {
 	if a.rejectRegcodeWriteIfStorageMismatch(w) {
+		return
+	}
+	if a.refreshStoreForRequest(w) {
 		return
 	}
 	reg, okReg := a.store().RegCode(params["code"])
@@ -248,6 +264,9 @@ func (a *App) handleDeleteRegcode(w http.ResponseWriter, r *http.Request, params
 	if a.rejectRegcodeWriteIfStorageMismatch(w) {
 		return
 	}
+	if a.refreshStoreForRequest(w) {
+		return
+	}
 	code := strings.TrimSpace(params["code"])
 	if code == "" {
 		failWithCode(w, http.StatusBadRequest, ErrRegcodeNotFound, "注册码不能为空")
@@ -297,6 +316,9 @@ func (a *App) handleBatchDeleteRegcodes(w http.ResponseWriter, r *http.Request, 
 	if a.rejectRegcodeWriteIfStorageMismatch(w) {
 		return
 	}
+	if a.refreshStoreForRequest(w) {
+		return
+	}
 	payload := decodeMap(r)
 	if stringValue(payload, "confirm") != confirmBatchDeleteRegcodes {
 		failWithCode(w, http.StatusBadRequest, ErrRegcodeBatchConfirm, "missing confirm "+confirmBatchDeleteRegcodes)
@@ -340,6 +362,9 @@ func (a *App) handleBatchDeleteRegcodes(w http.ResponseWriter, r *http.Request, 
 }
 
 func (a *App) handleRegcodeUsers(w http.ResponseWriter, r *http.Request, params Params) {
+	if a.refreshStoreForRequest(w) {
+		return
+	}
 	reg, okReg := a.store().RegCode(params["code"])
 	if !okReg {
 		failWithCode(w, http.StatusNotFound, ErrRegcodeNotFound, "注册码不存在")
@@ -409,6 +434,9 @@ func sortRegcodeDTOs(items []map[string]any, sortKey, order string) {
 // 但不会影响已注册用户的账号。
 func (a *App) handleClearRegcodeUsage(w http.ResponseWriter, r *http.Request, params Params) {
 	if a.rejectRegcodeWriteIfStorageMismatch(w) {
+		return
+	}
+	if a.refreshStoreForRequest(w) {
 		return
 	}
 	payload := decodeMap(r)
