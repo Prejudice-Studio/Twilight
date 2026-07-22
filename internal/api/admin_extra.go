@@ -795,6 +795,9 @@ func (a *App) handleAdminKickNoEmby(w http.ResponseWriter, r *http.Request, _ Pa
 }
 
 func (a *App) handleInviteDetach(w http.ResponseWriter, r *http.Request, params Params) {
+	if a.refreshStoreForRequest(w) {
+		return
+	}
 	if _, okUser := a.userFromPath(w, params, "uid"); !okUser {
 		return
 	}

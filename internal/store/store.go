@@ -4366,6 +4366,13 @@ func (s *Store) UpsertInviteCode(code InviteCode) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.mutateAndSaveLocked(func() error {
+		code.Code = strings.TrimSpace(code.Code)
+		if code.Code == "" {
+			return ErrInvalid
+		}
+		if _, exists := s.state.InviteCodes[code.Code]; exists {
+			return ErrConflict
+		}
 		if code.InviterUID == 0 {
 			code.InviterUID = code.UID
 		}
@@ -4427,16 +4434,12 @@ func (s *Store) DeleteInviteCode(uid int64, code string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.mutateAndSaveLocked(func() error {
+		code = strings.TrimSpace(code)
 		c, ok := s.state.InviteCodes[code]
 		if !ok || c.UID != uid {
 			return ErrNotFound
 		}
-		if c.UseCount > 0 || c.Used {
-			c.Active = false
-			s.state.InviteCodes[code] = c
-		} else {
-			delete(s.state.InviteCodes, code)
-		}
+		delete(s.state.InviteCodes, code)
 		return nil
 	})
 }

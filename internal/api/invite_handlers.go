@@ -18,7 +18,10 @@ func (a *App) handleInviteConfig(w http.ResponseWriter, r *http.Request, _ Param
 }
 
 func (a *App) handleInviteMe(w http.ResponseWriter, r *http.Request, _ Params) {
-	user := current(r).User
+	user, okUser := a.refreshCurrentUserForRequest(w, r)
+	if !okUser {
+		return
+	}
 	codes := a.store().ListInviteCodes(user.UID)
 	codeItems := make([]map[string]any, 0, len(codes))
 	for _, code := range codes {
@@ -59,8 +62,11 @@ func (a *App) handleInviteMe(w http.ResponseWriter, r *http.Request, _ Params) {
 }
 
 func (a *App) handleCreateInviteCode(w http.ResponseWriter, r *http.Request, _ Params) {
-	user := current(r).User
 	payload := decodeMap(r)
+	user, okUser := a.refreshCurrentUserForRequest(w, r)
+	if !okUser {
+		return
+	}
 	if strings.HasSuffix(r.URL.Path, "/renew-codes") {
 		a.handleCreateInviteRenewCode(w, r, user, payload)
 		return
@@ -115,8 +121,14 @@ func (a *App) handleCreateInviteCode(w http.ResponseWriter, r *http.Request, _ P
 		return
 	}
 	invite := store.InviteCode{Code: code, UID: user.UID, InviterUID: user.UID, Days: days, UseCountLimit: 1, Active: true, Note: truncateString(stringValue(payload, "note"), 255), TargetUsername: targetUsername, CreatedAt: time.Now().Unix(), ExpiredAt: expiresAt}
-	if err := a.store().UpsertInviteCode(invite); statusFromError(w, err) {
-		return
+	if err := a.store().UpsertInviteCode(invite); err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			failWithCode(w, http.StatusConflict, ErrInviteGenerationConflict, "邀请码生成冲突，请重试")
+			return
+		}
+		if statusFromError(w, err) {
+			return
+		}
 	}
 	a.audit(r, "create_invite_code", "user", 0, map[string]any{
 		"code": code, "days": days,
@@ -199,8 +211,14 @@ func (a *App) handleCreateInviteRenewCode(w http.ResponseWriter, r *http.Request
 		return
 	}
 	reg := store.RegCode{Code: code, Type: 2, ValidityTime: int64(validityHours), UseCountLimit: 1, Days: days, Note: truncateString(stringValue(payload, "note"), 120), TargetUsername: child.Username, Active: true, Source: "invite", CreatorUID: user.UID}
-	if err := a.store().UpsertRegCode(reg); statusFromError(w, err) {
-		return
+	if err := a.store().UpsertRegCode(reg); err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			failWithCode(w, http.StatusConflict, ErrInviteGenerationConflict, "续期码生成冲突，请重试")
+			return
+		}
+		if statusFromError(w, err) {
+			return
+		}
 	}
 	a.audit(r, "create_renew_code", "user", child.UID, map[string]any{
 		"code": code, "days": days, "target_uid": child.UID,
@@ -213,7 +231,11 @@ func (a *App) handleInviteCodes(w http.ResponseWriter, r *http.Request, _ Params
 		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
 		return
 	}
-	codes := a.store().ListInviteCodes(current(r).User.UID)
+	user, okUser := a.refreshCurrentUserForRequest(w, r)
+	if !okUser {
+		return
+	}
+	codes := a.store().ListInviteCodes(user.UID)
 	items := make([]map[string]any, 0, len(codes))
 	for _, code := range codes {
 		items = append(items, a.inviteCodeDTO(code))
@@ -226,7 +248,11 @@ func (a *App) handleDeleteInviteCode(w http.ResponseWriter, r *http.Request, par
 		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
 		return
 	}
-	if statusFromError(w, a.store().DeleteInviteCode(current(r).User.UID, params["code"])) {
+	user, okUser := a.refreshCurrentUserForRequest(w, r)
+	if !okUser {
+		return
+	}
+	if statusFromError(w, a.store().DeleteInviteCode(user.UID, params["code"])) {
 		return
 	}
 	ok(w, "invite code deleted", nil)
@@ -234,7 +260,10 @@ func (a *App) handleDeleteInviteCode(w http.ResponseWriter, r *http.Request, par
 
 func (a *App) handleDetachExpiredInviteChild(w http.ResponseWriter, r *http.Request, params Params) {
 	uid, _ := int64Param(params, "uid")
-	user := current(r).User
+	user, okUser := a.refreshCurrentUserForRequest(w, r)
+	if !okUser {
+		return
+	}
 	rel, okRel := a.store().ParentOf(uid)
 	if !okRel || rel.ParentUID != user.UID {
 		failWithCode(w, http.StatusForbidden, ErrInviteDetachNotDirect, "只能断开自己的直属下级")
@@ -258,7 +287,10 @@ func (a *App) handleDetachExpiredInviteChild(w http.ResponseWriter, r *http.Requ
 }
 
 func (a *App) handleDetachMyExpiredInvite(w http.ResponseWriter, r *http.Request, _ Params) {
-	user := current(r).User
+	user, okUser := a.refreshCurrentUserForRequest(w, r)
+	if !okUser {
+		return
+	}
 	if _, okRel := a.store().ParentOf(user.UID); !okRel {
 		failWithCode(w, http.StatusForbidden, ErrInviteDetachNotDirect, "当前账号没有邀请上级关系")
 		return
@@ -370,6 +402,9 @@ func (a *App) handleInviteCheck(w http.ResponseWriter, r *http.Request, _ Params
 	if code == "" {
 		code = stringValue(decodeMap(r), "code")
 	}
+	if a.refreshStoreForRequest(w) {
+		return
+	}
 	invite, okInvite := a.store().InviteCode(code)
 	if !okInvite || !invite.Active || (invite.ExpiredAt > 0 && invite.ExpiredAt <= time.Now().Unix()) {
 		failWithCode(w, http.StatusNotFound, ErrInviteNotFound, "邀请码无效或已停用")
@@ -398,9 +433,13 @@ func (a *App) handleInviteUse(w http.ResponseWriter, r *http.Request, _ Params) 
 		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
 		return
 	}
+	user, okUser := a.refreshCurrentUserForRequest(w, r)
+	if !okUser {
+		return
+	}
 	// 按 UID 限速：登录用户每分钟最多 10 次使用尝试，避免被盗号后或恶意
 	// 用户脚本尝试所有可能的邀请码进入邀请树。
-	if !a.allowRate(r.Context(), rateKey("invite-use:", current(r).User.UID), 10, time.Minute) {
+	if !a.allowRate(r.Context(), rateKey("invite-use:", user.UID), 10, time.Minute) {
 		failWithCode(w, http.StatusTooManyRequests, ErrRateLimited, "请求过于频繁，请稍后再试")
 		return
 	}
@@ -410,7 +449,6 @@ func (a *App) handleInviteUse(w http.ResponseWriter, r *http.Request, _ Params) 
 		failWithCode(w, http.StatusBadRequest, ErrCodeEmpty, "邀请码不能为空")
 		return
 	}
-	user := current(r).User
 	if user.EmbyID != "" {
 		failWithCode(w, http.StatusBadRequest, ErrInviteEmbyBound, "当前账号已绑定 Emby")
 		return

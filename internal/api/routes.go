@@ -245,6 +245,7 @@ func (a *App) registerAdminRoutes() {
 	a.add(http.MethodPost, "/api/v1/admin/invite/users/:uid/detach", AuthAdmin, a.handleInviteDetach)
 	a.add(http.MethodPost, "/api/v1/admin/invite/users/:uid/detach-delete-emby", AuthAdmin, a.handleAdminInviteDetachDeleteEmby)
 	a.add(http.MethodPost, "/api/v1/admin/invite/users/detach-batch", AuthAdmin, a.handleAdminInviteDetachBatch)
+	a.add(http.MethodPost, "/api/v1/admin/invite/quick-maintenance", AuthAdmin, a.handleAdminInviteQuickMaintenance)
 	a.add(http.MethodGet, "/api/v1/admin/invite/codes", AuthAdmin, a.handleAdminInviteCodes)
 	a.add(http.MethodGet, "/api/v1/admin/violations", AuthAdmin, a.handleListViolations)
 	a.add(http.MethodDelete, "/api/v1/admin/violations/:violation_id", AuthAdmin, a.handleDeleteViolation)

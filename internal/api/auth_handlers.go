@@ -397,6 +397,9 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request, _ Params) {
 			failWithCode(w, http.StatusTooManyRequests, ErrRegisterRateLimited, "注册码注册尝试过于频繁，请稍后再试")
 			return
 		}
+		if a.refreshStoreForRequest(w) {
+			return
+		}
 		reg, okReg := a.store().RegCode(regCode)
 		if !okReg || reg.IsDecoy || reg.Type != 1 || regcodeStatus(reg) != "available" {
 			failWithCode(w, http.StatusBadRequest, ErrRegcodeInvalid, "注册码无效、已用完或已过期")

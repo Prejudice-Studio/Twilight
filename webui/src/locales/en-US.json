@@ -475,7 +475,20 @@
     "detachDeleteEmby": "Detach and delete Emby",
     "detachDeleteEmbyTitle": "Detach and delete Emby account?",
     "detachDeleteEmbyDescription": "Detach {username} (UID {uid}) from the invite tree and delete their remote Emby account.",
-    "detachedAndDeletedEmby": "Invite relation detached and Emby account deleted"
+    "detachedAndDeletedEmby": "Invite relation detached and Emby account deleted",
+    "quickAll": "Maintain all relations",
+    "quickSelected": "Detach and renew",
+    "quickSubtree": "Maintain descendants",
+    "quickRenewDaysTitle": "Set renewal days",
+    "quickRenewDaysDescription": "Enter days to add to target users. Use -1 for permanent. 0 is not allowed.",
+    "quickRenewDaysInvalid": "Renewal days must be -1 or 1-36500",
+    "quickConfirmTitle": "Confirm quick maintenance?",
+    "quickSelectedDescription": "Detach selected users from their parents and renew those users by {days} days.",
+    "quickSubtreeDescription": "Detach all descendants of the current user from their parents and renew those descendants by {days} days.",
+    "quickAllDescription": "Detach every invite parent/child relation and renew all child users by {days} days.",
+    "quickConfirm": "Run maintenance",
+    "quickComplete": "Quick maintenance complete",
+    "quickResult": "{success} succeeded, {failed} failed, {detached} detached, {renewed} renewed"
   },
   "settings": {
     "loading": "Loading settings...",

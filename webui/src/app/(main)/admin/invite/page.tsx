@@ -222,6 +222,18 @@ export default function AdminInviteTreePage() {
     });
   }, []);
 
+  const requestRenewDays = useCallback(() => {
+    return new Promise<string | null>((resolve) => {
+      setDepthPrompt({
+        title: t("adminInvite.quickRenewDaysTitle"),
+        description: t("adminInvite.quickRenewDaysDescription"),
+        value: "30",
+        confirmLabel: t("adminInvite.continue"),
+        resolve,
+      });
+    });
+  }, [t]);
+
   const closeDepthPrompt = (value: string | null) => {
     setDepthPrompt((current) => {
       if (current) current.resolve(value);
@@ -323,6 +335,61 @@ export default function AdminInviteTreePage() {
     }
   };
 
+  const handleQuickMaintenance = async (
+    payload: { scope: "selected" | "subtree" | "all"; uids?: number[]; root_uid?: number; depth?: number; include_root?: boolean },
+    labelKey: MessageKey,
+  ) => {
+    const rawDays = await requestRenewDays();
+    if (rawDays === null) return;
+    const renewDays = parseInt(rawDays, 10);
+    if (!Number.isFinite(renewDays) || renewDays === 0 || renewDays < -1 || renewDays > 36500) {
+      toast({ title: t("adminInvite.quickRenewDaysInvalid"), variant: "destructive" });
+      return;
+    }
+    const ok = await confirm({
+      title: t("adminInvite.quickConfirmTitle"),
+      description: t(labelKey, { days: renewDays }),
+      tone: "danger",
+      confirmLabel: t("adminInvite.quickConfirm"),
+    });
+    if (!ok) return;
+    const res = await api.adminInviteQuickMaintenance({ ...payload, detach: true, renew_days: renewDays }).catch((err) => ({
+      success: false,
+      message: err instanceof Error ? err.message : t("adminInvite.requestFailed"),
+      data: null,
+    }));
+    if (res.success && res.data) {
+      toast({
+        title: t("adminInvite.quickComplete"),
+        description: t("adminInvite.quickResult", { success: res.data.success, failed: res.data.failed, detached: res.data.detached, renewed: res.data.renewed }),
+        variant: res.data.failed > 0 ? "default" : "success",
+      });
+      setSelectedUids(new Set());
+      setSelectedUid(null);
+      await reload();
+    } else {
+      toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
+    }
+  };
+
+  const handleSelectedQuickMaintenance = async () => {
+    const uids = [...selectedUids];
+    if (uids.length === 0) {
+      toast({ title: t("adminInvite.noBulkSelection"), variant: "destructive" });
+      return;
+    }
+    await handleQuickMaintenance({ scope: "selected", uids }, "adminInvite.quickSelectedDescription");
+  };
+
+  const handleSubtreeQuickMaintenance = async () => {
+    if (!selected) return;
+    await handleQuickMaintenance({ scope: "subtree", root_uid: selected.uid, depth: -1, include_root: false }, "adminInvite.quickSubtreeDescription");
+  };
+
+  const handleAllQuickMaintenance = async () => {
+    await handleQuickMaintenance({ scope: "all" }, "adminInvite.quickAllDescription");
+  };
+
   const handleCascadeToggle = async (enable: boolean) => {
     if (!selected) return;
     const action = enable ? t("adminInvite.enable") : t("adminInvite.disable");
@@ -415,10 +482,16 @@ export default function AdminInviteTreePage() {
             {t("adminInvite.description")}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => void reload()} disabled={loading}>
-          {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-          {t("common.refresh")}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={() => void reload()} disabled={loading}>
+            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+            {t("common.refresh")}
+          </Button>
+          <Button variant="destructive" size="sm" onClick={() => void handleAllQuickMaintenance()} disabled={loading || !forest || forest.edges.length === 0}>
+            <Ban className="mr-2 h-4 w-4" />
+            {t("adminInvite.quickAll")}
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -468,6 +541,10 @@ export default function AdminInviteTreePage() {
               <Button variant="outline" size="sm" onClick={() => void handleBulkDetach(false)}>
                 <Ban className="mr-2 h-4 w-4" />
                 {t("adminInvite.bulkDetach")}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => void handleSelectedQuickMaintenance()}>
+                <ShieldCheck className="mr-2 h-4 w-4" />
+                {t("adminInvite.quickSelected")}
               </Button>
               <Button variant="destructive" size="sm" onClick={() => void handleBulkDetach(true)}>
                 <Trash2 className="mr-2 h-4 w-4" />
@@ -629,6 +706,10 @@ export default function AdminInviteTreePage() {
                 <Button variant="destructive" size="sm" onClick={() => void handleDetachAndDeleteEmby()} disabled={selected.role === 0}>
                   <Trash2 className="mr-2 h-4 w-4" />
                   {t("adminInvite.detachDeleteEmby")}
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => void handleSubtreeQuickMaintenance()} disabled={(maps.descendants.get(selected.uid) ?? 0) === 0}>
+                  <ShieldCheck className="mr-2 h-4 w-4" />
+                  {t("adminInvite.quickSubtree")}
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => void handleCascadeToggle(false)}>
                   <Ban className="mr-2 h-4 w-4" />

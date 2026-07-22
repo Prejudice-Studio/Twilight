@@ -624,6 +624,33 @@ func TestDetachInviteClearsInviteCodeUsage(t *testing.T) {
 	}
 }
 
+func TestDeleteInviteCodePhysicallyDeletesUsedCode(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	parent, err := st.CreateUser(User{Username: "invite-parent", PasswordHash: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := st.CreateUser(User{Username: "invite-child", PasswordHash: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertInviteCode(InviteCode{Code: "USED-INVITE", UID: parent.UID, InviterUID: parent.UID, Days: 7, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ConsumeInviteCode("USED-INVITE", child.UID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteInviteCode(parent.UID, "USED-INVITE"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.InviteCode("USED-INVITE"); ok {
+		t.Fatal("used invite code should be physically deleted")
+	}
+	if rel, ok := st.ParentOf(child.UID); !ok || rel.ParentUID != parent.UID {
+		t.Fatalf("deleting an invite code should not detach historical relation: ok=%v rel=%#v", ok, rel)
+	}
+}
+
 func TestDetachInviteClearsLegacyRelationByChildUID(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	child, err := st.CreateUser(User{Username: "legacy-detach-child", PasswordHash: "x"})

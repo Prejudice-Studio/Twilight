@@ -11,6 +11,7 @@ const (
 	confirmBatchEmbyDisable    = "BATCH_EMBY_DISABLE"
 	confirmBatchEmbyGrantAll   = "BATCH_EMBY_GRANT_ALL_LIBRARIES"
 	confirmBatchDeleteRegcodes = "BATCH_DELETE_REGCODES"
+	confirmInviteQuickMaintain = "INVITE_QUICK_MAINTENANCE"
 	confirmCleanupInvalidUsers = "CLEANUP_INVALID_USERS"
 	confirmClearAllEmails      = "CLEAR_ALL_EMAILS"
 	confirmClearViolations     = "CLEAR_VIOLATIONS"

@@ -67,6 +67,22 @@ func (a *App) refreshStoreForRequest(w http.ResponseWriter) bool {
 	return false
 }
 
+func (a *App) refreshCurrentUserForRequest(w http.ResponseWriter, r *http.Request) (store.User, bool) {
+	if a.refreshStoreForRequest(w) {
+		return store.User{}, false
+	}
+	p := current(r)
+	if p.User.UID == 0 {
+		return store.User{}, true
+	}
+	u, ok := a.store().User(p.User.UID)
+	if !ok || !u.Active {
+		failWithCode(w, http.StatusUnauthorized, ErrUnauthorized, "登录状态已失效，请重新登录")
+		return store.User{}, false
+	}
+	return u, true
+}
+
 func (a *App) databaseMismatchWarning() string {
 	if !a.runtimeDatabaseMismatch() {
 		return ""

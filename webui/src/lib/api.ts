@@ -2223,7 +2223,7 @@ class ApiClient {
     return this.request<{
       codes: InviteCodeItem[];
       total: number;
-    }>("/admin/invite/codes");
+    }>("/admin/invite/codes", { cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
   async forgotPasswordByEmby(data: { emby_username: string; emby_password: string }) {
@@ -2442,15 +2442,15 @@ class ApiClient {
 
   // ==================== 邀请树 ====================
   async getInviteConfig() {
-    return this.request<InviteConfig>("/invite/config");
+    return this.request<InviteConfig>("/invite/config", { cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
   async getMyInviteStatus() {
-    return this.request<InviteMyStatus>("/invite/me");
+    return this.request<InviteMyStatus>("/invite/me", { cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
   async getMyInviteCodes() {
-    return this.request<{ codes: InviteCodeItem[]; total: number }>("/invite/codes");
+    return this.request<{ codes: InviteCodeItem[]; total: number }>("/invite/codes", { cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
   async createInviteCode(payload: { days?: number; expires_at?: number; note?: string; target_username?: string }) {
@@ -2502,12 +2502,16 @@ class ApiClient {
 
   async checkInviteCode(code: string) {
     const query = new URLSearchParams({ code });
-    return this.request<{ days: number; inviter: string | null }>(`/invite/check?${query.toString()}`);
+    return this.request<{ days: number; inviter: string | null }>(
+      `/invite/check?${query.toString()}`,
+      { cache: "no-store" },
+      { cacheRead: false, dedupe: false },
+    );
   }
 
   // 管理员：邀请森林
   async adminGetInviteTree() {
-    return this.request<InviteForest>("/admin/invite/tree");
+    return this.request<InviteForest>("/admin/invite/tree", { cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
   async adminDetachInviteUser(uid: number) {
@@ -2535,6 +2539,33 @@ class ApiClient {
     }>("/admin/invite/users/detach-batch", {
       method: "POST",
       body: JSON.stringify({ uids, delete_emby: Boolean(options.deleteEmby) }),
+    });
+  }
+
+  async adminInviteQuickMaintenance(payload: {
+    scope: "selected" | "subtree" | "all";
+    uids?: number[];
+    root_uid?: number;
+    depth?: number;
+    include_root?: boolean;
+    detach?: boolean;
+    renew_days?: number;
+    dry_run?: boolean;
+  }) {
+    return this.request<{
+      scope: string;
+      total: number;
+      success: number;
+      failed: number;
+      detached: number;
+      renewed: number;
+      renew_days: number;
+      dry_run: boolean;
+      target_uids: number[];
+      errors: Array<{ uid: number; error: string; code?: string }>;
+    }>("/admin/invite/quick-maintenance", {
+      method: "POST",
+      body: JSON.stringify({ ...payload, confirm: confirmPhrases.inviteQuickMaintenance }),
     });
   }
 

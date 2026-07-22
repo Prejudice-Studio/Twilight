@@ -31,13 +31,9 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 		failWithCode(w, http.StatusBadRequest, ErrCodeEmpty, "卡码不能为空")
 		return
 	}
-	if a.refreshStoreForRequest(w) {
-		return
-	}
-	if freshUser, ok := a.store().User(p.User.UID); ok {
-		p.User = freshUser
+	if user, ok := a.refreshCurrentUserForRequest(w, r); ok {
+		p.User = user
 	} else {
-		failWithCode(w, http.StatusUnauthorized, ErrUnauthorized, "登录状态已失效")
 		return
 	}
 	preview, source, okPreview := a.previewCode(r.Context(), code, p.User)

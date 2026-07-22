@@ -475,7 +475,20 @@
     "detachDeleteEmby": "斷開並刪除 Emby",
     "detachDeleteEmbyTitle": "斷開並刪除 Emby 帳號？",
     "detachDeleteEmbyDescription": "將斷開 {username} (UID {uid}) 的邀請關係，並刪除其遠端 Emby 帳號。",
-    "detachedAndDeletedEmby": "已斷開關係並刪除 Emby 帳號"
+    "detachedAndDeletedEmby": "已斷開關係並刪除 Emby 帳號",
+    "quickAll": "一鍵維護全部關係",
+    "quickSelected": "斷開並續期",
+    "quickSubtree": "處理全部下級",
+    "quickRenewDaysTitle": "設定統一續期天數",
+    "quickRenewDaysDescription": "輸入要為目標使用者追加的天數；-1 表示設為永久，0 不允許。",
+    "quickRenewDaysInvalid": "續期天數必須為 -1 或 1-36500",
+    "quickConfirmTitle": "確認快捷維護？",
+    "quickSelectedDescription": "將斷開已選擇使用者與上級的邀請關係，並為這些使用者統一續期 {days} 天。",
+    "quickSubtreeDescription": "將斷開目前使用者全部下級與各自上級的邀請關係，並為這些下級統一續期 {days} 天。",
+    "quickAllDescription": "將斷開全站所有上下級邀請關係，並為所有下級統一續期 {days} 天。",
+    "quickConfirm": "確認維護",
+    "quickComplete": "快捷維護完成",
+    "quickResult": "成功 {success} 個，失敗 {failed} 個，斷開 {detached} 條，續期 {renewed} 個"
   },
   "settings": {
     "loading": "正在載入設定...",

@@ -9,6 +9,7 @@ export const confirmPhrases = {
   batchEmbyDisable: "BATCH_EMBY_DISABLE",
   batchEmbyGrantAllLibraries: "BATCH_EMBY_GRANT_ALL_LIBRARIES",
   batchDeleteRegcodes: "BATCH_DELETE_REGCODES",
+  inviteQuickMaintenance: "INVITE_QUICK_MAINTENANCE",
   cleanupInvalidUsers: "CLEANUP_INVALID_USERS",
   clearAllUserEmails: "CLEAR_ALL_EMAILS",
   clearViolations: "CLEAR_VIOLATIONS",

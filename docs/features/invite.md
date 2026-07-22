@@ -4,6 +4,8 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 
 > 邀请关系与邀请码是「单一状态文档」（`internal/store`）里的字段，不是独立的数据库或单表。JSON 后端存于 `db/twilight_go_state.json`，PostgreSQL 后端存于 `twilight_state` 表（`id=1` 的一行 jsonb）。具体对应字段为 `state.invite_codes`（`map[string]InviteCode`）与 `state.invite_relations`（`map[int64]InviteRelation`）。不存在 `db/invites.db`、`invite_relations` 单表或「首次启动自动建表」。
 
+邀请列表、邀请树、公开校验、生成 / 删除 / 使用邀请码、断开关系和管理员维护接口会在读取前刷新这份单一状态文档；WebUI 邀请相关读请求也会绕过短读缓存和 in-flight GET 合并，避免外部维护或 PostgreSQL/JSON state 变更后继续显示旧邀请码 / 旧关系。
+
 相关文档：注册码与卡码见 [注册码与卡码](./regcodes.md)，统一卡码入口见 [后端 API 详参](../reference/backend-api.md)，配置项总览见 [Go 后端架构与配置](../reference/backend.md)，全部路由见 [API 路由索引](../reference/api-index.md)。
 
 ## 概念
@@ -64,7 +66,7 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 | `GET` | `/invite/me` | AuthUser | 当前用户的上级（`parent`）、下级列表（`children`）、子树（`tree`）、层级（`depth`）、能否邀请（`can_invite` + `invite_block_reason`）、可签发的最大天数（`max_code_days`）及自己生成的邀请码列表（`codes`）。 |
 | `POST` | `/invite/codes` | AuthUser | 生成邀请码。仅当 `invite_enabled=true` 可用；可选 body：`days`、`expires_at`、`note`、`target_username`。按 UID 限速 10 次/分钟。 |
 | `GET` | `/invite/codes` | AuthUser | 列出我生成的邀请码。 |
-| `DELETE` | `/invite/codes/:code` | AuthUser | 撤销 / 删除我生成的邀请码（仅限本人创建的码）。 |
+| `DELETE` | `/invite/codes/:code` | AuthUser | 物理删除我生成的邀请码（仅限本人创建的码）。删除邀请码本身不会断开已经形成的上下级关系；关系维护必须走 detach 接口。 |
 | `POST` | `/invite/renew-codes` | AuthUser | 为已加入邀请树的「直属下级」生成专属续期码（实际生成的是 `type=2` 续期注册码，见下）。邀请系统关闭后仍允许给既有直属下级生成。 |
 | `POST` | `/invite/me/detach-expired` | AuthUser | 自助删除自己的 Emby 账号并断开上级关系：仅允许自己存在邀请上级，且 Emby 已到期，或 Web 已禁用且仍绑定 Emby；清空绑定与待开通状态。 |
 | `POST` | `/invite/children/:uid/detach-expired` | AuthUser | 删除 Emby 并断开直属下级：仅允许目标 Emby 已到期，或 Web 已禁用且仍绑定 Emby；清空绑定与待开通状态并解除上下级关系。 |
@@ -87,6 +89,7 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 | `POST` | `/admin/invite/users/:uid/detach` | AuthAdmin | 把指定用户从上级断开（删除其作为 `child` 的边，自身晋升新树根）。返回 `changed` 表示原本是否有上级。 |
 | `POST` | `/admin/invite/users/:uid/detach-delete-emby` | AuthAdmin | 把指定用户从上级断开，并删除其远端 Emby 账号、清空本地 Emby 绑定字段。管理员账号受保护。 |
 | `POST` | `/admin/invite/users/detach-batch` | AuthAdmin | 批量断开邀请关系；请求体 `uids` 为目标 UID 列表，`delete_emby=true` 时同时删除远端 Emby 账号。返回 `total/success/failed/errors/deleted_emby`。 |
+| `POST` | `/admin/invite/quick-maintenance` | AuthAdmin | 快捷维护：按 `selected` / `subtree` / `all` 范围断开上下级关系，并可给受影响下级统一续期指定天数。确认短语为 `INVITE_QUICK_MAINTENANCE`。 |
 | `GET` | `/admin/invite/codes` | AuthAdmin | 列出全部邀请码（可按邀请人在前端过滤）。 |
 | `POST` | `/admin/users/:uid/delete` | AuthAdmin | 删除用户，支持 JSON body 的 `mode` 与 `cascade_depth`（见下，推荐）。 |
 | `DELETE` | `/admin/users/:uid` | AuthAdmin | 删除用户兼容入口，保留简单删除和旧客户端调用。 |
@@ -189,7 +192,19 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 - **原子消费**：`store.ConsumeInviteCodeAndUpdateUser` 在一次加锁的状态变更里完成「`use_count++` / 标记 `used` / 达到 `use_count_limit` 时置 `active=false`」、写入 `invite_relations[childUID]`（指向邀请人）以及更新被邀请人权益。其中再次校验邀请码 `active`、未超用量上限、未过期、邀请人不等于使用者，任一不满足即整体失败回滚。
 - 被邀请人会被标记为 `PendingEmby`（待开通），写入用户级 `emby_grant_locked=true`，并把过期时间按 `effectiveDays` 顺延，且不会超过邀请人的过期时间（`boundedInviteExpiry`）。该锁不会因后续删除邀请码或断开邀请关系而解除。
 
-> 邀请码生成时即固定 `use_count_limit = 1`，因此每张邀请码只能被使用一次；用过的码自动失效。被本人撤销时，若已被使用过则保留记录并置 `active=false`，否则直接从状态文档删除（`store.DeleteInviteCode`）。
+> 邀请码生成时即固定 `use_count_limit = 1`，因此每张邀请码只能被使用一次；用过的码自动失效。被本人删除时，`store.DeleteInviteCode` 会把该邀请码从状态文档物理移除，即使它已经被使用过也不再保留在邀请码列表里。删除码不会解除已经建立的邀请关系，避免“删码”误伤历史上下级；需要断开关系时使用自助 / 管理员 detach 入口。
+
+### 管理员快捷维护
+
+`POST /admin/invite/quick-maintenance` 面向历史关系清理和大规模整理，支持：
+
+- `scope="selected"`：处理 `uids` 中指定的用户。
+- `scope="subtree"`：处理 `root_uid` 的下级，`include_root=true` 时包含 root 本人；`depth=-1` 表示整棵子树。
+- `scope="all"`：处理全站所有作为下级存在的用户。
+- `detach=true`：断开这些用户与上级的关系，并清理其占用的邀请码使用记录。
+- `renew_days`：为目标用户续期，`1..36500` 为追加天数，`-1` 为永久，`0` 表示不续期。管理员账号受保护，不会被快捷续期修改。
+
+该接口与其它邀请维护接口一样不受 `invite_enabled=false` 阻断，因为它是历史维护，不是新邀请流量。响应返回 `total/success/failed/detached/renewed/errors`，成功执行会写入 `admin_invite_quick_maintenance` 审计日志。
 
 ## 相关错误码
 

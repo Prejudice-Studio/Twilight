@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/prejudice-studio/twilight/internal/store"
 )
@@ -89,5 +90,123 @@ func TestAdminTicketListAndDetailRefreshPersistedState(t *testing.T) {
 	detail := doJSON(app, http.MethodGet, "/api/v1/admin/tickets/"+strconv.FormatInt(id, 10), ``, admin)
 	if detail.Code != http.StatusNotFound {
 		t.Fatalf("admin ticket detail should refresh and return 404, got %d body=%s", detail.Code, detail.Body.String())
+	}
+}
+
+func TestRegisterAndRenewRefreshDeletedRegCode(t *testing.T) {
+	app := newTestApp(t)
+	registerAndLogin(t, app, "admin", "Admin123456")
+	userCookies := registerAndLogin(t, app, "renew-user", "User123456")
+	app.cfg().RegisterCodeLimit = true
+	if err := app.store().UpsertRegCode(store.RegCode{Code: "REGISTER-STALE", Type: 1, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	writePersistedStateForTest(t, app, func(state *store.State) {
+		delete(state.RegCodes, "REGISTER-STALE")
+	})
+
+	register := doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"stale-register","password":"User123456","reg_code":"REGISTER-STALE"}`, nil)
+	if register.Code != http.StatusBadRequest {
+		t.Fatalf("register should refresh deleted regcode and fail, got %d body=%s", register.Code, register.Body.String())
+	}
+
+	if err := app.store().UpsertRegCode(store.RegCode{Code: "RENEW-STALE", Type: 2, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	writePersistedStateForTest(t, app, func(state *store.State) {
+		delete(state.RegCodes, "RENEW-STALE")
+	})
+	renew := doJSON(app, http.MethodPost, "/api/v1/users/me/renew", `{"reg_code":"RENEW-STALE"}`, userCookies)
+	if renew.Code != http.StatusBadRequest {
+		t.Fatalf("renew should refresh deleted regcode and fail, got %d body=%s", renew.Code, renew.Body.String())
+	}
+}
+
+func TestInviteReadsRefreshPersistedState(t *testing.T) {
+	app := newTestApp(t)
+	admin := registerAndLogin(t, app, "admin", "Admin123456")
+	parentCookies := registerAndLogin(t, app, "invite-parent", "Parent123456")
+	parent, ok := app.store().FindUserByUsername("invite-parent")
+	if !ok {
+		t.Fatal("parent user missing")
+	}
+	if err := app.store().UpsertInviteCode(store.InviteCode{Code: "STALE-INVITE", UID: parent.UID, InviterUID: parent.UID, Days: 7, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	writePersistedStateForTest(t, app, func(state *store.State) {
+		delete(state.InviteCodes, "STALE-INVITE")
+	})
+
+	check := doJSON(app, http.MethodGet, "/api/v1/invite/check?code=STALE-INVITE", ``, nil)
+	if check.Code != http.StatusNotFound {
+		t.Fatalf("invite check should refresh deleted invite, got %d body=%s", check.Code, check.Body.String())
+	}
+	ownCodes := doJSON(app, http.MethodGet, "/api/v1/invite/codes", ``, parentCookies)
+	if ownCodes.Code != http.StatusOK {
+		t.Fatalf("invite codes status=%d body=%s", ownCodes.Code, ownCodes.Body.String())
+	}
+	var ownResp struct {
+		Data struct {
+			Total int `json:"total"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(ownCodes.Body.Bytes(), &ownResp); err != nil {
+		t.Fatal(err)
+	}
+	if ownResp.Data.Total != 0 {
+		t.Fatalf("own invite code list served stale deleted invite, body=%s", ownCodes.Body.String())
+	}
+	adminCodes := doJSON(app, http.MethodGet, "/api/v1/admin/invite/codes", ``, admin)
+	if adminCodes.Code != http.StatusOK {
+		t.Fatalf("admin invite codes status=%d body=%s", adminCodes.Code, adminCodes.Body.String())
+	}
+	var adminResp struct {
+		Data struct {
+			Total int `json:"total"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(adminCodes.Body.Bytes(), &adminResp); err != nil {
+		t.Fatal(err)
+	}
+	if adminResp.Data.Total != 0 {
+		t.Fatalf("admin invite code list served stale deleted invite, body=%s", adminCodes.Body.String())
+	}
+}
+
+func TestAdminInviteQuickMaintenanceDetachesAndRenews(t *testing.T) {
+	app := newTestApp(t)
+	admin := registerAndLogin(t, app, "admin", "Admin123456")
+	now := time.Now()
+	parent, err := app.store().CreateUser(store.User{Username: "quick-parent", PasswordHash: "x", Role: store.RoleNormal, Active: true, ExpiredAt: now.AddDate(0, 0, 30).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := app.store().CreateUser(store.User{Username: "quick-child", PasswordHash: "x", Role: store.RoleNormal, Active: true, ExpiredAt: now.AddDate(0, 0, -1).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store().UpsertInviteCode(store.InviteCode{Code: "QUICK-INVITE", UID: parent.UID, InviterUID: parent.UID, Days: 7, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.store().ConsumeInviteCode("QUICK-INVITE", child.UID); err != nil {
+		t.Fatal(err)
+	}
+	resp := doJSON(app, http.MethodPost, "/api/v1/admin/invite/quick-maintenance", `{"confirm":"INVITE_QUICK_MAINTENANCE","scope":"all","detach":true,"renew_days":10}`, admin)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("quick maintenance status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if _, ok := app.store().ParentOf(child.UID); ok {
+		t.Fatal("quick maintenance should detach invite relation")
+	}
+	updated, _ := app.store().User(child.UID)
+	if !updated.Active || updated.ExpiredAt < now.AddDate(0, 0, 9).Unix() {
+		t.Fatalf("quick maintenance should renew and reactivate child: %#v", updated)
+	}
+	invite, ok := app.store().InviteCode("QUICK-INVITE")
+	if !ok {
+		t.Fatal("detach should clear usage but keep invite code record")
+	}
+	if invite.UsedByUID != 0 || invite.Used || invite.UseCount != 0 || !invite.Active {
+		t.Fatalf("quick detach should clear invite usage: %#v", invite)
 	}
 }
