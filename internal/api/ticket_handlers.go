@@ -944,13 +944,15 @@ func (a *App) enqueueTicketNotification(scope, event string, ticketID, targetUID
 		// 通知发送是对外副作用而非状态变更：结果只进 zap 运行日志，不写审计库。
 		// 否则未配置 Telegram 的实例每次工单动作都会因 skip 触发一次全量 state
 		// 落盘，并把有界审计日志刷满"通知已跳过"噪声、挤掉真正的变更记录。
+		// 成功 / 跳过属于常态非事件，降到 Debug（默认在 InfoLevel sink 之下、不落盘），
+		// 只有真正失败才以 Warn 进运行日志，避免每条成功通知都触发一次 state 写。
 		switch {
-		case result.Skipped != "":
-			zap.L().Info("工单 Telegram 通知已跳过", append(fields, zap.String("skipped", result.Skipped))...)
 		case result.Failures > 0:
 			zap.L().Warn("工单 Telegram 通知部分失败", fields...)
+		case result.Skipped != "":
+			zap.L().Debug("工单 Telegram 通知已跳过", append(fields, zap.String("skipped", result.Skipped))...)
 		default:
-			zap.L().Info("工单 Telegram 通知已发送", fields...)
+			zap.L().Debug("工单 Telegram 通知已发送", fields...)
 		}
 	}()
 }
@@ -965,7 +967,8 @@ func (a *App) notifyTicketAdmins(ctx context.Context, event string, ticket store
 		if len(admins) == 0 {
 			return ticketNotificationResult{Skipped: "no_admin_targets"}
 		}
-		text := a.ticketAdminNotificationText(event, ticket, actor)
+		html := a.ticketAdminNotificationText(event, ticket, actor)
+		plain := stripTelegramHTML(html)
 		var photoName, photoType string
 		var photoData []byte
 		if event == "image_uploaded" {
@@ -974,14 +977,14 @@ func (a *App) notifyTicketAdmins(ctx context.Context, event string, ticket store
 		result := ticketNotificationResult{Targets: len(admins)}
 		for _, admin := range admins {
 			if len(photoData) > 0 {
-				if err := a.telegramSendPhoto(sendCtx, admin.TelegramID, photoName, photoType, photoData, text); err == nil {
+				// 图片通知：HTML 富文本 caption 随图一起送达；失败再退到纯文本消息。
+				if err := a.telegramSendPhoto(sendCtx, admin.TelegramID, photoName, photoType, photoData, html, "HTML"); err == nil {
 					continue
 				} else {
-					result.Failures++
 					zap.L().Warn("发送管理员工单图片通知失败，降级为纯文本", zap.Int64("ticket_id", ticket.ID), zap.Int64("admin_uid", admin.UID), zap.Error(err))
 				}
 			}
-			if err := a.telegramSendPlainMessage(sendCtx, admin.TelegramID, text); err != nil {
+			if err := a.telegramSendRichMessage(sendCtx, admin.TelegramID, html, plain); err != nil {
 				result.Failures++
 				zap.L().Warn("发送管理员工单通知失败", zap.Int64("ticket_id", ticket.ID), zap.Int64("admin_uid", admin.UID), zap.Error(err))
 			}
@@ -1004,28 +1007,38 @@ func (a *App) ticketAdminNotificationTargets(actor store.User) []store.User {
 	return admins
 }
 
+// ticketAdminNotificationText 拼装管理员工单通知的 HTML 富文本。所有动态字段
+// （标题、用户名、摘要等）都经 telegramEscapeHTML 转义后再嵌入，杜绝用户可控内容
+// 破坏 HTML 结构 / 注入标签。返回内容交给 telegramSendRichMessage 以 HTML 模式发送。
 func (a *App) ticketAdminNotificationText(event string, ticket store.Ticket, actor store.User) string {
-	lines := []string{
-		"工单通知 - " + ticketEventLabel(event),
-		"",
-		"站点：" + a.cfg().AppName,
-		"工单：#" + strconv.FormatInt(ticket.ID, 10) + " " + strings.TrimSpace(ticket.Title),
-		"状态：" + statusLabel(ticket.Status),
-		"优先级：" + ticket.Priority,
-		"类型：" + ticket.Type,
-		"提交人：" + ticket.Username + " (UID " + strconv.FormatInt(ticket.UID, 10) + ")",
+	esc := telegramEscapeHTML
+	title := strings.TrimSpace(ticket.Title)
+	if title == "" {
+		title = "(无标题)"
 	}
+	var b strings.Builder
+	b.WriteString("🎫 <b>工单" + esc(ticketEventLabel(event)) + "</b>\n")
+	b.WriteString("<b>" + esc(a.cfg().AppName) + "</b>\n")
+	b.WriteString("━━━━━━━━━━━━━━\n")
+	b.WriteString("🆔 <b>#" + strconv.FormatInt(ticket.ID, 10) + "</b>  " + esc(title) + "\n")
+	b.WriteString("📊 状态：" + esc(statusLabelWithEmoji(ticket.Status)) + "\n")
+	b.WriteString("⚑ 优先级：" + esc(ticketPriorityLabel(ticket.Priority)) + "\n")
+	if t := strings.TrimSpace(ticket.Type); t != "" {
+		b.WriteString("🏷 类型：" + esc(t) + "\n")
+	}
+	b.WriteString("👤 提交人：" + esc(ticket.Username) + " <code>UID " + strconv.FormatInt(ticket.UID, 10) + "</code>\n")
 	if actor.UID != 0 {
-		lines = append(lines, "操作者："+actor.Username+" (UID "+strconv.FormatInt(actor.UID, 10)+")")
+		b.WriteString("🛠 操作人：" + esc(actor.Username) + " <code>UID " + strconv.FormatInt(actor.UID, 10) + "</code>\n")
 	}
 	if label, summary := ticketAdminNotificationSummary(event, ticket); summary != "" {
-		lines = append(lines, "", label+"："+truncateString(summary, 220))
+		b.WriteString("\n💬 <b>" + esc(label) + "</b>\n")
+		b.WriteString("<blockquote>" + esc(truncateString(summary, 220)) + "</blockquote>\n")
 	}
 	if len(ticket.Attachments) > 0 {
-		lines = append(lines, "", "附件图片："+strconv.Itoa(len(ticket.Attachments))+" 张")
+		b.WriteString("🖼 附件：" + strconv.Itoa(len(ticket.Attachments)) + " 张\n")
 	}
-	lines = append(lines, "时间："+time.Now().Format("2006-01-02 15:04:05"))
-	return strings.Join(lines, "\n")
+	b.WriteString("🕒 <i>" + esc(time.Now().Format("2006-01-02 15:04:05")) + "</i>")
+	return b.String()
 }
 
 func ticketAdminNotificationSummary(event string, ticket store.Ticket) (string, string) {
@@ -1131,28 +1144,54 @@ func (a *App) notifyTicketOwner(ctx context.Context, updated, existing store.Tic
 		}
 		now := time.Now().Format("2006-01-02 15:04:05")
 		adminNote := ticketOwnerNotificationNote(updated, existing)
-		adminNoteContent := ""
+		esc := telegramEscapeHTML
+		// HTML 版：值全部转义，{admin_note_content} 拼成带 blockquote 的安全片段。
+		htmlNoteContent := ""
+		plainNoteContent := ""
 		if adminNote != "" {
-			adminNoteContent = "回复内容：\n" + adminNote
+			htmlNoteContent = "\n💬 <b>回复内容</b>\n<blockquote>" + esc(truncateString(adminNote, 500)) + "</blockquote>"
+			plainNoteContent = "回复内容：\n" + adminNote
 		}
-		notifValues := map[string]string{
+		htmlValues := map[string]string{
 			"{ticket_id}":          strconv.FormatInt(updated.ID, 10),
-			"{title}":              updated.Title,
+			"{title}":              esc(firstNonEmpty(strings.TrimSpace(updated.Title), "(无标题)")),
+			"{status}":             esc(statusLabelWithEmoji(updated.Status)),
+			"{priority}":           esc(ticketPriorityLabel(updated.Priority)),
+			"{type}":               esc(strings.TrimSpace(updated.Type)),
+			"{admin_note}":         esc(adminNote),
+			"{admin_note_content}": htmlNoteContent,
+			"{time}":               esc(now),
+			"{server_name}":        esc(a.cfg().AppName),
+		}
+		// 纯文本降级版：自定义模板混入裸 < / & 导致 HTML 解析失败时用原始值重发。
+		plainValues := map[string]string{
+			"{ticket_id}":          strconv.FormatInt(updated.ID, 10),
+			"{title}":              firstNonEmpty(strings.TrimSpace(updated.Title), "(无标题)"),
 			"{status}":             statusLabel(updated.Status),
-			"{priority}":           updated.Priority,
-			"{type}":               updated.Type,
+			"{priority}":           ticketPriorityLabel(updated.Priority),
+			"{type}":               strings.TrimSpace(updated.Type),
 			"{admin_note}":         adminNote,
-			"{admin_note_content}": adminNoteContent,
+			"{admin_note_content}": plainNoteContent,
 			"{time}":               now,
 			"{server_name}":        a.cfg().AppName,
 		}
 		tmpl := a.cfg().TicketNotifyTelegramTemplate
-		if tmpl == "" {
+		usingDefault := strings.TrimSpace(tmpl) == ""
+		if usingDefault {
 			tmpl = config.DefaultTicketNotifyTelegramTemplate
 		}
-		text := replaceNotifPlaceholders(tmpl, notifValues)
+		htmlText := replaceNotifPlaceholders(tmpl, htmlValues)
+		// 纯文本降级：默认模板含我们已知的 HTML 标签，去标签得到干净纯文本；
+		// 自定义模板历史上是纯文本，直接用原始值渲染，绝不 stripTelegramHTML——
+		// 否则模板里合法的裸 <（如“价格 < 100”）会把其后内容当标签吃掉。
+		var plainText string
+		if usingDefault {
+			plainText = stripTelegramHTML(replaceNotifPlaceholders(tmpl, plainValues))
+		} else {
+			plainText = replaceNotifPlaceholders(tmpl, plainValues)
+		}
 		result := ticketNotificationResult{Targets: 1}
-		if err := a.telegramSendPlainMessage(sendCtx, owner.TelegramID, text); err != nil {
+		if err := a.telegramSendRichMessage(sendCtx, owner.TelegramID, htmlText, plainText); err != nil {
 			result.Failures = 1
 			zap.L().Warn("发送工单变动通知失败", zap.Int64("ticket_id", updated.ID), zap.Int64("uid", owner.UID), zap.Error(err))
 		}
@@ -1188,4 +1227,35 @@ func statusLabel(status string) string {
 		return "已关闭"
 	}
 	return status
+}
+
+// statusLabelWithEmoji 在中文状态前加一个状态色点，用于 Telegram 富文本通知排版。
+func statusLabelWithEmoji(status string) string {
+	emoji := "⚪"
+	switch store.NormalizeTicketStatus(status) {
+	case store.TicketStatusOpen:
+		emoji = "🟡"
+	case store.TicketStatusInProgress:
+		emoji = "🔵"
+	case store.TicketStatusResolved:
+		emoji = "🟢"
+	case store.TicketStatusClosed:
+		emoji = "⚫"
+	}
+	return emoji + " " + statusLabel(status)
+}
+
+// ticketPriorityLabel 把原始优先级（low/medium/high/urgent）翻译成带图标的中文，
+// 通知里不再直接暴露英文枚举值。
+func ticketPriorityLabel(priority string) string {
+	switch store.NormalizeTicketPriority(priority) {
+	case store.TicketPriorityLow:
+		return "🟢 低"
+	case store.TicketPriorityHigh:
+		return "🟠 高"
+	case store.TicketPriorityUrgent:
+		return "🔴 紧急"
+	default:
+		return "🟡 中"
+	}
 }

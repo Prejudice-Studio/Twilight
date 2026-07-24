@@ -66,13 +66,18 @@ const DefaultLoginNotifyTelegramTemplate = `新登录通知
 IP：{ip}
 设备：{device}`
 
-// DefaultTicketNotifyTelegramTemplate 工单变动通知 Telegram 模板。
-// 占位符：{ticket_id}、{title}、{status}、{priority}、{type}、{admin_note}、{time}、{server_name}。
-const DefaultTicketNotifyTelegramTemplate = `工单变动通知
-
-工单：#{ticket_id} {title}
-状态：{status}
-时间：{time}
+// DefaultTicketNotifyTelegramTemplate 工单变动通知 Telegram 模板（HTML parse mode）。
+// 占位符：{ticket_id}、{title}、{status}、{priority}、{type}、{admin_note}、
+// {admin_note_content}、{time}、{server_name}。
+// 工单通知由 telegramSendRichMessage 固定以 HTML 模式发送（不受全局 parse_mode 影响），
+// 动态值在替换前已转义；{admin_note_content} 已是拼好的安全 HTML 片段，勿再包标签。
+// 自定义模板可用纯文本，若混入裸 < / & 会在发送失败后自动降级为纯文本重发。
+const DefaultTicketNotifyTelegramTemplate = `🎫 <b>工单更新通知</b>
+<b>{server_name}</b>
+━━━━━━━━━━━━━━
+🆔 <b>#{ticket_id}</b>  {title}
+📊 状态：{status}
+🕒 <i>{time}</i>
 {admin_note_content}`
 
 // DefaultLoginNotifyEmailSubjectTemplate 登录通知邮件标题模板。

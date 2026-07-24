@@ -202,7 +202,7 @@ func (a *App) telegramSendMessageWithMarkup(ctx context.Context, chatID any, tex
 	return numeric(result["message_id"]), nil
 }
 
-func (a *App) telegramSendPhoto(ctx context.Context, chatID any, filename, contentType string, data []byte, caption string) error {
+func (a *App) telegramSendPhoto(ctx context.Context, chatID any, filename, contentType string, data []byte, caption, parseMode string) error {
 	if len(data) == 0 {
 		return fmt.Errorf("photo data is empty")
 	}
@@ -218,6 +218,11 @@ func (a *App) telegramSendPhoto(ctx context.Context, chatID any, filename, conte
 	if text := truncateString(strings.TrimSpace(caption), 900); text != "" {
 		if err := writer.WriteField("caption", text); err != nil {
 			return err
+		}
+		if parseMode != "" {
+			if err := writer.WriteField("parse_mode", parseMode); err != nil {
+				return err
+			}
 		}
 	}
 	partHeader := make(textproto.MIMEHeader)
@@ -296,6 +301,82 @@ func (a *App) telegramParseMode() string {
 		return pm
 	}
 	return ""
+}
+
+// telegramEscapeHTML 转义 Telegram HTML parse mode 必须转义的三个字符。
+// 只处理 & < >（Telegram HTML 子集不要求转义引号），避免 html.EscapeString
+// 把引号变成 &#34; / &#39; 这类冗长实体污染文案。用于把用户可控内容（标题、
+// 用户名、回复正文等）安全地嵌入我们自己拼的 HTML 结构里。
+func telegramEscapeHTML(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
+}
+
+// stripTelegramHTML 把我们发出的有限 HTML（<b>/<code>/<blockquote> 等）还原成
+// 纯文本：去标签 + 反转义三个实体。仅用于 HTML 发送失败后的纯文本降级兜底。
+func stripTelegramHTML(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	inTag := false
+	for _, r := range s {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>':
+			inTag = false
+		case !inTag:
+			b.WriteRune(r)
+		}
+	}
+	out := b.String()
+	out = strings.ReplaceAll(out, "&lt;", "<")
+	out = strings.ReplaceAll(out, "&gt;", ">")
+	out = strings.ReplaceAll(out, "&amp;", "&")
+	return out
+}
+
+// telegramIsParseError 判断错误是否为 Telegram HTML 实体解析失败（400）。
+// 自定义模板可能混入裸 < / & 导致解析失败，此时应降级为纯文本重发而非放弃。
+func telegramIsParseError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "can't parse entities") || strings.Contains(msg, "can't parse") || strings.Contains(msg, "unsupported start tag") || strings.Contains(msg, "unmatched end tag")
+}
+
+// telegramSendRichMessage 用 HTML parse mode 发送富文本通知（工单等系统消息专用），
+// 不受运营配置的全局 parse_mode 影响，保证排版稳定统一。若 Telegram 因 HTML 解析
+// 失败（例如自定义模板混入裸 < / &）返回 400，自动用 plainFallback 纯文本重发，
+// plainFallback 为空时回退到去标签后的 HTML，确保消息始终可送达。
+func (a *App) telegramSendRichMessage(ctx context.Context, chatID any, htmlText, plainFallback string) error {
+	htmlText = truncateString(strings.TrimSpace(htmlText), 3900)
+	if htmlText == "" {
+		return fmt.Errorf("message text is empty")
+	}
+	err := a.telegramPost(ctx, "sendMessage", map[string]any{
+		"chat_id":                  chatID,
+		"text":                     htmlText,
+		"parse_mode":               "HTML",
+		"disable_web_page_preview": true,
+	}, nil)
+	if err == nil || !telegramIsParseError(err) {
+		return err
+	}
+	plain := truncateString(strings.TrimSpace(plainFallback), 3900)
+	if plain == "" {
+		plain = truncateString(stripTelegramHTML(htmlText), 3900)
+	}
+	if plain == "" {
+		return err
+	}
+	return a.telegramPost(ctx, "sendMessage", map[string]any{
+		"chat_id":                  chatID,
+		"text":                     plain,
+		"disable_web_page_preview": true,
+	}, nil)
 }
 
 func (a *App) telegramDeleteMessage(ctx context.Context, chatID, messageID int64) error {
