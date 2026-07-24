@@ -928,36 +928,23 @@ func (a *App) enqueueTicketNotification(scope, event string, ticketID, targetUID
 		result := send(ctx)
 		fields := []zap.Field{
 			zap.Int64("ticket_id", ticketID),
+			zap.Int64("target_uid", targetUID),
 			zap.String("scope", scope),
 			zap.String("event", event),
 			zap.Int("targets", result.Targets),
 			zap.Int("failures", result.Failures),
 		}
-		if result.Skipped != "" {
-			fields = append(fields, zap.String("skipped", result.Skipped))
-			zap.L().Info("工单 Telegram 通知已跳过", fields...)
-			a.auditSystem("ticket", "ticket_telegram_notification", targetUID, map[string]any{
-				"ticket_id": ticketID,
-				"scope":     scope,
-				"event":     event,
-				"targets":   result.Targets,
-				"failures":  result.Failures,
-				"skipped":   result.Skipped,
-			})
-			return
-		}
-		if result.Failures > 0 {
+		// 通知发送是对外副作用而非状态变更：结果只进 zap 运行日志，不写审计库。
+		// 否则未配置 Telegram 的实例每次工单动作都会因 skip 触发一次全量 state
+		// 落盘，并把有界审计日志刷满"通知已跳过"噪声、挤掉真正的变更记录。
+		switch {
+		case result.Skipped != "":
+			zap.L().Info("工单 Telegram 通知已跳过", append(fields, zap.String("skipped", result.Skipped))...)
+		case result.Failures > 0:
 			zap.L().Warn("工单 Telegram 通知部分失败", fields...)
-		} else {
+		default:
 			zap.L().Info("工单 Telegram 通知已发送", fields...)
 		}
-		a.auditSystem("ticket", "ticket_telegram_notification", targetUID, map[string]any{
-			"ticket_id": ticketID,
-			"scope":     scope,
-			"event":     event,
-			"targets":   result.Targets,
-			"failures":  result.Failures,
-		})
 	}()
 }
 

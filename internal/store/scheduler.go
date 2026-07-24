@@ -102,7 +102,7 @@ func (s *Store) TryStartSchedulerRun(run SchedulerRun, staleBeforeUnix, nowUnix 
 	normalizeSchedulerRunTimestamps(&run)
 	s.state.SchedulerRuns = prependBoundedHead(s.state.SchedulerRuns, run, maxStoredSchedulerRuns)
 	if err := s.saveLocked(); err != nil {
-		s.state = prev
+		s.restoreStateLocked(prev)
 		return SchedulerRun{}, false, err
 	}
 	return run, true, nil
@@ -265,7 +265,7 @@ func (s *Store) SchedulerStateOverview(jobIDs []string, limit int, activeJobIDs 
 			markSchedulerRunInterrupted(&s.state.SchedulerRuns[i], nowUnix)
 		}
 		if err := s.saveLocked(); err != nil {
-			s.state = prev
+			s.restoreStateLocked(prev)
 			return SchedulerOverview{}, err
 		}
 	}
@@ -394,7 +394,7 @@ func (s *Store) MarkInterruptedSchedulerRuns(jobID string, beforeUnix int64, now
 		markSchedulerRunInterrupted(run, nowUnix)
 	}
 	if err := s.saveLocked(); err != nil {
-		s.state = prev
+		s.restoreStateLocked(prev)
 		return 0, err
 	}
 	return changed, nil

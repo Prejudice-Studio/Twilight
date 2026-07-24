@@ -1264,22 +1264,41 @@ func (s *Store) Refresh() error {
 	return s.refreshLocked()
 }
 
-// snapshotStateLocked 把当前 s.state 序列化再反序列化得到一份独立副本，
-// 用于 mutateAndSaveLocked 的回滚。State 内大量 map/slice 是引用类型，
-// 浅拷贝不能隔离后续修改；JSON 往返一次比 reflect.DeepCopy 简单且与
-// 已有的 refreshLocked 走同一条路径（次数等量级，开销可接受）。
-func (s *Store) snapshotStateLocked() (State, error) {
+// stateSnapshot 持有变更前 State 的序列化副本，仅在真正回滚时才反序列化。
+// State 内大量 map/slice 是引用类型，浅拷贝无法隔离后续修改；旧实现在拍
+// 快照时就 marshal+unmarshal 造出一份完整 State 对象图，但绝大多数写路径
+// 成功落盘后这份副本立即变垃圾。改为只留字节、把 unmarshal 推迟到 restore，
+// 常见成功路径每次写少一次全量 unmarshal 与一份多 MB State 分配。
+type stateSnapshot struct {
+	data []byte
+}
+
+// snapshotStateLocked 把当前 s.state 序列化成快照字节，用于失败回滚。
+// 调用方必须已持有 s.mu 写锁。
+func (s *Store) snapshotStateLocked() (stateSnapshot, error) {
 	s.state.ensure()
 	data, err := json.Marshal(&s.state)
 	if err != nil {
-		return State{}, err
+		return stateSnapshot{}, err
 	}
+	return stateSnapshot{data: data}, nil
+}
+
+// restoreStateLocked 用快照覆盖内存 state 并重建派生索引，只有回滚时才会
+// 反序列化。集中回滚逻辑同时保证每个回滚点都重建索引（历史上多处
+// `s.state = prev` 漏掉 rebuildUserIndexes，留下索引与用户表发散的隐患）。
+// 调用方必须已持有 s.mu 写锁。
+func (s *Store) restoreStateLocked(snap stateSnapshot) {
 	var clone State
-	if err := json.Unmarshal(data, &clone); err != nil {
-		return State{}, err
+	if err := json.Unmarshal(snap.data, &clone); err != nil {
+		// 快照字节来自刚刚成功的 json.Marshal，理论上不可能再反序列化失败；
+		// 兜底从持久层重载（写失败时磁盘仍是变更前状态），避免内存停在半改态。
+		_ = s.refreshLocked()
+		return
 	}
 	clone.ensure()
-	return clone, nil
+	s.state = clone
+	s.rebuildUserIndexes()
 }
 
 // mutateAndSaveLocked 把"读最新状态 → 变更 → 持久化 → 失败回滚"模板化。
@@ -1302,13 +1321,11 @@ func (s *Store) mutateAndSaveLocked(mutate func() error) error {
 	}
 	if err := mutate(); err != nil {
 		// mutate 失败：本身就不打算落盘，状态可能被改了一半，回滚到快照。
-		s.state = prev
-		s.rebuildUserIndexes()
+		s.restoreStateLocked(prev)
 		return err
 	}
 	if err := s.saveLocked(); err != nil {
-		s.state = prev
-		s.rebuildUserIndexes()
+		s.restoreStateLocked(prev)
 		return err
 	}
 	return nil
@@ -1316,15 +1333,7 @@ func (s *Store) mutateAndSaveLocked(mutate func() error) error {
 
 func (s *Store) saveLocked() error {
 	s.state.ensure()
-	var (
-		data []byte
-		err  error
-	)
-	if s.db != nil {
-		data, err = json.Marshal(s.state)
-	} else {
-		data, err = json.Marshal(s.state)
-	}
+	data, err := json.Marshal(s.state)
 	if err != nil {
 		return err
 	}
@@ -2299,7 +2308,7 @@ func (s *Store) LockEmbyGrantForBoundUsers(uids []int64) (updated []int64, missi
 		return updated, missing, skippedNoEmby, nil
 	}
 	if err := s.saveLocked(); err != nil {
-		s.state = prev
+		s.restoreStateLocked(prev)
 		return nil, nil, nil, err
 	}
 	return updated, missing, skippedNoEmby, nil
