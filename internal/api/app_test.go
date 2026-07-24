@@ -2633,6 +2633,45 @@ func TestClearAuditLogsDoesNotRecreateAuditEntry(t *testing.T) {
 	}
 }
 
+func TestFallbackAuditCoversSuccessfulMutationsWithoutExplicitAudit(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().AuditLogEnabled = true
+	cookies := registerAndLogin(t, app, "fallback-audit", "User123456")
+	if err := app.store().ClearAuditLogs(); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := doJSON(app, http.MethodPost, "/api/v1/auth/logout", ``, cookies)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("logout status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	logs := app.store().ListAuditLogs()
+	if len(logs) != 1 {
+		t.Fatalf("expected one fallback audit log, got %#v", logs)
+	}
+	if logs[0].Action != "post_auth_logout" || logs[0].Category != "user" || logs[0].UID == 0 || logs[0].Detail["fallback"] != true {
+		t.Fatalf("unexpected fallback audit log: %#v", logs[0])
+	}
+}
+
+func TestAuditMaintenanceRoutesSkipFallbackAudit(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().AuditLogEnabled = true
+	adminCookies := registerAndLogin(t, app, "admin", "Admin123456")
+	app.auditEntryIP("system", 0, "test", "seed", "system", 0, nil)
+	if count := app.store().AuditLogCount(); count == 0 {
+		t.Fatal("expected seed audit log")
+	}
+
+	rr := doJSON(app, http.MethodPost, "/api/v1/admin/audit-logs/clear", `{"confirm":"`+confirmClearAuditLogs+`"}`, adminCookies)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("clear audit status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if count := app.store().AuditLogCount(); count != 0 {
+		t.Fatalf("audit maintenance route should not create fallback log, count=%d logs=%#v", count, app.store().ListAuditLogs())
+	}
+}
+
 func TestTelegramInlinePanelActionWritesAuditLog(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().AuditLogEnabled = true

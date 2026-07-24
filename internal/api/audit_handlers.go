@@ -48,6 +48,7 @@ func (a *App) auditWithUser(r *http.Request, uid int64, username, action, catego
 }
 
 func (a *App) auditEntry(r *http.Request, uid int64, username, action, category string, targetUID int64, detail map[string]any) {
+	markRequestAuditWritten(r)
 	entry := store.AuditLog{
 		UID:       uid,
 		Username:  username,
@@ -60,6 +61,111 @@ func (a *App) auditEntry(r *http.Request, uid int64, username, action, category 
 		IP:        a.clientIP(r),
 	}
 	a.writeAuditEntry(entry)
+}
+
+func markRequestAuditWritten(r *http.Request) {
+	if r == nil {
+		return
+	}
+	state, _ := r.Context().Value(auditRequestKey).(*auditRequestState)
+	if state != nil {
+		state.wrote.Store(true)
+	}
+}
+
+func requestAuditWritten(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	state, _ := r.Context().Value(auditRequestKey).(*auditRequestState)
+	return state != nil && state.wrote.Load()
+}
+
+func (a *App) maybeAuditHTTPMutation(r *http.Request, route *Route, params Params, p *principal, status int) {
+	if route == nil || !shouldFallbackAuditHTTPMutation(r, route, status) || requestAuditWritten(r) {
+		return
+	}
+	uid, username := int64(0), ""
+	category := "system"
+	targetUID := int64(0)
+	if p != nil {
+		uid = p.User.UID
+		username = p.User.Username
+		if p.User.Role == store.RoleAdmin || route.Auth == AuthAdmin {
+			category = "admin"
+		} else {
+			category = "user"
+			targetUID = p.User.UID
+		}
+	}
+	if target := safeAuditTargetUID(params); target > 0 {
+		targetUID = target
+	}
+	a.auditEntry(r, uid, username, fallbackAuditAction(route), category, targetUID, map[string]any{
+		"fallback":      true,
+		"path_template": route.Pattern,
+		"status":        status,
+		"params":        safeAuditRouteParams(params),
+	})
+}
+
+func shouldFallbackAuditHTTPMutation(r *http.Request, route *Route, status int) bool {
+	if r == nil || route == nil || status < 200 || status >= 300 {
+		return false
+	}
+	switch r.Method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+	default:
+		return false
+	}
+	pattern := route.Pattern
+	if strings.HasPrefix(pattern, "/api/v1/admin/audit-logs") {
+		return false
+	}
+	if pattern == "/api/v1/auth/refresh" {
+		return false
+	}
+	return route.Auth == AuthUser || route.Auth == AuthAdmin || route.Auth == AuthAPIKey
+}
+
+func fallbackAuditAction(route *Route) string {
+	pattern := strings.TrimPrefix(route.Pattern, "/api/v1/")
+	replacer := strings.NewReplacer("/", "_", "-", "_", ":", "", "{", "", "}", "")
+	return strings.ToLower(route.Method) + "_" + replacer.Replace(strings.Trim(pattern, "/"))
+}
+
+func safeAuditTargetUID(params Params) int64 {
+	for _, key := range []string{"uid", "user_id", "target_uid"} {
+		if raw := strings.TrimSpace(params[key]); raw != "" {
+			if value, err := strconv.ParseInt(raw, 10, 64); err == nil && value > 0 {
+				return value
+			}
+		}
+	}
+	return 0
+}
+
+func safeAuditRouteParams(params Params) map[string]any {
+	if len(params) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(params))
+	for key, raw := range params {
+		normalized := strings.ToLower(strings.TrimSpace(key))
+		value := strings.TrimSpace(raw)
+		if normalized == "" || value == "" {
+			continue
+		}
+		if normalized == "uid" || strings.HasSuffix(normalized, "_uid") || normalized == "id" || strings.HasSuffix(normalized, "_id") {
+			if parsed, err := strconv.ParseInt(value, 10, 64); err == nil {
+				out[normalized] = parsed
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // auditEntryIP 是不依赖 *http.Request 的审计写入入口，供没有 HTTP 上下文的路径

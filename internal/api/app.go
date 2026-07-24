@@ -163,6 +163,10 @@ type principal struct {
 	FromCookie bool
 }
 
+type auditRequestState struct {
+	wrote atomic.Bool
+}
+
 type statusResponseWriter struct {
 	http.ResponseWriter
 	status int
@@ -213,6 +217,7 @@ func (w *statusResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 type contextKey string
 
 const principalKey contextKey = "principal"
+const auditRequestKey contextKey = "audit_request"
 
 const (
 	twilightClientHeader         = "X-Twilight-Client"
@@ -703,10 +708,17 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if principal != nil && a.blockRestrictedEmbyAdmin(lw, r, route, principal.User) {
 		return
 	}
+	auditState := &auditRequestState{}
+	r = r.WithContext(context.WithValue(r.Context(), auditRequestKey, auditState))
 	if principal != nil {
 		r = r.WithContext(context.WithValue(r.Context(), principalKey, *principal))
 	}
 	route.Handler(lw, r, params)
+	status := lw.status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	a.maybeAuditHTTPMutation(r, route, params, principal, status)
 }
 
 func (a *App) allowRate(ctx context.Context, key string, limit int, window time.Duration) bool {

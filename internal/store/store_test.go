@@ -1068,8 +1068,20 @@ func TestUpdateTicketCanAppendReplyAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	updated, err := st.AddTicketReply(ticket.ID, TicketReply{
+		UID:      1,
+		Username: "user",
+		Role:     RoleNormal,
+		Content:  "more detail",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.Replies) != 1 {
+		t.Fatalf("test setup expected one user reply, got %#v", updated.Replies)
+	}
 	note := "admin is checking"
-	updated, err := st.UpdateTicket(ticket.ID, TicketUpdate{
+	updated, err = st.UpdateTicket(ticket.ID, TicketUpdate{
 		AdminNote: &note,
 		Reply: &TicketReply{
 			UID:      2,
@@ -1087,7 +1099,7 @@ func TestUpdateTicketCanAppendReplyAtomically(t *testing.T) {
 	if updated.Status != TicketStatusInProgress {
 		t.Fatalf("admin reply should move open ticket to in_progress, got %q", updated.Status)
 	}
-	if len(updated.Replies) != 1 || updated.Replies[0].Content != note || updated.Replies[0].CreatedAt == 0 {
+	if len(updated.Replies) != 2 || updated.Replies[0].Content != "more detail" || updated.Replies[1].Content != note || updated.Replies[1].CreatedAt == 0 {
 		t.Fatalf("reply should be appended with timestamp: %#v", updated.Replies)
 	}
 }

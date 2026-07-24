@@ -1219,7 +1219,6 @@ func (s *State) ensure() {
 				Content:   t.AdminNote,
 				CreatedAt: t.UpdatedAt,
 			}}
-			t.AdminNote = ""
 			s.Tickets[id] = t
 			_ = now
 		}
@@ -4120,9 +4119,13 @@ func applyTicketReplyLocked(t *Ticket, reply TicketReply, now int64) {
 	if reply.CreatedAt == 0 {
 		reply.CreatedAt = now
 	}
+	reply.Content = strings.TrimSpace(reply.Content)
 	t.Replies = append(t.Replies, reply)
 	if reply.Role == RoleAdmin && NormalizeTicketStatus(t.Status) == TicketStatusOpen {
 		t.Status = TicketStatusInProgress
+	}
+	if reply.Role == RoleAdmin && reply.Content != "" {
+		t.AdminNote = reply.Content
 	}
 	if reply.Role != RoleAdmin && NormalizeTicketStatus(t.Status) == TicketStatusResolved {
 		t.Status = TicketStatusOpen

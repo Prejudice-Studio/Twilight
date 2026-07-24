@@ -262,7 +262,8 @@ func (a *App) handleAdminTicket(w http.ResponseWriter, r *http.Request, params P
 	ok(w, "OK", map[string]any{"ticket": ticketDTO(ticket), "ticket_types": a.store().TicketTypes()})
 }
 
-// handleAdminUpdateTicket 管理员更新工单状态 / 回复。管理端接口不受 TicketSystemEnabled 开关限制。
+// handleAdminUpdateTicket 管理员更新工单状态、优先级、类型和处理摘要。
+// 聊天回复必须走 POST /admin/tickets/:ticket_id/reply，避免元数据表单把双方对话覆盖或伪造成回复。
 func (a *App) handleAdminUpdateTicket(w http.ResponseWriter, r *http.Request, params Params) {
 	id, _ := int64Param(params, "ticket_id")
 	payload := decodeMap(r)
@@ -301,27 +302,26 @@ func (a *App) handleAdminUpdateTicket(w http.ResponseWriter, r *http.Request, pa
 		value := strings.TrimSpace(stringValue(payload, "admin_note"))
 		adminNote = &value
 	}
-	var adminReply *store.TicketReply
-	if adminNote != nil && *adminNote != "" && *adminNote != strings.TrimSpace(existing.AdminNote) {
-		adminReply = &store.TicketReply{
-			UID:      current(r).User.UID,
-			Username: current(r).User.Username,
-			Role:     current(r).User.Role,
-			Content:  *adminNote,
-		}
-	}
 
 	ticket, err := a.store().UpdateTicket(id, store.TicketUpdate{
 		Status:    &status,
 		Priority:  &priority,
 		Type:      &ticketType,
 		AdminNote: adminNote,
-		Reply:     adminReply,
 	})
 	if statusFromError(w, err) {
 		return
 	}
-	a.audit(r, "update_ticket", "admin", ticket.UID, map[string]any{"ticket_id": ticket.ID, "new_status": status})
+	a.audit(r, "update_ticket", "admin", ticket.UID, map[string]any{
+		"ticket_id":    ticket.ID,
+		"old_status":   existing.Status,
+		"new_status":   ticket.Status,
+		"old_priority": existing.Priority,
+		"new_priority": ticket.Priority,
+		"old_type":     existing.Type,
+		"new_type":     ticket.Type,
+		"note_changed": adminNote != nil && strings.TrimSpace(existing.AdminNote) != ticket.AdminNote,
+	})
 
 	// 工单变动后通知工单所属用户（如果用户开启了 TG 通知）
 	a.notifyTicketOwner(r.Context(), ticket, existing)
@@ -352,23 +352,19 @@ func (a *App) handleAdminReplyTicket(w http.ResponseWriter, r *http.Request, par
 		return
 	}
 	p := current(r)
-	adminNote := content
 	reply := store.TicketReply{
 		UID:      p.User.UID,
 		Username: p.User.Username,
 		Role:     p.User.Role,
 		Content:  content,
 	}
-	ticket, err := a.store().UpdateTicket(id, store.TicketUpdate{
-		AdminNote: &adminNote,
-		Reply:     &reply,
-	})
+	ticket, err := a.store().AddTicketReply(id, reply)
 	if statusFromError(w, err) {
 		return
 	}
 	a.audit(r, "reply_ticket", "admin", ticket.UID, map[string]any{"ticket_id": id, "reply_len": len(content)})
 	a.notifyTicketOwner(r.Context(), ticket, existing)
-	a.notifyTicketAdmins(r.Context(), "updated", ticket, p.User)
+	a.notifyTicketAdmins(r.Context(), "admin_replied", ticket, p.User)
 	ok(w, "回复成功", map[string]any{
 		"ticket_id": id,
 		"ticket":    ticketDTO(ticket),
@@ -550,7 +546,11 @@ func (a *App) handleUploadTicketImage(w http.ResponseWriter, r *http.Request, pa
 		}
 	}
 	a.audit(r, "upload_ticket_image", auditCategoryForRole(p.User.Role), ticket.UID, map[string]any{"ticket_id": id, "filename": filename})
-	a.notifyTicketAdmins(r.Context(), "image_uploaded", updated, p.User)
+	if p.User.Role == store.RoleAdmin {
+		a.notifyTicketOwner(r.Context(), updated, ticket)
+	} else {
+		a.notifyTicketAdmins(r.Context(), "image_uploaded", updated, p.User)
+	}
 	created(w, "图片已上传", map[string]any{
 		"ticket_id":   id,
 		"attachment":  ticketAttachmentDTO(id, att),
@@ -647,6 +647,11 @@ func (a *App) handleDeleteTicketImage(w http.ResponseWriter, r *http.Request, pa
 		}
 	}
 	a.audit(r, "delete_ticket_image", auditCategoryForRole(p.User.Role), ticket.UID, map[string]any{"ticket_id": id, "filename": filename})
+	if p.User.Role != store.RoleAdmin {
+		a.notifyTicketAdmins(r.Context(), "image_deleted", updated, p.User)
+	} else {
+		a.notifyTicketOwner(r.Context(), updated, ticket)
+	}
 	ok(w, "图片已删除", map[string]any{
 		"ticket_id":   id,
 		"attachments": ticketAttachmentDTOs(id, updated.Attachments),
@@ -900,35 +905,101 @@ func (a *App) persistTicketTypesFromStore() {
 	}
 }
 
+const ticketNotificationTimeout = 12 * time.Second
+
+type ticketNotificationResult struct {
+	Targets  int
+	Failures int
+	Skipped  string
+}
+
+func (a *App) enqueueTicketNotification(scope, event string, ticketID, targetUID int64, send func(context.Context) ticketNotificationResult) {
+	if send == nil {
+		return
+	}
+	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				zap.L().Warn("工单 Telegram 通知任务异常", zap.Int64("ticket_id", ticketID), zap.String("scope", scope), zap.String("event", event), zap.String("panic", redactSensitiveText(fmt.Sprint(recovered))))
+			}
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), ticketNotificationTimeout)
+		defer cancel()
+		result := send(ctx)
+		fields := []zap.Field{
+			zap.Int64("ticket_id", ticketID),
+			zap.String("scope", scope),
+			zap.String("event", event),
+			zap.Int("targets", result.Targets),
+			zap.Int("failures", result.Failures),
+		}
+		if result.Skipped != "" {
+			fields = append(fields, zap.String("skipped", result.Skipped))
+			zap.L().Info("工单 Telegram 通知已跳过", fields...)
+			a.auditSystem("ticket", "ticket_telegram_notification", targetUID, map[string]any{
+				"ticket_id": ticketID,
+				"scope":     scope,
+				"event":     event,
+				"targets":   result.Targets,
+				"failures":  result.Failures,
+				"skipped":   result.Skipped,
+			})
+			return
+		}
+		if result.Failures > 0 {
+			zap.L().Warn("工单 Telegram 通知部分失败", fields...)
+		} else {
+			zap.L().Info("工单 Telegram 通知已发送", fields...)
+		}
+		a.auditSystem("ticket", "ticket_telegram_notification", targetUID, map[string]any{
+			"ticket_id": ticketID,
+			"scope":     scope,
+			"event":     event,
+			"targets":   result.Targets,
+			"failures":  result.Failures,
+		})
+	}()
+}
+
 // notifyTicketAdmins 在新工单 / 工单变动后向已在个人设置中开启工单 TG 通知的管理员推送。
 func (a *App) notifyTicketAdmins(ctx context.Context, event string, ticket store.Ticket, actor store.User) {
-	if !a.telegramAvailable() {
-		return
-	}
-	admins := a.ticketAdminNotificationTargets(actor)
-	if len(admins) == 0 {
-		return
-	}
-	text := a.ticketAdminNotificationText(event, ticket, actor)
-	photoName, photoType, photoData := a.ticketNotificationPhoto(ticket)
-	for _, admin := range admins {
-		if len(photoData) > 0 {
-			if err := a.telegramSendPhoto(ctx, admin.TelegramID, photoName, photoType, photoData, text); err == nil {
-				continue
-			} else {
-				zap.L().Warn("发送管理员工单图片通知失败，降级为纯文本", zap.Int64("ticket_id", ticket.ID), zap.Int64("admin_uid", admin.UID), zap.Error(err))
+	a.enqueueTicketNotification("admin", event, ticket.ID, ticket.UID, func(sendCtx context.Context) ticketNotificationResult {
+		if !a.telegramAvailable() {
+			return ticketNotificationResult{Skipped: "telegram_unavailable"}
+		}
+		admins := a.ticketAdminNotificationTargets(actor)
+		if len(admins) == 0 {
+			return ticketNotificationResult{Skipped: "no_admin_targets"}
+		}
+		text := a.ticketAdminNotificationText(event, ticket, actor)
+		var photoName, photoType string
+		var photoData []byte
+		if event == "image_uploaded" {
+			photoName, photoType, photoData = a.ticketNotificationPhoto(ticket)
+		}
+		result := ticketNotificationResult{Targets: len(admins)}
+		for _, admin := range admins {
+			if len(photoData) > 0 {
+				if err := a.telegramSendPhoto(sendCtx, admin.TelegramID, photoName, photoType, photoData, text); err == nil {
+					continue
+				} else {
+					result.Failures++
+					zap.L().Warn("发送管理员工单图片通知失败，降级为纯文本", zap.Int64("ticket_id", ticket.ID), zap.Int64("admin_uid", admin.UID), zap.Error(err))
+				}
+			}
+			if err := a.telegramSendPlainMessage(sendCtx, admin.TelegramID, text); err != nil {
+				result.Failures++
+				zap.L().Warn("发送管理员工单通知失败", zap.Int64("ticket_id", ticket.ID), zap.Int64("admin_uid", admin.UID), zap.Error(err))
 			}
 		}
-		if err := a.telegramSendPlainMessage(ctx, admin.TelegramID, text); err != nil {
-			zap.L().Warn("发送管理员工单通知失败", zap.Int64("ticket_id", ticket.ID), zap.Int64("admin_uid", admin.UID), zap.Error(err))
-		}
-	}
+		return result
+	})
 }
 
 func (a *App) ticketAdminNotificationTargets(actor store.User) []store.User {
 	admins := make([]store.User, 0)
 	for _, user := range a.store().ListUsers() {
-		if user.Role != store.RoleAdmin || !user.NotifyOnTicketTelegram || user.TelegramID == 0 {
+		if user.Role != store.RoleAdmin || !user.Active || !user.NotifyOnTicketTelegram || user.TelegramID == 0 {
 			continue
 		}
 		if actor.Role == store.RoleAdmin && actor.UID != 0 && user.UID == actor.UID {
@@ -953,16 +1024,45 @@ func (a *App) ticketAdminNotificationText(event string, ticket store.Ticket, act
 	if actor.UID != 0 {
 		lines = append(lines, "操作者："+actor.Username+" (UID "+strconv.FormatInt(actor.UID, 10)+")")
 	}
-	if note := strings.TrimSpace(ticket.AdminNote); note != "" {
-		lines = append(lines, "", "回复摘要："+truncateString(note, 220))
-	} else if content := strings.TrimSpace(ticket.Content); content != "" {
-		lines = append(lines, "", "内容摘要："+truncateString(content, 220))
+	if label, summary := ticketAdminNotificationSummary(event, ticket); summary != "" {
+		lines = append(lines, "", label+"："+truncateString(summary, 220))
 	}
 	if len(ticket.Attachments) > 0 {
 		lines = append(lines, "", "附件图片："+strconv.Itoa(len(ticket.Attachments))+" 张")
 	}
 	lines = append(lines, "时间："+time.Now().Format("2006-01-02 15:04:05"))
 	return strings.Join(lines, "\n")
+}
+
+func ticketAdminNotificationSummary(event string, ticket store.Ticket) (string, string) {
+	switch event {
+	case "replied":
+		if reply, ok := latestTicketReplyByRole(ticket, store.RoleNormal); ok {
+			return "用户回复摘要", reply.Content
+		}
+	case "admin_replied":
+		if reply, ok := latestTicketReplyByRole(ticket, store.RoleAdmin); ok {
+			return "管理员回复摘要", reply.Content
+		}
+	case "updated":
+		if note := strings.TrimSpace(ticket.AdminNote); note != "" {
+			return "处理摘要", note
+		}
+	}
+	if content := strings.TrimSpace(ticket.Content); content != "" {
+		return "内容摘要", content
+	}
+	return "", ""
+}
+
+func latestTicketReplyByRole(ticket store.Ticket, role int) (store.TicketReply, bool) {
+	for i := len(ticket.Replies) - 1; i >= 0; i-- {
+		reply := ticket.Replies[i]
+		if reply.Role == role && strings.TrimSpace(reply.Content) != "" {
+			return reply, true
+		}
+	}
+	return store.TicketReply{}, false
 }
 
 func ticketEventLabel(event string) string {
@@ -977,8 +1077,12 @@ func ticketEventLabel(event string) string {
 		return "用户重开"
 	case "image_uploaded":
 		return "新增图片"
+	case "image_deleted":
+		return "删除图片"
 	case "replied":
 		return "用户回复"
+	case "admin_replied":
+		return "管理员回复"
 	case "deleted":
 		return "工单删除"
 	default:
@@ -1015,46 +1119,66 @@ func (a *App) ticketNotificationPhoto(ticket store.Ticket) (string, string, []by
 
 // notifyTicketOwner 工单变动后向工单所属用户发送 Telegram 通知。
 func (a *App) notifyTicketOwner(ctx context.Context, updated, existing store.Ticket) {
-	owner, found := a.store().User(updated.UID)
-	if !found {
-		return
+	a.enqueueTicketNotification("owner", "updated", updated.ID, updated.UID, func(sendCtx context.Context) ticketNotificationResult {
+		owner, found := a.store().User(updated.UID)
+		if !found {
+			return ticketNotificationResult{Skipped: "owner_missing"}
+		}
+		if !a.telegramAvailable() || owner.TelegramID == 0 {
+			return ticketNotificationResult{Skipped: "telegram_unavailable"}
+		}
+		// 优先使用工单级别的通知设置，未设置时回退到用户全局设置
+		notify := owner.NotifyOnTicketTelegram
+		if updated.NotifyTelegram != nil {
+			notify = *updated.NotifyTelegram
+		}
+		if !notify {
+			return ticketNotificationResult{Skipped: "owner_disabled"}
+		}
+		now := time.Now().Format("2006-01-02 15:04:05")
+		adminNote := ticketOwnerNotificationNote(updated, existing)
+		adminNoteContent := ""
+		if adminNote != "" {
+			adminNoteContent = "回复内容：\n" + adminNote
+		}
+		notifValues := map[string]string{
+			"{ticket_id}":          strconv.FormatInt(updated.ID, 10),
+			"{title}":              updated.Title,
+			"{status}":             statusLabel(updated.Status),
+			"{priority}":           updated.Priority,
+			"{type}":               updated.Type,
+			"{admin_note}":         adminNote,
+			"{admin_note_content}": adminNoteContent,
+			"{time}":               now,
+			"{server_name}":        a.cfg().AppName,
+		}
+		tmpl := a.cfg().TicketNotifyTelegramTemplate
+		if tmpl == "" {
+			tmpl = config.DefaultTicketNotifyTelegramTemplate
+		}
+		text := replaceNotifPlaceholders(tmpl, notifValues)
+		result := ticketNotificationResult{Targets: 1}
+		if err := a.telegramSendPlainMessage(sendCtx, owner.TelegramID, text); err != nil {
+			result.Failures = 1
+			zap.L().Warn("发送工单变动通知失败", zap.Int64("ticket_id", updated.ID), zap.Int64("uid", owner.UID), zap.Error(err))
+		}
+		return result
+	})
+}
+
+func ticketOwnerNotificationNote(updated, existing store.Ticket) string {
+	if len(updated.Replies) > len(existing.Replies) {
+		for i := len(updated.Replies) - 1; i >= len(existing.Replies); i-- {
+			reply := updated.Replies[i]
+			if reply.Role == store.RoleAdmin && strings.TrimSpace(reply.Content) != "" {
+				return strings.TrimSpace(reply.Content)
+			}
+		}
 	}
-	if !a.telegramAvailable() || owner.TelegramID == 0 {
-		return
+	if strings.TrimSpace(updated.AdminNote) != strings.TrimSpace(existing.AdminNote) {
+		return strings.TrimSpace(updated.AdminNote)
 	}
-	// 优先使用工单级别的通知设置，未设置时回退到用户全局设置
-	notify := owner.NotifyOnTicketTelegram
-	if updated.NotifyTelegram != nil {
-		notify = *updated.NotifyTelegram
-	}
-	if !notify {
-		return
-	}
-	now := time.Now().Format("2006-01-02 15:04:05")
-	adminNote := strings.TrimSpace(updated.AdminNote)
-	adminNoteContent := ""
-	if adminNote != "" {
-		adminNoteContent = "回复内容：\n" + adminNote
-	}
-	notifValues := map[string]string{
-		"{ticket_id}":          strconv.FormatInt(updated.ID, 10),
-		"{title}":              updated.Title,
-		"{status}":             statusLabel(updated.Status),
-		"{priority}":           updated.Priority,
-		"{type}":               updated.Type,
-		"{admin_note}":         adminNote,
-		"{admin_note_content}": adminNoteContent,
-		"{time}":               now,
-		"{server_name}":        a.cfg().AppName,
-	}
-	tmpl := a.cfg().TicketNotifyTelegramTemplate
-	if tmpl == "" {
-		tmpl = config.DefaultTicketNotifyTelegramTemplate
-	}
-	text := replaceNotifPlaceholders(tmpl, notifValues)
-	if err := a.telegramSendPlainMessage(ctx, owner.TelegramID, text); err != nil {
-		zap.L().Warn("发送工单变动通知失败", zap.Int64("ticket_id", updated.ID), zap.Int64("uid", owner.UID), zap.Error(err))
-	}
+	return ""
 }
 
 // statusLabel 返回工单状态的中文描述。

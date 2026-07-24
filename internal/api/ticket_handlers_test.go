@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/prejudice-studio/twilight/internal/store"
@@ -397,6 +398,7 @@ func TestTicketRepliesSurviveStatusUpdatesAndReopenResolved(t *testing.T) {
 		t.Fatalf("user reply status=%d body=%s", rr.Code, rr.Body.String())
 	}
 
+	// 元数据 PUT 只更新状态/优先级/类型/处理摘要，不再把 admin_note 伪造成一条回复。
 	adminUpdate := doJSON(app, http.MethodPut, "/api/v1/admin/tickets/"+strconv.FormatInt(id, 10), `{"status":"resolved","priority":"high","type":"all","admin_note":"admin resolution"}`, admin)
 	if adminUpdate.Code != http.StatusOK {
 		t.Fatalf("admin update status=%d body=%s", adminUpdate.Code, adminUpdate.Body.String())
@@ -408,11 +410,27 @@ func TestTicketRepliesSurviveStatusUpdatesAndReopenResolved(t *testing.T) {
 	if ticket.Status != store.TicketStatusResolved || ticket.ResolvedAt <= 0 {
 		t.Fatalf("expected resolved ticket with timestamp, got status=%q resolved_at=%d", ticket.Status, ticket.ResolvedAt)
 	}
-	if len(ticket.Replies) != 2 {
-		t.Fatalf("expected user reply plus admin reply, got %#v", ticket.Replies)
+	if strings.TrimSpace(ticket.AdminNote) != "admin resolution" {
+		t.Fatalf("expected admin note persisted, got %q", ticket.AdminNote)
 	}
-	if ticket.Replies[0].Content != "user adds detail" || ticket.Replies[1].Content != "admin resolution" {
+	if len(ticket.Replies) != 1 {
+		t.Fatalf("metadata update must not forge a reply, got %#v", ticket.Replies)
+	}
+	if ticket.Replies[0].Content != "user adds detail" {
 		t.Fatalf("unexpected replies: %#v", ticket.Replies)
+	}
+
+	// 管理员真正的对话回复走独立回复端点，追加一条回复并保留用户历史。
+	adminReplyPath := "/api/v1/admin/tickets/" + strconv.FormatInt(id, 10) + "/reply"
+	if rr := doJSON(app, http.MethodPost, adminReplyPath, `{"content":"admin resolution reply"}`, admin); rr.Code != http.StatusOK {
+		t.Fatalf("admin reply status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	ticket, found = app.store().Ticket(id)
+	if !found {
+		t.Fatalf("ticket not found after admin reply")
+	}
+	if len(ticket.Replies) != 2 || ticket.Replies[1].Content != "admin resolution reply" {
+		t.Fatalf("expected user reply plus admin reply, got %#v", ticket.Replies)
 	}
 
 	if rr := doJSON(app, http.MethodPost, replyPath, `{"content":"still broken"}`, user); rr.Code != http.StatusOK {
@@ -602,6 +620,35 @@ func TestAdminTicketDetailAndReplyEndpoint(t *testing.T) {
 	}
 	if len(ticket.Replies) != 1 || ticket.Replies[0].Content != "admin chat reply" || ticket.Replies[0].Role != store.RoleAdmin {
 		t.Fatalf("unexpected replies after admin reply endpoint: %#v", ticket.Replies)
+	}
+}
+
+func TestAdminTicketReplyEndpointPreservesUserReplies(t *testing.T) {
+	app := newTestApp(t)
+	enableTicketSystem(t, app, nil)
+	admin := registerAndLogin(t, app, "admin", "Admin123456")
+	user := registerAndLogin(t, app, "ticket-user", "User123456")
+	id := createTicket(t, app, "reply preserve", "initial content", user)
+
+	userReplyPath := "/api/v1/tickets/" + strconv.FormatInt(id, 10) + "/reply"
+	if rr := doJSON(app, http.MethodPost, userReplyPath, `{"content":"user detail"}`, user); rr.Code != http.StatusOK {
+		t.Fatalf("user reply status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	adminPath := "/api/v1/admin/tickets/" + strconv.FormatInt(id, 10) + "/reply"
+	if rr := doJSON(app, http.MethodPost, adminPath, `{"content":"admin answer"}`, admin); rr.Code != http.StatusOK {
+		t.Fatalf("admin reply status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	ticket, found := app.store().Ticket(id)
+	if !found {
+		t.Fatal("ticket not found after replies")
+	}
+	if len(ticket.Replies) != 2 {
+		t.Fatalf("expected both user and admin replies, got %#v", ticket.Replies)
+	}
+	if ticket.Replies[0].Content != "user detail" || ticket.Replies[1].Content != "admin answer" {
+		t.Fatalf("unexpected reply order/content: %#v", ticket.Replies)
 	}
 }
 
