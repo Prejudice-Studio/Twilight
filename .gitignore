@@ -241,3 +241,4 @@ docs/AUDIT_REPORT.md
 # Kubernetes 本地配置
 kubeconfig*
 /.codex-reference-twilight
+/.corepack
