@@ -44,8 +44,6 @@ export type ErrCode =
   | "TICKET_IMAGE_TOO_LARGE"
   | "TICKET_IMAGE_TOO_MANY"
   | "TICKET_IMAGE_INVALID"
-  // === 操作日志 ===
-  | "AUDIT_LOG_NOT_FOUND"
   // === 用户 / 注册 ===
   | "USER_REGISTER_RATE_LIMITED"
   | "USER_REGISTER_DISABLED"
@@ -54,6 +52,8 @@ export type ErrCode =
   | "USER_NOT_FOUND"
   | "USER_LIMIT_REACHED"
   | "USER_PROTECTED"
+  | "USER_EMAIL_INVALID"
+  | "USER_EMAIL_BLACKLISTED"
   // === Telegram 绑定 ===
   | "TG_BIND_REQUIRED"
   | "TG_BIND_CODE_FORMAT_INVALID"
@@ -193,7 +193,6 @@ export type ErrCode =
   | "EMBY_ADMIN_LINK_FORBIDDEN"
   | "EMBY_LINKED_OTHER_USER"
   | "EMBY_PASSWORD_UPDATE_FAILED"
-  | "EMBY_CONNECT_FAILED"
   | "EMBY_USER_LOOKUP_FAILED"
   | "EMBY_USER_NOT_FOUND"
   | "EMBY_LATEST_FAILED"
@@ -273,7 +272,6 @@ export type ErrCode =
   | "BATCH_DAYS_INVALID"
   | "BATCH_LIBRARY_ACTION_INVALID"
   | "BATCH_SELF_TARGET"
-  | "USER_NO_EMBY"
   | "REGCODE_STORAGE_MISMATCH"
   | "RUNTIME_LOG_STREAM_UNSUPPORTED"
   | "CONFIG_SAVE_FAILED"
@@ -341,6 +339,8 @@ export const ErrCodes = {
   UserNotFound: "USER_NOT_FOUND",
   UserLimitReached: "USER_LIMIT_REACHED",
   UserProtected: "USER_PROTECTED",
+  EmailInvalid: "USER_EMAIL_INVALID",
+  EmailBlacklisted: "USER_EMAIL_BLACKLISTED",
   // Telegram 绑定
   TGBindRequired: "TG_BIND_REQUIRED",
   TGBindCodeFormat: "TG_BIND_CODE_FORMAT_INVALID",
@@ -480,7 +480,6 @@ export const ErrCodes = {
   EmbyAdminLinkForbidden: "EMBY_ADMIN_LINK_FORBIDDEN",
   EmbyLinkedOtherUser: "EMBY_LINKED_OTHER_USER",
   EmbyPasswordUpdateFailed: "EMBY_PASSWORD_UPDATE_FAILED",
-  EmbyConnectFailed: "EMBY_CONNECT_FAILED",
   EmbyUserLookupFailed: "EMBY_USER_LOOKUP_FAILED",
   EmbyUserNotFound: "EMBY_USER_NOT_FOUND",
   EmbyLatestFailed: "EMBY_LATEST_FAILED",
@@ -560,7 +559,6 @@ export const ErrCodes = {
   BatchDaysInvalid: "BATCH_DAYS_INVALID",
   BatchLibraryActionInvalid: "BATCH_LIBRARY_ACTION_INVALID",
   BatchSelfTarget: "BATCH_SELF_TARGET",
-  UserHasNoEmby: "USER_NO_EMBY",
   RegcodeStorageMismatch: "REGCODE_STORAGE_MISMATCH",
   RuntimeLogStreamUnsupported: "RUNTIME_LOG_STREAM_UNSUPPORTED",
   ConfigSaveFailed: "CONFIG_SAVE_FAILED",
