@@ -917,6 +917,13 @@ func (a *App) enqueueTicketNotification(scope, event string, ticketID, targetUID
 	if send == nil {
 		return
 	}
+	// Telegram 未配置时不存在任何可送达对象：直接不启协程，避免每次工单动作都
+	// 空跑一个「已跳过」通知。JSON 文件模式下 zap→runtime log sink 对每条日志都做
+	// 整份 state 落盘，这类非事件日志会平白触发一次全量状态重写（PG 模式为廉价
+	// INSERT）；后台协程对 state 的异步写在测试里还会与 t.TempDir() 清理竞争。
+	if !a.telegramAvailable() {
+		return
+	}
 	go func() {
 		defer func() {
 			if recovered := recover(); recovered != nil {
