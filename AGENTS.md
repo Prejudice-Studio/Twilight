@@ -189,6 +189,9 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Do not audit ordinary read-only list/get/search handlers unless the read itself is sensitive.
 - Telegram Bot and inline-panel state changes must write audit entries with `source=telegram` via `auditEntryIP` / `auditTelegramAction`, including user binding, Web/Emby enable-disable, grant, delete, and group kick/ban actions.
 - Audit-log maintenance endpoints (`delete`, `clear`, `prune`) must not append a new record into the same audit log after deleting records; otherwise users can never fully clear or reduce the log count.
+- Outbound notifications (Telegram ticket notify, etc.) are side-effects, not state changes. Report their success/failure/skip through `zap` runtime logs, not the audit log. Writing an audit entry per notification attempt spawns a full state-persist for a non-event and floods the bounded audit log with noise on installs without Telegram, evicting real state-change records.
+- Outbound notifications (Telegram ticket owner/admin pushes) are side-effects, not state mutations. Report their send/skip/failure outcome through `zap` runtime logs only; do not write them to the audit log. A per-notification audit write forces a full-state persist on every ticket action even on Telegram-less installs and evicts real entries from the bounded log.
+- Ticket owner/admin Telegram notifications run in a detached background goroutine (`enqueueTicketNotification`) with panic recovery and a bounded timeout, so a slow or failing Bot send never blocks the handler response or races handler-scoped request state.
 
 ## Domain Rules
 
@@ -262,6 +265,12 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - Admins retain debugging privileges on closed tickets and may still append diagnostic replies or maintain attachments.
 - Frontend image components receive `canDelete` and must disable destructive interactions for closed normal-user tickets.
 
+## Store Write Path Rules
+
+- All mutating store paths go through `mutateAndSaveLocked` (or hold `s.mu` and follow the same `refreshLocked` → snapshot → mutate → `saveLocked` → rollback-on-failure template). Do not reintroduce the old `refreshLocked` → mutate `s.state` → `saveLocked` writer template without rollback; a save failure there leaves memory and disk diverged (e.g. a user removed from `Users` but still referenced in `InviteRelations`).
+- `snapshotStateLocked` returns a `stateSnapshot` holding only the pre-mutation serialized bytes; the `unmarshal` into a fresh `State` is deferred to `restoreStateLocked` and only runs on the rare rollback path. Do not eagerly rebuild a full `State` object graph at snapshot time — the common success path discards it immediately.
+- Every rollback site must call `restoreStateLocked(prev)` rather than assigning `s.state = prev` directly, so derived indexes (`rebuildUserIndexes`) are always rebuilt. A bare `s.state = prev` after mutating indexed fields leaves the Emby-ID / user indexes pointing at stale entries.
+
 ## Sign-in Record Rules
 
 - `Signin.Records` grows over time; `internal/store/signin.go` trims records inline after appending.
@@ -288,6 +297,8 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - Safe image URLs must use HTTPS and a Bangumi/BGM host suffix.
 - Downloads must validate response size, content type, detected MIME, extension, path root, and symlink safety.
 - Use atomic writes for downloaded images.
+- `downloadBangumiCover` must short-circuit on `bangumiCoverCachedOnDisk` before issuing the outbound request, so a cached cover never triggers a network fetch that is discarded at the write step.
+- Batch backfill (`downloadBangumiCoversForEntries`) must dedupe by subject ID and bound concurrency with `bangumiCoverDownloadConcurrency`. Do not reintroduce a per-entry `for ... { go downloadBangumiCover }` that bursts one goroutine and one outbound request per collection item.
 
 ## Bangumi Watched-State Rules
 
