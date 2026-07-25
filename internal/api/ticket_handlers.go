@@ -1134,10 +1134,12 @@ func (a *App) notifyTicketOwner(ctx context.Context, updated, existing store.Tic
 		if !a.telegramAvailable() || owner.TelegramID == 0 {
 			return ticketNotificationResult{Skipped: "telegram_unavailable"}
 		}
-		// 优先使用工单级别的通知设置，未设置时回退到用户全局设置
+		// 推送需同时满足「用户全局设置」与「工单级别设置」：用户全局 NotifyOnTicketTelegram
+		// 是主开关，工单级别 NotifyTelegram 只能在其之上进一步收窄（对某张工单单独静音），
+		// 不能反向覆盖已关闭的全局开关。NotifyTelegram 为 nil 表示未单独设置，沿用全局。
 		notify := owner.NotifyOnTicketTelegram
 		if updated.NotifyTelegram != nil {
-			notify = *updated.NotifyTelegram
+			notify = notify && *updated.NotifyTelegram
 		}
 		if !notify {
 			return ticketNotificationResult{Skipped: "owner_disabled"}
