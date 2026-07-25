@@ -278,7 +278,7 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
 - 日志等级、保留行数与 Go 运行时内存目标由 `Global.log_level`、`Global.runtime_log_limit`、`Global.runtime_memory_limit_mb` 控制；日志保留行数会被夹在 100–50000，默认 1000；内存目标默认 128 MiB，设为 0 表示不限制。
 - 日志后端跟随状态存储：JSON 后端日志落在同目录旁路文件 `state.json.runtimelog`（内存环形缓冲 + NDJSON 追加，不再进 `state.json`）；PostgreSQL 后端落在独立表 `twilight_runtime_logs`。在状态接入前的早期日志会先缓冲在内存 fallback 缓冲区，接入后回写。`after=0` 返回最近 N 条快照；`after>0` 返回该游标之后的前 N 条，保持升序，避免增量读取跳过积压日志。
 - PostgreSQL 后端写入路径只做 INSERT，并按固定节奏异步裁剪；手动裁剪和异步裁剪都按 cutoff id 保留最近 N 条，避免 `NOT IN + ORDER BY LIMIT` 形式造成高写入期反复全表反扫。
-- 日志输出会脱敏：通过正则覆盖 `Authorization`、`Cookie`、`session id/token`、Emby/MediaBrowser token、`access/refresh/id token`、`client_secret`、`private_key`、`connection_string`、`database_url`、`token`、`secret`、`password`、`api_key`、`bot_token`、`dsn`、`Bearer …`、`key-…` 等敏感片段；敏感字段名（含 `key`、`*token`、`*secret` 等）直接替换为 `[REDACTED]`。
+- 日志输出会脱敏：通过正则覆盖 `Authorization`、`Cookie`、`session id/token`、Emby/MediaBrowser token、`access/refresh/id token`、`client_secret`、`private_key`、`connection_string`、`database_url`、`token`、`secret`、`password`、`api_key`、`bot_token`、`dsn`、`Bearer …`、`key-…` 等敏感片段；敏感字段名（含 `key`、`*token`、`*secret` 等）直接替换为 `[REDACTED]`。脱敏是每条日志每个字符串字段都要跑的热路径：`redactSensitiveText` 前置一层廉价触发词前缀过滤（`mightContainSecret`），文本（小写化后）不含任何敏感触发词时直接零分配原样返回，避免绝大多数普通日志（uid / path / duration 等）白跑四遍正则 + 全量字符串分配。触发词列表是四条正则「命中所必需的字面量子串」的超集，只会让快路径更保守（多跑正则），不会漏脱敏。
 - 状态接口只读取 Go runtime 摘要（版本、goroutine、内存、是否启用 Redis、活动数据库后端、用户数等）和 Linux `/proc` 摘要（loadavg / meminfo / uptime），不返回环境变量、配置明文、命令行参数或进程列表。
 - 实时日志流为 SSE（`text/event-stream`），按游标增量推送 `snapshot` / `logs` / `ping` 事件，单连接 25 秒空闲返回。
 
@@ -302,6 +302,7 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
   - `AuthAdmin`：登录且 `Role == RoleAdmin`。
   - `AuthAPIKey`：`X-API-Key` 头、`Authorization: ApiKey/Bearer` 或 `?apikey=` 查询参数。
 - Cookie 鉴权写请求不要求 CSRF 令牌，也不做额外来源校验；`X-Twilight-Client: webui` 不参与鉴权。
+- **客户端 IP 单次解析 + 全链路复用**：`ServeHTTP` 在 reload 之后解析一次客户端 IP 写进 request context，IP 黑名单、全局限速 key、访问日志以及各 handler 里的 `a.clientIP(r)` 全部命中缓存——保证同一请求的所有 IP 安全控制用同一个值（不再各自重复解析、也不会因中途状态变化取到不一致 IP）。受信代理判定改用 reload 期一次性解析好的匹配器（`trustedProxyMatcher`，随运行时快照原子切换），热路径不再每请求 `net.ParseCIDR` / `net.ParseIP`；`trusted_proxy_cidrs` 为空时匹配器恒判不受信（fail-closed），与旧逐条解析语义一致。
 - Cookie 会话默认 `HttpOnly`、`Secure=true`、`SameSite=Lax`；可通过 `CookieDomain` 跨子域共享。
 - CORS 留空或 `*` 时进入兼容模式并反射合法 Origin；填写列表后只允许可信 Origin。
 - API Key 只保存哈希，明文仅创建时返回一次。

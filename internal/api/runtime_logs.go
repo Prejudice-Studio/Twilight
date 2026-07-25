@@ -509,8 +509,35 @@ func sensitiveLogKey(key string) bool {
 		strings.Contains(normalized, "dsn")
 }
 
+// redactSensitiveTriggers 是四条脱敏正则各自匹配所必需的字面量子串（小写）。
+// 任一正则要命中，其命中片段里必然包含本列表中的某个词——因此若文本（小写化后）
+// 一个都不含，四次 ReplaceAllString 必然原样返回，可整段跳过。
+// 该列表只做「更宽」的近似：多列几个只是让快路径少走，绝不会漏（漏才会泄密）。
+var redactSensitiveTriggers = []string{
+	"bearer", "key", "authorization", "cookie", "session",
+	"token", "secret", "password", "passwd",
+	"connection", "database", "dsn", "emby", "mediabrowser",
+}
+
+// mightContainSecret 是脱敏正则的廉价前置过滤：绝大多数日志字段（uid / path /
+// duration 等）不含任何敏感触发词，直接短路，避免每条日志每个字符串字段都跑四遍
+// NFA 正则 + 全量分配。返回 true 只表示「可能命中」，最终仍由正则判定。
+func mightContainSecret(value string) bool {
+	lower := strings.ToLower(value)
+	for _, trigger := range redactSensitiveTriggers {
+		if strings.Contains(lower, trigger) {
+			return true
+		}
+	}
+	return false
+}
+
 func redactSensitiveText(value string) string {
 	if value == "" {
+		return value
+	}
+	// 快路径：不含任何触发词 ⇒ 四条正则都不可能命中，原样返回、零分配。
+	if !mightContainSecret(value) {
 		return value
 	}
 	value = bearerPattern.ReplaceAllString(value, "Bearer [REDACTED]")

@@ -103,6 +103,58 @@ type runtimeState struct {
 	sessions *sessionStore
 	limiter  *rateLimiter
 	redis    *redis.Client
+	// trustedProxies 是 cfg.TrustedProxyCIDRs 在 reload 期一次性解析好的匹配器：
+	// 把每请求都要跑的 net.ParseCIDR / net.ParseIP 挪到冷路径，热路径只做 Contains。
+	// 随快照一起原子切换，读端拿到的 cfg 与 trustedProxies 永远同源。
+	trustedProxies trustedProxyMatcher
+}
+
+// trustedProxyMatcher 持有预解析的受信代理网段与单 IP 列表。空列表 ⇒ 任何
+// 对端都不受信（fail-closed），与旧 upstreamIsTrustedProxy 语义一致。
+type trustedProxyMatcher struct {
+	nets []*net.IPNet
+	ips  []net.IP
+}
+
+// buildTrustedProxyMatcher 在 reload / New 时把 CIDR 字符串解析成匹配器；
+// 非法条目直接跳过（与旧逐请求解析时的 continue 行为一致）。
+func buildTrustedProxyMatcher(cidrs []string) trustedProxyMatcher {
+	var m trustedProxyMatcher
+	for _, raw := range cidrs {
+		entry := strings.TrimSpace(raw)
+		if entry == "" {
+			continue
+		}
+		// 允许直接写单个 IP（不带 /N）：等价于 /32 或 /128。
+		if !strings.Contains(entry, "/") {
+			if peer := net.ParseIP(entry); peer != nil {
+				m.ips = append(m.ips, peer)
+			}
+			continue
+		}
+		if _, network, err := net.ParseCIDR(entry); err == nil {
+			m.nets = append(m.nets, network)
+		}
+	}
+	return m
+}
+
+// contains 判断 ip 是否落在任一受信网段或等于任一受信单 IP。
+func (m trustedProxyMatcher) contains(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	for _, peer := range m.ips {
+		if peer.Equal(ip) {
+			return true
+		}
+	}
+	for _, network := range m.nets {
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // cfg 返回当前生效的 config.Config 指针：调用方读字段后即可释放快照；
@@ -219,6 +271,11 @@ type contextKey string
 const principalKey contextKey = "principal"
 const auditRequestKey contextKey = "audit_request"
 
+// clientIPKey 缓存单个请求解析出的客户端 IP。ServeHTTP 入口算一次写进
+// context，后续黑名单 / 限速 / 访问日志以及各 handler 里的 a.clientIP(r)
+// 都直接命中缓存，避免每请求重复走 XFF 右向左剥离 + CIDR 匹配。
+const clientIPKey contextKey = "client_ip"
+
 const (
 	twilightClientHeader         = "X-Twilight-Client"
 	twilightIntentHeader         = "X-Twilight-Intent"
@@ -239,11 +296,12 @@ func New(cfg config.Config, st *store.Store) (*App, error) {
 		bindStatus:           newBindStatusHub(),
 	}
 	app.runtime.Store(&runtimeState{
-		cfg:      cfg,
-		store:    st,
-		sessions: newSessionStoreWithDB(cfg.SessionTTL, redisClient, st),
-		limiter:  newRateLimiter(redisClient),
-		redis:    redisClient,
+		cfg:            cfg,
+		store:          st,
+		sessions:       newSessionStoreWithDB(cfg.SessionTTL, redisClient, st),
+		limiter:        newRateLimiter(redisClient),
+		redis:          redisClient,
+		trustedProxies: buildTrustedProxyMatcher(cfg.TrustedProxyCIDRs),
 	})
 	app.configSignature = configFileSignature(cfg.ConfigFile)
 	app.registerRoutes()
@@ -400,6 +458,8 @@ func (a *App) reloadConfigLocked() (map[string]any, error) {
 	// store 还是 prev"的撕裂态。
 	nextState := *prevState
 	nextState.cfg = next
+	// 受信代理网段随 cfg 一起在冷路径解析好，热路径 clientIP 只做匹配不再解析。
+	nextState.trustedProxies = buildTrustedProxyMatcher(next.TrustedProxyCIDRs)
 
 	reinitialized := []string{}
 	closeOldStore := false
@@ -672,6 +732,11 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	a.reloadConfigIfChanged()
+	// reload 之后 runtime 快照（cfg + trustedProxies）已是最新，此时解析一次
+	// 客户端 IP 写进 context：后续黑名单 / 限速 / 访问日志及各 handler 全部复用，
+	// 连 OPTIONS 早返回路径上的 defer 访问日志也命中缓存，不再二次解析。
+	clientIP := a.computeClientIP(r)
+	r = r.WithContext(context.WithValue(r.Context(), clientIPKey, clientIP))
 	a.applySecurityHeaders(lw)
 	if a.applyCORS(lw, r) && r.Method == http.MethodOptions {
 		lw.WriteHeader(http.StatusNoContent)
@@ -680,12 +745,12 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if a.cfg().MaxUploadSize > 0 {
 		r.Body = http.MaxBytesReader(lw, r.Body, a.cfg().MaxUploadSize)
 	}
-	if a.store().IsIPBlacklisted(a.clientIP(r)) {
+	if a.store().IsIPBlacklisted(clientIP) {
 		failWithCode(lw, http.StatusForbidden, ErrIPBlacklisted, "IP 已被封禁")
 		return
 	}
 
-	if !a.allowRate(r.Context(), rateKey("global:", a.clientIP(r)), a.cfg().RateLimitGlobalPerMinute, time.Minute) {
+	if !a.allowRate(r.Context(), rateKey("global:", clientIP), a.cfg().RateLimitGlobalPerMinute, time.Minute) {
 		failWithCode(lw, http.StatusTooManyRequests, ErrGlobalRateLimited, "请求过于频繁，请稍后再试")
 		return
 	}
@@ -753,9 +818,15 @@ func matchPattern(patternParts, requestParts []string) (Params, bool) {
 	if len(patternParts) != len(requestParts) {
 		return nil, false
 	}
-	params := Params{}
+	// params 延迟到遇到首个 `:` 占位符才分配：绝大多数静态路由（无路径参数）
+	// 与所有 length/字面量 不匹配的路由都不再产生一次 map 分配，match 每请求
+	// 遍历整张路由表时省掉大量短命 map。读端从 nil Params 取值等价于取空串。
+	var params Params
 	for i := range patternParts {
 		if strings.HasPrefix(patternParts[i], ":") {
+			if params == nil {
+				params = Params{}
+			}
 			params[strings.TrimPrefix(patternParts[i], ":")] = requestParts[i]
 			continue
 		}
@@ -1072,7 +1143,7 @@ func validateCORSOriginsStartup(origins []string, allowCredential bool) {
 // validateTrustedProxyStartup 在启动 / reload 时核验"信任代理头 + 上游 CIDR"
 // 这对配置：
 //   - TrustProxyHeaders=true 但 TrustedProxyCIDRs 为空：打 Error 提醒——
-//     upstreamIsTrustedProxy 在 CIDRs 为空时直接返回 false（fail-closed），
+//     trustedProxyMatcher 为空时 contains 恒返回 false（fail-closed），
 //     意味着 trust_proxy_headers=true 此时实际无效，所有 IP 限流 / 黑名单
 //     都基于 TCP 对端地址。运维必须补全 CIDR 才能生效。
 //   - 单条 CIDR 解析失败：打 Warn 列出出错条目，调用方仍然按剩余可用条目工作；
@@ -1205,7 +1276,24 @@ func sameSite(value string) http.SameSite {
 }
 
 func (a *App) clientIP(r *http.Request) string {
-	if a.cfg().TrustProxyHeaders && upstreamIsTrustedProxy(r.RemoteAddr, a.cfg().TrustedProxyCIDRs) {
+	// 命中 ServeHTTP 入口写入的缓存：同一请求内黑名单 / 限速 / 访问日志及各
+	// handler 多次调用只解析一次，省掉重复的 XFF 剥离 + 网段匹配。
+	if cached, ok := r.Context().Value(clientIPKey).(string); ok && cached != "" {
+		return cached
+	}
+	return a.computeClientIP(r)
+}
+
+// computeClientIP 真正解析客户端 IP。受信代理场景下才消费 CF-Connecting-IP /
+// X-Real-IP / X-Forwarded-For 这些可被任意调用方伪造的代理头；否则一律走
+// RemoteAddr。受信判定用 reload 期预解析好的 trustedProxies 匹配器，热路径不再
+// 每请求 net.ParseCIDR。
+//
+// 安全策略：trustedProxies 为空 ⇒ contains 恒 false（fail-closed）。配置不完整时
+// 直接走 RemoteAddr，由启动期日志引导运维补全 TrustedProxyCIDRs，避免任何人通过
+// 伪造 X-Forwarded-For 绕过 IP 限速 / 黑名单。
+func (a *App) computeClientIP(r *http.Request) string {
+	if rt := a.runtimeSnapshot(); rt != nil && rt.cfg.TrustProxyHeaders && rt.trustedProxies.contains(remoteAddrIP(r.RemoteAddr)) {
 		for _, header := range []string{"CF-Connecting-IP", "X-Real-IP"} {
 			if value := parseClientIPHeader(r.Header.Get(header)); value != "" {
 				return value
@@ -1213,7 +1301,7 @@ func (a *App) clientIP(r *http.Request) string {
 		}
 		// XFF 右向左剥离：直接对端是受信代理，但代理本身可能再被另一层
 		// 受信代理转发；攻击者控制的客户端在最左端塞任何字符串。从
-		// 最右一跳开始，逐跳验证是否仍处于 TrustedProxyCIDRs 范围内，
+		// 最右一跳开始，逐跳验证是否仍处于 trustedProxies 范围内，
 		// 第一个不在范围内的 IP 才是真实客户端 IP。
 		// 例：XFF = "spoofed, 1.1.1.1, 10.0.0.5"，RemoteAddr=10.0.0.1，
 		//   trusted = [10.0.0.0/24]，则结果应为 1.1.1.1（spoofed 不可信）。
@@ -1228,7 +1316,7 @@ func (a *App) clientIP(r *http.Request) string {
 				if i == 0 {
 					return ipStr
 				}
-				if upstreamIsTrustedProxy(ipStr, a.cfg().TrustedProxyCIDRs) {
+				if rt.trustedProxies.contains(net.ParseIP(ipStr)) {
 					continue
 				}
 				return ipStr
@@ -1242,46 +1330,13 @@ func (a *App) clientIP(r *http.Request) string {
 	return host
 }
 
-// upstreamIsTrustedProxy 判断 r.RemoteAddr 的对端是否落在 cfg.TrustedProxyCIDRs
-// 列表里。返回 true 时，clientIP 才会消费 X-Forwarded-For / X-Real-IP / CF-* 这
-// 些可被任意调用方伪造的代理头；否则一律走 RemoteAddr。
-//
-// 安全策略：cidrs 为空 ⇒ 返回 false（fail-closed）。
-// 配置不完整时直接走 RemoteAddr，由启动期日志引导运维补全 TrustedProxyCIDRs，
-// 避免任何人通过伪造 X-Forwarded-For 绕过 IP 限速 / 黑名单。
-func upstreamIsTrustedProxy(remoteAddr string, cidrs []string) bool {
-	if len(cidrs) == 0 {
-		return false
-	}
+// remoteAddrIP 从 host:port 或裸 IP 形式的 RemoteAddr 中解析出 net.IP，解析失败返回 nil。
+func remoteAddrIP(remoteAddr string) net.IP {
 	host := remoteAddr
 	if h, _, err := net.SplitHostPort(remoteAddr); err == nil {
 		host = h
 	}
-	ip := net.ParseIP(strings.TrimSpace(host))
-	if ip == nil {
-		return false
-	}
-	for _, raw := range cidrs {
-		entry := strings.TrimSpace(raw)
-		if entry == "" {
-			continue
-		}
-		// 允许直接写单个 IP（不带 /N）：等价于 /32 或 /128。
-		if !strings.Contains(entry, "/") {
-			if peer := net.ParseIP(entry); peer != nil && peer.Equal(ip) {
-				return true
-			}
-			continue
-		}
-		_, network, err := net.ParseCIDR(entry)
-		if err != nil {
-			continue
-		}
-		if network.Contains(ip) {
-			return true
-		}
-	}
-	return false
+	return net.ParseIP(strings.TrimSpace(host))
 }
 
 func parseClientIPHeader(value string) string {
