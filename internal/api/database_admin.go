@@ -318,6 +318,10 @@ func (a *App) handleDatabaseMigrate(w http.ResponseWriter, r *http.Request, _ Pa
 			failWithCode(w, http.StatusInternalServerError, ErrDBStateFileWriteBad, "写入状态文件失败")
 			return
 		}
+		// snapshot 已把 runtime log 内嵌进目标 state.json。若目标处残留旧的
+		// runtime log 旁路文件，下次 Open 会以旧旁路为准、遮蔽刚迁移进来的内嵌
+		// 日志（漏迁），故显式清掉，逼下次 Open 从内嵌 RuntimeLogs 重建旁路。
+		store.RemoveRuntimeLogSidecar(targetPath)
 		summary := a.databaseMigrationSummary(store.BackendJSON, state, dryRun, snapshotBytes, targetReady)
 		summary["state_file"] = targetPath
 		summary["pre_migration_backup"] = preMigration

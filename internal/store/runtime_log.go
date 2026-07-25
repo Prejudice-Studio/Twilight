@@ -71,23 +71,14 @@ func (s *Store) AddRuntimeLog(entry RuntimeLogEntry, limit int) (RuntimeLogEntry
 		s.maybeAsyncPrunePGRuntimeLogs(limit)
 		return entry, nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return entry, err
+	// JSON 后端：走独立旁路存储（内存环形缓冲 + NDJSON 追加文件），只碰 rlf.mu，
+	// 不再 s.mu.Lock + refreshLocked + 整份 state.json marshal+fsync。这既消除了
+	// 「saveLocked 持 s.mu 时 zap sink 回调本方法再抢 s.mu」的自旋死锁，也把每条日志
+	// 的落盘成本从「整库写」降到「一行 append」。
+	if s.runtimeLog != nil {
+		return s.runtimeLog.add(entry, limit), nil
 	}
-	if entry.ID == 0 {
-		entry.ID = s.state.NextRuntimeLogID
-		s.state.NextRuntimeLogID++
-	}
-	if entry.Time == 0 {
-		entry.Time = time.Now().Unix()
-	}
-	s.state.RuntimeLogs = append(s.state.RuntimeLogs, entry)
-	if len(s.state.RuntimeLogs) > limit {
-		s.state.RuntimeLogs = compactTail(s.state.RuntimeLogs, limit)
-	}
-	return entry, s.saveLocked()
+	return entry, nil
 }
 
 // maybeAsyncPrunePGRuntimeLogs 每 pgRuntimeLogPruneEvery 条 INSERT 触发一次
@@ -122,25 +113,10 @@ func (s *Store) RuntimeLogs(limit int, after int64) ([]RuntimeLogEntry, int64) {
 	if s.db != nil {
 		return s.postgresRuntimeLogs(limit, after)
 	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	maxLimit := len(s.state.RuntimeLogs)
-	if limit <= 0 || limit > maxLimit {
-		limit = maxLimit
+	if s.runtimeLog != nil {
+		return s.runtimeLog.logs(limit, after)
 	}
-	next := after
-	if s.state.NextRuntimeLogID > 1 {
-		next = s.state.NextRuntimeLogID - 1
-	}
-	start, end := runtimeLogWindow(s.state.RuntimeLogs, limit, after)
-	if start == end {
-		return nil, next
-	}
-	filtered := s.state.RuntimeLogs[start:end]
-	next = filtered[len(filtered)-1].ID
-	out := make([]RuntimeLogEntry, len(filtered))
-	copy(out, filtered)
-	return out, next
+	return nil, after
 }
 
 func runtimeLogWindow(entries []RuntimeLogEntry, limit int, after int64) (int, int) {
@@ -184,13 +160,10 @@ func (s *Store) RuntimeLogStats() (int64, int) {
 		}
 		return next.Int64, count
 	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	next := int64(0)
-	if s.state.NextRuntimeLogID > 1 {
-		next = s.state.NextRuntimeLogID - 1
+	if s.runtimeLog != nil {
+		return s.runtimeLog.stats()
 	}
-	return next, len(s.state.RuntimeLogs)
+	return 0, 0
 }
 
 func (s *Store) PruneRuntimeLogs(limit int) error {
@@ -204,16 +177,10 @@ func (s *Store) PruneRuntimeLogs(limit int) error {
 		_, err := s.db.ExecContext(ctx, pgRuntimeLogPruneSQL, limit)
 		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return err
+	if s.runtimeLog != nil {
+		return s.runtimeLog.prune(limit)
 	}
-	if len(s.state.RuntimeLogs) <= limit {
-		return nil
-	}
-	s.state.RuntimeLogs = compactTail(s.state.RuntimeLogs, limit)
-	return s.saveLocked()
+	return nil
 }
 
 func (s *Store) postgresRuntimeLogs(limit int, after int64) ([]RuntimeLogEntry, int64) {

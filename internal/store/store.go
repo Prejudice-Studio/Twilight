@@ -74,6 +74,13 @@ type Store struct {
 	// 需 xmin / 版本列，超出本次改动范围；PG 的 refreshLocked 保持每次全量拉取。
 	lastMtime time.Time
 	lastSize  int64
+
+	// runtimeLog 是 JSON 后端的 runtime log 旁路存储（内存环形缓冲 + NDJSON 追加文件）；
+	// PG 后端为 nil（走独立表 twilight_runtime_logs）。它拥有独立于 s.mu 的互斥锁，
+	// 让 AddRuntimeLog 的 JSON 分支不再抢 s.mu，既消除 zap-sink 自旋死锁，也让每条日志
+	// 从「整份 state.json marshal+fsync」降到「一行 append」。Open 时挂接一次后不再变更，
+	// 后续读取无需 s.mu 保护。
+	runtimeLog *runtimeLogFile
 }
 
 const (
@@ -633,6 +640,12 @@ func Open(path string) (*Store, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			// 新建库：state 为空，旁路文件也不存在，挂接后 nextID 从 1 起。
+			// 紧随的 saveLocked 落初始 state.json，无需理会 migrated（空库必为 false）。
+			if _, attachErr := st.attachRuntimeLogFile(); attachErr != nil {
+				_ = lock.Release()
+				return nil, attachErr
+			}
 			return st, st.saveLocked()
 		}
 		_ = lock.Release()
@@ -655,7 +668,51 @@ func Open(path string) (*Store, error) {
 	}
 	st.state.ensure()
 	st.rebuildUserIndexes()
+	// 挂接 runtime log 旁路存储。旁路文件已存在则以它为准；否则从 state 内嵌的
+	// RuntimeLogs 迁移一次并写出旁路文件，随后清空 state.RuntimeLogs 让它不再落进
+	// state.json。此调用发生在 store 被并发访问之前，无需持 s.mu。
+	migrated, err := st.attachRuntimeLogFile()
+	if err != nil {
+		_ = lock.Release()
+		return nil, err
+	}
+	// 发生过迁移（旧 state.json 内嵌了 runtime log）：立刻重写一次 state.json 把
+	// 那批日志抹掉，否则它们会一直躺在磁盘上直到下一次无关 mutation 才被 saveLocked
+	// 覆盖。此重写每份旧文件仅一次（此后 Open 从旁路 seed、无迁移、命中 Batch B 门控）。
+	if migrated {
+		if err := st.saveLocked(); err != nil {
+			_ = lock.Release()
+			return nil, err
+		}
+	}
 	return st, nil
+}
+
+// attachRuntimeLogFile 仅 JSON 后端调用（Open 内、store 未并发时）。它构造 runtimeLog
+// 旁路存储：若旁路文件已存在则 seed 自它（权威来源）；否则以 state 内嵌的 RuntimeLogs
+// 作为一次性迁移种子写出旁路文件。迁移后清空 s.state.RuntimeLogs，使 runtime log 从此
+// 只活在旁路文件里，不再随 state.json 反复 marshal+fsync。
+//
+// 返回 migrated=true 表示 state.json 里原本携带了 runtime log（无论是首次迁移进旁路，
+// 还是旁路已存在但 state.json 仍有历史残留）——调用方据此重写一次 state.json 清掉残留。
+func (s *Store) attachRuntimeLogFile() (bool, error) {
+	if s.db != nil {
+		return false, nil
+	}
+	migrated := len(s.state.RuntimeLogs) > 0
+	rlf, err := newRuntimeLogFile(sidecarPath(s.path), s.state.RuntimeLogs, s.state.NextRuntimeLogID)
+	if err != nil {
+		return false, err
+	}
+	s.runtimeLog = rlf
+	// state 内嵌日志已迁进旁路文件（或旁路文件本就是权威来源）：清空内存副本，
+	// 下次 saveLocked 便不会把它们再写回 state.json。NextRuntimeLogID 保留并与旁路
+	// nextID 对齐（取 max，不回退）。
+	s.state.RuntimeLogs = nil
+	if rlf.nextID > s.state.NextRuntimeLogID {
+		s.state.NextRuntimeLogID = rlf.nextID
+	}
+	return migrated, nil
 }
 
 // probeWritable 在目标目录里写一字节 sentinel 再删除，确认 dir 实际可写。
@@ -1573,6 +1630,14 @@ func (s *Store) Snapshot() ([]byte, error) {
 		if nextID > state.NextRuntimeLogID {
 			state.NextRuntimeLogID = nextID
 		}
+	} else if s.runtimeLog != nil {
+		// JSON 后端：runtime log 活在旁路文件里，内存 state.RuntimeLogs 恒空。
+		// 备份 / 迁移快照要自洽（含 JSON→PG 迁移不丢日志），这里现取旁路环形缓冲注入 State。
+		logs, nextID := s.runtimeLog.snapshotEntries()
+		state.RuntimeLogs = logs
+		if nextID > state.NextRuntimeLogID {
+			state.NextRuntimeLogID = nextID
+		}
 	}
 	return json.MarshalIndent(state, "", "  ")
 }
@@ -1630,7 +1695,15 @@ func (s *Store) LoadSnapshot(data []byte) error {
 	state.ensure()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// 快照里的 runtime_logs 单独接管：PG 回写独立表，JSON 回写旁路文件。
+	// 先把它从待落 state 里摘出，JSON 后端清空 s.state.RuntimeLogs 再 saveLocked，
+	// 保持「内存 state.RuntimeLogs 恒空、不进 state.json」的不变量（否则这批日志会
+	// 被写进 state.json 且此后一直随每次 saveLocked 反复落盘）。
+	logs := state.RuntimeLogs
 	s.state = state
+	if s.db == nil {
+		s.state.RuntimeLogs = nil
+	}
 	if err := s.saveLocked(); err != nil {
 		return err
 	}
@@ -1638,7 +1711,13 @@ func (s *Store) LoadSnapshot(data []byte) error {
 	// twilight_state 走到老时点而 twilight_runtime_logs 仍是最新数据。
 	// 失败不致命（state 已经写回），但要 surface 给调用方决定是否重试。
 	if s.db != nil {
-		if err := s.replaceRuntimeLogsLocked(state.RuntimeLogs); err != nil {
+		if err := s.replaceRuntimeLogsLocked(logs); err != nil {
+			return err
+		}
+	} else if s.runtimeLog != nil {
+		// JSON 后端：用快照里的 runtime log 整份替换旁路文件（含空快照 → 清空旁路），
+		// 与 PG 的 replaceRuntimeLogsLocked 语义对齐。
+		if err := s.runtimeLog.replace(logs); err != nil {
 			return err
 		}
 	}

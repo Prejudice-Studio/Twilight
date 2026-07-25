@@ -241,7 +241,7 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
 
 | 后端 | 说明 |
 | ---- | ---- |
-| JSON（`driver = "json"`、空值或 `file`） | 整份 `State` 序列化为 `db/twilight_go_state.json`（可由 `Database.state_file` / `TWILIGHT_STATE_FILE` 指定）。 |
+| JSON（`driver = "json"`、空值或 `file`） | 整份 `State` 序列化为 `db/twilight_go_state.json`（可由 `Database.state_file` / `TWILIGHT_STATE_FILE` 指定）；运行日志剥离到同目录旁路文件 `twilight_go_state.json.runtimelog`（NDJSON 追加），不再进 `state.json`。 |
 | PostgreSQL（`driver = "postgres"` / `postgresql`） | 整份 `State` 作为 jsonb 存进 `twilight_state` 表 `id = 1` 的单行；运行日志另存独立表 `twilight_runtime_logs`，会话另存独立表 `twilight_sessions`。 |
 
 数据库行为要点：
@@ -252,6 +252,7 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
   - `.bak` 影子拷贝不再每次写前 `os.ReadFile` 重读整份多 MB 文件，而是复用内存里缓存的"上次成功写入 / 加载的字节"（`Store.lastSaved`）——单进程独占下 `saveLocked` 的 `rename` 是 `state.json` 唯一写者，缓存与磁盘恒等；冷启动首写缓存为空时回退读盘保持原行为。`.bak` 语义不变（仍是上一次成功写入的 state）。
   - `refreshLocked` 前置**变更门控**：先 `os.Stat` 比对 `(mtime, size)` 与上次加载 / 落盘记录，一致即跳过整份 `ReadFile + json.Unmarshal + 重建索引`（单进程下磁盘只被自身 `saveLocked` 改动，命中即证明内存 state 已最新）。门控冷启动为空、`.bak` 回退后、或任何 stat 失败 / 不匹配都保守走完整重载。
   - **PostgreSQL 后端刻意不设变更门控**：PG 为真多进程，唯一可用行版本信号 `updated_at` 是事务起始时点（微秒级），跨后端同微秒写可能撞同值导致漏读 + 覆盖（丢更新）；稳妥门控需 `xmin` / 版本列，超出当前改动范围。PG 的 `refreshLocked` 保持每次全量拉取。
+  - **运行日志剥离出 `state.json`（独立旁路文件）**：JSON 后端每条 `zap` 日志过去都会 `refreshLocked` + 追加到 `State.RuntimeLogs` + 整份多 MB `state.json` 的 `marshal + fsync`——日志越多、单条落盘成本越高，且 sink 回调与 `saveLocked` 持有的 `s.mu` 构成自旋死锁风险。现改为写同目录旁路文件 `state.json.runtimelog`（内存环形缓冲作读取来源 + NDJSON 追加落盘），拥有独立于 `s.mu` 的互斥锁，单条日志成本从「整库写」降到「一行 append」（open→写一行→close，规避 Windows「文件仍打开时 rename 失败」；不做 per-append fsync，诊断日志尽力而为容忍崩溃丢尾部若干条；物理行数超过 ~2×limit 时原子重写收敛体积）。`Open` 时若旁路文件已存在则以它为准 seed，否则从历史 `state.json` 内嵌的 `RuntimeLogs` 一次性迁移进旁路文件并重写 `state.json` 抹掉残留（此后 `state.json` 不再承载运行日志）。`AddRuntimeLog` / `RuntimeLogs` / `RuntimeLogStats` / `PruneRuntimeLogs` 的方法签名与游标 / 统计语义完全不变，API 层无感知。
 - **PostgreSQL 后端**：目标库不存在时，会尝试用同一连接用户连接 `postgres` / `template1` 维护库执行 `CREATE DATABASE`（连接用户需要 `CREATEDB` 权限，已存在则不重复创建）；随后自动建表 `twilight_state`、`twilight_runtime_logs`、`twilight_sessions` 及相关索引（`CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`，幂等）。
 - **运行日志表性能口径**：`twilight_runtime_logs` 只服务 Go 进程运行日志，按 `id` 游标读取增量，按 `id DESC` 读取最新快照，并用 cutoff id 删除旧行以保留最近 N 条；主业务状态仍保持 `twilight_state` 单行 jsonb，不因性能优化拆出业务表。
 - DSN 优先级：`Database.url` / `TWILIGHT_DATABASE_URL` / `TWILIGHT_POSTGRES_DSN` 最高，否则由 host/port/user/password/database/sslmode 拼出 DSN。
@@ -260,7 +261,7 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
 
 管理端提供数据库状态、备份、恢复、迁移（`internal/api/database_admin.go`）：
 
-- 备份生成时点完整的 `State` 快照（PostgreSQL 后端会把独立表 `twilight_runtime_logs` 一并读回快照）。
+- 备份生成时点完整的 `State` 快照，运行日志也一并纳入以保证自洽：PostgreSQL 后端把独立表 `twilight_runtime_logs` 读回快照，JSON 后端把旁路文件 `state.json.runtimelog` 的环形缓冲注入快照。恢复 / 迁移时再由 `LoadSnapshot` 分别写回独立表或旁路文件（含空快照的清空语义）；JSON→JSON 迁移会显式清掉目标处的历史旁路文件，逼下次 `Open` 从内嵌 `RuntimeLogs` 重建，避免旧旁路遮蔽迁移进来的日志。
 - 恢复和迁移都必须先走预览：缺少确认短语时仅返回 `dry_run=true` 的预览结果，不写入数据。恢复确认短语 `RESTORE_DATABASE`，迁移确认短语 `MIGRATE_DATABASE`。
 - 恢复和迁移执行前都会自动创建保护性备份，响应中返回 `pre_operation_backup` 便于回滚审计。
 - 迁移面板默认关闭，需显式开启 `Database.migration_panel_enabled`（或 `TWILIGHT_DATABASE_MIGRATION_PANEL_ENABLED`）。
@@ -275,7 +276,7 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
 
 - 实时日志只接入 Go 进程内 `zap` 全局 logger（通过自定义 core 路由），不开放任意日志文件、journald 或路径参数读取。
 - 日志等级、保留行数与 Go 运行时内存目标由 `Global.log_level`、`Global.runtime_log_limit`、`Global.runtime_memory_limit_mb` 控制；日志保留行数会被夹在 100–50000，默认 1000；内存目标默认 128 MiB，设为 0 表示不限制。
-- 日志后端跟随状态存储：JSON 后端日志保存在 `State.RuntimeLogs`；PostgreSQL 后端落在独立表 `twilight_runtime_logs`。在状态接入前的早期日志会先缓冲在内存 fallback 缓冲区，接入后回写。`after=0` 返回最近 N 条快照；`after>0` 返回该游标之后的前 N 条，保持升序，避免增量读取跳过积压日志。
+- 日志后端跟随状态存储：JSON 后端日志落在同目录旁路文件 `state.json.runtimelog`（内存环形缓冲 + NDJSON 追加，不再进 `state.json`）；PostgreSQL 后端落在独立表 `twilight_runtime_logs`。在状态接入前的早期日志会先缓冲在内存 fallback 缓冲区，接入后回写。`after=0` 返回最近 N 条快照；`after>0` 返回该游标之后的前 N 条，保持升序，避免增量读取跳过积压日志。
 - PostgreSQL 后端写入路径只做 INSERT，并按固定节奏异步裁剪；手动裁剪和异步裁剪都按 cutoff id 保留最近 N 条，避免 `NOT IN + ORDER BY LIMIT` 形式造成高写入期反复全表反扫。
 - 日志输出会脱敏：通过正则覆盖 `Authorization`、`Cookie`、`session id/token`、Emby/MediaBrowser token、`access/refresh/id token`、`client_secret`、`private_key`、`connection_string`、`database_url`、`token`、`secret`、`password`、`api_key`、`bot_token`、`dsn`、`Bearer …`、`key-…` 等敏感片段；敏感字段名（含 `key`、`*token`、`*secret` 等）直接替换为 `[REDACTED]`。
 - 状态接口只读取 Go runtime 摘要（版本、goroutine、内存、是否启用 Redis、活动数据库后端、用户数等）和 Linux `/proc` 摘要（loadavg / meminfo / uptime），不返回环境变量、配置明文、命令行参数或进程列表。
