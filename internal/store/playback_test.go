@@ -3,6 +3,7 @@ package store
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestPlaybackRecordsFiltersDefaultsAndLimits(t *testing.T) {
@@ -129,6 +130,86 @@ func TestPlaybackRecordPrependCompactsOversizedCapacity(t *testing.T) {
 	}
 	if got := st.state.PlaybackRecords[0].ItemID; got != "new" {
 		t.Fatalf("expected newest record at head, got %q", got)
+	}
+}
+
+func TestAddPlaybackRecordsIdempotentMatchesSingleWrite(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	// 预置一条已有记录，验证批量去重会命中现有状态。
+	if err := st.AddPlaybackRecord(PlaybackRecord{UID: 1, ItemID: "existing", PlayedAt: 5}); err != nil {
+		t.Fatal(err)
+	}
+
+	inserted, err := st.AddPlaybackRecordsIdempotent([]PlaybackRecord{
+		{UID: 1, ItemID: "old", PlayedAt: 10},
+		{UID: 2, ItemID: "other", PlayedAt: 20},
+		{UID: 1, ItemID: "existing", PlayedAt: 5}, // 与预置记录重复 → 跳过
+		{UID: 1, ItemID: "mid", PlayedAt: 30},
+		{UID: 1, ItemID: "old", PlayedAt: 10}, // 批内重复 → 跳过
+		{UID: 1, ItemID: "new", PlayedAt: 40},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inserted != 4 {
+		t.Fatalf("expected 4 inserted (2 dups skipped), got %d", inserted)
+	}
+
+	// 逐条 prepend 语义：批内最后接受的 new 应在最前，existing 在最后。
+	all := st.PlaybackRecords(0, 0, 10)
+	if len(all) != 5 {
+		t.Fatalf("expected 5 total records, got %d: %#v", len(all), all)
+	}
+	if all[0].ItemID != "new" {
+		t.Fatalf("expected newest record 'new' at head, got %q", all[0].ItemID)
+	}
+	if all[len(all)-1].ItemID != "existing" {
+		t.Fatalf("expected 'existing' at tail, got %q", all[len(all)-1].ItemID)
+	}
+
+	uidRecords := st.PlaybackRecords(1, 0, 10)
+	if len(uidRecords) != 4 || uidRecords[0].ItemID != "new" {
+		t.Fatalf("unexpected uid=1 records: %#v", uidRecords)
+	}
+}
+
+func TestAddPlaybackRecordsIdempotentDefaultsPlayedAt(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	before := time.Now().Unix()
+	inserted, err := st.AddPlaybackRecordsIdempotent([]PlaybackRecord{
+		{UID: 7, ItemID: "no-time"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inserted != 1 {
+		t.Fatalf("expected 1 inserted, got %d", inserted)
+	}
+	got := st.PlaybackRecords(7, 0, 1)
+	if len(got) != 1 || got[0].PlayedAt < before {
+		t.Fatalf("expected PlayedAt default >= %d, got %#v", before, got)
+	}
+}
+
+func TestAddPlaybackRecordsIdempotentEmptyIsNoop(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	if inserted, err := st.AddPlaybackRecordsIdempotent(nil); err != nil || inserted != 0 {
+		t.Fatalf("empty batch inserted=%d err=%v, want 0 nil", inserted, err)
 	}
 }
 

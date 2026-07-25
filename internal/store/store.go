@@ -1067,6 +1067,9 @@ func configurePostgresDB(db *sql.DB, maxOpen, maxIdle int) {
 	db.SetMaxOpenConns(maxOpen)
 	db.SetMaxIdleConns(maxIdle)
 	db.SetConnMaxLifetime(30 * time.Minute)
+	// 空闲连接 5 分钟后回收：低峰期不必长期占着 maxIdle 条连接，也避免
+	// 中间件/PG 端提前掐断留下的半死连接被复用（配合 30 分钟硬上限）。
+	db.SetConnMaxIdleTime(5 * time.Minute)
 }
 
 func (s *Store) Close() error {

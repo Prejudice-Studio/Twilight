@@ -341,7 +341,9 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 ## Playback Records Database Rules
 
 - `twilight_playback_records` is a PostgreSQL table with columns `uid, item_id, title, series_name, media_type, index_number, duration, played_at` and a unique index on `(uid, item_id, played_at)` for idempotent inserts.
-- `AddPlaybackRecordIdempotent` dual-writes to both the state document (`PlaybackRecords` slice) and the PostgreSQL table when available, using `ON CONFLICT DO NOTHING`.
+- `AddPlaybackRecordIdempotent` dual-writes to both the state document (`PlaybackRecords` slice) and the PostgreSQL table when available, using `ON CONFLICT DO NOTHING`. The PG insert runs **outside** `s.mu` (state already durable after `saveLocked`); a stalled connection can no longer freeze all store writes. DB failure is swallowed (returns `false, nil`) since the state copy is authoritative.
+- Batch path: `AddPlaybackRecordsIdempotent([]PlaybackRecord)` does one `refreshLocked + saveLocked` for the whole slice and a chunked multi-row INSERT (500 rows/statement). The emby activity sync (`persistEmbyPlaybackRecordsFromActivity`, up to `embyActivityFetchLimit`=20000 events) uses this instead of per-record calls — the old loop paid a full-state jsonb serialize per record. Dedup semantics match the single-record path: `(uid, item_id, played_at)` key, records with `uid==0`/empty `item_id` skip dedup.
+- All playback PG reads/writes use `context.WithTimeout` (`pgPlaybackReadTimeout`/`pgPlaybackWriteTimeout`, 5s) so a dead connection self-releases instead of blocking indefinitely.
 - `PlaybackRecords` reads from the database first (when available), falling back to the in-memory state document for JSON-file mode.
 - `DELETE FROM twilight_playback_records` for retention cleanup via `DeletePlaybackRecordsBefore`.
 

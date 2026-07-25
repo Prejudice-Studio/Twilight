@@ -255,6 +255,11 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
   - **运行日志剥离出 `state.json`（独立旁路文件）**：JSON 后端每条 `zap` 日志过去都会 `refreshLocked` + 追加到 `State.RuntimeLogs` + 整份多 MB `state.json` 的 `marshal + fsync`——日志越多、单条落盘成本越高，且 sink 回调与 `saveLocked` 持有的 `s.mu` 构成自旋死锁风险。现改为写同目录旁路文件 `state.json.runtimelog`（内存环形缓冲作读取来源 + NDJSON 追加落盘），拥有独立于 `s.mu` 的互斥锁，单条日志成本从「整库写」降到「一行 append」（open→写一行→close，规避 Windows「文件仍打开时 rename 失败」；不做 per-append fsync，诊断日志尽力而为容忍崩溃丢尾部若干条；物理行数超过 ~2×limit 时原子重写收敛体积）。`Open` 时若旁路文件已存在则以它为准 seed，否则从历史 `state.json` 内嵌的 `RuntimeLogs` 一次性迁移进旁路文件并重写 `state.json` 抹掉残留（此后 `state.json` 不再承载运行日志）。`AddRuntimeLog` / `RuntimeLogs` / `RuntimeLogStats` / `PruneRuntimeLogs` 的方法签名与游标 / 统计语义完全不变，API 层无感知。
 - **PostgreSQL 后端**：目标库不存在时，会尝试用同一连接用户连接 `postgres` / `template1` 维护库执行 `CREATE DATABASE`（连接用户需要 `CREATEDB` 权限，已存在则不重复创建）；随后自动建表 `twilight_state`、`twilight_runtime_logs`、`twilight_sessions` 及相关索引（`CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`，幂等）。
 - **运行日志表性能口径**：`twilight_runtime_logs` 只服务 Go 进程运行日志，按 `id` 游标读取增量，按 `id DESC` 读取最新快照，并用 cutoff id 删除旧行以保留最近 N 条；主业务状态仍保持 `twilight_state` 单行 jsonb，不因性能优化拆出业务表。
+- **播放记录写路径优化**：
+  - 所有 `twilight_playback_records` 的 PG 读写都走带超时的 context（`pgPlaybackReadTimeout` / `pgPlaybackWriteTimeout`，均 5s），连接假死时到期自行释放，不再无限阻塞。
+  - `AddPlaybackRecordIdempotent` 的 PG 单条 INSERT 移到 `s.mu` 之外执行——记录已由 `saveLocked` 落盘（JSON 文件或 PG state jsonb），独立表行只是读路径优先命中的副本、`ON CONFLICT` 保证幂等；持锁跨这段网络 I/O 会让一个卡死的 PG 连接冻结全部 store 写操作。DB 失败按旧语义吞掉（返回 `false, nil`），状态副本为准。
+  - 新增批量写 `AddPlaybackRecordsIdempotent([]PlaybackRecord)`：整批只做一次 `refreshLocked + saveLocked`，PG 侧走分块多行 INSERT（每条语句 500 行，8 列 × 500 = 4000 占位符，远低于 65535 上限）。Emby 活动同步 `persistEmbyPlaybackRecordsFromActivity`（事件上限 `embyActivityFetchLimit`=20000）改用批量方法——旧代码逐条调用，PG 模式下每条都要全量 state jsonb 序列化 + UPDATE，是灾难级写放大。去重语义与单条完全一致：`(uid, item_id, played_at)` 幂等键，`uid==0` / 空 `item_id` 记录不参与去重（沿用旧行为），批内 + 与现有状态双重去重用一张 `map[playbackKey]` 把逐条 O(N*M) 扫描压到 O(N+M)。
+  - PG 连接池补 `SetConnMaxIdleTime(5min)`：低峰期回收空闲连接，规避中间件/PG 端提前掐断留下的半死连接被复用（与既有 `SetConnMaxLifetime(30min)` 硬上限配合）。
 - DSN 优先级：`Database.url` / `TWILIGHT_DATABASE_URL` / `TWILIGHT_POSTGRES_DSN` 最高，否则由 host/port/user/password/database/sslmode 拼出 DSN。
 
 ### Web 端数据库运维

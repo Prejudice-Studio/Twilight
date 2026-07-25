@@ -177,7 +177,7 @@ func (a *App) persistEmbyPlaybackRecordsFromActivity(ctx context.Context, since 
 		}
 	}
 	metadata := a.embyItemMetadata(ctx, itemIDs)
-	inserted := 0
+	pending := make([]store.PlaybackRecord, 0, len(events))
 	for _, event := range events {
 		user := usersByKey[normalizeEmbyActivityUserKey(event.UserID)]
 		if user.UID == 0 {
@@ -201,7 +201,7 @@ func (a *App) persistEmbyPlaybackRecordsFromActivity(ctx context.Context, since 
 		} else if mediaType == "" {
 			mediaType = "unknown"
 		}
-		ok, err := a.store().AddPlaybackRecordIdempotent(store.PlaybackRecord{
+		pending = append(pending, store.PlaybackRecord{
 			UID:        user.UID,
 			ItemID:     itemID,
 			Title:      title,
@@ -210,14 +210,10 @@ func (a *App) persistEmbyPlaybackRecordsFromActivity(ctx context.Context, since 
 			Duration:   clampActivityPlaybackDuration(event.Duration),
 			PlayedAt:   event.PlayedAt,
 		})
-		if err != nil {
-			return inserted, err
-		}
-		if ok {
-			inserted++
-		}
 	}
-	return inserted, nil
+	// 整批一次落盘：旧代码逐条 AddPlaybackRecordIdempotent，PG 模式下每条都要
+	// 全量 state jsonb 序列化 + UPDATE，20000 条上限时是灾难级放大。
+	return a.store().AddPlaybackRecordsIdempotent(pending)
 }
 
 func embyActivityPlaybackEventsFromLogs(logs []store.EmbyActivityLog, since, until int64) []embyActivityPlaybackEvent {
