@@ -248,6 +248,10 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
 
 - **JSON 后端**写盘走原子写 + fsync（tmp → fsync → rename → fsync 父目录），写前把上一份复制为 `.bak`；启动 / 刷新解析失败时回退到 `.bak`。文件权限收敛到 `0o600`。
 - **JSON 后端为单进程独占**：启动时对 `state.json` 加进程级文件锁（`*.lock`），第二个进程会拿到 busy 错误并启动失败。多进程 / 多实例部署应使用 PostgreSQL。
+- **JSON 后端写热路径优化（依赖上一条的单进程独占前提）**：
+  - `.bak` 影子拷贝不再每次写前 `os.ReadFile` 重读整份多 MB 文件，而是复用内存里缓存的"上次成功写入 / 加载的字节"（`Store.lastSaved`）——单进程独占下 `saveLocked` 的 `rename` 是 `state.json` 唯一写者，缓存与磁盘恒等；冷启动首写缓存为空时回退读盘保持原行为。`.bak` 语义不变（仍是上一次成功写入的 state）。
+  - `refreshLocked` 前置**变更门控**：先 `os.Stat` 比对 `(mtime, size)` 与上次加载 / 落盘记录，一致即跳过整份 `ReadFile + json.Unmarshal + 重建索引`（单进程下磁盘只被自身 `saveLocked` 改动，命中即证明内存 state 已最新）。门控冷启动为空、`.bak` 回退后、或任何 stat 失败 / 不匹配都保守走完整重载。
+  - **PostgreSQL 后端刻意不设变更门控**：PG 为真多进程，唯一可用行版本信号 `updated_at` 是事务起始时点（微秒级），跨后端同微秒写可能撞同值导致漏读 + 覆盖（丢更新）；稳妥门控需 `xmin` / 版本列，超出当前改动范围。PG 的 `refreshLocked` 保持每次全量拉取。
 - **PostgreSQL 后端**：目标库不存在时，会尝试用同一连接用户连接 `postgres` / `template1` 维护库执行 `CREATE DATABASE`（连接用户需要 `CREATEDB` 权限，已存在则不重复创建）；随后自动建表 `twilight_state`、`twilight_runtime_logs`、`twilight_sessions` 及相关索引（`CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`，幂等）。
 - **运行日志表性能口径**：`twilight_runtime_logs` 只服务 Go 进程运行日志，按 `id` 游标读取增量，按 `id DESC` 读取最新快照，并用 cutoff id 删除旧行以保留最近 N 条；主业务状态仍保持 `twilight_state` 单行 jsonb，不因性能优化拆出业务表。
 - DSN 优先级：`Database.url` / `TWILIGHT_DATABASE_URL` / `TWILIGHT_POSTGRES_DSN` 最高，否则由 host/port/user/password/database/sslmode 拼出 DSN。

@@ -53,6 +53,27 @@ type Store struct {
 	embyIDMap map[string]int64
 	// userUIDs 按 UID 升序保存现有用户 ID，让 ListUsers 避免每次读都排序 Users map。
 	userUIDs []int64
+
+	// —— 持久化缓存 / 变更门控（均由 s.mu 写锁保护）——
+	//
+	// lastSaved 缓存"当前 state.json 里已落盘的字节"（仅 JSON 后端）。saveLocked
+	// 写前的 .bak 影子拷贝历史上每次都 os.ReadFile(s.path) 重读整份多 MB 文件，
+	// 而这份内容恰好就是上一次成功写入的字节。JSON 后端持进程级 flock，state.json
+	// 的唯一写者就是本进程的 saveLocked，故 lastSaved 与磁盘内容恒等；直接拿它当
+	// .bak 源即可省掉每次写的整文件读 + 同尺寸缓冲分配（降 I/O 与 GC 抖动）。
+	// 冷启动 lastSaved 为 nil 时 saveLocked 回退到 os.ReadFile 保持原行为。
+	lastSaved []byte
+	// lastMtime / lastSize 是 JSON 后端的变更门控：refreshLocked 先 os.Stat，
+	// (mtime,size) 与上次加载/落盘记录一致即跳过整份 ReadFile+Unmarshal+重建索引。
+	// 单进程 flock 下磁盘只会被自己的 saveLocked 改动，门控命中即代表内存 state
+	// 已是最新，跳过安全；任何不匹配 / stat 失败都保守地走完整重载。
+	//
+	// Postgres 后端刻意不设变更门控：PG 是真多进程，唯一可用的行版本信号
+	// updated_at 是事务起始时点（微秒级），两个后端在同一微秒内写会撞同值，
+	// 令一方漏读另一方的写并在下次 saveLocked 覆盖之（丢更新）。稳妥的 PG 门控
+	// 需 xmin / 版本列，超出本次改动范围；PG 的 refreshLocked 保持每次全量拉取。
+	lastMtime time.Time
+	lastSize  int64
 }
 
 const (
@@ -1235,7 +1256,14 @@ func (s *State) compactHistory() {
 	s.PlaybackSessions = compactTail(s.PlaybackSessions, maxPlaybackSessions)
 	s.EmbyActivityLogs = compactTail(s.EmbyActivityLogs, maxEmbyActivityLogs)
 	s.BangumiSyncLogs = compactTail(s.BangumiSyncLogs, maxStoredBangumiSyncLogs)
+	// 仅对真正超限的用户回写：compactTail 在未超限时原样返回同一底层切片，
+	// 旧实现仍对每个用户做一次 map 赋值（value 类型 SigninState 是整值拷贝写回）。
+	// 绝大多数用户签到记录远未及 maxSigninRecords，跳过回写省掉每次落盘对全体
+	// 用户的无谓结构体拷贝（用户越多、写越频，收益越明显）。
 	for uid, signin := range s.Signin {
+		if len(signin.Records) <= maxSigninRecords {
+			continue
+		}
 		signin.Records = compactTail(signin.Records, maxSigninRecords)
 		s.Signin[uid] = signin
 	}
@@ -1365,7 +1393,14 @@ func (s *Store) saveLocked() error {
 	// zap.L() —— saveLocked 当前持有 s.mu，而全局 zap sink 注册了 runtime
 	// log 路由会回调 AddRuntimeLog 再次申请 s.mu，构成自旋死锁（Windows CI
 	// 上 dir.Sync 必然失败，必中此路径，而 Linux/macOS 通常成功才掩盖）。
-	if existing, readErr := os.ReadFile(s.path); readErr == nil && len(existing) > 0 {
+	// .bak 影子拷贝源：优先用 s.lastSaved（上次成功写入 / 加载的字节，与磁盘恒等），
+	// 省掉每次写的整份 os.ReadFile(s.path)。lastSaved 为 nil（冷启动首写，尚未落过盘）
+	// 时回退到读盘，保持原行为。
+	if existing := s.lastSaved; len(existing) > 0 {
+		if err := writeFileAtomicSync(s.path+".bak", existing, 0o600); err != nil {
+			fmt.Fprintf(os.Stderr, "twilight: state .bak shadow copy failed path=%s err=%v\n", s.path, err)
+		}
+	} else if existing, readErr := os.ReadFile(s.path); readErr == nil && len(existing) > 0 {
 		if err := writeFileAtomicSync(s.path+".bak", existing, 0o600); err != nil {
 			fmt.Fprintf(os.Stderr, "twilight: state .bak shadow copy failed path=%s err=%v\n", s.path, err)
 		}
@@ -1401,6 +1436,16 @@ func (s *Store) saveLocked() error {
 	// 父目录 fsync 让 rename 自身的目录条目落盘。Windows 不支持以这种方式
 	// 同步目录；文件内容已通过 f.Sync() 落盘，目录同步在该平台降级为 best effort。
 	_ = syncParentDir(filepath.Dir(s.path), false)
+	// 刷新 .bak 影子源缓存 + 变更门控基线：data 就是刚落盘的字节，(mtime,size)
+	// 从落盘后的 state.json 现读。stat 失败则清空门控，下次 refresh 保守走全量。
+	s.lastSaved = data
+	if fi, statErr := os.Stat(s.path); statErr == nil {
+		s.lastMtime = fi.ModTime()
+		s.lastSize = fi.Size()
+	} else {
+		s.lastMtime = time.Time{}
+		s.lastSize = 0
+	}
 	return nil
 }
 
@@ -1412,6 +1457,10 @@ func (s *Store) refreshLocked() error {
 	// writes so a stale process does not overwrite newer persisted state.
 	var data []byte
 	var err error
+	// jsonMtime / jsonSize 承载 JSON 后端本次读到文件的 stat，用于加载成功后刷新
+	// 变更门控基线（PG 后端保持零值且不参与，见 Store.lastMtime 注释）。
+	var jsonMtime time.Time
+	var jsonSize int64
 	if s.db != nil {
 		// 与 saveLocked 对齐：裸 context.Background 一旦 PG 抖动 / 主从切换
 		// 会让 refreshLocked 永久挂起，而 refreshLocked 是所有 mutating 路径
@@ -1434,14 +1483,31 @@ func (s *Store) refreshLocked() error {
 		if strings.TrimSpace(s.path) == "" {
 			return nil
 		}
+		// 变更门控：先 stat，(mtime,size) 与上次加载/落盘记录一致即代表磁盘未变。
+		// 单进程 flock 下 state.json 唯一写者是本进程 saveLocked，命中即证明内存
+		// state 已是最新，跳过整份 ReadFile+Unmarshal+rebuildUserIndexes。门控冷
+		// （lastMtime 零值，冷启动 / .bak 回退后）或任何不匹配都保守走完整重载。
+		if fi, statErr := os.Stat(s.path); statErr == nil && !s.lastMtime.IsZero() &&
+			fi.ModTime().Equal(s.lastMtime) && fi.Size() == s.lastSize {
+			return nil
+		}
 		data, err = os.ReadFile(s.path)
 		if errors.Is(err, os.ErrNotExist) {
 			s.state = emptyState()
 			s.rebuildUserIndexes()
+			s.lastSaved = nil
+			s.lastMtime = time.Time{}
+			s.lastSize = 0
 			return nil
 		}
 		if err != nil {
 			return err
+		}
+		// ReadFile 后再 stat 一次，把门控基线对齐到"实际读到的这份字节"。
+		// s.mu + flock 保证 stat/read 之间无并发写者，(mtime,size) 与 data 一致。
+		if fi, statErr := os.Stat(s.path); statErr == nil {
+			jsonMtime = fi.ModTime()
+			jsonSize = fi.Size()
 		}
 	}
 	var state State
@@ -1457,6 +1523,13 @@ func (s *Store) refreshLocked() error {
 						bakState.ensure()
 						s.state = bakState
 						s.rebuildUserIndexes()
+						// 内存已是 .bak 的好状态：把它设为 .bak 影子源，下次 saveLocked
+						// 便以好状态兜底、不会拿坏主文件覆盖 .bak。门控刻意留冷（不设
+						// mtime/size），逼下次 refresh 重读仍坏的主文件并再次回退，直到
+						// 一次成功 saveLocked 把主文件与门控一起修好。
+						s.lastSaved = bak
+						s.lastMtime = time.Time{}
+						s.lastSize = 0
 						return nil
 					}
 				}
@@ -1467,6 +1540,13 @@ func (s *Store) refreshLocked() error {
 	state.ensure()
 	s.state = state
 	s.rebuildUserIndexes()
+	// JSON 后端：刷新 .bak 影子源缓存 + 变更门控基线到"刚读到的这份字节"。
+	// stat 失败（jsonMtime 零值）则门控留冷，下次 refresh 保守走完整重载。
+	if s.db == nil {
+		s.lastSaved = data
+		s.lastMtime = jsonMtime
+		s.lastSize = jsonSize
+	}
 	return nil
 }
 
