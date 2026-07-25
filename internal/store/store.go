@@ -2059,6 +2059,68 @@ func (s *Store) UpdateUser(uid int64, fn func(*User) error) (User, error) {
 	return updated, nil
 }
 
+// UpdateUsers 把「对一组用户各跑一次 fn」压成一次 store 写：一次 refreshLocked +
+// snapshotStateLocked + saveLocked，取代逐用户 UpdateUser 的 N 次「整份 state
+// marshal + fsync（JSON）/ 整 jsonb upsert（PG）」。批量续期这类纯本地写在 JSON
+// 后端上原本会持 s.mu 做上百次整库落盘（多 MB × N），把所有并发读写全卡在锁上；
+// 收敛成一次落盘后锁占用与 IO 都降到 O(1) 份。
+//
+// 语义对齐 UpdateUser 的逐用户路径：fn 返回 error / 身份字段冲突 / 用户不存在都
+// 只记进返回的 map 且**不**中断整批（该用户的改动像 UpdateUser 的 mutate 失败分支
+// 一样被丢弃，不落盘）。只有 saveLocked 失败才整批回滚到变更前快照并以第二个返回值
+// 抛出——与 mutateAndSaveLocked 的「要么一起前进、要么一起回到上一个一致点」保持一致。
+// 重复 uid 只处理一次；没有任何用户真正改动时跳过 save。身份索引随每个成功用户增量
+// 维护，因此同一批内后来的用户能正确看到前面用户占用/释放的用户名/邮箱/TG/Emby 标识。
+func (s *Store) UpdateUsers(uids []int64, fn func(*User) error) (map[int64]error, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	results := make(map[int64]error, len(uids))
+	if len(uids) == 0 {
+		return results, nil
+	}
+	if err := s.refreshLocked(); err != nil {
+		return nil, err
+	}
+	prev, err := s.snapshotStateLocked()
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[int64]struct{}, len(uids))
+	changed := false
+	for _, uid := range uids {
+		if _, dup := seen[uid]; dup {
+			continue
+		}
+		seen[uid] = struct{}{}
+		u, ok := s.state.Users[uid]
+		if !ok {
+			results[uid] = ErrNotFound
+			continue
+		}
+		old := u
+		if ferr := fn(&u); ferr != nil {
+			results[uid] = ferr
+			continue
+		}
+		if cerr := s.userIdentityConflictLocked(old, u, uid); cerr != nil {
+			results[uid] = ErrConflict
+			continue
+		}
+		s.state.Users[uid] = u
+		s.maintainUserIndexes(old, u, uid)
+		results[uid] = nil
+		changed = true
+	}
+	if !changed {
+		return results, nil
+	}
+	if err := s.saveLocked(); err != nil {
+		s.restoreStateLocked(prev)
+		return nil, err
+	}
+	return results, nil
+}
+
 func (s *Store) ClearUserEmails() (total int, cleared int, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

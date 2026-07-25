@@ -85,16 +85,29 @@ func (a *App) handleBatchRenewUsers(w http.ResponseWriter, r *http.Request, _ Pa
 		failWithCode(w, http.StatusBadRequest, ErrBatchDaysInvalid, "days 不能超过 36500")
 		return
 	}
+	uids = uniqueInt64s(uids)
 	result := batchResult(len(uids))
-	for _, uid := range uniqueInt64s(uids) {
-		_, err := a.store().UpdateUser(uid, func(u *store.User) error {
-			// 与 self / admin renew 对齐：批量续期同样把被 check_expired 自禁
-			// 的账号一并解禁，避免 admin 在批量页看到"成功 200"但用户登录依旧
-			// 失败的灰色状态。
-			renewExpiryAndReactivate(u, addDaysToExpiry(u.ExpiredAt, days, time.Now()))
-			return nil
-		})
-		addBatchOutcome(result, uid, err)
+	// 批量续期是纯本地写、无远端副作用，收敛成一次 store.UpdateUsers（单次
+	// refresh+snapshot+save）取代逐用户 UpdateUser 的 N 次整库落盘：N 至多 200，
+	// JSON 后端上原本会持 s.mu 做上百次多 MB marshal+fsync 把并发读写全卡住。
+	now := time.Now()
+	outcomes, batchErr := a.store().UpdateUsers(uids, func(u *store.User) error {
+		// 与 self / admin renew 对齐：批量续期同样把被 check_expired 自禁
+		// 的账号一并解禁，避免 admin 在批量页看到"成功 200"但用户登录依旧
+		// 失败的灰色状态。
+		renewExpiryAndReactivate(u, addDaysToExpiry(u.ExpiredAt, days, now))
+		return nil
+	})
+	if batchErr != nil {
+		// 仅 saveLocked 失败会走到这里：整批已回滚，逐 UID 记同一落盘错误，
+		// 保持「批量响应里每个目标都有 outcome」的前端契约。
+		for _, uid := range uids {
+			addBatchOutcome(result, uid, batchErr)
+		}
+	} else {
+		for _, uid := range uids {
+			addBatchOutcome(result, uid, outcomes[uid])
+		}
 	}
 	result["days"] = days
 	a.audit(r, "batch_renew_users", "admin", 0, map[string]any{
