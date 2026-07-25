@@ -20,8 +20,7 @@ import (
 const bangumiWebhookReplayWindowSeconds = 300
 
 func (a *App) handleBangumiWebhook(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.cfg().BangumiEnabled {
-		failWithCode(w, http.StatusBadRequest, ErrBangumiSyncDisabled, "Bangumi 同步未启用")
+	if a.requireBangumiSyncEnabled(w) {
 		return
 	}
 	// 优先 header，避免 secret 被上游代理 / CDN access log 记录到 query string。

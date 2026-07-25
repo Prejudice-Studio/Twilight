@@ -40,8 +40,7 @@ func (a *App) handleBangumiSyncStatus(w http.ResponseWriter, r *http.Request, _ 
 }
 
 func (a *App) handleBangumiSyncTrigger(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.cfg().BangumiEnabled {
-		failWithCode(w, http.StatusBadRequest, ErrBangumiSyncDisabled, "Bangumi 同步未启用")
+	if a.requireBangumiSyncEnabled(w) {
 		return
 	}
 	p := current(r)
@@ -62,8 +61,7 @@ func (a *App) handleBangumiSyncTrigger(w http.ResponseWriter, r *http.Request, _
 }
 
 func (a *App) handleBangumiSyncHistory(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.cfg().BangumiEnabled {
-		failWithCode(w, http.StatusBadRequest, ErrBangumiSyncDisabled, "Bangumi 同步未启用")
+	if a.requireBangumiSyncEnabled(w) {
 		return
 	}
 	p := current(r)
@@ -79,8 +77,7 @@ func (a *App) handleBangumiSyncHistory(w http.ResponseWriter, r *http.Request, _
 }
 
 func (a *App) handleBangumiClearHistory(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.cfg().BangumiEnabled {
-		failWithCode(w, http.StatusBadRequest, ErrBangumiSyncDisabled, "Bangumi 同步未启用")
+	if a.requireBangumiSyncEnabled(w) {
 		return
 	}
 	p := current(r)
@@ -194,8 +191,7 @@ func (a *App) handleAdminBangumiRecords(w http.ResponseWriter, r *http.Request, 
 }
 
 func (a *App) handleAdminBangumiSyncUser(w http.ResponseWriter, r *http.Request, ps Params) {
-	if !a.cfg().BangumiEnabled {
-		failWithCode(w, http.StatusBadRequest, ErrBangumiSyncDisabled, "Bangumi 同步未启用")
+	if a.requireBangumiSyncEnabled(w) {
 		return
 	}
 	uid, err := strconv.ParseInt(ps["uid"], 10, 64)
@@ -323,8 +319,7 @@ func (a *App) handleBangumiMe(w http.ResponseWriter, r *http.Request, _ Params) 
 }
 
 func (a *App) handleBangumiCollections(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.cfg().BangumiManageEnabled {
-		failWithCode(w, http.StatusBadRequest, ErrBangumiManageDisabled, "Bangumi 管理功能未启用")
+	if a.requireBangumiManageEnabled(w) {
 		return
 	}
 	p := current(r)
@@ -377,8 +372,7 @@ func (a *App) handleBangumiCollections(w http.ResponseWriter, r *http.Request, _
 }
 
 func (a *App) handleUpdateBangumiCollection(w http.ResponseWriter, r *http.Request, ps Params) {
-	if !a.cfg().BangumiManageEnabled {
-		failWithCode(w, http.StatusBadRequest, ErrBangumiManageDisabled, "Bangumi 管理功能未启用")
+	if a.requireBangumiManageEnabled(w) {
 		return
 	}
 	subjectID := ps["subject_id"]

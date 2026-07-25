@@ -3372,22 +3372,9 @@ func (a *App) handleUserByTelegram(w http.ResponseWriter, r *http.Request, param
 	failWithCode(w, http.StatusNotFound, ErrUserNotFound, userNotFoundMessage)
 }
 
-func (a *App) handleEmbySync(w http.ResponseWriter, r *http.Request, _ Params) {
-	a.handleEmbySyncV2(w, r, nil)
-}
-func (a *App) handleAdminEmbyUsers(w http.ResponseWriter, r *http.Request, _ Params) {
-	a.handleAdminEmbyUsersV2(w, r, nil)
-}
-func (a *App) handleEmbyTest(w http.ResponseWriter, r *http.Request, _ Params) {
-	a.handleEmbyConnectivityTest(w, r, nil)
-}
 func (a *App) handleCountZero(w http.ResponseWriter, r *http.Request, _ Params) {
 	result := a.cleanupUnusedUploadAssets(24 * time.Hour)
 	ok(w, "OK", map[string]any{"count": result["deleted"], "cleaned": result["deleted"], "scanned": result["scanned"], "failed": result["failed"]})
-}
-
-func (a *App) handleCreateStandaloneEmby(w http.ResponseWriter, r *http.Request, _ Params) {
-	a.handleCreateStandaloneEmbyV2(w, r, nil)
 }
 
 func (a *App) handleAdminBindEmby(w http.ResponseWriter, r *http.Request, params Params) {

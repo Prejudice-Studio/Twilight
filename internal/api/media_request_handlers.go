@@ -89,8 +89,7 @@ func (a *App) handleInventorySearch(w http.ResponseWriter, r *http.Request, _ Pa
 }
 
 func (a *App) handleCreateMediaRequest(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.cfg().MediaRequestEnabled {
-		failWithCode(w, http.StatusForbidden, ErrMediaRequestDisabled, "media requests are disabled")
+	if a.requireMediaRequestEnabled(w) {
 		return
 	}
 	p := current(r)
@@ -175,8 +174,7 @@ func (a *App) handleCreateMediaRequest(w http.ResponseWriter, r *http.Request, _
 }
 
 func (a *App) handleMyMediaRequests(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.cfg().MediaRequestEnabled {
-		failWithCode(w, http.StatusForbidden, ErrMediaRequestDisabled, "media requests are disabled")
+	if a.requireMediaRequestEnabled(w) {
 		return
 	}
 	requests := a.store().ListMediaRequests(current(r).User.UID, false)

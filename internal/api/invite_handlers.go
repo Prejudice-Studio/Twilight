@@ -71,8 +71,7 @@ func (a *App) handleCreateInviteCode(w http.ResponseWriter, r *http.Request, _ P
 		a.handleCreateInviteRenewCode(w, r, user, payload)
 		return
 	}
-	if !a.cfg().InviteEnabled {
-		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
+	if a.requireInviteEnabled(w) {
 		return
 	}
 	// 按 UID 限速生成邀请码，防止恶意账号一次性吃满 invite_limit 配额，让
@@ -227,8 +226,7 @@ func (a *App) handleCreateInviteRenewCode(w http.ResponseWriter, r *http.Request
 }
 
 func (a *App) handleInviteCodes(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.cfg().InviteEnabled {
-		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
+	if a.requireInviteEnabled(w) {
 		return
 	}
 	user, okUser := a.refreshCurrentUserForRequest(w, r)
@@ -244,8 +242,7 @@ func (a *App) handleInviteCodes(w http.ResponseWriter, r *http.Request, _ Params
 }
 
 func (a *App) handleDeleteInviteCode(w http.ResponseWriter, r *http.Request, params Params) {
-	if !a.cfg().InviteEnabled {
-		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
+	if a.requireInviteEnabled(w) {
 		return
 	}
 	user, okUser := a.refreshCurrentUserForRequest(w, r)
@@ -387,8 +384,7 @@ func (a *App) canGenerateInviteRenewCodeForChild(parent, child store.User, maxDa
 }
 
 func (a *App) handleInviteCheck(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.cfg().InviteEnabled {
-		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
+	if a.requireInviteEnabled(w) {
 		return
 	}
 	// /invite/check 是 AuthPublic：未鉴权也能查询。如果不限速，攻击者可以
@@ -429,8 +425,7 @@ func (a *App) handleInviteCheck(w http.ResponseWriter, r *http.Request, _ Params
 }
 
 func (a *App) handleInviteUse(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.cfg().InviteEnabled {
-		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
+	if a.requireInviteEnabled(w) {
 		return
 	}
 	user, okUser := a.refreshCurrentUserForRequest(w, r)

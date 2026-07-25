@@ -80,8 +80,7 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 	}
 
 	if source == "invite" {
-		if !a.cfg().InviteEnabled {
-			failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
+		if a.requireInviteEnabled(w) {
 			return
 		}
 		invite, okInvite := a.store().InviteCode(code)

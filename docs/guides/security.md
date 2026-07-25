@@ -31,6 +31,12 @@
 
 配置面被入侵或管理员误填时，这一层避免可信的 `X-Emby-Token` / Bot Token / TMDB Key 被发往攻击者控制的内部地址。
 
+> **已知边界（M1，刻意保留、仅文档标注）**：`validateOutboundBaseURL` / `refuseUnsafeOutboundIP` 的过滤有意收窄，属于自托管取舍而非疏漏，运维需知悉其边界：
+> - **只拦字面 IP**：`refuseUnsafeOutboundIP` 仅在 `net.ParseIP(host) != nil`（host 本身就是 IP 字面量）时生效。**不做 DNS 解析**——若 base URL 填的是主机名，即使该主机名解析到内网 / loopback / 云元数据地址，也不会被拦截（含 DNS rebinding 场景）。
+> - **不拦 RFC1918 / CGNAT / ULA**：即使是字面 IP，`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`、CGNAT `100.64.0.0/10`、IPv6 ULA `fc00::/7` 均**不在**否决列表内；只拦 link-local（`169.254.0.0/16`、`fe80::/10`，AWS/GCP 元数据 `169.254.169.254` 借此被拦）、unspecified（`0.0.0.0`/`::`）与阿里云元数据 `100.100.100.200`。loopback（`127.0.0.1`/`::1`）显式放行。
+> - **触发面是管理员配置面，非用户输入**：这些 base URL（`Emby.emby_url` / `Bangumi.api_url` / `Telegram.api_url` / `Global.tmdb_api_url`）只有管理员能改，普通用户无法注入。实际风险是「配置面被入侵 / 管理员误填 / 从旧库迁入被污染值」时，可信凭据被发往内网服务，属于纵深防御的最后一环而非首要边界。
+> - 之所以不进一步收紧：自托管、docker-compose 同栈、内网反代普遍要求把 Emby / Bangumi 指向 RFC1918 或主机名地址，一刀切拦截会打死绝大多数现网部署。**如果你的部署不需要出站到内网**，可在反向代理 / 出口防火墙层面对后端做 egress 限制，作为这层之外的补充。
+
 ## 3. CORS 与会话安全
 
 ### 3.1 CORS
@@ -50,6 +56,13 @@ allow_credential = true
 
 - `allow_credential = true` 同时放行 `localhost` / `127.0.0.1` / `[::1]` 时，启动期会打 `Warn` 提示。请只在开发、可信内网或你明确接受的自托管场景使用。
 - 允许的请求头列表为 `Content-Type, Authorization, X-API-Key, X-Twilight-Client, X-Twilight-Intent`。`X-Twilight-Client` 不参与鉴权；`X-Twilight-Intent` 仅用于少数有副作用 GET 的显式意图校验。
+
+> **已知边界（M2，刻意保留、仅文档标注）**：`cors_origins` 留空 / 填 `*` 时的「反射任意 Origin」是自托管便利取舍，但与默认 `allow_credential = true` 组合时需明确其风险：
+> - **触发条件**：`cors_origins` 为空数组，或首项为 `*`（`corsOriginRelaxed()` 返回 `true`）。此时 `applyCORS` 会对**任意合法 `http`/`https` Origin** 回填 `Access-Control-Allow-Origin: <该 Origin>`（反射，而非 `*`）。
+> - **叠加凭据的后果**：默认 `allow_credential = true`，反射 Origin 时会同时下发 `Access-Control-Allow-Credentials: true`。浏览器规范只禁止 `*` + 凭据，但**反射出的是具体 Origin**，因此该禁令被绕过——任意第三方站点可在受害者浏览器里对本服务发起**带 Cookie 的跨站请求并读取已登录用户的鉴权响应**（跨站信息泄露；写请求因无 CSRF 令牌校验，见 §3.3，同样可被跨站触发）。
+> - **告警可见性弱**：`cors_origins` 留空时启动期仅打 **`Info`**（不是 `Warn`/`Error`），运维极易忽略。`*` + `allow_credential` 会打 `Error`，但空列表 + 凭据这一等价危险组合不会升级日志级别。
+> - **默认配置的定位**：出厂默认 `cors_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]` 且 `allow_credential = true`——**默认是白名单模式**（只放行本地前端），并不触发反射。风险出现在管理员**主动清空 `cors_origins` 或改成 `*`**、却保留 `allow_credential = true` 时。
+> - **规避方式（无需改代码）**：生产环境**始终显式填写可信前端 Origin 列表**（见上方 `[API]` 示例），不要留空也不要用 `*`；若确实需要多来源且不需要跨站携带 Cookie，则把 `allow_credential` 显式设为 `false`，让反射退化为无凭据的安全模式。
 
 ### 3.2 会话与 Cookie
 

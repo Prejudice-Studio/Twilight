@@ -354,6 +354,53 @@ func (a *App) requireTelegramConfigured(w http.ResponseWriter) bool {
 	return false
 }
 
+// requireInviteEnabled / requireSigninEnabled / requireMediaRequestEnabled /
+// requireBangumiSyncEnabled / requireBangumiManageEnabled 与上面两个同构，集中
+// 维护"功能未开启"的纯 gate 拒绝分支。每个都精确保留原 call site 的状态码与
+// message，避免前端错误码/文案回归。返回 true 表示已写出响应、调用方应直接 return。
+//
+// 复合条件（如 handlers.go 里 bgmModeSet 守卫、bangumi_sync_handlers.go:265 的
+// "返回 ok 而非 fail"分支、canInvite 的返回值语义）刻意不走这里，仍保留在原处。
+func (a *App) requireInviteEnabled(w http.ResponseWriter) bool {
+	if !a.cfg().InviteEnabled {
+		failWithCode(w, http.StatusForbidden, ErrInviteDisabled, "邀请功能未开启")
+		return true
+	}
+	return false
+}
+
+func (a *App) requireSigninEnabled(w http.ResponseWriter) bool {
+	if !a.cfg().SigninEnabled {
+		failWithCode(w, http.StatusForbidden, ErrSigninDisabled, "签到功能未开启")
+		return true
+	}
+	return false
+}
+
+func (a *App) requireMediaRequestEnabled(w http.ResponseWriter) bool {
+	if !a.cfg().MediaRequestEnabled {
+		failWithCode(w, http.StatusForbidden, ErrMediaRequestDisabled, "media requests are disabled")
+		return true
+	}
+	return false
+}
+
+func (a *App) requireBangumiSyncEnabled(w http.ResponseWriter) bool {
+	if !a.cfg().BangumiEnabled {
+		failWithCode(w, http.StatusBadRequest, ErrBangumiSyncDisabled, "Bangumi 同步未启用")
+		return true
+	}
+	return false
+}
+
+func (a *App) requireBangumiManageEnabled(w http.ResponseWriter) bool {
+	if !a.cfg().BangumiManageEnabled {
+		failWithCode(w, http.StatusBadRequest, ErrBangumiManageDisabled, "Bangumi 管理功能未启用")
+		return true
+	}
+	return false
+}
+
 func paginate[T any](items []T, page, perPage int) []T {
 	if perPage <= 0 {
 		return items

@@ -36,8 +36,7 @@ func (a *App) handleSigninMe(w http.ResponseWriter, r *http.Request, _ Params) {
 }
 
 func (a *App) handleSignin(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.cfg().SigninEnabled {
-		failWithCode(w, http.StatusForbidden, ErrSigninDisabled, "签到功能未开启")
+	if a.requireSigninEnabled(w) {
 		return
 	}
 	dailyPoints := signinDailyPoints(*a.cfg())
@@ -95,11 +94,10 @@ func (a *App) handleSigninHistory(w http.ResponseWriter, r *http.Request, _ Para
 }
 
 func (a *App) handleSigninRenew(w http.ResponseWriter, r *http.Request, _ Params) {
-	cfg := *a.cfg()
-	if !cfg.SigninEnabled {
-		failWithCode(w, http.StatusForbidden, ErrSigninDisabled, "签到功能未开启")
+	if a.requireSigninEnabled(w) {
 		return
 	}
+	cfg := *a.cfg()
 	if !signinRenewalEnabled(cfg) {
 		failWithCode(w, http.StatusForbidden, ErrSigninRenewalDisabled, signinRenewalDisabledMessage)
 		return
