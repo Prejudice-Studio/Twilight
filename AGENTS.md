@@ -338,6 +338,7 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 
 - The dashboard may show only the current Emby online viewer count from `/system/emby-viewers`.
 - Do not display who is watching, item names, covers, progress, or other now-playing details on the dashboard.
+- `/api/v1/emby/online` returns viewer count only (`current_online`); it must never emit a populated `users` array of who/what is playing. The count-only contract is enforced in `handleEmbyOnline`, not just in the UI.
 - `/api/v1/emby/now-playing` may exist for authenticated tooling, but the dashboard must not poll it or render its item/user details.
 
 ## Network Transport Rules

@@ -533,20 +533,6 @@ export interface EmbyInfo {
   episode_count?: number;
 }
 
-export interface EmbyOnlineInfo {
-  online: boolean;
-  current_online: number;
-  users: EmbyOnlineUser[];
-}
-
-export interface EmbyOnlineUser {
-  username: string;
-  item_name: string;
-  media_type: string;
-  client: string;
-  device_name: string;
-  last_activity: string;
-}
 
 export interface EmbySession {
   id: string;

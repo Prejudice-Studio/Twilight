@@ -42,7 +42,6 @@ import type {
   EmbyInfo,
   EmbyLibraryStats,
   EmbyNowPlaying,
-  EmbyOnlineInfo,
   EmbyRegisterStatus,
   EmbySession,
   LoginDevice,
@@ -1566,10 +1565,6 @@ class ApiClient {
 
   async getEmbyNowPlaying(signal?: AbortSignal) {
     return this.request<EmbyNowPlaying>("/emby/now-playing", { signal });
-  }
-
-  async getEmbyOnline(signal?: AbortSignal) {
-    return this.request<EmbyOnlineInfo>("/emby/online", { signal });
   }
 
   // 设备/IP 审查页的快速处置：按 Emby 用户 ID 单独启停 Emby（已关联本地用户时后端会
