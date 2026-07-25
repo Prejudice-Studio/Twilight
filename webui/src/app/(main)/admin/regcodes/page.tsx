@@ -721,6 +721,7 @@ export default function AdminRegcodesPage() {
     if (code.target_username) return `Web: ${userLabel(code.target_username, code.target_uid)}`;
     if (code.target_telegram_username) return `TG: @${code.target_telegram_username}${resolvedTargetSuffix(code)}`;
     if (code.target_telegram_id) return `TG ID: ${code.target_telegram_id}${resolvedTargetSuffix(code)}`;
+    if (code.target_uid) return `Web: ${userLabel(code.target_resolved_username, code.target_uid)}`;
     return "";
   };
 

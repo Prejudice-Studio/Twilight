@@ -510,6 +510,7 @@ func regcodeDTO(code store.RegCode) map[string]any {
 		"target_username":          code.TargetUsername,
 		"target_telegram_username": code.TargetTelegramUsername,
 		"target_telegram_id":       zeroNil(code.TargetTelegramID),
+		"target_uid":               zeroNil(code.TargetUID),
 		"created_time":             created,
 		"used_by":                  joinInt64(usedByUIDs),
 		"used_by_uids":             usedByUIDs,
