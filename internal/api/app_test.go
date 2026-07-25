@@ -1617,7 +1617,11 @@ func TestRuntimeLogsRequireAdminAndRedactSecrets(t *testing.T) {
 	}
 }
 
-func TestRuntimeLoggerAppliesLevelAndCapturesStdLog(t *testing.T) {
+// TestRuntimeLoggerCapturesAllLevelsAndGatesConsole 锁定「全量记录 / 控制台裁剪」双合同：
+// 持久化 sink 恒定按 Debug 全量捕获（低于 console 级别的日志也必须进运行日志面板），
+// 而 console(stdout) 仍按配置 log_level(此处 Warn)裁剪，避免默认配置刷屏；
+// 且敏感字段在 console 与 sink 两路都要被脱敏。
+func TestRuntimeLoggerCapturesAllLevelsAndGatesConsole(t *testing.T) {
 	runtimeLogs = newRuntimeLogSink(20)
 	t.Cleanup(func() {
 		runtimeLogs = newRuntimeLogSink(1000)
@@ -1628,24 +1632,40 @@ func TestRuntimeLoggerAppliesLevelAndCapturesStdLog(t *testing.T) {
 	InstallRuntimeLogger(&out, zapcore.WarnLevel)
 	ConfigureRuntimeLogging(zapcore.WarnLevel, 20)
 
-	zap.L().Info("runtime info should be filtered")
+	zap.L().Info("runtime info below console level")
 	zap.L().Warn("runtime warn should be captured", zap.String("token", "secret-value"))
 	log.Print("runtime standard log should be captured")
 	time.Sleep(10 * time.Millisecond)
 
 	entries, _ := runtimeLogs.snapshot(20, 0)
 	joined := ""
+	attrDump := ""
 	for _, entry := range entries {
 		joined += entry.Level + ":" + entry.Message + "\n"
+		for k, v := range entry.Attrs {
+			attrDump += k + "=" + v + "\n"
+		}
 	}
-	if strings.Contains(joined, "runtime info should be filtered") {
-		t.Fatalf("info log passed warn level filter: %s", joined)
+	// sink 全量捕获：Info(低于 console 级别)、Warn、std log 都必须进面板。
+	if !strings.Contains(joined, "runtime info below console level") {
+		t.Fatalf("info log missing from sink despite full capture: %s", joined)
 	}
 	if !strings.Contains(joined, "runtime warn should be captured") || !strings.Contains(joined, "runtime standard log should be captured") {
-		t.Fatalf("expected slog and std log entries, got: %s", joined)
+		t.Fatalf("expected warn + std log entries in sink, got: %s", joined)
 	}
+	// console 按 Warn 裁剪：Info 不得写入 stdout，Warn 必须写入。
+	if strings.Contains(out.String(), "runtime info below console level") {
+		t.Fatalf("info log leaked to console despite warn console level: %s", out.String())
+	}
+	if !strings.Contains(out.String(), "runtime warn should be captured") {
+		t.Fatalf("warn log missing from console output: %s", out.String())
+	}
+	// 敏感字段在两路都要被脱敏。
 	if strings.Contains(out.String(), "secret-value") {
-		t.Fatalf("sensitive attribute leaked to runtime log output: %s", out.String())
+		t.Fatalf("sensitive attribute leaked to console output: %s", out.String())
+	}
+	if strings.Contains(attrDump, "secret-value") {
+		t.Fatalf("sensitive attribute leaked to sink attrs: %s", attrDump)
 	}
 }
 

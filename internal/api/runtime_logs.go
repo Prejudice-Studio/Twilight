@@ -34,7 +34,14 @@ type runtimeLogBuffer struct {
 var (
 	runtimeStartedAt = time.Now()
 	runtimeLogs      = newRuntimeLogSink(1000)
-	runtimeLogLevel  = zap.NewAtomicLevelAt(zapcore.InfoLevel)
+	// runtimeConsoleLevel 控制控制台（stdout）输出级别，跟随配置 log_level（默认 info），
+	// 避免默认配置下 Debug 噪声刷屏。
+	runtimeConsoleLevel = zap.NewAtomicLevelAt(zapcore.InfoLevel)
+	// runtimeSinkLevel 控制持久化 sink（运行日志面板 + store）的捕获级别，恒定为 Debug：
+	// 全局所有级别日志都要落进运行日志面板供事后排查，与 console 输出级别解耦。
+	// zap core 的 LevelEnabler 用它（最宽松），保证 Debug 条目能通过 Check 进入 Write；
+	// console 写出在 Write 内用 runtimeConsoleLevel 二次门控。
+	runtimeSinkLevel = zap.NewAtomicLevelAt(zapcore.DebugLevel)
 	// 在 token / authorization 通用关键字之外，
 	// 显式列出 Emby / MediaBrowser / Session 等高频敏感字段变体。
 	// 子串匹配本来已能兜住 emby_token 这类（包含 "token"），但显式枚举：
@@ -314,7 +321,9 @@ func InstallRuntimeLogger(w io.Writer, level zapcore.Level) {
 	if w == nil {
 		w = io.Discard
 	}
-	runtimeLogLevel.SetLevel(level)
+	runtimeConsoleLevel.SetLevel(level)
+	// std log 桥接级别取 Info 与 console 级别的较大值：std log 本身没有级别语义，
+	// 用 console 级别决定它以何种 zap 级别注入，仍会被 sink 全量捕获。
 	stdLogLevel := zapcore.InfoLevel
 	if level > stdLogLevel {
 		stdLogLevel = level
@@ -322,21 +331,26 @@ func InstallRuntimeLogger(w io.Writer, level zapcore.Level) {
 	encoderConfig := zap.NewProductionEncoderConfig()
 	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
-	core := zapcore.NewCore(zapcore.NewConsoleEncoder(encoderConfig), zapcore.AddSync(w), runtimeLogLevel)
+	// 底层 console core 的 LevelEnabler 用 runtimeSinkLevel（Debug，最宽松），
+	// 保证所有级别条目都能通过 runtimeLogCore.Check 进入 Write；
+	// 真正的 console 输出裁剪在 Write 内按 runtimeConsoleLevel 二次门控。
+	core := zapcore.NewCore(zapcore.NewConsoleEncoder(encoderConfig), zapcore.AddSync(w), runtimeSinkLevel)
 	logger := zap.New(&runtimeLogCore{Core: core}, zap.AddCaller(), zap.ErrorOutput(zapcore.AddSync(w)))
 	zap.ReplaceGlobals(logger)
 	zap.RedirectStdLogAt(logger, stdLogLevel)
 }
 
 func ConfigureRuntimeLogging(level zapcore.Level, limit int) {
-	runtimeLogLevel.SetLevel(level)
+	// 只调 console 输出级别；sink 恒定 Debug 全量捕获，不随 log_level 变化。
+	runtimeConsoleLevel.SetLevel(level)
 	if limit > 0 {
 		runtimeLogs.configure(nil, limit)
 	}
 }
 
 func ConfigureRuntimeLoggingStore(st *store.Store, level zapcore.Level, limit int) {
-	runtimeLogLevel.SetLevel(level)
+	// 只调 console 输出级别；sink 恒定 Debug 全量捕获，不随 log_level 变化。
+	runtimeConsoleLevel.SetLevel(level)
 	runtimeLogs.configure(st, limit)
 }
 
@@ -362,6 +376,11 @@ func (c *runtimeLogCore) Write(entry zapcore.Entry, fields []zapcore.Field) erro
 		Message: redactSensitiveText(entry.Message),
 		Attrs:   attrs,
 	})
+	// console 输出按 runtimeConsoleLevel 二次门控：sink 已全量捕获上面的 append，
+	// 但低于 console 级别的条目不再写 stdout，保持默认配置下终端不被 Debug 刷屏。
+	if !runtimeConsoleLevel.Enabled(entry.Level) {
+		return nil
+	}
 	sanitized := zapcore.Entry{
 		Level:      entry.Level,
 		Time:       entry.Time,
@@ -538,6 +557,8 @@ func (a *App) handleRuntimeStatus(w http.ResponseWriter, r *http.Request, _ Para
 			"go_memory_limit": runtimeMemoryLimitBytes(),
 		},
 	}
+	// sink 恒定 Debug 全量捕获，与 console log_level 解耦；明示给运维状态面板。
+	status["runtime_log_capture"] = strings.ToLower(runtimeSinkLevel.Level().String())
 	if host := safeHostname(); host != "" {
 		status["hostname"] = host
 	}
