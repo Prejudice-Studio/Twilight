@@ -1636,7 +1636,7 @@ export default function AdminConfigPage() {
           }}
         >
           <div className="min-w-0 pb-1">
-            <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:inline-flex sm:h-10 sm:w-auto sm:grid-cols-none">
+            <TabsList className="i18n-stable-tabs grid h-auto w-full grid-cols-2 gap-1 sm:inline-flex sm:h-10 sm:w-auto sm:grid-cols-none">
               <TabsTrigger value="visual" className="min-w-0 gap-1.5 px-2 sm:px-4">
                 <SlidersHorizontal className="h-4 w-4" />
                 {t("adminConfig.tabVisual")}

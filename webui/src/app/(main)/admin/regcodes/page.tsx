@@ -792,7 +792,7 @@ export default function AdminRegcodesPage() {
             </DialogHeader>
             
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <TabsList className="grid w-full grid-cols-3 mb-4">
+              <TabsList className="i18n-stable-tabs grid h-auto w-full grid-cols-3 mb-4">
                 <TabsTrigger value="1">{t("adminRegcodes.tabRegister")}</TabsTrigger>
                 <TabsTrigger value="2">{t("adminRegcodes.tabRenew")}</TabsTrigger>
                 <TabsTrigger value="3">{t("adminRegcodes.tabWhitelist")}</TabsTrigger>

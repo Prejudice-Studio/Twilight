@@ -969,7 +969,7 @@ export default function AdminSchedulerPage() {
               <p className="text-xs text-muted-foreground">{t("adminScheduler.jobListHint")}</p>
             </div>
             <Tabs value={jobView} onValueChange={(value) => setJobView(value as JobView)}>
-              <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:inline-flex sm:w-auto sm:grid-cols-none">
+              <TabsList className="i18n-stable-tabs grid h-auto w-full grid-cols-2 gap-1 sm:inline-flex sm:w-auto sm:grid-cols-none">
                 <TabsTrigger value="all" className="gap-1.5 px-3">
                   {t("adminScheduler.filterAll")}
                   <span className="rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">{jobs.length}</span>

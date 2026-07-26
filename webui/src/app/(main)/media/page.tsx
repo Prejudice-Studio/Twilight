@@ -518,7 +518,7 @@ export default function MediaPage() {
 
       {/* Navigation Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="mb-8 grid w-full grid-cols-2 rounded-2xl p-1.5 glass-frosted sm:max-w-[400px]">
+        <TabsList className="i18n-stable-tabs mb-8 grid h-auto w-full grid-cols-2 rounded-2xl p-1.5 glass-frosted sm:max-w-[400px]">
           <TabsTrigger value="search" className="gap-2 rounded-xl py-2 font-bold data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md">
             <Search className="h-4 w-4" />
             {t("media.searchTab")}

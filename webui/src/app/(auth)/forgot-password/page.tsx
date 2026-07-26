@@ -300,7 +300,7 @@ export default function ForgotPasswordPage() {
         </div>
       ) : showTabs ? (
         <Tabs defaultValue="email">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="i18n-stable-tabs grid h-auto w-full grid-cols-2">
             <TabsTrigger value="email">
               <Mail className="mr-1.5 h-4 w-4" />
               {t("email.forgot.emailTab")}
