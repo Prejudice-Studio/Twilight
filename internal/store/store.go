@@ -44,6 +44,16 @@ type Store struct {
 	// userUIDs 按 UID 升序保存现有用户 ID，让 ListUsers 避免每次读都排序 Users map。
 	userUIDs []int64
 
+	// apiKeyHashMap（hash → APIKey.ID）/ legacyAPIKeyHashMap（hash → UID）是 API Key
+	// 鉴权热路径的二级索引。FindAPIKeyByHash 原先要全表扫 APIKeys + 全表扫 Users（找
+	// 遗留 key），非法 key（攻击者拿垃圾串狂打）每次都吃满 O(键数+用户数) 且全程持读锁，
+	// 是可被放大的 DoS 面。索引化后命中/未命中都是 O(1)。安全不变量：命中后仍回 s.state
+	// 复核并对 hash 做常量时间比对——索引陈旧至多导致「假未命中」（功能性、下轮 refresh
+	// 自愈），绝不会「假命中」放行已删除/轮换的 key。随 rebuildUserIndexes 在每个 refresh
+	// /回滚点重建，并在 CreateAPIKey / DeleteAPIKey / UpdateUser(遗留 key) 处增量维护。
+	apiKeyHashMap       map[string]int64
+	legacyAPIKeyHashMap map[string]int64
+
 	// stateVersion 是 Postgres 乐观并发版本号，与 twilight_state.version 列对应。
 	// refreshLocked 读 state 时一并读回 version 存于此；saveLocked 走「version = 期望值」
 	// 守卫的 UPSERT 并把 version+1 RETURNING 回来刷新本字段。多个 Twilight 进程
@@ -52,7 +62,33 @@ type Store struct {
 	// 取代此前「refresh(SELECT) 与 save(盲写整份 jsonb) 之间被他进程插入提交后仍整份覆盖」
 	// 的丢更新——正是「用户建了工单、TG 也收到了，工单却随后凭空消失」的根因。
 	stateVersion int64
+
+	// refreshRaw 缓存 refreshLocked 刚从持久层读回的原始 jsonb 字节。它就是「变更前
+	// 状态」的权威序列化，snapshotStateLocked 直接复用它作回滚快照，省去每次写路径
+	// 额外一份多 MB 的全量 marshal（此前拍快照要 marshal 一次、saveStateLocked 又
+	// marshal 一次，写热路径持锁做两份全量序列化）。消费即清空，避免陈旧字节被误用。
+	refreshRaw []byte
+
+	// API Key 调用统计（RequestCount / LastUsed）是纯展示字段，不参与任何鉴权判定，
+	// 却处在每个 API Key 请求的认证热路径上。此前每请求都为自增计数走一遍 mutateAndSaveLocked
+	// （全表 SELECT+unmarshal+重建索引 + 双份全量 marshal + jsonb UPSERT，全程持写锁），
+	// 是高频调用下的主要 CPU/IO 开销。改为：热路径只在 apiKeyUsageMu 下累加内存增量，
+	// 由后台协程按 apiKeyUsageFlushInterval 批量落盘一次；Close 时做最后一次 flush。
+	// 崩溃至多丢一个刷新周期的计数（可接受，非关键数据）。
+	apiKeyUsageMu   sync.Mutex
+	apiKeyUsage     map[int64]apiKeyUsageDelta
+	apiKeyFlushStop chan struct{}
+	apiKeyFlushDone chan struct{}
+	apiKeyFlushOnce sync.Once
 }
+
+// apiKeyUsageDelta 是单个 API Key 在一个刷新周期内累积的调用增量。
+type apiKeyUsageDelta struct {
+	count    int64
+	lastUsed int64
+}
+
+const apiKeyUsageFlushInterval = 30 * time.Second
 
 const (
 	BackendJSON     = "json"
@@ -619,6 +655,8 @@ func (s *Store) Close() error {
 	if s == nil || s.db == nil {
 		return nil
 	}
+	// 先停后台 flush 协程并落盘最后一批 API Key 调用统计，再关闭连接。
+	s.stopAPIKeyUsageFlusher()
 	return s.db.Close()
 }
 
@@ -879,7 +917,19 @@ type stateSnapshot struct {
 
 // snapshotStateLocked 把当前 s.state 序列化成快照字节，用于失败回滚。
 // 调用方必须已持有 s.mu 写锁。
+// snapshotStateLocked 取「变更前状态」的序列化快照用于失败回滚。调用方必须已持有
+// s.mu 写锁，且在同一临界区内紧接 refreshLocked 之后调用（mutateAndSaveLocked 保证）。
+//
+// 优先复用 refreshLocked 刚缓存的权威字节 refreshRaw：它就是当前 s.state 反序列化的
+// 来源，restoreStateLocked 走 unmarshal+ensure+rebuild 从它还原，结果与 refresh 产出
+// 的 s.state 逻辑等价，故可省去一次多 MB 的全量 marshal。消费即清空，防止后续误用陈旧
+// 字节；无缓存（冷启动无持久行）时回退到即时 marshal 保证正确性。
 func (s *Store) snapshotStateLocked() (stateSnapshot, error) {
+	if len(s.refreshRaw) > 0 {
+		data := s.refreshRaw
+		s.refreshRaw = nil
+		return stateSnapshot{data: data}, nil
+	}
 	s.state.ensure()
 	data, err := json.Marshal(&s.state)
 	if err != nil {
@@ -1040,6 +1090,8 @@ func (s *Store) refreshLocked() error {
 		s.state = emptyState()
 		s.rebuildUserIndexes()
 		s.stateVersion = 0
+		// 无持久行：无权威字节可复用，清空缓存让 snapshotStateLocked 回退到即时 marshal。
+		s.refreshRaw = nil
 		return nil
 	}
 	if err != nil {
@@ -1055,6 +1107,9 @@ func (s *Store) refreshLocked() error {
 	state.ensure()
 	s.state = state
 	s.rebuildUserIndexes()
+	// 缓存刚读回的权威字节，供紧随其后的 snapshotStateLocked 复用作回滚快照。
+	// database/sql 的 Scan 会为每个 []byte 目标分配独立副本，这些字节归本 Store 所有。
+	s.refreshRaw = data
 	return nil
 }
 
@@ -1557,7 +1612,8 @@ func (s *Store) CreateUserWithRegCode(u User, regCode string, telegramID int64) 
 			return ErrConflict
 		}
 		now := time.Now().Unix()
-		reg, err := s.consumableRegCodeLocked(regCode, now)
+		// 创建路径：账号尚未分配 UID，传 (0,0) 跳过 per-identity 守卫（每次都是新身份）。
+		reg, err := s.consumableRegCodeLocked(regCode, 0, 0, now)
 		if err != nil {
 			return err
 		}
@@ -1625,7 +1681,8 @@ func (s *Store) CreateUserForRegistration(u User, regCode, telegramBindCode stri
 		}
 
 		if regCode != "" {
-			reg, err := s.consumableRegCodeLocked(regCode, now)
+			// 创建路径：账号尚未分配 UID，传 (0,0) 跳过 per-identity 守卫（每次都是新身份）。
+			reg, err := s.consumableRegCodeLocked(regCode, 0, 0, now)
 			if err != nil {
 				return err
 			}
@@ -2326,6 +2383,11 @@ func (s *Store) DeleteUser(uid int64) error {
 		for id, key := range s.state.APIKeys {
 			if key.UID == uid {
 				delete(s.state.APIKeys, id)
+				// 同步摘除 hash 索引，保持其为现存 key 的准确超集（复核已能挡住陈旧项，
+				// 此处清理只为不留悬垂条目；save 失败回滚会整表重建）。
+				if s.apiKeyHashMap != nil && key.Hash != "" && s.apiKeyHashMap[key.Hash] == id {
+					delete(s.apiKeyHashMap, key.Hash)
+				}
 			}
 		}
 
@@ -2490,6 +2552,7 @@ func (s *Store) rebuildUserIndexes() {
 	verifiedEmailMap := make(map[string]int64, len(s.state.Users))
 	telegramIDMap := make(map[int64]int64, len(s.state.Users))
 	embyIDMap := make(map[string]int64, len(s.state.Users))
+	legacyAPIKeyHashMap := make(map[string]int64, len(s.state.Users))
 	userUIDs := make([]int64, 0, len(s.state.Users))
 	for _, u := range s.state.Users {
 		userUIDs = append(userUIDs, u.UID)
@@ -2508,14 +2571,27 @@ func (s *Store) rebuildUserIndexes() {
 		if u.EmbyID != "" {
 			embyIDMap[u.EmbyID] = u.UID
 		}
+		if u.LegacyAPIKeyStatus && u.LegacyAPIKeyHash != "" {
+			legacyAPIKeyHashMap[u.LegacyAPIKeyHash] = u.UID
+		}
 	}
 	sort.Slice(userUIDs, func(i, j int) bool { return userUIDs[i] < userUIDs[j] })
+	// apiKeyHashMap 索引所有 key（含 Enabled=false）——hash 恒定不随 Enabled 变，读路径
+	// 复核时再判 Enabled，故 Enable/Disable 切换无需维护索引。
+	apiKeyHashMap := make(map[string]int64, len(s.state.APIKeys))
+	for id, k := range s.state.APIKeys {
+		if k.Hash != "" {
+			apiKeyHashMap[k.Hash] = id
+		}
+	}
 	s.usernameMap = usernameMap
 	s.emailMap = emailMap
 	s.verifiedEmailMap = verifiedEmailMap
 	s.telegramIDMap = telegramIDMap
 	s.embyIDMap = embyIDMap
 	s.userUIDs = userUIDs
+	s.apiKeyHashMap = apiKeyHashMap
+	s.legacyAPIKeyHashMap = legacyAPIKeyHashMap
 }
 
 func (s *Store) maintainUserIndexes(oldUser, newUser User, uid int64) {
@@ -2527,6 +2603,26 @@ func (s *Store) maintainUserIndexes(oldUser, newUser User, uid int64) {
 	s.maintainEmailIndexes(oldUser, newUser, uid)
 	s.maintainTelegramIDIndex(oldUser.TelegramID, newUser.TelegramID, uid)
 	s.maintainEmbyIDIndex(oldUser.EmbyID, newUser.EmbyID, uid)
+	s.maintainLegacyAPIKeyIndex(oldUser, newUser, uid)
+}
+
+// maintainLegacyAPIKeyIndex 在用户变更后增量维护「遗留 API Key hash → UID」索引。
+// 遗留 key 的 hash 存在 User 上，仅经 UpdateUser 变动（设置 / 清除 / 关闭），因此在
+// 用户身份索引维护链里一并更新。调用方必须已持有 s.mu 写锁。
+func (s *Store) maintainLegacyAPIKeyIndex(oldUser, newUser User, uid int64) {
+	if s.legacyAPIKeyHashMap == nil {
+		s.rebuildUserIndexes()
+	}
+	// 旧 hash 若曾登记在本 uid 名下，先摘除（关闭 / 清除 / 轮换都要先撤旧值）。
+	if oldUser.LegacyAPIKeyStatus && oldUser.LegacyAPIKeyHash != "" {
+		if s.legacyAPIKeyHashMap[oldUser.LegacyAPIKeyHash] == uid {
+			delete(s.legacyAPIKeyHashMap, oldUser.LegacyAPIKeyHash)
+		}
+	}
+	// 新状态启用且有 hash 才登记；关闭态（Status=false）一律不进索引。
+	if newUser.LegacyAPIKeyStatus && newUser.LegacyAPIKeyHash != "" {
+		s.legacyAPIKeyHashMap[newUser.LegacyAPIKeyHash] = uid
+	}
 }
 
 func (s *Store) maintainUserOrderIndex(oldUID, newUID, uid int64) {
@@ -2654,6 +2750,13 @@ func (s *Store) CreateAPIKey(k APIKey) (APIKey, error) {
 		}
 		k.Enabled = true
 		s.state.APIKeys[k.ID] = k
+		// 增量登记到 hash 索引：CreateAPIKey 在 mutate 闭包内分配新 ID，refreshLocked
+		// 阶段的重建看不到它。save 失败时 restoreStateLocked 会整表重建，天然撤销此登记。
+		if s.apiKeyHashMap == nil {
+			s.rebuildUserIndexes()
+		} else if k.Hash != "" {
+			s.apiKeyHashMap[k.Hash] = k.ID
+		}
 		return nil
 	})
 	if err != nil {
@@ -2664,13 +2767,25 @@ func (s *Store) CreateAPIKey(k APIKey) (APIKey, error) {
 
 func (s *Store) ListAPIKeys(uid int64) []APIKey {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	keys := make([]APIKey, 0)
 	for _, k := range s.state.APIKeys {
 		if k.UID == uid {
 			keys = append(keys, k)
 		}
 	}
+	s.mu.RUnlock()
+	// 合并尚未落盘的内存增量，让展示的调用次数/最后使用时间保持最新
+	// （否则刚发生的调用要等到下个 flush 周期才可见）。
+	s.apiKeyUsageMu.Lock()
+	for i := range keys {
+		if d, ok := s.apiKeyUsage[keys[i].ID]; ok {
+			keys[i].RequestCount += d.count
+			if d.lastUsed > keys[i].LastUsed {
+				keys[i].LastUsed = d.lastUsed
+			}
+		}
+	}
+	s.apiKeyUsageMu.Unlock()
 	sort.Slice(keys, func(i, j int) bool { return keys[i].ID < keys[j].ID })
 	return keys
 }
@@ -2678,25 +2793,39 @@ func (s *Store) ListAPIKeys(uid int64) []APIKey {
 func (s *Store) FindAPIKeyByHash(hash string) (APIKey, User, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	// hash 用常量时间比对，避免攻击者通过响应时间差推断 hash 前缀
-	// 加速 API key 爆破。Enabled / Status 检查
-	// 仍是普通短路，因为它们不携带秘密值。
 	hashBytes := []byte(hash)
-	for _, k := range s.state.APIKeys {
-		if !k.Enabled {
-			continue
+	// 现代 key：hash → ID 索引命中后回 s.state 复核。命中项仍做常量时间比对以保留
+	// 「hash 比对不泄露时序」的原不变量；Enabled 判定不携带秘密值可普通短路。索引陈旧
+	// 只会让此处 ok=false（假未命中，下轮 refresh 自愈），绝不放行已删/轮换的 key。
+	if s.apiKeyHashMap != nil {
+		if id, ok := s.apiKeyHashMap[hash]; ok {
+			if k, exists := s.state.APIKeys[id]; exists && k.Enabled &&
+				subtle.ConstantTimeCompare([]byte(k.Hash), hashBytes) == 1 {
+				u, uok := s.state.Users[k.UID]
+				return k, u, uok
+			}
 		}
-		if subtle.ConstantTimeCompare([]byte(k.Hash), hashBytes) == 1 {
-			u, ok := s.state.Users[k.UID]
-			return k, u, ok
+	} else {
+		for _, k := range s.state.APIKeys { // 索引未建（异常兜底）：退回全表扫描保证正确性。
+			if k.Enabled && subtle.ConstantTimeCompare([]byte(k.Hash), hashBytes) == 1 {
+				u, ok := s.state.Users[k.UID]
+				return k, u, ok
+			}
 		}
 	}
-	for _, u := range s.state.Users {
-		if !u.LegacyAPIKeyStatus {
-			continue
+	// 遗留 key：hash → UID 索引命中后回 s.state 复核 Status + 常量时间比对。
+	if s.legacyAPIKeyHashMap != nil {
+		if uid, ok := s.legacyAPIKeyHashMap[hash]; ok {
+			if u, exists := s.state.Users[uid]; exists && u.LegacyAPIKeyStatus &&
+				subtle.ConstantTimeCompare([]byte(u.LegacyAPIKeyHash), hashBytes) == 1 {
+				return APIKey{UID: u.UID, Enabled: true, Permissions: u.LegacyPermissions, RateLimit: 100}, u, true
+			}
 		}
-		if subtle.ConstantTimeCompare([]byte(u.LegacyAPIKeyHash), hashBytes) == 1 {
-			return APIKey{UID: u.UID, Enabled: true, Permissions: u.LegacyPermissions, RateLimit: 100}, u, true
+	} else {
+		for _, u := range s.state.Users { // 索引未建兜底。
+			if u.LegacyAPIKeyStatus && subtle.ConstantTimeCompare([]byte(u.LegacyAPIKeyHash), hashBytes) == 1 {
+				return APIKey{UID: u.UID, Enabled: true, Permissions: u.LegacyPermissions, RateLimit: 100}, u, true
+			}
 		}
 	}
 	return APIKey{}, User{}, false
@@ -2724,18 +2853,118 @@ func (s *Store) UpdateAPIKey(uid, id int64, fn func(*APIKey) error) (APIKey, err
 	return updated, nil
 }
 
+// RecordAPIKeyUse 只在内存里累加调用增量，不触碰 s.state / 不落盘。真正的持久化由
+// flushAPIKeyUsageLocked 批量完成（后台协程周期性触发 + Close 时兜底）。因此它不再
+// 返回 ErrNotFound——id 是否存在留待 flush 时对照 s.state 校验（不存在的增量直接丢弃）。
 func (s *Store) RecordAPIKeyUse(id int64) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.mutateAndSaveLocked(func() error {
-		k, ok := s.state.APIKeys[id]
-		if !ok {
-			return ErrNotFound
-		}
-		k.RequestCount++
-		k.LastUsed = time.Now().Unix()
-		s.state.APIKeys[id] = k
+	now := time.Now().Unix()
+	s.apiKeyUsageMu.Lock()
+	if s.apiKeyUsage == nil {
+		s.apiKeyUsage = map[int64]apiKeyUsageDelta{}
+	}
+	d := s.apiKeyUsage[id]
+	d.count++
+	if now > d.lastUsed {
+		d.lastUsed = now
+	}
+	s.apiKeyUsage[id] = d
+	s.apiKeyUsageMu.Unlock()
+	return nil
+}
+
+// drainAPIKeyUsage 原子取走当前累积的增量并清空缓冲，供 flush 使用。
+func (s *Store) drainAPIKeyUsage() map[int64]apiKeyUsageDelta {
+	s.apiKeyUsageMu.Lock()
+	defer s.apiKeyUsageMu.Unlock()
+	if len(s.apiKeyUsage) == 0 {
 		return nil
+	}
+	pending := s.apiKeyUsage
+	s.apiKeyUsage = map[int64]apiKeyUsageDelta{}
+	return pending
+}
+
+// mergeBackAPIKeyUsage 在 flush 落盘失败时把取走的增量并回缓冲，避免丢计数；
+// 若期间又有新增量，二者相加、lastUsed 取较大值。
+func (s *Store) mergeBackAPIKeyUsage(pending map[int64]apiKeyUsageDelta) {
+	if len(pending) == 0 {
+		return
+	}
+	s.apiKeyUsageMu.Lock()
+	defer s.apiKeyUsageMu.Unlock()
+	if s.apiKeyUsage == nil {
+		s.apiKeyUsage = map[int64]apiKeyUsageDelta{}
+	}
+	for id, d := range pending {
+		cur := s.apiKeyUsage[id]
+		cur.count += d.count
+		if d.lastUsed > cur.lastUsed {
+			cur.lastUsed = d.lastUsed
+		}
+		s.apiKeyUsage[id] = cur
+	}
+}
+
+// flushAPIKeyUsage 把累积的调用增量一次性合并进 state 并落盘（单次 mutateAndSaveLocked）。
+// 无待落盘增量时直接返回、不产生任何写。落盘失败时把增量并回缓冲留待下次重试。
+func (s *Store) flushAPIKeyUsage() error {
+	pending := s.drainAPIKeyUsage()
+	if len(pending) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	err := s.mutateAndSaveLocked(func() error {
+		for id, d := range pending {
+			k, ok := s.state.APIKeys[id]
+			if !ok {
+				// 密钥已被删除：丢弃其增量。
+				continue
+			}
+			k.RequestCount += d.count
+			if d.lastUsed > k.LastUsed {
+				k.LastUsed = d.lastUsed
+			}
+			s.state.APIKeys[id] = k
+		}
+		return nil
+	})
+	s.mu.Unlock()
+	if err != nil {
+		s.mergeBackAPIKeyUsage(pending)
+		return err
+	}
+	return nil
+}
+
+// startAPIKeyUsageFlusher 启动后台协程，按固定周期批量落盘 API Key 调用统计。
+func (s *Store) startAPIKeyUsageFlusher() {
+	s.apiKeyFlushStop = make(chan struct{})
+	s.apiKeyFlushDone = make(chan struct{})
+	go func() {
+		defer close(s.apiKeyFlushDone)
+		ticker := time.NewTicker(apiKeyUsageFlushInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				_ = s.flushAPIKeyUsage()
+			case <-s.apiKeyFlushStop:
+				return
+			}
+		}
+	}()
+}
+
+// stopAPIKeyUsageFlusher 停止后台协程并做最后一次 flush，确保关闭前不丢计数。幂等。
+func (s *Store) stopAPIKeyUsageFlusher() {
+	s.apiKeyFlushOnce.Do(func() {
+		if s.apiKeyFlushStop != nil {
+			close(s.apiKeyFlushStop)
+		}
+		if s.apiKeyFlushDone != nil {
+			<-s.apiKeyFlushDone
+		}
+		_ = s.flushAPIKeyUsage()
 	})
 }
 
@@ -2748,6 +2977,11 @@ func (s *Store) DeleteAPIKey(uid, id int64) error {
 			return ErrNotFound
 		}
 		delete(s.state.APIKeys, id)
+		// 同步摘除 hash 索引；仅当该 hash 仍指向本 id 时删除，避免误删同 hash 的其它登记
+		// （理论上 hash 唯一，此判定纯属防御）。save 失败回滚亦会整表重建。
+		if s.apiKeyHashMap != nil && k.Hash != "" && s.apiKeyHashMap[k.Hash] == id {
+			delete(s.apiKeyHashMap, k.Hash)
+		}
 		return nil
 	})
 }
@@ -3791,7 +4025,7 @@ func (s *Store) ConsumeRegCode(code string, uid, telegramID int64) (RegCode, err
 	var consumed RegCode
 	err := s.mutateAndSaveLocked(func() error {
 		now := time.Now().Unix()
-		r, err := s.consumableRegCodeLocked(code, now)
+		r, err := s.consumableRegCodeLocked(code, uid, telegramID, now)
 		if err != nil {
 			return err
 		}
@@ -3815,12 +4049,12 @@ func (s *Store) ConsumeRegCodeAndUpdateUser(code string, uid, telegramID int64, 
 			return ErrNotFound
 		}
 		now := time.Now().Unix()
-		r, err := s.consumableRegCodeLocked(code, now)
-		if err != nil {
-			return err
-		}
 		if telegramID == 0 {
 			telegramID = u.TelegramID
+		}
+		r, err := s.consumableRegCodeLocked(code, uid, telegramID, now)
+		if err != nil {
+			return err
 		}
 		consumed = s.consumeRegCodeLocked(r, uid, telegramID)
 		old := u
@@ -3843,7 +4077,15 @@ func (s *Store) ConsumeRegCodeAndUpdateUser(code string, uid, telegramID int64, 
 	return updated, consumed, nil
 }
 
-func isRegCodeExpiredLocked(r RegCode, now int64) bool {
+// RegCodeExpired 判定注册码是否已过有效期。纯函数（不触碰状态），锁内锁外均可调用。
+// 有效期基准 elapsed = now - CreatedAt - PausedSeconds；若正处暂停态（PauseStart>0），
+// 则把 elapsed 冻结在暂停时刻，使暂停期间不消耗有效期。ValidityTime<=0 视为永久有效。
+//
+// 三处过期判定必须共用本函数：store 消费校验（consumableRegCodeLocked）、
+// API 展示态（regcodeStatus）、系统容量核算（remainingRegCodeUserSlots / remainingRegCodeEmbySlots）。
+// 容量核算旧实现漏算 PausedSeconds/PauseStart，会把「暂停但仍有效」的码误判为过期 →
+// 名额少算 → 允许越过 emby_user_limit 超发；统一到本函数即可消除该口径分叉。
+func RegCodeExpired(r RegCode, now int64) bool {
 	if r.ValidityTime <= 0 {
 		return false
 	}
@@ -3854,7 +4096,11 @@ func isRegCodeExpiredLocked(r RegCode, now int64) bool {
 	return elapsed >= r.ValidityTime*3600
 }
 
-func (s *Store) consumableRegCodeLocked(code string, now int64) (RegCode, error) {
+// consumableRegCodeLocked 校验某张注册码此刻是否可被 (uid, telegramID) 这个身份消费。
+// uid / telegramID 传 0 表示「新用户创建路径」——此时账号尚未分配 UID，每次都是新身份，
+// 天然不存在同一身份重复消费的双花问题（同 TG 二次建号由 telegramIDTakenLocked 拦），
+// 故跳过 per-identity 守卫、保持创建行为不变。既有用户消费路径必须传真实身份。
+func (s *Store) consumableRegCodeLocked(code string, uid, telegramID, now int64) (RegCode, error) {
 	r, ok := s.state.RegCodes[code]
 	if !ok || !r.Active {
 		return RegCode{}, ErrNotFound
@@ -3862,8 +4108,25 @@ func (s *Store) consumableRegCodeLocked(code string, now int64) (RegCode, error)
 	if r.UseCountLimit != -1 && r.UseCount >= r.UseCountLimit {
 		return RegCode{}, ErrConflict
 	}
-	if isRegCodeExpiredLocked(r, now) {
+	if RegCodeExpired(r, now) {
 		return RegCode{}, ErrExpired
+	}
+	// per-identity 单次守卫（语义：N 次 = N 个人各一次）。UseCount 是可服务人数上限，
+	// 不是单人可叠加次数；缺此守卫时用户可对同一张多次数/无限次码反复消费叠加天数、
+	// 抢占他人名额。与邀请码 parentOfLocked「不能重复加入邀请树」同源。
+	if uid != 0 {
+		for _, used := range r.UsedByUIDs {
+			if used == uid {
+				return RegCode{}, ErrRegCodeAlreadyUsedByUser
+			}
+		}
+	}
+	if telegramID != 0 {
+		for _, used := range r.UsedByTelegramIDs {
+			if used == telegramID {
+				return RegCode{}, ErrRegCodeAlreadyUsedByUser
+			}
+		}
 	}
 	return r, nil
 }
@@ -4529,13 +4792,20 @@ func (s *Store) ResetTelegramBotOffset() error {
 }
 
 var (
-	ErrNotFound                      = errors.New("not found")
-	ErrInvalid                       = errors.New("invalid")
-	ErrConflict                      = errors.New("conflict")
-	ErrExpired                       = errors.New("expired")
-	ErrLastAdmin                     = errors.New("last admin")
-	ErrGrantLocked                   = errors.New("emby grant locked")
+	ErrNotFound    = errors.New("not found")
+	ErrInvalid     = errors.New("invalid")
+	ErrConflict    = errors.New("conflict")
+	ErrExpired     = errors.New("expired")
+	ErrLastAdmin   = errors.New("last admin")
+	ErrGrantLocked = errors.New("emby grant locked")
+	// ErrRegCodeAlreadyUsedByUser 表示同一身份（UID 或 TelegramID）重复消费同一张
+	// 多次数/无限次注册码。语义为「N 次 = N 个人各一次」：UseCount 是可服务人数上限，
+	// 不是单人可叠加的次数。缺此守卫时，用户可对同一张 use_count_limit>1（或 -1）的码
+	// 反复调用消费接口，每次递增 UseCount 并把天数叠加到自己的到期时间、抢占本应留给
+	// 他人的名额。与邀请码 parentOfLocked「不能重复加入邀请树」同源。
+	ErrRegCodeAlreadyUsedByUser      = errors.New("reg code already used by this identity")
 	ErrTicketClosed                  = errors.New("ticket closed")
+	ErrTicketNotClosed               = errors.New("ticket not closed")
 	ErrTicketUserOpenLimit           = errors.New("ticket user open limit reached")
 	ErrTicketGlobalOpenLimit         = errors.New("ticket global open limit reached")
 	ErrMediaRequestUserActiveLimit   = errors.New("media request user active limit reached")

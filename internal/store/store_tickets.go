@@ -111,19 +111,6 @@ func applyTicketStatusTimestamps(t *Ticket, existing Ticket, now int64) {
 	}
 }
 
-func (s *Store) UpsertTicket(t Ticket) (Ticket, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	err := s.mutateAndSaveLocked(func() error {
-		t = s.upsertTicketLocked(t, time.Now().Unix())
-		return nil
-	})
-	if err != nil {
-		return Ticket{}, err
-	}
-	return t, nil
-}
-
 func (s *Store) CreateTicket(t Ticket, userOpenLimit, globalOpenLimit int) (Ticket, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -309,6 +296,47 @@ func (s *Store) UpdateTicket(ticketID int64, patch TicketUpdate) (Ticket, error)
 		if patch.Reply != nil {
 			applyTicketReplyLocked(&t, *patch.Reply, now)
 		}
+		t.UpdatedAt = now
+		s.state.Tickets[ticketID] = t
+		out = t
+		return nil
+	})
+	if err != nil {
+		return Ticket{}, err
+	}
+	return out, nil
+}
+
+// ReopenTicket 用户重开自己已关闭的工单：把「已关闭 → 待处理」的状态翻转与开单配额复核
+// 放在同一把锁内原子完成，堵住「关掉再重开」绕过 user/global open limit 的漏洞。
+// 单纯走 UpdateTicket 改状态不复核配额，用户可先关满上限外的旧单、逐个重开越过上限。
+// 传入 userOpenLimit/globalOpenLimit 语义与 CreateTicket 一致（<=0 表示不限）。
+// 复核时目标工单仍为 Closed 态，不计入 countOpenTicketsLocked，故与建单同为「新增一个开态」口径。
+func (s *Store) ReopenTicket(ticketID, uid int64, userOpenLimit, globalOpenLimit int) (Ticket, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out Ticket
+	err := s.mutateAndSaveLocked(func() error {
+		t, ok := s.state.Tickets[ticketID]
+		if !ok {
+			return ErrNotFound
+		}
+		if uid != 0 && t.UID != uid {
+			return ErrNotFound
+		}
+		if NormalizeTicketStatus(t.Status) != TicketStatusClosed {
+			return ErrTicketNotClosed
+		}
+		if userOpenLimit > 0 && s.countOpenTicketsLocked(t.UID) >= userOpenLimit {
+			return ErrTicketUserOpenLimit
+		}
+		if globalOpenLimit > 0 && s.countOpenTicketsLocked(0) >= globalOpenLimit {
+			return ErrTicketGlobalOpenLimit
+		}
+		now := time.Now().Unix()
+		existing := t
+		t.Status = TicketStatusOpen
+		applyTicketStatusTimestamps(&t, existing, now)
 		t.UpdatedAt = now
 		s.state.Tickets[ticketID] = t
 		out = t

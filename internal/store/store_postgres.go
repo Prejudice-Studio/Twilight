@@ -30,7 +30,12 @@ func OpenPostgres(ctx context.Context, dsn string) (*Store, error) {
 		// 冷启动首次落库：用 force 变体播种，绕过版本守卫。多个进程同时冷启动时
 		// 各自 seed 的都是同一份 emptyState，force 递增 version 也无害（内容一致），
 		// 避免其中一方因守卫 0 行冲突而启动失败。
-		return st, st.saveLockedForce()
+		if err := st.saveLockedForce(); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+		st.startAPIKeyUsageFlusher()
+		return st, nil
 	}
 	if err != nil {
 		_ = db.Close()
@@ -45,6 +50,7 @@ func OpenPostgres(ctx context.Context, dsn string) (*Store, error) {
 	st.stateVersion = version
 	st.state.ensure()
 	st.rebuildUserIndexes()
+	st.startAPIKeyUsageFlusher()
 	return st, nil
 }
 

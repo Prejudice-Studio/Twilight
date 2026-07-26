@@ -972,6 +972,61 @@ func TestCreateTicketEnforcesGlobalOpenLimit(t *testing.T) {
 	}
 }
 
+// TestReopenTicketRechecksOpenLimit 复现并锁死「关掉再重开」绕过开单上限的漏洞：
+// 用户上限=1 时，先建一单占满上限，再建第二单会被建单门挡下；把第一单关闭腾出名额、
+// 建出第二单后，若此时仍能重开第一单，用户就同时持有 2 个开态工单越过上限。
+// ReopenTicket 必须在同一把锁内复核 countOpenTicketsLocked，令重开在超限时返回
+// ErrTicketUserOpenLimit；名额确有空余时才放行。
+func TestReopenTicketRechecksOpenLimit(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	first, err := st.CreateTicket(Ticket{UID: 7, Username: "u", Title: "one", Content: "content", Type: TicketTypeDefault}, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 上限=1，已有一个开态单，第二次建单应被挡。
+	if _, err := st.CreateTicket(Ticket{UID: 7, Username: "u", Title: "two", Content: "content", Type: TicketTypeDefault}, 1, 0); !errors.Is(err, ErrTicketUserOpenLimit) {
+		t.Fatalf("expected user limit on second create, got %v", err)
+	}
+	// 关闭第一单腾出名额，再建第二单成功。
+	if _, err := st.UpdateTicket(first.ID, TicketUpdate{Status: stringPtr(TicketStatusClosed)}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := st.CreateTicket(Ticket{UID: 7, Username: "u", Title: "two", Content: "content", Type: TicketTypeDefault}, 1, 0)
+	if err != nil {
+		t.Fatalf("expected second create to succeed after close, got %v", err)
+	}
+	// 名额已被第二单占满：重开第一单必须被上限挡下（否则同时持有 2 个开态单）。
+	if _, err := st.ReopenTicket(first.ID, 7, 1, 0); !errors.Is(err, ErrTicketUserOpenLimit) {
+		t.Fatalf("expected reopen to be blocked by user limit, got %v", err)
+	}
+	// 关掉第二单腾出名额后，重开第一单应成功且回到开态。
+	if _, err := st.UpdateTicket(second.ID, TicketUpdate{Status: stringPtr(TicketStatusClosed)}); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := st.ReopenTicket(first.ID, 7, 1, 0)
+	if err != nil {
+		t.Fatalf("expected reopen to succeed after freeing slot, got %v", err)
+	}
+	if NormalizeTicketStatus(reopened.Status) != TicketStatusOpen {
+		t.Fatalf("expected reopened ticket to be open, got %q", reopened.Status)
+	}
+	// 非归属用户不能重开他人工单（uid 不匹配按 not found 处理）。
+	if _, err := st.UpdateTicket(first.ID, TicketUpdate{Status: stringPtr(TicketStatusClosed)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ReopenTicket(first.ID, 999, 1, 0); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected reopen by non-owner to be not-found, got %v", err)
+	}
+	// 未关闭的工单不可重开。
+	open, err := st.CreateTicket(Ticket{UID: 8, Username: "v", Title: "live", Content: "content", Type: TicketTypeDefault}, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ReopenTicket(open.ID, 8, 0, 0); !errors.Is(err, ErrTicketNotClosed) {
+		t.Fatalf("expected reopen of open ticket to fail with ErrTicketNotClosed, got %v", err)
+	}
+}
+
 func TestCountTicketsMatchesListFilters(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	first, err := st.CreateTicket(Ticket{UID: 1, Username: "a", Title: "one", Content: "content", Type: TicketTypeDefault, Priority: TicketPriorityMedium}, 0, 0)
@@ -1264,3 +1319,90 @@ func TestRepairLegacyTelegramBindResidueClearsPersistedBindCodes(t *testing.T) {
 	}
 }
 
+// TestFindAPIKeyByHashIndexLifecycle 锁定 API Key hash 索引的正确性与安全不变量：
+// 创建 / 删除 / 禁用 / 遗留 key / 级联删用户各路径下，索引与鉴权结果都必须与
+// 权威 state 一致；且陈旧索引只能造成「假未命中」，绝不能放行已删 / 已禁用的 key。
+func TestFindAPIKeyByHashIndexLifecycle(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	u, err := st.CreateUser(User{Username: "keyowner", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := st.CreateAPIKey(APIKey{UID: u.UID, Name: "k1", Hash: "HASH-modern-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 1) 现代 key 命中：返回的 key/用户必须对得上。
+	if k, gotU, ok := st.FindAPIKeyByHash("HASH-modern-1"); !ok || k.ID != created.ID || gotU.UID != u.UID {
+		t.Fatalf("modern key lookup: ok=%v k.ID=%d gotUID=%d", ok, k.ID, gotU.UID)
+	}
+	// 2) 禁用后必须查不到（hash 仍在索引，但复核 Enabled=false 挡下）。
+	if _, err := st.UpdateAPIKey(u.UID, created.ID, func(k *APIKey) error { k.Enabled = false; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := st.FindAPIKeyByHash("HASH-modern-1"); ok {
+		t.Fatal("disabled key must not authenticate")
+	}
+	// 3) 重新启用后恢复命中。
+	if _, err := st.UpdateAPIKey(u.UID, created.ID, func(k *APIKey) error { k.Enabled = true; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := st.FindAPIKeyByHash("HASH-modern-1"); !ok {
+		t.Fatal("re-enabled key must authenticate")
+	}
+	// 4) 删除后查不到，且索引条目被摘除。
+	if err := st.DeleteAPIKey(u.UID, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := st.FindAPIKeyByHash("HASH-modern-1"); ok {
+		t.Fatal("deleted key must not authenticate")
+	}
+	st.mu.RLock()
+	_, stillIndexed := st.apiKeyHashMap["HASH-modern-1"]
+	st.mu.RUnlock()
+	if stillIndexed {
+		t.Fatal("deleted key hash must be removed from index")
+	}
+}
+
+// TestFindAPIKeyByHashLegacyAndStaleSafety 覆盖遗留 key 经 UpdateUser 的索引维护，
+// 并直接注入「悬垂索引条目」验证复核层：陈旧索引绝不能放行已失效的 key。
+func TestFindAPIKeyByHashLegacyAndStaleSafety(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	u, err := st.CreateUser(User{Username: "legacyowner", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 启用遗留 key：UpdateUser → maintainLegacyAPIKeyIndex 登记 hash。
+	if _, err := st.UpdateUser(u.UID, func(x *User) error {
+		x.LegacyAPIKeyStatus = true
+		x.LegacyAPIKeyHash = "HASH-legacy-1"
+		x.LegacyPermissions = []string{"read"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, gotU, ok := st.FindAPIKeyByHash("HASH-legacy-1"); !ok || gotU.UID != u.UID {
+		t.Fatalf("legacy key lookup: ok=%v gotUID=%d", ok, gotU.UID)
+	}
+	// 关闭遗留 key：必须立刻查不到，且索引摘除。
+	if _, err := st.UpdateUser(u.UID, func(x *User) error { x.LegacyAPIKeyStatus = false; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := st.FindAPIKeyByHash("HASH-legacy-1"); ok {
+		t.Fatal("disabled legacy key must not authenticate")
+	}
+
+	// 安全不变量：手工往索引塞一个指向「已删除 key / 未启用遗留 key」的悬垂条目，
+	// FindAPIKeyByHash 必须靠回 state 复核挡下，返回 ok=false（假未命中而非假命中）。
+	st.mu.Lock()
+	st.apiKeyHashMap["HASH-ghost"] = 999999         // 无对应 APIKey
+	st.legacyAPIKeyHashMap["HASH-legacy-1"] = u.UID // 用户 Status 已 false
+	st.mu.Unlock()
+	if _, _, ok := st.FindAPIKeyByHash("HASH-ghost"); ok {
+		t.Fatal("stale modern index entry must not authenticate a non-existent key")
+	}
+	if _, _, ok := st.FindAPIKeyByHash("HASH-legacy-1"); ok {
+		t.Fatal("stale legacy index entry must not authenticate a disabled legacy key")
+	}
+}
