@@ -1,7 +1,6 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { flushSync } from "react-dom";
 import type { ComponentType } from "react";
 import Image from "next/image";
 import Link from "next/link";
@@ -17,8 +16,6 @@ import {
   FileText,
   MessageSquare,
   LogOut,
-  Moon,
-  Sun,
   TestTube,
   FileCode,
   Database,
@@ -36,14 +33,12 @@ import {
   MessageSquareMore,
   Shield,
   Code2,
-  Monitor,
 } from "lucide-react";
-import { useTheme } from "next-themes";
-import { nextThemeMode, normalizeThemeMode, themeModeLabelKey } from "@/lib/theme-mode";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { GithubProjectLink } from "@/components/github-project-link";
 import { LocaleSwitcher } from "@/components/locale-switcher";
+import { ThemeSwitcher } from "@/components/theme-switcher";
 import { api } from "@/lib/api";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import { SITE_NAME } from "@/lib/site-config";
@@ -59,14 +54,6 @@ export interface SidebarNavItem {
   icon: ComponentType<{ className?: string }>;
   category?: string;
 }
-
-type ViewTransitionLike = {
-  ready: Promise<void>;
-};
-
-type MaybeStartViewTransition = {
-  startViewTransition?: (updateCallback: () => void | Promise<void>) => ViewTransitionLike;
-};
 
 export const userNavItems: SidebarNavItem[] = [
   { href: "/dashboard", labelKey: "navigation.dashboard", icon: LayoutDashboard },
@@ -155,11 +142,6 @@ export function Sidebar() {
   const { t } = useI18n();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-  const setTheme = useTheme().setTheme;
-  const rawTheme = useTheme().theme;
-  // themeMode 反映用户选择的「设置值」（浅色 / 暗色 / 跟随系统），
-  // 未挂载时 rawTheme 为 undefined，normalizeThemeMode 回退浅色，与 SSR 首帧一致，避免水合抖动。
-  const themeMode = normalizeThemeMode(rawTheme);
   const isAdmin = user?.role === 0;
   const [profileAvatar, setProfileAvatar] = useState<string | null>(user?.avatar || null);
   const systemInfo = useSystemStore((s) => s.info);
@@ -210,63 +192,6 @@ export function Sidebar() {
     () => filterNavItems(adminNavItems, systemInfo?.features),
     [systemInfo?.features],
   );
-  const themeLabel = t(themeModeLabelKey(themeMode));
-
-  const toggleTheme = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    // 三态循环：浅色 → 暗色 → 跟随系统 → 浅色。
-    const nextTheme = nextThemeMode(rawTheme);
-
-    const startViewTransition = (document as unknown as MaybeStartViewTransition).startViewTransition;
-
-    // 没有 View Transition API（Firefox / Safari / 旧 Chrome）：直接切换
-    if (!startViewTransition) {
-      setTheme(nextTheme);
-      return;
-    }
-
-    // 关键：必须在 startViewTransition 回调里用 ``flushSync`` 同步提交 React 状态，
-    // 否则 React 18 的批处理会让 DOM 更新晚于浏览器拍快照，结果「主题没变」或者
-    // 「拍了两张相同快照、没有动画且看似失效」。
-    let didCommit = false;
-    try {
-      const x = event.clientX;
-      const y = event.clientY;
-      const transition = startViewTransition(() => {
-        flushSync(() => {
-          setTheme(nextTheme);
-        });
-        didCommit = true;
-      });
-
-      void transition.ready
-        .then(() => {
-          const radius = Math.hypot(
-            Math.max(x, window.innerWidth - x),
-            Math.max(y, window.innerHeight - y),
-          );
-          document.documentElement.animate(
-            {
-              clipPath: [
-                `circle(0px at ${x}px ${y}px)`,
-                `circle(${radius}px at ${x}px ${y}px)`,
-              ],
-            },
-            {
-              duration: 500,
-              easing: "ease-in-out",
-              pseudoElement: "::view-transition-new(root)",
-            } as KeyframeAnimationOptions,
-          );
-        })
-        .catch(() => undefined);
-    } catch {
-      // View Transition 内部抛错时（例如旧版 Chrome 的边界情况）回落到直接切换。
-      if (!didCommit) {
-        setTheme(nextTheme);
-      }
-    }
-  };
 
   return (
     <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 p-4 lg:block">
@@ -391,23 +316,10 @@ export function Sidebar() {
           </div>
 
           <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.5rem] gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="h-10 justify-start gap-2 overflow-hidden rounded-full border-border/70 bg-background/60 px-3 transition-all hover:bg-primary/10 hover:text-primary"
-              onClick={toggleTheme}
-              title={`${themeLabel} · ${t("common.switchTheme")}`}
-              aria-label={t("common.switchTheme")}
-            >
-              {themeMode === "dark" ? (
-                <Moon className="h-4 w-4" />
-              ) : themeMode === "system" ? (
-                <Monitor className="h-4 w-4" />
-              ) : (
-                <Sun className="h-4 w-4" />
-              )}
-              <span className="truncate text-xs font-medium">{themeLabel}</span>
-            </Button>
+            <ThemeSwitcher
+              align="start"
+              className="h-10 justify-start overflow-hidden rounded-full border-border/70 bg-background/60 px-3 transition-all hover:bg-primary/10 hover:text-primary"
+            />
             <LocaleSwitcher
               align="start"
               className="h-10 justify-start overflow-hidden rounded-full border-border/70 bg-background/60 px-3 transition-all hover:bg-primary/10 hover:text-primary"

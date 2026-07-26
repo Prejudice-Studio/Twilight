@@ -12,19 +12,6 @@ export function normalizeThemeMode(raw: string | undefined | null): ThemeMode {
   return "light";
 }
 
-// 三态循环顺序：浅色 → 暗色 → 跟随系统 → 浅色。
-// 保留「浅→暗」的既有肌肉记忆，把「跟随系统」接在末尾作为新增项。
-export function nextThemeMode(raw: string | undefined | null): ThemeMode {
-  switch (normalizeThemeMode(raw)) {
-    case "light":
-      return "dark";
-    case "dark":
-      return "system";
-    default:
-      return "light";
-  }
-}
-
 // 每个模式对应的 i18n 文案键。
 export function themeModeLabelKey(mode: ThemeMode): MessageKey {
   switch (mode) {

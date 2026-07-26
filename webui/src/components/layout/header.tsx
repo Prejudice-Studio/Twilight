@@ -4,7 +4,6 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useMemo, useState } from "react";
-import { useTheme } from "next-themes";
 import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
 import { Badge } from "@/components/ui/badge";
@@ -13,23 +12,19 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { cn } from "@/lib/utils";
 import { sanitizeImageUrl } from "@/lib/safe-url";
 import { adminNavItems, filterNavItems, userNavItems } from "@/components/layout/sidebar";
-import { Menu, Monitor, Moon, Sparkles, Sun } from "lucide-react";
+import { Menu, Sparkles } from "lucide-react";
 import { GithubProjectLink } from "@/components/github-project-link";
 import { LocaleSwitcher } from "@/components/locale-switcher";
+import { ThemeSwitcher } from "@/components/theme-switcher";
 import { useI18n } from "@/lib/i18n";
-import { nextThemeMode, normalizeThemeMode, themeModeLabelKey } from "@/lib/theme-mode";
 
 export function Header() {
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
   const { t } = useI18n();
   const { info: systemInfo } = useSystemStore();
-  const { theme, setTheme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const isAdmin = user?.role === 0;
-  // themeMode 反映用户选择的设置值（浅色 / 暗色 / 跟随系统），未挂载时回退浅色，与 SSR 首帧一致。
-  const themeMode = normalizeThemeMode(theme);
-  const themeLabel = t(themeModeLabelKey(themeMode));
   const envIcon = process.env.NEXT_PUBLIC_AUTH_ICON_URL?.trim();
   const systemIcon = useMemo(() => sanitizeImageUrl(envIcon || systemInfo?.icon), [envIcon, systemInfo?.icon]);
   const displaySiteName = systemInfo?.name || "Twilight";
@@ -113,22 +108,12 @@ export function Header() {
 
               <div className="grid grid-cols-3 gap-2 border-t bg-background/95 p-4">
                 <GithubProjectLink className="col-span-3" />
-                <Button
-                  variant="outline"
-                  className="h-11 w-full min-w-0"
-                  onClick={() => setTheme(nextThemeMode(theme))}
-                  title={`${themeLabel} · ${t("common.switchTheme")}`}
-                  aria-label={t("common.switchTheme")}
-                >
-                  {themeMode === "dark" ? (
-                    <Moon className="mr-2 h-4 w-4 shrink-0" />
-                  ) : themeMode === "system" ? (
-                    <Monitor className="mr-2 h-4 w-4 shrink-0" />
-                  ) : (
-                    <Sun className="mr-2 h-4 w-4 shrink-0" />
-                  )}
-                  <span className="truncate">{themeLabel}</span>
-                </Button>
+                <ThemeSwitcher
+                  align="center"
+                  showLabel
+                  className="h-11 w-full min-w-0 justify-center"
+                  onModeChange={() => setMobileOpen(false)}
+                />
                 <LocaleSwitcher
                   align="center"
                   className="h-11 w-full justify-center px-2"
