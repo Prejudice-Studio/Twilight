@@ -129,6 +129,10 @@ func (a *App) developerJSGenerateRegcode(vm *goja.Runtime, actor *store.User, op
 		result["error"] = "invalid_validity_time"
 		return vm.ToValue(result)
 	}
+	if validity > maxRegCodeValidityHours {
+		result["error"] = "invalid_validity_time"
+		return vm.ToValue(result)
+	}
 
 	useLimit := developerJSOptionInt(values, 1, "use_count_limit", "use_limit")
 	if useLimit == 0 {

@@ -79,7 +79,7 @@ func (a *App) systemUserLimitReached() (bool, int, int) {
 
 // remainingRegCodeUserSlots 注册码/白名单码剩余可注册用户数（计入系统用户上限）。
 func remainingRegCodeUserSlots(code store.RegCode, now int64) int {
-	if !code.Active || code.IsDecoy || (code.ValidityTime > 0 && code.CreatedAt+code.ValidityTime*3600 <= now) {
+	if !code.Active || code.IsDecoy || store.RegCodeExpired(code, now) {
 		return 0
 	}
 	if code.Type != 1 && code.Type != 3 {
@@ -114,16 +114,20 @@ func (a *App) embyCapacityReachedExcluding(excludeUID int64, excludeRegCode, exc
 		}
 	}
 	for _, code := range a.store().ListAllInviteCodes() {
-		if excludeInviteCode != "" && strings.EqualFold(code.Code, excludeInviteCode) {
-			continue
+		slots := remainingInviteSlots(code, now)
+		// 本次消费只占用该码 1 个名额：仅扣减 1，而非把整码剩余名额全部排除。
+		// 否则多名额码的 N 个并发消费者会集体躲在同一份缓冲后越过上限（TOCTOU 过度承诺）。
+		if excludeInviteCode != "" && strings.EqualFold(code.Code, excludeInviteCode) && slots > 0 {
+			slots--
 		}
-		current += remainingInviteSlots(code, now)
+		current += slots
 	}
 	for _, code := range a.store().ListRegCodes() {
-		if excludeRegCode != "" && strings.EqualFold(code.Code, excludeRegCode) {
-			continue
+		slots := remainingRegCodeEmbySlots(code, now)
+		if excludeRegCode != "" && strings.EqualFold(code.Code, excludeRegCode) && slots > 0 {
+			slots--
 		}
-		current += remainingRegCodeEmbySlots(code, now)
+		current += slots
 	}
 	return limit > 0 && current >= limit, current, limit
 }
@@ -136,7 +140,7 @@ func remainingInviteSlots(code store.InviteCode, now int64) int {
 }
 
 func remainingRegCodeEmbySlots(code store.RegCode, now int64) int {
-	if !code.Active || code.IsDecoy || (code.ValidityTime > 0 && code.CreatedAt+code.ValidityTime*3600 <= now) {
+	if !code.Active || code.IsDecoy || store.RegCodeExpired(code, now) {
 		return 0
 	}
 	if code.Type != 1 && code.Type != 3 {
@@ -506,14 +510,8 @@ func regcodeStatus(code store.RegCode) string {
 	if !code.Active {
 		return "disabled"
 	}
-	if code.ValidityTime > 0 {
-		elapsed := now - code.CreatedAt - code.PausedSeconds
-		if code.PauseStart > 0 {
-			elapsed = code.PauseStart - code.CreatedAt - code.PausedSeconds
-		}
-		if elapsed >= code.ValidityTime*3600 {
-			return "expired"
-		}
+	if store.RegCodeExpired(code, now) {
+		return "expired"
 	}
 	return "available"
 }

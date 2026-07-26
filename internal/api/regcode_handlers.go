@@ -11,6 +11,11 @@ import (
 	"github.com/prejudice-studio/twilight/internal/store"
 )
 
+// maxRegCodeValidityHours 卡码有效期（小时）上限，约百年。与 days 上限 36500 同一量级口径：
+// 既避免 store.RegCodeExpired 内 ValidityTime*3600 溢出 int64，也防止巨值静默等价永久权益，
+// 绕过显式「-1 永久」路径。所有 validity_time 入口（管理端建/改、TG JS 生成器）统一以此封顶。
+const maxRegCodeValidityHours = 876000
+
 func (a *App) handleListRegcodes(w http.ResponseWriter, r *http.Request, _ Params) {
 	if a.refreshStoreForRequest(w) {
 		return
@@ -22,9 +27,13 @@ func (a *App) handleListRegcodes(w http.ResponseWriter, r *http.Request, _ Param
 	typeFilter := r.URL.Query().Get("type")
 	sourceFilter := strings.ToLower(r.URL.Query().Get("source"))
 	search := strings.ToLower(r.URL.Query().Get("search"))
+	// 先按原始 RegCode 字段过滤（type/source/status/search 全是纯函数判定），只对命中的
+	// 码构造「廉价」DTO（package 级 regcodeDTO，不触碰 store）。真正昂贵的 a.regcodeDTO
+	// 富化——逐 used_by/creator/target 反查 User，每次拿一把 RLock——推迟到排序分页之后
+	// 只对当前页做，把 User 反查从 O(全部码×被用次数) 降到 O(单页)。
 	items := make([]map[string]any, 0, len(codes))
+	byCode := make(map[string]store.RegCode, len(codes))
 	for _, code := range codes {
-		dto := a.regcodeDTO(code)
 		if typeFilter != "" && strconv.Itoa(code.Type) != typeFilter {
 			continue
 		}
@@ -38,7 +47,7 @@ func (a *App) handleListRegcodes(w http.ResponseWriter, r *http.Request, _ Param
 				continue
 			}
 		}
-		if statusFilter != "" && statusFilter != "all" && dto["status"] != statusFilter {
+		if statusFilter != "" && statusFilter != "all" && regcodeStatus(code) != statusFilter {
 			if !(statusFilter == "decoy" && code.IsDecoy) && !(statusFilter == "active" && code.Active) {
 				continue
 			}
@@ -46,11 +55,19 @@ func (a *App) handleListRegcodes(w http.ResponseWriter, r *http.Request, _ Param
 		if !regcodeMatchesSearch(code, search) {
 			continue
 		}
-		items = append(items, dto)
+		items = append(items, regcodeDTO(code))
+		byCode[code.Code] = code
 	}
 	sortRegcodeDTOs(items, r.URL.Query().Get("sort"), r.URL.Query().Get("order"))
 	total := len(items)
 	items = paginate(items, page, perPage)
+	// 只富化当前页：用 code 主键回查原始码，替换为带 used_by_usernames / creator_username
+	// /target_resolved_username 的完整 DTO。
+	for i, item := range items {
+		if code, okCode := byCode[asString(item["code"])]; okCode {
+			items[i] = a.regcodeDTO(code)
+		}
+	}
 	ok(w, "OK", map[string]any{"regcodes": items, "total": total, "page": page, "per_page": perPage})
 }
 
@@ -88,6 +105,10 @@ func (a *App) handleCreateRegcodes(w http.ResponseWriter, r *http.Request, _ Par
 	}
 	if validity < -1 {
 		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "卡码有效期只能为 -1 或正整数小时")
+		return
+	}
+	if validity > maxRegCodeValidityHours {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "卡码有效期不能超过 876000 小时（约百年）")
 		return
 	}
 	useLimit := intValue(payload, "use_count_limit", 1)
@@ -229,6 +250,10 @@ func (a *App) handleUpdateRegcode(w http.ResponseWriter, r *http.Request, params
 			failWithCode(w, http.StatusBadRequest, ErrBadRequest, "卡码有效期只能为 -1 或正整数小时")
 			return
 		}
+		if validity > maxRegCodeValidityHours {
+			failWithCode(w, http.StatusBadRequest, ErrBadRequest, "卡码有效期不能超过 876000 小时（约百年）")
+			return
+		}
 		reg.ValidityTime = validity
 	}
 	if _, has := payload["days"]; has {
@@ -250,6 +275,18 @@ func (a *App) handleUpdateRegcode(w http.ResponseWriter, r *http.Request, params
 			return
 		}
 		reg.UseCountLimit = useLimit
+		// 抬高次数上限后，重新激活「用满自动停用」的码。consumeRegCodeLocked 用满时
+		// 置 Active=false 但不设 PauseStart；管理员显式暂停才会设 PauseStart>0。故仅当
+		//   ① 本次请求未显式改 active（尊重管理员显式意图）
+		//   ② 当前 !Active 且 PauseStart==0（是「用满」而非「被暂停」）
+		//   ③ 新上限仍有余量（-1 无限次，或 UseCount < 新上限）
+		// 三者同时满足才回激活。否则抬限额静默无效——consumableRegCodeLocked 首行
+		// !r.Active 直接判 ErrNotFound，用户侧仍报「无效/已过期」，管理员困惑。
+		if _, activeExplicit := payload["active"]; !activeExplicit && !reg.Active && reg.PauseStart == 0 {
+			if useLimit == -1 || int(reg.UseCount) < useLimit {
+				reg.Active = true
+			}
+		}
 	}
 	if err := a.store().UpsertRegCode(reg); statusFromError(w, err) {
 		return

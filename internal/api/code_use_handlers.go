@@ -190,6 +190,10 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 		failWithCode(w, http.StatusBadRequest, ErrCodeRegistrationGrantAlreadyUsed, "当前账号已经使用过 Emby 注册资格，不能重复使用注册码或邀请码")
 		return
 	}
+	if errors.Is(err, store.ErrRegCodeAlreadyUsedByUser) {
+		failWithCode(w, http.StatusConflict, ErrCodeAlreadyUsedByUser, "你已经使用过这张卡码，不能重复使用")
+		return
+	}
 	if errors.Is(err, store.ErrConflict) && grantsEmby {
 		if latest, ok := a.store().User(p.User.UID); ok && latest.EmbyID != "" {
 			failWithCode(w, http.StatusBadRequest, ErrCodeAlreadyEmbyBound, "当前账号已绑定 Emby，请使用续期码")

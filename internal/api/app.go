@@ -1697,6 +1697,10 @@ func statusFromError(w http.ResponseWriter, err error) bool {
 		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "资源已过期")
 		return true
 	}
+	if errors.Is(err, store.ErrRegCodeAlreadyUsedByUser) {
+		failWithCode(w, http.StatusConflict, ErrCodeAlreadyUsedByUser, "你已经使用过这张卡码，不能重复使用")
+		return true
+	}
 	if errors.Is(err, store.ErrInvalid) {
 		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "请求参数无效")
 		return true

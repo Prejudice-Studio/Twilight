@@ -124,6 +124,7 @@ const (
 	ErrCodeInvalid                      ErrCode = "CODE_INVALID"
 	ErrCodeAlreadyEmbyBound             ErrCode = "CODE_ALREADY_EMBY_BOUND"
 	ErrCodeRegistrationGrantAlreadyUsed ErrCode = "CODE_REGISTRATION_GRANT_ALREADY_USED"
+	ErrCodeAlreadyUsedByUser            ErrCode = "CODE_ALREADY_USED_BY_USER"
 	ErrInviteNotFound                   ErrCode = "INVITE_NOT_FOUND"
 	ErrInviteSelfGenerate               ErrCode = "INVITE_SELF_GENERATE"
 	ErrInviteAlreadyHasParent           ErrCode = "INVITE_ALREADY_HAS_PARENT"
