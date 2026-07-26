@@ -1714,6 +1714,18 @@ func (c Config) PostgresDSN() string {
 	return u.String()
 }
 
+// IsPostgresDriver 判定 driver 字符串是否指向 PostgreSQL 后端。整套部署已
+// 收敛为单一 PostgreSQL 后端，这里是唯一的判定入口：空值按默认（postgres）
+// 处理，"postgresql" 视作别名；其余任何值都不是合法运行期后端。
+func IsPostgresDriver(driver string) bool {
+	switch strings.ToLower(strings.TrimSpace(driver)) {
+	case "", "postgres", "postgresql":
+		return true
+	default:
+		return false
+	}
+}
+
 func (c Config) Addr() string {
 	return fmt.Sprintf("%s:%d", c.Host, c.Port)
 }

@@ -134,13 +134,19 @@ export default function AdminTicketDetailPage() {
     void loadTicket();
   }, [loadTicket]);
 
+  // 仅在「切换到另一张工单」时用服务端值初始化草稿（依赖 ticket?.id）。
+  // 此前依赖整个 ticket 对象：发送回复 / 保存元数据后的 setTicket 都会重跑本 effect，
+  // 把管理员正在编辑但尚未保存的 status/priority/type/处理备注草稿全部重置回服务端值，
+  // 表现为「回复后无法自动保存」「回复与聊天信息互相覆盖 / 部分消失」。
+  // 收窄到 id 后：同一张工单的后续刷新不再重置草稿，仅换单时才重新初始化。
   useEffect(() => {
     if (!ticket) return;
     setStatusDraft(ticket.status);
     setPriorityDraft(ticket.priority);
     setTypeDraft(ticket.type);
     setNoteDraft(ticket.admin_note || "");
-  }, [ticket]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticket?.id]);
 
   const messages = useMemo<ConversationMessage[]>(() => {
     if (!ticket) return [];
@@ -215,9 +221,18 @@ export default function AdminTicketDetailPage() {
     }
     setSending(true);
     try {
+      const prevStatus = ticket.status;
       const res = await api.adminReplyTicket(ticket.id, content);
       if (res.success && res.data?.ticket) {
-        setTicket(res.data.ticket);
+        const nextTicket = res.data.ticket;
+        setTicket(nextTicket);
+        // 后端在管理员回复 open 工单时会自动流转 open→in_progress。effect 已收窄到
+        // ticket?.id 不再自动同步草稿，这里仅当管理员尚未手动改动状态草稿
+        // （statusDraft 仍等于回复前的服务端状态）时，把状态草稿跟随这次自动流转，
+        // 避免下拉框显示 open 而实际已是 in_progress、随后保存又把它改回 open。
+        if (statusDraft === prevStatus && nextTicket.status !== prevStatus) {
+          setStatusDraft(nextTicket.status);
+        }
         setReply("");
         setReplyAttachments([]);
         toast({ title: t("tickets.replySent") });

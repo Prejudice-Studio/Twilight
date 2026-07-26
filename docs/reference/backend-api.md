@@ -1691,11 +1691,11 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 
 ### 10.12 数据库状态、备份、恢复、迁移
 
-> Twilight 把全部业务状态保存在 **单一状态文档** 中：JSON 文件 `db/twilight_go_state.json` 或 PostgreSQL `twilight_state` 表（`id=1` 的一行 jsonb）；另有独立表 `twilight_sessions`、`twilight_runtime_logs`。`twilight_runtime_logs` 仅用于高写入运行日志，并按 `id` 游标、索引和 cutoff id 裁剪优化；业务实体仍不得拆成独立表。下列接口围绕该状态文档操作。
+> Twilight 把全部业务状态保存在 **单一状态文档** 中：PostgreSQL `twilight_state` 表（`id=1` 的一行 jsonb），这是唯一运行后端；另有独立表 `twilight_sessions`、`twilight_runtime_logs`、`twilight_playback_records`。`twilight_runtime_logs` 仅用于高写入运行日志，并按 `id` 游标、索引和 cutoff id 裁剪优化；业务实体仍不得拆成独立表。下列接口围绕该状态文档操作。
 
 `GET /system/admin/database/status`
 
-- 说明：返回当前 active driver、配置 driver、状态文件、备份目录、PostgreSQL 配置状态和用户数。响应同时给出 `active_label/configured_label`，其中 `gojson` 表示 Go JSON 状态文件，`sqlite3` 表示旧 SQLite 迁移源，`postgresql` 表示 PostgreSQL 后端。
+- 说明：返回当前 active driver、配置 driver、状态文件、备份目录、PostgreSQL 配置状态和用户数。响应同时给出 `active_label/configured_label`（`postgresql` 表示 PostgreSQL 后端，`gojson` 表示 JSON 状态文件），以及 `supported_drivers` 列表——其中 `postgres` 标 `role=runtime`（唯一可运行后端），`json` 标 `role=export`（仅作迁移面板的一次性导出目标，非可运行后端）。
 - 认证：管理员（`AuthAdmin`）
 
 `GET /system/admin/database/backups` — 列出备份目录中的状态快照。
@@ -1723,19 +1723,18 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 
 `POST /system/admin/database/migrate`
 
-- 说明：迁移当前 Go 状态快照或旧 SQLite 文件集到 `json` / `postgres`。未传确认短语时只返回预检，不写入数据；确认执行前会自动创建保护性备份。
+- 说明：把当前运行状态快照写入目标 `postgres`（再导入一套 PG），或以 `json` 作为**一次性导出目标**把状态 dump 成 `state.json` 文件（非可运行后端，产物用于归档或喂给 `twilight migrate-json` 重新导入）。未传确认短语时只返回预检，不写入数据；确认执行前会自动创建保护性备份。
 - 预检请求体：
 
 ```json
 {
-  "source_driver": "sqlite",
   "target_driver": "postgres",
   "dry_run": true,
   "database_url": "postgres://user:pass@127.0.0.1:5432/twilight?sslmode=disable"
 }
 ```
 
-`source_driver` 可省略，省略时表示当前 Go 状态；传 `sqlite` / `legacy_sqlite` 时，后端只扫描固定数据库目录中的旧 SQLite 文件，不接受前端传入任意路径。
+`source_driver` 可省略，省略时表示当前运行状态。SQLite 数据源已禁用：传 `sqlite` / `legacy_sqlite` / `legacy-sqlite` 会返回 403 `DB_SQLITE_DISABLED`。
 
 - 执行请求体：
 
@@ -1746,9 +1745,9 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 }
 ```
 
+- 确认短语：迁移 `MIGRATE_DATABASE`，恢复 `RESTORE_DATABASE_BACKUP`。
 - 预检响应 `data` 包含 `source_driver`、`configured_driver`、`target_driver`、`snapshot_bytes`、`target_ready`、`backup_ready`、`warnings`、`counts`、`requires_confirmation`、`confirm`，并保留 `users`、`regcodes`、`invite_codes` 等兼容字段。PostgreSQL 目标会在权限允许时自动创建缺失数据库并准备 `twilight_state` 状态表，`target_ready.database_created` / `target_ready.schema_ready` 反映结果。
-- 旧 SQLite 来源会额外返回 `legacy_sqlite` 与 `legacy_sqlite_import`，包含检测到的文件、表计数、已映射表和未映射表。
-- 执行响应会额外返回 `pre_operation_backup` / `pre_migration_backup`；旧 SQLite 来源还会返回 `legacy_sqlite_backup`，确认写入前已自动备份旧文件集。
+- 执行响应会额外返回 `pre_operation_backup` / `pre_migration_backup`，确认写入前已自动创建保护性备份。
 
 ### 10.13 Git 自动更新
 

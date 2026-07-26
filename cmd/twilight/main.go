@@ -42,6 +42,8 @@ func run(args []string) error {
 		return runScheduler(args[2:])
 	case "bot":
 		return runBot(args[2:])
+	case "migrate-json":
+		return runMigrateJSON(args[2:])
 	case "version", "--version", "-v":
 		fmt.Println("Twilight Go Backend")
 		return nil
@@ -341,32 +343,88 @@ func runBot(args []string) error {
 	return app.RunTelegramBot(ctx)
 }
 
+// openStore 只打开 PostgreSQL 后端：整套部署已收敛为单一后端，driver 非
+// postgres 直接报错，不再回落本地 JSON。历史 JSON state 走 `migrate-json`
+// 一次性导入命令。
 func openStore(ctx context.Context, cfg config.Config) (*store.Store, error) {
-	switch cfg.DatabaseDriver {
-	case "", store.BackendJSON, "file":
-		st, err := store.Open(cfg.StateFile)
-		if err != nil {
-			return nil, err
-		}
-		applyConfiguredAdmins(cfg, st)
-		return st, nil
-	case store.BackendPostgres, "postgresql":
-		dsn := cfg.PostgresDSN()
-		if dsn == "" {
-			return nil, fmt.Errorf("database driver is postgres but no PostgreSQL URL or host/user/database is configured")
-		}
-		openCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		st, err := store.OpenPostgres(openCtx, dsn)
-		if err != nil {
-			return nil, err
-		}
-		st.ConfigurePostgres(cfg.PostgresMaxOpenConns, cfg.PostgresMaxIdleConns)
-		applyConfiguredAdmins(cfg, st)
-		return st, nil
-	default:
-		return nil, fmt.Errorf("unsupported database driver %q", cfg.DatabaseDriver)
+	if !config.IsPostgresDriver(cfg.DatabaseDriver) {
+		return nil, fmt.Errorf("unsupported database driver %q: only postgres is supported", cfg.DatabaseDriver)
 	}
+	dsn := cfg.PostgresDSN()
+	if dsn == "" {
+		return nil, fmt.Errorf("database driver is postgres but no PostgreSQL URL or host/user/database is configured")
+	}
+	openCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	st, err := store.OpenPostgres(openCtx, dsn)
+	if err != nil {
+		return nil, err
+	}
+	st.ConfigurePostgres(cfg.PostgresMaxOpenConns, cfg.PostgresMaxIdleConns)
+	applyConfiguredAdmins(cfg, st)
+	return st, nil
+}
+
+// runMigrateJSON 把历史 JSON 后端的 state.json 一次性导入当前配置的
+// PostgreSQL。这是 JSON→PG 收敛后唯一的历史数据迁移入口：读旧文件（含
+// .bak 兜底）→ 连 PG → LoadSnapshot 覆盖写。默认拒绝覆盖非空目标库，
+// 必须 --force 才会覆盖，避免误把已在运行的 PG 数据抹掉。
+func runMigrateJSON(args []string) error {
+	fs := flag.NewFlagSet("migrate-json", flag.ContinueOnError)
+	stateFile := fs.String("state-file", "", "历史 JSON 状态文件路径（默认取配置里的 Database.state_file）")
+	configFile := fs.String("config", "", "config file path; runtime only accepts the working directory config.toml")
+	force := fs.Bool("force", false, "目标 PostgreSQL 已有数据时也强制覆盖导入")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	configPath, err := runtimeConfigPath(*configFile)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.NewReader(configPath).Read()
+	if err != nil {
+		return err
+	}
+	api.InstallRuntimeLogger(os.Stdout, cfg.ZapLevel())
+
+	source := strings.TrimSpace(*stateFile)
+	if source == "" {
+		source = cfg.StateFile
+	}
+	if strings.TrimSpace(source) == "" {
+		return fmt.Errorf("no legacy state file specified; pass --state-file or set Database.state_file")
+	}
+	snapshot, err := store.ReadLegacyStateFile(source)
+	if err != nil {
+		return fmt.Errorf("read legacy state file: %w", err)
+	}
+
+	dsn := cfg.PostgresDSN()
+	if dsn == "" {
+		return fmt.Errorf("no PostgreSQL URL or host/user/database configured; migration target is required")
+	}
+	openCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	st, err := store.OpenPostgres(openCtx, dsn)
+	if err != nil {
+		return fmt.Errorf("open postgres target: %w", err)
+	}
+	defer st.Close()
+	st.ConfigurePostgres(cfg.PostgresMaxOpenConns, cfg.PostgresMaxIdleConns)
+
+	if existing := st.UserCount(); existing > 0 && !*force {
+		return fmt.Errorf("target postgres already holds %d users; refusing to overwrite without --force", existing)
+	}
+
+	if err := st.LoadSnapshot(snapshot); err != nil {
+		return fmt.Errorf("import snapshot into postgres: %w", err)
+	}
+	zap.L().Info("legacy JSON state imported into PostgreSQL",
+		zap.String("source", source),
+		zap.Int("users", st.UserCount()),
+	)
+	fmt.Printf("migrated %s -> PostgreSQL (%d users)\n", source, st.UserCount())
+	return nil
 }
 
 func applyConfiguredAdmins(cfg config.Config, st *store.Store) {
@@ -444,5 +502,6 @@ Usage:
   twilight all
   twilight scheduler
   twilight bot
+  twilight migrate-json --state-file <path> [--config config.toml] [--force]
   twilight version`)
 }

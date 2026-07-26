@@ -39,11 +39,11 @@ Update docs in the same change when behavior changes.
 
 ## Directory Map
 
-- `cmd/twilight`: CLI entry, supporting `api`, `all`, `scheduler`, `bot`, and `version`.
+- `cmd/twilight`: CLI entry, supporting `api`, `all`, `scheduler`, `bot`, `version`, and `migrate-json` (one-time import of a legacy `state.json` into PostgreSQL).
 - `internal/api`: HTTP routes, auth, rate limits, response helpers, handlers, external clients, scheduler, admin operations, runtime APIs.
 - `internal/api/routes.go`: centralized route registration.
 - `internal/config`: `config.toml`, `config.local.toml`, and `TWILIGHT_*` environment loading.
-- `internal/store`: single-state-document persistence, JSON or PostgreSQL.
+- `internal/store`: single-state-document persistence. PostgreSQL is the only runtime backend — `Store` is constructed exclusively via `store.OpenPostgres`, so `s.db` is always non-nil. The `json` label survives only as a one-way export target in the database-migration panel and as the `migrate-json` import source; there is no JSON/file runtime backend, no flock, and no `.bak`/sidecar state files.
 - `internal/redis`: RESP client for shared sessions and rate limits.
 - `internal/security`: tokens, password hashing, and secure random helpers.
 - `webui/src/app`: Next.js App Router pages.
@@ -197,12 +197,12 @@ Use this index before broad search. Line numbers drift, so search by function na
 
 `internal/api/runtime_logs.go` wires the global `zap` logger through `runtimeLogCore`, which tees every entry to two destinations gated by **two independent levels**:
 
-- `runtimeSinkLevel` (fixed at `Debug`) gates the persistent sink — the runtime-log panel + `store` (JSON-file or PostgreSQL). It is the core's `LevelEnabler`, so every entry passes `Check` and reaches `Write`, where it is unconditionally appended to the sink. **The sink captures all global logs at every level**; nothing is dropped by the configured `log_level`.
+- `runtimeSinkLevel` (fixed at `Debug`) gates the persistent sink — the runtime-log panel + `store` (the PostgreSQL `twilight_runtime_logs` table). It is the core's `LevelEnabler`, so every entry passes `Check` and reaches `Write`, where it is unconditionally appended to the sink. **The sink captures all global logs at every level**; nothing is dropped by the configured `log_level`.
 - `runtimeConsoleLevel` (follows config `log_level`, default `info`) gates only the stdout write inside `Write`. Entries below it are appended to the sink but not printed to the console, so the default config never floods the terminal with `Debug`.
 - The two levels are decoupled on purpose: `log_level` / `--debug` / hot reload adjust **console verbosity only**. `ConfigureRuntimeLogging` and `ConfigureRuntimeLoggingStore` set `runtimeConsoleLevel`; they must never lower the sink below `Debug`. Do not re-collapse them into one atomic — that reintroduces the old bug where sub-threshold logs never reached the panel and were lost.
 - Both the sink `append` path (`zapFieldsToAttrs` + `redactSensitiveText`) and the console path (`sanitizeZapFields`) redact sensitive keys/values. Any new persistence or console path for log data must route through the same redaction helpers; never write a raw `zapcore.Entry` message or field value to either destination.
 - `handleRuntimeStatus` reports `log_level` (console level) and `runtime_log_capture` (sink level, always `debug`) as distinct fields so the status panel makes the "recorded in full / console trimmed" contract observable.
-- Cost note: because the sink now persists `Debug` too, JSON-file mode pays a full state-persist per captured line at every level (PG mode stays a cheap INSERT). Keep genuinely high-frequency, per-request/per-loop chatter off the logger entirely rather than parking it at `Debug` and assuming it is free — "captured but off-console" is not "not written". See [[project_runtime_log_sink_cost]].
+- Cost note: because the sink now persists `Debug` too, every captured line at every level becomes a row `INSERT` into `twilight_runtime_logs` (cheap, but not free). Keep genuinely high-frequency, per-request/per-loop chatter off the logger entirely rather than parking it at `Debug` and assuming it is free — "captured but off-console" is not "not written". See [[project_runtime_log_sink_cost]].
 
 ## Domain Rules
 
@@ -247,7 +247,7 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - Disabled cards pause validity countdown through `PausedSeconds` and `PauseStart`.
 - When a card is used up, status must be `used_up` even if an admin also disabled it.
 - Bulk generation should keep using `UpsertRegCodes`; do not reintroduce slow one-by-one insert loops. `UpsertRegCodes` is create-only: duplicate codes inside the same batch or codes already present in the latest persisted state must reject the whole batch with `ErrConflict`, never overwrite an existing RegCode.
-- RegCode admin list/detail/user-history/check and state-changing prechecks must refresh the persisted single-state document before reading, so PostgreSQL-backed state, JSON state, and multi-process maintenance do not serve stale deleted or edited codes. WebUI RegCode reads must bypass the short read cache and in-flight GET dedupe.
+- RegCode admin list/detail/user-history/check and state-changing prechecks must refresh the persisted single-state document before reading, so PostgreSQL-backed state and multi-process maintenance do not serve stale deleted or edited codes. WebUI RegCode reads must bypass the short read cache and in-flight GET dedupe.
 
 ## Auth Background Rules
 
@@ -271,7 +271,7 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - Ticket notification results are outbound side-effects: log success/skip at `Debug` and only failures at `Warn`. Do not log successful sends at `Info`. Since the runtime-log sink now captures every level (see "Runtime Logging Rules"), the level choice controls **console verbosity**, not whether the line is recorded: `Debug` keeps routine per-action success/skip off the operator's stdout while still preserving it in the runtime-log panel for troubleshooting, and `Warn` surfaces failures on the console. In JSON-file mode every captured line still triggers a full state-persist, so the "no `Info` for success" rule remains — routine successes must not sit at a level the operator watches. See [[project_runtime_log_sink_cost]] and [[project_ticket_notify_async]].
 - User ticket creation must use the store atomic creation helper so per-user and global open-ticket quota checks happen under the same lock as insertion; do not reintroduce handler-side `Count*` then `UpsertTicket` flows.
 - After successful user ticket creation, the ticket must be immediately visible to `GET /admin/tickets`, recorded as `create_ticket` audit with the submitting UID as target, and logged to runtime logs without including ticket content. Frontend ticket list/detail and audit list reads must not use the short in-memory read cache.
-- Ticket list/detail endpoints and mutations that pre-read ticket state must refresh the persisted single-state document before reading, including replies and image attachment paths. This avoids stale admin/user views when another process, PostgreSQL-backed state, or direct JSON maintenance has changed or removed a ticket.
+- Ticket list/detail endpoints and mutations that pre-read ticket state must refresh the persisted single-state document before reading, including replies and image attachment paths. This avoids stale admin/user views when another process or PostgreSQL-backed state has changed or removed a ticket.
 - Admin ticket updates that add an admin reply must pass the reply through the store update helper in the same mutation; do not update status/admin_note first and append the reply in a second store call.
 - Admin ticket chat handling uses `GET /admin/tickets/:ticket_id` for a single ticket and `POST /admin/tickets/:ticket_id/reply` for text-only admin replies. Keep the attachment path on `/tickets/:ticket_id/images` so image limits and closed-ticket role rules stay centralized.
 - Ticket replies are the source of truth for two-sided conversation history. `admin_note` is only the latest admin summary / compatibility field and must not replace or clear `Ticket.Replies`.
@@ -345,7 +345,7 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - `AddPlaybackRecordIdempotent` dual-writes to both the state document (`PlaybackRecords` slice) and the PostgreSQL table when available, using `ON CONFLICT DO NOTHING`. The PG insert runs **outside** `s.mu` (state already durable after `saveLocked`); a stalled connection can no longer freeze all store writes. DB failure is swallowed (returns `false, nil`) since the state copy is authoritative.
 - Batch path: `AddPlaybackRecordsIdempotent([]PlaybackRecord)` does one `refreshLocked + saveLocked` for the whole slice and a chunked multi-row INSERT (500 rows/statement). The emby activity sync (`persistEmbyPlaybackRecordsFromActivity`, up to `embyActivityFetchLimit`=20000 events) uses this instead of per-record calls — the old loop paid a full-state jsonb serialize per record. Dedup semantics match the single-record path: `(uid, item_id, played_at)` key, records with `uid==0`/empty `item_id` skip dedup.
 - All playback PG reads/writes use `context.WithTimeout` (`pgPlaybackReadTimeout`/`pgPlaybackWriteTimeout`, 5s) so a dead connection self-releases instead of blocking indefinitely.
-- `PlaybackRecords` reads from the database first (when available), falling back to the in-memory state document for JSON-file mode.
+- `PlaybackRecords` reads from the PostgreSQL table first; the in-memory state slice remains only as a resilience fallback when a PG query errors (not a separate runtime backend). This dual-read is the one spot in `internal/store` where an `s.db` query failure still falls through to state — everything else in the store is unconditionally PG-backed.
 - `DELETE FROM twilight_playback_records` for retention cleanup via `DeletePlaybackRecordsBefore`.
 
 ## Dashboard Online Viewer Rules
@@ -406,9 +406,38 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 
 Run checks proportional to the change. For broad backend/frontend work, run:
 
-- `go test ./...`
+- `go build ./...`
 - `go vet ./...`
+- `go test ./...`
 - `cd webui && pnpm lint`
 - `cd webui && pnpm build`
 
 Use `gofmt` for Go changes and the repo lint/build tools for frontend changes.
+
+## Testing against PostgreSQL
+
+The `internal/store` and `internal/api` test packages talk to a **real PostgreSQL** (no in-memory or embedded double). They read the DSN from the `TWILIGHT_TEST_DSN` environment variable:
+
+- **Unset** → each package's `TestMain` prints a skip notice and exits 0, so `go test ./...` stays green on machines with no database. This is the expected state in most sandboxes.
+- **Set** → `TestMain` verifies reachability with `store.CheckPostgres`; if the DSN is set but unreachable it exits 1 (a set-but-broken DSN is treated as a failure, not a skip).
+
+Each test gets a clean schema: the store package resets via `TRUNCATE … RESTART IDENTITY` + `DELETE FROM twilight_state` + reseed; the api package drops the four tables (`twilight_state`, `twilight_runtime_logs`, `twilight_sessions`, `twilight_playback_records`) with `CASCADE` and lets the idempotent DDL in `openPreparedPostgres` recreate them. Both point at the **same** database.
+
+Because every package shares one test database and resets it per test, run the DB-backed packages serially — `go test -p 1 ./...` (or target one package at a time). Parallel package execution (`-p >1`) races two packages resetting/writing the same tables and produces flaky failures that are an artifact of the shared fixture, not real bugs.
+
+Example (PowerShell):
+
+```powershell
+$env:TWILIGHT_TEST_DSN = "postgres://twilight:secret@127.0.0.1:5432/twilight_test?sslmode=disable"
+go test -p 1 ./...
+```
+
+## Migrating a legacy JSON deployment
+
+Deployments that still hold a JSON `state.json` import it once with the `migrate-json` command:
+
+```
+twilight migrate-json --state-file <path> [--config config.toml] [--force]
+```
+
+It reads the legacy file (with `.bak` fallback), connects to the PostgreSQL configured in `config.toml`, and writes the snapshot via `LoadSnapshot`. It refuses to overwrite a target database that already holds users unless `--force` is passed. After import, run the service normally — there is no JSON runtime fallback.

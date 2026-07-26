@@ -14,17 +14,14 @@ import (
 func newEmailTestApp(t *testing.T, forceBind bool) *App {
 	t.Helper()
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := newTestStore(t)
 	app, err := New(config.Config{
 		AppName:           "Twilight Test",
 		Version:           "test",
 		Host:              "127.0.0.1",
 		Port:              0,
 		DatabaseDir:       dir,
-		DatabaseDriver:    store.BackendJSON,
+		DatabaseDriver:    store.BackendPostgres,
 		DatabaseBackupDir: filepath.Join(dir, "backups"),
 		StateFile:         filepath.Join(dir, "state.json"),
 		UploadDir:         filepath.Join(dir, "uploads"),

@@ -378,55 +378,32 @@ func newRedisClient(cfg config.Config) (*redis.Client, error) {
 	return redisClient, nil
 }
 
+// openConfiguredStore 只认 PostgreSQL：整个部署已收敛为单一后端，任何
+// 非 postgres 的 driver 值都视为配置错误直接拒开，不再回落到本地 JSON。
+// 历史 JSON 部署走一次性的 `twilight migrate-json` 命令导入，不在运行期打开。
 func openConfiguredStore(ctx context.Context, cfg config.Config) (*store.Store, error) {
-	switch cfg.DatabaseDriver {
-	case "", store.BackendJSON, "file":
-		return store.Open(cfg.StateFile)
-	case store.BackendPostgres, "postgresql":
-		dsn := cfg.PostgresDSN()
-		if dsn == "" {
-			return nil, fmt.Errorf("database driver is postgres but no PostgreSQL URL or host/user/database is configured")
-		}
-		openCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		st, err := store.OpenPostgres(openCtx, dsn)
-		if err != nil {
-			return nil, err
-		}
-		st.ConfigurePostgres(cfg.PostgresMaxOpenConns, cfg.PostgresMaxIdleConns)
-		return st, nil
-	default:
-		return nil, fmt.Errorf("unsupported database driver %q", cfg.DatabaseDriver)
+	if !config.IsPostgresDriver(cfg.DatabaseDriver) {
+		return nil, fmt.Errorf("unsupported database driver %q: only postgres is supported", cfg.DatabaseDriver)
 	}
+	dsn := cfg.PostgresDSN()
+	if dsn == "" {
+		return nil, fmt.Errorf("database driver is postgres but no PostgreSQL URL or host/user/database is configured")
+	}
+	openCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	st, err := store.OpenPostgres(openCtx, dsn)
+	if err != nil {
+		return nil, err
+	}
+	st.ConfigurePostgres(cfg.PostgresMaxOpenConns, cfg.PostgresMaxIdleConns)
+	return st, nil
 }
 
-// storeBackendChanged 判定 reload 是否需要重开 store。Driver / state file
-// 路径 / Postgres DSN 任一变化就必须重开；driver 含义以归一化为准（"" / "json"
-// / "file" 视为同一 JSON 后端，避免 reload 时把同一路径的 JSON store 反复
-// 关闭重开造成 flock 重入死锁）。
+// storeBackendChanged 判定 reload 是否需要重开 store。后端已收敛为单一
+// PostgreSQL，driver 不再切换，因此只有 Postgres DSN（URL 或 host/user/
+// database/password 派生值）变化时才需要重开连接池。
 func storeBackendChanged(previous, next config.Config) bool {
-	prevDriver := normalizeStoreDriver(previous.DatabaseDriver)
-	nextDriver := normalizeStoreDriver(next.DatabaseDriver)
-	if prevDriver != nextDriver {
-		return true
-	}
-	switch nextDriver {
-	case store.BackendJSON:
-		return previous.StateFile != next.StateFile
-	case store.BackendPostgres:
-		return previous.PostgresDSN() != next.PostgresDSN()
-	}
-	return false
-}
-
-func normalizeStoreDriver(driver string) string {
-	switch driver {
-	case "", store.BackendJSON, "file":
-		return store.BackendJSON
-	case store.BackendPostgres, "postgresql":
-		return store.BackendPostgres
-	}
-	return driver
+	return previous.PostgresDSN() != next.PostgresDSN()
 }
 
 func (a *App) Routes() []Route {
@@ -464,14 +441,10 @@ func (a *App) reloadConfigLocked() (map[string]any, error) {
 	reinitialized := []string{}
 	closeOldStore := false
 	if storeBackendChanged(previous, next) {
-		// Backend / 路径 / DSN 真的变了：先开新 store，确认成功后再关旧 store。
+		// Postgres DSN 变了：先开新连接池，确认成功后再关旧 store。
 		// 不能"先关后开"——那会留下 store==nil 窗口，并发 ServeHTTP 走到
 		// store().IsIPBlacklisted / store().User 等点会直接 nil panic；
-		// 失败时也无法干净回滚（旧 store 已 Close，再 Open 同一 JSON 路径
-		// 会与还在挥发的 flock 竞争）。
-		// storeBackendChanged 已经把"同 path JSON"过滤掉（normalizeStoreDriver
-		// 把 "" / "json" / "file" 归一），所以这里不会两个 JSON store 抢同一个
-		// 锁文件——对 PG → JSON、JSON 路径切换、PG DSN 切换都安全。
+		// 失败时也无法干净回滚。
 		nextStore, err := openConfiguredStore(context.Background(), next)
 		if err != nil {
 			return nil, err

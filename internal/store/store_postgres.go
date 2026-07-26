@@ -22,11 +22,15 @@ func OpenPostgres(ctx context.Context, dsn string) (*Store, error) {
 		return nil, err
 	}
 
-	st := &Store{backend: BackendPostgres, path: "postgres", db: db, state: emptyState()}
+	st := &Store{db: db, state: emptyState()}
 	var raw []byte
-	err = db.QueryRowContext(ctx, `SELECT state FROM twilight_state WHERE id = 1`).Scan(&raw)
+	var version int64
+	err = db.QueryRowContext(ctx, `SELECT state, version FROM twilight_state WHERE id = 1`).Scan(&raw, &version)
 	if errors.Is(err, sql.ErrNoRows) {
-		return st, st.saveLocked()
+		// 冷启动首次落库：用 force 变体播种，绕过版本守卫。多个进程同时冷启动时
+		// 各自 seed 的都是同一份 emptyState，force 递增 version 也无害（内容一致），
+		// 避免其中一方因守卫 0 行冲突而启动失败。
+		return st, st.saveLockedForce()
 	}
 	if err != nil {
 		_ = db.Close()
@@ -38,6 +42,7 @@ func OpenPostgres(ctx context.Context, dsn string) (*Store, error) {
 			return nil, err
 		}
 	}
+	st.stateVersion = version
 	st.state.ensure()
 	st.rebuildUserIndexes()
 	return st, nil
@@ -264,8 +269,16 @@ func openPreparedPostgres(ctx context.Context, dsn string) (*sql.DB, PostgresTar
 CREATE TABLE IF NOT EXISTS twilight_state (
 	id integer PRIMARY KEY,
 	state jsonb NOT NULL,
+	version bigint NOT NULL DEFAULT 0,
 	updated_at timestamptz NOT NULL DEFAULT now()
 )`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
+	// 存量部署迁移：老表没有 version 列。加列并默认 0，既有那一行 state 从版本 0 起步，
+	// 与冷启动播种（saveLockedForce 从持久层 version 递增）语义一致。幂等，可反复执行。
+	if _, err := db.ExecContext(ctx, `
+ALTER TABLE twilight_state ADD COLUMN IF NOT EXISTS version bigint NOT NULL DEFAULT 0`); err != nil {
 		_ = db.Close()
 		return nil, status, describePostgresConnectionError(target, err)
 	}

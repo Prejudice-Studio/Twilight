@@ -607,6 +607,11 @@ func TestAdminTicketDetailAndReplyEndpoint(t *testing.T) {
 		t.Fatalf("unexpected admin ticket detail: %#v", detailResp.Data)
 	}
 
+	// 先经元数据端点写入「处理备注」，它是与聊天回复解耦的独立字段。
+	if rr := doJSON(app, http.MethodPut, path, `{"admin_note":"内部处理备注"}`, admin); rr.Code != http.StatusOK {
+		t.Fatalf("admin update note status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
 	reply := doJSON(app, http.MethodPost, path+"/reply", `{"content":"admin chat reply"}`, admin)
 	if reply.Code != http.StatusOK {
 		t.Fatalf("admin reply endpoint status=%d body=%s", reply.Code, reply.Body.String())
@@ -615,8 +620,10 @@ func TestAdminTicketDetailAndReplyEndpoint(t *testing.T) {
 	if !found {
 		t.Fatal("ticket not found after admin reply")
 	}
-	if ticket.AdminNote != "admin chat reply" {
-		t.Fatalf("expected admin_note to track latest reply, got %q", ticket.AdminNote)
+	// 管理员聊天回复不得覆盖「处理备注」：二者已解耦，回复只进 Replies，
+	// AdminNote 保持元数据端点写入的值不变（旧行为会被回复正文冲掉，正是冲突根因）。
+	if ticket.AdminNote != "内部处理备注" {
+		t.Fatalf("admin reply must not overwrite admin_note, got %q", ticket.AdminNote)
 	}
 	if len(ticket.Replies) != 1 || ticket.Replies[0].Content != "admin chat reply" || ticket.Replies[0].Role != store.RoleAdmin {
 		t.Fatalf("unexpected replies after admin reply endpoint: %#v", ticket.Replies)

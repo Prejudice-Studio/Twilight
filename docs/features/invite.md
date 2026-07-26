@@ -2,9 +2,9 @@
 
 Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的 Emby 账号，形成一片由多棵树组成的「森林」。本文说明邀请树的概念、配置项、前后端入口、用户/管理员接口以及删除与启停的级联语义，所有行为均对照 `internal/api/invite_handlers.go`、`internal/api/invite_admin_handlers.go`、`internal/api/business.go`、`internal/store/store.go`、`internal/config/config.go` 核对。
 
-> 邀请关系与邀请码是「单一状态文档」（`internal/store`）里的字段，不是独立的数据库或单表。JSON 后端存于 `db/twilight_go_state.json`，PostgreSQL 后端存于 `twilight_state` 表（`id=1` 的一行 jsonb）。具体对应字段为 `state.invite_codes`（`map[string]InviteCode`）与 `state.invite_relations`（`map[int64]InviteRelation`）。不存在 `db/invites.db`、`invite_relations` 单表或「首次启动自动建表」。
+> 邀请关系与邀请码是「单一状态文档」（`internal/store`）里的字段，不是独立的数据库或单表。唯一运行后端是 PostgreSQL，整份状态存于 `twilight_state` 表（`id=1` 的一行 jsonb）。具体对应字段为 `state.invite_codes`（`map[string]InviteCode`）与 `state.invite_relations`（`map[int64]InviteRelation`）。不存在 `db/invites.db`、`invite_relations` 单表或「首次启动自动建表」。
 
-邀请列表、邀请树、公开校验、生成 / 删除 / 使用邀请码、断开关系和管理员维护接口会在读取前刷新这份单一状态文档；WebUI 邀请相关读请求也会绕过短读缓存和 in-flight GET 合并，避免外部维护或 PostgreSQL/JSON state 变更后继续显示旧邀请码 / 旧关系。
+邀请列表、邀请树、公开校验、生成 / 删除 / 使用邀请码、断开关系和管理员维护接口会在读取前刷新这份单一状态文档；WebUI 邀请相关读请求也会绕过短读缓存和 in-flight GET 合并，避免外部维护或其它进程写入 `twilight_state` 后继续显示旧邀请码 / 旧关系。
 
 相关文档：注册码与卡码见 [注册码与卡码](./regcodes.md)，统一卡码入口见 [后端 API 详参](../reference/backend-api.md)，配置项总览见 [Go 后端架构与配置](../reference/backend.md)，全部路由见 [API 路由索引](../reference/api-index.md)。
 

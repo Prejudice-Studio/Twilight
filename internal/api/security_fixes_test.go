@@ -167,17 +167,14 @@ func TestOpenAPIOnlyExposesPublicRoutes(t *testing.T) {
 // 本测试用一个不含任何 admin 配置的 App，确认首个注册用户只是普通用户。
 func TestFirstRegistrantIsNotAutoAdmin(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := newTestStore(t)
 	app, err := New(config.Config{
 		AppName:         "Twilight Test",
 		Version:         "test",
 		Host:            "127.0.0.1",
 		Port:            0,
 		DatabaseDir:     dir,
-		DatabaseDriver:  store.BackendJSON,
+		DatabaseDriver:  store.BackendPostgres,
 		StateFile:       filepath.Join(dir, "state.json"),
 		SessionCookie:   "twilight_session",
 		SessionTTL:      time.Hour,
@@ -244,8 +241,7 @@ func TestRepoURLCannotBeChangedViaWebConfig(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().ConfigFile = filepath.Join(app.cfg().DatabaseDir, "config.toml")
 	databaseConfig := "[Database]\n" +
-		"driver = \"json\"\n" +
-		"state_file = " + strconv.Quote(app.cfg().StateFile) + "\n" +
+		"driver = \"postgres\"\n" +
 		"backup_dir = " + strconv.Quote(app.cfg().DatabaseBackupDir) + "\n"
 	existing := "[Global]\nserver_name = \"old\"\n\n" + databaseConfig +
 		"\n[SystemUpdate]\nrepo_url = \"https://github.com/trusted/twilight.git\"\nbranch = \"main\"\n"

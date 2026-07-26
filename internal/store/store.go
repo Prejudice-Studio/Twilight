@@ -27,15 +27,9 @@ const (
 )
 
 type Store struct {
-	mu      sync.RWMutex
-	path    string
-	backend string
-	db      *sql.DB
-	state   State
-	// JSON 后端进程级排他锁。
-	// Postgres 后端为 nil；同进程内并发由 mu 已经串行化，
-	// 这里防的是多个 Twilight 进程共用同一份 state.json 时的丢更新。
-	lock *fileLock
+	mu    sync.RWMutex
+	db    *sql.DB
+	state State
 
 	// usernameMap / emailMap / verifiedEmailMap 是用户身份字段的二级索引，
 	// 让登录、注册冲突检查、密码找回等高频路径避免全量扫描 Users。
@@ -50,33 +44,14 @@ type Store struct {
 	// userUIDs 按 UID 升序保存现有用户 ID，让 ListUsers 避免每次读都排序 Users map。
 	userUIDs []int64
 
-	// —— 持久化缓存 / 变更门控（均由 s.mu 写锁保护）——
-	//
-	// lastSaved 缓存"当前 state.json 里已落盘的字节"（仅 JSON 后端）。saveLocked
-	// 写前的 .bak 影子拷贝历史上每次都 os.ReadFile(s.path) 重读整份多 MB 文件，
-	// 而这份内容恰好就是上一次成功写入的字节。JSON 后端持进程级 flock，state.json
-	// 的唯一写者就是本进程的 saveLocked，故 lastSaved 与磁盘内容恒等；直接拿它当
-	// .bak 源即可省掉每次写的整文件读 + 同尺寸缓冲分配（降 I/O 与 GC 抖动）。
-	// 冷启动 lastSaved 为 nil 时 saveLocked 回退到 os.ReadFile 保持原行为。
-	lastSaved []byte
-	// lastMtime / lastSize 是 JSON 后端的变更门控：refreshLocked 先 os.Stat，
-	// (mtime,size) 与上次加载/落盘记录一致即跳过整份 ReadFile+Unmarshal+重建索引。
-	// 单进程 flock 下磁盘只会被自己的 saveLocked 改动，门控命中即代表内存 state
-	// 已是最新，跳过安全；任何不匹配 / stat 失败都保守地走完整重载。
-	//
-	// Postgres 后端刻意不设变更门控：PG 是真多进程，唯一可用的行版本信号
-	// updated_at 是事务起始时点（微秒级），两个后端在同一微秒内写会撞同值，
-	// 令一方漏读另一方的写并在下次 saveLocked 覆盖之（丢更新）。稳妥的 PG 门控
-	// 需 xmin / 版本列，超出本次改动范围；PG 的 refreshLocked 保持每次全量拉取。
-	lastMtime time.Time
-	lastSize  int64
-
-	// runtimeLog 是 JSON 后端的 runtime log 旁路存储（内存环形缓冲 + NDJSON 追加文件）；
-	// PG 后端为 nil（走独立表 twilight_runtime_logs）。它拥有独立于 s.mu 的互斥锁，
-	// 让 AddRuntimeLog 的 JSON 分支不再抢 s.mu，既消除 zap-sink 自旋死锁，也让每条日志
-	// 从「整份 state.json marshal+fsync」降到「一行 append」。Open 时挂接一次后不再变更，
-	// 后续读取无需 s.mu 保护。
-	runtimeLog *runtimeLogFile
+	// stateVersion 是 Postgres 乐观并发版本号，与 twilight_state.version 列对应。
+	// refreshLocked 读 state 时一并读回 version 存于此；saveLocked 走「version = 期望值」
+	// 守卫的 UPSERT 并把 version+1 RETURNING 回来刷新本字段。多个 Twilight 进程
+	// （api / bot / scheduler）各持独立 Store 与 s.mu，跨进程唯一的串行点就是这一列：
+	// 谁的期望版本落后就 UPSERT 命中 0 行、拿到 errStateVersionConflict 回滚重试，
+	// 取代此前「refresh(SELECT) 与 save(盲写整份 jsonb) 之间被他进程插入提交后仍整份覆盖」
+	// 的丢更新——正是「用户建了工单、TG 也收到了，工单却随后凭空消失」的根因。
+	stateVersion int64
 }
 
 const (
@@ -610,136 +585,44 @@ type TelegramRosterUpdate struct {
 	IsBot      bool
 }
 
-func Open(path string) (*Store, error) {
-	if path == "" {
-		path = filepath.Join("db", "twilight_go_state.json")
+// ReadLegacyStateFile 读入历史 JSON 后端的 state.json（含 .bak 兜底），返回可直接
+// 交给 Store.LoadSnapshot 的快照字节。它是 PostgreSQL-only 收敛后唯一残留的 JSON
+// 读路径，仅供一次性迁移命令（twilight migrate-json）使用——运行时不再有 JSON 后端。
+// 内嵌的 runtime log 旁路文件（.runtimelog）刻意不迁移：那是纯诊断数据，价值不足以
+// 拖着整套旁路解析器。
+func ReadLegacyStateFile(path string) ([]byte, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, fmt.Errorf("legacy state file path is empty")
 	}
-	// 先确保父目录存在，再尝试拿排他锁；锁文件是 path + ".lock"。
-	// 第二个 Twilight 进程在这里会立刻拿到 ErrLockBusy，启动失败而不是
-	// 静默与首个进程竞写 state.json。
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("ensure state dir: %w", err)
-	}
-	// 启动期可写校验：失败立即 fail-fast，避免运行时第一次 saveLocked
-	// 才发现盘满 / 权限不对，把请求半途打断。
-	if err := probeWritable(filepath.Dir(path)); err != nil {
-		return nil, fmt.Errorf("state dir not writable: %w", err)
-	}
-	lock, err := acquireStateLock(path)
-	if err != nil {
-		if errors.Is(err, ErrLockBusy) {
-			return nil, fmt.Errorf("state file %q is locked by another Twilight process; multi-process JSON backend is not safe — use Postgres or stop the other process", path)
-		}
-		return nil, err
-	}
-	st := &Store{path: path, backend: BackendJSON, state: emptyState(), lock: lock}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			// 新建库：state 为空，旁路文件也不存在，挂接后 nextID 从 1 起。
-			// 紧随的 saveLocked 落初始 state.json，无需理会 migrated（空库必为 false）。
-			if _, attachErr := st.attachRuntimeLogFile(); attachErr != nil {
-				_ = lock.Release()
-				return nil, attachErr
-			}
-			return st, st.saveLocked()
-		}
-		_ = lock.Release()
 		return nil, err
 	}
+	var state State
 	if len(data) > 0 {
-		if err := json.Unmarshal(data, &st.state); err != nil {
-			// 主文件坏掉时尝试 .bak 兜底 —— Open 比 refreshLocked 更激进，
-			// 直接走 fallback 同时保留 lock，避免管理员被 "无法启动" 卡死。
-			if bak, bakErr := os.ReadFile(path + ".bak"); bakErr == nil && len(bak) > 0 {
-				if err := json.Unmarshal(bak, &st.state); err != nil {
-					_ = lock.Release()
-					return nil, err
-				}
-			} else {
-				_ = lock.Release()
-				return nil, err
+		if err := json.Unmarshal(data, &state); err != nil {
+			// 主文件损坏时回退 .bak（历史 saveLocked 写前的影子拷贝）。
+			bak, bakErr := os.ReadFile(path + ".bak")
+			if bakErr != nil || len(bak) == 0 {
+				return nil, fmt.Errorf("parse legacy state %q: %w", path, err)
+			}
+			if err := json.Unmarshal(bak, &state); err != nil {
+				return nil, fmt.Errorf("parse legacy state .bak %q: %w", path, err)
 			}
 		}
 	}
-	st.state.ensure()
-	st.rebuildUserIndexes()
-	// 挂接 runtime log 旁路存储。旁路文件已存在则以它为准；否则从 state 内嵌的
-	// RuntimeLogs 迁移一次并写出旁路文件，随后清空 state.RuntimeLogs 让它不再落进
-	// state.json。此调用发生在 store 被并发访问之前，无需持 s.mu。
-	migrated, err := st.attachRuntimeLogFile()
-	if err != nil {
-		_ = lock.Release()
-		return nil, err
-	}
-	// 发生过迁移（旧 state.json 内嵌了 runtime log）：立刻重写一次 state.json 把
-	// 那批日志抹掉，否则它们会一直躺在磁盘上直到下一次无关 mutation 才被 saveLocked
-	// 覆盖。此重写每份旧文件仅一次（此后 Open 从旁路 seed、无迁移、命中 Batch B 门控）。
-	if migrated {
-		if err := st.saveLocked(); err != nil {
-			_ = lock.Release()
-			return nil, err
-		}
-	}
-	return st, nil
-}
-
-// attachRuntimeLogFile 仅 JSON 后端调用（Open 内、store 未并发时）。它构造 runtimeLog
-// 旁路存储：若旁路文件已存在则 seed 自它（权威来源）；否则以 state 内嵌的 RuntimeLogs
-// 作为一次性迁移种子写出旁路文件。迁移后清空 s.state.RuntimeLogs，使 runtime log 从此
-// 只活在旁路文件里，不再随 state.json 反复 marshal+fsync。
-//
-// 返回 migrated=true 表示 state.json 里原本携带了 runtime log（无论是首次迁移进旁路，
-// 还是旁路已存在但 state.json 仍有历史残留）——调用方据此重写一次 state.json 清掉残留。
-func (s *Store) attachRuntimeLogFile() (bool, error) {
-	if s.db != nil {
-		return false, nil
-	}
-	migrated := len(s.state.RuntimeLogs) > 0
-	rlf, err := newRuntimeLogFile(sidecarPath(s.path), s.state.RuntimeLogs, s.state.NextRuntimeLogID)
-	if err != nil {
-		return false, err
-	}
-	s.runtimeLog = rlf
-	// state 内嵌日志已迁进旁路文件（或旁路文件本就是权威来源）：清空内存副本，
-	// 下次 saveLocked 便不会把它们再写回 state.json。NextRuntimeLogID 保留并与旁路
-	// nextID 对齐（取 max，不回退）。
-	s.state.RuntimeLogs = nil
-	if rlf.nextID > s.state.NextRuntimeLogID {
-		s.state.NextRuntimeLogID = rlf.nextID
-	}
-	return migrated, nil
-}
-
-// probeWritable 在目标目录里写一字节 sentinel 再删除，确认 dir 实际可写。
-func probeWritable(dir string) error {
-	tmp, err := os.CreateTemp(dir, ".twilight-write-probe-*")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	_, _ = tmp.Write([]byte{0})
-	_ = tmp.Close()
-	_ = os.Remove(name)
-	return nil
+	state.ensure()
+	return json.Marshal(state)
 }
 
 func (s *Store) Close() error {
-	if s == nil {
-		return nil
-	}
-	// JSON 后端释放进程级 flock；Postgres 后端 lock=nil 走 noop。
-	if s.lock != nil {
-		_ = s.lock.Release()
-		s.lock = nil
-	}
-	if s.db == nil {
+	if s == nil || s.db == nil {
 		return nil
 	}
 	return s.db.Close()
 }
 
-// DB returns the underlying *sql.DB when using PostgreSQL backend, or nil otherwise.
+// DB 返回底层 *sql.DB。PostgreSQL-only 收敛后恒非 nil（Store 只能经 OpenPostgres 构造）。
 func (s *Store) DB() *sql.DB {
 	if s == nil {
 		return nil
@@ -759,19 +642,10 @@ func (s *Store) ConfigurePostgres(maxOpen, maxIdle int) {
 	}
 }
 
+// Backend 恒返回 BackendPostgres：Twilight 现在只有 PostgreSQL 一种后端。
+// 保留此方法（而非删除）是为了兼容诊断 / 迁移面板里「当前生效后端」的展示位。
 func (s *Store) Backend() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.backend == "" {
-		return BackendJSON
-	}
-	return s.backend
-}
-
-func (s *Store) Path() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.path
+	return BackendPostgres
 }
 
 func emptyState() State {
@@ -942,23 +816,13 @@ func (s *State) ensure() {
 		s.DeveloperJSPresets = map[int64]DeveloperJSPreset{}
 	}
 
-	now := time.Now().Unix()
-	for id, t := range s.Tickets {
-		if t.AdminNote != "" && len(t.Replies) == 0 {
-			t.Replies = []TicketReply{{
-				UID:       0,
-				Username:  "管理员",
-				Role:      0,
-				Content:   t.AdminNote,
-				CreatedAt: t.UpdatedAt,
-			}}
-			s.Tickets[id] = t
-			_ = now
-		}
-	}
-	if s.TicketTypes == nil {
-		s.TicketTypes = []string{"all"}
-	}
+	// 历史遗留的「AdminNote → 合成一条管理员回复」迁移已移除。它本是 Replies[] 模型
+	// 出现前的一次性数据迁移，却写在 ensure() 里每次 save/load 都跑，且不 gate：
+	// 一旦「处理备注」被设而工单尚无回复，就凭空造出一条 UID:0「管理员」回复。
+	// 在 AdminNote 与聊天回复解耦后（见 applyTicketReplyLocked），这会把纯元数据的
+	// 处理备注反复伪造成对话消息，正是「管理员回复与聊天信息互相覆盖 / 部分消失」的一环。
+	// 早已运行过该迁移的部署，其合成回复已落盘、不受影响；用户端在无回复时仍会
+	// 回退展示 admin_note，legacy 可见性不丢失。此处不再自动把备注提升为回复。
 }
 
 func (s *State) compactHistory() {
@@ -1052,213 +916,145 @@ func (s *Store) restoreStateLocked(snap stateSnapshot) {
 //
 // mutate 自身返回 error 时不会触发 save / 回滚——还没真改盘，调用方自行处理。
 func (s *Store) mutateAndSaveLocked(mutate func() error) error {
-	if err := s.refreshLocked(); err != nil {
-		return err
-	}
-	prev, err := s.snapshotStateLocked()
-	if err != nil {
-		return err
-	}
-	if err := mutate(); err != nil {
-		// mutate 失败：本身就不打算落盘，状态可能被改了一半，回滚到快照。
+	// Postgres 后端多进程并发写会撞版本守卫（errStateVersionConflict）。撞上时
+	// 说明他进程已提交更新：重新 refreshLocked 拉到最新 state + version、以新基线
+	// 重放 mutate 再写。mutate 闭包必须基于「当前 s.state」重新计算（分配新 ID、
+	// 读队列长度等都在闭包内基于最新状态进行），故重放天然吸收他进程的写而非覆盖。
+	// 有界重试防病态活锁；JSON 后端不会返回该哨兵，一次即走完。
+	const maxAttempts = 8
+	for attempt := 0; ; attempt++ {
+		if err := s.refreshLocked(); err != nil {
+			return err
+		}
+		prev, err := s.snapshotStateLocked()
+		if err != nil {
+			return err
+		}
+		if err := mutate(); err != nil {
+			// mutate 失败：本身就不打算落盘，状态可能被改了一半，回滚到快照。
+			s.restoreStateLocked(prev)
+			return err
+		}
+		err = s.saveLocked()
+		if err == nil {
+			return nil
+		}
+		// 无论何种失败都先把内存回滚到 mutate 前，保证内存与持久层一致。
 		s.restoreStateLocked(prev)
+		if errors.Is(err, errStateVersionConflict) && attempt < maxAttempts-1 {
+			// 版本冲突且仍有重试预算：回到循环顶重新 refresh（拿到他进程的写与新
+			// version）再重放。不 sleep——冲突窗口极短，且 refresh 本身即让路。
+			continue
+		}
 		return err
 	}
-	if err := s.saveLocked(); err != nil {
-		s.restoreStateLocked(prev)
-		return err
-	}
-	return nil
 }
 
+// saveLocked 走版本守卫写：要求持久层 version 仍等于本进程读到的 s.stateVersion，
+// 被他进程抢先递增则返回 errStateVersionConflict 交由调用方处理（mutateAndSaveLocked
+// 重试 / 直裸写者 fail-closed）。
 func (s *Store) saveLocked() error {
+	return s.saveStateLocked(false)
+}
+
+// saveLockedForce 无条件覆盖持久层并把 version 推到「读到值 +1」，绕过版本守卫。
+// 仅用于 admin 恢复 / 迁移这类「本次快照就是权威、要盖掉一切」的场景（LoadSnapshot），
+// 常规写路径一律走 saveLocked 的守卫版本，避免退回丢更新老路。
+func (s *Store) saveLockedForce() error {
+	return s.saveStateLocked(true)
+}
+
+func (s *Store) saveStateLocked(force bool) error {
 	s.state.ensure()
 	data, err := json.Marshal(s.state)
 	if err != nil {
 		return err
 	}
-	if s.db != nil {
-		// 整 jsonb 一次写入大对象（用户表 + 邀请关系 + 登录历史 + … 数 MB）；
-		// 之前裸 context.Background() 一旦 PG 抖动会让 saveLocked 永久挂起，
-		// graceful shutdown 与并发 handler 全部跟着卡死。这里用 30s
-		// WithTimeout 兜底：到期 ExecContext 自行退出释放连接，调用方拿到
-		// context.DeadlineExceeded 走回滚分支（mutateAndSaveLocked 把内存 state
-		// 还原到 snapshot），磁盘和内存仍保持一致。
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		_, err = s.db.ExecContext(
+	// 整 jsonb 一次写入大对象（用户表 + 邀请关系 + 登录历史 + … 数 MB）；
+	// 之前裸 context.Background() 一旦 PG 抖动会让 saveLocked 永久挂起，
+	// graceful shutdown 与并发 handler 全部跟着卡死。这里用 30s
+	// WithTimeout 兜底：到期 ExecContext 自行退出释放连接，调用方拿到
+	// context.DeadlineExceeded 走回滚分支（mutateAndSaveLocked 把内存 state
+	// 还原到 snapshot），磁盘和内存仍保持一致。
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if force {
+		// 强制覆盖：无视持久层现有 version，把它推进到「本进程读到值 +1」。
+		// RETURNING 回填本地版本，使后续守卫写以此为新基线。
+		var newVersion int64
+		err = s.db.QueryRowContext(
 			ctx,
-			`INSERT INTO twilight_state (id, state, updated_at) VALUES (1, $1::jsonb, now())
-			 ON CONFLICT (id) DO UPDATE SET state = EXCLUDED.state, updated_at = now()`,
-			string(data),
-		)
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
-		return err
-	}
-	// 写前先把上一份 state.json 复制到 .bak —— refreshLocked 解析失败时可
-	// 回退到 .bak（避免一次坏写盖掉所有用户数据）。复用 writeFileAtomicSync
-	// 走 tmp + fsync(file) + rename + fsync(dir)：之前裸 os.WriteFile + Rename
-	// 没有 fsync，掉电后 .bak 可能仍是 page cache 里半字节状态，最坏 state.json
-	// 与 .bak 同时损坏 = 没有恢复路径。helper 失败仅写 stderr，**不能**走
-	// zap.L() —— saveLocked 当前持有 s.mu，而全局 zap sink 注册了 runtime
-	// log 路由会回调 AddRuntimeLog 再次申请 s.mu，构成自旋死锁（Windows CI
-	// 上 dir.Sync 必然失败，必中此路径，而 Linux/macOS 通常成功才掩盖）。
-	// .bak 影子拷贝源：优先用 s.lastSaved（上次成功写入 / 加载的字节，与磁盘恒等），
-	// 省掉每次写的整份 os.ReadFile(s.path)。lastSaved 为 nil（冷启动首写，尚未落过盘）
-	// 时回退到读盘，保持原行为。
-	if existing := s.lastSaved; len(existing) > 0 {
-		if err := writeFileAtomicSync(s.path+".bak", existing, 0o600); err != nil {
-			fmt.Fprintf(os.Stderr, "twilight: state .bak shadow copy failed path=%s err=%v\n", s.path, err)
+			`INSERT INTO twilight_state (id, state, version, updated_at) VALUES (1, $1::jsonb, $2, now())
+			 ON CONFLICT (id) DO UPDATE SET state = EXCLUDED.state, version = twilight_state.version + 1, updated_at = now()
+			 RETURNING version`,
+			string(data), s.stateVersion+1,
+		).Scan(&newVersion)
+		if err != nil {
+			return err
 		}
-	} else if existing, readErr := os.ReadFile(s.path); readErr == nil && len(existing) > 0 {
-		if err := writeFileAtomicSync(s.path+".bak", existing, 0o600); err != nil {
-			fmt.Fprintf(os.Stderr, "twilight: state .bak shadow copy failed path=%s err=%v\n", s.path, err)
-		}
+		s.stateVersion = newVersion
+		return nil
 	}
-	tmp := s.path + ".tmp"
-	// tmp 写完后必须 fsync 数据 + 父目录，否则 os.Rename 仅在 VFS 层原子，
-	// crash/掉电时数据可能仍在 page cache。顺序：
-	// write → fsync(file) → close → rename → chmod → fsync(dir)。
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	// 版本守卫写：仅当持久层 version 仍等于本进程读到的 s.stateVersion 时才更新，
+	// 命中即 version+1 并 RETURNING；被他进程抢先递增则 UPDATE 匹配 0 行、
+	// QueryRow 得 sql.ErrNoRows，转成 errStateVersionConflict 交调用方重试 / 上抛。
+	// id=1 尚不存在（冷启动首写）时 INSERT 分支生效，version 落为期望值。
+	var newVersion int64
+	err = s.db.QueryRowContext(
+		ctx,
+		`INSERT INTO twilight_state (id, state, version, updated_at) VALUES (1, $1::jsonb, $2, now())
+		 ON CONFLICT (id) DO UPDATE SET state = EXCLUDED.state, version = twilight_state.version + 1, updated_at = now()
+		 WHERE twilight_state.version = $3
+		 RETURNING version`,
+		string(data), s.stateVersion+1, s.stateVersion,
+	).Scan(&newVersion)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errStateVersionConflict
+	}
 	if err != nil {
 		return err
 	}
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, s.path); err != nil {
-		return err
-	}
-	// 强制 0o600：即使外部 umask / 拷贝把权限放宽到 group/other，重写后
-	// 也立刻收敛回仅 owner 可读写，避免 state.json 被同机其它用户读取。
-	_ = os.Chmod(s.path, 0o600)
-	// 父目录 fsync 让 rename 自身的目录条目落盘。Windows 不支持以这种方式
-	// 同步目录；文件内容已通过 f.Sync() 落盘，目录同步在该平台降级为 best effort。
-	_ = syncParentDir(filepath.Dir(s.path), false)
-	// 刷新 .bak 影子源缓存 + 变更门控基线：data 就是刚落盘的字节，(mtime,size)
-	// 从落盘后的 state.json 现读。stat 失败则清空门控，下次 refresh 保守走全量。
-	s.lastSaved = data
-	if fi, statErr := os.Stat(s.path); statErr == nil {
-		s.lastMtime = fi.ModTime()
-		s.lastSize = fi.Size()
-	} else {
-		s.lastMtime = time.Time{}
-		s.lastSize = 0
-	}
+	s.stateVersion = newVersion
 	return nil
 }
 
+// refreshLocked 在每次写前从 PostgreSQL 全量拉取最新 state + version。多个 Twilight
+// 进程（api / bot / scheduler）各持独立 Store，refresh 保证本进程在守卫 UPSERT 前拿到
+// 他进程的最新提交（丢更新防护的读侧）；stateVersion 一并对齐，作为 saveLocked 守卫写
+// 的期望基线。
 func (s *Store) refreshLocked() error {
 	if s == nil {
 		return nil
 	}
-	// Multiple Twilight processes can share the same state backend; refresh before
-	// writes so a stale process does not overwrite newer persisted state.
+	// 裸 context.Background 一旦 PG 抖动 / 主从切换会让 refreshLocked 永久挂起，
+	// 而它是所有 mutating 路径的前置（mutateAndSaveLocked / 直裸写者都走它）。
+	// 整个 store mutex 会跟着卡死，进而把 HTTP handler、scheduler、bot 全部排队挂起。
+	// 30s 与 saveLocked 同档，超时由调用方拿到 context.DeadlineExceeded 后走错误
+	// 回滚 / 报错路径。
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	var data []byte
-	var err error
-	// jsonMtime / jsonSize 承载 JSON 后端本次读到文件的 stat，用于加载成功后刷新
-	// 变更门控基线（PG 后端保持零值且不参与，见 Store.lastMtime 注释）。
-	var jsonMtime time.Time
-	var jsonSize int64
-	if s.db != nil {
-		// 与 saveLocked 对齐：裸 context.Background 一旦 PG 抖动 / 主从切换
-		// 会让 refreshLocked 永久挂起，而 refreshLocked 是所有 mutating 路径
-		// 的前置（mutateAndSaveLocked / 直裸写者都走它）。整个 store mutex
-		// 会跟着卡死，进而把 HTTP handler、scheduler、bot 全部排队挂起。
-		// 30s 与 saveLocked 同档，超时由调用方拿到 context.DeadlineExceeded
-		// 后走错误回滚 / 报错路径。
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		err = s.db.QueryRowContext(ctx, `SELECT state FROM twilight_state WHERE id = 1`).Scan(&data)
-		if errors.Is(err, sql.ErrNoRows) {
-			s.state = emptyState()
-			s.rebuildUserIndexes()
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-	} else {
-		if strings.TrimSpace(s.path) == "" {
-			return nil
-		}
-		// 变更门控：先 stat，(mtime,size) 与上次加载/落盘记录一致即代表磁盘未变。
-		// 单进程 flock 下 state.json 唯一写者是本进程 saveLocked，命中即证明内存
-		// state 已是最新，跳过整份 ReadFile+Unmarshal+rebuildUserIndexes。门控冷
-		// （lastMtime 零值，冷启动 / .bak 回退后）或任何不匹配都保守走完整重载。
-		if fi, statErr := os.Stat(s.path); statErr == nil && !s.lastMtime.IsZero() &&
-			fi.ModTime().Equal(s.lastMtime) && fi.Size() == s.lastSize {
-			return nil
-		}
-		data, err = os.ReadFile(s.path)
-		if errors.Is(err, os.ErrNotExist) {
-			s.state = emptyState()
-			s.rebuildUserIndexes()
-			s.lastSaved = nil
-			s.lastMtime = time.Time{}
-			s.lastSize = 0
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		// ReadFile 后再 stat 一次，把门控基线对齐到"实际读到的这份字节"。
-		// s.mu + flock 保证 stat/read 之间无并发写者，(mtime,size) 与 data 一致。
-		if fi, statErr := os.Stat(s.path); statErr == nil {
-			jsonMtime = fi.ModTime()
-			jsonSize = fi.Size()
-		}
+	var version int64
+	err := s.db.QueryRowContext(ctx, `SELECT state, version FROM twilight_state WHERE id = 1`).Scan(&data, &version)
+	if errors.Is(err, sql.ErrNoRows) {
+		s.state = emptyState()
+		s.rebuildUserIndexes()
+		s.stateVersion = 0
+		return nil
 	}
+	if err != nil {
+		return err
+	}
+	s.stateVersion = version
 	var state State
 	if len(data) > 0 {
 		if err := json.Unmarshal(data, &state); err != nil {
-			// 解析失败：尝试 fallback 到 .bak（saveLocked 写前快照），
-			// 避免一次坏写或文件截断把整库拖死。日志里只暴露文件大小 +
-			// 解析错误位置，不暴露内容（state.json 可能含 token）。
-			if s.db == nil && strings.TrimSpace(s.path) != "" {
-				if bak, bakErr := os.ReadFile(s.path + ".bak"); bakErr == nil && len(bak) > 0 {
-					var bakState State
-					if json.Unmarshal(bak, &bakState) == nil {
-						bakState.ensure()
-						s.state = bakState
-						s.rebuildUserIndexes()
-						// 内存已是 .bak 的好状态：把它设为 .bak 影子源，下次 saveLocked
-						// 便以好状态兜底、不会拿坏主文件覆盖 .bak。门控刻意留冷（不设
-						// mtime/size），逼下次 refresh 重读仍坏的主文件并再次回退，直到
-						// 一次成功 saveLocked 把主文件与门控一起修好。
-						s.lastSaved = bak
-						s.lastMtime = time.Time{}
-						s.lastSize = 0
-						return nil
-					}
-				}
-			}
 			return err
 		}
 	}
 	state.ensure()
 	s.state = state
 	s.rebuildUserIndexes()
-	// JSON 后端：刷新 .bak 影子源缓存 + 变更门控基线到"刚读到的这份字节"。
-	// stat 失败（jsonMtime 零值）则门控留冷，下次 refresh 保守走完整重载。
-	if s.db == nil {
-		s.lastSaved = data
-		s.lastMtime = jsonMtime
-		s.lastSize = jsonSize
-	}
 	return nil
 }
 
@@ -1270,29 +1066,17 @@ func (s *Store) Snapshot() ([]byte, error) {
 	}
 	state := s.state
 	state.ensure()
-	// PG 后端：runtime logs 落在独立表 `twilight_runtime_logs`，不会进入
-	// `twilight_state` 的 jsonb。Snapshot 必须把它们也读出来塞进 State，否则：
-	//   - PG → JSON 迁移会永久丢日志；
-	//   - 备份/恢复时 state 与 audit/runtime 两条线时点错位（admin 看到"已恢复"
-	//     但日志仍是恢复点之后的最新数据）。
+	// runtime logs 落在独立表 `twilight_runtime_logs`，不会进入 `twilight_state`
+	// 的 jsonb。Snapshot 必须把它们也读出来塞进 State，否则备份/恢复时 state 与
+	// runtime 两条线时点错位（admin 看到"已恢复"但日志仍是恢复点之后的最新数据）。
 	// 这里持锁期间额外做一次 SELECT，不影响并发写（只读快照）。
-	if s.db != nil {
-		logs, nextID, err := s.snapshotRuntimeLogsLocked()
-		if err != nil {
-			return nil, err
-		}
-		state.RuntimeLogs = logs
-		if nextID > state.NextRuntimeLogID {
-			state.NextRuntimeLogID = nextID
-		}
-	} else if s.runtimeLog != nil {
-		// JSON 后端：runtime log 活在旁路文件里，内存 state.RuntimeLogs 恒空。
-		// 备份 / 迁移快照要自洽（含 JSON→PG 迁移不丢日志），这里现取旁路环形缓冲注入 State。
-		logs, nextID := s.runtimeLog.snapshotEntries()
-		state.RuntimeLogs = logs
-		if nextID > state.NextRuntimeLogID {
-			state.NextRuntimeLogID = nextID
-		}
+	logs, nextID, err := s.snapshotRuntimeLogsLocked()
+	if err != nil {
+		return nil, err
+	}
+	state.RuntimeLogs = logs
+	if nextID > state.NextRuntimeLogID {
+		state.NextRuntimeLogID = nextID
 	}
 	return json.MarshalIndent(state, "", "  ")
 }
@@ -1350,31 +1134,22 @@ func (s *Store) LoadSnapshot(data []byte) error {
 	state.ensure()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// 快照里的 runtime_logs 单独接管：PG 回写独立表，JSON 回写旁路文件。
-	// 先把它从待落 state 里摘出，JSON 后端清空 s.state.RuntimeLogs 再 saveLocked，
-	// 保持「内存 state.RuntimeLogs 恒空、不进 state.json」的不变量（否则这批日志会
-	// 被写进 state.json 且此后一直随每次 saveLocked 反复落盘）。
+	// 快照里的 runtime_logs 单独接管：回写到独立表 twilight_runtime_logs，不进
+	// twilight_state 的 jsonb。先把它从待落 state 里摘出，避免这批日志被写进 state
+	// 且此后随每次 saveLocked 反复落盘。
 	logs := state.RuntimeLogs
 	s.state = state
-	if s.db == nil {
-		s.state.RuntimeLogs = nil
-	}
-	if err := s.saveLocked(); err != nil {
+	// admin 恢复 / 迁移：本次快照就是权威，必须无条件盖掉持久层现值（不能因版本守卫
+	// 失败而拒绝恢复）。saveLockedForce 的 ON CONFLICT 分支从持久层真实 version 递增，
+	// 无论本地 s.stateVersion 是否新鲜都保证覆盖生效，并回填本地版本作后续写基线。
+	if err := s.saveLockedForce(); err != nil {
 		return err
 	}
-	// PG 后端：把 snapshot 里的 runtime_logs 显式回写到独立表，避免恢复后
-	// twilight_state 走到老时点而 twilight_runtime_logs 仍是最新数据。
-	// 失败不致命（state 已经写回），但要 surface 给调用方决定是否重试。
-	if s.db != nil {
-		if err := s.replaceRuntimeLogsLocked(logs); err != nil {
-			return err
-		}
-	} else if s.runtimeLog != nil {
-		// JSON 后端：用快照里的 runtime log 整份替换旁路文件（含空快照 → 清空旁路），
-		// 与 PG 的 replaceRuntimeLogsLocked 语义对齐。
-		if err := s.runtimeLog.replace(logs); err != nil {
-			return err
-		}
+	// 把 snapshot 里的 runtime_logs 显式回写到独立表，避免恢复后 twilight_state
+	// 走到老时点而 twilight_runtime_logs 仍是最新数据。失败不致命（state 已经写回），
+	// 但要 surface 给调用方决定是否重试。
+	if err := s.replaceRuntimeLogsLocked(logs); err != nil {
+		return err
 	}
 	return nil
 }
@@ -4767,6 +4542,13 @@ var (
 	ErrMediaRequestGlobalActiveLimit = errors.New("media request global active limit reached")
 	ErrInsufficientPoints            = errors.New("insufficient points")
 )
+
+// errStateVersionConflict 是 Postgres 后端乐观并发控制的内部哨兵：saveLocked 的
+// 版本守卫 UPSERT 发现 twilight_state.version 已被其它进程递增时返回它。
+// 仅在进程内流转——mutateAndSaveLocked 捕获后重新 refresh+mutate 重试，直裸写者
+// 则 fail-closed 上抛（这些路径的调用方要么丢弃错误、要么可安全重试），
+// 绝不再走「盲写整份 jsonb 覆盖他进程刚提交的写」的丢更新老路。
+var errStateVersionConflict = errors.New("state version conflict")
 
 func randomKey(prefix string, id, now int64) string {
 	return prefix + "_" + strconv36(id) + "_" + strconv36(now)

@@ -20,7 +20,7 @@
 | `internal/api/routes.go` | 全部路由的集中注册点（含方法、鉴权级别、handler）。 |
 | `internal/api/*_client.go` | Emby、TMDB、Bangumi、Telegram 等外部服务客户端。 |
 | `internal/api/*_handlers.go` | 按功能域拆分的 HTTP handler，例如求片、邀请、注册码、调度、数据库与系统更新。 |
-| `internal/store` | 状态存储层：JSON 文件后端与 PostgreSQL 后端，定义单一状态文档 `State`。 |
+| `internal/store` | 状态存储层：唯一运行后端 PostgreSQL，定义单一状态文档 `State`；`Store` 仅经 `store.OpenPostgres` 构造。 |
 | `internal/config` | TOML 配置与 `TWILIGHT_*` 环境变量加载。 |
 | `internal/security` | 密码哈希、安全随机数与兼容校验。 |
 | `webui` | Next.js 前端应用。 |
@@ -232,17 +232,17 @@ Twilight 不对 Cookie 鉴权的变更类请求做 CSRF 令牌校验，也不做
 
 全部业务状态都保存在「单一状态文档」（`internal/store` 中的 `State` 结构体）里，包括用户、注册码、邀请码 `invite_codes`、邀请关系 `invite_relations`、公告 `announcements`、求片、签到、设备、登录日志、IP 黑名单、调度计划等。它们以 `State` 结构体的字段（多为 `map`）形式存在，并非独立数据库或独立表。
 
-两种存储后端：
+唯一运行后端是 **PostgreSQL**：
 
-- **JSON 文件后端**：默认状态文件为 `db/twilight_go_state.json`，整份状态序列化为一个 JSON 文档。
-- **PostgreSQL 后端**：状态写入 `twilight_state` 表中 `id = 1` 的单行 `jsonb`。另有两张独立表：`twilight_sessions`（会话）与 `twilight_runtime_logs`（运行时日志）。
+- 整份状态写入 `twilight_state` 表中 `id = 1` 的单行 `jsonb`。另有独立表：`twilight_sessions`（会话）、`twilight_runtime_logs`（运行时日志）、`twilight_playback_records`（播放记录）。
+- `Store` 仅能经 `store.OpenPostgres` 构造，`database.driver` 设为非 postgres 值时后端启动即报错。JSON 仅作为迁移面板的一次性导出目标与 `twilight migrate-json` 的导入源保留，不再是可运行后端；已无 JSON 文件后端、文件锁、`.bak` 影子文件或旁路日志文件。
 
 > 不存在旧 Python 时代的 `db/invites.db`、`invite_relations` 单表，也没有「新增 xx.db / 新增表 / `ALTER TABLE announcements 增列` / 启动时自动建表」这类邀请或公告相关的迁移说法。新增邀请 / 公告字段，是在 `State` 结构体上加字段，并在加载时补默认值（见 `store.go` 中对 nil map 的初始化），不要引入独立表或单独的 SQLite 文件。
 
 ### 数据库性能与接口一致性
 
 - 性能优化优先从现有访问模式入手：分页 / 游标、批量读取、索引、短超时、限流、前端按需加载和必要缓存；不要为了局部慢查询把业务实体拆成独立表，除非先更新架构文档并明确快照一致性、迁移、备份恢复方案。
-- PostgreSQL 的 `twilight_runtime_logs` 是高写入运行日志表，允许独立优化：最新快照按 `id DESC` 取最近 N 条，增量读取按 `id > after ORDER BY id ASC LIMIT N`，裁剪按 cutoff id 保留最近 N 条。JSON 后端和内存 fallback 必须保持相同 cursor 语义。
+- PostgreSQL 的 `twilight_runtime_logs` 是高写入运行日志表，允许独立优化：最新快照按 `id DESC` 取最近 N 条，增量读取按 `id > after ORDER BY id ASC LIMIT N`，裁剪按 cutoff id 保留最近 N 条。状态接入前的内存 fallback 缓冲区必须保持相同 cursor 语义。
 - 新增列表接口应保持统一响应口径：数据数组放在 `items` 或既有兼容字段，增量游标使用 `next_cursor`；变更字段名或排序语义前必须同步后端 API 文档、前端 API 类型和调用方。
 - 新增缓存必须写清作用域（进程 / Redis / 前端内存）、TTL、容量上限、失效条件和降级行为；配置热重载后不能继续读取旧配置或旧 store 句柄。
 

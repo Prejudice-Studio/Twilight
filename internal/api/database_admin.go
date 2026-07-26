@@ -27,9 +27,12 @@ func (a *App) handleDatabaseStatus(w http.ResponseWriter, r *http.Request, _ Par
 		"configured_driver": a.cfg().DatabaseDriver,
 		"active_label":      databaseDriverLabel(a.store().Backend()),
 		"configured_label":  databaseDriverLabel(a.cfg().DatabaseDriver),
+		// 运行期后端只有 PostgreSQL 一种；JSON 仅作为迁移面板的「一次性导出目标」
+		// （把当前状态 dump 成 state.json 文件），不再是可运行的后端。role 用
+		// runtime / export 区分，前端据此只把 postgres 当作可切换的运行后端。
 		"supported_drivers": []map[string]string{
 			{"driver": "postgres", "label": "postgresql", "role": "runtime"},
-			{"driver": "json", "label": "gojson", "role": "runtime"},
+			{"driver": "json", "label": "gojson", "role": "export"},
 		},
 		"state_file":              a.cfg().StateFile,
 		"backup_dir":              a.cfg().DatabaseBackupDir,
@@ -318,10 +321,6 @@ func (a *App) handleDatabaseMigrate(w http.ResponseWriter, r *http.Request, _ Pa
 			failWithCode(w, http.StatusInternalServerError, ErrDBStateFileWriteBad, "写入状态文件失败")
 			return
 		}
-		// snapshot 已把 runtime log 内嵌进目标 state.json。若目标处残留旧的
-		// runtime log 旁路文件，下次 Open 会以旧旁路为准、遮蔽刚迁移进来的内嵌
-		// 日志（漏迁），故显式清掉，逼下次 Open 从内嵌 RuntimeLogs 重建旁路。
-		store.RemoveRuntimeLogSidecar(targetPath)
 		summary := a.databaseMigrationSummary(store.BackendJSON, state, dryRun, snapshotBytes, targetReady)
 		summary["state_file"] = targetPath
 		summary["pre_migration_backup"] = preMigration

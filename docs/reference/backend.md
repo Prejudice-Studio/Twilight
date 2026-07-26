@@ -13,7 +13,7 @@ Emby 活动日志同步 `/System/ActivityLog/Entries` 后，会按 `playback.sta
 | `cmd/twilight` | Go 后端 CLI 入口，支持 `api`、`all`、`scheduler`、`bot`、`version` 子命令。 |
 | `internal/api` | HTTP 路由、统一响应 envelope、鉴权、CORS、限流、上传、安全头，以及按业务拆分的 handler / client / service。 |
 | `internal/config` | 读取运行目录 `config.toml`、同目录 `config.local.toml` 与 `TWILIGHT_*` 字段级环境变量；运行入口固定使用当前目录 `config.toml`。 |
-| `internal/store` | 单一状态文档存储，默认写入 JSON 文件 `db/twilight_go_state.json`，或写入 PostgreSQL 的 `twilight_state` 表。 |
+| `internal/store` | 单一状态文档存储，唯一运行期后端为 PostgreSQL：整份 `State` 作为 jsonb 存进 `twilight_state` 表；`Store` 仅能经 `store.OpenPostgres` 构造。JSON 仅作为迁移面板的一次性导出目标与 `migrate-json` 导入源保留，已无 JSON 文件运行后端、无文件锁、无 `.bak`/旁路文件。 |
 | `internal/redis` | 无第三方依赖的 Redis RESP 客户端，用于会话和限流跨进程共享。 |
 | `internal/security` | Token 生成、PBKDF2-SHA256 密码哈希与旧 SHA256 密码兼容校验。 |
 
@@ -94,7 +94,7 @@ systemd 部署对应三个服务单元：`twilight`、`twilight-bot`、`twilight
 | `API.host` / `API.port` | `0.0.0.0` / `5000` |
 | `Database.driver` | `postgres` |
 | `Database` PostgreSQL 默认 | host `127.0.0.1`、port `5432`、user `twilight`、database `twilight`、sslmode `prefer`、连接池 open=8 / idle=4 |
-| 状态文件 | `StateFile` 为空时回退到 `<databases_dir>/twilight_go_state.json`（`databases_dir` 默认 `db`） |
+| 状态文件（仅遗留/导出用途） | `StateFile` 为空时回退到 `<databases_dir>/twilight_go_state.json`（`databases_dir` 默认 `db`）；运行期不再读写此文件，仅作为迁移面板 JSON 导出目标与 `migrate-json` 默认导入源 |
 | 备份目录 | `DatabaseBackupDir` 为空时回退到 `<databases_dir>/backups` |
 | 上传目录 | `uploads`，单文件上限 5 MiB |
 | 日志 | `log_level=info`、`runtime_log_limit=1000`、`runtime_memory_limit_mb=128` |
@@ -104,7 +104,7 @@ systemd 部署对应三个服务单元：`twilight`、`twilight-bot`、`twilight
 | 限流 | 默认开启，全局 1200/分钟、登录 60/分钟等 |
 | 调度 | 默认开启，过期检查 `03:00`、到期提醒 `09:00`、每日统计 `00:05` |
 
-> `Database.driver` 默认就是 `postgres`，因此空配置启动会尝试连接 PostgreSQL；若要使用 JSON 文件存储，需显式设置 `driver = "json"`（或留空时按 JSON 处理，详见下文）。
+> 运行期后端已收敛为单一 PostgreSQL：`Database.driver` 只接受 `postgres` / `postgresql`（或留空按 `postgres` 处理）。设为其它值（含历史的 `json` / `file`）会在启动时直接报错，不再回退到 JSON 文件存储。历史 JSON 部署用 `twilight migrate-json` 一次性导入（详见下文）。
 
 ### CORS 约束
 
@@ -139,7 +139,7 @@ systemd 部署对应三个服务单元：`twilight`、`twilight-bot`、`twilight
 
 | 变量 | 说明 |
 | ---- | ---- |
-| `TWILIGHT_DATABASE_DRIVER` | 状态后端：`json`（或空/`file`）或 `postgres`（或 `postgresql`）。 |
+| `TWILIGHT_DATABASE_DRIVER` | 状态后端：只接受 `postgres` / `postgresql`（或留空按 `postgres` 处理）；其它值启动即报错。 |
 | `TWILIGHT_DATABASE_URL` / `TWILIGHT_POSTGRES_DSN` | PostgreSQL 完整 DSN，优先级高于分项配置（二者等价）。 |
 | `TWILIGHT_POSTGRES_HOST` / `TWILIGHT_POSTGRES_PORT` | PostgreSQL 主机与端口。 |
 | `TWILIGHT_POSTGRES_USER` / `TWILIGHT_POSTGRES_PASSWORD` / `TWILIGHT_POSTGRES_DATABASE` | PostgreSQL 用户、密码、库名。 |
@@ -237,41 +237,38 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
 
 > 旧文档把邀请、公告等描述为「新增 `db/invites.db` / `announcements.db`」「`invite_relations` 单表」「`ALTER TABLE announcements 增列`」「自动建表」等，均为过时说法。当前实现中这些都是单一状态文档（`internal/store`）里的字段。
 
-支持两种运行后端（`openStore` / `OpenPostgres`）：
+运行期只有一种后端（`OpenPostgres`）：
 
 | 后端 | 说明 |
 | ---- | ---- |
-| JSON（`driver = "json"`、空值或 `file`） | 整份 `State` 序列化为 `db/twilight_go_state.json`（可由 `Database.state_file` / `TWILIGHT_STATE_FILE` 指定）；运行日志剥离到同目录旁路文件 `twilight_go_state.json.runtimelog`（NDJSON 追加），不再进 `state.json`。 |
-| PostgreSQL（`driver = "postgres"` / `postgresql`） | 整份 `State` 作为 jsonb 存进 `twilight_state` 表 `id = 1` 的单行；运行日志另存独立表 `twilight_runtime_logs`，会话另存独立表 `twilight_sessions`。 |
+| PostgreSQL（`driver = "postgres"` / `postgresql` / 空值） | 整份 `State` 作为 jsonb 存进 `twilight_state` 表 `id = 1` 的单行；运行日志另存独立表 `twilight_runtime_logs`，会话另存独立表 `twilight_sessions`，播放记录另存 `twilight_playback_records`。`Store` 仅能经 `store.OpenPostgres` 构造，`s.db` 恒非 nil。 |
+
+> JSON 不再是运行后端：`driver` 设为 `json` / `file` 会在 `openStore` 直接报错。JSON 仅在两处以「文件」形式出现——迁移面板的一次性导出目标（把当前状态 dump 成 `state.json`）与 `twilight migrate-json` 的历史导入源。历史上的进程文件锁（`*.lock`）、`.bak` 影子文件、`state.json.runtimelog` 旁路日志文件、`refreshLocked` 变更门控均随 JSON 运行后端一并移除。
 
 数据库行为要点：
 
-- **JSON 后端**写盘走原子写 + fsync（tmp → fsync → rename → fsync 父目录），写前把上一份复制为 `.bak`；启动 / 刷新解析失败时回退到 `.bak`。文件权限收敛到 `0o600`。
-- **JSON 后端为单进程独占**：启动时对 `state.json` 加进程级文件锁（`*.lock`），第二个进程会拿到 busy 错误并启动失败。多进程 / 多实例部署应使用 PostgreSQL。
-- **JSON 后端写热路径优化（依赖上一条的单进程独占前提）**：
-  - `.bak` 影子拷贝不再每次写前 `os.ReadFile` 重读整份多 MB 文件，而是复用内存里缓存的"上次成功写入 / 加载的字节"（`Store.lastSaved`）——单进程独占下 `saveLocked` 的 `rename` 是 `state.json` 唯一写者，缓存与磁盘恒等；冷启动首写缓存为空时回退读盘保持原行为。`.bak` 语义不变（仍是上一次成功写入的 state）。
-  - `refreshLocked` 前置**变更门控**：先 `os.Stat` 比对 `(mtime, size)` 与上次加载 / 落盘记录，一致即跳过整份 `ReadFile + json.Unmarshal + 重建索引`（单进程下磁盘只被自身 `saveLocked` 改动，命中即证明内存 state 已最新）。门控冷启动为空、`.bak` 回退后、或任何 stat 失败 / 不匹配都保守走完整重载。
-  - **PostgreSQL 后端刻意不设变更门控**：PG 为真多进程，唯一可用行版本信号 `updated_at` 是事务起始时点（微秒级），跨后端同微秒写可能撞同值导致漏读 + 覆盖（丢更新）；稳妥门控需 `xmin` / 版本列，超出当前改动范围。PG 的 `refreshLocked` 保持每次全量拉取。
-  - **运行日志剥离出 `state.json`（独立旁路文件）**：JSON 后端每条 `zap` 日志过去都会 `refreshLocked` + 追加到 `State.RuntimeLogs` + 整份多 MB `state.json` 的 `marshal + fsync`——日志越多、单条落盘成本越高，且 sink 回调与 `saveLocked` 持有的 `s.mu` 构成自旋死锁风险。现改为写同目录旁路文件 `state.json.runtimelog`（内存环形缓冲作读取来源 + NDJSON 追加落盘），拥有独立于 `s.mu` 的互斥锁，单条日志成本从「整库写」降到「一行 append」（open→写一行→close，规避 Windows「文件仍打开时 rename 失败」；不做 per-append fsync，诊断日志尽力而为容忍崩溃丢尾部若干条；物理行数超过 ~2×limit 时原子重写收敛体积）。`Open` 时若旁路文件已存在则以它为准 seed，否则从历史 `state.json` 内嵌的 `RuntimeLogs` 一次性迁移进旁路文件并重写 `state.json` 抹掉残留（此后 `state.json` 不再承载运行日志）。`AddRuntimeLog` / `RuntimeLogs` / `RuntimeLogStats` / `PruneRuntimeLogs` 的方法签名与游标 / 统计语义完全不变，API 层无感知。
-- **PostgreSQL 后端**：目标库不存在时，会尝试用同一连接用户连接 `postgres` / `template1` 维护库执行 `CREATE DATABASE`（连接用户需要 `CREATEDB` 权限，已存在则不重复创建）；随后自动建表 `twilight_state`、`twilight_runtime_logs`、`twilight_sessions` 及相关索引（`CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`，幂等）。
+- **多进程并发写用版本列串行化**：`twilight_state` 带 `version bigint` 列，`saveLocked` 走「version = 读到值」守卫的 UPSERT，命中 0 行（被他进程抢先递增）即回 `errStateVersionConflict`，`mutateAndSaveLocked` 有界重试（重新 `refreshLocked` 拉最新 state + version 后重放 mutate）。这取代了此前「refresh 与整份 jsonb 盲写之间被他进程插入提交后仍整份覆盖」的丢更新——正是「用户建了工单、TG 也收到通知，工单却随后凭空消失」的根因。`saveLockedForce` 无视守卫强制覆盖并把 version 推到「读到值 +1」，仅用于冷启动播种、`LoadSnapshot` 恢复 / 迁移。
+- `refreshLocked` 每次全量 `SELECT state, version`：PG 为真多进程，不设本地变更门控（单进程独占下才成立的 stat 门控已随 JSON 后端移除）。读写都走 30s 超时 context，连接假死时到期自行释放，避免整个 `s.mu` 连带全站 handler 卡死。
+- 写盘失败一律回滚：`mutateAndSaveLocked` 在 mutate 前 `snapshotStateLocked` 拍字节快照，save 失败经 `restoreStateLocked` 覆盖回内存并重建索引，保证内存与持久层要么一起前进、要么一起回到上一个一致点。
+- **PostgreSQL 建库建表**：目标库不存在时，会尝试用同一连接用户连接 `postgres` / `template1` 维护库执行 `CREATE DATABASE`（连接用户需要 `CREATEDB` 权限，已存在则不重复创建）；随后自动建表 `twilight_state`、`twilight_runtime_logs`、`twilight_sessions`、`twilight_playback_records` 及相关索引（`CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` / `ALTER TABLE … ADD COLUMN IF NOT EXISTS version`，全部幂等，可反复执行）。
 - **运行日志表性能口径**：`twilight_runtime_logs` 只服务 Go 进程运行日志，按 `id` 游标读取增量，按 `id DESC` 读取最新快照，并用 cutoff id 删除旧行以保留最近 N 条；主业务状态仍保持 `twilight_state` 单行 jsonb，不因性能优化拆出业务表。
 - **播放记录写路径优化**：
   - 所有 `twilight_playback_records` 的 PG 读写都走带超时的 context（`pgPlaybackReadTimeout` / `pgPlaybackWriteTimeout`，均 5s），连接假死时到期自行释放，不再无限阻塞。
-  - `AddPlaybackRecordIdempotent` 的 PG 单条 INSERT 移到 `s.mu` 之外执行——记录已由 `saveLocked` 落盘（JSON 文件或 PG state jsonb），独立表行只是读路径优先命中的副本、`ON CONFLICT` 保证幂等；持锁跨这段网络 I/O 会让一个卡死的 PG 连接冻结全部 store 写操作。DB 失败按旧语义吞掉（返回 `false, nil`），状态副本为准。
+  - `AddPlaybackRecordIdempotent` 的 PG 单条 INSERT 移到 `s.mu` 之外执行——记录已由 `saveLocked` 落进 `twilight_state` 的 state jsonb，独立表 `twilight_playback_records` 行只是读路径优先命中的副本、`ON CONFLICT` 保证幂等；持锁跨这段网络 I/O 会让一个卡死的 PG 连接冻结全部 store 写操作。DB 失败按旧语义吞掉（返回 `false, nil`），内存状态副本为准（这是 `internal/store` 里唯一保留内存兜底读的位置）。
   - 新增批量写 `AddPlaybackRecordsIdempotent([]PlaybackRecord)`：整批只做一次 `refreshLocked + saveLocked`，PG 侧走分块多行 INSERT（每条语句 500 行，8 列 × 500 = 4000 占位符，远低于 65535 上限）。Emby 活动同步 `persistEmbyPlaybackRecordsFromActivity`（事件上限 `embyActivityFetchLimit`=20000）改用批量方法——旧代码逐条调用，PG 模式下每条都要全量 state jsonb 序列化 + UPDATE，是灾难级写放大。去重语义与单条完全一致：`(uid, item_id, played_at)` 幂等键，`uid==0` / 空 `item_id` 记录不参与去重（沿用旧行为），批内 + 与现有状态双重去重用一张 `map[playbackKey]` 把逐条 O(N*M) 扫描压到 O(N+M)。
   - PG 连接池补 `SetConnMaxIdleTime(5min)`：低峰期回收空闲连接，规避中间件/PG 端提前掐断留下的半死连接被复用（与既有 `SetConnMaxLifetime(30min)` 硬上限配合）。
-- **批量用户写路径优化**：新增 `Store.UpdateUsers([]int64, func(*User) error)`，把「对一组用户各跑一次 `UpdateUser`」压成一次 store 写（单次 `refreshLocked + snapshotStateLocked + saveLocked`），取代逐用户 N 次「整份 state marshal + fsync（JSON）/ 整 jsonb upsert（PG）」。批量续期 `handleBatchRenewUsers`（纯本地写、无远端副作用，上限 200）改用它——旧代码逐用户 `UpdateUser`，JSON 后端上会持 `s.mu` 做上百次多 MB 落盘把所有并发读写全卡在锁上。逐用户语义完全对齐单条路径：`fn` 报错 / 身份字段冲突（`userIdentityConflictLocked`）/ 用户不存在都只记进返回的 `map[int64]error` 且不中断整批（该用户改动被丢弃不落盘），只有 `saveLocked` 失败才整批回滚到快照并抛错；重复 uid 只处理一次，无任何用户真正改动时跳过 save。身份索引随每个成功用户增量维护，同批内后来的用户能看到前面用户占用/释放的用户名/邮箱/TG/Emby 标识。注意：涉及逐用户远端调用（Emby 停用、session 清理、TG 封禁）的批量口（`handleBatchToggleEmby` / `handleBatchGrantAllLibraries` / `handleBatchRefreshStatus` / `handleBatchDeleteUsers` 及退群清理任务）**不**收敛——远端 I/O 无法批处理，且现有「单侧远端失败降级记录、不回滚本地」语义必须逐用户保留。
+- **批量用户写路径优化**：新增 `Store.UpdateUsers([]int64, func(*User) error)`，把「对一组用户各跑一次 `UpdateUser`」压成一次 store 写（单次 `refreshLocked + snapshotStateLocked + saveLocked`），取代逐用户 N 次「整份 state jsonb upsert」。批量续期 `handleBatchRenewUsers`（纯本地写、无远端副作用，上限 200）改用它——旧代码逐用户 `UpdateUser`，会持 `s.mu` 做上百次整份 jsonb 落盘把所有并发读写全卡在锁上。逐用户语义完全对齐单条路径：`fn` 报错 / 身份字段冲突（`userIdentityConflictLocked`）/ 用户不存在都只记进返回的 `map[int64]error` 且不中断整批（该用户改动被丢弃不落盘），只有 `saveLocked` 失败才整批回滚到快照并抛错；重复 uid 只处理一次，无任何用户真正改动时跳过 save。身份索引随每个成功用户增量维护，同批内后来的用户能看到前面用户占用/释放的用户名/邮箱/TG/Emby 标识。注意：涉及逐用户远端调用（Emby 停用、session 清理、TG 封禁）的批量口（`handleBatchToggleEmby` / `handleBatchGrantAllLibraries` / `handleBatchRefreshStatus` / `handleBatchDeleteUsers` 及退群清理任务）**不**收敛——远端 I/O 无法批处理，且现有「单侧远端失败降级记录、不回滚本地」语义必须逐用户保留。
 - DSN 优先级：`Database.url` / `TWILIGHT_DATABASE_URL` / `TWILIGHT_POSTGRES_DSN` 最高，否则由 host/port/user/password/database/sslmode 拼出 DSN。
 
 ### Web 端数据库运维
 
 管理端提供数据库状态、备份、恢复、迁移（`internal/api/database_admin.go`）：
 
-- 备份生成时点完整的 `State` 快照，运行日志也一并纳入以保证自洽：PostgreSQL 后端把独立表 `twilight_runtime_logs` 读回快照，JSON 后端把旁路文件 `state.json.runtimelog` 的环形缓冲注入快照。恢复 / 迁移时再由 `LoadSnapshot` 分别写回独立表或旁路文件（含空快照的清空语义）；JSON→JSON 迁移会显式清掉目标处的历史旁路文件，逼下次 `Open` 从内嵌 `RuntimeLogs` 重建，避免旧旁路遮蔽迁移进来的日志。
+- 备份生成时点完整的 `State` 快照，运行日志也一并纳入以保证自洽：`Snapshot` 把独立表 `twilight_runtime_logs` 读回快照的 `RuntimeLogs`。恢复 / 迁移时再由 `LoadSnapshot` 把 `RuntimeLogs` 显式写回独立表（含空快照的清空语义），使 `twilight_state` 与 `twilight_runtime_logs` 两条线的时点一致，避免恢复后 state 走到老时点而日志仍是最新。
 - 恢复和迁移都必须先走预览：缺少确认短语时仅返回 `dry_run=true` 的预览结果，不写入数据。恢复确认短语 `RESTORE_DATABASE`，迁移确认短语 `MIGRATE_DATABASE`。
 - 恢复和迁移执行前都会自动创建保护性备份，响应中返回 `pre_operation_backup` 便于回滚审计。
 - 迁移面板默认关闭，需显式开启 `Database.migration_panel_enabled`（或 `TWILIGHT_DATABASE_MIGRATION_PANEL_ENABLED`）。
-- **迁移源 / 目标只支持 `postgres` 与 `json` 两种 driver**。SQLite 作为数据源已被禁用（请求 `source = sqlite/legacy_sqlite` 会返回 403 `DB_SQLITE_DISABLED`）。迁移预检不会写入业务快照，仅返回源/目标 driver、实体计数、快照大小、目标连通性与重启/配置告警；PostgreSQL 目标会准备好库与表。
+- **运行后端只有 PostgreSQL 一种**；迁移面板的 `target = json` 不是一个可运行后端，只是「把当前状态一次性 dump 成 `state.json` 文件」的导出目标（对应 `/system/admin/database/status` 里 `role=export` 的 driver），产物用于归档或喂给 `migrate-json` 重新导入。SQLite 作为数据源已被禁用（请求 `source = sqlite/legacy_sqlite` 会返回 403 `DB_SQLITE_DISABLED`）。迁移预检不会写入业务快照，仅返回源/目标 driver、实体计数、快照大小、目标连通性与重启/配置告警；PostgreSQL 目标会准备好库与表。
 - 备份恢复只接受备份目录内的普通 `.json` 文件，拒绝绝对路径、`..`、子目录跳转与符号链接（`ResolveBackupPath`）。
 
 > 旧文档关于「数据库迁移页检测 `db/*.db`、按固定文件名读取 `users.db`/`api_keys.db`/`regcode.db`/… 旧 SQLite 文件并迁移」的整段流程，在当前代码中已不存在；SQLite 迁移源已被禁用。
@@ -282,7 +279,7 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
 
 - 实时日志只接入 Go 进程内 `zap` 全局 logger（通过自定义 core 路由），不开放任意日志文件、journald 或路径参数读取。
 - 日志等级、保留行数与 Go 运行时内存目标由 `Global.log_level`、`Global.runtime_log_limit`、`Global.runtime_memory_limit_mb` 控制；日志保留行数会被夹在 100–50000，默认 1000；内存目标默认 128 MiB，设为 0 表示不限制。
-- 日志后端跟随状态存储：JSON 后端日志落在同目录旁路文件 `state.json.runtimelog`（内存环形缓冲 + NDJSON 追加，不再进 `state.json`）；PostgreSQL 后端落在独立表 `twilight_runtime_logs`。在状态接入前的早期日志会先缓冲在内存 fallback 缓冲区，接入后回写。`after=0` 返回最近 N 条快照；`after>0` 返回该游标之后的前 N 条，保持升序，避免增量读取跳过积压日志。
+- 日志落在独立表 `twilight_runtime_logs`（与 `twilight_state` 同库不同表），不进 state jsonb。在状态接入前的早期日志会先缓冲在内存 fallback 缓冲区，接入后回写。`after=0` 返回最近 N 条快照；`after>0` 返回该游标之后的前 N 条，保持升序，避免增量读取跳过积压日志。
 - PostgreSQL 后端写入路径只做 INSERT，并按固定节奏异步裁剪；手动裁剪和异步裁剪都按 cutoff id 保留最近 N 条，避免 `NOT IN + ORDER BY LIMIT` 形式造成高写入期反复全表反扫。
 - 日志输出会脱敏：通过正则覆盖 `Authorization`、`Cookie`、`session id/token`、Emby/MediaBrowser token、`access/refresh/id token`、`client_secret`、`private_key`、`connection_string`、`database_url`、`token`、`secret`、`password`、`api_key`、`bot_token`、`dsn`、`Bearer …`、`key-…` 等敏感片段；敏感字段名（含 `key`、`*token`、`*secret` 等）直接替换为 `[REDACTED]`。脱敏是每条日志每个字符串字段都要跑的热路径：`redactSensitiveText` 前置一层廉价触发词前缀过滤（`mightContainSecret`），文本（小写化后）不含任何敏感触发词时直接零分配原样返回，避免绝大多数普通日志（uid / path / duration 等）白跑四遍正则 + 全量字符串分配。触发词列表是四条正则「命中所必需的字面量子串」的超集，只会让快路径更保守（多跑正则），不会漏脱敏。
 - 状态接口只读取 Go runtime 摘要（版本、goroutine、内存、是否启用 Redis、活动数据库后端、用户数等）和 Linux `/proc` 摘要（loadavg / meminfo / uptime），不返回环境变量、配置明文、命令行参数或进程列表。

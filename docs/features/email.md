@@ -16,7 +16,7 @@
 
 ## 存储模型
 
-和全部业务状态一样，邮箱验证记录保存在「单一状态文档」（JSON 文件 `db/twilight_go_state.json` 或 PostgreSQL `twilight_state` 表的 `jsonb` 行）中，**没有**独立的邮箱数据库或表。
+和全部业务状态一样，邮箱验证记录保存在「单一状态文档」（唯一运行后端 PostgreSQL 的 `twilight_state` 表 `jsonb` 行）中，**没有**独立的邮箱数据库或表。
 
 - `EmailVerification` 以随机 `id`（32 位）为键存放在状态文档的 `EmailVerifications` 映射里。**只存验证码的 HMAC 哈希 `CodeHash`，永不存明文。**
 - 用户记录上的邮箱状态由三字段表达：`Email`、`EmailVerified`（布尔）、`EmailVerifiedAt`（验证时间戳，撤销时清零）。

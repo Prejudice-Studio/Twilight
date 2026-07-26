@@ -29,17 +29,14 @@ import (
 func newTestApp(t *testing.T) *App {
 	t.Helper()
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := newTestStore(t)
 	app, err := New(config.Config{
 		AppName:                      "Twilight Test",
 		Version:                      "test",
 		Host:                         "127.0.0.1",
 		Port:                         0,
 		DatabaseDir:                  dir,
-		DatabaseDriver:               store.BackendJSON,
+		DatabaseDriver:               store.BackendPostgres,
 		DatabaseBackupDir:            filepath.Join(dir, "backups"),
 		StateFile:                    filepath.Join(dir, "state.json"),
 		UploadDir:                    filepath.Join(dir, "uploads"),
@@ -118,29 +115,22 @@ func loginCookies(t *testing.T, app *App, username, password string) []*http.Coo
 
 func TestRegcodeWritesBlockedWhenRuntimeDatabaseMismatchesConfig(t *testing.T) {
 	app := newTestApp(t)
+	// 后端已收敛为单一 PostgreSQL：运行期 store 恒为 postgres。配置 driver
+	// 与之一致（postgres）时放行；被改成非 postgres 值时作为最后一道保险
+	// 拦下注册码写入，避免误写错后端。
 	app.cfg().DatabaseDriver = store.BackendPostgres
-
 	rec := httptest.NewRecorder()
-	if !app.rejectRegcodeWriteIfStorageMismatch(rec) {
-		t.Fatal("expected regcode writes to be blocked when configured database differs from active store")
-	}
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("expected conflict status, got %d", rec.Code)
-	}
-
-	app.cfg().DatabaseDriver = store.BackendJSON
-	rec = httptest.NewRecorder()
 	if app.rejectRegcodeWriteIfStorageMismatch(rec) {
 		t.Fatal("regcode writes were blocked even though active and configured databases match")
 	}
 
-	app.cfg().StateFile = filepath.Join(t.TempDir(), "other-state.json")
+	app.cfg().DatabaseDriver = store.BackendJSON
 	rec = httptest.NewRecorder()
 	if !app.rejectRegcodeWriteIfStorageMismatch(rec) {
-		t.Fatal("expected regcode writes to be blocked when configured state_file differs from active store path")
+		t.Fatal("expected regcode writes to be blocked when configured driver is not postgres")
 	}
 	if rec.Code != http.StatusConflict {
-		t.Fatalf("expected state_file mismatch conflict status, got %d", rec.Code)
+		t.Fatalf("expected conflict status, got %d", rec.Code)
 	}
 }
 
@@ -381,10 +371,9 @@ func TestRegcodesPersistAcrossAppRestartButBindCodesDoNot(t *testing.T) {
 	if err := app.store().Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := store.Open(cfg.StateFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// 模拟服务重启：不重置库，复用同一 PostgreSQL 再开一个 Store，断言
+	// 上一进程写入的数据仍在持久层。
+	reopened := reopenTestStore(t)
 	restarted, err := New(cfg, reopened)
 	if err != nil {
 		t.Fatal(err)
@@ -853,8 +842,7 @@ func TestProtectedAdminConfigHiddenPreservedAndApplied(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().ConfigFile = filepath.Join(app.cfg().DatabaseDir, "config.toml")
 	databaseConfig := "[Database]\n" +
-		"driver = \"json\"\n" +
-		"state_file = " + strconv.Quote(app.cfg().StateFile) + "\n" +
+		"driver = \"postgres\"\n" +
 		"backup_dir = " + strconv.Quote(app.cfg().DatabaseBackupDir) + "\n"
 	// register_mode = true 必须写进磁盘配置：saveConfigContent 会触发 reload，
 	// 从磁盘重新加载 cfg。新安全模型下首注册者不再自动成为 Admin，alice 要成为
@@ -4564,8 +4552,7 @@ server_name = "new"
 databases_dir = "` + strings.ReplaceAll(app.cfg().DatabaseDir, `\`, `\\`) + `"
 
 [Database]
-driver = "json"
-state_file = "` + strings.ReplaceAll(app.cfg().StateFile, `\`, `\\`) + `"
+driver = "postgres"
 backup_dir = "` + strings.ReplaceAll(app.cfg().DatabaseBackupDir, `\`, `\\`) + `"
 
 [Telegram]
@@ -4622,10 +4609,8 @@ func TestEmbyCapacityCountsPendingEntitlementsSeparatelyFromSystemLimit(t *testi
 }
 
 func TestMediaRequestInventoryIssueBypassesDuplicateGuard(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := newTestStore(t)
+	defer st.Close()
 	base := store.MediaRequest{UID: 1, Title: "Movie", Source: "tmdb", MediaID: 42, MediaType: "movie", MediaInfo: map[string]any{"title": "Movie"}}
 	if _, err := st.CreateMediaRequest(base); err != nil {
 		t.Fatal(err)

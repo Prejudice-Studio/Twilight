@@ -222,7 +222,7 @@ allow_credential = true
 - 注册码注册、邀请码开通、用户自助补建、手动绑定、管理员授予开通资格、独立 Emby 账号创建等路径都应在创建或新增绑定前检查容量。
 - 删除 Emby 账号或清理待开通资格后释放对应名额；独立 Emby 账号不写入本地用户表，因此还会额外读取 Emby 端总用户数做兜底。
 
-> 注意：邀请关系、注册码、公告等业务状态以**字段形式存在于单一状态文档**（`internal/store`，即 JSON 文件 `db/twilight_go_state.json` 或 PostgreSQL `twilight_state` 表的 jsonb 行），不存在独立的 `invites.db` / `invite_relations` 单表 / `ALTER TABLE` 这类旧描述。
+> 注意：邀请关系、注册码、公告等业务状态以**字段形式存在于单一状态文档**（`internal/store`，即 PostgreSQL `twilight_state` 表的整份 jsonb 行；唯一运行后端），不存在独立的 `invites.db` / `invite_relations` 单表 / `ALTER TABLE` 这类旧描述。
 
 ## 16. 配置文件自动备份
 
@@ -241,8 +241,8 @@ allow_credential = true
 - 备份、恢复、迁移接口均要求管理员登录；备份 / 恢复目标通过 `store.ResolveBackupPath` 限制在配置的备份目录内，拒绝 `../` 路径穿越。
 - 恢复与迁移前会自动创建保护性备份（如「数据库恢复前保护性备份」「数据库迁移前保护性备份」）。
 - 迁移到 PostgreSQL 前先用管理端预检，确认目标连接成功、快照与实体计数符合预期。
-- 切换 `Database.driver` 后需重启后端；仅迁移数据不会让当前进程自动切换已打开的 store（热重载会在 driver / 路径 / DSN 变化时重开 store，但监听地址变化需重启）。
-- 单一状态文档之外另有独立表 `twilight_sessions`、`twilight_runtime_logs`。
+- 运行后端只有 PostgreSQL 一种：`Database.driver` 设为非 postgres 值时后端启动即报错。热重载会在 DSN 变化时重开 store，但监听地址变化仍需重启。
+- 单一状态文档（`twilight_state`）之外另有独立表 `twilight_sessions`、`twilight_runtime_logs`、`twilight_playback_records`，同库不同表。
 
 Git 自动更新（`internal/api/system_update.go`）：
 

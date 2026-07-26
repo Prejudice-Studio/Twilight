@@ -404,9 +404,11 @@ func applyTicketReplyLocked(t *Ticket, reply TicketReply, now int64) {
 	if reply.Role == RoleAdmin && NormalizeTicketStatus(t.Status) == TicketStatusOpen {
 		t.Status = TicketStatusInProgress
 	}
-	if reply.Role == RoleAdmin && reply.Content != "" {
-		t.AdminNote = reply.Content
-	}
+	// AdminNote 是「处理备注」这一独立元数据字段（仅经 UpdateTicket 显式写入），
+	// 不再被管理员聊天回复顺手覆盖：此前每条 admin 回复都把 AdminNote 改成回复正文，
+	// 与前端草稿保存冲突——管理员回一句话就把处理备注冲掉，且发送回复触发的 setTicket
+	// 会把未保存的备注草稿一并重置，造成「回复与聊天信息互相覆盖 / 部分消失」。
+	// 聊天正文已完整存在于 t.Replies，AdminNote 与它彻底解耦后互不干扰。
 	if reply.Role != RoleAdmin && NormalizeTicketStatus(t.Status) == TicketStatusResolved {
 		t.Status = TicketStatusOpen
 		t.ResolvedAt = 0

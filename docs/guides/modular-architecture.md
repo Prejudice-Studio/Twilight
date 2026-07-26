@@ -69,7 +69,7 @@ Handler 不应做：
 
 - 大段业务状态转移。
 - 直接拼接远端 URL 或 shell 命令。
-- 直接读写 `db/twilight_go_state.json`。
+- 绕过 `internal/store` 直接读写 `twilight_state` 表或状态快照文件。
 - 把 Token、密码、API Key、数据库 URL、服务器线路写入日志或响应。
 - 绕过 `AuthAdmin` / `AuthUser` / `AuthAPIKey` 边界。
 

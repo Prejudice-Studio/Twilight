@@ -3,9 +3,7 @@ package store
 import (
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -421,8 +419,7 @@ func TestUpsertRegCodesRejectsExistingCodeAtomically(t *testing.T) {
 }
 
 func TestRefreshLoadsExternallyChangedRegCodesAndTickets(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.json")
-	st, err := Open(path)
+	st, err := Open("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,9 +445,14 @@ func TestRefreshLoadsExternallyChangedRegCodesAndTickets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteFileAtomicSync(path, data, 0o600); err != nil {
+	// 用另一个连到同一测试库的 Store 做带外写入（模拟其他进程改库），
+	// LoadSnapshot 走 saveLockedForce 覆盖持久层，第一个 Store 的内存仍是旧的。
+	writer := reopenTestStore(t)
+	if err := writer.LoadSnapshot(data); err != nil {
+		writer.Close()
 		t.Fatal(err)
 	}
+	writer.Close()
 
 	if _, ok := st.RegCode("STALE-REG"); !ok {
 		t.Fatal("test setup expected stale in-memory regcode before refresh")
@@ -1189,8 +1191,7 @@ func TestUpsertRegCodeDoesNotReactivateExistingDisabledCode(t *testing.T) {
 }
 
 func TestRegCodesPersistAcrossStoreReopen(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.json")
-	st, err := Open(path)
+	st, err := Open("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1199,75 +1200,12 @@ func TestRegCodesPersistAcrossStoreReopen(t *testing.T) {
 	}
 	_ = st.Close()
 
-	reopened, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// reopenTestStore 不重置库：跨重开复读的数据必须仍在 PostgreSQL 里。
+	reopened := reopenTestStore(t)
 	defer reopened.Close()
 	reg, ok := reopened.RegCode("PERSIST-REG")
 	if !ok || reg.Code != "PERSIST-REG" || reg.Type != 1 {
 		t.Fatalf("regcode did not persist correctly: ok=%v reg=%#v", ok, reg)
-	}
-}
-
-func TestStaleStoreWriteDoesNotDropRegCodes(t *testing.T) {
-	// JSON 后端从此采用进程级 flock，
-	// 第二个 Open() 必须立刻得到 ErrLockBusy；之前那种 "两个 Store 共
-	// 用一份 state.json" 的 stale-clobber 路径已经不可能在生产中触达。
-	// 这里改为契约测试：断言锁会立刻挡住第二个 Open，而第一个 Close
-	// 之后 Open 又能正常成功。
-	//
-	// 非 Unix 平台（Windows）上 flock_other.go 是 no-op，多进程部署的建
-	// 议是切到 Postgres 后端，这里直接跳过避免 CI 误报。
-	if runtime.GOOS == "windows" {
-		t.Skip("flock 仅在 Unix 平台启用；Windows 不强制单进程")
-	}
-	path := filepath.Join(t.TempDir(), "state.json")
-	first, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := Open(path); err == nil {
-		t.Fatal("expected second Open to fail while first holds the flock")
-	} else if !strings.Contains(err.Error(), "locked by another Twilight process") {
-		t.Fatalf("expected lock-busy error, got %v", err)
-	}
-
-	if err := first.UpsertRegCode(RegCode{Code: "NO-CLOBBER", Type: 1, Days: 30, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
-		t.Fatal(err)
-	}
-	if err := first.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	reopened, err := Open(path)
-	if err != nil {
-		t.Fatalf("expected Open to succeed after first Close; got %v", err)
-	}
-	defer reopened.Close()
-	if _, ok := reopened.RegCode("NO-CLOBBER"); !ok {
-		t.Fatal("regcode lost across lock cycle")
-	}
-}
-
-func TestFailedRegCodeSaveRollsBackMemory(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.json")
-	st, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	if err := os.Mkdir(path+".tmp", 0o700); err != nil {
-		t.Fatal(err)
-	}
-
-	err = st.UpsertRegCode(RegCode{Code: "UNSAVED-REG", Type: 1, Days: 30, ValidityTime: -1, UseCountLimit: 1, Active: true})
-	if err == nil {
-		t.Fatal("expected save failure")
-	}
-	if _, ok := st.RegCode("UNSAVED-REG"); ok {
-		t.Fatal("failed regcode save left unsaved code in memory")
 	}
 }
 
@@ -1326,43 +1264,3 @@ func TestRepairLegacyTelegramBindResidueClearsPersistedBindCodes(t *testing.T) {
 	}
 }
 
-// TestSaveLockedBackupCopyDoesNotLeaveBakTmp 锁定 saveLocked 写 .bak 影子副
-// 本时复用 writeFileAtomicSync：tmp 文件必须在 rename 后消失（O_EXCL 保证下
-// 一次写入会因为残留 tmp 直接失败），且 .bak 内容是上一次成功写入的 state，
-// 而不是当前正在写的新版本。这条不变量保护 refreshLocked 的解析失败回退路径。
-func TestSaveLockedBackupCopyDoesNotLeaveBakTmp(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "state.json")
-	st, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// 第一次写入：state.json 落盘后还没有 .bak（saveLocked 写前才会复制旧文件）。
-	if err := st.UpsertRegCode(RegCode{Code: "FIRST", Type: 2, Days: 30, Active: true}); err != nil {
-		t.Fatal(err)
-	}
-
-	// 第二次写入：触发 saveLocked 的 .bak 影子副本路径。
-	if err := st.UpsertRegCode(RegCode{Code: "SECOND", Type: 2, Days: 30, Active: true}); err != nil {
-		t.Fatal(err)
-	}
-
-	bak := path + ".bak"
-	bakTmp := path + ".bak.tmp"
-	if _, err := os.Stat(bakTmp); err == nil {
-		t.Fatalf(".bak.tmp leaked, writeFileAtomicSync should have renamed it: %s", bakTmp)
-	}
-	bakData, err := os.ReadFile(bak)
-	if err != nil {
-		t.Fatalf("expected .bak to exist after second save, got: %v", err)
-	}
-	// .bak 是 *上一次* 成功写入的快照——必须包含 FIRST 但不包含 SECOND。
-	s := string(bakData)
-	if !strings.Contains(s, "FIRST") {
-		t.Fatalf(".bak missing FIRST regcode: %s", s)
-	}
-	if strings.Contains(s, "SECOND") {
-		t.Fatalf(".bak unexpectedly contains current state's SECOND regcode: %s", s)
-	}
-}

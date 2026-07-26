@@ -6,10 +6,7 @@
 
 ## 数据模型
 
-公告不是一张独立的数据库表，而是 Twilight「单一状态文档」（`internal/store`）里的一组 `Announcement` 记录。整个业务状态（用户、注册码、邀请关系、邀请码、公告等）统一保存在：
-
-- JSON 文件 `db/twilight_go_state.json`，或
-- PostgreSQL 的 `twilight_state` 表中 `id=1` 那一行的 `jsonb` 字段。
+公告不是一张独立的数据库表，而是 Twilight「单一状态文档」（`internal/store`）里的一组 `Announcement` 记录。整个业务状态（用户、注册码、邀请关系、邀请码、公告等）统一保存在唯一运行后端 PostgreSQL 的 `twilight_state` 表中 `id=1` 那一行的 `jsonb` 字段里。
 
 公告以 `map[int64]Announcement` 的形式挂在状态文档的 `announcements` 字段下，自增主键来自状态文档里的 `next_announcement_id`。`render_mode` 等都是 `Announcement` 结构体上的普通字段，**不是**新增的数据库列。
 

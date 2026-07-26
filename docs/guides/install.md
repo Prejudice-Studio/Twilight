@@ -55,14 +55,12 @@ bash start_backend_prod.sh
 
 ## PostgreSQL 配置
 
-默认存储后端为 PostgreSQL（`config.go` 中 `DatabaseDriver` 默认 `postgres`）。在运行目录下的 `config.toml` 中配置 `[Database]`：
+唯一运行后端为 PostgreSQL（`config.go` 中 `DatabaseDriver` 默认 `postgres`；设为非 postgres 值会在启动期报错）。在运行目录下的 `config.toml` 中配置 `[Database]`：
 
 ```toml
 [Database]
-# 存储后端：postgres（默认）或 json
+# 存储后端：只支持 postgres（唯一运行后端）
 driver = "postgres"
-# Go JSON 状态文件路径；留空时使用 <databases_dir>/twilight_go_state.json
-state_file = ""
 # 完整 PostgreSQL DSN；填写后优先于下面的分项字段
 url = ""
 # 数据库备份目录；留空时使用 <databases_dir>/backups
@@ -91,12 +89,9 @@ url = "postgres://twilight:请替换为高强度密码@127.0.0.1:5432/twilight?s
 
 ### 状态存储模型
 
-无论用哪种后端，全部业务状态（用户、注册码/卡码、邀请关系与邀请码、公告等）都保存在「单一状态文档」中：
+全部业务状态（用户、注册码/卡码、邀请关系与邀请码、公告等）都保存在「单一状态文档」中：状态文档是 `twilight_state` 表里 `id = 1` 的那一行 `jsonb`。
 
-- JSON 后端：状态文档是文件 `db/twilight_go_state.json`。
-- PostgreSQL 后端：状态文档是 `twilight_state` 表里 `id = 1` 的那一行 `jsonb`。
-
-PostgreSQL 后端另有两张独立表：`twilight_sessions`（会话）和 `twilight_runtime_logs`（后台实时日志）。
+另有三张独立表：`twilight_sessions`（会话）、`twilight_runtime_logs`（后台实时日志）、`twilight_playback_records`（播放记录）。
 
 > 不存在「邀请单表」「公告单独建表 / ALTER TABLE 加列」「`db/invites.db`、`db/signin.db` 之类独立数据库」这种结构——邀请、公告等都是上述单一状态文档里的字段（见 `internal/store`）。
 
@@ -119,6 +114,7 @@ TWILIGHT_POSTGRES_MAX_OPEN_CONNS=8
 TWILIGHT_POSTGRES_MAX_IDLE_CONNS=4
 TWILIGHT_DATABASE_BACKUP_DIR=/opt/Twilight/db/backups
 TWILIGHT_DATABASE_MIGRATION_PANEL_ENABLED=false
+# 仅作迁移面板 JSON 导出目标与 migrate-json 默认导入源；运行期不读写此文件
 TWILIGHT_STATE_FILE=/opt/Twilight/db/twilight_go_state.json
 TWILIGHT_DATABASES_DIR=/opt/Twilight/db
 ```
@@ -131,7 +127,7 @@ TWILIGHT_DATABASES_DIR=/opt/Twilight/db
 
 ### 数据库迁移面板
 
-数据库迁移面板和迁移 API 默认关闭（`migration_panel_enabled = false`）。需要在 JSON 与 PostgreSQL 之间迁移时，临时把该字段改为 `true`，完成后建议关回。当前仅支持 `postgres` 和 `json` 两种存储后端互相迁移；旧 Python 时代的 SQLite 数据源已被禁用，迁移接口会直接拒绝 `sqlite` / `legacy_sqlite` 作为来源。
+数据库迁移面板和迁移 API 默认关闭（`migration_panel_enabled = false`）。需要迁移到另一套 PostgreSQL、或把当前状态一次性导出成 `state.json` 文件时，临时把该字段改为 `true`，完成后建议关回。目标 driver 支持 `postgres`（迁移到另一套 PG，可运行后端）与 `json`（一次性导出目标，产物用于归档或喂给 `twilight migrate-json` 重新导入，非可运行后端）；旧 Python 时代的 SQLite 数据源已被禁用，迁移接口会直接拒绝 `sqlite` / `legacy_sqlite` 作为来源（返回 403 `DB_SQLITE_DISABLED`）。
 
 迁移流程：管理端「数据库迁移」页先做预检（dry-run，预检会验证源快照和目标 PostgreSQL，并在目标库不存在且权限允许时自动创建数据库和 `twilight_state` 状态表，但不写入业务快照）；确认目标可用后再用确认短语二次确认执行。后端在实际写入前会自动创建保护性备份，并在响应中返回 `pre_operation_backup`。
 
@@ -247,7 +243,7 @@ sudo TWILIGHT_PROJECT_ROOT=/opt/Twilight \
 
 | 路径 | 内容 |
 | --- | --- |
-| `db/twilight_go_state.json` | JSON 后端的状态文档；用 PostgreSQL 时业务状态改存 `twilight_state` 表。 |
+| `db/twilight_go_state.json` | 仅迁移面板 JSON 导出目标与 `migrate-json` 默认导入源；运行期不读写。业务状态存 PostgreSQL `twilight_state` 表。 |
 | `db/backups/` | 数据库备份目录（`backup_dir` 留空时的默认值）。 |
 | `uploads/` | 文件上传目录（`upload_folder` 留空时的默认值）。 |
 | `config_backups/` | 启动时自动备份的 `config.toml` 历史。 |

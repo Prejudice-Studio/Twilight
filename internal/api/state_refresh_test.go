@@ -25,7 +25,13 @@ func writePersistedStateForTest(t *testing.T, app *App, mutate func(*store.State
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.WriteFileAtomicSync(app.store().Path(), data, 0o600); err != nil {
+	// 后端已收敛为单一 PostgreSQL：模拟「另一进程改库」不再是覆写状态文件，
+	// 而是另开一个连同一测试库的 Store 走 LoadSnapshot 强制落盘（saveLockedForce
+	// 会把持久层 version 递增）。被测 App 的 store 下次 Refresh 即读到这份带更高
+	// version 的新 state，等价于跨进程带外写。
+	writer := reopenTestStore(t)
+	defer writer.Close()
+	if err := writer.LoadSnapshot(data); err != nil {
 		t.Fatal(err)
 	}
 }

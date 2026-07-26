@@ -17,10 +17,7 @@ func newSetupTestApp(t *testing.T) *App {
 	t.Helper()
 	dir := t.TempDir()
 	stateFile := filepath.Join(dir, "state.json")
-	st, err := store.Open(stateFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := newTestStore(t)
 	cfg := config.Config{
 		AppName:                  "Twilight Test",
 		Version:                  "test",
@@ -28,7 +25,7 @@ func newSetupTestApp(t *testing.T) *App {
 		Port:                     0,
 		ConfigFile:               filepath.Join(dir, "config.toml"),
 		DatabaseDir:              dir,
-		DatabaseDriver:           store.BackendJSON,
+		DatabaseDriver:           store.BackendPostgres,
 		DatabaseBackupDir:        filepath.Join(dir, "backups"),
 		StateFile:                stateFile,
 		UploadDir:                filepath.Join(dir, "uploads"),

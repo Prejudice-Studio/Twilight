@@ -48,36 +48,26 @@ func (s *Store) AddRuntimeLog(entry RuntimeLogEntry, limit int) (RuntimeLogEntry
 	if entry.Time == 0 {
 		entry.Time = time.Now().Unix()
 	}
-	if s.db != nil {
-		attrs, err := json.Marshal(entry.Attrs)
-		if err != nil {
-			return entry, err
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), pgRuntimeLogWriteTimeout)
-		defer cancel()
-		var id int64
-		err = s.db.QueryRowContext(
-			ctx,
-			`INSERT INTO twilight_runtime_logs (time, level, message, attrs) VALUES ($1, $2, $3, $4::jsonb) RETURNING id`,
-			entry.Time,
-			entry.Level,
-			entry.Message,
-			string(attrs),
-		).Scan(&id)
-		if err != nil {
-			return entry, err
-		}
-		entry.ID = id
-		s.maybeAsyncPrunePGRuntimeLogs(limit)
-		return entry, nil
+	attrs, err := json.Marshal(entry.Attrs)
+	if err != nil {
+		return entry, err
 	}
-	// JSON 后端：走独立旁路存储（内存环形缓冲 + NDJSON 追加文件），只碰 rlf.mu，
-	// 不再 s.mu.Lock + refreshLocked + 整份 state.json marshal+fsync。这既消除了
-	// 「saveLocked 持 s.mu 时 zap sink 回调本方法再抢 s.mu」的自旋死锁，也把每条日志
-	// 的落盘成本从「整库写」降到「一行 append」。
-	if s.runtimeLog != nil {
-		return s.runtimeLog.add(entry, limit), nil
+	ctx, cancel := context.WithTimeout(context.Background(), pgRuntimeLogWriteTimeout)
+	defer cancel()
+	var id int64
+	err = s.db.QueryRowContext(
+		ctx,
+		`INSERT INTO twilight_runtime_logs (time, level, message, attrs) VALUES ($1, $2, $3, $4::jsonb) RETURNING id`,
+		entry.Time,
+		entry.Level,
+		entry.Message,
+		string(attrs),
+	).Scan(&id)
+	if err != nil {
+		return entry, err
 	}
+	entry.ID = id
+	s.maybeAsyncPrunePGRuntimeLogs(limit)
 	return entry, nil
 }
 
@@ -85,7 +75,7 @@ func (s *Store) AddRuntimeLog(entry RuntimeLogEntry, limit int) (RuntimeLogEntry
 // 后台 prune；写入路径不再阻塞在 DELETE 上。pgRuntimeLogPruneGate 保证同一
 // 时刻只有一个 prune goroutine 在跑，避免 burst 时叠加并发全表 DELETE。
 func (s *Store) maybeAsyncPrunePGRuntimeLogs(limit int) {
-	if s == nil || s.db == nil {
+	if s == nil {
 		return
 	}
 	if pgRuntimeLogPruneCounter.Add(1)%pgRuntimeLogPruneEvery != 0 {
@@ -110,13 +100,7 @@ func (s *Store) RuntimeLogs(limit int, after int64) ([]RuntimeLogEntry, int64) {
 	if s == nil {
 		return nil, after
 	}
-	if s.db != nil {
-		return s.postgresRuntimeLogs(limit, after)
-	}
-	if s.runtimeLog != nil {
-		return s.runtimeLog.logs(limit, after)
-	}
-	return nil, after
+	return s.postgresRuntimeLogs(limit, after)
 }
 
 func runtimeLogWindow(entries []RuntimeLogEntry, limit int, after int64) (int, int) {
@@ -150,20 +134,14 @@ func (s *Store) RuntimeLogStats() (int64, int) {
 	if s == nil {
 		return 0, 0
 	}
-	if s.db != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), pgRuntimeLogReadTimeout)
-		defer cancel()
-		var next sql.NullInt64
-		var count int
-		if err := s.db.QueryRowContext(ctx, `SELECT max(id), count(*) FROM twilight_runtime_logs`).Scan(&next, &count); err != nil {
-			return 0, 0
-		}
-		return next.Int64, count
+	ctx, cancel := context.WithTimeout(context.Background(), pgRuntimeLogReadTimeout)
+	defer cancel()
+	var next sql.NullInt64
+	var count int
+	if err := s.db.QueryRowContext(ctx, `SELECT max(id), count(*) FROM twilight_runtime_logs`).Scan(&next, &count); err != nil {
+		return 0, 0
 	}
-	if s.runtimeLog != nil {
-		return s.runtimeLog.stats()
-	}
-	return 0, 0
+	return next.Int64, count
 }
 
 func (s *Store) PruneRuntimeLogs(limit int) error {
@@ -171,16 +149,10 @@ func (s *Store) PruneRuntimeLogs(limit int) error {
 		return nil
 	}
 	limit = clampRuntimeLogLimit(limit)
-	if s.db != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), pgRuntimeLogPruneTimeout)
-		defer cancel()
-		_, err := s.db.ExecContext(ctx, pgRuntimeLogPruneSQL, limit)
-		return err
-	}
-	if s.runtimeLog != nil {
-		return s.runtimeLog.prune(limit)
-	}
-	return nil
+	ctx, cancel := context.WithTimeout(context.Background(), pgRuntimeLogPruneTimeout)
+	defer cancel()
+	_, err := s.db.ExecContext(ctx, pgRuntimeLogPruneSQL, limit)
+	return err
 }
 
 func (s *Store) postgresRuntimeLogs(limit int, after int64) ([]RuntimeLogEntry, int64) {

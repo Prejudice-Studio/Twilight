@@ -382,7 +382,7 @@
 | ---- | ---- | ---- | ---- |
 | GET | `/api/v1/announcements` | Public | 公开公告列表 |
 
-> 公告以字段形式保存在单一状态文档（`internal/store`，对应 JSON 文件 `db/twilight_go_state.json` 或 PostgreSQL `twilight_state` 表）中，不存在独立的公告表或建表/迁移逻辑。
+> 公告以字段形式保存在单一状态文档（`internal/store`，唯一运行后端 PostgreSQL 的 `twilight_state` 表 jsonb 行）中，不存在独立的公告表或建表/迁移逻辑。
 
 ## Invite
 

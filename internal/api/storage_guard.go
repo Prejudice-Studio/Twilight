@@ -2,50 +2,22 @@ package api
 
 import (
 	"net/http"
-	"path/filepath"
-	"strings"
 
+	"github.com/prejudice-studio/twilight/internal/config"
 	"github.com/prejudice-studio/twilight/internal/store"
 )
 
-const regcodeStorageMismatchMessage = "当前运行数据库与配置数据库或状态文件不一致，注册码写入已暂停。请先在数据库迁移页完成迁移并重启，确认当前运行后端与配置后端一致后再生成或使用注册码。"
+const regcodeStorageMismatchMessage = "当前运行数据库与配置数据库不一致，注册码写入已暂停。请确认 database.driver 为 postgres 且 PostgreSQL 连接配置正确后重启服务。"
 
-func normalizedRuntimeDriver(driver string) string {
-	switch strings.ToLower(strings.TrimSpace(driver)) {
-	case "", store.BackendJSON, "file":
-		return store.BackendJSON
-	case store.BackendPostgres, "postgresql":
-		return store.BackendPostgres
-	default:
-		return strings.ToLower(strings.TrimSpace(driver))
-	}
-}
-
+// runtimeDatabaseMismatch 判定运行期后端与配置后端是否不一致。后端已收敛为
+// 单一 PostgreSQL：运行期 store 恒为 postgres，唯一的失配场景是配置里的
+// driver 被改成了非 postgres 值（此时启动本应被拒，这里作为最后一道运行期
+// 保险，避免误判把注册码写进错误后端）。不再比对 JSON 状态文件路径。
 func (a *App) runtimeDatabaseMismatch() bool {
 	if a == nil || a.store() == nil {
 		return false
 	}
-	configuredDriver := normalizedRuntimeDriver(a.cfg().DatabaseDriver)
-	runtimeDriver := normalizedRuntimeDriver(a.store().Backend())
-	if configuredDriver != runtimeDriver {
-		return true
-	}
-	if configuredDriver == store.BackendJSON {
-		return normalizedRuntimeStateFile(a.cfg().StateFile) != normalizedRuntimeStateFile(a.store().Path())
-	}
-	return false
-}
-
-func normalizedRuntimeStateFile(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		path = filepath.Join("db", "twilight_go_state.json")
-	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return filepath.Clean(path)
-	}
-	return filepath.Clean(abs)
+	return !config.IsPostgresDriver(a.cfg().DatabaseDriver)
 }
 
 func (a *App) rejectRegcodeWriteIfStorageMismatch(w http.ResponseWriter) bool {
