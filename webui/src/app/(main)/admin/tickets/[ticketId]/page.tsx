@@ -191,14 +191,20 @@ export default function AdminTicketDetailPage() {
 
   const handleSaveMeta = async () => {
     if (!ticket) return;
+    // 只提交相对服务端当前值真正改动的字段：后端按 patch 语义处理，未提交字段保持最新落库值不变，
+    // 避免并发编辑同一工单时用陈旧草稿把他人刚改的字段回退（last-writer-wins）。
+    const payload: { status?: string; priority?: string; type?: string; admin_note?: string } = {};
+    if (statusDraft !== ticket.status) payload.status = statusDraft;
+    if (priorityDraft !== ticket.priority) payload.priority = priorityDraft;
+    if (typeDraft !== ticket.type) payload.type = typeDraft;
+    if (noteDraft.trim() !== (ticket.admin_note || "")) payload.admin_note = noteDraft.trim();
+    if (Object.keys(payload).length === 0) {
+      toast({ title: t("adminTickets.updated") });
+      return;
+    }
     setSaving(true);
     try {
-      const res = await api.adminUpdateTicket(ticket.id, {
-        status: statusDraft,
-        priority: priorityDraft,
-        type: typeDraft,
-        admin_note: noteDraft.trim(),
-      });
+      const res = await api.adminUpdateTicket(ticket.id, payload);
       if (res.success && res.data) {
         setTicket(res.data);
         toast({ title: t("adminTickets.updated") });

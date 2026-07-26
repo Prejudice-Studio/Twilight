@@ -156,9 +156,17 @@ export default function AdminTicketsPage() {
 
   const handleSave = async () => {
     if (!editingTicket) return;
+    // 只提交相对原值真正改动的字段：后端按 patch 语义处理，未提交的字段保持最新落库值不变，
+    // 两个管理员并发各改一字段时不会用陈旧快照回退对方的改动。
+    const payload: { status?: string; priority?: string; type?: string; admin_note?: string } = {};
+    if (editStatus !== editingTicket.status) payload.status = editStatus;
+    if (editPriority !== editingTicket.priority) payload.priority = editPriority;
+    if (editType !== editingTicket.type) payload.type = editType;
+    if (editNote.trim() !== (editingTicket.admin_note || "")) payload.admin_note = editNote.trim();
+    if (Object.keys(payload).length === 0) { setEditOpen(false); return; }
     setSaving(true);
     try {
-      const res = await api.adminUpdateTicket(editingTicket.id, { status: editStatus, priority: editPriority, type: editType, admin_note: editNote.trim() });
+      const res = await api.adminUpdateTicket(editingTicket.id, payload);
       if (res.success) { toast({ title: t("adminTickets.updated") }); setEditOpen(false); await reload(); }
       else toast({ title: res.message, variant: "destructive" });
     } catch (err: any) { toast({ title: err?.message || t("common.networkError"), variant: "destructive" }); }
@@ -166,8 +174,11 @@ export default function AdminTicketsPage() {
   };
 
   const quickStatus = async (ticket: Ticket, status: string) => {
+    // 只发 status：不再顺手回传 admin_note（patch 语义下未提供即「不动此字段」），
+    // 避免用列表行里的陈旧备注覆盖他人刚在详情页保存的内部备注。
+    if (status === ticket.status) return;
     try {
-      const res = await api.adminUpdateTicket(ticket.id, { status, admin_note: ticket.admin_note || "" });
+      const res = await api.adminUpdateTicket(ticket.id, { status });
       if (res.success) { toast({ title: t("adminTickets.updated") }); await reload(); }
       else toast({ title: res.message, variant: "destructive" });
     } catch (err: any) { toast({ title: err?.message || t("common.networkError"), variant: "destructive" }); }

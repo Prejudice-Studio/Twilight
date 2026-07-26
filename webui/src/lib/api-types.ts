@@ -1445,6 +1445,7 @@ export interface Ticket {
   type: string;
   status: "open" | "in_progress" | "resolved" | "closed";
   priority: "low" | "medium" | "high" | "urgent";
+  // 内部处理备注：仅管理端接口下发，用户端 DTO 不含此字段。面向用户的沟通走 replies[]。
   admin_note?: string;
   replies?: TicketReply[];
   attachments?: TicketAttachment[];
