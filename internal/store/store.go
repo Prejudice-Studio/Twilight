@@ -156,6 +156,7 @@ type State struct {
 	Tickets                 map[int64]Ticket                       `json:"tickets"`
 	TicketTypes             []string                               `json:"ticket_types,omitempty"`
 	DeveloperJSPresets      map[int64]DeveloperJSPreset            `json:"developer_js_presets,omitempty"`
+	BangumiRegcodeClaims    map[string]BangumiRegcodeClaim         `json:"bangumi_regcode_claims,omitempty"`
 	DeveloperModeEnabled    bool                                   `json:"developer_mode_enabled,omitempty"`
 	// TelegramBotOffset 持久化最近一次成功 ack 的 update_id+1。
 	// 重启 / token 切换时直接从这个值恢复，避免对 24h backlog 重新分发。
@@ -284,6 +285,22 @@ type DeveloperJSPreset struct {
 	CreatorUID  int64  `json:"creator_uid,omitempty"`
 	CreatedAt   int64  `json:"created_at"`
 	UpdatedAt   int64  `json:"updated_at"`
+}
+
+// BangumiRegcodeClaim 记录一个 Bangumi 账号（以其数值 id 为唯一键）已经通过自助
+// 发码通道领取过的注册码。它是「一个 Bangumi 账号永远只能领一次」这一全局不变量的
+// 唯一持久化依据：自助发码在生成码之前先查此表，命中即复用旧码而绝不再生成。
+// 键为 Bangumi 数值 id 的字符串形式（由服务端持 Token 调 /me 回填，不信任 JS 传入值）。
+type BangumiRegcodeClaim struct {
+	BangumiID       string `json:"bangumi_id"`
+	BangumiUsername string `json:"bangumi_username,omitempty"`
+	Code            string `json:"code"`
+	UID             int64  `json:"uid,omitempty"`
+	Username        string `json:"username,omitempty"`
+	TelegramID      int64  `json:"telegram_id,omitempty"`
+	Days            int    `json:"days,omitempty"`
+	Source          string `json:"source,omitempty"`
+	ClaimedAt       int64  `json:"claimed_at"`
 }
 
 type InviteCode struct {
@@ -852,6 +869,9 @@ func (s *State) ensure() {
 	}
 	if s.DeveloperJSPresets == nil {
 		s.DeveloperJSPresets = map[int64]DeveloperJSPreset{}
+	}
+	if s.BangumiRegcodeClaims == nil {
+		s.BangumiRegcodeClaims = map[string]BangumiRegcodeClaim{}
 	}
 
 	// 历史遗留的「AdminNote → 合成一条管理员回复」迁移已移除。它本是 Replies[] 模型
@@ -3618,6 +3638,66 @@ func (s *Store) DeleteDeveloperJSPreset(id int64) error {
 		delete(s.state.DeveloperJSPresets, id)
 		return nil
 	})
+}
+
+// BangumiRegcodeClaimByID 返回某 Bangumi 账号（数值 id 的字符串形式）已领取过的注册码
+// 领取记录。第二个返回值指示是否存在。只读、无副作用。
+func (s *Store) BangumiRegcodeClaimByID(bangumiID string) (BangumiRegcodeClaim, bool) {
+	bangumiID = strings.TrimSpace(bangumiID)
+	if bangumiID == "" {
+		return BangumiRegcodeClaim{}, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	claim, ok := s.state.BangumiRegcodeClaims[bangumiID]
+	return claim, ok
+}
+
+// ClaimBangumiRegcode 原子化地为一个 Bangumi 账号登记注册码领取记录，是「一个 Bangumi
+// 账号永远只能领一次」这一全局不变量的落点。语义为「首次写入生效」：
+//   - 若该 Bangumi id 尚无记录，写入 claim（补齐 BangumiID / ClaimedAt）并返回
+//     (写入后的记录, claimed=true)；
+//   - 若已存在记录（可能是本进程稍早、也可能是他进程/并发抢先写入的），不覆盖，
+//     返回 (既有记录, claimed=false)。
+//
+// 检查与写入在同一个 mutateAndSaveLocked 闭包内完成，PG 版本守卫撞冲突时整个闭包
+// 会基于最新 state 重放，因此并发下也不会两个请求都判定为「首次」而各自发一张码。
+// 调用方约定：claimed=false 时说明该账号此前已领码，应复用返回记录里的 Code、
+// 并回收自己刚生成的候选码，绝不再下发新码。
+func (s *Store) ClaimBangumiRegcode(claim BangumiRegcodeClaim) (BangumiRegcodeClaim, bool, error) {
+	claim.BangumiID = strings.TrimSpace(claim.BangumiID)
+	claim.Code = strings.TrimSpace(claim.Code)
+	if claim.BangumiID == "" || claim.Code == "" {
+		return BangumiRegcodeClaim{}, false, ErrInvalid
+	}
+	var (
+		stored  BangumiRegcodeClaim
+		claimed bool
+	)
+	err := func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.mutateAndSaveLocked(func() error {
+			// 闭包可能在版本冲突时被重放，务必每次都重置局部结果，避免沿用上一轮的判定。
+			claimed = false
+			if existing, ok := s.state.BangumiRegcodeClaims[claim.BangumiID]; ok {
+				stored = existing
+				return nil
+			}
+			record := claim
+			if record.ClaimedAt == 0 {
+				record.ClaimedAt = time.Now().Unix()
+			}
+			s.state.BangumiRegcodeClaims[record.BangumiID] = record
+			stored = record
+			claimed = true
+			return nil
+		})
+	}()
+	if err != nil {
+		return BangumiRegcodeClaim{}, false, err
+	}
+	return stored, claimed, nil
 }
 
 func (s *Store) DeveloperModeEnabled() bool {

@@ -368,8 +368,9 @@ func jsDocParamDefault(name, typ, description, fallback string) developerJSDocPa
 
 func developerJSBindingNames() []string {
 	return []string{
-		"ctx", "command", "input", "args", "user", "me", "constants", "roles", "db", "users", "admin", "regcodes", "invites", "announcements", "system", "text", "arrays", "time", "format", "interactions",
+		"ctx", "command", "input", "args", "user", "me", "constants", "roles", "db", "users", "admin", "regcodes", "invites", "announcements", "bangumi", "system", "text", "arrays", "time", "format", "interactions",
 		"getUser(uid)", "reply(text)", "exit(text)", "assert(condition, text)", "log(text)", "auth(role)", "authAdmin()", "fetch(url)", "config(key)", "env(key)",
+		"bangumi.enabled()", "bangumi.me()", "bangumi.collections(type, limit, offset)", "bangumi.summary()", "regcodes.grantSelf(options)",
 	}
 }
 

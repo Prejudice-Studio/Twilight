@@ -179,6 +179,7 @@ func (a *App) telegramRunJSCustomCommandWithOptions(code string, c telegramComma
 	_ = vm.Set("regcodes", a.developerJSRegcodesAPI(vm, &user, opts, &logs))
 	_ = vm.Set("invites", a.developerJSInvitesAPI(vm, &user, opts, &logs))
 	_ = vm.Set("announcements", a.developerJSAnnouncementsAPI(vm, &user, opts, &logs))
+	_ = vm.Set("bangumi", a.developerJSBangumiAPI(vm, &user, opts, &logs))
 	_ = vm.Set("system", a.developerJSSystemAPI(vm, &user))
 	_ = vm.Set("input", developerJSInputAPI(vm, c.Args, commandName, privateChat, opts.Preview))
 	_ = vm.Set("getUser", func(call goja.FunctionCall) goja.Value {

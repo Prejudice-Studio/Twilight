@@ -29,6 +29,13 @@ func (a *App) developerJSRegcodesAPI(vm *goja.Runtime, user *store.User, opts de
 		"quick": func(call goja.FunctionCall) goja.Value {
 			return a.developerJSQuickRegcode(vm, user, opts, logs, call)
 		},
+		// grantSelf(options?) 是面向「已绑定普通用户」的自助发码通道：区别于 admin-only
+		// 的 generate，它把注册码强制锁定给触发者本人，并以其 Bangumi 账号数值 id 为
+		// 全局去重键——一个 Bangumi 账号永远只能领一张（可重复调用但幂等复用旧码）。
+		// 强约束：仅私聊、必须已绑定 BGM Token、已有 Emby 账号则拒发。
+		"grantSelf": func(call goja.FunctionCall) goja.Value {
+			return a.developerJSGrantSelfRegcode(vm, user, opts, logs, call.Argument(0).Export())
+		},
 	}
 }
 
@@ -237,6 +244,178 @@ func (a *App) developerJSGenerateRegcode(vm *goja.Runtime, actor *store.User, op
 		"decoy":        decoy,
 		"script_api":   "regcodes.generate",
 		"private_chat": opts.PrivateChat,
+	})
+	return vm.ToValue(result)
+}
+
+// developerJSGrantSelfRegcode 是面向「已绑定普通用户」的自助发码通道。它不是 admin
+// 专属 generate 的放权版本，而是一条语义收窄、强约束的独立通道：
+//   - 仅私聊可用（opts.PrivateChat==false 直接拒绝）；
+//   - 触发者必须已绑定本地用户且已设置 BGM Token；
+//   - 触发者已有 Emby 账号则拒发（这是服务端硬不变量，脚本层再友好提示）；
+//   - 注册码强制锁定给触发者本人（TargetUsername/UID/TelegramID 全部落本人）；
+//   - 以「服务端持 Token 重新调 /me 拿到的 Bangumi 数值 id」为全局唯一去重键，
+//     一个 Bangumi 账号永远只能领一张：命中既有领取记录即幂等复用旧码，绝不再生成。
+//
+// 是否满足「注册时长 / 看过+在看数量 / 最早收藏时长」等业务门槛由脚本用 bangumi.summary()
+// 自行判定；本函数只负责发码通道自身的身份、去重与账号不变量，并始终审计。
+func (a *App) developerJSGrantSelfRegcode(vm *goja.Runtime, actor *store.User, opts developerJSRunOptions, logs *[]string, options any) goja.Value {
+	result := map[string]any{"ok": false}
+	if actor == nil || actor.UID == 0 {
+		result["error"] = "not_bound"
+		return vm.ToValue(result)
+	}
+	if !opts.PrivateChat {
+		result["error"] = "group_chat_forbidden"
+		return vm.ToValue(result)
+	}
+	if strings.TrimSpace(actor.BGMToken) == "" {
+		result["error"] = "no_token"
+		return vm.ToValue(result)
+	}
+	// 已有 Emby 账号则不给：EmbyID 非空即视为「已落地账号」。这是服务端硬闸，
+	// 即便脚本漏判也拦得住。
+	if strings.TrimSpace(actor.EmbyID) != "" {
+		result["error"] = "already_has_account"
+		return vm.ToValue(result)
+	}
+	if a.runtimeDatabaseMismatch() {
+		result["error"] = "storage_mismatch"
+		return vm.ToValue(result)
+	}
+
+	values, _ := options.(map[string]any)
+	if values == nil {
+		values = map[string]any{}
+	}
+	days := normalizeRegCodeDays(developerJSOptionInt(values, 30, "days"))
+	if days > 36500 {
+		result["error"] = "days_out_of_range"
+		return vm.ToValue(result)
+	}
+	note := truncateString(developerJSOptionString(values, "note"), 120)
+	// 锁定给本人：注册码指名到触发者当前用户名（沿用 admin「指名码」既有兑换语义），
+	// 并冗余记录 UID / TelegramID 作为纵深校验元数据。
+	targetUsername := strings.TrimSpace(actor.Username)
+	codeType := 1
+	format := a.regCodeFormatForType(codeType, developerJSOptionString(values, "format"))
+	algorithm := firstNonEmpty(developerJSOptionString(values, "random_algorithm", "algorithm"), a.cfg().RegCodeRandomAlgorithm, "base32-20")
+
+	result["days"] = days
+	result["type"] = codeType
+	result["type_name"] = regcodeTypeName(codeType)
+	result["target_username"] = targetUsername
+
+	if opts.Preview {
+		result["dry_run"] = true
+		result["ok"] = true
+		return vm.ToValue(result)
+	}
+
+	// 服务端持 Token 重新核验身份，拿到权威 Bangumi 数值 id 作为去重键（不信任 JS 传值）。
+	bangumiID, bangumiUsername, errCode := a.developerJSBangumiClaimSelf(actor, opts, logs)
+	if errCode != "" {
+		result["error"] = errCode
+		return vm.ToValue(result)
+	}
+
+	// 预检：该 Bangumi 账号是否已领过。命中即幂等复用旧码，连码都不再生成。
+	if existing, ok := a.store().BangumiRegcodeClaimByID(bangumiID); ok {
+		result["ok"] = true
+		result["already_claimed"] = true
+		result["code"] = existing.Code
+		result["days"] = existing.Days
+		return vm.ToValue(result)
+	}
+
+	// 生成候选码 + 全量碰撞检测（复用 generate 的去重口径）。
+	existingCodes := map[string]bool{}
+	for _, c := range a.store().ListRegCodes() {
+		existingCodes[c.Code] = true
+	}
+	for _, c := range a.store().ListAllInviteCodes() {
+		existingCodes[c.Code] = true
+	}
+	maxAttempts := 10
+	if strings.Contains(algorithm, "16") {
+		maxAttempts = 20
+	}
+	if algorithm == "digits-12" || algorithm == "hex10" {
+		maxAttempts = 30
+	}
+	code := ""
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		candidate := generateRegCode(format, codeType, algorithm, days, 1, -1, 1)
+		if existingCodes[candidate] {
+			continue
+		}
+		code = candidate
+		break
+	}
+	if code == "" {
+		result["error"] = "generation_conflict"
+		return vm.ToValue(result)
+	}
+
+	if err := a.store().UpsertRegCode(store.RegCode{
+		Code:             code,
+		Type:             codeType,
+		ValidityTime:     -1,
+		UseCountLimit:    1,
+		Days:             days,
+		Note:             note,
+		TargetUsername:   targetUsername,
+		TargetUID:        actor.UID,
+		TargetTelegramID: actor.TelegramID,
+		Active:           true,
+		Source:           "telegram_js_self",
+		CreatorUID:       actor.UID,
+	}); err != nil {
+		result["error"] = err.Error()
+		return vm.ToValue(result)
+	}
+
+	// 原子登记去重记录。claimed==false 说明并发下他人（其实只可能是同一 Bangumi 账号的
+	// 并发调用）已抢先登记：回收本次刚生成的码，幂等返回既有码，绝不下发第二张。
+	stored, claimed, err := a.store().ClaimBangumiRegcode(store.BangumiRegcodeClaim{
+		BangumiID:       bangumiID,
+		BangumiUsername: bangumiUsername,
+		Code:            code,
+		UID:             actor.UID,
+		Username:        actor.Username,
+		TelegramID:      actor.TelegramID,
+		Days:            days,
+		Source:          "telegram_js_self",
+	})
+	if err != nil {
+		// 登记失败：回收刚生成的码，避免留下无主码。
+		_ = a.store().DeleteRegCode(code)
+		result["error"] = "claim_failed"
+		return vm.ToValue(result)
+	}
+	if !claimed {
+		_ = a.store().DeleteRegCode(code)
+		result["ok"] = true
+		result["already_claimed"] = true
+		result["code"] = stored.Code
+		result["days"] = stored.Days
+		return vm.ToValue(result)
+	}
+
+	result["ok"] = true
+	result["code"] = code
+	result["bangumi_claimed"] = true
+	if logs != nil && len(*logs) < 8 {
+		*logs = append(*logs, "regcodes.grantSelf issued code")
+	}
+	a.auditEntryIP("telegram", actor.UID, actor.Username, "telegram_js_regcode_grant_self", "system", actor.UID, map[string]any{
+		"code":             code,
+		"days":             days,
+		"bangumi_id":       bangumiID,
+		"bangumi_username": bangumiUsername,
+		"target_username":  targetUsername,
+		"script_api":       "regcodes.grantSelf",
+		"private_chat":     opts.PrivateChat,
 	})
 	return vm.ToValue(result)
 }
