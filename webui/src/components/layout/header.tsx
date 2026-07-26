@@ -13,22 +13,23 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { cn } from "@/lib/utils";
 import { sanitizeImageUrl } from "@/lib/safe-url";
 import { adminNavItems, filterNavItems, userNavItems } from "@/components/layout/sidebar";
-import { Menu, Moon, Sparkles, Sun } from "lucide-react";
+import { Menu, Monitor, Moon, Sparkles, Sun } from "lucide-react";
 import { GithubProjectLink } from "@/components/github-project-link";
 import { LocaleSwitcher } from "@/components/locale-switcher";
 import { useI18n } from "@/lib/i18n";
+import { nextThemeMode, normalizeThemeMode, themeModeLabelKey } from "@/lib/theme-mode";
 
 export function Header() {
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
   const { t } = useI18n();
   const { info: systemInfo } = useSystemStore();
-  const { theme, resolvedTheme, setTheme } = useTheme();
+  const { theme, setTheme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const isAdmin = user?.role === 0;
-  const activeTheme = resolvedTheme || theme || "light";
-  const isDark = activeTheme === "dark";
-  const themeLabel = isDark ? t("common.themeDark") : t("common.themeLight");
+  // themeMode 反映用户选择的设置值（浅色 / 暗色 / 跟随系统），未挂载时回退浅色，与 SSR 首帧一致。
+  const themeMode = normalizeThemeMode(theme);
+  const themeLabel = t(themeModeLabelKey(themeMode));
   const envIcon = process.env.NEXT_PUBLIC_AUTH_ICON_URL?.trim();
   const systemIcon = useMemo(() => sanitizeImageUrl(envIcon || systemInfo?.icon), [envIcon, systemInfo?.icon]);
   const displaySiteName = systemInfo?.name || "Twilight";
@@ -115,11 +116,17 @@ export function Header() {
                 <Button
                   variant="outline"
                   className="h-11 w-full min-w-0"
-                  onClick={() => setTheme(isDark ? "light" : "dark")}
+                  onClick={() => setTheme(nextThemeMode(theme))}
                   title={`${themeLabel} · ${t("common.switchTheme")}`}
                   aria-label={t("common.switchTheme")}
                 >
-                  {isDark ? <Moon className="mr-2 h-4 w-4 shrink-0" /> : <Sun className="mr-2 h-4 w-4 shrink-0" />}
+                  {themeMode === "dark" ? (
+                    <Moon className="mr-2 h-4 w-4 shrink-0" />
+                  ) : themeMode === "system" ? (
+                    <Monitor className="mr-2 h-4 w-4 shrink-0" />
+                  ) : (
+                    <Sun className="mr-2 h-4 w-4 shrink-0" />
+                  )}
                   <span className="truncate">{themeLabel}</span>
                 </Button>
                 <LocaleSwitcher

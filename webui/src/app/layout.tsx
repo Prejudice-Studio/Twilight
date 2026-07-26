@@ -91,8 +91,8 @@ export default function RootLayout({
         <ThemeProvider
           attribute="class"
           defaultTheme="light"
-          enableSystem={false}
-          themes={["light", "dark"]}
+          enableSystem={true}
+          themes={["light", "dark", "system"]}
           disableTransitionOnChange={false}
         >
           <LocaleProvider>

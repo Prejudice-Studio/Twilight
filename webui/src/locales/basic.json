@@ -127,7 +127,8 @@
     "externalLink": "新窗口打开",
     "themeLight": "浅色",
     "themeDark": "暗色",
-    "switchTheme": "切换暗色 / 浅色主题",
+    "themeSystem": "跟随系统",
+    "switchTheme": "切换主题（浅色 / 暗色 / 跟随系统）",
     "switchLanguage": "切换界面语言",
     "currentLanguage": "当前语言",
     "logout": "退出登录",
@@ -343,7 +344,11 @@
     "bangumiAdmin": "Bangumi 管理",
     "tickets": "我的工单",
     "adminTickets": "工单处理",
-    "adminHome": "管理首页"
+    "adminHome": "管理首页",
+    "catService": "服务集成",
+    "catContent": "内容管理",
+    "catSecurity": "安全审计",
+    "catSystem": "系统运维"
   },
   "adminNav": {
     "title": "管理首页",

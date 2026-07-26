@@ -276,7 +276,8 @@
     "externalLink": "Open in new window",
     "themeLight": "Light",
     "themeDark": "Dark",
-    "switchTheme": "Toggle light / dark theme",
+    "themeSystem": "System",
+    "switchTheme": "Switch theme (light / dark / system)",
     "switchLanguage": "Switch interface language",
     "currentLanguage": "Current language",
     "logout": "Log out",
@@ -341,7 +342,11 @@
     "bangumiAdmin": "Bangumi Admin",
     "tickets": "My Tickets",
     "adminTickets": "Ticket Management",
-    "adminHome": "Admin Home"
+    "adminHome": "Admin Home",
+    "catService": "Service Integration",
+    "catContent": "Content Management",
+    "catSecurity": "Security & Audit",
+    "catSystem": "System Ops"
   },
   "signinRenewal": {
     "successTitle": "Renewal successful",

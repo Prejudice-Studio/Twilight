@@ -276,7 +276,8 @@
     "externalLink": "在新視窗開啟",
     "themeLight": "淺色",
     "themeDark": "深色",
-    "switchTheme": "切換深色 / 淺色主題",
+    "themeSystem": "跟隨系統",
+    "switchTheme": "切換主題（淺色 / 深色 / 跟隨系統）",
     "switchLanguage": "切換介面語言",
     "currentLanguage": "目前語言",
     "logout": "登出",
@@ -341,7 +342,11 @@
     "bangumiAdmin": "Bangumi 管理",
     "tickets": "我的工單",
     "adminTickets": "工單處理",
-    "adminHome": "管理首頁"
+    "adminHome": "管理首頁",
+    "catService": "服務整合",
+    "catContent": "內容管理",
+    "catSecurity": "安全稽核",
+    "catSystem": "系統維運"
   },
   "signinRenewal": {
     "successTitle": "續期成功",

@@ -36,8 +36,10 @@ import {
   MessageSquareMore,
   Shield,
   Code2,
+  Monitor,
 } from "lucide-react";
 import { useTheme } from "next-themes";
+import { nextThemeMode, normalizeThemeMode, themeModeLabelKey } from "@/lib/theme-mode";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { GithubProjectLink } from "@/components/github-project-link";
@@ -155,9 +157,9 @@ export function Sidebar() {
   const logout = useAuthStore((s) => s.logout);
   const setTheme = useTheme().setTheme;
   const rawTheme = useTheme().theme;
-  const resolvedTheme = useTheme().resolvedTheme;
-  // resolvedTheme 反映真实生效主题（含 SSR -> CSR 后的 hydration），用于图标显示
-  const currentTheme = resolvedTheme || rawTheme || "light";
+  // themeMode 反映用户选择的「设置值」（浅色 / 暗色 / 跟随系统），
+  // 未挂载时 rawTheme 为 undefined，normalizeThemeMode 回退浅色，与 SSR 首帧一致，避免水合抖动。
+  const themeMode = normalizeThemeMode(rawTheme);
   const isAdmin = user?.role === 0;
   const [profileAvatar, setProfileAvatar] = useState<string | null>(user?.avatar || null);
   const systemInfo = useSystemStore((s) => s.info);
@@ -208,12 +210,12 @@ export function Sidebar() {
     () => filterNavItems(adminNavItems, systemInfo?.features),
     [systemInfo?.features],
   );
-  const themeLabel = currentTheme === "dark" ? t("common.themeDark") : t("common.themeLight");
+  const themeLabel = t(themeModeLabelKey(themeMode));
 
   const toggleTheme = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
-    // 把 light <-> dark 翻转。currentTheme 在 enableSystem={false} 下只会是 "light" / "dark"。
-    const nextTheme = currentTheme === "dark" ? "light" : "dark";
+    // 三态循环：浅色 → 暗色 → 跟随系统 → 浅色。
+    const nextTheme = nextThemeMode(rawTheme);
 
     const startViewTransition = (document as unknown as MaybeStartViewTransition).startViewTransition;
 
@@ -332,7 +334,12 @@ export function Sidebar() {
                     const cat = item.category || "";
                     const showCat = cat && cat !== lastCat;
                     lastCat = cat;
-                    const catLabels: Record<string, string> = { service: "服务集成", content: "内容管理", security: "安全审计", system: "系统运维" };
+                    const catLabels: Record<string, string> = {
+                      service: t("navigation.catService"),
+                      content: t("navigation.catContent"),
+                      security: t("navigation.catSecurity"),
+                      system: t("navigation.catSystem"),
+                    };
                     return (
                       <Fragment key={item.href}>
                         {showCat && <p className="px-3 pt-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">{catLabels[cat] || cat}</p>}
@@ -392,7 +399,13 @@ export function Sidebar() {
               title={`${themeLabel} · ${t("common.switchTheme")}`}
               aria-label={t("common.switchTheme")}
             >
-              {currentTheme === "dark" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+              {themeMode === "dark" ? (
+                <Moon className="h-4 w-4" />
+              ) : themeMode === "system" ? (
+                <Monitor className="h-4 w-4" />
+              ) : (
+                <Sun className="h-4 w-4" />
+              )}
               <span className="truncate text-xs font-medium">{themeLabel}</span>
             </Button>
             <LocaleSwitcher
