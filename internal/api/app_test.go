@@ -6712,6 +6712,11 @@ func TestValidateEmbyURLRejectsUnsafeTargets(t *testing.T) {
 		{"aws metadata", "http://169.254.169.254/latest/meta-data/", true},
 		{"aliyun metadata", "http://100.100.100.200/", true},
 		{"link-local ipv6", "http://[fe80::1]:8096", true},
+		// IPv4-mapped IPv6 不能绕过否决：Go 的 To4() 会把 ::ffff:a.b.c.d 归一化，
+		// 元数据/link-local 仍被挡；而映射后的 RFC1918 仍按自托管策略放行。
+		{"ipv4-mapped metadata", "http://[::ffff:169.254.169.254]/", true},
+		{"ipv4-mapped aliyun", "http://[::ffff:100.100.100.200]/", true},
+		{"ipv4-mapped rfc1918 allowed", "http://[::ffff:10.0.0.5]:8096", false},
 		{"unspecified ipv4", "http://0.0.0.0:8096", true},
 		{"file scheme", "file:///etc/passwd", true},
 		{"ftp scheme", "ftp://example.com/", true},
