@@ -30,7 +30,7 @@ func (a *App) handleMyTickets(w http.ResponseWriter, r *http.Request, _ Params) 
 	}
 	p := current(r)
 	tickets := a.store().ListTickets(store.TicketFilter{UID: p.User.UID})
-	ok(w, "OK", map[string]any{"tickets": ticketDTOs(tickets), "total": len(tickets), "ticket_types": a.store().TicketTypes()})
+	ok(w, "OK", map[string]any{"tickets": ticketDTOs(tickets, false), "total": len(tickets), "ticket_types": a.store().TicketTypes()})
 }
 
 // handleCreateTicket 用户提交工单。
@@ -103,7 +103,7 @@ func (a *App) handleCreateTicket(w http.ResponseWriter, r *http.Request, _ Param
 	)
 	a.audit(r, "create_ticket", "user", p.User.UID, map[string]any{"ticket_id": ticket.ID, "type": ticketType, "priority": priority})
 	a.notifyTicketAdmins(r.Context(), "created", ticket, p.User)
-	created(w, "工单已提交", ticketDTO(ticket))
+	created(w, "工单已提交", ticketDTO(ticket, false))
 }
 
 // handleCloseOwnTicket 用户关闭自己的工单。
@@ -133,7 +133,7 @@ func (a *App) handleCloseOwnTicket(w http.ResponseWriter, r *http.Request, param
 	}
 	a.audit(r, "close_ticket", "user", 0, map[string]any{"ticket_id": id})
 	a.notifyTicketAdmins(r.Context(), "closed", ticket, p.User)
-	ok(w, "工单已关闭", ticketDTO(ticket))
+	ok(w, "工单已关闭", ticketDTO(ticket, false))
 }
 
 // handleReopenOwnTicket 用户重开自己的已关闭工单。
@@ -156,14 +156,27 @@ func (a *App) handleReopenOwnTicket(w http.ResponseWriter, r *http.Request, para
 		failWithCode(w, http.StatusBadRequest, ErrTicketNotClosed, "只有已关闭的工单可以重开")
 		return
 	}
-	status := store.TicketStatusOpen
-	ticket, err := a.store().UpdateTicket(id, store.TicketUpdate{Status: &status})
+	cfg := a.cfg()
+	// 重开与建单同一配额口径：原子复核 user/global open limit，堵住「关掉再重开」越过上限。
+	ticket, err := a.store().ReopenTicket(id, p.User.UID, cfg.TicketUserOpenLimit, cfg.TicketGlobalOpenLimit)
+	if errors.Is(err, store.ErrTicketNotClosed) {
+		failWithCode(w, http.StatusBadRequest, ErrTicketNotClosed, "只有已关闭的工单可以重开")
+		return
+	}
+	if errors.Is(err, store.ErrTicketUserOpenLimit) {
+		failWithCode(w, http.StatusConflict, ErrTicketUserLimit, "您当前待处理 / 处理中的工单已达上限，请先关闭部分工单后再重开")
+		return
+	}
+	if errors.Is(err, store.ErrTicketGlobalOpenLimit) {
+		failWithCode(w, http.StatusConflict, ErrTicketGlobalLimit, "当前系统待处理工单已达全局上限，请稍后再重开")
+		return
+	}
 	if statusFromError(w, err) {
 		return
 	}
 	a.audit(r, "reopen_ticket", "user", 0, map[string]any{"ticket_id": id})
 	a.notifyTicketAdmins(r.Context(), "reopened", ticket, p.User)
-	ok(w, "工单已重开", ticketDTO(ticket))
+	ok(w, "工单已重开", ticketDTO(ticket, false))
 }
 
 // handleToggleTicketNotify 切换单个工单的 Telegram 通知开关。
@@ -193,7 +206,7 @@ func (a *App) handleToggleTicketNotify(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 	a.audit(r, "toggle_ticket_notify", "user", 0, map[string]any{"ticket_id": id, "enabled": enabled})
-	ok(w, "通知设置已更新", ticketDTO(ticket))
+	ok(w, "通知设置已更新", ticketDTO(ticket, false))
 }
 
 // ---- 管理员工单接口 ----
@@ -240,7 +253,7 @@ func (a *App) handleAdminTickets(w http.ResponseWriter, r *http.Request, _ Param
 	}
 	result := a.store().ListTicketsPage(filter, page, perPage)
 	ok(w, "OK", map[string]any{
-		"tickets":      ticketDTOs(result.Tickets),
+		"tickets":      ticketDTOs(result.Tickets, true),
 		"total":        result.Total,
 		"page":         page,
 		"per_page":     perPage,
@@ -259,7 +272,7 @@ func (a *App) handleAdminTicket(w http.ResponseWriter, r *http.Request, params P
 		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
 		return
 	}
-	ok(w, "OK", map[string]any{"ticket": ticketDTO(ticket), "ticket_types": a.store().TicketTypes()})
+	ok(w, "OK", map[string]any{"ticket": ticketDTO(ticket, true), "ticket_types": a.store().TicketTypes()})
 }
 
 // handleAdminUpdateTicket 管理员更新工单状态、优先级、类型和处理摘要。
@@ -277,39 +290,64 @@ func (a *App) handleAdminUpdateTicket(w http.ResponseWriter, r *http.Request, pa
 		return
 	}
 
-	status := strings.TrimSpace(firstNonEmpty(stringValue(payload, "status"), existing.Status))
-	if !store.ValidTicketStatus(status) {
-		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的工单状态")
-		return
+	// 仅对 payload 显式提供的字段建指针（patch 语义）。未提供的字段在 store 的
+	// mutateAndSaveLocked 闭包里保持最新落库值不变——闭包在版本守卫 + 冲突重试后基于
+	// 最新 state 重跑，因此并发编辑同一工单时不会用请求时读到的陈旧 existing 快照把
+	// 他人刚改的字段回退（last-writer-wins）。此前无条件回填 status/priority/type，
+	// 两个管理员各改一字段时后写者会覆盖对方的改动。
+	var statusPtr, priorityPtr, typePtr, adminNote *string
+	if _, ok := payload["status"]; ok {
+		value := strings.TrimSpace(stringValue(payload, "status"))
+		if !store.ValidTicketStatus(value) {
+			failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的工单状态")
+			return
+		}
+		value = store.NormalizeTicketStatus(value)
+		statusPtr = &value
 	}
-	status = store.NormalizeTicketStatus(status)
-
-	priority := strings.TrimSpace(firstNonEmpty(stringValue(payload, "priority"), existing.Priority))
-	if !store.ValidTicketPriority(priority) {
-		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的优先级")
-		return
+	if _, ok := payload["priority"]; ok {
+		value := strings.TrimSpace(stringValue(payload, "priority"))
+		if !store.ValidTicketPriority(value) {
+			failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的优先级")
+			return
+		}
+		value = store.NormalizeTicketPriority(value)
+		priorityPtr = &value
 	}
-	priority = store.NormalizeTicketPriority(priority)
-
-	ticketType := strings.TrimSpace(firstNonEmpty(stringValue(payload, "type"), existing.Type))
-	if !validTicketType(a.store().TicketTypes(), ticketType) {
-		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的工单类型")
-		return
+	if _, ok := payload["type"]; ok {
+		value := strings.TrimSpace(stringValue(payload, "type"))
+		if !validTicketType(a.store().TicketTypes(), value) {
+			failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的工单类型")
+			return
+		}
+		value = store.NormalizeTicketType(a.store().TicketTypes(), value)
+		typePtr = &value
 	}
-	ticketType = store.NormalizeTicketType(a.store().TicketTypes(), ticketType)
-	var adminNote *string
 	if _, ok := payload["admin_note"]; ok {
 		value := strings.TrimSpace(stringValue(payload, "admin_note"))
 		adminNote = &value
 	}
 
 	ticket, err := a.store().UpdateTicket(id, store.TicketUpdate{
-		Status:    &status,
-		Priority:  &priority,
-		Type:      &ticketType,
+		Status:    statusPtr,
+		Priority:  priorityPtr,
+		Type:      typePtr,
 		AdminNote: adminNote,
 	})
 	if statusFromError(w, err) {
+		return
+	}
+	noteChanged := adminNote != nil && strings.TrimSpace(existing.AdminNote) != ticket.AdminNote
+	// 工单变动后通知工单所属用户（如果用户开启了 TG 通知）。
+	// admin_note 已收敛为纯内部备注：仅当本请求显式改动了所有者可见字段（状态/优先级/类型）
+	// 且值确有变化时才通知，单纯编辑内部备注不再向用户推送「工单更新」，避免内部动作外溢成噪声。
+	ownerVisibleChanged := (statusPtr != nil && ticket.Status != store.NormalizeTicketStatus(existing.Status)) ||
+		(priorityPtr != nil && ticket.Priority != store.NormalizeTicketPriority(existing.Priority)) ||
+		(typePtr != nil && ticket.Type != store.NormalizeTicketType(a.store().TicketTypes(), existing.Type))
+	// 空保存（表单未改动任何字段，或仅提交了与原值相同的 no-op）不应产生审计与通知噪声：
+	// 既不写 update_ticket 审计，也不向管理员广播「已更新」。仅当所有者可见字段或内部备注确有变化时才触发。
+	if !ownerVisibleChanged && !noteChanged {
+		ok(w, "工单无变化", ticketDTO(ticket, true))
 		return
 	}
 	a.audit(r, "update_ticket", "admin", ticket.UID, map[string]any{
@@ -320,14 +358,14 @@ func (a *App) handleAdminUpdateTicket(w http.ResponseWriter, r *http.Request, pa
 		"new_priority": ticket.Priority,
 		"old_type":     existing.Type,
 		"new_type":     ticket.Type,
-		"note_changed": adminNote != nil && strings.TrimSpace(existing.AdminNote) != ticket.AdminNote,
+		"note_changed": noteChanged,
 	})
-
-	// 工单变动后通知工单所属用户（如果用户开启了 TG 通知）
-	a.notifyTicketOwner(r.Context(), ticket, existing)
+	if ownerVisibleChanged {
+		a.notifyTicketOwner(r.Context(), ticket, existing)
+	}
 	a.notifyTicketAdmins(r.Context(), "updated", ticket, current(r).User)
 
-	ok(w, "工单已更新", ticketDTO(ticket))
+	ok(w, "工单已更新", ticketDTO(ticket, true))
 }
 
 // handleAdminReplyTicket 追加管理员文字回复，不要求提交状态 / 类型 / 优先级表单。
@@ -367,7 +405,7 @@ func (a *App) handleAdminReplyTicket(w http.ResponseWriter, r *http.Request, par
 	a.notifyTicketAdmins(r.Context(), "admin_replied", ticket, p.User)
 	ok(w, "回复成功", map[string]any{
 		"ticket_id": id,
-		"ticket":    ticketDTO(ticket),
+		"ticket":    ticketDTO(ticket, true),
 		"replies":   ticketReplyDTOs(ticket.Replies),
 	})
 }
@@ -719,7 +757,7 @@ func (a *App) handleReplyToTicket(w http.ResponseWriter, r *http.Request, params
 	}
 	ok(w, "回复成功", map[string]any{
 		"ticket_id": id,
-		"ticket":    ticketDTO(updated),
+		"ticket":    ticketDTO(updated, p.User.Role == store.RoleAdmin),
 		"replies":   ticketReplyDTOs(updated.Replies),
 	})
 }
@@ -783,7 +821,10 @@ func ticketReplyAuthor(role int) string {
 }
 
 // ticketDTO 把单个工单序列化为响应 map，并为每张附件补上可访问的 url 字段。
-func ticketDTO(t store.Ticket) map[string]any {
+// includeAdminNote 控制是否输出 admin_note：admin_note 是「内部处理备注」，仅管理端可见。
+// 面向工单所有者的沟通一律走 Replies[]（双向对话通道），备注与对话彻底分离，
+// 避免管理员误把内部备注当作对用户可见的留言写入而泄露。
+func ticketDTO(t store.Ticket, includeAdminNote bool) map[string]any {
 	notifyTelegram := true
 	if t.NotifyTelegram != nil {
 		notifyTelegram = *t.NotifyTelegram
@@ -797,7 +838,6 @@ func ticketDTO(t store.Ticket) map[string]any {
 		"type":            t.Type,
 		"status":          t.Status,
 		"priority":        t.Priority,
-		"admin_note":      t.AdminNote,
 		"replies":         ticketReplyDTOs(t.Replies),
 		"attachments":     ticketAttachmentDTOs(t.ID, t.Attachments),
 		"notify_telegram": notifyTelegram,
@@ -806,14 +846,17 @@ func ticketDTO(t store.Ticket) map[string]any {
 		"resolved_at":     t.ResolvedAt,
 		"closed_at":       t.ClosedAt,
 	}
+	if includeAdminNote {
+		dto["admin_note"] = t.AdminNote
+	}
 	return dto
 }
 
-// ticketDTOs 批量序列化工单列表。
-func ticketDTOs(tickets []store.Ticket) []map[string]any {
+// ticketDTOs 批量序列化工单列表。includeAdminNote 含义同 ticketDTO。
+func ticketDTOs(tickets []store.Ticket, includeAdminNote bool) []map[string]any {
 	out := make([]map[string]any, 0, len(tickets))
 	for _, t := range tickets {
-		out = append(out, ticketDTO(t))
+		out = append(out, ticketDTO(t, includeAdminNote))
 	}
 	return out
 }
@@ -1201,6 +1244,9 @@ func (a *App) notifyTicketOwner(ctx context.Context, updated, existing store.Tic
 	})
 }
 
+// ticketOwnerNotificationNote 取本次变动中要展示给工单所有者的「回复内容」。
+// 只认新增的管理员回复（Replies[]）——面向用户的唯一沟通通道。admin_note 是内部处理备注，
+// 与用户端彻底解耦，绝不出现在所有者通知里（此前会把 admin_note 变更推给用户，属泄露）。
 func ticketOwnerNotificationNote(updated, existing store.Ticket) string {
 	if len(updated.Replies) > len(existing.Replies) {
 		for i := len(updated.Replies) - 1; i >= len(existing.Replies); i-- {
@@ -1209,9 +1255,6 @@ func ticketOwnerNotificationNote(updated, existing store.Ticket) string {
 				return strings.TrimSpace(reply.Content)
 			}
 		}
-	}
-	if strings.TrimSpace(updated.AdminNote) != strings.TrimSpace(existing.AdminNote) {
-		return strings.TrimSpace(updated.AdminNote)
 	}
 	return ""
 }
