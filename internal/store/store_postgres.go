@@ -48,6 +48,7 @@ func OpenPostgres(ctx context.Context, dsn string) (*Store, error) {
 		}
 	}
 	st.stateVersion = version
+	st.stateRaw = raw
 	st.state.ensure()
 	st.rebuildUserIndexes()
 	if err := st.migrateLegacyAuditLogs(ctx); err != nil {

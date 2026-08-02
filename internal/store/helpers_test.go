@@ -77,6 +77,7 @@ func (s *Store) resetForTest(ctx context.Context) error {
 	defer s.mu.Unlock()
 	s.state = emptyState()
 	s.stateVersion = 0
+	s.stateRaw = nil
 	s.rebuildUserIndexes()
 	return s.saveLockedForce()
 }

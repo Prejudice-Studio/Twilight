@@ -63,11 +63,11 @@ type Store struct {
 	// 的丢更新——正是「用户建了工单、TG 也收到了，工单却随后凭空消失」的根因。
 	stateVersion int64
 
-	// refreshRaw 缓存 refreshLocked 刚从持久层读回的原始 jsonb 字节。它就是「变更前
-	// 状态」的权威序列化，snapshotStateLocked 直接复用它作回滚快照，省去每次写路径
-	// 额外一份多 MB 的全量 marshal（此前拍快照要 marshal 一次、saveStateLocked 又
-	// marshal 一次，写热路径持锁做两份全量序列化）。消费即清空，避免陈旧字节被误用。
-	refreshRaw []byte
+	// stateRaw 是与 stateVersion 对应的最近一次权威 JSONB 字节。refreshLocked 在版本
+	// 未变化时让 PostgreSQL 只返回 NULL state，跳过大对象网络传输、反序列化和索引重建；
+	// snapshotStateLocked 复用 stateRaw 作失败回滚快照，save 成功后再原子替换为新字节。
+	// 该切片只读持有，不与 s.state 的可变 map/slice 共享底层对象。
+	stateRaw []byte
 
 	// API Key 调用统计（RequestCount / LastUsed）是纯展示字段，不参与任何鉴权判定，
 	// 却处在每个 API Key 请求的认证热路径上。此前每请求都为自增计数走一遍 mutateAndSaveLocked
@@ -940,15 +940,12 @@ type stateSnapshot struct {
 // snapshotStateLocked 取「变更前状态」的序列化快照用于失败回滚。调用方必须已持有
 // s.mu 写锁，且在同一临界区内紧接 refreshLocked 之后调用（mutateAndSaveLocked 保证）。
 //
-// 优先复用 refreshLocked 刚缓存的权威字节 refreshRaw：它就是当前 s.state 反序列化的
-// 来源，restoreStateLocked 走 unmarshal+ensure+rebuild 从它还原，结果与 refresh 产出
-// 的 s.state 逻辑等价，故可省去一次多 MB 的全量 marshal。消费即清空，防止后续误用陈旧
-// 字节；无缓存（冷启动无持久行）时回退到即时 marshal 保证正确性。
+// 优先复用与当前 stateVersion 对齐的权威字节 stateRaw：restoreStateLocked 走
+// unmarshal+ensure+rebuild 从它还原，结果与 refresh 产出的 s.state 逻辑等价，故可省去
+// 一次多 MB 的全量 marshal。stateRaw 在 save 成功前始终代表变更前状态，可安全跨过 mutate。
 func (s *Store) snapshotStateLocked() (stateSnapshot, error) {
-	if len(s.refreshRaw) > 0 {
-		data := s.refreshRaw
-		s.refreshRaw = nil
-		return stateSnapshot{data: data}, nil
+	if len(s.stateRaw) > 0 {
+		return stateSnapshot{data: s.stateRaw}, nil
 	}
 	s.state.ensure()
 	data, err := json.Marshal(&s.state)
@@ -967,11 +964,16 @@ func (s *Store) restoreStateLocked(snap stateSnapshot) {
 	if err := json.Unmarshal(snap.data, &clone); err != nil {
 		// 快照字节来自刚刚成功的 json.Marshal，理论上不可能再反序列化失败；
 		// 兜底从持久层重载（写失败时磁盘仍是变更前状态），避免内存停在半改态。
+		// 先把本地版本设为不可能值，强制 refreshLocked 返回完整 state，不能命中
+		// “版本未变化”快路径后原样保留待回滚的内存对象。
+		s.stateVersion = -1
+		s.stateRaw = nil
 		_ = s.refreshLocked()
 		return
 	}
 	clone.ensure()
 	s.state = clone
+	s.stateRaw = snap.data
 	s.rebuildUserIndexes()
 }
 
@@ -1063,6 +1065,7 @@ func (s *Store) saveStateLocked(force bool) error {
 			return err
 		}
 		s.stateVersion = newVersion
+		s.stateRaw = data
 		return nil
 	}
 	// 版本守卫写：仅当持久层 version 仍等于本进程读到的 s.stateVersion 时才更新，
@@ -1085,6 +1088,7 @@ func (s *Store) saveStateLocked(force bool) error {
 		return err
 	}
 	s.stateVersion = newVersion
+	s.stateRaw = data
 	return nil
 }
 
@@ -1105,19 +1109,26 @@ func (s *Store) refreshLocked() error {
 	defer cancel()
 	var data []byte
 	var version int64
-	err := s.db.QueryRowContext(ctx, `SELECT state, version FROM twilight_state WHERE id = 1`).Scan(&data, &version)
+	// CASE 让版本未变化的常见路径只返回 NULL，而不是把整份 JSONB 从 PostgreSQL
+	// 传回 Go 后再丢弃。版本变化时仍一次查询取回 state + version，保持 Refresh 的
+	// 跨进程可见性与 mutateAndSaveLocked 的乐观并发基线。
+	err := s.db.QueryRowContext(ctx, `
+SELECT CASE WHEN version = $1 THEN NULL ELSE state END, version
+FROM twilight_state WHERE id = 1`, s.stateVersion).Scan(&data, &version)
 	if errors.Is(err, sql.ErrNoRows) {
 		s.state = emptyState()
 		s.rebuildUserIndexes()
 		s.stateVersion = 0
-		// 无持久行：无权威字节可复用，清空缓存让 snapshotStateLocked 回退到即时 marshal。
-		s.refreshRaw = nil
+		s.stateRaw, _ = json.Marshal(&s.state)
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	s.stateVersion = version
+	if version == s.stateVersion && len(data) == 0 {
+		// 本进程刚保存或上次刷新过的 state 仍是权威版本；stateRaw 同样继续有效。
+		return nil
+	}
 	var state State
 	if len(data) > 0 {
 		if err := json.Unmarshal(data, &state); err != nil {
@@ -1126,10 +1137,9 @@ func (s *Store) refreshLocked() error {
 	}
 	state.ensure()
 	s.state = state
+	s.stateVersion = version
+	s.stateRaw = data
 	s.rebuildUserIndexes()
-	// 缓存刚读回的权威字节，供紧随其后的 snapshotStateLocked 复用作回滚快照。
-	// database/sql 的 Scan 会为每个 []byte 目标分配独立副本，这些字节归本 Store 所有。
-	s.refreshRaw = data
 	return nil
 }
 

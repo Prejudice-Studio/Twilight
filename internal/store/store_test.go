@@ -472,6 +472,32 @@ func TestRefreshLoadsExternallyChangedRegCodesAndTickets(t *testing.T) {
 	}
 }
 
+func TestRefreshUnchangedVersionKeepsAuthoritativeStateBytes(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	if _, err := st.CreateUser(User{Username: "unchanged-refresh", PasswordHash: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	st.mu.RLock()
+	if len(st.stateRaw) == 0 {
+		st.mu.RUnlock()
+		t.Fatal("save did not retain authoritative state bytes")
+	}
+	before := &st.stateRaw[0]
+	beforeVersion := st.stateVersion
+	st.mu.RUnlock()
+	if err := st.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	if st.stateVersion != beforeVersion {
+		t.Fatalf("unchanged refresh moved version from %d to %d", beforeVersion, st.stateVersion)
+	}
+	if len(st.stateRaw) == 0 || &st.stateRaw[0] != before {
+		t.Fatal("unchanged refresh replaced the authoritative state payload")
+	}
+}
+
 // ClearEmbyGrantForUnboundUsers 必须只解锁"无 Emby 账号"用户的注册资格，并回退其
 // 占用的注册码/邀请码使用记录；已绑定 Emby 与 PendingEmby 在飞的用户保持不动。
 func TestClearEmbyGrantForUnboundUsers(t *testing.T) {

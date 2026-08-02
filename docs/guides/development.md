@@ -235,6 +235,7 @@ Twilight 不对 Cookie 鉴权的变更类请求做 CSRF 令牌校验，也不做
 唯一运行后端是 **PostgreSQL**：
 
 - 主要业务状态写入 `twilight_state` 表中 `id = 1` 的单行 `jsonb`。另有独立表：`twilight_audit_logs`（操作审计）、`twilight_sessions`（会话）、`twilight_runtime_logs`（运行时日志）、`twilight_playback_records`（播放记录）。审计拆表用于避免每次状态变更后的审计追加再次重写整份主状态。
+- `twilight_state.version` 是跨进程一致性的必要部分。Store 刷新会先比较版本，版本未变化时不会传回整份 JSONB；调试或人工维护数据库时，修改 `state` 必须同时执行 `version = version + 1`，正式代码不得绕过 `internal/store` 直接写这行。
 - `Store` 仅能经 `store.OpenPostgres` 构造，`database.driver` 设为非 postgres 值时后端启动即报错。JSON 仅作为迁移面板的一次性导出目标与 `twilight migrate-json` 的导入源保留，不再是可运行后端；已无 JSON 文件后端、文件锁、`.bak` 影子文件或旁路日志文件。
 
 > 不存在旧 Python 时代的 `db/invites.db`、`invite_relations` 单表，也没有「新增 xx.db / 新增表 / `ALTER TABLE announcements 增列` / 启动时自动建表」这类邀请或公告相关的迁移说法。新增邀请 / 公告字段，是在 `State` 结构体上加字段，并在加载时补默认值（见 `store.go` 中对 nil map 的初始化），不要引入独立表或单独的 SQLite 文件。

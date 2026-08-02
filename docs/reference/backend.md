@@ -248,8 +248,8 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
 数据库行为要点：
 
 - **多进程并发写用版本列串行化**：`twilight_state` 带 `version bigint` 列，`saveLocked` 走「version = 读到值」守卫的 UPSERT，命中 0 行（被他进程抢先递增）即回 `errStateVersionConflict`，`mutateAndSaveLocked` 有界重试（重新 `refreshLocked` 拉最新 state + version 后重放 mutate）。这取代了此前「refresh 与整份 jsonb 盲写之间被他进程插入提交后仍整份覆盖」的丢更新——正是「用户建了工单、TG 也收到通知，工单却随后凭空消失」的根因。`saveLockedForce` 无视守卫强制覆盖并把 version 推到「读到值 +1」，仅用于冷启动播种、`LoadSnapshot` 恢复 / 迁移。
-- `refreshLocked` 每次全量 `SELECT state, version`：PG 为真多进程，不设本地变更门控（单进程独占下才成立的 stat 门控已随 JSON 后端移除）。读写都走 30s 超时 context，连接假死时到期自行释放，避免整个 `s.mu` 连带全站 handler 卡死。
-- 写盘失败一律回滚：`mutateAndSaveLocked` 在 mutate 前 `snapshotStateLocked` 拍字节快照，save 失败经 `restoreStateLocked` 覆盖回内存并重建索引，保证内存与持久层要么一起前进、要么一起回到上一个一致点。
+- `refreshLocked` 每次先由 PostgreSQL 比较 `version`，查询使用 `CASE WHEN version = $1 THEN NULL ELSE state END`：版本没变时只返回版本号，不传输、不反序列化整份 JSONB，也不重建用户/API Key 索引；版本变化时才在同一查询中取回完整 state。读写都走 30s 超时 context，连接假死时到期自行释放，避免整个 `s.mu` 连带全站 handler 卡死。任何绕过 Store 的人工 SQL 修复若修改 `state`，必须同时递增 `version`，否则各进程会按未变化版本继续使用本地快照。
+- 写盘失败一律回滚：`Store.stateRaw` 常驻保存与 `stateVersion` 对齐的权威序列化字节；`snapshotStateLocked` 只引用这份只读字节，save 成功后才替换为新 JSON，失败则由 `restoreStateLocked` 延迟反序列化并重建索引。常见成功路径不再为了回滚额外序列化或复制完整对象图。
 - **PostgreSQL 建库建表**：目标库不存在时，会尝试用同一连接用户连接 `postgres` / `template1` 维护库执行 `CREATE DATABASE`（连接用户需要 `CREATEDB` 权限，已存在则不重复创建）；随后自动建表 `twilight_state`、`twilight_audit_logs`、`twilight_runtime_logs`、`twilight_sessions`、`twilight_playback_records` 及相关索引（`CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` / `ALTER TABLE … ADD COLUMN IF NOT EXISTS version`，全部幂等，可反复执行）。
 - **操作审计表性能口径**：`twilight_audit_logs` 使用自增 ID 与状态时间、分类、动作、操作者、目标用户索引。新增审计只插入独立表并在同一事务内执行条数保留，不再为一条审计记录全量读取、反序列化和重写 `twilight_state`。列表的筛选、排序、计数、分页由 PostgreSQL 完成，避免把完整审计历史复制进 Go 堆。旧 `state.audit_logs` 在启动时幂等迁移；备份时会重新合并到 JSON 快照，恢复时再拆回独立表。
 - **运行日志表性能口径**：`twilight_runtime_logs` 只服务 Go 进程运行日志，按 `id` 游标读取增量，按 `id DESC` 读取最新快照，并用 cutoff id 删除旧行以保留最近 N 条；其写入同样不会改动主状态文档。
