@@ -5,7 +5,6 @@ import type { ComponentType } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { motion, LayoutGroup } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth";
 import {
@@ -218,7 +217,7 @@ export function Sidebar() {
 
         <nav className="sidebar-nav">
           <p className="sidebar-label">{t("navigation.userMenu")}</p>
-          <LayoutGroup>
+          <Fragment>
             {visibleUserNavItems.map((item) => {
               const active = isActivePath(pathname, item.href);
               return (
@@ -229,29 +228,21 @@ export function Sidebar() {
                   className={cn("sidebar-link", active && "sidebar-link-active")}
                 >
                   {active && (
-                    <motion.span
-                      layoutId="sidebar-user-active-bg"
-                      className="sidebar-active-bg"
-                      transition={{ type: "spring", stiffness: 420, damping: 34 }}
-                    />
+                    <span className="sidebar-active-bg animate-in fade-in duration-150" />
                   )}
                   <item.icon className="relative z-10 h-4 w-4 shrink-0" />
                   <span className="relative z-10">{item.label || (item.labelKey ? t(item.labelKey) : "")}</span>
                   {active && (
-                    <motion.span
-                      layoutId="sidebar-user-active-dot"
-                      className="sidebar-dot"
-                      transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                    />
+                    <span className="sidebar-dot animate-in fade-in duration-150" />
                   )}
                 </Link>
               );
             })}
-          </LayoutGroup>
+          </Fragment>
           {isAdmin && (
             <>
               <p className="sidebar-label mt-5">{t("navigation.adminMenu")}</p>
-              <LayoutGroup>
+              <Fragment>
                 {(() => {
                   let lastCat = "";
                   return visibleAdminNavItems.map((item) => {
@@ -274,27 +265,19 @@ export function Sidebar() {
                           className={cn("sidebar-link", active && "sidebar-link-active")}
                         >
                           {active && (
-                            <motion.span
-                              layoutId="sidebar-admin-active-bg"
-                              className="sidebar-active-bg"
-                              transition={{ type: "spring", stiffness: 420, damping: 34 }}
-                            />
+                            <span className="sidebar-active-bg animate-in fade-in duration-150" />
                           )}
                           <item.icon className="relative z-10 h-4 w-4 shrink-0" />
                           <span className="relative z-10">{item.label || (item.labelKey ? t(item.labelKey) : "")}</span>
                           {active && (
-                            <motion.span
-                              layoutId="sidebar-admin-active-dot"
-                              className="sidebar-dot"
-                              transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                            />
+                            <span className="sidebar-dot animate-in fade-in duration-150" />
                           )}
                         </Link>
                       </Fragment>
                     );
                   });
                 })()}
-              </LayoutGroup>
+              </Fragment>
             </>
           )}
         </nav>

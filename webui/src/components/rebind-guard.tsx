@@ -2,7 +2,6 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
 import { Loader2, Copy, Bot, Check, AlertCircle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -87,11 +86,7 @@ export default function RebindGuard() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-lg"
-      >
+      <div className="w-full max-w-lg animate-in fade-in slide-in-from-bottom-2 duration-300">
         <Card className="border-primary/20 bg-card/90 backdrop-blur-sm">
           <CardHeader className="text-center pb-2">
             <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
@@ -194,7 +189,7 @@ export default function RebindGuard() {
             )}
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
     </div>
   );
 }
