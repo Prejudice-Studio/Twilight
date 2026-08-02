@@ -106,10 +106,13 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 const FORM_REQUEST_TIMEOUT_MS = 120_000;
 const READ_REQUEST_DEDUPE_WINDOW_MS = 750;
 const READ_RESPONSE_CACHE_TTL_MS = 3_000;
-const READ_RESPONSE_CACHE_MAX_ENTRIES = 80;
+const READ_RESPONSE_CACHE_MAX_ENTRIES = 32;
+const READ_RESPONSE_CACHE_MAX_SOURCE_CHARS = 64 * 1024;
+const READ_RESPONSE_CACHE_TOTAL_SOURCE_CHARS = 256 * 1024;
 
 const inFlightReadRequests = new Map<string, { promise: Promise<ApiResponse<unknown>>; startedAt: number }>();
-const readResponseCache = new Map<string, { data: ApiResponse<unknown>; cachedAt: number }>();
+const readResponseCache = new Map<string, { data: ApiResponse<unknown>; cachedAt: number; sourceChars: number }>();
+let readResponseCacheSourceChars = 0;
 let readCacheEpoch = 0;
 
 function headerCacheKey(headers: Record<string, string>): string {
@@ -155,26 +158,50 @@ function cloneApiResponse<T>(data: ApiResponse<T>): ApiResponse<T> {
   return deepClone(data);
 }
 
+function deleteCachedReadResponse(key: string): void {
+  const cached = readResponseCache.get(key);
+  if (!cached) return;
+  readResponseCacheSourceChars = Math.max(0, readResponseCacheSourceChars - cached.sourceChars);
+  readResponseCache.delete(key);
+}
+
 function getCachedReadResponse<T>(key: string, now = Date.now()): ApiResponse<T> | null {
   const cached = readResponseCache.get(key);
   if (!cached) return null;
   if (now - cached.cachedAt > READ_RESPONSE_CACHE_TTL_MS) {
-    readResponseCache.delete(key);
+    deleteCachedReadResponse(key);
     return null;
   }
+  // Refresh insertion order so the bounded map evicts the least recently used response.
+  readResponseCache.delete(key);
+  readResponseCache.set(key, cached);
   return cloneApiResponse(cached.data as ApiResponse<T>);
 }
 
-function setCachedReadResponse(key: string, data: ApiResponse<unknown>): void {
-  if (readResponseCache.size >= READ_RESPONSE_CACHE_MAX_ENTRIES) {
-    const oldest = readResponseCache.keys().next().value;
-    if (oldest) readResponseCache.delete(oldest);
+function setCachedReadResponse(key: string, data: ApiResponse<unknown>, sourceChars: number): void {
+  if (sourceChars > READ_RESPONSE_CACHE_MAX_SOURCE_CHARS) return;
+
+  deleteCachedReadResponse(key);
+  const now = Date.now();
+  for (const [cachedKey, cached] of readResponseCache) {
+    if (now - cached.cachedAt <= READ_RESPONSE_CACHE_TTL_MS) continue;
+    deleteCachedReadResponse(cachedKey);
   }
-  readResponseCache.set(key, { data: cloneApiResponse(data), cachedAt: Date.now() });
+  while (
+    readResponseCache.size >= READ_RESPONSE_CACHE_MAX_ENTRIES ||
+    readResponseCacheSourceChars + sourceChars > READ_RESPONSE_CACHE_TOTAL_SOURCE_CHARS
+  ) {
+    const oldest = readResponseCache.keys().next().value;
+    if (!oldest) break;
+    deleteCachedReadResponse(oldest);
+  }
+  readResponseCache.set(key, { data: cloneApiResponse(data), cachedAt: now, sourceChars });
+  readResponseCacheSourceChars += sourceChars;
 }
 
 function invalidateReadCaches(): void {
   readResponseCache.clear();
+  readResponseCacheSourceChars = 0;
   inFlightReadRequests.clear();
   readCacheEpoch++;
 }
@@ -317,21 +344,27 @@ async function parseApiResponse<T>(
   response: Response,
   endpoint: string,
   method: string,
-): Promise<ApiResponse<T>> {
+): Promise<{ data: ApiResponse<T>; sourceChars: number }> {
   if (response.status === 204) {
-    return { success: true, message: "OK" };
+    return { data: { success: true, message: "OK" }, sourceChars: 0 };
   }
 
   const text = await response.text();
   if (!text) {
-    return { success: response.ok, message: response.ok ? "OK" : response.statusText };
+    return {
+      data: { success: response.ok, message: response.ok ? "OK" : response.statusText },
+      sourceChars: 0,
+    };
   }
 
   try {
-    return JSON.parse(text) as ApiResponse<T>;
+    return { data: JSON.parse(text) as ApiResponse<T>, sourceChars: text.length };
   } catch (error) {
     if (!response.ok) {
-      return { success: false, message: response.statusText || `HTTP ${response.status}` };
+      return {
+        data: { success: false, message: response.statusText || `HTTP ${response.status}` },
+        sourceChars: text.length,
+      };
     }
     console.error("JSON parse error:", error);
     throw new Error(buildParseErrorMessage(response.status, endpoint, method));
@@ -428,9 +461,10 @@ export async function apiRequest<T>(
     guard.cleanup();
   }
 
-  const data = await parseApiResponse<T>(response, endpoint, method);
+  const parsed = await parseApiResponse<T>(response, endpoint, method);
+  const data = parsed.data;
   if (isReadRequest && response.ok && data?.success !== false && cacheKey && requestReadCacheEpoch === readCacheEpoch) {
-    setCachedReadResponse(cacheKey, data as ApiResponse<unknown>);
+    setCachedReadResponse(cacheKey, data as ApiResponse<unknown>, parsed.sourceChars);
   }
 
   if (!response.ok) {
@@ -495,7 +529,7 @@ export async function apiRequestForm<T>(
     guard.cleanup();
   }
 
-  const data = await parseApiResponse<T>(response, endpoint, methodName);
+  const { data } = await parseApiResponse<T>(response, endpoint, methodName);
 
   if (!response.ok) {
     throw new ApiError({
