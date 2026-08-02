@@ -34,7 +34,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// resetTestDatabase 把测试库清空到裸状态：直接 DROP 四张表（IF EXISTS +
+// resetTestDatabase 把测试库清空到裸状态：直接 DROP 五张表（IF EXISTS +
 // CASCADE，缺表也不报错），随后的 store.OpenPostgres 会幂等重建 schema 并
 // 播种空 state，等价于给每个用例一个全新的数据库。
 func resetTestDatabase(t *testing.T) {
@@ -46,7 +46,7 @@ func resetTestDatabase(t *testing.T) {
 	defer db.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS twilight_state, twilight_runtime_logs, twilight_sessions, twilight_playback_records CASCADE`); err != nil {
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS twilight_state, twilight_audit_logs, twilight_runtime_logs, twilight_sessions, twilight_playback_records CASCADE`); err != nil {
 		t.Fatalf("reset test database: %v", err)
 	}
 }
@@ -62,6 +62,7 @@ func newTestStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("open postgres test store: %v", err)
 	}
+	t.Cleanup(func() { _ = st.Close() })
 	return st
 }
 
@@ -75,5 +76,6 @@ func reopenTestStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("reopen postgres test store: %v", err)
 	}
+	t.Cleanup(func() { _ = st.Close() })
 	return st
 }

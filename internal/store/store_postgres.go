@@ -50,6 +50,10 @@ func OpenPostgres(ctx context.Context, dsn string) (*Store, error) {
 	st.stateVersion = version
 	st.state.ensure()
 	st.rebuildUserIndexes()
+	if err := st.migrateLegacyAuditLogs(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	st.startAPIKeyUsageFlusher()
 	return st, nil
 }
@@ -309,6 +313,35 @@ CREATE INDEX IF NOT EXISTS twilight_runtime_logs_time_idx ON twilight_runtime_lo
 CREATE INDEX IF NOT EXISTS twilight_runtime_logs_id_desc_idx ON twilight_runtime_logs (id DESC)`); err != nil {
 		_ = db.Close()
 		return nil, status, describePostgresConnectionError(target, err)
+	}
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS twilight_audit_logs (
+	id bigserial PRIMARY KEY,
+	uid bigint NOT NULL DEFAULT 0,
+	username text NOT NULL DEFAULT '',
+	action text NOT NULL,
+	category text NOT NULL,
+	source text NOT NULL DEFAULT '',
+	method text NOT NULL DEFAULT '',
+	target_uid bigint NOT NULL DEFAULT 0,
+	detail jsonb,
+	ip text NOT NULL DEFAULT '',
+	created_at bigint NOT NULL
+)`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
+	for _, statement := range []string{
+		`CREATE INDEX IF NOT EXISTS twilight_audit_logs_created_id_idx ON twilight_audit_logs (created_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS twilight_audit_logs_category_idx ON twilight_audit_logs (LOWER(category), created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS twilight_audit_logs_action_idx ON twilight_audit_logs (LOWER(action), created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS twilight_audit_logs_uid_idx ON twilight_audit_logs (uid, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS twilight_audit_logs_target_uid_idx ON twilight_audit_logs (target_uid, created_at DESC)`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			_ = db.Close()
+			return nil, status, describePostgresConnectionError(target, err)
+		}
 	}
 	if _, err := db.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS twilight_sessions (

@@ -49,4 +49,4 @@
 
 - 若文档与代码行为冲突，以 `internal/api/`、`internal/store/`、`internal/config/` 与实际接口返回为准。
 - 全部文档已对照 Go 后端源码核对；旧 Python 时代的描述（独立 SQLite 库、`X-Twilight-Client` 写请求校验等）已订正。
-- 关键架构约定（状态存储单文档模型、唯一运行后端 PostgreSQL 仅保留 `twilight_state`/`twilight_sessions`/`twilight_runtime_logs`/`twilight_playback_records`、配置热重载、CORS 与鉴权边界等）见 [开发指南](./guides/development.md) 与 [安全加固](./guides/security.md)。
+- 关键架构约定（主要业务状态单文档模型、唯一运行后端 PostgreSQL，以及 `twilight_audit_logs`/`twilight_sessions`/`twilight_runtime_logs`/`twilight_playback_records` 独立表、配置热重载、CORS 与鉴权边界等）见 [开发指南](./guides/development.md) 与 [安全加固](./guides/security.md)。

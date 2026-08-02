@@ -1240,7 +1240,7 @@ curl -X POST "http://localhost:5000/api/v1/admin/regcodes" \
 
 `GET /admin/tickets` 默认只返回待处理 / 处理中工单，便于管理端聚焦当前队列；传 `all=1` 或 `status=all` 时返回全部状态，传具体 `status` 时按该状态过滤。
 
-工单对象返回 `replies` 双方回复时间线，回复项包含 `uid`、`username`、`role`、`author`、`content`、`created_at`。`admin_note` 仅表示最新管理员摘要，用于旧客户端兼容；管理员更新 `admin_note` 时后端会追加一条管理员回复，并与状态/优先级/类型更新在同一次 store mutation 中完成。`GET /admin/tickets/{ticket_id}` 返回单个工单和类型列表，供管理端会话式处理页使用；`POST /admin/tickets/{ticket_id}/reply` 只追加管理员文字回复，不要求同时提交状态、优先级或类型。状态、优先级、类型归一和关闭/解决时间戳由 store 层统一维护。用户回复已解决但未关闭的工单会重新进入待处理状态；已关闭工单拒绝普通用户继续回复或修改附件，管理员仍可追加排查回复并维护附件。创建工单的用户/全局打开工单限额在 store 层与插入同锁检查，避免并发请求绕过限额。创建成功后会写入 `create_ticket` 审计日志（目标 UID 为提交人），并向运行日志追加不含正文的创建摘要，便于和 Telegram 通知顺序交叉排查。
+工单对象返回 `replies` 双方回复时间线，回复项包含 `uid`、`username`、`role`、`author`、`content`、`created_at`。`admin_note` 是仅管理端可见的内部处理摘要，不属于聊天内容，也不会自动生成或覆盖回复。`PUT /admin/tickets/{ticket_id}` 只更新状态、优先级、类型和内部摘要；`GET /admin/tickets/{ticket_id}` 返回单个工单和类型列表；`POST /admin/tickets/{ticket_id}/reply` 只追加管理员文字回复。状态、优先级、类型归一和关闭/解决时间戳由 store 层统一维护。用户回复已解决但未关闭的工单会重新进入待处理状态；已关闭工单拒绝普通用户继续回复或修改附件，管理员仍可追加排查回复并维护附件。创建工单的用户/全局打开工单限额在 store 层与插入同锁检查，避免并发请求绕过限额。创建成功后会写入 `create_ticket` 审计日志（目标 UID 为提交人），并向运行日志追加不含正文的创建摘要，便于和 Telegram 通知顺序交叉排查。
 
 用户 / 管理员工单列表、单个工单详情，以及回复、关闭、重开、附件上传 / 查看 / 删除等依赖当前工单状态的操作，会在读取前刷新持久化的单一状态文档，避免 PostgreSQL state、JSON state 或外部维护进程已经删除 / 修改工单后仍按旧内存快照处理。
 
@@ -1691,7 +1691,7 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 
 ### 10.12 数据库状态、备份、恢复、迁移
 
-> Twilight 把全部业务状态保存在 **单一状态文档** 中：PostgreSQL `twilight_state` 表（`id=1` 的一行 jsonb），这是唯一运行后端；另有独立表 `twilight_sessions`、`twilight_runtime_logs`、`twilight_playback_records`。`twilight_runtime_logs` 仅用于高写入运行日志，并按 `id` 游标、索引和 cutoff id 裁剪优化；业务实体仍不得拆成独立表。下列接口围绕该状态文档操作。
+> Twilight 的主要业务状态保存在 PostgreSQL `twilight_state`（`id=1` 的一行 jsonb）；高频追加或独立生命周期数据使用 `twilight_audit_logs`、`twilight_runtime_logs`、`twilight_sessions`、`twilight_playback_records`。审计与运行日志均通过索引和独立保留策略避免重写主状态；备份接口会把这些独立表合并回完整 JSON 快照。下列接口围绕该持久化体系操作。
 
 `GET /system/admin/database/status`
 

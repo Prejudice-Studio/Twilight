@@ -1153,6 +1153,14 @@ func (s *Store) Snapshot() ([]byte, error) {
 	if nextID > state.NextRuntimeLogID {
 		state.NextRuntimeLogID = nextID
 	}
+	// Audit logs also live in a dedicated high-write table. Merge them into the
+	// exported State so JSON backups remain complete and portable.
+	auditLogs, nextAuditID, err := s.snapshotAuditLogsLocked()
+	if err != nil {
+		return nil, err
+	}
+	state.AuditLogs = auditLogs
+	state.NextAuditLogID = nextAuditID
 	return json.MarshalIndent(state, "", "  ")
 }
 
@@ -1201,6 +1209,35 @@ ORDER BY id ASC`)
 	return out, nextID, nil
 }
 
+func (s *Store) snapshotAuditLogsLocked() ([]AuditLog, int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, uid, username, action, category, source, method, target_uid,
+       COALESCE(detail, '{}'::jsonb)::text, ip, created_at
+FROM twilight_audit_logs ORDER BY id ASC`)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var maxID int64
+	out := make([]AuditLog, 0)
+	for rows.Next() {
+		entry, scanErr := scanAuditLog(rows.Scan)
+		if scanErr != nil {
+			return nil, 0, scanErr
+		}
+		if entry.ID > maxID {
+			maxID = entry.ID
+		}
+		out = append(out, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return out, maxID + 1, nil
+}
+
 func (s *Store) LoadSnapshot(data []byte) error {
 	var state State
 	if err := json.Unmarshal(data, &state); err != nil {
@@ -1213,6 +1250,10 @@ func (s *Store) LoadSnapshot(data []byte) error {
 	// twilight_state 的 jsonb。先把它从待落 state 里摘出，避免这批日志被写进 state
 	// 且此后随每次 saveLocked 反复落盘。
 	logs := state.RuntimeLogs
+	auditLogs := state.AuditLogs
+	state.RuntimeLogs = nil
+	state.AuditLogs = nil
+	state.NextAuditLogID = 1
 	s.state = state
 	// admin 恢复 / 迁移：本次快照就是权威，必须无条件盖掉持久层现值（不能因版本守卫
 	// 失败而拒绝恢复）。saveLockedForce 的 ON CONFLICT 分支从持久层真实 version 递增，
@@ -1224,6 +1265,9 @@ func (s *Store) LoadSnapshot(data []byte) error {
 	// 走到老时点而 twilight_runtime_logs 仍是最新数据。失败不致命（state 已经写回），
 	// 但要 surface 给调用方决定是否重试。
 	if err := s.replaceRuntimeLogsLocked(logs); err != nil {
+		return err
+	}
+	if err := s.replaceAuditLogsLocked(auditLogs); err != nil {
 		return err
 	}
 	return nil
@@ -1280,6 +1324,29 @@ func (s *Store) replaceRuntimeLogsLocked(entries []RuntimeLogEntry) error {
 	}
 	tx = nil
 	return nil
+}
+
+// replaceAuditLogsLocked mirrors replaceRuntimeLogsLocked for backup restore.
+// Audit rows are restored transactionally and the sequence is synchronized so
+// the next append cannot collide with a historical ID.
+func (s *Store) replaceAuditLogsLocked(entries []AuditLog) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `TRUNCATE TABLE twilight_audit_logs RESTART IDENTITY`); err != nil {
+		return err
+	}
+	if err := insertAuditLogsTx(ctx, tx, entries); err != nil {
+		return err
+	}
+	if err := syncAuditLogSequence(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) Backup(dir string) (BackupInfo, error) {
@@ -4708,128 +4775,6 @@ func (s *Store) ClearViolationLogs() error {
 		s.state.ViolationLogs = nil
 		return nil
 	})
-}
-
-// ---------------------------------------------------------------------------
-// AuditLog — 操作审计日志
-// ---------------------------------------------------------------------------
-
-// AddAuditLog 追加一条操作审计日志。自动分配单调递增 ID 和时间戳。
-// limit 为保留上限条数（<=0 不限）。
-func (s *Store) AddAuditLog(entry AuditLog, limit int) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.refreshLocked(); err != nil {
-		return err
-	}
-
-	// Audit logs are append-only. Keep a rollback header instead of serializing and
-	// deserializing the entire State through mutateAndSaveLocked for every audited
-	// mutation. saveLocked still persists the complete state, but this removes one
-	// full-state marshal and unmarshal from the high-frequency audit path.
-	previousLogs := s.state.AuditLogs
-	previousNextID := s.state.NextAuditLogID
-	entry.Detail = cloneAuditLogDetail(entry.Detail)
-	entry.ID = s.state.NextAuditLogID
-	s.state.NextAuditLogID++
-	if entry.CreatedAt == 0 {
-		entry.CreatedAt = time.Now().Unix()
-	}
-	s.state.AuditLogs = append(s.state.AuditLogs, entry)
-	if limit > 0 && len(s.state.AuditLogs) > limit {
-		s.state.AuditLogs = s.state.AuditLogs[len(s.state.AuditLogs)-limit:]
-	}
-	if err := s.saveLocked(); err != nil {
-		s.state.AuditLogs = previousLogs
-		s.state.NextAuditLogID = previousNextID
-		return err
-	}
-	return nil
-}
-
-// ListAuditLogs 返回所有审计日志，最新在前。
-func (s *Store) ListAuditLogs() []AuditLog {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]AuditLog, len(s.state.AuditLogs))
-	for i, entry := range s.state.AuditLogs {
-		out[i] = cloneAuditLogEntry(entry)
-	}
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
-	}
-	return out
-}
-
-// DeleteAuditLog 按 ID 删除单条审计日志。
-func (s *Store) DeleteAuditLog(id int64) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.mutateAndSaveLocked(func() error {
-		for i, log := range s.state.AuditLogs {
-			if log.ID == id {
-				s.state.AuditLogs = append(s.state.AuditLogs[:i], s.state.AuditLogs[i+1:]...)
-				return nil
-			}
-		}
-		return ErrNotFound
-	})
-}
-
-// ClearAuditLogs 清空全部审计日志。
-func (s *Store) ClearAuditLogs() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.mutateAndSaveLocked(func() error {
-		s.state.AuditLogs = nil
-		return nil
-	})
-}
-
-// PruneAuditLogs 保留最新的 keep 条审计日志，超出部分从尾部裁剪。
-func (s *Store) PruneAuditLogs(keep int) error {
-	if keep <= 0 {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.mutateAndSaveLocked(func() error {
-		if len(s.state.AuditLogs) > keep {
-			s.state.AuditLogs = s.state.AuditLogs[len(s.state.AuditLogs)-keep:]
-		}
-		return nil
-	})
-}
-
-// PruneAuditLogsByAge 删除早于 cutoff 的审计日志。preserveAdmin 为 true 时保留管理员操作。
-func (s *Store) PruneAuditLogsByAge(cutoffUnix int64, preserveAdmin bool) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	removed := 0
-	_ = s.mutateAndSaveLocked(func() error {
-		filtered := s.state.AuditLogs[:0]
-		for _, log := range s.state.AuditLogs {
-			if log.CreatedAt < cutoffUnix {
-				if preserveAdmin && log.Category == "admin" {
-					filtered = append(filtered, log)
-					continue
-				}
-				removed++
-				continue
-			}
-			filtered = append(filtered, log)
-		}
-		s.state.AuditLogs = filtered
-		return nil
-	})
-	return removed
-}
-
-// AuditLogCount 返回当前审计日志总数。
-func (s *Store) AuditLogCount() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return len(s.state.AuditLogs)
 }
 
 // TelegramBotOffset 读取持久化的 getUpdates offset。新部署 / 历史 state

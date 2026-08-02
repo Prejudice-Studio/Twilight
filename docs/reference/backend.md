@@ -13,7 +13,7 @@ Emby 活动日志同步 `/System/ActivityLog/Entries` 后，会按 `playback.sta
 | `cmd/twilight` | Go 后端 CLI 入口，支持 `api`、`all`、`scheduler`、`bot`、`version` 子命令。 |
 | `internal/api` | HTTP 路由、统一响应 envelope、鉴权、CORS、限流、上传、安全头，以及按业务拆分的 handler / client / service。 |
 | `internal/config` | 读取运行目录 `config.toml`、同目录 `config.local.toml` 与 `TWILIGHT_*` 字段级环境变量；运行入口固定使用当前目录 `config.toml`。 |
-| `internal/store` | 单一状态文档存储，唯一运行期后端为 PostgreSQL：整份 `State` 作为 jsonb 存进 `twilight_state` 表；`Store` 仅能经 `store.OpenPostgres` 构造。JSON 仅作为迁移面板的一次性导出目标与 `migrate-json` 导入源保留，已无 JSON 文件运行后端、无文件锁、无 `.bak`/旁路文件。 |
+| `internal/store` | PostgreSQL 存储：主要业务 `State` 作为 JSONB 存进 `twilight_state`，审计、运行日志、会话与播放记录使用独立表；`Store` 仅能经 `store.OpenPostgres` 构造。JSON 仅作为迁移面板的一次性导出目标与 `migrate-json` 导入源保留，已无 JSON 文件运行后端、无文件锁、无 `.bak`/旁路文件。 |
 | `internal/redis` | 无第三方依赖的 Redis RESP 客户端，用于会话和限流跨进程共享。 |
 | `internal/security` | Token 生成、PBKDF2-SHA256 密码哈希与旧 SHA256 密码兼容校验。 |
 
@@ -231,7 +231,7 @@ Go 后端按统一的业务状态与前端响应形状实现，主要模块：
 
 ## 数据库与状态模型
 
-后端把**全部持久业务状态保存在单一状态文档**里（`internal/store/store.go` 的 `State` 结构）。该文档包含用户、API Key、求片、公告、邀请码、邀请关系（`invite_relations`）、注册码、签到、调度记录、设备、登录日志、IP 黑名单、播放记录、改绑申请、Telegram 花名册、违规日志、Bangumi 同步日志与 Bangumi 收藏缓存等实体——它们都是同一份 `State` 里的字段（map / slice），而**不是各自独立的数据库或表**。Telegram 注册/绑定码是当前 App 进程内存中的临时票据，旧 `bind_codes` 字段只作为历史状态字段保留，运行期不再用于新绑定码持久化。
+后端把**主要持久业务状态保存在单一状态文档**里（`internal/store/store.go` 的 `State` 结构）。该文档包含用户、API Key、求片、公告、邀请码、邀请关系（`invite_relations`）、注册码、签到、调度记录、设备、登录日志、IP 黑名单、播放记录、改绑申请、Telegram 花名册、违规日志、Bangumi 同步日志与 Bangumi 收藏缓存等实体——它们都是同一份 `State` 里的字段（map / slice），而**不是各自独立的数据库或表**。高频追加的操作审计和运行日志例外，分别落在 `twilight_audit_logs` 与 `twilight_runtime_logs`。Telegram 注册/绑定码是当前 App 进程内存中的临时票据，旧 `bind_codes` 字段只作为历史状态字段保留，运行期不再用于新绑定码持久化。
 
 Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subject_id`（BGMID）全局缓存作品详情，`BangumiCollectionCache` 以 `uid:type` 缓存用户收藏索引与进度/评分等用户态字段；读取时再按 `subject_id` 回填作品详情。这个设计避免不同用户收藏同一作品时在 state 中重复保存封面、标签和评分等大对象。
 
@@ -241,7 +241,7 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
 
 | 后端 | 说明 |
 | ---- | ---- |
-| PostgreSQL（`driver = "postgres"` / `postgresql` / 空值） | 整份 `State` 作为 jsonb 存进 `twilight_state` 表 `id = 1` 的单行；运行日志另存独立表 `twilight_runtime_logs`，会话另存独立表 `twilight_sessions`，播放记录另存 `twilight_playback_records`。`Store` 仅能经 `store.OpenPostgres` 构造，`s.db` 恒非 nil。 |
+| PostgreSQL（`driver = "postgres"` / `postgresql` / 空值） | 主要业务 `State` 作为 jsonb 存进 `twilight_state` 表 `id = 1` 的单行；操作审计、运行日志、会话、播放记录分别使用 `twilight_audit_logs`、`twilight_runtime_logs`、`twilight_sessions`、`twilight_playback_records`。`Store` 仅能经 `store.OpenPostgres` 构造，`s.db` 恒非 nil。 |
 
 > JSON 不再是运行后端：`driver` 设为 `json` / `file` 会在 `openStore` 直接报错。JSON 仅在两处以「文件」形式出现——迁移面板的一次性导出目标（把当前状态 dump 成 `state.json`）与 `twilight migrate-json` 的历史导入源。历史上的进程文件锁（`*.lock`）、`.bak` 影子文件、`state.json.runtimelog` 旁路日志文件、`refreshLocked` 变更门控均随 JSON 运行后端一并移除。
 
@@ -250,8 +250,9 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
 - **多进程并发写用版本列串行化**：`twilight_state` 带 `version bigint` 列，`saveLocked` 走「version = 读到值」守卫的 UPSERT，命中 0 行（被他进程抢先递增）即回 `errStateVersionConflict`，`mutateAndSaveLocked` 有界重试（重新 `refreshLocked` 拉最新 state + version 后重放 mutate）。这取代了此前「refresh 与整份 jsonb 盲写之间被他进程插入提交后仍整份覆盖」的丢更新——正是「用户建了工单、TG 也收到通知，工单却随后凭空消失」的根因。`saveLockedForce` 无视守卫强制覆盖并把 version 推到「读到值 +1」，仅用于冷启动播种、`LoadSnapshot` 恢复 / 迁移。
 - `refreshLocked` 每次全量 `SELECT state, version`：PG 为真多进程，不设本地变更门控（单进程独占下才成立的 stat 门控已随 JSON 后端移除）。读写都走 30s 超时 context，连接假死时到期自行释放，避免整个 `s.mu` 连带全站 handler 卡死。
 - 写盘失败一律回滚：`mutateAndSaveLocked` 在 mutate 前 `snapshotStateLocked` 拍字节快照，save 失败经 `restoreStateLocked` 覆盖回内存并重建索引，保证内存与持久层要么一起前进、要么一起回到上一个一致点。
-- **PostgreSQL 建库建表**：目标库不存在时，会尝试用同一连接用户连接 `postgres` / `template1` 维护库执行 `CREATE DATABASE`（连接用户需要 `CREATEDB` 权限，已存在则不重复创建）；随后自动建表 `twilight_state`、`twilight_runtime_logs`、`twilight_sessions`、`twilight_playback_records` 及相关索引（`CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` / `ALTER TABLE … ADD COLUMN IF NOT EXISTS version`，全部幂等，可反复执行）。
-- **运行日志表性能口径**：`twilight_runtime_logs` 只服务 Go 进程运行日志，按 `id` 游标读取增量，按 `id DESC` 读取最新快照，并用 cutoff id 删除旧行以保留最近 N 条；主业务状态仍保持 `twilight_state` 单行 jsonb，不因性能优化拆出业务表。
+- **PostgreSQL 建库建表**：目标库不存在时，会尝试用同一连接用户连接 `postgres` / `template1` 维护库执行 `CREATE DATABASE`（连接用户需要 `CREATEDB` 权限，已存在则不重复创建）；随后自动建表 `twilight_state`、`twilight_audit_logs`、`twilight_runtime_logs`、`twilight_sessions`、`twilight_playback_records` 及相关索引（`CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` / `ALTER TABLE … ADD COLUMN IF NOT EXISTS version`，全部幂等，可反复执行）。
+- **操作审计表性能口径**：`twilight_audit_logs` 使用自增 ID 与状态时间、分类、动作、操作者、目标用户索引。新增审计只插入独立表并在同一事务内执行条数保留，不再为一条审计记录全量读取、反序列化和重写 `twilight_state`。列表的筛选、排序、计数、分页由 PostgreSQL 完成，避免把完整审计历史复制进 Go 堆。旧 `state.audit_logs` 在启动时幂等迁移；备份时会重新合并到 JSON 快照，恢复时再拆回独立表。
+- **运行日志表性能口径**：`twilight_runtime_logs` 只服务 Go 进程运行日志，按 `id` 游标读取增量，按 `id DESC` 读取最新快照，并用 cutoff id 删除旧行以保留最近 N 条；其写入同样不会改动主状态文档。
 - **播放记录写路径优化**：
   - 所有 `twilight_playback_records` 的 PG 读写都走带超时的 context（`pgPlaybackReadTimeout` / `pgPlaybackWriteTimeout`，均 5s），连接假死时到期自行释放，不再无限阻塞。
   - `AddPlaybackRecordIdempotent` 的 PG 单条 INSERT 移到 `s.mu` 之外执行——记录已由 `saveLocked` 落进 `twilight_state` 的 state jsonb，独立表 `twilight_playback_records` 行只是读路径优先命中的副本、`ON CONFLICT` 保证幂等；持锁跨这段网络 I/O 会让一个卡死的 PG 连接冻结全部 store 写操作。DB 失败按旧语义吞掉（返回 `false, nil`），内存状态副本为准（这是 `internal/store` 里唯一保留内存兜底读的位置）。
@@ -264,7 +265,7 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
 
 管理端提供数据库状态、备份、恢复、迁移（`internal/api/database_admin.go`）：
 
-- 备份生成时点完整的 `State` 快照，运行日志也一并纳入以保证自洽：`Snapshot` 把独立表 `twilight_runtime_logs` 读回快照的 `RuntimeLogs`。恢复 / 迁移时再由 `LoadSnapshot` 把 `RuntimeLogs` 显式写回独立表（含空快照的清空语义），使 `twilight_state` 与 `twilight_runtime_logs` 两条线的时点一致，避免恢复后 state 走到老时点而日志仍是最新。
+- 备份生成完整的 `State` JSON：`Snapshot` 会把独立表 `twilight_runtime_logs` 与 `twilight_audit_logs` 分别读回 `RuntimeLogs`、`AuditLogs`；恢复 / 迁移时 `LoadSnapshot` 再把两类日志拆回对应独立表（含空快照的清空语义），不会因为性能拆表丢失备份内容。
 - 恢复和迁移都必须先走预览：缺少确认短语时仅返回 `dry_run=true` 的预览结果，不写入数据。恢复确认短语 `RESTORE_DATABASE`，迁移确认短语 `MIGRATE_DATABASE`。
 - 恢复和迁移执行前都会自动创建保护性备份，响应中返回 `pre_operation_backup` 便于回滚审计。
 - 迁移面板默认关闭，需显式开启 `Database.migration_panel_enabled`（或 `TWILIGHT_DATABASE_MIGRATION_PANEL_ENABLED`）。

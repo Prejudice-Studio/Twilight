@@ -59,14 +59,15 @@ func reopenTestStore(t *testing.T) *Store {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = st.Close() })
 	return st
 }
 
-// resetForTest 把测试库清空并重新播种一份空 state。先清 runtime log / session /
-// playback 三张边表（RESTART IDENTITY 让自增 ID 回到 1，满足日志 ID 断言），
+// resetForTest 把测试库清空并重新播种一份空 state。先清 runtime log / audit log /
+// session / playback 边表（RESTART IDENTITY 让自增 ID 回到 1，满足日志 ID 断言），
 // 再删掉 state 行并以 force 语义重写空 state（绕过版本守卫，version 归零）。
 func (s *Store) resetForTest(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, `TRUNCATE twilight_runtime_logs, twilight_sessions, twilight_playback_records RESTART IDENTITY`); err != nil {
+	if _, err := s.db.ExecContext(ctx, `TRUNCATE twilight_runtime_logs, twilight_audit_logs, twilight_sessions, twilight_playback_records RESTART IDENTITY`); err != nil {
 		return err
 	}
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM twilight_state`); err != nil {

@@ -43,7 +43,7 @@ Update docs in the same change when behavior changes.
 - `internal/api`: HTTP routes, auth, rate limits, response helpers, handlers, external clients, scheduler, admin operations, runtime APIs.
 - `internal/api/routes.go`: centralized route registration.
 - `internal/config`: `config.toml`, `config.local.toml`, and `TWILIGHT_*` environment loading.
-- `internal/store`: single-state-document persistence. PostgreSQL is the only runtime backend — `Store` is constructed exclusively via `store.OpenPostgres`, so `s.db` is always non-nil. The `json` label survives only as a one-way export target in the database-migration panel and as the `migrate-json` import source; there is no JSON/file runtime backend, no flock, and no `.bak`/sidecar state files.
+- `internal/store`: PostgreSQL persistence. Most business entities remain in the single `twilight_state` JSONB document; high-write audit logs, runtime logs, sessions, and playback records use dedicated tables. `Store` is constructed exclusively via `store.OpenPostgres`, so `s.db` is always non-nil. The `json` label survives only as a one-way export target in the database-migration panel and as the `migrate-json` import source; there is no JSON/file runtime backend, no flock, and no `.bak`/sidecar state files.
 - `internal/redis`: RESP client for shared sessions and rate limits.
 - `internal/security`: tokens, password hashing, and secure random helpers.
 - `webui/src/app`: Next.js App Router pages.
@@ -125,7 +125,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 | `RegCode` | code type, days, validity, use count, source, creator, pause bookkeeping |
 | `InviteCode` / `InviteRelation` | invite tree edges, parent/child relationship, renewal flows |
 | `Announcement` | title, content, render mode, level, pinned, visible |
-| `AuditLog` / `ViolationLog` | admin/user/system mutation tracking and violation evidence |
+| `AuditLog` / `ViolationLog` | audit rows live in `twilight_audit_logs`; violation evidence remains in the state document |
 | `Device` / `LoginLog` | device trust/block state and login history |
 | `SchedulerRun` | job run status, logs, summaries |
 | `BangumiCollectionCache` | per-user/per-type collection state only |
@@ -189,8 +189,8 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Do not audit ordinary read-only list/get/search handlers unless the read itself is sensitive.
 - Telegram Bot and inline-panel state changes must write audit entries with `source=telegram` via `auditEntryIP` / `auditTelegramAction`, including user binding, Web/Emby enable-disable, grant, delete, and group kick/ban actions.
 - Audit-log maintenance endpoints (`delete`, `clear`, `prune`) must not append a new record into the same audit log after deleting records; otherwise users can never fully clear or reduce the log count.
-- Outbound notifications (Telegram ticket notify, etc.) are side-effects, not state changes. Report their success/failure/skip through `zap` runtime logs, not the audit log. Writing an audit entry per notification attempt spawns a full state-persist for a non-event and floods the bounded audit log with noise on installs without Telegram, evicting real state-change records.
-- Outbound notifications (Telegram ticket owner/admin pushes) are side-effects, not state mutations. Report their send/skip/failure outcome through `zap` runtime logs only; do not write them to the audit log. A per-notification audit write forces a full-state persist on every ticket action even on Telegram-less installs and evicts real entries from the bounded log.
+- Outbound notifications (Telegram ticket owner/admin pushes) are side-effects, not state mutations. Report their send/skip/failure outcome through `zap` runtime logs only; do not flood the bounded audit history with delivery attempts that can evict real state-change records.
+- Audit rows are stored in the indexed `twilight_audit_logs` table. Appending, querying, deleting, and pruning audit history must not reintroduce a full `twilight_state` read/modify/write. JSON backup/import remains complete by merging the dedicated table into `State.AuditLogs` at snapshot time and splitting it out on restore.
 - Ticket owner/admin Telegram notifications run in a detached background goroutine (`enqueueTicketNotification`) with panic recovery and a bounded timeout, so a slow or failing Bot send never blocks the handler response or races handler-scoped request state.
 
 ## Runtime Logging Rules
@@ -268,11 +268,11 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - Ticket Telegram admin notifications must skip the acting admin themselves while still notifying other subscribed admins; keep target selection testable outside the send loop.
 - Owner ticket notifications require BOTH the owner's global `NotifyOnTicketTelegram` and the ticket-level `NotifyTelegram` to permit the push. The global setting is the master switch; the per-ticket flag can only narrow it further (mute one ticket), never re-enable a globally-disabled owner. `NotifyTelegram == nil` means "not set per-ticket" and falls back to the global setting alone. Do not restore the old override where a per-ticket `true` could push to an owner whose global toggle is off.
 - Ticket Telegram notifications (admin and owner) render as HTML via `telegramSendRichMessage`, which forces `parse_mode=HTML` independent of the operator's global `Telegram.parse_mode` so ticket layout stays stable. Every user-controlled field (title, username, reply/content summary) must pass through `telegramEscapeHTML` before being embedded in the HTML structure; only our own `<b>/<i>/<code>/<blockquote>` tags stay literal. `telegramSendRichMessage` auto-falls back to plain text on a Telegram HTML parse error (400) so a custom template with stray `<`/`&` still delivers. Priority must render through `ticketPriorityLabel` (localized + icon), never the raw `low/medium/high/urgent` enum.
-- Ticket notification results are outbound side-effects: log success/skip at `Debug` and only failures at `Warn`. Do not log successful sends at `Info`. Since the runtime-log sink now captures every level (see "Runtime Logging Rules"), the level choice controls **console verbosity**, not whether the line is recorded: `Debug` keeps routine per-action success/skip off the operator's stdout while still preserving it in the runtime-log panel for troubleshooting, and `Warn` surfaces failures on the console. In JSON-file mode every captured line still triggers a full state-persist, so the "no `Info` for success" rule remains — routine successes must not sit at a level the operator watches. See [[project_runtime_log_sink_cost]] and [[project_ticket_notify_async]].
+- Ticket notification results are outbound side-effects: log success/skip at `Debug` and only failures at `Warn`. Do not log successful sends at `Info`. Since the runtime-log sink captures every level (see "Runtime Logging Rules"), the level choice controls **console verbosity**, not whether the line is recorded: `Debug` keeps routine outcomes off stdout while preserving them in the runtime-log panel, and `Warn` surfaces failures on the console.
 - User ticket creation must use the store atomic creation helper so per-user and global open-ticket quota checks happen under the same lock as insertion; do not reintroduce handler-side `Count*` then `UpsertTicket` flows.
 - After successful user ticket creation, the ticket must be immediately visible to `GET /admin/tickets`, recorded as `create_ticket` audit with the submitting UID as target, and logged to runtime logs without including ticket content. Frontend ticket list/detail and audit list reads must not use the short in-memory read cache.
 - Ticket list/detail endpoints and mutations that pre-read ticket state must refresh the persisted single-state document before reading, including replies and image attachment paths. This avoids stale admin/user views when another process or PostgreSQL-backed state has changed or removed a ticket.
-- Admin ticket updates that add an admin reply must pass the reply through the store update helper in the same mutation; do not update status/admin_note first and append the reply in a second store call.
+- Admin ticket metadata updates and chat replies are separate mutations. `PUT /admin/tickets/:ticket_id` changes status, priority, type, or the internal `admin_note`; chat text must use `POST /admin/tickets/:ticket_id/reply` and append through `AddTicketReply`. Neither path may rebuild or replace `Ticket.Replies`.
 - Admin ticket chat handling uses `GET /admin/tickets/:ticket_id` for a single ticket and `POST /admin/tickets/:ticket_id/reply` for text-only admin replies. Keep the attachment path on `/tickets/:ticket_id/images` so image limits and closed-ticket role rules stay centralized.
 - Ticket replies are the source of truth for two-sided conversation history. `admin_note` is only the latest admin summary / compatibility field and must not replace or clear `Ticket.Replies`.
 - Closed tickets are evidence-preserving for normal users: store helpers and handlers reject normal-user replies and attachment mutations with the ticket-closed error path.
@@ -421,9 +421,11 @@ The `internal/store` and `internal/api` test packages talk to a **real PostgreSQ
 - **Unset** → each package's `TestMain` prints a skip notice and exits 0, so `go test ./...` stays green on machines with no database. This is the expected state in most sandboxes.
 - **Set** → `TestMain` verifies reachability with `store.CheckPostgres`; if the DSN is set but unreachable it exits 1 (a set-but-broken DSN is treated as a failure, not a skip).
 
-Each test gets a clean schema: the store package resets via `TRUNCATE … RESTART IDENTITY` + `DELETE FROM twilight_state` + reseed; the api package drops the four tables (`twilight_state`, `twilight_runtime_logs`, `twilight_sessions`, `twilight_playback_records`) with `CASCADE` and lets the idempotent DDL in `openPreparedPostgres` recreate them. Both point at the **same** database.
+Each test gets a clean schema: the store package resets via `TRUNCATE … RESTART IDENTITY` + `DELETE FROM twilight_state` + reseed; the api package drops the five tables (`twilight_state`, `twilight_audit_logs`, `twilight_runtime_logs`, `twilight_sessions`, `twilight_playback_records`) with `CASCADE` and lets the idempotent DDL in `openPreparedPostgres` recreate them. Both point at the **same** database.
 
 Because every package shares one test database and resets it per test, run the DB-backed packages serially — `go test -p 1 ./...` (or target one package at a time). Parallel package execution (`-p >1`) races two packages resetting/writing the same tables and produces flaky failures that are an artifact of the shared fixture, not real bugs.
+
+DB-backed tests that open a `Store` must register `t.Cleanup(func() { _ = st.Close() })` (or close it explicitly). The PostgreSQL pool keeps idle connections alive; a long package run that leaks one pool per test eventually fails with `SQLSTATE 53300` even when the product code is healthy.
 
 Example (PowerShell):
 

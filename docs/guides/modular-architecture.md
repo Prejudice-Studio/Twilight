@@ -24,7 +24,7 @@
 cmd/twilight
   -> internal/api              HTTP 路由、鉴权、请求解析、响应 envelope
        -> domain service       业务规则、状态转移、跨实体编排
-            -> internal/store  单一状态文档读写、原子更新
+            -> internal/store  主状态原子更新 + 独立高写入表
             -> integrations    Emby/Telegram/TMDB/Bangumi/SMTP 等外部协议
        -> internal/config      当前运行配置快照
        -> internal/security    密码、token、安全随机数
@@ -91,7 +91,7 @@ Service 入参应是明确类型，不直接接收 `http.Request`。需要操作
 - 新业务实体优先加到 `store.State`，并在 `ensure()` 中补默认 map/list。
 - 原子变更优先做成 store 方法，例如启停用户、消费卡码、清理验证码。
 - 列表筛选如果被批量操作复用，列表 handler 与批量 helper 必须共享同一筛选口径。
-- PostgreSQL 除 `twilight_state`、`twilight_sessions`、`twilight_runtime_logs` 外不新增业务表，除非先更新架构文档并说明快照一致性。
+- PostgreSQL 的主要业务实体仍归 `twilight_state` 管理；高写入或独立生命周期数据可使用已有的 `twilight_audit_logs`、`twilight_runtime_logs`、`twilight_sessions`、`twilight_playback_records`。新增独立表前必须更新架构文档，并明确旧数据迁移、备份合并、恢复拆分与跨表一致性边界。
 
 ## 外部 Client 规则
 

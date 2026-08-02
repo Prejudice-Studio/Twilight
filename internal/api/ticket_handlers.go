@@ -961,9 +961,7 @@ func (a *App) enqueueTicketNotification(scope, event string, ticketID, targetUID
 		return
 	}
 	// Telegram 未配置时不存在任何可送达对象：直接不启协程，避免每次工单动作都
-	// 空跑一个「已跳过」通知。JSON 文件模式下 zap→runtime log sink 对每条日志都做
-	// 整份 state 落盘，这类非事件日志会平白触发一次全量状态重写（PG 模式为廉价
-	// INSERT）；后台协程对 state 的异步写在测试里还会与 t.TempDir() 清理竞争。
+	// 空跑一个「已跳过」通知并产生无意义的运行日志写入。
 	if !a.telegramAvailable() {
 		return
 	}
@@ -985,10 +983,9 @@ func (a *App) enqueueTicketNotification(scope, event string, ticketID, targetUID
 			zap.Int("failures", result.Failures),
 		}
 		// 通知发送是对外副作用而非状态变更：结果只进 zap 运行日志，不写审计库。
-		// 否则未配置 Telegram 的实例每次工单动作都会因 skip 触发一次全量 state
-		// 落盘，并把有界审计日志刷满"通知已跳过"噪声、挤掉真正的变更记录。
-		// 成功 / 跳过属于常态非事件，降到 Debug（默认在 InfoLevel sink 之下、不落盘），
-		// 只有真正失败才以 Warn 进运行日志，避免每条成功通知都触发一次 state 写。
+		// 否则通知尝试会把有界审计历史刷满"已跳过"噪声、挤掉真正的变更记录。
+		// 成功 / 跳过属于常态非事件，降到 Debug 以免刷屏；运行日志 sink 仍会持久化
+		// Debug 供排障。只有真正失败才以 Warn 输出到默认级别控制台。
 		switch {
 		case result.Failures > 0:
 			zap.L().Warn("工单 Telegram 通知部分失败", fields...)

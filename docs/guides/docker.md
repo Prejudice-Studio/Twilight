@@ -118,7 +118,7 @@ docker compose ps
 ### PostgreSQL (`postgres`)
 
 - 镜像: `postgres:17-alpine`
-- 存储所有状态数据 (单行 JSONB + sessions + runtime logs)
+- 存储所有状态数据（主状态单行 JSONB + audit logs + sessions + runtime logs + playback records）
 - 数据库和表由 Go 后端首次启动时自动创建
 - 数据卷: `twilight-postgres-data`
 

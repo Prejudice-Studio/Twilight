@@ -177,6 +177,7 @@ allow_credential = true
 - 后台「安全中心」集中展示操作审计、运行日志、违规风控入口；设备/IP 审查入口指向「Emby 管理 → 设备 / IP 审查」页签。安全中心内嵌 `[Security]`、`[RateLimit]`、`[AuditLog]`、`[DeviceLimit]` 的结构化配置编辑。
 - 配置管理中的安全相关配置段保留兼容入口，但默认折叠并提示跳转安全中心；所有保存仍写入同一个 `config.toml`，不创建第二套配置源。
 - 所有新增管理端接口均使用 `AuthAdmin`，状态变更与沙箱执行写入审计日志。Telegram Bot 与群组 inline 管理面板产生的写操作使用 `source=telegram` 记录操作者、目标 UID 与动作详情；审计日志自身的删除、清空、裁剪接口不会在清理后向同一张审计日志表追加新记录，避免管理员无法真正清空日志。
+- 操作审计保存在独立的 `twilight_audit_logs` 表，写入、检索和保留策略不再重写整份 `twilight_state`。筛选值全部使用 SQL 参数，排序字段只能从后端白名单选择，搜索中的 `%`、`_` 与反斜杠按字面量转义。历史快照里的 `audit_logs` 会在启动时幂等迁移；数据库备份仍包含完整审计历史。
 
 ## 11. 最小权限原则
 
@@ -242,7 +243,7 @@ allow_credential = true
 - 恢复与迁移前会自动创建保护性备份（如「数据库恢复前保护性备份」「数据库迁移前保护性备份」）。
 - 迁移到 PostgreSQL 前先用管理端预检，确认目标连接成功、快照与实体计数符合预期。
 - 运行后端只有 PostgreSQL 一种：`Database.driver` 设为非 postgres 值时后端启动即报错。热重载会在 DSN 变化时重开 store，但监听地址变化仍需重启。
-- 单一状态文档（`twilight_state`）之外另有独立表 `twilight_sessions`、`twilight_runtime_logs`、`twilight_playback_records`，同库不同表。
+- 主状态文档（`twilight_state`）之外另有独立表 `twilight_audit_logs`、`twilight_sessions`、`twilight_runtime_logs`、`twilight_playback_records`，同库不同表；其中审计表与运行日志表用于隔离高频追加写，避免放大主状态 JSONB 的 CPU、内存与 I/O 开销。
 
 Git 自动更新（`internal/api/system_update.go`）：
 
