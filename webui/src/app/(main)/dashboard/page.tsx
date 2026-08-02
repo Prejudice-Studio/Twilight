@@ -372,21 +372,6 @@ export default function DashboardPage() {
       return;
     }
     setIsLatencyTesting(true);
-    // 每次测速前先检测 Emby 在线状态
-    let embyOnline = false;
-    try {
-      const embyRes = await api.getEmbyInfo();
-      embyOnline = embyRes.success && !!embyRes.data?.online;
-    } catch {
-      // 状态接口异常，视为不可达
-    }
-    if (!embyOnline) {
-      const offlineMap: Record<string, LineLatencyInfo> = {};
-      for (const slot of lineSlots) offlineMap[slot.key] = { status: "error" };
-      setLineLatencyMap(offlineMap);
-      setIsLatencyTesting(false);
-      return;
-    }
     setLineLatencyMap((prev) => {
       const next = { ...prev };
       for (const slot of lineSlots) next[slot.key] = { status: "testing" };
@@ -402,10 +387,6 @@ export default function DashboardPage() {
     });
     setIsLatencyTesting(false);
   }, [lineSlots, testSingleLineLatency]);
-
-  useEffect(() => {
-    if (lineSlots.length > 0) void runLineLatencyTests();
-  }, [lineSlots, runLineLatencyTests]);
 
   useEffect(() => {
     setDirectEmbyUsername(user?.username || "");

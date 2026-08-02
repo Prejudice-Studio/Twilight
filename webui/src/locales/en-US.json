@@ -455,7 +455,9 @@
     "episodeCount": "Episodes",
     "libraryStatsUnavailable": "Library stats are disabled or unavailable.",
     "nowPlaying": "Now Watching",
-    "nowPlayingCount": "{count} people watching now"
+    "nowPlayingCount": "{count} people watching now",
+    "serverNetworkStatus": "On-demand line checks; no automatic probes",
+    "retest": "Test lines"
   },
   "adminInvite": {
     "title": "Invite System Admin",

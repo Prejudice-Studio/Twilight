@@ -137,6 +137,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Use `webui/src/lib/api.ts` rather than naked `fetch` for app API calls.
 - User-facing copy belongs in `basic.json`, `zh-Hant.json`, and `en-US.json`; `zh-Hans.json` remains sparse and falls back to `basic.json`.
 - Polling should check document visibility when useful and must clear intervals on unmount.
+- Dashboard Emby line probes are user-triggered only. Loading or refreshing the line list must not automatically fan out one probe per line or issue an extra Emby status precheck.
 - Keep controls dimensionally stable across languages.
 - Coalesce duplicate in-flight `GET` / `HEAD` requests only in `webui/src/lib/api-request.ts`; never dedupe writes, caller-abortable requests, or endpoints that opt out with `dedupe: false`. The same wrapper owns the short successful-read memory cache; keep `/users/me`, `refresh=1`, `X-Twilight-Intent`, `no-store` / `reload`, and `cacheRead: false` out of that cache.
 - Current-user identity endpoints (`/users/me` and `/auth/me`) must also stay out of in-flight read dedupe. Login, logout, and session-changing frontend flows must clear request caches and invalidate stale auth-store promises before writing user state.
