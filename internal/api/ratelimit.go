@@ -31,9 +31,16 @@ type rateLimiter struct {
 	lastFallbackWarnNanos atomic.Int64
 }
 
-// fallbackWarnInterval 降级告警节流窗口：redis 持续不可用时，最多每隔这么久
-// 才落一条 Warn，避免高频端点把运行日志表打爆。
-const fallbackWarnInterval = 30 * time.Second
+const (
+	// fallbackWarnInterval 降级告警节流窗口：redis 持续不可用时，最多每隔这么久
+	// 才落一条 Warn，避免高频端点把运行日志表打爆。
+	fallbackWarnInterval = 30 * time.Second
+	// rateLimiterMaxBuckets limits attacker-controlled high-cardinality keys while
+	// Redis is unavailable. At capacity, existing buckets keep working and new
+	// keys fail closed until an expired bucket can be reclaimed.
+	rateLimiterMaxBuckets      = 10_000
+	rateLimiterCleanupInterval = 5 * time.Minute
+)
 
 type rateBucket struct {
 	Count   int
@@ -53,13 +60,12 @@ func (r *rateLimiter) Allow(ctx context.Context, key string, limit int, window t
 	if limit <= 0 {
 		return true
 	}
+	if window < time.Second {
+		window = time.Second
+	}
 	if r.redis != nil {
-		// 向下取整到秒；亚秒窗口会被截成 0，而 EXPIRE key 0 在 redis 中等价于
-		// 立即删除 key，桶永远攒不满 → 限流被静默关闭。兜底给 1s 下限。
+		// window 已在入口兜底到 1s，避免 EXPIRE key 0 立即删除桶。
 		expireSeconds := int(window / time.Second)
-		if expireSeconds < 1 {
-			expireSeconds = 1
-		}
 		count, err := r.redis.IncrExpire(ctx, r.prefix+key, expireSeconds)
 		if err == nil {
 			return count <= int64(limit)
@@ -76,23 +82,35 @@ func (r *rateLimiter) Allow(ctx context.Context, key string, limit int, window t
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Periodically purge expired buckets to prevent memory leak
-	if now.Sub(r.lastCleanup) > 5*time.Minute {
-		for k, b := range r.items {
-			if now.After(b.ResetAt) {
-				delete(r.items, k)
-			}
-		}
+	if now.Sub(r.lastCleanup) > rateLimiterCleanupInterval {
+		r.cleanupExpiredLocked(now)
 		r.lastCleanup = now
 	}
 
-	bucket := r.items[key]
+	bucket, exists := r.items[key]
+	if !exists && len(r.items) >= rateLimiterMaxBuckets {
+		// Capacity pressure should not wait for the periodic sweep. Reclaim expired
+		// keys immediately, then fail closed instead of growing without bound.
+		r.cleanupExpiredLocked(now)
+		r.lastCleanup = now
+		if len(r.items) >= rateLimiterMaxBuckets {
+			return false
+		}
+	}
 	if now.After(bucket.ResetAt) {
 		bucket = rateBucket{ResetAt: now.Add(window)}
 	}
 	bucket.Count++
 	r.items[key] = bucket
 	return bucket.Count <= limit
+}
+
+func (r *rateLimiter) cleanupExpiredLocked(now time.Time) {
+	for key, bucket := range r.items {
+		if !now.Before(bucket.ResetAt) {
+			delete(r.items, key)
+		}
+	}
 }
 
 func rateKey(parts ...any) string {

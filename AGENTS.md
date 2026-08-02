@@ -366,6 +366,11 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - The root layout includes `<link rel="dns-prefetch">` and `<link rel="preconnect">` tags for configured API origin, TMDB image CDN, and Bangumi API to warm connections early.
 - Next owns `Cache-Control` for `/_next/static` hashed build assets. Do not override that path from `webui/next.config.mjs`; keep explicit cache headers limited to app-owned public assets such as `favicon.png`.
 
+## Rate Limit Rules
+
+- Redis-backed rate limits fall back to the process-local limiter on Redis errors. The local limiter must remain capped at `rateLimiterMaxBuckets`; at capacity it reclaims expired buckets and then fails closed for unseen keys rather than growing an attacker-controlled map without bound.
+- Rate-limit windows shorter than one second are normalized to one second in both Redis and in-memory paths.
+
 ## Emby Session Rules
 
 - `/Sessions` includes idle and retained client sessions. Online/current viewer counts must include only entries with `NowPlayingItem`.
