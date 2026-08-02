@@ -46,6 +46,17 @@ type Route struct {
 	Handler HandlerFunc
 }
 
+type routeIndexKey struct {
+	method    string
+	partCount int
+	group     string
+}
+
+type routePathIndexKey struct {
+	partCount int
+	group     string
+}
+
 type App struct {
 	// runtime 持有 cfg / store / sessions / limiter / redis 这五个 hot reload
 	// 期间会被整体替换的运行时句柄。读端必须经 a.cfg() / a.store() 等访问器，
@@ -57,6 +68,8 @@ type App struct {
 	//   - reload 中途读端拿到 cfg 是 next、store 仍是 prev 的混合视图。
 	runtime               atomic.Pointer[runtimeState]
 	routes                []Route
+	routeIndex            map[routeIndexKey][]int
+	routePathIndex        map[routePathIndexKey][]int
 	runtimeMu             sync.Mutex
 	setupMu               sync.Mutex
 	configSignature       string
@@ -766,25 +779,97 @@ func (a *App) allowRate(ctx context.Context, key string, limit int, window time.
 	return a.limiter().Allow(ctx, key, limit, window)
 }
 func (a *App) add(method, pattern string, auth AuthLevel, handler HandlerFunc) {
-	a.routes = append(a.routes, Route{Method: method, Pattern: pattern, Parts: splitPath(pattern), Auth: auth, Handler: handler})
+	parts := splitPath(pattern)
+	index := len(a.routes)
+	a.routes = append(a.routes, Route{Method: method, Pattern: pattern, Parts: parts, Auth: auth, Handler: handler})
+	if a.routeIndex == nil {
+		a.routeIndex = make(map[routeIndexKey][]int)
+		a.routePathIndex = make(map[routePathIndexKey][]int)
+	}
+	group := routeGroup(parts)
+	methodKey := routeIndexKey{method: method, partCount: len(parts), group: group}
+	pathKey := routePathIndexKey{partCount: len(parts), group: group}
+	a.routeIndex[methodKey] = append(a.routeIndex[methodKey], index)
+	a.routePathIndex[pathKey] = append(a.routePathIndex[pathKey], index)
 }
 
 func (a *App) match(method, requestPath string) (*Route, Params, bool) {
-	methodAllowed := false
 	requestParts := splitPath(requestPath)
-	for i := range a.routes {
-		route := &a.routes[i]
-		params, ok := matchPattern(route.Parts, requestParts)
-		if !ok {
-			continue
-		}
-		if route.Method != method {
-			methodAllowed = true
-			continue
-		}
+	group := routeGroup(requestParts)
+	methodKey := routeIndexKey{method: method, partCount: len(requestParts), group: group}
+	methodFallbackKey := routeIndexKey{method: method, partCount: len(requestParts)}
+	if route, params := a.matchIndexedRoutes(
+		a.routeIndex[methodKey],
+		a.routeIndex[methodFallbackKey],
+		requestParts,
+		"",
+	); route != nil {
 		return route, params, true
 	}
-	return nil, nil, methodAllowed
+
+	pathKey := routePathIndexKey{partCount: len(requestParts), group: group}
+	pathFallbackKey := routePathIndexKey{partCount: len(requestParts)}
+	methodAllowed, _ := a.matchIndexedRoutes(
+		a.routePathIndex[pathKey],
+		a.routePathIndex[pathFallbackKey],
+		requestParts,
+		method,
+	)
+	return nil, nil, methodAllowed != nil
+}
+
+// matchIndexedRoutes merges the exact-group and wildcard-group registration
+// indexes without allocating a combined slice. Both input slices contain
+// monotonically increasing route indexes, so choosing the lower index preserves
+// the original registration priority even when a wildcard group precedes a
+// static group.
+func (a *App) matchIndexedRoutes(exact, wildcard []int, requestParts []string, excludeMethod string) (*Route, Params) {
+	if len(exact) > 0 && len(wildcard) > 0 && &exact[0] == &wildcard[0] {
+		wildcard = nil
+	}
+	exactPos, wildcardPos := 0, 0
+	for exactPos < len(exact) || wildcardPos < len(wildcard) {
+		index := 0
+		switch {
+		case exactPos >= len(exact):
+			index = wildcard[wildcardPos]
+			wildcardPos++
+		case wildcardPos >= len(wildcard):
+			index = exact[exactPos]
+			exactPos++
+		case exact[exactPos] <= wildcard[wildcardPos]:
+			index = exact[exactPos]
+			exactPos++
+			if index == wildcard[wildcardPos] {
+				wildcardPos++
+			}
+		default:
+			index = wildcard[wildcardPos]
+			wildcardPos++
+		}
+		route := &a.routes[index]
+		if excludeMethod != "" && route.Method == excludeMethod {
+			continue
+		}
+		if params, ok := matchPattern(route.Parts, requestParts); ok {
+			return route, params
+		}
+	}
+	return nil, nil
+}
+
+func routeGroup(parts []string) string {
+	if len(parts) == 0 {
+		return "/"
+	}
+	position := 0
+	if len(parts) > 2 {
+		position = 2
+	}
+	if strings.HasPrefix(parts[position], ":") {
+		return ""
+	}
+	return parts[position]
 }
 
 func matchPattern(patternParts, requestParts []string) (Params, bool) {

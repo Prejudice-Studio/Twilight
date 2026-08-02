@@ -84,6 +84,7 @@ Update docs in the same change when behavior changes.
 - Enforce feature gates in every relevant handler, not only in frontend visibility logic.
 - Do not read or print local secrets from config files unless explicitly requested.
 - Server status health checks are split across `/system/health/api`, `/system/health/database`, and `/system/health/emby`; keep `/system/health` as a compatibility aggregate and avoid adding database/Emby probes back into `/system/stats`.
+- HTTP route registration must go through `App.add`, which maintains immutable method/segment/domain indexes used by `App.match`. Do not append directly to `App.routes`, mutate routes after registration, or bypass the indexed 404/405 matching path.
 
 ## Backend Function Index
 

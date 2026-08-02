@@ -143,7 +143,7 @@ app routes
 
 | 能力 | 固定入口 |
 | ---- | -------- |
-| 路由注册 | `internal/api/routes.go` |
+| 路由注册 | `internal/api/routes.go`，统一调用 `App.add` 维护方法/段数/业务域索引；禁止直接追加 `App.routes` |
 | 鉴权等级 | `AuthPublic`、`AuthUser`、`AuthAdmin`、`AuthAPIKey` |
 | 响应 envelope | `internal/api/response.go` 与 `webui/src/lib/api-request.ts` |
 | 错误码 | `internal/api/errcode.go` 与 `webui/src/lib/errcode.ts` |
