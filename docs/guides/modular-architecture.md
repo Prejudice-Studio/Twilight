@@ -155,6 +155,8 @@ app routes
 | 前端 API | `webui/src/lib/api.ts` |
 | i18n | `webui/src/lib/i18n.tsx` 与 `webui/src/locales` |
 
+路由匹配在所有请求上执行。`App.add` 会按请求方法、路径段数和业务域构建启动期只读索引；`splitPath` 保留 `path.Clean` 对重复斜杠和点路径段的规范化，但正常的 `/api/...` 请求不得额外拼接路径前缀。新增路由只能通过集中注册入口进入这些索引。
+
 ## 拆分大文件的顺序
 
 优先按风险低、边界清晰、测试可覆盖的顺序拆：

@@ -896,7 +896,16 @@ func matchPattern(patternParts, requestParts []string) (Params, bool) {
 }
 
 func splitPath(p string) []string {
-	p = path.Clean("/" + p)
+	if p == "" {
+		return nil
+	}
+	// Request URL paths and every registered route already start with '/'. Avoid
+	// concatenating another prefix on that hot path; path.Clean keeps the same
+	// duplicate-slash and dot-segment normalization semantics.
+	if p[0] != '/' {
+		p = "/" + p
+	}
+	p = path.Clean(p)
 	if p == "/" {
 		return nil
 	}

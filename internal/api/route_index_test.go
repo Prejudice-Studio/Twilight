@@ -38,6 +38,32 @@ func TestRouteIndexPreservesWildcardGroupRegistrationOrder(t *testing.T) {
 	}
 }
 
+func TestSplitPathNormalizesEquivalentInputs(t *testing.T) {
+	want := []string{"api", "v1", "users", "me"}
+	for _, input := range []string{
+		"api/v1/users/me",
+		"/api/v1/users/me",
+		"//api//v1/users/./me",
+		"/api/v1/admin/../users/me/",
+	} {
+		got := splitPath(input)
+		if len(got) != len(want) {
+			t.Fatalf("splitPath(%q) = %v, want %v", input, got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("splitPath(%q) = %v, want %v", input, got, want)
+			}
+		}
+	}
+	if got := splitPath(""); got != nil {
+		t.Fatalf("splitPath(empty) = %v, want nil", got)
+	}
+	if got := splitPath("/"); got != nil {
+		t.Fatalf("splitPath(root) = %v, want nil", got)
+	}
+}
+
 func BenchmarkRouteIndexMatch(b *testing.B) {
 	app := benchmarkRouteApp()
 
