@@ -2530,18 +2530,24 @@ class ApiClient {
     );
   }
 
-  async adminBatchDetachInviteUsers(uids: number[], options: { deleteEmby?: boolean } = {}) {
+  async adminBatchDetachInviteUsers(uids: number[], options: { deleteEmby?: boolean; onlyEmbyDisabled?: boolean } = {}) {
     return this.request<{
       total: number;
       success: number;
       failed: number;
       detached: number;
       delete_emby: boolean;
+      only_emby_disabled: boolean;
       deleted_emby: number;
+      skipped_not_emby_disabled: number;
       errors: Array<{ uid: number; error: string; code?: string }>;
     }>("/admin/invite/users/detach-batch", {
       method: "POST",
-      body: JSON.stringify({ uids, delete_emby: Boolean(options.deleteEmby) }),
+      body: JSON.stringify({
+        uids,
+        delete_emby: Boolean(options.deleteEmby),
+        only_emby_disabled: Boolean(options.onlyEmbyDisabled),
+      }),
     });
   }
 
@@ -2562,6 +2568,7 @@ class ApiClient {
       failed: number;
       detached: number;
       renewed: number;
+      renew_skipped_disabled: number;
       renew_days: number;
       dry_run: boolean;
       target_uids: number[];

@@ -46,6 +46,8 @@ interface DepthPromptState {
   description: string;
   value: string;
   confirmLabel: string;
+  min?: number;
+  max?: number;
   resolve: (value: string | null) => void;
 }
 
@@ -216,9 +218,9 @@ export default function AdminInviteTreePage() {
     });
   }, [visibleUids]);
 
-  const requestDepth = useCallback((title: string, description: string, confirmLabel: string) => {
+  const requestDepth = useCallback((title: string, description: string, confirmLabel: string, min = 0) => {
     return new Promise<string | null>((resolve) => {
-      setDepthPrompt({ title, description, value: "1", confirmLabel, resolve });
+      setDepthPrompt({ title, description, value: "1", confirmLabel, min, resolve });
     });
   }, []);
 
@@ -229,6 +231,8 @@ export default function AdminInviteTreePage() {
         description: t("adminInvite.quickRenewDaysDescription"),
         value: "30",
         confirmLabel: t("adminInvite.continue"),
+        min: -1,
+        max: 36500,
         resolve,
       });
     });
@@ -304,20 +308,28 @@ export default function AdminInviteTreePage() {
     });
   };
 
-  const handleBulkDetach = async (deleteEmby: boolean) => {
+  const handleBulkDetach = async (deleteEmby: boolean, onlyEmbyDisabled = false) => {
     const uids = [...selectedUids];
     if (uids.length === 0) {
       toast({ title: t("adminInvite.noBulkSelection"), variant: "destructive" });
       return;
     }
     const ok = await confirm({
-      title: deleteEmby ? t("adminInvite.bulkDetachDeleteEmbyTitle") : t("adminInvite.bulkDetachTitle"),
-      description: deleteEmby ? t("adminInvite.bulkDetachDeleteEmbyDescription", { count: uids.length }) : t("adminInvite.bulkDetachDescription", { count: uids.length }),
+      title: onlyEmbyDisabled
+        ? t("adminInvite.bulkDetachDisabledEmbyTitle")
+        : deleteEmby
+          ? t("adminInvite.bulkDetachDeleteEmbyTitle")
+          : t("adminInvite.bulkDetachTitle"),
+      description: onlyEmbyDisabled
+        ? t("adminInvite.bulkDetachDisabledEmbyDescription", { count: uids.length })
+        : deleteEmby
+          ? t("adminInvite.bulkDetachDeleteEmbyDescription", { count: uids.length })
+          : t("adminInvite.bulkDetachDescription", { count: uids.length }),
       tone: deleteEmby ? "danger" : "warning",
       confirmLabel: deleteEmby ? t("adminInvite.detachDeleteEmby") : t("adminInvite.detach"),
     });
     if (!ok) return;
-    const res = await api.adminBatchDetachInviteUsers(uids, { deleteEmby }).catch((err) => ({
+    const res = await api.adminBatchDetachInviteUsers(uids, { deleteEmby, onlyEmbyDisabled }).catch((err) => ({
       success: false,
       message: err instanceof Error ? err.message : t("adminInvite.requestFailed"),
       data: null,
@@ -325,7 +337,18 @@ export default function AdminInviteTreePage() {
     if (res.success && res.data) {
       toast({
         title: t("adminInvite.bulkComplete"),
-        description: t("adminInvite.bulkResult", { success: res.data.success, failed: res.data.failed, deleted: res.data.deleted_emby || 0 }),
+        description: onlyEmbyDisabled
+          ? t("adminInvite.bulkDisabledEmbyResult", {
+              success: res.data.success,
+              failed: res.data.failed,
+              deleted: res.data.deleted_emby || 0,
+              skipped: res.data.skipped_not_emby_disabled || 0,
+            })
+          : t("adminInvite.bulkResult", {
+              success: res.data.success,
+              failed: res.data.failed,
+              deleted: res.data.deleted_emby || 0,
+            }),
         variant: res.data.failed > 0 ? "default" : "success",
       });
       setSelectedUids(new Set());
@@ -348,7 +371,9 @@ export default function AdminInviteTreePage() {
     }
     const ok = await confirm({
       title: t("adminInvite.quickConfirmTitle"),
-      description: t(labelKey, { days: renewDays }),
+      description: t(labelKey, {
+        renewal: renewDays === -1 ? t("adminInvite.permanent") : t("adminInvite.daysValue", { days: renewDays }),
+      }),
       tone: "danger",
       confirmLabel: t("adminInvite.quickConfirm"),
     });
@@ -361,7 +386,13 @@ export default function AdminInviteTreePage() {
     if (res.success && res.data) {
       toast({
         title: t("adminInvite.quickComplete"),
-        description: t("adminInvite.quickResult", { success: res.data.success, failed: res.data.failed, detached: res.data.detached, renewed: res.data.renewed }),
+        description: t("adminInvite.quickResult", {
+          success: res.data.success,
+          failed: res.data.failed,
+          detached: res.data.detached,
+          renewed: res.data.renewed,
+          skipped: res.data.renew_skipped_disabled || 0,
+        }),
         variant: res.data.failed > 0 ? "default" : "success",
       });
       setSelectedUids(new Set());
@@ -546,6 +577,10 @@ export default function AdminInviteTreePage() {
                 <ShieldCheck className="mr-2 h-4 w-4" />
                 {t("adminInvite.quickSelected")}
               </Button>
+              <Button variant="outline" size="sm" onClick={() => void handleBulkDetach(true, true)}>
+                <Trash2 className="mr-2 h-4 w-4" />
+                {t("adminInvite.bulkDetachDisabledEmby")}
+              </Button>
               <Button variant="destructive" size="sm" onClick={() => void handleBulkDetach(true)}>
                 <Trash2 className="mr-2 h-4 w-4" />
                 {t("adminInvite.bulkDetachDeleteEmby")}
@@ -641,7 +676,9 @@ export default function AdminInviteTreePage() {
                           <Badge variant={node.active ? "success" : "destructive"}>{node.active ? t("adminInvite.enable") : t("adminInvite.disable")}</Badge>
                         </td>
                         <td className="px-4 py-3">
-                          <Badge variant={node.emby_id ? "outline" : "secondary"}>{node.emby_id ? t("adminInvite.bound") : t("adminInvite.unbound")}</Badge>
+                          <Badge variant={node.emby_disabled ? "destructive" : node.emby_id ? "outline" : "secondary"}>
+                            {node.emby_disabled ? t("adminInvite.embyDisabled") : node.emby_id ? t("adminInvite.bound") : t("adminInvite.unbound")}
+                          </Badge>
                         </td>
                         <td className="px-4 py-3">{node.telegram_id || "-"}</td>
                         <td className="px-4 py-3">{t("adminInvite.childSummary", { direct: childCount, total: descendants })}</td>
@@ -673,7 +710,9 @@ export default function AdminInviteTreePage() {
             <div className="space-y-3 text-sm">
               <div className="flex flex-wrap gap-2">
                 <Badge variant={selected.active ? "success" : "secondary"}>{selected.active ? t("adminInvite.enable") : t("adminInvite.disable")}</Badge>
-                <Badge variant={selected.emby_id ? "outline" : "secondary"}>{selected.emby_id ? t("adminInvite.boundEmby") : t("adminInvite.noEmby")}</Badge>
+                <Badge variant={selected.emby_disabled ? "destructive" : selected.emby_id ? "outline" : "secondary"}>
+                  {selected.emby_disabled ? t("adminInvite.embyDisabled") : selected.emby_id ? t("adminInvite.boundEmby") : t("adminInvite.noEmby")}
+                </Badge>
                 {selected.is_root && <Badge>{t("adminInvite.root")}</Badge>}
               </div>
               <dl className="space-y-2">
@@ -737,13 +776,24 @@ export default function AdminInviteTreePage() {
           </DialogHeader>
           <Input
             type="number"
-            min={0}
-            value={depthPrompt?.value || "1"}
+            min={depthPrompt?.min ?? 0}
+            max={depthPrompt?.max}
+            value={depthPrompt?.value ?? "1"}
             onChange={(event) => setDepthPrompt((current) => current ? { ...current, value: event.target.value } : current)}
           />
+          {depthPrompt?.min === -1 && depthPrompt?.max === 36500 && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setDepthPrompt((current) => current ? { ...current, value: "-1" } : current)}
+            >
+              {t("adminInvite.setPermanent")}
+            </Button>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => closeDepthPrompt(null)}>{t("common.cancel")}</Button>
-            <Button onClick={() => closeDepthPrompt(depthPrompt?.value || "1")}>{depthPrompt?.confirmLabel || t("adminInvite.continue")}</Button>
+            <Button disabled={!depthPrompt?.value.trim()} onClick={() => closeDepthPrompt(depthPrompt?.value ?? null)}>{depthPrompt?.confirmLabel || t("adminInvite.continue")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

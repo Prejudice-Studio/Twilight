@@ -6502,6 +6502,116 @@ func TestAdminBatchDetachInviteRelation(t *testing.T) {
 	}
 }
 
+func TestInviteDisabledEmbyChildCanBeDeletedAndDetached(t *testing.T) {
+	now := time.Now().Unix()
+	child := store.User{Active: true, EmbyID: "disabled-emby", EmbyDisabled: true, ExpiredAt: now + 86400}
+	if !inviteChildCanDeleteEmbyAndDetach(child, now) {
+		t.Fatal("Emby-disabled bound child should be eligible for delete and detach")
+	}
+}
+
+func TestAdminBatchDetachOnlyDisabledEmby(t *testing.T) {
+	app := newTestApp(t)
+	admin := registerAndLogin(t, app, "admin", "Admin123456")
+	deletedRemoteID := ""
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/Users/emby-disabled" {
+			t.Fatalf("unexpected Emby request: %s %s", r.Method, r.URL.Path)
+		}
+		deletedRemoteID = strings.TrimPrefix(r.URL.Path, "/Users/")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+	app.cfg().EmbyToken = "token"
+
+	parent, err := app.store().CreateUser(store.User{Username: "disabled-emby-parent", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabledChild, err := app.store().CreateUser(store.User{Username: "disabled-emby-child", Role: store.RoleNormal, Active: true, EmbyID: "emby-disabled", EmbyDisabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabledChild, err := app.store().CreateUser(store.User{Username: "enabled-emby-child", Role: store.RoleNormal, Active: true, EmbyID: "emby-enabled"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for code, childUID := range map[string]int64{
+		"INV-DISABLED-EMBY": disabledChild.UID,
+		"INV-ENABLED-EMBY":  enabledChild.UID,
+	} {
+		if err := app.store().UpsertInviteCode(store.InviteCode{Code: code, UID: parent.UID, InviterUID: parent.UID, Days: 30, UseCountLimit: 1, Active: true}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := app.store().ConsumeInviteCode(code, childUID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	forest := app.inviteForest()
+	forestNodes, _ := forest["nodes"].([]map[string]any)
+	foundDisabledState := false
+	for _, node := range forestNodes {
+		if numeric(node["uid"]) == disabledChild.UID && node["emby_disabled"] == true {
+			foundDisabledState = true
+			break
+		}
+	}
+	if !foundDisabledState {
+		t.Fatalf("invite forest should expose disabled Emby state: %#v", forestNodes)
+	}
+
+	invalidBool := doJSON(app, http.MethodPost, "/api/v1/admin/invite/users/detach-batch", fmt.Sprintf(`{"uids":[%d],"delete_emby":true,"only_emby_disabled":"true"}`, disabledChild.UID), admin)
+	if invalidBool.Code != http.StatusBadRequest || !strings.Contains(invalidBool.Body.String(), string(ErrInvalidPayload)) {
+		t.Fatalf("string only_emby_disabled should be rejected, status=%d body=%s", invalidBool.Code, invalidBool.Body.String())
+	}
+	missingDelete := doJSON(app, http.MethodPost, "/api/v1/admin/invite/users/detach-batch", fmt.Sprintf(`{"uids":[%d],"delete_emby":false,"only_emby_disabled":true}`, disabledChild.UID), admin)
+	if missingDelete.Code != http.StatusBadRequest || !strings.Contains(missingDelete.Body.String(), string(ErrInvalidPayload)) {
+		t.Fatalf("only_emby_disabled without deletion should be rejected, status=%d body=%s", missingDelete.Code, missingDelete.Body.String())
+	}
+	if deletedRemoteID != "" {
+		t.Fatalf("invalid filtered requests must not delete remote Emby, got %q", deletedRemoteID)
+	}
+
+	body := fmt.Sprintf(`{"uids":[%d,%d],"delete_emby":true,"only_emby_disabled":true}`, disabledChild.UID, enabledChild.UID)
+	resp := doJSON(app, http.MethodPost, "/api/v1/admin/invite/users/detach-batch", body, admin)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("disabled Emby batch detach status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var payload struct {
+		Data struct {
+			Success                int `json:"success"`
+			Failed                 int `json:"failed"`
+			DeletedEmby            int `json:"deleted_emby"`
+			SkippedNotEmbyDisabled int `json:"skipped_not_emby_disabled"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Data.Success != 1 || payload.Data.Failed != 0 || payload.Data.DeletedEmby != 1 || payload.Data.SkippedNotEmbyDisabled != 1 {
+		t.Fatalf("unexpected disabled Emby batch result: %#v body=%s", payload.Data, resp.Body.String())
+	}
+	if deletedRemoteID != "emby-disabled" {
+		t.Fatalf("deleted remote Emby id=%q, want emby-disabled", deletedRemoteID)
+	}
+	updatedDisabled, _ := app.store().User(disabledChild.UID)
+	if updatedDisabled.EmbyID != "" || updatedDisabled.EmbyDisabled {
+		t.Fatalf("disabled Emby binding should be cleared: %#v", updatedDisabled)
+	}
+	if _, ok := app.store().ParentOf(disabledChild.UID); ok {
+		t.Fatal("disabled Emby child should be detached")
+	}
+	updatedEnabled, _ := app.store().User(enabledChild.UID)
+	if updatedEnabled.EmbyID != "emby-enabled" {
+		t.Fatalf("enabled Emby child should be untouched: %#v", updatedEnabled)
+	}
+	if _, ok := app.store().ParentOf(enabledChild.UID); !ok {
+		t.Fatal("enabled Emby child relation should remain")
+	}
+}
+
 func TestPublicRegcodeCheckHidesTargetedCodes(t *testing.T) {
 	app := newTestApp(t)
 	if err := app.store().UpsertRegCode(store.RegCode{Code: "TARGET-SECRET", Type: 2, Days: 5, ValidityTime: -1, UseCountLimit: 1, Active: true, TargetUsername: "alpha"}); err != nil {

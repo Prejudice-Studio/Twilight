@@ -313,7 +313,8 @@
 | GET | `/api/v1/admin/invite/tree` | Admin | 邀请树 |
 | POST | `/api/v1/admin/invite/users/{uid}/detach` | Admin | 将用户脱离邀请关系；邀请关闭后仍可维护历史关系 |
 | POST | `/api/v1/admin/invite/users/{uid}/detach-delete-emby` | Admin | 断开指定用户邀请关系并删除其远端 Emby 账号 |
-| POST | `/api/v1/admin/invite/users/detach-batch` | Admin | 批量断开邀请关系；`delete_emby=true` 时同时删除远端 Emby 账号 |
+| POST | `/api/v1/admin/invite/users/detach-batch` | Admin | 批量断开邀请关系；可删除全部所选 Emby，或用 `only_emby_disabled=true` 仅删除已禁用 Emby 并断开 |
+| POST | `/api/v1/admin/invite/quick-maintenance` | Admin | 按所选/子树/全站断开并续期；`renew_days=-1` 为永久，已禁用 Web 账号只断开不续期 |
 | GET | `/api/v1/admin/invite/codes` | Admin | 管理员视角邀请码列表 |
 | GET | `/api/v1/admin/violations` | Admin | 违规记录列表 |
 | DELETE | `/api/v1/admin/violations/{violation_id}` | Admin | 删除单条违规记录 |
@@ -394,8 +395,8 @@
 | POST | `/api/v1/invite/renew-codes` | User | 为已有直属下级生成指名续期码（邀请系统关闭时仍允许） |
 | GET | `/api/v1/invite/codes` | User | 我的邀请码列表 |
 | DELETE | `/api/v1/invite/codes/{code}` | User | 删除/停用邀请码 |
-| POST | `/api/v1/invite/me/detach-expired` | User | 自助删除自己的 Emby 账号并断开已到期邀请关系 |
-| POST | `/api/v1/invite/children/{uid}/detach-expired` | User | 删除 Emby 并断开 Emby 已到期或 Web 已禁用的直属下级（邀请系统关闭时仍允许） |
+| POST | `/api/v1/invite/me/detach-expired` | User | Emby 已到期/已禁用或 Web 已禁用时，自助删除自己的 Emby 账号并断开邀请关系 |
+| POST | `/api/v1/invite/children/{uid}/detach-expired` | User | 删除 Emby 并断开 Emby 已到期/已禁用或 Web 已禁用的直属下级（邀请系统关闭时仍允许） |
 | GET | `/api/v1/invite/check` | Public | 校验邀请码 |
 | POST | `/api/v1/invite/use` | User | 使用邀请码开通 Emby（兼容旧入口） |
 

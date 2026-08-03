@@ -1,12 +1,15 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/prejudice-studio/twilight/internal/store"
 )
+
+var errInviteQuickRenewDisabled = errors.New("invite quick maintenance renewal target is disabled")
 
 func (a *App) handleInviteTree(w http.ResponseWriter, r *http.Request, _ Params) {
 	if a.refreshStoreForRequest(w) {
@@ -65,6 +68,14 @@ func (a *App) handleAdminInviteDetachBatch(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	deleteEmby := boolValue(payload, "delete_emby", false)
+	onlyEmbyDisabled, _, okOnlyEmbyDisabled := requireStrictBoolValue(w, payload, "only_emby_disabled")
+	if !okOnlyEmbyDisabled {
+		return
+	}
+	if onlyEmbyDisabled && !deleteEmby {
+		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "only_emby_disabled 仅能与 delete_emby=true 一起使用")
+		return
+	}
 	if deleteEmby && !a.embyConfigured() {
 		failWithCode(w, http.StatusBadGateway, ErrEmbyDeleteFailed, "Emby 未配置，无法删除 Emby 账号")
 		return
@@ -72,10 +83,15 @@ func (a *App) handleAdminInviteDetachBatch(w http.ResponseWriter, r *http.Reques
 
 	result := batchResult(len(uids))
 	deletedEmbyCount := 0
+	skippedNotEmbyDisabled := 0
 	for _, uid := range uids {
 		target, okUser := a.store().User(uid)
 		if !okUser {
 			addBatchOutcomeWithCode(result, uid, ErrUserNotFound, fmt.Errorf("%s", userNotFoundMessage))
+			continue
+		}
+		if onlyEmbyDisabled && (target.EmbyID == "" || !target.EmbyDisabled) {
+			skippedNotEmbyDisabled++
 			continue
 		}
 		if deleteEmby && target.Role == store.RoleAdmin {
@@ -94,18 +110,22 @@ func (a *App) handleAdminInviteDetachBatch(w http.ResponseWriter, r *http.Reques
 	}
 
 	result["delete_emby"] = deleteEmby
+	result["only_emby_disabled"] = onlyEmbyDisabled
 	result["deleted_emby"] = deletedEmbyCount
+	result["skipped_not_emby_disabled"] = skippedNotEmbyDisabled
 	result["detached"] = result["success"]
 	action := "admin_invite_detach_batch"
 	if deleteEmby {
 		action = "admin_invite_detach_delete_emby_batch"
 	}
 	a.audit(r, action, "admin", 0, map[string]any{
-		"total":        result["total"],
-		"success":      result["success"],
-		"failed":       result["failed"],
-		"delete_emby":  deleteEmby,
-		"deleted_emby": deletedEmbyCount,
+		"total":                     result["total"],
+		"success":                   result["success"],
+		"failed":                    result["failed"],
+		"delete_emby":               deleteEmby,
+		"only_emby_disabled":        onlyEmbyDisabled,
+		"deleted_emby":              deletedEmbyCount,
+		"skipped_not_emby_disabled": skippedNotEmbyDisabled,
 	})
 	ok(w, "批量邀请关系处理完成", result)
 }
@@ -143,32 +163,40 @@ func (a *App) handleAdminInviteQuickMaintenance(w http.ResponseWriter, r *http.R
 	}
 	dryRun := boolValue(payload, "dry_run", false)
 	result := map[string]any{
-		"scope":       scope,
-		"total":       len(targets),
-		"success":     0,
-		"failed":      0,
-		"detached":    0,
-		"renewed":     0,
-		"renew_days":  renewDays,
-		"dry_run":     dryRun,
-		"errors":      []map[string]any{},
-		"target_uids": targets,
+		"scope":                  scope,
+		"total":                  len(targets),
+		"success":                0,
+		"failed":                 0,
+		"detached":               0,
+		"renewed":                0,
+		"renew_skipped_disabled": 0,
+		"renew_days":             renewDays,
+		"dry_run":                dryRun,
+		"errors":                 []map[string]any{},
+		"target_uids":            targets,
 	}
 	errorsOut := []map[string]any{}
 	success := 0
 	failed := 0
 	detached := 0
 	renewed := 0
+	renewSkippedDisabled := 0
 	for _, uid := range targets {
 		targetErrors := []map[string]any{}
+		targetHandled := false
 		target, found := a.store().User(uid)
 		if renewDays != 0 {
 			if !found {
 				targetErrors = append(targetErrors, map[string]any{"uid": uid, "code": ErrUserNotFound, "error": userNotFoundMessage})
 			} else if a.userIsProtected(target) {
 				targetErrors = append(targetErrors, map[string]any{"uid": uid, "code": ErrUserProtected, "error": a.protectedUserReason(target)})
+			} else if !target.Active {
+				renewSkippedDisabled++
 			} else if !dryRun {
 				_, err := a.store().UpdateUser(uid, func(u *store.User) error {
+					if !u.Active {
+						return errInviteQuickRenewDisabled
+					}
 					if renewDays < 0 {
 						renewExpiryAndReactivate(u, permanentExpiryUnix)
 						return nil
@@ -176,13 +204,17 @@ func (a *App) handleAdminInviteQuickMaintenance(w http.ResponseWriter, r *http.R
 					renewExpiryAndReactivate(u, addDaysToExpiry(u.ExpiredAt, renewDays, time.Now()))
 					return nil
 				})
-				if err != nil {
+				if errors.Is(err, errInviteQuickRenewDisabled) {
+					renewSkippedDisabled++
+				} else if err != nil {
 					targetErrors = append(targetErrors, map[string]any{"uid": uid, "error": err.Error()})
 				} else {
 					renewed++
+					targetHandled = true
 				}
 			} else if found && !a.userIsProtected(target) {
 				renewed++
+				targetHandled = true
 			}
 		}
 		if detach {
@@ -190,17 +222,23 @@ func (a *App) handleAdminInviteQuickMaintenance(w http.ResponseWriter, r *http.R
 			if !dryRun {
 				if err := a.store().DetachInvite(uid); err != nil {
 					targetErrors = append(targetErrors, map[string]any{"uid": uid, "error": err.Error()})
-				} else if hadParent {
+				} else {
+					targetHandled = true
+					if hadParent {
+						detached++
+					}
+				}
+			} else {
+				targetHandled = true
+				if hadParent {
 					detached++
 				}
-			} else if hadParent {
-				detached++
 			}
 		}
 		if len(targetErrors) > 0 {
 			failed++
 			errorsOut = append(errorsOut, targetErrors...)
-		} else {
+		} else if targetHandled {
 			success++
 		}
 	}
@@ -208,10 +246,11 @@ func (a *App) handleAdminInviteQuickMaintenance(w http.ResponseWriter, r *http.R
 	result["failed"] = failed
 	result["detached"] = detached
 	result["renewed"] = renewed
+	result["renew_skipped_disabled"] = renewSkippedDisabled
 	result["errors"] = errorsOut
 	if !dryRun {
 		a.audit(r, "admin_invite_quick_maintenance", "admin", 0, map[string]any{
-			"scope": scope, "total": len(targets), "success": success, "failed": failed, "detached": detached, "renewed": renewed, "renew_days": renewDays,
+			"scope": scope, "total": len(targets), "success": success, "failed": failed, "detached": detached, "renewed": renewed, "renew_skipped_disabled": renewSkippedDisabled, "renew_days": renewDays,
 		})
 	}
 	ok(w, "邀请快捷维护完成", result)

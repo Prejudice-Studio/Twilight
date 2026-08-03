@@ -1305,9 +1305,9 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/cleanup-invalid" \
 
 `POST /admin/invite/users/{uid}/detach-delete-emby` — 将指定用户从邀请树脱离，并删除其远端 Emby 账号；管理员账号受保护。
 
-`POST /admin/invite/users/detach-batch` — 批量断开邀请关系。请求体为 `{"uids":[1,2,3],"delete_emby":false}`；当 `delete_emby=true` 时同时删除远端 Emby 账号并清空本地 Emby 绑定字段。响应遵循批量操作格式：`total`、`success`、`failed`、`errors`，并返回 `deleted_emby` 计数。
+`POST /admin/invite/users/detach-batch` — 批量断开邀请关系。请求体为 `{"uids":[1,2,3],"delete_emby":false}`；当 `delete_emby=true` 时同时删除远端 Emby 账号并清空本地 Emby 绑定字段。`only_emby_disabled=true` 只能与 `delete_emby=true` 配合，后端会按刷新后的 `EmbyDisabled` 状态仅处理已禁用且仍绑定 Emby 的用户，其他目标保持不变并计入 `skipped_not_emby_disabled`。响应遵循批量操作格式：`total`、`success`、`failed`、`errors`，并返回 `deleted_emby`、`only_emby_disabled` 与跳过计数。
 
-`POST /admin/invite/quick-maintenance` — 快捷维护邀请关系。请求体示例：`{"confirm":"INVITE_QUICK_MAINTENANCE","scope":"all","detach":true,"renew_days":30}`；`scope` 可为 `selected`（配合 `uids`）、`subtree`（配合 `root_uid` / `depth` / `include_root`）或 `all`。`detach=true` 会断开目标用户与上级关系，`renew_days=1..36500` 为目标用户追加有效期，`-1` 设为永久。管理员账号受保护，接口返回 `total/success/failed/detached/renewed/errors`。
+`POST /admin/invite/quick-maintenance` — 快捷维护邀请关系。请求体示例：`{"confirm":"INVITE_QUICK_MAINTENANCE","scope":"all","detach":true,"renew_days":30}`；`scope` 可为 `selected`（配合 `uids`）、`subtree`（配合 `root_uid` / `depth` / `include_root`）或 `all`。`detach=true` 会断开目标用户与上级关系，`renew_days=1..36500` 为目标用户追加有效期，`-1` 设为永久。管理员账号受保护；Web 已禁用目标仍可断开，但不会续期、改变到期时间或重新启用。接口返回 `total/success/failed/detached/renewed/renew_skipped_disabled/errors`。
 
 `GET /admin/invite/codes` — 列出全部邀请码。
 
@@ -1937,8 +1937,8 @@ Telegram 管理中的「Bot 指令管理」页面不会创建第二套指令存�
 | `POST /invite/renew-codes` | `AuthUser` | 为已有直属下级生成指名续期码；`invite_enabled=false` 时仍允许 |
 | `GET /invite/codes` | `AuthUser` | 列出我的邀请码 |
 | `DELETE /invite/codes/{code}` | `AuthUser` | 物理删除邀请码；不自动断开既有上下级关系 |
-| `POST /invite/me/detach-expired` | `AuthUser` | 自助完全删除自己的 Emby 账号并断开到期邀请关系；`invite_enabled=false` 时仍允许 |
-| `POST /invite/children/{uid}/detach-expired` | `AuthUser` | 删除 Emby 并断开 Emby 已到期或 Web 已禁用的直属下级；`invite_enabled=false` 时仍允许 |
+| `POST /invite/me/detach-expired` | `AuthUser` | Emby 已到期、Emby 已禁用或 Web 已禁用时，自助完全删除自己的 Emby 账号并断开邀请关系；`invite_enabled=false` 时仍允许 |
+| `POST /invite/children/{uid}/detach-expired` | `AuthUser` | 删除 Emby 并断开 Emby 已到期、Emby 已禁用或 Web 已禁用的直属下级；`invite_enabled=false` 时仍允许 |
 | `GET /invite/check` | `AuthPublic` | 校验邀请码（IP 限流 10/60s） |
 | `POST /invite/use` | `AuthUser` | 使用邀请码 |
 

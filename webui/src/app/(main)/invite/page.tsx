@@ -63,6 +63,11 @@ function InviteTreeNodeList({ nodes }: { nodes: InviteTreeNode[] }) {
                 <Badge variant={node.has_emby ? "outline" : "secondary"} className="text-[10px]">
                   {node.has_emby ? "Emby" : t("invite.noEmby")}
                 </Badge>
+                {node.emby_disabled && (
+                  <Badge variant="destructive" className="text-[10px]">
+                    {t("invite.embyDisabled")}
+                  </Badge>
+                )}
                 {node.emby_expired && (
                   <Badge variant="destructive" className="text-[10px]">
                     {t("invite.expired")}
@@ -469,6 +474,11 @@ export default function InviteCenterPage() {
                       <Badge variant={child.has_emby ? "outline" : "secondary"} className="text-[10px]">
                         {child.has_emby ? "Emby" : t("invite.noEmby")}
                       </Badge>
+                      {child.emby_disabled && (
+                        <Badge variant="destructive" className="text-[10px]">
+                          {t("invite.embyDisabled")}
+                        </Badge>
+                      )}
                       {child.emby_expired && (
                         <Badge variant="destructive" className="text-[10px]">
                           {t("invite.expired")}

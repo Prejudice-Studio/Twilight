@@ -51,6 +51,7 @@ func (a *App) handleInviteMe(w http.ResponseWriter, r *http.Request, _ Params) {
 				"expire_status":              expireStatus(u.ExpiredAt),
 				"expired_at":                 publicExpiryUnix(u.ExpiredAt),
 				"has_emby":                   u.EmbyID != "",
+				"emby_disabled":              u.EmbyDisabled,
 				"emby_expired":               inviteChildEmbyExpired(u, now),
 				"can_generate_renew_code":    a.canGenerateInviteRenewCodeForChild(user, u, maxDays),
 				"can_delete_emby_and_detach": inviteChildCanDeleteEmbyAndDetach(u, now),
@@ -277,7 +278,7 @@ func (a *App) handleDetachExpiredInviteChild(w http.ResponseWriter, r *http.Requ
 	}
 	now := time.Now().Unix()
 	if !inviteChildCanDeleteEmbyAndDetach(child, now) {
-		failWithCode(w, http.StatusBadRequest, ErrInviteDetachNotExpired, "只能断开 Emby 已到期或 Web 已禁用且仍绑定 Emby 的直属下级")
+		failWithCode(w, http.StatusBadRequest, ErrInviteDetachNotExpired, "只能断开 Emby 已到期、Emby 已禁用或 Web 已禁用且仍绑定 Emby 的直属下级")
 		return
 	}
 	updated, deletedEmby, okDelete := a.deleteEmbyAndDetachInviteUser(w, r, child, "invite_child_detach_expired", "user")
@@ -303,7 +304,7 @@ func (a *App) handleDetachMyExpiredInvite(w http.ResponseWriter, r *http.Request
 	}
 	now := time.Now().Unix()
 	if !inviteChildCanDeleteEmbyAndDetach(latest, now) {
-		failWithCode(w, http.StatusBadRequest, ErrInviteDetachNotExpired, "只能在自己的 Emby 已到期或 Web 已禁用且仍绑定 Emby 时主动断开")
+		failWithCode(w, http.StatusBadRequest, ErrInviteDetachNotExpired, "只能在自己的 Emby 已到期、Emby 已禁用或 Web 已禁用且仍绑定 Emby 时主动断开")
 		return
 	}
 	updated, deletedEmby, okDelete := a.deleteEmbyAndDetachInviteUser(w, r, latest, "invite_self_detach_expired", "user")
@@ -366,7 +367,7 @@ func inviteChildEmbyExpired(child store.User, now int64) bool {
 }
 
 func inviteChildCanDeleteEmbyAndDetach(child store.User, now int64) bool {
-	return child.EmbyID != "" && (inviteChildEmbyExpired(child, now) || !child.Active)
+	return child.EmbyID != "" && (child.EmbyDisabled || inviteChildEmbyExpired(child, now) || !child.Active)
 }
 
 func (a *App) inviteExpiredSelfCleanupAllowed(u store.User, now int64) bool {

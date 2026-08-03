@@ -88,8 +88,8 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 | `GET` | `/admin/invite/tree` | AuthAdmin | 返回整片森林：`nodes`（节点）+ `edges`（边）+ `roots`（树根 UID 列表）+ `max_depth`（全局最大深度）+ `config`（当前配置）。 |
 | `POST` | `/admin/invite/users/:uid/detach` | AuthAdmin | 把指定用户从上级断开（删除其作为 `child` 的边，自身晋升新树根）。返回 `changed` 表示原本是否有上级。 |
 | `POST` | `/admin/invite/users/:uid/detach-delete-emby` | AuthAdmin | 把指定用户从上级断开，并删除其远端 Emby 账号、清空本地 Emby 绑定字段。管理员账号受保护。 |
-| `POST` | `/admin/invite/users/detach-batch` | AuthAdmin | 批量断开邀请关系；请求体 `uids` 为目标 UID 列表，`delete_emby=true` 时同时删除远端 Emby 账号。返回 `total/success/failed/errors/deleted_emby`。 |
-| `POST` | `/admin/invite/quick-maintenance` | AuthAdmin | 快捷维护：按 `selected` / `subtree` / `all` 范围断开上下级关系，并可给受影响下级统一续期指定天数。确认短语为 `INVITE_QUICK_MAINTENANCE`。 |
+| `POST` | `/admin/invite/users/detach-batch` | AuthAdmin | 批量断开邀请关系；请求体 `uids` 为目标 UID 列表，`delete_emby=true` 时同时删除远端 Emby 账号；再传 `only_emby_disabled=true` 时仅处理后端最新状态为 Emby 已禁用且仍有绑定的用户。返回 `total/success/failed/errors/deleted_emby/skipped_not_emby_disabled`。 |
+| `POST` | `/admin/invite/quick-maintenance` | AuthAdmin | 快捷维护：按 `selected` / `subtree` / `all` 范围断开上下级关系，并可给仍启用的下级统一续期指定天数或设为永久。确认短语为 `INVITE_QUICK_MAINTENANCE`。 |
 | `GET` | `/admin/invite/codes` | AuthAdmin | 列出全部邀请码（可按邀请人在前端过滤）。 |
 | `POST` | `/admin/users/:uid/delete` | AuthAdmin | 删除用户，支持 JSON body 的 `mode` 与 `cascade_depth`（见下，推荐）。 |
 | `DELETE` | `/admin/users/:uid` | AuthAdmin | 删除用户兼容入口，保留简单删除和旧客户端调用。 |
@@ -163,8 +163,8 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 | 仅停用 / 启用（`cascade_depth=1`） | 邀请关系完全不变；仅翻转 `Active` 并同步 Emby。 |
 | 级联禁用 / 启用（`cascade_depth>=2` 或 `<0`/`>=999`） | 仅翻转层级内各用户的 `Active` 并同步 Emby；邀请关系完全不动；受保护管理员自动跳过。 |
 | `mode=emby_only`（任意 `cascade_depth`） | 仅删除 Emby 账号并清空绑定字段；本地账号、上下级、邀请码全部保留。 |
-| 下级自助断开（`POST /invite/me/detach-expired`） | 仅当自己存在邀请上级，且 Emby 已到期，或 Web 已禁用且仍绑定 Emby 时，完全删除自己的 Emby 账号、清空本地 Emby 绑定与待开通状态，并解除自己的上级关系；同时清理对应邀请码的使用占用，避免刷新后恢复；不改变 Web 账号的启用 / 禁用状态。 |
-| 上级清理下级（`POST /invite/children/:uid/detach-expired`） | 仅当目标是 Emby 已到期，或 Web 已禁用且仍绑定 Emby 的直属下级时，完全删除其 Emby 账号、清空绑定与待开通状态，并解除上下级关系；同时清理对应邀请码的使用占用，避免刷新后恢复；不改变目标 Web 账号的启用 / 禁用状态。 |
+| 下级自助断开（`POST /invite/me/detach-expired`） | 仅当自己存在邀请上级，且 Emby 已到期、Emby 已禁用，或 Web 已禁用且仍绑定 Emby 时，完全删除自己的 Emby 账号、清空本地 Emby 绑定与待开通状态，并解除自己的上级关系；同时清理对应邀请码的使用占用，避免刷新后恢复；不改变 Web 账号的启用 / 禁用状态。 |
+| 上级清理下级（`POST /invite/children/:uid/detach-expired`） | 仅当目标是 Emby 已到期、Emby 已禁用，或 Web 已禁用且仍绑定 Emby 的直属下级时，完全删除其 Emby 账号、清空绑定与待开通状态，并解除上下级关系；同时清理对应邀请码的使用占用，避免刷新后恢复；不改变目标 Web 账号的启用 / 禁用状态。 |
 | 管理员断开（`POST /admin/invite/users/:uid/detach`） | 删除该用户作为 `child` 的边并清理其占用的邀请码使用记录，自身晋升新树根；不动其 Emby 账号与下级。`invite_enabled=false` 时仍可执行，用于维护历史关系。 |
 
 ## 核心校验
@@ -202,9 +202,11 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 - `scope="subtree"`：处理 `root_uid` 的下级，`include_root=true` 时包含 root 本人；`depth=-1` 表示整棵子树。
 - `scope="all"`：处理全站所有作为下级存在的用户。
 - `detach=true`：断开这些用户与上级的关系，并清理其占用的邀请码使用记录。
-- `renew_days`：为目标用户续期，`1..36500` 为追加天数，`-1` 为永久，`0` 表示不续期。管理员账号受保护，不会被快捷续期修改。
+- `renew_days`：为目标用户续期，`1..36500` 为追加天数，`-1` 为永久，`0` 表示不续期。管理员账号受保护；Web 已禁用用户只执行可用的断开操作，不续期、不修改到期时间，也不会被重新启用。
 
-该接口与其它邀请维护接口一样不受 `invite_enabled=false` 阻断，因为它是历史维护，不是新邀请流量。响应返回 `total/success/failed/detached/renewed/errors`，成功执行会写入 `admin_invite_quick_maintenance` 审计日志。
+该接口与其它邀请维护接口一样不受 `invite_enabled=false` 阻断，因为它是历史维护，不是新邀请流量。响应返回 `total/success/failed/detached/renewed/renew_skipped_disabled/errors`，成功执行会写入 `admin_invite_quick_maintenance` 审计日志。
+
+批量清理已禁用 Emby 时使用 `POST /admin/invite/users/detach-batch` 的 `delete_emby=true` 与 `only_emby_disabled=true`。后端会基于刷新后的 `EmbyDisabled` 状态再次筛选：只删除匹配用户的远端 Emby、清空本地绑定并断开关系；无绑定或 Emby 未禁用用户保持不变并计入 `skipped_not_emby_disabled`。`only_emby_disabled` 不是前端过滤提示，缺少 `delete_emby=true` 或传入非 JSON 布尔值都会被拒绝。
 
 ## 相关错误码
 

@@ -216,3 +216,73 @@ func TestAdminInviteQuickMaintenanceDetachesAndRenews(t *testing.T) {
 		t.Fatalf("quick detach should clear invite usage: %#v", invite)
 	}
 }
+
+func TestAdminInviteQuickMaintenancePermanentAndSkipsDisabled(t *testing.T) {
+	app := newTestApp(t)
+	admin := registerAndLogin(t, app, "admin", "Admin123456")
+	now := time.Now()
+	parent, err := app.store().CreateUser(store.User{Username: "quick-safe-parent", PasswordHash: "x", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeChild, err := app.store().CreateUser(store.User{Username: "quick-permanent-child", PasswordHash: "x", Role: store.RoleNormal, Active: true, ExpiredAt: now.AddDate(0, 0, 5).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabledExpiry := now.AddDate(0, 0, 15).Unix()
+	disabledChild, err := app.store().CreateUser(store.User{Username: "quick-disabled-child", PasswordHash: "x", Role: store.RoleNormal, Active: true, ExpiredAt: disabledExpiry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.store().UpdateUser(disabledChild.UID, func(u *store.User) error {
+		u.Active = false
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for code, childUID := range map[string]int64{
+		"QUICK-PERMANENT": activeChild.UID,
+		"QUICK-DISABLED":  disabledChild.UID,
+	} {
+		if err := app.store().UpsertInviteCode(store.InviteCode{Code: code, UID: parent.UID, InviterUID: parent.UID, Days: 7, UseCountLimit: 1, Active: true}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := app.store().ConsumeInviteCode(code, childUID); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	body := `{"confirm":"INVITE_QUICK_MAINTENANCE","scope":"selected","uids":[` + strconv.FormatInt(activeChild.UID, 10) + `,` + strconv.FormatInt(disabledChild.UID, 10) + `],"detach":true,"renew_days":-1}`
+	resp := doJSON(app, http.MethodPost, "/api/v1/admin/invite/quick-maintenance", body, admin)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("quick permanent maintenance status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var payload struct {
+		Data struct {
+			Success              int `json:"success"`
+			Detached             int `json:"detached"`
+			Renewed              int `json:"renewed"`
+			RenewSkippedDisabled int `json:"renew_skipped_disabled"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Data.Success != 2 || payload.Data.Detached != 2 || payload.Data.Renewed != 1 || payload.Data.RenewSkippedDisabled != 1 {
+		t.Fatalf("unexpected quick maintenance result: %#v body=%s", payload.Data, resp.Body.String())
+	}
+	updatedActive, _ := app.store().User(activeChild.UID)
+	if !updatedActive.Active || !expiryIsPermanent(updatedActive.ExpiredAt) {
+		t.Fatalf("active child should become permanent: %#v", updatedActive)
+	}
+	updatedDisabled, _ := app.store().User(disabledChild.UID)
+	if updatedDisabled.Active || updatedDisabled.ExpiredAt != disabledExpiry {
+		t.Fatalf("disabled child must stay disabled with unchanged expiry: %#v", updatedDisabled)
+	}
+	if _, ok := app.store().ParentOf(activeChild.UID); ok {
+		t.Fatal("active child should be detached")
+	}
+	if _, ok := app.store().ParentOf(disabledChild.UID); ok {
+		t.Fatal("disabled child should still be detached")
+	}
+}

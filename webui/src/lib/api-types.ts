@@ -1200,6 +1200,7 @@ export interface InviteTreeNode {
   username: string;
   active: boolean;
   has_emby: boolean;
+  emby_disabled?: boolean;
   expired_at?: number | null;
   expire_status?: string;
   emby_expired?: boolean;
@@ -1217,6 +1218,7 @@ export interface InviteMyStatus {
     username: string;
     active: boolean;
     has_emby: boolean;
+    emby_disabled?: boolean;
     expired_at?: number | null;
     expire_status?: string;
     emby_expired?: boolean;
@@ -1241,6 +1243,7 @@ export interface InviteForestNode {
   username: string;
   role: number;
   emby_id?: string | null;
+  emby_disabled?: boolean;
   active: boolean;
   telegram_id?: number | null;
   register_time?: number | null;

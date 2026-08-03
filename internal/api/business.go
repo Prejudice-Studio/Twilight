@@ -1256,6 +1256,7 @@ func (a *App) inviteTreeNode(uid int64, depth int, seen map[int64]bool) (map[str
 		"username":                   u.Username,
 		"active":                     u.Active,
 		"has_emby":                   u.EmbyID != "",
+		"emby_disabled":              u.EmbyDisabled,
 		"expired_at":                 u.ExpiredAt,
 		"expire_status":              expireStatus(u.ExpiredAt),
 		"emby_expired":               inviteChildEmbyExpired(u, now),
@@ -1291,6 +1292,7 @@ func (a *App) inviteTreeFor(user store.User) map[string]any {
 			"username":                   user.Username,
 			"active":                     user.Active,
 			"has_emby":                   user.EmbyID != "",
+			"emby_disabled":              user.EmbyDisabled,
 			"expired_at":                 user.ExpiredAt,
 			"expire_status":              expireStatus(user.ExpiredAt),
 			"emby_expired":               inviteChildEmbyExpired(user, now),
@@ -1376,7 +1378,7 @@ func (a *App) inviteForest() map[string]any {
 	nodes := []map[string]any{}
 	for uid := range allUIDs {
 		if u, ok := userByID[uid]; ok {
-			nodes = append(nodes, map[string]any{"uid": u.UID, "username": u.Username, "role": u.Role, "emby_id": emptyNil(u.EmbyID), "active": u.Active, "telegram_id": nullableInt(u.TelegramID), "register_time": u.RegisterTime, "expired_at": u.ExpiredAt, "is_root": parentOf[uid] == 0})
+			nodes = append(nodes, map[string]any{"uid": u.UID, "username": u.Username, "role": u.Role, "emby_id": emptyNil(u.EmbyID), "emby_disabled": u.EmbyDisabled, "active": u.Active, "telegram_id": nullableInt(u.TelegramID), "register_time": u.RegisterTime, "expired_at": u.ExpiredAt, "is_root": parentOf[uid] == 0})
 		}
 	}
 	sort.Slice(nodes, func(i, j int) bool { return numeric(nodes[i]["uid"]) < numeric(nodes[j]["uid"]) })

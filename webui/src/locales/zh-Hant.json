@@ -468,6 +468,9 @@
     "serverNetworkStatus": "按需線路探測，不會自動測速",
     "retest": "測速線路"
   },
+  "invite": {
+    "embyDisabled": "Emby 已停用"
+  },
   "adminInvite": {
     "title": "邀請系統管理",
     "description": "集中管理邀請關係、根使用者篩選、直屬/總下級統計和級聯操作；停用、啟用或刪除前會確認影響範圍。",
@@ -481,12 +484,16 @@
     "noBulkSelection": "請先選擇要處理的使用者",
     "bulkDetach": "批量斷開",
     "bulkDetachDeleteEmby": "批量斷開並刪除 Emby",
+    "bulkDetachDisabledEmby": "刪除已停用 Emby 並斷開",
     "bulkDetachTitle": "批量斷開邀請關係？",
     "bulkDetachDescription": "將斷開已選擇的 {count} 個使用者與其上級的邀請關係，保留下級樹。",
     "bulkDetachDeleteEmbyTitle": "批量斷開並刪除 Emby 帳號？",
     "bulkDetachDeleteEmbyDescription": "將處理已選擇的 {count} 個使用者：斷開邀請關係並刪除其遠端 Emby 帳號。",
+    "bulkDetachDisabledEmbyTitle": "刪除已停用的 Emby 帳號並斷開？",
+    "bulkDetachDisabledEmbyDescription": "將檢查已選擇的 {count} 個使用者，只刪除 Emby 已停用帳號並斷開其邀請關係；其他使用者保持不變。",
     "bulkComplete": "批量操作完成",
     "bulkResult": "成功 {success} 個，失敗 {failed} 個，刪除 Emby {deleted} 個",
+    "bulkDisabledEmbyResult": "處理 {success} 個，失敗 {failed} 個，刪除 Emby {deleted} 個，跳過非 Emby 停用帳號 {skipped} 個",
     "detachDeleteEmby": "斷開並刪除 Emby",
     "detachDeleteEmbyTitle": "斷開並刪除 Emby 帳號？",
     "detachDeleteEmbyDescription": "將斷開 {username} (UID {uid}) 的邀請關係，並刪除其遠端 Emby 帳號。",
@@ -497,13 +504,16 @@
     "quickRenewDaysTitle": "設定統一續期天數",
     "quickRenewDaysDescription": "輸入要為目標使用者追加的天數；-1 表示設為永久，0 不允許。",
     "quickRenewDaysInvalid": "續期天數必須為 -1 或 1-36500",
+    "setPermanent": "設為永久 (-1)",
+    "daysValue": "{days} 天",
     "quickConfirmTitle": "確認快捷維護？",
-    "quickSelectedDescription": "將斷開已選擇使用者與上級的邀請關係，並為這些使用者統一續期 {days} 天。",
-    "quickSubtreeDescription": "將斷開目前使用者全部下級與各自上級的邀請關係，並為這些下級統一續期 {days} 天。",
-    "quickAllDescription": "將斷開全站所有上下級邀請關係，並為所有下級統一續期 {days} 天。",
+    "quickSelectedDescription": "將斷開已選擇使用者與上級的邀請關係，並為其中仍啟用的使用者統一執行續期（{renewal}）；已停用使用者只斷開、不續期。",
+    "quickSubtreeDescription": "將斷開目前使用者全部下級與各自上級的邀請關係，並為其中仍啟用的下級統一執行續期（{renewal}）；已停用使用者只斷開、不續期。",
+    "quickAllDescription": "將斷開全站所有上下級邀請關係，並為其中仍啟用的下級統一執行續期（{renewal}）；已停用使用者只斷開、不續期。",
     "quickConfirm": "確認維護",
     "quickComplete": "快捷維護完成",
-    "quickResult": "成功 {success} 個，失敗 {failed} 個，斷開 {detached} 條，續期 {renewed} 個"
+    "quickResult": "成功 {success} 個，失敗 {failed} 個，斷開 {detached} 條，續期 {renewed} 個，跳過已停用續期 {skipped} 個",
+    "embyDisabled": "Emby 已停用"
   },
   "settings": {
     "loading": "正在載入設定...",
