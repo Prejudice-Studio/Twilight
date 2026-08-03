@@ -310,7 +310,7 @@
 | POST | `/api/v1/admin/email/verifications/cleanup` | Admin | 手动清理所有已过期的在用验证码 |
 | DELETE | `/api/v1/admin/email/verifications/{id}` | Admin | 撤销指定在用验证码记录（立即失效） |
 | POST | `/api/v1/admin/users/kick-no-emby` | Admin | 踢出无 Emby 账号的用户 |
-| GET | `/api/v1/admin/invite/tree` | Admin | 邀请树 |
+| GET | `/api/v1/admin/invite/tree` | Admin | 邀请树；邀请关闭时隐藏没有真实关系的孤立持码用户 |
 | POST | `/api/v1/admin/invite/users/{uid}/detach` | Admin | 将用户脱离邀请关系；邀请关闭后仍可维护历史关系 |
 | POST | `/api/v1/admin/invite/users/{uid}/detach-delete-emby` | Admin | 断开指定用户邀请关系并删除其远端 Emby 账号 |
 | POST | `/api/v1/admin/invite/users/detach-batch` | Admin | 批量断开邀请关系；可删除全部所选 Emby，或用 `only_emby_disabled=true` 仅删除已禁用 Emby 并断开 |

@@ -4,7 +4,7 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 
 > 邀请关系与邀请码是「单一状态文档」（`internal/store`）里的字段，不是独立的数据库或单表。唯一运行后端是 PostgreSQL，整份状态存于 `twilight_state` 表（`id=1` 的一行 jsonb）。具体对应字段为 `state.invite_codes`（`map[string]InviteCode`）与 `state.invite_relations`（`map[int64]InviteRelation`）。不存在 `db/invites.db`、`invite_relations` 单表或「首次启动自动建表」。
 
-邀请列表、邀请树、公开校验、生成 / 删除 / 使用邀请码、断开关系和管理员维护接口会在读取前刷新这份单一状态文档；WebUI 邀请相关读请求也会绕过短读缓存和 in-flight GET 合并，避免外部维护或其它进程写入 `twilight_state` 后继续显示旧邀请码 / 旧关系。
+邀请列表、邀请树、公开校验、生成 / 删除 / 使用邀请码、断开关系和管理员维护接口会在读取前刷新这份单一状态文档；WebUI 邀请相关读请求也会绕过短读缓存和 in-flight GET 合并，避免外部维护或其它进程写入 `twilight_state` 后继续显示旧邀请码 / 旧关系。邀请功能开启时，管理员森林会额外显示仅持有码、尚未形成关系的潜在树根；关闭后只展示真实历史关系，持有码但没有任何上下级关系的孤立用户不会显示，关系中的末级下级仍会保留。
 
 相关文档：注册码与卡码见 [注册码与卡码](./regcodes.md)，统一卡码入口见 [后端 API 详参](../reference/backend-api.md)，配置项总览见 [Go 后端架构与配置](../reference/backend.md)，全部路由见 [API 路由索引](../reference/api-index.md)。
 
@@ -85,7 +85,7 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 
 | Method | Path | 鉴权 | 描述 |
 | ------ | ---- | ---- | ---- |
-| `GET` | `/admin/invite/tree` | AuthAdmin | 返回整片森林：`nodes`（节点）+ `edges`（边）+ `roots`（树根 UID 列表）+ `max_depth`（全局最大深度）+ `config`（当前配置）。 |
+| `GET` | `/admin/invite/tree` | AuthAdmin | 返回整片森林：`nodes`（节点）+ `edges`（边）+ `roots`（树根 UID 列表）+ `max_depth`（全局最大深度）+ `config`（当前配置）。邀请关闭时不返回仅因持有码而出现、且没有真实上下级关系的孤立用户。 |
 | `POST` | `/admin/invite/users/:uid/detach` | AuthAdmin | 把指定用户从上级断开（删除其作为 `child` 的边，自身晋升新树根）。返回 `changed` 表示原本是否有上级。 |
 | `POST` | `/admin/invite/users/:uid/detach-delete-emby` | AuthAdmin | 把指定用户从上级断开，并删除其远端 Emby 账号、清空本地 Emby 绑定字段。管理员账号受保护。 |
 | `POST` | `/admin/invite/users/detach-batch` | AuthAdmin | 批量断开邀请关系；请求体 `uids` 为目标 UID 列表，`delete_emby=true` 时同时删除远端 Emby 账号；再传 `only_emby_disabled=true` 时仅处理后端最新状态为 Emby 已禁用且仍有绑定的用户。返回 `total/success/failed/errors/deleted_emby/skipped_not_emby_disabled`。 |

@@ -1372,8 +1372,12 @@ func (a *App) inviteForest() map[string]any {
 		parentOf[rel.ChildUID] = rel.ParentUID
 		children[rel.ParentUID] = append(children[rel.ParentUID], rel.ChildUID)
 	}
-	for _, code := range a.store().ListAllInviteCodes() {
-		allUIDs[code.InviterUID] = true
+	// 邀请开启时保留仅持有码、尚未形成关系的邀请人，便于管理员查看潜在树根。
+	// 关闭后管理页只展示真实历史关系，避免无下级的持码用户成为孤立节点。
+	if a.cfg().InviteEnabled {
+		for _, code := range a.store().ListAllInviteCodes() {
+			allUIDs[code.InviterUID] = true
+		}
 	}
 	nodes := []map[string]any{}
 	for uid := range allUIDs {

@@ -6502,6 +6502,56 @@ func TestAdminBatchDetachInviteRelation(t *testing.T) {
 	}
 }
 
+func TestInviteForestHidesCodeOnlyUsersWhenInviteDisabled(t *testing.T) {
+	app := newTestApp(t)
+	codeOnly, err := app.store().CreateUser(store.User{Username: "invite-code-only", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := app.store().CreateUser(store.User{Username: "invite-tree-parent", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := app.store().CreateUser(store.User{Username: "invite-tree-leaf", Role: store.RoleNormal, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store().UpsertInviteCode(store.InviteCode{Code: "INV-CODE-ONLY", UID: codeOnly.UID, InviterUID: codeOnly.UID, Days: 30, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store().UpsertInviteCode(store.InviteCode{Code: "INV-TREE-LEAF", UID: parent.UID, InviterUID: parent.UID, Days: 30, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.store().ConsumeInviteCode("INV-TREE-LEAF", leaf.UID); err != nil {
+		t.Fatal(err)
+	}
+
+	forestUIDs := func() map[int64]bool {
+		forest := app.inviteForest()
+		nodes, _ := forest["nodes"].([]map[string]any)
+		uids := make(map[int64]bool, len(nodes))
+		for _, node := range nodes {
+			uids[numeric(node["uid"])] = true
+		}
+		return uids
+	}
+
+	app.cfg().InviteEnabled = true
+	enabledUIDs := forestUIDs()
+	if !enabledUIDs[codeOnly.UID] {
+		t.Fatal("enabled invite forest should retain a code-only prospective root")
+	}
+
+	app.cfg().InviteEnabled = false
+	disabledUIDs := forestUIDs()
+	if disabledUIDs[codeOnly.UID] {
+		t.Fatal("disabled invite forest should hide users with codes but no relations")
+	}
+	if !disabledUIDs[parent.UID] || !disabledUIDs[leaf.UID] {
+		t.Fatalf("disabled invite forest must retain complete real relations, got uids=%v", disabledUIDs)
+	}
+}
+
 func TestInviteDisabledEmbyChildCanBeDeletedAndDetached(t *testing.T) {
 	now := time.Now().Unix()
 	child := store.User{Active: true, EmbyID: "disabled-emby", EmbyDisabled: true, ExpiredAt: now + 86400}

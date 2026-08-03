@@ -1299,7 +1299,7 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/cleanup-invalid" \
 
 邀请树、邀请码列表、公开校验、使用 / 删除 / 断开和管理员维护接口读取前会刷新持久化状态文档；前端邀请读接口绕过短读缓存和 GET 合并，避免删除或断开后继续显示旧关系。
 
-`GET /admin/invite/tree` — 查看邀请树。
+`GET /admin/invite/tree` — 查看邀请树。邀请开启时可包含仅持有码、尚未建立关系的潜在根节点；邀请关闭时只返回真实关系的两端，隐藏没有任何上下级关系的孤立持码用户，同时保留没有后代的末级下级以维持树结构完整。
 
 `POST /admin/invite/users/{uid}/detach` — 将指定用户从邀请树脱离。
 
