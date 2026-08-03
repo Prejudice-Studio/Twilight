@@ -45,8 +45,8 @@ func telegramIsAnonymousGroupMessage(message map[string]any) bool {
 	return numeric(chat["id"]) != 0 && !strings.EqualFold(asString(chat["type"]), "private") && numeric(from["id"]) == 0
 }
 
-func (a *App) telegramResolveGroupUserTarget(fields []string, message map[string]any) (store.User, string) {
-	return a.telegramResolveGroupUserTargetValues(telegramCommandQuery(fields), telegramReplyTelegramID(message))
+func (a *App) telegramResolveGroupUserTarget(query string, message map[string]any) (store.User, string) {
+	return a.telegramResolveGroupUserTargetValues(query, telegramReplyTelegramID(message))
 }
 
 func (a *App) telegramResolveGroupUserTargetValues(query string, replyTelegramID int64) (store.User, string) {
@@ -69,8 +69,8 @@ func (a *App) telegramResolveGroupUserTargetValues(query string, replyTelegramID
 	return users[0], ""
 }
 
-func (a *App) telegramSendGroupAdminAuth(ctx context.Context, chatID, commandMessageID int64, fields []string, message map[string]any) {
-	panel := a.telegramCreateAuthPanel(chatID, commandMessageID, telegramCommandQuery(fields), telegramReplyTelegramID(message))
+func (a *App) telegramSendGroupAdminAuth(ctx context.Context, chatID, commandMessageID int64, query string, message map[string]any) {
+	panel := a.telegramCreateAuthPanel(chatID, commandMessageID, query, telegramReplyTelegramID(message))
 	markup := telegramInlineKeyboard([][]telegramInlineButton{
 		{{Text: "验证管理员身份", Data: "gadm:auth:" + panel.Token}},
 		{{Text: "关闭面板", Data: "gadm:act:close:" + panel.Token}},
@@ -1029,13 +1029,6 @@ func telegramInlineKeyboard(rows [][]telegramInlineButton) any {
 		keyboard = append(keyboard, items)
 	}
 	return map[string]any{"inline_keyboard": keyboard}
-}
-
-func telegramCommandQuery(fields []string) string {
-	if len(fields) <= 1 {
-		return ""
-	}
-	return strings.Join(fields[1:], " ")
 }
 
 func telegramReplyTelegramID(message map[string]any) int64 {

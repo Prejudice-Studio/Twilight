@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -3643,6 +3644,54 @@ func TestTelegramCommandDisabledHotPathDoesNotAllocateSet(t *testing.T) {
 		_ = app.telegramCommandDisabled("/help")
 	}); allocations != 0 {
 		t.Fatalf("disabled command hot path allocated %.2f objects per lookup", allocations)
+	}
+}
+
+func TestTelegramParseCommandText(t *testing.T) {
+	tests := []struct {
+		name        string
+		text        string
+		wantCommand string
+		wantArgs    []string
+	}{
+		{name: "ordinary text", text: "hello", wantCommand: ""},
+		{name: "no args", text: "/ping", wantCommand: "/ping"},
+		{name: "bot suffix", text: "/PING@TwilightBot", wantCommand: "/ping"},
+		{name: "unicode whitespace", text: "/userinfo\u3000alpha  beta", wantCommand: "/userinfo", wantArgs: []string{"alpha", "beta"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			command, args := telegramParseCommandText(tt.text)
+			if command != tt.wantCommand || !slices.Equal(args, tt.wantArgs) {
+				t.Fatalf("parse %q = command %q args %#v, want %q %#v", tt.text, command, args, tt.wantCommand, tt.wantArgs)
+			}
+		})
+	}
+	if allocations := testing.AllocsPerRun(100, func() {
+		_, _ = telegramParseCommandText("/ping")
+	}); allocations != 0 {
+		t.Fatalf("no-argument command parser allocated %.2f objects", allocations)
+	}
+}
+
+func TestTelegramCommandConfigIndexInvalidatesOnSliceReplacement(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().TelegramCustomCommands = []config.TelegramCommandReply{{Command: "/one", Reply: "first"}}
+	app.cfg().TelegramDisabledCommands = []string{"ping"}
+	if reply, ok := app.telegramCustomCommandReply("/one"); !ok || reply != "first" || !app.telegramCommandDisabled("/ping") {
+		t.Fatal("initial Telegram command index was not built from configuration")
+	}
+
+	app.cfg().TelegramCustomCommands = []config.TelegramCommandReply{{Command: "/two", Reply: "second"}}
+	app.cfg().TelegramDisabledCommands = []string{"version"}
+	if _, ok := app.telegramCustomCommandReply("/one"); ok {
+		t.Fatal("custom command index retained replaced configuration")
+	}
+	if reply, ok := app.telegramCustomCommandReply("/two"); !ok || reply != "second" {
+		t.Fatalf("replacement custom command missing: reply=%q ok=%v", reply, ok)
+	}
+	if app.telegramCommandDisabled("/ping") || !app.telegramCommandDisabled("/version") {
+		t.Fatal("disabled command index retained replaced configuration")
 	}
 }
 

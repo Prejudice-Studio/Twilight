@@ -15,6 +15,25 @@ import (
 	"github.com/prejudice-studio/twilight/internal/store"
 )
 
+func TestTelegramJSCustomCommandCompileCache(t *testing.T) {
+	app := newTestApp(t)
+	code := `reply("cached");`
+	first, err := app.telegramCompileJSCustomCommand(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := app.telegramCompileJSCustomCommand(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatal("identical custom JS command was compiled more than once")
+	}
+	if _, err := app.telegramCompileJSCustomCommand(`require("fs")`); err == nil {
+		t.Fatal("blocked custom JS command entered the compile cache")
+	}
+}
+
 func TestDeveloperJSDocsEndpointRequiresAdminAndDescribesGoja(t *testing.T) {
 	app := newTestApp(t)
 

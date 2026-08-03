@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+
+	"github.com/prejudice-studio/twilight/internal/config"
 )
 
 // telegramCommands 是 Telegram bot 命令注册表，把过去 handleTelegramUpdate
@@ -57,6 +59,68 @@ type telegramCommandCtx struct {
 	Command  string
 	// Args 是 fields[1:]，handler 自行选择 strings.Join 还是按位置取。
 	Args []string
+}
+
+// telegramCommandConfigIndex 把配置中的自定义指令和禁用指令转换为只读索引。
+// runtimeState 中的配置快照不可变，因此只需用切片首地址和长度识别当前配置；
+// 热重载或测试替换切片后会自动重建，普通 update 只做 O(1) map 查询。
+type telegramCommandConfigIndex struct {
+	customFirst   *config.TelegramCommandReply
+	customLen     int
+	disabledFirst *string
+	disabledLen   int
+	custom        map[string]string
+	disabled      map[string]bool
+}
+
+func telegramCustomCommandFirst(items []config.TelegramCommandReply) *config.TelegramCommandReply {
+	if len(items) == 0 {
+		return nil
+	}
+	return &items[0]
+}
+
+func telegramDisabledCommandFirst(items []string) *string {
+	if len(items) == 0 {
+		return nil
+	}
+	return &items[0]
+}
+
+func (a *App) telegramCommandConfigIndex() *telegramCommandConfigIndex {
+	cfg := a.cfg()
+	customFirst := telegramCustomCommandFirst(cfg.TelegramCustomCommands)
+	disabledFirst := telegramDisabledCommandFirst(cfg.TelegramDisabledCommands)
+	if cached := a.telegramCommandIndex.Load(); cached != nil &&
+		cached.customFirst == customFirst && cached.customLen == len(cfg.TelegramCustomCommands) &&
+		cached.disabledFirst == disabledFirst && cached.disabledLen == len(cfg.TelegramDisabledCommands) {
+		return cached
+	}
+
+	index := &telegramCommandConfigIndex{
+		customFirst:   customFirst,
+		customLen:     len(cfg.TelegramCustomCommands),
+		disabledFirst: disabledFirst,
+		disabledLen:   len(cfg.TelegramDisabledCommands),
+		custom:        make(map[string]string, len(cfg.TelegramCustomCommands)),
+		disabled:      make(map[string]bool, len(cfg.TelegramDisabledCommands)),
+	}
+	for _, item := range cfg.TelegramCustomCommands {
+		command := telegramCommand(item.Command)
+		if command == "" || strings.TrimSpace(item.Reply) == "" {
+			continue
+		}
+		if _, exists := index.custom[command]; !exists {
+			index.custom[command] = item.Reply
+		}
+	}
+	for _, item := range cfg.TelegramDisabledCommands {
+		if command := normalizeTelegramDisabledCommand(item); command != "" {
+			index.disabled[command] = true
+		}
+	}
+	a.telegramCommandIndex.Store(index)
+	return index
 }
 
 var telegramAdminHelpCommandHandler = func(a *App, ctx context.Context, c telegramCommandCtx) {
@@ -170,7 +234,7 @@ var telegramCommandRegistry = map[string]telegramCommandSpec{
 		private:     true,
 		admin:       true,
 		handler: func(a *App, ctx context.Context, c telegramCommandCtx) {
-			a.telegramHandleStats(ctx, c.ChatID, c.FromID)
+			a.telegramHandleStats(ctx, c.ChatID)
 		},
 	},
 	"/admin": {
@@ -183,7 +247,7 @@ var telegramCommandRegistry = map[string]telegramCommandSpec{
 		private:     true,
 		admin:       true,
 		handler: func(a *App, ctx context.Context, c telegramCommandCtx) {
-			a.telegramHandleAdmin(ctx, c.ChatID, c.FromID)
+			a.telegramHandleAdmin(ctx, c.ChatID)
 		},
 	},
 	"/userinfo": {
@@ -196,7 +260,7 @@ var telegramCommandRegistry = map[string]telegramCommandSpec{
 		private:     true,
 		admin:       true,
 		handler: func(a *App, ctx context.Context, c telegramCommandCtx) {
-			a.telegramHandleUserInfo(ctx, c.ChatID, c.FromID, c.argString())
+			a.telegramHandleUserInfo(ctx, c.ChatID, c.argString())
 		},
 	},
 	"/twfind": {
@@ -209,7 +273,7 @@ var telegramCommandRegistry = map[string]telegramCommandSpec{
 		private:     true,
 		admin:       true,
 		handler: func(a *App, ctx context.Context, c telegramCommandCtx) {
-			a.telegramHandleFind(ctx, c.ChatID, c.FromID, c.argString())
+			a.telegramHandleFind(ctx, c.ChatID, c.argString())
 		},
 	},
 	"/twishelp": {
@@ -378,26 +442,20 @@ func normalizeTelegramDisabledCommand(raw string) string {
 }
 
 func (a *App) telegramDisabledCommandSet() map[string]bool {
-	out := make(map[string]bool)
-	for _, disabled := range a.cfg().TelegramDisabledCommands {
-		if name := normalizeTelegramDisabledCommand(disabled); name != "" {
-			out[name] = true
-		}
-	}
-	return out
+	return a.telegramCommandConfigIndex().disabled
 }
 
 func (a *App) telegramCommandDisabled(command string) bool {
 	name := normalizeTelegramDisabledCommand(telegramCommand(command))
+	return a.telegramCommandDisabledNormalized(name)
+}
+
+func (a *App) telegramCommandDisabledNormalized(command string) bool {
+	name := strings.TrimPrefix(command, "/")
 	if name == "" {
 		return false
 	}
-	for _, disabled := range a.cfg().TelegramDisabledCommands {
-		if normalizeTelegramDisabledCommand(disabled) == name {
-			return true
-		}
-	}
-	return false
+	return a.telegramCommandConfigIndex().disabled[name]
 }
 
 func (a *App) telegramCommandCatalog() []telegramCommandCatalogItem {
@@ -476,7 +534,7 @@ func (a *App) telegramDispatchRegistry(ctx context.Context, command string, c te
 		return false
 	}
 	// 检查内置指令是否被管理员禁用
-	if a.telegramCommandDisabled(command) {
+	if a.telegramCommandDisabledNormalized(command) {
 		_ = a.telegramSendMessage(ctx, c.ChatID, "该内置指令已被管理员停用。")
 		return true
 	}

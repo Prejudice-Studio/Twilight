@@ -275,7 +275,7 @@ func TestUserSummaryCountsScansWithoutListSemantics(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.CreateUser(User{Username: "blank", Role: RoleNormal, EmbyID: "   ", Email: "   "}); err != nil {
+	if _, err := st.CreateUser(User{Username: "blank", Role: RoleNormal, EmbyID: "   ", Email: "   ", PendingEmby: true}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -285,6 +285,9 @@ func TestUserSummaryCountsScansWithoutListSemantics(t *testing.T) {
 	}
 	if counts.TelegramBound != 1 || counts.EmbyBound != 1 || counts.EmailBound != 2 || counts.EmailVerified != 1 {
 		t.Fatalf("unexpected binding counts: %#v", counts)
+	}
+	if counts.PendingEmby != 1 {
+		t.Fatalf("unexpected pending Emby count: %#v", counts)
 	}
 }
 

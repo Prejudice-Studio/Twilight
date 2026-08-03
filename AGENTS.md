@@ -186,6 +186,9 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Telegram API endpoint validation is cached by the effective API URL and Bot Token. The cache key must invalidate automatically on either configuration change, and cache hits must never bypass the existing outbound URL / SSRF validation for a new base URL.
 - Ordinary group messages may refresh a roster member's `LastSeen` at most once per five minutes. New members, membership status changes, and newly observed bot flags must still persist immediately. Do not restore per-message full-state writes.
 - Preserve serial update processing unless a replacement guarantees ordering per chat/user and keeps offset acknowledgement after all effects complete. Binding, account deletion confirmation, developer JS waiters, and inline callbacks depend on that ordering.
+- After pending-interaction and bind-code handling, non-command Telegram text must return before command tokenization, registry lookup, and custom-command lookup. Parse the command token separately so no-argument commands do not allocate an argument slice; pass the canonical lowercase command through dispatch without repeatedly normalizing it.
+- Custom-command and disabled-command lookups use the immutable per-config command index. Rebuild it when either backing configuration slice changes; do not restore a per-update linear scan.
+- Repeated custom JavaScript commands reuse the bounded cache of security-validated, compiled Goja programs keyed by script content. Never cache rejected scripts, never bypass `validateDeveloperJSCommand` on a cache miss, and keep the cache bounded.
 
 ## Audit Log Rules
 

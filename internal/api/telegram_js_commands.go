@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -30,7 +31,10 @@ const (
 	// Telegram messages). A 200ms cap previously interrupted every command that
 	// touched the network, which broke developer-mode JS commands entirely.
 	developerJSExecutionTimeout = 8 * time.Second
+	telegramJSProgramCacheLimit = 32
 )
+
+type telegramJSProgramCache map[[sha256.Size]byte]*goja.Program
 
 type developerJSRunOptions struct {
 	Preview     bool
@@ -41,7 +45,8 @@ type developerJSRunOptions struct {
 type developerJSExitSignal struct{}
 
 func (a *App) telegramHandleCustomCommand(ctx context.Context, command string, c telegramCommandCtx, privateChat bool) bool {
-	reply, ok := a.telegramCustomCommandReply(command)
+	command = telegramCommand(command)
+	reply, ok := a.telegramCustomCommandReplyNormalized(command)
 	if !ok {
 		return false
 	}
@@ -54,7 +59,7 @@ func (a *App) telegramHandleCustomCommand(ctx context.Context, command string, c
 	user, _ := a.store().FindUserByTelegramID(c.FromID)
 	if !a.store().DeveloperModeEnabled() {
 		a.auditEntryIP("telegram", user.UID, user.Username, "telegram_js_command_blocked", "system", user.UID, map[string]any{
-			"command":      telegramCommand(command),
+			"command":      command,
 			"reason":       "developer_mode_disabled",
 			"private_chat": privateChat,
 		})
@@ -64,7 +69,7 @@ func (a *App) telegramHandleCustomCommand(ctx context.Context, command string, c
 	script, presetID, err := a.telegramResolveJSCustomCommand(strings.TrimSpace(trimmed[len(telegramJSPrefix):]))
 	if err != nil {
 		a.auditEntryIP("telegram", user.UID, user.Username, "telegram_js_command_blocked", "system", user.UID, map[string]any{
-			"command":      telegramCommand(command),
+			"command":      command,
 			"reason":       err.Error(),
 			"preset_id":    zeroNil(presetID),
 			"private_chat": privateChat,
@@ -72,9 +77,9 @@ func (a *App) telegramHandleCustomCommand(ctx context.Context, command string, c
 		_ = a.telegramSendMessage(ctx, c.ChatID, "Custom JS command is not available. Please contact an administrator.")
 		return true
 	}
-	c.Command = telegramCommand(command)
+	c.Command = command
 	text, logs, err := a.telegramRunJSCustomCommandWithContext(ctx, script, c, privateChat)
-	detail := map[string]any{"command": telegramCommand(command), "ok": err == nil, "private_chat": privateChat}
+	detail := map[string]any{"command": command, "ok": err == nil, "private_chat": privateChat}
 	if presetID > 0 {
 		detail["preset_id"] = presetID
 	}
@@ -123,13 +128,9 @@ func (a *App) telegramRunJSCustomCommandWithOptions(code string, c telegramComma
 			runErr = fmt.Errorf("developer js runtime panic: %s", truncateString(redactSensitiveText(fmt.Sprint(r)), 160))
 		}
 	}()
-	result := validateDeveloperJSCommand(code)
-	if ok, _ := result["ok"].(bool); !ok {
-		return "", nil, fmt.Errorf("developer js command rejected: %v", result["errors"])
-	}
-	program, err := goja.Compile("telegram_custom_command.js", "(function(){\n"+code+"\n})();", false)
+	program, err := a.telegramCompileJSCustomCommand(code)
 	if err != nil {
-		return "", nil, developerJSSafeError(err)
+		return "", nil, err
 	}
 	if opts.Context == nil {
 		opts.Context = context.Background()
@@ -319,6 +320,38 @@ func (a *App) telegramRunJSCustomCommandWithOptions(code string, c telegramComma
 		return "", logs, developerJSSafeError(err)
 	}
 	return strings.Join(replies, "\n"), logs, nil
+}
+
+func (a *App) telegramCompileJSCustomCommand(code string) (*goja.Program, error) {
+	key := sha256.Sum256([]byte(code))
+	a.telegramJSProgramMu.RLock()
+	program := a.telegramJSPrograms[key]
+	a.telegramJSProgramMu.RUnlock()
+	if program != nil {
+		return program, nil
+	}
+
+	result := validateDeveloperJSCommand(code)
+	if ok, _ := result["ok"].(bool); !ok {
+		return nil, fmt.Errorf("developer js command rejected: %v", result["errors"])
+	}
+	compiled, err := goja.Compile("telegram_custom_command.js", "(function(){\n"+code+"\n})();", false)
+	if err != nil {
+		return nil, developerJSSafeError(err)
+	}
+
+	a.telegramJSProgramMu.Lock()
+	defer a.telegramJSProgramMu.Unlock()
+	if program = a.telegramJSPrograms[key]; program != nil {
+		return program, nil
+	}
+	if len(a.telegramJSPrograms) >= telegramJSProgramCacheLimit {
+		a.telegramJSPrograms = make(telegramJSProgramCache, telegramJSProgramCacheLimit)
+	} else if a.telegramJSPrograms == nil {
+		a.telegramJSPrograms = make(telegramJSProgramCache, telegramJSProgramCacheLimit)
+	}
+	a.telegramJSPrograms[key] = compiled
+	return compiled, nil
 }
 
 func developerJSWasExit(err error) bool {

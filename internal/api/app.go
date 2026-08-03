@@ -78,6 +78,7 @@ type App struct {
 	telegramBotCacheUntil time.Time
 	telegramBotCache      map[string]any
 	telegramEndpointCache atomic.Pointer[telegramEndpointCacheEntry]
+	telegramCommandIndex  atomic.Pointer[telegramCommandConfigIndex]
 	telegramStatusMu      sync.Mutex
 	telegramLastOKAt      int64
 	telegramLastErrorAt   int64
@@ -88,6 +89,8 @@ type App struct {
 	developerJSMu         sync.Mutex
 	developerJSCallbacks  map[string]developerJSCallbackContext
 	developerJSWaiters    map[string]developerJSMessageWaiter
+	telegramJSProgramMu   sync.RWMutex
+	telegramJSPrograms    telegramJSProgramCache
 	delAccountPendingMu   sync.Mutex
 	delAccountPending     map[string]*delAccountPendingState
 	embyAdminMu           sync.Mutex

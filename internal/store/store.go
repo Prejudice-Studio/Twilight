@@ -220,6 +220,7 @@ type UserSummaryCounts struct {
 	Admins        int
 	TelegramBound int
 	EmbyBound     int
+	PendingEmby   int
 	EmailBound    int
 	EmailVerified int
 }
@@ -4719,6 +4720,9 @@ func (s *Store) UserSummaryCounts() UserSummaryCounts {
 		}
 		if strings.TrimSpace(u.EmbyID) != "" {
 			counts.EmbyBound++
+		}
+		if u.PendingEmby {
+			counts.PendingEmby++
 		}
 		if strings.TrimSpace(u.Email) != "" {
 			counts.EmailBound++

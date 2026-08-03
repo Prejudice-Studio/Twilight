@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/prejudice-studio/twilight/internal/store"
 )
@@ -244,16 +245,25 @@ func (a *App) handleTelegramUpdate(ctx context.Context, update map[string]any) {
 		return
 	}
 	// 拦截非命令文本：delAccount 两步验证（Web密码→Emby密码）
-	if !strings.HasPrefix(text, "/") && a.telegramConsumeDelAccountPending(ctx, chatID, fromID, text) {
+	isCommand := text[0] == '/'
+	if !isCommand && a.telegramConsumeDelAccountPending(ctx, chatID, fromID, text) {
 		return
 	}
-	fields := strings.Fields(text)
-	command := telegramCommand(fields[0])
+	if !isCommand {
+		if privateChat && telegramBindCodePattern.MatchString(text) {
+			a.telegramConfirmBindCode(ctx, chatID, fromID, username, text)
+		}
+		return
+	}
+	command, args := telegramParseCommandText(text)
+	if command == "" {
+		return
+	}
 
 	// 先把"私聊 + 普通 gating"的标准命令交给注册表统一分发，dispatcher 内部
 	// 集中处理 private/admin 校验，避免每个 case 重复 telegramRequirePrivate +
 	// telegramAdminID 模板。
-	cmdCtx := telegramCommandCtx{ChatID: chatID, FromID: fromID, Username: username, Command: command, Args: fields[1:]}
+	cmdCtx := telegramCommandCtx{ChatID: chatID, FromID: fromID, Username: username, Command: command, Args: args}
 	if a.telegramDispatchRegistry(ctx, command, cmdCtx, privateChat) {
 		return
 	}
@@ -274,16 +284,12 @@ func (a *App) handleTelegramUpdate(ctx context.Context, update map[string]any) {
 	case "/twguser":
 		// 群组管理命令：群内匿名管理员要走 inline 按钮二次鉴权，
 		// 私聊也允许，gating 逻辑和注册表的"private + admin"模式不一样。
-		a.telegramHandleGroupUser(ctx, chatID, fromID, fields, message)
+		a.telegramHandleGroupUser(ctx, chatID, fromID, args, message)
 	default:
 		if a.telegramHandleCustomCommand(ctx, command, cmdCtx, privateChat) {
 			return
 		}
-		if privateChat && telegramBindCodePattern.MatchString(command) && !strings.HasPrefix(command, "/") {
-			a.telegramConfirmBindCode(ctx, chatID, fromID, username, command)
-			return
-		}
-		if privateChat && strings.HasPrefix(command, "/") {
+		if privateChat {
 			_ = a.telegramSendMessage(ctx, chatID, "未知命令。发送 /help 查看可用命令。")
 		}
 	}
@@ -795,49 +801,17 @@ func (a *App) telegramExecuteDelAccount(ctx context.Context, chatID int64, u sto
 	_ = a.telegramSendMessage(ctx, chatID, msg)
 }
 
-func (a *App) telegramHandleStats(ctx context.Context, chatID, telegramID int64) {
-	if !a.telegramAdminID(telegramID) {
-		_ = a.telegramSendMessage(ctx, chatID, "没有管理员权限。")
-		return
-	}
-	users := a.store().ListUsers()
-	active := 0
-	embyBound := 0
-	telegramBound := 0
-	pendingEmby := 0
-	for _, u := range users {
-		if u.Active {
-			active++
-		}
-		if u.EmbyID != "" {
-			embyBound++
-		}
-		if u.TelegramID != 0 {
-			telegramBound++
-		}
-		if u.PendingEmby {
-			pendingEmby++
-		}
-	}
-	regcodes := a.store().ListRegCodes()
-	inviteCodes := a.store().ListAllInviteCodes()
-	text := fmt.Sprintf("服务统计\n\n用户总数: %d\n活跃用户: %d\nTelegram 已绑定: %d\nEmby 已绑定: %d\n待开通 Emby: %d\n注册码: %d\n邀请码: %d", len(users), active, telegramBound, embyBound, pendingEmby, len(regcodes), len(inviteCodes))
+func (a *App) telegramHandleStats(ctx context.Context, chatID int64) {
+	counts := a.store().UserSummaryCounts()
+	text := fmt.Sprintf("服务统计\n\n用户总数: %d\n活跃用户: %d\nTelegram 已绑定: %d\nEmby 已绑定: %d\n待开通 Emby: %d\n注册码: %d\n邀请码: %d", counts.Total, counts.Active, counts.TelegramBound, counts.EmbyBound, counts.PendingEmby, a.store().CountRegCodes(), a.store().CountInviteCodes())
 	_ = a.telegramSendMessage(ctx, chatID, text)
 }
 
-func (a *App) telegramHandleAdmin(ctx context.Context, chatID, telegramID int64) {
-	if !a.telegramAdminID(telegramID) {
-		_ = a.telegramSendMessage(ctx, chatID, "没有管理员权限。")
-		return
-	}
+func (a *App) telegramHandleAdmin(ctx context.Context, chatID int64) {
 	_ = a.telegramSendMessage(ctx, chatID, "管理员查询入口\n\n/stats 服务统计\n/userinfo <关键词> 查看单个用户\n/twfind <关键词> 搜索用户\n/twishelp 查看管理员帮助\n\n涉及写入、删除、密码和服务重启的操作请在 Web 后台完成。")
 }
 
-func (a *App) telegramHandleUserInfo(ctx context.Context, chatID, telegramID int64, query string) {
-	if !a.telegramAdminID(telegramID) {
-		_ = a.telegramSendMessage(ctx, chatID, "没有管理员权限。")
-		return
-	}
+func (a *App) telegramHandleUserInfo(ctx context.Context, chatID int64, query string) {
 	if strings.TrimSpace(query) == "" {
 		_ = a.telegramSendMessage(ctx, chatID, "请发送 /userinfo <用户名/UID/关键词>")
 		return
@@ -854,11 +828,7 @@ func (a *App) telegramHandleUserInfo(ctx context.Context, chatID, telegramID int
 	_ = a.telegramSendMessage(ctx, chatID, "用户详情\n\n"+telegramUserSummary(users[0]))
 }
 
-func (a *App) telegramHandleFind(ctx context.Context, chatID, telegramID int64, query string) {
-	if !a.telegramAdminID(telegramID) {
-		_ = a.telegramSendMessage(ctx, chatID, "没有管理员权限。")
-		return
-	}
+func (a *App) telegramHandleFind(ctx context.Context, chatID int64, query string) {
 	if strings.TrimSpace(query) == "" {
 		_ = a.telegramSendMessage(ctx, chatID, "请发送 /twfind <用户名/UID/关键词>")
 		return
@@ -980,18 +950,19 @@ func (a *App) telegramAdminIdentity(telegramID int64) (int64, string) {
 	return 0, ""
 }
 
-func (a *App) telegramHandleGroupUser(ctx context.Context, chatID, telegramID int64, fields []string, message map[string]any) {
+func (a *App) telegramHandleGroupUser(ctx context.Context, chatID, telegramID int64, args []string, message map[string]any) {
 	messageID := numeric(message["message_id"])
+	query := strings.Join(args, " ")
 	anonymousCommand := telegramIsAnonymousGroupMessage(message)
 	if anonymousCommand {
-		a.telegramSendGroupAdminAuth(ctx, chatID, messageID, fields, message)
+		a.telegramSendGroupAdminAuth(ctx, chatID, messageID, query, message)
 		return
 	}
 	if !a.telegramAdminID(telegramID) {
 		a.telegramSendUnauthorizedAndCleanup(ctx, chatID, messageID)
 		return
 	}
-	user, reason := a.telegramResolveGroupUserTarget(fields, message)
+	user, reason := a.telegramResolveGroupUserTarget(query, message)
 	if reason != "" {
 		_ = a.telegramSendMessage(ctx, chatID, reason)
 		return
@@ -1029,8 +1000,24 @@ func telegramCommand(raw string) string {
 	return strings.ToLower(raw)
 }
 
+func telegramParseCommandText(text string) (string, []string) {
+	text = strings.TrimSpace(text)
+	if text == "" || text[0] != '/' {
+		return "", nil
+	}
+	separator := strings.IndexFunc(text, unicode.IsSpace)
+	if separator < 0 {
+		return telegramCommand(text), nil
+	}
+	return telegramCommand(text[:separator]), strings.Fields(text[separator:])
+}
+
 func (a *App) telegramCustomCommandReply(command string) (string, bool) {
 	command = telegramCommand(command)
+	return a.telegramCustomCommandReplyNormalized(command)
+}
+
+func (a *App) telegramCustomCommandReplyNormalized(command string) (string, bool) {
 	if command == "" || !strings.HasPrefix(command, "/") {
 		return "", false
 	}
@@ -1038,12 +1025,8 @@ func (a *App) telegramCustomCommandReply(command string) (string, bool) {
 	if _, isBuiltIn := telegramCommandRegistry[command]; isBuiltIn {
 		return "", false
 	}
-	for _, item := range a.cfg().TelegramCustomCommands {
-		if telegramCommand(item.Command) == command && strings.TrimSpace(item.Reply) != "" {
-			return item.Reply, true
-		}
-	}
-	return "", false
+	reply, ok := a.telegramCommandConfigIndex().custom[command]
+	return reply, ok
 }
 
 func (a *App) telegramStartText() string {
