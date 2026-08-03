@@ -1834,10 +1834,10 @@ func (a *App) publicTelegramBotInfo(ctx context.Context) map[string]any {
 		empty["error"] = "Telegram 未启用或未配置 Bot Token"
 		return empty
 	}
-	token := strings.TrimSpace(a.cfg().TelegramBotToken)
+	cacheKey := a.telegramCurrentBotConfigKey()
 	now := time.Now()
 	a.telegramBotMu.Lock()
-	if a.telegramBotCacheToken == token && now.Before(a.telegramBotCacheUntil) && a.telegramBotCache != nil {
+	if a.telegramBotCacheKey == cacheKey && now.Before(a.telegramBotCacheUntil) && a.telegramBotCache != nil {
 		cached := cloneMap(a.telegramBotCache)
 		a.telegramBotMu.Unlock()
 		return cached
@@ -1858,7 +1858,7 @@ func (a *App) publicTelegramBotInfo(ctx context.Context) map[string]any {
 	}
 
 	a.telegramBotMu.Lock()
-	a.telegramBotCacheToken = token
+	a.telegramBotCacheKey = cacheKey
 	if err == nil {
 		a.telegramBotCacheUntil = now.Add(10 * time.Minute)
 	} else {

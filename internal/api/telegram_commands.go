@@ -392,11 +392,19 @@ func (a *App) telegramCommandDisabled(command string) bool {
 	if name == "" {
 		return false
 	}
-	return a.telegramDisabledCommandSet()[name]
+	for _, disabled := range a.cfg().TelegramDisabledCommands {
+		if normalizeTelegramDisabledCommand(disabled) == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) telegramCommandCatalog() []telegramCommandCatalogItem {
-	disabled := a.telegramDisabledCommandSet()
+	return a.telegramCommandCatalogWithDisabled(a.telegramDisabledCommandSet())
+}
+
+func (a *App) telegramCommandCatalogWithDisabled(disabled map[string]bool) []telegramCommandCatalogItem {
 	items := make([]telegramCommandCatalogItem, 0, len(telegramCommandRegistry)+len(telegramSpecialCommandCatalog))
 	for command, spec := range telegramCommandRegistry {
 		name := spec.name
@@ -450,13 +458,14 @@ func telegramCatalogOrder(item telegramCommandCatalogItem) int {
 }
 
 func (a *App) handleTelegramCommandCatalog(w http.ResponseWriter, r *http.Request, _ Params) {
-	disabled := make([]string, 0, len(a.telegramDisabledCommandSet()))
-	for name := range a.telegramDisabledCommandSet() {
+	disabledSet := a.telegramDisabledCommandSet()
+	disabled := make([]string, 0, len(disabledSet))
+	for name := range disabledSet {
 		disabled = append(disabled, name)
 	}
 	sort.Strings(disabled)
 	ok(w, "ok", map[string]any{
-		"commands":          a.telegramCommandCatalog(),
+		"commands":          a.telegramCommandCatalogWithDisabled(disabledSet),
 		"disabled_commands": disabled,
 	})
 }

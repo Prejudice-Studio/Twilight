@@ -74,9 +74,10 @@ type App struct {
 	setupMu               sync.Mutex
 	configSignature       string
 	telegramBotMu         sync.Mutex
-	telegramBotCacheToken string
+	telegramBotCacheKey   telegramBotConfigKey
 	telegramBotCacheUntil time.Time
 	telegramBotCache      map[string]any
+	telegramEndpointCache atomic.Pointer[telegramEndpointCacheEntry]
 	telegramStatusMu      sync.Mutex
 	telegramLastOKAt      int64
 	telegramLastErrorAt   int64

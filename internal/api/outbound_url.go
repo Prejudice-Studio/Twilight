@@ -17,9 +17,9 @@ package api
 //
 //	"Bangumi URL 协议不支持: ..." vs "Emby URL 协议不支持: ..."
 //
-// 性能：每次远端调用都要解析一次 URL，对单次出站 RTT 几乎不可见；emby 路径
-// 仍保留专用 RWMutex 缓存（embyURLCache*），其他服务调用频率低（Bangumi/TMDB
-// 仅在搜索路径，Telegram 走 polling 长连接），暂不引入缓存。
+// 性能：Emby 保留专用 RWMutex 缓存（embyURLCache*）；Telegram 会按当前 API URL
+// 与 Bot Token 缓存校验后的请求前缀，配置变化时由缓存键自动失效。Bangumi/TMDB
+// 仅在搜索路径调用，仍按请求校验。
 
 import (
 	"fmt"

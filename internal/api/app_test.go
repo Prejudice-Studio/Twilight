@@ -3572,6 +3572,80 @@ func TestTelegramGetUpdatesAllowsCallbacks(t *testing.T) {
 	}
 }
 
+func TestRunTelegramBotReusesVerifiedIdentityAcrossPolls(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().TelegramMode = true
+	app.cfg().TelegramBotToken = "123:ABC"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var getMeCalls atomic.Int32
+	var getUpdatesCalls atomic.Int32
+	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/bot123:ABC/getMe":
+			getMeCalls.Add(1)
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"username":"twilight_test_bot"}}`))
+		case "/bot123:ABC/getUpdates":
+			if getUpdatesCalls.Add(1) >= 3 {
+				cancel()
+			}
+			_, _ = w.Write([]byte(`{"ok":true,"result":[]}`))
+		default:
+			t.Errorf("unexpected Telegram path: %s", r.URL.Path)
+			_, _ = w.Write([]byte(`{"ok":false}`))
+		}
+	}))
+	defer tg.Close()
+	app.cfg().TelegramAPIURL = tg.URL
+
+	if err := app.RunTelegramBot(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := getMeCalls.Load(); got != 1 {
+		t.Fatalf("getMe calls = %d, want 1 for unchanged bot configuration", got)
+	}
+	if got := getUpdatesCalls.Load(); got < 3 {
+		t.Fatalf("getUpdates calls = %d, want at least 3", got)
+	}
+}
+
+func TestTelegramEndpointCacheInvalidatesWithConfiguration(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().TelegramBotToken = "123:ABC"
+	app.cfg().TelegramAPIURL = "https://api.telegram.org"
+	if _, err := app.telegramEndpoint("getMe"); err != nil {
+		t.Fatal(err)
+	}
+
+	app.cfg().TelegramBotToken = "456:DEF"
+	got, err := app.telegramEndpoint("getUpdates")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "https://api.telegram.org/bot456:DEF/getUpdates" {
+		t.Fatalf("endpoint cache retained old token: %q", got)
+	}
+
+	app.cfg().TelegramAPIURL = "http://169.254.169.254"
+	if _, err := app.telegramEndpoint("getMe"); err == nil {
+		t.Fatal("endpoint cache bypassed validation after API URL changed")
+	}
+}
+
+func TestTelegramCommandDisabledHotPathDoesNotAllocateSet(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().TelegramDisabledCommands = []string{"help", "stats"}
+	if !app.telegramCommandDisabled("/help") || app.telegramCommandDisabled("/me") {
+		t.Fatal("disabled command lookup returned an unexpected result")
+	}
+	if allocations := testing.AllocsPerRun(100, func() {
+		_ = app.telegramCommandDisabled("/help")
+	}); allocations != 0 {
+		t.Fatalf("disabled command hot path allocated %.2f objects per lookup", allocations)
+	}
+}
+
 func TestTelegramBindRequirementSplitsGroupAndChannel(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().TelegramMode = true

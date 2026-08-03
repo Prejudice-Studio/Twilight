@@ -181,6 +181,11 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Custom commands may not override built-in or fixed special commands such as `/start`, `/help`, `/twihelp`, and `/twguser`.
 - Telegram bind codes are runtime tickets held in `bindStatusHub`, not durable account bindings. Startup and config reload must run the legacy bind-code residue repair so old persisted `state.bind_codes` entries cannot make Telegram look confirmed while no `User.TelegramID` exists. Web registration must consume a confirmed register-scene bind code through the hub atomically with local user creation; do not pre-read the Telegram identity and delete the code in a later separate step.
 - Any App-layer user deletion path must go through `deleteLocalUser` or perform the same cleanup: `store.DeleteUser`, session removal, and `bindStatusHub` cleanup by deleted UID / Telegram ID. Do not call `store.DeleteUser` directly from handlers, scheduler jobs, or Telegram actions.
+- Keep the long-poll hot path cheap and ordered. Validate Bot identity with `getMe` only at startup or after the effective Telegram API URL / Bot Token changes; throttle config-file signature checks during immediately-returning update bursts; update runtime health once per poll batch rather than once per update.
+- When Bot configuration is disabled or incomplete, record the waiting runtime state and log only on transition into that state. Do not emit a persistent runtime-log row on every retry interval.
+- Telegram API endpoint validation is cached by the effective API URL and Bot Token. The cache key must invalidate automatically on either configuration change, and cache hits must never bypass the existing outbound URL / SSRF validation for a new base URL.
+- Ordinary group messages may refresh a roster member's `LastSeen` at most once per five minutes. New members, membership status changes, and newly observed bot flags must still persist immediately. Do not restore per-message full-state writes.
+- Preserve serial update processing unless a replacement guarantees ordering per chat/user and keeps offset acknowledgement after all effects complete. Binding, account deletion confirmation, developer JS waiters, and inline callbacks depend on that ordering.
 
 ## Audit Log Rules
 

@@ -4527,6 +4527,15 @@ func (s *Store) RevokeApprovedRebindRequests(reviewerUID int64, note string) (in
 	return count, nil
 }
 
+const telegramRosterObservationWriteInterval = 5 * time.Minute
+
+func telegramRosterObservationNeedsWrite(entry TelegramRosterEntry, exists bool, status string, isBot bool, now int64) bool {
+	if !exists || entry.LastStatus != status || (isBot && !entry.IsBot) {
+		return true
+	}
+	return entry.LastSeen <= 0 || now-entry.LastSeen >= int64(telegramRosterObservationWriteInterval/time.Second)
+}
+
 func (s *Store) UpsertTelegramRoster(chatID string, telegramID int64, status string, isBot bool) error {
 	chatID = strings.TrimSpace(chatID)
 	if chatID == "" || telegramID <= 0 {
@@ -4537,10 +4546,17 @@ func (s *Store) UpsertTelegramRoster(chatID string, telegramID int64, status str
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	key := telegramRosterKey(chatID, telegramID)
+	now := time.Now().Unix()
+	if entry, ok := s.state.TelegramRoster[key]; !telegramRosterObservationNeedsWrite(entry, ok, status, isBot, now) {
+		return nil
+	}
 	return s.mutateAndSaveLocked(func() error {
-		key := telegramRosterKey(chatID, telegramID)
-		now := time.Now().Unix()
+		now = time.Now().Unix()
 		entry, ok := s.state.TelegramRoster[key]
+		if !telegramRosterObservationNeedsWrite(entry, ok, status, isBot, now) {
+			return nil
+		}
 		if !ok {
 			entry = TelegramRosterEntry{ChatID: chatID, TelegramID: telegramID, FirstSeen: now}
 		}

@@ -18,6 +18,21 @@ import (
 
 var telegramBindCodePattern = regexp.MustCompile(`^[A-Za-z0-9]{6,16}$`)
 
+const telegramBotConfigCheckInterval = time.Second
+
+type telegramBotConfigKey struct {
+	apiURL string
+	token  string
+}
+
+func (a *App) telegramCurrentBotConfigKey() telegramBotConfigKey {
+	cfg := a.cfg()
+	return telegramBotConfigKey{
+		apiURL: strings.TrimRight(firstNonEmpty(cfg.TelegramAPIURL, "https://api.telegram.org"), "/"),
+		token:  strings.TrimSpace(cfg.TelegramBotToken),
+	}
+}
+
 // delAccountPendingState 记录 /delAccount emby 两步验证的中间状态。
 type delAccountPendingState struct {
 	TelegramID  int64
@@ -88,16 +103,27 @@ func (a *App) RunTelegramBot(ctx context.Context) error {
 	// 的命令会被重放）。0 = 历史 state / 新部署，按 getUpdates 默认行为走。
 	offset := a.store().TelegramBotOffset()
 	activeBot := ""
+	var verifiedConfig telegramBotConfigKey
+	configVerified := false
+	nextConfigCheck := time.Time{}
+	waitingForConfig := false
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		default:
 		}
-		a.reloadConfigIfChanged()
+		now := time.Now()
+		if !now.Before(nextConfigCheck) {
+			a.reloadConfigIfChanged()
+			nextConfigCheck = now.Add(telegramBotConfigCheckInterval)
+		}
 		if !a.telegramAvailable() {
-			a.setTelegramRuntimeStatus(false, fmt.Errorf("Telegram bot is disabled or token is not configured"))
-			zap.L().Info("Telegram bot configuration disabled; waiting before next config check")
+			if !waitingForConfig {
+				a.setTelegramRuntimeStatus(false, fmt.Errorf("Telegram bot is disabled or token is not configured"))
+				zap.L().Info("Telegram bot configuration disabled; waiting before next config check")
+				waitingForConfig = true
+			}
 			select {
 			case <-ctx.Done():
 				return nil
@@ -105,33 +131,39 @@ func (a *App) RunTelegramBot(ctx context.Context) error {
 				continue
 			}
 		}
-		// botIdentity = 当前 bot 的 username。token 改了但 bot 实体（同一
-		// @bot_name）不变时复用旧 offset 是正确的；只有 bot 实体真的换了才
-		// 必须 reset，否则会把新 bot 的真实 update 当成"已处理"丢掉。
-		me, err := a.telegramGetMe(ctx)
-		if err != nil {
-			a.setTelegramRuntimeStatus(false, err)
-			zap.L().Warn("Telegram bot initialization failed", zap.Error(err))
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-time.After(3 * time.Second):
-				continue
+		waitingForConfig = false
+		botConfig := a.telegramCurrentBotConfigKey()
+		if !configVerified || botConfig != verifiedConfig {
+			// botIdentity = 当前 bot 的 username。token 改了但 bot 实体（同一
+			// @bot_name）不变时复用旧 offset 是正确的；只有 bot 实体真的换了才
+			// 必须 reset，否则会把新 bot 的真实 update 当成"已处理"丢掉。
+			me, err := a.telegramGetMe(ctx)
+			if err != nil {
+				a.setTelegramRuntimeStatus(false, err)
+				zap.L().Warn("Telegram bot initialization failed", zap.Error(err))
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-time.After(3 * time.Second):
+					continue
+				}
 			}
-		}
-		botIdentity := strings.TrimSpace(asString(me["username"]))
-		if botIdentity != "" && activeBot != "" && botIdentity != activeBot {
-			// bot 实体切换：旧 offset 和新 bot 的 update 序列没有任何关系，
-			// 必须 reset 否则会跳过新 bot 的真实初始 update。
-			if err := a.store().ResetTelegramBotOffset(); err != nil {
-				zap.L().Warn("reset telegram offset failed", zap.Error(err))
+			botIdentity := strings.TrimSpace(asString(me["username"]))
+			if botIdentity != "" && activeBot != "" && botIdentity != activeBot {
+				// bot 实体切换：旧 offset 和新 bot 的 update 序列没有任何关系，
+				// 必须 reset 否则会跳过新 bot 的真实初始 update。
+				if err := a.store().ResetTelegramBotOffset(); err != nil {
+					zap.L().Warn("reset telegram offset failed", zap.Error(err))
+				}
+				offset = 0
 			}
-			offset = 0
-		}
-		if botIdentity != "" && botIdentity != activeBot {
-			activeBot = botIdentity
-			a.setTelegramRuntimeStatus(true, nil)
-			zap.L().Info("Telegram bot polling started", zap.String("username", botIdentity), zap.Int64("resume_offset", offset))
+			verifiedConfig = botConfig
+			configVerified = true
+			if botIdentity != "" && botIdentity != activeBot {
+				activeBot = botIdentity
+				a.setTelegramRuntimeStatus(true, nil)
+				zap.L().Info("Telegram bot polling started", zap.String("username", botIdentity), zap.Int64("resume_offset", offset))
+			}
 		}
 		updates, err := a.telegramGetUpdates(ctx, offset)
 		if err != nil {
@@ -144,8 +176,8 @@ func (a *App) RunTelegramBot(ctx context.Context) error {
 				continue
 			}
 		}
+		a.setTelegramRuntimeStatus(true, nil)
 		for _, update := range updates {
-			a.setTelegramRuntimeStatus(true, nil)
 			if id := numeric(update["update_id"]); id >= offset {
 				offset = id + 1
 			}
@@ -1060,7 +1092,8 @@ func (a *App) telegramHelpText(admin bool) string {
 		"",
 		"用户命令:",
 	)
-	for _, item := range a.telegramCommandCatalog() {
+	catalog := a.telegramCommandCatalog()
+	for _, item := range catalog {
 		if item.Admin || item.Category != "user" || item.Disabled {
 			continue
 		}
@@ -1068,7 +1101,7 @@ func (a *App) telegramHelpText(admin bool) string {
 	}
 	if admin {
 		lines = append(lines, "", "管理员命令:")
-		for _, item := range a.telegramCommandCatalog() {
+		for _, item := range catalog {
 			if !item.Admin || item.Category != "admin" || item.Disabled {
 				continue
 			}

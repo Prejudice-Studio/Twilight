@@ -42,11 +42,23 @@ type telegramResponseParameters struct {
 const telegramRetryAfterSentinel = "tw_retry_after_seconds="
 
 func (a *App) telegramAvailable() bool {
-	return a.cfg().TelegramMode && strings.TrimSpace(a.cfg().TelegramBotToken) != ""
+	cfg := a.cfg()
+	return cfg.TelegramMode && strings.TrimSpace(cfg.TelegramBotToken) != ""
+}
+
+type telegramEndpointCacheEntry struct {
+	base   string
+	token  string
+	prefix string
 }
 
 func (a *App) telegramEndpoint(method string) (string, error) {
-	rawBase := strings.TrimRight(firstNonEmpty(a.cfg().TelegramAPIURL, "https://api.telegram.org"), "/")
+	cfg := a.cfg()
+	rawBase := strings.TrimRight(firstNonEmpty(cfg.TelegramAPIURL, "https://api.telegram.org"), "/")
+	token := strings.TrimSpace(cfg.TelegramBotToken)
+	if cached := a.telegramEndpointCache.Load(); cached != nil && cached.base == rawBase && cached.token == token {
+		return cached.prefix + "/" + method, nil
+	}
 	// telegramEndpoint 现在返回 error：与 Emby / Bangumi / TMDB 对齐，配置面
 	// 被入侵或 admin 误填后，能在拼出含 bot token 的 URL **之前** 否决。
 	// 之前是 "TrimRight + 拼字符串"，scheme=javascript: 或 host=元数据 IP 都
@@ -64,14 +76,14 @@ func (a *App) telegramEndpoint(method string) (string, error) {
 	if _, err := validateOutboundBaseURL(probeBase, "Telegram"); err != nil {
 		return "", err
 	}
-	token := strings.TrimSpace(a.cfg().TelegramBotToken)
+	prefix := rawBase + "/bot" + token
 	if strings.HasSuffix(rawBase, "/bot"+token) {
-		return rawBase + "/" + method, nil
+		prefix = rawBase
+	} else if strings.HasSuffix(rawBase, "/bot") {
+		prefix = rawBase + token
 	}
-	if strings.HasSuffix(rawBase, "/bot") {
-		return rawBase + token + "/" + method, nil
-	}
-	return rawBase + "/bot" + token + "/" + method, nil
+	a.telegramEndpointCache.Store(&telegramEndpointCacheEntry{base: rawBase, token: token, prefix: prefix})
+	return prefix + "/" + method, nil
 }
 
 func (a *App) setTelegramRuntimeStatus(polling bool, err error) {
