@@ -180,6 +180,10 @@ func (a *App) handleCreateInviteRenewCode(w http.ResponseWriter, r *http.Request
 		failWithCode(w, http.StatusForbidden, ErrInviteRenewBadTarget, "下级 Web 账号已被禁用，无法使用续期码；请删除其 Emby 账号并断开关系")
 		return
 	}
+	if validateSelfServiceRenewalTarget(child) != nil {
+		failWithCode(w, http.StatusConflict, ErrRenewRequiresEmby, "目标下级尚未绑定或开通 Emby，不能生成续期码")
+		return
+	}
 	maxDays, reason := a.maxCodeDays(user)
 	if maxDays <= 0 {
 		failWithCode(w, http.StatusForbidden, ErrInviterDaysShort, firstNonEmpty(reason, "当前账号有效期不足，无法生成续期码"))

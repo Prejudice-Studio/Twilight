@@ -17,7 +17,7 @@
 | type / 来源 | 名称 | 使用入口 | 行为 |
 | ---- | ---- | -------- | ---- |
 | `1` | 注册码 | `POST /api/v1/users/register`、`POST /api/v1/users/me/use-code` | 公开注册时建系统账号并标记 `PendingEmby`（待开通 Emby）；已登录且未绑定 Emby 的用户用它将角色置为普通用户、按 `days` 写入 `PendingEmbyDays`，并续期账号有效期。后续既可创建新的 Emby 账号，也可绑定已有 Emby 账号并消耗该资格。 |
-| `2` | 续期码 | `POST /api/v1/users/me/renew`、`POST /api/v1/users/me/use-code` | 已登录用户续期；按 `days` 在原有效期基础上叠加，`days<0` 表示永久，`days=0` 按 30 天处理。 |
+| `2` | 续期码 | `POST /api/v1/users/me/renew`、`POST /api/v1/users/me/use-code` | 仅供已绑定 Emby 的用户续期；按 `days` 在原有效期基础上叠加，`days<0` 表示永久，`days=0` 按 30 天处理。只有 Web 账号或仅持有 `PendingEmby` 待开通资格时会拒绝，且不会消费卡码。 |
 | `3` | 白名单码 | `POST /api/v1/users/me/use-code` | 将角色升为白名单（`RoleWhitelist`）、`Active=true`、有效期置为永久；未绑定 Emby 时同时标记 `PendingEmby`（永久天数）以补建 Emby 账号。 |
 | 邀请码（`source=invite`） | 邀请码 | `POST /api/v1/users/me/use-code` | 已登录且未绑定 Emby 的用户获得 Emby 开通资格并加入邀请树；后续可创建新的 Emby 账号或绑定已有 Emby 账号。天数受邀请人剩余有效期约束。详见 [邀请树](./invite.md)。 |
 
@@ -149,6 +149,7 @@
 - 正式使用时按来源消费：邀请码走 `ConsumeInviteCodeAndUpdateUser` 并建立邀请关系；注册码走 `ConsumeRegCodeAndUpdateUser`。消费、邀请关系和用户字段更新在同一次 store 写锁内完成。
 - 授予 Emby 资格的卡码（注册/白名单/邀请）在消费前会做 Emby 容量检查（`embyCapacityReachedExcluding`），超限返回 `EMBY_CAPACITY_REACHED`。
 - 已绑定 Emby 的账号使用注册/白名单/邀请码会被拒绝（`CODE_ALREADY_EMBY_BOUND`），应改用续期码。
+- 续期码只延长已有 Emby 权益。当前用户没有 `EmbyID` 或仅处于 `PendingEmby` 时，预览/消费返回 `409 RENEW_REQUIRES_EMBY`；Store 会在消费卡码的同一把锁内再次检查，因此拒绝时 `UseCount`、使用者记录和用户到期时间都不变。
 - 注册码、白名单码、邀请码、后台授予、Telegram 面板授予以及自助创建 Emby 都会在用户记录写入 `emby_grant_locked=true` 和来源字段。自助创建 Emby 按 `registration_source=regcode` 的注册资格处理，即使没有实际卡码字符串也会被视为已使用过注册类资格。后续是否允许自助解绑 Emby 只看用户自身字段，不再依赖 `RegCode.used_by_*` 或 `InviteRelations`；删除注册码、清理使用记录、断开邀请关系不会解除这个锁。
 
 同一处理逻辑也挂在 `POST /api/v1/apikey/use-code`（鉴权：AuthAPIKey），供外部系统接入，见 [API Key 外部接入](../reference/api-key.md)。
@@ -163,7 +164,7 @@
 
 ### 旧续期入口 `POST /api/v1/users/me/renew`（鉴权：AuthUser）
 
-`handleRenew`（`internal/api/handlers.go`）保留为兼容入口：必须提供 `reg_code`，且预览结果必须是 `source=regcode` 且 `type==2`（续期码），否则报错。续期经 `ConsumeRegCodeAndUpdateUser` 在同一把锁内完成卡码消费与用户续期，并用 `renewExpiryAndReactivate` 顺带解禁因到期被停用的非邀请账号。
+`handleRenew`（`internal/api/handlers.go`）保留为兼容入口：必须提供 `reg_code`，且预览结果必须是 `source=regcode` 且 `type==2`（续期码），否则报错。当前用户必须已绑定 Emby；续期经 `ConsumeRegCodeAndUpdateUser` 在同一把锁内复核绑定、完成卡码消费与用户续期，并用 `renewExpiryAndReactivate` 顺带解禁因到期被停用的非邀请账号。
 
 ### 公开注册 `POST /api/v1/users/register`（鉴权：AuthPublic）
 
@@ -217,9 +218,9 @@
 | ---- | ---- | ---- |
 | `GET /api/v1/users/regcode/check` | AuthPublic | 每 IP 10 次/分钟；不返回使用者；隐藏诱饵码与指名码 |
 | `POST /api/v1/users/register` | AuthPublic | 注册整体按 IP 限流；带注册码时叠加每 IP 10 次/分钟；建账号、绑定码消费与注册码消费同锁原子 |
-| `POST /api/v1/users/me/use-code` | AuthUser | `check_only` 预览不消费；消费与用户权益更新在全局锁下原子完成 |
-| `POST /api/v1/apikey/use-code` | AuthAPIKey | 同 use-code 逻辑，供外部接入 |
-| `POST /api/v1/users/me/renew` | AuthUser | 仅接受 type=2 续期码 |
+| `POST /api/v1/users/me/use-code` | AuthUser | `check_only` 预览不消费；type=2 要求已绑定 Emby；消费与用户权益更新在全局锁下原子完成 |
+| `POST /api/v1/apikey/use-code` | AuthAPIKey | 同 use-code 逻辑，并要求 `account:write` |
+| `POST /api/v1/users/me/renew` | AuthUser | 仅接受 type=2 续期码，且要求已绑定 Emby |
 | `GET/POST/PUT/DELETE /api/v1/admin/regcodes*` | AuthAdmin | 批量删除/清理需确认短语；写操作受数据库一致性护栏约束 |
 
 Cookie 鉴权的变更类请求不要求 CSRF 令牌，也不做额外来源校验；Bearer Token 与 API Key 按各自鉴权路径处理。统一响应 envelope 为 `{ success, code, message, data, timestamp }`。鉴权级别与响应约定详见 [API 路由索引](../reference/api-index.md) 与 [后端 API 详参](../reference/backend-api.md)。

@@ -79,7 +79,7 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 
 ### 续期码（`POST /invite/renew-codes`）
 
-为「直属下级」签发的实际上是一张一次性、指名的续期注册码（`type=2`，`target_username` 固定为下级用户名，默认格式 `REN-{random}`），见 [注册码与卡码](./regcodes.md)。校验要点（`handleCreateInviteRenewCode`）：邀请人账号需 `Active`、未过期（`userEntitlementOK`）、若 `invite_require_emby=true` 则需已绑定 Emby；目标必须是当前用户的直属下级且 Web 账号仍启用；续期天数受 `maxCodeDays` 封顶；`validity_hours` 限制在 `1-720` 小时。`invite_enabled=false` 只禁止新邀请码，不阻止既有直属下级续期码，也不阻止到期下级或上级对历史关系做 Emby 删除与断开善后。
+为「直属下级」签发的实际上是一张一次性、指名的续期注册码（`type=2`，`target_username` 固定为下级用户名，默认格式 `REN-{random}`），见 [注册码与卡码](./regcodes.md)。校验要点（`handleCreateInviteRenewCode`）：邀请人账号需 `Active`、未过期（`userEntitlementOK`）、若 `invite_require_emby=true` 则需已绑定 Emby；目标必须是当前用户的直属下级、Web 账号仍启用并且已经绑定 Emby，只有 Web 账号或待开通资格不能签发续期码；续期天数受 `maxCodeDays` 封顶；`validity_hours` 限制在 `1-720` 小时。`invite_enabled=false` 只禁止新邀请码，不阻止为符合条件的既有直属下级生成续期码，也不阻止到期下级或上级对历史关系做 Emby 删除与断开善后。
 
 ## 管理员接口
 

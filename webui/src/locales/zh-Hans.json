@@ -72,6 +72,7 @@
     "failureTitle": "续期失败",
     "actionLabel": "{cost} {currencyName} 续 {days} 天",
     "actionTitle": "{cost} {currencyName} 可兑换 {days} 天",
+    "requiresEmby": "请先绑定或开通 Emby 账号，再使用续期权益",
     "successDescription": "已消耗 {spent} {currencyName}，当前有效期：{expireStatus}"
   },
   "adminUsers": {

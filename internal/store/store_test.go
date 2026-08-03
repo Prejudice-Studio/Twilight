@@ -161,6 +161,37 @@ func TestEmbyIDIndexTracksCodeConsumptionCallbacks(t *testing.T) {
 	}
 }
 
+func TestSelfServiceRenewalBenefitsRequireEmbyWithoutMutation(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	user, err := st.CreateUser(User{Username: "renew-no-emby", Role: RoleNormal, Active: true, ExpiredAt: time.Now().AddDate(0, 0, 1).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := st.AddSignin(user.UID, 100); err != nil || !created {
+		t.Fatalf("seed points created=%v err=%v", created, err)
+	}
+	if _, _, err := st.SpendSigninPointsAndUpdateUser(user.UID, 40, func(u *User) error {
+		u.ExpiredAt = time.Now().AddDate(0, 0, 10).Unix()
+		return nil
+	}); !errors.Is(err, ErrEmbyRequired) {
+		t.Fatalf("spend without Emby error=%v", err)
+	}
+	if err := st.UpsertRegCode(RegCode{Code: "RENEW-NO-EMBY", Type: 2, Days: 30, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.ConsumeRegCodeAndUpdateUser("RENEW-NO-EMBY", user.UID, 0, nil); !errors.Is(err, ErrEmbyRequired) {
+		t.Fatalf("renew code without Emby error=%v", err)
+	}
+	latest, _ := st.User(user.UID)
+	reg, ok := st.RegCode("RENEW-NO-EMBY")
+	if latest.ExpiredAt != user.ExpiredAt || st.Signin(user.UID).Points != 100 {
+		t.Fatalf("rejected points renewal mutated state: user=%#v signin=%#v", latest, st.Signin(user.UID))
+	}
+	if !ok || reg.UseCount != 0 || !reg.Active || len(reg.UsedByUIDs) != 0 {
+		t.Fatalf("rejected renewal code was consumed: ok=%v reg=%#v", ok, reg)
+	}
+}
+
 func TestUserIdentityIndexesTrackUsernameAndEmailLifecycle(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	alpha, err := st.CreateUser(User{Username: "Alpha", Email: "Alpha@Example.com", Role: RoleNormal})

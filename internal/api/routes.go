@@ -293,19 +293,19 @@ func (a *App) registerAdminRoutes() {
 }
 
 func (a *App) registerAPIKeyRoutes() {
-	a.add(http.MethodGet, "/api/v1/apikey/info", AuthAPIKey, a.handleAPIKeyInfo)
-	a.add(http.MethodGet, "/api/v1/apikey/status", AuthAPIKey, a.handleAPIKeyStatus)
-	a.add(http.MethodPost, "/api/v1/apikey/enable", AuthAPIKey, a.handleAPIKeyEnableAccount)
-	a.add(http.MethodPost, "/api/v1/apikey/disable", AuthAPIKey, a.handleAPIKeyDisableAccount)
-	a.add(http.MethodPost, "/api/v1/apikey/renew", AuthAPIKey, a.handleAPIKeyRenew)
-	a.add(http.MethodPost, "/api/v1/apikey/key/refresh", AuthAPIKey, a.handleLegacyAPIKeyGenerate)
+	a.add(http.MethodGet, "/api/v1/apikey/info", AuthAPIKey, a.withAPIKeyPermission(apiKeyPermissionAccountRead, a.handleAPIKeyInfo))
+	a.add(http.MethodGet, "/api/v1/apikey/status", AuthAPIKey, a.withAPIKeyPermission(apiKeyPermissionAccountRead, a.handleAPIKeyStatus))
+	a.add(http.MethodPost, "/api/v1/apikey/enable", AuthAPIKey, a.withAPIKeyPermission(apiKeyPermissionAccountWrite, a.handleAPIKeyEnableAccount))
+	a.add(http.MethodPost, "/api/v1/apikey/disable", AuthAPIKey, a.withAPIKeyPermission(apiKeyPermissionAccountWrite, a.handleAPIKeyDisableAccount))
+	a.add(http.MethodPost, "/api/v1/apikey/renew", AuthAPIKey, a.withAPIKeyPermission(apiKeyPermissionAccountWrite, a.handleAPIKeyRenew))
+	a.add(http.MethodPost, "/api/v1/apikey/key/refresh", AuthAPIKey, a.withAPIKeyPermission(apiKeyPermissionAccountWrite, a.handleLegacyAPIKeyGenerate))
 	a.add(http.MethodGet, "/api/v1/apikey/permissions", AuthAPIKey, a.handleAPIKeyPermissions)
 	a.add(http.MethodPut, "/api/v1/apikey/permissions", AuthAPIKey, a.handleForbiddenSelfPermission)
 	a.add(http.MethodPost, "/api/v1/apikey/key/disable", AuthAPIKey, a.handleAPIKeyDisableKey)
 	a.add(http.MethodPost, "/api/v1/apikey/key/enable", AuthAPIKey, a.handleAPIKeyEnableKey)
-	a.add(http.MethodGet, "/api/v1/apikey/emby/status", AuthAPIKey, a.handleEmbyStatus)
-	a.add(http.MethodPost, "/api/v1/apikey/emby/kick", AuthAPIKey, a.handleAPIKeyEmbyKick)
-	a.add(http.MethodPost, "/api/v1/apikey/use-code", AuthAPIKey, a.handleUseCode)
+	a.add(http.MethodGet, "/api/v1/apikey/emby/status", AuthAPIKey, a.withAPIKeyPermission(apiKeyPermissionEmbyRead, a.handleEmbyStatus))
+	a.add(http.MethodPost, "/api/v1/apikey/emby/kick", AuthAPIKey, a.withAPIKeyPermission(apiKeyPermissionEmbyWrite, a.handleAPIKeyEmbyKick))
+	a.add(http.MethodPost, "/api/v1/apikey/use-code", AuthAPIKey, a.withAPIKeyPermission(apiKeyPermissionAccountWrite, a.handleUseCode))
 }
 
 func (a *App) registerSecurityRoutes() {

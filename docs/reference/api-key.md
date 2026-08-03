@@ -116,9 +116,7 @@ API Key 记录上带有一个 `permissions` 字段（字符串数组），可取
 
 新创建的 Key 默认携带上述全部 4 项权限（`internal/api/apikey_handlers.go` 的 `defaultPermissions`）。
 
-> 重要：当前实现中，`/apikey/*` 路由**只校验「密钥有效 + 账号 Active」这一层（`AuthAPIKey`），并不在各端点上逐项强制 `permissions`**。也就是说，只要持有一把有效且账号正常的 Key，即可调用本前缀下的全部接口。`permissions` 字段目前主要用于展示与未来扩展；`/apikey/info`、`/apikey/permissions` 会把它原样回显，但不会因为缺少某项权限而拒绝请求。
->
-> 这一点与旧文档「接口权限映射表 / 缺少 `account:write` 返回 403」的描述不同，旧描述并不符合当前代码，已据实改写。
+`/apikey/*` 路由会在认证通过后继续强制检查 `permissions`：账号只读接口要求 `account:read`，账号启停、续期、卡码消费和 Key 轮换要求 `account:write`，Emby 状态要求 `emby:read`，踢出 Emby 会话要求 `emby:write`。缺少权限返回 HTTP 403 + `API_KEY_PERMISSION_DENIED`，且不会执行目标操作。历史 Key 的权限数组为空时按默认全权限兼容，避免升级后把旧 Key 全部锁死。
 
 ### 4.1 API Key 不能自行修改权限
 
@@ -128,21 +126,21 @@ API Key 记录上带有一个 `permissions` 字段（字符串数组），可取
 
 下表为 `registerAPIKeyRoutes` 中登记的全部路由（均为 `AuthAPIKey`）：
 
-| 方法 | 路径 | 说明 |
-| ---- | ---- | ---- |
-| GET | `/api/v1/apikey/info` | 账号信息 + 当前 Key 权限 |
-| GET | `/api/v1/apikey/status` | 账号激活状态与到期时间 |
-| POST | `/api/v1/apikey/enable` | 启用当前账号 |
-| POST | `/api/v1/apikey/disable` | 禁用当前账号（并失效全部会话） |
-| POST | `/api/v1/apikey/renew` | 用续期码为当前账号续期 |
-| POST | `/api/v1/apikey/key/refresh` | 刷新（轮换）单键 Key，旧值立即失效 |
-| GET | `/api/v1/apikey/permissions` | 查看当前 Key 权限与完整权限列表 |
-| PUT | `/api/v1/apikey/permissions` | 固定拒绝（见 4.1） |
-| POST | `/api/v1/apikey/key/disable` | 禁用当前 Key |
-| POST | `/api/v1/apikey/key/enable` | 启用当前 Key |
-| GET | `/api/v1/apikey/emby/status` | 查看 Emby 服务状态 |
-| POST | `/api/v1/apikey/emby/kick` | 踢出当前账号的 Emby 会话 |
-| POST | `/api/v1/apikey/use-code` | 使用注册码 / 邀请码 / 续期码 |
+| 方法 | 路径 | 所需权限 | 说明 |
+| ---- | ---- | ---- | ---- |
+| GET | `/api/v1/apikey/info` | `account:read` | 账号信息 + 当前 Key 权限 |
+| GET | `/api/v1/apikey/status` | `account:read` | 账号激活状态与到期时间 |
+| POST | `/api/v1/apikey/enable` | `account:write` | 启用当前账号 |
+| POST | `/api/v1/apikey/disable` | `account:write` | 禁用当前账号（并失效全部会话） |
+| POST | `/api/v1/apikey/renew` | `account:write` | 用续期码为当前账号续期 |
+| POST | `/api/v1/apikey/key/refresh` | `account:write` | 刷新（轮换）单键 Key，旧值立即失效 |
+| GET | `/api/v1/apikey/permissions` | 仅认证 | 查看当前 Key 权限与完整权限列表 |
+| PUT | `/api/v1/apikey/permissions` | 固定拒绝 | 不能用 Key 修改自身权限（见 4.1） |
+| POST | `/api/v1/apikey/key/disable` | 仅认证 | 禁用当前 Key |
+| POST | `/api/v1/apikey/key/enable` | 仅认证 | 启用当前 Key |
+| GET | `/api/v1/apikey/emby/status` | `emby:read` | 查看 Emby 服务状态 |
+| POST | `/api/v1/apikey/emby/kick` | `emby:write` | 踢出当前账号的 Emby 会话 |
+| POST | `/api/v1/apikey/use-code` | `account:write` | 使用注册码 / 邀请码 / 续期码 |
 
 ### 5.1 账号信息与状态
 
@@ -239,6 +237,7 @@ curl -X POST "https://your-domain.com/api/v1/apikey/renew" \
 
 - 缺少 `reg_code` → 400（`AUTH` 类业务码 `REGCODE` 相关，文案「续期需要提供注册码」）；
 - 该码必须是「续期码」类型且属于当前用户、未用完、未过期，否则 400；
+- 当前账号必须已经绑定 Emby；只有 Web 账号或仅持有待开通资格时返回 `409 RENEW_REQUIRES_EMBY`，卡码不会被消费；
 - 续期成功后返回 `expire_status`、`expired_at` 与最新 `user`。
 
 关于续期码 / 注册码的类型区分，见 [注册码与卡码](../features/regcodes.md)。
@@ -374,6 +373,7 @@ curl -X POST "https://your-domain.com/api/v1/apikey/use-code" \
 | 403 | `AUTH_ACCOUNT_DISABLED` | 账号被管理员禁用 |
 | 403 | `AUTH_ACCOUNT_EXPIRED` | 账号有效期已到期 |
 | 403 | `API_KEY_SELF_PERMISSION_FORBIDDEN` | 试图用 Key 修改自身权限（`PUT /permissions`） |
+| 403 | `API_KEY_PERMISSION_DENIED` | 当前 Key 缺少端点要求的 `account:*` 或 `emby:*` 权限 |
 | 404 | `NOT_FOUND` / `INVITE_NOT_FOUND` 等 | 资源不存在 |
 | 409 | `EMBY_CAPACITY_REACHED` | 用码创建 Emby 用户时容量已满 |
 | 500 | `INTERNAL` | 服务器内部错误 |
@@ -385,9 +385,8 @@ curl -X POST "https://your-domain.com/api/v1/apikey/use-code" \
 | `AUTH_APIKEY_EMPTY` | Key 为空（多见于 API Key 登录入口） |
 | `CODE_EMPTY` / `CODE_INVALID` | 卡码为空 / 无效 |
 | `CODE_ALREADY_EMBY_BOUND` | 账号已绑定 Emby，应改用续期码 |
+| `RENEW_REQUIRES_EMBY` | 续期只适用于已经绑定的 Emby 账号 |
 | `INVITE_*` | 邀请码相关约束（自用、已有上级、目标不符等） |
-
-> 旧文档列出的「`API Key 缺少权限: account:write` + 403」并不存在于当前代码，已删除。当前实现下，缺少某项 `permissions` 不会被拒；真正会拒绝的是「Key 无效 / 账号非 Active / 自助改权限」这几类。
 
 ## 7. 调用示例
 
@@ -513,4 +512,4 @@ A：不能。`/renew` 的续期天数由你提供的「续期码」决定，必�
 
 **Q：用 Key 能给自己加权限吗？**
 
-A：不能。`PUT /api/v1/apikey/permissions` 固定返回 403（`API_KEY_SELF_PERMISSION_FORBIDDEN`），权限只能在 Web 端「个人设置」中调整。需要说明的是，当前实现并不在各端点上逐项强制 `permissions`：只要 Key 有效且账号正常，即可调用本前缀下全部接口。
+A：不能。`PUT /api/v1/apikey/permissions` 固定返回 403（`API_KEY_SELF_PERMISSION_FORBIDDEN`），权限只能在 Web 端「个人设置」中调整。各端点会继续检查当前 Key 的 `permissions`，缺少所需 scope 返回 `API_KEY_PERMISSION_DENIED`，不会执行操作。

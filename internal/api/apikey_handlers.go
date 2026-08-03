@@ -16,10 +16,35 @@ package api
 
 import (
 	"net/http"
+	"slices"
 	"strconv"
 
 	"github.com/prejudice-studio/twilight/internal/store"
 )
+
+const (
+	apiKeyPermissionAccountRead  = "account:read"
+	apiKeyPermissionAccountWrite = "account:write"
+	apiKeyPermissionEmbyRead     = "emby:read"
+	apiKeyPermissionEmbyWrite    = "emby:write"
+)
+
+func effectiveAPIKeyPermissions(key store.APIKey) []string {
+	if len(key.Permissions) == 0 {
+		return defaultPermissions()
+	}
+	return key.Permissions
+}
+
+func (a *App) withAPIKeyPermission(permission string, next HandlerFunc) HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request, params Params) {
+		if !slices.Contains(effectiveAPIKeyPermissions(current(r).APIKey), permission) {
+			failWithCode(w, http.StatusForbidden, ErrAPIKeyPermissionDenied, "API Key 缺少权限："+permission)
+			return
+		}
+		next(w, r, params)
+	}
+}
 
 func (a *App) handleLegacyAPIKeyStatus(w http.ResponseWriter, r *http.Request, _ Params) {
 	u := current(r).User
@@ -214,7 +239,7 @@ func publicAPIKey(k store.APIKey, plain string) map[string]any {
 }
 
 func defaultPermissions() []string {
-	return []string{"account:read", "account:write", "emby:read", "emby:write"}
+	return []string{apiKeyPermissionAccountRead, apiKeyPermissionAccountWrite, apiKeyPermissionEmbyRead, apiKeyPermissionEmbyWrite}
 }
 
 func (a *App) handleAPIKeyInfo(w http.ResponseWriter, r *http.Request, _ Params) {

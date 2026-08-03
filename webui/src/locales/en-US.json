@@ -353,6 +353,7 @@
     "failureTitle": "Renewal failed",
     "actionLabel": "Renew {days} days for {cost} {currencyName}",
     "actionTitle": "Exchange {cost} {currencyName} for {days} days",
+    "requiresEmby": "Bind or activate an Emby account before using renewal benefits.",
     "successDescription": "Spent {spent} {currencyName}. Current expiry: {expireStatus}"
   },
   "adminUsers": {

@@ -230,6 +230,8 @@ export const ERROR_CODE_FRIENDLY: Partial<Record<ErrCode, string>> = {
   SIGNIN_DISABLED: "签到功能未开启",
   SIGNIN_RENEWAL_DISABLED: "积分续期功能未开启",
   SIGNIN_INSUFFICIENT_POINTS: "积分不足，无法续期",
+  RENEW_REQUIRES_EMBY: "请先绑定或开通 Emby 账号，再使用续期权益",
+  API_KEY_PERMISSION_DENIED: "当前 API Key 缺少调用此接口所需的权限",
   DB_BACKUP_LIST_FAILED: "读取数据库备份列表失败",
   DB_BACKUP_INVALID: "备份文件无效",
   DB_BACKUP_READ_FAILED: "读取备份失败",

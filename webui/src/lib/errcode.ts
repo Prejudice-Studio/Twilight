@@ -133,6 +133,7 @@ export type ErrCode =
   | "SIGNIN_DISABLED"
   | "SIGNIN_RENEWAL_DISABLED"
   | "SIGNIN_INSUFFICIENT_POINTS"
+  | "RENEW_REQUIRES_EMBY"
   // === 数据库迁移 / 备份 ===
   | "DB_BACKUP_LIST_FAILED"
   | "DB_BACKUP_INVALID"
@@ -229,6 +230,7 @@ export type ErrCode =
   | "ADMIN_EMBY_PASSWORD_RESET_FAILED"
   | "ADMIN_LAST_ADMIN_PROTECTED"
   | "API_KEY_SELF_PERMISSION_FORBIDDEN"
+  | "API_KEY_PERMISSION_DENIED"
   // === 求片 / 库存 / 媒体（media_request_handlers.go） ===
   | "MEDIA_REQUEST_DISABLED"
   | "MEDIA_REQUEST_TG_REQUIRED"
@@ -420,6 +422,7 @@ export const ErrCodes = {
   SigninDisabled: "SIGNIN_DISABLED",
   SigninRenewalDisabled: "SIGNIN_RENEWAL_DISABLED",
   SigninInsufficientPoints: "SIGNIN_INSUFFICIENT_POINTS",
+  RenewRequiresEmby: "RENEW_REQUIRES_EMBY",
   // 数据库迁移 / 备份
   DBBackupListFailed: "DB_BACKUP_LIST_FAILED",
   DBBackupInvalid: "DB_BACKUP_INVALID",
@@ -516,6 +519,7 @@ export const ErrCodes = {
   AdminEmbyPasswordReset: "ADMIN_EMBY_PASSWORD_RESET_FAILED",
   AdminLastAdminProtected: "ADMIN_LAST_ADMIN_PROTECTED",
   APIKeySelfPermForbidden: "API_KEY_SELF_PERMISSION_FORBIDDEN",
+  APIKeyPermissionDenied: "API_KEY_PERMISSION_DENIED",
   // 求片 / 库存 / 媒体
   MediaRequestDisabled: "MEDIA_REQUEST_DISABLED",
   MediaRequestTGRequired: "MEDIA_REQUEST_TG_REQUIRED",

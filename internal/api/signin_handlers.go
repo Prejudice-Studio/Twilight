@@ -106,6 +106,9 @@ func (a *App) handleSigninRenew(w http.ResponseWriter, r *http.Request, _ Params
 	if a.requireNonEmbyAdmin(w, r, p.User) {
 		return
 	}
+	if rejectSelfServiceRenewalWithoutEmby(w, p.User) {
+		return
+	}
 	if expiryIsPermanent(p.User.ExpiredAt) {
 		failWithCode(w, http.StatusConflict, ErrConflict, signinRenewalPermanentMessage)
 		return
@@ -113,6 +116,9 @@ func (a *App) handleSigninRenew(w http.ResponseWriter, r *http.Request, _ Params
 	cost := cfg.SigninRenewalCost
 	days := cfg.SigninRenewalDays
 	u, si, err := a.store().SpendSigninPointsAndUpdateUser(p.User.UID, cost, func(u *store.User) error {
+		if err := validateSelfServiceRenewalTarget(*u); err != nil {
+			return err
+		}
 		if expiryIsPermanent(u.ExpiredAt) {
 			return store.ErrConflict
 		}
@@ -121,6 +127,8 @@ func (a *App) handleSigninRenew(w http.ResponseWriter, r *http.Request, _ Params
 	})
 	if err != nil {
 		switch {
+		case errors.Is(err, store.ErrEmbyRequired):
+			failWithCode(w, http.StatusConflict, ErrRenewRequiresEmby, "请先绑定或开通 Emby 账号，再使用积分续期")
 		case errors.Is(err, store.ErrInsufficientPoints):
 			failWithCode(w, http.StatusConflict, ErrSigninInsufficientPoints, signinRenewalInsufficientMessage)
 		case errors.Is(err, store.ErrConflict):

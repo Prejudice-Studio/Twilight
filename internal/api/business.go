@@ -330,6 +330,24 @@ func renewExpiryAndReactivate(u *store.User, newExpiredAt int64) {
 	}
 }
 
+// validateSelfServiceRenewalTarget keeps renewal benefits attached to a real
+// local Emby binding. Registration, whitelist, and invite codes intentionally
+// do not use this guard because they grant a pending Emby entitlement.
+func validateSelfServiceRenewalTarget(u store.User) error {
+	if strings.TrimSpace(u.EmbyID) == "" || u.PendingEmby {
+		return store.ErrEmbyRequired
+	}
+	return nil
+}
+
+func rejectSelfServiceRenewalWithoutEmby(w http.ResponseWriter, u store.User) bool {
+	if validateSelfServiceRenewalTarget(u) == nil {
+		return false
+	}
+	failWithCode(w, http.StatusConflict, ErrRenewRequiresEmby, "请先绑定或开通 Emby 账号，再使用续期权益")
+	return true
+}
+
 // requireEmbyConfigured 把"Emby URL 或 Token 未配置 → 写一致的 400 响应"的样板收敛
 // 到一处。同时校验 URL 和 Token：仅配置 URL 而 Token 为空时，所有 Emby API 调用
 // 都会以未鉴权身份发出，可能导致数据泄露或被 Emby 拒绝。

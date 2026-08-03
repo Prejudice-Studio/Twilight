@@ -1951,10 +1951,10 @@ Telegram 管理中的「Bot 指令管理」页面不会创建第二套指令存�
 | `GET /signin/config` | `AuthPublic` | 签到功能配置 |
 | `GET /signin/me` | `AuthUser` | 我的签到状态 |
 | `POST /signin` | `AuthUser` | 执行签到 |
-| `POST /signin/renew` | `AuthUser` | 使用签到积分续期；消耗积分和续期天数由管理员配置 |
+| `POST /signin/renew` | `AuthUser` | 使用签到积分续期；要求已绑定 Emby，消耗积分和续期天数由管理员配置 |
 | `GET /signin/history` | `AuthUser` | 签到历史 |
 
-`POST /signin/renew` 成功后在同一次状态写入中扣减 `signin.points` 并延长当前用户 `expired_at`；积分不足返回 `SIGNIN_INSUFFICIENT_POINTS`，功能未开启返回 `SIGNIN_RENEWAL_DISABLED`。
+`POST /signin/renew` 只续期已有 Emby 权益。用户没有 `EmbyID` 或仅持有 `PendingEmby` 待开通资格时返回 `409 RENEW_REQUIRES_EMBY`，Store 在原子写入内复核后才扣分，因此拒绝时积分和到期时间都不变。成功后在同一次状态写入中扣减 `signin.points` 并延长当前用户 `expired_at`；积分不足返回 `SIGNIN_INSUFFICIENT_POINTS`，功能未开启返回 `SIGNIN_RENEWAL_DISABLED`。
 
 ### 11.5 公告（前台）
 

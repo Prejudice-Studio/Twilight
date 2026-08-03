@@ -1022,10 +1022,16 @@ func (a *App) handleRenew(w http.ResponseWriter, r *http.Request, _ Params) {
 		failWithCode(w, http.StatusBadRequest, ErrRenewCodeInvalid, "续期码无效、已用完、已过期或不属于当前用户")
 		return
 	}
+	if rejectSelfServiceRenewalWithoutEmby(w, p.User) {
+		return
+	}
 	if a.rejectRegcodeWriteIfStorageMismatch(w) {
 		return
 	}
 	u, _, err := a.store().ConsumeRegCodeAndUpdateUser(regCode, p.User.UID, p.User.TelegramID, func(u *store.User, code store.RegCode) error {
+		if err := validateSelfServiceRenewalTarget(*u); err != nil {
+			return err
+		}
 		days := normalizeRegCodeDays(code.Days)
 		// 用 renewExpiryAndReactivate 而不是裸 ExpiredAt = ...：自助续费会
 		// 把曾被 check_expired 设成 Active=false 的非邀请账号同步解禁，避免
@@ -1034,6 +1040,10 @@ func (a *App) handleRenew(w http.ResponseWriter, r *http.Request, _ Params) {
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, store.ErrEmbyRequired) {
+			failWithCode(w, http.StatusConflict, ErrRenewRequiresEmby, "请先绑定或开通 Emby 账号，再使用续期码")
+			return
+		}
 		if !errors.Is(err, store.ErrNotFound) && !errors.Is(err, store.ErrExpired) && !errors.Is(err, store.ErrConflict) {
 			statusFromError(w, err)
 			return

@@ -434,6 +434,49 @@ func TestAPIKeyFlow(t *testing.T) {
 	}
 }
 
+func TestAPIKeyPermissionsAreEnforcedByRoutes(t *testing.T) {
+	app := newTestApp(t)
+	cookies := registerAndLogin(t, app, "scope-user", "Password123456")
+	created := doJSONWithHeaders(app, http.MethodPost, "/api/v1/users/me/apikeys", `{"name":"read-only"}`, cookies, map[string]string{"X-Twilight-Client": "webui"})
+	if created.Code != http.StatusOK {
+		t.Fatalf("create key status=%d body=%s", created.Code, created.Body.String())
+	}
+	var env envelope
+	if err := json.Unmarshal(created.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	data := env.Data.(map[string]any)
+	key, _ := data["key"].(string)
+	keyID := int64(numeric(data["id"]))
+	user, _ := app.store().FindUserByUsername("scope-user")
+	if _, err := app.store().UpdateAPIKey(user.UID, keyID, func(k *store.APIKey) error {
+		k.Permissions = []string{apiKeyPermissionAccountRead}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	infoReq := httptest.NewRequest(http.MethodGet, "/api/v1/apikey/info", nil)
+	infoReq.Header.Set("X-API-Key", key)
+	info := httptest.NewRecorder()
+	app.ServeHTTP(info, infoReq)
+	if info.Code != http.StatusOK {
+		t.Fatalf("read scope should access info, status=%d body=%s", info.Code, info.Body.String())
+	}
+
+	disableReq := httptest.NewRequest(http.MethodPost, "/api/v1/apikey/disable", nil)
+	disableReq.Header.Set("X-API-Key", key)
+	disabled := httptest.NewRecorder()
+	app.ServeHTTP(disabled, disableReq)
+	if disabled.Code != http.StatusForbidden || !strings.Contains(disabled.Body.String(), string(ErrAPIKeyPermissionDenied)) {
+		t.Fatalf("read-only key should not disable account, status=%d body=%s", disabled.Code, disabled.Body.String())
+	}
+	latest, _ := app.store().User(user.UID)
+	if !latest.Active {
+		t.Fatal("permission-denied API key changed account state")
+	}
+}
+
 func TestAPIKeyLoginIsRateLimited(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().RateLimitEnabled = true
@@ -922,7 +965,11 @@ func TestRegcodeInviteMediaAndSecurityFlows(t *testing.T) {
 	userLogin := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"user","password":"User123456"}`, nil)
 	userCookie := findCookie(userLogin.Result().Cookies(), "twilight_session")
 	user, _ := app.store().FindUserByUsername("user")
-	_, _ = app.store().UpdateUser(user.UID, func(u *store.User) error { u.TelegramID = 12345; return nil })
+	_, _ = app.store().UpdateUser(user.UID, func(u *store.User) error {
+		u.TelegramID = 12345
+		u.EmbyID = "emby-user"
+		return nil
+	})
 
 	createdCodes := doJSONWithHeaders(app, http.MethodPost, "/api/v1/admin/regcodes", `{"type":2,"days":15,"count":1,"random_algorithm":"hex20"}`, []*http.Cookie{adminCookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if createdCodes.Code != http.StatusOK {
@@ -1083,7 +1130,11 @@ func TestSigninRenewalSpendsPointsWhenEnabled(t *testing.T) {
 		t.Fatal("missing test user")
 	}
 	expiresAt := time.Now().AddDate(0, 0, 1).Unix()
-	if _, err := app.store().UpdateUser(user.UID, func(u *store.User) error { u.ExpiredAt = expiresAt; return nil }); err != nil {
+	if _, err := app.store().UpdateUser(user.UID, func(u *store.User) error {
+		u.EmbyID = "emby-renew-points"
+		u.ExpiredAt = expiresAt
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, created, err := app.store().AddSigninWithOptions(user.UID, 100, nil, true); err != nil || !created {
@@ -1118,6 +1169,70 @@ func TestSigninRenewalSpendsPointsWhenEnabled(t *testing.T) {
 	}
 	if got := numeric(env.Data["remaining_points"]); got != 60 {
 		t.Fatalf("unexpected remaining_points: %#v", env.Data)
+	}
+}
+
+func TestSigninRenewalRequiresEmbyWithoutSpendingPoints(t *testing.T) {
+	app := newTestApp(t)
+	cookies := registerAndLogin(t, app, "renew-no-emby", "Admin123456")
+	user, _ := app.store().FindUserByUsername("renew-no-emby")
+	expiresAt := time.Now().AddDate(0, 0, 1).Unix()
+	if _, err := app.store().UpdateUser(user.UID, func(u *store.User) error {
+		u.ExpiredAt = expiresAt
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := app.store().AddSigninWithOptions(user.UID, 100, nil, true); err != nil || !created {
+		t.Fatalf("seed signin points created=%v err=%v", created, err)
+	}
+	app.cfg().SigninRenewalEnabled = true
+	app.cfg().SigninRenewalCost = 40
+	app.cfg().SigninRenewalDays = 10
+
+	renewed := doJSONWithHeaders(app, http.MethodPost, "/api/v1/signin/renew", `{}`, cookies, map[string]string{"X-Twilight-Client": "webui"})
+	if renewed.Code != http.StatusConflict || !strings.Contains(renewed.Body.String(), string(ErrRenewRequiresEmby)) {
+		t.Fatalf("renewal without Emby status=%d body=%s", renewed.Code, renewed.Body.String())
+	}
+	latest, _ := app.store().User(user.UID)
+	if latest.ExpiredAt != expiresAt {
+		t.Fatalf("rejected renewal changed expiry: got=%d want=%d", latest.ExpiredAt, expiresAt)
+	}
+	if points := app.store().Signin(user.UID).Points; points != 100 {
+		t.Fatalf("rejected renewal spent points: got=%d want=100", points)
+	}
+}
+
+func TestRenewalCodesRequireEmbyWithoutBeingConsumed(t *testing.T) {
+	app := newTestApp(t)
+	user, err := app.store().CreateUser(store.User{Username: "code-no-emby", Role: store.RoleNormal, Active: true, ExpiredAt: time.Now().AddDate(0, 0, 1).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []string{"RENEW-NO-EMBY-UNIFIED", "RENEW-NO-EMBY-LEGACY"} {
+		if err := app.store().UpsertRegCode(store.RegCode{Code: code, Type: 2, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	call := func(path, body string, handler HandlerFunc) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req = req.WithContext(context.WithValue(req.Context(), principalKey, principal{User: user}))
+		rr := httptest.NewRecorder()
+		handler(rr, req, nil)
+		return rr
+	}
+	if rr := call("/api/v1/users/me/use-code", `{"reg_code":"RENEW-NO-EMBY-UNIFIED"}`, app.handleUseCode); rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), string(ErrRenewRequiresEmby)) {
+		t.Fatalf("unified renewal without Emby status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if rr := call("/api/v1/users/me/renew", `{"reg_code":"RENEW-NO-EMBY-LEGACY"}`, app.handleRenew); rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), string(ErrRenewRequiresEmby)) {
+		t.Fatalf("legacy renewal without Emby status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	for _, code := range []string{"RENEW-NO-EMBY-UNIFIED", "RENEW-NO-EMBY-LEGACY"} {
+		reg, _ := app.store().RegCode(code)
+		if reg.UseCount != 0 || !reg.Active {
+			t.Fatalf("rejected renewal consumed code %s: %#v", code, reg)
+		}
 	}
 }
 
@@ -4760,7 +4875,7 @@ func TestTargetedRegcodesAreCreatedListedAndEnforced(t *testing.T) {
 		t.Fatalf("target username was not searchable/listed, status=%d body=%s", list.Code, list.Body.String())
 	}
 
-	alpha, err := app.store().CreateUser(store.User{Username: "alpha", Role: store.RoleNormal, Active: true})
+	alpha, err := app.store().CreateUser(store.User{Username: "alpha", Role: store.RoleNormal, Active: true, EmbyID: "emby-alpha"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4834,7 +4949,7 @@ func TestTelegramTargetedRegcodesAreCreatedListedAndEnforced(t *testing.T) {
 		t.Fatalf("target telegram id was not searchable/listed, status=%d body=%s", list.Code, list.Body.String())
 	}
 
-	alpha, err := app.store().CreateUser(store.User{Username: "alpha", Role: store.RoleNormal, Active: true, TelegramID: 4242, TelegramUsername: "alpha_tg"})
+	alpha, err := app.store().CreateUser(store.User{Username: "alpha", Role: store.RoleNormal, Active: true, EmbyID: "emby-alpha", TelegramID: 4242, TelegramUsername: "alpha_tg"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5610,7 +5725,7 @@ func TestAdminSetUserExpiryAbsolute(t *testing.T) {
 
 func TestRenewEndpointHonorsPermanentRegcode(t *testing.T) {
 	app := newTestApp(t)
-	user, err := app.store().CreateUser(store.User{Username: "renew-permanent", Role: store.RoleNormal, Active: true, ExpiredAt: time.Now().AddDate(0, 0, 1).Unix()})
+	user, err := app.store().CreateUser(store.User{Username: "renew-permanent", Role: store.RoleNormal, Active: true, EmbyID: "emby-renew-permanent", ExpiredAt: time.Now().AddDate(0, 0, 1).Unix()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6035,7 +6150,7 @@ func TestInviteRenewCodeCreatesTargetedRegCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := app.store().CreateUser(store.User{Username: "renew-child", Role: store.RoleNormal, Active: true, ExpiredAt: now.AddDate(0, 0, 1).Unix()})
+	child, err := app.store().CreateUser(store.User{Username: "renew-child", Role: store.RoleNormal, Active: true, EmbyID: "emby-renew-child", ExpiredAt: now.AddDate(0, 0, 1).Unix()})
 	if err != nil {
 		t.Fatal(err)
 	}

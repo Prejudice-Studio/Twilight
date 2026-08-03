@@ -1,6 +1,9 @@
 package store
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 const signinDateLayout = "2006-01-02"
 const maxSigninRecords = 730 // 最多保留 730 条签到记录（约 2 年），超出的旧记录自动裁剪
@@ -88,6 +91,9 @@ func (s *Store) SpendSigninPointsAndUpdateUser(uid int64, cost int, fn func(*Use
 		u, ok := s.state.Users[uid]
 		if !ok {
 			return ErrNotFound
+		}
+		if strings.TrimSpace(u.EmbyID) == "" || u.PendingEmby {
+			return ErrEmbyRequired
 		}
 		si := s.state.Signin[uid]
 		if si.UID == 0 {

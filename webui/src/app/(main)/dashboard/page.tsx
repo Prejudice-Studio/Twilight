@@ -460,6 +460,7 @@ export default function DashboardPage() {
   const isAdmin = user?.role === 0;
   const isPending = !user?.emby_id && !user?.active;
   const isPendingEmby = Boolean(user?.pending_emby) && !user?.emby_id;
+  const hasEmbyBinding = Boolean(user?.emby_bound || user?.emby_id);
   const isPendingEmbyFromRegcode = isPendingEmby && user?.pending_emby_days !== null && user?.pending_emby_days !== undefined;
   const hasGrantedEmbyRegisterEntitlement = isPendingEmbyFromRegcode;
 
@@ -1081,8 +1082,8 @@ export default function DashboardPage() {
                   size="sm"
                   variant="secondary"
                   onClick={handleSigninRenewal}
-                  disabled={renewingWithPoints || !signinRenewal.affordable || isPermanent || isPendingEmby}
-                  title={signinRenewal.affordable ? undefined : t("signinRenewal.actionTitle", { cost: signinRenewal.cost, currencyName: signinSummary.currency_name, days: signinRenewal.days })}
+                  disabled={renewingWithPoints || !signinRenewal.affordable || isPermanent || !hasEmbyBinding}
+                  title={!hasEmbyBinding ? t("signinRenewal.requiresEmby") : signinRenewal.affordable ? undefined : t("signinRenewal.actionTitle", { cost: signinRenewal.cost, currencyName: signinSummary.currency_name, days: signinRenewal.days })}
                 >
                   {renewingWithPoints ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />

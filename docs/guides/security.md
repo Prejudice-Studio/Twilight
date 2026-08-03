@@ -183,6 +183,7 @@ allow_credential = true
 ## 11. 最小权限原则
 
 - API Key 仅授予必要 scope；`?apikey=` query 传参仅对显式允许 query 的 Key 生效（默认不允许）。
+- `/apikey/*` 在路由 handler 前强制执行 scope：账号读写分别要求 `account:read` / `account:write`，Emby 状态与会话操作分别要求 `emby:read` / `emby:write`。缺少 scope 返回 `API_KEY_PERMISSION_DENIED`，不能把 `permissions` 退化成仅展示字段。
 - API Key 不能自行修改权限；权限变更必须通过已登录 Web 端完成，避免只读 Key 自提权。
 - 管理员账号数量最小化，长期不用的高权限账号及时停用。
 - Telegram 管理员 ID 仅配置必要人员。

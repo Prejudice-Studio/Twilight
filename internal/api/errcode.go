@@ -176,6 +176,7 @@ const (
 	ErrSigninDisabled           ErrCode = "SIGNIN_DISABLED"
 	ErrSigninRenewalDisabled    ErrCode = "SIGNIN_RENEWAL_DISABLED"
 	ErrSigninInsufficientPoints ErrCode = "SIGNIN_INSUFFICIENT_POINTS"
+	ErrRenewRequiresEmby        ErrCode = "RENEW_REQUIRES_EMBY"
 
 	// === 数据库迁移 / 备份 ===
 	// database_admin.go 的 fail() 全部是中文裸串；前端目前只能 toast 后端
@@ -291,6 +292,7 @@ const (
 	ErrAdminEmbyPasswordReset     ErrCode = "ADMIN_EMBY_PASSWORD_RESET_FAILED"
 	ErrAdminLastAdminProtected    ErrCode = "ADMIN_LAST_ADMIN_PROTECTED"
 	ErrAPIKeySelfPermForbidden    ErrCode = "API_KEY_SELF_PERMISSION_FORBIDDEN"
+	ErrAPIKeyPermissionDenied     ErrCode = "API_KEY_PERMISSION_DENIED"
 
 	// === 求片 / 库存 / 媒体（media_request_handlers.go） ===
 	ErrMediaRequestDisabled       ErrCode = "MEDIA_REQUEST_DISABLED"

@@ -353,6 +353,7 @@
     "failureTitle": "續期失敗",
     "actionLabel": "{cost} {currencyName} 續 {days} 天",
     "actionTitle": "{cost} {currencyName} 可兌換 {days} 天",
+    "requiresEmby": "請先綁定或開通 Emby 帳號，再使用續期權益",
     "successDescription": "已消耗 {spent} {currencyName}，目前有效期：{expireStatus}"
   },
   "adminUsers": {

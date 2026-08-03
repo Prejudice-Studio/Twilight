@@ -4213,6 +4213,9 @@ func (s *Store) ConsumeRegCodeAndUpdateUser(code string, uid, telegramID int64, 
 		if err != nil {
 			return err
 		}
+		if r.Type == 2 && (strings.TrimSpace(u.EmbyID) == "" || u.PendingEmby) {
+			return ErrEmbyRequired
+		}
 		consumed = s.consumeRegCodeLocked(r, uid, telegramID)
 		old := u
 		if fn != nil {
@@ -4846,6 +4849,7 @@ var (
 	ErrMediaRequestUserActiveLimit   = errors.New("media request user active limit reached")
 	ErrMediaRequestGlobalActiveLimit = errors.New("media request global active limit reached")
 	ErrInsufficientPoints            = errors.New("insufficient points")
+	ErrEmbyRequired                  = errors.New("emby binding required")
 )
 
 // errStateVersionConflict 是 Postgres 后端乐观并发控制的内部哨兵：saveLocked 的

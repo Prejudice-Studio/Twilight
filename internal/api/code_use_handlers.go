@@ -47,6 +47,9 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 	}
 	codeType := int(numeric(preview["type"]))
 	grantsEmby := codeGrantsEmbyRegistration(source, codeType)
+	if source == "regcode" && codeType == 2 && rejectSelfServiceRenewalWithoutEmby(w, p.User) {
+		return
+	}
 	if grantsEmby && p.User.EmbyID != "" {
 		failWithCode(w, http.StatusBadRequest, ErrCodeAlreadyEmbyBound, "当前账号已绑定 Emby，请使用续期码")
 		return
@@ -128,6 +131,11 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 		}
 	}
 	updateUser := func(u *store.User, reg store.RegCode) error {
+		if source == "regcode" && reg.Type == 2 {
+			if err := validateSelfServiceRenewalTarget(*u); err != nil {
+				return err
+			}
+		}
 		currentReplacesPendingEntitlement := source == "regcode" && u.EmbyID == "" && u.PendingEmby && codeGrantsEmbyRegistration(source, codeType)
 		if grantsEmby && u.EmbyID != "" {
 			return store.ErrConflict
@@ -192,6 +200,10 @@ func (a *App) handleUseCode(w http.ResponseWriter, r *http.Request, _ Params) {
 	}
 	if errors.Is(err, store.ErrRegCodeAlreadyUsedByUser) {
 		failWithCode(w, http.StatusConflict, ErrCodeAlreadyUsedByUser, "你已经使用过这张卡码，不能重复使用")
+		return
+	}
+	if errors.Is(err, store.ErrEmbyRequired) {
+		failWithCode(w, http.StatusConflict, ErrRenewRequiresEmby, "请先绑定或开通 Emby 账号，再使用续期码")
 		return
 	}
 	if errors.Is(err, store.ErrConflict) && grantsEmby {

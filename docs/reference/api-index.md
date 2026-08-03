@@ -88,7 +88,7 @@
 | POST | `/api/v1/users/me/emby/bind` | User | 绑定已有 Emby 账号 |
 | POST | `/api/v1/users/me/emby/register` | User | 登录后补建 Emby 账号（PENDING_EMBY 流程） |
 | POST | `/api/v1/users/me/emby/unbind` | User | 先禁用远端 Emby；成功后清理本地绑定，禁用失败则保留本地绑定 |
-| POST | `/api/v1/users/me/renew` | User | 使用续期码续期 |
+| POST | `/api/v1/users/me/renew` | User | 使用续期码续期（需已绑定 Emby） |
 | POST | `/api/v1/users/me/use-code` | User | 统一预检/使用注册码、续期码、白名单码、邀请码 |
 | GET | `/api/v1/users/me/use-code/status` | User | 查询 use-code 异步队列状态 |
 | GET | `/api/v1/users/me/devices` | User | 当前用户设备列表 |
@@ -408,7 +408,7 @@
 | GET | `/api/v1/signin/config` | Public | 签到公开配置 |
 | GET | `/api/v1/signin/me` | User | 我的签到摘要 |
 | POST | `/api/v1/signin` | User | 签到 |
-| POST | `/api/v1/signin/renew` | User | 使用签到积分续期（需管理员开启） |
+| POST | `/api/v1/signin/renew` | User | 使用签到积分续期（需管理员开启且已绑定 Emby） |
 | GET | `/api/v1/signin/history` | User | 签到历史 |
 
 ## API Key

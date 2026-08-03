@@ -40,7 +40,7 @@ function formatRelative(ts: number, locale: string): string {
 
 export default function ScorePage() {
   const { toast } = useToast();
-  const { fetchUser } = useAuthStore();
+  const { user, fetchUser } = useAuthStore();
   const { locale, t } = useI18n();
   const [summary, setSummary] = useState<SigninSummary | null>(null);
   const [config, setConfig] = useState<SigninPublicConfig | null>(null);
@@ -52,6 +52,7 @@ export default function ScorePage() {
 
   const currencyName = summary?.currency_name || config?.currency_name || t("score.defaultCurrency");
   const renewal = summary?.renewal || config?.renewal;
+  const hasEmbyBinding = Boolean(user?.emby_bound || user?.emby_id);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -200,7 +201,8 @@ export default function ScorePage() {
                   variant="secondary"
                   size="lg"
                   onClick={handleRenewal}
-                  disabled={renewing || !renewal.affordable}
+                  disabled={renewing || !renewal.affordable || !hasEmbyBinding}
+                  title={!hasEmbyBinding ? t("signinRenewal.requiresEmby") : undefined}
                   className="min-w-[180px]"
                 >
                   {renewing ? (
@@ -210,6 +212,11 @@ export default function ScorePage() {
                   )}
                   {t("signinRenewal.actionLabel", { cost: renewal.cost, currencyName, days: renewal.days })}
                 </Button>
+              )}
+              {renewal?.enabled && !hasEmbyBinding && (
+                <p className="max-w-[280px] text-xs text-muted-foreground md:text-right">
+                  {t("signinRenewal.requiresEmby")}
+                </p>
               )}
               <Button
                 size="lg"
