@@ -310,7 +310,7 @@ class ApiClient {
     return this.request<UserSettings>("/users/me/settings");
   }
 
-  async updateMySettings(data: { bgm_mode?: boolean; bgm_manage_mode?: boolean; bgm_token?: string; email?: string; notify_on_login_telegram?: boolean; notify_on_login_email?: boolean; notify_on_ticket_telegram?: boolean; password_change_email_required?: boolean; emby_password_email_required?: boolean; emby_password_old_password_required?: boolean; old_password?: string; verification_id?: string; email_code?: string; code?: string }) {
+  async updateMySettings(data: { bgm_mode?: boolean; bgm_manage_mode?: boolean; bgm_token?: string; email?: string; notify_on_login_telegram?: boolean; notify_on_login_email?: boolean; notify_on_ticket_telegram?: boolean; signin_auto_renewal?: boolean; password_change_email_required?: boolean; emby_password_email_required?: boolean; emby_password_old_password_required?: boolean; old_password?: string; verification_id?: string; email_code?: string; code?: string }) {
     return this.request<UserInfo>("/users/me", {
       method: "PUT",
       body: JSON.stringify(data),
@@ -691,6 +691,14 @@ class ApiClient {
     const res = await this.request<SigninRenewalResult>("/signin/renew", { method: "POST" });
     if (res.success && res.data?.user?.avatar) {
       res.data.user.avatar = this.toAbsoluteAssetUrl(res.data.user.avatar) || undefined;
+    }
+    return res;
+  }
+
+  async updateSigninAutoRenewal(enabled: boolean) {
+    const res = await this.updateMySettings({ signin_auto_renewal: enabled });
+    if (res.success && res.data?.avatar) {
+      res.data.avatar = this.toAbsoluteAssetUrl(res.data.avatar) || undefined;
     }
     return res;
   }

@@ -354,7 +354,15 @@
     "actionLabel": "{cost} {currencyName} 續 {days} 天",
     "actionTitle": "{cost} {currencyName} 可兌換 {days} 天",
     "requiresEmby": "請先綁定或開通 Emby 帳號，再使用續期權益",
-    "successDescription": "已消耗 {spent} {currencyName}，目前有效期：{expireStatus}"
+    "successDescription": "已消耗 {spent} {currencyName}，目前有效期：{expireStatus}",
+    "autoLabel": "到期自動續期",
+    "autoDescription": "到期檢查時，餘額達到 {cost} {currencyName} 將自動續期 {days} 天",
+    "autoUnavailable": "僅已綁定 Emby 且有固定有效期的一般帳號可開啟",
+    "autoEnabledTitle": "已開啟自動續期",
+    "autoEnabledDescription": "到期時將嘗試消耗 {cost} {currencyName} 續期 {days} 天",
+    "autoDisabledTitle": "已關閉自動續期",
+    "autoDisabledDescription": "到期時不會自動消耗簽到積分",
+    "autoUpdateFailed": "自動續期設定失敗"
   },
   "adminUsers": {
     "perPage": "每頁",

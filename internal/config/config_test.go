@@ -70,6 +70,24 @@ auto_cleanup_unverified_hours = 72
 	}
 }
 
+func TestLoadSigninAutoRenewalConfigAndEnvOverride(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	content := `[SAR]
+signin_auto_renewal_enabled = false
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TWILIGHT_SIGNIN_AUTO_RENEWAL_ENABLED", "true")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.SigninAutoRenewalEnabled {
+		t.Fatal("expected automatic sign-in renewal to be enabled by environment override")
+	}
+}
+
 func TestLoadSetupModeFromAnySection(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	content := `[Bootstrap]

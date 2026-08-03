@@ -132,6 +132,7 @@ export type ErrCode =
   // === 签到 ===
   | "SIGNIN_DISABLED"
   | "SIGNIN_RENEWAL_DISABLED"
+  | "SIGNIN_AUTO_RENEWAL_DISABLED"
   | "SIGNIN_INSUFFICIENT_POINTS"
   | "RENEW_REQUIRES_EMBY"
   // === 数据库迁移 / 备份 ===
@@ -421,6 +422,7 @@ export const ErrCodes = {
   // 签到
   SigninDisabled: "SIGNIN_DISABLED",
   SigninRenewalDisabled: "SIGNIN_RENEWAL_DISABLED",
+  SigninAutoRenewalDisabled: "SIGNIN_AUTO_RENEWAL_DISABLED",
   SigninInsufficientPoints: "SIGNIN_INSUFFICIENT_POINTS",
   RenewRequiresEmby: "RENEW_REQUIRES_EMBY",
   // 数据库迁移 / 备份

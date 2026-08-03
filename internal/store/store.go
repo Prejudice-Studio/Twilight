@@ -199,6 +199,7 @@ type User struct {
 	NotifyOnLoginTelegram                   bool     `json:"notify_on_login_telegram,omitempty"`
 	NotifyOnLoginEmail                      bool     `json:"notify_on_login_email,omitempty"`
 	NotifyOnTicketTelegram                  bool     `json:"notify_on_ticket_telegram,omitempty"`
+	SigninAutoRenewal                       bool     `json:"signin_auto_renewal,omitempty"`
 	RequireEmailForPasswordChange           bool     `json:"require_email_for_password_change,omitempty"`
 	RequireEmailForEmbyPasswordChange       bool     `json:"require_email_for_emby_password_change,omitempty"`
 	RequireOldPasswordForEmbyPasswordChange bool     `json:"require_old_password_for_emby_password_change,omitempty"`

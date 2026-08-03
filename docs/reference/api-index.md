@@ -406,10 +406,12 @@
 | 方法 | 路径 | 鉴权 | 说明 |
 | ---- | ---- | ---- | ---- |
 | GET | `/api/v1/signin/config` | Public | 签到公开配置 |
-| GET | `/api/v1/signin/me` | User | 我的签到摘要 |
+| GET | `/api/v1/signin/me` | User | 我的签到摘要、积分续期与个人自动续期状态 |
 | POST | `/api/v1/signin` | User | 签到 |
 | POST | `/api/v1/signin/renew` | User | 使用签到积分续期（需管理员开启且已绑定 Emby） |
 | GET | `/api/v1/signin/history` | User | 签到历史 |
+
+用户通过 `PUT /api/v1/users/me` 的 `signin_auto_renewal` 严格布尔字段开关个人自动续期；管理员还需先开启全局自动续期许可。详细条件见 [签到与积分续期](../features/signin.md)。
 
 ## API Key
 

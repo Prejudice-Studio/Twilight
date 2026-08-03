@@ -229,6 +229,7 @@ export const ERROR_CODE_FRIENDLY: Partial<Record<ErrCode, string>> = {
   REGCODE_BATCH_DELETE_FAILED: "批量删除注册码失败，请稍后重试",
   SIGNIN_DISABLED: "签到功能未开启",
   SIGNIN_RENEWAL_DISABLED: "积分续期功能未开启",
+  SIGNIN_AUTO_RENEWAL_DISABLED: "管理员未开启签到自动续期",
   SIGNIN_INSUFFICIENT_POINTS: "积分不足，无法续期",
   RENEW_REQUIRES_EMBY: "请先绑定或开通 Emby 账号，再使用续期权益",
   API_KEY_PERMISSION_DENIED: "当前 API Key 缺少调用此接口所需的权限",

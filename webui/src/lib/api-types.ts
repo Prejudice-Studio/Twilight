@@ -192,6 +192,7 @@ export interface UserInfo {
   notify_on_login_telegram?: boolean;  // 登录时发送 Telegram 通知
   notify_on_login_email?: boolean;  // 登录时发送邮件通知
   notify_on_ticket_telegram?: boolean;  // 工单变动时发送 Telegram 通知
+  signin_auto_renewal?: boolean;  // 到期时自动使用签到积分续期
   password_change_email_required?: boolean;
   emby_password_email_required?: boolean;
   emby_password_old_password_required?: boolean;
@@ -339,6 +340,7 @@ export interface UserSettings {
   notify_on_login_telegram?: boolean;
   notify_on_login_email?: boolean;
   notify_on_ticket_telegram?: boolean;
+  signin_auto_renewal?: boolean;
   password_change_email_required?: boolean;
   emby_password_email_required?: boolean;
   emby_password_old_password_required?: boolean;
@@ -1270,6 +1272,9 @@ export interface SigninRenewalConfig {
   cost: number;
   days: number;
   affordable?: boolean;
+  auto_renewal_enabled?: boolean;
+  auto_renewal_user_enabled?: boolean;
+  auto_renewal_available?: boolean;
 }
 
 export interface SigninSummary {

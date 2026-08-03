@@ -344,7 +344,9 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - `runDueSchedulerJobs` collects all due jobs first, then launches them in parallel with `schedulerAutoConcurrency=4` semaphore to prevent a slow job from delaying all subsequent due jobs in the same tick.
 - Each auto job launch goroutine has its own panic recovery; a single job panic must not crash the daemon loop.
 - `schedulerSideEffectContext` provides a 15-second detached context for side operations (session cleanup, remote Emby disable) that should not be cancelled by the main job context.
-- `check_expired` performs batch `ctx.Err()` checks every 50 users to allow early termination.
+- `check_expired` refreshes the persisted state once before scanning so split API/scheduler processes see current user preferences, then performs batch `ctx.Err()` checks every 50 users to allow early termination.
+- Sign-in point auto-renewal runs only inside `check_expired` and requires `SigninEnabled`, `SigninRenewalEnabled`, `SigninAutoRenewalEnabled`, and the user's `SigninAutoRenewal` preference. It must use `SpendSigninPointsAndUpdateUser`; never split the balance check, deduction, and expiry update into separate writes.
+- Auto-renewal applies once to an active, expired, finite normal user with a real Emby binding. Protected users, pending/unbound Emby users, permanent accounts, and manually disabled accounts must never auto-spend points. A rejected auto-renewal falls through to ordinary expiry handling.
 - `sync_emby_activity_logs` accepts `since_hours` param (default 24, max 720) for flexible sync windows.
 - All state-changing scheduler operations (check_expired, cleanup_no_emby, emby_sync, cleanup_unlinked_emby, cleanup_emby_devices, cleanup_ticket_images, cleanup_pending_emby_entitlements) must call `a.auditSystem("scheduler", action, 0, detail)` after successful mutations.
 

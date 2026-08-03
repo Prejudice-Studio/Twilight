@@ -1053,6 +1053,7 @@ func configSectionDefs() []configSectionDef {
 			{Key: "streak_bonus_points", Label: "连签奖励积分", Type: "list", Description: "数字列表，与连签奖励天数一一对应"},
 			{Key: "reset_after_miss", Label: "漏签重置连签", Type: "bool", Description: "漏签后是否从 1 天重新计算连续签到"},
 			{Key: "signin_renewal_enabled", Label: "启用积分续期", Type: "bool", Description: "允许用户用签到积分兑换账号续期；关闭时前端不显示兑换入口"},
+			{Key: "signin_auto_renewal_enabled", Label: "允许自动积分续期", Type: "bool", Description: "允许已主动开启个人开关的用户在到期检查时自动扣除签到积分续期"},
 			{Key: "signin_renewal_cost", Label: "续期消耗积分", Type: "int", Description: "每次积分续期需要消耗的积分数，必须大于 0"},
 			{Key: "signin_renewal_days", Label: "续期天数", Type: "int", Description: "每次积分续期增加的天数，必须大于 0"},
 		}},
@@ -1214,7 +1215,7 @@ func configValues(cfg config.Config) map[string]map[string]any {
 			"auto_cleanup_pending_emby_days": cfg.AutoCleanupPendingEmbyDays,
 			"signin_enabled":                 cfg.SigninEnabled, "currency_name": cfg.SigninCurrencyName, "daily_min": cfg.SigninDailyMin, "daily_max": cfg.SigninDailyMax,
 			"streak_bonus_enabled": cfg.SigninStreakBonusEnabled, "streak_bonus_days": intsToAny(cfg.SigninStreakBonusDays), "streak_bonus_points": intsToAny(cfg.SigninStreakBonusPoints),
-			"reset_after_miss": cfg.SigninResetAfterMiss, "signin_renewal_enabled": cfg.SigninRenewalEnabled, "signin_renewal_cost": cfg.SigninRenewalCost, "signin_renewal_days": cfg.SigninRenewalDays,
+			"reset_after_miss": cfg.SigninResetAfterMiss, "signin_renewal_enabled": cfg.SigninRenewalEnabled, "signin_auto_renewal_enabled": cfg.SigninAutoRenewalEnabled, "signin_renewal_cost": cfg.SigninRenewalCost, "signin_renewal_days": cfg.SigninRenewalDays,
 		},
 		"DeviceLimit": {"device_limit_enabled": cfg.DeviceLimitEnabled, "max_devices": cfg.MaxDevices, "max_streams": cfg.MaxStreams},
 		"RateLimit": {

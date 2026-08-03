@@ -14,6 +14,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { useAuthStore } from "@/store/auth";
 import { useI18n } from "@/lib/i18n";
@@ -40,7 +41,7 @@ function formatRelative(ts: number, locale: string): string {
 
 export default function ScorePage() {
   const { toast } = useToast();
-  const { user, fetchUser } = useAuthStore();
+  const { user, fetchUser, setUser } = useAuthStore();
   const { locale, t } = useI18n();
   const [summary, setSummary] = useState<SigninSummary | null>(null);
   const [config, setConfig] = useState<SigninPublicConfig | null>(null);
@@ -48,6 +49,7 @@ export default function ScorePage() {
   const [loading, setLoading] = useState(true);
   const [signing, setSigning] = useState(false);
   const [renewing, setRenewing] = useState(false);
+  const [updatingAutoRenewal, setUpdatingAutoRenewal] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const currencyName = summary?.currency_name || config?.currency_name || t("score.defaultCurrency");
@@ -128,7 +130,8 @@ export default function ScorePage() {
           description: t("signinRenewal.successDescription", { spent: res.data.spent_points, currencyName: res.data.currency_name, expireStatus: res.data.expire_status }),
           variant: "success",
         });
-        await fetchUser();
+        if (res.data.user) setUser(res.data.user);
+        else await fetchUser();
         await reload();
       } else {
         toast({ title: t("signinRenewal.failureTitle"), description: res.message, variant: "destructive" });
@@ -142,6 +145,38 @@ export default function ScorePage() {
       });
     } finally {
       setRenewing(false);
+    }
+  };
+
+  const handleAutoRenewalChange = async (enabled: boolean) => {
+    if (updatingAutoRenewal || !renewal?.auto_renewal_enabled || !renewal.auto_renewal_available) return;
+    setUpdatingAutoRenewal(true);
+    try {
+      const res = await api.updateSigninAutoRenewal(enabled);
+      if (!res.success) {
+        toast({ title: t("signinRenewal.autoUpdateFailed"), description: res.message, variant: "destructive" });
+        return;
+      }
+      setSummary((current) => current?.renewal ? {
+        ...current,
+        renewal: { ...current.renewal, auto_renewal_user_enabled: enabled },
+      } : current);
+      if (res.data) setUser(res.data);
+      toast({
+        title: enabled ? t("signinRenewal.autoEnabledTitle") : t("signinRenewal.autoDisabledTitle"),
+        description: enabled
+          ? t("signinRenewal.autoEnabledDescription", { cost: renewal.cost, currencyName, days: renewal.days })
+          : t("signinRenewal.autoDisabledDescription"),
+        variant: "success",
+      });
+    } catch (err) {
+      toast({
+        title: t("signinRenewal.autoUpdateFailed"),
+        description: err instanceof Error ? err.message : t("common.networkError"),
+        variant: "destructive",
+      });
+    } finally {
+      setUpdatingAutoRenewal(false);
     }
   };
 
@@ -217,6 +252,26 @@ export default function ScorePage() {
                 <p className="max-w-[280px] text-xs text-muted-foreground md:text-right">
                   {t("signinRenewal.requiresEmby")}
                 </p>
+              )}
+              {renewal?.auto_renewal_enabled && (
+                <div className="flex w-full min-w-0 items-center justify-between gap-3 rounded-md border border-border/60 bg-muted/30 px-3 py-2 md:w-[320px]">
+                  <label htmlFor="signin-auto-renewal" className="min-w-0 flex-1 cursor-pointer">
+                    <span className="block text-sm font-medium leading-5">{t("signinRenewal.autoLabel")}</span>
+                    <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
+                      {renewal.auto_renewal_available
+                        ? t("signinRenewal.autoDescription", { cost: renewal.cost, currencyName, days: renewal.days })
+                        : t("signinRenewal.autoUnavailable")}
+                    </span>
+                  </label>
+                  <Switch
+                    id="signin-auto-renewal"
+                    checked={renewal.auto_renewal_user_enabled === true}
+                    onCheckedChange={handleAutoRenewalChange}
+                    disabled={updatingAutoRenewal || !renewal.auto_renewal_available}
+                    aria-label={t("signinRenewal.autoLabel")}
+                    className="shrink-0"
+                  />
+                </div>
               )}
               <Button
                 size="lg"

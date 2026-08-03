@@ -1944,7 +1944,7 @@ Telegram 管理中的「Bot 指令管理」页面不会创建第二套指令存�
 
 ### 11.4 Signin 模块
 
-> 签到积分默认仅记录余额；管理员可通过 `[SAR].signin_renewal_enabled` 或 `[Signin].renewal_enabled` 开启积分续期。关闭时 `/signin/me` 的 `renewal.enabled=false`，前端不展示兑换入口。
+> 签到积分默认仅记录余额；管理员可通过 `[SAR].signin_renewal_enabled` 或 `[Signin].renewal_enabled` 开启积分续期。关闭时 `/signin/me` 的 `renewal.enabled=false`，前端不展示兑换入口。完整规则见 [签到与积分续期](../features/signin.md)。
 
 | 方法/路径 | 认证 | 说明 |
 | --------- | ---- | ---- |
@@ -1955,6 +1955,10 @@ Telegram 管理中的「Bot 指令管理」页面不会创建第二套指令存�
 | `GET /signin/history` | `AuthUser` | 签到历史 |
 
 `POST /signin/renew` 只续期已有 Emby 权益。用户没有 `EmbyID` 或仅持有 `PendingEmby` 待开通资格时返回 `409 RENEW_REQUIRES_EMBY`，Store 在原子写入内复核后才扣分，因此拒绝时积分和到期时间都不变。成功后在同一次状态写入中扣减 `signin.points` 并延长当前用户 `expired_at`；积分不足返回 `SIGNIN_INSUFFICIENT_POINTS`，功能未开启返回 `SIGNIN_RENEWAL_DISABLED`。
+
+管理员再开启 `[SAR].signin_auto_renewal_enabled` 后，符合条件的用户可在签到页自行开启自动续期。个人偏好通过 `PUT /users/me` 的严格布尔字段 `signin_auto_renewal` 更新；尝试在管理员未许可时开启返回 `403 SIGNIN_AUTO_RENEWAL_DISABLED`，关闭个人偏好始终允许。`GET /signin/me` 的 `renewal` 还返回 `auto_renewal_enabled`（全局许可）、`auto_renewal_user_enabled`（个人偏好）与 `auto_renewal_available`（当前账号是否具备开启资格）。
+
+自动续期只在 `check_expired` 发现启用中的普通账号已经到期时尝试一次。签到、积分续期、管理员自动续期许可和个人偏好必须全部开启，并要求已有 Emby、非待开通、非永久账号且余额不少于配置消耗；扣分与延长有效期在同一个 Store 原子写入完成。失败不会扣分，并继续执行普通到期禁用。管理员、白名单、配置管理员及手动禁用账号不会自动消费积分。
 
 ### 11.5 公告（前台）
 

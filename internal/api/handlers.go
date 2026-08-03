@@ -453,6 +453,27 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 	if !okBool {
 		return
 	}
+	signinAutoRenewalNext, signinAutoRenewalSet, okBool := requireStrictBoolValue(w, payload, "signin_auto_renewal")
+	if !okBool {
+		return
+	}
+	if signinAutoRenewalSet && signinAutoRenewalNext {
+		cfg := *a.cfg()
+		switch {
+		case !signinAutoRenewalEnabled(cfg):
+			failWithCode(w, http.StatusForbidden, ErrSigninAutoRenewalDisabled, "管理员未开启签到自动续期")
+			return
+		case a.userIsProtected(p.User):
+			failWithCode(w, http.StatusConflict, ErrConflict, "管理员和白名单账号无需自动续期")
+			return
+		case validateSelfServiceRenewalTarget(p.User) != nil:
+			failWithCode(w, http.StatusConflict, ErrRenewRequiresEmby, "请先绑定或开通 Emby 账号，再开启自动续期")
+			return
+		case p.User.ExpiredAt <= 0 || expiryIsPermanent(p.User.ExpiredAt):
+			failWithCode(w, http.StatusConflict, ErrConflict, "当前账号没有需要自动续期的有效期")
+			return
+		}
+	}
 	if !a.cfg().BangumiEnabled {
 		if bgmModeSet {
 			failWithCode(w, http.StatusForbidden, ErrBangumiSyncDisabled, "Bangumi 同步未开启")
@@ -618,6 +639,17 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 		if notifyTicketTelegramSet {
 			u.NotifyOnTicketTelegram = notifyTicketTelegramNext
 		}
+		if signinAutoRenewalSet {
+			if signinAutoRenewalNext {
+				if !signinAutoRenewalEnabled(*a.cfg()) || a.userIsProtected(*u) || u.ExpiredAt <= 0 || expiryIsPermanent(u.ExpiredAt) {
+					return store.ErrConflict
+				}
+				if err := validateSelfServiceRenewalTarget(*u); err != nil {
+					return err
+				}
+			}
+			u.SigninAutoRenewal = signinAutoRenewalNext
+		}
 		if passwordChangeEmailRequiredSet {
 			u.RequireEmailForPasswordChange = passwordChangeEmailRequiredNext
 		}
@@ -629,13 +661,27 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 		}
 		return nil
 	})
+	if signinAutoRenewalSet && signinAutoRenewalNext {
+		switch {
+		case errors.Is(err, store.ErrEmbyRequired):
+			failWithCode(w, http.StatusConflict, ErrRenewRequiresEmby, "请先绑定或开通 Emby 账号，再开启自动续期")
+			return
+		case errors.Is(err, store.ErrConflict):
+			failWithCode(w, http.StatusConflict, ErrConflict, "账号状态已变化，请刷新后重试")
+			return
+		}
+	}
 	if statusFromError(w, err) {
 		return
 	}
 	if bgmTokenChanged {
 		_ = a.store().DeleteBangumiCollectionCache(u.UID, 0)
 	}
-	a.audit(r, "update_profile", "user", 0, nil)
+	if signinAutoRenewalSet {
+		a.audit(r, "update_signin_auto_renewal", "user", 0, map[string]any{"enabled": signinAutoRenewalNext})
+	} else {
+		a.audit(r, "update_profile", "user", 0, nil)
+	}
 	ok(w, "更新成功", publicUser(u))
 }
 
@@ -1531,6 +1577,7 @@ func (a *App) handleUserSettings(w http.ResponseWriter, r *http.Request, _ Param
 	ok(w, "OK", map[string]any{
 		"bgm_mode": u.BGMMode, "bgm_token_set": u.BGMToken != "", "api_key_enabled": u.LegacyAPIKeyStatus,
 		"notify_on_login_telegram": u.NotifyOnLoginTelegram, "notify_on_login_email": u.NotifyOnLoginEmail, "notify_on_ticket_telegram": u.NotifyOnTicketTelegram,
+		"signin_auto_renewal":                 u.SigninAutoRenewal,
 		"password_change_email_required":      a.passwordChangeEmailRequired(u, emailPurposeChangePass),
 		"emby_password_email_required":        a.passwordChangeEmailRequired(u, emailPurposeChangeEmby),
 		"emby_password_old_password_required": u.RequireOldPasswordForEmbyPasswordChange,

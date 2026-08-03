@@ -173,10 +173,11 @@ const (
 	ErrRegcodeBatchFailed      ErrCode = "REGCODE_BATCH_DELETE_FAILED"
 
 	// === 签到 ===
-	ErrSigninDisabled           ErrCode = "SIGNIN_DISABLED"
-	ErrSigninRenewalDisabled    ErrCode = "SIGNIN_RENEWAL_DISABLED"
-	ErrSigninInsufficientPoints ErrCode = "SIGNIN_INSUFFICIENT_POINTS"
-	ErrRenewRequiresEmby        ErrCode = "RENEW_REQUIRES_EMBY"
+	ErrSigninDisabled            ErrCode = "SIGNIN_DISABLED"
+	ErrSigninRenewalDisabled     ErrCode = "SIGNIN_RENEWAL_DISABLED"
+	ErrSigninAutoRenewalDisabled ErrCode = "SIGNIN_AUTO_RENEWAL_DISABLED"
+	ErrSigninInsufficientPoints  ErrCode = "SIGNIN_INSUFFICIENT_POINTS"
+	ErrRenewRequiresEmby         ErrCode = "RENEW_REQUIRES_EMBY"
 
 	// === 数据库迁移 / 备份 ===
 	// database_admin.go 的 fail() 全部是中文裸串；前端目前只能 toast 后端

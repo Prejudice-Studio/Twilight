@@ -365,7 +365,15 @@
     "actionLabel": "{cost} {currencyName} 续 {days} 天",
     "actionTitle": "{cost} {currencyName} 可兑换 {days} 天",
     "requiresEmby": "请先绑定或开通 Emby 账号，再使用续期权益",
-    "successDescription": "已消耗 {spent} {currencyName}，当前有效期：{expireStatus}"
+    "successDescription": "已消耗 {spent} {currencyName}，当前有效期：{expireStatus}",
+    "autoLabel": "到期自动续期",
+    "autoDescription": "到期检查时，余额达到 {cost} {currencyName} 将自动续期 {days} 天",
+    "autoUnavailable": "仅已绑定 Emby 且有固定有效期的普通账号可开启",
+    "autoEnabledTitle": "已开启自动续期",
+    "autoEnabledDescription": "到期时将尝试消耗 {cost} {currencyName} 续期 {days} 天",
+    "autoDisabledTitle": "已关闭自动续期",
+    "autoDisabledDescription": "到期时不会自动消耗签到积分",
+    "autoUpdateFailed": "自动续期设置失败"
   },
   "score": {
     "defaultCurrency": "积分",

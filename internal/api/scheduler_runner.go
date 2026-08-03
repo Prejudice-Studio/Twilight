@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -106,9 +107,21 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 	now := time.Now().Unix()
 	switch jobID {
 	case "check_expired":
+		if err := a.store().Refresh(); err != nil {
+			return map[string]any{"success": false}, []string{"failed to refresh persisted state"}, err
+		}
 		disabled := 0
 		embyDisabled := 0
 		skippedProtected := 0
+		autoRenewed := 0
+		autoRenewalInsufficient := 0
+		autoRenewalIneligible := 0
+		autoRenewalFailed := 0
+		autoRenewalPointsSpent := 0
+		autoRenewalEmbyEnabled := 0
+		autoRenewalEmbyEnableFailed := 0
+		cfg := *a.cfg()
+		autoRenewalActive := signinAutoRenewalEnabled(cfg)
 		users := a.store().ListUsers()
 		invitedUIDs := map[int64]bool{}
 		for _, rel := range a.store().InviteRelations() {
@@ -119,7 +132,7 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 			batchCount++
 			if batchCount%50 == 0 {
 				if err := r.Context().Err(); err != nil {
-					return map[string]any{"success": false, "terminated": true, "disabled": disabled, "emby_disabled": embyDisabled, "skipped_protected": skippedProtected}, []string{"job terminated"}, err
+					return map[string]any{"success": false, "terminated": true, "disabled": disabled, "emby_disabled": embyDisabled, "skipped_protected": skippedProtected, "auto_renewed": autoRenewed, "auto_renewal_insufficient": autoRenewalInsufficient, "auto_renewal_ineligible": autoRenewalIneligible, "auto_renewal_failed": autoRenewalFailed, "auto_renewal_points_spent": autoRenewalPointsSpent}, []string{"job terminated"}, err
 				}
 			}
 			// 守护管理员 / 白名单不被自动禁用：运维约定"绝不会给 admin 设
@@ -136,6 +149,41 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 				continue
 			}
 			if u.Active && u.ExpiredAt > 0 && u.ExpiredAt < now {
+				if autoRenewalActive && u.SigninAutoRenewal {
+					renewed, _, renewErr := a.spendSigninRenewal(u.UID, cfg.SigninRenewalCost, cfg.SigninRenewalDays, time.Unix(now, 0), true)
+					if renewErr == nil {
+						autoRenewed++
+						autoRenewalPointsSpent += cfg.SigninRenewalCost
+						if renewed.EmbyDisabled && a.embyConfigured() {
+							sideCtx, sideCancel := schedulerSideEffectContext(r.Context())
+							if err := a.embyApplyEnabledState(sideCtx, renewed.UID, renewed.EmbyID, true); err != nil {
+								autoRenewalEmbyEnableFailed++
+								zap.L().Warn("failed to re-enable Emby after automatic sign-in renewal", zap.Int64("uid", renewed.UID), zap.Error(err))
+							} else {
+								autoRenewalEmbyEnabled++
+							}
+							sideCancel()
+						}
+						continue
+					}
+					switch {
+					case errors.Is(renewErr, store.ErrInsufficientPoints):
+						autoRenewalInsufficient++
+					case errors.Is(renewErr, store.ErrEmbyRequired), errors.Is(renewErr, store.ErrConflict):
+						autoRenewalIneligible++
+					default:
+						autoRenewalFailed++
+						zap.L().Warn("automatic sign-in renewal failed", zap.Int64("uid", u.UID), zap.Error(renewErr))
+					}
+					// SpendSigninPointsAndUpdateUser refreshes under the store lock. Re-read
+					// before expiry handling so a concurrent renewal is never disabled from
+					// the stale ListUsers snapshot.
+					latest, ok := a.store().User(u.UID)
+					if !ok || !latest.Active || latest.ExpiredAt <= 0 || latest.ExpiredAt >= now {
+						continue
+					}
+					u = latest
+				}
 				// For invited users (have invite relation), only disable Emby access
 				// but keep the account active so they can still log in and renew
 				isInvited := invitedUIDs[u.UID]
@@ -171,6 +219,14 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 				}
 			}
 		}
+		if autoRenewed > 0 {
+			a.auditSystem("scheduler", "auto_renew_expired_users", 0, map[string]any{
+				"auto_renewed":                    autoRenewed,
+				"auto_renewal_points_spent":       autoRenewalPointsSpent,
+				"auto_renewal_emby_enabled":       autoRenewalEmbyEnabled,
+				"auto_renewal_emby_enable_failed": autoRenewalEmbyEnableFailed,
+			})
+		}
 		if disabled > 0 || embyDisabled > 0 {
 			a.auditSystem("scheduler", "disable_expired_users", 0, map[string]any{
 				"disabled":          disabled,
@@ -178,7 +234,19 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 				"skipped_protected": skippedProtected,
 			})
 		}
-		return map[string]any{"success": true, "disabled": disabled, "emby_disabled": embyDisabled, "skipped_protected": skippedProtected}, []string{fmt.Sprintf("disabled %d expired users", disabled)}, nil
+		return map[string]any{
+			"success":                         true,
+			"disabled":                        disabled,
+			"emby_disabled":                   embyDisabled,
+			"skipped_protected":               skippedProtected,
+			"auto_renewed":                    autoRenewed,
+			"auto_renewal_insufficient":       autoRenewalInsufficient,
+			"auto_renewal_ineligible":         autoRenewalIneligible,
+			"auto_renewal_failed":             autoRenewalFailed,
+			"auto_renewal_points_spent":       autoRenewalPointsSpent,
+			"auto_renewal_emby_enabled":       autoRenewalEmbyEnabled,
+			"auto_renewal_emby_enable_failed": autoRenewalEmbyEnableFailed,
+		}, []string{fmt.Sprintf("auto-renewed %d and disabled %d expired users", autoRenewed, disabled)}, nil
 	case "check_expiring", "expiry_reminders":
 		defaultDays := a.cfg().NotificationExpiryRemindDays
 		if defaultDays <= 0 {

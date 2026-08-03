@@ -1680,6 +1680,7 @@ func publicUser(u store.User) map[string]any {
 		"notify_on_login_telegram":            u.NotifyOnLoginTelegram,
 		"notify_on_login_email":               u.NotifyOnLoginEmail,
 		"notify_on_ticket_telegram":           u.NotifyOnTicketTelegram,
+		"signin_auto_renewal":                 u.SigninAutoRenewal,
 		"password_change_email_required":      u.RequireEmailForPasswordChange,
 		"emby_password_email_required":        u.RequireEmailForEmbyPasswordChange,
 		"emby_password_old_password_required": u.RequireOldPasswordForEmbyPasswordChange,

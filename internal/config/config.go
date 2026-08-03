@@ -293,6 +293,7 @@ type Config struct {
 	SigninStreakBonusPoints      []int
 	SigninResetAfterMiss         bool
 	SigninRenewalEnabled         bool
+	SigninAutoRenewalEnabled     bool
 	SigninRenewalCost            int
 	SigninRenewalDays            int
 	InviteEnabled                bool
@@ -471,6 +472,7 @@ func Load(path string) (Config, error) {
 	cfg.SigninStreakBonusPoints = reader.intListValue(cfg.SigninStreakBonusPoints, "SAR.streak_bonus_points", "Signin.streak_bonus_points", "streak_bonus_points")
 	cfg.SigninResetAfterMiss = reader.boolValue(cfg.SigninResetAfterMiss, "SAR.reset_after_miss", "Signin.reset_after_miss", "reset_after_miss")
 	cfg.SigninRenewalEnabled = reader.boolValue(cfg.SigninRenewalEnabled, "SAR.signin_renewal_enabled", "Signin.renewal_enabled", "signin_renewal_enabled")
+	cfg.SigninAutoRenewalEnabled = reader.boolValue(cfg.SigninAutoRenewalEnabled, "SAR.signin_auto_renewal_enabled", "Signin.auto_renewal_enabled", "signin_auto_renewal_enabled")
 	cfg.SigninRenewalCost = reader.intValue(cfg.SigninRenewalCost, "SAR.signin_renewal_cost", "Signin.renewal_cost", "signin_renewal_cost")
 	cfg.SigninRenewalDays = reader.intValue(cfg.SigninRenewalDays, "SAR.signin_renewal_days", "Signin.renewal_days", "signin_renewal_days")
 	cfg.InviteEnabled = reader.boolValue(cfg.InviteEnabled, "SAR.invite_enabled", "Register.invite_enabled", "invite_enabled")
@@ -692,6 +694,7 @@ func defaults() Config {
 		SigninStreakBonusPoints:              []int{10, 50, 100, 300},
 		SigninResetAfterMiss:                 true,
 		SigninRenewalEnabled:                 false,
+		SigninAutoRenewalEnabled:             false,
 		SigninRenewalCost:                    100,
 		SigninRenewalDays:                    30,
 		InviteEnabled:                        true,
@@ -988,6 +991,9 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("TWILIGHT_SIGNIN_RENEWAL_ENABLED"); v != "" {
 		cfg.SigninRenewalEnabled = boolValue(v, cfg.SigninRenewalEnabled)
+	}
+	if v := os.Getenv("TWILIGHT_SIGNIN_AUTO_RENEWAL_ENABLED"); v != "" {
+		cfg.SigninAutoRenewalEnabled = boolValue(v, cfg.SigninAutoRenewalEnabled)
 	}
 	if v := os.Getenv("TWILIGHT_SIGNIN_RENEWAL_COST"); v != "" {
 		cfg.SigninRenewalCost = intValue(v, cfg.SigninRenewalCost)

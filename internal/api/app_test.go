@@ -1203,6 +1203,188 @@ func TestSigninRenewalRequiresEmbyWithoutSpendingPoints(t *testing.T) {
 	}
 }
 
+func TestSigninAutoRenewalPreferenceEnforcesBackendGates(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().AuditLogEnabled = true
+	cookies := registerAndLogin(t, app, "auto-renew-setting", "Admin123456")
+	user, _ := app.store().FindUserByUsername("auto-renew-setting")
+	if _, err := app.store().UpdateUser(user.UID, func(u *store.User) error {
+		u.EmbyID = "emby-auto-renew-setting"
+		u.ExpiredAt = time.Now().AddDate(0, 0, 7).Unix()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	invalid := doJSON(app, http.MethodPut, "/api/v1/users/me", `{"signin_auto_renewal":"true"}`, cookies)
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("non-boolean preference status=%d body=%s", invalid.Code, invalid.Body.String())
+	}
+	disabled := doJSON(app, http.MethodPut, "/api/v1/users/me", `{"signin_auto_renewal":true}`, cookies)
+	if disabled.Code != http.StatusForbidden || !strings.Contains(disabled.Body.String(), string(ErrSigninAutoRenewalDisabled)) {
+		t.Fatalf("disabled auto renewal status=%d body=%s", disabled.Code, disabled.Body.String())
+	}
+
+	app.cfg().SigninRenewalEnabled = true
+	app.cfg().SigninAutoRenewalEnabled = true
+	app.cfg().SigninRenewalCost = 40
+	app.cfg().SigninRenewalDays = 10
+	enabled := doJSON(app, http.MethodPut, "/api/v1/users/me", `{"signin_auto_renewal":true}`, cookies)
+	if enabled.Code != http.StatusOK {
+		t.Fatalf("enable auto renewal status=%d body=%s", enabled.Code, enabled.Body.String())
+	}
+	latest, _ := app.store().User(user.UID)
+	if !latest.SigninAutoRenewal {
+		t.Fatal("auto renewal preference was not persisted")
+	}
+	summary := doJSON(app, http.MethodGet, "/api/v1/signin/me", ``, cookies)
+	if summary.Code != http.StatusOK || !strings.Contains(summary.Body.String(), `"auto_renewal_user_enabled":true`) || !strings.Contains(summary.Body.String(), `"auto_renewal_available":true`) {
+		t.Fatalf("signin summary missing auto renewal state: status=%d body=%s", summary.Code, summary.Body.String())
+	}
+	foundAudit := false
+	for _, entry := range app.store().ListAuditLogs() {
+		if entry.Action == "update_signin_auto_renewal" && entry.TargetUID == 0 {
+			foundAudit = true
+			break
+		}
+	}
+	if !foundAudit {
+		t.Fatal("auto renewal preference update was not audited")
+	}
+
+	// A user must always be able to opt out, even after the administrator
+	// disables the global permission.
+	app.cfg().SigninAutoRenewalEnabled = false
+	disabledByUser := doJSON(app, http.MethodPut, "/api/v1/users/me", `{"signin_auto_renewal":false}`, cookies)
+	if disabledByUser.Code != http.StatusOK {
+		t.Fatalf("disable preference status=%d body=%s", disabledByUser.Code, disabledByUser.Body.String())
+	}
+	latest, _ = app.store().User(user.UID)
+	if latest.SigninAutoRenewal {
+		t.Fatal("auto renewal preference remained enabled after opt-out")
+	}
+}
+
+func TestCheckExpiredAutoRenewsWithSigninPoints(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().AuditLogEnabled = true
+	app.cfg().SigninRenewalEnabled = true
+	app.cfg().SigninAutoRenewalEnabled = true
+	app.cfg().SigninRenewalCost = 40
+	app.cfg().SigninRenewalDays = 10
+	expiredAt := time.Now().Add(-time.Hour).Unix()
+
+	create := func(username, embyID string, auto bool, role int, points int) store.User {
+		t.Helper()
+		u, err := app.store().CreateUser(store.User{Username: username, EmbyID: embyID, SigninAutoRenewal: auto, Role: role, Active: true, ExpiredAt: expiredAt})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if points > 0 {
+			if _, created, err := app.store().AddSigninWithOptions(u.UID, points, nil, true); err != nil || !created {
+				t.Fatalf("seed points for %s created=%v err=%v", username, created, err)
+			}
+		}
+		return u
+	}
+
+	renewed := create("auto-renew-success", "emby-auto-renew-success", true, store.RoleNormal, 100)
+	preferenceOff := create("auto-renew-off", "emby-auto-renew-off", false, store.RoleNormal, 100)
+	insufficient := create("auto-renew-poor", "emby-auto-renew-poor", true, store.RoleNormal, 20)
+	noEmby := create("auto-renew-no-emby", "", true, store.RoleNormal, 100)
+	admin := create("auto-renew-admin", "emby-auto-renew-admin", true, store.RoleAdmin, 100)
+	whitelist := create("auto-renew-whitelist", "emby-auto-renew-whitelist", true, store.RoleWhitelist, 100)
+
+	req := httptest.NewRequest(http.MethodPost, "/scheduler/internal", nil)
+	summary, _, err := app.runSchedulerJob(req, "check_expired")
+	if err != nil {
+		t.Fatalf("run check_expired: %v", err)
+	}
+	if got := int(numeric(summary["auto_renewed"])); got != 1 {
+		t.Fatalf("auto_renewed=%d want=1 summary=%v", got, summary)
+	}
+	if got := int(numeric(summary["auto_renewal_insufficient"])); got != 1 {
+		t.Fatalf("auto_renewal_insufficient=%d want=1 summary=%v", got, summary)
+	}
+	if got := int(numeric(summary["auto_renewal_ineligible"])); got != 1 {
+		t.Fatalf("auto_renewal_ineligible=%d want=1 summary=%v", got, summary)
+	}
+	if got := int(numeric(summary["auto_renewal_points_spent"])); got != 40 {
+		t.Fatalf("auto_renewal_points_spent=%d want=40 summary=%v", got, summary)
+	}
+	foundAudit := false
+	for _, entry := range app.store().ListAuditLogs() {
+		if entry.Action == "auto_renew_expired_users" {
+			foundAudit = true
+			break
+		}
+	}
+	if !foundAudit {
+		t.Fatal("automatic expiry renewal was not audited")
+	}
+
+	latestRenewed, _ := app.store().User(renewed.UID)
+	if !latestRenewed.Active || latestRenewed.ExpiredAt <= time.Now().Unix() {
+		t.Fatalf("auto-renewed user remained expired: %#v", latestRenewed)
+	}
+	if points := app.store().Signin(renewed.UID).Points; points != 60 {
+		t.Fatalf("auto renewal points=%d want=60", points)
+	}
+	for _, tc := range []struct {
+		user       store.User
+		wantPoints int
+	}{
+		{preferenceOff, 100},
+		{insufficient, 20},
+		{noEmby, 100},
+	} {
+		latest, _ := app.store().User(tc.user.UID)
+		if latest.Active {
+			t.Fatalf("ineligible expired user %s was not disabled", latest.Username)
+		}
+		if points := app.store().Signin(tc.user.UID).Points; points != tc.wantPoints {
+			t.Fatalf("ineligible user %s points=%d want=%d", latest.Username, points, tc.wantPoints)
+		}
+	}
+	for _, protected := range []store.User{admin, whitelist} {
+		latest, _ := app.store().User(protected.UID)
+		if !latest.Active || app.store().Signin(protected.UID).Points != 100 {
+			t.Fatalf("protected user was changed by auto renewal: %#v", latest)
+		}
+	}
+
+	second, _, err := app.runSchedulerJob(httptest.NewRequest(http.MethodPost, "/scheduler/internal", nil), "check_expired")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := int(numeric(second["auto_renewed"])); got != 0 || app.store().Signin(renewed.UID).Points != 60 {
+		t.Fatalf("second expiry run spent points again: summary=%v points=%d", second, app.store().Signin(renewed.UID).Points)
+	}
+}
+
+func TestCheckExpiredDoesNotAutoRenewWhenAdminPermissionIsOff(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().SigninRenewalEnabled = true
+	app.cfg().SigninAutoRenewalEnabled = false
+	app.cfg().SigninRenewalCost = 40
+	app.cfg().SigninRenewalDays = 10
+	u, err := app.store().CreateUser(store.User{Username: "auto-renew-global-off", EmbyID: "emby-auto-renew-global-off", SigninAutoRenewal: true, Role: store.RoleNormal, Active: true, ExpiredAt: time.Now().Add(-time.Hour).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := app.store().AddSigninWithOptions(u.UID, 100, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	summary, _, err := app.runSchedulerJob(httptest.NewRequest(http.MethodPost, "/scheduler/internal", nil), "check_expired")
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest, _ := app.store().User(u.UID)
+	if latest.Active || app.store().Signin(u.UID).Points != 100 || int(numeric(summary["auto_renewed"])) != 0 {
+		t.Fatalf("global-off user was auto-renewed: user=%#v points=%d summary=%v", latest, app.store().Signin(u.UID).Points, summary)
+	}
+}
+
 func TestRenewalCodesRequireEmbyWithoutBeingConsumed(t *testing.T) {
 	app := newTestApp(t)
 	user, err := app.store().CreateUser(store.User{Username: "code-no-emby", Role: store.RoleNormal, Active: true, ExpiredAt: time.Now().AddDate(0, 0, 1).Unix()})

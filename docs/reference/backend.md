@@ -85,7 +85,7 @@ systemd 部署对应三个服务单元：`twilight`、`twilight-bot`、`twilight
 
 > 运行入口不会读取 `TWILIGHT_CONFIG_FILE` 指向的其它路径；这保证 1Panel、systemd 与手动启动都默认使用项目目录下的 `config.toml`。需要临时测试其它配置时，请切换到对应测试目录后再启动进程。
 
-配置项使用 TOML 分段（如 `[Global]`、`[API]`、`[Database]`、`[Emby]`、`[Telegram]`、`[SAR]`、`[Email]`、`[RateLimit]`、`[Scheduler]`、`[SystemUpdate]`、`[Security]` 等）。读取时对每个字段都准备了多个候选键（含分段键、历史扁平键和裸键），存在历史命名兼容；例如签到相关项同时识别 `SAR.*` 与历史的 `Signin.*`。
+配置项使用 TOML 分段（如 `[Global]`、`[API]`、`[Database]`、`[Emby]`、`[Telegram]`、`[SAR]`、`[Email]`、`[RateLimit]`、`[Scheduler]`、`[SystemUpdate]`、`[Security]` 等）。读取时对每个字段都准备了多个候选键（含分段键、历史扁平键和裸键），存在历史命名兼容；例如签到相关项同时识别 `SAR.*` 与历史的 `Signin.*`。自动积分续期的管理员许可为 `SAR.signin_auto_renewal_enabled`，历史分段兼容键为 `Signin.auto_renewal_enabled`，默认关闭。
 
 ### 关键默认值
 
@@ -177,7 +177,7 @@ systemd 部署对应三个服务单元：`twilight`、`twilight-bot`、`twilight
 | `TWILIGHT_USER_LIMIT` / `TWILIGHT_EMBY_USER_LIMIT` | 系统用户与 Emby 用户上限（`-1` 表示不限）。 |
 | `TWILIGHT_REGCODE_FORMAT` / `TWILIGHT_REGCODE_RANDOM_ALGORITHM` | 注册码格式与随机算法。 |
 | `TWILIGHT_MEDIA_REQUEST_ENABLED` | 求片开关。 |
-| `TWILIGHT_SIGNIN_*` | 签到相关（开关、货币名、每日积分、连签奖励、积分续期开关/消耗/天数等）。 |
+| `TWILIGHT_SIGNIN_*` | 签到相关（开关、货币名、每日积分、连签奖励、积分续期开关/自动续期许可/消耗/天数等）；自动续期环境变量为 `TWILIGHT_SIGNIN_AUTO_RENEWAL_ENABLED`。 |
 | `TWILIGHT_NOTIFICATION_ENABLED` / `TWILIGHT_NOTIFICATION_EXPIRY_REMIND_DAYS` | 到期提醒。 |
 | `TWILIGHT_AUTO_CLEANUP_PENDING_EMBY` / `TWILIGHT_AUTO_CLEANUP_PENDING_EMBY_DAYS` | 待补建 Emby 自动清理。 |
 | `TWILIGHT_RATE_LIMIT_*` | 各类限流阈值（全局、登录、注册、找回密码、邮箱发码、上传、管理员图标、API Key 默认）。 |
@@ -199,7 +199,7 @@ systemd 部署对应三个服务单元：`twilight`、`twilight-bot`、`twilight
 | `TWILIGHT_EMAIL_VALIDATION_MODE` / `TWILIGHT_EMAIL_WHITELIST` / `TWILIGHT_EMAIL_BLACKLIST` | 邮箱域名校验模式与黑白名单（与注册共用，逗号分隔）。 |
 | `TWILIGHT_RATE_LIMIT_EMAIL_CODE_IP_PER_10M` / `TWILIGHT_RATE_LIMIT_EMAIL_CODE_ADDR_PER_10M` / `TWILIGHT_RATE_LIMIT_EMAIL_CODE_UID_PER_10M` | 发码限流（每 IP / 每收件地址 / 每登录账号）。 |
 
-更多按业务划分的配置项见各功能文档：[注册码与卡码](../features/regcodes.md)、[邮箱验证与找回密码](../features/email.md)、[邀请树](../features/invite.md)、[求片系统](../features/media-requests.md)、[工单系统](../features/tickets.md)、[Telegram Bot 命令](../features/telegram-bot.md)、[Bangumi 同步](../features/bangumi.md)、[背景与头像](../features/background.md)。
+更多按业务划分的配置项见各功能文档：[签到与积分续期](../features/signin.md)、[注册码与卡码](../features/regcodes.md)、[邮箱验证与找回密码](../features/email.md)、[邀请树](../features/invite.md)、[求片系统](../features/media-requests.md)、[工单系统](../features/tickets.md)、[Telegram Bot 命令](../features/telegram-bot.md)、[Bangumi 同步](../features/bangumi.md)、[背景与头像](../features/background.md)。
 
 ## Redis 优化
 

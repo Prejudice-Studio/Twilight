@@ -10,7 +10,7 @@ import (
 )
 
 var schedulerJobs = []map[string]any{
-	{"id": "check_expired", "name": "检查已过期用户", "description": "扫描已过期账号，按规则禁用系统或 Emby 访问，并清除过期会话。", "manual_only": false, "enabled": true},
+	{"id": "check_expired", "name": "检查已过期用户", "description": "扫描已过期账号，先按签到配置尝试自动积分续期，再禁用未续期账号并清除过期会话。", "manual_only": false, "enabled": true},
 	{"id": "check_expiring", "name": "检查即将到期用户", "description": "统计近期即将到期的用户数量，供管理员评估续期风险。", "manual_only": false, "enabled": true},
 	{"id": "expiry_reminders", "name": "发送到期提醒", "description": "向即将到期且已绑定 Telegram 的用户发送续期通知。", "manual_only": false, "enabled": true},
 	{"id": "daily_stats", "name": "每日统计", "description": "记录每日用户总数与活跃用户数。", "manual_only": false, "enabled": true},

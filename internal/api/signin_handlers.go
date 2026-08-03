@@ -31,8 +31,11 @@ func (a *App) handleSigninConfig(w http.ResponseWriter, r *http.Request, _ Param
 }
 
 func (a *App) handleSigninMe(w http.ResponseWriter, r *http.Request, _ Params) {
-	si := a.store().Signin(current(r).User.UID)
-	ok(w, "OK", signinSummaryPayload(*a.cfg(), si))
+	user := current(r).User
+	si := a.store().Signin(user.UID)
+	payload := signinSummaryPayload(*a.cfg(), si)
+	a.attachSigninAutoRenewal(payload, *a.cfg(), si.Points, user)
+	ok(w, "OK", payload)
 }
 
 func (a *App) handleSignin(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -57,6 +60,7 @@ func (a *App) handleSignin(w http.ResponseWriter, r *http.Request, _ Params) {
 		}
 	}
 	payload := signinActionPayload(*a.cfg(), si, createdToday, dailyPoints, bonusPoints)
+	a.attachSigninAutoRenewal(payload, *a.cfg(), si.Points, current(r).User)
 	if createdToday {
 		a.audit(r, "signin", "user", 0, map[string]any{"points": dailyPoints, "bonus": bonusPoints})
 		ok(w, "签到成功", payload)
@@ -115,16 +119,7 @@ func (a *App) handleSigninRenew(w http.ResponseWriter, r *http.Request, _ Params
 	}
 	cost := cfg.SigninRenewalCost
 	days := cfg.SigninRenewalDays
-	u, si, err := a.store().SpendSigninPointsAndUpdateUser(p.User.UID, cost, func(u *store.User) error {
-		if err := validateSelfServiceRenewalTarget(*u); err != nil {
-			return err
-		}
-		if expiryIsPermanent(u.ExpiredAt) {
-			return store.ErrConflict
-		}
-		renewExpiryAndReactivate(u, addDaysToExpiry(u.ExpiredAt, days, time.Now()))
-		return nil
-	})
+	u, si, err := a.spendSigninRenewal(p.User.UID, cost, days, time.Now(), false)
 	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrEmbyRequired):
@@ -138,11 +133,14 @@ func (a *App) handleSigninRenew(w http.ResponseWriter, r *http.Request, _ Params
 		}
 		return
 	}
+	a.audit(r, "renew_with_signin_points", "user", 0, map[string]any{"spent_points": cost, "days": days})
+	renewalPayload := signinRenewalPayload(cfg, si.Points)
+	a.attachSigninAutoRenewalToRenewal(renewalPayload, cfg, u)
 	ok(w, signinRenewalSuccessMessage, map[string]any{
 		"currency_name":    signinCurrencyName(cfg),
 		"spent_points":     cost,
 		"remaining_points": si.Points,
-		"renewal":          signinRenewalPayload(cfg, si.Points),
+		"renewal":          renewalPayload,
 		"expire_status":    expireStatus(u.ExpiredAt),
 		"expired_at":       publicExpiryUnix(u.ExpiredAt),
 		"user":             publicUser(u),
@@ -226,6 +224,10 @@ func signinRenewalEnabled(cfg config.Config) bool {
 	return cfg.SigninRenewalEnabled && cfg.SigninRenewalCost > 0 && cfg.SigninRenewalDays > 0
 }
 
+func signinAutoRenewalEnabled(cfg config.Config) bool {
+	return cfg.SigninEnabled && signinRenewalEnabled(cfg) && cfg.SigninAutoRenewalEnabled
+}
+
 func signinRenewalPayload(cfg config.Config, points int) map[string]any {
 	cost := cfg.SigninRenewalCost
 	if cost < 0 {
@@ -237,11 +239,48 @@ func signinRenewalPayload(cfg config.Config, points int) map[string]any {
 	}
 	enabled := signinRenewalEnabled(cfg)
 	return map[string]any{
-		"enabled":    enabled,
-		"cost":       cost,
-		"days":       days,
-		"affordable": enabled && points >= cost,
+		"enabled":              enabled,
+		"cost":                 cost,
+		"days":                 days,
+		"affordable":           enabled && points >= cost,
+		"auto_renewal_enabled": signinAutoRenewalEnabled(cfg),
 	}
+}
+
+func (a *App) attachSigninAutoRenewal(payload map[string]any, cfg config.Config, points int, user store.User) {
+	renewal, _ := payload["renewal"].(map[string]any)
+	if renewal == nil {
+		renewal = signinRenewalPayload(cfg, points)
+		payload["renewal"] = renewal
+	}
+	a.attachSigninAutoRenewalToRenewal(renewal, cfg, user)
+}
+
+func (a *App) attachSigninAutoRenewalToRenewal(renewal map[string]any, cfg config.Config, user store.User) {
+	renewal["auto_renewal_user_enabled"] = user.SigninAutoRenewal
+	renewal["auto_renewal_available"] = signinAutoRenewalEnabled(cfg) &&
+		!a.userIsProtected(user) &&
+		validateSelfServiceRenewalTarget(user) == nil &&
+		user.ExpiredAt > 0 &&
+		!expiryIsPermanent(user.ExpiredAt)
+}
+
+func (a *App) spendSigninRenewal(uid int64, cost, days int, now time.Time, automatic bool) (store.User, store.Signin, error) {
+	return a.store().SpendSigninPointsAndUpdateUser(uid, cost, func(u *store.User) error {
+		if err := validateSelfServiceRenewalTarget(*u); err != nil {
+			return err
+		}
+		if expiryIsPermanent(u.ExpiredAt) {
+			return store.ErrConflict
+		}
+		if automatic {
+			if !u.SigninAutoRenewal || !u.Active || a.userIsProtected(*u) || u.ExpiredAt <= 0 || u.ExpiredAt >= now.Unix() {
+				return store.ErrConflict
+			}
+		}
+		renewExpiryAndReactivate(u, addDaysToExpiry(u.ExpiredAt, days, now))
+		return nil
+	})
 }
 
 // signinDailyPoints 用 crypto/rand 生成 [min, max] 区间内的整数。

@@ -354,7 +354,15 @@
     "actionLabel": "Renew {days} days for {cost} {currencyName}",
     "actionTitle": "Exchange {cost} {currencyName} for {days} days",
     "requiresEmby": "Bind or activate an Emby account before using renewal benefits.",
-    "successDescription": "Spent {spent} {currencyName}. Current expiry: {expireStatus}"
+    "successDescription": "Spent {spent} {currencyName}. Current expiry: {expireStatus}",
+    "autoLabel": "Renew automatically at expiry",
+    "autoDescription": "At expiry, renew for {days} days when the balance reaches {cost} {currencyName}",
+    "autoUnavailable": "Available only to regular accounts with Emby linked and a fixed expiry",
+    "autoEnabledTitle": "Automatic renewal enabled",
+    "autoEnabledDescription": "At expiry, Twilight will try to spend {cost} {currencyName} for {days} more days",
+    "autoDisabledTitle": "Automatic renewal disabled",
+    "autoDisabledDescription": "Sign-in points will not be spent automatically at expiry",
+    "autoUpdateFailed": "Could not update automatic renewal"
   },
   "adminUsers": {
     "perPage": "Per Page",

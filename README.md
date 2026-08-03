@@ -112,6 +112,7 @@ pnpm build
 | [API Key 外部接入](docs/reference/api-key.md) | 第三方集成与权限矩阵 |
 | [开发者 JS 沙箱参考](docs/reference/developer-js.md) | Telegram Bot 自定义 JS 的内置对象、函数、权限边界与示例 |
 | [邮箱验证](docs/features/email.md) | SMTP、验证码、强制绑定、找回密码和邮箱管理 |
+| [签到与积分续期](docs/features/signin.md) | 每日签到、手动积分续期与到期自动续期规则 |
 | [注册码与卡码](docs/features/regcodes.md) | 注册码、续期码、白名单码算法和使用规则 |
 | [邀请系统](docs/features/invite.md) | 邀请关系管理、级联删除与启停语义 |
 | [邀请历史脏数据修复](docs/features/invite-data-repair.md) | 防止断开上下级后被旧关系或旧邀请码占用记录恢复 |
