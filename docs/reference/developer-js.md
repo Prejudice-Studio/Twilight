@@ -21,6 +21,10 @@
 
 ## 安全边界
 
+Telegram JS 交互状态是短期内存数据，不会无限增长：内联 callback 与消息 waiter 分别最多保留 512 项，超过容量时先清理过期项，再淘汰最早到期项并停止关联定时器。被淘汰的按钮会按“交互已过期”处理；脚本应把关键状态持久化到受控 Store API，而不是依赖长时间保留的临时交互。
+
+同一 callback token 或 waiter key 被新交互替换时，系统会分配新的内部 generation。旧定时器即使已经开始执行，也不能删除替换后的新状态或发送旧超时提示，从而避免快速重复交互造成状态串线。
+
 沙箱不会暴露文件系统、进程、模块加载器、浏览器对象、原始数据库 state、SQL、数据库连接信息、密码、Token、API Key、BGM Token 明文、Emby 内部 ID 或敏感配置。
 
 `fetch()` 是受限同步能力：只允许公开 `http/https` 的 `GET` / `POST` / `HEAD`，阻断 localhost、内网、链路本地（含云元数据 `169.254.169.254`）、广播与组播目标，禁用跳转和凭据，响应体有限长。除发起前按域名解析校验外，还会在 TCP 拨号阶段对**实际连接到的 IP** 再校验一次，阻断 DNS rebinding（解析时返回公网 IP、连接时切到内网 IP）与 IPv4-mapped IPv6 绕过。`eval`、`Function`、`globalThis`、`fetch`、`setTimeout`、`setInterval` 会被标记为高风险能力；`require`、`process`、浏览器对象、本地存储、cookie、`constructor.constructor` 等仍会被静态阻断。

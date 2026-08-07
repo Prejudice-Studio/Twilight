@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,11 +20,23 @@ import (
 
 var telegramBindCodePattern = regexp.MustCompile(`^[A-Za-z0-9]{6,16}$`)
 
-const telegramBotConfigCheckInterval = time.Second
+const (
+	telegramBotConfigCheckInterval = time.Second
+	telegramEmbyHealthTimeout      = 1500 * time.Millisecond
+	telegramEmbyHealthSuccessTTL   = 30 * time.Second
+	telegramEmbyHealthFailureTTL   = 5 * time.Second
+	delAccountPendingMaxEntries    = 1024
+)
 
 type telegramBotConfigKey struct {
 	apiURL string
 	token  string
+}
+
+type telegramEmbyHealthCache struct {
+	key   [sha256.Size]byte
+	ok    bool
+	until time.Time
 }
 
 func (a *App) telegramCurrentBotConfigKey() telegramBotConfigKey {
@@ -55,7 +68,24 @@ func (a *App) saveDelAccountPending(state *delAccountPendingState) {
 	if a.delAccountPending == nil {
 		a.delAccountPending = map[string]*delAccountPendingState{}
 	}
-	a.delAccountPending[delAccountPendingKey(state.ChatID, state.TelegramID)] = state
+	now := time.Now().Unix()
+	key := delAccountPendingKey(state.ChatID, state.TelegramID)
+	for existingKey, existing := range a.delAccountPending {
+		if existing == nil || existing.ExpiresAt < now {
+			delete(a.delAccountPending, existingKey)
+		}
+	}
+	if _, replacing := a.delAccountPending[key]; !replacing && len(a.delAccountPending) >= delAccountPendingMaxEntries {
+		oldestKey := ""
+		oldestExpiry := int64(0)
+		for existingKey, existing := range a.delAccountPending {
+			if existing != nil && (oldestKey == "" || existing.ExpiresAt < oldestExpiry) {
+				oldestKey, oldestExpiry = existingKey, existing.ExpiresAt
+			}
+		}
+		delete(a.delAccountPending, oldestKey)
+	}
+	a.delAccountPending[key] = state
 }
 
 func (a *App) takeDelAccountPending(chatID, telegramID int64) *delAccountPendingState {
@@ -494,15 +524,7 @@ func (a *App) telegramHandleEmby(ctx context.Context, chatID, telegramID int64) 
 		_ = a.telegramSendMessage(ctx, chatID, "当前 Telegram 尚未绑定 Twilight 账号。")
 		return
 	}
-	online := false
-	checked := false
-	if strings.TrimSpace(a.cfg().EmbyURL) != "" {
-		checked = true
-		// 5s ctx 走 embyHealth：双段 fallback 由 helper 集中处理。
-		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		_, online = a.embyHealth(checkCtx)
-	}
+	checked, online := a.telegramCachedEmbyHealth(ctx)
 	status := "未检测"
 	if checked && online {
 		status = "正常"
@@ -520,6 +542,36 @@ func (a *App) telegramHandleEmby(ctx context.Context, chatID, telegramID int64) 
 		"连通性: " + status,
 	}
 	_ = a.telegramSendMessage(ctx, chatID, strings.Join(lines, "\n"))
+}
+
+func (a *App) telegramCachedEmbyHealth(ctx context.Context) (checked, online bool) {
+	cfg := a.cfg()
+	baseURL := strings.TrimSpace(cfg.EmbyURL)
+	if baseURL == "" {
+		return false, false
+	}
+	token := strings.TrimSpace(cfg.EmbyToken)
+	key := sha256.Sum256([]byte(baseURL + "\x00" + token))
+	now := time.Now()
+	a.telegramEmbyHealthMu.Lock()
+	cache := a.telegramEmbyHealth
+	if cache.key == key && now.Before(cache.until) {
+		a.telegramEmbyHealthMu.Unlock()
+		return true, cache.ok
+	}
+	a.telegramEmbyHealthMu.Unlock()
+
+	checkCtx, cancel := context.WithTimeout(ctx, telegramEmbyHealthTimeout)
+	_, online = a.embyHealth(checkCtx)
+	cancel()
+	ttl := telegramEmbyHealthFailureTTL
+	if online {
+		ttl = telegramEmbyHealthSuccessTTL
+	}
+	a.telegramEmbyHealthMu.Lock()
+	a.telegramEmbyHealth = telegramEmbyHealthCache{key: key, ok: online, until: now.Add(ttl)}
+	a.telegramEmbyHealthMu.Unlock()
+	return true, online
 }
 
 func (a *App) telegramHandleResetPassword(ctx context.Context, chatID, telegramID int64) {
@@ -1151,33 +1203,7 @@ func (a *App) telegramFindUsers(query string, limit int) []store.User {
 	if limit <= 0 || limit > 20 {
 		limit = 20
 	}
-	lower := strings.ToLower(query)
-	out := []store.User{}
-	for _, u := range a.store().ListUsers() {
-		if telegramUserMatches(u, lower) {
-			out = append(out, u)
-			if len(out) >= limit {
-				break
-			}
-		}
-	}
-	return out
-}
-
-func telegramUserMatches(u store.User, query string) bool {
-	if strconv.FormatInt(u.UID, 10) == query {
-		return true
-	}
-	if u.TelegramID != 0 && strconv.FormatInt(u.TelegramID, 10) == query {
-		return true
-	}
-	fields := []string{u.Username, u.Email, u.TelegramUsername, u.EmbyUsername, u.EmbyID}
-	for _, field := range fields {
-		if field != "" && strings.Contains(strings.ToLower(field), query) {
-			return true
-		}
-	}
-	return false
+	return a.store().SearchUsers(query, limit)
 }
 
 func telegramUserSummary(u store.User) string {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -326,6 +327,37 @@ func TestListUsersKeepsUIDOrderAcrossUserLifecycle(t *testing.T) {
 	}
 	if got := append([]int64(nil), st.userUIDs...); !sameInt64s(got, want) {
 		t.Fatalf("userUIDs index after delete/create=%v want=%v", got, want)
+	}
+}
+
+func TestSearchUsersPreservesUIDOrderAndLimitsWithoutListCopy(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	first, err := st.CreateUser(User{Username: "AlphaOne", Email: "alpha@example.com", Role: RoleNormal, TelegramID: 9001})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := st.CreateUser(User{Username: "AlphaTwo", EmbyUsername: "MediaAlpha", EmbyID: "emby-alpha", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateUser(User{Username: "Beta", Role: RoleNormal}); err != nil {
+		t.Fatal(err)
+	}
+
+	matches := st.SearchUsers("ALPHA", 10)
+	if len(matches) != 2 || matches[0].UID != first.UID || matches[1].UID != second.UID {
+		t.Fatalf("unexpected ordered search result: %#v", matches)
+	}
+	limited := st.SearchUsers("alpha", 1)
+	if len(limited) != 1 || limited[0].UID != first.UID {
+		t.Fatalf("unexpected limited search result: %#v", limited)
+	}
+	byTelegram := st.SearchUsers("9001", 10)
+	if len(byTelegram) != 1 || byTelegram[0].UID != first.UID {
+		t.Fatalf("Telegram ID search failed: %#v", byTelegram)
+	}
+	if got := st.SearchUsers("+"+strconv.FormatInt(first.UID, 10), 10); len(got) != 0 {
+		t.Fatalf("non-canonical UID unexpectedly matched: %#v", got)
 	}
 }
 

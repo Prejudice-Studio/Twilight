@@ -2643,6 +2643,68 @@ func (s *Store) ListUsers() []User {
 	return users
 }
 
+// SearchUsers returns UID-ordered matches without first copying and sorting the
+// complete user set. It is used by latency-sensitive Telegram administration
+// paths where only the first small page is needed.
+func (s *Store) SearchUsers(query string, limit int) []User {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return nil
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	numericID, numericQueryErr := strconv.ParseInt(query, 10, 64)
+	numericQuery := numericQueryErr == nil && strconv.FormatInt(numericID, 10) == query
+	matches := func(u User) bool {
+		if numericQuery && (u.UID == numericID || (u.TelegramID != 0 && u.TelegramID == numericID)) {
+			return true
+		}
+		return userSearchFieldMatches(u.Username, query) ||
+			userSearchFieldMatches(u.Email, query) ||
+			userSearchFieldMatches(u.TelegramUsername, query) ||
+			userSearchFieldMatches(u.EmbyUsername, query) ||
+			userSearchFieldMatches(u.EmbyID, query)
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]User, 0, min(limit, len(s.state.Users)))
+	if len(s.userUIDs) == len(s.state.Users) {
+		for _, uid := range s.userUIDs {
+			u, ok := s.state.Users[uid]
+			if ok && matches(u) {
+				out = append(out, u)
+				if len(out) >= limit {
+					return out
+				}
+			}
+		}
+		return out
+	}
+
+	// Index repair fallback: preserve the public UID ordering even if the cached
+	// UID slice is temporarily unavailable.
+	users := make([]User, 0, len(s.state.Users))
+	for _, u := range s.state.Users {
+		users = append(users, u)
+	}
+	sort.Slice(users, func(i, j int) bool { return users[i].UID < users[j].UID })
+	for _, u := range users {
+		if matches(u) {
+			out = append(out, u)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out
+}
+
+func userSearchFieldMatches(field, query string) bool {
+	return field != "" && strings.Contains(strings.ToLower(field), query)
+}
+
 // rebuildUserIndexes 从当前 Users map 一次性重建所有用户身份字段索引。
 // 在 Open / OpenPostgres 加载 state 后调用，无需持锁（调用方已持有写锁或尚未暴露引用）。
 func (s *Store) rebuildUserIndexes() {

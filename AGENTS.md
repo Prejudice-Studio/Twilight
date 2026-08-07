@@ -189,6 +189,10 @@ Use this index before broad search. Line numbers drift, so search by function na
 - After pending-interaction and bind-code handling, non-command Telegram text must return before command tokenization, registry lookup, and custom-command lookup. Parse the command token separately so no-argument commands do not allocate an argument slice; pass the canonical lowercase command through dispatch without repeatedly normalizing it.
 - Custom-command and disabled-command lookups use the immutable per-config command index. Rebuild it when either backing configuration slice changes; do not restore a per-update linear scan.
 - Repeated custom JavaScript commands reuse the bounded cache of security-validated, compiled Goja programs keyed by script content. Never cache rejected scripts, never bypass `validateDeveloperJSCommand` on a cache miss, and keep the cache bounded.
+- Telegram `/emby` connectivity uses a short, configuration-keyed probe cache and a 1.5-second first-probe budget. Cache identity must hash the effective Emby URL and token rather than retaining another plaintext token copy; configuration changes must invalidate the result.
+- Latency-sensitive Telegram user search must use `Store.SearchUsers`, which scans the existing UID order under the store read lock and stops at the requested limit. Do not restore `ListUsers` full-copy/full-sort search in Bot handlers.
+- Short-lived Telegram panel, developer-JS callback/waiter, and account-deletion confirmation maps must remain capacity-bounded. On insertion, prune expired state and evict the earliest-expiring entry at capacity, stopping any associated timer; do not add unbounded per-interaction timers or maps.
+- Replacing a developer-JS callback or waiter must assign a new monotonic generation. Timer callbacks may delete state or send timeout replies only when their captured generation still matches the current entry; `Timer.Stop` alone is not a sufficient replacement guard because an old callback may already be running.
 
 ## Audit Log Rules
 

@@ -12,6 +12,8 @@ const (
 	developerJSWaitMaxSeconds      = 60
 	developerJSMaxInlineButtons    = 8
 	developerJSMaxInteractionChars = 1200
+	developerJSCallbackMaxEntries  = 512
+	developerJSWaiterMaxEntries    = 512
 )
 
 type developerJSCallbackAction struct {
@@ -29,6 +31,7 @@ type developerJSCallbackContext struct {
 	ExpiresAt       int64
 	Actions         []developerJSCallbackAction
 	Timer           *time.Timer
+	generation      uint64
 }
 
 type developerJSMessageWaiter struct {
@@ -41,6 +44,7 @@ type developerJSMessageWaiter struct {
 	MaxChars     int
 	Numbered     bool
 	Timer        *time.Timer
+	generation   uint64
 }
 
 func developerJSWaiterKey(chatID, fromID int64) string {
@@ -55,12 +59,55 @@ func (a *App) saveDeveloperJSCallback(item developerJSCallbackContext) {
 	if existing, ok := a.developerJSCallbacks[item.Token]; ok && existing.Timer != nil {
 		existing.Timer.Stop()
 	}
+	a.pruneDeveloperJSCallbacksLocked(item.Token, time.Now().Unix())
 	token := item.Token
+	item.generation = a.developerJSInteractionSeq.Add(1)
+	generation := item.generation
 	item.Timer = time.AfterFunc(time.Until(time.Unix(item.ExpiresAt, 0))+time.Second, func() {
-		a.deleteDeveloperJSCallback(token)
+		a.expireDeveloperJSCallback(token, generation)
 	})
 	a.developerJSCallbacks[item.Token] = item
 	a.developerJSMu.Unlock()
+}
+
+func (a *App) expireDeveloperJSCallback(token string, generation uint64) {
+	a.developerJSMu.Lock()
+	defer a.developerJSMu.Unlock()
+	item, ok := a.developerJSCallbacks[token]
+	if !ok || item.generation != generation {
+		return
+	}
+	if item.Timer != nil {
+		item.Timer.Stop()
+	}
+	delete(a.developerJSCallbacks, token)
+}
+
+func (a *App) pruneDeveloperJSCallbacksLocked(incomingToken string, now int64) {
+	for token, item := range a.developerJSCallbacks {
+		if token != incomingToken && item.ExpiresAt < now {
+			if item.Timer != nil {
+				item.Timer.Stop()
+			}
+			delete(a.developerJSCallbacks, token)
+		}
+	}
+	if _, replacing := a.developerJSCallbacks[incomingToken]; replacing || len(a.developerJSCallbacks) < developerJSCallbackMaxEntries {
+		return
+	}
+	oldestToken := ""
+	oldestExpiry := int64(0)
+	for token, item := range a.developerJSCallbacks {
+		if token != incomingToken && (oldestToken == "" || item.ExpiresAt < oldestExpiry) {
+			oldestToken, oldestExpiry = token, item.ExpiresAt
+		}
+	}
+	if oldest, ok := a.developerJSCallbacks[oldestToken]; ok {
+		if oldest.Timer != nil {
+			oldest.Timer.Stop()
+		}
+		delete(a.developerJSCallbacks, oldestToken)
+	}
 }
 
 func (a *App) deleteDeveloperJSCallback(token string) {
@@ -156,17 +203,60 @@ func (a *App) saveDeveloperJSWaiter(item developerJSMessageWaiter) {
 	if existing, ok := a.developerJSWaiters[item.Key]; ok && existing.Timer != nil {
 		existing.Timer.Stop()
 	}
+	a.pruneDeveloperJSWaitersLocked(item.Key, time.Now().Unix())
 	key := item.Key
 	timeoutReply := item.TimeoutReply
 	chatID := item.ChatID
+	item.generation = a.developerJSInteractionSeq.Add(1)
+	generation := item.generation
 	item.Timer = time.AfterFunc(time.Until(time.Unix(item.ExpiresAt, 0))+time.Second, func() {
-		a.deleteDeveloperJSWaiter(key)
-		if strings.TrimSpace(timeoutReply) != "" {
+		if a.expireDeveloperJSWaiter(key, generation) && strings.TrimSpace(timeoutReply) != "" {
 			_ = a.telegramSendMessage(context.Background(), chatID, timeoutReply)
 		}
 	})
 	a.developerJSWaiters[item.Key] = item
 	a.developerJSMu.Unlock()
+}
+
+func (a *App) expireDeveloperJSWaiter(key string, generation uint64) bool {
+	a.developerJSMu.Lock()
+	defer a.developerJSMu.Unlock()
+	item, ok := a.developerJSWaiters[key]
+	if !ok || item.generation != generation {
+		return false
+	}
+	if item.Timer != nil {
+		item.Timer.Stop()
+	}
+	delete(a.developerJSWaiters, key)
+	return true
+}
+
+func (a *App) pruneDeveloperJSWaitersLocked(incomingKey string, now int64) {
+	for key, item := range a.developerJSWaiters {
+		if key != incomingKey && item.ExpiresAt < now {
+			if item.Timer != nil {
+				item.Timer.Stop()
+			}
+			delete(a.developerJSWaiters, key)
+		}
+	}
+	if _, replacing := a.developerJSWaiters[incomingKey]; replacing || len(a.developerJSWaiters) < developerJSWaiterMaxEntries {
+		return
+	}
+	oldestKey := ""
+	oldestExpiry := int64(0)
+	for key, item := range a.developerJSWaiters {
+		if key != incomingKey && (oldestKey == "" || item.ExpiresAt < oldestExpiry) {
+			oldestKey, oldestExpiry = key, item.ExpiresAt
+		}
+	}
+	if oldest, ok := a.developerJSWaiters[oldestKey]; ok {
+		if oldest.Timer != nil {
+			oldest.Timer.Stop()
+		}
+		delete(a.developerJSWaiters, oldestKey)
+	}
 }
 
 func (a *App) deleteDeveloperJSWaiter(key string) {

@@ -13,7 +13,10 @@ import (
 	"github.com/prejudice-studio/twilight/internal/store"
 )
 
-const telegramPanelTTL = time.Minute
+const (
+	telegramPanelTTL        = time.Minute
+	telegramPanelMaxEntries = 256
+)
 
 type telegramPanelContext struct {
 	Token            string
@@ -139,11 +142,41 @@ func (a *App) telegramSavePanel(panel telegramPanelContext) {
 	if existing, ok := a.telegramPanels[panel.Token]; ok && existing.timer != nil {
 		existing.timer.Stop()
 	}
+	a.pruneTelegramPanelsLocked(panel.Token, time.Now().Unix())
 	delay := telegramPanelTTL + time.Second
 	token := panel.Token
 	panel.timer = time.AfterFunc(delay, func() { a.telegramExpirePanel(token) })
 	a.telegramPanels[panel.Token] = panel
 	a.telegramPanelMu.Unlock()
+}
+
+// pruneTelegramPanelsLocked bounds short-lived panel state and its timers.
+// Caller must hold telegramPanelMu.
+func (a *App) pruneTelegramPanelsLocked(incomingToken string, now int64) {
+	for token, panel := range a.telegramPanels {
+		if token != incomingToken && panel.ExpiresAt < now {
+			if panel.timer != nil {
+				panel.timer.Stop()
+			}
+			delete(a.telegramPanels, token)
+		}
+	}
+	if _, replacing := a.telegramPanels[incomingToken]; replacing || len(a.telegramPanels) < telegramPanelMaxEntries {
+		return
+	}
+	oldestToken := ""
+	oldestExpiry := int64(0)
+	for token, panel := range a.telegramPanels {
+		if token != incomingToken && (oldestToken == "" || panel.ExpiresAt < oldestExpiry) {
+			oldestToken, oldestExpiry = token, panel.ExpiresAt
+		}
+	}
+	if oldest, ok := a.telegramPanels[oldestToken]; ok {
+		if oldest.timer != nil {
+			oldest.timer.Stop()
+		}
+		delete(a.telegramPanels, oldestToken)
+	}
 }
 
 // telegramSchedulePanelExpiry 仅在 telegramExpirePanel 发现 panel 仍未到期
@@ -217,6 +250,7 @@ func (a *App) telegramTouchPanel(panel telegramPanelContext) telegramPanelContex
 	panel.ExpiresAt = time.Now().Add(telegramPanelTTL).Unix()
 	delay := telegramPanelTTL + time.Second
 	a.telegramPanelMu.Lock()
+	a.pruneTelegramPanelsLocked(panel.Token, time.Now().Unix())
 	if existing, ok := a.telegramPanels[panel.Token]; ok && existing.timer != nil {
 		// 复用 map 里那把 timer：Reset 即可，不再每次 AfterFunc 新建 closure。
 		existing.timer.Reset(delay)

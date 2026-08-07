@@ -3695,6 +3695,71 @@ func TestTelegramCommandConfigIndexInvalidatesOnSliceReplacement(t *testing.T) {
 	}
 }
 
+func TestTelegramEmbyHealthCacheReusesProbeAndInvalidatesOnConfig(t *testing.T) {
+	app := newTestApp(t)
+	var calls atomic.Int32
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/System/Info/Public" {
+			t.Fatalf("unexpected Emby path: %s", r.URL.Path)
+		}
+		calls.Add(1)
+		_, _ = w.Write([]byte(`{"ServerName":"test"}`))
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+	app.cfg().EmbyToken = "token-one"
+
+	for i := 0; i < 2; i++ {
+		checked, online := app.telegramCachedEmbyHealth(context.Background())
+		if !checked || !online {
+			t.Fatalf("probe %d returned checked=%v online=%v", i, checked, online)
+		}
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("cached Emby health issued %d requests, want 1", got)
+	}
+
+	app.cfg().EmbyToken = "token-two"
+	if checked, online := app.telegramCachedEmbyHealth(context.Background()); !checked || !online {
+		t.Fatalf("probe after token change returned checked=%v online=%v", checked, online)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("Emby health cache did not invalidate on config change: calls=%d", got)
+	}
+}
+
+func TestTelegramTransientStateIsCapacityBounded(t *testing.T) {
+	app := newTestApp(t)
+	now := time.Now().Unix()
+
+	app.telegramPanels = make(map[string]telegramPanelContext, telegramPanelMaxEntries)
+	for i := 0; i < telegramPanelMaxEntries; i++ {
+		token := fmt.Sprintf("panel-%04d", i)
+		app.telegramPanels[token] = telegramPanelContext{Token: token, ExpiresAt: now + int64(i+10)}
+	}
+	app.telegramSavePanel(telegramPanelContext{Token: "panel-new", ExpiresAt: now + 3600})
+	if len(app.telegramPanels) != telegramPanelMaxEntries {
+		t.Fatalf("panel state size=%d, want %d", len(app.telegramPanels), telegramPanelMaxEntries)
+	}
+	if _, exists := app.telegramPanels["panel-0000"]; exists {
+		t.Fatal("oldest panel was not evicted at capacity")
+	}
+	app.telegramDeletePanel("panel-new")
+
+	app.delAccountPending = make(map[string]*delAccountPendingState, delAccountPendingMaxEntries)
+	for i := 0; i < delAccountPendingMaxEntries; i++ {
+		key := fmt.Sprintf("pending-%04d", i)
+		app.delAccountPending[key] = &delAccountPendingState{ExpiresAt: now + int64(i+10)}
+	}
+	app.saveDelAccountPending(&delAccountPendingState{ChatID: 1, TelegramID: 2, ExpiresAt: now + 3600})
+	if len(app.delAccountPending) != delAccountPendingMaxEntries {
+		t.Fatalf("delAccount pending size=%d, want %d", len(app.delAccountPending), delAccountPendingMaxEntries)
+	}
+	if _, exists := app.delAccountPending["pending-0000"]; exists {
+		t.Fatal("oldest delAccount pending state was not evicted at capacity")
+	}
+}
+
 func TestTelegramBindRequirementSplitsGroupAndChannel(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().TelegramMode = true

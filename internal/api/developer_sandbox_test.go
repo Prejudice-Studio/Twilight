@@ -34,6 +34,65 @@ func TestTelegramJSCustomCommandCompileCache(t *testing.T) {
 	}
 }
 
+func TestDeveloperJSInteractionStateIsCapacityBounded(t *testing.T) {
+	app := newTestApp(t)
+	now := time.Now().Unix()
+	app.developerJSCallbacks = make(map[string]developerJSCallbackContext, developerJSCallbackMaxEntries)
+	for i := 0; i < developerJSCallbackMaxEntries; i++ {
+		token := fmt.Sprintf("callback-%04d", i)
+		app.developerJSCallbacks[token] = developerJSCallbackContext{Token: token, ExpiresAt: now + int64(i+10)}
+	}
+	app.saveDeveloperJSCallback(developerJSCallbackContext{Token: "callback-new", ExpiresAt: now + 3600})
+	if len(app.developerJSCallbacks) != developerJSCallbackMaxEntries {
+		t.Fatalf("callback state size=%d, want %d", len(app.developerJSCallbacks), developerJSCallbackMaxEntries)
+	}
+	if _, exists := app.developerJSCallbacks["callback-0000"]; exists {
+		t.Fatal("oldest callback state was not evicted at capacity")
+	}
+	app.deleteDeveloperJSCallback("callback-new")
+
+	app.developerJSWaiters = make(map[string]developerJSMessageWaiter, developerJSWaiterMaxEntries)
+	for i := 0; i < developerJSWaiterMaxEntries; i++ {
+		key := fmt.Sprintf("waiter-%04d", i)
+		app.developerJSWaiters[key] = developerJSMessageWaiter{Key: key, ExpiresAt: now + int64(i+10)}
+	}
+	app.saveDeveloperJSWaiter(developerJSMessageWaiter{Key: "waiter-new", ExpiresAt: now + 3600})
+	if len(app.developerJSWaiters) != developerJSWaiterMaxEntries {
+		t.Fatalf("waiter state size=%d, want %d", len(app.developerJSWaiters), developerJSWaiterMaxEntries)
+	}
+	if _, exists := app.developerJSWaiters["waiter-0000"]; exists {
+		t.Fatal("oldest waiter state was not evicted at capacity")
+	}
+	app.deleteDeveloperJSWaiter("waiter-new")
+}
+
+func TestDeveloperJSReplacedInteractionIgnoresOldTimerGeneration(t *testing.T) {
+	app := newTestApp(t)
+	expiresAt := time.Now().Add(time.Hour).Unix()
+
+	app.saveDeveloperJSCallback(developerJSCallbackContext{Token: "same-callback", ExpiresAt: expiresAt})
+	oldCallback := app.developerJSCallbacks["same-callback"]
+	app.saveDeveloperJSCallback(developerJSCallbackContext{Token: "same-callback", ExpiresAt: expiresAt})
+	newCallback := app.developerJSCallbacks["same-callback"]
+	app.expireDeveloperJSCallback("same-callback", oldCallback.generation)
+	if current, ok := app.developerJSCallbacks["same-callback"]; !ok || current.generation != newCallback.generation {
+		t.Fatal("old callback timer removed its replacement")
+	}
+	app.deleteDeveloperJSCallback("same-callback")
+
+	app.saveDeveloperJSWaiter(developerJSMessageWaiter{Key: "same-waiter", ExpiresAt: expiresAt})
+	oldWaiter := app.developerJSWaiters["same-waiter"]
+	app.saveDeveloperJSWaiter(developerJSMessageWaiter{Key: "same-waiter", ExpiresAt: expiresAt})
+	newWaiter := app.developerJSWaiters["same-waiter"]
+	if app.expireDeveloperJSWaiter("same-waiter", oldWaiter.generation) {
+		t.Fatal("old waiter timer reported deleting its replacement")
+	}
+	if current, ok := app.developerJSWaiters["same-waiter"]; !ok || current.generation != newWaiter.generation {
+		t.Fatal("old waiter timer removed its replacement")
+	}
+	app.deleteDeveloperJSWaiter("same-waiter")
+}
+
 func TestDeveloperJSDocsEndpointRequiresAdminAndDescribesGoja(t *testing.T) {
 	app := newTestApp(t)
 
