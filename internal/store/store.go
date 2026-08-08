@@ -80,6 +80,13 @@ type Store struct {
 	apiKeyFlushStop chan struct{}
 	apiKeyFlushDone chan struct{}
 	apiKeyFlushOnce sync.Once
+
+	// telegramRosterCache absorbs repeated ordinary group-message observations.
+	// Roster history itself lives in PostgreSQL; keeping only a bounded hot set
+	// avoids both one SQL write per message and an unbounded in-process mirror.
+	telegramRosterCacheMu  sync.Mutex
+	telegramRosterCache    map[telegramRosterCacheKey]telegramRosterCacheEntry
+	telegramRosterCacheSeq uint64
 }
 
 // apiKeyUsageDelta 是单个 API Key 在一个刷新周期内累积的调用增量。
@@ -147,7 +154,7 @@ type State struct {
 	EmbyActivityLogs        []EmbyActivityLog                      `json:"emby_activity_logs,omitempty"`
 	NextEmbyActivityLogID   int64                                  `json:"next_emby_activity_log_id"`
 	RebindRequests          map[int64]RebindRequest                `json:"rebind_requests"`
-	TelegramRoster          map[string]TelegramRosterEntry         `json:"telegram_roster"`
+	TelegramRoster          map[string]TelegramRosterEntry         `json:"telegram_roster,omitempty"`
 	ViolationLogs           []ViolationLog                         `json:"violation_logs"`
 	AuditLogs               []AuditLog                             `json:"audit_logs"`
 	BangumiSyncLogs         []BangumiSyncLog                       `json:"bangumi_sync_logs"`
@@ -800,9 +807,6 @@ func (s *State) ensure() {
 	if s.RebindRequests == nil {
 		s.RebindRequests = map[int64]RebindRequest{}
 	}
-	if s.TelegramRoster == nil {
-		s.TelegramRoster = map[string]TelegramRosterEntry{}
-	}
 	if s.ViolationLogs == nil {
 		s.ViolationLogs = []ViolationLog{}
 	}
@@ -1169,6 +1173,14 @@ func (s *Store) Snapshot() ([]byte, error) {
 	}
 	state.AuditLogs = auditLogs
 	state.NextAuditLogID = nextAuditID
+	// Telegram roster is another dedicated runtime table. Merge it only for the
+	// portable JSON snapshot; the Store's live State keeps no historical roster
+	// map resident on the Go heap.
+	roster, err := s.snapshotTelegramRosterLocked()
+	if err != nil {
+		return nil, err
+	}
+	state.TelegramRoster = roster
 	return json.MarshalIndent(state, "", "  ")
 }
 
@@ -1259,9 +1271,11 @@ func (s *Store) LoadSnapshot(data []byte) error {
 	// 且此后随每次 saveLocked 反复落盘。
 	logs := state.RuntimeLogs
 	auditLogs := state.AuditLogs
+	telegramRoster := state.TelegramRoster
 	legacyTelegramBotOffset := state.TelegramBotOffset
 	state.RuntimeLogs = nil
 	state.AuditLogs = nil
+	state.TelegramRoster = nil
 	state.NextAuditLogID = 1
 	state.TelegramBotOffset = 0
 	s.state = state
@@ -1281,6 +1295,9 @@ func (s *Store) LoadSnapshot(data []byte) error {
 		return err
 	}
 	if err := s.replaceAuditLogsLocked(auditLogs); err != nil {
+		return err
+	}
+	if err := s.replaceTelegramRosterLocked(telegramRoster); err != nil {
 		return err
 	}
 	return nil
@@ -4591,170 +4608,6 @@ func (s *Store) RevokeApprovedRebindRequests(reviewerUID int64, note string) (in
 	return count, nil
 }
 
-const telegramRosterObservationWriteInterval = 5 * time.Minute
-
-func telegramRosterObservationNeedsWrite(entry TelegramRosterEntry, exists bool, status string, isBot bool, now int64) bool {
-	if !exists || entry.LastStatus != status || (isBot && !entry.IsBot) {
-		return true
-	}
-	return entry.LastSeen <= 0 || now-entry.LastSeen >= int64(telegramRosterObservationWriteInterval/time.Second)
-}
-
-func (s *Store) UpsertTelegramRoster(chatID string, telegramID int64, status string, isBot bool) error {
-	chatID = strings.TrimSpace(chatID)
-	if chatID == "" || telegramID <= 0 {
-		return nil
-	}
-	if status == "" {
-		status = "member"
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	key := telegramRosterKey(chatID, telegramID)
-	now := time.Now().Unix()
-	if entry, ok := s.state.TelegramRoster[key]; !telegramRosterObservationNeedsWrite(entry, ok, status, isBot, now) {
-		return nil
-	}
-	return s.mutateAndSaveLocked(func() error {
-		now = time.Now().Unix()
-		entry, ok := s.state.TelegramRoster[key]
-		if !telegramRosterObservationNeedsWrite(entry, ok, status, isBot, now) {
-			return nil
-		}
-		if !ok {
-			entry = TelegramRosterEntry{ChatID: chatID, TelegramID: telegramID, FirstSeen: now}
-		}
-		entry.LastSeen = now
-		entry.LastStatus = status
-		if isBot {
-			entry.IsBot = true
-		}
-		s.state.TelegramRoster[key] = entry
-		return nil
-	})
-}
-
-func (s *Store) MarkTelegramRosterLeft(chatID string, telegramID int64, status string) error {
-	chatID = strings.TrimSpace(chatID)
-	if chatID == "" || telegramID <= 0 {
-		return nil
-	}
-	if status == "" {
-		status = "left"
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.mutateAndSaveLocked(func() error {
-		key := telegramRosterKey(chatID, telegramID)
-		entry, ok := s.state.TelegramRoster[key]
-		if !ok {
-			entry = TelegramRosterEntry{ChatID: chatID, TelegramID: telegramID, FirstSeen: time.Now().Unix()}
-		}
-		entry.LastSeen = time.Now().Unix()
-		entry.LastStatus = status
-		s.state.TelegramRoster[key] = entry
-		return nil
-	})
-}
-
-func (s *Store) ApplyTelegramRosterUpdates(updates []TelegramRosterUpdate) error {
-	if len(updates) == 0 {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.mutateAndSaveLocked(func() error {
-		now := time.Now().Unix()
-		for _, update := range updates {
-			chatID := strings.TrimSpace(update.ChatID)
-			if chatID == "" || update.TelegramID <= 0 {
-				continue
-			}
-			status := strings.TrimSpace(update.Status)
-			if status == "" {
-				status = "member"
-			}
-			key := telegramRosterKey(chatID, update.TelegramID)
-			entry, ok := s.state.TelegramRoster[key]
-			if !ok {
-				entry = TelegramRosterEntry{ChatID: chatID, TelegramID: update.TelegramID, FirstSeen: now}
-			}
-			entry.LastSeen = now
-			entry.LastStatus = status
-			if update.IsBot {
-				entry.IsBot = true
-			}
-			s.state.TelegramRoster[key] = entry
-		}
-		return nil
-	})
-}
-
-func (s *Store) TelegramRoster(chatID string, activeOnly bool) []TelegramRosterEntry {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]TelegramRosterEntry, 0)
-	for _, entry := range s.state.TelegramRoster {
-		if chatID != "" && entry.ChatID != chatID {
-			continue
-		}
-		if activeOnly && !telegramRosterActive(entry.LastStatus) {
-			continue
-		}
-		out = append(out, entry)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].ChatID == out[j].ChatID {
-			return out[i].TelegramID < out[j].TelegramID
-		}
-		return out[i].ChatID < out[j].ChatID
-	})
-	return out
-}
-
-func (s *Store) TelegramRosterStats(chatID string) map[string]any {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := map[string]any{"chat_id": chatID, "total": 0, "active": 0, "inactive": 0, "bots": 0, "first_seen_at": nil, "last_seen_at": nil}
-	firstSeen := int64(0)
-	lastSeen := int64(0)
-	total := 0
-	active := 0
-	inactive := 0
-	bots := 0
-	for _, entry := range s.state.TelegramRoster {
-		if chatID != "" && entry.ChatID != chatID {
-			continue
-		}
-		total++
-		if entry.IsBot {
-			bots++
-		}
-		if telegramRosterActive(entry.LastStatus) {
-			active++
-		} else {
-			inactive++
-		}
-		if entry.FirstSeen > 0 && (firstSeen == 0 || entry.FirstSeen < firstSeen) {
-			firstSeen = entry.FirstSeen
-		}
-		if entry.LastSeen > lastSeen {
-			lastSeen = entry.LastSeen
-		}
-	}
-	result["total"] = total
-	result["active"] = active
-	result["inactive"] = inactive
-	result["bots"] = bots
-	if firstSeen > 0 {
-		result["first_seen_at"] = firstSeen
-	}
-	if lastSeen > 0 {
-		result["last_seen_at"] = lastSeen
-	}
-	return result
-}
-
 func (s *Store) CountUsersBy(predicate func(User) bool) int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -4807,19 +4660,6 @@ func appendUniqueInt64(values []int64, value int64) []int64 {
 		}
 	}
 	return append(values, value)
-}
-
-func telegramRosterKey(chatID string, telegramID int64) string {
-	return strings.TrimSpace(chatID) + ":" + strconv36(telegramID)
-}
-
-func telegramRosterActive(status string) bool {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "", "member", "administrator", "creator", "restricted":
-		return true
-	default:
-		return false
-	}
 }
 
 // AddViolationLog records a code violation attempt.

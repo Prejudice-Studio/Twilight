@@ -568,11 +568,14 @@ func (t telegramKickTarget) dto() map[string]any {
 	return map[string]any{"tg_id": t.TelegramID, "uid": t.UID, "username": t.Username, "reason": t.Reason}
 }
 
-func (a *App) telegramKickPlan(chatID string) telegramKickPlan {
-	entries := a.store().TelegramRoster(chatID, true)
+func (a *App) telegramKickPlan(chatID string) (telegramKickPlan, error) {
+	entries, err := a.store().TelegramRoster(chatID, true)
+	if err != nil {
+		return telegramKickPlan{}, err
+	}
 	if len(entries) == 0 {
 		targets, skipped, preserved := a.telegramKickTargets()
-		return telegramKickPlan{Targets: targets, Skipped: skipped, PreservedBound: preserved, RosterSize: len(targets) + preserved + skipped["admin"] + skipped["whitelist"], KnownOnly: true}
+		return telegramKickPlan{Targets: targets, Skipped: skipped, PreservedBound: preserved, RosterSize: len(targets) + preserved + skipped["admin"] + skipped["whitelist"], KnownOnly: true}, nil
 	}
 	skipped := map[string]int{"admin": 0, "whitelist": 0, "bound": 0, "no_telegram": 0, "bot": 0}
 	adminIDs := map[int64]bool{}
@@ -626,7 +629,7 @@ func (a *App) telegramKickPlan(chatID string) telegramKickPlan {
 		}
 		targets = append(targets, telegramKickTarget{TelegramID: entry.TelegramID, UID: u.UID, Username: u.Username, Reason: reason})
 	}
-	return telegramKickPlan{Targets: targets, Skipped: skipped, PreservedBound: preserved, RosterSize: len(entries), Bots: skipped["bot"], KnownOnly: false}
+	return telegramKickPlan{Targets: targets, Skipped: skipped, PreservedBound: preserved, RosterSize: len(entries), Bots: skipped["bot"], KnownOnly: false}, nil
 }
 
 func telegramChatIDs(values []string) []string {

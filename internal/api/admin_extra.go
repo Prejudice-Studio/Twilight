@@ -943,7 +943,11 @@ func (a *App) handleTelegramKickUnbound(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	chatID := chats[0]
-	plan := a.telegramKickPlan(chatID)
+	plan, err := a.telegramKickPlan(chatID)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, "读取 Telegram 花名册失败")
+		return
+	}
 	targets := plan.Targets
 	skippedByType := plan.Skipped
 	preservedBound := plan.PreservedBound

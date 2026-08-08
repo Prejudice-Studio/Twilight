@@ -46,7 +46,7 @@ func resetTestDatabase(t *testing.T) {
 	defer db.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS twilight_state, twilight_audit_logs, twilight_runtime_logs, twilight_sessions, twilight_telegram_runtime, twilight_playback_records CASCADE`); err != nil {
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS twilight_state, twilight_audit_logs, twilight_runtime_logs, twilight_sessions, twilight_telegram_roster, twilight_telegram_runtime, twilight_playback_records CASCADE`); err != nil {
 		t.Fatalf("reset test database: %v", err)
 	}
 }

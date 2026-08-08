@@ -587,7 +587,10 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		if len(chats) == 0 {
 			return map[string]any{"success": true, "enabled": false, "targets": 0, "dry_run": dryRun, "max_per_run": maxPerRun}, []string{"Telegram group not configured"}, nil
 		}
-		plan := a.telegramKickPlan(chats[0])
+		plan, err := a.telegramKickPlan(chats[0])
+		if err != nil {
+			return map[string]any{"success": false, "enabled": true}, []string{"读取 Telegram 花名册失败"}, err
+		}
 		targets := plan.Targets
 		skippedByType := plan.Skipped
 		preservedBound := plan.PreservedBound

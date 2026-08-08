@@ -91,7 +91,7 @@ url = "postgres://twilight:请替换为高强度密码@127.0.0.1:5432/twilight?s
 
 全部业务状态（用户、注册码/卡码、邀请关系与邀请码、公告等）都保存在「单一状态文档」中：状态文档是 `twilight_state` 表里 `id = 1` 的那一行 `jsonb`。
 
-另有五张独立表：`twilight_audit_logs`（操作审计）、`twilight_sessions`（会话）、`twilight_runtime_logs`（后台实时日志）、`twilight_playback_records`（播放记录）、`twilight_telegram_runtime`（Telegram 更新确认游标）。这些表会由后端幂等创建，无需手工执行迁移 SQL。
+另有六张独立表：`twilight_audit_logs`（操作审计）、`twilight_sessions`（会话）、`twilight_runtime_logs`（后台实时日志）、`twilight_playback_records`（播放记录）、`twilight_telegram_roster`（Telegram 群成员花名册）、`twilight_telegram_runtime`（Telegram 更新确认游标）。这些表会由后端幂等创建，无需手工执行迁移 SQL；升级时旧主状态中的花名册会自动迁移并从 JSONB 清除。
 
 > 不存在「邀请单表」「公告单独建表 / ALTER TABLE 加列」「`db/invites.db`、`db/signin.db` 之类独立数据库」这种结构——邀请、公告等都是上述单一状态文档里的字段（见 `internal/store`）。
 

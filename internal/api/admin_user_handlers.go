@@ -1077,8 +1077,16 @@ func (a *App) handleTelegramRosterStats(w http.ResponseWriter, r *http.Request, 
 	if len(chats) > 0 {
 		chatID = chats[0]
 	}
-	stats := a.store().TelegramRosterStats(chatID)
-	entries := a.store().TelegramRoster(chatID, true)
+	stats, err := a.store().TelegramRosterStats(chatID)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, "读取 Telegram 花名册统计失败")
+		return
+	}
+	entries, err := a.store().TelegramRoster(chatID, true)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, "读取 Telegram 花名册失败")
+		return
+	}
 	bound := 0
 	unbound := 0
 	if len(entries) > 0 {

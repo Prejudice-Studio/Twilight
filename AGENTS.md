@@ -43,7 +43,7 @@ Update docs in the same change when behavior changes.
 - `internal/api`: HTTP routes, auth, rate limits, response helpers, handlers, external clients, scheduler, admin operations, runtime APIs.
 - `internal/api/routes.go`: centralized route registration.
 - `internal/config`: `config.toml`, `config.local.toml`, and `TWILIGHT_*` environment loading.
-- `internal/store`: PostgreSQL persistence. Most business entities remain in the single `twilight_state` JSONB document; high-write audit logs, runtime logs, sessions, playback records, and the Telegram update cursor use dedicated tables. `Store` is constructed exclusively via `store.OpenPostgres`, so `s.db` is always non-nil. The `json` label survives only as a one-way export target in the database-migration panel and as the `migrate-json` import source; there is no JSON/file runtime backend, no flock, and no `.bak`/sidecar state files.
+- `internal/store`: PostgreSQL persistence. Most business entities remain in the single `twilight_state` JSONB document; high-write audit logs, runtime logs, sessions, playback records, the Telegram roster, and the Telegram update cursor use dedicated tables. `Store` is constructed exclusively via `store.OpenPostgres`, so `s.db` is always non-nil. The `json` label survives only as a one-way export target in the database-migration panel and as the `migrate-json` import source; there is no JSON/file runtime backend, no flock, and no `.bak`/sidecar state files.
 - `internal/redis`: RESP client for shared sessions and rate limits.
 - `internal/security`: tokens, password hashing, and secure random helpers.
 - `webui/src/app`: Next.js App Router pages.
@@ -133,6 +133,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 | `BangumiCollectionCache` | per-user/per-type collection state only |
 | `BangumiSubjectCache` | global Bangumi subject payload by subject ID |
 | `EmbyActivityLog` | ActivityLog entries synced from Emby and stored for audit/history |
+| `TelegramRosterEntry` | Runtime rows live in `twilight_telegram_roster`; `State.TelegramRoster` is import/export compatibility only |
 
 ## Frontend Rules
 
@@ -184,7 +185,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Keep the long-poll hot path cheap and ordered. Validate Bot identity with `getMe` only at startup or after the effective Telegram API URL / Bot Token changes; throttle config-file signature checks during immediately-returning update bursts; update runtime health once per poll batch rather than once per update.
 - When Bot configuration is disabled or incomplete, record the waiting runtime state and log only on transition into that state. Do not emit a persistent runtime-log row on every retry interval.
 - Telegram API endpoint validation is cached by the effective API URL and Bot Token. The cache key must invalidate automatically on either configuration change, and cache hits must never bypass the existing outbound URL / SSRF validation for a new base URL.
-- Ordinary group messages may refresh a roster member's `LastSeen` at most once per five minutes. New members, membership status changes, and newly observed bot flags must still persist immediately. Do not restore per-message full-state writes.
+- Telegram roster history lives in `twilight_telegram_roster`, not the resident `State` map. Ordinary group messages may refresh a member's `LastSeen` at most once per five minutes through the bounded 4096-entry hot cache; new members, membership status changes, and newly observed bot flags must still persist immediately. Scheduler membership batches use one consolidated JSONB UPSERT. Roster writes and reads must not refresh, serialize, or rewrite `twilight_state`; startup migrates legacy map rows, while `Snapshot`/`LoadSnapshot` merge/split them for backup compatibility.
 - Telegram update batches use at most eight workers over chat/user connected components. Updates sharing a chat, acting user, or membership target must remain in Telegram order; only independent components may run concurrently. The batch must finish every effect before acknowledging its offset. Binding, account deletion confirmation, developer JS waiters, and inline callbacks depend on these ordering and acknowledgement guarantees.
 - The durable `getUpdates` cursor lives in the singleton `twilight_telegram_runtime` row. Advancing or resetting it must never refresh, snapshot, serialize, or rewrite `twilight_state`. The legacy `State.TelegramBotOffset` field is an import seed only: startup and `LoadSnapshot` migrate it monotonically into the runtime row and clear it from JSONB so new backups do not carry stale operational cursors.
 - After pending-interaction and bind-code handling, non-command Telegram text must return before command tokenization, registry lookup, and custom-command lookup. Parse the command token separately so no-argument commands do not allocate an argument slice; pass the canonical lowercase command through dispatch without repeatedly normalizing it.
@@ -451,7 +452,7 @@ The `internal/store` and `internal/api` test packages talk to a **real PostgreSQ
 - **Unset** → each package's `TestMain` prints a skip notice and exits 0, so `go test ./...` stays green on machines with no database. This is the expected state in most sandboxes.
 - **Set** → `TestMain` verifies reachability with `store.CheckPostgres`; if the DSN is set but unreachable it exits 1 (a set-but-broken DSN is treated as a failure, not a skip).
 
-Each test gets a clean schema: the store package resets via `TRUNCATE … RESTART IDENTITY` + `DELETE FROM twilight_state` + reseed; the api package drops the six tables (`twilight_state`, `twilight_audit_logs`, `twilight_runtime_logs`, `twilight_sessions`, `twilight_telegram_runtime`, `twilight_playback_records`) with `CASCADE` and lets the idempotent DDL in `openPreparedPostgres` recreate them. Both point at the **same** database.
+Each test gets a clean schema: the store package resets via `TRUNCATE … RESTART IDENTITY` + `DELETE FROM twilight_state` + reseed; the api package drops the seven tables (`twilight_state`, `twilight_audit_logs`, `twilight_runtime_logs`, `twilight_sessions`, `twilight_telegram_roster`, `twilight_telegram_runtime`, `twilight_playback_records`) with `CASCADE` and lets the idempotent DDL in `openPreparedPostgres` recreate them. Both point at the **same** database.
 
 Because every package shares one test database and resets it per test, run the DB-backed packages serially — `go test -p 1 ./...` (or target one package at a time). Parallel package execution (`-p >1`) races two packages resetting/writing the same tables and produces flaky failures that are an artifact of the shared fixture, not real bugs.
 
