@@ -132,7 +132,10 @@ func (a *App) RunTelegramBot(ctx context.Context) error {
 	// 启动时从 store 恢复上一次成功 ack 的 offset，避免进程重启后把 24h 内
 	// 已经处理过的 update 重新分发一遍（telegramConfirmBindCode 这类有副作用
 	// 的命令会被重放）。0 = 历史 state / 新部署，按 getUpdates 默认行为走。
-	offset := a.store().TelegramBotOffset()
+	offset, err := a.store().TelegramBotOffset()
+	if err != nil {
+		return fmt.Errorf("load Telegram update offset: %w", err)
+	}
 	activeBot := ""
 	var verifiedConfig telegramBotConfigKey
 	configVerified := false
@@ -212,18 +215,8 @@ func (a *App) RunTelegramBot(ctx context.Context) error {
 			if id := numeric(update["update_id"]); id >= offset {
 				offset = id + 1
 			}
-			func(u map[string]any) {
-				// 单条 update 处理 panic 隔离：一条坏消息不能让整个 bot 退出。
-				defer func() {
-					if r := recover(); r != nil {
-						// update_id 走 numeric 提取避免 zap.Any 反射；panic value 同理强制
-						// 经 redact 转字符串，避免 reflect 路径输出原始 chat / user 数据。
-						zap.L().Error("telegram update panic", zap.Int64("update_id", int64(numeric(u["update_id"]))), zap.String("panic", redactSensitiveText(fmt.Sprintf("%v", r))))
-					}
-				}()
-				a.handleTelegramUpdate(ctx, u)
-			}(update)
 		}
+		a.handleTelegramUpdateBatch(ctx, updates)
 		// 整个 batch 处理完成才推进持久化 offset：一旦写入成功，下一次重启
 		// 不会再分发到已 ack 的 update。SetTelegramBotOffset 内部做单调防退化，
 		// 偶尔的 store 写失败只是不更新 disk，下一轮 batch 会再尝试。

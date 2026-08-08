@@ -67,7 +67,7 @@ func reopenTestStore(t *testing.T) *Store {
 // session / playback 边表（RESTART IDENTITY 让自增 ID 回到 1，满足日志 ID 断言），
 // 再删掉 state 行并以 force 语义重写空 state（绕过版本守卫，version 归零）。
 func (s *Store) resetForTest(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, `TRUNCATE twilight_runtime_logs, twilight_audit_logs, twilight_sessions, twilight_playback_records RESTART IDENTITY`); err != nil {
+	if _, err := s.db.ExecContext(ctx, `TRUNCATE twilight_runtime_logs, twilight_audit_logs, twilight_sessions, twilight_telegram_runtime, twilight_playback_records RESTART IDENTITY`); err != nil {
 		return err
 	}
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM twilight_state`); err != nil {
@@ -79,5 +79,8 @@ func (s *Store) resetForTest(ctx context.Context) error {
 	s.stateVersion = 0
 	s.stateRaw = nil
 	s.rebuildUserIndexes()
-	return s.saveLockedForce()
+	if err := s.saveLockedForce(); err != nil {
+		return err
+	}
+	return s.ensureTelegramRuntime(ctx)
 }

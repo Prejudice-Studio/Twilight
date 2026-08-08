@@ -22,7 +22,7 @@ Twilight 是一个 Go 后端 + Next.js 前端的 Emby / Jellyfin 用户管理系
 
 - 后端：Go，入口为 `cmd/twilight`，部署目标为 Linux + systemd，也支持 Docker。
 - 前端：Next.js App Router、TypeScript、Tailwind CSS、Radix/shadcn 风格组件。
-- 存储：唯一运行后端为 PostgreSQL；主要业务状态保存在 `twilight_state` 单行 JSONB，操作审计、运行日志、会话与播放记录使用独立表以降低高频写放大。JSON 仅用于备份导出和旧数据导入。
+- 存储：唯一运行后端为 PostgreSQL；主要业务状态保存在 `twilight_state` 单行 JSONB，操作审计、运行日志、会话、播放记录与 Telegram 轮询游标使用独立表以降低高频写放大。JSON 仅用于备份导出和旧数据导入。
 - 配置：统一读取 `config.toml`、`config.local.toml` 与 `TWILIGHT_*` 环境变量覆盖。
 
 ## 核心能力

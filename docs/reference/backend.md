@@ -241,7 +241,7 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
 
 | 后端 | 说明 |
 | ---- | ---- |
-| PostgreSQL（`driver = "postgres"` / `postgresql` / 空值） | 主要业务 `State` 作为 jsonb 存进 `twilight_state` 表 `id = 1` 的单行；操作审计、运行日志、会话、播放记录分别使用 `twilight_audit_logs`、`twilight_runtime_logs`、`twilight_sessions`、`twilight_playback_records`。`Store` 仅能经 `store.OpenPostgres` 构造，`s.db` 恒非 nil。 |
+| PostgreSQL（`driver = "postgres"` / `postgresql` / 空值） | 主要业务 `State` 作为 jsonb 存进 `twilight_state` 表 `id = 1` 的单行；操作审计、运行日志、会话、播放记录、Telegram 更新游标分别使用 `twilight_audit_logs`、`twilight_runtime_logs`、`twilight_sessions`、`twilight_playback_records`、`twilight_telegram_runtime`。`Store` 仅能经 `store.OpenPostgres` 构造，`s.db` 恒非 nil。 |
 
 > JSON 不再是运行后端：`driver` 设为 `json` / `file` 会在 `openStore` 直接报错。JSON 仅在两处以「文件」形式出现——迁移面板的一次性导出目标（把当前状态 dump 成 `state.json`）与 `twilight migrate-json` 的历史导入源。历史上的进程文件锁（`*.lock`）、`.bak` 影子文件、`state.json.runtimelog` 旁路日志文件、`refreshLocked` 变更门控均随 JSON 运行后端一并移除。
 
@@ -250,9 +250,10 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
 - **多进程并发写用版本列串行化**：`twilight_state` 带 `version bigint` 列，`saveLocked` 走「version = 读到值」守卫的 UPSERT，命中 0 行（被他进程抢先递增）即回 `errStateVersionConflict`，`mutateAndSaveLocked` 有界重试（重新 `refreshLocked` 拉最新 state + version 后重放 mutate）。这取代了此前「refresh 与整份 jsonb 盲写之间被他进程插入提交后仍整份覆盖」的丢更新——正是「用户建了工单、TG 也收到通知，工单却随后凭空消失」的根因。`saveLockedForce` 无视守卫强制覆盖并把 version 推到「读到值 +1」，仅用于冷启动播种、`LoadSnapshot` 恢复 / 迁移。
 - `refreshLocked` 每次先由 PostgreSQL 比较 `version`，查询使用 `CASE WHEN version = $1 THEN NULL ELSE state END`：版本没变时只返回版本号，不传输、不反序列化整份 JSONB，也不重建用户/API Key 索引；版本变化时才在同一查询中取回完整 state。读写都走 30s 超时 context，连接假死时到期自行释放，避免整个 `s.mu` 连带全站 handler 卡死。任何绕过 Store 的人工 SQL 修复若修改 `state`，必须同时递增 `version`，否则各进程会按未变化版本继续使用本地快照。
 - 写盘失败一律回滚：`Store.stateRaw` 常驻保存与 `stateVersion` 对齐的权威序列化字节；`snapshotStateLocked` 只引用这份只读字节，save 成功后才替换为新 JSON，失败则由 `restoreStateLocked` 延迟反序列化并重建索引。常见成功路径不再为了回滚额外序列化或复制完整对象图。
-- **PostgreSQL 建库建表**：目标库不存在时，会尝试用同一连接用户连接 `postgres` / `template1` 维护库执行 `CREATE DATABASE`（连接用户需要 `CREATEDB` 权限，已存在则不重复创建）；随后自动建表 `twilight_state`、`twilight_audit_logs`、`twilight_runtime_logs`、`twilight_sessions`、`twilight_playback_records` 及相关索引（`CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` / `ALTER TABLE … ADD COLUMN IF NOT EXISTS version`，全部幂等，可反复执行）。
+- **PostgreSQL 建库建表**：目标库不存在时，会尝试用同一连接用户连接 `postgres` / `template1` 维护库执行 `CREATE DATABASE`（连接用户需要 `CREATEDB` 权限，已存在则不重复创建）；随后自动建表 `twilight_state`、`twilight_audit_logs`、`twilight_runtime_logs`、`twilight_sessions`、`twilight_playback_records`、`twilight_telegram_runtime` 及相关索引（`CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` / `ALTER TABLE … ADD COLUMN IF NOT EXISTS version`，全部幂等，可反复执行）。
 - **操作审计表性能口径**：`twilight_audit_logs` 使用自增 ID 与状态时间、分类、动作、操作者、目标用户索引。新增审计只插入独立表并在同一事务内执行条数保留，不再为一条审计记录全量读取、反序列化和重写 `twilight_state`。列表的筛选、排序、计数、分页由 PostgreSQL 完成，避免把完整审计历史复制进 Go 堆。旧 `state.audit_logs` 在启动时幂等迁移；备份时会重新合并到 JSON 快照，恢复时再拆回独立表。
 - **运行日志表性能口径**：`twilight_runtime_logs` 只服务 Go 进程运行日志，按 `id` 游标读取增量，按 `id DESC` 读取最新快照，并用 cutoff id 删除旧行以保留最近 N 条；其写入同样不会改动主状态文档。
+- **Telegram 游标性能与一致性口径**：`twilight_telegram_runtime` 只有 `id=1` 的一行，批次完成后以 `GREATEST` 单调推进 `update_offset`，不获取 Store 全局锁，也不刷新、快照、编码或重写 `twilight_state`。Bot 身份经 `getMe` 确认变化时才允许清零。旧 `State.TelegramBotOffset` 在启动或 `LoadSnapshot` 时作为迁移种子，迁移后从 JSONB 清除；新备份不携带该运行游标。
 - **播放记录写路径优化**：
   - 所有 `twilight_playback_records` 的 PG 读写都走带超时的 context（`pgPlaybackReadTimeout` / `pgPlaybackWriteTimeout`，均 5s），连接假死时到期自行释放，不再无限阻塞。
   - `AddPlaybackRecordIdempotent` 的 PG 单条 INSERT 移到 `s.mu` 之外执行——记录已由 `saveLocked` 落进 `twilight_state` 的 state jsonb，独立表 `twilight_playback_records` 行只是读路径优先命中的副本、`ON CONFLICT` 保证幂等；持锁跨这段网络 I/O 会让一个卡死的 PG 连接冻结全部 store 写操作。DB 失败按旧语义吞掉（返回 `false, nil`），内存状态副本为准（这是 `internal/store` 里唯一保留内存兜底读的位置）。
@@ -265,7 +266,7 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
 
 管理端提供数据库状态、备份、恢复、迁移（`internal/api/database_admin.go`）：
 
-- 备份生成完整的 `State` JSON：`Snapshot` 会把独立表 `twilight_runtime_logs` 与 `twilight_audit_logs` 分别读回 `RuntimeLogs`、`AuditLogs`；恢复 / 迁移时 `LoadSnapshot` 再把两类日志拆回对应独立表（含空快照的清空语义），不会因为性能拆表丢失备份内容。
+- 备份生成完整的业务 `State` JSON：`Snapshot` 会把独立表 `twilight_runtime_logs` 与 `twilight_audit_logs` 分别读回 `RuntimeLogs`、`AuditLogs`；恢复 / 迁移时 `LoadSnapshot` 再把两类日志拆回对应独立表（含空快照的清空语义），不会因为性能拆表丢失备份内容。`twilight_telegram_runtime` 是消费确认游标，不随业务状态恢复到旧时点；仅兼容旧快照内的 `telegram_bot_offset`，并以不回退方式迁移。
 - 恢复和迁移都必须先走预览：缺少确认短语时仅返回 `dry_run=true` 的预览结果，不写入数据。恢复确认短语 `RESTORE_DATABASE`，迁移确认短语 `MIGRATE_DATABASE`。
 - 恢复和迁移执行前都会自动创建保护性备份，响应中返回 `pre_operation_backup` 便于回滚审计。
 - 迁移面板默认关闭，需显式开启 `Database.migration_panel_enabled`（或 `TWILIGHT_DATABASE_MIGRATION_PANEL_ENABLED`）。

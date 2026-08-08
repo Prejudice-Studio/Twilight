@@ -45,7 +45,7 @@ func TestEnsureTicketDefaultsPreservesStringList(t *testing.T) {
 func TestTicketTypeAddPersistsToConfigFile(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().ConfigFile = filepath.Join(app.cfg().DatabaseDir, "config.toml")
-	initial := "[Ticket]\nenabled = true\ntypes = [\"all\"]\n"
+	initial := "[Admin]\nusernames = [\"admin\"]\n\n[Ticket]\nenabled = true\ntypes = [\"all\"]\n"
 	if err := os.WriteFile(app.cfg().ConfigFile, []byte(initial), 0o600); err != nil {
 		t.Fatal(err)
 	}

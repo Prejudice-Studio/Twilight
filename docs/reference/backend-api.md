@@ -1691,7 +1691,7 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 
 ### 10.12 数据库状态、备份、恢复、迁移
 
-> Twilight 的主要业务状态保存在 PostgreSQL `twilight_state`（`id=1` 的一行 jsonb）；高频追加或独立生命周期数据使用 `twilight_audit_logs`、`twilight_runtime_logs`、`twilight_sessions`、`twilight_playback_records`。审计与运行日志均通过索引和独立保留策略避免重写主状态；备份接口会把这些独立表合并回完整 JSON 快照。下列接口围绕该持久化体系操作。
+> Twilight 的主要业务状态保存在 PostgreSQL `twilight_state`（`id=1` 的一行 jsonb）；高频追加或独立生命周期数据使用 `twilight_audit_logs`、`twilight_runtime_logs`、`twilight_sessions`、`twilight_playback_records`，Telegram 更新确认游标单独使用 `twilight_telegram_runtime`。审计与运行日志会合并回完整 JSON 备份；Telegram 游标属于运行确认状态，不随业务快照回滚，历史 JSON 中的旧游标只在导入时单调迁移一次。下列接口围绕该持久化体系操作。
 
 `GET /system/admin/database/status`
 

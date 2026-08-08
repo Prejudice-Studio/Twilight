@@ -34,6 +34,14 @@ func OpenPostgres(ctx context.Context, dsn string) (*Store, error) {
 			_ = db.Close()
 			return nil, err
 		}
+		if err := st.ensureTelegramRuntime(ctx); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+		if err := st.clearLegacyTelegramBotOffset(); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
 		st.startAPIKeyUsageFlusher()
 		return st, nil
 	}
@@ -52,6 +60,14 @@ func OpenPostgres(ctx context.Context, dsn string) (*Store, error) {
 	st.state.ensure()
 	st.rebuildUserIndexes()
 	if err := st.migrateLegacyAuditLogs(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := st.ensureTelegramRuntime(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := st.clearLegacyTelegramBotOffset(); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -361,6 +377,15 @@ CREATE INDEX IF NOT EXISTS twilight_sessions_uid_idx ON twilight_sessions (uid)`
 	}
 	if _, err := db.ExecContext(ctx, `
 CREATE INDEX IF NOT EXISTS twilight_sessions_expires_at_idx ON twilight_sessions (expires_at)`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS twilight_telegram_runtime (
+	id smallint PRIMARY KEY CHECK (id = 1),
+	update_offset bigint NOT NULL DEFAULT 0,
+	updated_at timestamptz NOT NULL DEFAULT now()
+)`); err != nil {
 		_ = db.Close()
 		return nil, status, describePostgresConnectionError(target, err)
 	}

@@ -245,7 +245,7 @@ allow_credential = true
 - 恢复与迁移前会自动创建保护性备份（如「数据库恢复前保护性备份」「数据库迁移前保护性备份」）。
 - 迁移到 PostgreSQL 前先用管理端预检，确认目标连接成功、快照与实体计数符合预期。
 - 运行后端只有 PostgreSQL 一种：`Database.driver` 设为非 postgres 值时后端启动即报错。热重载会在 DSN 变化时重开 store，但监听地址变化仍需重启。
-- 主状态文档（`twilight_state`）之外另有独立表 `twilight_audit_logs`、`twilight_sessions`、`twilight_runtime_logs`、`twilight_playback_records`，同库不同表；其中审计表与运行日志表用于隔离高频追加写，避免放大主状态 JSONB 的 CPU、内存与 I/O 开销。
+- 主状态文档（`twilight_state`）之外另有独立表 `twilight_audit_logs`、`twilight_sessions`、`twilight_runtime_logs`、`twilight_playback_records`、`twilight_telegram_runtime`，同库不同表；其中审计、运行日志和 Telegram 确认游标用于隔离高频小写入，避免放大主状态 JSONB 的 CPU、内存与 I/O 开销。Telegram 游标只允许单调推进，只有 `getMe` 证明 Bot 身份变化时才能清零，且必须等整个更新批次副作用完成后再确认。
 
 Git 自动更新（`internal/api/system_update.go`）：
 

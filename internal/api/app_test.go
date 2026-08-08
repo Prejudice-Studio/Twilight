@@ -786,6 +786,9 @@ func TestUploadRejectsNonImage(t *testing.T) {
 func TestAdminServerIconUploadUpdatesConfig(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().ConfigFile = filepath.Join(app.cfg().DatabaseDir, "config.toml")
+	if err := os.WriteFile(app.cfg().ConfigFile, []byte("[Admin]\nusernames = [\"admin\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)
 	login := doJSON(app, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"Admin123456"}`, nil)
 	cookie := findCookie(login.Result().Cookies(), "twilight_session")

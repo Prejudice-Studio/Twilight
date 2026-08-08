@@ -236,7 +236,7 @@ Twilight 不对 Cookie 鉴权的变更类请求做 CSRF 令牌校验，也不做
 
 唯一运行后端是 **PostgreSQL**：
 
-- 主要业务状态写入 `twilight_state` 表中 `id = 1` 的单行 `jsonb`。另有独立表：`twilight_audit_logs`（操作审计）、`twilight_sessions`（会话）、`twilight_runtime_logs`（运行时日志）、`twilight_playback_records`（播放记录）。审计拆表用于避免每次状态变更后的审计追加再次重写整份主状态。
+- 主要业务状态写入 `twilight_state` 表中 `id = 1` 的单行 `jsonb`。另有独立表：`twilight_audit_logs`（操作审计）、`twilight_sessions`（会话）、`twilight_runtime_logs`（运行时日志）、`twilight_playback_records`（播放记录）、`twilight_telegram_runtime`（Telegram 更新确认游标）。高频或独立生命周期数据拆表用于避免无关运行时写入反复重写整份主状态。
 - `twilight_state.version` 是跨进程一致性的必要部分。Store 刷新会先比较版本，版本未变化时不会传回整份 JSONB；调试或人工维护数据库时，修改 `state` 必须同时执行 `version = version + 1`，正式代码不得绕过 `internal/store` 直接写这行。
 - `Store` 仅能经 `store.OpenPostgres` 构造，`database.driver` 设为非 postgres 值时后端启动即报错。JSON 仅作为迁移面板的一次性导出目标与 `twilight migrate-json` 的导入源保留，不再是可运行后端；已无 JSON 文件后端、文件锁、`.bak` 影子文件或旁路日志文件。
 
@@ -246,6 +246,7 @@ Twilight 不对 Cookie 鉴权的变更类请求做 CSRF 令牌校验，也不做
 
 - 性能优化优先从现有访问模式入手：分页 / 游标、批量读取、索引、短超时、限流、前端按需加载和必要缓存；不要为了局部慢查询把业务实体拆成独立表，除非先更新架构文档并明确快照一致性、迁移、备份恢复方案。
 - PostgreSQL 的 `twilight_runtime_logs` 是高写入运行日志表，允许独立优化：最新快照按 `id DESC` 取最近 N 条，增量读取按 `id > after ORDER BY id ASC LIMIT N`，裁剪按 cutoff id 保留最近 N 条。状态接入前的内存 fallback 缓冲区必须保持相同 cursor 语义。
+- `twilight_telegram_runtime` 只保存一行单调 `getUpdates` offset。它是运行确认状态而非业务快照内容；旧 `State.TelegramBotOffset` 只作为升级/历史 JSON 导入种子，迁移后必须清零，运行期推进不得调用 `mutateAndSaveLocked`。
 - 新增列表接口应保持统一响应口径：数据数组放在 `items` 或既有兼容字段，增量游标使用 `next_cursor`；变更字段名或排序语义前必须同步后端 API 文档、前端 API 类型和调用方。
 - 新增缓存必须写清作用域（进程 / Redis / 前端内存）、TTL、容量上限、失效条件和降级行为；配置热重载后不能继续读取旧配置或旧 store 句柄。
 
