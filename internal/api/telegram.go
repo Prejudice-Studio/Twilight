@@ -34,9 +34,9 @@ type telegramResponseParameters struct {
 	MigrateToChatID int64 `json:"migrate_to_chat_id"`
 }
 
-// telegramRetryAfterSentinel 让 telegramRateLimitPause 能从 error message 中
-// 把 retry_after 反解出来。避免改 postJSON / errors.As 的链路（涉及 30+ 调
-// 用方）——把秒数编进 error 字符串足够 cheap、调用方一行 grep 就能拿到。
+// telegramRetryAfterSentinel 让 telegramRateLimitPause 能从 Telegram 协议层
+// 的 error message 中把 retry_after 反解出来。把秒数编进 error 字符串可让
+// 现有批处理和调度调用方保持统一的轻量重试路径。
 //
 // 取一个不可能出现在 telegram 真实文案里的前缀，避免和 description 混淆。
 const telegramRetryAfterSentinel = "tw_retry_after_seconds="
@@ -110,49 +110,6 @@ func (a *App) telegramRuntimeStatus() map[string]any {
 	}
 }
 
-func (a *App) telegramPost(ctx context.Context, method string, body map[string]any, dst any) error {
-	return a.telegramPostWithTimeout(ctx, method, body, dst, 20*time.Second)
-}
-
-func (a *App) telegramPostWithTimeout(ctx context.Context, method string, body map[string]any, dst any, timeout time.Duration) error {
-	if !a.telegramAvailable() {
-		return fmt.Errorf("Telegram is not enabled or bot token is not configured")
-	}
-	var payload telegramResponse
-	endpoint, endpointErr := a.telegramEndpoint(method)
-	if endpointErr != nil {
-		return fmt.Errorf("%s", a.telegramSanitizeError(endpointErr))
-	}
-	if err := postJSONWithTimeout(ctx, endpoint, map[string]string{"Accept": "application/json"}, body, &payload, timeout); err != nil {
-		return fmt.Errorf("%s", a.telegramSanitizeError(err))
-	}
-	if !payload.OK {
-		msg := strings.TrimSpace(payload.Description)
-		if msg == "" {
-			msg = "Telegram API request failed"
-		}
-		// 把 retry_after 编进错误字符串，让 telegramRateLimitPause 能 grep 出
-		// 真实秒数；在没有 retry_after 的常规失败上完全不可见，不污染 admin
-		// 看到的 SchedulerRun.Logs。
-		if payload.Parameters.RetryAfter > 0 {
-			if payload.ErrorCode != 0 {
-				return fmt.Errorf("telegram %s failed: %s (%d) [%s%d]", method, msg, payload.ErrorCode, telegramRetryAfterSentinel, payload.Parameters.RetryAfter)
-			}
-			return fmt.Errorf("telegram %s failed: %s [%s%d]", method, msg, telegramRetryAfterSentinel, payload.Parameters.RetryAfter)
-		}
-		if payload.ErrorCode != 0 {
-			return fmt.Errorf("telegram %s failed: %s (%d)", method, msg, payload.ErrorCode)
-		}
-		return fmt.Errorf("telegram %s failed: %s", method, msg)
-	}
-	if dst != nil && len(payload.Result) > 0 {
-		if err := json.Unmarshal(payload.Result, dst); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (a *App) telegramSanitizeError(err error) string {
 	if err == nil {
 		return ""
@@ -168,9 +125,13 @@ func (a *App) telegramSanitizeError(err error) string {
 }
 
 func (a *App) telegramGetMe(ctx context.Context) (map[string]any, error) {
-	var result map[string]any
-	err := a.telegramPost(ctx, "getMe", map[string]any{}, &result)
-	return result, err
+	return telegramPostResult[map[string]any](a, ctx, "getMe", struct{}{}, 20*time.Second)
+}
+
+func (a *App) telegramGetChat(ctx context.Context, chatID any) (map[string]any, error) {
+	return telegramPostResult[map[string]any](a, ctx, "getChat", struct {
+		ChatID any `json:"chat_id"`
+	}{ChatID: chatID}, 20*time.Second)
 }
 
 func (a *App) telegramSendMessage(ctx context.Context, chatID any, text string) error {
@@ -183,12 +144,8 @@ func (a *App) telegramSendPlainMessage(ctx context.Context, chatID any, text str
 	if text == "" {
 		return fmt.Errorf("message text is empty")
 	}
-	body := map[string]any{
-		"chat_id":                  chatID,
-		"text":                     text,
-		"disable_web_page_preview": true,
-	}
-	return a.telegramPost(ctx, "sendMessage", body, nil)
+	body := telegramSendMessageRequest{ChatID: chatID, Text: text, DisableWebPagePreview: true}
+	return a.telegramPostNoResult(ctx, "sendMessage", body)
 }
 
 func (a *App) telegramSendMessageWithMarkup(ctx context.Context, chatID any, text string, replyMarkup any) (int64, error) {
@@ -196,22 +153,15 @@ func (a *App) telegramSendMessageWithMarkup(ctx context.Context, chatID any, tex
 	if text == "" {
 		return 0, fmt.Errorf("message text is empty")
 	}
-	body := map[string]any{
-		"chat_id":                  chatID,
-		"text":                     text,
-		"disable_web_page_preview": true,
+	body := telegramSendMessageRequest{
+		ChatID: chatID, Text: text, ParseMode: a.telegramParseMode(),
+		DisableWebPagePreview: true, ReplyMarkup: replyMarkup,
 	}
-	if pm := a.telegramParseMode(); pm != "" {
-		body["parse_mode"] = pm
-	}
-	if replyMarkup != nil {
-		body["reply_markup"] = replyMarkup
-	}
-	var result map[string]any
-	if err := a.telegramPost(ctx, "sendMessage", body, &result); err != nil {
+	result, err := telegramPostResult[telegramMessageResult](a, ctx, "sendMessage", body, 20*time.Second)
+	if err != nil {
 		return 0, err
 	}
-	return numeric(result["message_id"]), nil
+	return result.MessageID, nil
 }
 
 func (a *App) telegramSendPhoto(ctx context.Context, chatID any, filename, contentType string, data []byte, caption, parseMode string) error {
@@ -295,14 +245,11 @@ func (a *App) telegramEditMessageText(ctx context.Context, chatID, messageID int
 	if text == "" {
 		return fmt.Errorf("message text is empty")
 	}
-	body := map[string]any{"chat_id": chatID, "message_id": messageID, "text": text, "disable_web_page_preview": true}
-	if pm := a.telegramParseMode(); pm != "" {
-		body["parse_mode"] = pm
+	body := telegramEditMessageRequest{
+		ChatID: chatID, MessageID: messageID, Text: text, ParseMode: a.telegramParseMode(),
+		DisableWebPagePreview: true, ReplyMarkup: replyMarkup,
 	}
-	if replyMarkup != nil {
-		body["reply_markup"] = replyMarkup
-	}
-	return a.telegramPost(ctx, "editMessageText", body, nil)
+	return a.telegramPostNoResult(ctx, "editMessageText", body)
 }
 
 // telegramParseMode 返回当前配置的消息解析模式。
@@ -368,12 +315,9 @@ func (a *App) telegramSendRichMessage(ctx context.Context, chatID any, htmlText,
 	if htmlText == "" {
 		return fmt.Errorf("message text is empty")
 	}
-	err := a.telegramPost(ctx, "sendMessage", map[string]any{
-		"chat_id":                  chatID,
-		"text":                     htmlText,
-		"parse_mode":               "HTML",
-		"disable_web_page_preview": true,
-	}, nil)
+	err := a.telegramPostNoResult(ctx, "sendMessage", telegramSendMessageRequest{
+		ChatID: chatID, Text: htmlText, ParseMode: "HTML", DisableWebPagePreview: true,
+	})
 	if err == nil || !telegramIsParseError(err) {
 		return err
 	}
@@ -384,29 +328,25 @@ func (a *App) telegramSendRichMessage(ctx context.Context, chatID any, htmlText,
 	if plain == "" {
 		return err
 	}
-	return a.telegramPost(ctx, "sendMessage", map[string]any{
-		"chat_id":                  chatID,
-		"text":                     plain,
-		"disable_web_page_preview": true,
-	}, nil)
+	return a.telegramPostNoResult(ctx, "sendMessage", telegramSendMessageRequest{
+		ChatID: chatID, Text: plain, DisableWebPagePreview: true,
+	})
 }
 
 func (a *App) telegramDeleteMessage(ctx context.Context, chatID, messageID int64) error {
 	if chatID == 0 || messageID == 0 {
 		return nil
 	}
-	return a.telegramPost(ctx, "deleteMessage", map[string]any{"chat_id": chatID, "message_id": messageID}, nil)
+	return a.telegramPostNoResult(ctx, "deleteMessage", telegramDeleteMessageRequest{ChatID: chatID, MessageID: messageID})
 }
 
 func (a *App) telegramAnswerCallbackQuery(ctx context.Context, callbackID, text string, showAlert bool) error {
 	if strings.TrimSpace(callbackID) == "" {
 		return nil
 	}
-	return a.telegramPost(ctx, "answerCallbackQuery", map[string]any{
-		"callback_query_id": callbackID,
-		"text":              truncateString(text, 190),
-		"show_alert":        showAlert,
-	}, nil)
+	return a.telegramPostNoResult(ctx, "answerCallbackQuery", telegramAnswerCallbackRequest{
+		CallbackQueryID: callbackID, Text: truncateString(text, 190), ShowAlert: showAlert,
+	})
 }
 
 func (a *App) telegramGetChatMember(ctx context.Context, chatID string, userID int64) (map[string]any, error) {
@@ -414,26 +354,24 @@ func (a *App) telegramGetChatMember(ctx context.Context, chatID string, userID i
 }
 
 func (a *App) telegramGetChatMemberWithTimeout(ctx context.Context, chatID string, userID int64, timeout time.Duration) (map[string]any, error) {
-	var result map[string]any
-	err := a.telegramPostWithTimeout(ctx, "getChatMember", map[string]any{"chat_id": chatID, "user_id": userID}, &result, timeout)
-	return result, err
+	return telegramPostResult[map[string]any](a, ctx, "getChatMember", telegramChatMemberRequest{ChatID: chatID, UserID: userID}, timeout)
 }
 
 func (a *App) telegramGetChatAdministrators(ctx context.Context, chatID string) ([]map[string]any, error) {
-	var result []map[string]any
-	err := a.telegramPost(ctx, "getChatAdministrators", map[string]any{"chat_id": chatID}, &result)
-	return result, err
+	return telegramPostResult[[]map[string]any](a, ctx, "getChatAdministrators", struct {
+		ChatID string `json:"chat_id"`
+	}{ChatID: chatID}, 20*time.Second)
 }
 
 func (a *App) telegramKickChatMember(ctx context.Context, chatID string, userID int64) error {
-	if err := a.telegramPost(ctx, "banChatMember", map[string]any{"chat_id": chatID, "user_id": userID, "revoke_messages": false}, nil); err != nil {
+	if err := a.telegramPostNoResult(ctx, "banChatMember", telegramBanMemberRequest{ChatID: chatID, UserID: userID, RevokeMessages: false}); err != nil {
 		return err
 	}
-	return a.telegramPost(ctx, "unbanChatMember", map[string]any{"chat_id": chatID, "user_id": userID, "only_if_banned": true}, nil)
+	return a.telegramPostNoResult(ctx, "unbanChatMember", telegramUnbanMemberRequest{ChatID: chatID, UserID: userID, OnlyIfBanned: true})
 }
 
 func (a *App) telegramBanChatMember(ctx context.Context, chatID string, userID int64) error {
-	return a.telegramPost(ctx, "banChatMember", map[string]any{"chat_id": chatID, "user_id": userID, "revoke_messages": false}, nil)
+	return a.telegramPostNoResult(ctx, "banChatMember", telegramBanMemberRequest{ChatID: chatID, UserID: userID, RevokeMessages: false})
 }
 
 func (a *App) telegramMembershipMissing(ctx context.Context, telegramID int64, strict bool) ([]string, error) {
@@ -671,11 +609,11 @@ func telegramMemberIsAdminOrBot(member map[string]any) bool {
 // 看到 telegram 限速错误就 sleep。
 //
 // 两条来源：
-//  1. telegramPost 在 OK=false + parameters.retry_after>0 时把秒数编进错误
+//  1. Telegram 协议层在 OK=false + parameters.retry_after>0 时把秒数编进错误
 //     字符串（telegramRetryAfterSentinel）；这里反解出来，sleep 真实秒数；
 //  2. fallback 到旧行为——没有 sentinel 但 description 里出现 "too many
 //     requests" 时 sleep 2s（调用方与 admin 路径上偶尔有自己拼装的 429 错
-//     误，不走 telegramPost）。
+//     误，不走统一协议层）。
 //
 // 上限 60s 是工程妥协：scheduler 任务总 ctx 限制在 30 分钟级别，单次 sleep
 // 太长会让 admin 取消任务时反应迟钝；retry_after > 60s 的情况一般是 chat

@@ -82,6 +82,16 @@ bash start_backend_prod.sh
 
 > `all` 模式下，Telegram Bot 在未配置 token 时会立即正常返回（return nil），此时进程进入「API + 调度器继续运行、Bot 不参与」的模式，不会拖垮其他服务。这是设计行为，不是错误。
 
+### Telegram Bot 协议性能回归
+
+Telegram JSON API 的统一协议层位于 `internal/api/telegram_transport.go`。`getUpdates` 成功响应必须保持单次类型化解析，稳定请求字段使用固定 DTO，写操作使用不保留 `result` 的丢弃类型。修改该路径后，应在配置好 `TWILIGHT_TEST_DSN` 的环境运行：
+
+```bash
+go test -run '^$' -bench '^BenchmarkTelegramUpdateEnvelopeDecode$' -benchmem -count=3 ./internal/api
+```
+
+基准同时保留旧双重解析模型作参照。关注 `single_typed_decode` 的 `ns/op`、`B/op` 和 `allocs/op`，不能只用一次绝对耗时判断回归；还必须运行完整 `internal/api` 真库测试，验证请求字段、父级 deadline、4 MiB 响应边界、429 退避和 Bot Token 脱敏。
+
 ## 前端开发
 
 前端是位于 `webui/` 的 Next.js 应用，使用 pnpm 作为包管理器（见 `package.json` 中的 `packageManager`）。

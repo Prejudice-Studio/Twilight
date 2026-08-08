@@ -73,8 +73,8 @@ func (a *App) refreshTelegramUsernameForUser(ctx context.Context, u store.User, 
 		out["telegram_error"] = "Telegram Bot Token 未配置"
 		return
 	}
-	var chat map[string]any
-	if err := a.telegramPost(ctx, "getChat", map[string]any{"chat_id": u.TelegramID}, &chat); err != nil {
+	chat, err := a.telegramGetChat(ctx, u.TelegramID)
+	if err != nil {
 		out["telegram_error"] = a.telegramSanitizeError(err)
 		return
 	}

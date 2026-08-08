@@ -17,7 +17,7 @@ Emby 活动日志同步 `/System/ActivityLog/Entries` 后，会按 `playback.sta
 | `internal/redis` | 无第三方依赖的 Redis RESP 客户端，用于会话和限流跨进程共享。 |
 | `internal/security` | Token 生成、PBKDF2-SHA256 密码哈希与旧 SHA256 密码兼容校验。 |
 
-`internal/api` 已按维护边界拆分。常见文件包括：`emby_client.go`、`emby_inventory.go`、`emby_url_probe.go` 负责 Emby；`tmdb_client.go`、`bangumi_client.go`、`bangumi_webhook.go` 负责外部媒体源；`media_service.go` 负责搜索/详情聚合；`media_request_handlers.go` 负责求片 HTTP；`code_use_handlers.go`、`regcode_handlers.go`、`invite_handlers.go` 负责卡码和邀请；`scheduler_handlers.go`、`scheduler_runner.go` 负责调度；`database_admin.go`、`system_update.go`、`runtime_logs.go` 负责数据库运维、Git 更新、运行状态与实时日志。
+`internal/api` 已按维护边界拆分。常见文件包括：`emby_client.go`、`emby_inventory.go`、`emby_url_probe.go` 负责 Emby；`telegram_bot.go`、`telegram_commands.go`、`telegram_transport.go` 分别负责 Bot 生命周期、指令分发和 Telegram 类型化 HTTP/JSON 协议；`tmdb_client.go`、`bangumi_client.go`、`bangumi_webhook.go` 负责外部媒体源；`media_service.go` 负责搜索/详情聚合；`media_request_handlers.go` 负责求片 HTTP；`code_use_handlers.go`、`regcode_handlers.go`、`invite_handlers.go` 负责卡码和邀请；`scheduler_handlers.go`、`scheduler_runner.go` 负责调度；`database_admin.go`、`system_update.go`、`runtime_logs.go` 负责数据库运维、Git 更新、运行状态与实时日志。
 
 相关文档：路由清单见 [API 路由索引](./api-index.md)，接口字段见 [后端 API 详参](./backend-api.md)，安全加固见 [安全加固](../guides/security.md)，部署步骤见 [安装部署](../guides/install.md)。
 
@@ -255,6 +255,7 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
 - **运行日志表性能口径**：`twilight_runtime_logs` 只服务 Go 进程运行日志，按 `id` 游标读取增量，按 `id DESC` 读取最新快照，并用 cutoff id 删除旧行以保留最近 N 条；其写入同样不会改动主状态文档。
 - **Telegram 游标性能与一致性口径**：`twilight_telegram_runtime` 只有 `id=1` 的一行，批次完成后以 `GREATEST` 单调推进 `update_offset`，不获取 Store 全局锁，也不刷新、快照、编码或重写 `twilight_state`。Bot 身份经 `getMe` 确认变化时才允许清零。旧 `State.TelegramBotOffset` 在启动或 `LoadSnapshot` 时作为迁移种子，迁移后从 JSONB 清除；新备份不携带该运行游标。
 - **Telegram 花名册性能与一致性口径**：`twilight_telegram_roster` 以 `(chat_id, telegram_id)` 为主键，首次观察和状态变化使用窄行 UPSERT，普通消息由 4096 项有界热缓存做五分钟节流；冷缓存仍用 SQL `WHERE` 阻止近期无变化行产生物理 UPDATE。定时成员检查把去重结果编码为 JSONB，一条语句批量合并，`is_bot` 只允许从 false 升为 true，并保留最早 `first_seen` 与最新 `last_seen/status`。列表排序和统计聚合由 PostgreSQL 完成，不再扫描常驻 Go map。旧 `State.TelegramRoster` 启动时幂等迁移并从主状态清除。
+- **Telegram 协议性能与安全口径**：`telegram_transport.go` 直接把 Telegram envelope 的 `result` 解码到目标类型，替代“整包 `ReadAll` + `RawMessage` + 二次 `Unmarshal`”；稳定方法使用固定请求结构，写操作不保留返回对象。成功响应硬限制为 4 MiB，错误正文有界读取，已有调用方 deadline 优先于默认超时，并保留 HTTP 429 `retry_after`、共享连接复用、同源重定向限制和所有错误出口的 Bot Token 脱敏。
 - **播放记录写路径优化**：
   - 所有 `twilight_playback_records` 的 PG 读写都走带超时的 context（`pgPlaybackReadTimeout` / `pgPlaybackWriteTimeout`，均 5s），连接假死时到期自行释放，不再无限阻塞。
   - `AddPlaybackRecordIdempotent` 的 PG 单条 INSERT 移到 `s.mu` 之外执行——记录已由 `saveLocked` 落进 `twilight_state` 的 state jsonb，独立表 `twilight_playback_records` 行只是读路径优先命中的副本、`ON CONFLICT` 保证幂等；持锁跨这段网络 I/O 会让一个卡死的 PG 连接冻结全部 store 写操作。DB 失败按旧语义吞掉（返回 `false, nil`），内存状态副本为准（这是 `internal/store` 里唯一保留内存兜底读的位置）。

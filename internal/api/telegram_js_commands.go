@@ -204,18 +204,15 @@ func (a *App) telegramRunJSCustomCommandWithOptions(code string, c telegramComma
 				pm = p
 			}
 		}
-		body := map[string]any{"chat_id": chatID, "text": msgText, "disable_web_page_preview": true}
-		if pm != "" {
-			body["parse_mode"] = pm
-		}
-		var result map[string]any
-		if err := a.telegramPost(opts.Context, "sendMessage", body, &result); err != nil {
+		body := telegramSendMessageRequest{ChatID: chatID, Text: msgText, ParseMode: pm, DisableWebPagePreview: true}
+		result, err := telegramPostResult[telegramMessageResult](a, opts.Context, "sendMessage", body, 20*time.Second)
+		if err != nil {
 			if len(logs) < 8 {
 				logs = append(logs, "sendMessage error: "+truncateString(err.Error(), 200))
 			}
 			return vm.ToValue(false)
 		}
-		return vm.ToValue(numeric(result["message_id"]))
+		return vm.ToValue(result.MessageID)
 	})
 	_ = vm.Set("reply", func(call goja.FunctionCall) goja.Value {
 		if len(replies) < 4 {

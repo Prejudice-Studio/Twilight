@@ -2326,8 +2326,7 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request, _ Params) {
 	username := strings.TrimPrefix(asString(me["username"]), "@")
 	results = append(results, map[string]any{"target": "Bot getMe", "success": true, "username": username, "bot_id": zeroNil(botID)})
 	for _, chatID := range telegramChatIDs(a.cfg().TelegramGroupIDs) {
-		var chat map[string]any
-		err := a.telegramPost(testCtx, "getChat", map[string]any{"chat_id": chatID}, &chat)
+		chat, err := a.telegramGetChat(testCtx, chatID)
 		item := map[string]any{"target": " 群组 " + chatID, "success": err == nil}
 		if err != nil {
 			item["error"] = err.Error()
@@ -2345,8 +2344,7 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request, _ Params) {
 		results = append(results, item)
 	}
 	for _, chatID := range telegramChatIDs(a.cfg().TelegramChannelIDs) {
-		var chat map[string]any
-		err := a.telegramPost(testCtx, "getChat", map[string]any{"chat_id": chatID}, &chat)
+		chat, err := a.telegramGetChat(testCtx, chatID)
 		item := map[string]any{"target": "频道 " + chatID, "success": err == nil}
 		if err != nil {
 			item["error"] = err.Error()

@@ -3377,7 +3377,7 @@ func TestTelegramErrorRedactsBotToken(t *testing.T) {
 	}
 }
 
-// TestTelegramRetryAfterFromError 锁定 R61-3 不变量：telegramPost 在 OK=false
+// TestTelegramRetryAfterFromError 锁定 R61-3 不变量：Telegram 协议层在 OK=false
 // + parameters.retry_after>0 时必须把秒数编进错误字符串，
 // telegramRetryAfterFromError 反解出来后调用方才能 sleep 真实秒数。
 //

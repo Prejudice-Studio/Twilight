@@ -1,0 +1,258 @@
+package api
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestDecodeTelegramEnvelopeDirectResult(t *testing.T) {
+	raw := `{"result":[{"update_id":7,"message":{"text":"hello"}}],"ok":true,"unknown":{"ignored":true}}`
+	payload, err := decodeTelegramEnvelope[[]map[string]any](strings.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !payload.OK || len(payload.Result) != 1 || numeric(payload.Result[0]["update_id"]) != 7 {
+		t.Fatalf("unexpected payload: %#v", payload)
+	}
+
+	discarded, err := decodeTelegramEnvelope[telegramDiscardResult](strings.NewReader(`{"ok":true,"result":{"message_id":42,"text":"unused"}}`))
+	if err != nil || !discarded.OK {
+		t.Fatalf("discard result failed: payload=%#v err=%v", discarded, err)
+	}
+}
+
+func TestDecodeTelegramEnvelopeRejectsTrailingAndOversizedData(t *testing.T) {
+	if _, err := decodeTelegramEnvelope[map[string]any](strings.NewReader(`{"ok":true,"result":{}} {"extra":true}`)); err == nil {
+		t.Fatal("multiple top-level JSON values were accepted")
+	}
+	prefix := `{"ok":true,"result":"`
+	suffix := `"}`
+	exact := prefix + strings.Repeat("x", telegramMaxResponseBytes-len(prefix)-len(suffix)) + suffix
+	if _, err := decodeTelegramEnvelope[string](strings.NewReader(exact)); err != nil {
+		t.Fatalf("exact-size response was rejected: %v", err)
+	}
+	if _, err := decodeTelegramEnvelope[string](strings.NewReader(exact + " ")); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("oversized response error=%v", err)
+	}
+}
+
+func TestTelegramTypedRequestJSONCompatibility(t *testing.T) {
+	tests := []struct {
+		name string
+		body any
+		want map[string]any
+	}{
+		{
+			name: "plain message omits optional fields",
+			body: telegramSendMessageRequest{ChatID: int64(42), Text: "hello", DisableWebPagePreview: true},
+			want: map[string]any{"chat_id": float64(42), "text": "hello", "disable_web_page_preview": true},
+		},
+		{
+			name: "message markup",
+			body: telegramSendMessageRequest{ChatID: "@channel", Text: "hello", ParseMode: "HTML", DisableWebPagePreview: true, ReplyMarkup: map[string]any{"inline_keyboard": []any{}}},
+			want: map[string]any{"chat_id": "@channel", "text": "hello", "parse_mode": "HTML", "disable_web_page_preview": true, "reply_markup": map[string]any{"inline_keyboard": []any{}}},
+		},
+		{
+			name: "edit message",
+			body: telegramEditMessageRequest{ChatID: 7, MessageID: 9, Text: "updated", DisableWebPagePreview: true},
+			want: map[string]any{"chat_id": float64(7), "message_id": float64(9), "text": "updated", "disable_web_page_preview": true},
+		},
+		{
+			name: "callback keeps false alert",
+			body: telegramAnswerCallbackRequest{CallbackQueryID: "cb", Text: "done", ShowAlert: false},
+			want: map[string]any{"callback_query_id": "cb", "text": "done", "show_alert": false},
+		},
+		{
+			name: "ban keeps false revoke",
+			body: telegramBanMemberRequest{ChatID: "-1001", UserID: 8, RevokeMessages: false},
+			want: map[string]any{"chat_id": "-1001", "user_id": float64(8), "revoke_messages": false},
+		},
+		{
+			name: "unban",
+			body: telegramUnbanMemberRequest{ChatID: "-1001", UserID: 8, OnlyIfBanned: true},
+			want: map[string]any{"chat_id": "-1001", "user_id": float64(8), "only_if_banned": true},
+		},
+		{
+			name: "initial update poll omits offset",
+			body: telegramGetUpdatesRequest{Timeout: 30, AllowedUpdates: telegramAllowedUpdates},
+			want: map[string]any{"timeout": float64(30), "allowed_updates": []any{"message", "callback_query", "chat_member", "my_chat_member"}},
+		},
+		{
+			name: "subsequent update poll includes offset",
+			body: telegramGetUpdatesRequest{Offset: 99, Timeout: 30, AllowedUpdates: telegramAllowedUpdates},
+			want: map[string]any{"offset": float64(99), "timeout": float64(30), "allowed_updates": []any{"message", "callback_query", "chat_member", "my_chat_member"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := json.Marshal(tt.body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got map[string]any
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("request JSON=%s\ngot:  %#v\nwant: %#v", raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTelegramHTTPErrorPreservesRetryAfter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"ok":false,"error_code":429,"description":"Too Many Requests","parameters":{"retry_after":9}}`))
+	}))
+	defer server.Close()
+	_, err := telegramPostResultToEndpoint[telegramDiscardResult](context.Background(), server.URL, "sendMessage", struct{}{}, time.Second)
+	if err == nil {
+		t.Fatal("expected Telegram HTTP error")
+	}
+	if retry, ok := telegramRetryAfterFromError(err); !ok || retry != 9*time.Second {
+		t.Fatalf("retry_after=%v ok=%v err=%v", retry, ok, err)
+	}
+}
+
+func TestTelegramTransportReportsNonJSONStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "upstream unavailable", http.StatusBadGateway)
+	}))
+	defer server.Close()
+	_, err := telegramPostResultToEndpoint[telegramDiscardResult](context.Background(), server.URL, "sendMessage", struct{}{}, time.Second)
+	if err == nil || !strings.Contains(err.Error(), "remote status 502") || !strings.Contains(err.Error(), "upstream unavailable") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestTelegramTransportPreservesCallerDeadline(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		<-release
+	}))
+	defer server.Close()
+	defer close(release)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := telegramPostResultToEndpoint[telegramDiscardResult](ctx, server.URL, "getUpdates", struct{}{}, time.Second)
+	if err == nil || !strings.Contains(err.Error(), context.DeadlineExceeded.Error()) {
+		t.Fatalf("expected caller deadline error, got %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("caller deadline was replaced by transport timeout: %v", elapsed)
+	}
+}
+
+func TestTelegramTransportSanitizesTokenFromAllErrorSources(t *testing.T) {
+	const token = "123:VERY_SECRET_TOKEN"
+	tests := []struct {
+		name    string
+		handler http.Handler
+		closed  bool
+	}{
+		{
+			name: "error body",
+			handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "upstream echoed "+token, http.StatusBadGateway)
+			}),
+		},
+		{
+			name: "redirect location",
+			handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Location", "https://example.com/bot"+token+"/getMe")
+				w.WriteHeader(http.StatusFound)
+			}),
+		},
+		{name: "network error", handler: http.NotFoundHandler(), closed: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(tt.handler)
+			baseURL := server.URL
+			if tt.closed {
+				server.Close()
+			} else {
+				defer server.Close()
+			}
+
+			app := newTestApp(t)
+			app.cfg().TelegramMode = true
+			app.cfg().TelegramBotToken = token
+			app.cfg().TelegramAPIURL = baseURL
+			_, err := app.telegramGetMe(context.Background())
+			if err == nil {
+				t.Fatal("expected Telegram transport error")
+			}
+			if strings.Contains(err.Error(), token) {
+				t.Fatalf("Telegram token leaked in error: %v", err)
+			}
+			if !strings.Contains(err.Error(), "<redacted>") {
+				t.Fatalf("sanitized error lacks redaction marker: %v", err)
+			}
+		})
+	}
+}
+
+func BenchmarkTelegramUpdateEnvelopeDecode(b *testing.B) {
+	updates := make([]map[string]any, 100)
+	for i := range updates {
+		updates[i] = map[string]any{
+			"update_id": i + 1,
+			"message": map[string]any{
+				"message_id": i + 10,
+				"chat":       map[string]any{"id": -1001234567890, "type": "supergroup"},
+				"from":       map[string]any{"id": i + 1000, "username": fmt.Sprintf("member_%d", i)},
+				"text":       strings.Repeat("telegram update payload ", 12),
+			},
+		}
+	}
+	raw, err := json.Marshal(map[string]any{"ok": true, "result": updates})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportMetric(float64(len(raw)), "response_bytes")
+
+	b.Run("legacy_read_raw_decode", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			copied, readErr := io.ReadAll(bytes.NewReader(raw))
+			if readErr != nil {
+				b.Fatal(readErr)
+			}
+			var envelope telegramResponse
+			if err := json.Unmarshal(copied, &envelope); err != nil {
+				b.Fatal(err)
+			}
+			var result []map[string]any
+			if err := json.Unmarshal(envelope.Result, &result); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("single_typed_decode", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			payload, err := decodeTelegramEnvelope[[]map[string]any](bytes.NewReader(raw))
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(payload.Result) != len(updates) {
+				b.Fatal("decoded update count mismatch")
+			}
+		}
+	})
+}

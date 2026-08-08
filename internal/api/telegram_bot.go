@@ -229,13 +229,8 @@ func (a *App) RunTelegramBot(ctx context.Context) error {
 }
 
 func (a *App) telegramGetUpdates(ctx context.Context, offset int64) ([]map[string]any, error) {
-	var result []map[string]any
-	body := map[string]any{"timeout": 30, "allowed_updates": []string{"message", "callback_query", "chat_member", "my_chat_member"}}
-	if offset > 0 {
-		body["offset"] = offset
-	}
-	err := a.telegramPostWithTimeout(ctx, "getUpdates", body, &result, 45*time.Second)
-	return result, err
+	body := telegramGetUpdatesRequest{Offset: offset, Timeout: 30, AllowedUpdates: telegramAllowedUpdates}
+	return telegramPostResult[[]map[string]any](a, ctx, "getUpdates", body, 45*time.Second)
 }
 
 func (a *App) handleTelegramUpdate(ctx context.Context, update map[string]any) {
