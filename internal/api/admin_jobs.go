@@ -246,14 +246,13 @@ func (a *App) telegramMembershipMissingForScheduler(ctx context.Context, telegra
 			}
 			return missing, updates, err
 		}
-		status := strings.ToLower(asString(member["status"]))
+		status := strings.ToLower(member.Status)
 		if status == "left" || status == "kicked" {
 			missing = append(missing, chatID)
 			updates = append(updates, store.TelegramRosterUpdate{ChatID: chatID, TelegramID: telegramID, Status: status})
 			continue
 		}
-		user, _ := member["user"].(map[string]any)
-		updates = append(updates, store.TelegramRosterUpdate{ChatID: chatID, TelegramID: telegramID, Status: firstNonEmpty(status, "member"), IsBot: boolish(user["is_bot"])})
+		updates = append(updates, store.TelegramRosterUpdate{ChatID: chatID, TelegramID: telegramID, Status: firstNonEmpty(status, "member"), IsBot: member.User.IsBot})
 	}
 	return missing, updates, nil
 }

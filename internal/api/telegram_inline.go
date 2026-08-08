@@ -599,11 +599,40 @@ func (a *App) telegramGroupUserPanelTextForChat(ctx context.Context, chatID int6
 }
 
 func telegramRenderPanelTemplate(template string, values map[string]string) string {
-	pairs := make([]string, 0, len(values)*2)
-	for key, value := range values {
-		pairs = append(pairs, "{"+key+"}", value)
+	var out strings.Builder
+	lastWritten := 0
+	searchFrom := 0
+	for searchFrom < len(template) {
+		relativeOpen := strings.IndexByte(template[searchFrom:], '{')
+		if relativeOpen < 0 {
+			break
+		}
+		open := searchFrom + relativeOpen
+		relativeClose := strings.IndexByte(template[open+1:], '}')
+		if relativeClose < 0 {
+			break
+		}
+		close := open + 1 + relativeClose
+		value, known := values[template[open+1:close]]
+		if !known {
+			// Move one byte forward so a known placeholder nested inside malformed
+			// custom text can still be rendered, matching strings.Replacer.
+			searchFrom = open + 1
+			continue
+		}
+		if out.Cap() == 0 {
+			out.Grow(len(template))
+		}
+		out.WriteString(template[lastWritten:open])
+		out.WriteString(value)
+		lastWritten = close + 1
+		searchFrom = close + 1
 	}
-	return strings.NewReplacer(pairs...).Replace(template)
+	if out.Cap() == 0 {
+		return template
+	}
+	out.WriteString(template[lastWritten:])
+	return out.String()
 }
 
 func (a *App) telegramGroupUserPanelPlaceholders(ctx context.Context, chatID int64, u store.User, template string) map[string]string {
@@ -693,8 +722,7 @@ func (a *App) telegramPanelUsername(ctx context.Context, chatID int64, u store.U
 	if err != nil {
 		return username
 	}
-	remoteUser, _ := member["user"].(map[string]any)
-	username = strings.TrimPrefix(strings.TrimSpace(asString(remoteUser["username"])), "@")
+	username = strings.TrimPrefix(strings.TrimSpace(member.User.Username), "@")
 	if username == "" {
 		return ""
 	}

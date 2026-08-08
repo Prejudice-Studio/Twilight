@@ -78,7 +78,7 @@ func (a *App) refreshTelegramUsernameForUser(ctx context.Context, u store.User, 
 		out["telegram_error"] = a.telegramSanitizeError(err)
 		return
 	}
-	username := strings.TrimPrefix(strings.TrimSpace(asString(chat["username"])), "@")
+	username := strings.TrimPrefix(strings.TrimSpace(chat.Username), "@")
 	out["telegram_username"] = username
 	if username == "" || username == u.TelegramUsername {
 		return

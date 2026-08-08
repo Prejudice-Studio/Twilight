@@ -182,7 +182,7 @@ func (a *App) RunTelegramBot(ctx context.Context) error {
 					continue
 				}
 			}
-			botIdentity := strings.TrimSpace(asString(me["username"]))
+			botIdentity := strings.TrimSpace(me.Username)
 			if botIdentity != "" && activeBot != "" && botIdentity != activeBot {
 				// bot 实体切换：旧 offset 和新 bot 的 update 序列没有任何关系，
 				// 必须 reset 否则会跳过新 bot 的真实初始 update。
@@ -1015,10 +1015,8 @@ func (a *App) telegramHandleGroupUser(ctx context.Context, chatID, telegramID in
 }
 
 func (a *App) telegramAdminID(telegramID int64) bool {
-	for _, id := range a.cfg().TelegramAdminIDs {
-		if id == telegramID {
-			return true
-		}
+	if _, ok := a.telegramCommandConfigIndex().admins[telegramID]; ok {
+		return true
 	}
 	if u, okUser := a.store().FindUserByTelegramID(telegramID); okUser && u.Role == store.RoleAdmin {
 		return true

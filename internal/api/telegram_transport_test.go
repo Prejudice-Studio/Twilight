@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/prejudice-studio/twilight/internal/store"
 )
 
 func TestDecodeTelegramEnvelopeDirectResult(t *testing.T) {
@@ -57,6 +59,91 @@ func TestDecodeTelegramTypedUpdates(t *testing.T) {
 	}
 	if payload.Result[3].MyChatMember == nil || payload.Result[3].MyChatMember.NewChatMember.Status != "administrator" {
 		t.Fatalf("typed my_chat_member lost fields: %#v", payload.Result[3].MyChatMember)
+	}
+}
+
+func TestDecodeTelegramTypedChatMembers(t *testing.T) {
+	raw := `{"ok":true,"result":[` +
+		`{"status":"creator","user":{"id":9007199254740993,"is_bot":false,"username":"owner"},"custom_title":"ignored"},` +
+		`{"status":"administrator","user":{"id":8,"is_bot":true,"username":"helper"}}]}`
+	payload, err := decodeTelegramEnvelope[[]telegramChatMember](strings.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Result) != 2 || payload.Result[0].User.ID != 9007199254740993 || payload.Result[0].Status != "creator" {
+		t.Fatalf("typed administrators lost fields: %#v", payload.Result)
+	}
+	if !payload.Result[1].User.IsBot || !telegramMemberIsAdminOrBot(payload.Result[1]) {
+		t.Fatalf("typed bot administrator not recognized: %#v", payload.Result[1])
+	}
+	if !telegramMemberIsGone(telegramChatMember{Status: "LEFT"}) {
+		t.Fatal("case-insensitive left status was not recognized")
+	}
+}
+
+func TestDecodeTelegramTypedIdentityAndChat(t *testing.T) {
+	identity, err := decodeTelegramEnvelope[telegramUser](strings.NewReader(`{"ok":true,"result":{"id":42,"is_bot":true,"username":"twilight_bot","first_name":"ignored"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity.Result.ID != 42 || !identity.Result.IsBot || identity.Result.Username != "twilight_bot" {
+		t.Fatalf("typed identity lost fields: %#v", identity.Result)
+	}
+	chat, err := decodeTelegramEnvelope[telegramChat](strings.NewReader(`{"ok":true,"result":{"id":-1001,"type":"supergroup","title":"Twilight","username":"twilight_group","description":"ignored"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chat.Result.ID != -1001 || chat.Result.Type != "supergroup" || chat.Result.Title != "Twilight" || chat.Result.Username != "twilight_group" {
+		t.Fatalf("typed chat lost fields: %#v", chat.Result)
+	}
+}
+
+func TestTelegramConfigAdminIndexRefreshesWithSnapshotSlices(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().TelegramAdminIDs = []int64{11, 22}
+	if !app.telegramAdminID(11) || !app.telegramAdminID(22) || app.telegramAdminID(33) {
+		t.Fatal("configured administrator index returned the wrong initial membership")
+	}
+	app.cfg().TelegramAdminIDs = []int64{33}
+	if app.telegramAdminID(11) || !app.telegramAdminID(33) {
+		t.Fatal("configured administrator index did not refresh after slice replacement")
+	}
+	user, err := app.store().CreateUser(store.User{Username: "dynamic-admin", TelegramID: 44, Role: store.RoleAdmin, Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !app.telegramAdminID(44) {
+		t.Fatal("store-backed administrator role was not recognized")
+	}
+	if _, err := app.store().UpdateUser(user.UID, func(current *store.User) error {
+		current.Role = store.RoleNormal
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if app.telegramAdminID(44) {
+		t.Fatal("store-backed administrator role remained cached after demotion")
+	}
+}
+
+func TestTelegramRenderPanelTemplateCompatibility(t *testing.T) {
+	values := map[string]string{"username": "alice", "uid": "42"}
+	tests := []string{
+		"plain text",
+		"{username}/{uid}/{username}",
+		"unknown={future_key}; user={username}",
+		"malformed={future_{username}}",
+		"unterminated={username",
+	}
+	for _, template := range tests {
+		pairs := make([]string, 0, len(values)*2)
+		for key, value := range values {
+			pairs = append(pairs, "{"+key+"}", value)
+		}
+		want := strings.NewReplacer(pairs...).Replace(template)
+		if got := telegramRenderPanelTemplate(template, values); got != want {
+			t.Fatalf("template %q rendered as %q, want %q", template, got, want)
+		}
 	}
 }
 
@@ -355,4 +442,121 @@ func BenchmarkTelegramUpdateEnvelopeDecode(b *testing.B) {
 		b.ReportMetric(typedNS/dynamicNS, "typed/dynamic")
 	})
 
+}
+
+func BenchmarkTelegramChatAdministratorsDecode(b *testing.B) {
+	admins := make([]map[string]any, 100)
+	for i := range admins {
+		admins[i] = map[string]any{
+			"status": "administrator",
+			"user": map[string]any{
+				"id":         i + 1000,
+				"is_bot":     i%10 == 0,
+				"username":   fmt.Sprintf("admin_%d", i),
+				"first_name": strings.Repeat("administrator ", 4),
+			},
+			"can_manage_chat": true,
+		}
+	}
+	raw, err := json.Marshal(map[string]any{"ok": true, "result": admins})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportMetric(float64(len(raw)), "response_bytes")
+
+	b.Run("dynamic", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			payload, decodeErr := decodeTelegramEnvelope[[]map[string]any](bytes.NewReader(raw))
+			if decodeErr != nil || len(payload.Result) != len(admins) {
+				b.Fatal("dynamic administrator decode failed")
+			}
+		}
+	})
+	b.Run("typed", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			payload, decodeErr := decodeTelegramEnvelope[[]telegramChatMember](bytes.NewReader(raw))
+			if decodeErr != nil || len(payload.Result) != len(admins) {
+				b.Fatal("typed administrator decode failed")
+			}
+		}
+	})
+	b.Run("interleaved_compare", func(b *testing.B) {
+		var dynamicDuration time.Duration
+		var typedDuration time.Duration
+		decodeDynamic := func() {
+			started := time.Now()
+			payload, decodeErr := decodeTelegramEnvelope[[]map[string]any](bytes.NewReader(raw))
+			dynamicDuration += time.Since(started)
+			if decodeErr != nil || len(payload.Result) != len(admins) {
+				b.Fatal("dynamic administrator decode failed")
+			}
+		}
+		decodeTyped := func() {
+			started := time.Now()
+			payload, decodeErr := decodeTelegramEnvelope[[]telegramChatMember](bytes.NewReader(raw))
+			typedDuration += time.Since(started)
+			if decodeErr != nil || len(payload.Result) != len(admins) {
+				b.Fatal("typed administrator decode failed")
+			}
+		}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if i&1 == 0 {
+				decodeDynamic()
+				decodeTyped()
+			} else {
+				decodeTyped()
+				decodeDynamic()
+			}
+		}
+		b.StopTimer()
+		dynamicNS := float64(dynamicDuration.Nanoseconds()) / float64(b.N)
+		typedNS := float64(typedDuration.Nanoseconds()) / float64(b.N)
+		b.ReportMetric(dynamicNS, "dynamic_ns/op")
+		b.ReportMetric(typedNS, "typed_ns/op")
+		b.ReportMetric(typedNS/dynamicNS, "typed/dynamic")
+	})
+}
+
+func BenchmarkTelegramPanelTemplateRender(b *testing.B) {
+	template := "user={username} uid={uid} status={web_status} remote={emby_remote_status} unknown={future_key} again={username}"
+	values := map[string]string{
+		"username":           "alice",
+		"uid":                "42",
+		"web_status":         "启用",
+		"emby_remote_status": "已找到",
+		"unused_1":           "unused",
+		"unused_2":           "unused",
+		"unused_3":           "unused",
+		"unused_4":           "unused",
+	}
+	legacy := func() string {
+		pairs := make([]string, 0, len(values)*2)
+		for key, value := range values {
+			pairs = append(pairs, "{"+key+"}", value)
+		}
+		return strings.NewReplacer(pairs...).Replace(template)
+	}
+	want := legacy()
+	if got := telegramRenderPanelTemplate(template, values); got != want {
+		b.Fatalf("render mismatch: got %q want %q", got, want)
+	}
+	b.Run("legacy_replacer", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if legacy() != want {
+				b.Fatal("legacy render changed")
+			}
+		}
+	})
+	b.Run("single_pass", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if telegramRenderPanelTemplate(template, values) != want {
+				b.Fatal("single-pass render changed")
+			}
+		}
+	})
 }

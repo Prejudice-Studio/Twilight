@@ -1849,7 +1849,7 @@ func (a *App) publicTelegramBotInfo(ctx context.Context) map[string]any {
 	me, err := a.telegramGetMe(lookupCtx)
 	bot := empty
 	if err == nil {
-		username := strings.TrimPrefix(asString(me["username"]), "@")
+		username := strings.TrimPrefix(me.Username, "@")
 		if telegramPublicUsernamePattern.MatchString(username) {
 			bot = map[string]any{"username": username, "url": "https://t.me/" + username, "enabled": a.cfg().TelegramMode, "configured": true, "ok": true, "error": ""}
 		}
@@ -2322,8 +2322,8 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request, _ Params) {
 		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatus()})
 		return
 	}
-	botID := int64(numeric(me["id"]))
-	username := strings.TrimPrefix(asString(me["username"]), "@")
+	botID := me.ID
+	username := strings.TrimPrefix(me.Username, "@")
 	results = append(results, map[string]any{"target": "Bot getMe", "success": true, "username": username, "bot_id": zeroNil(botID)})
 	for _, chatID := range telegramChatIDs(a.cfg().TelegramGroupIDs) {
 		chat, err := a.telegramGetChat(testCtx, chatID)
@@ -2331,13 +2331,13 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request, _ Params) {
 		if err != nil {
 			item["error"] = err.Error()
 		} else {
-			item["title"] = firstNonEmpty(asString(chat["title"]), asString(chat["username"]))
+			item["title"] = firstNonEmpty(chat.Title, chat.Username)
 			if botID != 0 {
 				if member, memberErr := a.telegramGetChatMember(testCtx, chatID, botID); memberErr != nil {
 					item["success"] = false
 					item["error"] = memberErr.Error()
 				} else {
-					item["bot_status"] = asString(member["status"])
+					item["bot_status"] = member.Status
 				}
 			}
 		}
@@ -2349,7 +2349,7 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request, _ Params) {
 		if err != nil {
 			item["error"] = err.Error()
 		} else {
-			item["title"] = firstNonEmpty(asString(chat["title"]), asString(chat["username"]))
+			item["title"] = firstNonEmpty(chat.Title, chat.Username)
 		}
 		results = append(results, item)
 	}

@@ -61,7 +61,8 @@ type telegramCommandCtx struct {
 	Args []string
 }
 
-// telegramCommandConfigIndex 把配置中的自定义指令和禁用指令转换为只读索引。
+// telegramCommandConfigIndex 把配置中的自定义指令、禁用指令和管理员 ID
+// 转换为只读索引。
 // runtimeState 中的配置快照不可变，因此只需用切片首地址和长度识别当前配置；
 // 热重载或测试替换切片后会自动重建，普通 update 只做 O(1) map 查询。
 type telegramCommandConfigIndex struct {
@@ -69,8 +70,11 @@ type telegramCommandConfigIndex struct {
 	customLen     int
 	disabledFirst *string
 	disabledLen   int
+	adminFirst    *int64
+	adminLen      int
 	custom        map[string]string
 	disabled      map[string]bool
+	admins        map[int64]struct{}
 }
 
 func telegramCustomCommandFirst(items []config.TelegramCommandReply) *config.TelegramCommandReply {
@@ -87,13 +91,22 @@ func telegramDisabledCommandFirst(items []string) *string {
 	return &items[0]
 }
 
+func telegramAdminIDFirst(items []int64) *int64 {
+	if len(items) == 0 {
+		return nil
+	}
+	return &items[0]
+}
+
 func (a *App) telegramCommandConfigIndex() *telegramCommandConfigIndex {
 	cfg := a.cfg()
 	customFirst := telegramCustomCommandFirst(cfg.TelegramCustomCommands)
 	disabledFirst := telegramDisabledCommandFirst(cfg.TelegramDisabledCommands)
+	adminFirst := telegramAdminIDFirst(cfg.TelegramAdminIDs)
 	if cached := a.telegramCommandIndex.Load(); cached != nil &&
 		cached.customFirst == customFirst && cached.customLen == len(cfg.TelegramCustomCommands) &&
-		cached.disabledFirst == disabledFirst && cached.disabledLen == len(cfg.TelegramDisabledCommands) {
+		cached.disabledFirst == disabledFirst && cached.disabledLen == len(cfg.TelegramDisabledCommands) &&
+		cached.adminFirst == adminFirst && cached.adminLen == len(cfg.TelegramAdminIDs) {
 		return cached
 	}
 
@@ -102,8 +115,11 @@ func (a *App) telegramCommandConfigIndex() *telegramCommandConfigIndex {
 		customLen:     len(cfg.TelegramCustomCommands),
 		disabledFirst: disabledFirst,
 		disabledLen:   len(cfg.TelegramDisabledCommands),
+		adminFirst:    adminFirst,
+		adminLen:      len(cfg.TelegramAdminIDs),
 		custom:        make(map[string]string, len(cfg.TelegramCustomCommands)),
 		disabled:      make(map[string]bool, len(cfg.TelegramDisabledCommands)),
+		admins:        make(map[int64]struct{}, len(cfg.TelegramAdminIDs)),
 	}
 	for _, item := range cfg.TelegramCustomCommands {
 		command := telegramCommand(item.Command)
@@ -117,6 +133,11 @@ func (a *App) telegramCommandConfigIndex() *telegramCommandConfigIndex {
 	for _, item := range cfg.TelegramDisabledCommands {
 		if command := normalizeTelegramDisabledCommand(item); command != "" {
 			index.disabled[command] = true
+		}
+	}
+	for _, id := range cfg.TelegramAdminIDs {
+		if id != 0 {
+			index.admins[id] = struct{}{}
 		}
 	}
 	a.telegramCommandIndex.Store(index)

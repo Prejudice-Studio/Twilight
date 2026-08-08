@@ -124,12 +124,12 @@ func (a *App) telegramSanitizeError(err error) string {
 	return msg
 }
 
-func (a *App) telegramGetMe(ctx context.Context) (map[string]any, error) {
-	return telegramPostResult[map[string]any](a, ctx, "getMe", struct{}{}, 20*time.Second)
+func (a *App) telegramGetMe(ctx context.Context) (telegramUser, error) {
+	return telegramPostResult[telegramUser](a, ctx, "getMe", struct{}{}, 20*time.Second)
 }
 
-func (a *App) telegramGetChat(ctx context.Context, chatID any) (map[string]any, error) {
-	return telegramPostResult[map[string]any](a, ctx, "getChat", struct {
+func (a *App) telegramGetChat(ctx context.Context, chatID any) (telegramChat, error) {
+	return telegramPostResult[telegramChat](a, ctx, "getChat", struct {
 		ChatID any `json:"chat_id"`
 	}{ChatID: chatID}, 20*time.Second)
 }
@@ -354,16 +354,16 @@ func (a *App) telegramAnswerCallbackQuery(ctx context.Context, callbackID, text 
 	})
 }
 
-func (a *App) telegramGetChatMember(ctx context.Context, chatID string, userID int64) (map[string]any, error) {
+func (a *App) telegramGetChatMember(ctx context.Context, chatID string, userID int64) (telegramChatMember, error) {
 	return a.telegramGetChatMemberWithTimeout(ctx, chatID, userID, 20*time.Second)
 }
 
-func (a *App) telegramGetChatMemberWithTimeout(ctx context.Context, chatID string, userID int64, timeout time.Duration) (map[string]any, error) {
-	return telegramPostResult[map[string]any](a, ctx, "getChatMember", telegramChatMemberRequest{ChatID: chatID, UserID: userID}, timeout)
+func (a *App) telegramGetChatMemberWithTimeout(ctx context.Context, chatID string, userID int64, timeout time.Duration) (telegramChatMember, error) {
+	return telegramPostResult[telegramChatMember](a, ctx, "getChatMember", telegramChatMemberRequest{ChatID: chatID, UserID: userID}, timeout)
 }
 
-func (a *App) telegramGetChatAdministrators(ctx context.Context, chatID string) ([]map[string]any, error) {
-	return telegramPostResult[[]map[string]any](a, ctx, "getChatAdministrators", struct {
+func (a *App) telegramGetChatAdministrators(ctx context.Context, chatID string) ([]telegramChatMember, error) {
+	return telegramPostResult[[]telegramChatMember](a, ctx, "getChatAdministrators", struct {
 		ChatID string `json:"chat_id"`
 	}{ChatID: chatID}, 20*time.Second)
 }
@@ -426,21 +426,21 @@ func (a *App) telegramMembershipMissingForChats(ctx context.Context, telegramID 
 			}
 			continue
 		}
-		status := strings.ToLower(asString(member["status"]))
+		status := strings.ToLower(member.Status)
 		if status == "left" || status == "kicked" {
 			missing = append(missing, chatID)
 			_ = a.store().MarkTelegramRosterLeft(chatID, telegramID, status)
 			continue
 		}
-		user, _ := member["user"].(map[string]any)
-		_ = a.store().UpsertTelegramRoster(chatID, telegramID, firstNonEmpty(status, "member"), boolish(user["is_bot"]))
+		_ = a.store().UpsertTelegramRoster(chatID, telegramID, firstNonEmpty(status, "member"), member.User.IsBot)
 	}
 	return missing, nil
 }
 
 func (a *App) telegramAdminSet(ctx context.Context, chatID string) map[int64]bool {
-	out := map[int64]bool{}
-	for _, id := range a.cfg().TelegramAdminIDs {
+	configured := a.telegramCommandConfigIndex().admins
+	out := make(map[int64]bool, len(configured))
+	for id := range configured {
 		out[id] = true
 	}
 	admins, err := a.telegramGetChatAdministrators(ctx, chatID)
@@ -448,9 +448,8 @@ func (a *App) telegramAdminSet(ctx context.Context, chatID string) map[int64]boo
 		return out
 	}
 	for _, member := range admins {
-		user, _ := member["user"].(map[string]any)
-		if id := numeric(user["id"]); id != 0 {
-			out[id] = true
+		if member.User.ID != 0 {
+			out[member.User.ID] = true
 		}
 	}
 	return out
@@ -596,18 +595,17 @@ func telegramChatIDValue(value string) any {
 	return value
 }
 
-func telegramMemberIsGone(member map[string]any) bool {
-	status := strings.ToLower(asString(member["status"]))
+func telegramMemberIsGone(member telegramChatMember) bool {
+	status := strings.ToLower(member.Status)
 	return status == "left" || status == "kicked"
 }
 
-func telegramMemberIsAdminOrBot(member map[string]any) bool {
-	status := strings.ToLower(asString(member["status"]))
+func telegramMemberIsAdminOrBot(member telegramChatMember) bool {
+	status := strings.ToLower(member.Status)
 	if status == "creator" || status == "administrator" {
 		return true
 	}
-	user, _ := member["user"].(map[string]any)
-	return boolish(user["is_bot"])
+	return member.User.IsBot
 }
 
 // telegramRateLimitPause 在批处理（kick / 提醒）路径上充当一行式背压：
