@@ -30,6 +30,36 @@ func TestDecodeTelegramEnvelopeDirectResult(t *testing.T) {
 	}
 }
 
+func TestDecodeTelegramTypedUpdates(t *testing.T) {
+	raw := `{"ok":true,"result":[` +
+		`{"update_id":1,"message":{"message_id":11,"text":"/ping","chat":{"id":-100,"type":"supergroup"},"from":{"id":9007199254740993,"is_bot":false,"username":"alice"},"sender_chat":{"id":-100},"reply_to_message":{"from":{"id":77}}}},` +
+		`{"update_id":2,"callback_query":{"id":"cb","data":"gadm:act:close:token","from":{"id":8,"username":"admin"},"message":{"message_id":12,"chat":{"id":-100,"type":"supergroup"}}}},` +
+		`{"update_id":3,"chat_member":{"chat":{"id":-200,"type":"supergroup"},"from":{"id":9},"new_chat_member":{"status":"left","user":{"id":10,"is_bot":true,"username":"helper"}}}},` +
+		`{"update_id":4,"my_chat_member":{"chat":{"id":-300,"type":"supergroup"},"from":{"id":11},"new_chat_member":{"status":"administrator","user":{"id":12,"is_bot":true}}}}]}`
+	payload, err := decodeTelegramEnvelope[[]telegramUpdate](strings.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Result) != 4 {
+		t.Fatalf("typed update count=%d, want 4", len(payload.Result))
+	}
+	message := payload.Result[0].Message
+	if message == nil || message.From.ID != 9007199254740993 || message.SenderChat.ID != -100 || message.ReplyToMessage == nil || message.ReplyToMessage.From.ID != 77 {
+		t.Fatalf("typed message lost fields: %#v", message)
+	}
+	callback := payload.Result[1].CallbackQuery
+	if callback == nil || callback.ID != "cb" || callback.From.ID != 8 || callback.Message == nil || callback.Message.MessageID != 12 {
+		t.Fatalf("typed callback lost fields: %#v", callback)
+	}
+	membership := payload.Result[2].ChatMember
+	if membership == nil || membership.Chat.ID != -200 || membership.From.ID != 9 || membership.NewChatMember.Status != "left" || membership.NewChatMember.User.ID != 10 || !membership.NewChatMember.User.IsBot {
+		t.Fatalf("typed membership lost fields: %#v", membership)
+	}
+	if payload.Result[3].MyChatMember == nil || payload.Result[3].MyChatMember.NewChatMember.Status != "administrator" {
+		t.Fatalf("typed my_chat_member lost fields: %#v", payload.Result[3].MyChatMember)
+	}
+}
+
 func TestDecodeTelegramEnvelopeRejectsTrailingAndOversizedData(t *testing.T) {
 	if _, err := decodeTelegramEnvelope[map[string]any](strings.NewReader(`{"ok":true,"result":{}} {"extra":true}`)); err == nil {
 		t.Fatal("multiple top-level JSON values were accepted")
@@ -206,6 +236,25 @@ func TestTelegramTransportSanitizesTokenFromAllErrorSources(t *testing.T) {
 	}
 }
 
+func TestTelegramSendMessageDiscardsUnusedMessageResult(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":"unused-invalid-type","text":"ignored"}}`))
+	}))
+	defer server.Close()
+
+	app := newTestApp(t)
+	app.cfg().TelegramMode = true
+	app.cfg().TelegramBotToken = "123:ABC"
+	app.cfg().TelegramAPIURL = server.URL
+	if err := app.telegramSendMessage(context.Background(), 42, "pong"); err != nil {
+		t.Fatalf("ordinary message retained unused result: %v", err)
+	}
+	if _, err := app.telegramSendMessageWithMarkup(context.Background(), 42, "panel", nil); err == nil {
+		t.Fatal("message-id path accepted an invalid message_id")
+	}
+}
+
 func BenchmarkTelegramUpdateEnvelopeDecode(b *testing.B) {
 	updates := make([]map[string]any, 100)
 	for i := range updates {
@@ -243,7 +292,7 @@ func BenchmarkTelegramUpdateEnvelopeDecode(b *testing.B) {
 		}
 	})
 
-	b.Run("single_typed_decode", func(b *testing.B) {
+	b.Run("single_dynamic_decode", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			payload, err := decodeTelegramEnvelope[[]map[string]any](bytes.NewReader(raw))
@@ -255,4 +304,55 @@ func BenchmarkTelegramUpdateEnvelopeDecode(b *testing.B) {
 			}
 		}
 	})
+
+	b.Run("typed_update_decode", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			payload, err := decodeTelegramEnvelope[[]telegramUpdate](bytes.NewReader(raw))
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(payload.Result) != len(updates) || payload.Result[0].Message == nil {
+				b.Fatal("decoded typed update count mismatch")
+			}
+		}
+	})
+
+	b.Run("interleaved_compare", func(b *testing.B) {
+		var dynamicDuration time.Duration
+		var typedDuration time.Duration
+		decodeDynamic := func() {
+			started := time.Now()
+			payload, decodeErr := decodeTelegramEnvelope[[]map[string]any](bytes.NewReader(raw))
+			dynamicDuration += time.Since(started)
+			if decodeErr != nil || len(payload.Result) != len(updates) {
+				b.Fatal("dynamic update decode failed")
+			}
+		}
+		decodeTyped := func() {
+			started := time.Now()
+			payload, decodeErr := decodeTelegramEnvelope[[]telegramUpdate](bytes.NewReader(raw))
+			typedDuration += time.Since(started)
+			if decodeErr != nil || len(payload.Result) != len(updates) || payload.Result[0].Message == nil {
+				b.Fatal("typed update decode failed")
+			}
+		}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if i&1 == 0 {
+				decodeDynamic()
+				decodeTyped()
+			} else {
+				decodeTyped()
+				decodeDynamic()
+			}
+		}
+		b.StopTimer()
+		dynamicNS := float64(dynamicDuration.Nanoseconds()) / float64(b.N)
+		typedNS := float64(typedDuration.Nanoseconds()) / float64(b.N)
+		b.ReportMetric(dynamicNS, "dynamic_ns/op")
+		b.ReportMetric(typedNS, "typed_ns/op")
+		b.ReportMetric(typedNS/dynamicNS, "typed/dynamic")
+	})
+
 }

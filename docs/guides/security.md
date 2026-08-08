@@ -193,6 +193,7 @@ allow_credential = true
 
 - 启用 Bot 内部回调时，必须配置强随机的 `Security.bot_internal_secret`。内部绑定确认端点 `POST /api/v1/users/me/telegram/bind-confirm`（`internal/api/telegram_bind_secure.go`）虽然挂在免登录路由上，但要求请求携带 `X-Internal-Secret`（或 `Authorization: Bearer <secret>`）并与配置值做常量时间比对；未配置密钥时该端点直接拒绝。
 - Telegram JSON 请求统一复用经过 SSRF 校验的端点、共享连接池和同源重定向策略。成功响应最多解码 4 MiB，错误响应只读取有界正文；网络错误、Telegram 错误正文和被拒绝重定向的 `Location` 在离开 App 协议层前都会清除 Bot Token。不得在命令实现中自行拼接 Bot URL 或绕过该脱敏出口。
+- 入站 update 只解码业务需要的强类型字段，未知 Telegram 字段不会进入通用动态对象。群组面板 callback 仅接受 `gadm:auth:<token>` / `gadm:act:<action>:<token>`，开发者 JS callback 仅接受 `djs:<token>:<index>`；空段、多余段和非法序号必须拒绝，不能用宽松 `Split` 后忽略中间内容。
 - 开启群组 / 频道强制校验时，确保 Bot 在目标群有足够权限，避免误判。
 - 开发者模式下的 Telegram JS 自定义命令只在 `bot_custom_commands` 的回复内容以 `js:` 开头时启用；沙箱暴露 `ctx`、`args`、`user`、`constants`、`reply(text)`、`log(text)`、`auth(role)`、`config(key)`、`env(key)` 以及受限的同步 `fetch()`、`interactions.*`、`users.*` / `db.*` 等白名单能力。其中配置与环境变量读取为只读白名单，Token、Secret、密码、API Key、数据库 URL、服务器线路等敏感信息不会返回；`fetch()` 仅放行公网 `http/https` 的 `GET`/`POST`/`HEAD`，禁用凭据与跳转、限制响应体长度，并在发起前按域名解析校验、在 TCP 拨号阶段对实际连接 IP 再次校验以阻断 localhost / 内网 / 链路本地（含云元数据）/ 广播组播目标和 DNS rebinding；沙箱不提供文件或进程能力，并有执行超时与危险 token 静态拦截。每次执行会写入 `telegram_js_command_execute` 审计日志。
 - **退群完全封禁模式（`Telegram.ban_on_leave`）**：

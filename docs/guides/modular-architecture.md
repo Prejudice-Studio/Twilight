@@ -102,7 +102,7 @@ Service 入参应是明确类型，不直接接收 `http.Request`。需要操作
 - 返回结构化结果，不直接写本地 store。
 - 高频或昂贵调用可以短缓存，但必须说明作用域、TTL、失效条件和降级行为。
 - Emby/Jellyfin 副作用必须先由业务层完成本地权限、容量、到期状态和管理员账号保护校验。
-- Telegram JSON 协议集中在 `internal/api/telegram_transport.go`：稳定方法使用固定请求 DTO，响应 envelope 直接类型化解码一次，写操作不保留无用 `result`。协议层负责响应大小上限、调用方 deadline 继承、HTTP 429 退避参数、重定向拒绝和 Token 脱敏；命令或 handler 不应各自复制这套逻辑。
+- Telegram JSON 协议集中在 `internal/api/telegram_transport.go`，入站窄 DTO 集中在 `telegram_update_types.go`：稳定方法使用固定请求 DTO，`getUpdates` 直接解码强类型 message/callback/chat-member，普通写操作不保留无用 `result`。批次层只编排 DTO 索引和指针，业务 handler 不应重新引入动态 map 或复制协议结构。协议层负责响应大小上限、调用方 deadline 继承、HTTP 429 退避参数、重定向拒绝和 Token 脱敏。
 
 ## 前端分层
 

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -133,25 +134,26 @@ func (a *App) developerJSCallback(token string) (developerJSCallbackContext, boo
 	return item, true
 }
 
-func (a *App) telegramHandleDeveloperJSCallback(ctx context.Context, callback map[string]any) bool {
-	data := asString(callback["data"])
-	parts := strings.Split(data, ":")
-	if len(parts) != 3 || parts[0] != "djs" {
+func (a *App) telegramHandleDeveloperJSCallback(ctx context.Context, callback *telegramCallbackQuery) bool {
+	if callback == nil {
+		return false
+	}
+	token, idx, parsed := telegramParseDeveloperJSCallback(callback.Data)
+	if !parsed {
 		return false
 	}
 	if !a.store().DeveloperModeEnabled() {
-		_ = a.telegramAnswerCallbackQuery(ctx, asString(callback["id"]), "Developer mode is disabled.", true)
+		_ = a.telegramAnswerCallbackQuery(ctx, callback.ID, "Developer mode is disabled.", true)
 		return true
 	}
-	token := parts[1]
-	idx := int(numeric(parts[2]))
-	callbackID := asString(callback["id"])
-	from, _ := callback["from"].(map[string]any)
-	actorID := numeric(from["id"])
-	message, _ := callback["message"].(map[string]any)
-	chat, _ := message["chat"].(map[string]any)
-	chatID := numeric(chat["id"])
-	messageID := numeric(message["message_id"])
+	callbackID := callback.ID
+	actorID := callback.From.ID
+	message := callback.Message
+	var chatID, messageID int64
+	if message != nil {
+		chatID = message.Chat.ID
+		messageID = message.MessageID
+	}
 	item, ok := a.developerJSCallback(token)
 	if !ok {
 		_ = a.telegramAnswerCallbackQuery(ctx, callbackID, "This action has expired.", true)
@@ -193,6 +195,22 @@ func (a *App) telegramHandleDeveloperJSCallback(ctx context.Context, callback ma
 		"replied":    strings.TrimSpace(action.Reply) != "",
 	})
 	return true
+}
+
+func telegramParseDeveloperJSCallback(data string) (token string, index int, ok bool) {
+	prefix, rest, found := strings.Cut(data, ":")
+	if !found || prefix != "djs" {
+		return "", 0, false
+	}
+	token, indexText, found := strings.Cut(rest, ":")
+	if !found || token == "" || indexText == "" || strings.Contains(indexText, ":") {
+		return "", 0, false
+	}
+	index, err := strconv.Atoi(indexText)
+	if err != nil {
+		return "", 0, false
+	}
+	return token, index, true
 }
 
 func (a *App) saveDeveloperJSWaiter(item developerJSMessageWaiter) {

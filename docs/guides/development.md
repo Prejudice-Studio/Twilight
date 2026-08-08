@@ -84,13 +84,13 @@ bash start_backend_prod.sh
 
 ### Telegram Bot 协议性能回归
 
-Telegram JSON API 的统一协议层位于 `internal/api/telegram_transport.go`。`getUpdates` 成功响应必须保持单次类型化解析，稳定请求字段使用固定 DTO，写操作使用不保留 `result` 的丢弃类型。修改该路径后，应在配置好 `TWILIGHT_TEST_DSN` 的环境运行：
+Telegram JSON API 的统一协议层位于 `internal/api/telegram_transport.go`，入站更新 DTO 位于 `internal/api/telegram_update_types.go`。`getUpdates` 必须直接返回 `[]telegramUpdate`，不能恢复嵌套动态 map；批次调度只传索引和原切片元素指针。稳定请求字段使用固定 DTO，普通写操作使用不保留 `result` 的丢弃类型。修改该路径后，应在配置好 `TWILIGHT_TEST_DSN` 的环境运行：
 
 ```bash
 go test -run '^$' -bench '^BenchmarkTelegramUpdateEnvelopeDecode$' -benchmem -count=3 ./internal/api
 ```
 
-基准同时保留旧双重解析模型作参照。关注 `single_typed_decode` 的 `ns/op`、`B/op` 和 `allocs/op`，不能只用一次绝对耗时判断回归；还必须运行完整 `internal/api` 真库测试，验证请求字段、父级 deadline、4 MiB 响应边界、429 退避和 Bot Token 脱敏。
+基准同时保留 `legacy_read_raw_decode`、`single_dynamic_decode`、`typed_update_decode` 和交错对比。CPU 睿频会让顺序运行的绝对 `ns/op` 漂移，应以 `interleaved_compare` 的 `typed/dynamic` 比率，以及 `typed_update_decode` 的 `B/op` / `allocs/op` 为主要证据。还必须运行完整 `internal/api` 真库测试，验证 message/callback/chat-member 字段、批次顺序、请求字段、父级 deadline、4 MiB 响应边界、429 退避和 Bot Token 脱敏。
 
 ## 前端开发
 

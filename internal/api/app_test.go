@@ -3883,15 +3883,13 @@ func TestTelegramAnonymousGroupUserRequiresInlineAuth(t *testing.T) {
 	defer tg.Close()
 	app.cfg().TelegramAPIURL = tg.URL
 
-	app.handleTelegramUpdate(context.Background(), map[string]any{
-		"message": map[string]any{
-			"message_id": 77,
-			"text":       "/twguser target",
-			"chat":       map[string]any{"id": -1001, "type": "supergroup"},
-			"from":       map[string]any{"id": 1087968824, "is_bot": true},
-			"sender_chat": map[string]any{
-				"id": -1001,
-			},
+	app.handleTelegramUpdate(context.Background(), &telegramUpdate{
+		Message: &telegramMessage{
+			MessageID:  77,
+			Text:       "/twguser target",
+			Chat:       telegramChat{ID: -1001, Type: "supergroup"},
+			From:       telegramUser{ID: 1087968824, IsBot: true},
+			SenderChat: telegramChat{ID: -1001},
 		},
 	})
 	if len(requests) != 1 {
@@ -3972,12 +3970,12 @@ func TestTelegramDisabledBuiltinDoesNotFallThroughToCustomCommand(t *testing.T) 
 	defer tg.Close()
 	app.cfg().TelegramAPIURL = tg.URL
 
-	app.handleTelegramUpdate(context.Background(), map[string]any{
-		"message": map[string]any{
-			"message_id": 88,
-			"text":       "/ping",
-			"chat":       map[string]any{"id": 42, "type": "private"},
-			"from":       map[string]any{"id": 42},
+	app.handleTelegramUpdate(context.Background(), &telegramUpdate{
+		Message: &telegramMessage{
+			MessageID: 88,
+			Text:      "/ping",
+			Chat:      telegramChat{ID: 42, Type: "private"},
+			From:      telegramUser{ID: 42},
 		},
 	})
 	if len(requests) != 1 {
@@ -4015,12 +4013,12 @@ func TestTelegramGroupUserPanelDeletesCommandMessageAfterSend(t *testing.T) {
 	defer tg.Close()
 	app.cfg().TelegramAPIURL = tg.URL
 
-	app.handleTelegramUpdate(context.Background(), map[string]any{
-		"message": map[string]any{
-			"message_id": 77,
-			"text":       "/twguser target",
-			"chat":       map[string]any{"id": -1001, "type": "supergroup"},
-			"from":       map[string]any{"id": 9001},
+	app.handleTelegramUpdate(context.Background(), &telegramUpdate{
+		Message: &telegramMessage{
+			MessageID: 77,
+			Text:      "/twguser target",
+			Chat:      telegramChat{ID: -1001, Type: "supergroup"},
+			From:      telegramUser{ID: 9001},
 		},
 	})
 
@@ -4062,15 +4060,13 @@ func TestTelegramAnonymousGroupUserAuthDeletesCommandMessageAfterPanel(t *testin
 	defer tg.Close()
 	app.cfg().TelegramAPIURL = tg.URL
 
-	app.handleTelegramUpdate(context.Background(), map[string]any{
-		"message": map[string]any{
-			"message_id": 77,
-			"text":       "/twguser target",
-			"chat":       map[string]any{"id": -1001, "type": "supergroup"},
-			"from":       map[string]any{"id": 1087968824, "is_bot": true},
-			"sender_chat": map[string]any{
-				"id": -1001,
-			},
+	app.handleTelegramUpdate(context.Background(), &telegramUpdate{
+		Message: &telegramMessage{
+			MessageID:  77,
+			Text:       "/twguser target",
+			Chat:       telegramChat{ID: -1001, Type: "supergroup"},
+			From:       telegramUser{ID: 1087968824, IsBot: true},
+			SenderChat: telegramChat{ID: -1001},
 		},
 	})
 
@@ -4085,14 +4081,14 @@ func TestTelegramAnonymousGroupUserAuthDeletesCommandMessageAfterPanel(t *testin
 		t.Fatal("anonymous /twguser did not create auth panel")
 	}
 
-	app.handleTelegramUpdate(context.Background(), map[string]any{
-		"callback_query": map[string]any{
-			"id":   "cb-auth",
-			"data": "gadm:auth:" + panel.Token,
-			"from": map[string]any{"id": 9001},
-			"message": map[string]any{
-				"message_id": panel.MessageID,
-				"chat":       map[string]any{"id": panel.ChatID},
+	app.handleTelegramUpdate(context.Background(), &telegramUpdate{
+		CallbackQuery: &telegramCallbackQuery{
+			ID:   "cb-auth",
+			Data: "gadm:auth:" + panel.Token,
+			From: telegramUser{ID: 9001},
+			Message: &telegramMessage{
+				MessageID: panel.MessageID,
+				Chat:      telegramChat{ID: panel.ChatID},
 			},
 		},
 	})
@@ -4206,14 +4202,14 @@ func TestTelegramPanelCloseRequiresAdminAndDeletesPanel(t *testing.T) {
 	app.telegramSavePanel(panel)
 	defer app.telegramDeletePanel(panel.Token)
 
-	callback := func(actorID int64, callbackID string) map[string]any {
-		return map[string]any{
-			"id":   callbackID,
-			"data": "gadm:act:close:" + panel.Token,
-			"from": map[string]any{"id": actorID},
-			"message": map[string]any{
-				"message_id": panel.MessageID,
-				"chat":       map[string]any{"id": panel.ChatID},
+	callback := func(actorID int64, callbackID string) *telegramCallbackQuery {
+		return &telegramCallbackQuery{
+			ID:   callbackID,
+			Data: "gadm:act:close:" + panel.Token,
+			From: telegramUser{ID: actorID},
+			Message: &telegramMessage{
+				MessageID: panel.MessageID,
+				Chat:      telegramChat{ID: panel.ChatID},
 			},
 		}
 	}

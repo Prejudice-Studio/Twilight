@@ -13,16 +13,20 @@ const telegramUpdateBatchMaxWorkers = 8
 // handleTelegramUpdateBatch keeps updates from one chat ordered while allowing
 // independent chats to make progress concurrently. It returns only after every
 // update effect completes, so the caller can durably advance getUpdates offset.
-func (a *App) handleTelegramUpdateBatch(ctx context.Context, updates []map[string]any) {
+func (a *App) handleTelegramUpdateBatch(ctx context.Context, updates []telegramUpdate) {
 	processTelegramUpdateBatch(ctx, updates, telegramUpdateBatchMaxWorkers, a.handleTelegramUpdateSafely)
 }
 
-func (a *App) handleTelegramUpdateSafely(ctx context.Context, update map[string]any) {
+func (a *App) handleTelegramUpdateSafely(ctx context.Context, update *telegramUpdate) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
+			var updateID int64
+			if update != nil {
+				updateID = update.UpdateID
+			}
 			zap.L().Error(
 				"telegram update panic",
-				zap.Int64("update_id", numeric(update["update_id"])),
+				zap.Int64("update_id", updateID),
 				zap.String("panic", redactSensitiveText(fmt.Sprintf("%v", recovered))),
 			)
 		}
@@ -32,22 +36,22 @@ func (a *App) handleTelegramUpdateSafely(ctx context.Context, update map[string]
 
 func processTelegramUpdateBatch(
 	ctx context.Context,
-	updates []map[string]any,
+	updates []telegramUpdate,
 	maxWorkers int,
-	handle func(context.Context, map[string]any),
+	handle func(context.Context, *telegramUpdate),
 ) {
 	if len(updates) == 0 || handle == nil {
 		return
 	}
 	if len(updates) == 1 {
-		handle(ctx, updates[0])
+		handle(ctx, &updates[0])
 		return
 	}
 
-	groups := groupTelegramUpdatesByOrdering(updates)
+	groups := groupTelegramUpdateIndexesByOrdering(updates)
 	if len(groups) == 1 {
-		for _, update := range groups[0] {
-			handle(ctx, update)
+		for _, index := range groups[0] {
+			handle(ctx, &updates[index])
 		}
 		return
 	}
@@ -55,15 +59,15 @@ func processTelegramUpdateBatch(
 		maxWorkers = len(groups)
 	}
 
-	jobs := make(chan []map[string]any)
+	jobs := make(chan []int)
 	var workers sync.WaitGroup
 	workers.Add(maxWorkers)
 	for range maxWorkers {
 		go func() {
 			defer workers.Done()
 			for group := range jobs {
-				for _, update := range group {
-					handle(ctx, update)
+				for _, index := range group {
+					handle(ctx, &updates[index])
 				}
 			}
 		}()
@@ -86,15 +90,14 @@ const (
 	telegramUpdateStreamUnknown
 )
 
-// groupTelegramUpdatesByOrdering builds connected components over chat and
-// user identities. Updates sharing either identity remain in Telegram order;
-// only components with no shared chat or user may run concurrently.
-func groupTelegramUpdatesByOrdering(updates []map[string]any) [][]map[string]any {
+// groupTelegramUpdateIndexesByOrdering builds connected components over chat
+// and user identities without copying the typed update values.
+func groupTelegramUpdateIndexesByOrdering(updates []telegramUpdate) [][]int {
 	parents := make([]int, len(updates))
 	owners := make(map[telegramUpdateStreamKey]int, len(updates)*2)
-	for i, update := range updates {
+	for i := range updates {
 		parents[i] = i
-		keys, count := telegramUpdateOrderingKeys(update)
+		keys, count := telegramUpdateOrderingKeys(&updates[i])
 		if count == 0 {
 			keys[0] = telegramUpdateStreamKey{kind: telegramUpdateStreamUnknown}
 			count = 1
@@ -109,8 +112,8 @@ func groupTelegramUpdatesByOrdering(updates []map[string]any) [][]map[string]any
 	}
 
 	positions := make(map[int]int, len(updates))
-	groups := make([][]map[string]any, 0, len(updates))
-	for i, update := range updates {
+	groups := make([][]int, 0, len(updates))
+	for i := range updates {
 		root := telegramFindUpdateGroup(parents, i)
 		position, ok := positions[root]
 		if !ok {
@@ -118,7 +121,7 @@ func groupTelegramUpdatesByOrdering(updates []map[string]any) [][]map[string]any
 			positions[root] = position
 			groups = append(groups, nil)
 		}
-		groups[position] = append(groups[position], update)
+		groups[position] = append(groups[position], i)
 	}
 	return groups
 }
@@ -144,7 +147,7 @@ func telegramUnionUpdateGroups(parents []int, left, right int) {
 	}
 }
 
-func telegramUpdateOrderingKey(update map[string]any) int64 {
+func telegramUpdateOrderingKey(update *telegramUpdate) int64 {
 	keys, count := telegramUpdateOrderingKeys(update)
 	if count == 0 {
 		return 0
@@ -152,7 +155,7 @@ func telegramUpdateOrderingKey(update map[string]any) int64 {
 	return keys[0].id
 }
 
-func telegramUpdateOrderingKeys(update map[string]any) ([4]telegramUpdateStreamKey, int) {
+func telegramUpdateOrderingKeys(update *telegramUpdate) ([4]telegramUpdateStreamKey, int) {
 	var keys [4]telegramUpdateStreamKey
 	count := 0
 	add := func(kind byte, id int64) {
@@ -162,47 +165,38 @@ func telegramUpdateOrderingKeys(update map[string]any) ([4]telegramUpdateStreamK
 		keys[count] = telegramUpdateStreamKey{kind: kind, id: id}
 		count++
 	}
-	if message, _ := update["message"].(map[string]any); message != nil {
+	if update == nil {
+		return keys, count
+	}
+	if message := update.Message; message != nil {
 		chatID, fromID := telegramMessageOrderingIDs(message)
 		add(telegramUpdateStreamChat, chatID)
 		add(telegramUpdateStreamUser, fromID)
 		return keys, count
 	}
-	if callback, _ := update["callback_query"].(map[string]any); callback != nil {
-		if message, _ := callback["message"].(map[string]any); message != nil {
+	if callback := update.CallbackQuery; callback != nil {
+		if message := callback.Message; message != nil {
 			chatID, _ := telegramMessageOrderingIDs(message)
 			add(telegramUpdateStreamChat, chatID)
 		}
-		if from, _ := callback["from"].(map[string]any); from != nil {
-			add(telegramUpdateStreamUser, numeric(from["id"]))
-		}
+		add(telegramUpdateStreamUser, callback.From.ID)
 		return keys, count
 	}
-	for _, field := range []string{"chat_member", "my_chat_member"} {
-		if event, _ := update[field].(map[string]any); event != nil {
-			if chat, _ := event["chat"].(map[string]any); chat != nil {
-				add(telegramUpdateStreamChat, numeric(chat["id"]))
-			}
-			if from, _ := event["from"].(map[string]any); from != nil {
-				add(telegramUpdateStreamUser, numeric(from["id"]))
-			}
-			if member, _ := event["new_chat_member"].(map[string]any); member != nil {
-				if user, _ := member["user"].(map[string]any); user != nil {
-					add(telegramUpdateStreamUser, numeric(user["id"]))
-				}
-			}
-			return keys, count
-		}
+	event := update.ChatMember
+	if event == nil {
+		event = update.MyChatMember
+	}
+	if event != nil {
+		add(telegramUpdateStreamChat, event.Chat.ID)
+		add(telegramUpdateStreamUser, event.From.ID)
+		add(telegramUpdateStreamUser, event.NewChatMember.User.ID)
 	}
 	return keys, count
 }
 
-func telegramMessageOrderingIDs(message map[string]any) (chatID, fromID int64) {
-	if chat, _ := message["chat"].(map[string]any); chat != nil {
-		chatID = numeric(chat["id"])
+func telegramMessageOrderingIDs(message *telegramMessage) (chatID, fromID int64) {
+	if message == nil {
+		return 0, 0
 	}
-	if from, _ := message["from"].(map[string]any); from != nil {
-		fromID = numeric(from["id"])
-	}
-	return chatID, fromID
+	return message.Chat.ID, message.From.ID
 }

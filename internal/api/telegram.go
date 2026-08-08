@@ -135,8 +135,13 @@ func (a *App) telegramGetChat(ctx context.Context, chatID any) (map[string]any, 
 }
 
 func (a *App) telegramSendMessage(ctx context.Context, chatID any, text string) error {
-	_, err := a.telegramSendMessageWithMarkup(ctx, chatID, text, nil)
-	return err
+	text = truncateString(strings.TrimSpace(text), 3900)
+	if text == "" {
+		return fmt.Errorf("message text is empty")
+	}
+	return a.telegramPostNoResult(ctx, "sendMessage", telegramSendMessageRequest{
+		ChatID: chatID, Text: text, ParseMode: a.telegramParseMode(), DisableWebPagePreview: true,
+	})
 }
 
 func (a *App) telegramSendPlainMessage(ctx context.Context, chatID any, text string) error {

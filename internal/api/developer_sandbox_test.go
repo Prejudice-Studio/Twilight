@@ -655,26 +655,26 @@ func TestDeveloperJSInlineCallbackOwnerAndEdit(t *testing.T) {
 		t.Fatalf("unexpected callback data: %#v", button)
 	}
 
-	app.handleTelegramUpdate(context.Background(), map[string]any{"callback_query": map[string]any{
-		"id":   "cb-denied",
-		"data": callbackData,
-		"from": map[string]any{"id": float64(701)},
-		"message": map[string]any{
-			"message_id": float64(101),
-			"chat":       map[string]any{"id": float64(900)},
+	app.handleTelegramUpdate(context.Background(), &telegramUpdate{CallbackQuery: &telegramCallbackQuery{
+		ID:   "cb-denied",
+		Data: callbackData,
+		From: telegramUser{ID: 701},
+		Message: &telegramMessage{
+			MessageID: 101,
+			Chat:      telegramChat{ID: 900},
 		},
 	}})
 	if len(requests) != 2 || requests[1]["_path"] != "/bot123:ABC/answerCallbackQuery" || boolish(requests[1]["show_alert"]) != true {
 		t.Fatalf("expected denied callback answer, got %#v", requests)
 	}
 
-	app.handleTelegramUpdate(context.Background(), map[string]any{"callback_query": map[string]any{
-		"id":   "cb-ok",
-		"data": callbackData,
-		"from": map[string]any{"id": float64(700)},
-		"message": map[string]any{
-			"message_id": float64(101),
-			"chat":       map[string]any{"id": float64(900)},
+	app.handleTelegramUpdate(context.Background(), &telegramUpdate{CallbackQuery: &telegramCallbackQuery{
+		ID:   "cb-ok",
+		Data: callbackData,
+		From: telegramUser{ID: 700},
+		Message: &telegramMessage{
+			MessageID: 101,
+			Chat:      telegramChat{ID: 900},
 		},
 	}})
 	if len(requests) != 4 || requests[2]["_path"] != "/bot123:ABC/answerCallbackQuery" || requests[3]["_path"] != "/bot123:ABC/editMessageText" {
@@ -718,19 +718,19 @@ func TestDeveloperJSWaitTextConsumesSameUserPlainText(t *testing.T) {
 		t.Fatalf("expected prompt send, got %#v", requests)
 	}
 
-	app.handleTelegramUpdate(context.Background(), map[string]any{"message": map[string]any{
-		"text": "alpha beta gamma",
-		"from": map[string]any{"id": float64(702)},
-		"chat": map[string]any{"id": float64(901), "type": "private"},
+	app.handleTelegramUpdate(context.Background(), &telegramUpdate{Message: &telegramMessage{
+		Text: "alpha beta gamma",
+		From: telegramUser{ID: 702},
+		Chat: telegramChat{ID: 901, Type: "private"},
 	}})
 	if len(requests) != 1 {
 		t.Fatalf("waiter consumed wrong user message: %#v", requests)
 	}
 
-	app.handleTelegramUpdate(context.Background(), map[string]any{"message": map[string]any{
-		"text": "alpha beta gamma",
-		"from": map[string]any{"id": float64(701)},
-		"chat": map[string]any{"id": float64(901), "type": "private"},
+	app.handleTelegramUpdate(context.Background(), &telegramUpdate{Message: &telegramMessage{
+		Text: "alpha beta gamma",
+		From: telegramUser{ID: 701},
+		Chat: telegramChat{ID: 901, Type: "private"},
 	}})
 	if len(requests) != 2 {
 		t.Fatalf("expected waiter reply, got %#v", requests)

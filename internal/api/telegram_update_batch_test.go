@@ -9,7 +9,7 @@ import (
 )
 
 func TestTelegramUpdateBatchPreservesOrderWithinChat(t *testing.T) {
-	updates := []map[string]any{
+	updates := []telegramUpdate{
 		telegramTestMessageUpdate(1, 100),
 		telegramTestMessageUpdate(2, 200),
 		telegramTestMessageUpdate(3, 100),
@@ -17,10 +17,10 @@ func TestTelegramUpdateBatchPreservesOrderWithinChat(t *testing.T) {
 	}
 	seen := map[int64][]int64{}
 	var mu sync.Mutex
-	processTelegramUpdateBatch(context.Background(), updates, 2, func(_ context.Context, update map[string]any) {
+	processTelegramUpdateBatch(context.Background(), updates, 2, func(_ context.Context, update *telegramUpdate) {
 		chatID := telegramUpdateOrderingKey(update)
 		mu.Lock()
-		seen[chatID] = append(seen[chatID], numeric(update["update_id"]))
+		seen[chatID] = append(seen[chatID], update.UpdateID)
 		mu.Unlock()
 	})
 
@@ -33,19 +33,19 @@ func TestTelegramUpdateBatchPreservesOrderWithinChat(t *testing.T) {
 }
 
 func TestTelegramUpdateBatchPreservesOrderAcrossSharedUserAndChat(t *testing.T) {
-	updates := []map[string]any{
+	updates := []telegramUpdate{
 		telegramTestMessageUpdateFrom(1, 100, 7),
 		telegramTestMessageUpdateFrom(2, 200, 7),
 		telegramTestMessageUpdateFrom(3, 200, 8),
 		telegramTestMessageUpdateFrom(4, 300, 9),
 	}
-	groups := groupTelegramUpdatesByOrdering(updates)
+	groups := groupTelegramUpdateIndexesByOrdering(updates)
 	if len(groups) != 2 {
 		t.Fatalf("group count=%d, want 2", len(groups))
 	}
 	shared := make([]int64, 0, len(groups[0]))
-	for _, update := range groups[0] {
-		shared = append(shared, numeric(update["update_id"]))
+	for _, index := range groups[0] {
+		shared = append(shared, updates[index].UpdateID)
 	}
 	if !sameTelegramUpdateIDs(shared, []int64{1, 2, 3}) {
 		t.Fatalf("shared user/chat group order=%v, want [1 2 3]", shared)
@@ -53,7 +53,7 @@ func TestTelegramUpdateBatchPreservesOrderAcrossSharedUserAndChat(t *testing.T) 
 }
 
 func TestTelegramUpdateBatchRunsIndependentChatsConcurrentlyAndWaits(t *testing.T) {
-	updates := []map[string]any{
+	updates := []telegramUpdate{
 		telegramTestMessageUpdate(1, 100),
 		telegramTestMessageUpdate(2, 200),
 	}
@@ -61,7 +61,7 @@ func TestTelegramUpdateBatchRunsIndependentChatsConcurrentlyAndWaits(t *testing.
 	release := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
-		processTelegramUpdateBatch(context.Background(), updates, 2, func(_ context.Context, update map[string]any) {
+		processTelegramUpdateBatch(context.Background(), updates, 2, func(_ context.Context, update *telegramUpdate) {
 			started <- telegramUpdateOrderingKey(update)
 			<-release
 		})
@@ -89,13 +89,13 @@ func TestTelegramUpdateBatchRunsIndependentChatsConcurrentlyAndWaits(t *testing.
 }
 
 func TestTelegramUpdateBatchBoundsConcurrency(t *testing.T) {
-	updates := make([]map[string]any, 0, 20)
+	updates := make([]telegramUpdate, 0, 20)
 	for i := int64(1); i <= 20; i++ {
 		updates = append(updates, telegramTestMessageUpdate(i, i))
 	}
 	var active atomic.Int32
 	var peak atomic.Int32
-	processTelegramUpdateBatch(context.Background(), updates, 3, func(_ context.Context, _ map[string]any) {
+	processTelegramUpdateBatch(context.Background(), updates, 3, func(_ context.Context, _ *telegramUpdate) {
 		current := active.Add(1)
 		for {
 			previous := peak.Load()
@@ -112,35 +112,68 @@ func TestTelegramUpdateBatchBoundsConcurrency(t *testing.T) {
 }
 
 func TestTelegramUpdateOrderingKeyCoversCallbacksAndMembership(t *testing.T) {
-	callback := map[string]any{
-		"callback_query": map[string]any{
-			"from":    map[string]any{"id": int64(7)},
-			"message": map[string]any{"chat": map[string]any{"id": int64(-100)}},
+	callback := telegramUpdate{
+		CallbackQuery: &telegramCallbackQuery{
+			From:    telegramUser{ID: 7},
+			Message: &telegramMessage{Chat: telegramChat{ID: -100}},
 		},
 	}
-	if got := telegramUpdateOrderingKey(callback); got != -100 {
+	if got := telegramUpdateOrderingKey(&callback); got != -100 {
 		t.Fatalf("callback ordering key=%d, want -100", got)
 	}
-	inlineCallback := map[string]any{"callback_query": map[string]any{"from": map[string]any{"id": int64(7)}}}
-	if got := telegramUpdateOrderingKey(inlineCallback); got != 7 {
+	inlineCallback := telegramUpdate{CallbackQuery: &telegramCallbackQuery{From: telegramUser{ID: 7}}}
+	if got := telegramUpdateOrderingKey(&inlineCallback); got != 7 {
 		t.Fatalf("inline callback ordering key=%d, want 7", got)
 	}
-	membership := map[string]any{"chat_member": map[string]any{"chat": map[string]any{"id": int64(-200)}}}
-	if got := telegramUpdateOrderingKey(membership); got != -200 {
+	membership := telegramUpdate{ChatMember: &telegramChatMemberUpdate{Chat: telegramChat{ID: -200}}}
+	if got := telegramUpdateOrderingKey(&membership); got != -200 {
 		t.Fatalf("membership ordering key=%d, want -200", got)
 	}
 }
 
-func telegramTestMessageUpdate(updateID, chatID int64) map[string]any {
+func TestTelegramCallbackDataParsersAreStrictAndAllocationFree(t *testing.T) {
+	mode, action, token, ok := telegramParsePanelCallback("gadm:act:close:panel-token")
+	if !ok || mode != "act" || action != "close" || token != "panel-token" {
+		t.Fatalf("panel callback parse=%q %q %q %v", mode, action, token, ok)
+	}
+	mode, action, token, ok = telegramParsePanelCallback("gadm:auth:panel-token")
+	if !ok || mode != "auth" || action != "" || token != "panel-token" {
+		t.Fatalf("panel auth parse=%q %q %q %v", mode, action, token, ok)
+	}
+	for _, malformed := range []string{"", "gadm", "gadm:act", "gadm:act:close", "gadm:act:close:token:extra", "gadm:auth:token:extra"} {
+		if _, _, _, parsed := telegramParsePanelCallback(malformed); parsed {
+			t.Fatalf("malformed panel callback accepted: %q", malformed)
+		}
+	}
+
+	jsToken, index, ok := telegramParseDeveloperJSCallback("djs:callback-token:7")
+	if !ok || jsToken != "callback-token" || index != 7 {
+		t.Fatalf("developer callback parse=%q %d %v", jsToken, index, ok)
+	}
+	for _, malformed := range []string{"", "djs", "djs:token", "djs::1", "djs:token:x", "djs:token:1:extra"} {
+		if _, _, parsed := telegramParseDeveloperJSCallback(malformed); parsed {
+			t.Fatalf("malformed developer callback accepted: %q", malformed)
+		}
+	}
+
+	if allocations := testing.AllocsPerRun(100, func() {
+		_, _, _, _ = telegramParsePanelCallback("gadm:act:close:panel-token")
+		_, _, _ = telegramParseDeveloperJSCallback("djs:callback-token:7")
+	}); allocations != 0 {
+		t.Fatalf("callback parser allocated %.2f objects per run", allocations)
+	}
+}
+
+func telegramTestMessageUpdate(updateID, chatID int64) telegramUpdate {
 	return telegramTestMessageUpdateFrom(updateID, chatID, chatID)
 }
 
-func telegramTestMessageUpdateFrom(updateID, chatID, fromID int64) map[string]any {
-	return map[string]any{
-		"update_id": updateID,
-		"message": map[string]any{
-			"chat": map[string]any{"id": chatID},
-			"from": map[string]any{"id": fromID},
+func telegramTestMessageUpdateFrom(updateID, chatID, fromID int64) telegramUpdate {
+	return telegramUpdate{
+		UpdateID: updateID,
+		Message: &telegramMessage{
+			Chat: telegramChat{ID: chatID},
+			From: telegramUser{ID: fromID},
 		},
 	}
 }

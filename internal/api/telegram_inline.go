@@ -36,19 +36,17 @@ type telegramPanelContext struct {
 	timer *time.Timer
 }
 
-func telegramIsAnonymousGroupMessage(message map[string]any) bool {
+func telegramIsAnonymousGroupMessage(message *telegramMessage) bool {
 	if message == nil {
 		return false
 	}
-	if senderChat, _ := message["sender_chat"].(map[string]any); senderChat != nil {
+	if message.SenderChat.ID != 0 {
 		return true
 	}
-	chat, _ := message["chat"].(map[string]any)
-	from, _ := message["from"].(map[string]any)
-	return numeric(chat["id"]) != 0 && !strings.EqualFold(asString(chat["type"]), "private") && numeric(from["id"]) == 0
+	return message.Chat.ID != 0 && !strings.EqualFold(message.Chat.Type, "private") && message.From.ID == 0
 }
 
-func (a *App) telegramResolveGroupUserTarget(query string, message map[string]any) (store.User, string) {
+func (a *App) telegramResolveGroupUserTarget(query string, message *telegramMessage) (store.User, string) {
 	return a.telegramResolveGroupUserTargetValues(query, telegramReplyTelegramID(message))
 }
 
@@ -72,7 +70,7 @@ func (a *App) telegramResolveGroupUserTargetValues(query string, replyTelegramID
 	return users[0], ""
 }
 
-func (a *App) telegramSendGroupAdminAuth(ctx context.Context, chatID, commandMessageID int64, query string, message map[string]any) {
+func (a *App) telegramSendGroupAdminAuth(ctx context.Context, chatID, commandMessageID int64, query string, message *telegramMessage) {
 	panel := a.telegramCreateAuthPanel(chatID, commandMessageID, query, telegramReplyTelegramID(message))
 	markup := telegramInlineKeyboard([][]telegramInlineButton{
 		{{Text: "验证管理员身份", Data: "gadm:auth:" + panel.Token}},
@@ -275,20 +273,22 @@ func (a *App) telegramDeletePanel(token string) {
 	a.telegramPanelMu.Unlock()
 }
 
-func (a *App) telegramHandleCallback(ctx context.Context, callback map[string]any) {
-	data := asString(callback["data"])
-	parts := strings.Split(data, ":")
-	if len(parts) < 3 || parts[0] != "gadm" {
+func (a *App) telegramHandleCallback(ctx context.Context, callback *telegramCallbackQuery) {
+	if callback == nil {
 		return
 	}
-	callbackID := asString(callback["id"])
-	from, _ := callback["from"].(map[string]any)
-	actorID := numeric(from["id"])
-	message, _ := callback["message"].(map[string]any)
-	chat, _ := message["chat"].(map[string]any)
-	chatID := numeric(chat["id"])
-	messageID := numeric(message["message_id"])
-	token := parts[len(parts)-1]
+	mode, action, token, parsed := telegramParsePanelCallback(callback.Data)
+	if !parsed {
+		return
+	}
+	callbackID := callback.ID
+	actorID := callback.From.ID
+	message := callback.Message
+	var chatID, messageID int64
+	if message != nil {
+		chatID = message.Chat.ID
+		messageID = message.MessageID
+	}
 	panel, ok := a.telegramPanel(token)
 	if !ok {
 		_ = a.telegramAnswerCallbackQuery(ctx, callbackID, "面板已过期，请重新发送 /twguser。", true)
@@ -310,7 +310,7 @@ func (a *App) telegramHandleCallback(ctx context.Context, callback map[string]an
 		a.telegramSendUnauthorizedAndCleanup(ctx, panel.ChatID, panel.CommandMessageID)
 		return
 	}
-	if parts[1] == "auth" {
+	if mode == "auth" {
 		panel.ConfirmAction = ""
 		panel = a.telegramTouchPanel(panel)
 		_ = a.telegramAnswerCallbackQuery(ctx, callbackID, "身份验证通过。", false)
@@ -329,10 +329,9 @@ func (a *App) telegramHandleCallback(ctx context.Context, callback map[string]an
 		}
 		return
 	}
-	if len(parts) < 4 || parts[1] != "act" {
+	if mode != "act" {
 		return
 	}
-	action := parts[2]
 	if action == "close" {
 		a.telegramDeletePanel(panel.Token)
 		_ = a.telegramAnswerCallbackQuery(ctx, callbackID, "面板已关闭。", false)
@@ -342,6 +341,32 @@ func (a *App) telegramHandleCallback(ctx context.Context, callback map[string]an
 	panel = a.telegramTouchPanel(panel)
 	_ = a.telegramAnswerCallbackQuery(ctx, callbackID, "操作处理中。", false)
 	a.telegramApplyPanelAction(ctx, panel, action, actorID)
+}
+
+func telegramParsePanelCallback(data string) (mode, action, token string, ok bool) {
+	prefix, rest, found := strings.Cut(data, ":")
+	if !found || prefix != "gadm" {
+		return "", "", "", false
+	}
+	mode, rest, found = strings.Cut(rest, ":")
+	if !found {
+		return "", "", "", false
+	}
+	switch mode {
+	case "auth":
+		if rest == "" || strings.Contains(rest, ":") {
+			return "", "", "", false
+		}
+		return mode, "", rest, true
+	case "act":
+		action, token, found = strings.Cut(rest, ":")
+		if !found || action == "" || token == "" || strings.Contains(token, ":") {
+			return "", "", "", false
+		}
+		return mode, action, token, true
+	default:
+		return "", "", "", false
+	}
 }
 
 func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelContext, action string, actorID int64) {
@@ -1065,11 +1090,9 @@ func telegramInlineKeyboard(rows [][]telegramInlineButton) any {
 	return map[string]any{"inline_keyboard": keyboard}
 }
 
-func telegramReplyTelegramID(message map[string]any) int64 {
-	if reply, _ := message["reply_to_message"].(map[string]any); reply != nil {
-		if from, _ := reply["from"].(map[string]any); from != nil {
-			return numeric(from["id"])
-		}
+func telegramReplyTelegramID(message *telegramMessage) int64 {
+	if message != nil && message.ReplyToMessage != nil {
+		return message.ReplyToMessage.From.ID
 	}
 	return 0
 }

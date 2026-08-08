@@ -212,8 +212,8 @@ func (a *App) RunTelegramBot(ctx context.Context) error {
 		}
 		a.setTelegramRuntimeStatus(true, nil)
 		for _, update := range updates {
-			if id := numeric(update["update_id"]); id >= offset {
-				offset = id + 1
+			if update.UpdateID >= offset {
+				offset = update.UpdateID + 1
 			}
 		}
 		a.handleTelegramUpdateBatch(ctx, updates)
@@ -228,37 +228,38 @@ func (a *App) RunTelegramBot(ctx context.Context) error {
 	}
 }
 
-func (a *App) telegramGetUpdates(ctx context.Context, offset int64) ([]map[string]any, error) {
+func (a *App) telegramGetUpdates(ctx context.Context, offset int64) ([]telegramUpdate, error) {
 	body := telegramGetUpdatesRequest{Offset: offset, Timeout: 30, AllowedUpdates: telegramAllowedUpdates}
-	return telegramPostResult[[]map[string]any](a, ctx, "getUpdates", body, 45*time.Second)
+	return telegramPostResult[[]telegramUpdate](a, ctx, "getUpdates", body, 45*time.Second)
 }
 
-func (a *App) handleTelegramUpdate(ctx context.Context, update map[string]any) {
+func (a *App) handleTelegramUpdate(ctx context.Context, update *telegramUpdate) {
+	if update == nil {
+		return
+	}
 	a.observeTelegramRoster(update)
-	if callback, _ := update["callback_query"].(map[string]any); callback != nil {
+	if callback := update.CallbackQuery; callback != nil {
 		if a.telegramHandleDeveloperJSCallback(ctx, callback) {
 			return
 		}
 		a.telegramHandleCallback(ctx, callback)
 		return
 	}
-	message, _ := update["message"].(map[string]any)
+	message := update.Message
 	if message == nil {
 		return
 	}
-	text := strings.TrimSpace(asString(message["text"]))
+	text := strings.TrimSpace(message.Text)
 	if text == "" {
 		return
 	}
-	chat, _ := message["chat"].(map[string]any)
-	from, _ := message["from"].(map[string]any)
-	chatID := numeric(chat["id"])
-	fromID := numeric(from["id"])
+	chatID := message.Chat.ID
+	fromID := message.From.ID
 	if chatID == 0 {
 		chatID = fromID
 	}
-	username := strings.TrimPrefix(asString(from["username"]), "@")
-	privateChat := chatID == fromID || strings.EqualFold(asString(chat["type"]), "private")
+	username := strings.TrimPrefix(message.From.Username, "@")
+	privateChat := chatID == fromID || strings.EqualFold(message.Chat.Type, "private")
 	if a.telegramConsumeDeveloperJSWaiter(ctx, chatID, fromID, text) {
 		return
 	}
@@ -313,41 +314,39 @@ func (a *App) handleTelegramUpdate(ctx context.Context, update map[string]any) {
 	}
 }
 
-func (a *App) observeTelegramRoster(update map[string]any) {
-	if message, _ := update["message"].(map[string]any); message != nil {
-		chat, _ := message["chat"].(map[string]any)
-		from, _ := message["from"].(map[string]any)
-		chatID := numeric(chat["id"])
-		fromID := numeric(from["id"])
+func (a *App) observeTelegramRoster(update *telegramUpdate) {
+	if update == nil {
+		return
+	}
+	if message := update.Message; message != nil {
+		chatID := message.Chat.ID
+		fromID := message.From.ID
 		// 私聊 + 群聊都顺手刷新已绑定用户的 Telegram 用户名（无额外 API 调用）。
-		a.refreshTelegramUsername(fromID, asString(from["username"]))
+		a.refreshTelegramUsername(fromID, message.From.Username)
 		if chatID != 0 && fromID > 0 && chatID != fromID {
-			_ = a.store().UpsertTelegramRoster(fmt.Sprint(chatID), fromID, "member", boolish(from["is_bot"]))
+			_ = a.store().UpsertTelegramRoster(fmt.Sprint(chatID), fromID, "member", message.From.IsBot)
 		}
 		return
 	}
-	for _, key := range []string{"chat_member", "my_chat_member"} {
-		event, _ := update[key].(map[string]any)
-		if event == nil {
-			continue
-		}
-		chat, _ := event["chat"].(map[string]any)
-		newMember, _ := event["new_chat_member"].(map[string]any)
-		user, _ := newMember["user"].(map[string]any)
-		chatID := numeric(chat["id"])
-		userID := numeric(user["id"])
-		status := strings.ToLower(asString(newMember["status"]))
-		if chatID == 0 || userID <= 0 {
-			return
-		}
-		a.refreshTelegramUsername(userID, asString(user["username"]))
-		if status == "left" || status == "kicked" {
-			_ = a.store().MarkTelegramRosterLeft(fmt.Sprint(chatID), userID, status)
-			return
-		}
-		_ = a.store().UpsertTelegramRoster(fmt.Sprint(chatID), userID, firstNonEmpty(status, "member"), boolish(user["is_bot"]))
+	event := update.ChatMember
+	if event == nil {
+		event = update.MyChatMember
+	}
+	if event == nil {
 		return
 	}
+	chatID := event.Chat.ID
+	user := event.NewChatMember.User
+	status := strings.ToLower(event.NewChatMember.Status)
+	if chatID == 0 || user.ID <= 0 {
+		return
+	}
+	a.refreshTelegramUsername(user.ID, user.Username)
+	if status == "left" || status == "kicked" {
+		_ = a.store().MarkTelegramRosterLeft(fmt.Sprint(chatID), user.ID, status)
+		return
+	}
+	_ = a.store().UpsertTelegramRoster(fmt.Sprint(chatID), user.ID, firstNonEmpty(status, "member"), user.IsBot)
 }
 
 // refreshTelegramUsername 在收到任意来自已绑定用户的更新时被动刷新其存储的
@@ -990,8 +989,11 @@ func (a *App) telegramAdminIdentity(telegramID int64) (int64, string) {
 	return 0, ""
 }
 
-func (a *App) telegramHandleGroupUser(ctx context.Context, chatID, telegramID int64, args []string, message map[string]any) {
-	messageID := numeric(message["message_id"])
+func (a *App) telegramHandleGroupUser(ctx context.Context, chatID, telegramID int64, args []string, message *telegramMessage) {
+	if message == nil {
+		return
+	}
+	messageID := message.MessageID
 	query := strings.Join(args, " ")
 	anonymousCommand := telegramIsAnonymousGroupMessage(message)
 	if anonymousCommand {
