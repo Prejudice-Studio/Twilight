@@ -14,8 +14,10 @@ import (
 )
 
 const (
-	telegramPanelTTL        = time.Minute
-	telegramPanelMaxEntries = 256
+	telegramPanelTTL             = time.Minute
+	telegramPanelMaxEntries      = 256
+	telegramUserSelectionMax     = 8
+	telegramUserSearchQueryLimit = 128
 )
 
 type telegramPanelContext struct {
@@ -26,6 +28,7 @@ type telegramPanelContext struct {
 	TargetUID        int64
 	Query            string
 	ReplyTelegramID  int64
+	CandidateUIDs    []int64
 	ExpiresAt        int64
 	ConfirmAction    string
 	// timer 是这个 panel 的过期定时器；同一个 panel 全程只对应一个 *time.Timer。
@@ -46,28 +49,97 @@ func telegramIsAnonymousGroupMessage(message *telegramMessage) bool {
 	return message.Chat.ID != 0 && !strings.EqualFold(message.Chat.Type, "private") && message.From.ID == 0
 }
 
-func (a *App) telegramResolveGroupUserTarget(query string, message *telegramMessage) (store.User, string) {
+type telegramGroupUserSearch struct {
+	Query      string
+	Field      store.UserIdentitySearchField
+	FieldLabel string
+}
+
+type telegramGroupUserResolution struct {
+	Users     []store.User
+	Search    telegramGroupUserSearch
+	Truncated bool
+	Reason    string
+}
+
+func (a *App) telegramResolveGroupUserTargets(query string, message *telegramMessage) telegramGroupUserResolution {
 	return a.telegramResolveGroupUserTargetValues(query, telegramReplyTelegramID(message))
 }
 
-func (a *App) telegramResolveGroupUserTargetValues(query string, replyTelegramID int64) (store.User, string) {
+func (a *App) telegramResolveGroupUserTargetValues(query string, replyTelegramID int64) telegramGroupUserResolution {
 	if strings.TrimSpace(query) == "" {
 		if replyTelegramID != 0 {
 			if u, okUser := a.store().FindUserByTelegramID(replyTelegramID); okUser {
-				return u, ""
+				return telegramGroupUserResolution{Users: []store.User{u}, Search: telegramGroupUserSearch{FieldLabel: "回复消息"}}
 			}
-			return store.User{}, "目标 Telegram 尚未绑定 Twilight 账号。"
+			return telegramGroupUserResolution{Reason: "目标 Telegram 尚未绑定 Twilight 账号。"}
 		}
-		return store.User{}, "请回复目标用户消息后发送 /twguser，或发送 /twguser <用户名/UID/关键词>。"
+		return telegramGroupUserResolution{Reason: telegramGroupUserSearchUsage()}
 	}
-	users := a.telegramFindUsers(query, 6)
+	search, reason := telegramParseGroupUserSearch(query)
+	if reason != "" {
+		return telegramGroupUserResolution{Reason: reason}
+	}
+	users := a.store().SearchUsersByIdentity(search.Query, search.Field, telegramUserSelectionMax+1)
 	if len(users) == 0 {
-		return store.User{}, "未找到匹配用户。"
+		return telegramGroupUserResolution{Search: search, Reason: "未找到匹配用户。"}
 	}
-	if len(users) > 1 {
-		return store.User{}, "找到多个匹配项，请缩小关键词。\n\n" + telegramUserList(users)
+	resolution := telegramGroupUserResolution{Users: users, Search: search}
+	if len(users) > telegramUserSelectionMax {
+		resolution.Users = users[:telegramUserSelectionMax]
+		resolution.Truncated = true
 	}
-	return users[0], ""
+	return resolution
+}
+
+func telegramParseGroupUserSearch(raw string) (telegramGroupUserSearch, string) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return telegramGroupUserSearch{}, telegramGroupUserSearchUsage()
+	}
+	fields := strings.Fields(trimmed)
+	search := telegramGroupUserSearch{Query: trimmed, Field: store.UserIdentitySearchAny, FieldLabel: "全部身份字段"}
+	if len(fields) >= 2 {
+		var recognized bool
+		switch strings.ToLower(fields[len(fields)-1]) {
+		case "uid":
+			search.Field, search.FieldLabel, recognized = store.UserIdentitySearchUID, "UID", true
+		case "username":
+			search.Field, search.FieldLabel, recognized = store.UserIdentitySearchUsername, "Web 用户名", true
+		case "tgid":
+			search.Field, search.FieldLabel, recognized = store.UserIdentitySearchTelegramID, "Telegram ID", true
+		case "tgname":
+			search.Field, search.FieldLabel, recognized = store.UserIdentitySearchTelegramUsername, "Telegram 用户名", true
+		}
+		if recognized {
+			search.Query = strings.TrimSpace(strings.Join(fields[:len(fields)-1], " "))
+		}
+	}
+	if search.Query == "" {
+		return telegramGroupUserSearch{}, telegramGroupUserSearchUsage()
+	}
+	if len([]rune(search.Query)) > telegramUserSearchQueryLimit {
+		return telegramGroupUserSearch{}, "查询关键词过长，请缩短后重试。"
+	}
+	if search.Field == store.UserIdentitySearchUID || search.Field == store.UserIdentitySearchTelegramID {
+		value, err := strconv.ParseUint(search.Query, 10, 63)
+		if err != nil || value == 0 {
+			return telegramGroupUserSearch{}, search.FieldLabel + " 查询值必须是正整数。"
+		}
+	}
+	if search.Field == store.UserIdentitySearchTelegramUsername {
+		search.Query = strings.TrimPrefix(search.Query, "@")
+		if search.Query == "" {
+			return telegramGroupUserSearch{}, "Telegram 用户名不能为空。"
+		}
+	}
+	return search, ""
+}
+
+func telegramGroupUserSearchUsage() string {
+	return "请回复目标用户消息后发送 /twguser，或使用：\n" +
+		"/twguser <关键词>\n" +
+		"/twguser <值> uid|username|tgid|tgname"
 }
 
 func (a *App) telegramSendGroupAdminAuth(ctx context.Context, chatID, commandMessageID int64, query string, message *telegramMessage) {
@@ -98,6 +170,47 @@ func (a *App) telegramSendGroupUserPanel(ctx context.Context, chatID, commandMes
 	}
 	a.telegramSavePanel(panel)
 	return true
+}
+
+func (a *App) telegramSendGroupUserSelection(ctx context.Context, chatID, commandMessageID int64, query string, replyTelegramID int64, resolution telegramGroupUserResolution) bool {
+	panel := a.telegramCreateAuthPanel(chatID, commandMessageID, query, replyTelegramID)
+	panel.CandidateUIDs = telegramUserUIDs(resolution.Users)
+	messageID, err := a.telegramSendMessageWithMarkup(ctx, chatID, telegramGroupUserSelectionText(resolution), telegramGroupUserSelectionMarkup(panel.Token, resolution.Users))
+	if err != nil {
+		return false
+	}
+	panel.MessageID = messageID
+	a.telegramSavePanel(panel)
+	return true
+}
+
+func telegramUserUIDs(users []store.User) []int64 {
+	uids := make([]int64, 0, len(users))
+	for _, user := range users {
+		uids = append(uids, user.UID)
+	}
+	return uids
+}
+
+func telegramGroupUserSelectionText(resolution telegramGroupUserResolution) string {
+	text := fmt.Sprintf("找到 %d 个匹配用户，请选择目标。\n查询方式：%s\n选择时会重新验证管理员权限。", len(resolution.Users), resolution.Search.FieldLabel)
+	if resolution.Truncated {
+		text += fmt.Sprintf("\n仅显示前 %d 项，请缩小关键词以查看更多结果。", telegramUserSelectionMax)
+	}
+	return text
+}
+
+func telegramGroupUserSelectionMarkup(token string, users []store.User) any {
+	rows := make([][]telegramInlineButton, 0, len(users)+1)
+	for _, user := range users {
+		label := fmt.Sprintf("UID %d · %s", user.UID, user.Username)
+		if username := strings.TrimPrefix(strings.TrimSpace(user.TelegramUsername), "@"); username != "" {
+			label += " · @" + username
+		}
+		rows = append(rows, []telegramInlineButton{{Text: truncateString(label, 64), Data: fmt.Sprintf("gadm:act:select_%d:%s", user.UID, token)}})
+	}
+	rows = append(rows, []telegramInlineButton{{Text: "关闭面板", Data: "gadm:act:close:" + token}})
+	return telegramInlineKeyboard(rows)
 }
 
 func (a *App) telegramDeleteGroupUserCommandMessage(ctx context.Context, chatID, commandMessageID int64) {
@@ -315,13 +428,21 @@ func (a *App) telegramHandleCallback(ctx context.Context, callback *telegramCall
 		panel = a.telegramTouchPanel(panel)
 		_ = a.telegramAnswerCallbackQuery(ctx, callbackID, "身份验证通过。", false)
 		if panel.TargetUID == 0 {
-			target, reason := a.telegramResolveGroupUserTargetValues(panel.Query, panel.ReplyTelegramID)
-			if reason != "" {
-				_ = a.telegramEditMessageText(ctx, panel.ChatID, panel.MessageID, reason, nil)
+			resolution := a.telegramResolveGroupUserTargetValues(panel.Query, panel.ReplyTelegramID)
+			if resolution.Reason != "" {
+				_ = a.telegramEditMessageText(ctx, panel.ChatID, panel.MessageID, resolution.Reason, nil)
 				a.telegramDeletePanel(panel.Token)
 				return
 			}
-			panel.TargetUID = target.UID
+			if len(resolution.Users) > 1 {
+				panel.CandidateUIDs = telegramUserUIDs(resolution.Users)
+				panel = a.telegramTouchPanel(panel)
+				_ = a.telegramEditMessageText(ctx, panel.ChatID, panel.MessageID, telegramGroupUserSelectionText(resolution), telegramGroupUserSelectionMarkup(panel.Token, resolution.Users))
+				a.telegramDeleteGroupUserCommandMessage(ctx, panel.ChatID, panel.CommandMessageID)
+				return
+			}
+			panel.TargetUID = resolution.Users[0].UID
+			panel.CandidateUIDs = nil
 			panel = a.telegramTouchPanel(panel)
 		}
 		if a.telegramEditPanel(ctx, panel) {
@@ -338,9 +459,49 @@ func (a *App) telegramHandleCallback(ctx context.Context, callback *telegramCall
 		_ = a.telegramDeleteMessage(ctx, panel.ChatID, panel.MessageID)
 		return
 	}
+	if selectedUID, selected := telegramSelectionActionUID(action); selected {
+		if !telegramPanelCandidateAllowed(panel, selectedUID) {
+			_ = a.telegramAnswerCallbackQuery(ctx, callbackID, "候选用户无效或已过期，请重新搜索。", true)
+			return
+		}
+		if _, exists := a.store().User(selectedUID); !exists {
+			_ = a.telegramAnswerCallbackQuery(ctx, callbackID, "目标用户已不存在，请重新搜索。", true)
+			return
+		}
+		panel.TargetUID = selectedUID
+		panel.CandidateUIDs = nil
+		panel.Query = ""
+		panel.ReplyTelegramID = 0
+		panel.ConfirmAction = ""
+		panel = a.telegramTouchPanel(panel)
+		_ = a.telegramAnswerCallbackQuery(ctx, callbackID, "已选择目标用户。", false)
+		_ = a.telegramEditPanel(ctx, panel)
+		return
+	}
 	panel = a.telegramTouchPanel(panel)
 	_ = a.telegramAnswerCallbackQuery(ctx, callbackID, "操作处理中。", false)
 	a.telegramApplyPanelAction(ctx, panel, action, actorID)
+}
+
+func telegramSelectionActionUID(action string) (int64, bool) {
+	raw, found := strings.CutPrefix(action, "select_")
+	if !found {
+		return 0, false
+	}
+	uid, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || uid <= 0 || strconv.FormatInt(uid, 10) != raw {
+		return 0, true
+	}
+	return uid, true
+}
+
+func telegramPanelCandidateAllowed(panel telegramPanelContext, uid int64) bool {
+	for _, candidateUID := range panel.CandidateUIDs {
+		if candidateUID == uid {
+			return true
+		}
+	}
+	return false
 }
 
 func telegramParsePanelCallback(data string) (mode, action, token string, ok bool) {

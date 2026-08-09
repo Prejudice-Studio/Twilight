@@ -538,6 +538,9 @@ func (a *App) handleAdminForceUnbind(w http.ResponseWriter, r *http.Request, par
 	if statusFromError(w, err) {
 		return
 	}
+	if unbindTelegram {
+		a.cleanupUserTelegramResidue(uid, oldTelegramID)
+	}
 	changed := []string{}
 	if unbindTelegram && oldTelegramID != 0 {
 		changed = append(changed, "telegram")
@@ -962,6 +965,7 @@ func (a *App) handleAdminUnbindTelegram(w http.ResponseWriter, r *http.Request, 
 	if statusFromError(w, err) {
 		return
 	}
+	a.cleanupUserTelegramResidue(uid, old)
 	a.audit(r, "admin_unbind_telegram", "admin", uid, map[string]any{"old_telegram_id": old})
 	ok(w, "Telegram unbound", map[string]any{"uid": u.UID, "username": u.Username, "old_telegram_id": old})
 }
@@ -996,11 +1000,9 @@ func (a *App) handleAdminBindTelegram(w http.ResponseWriter, r *http.Request, pa
 
 func (a *App) handleUserByTelegram(w http.ResponseWriter, r *http.Request, params Params) {
 	tgid, _ := int64Param(params, "telegram_id")
-	for _, u := range a.store().ListUsers() {
-		if u.TelegramID == tgid {
-			ok(w, "OK", publicUser(u))
-			return
-		}
+	if u, found := a.store().FindUserByTelegramID(tgid); found {
+		ok(w, "OK", publicUser(u))
+		return
 	}
 	failWithCode(w, http.StatusNotFound, ErrUserNotFound, userNotFoundMessage)
 }

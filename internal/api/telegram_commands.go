@@ -405,7 +405,7 @@ var telegramSpecialCommandCatalog = []telegramCommandCatalogItem{
 	{Command: "/start", Name: "start", Label: "/start", Description: "打开 Bot 入口", Usage: "/start", Category: "system", Private: false, Admin: false, Disableable: false},
 	{Command: "/help", Name: "help", Label: "/help", Description: "查看完整帮助", Usage: "/help", Category: "system", Private: false, Admin: false, Disableable: false},
 	{Command: "/twihelp", Name: "twihelp", Label: "/twihelp", Description: "查看群组使用提示", Usage: "/twihelp", Category: "group", Private: false, Admin: false, Disableable: false},
-	{Command: "/twguser", Name: "twguser", Label: "/twguser", Description: "群组用户管理面板", Usage: "/twguser <用户名/UID/关键词>", Category: "group", Private: false, Admin: true, Disableable: false},
+	{Command: "/twguser", Name: "twguser", Label: "/twguser", Description: "搜索并打开群组用户管理面板", Usage: "/twguser <关键词> [uid|username|tgid|tgname]", Category: "group", Private: false, Admin: true, Disableable: false},
 }
 
 // telegramDispatchRegistry 在 dispatcher 中统一执行注册表里命令的 gating，

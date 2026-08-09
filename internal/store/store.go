@@ -2372,6 +2372,13 @@ func (s *Store) SetUserActiveAtomic(uid int64, active bool) (User, error) {
 // 解决 handleAdminBindTelegram 闭包外 FindUserByTelegramID 与 UpdateUser
 // 闭包写之间的 TOCTOU。
 func (s *Store) BindUserTelegramAtomic(uid int64, tgid int64, currentUID int64) (User, int64, error) {
+	return s.BindUserTelegramAtomicWithUsername(uid, tgid, "", currentUID)
+}
+
+// BindUserTelegramAtomicWithUsername binds the Telegram identity and username
+// in one state mutation. An empty username clears a stale name when the ID is
+// changed, but preserves the current name for an idempotent same-ID bind.
+func (s *Store) BindUserTelegramAtomicWithUsername(uid int64, tgid int64, telegramUsername string, currentUID int64) (User, int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var (
@@ -2392,6 +2399,12 @@ func (s *Store) BindUserTelegramAtomic(uid int64, tgid int64, currentUID int64) 
 		oldUser := u
 		old = u.TelegramID
 		u.TelegramID = tgid
+		username := strings.TrimPrefix(strings.TrimSpace(telegramUsername), "@")
+		if username != "" {
+			u.TelegramUsername = username
+		} else if old != tgid {
+			u.TelegramUsername = ""
+		}
 		s.state.Users[uid] = u
 		s.maintainUserIndexes(oldUser, u, uid)
 		updated = u
@@ -2661,9 +2674,18 @@ func (s *Store) ListUsers() []User {
 	return users
 }
 
-// SearchUsers returns UID-ordered matches without first copying and sorting the
-// complete user set. It is used by latency-sensitive Telegram administration
-// paths where only the first small page is needed.
+type UserIdentitySearchField uint8
+
+const (
+	UserIdentitySearchAny UserIdentitySearchField = iota
+	UserIdentitySearchUID
+	UserIdentitySearchUsername
+	UserIdentitySearchTelegramID
+	UserIdentitySearchTelegramUsername
+)
+
+// SearchUsers returns UID-ordered broad matches without first copying and
+// sorting the complete user set.
 func (s *Store) SearchUsers(query string, limit int) []User {
 	query = strings.ToLower(strings.TrimSpace(query))
 	if query == "" {
@@ -2683,6 +2705,43 @@ func (s *Store) SearchUsers(query string, limit int) []User {
 			userSearchFieldMatches(u.TelegramUsername, query) ||
 			userSearchFieldMatches(u.EmbyUsername, query) ||
 			userSearchFieldMatches(u.EmbyID, query)
+	}
+	return s.searchUsersMatching(limit, matches)
+}
+
+// SearchUsersByIdentity is the narrow Telegram administration search. It
+// intentionally searches only UID, Web username, Telegram ID, and Telegram
+// username so an ambiguous panel query does not disclose or accidentally match
+// email/Emby identity fields.
+func (s *Store) SearchUsersByIdentity(query string, field UserIdentitySearchField, limit int) []User {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return nil
+	}
+	telegramQuery := strings.TrimPrefix(query, "@")
+	matches := func(u User) bool {
+		switch field {
+		case UserIdentitySearchUID:
+			return strings.Contains(strconv.FormatInt(u.UID, 10), query)
+		case UserIdentitySearchUsername:
+			return userSearchFieldMatches(u.Username, query)
+		case UserIdentitySearchTelegramID:
+			return u.TelegramID != 0 && strings.Contains(strconv.FormatInt(u.TelegramID, 10), query)
+		case UserIdentitySearchTelegramUsername:
+			return telegramQuery != "" && userSearchFieldMatches(normalizeTelegramUsername(u.TelegramUsername), telegramQuery)
+		default:
+			return strings.Contains(strconv.FormatInt(u.UID, 10), query) ||
+				userSearchFieldMatches(u.Username, query) ||
+				(u.TelegramID != 0 && strings.Contains(strconv.FormatInt(u.TelegramID, 10), query)) ||
+				(telegramQuery != "" && userSearchFieldMatches(normalizeTelegramUsername(u.TelegramUsername), telegramQuery))
+		}
+	}
+	return s.searchUsersMatching(limit, matches)
+}
+
+func (s *Store) searchUsersMatching(limit int, matches func(User) bool) []User {
+	if limit <= 0 || limit > 100 {
+		limit = 100
 	}
 
 	s.mu.RLock()
@@ -2913,6 +2972,72 @@ func (s *Store) FindUserByTelegramID(telegramID int64) (User, bool) {
 		}
 	}
 	return User{}, false
+}
+
+// UpdateTelegramUsernameIfBound refreshes the username learned from a
+// Telegram update only while the same Telegram ID is still bound. The final
+// identity check runs inside the version-guarded mutation so a concurrent Web
+// unbind or rebind cannot write a stale username to another account.
+func (s *Store) UpdateTelegramUsernameIfBound(telegramID int64, rawUsername string) (User, bool, error) {
+	if telegramID <= 0 {
+		return User{}, false, nil
+	}
+	username := strings.TrimPrefix(strings.TrimSpace(rawUsername), "@")
+	if username == "" {
+		return User{}, false, nil
+	}
+
+	s.mu.RLock()
+	uid, indexed := s.telegramIDMap[telegramID]
+	current, found := s.state.Users[uid]
+	if !indexed {
+		for candidateUID, candidate := range s.state.Users {
+			if candidate.TelegramID == telegramID {
+				uid, current, indexed, found = candidateUID, candidate, true, true
+				break
+			}
+		}
+	}
+	if !indexed || !found || current.TelegramID != telegramID || current.TelegramUsername == username {
+		s.mu.RUnlock()
+		return current, false, nil
+	}
+	s.mu.RUnlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var updated User
+	changed := false
+	err := s.mutateAndSaveLocked(func() error {
+		uid, indexed := s.telegramIDMap[telegramID]
+		current, found := s.state.Users[uid]
+		if !indexed {
+			for candidateUID, candidate := range s.state.Users {
+				if candidate.TelegramID == telegramID {
+					uid, current, indexed, found = candidateUID, candidate, true, true
+					break
+				}
+			}
+		}
+		if !indexed || !found || current.TelegramID != telegramID {
+			return nil
+		}
+		updated = current
+		if current.TelegramUsername == username {
+			return nil
+		}
+		old := current
+		current.TelegramUsername = username
+		s.state.Users[uid] = current
+		s.maintainUserIndexes(old, current, uid)
+		updated = current
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return User{}, false, err
+	}
+	return updated, changed, nil
 }
 
 func (s *Store) CreateAPIKey(k APIKey) (APIKey, error) {

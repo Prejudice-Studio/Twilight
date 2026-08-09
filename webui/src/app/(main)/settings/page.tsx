@@ -371,7 +371,21 @@ export default function SettingsPage() {
     scene: "user",
     expiresIn: bindCodeExpiry,
     enabled: Boolean(bindCode) && !telegramStatus?.bound,
-    onBound: () => {
+    onBound: (data) => {
+      setTelegramStatus((previous) => ({
+        bound: true,
+        telegram_id: data.telegram_id ?? previous?.telegram_id,
+        telegram_id_full: data.telegram_id ?? previous?.telegram_id_full,
+        telegram_username: data.telegram_username ?? previous?.telegram_username,
+        force_bind: previous?.force_bind ?? false,
+        can_unbind: previous?.can_unbind ?? false,
+        can_change: previous?.can_change ?? true,
+        rebind_approved: previous?.rebind_approved,
+        pending_rebind_request: previous?.pending_rebind_request,
+        rebind_request_status: previous?.rebind_request_status,
+        rebind_request_id: previous?.rebind_request_id,
+        rebinding_in_progress: previous?.rebinding_in_progress,
+      }));
       setBindCode(null);
       setBindCodeExpiry(0);
       toast({ title: t("settings.rebindCompleteTitle"), variant: "success" });

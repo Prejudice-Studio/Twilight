@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -60,6 +61,39 @@ func TestAdminRegcodeListRefreshesPersistedState(t *testing.T) {
 	}
 	if resp.Data.Total != 0 {
 		t.Fatalf("admin regcode list served stale deleted code, total=%d body=%s", resp.Data.Total, rr.Body.String())
+	}
+}
+
+func TestTelegramUpdateBatchRefreshesPersistedUserState(t *testing.T) {
+	app := newTestApp(t)
+	writer := reopenTestStore(t)
+	defer writer.Close()
+	created, err := writer.CreateUser(store.User{
+		Username:         "telegram-cross-process",
+		Role:             store.RoleNormal,
+		Active:           true,
+		TelegramID:       73001,
+		TelegramUsername: "cross_process",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found := app.store().FindUserByTelegramID(created.TelegramID); found {
+		t.Fatal("test setup unexpectedly refreshed the bot store")
+	}
+
+	if ok := app.handleTelegramUpdateBatch(context.Background(), []telegramUpdate{{
+		UpdateID: 1,
+		Message: &telegramMessage{
+			From: telegramUser{ID: created.TelegramID, Username: "cross_process"},
+			Chat: telegramChat{ID: created.TelegramID, Type: "private"},
+		},
+	}}); !ok {
+		t.Fatal("telegram update batch state refresh failed")
+	}
+	refreshed, found := app.store().FindUserByTelegramID(created.TelegramID)
+	if !found || refreshed.UID != created.UID {
+		t.Fatalf("telegram batch did not refresh persisted user: found=%v user=%#v", found, refreshed)
 	}
 }
 

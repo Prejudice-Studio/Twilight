@@ -610,3 +610,31 @@ JS runtime now exposes a richer but still controlled user and system API surface
   - `format.*` provides common output helpers: `bool()`, `role()`, `date()`, `expiry()`, `duration()`, `user()`, and `json()`.
   - `text.*`, `arrays.*`, and `time.*` include extra helpers for trimming/case conversion/templates, joining/sorting arrays, and calculating timestamps.
 - Scripts execute inside a function scope, so a top-level `return` can be used to stop a command early.
+
+## Telegram 绑定同步与 `/twguser` 搜索
+
+### 绑定状态
+
+Telegram 绑定关系以 PostgreSQL 中的用户记录为准，`TelegramID` 是唯一身份键，`TelegramUsername` 只是从 Telegram update 被动刷新的人类可读字段。`api`、`bot`、`scheduler` 分进程运行时，Bot 会在每个 update 批次开始前按版本刷新用户快照和 Telegram ID 索引；刷新失败会暂停该批处理并保留 offset，避免使用过期的管理员权限或绑定状态。
+
+Web 解绑、管理员解绑和删除账号会同时撤销该用户的短期 Telegram 绑定票据，避免 Bot、Web 和历史绑定码在短时间内显示不同状态。Telegram 用户删除用户名时不会用空值覆盖历史用户名，但重新绑定或管理员修改绑定会以新的 Telegram ID 为准。
+
+### `/twguser`
+
+该命令仅允许已鉴权的 Telegram 管理员使用。可直接模糊搜索 UID、Web 用户名、Telegram ID 和 Telegram 用户名：
+
+```text
+/twguser 2345
+/twguser testuser
+```
+
+也可以限定搜索字段，避免同名或数字产生歧义：
+
+```text
+/twguser 2345 uid
+/twguser testuser username
+/twguser testuser tgid
+/twguser testuser tgname
+```
+
+匹配到多个用户时，Bot 返回候选按钮。每次点击候选或面板操作都会重新验证操作者的管理员身份，并校验候选 UID 仍属于当前搜索面板；候选过期、账号删除或权限撤销后不会继续执行操作。回复群成员消息时仍可省略关键词，Bot 会按回复消息中的 Telegram ID 查找绑定账号。

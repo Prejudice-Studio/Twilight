@@ -348,7 +348,7 @@ export interface UserSettings {
   emby_password_email_forced?: boolean;
   telegram: {
     bound: boolean;
-    telegram_id?: string;
+    telegram_id?: number;
     telegram_id_full?: number;
     telegram_username?: string;
     force_bind: boolean;
@@ -384,7 +384,7 @@ export interface EmbyStatus {
 
 export interface TelegramStatus {
   bound: boolean;
-  telegram_id?: string;
+  telegram_id?: number;
   telegram_id_full?: number;
   telegram_username?: string;  // Telegram 用户名
   force_bind: boolean;

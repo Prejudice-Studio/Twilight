@@ -211,12 +211,21 @@ func (a *App) RunTelegramBot(ctx context.Context) error {
 			}
 		}
 		a.setTelegramRuntimeStatus(true, nil)
+		batchOffset := offset
 		for _, update := range updates {
 			if update.UpdateID >= offset {
 				offset = update.UpdateID + 1
 			}
 		}
-		a.handleTelegramUpdateBatch(ctx, updates)
+		if !a.handleTelegramUpdateBatch(ctx, updates) {
+			offset = batchOffset
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(time.Second):
+			}
+			continue
+		}
 		// 整个 batch 处理完成才推进持久化 offset：一旦写入成功，下一次重启
 		// 不会再分发到已 ack 的 update。SetTelegramBotOffset 内部做单调防退化，
 		// 偶尔的 store 写失败只是不更新 disk，下一轮 batch 会再尝试。
@@ -353,21 +362,7 @@ func (a *App) observeTelegramRoster(update *telegramUpdate) {
 // Telegram 用户名。只有解析到绑定账号、且新用户名非空并与现存不同才写库，避免
 // 无谓写盘；用户名为空（对方删了 @username）时保留旧值不清空，以免破坏指名码匹配。
 func (a *App) refreshTelegramUsername(telegramID int64, rawUsername string) {
-	if telegramID <= 0 {
-		return
-	}
-	username := strings.TrimPrefix(strings.TrimSpace(rawUsername), "@")
-	if username == "" {
-		return
-	}
-	u, ok := a.store().FindUserByTelegramID(telegramID)
-	if !ok || u.TelegramUsername == username {
-		return
-	}
-	_, _ = a.store().UpdateUser(u.UID, func(cur *store.User) error {
-		cur.TelegramUsername = username
-		return nil
-	})
+	_, _, _ = a.store().UpdateTelegramUsernameIfBound(telegramID, rawUsername)
 }
 
 func (a *App) telegramConfirmBindCode(ctx context.Context, chatID, telegramID int64, username, code string) {
@@ -1004,12 +999,18 @@ func (a *App) telegramHandleGroupUser(ctx context.Context, chatID, telegramID in
 		a.telegramSendUnauthorizedAndCleanup(ctx, chatID, messageID)
 		return
 	}
-	user, reason := a.telegramResolveGroupUserTarget(query, message)
-	if reason != "" {
-		_ = a.telegramSendMessage(ctx, chatID, reason)
+	resolution := a.telegramResolveGroupUserTargets(query, message)
+	if resolution.Reason != "" {
+		_ = a.telegramSendMessage(ctx, chatID, resolution.Reason)
 		return
 	}
-	if a.telegramSendGroupUserPanel(ctx, chatID, messageID, user, false) {
+	if len(resolution.Users) > 1 {
+		if a.telegramSendGroupUserSelection(ctx, chatID, messageID, query, telegramReplyTelegramID(message), resolution) {
+			a.telegramDeleteGroupUserCommandMessage(ctx, chatID, messageID)
+		}
+		return
+	}
+	if a.telegramSendGroupUserPanel(ctx, chatID, messageID, resolution.Users[0], false) {
 		a.telegramDeleteGroupUserCommandMessage(ctx, chatID, messageID)
 	}
 }
@@ -1151,6 +1152,8 @@ func (a *App) telegramAdminHelpText() string {
 	lines = append(lines,
 		"",
 		"/twguser 回复群成员消息时按 Telegram 绑定关系查询",
+		"/twguser <关键词> 可模糊匹配 UID、Web 用户名、Telegram ID 和 Telegram 用户名",
+		"/twguser <值> uid|username|tgid|tgname 可限定查询字段；多结果时点击按钮选择",
 		"",
 		"/twguser 面板支持启用/禁用 Web 账号、启用/禁用 Emby、删除 Emby、本地删除用户、移出/封禁群组和授予 7/30/365 天或永久 Emby 注册资格。删除类操作需要二次确认；每次按钮操作都会重新鉴权。群组匿名管理员使用 /twguser 时需要先通过 inline 按钮验证身份。",
 	)

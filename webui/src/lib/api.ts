@@ -307,7 +307,7 @@ class ApiClient {
   }
 
   async getMySettings() {
-    return this.request<UserSettings>("/users/me/settings");
+    return this.request<UserSettings>("/users/me/settings", { cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
   async updateMySettings(data: { bgm_mode?: boolean; bgm_manage_mode?: boolean; bgm_token?: string; email?: string; notify_on_login_telegram?: boolean; notify_on_login_email?: boolean; notify_on_ticket_telegram?: boolean; signin_auto_renewal?: boolean; password_change_email_required?: boolean; emby_password_email_required?: boolean; emby_password_old_password_required?: boolean; old_password?: string; verification_id?: string; email_code?: string; code?: string }) {
@@ -402,7 +402,7 @@ class ApiClient {
   }
 
   async getTelegramStatus(signal?: AbortSignal) {
-    return this.request<TelegramStatus>("/users/me/telegram", { signal });
+    return this.request<TelegramStatus>("/users/me/telegram", { signal, cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
   async getBindCode() {
@@ -436,8 +436,8 @@ class ApiClient {
       telegram_username?: string;
     }>(
       `/users/telegram/register/bind-code/status?${q}`,
-      { signal },
-      { timeoutMs: 10_000 },
+      { signal, cache: "no-store" },
+      { timeoutMs: 10_000, cacheRead: false, dedupe: false },
     );
   }
 
@@ -465,8 +465,8 @@ class ApiClient {
       telegram_username?: string;
     }>(
       `/users/me/telegram/bind-code/status?${q}`,
-      { signal },
-      { timeoutMs: 10_000 },
+      { signal, cache: "no-store" },
+      { timeoutMs: 10_000, cacheRead: false, dedupe: false },
     );
   }
 

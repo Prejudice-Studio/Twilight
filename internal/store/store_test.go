@@ -361,6 +361,63 @@ func TestSearchUsersPreservesUIDOrderAndLimitsWithoutListCopy(t *testing.T) {
 	}
 }
 
+func TestUpdateTelegramUsernameIfBoundKeepsBindingIdentity(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	user, err := st.CreateUser(User{Username: "telegram-sync", Role: RoleNormal, TelegramID: 7001, TelegramUsername: "old_name"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, changed, err := st.UpdateTelegramUsernameIfBound(7001, "@new_name")
+	if err != nil || !changed || updated.UID != user.UID || updated.TelegramUsername != "new_name" {
+		t.Fatalf("username refresh = %#v changed=%v err=%v", updated, changed, err)
+	}
+	if _, changed, err = st.UpdateTelegramUsernameIfBound(7001, ""); err != nil || changed {
+		t.Fatalf("empty username should be ignored, changed=%v err=%v", changed, err)
+	}
+
+	if _, err := st.UpdateUser(user.UID, func(u *User) error {
+		u.TelegramID = 0
+		u.TelegramUsername = ""
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, changed, err = st.UpdateTelegramUsernameIfBound(7001, "stale_name"); err != nil || changed {
+		t.Fatalf("stale identity should not be refreshed, changed=%v err=%v", changed, err)
+	}
+	final, _ := st.User(user.UID)
+	if final.TelegramID != 0 || final.TelegramUsername != "" {
+		t.Fatalf("stale username changed an unbound user: %#v", final)
+	}
+}
+
+func TestSearchUsersByIdentityRestrictsConfiguredField(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	alpha, err := st.CreateUser(User{Username: "web-testuser", Role: RoleNormal, TelegramID: 812345, TelegramUsername: "tg-testuser"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateUser(User{Username: "other-testuser", Role: RoleNormal, TelegramID: 923456, TelegramUsername: "other-tg"}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		query string
+		field UserIdentitySearchField
+	}{
+		{query: "testuser", field: UserIdentitySearchUsername},
+		{query: "2345", field: UserIdentitySearchTelegramID},
+		{query: "testuser", field: UserIdentitySearchTelegramUsername},
+		{query: strconv.FormatInt(alpha.UID, 10), field: UserIdentitySearchUID},
+	} {
+		matches := st.SearchUsersByIdentity(test.query, test.field, 10)
+		if len(matches) != 1 || matches[0].UID != alpha.UID {
+			t.Fatalf("field=%d query=%q matches=%#v", test.field, test.query, matches)
+		}
+	}
+}
+
 func userUIDsFromList(users []User) []int64 {
 	out := make([]int64, 0, len(users))
 	for _, u := range users {

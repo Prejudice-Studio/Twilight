@@ -37,3 +37,45 @@ func TestRefreshTelegramUsername(t *testing.T) {
 	app.refreshTelegramUsername(999, "ghost")
 	app.refreshTelegramUsername(0, "ignored")
 }
+
+func TestTelegramGroupUserSearchSupportsFuzzyAndExplicitFields(t *testing.T) {
+	for _, test := range []struct {
+		input string
+		query string
+		field store.UserIdentitySearchField
+	}{
+		{input: "2345 uid", query: "2345", field: store.UserIdentitySearchUID},
+		{input: "testuser username", query: "testuser", field: store.UserIdentitySearchUsername},
+		{input: "testuser tgid", query: "testuser", field: store.UserIdentitySearchTelegramID},
+		{input: "@testuser tgname", query: "testuser", field: store.UserIdentitySearchTelegramUsername},
+		{input: "testuser", query: "testuser", field: store.UserIdentitySearchAny},
+	} {
+		got, reason := telegramParseGroupUserSearch(test.input)
+		if reason != "" || got.Query != test.query || got.Field != test.field {
+			t.Fatalf("parse %q = %#v reason=%q", test.input, got, reason)
+		}
+	}
+}
+
+func TestTelegramGroupUserResolutionKeepsBoundedCandidateSet(t *testing.T) {
+	app := newTestApp(t)
+	first, err := app.store().CreateUser(store.User{Username: "match-one", Role: store.RoleNormal, TelegramUsername: "same-name"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := app.store().CreateUser(store.User{Username: "match-two", Role: store.RoleNormal, TelegramUsername: "same-name-two"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolution := app.telegramResolveGroupUserTargetValues("same tgname", 0)
+	if resolution.Reason != "" || len(resolution.Users) != 2 {
+		t.Fatalf("unexpected resolution: %#v", resolution)
+	}
+	panel := telegramPanelContext{CandidateUIDs: telegramUserUIDs(resolution.Users)}
+	if !telegramPanelCandidateAllowed(panel, first.UID) || !telegramPanelCandidateAllowed(panel, second.UID) {
+		t.Fatalf("matched users missing from candidate set: %#v", panel)
+	}
+	if telegramPanelCandidateAllowed(panel, first.UID+second.UID+1) {
+		t.Fatalf("unmatched user was accepted by candidate set: %#v", panel)
+	}
+}

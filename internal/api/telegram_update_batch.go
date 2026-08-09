@@ -13,8 +13,20 @@ const telegramUpdateBatchMaxWorkers = 8
 // handleTelegramUpdateBatch keeps updates from one chat ordered while allowing
 // independent chats to make progress concurrently. It returns only after every
 // update effect completes, so the caller can durably advance getUpdates offset.
-func (a *App) handleTelegramUpdateBatch(ctx context.Context, updates []telegramUpdate) {
+
+// handleTelegramUpdateBatch refreshes the shared PostgreSQL snapshot once per
+// batch. The API and Bot may run in different processes, so handling updates
+// against a startup-only user index makes Web and Telegram binding states drift.
+func (a *App) handleTelegramUpdateBatch(ctx context.Context, updates []telegramUpdate) bool {
+	if len(updates) == 0 {
+		return true
+	}
+	if err := a.store().Refresh(); err != nil {
+		zap.L().Warn("telegram update batch state refresh failed", zap.Error(err))
+		return false
+	}
 	processTelegramUpdateBatch(ctx, updates, telegramUpdateBatchMaxWorkers, a.handleTelegramUpdateSafely)
+	return true
 }
 
 func (a *App) handleTelegramUpdateSafely(ctx context.Context, update *telegramUpdate) {

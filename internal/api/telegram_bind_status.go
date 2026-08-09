@@ -32,6 +32,19 @@ func (a *App) telegramBindCodeState(code string, uid int64, requireScene string,
 	if !telegramBindCodePattern.MatchString(code) {
 		return telegramBindCodeState{Code: code, Status: "invalid_format", ErrorCode: ErrTGBindCodeFormat, HTTPStatus: http.StatusBadRequest, Message: "Telegram 绑定码格式不正确", Invalid: true, Terminal: true}
 	}
+	// User bindings are durable Store state; bind-code hub entries are only
+	// short-lived delivery tickets. Prefer the authoritative user record so a
+	// stale failure/grace entry cannot make an already-bound account appear
+	// pending or failed after Bot confirmation completed.
+	if uid != 0 && (requireScene == "" || requireScene == "user") {
+		if u, ok := a.store().User(uid); ok && u.TelegramID != 0 {
+			return telegramBindCodeState{
+				Code: code, Status: "bound", Message: "Telegram 已绑定",
+				Confirmed: true, Terminal: true, TelegramBound: true,
+				TelegramID: u.TelegramID, TelegramUsername: u.TelegramUsername,
+			}
+		}
+	}
 	if a.bindStatus != nil {
 		if failure, ok := a.bindStatus.failure(code, now); ok {
 			return telegramBindCodeState{
@@ -48,10 +61,8 @@ func (a *App) telegramBindCodeState(code string, uid int64, requireScene string,
 	bind, okBind := a.bindCode(code)
 	if !okBind {
 		if uid != 0 {
-			for _, u := range a.store().ListUsers() {
-				if u.UID == uid && u.TelegramID != 0 {
-					return telegramBindCodeState{Code: code, Status: "bound", Message: "Telegram 已绑定", Confirmed: true, Terminal: true, TelegramBound: true, TelegramID: u.TelegramID, TelegramUsername: u.TelegramUsername}
-				}
+			if u, ok := a.store().User(uid); ok && u.TelegramID != 0 {
+				return telegramBindCodeState{Code: code, Status: "bound", Message: "Telegram 已绑定", Confirmed: true, Terminal: true, TelegramBound: true, TelegramID: u.TelegramID, TelegramUsername: u.TelegramUsername}
 			}
 		}
 		return telegramBindCodeState{Code: code, Status: "not_found", ErrorCode: ErrTGBindCodeNotFound, HTTPStatus: http.StatusBadRequest, Message: "绑定码不存在", Invalid: true, Terminal: true}
@@ -194,18 +205,9 @@ func (a *App) confirmBindCodeAtomic(code string, telegramID int64, telegramUsern
 		}
 		return false
 	}, func(bind store.BindCode) (store.User, error) {
-		updated, _, err := a.store().BindUserTelegramAtomic(bind.UID, bind.TelegramID, bind.UID)
+		updated, _, err := a.store().BindUserTelegramAtomicWithUsername(bind.UID, bind.TelegramID, bind.TelegramUsername, bind.UID)
 		if err != nil {
 			return store.User{}, err
-		}
-		if strings.TrimSpace(bind.TelegramUsername) != "" {
-			updated, err = a.store().UpdateUser(bind.UID, func(u *store.User) error {
-				u.TelegramUsername = strings.TrimSpace(bind.TelegramUsername)
-				return nil
-			})
-			if err != nil {
-				return store.User{}, err
-			}
 		}
 		a.auditTelegramAction(bind.TelegramID, "bind_telegram_via_telegram", "user", updated.UID, map[string]any{"scene": bind.Scene})
 		return updated, nil

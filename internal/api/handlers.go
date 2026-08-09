@@ -1533,6 +1533,7 @@ func (a *App) handleUnbindTelegram(w http.ResponseWriter, r *http.Request, _ Par
 	if statusFromError(w, err) {
 		return
 	}
+	a.cleanupUserTelegramResidue(p.User.UID, p.User.TelegramID)
 	// Mark approved rebind request as consumed so it cannot be reused.
 	// 走 ConsumeRebindRequest 而非 ReviewRebindRequest：后者会把 ReviewerUID
 	// 覆盖成 0、用 "auto-consumed" 抹掉管理员原始审核备注、并把 ReviewedAt
