@@ -64,6 +64,40 @@ func TestAdminRegcodeListRefreshesPersistedState(t *testing.T) {
 	}
 }
 
+func TestAdminUserReadRefreshesPersistedStateAtHTTPBoundary(t *testing.T) {
+	app := newTestApp(t)
+	admin := registerAndLogin(t, app, "boundary-admin", "Admin123456")
+	writer := reopenTestStore(t)
+	defer writer.Close()
+	created, err := writer.CreateUser(store.User{
+		Username: "boundary-cross-process",
+		Role:     store.RoleNormal,
+		Active:   true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found := app.store().User(created.UID); found {
+		t.Fatal("test setup unexpectedly refreshed the HTTP store")
+	}
+
+	response := doJSON(app, http.MethodGet, "/api/v1/admin/users?search=boundary-cross-process", ``, admin)
+	if response.Code != http.StatusOK {
+		t.Fatalf("admin user list status=%d body=%s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Data struct {
+			Users []store.User `json:"users"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode admin user list: %v body=%s", err, response.Body.String())
+	}
+	if len(payload.Data.Users) != 1 || payload.Data.Users[0].UID != created.UID {
+		t.Fatalf("admin user list did not see cross-process user: %#v", payload.Data.Users)
+	}
+}
+
 func TestTelegramUpdateBatchRefreshesPersistedUserState(t *testing.T) {
 	app := newTestApp(t)
 	writer := reopenTestStore(t)

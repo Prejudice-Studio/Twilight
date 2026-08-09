@@ -17,7 +17,7 @@ import (
 const maxRegCodeValidityHours = 876000
 
 func (a *App) handleListRegcodes(w http.ResponseWriter, r *http.Request, _ Params) {
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	codes := a.store().ListRegCodes()
@@ -75,7 +75,7 @@ func (a *App) handleCreateRegcodes(w http.ResponseWriter, r *http.Request, _ Par
 	if a.rejectRegcodeWriteIfStorageMismatch(w) {
 		return
 	}
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	payload := decodeMap(r)
@@ -214,7 +214,7 @@ func (a *App) handleUpdateRegcode(w http.ResponseWriter, r *http.Request, params
 	if a.rejectRegcodeWriteIfStorageMismatch(w) {
 		return
 	}
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	reg, okReg := a.store().RegCode(params["code"])
@@ -301,7 +301,7 @@ func (a *App) handleDeleteRegcode(w http.ResponseWriter, r *http.Request, params
 	if a.rejectRegcodeWriteIfStorageMismatch(w) {
 		return
 	}
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	code := strings.TrimSpace(params["code"])
@@ -353,7 +353,7 @@ func (a *App) handleBatchDeleteRegcodes(w http.ResponseWriter, r *http.Request, 
 	if a.rejectRegcodeWriteIfStorageMismatch(w) {
 		return
 	}
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	payload := decodeMap(r)
@@ -399,7 +399,7 @@ func (a *App) handleBatchDeleteRegcodes(w http.ResponseWriter, r *http.Request, 
 }
 
 func (a *App) handleRegcodeUsers(w http.ResponseWriter, r *http.Request, params Params) {
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	reg, okReg := a.store().RegCode(params["code"])
@@ -473,7 +473,7 @@ func (a *App) handleClearRegcodeUsage(w http.ResponseWriter, r *http.Request, pa
 	if a.rejectRegcodeWriteIfStorageMismatch(w) {
 		return
 	}
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	payload := decodeMap(r)

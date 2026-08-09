@@ -254,7 +254,7 @@ func (a *App) handleRegcodeCheck(w http.ResponseWriter, r *http.Request, _ Param
 		payload := decodeMap(r)
 		code = stringValue(payload, "reg_code")
 	}
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	if code != "" {

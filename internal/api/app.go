@@ -738,13 +738,20 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if a.cfg().MaxUploadSize > 0 {
 		r.Body = http.MaxBytesReader(lw, r.Body, a.cfg().MaxUploadSize)
 	}
-	if a.store().IsIPBlacklisted(clientIP) {
-		failWithCode(lw, http.StatusForbidden, ErrIPBlacklisted, "IP 已被封禁")
+	if !a.allowRate(r.Context(), rateKey("global:", clientIP), a.cfg().RateLimitGlobalPerMinute, time.Minute) {
+		failWithCode(lw, http.StatusTooManyRequests, ErrGlobalRateLimited, "请求过于频繁，请稍后再试")
 		return
 	}
 
-	if !a.allowRate(r.Context(), rateKey("global:", clientIP), a.cfg().RateLimitGlobalPerMinute, time.Minute) {
-		failWithCode(lw, http.StatusTooManyRequests, ErrGlobalRateLimited, "请求过于频繁，请稍后再试")
+	// Every process owns a Store snapshot. Refresh after cheap transport guards
+	// but before blacklist checks, routing, authentication, or any handler read.
+	// Handler-level guards reuse the request marker.
+	r = withRequestStoreRefreshState(r)
+	if a.refreshStoreForRequest(lw, r) {
+		return
+	}
+	if a.store().IsIPBlacklisted(clientIP) {
+		failWithCode(lw, http.StatusForbidden, ErrIPBlacklisted, "IP 已被封禁")
 		return
 	}
 

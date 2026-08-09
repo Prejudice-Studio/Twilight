@@ -403,7 +403,7 @@ func (a *App) handleInviteCheck(w http.ResponseWriter, r *http.Request, _ Params
 	if code == "" {
 		code = stringValue(decodeMap(r), "code")
 	}
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	invite, okInvite := a.store().InviteCode(code)

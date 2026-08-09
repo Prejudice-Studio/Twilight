@@ -92,6 +92,7 @@ Service 入参应是明确类型，不直接接收 `http.Request`。需要操作
 - 原子变更优先做成 store 方法，例如启停用户、消费卡码、清理验证码。
 - 列表筛选如果被批量操作复用，列表 handler 与批量 helper 必须共享同一筛选口径。
 - PostgreSQL 的主要业务实体仍归 `twilight_state` 管理；高写入或独立生命周期数据可使用已有的 `twilight_audit_logs`、`twilight_runtime_logs`、`twilight_sessions`、`twilight_playback_records`、`twilight_telegram_roster`、`twilight_telegram_runtime`。新增独立表前必须更新架构文档，并明确旧数据迁移、备份合并、恢复拆分与跨表一致性边界。Telegram offset 属于运行确认状态，不随业务快照回滚；花名册属于可备份业务历史，运行时在专表中读写，快照时合并回 `State.TelegramRoster`。
+- 多进程读取必须在边界同步：HTTP 路由在鉴权前刷新 Store，Telegram 在每批更新前刷新，调度器在每个任务执行前刷新。Store 的版本探测在版本未变化时不传输完整 JSONB；请求或任务内的局部刷新应复用边界刷新结果，避免重复查询。
 
 ## 外部 Client 规则
 

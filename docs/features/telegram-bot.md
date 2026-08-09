@@ -617,6 +617,10 @@ JS runtime now exposes a richer but still controlled user and system API surface
 
 Telegram 绑定关系以 PostgreSQL 中的用户记录为准，`TelegramID` 是唯一身份键，`TelegramUsername` 只是从 Telegram update 被动刷新的人类可读字段。`api`、`bot`、`scheduler` 分进程运行时，Bot 会在每个 update 批次开始前按版本刷新用户快照和 Telegram ID 索引；刷新失败会暂停该批处理并保留 offset，避免使用过期的管理员权限或绑定状态。
 
+### 统一状态读取
+
+跨进程状态刷新不限于绑定：所有已匹配的 HTTP 请求会在鉴权前刷新一次 Store，定时任务会在每次执行前刷新，Telegram 则在每个非空更新批次开始时刷新。版本未变化时 PostgreSQL 只返回版本号，不会传输或反序列化整份业务 JSONB；任一边界刷新失败都会停止当前请求、任务或 update 批次，避免用旧的用户、邀请码、工单、邀请关系或权限状态继续读取、鉴权和操作。
+
 Web 解绑、管理员解绑和删除账号会同时撤销该用户的短期 Telegram 绑定票据，避免 Bot、Web 和历史绑定码在短时间内显示不同状态。Telegram 用户删除用户名时不会用空值覆盖历史用户名，但重新绑定或管理员修改绑定会以新的 Telegram ID 为准。
 
 ### `/twguser`

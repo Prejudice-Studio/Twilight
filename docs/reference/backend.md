@@ -248,6 +248,7 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
 数据库行为要点：
 
 - **多进程并发写用版本列串行化**：`twilight_state` 带 `version bigint` 列，`saveLocked` 走「version = 读到值」守卫的 UPSERT，命中 0 行（被他进程抢先递增）即回 `errStateVersionConflict`，`mutateAndSaveLocked` 有界重试（重新 `refreshLocked` 拉最新 state + version 后重放 mutate）。这取代了此前「refresh 与整份 jsonb 盲写之间被他进程插入提交后仍整份覆盖」的丢更新——正是「用户建了工单、TG 也收到通知，工单却随后凭空消失」的根因。`saveLockedForce` 无视守卫强制覆盖并把 version 推到「读到值 +1」，仅用于冷启动播种、`LoadSnapshot` 恢复 / 迁移。
+- **多进程读取在边界统一刷新**：每个已匹配的 HTTP 请求都在鉴权前刷新一次 Store；请求内已有的注册码、邀请、工单等局部保护会复用该结果，因此不会重复探测版本。Telegram 在每个非空更新批次开始时刷新，定时任务在每次任务执行前刷新。刷新仅比较版本号，版本未变时不会传输或反序列化完整 JSONB；刷新失败时当前请求、更新批次或任务会停止，避免以旧权限或旧业务状态继续执行。
 - `refreshLocked` 每次先由 PostgreSQL 比较 `version`，查询使用 `CASE WHEN version = $1 THEN NULL ELSE state END`：版本没变时只返回版本号，不传输、不反序列化整份 JSONB，也不重建用户/API Key 索引；版本变化时才在同一查询中取回完整 state。读写都走 30s 超时 context，连接假死时到期自行释放，避免整个 `s.mu` 连带全站 handler 卡死。任何绕过 Store 的人工 SQL 修复若修改 `state`，必须同时递增 `version`，否则各进程会按未变化版本继续使用本地快照。
 - 写盘失败一律回滚：`Store.stateRaw` 常驻保存与 `stateVersion` 对齐的权威序列化字节；`snapshotStateLocked` 只引用这份只读字节，save 成功后才替换为新 JSON，失败则由 `restoreStateLocked` 延迟反序列化并重建索引。常见成功路径不再为了回滚额外序列化或复制完整对象图。
 - **PostgreSQL 建库建表**：目标库不存在时，会尝试用同一连接用户连接 `postgres` / `template1` 维护库执行 `CREATE DATABASE`（连接用户需要 `CREATEDB` 权限，已存在则不重复创建）；随后自动建表 `twilight_state`、`twilight_audit_logs`、`twilight_runtime_logs`、`twilight_sessions`、`twilight_playback_records`、`twilight_telegram_roster`、`twilight_telegram_runtime` 及相关索引（`CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` / `ALTER TABLE … ADD COLUMN IF NOT EXISTS version`，全部幂等，可反复执行）。

@@ -25,7 +25,7 @@ func (a *App) handleMyTickets(w http.ResponseWriter, r *http.Request, _ Params) 
 		failWithCode(w, http.StatusServiceUnavailable, ErrTicketDisabled, "工单系统未启用")
 		return
 	}
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	p := current(r)
@@ -114,7 +114,7 @@ func (a *App) handleCloseOwnTicket(w http.ResponseWriter, r *http.Request, param
 	}
 	id, _ := int64Param(params, "ticket_id")
 	p := current(r)
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	existing, found := a.store().Ticket(id)
@@ -144,7 +144,7 @@ func (a *App) handleReopenOwnTicket(w http.ResponseWriter, r *http.Request, para
 	}
 	id, _ := int64Param(params, "ticket_id")
 	p := current(r)
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	existing, found := a.store().Ticket(id)
@@ -187,7 +187,7 @@ func (a *App) handleToggleTicketNotify(w http.ResponseWriter, r *http.Request, p
 	}
 	id, _ := int64Param(params, "ticket_id")
 	p := current(r)
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	existing, found := a.store().Ticket(id)
@@ -214,7 +214,7 @@ func (a *App) handleToggleTicketNotify(w http.ResponseWriter, r *http.Request, p
 // handleAdminTickets 管理员查看所有工单（支持筛选）。管理端接口不受 TicketSystemEnabled 开关限制。
 // 默认仅显示未解决的工单（open / in_progress），传 ?all=1 可查看全部包括已解决/已关闭。
 func (a *App) handleAdminTickets(w http.ResponseWriter, r *http.Request, _ Params) {
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status")))
@@ -263,7 +263,7 @@ func (a *App) handleAdminTickets(w http.ResponseWriter, r *http.Request, _ Param
 
 // handleAdminTicket 返回单个工单及完整对话。管理端接口不受 TicketSystemEnabled 开关限制。
 func (a *App) handleAdminTicket(w http.ResponseWriter, r *http.Request, params Params) {
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	id, _ := int64Param(params, "ticket_id")
@@ -281,7 +281,7 @@ func (a *App) handleAdminUpdateTicket(w http.ResponseWriter, r *http.Request, pa
 	id, _ := int64Param(params, "ticket_id")
 	payload := decodeMap(r)
 
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	existing, foundTicket := a.store().Ticket(id)
@@ -371,7 +371,7 @@ func (a *App) handleAdminUpdateTicket(w http.ResponseWriter, r *http.Request, pa
 // handleAdminReplyTicket 追加管理员文字回复，不要求提交状态 / 类型 / 优先级表单。
 func (a *App) handleAdminReplyTicket(w http.ResponseWriter, r *http.Request, params Params) {
 	id, _ := int64Param(params, "ticket_id")
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	existing, foundTicket := a.store().Ticket(id)
@@ -413,7 +413,7 @@ func (a *App) handleAdminReplyTicket(w http.ResponseWriter, r *http.Request, par
 // handleAdminDeleteTicket 管理员删除工单。管理端接口不受 TicketSystemEnabled 开关限制。
 func (a *App) handleAdminDeleteTicket(w http.ResponseWriter, r *http.Request, params Params) {
 	id, _ := int64Param(params, "ticket_id")
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	existing, found := a.store().Ticket(id)
@@ -478,7 +478,7 @@ func (a *App) handleUploadTicketImage(w http.ResponseWriter, r *http.Request, pa
 		return
 	}
 	id, _ := int64Param(params, "ticket_id")
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	ticket, allowed := a.ticketAccessible(p, id)
@@ -605,7 +605,7 @@ func (a *App) handleGetTicketImage(w http.ResponseWriter, r *http.Request, param
 		failWithCode(w, http.StatusNotFound, ErrAssetNotFound, "resource not found")
 		return
 	}
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	ticket, allowed := a.ticketAccessible(p, id)
@@ -651,7 +651,7 @@ func (a *App) handleDeleteTicketImage(w http.ResponseWriter, r *http.Request, pa
 		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "图片不存在")
 		return
 	}
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	ticket, allowed := a.ticketAccessible(p, id)
@@ -708,7 +708,7 @@ func (a *App) handleReplyToTicket(w http.ResponseWriter, r *http.Request, params
 		return
 	}
 	id, _ := int64Param(params, "ticket_id")
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	ticket, okTicket := a.store().Ticket(id)

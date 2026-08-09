@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/prejudice-studio/twilight/internal/config"
@@ -9,10 +10,21 @@ import (
 
 const regcodeStorageMismatchMessage = "当前运行数据库与配置数据库不一致，注册码写入已暂停。请确认 database.driver 为 postgres 且 PostgreSQL 连接配置正确后重启服务。"
 
-// runtimeDatabaseMismatch 判定运行期后端与配置后端是否不一致。后端已收敛为
-// 单一 PostgreSQL：运行期 store 恒为 postgres，唯一的失配场景是配置里的
-// driver 被改成了非 postgres 值（此时启动本应被拒，这里作为最后一道运行期
-// 保险，避免误判把注册码写进错误后端）。不再比对 JSON 状态文件路径。
+type requestStoreRefreshKey struct{}
+
+type requestStoreRefreshState struct {
+	completed bool
+}
+
+func withRequestStoreRefreshState(r *http.Request) *http.Request {
+	if r == nil {
+		return r
+	}
+	return r.WithContext(context.WithValue(r.Context(), requestStoreRefreshKey{}, &requestStoreRefreshState{}))
+}
+
+// runtimeDatabaseMismatch keeps a final runtime guard for a configuration that
+// no longer points at the mandatory PostgreSQL backend.
 func (a *App) runtimeDatabaseMismatch() bool {
 	if a == nil || a.store() == nil {
 		return false
@@ -28,19 +40,33 @@ func (a *App) rejectRegcodeWriteIfStorageMismatch(w http.ResponseWriter) bool {
 	return true
 }
 
-func (a *App) refreshStoreForRequest(w http.ResponseWriter) bool {
+// refreshStoreForRequest makes the PostgreSQL snapshot current once for every
+// routed HTTP request. This covers authentication and public read routes as
+// well as handlers, while the request-local marker keeps legacy handler guards
+// from issuing a second version probe.
+func (a *App) refreshStoreForRequest(w http.ResponseWriter, r *http.Request) bool {
 	if a == nil || a.store() == nil {
+		return false
+	}
+	var state *requestStoreRefreshState
+	if r != nil {
+		state, _ = r.Context().Value(requestStoreRefreshKey{}).(*requestStoreRefreshState)
+	}
+	if state != nil && state.completed {
 		return false
 	}
 	if err := a.store().Refresh(); err != nil {
 		failWithCode(w, http.StatusInternalServerError, ErrInternal, "读取最新数据库状态失败")
 		return true
 	}
+	if state != nil {
+		state.completed = true
+	}
 	return false
 }
 
 func (a *App) refreshCurrentUserForRequest(w http.ResponseWriter, r *http.Request) (store.User, bool) {
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return store.User{}, false
 	}
 	p := current(r)

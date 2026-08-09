@@ -100,6 +100,17 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 	if !schedulerJobExists(jobID) {
 		return map[string]any{"success": false}, nil, fmt.Errorf("job not found")
 	}
+	// Scheduler may run in a dedicated process. Refresh once before every job so
+	// all job reads share the same persisted view as HTTP and Telegram flows.
+	if err := a.store().Refresh(); err != nil {
+		return map[string]any{"success": false}, []string{"failed to refresh persisted state"}, err
+	}
+	if r != nil {
+		r = withRequestStoreRefreshState(r)
+		if state, _ := r.Context().Value(requestStoreRefreshKey{}).(*requestStoreRefreshState); state != nil {
+			state.completed = true
+		}
+	}
 	params := a.schedulerEffectiveParams(r, jobID)
 	if err := r.Context().Err(); err != nil {
 		return map[string]any{"success": false, "terminated": true}, []string{"job terminated before execution"}, err
@@ -107,9 +118,6 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 	now := time.Now().Unix()
 	switch jobID {
 	case "check_expired":
-		if err := a.store().Refresh(); err != nil {
-			return map[string]any{"success": false}, []string{"failed to refresh persisted state"}, err
-		}
 		disabled := 0
 		embyDisabled := 0
 		skippedProtected := 0

@@ -81,6 +81,7 @@ Update docs in the same change when behavior changes.
 - Keep error codes aligned between `internal/api/errcode.go` and frontend error helpers.
 - State-changing operations should call `a.audit(r, action, category, targetUID, detail)` after success.
 - Read-only list/get/search endpoints usually do not need audit entries.
+- HTTP requests must refresh the shared Store snapshot once after cheap transport/rate-limit guards and before blacklist checks, routing, or authentication. Reuse the request-local refresh marker in any handler-level guard; do not add a second `Store.Refresh()` probe to ordinary reads. Scheduler jobs likewise refresh once at their execution boundary, and Telegram refreshes once per non-empty update batch.
 - Enforce feature gates in every relevant handler, not only in frontend visibility logic.
 - Do not read or print local secrets from config files unless explicitly requested.
 - Server status health checks are split across `/system/health/api`, `/system/health/database`, and `/system/health/emby`; keep `/system/health` as a compatibility aggregate and avoid adding database/Emby probes back into `/system/stats`.

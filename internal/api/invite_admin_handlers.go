@@ -12,13 +12,13 @@ import (
 var errInviteQuickRenewDisabled = errors.New("invite quick maintenance renewal target is disabled")
 
 func (a *App) handleInviteTree(w http.ResponseWriter, r *http.Request, _ Params) {
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	ok(w, "OK", a.inviteForest())
 }
 func (a *App) handleAdminInviteCodes(w http.ResponseWriter, r *http.Request, _ Params) {
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	codes := a.store().ListAllInviteCodes()
@@ -30,7 +30,7 @@ func (a *App) handleAdminInviteCodes(w http.ResponseWriter, r *http.Request, _ P
 }
 
 func (a *App) handleAdminInviteDetachDeleteEmby(w http.ResponseWriter, r *http.Request, params Params) {
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	target, okUser := a.userFromPath(w, params, "uid")
@@ -55,7 +55,7 @@ func (a *App) handleAdminInviteDetachDeleteEmby(w http.ResponseWriter, r *http.R
 
 func (a *App) handleAdminInviteDetachBatch(w http.ResponseWriter, r *http.Request, _ Params) {
 	payload := decodeMap(r)
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	uids := uniqueInt64s(int64Slice(payload["uids"]))
@@ -136,7 +136,7 @@ func (a *App) handleAdminInviteQuickMaintenance(w http.ResponseWriter, r *http.R
 		failWithCode(w, http.StatusBadRequest, ErrBatchConfirmRequired, "missing confirm "+confirmInviteQuickMaintain)
 		return
 	}
-	if a.refreshStoreForRequest(w) {
+	if a.refreshStoreForRequest(w, r) {
 		return
 	}
 	scope := stringValue(payload, "scope")
