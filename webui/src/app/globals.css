@@ -586,6 +586,10 @@
   }
 
   .admin-section-surface :where(.overflow-x-auto) {
+    max-width: 100%;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
     border-radius: calc(var(--radius) * 0.85);
   }
 

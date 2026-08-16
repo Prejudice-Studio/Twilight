@@ -745,7 +745,7 @@ function UserAuditCard({
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-muted/40"
+        className="grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-3 p-4 text-left transition-colors hover:bg-muted/40 sm:grid-cols-[auto_minmax(0,1fr)_auto]"
         aria-expanded={open}
       >
         {open ? (
@@ -778,7 +778,7 @@ function UserAuditCard({
             )}
           </div>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+        <div className="col-span-2 flex min-w-0 flex-wrap items-center gap-1.5 pl-7 sm:col-span-1 sm:col-start-3 sm:row-start-1 sm:justify-end sm:pl-0">
           {clientFiltered && (
             <Badge variant="secondary" className="gap-1 text-[10px]">
               <AppWindow className="h-3 w-3" />
@@ -960,7 +960,7 @@ function UserAuditCard({
             {devices.length > 0 ? (
               <div className="overflow-hidden rounded-lg border bg-background">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table className="min-w-[680px] w-full text-sm">
                     <thead className="bg-muted/50">
                       <tr>
                         <th className="p-2.5 text-left font-medium">{t("deviceAudit.devColName")}</th>
@@ -1033,7 +1033,7 @@ function DeviceTableView({
     <Card>
       <CardContent className="p-0">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="min-w-[760px] w-full text-sm">
             <thead className="bg-muted/50">
               <tr>
                 <th className="p-2.5 text-left font-medium">{t("deviceAudit.devColUser")}</th>
@@ -1115,9 +1115,9 @@ function AccountPanel({ title, children }: { title: string; children: React.Reac
 
 function ClientCell({ device: d }: { device: EmbyAuditDevice }) {
   return (
-    <span className="inline-flex items-center gap-1">
-      <span>{d.app_name || "—"}</span>
-      {d.app_version && <span className="text-xs text-muted-foreground">{d.app_version}</span>}
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-1">
+      <span className="break-words">{d.app_name || "—"}</span>
+      {d.app_version && <span className="break-words text-xs text-muted-foreground">{d.app_version}</span>}
     </span>
   );
 }
@@ -1160,9 +1160,9 @@ function Row({
   mono?: boolean;
 }) {
   return (
-    <div className="flex justify-between gap-3">
+    <div className="flex items-start justify-between gap-3">
       <dt className="shrink-0 text-muted-foreground">{label}</dt>
-      <dd className={`text-right ${mono ? "font-mono text-xs" : ""}`}>{value}</dd>
+      <dd className={`min-w-0 break-words text-right ${mono ? "font-mono text-xs" : ""}`}>{value}</dd>
     </div>
   );
 }

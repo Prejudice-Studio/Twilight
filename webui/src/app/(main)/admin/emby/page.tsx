@@ -380,8 +380,8 @@ export default function AdminEmbyPage() {
       <motion.div variants={item}>
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
                 <CardTitle className="flex items-center gap-2">
                   <Wifi className="h-5 w-5" />
                   {t("adminEmby.connTitle")}
@@ -390,7 +390,7 @@ export default function AdminEmbyPage() {
                   {t("adminEmby.connDesc")}
                 </CardDescription>
               </div>
-              <Button onClick={handleTestConnectivity} disabled={isTesting}>
+              <Button className="w-full sm:w-auto" onClick={handleTestConnectivity} disabled={isTesting}>
                 {isTesting ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
@@ -409,7 +409,7 @@ export default function AdminEmbyPage() {
                     <Server className="h-4 w-4 text-muted-foreground" />
                     <span className="text-sm font-medium">{t("adminEmby.serverInfo")}</span>
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                  <div className="grid gap-2 text-sm sm:grid-cols-2 md:grid-cols-4">
                     <div>
                       <span className="text-muted-foreground">{t("adminEmby.nameLabel")}</span>
                       {testResult.server_info.name}
@@ -714,8 +714,8 @@ export default function AdminEmbyPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             {/* Cleanup orphans */}
-            <div className="flex items-center justify-between rounded-lg border p-4">
-              <div>
+            <div className="flex flex-col items-stretch gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
                 <div className="font-medium flex items-center gap-2">
                   <Link2Off className="h-4 w-4 text-amber-500" />
                   {t("adminEmby.cleanOrphansTitle")}
@@ -725,6 +725,7 @@ export default function AdminEmbyPage() {
                 </p>
               </div>
               <Button
+                className="w-full sm:w-auto"
                 variant="outline"
                 onClick={handleCleanup}
                 disabled={isCleaning}
@@ -739,8 +740,8 @@ export default function AdminEmbyPage() {
             </div>
 
             {/* Reset all bindings */}
-            <div className="flex items-center justify-between rounded-lg border border-red-500/20 p-4 bg-red-500/5">
-              <div>
+            <div className="flex flex-col items-stretch gap-3 rounded-lg border border-red-500/20 bg-red-500/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
                 <div className="font-medium flex items-center gap-2 text-red-500">
                   <AlertTriangle className="h-4 w-4" />
                   {t("adminEmby.resetBindingsTitle")}
@@ -750,6 +751,7 @@ export default function AdminEmbyPage() {
                 </p>
               </div>
               <Button
+                className="w-full sm:w-auto"
                 variant="destructive"
                 onClick={() => setResetDialogOpen(true)}
                 disabled={isResetting}

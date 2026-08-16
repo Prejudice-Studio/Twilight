@@ -106,22 +106,22 @@ export function Header() {
                 )}
               </nav>
 
-              <div className="grid grid-cols-3 gap-2 border-t bg-background/95 p-4">
-                <GithubProjectLink className="col-span-3" />
+              <div className="grid grid-cols-2 gap-2 border-t bg-background/95 p-4 sm:grid-cols-3">
+                <GithubProjectLink className="col-span-2 sm:col-span-3" />
                 <ThemeSwitcher
                   align="center"
                   showLabel
-                  className="h-11 w-full min-w-0 justify-center"
+                  className="min-h-11 w-full min-w-0 justify-center"
                   onModeChange={() => setMobileOpen(false)}
                 />
                 <LocaleSwitcher
                   align="center"
-                  className="h-11 w-full justify-center px-2"
+                  className="min-h-11 w-full min-w-0 justify-center px-2"
                   onLocaleChange={() => setMobileOpen(false)}
                 />
                 <Button
                   variant="outline"
-                  className="h-11 w-full min-w-0"
+                  className="col-span-2 min-h-11 w-full min-w-0 sm:col-span-1"
                   aria-label={t("common.logout")}
                   onClick={() => {
                     setMobileOpen(false);
