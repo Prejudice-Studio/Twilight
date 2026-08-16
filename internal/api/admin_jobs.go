@@ -31,6 +31,7 @@ func (a *App) enforceTelegramMembership(ctx context.Context, autoEnableRejoined 
 		"enabled": false, "telegram_available": a.telegramAvailable(), "groups": chats,
 		"scanned": 0, "disabled": 0, "emby_disabled": 0, "banned": 0, "rejoined_enabled": 0,
 		"rejoined_pending_review": 0, "rejoin_candidates": 0, "skipped": 0, "failed": 0,
+		"rebind_protected": 0, "rebind_pending": 0, "rebind_approved": 0, "rebinding_in_progress": 0,
 		"auto_enable_rejoined": autoEnableRejoined,
 	}
 	rejoinCandidates := []map[string]any{}
@@ -48,6 +49,7 @@ func (a *App) enforceTelegramMembership(ctx context.Context, autoEnableRejoined 
 	candidates := []store.User{}
 	uniqueTelegramIDs := []int64{}
 	seenTelegramIDs := map[int64]bool{}
+	rebindProtections := a.store().TelegramMembershipRebindProtections()
 	for _, u := range a.store().ListUsers() {
 		if err := ctx.Err(); err != nil {
 			result["terminated"] = true
@@ -55,6 +57,13 @@ func (a *App) enforceTelegramMembership(ctx context.Context, autoEnableRejoined 
 		}
 		if u.TelegramID == 0 || a.userIsProtected(u) {
 			result["skipped"] = int(numeric(result["skipped"])) + 1
+			continue
+		}
+		if reason := rebindProtections[u.UID]; reason != "" {
+			recordTelegramMembershipRebindProtection(result, reason)
+			if len(logs) < 50 {
+				logs = append(logs, fmt.Sprintf("rebind-protected uid=%d username=%s state=%s", u.UID, u.Username, reason))
+			}
 			continue
 		}
 		result["scanned"] = int(numeric(result["scanned"])) + 1
@@ -100,9 +109,19 @@ func (a *App) enforceTelegramMembership(ctx context.Context, autoEnableRejoined 
 			continue
 		}
 		if u.Active && len(missing) > 0 {
-			updated, err := a.store().SetUserActiveAtomic(u.UID, false)
+			updated, disabledNow, rebindReason, err := a.store().DisableUserForTelegramMembership(u.UID)
 			if err != nil {
 				result["failed"] = int(numeric(result["failed"])) + 1
+				continue
+			}
+			if rebindReason != "" {
+				recordTelegramMembershipRebindProtection(result, rebindReason)
+				if len(logs) < 50 {
+					logs = append(logs, fmt.Sprintf("rebind-protected before disable uid=%d username=%s state=%s", updated.UID, updated.Username, rebindReason))
+				}
+				continue
+			}
+			if !disabledNow {
 				continue
 			}
 			// 立即清除该用户所有 session（redis + memory + PG）。否则 stale token
@@ -153,6 +172,19 @@ func (a *App) enforceTelegramMembership(ctx context.Context, autoEnableRejoined 
 		result["rejoin_candidate_users"] = rejoinCandidates
 	}
 	return result, logs, nil
+}
+
+func recordTelegramMembershipRebindProtection(result map[string]any, reason string) {
+	result["skipped"] = int(numeric(result["skipped"])) + 1
+	result["rebind_protected"] = int(numeric(result["rebind_protected"])) + 1
+	switch reason {
+	case "pending":
+		result["rebind_pending"] = int(numeric(result["rebind_pending"])) + 1
+	case "approved":
+		result["rebind_approved"] = int(numeric(result["rebind_approved"])) + 1
+	case "in_progress":
+		result["rebinding_in_progress"] = int(numeric(result["rebinding_in_progress"])) + 1
+	}
 }
 
 func (a *App) telegramMembershipCheckConcurrency(total int) int {

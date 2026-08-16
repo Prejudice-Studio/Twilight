@@ -2368,6 +2368,103 @@ func (s *Store) SetUserActiveAtomic(uid int64, active bool) (User, error) {
 	return updated, nil
 }
 
+// TelegramMembershipRebindProtections returns users whose Telegram group
+// membership checks must pause while a legitimate rebind workflow is active.
+// Pending and approved requests are both actionable workflow states; an
+// in-progress rebind is tracked directly on the user after the old binding is
+// consumed. Callers must still re-check immediately before a destructive
+// change because a request can be submitted after this snapshot is read.
+func (s *Store) TelegramMembershipRebindProtections() map[int64]string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	protected := make(map[int64]string)
+	for _, req := range s.state.RebindRequests {
+		if req.UID == 0 || (req.Status != "pending" && req.Status != "approved") {
+			continue
+		}
+		if req.Status == "pending" || protected[req.UID] == "" {
+			protected[req.UID] = req.Status
+		}
+	}
+	for uid, user := range s.state.Users {
+		if user.RebindingInProgress {
+			protected[uid] = "in_progress"
+		}
+	}
+	return protected
+}
+
+// DisableUserForTelegramMembership disables a user only when no rebind
+// workflow is active at the exact mutation point. It is deliberately separate
+// from SetUserActiveAtomic: group-membership enforcement has a rebind-specific
+// safety exception, while administrator and expiry actions must remain able to
+// disable accounts normally.
+func (s *Store) DisableUserForTelegramMembership(uid int64) (User, bool, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var (
+		updated          User
+		disabled         bool
+		protectionReason string
+	)
+	err := s.mutateAndSaveLocked(func() error {
+		u, ok := s.state.Users[uid]
+		if !ok {
+			return ErrNotFound
+		}
+		updated = u
+		if reason := s.telegramMembershipRebindProtectionLocked(uid, u); reason != "" {
+			protectionReason = reason
+			return errTelegramMembershipRebindProtected
+		}
+		if !u.Active {
+			return errTelegramMembershipNoChange
+		}
+		if u.Role == RoleAdmin {
+			others := 0
+			for _, other := range s.state.Users {
+				if other.UID != u.UID && other.Role == RoleAdmin && other.Active {
+					others++
+				}
+			}
+			if others == 0 {
+				return ErrLastAdmin
+			}
+		}
+		u.Active = false
+		s.state.Users[uid] = u
+		updated = u
+		disabled = true
+		return nil
+	})
+	if errors.Is(err, errTelegramMembershipRebindProtected) || errors.Is(err, errTelegramMembershipNoChange) {
+		return updated, false, protectionReason, nil
+	}
+	if err != nil {
+		return User{}, false, "", err
+	}
+	return updated, disabled, "", nil
+}
+
+// telegramMembershipRebindProtectionLocked is intentionally a final, local
+// scan. The outer scheduler uses the bulk snapshot for speed; this lock-held
+// check closes the submit-request versus disable-account race.
+func (s *Store) telegramMembershipRebindProtectionLocked(uid int64, user User) string {
+	if user.RebindingInProgress {
+		return "in_progress"
+	}
+	reason := ""
+	for _, req := range s.state.RebindRequests {
+		if req.UID != uid || (req.Status != "pending" && req.Status != "approved") {
+			continue
+		}
+		if req.Status == "pending" || reason == "" {
+			reason = req.Status
+		}
+	}
+	return reason
+}
+
 // BindUserTelegramAtomic 同把锁内：唯一性校验 + admin 自保 + 写入。
 // 解决 handleAdminBindTelegram 闭包外 FindUserByTelegramID 与 UpdateUser
 // 闭包写之间的 TOCTOU。
@@ -4944,6 +5041,11 @@ var (
 // 则 fail-closed 上抛（这些路径的调用方要么丢弃错误、要么可安全重试），
 // 绝不再走「盲写整份 jsonb 覆盖他进程刚提交的写」的丢更新老路。
 var errStateVersionConflict = errors.New("state version conflict")
+
+var (
+	errTelegramMembershipRebindProtected = errors.New("telegram membership rebind protected")
+	errTelegramMembershipNoChange        = errors.New("telegram membership no change")
+)
 
 func randomKey(prefix string, id, now int64) string {
 	return prefix + "_" + strconv36(id) + "_" + strconv36(now)

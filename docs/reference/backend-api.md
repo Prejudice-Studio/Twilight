@@ -709,7 +709,7 @@ curl -X DELETE "http://localhost:5000/api/v1/users/me/devices/abc123" \
 
 `POST /users/me/telegram/rebind-request`
 
-- 说明：发起换绑申请，进入管理员审核队列。
+- 说明：发起换绑申请，进入管理员审核队列。处于待审核、已批准待解绑或正在换绑状态的用户会暂时跳过定时 Telegram 群成员巡检的自动 Web/Emby 禁用；账号到期处理不受影响。
 - 认证：登录用户（`AuthUser`）
 - 限流：UID，3 / 1 小时
 
