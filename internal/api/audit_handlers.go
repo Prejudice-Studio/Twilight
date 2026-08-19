@@ -32,6 +32,14 @@ var (
 		"login", "logout", "password", "role", "telegram", "developer",
 		"security", "audit", "violation", "ip", "device", "apikey",
 	}
+	// fallbackAuditActionReplacer 把 fallback 审计 action 名里的路径分隔符与
+	// 花括号替换为下划线 / 空串。原实现在每次调用 fallbackAuditAction 时新建
+	// Replacer（内部会分配字符串切片），现提升为包级变量。
+	fallbackAuditActionReplacer = strings.NewReplacer("/", "_", "-", "_", ":", "", "{", "", "}", "")
+	// auditSensitiveDetailKeyReplacer 是 auditSensitiveDetailKey 的字段名归一化表：
+	// 除 sensitiveLogKeyReplacer 剥的 `_`/`-`/`.` 外还额外剥空格（如 "Verification Code"）。
+	// 原实现在每次调用时新建 Replacer，现提升为包级变量。
+	auditSensitiveDetailKeyReplacer = strings.NewReplacer("_", "", "-", "", ".", "", " ", "")
 )
 
 // audit 是写入操作审计日志的便捷方法。category 为 "admin" / "user" / "system"。
@@ -144,8 +152,7 @@ func shouldFallbackAuditHTTPMutation(r *http.Request, route *Route, status int) 
 
 func fallbackAuditAction(route *Route) string {
 	pattern := strings.TrimPrefix(route.Pattern, "/api/v1/")
-	replacer := strings.NewReplacer("/", "_", "-", "_", ":", "", "{", "", "}", "")
-	return strings.ToLower(route.Method) + "_" + replacer.Replace(strings.Trim(pattern, "/"))
+	return strings.ToLower(route.Method) + "_" + fallbackAuditActionReplacer.Replace(strings.Trim(pattern, "/"))
 }
 
 func safeAuditTargetUID(params Params) int64 {
@@ -431,7 +438,7 @@ func auditSensitiveDetailKey(key string) bool {
 	if sensitiveLogKey(key) {
 		return true
 	}
-	normalized := strings.NewReplacer("_", "", "-", "", ".", "", " ", "").Replace(strings.ToLower(key))
+	normalized := auditSensitiveDetailKeyReplacer.Replace(strings.ToLower(key))
 	if normalized == "code" || normalized == "codes" || normalized == "credential" || normalized == "credentials" {
 		return true
 	}

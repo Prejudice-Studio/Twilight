@@ -34,6 +34,10 @@ const (
 	telegramJSProgramCacheLimit = 32
 )
 
+// telegramJSHTMLReplacer 是开发者 JS 文本 API 里 escape() 的 HTML 转义表。
+// 原实现在每次调用时新建 Replacer，现提升为包级变量消除重复分配。
+var telegramJSHTMLReplacer = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+
 type telegramJSProgramCache map[[sha256.Size]byte]*goja.Program
 
 type developerJSRunOptions struct {
@@ -1652,7 +1656,7 @@ func developerJSTextAPI(vm *goja.Runtime) map[string]any {
 			return vm.ToValue(strings.Join(items, "\n"))
 		},
 		"escape": func(call goja.FunctionCall) goja.Value {
-			value := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(call.Argument(0).String())
+			value := telegramJSHTMLReplacer.Replace(call.Argument(0).String())
 			return vm.ToValue(value)
 		},
 		"numberLines": func(call goja.FunctionCall) goja.Value {

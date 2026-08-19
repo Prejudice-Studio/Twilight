@@ -59,6 +59,12 @@ var (
 	keyPattern             = regexp.MustCompile(`key-[A-Za-z0-9._~+/=-]{12,}`)
 )
 
+// sensitiveLogKeyReplacer 把敏感字段名的 `_` / `-` / `.` 剥掉后做小写匹配，
+// 供 sensitiveLogKey 使用。原实现在每次调用时新建 Replacer（字符串切片装箱），
+// 现提升为包级变量。注意：sensitiveLogKey 历史上不剥空格，与
+// auditSensitiveDetailKey（剥空格）口径不同，故两处各自保留独立 Replacer。
+var sensitiveLogKeyReplacer = strings.NewReplacer("_", "", "-", "", ".", "")
+
 type runtimeLogSink struct {
 	mu       sync.RWMutex
 	cond     *sync.Cond
@@ -489,7 +495,7 @@ func zapFieldValueString(field zapcore.Field) string {
 }
 
 func sensitiveLogKey(key string) bool {
-	normalized := strings.NewReplacer("_", "", "-", "", ".", "").Replace(strings.ToLower(key))
+	normalized := sensitiveLogKeyReplacer.Replace(strings.ToLower(key))
 	return normalized == "key" ||
 		strings.Contains(normalized, "authorization") ||
 		strings.Contains(normalized, "cookie") ||

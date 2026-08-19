@@ -78,18 +78,21 @@ func normalizeTMDBMediaType(mediaType string) string {
 	}
 }
 
+// mediaIDPatterns 是 detectMediaID 的静态正则表：请求热路径上不再每次调用
+// 重建 4 个 *regexp.Regexp 与一个匿名结构切片。detectMediaID 只读不改。
+var mediaIDPatterns = []struct {
+	re     *regexp.Regexp
+	source string
+}{
+	{regexp.MustCompile(`(?i)themoviedb\.org/(movie|tv)/(\d+)`), "tmdb"},
+	{regexp.MustCompile(`(?i)^tmdb:(?:(movie|tv):)?(\d+)$`), "tmdb"},
+	{regexp.MustCompile(`(?i)(?:bgm\.tv|bangumi\.tv)/subject/(\d+)`), "bangumi"},
+	{regexp.MustCompile(`(?i)^bgm:(\d+)$`), "bangumi"},
+}
+
 func detectMediaID(query string) (source, id, mediaType string, ok bool) {
 	query = strings.TrimSpace(query)
-	patterns := []struct {
-		re     *regexp.Regexp
-		source string
-	}{
-		{regexp.MustCompile(`(?i)themoviedb\.org/(movie|tv)/(\d+)`), "tmdb"},
-		{regexp.MustCompile(`(?i)^tmdb:(?:(movie|tv):)?(\d+)$`), "tmdb"},
-		{regexp.MustCompile(`(?i)(?:bgm\.tv|bangumi\.tv)/subject/(\d+)`), "bangumi"},
-		{regexp.MustCompile(`(?i)^bgm:(\d+)$`), "bangumi"},
-	}
-	for _, pattern := range patterns {
+	for _, pattern := range mediaIDPatterns {
 		m := pattern.re.FindStringSubmatch(query)
 		if len(m) == 0 {
 			continue
