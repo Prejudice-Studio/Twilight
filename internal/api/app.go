@@ -1067,6 +1067,8 @@ func (a *App) applyCORS(w http.ResponseWriter, r *http.Request) bool {
 	if origin == "" {
 		return false
 	}
+	// origin 已在入口规范化一次；下面三个判定（白名单 / 同源 / 宽松反射）都
+	// 直接消费这份规范化结果，不再各自重复 url.Parse + strings.ToLower。
 	allowed := a.corsOriginAllowed(origin) || a.corsOriginMatchesHost(origin, r) || a.corsOriginRelaxed()
 	if !allowed {
 		return false
@@ -1085,14 +1087,17 @@ func (a *App) applyCORS(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// corsOriginAllowed reports whether a normalized origin is present in the
+// configured allowlist. The origin must already be normalized (applyCORS does
+// this once); it is re-checked defensively for the `*` sentinel which is never a
+// concrete match.
 func (a *App) corsOriginAllowed(origin string) bool {
-	origin = normalizeCORSOrigin(origin)
 	if origin == "" || origin == "*" {
 		return false
 	}
 	for _, candidate := range a.cfg().CORSOrigins {
 		candidate = strings.TrimSpace(candidate)
-		if candidate == "*" {
+		if candidate == "" || candidate == "*" {
 			continue
 		}
 		if strings.EqualFold(normalizeCORSOrigin(candidate), origin) {
@@ -1117,11 +1122,8 @@ func (a *App) corsOriginRelaxed() bool {
 // as scheme://host[:port]. This preserves the pre-98b1c3d same-host CORS
 // behavior for deployments where browsers send an Origin header on same-origin
 // requests even though the API host is not duplicated in cors_origins.
+// The origin is already normalized by applyCORS.
 func (a *App) corsOriginMatchesHost(origin string, r *http.Request) bool {
-	normalized := normalizeCORSOrigin(origin)
-	if normalized == "" {
-		return false
-	}
 	host := strings.TrimSpace(r.Host)
 	if host == "" {
 		return false
@@ -1131,7 +1133,7 @@ func (a *App) corsOriginMatchesHost(origin string, r *http.Request) bool {
 		scheme = "http"
 	}
 	hostOrigin := scheme + "://" + host
-	return strings.EqualFold(normalized, hostOrigin)
+	return strings.EqualFold(origin, hostOrigin)
 }
 
 func requireWebUIIntent(w http.ResponseWriter, r *http.Request, intent string) bool {
