@@ -212,9 +212,9 @@ func (a *App) RunTelegramBot(ctx context.Context) error {
 		}
 		a.setTelegramRuntimeStatus(true, nil)
 		batchOffset := offset
-		for _, update := range updates {
-			if update.UpdateID >= offset {
-				offset = update.UpdateID + 1
+		for i := range updates {
+			if updates[i].UpdateID >= offset {
+				offset = updates[i].UpdateID + 1
 			}
 		}
 		if !a.handleTelegramUpdateBatch(ctx, updates) {
