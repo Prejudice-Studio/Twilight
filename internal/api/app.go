@@ -1034,7 +1034,10 @@ func current(r *http.Request) principal {
 }
 
 func bearerToken(header string) string {
-	if strings.HasPrefix(strings.ToLower(header), "bearer ") {
+	// 大小写不敏感的 "bearer " 前缀校验：先做长度剪枝，再用 EqualFold 只比较
+	// 前 7 字节，避免对整段 Authorization 头做一次 strings.ToLower 分配（原
+	// strings.ToLower(header) 会复制整个头）。只有确为 bearer 才切出 token。
+	if len(header) > len("bearer ") && strings.EqualFold(header[:len("bearer ")], "bearer ") {
 		return strings.TrimSpace(header[len("bearer "):])
 	}
 	return ""
