@@ -81,7 +81,21 @@ func requestAuditWritten(r *http.Request) bool {
 	return state != nil && state.wrote.Load()
 }
 
+// auditHTTPMutationConfigured reports whether HTTP mutation fallback audit is
+// enabled this request. It's the cheap gate used by maybeAuditHTTPMutation before
+// any route-shape work; writeAuditEntry enforces the same switch at persist time.
+func (a *App) auditHTTPMutationConfigured() bool {
+	return a.cfg().AuditLogEnabled
+}
+
 func (a *App) maybeAuditHTTPMutation(r *http.Request, route *Route, params Params, p *principal, status int) {
+	// 审计总开关关闭时，本次请求的 fallback 审计已无意义，直接短路。
+	// 配置在每请求只读一次（auditHTTPMutationConfigured，见 writeAuditEntry 对
+	// AuditLogEnabled 的同口径）；关闭期间热路径不再为「是否该补审计」反复装配
+	// safeAuditTargetUID / fallbackAuditAction 的临时对象。
+	if !a.auditHTTPMutationConfigured() {
+		return
+	}
 	if route == nil || !shouldFallbackAuditHTTPMutation(r, route, status) || requestAuditWritten(r) {
 		return
 	}
