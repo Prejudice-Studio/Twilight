@@ -55,7 +55,7 @@ func (a *App) getBangumi(ctx context.Context, id string) (map[string]any, error)
 		return nil, err
 	}
 	var payload map[string]any
-	if err := getJSON(ctx, endpoint, a.bangumiHeaders(), &payload); err != nil {
+	if err := getJSON(ctx, endpoint, a.bangumiSearchHeaders(), &payload); err != nil {
 		return nil, err
 	}
 	return bangumiToMedia(payload), nil

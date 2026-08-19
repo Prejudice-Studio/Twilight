@@ -103,7 +103,7 @@ bangumi_app_id = ""
 
 | 配置键 | 后端字段 | 默认值 | 用途 |
 | --- | --- | --- | --- |
-| `Global.bangumi_token` | `BangumiToken` | 空 | 求片调用 Bangumi API 时作为 `Authorization: Bearer` 凭据 |
+| `Global.bangumi_token` | `BangumiToken` | 空 | Bangumi 同步链路（`/users/-/collections` 等私有端点）的 `Authorization: Bearer` 凭据；求片搜索 / 详情不使用 |
 | `Global.bangumi_api_url` | `BangumiAPIURL` | `https://api.bgm.tv/v0` | Bangumi API 基址（出站请求受 SSRF 校验约束） |
 | `Global.bangumi_app_id` | `BangumiAppID` | 空 | Bangumi 应用 ID（保留字段） |
 
@@ -436,7 +436,7 @@ Webhook 期望接收 JSON 通知。后端从负载中按以下规则解析：
 - 路由 `GET /api/v1/media/search/bangumi`（`AuthUser`）与 `GET /api/v1/media/bangumi/:bgm_id`（`AuthUser`）。
 - 搜索请求 `POST {BangumiAPIURL}/search/subjects`，`filter.type` 取 `[2, 6]`（动画 / 三次元），允许 NSFW，按 `match` 排序。
 - 详情请求 `GET {BangumiAPIURL}/subjects/{id}`，`id` 必须为正整数。
-- 凭据为 `Global.bangumi_token`（若配置则加 `Authorization: Bearer`），与用户个人 Token 无关。
+- 搜索与详情为无需鉴权的公开端点，不带任何 `Authorization`（见下方「求片搜索与 Token」）；`Global.bangumi_token` 仅供同步链路访问 `/users/-/collections` 等私有端点时使用。
 
 返回结果被规整为统一媒体结构，包含标题（优先 `name_cn`）、海报、类型（书籍 / 动画 / 音乐 / 游戏 / 三次元）、简介、首播日期、评分、标签等。
 
