@@ -2749,26 +2749,57 @@ func (s *Store) DeleteUser(uid int64) error {
 }
 
 func (s *Store) ListUsers() []User {
+	return s.UsersMatching(0, nil)
+}
+
+// UsersMatching 按 UID 升序遍历所有用户，对每个用户调用 matches；matches 为 nil
+// 等价于全量返回。命中即 append 到 out，超过 limit 时提前返回（limit<=0 表示不限）。
+// 相较 ListUsers 先构造整份 []User 切片再让调用方二次过滤，本方法在满足 matches
+// 的用户达到 limit 时即可停止，省去无关用户的一次整份切片拷贝与残留分配。
+//
+// 顺序与 ListUsers 完全一致（userUIDs 缓存已按 UID 升序；缓存失效时回退到
+// map 全量 + 排序，同样升序）。调用方必须在 store 锁外使用返回的 User 副本。
+func (s *Store) UsersMatching(limit int, matches func(User) bool) []User {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if limit <= 0 {
+		limit = len(s.state.Users)
+	}
 	if len(s.userUIDs) == len(s.state.Users) {
-		users := make([]User, 0, len(s.userUIDs))
+		out := make([]User, 0, min(limit, len(s.userUIDs)))
 		for _, uid := range s.userUIDs {
-			if u, ok := s.state.Users[uid]; ok {
-				users = append(users, u)
+			u, ok := s.state.Users[uid]
+			if !ok {
+				continue
+			}
+			if matches != nil && !matches(u) {
+				continue
+			}
+			out = append(out, u)
+			if len(out) >= limit {
+				return out
 			}
 		}
-		if len(users) == len(s.state.Users) {
-			return users
-		}
+		return out
 	}
 
+	// 索引修复回退：userUIDs 暂时不可用时仍保序（按 UID 升序）。
 	users := make([]User, 0, len(s.state.Users))
 	for _, u := range s.state.Users {
 		users = append(users, u)
 	}
 	sort.Slice(users, func(i, j int) bool { return users[i].UID < users[j].UID })
-	return users
+	out := make([]User, 0, min(limit, len(users)))
+	for _, u := range users {
+		if matches != nil && !matches(u) {
+			continue
+		}
+		out = append(out, u)
+		if len(out) >= limit {
+			return out
+		}
+	}
+	return out
 }
 
 type UserIdentitySearchField uint8

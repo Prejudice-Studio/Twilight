@@ -14,7 +14,6 @@ import (
 )
 
 func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request, _ Params) {
-	users := a.store().ListUsers()
 	page := max(1, queryInt(r, "page", 1))
 	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
 	query := r.URL.Query()
@@ -30,11 +29,13 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request, _ Params)
 		search:            strings.ToLower(strings.TrimSpace(query.Get("search"))),
 		now:               time.Now().Unix(),
 	}
-	items := make([]map[string]any, 0, len(users))
-	for _, u := range users {
-		if !adminUserMatchesListFilters(u, filter) {
-			continue
-		}
+	// 只在筛选中保留匹配用户（无 limit，与旧 ListUsers 语义一致），避免先复制整份
+	// []User 再二次过滤的额外整切片分配。排序/分页仍由下方 sortUsers + paginate 完成。
+	matched := a.store().UsersMatching(0, func(u store.User) bool {
+		return adminUserMatchesListFilters(u, filter)
+	})
+	items := make([]map[string]any, 0, len(matched))
+	for _, u := range matched {
 		items = append(items, publicUserAt(u, filter.now))
 	}
 	sortUsers(items, query.Get("sort"))

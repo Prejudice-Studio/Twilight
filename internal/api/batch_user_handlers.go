@@ -524,17 +524,20 @@ func (a *App) filteredBatchUserUIDs(payload map[string]any, limit int) ([]int64,
 	}
 	uids := []int64{}
 	matched := 0
-	for _, u := range a.store().ListUsers() {
+	// 只借用 UsersMatching 的「按 UID 升序 + 避免 ListUsers 整份拷贝」遍历，不消费
+	// 它返回的匹配切片：始终返回 false 让 out 保持空，计数与收集都在闭包内完成。
+	a.store().UsersMatching(0, func(u store.User) bool {
 		if !adminUserMatchesListFilters(u, listFilter) {
-			continue
+			return false
 		}
 		if _, skip := excluded[u.UID]; skip {
-			continue
+			return false
 		}
 		matched++
 		if limit <= 0 || len(uids) < limit {
 			uids = append(uids, u.UID)
 		}
-	}
+		return false
+	})
 	return uids, matched
 }
