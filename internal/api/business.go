@@ -1022,9 +1022,9 @@ func sortUsers(items []map[string]any, sortKey string) {
 	case "uid_desc", "":
 		sort.Slice(items, func(i, j int) bool { return numeric(items[i]["uid"]) > numeric(items[j]["uid"]) })
 	case "username_asc":
-		sort.Slice(items, func(i, j int) bool { return fmt.Sprint(items[i]["username"]) < fmt.Sprint(items[j]["username"]) })
+		sort.Slice(items, func(i, j int) bool { return asString(items[i]["username"]) < asString(items[j]["username"]) })
 	case "username_desc":
-		sort.Slice(items, func(i, j int) bool { return fmt.Sprint(items[i]["username"]) > fmt.Sprint(items[j]["username"]) })
+		sort.Slice(items, func(i, j int) bool { return asString(items[i]["username"]) > asString(items[j]["username"]) })
 	case "register_time_desc", "created_desc":
 		sort.Slice(items, func(i, j int) bool { return numeric(items[i]["register_time"]) > numeric(items[j]["register_time"]) })
 	case "register_time_asc", "created_asc":
