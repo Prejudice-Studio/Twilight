@@ -40,8 +40,8 @@ func (a *App) searchTMDB(ctx context.Context, query, mediaType string, limit int
 	}
 	mediaType = normalizeTMDBMediaType(mediaType)
 	endpoint := base + "/search/multi"
-	if mediaType == "movie" || mediaType == "tv" {
-		endpoint = base + "/search/" + mediaType
+	if specific := tmdbSearchMediaType(mediaType); specific != "" {
+		endpoint = base + "/search/" + specific
 	}
 	q := url.Values{"api_key": {a.cfg().TMDBAPIKey}, "language": {"zh-CN"}, "query": {query}}
 	var payload map[string]any

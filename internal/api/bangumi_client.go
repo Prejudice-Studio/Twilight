@@ -22,7 +22,7 @@ func (a *App) searchBangumi(ctx context.Context, query string, limit int) ([]map
 		"filter":  map[string]any{"type": []int{2, 6}, "nsfw": true},
 	}
 	var payload map[string]any
-	if err := postJSON(ctx, endpoint, a.bangumiHeaders(), body, &payload); err != nil {
+	if err := postJSON(ctx, endpoint, a.bangumiSearchHeaders(), body, &payload); err != nil {
 		return nil, err
 	}
 	rows, _ := payload["data"].([]any)
@@ -34,6 +34,16 @@ func (a *App) searchBangumi(ctx context.Context, query string, limit int) ([]map
 		}
 	}
 	return results, nil
+}
+
+// bangumiSearchHeaders 为求片搜索单独拼 headers：只带基本 UA，不带全局 Token。
+// bangumi 的 search/subjects 是无需鉴权的公开端点，而同步链路会把管理员配置的
+// BangumiToken 复用为 Authorization（用于 /users/-/collections 等私有端点）。
+// 若该 token 过期 / 无效，search/subjects 反而返回 401 使整个求片搜索失败。
+// 求片搜索无需登录态，干脆不带凭据，既根治"过期 token 拖垮搜索"，也避免把
+// 管理员 token 无谓地发到搜索端点。
+func (a *App) bangumiSearchHeaders() map[string]string {
+	return map[string]string{"User-Agent": "Twilight/1.0", "Accept": "application/json"}
 }
 
 func (a *App) getBangumi(ctx context.Context, id string) (map[string]any, error) {

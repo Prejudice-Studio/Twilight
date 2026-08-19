@@ -108,6 +108,17 @@ func detectMediaID(query string) (source, id, mediaType string, ok bool) {
 	return "", "", "", false
 }
 
+// tmdbSearchMediaType 判断调用方指定的媒体类型是否足够具体，供 searchTMDB 选择
+// /search/movie 还是 /search/multi。mediaType 为空或"未知"时不限定。
+func tmdbSearchMediaType(mediaType string) string {
+	switch strings.ToLower(strings.TrimSpace(mediaType)) {
+	case "movie", "tv":
+		return strings.ToLower(strings.TrimSpace(mediaType))
+	default:
+		return ""
+	}
+}
+
 func mediaResultFromFields(source, id, title, mediaType, poster string) map[string]any {
 	parsedID, _ := strconv.ParseInt(id, 10, 64)
 	if title == "" {

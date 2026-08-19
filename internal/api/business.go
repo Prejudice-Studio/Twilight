@@ -1538,6 +1538,14 @@ func asString(value any) string {
 		return v
 	case nil:
 		return ""
+	case float64:
+		// 媒体 ID 走 JSON 反序列化后是 float64；fmt.Sprint 对 ≥1e6 的整数会
+		// 输出科学计数法（如 1.2345678e+07），拼接进 URL / source_url / 搜索
+		// 关键词后破坏语义。整值浮点用无指数 'f' 格式化，非整值回退 fmt.Sprint。
+		if v == float64(int64(v)) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+		return fmt.Sprint(v)
 	default:
 		return fmt.Sprint(v)
 	}
