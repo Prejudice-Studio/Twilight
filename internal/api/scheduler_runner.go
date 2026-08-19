@@ -697,6 +697,15 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		summary["failed"] = failedCount
 		summary["not_in_group"] = notInGroup
 		summary["scanned"] = scanned
+		// 一键踢未绑（退群/无账号）同样属于封禁类副作用，计入系统日志供管理员复核。
+		if kicked > 0 {
+			a.auditSystem("scheduler", "kick_unbound_group_members", 0, map[string]any{
+				"kicked":  kicked,
+				"skipped": skipped,
+				"failed":  failedCount,
+				"chat_id": chats[0],
+			})
+		}
 		return summary, logs, nil
 	case "cleanup_emby_devices":
 		result, logs, err := a.cleanupEmbyDevices(r.Context(), embyDeviceCleanupOptions{

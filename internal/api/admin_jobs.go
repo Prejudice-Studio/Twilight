@@ -49,6 +49,7 @@ func (a *App) enforceTelegramMembership(ctx context.Context, autoEnableRejoined 
 	candidates := []store.User{}
 	uniqueTelegramIDs := []int64{}
 	seenTelegramIDs := map[int64]bool{}
+	bannedUsers := []map[string]any{}
 	rebindProtections := a.store().TelegramMembershipRebindProtections()
 	for _, u := range a.store().ListUsers() {
 		if err := ctx.Err(); err != nil {
@@ -137,6 +138,7 @@ func (a *App) enforceTelegramMembership(ctx context.Context, autoEnableRejoined 
 				for _, chatID := range chats {
 					if err := a.telegramBanChatMember(ctx, chatID, updated.TelegramID); err == nil {
 						result["banned"] = int(numeric(result["banned"])) + 1
+						bannedUsers = append(bannedUsers, map[string]any{"uid": updated.UID, "username": updated.Username, "telegram_id": updated.TelegramID, "chat_id": chatID})
 					}
 				}
 			}
@@ -170,6 +172,13 @@ func (a *App) enforceTelegramMembership(ctx context.Context, autoEnableRejoined 
 	}
 	if len(rejoinCandidates) > 0 {
 		result["rejoin_candidate_users"] = rejoinCandidates
+	}
+	// 退群封禁属于安全敏感的系统副作用，必须计入系统日志（审计）供管理员追查。
+	if len(bannedUsers) > 0 {
+		a.auditSystem("scheduler", "ban_telegram_users_on_leave", 0, map[string]any{
+			"banned": int(numeric(result["banned"])),
+			"users":  bannedUsers,
+		})
 	}
 	return result, logs, nil
 }
