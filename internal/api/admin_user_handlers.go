@@ -17,16 +17,17 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request, _ Params)
 	users := a.store().ListUsers()
 	page := max(1, queryInt(r, "page", 1))
 	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
+	query := r.URL.Query()
 	filter := adminUserListFilter{
-		roleFilter:        r.URL.Query().Get("role"),
-		hasRole:           r.URL.Query().Get("role") != "",
-		activeFilter:      r.URL.Query().Get("active"),
-		hasActive:         r.URL.Query().Get("active") != "",
+		roleFilter:        query.Get("role"),
+		hasRole:           query.Get("role") != "",
+		activeFilter:      query.Get("active"),
+		hasActive:         query.Get("active") != "",
 		strictQueryActive: true,
-		embyFilter:        strings.ToLower(strings.TrimSpace(r.URL.Query().Get("emby"))),
-		embyStatusFilter:  strings.ToLower(strings.TrimSpace(r.URL.Query().Get("emby_status"))),
-		emailFilter:       strings.ToLower(strings.TrimSpace(r.URL.Query().Get("email_status"))),
-		search:            strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search"))),
+		embyFilter:        strings.ToLower(strings.TrimSpace(query.Get("emby"))),
+		embyStatusFilter:  strings.ToLower(strings.TrimSpace(query.Get("emby_status"))),
+		emailFilter:       strings.ToLower(strings.TrimSpace(query.Get("email_status"))),
+		search:            strings.ToLower(strings.TrimSpace(query.Get("search"))),
 		now:               time.Now().Unix(),
 	}
 	items := make([]map[string]any, 0, len(users))
@@ -36,7 +37,7 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request, _ Params)
 		}
 		items = append(items, publicUser(u))
 	}
-	sortUsers(items, r.URL.Query().Get("sort"))
+	sortUsers(items, query.Get("sort"))
 	total := len(items)
 	items = paginate(items, page, perPage)
 	ok(w, "OK", map[string]any{"users": items, "total": total, "page": page, "per_page": perPage, "pages": pages(total, perPage)})

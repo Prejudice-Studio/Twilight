@@ -1002,9 +1002,11 @@ func (a *App) authenticateAPIKey(r *http.Request) (*principal, bool) {
 			key = strings.TrimSpace(auth[len("apikey "):])
 		}
 	}
-	if key == "" && r.URL.Query().Get("apikey") != "" {
-		key = strings.TrimSpace(r.URL.Query().Get("apikey"))
-		fromQuery = true
+	if key == "" {
+		if raw := r.URL.Query().Get("apikey"); raw != "" {
+			key = strings.TrimSpace(raw)
+			fromQuery = true
+		}
 	}
 	if key == "" {
 		return nil, false
