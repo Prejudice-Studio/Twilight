@@ -55,10 +55,14 @@ func (a *App) searchTMDB(ctx context.Context, query, mediaType string, limit int
 		if item == nil {
 			continue
 		}
-		mt := firstNonEmpty(fmt.Sprint(item["media_type"]), mediaType, "movie")
-		if mt == "person" {
+		// /search/multi 会混入 person 结果；/search/movie 与 /search/tv 结果里
+		// 通常没有 media_type 字段。先按原始 media_type 过滤 person，再落到
+		// 搜索时指定的媒体类型（多源搜索时 mediaType 为空，默认 movie）。
+		rawMT := strings.ToLower(strings.TrimSpace(asString(item["media_type"])))
+		if rawMT == "person" {
 			continue
 		}
+		mt := normalizeTMDBMediaType(firstNonEmpty(rawMT, mediaType, "movie"))
 		results = append(results, tmdbToMedia(item, mt, a.cfg().TMDBImageURL))
 		if len(results) >= limit {
 			break
