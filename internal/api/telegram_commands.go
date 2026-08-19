@@ -456,8 +456,8 @@ func (a *App) telegramHandleBroadcast(ctx context.Context, chatID, fromID int64,
 	_ = a.telegramSendMessage(ctx, chatID, "广播完成。已发送 "+fmt.Sprintf("%d", sent)+" 人，失败 "+fmt.Sprintf("%d", failed)+" 人。")
 	// 管理员广播是面向全体用户的通知副作用，计入系统日志（审计）供管理员复核。
 	a.auditTelegramAction(fromID, "broadcast_via_telegram", "admin", 0, map[string]any{
-		"sent":         sent,
-		"failed":       failed,
+		"sent":          sent,
+		"failed":        failed,
 		"message_chars": len(message),
 	})
 }

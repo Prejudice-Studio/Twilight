@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/prejudice-studio/twilight/internal/store"
 	"go.uber.org/zap"
@@ -439,7 +440,14 @@ func paginate[T any](items []T, page, perPage int) []T {
 }
 
 func truncateString(value string, limit int) string {
-	if limit <= 0 || len([]rune(value)) <= limit {
+	// 快速路径：字节长度已 <= limit 时（ASCII 占绝大多数），rune 数必然 <= limit，
+	// 直接原样返回、零分配。原实现用 len([]rune(value)) 计数，即便不截断也会
+	// 为每个字符串分配一份 rune 切片（audit 每字段、每个 handler 都调用）。
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	// 字节超限才用 utf8.RuneCountInString 精确计数（不分配），仍不超限则返回。
+	if utf8.RuneCountInString(value) <= limit {
 		return value
 	}
 	runes := []rune(value)
