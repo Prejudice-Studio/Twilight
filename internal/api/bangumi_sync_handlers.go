@@ -284,7 +284,7 @@ func (a *App) handleBangumiMe(w http.ResponseWriter, r *http.Request, _ Params) 
 
 	username := asString(me["username"])
 	if username == "" {
-		username = fmt.Sprint(me["id"])
+		username = asString(me["id"])
 	}
 
 	watching, watchingTotal, watchingCached, watchingUpdated, _ := a.bangumiCollectionsCached(ctx, u, username, 3, 8, 0, false)
@@ -343,7 +343,7 @@ func (a *App) handleBangumiCollections(w http.ResponseWriter, r *http.Request, _
 	}
 	username := asString(me["username"])
 	if username == "" {
-		username = fmt.Sprint(me["id"])
+		username = asString(me["id"])
 	}
 
 	collectType := queryInt(r, "type", 3) // 1:想看, 2:看过, 3:在看
@@ -514,7 +514,7 @@ func (a *App) refreshBangumiCollectionCacheForUser(ctx context.Context, u store.
 	}
 	username := asString(me["username"])
 	if username == "" {
-		username = fmt.Sprint(me["id"])
+		username = asString(me["id"])
 	}
 	refreshed := 0
 	totalEntries := 0
