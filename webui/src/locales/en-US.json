@@ -466,7 +466,8 @@
     "nowPlaying": "Now Watching",
     "nowPlayingCount": "{count} people watching now",
     "serverNetworkStatus": "On-demand line checks; no automatic probes",
-    "retest": "Test lines"
+    "retest": "Test lines",
+    "notApplicable": "Not applicable"
   },
   "invite": {
     "embyDisabled": "Emby disabled"

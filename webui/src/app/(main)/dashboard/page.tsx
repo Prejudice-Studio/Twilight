@@ -477,12 +477,13 @@ export default function DashboardPage() {
     }
   }
 
-  // 未开通 Emby 时既不算"永久"也不算"已过期"，前端单独展示。
-  const isPermanent = !isPendingEmby && (isAdmin || expiredTimestamp === null);
+  // 未绑定 Emby（且无开通资格）时不存在"到期时间"概念，前端展示"未对应"而非"永久"。
+  const hasNoEmby = !hasEmbyBinding && !isPendingEmby;
+  const isPermanent = hasEmbyBinding && !isPendingEmby && (isAdmin || expiredTimestamp === null);
   const safeExpiredTimestamp = expiredTimestamp ?? 0;
-  const isExpired = !isPermanent && !isPendingEmby && safeExpiredTimestamp < Date.now();
+  const isExpired = hasEmbyBinding && !isPermanent && !isPendingEmby && safeExpiredTimestamp < Date.now();
   const embyDisabledByExpiry = Boolean(user?.emby_disabled_by_expiry || isExpired);
-  const daysLeft = !isPermanent && !isPendingEmby
+  const daysLeft = hasEmbyBinding && !isPermanent && !isPendingEmby
     ? Math.max(0, Math.ceil((safeExpiredTimestamp - Date.now()) / (1000 * 60 * 60 * 24)))
     : 0;
   const signinRenewal = signinSummary?.renewal;
@@ -867,9 +868,14 @@ export default function DashboardPage() {
             <div className="p-3 w-fit bg-amber-500/10 text-amber-500 rounded-2xl">
               <Calendar className="h-5 w-5" />
             </div>
-            {!isPermanent && !isPendingEmby && (
+            {!hasNoEmby && !isPermanent && !isPendingEmby && (
               <Badge variant={isExpired ? "destructive" : daysLeft <= 7 ? "warning" : "outline"} className="text-[10px]">
                 {isExpired ? t("dashboard.expired") : t("dashboard.daysLeft", { days: daysLeft })}
+              </Badge>
+            )}
+            {hasNoEmby && (
+              <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                {t("dashboard.notApplicable")}
               </Badge>
             )}
             {isPendingEmby && (
@@ -880,7 +886,7 @@ export default function DashboardPage() {
           </div>
           <p className="mt-4 text-[10px] font-black uppercase tracking-widest text-muted-foreground">{t("dashboard.expiryCountdown")}</p>
           <h3 className="text-2xl sm:text-3xl font-black mt-1 break-all">
-            {isPendingEmby ? "—" : isPermanent ? t("dashboard.permanentDisplay") : t("score.days", { days: daysLeft })}
+            {isPendingEmby ? "—" : hasNoEmby ? t("dashboard.notApplicable") : isPermanent ? t("dashboard.permanentDisplay") : t("score.days", { days: daysLeft })}
           </h3>
         </motion.div>
 

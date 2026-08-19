@@ -643,6 +643,7 @@
     "expired": "已过期",
     "daysLeft": "剩 {days} 天",
     "notOpened": "未开通",
+    "notApplicable": "未对应",
     "expiryCountdown": "到期倒计时",
     "permanentDisplay": "∞ 永久",
     "accountStatus": "账号状态",

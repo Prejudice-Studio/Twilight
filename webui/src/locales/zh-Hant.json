@@ -466,7 +466,8 @@
     "nowPlaying": "正在觀看",
     "nowPlayingCount": "當前 {count} 人正在觀看",
     "serverNetworkStatus": "按需線路探測，不會自動測速",
-    "retest": "測速線路"
+    "retest": "測速線路",
+    "notApplicable": "未對應"
   },
   "invite": {
     "embyDisabled": "Emby 已停用"
