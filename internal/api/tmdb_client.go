@@ -93,7 +93,7 @@ func (a *App) getTMDB(ctx context.Context, id, mediaType string) (map[string]any
 }
 
 func tmdbToMedia(item map[string]any, mediaType, imageBase string) map[string]any {
-	id := fmt.Sprint(item["id"])
+	id := asString(item["id"])
 	title := firstNonEmpty(asString(item["title"]), asString(item["name"]), id)
 	original := firstNonEmpty(asString(item["original_title"]), asString(item["original_name"]), title)
 	release := firstNonEmpty(asString(item["release_date"]), asString(item["first_air_date"]))

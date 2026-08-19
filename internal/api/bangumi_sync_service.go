@@ -140,7 +140,7 @@ func (a *App) matchBangumiSubject(ctx context.Context, record store.PlaybackReco
 	if item == nil {
 		return "", "", fmt.Errorf("搜索结果格式异常")
 	}
-	sid := fmt.Sprint(item["id"])
+	sid := asString(item["id"])
 	sname := firstNonEmpty(asString(item["name_cn"]), asString(item["name"]), sid)
 	return sid, sname, nil
 }

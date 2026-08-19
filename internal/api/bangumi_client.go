@@ -104,7 +104,7 @@ func bangumiEndpoint(base, path string, values url.Values) (string, error) {
 }
 
 func bangumiToMedia(item map[string]any) map[string]any {
-	id := fmt.Sprint(item["id"])
+	id := asString(item["id"])
 	title := firstNonEmpty(asString(item["name_cn"]), asString(item["name"]), id)
 	images, _ := item["images"].(map[string]any)
 	poster := firstNonEmpty(asString(images["large"]), asString(images["common"]), asString(images["medium"]))
