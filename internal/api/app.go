@@ -1661,7 +1661,13 @@ func adminUserActionState(u store.User, now int64) map[string]any {
 }
 
 func publicUser(u store.User) map[string]any {
-	now := time.Now().Unix()
+	return publicUserAt(u, time.Now().Unix())
+}
+
+// publicUserAt 是 publicUser 的 now 注入版。publicUser 本身每条记录都会读一次
+// time.Now，公共字段本身不依赖时间，真正的耗时在 adminUserActionState 与
+// expireStatus 的 now 比较；列表页一页渲染 N 行时复用同一 now，避免每行系统调用。
+func publicUserAt(u store.User, now int64) map[string]any {
 	return map[string]any{
 		"uid":               u.UID,
 		"username":          u.Username,
@@ -1672,7 +1678,7 @@ func publicUser(u store.User) map[string]any {
 		"role":              u.Role,
 		"role_name":         roleName(u.Role),
 		"active":            u.Active,
-		"expire_status":     expireStatus(u.ExpiredAt),
+		"expire_status":     expireStatusAt(u.ExpiredAt, now),
 		"expired_at":        publicExpiryUnix(u.ExpiredAt),
 		"emby_id":           u.EmbyID,
 		"emby_username":     u.EmbyUsername,
@@ -1731,13 +1737,18 @@ func roleName(role int) string {
 }
 
 func expireStatus(expiredAt int64) string {
+	return expireStatusAt(expiredAt, time.Now().Unix())
+}
+
+// expireStatusAt 是 expireStatus 的 now 注入版：管理列表等一页渲染 N 个用户时
+// 复用同一个 now，避免每行各做一次 time.Now 系统调用。
+func expireStatusAt(expiredAt, now int64) string {
 	if expiryIsPermanent(expiredAt) {
 		return "永不过期"
 	}
 	if expiredAt == 0 {
 		return "未设置"
 	}
-	now := time.Now().Unix()
 	if expiredAt < now {
 		return "已过期"
 	}

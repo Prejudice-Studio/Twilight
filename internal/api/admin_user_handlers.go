@@ -35,7 +35,7 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request, _ Params)
 		if !adminUserMatchesListFilters(u, filter) {
 			continue
 		}
-		items = append(items, publicUser(u))
+		items = append(items, publicUserAt(u, filter.now))
 	}
 	sortUsers(items, query.Get("sort"))
 	total := len(items)
