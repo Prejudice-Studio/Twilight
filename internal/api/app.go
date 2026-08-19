@@ -993,10 +993,12 @@ func (a *App) authenticateAPIKey(r *http.Request) (*principal, bool) {
 	fromQuery := false
 	if key == "" {
 		auth := strings.TrimSpace(r.Header.Get("Authorization"))
-		lower := strings.ToLower(auth)
-		if strings.HasPrefix(lower, "bearer ") {
+		// 大小写不敏感前缀判定：不再对整个 Authorization 头做 strings.ToLower
+		// 分配，改用 EqualFold 只比较前 7 字节（"bearer " / "apikey "）。
+		switch {
+		case len(auth) > len("bearer ") && strings.EqualFold(auth[:len("bearer ")], "bearer "):
 			key = strings.TrimSpace(auth[len("bearer "):])
-		} else if strings.HasPrefix(lower, "apikey ") {
+		case len(auth) > len("apikey ") && strings.EqualFold(auth[:len("apikey ")], "apikey "):
 			key = strings.TrimSpace(auth[len("apikey "):])
 		}
 	}
