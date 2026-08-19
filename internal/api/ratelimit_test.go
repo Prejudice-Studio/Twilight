@@ -53,3 +53,26 @@ func TestRateLimiterAppliesMinimumWindowInMemory(t *testing.T) {
 		t.Fatal("second request should be limited within the one-second minimum window")
 	}
 }
+
+// TestRateKeyMatchesLegacyFormat 回归校验：rateKey 与旧 fmt.Sprint(parts...)
+// 的字节输出必须逐字节一致，确保限流 key 在跨进程（Redis / 内存桶）语义不变。
+func TestRateKeyMatchesLegacyFormat(t *testing.T) {
+	cases := [][]any{
+		{},
+		{"global:", "127.0.0.1"},
+		{"login:", "192.168.1.1"},
+		{"login:user:", "alice"},
+		{"use-code:uid:", int64(42)},
+		{"use-code:uid:", 42},
+		{"ticket:uid:", int64(123456789)},
+		{"emby-probe:", int64(-7)},
+		{"apikey:", "hash", "suffix"},
+	}
+	for _, parts := range cases {
+		got := rateKey(parts...)
+		want := fmt.Sprint(parts...)
+		if got != want {
+			t.Fatalf("rateKey(%v) = %q, want %q", parts, got, want)
+		}
+	}
+}

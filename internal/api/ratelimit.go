@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -113,8 +114,96 @@ func (r *rateLimiter) cleanupExpiredLocked(now time.Time) {
 	}
 }
 
+// rateKey 把限流 key 的若干段拼成一个字符串。旧实现用 fmt.Sprint(parts...)，
+// 每个请求都走 reflect 装箱 + 变长 []any 分配；限流 key 段全是 string / int64，
+// 直接用 Builder 按最大长度预估缓冲，零反射、单次分配，且 key 字节与旧实现
+// 完全一致（fmt.Sprint 对 string/int64 就是原样拼接）。
 func rateKey(parts ...any) string {
-	return fmt.Sprint(parts...)
+	if len(parts) == 0 {
+		return ""
+	}
+	total := 0
+	for _, p := range parts {
+		total += rateKeyPartLen(p)
+	}
+	var b strings.Builder
+	b.Grow(total)
+	for _, p := range parts {
+		writeRateKeyPart(&b, p)
+	}
+	return b.String()
+}
+
+// rateKeyPartLen 预估单个 key 段拼接后的字节长度，仅用于 Builder.Grow 的容量
+// 提示，多估或少估都不影响正确性（Grow 只是减少扩容次数）。
+func rateKeyPartLen(p any) int {
+	switch v := p.(type) {
+	case string:
+		return len(v)
+	case int64:
+		return intLen(v)
+	case int:
+		return intLen(int64(v))
+	default:
+		return 16
+	}
+}
+
+func writeRateKeyPart(b *strings.Builder, p any) {
+	switch v := p.(type) {
+	case string:
+		b.WriteString(v)
+	case int64:
+		writeInt64(b, v)
+	case int:
+		writeInt64(b, int64(v))
+	default:
+		// 兜底路径：与旧 fmt.Sprint 行为一致的非常规段（理论上不存在）。
+		b.WriteString(fmt.Sprint(p))
+	}
+}
+
+// writeInt64 把 int64 以十进制写入 Builder，避免经 strconv.AppendInt 返回切片
+// 后再次复制到 Builder。
+func writeInt64(b *strings.Builder, v int64) {
+	var buf [20]byte
+	n := 0
+	negative := v < 0
+	u := uint64(v)
+	if negative {
+		u = uint64(-v)
+	}
+	if u == 0 {
+		b.WriteByte('0')
+		return
+	}
+	for u > 0 {
+		buf[n] = byte('0' + u%10)
+		u /= 10
+		n++
+	}
+	if negative {
+		b.WriteByte('-')
+	}
+	for i := n - 1; i >= 0; i-- {
+		b.WriteByte(buf[i])
+	}
+}
+
+// intLen 返回十进制表示的字符数（负号不计入，用于 Grow 预估值）。
+func intLen(v int64) int {
+	if v < 0 {
+		v = -v
+	}
+	if v == 0 {
+		return 1
+	}
+	n := 0
+	for v > 0 {
+		v /= 10
+		n++
+	}
+	return n
 }
 
 // shouldWarnFallback 判断当前这次降级是否应落一条 Warn。用 CAS 抢占时间戳：
