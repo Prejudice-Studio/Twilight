@@ -38,11 +38,15 @@ func (a *App) searchTMDB(ctx context.Context, query, mediaType string, limit int
 	if err != nil {
 		return nil, err
 	}
-	mediaType = normalizeTMDBMediaType(mediaType)
+	// 先按「调用方是否明确指定了媒体类型」选择端点：指定 movie/tv 走
+	// /search/movie 或 /search/tv，未指定走 /search/multi（名称搜索不限定类型）。
+	// 注意不能先 normalizeTMDBMediaType：空串会被归一成 "movie"，导致名称搜索
+	// 永远落到 /search/movie，剧集永远搜不到。
 	endpoint := base + "/search/multi"
 	if specific := tmdbSearchMediaType(mediaType); specific != "" {
 		endpoint = base + "/search/" + specific
 	}
+	mediaType = normalizeTMDBMediaType(mediaType)
 	q := url.Values{"api_key": {a.cfg().TMDBAPIKey}, "language": {"zh-CN"}, "query": {query}}
 	var payload map[string]any
 	if err := getJSON(ctx, endpoint+"?"+q.Encode(), nil, &payload); err != nil {
