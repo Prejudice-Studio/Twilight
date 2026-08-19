@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/prejudice-studio/twilight/internal/store"
 )
@@ -427,7 +428,7 @@ func (s *auditDetailSanitizer) sanitizeSlice(value []any, depth int) []any {
 
 func sanitizeAuditString(value string, sanitizer *auditDetailSanitizer) string {
 	value = strings.ToValidUTF8(redactSensitiveText(value), "")
-	if len([]rune(value)) > auditDetailMaxStringRunes {
+	if utf8.RuneCountInString(value) > auditDetailMaxStringRunes {
 		sanitizer.truncated = true
 		value = truncateString(value, auditDetailMaxStringRunes) + "..."
 	}
