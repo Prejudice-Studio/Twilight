@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"go.uber.org/zap"
 
@@ -346,7 +347,12 @@ func sanitizeSchedulerLogs(logs []string) []string {
 
 func sanitizeSchedulerText(value string, limit int) (string, bool) {
 	value = redactSensitiveText(value)
-	if limit <= 0 || len([]rune(value)) <= limit {
+	// 与 truncateString 同口径的快路径：字节长度已 <= limit 时 rune 数必然 <= limit，
+	// 避免每次日志行都分配 rune 切片计数（这里每轮调度逐行调用，分配压力放大）。
+	if limit <= 0 || len(value) <= limit {
+		return value, false
+	}
+	if utf8.RuneCountInString(value) <= limit {
 		return value, false
 	}
 	return truncateString(value, limit) + " [truncated]", true
