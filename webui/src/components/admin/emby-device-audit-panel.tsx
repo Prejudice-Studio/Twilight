@@ -766,7 +766,7 @@ function UserAuditCard({
               </Badge>
             )}
             {u.local_user && u.local_user.role === 0 && (
-              <Badge className="border-purple-500/20 bg-purple-500/10 text-purple-500">
+              <Badge className="border-info/20 bg-info/10 text-info">
                 <Shield className="mr-1 h-3 w-3" />
                 {t("deviceAudit.roleAdmin")}
               </Badge>
@@ -1054,7 +1054,7 @@ function DeviceTableView({
                       <div className="flex items-center gap-1.5">
                         <span className="font-medium">{name}</span>
                         {u.local_user && u.local_user.role === 0 && (
-                          <Shield className="h-3 w-3 text-purple-500" />
+                          <Shield className="h-3 w-3 text-info" />
                         )}
                       </div>
                       {u.local_user ? (

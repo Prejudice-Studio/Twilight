@@ -562,9 +562,9 @@ export default function MediaPage() {
     show: { opacity: 1, y: 0 }
   };
   const compactSegmentClass = "grid w-full grid-cols-2 overflow-hidden rounded-xl border border-border/60 bg-secondary/80 p-0.5 sm:w-auto";
-  const compactSegmentButtonClass = "min-w-0 rounded-[0.65rem] px-3 py-1.5 text-xs font-bold transition-colors sm:px-4";
-  const sourceSegmentClass = "isolate flex h-14 w-full overflow-hidden rounded-[1.25rem] border border-border/70 bg-card/60 backdrop-blur-md dark:bg-slate-950/40 sm:w-auto";
-  const sourceSegmentButtonClass = "min-w-0 flex-1 px-3 text-sm font-bold transition-colors sm:flex-none sm:px-6";
+  const compactSegmentButtonClass = "inline-flex min-w-0 items-center justify-center rounded-[0.65rem] px-3 py-1.5 text-xs font-bold transition-colors sm:px-4";
+  const sourceSegmentClass = "isolate flex h-14 shrink-0 w-full overflow-hidden rounded-[1.25rem] border border-border/70 bg-card/60 backdrop-blur-md dark:bg-slate-950/40 sm:w-auto";
+  const sourceSegmentButtonClass = "inline-flex min-w-0 flex-1 items-center justify-center px-3 text-sm font-bold transition-colors sm:flex-none sm:px-6";
   const activeSegmentClass = "bg-primary text-primary-foreground";
   const inactiveSegmentClass = "text-muted-foreground hover:bg-accent/80";
   const mediaRequestDisabled = systemInfo?.features?.media_request === false;
@@ -675,8 +675,8 @@ export default function MediaPage() {
                 </div>
 
                 {/* 搜索输入区域 */}
-                <div className="flex min-w-0 flex-col items-stretch gap-4 lg:flex-row">
-                  <div className="relative flex-1 group">
+                <div className="flex min-w-0 flex-col items-stretch gap-4 lg:flex-row lg:items-center">
+                  <div className="relative flex-1 group lg:h-14">
                     <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-primary" />
                     <Input
                       placeholder={
@@ -687,7 +687,7 @@ export default function MediaPage() {
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                      className="h-14 pl-12 rounded-[1.25rem] border-white/40 bg-white/50 text-slate-950 backdrop-blur-md focus:bg-white transition-all shadow-inner text-base font-medium dark:border-slate-700/70 dark:bg-slate-950/80 dark:text-slate-100 dark:focus:bg-slate-900/95"
+                      className="h-full min-h-14 pl-12 rounded-[1.25rem] border-white/40 bg-white/50 text-slate-950 backdrop-blur-md focus:bg-white transition-all shadow-inner text-base font-medium dark:border-slate-700/70 dark:bg-slate-950/80 dark:text-slate-100 dark:focus:bg-slate-900/95"
                     />
                   </div>
                   
@@ -731,7 +731,7 @@ export default function MediaPage() {
                     </div>
                   )}
                   
-                  <Button onClick={handleSearch} disabled={isSearching} className="h-14 w-full rounded-[1.25rem] px-8 shadow-xl shadow-primary/20 transition-all active:scale-95 lg:w-auto">
+                  <Button onClick={handleSearch} disabled={isSearching} className="h-14 w-full shrink-0 rounded-[1.25rem] px-8 shadow-md shadow-primary/15 transition-all active:scale-95 lg:w-auto">
                     {isSearching ? (
                       <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                     ) : (
@@ -986,9 +986,9 @@ export default function MediaPage() {
                 <DialogTitle>{activeMediaDetail.title}</DialogTitle>
                 <DialogDescription>{t("media.detailDialogDescription", { title: activeMediaDetail.title })}</DialogDescription>
               </DialogHeader>
-              <div className="grid min-h-0 flex-1 overflow-y-auto md:h-full md:grid-cols-[minmax(260px,340px)_minmax(0,1fr)] md:overflow-hidden">
-                <div className="custom-scrollbar min-h-0 overflow-y-auto bg-background p-4 sm:p-5">
-                  <div className="mx-auto w-full max-w-[360px] md:max-w-none">
+              <div className="grid min-h-0 flex-1 overflow-y-auto md:h-full md:grid-cols-[minmax(300px,1fr)_minmax(0,1fr)] md:overflow-hidden">
+                <div className="custom-scrollbar min-h-0 overflow-y-auto bg-background p-4 sm:p-5 md:flex md:items-end md:pb-0">
+                  <div className="mx-auto w-full max-w-[360px] md:mx-0 md:max-w-none">
                     {detailPoster ? (
                       <div className="w-full overflow-hidden rounded-lg shadow-2xl">
                         {/* Use the image's intrinsic dimensions so non-2:3 posters do not get letterboxed. */}
@@ -1022,8 +1022,26 @@ export default function MediaPage() {
                       </div>
                     )}
 
-                    <div className="flex flex-col gap-5 border-b pb-5 sm:flex-row sm:items-start">
-                      <div className="min-w-0 flex-1">
+                    <div className={cn(
+                      "border-b pb-5",
+                      detailLogo
+                        ? "grid gap-5 sm:grid-cols-[minmax(160px,240px)_minmax(0,1fr)] sm:items-center"
+                        : "flex flex-col gap-5 sm:flex-row sm:items-start"
+                    )}>
+                      {detailLogo && (
+                        <div className="flex min-h-24 min-w-0 items-center justify-start sm:min-h-32">
+                          {/* TMDB logos are transparent artwork; keep the image unframed and preserve its ratio. */}
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={detailLogo}
+                            alt={t("media.logoAlt", { title: activeMediaDetail.title })}
+                            loading="lazy"
+                            decoding="async"
+                            className="block h-auto max-h-32 max-w-full w-auto object-contain object-left drop-shadow-sm"
+                          />
+                        </div>
+                      )}
+                      <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant="outline" className="rounded-lg border-primary/20 px-3 py-1 font-bold text-primary">
                             {mediaTypeLabel(activeMediaDetail)}
@@ -1047,19 +1065,6 @@ export default function MediaPage() {
                           </p>
                         )}
                       </div>
-                      {detailLogo && (
-                        <div className="flex min-h-24 w-full max-w-[240px] shrink-0 items-center justify-start rounded-lg border bg-muted/25 p-3 sm:ml-auto sm:justify-end">
-                          {/* Logo artwork is transparent and can have any aspect ratio; preserve it. */}
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={detailLogo}
-                            alt={t("media.logoAlt", { title: activeMediaDetail.title })}
-                            loading="lazy"
-                            decoding="async"
-                            className="block h-auto max-h-24 max-w-full w-auto object-contain object-left drop-shadow-sm sm:object-right"
-                          />
-                        </div>
-                      )}
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">

@@ -332,7 +332,7 @@ export default function ScorePage() {
 
         <Card className="border-border/60">
           <CardContent className="flex items-center gap-4 p-5">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-purple-500/15 text-purple-500">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-info/10 text-info">
               <Trophy className="h-5 w-5" />
             </div>
             <div>

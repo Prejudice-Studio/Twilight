@@ -757,7 +757,7 @@ export default function AppearanceSettingsPage() {
                 <CardDescription>{t("appearance.currentAvatarDescription")}</CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col items-center gap-4">
-                <div className="relative rounded-full bg-gradient-to-br from-primary/30 via-sky-500/20 to-fuchsia-500/20 p-1.5">
+                <div className="relative rounded-full bg-gradient-to-br from-primary/30 via-sky-500/20 to-info/20 p-1.5">
                   <div className="flex h-40 w-40 items-center justify-center overflow-hidden rounded-full border border-border bg-muted shadow-inner">
                     {avatar ? (
                       <Image

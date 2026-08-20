@@ -613,7 +613,7 @@ export default function AdminEmbyPage() {
                             <td className="p-3">
                               <div className="flex flex-wrap gap-1">
                                 {eu.is_admin && (
-                                  <Badge variant="default" className="bg-purple-500/10 text-purple-500 border-purple-500/20">
+                                  <Badge variant="default" className="border-info/20 bg-info/10 text-info">
                                     <Shield className="h-3 w-3 mr-1" />{t("adminEmby.badgeAdmin")}
                                   </Badge>
                                 )}

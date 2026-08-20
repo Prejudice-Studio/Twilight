@@ -463,7 +463,7 @@ export default function AdminEmailPage() {
                           <td className="p-3">
                             <div className="flex flex-wrap gap-1">
                               {acc.role === 0 && (
-                                <Badge className="border-purple-500/20 bg-purple-500/10 text-purple-500">
+                                <Badge className="border-info/20 bg-info/10 text-info">
                                   {t("emailAdmin.adminBadge")}
                                 </Badge>
                               )}

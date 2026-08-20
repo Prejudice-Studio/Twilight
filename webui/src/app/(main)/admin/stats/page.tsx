@@ -130,12 +130,12 @@ export default function AdminStatsPage() {
 
         <motion.div variants={item}>
           <Card className="relative overflow-hidden">
-            <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 translate-y-[-50%] rounded-full bg-gradient-to-br from-twilight-500/20 to-transparent" />
+            <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 translate-y-[-50%] rounded-full bg-info/10" />
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 {t("adminStats.memoryAvailable")}
               </CardTitle>
-              <Coins className="h-4 w-4 text-twilight-500" />
+              <Coins className="h-4 w-4 text-info" />
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold">
@@ -147,12 +147,12 @@ export default function AdminStatsPage() {
 
         <motion.div variants={item}>
           <Card className="relative overflow-hidden">
-            <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 translate-y-[-50%] rounded-full bg-gradient-to-br from-purple-500/20 to-transparent" />
+            <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 translate-y-[-50%] rounded-full bg-info/10" />
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 {t("adminStats.diskUsage")}
               </CardTitle>
-              <Clock className="h-4 w-4 text-purple-500" />
+              <Clock className="h-4 w-4 text-info" />
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold">

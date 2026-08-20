@@ -891,7 +891,7 @@ export default function DashboardPage() {
         </motion.div>
 
         <motion.div variants={item} className="premium-card p-5 sm:p-6">
-          <div className="p-3 w-fit bg-purple-500/10 text-purple-500 rounded-2xl">
+          <div className="p-3 w-fit rounded-2xl bg-info/10 text-info">
             <Clock className="h-5 w-5" />
           </div>
           <p className="mt-4 text-[10px] font-black uppercase tracking-widest text-muted-foreground">{t("dashboard.accountStatus")}</p>
@@ -989,7 +989,7 @@ export default function DashboardPage() {
         <motion.div variants={item} className="premium-card p-5 sm:p-6 flex flex-col gap-3">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
-              <div className="p-2 bg-indigo-500/10 text-indigo-500 rounded-xl">
+              <div className="p-2 rounded-xl bg-info/10 text-info">
                 <Activity className="h-4 w-4" />
               </div>
               <h3 className="text-sm font-black uppercase tracking-widest text-muted-foreground">{t("dashboard.mediaOverview")}</h3>
