@@ -798,7 +798,8 @@ curl -X GET "http://localhost:5000/api/v1/media/search?keyword=matrix&page=1&per
 
 - 认证：登录用户（`AuthUser`）
 - `source_type`：`tmdb`、`bangumi` 或兼容别名 `bgm`。
-- TMDB 可通过 `type=movie|tv` 指定类型；返回值包含可用的海报、简介、原名、上映日期、评分、类型、来源链接，以及详情端点提供的类型标签、时长、季数、集数和来源状态。
+- TMDB 可通过 `type=movie|tv` 指定类型；返回值包含可用的海报、简介、原名、上映日期、评分、类型、来源链接、标语、结束日期、制作方、主创、演员、国家/语言和预告链接，以及详情端点提供的时长、季数、集数和来源状态。
+- Bangumi 返回值包含海报、简介、原名、上映日期、评分、标签、排名、评分人数、话数/卷数、平台、别名、播出信息、官网、导演/原作和制作方等字段。来源接口缺少某个字段时不会伪造内容，前端会保留搜索结果中已有的字段。
 
 ```bash
 curl -X GET "http://localhost:5000/api/v1/media/search/id/tmdb/12345" \
@@ -811,6 +812,8 @@ curl -X GET "http://localhost:5000/api/v1/media/search/id/tmdb/12345" \
 
 - 认证：登录用户（`AuthUser`）
 - `media_id` 也兼容参数名 `id`；TMDB 的 `media_type` 也兼容参数名 `type`。
+- 返回的 `poster`/`poster_url` 为海报，`backdrop`/`backdrop_url` 为背景图（如果来源提供）；`official_url` 和 `trailer_url` 为经过来源接口归一化的外链。
+- 通用详情字段包括 `genres`、`runtime`、`seasons`、`episodes`、`status`、`end_date`、`countries`、`languages`、`creators`、`studios`、`cast`；来源特有的原始补充值位于 `extra`，不要把 `extra` 当作稳定字段契约。
 
 #### TMDB 详情
 

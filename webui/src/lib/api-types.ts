@@ -442,6 +442,7 @@ export interface MediaItem {
   media_type: string;
   rating?: number;
   vote_average?: number;
+  media_type_label?: string;
 }
 
 export interface MediaDetail extends MediaItem {
@@ -451,7 +452,22 @@ export interface MediaDetail extends MediaItem {
   runtime?: number;
   seasons?: number;
   episodes?: number;
+  volumes?: number;
   status?: string;
+  end_date?: string;
+  tagline?: string;
+  platform?: string;
+  broadcast?: string;
+  official_url?: string;
+  trailer_url?: string;
+  rank?: number;
+  vote_count?: number;
+  countries?: string[];
+  languages?: string[];
+  aliases?: string[];
+  creators?: string[];
+  studios?: string[];
+  cast?: string[];
   extra?: Record<string, unknown>;
 }
 

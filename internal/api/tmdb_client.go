@@ -88,7 +88,7 @@ func (a *App) getTMDB(ctx context.Context, id, mediaType string) (map[string]any
 		return nil, err
 	}
 	endpoint := base + "/" + mediaType + "/" + id
-	q := url.Values{"api_key": {a.cfg().TMDBAPIKey}, "language": {"zh-CN"}, "append_to_response": {"credits,genres,videos,images,seasons"}}
+	q := url.Values{"api_key": {a.cfg().TMDBAPIKey}, "language": {"zh-CN"}, "append_to_response": {"credits,videos"}}
 	var payload map[string]any
 	if err := getJSON(ctx, endpoint+"?"+q.Encode(), nil, &payload); err != nil {
 		return nil, err
@@ -116,9 +116,21 @@ func tmdbToMedia(item map[string]any, mediaType, imageBase string) map[string]an
 	if len(release) >= 4 {
 		result["year"] = release[:4]
 	}
-	rating := numeric(item["vote_average"])
+	rating := mediaFloat(item["vote_average"])
 	result["vote_average"] = rating
 	result["rating"] = rating
+	if voteCount := int(numeric(item["vote_count"])); voteCount > 0 {
+		result["vote_count"] = voteCount
+	}
+	if tagline := strings.TrimSpace(asString(item["tagline"])); tagline != "" {
+		result["tagline"] = truncateString(tagline, 300)
+	}
+	if endDate := strings.TrimSpace(asString(item["last_air_date"])); endDate != "" {
+		result["end_date"] = endDate
+	}
+	if homepage := strings.TrimSpace(asString(item["homepage"])); homepage != "" {
+		result["official_url"] = homepage
+	}
 	genres := []string{}
 	if rows, ok := item["genres"].([]any); ok {
 		for _, row := range rows {
@@ -131,7 +143,13 @@ func tmdbToMedia(item map[string]any, mediaType, imageBase string) map[string]an
 	if len(genres) > 0 {
 		result["genres"] = genres
 	}
-	if runtime := int(numeric(item["runtime"])); runtime > 0 {
+	runtime := int(numeric(item["runtime"]))
+	if runtime <= 0 {
+		if runtimes, ok := item["episode_run_time"].([]any); ok && len(runtimes) > 0 {
+			runtime = int(numeric(runtimes[0]))
+		}
+	}
+	if runtime > 0 {
 		result["runtime"] = runtime
 	}
 	if seasons := int(numeric(item["number_of_seasons"])); seasons > 0 {
@@ -143,6 +161,97 @@ func tmdbToMedia(item map[string]any, mediaType, imageBase string) map[string]an
 	if status := asString(item["status"]); status != "" {
 		result["status"] = status
 	}
-	result["extra"] = map[string]any{"vote_count": item["vote_count"], "original_language": item["original_language"], "popularity": item["popularity"], "genres": genres, "runtime": result["runtime"], "number_of_seasons": result["seasons"], "number_of_episodes": result["episodes"]}
+	countries := mediaStringList(item["production_countries"], []string{"name", "iso_3166_1"}, 5)
+	if len(countries) == 0 {
+		countries = mediaStringList(item["origin_country"], nil, 5)
+	}
+	if len(countries) > 0 {
+		result["countries"] = countries
+	}
+	languages := mediaStringList(item["spoken_languages"], []string{"name", "english_name", "iso_639_1"}, 5)
+	if len(languages) == 0 {
+		languages = mediaStringList(item["original_language"], nil, 1)
+	}
+	if len(languages) > 0 {
+		result["languages"] = languages
+	}
+	studios := mergeMediaStringLists(8,
+		mediaStringList(item["production_companies"], []string{"name"}, 8),
+		mediaStringList(item["networks"], []string{"name"}, 8),
+	)
+	if len(studios) > 0 {
+		result["studios"] = studios
+	}
+	credits, _ := item["credits"].(map[string]any)
+	creators := mergeMediaStringLists(8,
+		mediaStringList(item["created_by"], []string{"name"}, 8),
+		tmdbCrewNames(credits["crew"], 8),
+	)
+	if len(creators) > 0 {
+		result["creators"] = creators
+	}
+	if cast := mediaStringList(credits["cast"], []string{"name"}, 8); len(cast) > 0 {
+		result["cast"] = cast
+	}
+	if trailerURL := tmdbTrailerURL(item["videos"]); trailerURL != "" {
+		result["trailer_url"] = trailerURL
+	}
+	result["extra"] = map[string]any{"vote_count": result["vote_count"], "original_language": item["original_language"], "popularity": item["popularity"], "genres": genres, "runtime": result["runtime"], "number_of_seasons": result["seasons"], "number_of_episodes": result["episodes"]}
 	return result
+}
+
+func tmdbCrewNames(value any, limit int) []string {
+	rows, _ := value.([]any)
+	filtered := make([]any, 0, min(limit, len(rows)))
+	for _, row := range rows {
+		crew, _ := row.(map[string]any)
+		if crew == nil {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(asString(crew["job"]))) {
+		case "director", "creator", "screenplay", "writer", "series director":
+			filtered = append(filtered, crew)
+		}
+		if len(filtered) >= limit {
+			break
+		}
+	}
+	return mediaStringList(filtered, []string{"name"}, limit)
+}
+
+func tmdbTrailerURL(value any) string {
+	videos, _ := value.(map[string]any)
+	rows, _ := videos["results"].([]any)
+	fallback := ""
+	for _, row := range rows {
+		video, _ := row.(map[string]any)
+		if video == nil || !strings.EqualFold(strings.TrimSpace(asString(video["site"])), "YouTube") {
+			continue
+		}
+		key := strings.TrimSpace(asString(video["key"]))
+		if !safeYouTubeVideoKey(key) {
+			continue
+		}
+		candidate := "https://www.youtube.com/watch?v=" + key
+		if fallback == "" {
+			fallback = candidate
+		}
+		if strings.EqualFold(strings.TrimSpace(asString(video["type"])), "Trailer") {
+			return candidate
+		}
+	}
+	return fallback
+}
+
+func safeYouTubeVideoKey(value string) bool {
+	if len(value) < 6 || len(value) > 32 {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '-' || char == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }

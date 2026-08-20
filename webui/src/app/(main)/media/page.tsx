@@ -571,6 +571,31 @@ export default function MediaPage() {
     : null;
   const detailPoster = sanitizeImageUrl(activeMediaDetail?.poster || activeMediaDetail?.poster_url);
   const detailSourceURL = sanitizeExternalUrl(activeMediaDetail?.source_url);
+  const detailOfficialURL = sanitizeExternalUrl(activeMediaDetail?.official_url);
+  const detailTrailerURL = sanitizeExternalUrl(activeMediaDetail?.trailer_url);
+  const mediaTypeLabel = (media: MediaItem) => {
+    if (media.media_type_label) return media.media_type_label;
+    switch (String(media.media_type || "").toLowerCase()) {
+      case "movie":
+        return t("media.movieWork");
+      case "tv":
+        return t("media.tvSeries");
+      case "动画":
+      case "anime":
+        return t("media.animation");
+      case "三次元":
+      case "live_action":
+        return t("media.liveAction");
+      case "书籍":
+        return t("media.book");
+      case "音乐":
+        return t("media.music");
+      case "游戏":
+        return t("media.game");
+      default:
+        return media.media_type || t("media.unknownType");
+    }
+  };
 
   if (mediaRequestDisabled) {
     return (
@@ -761,7 +786,7 @@ export default function MediaPage() {
                             {media.source.toUpperCase()}
                           </Badge>
                           <Badge className="bg-black/40 backdrop-blur-xl border-0 text-white font-black text-[10px] tracking-widest px-2.5 py-1 uppercase">
-                            {media.media_type === "movie" ? t("media.movieBadge") : t("media.tvBadge")}
+                            {mediaTypeLabel(media)}
                           </Badge>
                         </div>
 
@@ -943,55 +968,59 @@ export default function MediaPage() {
 
       {/* Detail Dialog */}
       <Dialog open={!!selectedMedia} onOpenChange={(open) => !open && closeMediaDetail()}>
-        <DialogContent className="max-h-[calc(100dvh-1rem)] max-w-5xl overflow-hidden rounded-xl border-0 p-0 glass-acrylic shadow-2xl [&>button:last-child]:bg-black/55 [&>button:last-child]:text-white">
+        <DialogContent className="!max-h-[calc(100dvh-1rem)] max-w-6xl overflow-hidden rounded-xl border-0 p-0 glass-acrylic shadow-2xl md:h-[calc(100dvh-1rem)] md:!max-h-[850px] [&>button:last-child]:bg-black/55 [&>button:last-child]:text-white">
           {activeMediaDetail && (
             <>
               <DialogHeader className="sr-only">
                 <DialogTitle>{activeMediaDetail.title}</DialogTitle>
                 <DialogDescription>{t("media.detailDialogDescription", { title: activeMediaDetail.title })}</DialogDescription>
               </DialogHeader>
-              <div className="grid max-h-[calc(100dvh-1rem)] overflow-y-auto md:grid-cols-[minmax(240px,320px)_minmax(0,1fr)] md:overflow-hidden">
-                <div className="relative flex min-h-[380px] items-center justify-center bg-black p-4 md:min-h-0">
-                  {detailPoster ? (
-                    <div className="relative aspect-[2/3] w-full max-w-[260px] overflow-hidden rounded-lg bg-black shadow-2xl md:max-w-none">
-                      <Image
-                        src={detailPoster}
-                        alt={activeMediaDetail.title}
-                        fill
-                        unoptimized
-                        sizes="(max-width: 768px) 260px, 320px"
-                        className="h-full w-full object-contain"
-                      />
-                    </div>
-                  ) : (
-                    <div className="flex aspect-[2/3] w-full max-w-[260px] items-center justify-center rounded-lg bg-secondary md:max-w-none">
-                      {activeMediaDetail.media_type === "movie" ? (
-                        <Film className="h-20 w-20 text-muted-foreground/25" />
-                      ) : (
-                        <Tv className="h-20 w-20 text-muted-foreground/25" />
+              <div className="grid min-h-0 flex-1 overflow-y-auto md:h-full md:grid-cols-[minmax(260px,340px)_minmax(0,1fr)] md:overflow-hidden">
+                <div className="custom-scrollbar min-h-0 overflow-y-auto bg-neutral-950 p-4 text-white sm:p-5">
+                  <div className="mx-auto flex w-full max-w-[280px] flex-col gap-4 md:max-w-none">
+                    {detailPoster ? (
+                      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-black shadow-2xl">
+                        <Image
+                          src={detailPoster}
+                          alt={activeMediaDetail.title}
+                          fill
+                          unoptimized
+                          sizes="(max-width: 768px) 260px, 320px"
+                          className="h-full w-full object-contain"
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex aspect-[2/3] w-full items-center justify-center rounded-lg bg-secondary">
+                        {activeMediaDetail.media_type === "movie" ? (
+                          <Film className="h-20 w-20 text-muted-foreground/25" />
+                        ) : (
+                          <Tv className="h-20 w-20 text-muted-foreground/25" />
+                        )}
+                      </div>
+                    )}
+                    <div className="min-w-0 pb-1">
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <Badge className="border-white/20 bg-white/20 px-2.5 py-1 text-[10px] font-black tracking-widest text-white backdrop-blur-md">
+                          {activeMediaDetail.source.toUpperCase()}
+                        </Badge>
+                        {activeMediaDetail.rating !== undefined && activeMediaDetail.rating > 0 && (
+                          <div className="flex items-center gap-1 rounded-md bg-yellow-400 px-2 py-1 text-[10px] font-black text-black">
+                            <Star className="h-3 w-3 fill-black" />
+                            {activeMediaDetail.rating.toFixed(1)}
+                          </div>
+                        )}
+                      </div>
+                      <h2 className="break-words text-xl font-black leading-tight text-white sm:text-2xl">
+                        {activeMediaDetail.title}
+                      </h2>
+                      {activeMediaDetail.original_title && activeMediaDetail.original_title !== activeMediaDetail.title && (
+                        <p className="mt-2 break-words text-xs font-medium text-white/65">{activeMediaDetail.original_title}</p>
                       )}
                     </div>
-                  )}
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-44 bg-gradient-to-t from-black/90 to-transparent" />
-                  <div className="absolute bottom-5 left-5 right-5 min-w-0">
-                    <div className="mb-2 flex flex-wrap items-center gap-2">
-                      <Badge className="border-white/20 bg-white/20 px-2.5 py-1 text-[10px] font-black tracking-widest text-white backdrop-blur-md">
-                        {activeMediaDetail.source.toUpperCase()}
-                      </Badge>
-                      {activeMediaDetail.rating !== undefined && activeMediaDetail.rating > 0 && (
-                        <div className="flex items-center gap-1 rounded-md bg-yellow-400 px-2 py-1 text-[10px] font-black text-black">
-                          <Star className="h-3 w-3 fill-black" />
-                          {activeMediaDetail.rating.toFixed(1)}
-                        </div>
-                      )}
-                    </div>
-                    <h2 className="line-clamp-2 break-words text-xl font-black leading-tight text-white sm:text-2xl">
-                      {activeMediaDetail.title}
-                    </h2>
                   </div>
                 </div>
 
-                <div className="custom-scrollbar overflow-y-auto bg-card/95 p-5 text-foreground sm:p-7">
+                <div className="custom-scrollbar min-h-0 overflow-y-auto bg-card/95 p-5 text-foreground sm:p-7">
                   <div className="space-y-6">
                     {isLoadingDetail && (
                       <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs font-medium text-primary">
@@ -1002,7 +1031,7 @@ export default function MediaPage() {
 
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="outline" className="rounded-lg border-primary/20 px-3 py-1 font-bold text-primary">
-                        {activeMediaDetail.media_type === "movie" ? t("media.movieWork") : t("media.tvSeries")}
+                        {mediaTypeLabel(activeMediaDetail)}
                       </Badge>
                       {activeMediaDetail.genres?.map((genre) => (
                         <Badge key={genre} variant="secondary" className="rounded-lg border border-border bg-muted/80 px-3 py-1 font-bold text-muted-foreground">
@@ -1010,16 +1039,32 @@ export default function MediaPage() {
                         </Badge>
                       ))}
                       {detailSourceURL && (
-                        <Button asChild size="sm" variant="outline" className="ml-auto">
+                        <Button asChild size="sm" variant="outline" className="sm:ml-auto">
                           <a href={detailSourceURL} target="_blank" rel="noopener noreferrer">
                             {t("media.openSource")}
                             <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
                           </a>
                         </Button>
                       )}
+                      {detailOfficialURL && detailOfficialURL !== detailSourceURL && (
+                        <Button asChild size="sm" variant="outline">
+                          <a href={detailOfficialURL} target="_blank" rel="noopener noreferrer">
+                            {t("media.openOfficialSite")}
+                            <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
+                          </a>
+                        </Button>
+                      )}
+                      {detailTrailerURL && (
+                        <Button asChild size="sm" variant="outline">
+                          <a href={detailTrailerURL} target="_blank" rel="noopener noreferrer">
+                            {t("media.watchTrailer")}
+                            <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
+                          </a>
+                        </Button>
+                      )}
                     </div>
 
-                    <dl className="grid gap-3 rounded-lg border bg-muted/25 p-4 text-sm sm:grid-cols-2">
+                    <dl className="grid gap-3 rounded-lg border bg-muted/25 p-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
                       <div className="min-w-0">
                         <dt className="text-xs text-muted-foreground">{t("media.sourceIdentifier")}</dt>
                         <dd className="mt-1 break-all font-mono">{activeMediaDetail.source.toUpperCase()}#{activeMediaDetail.id}</dd>
@@ -1028,12 +1073,6 @@ export default function MediaPage() {
                         <dt className="text-xs text-muted-foreground">{t("media.releaseDate")}</dt>
                         <dd className="mt-1 break-words">{activeMediaDetail.release_date || activeMediaDetail.year || t("media.unknownYear")}</dd>
                       </div>
-                      {activeMediaDetail.original_title && activeMediaDetail.original_title !== activeMediaDetail.title && (
-                        <div className="min-w-0 sm:col-span-2">
-                          <dt className="text-xs text-muted-foreground">{t("media.originalTitle")}</dt>
-                          <dd className="mt-1 break-words">{activeMediaDetail.original_title}</dd>
-                        </div>
-                      )}
                       {activeMediaDetail.runtime !== undefined && activeMediaDetail.runtime > 0 && (
                         <div className="min-w-0">
                           <dt className="text-xs text-muted-foreground">{t("media.runtime")}</dt>
@@ -1046,13 +1085,103 @@ export default function MediaPage() {
                           <dd className="mt-1">{t("media.episodeCount", { count: activeMediaDetail.episodes })}</dd>
                         </div>
                       )}
+                      {activeMediaDetail.seasons !== undefined && activeMediaDetail.seasons > 0 && (
+                        <div className="min-w-0">
+                          <dt className="text-xs text-muted-foreground">{t("media.seasons")}</dt>
+                          <dd className="mt-1">{t("media.seasonCount", { count: activeMediaDetail.seasons })}</dd>
+                        </div>
+                      )}
+                      {activeMediaDetail.volumes !== undefined && activeMediaDetail.volumes > 0 && (
+                        <div className="min-w-0">
+                          <dt className="text-xs text-muted-foreground">{t("media.volumes")}</dt>
+                          <dd className="mt-1">{t("media.volumeCount", { count: activeMediaDetail.volumes })}</dd>
+                        </div>
+                      )}
                       {activeMediaDetail.status && (
                         <div className="min-w-0">
                           <dt className="text-xs text-muted-foreground">{t("media.sourceStatus")}</dt>
                           <dd className="mt-1 break-words">{activeMediaDetail.status}</dd>
                         </div>
                       )}
+                      {activeMediaDetail.end_date && (
+                        <div className="min-w-0">
+                          <dt className="text-xs text-muted-foreground">{t("media.endDate")}</dt>
+                          <dd className="mt-1 break-words">{activeMediaDetail.end_date}</dd>
+                        </div>
+                      )}
+                      {activeMediaDetail.platform && (
+                        <div className="min-w-0">
+                          <dt className="text-xs text-muted-foreground">{t("media.platform")}</dt>
+                          <dd className="mt-1 break-words">{activeMediaDetail.platform}</dd>
+                        </div>
+                      )}
+                      {activeMediaDetail.broadcast && (
+                        <div className="min-w-0">
+                          <dt className="text-xs text-muted-foreground">{t("media.broadcast")}</dt>
+                          <dd className="mt-1 break-words">{activeMediaDetail.broadcast}</dd>
+                        </div>
+                      )}
+                      {activeMediaDetail.rank !== undefined && activeMediaDetail.rank > 0 && (
+                        <div className="min-w-0">
+                          <dt className="text-xs text-muted-foreground">{t("media.rank")}</dt>
+                          <dd className="mt-1">{t("media.rankValue", { rank: activeMediaDetail.rank })}</dd>
+                        </div>
+                      )}
+                      {activeMediaDetail.vote_count !== undefined && activeMediaDetail.vote_count > 0 && (
+                        <div className="min-w-0">
+                          <dt className="text-xs text-muted-foreground">{t("media.voteCount")}</dt>
+                          <dd className="mt-1">{t("media.voteCountValue", { count: activeMediaDetail.vote_count })}</dd>
+                        </div>
+                      )}
+                      {activeMediaDetail.countries?.length ? (
+                        <div className="min-w-0">
+                          <dt className="text-xs text-muted-foreground">{t("media.countries")}</dt>
+                          <dd className="mt-1 break-words">{activeMediaDetail.countries.join(" / ")}</dd>
+                        </div>
+                      ) : null}
+                      {activeMediaDetail.languages?.length ? (
+                        <div className="min-w-0">
+                          <dt className="text-xs text-muted-foreground">{t("media.languages")}</dt>
+                          <dd className="mt-1 break-words">{activeMediaDetail.languages.join(" / ")}</dd>
+                        </div>
+                      ) : null}
                     </dl>
+
+                    {activeMediaDetail.tagline && (
+                      <p className="border-l-2 border-primary/40 pl-4 text-sm font-semibold italic leading-relaxed text-muted-foreground">
+                        {activeMediaDetail.tagline}
+                      </p>
+                    )}
+
+                    {activeMediaDetail.aliases?.length ? (
+                      <div className="space-y-2">
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">{t("media.aliases")}</p>
+                        <p className="break-words text-sm leading-relaxed">{activeMediaDetail.aliases.join(" / ")}</p>
+                      </div>
+                    ) : null}
+
+                    {(activeMediaDetail.creators?.length || activeMediaDetail.studios?.length || activeMediaDetail.cast?.length) ? (
+                      <dl className="grid gap-4 rounded-lg border bg-background/60 p-4 text-sm sm:grid-cols-2">
+                        {activeMediaDetail.creators?.length ? (
+                          <div className="min-w-0">
+                            <dt className="text-xs text-muted-foreground">{t("media.creators")}</dt>
+                            <dd className="mt-1 break-words leading-relaxed">{activeMediaDetail.creators.join(" / ")}</dd>
+                          </div>
+                        ) : null}
+                        {activeMediaDetail.studios?.length ? (
+                          <div className="min-w-0">
+                            <dt className="text-xs text-muted-foreground">{t("media.studios")}</dt>
+                            <dd className="mt-1 break-words leading-relaxed">{activeMediaDetail.studios.join(" / ")}</dd>
+                          </div>
+                        ) : null}
+                        {activeMediaDetail.cast?.length ? (
+                          <div className="min-w-0 sm:col-span-2">
+                            <dt className="text-xs text-muted-foreground">{t("media.cast")}</dt>
+                            <dd className="mt-1 break-words leading-relaxed">{activeMediaDetail.cast.join(" / ")}</dd>
+                          </div>
+                        ) : null}
+                      </dl>
+                    ) : null}
 
                     <div className="space-y-2">
                       <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">{t("media.about")}</p>

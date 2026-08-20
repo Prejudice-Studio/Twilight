@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -86,6 +87,87 @@ func interleaveMediaResults(primary, secondary []map[string]any, limit int) []ma
 		}
 	}
 	return result
+}
+
+func mediaFloat(value any) float64 {
+	var result float64
+	switch typed := value.(type) {
+	case float64:
+		result = typed
+	case float32:
+		result = float64(typed)
+	case int:
+		result = float64(typed)
+	case int64:
+		result = float64(typed)
+	case string:
+		result, _ = strconv.ParseFloat(strings.TrimSpace(typed), 64)
+	default:
+		return 0
+	}
+	if math.IsNaN(result) || math.IsInf(result, 0) {
+		return 0
+	}
+	return result
+}
+
+func mediaStringList(value any, fields []string, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	values := make([]string, 0, min(limit, 8))
+	seen := make(map[string]struct{}, min(limit, 8))
+	var appendValue func(any)
+	appendValue = func(candidate any) {
+		if len(values) >= limit || candidate == nil {
+			return
+		}
+		switch typed := candidate.(type) {
+		case string:
+			text := truncateString(strings.TrimSpace(strings.ToValidUTF8(typed, "")), 120)
+			key := strings.ToLower(text)
+			if text == "" {
+				return
+			}
+			if _, exists := seen[key]; exists {
+				return
+			}
+			seen[key] = struct{}{}
+			values = append(values, text)
+		case []any:
+			for _, item := range typed {
+				appendValue(item)
+				if len(values) >= limit {
+					break
+				}
+			}
+		case map[string]any:
+			for _, field := range fields {
+				if nested, ok := typed[field]; ok {
+					before := len(values)
+					appendValue(nested)
+					if len(values) > before {
+						break
+					}
+				}
+			}
+		}
+	}
+	appendValue(value)
+	if len(values) == 0 {
+		return nil
+	}
+	return values
+}
+
+func mergeMediaStringLists(limit int, groups ...[]string) []string {
+	rows := make([]any, 0, len(groups))
+	for _, group := range groups {
+		for _, value := range group {
+			rows = append(rows, value)
+		}
+	}
+	return mediaStringList(rows, nil, limit)
 }
 
 func (a *App) mediaDetail(ctx context.Context, source, id, mediaType string) (map[string]any, bool) {

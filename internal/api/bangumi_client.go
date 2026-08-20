@@ -116,26 +116,87 @@ func bangumiToMedia(item map[string]any) map[string]any {
 		result["year"] = date[:4]
 	}
 	rating, _ := item["rating"].(map[string]any)
-	score := numeric(rating["score"])
+	score := mediaFloat(rating["score"])
 	result["vote_average"] = score
 	result["rating"] = score
-	genres := []string{}
-	if tags, ok := item["tags"].([]any); ok {
-		for _, row := range tags {
-			tag, _ := row.(map[string]any)
-			if name := asString(tag["name"]); name != "" {
-				genres = append(genres, name)
-			}
-			if len(genres) >= 5 {
-				break
-			}
-		}
+	if rank := int(numeric(rating["rank"])); rank > 0 {
+		result["rank"] = rank
 	}
+	if voteCount := int(numeric(rating["total"])); voteCount > 0 {
+		result["vote_count"] = voteCount
+	}
+	if episodes := int(numeric(item["eps"])); episodes > 0 {
+		result["episodes"] = episodes
+	}
+	if volumes := int(numeric(item["volumes"])); volumes > 0 {
+		result["volumes"] = volumes
+	}
+	if platform := strings.TrimSpace(asString(item["platform"])); platform != "" {
+		result["platform"] = truncateString(platform, 80)
+	}
+	genres := mediaStringList(item["tags"], []string{"name"}, 8)
 	if len(genres) > 0 {
 		result["genres"] = genres
 	}
-	result["extra"] = map[string]any{"rank": rating["rank"], "type_id": item["type"], "eps": item["eps"], "volumes": item["volumes"], "tags": item["tags"]}
+	info := bangumiInfobox(item["infobox"])
+	if aliases := info["别名"]; len(aliases) > 0 {
+		result["aliases"] = aliases
+	}
+	if endDate := firstBangumiInfo(info, "播放结束", "发售日"); endDate != "" {
+		result["end_date"] = endDate
+	}
+	if officialURL := firstBangumiInfo(info, "官方网站"); officialURL != "" {
+		result["official_url"] = officialURL
+	}
+	if broadcast := firstBangumiInfo(info, "放送星期", "播放电视台"); broadcast != "" {
+		result["broadcast"] = broadcast
+	}
+	creators := mergeMediaStringLists(8, info["导演"], info["原作"], info["系列构成"], info["脚本"], info["编剧"])
+	if len(creators) > 0 {
+		result["creators"] = creators
+	}
+	studios := mergeMediaStringLists(8, info["动画制作"], info["制作"], info["製作"])
+	if len(studios) > 0 {
+		result["studios"] = studios
+	}
+	cast := mergeMediaStringLists(8, info["主演"], info["演员"])
+	if len(cast) > 0 {
+		result["cast"] = cast
+	}
+	if countries := mergeMediaStringLists(5, info["国家"], info["地区"]); len(countries) > 0 {
+		result["countries"] = countries
+	}
+	if languages := info["语言"]; len(languages) > 0 {
+		result["languages"] = languages
+	}
+	result["extra"] = map[string]any{"rank": result["rank"], "type_id": item["type"], "eps": result["episodes"], "volumes": result["volumes"], "tags": genres}
 	return result
+}
+
+func bangumiInfobox(value any) map[string][]string {
+	rows, _ := value.([]any)
+	result := make(map[string][]string, len(rows))
+	for _, row := range rows {
+		entry, _ := row.(map[string]any)
+		key := strings.TrimSpace(asString(entry["key"]))
+		if key == "" {
+			continue
+		}
+		values := mediaStringList(entry["value"], []string{"v", "value", "name"}, 8)
+		if len(values) > 0 {
+			result[key] = values
+		}
+	}
+	return result
+}
+
+func firstBangumiInfo(info map[string][]string, keys ...string) string {
+	for _, key := range keys {
+		if values := info[key]; len(values) > 0 {
+			return values[0]
+		}
+	}
+	return ""
 }
 
 func bangumiTypeName(t int) string {
