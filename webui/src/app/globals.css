@@ -742,7 +742,7 @@
   .js-code-highlight .tok-comment { color: hsl(var(--muted-foreground)); font-style: italic; }
   .js-code-highlight .tok-fn { color: #60a5fa; }
   .light .js-code-highlight .tok-keyword,
-  :root:not(.dark) .js-code-highlight .tok-keyword { color: #9333ea; }
+  :root:not(.dark) .js-code-highlight .tok-keyword { color: #0369a1; }
   .light .js-code-highlight .tok-string,
   :root:not(.dark) .js-code-highlight .tok-string { color: #059669; }
   .light .js-code-highlight .tok-number,

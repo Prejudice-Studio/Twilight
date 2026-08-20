@@ -16,8 +16,8 @@ import {
 } from "@/lib/theme-custom";
 import { Loader2, Save } from "lucide-react";
 
-const primaryPresets = ["#7c3aed", "#2563eb", "#0891b2", "#059669", "#dc2626", "#ea580c", "#db2777", "#111827"];
-const accentPresets = ["#ede9fe", "#dbeafe", "#cffafe", "#dcfce7", "#fee2e2", "#ffedd5", "#fce7f3", "#e5e7eb"];
+const primaryPresets = ["#334155", "#2563eb", "#0891b2", "#059669", "#dc2626", "#ea580c", "#0f766e", "#111827"];
+const accentPresets = ["#e2e8f0", "#dbeafe", "#cffafe", "#dcfce7", "#fee2e2", "#ffedd5", "#ccfbf1", "#e5e7eb"];
 
 function normalizeHexColor(value: string): string {
   const trimmed = value.trim();

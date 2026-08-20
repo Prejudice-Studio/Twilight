@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -48,6 +48,8 @@ import { sanitizeExternalUrl, sanitizeImageUrl } from "@/lib/safe-url";
 const MAX_SEARCH_CACHE_ENTRIES = 20;
 const MAX_DETAIL_CACHE_ENTRIES = 40;
 const MAX_INVENTORY_CACHE_ENTRIES = 40;
+const DEFAULT_POSTER_WIDTH = 500;
+const DEFAULT_POSTER_HEIGHT = 750;
 
 function rememberCache<K, V>(cache: Map<K, V>, key: K, value: V, limit: number) {
   if (cache.has(key)) {
@@ -168,6 +170,15 @@ export default function MediaPage() {
   const [inventoryCheck, setInventoryCheck] = useState<InventoryCheckResult | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [isRequesting, setIsRequesting] = useState(false);
+  const [detailPosterMetrics, setDetailPosterMetrics] = useState<{
+    src: string;
+    width: number;
+    height: number;
+  } | null>(null);
+  const [detailViewport, setDetailViewport] = useState(() => ({
+    width: typeof window === "undefined" ? 1280 : window.innerWidth,
+    height: typeof window === "undefined" ? 850 : window.innerHeight,
+  }));
   const [selectedSeason, setSelectedSeason] = useState<number | undefined>();
   const [requestNote, setRequestNote] = useState("");
   
@@ -201,6 +212,23 @@ export default function MediaPage() {
   useEffect(() => {
     void fetchSystemInfo();
   }, [fetchSystemInfo]);
+
+  useEffect(() => {
+    if (!selectedMedia) return;
+    let frame = 0;
+    const updateViewport = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        setDetailViewport({ width: window.innerWidth, height: window.innerHeight });
+      });
+    };
+    updateViewport();
+    window.addEventListener("resize", updateViewport, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", updateViewport);
+    };
+  }, [selectedMedia]);
 
   const isAbortError = (error: unknown) => {
     return error instanceof DOMException && error.name === "AbortError";
@@ -584,6 +612,26 @@ export default function MediaPage() {
   const detailSourceURL = sanitizeExternalUrl(activeMediaDetail?.source_url);
   const detailOfficialURL = sanitizeExternalUrl(activeMediaDetail?.official_url);
   const detailTrailerURL = sanitizeExternalUrl(activeMediaDetail?.trailer_url);
+  const currentPosterMetrics = detailPosterMetrics && detailPosterMetrics.src === detailPoster
+    ? detailPosterMetrics
+    : { src: detailPoster, width: DEFAULT_POSTER_WIDTH, height: DEFAULT_POSTER_HEIGHT };
+  const posterNaturalWidth = Math.max(1, currentPosterMetrics.width);
+  const posterNaturalHeight = Math.max(1, currentPosterMetrics.height);
+  const rightPanelWidth = Math.min(620, Math.max(440, detailViewport.width * 0.52));
+  const availablePosterWidth = Math.max(280, detailViewport.width - rightPanelWidth - 16);
+  const availablePosterHeight = Math.max(320, detailViewport.height - 16);
+  const posterScale = detailPoster
+    ? Math.min(1, availablePosterWidth / posterNaturalWidth, availablePosterHeight / posterNaturalHeight)
+    : 1;
+  const posterDisplayWidth = Math.max(1, Math.round(posterNaturalWidth * posterScale));
+  const posterDisplayHeight = Math.max(1, Math.round(posterNaturalHeight * posterScale));
+  const detailDialogWidth = posterDisplayWidth + Math.round(rightPanelWidth);
+  const detailDialogStyle = {
+    "--media-detail-height": `${posterDisplayHeight}px`,
+    "--media-detail-width": `${detailDialogWidth}px`,
+    "--media-poster-width": `${posterDisplayWidth}px`,
+    "--media-detail-panel-width": `${Math.round(rightPanelWidth)}px`,
+  } as CSSProperties & Record<string, string>;
   const mediaTypeLabel = (media: MediaItem) => {
     if (media.media_type_label) return media.media_type_label;
     switch (String(media.media_type || "").toLowerCase()) {
@@ -979,18 +1027,21 @@ export default function MediaPage() {
 
       {/* Detail Dialog */}
       <Dialog open={!!selectedMedia} onOpenChange={(open) => !open && closeMediaDetail()}>
-        <DialogContent className="!max-h-[calc(100dvh-1rem)] max-w-6xl overflow-hidden rounded-xl border-0 p-0 glass-acrylic shadow-2xl md:h-[calc(100dvh-1rem)] md:!max-h-[850px] [&>button:last-child]:bg-black/55 [&>button:last-child]:text-white">
+        <DialogContent
+          style={detailDialogStyle}
+          className="!max-h-[calc(100dvh-1rem)] max-w-6xl overflow-hidden rounded-xl border-0 p-0 glass-acrylic shadow-2xl lg:!h-[var(--media-detail-height)] lg:!w-[var(--media-detail-width)] lg:!max-w-[calc(100vw-1rem)] [&>button:last-child]:bg-black/55 [&>button:last-child]:text-white"
+        >
           {activeMediaDetail && (
             <>
               <DialogHeader className="sr-only">
                 <DialogTitle>{activeMediaDetail.title}</DialogTitle>
                 <DialogDescription>{t("media.detailDialogDescription", { title: activeMediaDetail.title })}</DialogDescription>
               </DialogHeader>
-              <div className="grid min-h-0 flex-1 overflow-y-auto md:h-full md:grid-cols-[minmax(300px,1fr)_minmax(0,1fr)] md:overflow-hidden">
-                <div className="custom-scrollbar min-h-0 overflow-y-auto bg-background p-4 sm:p-5 md:flex md:items-end md:pb-0">
-                  <div className="mx-auto w-full max-w-[360px] md:mx-0 md:max-w-none">
+              <div className="grid min-h-0 flex-1 overflow-y-auto lg:h-full lg:grid-cols-[var(--media-poster-width)_var(--media-detail-panel-width)] lg:overflow-hidden">
+                <div className="flex min-h-0 justify-center bg-background p-4 sm:p-5 lg:h-full lg:w-full lg:items-stretch lg:p-0">
+                  <div className="mx-auto w-full max-w-[360px] lg:mx-0 lg:h-full lg:w-full lg:max-w-none">
                     {detailPoster ? (
-                      <div className="w-full overflow-hidden rounded-lg shadow-2xl">
+                      <div className="w-full overflow-hidden rounded-lg shadow-2xl lg:h-full lg:rounded-none lg:shadow-none">
                         {/* Use the image's intrinsic dimensions so non-2:3 posters do not get letterboxed. */}
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
@@ -998,7 +1049,17 @@ export default function MediaPage() {
                           alt={activeMediaDetail.title}
                           loading="eager"
                           decoding="async"
-                          className="block h-auto max-w-full w-full"
+                          onLoad={(event) => {
+                            const image = event.currentTarget;
+                            if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+                              setDetailPosterMetrics({
+                                src: detailPoster,
+                                width: image.naturalWidth,
+                                height: image.naturalHeight,
+                              });
+                            }
+                          }}
+                          className="block h-auto max-w-full w-full lg:h-full lg:object-contain"
                         />
                       </div>
                     ) : (
@@ -1013,7 +1074,7 @@ export default function MediaPage() {
                   </div>
                 </div>
 
-                <div className="custom-scrollbar min-h-0 overflow-y-auto bg-card/95 p-5 text-foreground sm:p-7">
+                <div className="custom-scrollbar min-h-0 overflow-y-auto bg-card/95 p-5 text-foreground sm:p-7 lg:h-full">
                   <div className="space-y-6">
                     {isLoadingDetail && (
                       <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs font-medium text-primary">

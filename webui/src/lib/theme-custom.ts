@@ -2,6 +2,8 @@
 
 const STORAGE_KEY = "twilight:theme-custom";
 const CSS_VAR_PREFIX = "--tw-custom";
+const LEGACY_DEFAULT_PRIMARY = "#7c3aed";
+const LEGACY_DEFAULT_ACCENT = "#ede9fe";
 
 export interface ThemeCustom {
   /** 主色，使用 #RRGGBB 存储 */
@@ -20,8 +22,8 @@ export interface ThemeCustom {
 }
 
 const DEFAULTS: ThemeCustom = {
-  primaryColor: "#7c3aed",
-  accentColor: "#ede9fe",
+  primaryColor: "#334155",
+  accentColor: "#e2e8f0",
   radius: 1.0,
   glassBlur: 12,
   compact: false,
@@ -112,11 +114,18 @@ function normalizeThemeCustom(partial: Partial<ThemeCustom>): ThemeCustom {
       ? hslToHex(257 + partial.primaryHueShift, 90, 58)
       : DEFAULTS.primaryColor;
 
+  const primaryColor = normalizeHexColor(migratedPrimary, DEFAULTS.primaryColor);
+  const accentColor = normalizeHexColor(partial.accentColor, DEFAULTS.accentColor);
+  const isLegacyDefault =
+    primaryColor === LEGACY_DEFAULT_PRIMARY && accentColor === LEGACY_DEFAULT_ACCENT;
+  const isLegacyHueDefault =
+    typeof partial.primaryColor !== "string" && partial.primaryHueShift === 0;
+
   return {
     ...DEFAULTS,
     ...partial,
-    primaryColor: normalizeHexColor(migratedPrimary, DEFAULTS.primaryColor),
-    accentColor: normalizeHexColor(partial.accentColor, DEFAULTS.accentColor),
+    primaryColor: isLegacyDefault || isLegacyHueDefault ? DEFAULTS.primaryColor : primaryColor,
+    accentColor: isLegacyDefault ? DEFAULTS.accentColor : accentColor,
     radius: clamp(Number(partial.radius ?? DEFAULTS.radius), 0.25, 2),
     glassBlur: clamp(Number(partial.glassBlur ?? DEFAULTS.glassBlur), 0, 32),
     compact: Boolean(partial.compact),
