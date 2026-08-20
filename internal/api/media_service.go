@@ -8,8 +8,11 @@ import (
 	"strings"
 )
 
-func (a *App) searchMedia(ctx context.Context, query, source, mediaType string, limit int, includeDetails bool) ([]map[string]any, string, map[string]string) {
+func (a *App) searchMedia(ctx context.Context, query, source, mediaType string, limit int, _ bool) ([]map[string]any, string, map[string]string) {
 	if strings.TrimSpace(query) == "" {
+		return []map[string]any{}, "OK", nil
+	}
+	if limit <= 0 {
 		return []map[string]any{}, "OK", nil
 	}
 	if kind, id, mt, ok := detectMediaID(query); ok {
@@ -17,29 +20,72 @@ func (a *App) searchMedia(ctx context.Context, query, source, mediaType string, 
 			return []map[string]any{result}, "OK", nil
 		}
 	}
-	results := []map[string]any{}
 	sourceErrors := map[string]string{}
-	if source == "all" || source == "tmdb" {
-		if tmdb, err := a.searchTMDB(ctx, query, mediaType, limit); err == nil {
-			results = append(results, tmdb...)
-		} else {
-			sourceErrors["tmdb"] = fmt.Sprintf("TMDB 搜索失败：%v", err)
+	results := make([]map[string]any, 0, limit)
+
+	if source == "all" {
+		// 两个来源彼此独立，并行查询能把聚合搜索时延收敛到较慢的一路。
+		// 每个通道容量为 1，客户端取消请求后子任务也不会因回传结果而阻塞。
+		type sourceResult struct {
+			items []map[string]any
+			err   error
 		}
-	}
-	if source == "all" || source == "bangumi" {
-		if bgm, err := a.searchBangumi(ctx, query, limit); err == nil {
-			results = append(results, bgm...)
+		tmdbResult := make(chan sourceResult, 1)
+		bangumiResult := make(chan sourceResult, 1)
+		go func() {
+			items, err := a.searchTMDB(ctx, query, mediaType, limit)
+			tmdbResult <- sourceResult{items: items, err: err}
+		}()
+		go func() {
+			items, err := a.searchBangumi(ctx, query, limit)
+			bangumiResult <- sourceResult{items: items, err: err}
+		}()
+
+		tmdb := <-tmdbResult
+		bangumi := <-bangumiResult
+		if tmdb.err != nil {
+			sourceErrors["tmdb"] = fmt.Sprintf("TMDB 搜索失败：%v", tmdb.err)
+		}
+		if bangumi.err != nil {
+			sourceErrors["bangumi"] = fmt.Sprintf("Bangumi 搜索失败：%v", bangumi.err)
+		}
+		results = interleaveMediaResults(tmdb.items, bangumi.items, limit)
+	} else if source == "bangumi" {
+		if items, err := a.searchBangumi(ctx, query, limit); err == nil {
+			results = append(results, items...)
 		} else {
 			sourceErrors["bangumi"] = fmt.Sprintf("Bangumi 搜索失败：%v", err)
 		}
-	}
-	if len(results) > limit {
-		results = results[:limit]
+	} else {
+		if items, err := a.searchTMDB(ctx, query, mediaType, limit); err == nil {
+			results = append(results, items...)
+		} else {
+			sourceErrors["tmdb"] = fmt.Sprintf("TMDB 搜索失败：%v", err)
+		}
 	}
 	if len(sourceErrors) == 0 {
 		sourceErrors = nil
 	}
 	return results, "OK", sourceErrors
+}
+
+func interleaveMediaResults(primary, secondary []map[string]any, limit int) []map[string]any {
+	if limit <= 0 {
+		return []map[string]any{}
+	}
+	result := make([]map[string]any, 0, min(limit, len(primary)+len(secondary)))
+	for index := 0; len(result) < limit && (index < len(primary) || index < len(secondary)); index++ {
+		if index < len(primary) {
+			result = append(result, primary[index])
+			if len(result) == limit {
+				break
+			}
+		}
+		if index < len(secondary) {
+			result = append(result, secondary[index])
+		}
+	}
+	return result
 }
 
 func (a *App) mediaDetail(ctx context.Context, source, id, mediaType string) (map[string]any, bool) {

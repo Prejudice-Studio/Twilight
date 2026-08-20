@@ -190,10 +190,10 @@
 
 | 方法 | 路径 | 鉴权 | 说明 |
 | ---- | ---- | ---- | ---- |
-| GET | `/api/v1/media/search` | User | 聚合搜索 |
+| GET | `/api/v1/media/search` | User | TMDB/Bangumi 并行聚合搜索；全部来源交错合并并返回部分失败 warnings |
 | GET | `/api/v1/media/search/tmdb` | User | TMDB 搜索 |
 | GET | `/api/v1/media/search/bangumi` | User | Bangumi 搜索 |
-| GET | `/api/v1/media/search/id/{source_type}/{media_id}` | User | 按源 ID 搜索详情 |
+| GET | `/api/v1/media/search/id/{source_type}/{media_id}` | User | 按源 ID 查询海报与完整媒体详情 |
 | GET | `/api/v1/media/detail` | User | 媒体详情 |
 | GET | `/api/v1/media/tmdb/{tmdb_id}` | User | TMDB 详情 |
 | GET | `/api/v1/media/bangumi/{bgm_id}` | User | Bangumi 详情 |

@@ -435,7 +435,7 @@ export interface MediaItem {
   overview?: string;
   poster?: string;
   poster_url?: string;
-  year?: number;
+  year?: number | string;
   release_date?: string;
   source: string;
   source_url?: string;
@@ -446,11 +446,13 @@ export interface MediaItem {
 
 export interface MediaDetail extends MediaItem {
   backdrop?: string;
+  backdrop_url?: string;
   genres?: string[];
   runtime?: number;
   seasons?: number;
   episodes?: number;
   status?: string;
+  extra?: Record<string, unknown>;
 }
 
 export interface InventoryCheckRequest {

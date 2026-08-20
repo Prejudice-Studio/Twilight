@@ -11,10 +11,21 @@ import (
 	"github.com/prejudice-studio/twilight/internal/store"
 )
 
-func (a *App) handleMediaSearch(w http.ResponseWriter, r *http.Request, _ Params) {
+func (a *App) handleMediaSearch(w http.ResponseWriter, r *http.Request, params Params) {
 	query := firstNonEmpty(r.URL.Query().Get("q"), r.URL.Query().Get("query"), r.URL.Query().Get("keyword"))
 	limit := clamp(queryInt(r, "limit", queryInt(r, "per_page", 20)), 1, 50)
-	source := normalizeSource(firstNonEmpty(r.URL.Query().Get("source"), "all"))
+	// The source-specific aliases are part of the public API and take precedence
+	// over a query parameter, so the URL path and returned source cannot diverge.
+	routeSource := params["source"]
+	if routeSource == "" {
+		switch r.URL.Path {
+		case "/api/v1/media/search/tmdb":
+			routeSource = "tmdb"
+		case "/api/v1/media/search/bangumi":
+			routeSource = "bangumi"
+		}
+	}
+	source := normalizeSource(firstNonEmpty(routeSource, r.URL.Query().Get("source"), "all"))
 	mediaType := firstNonEmpty(r.URL.Query().Get("type"), r.URL.Query().Get("media_type"))
 	results, message, sourceErrors := a.searchMedia(r.Context(), query, source, mediaType, limit, false)
 	if source != "all" {

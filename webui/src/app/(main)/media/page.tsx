@@ -38,11 +38,12 @@ import {
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { api, type MediaItem, type MediaDetail, type InventoryCheckResult, type MediaRequest } from "@/lib/api";
+import { api, type ApiResponse, type MediaItem, type MediaDetail, type InventoryCheckResult, type MediaRequest } from "@/lib/api";
 import { formatRelativeTime, cn } from "@/lib/utils";
 import { useSystemStore } from "@/store/system";
 import { mediaRequestExternalUrl } from "@/lib/media-external-url";
 import { useI18n } from "@/lib/i18n";
+import { sanitizeExternalUrl, sanitizeImageUrl } from "@/lib/safe-url";
 
 const MAX_SEARCH_CACHE_ENTRIES = 20;
 const MAX_DETAIL_CACHE_ENTRIES = 40;
@@ -58,6 +59,90 @@ function rememberCache<K, V>(cache: Map<K, V>, key: K, value: V, limit: number) 
     if (oldestKey === undefined) break;
     cache.delete(oldestKey);
   }
+}
+
+interface ResponseOutcome<T> {
+  data?: T;
+  message?: string;
+  error?: unknown;
+}
+
+async function settleResponse<T>(request: Promise<ApiResponse<T>>): Promise<ResponseOutcome<T>> {
+  try {
+    const response = await request;
+    if (response.success && response.data !== undefined) {
+      return { data: response.data };
+    }
+    return { message: response.message };
+  } catch (error) {
+    return { error };
+  }
+}
+
+function normalizeMediaYear(value: MediaItem["year"]): number | undefined {
+  const parsed = typeof value === "number" ? value : Number.parseInt(String(value || ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function normalizeMediaRating(value: MediaItem["rating"] | MediaItem["vote_average"]): number | undefined {
+  const parsed = typeof value === "number" ? value : Number.parseFloat(String(value ?? ""));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function normalizeMediaItem(item: MediaItem): MediaItem {
+  const source = String(item.source || "tmdb").toLowerCase();
+  const mediaType = String(item.media_type || "movie").toLowerCase();
+  const poster = sanitizeImageUrl(item.poster || item.poster_url);
+  return {
+    ...item,
+    source,
+    media_type: mediaType,
+    title: String(item.title || ""),
+    poster,
+    poster_url: poster,
+    source_url: sanitizeExternalUrl(item.source_url),
+    year: normalizeMediaYear(item.year),
+    rating: normalizeMediaRating(item.rating ?? item.vote_average),
+  };
+}
+
+function normalizeMediaDetail(detail: MediaDetail): MediaDetail {
+  const item = normalizeMediaItem(detail);
+  const backdrop = sanitizeImageUrl(detail.backdrop || detail.backdrop_url);
+  return {
+    ...detail,
+    ...item,
+    backdrop,
+    backdrop_url: backdrop,
+  };
+}
+
+function mergeMediaItems(current: MediaItem, incoming: MediaItem): MediaItem {
+  const first = normalizeMediaItem(current);
+  const next = normalizeMediaItem(incoming);
+  return normalizeMediaItem({
+    id: first.id,
+    source: first.source,
+    media_type: first.media_type,
+    title: first.title || next.title,
+    original_title: first.original_title || next.original_title,
+    overview: first.overview || next.overview,
+    poster: first.poster || next.poster,
+    poster_url: first.poster_url || next.poster_url,
+    release_date: first.release_date || next.release_date,
+    year: first.year ?? next.year,
+    source_url: first.source_url || next.source_url,
+    rating: first.rating ?? next.rating,
+    vote_average: first.vote_average ?? next.vote_average,
+  });
+}
+
+function mediaCacheKey(media: MediaItem): string {
+  return `${media.source.toLowerCase()}-${media.id}-${media.media_type.toLowerCase()}`;
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 export default function MediaPage() {
@@ -114,6 +199,15 @@ export default function MediaPage() {
     return error instanceof DOMException && error.name === "AbortError";
   };
 
+  const closeMediaDetail = () => {
+    detailAbortRef.current?.abort();
+    detailAbortRef.current = null;
+    setSelectedMedia(null);
+    setMediaDetail(null);
+    setInventoryCheck(null);
+    setIsLoadingDetail(false);
+  };
+
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
 
@@ -128,6 +222,7 @@ export default function MediaPage() {
       const cachedResults = searchCacheRef.current.get(searchCacheKey);
       if (cachedResults) {
         setResults(cachedResults);
+        setIsSearching(false);
         return;
       }
     }
@@ -164,65 +259,12 @@ export default function MediaPage() {
         }
 
         if (detailRes.success && detailRes.data) {
-          // 转换为 MediaItem 格式并直接显示
-          const detail = detailRes.data;
-          const mediaItem: MediaItem = {
-            id: detail.id,
-            title: detail.title,
-            original_title: detail.original_title,
-            media_type: detail.media_type,
-            overview: detail.overview,
-            release_date: detail.release_date,
-            year: detail.year,
-            poster: detail.poster || detail.poster_url,
-            poster_url: detail.poster_url,
-            rating: detail.rating || detail.vote_average,
-            vote_average: detail.vote_average,
-            source: detail.source,
-            source_url: detail.source_url,
-          };
+          const detail = normalizeMediaDetail(detailRes.data);
+          const mediaItem = normalizeMediaItem(detail);
           setResults([mediaItem]);
-          
-          // 直接使用已获取的详情数据，避免重复请求
-          setSelectedMedia(mediaItem);
-          setIsLoadingDetail(true);
-          setMediaDetail(null);
-          setInventoryCheck(null);
-          setSelectedSeason(undefined);
-          setRequestNote("");
-
-          if (controller.signal.aborted) return;
-
-          const detailKey = `${detail.source}-${detail.id}-${detail.media_type}`;
+          const detailKey = mediaCacheKey(detail);
           rememberCache(detailCacheRef.current, detailKey, detail, MAX_DETAIL_CACHE_ENTRIES);
-          
-          try {
-            let inventoryRes = null;
-            if (mediaItem.source !== "bangumi" && mediaItem.source !== "bgm") {
-              inventoryRes = await api.checkInventory({
-                source: mediaItem.source,
-                media_id: mediaItem.id,
-                media_type: mediaItem.media_type,
-                title: mediaItem.title,
-                original_title: mediaItem.original_title,
-                year: mediaItem.year,
-              }, controller.signal);
-            }
-
-            if (controller.signal.aborted) return;
-
-            setMediaDetail(detail);
-            if (inventoryRes?.success && inventoryRes.data) {
-              setInventoryCheck(inventoryRes.data);
-              rememberCache(inventoryCacheRef.current, detailKey, inventoryRes.data, MAX_INVENTORY_CACHE_ENTRIES);
-            }
-          } catch (error: any) {
-            if (isAbortError(error)) return;
-            console.error(error);
-            setMediaDetail(detail);
-          } finally {
-            setIsLoadingDetail(false);
-          }
+          void handleSelectMedia(mediaItem, detail);
         } else {
           toast({
             title: t("media.notFound"),
@@ -238,15 +280,11 @@ export default function MediaPage() {
           // 聚合逻辑：确保 TMDB 同片多季（或重复结果）被折叠
           const uniqueResults = new Map<string, MediaItem>();
           
-          res.data.results.forEach((item: any) => {
-            const key = `${item.source}-${item.id}-${item.media_type}`;
-            if (!uniqueResults.has(key)) {
-              uniqueResults.set(key, {
-                ...item,
-                poster: item.poster || item.poster_url,
-                rating: item.rating || item.vote_average,
-              });
-            }
+          res.data.results.forEach((item) => {
+            const normalized = normalizeMediaItem(item);
+            const key = mediaCacheKey(normalized);
+            const current = uniqueResults.get(key);
+            uniqueResults.set(key, current ? mergeMediaItems(current, normalized) : normalized);
           });
           
           const finalResults = Array.from(uniqueResults.values());
@@ -268,85 +306,119 @@ export default function MediaPage() {
           }
         }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (isAbortError(error)) return;
       toast({
         title: t("media.searchFailed"),
-        description: error.message,
+        description: errorMessage(error, t("common.networkError")),
         variant: "destructive",
       });
     } finally {
-      setIsSearching(false);
+      if (searchAbortRef.current === controller) {
+        setIsSearching(false);
+      }
     }
   };
 
-  const handleSelectMedia = async (media: MediaItem) => {
+  const handleSelectMedia = async (media: MediaItem, initialDetail?: MediaDetail) => {
     detailAbortRef.current?.abort();
     const controller = new AbortController();
     detailAbortRef.current = controller;
 
-    setSelectedMedia(media);
-    setIsLoadingDetail(true);
-    setMediaDetail(null);
-    setInventoryCheck(null);
+    const normalizedMedia = normalizeMediaItem(media);
+    const detailKey = mediaCacheKey(normalizedMedia);
+    const cachedDetail = initialDetail
+      ? normalizeMediaDetail(initialDetail)
+      : detailCacheRef.current.get(detailKey);
+    const cachedInventory = inventoryCacheRef.current.get(detailKey);
+    const inventorySupported = normalizedMedia.source !== "bangumi" && normalizedMedia.source !== "bgm";
+    const shouldLoadDetail = !cachedDetail;
+    const shouldLoadInventory = inventorySupported && !cachedInventory;
+
+    setSelectedMedia(normalizedMedia);
+    // 搜索结果本身已包含标题和海报，先展示它，再在后台补齐详情。
+    setMediaDetail(cachedDetail || normalizeMediaDetail(normalizedMedia));
+    setInventoryCheck(cachedInventory || null);
+    setIsLoadingDetail(shouldLoadDetail || shouldLoadInventory);
     setSelectedSeason(undefined);
     setRequestNote("");
 
+    if (cachedDetail) {
+      rememberCache(detailCacheRef.current, detailKey, cachedDetail, MAX_DETAIL_CACHE_ENTRIES);
+    }
+    if (!shouldLoadDetail && !shouldLoadInventory) {
+      return;
+    }
+
     try {
-      const detailKey = `${media.source}-${media.id}-${media.media_type}`;
-      const cachedDetail = detailCacheRef.current.get(detailKey);
-      const cachedInventory = inventoryCacheRef.current.get(detailKey);
-
-      if (cachedDetail) {
-        setMediaDetail(cachedDetail);
-      }
-      if (cachedInventory) {
-        setInventoryCheck(cachedInventory);
-      }
-      if (cachedDetail && cachedInventory) {
-        return;
-      }
-
-      // 获取详情和库存检查
-      const detailRes = await api.getMediaDetail(media.source, media.id, media.media_type, controller.signal);
-      let inventoryRes = null;
-      if (media.source !== "bangumi" && media.source !== "bgm") {
-        inventoryRes = await api.checkInventory({
-          source: media.source,
-          media_id: media.id,
-          media_type: media.media_type,
-          title: media.title,
-          original_title: media.original_title,
-          year: media.year,
-        }, controller.signal);
-      }
+      const [detailOutcome, inventoryOutcome] = await Promise.all([
+        shouldLoadDetail
+          ? settleResponse(api.getMediaDetail(
+              normalizedMedia.source,
+              normalizedMedia.id,
+              normalizedMedia.media_type,
+              controller.signal,
+            ))
+          : Promise.resolve<ResponseOutcome<MediaDetail>>({ data: cachedDetail }),
+        shouldLoadInventory
+          ? settleResponse(api.checkInventory({
+              source: normalizedMedia.source,
+              media_id: normalizedMedia.id,
+              media_type: normalizedMedia.media_type,
+              title: normalizedMedia.title,
+              original_title: normalizedMedia.original_title,
+              year: normalizeMediaYear(normalizedMedia.year),
+            }, controller.signal))
+          : Promise.resolve<ResponseOutcome<InventoryCheckResult>>({ data: cachedInventory }),
+      ]);
 
       if (controller.signal.aborted) return;
 
-      if (detailRes.success && detailRes.data) {
-        setMediaDetail(detailRes.data);
-        rememberCache(detailCacheRef.current, detailKey, detailRes.data, MAX_DETAIL_CACHE_ENTRIES);
-      } else {
+      if (detailOutcome.data) {
+        const normalizedDetail = normalizeMediaDetail(detailOutcome.data);
+        const detail = normalizeMediaDetail({
+          ...normalizedDetail,
+          title: normalizedDetail.title || normalizedMedia.title,
+          original_title: normalizedDetail.original_title || normalizedMedia.original_title,
+          overview: normalizedDetail.overview || normalizedMedia.overview,
+          poster: normalizedDetail.poster || normalizedMedia.poster,
+          poster_url: normalizedDetail.poster_url || normalizedMedia.poster_url,
+          year: normalizedDetail.year ?? normalizedMedia.year,
+          release_date: normalizedDetail.release_date || normalizedMedia.release_date,
+          source_url: normalizedDetail.source_url || normalizedMedia.source_url,
+          rating: normalizedDetail.rating ?? normalizedMedia.rating,
+          vote_average: normalizedDetail.vote_average ?? normalizedMedia.vote_average,
+        });
+        setMediaDetail(detail);
+        rememberCache(detailCacheRef.current, detailKey, detail, MAX_DETAIL_CACHE_ENTRIES);
+      } else if (shouldLoadDetail) {
         toast({
           title: t("media.detailFailed"),
-          description: detailRes.message || t("media.detailFailedDescription"),
+          description: detailOutcome.message || errorMessage(detailOutcome.error, t("media.detailFailedDescription")),
           variant: "destructive",
         });
       }
-      if (inventoryRes?.success && inventoryRes.data) {
-        setInventoryCheck(inventoryRes.data);
-        rememberCache(inventoryCacheRef.current, detailKey, inventoryRes.data, MAX_INVENTORY_CACHE_ENTRIES);
+      if (inventoryOutcome.data) {
+        setInventoryCheck(inventoryOutcome.data);
+        rememberCache(inventoryCacheRef.current, detailKey, inventoryOutcome.data, MAX_INVENTORY_CACHE_ENTRIES);
+      } else if (shouldLoadInventory) {
+        toast({
+          title: t("media.inventoryCheckFailed"),
+          description: inventoryOutcome.message || errorMessage(inventoryOutcome.error, t("common.networkError")),
+          variant: "destructive",
+        });
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (isAbortError(error)) return;
-      console.error(error);
       toast({
         title: t("media.detailFailed"),
-        description: error.message || t("common.networkError"),
+        description: errorMessage(error, t("common.networkError")),
         variant: "destructive",
       });
     } finally {
-      setIsLoadingDetail(false);
+      if (detailAbortRef.current === controller) {
+        setIsLoadingDetail(false);
+      }
     }
   };
 
@@ -364,7 +436,7 @@ export default function MediaPage() {
         poster: mediaDetail?.poster || selectedMedia.poster,
         poster_url: mediaDetail?.poster_url || selectedMedia.poster_url,
         overview: mediaDetail?.overview || selectedMedia.overview,
-        year: mediaDetail?.year || selectedMedia.year,
+        year: normalizeMediaYear(mediaDetail?.year ?? selectedMedia.year),
         season: selectedSeason,
         note: requestNote.trim() || undefined,
       });
@@ -376,7 +448,7 @@ export default function MediaPage() {
           variant: "success",
         });
         myRequestsCacheRef.current = null;
-        setSelectedMedia(null);
+        closeMediaDetail();
       } else {
         toast({
           title: t("media.requestFailed"),
@@ -448,7 +520,9 @@ export default function MediaPage() {
       if (isAbortError(error)) return;
       console.error(error);
     } finally {
-      setIsRequestsLoading(false);
+      if (requestsAbortRef.current === controller) {
+        setIsRequestsLoading(false);
+      }
     }
   };
 
@@ -492,6 +566,11 @@ export default function MediaPage() {
   );
   const inventoryIssueReady = Boolean(requestNeedsIssueNote && requestNote.trim());
   const requestBlockedByInventory = Boolean(requestNeedsIssueNote && !requestNote.trim());
+  const activeMediaDetail = selectedMedia
+    ? normalizeMediaDetail(mediaDetail || selectedMedia)
+    : null;
+  const detailPoster = sanitizeImageUrl(activeMediaDetail?.poster || activeMediaDetail?.poster_url);
+  const detailSourceURL = sanitizeExternalUrl(activeMediaDetail?.source_url);
 
   if (mediaRequestDisabled) {
     return (
@@ -636,15 +715,25 @@ export default function MediaPage() {
                 variants={container}
                 initial="hidden"
                 animate="show"
-                className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                className="space-y-4"
               >
-                {results.map((media) => (
-                  <motion.div
-                    key={`${media.source}-${media.id}`}
-                    variants={itemAnim}
-                  >
-                    <div
-                      className="group cursor-pointer premium-card h-full overflow-hidden p-0 flex flex-col hover:ring-2 ring-primary/40"
+                <div className="flex flex-wrap items-end justify-between gap-2">
+                  <div>
+                    <h2 className="text-xl font-bold">{t("media.resultsTitle")}</h2>
+                    <p className="text-sm text-muted-foreground">{t("media.resultsDescription")}</p>
+                  </div>
+                  <Badge variant="outline">{t("media.resultCount", { count: results.length })}</Badge>
+                </div>
+                <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {results.map((media) => (
+                    <motion.div
+                      key={mediaCacheKey(media)}
+                      variants={itemAnim}
+                    >
+                      <button
+                        type="button"
+                        aria-label={t("media.openDetails", { title: media.title })}
+                        className="group premium-card flex h-full w-full flex-col overflow-hidden p-0 text-left ring-primary/40 hover:ring-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                       onClick={() => handleSelectMedia(media)}
                     >
                       <div className="aspect-[2/3] relative overflow-hidden bg-muted">
@@ -679,7 +768,7 @@ export default function MediaPage() {
                         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                         
                         <div className="absolute bottom-4 left-4 right-4 translate-y-4 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-500">
-                           {media.rating && (
+                           {media.rating !== undefined && media.rating > 0 && (
                              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-400 rounded-full w-fit shadow-lg shadow-yellow-400/20">
                                <Star className="h-3.5 w-3.5 fill-black text-black" />
                                <span className="text-[12px] font-black text-black">{media.rating.toFixed(1)}</span>
@@ -694,9 +783,10 @@ export default function MediaPage() {
                           {media.year || t("media.unknownYear")}
                         </p>
                       </div>
-                    </div>
-                  </motion.div>
-                ))}
+                      </button>
+                    </motion.div>
+                  ))}
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
@@ -735,10 +825,10 @@ export default function MediaPage() {
                     >
                       <div className="flex min-w-0 flex-1 gap-4">
                         <div className="relative flex aspect-[2/3] w-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/60 bg-white/90 shadow-sm dark:border-slate-700/70 dark:bg-slate-950/70 sm:w-28">
-                          {req.media_info?.poster_url || req.media_info?.poster ? (
+                          {sanitizeImageUrl(req.media_info?.poster_url || req.media_info?.poster) ? (
                             <Image
-                              src={req.media_info.poster_url || req.media_info.poster || ""}
-                              alt={req.media_info.title}
+                              src={sanitizeImageUrl(req.media_info?.poster_url || req.media_info?.poster) || ""}
+                              alt={req.media_info?.title || t("media.unknownMedia")}
                               fill
                               unoptimized
                               sizes="112px"
@@ -852,180 +942,225 @@ export default function MediaPage() {
       </Tabs>
 
       {/* Detail Dialog */}
-      <Dialog open={!!selectedMedia} onOpenChange={() => {
-        setSelectedMedia(null);
-        setMediaDetail(null);
-        setInventoryCheck(null);
-      }}>
-        <DialogContent className="max-h-[90dvh] max-w-5xl overflow-y-auto rounded-[2rem] border-0 p-0 glass-acrylic shadow-2xl">
-          {isLoadingDetail ? (
-            <div className="flex h-[400px] items-center justify-center">
-              <div className="relative">
-                <div className="h-12 w-12 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
-                <div className="mt-4 text-xs font-black text-primary uppercase tracking-widest animate-pulse">{t("media.loadingDetails")}</div>
-              </div>
-            </div>
-          ) : !selectedMedia ? null : mediaDetail ? (
-            <div className="grid h-full max-h-[85vh] md:grid-cols-[minmax(240px,320px)_1fr]">
-              {/* Left Side: Poster */}
-              <div className="relative flex min-h-[360px] items-center justify-center bg-black/80 p-4 md:min-h-0">
-                {mediaDetail.poster ? (
-                  <div className="relative aspect-[2/3] w-full max-w-[280px] overflow-hidden rounded-2xl shadow-2xl md:max-w-none">
-                    <Image
-                      src={mediaDetail.poster}
-                      alt={mediaDetail.title}
-                      fill
-                      unoptimized
-                      sizes="(max-width: 768px) 280px, 320px"
-                      className="h-full w-full object-contain"
-                    />
-                  </div>
-                ) : (
-                  <div className="flex aspect-[2/3] w-full max-w-[280px] items-center justify-center rounded-2xl bg-secondary md:max-w-none">
-                    <Film className="h-20 w-20 text-muted-foreground/20" />
-                  </div>
-                )}
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-44 bg-gradient-to-t from-black/80 to-transparent" />
-                <div className="absolute bottom-6 left-6 right-6">
-                   <div className="flex items-center gap-2 mb-2">
-                     <Badge className="bg-white/20 backdrop-blur-md border-white/20 text-white font-black text-[10px] tracking-widest px-2.5 py-1">
-                        {mediaDetail.source?.toUpperCase()}
-                     </Badge>
-                     {mediaDetail.rating && (
-                        <div className="flex items-center gap-1 px-2 py-0.5 bg-yellow-400 rounded-lg text-[10px] font-black text-black">
-                          <Star className="h-3 w-3 fill-black" />
-                          {mediaDetail.rating.toFixed(1)}
-                        </div>
-                     )}
-                   </div>
-                   <h2 className="text-2xl font-black text-white leading-none truncate">{mediaDetail.title}</h2>
-                </div>
-              </div>
-
-              {/* Right Side: Content */}
-              <div className="overflow-y-auto bg-card/95 p-6 text-foreground custom-scrollbar sm:p-8">
-                <div className="space-y-6">
-                  {/* Status & Genres */}
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline" className="border-primary/20 text-primary font-bold px-3 py-1 rounded-xl">
-                      {mediaDetail.media_type === "movie" ? t("media.movieWork") : t("media.tvSeries")}
-                    </Badge>
-                    {mediaDetail.genres?.map(genre => (
-                      <Badge key={genre} variant="secondary" className="bg-muted/80 border border-border text-muted-foreground font-bold px-3 py-1 rounded-xl">
-                        {genre}
+      <Dialog open={!!selectedMedia} onOpenChange={(open) => !open && closeMediaDetail()}>
+        <DialogContent className="max-h-[calc(100dvh-1rem)] max-w-5xl overflow-hidden rounded-xl border-0 p-0 glass-acrylic shadow-2xl [&>button:last-child]:bg-black/55 [&>button:last-child]:text-white">
+          {activeMediaDetail && (
+            <>
+              <DialogHeader className="sr-only">
+                <DialogTitle>{activeMediaDetail.title}</DialogTitle>
+                <DialogDescription>{t("media.detailDialogDescription", { title: activeMediaDetail.title })}</DialogDescription>
+              </DialogHeader>
+              <div className="grid max-h-[calc(100dvh-1rem)] overflow-y-auto md:grid-cols-[minmax(240px,320px)_minmax(0,1fr)] md:overflow-hidden">
+                <div className="relative flex min-h-[380px] items-center justify-center bg-black p-4 md:min-h-0">
+                  {detailPoster ? (
+                    <div className="relative aspect-[2/3] w-full max-w-[260px] overflow-hidden rounded-lg bg-black shadow-2xl md:max-w-none">
+                      <Image
+                        src={detailPoster}
+                        alt={activeMediaDetail.title}
+                        fill
+                        unoptimized
+                        sizes="(max-width: 768px) 260px, 320px"
+                        className="h-full w-full object-contain"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex aspect-[2/3] w-full max-w-[260px] items-center justify-center rounded-lg bg-secondary md:max-w-none">
+                      {activeMediaDetail.media_type === "movie" ? (
+                        <Film className="h-20 w-20 text-muted-foreground/25" />
+                      ) : (
+                        <Tv className="h-20 w-20 text-muted-foreground/25" />
+                      )}
+                    </div>
+                  )}
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-44 bg-gradient-to-t from-black/90 to-transparent" />
+                  <div className="absolute bottom-5 left-5 right-5 min-w-0">
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <Badge className="border-white/20 bg-white/20 px-2.5 py-1 text-[10px] font-black tracking-widest text-white backdrop-blur-md">
+                        {activeMediaDetail.source.toUpperCase()}
                       </Badge>
-                    ))}
-                  </div>
-
-                  {/* Overview */}
-                  <div className="space-y-2">
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">{t("media.about")}</p>
-                    <p className="text-sm leading-relaxed text-foreground font-medium">
-                      {mediaDetail.overview || t("media.noOverview")}
-                    </p>
-                  </div>
-
-                  {/* Inventory Info */}
-                  {inventoryCheck && (
-                    <div className={cn(
-                      "p-4 rounded-[1.5rem] border transition-all duration-500",
-                      inventoryCheck.exists 
-                        ? "bg-emerald-50 border-emerald-100 shadow-sm" 
-                        : "bg-amber-50 border-amber-100 shadow-sm"
-                    )}>
-                      <div className="flex items-center gap-3">
-                        <div className={cn(
-                          "flex h-8 w-8 items-center justify-center rounded-full shadow-sm",
-                          inventoryCheck.exists ? "bg-emerald-500 text-white" : "bg-amber-500 text-white"
-                        )}>
-                          {inventoryCheck.exists ? <Check className="h-4 w-4" /> : <Package className="h-4 w-4" />}
+                      {activeMediaDetail.rating !== undefined && activeMediaDetail.rating > 0 && (
+                        <div className="flex items-center gap-1 rounded-md bg-yellow-400 px-2 py-1 text-[10px] font-black text-black">
+                          <Star className="h-3 w-3 fill-black" />
+                          {activeMediaDetail.rating.toFixed(1)}
                         </div>
-                        <div>
-                          <p className="text-sm font-black text-foreground">
-                            {inventoryCheck.exists ? t("media.inventoryAvailable") : t("media.inventoryMissing")}
-                          </p>
-                          <p className="text-[11px] font-medium text-muted-foreground">
-                            {inventoryCheck.exists ? t("media.inventoryAvailableDescription") : t("media.inventoryMissingDescription")}
-                          </p>
-                        </div>
-                      </div>
+                      )}
                     </div>
-                  )}
-
-                  {/* TV Season Selection */}
-                  {mediaDetail.media_type !== "movie" && mediaDetail.seasons && (
-                    <div className="space-y-3">
-                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">{t("media.seasons")}</p>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          onClick={() => setSelectedSeason(undefined)}
-                          className={cn(
-                            "px-4 py-2 rounded-xl text-xs font-black transition-all border shadow-sm",
-                            selectedSeason === undefined 
-                              ? "bg-primary text-primary-foreground border-primary shadow-primary/20"
-                              : "bg-card border-border text-muted-foreground hover:bg-accent"
-                          )}
-                        >
-                          {t("media.allSeasons")}
-                        </button>
-                        {Array.from({ length: mediaDetail.seasons }, (_, i) => i + 1).map((s) => {
-                          const isAvailable = inventoryCheck?.seasons_available?.includes(s);
-                          const canReportAvailableSeason = Boolean(isAvailable && requestNote.trim());
-                          return (
-                            <button
-                              key={s}
-                              onClick={() => (!isAvailable || canReportAvailableSeason) && setSelectedSeason(s)}
-                              disabled={Boolean(isAvailable && !canReportAvailableSeason)}
-                              className={cn(
-                                "px-4 py-2 rounded-xl text-xs font-black transition-all border shadow-sm relative overflow-hidden group",
-                                selectedSeason === s 
-                                  ? "bg-primary text-primary-foreground border-primary shadow-primary/20" 
-                                  : isAvailable
-                                    ? cn("bg-emerald-50 border-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:border-emerald-500/30 dark:text-emerald-300", canReportAvailableSeason ? "hover:bg-emerald-100" : "opacity-60 cursor-not-allowed")
-                                    : "bg-background border-border text-muted-foreground hover:bg-accent"
-                              )}
-                            >
-                              {t("media.season", { season: s })}
-                              {isAvailable && <Check className="ml-1.5 h-3 w-3 inline-block" />}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Request Note */}
-                  <div className="space-y-3">
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">{t("media.instructions")}</p>
-                    <Input
-                      placeholder={inventoryCheck?.exists ? t("media.issuePlaceholder") : t("media.requestPlaceholder")}
-                      value={requestNote}
-                      onChange={(e) => setRequestNote(e.target.value)}
-                      className="rounded-[1.25rem] border-white/60 bg-white/40 shadow-inner h-12 dark:border-slate-700/70 dark:bg-slate-950/70 dark:text-slate-100"
-                    />
+                    <h2 className="line-clamp-2 break-words text-xl font-black leading-tight text-white sm:text-2xl">
+                      {activeMediaDetail.title}
+                    </h2>
                   </div>
                 </div>
 
-                <div className="mt-10 flex gap-3">
-                  <Button variant="outline" className="flex-1 h-12 rounded-2xl font-black border-border bg-background hover:bg-accent transition-all shadow-sm" onClick={() => setSelectedMedia(null)}>
-                    {t("common.close")}
-                  </Button>
-                  <Button
-                    onClick={handleRequest}
-                    disabled={isRequesting || requestBlockedByInventory}
-                    className="flex-[2] h-12 rounded-2xl font-black shadow-xl shadow-primary/20 active:scale-95 transition-all"
-                  >
-                    {isRequesting ? (
-                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                    ) : (
-                      <Send className="mr-2 h-5 w-5" />
+                <div className="custom-scrollbar overflow-y-auto bg-card/95 p-5 text-foreground sm:p-7">
+                  <div className="space-y-6">
+                    {isLoadingDetail && (
+                      <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs font-medium text-primary">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        {t("media.loadingDetails")}
+                      </div>
                     )}
-                    {requestBlockedByInventory ? t("media.submitIssueAfterNote") : inventoryIssueReady ? t("media.submitIssue") : t("media.requestNow")}
-                  </Button>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline" className="rounded-lg border-primary/20 px-3 py-1 font-bold text-primary">
+                        {activeMediaDetail.media_type === "movie" ? t("media.movieWork") : t("media.tvSeries")}
+                      </Badge>
+                      {activeMediaDetail.genres?.map((genre) => (
+                        <Badge key={genre} variant="secondary" className="rounded-lg border border-border bg-muted/80 px-3 py-1 font-bold text-muted-foreground">
+                          {genre}
+                        </Badge>
+                      ))}
+                      {detailSourceURL && (
+                        <Button asChild size="sm" variant="outline" className="ml-auto">
+                          <a href={detailSourceURL} target="_blank" rel="noopener noreferrer">
+                            {t("media.openSource")}
+                            <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
+                          </a>
+                        </Button>
+                      )}
+                    </div>
+
+                    <dl className="grid gap-3 rounded-lg border bg-muted/25 p-4 text-sm sm:grid-cols-2">
+                      <div className="min-w-0">
+                        <dt className="text-xs text-muted-foreground">{t("media.sourceIdentifier")}</dt>
+                        <dd className="mt-1 break-all font-mono">{activeMediaDetail.source.toUpperCase()}#{activeMediaDetail.id}</dd>
+                      </div>
+                      <div className="min-w-0">
+                        <dt className="text-xs text-muted-foreground">{t("media.releaseDate")}</dt>
+                        <dd className="mt-1 break-words">{activeMediaDetail.release_date || activeMediaDetail.year || t("media.unknownYear")}</dd>
+                      </div>
+                      {activeMediaDetail.original_title && activeMediaDetail.original_title !== activeMediaDetail.title && (
+                        <div className="min-w-0 sm:col-span-2">
+                          <dt className="text-xs text-muted-foreground">{t("media.originalTitle")}</dt>
+                          <dd className="mt-1 break-words">{activeMediaDetail.original_title}</dd>
+                        </div>
+                      )}
+                      {activeMediaDetail.runtime !== undefined && activeMediaDetail.runtime > 0 && (
+                        <div className="min-w-0">
+                          <dt className="text-xs text-muted-foreground">{t("media.runtime")}</dt>
+                          <dd className="mt-1">{t("media.runtimeMinutes", { minutes: activeMediaDetail.runtime })}</dd>
+                        </div>
+                      )}
+                      {activeMediaDetail.episodes !== undefined && activeMediaDetail.episodes > 0 && (
+                        <div className="min-w-0">
+                          <dt className="text-xs text-muted-foreground">{t("media.episodes")}</dt>
+                          <dd className="mt-1">{t("media.episodeCount", { count: activeMediaDetail.episodes })}</dd>
+                        </div>
+                      )}
+                      {activeMediaDetail.status && (
+                        <div className="min-w-0">
+                          <dt className="text-xs text-muted-foreground">{t("media.sourceStatus")}</dt>
+                          <dd className="mt-1 break-words">{activeMediaDetail.status}</dd>
+                        </div>
+                      )}
+                    </dl>
+
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">{t("media.about")}</p>
+                      <p className="whitespace-pre-line text-sm font-medium leading-relaxed text-foreground">
+                        {activeMediaDetail.overview || t("media.noOverview")}
+                      </p>
+                    </div>
+
+                    {inventoryCheck && (
+                      <div className={cn(
+                        "rounded-lg border p-4",
+                        inventoryCheck.exists
+                          ? "border-emerald-200 bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/10"
+                          : "border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10",
+                      )}>
+                        <div className="flex items-start gap-3">
+                          <div className={cn(
+                            "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white",
+                            inventoryCheck.exists ? "bg-emerald-500" : "bg-amber-500",
+                          )}>
+                            {inventoryCheck.exists ? <Check className="h-4 w-4" /> : <Package className="h-4 w-4" />}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-black text-foreground">
+                              {inventoryCheck.exists ? t("media.inventoryAvailable") : t("media.inventoryMissing")}
+                            </p>
+                            <p className="mt-1 text-xs font-medium text-muted-foreground">
+                              {inventoryCheck.exists ? t("media.inventoryAvailableDescription") : t("media.inventoryMissingDescription")}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {activeMediaDetail.media_type !== "movie" && activeMediaDetail.seasons !== undefined && activeMediaDetail.seasons > 0 && (
+                      <div className="space-y-3">
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">{t("media.seasons")}</p>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedSeason(undefined)}
+                            className={cn(
+                              "rounded-lg border px-4 py-2 text-xs font-black transition-colors",
+                              selectedSeason === undefined
+                                ? "border-primary bg-primary text-primary-foreground"
+                                : "border-border bg-card text-muted-foreground hover:bg-accent",
+                            )}
+                          >
+                            {t("media.allSeasons")}
+                          </button>
+                          {Array.from({ length: activeMediaDetail.seasons }, (_, index) => index + 1).map((season) => {
+                            const isAvailable = inventoryCheck?.seasons_available?.includes(season);
+                            const canReportAvailableSeason = Boolean(isAvailable && requestNote.trim());
+                            return (
+                              <button
+                                key={season}
+                                type="button"
+                                onClick={() => (!isAvailable || canReportAvailableSeason) && setSelectedSeason(season)}
+                                disabled={Boolean(isAvailable && !canReportAvailableSeason)}
+                                className={cn(
+                                  "rounded-lg border px-4 py-2 text-xs font-black transition-colors",
+                                  selectedSeason === season
+                                    ? "border-primary bg-primary text-primary-foreground"
+                                    : isAvailable
+                                      ? cn("border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300", canReportAvailableSeason ? "hover:bg-emerald-100" : "cursor-not-allowed opacity-60")
+                                      : "border-border bg-background text-muted-foreground hover:bg-accent",
+                                )}
+                              >
+                                {t("media.season", { season })}
+                                {isAvailable && <Check className="ml-1.5 inline-block h-3 w-3" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-3">
+                      <Label htmlFor="media-request-note" className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">
+                        {t("media.instructions")}
+                      </Label>
+                      <Input
+                        id="media-request-note"
+                        placeholder={inventoryCheck?.exists ? t("media.issuePlaceholder") : t("media.requestPlaceholder")}
+                        value={requestNote}
+                        onChange={(event) => setRequestNote(event.target.value)}
+                        className="h-12 rounded-lg border-border bg-background shadow-inner"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-8 flex flex-col gap-3 border-t pt-5 sm:flex-row">
+                    <Button variant="outline" className="sm:flex-1" onClick={closeMediaDetail}>
+                      {t("common.close")}
+                    </Button>
+                    <Button
+                      onClick={handleRequest}
+                      disabled={isRequesting || requestBlockedByInventory}
+                      className="sm:flex-[2]"
+                    >
+                      {isRequesting ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Send className="mr-2 h-5 w-5" />}
+                      {requestBlockedByInventory ? t("media.submitIssueAfterNote") : inventoryIssueReady ? t("media.submitIssue") : t("media.requestNow")}
+                    </Button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : null}
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </div>

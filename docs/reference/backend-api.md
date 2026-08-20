@@ -783,18 +783,22 @@ curl -X GET "http://localhost:5000/api/v1/media/search?keyword=matrix&page=1&per
 `GET /media/search/tmdb?query=<query>&page=1`
 
 - 认证：登录用户（`AuthUser`）
+- 该路径固定搜索 TMDB；即使同时传入 `source` 参数，也不会改变路径指定的来源。
 
 #### Bangumi 搜索
 
 `GET /media/search/bangumi?query=<query>&page=1`
 
 - 认证：登录用户（`AuthUser`）
+- 该路径固定搜索 Bangumi；即使同时传入 `source` 参数，也不会改变路径指定的来源。
 
 #### 通过 source_type 和 media_id 查询详情
 
 `GET /media/search/id/{source_type}/{media_id}`
 
 - 认证：登录用户（`AuthUser`）
+- `source_type`：`tmdb`、`bangumi` 或兼容别名 `bgm`。
+- TMDB 可通过 `type=movie|tv` 指定类型；返回值包含可用的海报、简介、原名、上映日期、评分、类型、来源链接，以及详情端点提供的类型标签、时长、季数、集数和来源状态。
 
 ```bash
 curl -X GET "http://localhost:5000/api/v1/media/search/id/tmdb/12345" \
@@ -803,9 +807,10 @@ curl -X GET "http://localhost:5000/api/v1/media/search/id/tmdb/12345" \
 
 #### 媒体详情
 
-`GET /media/detail?source=tmdb&id=12345`
+`GET /media/detail?source=tmdb&media_id=12345&media_type=movie`
 
 - 认证：登录用户（`AuthUser`）
+- `media_id` 也兼容参数名 `id`；TMDB 的 `media_type` 也兼容参数名 `type`。
 
 #### TMDB 详情
 
