@@ -107,6 +107,11 @@ function hslVar(hex: string): string {
   return `${h} ${s}% ${l}%`;
 }
 
+function isPurpleLike(hex: string): boolean {
+  const { h, s } = rgbToHsl(hexToRgb(hex));
+  return s >= 35 && h >= 245 && h <= 315;
+}
+
 function normalizeThemeCustom(partial: Partial<ThemeCustom>): ThemeCustom {
   const migratedPrimary = typeof partial.primaryColor === "string"
     ? partial.primaryColor
@@ -120,11 +125,12 @@ function normalizeThemeCustom(partial: Partial<ThemeCustom>): ThemeCustom {
     primaryColor === LEGACY_DEFAULT_PRIMARY && accentColor === LEGACY_DEFAULT_ACCENT;
   const isLegacyHueDefault =
     typeof partial.primaryColor !== "string" && partial.primaryHueShift === 0;
+  const isDisallowedPurple = isPurpleLike(primaryColor);
 
   return {
     ...DEFAULTS,
     ...partial,
-    primaryColor: isLegacyDefault || isLegacyHueDefault ? DEFAULTS.primaryColor : primaryColor,
+    primaryColor: isLegacyDefault || isLegacyHueDefault || isDisallowedPurple ? DEFAULTS.primaryColor : primaryColor,
     accentColor: isLegacyDefault ? DEFAULTS.accentColor : accentColor,
     radius: clamp(Number(partial.radius ?? DEFAULTS.radius), 0.25, 2),
     glassBlur: clamp(Number(partial.glassBlur ?? DEFAULTS.glassBlur), 0, 32),

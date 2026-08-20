@@ -617,14 +617,18 @@ export default function MediaPage() {
     : { src: detailPoster, width: DEFAULT_POSTER_WIDTH, height: DEFAULT_POSTER_HEIGHT };
   const posterNaturalWidth = Math.max(1, currentPosterMetrics.width);
   const posterNaturalHeight = Math.max(1, currentPosterMetrics.height);
-  const rightPanelWidth = Math.min(620, Math.max(440, detailViewport.width * 0.52));
-  const availablePosterWidth = Math.max(280, detailViewport.width - rightPanelWidth - 16);
-  const availablePosterHeight = Math.max(320, detailViewport.height - 16);
-  const posterScale = detailPoster
-    ? Math.min(1, availablePosterWidth / posterNaturalWidth, availablePosterHeight / posterNaturalHeight)
-    : 1;
-  const posterDisplayWidth = Math.max(1, Math.round(posterNaturalWidth * posterScale));
-  const posterDisplayHeight = Math.max(1, Math.round(posterNaturalHeight * posterScale));
+  const posterAspectRatio = posterNaturalWidth / posterNaturalHeight;
+  const maxDialogWidth = Math.min(1440, Math.max(320, detailViewport.width - 24));
+  const maxDialogHeight = Math.min(860, Math.max(180, detailViewport.height - 24));
+  const projectedPosterWidth = posterAspectRatio * maxDialogHeight;
+  const rightPanelWidth = Math.min(620, Math.max(440, Math.round(projectedPosterWidth * 0.95)));
+  let detailDialogHeight = maxDialogHeight;
+  let posterDisplayWidth = Math.max(1, Math.round(posterAspectRatio * detailDialogHeight));
+  if (posterDisplayWidth + rightPanelWidth > maxDialogWidth) {
+    detailDialogHeight = Math.max(180, Math.floor((maxDialogWidth - rightPanelWidth) / posterAspectRatio));
+    posterDisplayWidth = Math.max(1, Math.round(posterAspectRatio * detailDialogHeight));
+  }
+  const posterDisplayHeight = Math.round(detailDialogHeight);
   const detailDialogWidth = posterDisplayWidth + Math.round(rightPanelWidth);
   const detailDialogStyle = {
     "--media-detail-height": `${posterDisplayHeight}px`,
@@ -1029,7 +1033,7 @@ export default function MediaPage() {
       <Dialog open={!!selectedMedia} onOpenChange={(open) => !open && closeMediaDetail()}>
         <DialogContent
           style={detailDialogStyle}
-          className="!max-h-[calc(100dvh-1rem)] max-w-6xl overflow-hidden rounded-xl border-0 p-0 glass-acrylic shadow-2xl lg:!h-[var(--media-detail-height)] lg:!w-[var(--media-detail-width)] lg:!max-w-[calc(100vw-1rem)] [&>button:last-child]:bg-black/55 [&>button:last-child]:text-white"
+          className="!max-h-[calc(100dvh-1rem)] !gap-0 max-w-6xl overflow-hidden rounded-xl border-0 p-0 glass-acrylic shadow-2xl lg:!h-[var(--media-detail-height)] lg:!w-[var(--media-detail-width)] lg:!max-w-none lg:!flex lg:!flex-col [&>button:last-child]:bg-black/55 [&>button:last-child]:text-white"
         >
           {activeMediaDetail && (
             <>
@@ -1037,7 +1041,7 @@ export default function MediaPage() {
                 <DialogTitle>{activeMediaDetail.title}</DialogTitle>
                 <DialogDescription>{t("media.detailDialogDescription", { title: activeMediaDetail.title })}</DialogDescription>
               </DialogHeader>
-              <div className="grid min-h-0 flex-1 overflow-y-auto lg:h-full lg:grid-cols-[var(--media-poster-width)_var(--media-detail-panel-width)] lg:overflow-hidden">
+              <div className="grid min-h-0 min-w-0 flex-1 overflow-y-auto lg:h-full lg:min-h-0 lg:flex-1 lg:grid-cols-[var(--media-poster-width)_var(--media-detail-panel-width)] lg:overflow-hidden">
                 <div className="flex min-h-0 justify-center bg-background p-4 sm:p-5 lg:h-full lg:w-full lg:items-stretch lg:p-0">
                   <div className="mx-auto w-full max-w-[360px] lg:mx-0 lg:h-full lg:w-full lg:max-w-none">
                     {detailPoster ? (
@@ -1074,8 +1078,8 @@ export default function MediaPage() {
                   </div>
                 </div>
 
-                <div className="custom-scrollbar min-h-0 overflow-y-auto bg-card/95 p-5 text-foreground sm:p-7 lg:h-full">
-                  <div className="space-y-6">
+                <div className="custom-scrollbar min-h-0 min-w-0 overflow-visible bg-card/95 p-5 text-foreground sm:p-7 lg:h-full lg:overflow-y-auto">
+                  <div className="min-w-0 space-y-6">
                     {isLoadingDetail && (
                       <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs font-medium text-primary">
                         <Loader2 className="h-4 w-4 animate-spin" />

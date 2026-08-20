@@ -72,12 +72,12 @@ const gradientPresets: Array<{ nameKey: MessageKey; value: string }> = [
     value: "linear-gradient(135deg, #ffc0d5 0%, #ffe9a6 100%)",
   },
   {
-    nameKey: "appearance.presetDeepPurple",
-    value: "linear-gradient(135deg, #3b3b64 0%, #585884 100%)",
+    nameKey: "appearance.presetSlate",
+    value: "linear-gradient(135deg, #334155 0%, #64748b 100%)",
   },
   {
     nameKey: "appearance.presetMidnight",
-    value: "linear-gradient(135deg, #27234a 0%, #4a4585 50%, #3f3f6b 100%)",
+    value: "linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)",
   },
   {
     nameKey: "appearance.presetOcean",
