@@ -88,7 +88,12 @@ func (a *App) getTMDB(ctx context.Context, id, mediaType string) (map[string]any
 		return nil, err
 	}
 	endpoint := base + "/" + mediaType + "/" + id
-	q := url.Values{"api_key": {a.cfg().TMDBAPIKey}, "language": {"zh-CN"}, "append_to_response": {"credits,videos"}}
+	q := url.Values{
+		"api_key":                {a.cfg().TMDBAPIKey},
+		"language":               {"zh-CN"},
+		"append_to_response":     {"credits,videos,images"},
+		"include_image_language": {"zh,ja,en"},
+	}
 	var payload map[string]any
 	if err := getJSON(ctx, endpoint+"?"+q.Encode(), nil, &payload); err != nil {
 		return nil, err
@@ -109,6 +114,11 @@ func tmdbToMedia(item map[string]any, mediaType, imageBase string) map[string]an
 	if path := asString(item["backdrop_path"]); path != "" {
 		result["backdrop"] = strings.TrimRight(imageBase, "/") + "/w780" + path
 		result["backdrop_url"] = result["backdrop"]
+	}
+	if logoURL, logoLanguage := tmdbLogoURL(item["images"], imageBase); logoURL != "" {
+		result["logo"] = logoURL
+		result["logo_url"] = logoURL
+		result["logo_language"] = logoLanguage
 	}
 	result["original_title"] = original
 	result["overview"] = asString(item["overview"])
@@ -241,6 +251,25 @@ func tmdbTrailerURL(value any) string {
 		}
 	}
 	return fallback
+}
+
+func tmdbLogoURL(value any, imageBase string) (string, string) {
+	images, _ := value.(map[string]any)
+	logos, _ := images["logos"].([]any)
+	for _, language := range []string{"zh", "ja", "en"} {
+		for _, row := range logos {
+			logo, _ := row.(map[string]any)
+			if logo == nil || strings.ToLower(strings.TrimSpace(asString(logo["iso_639_1"]))) != language {
+				continue
+			}
+			path := strings.TrimSpace(asString(logo["file_path"]))
+			if path == "" {
+				continue
+			}
+			return strings.TrimRight(imageBase, "/") + "/w500" + path, language
+		}
+	}
+	return "", ""
 }
 
 func safeYouTubeVideoKey(value string) bool {

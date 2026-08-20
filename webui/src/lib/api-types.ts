@@ -443,6 +443,9 @@ export interface MediaItem {
   rating?: number;
   vote_average?: number;
   media_type_label?: string;
+  logo?: string;
+  logo_url?: string;
+  logo_language?: "zh" | "ja" | "en";
 }
 
 export interface MediaDetail extends MediaItem {

@@ -33,15 +33,23 @@ func TestInterleaveMediaResultsUsesRemainingSource(t *testing.T) {
 
 func TestTMDBToMediaKeepsDetailedMetadata(t *testing.T) {
 	result := tmdbToMedia(map[string]any{
-		"id":               float64(123),
-		"name":             "示例剧集",
-		"original_name":    "Example Series",
-		"first_air_date":   "2024-01-02",
-		"vote_average":     8.7,
-		"vote_count":       1234,
-		"tagline":          "A useful tagline",
-		"last_air_date":    "2024-04-01",
-		"homepage":         "https://example.com/series",
+		"id":             float64(123),
+		"name":           "示例剧集",
+		"original_name":  "Example Series",
+		"first_air_date": "2024-01-02",
+		"vote_average":   8.7,
+		"vote_count":     1234,
+		"tagline":        "A useful tagline",
+		"last_air_date":  "2024-04-01",
+		"homepage":       "https://example.com/series",
+		"images": map[string]any{
+			"logos": []any{
+				map[string]any{"iso_639_1": "en", "file_path": "/english-logo.png"},
+				map[string]any{"iso_639_1": "ja", "file_path": "/japanese-logo.png"},
+				map[string]any{"iso_639_1": "zh", "file_path": "/chinese-logo.png"},
+				map[string]any{"iso_639_1": "ko", "file_path": "/ignored-logo.png"},
+			},
+		},
 		"episode_run_time": []any{float64(24)},
 		"production_countries": []any{
 			map[string]any{"name": "日本"},
@@ -73,6 +81,9 @@ func TestTMDBToMediaKeepsDetailedMetadata(t *testing.T) {
 	if got := result["trailer_url"]; got != "https://www.youtube.com/watch?v=abcDEF_1234" {
 		t.Fatalf("trailer_url=%v", got)
 	}
+	if got := result["logo_url"]; got != "https://image.example/w500/chinese-logo.png" || result["logo_language"] != "zh" {
+		t.Fatalf("logo=%v language=%v", got, result["logo_language"])
+	}
 	for key, want := range map[string]string{"tagline": "A useful tagline", "end_date": "2024-04-01", "official_url": "https://example.com/series"} {
 		if got := asString(result[key]); got != want {
 			t.Fatalf("%s=%q want=%q", key, got, want)
@@ -86,6 +97,51 @@ func TestTMDBToMediaKeepsDetailedMetadata(t *testing.T) {
 	}
 	if got := result["cast"].([]string); len(got) != 1 || got[0] != "Example Actor" {
 		t.Fatalf("cast=%#v", got)
+	}
+}
+
+func TestTMDBLogoURLUsesOnlySupportedLanguageFallbacks(t *testing.T) {
+	imageBase := "https://image.example"
+	tests := []struct {
+		name         string
+		logos        []any
+		wantURL      string
+		wantLanguage string
+	}{
+		{
+			name: "japanese when chinese missing",
+			logos: []any{
+				map[string]any{"iso_639_1": "en", "file_path": "/english.png"},
+				map[string]any{"iso_639_1": "ja", "file_path": "/japanese.png"},
+			},
+			wantURL:      imageBase + "/w500/japanese.png",
+			wantLanguage: "ja",
+		},
+		{
+			name: "english when chinese and japanese missing",
+			logos: []any{
+				map[string]any{"iso_639_1": "ko", "file_path": "/korean.png"},
+				map[string]any{"iso_639_1": "en", "file_path": "/english.png"},
+			},
+			wantURL:      imageBase + "/w500/english.png",
+			wantLanguage: "en",
+		},
+		{
+			name: "unsupported and language neutral logos are rejected",
+			logos: []any{
+				map[string]any{"iso_639_1": "ko", "file_path": "/korean.png"},
+				map[string]any{"iso_639_1": nil, "file_path": "/neutral.png"},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gotURL, gotLanguage := tmdbLogoURL(map[string]any{"logos": test.logos}, imageBase)
+			if gotURL != test.wantURL || gotLanguage != test.wantLanguage {
+				t.Fatalf("logo=%q language=%q want logo=%q language=%q", gotURL, gotLanguage, test.wantURL, test.wantLanguage)
+			}
+		})
 	}
 }
 

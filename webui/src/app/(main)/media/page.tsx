@@ -93,6 +93,7 @@ function normalizeMediaItem(item: MediaItem): MediaItem {
   const source = String(item.source || "tmdb").toLowerCase();
   const mediaType = String(item.media_type || "movie").toLowerCase();
   const poster = sanitizeImageUrl(item.poster || item.poster_url);
+  const logo = sanitizeImageUrl(item.logo || item.logo_url);
   return {
     ...item,
     source,
@@ -100,6 +101,9 @@ function normalizeMediaItem(item: MediaItem): MediaItem {
     title: String(item.title || ""),
     poster,
     poster_url: poster,
+    logo,
+    logo_url: logo,
+    logo_language: item.logo_language,
     source_url: sanitizeExternalUrl(item.source_url),
     year: normalizeMediaYear(item.year),
     rating: normalizeMediaRating(item.rating ?? item.vote_average),
@@ -129,6 +133,9 @@ function mergeMediaItems(current: MediaItem, incoming: MediaItem): MediaItem {
     overview: first.overview || next.overview,
     poster: first.poster || next.poster,
     poster_url: first.poster_url || next.poster_url,
+    logo: first.logo || next.logo,
+    logo_url: first.logo_url || next.logo_url,
+    logo_language: first.logo_language || next.logo_language,
     release_date: first.release_date || next.release_date,
     year: first.year ?? next.year,
     source_url: first.source_url || next.source_url,
@@ -388,6 +395,9 @@ export default function MediaPage() {
           source_url: normalizedDetail.source_url || normalizedMedia.source_url,
           rating: normalizedDetail.rating ?? normalizedMedia.rating,
           vote_average: normalizedDetail.vote_average ?? normalizedMedia.vote_average,
+          logo: normalizedDetail.logo || normalizedMedia.logo,
+          logo_url: normalizedDetail.logo_url || normalizedMedia.logo_url,
+          logo_language: normalizedDetail.logo_language || normalizedMedia.logo_language,
         });
         setMediaDetail(detail);
         rememberCache(detailCacheRef.current, detailKey, detail, MAX_DETAIL_CACHE_ENTRIES);
@@ -570,6 +580,7 @@ export default function MediaPage() {
     ? normalizeMediaDetail(mediaDetail || selectedMedia)
     : null;
   const detailPoster = sanitizeImageUrl(activeMediaDetail?.poster || activeMediaDetail?.poster_url);
+  const detailLogo = sanitizeImageUrl(activeMediaDetail?.logo || activeMediaDetail?.logo_url);
   const detailSourceURL = sanitizeExternalUrl(activeMediaDetail?.source_url);
   const detailOfficialURL = sanitizeExternalUrl(activeMediaDetail?.official_url);
   const detailTrailerURL = sanitizeExternalUrl(activeMediaDetail?.trailer_url);
@@ -976,17 +987,18 @@ export default function MediaPage() {
                 <DialogDescription>{t("media.detailDialogDescription", { title: activeMediaDetail.title })}</DialogDescription>
               </DialogHeader>
               <div className="grid min-h-0 flex-1 overflow-y-auto md:h-full md:grid-cols-[minmax(260px,340px)_minmax(0,1fr)] md:overflow-hidden">
-                <div className="custom-scrollbar min-h-0 overflow-y-auto bg-neutral-950 p-4 text-white sm:p-5">
-                  <div className="mx-auto flex w-full max-w-[280px] flex-col gap-4 md:max-w-none">
+                <div className="custom-scrollbar min-h-0 overflow-y-auto bg-background p-4 sm:p-5">
+                  <div className="mx-auto w-full max-w-[360px] md:max-w-none">
                     {detailPoster ? (
-                      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-black shadow-2xl">
-                        <Image
+                      <div className="w-full overflow-hidden rounded-lg shadow-2xl">
+                        {/* Use the image's intrinsic dimensions so non-2:3 posters do not get letterboxed. */}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
                           src={detailPoster}
                           alt={activeMediaDetail.title}
-                          fill
-                          unoptimized
-                          sizes="(max-width: 768px) 260px, 320px"
-                          className="h-full w-full object-contain"
+                          loading="eager"
+                          decoding="async"
+                          className="block h-auto max-w-full w-full"
                         />
                       </div>
                     ) : (
@@ -998,25 +1010,6 @@ export default function MediaPage() {
                         )}
                       </div>
                     )}
-                    <div className="min-w-0 pb-1">
-                      <div className="mb-2 flex flex-wrap items-center gap-2">
-                        <Badge className="border-white/20 bg-white/20 px-2.5 py-1 text-[10px] font-black tracking-widest text-white backdrop-blur-md">
-                          {activeMediaDetail.source.toUpperCase()}
-                        </Badge>
-                        {activeMediaDetail.rating !== undefined && activeMediaDetail.rating > 0 && (
-                          <div className="flex items-center gap-1 rounded-md bg-yellow-400 px-2 py-1 text-[10px] font-black text-black">
-                            <Star className="h-3 w-3 fill-black" />
-                            {activeMediaDetail.rating.toFixed(1)}
-                          </div>
-                        )}
-                      </div>
-                      <h2 className="break-words text-xl font-black leading-tight text-white sm:text-2xl">
-                        {activeMediaDetail.title}
-                      </h2>
-                      {activeMediaDetail.original_title && activeMediaDetail.original_title !== activeMediaDetail.title && (
-                        <p className="mt-2 break-words text-xs font-medium text-white/65">{activeMediaDetail.original_title}</p>
-                      )}
-                    </div>
                   </div>
                 </div>
 
@@ -1029,10 +1022,47 @@ export default function MediaPage() {
                       </div>
                     )}
 
+                    <div className="flex flex-col gap-5 border-b pb-5 sm:flex-row sm:items-start">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline" className="rounded-lg border-primary/20 px-3 py-1 font-bold text-primary">
+                            {mediaTypeLabel(activeMediaDetail)}
+                          </Badge>
+                          <Badge variant="secondary" className="rounded-lg font-bold">
+                            {activeMediaDetail.source.toUpperCase()}
+                          </Badge>
+                          {activeMediaDetail.rating !== undefined && activeMediaDetail.rating > 0 && (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-yellow-400 px-2 py-1 text-xs font-black text-black">
+                              <Star className="h-3 w-3 fill-black" />
+                              {activeMediaDetail.rating.toFixed(1)}
+                            </span>
+                          )}
+                        </div>
+                        <h2 className="mt-3 break-words text-2xl font-black leading-tight text-foreground sm:text-3xl">
+                          {activeMediaDetail.title}
+                        </h2>
+                        {activeMediaDetail.original_title && activeMediaDetail.original_title !== activeMediaDetail.title && (
+                          <p className="mt-2 break-words text-sm font-medium text-muted-foreground">
+                            {t("media.originalTitle")}: {activeMediaDetail.original_title}
+                          </p>
+                        )}
+                      </div>
+                      {detailLogo && (
+                        <div className="flex min-h-24 w-full max-w-[240px] shrink-0 items-center justify-start rounded-lg border bg-muted/25 p-3 sm:ml-auto sm:justify-end">
+                          {/* Logo artwork is transparent and can have any aspect ratio; preserve it. */}
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={detailLogo}
+                            alt={t("media.logoAlt", { title: activeMediaDetail.title })}
+                            loading="lazy"
+                            decoding="async"
+                            className="block h-auto max-h-24 max-w-full w-auto object-contain object-left drop-shadow-sm sm:object-right"
+                          />
+                        </div>
+                      )}
+                    </div>
+
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline" className="rounded-lg border-primary/20 px-3 py-1 font-bold text-primary">
-                        {mediaTypeLabel(activeMediaDetail)}
-                      </Badge>
                       {activeMediaDetail.genres?.map((genre) => (
                         <Badge key={genre} variant="secondary" className="rounded-lg border border-border bg-muted/80 px-3 py-1 font-bold text-muted-foreground">
                           {genre}

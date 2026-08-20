@@ -813,6 +813,7 @@ curl -X GET "http://localhost:5000/api/v1/media/search/id/tmdb/12345" \
 - 认证：登录用户（`AuthUser`）
 - `media_id` 也兼容参数名 `id`；TMDB 的 `media_type` 也兼容参数名 `type`。
 - 返回的 `poster`/`poster_url` 为海报，`backdrop`/`backdrop_url` 为背景图（如果来源提供）；`official_url` 和 `trailer_url` 为经过来源接口归一化的外链。
+- TMDB 详情会请求 Logo 图片并按 `zh`、`ja`、`en` 顺序返回最多一个 `logo`/`logo_url`，同时返回 `logo_language`；其他语言 Logo 不会作为回退结果。
 - 通用详情字段包括 `genres`、`runtime`、`seasons`、`episodes`、`status`、`end_date`、`countries`、`languages`、`creators`、`studios`、`cast`；来源特有的原始补充值位于 `extra`，不要把 `extra` 当作稳定字段契约。
 
 #### TMDB 详情
