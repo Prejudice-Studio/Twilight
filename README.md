@@ -163,10 +163,6 @@ cd webui && pnpm lint && pnpm typecheck && pnpm build
 
 </div>
 
-## Star
-
-[![Star History Chart](https://api.star-history.com/svg?repos=Prejudice-Studio/Twilight&type=Date)](https://star-history.com/#Prejudice-Studio/Twilight&Date)
-
 <div align="center">
 
 如果 Twilight 对你有帮助，欢迎点一个 Star。
