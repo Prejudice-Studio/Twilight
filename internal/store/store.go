@@ -247,6 +247,7 @@ type APIKey struct {
 
 type MediaRequest struct {
 	ID            int64          `json:"id"`
+	Revision      int64          `json:"revision,omitempty"`
 	RequireKey    string         `json:"require_key"`
 	UID           int64          `json:"uid"`
 	TelegramID    int64          `json:"telegram_id,omitempty"`
@@ -3462,6 +3463,9 @@ func (s *Store) CreateMediaRequestWithOptions(r MediaRequest, opts MediaRequestC
 		}
 		r.CreatedAt = now
 		r.UpdatedAt = now
+		if r.Revision <= 0 {
+			r.Revision = 1
+		}
 		s.state.MediaRequests[r.ID] = r
 		return nil
 	})
@@ -3574,6 +3578,7 @@ func (s *Store) UpdateMediaRequest(id int64, fn func(*MediaRequest) error) (Medi
 		if err := fn(&r); err != nil {
 			return err
 		}
+		r.Revision++
 		r.UpdatedAt = time.Now().Unix()
 		s.state.MediaRequests[id] = r
 		updated = r
@@ -3586,15 +3591,30 @@ func (s *Store) UpdateMediaRequest(id int64, fn func(*MediaRequest) error) (Medi
 }
 
 func (s *Store) DeleteMediaRequest(id int64) error {
+	_, err := s.DeleteMediaRequestIfRevision(id, nil)
+	return err
+}
+
+func (s *Store) DeleteMediaRequestIfRevision(id int64, expectedRevision *int64) (MediaRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.mutateAndSaveLocked(func() error {
-		if _, ok := s.state.MediaRequests[id]; !ok {
+	var deleted MediaRequest
+	err := s.mutateAndSaveLocked(func() error {
+		request, ok := s.state.MediaRequests[id]
+		if !ok {
 			return ErrNotFound
 		}
+		if expectedRevision != nil && request.Revision != *expectedRevision {
+			return ErrConflict
+		}
+		deleted = request
 		delete(s.state.MediaRequests, id)
 		return nil
 	})
+	if err != nil {
+		return MediaRequest{}, err
+	}
+	return deleted, nil
 }
 
 func (s *Store) UpsertBindCode(code BindCode) error {

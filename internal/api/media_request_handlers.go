@@ -181,6 +181,9 @@ func (a *App) handleCreateMediaRequest(w http.ResponseWriter, r *http.Request, _
 	if statusFromError(w, err) {
 		return
 	}
+	a.audit(r, "create_media_request", "user", p.User.UID, map[string]any{
+		"request_id": req.ID, "require_key": req.RequireKey, "source": req.Source, "media_id": req.MediaID,
+	})
 	created(w, "media request submitted", mediaRequestUserDTO(req))
 }
 
@@ -198,14 +201,115 @@ func (a *App) handleMyMediaRequests(w http.ResponseWriter, r *http.Request, _ Pa
 
 func (a *App) handleAdminMediaRequests(w http.ResponseWriter, r *http.Request, _ Params) {
 	statusFilter := strings.ToLower(firstNonEmpty(r.URL.Query().Get("status"), "active"))
+	if !validMediaRequestAdminFilter(statusFilter) {
+		failWithCode(w, http.StatusBadRequest, ErrMediaRequestStatusInvalid, "invalid status filter")
+		return
+	}
+	sourceFilter := strings.ToLower(strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("source"), "all")))
+	if sourceFilter == "bgm" {
+		sourceFilter = "bangumi"
+	}
+	if sourceFilter != "all" && sourceFilter != "tmdb" && sourceFilter != "bangumi" {
+		failWithCode(w, http.StatusBadRequest, ErrMediaRequestSourceInvalid, "invalid source filter")
+		return
+	}
+	query := truncateString(strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("q"), r.URL.Query().Get("query"))), 120)
 	page := clamp(queryInt(r, "page", 1), 1, 1000000)
 	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
-	result := a.store().ListMediaRequestsPage(0, true, statusFilter, page, perPage)
+	result := a.store().ListMediaRequestsPageWithOptions(store.MediaRequestListOptions{
+		All: true, StatusFilter: statusFilter, Source: sourceFilter, Query: query,
+		Page: page, PerPage: perPage,
+	})
 	items := make([]map[string]any, 0, len(result.Requests))
 	for _, req := range result.Requests {
-		items = append(items, mediaRequestAdminDTO(req, a.store()))
+		var user *store.User
+		if value, exists := result.Users[req.UID]; exists {
+			copy := value
+			user = &copy
+		}
+		items = append(items, mediaRequestAdminDTO(req, user))
 	}
-	ok(w, "OK", map[string]any{"requests": items, "total": result.Total, "page": page, "per_page": perPage})
+	w.Header().Set("Cache-Control", "private, no-store")
+	ok(w, "OK", map[string]any{
+		"requests":      items,
+		"total":         result.Total,
+		"page":          result.Page,
+		"per_page":      result.PerPage,
+		"total_pages":   result.TotalPages,
+		"has_next":      result.HasNext,
+		"status_counts": result.StatusCounts,
+	})
+}
+
+func validMediaRequestAdminFilter(filter string) bool {
+	switch strings.ToLower(strings.TrimSpace(filter)) {
+	case "all", "active", "pending", "unhandled", "accepted", "downloading", "rejected", "completed":
+		return true
+	default:
+		return false
+	}
+}
+
+func mediaRequestExpectedRevision(r *http.Request) (*int64, error) {
+	raw := strings.TrimSpace(r.Header.Get("If-Match"))
+	if raw == "" {
+		return nil, nil
+	}
+	raw = strings.TrimSpace(strings.TrimPrefix(raw, "W/"))
+	raw = strings.Trim(raw, `"`)
+	revision, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || revision < 0 {
+		return nil, store.ErrInvalid
+	}
+	return &revision, nil
+}
+
+func writeMediaRequestETag(w http.ResponseWriter, revision int64) {
+	w.Header().Set("ETag", fmt.Sprintf(`"%d"`, revision))
+}
+
+func mediaRequestUserForDTO(st *store.Store, req store.MediaRequest) *store.User {
+	if user, exists := st.User(req.UID); exists {
+		return &user
+	}
+	return nil
+}
+
+func failMediaRequestMutation(w http.ResponseWriter, err error) bool {
+	if errors.Is(err, store.ErrConflict) {
+		failWithCode(w, http.StatusConflict, ErrMediaRequestConflict, "求片已被其他操作更新，请刷新后重试")
+		return true
+	}
+	return statusFromError(w, err)
+}
+
+func decodeMediaRequestStatusUpdate(w http.ResponseWriter, r *http.Request) (string, string, *int64, bool) {
+	payload := decodeMap(r)
+	rawStatus := stringValue(payload, "status")
+	if rawStatus == "" {
+		failWithCode(w, http.StatusBadRequest, ErrMediaRequestStatusInvalid, "status required")
+		return "", "", nil, false
+	}
+	status := store.NormalizeMediaRequestStatus(rawStatus)
+	if status == "" {
+		failWithCode(w, http.StatusBadRequest, ErrMediaRequestStatusInvalid, "invalid status")
+		return "", "", nil, false
+	}
+	expectedRevision, err := mediaRequestExpectedRevision(r)
+	if err != nil {
+		failWithCode(w, http.StatusBadRequest, ErrMediaRequestRevisionInvalid, "invalid If-Match revision")
+		return "", "", nil, false
+	}
+	note := truncateString(firstNonEmpty(stringValue(payload, "note"), stringValue(payload, "admin_note")), 1000)
+	return status, note, expectedRevision, true
+}
+
+func (a *App) respondMediaRequestUpdated(w http.ResponseWriter, r *http.Request, req store.MediaRequest) {
+	writeMediaRequestETag(w, req.Revision)
+	a.audit(r, "update_media_request", "admin", req.UID, map[string]any{
+		"request_id": req.ID, "require_key": req.RequireKey, "status": store.MediaRequestAdminStatus(req.Status), "revision": req.Revision,
+	})
+	ok(w, "状态已更新", mediaRequestAdminDTO(req, mediaRequestUserForDTO(a.store(), req)))
 }
 
 func (a *App) handleUpdateMediaRequestStatus(w http.ResponseWriter, r *http.Request, params Params) {
@@ -214,33 +318,27 @@ func (a *App) handleUpdateMediaRequestStatus(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	id, _ := int64Param(params, "request_id")
-	payload := decodeMap(r)
-	rawStatus := stringValue(payload, "status")
-	if rawStatus == "" {
-		failWithCode(w, http.StatusBadRequest, ErrMediaRequestStatusInvalid, "status required")
+	status, note, expectedRevision, valid := decodeMediaRequestStatusUpdate(w, r)
+	if !valid {
 		return
 	}
-	status := store.NormalizeMediaRequestStatus(rawStatus)
-	if status == "" {
-		failWithCode(w, http.StatusBadRequest, ErrMediaRequestStatusInvalid, "invalid status")
+	req, err := a.store().UpdateMediaRequestStatusIfRevision(id, status, note, false, expectedRevision)
+	if failMediaRequestMutation(w, err) {
 		return
 	}
-	note := truncateString(firstNonEmpty(stringValue(payload, "note"), stringValue(payload, "admin_note")), 1000)
-	req, err := a.store().UpdateMediaRequestStatus(id, status, note, false)
-	if statusFromError(w, err) {
-		return
-	}
-	ok(w, "状态已更新", mediaRequestAdminDTO(req, a.store()))
+	a.respondMediaRequestUpdated(w, r, req)
 }
 
 func (a *App) handleUpdateMediaRequestByKey(w http.ResponseWriter, r *http.Request, params Params) {
-	req, okReq := a.store().FindMediaRequestByKey(params["require_key"])
-	if !okReq {
-		failWithCode(w, http.StatusNotFound, ErrMediaRequestNotFound, "request not found")
+	status, note, expectedRevision, valid := decodeMediaRequestStatusUpdate(w, r)
+	if !valid {
 		return
 	}
-	params["request_id"] = strconv.FormatInt(req.ID, 10)
-	a.handleUpdateMediaRequestStatus(w, r, params)
+	req, err := a.store().UpdateMediaRequestStatusByKey(params["require_key"], status, note, false, expectedRevision)
+	if failMediaRequestMutation(w, err) {
+		return
+	}
+	a.respondMediaRequestUpdated(w, r, req)
 }
 
 func (a *App) handleExternalMediaUpdate(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -270,7 +368,11 @@ func (a *App) handleExternalMediaUpdate(w http.ResponseWriter, r *http.Request, 
 	if statusFromError(w, err) {
 		return
 	}
-	ok(w, "状态已更新", mediaRequestAdminDTO(req, a.store()))
+	a.auditEntryIP(a.clientIP(r), 0, "external-media", "external_update_media_request", "system", req.UID, map[string]any{
+		"request_id": req.ID, "require_key": req.RequireKey, "status": store.MediaRequestAdminStatus(req.Status), "revision": req.Revision,
+	})
+	writeMediaRequestETag(w, req.Revision)
+	ok(w, "状态已更新", mediaRequestAdminDTO(req, mediaRequestUserForDTO(a.store(), req)))
 }
 
 func (a *App) handleMediaRequestByKey(w http.ResponseWriter, r *http.Request, params Params) {
@@ -283,6 +385,8 @@ func (a *App) handleMediaRequestByKey(w http.ResponseWriter, r *http.Request, pa
 		failWithCode(w, http.StatusForbidden, ErrMediaRequestAccessDenied, "cannot access this request")
 		return
 	}
+	writeMediaRequestETag(w, req.Revision)
+	w.Header().Set("Cache-Control", "private, no-store")
 	ok(w, "OK", mediaRequestUserDTO(req))
 }
 
@@ -296,9 +400,18 @@ func (a *App) handleDeleteMediaRequestByKey(w http.ResponseWriter, r *http.Reque
 		failWithCode(w, http.StatusForbidden, ErrMediaRequestDeleteDenied, "cannot delete this request")
 		return
 	}
-	if statusFromError(w, a.store().DeleteMediaRequest(req.ID)) {
+	expectedRevision, err := mediaRequestExpectedRevision(r)
+	if err != nil {
+		failWithCode(w, http.StatusBadRequest, ErrMediaRequestRevisionInvalid, "invalid If-Match revision")
 		return
 	}
+	deleted, err := a.store().DeleteMediaRequestByKey(params["require_key"], expectedRevision)
+	if failMediaRequestMutation(w, err) {
+		return
+	}
+	a.audit(r, "delete_media_request", auditCategoryForRole(current(r).User.Role), deleted.UID, map[string]any{
+		"request_id": deleted.ID, "require_key": deleted.RequireKey, "source": deleted.Source, "media_id": deleted.MediaID,
+	})
 	ok(w, "request deleted", nil)
 }
 
@@ -311,6 +424,8 @@ func (a *App) handleMediaRequestByID(w http.ResponseWriter, r *http.Request, par
 			failWithCode(w, http.StatusNotFound, ErrMediaRequestNotFound, "request not found")
 			return
 		}
+		writeMediaRequestETag(w, req.Revision)
+		w.Header().Set("Cache-Control", "private, no-store")
 		ok(w, "OK", mediaRequestUserDTO(req))
 		return
 	}
@@ -319,16 +434,26 @@ func (a *App) handleMediaRequestByID(w http.ResponseWriter, r *http.Request, par
 
 func (a *App) handleDeleteMediaRequest(w http.ResponseWriter, r *http.Request, params Params) {
 	id, _ := int64Param(params, "request_id")
-	if req, okReq := a.store().MediaRequest(id); !okReq {
+	request, okReq := a.store().MediaRequest(id)
+	if !okReq {
 		failWithCode(w, http.StatusNotFound, ErrMediaRequestNotFound, "request not found")
 		return
-	} else if !canAccessMediaRequest(current(r).User, req) {
+	} else if !canAccessMediaRequest(current(r).User, request) {
 		// Match GET by id: existing-but-forbidden rows are hidden as 404.
 		failWithCode(w, http.StatusNotFound, ErrMediaRequestNotFound, "request not found")
 		return
 	}
-	if statusFromError(w, a.store().DeleteMediaRequest(id)) {
+	expectedRevision, err := mediaRequestExpectedRevision(r)
+	if err != nil {
+		failWithCode(w, http.StatusBadRequest, ErrMediaRequestRevisionInvalid, "invalid If-Match revision")
 		return
 	}
+	deleted, err := a.store().DeleteMediaRequestIfRevision(id, expectedRevision)
+	if failMediaRequestMutation(w, err) {
+		return
+	}
+	a.audit(r, "delete_media_request", auditCategoryForRole(current(r).User.Role), deleted.UID, map[string]any{
+		"request_id": deleted.ID, "require_key": deleted.RequireKey, "source": deleted.Source, "media_id": deleted.MediaID,
+	})
 	ok(w, "request deleted", nil)
 }

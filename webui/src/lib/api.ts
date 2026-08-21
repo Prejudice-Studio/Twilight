@@ -59,6 +59,7 @@ import type {
   MediaItem,
   MediaRequest,
   MediaRequestData,
+  AdminMediaRequestListResponse,
   PlaybackRecordWithSync,
   Regcode,
   RegisterAvailability,
@@ -2313,13 +2314,20 @@ class ApiClient {
     });
   }
 
-  async getMediaRequests(params: { page?: number; status?: string } = {}, signal?: AbortSignal) {
+  async getMediaRequests(
+    params: { page?: number; perPage?: number; status?: string; source?: string; query?: string } = {},
+    signal?: AbortSignal,
+  ) {
     const query = new URLSearchParams();
     if (params.page) query.set("page", String(params.page));
+    if (params.perPage) query.set("per_page", String(params.perPage));
     if (params.status) query.set("status", params.status);
-    const res = await this.request<{ requests: MediaRequest[]; total: number }>(
+    if (params.source && params.source !== "all") query.set("source", params.source);
+    if (params.query?.trim()) query.set("q", params.query.trim());
+    const res = await this.request<AdminMediaRequestListResponse>(
       `/admin/media-requests?${query}`,
-      { signal }
+      { signal, cache: "no-store" },
+      { cacheRead: false, dedupe: false },
     );
     if (res.success && res.data?.requests) {
       res.data.requests = res.data.requests.map((item) => ({
@@ -2334,19 +2342,26 @@ class ApiClient {
    * 管理员更新求片状态。第一个参数现在是 require_key（全局唯一），避免
    * Bangumi/TMDB 两表数值 id 撞车把操作打到错的求片。
    */
-  async updateMediaRequest(requireKey: string, status: string, note?: string) {
+  async updateMediaRequest(requireKey: string, status: string, note?: string, revision?: number) {
     const normalizedStatus = normalizeMediaRequestStatus(status, "admin");
     const normalizedNote = (note || "").trim().slice(0, 1000);
-    return this.request(`/admin/media-requests/by-key/${encodeURIComponent(requireKey)}`, {
+    return this.request<MediaRequest>(`/admin/media-requests/by-key/${encodeURIComponent(requireKey)}`, {
       method: "PUT",
+      headers: revision !== undefined ? { "If-Match": `"${revision}"` } : undefined,
       body: JSON.stringify({ status: normalizedStatus, note: normalizedNote }),
+    }).then((res) => {
+      if (res.success && res.data) {
+        res.data.status = normalizeMediaRequestStatus(res.data.status, "admin");
+      }
+      return res;
     });
   }
 
   /** 管理员删除任意求片，按 require_key。 */
-  async deleteMediaRequest(requireKey: string) {
+  async deleteMediaRequest(requireKey: string, revision?: number) {
     return this.request(`/admin/media-requests/by-key/${encodeURIComponent(requireKey)}`, {
       method: "DELETE",
+      headers: revision !== undefined ? { "If-Match": `"${revision}"` } : undefined,
     });
   }
 

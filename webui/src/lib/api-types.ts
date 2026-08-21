@@ -512,12 +512,15 @@ export interface MediaRequestData {
 
 export interface MediaRequest {
   id: number;
+  revision: number;
   source: string;
   // Bangumi 端是 int，TMDB 端是 str（"12345" 或 "tv:12345"），所以这里宽放一些类型
   media_id: number | string;
   status: string; // UNHANDLED, ACCEPTED, REJECTED, COMPLETED
   timestamp: number;
+  updated_at?: number;
   title: string;
+  original_title?: string;
   media_type: string;
   season?: number;
   // 后端始终下发；用作前端 React key 与 PUT/DELETE 的路由参数。
@@ -536,11 +539,32 @@ export interface MediaRequest {
     [key: string]: any;
   };
   admin_note?: string;
+  note?: string;
   user?: {
     telegram_id: number;
     username?: string;
     uid?: number;
   };
+}
+
+export interface MediaRequestStatusCounts {
+  all: number;
+  active: number;
+  pending: number;
+  accepted: number;
+  downloading: number;
+  rejected: number;
+  completed: number;
+}
+
+export interface AdminMediaRequestListResponse {
+  requests: MediaRequest[];
+  total: number;
+  page: number;
+  per_page: number;
+  total_pages: number;
+  has_next: boolean;
+  status_counts: MediaRequestStatusCounts;
 }
 
 export interface EmbyInfo {

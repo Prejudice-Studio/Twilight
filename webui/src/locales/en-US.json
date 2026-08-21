@@ -559,6 +559,18 @@
     "submitIssue": "Submit issue report",
     "requestNow": "Request now"
   },
+  "adminRequests": {
+    "searchLabel": "Search media requests",
+    "searchPlaceholder": "Search title, username, request ID, media ID, or key",
+    "sourceLabel": "Source",
+    "pageSize": "Rows per page",
+    "pageSizeShort": "rows",
+    "previousPage": "Previous page",
+    "nextPage": "Next page",
+    "loadFailed": "Failed to load media requests",
+    "conflictTitle": "Request was updated",
+    "conflictDescription": "Another administrator changed this request. The list was refreshed with the latest state."
+  },
   "dashboard": {
     "developerAdminOnly": "Developer mode is only available to administrators",
     "developerPasswordRequired": "Enter the administrator password",

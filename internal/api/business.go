@@ -470,10 +470,9 @@ func canAccessMediaRequest(user store.User, req store.MediaRequest) bool {
 }
 
 func mediaRequestUserDTO(req store.MediaRequest) map[string]any {
-	mediaInfo := req.MediaInfo
-	if mediaInfo == nil {
-		mediaInfo = map[string]any{}
-	}
+	// DTO normalization must never mutate the Store-owned map. MediaRequest is
+	// copied by value, but MediaInfo still aliases the resident state document.
+	mediaInfo := cloneMap(req.MediaInfo)
 	if _, ok := mediaInfo["title"]; !ok {
 		mediaInfo["title"] = req.Title
 	}
@@ -488,28 +487,32 @@ func mediaRequestUserDTO(req store.MediaRequest) map[string]any {
 		status = store.MediaRequestStatusUnhandled
 	}
 	return map[string]any{
-		"id":          req.ID,
-		"media_id":    req.MediaID,
-		"source":      req.Source,
-		"status":      status,
-		"status_text": store.MediaRequestStatusText(status),
-		"timestamp":   req.CreatedAt,
-		"title":       req.Title,
-		"season":      zeroNil(int64(req.Season)),
-		"year":        req.Year,
-		"media_type":  req.MediaType,
-		"require_key": req.RequireKey,
-		"admin_note":  req.AdminNote,
-		"media_info":  mediaInfo,
+		"id":             req.ID,
+		"revision":       req.Revision,
+		"media_id":       req.MediaID,
+		"source":         req.Source,
+		"status":         status,
+		"status_text":    store.MediaRequestStatusText(status),
+		"timestamp":      req.CreatedAt,
+		"updated_at":     req.UpdatedAt,
+		"title":          req.Title,
+		"original_title": req.OriginalTitle,
+		"season":         zeroNil(int64(req.Season)),
+		"year":           req.Year,
+		"media_type":     req.MediaType,
+		"require_key":    req.RequireKey,
+		"admin_note":     req.AdminNote,
+		"note":           req.Note,
+		"media_info":     mediaInfo,
 	}
 }
 
-func mediaRequestAdminDTO(req store.MediaRequest, st *store.Store) map[string]any {
+func mediaRequestAdminDTO(req store.MediaRequest, user *store.User) map[string]any {
 	dto := mediaRequestUserDTO(req)
 	dto["status"] = store.MediaRequestAdminStatus(req.Status)
 	userData := map[string]any{"telegram_id": req.TelegramID, "username": req.Username, "uid": req.UID}
-	if u, ok := st.User(req.UID); ok {
-		userData = map[string]any{"telegram_id": u.TelegramID, "username": u.Username, "uid": u.UID}
+	if user != nil {
+		userData = map[string]any{"telegram_id": user.TelegramID, "username": user.Username, "uid": user.UID}
 	}
 	dto["user"] = userData
 	return dto

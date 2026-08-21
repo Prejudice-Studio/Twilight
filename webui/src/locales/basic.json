@@ -999,7 +999,17 @@
     "changeStatus": "修改状态",
     "selectStatus": "选择状态",
     "notePlaceholder": "在此输入备注信息...",
-    "confirmSave": "确认保存"
+    "confirmSave": "确认保存",
+    "searchLabel": "搜索求片",
+    "searchPlaceholder": "搜索标题、用户名、请求 ID、媒体 ID 或 Key",
+    "sourceLabel": "来源",
+    "pageSize": "每页条数",
+    "pageSizeShort": "条",
+    "previousPage": "上一页",
+    "nextPage": "下一页",
+    "loadFailed": "加载求片失败",
+    "conflictTitle": "求片已被更新",
+    "conflictDescription": "其他管理员已经处理了这条求片，列表已重新加载，请确认最新状态。"
   },
   "adminAnnouncements": {
     "renderPlain": "纯文本",

@@ -1648,6 +1648,63 @@ func TestAdminMediaRequestFiltersSeparateActiveAndPending(t *testing.T) {
 	}
 }
 
+func TestAdminMediaRequestListMetadataAndRevisionConflict(t *testing.T) {
+	app := newTestApp(t)
+	adminCookies := registerAndLogin(t, app, "admin", "Admin123456")
+	created, err := app.store().CreateMediaRequest(store.MediaRequest{
+		UID: 1, TelegramID: 99, Username: "admin", Title: "Searchable Movie",
+		Source: "tmdb", MediaID: 4242, MediaType: "movie",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	list := doJSONWithHeaders(app, http.MethodGet, "/api/v1/admin/media-requests?status=all&source=tmdb&q=4242&per_page=50", ``, adminCookies, nil)
+	if list.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", list.Code, list.Body.String())
+	}
+	if got := list.Header().Get("Cache-Control"); got != "private, no-store" {
+		t.Fatalf("cache-control=%q", got)
+	}
+	var envelope struct {
+		Data struct {
+			Requests []struct {
+				RequireKey string `json:"require_key"`
+				Revision   int64  `json:"revision"`
+			} `json:"requests"`
+			Total        int            `json:"total"`
+			TotalPages   int            `json:"total_pages"`
+			PerPage      int            `json:"per_page"`
+			StatusCounts map[string]int `json:"status_counts"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Data.Total != 1 || envelope.Data.TotalPages != 1 || envelope.Data.PerPage != 50 || len(envelope.Data.Requests) != 1 {
+		t.Fatalf("unexpected list metadata: %#v", envelope.Data)
+	}
+	if envelope.Data.StatusCounts["all"] != 1 || envelope.Data.StatusCounts["pending"] != 1 {
+		t.Fatalf("unexpected status counts: %#v", envelope.Data.StatusCounts)
+	}
+
+	path := "/api/v1/admin/media-requests/by-key/" + created.RequireKey
+	headers := map[string]string{"X-Twilight-Client": "webui", "If-Match": `"1"`}
+	first := doJSONWithHeaders(app, http.MethodPut, path, `{"status":"accepted","note":"first"}`, adminCookies, headers)
+	if first.Code != http.StatusOK || first.Header().Get("ETag") != `"2"` {
+		t.Fatalf("first update status=%d etag=%q body=%s", first.Code, first.Header().Get("ETag"), first.Body.String())
+	}
+	stale := doJSONWithHeaders(app, http.MethodPut, path, `{"status":"completed"}`, adminCookies, headers)
+	if stale.Code != http.StatusConflict || !strings.Contains(stale.Body.String(), `"error_code":"MEDIA_REQUEST_CONFLICT"`) {
+		t.Fatalf("stale update status=%d body=%s", stale.Code, stale.Body.String())
+	}
+
+	invalid := doJSONWithHeaders(app, http.MethodGet, "/api/v1/admin/media-requests?source=invalid", ``, adminCookies, nil)
+	if invalid.Code != http.StatusBadRequest || !strings.Contains(invalid.Body.String(), `"error_code":"MEDIA_REQUEST_SOURCE_INVALID"`) {
+		t.Fatalf("invalid source status=%d body=%s", invalid.Code, invalid.Body.String())
+	}
+}
+
 func TestEmbyURLsDoNotFallbackToInternalServerURL(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().EmbyURL = "http://127.0.0.1:8096"

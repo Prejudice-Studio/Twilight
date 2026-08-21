@@ -3,6 +3,7 @@ package store
 import (
 	"container/heap"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -21,8 +22,24 @@ type MediaRequestCreateOptions struct {
 }
 
 type MediaRequestPage struct {
-	Requests []MediaRequest
-	Total    int
+	Requests     []MediaRequest
+	Users        map[int64]User
+	StatusCounts map[string]int
+	Total        int
+	Page         int
+	PerPage      int
+	TotalPages   int
+	HasNext      bool
+}
+
+type MediaRequestListOptions struct {
+	UID          int64
+	All          bool
+	StatusFilter string
+	Source       string
+	Query        string
+	Page         int
+	PerPage      int
 }
 
 type mediaRequestIDMinHeap []MediaRequest
@@ -127,26 +144,62 @@ func isActiveMediaStatus(status string) bool {
 }
 
 func (s *Store) ListMediaRequestsPage(uid int64, all bool, statusFilter string, page, perPage int) MediaRequestPage {
+	return s.ListMediaRequestsPageWithOptions(MediaRequestListOptions{
+		UID: uid, All: all, StatusFilter: statusFilter, Page: page, PerPage: perPage,
+	})
+}
+
+func (s *Store) ListMediaRequestsPageWithOptions(opts MediaRequestListOptions) MediaRequestPage {
+	page := opts.Page
 	if page < 1 {
 		page = 1
 	}
+	perPage := opts.PerPage
 	if perPage < 1 {
 		perPage = 20
 	}
 	offset := (page - 1) * perPage
 	window := offset + perPage
 	if window < perPage {
-		return MediaRequestPage{}
+		return MediaRequestPage{Page: page, PerPage: perPage}
 	}
+	statusFilter := strings.ToLower(strings.TrimSpace(opts.StatusFilter))
+	sourceFilter := strings.ToLower(strings.TrimSpace(opts.Source))
+	if sourceFilter == "bgm" {
+		sourceFilter = "bangumi"
+	}
+	query := strings.ToLower(strings.TrimSpace(opts.Query))
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var top mediaRequestIDMinHeap
+	counts := map[string]int{
+		"all": 0, "active": 0, "pending": 0, "accepted": 0,
+		"downloading": 0, "rejected": 0, "completed": 0,
+	}
 	total := 0
 	heapReady := false
 	for _, r := range s.state.MediaRequests {
-		if !all && r.UID != uid {
+		if !opts.All && r.UID != opts.UID {
 			continue
+		}
+		if sourceFilter != "" && sourceFilter != "all" {
+			requestSource := strings.ToLower(strings.TrimSpace(r.Source))
+			if requestSource == "bgm" {
+				requestSource = "bangumi"
+			}
+			if requestSource != sourceFilter {
+				continue
+			}
+		}
+		if query != "" && !mediaRequestMatchesQuery(r, query) {
+			continue
+		}
+		adminStatus := MediaRequestAdminStatus(r.Status)
+		counts["all"]++
+		counts[adminStatus]++
+		if IsActiveMediaRequestStatus(r.Status) {
+			counts["active"]++
 		}
 		if !MediaRequestStatusMatches(r.Status, statusFilter) {
 			continue
@@ -169,8 +222,15 @@ func (s *Store) ListMediaRequestsPage(uid int64, all bool, statusFilter string, 
 			heap.Fix(&top, 0)
 		}
 	}
+	totalPages := 0
+	if total > 0 {
+		totalPages = (total + perPage - 1) / perPage
+	}
 	if total == 0 || offset >= len(top) {
-		return MediaRequestPage{Total: total}
+		return MediaRequestPage{
+			StatusCounts: counts, Total: total, Page: page, PerPage: perPage,
+			TotalPages: totalPages, HasNext: page < totalPages,
+		}
 	}
 	sort.Slice(top, func(i, j int) bool { return top[i].ID > top[j].ID })
 	end := offset + perPage
@@ -179,10 +239,43 @@ func (s *Store) ListMediaRequestsPage(uid int64, all bool, statusFilter string, 
 	}
 	requests := make([]MediaRequest, end-offset)
 	copy(requests, top[offset:end])
-	return MediaRequestPage{Requests: requests, Total: total}
+	users := make(map[int64]User, len(requests))
+	for _, request := range requests {
+		if user, ok := s.state.Users[request.UID]; ok {
+			users[request.UID] = user
+		}
+	}
+	return MediaRequestPage{
+		Requests: requests, Users: users, StatusCounts: counts, Total: total,
+		Page: page, PerPage: perPage, TotalPages: totalPages, HasNext: page < totalPages,
+	}
+}
+
+func mediaRequestMatchesQuery(r MediaRequest, query string) bool {
+	fields := [...]string{
+		r.Title,
+		r.OriginalTitle,
+		r.Username,
+		r.RequireKey,
+		r.Source,
+		strconv.FormatInt(r.ID, 10),
+		strconv.FormatInt(r.MediaID, 10),
+		strconv.FormatInt(r.UID, 10),
+		strconv.FormatInt(r.TelegramID, 10),
+	}
+	for _, field := range fields {
+		if strings.Contains(strings.ToLower(field), query) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Store) UpdateMediaRequestStatus(id int64, rawStatus string, adminNote string, replaceNote bool) (MediaRequest, error) {
+	return s.UpdateMediaRequestStatusIfRevision(id, rawStatus, adminNote, replaceNote, nil)
+}
+
+func (s *Store) UpdateMediaRequestStatusIfRevision(id int64, rawStatus string, adminNote string, replaceNote bool, expectedRevision *int64) (MediaRequest, error) {
 	status := NormalizeMediaRequestStatus(rawStatus)
 	if status == "" {
 		return MediaRequest{}, ErrInvalid
@@ -195,11 +288,10 @@ func (s *Store) UpdateMediaRequestStatus(id int64, rawStatus string, adminNote s
 		if !ok {
 			return ErrNotFound
 		}
-		r.Status = status
-		if replaceNote || strings.TrimSpace(adminNote) != "" {
-			r.AdminNote = adminNote
+		if expectedRevision != nil && r.Revision != *expectedRevision {
+			return ErrConflict
 		}
-		r.UpdatedAt = time.Now().Unix()
+		applyMediaRequestStatusUpdate(&r, status, adminNote, replaceNote)
 		s.state.MediaRequests[id] = r
 		updated = r
 		return nil
@@ -208,4 +300,74 @@ func (s *Store) UpdateMediaRequestStatus(id int64, rawStatus string, adminNote s
 		return MediaRequest{}, err
 	}
 	return updated, nil
+}
+
+func (s *Store) UpdateMediaRequestStatusByKey(key, rawStatus, adminNote string, replaceNote bool, expectedRevision *int64) (MediaRequest, error) {
+	status := NormalizeMediaRequestStatus(rawStatus)
+	if status == "" || strings.TrimSpace(key) == "" {
+		return MediaRequest{}, ErrInvalid
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var updated MediaRequest
+	err := s.mutateAndSaveLocked(func() error {
+		id, current, ok := s.mediaRequestByKeyLocked(key)
+		if !ok {
+			return ErrNotFound
+		}
+		if expectedRevision != nil && current.Revision != *expectedRevision {
+			return ErrConflict
+		}
+		applyMediaRequestStatusUpdate(&current, status, adminNote, replaceNote)
+		s.state.MediaRequests[id] = current
+		updated = current
+		return nil
+	})
+	if err != nil {
+		return MediaRequest{}, err
+	}
+	return updated, nil
+}
+
+func applyMediaRequestStatusUpdate(r *MediaRequest, status, adminNote string, replaceNote bool) {
+	r.Status = status
+	if replaceNote || strings.TrimSpace(adminNote) != "" {
+		r.AdminNote = adminNote
+	}
+	r.Revision++
+	r.UpdatedAt = time.Now().Unix()
+}
+
+func (s *Store) mediaRequestByKeyLocked(key string) (int64, MediaRequest, bool) {
+	for id, request := range s.state.MediaRequests {
+		if request.RequireKey == key {
+			return id, request, true
+		}
+	}
+	return 0, MediaRequest{}, false
+}
+
+func (s *Store) DeleteMediaRequestByKey(key string, expectedRevision *int64) (MediaRequest, error) {
+	if strings.TrimSpace(key) == "" {
+		return MediaRequest{}, ErrInvalid
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var deleted MediaRequest
+	err := s.mutateAndSaveLocked(func() error {
+		id, current, ok := s.mediaRequestByKeyLocked(key)
+		if !ok {
+			return ErrNotFound
+		}
+		if expectedRevision != nil && current.Revision != *expectedRevision {
+			return ErrConflict
+		}
+		deleted = current
+		delete(s.state.MediaRequests, id)
+		return nil
+	})
+	if err != nil {
+		return MediaRequest{}, err
+	}
+	return deleted, nil
 }

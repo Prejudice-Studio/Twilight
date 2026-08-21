@@ -559,6 +559,18 @@
     "submitIssue": "提交問題回報",
     "requestNow": "立即求片"
   },
+  "adminRequests": {
+    "searchLabel": "搜尋求片",
+    "searchPlaceholder": "搜尋標題、使用者名稱、請求 ID、媒體 ID 或 Key",
+    "sourceLabel": "來源",
+    "pageSize": "每頁筆數",
+    "pageSizeShort": "筆",
+    "previousPage": "上一頁",
+    "nextPage": "下一頁",
+    "loadFailed": "載入求片失敗",
+    "conflictTitle": "求片已被更新",
+    "conflictDescription": "其他管理員已處理這條求片，列表已重新載入，請確認最新狀態。"
+  },
   "dashboard": {
     "developerAdminOnly": "開發者模式僅限管理員啟用",
     "developerPasswordRequired": "請輸入管理員密碼",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import Image from "next/image";
 import {
   Film,
@@ -16,10 +16,13 @@ import {
   Trash2,
   ExternalLink,
   Copy,
+  Search,
+  RefreshCw,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Button, IconButton } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -40,12 +43,63 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError } from "@/components/layout/page-state";
-import { api, type MediaRequest } from "@/lib/api";
+import { api, type MediaRequest, type MediaRequestStatusCounts } from "@/lib/api";
+import { ApiError } from "@/lib/api-request";
 import { formatDate } from "@/lib/utils";
 import { mediaRequestExternalUrl } from "@/lib/media-external-url";
 import { useI18n } from "@/lib/i18n";
+import { sanitizeImageUrl } from "@/lib/safe-url";
+
+type AdminRequestStatus = keyof MediaRequestStatusCounts;
+
+const EMPTY_STATUS_COUNTS: MediaRequestStatusCounts = {
+  all: 0,
+  active: 0,
+  pending: 0,
+  accepted: 0,
+  downloading: 0,
+  rejected: 0,
+  completed: 0,
+};
+
+function isActiveStatus(status: string): boolean {
+  return status === "pending" || status === "accepted" || status === "downloading";
+}
+
+function matchesStatusFilter(status: string, filter: AdminRequestStatus): boolean {
+  if (filter === "all") return true;
+  if (filter === "active") return isActiveStatus(status);
+  return status === filter;
+}
+
+function updateStatusCounts(
+  counts: MediaRequestStatusCounts,
+  previousStatus: string,
+  nextStatus?: string,
+): MediaRequestStatusCounts {
+  const next = { ...counts };
+  const previousKey = previousStatus as keyof MediaRequestStatusCounts;
+  if (previousKey in next) next[previousKey] = Math.max(0, next[previousKey] - 1);
+  next.all = Math.max(0, next.all - 1);
+  if (isActiveStatus(previousStatus)) next.active = Math.max(0, next.active - 1);
+  if (nextStatus) {
+    const nextKey = nextStatus as keyof MediaRequestStatusCounts;
+    if (nextKey in next) next[nextKey] += 1;
+    next.all += 1;
+    if (isActiveStatus(nextStatus)) next.active += 1;
+  }
+  return next;
+}
+
+function mediaRequestPoster(request: MediaRequest): string | null {
+  return sanitizeImageUrl(request.media_info?.poster || request.media_info?.poster_url) || null;
+}
+
+function mediaRequestRating(value: unknown): string | null {
+  const rating = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(rating) && rating > 0 ? rating.toFixed(1) : null;
+}
 
 export default function AdminRequestsPage() {
   const { toast } = useToast();
@@ -54,7 +108,19 @@ export default function AdminRequestsPage() {
   const [requests, setRequests] = useState<MediaRequest[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [status, setStatus] = useState("active");
+  const [perPage, setPerPage] = useState(20);
+  const [status, setStatus] = useState<AdminRequestStatus>("active");
+  const [source, setSource] = useState("all");
+  const [searchInput, setSearchInput] = useState("");
+  const [query, setQuery] = useState("");
+  const [statusCounts, setStatusCounts] = useState<MediaRequestStatusCounts>(EMPTY_STATUS_COUNTS);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadedKey, setLoadedKey] = useState("");
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [deletingKey, setDeletingKey] = useState("");
+  const requestAbortRef = useRef<AbortController | null>(null);
+  const requestSequenceRef = useRef(0);
 
   // Action dialog
   const [actionOpen, setActionOpen] = useState(false);
@@ -62,44 +128,70 @@ export default function AdminRequestsPage() {
   const [selectedStatus, setSelectedStatus] = useState("accepted");
   const [adminNote, setAdminNote] = useState("");
   const [isActioning, setIsActioning] = useState(false);
-  const requestsCacheRef = useRef<Map<string, { requests: MediaRequest[]; total: number }>>(
-    new Map()
-  );
+  const requestKey = `${page}|${perPage}|${status}|${source}|${query}`;
 
-  const invalidateRequestsCache = () => {
-    requestsCacheRef.current.clear();
-  };
-
-  const loadRequestsResource = useCallback(async (signal?: AbortSignal) => {
-    const cacheKey = `${page}-${status}`;
-    const cached = requestsCacheRef.current.get(cacheKey);
-    if (cached) {
-      setRequests(cached.requests);
-      setTotal(cached.total);
-      return true;
-    }
-
-    const res = await api.getMediaRequests({ page, status }, signal);
-    if (res.success && res.data) {
+  const loadRequests = useCallback(async () => {
+    requestAbortRef.current?.abort();
+    const controller = new AbortController();
+    requestAbortRef.current = controller;
+    const sequence = ++requestSequenceRef.current;
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const res = await api.getMediaRequests({ page, perPage, status, source, query }, controller.signal);
+      if (controller.signal.aborted || sequence !== requestSequenceRef.current) return;
+      if (!res.success || !res.data) {
+        throw new Error(res.message || t("adminRequests.loadFailed"));
+      }
       setRequests(res.data.requests);
       setTotal(res.data.total);
-      requestsCacheRef.current.set(cacheKey, {
-        requests: res.data.requests,
-        total: res.data.total,
-      });
+      setStatusCounts({ ...EMPTY_STATUS_COUNTS, ...res.data.status_counts });
+      setLoadedKey(requestKey);
+      setHasLoaded(true);
+      if (res.data.total_pages > 0 && page > res.data.total_pages) {
+        setPage(res.data.total_pages);
+      }
+    } catch (error: unknown) {
+      if (controller.signal.aborted) return;
+      const message = error instanceof Error ? error.message : t("adminRequests.loadFailed");
+      setLoadError(message);
+    } finally {
+      if (sequence === requestSequenceRef.current) {
+        setIsLoading(false);
+      }
+      if (requestAbortRef.current === controller) {
+        requestAbortRef.current = null;
+      }
     }
-    return true;
-  }, [page, status]);
-
-  const {
-    isLoading,
-    error,
-    execute: loadRequests,
-  } = useAsyncResource(loadRequestsResource, { immediate: false });
+  }, [page, perPage, query, requestKey, source, status, t]);
 
   useEffect(() => {
     void loadRequests();
+    return () => requestAbortRef.current?.abort();
   }, [loadRequests]);
+
+  const handleSearch = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const nextQuery = searchInput.trim().slice(0, 120);
+    if (nextQuery === query && page === 1) {
+      void loadRequests();
+      return;
+    }
+    setPage(1);
+    setQuery(nextQuery);
+  };
+
+  const handleMutationConflict = (error: unknown): boolean => {
+    if (!(error instanceof ApiError) || error.errorCode !== "MEDIA_REQUEST_CONFLICT") return false;
+    toast({
+      title: t("adminRequests.conflictTitle"),
+      description: t("adminRequests.conflictDescription"),
+      variant: "destructive",
+    });
+    setActionOpen(false);
+    void loadRequests();
+    return true;
+  };
 
   const handleAction = async () => {
     if (!selectedRequest) return;
@@ -110,9 +202,16 @@ export default function AdminRequestsPage() {
 
     setIsActioning(true);
     try {
-      const res = await api.updateMediaRequest(selectedRequest.require_key, selectedStatus, adminNote);
+      const previous = selectedRequest;
+      const res = await api.updateMediaRequest(
+        previous.require_key,
+        selectedStatus,
+        adminNote,
+        previous.revision,
+      );
 
-      if (res.success) {
+      if (res.success && res.data) {
+        const updated = res.data;
         toast({
           title: t("common.operationSuccess"),
           variant: "success",
@@ -120,20 +219,33 @@ export default function AdminRequestsPage() {
         setActionOpen(false);
         setSelectedRequest(null);
         setAdminNote("");
-        invalidateRequestsCache();
-        loadRequests();
+        setStatusCounts((current) => updateStatusCounts(current, previous.status, updated.status));
+        if (matchesStatusFilter(updated.status, status)) {
+          setRequests((current) => current.map((item) => (
+            item.require_key === previous.require_key ? updated : item
+          )));
+        } else {
+          setRequests((current) => current.filter((item) => item.require_key !== previous.require_key));
+          setTotal((current) => Math.max(0, current - 1));
+        }
       } else {
         toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
       }
-    } catch (error: any) {
-      toast({ title: t("common.operationFailed"), description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      if (!handleMutationConflict(error)) {
+        toast({
+          title: t("common.operationFailed"),
+          description: error instanceof Error ? error.message : t("common.networkError"),
+          variant: "destructive",
+        });
+      }
     } finally {
       setIsActioning(false);
     }
   };
 
-  const handleDelete = async (requireKey: string) => {
-    if (!requireKey) {
+  const handleDelete = async (request: MediaRequest) => {
+    if (!request.require_key) {
       toast({ title: t("media.missingRequireKey"), variant: "destructive" });
       return;
     }
@@ -146,16 +258,29 @@ export default function AdminRequestsPage() {
     if (!ok) return;
 
     try {
-      const res = await api.deleteMediaRequest(requireKey);
+      setDeletingKey(request.require_key);
+      const res = await api.deleteMediaRequest(request.require_key, request.revision);
       if (res.success) {
         toast({ title: t("media.deleteSuccess"), variant: "success" });
-        invalidateRequestsCache();
-        loadRequests();
+        setRequests((current) => current.filter((item) => item.require_key !== request.require_key));
+        setStatusCounts((current) => updateStatusCounts(current, request.status));
+        setTotal((current) => Math.max(0, current - 1));
+        if (requests.length === 1 && page > 1) {
+          setPage((current) => Math.max(1, current - 1));
+        }
       } else {
         toast({ title: t("common.deleteFailed"), description: res.message, variant: "destructive" });
       }
-    } catch (error: any) {
-      toast({ title: t("common.deleteFailed"), description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      if (!handleMutationConflict(error)) {
+        toast({
+          title: t("common.deleteFailed"),
+          description: error instanceof Error ? error.message : t("common.networkError"),
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setDeletingKey("");
     }
   };
 
@@ -191,7 +316,7 @@ export default function AdminRequestsPage() {
         );
       case "downloading":
         return (
-          <Badge variant="gradient">
+          <Badge variant="info">
             <Loader2 className="mr-1 h-3 w-3 animate-spin" />
             {t("media.statusDownloading")}
           </Badge>
@@ -208,10 +333,11 @@ export default function AdminRequestsPage() {
     }
   };
 
-  const pages = Math.ceil(total / 20);
+  const pages = Math.ceil(total / perPage);
+  const isChangingView = isLoading && loadedKey !== requestKey;
 
-  if (error) {
-    return <PageError message={error} onRetry={() => void loadRequests()} />;
+  if (loadError && !hasLoaded) {
+    return <PageError message={loadError} onRetry={() => void loadRequests()} />;
   }
 
   return (
@@ -226,23 +352,62 @@ export default function AdminRequestsPage() {
         </Badge>
       </div>
 
-      {/* Status Filter */}
-      <Tabs value={status} onValueChange={(v) => { setStatus(v); setPage(1); }}>
-        <TabsList className="flex w-full overflow-x-auto sm:inline-flex sm:w-auto">
-          <TabsTrigger value="active">{t("adminRequests.activeQueue")}</TabsTrigger>
-          <TabsTrigger value="pending">{t("media.statusUnhandled")}</TabsTrigger>
-          <TabsTrigger value="accepted">{t("media.statusAccepted")}</TabsTrigger>
-          <TabsTrigger value="downloading">{t("media.statusDownloading")}</TabsTrigger>
-          <TabsTrigger value="rejected">{t("media.statusRejected")}</TabsTrigger>
-          <TabsTrigger value="completed">{t("media.statusCompleted")}</TabsTrigger>
-          <TabsTrigger value="all">{t("adminReview.all")}</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      <div className="flex flex-col gap-3 rounded-xl border bg-card/70 p-3 sm:p-4">
+        <form className="flex flex-col gap-2 lg:flex-row" onSubmit={handleSearch}>
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <Input
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              placeholder={t("adminRequests.searchPlaceholder")}
+              aria-label={t("adminRequests.searchLabel")}
+              className="h-11 pl-9"
+            />
+          </div>
+          <Select value={source} onValueChange={(value) => { setSource(value); setPage(1); }}>
+            <SelectTrigger className="h-11 w-full lg:w-36" aria-label={t("adminRequests.sourceLabel")}>
+              <SelectValue placeholder={t("adminRequests.sourceLabel")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t("adminReview.all")}</SelectItem>
+              <SelectItem value="tmdb">TMDB</SelectItem>
+              <SelectItem value="bangumi">Bangumi</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button type="submit" className="h-11 shrink-0 px-5">
+            <Search className="mr-2 h-4 w-4" />
+            {t("common.search")}
+          </Button>
+          <Button type="button" variant="outline" className="h-11 shrink-0" onClick={() => void loadRequests()} disabled={isLoading}>
+            <RefreshCw className={isLoading ? "mr-2 h-4 w-4 animate-spin" : "mr-2 h-4 w-4"} />
+            {t("common.refresh")}
+          </Button>
+        </form>
+
+        <Tabs value={status} onValueChange={(value) => { setStatus(value as AdminRequestStatus); setPage(1); }}>
+          <TabsList className="flex w-full overflow-x-auto sm:inline-flex sm:w-auto">
+            <TabsTrigger value="active">{t("adminRequests.activeQueue")} <span className="ml-1 text-xs text-muted-foreground">{statusCounts.active}</span></TabsTrigger>
+            <TabsTrigger value="pending">{t("media.statusUnhandled")} <span className="ml-1 text-xs text-muted-foreground">{statusCounts.pending}</span></TabsTrigger>
+            <TabsTrigger value="accepted">{t("media.statusAccepted")} <span className="ml-1 text-xs text-muted-foreground">{statusCounts.accepted}</span></TabsTrigger>
+            <TabsTrigger value="downloading">{t("media.statusDownloading")} <span className="ml-1 text-xs text-muted-foreground">{statusCounts.downloading}</span></TabsTrigger>
+            <TabsTrigger value="rejected">{t("media.statusRejected")} <span className="ml-1 text-xs text-muted-foreground">{statusCounts.rejected}</span></TabsTrigger>
+            <TabsTrigger value="completed">{t("media.statusCompleted")} <span className="ml-1 text-xs text-muted-foreground">{statusCounts.completed}</span></TabsTrigger>
+            <TabsTrigger value="all">{t("adminReview.all")} <span className="ml-1 text-xs text-muted-foreground">{statusCounts.all}</span></TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+
+      {loadError && hasLoaded && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <span>{loadError}</span>
+          <Button size="sm" variant="outline" onClick={() => void loadRequests()}>{t("common.retry")}</Button>
+        </div>
+      )}
 
       {/* Requests List */}
       <Card>
         <CardContent className="p-0">
-          {isLoading ? (
+          {isChangingView ? (
             <div className="flex h-64 items-center justify-center">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
@@ -259,10 +424,10 @@ export default function AdminRequestsPage() {
                 >
                   <div className="flex min-w-0 flex-1 items-start gap-4">
                     <div className="relative flex h-20 w-14 shrink-0 items-center justify-center rounded-lg bg-primary/5 overflow-hidden border border-primary/10">
-                      {request.media_info?.poster || request.media_info?.poster_url ? (
+                      {mediaRequestPoster(request) ? (
                         <Image
-                          src={request.media_info.poster || request.media_info.poster_url || ""}
-                          alt={request.media_info.title}
+                          src={mediaRequestPoster(request) || ""}
+                          alt={request.media_info?.title || request.title}
                           fill
                           unoptimized
                           sizes="56px"
@@ -296,14 +461,14 @@ export default function AdminRequestsPage() {
                             {t("media.season", { season: request.media_info.season })}
                           </Badge>
                         )}
-                        {request.media_info?.vote_average && (
+                        {mediaRequestRating(request.media_info?.vote_average) && (
                           <Badge variant="outline" className="text-xs border-amber-500/20 text-amber-500">
-                             ★ {request.media_info.vote_average.toFixed(1)}
+                             ★ {mediaRequestRating(request.media_info?.vote_average)}
                           </Badge>
                         )}
-                        {request.media_info?.rating && (
+                        {mediaRequestRating(request.media_info?.rating) && (
                           <Badge variant="outline" className="text-xs border-amber-500/20 text-amber-500">
-                             ★ {request.media_info.rating.toFixed(1)}
+                             ★ {mediaRequestRating(request.media_info?.rating)}
                           </Badge>
                         )}
                       </div>
@@ -311,30 +476,9 @@ export default function AdminRequestsPage() {
                         <div className="flex items-center gap-1">
                           {(() => {
                                 const url = mediaRequestExternalUrl(request);
-                            const inner = request.source.toLowerCase() === "tmdb" ? (
-                              <Image
-                                src="https://www.themoviedb.org/assets/2/v4/logos/v2/blue_short-8e7b30f73a4020692ccca9c88bafe5dcb6f8a62a4c6bc55cd9ba82bb2cd95f6c.svg"
-                                alt="TMDB"
-                                width={42}
-                                height={12}
-                                unoptimized
-                                className="h-3 w-auto"
-                              />
-                            ) : request.source.toLowerCase() === "bangumi" ? (
-                              <div className="flex items-center gap-1 bg-[#f09199]/10 dark:bg-[#f09199]/20 px-1.5 py-0.5 rounded text-[10px] font-bold text-[#d95b67] dark:text-[#ffb3bc] border border-[#f09199]/20 dark:border-[#f09199]/40">
-                                <Image
-                                  src="https://bangumi.tv/img/favicon.ico"
-                                  alt="Bangumi"
-                                  width={12}
-                                  height={12}
-                                  unoptimized
-                                  className="h-3 w-3"
-                                />
-                                Bangumi
-                              </div>
-                            ) : (
-                              <Badge variant="secondary" className="text-[10px] h-4">
-                                {request.source.toUpperCase()}
+                            const inner = (
+                              <Badge variant="secondary" className="h-5 text-[10px]">
+                                {request.source.toLowerCase() === "bangumi" ? "Bangumi" : request.source.toUpperCase()}
                               </Badge>
                             );
                             return url ? (
@@ -368,12 +512,12 @@ export default function AdminRequestsPage() {
                           <code className="max-w-[10rem] truncate rounded bg-muted px-1 text-foreground sm:max-w-[16rem]">
                             {request.require_key}
                           </code>
-                          <Button
+                          <IconButton
                             type="button"
-                            size="icon"
                             variant="ghost"
                             className="h-5 w-5 text-muted-foreground hover:text-foreground"
                             title={t("media.copyKey")}
+                            aria-label={t("media.copyKey")}
                             onClick={() => {
                               navigator.clipboard.writeText(request.require_key).then(
                                 () => toast({ title: t("adminRequests.keyCopied"), variant: "success" }),
@@ -382,7 +526,7 @@ export default function AdminRequestsPage() {
                             }}
                           >
                             <Copy className="h-3 w-3" />
-                          </Button>
+                          </IconButton>
                         </span>
                         <span className="hidden sm:inline">•</span>
                         <span>{request.media_info?.media_type === "movie" ? t("media.movie") : t("media.tv")}</span>
@@ -422,15 +566,16 @@ export default function AdminRequestsPage() {
                     >
                       {t("adminRequests.handle")}
                     </Button>
-                    <Button
-                      size="icon"
+                    <IconButton
                       variant="ghost"
                       className="h-8 w-8 text-muted-foreground hover:text-destructive dark:hover:bg-destructive/15"
-                      onClick={() => handleDelete(request.require_key)}
+                      onClick={() => void handleDelete(request)}
+                      disabled={deletingKey === request.require_key}
                       title={t("adminRequests.deleteRequest")}
+                      aria-label={t("adminRequests.deleteRequest")}
                     >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                      {deletingKey === request.require_key ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                    </IconButton>
                   </div>
                 </div>
               ))}
@@ -439,29 +584,41 @@ export default function AdminRequestsPage() {
         </CardContent>
       </Card>
 
-      {pages > 1 && (
-        <div className="flex items-center justify-center gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page === 1}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <span className="text-sm">
-            {t("adminRequests.pageStatus", { page, pages })}
-          </span>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setPage((p) => Math.min(pages, p + 1))}
-            disabled={page === pages}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-      )}
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        {pages > 1 && (
+          <>
+            <IconButton
+              variant="outline"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+              aria-label={t("adminRequests.previousPage")}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </IconButton>
+            <span className="text-sm">
+              {t("adminRequests.pageStatus", { page, pages })}
+            </span>
+            <IconButton
+              variant="outline"
+              onClick={() => setPage((p) => Math.min(pages, p + 1))}
+              disabled={page === pages}
+              aria-label={t("adminRequests.nextPage")}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </IconButton>
+          </>
+        )}
+          <Select value={String(perPage)} onValueChange={(value) => { setPerPage(Number(value)); setPage(1); }}>
+            <SelectTrigger className="h-10 w-28" aria-label={t("adminRequests.pageSize")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="20">20 / {t("adminRequests.pageSizeShort")}</SelectItem>
+              <SelectItem value="50">50 / {t("adminRequests.pageSizeShort")}</SelectItem>
+              <SelectItem value="100">100 / {t("adminRequests.pageSizeShort")}</SelectItem>
+            </SelectContent>
+          </Select>
+      </div>
 
       {/* Action Dialog */}
       <Dialog open={actionOpen} onOpenChange={setActionOpen}>
@@ -493,10 +650,12 @@ export default function AdminRequestsPage() {
             </div>
             <div className="space-y-2">
               <Label>{t("adminReview.adminNoteOptional")}</Label>
-              <Input
+              <Textarea
+                maxLength={1000}
                 placeholder={t("adminRequests.notePlaceholder")}
                 value={adminNote}
-                onChange={(e) => setAdminNote(e.target.value)}
+                onChange={(event) => setAdminNote(event.target.value)}
+                className="min-h-24 resize-y"
               />
             </div>
           </div>

@@ -1229,17 +1229,19 @@ curl -X POST "http://localhost:5000/api/v1/admin/regcodes" \
 
 ### 9.4 求片管理（Admin 别名）
 
-`GET /admin/media-requests` — 列出全部求片（与 `/media/request/pending` 同 handler）。
+`GET /admin/media-requests` — 查询管理员求片列表（与 `/media/request/pending` 同 handler）。
 
-默认筛选为 `status=active`，即 `UNHANDLED` / `ACCEPTED` / `DOWNLOADING` 活跃队列；`status=pending` 或 `status=unhandled` 仅返回真正待处理的 `UNHANDLED`，`status=all` 返回全部。
+默认筛选为 `status=active`，即 `UNHANDLED` / `ACCEPTED` / `DOWNLOADING` 活跃队列；`status=pending` 或 `status=unhandled` 仅返回真正待处理的 `UNHANDLED`，`status=all` 返回全部。可选参数：`source=all|tmdb|bangumi`、`q`（标题、用户名、请求 ID、媒体 ID、UID、Telegram ID、Key 模糊搜索）、`page`、`per_page`。`q` 最多 120 字符，`per_page` 最大 100。
+
+响应 `data` 包含 `requests`、`total`、`page`、`per_page`、`total_pages`、`has_next` 和 `status_counts`。`status_counts` 是当前 `source` + `q` 范围内各状态的计数，不受当前 `status` 页签限制。列表响应带 `Cache-Control: private, no-store`。
 
 `PUT /admin/media-requests/{request_id}` — 更新求片状态。
 
 `DELETE /admin/media-requests/{request_id}` — 删除求片。
 
-`PUT /admin/media-requests/by-key/{require_key}` — 按 key 更新。
+`PUT /admin/media-requests/by-key/{require_key}` — 按 key 更新。列表行携带 `revision` 时应发送 `If-Match: "<revision>"`；成功返回新的 `revision` 和同值 `ETag`，revision 已变化时返回 `409 MEDIA_REQUEST_CONFLICT`，避免多个管理员互相覆盖。
 
-`DELETE /admin/media-requests/by-key/{require_key}` — 按 key 删除。
+`DELETE /admin/media-requests/by-key/{require_key}` — 按 key 删除；同样支持 `If-Match`，陈旧 revision 返回 `409 MEDIA_REQUEST_CONFLICT`。
 
 ### 9.4.1 工单系统
 

@@ -282,11 +282,11 @@
 | DELETE | `/api/v1/admin/regcodes/{code}` | Admin | 删除注册码 |
 | GET | `/api/v1/admin/regcodes/{code}/users` | Admin | 查看注册码使用者 |
 | POST | `/api/v1/admin/regcodes/{code}/clear-usage` | Admin | 清理注册码使用记录 |
-| GET | `/api/v1/admin/media-requests` | Admin | 求片管理列表；默认 `status=active`，`pending` 仅待处理，`all` 全部 |
+| GET | `/api/v1/admin/media-requests` | Admin | 求片管理列表；支持 `status/source/q/page/per_page`，返回状态计数与分页元数据，不缓存 |
 | PUT | `/api/v1/admin/media-requests/{request_id}` | Admin | 更新求片状态 |
 | DELETE | `/api/v1/admin/media-requests/{request_id}` | Admin | 删除求片 |
-| PUT | `/api/v1/admin/media-requests/by-key/{require_key}` | Admin | 按 key 更新求片 |
-| DELETE | `/api/v1/admin/media-requests/by-key/{require_key}` | Admin | 按 key 删除求片 |
+| PUT | `/api/v1/admin/media-requests/by-key/{require_key}` | Admin | 按 key 更新求片；支持 `If-Match` revision 冲突保护 |
+| DELETE | `/api/v1/admin/media-requests/by-key/{require_key}` | Admin | 按 key 删除求片；支持 `If-Match` revision 冲突保护 |
 | GET | `/api/v1/admin/tickets` | Admin | 工单管理列表；默认仅返回待处理/处理中，`all=1` 或 `status=all` 返回全部 |
 | GET | `/api/v1/admin/tickets/{ticket_id}` | Admin | 管理员读取单个工单及完整对话，用于会话式处理页 |
 | PUT | `/api/v1/admin/tickets/{ticket_id}` | Admin | 更新工单状态、优先级、类型和管理员摘要；新摘要会追加管理员回复 |

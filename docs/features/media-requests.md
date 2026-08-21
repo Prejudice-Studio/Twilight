@@ -46,3 +46,12 @@
 - 外部回调的备注使用覆盖语义，允许用空备注清空旧 `admin_note`。
 
 这些语义由 `store.UpdateMediaRequestStatus` 提供，HTTP handler 只负责鉴权、参数读取和错误码映射。
+
+## 管理端请求与并发
+
+- 管理端使用 `GET /admin/media-requests` 统一获取列表。参数为 `status=active|pending|accepted|downloading|rejected|completed|all`、`source=all|tmdb|bangumi`、`q`（标题、用户名、请求 ID、媒体 ID、UID、Telegram ID、Key 的模糊搜索）、`page` 和 `per_page`。`q` 最多保留 120 个字符，`per_page` 由后端限制在 1-100。
+- 列表响应同时返回当前页、`total`、`total_pages`、`has_next` 和同一来源/关键词范围内的 `status_counts`，前端切换标签不需要再为计数发请求。列表响应使用 `Cache-Control: private, no-store`，前端也必须关闭 GET 短缓存和请求去重。
+- 管理员更新和删除优先使用 `/admin/media-requests/by-key/{require_key}`。列表行会携带 `revision`，前端通过 `If-Match: "<revision>"` 提交；成功响应返回新 revision 和同值 `ETag`。revision 不一致返回 `409 MEDIA_REQUEST_CONFLICT`，前端重新获取当前筛选列表，不应盲目覆盖本地行。
+- 写操作成功会在前端局部替换/移除当前行并同步状态计数、总数和分页，不再无条件重复请求整页。用户主动点击刷新、切换筛选/页码、删除当前页最后一条或发生 revision 冲突时才重新获取列表。
+- 管理 DTO 会在 Store 的同一次读锁范围内取得当前页关联用户快照；构造 DTO 时复制 `media_info`，不会因为补写标题、季数或媒体类型而修改内存中的持久化状态。
+- 管理列表只显示本地来源徽标，不为每一行加载 TMDB Logo 或 Bangumi favicon；海报 URL 在浏览器渲染前经过安全校验。

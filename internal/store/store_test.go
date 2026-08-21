@@ -1044,6 +1044,12 @@ func TestListMediaRequestsPageFiltersAndPaginates(t *testing.T) {
 	if active.Total != 4 {
 		t.Fatalf("active total=%d want 4", active.Total)
 	}
+	if active.StatusCounts["active"] != 4 || active.StatusCounts["pending"] != 2 || active.StatusCounts["completed"] != 1 {
+		t.Fatalf("unexpected status counts: %#v", active.StatusCounts)
+	}
+	if active.Page != 2 || active.PerPage != 2 || active.TotalPages != 2 || active.HasNext {
+		t.Fatalf("unexpected pagination metadata: %#v", active)
+	}
 	if got, want := mediaRequestIDs(active.Requests), []int64{requests[2].ID, requests[0].ID}; !sameInt64s(got, want) {
 		t.Fatalf("active page IDs=%v want %v", got, want)
 	}
@@ -1059,6 +1065,50 @@ func TestListMediaRequestsPageFiltersAndPaginates(t *testing.T) {
 	empty := st.ListMediaRequestsPage(0, true, "active", 99, 10)
 	if empty.Total != 4 || len(empty.Requests) != 0 {
 		t.Fatalf("out-of-range page=%#v want total 4 and no rows", empty)
+	}
+
+	filtered := st.ListMediaRequestsPageWithOptions(MediaRequestListOptions{
+		All: true, StatusFilter: "all", Source: "tmdb", Query: "105", Page: 1, PerPage: 10,
+	})
+	if filtered.Total != 1 || len(filtered.Requests) != 1 || filtered.Requests[0].MediaID != 105 {
+		t.Fatalf("filtered page=%#v want media id 105", filtered)
+	}
+	if filtered.StatusCounts["all"] != 1 || filtered.StatusCounts["pending"] != 1 {
+		t.Fatalf("filtered counts=%#v", filtered.StatusCounts)
+	}
+}
+
+func TestMediaRequestRevisionProtectsAdminMutations(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	request, err := st.CreateMediaRequest(MediaRequest{
+		UID: 1, Title: "Movie", Source: "tmdb", MediaID: 42, MediaType: "movie",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Revision != 1 {
+		t.Fatalf("initial revision=%d want 1", request.Revision)
+	}
+
+	expected := request.Revision
+	updated, err := st.UpdateMediaRequestStatusByKey(request.RequireKey, "accepted", "ok", false, &expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Revision != 2 || updated.Status != MediaRequestStatusAccepted {
+		t.Fatalf("updated request=%#v", updated)
+	}
+	if _, err := st.UpdateMediaRequestStatusByKey(request.RequireKey, "completed", "", false, &expected); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale update err=%v want conflict", err)
+	}
+	if _, err := st.DeleteMediaRequestByKey(request.RequireKey, &expected); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale delete err=%v want conflict", err)
+	}
+
+	expected = updated.Revision
+	deleted, err := st.DeleteMediaRequestByKey(request.RequireKey, &expected)
+	if err != nil || deleted.ID != request.ID {
+		t.Fatalf("delete request=%#v err=%v", deleted, err)
 	}
 }
 
