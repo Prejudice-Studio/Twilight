@@ -394,6 +394,10 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - The playback stats page, playback stats API routes, feature gate, and config key have been removed. Do not reintroduce `/stats/playback`, `/emby/playback-stats`, `/admin/emby/playback-stats*`, or `[Emby].emby_playback_stats_enabled`.
 - `total_duration` for persisted records is computed from paired start/stop events, capped at 12 hours per playback; unmatched events must not fabricate duration.
 - Emby ActivityLog sync must write paired playback records to `PlaybackRecords`; Bangumi sync and retention checks should consume those persisted records.
+- Emby ActivityLog playback pairing must resolve only users whose Emby ID, Emby
+  username, or Web username appears in the current event batch. Do not rebuild a
+  full user map for a small activity batch; keep the existing UID-order collision
+  behavior.
 
 ## Scheduler Daemon Rules
 

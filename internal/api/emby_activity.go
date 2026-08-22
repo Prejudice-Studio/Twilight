@@ -169,7 +169,21 @@ func (a *App) persistEmbyPlaybackRecordsFromActivity(ctx context.Context, since 
 	if len(events) == 0 {
 		return 0, nil
 	}
-	usersByKey := embyActivityUsersByKey(a.store().ListUsers())
+	activityUserKeys := embyActivityUserKeys(events)
+	var matchedUsers []store.User
+	if len(activityUserKeys) > 0 {
+		matchedUsers = a.store().UsersMatching(len(activityUserKeys), func(user store.User) bool {
+			for _, key := range []string{user.EmbyID, user.EmbyUsername, user.Username} {
+				if normalized := normalizeEmbyActivityUserKey(key); normalized != "" {
+					if _, ok := activityUserKeys[normalized]; ok {
+						return true
+					}
+				}
+			}
+			return false
+		})
+	}
+	usersByKey := embyActivityUsersByKey(matchedUsers)
 	itemIDs := make([]string, 0, len(events))
 	for _, event := range events {
 		if validEmbyItemID(event.ItemID) {
@@ -288,6 +302,18 @@ func embyActivityUsersByKey(users []store.User) map[string]store.User {
 		}
 	}
 	return out
+}
+
+func embyActivityUserKeys(events []embyActivityPlaybackEvent) map[string]struct{} {
+	keys := make(map[string]struct{}, len(events)*2)
+	for _, event := range events {
+		for _, key := range []string{event.UserID, event.UserName, event.UserKey} {
+			if normalized := normalizeEmbyActivityUserKey(key); normalized != "" {
+				keys[normalized] = struct{}{}
+			}
+		}
+	}
+	return keys
 }
 
 func normalizeEmbyActivityUserKey(value string) string {
