@@ -262,6 +262,9 @@ Use this index before broad search. Line numbers drift, so search by function na
   must construct a complete known-user plan.
 - Emby device/IP audit initialization must use `UsersWithEmby` so unbound Web
   accounts are not copied into the device aggregation input.
+- Ticket Telegram notification target selection must collect matching admin UIDs
+  first and hydrate only those users; do not copy the full user table for every
+  ticket event.
 - Admin user listing must filter and sort the lightweight `store.User` slice before
   constructing `publicUserAt` DTO maps, and must construct DTOs only for the current
   page. Keep `per_page` bounded; do not materialize full public rows for 2000+ users.

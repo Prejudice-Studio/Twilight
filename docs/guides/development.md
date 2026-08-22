@@ -266,6 +266,7 @@ Twilight 不对 Cookie 鉴权的变更类请求做 CSRF 令牌校验，也不做
 - 过滤用户的统一批量本地变更应使用带完整匹配计数的 Store 读取和一次 `UpdateUsers` 落盘；只有本地批量更新成功的 UID 才能进入后续远端副作用。
 - Telegram 已有花名册时只按花名册中的 Telegram ID hydrate 用户；没有花名册的兼容 fallback 才允许扫描全量用户生成完整预览。
 - Emby 设备/IP 审查只需本地 Emby 绑定用户，应使用紧凑的 `UsersWithEmby` 读取；扫描状态文档仍然需要遍历用户，但不要保留无关 Web 账号副本。
+- 工单 Telegram 通知目标只需启用通知的管理员，应先筛选 UID 再 hydrate 管理员；不要每次工单事件复制全量用户。
 - Emby 活动日志转播放记录时，先从当前事件批次提取用户身份 key，再用有界 `UsersMatching` 构造映射；不要为少量活动事件复制全量用户。
 - Bangumi 管理用户列表应先用 UID-only 扫描完成搜索与计数，再按当前页 UID hydrate 用户；每页的同步日志/播放记录统计保持原有逐用户语义。
 - PostgreSQL 的 `twilight_runtime_logs` 是高写入运行日志表，允许独立优化：最新快照按 `id DESC` 取最近 N 条，增量读取按 `id > after ORDER BY id ASC LIMIT N`，裁剪按 cutoff id 保留最近 N 条。状态接入前的内存 fallback 缓冲区必须保持相同 cursor 语义。普通快速成功请求不写运行日志，只保留失败请求和 2 秒以上慢成功请求，避免每个 HTTP 请求额外执行一次日志 INSERT。

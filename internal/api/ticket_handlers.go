@@ -1034,15 +1034,18 @@ func (a *App) notifyTicketAdmins(ctx context.Context, event string, ticket store
 }
 
 func (a *App) ticketAdminNotificationTargets(actor store.User) []store.User {
-	admins := make([]store.User, 0)
-	for _, user := range a.store().ListUsers() {
+	adminUIDs, _ := a.store().UserUIDsMatching(0, func(user store.User) bool {
 		if user.Role != store.RoleAdmin || !user.Active || !user.NotifyOnTicketTelegram || user.TelegramID == 0 {
-			continue
+			return false
 		}
-		if actor.Role == store.RoleAdmin && actor.UID != 0 && user.UID == actor.UID {
-			continue
+		return !(actor.Role == store.RoleAdmin && actor.UID != 0 && user.UID == actor.UID)
+	})
+	usersByUID := a.store().UsersByUIDs(adminUIDs)
+	admins := make([]store.User, 0, len(adminUIDs))
+	for _, uid := range adminUIDs {
+		if user, ok := usersByUID[uid]; ok {
+			admins = append(admins, user)
 		}
-		admins = append(admins, user)
 	}
 	return admins
 }
