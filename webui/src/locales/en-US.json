@@ -1333,7 +1333,9 @@
     "devColUser": "User",
     "clientFilterActiveHint": "Filtered by client \"{name}\"; showing matching devices only",
     "deviceMatchCount": "{count} matching devices",
-    "emptyDevices": "No matching devices"
+    "emptyDevices": "No matching devices",
+    "renderedRows": "Rendered {shown} / {total} rows",
+    "loadMoreRows": "Show more"
   },
   "adminEmby": {
     "title": "Emby Management",

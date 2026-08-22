@@ -489,6 +489,7 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 ## Emby Device Audit Rules
 
 - Device/IP audit is manual-refresh only in the frontend. Do not add automatic polling or visible auto-refresh controls without an explicit user request.
+- Device/IP audit may hold thousands of users and retained devices. Keep filtering/sorting linear, mount user cards and flattened device rows in bounded 300-row batches, and route initial/manual/post-action reads through one abortable sequence-protected loader. Do not turn batching into automatic infinite scroll or polling.
 - `/admin/emby/device-audit` should degrade gracefully when one Emby source fails. `/Devices`, `/Sessions`, and `/System/ActivityLog` availability is reported in `summary`; one failed source must not hide data from the remaining sources.
 - Offline Emby device rows should be aggregated per Emby user by device name, client name, and client version. Preserve a `count` field and latest activity/device id so repeated retained device records do not flood the audit UI.
 - Device/IP audit must exclude Twilight's own Emby client devices/sessions (`Twilight`, `Twilight Bind`, `twilight-client`) from users, IPs, client stats, and device totals.

@@ -1333,7 +1333,9 @@
     "devColUser": "使用者",
     "clientFilterActiveHint": "已依用戶端「{name}」篩選，僅顯示相符裝置",
     "deviceMatchCount": "相符 {count} 台裝置",
-    "emptyDevices": "無相符裝置"
+    "emptyDevices": "無相符裝置",
+    "renderedRows": "已渲染 {shown} / {total} 行",
+    "loadMoreRows": "顯示更多"
   },
   "adminEmby": {
     "title": "Emby 管理",

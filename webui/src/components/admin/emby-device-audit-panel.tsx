@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   MonitorSmartphone,
   RefreshCw,
@@ -51,6 +51,7 @@ const PERMANENT_THRESHOLD = 253402214400;
 // 不接受空字符串作为 value，所以空 AppName 在下拉里用一个稳定占位值表示。
 const CLIENT_ALL = "all";
 const CLIENT_UNKNOWN = "__unknown__";
+const AUDIT_ROW_BATCH_SIZE = 300;
 
 // clientFilterValue 把后端的客户端名（可能为空串）映射成可用于 Select / 比较的稳定值。
 function clientFilterValue(name: string): string {
@@ -164,13 +165,21 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
   const [sortKey, setSortKey] = useState<SortKey>("devices");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [lastRefreshAt, setLastRefreshAt] = useState<number | null>(null);
+  const [userRowLimit, setUserRowLimit] = useState(AUDIT_ROW_BATCH_SIZE);
+  const [deviceRowLimit, setDeviceRowLimit] = useState(AUDIT_ROW_BATCH_SIZE);
+  const reloadAbortRef = useRef<AbortController | null>(null);
+  const reloadSequenceRef = useRef(0);
 
-  const reload = useCallback(async (refresh = false, signal?: AbortSignal) => {
+  const reload = useCallback(async (refresh = false) => {
+    reloadAbortRef.current?.abort();
+    const controller = new AbortController();
+    reloadAbortRef.current = controller;
+    const sequence = ++reloadSequenceRef.current;
     setLoading(true);
     setError(null);
     try {
-      const res = await api.adminGetEmbyDeviceAudit(refresh, signal);
-      if (signal?.aborted) return;
+      const res = await api.adminGetEmbyDeviceAudit(refresh, controller.signal);
+      if (controller.signal.aborted || sequence !== reloadSequenceRef.current) return;
       if (res.success && res.data) {
         setData(res.data);
         setLastRefreshAt(Date.now());
@@ -178,19 +187,21 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
         throw new Error(res.message || t("deviceAudit.loadFailed"));
       }
     } catch (err) {
-      if (signal?.aborted) return;
+      if (controller.signal.aborted || sequence !== reloadSequenceRef.current) return;
       const message = err instanceof Error ? err.message : t("deviceAudit.loadFailed");
       setError(message);
       toast({ title: t("deviceAudit.loadFailed"), description: message, variant: "destructive" });
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (reloadAbortRef.current === controller) {
+        reloadAbortRef.current = null;
+        if (sequence === reloadSequenceRef.current) setLoading(false);
+      }
     }
   }, [t, toast]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    void reload(false, controller.signal);
-    return () => controller.abort();
+    void reload(false);
+    return () => reloadAbortRef.current?.abort();
   }, [reload]);
 
   const toggleExpand = useCallback((id: string) => {
@@ -356,6 +367,20 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
     });
     return rows;
   }, [data, q, category, clientFilterActive, clientFilterTarget, sortKey]);
+
+  const renderedUsers = useMemo(
+    () => visibleUsers.slice(0, userRowLimit),
+    [userRowLimit, visibleUsers],
+  );
+  const renderedDevices = useMemo(
+    () => visibleDevices.slice(0, deviceRowLimit),
+    [deviceRowLimit, visibleDevices],
+  );
+
+  useEffect(() => {
+    setUserRowLimit(AUDIT_ROW_BATCH_SIZE);
+    setDeviceRowLimit(AUDIT_ROW_BATCH_SIZE);
+  }, [data, search, category, clientFilter, sortKey, view]);
 
   const renderToolbar = () => (
     <Card>
@@ -675,7 +700,15 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
           </CardContent>
         </Card>
       ) : view === "devices" ? (
-        <DeviceTableView rows={visibleDevices} t={t} locale={locale} />
+        <div className="space-y-2">
+          <DeviceTableView rows={renderedDevices} t={t} locale={locale} />
+          <AuditBatchFooter
+            shown={renderedDevices.length}
+            total={visibleDevices.length}
+            onLoadMore={() => setDeviceRowLimit((current) => current + AUDIT_ROW_BATCH_SIZE)}
+            t={t}
+          />
+        </div>
       ) : visibleUsers.length === 0 ? (
         <Card>
           <CardContent className="p-6 text-center text-sm text-muted-foreground">
@@ -684,7 +717,7 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
         </Card>
       ) : (
         <div className="space-y-2">
-          {visibleUsers.map((u, index) => (
+          {renderedUsers.map((u, index) => (
             <UserAuditCard
               key={userKey(u, index)}
               user={u}
@@ -700,6 +733,12 @@ export default function AdminDeviceAuditPanel({ embedded = false }: { embedded?:
               locale={locale}
             />
           ))}
+          <AuditBatchFooter
+            shown={renderedUsers.length}
+            total={visibleUsers.length}
+            onLoadMore={() => setUserRowLimit((current) => current + AUDIT_ROW_BATCH_SIZE)}
+            t={t}
+          />
         </div>
       )}
     </div>
@@ -1109,6 +1148,20 @@ function AccountPanel({ title, children }: { title: string; children: React.Reac
         {title}
       </div>
       {children}
+    </div>
+  );
+}
+
+function AuditBatchFooter({ shown, total, onLoadMore, t }: { shown: number; total: number; onLoadMore: () => void; t: TFunc }) {
+  if (total === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2 text-xs text-muted-foreground">
+      <span>{t("deviceAudit.renderedRows", { shown, total })}</span>
+      {shown < total && (
+        <Button variant="outline" size="sm" onClick={onLoadMore}>
+          {t("deviceAudit.loadMoreRows")}
+        </Button>
+      )}
     </div>
   );
 }

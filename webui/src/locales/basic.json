@@ -2198,7 +2198,9 @@
     "chartDevices": "设备型号分布",
     "statusOnline": "在线",
     "statusOffline": "离线",
-    "unknownDevice": "未知设备"
+    "unknownDevice": "未知设备",
+    "renderedRows": "已渲染 {shown} / {total} 行",
+    "loadMoreRows": "显示更多"
   },
   "adminEmby": {
     "title": "Emby 管理",
