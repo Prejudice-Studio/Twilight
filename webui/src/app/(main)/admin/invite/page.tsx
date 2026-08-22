@@ -41,6 +41,8 @@ interface TreeRow {
   childCount: number;
 }
 
+const ROW_BATCH_SIZE = 300;
+
 interface DepthPromptState {
   title: string;
   description: string;
@@ -117,6 +119,8 @@ export default function AdminInviteTreePage() {
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [selectedUid, setSelectedUid] = useState<number | null>(null);
   const [selectedUids, setSelectedUids] = useState<Set<number>>(new Set());
+  const [rowLimit, setRowLimit] = useState(ROW_BATCH_SIZE);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
   const [depthPrompt, setDepthPrompt] = useState<DepthPromptState | null>(null);
   const reloadAbortRef = useRef<AbortController | null>(null);
   const reloadSequenceRef = useRef(0);
@@ -178,7 +182,7 @@ export default function AdminInviteTreePage() {
     return set;
   }, [deferredQuery, forest, maps]);
 
-  const rows = useMemo(() => {
+  const allRows = useMemo(() => {
     if (!forest || !maps) return [];
     const q = deferredQuery.trim();
     const out: TreeRow[] = [];
@@ -198,13 +202,22 @@ export default function AdminInviteTreePage() {
           });
         }
         if (!collapsed.has(item.uid)) {
-          const childIds = [...(maps.children.get(item.uid) || [])].reverse();
-          for (const child of childIds) stack.push({ uid: child, depth: item.depth + 1 });
+          const childIds = maps.children.get(item.uid) || [];
+          for (let index = childIds.length - 1; index >= 0; index--) {
+            stack.push({ uid: childIds[index], depth: item.depth + 1 });
+          }
         }
       }
     }
     return out;
   }, [collapsed, deferredQuery, forest, includedBySearch, maps, rootFilter]);
+
+  const rows = useMemo(() => allRows.slice(0, rowLimit), [allRows, rowLimit]);
+  const hasMoreRows = rows.length < allRows.length;
+
+  useEffect(() => {
+    setRowLimit(ROW_BATCH_SIZE);
+  }, [deferredQuery, rootFilter]);
 
   const selected = selectedUid && maps?.nodeByUid.get(selectedUid) ? maps.nodeByUid.get(selectedUid)! : null;
   const visibleUids = useMemo(() => rows.map((row) => row.node.uid), [rows]);
@@ -256,7 +269,7 @@ export default function AdminInviteTreePage() {
   };
 
   const handleDetach = async () => {
-    if (!selected) return;
+    if (!selected || busyAction) return;
     const ok = await confirm({
       title: t("adminInvite.detachTitle"),
       description: t("adminInvite.detachDescription"),
@@ -264,20 +277,25 @@ export default function AdminInviteTreePage() {
       confirmLabel: t("adminInvite.detach"),
     });
     if (!ok) return;
-    const res = await api.adminDetachInviteUser(selected.uid).catch((err) => ({
-      success: false,
-      message: err instanceof Error ? err.message : t("adminInvite.requestFailed"),
-    }));
-    if (res.success) {
-      toast({ title: t("adminInvite.detached") });
-      await reload();
-    } else {
-      toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
+    setBusyAction("detach");
+    try {
+      const res = await api.adminDetachInviteUser(selected.uid).catch((err) => ({
+        success: false,
+        message: err instanceof Error ? err.message : t("adminInvite.requestFailed"),
+      }));
+      if (res.success) {
+        toast({ title: t("adminInvite.detached") });
+        await reload();
+      } else {
+        toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
+      }
+    } finally {
+      setBusyAction(null);
     }
   };
 
   const handleDetachAndDeleteEmby = async () => {
-    if (!selected) return;
+    if (!selected || busyAction) return;
     const ok = await confirm({
       title: t("adminInvite.detachDeleteEmbyTitle"),
       description: t("adminInvite.detachDeleteEmbyDescription", { username: selected.username, uid: selected.uid }),
@@ -285,16 +303,21 @@ export default function AdminInviteTreePage() {
       confirmLabel: t("adminInvite.detachDeleteEmby"),
     });
     if (!ok) return;
-    const res = await api.adminDetachInviteUserAndDeleteEmby(selected.uid).catch((err) => ({
-      success: false,
-      message: err instanceof Error ? err.message : t("adminInvite.requestFailed"),
-    }));
-    if (res.success) {
-      toast({ title: t("adminInvite.detachedAndDeletedEmby") });
-      setSelectedUid(null);
-      await reload();
-    } else {
-      toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
+    setBusyAction("detach-delete-emby");
+    try {
+      const res = await api.adminDetachInviteUserAndDeleteEmby(selected.uid).catch((err) => ({
+        success: false,
+        message: err instanceof Error ? err.message : t("adminInvite.requestFailed"),
+      }));
+      if (res.success) {
+        toast({ title: t("adminInvite.detachedAndDeletedEmby") });
+        setSelectedUid(null);
+        await reload();
+      } else {
+        toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
+      }
+    } finally {
+      setBusyAction(null);
     }
   };
 
@@ -319,6 +342,7 @@ export default function AdminInviteTreePage() {
   };
 
   const handleBulkDetach = async (deleteEmby: boolean, onlyEmbyDisabled = false) => {
+    if (busyAction) return;
     const uids = [...selectedUids];
     if (uids.length === 0) {
       toast({ title: t("adminInvite.noBulkSelection"), variant: "destructive" });
@@ -339,32 +363,37 @@ export default function AdminInviteTreePage() {
       confirmLabel: deleteEmby ? t("adminInvite.detachDeleteEmby") : t("adminInvite.detach"),
     });
     if (!ok) return;
-    const res = await api.adminBatchDetachInviteUsers(uids, { deleteEmby, onlyEmbyDisabled }).catch((err) => ({
-      success: false,
-      message: err instanceof Error ? err.message : t("adminInvite.requestFailed"),
-      data: null,
-    }));
-    if (res.success && res.data) {
-      toast({
-        title: t("adminInvite.bulkComplete"),
-        description: onlyEmbyDisabled
-          ? t("adminInvite.bulkDisabledEmbyResult", {
-              success: res.data.success,
-              failed: res.data.failed,
-              deleted: res.data.deleted_emby || 0,
-              skipped: res.data.skipped_not_emby_disabled || 0,
-            })
-          : t("adminInvite.bulkResult", {
-              success: res.data.success,
-              failed: res.data.failed,
-              deleted: res.data.deleted_emby || 0,
-            }),
-        variant: res.data.failed > 0 ? "default" : "success",
-      });
-      setSelectedUids(new Set());
-      await reload();
-    } else {
-      toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
+    setBusyAction("bulk-detach");
+    try {
+      const res = await api.adminBatchDetachInviteUsers(uids, { deleteEmby, onlyEmbyDisabled }).catch((err) => ({
+        success: false,
+        message: err instanceof Error ? err.message : t("adminInvite.requestFailed"),
+        data: null,
+      }));
+      if (res.success && res.data) {
+        toast({
+          title: t("adminInvite.bulkComplete"),
+          description: onlyEmbyDisabled
+            ? t("adminInvite.bulkDisabledEmbyResult", {
+                success: res.data.success,
+                failed: res.data.failed,
+                deleted: res.data.deleted_emby || 0,
+                skipped: res.data.skipped_not_emby_disabled || 0,
+              })
+            : t("adminInvite.bulkResult", {
+                success: res.data.success,
+                failed: res.data.failed,
+                deleted: res.data.deleted_emby || 0,
+              }),
+          variant: res.data.failed > 0 ? "default" : "success",
+        });
+        setSelectedUids(new Set());
+        await reload();
+      } else {
+        toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
+      }
+    } finally {
+      setBusyAction(null);
     }
   };
 
@@ -372,6 +401,7 @@ export default function AdminInviteTreePage() {
     payload: { scope: "selected" | "subtree" | "all"; uids?: number[]; root_uid?: number; depth?: number; include_root?: boolean },
     labelKey: MessageKey,
   ) => {
+    if (busyAction) return;
     const rawDays = await requestRenewDays();
     if (rawDays === null) return;
     const renewDays = parseInt(rawDays, 10);
@@ -388,28 +418,33 @@ export default function AdminInviteTreePage() {
       confirmLabel: t("adminInvite.quickConfirm"),
     });
     if (!ok) return;
-    const res = await api.adminInviteQuickMaintenance({ ...payload, detach: true, renew_days: renewDays }).catch((err) => ({
-      success: false,
-      message: err instanceof Error ? err.message : t("adminInvite.requestFailed"),
-      data: null,
-    }));
-    if (res.success && res.data) {
-      toast({
-        title: t("adminInvite.quickComplete"),
-        description: t("adminInvite.quickResult", {
-          success: res.data.success,
-          failed: res.data.failed,
-          detached: res.data.detached,
-          renewed: res.data.renewed,
-          skipped: res.data.renew_skipped_disabled || 0,
-        }),
-        variant: res.data.failed > 0 ? "default" : "success",
-      });
-      setSelectedUids(new Set());
-      setSelectedUid(null);
-      await reload();
-    } else {
-      toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
+    setBusyAction("quick-maintenance");
+    try {
+      const res = await api.adminInviteQuickMaintenance({ ...payload, detach: true, renew_days: renewDays }).catch((err) => ({
+        success: false,
+        message: err instanceof Error ? err.message : t("adminInvite.requestFailed"),
+        data: null,
+      }));
+      if (res.success && res.data) {
+        toast({
+          title: t("adminInvite.quickComplete"),
+          description: t("adminInvite.quickResult", {
+            success: res.data.success,
+            failed: res.data.failed,
+            detached: res.data.detached,
+            renewed: res.data.renewed,
+            skipped: res.data.renew_skipped_disabled || 0,
+          }),
+          variant: res.data.failed > 0 ? "default" : "success",
+        });
+        setSelectedUids(new Set());
+        setSelectedUid(null);
+        await reload();
+      } else {
+        toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
+      }
+    } finally {
+      setBusyAction(null);
     }
   };
 
@@ -432,7 +467,7 @@ export default function AdminInviteTreePage() {
   };
 
   const handleCascadeToggle = async (enable: boolean) => {
-    if (!selected) return;
+    if (!selected || busyAction) return;
     const action = enable ? t("adminInvite.enable") : t("adminInvite.disable");
     const raw = await requestDepth(
       t("adminInvite.cascadeAction", { action }),
@@ -452,25 +487,30 @@ export default function AdminInviteTreePage() {
       confirmLabel: t("adminInvite.confirmAction", { action }),
     });
     if (!ok) return;
-    const res = await api.toggleUserActive(selected.uid, { enable, cascadeDepth: depth }).catch((err) => ({
-      success: false,
-      message: err instanceof Error ? err.message : t("adminInvite.requestFailed"),
-      data: null,
-    }));
-    if (res.success) {
-      toast({
-        title: t("adminInvite.cascadeComplete"),
-        description: t("adminInvite.cascadeResult", { affected: res.data?.affected?.length ?? 0, skipped: res.data?.skipped?.length ?? 0 }),
-        variant: "success",
-      });
-      await reload();
-    } else {
-      toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
+    setBusyAction(enable ? "cascade-enable" : "cascade-disable");
+    try {
+      const res = await api.toggleUserActive(selected.uid, { enable, cascadeDepth: depth }).catch((err) => ({
+        success: false,
+        message: err instanceof Error ? err.message : t("adminInvite.requestFailed"),
+        data: null,
+      }));
+      if (res.success) {
+        toast({
+          title: t("adminInvite.cascadeComplete"),
+          description: t("adminInvite.cascadeResult", { affected: res.data?.affected?.length ?? 0, skipped: res.data?.skipped?.length ?? 0 }),
+          variant: "success",
+        });
+        await reload();
+      } else {
+        toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
+      }
+    } finally {
+      setBusyAction(null);
     }
   };
 
   const handleCascadeDelete = async () => {
-    if (!selected) return;
+    if (!selected || busyAction) return;
     const raw = await requestDepth(
       t("adminInvite.cascadeDelete"),
       t("adminInvite.depthDescription"),
@@ -489,16 +529,21 @@ export default function AdminInviteTreePage() {
       confirmLabel: t("common.delete"),
     });
     if (!ok) return;
-    const res = await api.deleteUserScoped(selected.uid, { mode: "with_emby", cascadeDepth: depth }).catch((err) => ({
-      success: false,
-      message: err instanceof Error ? err.message : t("adminInvite.requestFailed"),
-    }));
-    if (res.success) {
-      toast({ title: t("adminInvite.deleted"), variant: "success" });
-      setSelectedUid(null);
-      await reload();
-    } else {
-      toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
+    setBusyAction("cascade-delete");
+    try {
+      const res = await api.deleteUserScoped(selected.uid, { mode: "with_emby", cascadeDepth: depth }).catch((err) => ({
+        success: false,
+        message: err instanceof Error ? err.message : t("adminInvite.requestFailed"),
+      }));
+      if (res.success) {
+        toast({ title: t("adminInvite.deleted"), variant: "success" });
+        setSelectedUid(null);
+        await reload();
+      } else {
+        toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
+      }
+    } finally {
+      setBusyAction(null);
     }
   };
 
@@ -528,7 +573,7 @@ export default function AdminInviteTreePage() {
             {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
             {t("common.refresh")}
           </Button>
-          <Button variant="destructive" size="sm" onClick={() => void handleAllQuickMaintenance()} disabled={loading || !forest || forest.edges.length === 0}>
+          <Button variant="destructive" size="sm" onClick={() => void handleAllQuickMaintenance()} disabled={loading || Boolean(busyAction) || !forest || forest.edges.length === 0}>
             <Ban className="mr-2 h-4 w-4" />
             {t("adminInvite.quickAll")}
           </Button>
@@ -579,19 +624,19 @@ export default function AdminInviteTreePage() {
                 <Square className="mr-2 h-4 w-4" />
                 {t("adminInvite.clearSelection")}
               </Button>
-              <Button variant="outline" size="sm" onClick={() => void handleBulkDetach(false)}>
+              <Button variant="outline" size="sm" onClick={() => void handleBulkDetach(false)} disabled={Boolean(busyAction)}>
                 <Ban className="mr-2 h-4 w-4" />
                 {t("adminInvite.bulkDetach")}
               </Button>
-              <Button variant="outline" size="sm" onClick={() => void handleSelectedQuickMaintenance()}>
+              <Button variant="outline" size="sm" onClick={() => void handleSelectedQuickMaintenance()} disabled={Boolean(busyAction)}>
                 <ShieldCheck className="mr-2 h-4 w-4" />
                 {t("adminInvite.quickSelected")}
               </Button>
-              <Button variant="outline" size="sm" onClick={() => void handleBulkDetach(true, true)}>
+              <Button variant="outline" size="sm" onClick={() => void handleBulkDetach(true, true)} disabled={Boolean(busyAction)}>
                 <Trash2 className="mr-2 h-4 w-4" />
                 {t("adminInvite.bulkDetachDisabledEmby")}
               </Button>
-              <Button variant="destructive" size="sm" onClick={() => void handleBulkDetach(true)}>
+              <Button variant="destructive" size="sm" onClick={() => void handleBulkDetach(true)} disabled={Boolean(busyAction)}>
                 <Trash2 className="mr-2 h-4 w-4" />
                 {t("adminInvite.bulkDetachDeleteEmby")}
               </Button>
@@ -622,7 +667,7 @@ export default function AdminInviteTreePage() {
       ) : (
         <Card>
           <CardContent className="p-0">
-            <div className="overflow-auto">
+            <div className="custom-scrollbar max-h-[min(70dvh,900px)] overflow-auto overscroll-contain">
               <table className="w-full min-w-[920px] text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
@@ -693,7 +738,7 @@ export default function AdminInviteTreePage() {
                         <td className="px-4 py-3">{node.telegram_id || "-"}</td>
                         <td className="px-4 py-3">{t("adminInvite.childSummary", { direct: childCount, total: descendants })}</td>
                         <td className="px-4 py-3 text-right">
-                          <Button variant="outline" size="sm" onClick={() => setSelectedUid(node.uid)}>
+                          <Button variant="outline" size="sm" onClick={() => setSelectedUid(node.uid)} disabled={Boolean(busyAction)}>
                             {t("adminInvite.details")}
                           </Button>
                         </td>
@@ -705,6 +750,16 @@ export default function AdminInviteTreePage() {
             </div>
             {rows.length === 0 && (
               <div className="p-8 text-center text-sm text-muted-foreground">{t("adminInvite.noMatches")}</div>
+            )}
+            {allRows.length > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 text-xs text-muted-foreground">
+                <span>{t("adminInvite.renderedRows", { shown: rows.length, total: allRows.length })}</span>
+                {hasMoreRows && (
+                  <Button variant="outline" size="sm" onClick={() => setRowLimit((current) => current + ROW_BATCH_SIZE)}>
+                    {t("adminInvite.loadMoreRows")}
+                  </Button>
+                )}
+              </div>
             )}
           </CardContent>
         </Card>
@@ -748,27 +803,27 @@ export default function AdminInviteTreePage() {
                 </div>
               </dl>
               <div className="grid gap-2 pt-2">
-                <Button variant="outline" size="sm" onClick={() => void handleDetach()} disabled={selected.is_root}>
+                <Button variant="outline" size="sm" onClick={() => void handleDetach()} disabled={selected.is_root || Boolean(busyAction)}>
                   <Ban className="mr-2 h-4 w-4" />
                   {selected.is_root ? t("adminInvite.alreadyRoot") : t("adminInvite.detach")}
                 </Button>
-                <Button variant="destructive" size="sm" onClick={() => void handleDetachAndDeleteEmby()} disabled={selected.role === 0}>
+                <Button variant="destructive" size="sm" onClick={() => void handleDetachAndDeleteEmby()} disabled={selected.role === 0 || Boolean(busyAction)}>
                   <Trash2 className="mr-2 h-4 w-4" />
                   {t("adminInvite.detachDeleteEmby")}
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => void handleSubtreeQuickMaintenance()} disabled={(maps.descendants.get(selected.uid) ?? 0) === 0}>
+                <Button variant="outline" size="sm" onClick={() => void handleSubtreeQuickMaintenance()} disabled={(maps.descendants.get(selected.uid) ?? 0) === 0 || Boolean(busyAction)}>
                   <ShieldCheck className="mr-2 h-4 w-4" />
                   {t("adminInvite.quickSubtree")}
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => void handleCascadeToggle(false)}>
+                <Button variant="outline" size="sm" onClick={() => void handleCascadeToggle(false)} disabled={Boolean(busyAction)}>
                   <Ban className="mr-2 h-4 w-4" />
                   {t("adminInvite.cascadeDisable")}
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => void handleCascadeToggle(true)}>
+                <Button variant="outline" size="sm" onClick={() => void handleCascadeToggle(true)} disabled={Boolean(busyAction)}>
                   <ShieldCheck className="mr-2 h-4 w-4" />
                   {t("adminInvite.cascadeEnable")}
                 </Button>
-                <Button variant="destructive" size="sm" onClick={() => void handleCascadeDelete()}>
+                <Button variant="destructive" size="sm" onClick={() => void handleCascadeDelete()} disabled={Boolean(busyAction)}>
                   <Trash2 className="mr-2 h-4 w-4" />
                   {t("adminInvite.cascadeDelete")}
                 </Button>

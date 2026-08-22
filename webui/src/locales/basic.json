@@ -1155,6 +1155,8 @@
     "childSummary": "{direct} 直属 / {total} 总计",
     "details": "详情",
     "noMatches": "没有匹配当前筛选的用户。",
+    "renderedRows": "已显示 {shown} / {total} 行",
+    "loadMoreRows": "显示更多",
     "boundEmby": "已绑定 Emby",
     "noEmby": "无 Emby",
     "root": "根节点",

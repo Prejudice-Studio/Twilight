@@ -606,6 +606,8 @@
     "configDescription": "直接維護 config.toml 中的邀請配置，避免產生重複配置來源。",
     "configNotice": "配置管理中的註冊/邀請入口僅作相容保留；建議在邀請系統管理中維護邀請配置。",
     "selectedCount": "已選擇 {count} 個使用者",
+    "renderedRows": "已顯示 {shown} / {total} 行",
+    "loadMoreRows": "顯示更多",
     "selectVisible": "選擇目前列表",
     "selectUser": "選擇 {username}",
     "clearSelection": "清空選擇",

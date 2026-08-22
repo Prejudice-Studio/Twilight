@@ -606,6 +606,8 @@
     "configDescription": "Maintain invite settings directly in config.toml without creating a duplicate configuration source.",
     "configNotice": "The folded registration/invite entry in Configuration is kept for compatibility; use Invite System Admin for invite settings.",
     "selectedCount": "{count} users selected",
+    "renderedRows": "Showing {shown} / {total} rows",
+    "loadMoreRows": "Show more",
     "selectVisible": "Select visible",
     "selectUser": "Select {username}",
     "clearSelection": "Clear selection",
