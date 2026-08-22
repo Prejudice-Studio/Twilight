@@ -79,6 +79,7 @@ export default function AdminRegcodesPage() {
   const [filterType, setFilterType] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterSource, setFilterSource] = useState("admin");
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState("created_time");
   const [order, setOrder] = useState("desc");
@@ -154,6 +155,16 @@ export default function AdminRegcodesPage() {
     error,
     execute: loadRegcodes,
   } = useAsyncResource(loadRegcodesResource, { immediate: true });
+
+  // 搜索输入只在用户短暂停止输入后提交，避免每个字符都触发一次分页请求。
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const nextSearch = searchInput.trim().slice(0, 120);
+      setSearch((current) => (current === nextSearch ? current : nextSearch));
+      setPage((current) => (current === 1 ? current : 1));
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
 
   // 筛选条件变化时重置“选中全部匹配”作用域，避免旧作用域跨越不同筛选集合
   useEffect(() => {
@@ -360,6 +371,7 @@ export default function AdminRegcodesPage() {
     setFilterType("all");
     setFilterStatus("all");
     setFilterSource("all");
+    setSearchInput("");
     setSearch("");
     setSort("created_time");
     setOrder("desc");
@@ -1012,7 +1024,7 @@ export default function AdminRegcodesPage() {
                         </Button>
                       </div>
                     </div>
-                    <div className="max-h-40 overflow-y-auto space-y-2 pr-1">
+                    <div className="custom-scrollbar max-h-40 space-y-2 overflow-y-auto pr-1">
                       {createdCodes.map((code) => (
                         <div key={code} className="flex items-center gap-2 group">
                           <code className="flex-1 text-[12px] font-mono bg-background px-2 py-1.5 rounded-lg border border-border group-hover:border-primary/50 transition-colors">
@@ -1214,7 +1226,7 @@ export default function AdminRegcodesPage() {
                     </div>
                   ))}
                 </div>
-                <div className="hidden overflow-x-auto md:block">
+                <div className="custom-scrollbar hidden overflow-x-auto md:block">
                   <table className="w-full min-w-[1000px]">
                     <thead>
                       <tr className="border-b bg-muted/50">
@@ -1361,8 +1373,8 @@ export default function AdminRegcodesPage() {
         <CardContent className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[minmax(200px,1fr)_0.7fr_0.7fr_0.7fr_0.7fr_0.7fr_auto]">
           <Input
             placeholder={t("adminRegcodes.searchRegcodePlaceholder")}
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
           />
           <Select value={filterType} onValueChange={(v) => { setFilterType(v); setPage(1); }}>
             <SelectTrigger><SelectValue placeholder={t("adminRegcodes.filterTypePlaceholder")} /></SelectTrigger>
@@ -1393,7 +1405,7 @@ export default function AdminRegcodesPage() {
               <SelectItem value="disabled">{t("adminRegcodes.statusDisabled")}</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={sort} onValueChange={setSort}>
+          <Select value={sort} onValueChange={(value) => { setSort(value); setPage(1); }}>
             <SelectTrigger><SelectValue placeholder={t("adminRegcodes.sortPlaceholder")} /></SelectTrigger>
             <SelectContent>
               <SelectItem value="created_time">{t("adminRegcodes.sortCreatedTime")}</SelectItem>
@@ -1404,7 +1416,7 @@ export default function AdminRegcodesPage() {
               <SelectItem value="note">{t("adminRegcodes.sortNote")}</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={order} onValueChange={setOrder}>
+          <Select value={order} onValueChange={(value) => { setOrder(value); setPage(1); }}>
             <SelectTrigger><SelectValue placeholder={t("adminRegcodes.orderPlaceholder")} /></SelectTrigger>
             <SelectContent>
               <SelectItem value="desc">{t("adminRegcodes.orderDesc")}</SelectItem>
@@ -1556,7 +1568,7 @@ export default function AdminRegcodesPage() {
               ))}
             </div>
 
-            <div className="hidden overflow-x-auto md:block">
+            <div className="custom-scrollbar hidden overflow-x-auto md:block">
               <table className="w-full min-w-[1160px] table-fixed">
                 <colgroup>
                   <col className="w-12" />
@@ -1773,7 +1785,7 @@ export default function AdminRegcodesPage() {
               {t("adminRegcodes.noUsageRecords")}
             </div>
           ) : (
-            <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+            <div className="custom-scrollbar max-h-[60vh] space-y-3 overflow-y-auto pr-1">
               {usageUsers.map((user, index) => (
                 <div key={`${user.uid || "missing"}-${index}`} className="rounded-xl border bg-muted/20 p-4">
                   {user.found ? (
