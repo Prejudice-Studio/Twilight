@@ -1,6 +1,5 @@
 "use client";
 
-import { motion } from "framer-motion";
 import Link from "next/link";
 import {
   Users, Megaphone, MessageSquareMore, FileText, Network, Film, ShieldAlert,
@@ -50,16 +49,6 @@ const categoryConfig: Record<string, { labelKey: string; icon: LucideIcon }> = {
   integration: { labelKey: "adminNav.categoryIntegration", icon: Server },
 };
 
-const container = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.05 } },
-};
-
-const item = {
-  hidden: { opacity: 0, y: 12 },
-  show: { opacity: 1, y: 0 },
-};
-
 export default function AdminIndexPage() {
   const { t } = useI18n();
   const { info: systemInfo } = useSystemStore();
@@ -71,7 +60,7 @@ export default function AdminIndexPage() {
   });
 
   return (
-    <motion.div variants={container} initial="hidden" animate="show" className="space-y-8">
+    <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold">{t("adminNav.title")}</h1>
         <p className="text-sm text-muted-foreground mt-1">{t("adminNav.description")}</p>
@@ -93,7 +82,7 @@ export default function AdminIndexPage() {
               {pages.map((page) => {
                 const Icon = page.icon;
                 return (
-                  <motion.div key={page.href} variants={item}>
+                  <div key={page.href}>
                     <Link href={page.href} prefetch={false}>
                       <Card className="glass-card cursor-pointer transition-colors hover:border-primary/50 hover:bg-accent/30">
                         <CardContent className="flex items-center gap-3 p-4">
@@ -107,13 +96,13 @@ export default function AdminIndexPage() {
                         </CardContent>
                       </Card>
                     </Link>
-                  </motion.div>
+                  </div>
                 );
               })}
             </div>
           </section>
         );
       })}
-    </motion.div>
+    </div>
   );
 }

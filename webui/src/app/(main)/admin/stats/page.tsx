@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { motion } from "framer-motion";
 import {
   Users,
   UserCheck,
@@ -20,16 +19,6 @@ import { PageError, PageLoading } from "@/components/layout/page-state";
 import { api, type SystemStats } from "@/lib/api";
 import { formatNumber } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
-
-const container = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.1 } },
-};
-
-const item = {
-  hidden: { opacity: 0, y: 20 },
-  show: { opacity: 1, y: 0 },
-};
 
 const formatBytes = (bytes: number | undefined, unknown: string) => {
   if (bytes == null) return unknown;
@@ -64,12 +53,7 @@ export default function AdminStatsPage() {
   }
 
   return (
-    <motion.div
-      variants={container}
-      initial="hidden"
-      animate="show"
-      className="space-y-6"
-    >
+    <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold">{t("adminStats.title")}</h1>
         <p className="text-muted-foreground">{t("adminStats.description")}</p>
@@ -77,9 +61,8 @@ export default function AdminStatsPage() {
 
       {/* Stats Grid */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <motion.div variants={item}>
+        <div>
           <Card className="relative overflow-hidden">
-            <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 translate-y-[-50%] rounded-full bg-gradient-to-br from-blue-500/20 to-transparent" />
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 {t("adminStats.cpuCount")}
@@ -92,11 +75,10 @@ export default function AdminStatsPage() {
               </div>
             </CardContent>
           </Card>
-        </motion.div>
+        </div>
 
-        <motion.div variants={item}>
+        <div>
           <Card className="relative overflow-hidden">
-            <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 translate-y-[-50%] rounded-full bg-gradient-to-br from-emerald-500/20 to-transparent" />
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 {t("adminStats.cpuUsage")}
@@ -109,11 +91,10 @@ export default function AdminStatsPage() {
               </div>
             </CardContent>
           </Card>
-        </motion.div>
+        </div>
 
-        <motion.div variants={item}>
+        <div>
           <Card className="relative overflow-hidden">
-            <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 translate-y-[-50%] rounded-full bg-gradient-to-br from-orange-500/20 to-transparent" />
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 {t("adminStats.memoryUsage")}
@@ -126,11 +107,10 @@ export default function AdminStatsPage() {
               </div>
             </CardContent>
           </Card>
-        </motion.div>
+        </div>
 
-        <motion.div variants={item}>
+        <div>
           <Card className="relative overflow-hidden">
-            <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 translate-y-[-50%] rounded-full bg-info/10" />
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 {t("adminStats.memoryAvailable")}
@@ -143,11 +123,10 @@ export default function AdminStatsPage() {
               </div>
             </CardContent>
           </Card>
-        </motion.div>
+        </div>
 
-        <motion.div variants={item}>
+        <div>
           <Card className="relative overflow-hidden">
-            <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 translate-y-[-50%] rounded-full bg-info/10" />
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 {t("adminStats.diskUsage")}
@@ -160,11 +139,11 @@ export default function AdminStatsPage() {
               </div>
             </CardContent>
           </Card>
-        </motion.div>
+        </div>
       </div>
 
       {/* Quick Overview */}
-      <motion.div variants={item}>
+      <div>
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -205,8 +184,8 @@ export default function AdminStatsPage() {
             </div>
           </CardContent>
         </Card>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 }
 
