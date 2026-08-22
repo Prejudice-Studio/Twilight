@@ -172,7 +172,7 @@ export function UserActionsMenu({
           <MoreHorizontal className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="max-h-[min(82vh,640px)] w-[min(20rem,calc(100vw-1.5rem))] overflow-y-auto">
+      <DropdownMenuContent align="end" className="custom-scrollbar max-h-[min(82dvh,640px)] w-[min(20rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain">
         <DropdownMenuItem onClick={() => handlers.onEdit(user)}>
           <Edit className="mr-2 h-4 w-4" />
           <MenuTitle title="编辑信息" desc="角色、Emby ID 与状态" />

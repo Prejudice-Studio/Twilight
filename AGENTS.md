@@ -173,6 +173,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - The media search toolbar keeps the input, source/type segmented controls, and search action at a stable 56px desktop height with centered contents; do not allow one control to drift vertically because of intrinsic button padding.
 - Dangerous admin actions need clear labels, confirmations, result toasts, and audit coverage where applicable.
 - User-management actions must stay grouped by domain (account state, Emby, identity binding, registration entitlement, destructive actions) instead of long flat menus. When adding user actions, keep `admin_action_state` and frontend `UserInfo` types aligned so the UI can disable or explain unavailable operations.
+- The admin user action menu, desktop table, and destructive-maintenance previews must own bounded `dvh` Firefox scroll regions. Keep the desktop table header sticky, allow preview tables to scroll in both directions on phones, and retain server-side pagination plus mobile cards instead of mounting the entire user base.
 - Admin user-list filter changes must reset to page 1 without issuing a stale-page request; page-size changes must clear the cross-page selection scope. In the virtual `emby` selection scope, current-page select-all counts only rows with an Emby binding.
 
 ## Security Boundaries

@@ -1312,9 +1312,9 @@ export function CleanupInvalidUsersDialog({
             <div className="space-y-2">
               <Label>匹配到 {preview.length} 个无效用户</Label>
               {preview.length > 0 ? (
-                <div className="max-h-48 overflow-y-auto rounded-md border">
-                  <table className="w-full text-sm">
-                    <thead>
+                <div className="custom-scrollbar max-h-[min(40dvh,12rem)] overflow-auto overscroll-contain rounded-md border">
+                  <table className="w-full min-w-[28rem] text-sm">
+                    <thead className="sticky top-0 z-10 bg-muted">
                       <tr className="border-b bg-muted/50">
                         <th className="px-3 py-2 text-left">用户名</th>
                         <th className="px-3 py-2 text-left">注册时间</th>
@@ -1489,9 +1489,9 @@ export function NoEmbyKickDialog({
                 )}
               </div>
               {preview.candidate_count > 0 ? (
-                <div className="max-h-56 overflow-y-auto rounded-md border">
-                  <table className="w-full text-sm">
-                    <thead>
+                <div className="custom-scrollbar max-h-[min(44dvh,14rem)] overflow-auto overscroll-contain rounded-md border">
+                  <table className="w-full min-w-[38rem] text-sm">
+                    <thead className="sticky top-0 z-10 bg-muted">
                       <tr className="border-b bg-muted/50">
                         <th className="px-3 py-2 text-left">UID</th>
                         <th className="px-3 py-2 text-left">用户名</th>

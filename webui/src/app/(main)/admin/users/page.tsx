@@ -2463,9 +2463,9 @@ export default function AdminUsersPage() {
               ))}
             </div>
 
-            <div className="hidden overflow-x-auto lg:block">
+            <div className="custom-scrollbar hidden max-h-[min(68dvh,900px)] overflow-auto overscroll-contain lg:block">
               <table className="w-full min-w-[980px]">
-                <thead>
+                <thead className="sticky top-0 z-10 bg-muted">
                   <tr className="border-b bg-muted/50">
                     <th className="w-10 px-4 py-3 text-left text-sm font-medium">
                       <input
