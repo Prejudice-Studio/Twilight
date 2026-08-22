@@ -2590,6 +2590,10 @@
     "labelSessionStarted": "會話開始",
     "labelSessionEnded": "會話結束"
   },
+  "adminStatus": {
+    "partialUpdate": "部分狀態已更新",
+    "unavailable": "暫時不可用"
+  },
   "deviceAuditPatch": {
     "refreshedAt": "更新於 {time}"
   }

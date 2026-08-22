@@ -250,8 +250,8 @@ class ApiClient {
   }
 
   // System
-  async getSystemInfo() {
-    const res = await this.request<SystemInfo>("/system/info");
+  async getSystemInfo(signal?: AbortSignal) {
+    const res = await this.request<SystemInfo>("/system/info", { signal });
     if (res.success && res.data?.icon) {
       res.data.icon = this.toAbsoluteAssetUrl(res.data.icon) || "";
     }
@@ -279,16 +279,16 @@ class ApiClient {
     return this.request<SystemHealth>("/system/health");
   }
 
-  async getSystemHealthApi() {
-    return this.request<SystemHealthDetail>("/system/health/api");
+  async getSystemHealthApi(signal?: AbortSignal) {
+    return this.request<SystemHealthDetail>("/system/health/api", { signal, cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
-  async getSystemHealthDatabase() {
-    return this.request<SystemHealthDetail>("/system/health/database");
+  async getSystemHealthDatabase(signal?: AbortSignal) {
+    return this.request<SystemHealthDetail>("/system/health/database", { signal, cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
-  async getSystemHealthEmby() {
-    return this.request<SystemHealthDetail>("/system/health/emby");
+  async getSystemHealthEmby(signal?: AbortSignal) {
+    return this.request<SystemHealthDetail>("/system/health/emby", { signal, cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
   // User
@@ -1297,8 +1297,8 @@ class ApiClient {
     return this.request<TelegramCommandCatalog>("/admin/telegram/commands/catalog", { signal, cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
-  async getSystemStats() {
-    return this.request<SystemStats>("/system/admin/stats");
+  async getSystemStats(signal?: AbortSignal) {
+    return this.request<SystemStats>("/system/admin/stats", { signal, cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
   async getEmbyLibraryStats(signal?: AbortSignal) {

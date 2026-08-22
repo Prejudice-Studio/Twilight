@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Activity, Database, Loader2, RefreshCw, Server, ShieldCheck, XCircle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -56,49 +56,69 @@ export default function AdminStatusPage() {
   const [stats, setStats] = useState<ExtendedSystemStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const loadAbortRef = useRef<AbortController | null>(null);
+  const loadSequenceRef = useRef(0);
 
   const loadStatus = useCallback(async () => {
+    loadAbortRef.current?.abort();
+    const controller = new AbortController();
+    loadAbortRef.current = controller;
+    const sequence = ++loadSequenceRef.current;
     setLoading(true);
     setError(null);
 
     try {
-      const [apiHealthRes, databaseHealthRes, embyHealthRes, infoRes, statsRes] = await Promise.all([
-        api.getSystemHealthApi(),
-        api.getSystemHealthDatabase(),
-        api.getSystemHealthEmby(),
-        api.getSystemInfo(),
-        api.getSystemStats(),
+      const [apiHealthRes, databaseHealthRes, embyHealthRes, infoRes, statsRes] = await Promise.allSettled([
+        api.getSystemHealthApi(controller.signal),
+        api.getSystemHealthDatabase(controller.signal),
+        api.getSystemHealthEmby(controller.signal),
+        api.getSystemInfo(controller.signal),
+        api.getSystemStats(controller.signal),
       ]);
 
-      if (!apiHealthRes.success) {
-        throw new Error(apiHealthRes.message || t("adminStatus.healthFailed"));
-      }
-      if (!databaseHealthRes.success) {
-        throw new Error(databaseHealthRes.message || t("adminStatus.healthFailed"));
-      }
-      if (!embyHealthRes.success) {
-        throw new Error(embyHealthRes.message || t("adminStatus.healthFailed"));
-      }
-      if (!infoRes.success) {
-        throw new Error(infoRes.message || t("adminStatus.infoFailed"));
-      }
-      if (!statsRes.success) {
-        throw new Error(statsRes.message || t("adminStatus.statsFailed"));
-      }
+      if (controller.signal.aborted || sequence !== loadSequenceRef.current) return;
+      const errors: string[] = [];
+      const read = <T,>(result: PromiseSettledResult<{ success: boolean; message: string; data?: T }>, label: string) => {
+        if (result.status === "rejected") {
+          errors.push(`${label}: ${result.reason instanceof Error ? result.reason.message : t("adminStatus.loadError")}`);
+          return undefined;
+        }
+        if (!result.value.success || !result.value.data) {
+          errors.push(`${label}: ${result.value.message || t("adminStatus.loadError")}`);
+          return undefined;
+        }
+        return result.value.data;
+      };
+      const nextApiHealth = read(apiHealthRes, t("adminStatus.apiService"));
+      const nextDatabaseHealth = read(databaseHealthRes, t("adminLogs.database"));
+      const nextEmbyHealth = read(embyHealthRes, t("adminStatus.embyService"));
+      const nextInfo = read(infoRes, t("adminStatus.systemArchitecture"));
+      const nextStats = read(statsRes, t("adminStatus.systemStats"));
 
       setHealth({
-        api: apiHealthRes.data,
-        database: databaseHealthRes.data,
-        emby: embyHealthRes.data,
+        api: nextApiHealth,
+        database: nextDatabaseHealth,
+        emby: nextEmbyHealth,
       });
-      setInfo(infoRes.data || null);
-      setStats(statsRes.data || null);
-      toast({ title: t("adminStatus.updated"), variant: "success" });
-    } catch (err: any) {
-      setError(err?.message || t("adminStatus.loadError"));
-      toast({ title: t("adminLogs.loadFailed"), description: err?.message || String(err), variant: "destructive" });
+      setInfo(nextInfo || null);
+      setStats(nextStats || null);
+      if (errors.length > 0) {
+        const summary = errors.join("；");
+        setError(summary);
+        toast({ title: t("adminStatus.partialUpdate"), description: summary, variant: "destructive" });
+      } else {
+        toast({ title: t("adminStatus.updated"), variant: "success" });
+      }
+    } catch (err: unknown) {
+      if (controller.signal.aborted || sequence !== loadSequenceRef.current) return;
+      const message = err instanceof Error ? err.message : t("adminStatus.loadError");
+      setError(message);
+      toast({ title: t("adminStatus.loadError"), description: message, variant: "destructive" });
     } finally {
-      setLoading(false);
+      if (loadAbortRef.current === controller) {
+        loadAbortRef.current = null;
+        if (sequence === loadSequenceRef.current) setLoading(false);
+      }
     }
   }, [t, toast]);
 
@@ -106,22 +126,24 @@ export default function AdminStatusPage() {
 
   useEffect(() => {
     void loadStatus();
+    return () => loadAbortRef.current?.abort();
   }, [loadStatus]);
 
   const renderStatusItem = (flag: boolean | undefined, label: string) => {
-    const healthy = Boolean(flag);
+    const available = typeof flag === "boolean";
+    const healthy = flag === true;
     return (
-      <div className="flex items-center justify-between gap-3 rounded-xl border p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4">
         <div className="flex items-center gap-3">
-          <div className={`grid h-10 w-10 place-items-center rounded-xl ${healthy ? "bg-emerald-500/10" : "bg-destructive/10"}`}>
-            {healthy ? <ShieldCheck className="h-5 w-5 text-emerald-500" /> : <XCircle className="h-5 w-5 text-destructive" />}
+          <div className={`grid h-10 w-10 place-items-center rounded-xl ${healthy ? "bg-emerald-500/10" : available ? "bg-destructive/10" : "bg-muted"}`}>
+            {healthy ? <ShieldCheck className="h-5 w-5 text-emerald-500" /> : available ? <XCircle className="h-5 w-5 text-destructive" /> : <Activity className="h-5 w-5 text-muted-foreground" />}
           </div>
           <div>
             <p className="font-medium">{label}</p>
-            <p className="text-sm text-muted-foreground">{healthy ? t("adminStatus.healthy") : t("adminStatus.unhealthy")}</p>
+            <p className="text-sm text-muted-foreground">{!available ? t("adminStatus.unavailable") : healthy ? t("adminStatus.healthy") : t("adminStatus.unhealthy")}</p>
           </div>
         </div>
-        <Badge variant={healthy ? "success" : "destructive"}>{healthy ? "OK" : "FAIL"}</Badge>
+        <Badge variant={!available ? "outline" : healthy ? "success" : "destructive"}>{!available ? "N/A" : healthy ? "OK" : "FAIL"}</Badge>
       </div>
     );
   };
@@ -133,7 +155,7 @@ export default function AdminStatusPage() {
           <h1 className="text-3xl font-bold">{t("adminStatus.title")}</h1>
           <p className="text-muted-foreground">{t("adminStatus.description")}</p>
         </div>
-        <Button onClick={loadStatus} disabled={loading}>
+        <Button className="w-full sm:w-auto" onClick={() => void loadStatus()} disabled={loading}>
           {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
           {t("adminStatus.refresh")}
         </Button>

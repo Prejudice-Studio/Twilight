@@ -2590,6 +2590,10 @@
     "labelSessionStarted": "Session started",
     "labelSessionEnded": "Session ended"
   },
+  "adminStatus": {
+    "partialUpdate": "Partial status update",
+    "unavailable": "Unavailable"
+  },
   "deviceAuditPatch": {
     "refreshedAt": "Updated {time}"
   }

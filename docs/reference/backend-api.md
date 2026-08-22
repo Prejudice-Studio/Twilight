@@ -1008,6 +1008,8 @@ curl -X GET "http://localhost:5000/api/v1/admin/users?status=active&page=1&per_p
 
 前端保持服务端分页：桌面用户表在受限 Firefox 滚动区域中显示并固定表头，手机和平板使用当前页用户卡片。单用户分组操作菜单与无效账号清理预览使用 `dvh` 视口边界，预览表可横纵滚动，不会因长列表或窄视口遮住确认操作。
 
+服务器状态页的 API、数据库和 Emby 健康检查分别调用 `/system/health/api`、`/system/health/database`、`/system/health/emby`，并与系统信息、统计请求共享一次可取消刷新。前端使用 `Promise.allSettled` 独立呈现结果，单个依赖不可用时不会把其他成功结果误报为整体异常。
+
 #### 更新用户信息
 
 `PUT /admin/users/{uid}`
