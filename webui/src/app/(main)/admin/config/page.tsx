@@ -2383,7 +2383,7 @@ export default function AdminConfigPage() {
                 </div>
 
                 {updateOutput.length > 0 && (
-                  <pre className="custom-scrollbar max-h-96 overflow-auto rounded-lg border bg-muted/50 p-4 text-xs whitespace-pre-wrap">
+                  <pre className="custom-scrollbar max-h-96 overflow-auto overscroll-contain rounded-lg border bg-muted/50 p-4 text-xs whitespace-pre-wrap">
                     {updateOutput.join("\n\n")}
                   </pre>
                 )}
@@ -2465,7 +2465,7 @@ export default function AdminConfigPage() {
                 {t("adminConfig.saveDialogDescription")}
               </DialogDescription>
             </DialogHeader>
-            <div className="custom-scrollbar max-h-64 overflow-y-auto space-y-2 py-2">
+            <div className="custom-scrollbar max-h-64 space-y-2 overflow-y-auto overscroll-contain py-2">
               {schema?.sections.map((section) => {
                 const sectionChanges = configChanges.filter((change) => change.sectionKey === section.key);
                 if (sectionChanges.length === 0) return null;
