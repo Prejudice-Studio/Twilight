@@ -1785,7 +1785,7 @@ export default function AdminRegcodesPage() {
               {t("adminRegcodes.noUsageRecords")}
             </div>
           ) : (
-            <div className="custom-scrollbar max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+            <div className="custom-scrollbar max-h-[min(60dvh,720px)] space-y-3 overflow-y-auto overscroll-contain pr-1">
               {usageUsers.map((user, index) => (
                 <div key={`${user.uid || "missing"}-${index}`} className="rounded-xl border bg-muted/20 p-4">
                   {user.found ? (

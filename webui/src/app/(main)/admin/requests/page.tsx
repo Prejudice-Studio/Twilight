@@ -385,7 +385,7 @@ export default function AdminRequestsPage() {
         </form>
 
         <Tabs value={status} onValueChange={(value) => { setStatus(value as AdminRequestStatus); setPage(1); }}>
-          <TabsList className="flex w-full overflow-x-auto sm:inline-flex sm:w-auto">
+          <TabsList className="custom-scrollbar flex w-full overflow-x-auto overscroll-x-contain sm:inline-flex sm:w-auto">
             <TabsTrigger value="active">{t("adminRequests.activeQueue")} <span className="ml-1 text-xs text-muted-foreground">{statusCounts.active}</span></TabsTrigger>
             <TabsTrigger value="pending">{t("media.statusUnhandled")} <span className="ml-1 text-xs text-muted-foreground">{statusCounts.pending}</span></TabsTrigger>
             <TabsTrigger value="accepted">{t("media.statusAccepted")} <span className="ml-1 text-xs text-muted-foreground">{statusCounts.accepted}</span></TabsTrigger>
@@ -416,7 +416,7 @@ export default function AdminRequestsPage() {
               {t("adminReview.emptyRequests", { pending: status === "pending" ? t("adminReview.pendingPrefix") : "" })}
             </div>
           ) : (
-            <div className="divide-y">
+            <div className="custom-scrollbar max-h-[min(72dvh,900px)] divide-y overflow-y-auto overscroll-contain">
               {requests.map((request) => (
                 <div
                   key={request.require_key || `${request.source}-${request.id}`}

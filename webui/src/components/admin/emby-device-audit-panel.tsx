@@ -959,9 +959,9 @@ function UserAuditCard({
             </div>
             {devices.length > 0 ? (
               <div className="overflow-hidden rounded-lg border bg-background">
-                <div className="overflow-x-auto">
+                <div className="custom-scrollbar max-h-[min(48dvh,680px)] overflow-auto overscroll-contain">
                   <table className="min-w-[680px] w-full text-sm">
-                    <thead className="bg-muted/50">
+                    <thead className="sticky top-0 z-10 bg-muted">
                       <tr>
                         <th className="p-2.5 text-left font-medium">{t("deviceAudit.devColName")}</th>
                         <th className="p-2.5 text-left font-medium">{t("deviceAudit.devColApp")}</th>
@@ -1032,9 +1032,9 @@ function DeviceTableView({
   return (
     <Card>
       <CardContent className="p-0">
-        <div className="overflow-x-auto">
+        <div className="custom-scrollbar max-h-[min(68dvh,880px)] overflow-auto overscroll-contain">
           <table className="min-w-[760px] w-full text-sm">
-            <thead className="bg-muted/50">
+            <thead className="sticky top-0 z-10 bg-muted">
               <tr>
                 <th className="p-2.5 text-left font-medium">{t("deviceAudit.devColUser")}</th>
                 <th className="p-2.5 text-left font-medium">{t("deviceAudit.devColName")}</th>

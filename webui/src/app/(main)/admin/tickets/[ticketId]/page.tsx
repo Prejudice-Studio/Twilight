@@ -411,14 +411,14 @@ export default function AdminTicketDetailPage() {
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
         <Card className="overflow-hidden">
-          <CardContent className="flex min-h-[65vh] flex-col p-0">
+          <CardContent className="flex min-h-[65dvh] min-w-0 flex-col p-0">
             <div className="border-b px-4 py-3">
               <div className="flex items-center gap-2 text-sm font-semibold">
                 <MessageSquareMore className="h-4 w-4 text-primary" />
                 {t("tickets.conversation")}
               </div>
             </div>
-            <div ref={conversationRef} className="flex-1 space-y-4 overflow-y-auto bg-muted/20 p-4">
+            <div ref={conversationRef} className="custom-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain bg-muted/20 p-4">
               {messages.map((message) => {
                 const isAdmin = message.author === "admin";
                 return (
@@ -446,7 +446,7 @@ export default function AdminTicketDetailPage() {
               </div>
               {replyAttachments.length > 0 && (
                 <div className="mb-3 rounded-lg border bg-muted/20 p-2">
-                  <div className="flex gap-2 overflow-x-auto pb-1">
+                  <div className="custom-scrollbar flex gap-2 overflow-x-auto overscroll-x-contain pb-1">
                     {replyAttachments.map((attachment) => {
                       const src = api.ticketImageSrc(attachment.url);
                       if (!src) return null;
