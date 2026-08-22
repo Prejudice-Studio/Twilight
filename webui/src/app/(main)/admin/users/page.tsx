@@ -69,6 +69,8 @@ import { formatDate, readStoredPerPage, storePerPage } from "@/lib/utils";
 
 const USERS_PER_PAGE_OPTIONS = [20, 50, 100];
 const USERS_PER_PAGE_STORAGE_KEY = "twilight.admin.users.perPage";
+const MAX_USERS_CACHE_ENTRIES = 8;
+const MAX_USERS_CACHE_ROWS = 400;
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { sanitizeImageUrl } from "@/lib/safe-url";
 import { API_BASE } from "@/lib/api-request";
@@ -90,6 +92,7 @@ import {
   batchToggleConfirmConfig,
   buildUsersCacheKey,
   hasStrongAdminPassword,
+  rememberUsersCache,
   toggleSetMember,
   usersBatchFilterParams,
   usersListParams,
@@ -313,6 +316,7 @@ export default function AdminUsersPage() {
     const cacheKey = buildUsersCacheKey(listState);
     const cached = usersCacheRef.current.get(cacheKey);
     if (cached) {
+      rememberUsersCache(usersCacheRef.current, cacheKey, cached, MAX_USERS_CACHE_ENTRIES, MAX_USERS_CACHE_ROWS);
       setUsers(cached.users);
       setTotal(cached.total);
       setPages(cached.pages);
@@ -324,11 +328,13 @@ export default function AdminUsersPage() {
       setUsers(res.data.users);
       setTotal(res.data.total);
       setPages(res.data.pages);
-      usersCacheRef.current.set(cacheKey, {
-        users: res.data.users,
-        total: res.data.total,
-        pages: res.data.pages,
-      });
+      rememberUsersCache(
+        usersCacheRef.current,
+        cacheKey,
+        { users: res.data.users, total: res.data.total, pages: res.data.pages },
+        MAX_USERS_CACHE_ENTRIES,
+        MAX_USERS_CACHE_ROWS,
+      );
     }
     return true;
   }, [page, perPage, search, roleFilter, activeFilter, embyFilter, embyStatusFilter, emailStatusFilter, sortBy]);

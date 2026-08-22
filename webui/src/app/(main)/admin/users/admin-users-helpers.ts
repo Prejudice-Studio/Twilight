@@ -37,6 +37,29 @@ export function buildUsersCacheKey(state: UsersListState): string {
   ].join("-");
 }
 
+// Keep the page-level cache bounded. Admins often move through many filter/page
+// combinations during a cleanup; retaining every page makes the component hold
+// a second, unbounded copy of the user list in the browser.
+export function rememberUsersCache<T extends { users: unknown[] }>(
+  cache: Map<string, T>,
+  key: string,
+  value: T,
+  maxEntries: number,
+  maxRows: number,
+): void {
+  cache.delete(key);
+  cache.set(key, value);
+  let rows = 0;
+  for (const entry of cache.values()) rows += entry.users.length;
+  while (cache.size > maxEntries || rows > maxRows) {
+    const oldestKey = cache.keys().next().value as string | undefined;
+    if (oldestKey === undefined) return;
+    const oldest = cache.get(oldestKey);
+    cache.delete(oldestKey);
+    rows -= oldest?.users.length ?? 0;
+  }
+}
+
 export function usersListParams(state: UsersListState): AdminUserListParams {
   return {
     page: state.page,
