@@ -64,6 +64,7 @@ export default function AdminViolationsPage() {
       const res = await api.getViolations(page, {
         type: typeFilter !== "all" ? typeFilter : undefined,
         search: search || undefined,
+        signal,
       });
       if (res.success && res.data) {
         setViolations(res.data.violations || []);
@@ -122,10 +123,10 @@ export default function AdminViolationsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
           <ShieldAlert className="h-6 w-6 text-destructive" />
-          <h1 className="text-2xl font-bold">{t("adminViolations.title")}</h1>
+          <h1 className="break-words text-2xl font-bold">{t("adminViolations.title")}</h1>
           {total > 0 && (
             <Badge variant="destructive" className="ml-2">
               {total}
@@ -215,7 +216,7 @@ export default function AdminViolationsPage() {
                       {v.reason}
                     </div>
                   </div>
-                  <div className="flex items-center gap-3 sm:flex-shrink-0">
+            <div className="flex flex-wrap items-center gap-2 sm:flex-shrink-0 sm:gap-3">
                     <Badge
                       variant={v.action === "log_only" ? "secondary" : "destructive"}
                       className="text-xs"

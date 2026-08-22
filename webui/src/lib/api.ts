@@ -2256,12 +2256,14 @@ class ApiClient {
   }
 
   // Violations audit
-  async getViolations(page = 1, params: { type?: string; search?: string } = {}) {
+  async getViolations(page = 1, params: { type?: string; search?: string; signal?: AbortSignal } = {}) {
     const query = new URLSearchParams({ page: String(page) });
     if (params.type && params.type !== "all") query.set("type", params.type);
     if (params.search) query.set("search", params.search);
     return this.request<{ violations: ViolationLog[]; total: number; page: number; per_page: number }>(
-      `/admin/violations?${query.toString()}`
+      `/admin/violations?${query.toString()}`,
+      { signal: params.signal, cache: "no-store" },
+      { cacheRead: false, dedupe: false },
     );
   }
 
