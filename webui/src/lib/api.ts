@@ -379,23 +379,33 @@ class ApiClient {
     return this.request("/bangumi/sync/history", { method: "DELETE" });
   }
 
-  async adminBangumiUsers(page = 1, perPage = 20, search = "") {
+  async adminBangumiUsers(page = 1, perPage = 20, search = "", signal?: AbortSignal) {
     const encodedSearch = encodeURIComponent(search);
     return this.request<{ users: BangumiUserInfo[]; total: number; page: number; per_page: number; pages: number }>(
-      `/admin/bangumi/users?page=${page}&per_page=${perPage}&search=${encodedSearch}`
+      `/admin/bangumi/users?page=${page}&per_page=${perPage}&search=${encodedSearch}`,
+      { signal, cache: "no-store" },
+      { cacheRead: false, dedupe: false },
     );
   }
 
-  async adminBangumiRecords(uid: number, limit = 100) {
-    return this.request<{ records: PlaybackRecordWithSync[]; total: number }>(`/admin/bangumi/records/${uid}?limit=${limit}`);
+  async adminBangumiRecords(uid: number, limit = 100, signal?: AbortSignal) {
+    return this.request<{ records: PlaybackRecordWithSync[]; total: number }>(
+      `/admin/bangumi/records/${uid}?limit=${limit}`,
+      { signal, cache: "no-store" },
+      { cacheRead: false, dedupe: false },
+    );
   }
 
   async adminBangumiSyncUser(uid: number) {
     return this.request<BangumiSyncResult>(`/admin/bangumi/sync/${uid}`, { method: "POST" });
   }
 
-  async adminBangumiSyncLogs(uid: number, limit = 100) {
-    return this.request<{ logs: BangumiSyncLog[]; total: number }>(`/admin/bangumi/logs/${uid}?limit=${limit}`);
+  async adminBangumiSyncLogs(uid: number, limit = 100, signal?: AbortSignal) {
+    return this.request<{ logs: BangumiSyncLog[]; total: number }>(
+      `/admin/bangumi/logs/${uid}?limit=${limit}`,
+      { signal, cache: "no-store" },
+      { cacheRead: false, dedupe: false },
+    );
   }
 
   async adminBangumiClearLogs(uid: number) {

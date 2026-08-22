@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { motion } from "framer-motion";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { BookOpen, RefreshCw, Trash2, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Eye, Search, Settings2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -26,6 +25,11 @@ function formatDuration(seconds: number): string {
   const m = Math.floor((seconds % 3600) / 60);
   if (h > 0) return `${h}h${m}m`;
   return `${m}m`;
+}
+
+function isAbortError(error: unknown): boolean {
+  return (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError");
 }
 
 function BGMConfigCard() {
@@ -100,9 +104,11 @@ export default function AdminBangumiPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [totalPages, setTotalPages] = useState(1);
   const [totalUsers, setTotalUsers] = useState(0);
+  const recordsAbortRef = useRef<AbortController | null>(null);
+  const logsAbortRef = useRef<AbortController | null>(null);
 
-  const loadResource = useCallback(async () => {
-    const res = await api.adminBangumiUsers(page, 20, search);
+  const loadResource = useCallback(async (signal?: AbortSignal) => {
+    const res = await api.adminBangumiUsers(page, 20, search, signal);
     if (res.success && res.data) {
       setUsers(res.data.users || []);
       setTotalUsers(res.data.total ?? 0);
@@ -113,6 +119,11 @@ export default function AdminBangumiPage() {
   }, [page, search]);
 
   const { isLoading, error, execute: reload } = useAsyncResource(loadResource, { immediate: true });
+
+  useEffect(() => () => {
+    recordsAbortRef.current?.abort();
+    logsAbortRef.current?.abort();
+  }, []);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -138,34 +149,56 @@ export default function AdminBangumiPage() {
   };
 
   const handleViewRecords = async (u: BangumiUserInfo) => {
+    logsAbortRef.current?.abort();
+    setLogsOpen(false);
+    recordsAbortRef.current?.abort();
+    const controller = new AbortController();
+    recordsAbortRef.current = controller;
     setSelectedUser(u);
     setRecordOpen(true);
+    setRecords([]);
     setLoadingRecords(true);
     try {
-      const res = await api.adminBangumiRecords(u.uid);
-      if (res.success && res.data) {
+      const res = await api.adminBangumiRecords(u.uid, 100, controller.signal);
+      if (!controller.signal.aborted && res.success && res.data) {
         setRecords(res.data.records || []);
       }
-    } catch {
-      toast({ title: t("bangumi.loadFailed"), variant: "destructive" });
+    } catch (error) {
+      if (!isAbortError(error)) {
+        toast({ title: t("bangumi.loadFailed"), variant: "destructive" });
+      }
     } finally {
-      setLoadingRecords(false);
+      if (recordsAbortRef.current === controller) {
+        recordsAbortRef.current = null;
+        setLoadingRecords(false);
+      }
     }
   };
 
   const handleViewLogs = async (u: BangumiUserInfo) => {
+    recordsAbortRef.current?.abort();
+    setRecordOpen(false);
+    logsAbortRef.current?.abort();
+    const controller = new AbortController();
+    logsAbortRef.current = controller;
     setSelectedUser(u);
     setLogsOpen(true);
+    setLogs([]);
     setLoadingLogs(true);
     try {
-      const res = await api.adminBangumiSyncLogs(u.uid);
-      if (res.success && res.data) {
+      const res = await api.adminBangumiSyncLogs(u.uid, 100, controller.signal);
+      if (!controller.signal.aborted && res.success && res.data) {
         setLogs(res.data.logs || []);
       }
-    } catch {
-      toast({ title: t("bangumi.loadFailed"), variant: "destructive" });
+    } catch (error) {
+      if (!isAbortError(error)) {
+        toast({ title: t("bangumi.loadFailed"), variant: "destructive" });
+      }
     } finally {
-      setLoadingLogs(false);
+      if (logsAbortRef.current === controller) {
+        logsAbortRef.current = null;
+        setLoadingLogs(false);
+      }
     }
   };
 
@@ -189,7 +222,7 @@ export default function AdminBangumiPage() {
   };
 
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+    <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <BookOpen className="h-6 w-6" />
@@ -203,15 +236,15 @@ export default function AdminBangumiPage() {
       {/* BGM 配置状态卡片 */}
       <BGMConfigCard />
 
-      <div className="flex items-center gap-2">
-        <form onSubmit={handleSearchSubmit} className="flex flex-1 max-w-sm items-center gap-2">
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+        <form onSubmit={handleSearchSubmit} className="flex min-w-0 flex-1 items-center gap-2 sm:max-w-lg">
           <Input
             placeholder="搜索用户名..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="h-9"
+            className="h-10 min-w-0"
           />
-          <Button type="submit" size="sm" className="h-9">
+          <Button type="submit" size="sm" className="h-10 shrink-0">
             <Search className="h-4 w-4 mr-1" />
             搜索
           </Button>
@@ -225,7 +258,7 @@ export default function AdminBangumiPage() {
                 setSearch("");
                 setPage(1);
               }}
-              className="h-9 px-2"
+              className="h-10 shrink-0 px-2"
             >
               清除
             </Button>
@@ -259,9 +292,9 @@ export default function AdminBangumiPage() {
           {users.map((u) => (
             <Card key={u.uid} className="glass-card">
               <CardContent className="pt-4">
-                <div className="flex items-center justify-between flex-wrap gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="text-sm font-medium truncate">{u.username}</div>
+                <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="flex min-w-0 flex-wrap items-center gap-3">
+                    <div className="max-w-full truncate text-sm font-medium">{u.username}</div>
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <Badge variant="outline" className="text-xs">
                         {u.bgm_mode ? "同步:开" : "同步:关"}
@@ -279,11 +312,11 @@ export default function AdminBangumiPage() {
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <span>{t("bangumi.records")}: {u.record_count}</span>
                     <span className="text-green-500">{t("bangumi.synced")}: {u.sync_count}</span>
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex max-w-full flex-wrap gap-1.5 lg:justify-end">
                     <Button
                       size="sm"
                       variant="outline"
@@ -319,6 +352,7 @@ export default function AdminBangumiPage() {
                         size="sm"
                         variant="ghost"
                         onClick={() => handleClearLogs(u.uid)}
+                        aria-label={t("common.delete")}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
@@ -356,8 +390,8 @@ export default function AdminBangumiPage() {
         </div>
       )}
 
-      <Dialog open={recordOpen} onOpenChange={setRecordOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+      <Dialog open={recordOpen} onOpenChange={(open) => { setRecordOpen(open); if (!open) recordsAbortRef.current?.abort(); }}>
+        <DialogContent className="custom-scrollbar max-h-[80dvh] max-w-2xl overflow-y-auto overscroll-contain">
           <DialogHeader>
             <DialogTitle>{t("bangumi.playbackRecords")} - {selectedUser?.username}</DialogTitle>
             <DialogDescription>{t("bangumi.playbackRecordsDescription")}</DialogDescription>
@@ -394,8 +428,8 @@ export default function AdminBangumiPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={logsOpen} onOpenChange={setLogsOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+      <Dialog open={logsOpen} onOpenChange={(open) => { setLogsOpen(open); if (!open) logsAbortRef.current?.abort(); }}>
+        <DialogContent className="custom-scrollbar max-h-[80dvh] max-w-2xl overflow-y-auto overscroll-contain">
           <DialogHeader>
             <DialogTitle>{t("bangumi.syncLogs")} - {selectedUser?.username}</DialogTitle>
             <DialogDescription>{t("bangumi.syncLogsDescription")}</DialogDescription>
@@ -435,6 +469,6 @@ export default function AdminBangumiPage() {
           )}
         </DialogContent>
       </Dialog>
-    </motion.div>
+    </div>
   );
 }
