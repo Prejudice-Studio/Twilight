@@ -265,6 +265,9 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Invite-forest reads must use the Store's UID-scoped forest snapshot. Do not call
   `ListUsers()` or `ListAllInviteCodes()` just to build the admin tree; the snapshot
   copies relation endpoints and, when enabled, invite-code owners under one read lock.
+- Admin Bangumi user listing must collect matching UIDs first and hydrate only the
+  requested page. Keep its UID-ascending order and per-page sync statistics, but do
+  not materialize the full user slice for a paginated response.
 - Admin invite maintenance supports both single-user and batch detach. `POST /admin/invite/users/detach-batch` accepts explicit UID lists and may delete remote Emby accounts with `delete_emby=true`; `only_emby_disabled=true` is valid only with deletion enabled and must be enforced against the latest backend `EmbyDisabled` state so enabled Emby accounts are skipped. Keep maintenance available when the invite system is disabled because it is historical maintenance, not new invite flow.
 - Admin invite quick maintenance lives at `POST /admin/invite/quick-maintenance`. It requires `INVITE_QUICK_MAINTENANCE`, supports `scope=selected|subtree|all`, may detach relations, accepts `renew_days=-1` for permanent expiry, and must protect admin accounts from renewal changes. Web-disabled targets may still be detached but must never be renewed or reactivated; report them through `renew_skipped_disabled`. Keep the endpoint available when the invite system is disabled.
 - Bangumi subject cache is global by subject ID; collection cache is per user and type. `UpsertBangumiCollectionCache` owns splitting full API entries.

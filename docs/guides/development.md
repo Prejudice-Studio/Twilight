@@ -264,6 +264,7 @@ Twilight 不对 Cookie 鉴权的变更类请求做 CSRF 令牌校验，也不做
 - 批量 `select_all` 只需要目标 UID 时应使用 Store 的 UID-only 匹配方法；它必须返回完整匹配计数，同时只保留请求上限内的 UID，避免用空回调触发全量 `[]User` 分配。
 - 有明确目标 UID 的批量处理应通过 Store 一次性读取目标用户，不要用 `ListUsers()` 构建全量 UID map；远端逐用户副作用仍按原有顺序和错误降级语义执行。
 - Emby 活动日志转播放记录时，先从当前事件批次提取用户身份 key，再用有界 `UsersMatching` 构造映射；不要为少量活动事件复制全量用户。
+- Bangumi 管理用户列表应先用 UID-only 扫描完成搜索与计数，再按当前页 UID hydrate 用户；每页的同步日志/播放记录统计保持原有逐用户语义。
 - PostgreSQL 的 `twilight_runtime_logs` 是高写入运行日志表，允许独立优化：最新快照按 `id DESC` 取最近 N 条，增量读取按 `id > after ORDER BY id ASC LIMIT N`，裁剪按 cutoff id 保留最近 N 条。状态接入前的内存 fallback 缓冲区必须保持相同 cursor 语义。普通快速成功请求不写运行日志，只保留失败请求和 2 秒以上慢成功请求，避免每个 HTTP 请求额外执行一次日志 INSERT。
 - `twilight_telegram_runtime` 只保存一行单调 `getUpdates` offset。它是运行确认状态而非业务快照内容；旧 `State.TelegramBotOffset` 只作为升级/历史 JSON 导入种子，迁移后必须清零，运行期推进不得调用 `mutateAndSaveLocked`。
 - `twilight_telegram_roster` 以 `(chat_id, telegram_id)` 为主键。普通群消息先命中进程内最多 4096 项的热观察缓存，同成员状态未变时五分钟内不访问数据库；冷缓存仍由 SQL 条件阻止近期行产生物理 UPDATE。定时成员检查先在 Go 内合并重复项，再通过一次 JSONB UPSERT 落库。启动会幂等迁移旧 `State.TelegramRoster`，备份/恢复则由 `Snapshot` / `LoadSnapshot` 合并和拆分，运行期不得把全量花名册重新常驻主状态。

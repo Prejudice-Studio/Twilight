@@ -89,24 +89,21 @@ func (a *App) handleBangumiClearHistory(w http.ResponseWriter, r *http.Request, 
 }
 
 func (a *App) handleAdminBangumiUsers(w http.ResponseWriter, r *http.Request, _ Params) {
-	users := a.store().ListUsers()
 	page := max(1, queryInt(r, "page", 1))
 	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
 	search := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
 
-	filteredUsers := make([]store.User, 0)
-	for _, u := range users {
+	matchedUIDs, total := a.store().UserUIDsMatching(0, func(u store.User) bool {
 		if search != "" {
 			uidStr := strconv.FormatInt(u.UID, 10)
 			if !strings.Contains(strings.ToLower(u.Username), search) && !strings.Contains(uidStr, search) {
-				continue
+				return false
 			}
 		}
-		filteredUsers = append(filteredUsers, u)
-	}
-
-	total := len(filteredUsers)
-	paginatedUsers := paginate(filteredUsers, page, perPage)
+		return true
+	})
+	pageUIDs := paginate(matchedUIDs, page, perPage)
+	usersByUID := a.store().UsersByUIDs(pageUIDs)
 
 	type BangumiUserInfo struct {
 		UID           int64  `json:"uid"`
@@ -119,8 +116,12 @@ func (a *App) handleAdminBangumiUsers(w http.ResponseWriter, r *http.Request, _ 
 		RecordCount   int    `json:"record_count"`
 	}
 
-	result := make([]BangumiUserInfo, 0, len(paginatedUsers))
-	for _, u := range paginatedUsers {
+	result := make([]BangumiUserInfo, 0, len(pageUIDs))
+	for _, uid := range pageUIDs {
+		u, ok := usersByUID[uid]
+		if !ok {
+			continue
+		}
 		info := BangumiUserInfo{
 			UID:           u.UID,
 			Username:      u.Username,
