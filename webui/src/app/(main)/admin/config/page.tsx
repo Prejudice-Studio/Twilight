@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState, useMemo, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import {
   Settings,
   Save,
@@ -60,6 +59,13 @@ import { deepClone } from "@/lib/deep-clone";
 import { useI18n, type MessageKey, type MessageParams } from "@/lib/i18n";
 import { useSystemStore } from "@/store/system";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Alert,
   AlertDescription,
@@ -222,21 +228,6 @@ function formatConfigPreviewValue(field: ConfigField, value: unknown, t: Transla
   if (value === null || value === undefined) return t("common.empty");
   return truncateConfigPreview(String(value), t("common.empty"));
 }
-
-// ==================== 动画 ====================
-
-const container = {
-  hidden: { opacity: 0 },
-  show: {
-    opacity: 1,
-    transition: { staggerChildren: 0.05 },
-  },
-};
-
-const item = {
-  hidden: { opacity: 0, y: 12 },
-  show: { opacity: 1, y: 0 },
-};
 
 // ==================== Section 图标映射 ====================
 
@@ -727,93 +718,80 @@ function SectionCard({
   if (searchText && visibleFields.length === 0) return null;
 
   return (
-    <motion.div variants={item} id={`section-${section.key}`}>
+    <div className="config-section-enter" id={`section-${section.key}`}>
       <Card className="overflow-hidden">
-        <button
-          type="button"
-          className="w-full text-left"
-          onClick={onToggle}
-        >
-          <CardHeader className="cursor-pointer select-none hover:bg-muted/30 transition-colors py-4">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="flex items-center justify-center h-9 w-9 rounded-lg bg-primary/10 text-primary">
-                <Icon className="h-5 w-5" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <CardTitle className="flex min-w-0 flex-wrap items-center gap-2 text-base">
-                  <span className="truncate">{section.title}</span>
-                  {changedCount > 0 && (
-                    <Badge variant="warning" className="text-[10px] px-1.5 py-0">
-                      {t("adminConfig.changedFieldCount", { count: changedCount })}
-                    </Badge>
-                  )}
-                </CardTitle>
-                <CardDescription className="text-xs mt-0.5">
-                  {section.description}
-                  {COLLAPSED_LINKS[section.key] && (
-                    <span className="ml-1 inline-flex flex-wrap items-center gap-1">
-                      <span>{t("adminConfig.preferModuleEdit")}</span>
-                      <a
-                        href={COLLAPSED_LINKS[section.key].href}
-                        className="text-primary underline underline-offset-2 hover:text-primary/80"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {t(COLLAPSED_LINKS[section.key].labelKey)} →
-                      </a>
-                    </span>
-                  )}
-                </CardDescription>
-              </div>
-              <div className="text-muted-foreground">
-                {isExpanded ? (
-                  <ChevronDown className="h-5 w-5" />
-                ) : (
-                  <ChevronRight className="h-5 w-5" />
-                )}
-              </div>
+        <CardHeader className="py-4">
+          <button
+            type="button"
+            className="flex w-full min-w-0 items-center gap-3 text-left"
+            onClick={onToggle}
+            aria-expanded={isExpanded}
+          >
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Icon className="h-5 w-5" />
             </div>
-          </CardHeader>
-        </button>
-        <AnimatePresence initial={false}>
-          {isExpanded && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.2 }}
-            >
-              <CardContent className="pt-0 pb-4 space-y-1">
-                {visibleFields.map((field) => {
-                  const val =
-                    values[field.key] !== undefined
-                      ? values[field.key]
-                      : field.value;
-                  const origVal = originalValues[field.key];
-                  const isChanged = isConfigValueChanged(val, origVal);
-                  return (
-                    <FieldRow
-                      key={field.key}
-                      field={field}
-                      value={val}
-                      isChanged={isChanged}
-                      onFieldChange={(v) =>
-                        onFieldChange(section.key, field.key, v)
-                      }
-                      onReset={() => onResetField(section.key, field.key)}
-                      highlight={searchText}
-                    />
-                  );
-                })}
-                {/* 搜索态下若该 section 没有命中字段，则不展示 footer，避免误导。 */}
-                {footer && (!searchText || visibleFields.length > 0) && (
-                  <div className="pt-2">{footer}</div>
+            <div className="min-w-0 flex-1">
+              <CardTitle className="flex min-w-0 flex-wrap items-center gap-2 text-base">
+                <span className="break-words">{section.title}</span>
+                {changedCount > 0 && (
+                  <Badge variant="warning" className="text-[10px] px-1.5 py-0">
+                    {t("adminConfig.changedFieldCount", { count: changedCount })}
+                  </Badge>
                 )}
-              </CardContent>
-            </motion.div>
-          )}
-        </AnimatePresence>
+              </CardTitle>
+            </div>
+            <div className="shrink-0 text-muted-foreground" aria-hidden="true">
+              {isExpanded ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+            </div>
+          </button>
+          <CardDescription className="mt-2 text-xs sm:pl-12">
+            {section.description}
+            {COLLAPSED_LINKS[section.key] && (
+              <span className="ml-1 inline-flex flex-wrap items-center gap-1">
+                <span>{t("adminConfig.preferModuleEdit")}</span>
+                <a
+                  href={COLLAPSED_LINKS[section.key].href}
+                  className="text-primary underline underline-offset-2 hover:text-primary/80"
+                >
+                  {t(COLLAPSED_LINKS[section.key].labelKey)} →
+                </a>
+              </span>
+            )}
+          </CardDescription>
+        </CardHeader>
+        {isExpanded && (
+          <div className="config-section-content">
+            <CardContent className="space-y-1 pb-4 pt-0">
+              {visibleFields.map((field) => {
+                const val =
+                  values[field.key] !== undefined
+                    ? values[field.key]
+                    : field.value;
+                const origVal = originalValues[field.key];
+                const isChanged = isConfigValueChanged(val, origVal);
+                return (
+                  <FieldRow
+                    key={field.key}
+                    field={field}
+                    value={val}
+                    isChanged={isChanged}
+                    onFieldChange={(v) =>
+                      onFieldChange(section.key, field.key, v)
+                    }
+                    onReset={() => onResetField(section.key, field.key)}
+                    highlight={searchText}
+                  />
+                );
+              })}
+              {/* 搜索态下若该 section 没有命中字段，则不展示 footer，避免误导。 */}
+              {footer && (!searchText || visibleFields.length > 0) && (
+                <div className="pt-2">{footer}</div>
+              )}
+            </CardContent>
+          </div>
+        )}
       </Card>
-    </motion.div>
+    </div>
   );
 }
 
@@ -891,6 +869,49 @@ function EmailTestPanel() {
 
 // ==================== Section 导航侧边栏 ====================
 
+function SectionPicker({
+  sections,
+  categories,
+  activeSection,
+  changedCounts,
+  onSelect,
+}: {
+  sections: ConfigSection[];
+  categories: ConfigCategory[];
+  activeSection: string;
+  changedCounts: Record<string, number>;
+  onSelect: (key: string) => void;
+}) {
+  const { t } = useI18n();
+  const categoryTitles = new Map(categories.map((category) => [category.key, category.title]));
+
+  return (
+    <div className="mb-4 xl:hidden">
+      <Label htmlFor="admin-config-section" className="mb-2 block text-xs text-muted-foreground">
+        {t("adminConfig.configGroup")}
+      </Label>
+      <Select value={activeSection || sections[0]?.key} onValueChange={onSelect}>
+        <SelectTrigger id="admin-config-section" className="min-h-11">
+          <SelectValue placeholder={t("adminConfig.configGroup")} />
+        </SelectTrigger>
+        <SelectContent>
+          {sections.map((section) => {
+            const categoryTitle = section.category ? categoryTitles.get(section.category) : undefined;
+            const count = changedCounts[section.key] || 0;
+            return (
+              <SelectItem key={section.key} value={section.key} className="whitespace-normal break-words">
+                {categoryTitle ? `${categoryTitle} / ` : ""}
+                {section.title}
+                {count > 0 ? ` · ${t("adminConfig.changedFieldCount", { count })}` : ""}
+              </SelectItem>
+            );
+          })}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 function SectionNav({
   sections,
   categories,
@@ -933,8 +954,8 @@ function SectionNav({
   }
 
   return (
-    <nav className="hidden xl:block w-52 shrink-0">
-      <div className="sticky top-20 space-y-4">
+    <nav className="hidden w-52 shrink-0 xl:block">
+      <div className="custom-scrollbar sticky top-20 max-h-[calc(100dvh-7rem)] space-y-4 overflow-y-auto overscroll-contain pr-1">
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2">
           {t("adminConfig.configGroup")}
         </p>
@@ -1003,6 +1024,7 @@ export default function AdminConfigPage() {
 
   // UI 状态
   const [searchText, setSearchText] = useState("");
+  const [activeTab, setActiveTab] = useState("visual");
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set()
   );
@@ -1039,6 +1061,8 @@ export default function AdminConfigPage() {
   const hasSchemaChanges = useMemo(() => {
     return JSON.stringify(editedValues) !== JSON.stringify(originalValues);
   }, [editedValues, originalValues]);
+
+  const hasUnsavedChanges = hasSchemaChanges || hasChanges;
 
   // 每个 section 的修改计数
   const changedCounts = useMemo(() => {
@@ -1126,6 +1150,38 @@ export default function AdminConfigPage() {
   useEffect(() => {
     setHasChanges(configContent !== originalContent);
   }, [configContent, originalContent]);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  useEffect(() => {
+    if (!schema || searchText.trim()) return;
+    const targets = schema.sections
+      .map((section) => document.getElementById(`section-${section.key}`))
+      .filter((element): element is HTMLElement => Boolean(element));
+    if (targets.length === 0 || typeof IntersectionObserver === "undefined") return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        const first = visible[0]?.target as HTMLElement | undefined;
+        const key = first?.id.replace(/^section-/, "");
+        if (key) setActiveSection(key);
+      },
+      { rootMargin: "-7rem 0px -65% 0px", threshold: [0, 0.1] },
+    );
+    targets.forEach((target) => observer.observe(target));
+    return () => observer.disconnect();
+  }, [schema, searchText]);
 
   useEffect(() => {
     return () => {
@@ -1244,9 +1300,53 @@ export default function AdminConfigPage() {
     }, 50);
   };
 
+  const handleReloadSchema = async () => {
+    if (hasSchemaChanges) {
+      const accepted = await confirm({
+        title: t("adminConfig.reloadSchemaTitle"),
+        description: t("adminConfig.reloadSchemaDescription"),
+        tone: "warning",
+        confirmLabel: t("adminConfig.reloadConfirmLabel"),
+      });
+      if (!accepted) return;
+    }
+    await loadSchema();
+  };
+
+  const handleReloadToml = async () => {
+    if (hasChanges) {
+      const accepted = await confirm({
+        title: t("adminConfig.reloadTomlTitle"),
+        description: t("adminConfig.reloadTomlDescription"),
+        tone: "warning",
+        confirmLabel: t("adminConfig.reloadConfirmLabel"),
+      });
+      if (!accepted) return;
+    }
+    await loadConfig();
+  };
+
+  const handleTabChange = (value: string) => {
+    setActiveTab(value);
+    if (value === "toml" && !configContent) {
+      void loadConfig();
+    }
+    if (value === "config-backups" && configBackups.length === 0) {
+      void loadConfigBackups();
+    }
+  };
+
   // 保存可视化配置
   const handleSaveSchema = async () => {
     setShowSaveDialog(false);
+    if (hasChanges) {
+      toast({
+        title: t("adminConfig.editorConflictTitle"),
+        description: t("adminConfig.editorConflictDescription"),
+        variant: "destructive",
+      });
+      return;
+    }
     if (!hasSchemaChanges) {
       toast({ title: t("adminConfig.noChangesTitle"), description: t("adminConfig.noSchemaChangesDescription") });
       return;
@@ -1302,6 +1402,14 @@ export default function AdminConfigPage() {
 
   // 保存源文件
   const handleSaveToml = async () => {
+    if (hasSchemaChanges) {
+      toast({
+        title: t("adminConfig.editorConflictTitle"),
+        description: t("adminConfig.editorConflictDescription"),
+        variant: "destructive",
+      });
+      return;
+    }
     if (!hasChanges) {
       toast({ title: t("adminConfig.noChangesTitle"), description: t("adminConfig.noTomlChangesDescription") });
       return;
@@ -1472,6 +1580,14 @@ export default function AdminConfigPage() {
   };
 
   const handlePreviewConfigRestore = async (backup: ConfigBackup) => {
+    if (hasUnsavedChanges) {
+      toast({
+        title: t("adminConfig.unsavedConfigTitle"),
+        description: t("adminConfig.restoreUnsavedWarning"),
+        variant: "destructive",
+      });
+      return;
+    }
     setIsConfigBackupBusy(true);
     try {
       const res = await api.restoreConfigBackup(backup.name, { dry_run: true });
@@ -1490,6 +1606,14 @@ export default function AdminConfigPage() {
 
   const handleConfirmConfigRestore = async () => {
     if (!configRestorePreview?.restored) return;
+    if (hasUnsavedChanges) {
+      toast({
+        title: t("adminConfig.unsavedConfigTitle"),
+        description: t("adminConfig.restoreUnsavedWarning"),
+        variant: "destructive",
+      });
+      return;
+    }
     setIsConfigBackupBusy(true);
     try {
       const res = await api.restoreConfigBackup(configRestorePreview.restored, {
@@ -1610,12 +1734,7 @@ export default function AdminConfigPage() {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <motion.div
-        variants={container}
-        initial="hidden"
-        animate="show"
-        className="space-y-6"
-      >
+      <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold">{t("adminConfig.pageTitle")}</h1>
           <p className="text-muted-foreground">
@@ -1623,18 +1742,7 @@ export default function AdminConfigPage() {
           </p>
         </div>
 
-        <Tabs
-          className="min-w-0"
-          defaultValue="visual"
-          onValueChange={(v) => {
-            if (v === "toml" && !configContent) {
-              void loadConfig();
-            }
-            if (v === "config-backups" && configBackups.length === 0) {
-              void loadConfigBackups();
-            }
-          }}
-        >
+        <Tabs className="min-w-0" value={activeTab} onValueChange={handleTabChange}>
           <div className="min-w-0 pb-1">
             <TabsList className="i18n-stable-tabs grid h-auto w-full grid-cols-2 gap-1 sm:inline-flex sm:h-10 sm:w-auto sm:grid-cols-none">
               <TabsTrigger value="visual" className="min-w-0 gap-1.5 px-2 sm:px-4">
@@ -1845,7 +1953,7 @@ export default function AdminConfigPage() {
                   variant="outline"
                   size="sm"
                   className="flex-1 sm:flex-none"
-                  onClick={() => void loadSchema()}
+                  onClick={() => void handleReloadSchema()}
                   disabled={isLoadingSchema || isSavingSchema}
                 >
                   {isLoadingSchema ? (
@@ -1911,6 +2019,16 @@ export default function AdminConfigPage() {
                 </Button>
               </div>
             </div>
+
+            {schema && !searchText && (
+              <SectionPicker
+                sections={schema.sections}
+                categories={schema.categories ?? [FALLBACK_CATEGORY]}
+                activeSection={activeSection}
+                changedCounts={changedCounts}
+                onSelect={scrollToSection}
+              />
+            )}
 
             {/* 主内容区（侧边栏 + 配置列表） */}
             <div className="flex min-w-0 gap-6">
@@ -2016,15 +2134,8 @@ export default function AdminConfigPage() {
             </div>
 
             {/* 底部浮动保存栏 */}
-            <AnimatePresence>
-              {hasSchemaChanges && !isSavingSchema && (
-                <motion.div
-                  initial={{ y: 60, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  exit={{ y: 60, opacity: 0 }}
-                  transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                  className="fixed inset-x-3 bottom-4 z-50 sm:inset-x-auto sm:bottom-6 sm:left-1/2 sm:-translate-x-1/2"
-                >
+            {hasSchemaChanges && !isSavingSchema && (
+              <div className="config-save-bar fixed inset-x-3 z-50 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2">
                   <div className="flex flex-wrap items-center justify-center gap-2 rounded-2xl border bg-background/95 px-3 py-2.5 shadow-lg backdrop-blur sm:flex-nowrap sm:gap-3 sm:rounded-full sm:px-5">
                     <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
                     <span className="min-w-0 text-sm">
@@ -2047,31 +2158,28 @@ export default function AdminConfigPage() {
                       {t("common.save")}
                     </Button>
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+              </div>
+            )}
           </TabsContent>
 
           {/* ==================== 源文件编辑 ==================== */}
           <TabsContent value="toml" className="mt-4">
-            <motion.div variants={item}>
+            <div>
               <Card>
                 <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
                       <CardTitle className="flex items-center gap-2">
-                        <Settings className="h-5 w-5" />
+                        <Settings className="h-5 w-5 shrink-0" />
                         {t("adminConfig.tomlTitle")}
                       </CardTitle>
-                      <CardDescription>
-                        {t("adminConfig.tomlDescription")}
-                      </CardDescription>
+                      <CardDescription>{t("adminConfig.tomlDescription")}</CardDescription>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex w-full flex-wrap gap-2 sm:w-auto">
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => void loadConfig()}
+                        onClick={() => void handleReloadToml()}
                         disabled={isLoadingToml || isSaving}
                       >
                         {isLoadingToml ? (
@@ -2104,9 +2212,9 @@ export default function AdminConfigPage() {
                   ) : (
                     <div className="space-y-3">
                       {configPath && (
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
                           <FileText className="h-3.5 w-3.5 shrink-0" />
-                          <span className="truncate">{configPath}</span>
+                          <span className="min-w-0 break-all">{configPath}</span>
                           <span className="ml-auto shrink-0">
                             {t("adminConfig.tomlAutoBackup")}
                           </span>
@@ -2126,7 +2234,7 @@ export default function AdminConfigPage() {
                         className="font-mono text-sm min-h-[600px] leading-relaxed"
                         placeholder={t("adminConfig.tomlPlaceholder")}
                       />
-                      <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-muted-foreground">
                         <span>
                           {t("adminConfig.tomlStats", { lines: configContent.split("\n").length, chars: configContent.length })}
                         </span>
@@ -2136,7 +2244,7 @@ export default function AdminConfigPage() {
                   )}
                 </CardContent>
               </Card>
-            </motion.div>
+            </div>
           </TabsContent>
 
           <TabsContent value="config-backups" className="mt-4">
@@ -2275,7 +2383,7 @@ export default function AdminConfigPage() {
                 </div>
 
                 {updateOutput.length > 0 && (
-                  <pre className="max-h-96 overflow-auto rounded-lg border bg-muted/50 p-4 text-xs whitespace-pre-wrap">
+                  <pre className="custom-scrollbar max-h-96 overflow-auto rounded-lg border bg-muted/50 p-4 text-xs whitespace-pre-wrap">
                     {updateOutput.join("\n\n")}
                   </pre>
                 )}
@@ -2292,7 +2400,7 @@ export default function AdminConfigPage() {
                 {configBackupView?.backup.name} · {formatBytes(configBackupView?.backup.size || 0)}
               </DialogDescription>
             </DialogHeader>
-            <pre className="max-h-[65vh] overflow-auto p-4 text-xs leading-relaxed whitespace-pre-wrap">
+            <pre className="custom-scrollbar max-h-[65vh] overflow-auto p-4 text-xs leading-relaxed whitespace-pre-wrap">
               {configBackupView?.content || ""}
             </pre>
             <DialogFooter className="border-t p-4">
@@ -2357,7 +2465,7 @@ export default function AdminConfigPage() {
                 {t("adminConfig.saveDialogDescription")}
               </DialogDescription>
             </DialogHeader>
-            <div className="max-h-64 overflow-y-auto space-y-2 py-2">
+            <div className="custom-scrollbar max-h-64 overflow-y-auto space-y-2 py-2">
               {schema?.sections.map((section) => {
                 const sectionChanges = configChanges.filter((change) => change.sectionKey === section.key);
                 if (sectionChanges.length === 0) return null;
@@ -2412,7 +2520,7 @@ export default function AdminConfigPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </motion.div>
+      </div>
     </TooltipProvider>
   );
 }

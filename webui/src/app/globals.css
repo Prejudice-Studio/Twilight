@@ -626,6 +626,30 @@
     scroll-margin-top: 6.5rem;
   }
 
+  .config-section-enter {
+    min-width: 0;
+  }
+
+  .config-section-content {
+    border-top: 1px solid hsl(var(--border) / 0.7);
+  }
+
+  .config-save-bar {
+    bottom: max(1rem, env(safe-area-inset-bottom));
+    animation: config-save-bar-in 180ms ease-out;
+  }
+
+  @keyframes config-save-bar-in {
+    from { opacity: 0; transform: translateY(0.75rem); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .config-save-bar {
+      animation: none;
+    }
+  }
+
   .admin-section-surface :where(.grid) {
     min-width: 0;
   }
