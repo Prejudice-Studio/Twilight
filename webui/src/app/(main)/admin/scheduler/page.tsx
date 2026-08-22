@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -53,6 +53,11 @@ import {
 } from "@/lib/api";
 
 type TFunc = (key: MessageKey, params?: MessageParams) => string;
+
+function isAbortError(error: unknown): boolean {
+  return (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError");
+}
 
 function formatTimestamp(seconds: number | null | undefined): string {
   if (!seconds) return "—";
@@ -675,14 +680,33 @@ export default function AdminSchedulerPage() {
   const [paramIgnoreEnabled, setParamIgnoreEnabled] = useState(true);
   const [paramKickDryRun, setParamKickDryRun] = useState(true);
   const [paramKickMaxPerRun, setParamKickMaxPerRun] = useState("200");
+  const jobsAbortRef = useRef<AbortController | null>(null);
+  const logsAbortRef = useRef<AbortController | null>(null);
+  const logsSequenceRef = useRef(0);
 
   const loadJobs = useCallback(async (signal?: AbortSignal) => {
-    const res = await api.listSchedulerJobs(signal);
-    if (res.success && res.data) {
-      setJobs(res.data.jobs || []);
-      setRunning({});
+    jobsAbortRef.current?.abort();
+    const controller = new AbortController();
+    jobsAbortRef.current = controller;
+    const handleAbort = () => controller.abort();
+    signal?.addEventListener("abort", handleAbort, { once: true });
+    try {
+      const res = await api.listSchedulerJobs(controller.signal);
+      if (!controller.signal.aborted && res.success && res.data) {
+        setJobs(res.data.jobs || []);
+        setRunning({});
+      }
+      return true;
+    } finally {
+      signal?.removeEventListener("abort", handleAbort);
+      if (jobsAbortRef.current === controller) jobsAbortRef.current = null;
     }
-    return true;
+  }, []);
+
+  useEffect(() => () => {
+    jobsAbortRef.current?.abort();
+    logsAbortRef.current?.abort();
+    logsSequenceRef.current++;
   }, []);
 
   const {
@@ -725,7 +749,7 @@ export default function AdminSchedulerPage() {
     async (signal?: AbortSignal) => {
       await loadJobs(signal);
     },
-    2000,
+    3000,
     anyRunning,
   );
 
@@ -859,15 +883,20 @@ export default function AdminSchedulerPage() {
   }, [refresh, toast, t]);
 
   const openLogs = async (job: SchedulerJobItem) => {
+    logsAbortRef.current?.abort();
+    const controller = new AbortController();
+    logsAbortRef.current = controller;
+    const sequence = ++logsSequenceRef.current;
     setLogsJob(job);
     setLogsDetail(null);
     setLogsHistory([]);
     setLogsLoading(true);
     try {
       const [detailRes, historyRes] = await Promise.all([
-        api.getSchedulerJobLastRun(job.id),
-        api.getSchedulerJobHistory(job.id, 20),
+        api.getSchedulerJobLastRun(job.id, controller.signal),
+        api.getSchedulerJobHistory(job.id, 20, controller.signal),
       ]);
+      if (controller.signal.aborted || sequence !== logsSequenceRef.current) return;
       if (detailRes.success) {
         setLogsDetail(detailRes.data?.last_run || null);
       }
@@ -875,9 +904,12 @@ export default function AdminSchedulerPage() {
         setLogsHistory(historyRes.data?.history || []);
       }
     } catch (err: any) {
-      toast({ title: t("adminScheduler.loadLogsFailedTitle"), description: err.message || t("common.networkError"), variant: "destructive" });
+      if (!isAbortError(err) && sequence === logsSequenceRef.current) {
+        toast({ title: t("adminScheduler.loadLogsFailedTitle"), description: err.message || t("common.networkError"), variant: "destructive" });
+      }
     } finally {
-      setLogsLoading(false);
+      if (sequence === logsSequenceRef.current) setLogsLoading(false);
+      if (logsAbortRef.current === controller) logsAbortRef.current = null;
     }
   };
 
@@ -1253,15 +1285,15 @@ export default function AdminSchedulerPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(logsJob)} onOpenChange={(open) => { if (!open) { setLogsJob(null); setLogsDetail(null); setLogsHistory([]); } }}>
-        <DialogContent className="max-h-[85vh] w-[92vw] max-w-3xl overflow-hidden p-0 sm:max-w-3xl">
+      <Dialog open={Boolean(logsJob)} onOpenChange={(open) => { if (!open) { logsSequenceRef.current++; logsAbortRef.current?.abort(); setLogsJob(null); setLogsDetail(null); setLogsHistory([]); } }}>
+        <DialogContent className="max-h-[85dvh] w-[92vw] max-w-3xl overflow-hidden p-0 sm:max-w-3xl">
           <DialogHeader className="border-b p-4">
             <DialogTitle>{t("adminScheduler.runLogsTitle", { name: logsJob?.name ?? "" })}</DialogTitle>
             <DialogDescription className="break-words">
               {logsJob?.description}
             </DialogDescription>
           </DialogHeader>
-          <div className="max-h-[70vh] space-y-4 overflow-y-auto p-4">
+          <div className="custom-scrollbar max-h-[70dvh] space-y-4 overflow-y-auto overscroll-contain p-4">
             {logsLoading ? (
               <div className="flex items-center justify-center py-10">
                 <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -1285,7 +1317,7 @@ export default function AdminSchedulerPage() {
                 {logsDetail.logs && logsDetail.logs.length > 0 ? (
                   <div>
                     <p className="mb-1 text-xs font-medium text-muted-foreground">{t("adminScheduler.lastLog")}</p>
-                    <pre className="max-h-72 overflow-auto rounded-md border border-border/60 bg-background p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words">
+                    <pre className="custom-scrollbar max-h-72 overflow-auto overscroll-contain rounded-md border border-border/60 bg-background p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words">
                       {logsDetail.logs.join("\n")}
                     </pre>
                   </div>
@@ -1322,7 +1354,7 @@ export default function AdminSchedulerPage() {
                             {run.error && <p className="break-words text-destructive">{t("adminScheduler.errorLabel")}{run.error}</p>}
                             {renderSummaryChips(t, run.summary)}
                             {run.logs && run.logs.length > 0 ? (
-                              <pre className="max-h-60 overflow-auto rounded-md border border-border/60 bg-background p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words">
+                              <pre className="custom-scrollbar max-h-60 overflow-auto overscroll-contain rounded-md border border-border/60 bg-background p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words">
                                 {run.logs.join("\n")}
                               </pre>
                             ) : (

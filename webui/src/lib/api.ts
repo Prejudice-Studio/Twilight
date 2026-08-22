@@ -1506,7 +1506,7 @@ class ApiClient {
   // ==================== 定时任务管理 ====================
 
   async listSchedulerJobs(signal?: AbortSignal) {
-    return this.request<{ jobs: SchedulerJobItem[] }>(`/admin/scheduler/jobs`, { signal });
+    return this.request<{ jobs: SchedulerJobItem[] }>(`/admin/scheduler/jobs`, { signal, cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
   async triggerSchedulerJob(
@@ -1528,16 +1528,20 @@ class ApiClient {
     );
   }
 
-  async getSchedulerJobLastRun(jobId: string) {
+  async getSchedulerJobLastRun(jobId: string, signal?: AbortSignal) {
     return this.request<{ job_id: string; last_run: SchedulerJobRun | null }>(
       `/admin/scheduler/jobs/${encodeURIComponent(jobId)}/last-run`,
+      { signal, cache: "no-store" },
+      { cacheRead: false, dedupe: false },
     );
   }
 
-  async getSchedulerJobHistory(jobId: string, limit = 20) {
+  async getSchedulerJobHistory(jobId: string, limit = 20, signal?: AbortSignal) {
     const q = new URLSearchParams({ limit: String(limit) });
     return this.request<{ job_id: string; history: SchedulerJobRun[]; total: number }>(
       `/admin/scheduler/jobs/${encodeURIComponent(jobId)}/history?${q}`,
+      { signal, cache: "no-store" },
+      { cacheRead: false, dedupe: false },
     );
   }
 
