@@ -802,7 +802,8 @@ class ApiClient {
   async getMyRequests(signal?: AbortSignal) {
     const res = await this.request<MediaRequest[]>(
       "/media/request/my",
-      { signal }
+      { signal, cache: "no-store" },
+      { cacheRead: false, dedupe: false },
     );
     if (res.success && Array.isArray(res.data)) {
       res.data = res.data.map((item) => ({
