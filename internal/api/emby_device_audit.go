@@ -253,10 +253,8 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 		}
 		return u
 	}
-	for _, local := range a.store().ListUsers() {
-		if local.EmbyID != "" {
-			getUser(local.EmbyID, local.EmbyUsername)
-		}
+	for _, local := range a.store().UsersWithEmby() {
+		getUser(local.EmbyID, local.EmbyUsername)
 	}
 
 	type liveSession struct {

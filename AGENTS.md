@@ -260,6 +260,8 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Telegram roster plans with an existing roster must hydrate users through
   `UsersByTelegramIDs`; the no-roster fallback may still scan all users because it
   must construct a complete known-user plan.
+- Emby device/IP audit initialization must use `UsersWithEmby` so unbound Web
+  accounts are not copied into the device aggregation input.
 - Admin user listing must filter and sort the lightweight `store.User` slice before
   constructing `publicUserAt` DTO maps, and must construct DTOs only for the current
   page. Keep `per_page` bounded; do not materialize full public rows for 2000+ users.

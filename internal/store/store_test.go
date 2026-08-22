@@ -112,6 +112,21 @@ func TestUsersByTelegramIDsCopiesOnlyRequestedBindings(t *testing.T) {
 	}
 }
 
+func TestUsersWithEmbyExcludesUnboundUsers(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	if _, err := st.CreateUser(User{Username: "unbound", Role: RoleNormal}); err != nil {
+		t.Fatal(err)
+	}
+	bound, err := st.CreateUser(User{Username: "bound", EmbyID: "emby-1", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	users := st.UsersWithEmby()
+	if len(users) != 1 || users[0].UID != bound.UID {
+		t.Fatalf("users=%v, want only bound user", users)
+	}
+}
+
 func TestEmbyIDIndexTracksUserLifecycle(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	alpha, err := st.CreateUser(User{Username: "alpha", EmbyID: "emby-alpha", Role: RoleNormal})

@@ -2950,6 +2950,30 @@ func (s *Store) UsersByTelegramIDs(telegramIDs []int64) map[int64]User {
 	return users
 }
 
+// UsersWithEmby returns only users with a non-empty Emby binding. The scan is
+// still O(user count), but the returned slice does not retain unrelated Web
+// accounts, which is important for device/audit aggregation on large panels.
+func (s *Store) UsersWithEmby() []User {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	users := make([]User, 0, min(len(s.state.Users), 256))
+	if len(s.userUIDs) == len(s.state.Users) {
+		for _, uid := range s.userUIDs {
+			if user, ok := s.state.Users[uid]; ok && strings.TrimSpace(user.EmbyID) != "" {
+				users = append(users, user)
+			}
+		}
+		return users
+	}
+	for _, user := range s.state.Users {
+		if strings.TrimSpace(user.EmbyID) != "" {
+			users = append(users, user)
+		}
+	}
+	sort.Slice(users, func(i, j int) bool { return users[i].UID < users[j].UID })
+	return users
+}
+
 type UserIdentitySearchField uint8
 
 const (
