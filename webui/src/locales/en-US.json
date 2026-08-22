@@ -1651,6 +1651,7 @@
     "remainingChanges": "{count} more changes are not expanded in the summary. Review the full list in the save confirmation dialog.",
     "searchPlaceholder": "Search configuration...",
     "searchResultCount": "Found {count} matches",
+    "clearSearch": "Clear search",
     "expandAll": "Expand all",
     "collapseAll": "Collapse all",
     "saveConfig": "Save configuration",

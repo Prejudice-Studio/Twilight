@@ -1651,6 +1651,7 @@
     "remainingChanges": "還有 {count} 項改動未在摘要中展開，可在儲存確認視窗中查看完整列表。",
     "searchPlaceholder": "搜尋配置項...",
     "searchResultCount": "找到 {count} 個匹配項",
+    "clearSearch": "清除搜尋",
     "expandAll": "全部展開",
     "collapseAll": "全部摺疊",
     "saveConfig": "儲存配置",

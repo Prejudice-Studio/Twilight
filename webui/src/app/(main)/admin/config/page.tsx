@@ -1768,7 +1768,7 @@ export default function AdminConfigPage() {
           <TabsContent value="visual" className="mt-4">
             <Card className="mb-4">
               <CardHeader className="pb-3">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                   <div className="min-w-0">
                     <CardTitle className="flex items-center gap-2 text-base">
                       <ImageIcon className="h-5 w-5" />
@@ -1778,7 +1778,7 @@ export default function AdminConfigPage() {
                       {t("adminConfig.serverIconDescription")}
                     </CardDescription>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex w-full items-center gap-3 lg:w-auto">
                     <span
                       aria-hidden="true"
                       className="h-12 w-12 rounded-md border bg-muted bg-contain bg-center bg-no-repeat"
@@ -1812,7 +1812,7 @@ export default function AdminConfigPage() {
 
             <Card className="mb-4">
               <CardHeader className="pb-3">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                   <div className="min-w-0">
                     <CardTitle className="flex items-center gap-2 text-base">
                       <ImageIcon className="h-5 w-5" />
@@ -1822,7 +1822,7 @@ export default function AdminConfigPage() {
                       {t("adminConfig.authBgDescription")}
                     </CardDescription>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex w-full items-center gap-3 lg:w-auto">
                     <input
                       ref={authBgInputRef}
                       type="file"
@@ -1922,8 +1922,8 @@ export default function AdminConfigPage() {
               </Card>
             )}
             {/* 搜索与操作栏 */}
-            <div className="mb-4 flex min-w-0 flex-col items-stretch gap-3 sm:flex-row sm:items-center">
-              <div className="relative w-full min-w-0 sm:max-w-md sm:flex-1">
+            <div className="mb-4 flex min-w-0 flex-col items-stretch gap-3 lg:flex-row lg:items-center">
+              <div className="relative w-full min-w-0 lg:max-w-md lg:flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   placeholder={t("adminConfig.searchPlaceholder")}
@@ -1936,6 +1936,7 @@ export default function AdminConfigPage() {
                     type="button"
                     variant="ghost"
                     size="icon"
+                    aria-label={t("adminConfig.clearSearch")}
                     onClick={() => setSearchText("")}
                     className="absolute right-0 top-0 h-full px-2 hover:bg-transparent"
                   >
@@ -1948,11 +1949,11 @@ export default function AdminConfigPage() {
                   {t("adminConfig.searchResultCount", { count: searchResultCount })}
                 </span>
               )}
-              <div className="ml-auto flex w-full flex-wrap gap-2 sm:w-auto">
+              <div className="ml-auto grid w-full [grid-template-columns:repeat(2,minmax(0,1fr))] gap-2 lg:flex lg:w-auto lg:flex-wrap">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="flex-1 sm:flex-none"
+                  className="min-h-10 w-full whitespace-normal leading-tight lg:min-h-9 lg:w-auto"
                   onClick={() => void handleReloadSchema()}
                   disabled={isLoadingSchema || isSavingSchema}
                 >
@@ -1966,7 +1967,7 @@ export default function AdminConfigPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="flex-1 sm:flex-none"
+                  className="min-h-10 w-full whitespace-normal leading-tight lg:min-h-9 lg:w-auto"
                   onClick={expandAllSections}
                   disabled={isLoadingSchema || !schema}
                 >
@@ -1976,7 +1977,7 @@ export default function AdminConfigPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="flex-1 sm:flex-none"
+                  className="min-h-10 w-full whitespace-normal leading-tight lg:min-h-9 lg:w-auto"
                   onClick={collapseAllSections}
                   disabled={isLoadingSchema || !schema}
                 >
@@ -1988,7 +1989,7 @@ export default function AdminConfigPage() {
                     variant="outline"
                     size="sm"
                     onClick={handleResetAll}
-                    className="flex-1 text-muted-foreground sm:flex-none"
+                    className="min-h-10 w-full whitespace-normal leading-tight text-muted-foreground lg:min-h-9 lg:w-auto"
                   >
                     <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
                     {t("common.resetAll")}
@@ -1996,7 +1997,7 @@ export default function AdminConfigPage() {
                 )}
                 <Button
                   size="sm"
-                  className="flex-1 sm:flex-none"
+                  className="min-h-10 w-full whitespace-normal leading-tight lg:min-h-9 lg:w-auto"
                   onClick={() => setShowSaveDialog(true)}
                   disabled={
                     isLoadingSchema || isSavingSchema || !hasSchemaChanges

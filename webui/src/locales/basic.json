@@ -2516,6 +2516,7 @@
     "remainingChanges": "还有 {count} 项改动未在摘要中展开，可在保存确认弹窗中查看完整列表。",
     "searchPlaceholder": "搜索配置项...",
     "searchResultCount": "找到 {count} 个匹配项",
+    "clearSearch": "清除搜索",
     "expandAll": "全部展开",
     "collapseAll": "全部折叠",
     "saveConfig": "保存配置",
