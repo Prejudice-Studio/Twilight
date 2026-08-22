@@ -154,6 +154,10 @@
     overflow-x: hidden;
   }
 
+  html {
+    scrollbar-gutter: stable;
+  }
+
   body {
     @apply antialiased;
     min-width: 0;
@@ -417,6 +421,10 @@
     margin-top: 1rem;
     flex: 1;
     overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.42) transparent;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
   }
 
   .sidebar-label {
@@ -507,10 +515,15 @@
     transition: background 200ms ease, border-color 200ms ease, backdrop-filter 200ms ease;
   }
 
+  .custom-scrollbar {
+    scrollbar-color: hsl(var(--muted-foreground) / 0.42) transparent;
+    scrollbar-width: thin;
+  }
+
   .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
   .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: hsl(var(--primary) / 0.45);
+    background: hsl(var(--muted-foreground) / 0.42);
     border-radius: 9999px;
   }
 
@@ -588,9 +601,21 @@
   .admin-section-surface :where(.overflow-x-auto) {
     max-width: 100%;
     overscroll-behavior-x: contain;
-    -webkit-overflow-scrolling: touch;
-    touch-action: pan-x;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.42) transparent;
+    scrollbar-width: thin;
+    touch-action: pan-x pan-y;
     border-radius: calc(var(--radius) * 0.85);
+  }
+
+  .admin-section-surface :where(.overflow-y-auto, .overflow-auto) {
+    overscroll-behavior: contain;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.42) transparent;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+  }
+
+  .admin-section-surface :where([id^="section-"]) {
+    scroll-margin-top: 6.5rem;
   }
 
   .admin-section-surface :where(.grid) {
