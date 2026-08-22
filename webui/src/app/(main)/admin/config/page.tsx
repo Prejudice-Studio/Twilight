@@ -1177,7 +1177,7 @@ export default function AdminConfigPage() {
         const key = first?.id.replace(/^section-/, "");
         if (key) setActiveSection(key);
       },
-      { rootMargin: "-7rem 0px -65% 0px", threshold: [0, 0.1] },
+      { rootMargin: "-112px 0px -65% 0px", threshold: [0, 0.1] },
     );
     targets.forEach((target) => observer.observe(target));
     return () => observer.disconnect();
