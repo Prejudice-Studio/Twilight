@@ -97,6 +97,21 @@ func TestUsersMatchingWithCountLimitsCopiesAndCountsAllMatches(t *testing.T) {
 	}
 }
 
+func TestUsersByTelegramIDsCopiesOnlyRequestedBindings(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	first, err := st.CreateUser(User{Username: "first-tg", TelegramID: 101, Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateUser(User{Username: "second-tg", TelegramID: 202, Role: RoleNormal}); err != nil {
+		t.Fatal(err)
+	}
+	users := st.UsersByTelegramIDs([]int64{101, 999, 101})
+	if len(users) != 1 || users[101].UID != first.UID {
+		t.Fatalf("users=%v, want only Telegram 101 binding", users)
+	}
+}
+
 func TestEmbyIDIndexTracksUserLifecycle(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	alpha, err := st.CreateUser(User{Username: "alpha", EmbyID: "emby-alpha", Role: RoleNormal})

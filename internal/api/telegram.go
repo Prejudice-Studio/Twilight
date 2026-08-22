@@ -524,14 +524,17 @@ func (a *App) telegramKickPlan(chatID string) (telegramKickPlan, error) {
 	for _, id := range a.cfg().TelegramAdminIDs {
 		adminIDs[id] = true
 	}
-	usersByTG := map[int64]store.User{}
-	for _, u := range a.store().ListUsers() {
-		if u.TelegramID != 0 {
-			usersByTG[u.TelegramID] = u
-		} else {
-			skipped["no_telegram"]++
+	telegramIDs := make([]int64, 0, len(entries))
+	seenTelegramIDs := map[int64]struct{}{}
+	for _, entry := range entries {
+		if entry.TelegramID != 0 {
+			if _, seen := seenTelegramIDs[entry.TelegramID]; !seen {
+				seenTelegramIDs[entry.TelegramID] = struct{}{}
+				telegramIDs = append(telegramIDs, entry.TelegramID)
+			}
 		}
 	}
+	usersByTG := a.store().UsersByTelegramIDs(telegramIDs)
 	targets := []telegramKickTarget{}
 	preserved := 0
 	for _, entry := range entries {

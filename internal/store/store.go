@@ -2920,6 +2920,36 @@ func (s *Store) UsersByUIDs(uids []int64) map[int64]User {
 	return users
 }
 
+// UsersByTelegramIDs copies only users bound to the requested Telegram IDs.
+// It is used when a Telegram roster already defines the candidate set, so a
+// large user table does not need to be rebuilt into a second Telegram index.
+func (s *Store) UsersByTelegramIDs(telegramIDs []int64) map[int64]User {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	users := make(map[int64]User, len(telegramIDs))
+	for _, telegramID := range telegramIDs {
+		if telegramID == 0 {
+			continue
+		}
+		uid, ok := s.telegramIDMap[telegramID]
+		if !ok {
+			for candidateUID, user := range s.state.Users {
+				if user.TelegramID == telegramID {
+					uid = candidateUID
+					ok = true
+					break
+				}
+			}
+		}
+		if ok {
+			if user, found := s.state.Users[uid]; found && user.TelegramID == telegramID {
+				users[telegramID] = user
+			}
+		}
+	}
+	return users
+}
+
 type UserIdentitySearchField uint8
 
 const (
