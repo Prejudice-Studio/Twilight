@@ -289,9 +289,9 @@
 | DELETE | `/api/v1/admin/media-requests/{request_id}` | Admin | 删除求片 |
 | PUT | `/api/v1/admin/media-requests/by-key/{require_key}` | Admin | 按 key 更新求片；支持 `If-Match` revision 冲突保护 |
 | DELETE | `/api/v1/admin/media-requests/by-key/{require_key}` | Admin | 按 key 删除求片；支持 `If-Match` revision 冲突保护 |
-| GET | `/api/v1/admin/tickets` | Admin | 工单管理列表；默认仅返回待处理/处理中，`all=1` 或 `status=all` 返回全部 |
+| GET | `/api/v1/admin/tickets` | Admin | 紧凑工单队列；默认仅返回待处理/处理中，`all=1` 或 `status=all` 返回全部；回复与附件只返回计数 |
 | GET | `/api/v1/admin/tickets/{ticket_id}` | Admin | 管理员读取单个工单及完整对话，用于会话式处理页 |
-| PUT | `/api/v1/admin/tickets/{ticket_id}` | Admin | 更新工单状态、优先级、类型和管理员摘要；新摘要会追加管理员回复 |
+| PUT | `/api/v1/admin/tickets/{ticket_id}` | Admin | 更新工单状态、优先级、类型和管理员内部摘要，不追加聊天回复 |
 | POST | `/api/v1/admin/tickets/{ticket_id}/reply` | Admin | 管理员追加文字回复，不需要同时提交状态/类型/优先级表单 |
 | DELETE | `/api/v1/admin/tickets/{ticket_id}` | Admin | 删除工单并清理附件目录 |
 | GET | `/api/v1/admin/ticket-types` | Admin | 获取工单类型 |

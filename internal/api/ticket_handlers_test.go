@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/prejudice-studio/twilight/internal/store"
 )
@@ -627,6 +628,52 @@ func TestAdminTicketDetailAndReplyEndpoint(t *testing.T) {
 	}
 	if len(ticket.Replies) != 1 || ticket.Replies[0].Content != "admin chat reply" || ticket.Replies[0].Role != store.RoleAdmin {
 		t.Fatalf("unexpected replies after admin reply endpoint: %#v", ticket.Replies)
+	}
+}
+
+func TestAdminTicketListUsesCompactConversationSummary(t *testing.T) {
+	app := newTestApp(t)
+	enableTicketSystem(t, app, nil)
+	admin := registerAndLogin(t, app, "admin", "Admin123456")
+	user := registerAndLogin(t, app, "ticket-summary-owner", "Owner123456")
+	id := createTicket(t, app, "summary ticket", "initial content", user)
+	if _, err := app.store().AddTicketReply(id, store.TicketReply{UID: 2, Username: "ticket-summary-owner", Role: store.RoleNormal, Content: "reply body", CreatedAt: time.Now().Unix()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.store().AddTicketAttachment(id, store.TicketAttachment{Filename: "test.png", ContentType: "image/png", Size: 12, UploadedUID: 2, CreatedAt: time.Now().Unix()}, store.RoleNormal); err != nil {
+		t.Fatal(err)
+	}
+
+	list := doJSON(app, http.MethodGet, "/api/v1/admin/tickets?all=1", ``, admin)
+	if list.Code != http.StatusOK {
+		t.Fatalf("admin ticket list status=%d body=%s", list.Code, list.Body.String())
+	}
+	var payload struct {
+		Data struct {
+			Tickets []map[string]any `json:"tickets"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	var item map[string]any
+	for _, candidate := range payload.Data.Tickets {
+		if int64(candidate["id"].(float64)) == id {
+			item = candidate
+			break
+		}
+	}
+	if item == nil {
+		t.Fatalf("ticket %d missing from list", id)
+	}
+	if _, exists := item["replies"]; exists {
+		t.Fatalf("compact list must omit replies: %#v", item)
+	}
+	if _, exists := item["attachments"]; exists {
+		t.Fatalf("compact list must omit attachments: %#v", item)
+	}
+	if item["reply_count"] != float64(1) || item["attachment_count"] != float64(1) {
+		t.Fatalf("unexpected compact counts: %#v", item)
 	}
 }
 

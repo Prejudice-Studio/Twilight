@@ -2,11 +2,10 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
 import {
   MessageSquareMore, Loader2, Trash2, Edit2, AlertCircle, Clock, User,
   CheckCircle2, Archive, RotateCcw, PlayCircle, Plus, Pencil, Settings2, RefreshCw,
-  ArrowRight,
+  ArrowRight, MoreHorizontal, Image as ImageIcon,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,16 +17,18 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { api, type Ticket } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
-import { useSystemStore } from "@/store/system";
-import { TicketImages } from "@/components/ticket-images";
-
-const DEFAULT_TICKET_IMAGE_MAX_SIZE = 5 * 1024 * 1024;
-const DEFAULT_TICKET_IMAGE_MAX_COUNT = 5;
 const ADMIN_TICKET_PAGE_SIZE = 20;
 
 const STATUS_MAP: Record<string, { labelKey: string; className: string; icon: typeof AlertCircle }> = {
@@ -53,9 +54,6 @@ export default function AdminTicketsPage() {
   const { confirm } = useConfirm();
   const { t } = useI18n();
   const router = useRouter();
-  const { info: systemInfo } = useSystemStore();
-  const imageMaxSize = Number(systemInfo?.limits?.ticket_image_max_size) || DEFAULT_TICKET_IMAGE_MAX_SIZE;
-  const imageMaxCount = Number(systemInfo?.limits?.ticket_image_max_count) || DEFAULT_TICKET_IMAGE_MAX_COUNT;
 
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -70,6 +68,7 @@ export default function AdminTicketsPage() {
   const [editType, setEditType] = useState("");
   const [editNote, setEditNote] = useState("");
   const [saving, setSaving] = useState(false);
+  const [busyTicketId, setBusyTicketId] = useState<number | null>(null);
 
   // 工单类型管理
   const [typeMgmtOpen, setTypeMgmtOpen] = useState(false);
@@ -177,18 +176,22 @@ export default function AdminTicketsPage() {
     // 只发 status：不再顺手回传 admin_note（patch 语义下未提供即「不动此字段」），
     // 避免用列表行里的陈旧备注覆盖他人刚在详情页保存的内部备注。
     if (status === ticket.status) return;
+    setBusyTicketId(ticket.id);
     try {
       const res = await api.adminUpdateTicket(ticket.id, { status });
       if (res.success) { toast({ title: t("adminTickets.updated") }); await reload(); }
       else toast({ title: res.message, variant: "destructive" });
     } catch (err: any) { toast({ title: err?.message || t("common.networkError"), variant: "destructive" }); }
+    finally { setBusyTicketId(null); }
   };
 
   const handleDelete = async (id: number) => {
     const ok = await confirm({ title: t("adminTickets.deleteConfirmTitle"), description: t("adminTickets.deleteConfirmDescription"), tone: "danger", confirmLabel: t("common.delete") });
     if (!ok) return;
+    setBusyTicketId(id);
     try { const res = await api.adminDeleteTicket(id); if (res.success) { toast({ title: t("adminTickets.deleted") }); await reload(); } else toast({ title: res.message, variant: "destructive" }); }
     catch (err: any) { toast({ title: err?.message || t("common.networkError"), variant: "destructive" }); }
+    finally { setBusyTicketId(null); }
   };
 
   const types = Array.isArray(data?.types) && data.types.length ? data.types : DEFAULT_TYPES.map((d) => d.value);
@@ -217,7 +220,7 @@ export default function AdminTicketsPage() {
   };
 
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+    <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-2"><MessageSquareMore className="h-5 w-5" />{t("adminTickets.title")}</h1>
         <p className="text-sm text-muted-foreground mt-1">{t("adminTickets.description")}</p>
@@ -287,7 +290,7 @@ export default function AdminTicketsPage() {
             const isClosed = ticket.status === "closed";
             return (
               <Card key={ticket.id} className={isClosed ? "opacity-70" : ""}>
-                <CardContent className="p-5 space-y-4">
+                <CardContent className="space-y-3 p-4 sm:p-5">
                   <div className="flex items-start justify-between gap-3 flex-wrap">
                     <div className="flex-1 min-w-0 space-y-2">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -301,75 +304,74 @@ export default function AdminTicketsPage() {
                         <h3 className="font-bold text-base hover:underline">{ticket.title}</h3>
                       </button>
                     </div>
-                    <div className="flex gap-1 shrink-0 flex-wrap">
-                      <Button variant="default" size="sm" className="h-8 text-xs" onClick={() => openConversation(ticket.id)}>
+                    <div className="flex w-full shrink-0 flex-wrap gap-2 sm:w-auto">
+                      <Button variant="default" size="sm" className="min-h-9 flex-1 text-xs sm:flex-none" onClick={() => openConversation(ticket.id)}>
                         <MessageSquareMore className="h-3.5 w-3.5 mr-1" />{t("adminTickets.openConversation")}
                       </Button>
-                      {ticket.status === "open" && (
-                        <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => quickStatus(ticket, "in_progress")}><PlayCircle className="h-3.5 w-3.5 mr-1" />{t("adminTickets.markInProgress")}</Button>
-                      )}
-                      {(ticket.status === "open" || ticket.status === "in_progress") && (
-                        <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => quickStatus(ticket, "resolved")}><CheckCircle2 className="h-3.5 w-3.5 mr-1" />{t("adminTickets.markResolved")}</Button>
-                      )}
-                      {ticket.status !== "closed" && (
-                        <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground" onClick={() => quickStatus(ticket, "closed")}><Archive className="h-3.5 w-3.5 mr-1" />{t("adminTickets.closeTicket")}</Button>
-                      )}
-                      {ticket.status === "closed" && (
-                        <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => quickStatus(ticket, "open")}><RotateCcw className="h-3.5 w-3.5 mr-1" />{t("adminTickets.reopenTicket")}</Button>
-                      )}
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(ticket)}><Edit2 className="h-4 w-4" /></Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => handleDelete(ticket.id)}><Trash2 className="h-4 w-4" /></Button>
+                      <Button variant="outline" size="sm" className="min-h-9 flex-1 text-xs sm:flex-none" onClick={() => openEdit(ticket)}>
+                        <Edit2 className="mr-1 h-3.5 w-3.5" />{t("adminTickets.editTitle")}
+                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-9 w-9 shrink-0"
+                            disabled={busyTicketId === ticket.id}
+                            aria-label={t("adminTickets.moreActions")}
+                            title={t("adminTickets.moreActions")}
+                          >
+                            {busyTicketId === ticket.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoreHorizontal className="h-4 w-4" />}
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-52">
+                          {ticket.status === "open" && (
+                            <DropdownMenuItem onClick={() => void quickStatus(ticket, "in_progress")}>
+                              <PlayCircle className="h-4 w-4" />{t("adminTickets.markInProgress")}
+                            </DropdownMenuItem>
+                          )}
+                          {(ticket.status === "open" || ticket.status === "in_progress") && (
+                            <DropdownMenuItem onClick={() => void quickStatus(ticket, "resolved")}>
+                              <CheckCircle2 className="h-4 w-4" />{t("adminTickets.markResolved")}
+                            </DropdownMenuItem>
+                          )}
+                          {ticket.status !== "closed" ? (
+                            <DropdownMenuItem onClick={() => void quickStatus(ticket, "closed")}>
+                              <Archive className="h-4 w-4" />{t("adminTickets.closeTicket")}
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem onClick={() => void quickStatus(ticket, "open")}>
+                              <RotateCcw className="h-4 w-4" />{t("adminTickets.reopenTicket")}
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => void handleDelete(ticket.id)}>
+                            <Trash2 className="h-4 w-4" />{t("common.delete")}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </div>
 
-                  <div className="rounded-lg bg-muted/30 p-4 text-sm whitespace-pre-wrap break-words border border-border/50">
+                  <div className="line-clamp-3 rounded-lg border border-border/50 bg-muted/30 p-3 text-sm whitespace-pre-wrap break-words">
                     {ticket.content}
                   </div>
 
-                  <TicketImages
-                    ticketId={ticket.id}
-                    attachments={ticket.attachments || []}
-                    editable={!isClosed}
-                    canDelete
-                    maxSize={imageMaxSize}
-                    maxCount={imageMaxCount}
-                    onChange={() => void reload()}
-                  />
-
-                  {((ticket.replies && ticket.replies.length > 0) || ticket.admin_note) && (
-                    <div className="rounded-lg border border-border/60 bg-muted/20 p-4 space-y-3">
-                      <div className="flex items-center gap-2 text-xs font-semibold">
-                        <MessageSquareMore className="h-3.5 w-3.5 text-info" />
-                        {t("tickets.conversation")}
-                      </div>
-                      {ticket.replies && ticket.replies.length > 0 ? (
-                        <div className="space-y-3">
-                          {ticket.replies.map((reply, index) => {
-                            const isAdminReply = reply.author === "admin" || reply.role === 0;
-                            return (
-                              <div key={`${reply.created_at}-${reply.uid}-${index}`} className={`rounded-md border p-3 ${isAdminReply ? "border-info/20 bg-info/5" : "border-border bg-background/70"}`}>
-                                <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-                                  <span className={isAdminReply ? "font-semibold text-info" : "font-semibold text-foreground"}>
-                                    {isAdminReply ? t("tickets.adminReply") : t("tickets.userReply")}
-                                  </span>
-                                  <span>{reply.username}</span>
-                                  <span className="ml-auto">{new Date(reply.created_at * 1000).toLocaleString()}</span>
-                                </div>
-                                <p className="whitespace-pre-wrap break-words text-sm">{reply.content}</p>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <div className="rounded-md border border-info/20 bg-info/5 p-3">
-                          <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-                            <span className="font-semibold text-info">{t("tickets.adminReply")}</span>
-                          </div>
-                          <p className="whitespace-pre-wrap break-words text-sm">{ticket.admin_note}</p>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1">
+                      <MessageSquareMore className="h-3.5 w-3.5" />
+                      {t("adminTickets.replyCount", { count: ticket.reply_count ?? ticket.replies?.length ?? 0 })}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <ImageIcon className="h-3.5 w-3.5" />
+                      {t("adminTickets.imageCount", { count: ticket.attachment_count ?? ticket.attachments?.length ?? 0 })}
+                    </span>
+                    {ticket.admin_note && (
+                      <span className="min-w-0 flex-1 truncate" title={ticket.admin_note}>
+                        {t("adminTickets.adminNoteSummary", { note: ticket.admin_note })}
+                      </span>
+                    )}
+                  </div>
 
                   <div className="flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap">
                     <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{new Date(ticket.created_at * 1000).toLocaleString()}</span>
@@ -420,7 +422,7 @@ export default function AdminTicketsPage() {
           </DialogHeader>
           {editingTicket && (
             <div className="space-y-4">
-              <div className="rounded-lg bg-muted/30 p-3 text-sm whitespace-pre-wrap break-words border max-h-32 overflow-y-auto">
+              <div className="custom-scrollbar max-h-32 overflow-y-auto rounded-lg border bg-muted/30 p-3 text-sm whitespace-pre-wrap break-words">
                 {editingTicket.content}
               </div>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -479,7 +481,7 @@ export default function AdminTicketsPage() {
               </Button>
             </div>
             {/* 已有类型列表 */}
-            <div className="max-h-60 space-y-1 overflow-y-auto">
+            <div className="custom-scrollbar max-h-60 space-y-1 overflow-y-auto">
               {typeMgmtTypes.map((tp: string) => (
                 <div key={tp} className="flex items-center gap-2 rounded-md border px-3 py-2">
                   {editingTypeName === tp ? (
@@ -505,7 +507,8 @@ export default function AdminTicketsPage() {
                       <Button
                         size="icon" variant="ghost" className="h-7 w-7"
                         onClick={() => { setEditingTypeName(tp); setEditTypeValue(tp); }}
-                        title="Rename"
+                        title={t("adminTickets.renameType")}
+                        aria-label={t("adminTickets.renameType")}
                       >
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
@@ -513,7 +516,8 @@ export default function AdminTicketsPage() {
                         size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive"
                         onClick={() => void handleDeleteType(tp)}
                         disabled={typeMgmtTypes.length <= 1}
-                        title={typeMgmtTypes.length <= 1 ? "Cannot delete last type" : "Delete"}
+                        title={typeMgmtTypes.length <= 1 ? t("adminTickets.cannotDeleteLastType") : t("common.delete")}
+                        aria-label={typeMgmtTypes.length <= 1 ? t("adminTickets.cannotDeleteLastType") : t("common.delete")}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
@@ -528,6 +532,6 @@ export default function AdminTicketsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </motion.div>
+    </div>
   );
 }

@@ -253,7 +253,7 @@ func (a *App) handleAdminTickets(w http.ResponseWriter, r *http.Request, _ Param
 	}
 	result := a.store().ListTicketsPage(filter, page, perPage)
 	ok(w, "OK", map[string]any{
-		"tickets":      ticketDTOs(result.Tickets, true),
+		"tickets":      ticketListDTOs(result.Tickets),
 		"total":        result.Total,
 		"page":         page,
 		"per_page":     perPage,
@@ -857,6 +857,62 @@ func ticketDTOs(tickets []store.Ticket, includeAdminNote bool) []map[string]any 
 	out := make([]map[string]any, 0, len(tickets))
 	for _, t := range tickets {
 		out = append(out, ticketDTO(t, includeAdminNote))
+	}
+	return out
+}
+
+// adminTicketListDTO keeps the administration queue compact and avoids the
+// per-field interface allocations of the full map-based detail DTO.
+type adminTicketListDTO struct {
+	ID              int64  `json:"id"`
+	UID             int64  `json:"uid"`
+	Username        string `json:"username"`
+	Title           string `json:"title"`
+	Content         string `json:"content"`
+	Type            string `json:"type"`
+	Status          string `json:"status"`
+	Priority        string `json:"priority"`
+	AdminNote       string `json:"admin_note"`
+	ReplyCount      int    `json:"reply_count"`
+	AttachmentCount int    `json:"attachment_count"`
+	NotifyTelegram  bool   `json:"notify_telegram"`
+	CreatedAt       int64  `json:"created_at"`
+	UpdatedAt       int64  `json:"updated_at"`
+	ResolvedAt      int64  `json:"resolved_at"`
+	ClosedAt        int64  `json:"closed_at"`
+}
+
+// ticketListDTO deliberately excludes reply bodies and attachment URLs. Those
+// fields belong to the single-ticket conversation endpoint.
+func ticketListDTO(t store.Ticket) adminTicketListDTO {
+	notifyTelegram := true
+	if t.NotifyTelegram != nil {
+		notifyTelegram = *t.NotifyTelegram
+	}
+	return adminTicketListDTO{
+		ID:              t.ID,
+		UID:             t.UID,
+		Username:        t.Username,
+		Title:           t.Title,
+		Content:         t.Content,
+		Type:            t.Type,
+		Status:          t.Status,
+		Priority:        t.Priority,
+		AdminNote:       t.AdminNote,
+		ReplyCount:      len(t.Replies),
+		AttachmentCount: len(t.Attachments),
+		NotifyTelegram:  notifyTelegram,
+		CreatedAt:       t.CreatedAt,
+		UpdatedAt:       t.UpdatedAt,
+		ResolvedAt:      t.ResolvedAt,
+		ClosedAt:        t.ClosedAt,
+	}
+}
+
+func ticketListDTOs(tickets []store.Ticket) []adminTicketListDTO {
+	out := make([]adminTicketListDTO, 0, len(tickets))
+	for _, ticket := range tickets {
+		out = append(out, ticketListDTO(ticket))
 	}
 	return out
 }

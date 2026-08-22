@@ -1502,6 +1502,8 @@ export interface Ticket {
   admin_note?: string;
   replies?: TicketReply[];
   attachments?: TicketAttachment[];
+  reply_count?: number;
+  attachment_count?: number;
   notify_telegram: boolean;
   created_at: number;
   updated_at: number;
