@@ -1030,7 +1030,7 @@ export default function AdminRegcodesPage() {
                           <code className="flex-1 text-[12px] font-mono bg-background px-2 py-1.5 rounded-lg border border-border group-hover:border-primary/50 transition-colors">
                             {code}
                           </code>
-                          <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-primary/10 hover:text-primary" onClick={() => copyToClipboard(code)}>
+                          <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-primary/10 hover:text-primary" aria-label={t("adminRegcodes.copyCodes")} onClick={() => copyToClipboard(code)}>
                             <Copy className="h-3.5 w-3.5" />
                           </Button>
                         </div>
@@ -1156,7 +1156,7 @@ export default function AdminRegcodesPage() {
                     <div key={u.code + u._kind} className="rounded-xl border bg-background p-4 shadow-sm">
                       <div className="flex items-center gap-2">
                         <code className="flex-1 truncate rounded bg-muted px-2 py-1 text-sm">{u.code}</code>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" onClick={() => copyToClipboard(u.code)}>
+                        <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" aria-label={t("adminRegcodes.copyCodes")} onClick={() => copyToClipboard(u.code)}>
                           <Copy className="h-3.5 w-3.5" />
                         </Button>
                       </div>
@@ -1247,7 +1247,7 @@ export default function AdminRegcodesPage() {
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
                               <code className="rounded bg-muted px-2 py-1 text-sm">{u.code}</code>
-                              <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => copyToClipboard(u.code)}>
+                              <Button size="icon" variant="ghost" className="h-6 w-6" aria-label={t("adminRegcodes.copyCodes")} onClick={() => copyToClipboard(u.code)}>
                                 <Copy className="h-3 w-3" />
                               </Button>
                             </div>
@@ -1471,6 +1471,7 @@ export default function AdminRegcodesPage() {
                         size="icon"
                         variant="ghost"
                         className="h-8 w-8"
+                        aria-label={t("adminRegcodes.copyCodes")}
                         onClick={() => copyToClipboard(code.code)}
                       >
                         <Copy className="h-3.5 w-3.5" />
@@ -1480,6 +1481,7 @@ export default function AdminRegcodesPage() {
                         variant="ghost"
                         className="h-8 w-8"
                         title={code.active !== false ? t("adminRegcodes.disableAction") : t("adminRegcodes.enableAction")}
+                        aria-label={code.active !== false ? t("adminRegcodes.disableAction") : t("adminRegcodes.enableAction")}
                         onClick={() => void handleToggleActive(code)}
                         disabled={togglingCode === code.code}
                       >
@@ -1490,6 +1492,7 @@ export default function AdminRegcodesPage() {
                         variant="ghost"
                         className="h-8 w-8"
                         title={t("adminRegcodes.editAction")}
+                        aria-label={t("adminRegcodes.editAction")}
                         onClick={() => openEditDialog(code)}
                       >
                         <Pencil className="h-4 w-4" />
@@ -1498,6 +1501,7 @@ export default function AdminRegcodesPage() {
                         size="icon"
                         variant="ghost"
                         className="h-8 w-8 text-destructive hover:text-destructive"
+                        aria-label={t("common.delete")}
                         onClick={() => void handleDelete(code)}
                         disabled={deletingCode === code.code}
                       >
@@ -1549,7 +1553,7 @@ export default function AdminRegcodesPage() {
                       className="h-9 min-w-0 text-xs"
                       onChange={(e) => setNoteDrafts((prev) => ({ ...prev, [code.code]: e.target.value }))}
                     />
-                    <Button size="icon" variant="outline" className="h-9 w-9 shrink-0" disabled={savingNote === code.code} onClick={() => void handleSaveNote(code.code)}>
+                    <Button size="icon" variant="outline" className="h-9 w-9 shrink-0" aria-label={t("common.save")} disabled={savingNote === code.code} onClick={() => void handleSaveNote(code.code)}>
                       {savingNote === code.code ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                     </Button>
                     {usedCount(code) > 0 && (
@@ -1559,6 +1563,7 @@ export default function AdminRegcodesPage() {
                         className="h-9 w-9 shrink-0"
                         onClick={() => void openUsageDialog(code)}
                         title={t("adminRegcodes.peopleUsed", { count: usedCount(code) })}
+                        aria-label={t("adminRegcodes.peopleUsed", { count: usedCount(code) })}
                       >
                         <Users className="h-4 w-4" />
                       </Button>
@@ -1619,6 +1624,7 @@ export default function AdminRegcodesPage() {
                             size="icon"
                             variant="ghost"
                             className="h-6 w-6"
+                            aria-label={t("adminRegcodes.copyCodes")}
                             onClick={() => copyToClipboard(code.code)}
                           >
                             <Copy className="h-3 w-3" />
@@ -1641,7 +1647,7 @@ export default function AdminRegcodesPage() {
                               className="h-8 text-xs"
                               onChange={(e) => setNoteDrafts((prev) => ({ ...prev, [code.code]: e.target.value }))}
                             />
-                            <Button size="icon" variant="ghost" className="h-8 w-8" disabled={savingNote === code.code} onClick={() => void handleSaveNote(code.code)}>
+                            <Button size="icon" variant="ghost" className="h-8 w-8" aria-label={t("common.save")} disabled={savingNote === code.code} onClick={() => void handleSaveNote(code.code)}>
                               {savingNote === code.code ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                             </Button>
                           </div>
@@ -1691,6 +1697,7 @@ export default function AdminRegcodesPage() {
                             variant="ghost"
                             className="h-8 w-8"
                             title={code.active !== false ? t("adminRegcodes.disableAction") : t("adminRegcodes.enableAction")}
+                            aria-label={code.active !== false ? t("adminRegcodes.disableAction") : t("adminRegcodes.enableAction")}
                             onClick={() => void handleToggleActive(code)}
                             disabled={togglingCode === code.code}
                           >
@@ -1701,6 +1708,7 @@ export default function AdminRegcodesPage() {
                             variant="ghost"
                             className="h-8 w-8"
                             title={t("adminRegcodes.editAction")}
+                            aria-label={t("adminRegcodes.editAction")}
                             onClick={() => openEditDialog(code)}
                           >
                             <Pencil className="h-4 w-4" />
@@ -1709,6 +1717,7 @@ export default function AdminRegcodesPage() {
                             size="icon"
                             variant="ghost"
                             className="text-destructive hover:text-destructive"
+                            aria-label={t("common.delete")}
                             onClick={() => void handleDelete(code)}
                             disabled={deletingCode === code.code}
                           >
@@ -1740,11 +1749,11 @@ export default function AdminRegcodesPage() {
         </div>
         {pages > 1 && (
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="icon" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
+            <Button variant="outline" size="icon" aria-label={t("common.previousPage")} onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
             <span className="text-sm">{t("adminRegcodes.pageStatus", { page, pages })}</span>
-            <Button variant="outline" size="icon" onClick={() => setPage((p) => Math.min(pages, p + 1))} disabled={page === pages}>
+            <Button variant="outline" size="icon" aria-label={t("common.nextPage")} onClick={() => setPage((p) => Math.min(pages, p + 1))} disabled={page === pages}>
               <ChevronRight className="h-4 w-4" />
             </Button>
             <div className="flex items-center gap-1 ml-2">
