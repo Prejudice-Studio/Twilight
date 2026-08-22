@@ -1026,32 +1026,38 @@ func (a *App) recordViolation(ctx context.Context, user store.User, code, codeTy
 	}
 }
 
-func sortUsers(items []map[string]any, sortKey string) {
+// sortUsers 排序管理员用户列表的轻量副本。必须在构造 publicUserAt 的 map 之前调用，
+// 否则 2000+ 用户时会为最终不会返回的页外用户付出大量 map、字符串和接口值分配。
+func sortUsers(items []store.User, sortKey string) {
 	switch sortKey {
 	case "uid_asc":
-		sort.Slice(items, func(i, j int) bool { return numeric(items[i]["uid"]) < numeric(items[j]["uid"]) })
+		sort.Slice(items, func(i, j int) bool { return items[i].UID < items[j].UID })
 	case "uid_desc", "":
-		sort.Slice(items, func(i, j int) bool { return numeric(items[i]["uid"]) > numeric(items[j]["uid"]) })
+		sort.Slice(items, func(i, j int) bool { return items[i].UID > items[j].UID })
 	case "username_asc":
-		sort.Slice(items, func(i, j int) bool { return asString(items[i]["username"]) < asString(items[j]["username"]) })
+		sort.Slice(items, func(i, j int) bool { return items[i].Username < items[j].Username })
 	case "username_desc":
-		sort.Slice(items, func(i, j int) bool { return asString(items[i]["username"]) > asString(items[j]["username"]) })
+		sort.Slice(items, func(i, j int) bool { return items[i].Username > items[j].Username })
 	case "register_time_desc", "created_desc":
-		sort.Slice(items, func(i, j int) bool { return numeric(items[i]["register_time"]) > numeric(items[j]["register_time"]) })
+		sort.Slice(items, func(i, j int) bool { return items[i].RegisterTime > items[j].RegisterTime })
 	case "register_time_asc", "created_asc":
-		sort.Slice(items, func(i, j int) bool { return numeric(items[i]["register_time"]) < numeric(items[j]["register_time"]) })
+		sort.Slice(items, func(i, j int) bool { return items[i].RegisterTime < items[j].RegisterTime })
 	case "expired_at_asc", "expire_asc":
-		sort.Slice(items, func(i, j int) bool { return numeric(items[i]["expired_at"]) < numeric(items[j]["expired_at"]) })
+		sort.Slice(items, func(i, j int) bool {
+			return publicExpiryUnix(items[i].ExpiredAt) < publicExpiryUnix(items[j].ExpiredAt)
+		})
 	case "expired_at_desc", "expire_desc":
-		sort.Slice(items, func(i, j int) bool { return numeric(items[i]["expired_at"]) > numeric(items[j]["expired_at"]) })
+		sort.Slice(items, func(i, j int) bool {
+			return publicExpiryUnix(items[i].ExpiredAt) > publicExpiryUnix(items[j].ExpiredAt)
+		})
 	case "role_asc":
-		sort.Slice(items, func(i, j int) bool { return numeric(items[i]["role"]) < numeric(items[j]["role"]) })
+		sort.Slice(items, func(i, j int) bool { return items[i].Role < items[j].Role })
 	case "active_desc":
-		sort.Slice(items, func(i, j int) bool { return toBool(items[i]["active"]) && !toBool(items[j]["active"]) })
+		sort.Slice(items, func(i, j int) bool { return items[i].Active && !items[j].Active })
 	case "active_asc":
-		sort.Slice(items, func(i, j int) bool { return !toBool(items[i]["active"]) && toBool(items[j]["active"]) })
+		sort.Slice(items, func(i, j int) bool { return !items[i].Active && items[j].Active })
 	default:
-		sort.Slice(items, func(i, j int) bool { return numeric(items[i]["uid"]) > numeric(items[j]["uid"]) })
+		sort.Slice(items, func(i, j int) bool { return items[i].UID > items[j].UID })
 	}
 }
 

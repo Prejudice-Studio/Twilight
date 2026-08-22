@@ -115,3 +115,44 @@ func TestAdminUserMatchesListFiltersSharedSemantics(t *testing.T) {
 		})
 	}
 }
+
+func TestSortUsersKeepsAdminSortSemantics(t *testing.T) {
+	users := []store.User{
+		{UID: 1, Username: "zeta", RegisterTime: 20, ExpiredAt: 200, Role: store.RoleNormal, Active: true},
+		{UID: 2, Username: "alpha", RegisterTime: 10, ExpiredAt: -1, Role: store.RoleAdmin, Active: false},
+		{UID: 3, Username: "beta", RegisterTime: 30, ExpiredAt: 100, Role: store.RoleWhitelist, Active: true},
+	}
+
+	tests := []struct {
+		name string
+		key  string
+		want []int64
+	}{
+		{name: "uid desc default", key: "", want: []int64{3, 2, 1}},
+		{name: "uid asc", key: "uid_asc", want: []int64{1, 2, 3}},
+		{name: "username asc", key: "username_asc", want: []int64{2, 3, 1}},
+		{name: "register desc", key: "register_time_desc", want: []int64{3, 1, 2}},
+		{name: "permanent expiry is -1", key: "expired_at_asc", want: []int64{2, 3, 1}},
+		{name: "role asc", key: "role_asc", want: []int64{2, 1, 3}},
+		{name: "active asc", key: "active_asc", want: []int64{2, 1, 3}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotUsers := append([]store.User(nil), users...)
+			sortUsers(gotUsers, tc.key)
+			got := make([]int64, len(gotUsers))
+			for i, user := range gotUsers {
+				got[i] = user.UID
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("got %v, want %v", got, tc.want)
+				}
+			}
+		})
+	}
+}

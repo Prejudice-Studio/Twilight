@@ -29,18 +29,18 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request, _ Params)
 		search:            strings.ToLower(strings.TrimSpace(query.Get("search"))),
 		now:               time.Now().Unix(),
 	}
-	// 只在筛选中保留匹配用户（无 limit，与旧 ListUsers 语义一致），避免先复制整份
-	// []User 再二次过滤的额外整切片分配。排序/分页仍由下方 sortUsers + paginate 完成。
+	// 只在筛选中保留匹配用户（无 limit，与旧 ListUsers 语义一致）。排序时继续使用
+	// 轻量的 store.User，分页后才构造公开 DTO；大用户量下不能为页外用户创建完整 map。
 	matched := a.store().UsersMatching(0, func(u store.User) bool {
 		return adminUserMatchesListFilters(u, filter)
 	})
-	items := make([]map[string]any, 0, len(matched))
-	for _, u := range matched {
+	sortUsers(matched, query.Get("sort"))
+	total := len(matched)
+	pageUsers := paginate(matched, page, perPage)
+	items := make([]map[string]any, 0, len(pageUsers))
+	for _, u := range pageUsers {
 		items = append(items, publicUserAt(u, filter.now))
 	}
-	sortUsers(items, query.Get("sort"))
-	total := len(items)
-	items = paginate(items, page, perPage)
 	ok(w, "OK", map[string]any{"users": items, "total": total, "page": page, "per_page": perPage, "pages": pages(total, perPage)})
 }
 

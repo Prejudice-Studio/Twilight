@@ -245,6 +245,9 @@ Use this index before broad search. Line numbers drift, so search by function na
 - `RegCode.Source`: `admin`, `invite`, or empty historical values treated as `admin`.
 - Disabled RegCodes pause validity countdown; used-up status takes priority over manual disabled status.
 - Admin user listing and `filteredBatchUserUIDs` must keep filter semantics aligned.
+- Admin user listing must filter and sort the lightweight `store.User` slice before
+  constructing `publicUserAt` DTO maps, and must construct DTOs only for the current
+  page. Keep `per_page` bounded; do not materialize full public rows for 2000+ users.
 - `InviteEnabled=false` stops new invite flow only. It must not block admin invite-tree maintenance, existing child renewal codes, `POST /invite/children/:uid/detach-expired`, or `POST /invite/me/detach-expired`.
 - Expired, Web-disabled, or Emby-disabled invited users who actively detach must fully delete their own remote Emby account, clear local Emby binding/pending state, and detach their parent relation. Do not implement this as merely disabling Emby.
 - Invite detach must remove both the user's parent relation and consumed invite-code usage (`UsedByUID`, `Used`, `UseCount`, `Active`) through the store helper, so refreshes or repair paths cannot recreate the parent relation from stale code usage. Historical dirty state may contain map keys that do not match `InviteRelation.ChildUID`; parent lookups and detach cleanup must treat `ChildUID` as authoritative and clear every relation whose `ChildUID` matches the detached user.
