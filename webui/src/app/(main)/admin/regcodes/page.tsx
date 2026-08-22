@@ -1024,7 +1024,7 @@ export default function AdminRegcodesPage() {
                         </Button>
                       </div>
                     </div>
-                    <div className="custom-scrollbar max-h-40 space-y-2 overflow-y-auto pr-1">
+                    <div className="custom-scrollbar max-h-40 space-y-2 overflow-y-auto overscroll-contain pr-1">
                       {createdCodes.map((code) => (
                         <div key={code} className="flex items-center gap-2 group">
                           <code className="flex-1 text-[12px] font-mono bg-background px-2 py-1.5 rounded-lg border border-border group-hover:border-primary/50 transition-colors">
@@ -1226,7 +1226,7 @@ export default function AdminRegcodesPage() {
                     </div>
                   ))}
                 </div>
-                <div className="custom-scrollbar hidden overflow-x-auto md:block">
+                <div className="custom-scrollbar hidden overflow-x-auto overscroll-x-contain md:block">
                   <table className="w-full min-w-[1000px]">
                     <thead>
                       <tr className="border-b bg-muted/50">
@@ -1568,7 +1568,7 @@ export default function AdminRegcodesPage() {
               ))}
             </div>
 
-            <div className="custom-scrollbar hidden overflow-x-auto md:block">
+            <div className="custom-scrollbar hidden overflow-x-auto overscroll-x-contain md:block">
               <table className="w-full min-w-[1160px] table-fixed">
                 <colgroup>
                   <col className="w-12" />

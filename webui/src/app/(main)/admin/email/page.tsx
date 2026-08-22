@@ -360,7 +360,7 @@ export default function AdminEmailPage() {
                     {filteredPending.length === 0 && <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">{t("emailAdmin.emptyPending")}</div>}
                   </div>
                   <div className="hidden overflow-hidden rounded-lg border lg:block">
-                    <div className="custom-scrollbar overflow-x-auto">
+                    <div className="custom-scrollbar overflow-x-auto overscroll-x-contain">
                       <table className="w-full min-w-[760px] text-sm">
                     <thead className="bg-muted/50">
                       <tr>
@@ -509,7 +509,7 @@ export default function AdminEmailPage() {
                     {filteredAccounts.length === 0 && <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">{t("emailAdmin.emptyAccounts")}</div>}
                   </div>
                   <div className="hidden overflow-hidden rounded-lg border lg:block">
-                    <div className="custom-scrollbar overflow-x-auto">
+                    <div className="custom-scrollbar overflow-x-auto overscroll-x-contain">
                       <table className="w-full min-w-[680px] text-sm">
                     <thead className="bg-muted/50">
                       <tr>

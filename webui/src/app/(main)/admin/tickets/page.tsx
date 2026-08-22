@@ -422,7 +422,7 @@ export default function AdminTicketsPage() {
           </DialogHeader>
           {editingTicket && (
             <div className="space-y-4">
-              <div className="custom-scrollbar max-h-32 overflow-y-auto rounded-lg border bg-muted/30 p-3 text-sm whitespace-pre-wrap break-words">
+              <div className="custom-scrollbar max-h-32 overflow-y-auto overscroll-contain rounded-lg border bg-muted/30 p-3 text-sm whitespace-pre-wrap break-words">
                 {editingTicket.content}
               </div>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -481,7 +481,7 @@ export default function AdminTicketsPage() {
               </Button>
             </div>
             {/* 已有类型列表 */}
-            <div className="custom-scrollbar max-h-60 space-y-1 overflow-y-auto">
+            <div className="custom-scrollbar max-h-60 space-y-1 overflow-y-auto overscroll-contain">
               {typeMgmtTypes.map((tp: string) => (
                 <div key={tp} className="flex items-center gap-2 rounded-md border px-3 py-2">
                   {editingTypeName === tp ? (

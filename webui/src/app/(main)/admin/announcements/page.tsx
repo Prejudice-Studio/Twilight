@@ -561,7 +561,7 @@ export default function AdminAnnouncementsPage() {
             {form.content.trim() && (
               <div className="space-y-1">
                 <Label className="text-[11px] text-muted-foreground">{t("adminAnnouncements.preview")}</Label>
-                <div className="rounded-md border bg-muted/30 p-3 max-h-48 overflow-y-auto">
+                <div className="custom-scrollbar max-h-48 overflow-y-auto overscroll-contain rounded-md border bg-muted/30 p-3">
                   <SafeAnnouncementContent content={form.content} mode={form.renderMode} />
                 </div>
               </div>
