@@ -278,8 +278,8 @@ func (a *App) runSchedulerJob(r *http.Request, jobID string) (map[string]any, []
 		}
 		return map[string]any{"success": true, "expiring": count, "days": days}, []string{fmt.Sprintf("found %d expiring users", count)}, nil
 	case "daily_stats":
-		users := a.store().ListUsers()
-		return map[string]any{"success": true, "users": len(users), "active": countActive(users)}, []string{"daily stats generated"}, nil
+		totalUsers, activeUsers := a.store().UserCounts()
+		return map[string]any{"success": true, "users": totalUsers, "active": activeUsers}, []string{"daily stats generated"}, nil
 	case "sync_emby_activity_logs":
 		if !a.embyConfigured() {
 			return map[string]any{"success": true, "configured": false, "new_entries": 0}, []string{"Emby not configured"}, nil

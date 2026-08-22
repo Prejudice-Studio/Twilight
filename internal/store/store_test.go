@@ -460,6 +460,23 @@ func TestDeleteRegCodePhysicallyDeletesUsedCode(t *testing.T) {
 func TestStoreCountHelpersMatchListSemantics(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	now := time.Now().Unix()
+	activeUser, err := st.CreateUser(User{Username: "count-active", Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inactiveUser, err := st.CreateUser(User{Username: "count-inactive", Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpdateUser(inactiveUser.UID, func(user *User) error {
+		user.Active = false
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if total, active := st.UserCounts(); total != st.UserCount() || active != 1 || activeUser.UID == inactiveUser.UID {
+		t.Fatalf("user counts total=%d active=%d user_count=%d", total, active, st.UserCount())
+	}
 	if err := st.UpsertRegCode(RegCode{Code: "REG-1", Type: 1, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -468,6 +485,9 @@ func TestStoreCountHelpersMatchListSemantics(t *testing.T) {
 	}
 	if got, want := st.CountRegCodes(), len(st.ListRegCodes()); got != want {
 		t.Fatalf("regcode count=%d want list len %d", got, want)
+	}
+	if total, active := st.RegCodeCounts(); total != 2 || active != 1 {
+		t.Fatalf("regcode counts total=%d active=%d", total, active)
 	}
 
 	if _, err := st.UpsertAnnouncement(Announcement{Title: "visible", Content: "ok", Visible: true}); err != nil {

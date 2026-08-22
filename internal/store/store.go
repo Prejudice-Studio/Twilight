@@ -1613,6 +1613,20 @@ func (s *Store) UserCount() int {
 	return len(s.state.Users)
 }
 
+// UserCounts returns total and active user counts without copying the complete
+// user slice. It is intended for status panels and scheduled summaries.
+func (s *Store) UserCounts() (total int, active int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	total = len(s.state.Users)
+	for _, user := range s.state.Users {
+		if user.Active {
+			active++
+		}
+	}
+	return total, active
+}
+
 func (s *Store) CreateUser(u User) (User, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -4677,6 +4691,20 @@ func (s *Store) CountRegCodes() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.state.RegCodes)
+}
+
+// RegCodeCounts returns total and currently active registration-code counts
+// without allocating and sorting a full list.
+func (s *Store) RegCodeCounts() (total int, active int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	total = len(s.state.RegCodes)
+	for _, code := range s.state.RegCodes {
+		if code.Active {
+			active++
+		}
+	}
+	return total, active
 }
 
 func (s *Store) DeleteRegCode(code string) error {

@@ -2124,7 +2124,7 @@ class ApiClient {
     });
   }
 
-  async getRegcodes(page = 1, params: { type?: string; status?: string; source?: string; search?: string; sort?: string; order?: string; per_page?: number } = {}) {
+  async getRegcodes(page = 1, params: { type?: string; status?: string; source?: string; search?: string; sort?: string; order?: string; per_page?: number } = {}, signal?: AbortSignal) {
     const query = new URLSearchParams({ page: String(page) });
     if (params.type && params.type !== "all") query.set("type", params.type);
     if (params.status && params.status !== "all") query.set("status", params.status);
@@ -2135,7 +2135,7 @@ class ApiClient {
     if (params.per_page) query.set("per_page", String(params.per_page));
     return this.request<{ regcodes: Regcode[]; total: number }>(
       `/admin/regcodes?${query.toString()}`,
-      { cache: "no-store" },
+      { cache: "no-store", signal },
       { cacheRead: false, dedupe: false },
     );
   }
@@ -2224,11 +2224,11 @@ class ApiClient {
     });
   }
 
-  async getAdminInviteCodes() {
+  async getAdminInviteCodes(signal?: AbortSignal) {
     return this.request<{
       codes: InviteCodeItem[];
       total: number;
-    }>("/admin/invite/codes", { cache: "no-store" }, { cacheRead: false, dedupe: false });
+    }>("/admin/invite/codes", { cache: "no-store", signal }, { cacheRead: false, dedupe: false });
   }
 
   async forgotPasswordByEmby(data: { emby_username: string; emby_password: string }) {
@@ -2529,8 +2529,8 @@ class ApiClient {
   }
 
   // 管理员：邀请森林
-  async adminGetInviteTree() {
-    return this.request<InviteForest>("/admin/invite/tree", { cache: "no-store" }, { cacheRead: false, dedupe: false });
+  async adminGetInviteTree(signal?: AbortSignal) {
+    return this.request<InviteForest>("/admin/invite/tree", { cache: "no-store", signal }, { cacheRead: false, dedupe: false });
   }
 
   async adminDetachInviteUser(uid: number) {
@@ -2718,7 +2718,7 @@ class ApiClient {
     return this.toAbsoluteAssetUrl(url) || "";
   }
 
-  async adminListTickets(params: { uid?: number; status?: string; type?: string; priority?: string; all?: boolean; page?: number; per_page?: number } = {}) {
+  async adminListTickets(params: { uid?: number; status?: string; type?: string; priority?: string; all?: boolean; page?: number; per_page?: number } = {}, signal?: AbortSignal) {
     const query = new URLSearchParams();
     if (params.uid) query.set("uid", String(params.uid));
     if (params.all) query.set("all", "1");
@@ -2729,15 +2729,15 @@ class ApiClient {
     if (params.per_page) query.set("per_page", String(params.per_page));
     return this.request<{ tickets: Ticket[]; total: number; page?: number; per_page?: number; ticket_types: string[] }>(
       `/admin/tickets?${query.toString()}`,
-      { cache: "no-store" },
+      { cache: "no-store", signal },
       { cacheRead: false, dedupe: false },
     );
   }
 
-  async adminGetTicket(id: number) {
+  async adminGetTicket(id: number, signal?: AbortSignal) {
     return this.request<{ ticket: Ticket; ticket_types: string[] }>(
       `/admin/tickets/${id}`,
-      { cache: "no-store" },
+      { cache: "no-store", signal },
       { cacheRead: false, dedupe: false },
     );
   }

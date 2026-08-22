@@ -126,13 +126,15 @@
 | ---- | ---- | ---- | ---- |
 | GET | `/api/v1/system/info` | Public | 系统公开信息 |
 | GET | `/api/v1/system/server-icon` | Public | 服务器图标 |
-| GET | `/api/v1/system/health` | Public | 健康检查 |
+| GET | `/api/v1/system/health` | Public | 轻量 API 存活摘要（不探测数据库或 Emby） |
 | GET | `/api/v1/system/health/api` | Admin | API 服务健康检查（状态页单项检测） |
 | GET | `/api/v1/system/health/database` | Admin | 数据库健康检查（状态页单项检测） |
 | GET | `/api/v1/system/health/emby` | Admin | Emby 健康检查（状态页单项检测） |
 | GET | `/api/v1/system/stats` | Admin | 系统运行时统计 |
 | GET | `/api/v1/system/emby-urls` | User | 按权限下发 Emby 线路 |
 | POST | `/api/v1/system/emby-urls/probe` | User | 探测 Emby 线路连通性 |
+| GET | `/api/v1/system/emby-stats` | User | 按配置读取 Emby 媒体库数量 |
+| GET | `/api/v1/system/emby-viewers` | User | 当前正在播放人数（仅总数） |
 | GET | `/api/v1/system/config` | User | 用户可见配置 |
 | GET | `/api/v1/system/admin/config` | Admin | 管理员完整配置 |
 | GET | `/api/v1/system/admin/stats` | Admin | 管理统计 |

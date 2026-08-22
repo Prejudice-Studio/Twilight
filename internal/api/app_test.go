@@ -727,6 +727,106 @@ func TestFrontendRouteCompatibilityDoesNot404(t *testing.T) {
 	}
 }
 
+func TestPublicHealthDoesNotProbePrivateDependencies(t *testing.T) {
+	app := newTestApp(t)
+	var embyCalls atomic.Int64
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		embyCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ServerName":"test","Version":"1"}`))
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+	app.cfg().EmbyToken = "configured-test-token"
+
+	response := doJSON(app, http.MethodGet, "/api/v1/system/health", "", nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("public health status=%d body=%s", response.Code, response.Body.String())
+	}
+	if calls := embyCalls.Load(); calls != 0 {
+		t.Fatalf("public health triggered %d Emby probes", calls)
+	}
+	for _, privateField := range []string{"database_detail", "emby_detail", "storage_warning"} {
+		if strings.Contains(response.Body.String(), privateField) {
+			t.Fatalf("public health leaked private field %q: %s", privateField, response.Body.String())
+		}
+	}
+}
+
+func TestEmbyViewerCountRequiresLogin(t *testing.T) {
+	app := newTestApp(t)
+	response := doJSON(app, http.MethodGet, "/api/v1/system/emby-viewers", "", nil)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous viewer count status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestEmbyStatusSkipsLibraryCountsWhenStatsDisabled(t *testing.T) {
+	app := newTestApp(t)
+	var countCalls atomic.Int64
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/System/Info/Public":
+			_, _ = w.Write([]byte(`{"ServerName":"test","Version":"1"}`))
+		case "/Sessions":
+			_, _ = w.Write([]byte(`[]`))
+		case "/Items/Counts":
+			countCalls.Add(1)
+			_, _ = w.Write([]byte(`{"MovieCount":1,"SeriesCount":2,"EpisodeCount":3}`))
+		default:
+			t.Fatalf("unexpected Emby request: %s", r.URL.Path)
+		}
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+	app.cfg().EmbyToken = "configured-test-token"
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/emby/status", nil)
+	request = request.WithContext(context.WithValue(request.Context(), principalKey, principal{User: store.User{UID: 1, Active: true}}))
+	response := httptest.NewRecorder()
+	app.handleEmbyStatus(response, request, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("Emby status=%d body=%s", response.Code, response.Body.String())
+	}
+	if calls := countCalls.Load(); calls != 0 {
+		t.Fatalf("disabled Emby stats triggered %d library count requests", calls)
+	}
+
+	app.cfg().EmbyStatsEnabled = true
+	response = httptest.NewRecorder()
+	app.handleEmbyStatus(response, request, nil)
+	if calls := countCalls.Load(); calls != 1 {
+		t.Fatalf("enabled Emby stats count requests=%d want=1", calls)
+	}
+}
+
+func TestEmbyConnectionChangeInvalidatesServerScopedCaches(t *testing.T) {
+	app := newTestApp(t)
+	app.embySessionsCache = []map[string]any{{"Id": "old-session"}}
+	app.embySessionsUntil = time.Now().Add(time.Minute)
+	app.embyDeviceAuditCache = map[string]any{"server": "old"}
+	app.embyDeviceAuditUntil = time.Now().Add(time.Minute)
+	app.embyAdminCache["old-user"] = embyAdminCacheEntry{admin: true, checked: time.Now()}
+
+	app.invalidateEmbyConfigurationCaches()
+	if app.embySessionsCache != nil || !app.embySessionsUntil.IsZero() {
+		t.Fatalf("session cache was not invalidated: cache=%v until=%v", app.embySessionsCache, app.embySessionsUntil)
+	}
+	if app.embyDeviceAuditCache != nil || !app.embyDeviceAuditUntil.IsZero() {
+		t.Fatalf("device audit cache was not invalidated: cache=%v until=%v", app.embyDeviceAuditCache, app.embyDeviceAuditUntil)
+	}
+	if len(app.embyAdminCache) != 0 {
+		t.Fatalf("Emby admin cache was not invalidated: %v", app.embyAdminCache)
+	}
+	previous := config.Config{EmbyURL: "https://old.example", EmbyToken: "old"}
+	if !embyConnectionChanged(previous, config.Config{EmbyURL: "https://new.example", EmbyToken: "old"}) ||
+		!embyConnectionChanged(previous, config.Config{EmbyURL: "https://old.example", EmbyToken: "new"}) ||
+		embyConnectionChanged(previous, previous) {
+		t.Fatal("Emby connection change detection is inconsistent")
+	}
+}
+
 func TestStatusResponseWriterForwardsFlush(t *testing.T) {
 	rr := httptest.NewRecorder()
 	w := &statusResponseWriter{ResponseWriter: rr}
@@ -2016,6 +2116,61 @@ func TestRuntimeLoggerCapturesAllLevelsAndGatesConsole(t *testing.T) {
 	}
 }
 
+func TestServeHTTPSuccessDoesNotWriteAccessLog(t *testing.T) {
+	app := newTestApp(t)
+	runtimeLogs = newRuntimeLogSink(20)
+	t.Cleanup(func() {
+		runtimeLogs = newRuntimeLogSink(1000)
+		InstallRuntimeLogger(io.Discard, zapcore.InfoLevel)
+	})
+	InstallRuntimeLogger(io.Discard, zapcore.InfoLevel)
+	ConfigureRuntimeLogging(zapcore.InfoLevel, 20)
+
+	response := doJSON(app, http.MethodGet, "/api/v1/system/info", "", nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("system info status=%d body=%s", response.Code, response.Body.String())
+	}
+	entries, _ := runtimeLogs.snapshot(20, 0)
+	for _, entry := range entries {
+		if strings.Contains(entry.Message, "http request completed") || strings.Contains(entry.Message, "slow http request completed") {
+			t.Fatalf("successful request unexpectedly wrote access log: %#v", entry)
+		}
+	}
+
+	missing := doJSON(app, http.MethodGet, "/api/v1/route-that-does-not-exist", "", nil)
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing route status=%d body=%s", missing.Code, missing.Body.String())
+	}
+	entries, _ = runtimeLogs.snapshot(20, 0)
+	foundFailure := false
+	for _, entry := range entries {
+		if strings.Contains(entry.Message, "http request completed") {
+			foundFailure = true
+			break
+		}
+	}
+	if !foundFailure {
+		t.Fatalf("expected failed request to remain observable in runtime logs: %#v", entries)
+	}
+}
+
+func TestConfigSignatureCheckIsThrottled(t *testing.T) {
+	var app App
+	start := time.Unix(100, 0)
+	if !app.shouldCheckConfigSignature(start) {
+		t.Fatal("first config signature check should be allowed")
+	}
+	if app.shouldCheckConfigSignature(start.Add(100 * time.Millisecond)) {
+		t.Fatal("config signature check should be throttled inside interval")
+	}
+	if !app.shouldCheckConfigSignature(start.Add(configSignatureCheckInterval)) {
+		t.Fatal("config signature check should resume after interval")
+	}
+	if !app.shouldCheckConfigSignature(start.Add(-time.Second)) {
+		t.Fatal("config signature check should recover after a wall-clock rollback")
+	}
+}
+
 func TestConfigFileChangeHotReloadsRuntimeLogLevel(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().ConfigFile = filepath.Join(app.cfg().DatabaseDir, "config.toml")
@@ -3126,6 +3281,57 @@ func TestRegisterRejectsMalformedTelegramBindCodeBeforeLookup(t *testing.T) {
 	rr := doJSON(app, http.MethodGet, "/api/v1/users/telegram/register/bind-code/status?code=../../bad", ``, nil)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"invalid":true`) || !strings.Contains(rr.Body.String(), `"terminal":true`) {
 		t.Fatalf("malformed bind code status endpoint response=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestBindCodeLongPollUsesHubNotifications(t *testing.T) {
+	app := newTestApp(t)
+	now := time.Now().Unix()
+	bind := store.BindCode{Code: "EVENT12", Scene: "register", CreatedAt: now, ExpiresAt: now + 60}
+	if err := app.upsertBindCode(bind); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/users/telegram/register/bind-code/status?code=EVENT12&wait=5", nil)
+	response := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		app.handleBindCodeStatus(response, request, nil)
+		close(done)
+	}()
+
+	watchDeadline := time.Now().Add(time.Second)
+	for {
+		app.bindStatus.mu.Lock()
+		watching := len(app.bindStatus.watchers[bind.Code]) > 0
+		app.bindStatus.mu.Unlock()
+		if watching {
+			break
+		}
+		if time.Now().After(watchDeadline) {
+			t.Fatal("long poll did not subscribe to bind-status notifications")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	bind.Confirmed = true
+	bind.TelegramID = 777
+	if err := app.upsertBindCode(bind); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("long poll did not wake after bind-status notification")
+	}
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"confirmed":true`) {
+		t.Fatalf("long poll response=%d body=%s", response.Code, response.Body.String())
+	}
+	app.bindStatus.mu.Lock()
+	remainingWatchers := len(app.bindStatus.watchers[bind.Code])
+	app.bindStatus.mu.Unlock()
+	if remainingWatchers != 0 {
+		t.Fatalf("long poll leaked %d bind-status watchers", remainingWatchers)
 	}
 }
 
@@ -7314,6 +7520,19 @@ func TestDecodeMapEnforcesSizeAndDepthLimits(t *testing.T) {
 		got := decodeMap(req)
 		if len(got) != 0 {
 			t.Fatalf("expected empty map for over-nested body, got %v", got)
+		}
+	})
+	t.Run("rejects trailing JSON document", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"a":1}{"b":2}`))
+		if got := decodeMap(req); len(got) != 0 {
+			t.Fatalf("expected empty map for multiple JSON documents, got %v", got)
+		}
+		var payload struct {
+			A int `json:"a"`
+		}
+		req = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"a":1}{"b":2}`))
+		if err := decodeJSON(req, &payload); err == nil {
+			t.Fatal("decodeJSON accepted multiple JSON documents")
 		}
 	})
 	t.Run("accepts shallow payload within limits", func(t *testing.T) {

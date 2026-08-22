@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FileText,
   Plus,
@@ -101,6 +101,8 @@ export default function AdminRegcodesPage() {
   const [inviteRegcodes, setInviteRegcodes] = useState<Regcode[]>([]);
   const [inviteRegcodesLoading, setInviteRegcodesLoading] = useState(false);
   const [inviteRegcodesLoaded, setInviteRegcodesLoaded] = useState(false);
+  const inviteLoadAbortRef = useRef<AbortController | null>(null);
+  const inviteLoadSequenceRef = useRef(0);
 
   // Create dialog
   const [createOpen, setCreateOpen] = useState(false);
@@ -124,8 +126,8 @@ export default function AdminRegcodesPage() {
 
   const formatRegcodeDays = (days: number) => (days < 0 ? t("adminRegcodes.permanent") : t("adminRegcodes.daysValue", { days: days || 30 }));
 
-  const loadRegcodesResource = useCallback(async () => {
-    const res = await api.getRegcodes(page, { type: filterType, status: filterStatus, source: filterSource, search, sort, order, per_page: perPage });
+  const loadRegcodesResource = useCallback(async (signal?: AbortSignal) => {
+    const res = await api.getRegcodes(page, { type: filterType, status: filterStatus, source: filterSource, search, sort, order, per_page: perPage }, signal);
     if (res.success && res.data) {
       const regcodesList = Array.isArray(res.data.regcodes)
         ? res.data.regcodes
@@ -491,47 +493,51 @@ export default function AdminRegcodesPage() {
     }
   };
 
-  const loadInviteCodes = useCallback(async () => {
+  const loadInviteData = useCallback(async () => {
+    inviteLoadAbortRef.current?.abort();
+    const controller = new AbortController();
+    inviteLoadAbortRef.current = controller;
+    const sequence = ++inviteLoadSequenceRef.current;
     setInviteCodesLoading(true);
+    setInviteRegcodesLoading(true);
     try {
-      const res = await api.getAdminInviteCodes();
-      if (res.success && res.data) {
-        setInviteCodes(res.data.codes || []);
-        setInviteCodesTotal(res.data.total || 0);
-        setInviteCodesLoaded(true);
+      const [codesResult, regcodesResult] = await Promise.allSettled([
+        api.getAdminInviteCodes(controller.signal),
+        api.getRegcodes(1, { source: "invite", per_page: 500 }, controller.signal),
+      ]);
+      if (controller.signal.aborted || sequence !== inviteLoadSequenceRef.current) return;
+
+      if (codesResult.status === "fulfilled" && codesResult.value.success && codesResult.value.data) {
+        setInviteCodes(codesResult.value.data.codes || []);
+        setInviteCodesTotal(codesResult.value.data.total || 0);
       } else {
-        toast({ title: t("adminRegcodes.loadInviteFailed"), description: res.message, variant: "destructive" });
+        const description = codesResult.status === "rejected"
+          ? (codesResult.reason instanceof Error ? codesResult.reason.message : t("common.networkError"))
+          : codesResult.value.message;
+        toast({ title: t("adminRegcodes.loadInviteFailed"), description, variant: "destructive" });
       }
-    } catch (error: any) {
-      toast({ title: t("adminRegcodes.loadInviteFailed"), description: error.message, variant: "destructive" });
+      if (regcodesResult.status === "fulfilled" && regcodesResult.value.success && regcodesResult.value.data) {
+        setInviteRegcodes(regcodesResult.value.data.regcodes || []);
+      }
+      // "Loaded" means that the initial attempt completed. A partial outage must
+      // not turn the effect into an unbounded automatic retry loop.
+      setInviteCodesLoaded(true);
+      setInviteRegcodesLoaded(true);
     } finally {
-      setInviteCodesLoading(false);
+      if (sequence === inviteLoadSequenceRef.current) {
+        setInviteCodesLoading(false);
+        setInviteRegcodesLoading(false);
+      }
+      if (inviteLoadAbortRef.current === controller) inviteLoadAbortRef.current = null;
     }
   }, [toast, t]);
 
-  const loadInviteRegcodes = useCallback(async () => {
-    setInviteRegcodesLoading(true);
-    try {
-      const res = await api.getRegcodes(1, { source: "invite", per_page: 500 });
-      if (res.success && res.data) {
-        setInviteRegcodes(res.data.regcodes || []);
-        setInviteRegcodesLoaded(true);
-      }
-    } catch {
-      // silently fail; invite codes are the primary data here
-    } finally {
-      setInviteRegcodesLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
-    if (viewMode === "invitecodes" && !inviteCodesLoaded && !inviteCodesLoading) {
-      void loadInviteCodes();
+    if (viewMode === "invitecodes" && (!inviteCodesLoaded || !inviteRegcodesLoaded)) {
+      void loadInviteData();
     }
-    if (viewMode === "invitecodes" && !inviteRegcodesLoaded && !inviteRegcodesLoading) {
-      void loadInviteRegcodes();
-    }
-  }, [viewMode, inviteCodesLoaded, inviteCodesLoading, inviteRegcodesLoaded, inviteRegcodesLoading, loadInviteCodes, loadInviteRegcodes]);
+    return () => inviteLoadAbortRef.current?.abort();
+  }, [viewMode, inviteCodesLoaded, inviteRegcodesLoaded, loadInviteData]);
 
   const selectedRegcodes = regcodes.filter((item) => selectedCodes.has(item.code));
 
@@ -1052,7 +1058,7 @@ export default function AdminRegcodesPage() {
                   className="h-8 w-48 pl-8 text-xs"
                 />
               </div>
-              <Button variant="outline" size="sm" onClick={() => { void loadInviteCodes(); void loadInviteRegcodes(); }} disabled={inviteCodesLoading}>
+              <Button variant="outline" size="sm" onClick={() => void loadInviteData()} disabled={inviteCodesLoading || inviteRegcodesLoading}>
                 {(inviteCodesLoading || inviteRegcodesLoading) ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
                 {t("adminRegcodes.refresh")}
               </Button>

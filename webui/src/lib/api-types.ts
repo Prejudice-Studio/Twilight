@@ -106,8 +106,8 @@ export interface SetupResult {
 
 export interface SystemHealth {
   api: boolean;
-  database: boolean;
-  emby: boolean;
+  status: string;
+  time: number;
 }
 
 export interface SystemHealthDetail {

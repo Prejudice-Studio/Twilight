@@ -84,7 +84,9 @@ Update docs in the same change when behavior changes.
 - HTTP requests must refresh the shared Store snapshot once after cheap transport/rate-limit guards and before blacklist checks, routing, or authentication. Reuse the request-local refresh marker in any handler-level guard; do not add a second `Store.Refresh()` probe to ordinary reads. Scheduler jobs likewise refresh once at their execution boundary, and Telegram refreshes once per non-empty update batch.
 - Enforce feature gates in every relevant handler, not only in frontend visibility logic.
 - Do not read or print local secrets from config files unless explicitly requested.
-- Server status health checks are split across `/system/health/api`, `/system/health/database`, and `/system/health/emby`; keep `/system/health` as a compatibility aggregate and avoid adding database/Emby probes back into `/system/stats`.
+- Server status health checks are split across `/system/health/api`, `/system/health/database`, and `/system/health/emby`. Keep public `/system/health` as a lightweight API-only liveness summary: it must not ping PostgreSQL, contact Emby, or expose private dependency details. Avoid adding database/Emby probes back into `/system/stats`.
+- Config-file signature checks are hot-reload polling, not request state. Keep the short process-wide throttle in `reloadConfigIfChanged`; do not restore per-request `stat` calls for both config files.
+- JSON request decoders must accept exactly one JSON value, followed only by whitespace/EOF, while preserving the shared size and nesting-depth limits.
 - HTTP route registration must go through `App.add`, which maintains immutable method/segment/domain indexes used by `App.match`. Do not append directly to `App.routes`, mutate routes after registration, or bypass the indexed 404/405 matching path.
 - `splitPath` must preserve `path.Clean` normalization for duplicate slashes and dot segments while avoiding unconditional string prefix allocation for normal slash-prefixed request paths.
 
@@ -146,6 +148,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Keep controls dimensionally stable across languages.
 - Coalesce duplicate in-flight `GET` / `HEAD` requests only in `webui/src/lib/api-request.ts`; never dedupe writes, caller-abortable requests, or endpoints that opt out with `dedupe: false`. The same wrapper owns the short successful-read memory cache; keep it bounded by entry count, per-response source size, and total source-size budget, and keep `/users/me`, `refresh=1`, `X-Twilight-Intent`, `no-store` / `reload`, and `cacheRead: false` out of that cache.
 - Current-user identity endpoints (`/users/me` and `/auth/me`) must also stay out of in-flight read dedupe. Login, logout, and session-changing frontend flows must clear request caches and invalidate stale auth-store promises before writing user state.
+- Rapidly changing admin list/detail reads must pass `AbortSignal` through `api.ts`; refresh, filter/page changes, route changes, and unmount must cancel superseded requests, and stale responses must not overwrite newer state or produce abort-error toasts.
 - Admin tables, dialogs, dropdowns, and selects must stay usable in phone, tablet, and narrow desktop devtools viewports. Prefer stable dimensions, horizontal table overflow, wrapping button labels, and mobile card views over cramped desktop tables.
 - Shared responsive primitives must preserve the viewport boundary: toolbar and dangerous-action controls wrap or stack on narrow screens; tables scroll inside their own touch-friendly wrapper; tabs scroll inside their own list; and shared text buttons use a minimum height rather than clipping a translated label.
 - Keep the normal WebUI action language restrained: the shared primary/accent theme uses low-saturation blue-gray tokens, and ordinary buttons, badges, avatars, progress indicators, and status icons must not reintroduce purple gradients or hard-coded purple/indigo fills. Use semantic `primary`, `info`, `success`, and `warning` tokens for emphasis.
@@ -185,6 +188,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Disabling a built-in command through `Telegram.disabled_commands` must be terminal: the Bot should tell the user the command is disabled and must not fall through to a same-name custom command.
 - Custom commands may not override built-in or fixed special commands such as `/start`, `/help`, `/twihelp`, and `/twguser`.
 - Telegram bind codes are runtime tickets held in `bindStatusHub`, not durable account bindings. Startup and config reload must run the legacy bind-code residue repair so old persisted `state.bind_codes` entries cannot make Telegram look confirmed while no `User.TelegramID` exists. Web registration must consume a confirmed register-scene bind code through the hub atomically with local user creation; do not pre-read the Telegram identity and delete the code in a later separate step.
+- HTTP long-poll bind-status handlers must subscribe to `bindStatusHub` notifications and use bounded timeout/expiry timers. Do not restore per-request fixed-interval status polling; subscribe and then re-read once to close the registration race.
 - Any App-layer user deletion path must go through `deleteLocalUser` or perform the same cleanup: `store.DeleteUser`, session removal, and `bindStatusHub` cleanup by deleted UID / Telegram ID. Do not call `store.DeleteUser` directly from handlers, scheduler jobs, or Telegram actions.
 - Keep the long-poll hot path cheap and ordered. Validate Bot identity with `getMe` only at startup or after the effective Telegram API URL / Bot Token changes; throttle config-file signature checks during immediately-returning update bursts; update runtime health once per poll batch rather than once per update.
 - Telegram JSON calls go through the typed single-decode transport in `telegram_transport.go`. Do not restore the `io.ReadAll -> RawMessage -> second Unmarshal` response path or per-call request maps for stable Bot methods. Successful responses are capped at 4 MiB, write-only calls discard `result` without retaining it, caller deadlines take precedence over endpoint defaults, and every error leaving the App wrapper must redact the Bot Token.
@@ -234,6 +238,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Both the sink `append` path (`zapFieldsToAttrs` + `redactSensitiveText`) and the console path (`sanitizeZapFields`) redact sensitive keys/values. Any new persistence or console path for log data must route through the same redaction helpers; never write a raw `zapcore.Entry` message or field value to either destination.
 - `handleRuntimeStatus` reports `log_level` (console level) and `runtime_log_capture` (sink level, always `debug`) as distinct fields so the status panel makes the "recorded in full / console trimmed" contract observable.
 - Cost note: because the sink now persists `Debug` too, every captured line at every level becomes a row `INSERT` into `twilight_runtime_logs` (cheap, but not free). Keep genuinely high-frequency, per-request/per-loop chatter off the logger entirely rather than parking it at `Debug` and assuming it is free — "captured but off-console" is not "not written". See [[project_runtime_log_sink_cost]].
+- Ordinary fast successful HTTP requests are intentionally not access-logged. Preserve error request logs and the slow-success threshold; never restore one persistent runtime-log row for every `2xx`/`3xx` response.
 
 ## Domain Rules
 
@@ -398,7 +403,7 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 
 ## Dashboard Online Viewer Rules
 
-- The dashboard may show only the current Emby online viewer count from `/system/emby-viewers`.
+- The dashboard may show only the current Emby online viewer count from `/system/emby-viewers`; this route is `AuthUser` and must never become anonymous again.
 - Do not display who is watching, item names, covers, progress, or other now-playing details on the dashboard.
 - `/api/v1/emby/online` returns viewer count only (`current_online`); it must never emit a populated `users` array of who/what is playing. The count-only contract is enforced in `handleEmbyOnline`, not just in the UI.
 - `/api/v1/emby/now-playing` may exist for authenticated tooling, but the dashboard must not poll it or render its item/user details.
@@ -408,6 +413,7 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - `sharedHTTPTransport` is the single shared transport for all external HTTP calls (Emby, Telegram, Bangumi, TMDB), configured with `MaxIdleConns=64`, `MaxIdleConnsPerHost=8`, dial timeout 5s.
 - Per-request timeouts are controlled via `context.WithTimeout`, not `http.Client.Timeout`, allowing per-endpoint timeout granularity while reusing the shared transport.
 - `sameHostRedirectPolicy` rejects cross-host redirects (max 5 hops same-host) to prevent token leakage via 302 to attacker-controlled hosts.
+- Hot-reloading a changed Emby URL or token must invalidate every server-scoped cache, including sessions, device/IP audit data, and Emby administrator decisions, before those results can be reused.
 - Telegram's protocol wrapper must keep HTTP 429 `parameters.retry_after` semantics, classify refused 3xx responses before decoding their bodies, and apply the shared redirect policy and connection pool without introducing a separate `http.Client`.
 - The root layout includes `<link rel="dns-prefetch">` and `<link rel="preconnect">` tags for configured API origin, TMDB image CDN, and Bangumi API to warm connections early.
 - Next owns `Cache-Control` for `/_next/static` hashed build assets. Do not override that path from `webui/next.config.mjs`; keep explicit cache headers limited to app-owned public assets such as `favicon.png`.

@@ -102,6 +102,7 @@ Service 入参应是明确类型，不直接接收 `http.Request`。需要操作
 - 必须设置超时、必要退避和错误脱敏。
 - 返回结构化结果，不直接写本地 store。
 - 高频或昂贵调用可以短缓存，但必须说明作用域、TTL、失效条件和降级行为。
+- 以外部服务器身份为作用域的缓存必须把 URL / 凭据变化作为失效边界。Emby 热重载会统一清理会话、设备/IP 审查和管理员判定缓存，新增 Emby 缓存不得留在该失效入口之外。
 - Emby/Jellyfin 副作用必须先由业务层完成本地权限、容量、到期状态和管理员账号保护校验。
 - Telegram JSON 协议集中在 `internal/api/telegram_transport.go`，窄 DTO 集中在 `telegram_update_types.go`：稳定方法使用固定请求 DTO，`getUpdates`、`getMe`、`getChat` 和群成员查询直接解码强类型对象，普通写操作不保留无用 `result`。批次层只编排 DTO 索引和指针，业务 handler 不应重新引入动态 map 或复制协议结构。自定义命令、禁用命令和配置管理员 ID 共用按配置快照失效的只读索引；群组面板模板使用单次扫描渲染。协议层负责响应大小上限、调用方 deadline 继承、HTTP 429 退避参数、重定向拒绝和 Token 脱敏。
 
@@ -135,6 +136,7 @@ app routes
 - 页面只组合，不堆业务巨型组件；超过一个独立工作流时拆到 `components/admin/*` 或领域组件。
 - 重型面板按需挂载，非默认页签不在首屏请求大接口。
 - 密集导航区使用 `Link prefetch={false}`，避免首屏预载大量后台 chunk。
+- 列表、详情和筛选读取通过 `api.ts` 传递 `AbortSignal`；刷新、筛选/分页变化和卸载要取消旧请求，并用请求序列防止过期响应覆盖新页面状态。可取消读取不参与 in-flight 合流。
 - 系统信息统一通过 `useSystemStore.fetchInfo()`，配置保存后调用 `invalidate()`。
 - 配置编辑统一复用 `/system/admin/config/schema` 与 `api.updateConfigBySchema()`。
 - 资源 URL、头像、背景、公告渲染必须走 `safe-url`、`safe-render` 或 API 客户端归一化。

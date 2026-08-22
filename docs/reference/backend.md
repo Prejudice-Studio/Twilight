@@ -85,6 +85,8 @@ systemd 部署对应三个服务单元：`twilight`、`twilight-bot`、`twilight
 
 > 运行入口不会读取 `TWILIGHT_CONFIG_FILE` 指向的其它路径；这保证 1Panel、systemd 与手动启动都默认使用项目目录下的 `config.toml`。需要临时测试其它配置时，请切换到对应测试目录后再启动进程。
 
+API、Scheduler 与 Bot 都会检测配置文件签名并支持热重载；签名探测在进程内按 500ms 节流，HTTP 并发不会为每个请求分别 `stat` 主配置和 local 配置。Emby URL 或 Token 发生变化时，会同步清空旧服务器的会话、设备/IP 审查和 Emby 管理员判定缓存，避免跨服务器复用陈旧结果。
+
 配置项使用 TOML 分段（如 `[Global]`、`[API]`、`[Database]`、`[Emby]`、`[Telegram]`、`[SAR]`、`[Email]`、`[RateLimit]`、`[Scheduler]`、`[SystemUpdate]`、`[Security]` 等）。读取时对每个字段都准备了多个候选键（含分段键、历史扁平键和裸键），存在历史命名兼容；例如签到相关项同时识别 `SAR.*` 与历史的 `Signin.*`。自动积分续期的管理员许可为 `SAR.signin_auto_renewal_enabled`，历史分段兼容键为 `Signin.auto_renewal_enabled`，默认关闭。
 
 ### 关键默认值
@@ -233,6 +235,8 @@ Go 后端按统一的业务状态与前端响应形状实现，主要模块：
 
 后端把**主要持久业务状态保存在单一状态文档**里（`internal/store/store.go` 的 `State` 结构）。该文档包含用户、API Key、求片、公告、邀请码、邀请关系（`invite_relations`）、注册码、签到、调度记录、设备、登录日志、IP 黑名单、播放记录、改绑申请、Telegram 花名册、违规日志、Bangumi 同步日志与 Bangumi 收藏缓存等实体——它们都是同一份 `State` 里的字段（map / slice），而**不是各自独立的数据库或表**。高频追加的操作审计和运行日志例外，分别落在 `twilight_audit_logs` 与 `twilight_runtime_logs`。Telegram 注册/绑定码是当前 App 进程内存中的临时票据，旧 `bind_codes` 字段只作为历史状态字段保留，运行期不再用于新绑定码持久化。
 
+绑定码状态的 WebSocket 与 HTTP 长轮询共用 `bindStatusHub` 事件通知。HTTP 长轮询注册 watcher 后会立即复查一次状态以关闭订阅竞态，并只在状态变化、绑定码到期、请求超时或客户端取消时唤醒；不再为每个等待请求运行 500ms 周期轮询。
+
 Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subject_id`（BGMID）全局缓存作品详情，`BangumiCollectionCache` 以 `uid:type` 缓存用户收藏索引与进度/评分等用户态字段；读取时再按 `subject_id` 回填作品详情。这个设计避免不同用户收藏同一作品时在 state 中重复保存封面、标签和评分等大对象。
 
 > 旧文档把邀请、公告等描述为「新增 `db/invites.db` / `announcements.db`」「`invite_relations` 单表」「`ALTER TABLE announcements 增列`」「自动建表」等，均为过时说法。当前实现中这些都是单一状态文档（`internal/store`）里的字段。
@@ -253,7 +257,7 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
 - 写盘失败一律回滚：`Store.stateRaw` 常驻保存与 `stateVersion` 对齐的权威序列化字节；`snapshotStateLocked` 只引用这份只读字节，save 成功后才替换为新 JSON，失败则由 `restoreStateLocked` 延迟反序列化并重建索引。常见成功路径不再为了回滚额外序列化或复制完整对象图。
 - **PostgreSQL 建库建表**：目标库不存在时，会尝试用同一连接用户连接 `postgres` / `template1` 维护库执行 `CREATE DATABASE`（连接用户需要 `CREATEDB` 权限，已存在则不重复创建）；随后自动建表 `twilight_state`、`twilight_audit_logs`、`twilight_runtime_logs`、`twilight_sessions`、`twilight_playback_records`、`twilight_telegram_roster`、`twilight_telegram_runtime` 及相关索引（`CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` / `ALTER TABLE … ADD COLUMN IF NOT EXISTS version`，全部幂等，可反复执行）。
 - **操作审计表性能口径**：`twilight_audit_logs` 使用自增 ID 与状态时间、分类、动作、操作者、目标用户索引。新增审计只插入独立表并在同一事务内执行条数保留，不再为一条审计记录全量读取、反序列化和重写 `twilight_state`。列表的筛选、排序、计数、分页由 PostgreSQL 完成，避免把完整审计历史复制进 Go 堆。旧 `state.audit_logs` 在启动时幂等迁移；备份时会重新合并到 JSON 快照，恢复时再拆回独立表。
-- **运行日志表性能口径**：`twilight_runtime_logs` 只服务 Go 进程运行日志，按 `id` 游标读取增量，按 `id DESC` 读取最新快照，并用 cutoff id 删除旧行以保留最近 N 条；其写入同样不会改动主状态文档。
+- **运行日志表性能口径**：`twilight_runtime_logs` 只服务 Go 进程运行日志，按 `id` 游标读取增量，按 `id DESC` 读取最新快照，并用 cutoff id 删除旧行以保留最近 N 条；其写入同样不会改动主状态文档。普通快速 `2xx/3xx` HTTP 请求不生成运行日志行，只记录 `4xx/5xx` 与耗时达到 2 秒的慢成功请求，避免把诊断日志退化为逐请求访问日志。
 - **Telegram 游标性能与一致性口径**：`twilight_telegram_runtime` 只有 `id=1` 的一行，批次完成后以 `GREATEST` 单调推进 `update_offset`，不获取 Store 全局锁，也不刷新、快照、编码或重写 `twilight_state`。Bot 身份经 `getMe` 确认变化时才允许清零。旧 `State.TelegramBotOffset` 在启动或 `LoadSnapshot` 时作为迁移种子，迁移后从 JSONB 清除；新备份不携带该运行游标。
 - **Telegram 花名册性能与一致性口径**：`twilight_telegram_roster` 以 `(chat_id, telegram_id)` 为主键，首次观察和状态变化使用窄行 UPSERT，普通消息由 4096 项有界热缓存做五分钟节流；冷缓存仍用 SQL `WHERE` 阻止近期无变化行产生物理 UPDATE。定时成员检查把去重结果编码为 JSONB，一条语句批量合并，`is_bot` 只允许从 false 升为 true，并保留最早 `first_seen` 与最新 `last_seen/status`。列表排序和统计聚合由 PostgreSQL 完成，不再扫描常驻 Go map。旧 `State.TelegramRoster` 启动时幂等迁移并从主状态清除。
 - **Telegram 协议性能与安全口径**：`telegram_transport.go` 直接把 Telegram envelope 的 `result` 解码到目标类型，`telegram_update_types.go` 只声明 update、identity、chat、member 等实际消费字段，替代动态 map。批次排序保存原切片索引并传元素指针；普通回复不解析无用 Message，只有面板/交互保留 `message_id`。配置管理员 ID 与命令配置共用不可变索引，本地动态管理员角色继续查 Store 专用索引；群组面板模板按占位符单次扫描，不在每次刷新重建 `strings.Replacer`。成功响应硬限制为 4 MiB，错误正文有界读取，已有调用方 deadline 优先于默认超时，并保留 HTTP 429 `retry_after`、共享连接复用、同源重定向限制和所有错误出口的 Bot Token 脱敏。callback data 采用严格定长结构，拒绝空段和多余段。
@@ -285,6 +289,7 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
 - 实时日志只接入 Go 进程内 `zap` 全局 logger（通过自定义 core 路由），不开放任意日志文件、journald 或路径参数读取。
 - 日志等级、保留行数与 Go 运行时内存目标由 `Global.log_level`、`Global.runtime_log_limit`、`Global.runtime_memory_limit_mb` 控制；日志保留行数会被夹在 100–50000，默认 1000；内存目标默认 128 MiB，设为 0 表示不限制。
 - 日志落在独立表 `twilight_runtime_logs`（与 `twilight_state` 同库不同表），不进 state jsonb。在状态接入前的早期日志会先缓冲在内存 fallback 缓冲区，接入后回写。`after=0` 返回最近 N 条快照；`after>0` 返回该游标之后的前 N 条，保持升序，避免增量读取跳过积压日志。
+- HTTP 请求日志只保留失败请求和耗时达到 2 秒的慢成功请求；正常快速成功响应不会写入该表。由于 sink 会持久化所有日志级别，高频路径应直接减少日志调用，而不是仅把访问日志降为 `Debug`。
 - PostgreSQL 后端写入路径只做 INSERT，并按固定节奏异步裁剪；手动裁剪和异步裁剪都按 cutoff id 保留最近 N 条，避免 `NOT IN + ORDER BY LIMIT` 形式造成高写入期反复全表反扫。
 - 日志输出会脱敏：通过正则覆盖 `Authorization`、`Cookie`、`session id/token`、Emby/MediaBrowser token、`access/refresh/id token`、`client_secret`、`private_key`、`connection_string`、`database_url`、`token`、`secret`、`password`、`api_key`、`bot_token`、`dsn`、`Bearer …`、`key-…` 等敏感片段；敏感字段名（含 `key`、`*token`、`*secret` 等）直接替换为 `[REDACTED]`。脱敏是每条日志每个字符串字段都要跑的热路径：`redactSensitiveText` 前置一层廉价触发词前缀过滤（`mightContainSecret`），文本（小写化后）不含任何敏感触发词时直接零分配原样返回，避免绝大多数普通日志（uid / path / duration 等）白跑四遍正则 + 全量字符串分配。触发词列表是四条正则「命中所必需的字面量子串」的超集，只会让快路径更保守（多跑正则），不会漏脱敏。
 - 状态接口只读取 Go runtime 摘要（版本、goroutine、内存、是否启用 Redis、活动数据库后端、用户数等）和 Linux `/proc` 摘要（loadavg / meminfo / uptime），不返回环境变量、配置明文、命令行参数或进程列表。

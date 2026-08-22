@@ -88,6 +88,8 @@ export default function AdminTicketDetailPage() {
   const imageMaxCount = Number(systemInfo?.limits?.ticket_image_max_count) || DEFAULT_TICKET_IMAGE_MAX_COUNT;
   const id = Number(ticketId);
   const conversationRef = useRef<HTMLDivElement>(null);
+  const loadAbortRef = useRef<AbortController | null>(null);
+  const loadSequenceRef = useRef(0);
 
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [types, setTypes] = useState<string[]>([]);
@@ -107,15 +109,21 @@ export default function AdminTicketDetailPage() {
   const [noteDraft, setNoteDraft] = useState("");
 
   const loadTicket = useCallback(async () => {
+    loadAbortRef.current?.abort();
+    const controller = new AbortController();
+    loadAbortRef.current = controller;
+    const sequence = ++loadSequenceRef.current;
     if (!Number.isInteger(id) || id <= 0) {
       setError(t("adminTickets.invalidTicketId"));
       setLoading(false);
+      loadAbortRef.current = null;
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const res = await api.adminGetTicket(id);
+      const res = await api.adminGetTicket(id, controller.signal);
+      if (controller.signal.aborted || sequence !== loadSequenceRef.current) return;
       if (res.success && res.data) {
         setTicket(res.data.ticket);
         setTypes(res.data.ticket_types || []);
@@ -124,14 +132,17 @@ export default function AdminTicketDetailPage() {
         throw new Error(res.message || t("adminTickets.loadFailed"));
       }
     } catch (err) {
+      if (controller.signal.aborted || sequence !== loadSequenceRef.current) return;
       setError(err instanceof Error ? err.message : t("adminTickets.loadFailed"));
     } finally {
-      setLoading(false);
+      if (sequence === loadSequenceRef.current) setLoading(false);
+      if (loadAbortRef.current === controller) loadAbortRef.current = null;
     }
   }, [id, t]);
 
   useEffect(() => {
     void loadTicket();
+    return () => loadAbortRef.current?.abort();
   }, [loadTicket]);
 
   // 仅在「切换到另一张工单」时用服务端值初始化草稿（依赖 ticket?.id）。

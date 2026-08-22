@@ -166,6 +166,7 @@ bash start_backend_dev.sh
 - Emby 管理与设备/IP 审查共用 `webui/src/app/(main)/admin/emby`，设备审查是页签级入口；`/admin/device-audit` 只作为兼容直达页面保留。设备审查不展示 Twilight 自身连接 Emby 时产生的设备/会话；全量 Emby 设备记录清理只放在调度器 `cleanup_emby_devices`，不要在审查页重新添加“清理全部/踢出全部”入口。
 - 工单页必须展示 `replies` 双方回复时间线；`admin_note` 仅作为最新管理员摘要和旧数据兼容字段。状态、优先级、类型归一、关闭/重开时间戳、开放工单计数与“更新时保留 replies/附件”逻辑统一放在 `internal/store`，前端和 handler 不要重复判断。
 - 后台重型面板应按需加载：非默认页签不要在首屏自动请求大接口；公共系统信息走 `useSystemStore.fetchInfo()` 的 TTL 与 inflight 复用，配置保存后调用 `invalidate()`。
+- 管理列表、详情和筛选结果应把 `AbortSignal` 从 `useAsyncResource` 或页面控制器传到 `api.ts`；分页、筛选、手动刷新、路由切换和卸载时取消旧读取，并用请求序列阻止旧响应覆盖新状态。取消请求不弹失败提示。
 - 侧边栏、移动菜单、管理导航等密集导航区域使用 `Link prefetch={false}`，避免首屏预载大量不一定访问的后台页面 chunk；只对明确的高频下一步保留预取。
 
 ## API 与安全规范
@@ -175,6 +176,7 @@ bash start_backend_dev.sh
 - 新路由统一在 `internal/api/routes.go` 注册，通过 `a.add(method, pattern, auth, handler)` 声明方法、路径、鉴权级别和 handler；按功能域分布在 `registerAdminRoutes` / `registerAPIKeyRoutes` / `registerSecurityRoutes` / `registerBatchRoutes` 等分组函数中。
 - handler 只负责参数校验、鉴权、调用服务和整理响应；可复用的业务逻辑放到对应功能域文件，外部服务调用必须走独立 client/helper（Emby、TMDB、Bangumi、Telegram），不要散落在 handler 内。
 - 响应必须使用统一 envelope，并与 `webui/src/lib/api.ts` 保持兼容。
+- JSON 请求体必须经统一解码器读取，限制为单个 JSON 值、256 KiB 和 32 层嵌套；不得只解码第一个值后忽略尾随第二份 JSON 文档。
 - 公开接口、登录接口，以及验证码 / 绑定码 / 邀请码 / 注册码检查类接口必须考虑限流。
 - 管理员的破坏性操作必须有明确权限边界，并尽量返回结构化的 `skipped`、`failed`、`details` 等字段，便于前端展示处理结果。
 - 涉及鉴权、文件、路径、密钥、迁移或共享行为的改动，必须补充聚焦测试。
@@ -256,11 +258,12 @@ Twilight 不对 Cookie 鉴权的变更类请求做 CSRF 令牌校验，也不做
 ### 数据库性能与接口一致性
 
 - 性能优化优先从现有访问模式入手：分页 / 游标、批量读取、索引、短超时、限流、前端按需加载和必要缓存；不要为了局部慢查询把业务实体拆成独立表，除非先更新架构文档并明确快照一致性、迁移、备份恢复方案。
-- PostgreSQL 的 `twilight_runtime_logs` 是高写入运行日志表，允许独立优化：最新快照按 `id DESC` 取最近 N 条，增量读取按 `id > after ORDER BY id ASC LIMIT N`，裁剪按 cutoff id 保留最近 N 条。状态接入前的内存 fallback 缓冲区必须保持相同 cursor 语义。
+- PostgreSQL 的 `twilight_runtime_logs` 是高写入运行日志表，允许独立优化：最新快照按 `id DESC` 取最近 N 条，增量读取按 `id > after ORDER BY id ASC LIMIT N`，裁剪按 cutoff id 保留最近 N 条。状态接入前的内存 fallback 缓冲区必须保持相同 cursor 语义。普通快速成功请求不写运行日志，只保留失败请求和 2 秒以上慢成功请求，避免每个 HTTP 请求额外执行一次日志 INSERT。
 - `twilight_telegram_runtime` 只保存一行单调 `getUpdates` offset。它是运行确认状态而非业务快照内容；旧 `State.TelegramBotOffset` 只作为升级/历史 JSON 导入种子，迁移后必须清零，运行期推进不得调用 `mutateAndSaveLocked`。
 - `twilight_telegram_roster` 以 `(chat_id, telegram_id)` 为主键。普通群消息先命中进程内最多 4096 项的热观察缓存，同成员状态未变时五分钟内不访问数据库；冷缓存仍由 SQL 条件阻止近期行产生物理 UPDATE。定时成员检查先在 Go 内合并重复项，再通过一次 JSONB UPSERT 落库。启动会幂等迁移旧 `State.TelegramRoster`，备份/恢复则由 `Snapshot` / `LoadSnapshot` 合并和拆分，运行期不得把全量花名册重新常驻主状态。
 - 新增列表接口应保持统一响应口径：数据数组放在 `items` 或既有兼容字段，增量游标使用 `next_cursor`；变更字段名或排序语义前必须同步后端 API 文档、前端 API 类型和调用方。
-- 新增缓存必须写清作用域（进程 / Redis / 前端内存）、TTL、容量上限、失效条件和降级行为；配置热重载后不能继续读取旧配置或旧 store 句柄。
+- 新增缓存必须写清作用域（进程 / Redis / 前端内存）、TTL、容量上限、失效条件和降级行为；配置热重载后不能继续读取旧配置或旧 store 句柄。外部服务的 URL 或凭据变化时必须清空以服务器身份为作用域的缓存；当前 Emby 热重载会清理会话、设备审查与管理员判定缓存。
+- 配置文件签名探测由 API、Scheduler 与 Bot 共用 500ms 进程级节流；不得在普通 HTTP 请求路径恢复每请求两次文件系统 `stat`。绑定码 HTTP 长轮询应复用 `bindStatusHub` 状态通知和到期/超时定时器，不得恢复 500ms 周期扫描。
 
 ### 迁移与引导
 

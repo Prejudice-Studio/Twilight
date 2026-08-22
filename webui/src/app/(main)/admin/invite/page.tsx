@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Ban,
@@ -118,26 +118,36 @@ export default function AdminInviteTreePage() {
   const [selectedUid, setSelectedUid] = useState<number | null>(null);
   const [selectedUids, setSelectedUids] = useState<Set<number>>(new Set());
   const [depthPrompt, setDepthPrompt] = useState<DepthPromptState | null>(null);
+  const reloadAbortRef = useRef<AbortController | null>(null);
+  const reloadSequenceRef = useRef(0);
 
   const reload = useCallback(async () => {
+    reloadAbortRef.current?.abort();
+    const controller = new AbortController();
+    reloadAbortRef.current = controller;
+    const sequence = ++reloadSequenceRef.current;
     setLoading(true);
     setError(null);
     try {
-      const res = await api.adminGetInviteTree();
+      const res = await api.adminGetInviteTree(controller.signal);
+      if (controller.signal.aborted || sequence !== reloadSequenceRef.current) return;
       if (res.success && res.data) {
         setForest(res.data);
       } else {
         throw new Error(res.message || t("adminInvite.loadFailed"));
       }
     } catch (err) {
+      if (controller.signal.aborted || sequence !== reloadSequenceRef.current) return;
       setError(err instanceof Error ? err.message : t("adminInvite.loadFailed"));
     } finally {
-      setLoading(false);
+      if (sequence === reloadSequenceRef.current) setLoading(false);
+      if (reloadAbortRef.current === controller) reloadAbortRef.current = null;
     }
   }, [t]);
 
   useEffect(() => {
     void reload();
+    return () => reloadAbortRef.current?.abort();
   }, [reload]);
 
   const maps = useMemo(() => (forest ? buildMaps(forest) : null), [forest]);

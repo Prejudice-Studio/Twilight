@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"go.uber.org/zap"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -73,6 +74,7 @@ type App struct {
 	runtimeMu                 sync.Mutex
 	setupMu                   sync.Mutex
 	configSignature           string
+	configSignatureCheckedAt  atomic.Int64
 	telegramBotMu             sync.Mutex
 	telegramBotCacheKey       telegramBotConfigKey
 	telegramBotCacheUntil     time.Time
@@ -297,6 +299,13 @@ const auditRequestKey contextKey = "audit_request"
 const clientIPKey contextKey = "client_ip"
 
 const (
+	// 配置文件不是请求级状态。限制签名检查频率可以保留热重载能力，
+	// 同时避免每个 HTTP 请求都对主配置和 local 配置执行文件系统 stat。
+	configSignatureCheckInterval = 500 * time.Millisecond
+	// 正常请求不应进入高写入运行日志表；仅保留异常请求和明显慢请求，
+	// 让运行日志服务于诊断而不是变成逐请求访问日志。
+	httpRequestSlowLogThreshold = 2 * time.Second
+
 	twilightClientHeader         = "X-Twilight-Client"
 	twilightIntentHeader         = "X-Twilight-Intent"
 	twilightIntentCreateBindCode = "create-bind-code"
@@ -426,6 +435,11 @@ func storeBackendChanged(previous, next config.Config) bool {
 	return previous.PostgresDSN() != next.PostgresDSN()
 }
 
+func embyConnectionChanged(previous, next config.Config) bool {
+	return strings.TrimSpace(previous.EmbyURL) != strings.TrimSpace(next.EmbyURL) ||
+		strings.TrimSpace(previous.EmbyToken) != strings.TrimSpace(next.EmbyToken)
+}
+
 func (a *App) Routes() []Route {
 	out := make([]Route, len(a.routes))
 	copy(out, a.routes)
@@ -497,6 +511,9 @@ func (a *App) reloadConfigLocked() (map[string]any, error) {
 
 	// 原子切换：在此之前任何 return 都不会污染当前运行时；之后读端就是新状态。
 	a.runtime.Store(&nextState)
+	if embyConnectionChanged(previous, next) {
+		a.invalidateEmbyConfigurationCaches()
+	}
 
 	// applyConfiguredAdmins 读 cfg / 写 store，必须在 atomic Store 之后调用，
 	// 否则它内部的 a.cfg() / a.store() 还会看到旧快照。
@@ -626,7 +643,23 @@ func liveAppliedConfigFields(previous, next config.Config) []string {
 	return out
 }
 
+func (a *App) shouldCheckConfigSignature(now time.Time) bool {
+	lastChecked := a.configSignatureCheckedAt.Load()
+	nowUnixNano := now.UnixNano()
+	elapsed := nowUnixNano - lastChecked
+	if lastChecked > 0 && elapsed >= 0 && elapsed < configSignatureCheckInterval.Nanoseconds() {
+		return false
+	}
+	if !a.configSignatureCheckedAt.CompareAndSwap(lastChecked, nowUnixNano) {
+		return false
+	}
+	return true
+}
+
 func (a *App) reloadConfigIfChanged() {
+	if !a.shouldCheckConfigSignature(time.Now()) {
+		return
+	}
 	current := configFileSignature(a.cfg().ConfigFile)
 	a.runtimeMu.Lock()
 	if current == "" || current == a.configSignature {
@@ -704,25 +737,30 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if status == 0 {
 			status = http.StatusOK
 		}
+		duration := time.Since(started)
+		if status < 400 && duration < httpRequestSlowLogThreshold {
+			return
+		}
 		fields := []zap.Field{
 			zap.String("method", r.Method),
 			zap.String("path", r.URL.Path),
 			zap.Int("status", status),
 			zap.Int("bytes", lw.bytes),
-			zap.Int64("duration_ms", time.Since(started).Milliseconds()),
+			zap.Int64("duration_ms", duration.Milliseconds()),
 			zap.String("ip", a.clientIP(r)),
 		}
 		if principalLog != nil {
 			fields = append(fields, zap.Int64("uid", principalLog.User.UID), zap.String("username", principalLog.User.Username))
 		}
-		switch {
-		case status >= 500:
+		if status >= 500 {
 			zap.L().Error("http request completed", fields...)
-		case status >= 400:
-			zap.L().Warn("http request completed", fields...)
-		default:
-			zap.L().Info("http request completed", fields...)
+			return
 		}
+		if status >= 400 {
+			zap.L().Warn("http request completed", fields...)
+			return
+		}
+		zap.L().Warn("slow http request completed", fields...)
 	}()
 	a.reloadConfigIfChanged()
 	// reload 之后 runtime 快照（cfg + trustedProxies）已是最新，此时解析一次
@@ -1458,6 +1496,17 @@ func decodeJSON(r *http.Request, dst any) error {
 	if err := decoder.Decode(dst); err != nil {
 		return err
 	}
+	return requireJSONEOF(decoder)
+}
+
+func requireJSONEOF(decoder *json.Decoder) error {
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return errors.New("request body must contain exactly one JSON value")
+		}
+		return err
+	}
 	return nil
 }
 
@@ -1480,7 +1529,11 @@ func decodeMap(r *http.Request) map[string]any {
 		return payload
 	}
 	body := http.MaxBytesReader(nil, r.Body, maxJSONBodyBytes)
-	if err := json.NewDecoder(body).Decode(&payload); err != nil {
+	decoder := json.NewDecoder(body)
+	if err := decoder.Decode(&payload); err != nil {
+		return map[string]any{}
+	}
+	if err := requireJSONEOF(decoder); err != nil {
 		return map[string]any{}
 	}
 	if jsonDepthExceeds(payload, maxJSONNestingDepth) {

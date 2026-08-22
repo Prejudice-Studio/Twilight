@@ -119,7 +119,7 @@ export default function AdminTicketsPage() {
     finally { setTypeMgmtSaving(false); }
   };
 
-  const loadTickets = useCallback(async () => {
+  const loadTickets = useCallback(async (signal?: AbortSignal) => {
     const res = await api.adminListTickets({
       all: statusFilter === "all",
       status: statusFilter !== "all" ? statusFilter : undefined,
@@ -127,7 +127,7 @@ export default function AdminTicketsPage() {
       priority: priorityFilter !== "all" ? priorityFilter : undefined,
       page,
       per_page: ADMIN_TICKET_PAGE_SIZE,
-    });
+    }, signal);
     if (res.success && res.data) {
       return {
         tickets: res.data.tickets,

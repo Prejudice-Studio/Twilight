@@ -48,6 +48,22 @@ func (a *App) invalidateEmbySessionsSnapshot() {
 	a.embySessionsMu.Unlock()
 }
 
+// invalidateEmbyConfigurationCaches drops every cache whose identity belongs
+// to one Emby server. A hot-reloaded URL or token must never reuse sessions,
+// device audit data, or administrator decisions from the previous server.
+func (a *App) invalidateEmbyConfigurationCaches() {
+	a.invalidateEmbySessionsSnapshot()
+
+	a.embyDeviceAuditMu.Lock()
+	a.embyDeviceAuditUntil = time.Time{}
+	a.embyDeviceAuditCache = nil
+	a.embyDeviceAuditMu.Unlock()
+
+	a.embyAdminMu.Lock()
+	clear(a.embyAdminCache)
+	a.embyAdminMu.Unlock()
+}
+
 func embySessionNowPlaying(session map[string]any) (map[string]any, bool) {
 	item, ok := session["NowPlayingItem"].(map[string]any)
 	return item, ok && item != nil

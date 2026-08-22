@@ -91,7 +91,11 @@ allow_credential = true
 
 所有响应使用统一 envelope：`{ success, code, error_code, message, data, timestamp }`（`error_code` 为协议层错误码，便于前端按码而非文案分支；`data` 为空时省略）。
 
+JSON 请求体由统一解码器限制为 256 KiB、最多 32 层嵌套且只能包含一个 JSON 值；尾随第二个对象、数组或标量会被拒绝，避免不同代理、校验层与 handler 对同一请求产生歧义解析。
+
 被禁用 / 到期账号即便持有有效 session 也会被拒：`authenticate` 在 `!Active` 时区分「到期」（`ACCOUNT_EXPIRED`）与「被禁用」（`ACCOUNT_DISABLED`），让前端把「续费」与「申诉」两条引导分开。
+
+公开 `GET /api/v1/system/health` 只返回 API 存活摘要，不执行 PostgreSQL Ping、Emby 请求或返回私有依赖详情；数据库、Emby 与 API 真实检测分别位于三个 `AuthAdmin` 健康接口。`GET /api/v1/system/emby-viewers` 会触发 Emby 会话读取，因此是 `AuthUser`，匿名调用不能借此探测在线活动。
 
 ### 4.1 运行时 API 文档边界
 

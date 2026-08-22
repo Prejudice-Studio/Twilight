@@ -79,6 +79,8 @@ Cookie 鉴权的变更类请求（`POST` / `PUT` / `DELETE`）不要求 CSRF 令
 
 双子域部署时，如需两个子域都能携带同一登录会话，应设置 `session_cookie_domain` 让前端站点与 API 站点共享 `HttpOnly` session cookie。CORS 留空或 `*` 时会反射合法 Origin；填写 `cors_origins` 后仅允许列表内 Origin。WebUI 登录态以浏览器请求 `/users/me` 的后端响应为准；`/users/me` 与 `/auth/me` 不应被浏览器、代理或前端请求层缓存/合流，登录和登出后必须重新确认当前用户，避免多账号切换时旧响应覆盖新会话。
 
+JSON 请求体只能包含一个 JSON 值，值后只允许空白字符与 EOF；拼接第二个对象、数组或标量会被视为 malformed JSON。统一解码器同时限制请求体大小为 256 KiB、嵌套深度为 32 层，前端校验不能替代这些后端边界。
+
 更多机制说明见 [安全加固](../guides/security.md)。
 
 ### 2.4 响应结构
@@ -1505,7 +1507,7 @@ curl -X POST "http://localhost:5000/api/v1/admin/scheduler/jobs/check_expired/ru
 
 `GET /system/health`
 
-- 说明：兼容聚合健康接口，返回 `api`、`database`、`emby` 布尔状态，并保留 `status/storage/redis` 等兼容字段。登录用户会额外收到 `api_detail`、`database_detail` 与 `emby_detail`；数据库状态以当前 store 可读为主，PostgreSQL `ping` 失败会作为 `warning/ping_error` 诊断返回，不再单独把可读数据库判为异常。后台服务器状态页使用下列三个管理员接口分别检测，避免一次请求内重复探测：
+- 说明：公开轻量存活接口，仅返回 `status`、`time` 与 `api` 摘要。它不会执行 PostgreSQL `Ping`、Emby 网络请求，也不会暴露存储、Redis 或外部依赖详情，适合反向代理和进程存活探针。后台服务器状态页使用下列三个管理员接口分别检测，避免一次请求内重复探测：
   - `GET /system/health/api`
   - `GET /system/health/database`
   - `GET /system/health/emby`
@@ -1619,7 +1621,14 @@ curl -X GET "http://localhost:5000/api/v1/system/config" \
 - 说明：服务端探测 Emby 线路连通性，供前端在多线路间选择。
 - 认证：登录用户（`AuthUser`）
 
-### 10.10 管理员运行状态与实时日志
+### 10.10 Emby 在线人数
+
+`GET /system/emby-viewers`
+
+- 说明：返回当前 Emby 正在播放会话的总人数，只统计含 `NowPlayingItem` 的会话，不返回用户、媒体条目、封面或进度。会话读取复用短时服务器缓存，避免仪表盘并发刷新重复请求 `/Sessions`。
+- 认证：登录用户（`AuthUser`），不允许匿名探测 Emby 会话状态。
+
+### 10.11 管理员运行状态与实时日志
 
 `GET /system/admin/runtime/status`
 
@@ -1660,7 +1669,7 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
   -H "Authorization: Bearer <admin_token>"
 ```
 
-### 10.11 config.toml 读写与备份
+### 10.12 config.toml 读写与备份
 
 `GET /system/admin/config/toml` — 读取当前 config.toml（管理员）。
 
@@ -1700,7 +1709,7 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 | `POST /system/admin/config/restore` | 从备份恢复配置 |
 | `POST /system/admin/config/sweep` | 手动触发 config.toml 自动整理（迁移历史段、删孤立键、补默认值，带备份） |
 
-### 10.12 数据库状态、备份、恢复、迁移
+### 10.13 数据库状态、备份、恢复、迁移
 
 > Twilight 的主要业务状态保存在 PostgreSQL `twilight_state`（`id=1` 的一行 jsonb）；高频追加或独立生命周期数据使用 `twilight_audit_logs`、`twilight_runtime_logs`、`twilight_sessions`、`twilight_playback_records`、`twilight_telegram_roster`，Telegram 更新确认游标单独使用 `twilight_telegram_runtime`。审计、运行日志与花名册会合并回完整 JSON 备份；Telegram 游标属于运行确认状态，不随业务快照回滚，历史 JSON 中的旧游标只在导入时单调迁移一次。下列接口围绕该持久化体系操作。
 
@@ -1760,7 +1769,7 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 - 预检响应 `data` 包含 `source_driver`、`configured_driver`、`target_driver`、`snapshot_bytes`、`target_ready`、`backup_ready`、`warnings`、`counts`、`requires_confirmation`、`confirm`，并保留 `users`、`regcodes`、`invite_codes` 等兼容字段。PostgreSQL 目标会在权限允许时自动创建缺失数据库并准备 `twilight_state` 状态表，`target_ready.database_created` / `target_ready.schema_ready` 反映结果。
 - 执行响应会额外返回 `pre_operation_backup` / `pre_migration_backup`，确认写入前已自动创建保护性备份。
 
-### 10.13 Git 自动更新
+### 10.14 Git 自动更新
 
 `POST /system/admin/update`
 
@@ -1781,7 +1790,7 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 - 重启策略：只有 commit 实际变化且请求 `restart_services=true` 时才调度重启；优先使用 `systemd-run --on-active=2` 延迟重启 `twilight`、`twilight-bot`、`twilight-scheduler`，失败时回退为后台 `systemctl restart`。
 - 响应字段：`updated` 表示 commit 是否变化，`restart_requested` 表示请求是否要求重启，`restart_scheduled` 表示是否成功安排重启，`restart_method` 表示使用的调度方式。
 
-### 10.14 测试 Telegram Bot 连通性
+### 10.15 测试 Telegram Bot 连通性
 
 `POST /system/admin/bot/test`
 
@@ -1808,14 +1817,14 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 }
 ```
 
-### 10.15 获取全部路由列表
+### 10.16 获取全部路由列表
 
 `GET /system/admin/apis`
 
 - 说明：获取后端注册的全部路由列表。
 - 认证：管理员（`AuthAdmin`）
 
-### 10.16 开发者模式与 JS 沙箱
+### 10.17 开发者模式与 JS 沙箱
 
 `POST /admin/developer-mode/activate`
 

@@ -1161,47 +1161,12 @@ func (a *App) createBindCode(w http.ResponseWriter, uid int64, scene string) {
 func (a *App) handleBindCodeStatus(w http.ResponseWriter, r *http.Request, _ Params) {
 	code := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("code")))
 	// Long-poll 支持：客户端传 wait=N（秒）表示愿意等待最多 N 秒。
-	// 在等待期间每 500ms 检查一次 bind code 状态，一旦变为终态立即返回。
+	// 等待期间复用 bindStatusHub 的状态通知，避免每个请求创建周期性轮询器。
 	// 不传 wait 或 wait<=0 时退化为即时响应（兼容旧客户端）。
 	waitSec := clamp(queryInt(r, "wait", 0), 0, 60)
-
-	respond := func() {
-		state := a.telegramBindCodeState(code, 0, "register", time.Now().Unix(), true)
+	state, respond := a.waitForTelegramBindCodeState(r, code, 0, "register", waitSec)
+	if respond {
 		writeTelegramBindCodeState(w, state)
-	}
-
-	// 即时模式
-	if waitSec <= 0 {
-		respond()
-		return
-	}
-
-	// Long-poll 模式：先检查一次，如果已经是终态直接返回
-	state := a.telegramBindCodeState(code, 0, "register", time.Now().Unix(), true)
-	if state.Terminal {
-		respond()
-		return
-	}
-
-	// 挂起等待，每 500ms 轮询 store 直到终态或超时
-	deadline := time.After(time.Duration(waitSec) * time.Second)
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-deadline:
-			respond()
-			return
-		case <-ticker.C:
-			state = a.telegramBindCodeState(code, 0, "register", time.Now().Unix(), true)
-			if state.Terminal {
-				respond()
-				return
-			}
-		}
 	}
 }
 
@@ -1291,39 +1256,49 @@ func (a *App) handleUserBindCodeStatus(w http.ResponseWriter, r *http.Request, _
 	}
 	uid := current(r).User.UID
 	waitSec := clamp(queryInt(r, "wait", 0), 0, 60)
-
-	respond := func() {
-		state := a.telegramBindCodeState(code, uid, "", time.Now().Unix(), true)
+	state, respond := a.waitForTelegramBindCodeState(r, code, uid, "", waitSec)
+	if respond {
 		writeTelegramBindCodeState(w, state)
 	}
+}
 
-	if waitSec <= 0 {
-		respond()
-		return
+// waitForTelegramBindCodeState waits on the shared bind-status event hub rather
+// than waking every long-poll request on a fixed ticker. The second lookup after
+// subscribing closes the race between the initial read and watcher registration.
+func (a *App) waitForTelegramBindCodeState(r *http.Request, code string, uid int64, scene string, waitSec int) (telegramBindCodeState, bool) {
+	state := a.telegramBindCodeState(code, uid, scene, time.Now().Unix(), true)
+	if waitSec <= 0 || state.Terminal {
+		return state, true
 	}
 
-	state := a.telegramBindCodeState(code, uid, "", time.Now().Unix(), true)
+	var updates <-chan struct{}
+	unsubscribe := func() {}
+	if a.bindStatus != nil {
+		updates, unsubscribe = a.bindStatus.subscribe(code)
+	}
+	defer unsubscribe()
+
+	state = a.telegramBindCodeState(code, uid, scene, time.Now().Unix(), true)
 	if state.Terminal {
-		respond()
-		return
+		return state, true
 	}
 
-	deadline := time.After(time.Duration(waitSec) * time.Second)
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
+	wait := time.Duration(waitSec) * time.Second
+	if expiryWait := bindStateExpiryWait(state); expiryWait < wait {
+		wait = expiryWait
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
-			return
-		case <-deadline:
-			respond()
-			return
-		case <-ticker.C:
-			state = a.telegramBindCodeState(code, uid, "", time.Now().Unix(), true)
+			return state, false
+		case <-timer.C:
+			return a.telegramBindCodeState(code, uid, scene, time.Now().Unix(), true), true
+		case <-updates:
+			state = a.telegramBindCodeState(code, uid, scene, time.Now().Unix(), true)
 			if state.Terminal {
-				respond()
-				return
+				return state, true
 			}
 		}
 	}
@@ -2019,31 +1994,11 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request, _ Params) {
 		failWithCode(w, http.StatusTooManyRequests, ErrRateLimited, "请求过于频繁")
 		return
 	}
-	isAuth := current(r).User.UID != 0
 	api := a.apiHealth()
-	database := a.databaseHealth(r.Context())
-	emby := a.embyStatusSnapshot(r.Context(), false)
 	data := map[string]any{
 		"status": "healthy",
 		"time":   time.Now().Unix(),
 		"api":    boolValue(api, "ok", false),
-	}
-	if isAuth {
-		sessionFallback := a.sessions().FallbackCount()
-		rateFallback := a.limiter().FallbackCount()
-		data["api_detail"] = api
-		data["database"] = boolValue(database, "ok", false)
-		data["database_detail"] = database
-		data["emby"] = boolValue(emby, "online", false)
-		data["emby_detail"] = emby
-		data["emby_configured"] = boolValue(emby, "configured", false)
-		data["redis"] = a.redis() != nil
-		data["redis_degraded"] = a.redis() != nil && (sessionFallback > 0 || rateFallback > 0)
-		data["storage"] = a.store().Backend()
-		data["active_database"] = a.store().Backend()
-		data["config_database"] = strings.ToLower(a.cfg().DatabaseDriver)
-		data["storage_mismatch"] = a.runtimeDatabaseMismatch()
-		data["storage_warning"] = a.databaseMismatchWarning()
 	}
 	ok(w, "OK", data)
 }
@@ -2071,25 +2026,18 @@ func (a *App) handleHealthEmby(w http.ResponseWriter, r *http.Request, _ Params)
 }
 
 func (a *App) handleSystemStats(w http.ResponseWriter, r *http.Request, _ Params) {
-	users := a.store().ListUsers()
-	activeUsers := countActive(users)
-	regcodes := a.store().ListRegCodes()
-	activeRegcodes := 0
-	for _, code := range regcodes {
-		if code.Active {
-			activeRegcodes++
-		}
-	}
+	totalUsers, activeUsers := a.store().UserCounts()
+	totalRegcodes, activeRegcodes := a.store().RegCodeCounts()
 	usage := 0
 	if a.cfg().UserLimit > 0 {
-		usage = int(float64(len(users)) / float64(a.cfg().UserLimit) * 100)
+		usage = int(float64(totalUsers) / float64(a.cfg().UserLimit) * 100)
 	}
 	ok(w, "OK", map[string]any{
 		"timestamp":     time.Now().Unix(),
 		"cpu_count":     nil,
-		"users":         map[string]any{"active": activeUsers, "total": len(users), "limit": zeroNil(int64(a.cfg().UserLimit)), "usage_percent": usage},
-		"regcodes":      map[string]any{"active": activeRegcodes, "total": len(regcodes)},
-		"total_users":   len(users),
+		"users":         map[string]any{"active": activeUsers, "total": totalUsers, "limit": zeroNil(int64(a.cfg().UserLimit)), "usage_percent": usage},
+		"regcodes":      map[string]any{"active": activeRegcodes, "total": totalRegcodes},
+		"total_users":   totalUsers,
 		"active_users":  activeUsers,
 		"redis_enabled": a.redis() != nil,
 		"redis_fallback": map[string]any{
@@ -2364,7 +2312,7 @@ func (a *App) handleEmbyStatus(w http.ResponseWriter, r *http.Request, _ Params)
 	payload["is_active"] = u.Active
 	payload["can_unbind"] = a.userCanSelfUnbindEmby(u)
 	payload["message"] = "OK"
-	if boolValue(payload, "online", false) {
+	if a.cfg().EmbyStatsEnabled && boolValue(payload, "online", false) {
 		libCounts := a.embyLibraryCounts(r.Context())
 		if libCounts != nil {
 			payload["movie_count"] = libCounts["movies"]
@@ -2531,14 +2479,4 @@ func zeroNil(v int64) any {
 		return nil
 	}
 	return v
-}
-
-func countActive(users []store.User) int {
-	count := 0
-	for _, u := range users {
-		if u.Active {
-			count++
-		}
-	}
-	return count
 }
