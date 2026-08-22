@@ -1192,8 +1192,8 @@ export default function AdminConfigPage() {
   }, []);
 
   // 加载源文件
-  const loadConfigResource = useCallback(async () => {
-    const res = await api.getConfigToml();
+  const loadConfigResource = useCallback(async (signal?: AbortSignal) => {
+    const res = await api.getConfigToml(signal);
     if (res.success && res.data) {
       setConfigContent(res.data.content);
       setOriginalContent(res.data.content);
@@ -1205,8 +1205,8 @@ export default function AdminConfigPage() {
   }, [t]);
 
   // 加载结构化配置
-  const loadSchemaResource = useCallback(async () => {
-    const res = await api.getConfigSchema();
+  const loadSchemaResource = useCallback(async (signal?: AbortSignal) => {
+    const res = await api.getConfigSchema(signal);
     if (res.success && res.data) {
       setSchema(res.data);
       const initial: Record<string, Record<string, unknown>> = {};
@@ -2393,14 +2393,14 @@ export default function AdminConfigPage() {
         </Tabs>
 
         <Dialog open={showConfigBackupView} onOpenChange={setShowConfigBackupView}>
-          <DialogContent className="max-h-[85vh] max-w-3xl overflow-hidden p-0">
+          <DialogContent className="max-h-[85dvh] max-w-3xl overflow-hidden p-0">
             <DialogHeader className="border-b p-4">
               <DialogTitle>{t("adminConfig.viewBackupTitle")}</DialogTitle>
               <DialogDescription>
                 {configBackupView?.backup.name} · {formatBytes(configBackupView?.backup.size || 0)}
               </DialogDescription>
             </DialogHeader>
-            <pre className="custom-scrollbar max-h-[65vh] overflow-auto p-4 text-xs leading-relaxed whitespace-pre-wrap">
+            <pre className="custom-scrollbar max-h-[65dvh] overflow-auto overscroll-contain p-4 text-xs leading-relaxed whitespace-pre-wrap">
               {configBackupView?.content || ""}
             </pre>
             <DialogFooter className="border-t p-4">

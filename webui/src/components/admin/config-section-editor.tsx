@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Eye, EyeOff, Loader2, Plus, RotateCcw, Save, X } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { useAsyncResource } from "@/hooks/use-async-resource";
 import { api } from "@/lib/api";
 import type { ConfigField, ConfigSchema, ConfigSection } from "@/lib/api-types";
 import { deepClone } from "@/lib/deep-clone";
@@ -256,9 +257,7 @@ export function AdminConfigSections({
   const [schema, setSchema] = useState<ConfigSchema | null>(null);
   const [values, setValues] = useState<Record<string, Record<string, unknown>>>({});
   const [original, setOriginal] = useState<Record<string, Record<string, unknown>>>({});
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const sectionKeysKey = useMemo(() => JSON.stringify(sectionKeys), [sectionKeys]);
   const sectionFieldKeysKey = useMemo(() => JSON.stringify(sectionFieldKeys ?? {}), [sectionFieldKeys]);
   const stableSectionKeys = useMemo(() => JSON.parse(sectionKeysKey) as string[], [sectionKeysKey]);
@@ -267,35 +266,26 @@ export function AdminConfigSections({
     [sectionFieldKeysKey],
   );
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await api.getConfigSchema();
-      if (!res.success || !res.data) throw new Error(res.message || t("adminConfig.sectionEditor.loadFailed"));
-      const nextValues: Record<string, Record<string, unknown>> = {};
-      for (const section of res.data.sections) {
-        if (!stableSectionKeys.includes(section.key)) continue;
-        nextValues[section.key] = {};
-        for (const field of section.fields) {
-          const allowedFields = stableSectionFieldKeys[section.key];
-          if (allowedFields && !allowedFields.includes(field.key)) continue;
-          nextValues[section.key][field.key] = field.type === "list" ? toEditorList(field.value) : field.value;
-        }
+  const load = useCallback(async (signal?: AbortSignal) => {
+    const res = await api.getConfigSchema(signal);
+    if (!res.success || !res.data) throw new Error(res.message || t("adminConfig.sectionEditor.loadFailed"));
+    const nextValues: Record<string, Record<string, unknown>> = {};
+    for (const section of res.data.sections) {
+      if (!stableSectionKeys.includes(section.key)) continue;
+      nextValues[section.key] = {};
+      for (const field of section.fields) {
+        const allowedFields = stableSectionFieldKeys[section.key];
+        if (allowedFields && !allowedFields.includes(field.key)) continue;
+        nextValues[section.key][field.key] = field.type === "list" ? toEditorList(field.value) : field.value;
       }
-      setSchema(res.data);
-      setValues(deepClone(nextValues));
-      setOriginal(deepClone(nextValues));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("adminConfig.sectionEditor.loadFailed"));
-    } finally {
-      setLoading(false);
     }
+    setSchema(res.data);
+    setValues(deepClone(nextValues));
+    setOriginal(deepClone(nextValues));
+    return true;
   }, [stableSectionFieldKeys, stableSectionKeys, t]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const { isLoading: loading, error, execute: reload } = useAsyncResource(load, { immediate: true });
 
   const sections = useMemo<ConfigSection[]>(() => {
     if (!schema) return [];
@@ -337,7 +327,7 @@ export function AdminConfigSections({
       const res = await api.updateConfigBySchema(payload);
       if (!res.success) throw new Error(res.message || t("adminConfig.sectionEditor.saveFailed"));
       toast({ title: t("adminConfig.sectionEditor.saved"), variant: "success" });
-      await load();
+      await reload();
     } catch (err) {
       toast({ title: t("adminConfig.sectionEditor.saveFailed"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
@@ -353,7 +343,10 @@ export function AdminConfigSections({
     return (
       <Alert variant="destructive">
         <AlertTitle>{t("adminConfig.sectionEditor.loadFailed")}</AlertTitle>
-        <AlertDescription>{error}</AlertDescription>
+        <AlertDescription className="space-y-3">
+          <p className="break-words">{error}</p>
+          <Button variant="outline" size="sm" onClick={() => void reload()}>{t("common.retry")}</Button>
+        </AlertDescription>
       </Alert>
     );
   }

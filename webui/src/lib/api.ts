@@ -1325,8 +1325,12 @@ class ApiClient {
     return `${API_BASE}/api/v1/system/admin/runtime/logs/stream?${query}`;
   }
 
-  async getConfigToml() {
-    return this.request<{ content: string; path: string; raw_content?: string; completed?: boolean }>("/system/admin/config/toml");
+  async getConfigToml(signal?: AbortSignal) {
+    return this.request<{ content: string; path: string; raw_content?: string; completed?: boolean }>(
+      "/system/admin/config/toml",
+      { signal, cache: "no-store" },
+      { cacheRead: false, dedupe: false },
+    );
   }
 
   async updateConfigToml(content: string) {
