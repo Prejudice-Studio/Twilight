@@ -1088,6 +1088,8 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/123/disable" \
 
 前端主入口为「Emby 管理」，设备/IP 审查已整合为该页面的独立页签；旧 `/admin/device-audit` 页面保留为兼容入口。
 
+Emby 账号列表与本地活动日志均由管理员手动读取，离开页面或再次读取会取消过期请求，且不会复用短时前端读缓存。为适应 2000+ 账号，Emby 用户和孤儿记录按 300 行分批挂载，表格、页签和活动日志在 Firefox 中使用有高度边界的独立滚动区域。同步、导入、删除未绑定用户、清理孤儿和重置绑定互斥执行，避免管理员重复点击产生并发写操作。设备/IP 审查和从 Emby 同步活动日志仍只允许手动刷新，不会后台轮询；已入库活动日志继续保留。
+
 `GET /admin/emby/device-audit` 返回按 Emby 用户聚合的设备、在线会话 IP、活动日志登录 IP 与本地账号关联。接口会过滤 Twilight 自身连接 Emby 时产生的设备/会话（如 `Twilight`、`Twilight Bind`、`twilight-client`），避免把面板自身计入用户、IP、客户端和设备统计。设备名、客户端名、版本等展示字段会先解码 HTML 实体并清理异常尾随引号/反斜杠，避免 Emby 或第三方客户端返回的 `&quot;`、`"\` 原样出现在界面。离线保留设备会按同一 Emby 用户下的设备名、客户端名、客户端版本聚合，返回 `count` 与最新活动时间，避免同一手机/客户端的多条历史 DeviceId 刷屏；在线设备保留实时独立行。`summary.devices_available`、`summary.sessions_available` 和 `summary.activity_available` 分别表示 `/Devices`、`/Sessions`、`/System/ActivityLog` 来源是否可用；其中任一来源失败时接口会尽量返回其余可用数据，并在对应 `*_error` 字段写入脱敏后的简短错误。
 
 全量清理 Emby 历史设备记录不在设备/IP 审查页提供按钮，也不提供独立的“踢出全部”管理接口；请使用定时任务 `cleanup_emby_devices`。该任务通过 Emby 管理员接口 `DELETE /Devices?Id={DeviceId}` 删除设备记录，兼容 `Id` 与 `ReportedId`，默认 `dry_run=true`，并自动跳过 Twilight 自身设备和本地受保护用户设备。

@@ -2276,6 +2276,8 @@
     "statOrphans": "孤儿记录",
     "userListTitle": "Emby 用户列表",
     "showingCount": "当前展示 {shown} / {total}",
+    "renderedRows": "已渲染 {shown} / {total} 行",
+    "loadMoreRows": "显示更多",
     "searchPlaceholder": "搜索 Emby 名称 / EmbyID / 本地用户名 / UID / Telegram ID",
     "linkFilterPlaceholder": "关联状态",
     "linkAll": "全部关联状态",

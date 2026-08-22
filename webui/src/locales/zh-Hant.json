@@ -1413,6 +1413,8 @@
     "statOrphans": "孤兒記錄",
     "userListTitle": "Emby 使用者列表",
     "showingCount": "目前顯示 {shown} / {total}",
+    "renderedRows": "已渲染 {shown} / {total} 行",
+    "loadMoreRows": "顯示更多",
     "searchPlaceholder": "搜尋 Emby 名稱 / EmbyID / 本地使用者名 / UID / Telegram ID",
     "linkFilterPlaceholder": "關聯狀態",
     "linkAll": "全部關聯狀態",

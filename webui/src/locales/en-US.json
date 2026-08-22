@@ -1413,6 +1413,8 @@
     "statOrphans": "Orphan records",
     "userListTitle": "Emby user list",
     "showingCount": "Showing {shown} / {total}",
+    "renderedRows": "Rendered {shown} / {total} rows",
+    "loadMoreRows": "Show more",
     "searchPlaceholder": "Search Emby name / EmbyID / local username / UID / Telegram ID",
     "linkFilterPlaceholder": "Link status",
     "linkAll": "All link statuses",

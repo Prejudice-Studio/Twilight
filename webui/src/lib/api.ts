@@ -1591,7 +1591,7 @@ class ApiClient {
     }>("/admin/emby/test", { method: "POST" });
   }
 
-  async listEmbyUsers() {
+  async listEmbyUsers(signal?: AbortSignal) {
     return this.request<{
       emby_users: Array<{
         emby_id: string; emby_name: string; has_password: boolean;
@@ -1602,7 +1602,7 @@ class ApiClient {
       }>;
       orphans: Array<{ uid: number; username: string; emby_id: string; telegram_id: number | null }>;
       total_emby: number; total_linked: number; total_orphans: number;
-    }>("/admin/emby/users");
+    }>("/admin/emby/users", { signal, cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
   // Emby 登录用户的设备 / IP 审查（按用户聚合）：
@@ -1611,13 +1611,17 @@ class ApiClient {
     return this.request<EmbyDeviceAuditData>(`/admin/emby/device-audit${refresh ? "?refresh=1" : ""}`, { signal });
   }
 
-  async adminGetEmbyActivityLogs(limit = 100, refresh = false, sinceHours = 24) {
+  async adminGetEmbyActivityLogs(limit = 100, refresh = false, sinceHours = 24, signal?: AbortSignal) {
     const params = new URLSearchParams({ limit: String(limit) });
     if (refresh) {
       params.set("refresh", "1");
       params.set("since_hours", String(sinceHours));
     }
-    return this.request<EmbyActivityLogsResponse>(`/admin/emby/activity-logs?${params.toString()}`);
+    return this.request<EmbyActivityLogsResponse>(
+      `/admin/emby/activity-logs?${params.toString()}`,
+      { signal, cache: "no-store" },
+      { cacheRead: false, dedupe: false },
+    );
   }
 
   async getEmbyNowPlaying(signal?: AbortSignal) {

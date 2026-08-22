@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Activity, Loader2, LogIn, LogOut, Pause, Play, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,6 +38,9 @@ export default function EmbyActivityLogs() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [lastNewEntries, setLastNewEntries] = useState<number | null>(null);
+  const refreshAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => refreshAbortRef.current?.abort(), []);
 
   const formatDate = useCallback((unix: number) => {
     if (!unix) return "";
@@ -49,8 +52,8 @@ export default function EmbyActivityLogs() {
     if (typeof data.new_entries === "number") setLastNewEntries(data.new_entries);
   }, []);
 
-  const load = useCallback(async () => {
-    const res = await api.adminGetEmbyActivityLogs(100, false);
+  const load = useCallback(async (signal?: AbortSignal) => {
+    const res = await api.adminGetEmbyActivityLogs(100, false, 24, signal);
     if (res.success && res.data) {
       applyMeta(res.data);
       return res.data.entries || [];
@@ -61,9 +64,13 @@ export default function EmbyActivityLogs() {
   const { data: logs, isLoading, error, execute: reload, setData } = useAsyncResource(load, { immediate: true });
 
   const handleRefresh = async () => {
+    refreshAbortRef.current?.abort();
+    const controller = new AbortController();
+    refreshAbortRef.current = controller;
     setRefreshing(true);
     try {
-      const res = await api.adminGetEmbyActivityLogs(100, true, 24);
+      const res = await api.adminGetEmbyActivityLogs(100, true, 24, controller.signal);
+      if (controller.signal.aborted) return;
       if (!res.success || !res.data) {
         throw new Error(res.message || t("embyActivityLogs.refreshFailed"));
       }
@@ -75,13 +82,17 @@ export default function EmbyActivityLogs() {
         variant: "success",
       });
     } catch (err) {
+      if (controller.signal.aborted) return;
       toast({
         title: t("embyActivityLogs.refreshFailed"),
         description: err instanceof Error ? err.message : undefined,
         variant: "destructive",
       });
     } finally {
-      setRefreshing(false);
+      if (refreshAbortRef.current === controller) {
+        refreshAbortRef.current = null;
+        setRefreshing(false);
+      }
     }
   };
 
@@ -118,7 +129,7 @@ export default function EmbyActivityLogs() {
       ) : !logs || logs.length === 0 ? (
         <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">{t("embyActivityLogs.empty")}</CardContent></Card>
       ) : (
-        <div className="space-y-1.5">
+        <div className="custom-scrollbar max-h-[min(68dvh,840px)] space-y-1.5 overflow-y-auto overscroll-contain pr-1">
           {logs.map((log: EmbyActivityLogEntry, idx: number) => {
             const labelKey = activityLabelKey(log.type);
             return (
@@ -132,7 +143,7 @@ export default function EmbyActivityLogs() {
                   <p className="truncate text-xs text-muted-foreground">{log.name}</p>
                   {log.overview && <p className="line-clamp-1 text-[11px] text-muted-foreground/70">{log.overview}</p>}
                 </div>
-                <div className="shrink-0 whitespace-nowrap text-[10px] text-muted-foreground/50">
+                <div className="max-w-[8rem] shrink-0 text-right text-[10px] text-muted-foreground/50 sm:max-w-none sm:whitespace-nowrap">
                   {formatDate(log.date)}
                 </div>
               </div>

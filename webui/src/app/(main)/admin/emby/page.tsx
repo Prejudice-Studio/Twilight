@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
 import {
   Server,
   Loader2,
@@ -35,6 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { useAsyncResource } from "@/hooks/use-async-resource";
 import { useI18n } from "@/lib/i18n";
 import { api } from "@/lib/api";
 import {
@@ -46,15 +46,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-const container = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.1 } },
-};
-
-const item = {
-  hidden: { opacity: 0, y: 20 },
-  show: { opacity: 1, y: 0 },
-};
+const EMBY_TABLE_BATCH_SIZE = 300;
 
 interface TestResult {
   name: string;
@@ -121,14 +113,25 @@ export default function AdminEmbyPage() {
   const [testResult, setTestResult] = useState<ConnectivityResult | null>(null);
   const [isTesting, setIsTesting] = useState(false);
 
-  // Emby users state
-  const [embyData, setEmbyData] = useState<EmbyUsersData | null>(null);
-  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
-
   // Emby 用户表筛选：name 关键字 + 关联状态 + 属性
   const [userSearch, setUserSearch] = useState("");
   const [linkFilter, setLinkFilter] = useState<"all" | "linked" | "unlinked" | "name_mismatch">("all");
   const [attrFilter, setAttrFilter] = useState<"all" | "admin" | "disabled" | "hidden">("all");
+  const [userRowLimit, setUserRowLimit] = useState(EMBY_TABLE_BATCH_SIZE);
+  const [orphanRowLimit, setOrphanRowLimit] = useState(EMBY_TABLE_BATCH_SIZE);
+
+  const loadEmbyUsers = useCallback(async (signal?: AbortSignal): Promise<EmbyUsersData> => {
+    const res = await api.listEmbyUsers(signal);
+    if (res.success && res.data) return res.data;
+    throw new Error(res.message || t("adminEmby.loadFailed"));
+  }, [t]);
+
+  const {
+    data: embyData,
+    isLoading: isLoadingUsers,
+    error: userLoadError,
+    execute: reloadEmbyUsers,
+  } = useAsyncResource(loadEmbyUsers, { immediate: false });
 
   const filteredEmbyUsers = useMemo<EmbyUserItem[]>(() => {
     if (!embyData) return [];
@@ -160,12 +163,26 @@ export default function AdminEmbyPage() {
     });
   }, [embyData, userSearch, linkFilter, attrFilter]);
 
+  const visibleEmbyUsers = useMemo(
+    () => filteredEmbyUsers.slice(0, userRowLimit),
+    [filteredEmbyUsers, userRowLimit],
+  );
+  const visibleOrphans = useMemo(
+    () => (embyData?.orphans || []).slice(0, orphanRowLimit),
+    [embyData, orphanRowLimit],
+  );
+
+  useEffect(() => {
+    setUserRowLimit(EMBY_TABLE_BATCH_SIZE);
+  }, [embyData, userSearch, linkFilter, attrFilter]);
+
+  useEffect(() => {
+    setOrphanRowLimit(EMBY_TABLE_BATCH_SIZE);
+  }, [embyData]);
+
   // Action loading states
-  const [isImporting, setIsImporting] = useState(false);
-  const [isCleaning, setIsCleaning] = useState(false);
-  const [isResetting, setIsResetting] = useState(false);
-  const [isDeletingUnlinked, setIsDeletingUnlinked] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [busyAction, setBusyAction] = useState<"sync" | "import" | "delete-unlinked" | "cleanup" | "reset" | null>(null);
+  const mutationBusy = busyAction !== null;
 
   // Confirm dialog
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
@@ -196,24 +213,17 @@ export default function AdminEmbyPage() {
 
   // Load Emby users
   const handleLoadUsers = useCallback(async () => {
-    setIsLoadingUsers(true);
     try {
-      const res = await api.listEmbyUsers();
-      if (res.success && res.data) {
-        setEmbyData(res.data);
-      } else {
-        toast({ title: t("adminEmby.loadFailed"), description: res.message, variant: "destructive" });
-      }
+      await reloadEmbyUsers();
     } catch (err: any) {
       toast({ title: t("adminEmby.loadError"), description: err.message, variant: "destructive" });
-    } finally {
-      setIsLoadingUsers(false);
     }
-  }, [toast, t]);
+  }, [reloadEmbyUsers, toast, t]);
 
   // Sync all
   const handleSync = useCallback(async () => {
-    setIsSyncing(true);
+    if (mutationBusy) return;
+    setBusyAction("sync");
     try {
       const res = await api.syncAllEmbyUsers();
       if (res.success && res.data) {
@@ -229,13 +239,14 @@ export default function AdminEmbyPage() {
     } catch (err: any) {
       toast({ title: t("adminEmby.syncError"), description: err.message, variant: "destructive" });
     } finally {
-      setIsSyncing(false);
+      setBusyAction(null);
     }
-  }, [toast, handleLoadUsers, t]);
+  }, [mutationBusy, toast, handleLoadUsers, t]);
 
   // Import unlinked users
   const handleImport = useCallback(async () => {
-    setIsImporting(true);
+    if (mutationBusy) return;
+    setBusyAction("import");
     try {
       const res = await api.importEmbyUsers();
       if (res.success && res.data) {
@@ -251,12 +262,13 @@ export default function AdminEmbyPage() {
     } catch (err: any) {
       toast({ title: t("adminEmby.scanError"), description: err.message, variant: "destructive" });
     } finally {
-      setIsImporting(false);
+      setBusyAction(null);
     }
-  }, [toast, handleLoadUsers, t]);
+  }, [mutationBusy, toast, handleLoadUsers, t]);
 
   const handleDeleteUnlinked = useCallback(async () => {
-    setIsDeletingUnlinked(true);
+    if (mutationBusy) return;
+    setBusyAction("delete-unlinked");
     try {
       const res = await api.deleteUnlinkedEmbyUsers(false);
       if (res.success && res.data) {
@@ -272,13 +284,14 @@ export default function AdminEmbyPage() {
     } catch (err: any) {
       toast({ title: t("adminEmby.deleteError"), description: err.message, variant: "destructive" });
     } finally {
-      setIsDeletingUnlinked(false);
+      setBusyAction(null);
     }
-  }, [toast, handleLoadUsers, t]);
+  }, [mutationBusy, toast, handleLoadUsers, t]);
 
   // Cleanup orphans
   const handleCleanup = useCallback(async () => {
-    setIsCleaning(true);
+    if (mutationBusy) return;
+    setBusyAction("cleanup");
     try {
       const res = await api.cleanupOrphanEmbyIds();
       if (res.success && res.data) {
@@ -294,13 +307,14 @@ export default function AdminEmbyPage() {
     } catch (err: any) {
       toast({ title: t("adminEmby.cleanupError"), description: err.message, variant: "destructive" });
     } finally {
-      setIsCleaning(false);
+      setBusyAction(null);
     }
-  }, [toast, handleLoadUsers, t]);
+  }, [mutationBusy, toast, handleLoadUsers, t]);
 
   // Reset all bindings
   const handleResetBindings = useCallback(async () => {
-    setIsResetting(true);
+    if (mutationBusy) return;
+    setBusyAction("reset");
     try {
       const res = await api.resetAllEmbyBindings();
       if (res.success && res.data) {
@@ -317,9 +331,9 @@ export default function AdminEmbyPage() {
     } catch (err: any) {
       toast({ title: t("adminEmby.resetError"), description: err.message, variant: "destructive" });
     } finally {
-      setIsResetting(false);
+      setBusyAction(null);
     }
-  }, [toast, handleLoadUsers, t]);
+  }, [mutationBusy, toast, handleLoadUsers, t]);
 
   const syncStatusBadge = (status: string) => {
     // 用户名一致与否不展示——本地与 Emby 用户名是允许不一致的，
@@ -338,12 +352,7 @@ export default function AdminEmbyPage() {
   };
 
   return (
-    <motion.div
-      variants={container}
-      initial="hidden"
-      animate="show"
-      className="space-y-6"
-    >
+    <div className="space-y-6">
       {/* Page Header */}
       <div>
         <h1 className="text-3xl font-bold">{t("adminEmby.title")}</h1>
@@ -360,7 +369,8 @@ export default function AdminEmbyPage() {
         }}
         className="space-y-5"
       >
-        <TabsList className="i18n-stable-tabs grid h-auto w-full grid-cols-3 sm:w-fit">
+        <div className="custom-scrollbar overflow-x-auto overscroll-x-contain pb-1">
+        <TabsList className="i18n-stable-tabs grid h-auto min-w-[34rem] grid-cols-3 sm:w-fit sm:min-w-0">
           <TabsTrigger value="accounts" className="gap-2">
             <Server className="h-4 w-4" />
             {t("adminEmby.accountsTab")}
@@ -374,10 +384,11 @@ export default function AdminEmbyPage() {
             {t("embyActivityLogs.title")}
           </TabsTrigger>
         </TabsList>
+        </div>
 
         <TabsContent value="accounts" className="mt-0 space-y-6">
       {/* Connectivity Test */}
-      <motion.div variants={item}>
+      <div>
         <Card>
           <CardHeader>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -390,7 +401,7 @@ export default function AdminEmbyPage() {
                   {t("adminEmby.connDesc")}
                 </CardDescription>
               </div>
-              <Button className="w-full sm:w-auto" onClick={handleTestConnectivity} disabled={isTesting}>
+              <Button className="w-full sm:w-auto" onClick={handleTestConnectivity} disabled={isTesting || mutationBusy}>
                 {isTesting ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
@@ -473,10 +484,10 @@ export default function AdminEmbyPage() {
             </CardContent>
           )}
         </Card>
-      </motion.div>
+      </div>
 
       {/* User Management */}
-      <motion.div variants={item}>
+      <div>
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between flex-wrap gap-4">
@@ -489,8 +500,8 @@ export default function AdminEmbyPage() {
                   {t("adminEmby.userMgmtDesc")}
                 </CardDescription>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" onClick={handleLoadUsers} disabled={isLoadingUsers}>
+              <div className="i18n-toolbar grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto sm:flex-wrap">
+                <Button className="w-full sm:w-auto" variant="outline" onClick={handleLoadUsers} disabled={isLoadingUsers || mutationBusy}>
                   {isLoadingUsers ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
@@ -498,24 +509,24 @@ export default function AdminEmbyPage() {
                   )}
                   {t("adminEmby.fetchData")}
                 </Button>
-                <Button variant="outline" onClick={handleSync} disabled={isSyncing || !embyData}>
-                  {isSyncing ? (
+                <Button className="w-full sm:w-auto" variant="outline" onClick={handleSync} disabled={mutationBusy || !embyData}>
+                  {busyAction === "sync" ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
                     <Link2 className="mr-2 h-4 w-4" />
                   )}
                   {t("adminEmby.syncUsers")}
                 </Button>
-                <Button variant="outline" onClick={handleImport} disabled={isImporting || !embyData}>
-                  {isImporting ? (
+                <Button className="w-full sm:w-auto" variant="outline" onClick={handleImport} disabled={mutationBusy || !embyData}>
+                  {busyAction === "import" ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
                     <Download className="mr-2 h-4 w-4" />
                   )}
                   {t("adminEmby.scanUnlinked")}
                 </Button>
-                <Button variant="destructive" onClick={handleDeleteUnlinked} disabled={isDeletingUnlinked || !embyData}>
-                  {isDeletingUnlinked ? (
+                <Button className="w-full sm:w-auto" variant="destructive" onClick={handleDeleteUnlinked} disabled={mutationBusy || !embyData}>
+                  {busyAction === "delete-unlinked" ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
                     <Trash2 className="mr-2 h-4 w-4" />
@@ -525,7 +536,13 @@ export default function AdminEmbyPage() {
               </div>
             </div>
           </CardHeader>
-          {embyData ? (
+          {userLoadError && !embyData ? (
+            <CardContent>
+              <div className="rounded-lg border border-destructive/40 p-6 text-center text-sm text-destructive">
+                {userLoadError}
+              </div>
+            </CardContent>
+          ) : embyData ? (
             <CardContent className="space-y-4">
               {/* Summary */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -590,10 +607,10 @@ export default function AdminEmbyPage() {
                   </Select>
                 </div>
 
-                <div className="rounded-lg border overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-muted/50">
+                <div className="overflow-hidden rounded-lg border">
+                  <div className="custom-scrollbar max-h-[min(62dvh,800px)] overflow-auto overscroll-contain">
+                    <table className="w-full min-w-[720px] text-sm">
+                      <thead className="sticky top-0 z-10 bg-muted">
                         <tr>
                           <th className="text-left p-3 font-medium">{t("adminEmby.thEmbyUsername")}</th>
                           <th className="text-left p-3 font-medium">{t("adminEmby.thAttr")}</th>
@@ -602,7 +619,7 @@ export default function AdminEmbyPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y">
-                        {filteredEmbyUsers.map((eu) => (
+                        {visibleEmbyUsers.map((eu) => (
                           <tr key={eu.emby_id} className="hover:bg-muted/30">
                             <td className="p-3">
                               <div className="font-medium">{eu.emby_name}</div>
@@ -650,6 +667,16 @@ export default function AdminEmbyPage() {
                       </tbody>
                     </table>
                   </div>
+                  {filteredEmbyUsers.length > 0 && (
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-t px-3 py-2 text-xs text-muted-foreground">
+                      <span>{t("adminEmby.renderedRows", { shown: visibleEmbyUsers.length, total: filteredEmbyUsers.length })}</span>
+                      {visibleEmbyUsers.length < filteredEmbyUsers.length && (
+                        <Button variant="outline" size="sm" onClick={() => setUserRowLimit((current) => current + EMBY_TABLE_BATCH_SIZE)}>
+                          {t("adminEmby.loadMoreRows")}
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -663,10 +690,10 @@ export default function AdminEmbyPage() {
                       {t("adminEmby.orphansHint")}
                     </span>
                   </h3>
-                  <div className="rounded-lg border overflow-hidden">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead className="bg-muted/50">
+                  <div className="overflow-hidden rounded-lg border">
+                    <div className="custom-scrollbar max-h-[min(45dvh,560px)] overflow-auto overscroll-contain">
+                      <table className="w-full min-w-[620px] text-sm">
+                        <thead className="sticky top-0 z-10 bg-muted">
                           <tr>
                             <th className="text-left p-3 font-medium">{t("adminEmby.thLocalUsername")}</th>
                             <th className="text-left p-3 font-medium">UID</th>
@@ -674,7 +701,7 @@ export default function AdminEmbyPage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y">
-                          {embyData.orphans.map((o) => (
+                          {visibleOrphans.map((o) => (
                             <tr key={o.uid} className="hover:bg-muted/30">
                               <td className="p-3 font-medium">{o.username}</td>
                               <td className="p-3">{o.uid}</td>
@@ -685,6 +712,14 @@ export default function AdminEmbyPage() {
                           ))}
                         </tbody>
                       </table>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-t px-3 py-2 text-xs text-muted-foreground">
+                      <span>{t("adminEmby.renderedRows", { shown: visibleOrphans.length, total: embyData.orphans.length })}</span>
+                      {visibleOrphans.length < embyData.orphans.length && (
+                        <Button variant="outline" size="sm" onClick={() => setOrphanRowLimit((current) => current + EMBY_TABLE_BATCH_SIZE)}>
+                          {t("adminEmby.loadMoreRows")}
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -698,10 +733,10 @@ export default function AdminEmbyPage() {
             </CardContent>
           )}
         </Card>
-      </motion.div>
+      </div>
 
       {/* Cleanup Actions */}
-      <motion.div variants={item}>
+      <div>
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -728,9 +763,9 @@ export default function AdminEmbyPage() {
                 className="w-full sm:w-auto"
                 variant="outline"
                 onClick={handleCleanup}
-                disabled={isCleaning}
+                disabled={mutationBusy}
               >
-                {isCleaning ? (
+                {busyAction === "cleanup" ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
                   <Trash2 className="mr-2 h-4 w-4" />
@@ -754,9 +789,9 @@ export default function AdminEmbyPage() {
                 className="w-full sm:w-auto"
                 variant="destructive"
                 onClick={() => setResetDialogOpen(true)}
-                disabled={isResetting}
+                disabled={mutationBusy}
               >
-                {isResetting ? (
+                {busyAction === "reset" ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
                   <Trash2 className="mr-2 h-4 w-4" />
@@ -766,7 +801,7 @@ export default function AdminEmbyPage() {
             </div>
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
         </TabsContent>
 
         <TabsContent value="devices" className="mt-0">
@@ -796,15 +831,15 @@ export default function AdminEmbyPage() {
             <Button
               variant="destructive"
               onClick={handleResetBindings}
-              disabled={isResetting}
+              disabled={mutationBusy}
             >
-              {isResetting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {busyAction === "reset" && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {t("adminEmby.resetConfirm")}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-    </motion.div>
+    </div>
   );
 }
