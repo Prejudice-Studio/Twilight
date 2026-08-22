@@ -1293,8 +1293,8 @@ class ApiClient {
     });
   }
 
-  async getTelegramCommandCatalog() {
-    return this.request<TelegramCommandCatalog>("/admin/telegram/commands/catalog");
+  async getTelegramCommandCatalog(signal?: AbortSignal) {
+    return this.request<TelegramCommandCatalog>("/admin/telegram/commands/catalog", { signal, cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
   async getSystemStats() {
@@ -1368,10 +1368,22 @@ class ApiClient {
     });
   }
 
-  async getConfigSchema() {
+  async getConfigSchema(signal?: AbortSignal) {
     const now = Date.now();
     if (this.configSchemaCache.value && now < this.configSchemaCache.until) {
       return this.cloneResponse(this.configSchemaCache.value);
+    }
+    if (signal) {
+      const res = await this.request<ConfigSchema>(
+        "/system/admin/config/schema",
+        { signal, cache: "no-store" },
+        { cacheRead: false, dedupe: false },
+      );
+      if (res.success) {
+        this.configSchemaCache.value = this.cloneResponse(res);
+        this.configSchemaCache.until = Date.now() + 30_000;
+      }
+      return this.cloneResponse(res);
     }
     if (this.configSchemaCache.promise) {
       return this.cloneResponse(await this.configSchemaCache.promise);
@@ -1943,8 +1955,12 @@ class ApiClient {
     return this.request<DeveloperJSDocs>("/admin/developer/js-docs");
   }
 
-  async listDeveloperJSPresets() {
-    return this.request<{ presets: DeveloperJSPreset[]; total: number; developer_mode_enabled?: boolean }>("/admin/developer/js-presets");
+  async listDeveloperJSPresets(signal?: AbortSignal) {
+    return this.request<{ presets: DeveloperJSPreset[]; total: number; developer_mode_enabled?: boolean }>(
+      "/admin/developer/js-presets",
+      { signal, cache: "no-store" },
+      { cacheRead: false, dedupe: false },
+    );
   }
 
   async createDeveloperJSPreset(payload: { name: string; description?: string; code?: string }) {

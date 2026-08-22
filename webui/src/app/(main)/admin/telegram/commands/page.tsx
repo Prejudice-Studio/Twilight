@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { AlertTriangle, BookOpen, Code2, Loader2, Plus, RotateCcw, Save, Search, Shield, Trash2 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { useAsyncResource } from "@/hooks/use-async-resource";
 import { api } from "@/lib/api";
 import type { DeveloperJSPreset, TelegramCommandCatalogItem } from "@/lib/api-types";
 import { deepClone } from "@/lib/deep-clone";
@@ -109,52 +110,66 @@ export default function AdminTelegramCommandsPage() {
   const [disabledCommands, setDisabledCommands] = useState<string[]>([]);
   const [originalDisabled, setOriginalDisabled] = useState<string[]>([]);
   const [builtinQuery, setBuiltinQuery] = useState("");
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const replyTextareasRef = useRef(new Map<string, HTMLTextAreaElement>());
+  const activeReplyRowRef = useRef<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [schemaRes, presetRes, commandCatalogRes] = await Promise.all([
-        api.getConfigSchema(),
-        api.listDeveloperJSPresets(),
-        api.getTelegramCommandCatalog(),
-      ]);
-      if (!schemaRes.success || !schemaRes.data) throw new Error(schemaRes.message || t("adminTelegramCommands.loadFailed"));
-      const nextPresets = presetRes.success && presetRes.data ? presetRes.data.presets : [];
-      if (!commandCatalogRes.success || !commandCatalogRes.data) throw new Error(commandCatalogRes.message || t("adminTelegramCommands.loadFailed"));
-      const telegram = schemaRes.data.sections.find((section) => section.key === "Telegram");
-      const field = telegram?.fields.find((item) => item.key === "bot_custom_commands");
-      const nextRows = commandRows(field?.value ?? [], nextPresets);
-      const disabledField = telegram?.fields.find((item) => item.key === "disabled_commands");
-      const schemaDisabled = Array.isArray(disabledField?.value) ? (disabledField!.value as string[]).map((s: string) => commandName(s)).filter(Boolean) : [];
-      const disableableNames = new Set(commandCatalogRes.data.commands.filter((item) => item.disableable).map((item) => commandName(item.command)));
-      const catalogDisabled = commandCatalogRes.data.commands
-        .filter((item) => item.disableable && item.disabled)
-        .map((item) => commandName(item.command))
-        .filter(Boolean);
-      const nextDisabled = (catalogDisabled.length > 0 ? catalogDisabled : schemaDisabled).filter((name) => disableableNames.has(name));
-      setPresets(nextPresets);
-      setCatalog(commandCatalogRes.data.commands);
-      setRows(nextRows);
-      setOriginal(deepClone(nextRows));
-      setDisabledCommands(nextDisabled);
-      setOriginalDisabled([...nextDisabled]);
-    } catch (err) {
-      toast({ title: t("adminTelegramCommands.loadFailed"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
-  }, [t, toast]);
+  const load = useCallback(async (signal?: AbortSignal) => {
+    const [schemaRes, presetRes, commandCatalogRes] = await Promise.all([
+      api.getConfigSchema(signal),
+      api.listDeveloperJSPresets(signal),
+      api.getTelegramCommandCatalog(signal),
+    ]);
+    if (!schemaRes.success || !schemaRes.data) throw new Error(schemaRes.message || t("adminTelegramCommands.loadFailed"));
+    const nextPresets = presetRes.success && presetRes.data ? presetRes.data.presets : [];
+    if (!commandCatalogRes.success || !commandCatalogRes.data) throw new Error(commandCatalogRes.message || t("adminTelegramCommands.loadFailed"));
+    const telegram = schemaRes.data.sections.find((section) => section.key === "Telegram");
+    const field = telegram?.fields.find((item) => item.key === "bot_custom_commands");
+    const nextRows = commandRows(field?.value ?? [], nextPresets);
+    const disabledField = telegram?.fields.find((item) => item.key === "disabled_commands");
+    const schemaDisabled = Array.isArray(disabledField?.value) ? (disabledField!.value as string[]).map((s: string) => commandName(s)).filter(Boolean) : [];
+    const disableableNames = new Set(commandCatalogRes.data.commands.filter((item) => item.disableable).map((item) => commandName(item.command)));
+    const catalogDisabled = commandCatalogRes.data.commands
+      .filter((item) => item.disableable && item.disabled)
+      .map((item) => commandName(item.command))
+      .filter(Boolean);
+    const nextDisabled = (catalogDisabled.length > 0 ? catalogDisabled : schemaDisabled).filter((name) => disableableNames.has(name));
+    setPresets(nextPresets);
+    setCatalog(commandCatalogRes.data.commands);
+    setRows(nextRows);
+    setOriginal(deepClone(nextRows));
+    setDisabledCommands(nextDisabled);
+    setOriginalDisabled([...nextDisabled]);
+    return true;
+  }, [t]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const { isLoading: loading, error: loadError, execute: reload } = useAsyncResource(load, { immediate: true });
 
   const changed = useMemo(() => JSON.stringify(rows) !== JSON.stringify(original) || JSON.stringify(disabledCommands) !== JSON.stringify(originalDisabled), [rows, original, disabledCommands, originalDisabled]);
 
   const updateRow = (id: string, patch: Partial<CommandRow>) => {
     setRows((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  };
+
+  const insertPlaceholder = (placeholder: string) => {
+    const rowId = activeReplyRowRef.current;
+    const textarea = rowId ? replyTextareasRef.current.get(rowId) : null;
+    if (!rowId || !textarea) {
+      toast({ title: t("adminTelegramCommands.focusReplyFirst"), variant: "destructive" });
+      return;
+    }
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    setRows((current) => current.map((row) => row.id === rowId
+      ? { ...row, text: row.text.slice(0, start) + placeholder + row.text.slice(end) }
+      : row));
+    window.requestAnimationFrame(() => {
+      const current = replyTextareasRef.current.get(rowId);
+      if (!current) return;
+      const cursor = start + placeholder.length;
+      current.focus();
+      current.setSelectionRange(cursor, cursor);
+    });
   };
 
   const addRow = () => {
@@ -228,7 +243,7 @@ export default function AdminTelegramCommandsPage() {
       const res = await api.updateConfigBySchema({ Telegram: { bot_custom_commands: payload, disabled_commands: normalizedDisabled } });
       if (!res.success) throw new Error(res.message || t("adminTelegramCommands.saveFailed"));
       toast({ title: t("adminTelegramCommands.saved"), variant: "success" });
-      await load();
+      await reload();
     } catch (err) {
       toast({ title: t("adminTelegramCommands.saveFailed"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
@@ -238,6 +253,18 @@ export default function AdminTelegramCommandsPage() {
 
   if (loading) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>;
+  }
+
+  if (loadError) {
+    return (
+      <Card className="border-destructive/40">
+        <CardContent className="flex min-h-48 flex-col items-center justify-center gap-3 p-6 text-center">
+          <AlertTriangle className="h-8 w-8 text-destructive" />
+          <p className="break-words text-sm text-muted-foreground">{loadError}</p>
+          <Button variant="outline" onClick={() => void reload()}>{t("common.retry")}</Button>
+        </CardContent>
+      </Card>
+    );
   }
 
   return (
@@ -300,6 +327,7 @@ export default function AdminTelegramCommandsPage() {
           </div>
         </CardHeader>
         <CardContent>
+          <div className="custom-scrollbar max-h-[min(60dvh,720px)] overflow-y-auto overscroll-contain pr-1">
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {filteredCatalog.map((cmd) => {
               const name = commandName(cmd.command);
@@ -336,6 +364,7 @@ export default function AdminTelegramCommandsPage() {
               <p className="col-span-full rounded-md border border-dashed p-4 text-sm text-muted-foreground">{t("adminTelegramCommands.noBuiltinMatches")}</p>
             ) : null}
           </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -346,6 +375,7 @@ export default function AdminTelegramCommandsPage() {
             <CardDescription>{t("adminTelegramCommands.listDescription")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            <div className="custom-scrollbar max-h-[min(68dvh,860px)] space-y-3 overflow-y-auto overscroll-contain pr-1">
             {rows.map((row, index) => (
               <div key={row.id} className="grid gap-3 rounded-lg border p-3 lg:grid-cols-[160px_140px_minmax(0,1fr)_auto]">
                 <div className="space-y-2">
@@ -368,7 +398,17 @@ export default function AdminTelegramCommandsPage() {
                 <div className="space-y-2">
                   <Label>{row.type === "text" ? t("adminTelegramCommands.replyText") : t("adminTelegramCommands.jsPreset")}</Label>
                   {row.type === "text" ? (
-                    <Textarea value={row.text} onChange={(event) => updateRow(row.id, { text: event.target.value })} className="min-h-24" placeholder={t("adminTelegramCommands.textPlaceholder")} />
+                    <Textarea
+                      ref={(node) => {
+                        if (node) replyTextareasRef.current.set(row.id, node);
+                        else replyTextareasRef.current.delete(row.id);
+                      }}
+                      value={row.text}
+                      onFocus={() => { activeReplyRowRef.current = row.id; }}
+                      onChange={(event) => updateRow(row.id, { text: event.target.value })}
+                      className="min-h-24"
+                      placeholder={t("adminTelegramCommands.textPlaceholder")}
+                    />
                   ) : (
                     <div className="space-y-2">
                       <Select value={row.presetId || nonePreset} onValueChange={(value) => updateRow(row.id, { presetId: value === nonePreset ? "" : value, inlineCode: undefined })}>
@@ -396,6 +436,7 @@ export default function AdminTelegramCommandsPage() {
                 </div>
               </div>
             ))}
+            </div>
             <Button type="button" variant="outline" className="w-full" onClick={addRow}>
               <Plus className="mr-2 h-4 w-4" />
               {t("adminTelegramCommands.add")}
@@ -435,18 +476,7 @@ export default function AdminTelegramCommandsPage() {
                       key={item}
                       type="button"
                       className="inline-flex items-center rounded-md border bg-muted/30 px-2 py-0.5 font-mono text-[11px] hover:bg-muted cursor-pointer"
-                      onClick={() => {
-                        const active = document.activeElement;
-                        if (active instanceof HTMLTextAreaElement) {
-                          const start = active.selectionStart;
-                          const end = active.selectionEnd;
-                          const val = active.value;
-                          active.value = val.slice(0, start) + item + val.slice(end);
-                          active.selectionStart = active.selectionEnd = start + item.length;
-                          active.dispatchEvent(new Event("input", { bubbles: true }));
-                          active.focus();
-                        }
-                      }}
+                      onClick={() => insertPlaceholder(item)}
                       title={t("adminTelegramCommands.clickToInsert")}
                     >
                       {item}
@@ -460,18 +490,7 @@ export default function AdminTelegramCommandsPage() {
                       key={item}
                       type="button"
                       className="inline-flex items-center rounded-md border bg-muted/30 px-2 py-0.5 font-mono text-[11px] hover:bg-muted cursor-pointer"
-                      onClick={() => {
-                        const active = document.activeElement;
-                        if (active instanceof HTMLTextAreaElement) {
-                          const start = active.selectionStart;
-                          const end = active.selectionEnd;
-                          const val = active.value;
-                          active.value = val.slice(0, start) + item + val.slice(end);
-                          active.selectionStart = active.selectionEnd = start + item.length;
-                          active.dispatchEvent(new Event("input", { bubbles: true }));
-                          active.focus();
-                        }
-                      }}
+                      onClick={() => insertPlaceholder(item)}
                       title={t("adminTelegramCommands.clickToInsert")}
                     >
                       {item}
@@ -485,18 +504,7 @@ export default function AdminTelegramCommandsPage() {
                       key={item}
                       type="button"
                       className="inline-flex items-center rounded-md border bg-muted/30 px-2 py-0.5 font-mono text-[11px] hover:bg-muted cursor-pointer"
-                      onClick={() => {
-                        const active = document.activeElement;
-                        if (active instanceof HTMLTextAreaElement) {
-                          const start = active.selectionStart;
-                          const end = active.selectionEnd;
-                          const val = active.value;
-                          active.value = val.slice(0, start) + item + val.slice(end);
-                          active.selectionStart = active.selectionEnd = start + item.length;
-                          active.dispatchEvent(new Event("input", { bubbles: true }));
-                          active.focus();
-                        }
-                      }}
+                      onClick={() => insertPlaceholder(item)}
                       title={t("adminTelegramCommands.clickToInsert")}
                     >
                       {item}

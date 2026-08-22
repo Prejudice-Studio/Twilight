@@ -1812,6 +1812,7 @@
     "placeholderCategoryTG": "Telegram 上下文",
     "placeholderCategoryUser": "使用者資訊（僅 JS 指令有效）",
     "clickToInsert": "點擊插入此佔位符",
+    "focusReplyFirst": "請先點擊要插入佔位符的回覆文字框",
     "loadFailed": "載入 Bot 指令失敗",
     "saveFailed": "儲存 Bot 指令失敗",
     "saved": "Bot 指令已儲存"

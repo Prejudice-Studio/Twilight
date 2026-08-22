@@ -187,6 +187,8 @@ Telegram 绑定码只是短期运行时票据，真正的账号绑定以用户�
 
 Web 后台的入口是「Telegram 管理 → Bot 指令管理」（`/admin/telegram/commands`）。该页面从后端 `GET /admin/telegram/commands/catalog` 读取内置指令目录和开关状态，再编辑 `Telegram.bot_custom_commands` 与 `Telegram.disabled_commands`，不会创建第二套 Bot 指令配置：
 
+页面首屏并发读取配置 schema、JS 预设和后端权威指令目录，离开页面或重新加载时会取消整组旧请求。内置/自定义指令列表使用受限 Firefox 滚动区域，避免大量指令撑大移动端页面。占位符按钮会写入最后聚焦的纯文本回复框对应 React 状态；未聚焦回复框时会提示，不再直接修改 DOM 导致保存时丢失。
+
 - 纯文本类型保存为普通回复，运行时只经过 `telegramRenderText` 的基础占位符替换，例如 `{server_name}`、`{bot_username}`、`{user_name}`。
 - 自定义 JS 类型从「开发者模式」保存的 JS 预设中选择，推荐保存为 `js:preset:<id>` 动态引用格式。
 - 开发者模式支持新建空白 JS 预设、命名、保存、更新和删除；非空脚本保存前必须通过与沙箱预览一致的安全校验。预检页可模拟真实 `/command`、参数和私聊/群聊上下文，并显示本地静态诊断、后端运行指标、风险 token、耗时、输出和日志。

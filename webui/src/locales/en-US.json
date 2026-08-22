@@ -1812,6 +1812,7 @@
     "placeholderCategoryTG": "Telegram Context",
     "placeholderCategoryUser": "User Info (JS commands only)",
     "clickToInsert": "Click to insert this placeholder",
+    "focusReplyFirst": "Focus a reply text field before inserting a placeholder",
     "loadFailed": "Failed to load bot commands",
     "saveFailed": "Failed to save bot commands",
     "saved": "Bot commands saved"
