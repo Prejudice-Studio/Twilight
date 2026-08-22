@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Mail,
   RefreshCw,
@@ -28,6 +28,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { AdminConfigSections } from "@/components/admin/config-section-editor";
+import { useAsyncResource } from "@/hooks/use-async-resource";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import { api } from "@/lib/api";
 import type { EmailAdminData } from "@/lib/api-types";
@@ -51,40 +52,61 @@ export default function AdminEmailPage() {
   const { toast } = useToast();
   const { confirm } = useConfirm();
 
-  const [data, setData] = useState<EmailAdminData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
   const [tab, setTab] = useState<"pending" | "accounts" | "config">("pending");
+  const [listView, setListView] = useState<"pending" | "accounts">("pending");
   const [pendingSearch, setPendingSearch] = useState("");
   const [accountSearch, setAccountSearch] = useState("");
   const [verifiedFilter, setVerifiedFilter] = useState<VerifiedFilter>("all");
+  const [pendingQuery, setPendingQuery] = useState("");
+  const [accountQuery, setAccountQuery] = useState("");
+  const [pendingPage, setPendingPage] = useState(1);
+  const [accountPage, setAccountPage] = useState(1);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [cleaning, setCleaning] = useState(false);
   const [clearingEmails, setClearingEmails] = useState(false);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await api.adminGetEmailVerifications();
-      if (res.success && res.data) {
-        setData(res.data);
-      } else {
-        throw new Error(res.message || t("emailAdmin.loadFailed"));
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : t("emailAdmin.loadFailed");
-      setError(message);
-      toast({ title: t("emailAdmin.loadFailed"), description: message, variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
-  }, [t, toast]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setPendingQuery(pendingSearch.trim());
+      setPendingPage(1);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [pendingSearch]);
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    const timer = window.setTimeout(() => {
+      setAccountQuery(accountSearch.trim());
+      setAccountPage(1);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [accountSearch]);
+
+  const loadResource = useCallback(async (signal?: AbortSignal) => {
+    const page = listView === "accounts" ? accountPage : pendingPage;
+    const search = listView === "accounts" ? accountQuery : pendingQuery;
+    const res = await api.adminGetEmailVerifications({
+      view: listView,
+      page,
+      per_page: 25,
+      search,
+      verified: listView === "accounts" ? verifiedFilter : "all",
+    }, signal);
+    if (!res.success || !res.data) {
+      throw new Error(res.message || t("emailAdmin.loadFailed"));
+    }
+    return res.data;
+  }, [accountPage, accountQuery, listView, pendingPage, pendingQuery, t, verifiedFilter]);
+
+  const {
+    data: loadedData,
+    isLoading: loading,
+    error,
+    execute: reload,
+    setData: setLoadedData,
+  } = useAsyncResource(loadResource, { immediate: true });
+
+  const data: EmailAdminData | null = loadedData ?? null;
+  const hasActiveData = !!data && (!data.view || data.view === listView);
 
   const handleRevoke = useCallback(
     async (id: string) => {
@@ -132,38 +154,31 @@ export default function AdminEmailPage() {
     }
   }, [reload, t, toast]);
 
-  const filteredPending = useMemo(() => {
-    if (!data) return [];
-    const q = pendingSearch.trim().toLowerCase();
-    if (!q) return data.pending;
-    return data.pending.filter((p) =>
-      [p.email, p.username ?? "", p.uid != null ? String(p.uid) : "", p.purpose].some((h) =>
-        h.toLowerCase().includes(q),
-      ),
-    );
-  }, [data, pendingSearch]);
-
-  const filteredAccounts = useMemo(() => {
-    if (!data) return [];
-    const q = accountSearch.trim().toLowerCase();
-    return data.accounts.filter((acc) => {
-      if (verifiedFilter === "verified" && !acc.email_verified) return false;
-      if (verifiedFilter === "unverified" && acc.email_verified) return false;
-      if (q) {
-        const hay = [
-          acc.username,
-          String(acc.uid),
-          acc.email,
-          acc.telegram_username ?? "",
-          acc.telegram_id != null ? String(acc.telegram_id) : "",
-        ];
-        if (!hay.some((h) => h.toLowerCase().includes(q))) return false;
-      }
-      return true;
-    });
-  }, [data, accountSearch, verifiedFilter]);
+  const filteredPending = hasActiveData && tab === "pending" ? (data?.pending ?? []) : [];
+  const filteredAccounts = hasActiveData && tab === "accounts" ? (data?.accounts ?? []) : [];
 
   const summary = data?.summary;
+  const mutationBusy = revokingId !== null || cleaning || clearingEmails;
+
+  useEffect(() => {
+    if (data?.view === "pending") {
+      const lastPage = Math.max(1, data.pages?.pending ?? 1);
+      if (pendingPage > lastPage) setPendingPage(lastPage);
+    }
+    if (data?.view === "accounts") {
+      const lastPage = Math.max(1, data.pages?.accounts ?? 1);
+      if (accountPage > lastPage) setAccountPage(lastPage);
+    }
+  }, [accountPage, data, pendingPage]);
+
+  const handleTabChange = (value: string) => {
+    const next = value as "pending" | "accounts" | "config";
+    setTab(next);
+    if (next !== "config" && next !== listView) {
+      setLoadedData(undefined);
+      setListView(next);
+    }
+  };
 
   const handleClearUnverified = useCallback(async () => {
     const ok = await confirm({
@@ -256,13 +271,13 @@ export default function AdminEmailPage() {
           </CardContent>
         </Card>
       ) : (
-        <Tabs value={tab} onValueChange={(v) => setTab(v as "pending" | "accounts" | "config")}>
-          <TabsList>
+        <Tabs value={tab} onValueChange={handleTabChange}>
+          <TabsList className="max-w-full overflow-x-auto">
             <TabsTrigger value="pending">
-              {t("emailAdmin.tabPending")} ({data?.pending.length ?? 0})
+              {t("emailAdmin.tabPending")} ({summary?.total_pending ?? 0})
             </TabsTrigger>
             <TabsTrigger value="accounts">
-              {t("emailAdmin.tabAccounts")} ({data?.accounts.length ?? 0})
+              {t("emailAdmin.tabAccounts")} ({summary?.total_with_email ?? 0})
             </TabsTrigger>
             <TabsTrigger value="config">{t("emailAdmin.tabConfig")}</TabsTrigger>
           </TabsList>
@@ -271,7 +286,7 @@ export default function AdminEmailPage() {
           {tab === "pending" && (
             <div className="mt-3 space-y-3">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="relative sm:max-w-xs">
+                <div className="relative w-full sm:max-w-xs">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     value={pendingSearch}
@@ -280,38 +295,73 @@ export default function AdminEmailPage() {
                     className="pl-9"
                   />
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleCleanup()}
-                  disabled={cleaning || (summary?.expired_pending ?? 0) === 0}
-                >
-                  {cleaning ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="mr-2 h-4 w-4" />
-                  )}
-                  {t("emailAdmin.cleanupExpired")}
-                </Button>
-                {(summary?.unverified ?? 0) > 0 && (
+                <div className="flex w-full flex-wrap gap-2 sm:w-auto">
                   <Button
-                    variant="destructive"
+                    variant="outline"
                     size="sm"
-                    onClick={() => void handleClearUnverified()}
-                    disabled={clearingEmails}
+                    className="min-h-9 flex-1 sm:flex-none"
+                    onClick={() => void handleCleanup()}
+                    disabled={mutationBusy || (summary?.expired_pending ?? 0) === 0}
                   >
-                    {clearingEmails ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="mr-2 h-4 w-4" />
-                    )}
-                    {t("emailAdmin.clearUnverifiedBtn")}
+                    {cleaning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                    {t("emailAdmin.cleanupExpired")}
                   </Button>
-                )}
+                  {(summary?.unverified ?? 0) > 0 && (
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="min-h-9 flex-1 sm:flex-none"
+                      onClick={() => void handleClearUnverified()}
+                      disabled={mutationBusy}
+                    >
+                      {clearingEmails ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                      {t("emailAdmin.clearUnverifiedBtn")}
+                    </Button>
+                  )}
+                </div>
               </div>
-              <div className="overflow-hidden rounded-lg border">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+              {loading && !hasActiveData ? (
+                <Card><CardContent className="flex items-center justify-center gap-2 p-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />{t("common.loading")}</CardContent></Card>
+              ) : (
+                <>
+                  <div className="space-y-2 lg:hidden">
+                    {filteredPending.map((p) => {
+                      const purposeKey = PURPOSE_LABEL[p.purpose];
+                      return (
+                        <div key={p.id} className="space-y-3 rounded-lg border p-3">
+                          <div className="flex min-w-0 items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <Badge variant="secondary">{purposeKey ? t(purposeKey) : p.purpose}</Badge>
+                              <p className="mt-2 break-all font-mono text-xs">{p.email}</p>
+                            </div>
+                            <Badge variant={p.expired ? "secondary" : "outline"} className={!p.expired ? "border-emerald-500/20 text-emerald-500" : ""}>
+                              {p.expired ? t("emailAdmin.codeExpired") : t("emailAdmin.codeActive")}
+                            </Badge>
+                          </div>
+                          <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                            <div className="min-w-0"><dt className="text-muted-foreground">{t("emailAdmin.colUser")}</dt><dd className="mt-0.5 break-words">{p.username ? `${p.username} · UID ${p.uid}` : "—"}</dd></div>
+                            <div><dt className="text-muted-foreground">{t("emailAdmin.colAttempts")}</dt><dd className="mt-0.5 tabular-nums">{p.attempts}/{p.max_attempts}</dd></div>
+                            <div><dt className="text-muted-foreground">{t("emailAdmin.colCreated")}</dt><dd className="mt-0.5">{formatUnix(p.created_at, locale)}</dd></div>
+                            <div><dt className="text-muted-foreground">{t("emailAdmin.colExpires")}</dt><dd className="mt-0.5">{formatUnix(p.expires_at, locale)}</dd></div>
+                          </dl>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="min-h-9 w-full text-destructive hover:text-destructive"
+                            onClick={() => void handleRevoke(p.id)}
+                            disabled={mutationBusy}
+                          >
+                            {revokingId === p.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                            {t("emailAdmin.revoke")}
+                          </Button>
+                        </div>
+                      );
+                    })}
+                    {filteredPending.length === 0 && <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">{t("emailAdmin.emptyPending")}</div>}
+                  </div>
+                  <div className="hidden overflow-hidden rounded-lg border lg:block">
+                    <div className="custom-scrollbar overflow-x-auto">
+                      <table className="w-full min-w-[760px] text-sm">
                     <thead className="bg-muted/50">
                       <tr>
                         <th className="p-3 text-left font-medium">{t("emailAdmin.colPurpose")}</th>
@@ -362,7 +412,7 @@ export default function AdminEmailPage() {
                                 size="sm"
                                 className="text-destructive hover:text-destructive"
                                 onClick={() => void handleRevoke(p.id)}
-                                disabled={revokingId === p.id}
+                                disabled={mutationBusy}
                               >
                                 {revokingId === p.id ? (
                                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -383,9 +433,20 @@ export default function AdminEmailPage() {
                         </tr>
                       )}
                     </tbody>
-                  </table>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              )}
+              {hasActiveData && tab === "pending" && (data?.pages?.pending ?? 0) > 1 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                  <span className="text-muted-foreground">{t("common.pageStatus", { page: pendingPage, pages: data?.pages?.pending ?? 0 })}</span>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" disabled={pendingPage <= 1 || loading} onClick={() => setPendingPage((page) => Math.max(1, page - 1))}>{t("common.previousPage")}</Button>
+                    <Button variant="outline" size="sm" disabled={pendingPage >= (data?.pages?.pending ?? 0) || loading} onClick={() => setPendingPage((page) => page + 1)}>{t("common.nextPage")}</Button>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
 
@@ -402,7 +463,7 @@ export default function AdminEmailPage() {
                     className="pl-9"
                   />
                 </div>
-                <Select value={verifiedFilter} onValueChange={(v) => setVerifiedFilter(v as VerifiedFilter)}>
+                <Select value={verifiedFilter} onValueChange={(v) => { setVerifiedFilter(v as VerifiedFilter); setAccountPage(1); }}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -413,9 +474,43 @@ export default function AdminEmailPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="overflow-hidden rounded-lg border">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+              {loading && !hasActiveData ? (
+                <Card><CardContent className="flex items-center justify-center gap-2 p-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />{t("common.loading")}</CardContent></Card>
+              ) : (
+                <>
+                  <div className="space-y-2 lg:hidden">
+                    {filteredAccounts.map((acc) => (
+                      <div key={acc.uid} className="space-y-3 rounded-lg border p-3">
+                        <div className="flex min-w-0 items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="break-words font-medium">{acc.username}</p>
+                            <p className="text-xs text-muted-foreground">UID {acc.uid}</p>
+                          </div>
+                          <div className={acc.email_verified ? "flex items-center gap-1 text-emerald-500" : "flex items-center gap-1 text-amber-500"}>
+                            {acc.email_verified ? <ShieldCheck className="h-4 w-4" /> : <ShieldAlert className="h-4 w-4" />}
+                            <span className="text-xs">{acc.email_verified ? t("emailAdmin.verified") : t("emailAdmin.unverified")}</span>
+                          </div>
+                        </div>
+                        <p className="break-all font-mono text-xs">{acc.email}</p>
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          <span className="text-muted-foreground">{t("emailAdmin.colTelegram")}:</span>
+                          <span className="break-all font-mono">{acc.telegram_id != null ? (acc.telegram_username ? `@${acc.telegram_username}` : acc.telegram_id) : t("emailAdmin.notBound")}</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {acc.role === 0 && <Badge className="border-info/20 bg-info/10 text-info">{t("emailAdmin.adminBadge")}</Badge>}
+                          {acc.active ? (
+                            <Badge variant="outline" className="gap-1 border-emerald-500/20 text-emerald-500"><CheckCircle2 className="h-3 w-3" />{t("emailAdmin.enabledBadge")}</Badge>
+                          ) : (
+                            <Badge variant="destructive" className="gap-1"><XCircle className="h-3 w-3" />{t("emailAdmin.disabledBadge")}</Badge>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    {filteredAccounts.length === 0 && <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">{t("emailAdmin.emptyAccounts")}</div>}
+                  </div>
+                  <div className="hidden overflow-hidden rounded-lg border lg:block">
+                    <div className="custom-scrollbar overflow-x-auto">
+                      <table className="w-full min-w-[680px] text-sm">
                     <thead className="bg-muted/50">
                       <tr>
                         <th className="p-3 text-left font-medium">{t("emailAdmin.colUser")}</th>
@@ -489,9 +584,20 @@ export default function AdminEmailPage() {
                         </tr>
                       )}
                     </tbody>
-                  </table>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              )}
+              {hasActiveData && tab === "accounts" && (data?.pages?.accounts ?? 0) > 1 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                  <span className="text-muted-foreground">{t("common.pageStatus", { page: accountPage, pages: data?.pages?.accounts ?? 0 })}</span>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" disabled={accountPage <= 1 || loading} onClick={() => setAccountPage((page) => Math.max(1, page - 1))}>{t("common.previousPage")}</Button>
+                    <Button variant="outline" size="sm" disabled={accountPage >= (data?.pages?.accounts ?? 0) || loading} onClick={() => setAccountPage((page) => page + 1)}>{t("common.nextPage")}</Button>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
 

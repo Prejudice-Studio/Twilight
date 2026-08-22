@@ -1235,6 +1235,7 @@
     "unverified": "未驗證",
     "notBound": "未綁定",
     "adminBadge": "管理員",
+    "enabledBadge": "已啟用",
     "disabledBadge": "已停用",
     "emptyAccounts": "暫無相符帳號",
     "tabConfig": "信箱配置",

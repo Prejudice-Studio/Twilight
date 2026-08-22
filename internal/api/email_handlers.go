@@ -405,13 +405,38 @@ func (a *App) emailVerificationDTO(v store.EmailVerification, now int64, usernam
 	}
 }
 
-// handleAdminEmailVerifications 汇总邮箱管理审查数据：在用验证码记录（脱敏）+ 已设置
-// 邮箱的账号清单（含验证状态/时间）+ 统计与 SMTP/强制策略状态。仅 AuthAdmin。
+// handleAdminEmailVerifications 汇总邮箱管理审查数据。默认保留旧客户端的完整响应；
+// 新客户端传 view=pending|accounts|summary 时只返回当前视图所需页，避免大账号量下
+// 每次切换筛选都传输全部邮箱和验证码记录。
 func (a *App) handleAdminEmailVerifications(w http.ResponseWriter, r *http.Request, _ Params) {
 	cfg := a.cfg()
 	now := time.Now().Unix()
+	query := r.URL.Query()
+	view := strings.ToLower(strings.TrimSpace(query.Get("view")))
+	if view != "" && view != "pending" && view != "accounts" && view != "summary" {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "无效的邮箱管理视图")
+		return
+	}
+	page := max(1, queryInt(r, "page", 1))
+	perPage := clamp(queryInt(r, "per_page", 25), 1, 100)
+	search := truncateString(strings.TrimSpace(query.Get("search")), 120)
+	verified := strings.ToLower(strings.TrimSpace(query.Get("verified")))
+	if verified != "" && verified != "all" && verified != "verified" && verified != "unverified" {
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "无效的邮箱验证筛选")
+		return
+	}
+	if view == "" {
+		perPage = 0
+		page = 1
+	}
 
-	snapshot := a.store().EmailVerificationAdminSnapshot(now)
+	snapshot := a.store().EmailVerificationAdminView(now, store.EmailVerificationAdminQuery{
+		View:     view,
+		Search:   search,
+		Verified: verified,
+		Offset:   (page - 1) * perPage,
+		Limit:    perPage,
+	})
 	pending := make([]map[string]any, 0, len(snapshot.Records))
 	for _, v := range snapshot.Records {
 		username := ""
@@ -437,17 +462,22 @@ func (a *App) handleAdminEmailVerifications(w http.ResponseWriter, r *http.Reque
 	}
 
 	ok(w, "OK", map[string]any{
+		"view":            view,
+		"page":            page,
+		"per_page":        perPage,
+		"total":           map[string]int{"pending": snapshot.PendingTotal, "accounts": snapshot.AccountTotal},
+		"pages":           map[string]int{"pending": pages(snapshot.PendingTotal, perPage), "accounts": pages(snapshot.AccountTotal, perPage)},
 		"smtp_configured": emailConfigured(cfg),
 		"email_enabled":   cfg.EmailEnabled,
 		"force_bind":      cfg.EmailForceBind,
 		"pending":         pending,
 		"accounts":        accounts,
 		"summary": map[string]any{
-			"total_pending":    len(pending),
+			"total_pending":    snapshot.TotalPending,
 			"expired_pending":  snapshot.ExpiredPending,
-			"total_with_email": len(accounts),
+			"total_with_email": snapshot.TotalWithEmail,
 			"verified":         snapshot.Verified,
-			"unverified":       len(accounts) - snapshot.Verified,
+			"unverified":       snapshot.TotalWithEmail - snapshot.Verified,
 		},
 	})
 }
@@ -459,9 +489,15 @@ func (a *App) handleAdminDeleteEmailVerification(w http.ResponseWriter, r *http.
 		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "缺少验证记录 id")
 		return
 	}
+	record, found := a.store().EmailVerification(id)
+	if !found {
+		failWithCode(w, http.StatusNotFound, ErrNotFound, "验证记录不存在")
+		return
+	}
 	if err := a.store().DeleteEmailVerification(id); statusFromError(w, err) {
 		return
 	}
+	a.audit(r, "revoke_email_verification", "admin", record.UID, map[string]any{"purpose": record.Purpose})
 	ok(w, "已撤销验证记录", map[string]any{"id": id})
 }
 
@@ -471,6 +507,7 @@ func (a *App) handleAdminCleanupEmailVerifications(w http.ResponseWriter, r *htt
 	if statusFromError(w, err) {
 		return
 	}
+	a.audit(r, "cleanup_email_verifications", "admin", 0, map[string]any{"deleted": deleted})
 	ok(w, "已清理过期验证码", map[string]any{"deleted": deleted})
 }
 

@@ -261,6 +261,11 @@ export interface EmailAdminSummary {
 }
 
 export interface EmailAdminData {
+  view?: "" | "pending" | "accounts" | "summary";
+  page?: number;
+  per_page?: number;
+  total?: { pending: number; accounts: number };
+  pages?: { pending: number; accounts: number };
   smtp_configured: boolean;
   email_enabled: boolean;
   force_bind: boolean;

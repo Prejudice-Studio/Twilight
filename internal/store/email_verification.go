@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -49,6 +50,20 @@ type EmailVerificationAdminSnapshot struct {
 	Accounts       []EmailVerificationAccountSnapshot
 	Verified       int
 	ExpiredPending int
+	TotalPending   int
+	TotalWithEmail int
+	PendingTotal   int
+	AccountTotal   int
+}
+
+// EmailVerificationAdminQuery controls the bounded view returned to the
+// administration page. An empty View preserves the historical full snapshot.
+type EmailVerificationAdminQuery struct {
+	View     string
+	Search   string
+	Verified string
+	Offset   int
+	Limit    int
 }
 
 // EmailVerificationResult 是 ConsumeEmailVerificationAtomic 的判定结果。
@@ -174,26 +189,62 @@ func (s *Store) ListEmailVerifications() []EmailVerification {
 }
 
 func (s *Store) EmailVerificationAdminSnapshot(now int64) EmailVerificationAdminSnapshot {
+	return s.EmailVerificationAdminView(now, EmailVerificationAdminQuery{})
+}
+
+// EmailVerificationAdminView computes global counters while only copying the
+// requested page. This keeps large email-account lists out of every response.
+func (s *Store) EmailVerificationAdminView(now int64, query EmailVerificationAdminQuery) EmailVerificationAdminSnapshot {
+	view := strings.ToLower(strings.TrimSpace(query.View))
+	includeRecords := view == "" || view == "pending"
+	includeAccounts := view == "" || view == "accounts"
+	search := strings.ToLower(strings.TrimSpace(query.Search))
+	verifiedFilter := strings.ToLower(strings.TrimSpace(query.Verified))
+	offset := query.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	limit := query.Limit
+	if limit < 0 {
+		limit = 0
+	}
+
 	s.mu.RLock()
-	records := make([]EmailVerification, 0, len(s.state.EmailVerifications))
+	var records []EmailVerification
 	var usernames map[int64]string
 	expiredPending := 0
+	pendingTotal := 0
+	if includeRecords {
+		records = make([]EmailVerification, 0, len(s.state.EmailVerifications))
+	}
 	for _, v := range s.state.EmailVerifications {
 		if v.ExpiresAt > 0 && v.ExpiresAt <= now {
 			expiredPending++
 		}
+		if !includeRecords || !emailVerificationMatches(v, s.state.Users, search) {
+			continue
+		}
+		pendingTotal++
+		records = append(records, v)
 		if v.UID != 0 {
-			if u, ok := s.state.Users[v.UID]; ok {
+			if user, ok := s.state.Users[v.UID]; ok {
 				if usernames == nil {
 					usernames = make(map[int64]string)
 				}
-				usernames[v.UID] = u.Username
+				usernames[v.UID] = user.Username
 			}
 		}
-		records = append(records, v)
 	}
-	accounts := make([]EmailVerificationAccountSnapshot, 0)
+	allPendingTotal := len(s.state.EmailVerifications)
+
+	accounts := []EmailVerificationAccountSnapshot(nil)
+	if includeAccounts {
+		accounts = make([]EmailVerificationAccountSnapshot, 0, minPositive(len(s.userUIDs), limit))
+	}
 	verified := 0
+	accountTotal := 0
+	allAccountTotal := 0
+	accountMatchIndex := 0
 	for _, uid := range s.userUIDs {
 		u, ok := s.state.Users[uid]
 		if !ok || strings.TrimSpace(u.Email) == "" {
@@ -202,33 +253,116 @@ func (s *Store) EmailVerificationAdminSnapshot(now int64) EmailVerificationAdmin
 		if u.EmailVerified {
 			verified++
 		}
-		accounts = append(accounts, EmailVerificationAccountSnapshot{
-			UID:              u.UID,
-			Username:         u.Username,
-			Email:            u.Email,
-			EmailVerified:    u.EmailVerified,
-			EmailVerifiedAt:  u.EmailVerifiedAt,
-			TelegramID:       u.TelegramID,
-			TelegramUsername: u.TelegramUsername,
-			Role:             u.Role,
-			Active:           u.Active,
-		})
+		allAccountTotal++
+		if !includeAccounts || !emailAccountMatches(u, search, verifiedFilter) {
+			continue
+		}
+		accountTotal++
+		if view == "" || (view == "accounts" && (limit <= 0 || (accountMatchIndex >= offset && accountMatchIndex < offset+limit))) {
+			accounts = append(accounts, EmailVerificationAccountSnapshot{
+				UID:              u.UID,
+				Username:         u.Username,
+				Email:            u.Email,
+				EmailVerified:    u.EmailVerified,
+				EmailVerifiedAt:  u.EmailVerifiedAt,
+				TelegramID:       u.TelegramID,
+				TelegramUsername: u.TelegramUsername,
+				Role:             u.Role,
+				Active:           u.Active,
+			})
+		}
+		accountMatchIndex++
 	}
 	s.mu.RUnlock()
+	if includeRecords {
+		sort.SliceStable(records, func(i, j int) bool {
+			if records[i].LastSentAt == records[j].LastSentAt {
+				return records[i].ID < records[j].ID
+			}
+			return records[i].LastSentAt > records[j].LastSentAt
+		})
+	}
+	if view == "pending" {
+		records = sliceEmailVerificationPage(records, offset, limit)
+	}
 
-	sort.SliceStable(records, func(i, j int) bool {
-		if records[i].LastSentAt == records[j].LastSentAt {
-			return records[i].ID < records[j].ID
-		}
-		return records[i].LastSentAt > records[j].LastSentAt
-	})
+	if view == "" {
+		pendingTotal = allPendingTotal
+		accountTotal = len(accounts)
+	}
 	return EmailVerificationAdminSnapshot{
 		Records:        records,
 		UsernamesByUID: usernames,
 		Accounts:       accounts,
 		Verified:       verified,
 		ExpiredPending: expiredPending,
+		TotalPending:   allPendingTotal,
+		TotalWithEmail: allAccountTotal,
+		PendingTotal:   pendingTotal,
+		AccountTotal:   accountTotal,
 	}
+}
+
+func minPositive(length, limit int) int {
+	if limit <= 0 || limit > length {
+		return length
+	}
+	return limit
+}
+
+func sliceEmailVerificationPage(records []EmailVerification, offset, limit int) []EmailVerification {
+	if offset >= len(records) {
+		return []EmailVerification{}
+	}
+	end := len(records)
+	if limit > 0 && offset+limit < end {
+		end = offset + limit
+	}
+	return records[offset:end]
+}
+
+func emailVerificationMatches(v EmailVerification, users map[int64]User, search string) bool {
+	if search == "" {
+		return true
+	}
+	username := ""
+	if user, ok := users[v.UID]; ok {
+		username = user.Username
+	}
+	return containsEmailAdminSearch(search, v.Purpose, v.Email, username, emailAdminIDString(v.UID))
+}
+
+func emailAccountMatches(u User, search, verifiedFilter string) bool {
+	switch verifiedFilter {
+	case "verified":
+		if !u.EmailVerified {
+			return false
+		}
+	case "unverified":
+		if u.EmailVerified {
+			return false
+		}
+	}
+	if search == "" {
+		return true
+	}
+	return containsEmailAdminSearch(search, u.Username, u.Email, u.TelegramUsername, emailAdminIDString(u.UID), emailAdminIDString(u.TelegramID))
+}
+
+func emailAdminIDString(id int64) string {
+	if id == 0 {
+		return ""
+	}
+	return strconv.FormatInt(id, 10)
+}
+
+func containsEmailAdminSearch(search string, values ...string) bool {
+	for _, value := range values {
+		if strings.Contains(strings.ToLower(value), search) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Store) EmailVerification(id string) (EmailVerification, bool) {

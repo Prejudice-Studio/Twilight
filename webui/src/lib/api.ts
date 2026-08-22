@@ -604,9 +604,26 @@ class ApiClient {
     });
   }
 
-  // 管理员：邮箱管理审查——在用验证码记录（脱敏）+ 已绑邮箱账号 + 统计。
-  async adminGetEmailVerifications() {
-    return this.request<EmailAdminData>("/admin/email/verifications");
+  // 管理员：邮箱管理审查。传 view/page/search 等参数时只读取当前页，
+  // 不再为后台筛选传输所有账号的邮箱数据。
+  async adminGetEmailVerifications(
+    params: {
+      view?: "pending" | "accounts" | "summary";
+      page?: number;
+      per_page?: number;
+      search?: string;
+      verified?: "all" | "verified" | "unverified";
+    } = {},
+    signal?: AbortSignal,
+  ) {
+    const query = new URLSearchParams();
+    if (params.view) query.set("view", params.view);
+    if (params.page) query.set("page", String(params.page));
+    if (params.per_page) query.set("per_page", String(params.per_page));
+    if (params.search) query.set("search", params.search);
+    if (params.verified) query.set("verified", params.verified);
+    const suffix = query.toString();
+    return this.request<EmailAdminData>(`/admin/email/verifications${suffix ? `?${suffix}` : ""}`, { signal });
   }
 
   // 管理员：撤销一条在用验证码记录（让该验证码立即失效）。

@@ -1235,6 +1235,7 @@
     "unverified": "Unverified",
     "notBound": "Not bound",
     "adminBadge": "Admin",
+    "enabledBadge": "Enabled",
     "disabledBadge": "Disabled",
     "emptyAccounts": "No matching accounts",
     "tabConfig": "Email configuration",

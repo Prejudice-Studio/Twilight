@@ -1151,6 +1151,19 @@ curl -X POST "http://localhost:5000/api/v1/admin/emby/sync" \
 }
 ```
 
+### 9.2.1 邮箱验证管理
+
+`GET /admin/email/verifications`
+
+- `view=pending`：返回验证码记录当前页，`search` 可匹配邮箱、用户名、UID 和用途；响应不携带邮箱账号列表。
+- `view=accounts`：返回已设置邮箱账号当前页，`search` 可匹配 Web 用户名、UID、邮箱、Telegram ID / 用户名，`verified=all|verified|unverified` 控制验证状态；响应不携带验证码记录。
+- `view=summary`：只返回 SMTP / 强制绑定状态与全局统计，不复制两类列表。
+- `page` 从 1 开始；`per_page` 默认 25，范围 1 到 100。`total` 和 `pages` 分别给出当前筛选结果数和页数，`summary` 始终是未筛选的全局统计。
+- 为兼容旧客户端，不传 `view` 时仍返回完整两类列表；新版 WebUI 不使用该模式。
+- 验证码记录只包含用途、邮箱、关联用户、尝试次数和时间等审查字段，绝不返回验证码或 `CodeHash`。
+
+`DELETE /admin/email/verifications/{id}` 会立即撤销对应验证码；`POST /admin/email/verifications/cleanup` 清理全部过期验证码。两类成功写操作都会写入管理员审计日志，审计详情不记录完整邮箱或验证码材料。
+
 ### 9.3 注册码与卡码
 
 > 规则细节见 [注册码与卡码](../features/regcodes.md)。

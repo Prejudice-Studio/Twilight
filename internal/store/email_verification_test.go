@@ -133,6 +133,26 @@ func TestEmailVerificationAdminSnapshot(t *testing.T) {
 	if snapshot.Accounts[0].UID != alice.UID || snapshot.Accounts[1].UID != bob.UID {
 		t.Fatalf("accounts should follow user UID order and skip empty emails: %#v", snapshot.Accounts)
 	}
+
+	pendingPage := st.EmailVerificationAdminView(now, EmailVerificationAdminQuery{
+		View: "pending", Offset: 0, Limit: 1,
+	})
+	if len(pendingPage.Records) != 1 || pendingPage.Records[0].ID != "new" {
+		t.Fatalf("pending page = %#v, want newest record only", pendingPage.Records)
+	}
+	if pendingPage.PendingTotal != 2 || pendingPage.TotalPending != 2 || pendingPage.TotalWithEmail != 2 {
+		t.Fatalf("pending page totals = pending %d/%d email %d", pendingPage.PendingTotal, pendingPage.TotalPending, pendingPage.TotalWithEmail)
+	}
+
+	accountPage := st.EmailVerificationAdminView(now, EmailVerificationAdminQuery{
+		View: "accounts", Search: "bob", Offset: 0, Limit: 1,
+	})
+	if len(accountPage.Accounts) != 1 || accountPage.Accounts[0].Username != "bob" || accountPage.AccountTotal != 1 {
+		t.Fatalf("account page = %#v, total=%d", accountPage.Accounts, accountPage.AccountTotal)
+	}
+	if accountPage.TotalWithEmail != 2 || accountPage.Verified != 1 {
+		t.Fatalf("account page global totals = email %d verified %d", accountPage.TotalWithEmail, accountPage.Verified)
+	}
 }
 
 func TestSetUserEmailVerifiedConflictAndForce(t *testing.T) {

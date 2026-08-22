@@ -2092,6 +2092,7 @@
     "unverified": "未验证",
     "notBound": "未绑定",
     "adminBadge": "管理员",
+    "enabledBadge": "已启用",
     "disabledBadge": "已禁用",
     "emptyAccounts": "暂无匹配账号",
     "tabConfig": "邮箱配置",
