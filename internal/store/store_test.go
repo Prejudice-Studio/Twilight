@@ -81,6 +81,22 @@ func TestUsersByUIDsCopiesOnlyRequestedUsers(t *testing.T) {
 	}
 }
 
+func TestUsersMatchingWithCountLimitsCopiesAndCountsAllMatches(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	for _, username := range []string{"one", "two", "three"} {
+		if _, err := st.CreateUser(User{Username: username, Role: RoleNormal}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	users, matched := st.UsersMatchingWithCount(2, func(User) bool { return true })
+	if matched != 3 || len(users) != 2 {
+		t.Fatalf("users=%d matched=%d, want two returned and three matched", len(users), matched)
+	}
+	if users[0].Username != "one" || users[1].Username != "two" {
+		t.Fatalf("users=%v, want UID order", users)
+	}
+}
+
 func TestEmbyIDIndexTracksUserLifecycle(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	alpha, err := st.CreateUser(User{Username: "alpha", EmbyID: "emby-alpha", Role: RoleNormal})

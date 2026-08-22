@@ -2863,6 +2863,47 @@ func (s *Store) UserUIDsMatching(limit int, matches func(User) bool) ([]int64, i
 	return uids, matched
 }
 
+// UsersMatchingWithCount returns at most limit matching user copies and the
+// complete match count. It is useful for bounded admin operations that need
+// both the candidate fields and an accurate over-limit response without first
+// materializing the entire user table.
+func (s *Store) UsersMatchingWithCount(limit int, matches func(User) bool) ([]User, int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	capacity := len(s.state.Users)
+	if limit > 0 && limit < capacity {
+		capacity = limit
+	}
+	users := make([]User, 0, capacity)
+	matched := 0
+	appendMatch := func(user User) {
+		if matches != nil && !matches(user) {
+			return
+		}
+		matched++
+		if limit <= 0 || len(users) < limit {
+			users = append(users, user)
+		}
+	}
+	if len(s.userUIDs) == len(s.state.Users) {
+		for _, uid := range s.userUIDs {
+			if user, ok := s.state.Users[uid]; ok {
+				appendMatch(user)
+			}
+		}
+		return users, matched
+	}
+	orderedUIDs := make([]int64, 0, len(s.state.Users))
+	for uid := range s.state.Users {
+		orderedUIDs = append(orderedUIDs, uid)
+	}
+	sort.Slice(orderedUIDs, func(i, j int) bool { return orderedUIDs[i] < orderedUIDs[j] })
+	for _, uid := range orderedUIDs {
+		appendMatch(s.state.Users[uid])
+	}
+	return users, matched
+}
+
 // UsersByUIDs copies only the requested users under one read lock. It is for
 // bounded batch handlers that need several user fields before a mutation; it
 // deliberately omits missing IDs so callers can preserve their own not-found

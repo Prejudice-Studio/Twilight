@@ -520,8 +520,7 @@ func (a *App) handleAdminBulkExpire(w http.ResponseWriter, r *http.Request, _ Pa
 	}
 	includeAdmin := boolValue(payload, "include_admin", false)
 	includeWhitelist := boolValue(payload, "include_whitelist", false)
-	affectedUIDs := make([]int64, 0)
-	matched, updated, skipped := a.updateFilteredUsers(payload["filter"], func(u store.User) (bool, string) {
+	matched, updated, skipped, affectedUIDs := a.updateFilteredUsers(payload["filter"], func(u store.User) (bool, string) {
 		if u.Role == store.RoleAdmin && !includeAdmin {
 			return false, "admin"
 		}
@@ -543,7 +542,6 @@ func (a *App) handleAdminBulkExpire(w http.ResponseWriter, r *http.Request, _ Pa
 		return true, ""
 	}, func(u *store.User) {
 		u.ExpiredAt = expiredAt
-		affectedUIDs = append(affectedUIDs, u.UID)
 	})
 	// 若新到期时间已使账号过期，必须同步关停其 Emby 账号——否则会留下「Web 已过期、
 	// Emby 仍可登录」的越权窗口（与单用户禁用、调度自动过期口径一致）。到期时间设为
@@ -1049,7 +1047,7 @@ func (a *App) handleTelegramKickUnbound(w http.ResponseWriter, r *http.Request, 
 	ok(w, "telegram kick complete", base)
 }
 
-func (a *App) updateFilteredUsers(filterValue any, include func(store.User) (bool, string), update func(*store.User)) (matched int, updated int, skipped map[string]int) {
+func (a *App) updateFilteredUsers(filterValue any, include func(store.User) (bool, string), update func(*store.User)) (matched int, updated int, skipped map[string]int, updatedUIDs []int64) {
 	skipped = map[string]int{}
 	uids := int64SliceFromAnyMap(filterValue, "uids")
 	uidSet := map[int64]bool{}
@@ -1061,24 +1059,36 @@ func (a *App) updateFilteredUsers(filterValue any, include func(store.User) (boo
 	activeFilter, hasActive := filter["active"]
 	embyFilter := strings.ToLower(asString(filter["emby"]))
 	search := strings.ToLower(asString(filter["search"]))
-	for _, u := range a.store().ListUsers() {
-		if !adminUserMatchesFilter(u, uidSet, roleFilter, hasRole, activeFilter, hasActive, embyFilter, search) {
-			continue
-		}
-		matched++
-		if matched > 5000 {
-			skipped["over_limit"]++
-			continue
-		}
+	candidates, matched := a.store().UsersMatchingWithCount(5000, func(u store.User) bool {
+		return adminUserMatchesFilter(u, uidSet, roleFilter, hasRole, activeFilter, hasActive, embyFilter, search)
+	})
+	if matched > len(candidates) {
+		skipped["over_limit"] = matched - len(candidates)
+	}
+	targetUIDs := make([]int64, 0, len(candidates))
+	for _, u := range candidates {
 		if okInclude, reason := include(u); !okInclude {
 			skipped[reason]++
 			continue
 		}
-		if _, err := a.store().UpdateUser(u.UID, func(u *store.User) error { update(u); return nil }); err == nil {
+		targetUIDs = append(targetUIDs, u.UID)
+	}
+	results, batchErr := a.store().UpdateUsers(targetUIDs, func(user *store.User) error {
+		update(user)
+		return nil
+	})
+	if batchErr != nil {
+		skipped["update_failed"] = len(targetUIDs)
+		return matched, 0, skipped, nil
+	}
+	updatedUIDs = make([]int64, 0, len(targetUIDs))
+	for _, uid := range targetUIDs {
+		if err, ok := results[uid]; ok && err == nil {
 			updated++
+			updatedUIDs = append(updatedUIDs, uid)
 		}
 	}
-	return matched, updated, skipped
+	return matched, updated, skipped, updatedUIDs
 }
 
 func (a *App) filteredUsers(payload map[string]any) []store.User {
