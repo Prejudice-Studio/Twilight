@@ -382,8 +382,6 @@ export default function AdminUsersPage() {
         ? Boolean(user.emby_id) && !excludedUserIds.has(user.uid)
         : selectedUserIds.has(user.uid);
 
-  const allPageSelected = users.length > 0 && users.every(isUserSelected);
-
   const clearUserSelection = () => {
     setSelectedUserIds(new Set());
     setExcludedUserIds(new Set());
@@ -434,6 +432,11 @@ export default function AdminUsersPage() {
   // 当前页可勾选的行：emby 范围下仅已绑定 Emby 的行参与。
   const selectablePageRows = () =>
     selectionScope === "emby" ? users.filter((user) => Boolean(user.emby_id)) : users;
+
+  const allPageSelected = (() => {
+    const rows = selectablePageRows();
+    return rows.length > 0 && rows.every(isUserSelected);
+  })();
 
   const toggleSelectCurrentPage = () => {
     if (selectionScope === "manual") {
@@ -572,7 +575,9 @@ export default function AdminUsersPage() {
     setPage(1);
     invalidateUsersCache();
     setExpandedUserIds(new Set());
-    void loadUsers();
+    if (page === 1) {
+      void loadUsers();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roleFilter, activeFilter, embyFilter, embyStatusFilter, emailStatusFilter, sortBy]);
 
@@ -2111,7 +2116,7 @@ export default function AdminUsersPage() {
               </DropdownMenuSub>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Badge variant="outline" className="text-lg px-4 py-2">
+          <Badge variant="outline" className="px-3 py-1.5 text-sm sm:px-4 sm:py-2 sm:text-lg">
             共 {total} 用户
           </Badge>
         </div>
@@ -2135,7 +2140,7 @@ export default function AdminUsersPage() {
               />
             </div>
             <div className="flex items-center gap-2 md:w-auto">
-              <Select value={perPage.toString()} onValueChange={(value) => { setPerPage(Number(value)); setPage(1); invalidateUsersCache(); }}>
+              <Select value={perPage.toString()} onValueChange={(value) => handlePerPageChange(Number(value))}>
                 <SelectTrigger className="w-28 md:w-24">
                   <SelectValue />
                 </SelectTrigger>
@@ -2260,7 +2265,8 @@ export default function AdminUsersPage() {
                 onClick={() => {
                   setRoleFilter("all");
                   setActiveFilter("all");
-                  setEmbyFilter("all");
+                   setEmbyFilter("all");
+                   setEmbyStatusFilter("all");
                   setEmailStatusFilter("all");
                   setSortBy("uid_asc");
                 }}
