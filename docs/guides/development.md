@@ -277,6 +277,7 @@ Twilight 不对 Cookie 鉴权的变更类请求做 CSRF 令牌校验，也不做
 - Emby 活动日志转播放记录时，先从当前事件批次提取用户身份 key，再用有界 `UsersMatching` 构造映射；不要为少量活动事件复制全量用户。
 - Bangumi 管理用户列表应先用 UID-only 扫描完成搜索与计数，再按当前页 UID hydrate 用户；每页的同步日志/播放记录统计保持原有逐用户语义。
 - PostgreSQL 的 `twilight_runtime_logs` 是高写入运行日志表，允许独立优化：最新快照按 `id DESC` 取最近 N 条，增量读取按 `id > after ORDER BY id ASC LIMIT N`，裁剪按 cutoff id 保留最近 N 条。状态接入前的内存 fallback 缓冲区必须保持相同 cursor 语义。普通快速成功请求不写运行日志，只保留失败请求和 2 秒以上慢成功请求，避免每个 HTTP 请求额外执行一次日志 INSERT。
+- 管理员运行日志页的“加载更多”只调整快照上限，随后由同一条受 AbortSignal 管理的读取刷新；不能在按钮处理器里再发一条重复的全量请求。日志窗口使用 Firefox 兼容的有限高度滚动区。
 - `twilight_telegram_runtime` 只保存一行单调 `getUpdates` offset。它是运行确认状态而非业务快照内容；旧 `State.TelegramBotOffset` 只作为升级/历史 JSON 导入种子，迁移后必须清零，运行期推进不得调用 `mutateAndSaveLocked`。
 - `twilight_telegram_roster` 以 `(chat_id, telegram_id)` 为主键。普通群消息先命中进程内最多 4096 项的热观察缓存，同成员状态未变时五分钟内不访问数据库；冷缓存仍由 SQL 条件阻止近期行产生物理 UPDATE。定时成员检查先在 Go 内合并重复项，再通过一次 JSONB UPSERT 落库。启动会幂等迁移旧 `State.TelegramRoster`，备份/恢复则由 `Snapshot` / `LoadSnapshot` 合并和拆分，运行期不得把全量花名册重新常驻主状态。
 - 新增列表接口应保持统一响应口径：数据数组放在 `items` 或既有兼容字段，增量游标使用 `next_cursor`；变更字段名或排序语义前必须同步后端 API 文档、前端 API 类型和调用方。

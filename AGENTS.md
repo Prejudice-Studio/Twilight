@@ -247,6 +247,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Both the sink `append` path (`zapFieldsToAttrs` + `redactSensitiveText`) and the console path (`sanitizeZapFields`) redact sensitive keys/values. Any new persistence or console path for log data must route through the same redaction helpers; never write a raw `zapcore.Entry` message or field value to either destination.
 - `handleRuntimeStatus` reports `log_level` (console level) and `runtime_log_capture` (sink level, always `debug`) as distinct fields so the status panel makes the "recorded in full / console trimmed" contract observable.
 - Cost note: because the sink now persists `Debug` too, every captured line at every level becomes a row `INSERT` into `twilight_runtime_logs` (cheap, but not free). Keep genuinely high-frequency, per-request/per-loop chatter off the logger entirely rather than parking it at `Debug` and assuming it is free — "captured but off-console" is not "not written". See [[project_runtime_log_sink_cost]].
+- The admin runtime-log page keeps a bounded client buffer and uses SSE with visible polling fallback. Increasing the display limit must change the snapshot limit only; it must not issue a separate full log request before the limit-triggered reload.
 - Ordinary fast successful HTTP requests are intentionally not access-logged. Preserve error request logs and the slow-success threshold; never restore one persistent runtime-log row for every `2xx`/`3xx` response.
 
 ## Domain Rules

@@ -191,15 +191,10 @@ export default function AdminRuntimeLogsPage() {
     }
   }, [logLimit, setNextCursor, t, toast]);
 
-  const loadMore = useCallback(async () => {
+  const loadMore = useCallback(() => {
     const nextLimit = Math.min(status?.runtime_log_limit || 5000, logLimit + 500);
     setLogLimit(nextLimit);
-    const res = await api.getRuntimeLogs(nextLimit);
-    if (res.success && res.data) {
-      setLogState(runtimeLogState(res.data.entries || [], nextLimit));
-      setNextCursor(res.data.next_cursor || 0);
-    }
-  }, [logLimit, setNextCursor, status?.runtime_log_limit]);
+  }, [logLimit, status?.runtime_log_limit]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -343,7 +338,7 @@ export default function AdminRuntimeLogsPage() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="h-[min(62vh,42rem)] overflow-y-auto overflow-x-hidden bg-zinc-950 p-3 text-xs text-zinc-100">
+          <div className="custom-scrollbar h-[min(62vh,42rem)] overflow-x-hidden overflow-y-auto overscroll-contain bg-zinc-950 p-3 text-xs text-zinc-100">
             {logs.length === 0 ? (
               <div className="flex h-full items-center justify-center text-zinc-500">{t("adminLogs.empty")}</div>
             ) : (
