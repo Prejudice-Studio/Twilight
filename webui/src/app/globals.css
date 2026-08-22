@@ -427,6 +427,14 @@
     scrollbar-width: thin;
   }
 
+  .app-header {
+    padding-top: max(0.75rem, env(safe-area-inset-top));
+  }
+
+  .mobile-nav-footer {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
   .sidebar-label {
     margin-bottom: 0.5rem;
     padding: 0 0.4rem;
@@ -688,6 +696,18 @@
 
     .admin-section-surface :where(h1) {
       font-size: 1.35rem;
+    }
+  }
+
+  @media (min-width: 640px) {
+    .app-header {
+      padding-top: max(1rem, env(safe-area-inset-top));
+    }
+  }
+
+  @media (min-width: 768px) {
+    .app-header {
+      padding-top: max(1.5rem, env(safe-area-inset-top));
     }
   }
 

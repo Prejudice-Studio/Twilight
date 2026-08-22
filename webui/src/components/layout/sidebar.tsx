@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType } from "react";
 import Image from "next/image";
 import Link from "next/link";
@@ -54,6 +54,11 @@ export interface SidebarNavItem {
   category?: string;
 }
 
+export interface SidebarNavGroup {
+  category: string;
+  items: SidebarNavItem[];
+}
+
 export const userNavItems: SidebarNavItem[] = [
   { href: "/dashboard", labelKey: "navigation.dashboard", icon: LayoutDashboard },
   { href: "/announcements", labelKey: "navigation.announcements", icon: Megaphone },
@@ -92,6 +97,27 @@ export const adminNavItems: SidebarNavItem[] = [
   { href: "/admin/developer", labelKey: "navigation.developerMode", icon: Code2, category: "system" },
 ];
 
+export const adminCategoryLabelKeys: Record<string, MessageKey> = {
+  service: "navigation.catService",
+  content: "navigation.catContent",
+  security: "navigation.catSecurity",
+  system: "navigation.catSystem",
+};
+
+export function groupNavItems(items: SidebarNavItem[]): SidebarNavGroup[] {
+  const groups: SidebarNavGroup[] = [];
+  for (const navItem of items) {
+    const category = navItem.category || "";
+    const current = groups[groups.length - 1];
+    if (!current || current.category !== category) {
+      groups.push({ category, items: [navItem] });
+      continue;
+    }
+    current.items.push(navItem);
+  }
+  return groups;
+}
+
 export function filterNavItems(
   items: SidebarNavItem[],
   features?: Record<string, boolean> | null,
@@ -116,19 +142,13 @@ export function filterNavItems(
   });
 }
 
-function isActivePath(pathname: string, href: string) {
+export function isActivePath(pathname: string, href: string) {
   if (href === "/admin") return pathname === "/admin";
   if (href === "/admin/telegram") {
     return pathname === href || pathname.startsWith(`${href}/`) || pathname.startsWith("/admin/telegram-rebind-requests");
   }
   if (href === "/admin/security") {
-    return (
-      pathname === href ||
-      pathname.startsWith(`${href}/`) ||
-      pathname.startsWith("/admin/audit-logs") ||
-      pathname.startsWith("/admin/logs") ||
-      pathname.startsWith("/admin/violations")
-    );
+    return pathname === href || pathname.startsWith(`${href}/`);
   }
   if (href === "/admin/emby") {
     return pathname === href || pathname.startsWith(`${href}/`) || pathname.startsWith("/admin/device-audit");
@@ -144,6 +164,7 @@ export function Sidebar() {
   const isAdmin = user?.role === 0;
   const [profileAvatar, setProfileAvatar] = useState<string | null>(user?.avatar || null);
   const systemInfo = useSystemStore((s) => s.info);
+  const activeLinkRef = useRef<HTMLAnchorElement | null>(null);
 
   const loadProfileAvatar = useCallback(async () => {
     if (!user?.uid) {
@@ -191,6 +212,19 @@ export function Sidebar() {
     () => filterNavItems(adminNavItems, systemInfo?.features),
     [systemInfo?.features],
   );
+  const visibleAdminNavGroups = useMemo(
+    () => groupNavItems(visibleAdminNavItems),
+    [visibleAdminNavItems],
+  );
+
+  useEffect(() => {
+    const activeLink = activeLinkRef.current;
+    if (!activeLink) return;
+    const frame = window.requestAnimationFrame(() => {
+      activeLink.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [pathname]);
 
   return (
     <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 p-4 lg:block">
@@ -225,6 +259,8 @@ export function Sidebar() {
                   key={item.href}
                   href={item.href}
                   prefetch={false}
+                  ref={active ? activeLinkRef : undefined}
+                  aria-current={active ? "page" : undefined}
                   className={cn("sidebar-link", active && "sidebar-link-active")}
                 >
                   {active && (
@@ -243,40 +279,35 @@ export function Sidebar() {
             <>
               <p className="sidebar-label mt-5">{t("navigation.adminMenu")}</p>
               <Fragment>
-                {(() => {
-                  let lastCat = "";
-                  return visibleAdminNavItems.map((item) => {
-                    const active = isActivePath(pathname, item.href);
-                    const cat = item.category || "";
-                    const showCat = cat && cat !== lastCat;
-                    lastCat = cat;
-                    const catLabels: Record<string, string> = {
-                      service: t("navigation.catService"),
-                      content: t("navigation.catContent"),
-                      security: t("navigation.catSecurity"),
-                      system: t("navigation.catSystem"),
-                    };
-                    return (
-                      <Fragment key={item.href}>
-                        {showCat && <p className="px-3 pt-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">{catLabels[cat] || cat}</p>}
+                {visibleAdminNavGroups.map((group) => (
+                  <Fragment key={group.category || "account"}>
+                    {group.category && (
+                      <p className="px-3 pb-1 pt-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">
+                        {adminCategoryLabelKeys[group.category]
+                          ? t(adminCategoryLabelKeys[group.category])
+                          : group.category}
+                      </p>
+                    )}
+                    {group.items.map((item) => {
+                      const active = isActivePath(pathname, item.href);
+                      return (
                         <Link
+                          key={item.href}
                           href={item.href}
                           prefetch={false}
+                          ref={active ? activeLinkRef : undefined}
+                          aria-current={active ? "page" : undefined}
                           className={cn("sidebar-link", active && "sidebar-link-active")}
                         >
-                          {active && (
-                            <span className="sidebar-active-bg animate-in fade-in duration-150" />
-                          )}
+                          {active && <span className="sidebar-active-bg animate-in fade-in duration-150" />}
                           <item.icon className="relative z-10 h-4 w-4 shrink-0" />
                           <span className="relative z-10">{item.label || (item.labelKey ? t(item.labelKey) : "")}</span>
-                          {active && (
-                            <span className="sidebar-dot animate-in fade-in duration-150" />
-                          )}
+                          {active && <span className="sidebar-dot animate-in fade-in duration-150" />}
                         </Link>
-                      </Fragment>
-                    );
-                  });
-                })()}
+                      );
+                    })}
+                  </Fragment>
+                ))}
               </Fragment>
             </>
           )}
