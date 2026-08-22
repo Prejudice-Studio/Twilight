@@ -26,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { JsCodeEditor } from "@/components/js-code-editor";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
+import { useAsyncResource } from "@/hooks/use-async-resource";
 import { api } from "@/lib/api";
 import type { DeveloperJSPreset, DeveloperJSDocs, DeveloperJSDocEntry } from "@/lib/api-types";
 import { useSystemStore } from "@/store/system";
@@ -388,37 +389,32 @@ export default function AdminDeveloperPage() {
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [templateName, setTemplateName] = useState("");
   const [templateDescription, setTemplateDescription] = useState("");
-  const [serverPresets, setServerPresets] = useState<DeveloperJSPreset[]>([]);
   const [activeTemplateId, setActiveTemplateId] = useState("hello");
   const [result, setResult] = useState<Awaited<ReturnType<typeof api.previewDeveloperJSCommand>>["data"] | null>(null);
-  const [docs, setDocs] = useState<DeveloperJSDocs | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [previewCommand, setPreviewCommand] = useState("/preview");
   const [previewArgs, setPreviewArgs] = useState("preview");
   const [previewPrivateChat, setPreviewPrivateChat] = useState(true);
 
-  const loadPresets = useCallback(async () => {
-    try {
-      const res = await api.listDeveloperJSPresets();
-      if (res.success && res.data) {
-        setServerPresets(res.data.presets);
-      }
-    } catch (err) {
-      toast({ title: t("adminDeveloper.templatesLoadFailed"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
-    }
-  }, [t, toast]);
+  const loadPresets = useCallback(async (signal?: AbortSignal): Promise<DeveloperJSPreset[]> => {
+    const res = await api.listDeveloperJSPresets(signal);
+    if (res.success && res.data) return res.data.presets;
+    throw new Error(res.message || t("adminDeveloper.templatesLoadFailed"));
+  }, [t]);
 
-  const loadDocs = useCallback(async () => {
-    try {
-      const res = await api.getDeveloperJSDocs();
-      if (res.success && res.data) {
-        setDocs(res.data);
-      }
-    } catch {
-      // 符号树为辅助功能，加载失败时静默降级，不打断编辑器使用。
-    }
-  }, []);
+  const loadDocs = useCallback(async (signal?: AbortSignal): Promise<DeveloperJSDocs> => {
+    const res = await api.getDeveloperJSDocs(signal);
+    if (res.success && res.data) return res.data;
+    throw new Error(res.message || t("adminDeveloper.docsLoadFailed"));
+  }, [t]);
+
+  const {
+    data: serverPresets = [],
+    error: presetsLoadError,
+    execute: reloadPresets,
+  } = useAsyncResource(loadPresets, { immediate: true, initialData: [] });
+  const { data: docs } = useAsyncResource(loadDocs, { immediate: true });
 
   const toggleGroup = useCallback((key: string) => {
     setExpandedGroups((prev) => ({
@@ -453,12 +449,10 @@ export default function AdminDeveloperPage() {
   }, [docs]);
 
   useEffect(() => {
-    void loadPresets();
-  }, [loadPresets]);
-
-  useEffect(() => {
-    void loadDocs();
-  }, [loadDocs]);
+    if (presetsLoadError) {
+      toast({ title: t("adminDeveloper.templatesLoadFailed"), description: presetsLoadError, variant: "destructive" });
+    }
+  }, [presetsLoadError, t, toast]);
 
   useEffect(() => () => previewAbortRef.current?.abort(), []);
 
@@ -468,15 +462,16 @@ export default function AdminDeveloperPage() {
   const codeAnalysis = useMemo(() => {
     const normalized = code.trim();
     const lower = normalized.toLowerCase();
+    const bytes = new TextEncoder().encode(normalized).byteLength;
     const blocked = blockedStaticTokens.filter((token) => lower.includes(token));
     const risky = riskyStaticTokens.filter((token) => lower.includes(token));
     return {
-      bytes: new Blob([normalized]).size,
+      bytes,
       chars: normalized.length,
       lines: normalized ? normalized.split(/\r\n|\r|\n/).length : 0,
       blocked,
       risky,
-      overLimit: new Blob([normalized]).size > 8000,
+      overLimit: bytes > 8000,
       empty: normalized.length === 0,
     };
   }, [code]);
@@ -530,7 +525,7 @@ export default function AdminDeveloperPage() {
     try {
       const res = await api.createDeveloperJSPreset({ name, description: templateDescription.trim(), code });
       if (!res.success || !res.data) throw new Error(res.message || t("adminDeveloper.templateSaveFailed"));
-      await loadPresets();
+      await reloadPresets();
       setActiveTemplateId(`preset-${res.data.id}`);
       toast({ title: t("adminDeveloper.templateSaved"), variant: "success" });
     } catch (err) {
@@ -538,7 +533,7 @@ export default function AdminDeveloperPage() {
     } finally {
       setSavingTemplate(false);
     }
-  }, [code, codeAnalysis, loadPresets, t, templateDescription, templateName, toast]);
+  }, [code, codeAnalysis, reloadPresets, t, templateDescription, templateName, toast]);
 
   const updateTemplate = useCallback(async () => {
     const target = customTemplates.find((item) => item.id === activeTemplateId && item.presetId);
@@ -556,14 +551,14 @@ export default function AdminDeveloperPage() {
     try {
       const res = await api.updateDeveloperJSPreset(target.presetId, { name, description: templateDescription.trim(), code });
       if (!res.success) throw new Error(res.message || t("adminDeveloper.templateSaveFailed"));
-      await loadPresets();
+      await reloadPresets();
       toast({ title: t("adminDeveloper.templateUpdated"), variant: "success" });
     } catch (err) {
       toast({ title: t("adminDeveloper.templateSaveFailed"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
       setSavingTemplate(false);
     }
-  }, [activeTemplateId, code, codeAnalysis, customTemplates, loadPresets, t, templateDescription, templateName, toast]);
+  }, [activeTemplateId, code, codeAnalysis, customTemplates, reloadPresets, t, templateDescription, templateName, toast]);
 
   const deleteTemplate = useCallback(async () => {
     const target = customTemplates.find((item) => item.id === activeTemplateId && item.presetId);
@@ -572,7 +567,7 @@ export default function AdminDeveloperPage() {
     try {
       const res = await api.deleteDeveloperJSPreset(target.presetId);
       if (!res.success) throw new Error(res.message || t("adminDeveloper.templateSaveFailed"));
-      await loadPresets();
+      await reloadPresets();
       applyTemplate(builtInTemplates[0]);
       toast({ title: t("adminDeveloper.templateDeleted"), variant: "success" });
     } catch (err) {
@@ -580,7 +575,7 @@ export default function AdminDeveloperPage() {
     } finally {
       setSavingTemplate(false);
     }
-  }, [activeTemplateId, applyTemplate, customTemplates, loadPresets, t, toast]);
+  }, [activeTemplateId, applyTemplate, customTemplates, reloadPresets, t, toast]);
 
   const copyCommandReply = useCallback(async () => {
     try {
@@ -924,7 +919,7 @@ export default function AdminDeveloperPage() {
                   {t("adminDeveloper.symbolTreeDescription")}
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4 text-sm max-h-[600px] overflow-y-auto pr-1 pt-4">
+              <CardContent className="custom-scrollbar max-h-[min(68dvh,840px)] space-y-4 overflow-y-auto overscroll-contain pr-1 pt-4 text-sm">
                 {/* 1. Global bindings */}
                 <div className="space-y-1">
                   <button

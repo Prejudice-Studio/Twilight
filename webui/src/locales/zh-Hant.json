@@ -1891,6 +1891,7 @@
     "templatesTitle": "JS 範本預設",
     "templatesDescription": "選擇內建範本或將目前腳本儲存為服務端預設，Telegram 指令管理可直接選擇這些預設。",
     "templatesLoadFailed": "載入 JS 預設失敗",
+    "docsLoadFailed": "載入 JS 文件失敗",
     "newBlankPreset": "新增空白預設",
     "builtin": "內建",
     "custom": "自訂",

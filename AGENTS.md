@@ -174,6 +174,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Dangerous admin actions need clear labels, confirmations, result toasts, and audit coverage where applicable.
 - User-management actions must stay grouped by domain (account state, Emby, identity binding, registration entitlement, destructive actions) instead of long flat menus. When adding user actions, keep `admin_action_state` and frontend `UserInfo` types aligned so the UI can disable or explain unavailable operations.
 - The admin user action menu, desktop table, and destructive-maintenance previews must own bounded `dvh` Firefox scroll regions. Keep the desktop table header sticky, allow preview tables to scroll in both directions on phones, and retain server-side pagination plus mobile cards instead of mounting the entire user base.
+- Developer-mode JS docs and preset reads must pass `AbortSignal`, opt out of the short read cache, and ignore obsolete responses on unmount. The symbol tree, category strip, tab list, and examples must stay inside bounded Firefox `dvh` scroll regions; keep the sandbox security contract unchanged.
 - Admin user-list filter changes must reset to page 1 without issuing a stale-page request; page-size changes must clear the cross-page selection scope. In the virtual `emby` selection scope, current-page select-all counts only rows with an Emby binding.
 
 ## Security Boundaries

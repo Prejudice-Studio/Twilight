@@ -1891,6 +1891,7 @@
     "templatesTitle": "JS templates",
     "templatesDescription": "Choose a built-in template or save the current script as a server-side preset that Telegram command management can select.",
     "templatesLoadFailed": "Failed to load JS presets",
+    "docsLoadFailed": "Failed to load JS documentation",
     "newBlankPreset": "New blank preset",
     "builtin": "Built-in",
     "custom": "Custom",

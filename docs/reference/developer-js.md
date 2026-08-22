@@ -64,7 +64,7 @@ Telegram JS 交互状态是短期内存数据，不会无限增长：内联 call
 | `env(key)` | `key: string` | `string` | 读取白名单内非敏感环境变量。 |
 | `fetch(url, options?)` | `url: string`, `options.method?: string` | object | 受限同步 HTTP 请求。 |
 
-完整参数表由 `/admin/developer/js-docs` 动态展示，后端新增沙箱 API 时必须同步更新该端点和本文档。
+完整参数表由 `/admin/developer/js-docs` 动态展示，后端新增沙箱 API 时必须同步更新该端点和本文档。后台编辑器和独立文档页读取文档/预设时使用可取消的 `no-store` 请求；符号树、分类条、页签与代码示例在 Firefox 中使用受限 `dvh` 滚动区域，离开页面不会让旧响应继续写入界面。
 
 ## 用户接口（`users`）
 

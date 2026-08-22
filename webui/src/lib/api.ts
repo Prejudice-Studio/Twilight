@@ -1959,8 +1959,12 @@ class ApiClient {
     }, { timeoutMs: 15_000 });
   }
 
-  async getDeveloperJSDocs() {
-    return this.request<DeveloperJSDocs>("/admin/developer/js-docs");
+  async getDeveloperJSDocs(signal?: AbortSignal) {
+    return this.request<DeveloperJSDocs>(
+      "/admin/developer/js-docs",
+      { signal, cache: "no-store" },
+      { cacheRead: false, dedupe: false },
+    );
   }
 
   async listDeveloperJSPresets(signal?: AbortSignal) {

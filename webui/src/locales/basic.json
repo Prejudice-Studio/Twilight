@@ -2754,6 +2754,7 @@
     "templatesTitle": "JS 模板预设",
     "templatesDescription": "选择内置模板或保存当前脚本为服务端预设，Telegram 指令管理可直接选择这些预设。",
     "templatesLoadFailed": "加载 JS 预设失败",
+    "docsLoadFailed": "加载 JS 文档失败",
     "newBlankPreset": "新建空白预设",
     "builtin": "内置",
     "custom": "自定义",

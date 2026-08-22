@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { useAsyncResource } from "@/hooks/use-async-resource";
 import { api } from "@/lib/api";
 import type { DeveloperJSDocEntry, DeveloperJSDocs } from "@/lib/api-types";
 import { useI18n, type Locale } from "@/lib/i18n";
@@ -1129,28 +1130,22 @@ export function DeveloperJSDocsPanel({ className, onInsertSnippet }: DeveloperJS
   const textLocale = asTextLocale(locale);
   const l = labels[textLocale];
   const { toast } = useToast();
-  const [docs, setDocs] = useState<DeveloperJSDocs | null>(null);
-  const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string>("");
 
-  const loadDocs = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await api.getDeveloperJSDocs();
-      if (res.success && res.data) {
-        setDocs(res.data);
-      }
-    } catch (err) {
-      toast({ title: l.loadFailed, description: err instanceof Error ? err.message : undefined, variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
-  }, [l.loadFailed, toast]);
+  const loadDocs = useCallback(async (signal?: AbortSignal): Promise<DeveloperJSDocs> => {
+    const res = await api.getDeveloperJSDocs(signal);
+    if (res.success && res.data) return res.data;
+    throw new Error(res.message || l.loadFailed);
+  }, [l.loadFailed]);
+
+  const { data: docs, isLoading: loading, error: loadError } = useAsyncResource(loadDocs, { immediate: true });
 
   useEffect(() => {
-    void loadDocs();
-  }, [loadDocs]);
+    if (loadError) {
+      toast({ title: l.loadFailed, description: loadError, variant: "destructive" });
+    }
+  }, [l.loadFailed, loadError, toast]);
 
   const view = useMemo(() => {
     if (!docs) return null;
@@ -1214,7 +1209,8 @@ export function DeveloperJSDocsPanel({ className, onInsertSnippet }: DeveloperJS
           </div>
         ) : view ? (
           <Tabs defaultValue="overview" className="space-y-4">
-            <TabsList className="i18n-stable-tabs grid h-auto w-full grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
+            <div className="custom-scrollbar overflow-x-auto overscroll-x-contain pb-1">
+            <TabsList className="i18n-stable-tabs grid h-auto min-w-[34rem] grid-cols-2 md:grid-cols-3 xl:grid-cols-6 xl:min-w-0">
               <TabsTrigger value="overview">{l.overviewTab}</TabsTrigger>
               <TabsTrigger value="context">{l.contextTab}</TabsTrigger>
               <TabsTrigger value="functions">{l.functionsTab}</TabsTrigger>
@@ -1222,6 +1218,7 @@ export function DeveloperJSDocsPanel({ className, onInsertSnippet }: DeveloperJS
               <TabsTrigger value="config">{l.configTab}</TabsTrigger>
               <TabsTrigger value="examples">{l.examplesTab}</TabsTrigger>
             </TabsList>
+            </div>
 
             <TabsContent value="overview" className="space-y-4">
               <div className="grid gap-3 lg:grid-cols-2">
@@ -1292,7 +1289,7 @@ export function DeveloperJSDocsPanel({ className, onInsertSnippet }: DeveloperJS
 
             <TabsContent value="functions" className="space-y-4">
               <p className="text-sm text-muted-foreground">{l.functionIntro}</p>
-              <div className="flex gap-2 overflow-x-auto pb-1">
+              <div className="custom-scrollbar flex gap-2 overflow-x-auto overscroll-x-contain pb-2">
                 <Button type="button" size="sm" variant={category === "" ? "default" : "outline"} onClick={() => setCategory("")}>
                   {l.allCategories}
                 </Button>
@@ -1334,7 +1331,7 @@ export function DeveloperJSDocsPanel({ className, onInsertSnippet }: DeveloperJS
                       <Badge variant="outline" className="text-[10px]">{example.id}</Badge>
                     </div>
                     <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{example.description}</p>
-                    <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-background p-2 text-[11px]">{example.code}</pre>
+                    <pre className="custom-scrollbar mt-2 max-h-[min(32dvh,18rem)] overflow-auto overscroll-contain whitespace-pre-wrap rounded-md bg-background p-2 text-[11px]">{example.code}</pre>
                     {onInsertSnippet ? (
                       <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => onInsertSnippet(`\n${example.code}\n`)}>
                         {l.insert}
