@@ -1313,13 +1313,13 @@ export default function AdminRegcodesPage() {
                 </>
               )}
             </span>
-            <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+            <div className="grid w-full [grid-template-columns:repeat(2,minmax(0,1fr))] gap-2 sm:flex sm:w-auto sm:flex-wrap">
               {selectionScope === "all" ? (
-                <Button className="flex-1 sm:flex-none" variant="ghost" size="sm" onClick={clearSelection}>
+                <Button className="min-h-10 w-full whitespace-normal leading-tight sm:min-h-9 sm:w-auto" variant="ghost" size="sm" onClick={clearSelection}>
                   {t("adminRegcodes.clearSelection")}
                 </Button>
               ) : (
-                <Button className="flex-1 sm:flex-none" variant="ghost" size="sm"
+                <Button className="min-h-10 w-full whitespace-normal leading-tight sm:min-h-9 sm:w-auto" variant="ghost" size="sm"
                   disabled={regcodes.length === 0}
                   onClick={() => {
                     const regcodesOnPage = new Set(regcodes.map((item) => item.code));
@@ -1339,25 +1339,25 @@ export default function AdminRegcodesPage() {
                     : t("adminRegcodes.selectAll")}
                 </Button>
               )}
-              <Button className="flex-1 sm:flex-none" variant="outline" size="sm"
+              <Button className="min-h-10 w-full whitespace-normal leading-tight sm:min-h-9 sm:w-auto" variant="outline" size="sm"
                 onClick={enableSelectAllMatching}
                 disabled={total === 0 || selectionScope === "all"}>
                 <CheckCheck className="mr-2 h-4 w-4" /> {t("adminRegcodes.selectAllMatching", { count: total })}
               </Button>
-              <Button className="flex-1 sm:flex-none" variant="outline" size="sm" onClick={invertSelection} disabled={regcodes.length === 0}>
+              <Button className="min-h-10 w-full whitespace-normal leading-tight sm:min-h-9 sm:w-auto" variant="outline" size="sm" onClick={invertSelection} disabled={regcodes.length === 0}>
                 <FlipHorizontal2 className="mr-2 h-4 w-4" /> {t("adminRegcodes.invertSelection")}
               </Button>
-          <Button className="flex-1 sm:flex-none" variant="outline" size="sm" onClick={() => copyRegcodes(selectedRegcodes.length > 0 ? selectedRegcodes : regcodes)} disabled={regcodes.length === 0}>
+          <Button className="min-h-10 w-full whitespace-normal leading-tight sm:min-h-9 sm:w-auto" variant="outline" size="sm" onClick={() => copyRegcodes(selectedRegcodes.length > 0 ? selectedRegcodes : regcodes)} disabled={regcodes.length === 0}>
             <Copy className="mr-2 h-4 w-4" /> {t("adminRegcodes.copyCodes")}
           </Button>
-          <Button className="flex-1 sm:flex-none" variant="outline" size="sm" onClick={() => exportSelected("txt")} disabled={regcodes.length === 0}>
+          <Button className="min-h-10 w-full whitespace-normal leading-tight sm:min-h-9 sm:w-auto" variant="outline" size="sm" onClick={() => exportSelected("txt")} disabled={regcodes.length === 0}>
             <Download className="mr-2 h-4 w-4" /> {t("adminRegcodes.exportTxt")}
           </Button>
-          <Button className="flex-1 sm:flex-none" variant="outline" size="sm" onClick={() => exportSelected("json")} disabled={regcodes.length === 0}>
+          <Button className="min-h-10 w-full whitespace-normal leading-tight sm:min-h-9 sm:w-auto" variant="outline" size="sm" onClick={() => exportSelected("json")} disabled={regcodes.length === 0}>
             <Download className="mr-2 h-4 w-4" /> {t("adminRegcodes.exportJson")}
           </Button>
           <Button
-            className="flex-1 sm:flex-none"
+            className="col-span-2 min-h-10 w-full whitespace-normal leading-tight sm:col-auto sm:min-h-9 sm:w-auto"
             variant="destructive"
             size="sm"
             onClick={() => void handleBatchDelete()}
