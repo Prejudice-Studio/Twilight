@@ -248,6 +248,9 @@ Use this index before broad search. Line numbers drift, so search by function na
 - `RegCode.Source`: `admin`, `invite`, or empty historical values treated as `admin`.
 - Disabled RegCodes pause validity countdown; used-up status takes priority over manual disabled status.
 - Admin user listing and `filteredBatchUserUIDs` must keep filter semantics aligned.
+- Batch `select_all` filtering that only needs target IDs must use the Store UID-only
+  matcher; do not call `UsersMatching` with a callback that always returns false,
+  because that still reserves a full `[]User` backing array.
 - Admin user listing must filter and sort the lightweight `store.User` slice before
   constructing `publicUserAt` DTO maps, and must construct DTOs only for the current
   page. Keep `per_page` bounded; do not materialize full public rows for 2000+ users.

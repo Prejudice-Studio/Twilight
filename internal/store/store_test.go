@@ -38,6 +38,30 @@ func TestStrconv36(t *testing.T) {
 	}
 }
 
+func TestUserUIDsMatchingKeepsOrderAndCountWithoutUserCopies(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	for _, username := range []string{"alpha", "beta", "gamma", "delta"} {
+		if _, err := st.CreateUser(User{Username: username, Role: RoleNormal, Active: username != "beta"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	uids, matched := st.UserUIDsMatching(2, func(u User) bool { return u.Active })
+	if matched != 3 {
+		t.Fatalf("matched=%d, want 3", matched)
+	}
+	allUsers := st.ListUsers()
+	want := []int64{allUsers[0].UID, allUsers[2].UID}
+	if len(uids) != len(want) || uids[0] != want[0] || uids[1] != want[1] {
+		t.Fatalf("uids=%v, want %v", uids, want)
+	}
+
+	all, allMatched := st.UserUIDsMatching(0, func(u User) bool { return u.Active })
+	if allMatched != 3 || len(all) != 3 {
+		t.Fatalf("unlimited result=%v matched=%d, want three", all, allMatched)
+	}
+}
+
 func TestEmbyIDIndexTracksUserLifecycle(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	alpha, err := st.CreateUser(User{Username: "alpha", EmbyID: "emby-alpha", Role: RoleNormal})

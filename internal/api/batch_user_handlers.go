@@ -522,22 +522,17 @@ func (a *App) filteredBatchUserUIDs(payload map[string]any, limit int) ([]int64,
 	for _, id := range int64Slice(payload["exclude_uids"]) {
 		excluded[id] = struct{}{}
 	}
-	uids := []int64{}
-	matched := 0
-	// 只借用 UsersMatching 的「按 UID 升序 + 避免 ListUsers 整份拷贝」遍历，不消费
-	// 它返回的匹配切片：始终返回 false 让 out 保持空，计数与收集都在闭包内完成。
-	a.store().UsersMatching(0, func(u store.User) bool {
+	// 只需要 UID，不要通过 UsersMatching 构造一份容量等于用户总数的 []User。
+	// StoreUID-only 遍历仍按 UID 升序并返回完整匹配数，后续 handler 会逐 UID
+	// 重新读取并执行鉴权/状态校验。
+	uids, matched := a.store().UserUIDsMatching(limit, func(u store.User) bool {
 		if !adminUserMatchesListFilters(u, listFilter) {
 			return false
 		}
 		if _, skip := excluded[u.UID]; skip {
 			return false
 		}
-		matched++
-		if limit <= 0 || len(uids) < limit {
-			uids = append(uids, u.UID)
-		}
-		return false
+		return true
 	})
 	return uids, matched
 }

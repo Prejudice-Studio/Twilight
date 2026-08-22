@@ -2817,6 +2817,52 @@ func (s *Store) UsersMatching(limit int, matches func(User) bool) []User {
 	return out
 }
 
+// UserUIDsMatching is the UID-only counterpart to UsersMatching. It keeps the
+// same UID ordering and full-match count, but never allocates a []User backing
+// array. Batch selection paths should use it when they only need IDs for later
+// per-user authorization or mutation.
+func (s *Store) UserUIDsMatching(limit int, matches func(User) bool) ([]int64, int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	capacity := len(s.state.Users)
+	if limit > 0 && limit < capacity {
+		capacity = limit
+	}
+	uids := make([]int64, 0, capacity)
+	matched := 0
+	appendMatch := func(u User) {
+		if matches != nil && !matches(u) {
+			return
+		}
+		matched++
+		if limit <= 0 || len(uids) < limit {
+			uids = append(uids, u.UID)
+		}
+	}
+
+	if len(s.userUIDs) == len(s.state.Users) {
+		for _, uid := range s.userUIDs {
+			if u, ok := s.state.Users[uid]; ok {
+				appendMatch(u)
+			}
+		}
+		return uids, matched
+	}
+
+	// Index repair fallback: sort only the compact UID list rather than copying
+	// every User value before applying the predicate.
+	orderedUIDs := make([]int64, 0, len(s.state.Users))
+	for uid := range s.state.Users {
+		orderedUIDs = append(orderedUIDs, uid)
+	}
+	sort.Slice(orderedUIDs, func(i, j int) bool { return orderedUIDs[i] < orderedUIDs[j] })
+	for _, uid := range orderedUIDs {
+		appendMatch(s.state.Users[uid])
+	}
+	return uids, matched
+}
+
 type UserIdentitySearchField uint8
 
 const (
