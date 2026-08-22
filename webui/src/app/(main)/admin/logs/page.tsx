@@ -330,9 +330,9 @@ export default function AdminRuntimeLogsPage() {
       </div>
 
       <Card className="overflow-hidden">
-        <CardHeader className="flex flex-row items-center justify-between gap-3 border-b p-4">
+        <CardHeader className="flex flex-col items-start gap-2 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle className="text-base">{t("adminLogs.stream")}</CardTitle>
-          <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground sm:w-auto sm:flex-nowrap">
             <span className="whitespace-nowrap">{t("adminLogs.lineCount", { current: logs.length, limit: status?.runtime_log_limit || logLimit })}</span>
             <span className="truncate">{t("adminLogs.cursor", { cursor })}</span>
           </div>

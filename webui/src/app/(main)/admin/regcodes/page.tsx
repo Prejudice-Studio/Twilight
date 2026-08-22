@@ -1058,19 +1058,19 @@ export default function AdminRegcodesPage() {
       {viewMode === "invitecodes" ? (
         <>
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-3 pb-3">
+          <CardHeader className="flex flex-col items-stretch gap-3 pb-3 sm:flex-row sm:items-center sm:justify-between">
             <CardTitle className="text-lg">{t("adminRegcodes.inviteListTitle")}</CardTitle>
-            <div className="flex items-center gap-2">
-              <div className="relative">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="relative w-full sm:w-48">
                 <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   placeholder={t("adminRegcodes.inviteSearchPlaceholder")}
                   value={inviteSearch}
                   onChange={(e) => setInviteSearch(e.target.value)}
-                  className="h-8 w-48 pl-8 text-xs"
+                  className="h-8 w-full pl-8 text-xs"
                 />
               </div>
-              <Button variant="outline" size="sm" onClick={() => void loadInviteData()} disabled={inviteCodesLoading || inviteRegcodesLoading}>
+              <Button className="w-full sm:w-auto" variant="outline" size="sm" onClick={() => void loadInviteData()} disabled={inviteCodesLoading || inviteRegcodesLoading}>
                 {(inviteCodesLoading || inviteRegcodesLoading) ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
                 {t("adminRegcodes.refresh")}
               </Button>
