@@ -4073,14 +4073,25 @@ func (s *Store) UpsertAnnouncement(a Announcement) (Announcement, error) {
 }
 
 func (s *Store) ListAnnouncements(includeHidden bool) []Announcement {
+	return s.ListAnnouncementsFiltered(includeHidden, includeHidden)
+}
+
+// ListAnnouncementsFiltered returns announcements with independent visibility
+// and expiry filters. The legacy ListAnnouncements method intentionally keeps
+// its historical behavior: includeHidden=true also includes expired records.
+func (s *Store) ListAnnouncementsFiltered(includeHidden, includeExpired bool) []Announcement {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	now := time.Now().Unix()
 	out := make([]Announcement, 0)
 	for _, a := range s.state.Announcements {
-		if announcementVisibleForList(a, includeHidden, now) {
-			out = append(out, a)
+		if !includeHidden && !a.Visible {
+			continue
 		}
+		if !includeExpired && a.ExpiredAt > 0 && a.ExpiredAt < now {
+			continue
+		}
+		out = append(out, a)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Pinned != out[j].Pinned {

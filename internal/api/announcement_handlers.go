@@ -17,14 +17,35 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/prejudice-studio/twilight/internal/store"
 )
 
 func (a *App) handleAdminAnnouncements(w http.ResponseWriter, r *http.Request, _ Params) {
-	anns := a.store().ListAnnouncements(true)
-	ok(w, "OK", map[string]any{"announcements": anns, "total": len(anns)})
+	includeInvisible := true
+	if raw := r.URL.Query().Get("include_invisible"); raw != "" {
+		if parsed, err := strconv.ParseBool(raw); err == nil {
+			includeInvisible = parsed
+		}
+	}
+	includeExpired := true
+	if raw := r.URL.Query().Get("include_expired"); raw != "" {
+		if parsed, err := strconv.ParseBool(raw); err == nil {
+			includeExpired = parsed
+		}
+	}
+	page := max(1, queryInt(r, "page", 1))
+	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
+	all := a.store().ListAnnouncementsFiltered(includeInvisible, includeExpired)
+	ok(w, "OK", map[string]any{
+		"announcements": paginate(all, page, perPage),
+		"total":         len(all),
+		"page":          page,
+		"per_page":      perPage,
+		"pages":         pages(len(all), perPage),
+	})
 }
 
 func (a *App) handleAnnouncements(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -41,9 +62,9 @@ func (a *App) handleAnnouncementsMe(w http.ResponseWriter, r *http.Request, _ Pa
 		unseenIDs = append(unseenIDs, a.ID)
 	}
 	ok(w, "OK", map[string]any{
-		"announcements":        anns,
-		"total":                len(anns),
-		"unseen_force_read":    unseen,
+		"announcements":         anns,
+		"total":                 len(anns),
+		"unseen_force_read":     unseen,
 		"unseen_force_read_ids": unseenIDs,
 	})
 }
@@ -86,7 +107,7 @@ func (a *App) handleCreateAnnouncement(w http.ResponseWriter, r *http.Request, _
 func (a *App) handleUpdateAnnouncement(w http.ResponseWriter, r *http.Request, params Params) {
 	id, _ := int64Param(params, "announcement_id")
 	payload := decodeMap(r)
-	existing := store.Announcement{ID: id, Title: "鍏憡", Level: "info", Visible: true, RenderMode: "plain"}
+	existing := store.Announcement{ID: id, Title: "公告", Level: "info", Visible: true, RenderMode: "plain"}
 	for _, ann := range a.store().ListAnnouncements(true) {
 		if ann.ID == id {
 			existing = ann
@@ -94,18 +115,18 @@ func (a *App) handleUpdateAnnouncement(w http.ResponseWriter, r *http.Request, p
 		}
 	}
 	ann, err := a.store().UpsertAnnouncement(store.Announcement{
-		ID:              id,
-		Title:           firstNonEmpty(stringValue(payload, "title"), existing.Title, "公告"),
-		Content:         firstNonEmpty(stringValue(payload, "content"), existing.Content),
-		Visible:         boolValue(payload, "visible", existing.Visible),
-		Level:           firstNonEmpty(stringValue(payload, "level"), existing.Level, "info"),
-		RenderMode:      safeAnnouncementRenderMode(firstNonEmpty(stringValue(payload, "render_mode"), existing.RenderMode)),
-		Pinned:          boolValue(payload, "pinned", existing.Pinned),
-		ForceRead:       boolValue(payload, "force_read", existing.ForceRead),
+		ID:               id,
+		Title:            firstNonEmpty(stringValue(payload, "title"), existing.Title, "公告"),
+		Content:          firstNonEmpty(stringValue(payload, "content"), existing.Content),
+		Visible:          boolValue(payload, "visible", existing.Visible),
+		Level:            firstNonEmpty(stringValue(payload, "level"), existing.Level, "info"),
+		RenderMode:       safeAnnouncementRenderMode(firstNonEmpty(stringValue(payload, "render_mode"), existing.RenderMode)),
+		Pinned:           boolValue(payload, "pinned", existing.Pinned),
+		ForceRead:        boolValue(payload, "force_read", existing.ForceRead),
 		ForceReadSeconds: int(numeric(payload["force_read_seconds"])),
-		CreatedByUID:    existing.CreatedByUID,
-		CreatedAt:       existing.CreatedAt,
-		ExpiredAt:       int64Value(payload, "expires_at", int64Value(payload, "expired_at", existing.ExpiredAt)),
+		CreatedByUID:     existing.CreatedByUID,
+		CreatedAt:        existing.CreatedAt,
+		ExpiredAt:        int64Value(payload, "expires_at", int64Value(payload, "expired_at", existing.ExpiredAt)),
 	})
 	if statusFromError(w, err) {
 		return

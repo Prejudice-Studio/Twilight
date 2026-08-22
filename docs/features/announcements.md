@@ -97,7 +97,7 @@
 - 新建 / 编辑对话框包含：标题（可选）、内容（最多 10000 字）、级别下拉、**渲染方式下拉**（纯文本 / Markdown / BBCode）、截止时间（`datetime-local`，留空表示永久）、置顶开关、立即可见开关。
 - 表单内嵌「预览」区，使用同一个 `SafeAnnouncementContent` 组件实时渲染当前内容，便于发布前确认效果。
 
-> 前端的 `adminListAnnouncements` 会附带 `page` / `per_page` / `include_invisible` / `include_expired` 查询参数，但当前 Go 端 `handleAdminAnnouncements` 直接返回 `ListAnnouncements(true)` 的全量结果，**并未解析这些查询参数**，也不返回 `page` / `per_page` / `pages` 字段。分页与过滤目前实际由前端在拿到全量后自行处理。
+管理员列表由后端完成筛选和分页：`page` / `per_page`（每页最多 100 条）、`include_invisible` 与 `include_expired` 会在 `handleAdminAnnouncements` 中解析，响应返回 `page` / `per_page` / `pages` / `total`。前端只保留当前页，切换筛选或页码时会取消已过时的读请求，避免在大规模公告数据下重复传输和渲染。
 
 ## 仪表盘与公开展示
 
@@ -140,7 +140,7 @@
 
 | 方法 | 路径 | 说明 |
 | ---- | ---- | ---- |
-| `GET` | `/api/v1/admin/announcements` | 列出全部公告（含隐藏与过期）。`data` 为 `{ announcements, total }`。 |
+| `GET` | `/api/v1/admin/announcements` | 管理员筛选分页列表。`data` 为 `{ announcements, total, page, per_page, pages }`；默认包含隐藏与过期公告，可用 `include_invisible=false`、`include_expired=false` 排除。 |
 | `POST` | `/api/v1/admin/announcements` | 新建公告。成功返回 201 与新建记录。 |
 | `PUT` | `/api/v1/admin/announcements/:announcement_id` | 更新公告。未传字段沿用既有值；`created_by_uid` / `created_at` 保持不变。 |
 | `DELETE` | `/api/v1/admin/announcements/:announcement_id` | 删除公告。不存在则返回未找到错误。 |

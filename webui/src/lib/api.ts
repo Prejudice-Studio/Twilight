@@ -2423,6 +2423,7 @@ class ApiClient {
     per_page?: number;
     include_invisible?: boolean;
     include_expired?: boolean;
+    signal?: AbortSignal;
   } = {}) {
     const query = new URLSearchParams();
     if (params.page) query.set('page', String(params.page));
@@ -2435,7 +2436,10 @@ class ApiClient {
       page: number;
       per_page: number;
       pages: number;
-    }>(`/admin/announcements?${query.toString()}`);
+    }>(`/admin/announcements?${query.toString()}`, {
+      signal: params.signal,
+      cache: "no-store",
+    }, { cacheRead: false, dedupe: false });
   }
 
   async adminCreateAnnouncement(payload: {

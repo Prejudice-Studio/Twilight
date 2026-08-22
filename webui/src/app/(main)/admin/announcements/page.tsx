@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { motion } from "framer-motion";
 import {
   Megaphone,
   Plus,
@@ -120,13 +119,15 @@ export default function AdminAnnouncementsPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm());
   const [saving, setSaving] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
 
-  const loadResource = useCallback(async () => {
+  const loadResource = useCallback(async (signal?: AbortSignal) => {
     const res = await api.adminListAnnouncements({
       page,
       per_page: 20,
       include_invisible: includeInvisible,
       include_expired: includeExpired,
+      signal,
     });
     if (res.success && res.data) {
       setItems(res.data.announcements || []);
@@ -186,7 +187,18 @@ export default function AdminAnnouncementsPage() {
       if (res.success) {
         toast({ title: editingId ? t("adminAnnouncements.updated") : t("adminAnnouncements.published") });
         setCreateOpen(false);
-        await reload();
+        if (res.data) {
+          if (editingId) {
+            setItems((current) => current.map((item) => item.id === editingId ? res.data! : item));
+          } else if (page === 1) {
+            setItems((current) => [res.data!, ...current].slice(0, 20));
+            setTotal((current) => current + 1);
+          } else {
+            await reload();
+          }
+        } else {
+          await reload();
+        }
       } else {
         toast({ title: t("adminConfig.saveFailureTitle"), description: res.message, variant: "destructive" });
       }
@@ -209,11 +221,13 @@ export default function AdminAnnouncementsPage() {
       confirmLabel: t("common.delete"),
     });
     if (!ok) return;
+    setPendingAction(`delete:${id}`);
     try {
       const res = await api.adminDeleteAnnouncement(id);
       if (res.success) {
         toast({ title: t("adminAnnouncements.deleted") });
-        await reload();
+        setItems((current) => current.filter((item) => item.id !== id));
+        setTotal((current) => Math.max(0, current - 1));
       } else {
         toast({ title: t("common.deleteFailed"), description: res.message, variant: "destructive" });
       }
@@ -223,15 +237,22 @@ export default function AdminAnnouncementsPage() {
         description: err instanceof Error ? err.message : t("adminAnnouncements.requestError"),
         variant: "destructive",
       });
+    } finally {
+      setPendingAction(null);
     }
   };
 
   const toggleVisible = async (ann: Announcement) => {
+    setPendingAction(`visible:${ann.id}`);
     try {
       const res = await api.adminUpdateAnnouncement(ann.id, { visible: !ann.visible });
       if (res.success) {
         toast({ title: ann.visible ? t("adminAnnouncements.hidden") : t("adminAnnouncements.shown") });
-        await reload();
+        if (res.data) {
+          setItems((current) => current.map((item) => item.id === ann.id ? res.data! : item));
+        } else {
+          await reload();
+        }
       } else {
         toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
       }
@@ -241,15 +262,22 @@ export default function AdminAnnouncementsPage() {
         description: err instanceof Error ? err.message : t("adminAnnouncements.requestError"),
         variant: "destructive",
       });
+    } finally {
+      setPendingAction(null);
     }
   };
 
   const togglePinned = async (ann: Announcement) => {
+    setPendingAction(`pinned:${ann.id}`);
     try {
       const res = await api.adminUpdateAnnouncement(ann.id, { pinned: !ann.pinned });
       if (res.success) {
         toast({ title: ann.pinned ? t("adminAnnouncements.unpinned") : t("adminAnnouncements.pinned") });
-        await reload();
+        if (res.data) {
+          setItems((current) => current.map((item) => item.id === ann.id ? res.data! : item));
+        } else {
+          await reload();
+        }
       } else {
         toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
       }
@@ -259,15 +287,13 @@ export default function AdminAnnouncementsPage() {
         description: err instanceof Error ? err.message : t("adminAnnouncements.requestError"),
         variant: "destructive",
       });
+    } finally {
+      setPendingAction(null);
     }
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="space-y-6"
-    >
+    <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
@@ -367,12 +393,14 @@ export default function AdminAnnouncementsPage() {
                         )}
                       </p>
                     </div>
-                    <div className="flex gap-1 shrink-0">
+                    <div className="flex max-w-full flex-wrap justify-end gap-1 shrink-0">
                       <Button
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8"
                         onClick={() => togglePinned(ann)}
+                        disabled={pendingAction !== null}
+                        aria-label={ann.pinned ? t("adminAnnouncements.unpin") : t("adminAnnouncements.pin")}
                         title={ann.pinned ? t("adminAnnouncements.unpin") : t("adminAnnouncements.pin")}
                       >
                         <Pin className={`h-4 w-4 ${ann.pinned ? "text-primary" : ""}`} />
@@ -382,6 +410,8 @@ export default function AdminAnnouncementsPage() {
                         size="icon"
                         className="h-8 w-8"
                         onClick={() => toggleVisible(ann)}
+                        disabled={pendingAction !== null}
+                        aria-label={ann.visible ? t("common.hide") : t("common.show")}
                         title={ann.visible ? t("common.hide") : t("common.show")}
                       >
                         {ann.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
@@ -391,6 +421,8 @@ export default function AdminAnnouncementsPage() {
                         size="icon"
                         className="h-8 w-8"
                         onClick={() => openEdit(ann)}
+                        disabled={pendingAction !== null}
+                        aria-label={t("adminAnnouncements.edit")}
                       >
                         <Edit2 className="h-4 w-4" />
                       </Button>
@@ -399,6 +431,8 @@ export default function AdminAnnouncementsPage() {
                         size="icon"
                         className="h-8 w-8 text-destructive hover:text-destructive"
                         onClick={() => handleDelete(ann.id)}
+                        disabled={pendingAction !== null}
+                        aria-label={t("common.delete")}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -564,6 +598,6 @@ export default function AdminAnnouncementsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </motion.div>
+    </div>
   );
 }

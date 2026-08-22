@@ -594,6 +594,12 @@ func TestStoreCountHelpersMatchListSemantics(t *testing.T) {
 	if got, want := st.CountAnnouncements(true), len(st.ListAnnouncements(true)); got != want || got != 3 {
 		t.Fatalf("all announcement count=%d want list len %d and all=3", got, want)
 	}
+	if got := st.ListAnnouncementsFiltered(false, true); len(got) != 1 || got[0].Title != "visible" {
+		t.Fatalf("visible-only announcement filter returned %#v", got)
+	}
+	if got := st.ListAnnouncementsFiltered(true, false); len(got) != 2 {
+		t.Fatalf("non-expired announcement filter returned %d items, want 2", len(got))
+	}
 
 	if _, err := st.UpsertDeveloperJSPreset(DeveloperJSPreset{Name: "one", Code: "return 1"}); err != nil {
 		t.Fatal(err)

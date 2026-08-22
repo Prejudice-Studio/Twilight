@@ -1508,7 +1508,7 @@ curl -X POST "http://localhost:5000/api/v1/admin/scheduler/jobs/check_expired/ru
 
 > 公告（`announcements`）以字段形式保存在单一状态文档（`internal/store`）中，不存在独立数据库或 `ALTER TABLE` 操作；前台读取见 [11.x 公告](#1112-公告)，功能说明见 [公告系统](../features/announcements.md)。
 
-`GET /admin/announcements` — 列出全部公告。
+`GET /admin/announcements` — 管理员筛选分页列出公告。支持 `page`、`per_page`（1-100）、`include_invisible`、`include_expired`；响应 `data` 为 `{ announcements, total, page, per_page, pages }`。
 
 `POST /admin/announcements` — 创建公告。
 
