@@ -174,10 +174,8 @@ func (a *App) handleBatchLockEmbyUnbind(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	result := batchResult(len(uids))
-	usersByUID := map[int64]store.User{}
-	for _, user := range a.store().ListUsers() {
-		usersByUID[user.UID] = user
-	}
+	// 目标最多 200 个，只读取目标用户；不要为了一个有界批量请求复制全量用户表。
+	usersByUID := a.store().UsersByUIDs(uids)
 	eligible := make([]int64, 0, len(uids))
 	skippedNoEmby := 0
 	for _, uid := range uids {
@@ -232,10 +230,7 @@ func (a *App) handleBatchClearEmbyGrantUnbound(w http.ResponseWriter, r *http.Re
 		return
 	}
 	result := batchResult(len(uids))
-	usersByUID := map[int64]store.User{}
-	for _, user := range a.store().ListUsers() {
-		usersByUID[user.UID] = user
-	}
+	usersByUID := a.store().UsersByUIDs(uids)
 	eligible := make([]int64, 0, len(uids))
 	for _, uid := range uids {
 		target, okUser := usersByUID[uid]

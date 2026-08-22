@@ -62,6 +62,25 @@ func TestUserUIDsMatchingKeepsOrderAndCountWithoutUserCopies(t *testing.T) {
 	}
 }
 
+func TestUsersByUIDsCopiesOnlyRequestedUsers(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	first, err := st.CreateUser(User{Username: "first", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := st.CreateUser(User{Username: "second", Role: RoleNormal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	users := st.UsersByUIDs([]int64{second.UID, 999999, second.UID})
+	if len(users) != 1 || users[second.UID].Username != "second" {
+		t.Fatalf("users=%v, want only second user", users)
+	}
+	if _, ok := users[first.UID]; ok {
+		t.Fatal("unrequested user was copied")
+	}
+}
+
 func TestEmbyIDIndexTracksUserLifecycle(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	alpha, err := st.CreateUser(User{Username: "alpha", EmbyID: "emby-alpha", Role: RoleNormal})

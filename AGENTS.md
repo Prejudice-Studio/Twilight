@@ -251,6 +251,8 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Batch `select_all` filtering that only needs target IDs must use the Store UID-only
   matcher; do not call `UsersMatching` with a callback that always returns false,
   because that still reserves a full `[]User` backing array.
+- Bounded batch handlers that need user fields for explicit target IDs must use
+  `UsersByUIDs`; do not rebuild a UID map from `ListUsers()`.
 - Admin user listing must filter and sort the lightweight `store.User` slice before
   constructing `publicUserAt` DTO maps, and must construct DTOs only for the current
   page. Keep `per_page` bounded; do not materialize full public rows for 2000+ users.

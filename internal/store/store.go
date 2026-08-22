@@ -2863,6 +2863,22 @@ func (s *Store) UserUIDsMatching(limit int, matches func(User) bool) ([]int64, i
 	return uids, matched
 }
 
+// UsersByUIDs copies only the requested users under one read lock. It is for
+// bounded batch handlers that need several user fields before a mutation; it
+// deliberately omits missing IDs so callers can preserve their own not-found
+// result ordering.
+func (s *Store) UsersByUIDs(uids []int64) map[int64]User {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	users := make(map[int64]User, len(uids))
+	for _, uid := range uids {
+		if user, ok := s.state.Users[uid]; ok {
+			users[uid] = user
+		}
+	}
+	return users
+}
+
 type UserIdentitySearchField uint8
 
 const (
