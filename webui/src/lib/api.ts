@@ -1399,12 +1399,12 @@ class ApiClient {
     return res;
   }
 
-  async getDatabaseStatus() {
-    return this.request<DatabaseStatus>("/system/admin/database/status");
+  async getDatabaseStatus(signal?: AbortSignal) {
+    return this.request<DatabaseStatus>("/system/admin/database/status", { signal, cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
-  async listDatabaseBackups() {
-    return this.request<{ backups: DatabaseBackup[] }>("/system/admin/database/backups");
+  async listDatabaseBackups(signal?: AbortSignal) {
+    return this.request<{ backups: DatabaseBackup[] }>("/system/admin/database/backups", { signal, cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
   async inspectDatabaseBackup(name: string) {

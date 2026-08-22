@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import {
   AlertTriangle,
@@ -61,6 +61,11 @@ function countOf(result: DatabaseMigrationResult | null, key: string): number {
 function compactJSON(value?: Record<string, unknown>): string {
   if (!value) return "-";
   return JSON.stringify(value);
+}
+
+function isAbortError(error: unknown): boolean {
+  return (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError");
 }
 
 function StatusPill({ ok, label }: { ok: boolean; label: string }) {
@@ -136,14 +141,21 @@ export default function AdminDatabaseMigrationPage() {
   const [restorePreview, setRestorePreview] = useState<DatabaseRestoreResult | null>(null);
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [backupNote, setBackupNote] = useState("");
+  const loadAbortRef = useRef<AbortController | null>(null);
+  const loadSequenceRef = useRef(0);
 
   const loadDatabase = useCallback(async () => {
+    loadAbortRef.current?.abort();
+    const controller = new AbortController();
+    loadAbortRef.current = controller;
+    const sequence = ++loadSequenceRef.current;
     setLoading(true);
     try {
       const [statusRes, backupsRes] = await Promise.all([
-        api.getDatabaseStatus(),
-        api.listDatabaseBackups(),
+        api.getDatabaseStatus(controller.signal),
+        api.listDatabaseBackups(controller.signal),
       ]);
+      if (controller.signal.aborted || sequence !== loadSequenceRef.current) return;
       if (statusRes.success && statusRes.data) {
         setDbStatus(statusRes.data);
       }
@@ -151,14 +163,23 @@ export default function AdminDatabaseMigrationPage() {
         setDbBackups(backupsRes.data.backups || []);
       }
     } catch (error: any) {
-      toast({ title: t("adminDatabase.loadStatusFailed"), description: error.message || t("adminDatabase.checkBackend"), variant: "destructive" });
+      if (!isAbortError(error) && sequence === loadSequenceRef.current) {
+        toast({ title: t("adminDatabase.loadStatusFailed"), description: error.message || t("adminDatabase.checkBackend"), variant: "destructive" });
+      }
     } finally {
-      setLoading(false);
+      if (sequence === loadSequenceRef.current) setLoading(false);
+      if (loadAbortRef.current === controller) loadAbortRef.current = null;
     }
   }, [toast, t]);
 
   useEffect(() => {
+    const sequenceRef = loadSequenceRef;
+    const abortRef = loadAbortRef;
     void loadDatabase();
+    return () => {
+      sequenceRef.current++;
+      abortRef.current?.abort();
+    };
   }, [loadDatabase]);
 
   const latestBackup = dbBackups[0];
@@ -421,7 +442,7 @@ export default function AdminDatabaseMigrationPage() {
           {dbBackups.length === 0 ? (
             <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">{t("adminDatabase.noBackups")}</div>
           ) : (
-            <div className="divide-y rounded-xl border">
+            <div className="custom-scrollbar max-h-[min(55dvh,640px)] divide-y overflow-y-auto overscroll-contain rounded-xl border">
               {dbBackups.map((backup) => (
                 <div key={backup.name} className="flex flex-col gap-3 p-3 md:flex-row md:items-center md:justify-between">
                   <div className="min-w-0">
@@ -625,7 +646,7 @@ export default function AdminDatabaseMigrationPage() {
       )}
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="custom-scrollbar max-h-[85dvh] max-w-lg overflow-y-auto overscroll-contain">
           <DialogHeader>
             <DialogTitle>{t("adminDatabase.confirmMigrateTitle")}</DialogTitle>
             <DialogDescription>{t("adminDatabase.confirmMigrateDesc")}</DialogDescription>
@@ -657,7 +678,7 @@ export default function AdminDatabaseMigrationPage() {
       </Dialog>
 
       <Dialog open={backupPreviewOpen} onOpenChange={setBackupPreviewOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="custom-scrollbar max-h-[85dvh] max-w-lg overflow-y-auto overscroll-contain">
           <DialogHeader>
             <DialogTitle>{t("adminDatabase.backupDetailTitle")}</DialogTitle>
             <DialogDescription>{t("adminDatabase.backupDetailDesc")}</DialogDescription>
@@ -686,7 +707,7 @@ export default function AdminDatabaseMigrationPage() {
       </Dialog>
 
       <Dialog open={restoreOpen} onOpenChange={setRestoreOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="custom-scrollbar max-h-[85dvh] max-w-lg overflow-y-auto overscroll-contain">
           <DialogHeader>
             <DialogTitle>{t("adminDatabase.confirmRestoreTitle")}</DialogTitle>
             <DialogDescription>{t("adminDatabase.confirmRestoreDesc")}</DialogDescription>

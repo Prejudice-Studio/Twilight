@@ -1510,6 +1510,8 @@ curl -X POST "http://localhost:5000/api/v1/admin/scheduler/jobs/check_expired/ru
 
 `GET /admin/announcements` — 管理员筛选分页列出公告。支持 `page`、`per_page`（1-100）、`include_invisible`、`include_expired`；响应 `data` 为 `{ announcements, total, page, per_page, pages }`。
 
+管理员数据库页的状态与备份列表是两个可取消的只读请求；前端刷新或离开页面时会取消旧请求。备份历史和预览均在前端受限滚动区域内显示，不会因历史备份数量增长而撑大后台页面。
+
 `POST /admin/announcements` — 创建公告。
 
 `PUT /admin/announcements/{announcement_id}` — 更新公告。
