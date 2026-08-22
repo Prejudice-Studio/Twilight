@@ -1374,15 +1374,10 @@ func (a *App) canInvite(user store.User) (bool, string) {
 }
 
 func (a *App) inviteForest() map[string]any {
-	rels := a.store().InviteRelations()
-	users := a.store().ListUsers()
-	userByID := map[int64]store.User{}
+	rels, userByID := a.store().InviteForestSnapshot(a.cfg().InviteEnabled)
 	allUIDs := map[int64]bool{}
 	parentOf := map[int64]int64{}
 	children := map[int64][]int64{}
-	for _, u := range users {
-		userByID[u.UID] = u
-	}
 	for _, rel := range rels {
 		allUIDs[rel.ParentUID] = true
 		allUIDs[rel.ChildUID] = true
@@ -1392,17 +1387,25 @@ func (a *App) inviteForest() map[string]any {
 	// 邀请开启时保留仅持有码、尚未形成关系的邀请人，便于管理员查看潜在树根。
 	// 关闭后管理页只展示真实历史关系，避免无下级的持码用户成为孤立节点。
 	if a.cfg().InviteEnabled {
-		for _, code := range a.store().ListAllInviteCodes() {
-			allUIDs[code.InviterUID] = true
+		for uid := range userByID {
+			// The Store snapshot includes code-only owners only while this flag is
+			// enabled. Relation endpoints are already represented in allUIDs.
+			if !allUIDs[uid] {
+				allUIDs[uid] = true
+			}
 		}
 	}
-	nodes := []map[string]any{}
+	nodeUsers := make([]store.User, 0, len(allUIDs))
 	for uid := range allUIDs {
 		if u, ok := userByID[uid]; ok {
-			nodes = append(nodes, map[string]any{"uid": u.UID, "username": u.Username, "role": u.Role, "emby_id": emptyNil(u.EmbyID), "emby_disabled": u.EmbyDisabled, "active": u.Active, "telegram_id": nullableInt(u.TelegramID), "register_time": u.RegisterTime, "expired_at": u.ExpiredAt, "is_root": parentOf[uid] == 0})
+			nodeUsers = append(nodeUsers, u)
 		}
 	}
-	sort.Slice(nodes, func(i, j int) bool { return numeric(nodes[i]["uid"]) < numeric(nodes[j]["uid"]) })
+	sort.Slice(nodeUsers, func(i, j int) bool { return nodeUsers[i].UID < nodeUsers[j].UID })
+	nodes := make([]map[string]any, 0, len(nodeUsers))
+	for _, u := range nodeUsers {
+		nodes = append(nodes, map[string]any{"uid": u.UID, "username": u.Username, "role": u.Role, "emby_id": emptyNil(u.EmbyID), "emby_disabled": u.EmbyDisabled, "active": u.Active, "telegram_id": nullableInt(u.TelegramID), "register_time": u.RegisterTime, "expired_at": u.ExpiredAt, "is_root": parentOf[u.UID] == 0})
+	}
 	edges := []map[string]any{}
 	for _, rel := range rels {
 		edges = append(edges, map[string]any{"parent": rel.ParentUID, "child": rel.ChildUID, "code": rel.Code, "created_at": rel.CreatedAt})
@@ -1427,10 +1430,11 @@ func subtreeDepth(root int64, children map[int64][]int64) int {
 		uid   int64
 		depth int
 	}{{root, 1}}
+	queueIndex := 0
 	seen := map[int64]bool{root: true}
-	for len(queue) > 0 {
+	for queueIndex < len(queue) {
 		item := queue[0]
-		queue = queue[1:]
+		queueIndex++
 		if item.depth > maxDepth {
 			maxDepth = item.depth
 		}

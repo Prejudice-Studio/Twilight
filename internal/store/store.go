@@ -4370,6 +4370,40 @@ func (s *Store) InviteRelations() []InviteRelation {
 	return out
 }
 
+// InviteForestSnapshot returns only the users that can appear in the admin
+// invite forest: relation endpoints, plus invite-code owners when prospective
+// roots are requested. Keeping the UID selection and user copy under one read
+// lock avoids materializing the full user and invite-code maps for every tree
+// request.
+func (s *Store) InviteForestSnapshot(includeCodeOwners bool) ([]InviteRelation, map[int64]User) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	relations := make([]InviteRelation, 0, len(s.state.InviteRelations))
+	userIDs := make(map[int64]struct{}, len(s.state.InviteRelations)*2)
+	for _, rel := range s.state.InviteRelations {
+		relations = append(relations, rel)
+		userIDs[rel.ParentUID] = struct{}{}
+		userIDs[rel.ChildUID] = struct{}{}
+	}
+	if includeCodeOwners {
+		for _, code := range s.state.InviteCodes {
+			userIDs[code.InviterUID] = struct{}{}
+		}
+	}
+	sort.Slice(relations, func(i, j int) bool {
+		return relations[i].ParentUID < relations[j].ParentUID ||
+			(relations[i].ParentUID == relations[j].ParentUID && relations[i].ChildUID < relations[j].ChildUID)
+	})
+	users := make(map[int64]User, len(userIDs))
+	for uid := range userIDs {
+		if user, ok := s.state.Users[uid]; ok {
+			users[uid] = user
+		}
+	}
+	return relations, users
+}
+
 func (s *Store) ParentOf(uid int64) (InviteRelation, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
