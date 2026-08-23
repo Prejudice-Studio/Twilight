@@ -60,6 +60,7 @@ import type {
   MediaRequest,
   MediaRequestData,
   AdminMediaRequestListResponse,
+  MediaRequestBatchUpdateResponse,
   PlaybackRecordWithSync,
   Regcode,
   RegisterAvailability,
@@ -2392,10 +2393,18 @@ class ApiClient {
       { cacheRead: false, dedupe: false },
     );
     if (res.success && res.data?.requests) {
-      res.data.requests = res.data.requests.map((item) => ({
-        ...item,
-        status: normalizeMediaRequestStatus(item.status, "admin"),
-      }));
+      res.data.requests = res.data.requests.map((item) => {
+        const groupedRequests = (item.grouped_requests || [item]).map((member) => ({
+          ...member,
+          status: normalizeMediaRequestStatus(member.status, "admin"),
+        }));
+        return {
+          ...item,
+          status: normalizeMediaRequestStatus(item.status, "admin"),
+          grouped_requests: groupedRequests,
+          group_count: item.group_count || groupedRequests.length,
+        };
+      });
     }
     return res;
   }
@@ -2414,6 +2423,35 @@ class ApiClient {
     }).then((res) => {
       if (res.success && res.data) {
         res.data.status = normalizeMediaRequestStatus(res.data.status, "admin");
+      }
+      return res;
+    });
+  }
+
+  /** 管理员原子更新一个同名求片组，任一 revision 冲突时整体失败。 */
+  async updateMediaRequests(
+    requests: Array<Pick<MediaRequest, "require_key" | "revision">>,
+    status: string,
+    note?: string,
+  ) {
+    const normalizedStatus = normalizeMediaRequestStatus(status, "admin");
+    const normalizedNote = (note || "").trim().slice(0, 1000);
+    return this.request<MediaRequestBatchUpdateResponse>("/admin/media-requests/batch/by-key", {
+      method: "PUT",
+      body: JSON.stringify({
+        status: normalizedStatus,
+        note: normalizedNote,
+        items: requests.map((request) => ({
+          require_key: request.require_key,
+          revision: request.revision,
+        })),
+      }),
+    }).then((res) => {
+      if (res.success && res.data) {
+        res.data.requests = res.data.requests.map((item) => ({
+          ...item,
+          status: normalizeMediaRequestStatus(item.status, "admin"),
+        }));
       }
       return res;
     });

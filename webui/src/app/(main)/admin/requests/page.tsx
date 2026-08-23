@@ -18,6 +18,8 @@ import {
   Copy,
   Search,
   RefreshCw,
+  Layers3,
+  Ungroup,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button, IconButton } from "@/components/ui/button";
@@ -101,12 +103,27 @@ function mediaRequestRating(value: unknown): string | null {
   return Number.isFinite(rating) && rating > 0 ? rating.toFixed(1) : null;
 }
 
+function mediaRequestGroupMembers(request: MediaRequest): MediaRequest[] {
+  return request.grouped_requests?.length ? request.grouped_requests : [request];
+}
+
+function mediaRequestGroupKey(request: MediaRequest): string {
+  return request.group_key || request.require_key || `${request.source}-${request.id}`;
+}
+
+function mediaRequestSourceClass(source: string): string {
+  return source.toLowerCase() === "bangumi"
+    ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+    : "border-cyan-500/30 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300";
+}
+
 export default function AdminRequestsPage() {
   const { toast } = useToast();
   const { confirm } = useConfirm();
   const { t } = useI18n();
   const [requests, setRequests] = useState<MediaRequest[]>([]);
   const [total, setTotal] = useState(0);
+  const [requestTotal, setRequestTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(20);
   const [status, setStatus] = useState<AdminRequestStatus>("active");
@@ -119,12 +136,14 @@ export default function AdminRequestsPage() {
   const [loadedKey, setLoadedKey] = useState("");
   const [hasLoaded, setHasLoaded] = useState(false);
   const [deletingKey, setDeletingKey] = useState("");
+  const [splitGroupKeys, setSplitGroupKeys] = useState<Set<string>>(() => new Set());
   const requestAbortRef = useRef<AbortController | null>(null);
   const requestSequenceRef = useRef(0);
 
   // Action dialog
   const [actionOpen, setActionOpen] = useState(false);
-  const [selectedRequest, setSelectedRequest] = useState<MediaRequest | null>(null);
+  const [selectedRequests, setSelectedRequests] = useState<MediaRequest[]>([]);
+  const [selectedGroupKey, setSelectedGroupKey] = useState("");
   const [selectedStatus, setSelectedStatus] = useState("accepted");
   const [adminNote, setAdminNote] = useState("");
   const [isActioning, setIsActioning] = useState(false);
@@ -144,7 +163,12 @@ export default function AdminRequestsPage() {
         throw new Error(res.message || t("adminRequests.loadFailed"));
       }
       setRequests(res.data.requests);
+      setSplitGroupKeys(new Set());
       setTotal(res.data.total);
+      setRequestTotal(res.data.request_total ?? res.data.requests.reduce(
+        (count, item) => count + mediaRequestGroupMembers(item).length,
+        0,
+      ));
       setStatusCounts({ ...EMPTY_STATUS_COUNTS, ...res.data.status_counts });
       setLoadedKey(requestKey);
       setHasLoaded(true);
@@ -194,40 +218,66 @@ export default function AdminRequestsPage() {
   };
 
   const handleAction = async () => {
-    if (!selectedRequest) return;
-    if (!selectedRequest.require_key) {
+    if (selectedRequests.length === 0) return;
+    if (selectedRequests.some((request) => !request.require_key)) {
       toast({ title: t("adminRequests.missingRequireKey"), variant: "destructive" });
       return;
     }
 
     setIsActioning(true);
     try {
-      const previous = selectedRequest;
-      const res = await api.updateMediaRequest(
-        previous.require_key,
-        selectedStatus,
-        adminNote,
-        previous.revision,
-      );
+      const res = selectedRequests.length > 1
+        ? await api.updateMediaRequests(selectedRequests, selectedStatus, adminNote)
+        : await api.updateMediaRequest(
+          selectedRequests[0].require_key,
+          selectedStatus,
+          adminNote,
+          selectedRequests[0].revision,
+        );
 
       if (res.success && res.data) {
-        const updated = res.data;
+        const updatedRequests = "requests" in res.data ? res.data.requests : [res.data];
+        const updatedByKey = new Map(updatedRequests.map((request) => [request.require_key, request]));
         toast({
           title: t("common.operationSuccess"),
           variant: "success",
         });
         setActionOpen(false);
-        setSelectedRequest(null);
+        setSelectedRequests([]);
         setAdminNote("");
-        setStatusCounts((current) => updateStatusCounts(current, previous.status, updated.status));
-        if (matchesStatusFilter(updated.status, status)) {
-          setRequests((current) => current.map((item) => (
-            item.require_key === previous.require_key ? updated : item
-          )));
-        } else {
-          setRequests((current) => current.filter((item) => item.require_key !== previous.require_key));
-          setTotal((current) => Math.max(0, current - 1));
+        setStatusCounts((current) => selectedRequests.reduce((counts, previous) => {
+          const updated = updatedByKey.get(previous.require_key);
+          return updated ? updateStatusCounts(counts, previous.status, updated.status) : counts;
+        }, current));
+        const parentGroup = requests.find((group) => mediaRequestGroupKey(group) === selectedGroupKey);
+        const removedCount = selectedRequests.filter((previous) => {
+          const updated = updatedByKey.get(previous.require_key);
+          return updated ? !matchesStatusFilter(updated.status, status) : false;
+        }).length;
+        if (removedCount > 0) {
+          setRequestTotal((count) => Math.max(0, count - removedCount));
+          if (parentGroup && removedCount === mediaRequestGroupMembers(parentGroup).length) {
+            setTotal((count) => Math.max(0, count - 1));
+          }
         }
+        setRequests((current) => current.flatMap((group) => {
+          if (mediaRequestGroupKey(group) !== selectedGroupKey) return [group];
+          const previousMembers = mediaRequestGroupMembers(group);
+          const nextMembers = previousMembers.flatMap((member) => {
+            const updated = updatedByKey.get(member.require_key);
+            if (!updated) return [member];
+            return matchesStatusFilter(updated.status, status) ? [updated] : [];
+          });
+          if (nextMembers.length === 0) {
+            return [];
+          }
+          return [{
+            ...nextMembers[0],
+            group_key: group.group_key,
+            group_count: nextMembers.length,
+            grouped_requests: nextMembers,
+          }];
+        }));
       } else {
         toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
       }
@@ -262,10 +312,29 @@ export default function AdminRequestsPage() {
       const res = await api.deleteMediaRequest(request.require_key, request.revision);
       if (res.success) {
         toast({ title: t("media.deleteSuccess"), variant: "success" });
-        setRequests((current) => current.filter((item) => item.require_key !== request.require_key));
+        const parentGroup = requests.find((group) => mediaRequestGroupMembers(group).some(
+          (member) => member.require_key === request.require_key,
+        ));
+        if (parentGroup && mediaRequestGroupMembers(parentGroup).length === 1) {
+          setTotal((count) => Math.max(0, count - 1));
+        }
+        setRequests((current) => current.flatMap((group) => {
+          const previousMembers = mediaRequestGroupMembers(group);
+          if (!previousMembers.some((member) => member.require_key === request.require_key)) return [group];
+          const nextMembers = previousMembers.filter((member) => member.require_key !== request.require_key);
+          if (nextMembers.length === 0) {
+            return [];
+          }
+          return [{
+            ...nextMembers[0],
+            group_key: group.group_key,
+            group_count: nextMembers.length,
+            grouped_requests: nextMembers,
+          }];
+        }));
         setStatusCounts((current) => updateStatusCounts(current, request.status));
-        setTotal((current) => Math.max(0, current - 1));
-        if (requests.length === 1 && page > 1) {
+        setRequestTotal((current) => Math.max(0, current - 1));
+        if (total === 1 && page > 1) {
           setPage((current) => Math.max(1, current - 1));
         }
       } else {
@@ -284,10 +353,13 @@ export default function AdminRequestsPage() {
     }
   };
 
-  const openActionDialog = (request: MediaRequest) => {
-    setSelectedRequest(request);
-    setSelectedStatus(request.status === "pending" ? "accepted" : request.status);
-    setAdminNote(request.admin_note || "");
+  const openActionDialog = (group: MediaRequest, request?: MediaRequest) => {
+    const targets = request ? [request] : mediaRequestGroupMembers(group);
+    const first = targets[0];
+    setSelectedRequests(targets);
+    setSelectedGroupKey(mediaRequestGroupKey(group));
+    setSelectedStatus(first.status === "pending" ? "accepted" : first.status);
+    setAdminNote(targets.length === 1 ? (first.admin_note || "") : "");
     setActionOpen(true);
   };
 
@@ -335,6 +407,14 @@ export default function AdminRequestsPage() {
 
   const pages = Math.ceil(total / perPage);
   const isChangingView = isLoading && loadedKey !== requestKey;
+  const displayItems = requests.flatMap((group) => {
+    const groupKey = mediaRequestGroupKey(group);
+    const members = mediaRequestGroupMembers(group);
+    if (members.length > 1 && splitGroupKeys.has(groupKey)) {
+      return members.map((request) => ({ group, groupKey, members, request, isSplit: true }));
+    }
+    return [{ group, groupKey, members, request: group, isSplit: false }];
+  });
 
   if (loadError && !hasLoaded) {
     return <PageError message={loadError} onRetry={() => void loadRequests()} />;
@@ -348,7 +428,7 @@ export default function AdminRequestsPage() {
           <p className="text-sm text-muted-foreground">{t("adminRequests.description")}</p>
         </div>
         <Badge variant="outline" className="self-start px-3 py-1.5 text-sm sm:self-auto sm:px-4 sm:py-2 sm:text-lg">
-          {t("adminReview.totalRequests", { count: total })}
+          {t("adminReview.totalRequests", { count: requestTotal })}
         </Badge>
       </div>
 
@@ -417,10 +497,12 @@ export default function AdminRequestsPage() {
             </div>
           ) : (
             <div className="custom-scrollbar max-h-[min(72dvh,900px)] divide-y overflow-y-auto overscroll-contain">
-              {requests.map((request) => (
+              {displayItems.map(({ group, groupKey, members, request, isSplit }) => (
                 <div
-                  key={request.require_key || `${request.source}-${request.id}`}
-                  className="flex flex-col gap-3 p-4 hover:bg-muted/30 sm:flex-row sm:items-center sm:justify-between"
+                  key={`${groupKey}:${isSplit ? request.require_key : "group"}`}
+                  className={isSplit
+                    ? "flex flex-col gap-3 bg-muted/15 p-4 pl-6 hover:bg-muted/30 sm:flex-row sm:items-center sm:justify-between"
+                    : "flex flex-col gap-3 p-4 hover:bg-muted/30 sm:flex-row sm:items-center sm:justify-between"}
                 >
                   <div className="flex min-w-0 flex-1 items-start gap-4">
                     <div className="relative flex h-20 w-14 shrink-0 items-center justify-center rounded-lg bg-primary/5 overflow-hidden border border-primary/10">
@@ -456,6 +538,12 @@ export default function AdminRequestsPage() {
                             </a>
                           );
                         })()}
+                        {members.length > 1 && !isSplit && (
+                          <Badge variant="outline" className="border-border bg-muted/60 text-xs text-foreground">
+                            <Layers3 className="mr-1 h-3 w-3" />
+                            {t("adminRequests.groupCount", { count: members.length })}
+                          </Badge>
+                        )}
                         {request.media_info?.season && (
                           <Badge variant="outline" className="text-xs">
                             {t("media.season", { season: request.media_info.season })}
@@ -473,26 +561,12 @@ export default function AdminRequestsPage() {
                         )}
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                        <div className="flex items-center gap-1">
-                          {(() => {
-                                const url = mediaRequestExternalUrl(request);
-                            const inner = (
-                              <Badge variant="secondary" className="h-5 text-[10px]">
-                                {request.source.toLowerCase() === "bangumi" ? "Bangumi" : request.source.toUpperCase()}
-                              </Badge>
-                            );
-                            return url ? (
-                              <a
-                                href={url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 hover:opacity-80"
-                                title={t("media.viewOnSource", { source: request.source.toUpperCase() })}
-                              >
-                                {inner}
-                              </a>
-                            ) : inner;
-                          })()}
+                        <div className="flex flex-wrap items-center gap-1">
+                          {Array.from(new Set((isSplit ? [request] : members).map((member) => member.source.toLowerCase()))).map((itemSource) => (
+                            <Badge key={itemSource} variant="outline" className={`h-5 text-[10px] ${mediaRequestSourceClass(itemSource)}`}>
+                              {itemSource === "bangumi" ? "Bangumi" : "TMDB"}
+                            </Badge>
+                          ))}
                         </div>
                         <span className="hidden sm:inline">•</span>
                         <span className="flex items-center gap-0.5" title={t("adminRequests.internalId", { source: request.source })}>
@@ -558,24 +632,43 @@ export default function AdminRequestsPage() {
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center gap-2 sm:gap-3 sm:self-center">
-                    {getStatusBadge(request.status)}
+                    {Array.from(new Set((isSplit ? [request] : members).map((member) => member.status))).map((itemStatus) => (
+                      <span key={itemStatus}>{getStatusBadge(itemStatus)}</span>
+                    ))}
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => openActionDialog(request)}
+                      onClick={() => openActionDialog(group, isSplit ? request : undefined)}
                     >
-                      {t("adminRequests.handle")}
+                      {members.length > 1 && !isSplit ? t("adminRequests.handleGroup") : t("adminRequests.handle")}
                     </Button>
-                    <IconButton
-                      variant="ghost"
-                      className="h-8 w-8 text-muted-foreground hover:text-destructive dark:hover:bg-destructive/15"
-                      onClick={() => void handleDelete(request)}
-                      disabled={deletingKey === request.require_key}
-                      title={t("adminRequests.deleteRequest")}
-                      aria-label={t("adminRequests.deleteRequest")}
-                    >
-                      {deletingKey === request.require_key ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                    </IconButton>
+                    {members.length > 1 && (!isSplit || request.require_key === members[0].require_key) && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setSplitGroupKeys((current) => {
+                          const next = new Set(current);
+                          if (isSplit) next.delete(groupKey);
+                          else next.add(groupKey);
+                          return next;
+                        })}
+                      >
+                        <Ungroup className="mr-1.5 h-4 w-4" />
+                        {isSplit ? t("adminRequests.mergeGroup") : t("adminRequests.splitGroup")}
+                      </Button>
+                    )}
+                    {(members.length === 1 || isSplit) && (
+                      <IconButton
+                        variant="ghost"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive dark:hover:bg-destructive/15"
+                        onClick={() => void handleDelete(request)}
+                        disabled={deletingKey === request.require_key}
+                        title={t("adminRequests.deleteRequest")}
+                        aria-label={t("adminRequests.deleteRequest")}
+                      >
+                        {deletingKey === request.require_key ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                      </IconButton>
+                    )}
                   </div>
                 </div>
               ))}
@@ -624,12 +717,16 @@ export default function AdminRequestsPage() {
       <Dialog open={actionOpen} onOpenChange={setActionOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{t("adminRequests.dialogTitle")}</DialogTitle>
+            <DialogTitle>
+              {selectedRequests.length > 1 ? t("adminRequests.groupDialogTitle") : t("adminRequests.dialogTitle")}
+            </DialogTitle>
             <DialogDescription>
-              {t("adminRequests.dialogDescription", { id: selectedRequest?.id, mediaId: selectedRequest?.media_id })}
+              {selectedRequests.length > 1
+                ? t("adminRequests.groupDialogDescription", { count: selectedRequests.length })
+                : t("adminRequests.dialogDescription", { id: selectedRequests[0]?.id, mediaId: selectedRequests[0]?.media_id })}
               <br />
-              {selectedRequest?.media_info?.title}
-              {selectedRequest?.media_info?.season && ` - ${t("media.season", { season: selectedRequest.media_info.season })}`}
+              {selectedRequests[0]?.media_info?.title || selectedRequests[0]?.title}
+              {selectedRequests[0]?.media_info?.season && ` - ${t("media.season", { season: selectedRequests[0].media_info.season })}`}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">

@@ -561,6 +561,12 @@
     "requestNow": "Request now"
   },
   "adminRequests": {
+    "handleGroup": "Handle together",
+    "groupCount": "{count} matching titles",
+    "splitGroup": "Split view",
+    "mergeGroup": "Group view",
+    "groupDialogTitle": "Handle matching requests together",
+    "groupDialogDescription": "The status and note will be applied atomically to {count} requests. If any request was changed by another administrator, none will be updated.",
     "searchLabel": "Search media requests",
     "searchPlaceholder": "Search title, username, request ID, media ID, or key",
     "sourceLabel": "Source",

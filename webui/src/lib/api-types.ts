@@ -550,6 +550,9 @@ export interface MediaRequest {
     username?: string;
     uid?: number;
   };
+  group_key?: string;
+  group_count?: number;
+  grouped_requests?: MediaRequest[];
 }
 
 export interface MediaRequestStatusCounts {
@@ -565,11 +568,16 @@ export interface MediaRequestStatusCounts {
 export interface AdminMediaRequestListResponse {
   requests: MediaRequest[];
   total: number;
+  request_total: number;
   page: number;
   per_page: number;
   total_pages: number;
   has_next: boolean;
   status_counts: MediaRequestStatusCounts;
+}
+
+export interface MediaRequestBatchUpdateResponse {
+  requests: MediaRequest[];
 }
 
 export interface EmbyInfo {
