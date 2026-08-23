@@ -17,13 +17,15 @@ import (
 // api 层测试同样打真库：设了才跑，没设整包直接跳过（见 TestMain）。
 var testDSN string
 
-// TestMain 是 api 包所有测试的总闸门。没有 TWILIGHT_TEST_DSN 时不连库、
-// 直接以 0 退出（等价整包 skip），无库环境下 `go test ./...` 仍是绿的。
+// TestMain only validates PostgreSQL when a DSN is configured. Tests that need
+// the database skip in resetTestDatabase; pure routing/response/security tests
+// must still run locally so protocol regressions cannot hide behind a green
+// package-level early exit.
 func TestMain(m *testing.M) {
 	testDSN = os.Getenv("TWILIGHT_TEST_DSN")
 	if testDSN == "" {
-		fmt.Fprintln(os.Stderr, "TWILIGHT_TEST_DSN not set; skipping api package tests")
-		os.Exit(0)
+		fmt.Fprintln(os.Stderr, "TWILIGHT_TEST_DSN not set; database-backed api tests will be skipped")
+		os.Exit(m.Run())
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -39,6 +41,9 @@ func TestMain(m *testing.M) {
 // 播种空 state，等价于给每个用例一个全新的数据库。
 func resetTestDatabase(t *testing.T) {
 	t.Helper()
+	if testDSN == "" {
+		t.Skip("TWILIGHT_TEST_DSN not set")
+	}
 	db, err := sql.Open("pgx", testDSN)
 	if err != nil {
 		t.Fatalf("open reset connection: %v", err)
@@ -70,6 +75,9 @@ func newTestStore(t *testing.T) *store.Store {
 // 「服务重启 / 另一进程改库后数据仍在持久层」这类语义。
 func reopenTestStore(t *testing.T) *store.Store {
 	t.Helper()
+	if testDSN == "" {
+		t.Skip("TWILIGHT_TEST_DSN not set")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	st, err := store.OpenPostgres(ctx, testDSN)

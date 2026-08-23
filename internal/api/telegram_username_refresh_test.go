@@ -46,7 +46,7 @@ func TestTelegramGroupUserSearchSupportsFuzzyAndExplicitFields(t *testing.T) {
 	}{
 		{input: "2345 uid", query: "2345", field: store.UserIdentitySearchUID},
 		{input: "testuser username", query: "testuser", field: store.UserIdentitySearchUsername},
-		{input: "testuser tgid", query: "testuser", field: store.UserIdentitySearchTelegramID},
+		{input: "2345 tgid", query: "2345", field: store.UserIdentitySearchTelegramID},
 		{input: "@testuser tgname", query: "testuser", field: store.UserIdentitySearchTelegramUsername},
 		{input: "testuser", query: "testuser", field: store.UserIdentitySearchAny},
 	} {
