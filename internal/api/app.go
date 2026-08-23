@@ -1126,7 +1126,9 @@ func (a *App) applyCORS(w http.ResponseWriter, r *http.Request) bool {
 	if a.cfg().AllowCredential {
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 	}
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key, X-Twilight-Client, X-Twilight-Intent")
+	// 求片管理员更新使用 If-Match 做 revision 并发保护；它必须包含在
+	// 预检允许头中，否则浏览器会在实际 PUT 发出前直接拦截请求。
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key, If-Match, X-Twilight-Client, X-Twilight-Intent")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
 	w.Header().Set("Access-Control-Max-Age", "600")
 	return true

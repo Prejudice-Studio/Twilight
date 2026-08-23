@@ -180,6 +180,7 @@ func TestRelaxedCORSReflectsValidOriginWhenNoWhitelist(t *testing.T) {
 	req := httptest.NewRequest(http.MethodOptions, "/api/v1/users/me", nil)
 	req.Header.Set("Origin", "https://panel.example")
 	req.Header.Set("Access-Control-Request-Method", "PUT")
+	req.Header.Set("Access-Control-Request-Headers", "content-type, if-match, x-twilight-client")
 	rr := httptest.NewRecorder()
 	app.ServeHTTP(rr, req)
 
@@ -188,6 +189,9 @@ func TestRelaxedCORSReflectsValidOriginWhenNoWhitelist(t *testing.T) {
 	}
 	if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "https://panel.example" {
 		t.Fatalf("relaxed CORS did not reflect valid origin: %q", got)
+	}
+	if got := rr.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(strings.ToLower(got), "if-match") {
+		t.Fatalf("relaxed CORS did not allow If-Match: %q", got)
 	}
 
 	req = httptest.NewRequest(http.MethodOptions, "/api/v1/users/me", nil)
