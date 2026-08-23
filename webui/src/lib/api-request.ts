@@ -351,10 +351,10 @@ async function parseApiResponse<T>(
 
   const text = await response.text();
   if (!text) {
-    return {
-      data: { success: response.ok, message: response.ok ? "OK" : response.statusText },
-      sourceChars: 0,
-    };
+    if (response.ok) {
+      throw new Error(`服务器返回空响应：${describeApiTarget(endpoint, method)}\nHTTP ${response.status} 没有返回标准 JSON。`);
+    }
+    return { data: { success: false, message: response.statusText }, sourceChars: 0 };
   }
 
   try {

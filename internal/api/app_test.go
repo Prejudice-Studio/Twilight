@@ -1771,7 +1771,8 @@ func TestAdminMediaRequestListMetadataAndRevisionConflict(t *testing.T) {
 		t.Fatalf("cache-control=%q", got)
 	}
 	var envelope struct {
-		Data struct {
+		Success bool `json:"success"`
+		Data    struct {
 			Requests []struct {
 				RequireKey string `json:"require_key"`
 				Revision   int64  `json:"revision"`
@@ -1784,6 +1785,12 @@ func TestAdminMediaRequestListMetadataAndRevisionConflict(t *testing.T) {
 	}
 	if err := json.Unmarshal(list.Body.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
+	}
+	if !envelope.Success {
+		t.Fatalf("group list did not return a successful JSON envelope: %s", list.Body.String())
+	}
+	if _, err := json.Marshal(envelope); err != nil {
+		t.Fatalf("group list response is not serializable: %v", err)
 	}
 	if envelope.Data.Total != 1 || envelope.Data.TotalPages != 1 || envelope.Data.PerPage != 50 || len(envelope.Data.Requests) != 1 {
 		t.Fatalf("unexpected list metadata: %#v", envelope.Data)

@@ -1,8 +1,11 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
+
+	"github.com/prejudice-studio/twilight/internal/store"
 )
 
 func TestDefaultErrorCodeCoversAPIStatuses(t *testing.T) {
@@ -39,5 +42,27 @@ func TestDefaultErrorCodeCoversAPIStatuses(t *testing.T) {
 	}
 	if got := defaultErrorCode(http.StatusNotImplemented, false); got != "INTERNAL_ERROR" {
 		t.Fatalf("unmapped 5xx fallback = %q, want INTERNAL_ERROR", got)
+	}
+}
+
+func TestMediaRequestAdminGroupDTOIsAcyclic(t *testing.T) {
+	group := store.MediaRequestGroup{
+		Key: "same title",
+		Requests: []store.MediaRequest{
+			{ID: 1, RequireKey: "req_tmdb", Title: "Same Title", Source: "tmdb", MediaID: 10, Revision: 1},
+			{ID: 2, RequireKey: "req_bangumi", Title: "same title", Source: "bangumi", MediaID: 20, Revision: 1},
+		},
+	}
+	payload := mediaRequestAdminGroupDTO(group, nil)
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("group DTO must be serializable: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("group DTO JSON is invalid: %v", err)
+	}
+	if got := int(decoded["group_count"].(float64)); got != 2 {
+		t.Fatalf("group_count=%d want 2", got)
 	}
 }

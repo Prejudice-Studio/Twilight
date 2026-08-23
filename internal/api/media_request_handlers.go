@@ -222,22 +222,10 @@ func (a *App) handleAdminMediaRequests(w http.ResponseWriter, r *http.Request, _
 	})
 	items := make([]map[string]any, 0, len(result.Groups))
 	for _, group := range result.Groups {
-		members := make([]map[string]any, 0, len(group.Requests))
-		for _, req := range group.Requests {
-			var user *store.User
-			if value, exists := result.Users[req.UID]; exists {
-				copy := value
-				user = &copy
-			}
-			members = append(members, mediaRequestAdminDTO(req, user))
-		}
-		if len(members) == 0 {
+		item := mediaRequestAdminGroupDTO(group, result.Users)
+		if item == nil {
 			continue
 		}
-		item := members[0]
-		item["group_key"] = group.Key
-		item["group_count"] = len(members)
-		item["grouped_requests"] = members
 		items = append(items, item)
 	}
 	w.Header().Set("Cache-Control", "private, no-store")
@@ -251,6 +239,28 @@ func (a *App) handleAdminMediaRequests(w http.ResponseWriter, r *http.Request, _
 		"has_next":      result.HasNext,
 		"status_counts": result.StatusCounts,
 	})
+}
+
+func mediaRequestAdminGroupDTO(group store.MediaRequestGroup, users map[int64]store.User) map[string]any {
+	if len(group.Requests) == 0 {
+		return nil
+	}
+	members := make([]map[string]any, 0, len(group.Requests))
+	for _, req := range group.Requests {
+		var user *store.User
+		if value, exists := users[req.UID]; exists {
+			copy := value
+			user = &copy
+		}
+		members = append(members, mediaRequestAdminDTO(req, user))
+	}
+	// Keep the representative separate from members[0]. Reusing that map and
+	// attaching members to it creates a circular JSON value.
+	item := cloneMap(members[0])
+	item["group_key"] = group.Key
+	item["group_count"] = len(members)
+	item["grouped_requests"] = members
+	return item
 }
 
 func validMediaRequestAdminFilter(filter string) bool {
