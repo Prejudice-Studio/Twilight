@@ -54,8 +54,11 @@
 ## 管理端请求与并发
 
 - 管理端使用 `GET /admin/media-requests` 统一获取列表。参数为 `status=active|pending|accepted|downloading|rejected|completed|all`、`source=all|tmdb|bangumi`、`q`（标题、用户名、请求 ID、媒体 ID、UID、Telegram ID、Key 的模糊搜索）、`page` 和 `per_page`。`q` 最多保留 120 个字符，`per_page` 由后端限制在 1-100。
-- 列表响应同时返回当前页、`total`、`total_pages`、`has_next` 和同一来源/关键词范围内的 `status_counts`，前端切换标签不需要再为计数发请求。列表响应使用 `Cache-Control: private, no-store`，前端也必须关闭 GET 短缓存和请求去重。
+- 后端先将标题执行 Trim、连续空白折叠和大小写归一，再按标题聚合，最后对组分页。因此同名的 TMDB / Bangumi 请求不会因为落在原始列表的不同页而漏合并。`total` 表示组数，`request_total` 表示当前状态筛选命中的原始请求条数；`status_counts` 仍按原始请求计数。
+- 每个列表项保留代表请求字段，并通过 `group_key`、`group_count`、`grouped_requests` 返回完整成员。WebUI 默认展示聚合项和不同的 TMDB / Bangumi 来源样式；管理员可点“拆分显示”后单独处理或删除某个成员，拆分只改变当前页面呈现，不修改持久化记录。
+- 列表响应同时返回当前页、`total_pages`、`has_next` 和同一来源/关键词范围内的 `status_counts`，前端切换标签不需要再为计数发请求。列表响应使用 `Cache-Control: private, no-store`，前端也必须关闭 GET 短缓存和请求去重。
 - 管理员更新和删除优先使用 `/admin/media-requests/by-key/{require_key}`。列表行会携带 `revision`，前端通过 `If-Match: "<revision>"` 提交；成功响应返回新 revision 和同值 `ETag`。revision 不一致返回 `409 MEDIA_REQUEST_CONFLICT`，前端重新获取当前筛选列表，不应盲目覆盖本地行。
+- 同名组通过 `PUT /admin/media-requests/batch/by-key` 同时处理，请求体携带 1-100 个 `{require_key, revision}`。Store 在同一把写锁内先校验全部 key、重复项和 revision，再一次性更新并持久化；任何成员缺失、重复或冲突时整批不写，成功后只记录一条批量审计日志。
 - 写操作成功会在前端局部替换/移除当前行并同步状态计数、总数和分页，不再无条件重复请求整页。用户主动点击刷新、切换筛选/页码、删除当前页最后一条或发生 revision 冲突时才重新获取列表。
 - 管理 DTO 会在 Store 的同一次读锁范围内取得当前页关联用户快照；构造 DTO 时复制 `media_info`，不会因为补写标题、季数或媒体类型而修改内存中的持久化状态。
 - 管理列表只显示本地来源徽标，不为每一行加载 TMDB Logo 或 Bangumi favicon；海报 URL 在浏览器渲染前经过安全校验。

@@ -288,6 +288,7 @@
 | PUT | `/api/v1/admin/media-requests/{request_id}` | Admin | 更新求片状态 |
 | DELETE | `/api/v1/admin/media-requests/{request_id}` | Admin | 删除求片 |
 | PUT | `/api/v1/admin/media-requests/by-key/{require_key}` | Admin | 按 key 更新求片；支持 `If-Match` revision 冲突保护 |
+| PUT | `/api/v1/admin/media-requests/batch/by-key` | Admin | 原子批量更新 1-100 条求片；逐条校验 key 与 revision |
 | DELETE | `/api/v1/admin/media-requests/by-key/{require_key}` | Admin | 按 key 删除求片；支持 `If-Match` revision 冲突保护 |
 | GET | `/api/v1/admin/tickets` | Admin | 紧凑工单队列；默认仅返回待处理/处理中，`all=1` 或 `status=all` 返回全部；回复与附件只返回计数 |
 | GET | `/api/v1/admin/tickets/{ticket_id}` | Admin | 管理员读取单个工单及完整对话，用于会话式处理页 |

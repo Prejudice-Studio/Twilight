@@ -55,7 +55,7 @@ allow_credential = true
 ```
 
 - `allow_credential = true` 同时放行 `localhost` / `127.0.0.1` / `[::1]` 时，启动期会打 `Warn` 提示。请只在开发、可信内网或你明确接受的自托管场景使用。
-- 允许的请求头列表为 `Content-Type, Authorization, X-API-Key, X-Twilight-Client, X-Twilight-Intent`。`X-Twilight-Client` 不参与鉴权；`X-Twilight-Intent` 仅用于少数有副作用 GET 的显式意图校验。
+- 允许的请求头列表为 `Content-Type, Authorization, X-API-Key, If-Match, X-Twilight-Client, X-Twilight-Intent`。`If-Match` 用于求片等管理写操作的 revision 并发保护；遗漏它会让跨 Origin 浏览器请求在 `PUT` / `DELETE` 发出前被预检拦截。`X-Twilight-Client` 不参与鉴权；`X-Twilight-Intent` 仅用于少数有副作用 GET 的显式意图校验。
 
 > **已知边界（M2，刻意保留、仅文档标注）**：`cors_origins` 留空 / 填 `*` 时的「反射任意 Origin」是自托管便利取舍，但与默认 `allow_credential = true` 组合时需明确其风险：
 > - **触发条件**：`cors_origins` 为空数组，或首项为 `*`（`corsOriginRelaxed()` 返回 `true`）。此时 `applyCORS` 会对**任意合法 `http`/`https` Origin** 回填 `Access-Control-Allow-Origin: <该 Origin>`（反射，而非 `*`）。

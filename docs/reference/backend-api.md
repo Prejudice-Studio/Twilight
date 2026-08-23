@@ -1258,13 +1258,28 @@ curl -X POST "http://localhost:5000/api/v1/admin/regcodes" \
 
 默认筛选为 `status=active`，即 `UNHANDLED` / `ACCEPTED` / `DOWNLOADING` 活跃队列；`status=pending` 或 `status=unhandled` 仅返回真正待处理的 `UNHANDLED`，`status=all` 返回全部。可选参数：`source=all|tmdb|bangumi`、`q`（标题、用户名、请求 ID、媒体 ID、UID、Telegram ID、Key 模糊搜索）、`page`、`per_page`。`q` 最多 120 字符，`per_page` 最大 100。
 
-响应 `data` 包含 `requests`、`total`、`page`、`per_page`、`total_pages`、`has_next` 和 `status_counts`。`status_counts` 是当前 `source` + `q` 范围内各状态的计数，不受当前 `status` 页签限制。列表响应带 `Cache-Control: private, no-store`。
+列表会在分页前按规范化标题（去除首尾空白、折叠连续空白、忽略大小写）聚合 TMDB / Bangumi 请求。响应 `data` 包含 `requests`、`total`（组数）、`request_total`（当前状态筛选命中的原始请求数）、`page`、`per_page`、`total_pages`、`has_next` 和 `status_counts`。每个聚合项包含 `group_key`、`group_count` 与完整 `grouped_requests`；`status_counts` 仍按原始请求计数，是当前 `source` + `q` 范围内各状态的计数，不受当前 `status` 页签限制。列表响应带 `Cache-Control: private, no-store`。
 
 `PUT /admin/media-requests/{request_id}` — 更新求片状态。
 
 `DELETE /admin/media-requests/{request_id}` — 删除求片。
 
 `PUT /admin/media-requests/by-key/{require_key}` — 按 key 更新。列表行携带 `revision` 时应发送 `If-Match: "<revision>"`；成功返回新的 `revision` 和同值 `ETag`，revision 已变化时返回 `409 MEDIA_REQUEST_CONFLICT`，避免多个管理员互相覆盖。
+
+`PUT /admin/media-requests/batch/by-key` — 原子更新 1-100 条同名求片。请求示例：
+
+```json
+{
+  "status": "accepted",
+  "note": "已加入处理队列",
+  "items": [
+    { "require_key": "req_tmdb", "revision": 1 },
+    { "require_key": "req_bangumi", "revision": 3 }
+  ]
+}
+```
+
+全部 key、重复项和 revision 会在写入前统一校验；任何成员不存在、格式错误或 revision 冲突时整批不更新。成功响应 `data.requests` 返回全部更新后的成员。
 
 `DELETE /admin/media-requests/by-key/{require_key}` — 按 key 删除；同样支持 `If-Match`，陈旧 revision 返回 `409 MEDIA_REQUEST_CONFLICT`。
 
