@@ -32,6 +32,31 @@ type MediaRequestPage struct {
 	HasNext      bool
 }
 
+// MediaRequestGroupPage is the administrator-facing view grouped by a
+// normalized title. The underlying requests remain independent records so a
+// group can be expanded and handled one member at a time.
+type MediaRequestGroupPage struct {
+	Groups       []MediaRequestGroup
+	Users        map[int64]User
+	StatusCounts map[string]int
+	Total        int
+	RequestTotal int
+	Page         int
+	PerPage      int
+	TotalPages   int
+	HasNext      bool
+}
+
+type MediaRequestGroup struct {
+	Key      string
+	Requests []MediaRequest
+}
+
+type MediaRequestBatchItem struct {
+	RequireKey string
+	Revision   *int64
+}
+
 type MediaRequestListOptions struct {
 	UID          int64
 	All          bool
@@ -251,6 +276,117 @@ func (s *Store) ListMediaRequestsPageWithOptions(opts MediaRequestListOptions) M
 	}
 }
 
+// ListMediaRequestGroupsPageWithOptions groups matching titles before
+// pagination. This keeps a same-title group together even when the raw
+// requests would otherwise straddle two pages.
+func (s *Store) ListMediaRequestGroupsPageWithOptions(opts MediaRequestListOptions) MediaRequestGroupPage {
+	page := opts.Page
+	if page < 1 {
+		page = 1
+	}
+	perPage := opts.PerPage
+	if perPage < 1 {
+		perPage = 20
+	}
+	statusFilter := strings.ToLower(strings.TrimSpace(opts.StatusFilter))
+	sourceFilter := strings.ToLower(strings.TrimSpace(opts.Source))
+	if sourceFilter == "bgm" {
+		sourceFilter = "bangumi"
+	}
+	query := strings.ToLower(strings.TrimSpace(opts.Query))
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	counts := map[string]int{
+		"all": 0, "active": 0, "pending": 0, "accepted": 0,
+		"downloading": 0, "rejected": 0, "completed": 0,
+	}
+	groupMap := make(map[string][]MediaRequest)
+	requestTotal := 0
+	for _, r := range s.state.MediaRequests {
+		if !opts.All && r.UID != opts.UID {
+			continue
+		}
+		requestSource := strings.ToLower(strings.TrimSpace(r.Source))
+		if requestSource == "bgm" {
+			requestSource = "bangumi"
+		}
+		if sourceFilter != "" && sourceFilter != "all" && requestSource != sourceFilter {
+			continue
+		}
+		if query != "" && !mediaRequestMatchesQuery(r, query) {
+			continue
+		}
+		adminStatus := MediaRequestAdminStatus(r.Status)
+		counts["all"]++
+		counts[adminStatus]++
+		if IsActiveMediaRequestStatus(r.Status) {
+			counts["active"]++
+		}
+		if !MediaRequestStatusMatches(r.Status, statusFilter) {
+			continue
+		}
+		requestTotal++
+		key := MediaRequestGroupKey(r)
+		groupMap[key] = append(groupMap[key], r)
+	}
+
+	groups := make([]MediaRequestGroup, 0, len(groupMap))
+	for key, requests := range groupMap {
+		sort.Slice(requests, func(i, j int) bool { return requests[i].ID > requests[j].ID })
+		groups = append(groups, MediaRequestGroup{Key: key, Requests: requests})
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].Requests[0].ID > groups[j].Requests[0].ID
+	})
+	total := len(groups)
+	totalPages := 0
+	if total > 0 {
+		totalPages = (total + perPage - 1) / perPage
+	}
+	offset := (page - 1) * perPage
+	if offset >= total {
+		return MediaRequestGroupPage{
+			StatusCounts: counts, Total: total, RequestTotal: requestTotal, Page: page, PerPage: perPage,
+			TotalPages: totalPages, HasNext: page < totalPages,
+		}
+	}
+	end := offset + perPage
+	if end > total {
+		end = total
+	}
+	selected := groups[offset:end]
+	users := make(map[int64]User)
+	for _, group := range selected {
+		for _, request := range group.Requests {
+			if user, ok := s.state.Users[request.UID]; ok {
+				users[request.UID] = user
+			}
+		}
+	}
+	return MediaRequestGroupPage{
+		Groups: selected, Users: users, StatusCounts: counts, Total: total, RequestTotal: requestTotal,
+		Page: page, PerPage: perPage, TotalPages: totalPages, HasNext: page < totalPages,
+	}
+}
+
+// MediaRequestGroupKey normalizes only the display title. Source and media ID
+// are intentionally excluded: a same-named TMDB and Bangumi request is one
+// administrator work item, while both source records remain independently
+// addressable by require_key.
+func MediaRequestGroupKey(r MediaRequest) string {
+	title := strings.TrimSpace(r.Title)
+	if title == "" && r.MediaInfo != nil {
+		if value, ok := r.MediaInfo["title"].(string); ok {
+			title = strings.TrimSpace(value)
+		}
+	}
+	if title == "" {
+		return "request:" + r.RequireKey
+	}
+	return strings.ToLower(strings.Join(strings.Fields(title), " "))
+}
+
 func mediaRequestMatchesQuery(r MediaRequest, query string) bool {
 	fields := [...]string{
 		r.Title,
@@ -325,6 +461,64 @@ func (s *Store) UpdateMediaRequestStatusByKey(key, rawStatus, adminNote string, 
 	})
 	if err != nil {
 		return MediaRequest{}, err
+	}
+	return updated, nil
+}
+
+// UpdateMediaRequestsStatusByKey applies one status transition to every
+// member atomically. All keys and revisions are checked before any member is
+// changed or the state document is persisted.
+func (s *Store) UpdateMediaRequestsStatusByKey(items []MediaRequestBatchItem, rawStatus, adminNote string, replaceNote bool) ([]MediaRequest, error) {
+	status := NormalizeMediaRequestStatus(rawStatus)
+	if status == "" || len(items) == 0 {
+		return nil, ErrInvalid
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	updated := make([]MediaRequest, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	err := s.mutateAndSaveLocked(func() error {
+		for _, item := range items {
+			key := strings.TrimSpace(item.RequireKey)
+			if key == "" {
+				return ErrInvalid
+			}
+			if _, exists := seen[key]; exists {
+				return ErrInvalid
+			}
+			seen[key] = struct{}{}
+		}
+		type batchTarget struct {
+			id      int64
+			request MediaRequest
+		}
+		targets := make(map[string]batchTarget, len(items))
+		for id, current := range s.state.MediaRequests {
+			if _, wanted := seen[current.RequireKey]; wanted {
+				targets[current.RequireKey] = batchTarget{id: id, request: current}
+			}
+		}
+		for _, item := range items {
+			key := strings.TrimSpace(item.RequireKey)
+			target, ok := targets[key]
+			if !ok {
+				return ErrNotFound
+			}
+			if item.Revision != nil && target.request.Revision != *item.Revision {
+				return ErrConflict
+			}
+		}
+		for _, item := range items {
+			target := targets[strings.TrimSpace(item.RequireKey)]
+			current := target.request
+			applyMediaRequestStatusUpdate(&current, status, adminNote, replaceNote)
+			s.state.MediaRequests[target.id] = current
+			updated = append(updated, current)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return updated, nil
 }

@@ -1193,6 +1193,82 @@ func TestListMediaRequestsPageFiltersAndPaginates(t *testing.T) {
 	}
 }
 
+func TestListMediaRequestGroupsBeforePagination(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	first, err := st.CreateMediaRequest(MediaRequest{
+		UID: 1, Title: "  Same   Name ", Source: "tmdb", MediaID: 101, MediaType: "movie",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := st.CreateMediaRequest(MediaRequest{
+		UID: 2, Title: "same name", Source: "bangumi", MediaID: 202, MediaType: "tv",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := st.CreateMediaRequest(MediaRequest{
+		UID: 3, Title: "Other", Source: "tmdb", MediaID: 303, MediaType: "movie",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	page := st.ListMediaRequestGroupsPageWithOptions(MediaRequestListOptions{
+		All: true, StatusFilter: "all", Source: "all", Page: 1, PerPage: 1,
+	})
+	if page.Total != 2 || page.RequestTotal != 3 || page.TotalPages != 2 || !page.HasNext {
+		t.Fatalf("unexpected grouped metadata: %#v", page)
+	}
+	if len(page.Groups) != 1 || page.Groups[0].Key != "request:"+third.RequireKey || len(page.Groups[0].Requests) != 1 {
+		t.Fatalf("first grouped page=%#v", page.Groups)
+	}
+	page = st.ListMediaRequestGroupsPageWithOptions(MediaRequestListOptions{
+		All: true, StatusFilter: "all", Source: "all", Page: 2, PerPage: 1,
+	})
+	if len(page.Groups) != 1 || page.Groups[0].Key != "same name" || len(page.Groups[0].Requests) != 2 {
+		t.Fatalf("same-name group=%#v", page.Groups)
+	}
+	if got, want := mediaRequestIDs(page.Groups[0].Requests), []int64{second.ID, first.ID}; !sameInt64s(got, want) {
+		t.Fatalf("same-name member IDs=%v want %v", got, want)
+	}
+}
+
+func TestUpdateMediaRequestsStatusByKeyIsAtomic(t *testing.T) {
+	st := newJSONStoreForTest(t)
+	first, err := st.CreateMediaRequest(MediaRequest{UID: 1, Title: "Same", Source: "tmdb", MediaID: 1, MediaType: "movie"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := st.CreateMediaRequest(MediaRequest{UID: 2, Title: "Same", Source: "bangumi", MediaID: 2, MediaType: "tv"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstRevision, staleRevision := first.Revision, second.Revision+1
+	items := []MediaRequestBatchItem{
+		{RequireKey: first.RequireKey, Revision: &firstRevision},
+		{RequireKey: second.RequireKey, Revision: &staleRevision},
+	}
+	if _, err := st.UpdateMediaRequestsStatusByKey(items, "accepted", "batch", false); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale batch err=%v want conflict", err)
+	}
+	unchangedFirst, _ := st.FindMediaRequestByKey(first.RequireKey)
+	unchangedSecond, _ := st.FindMediaRequestByKey(second.RequireKey)
+	if unchangedFirst.Status != MediaRequestStatusUnhandled || unchangedSecond.Status != MediaRequestStatusUnhandled || unchangedFirst.Revision != 1 || unchangedSecond.Revision != 1 {
+		t.Fatalf("conflicting batch changed state: first=%#v second=%#v", unchangedFirst, unchangedSecond)
+	}
+
+	secondRevision := second.Revision
+	items[1].Revision = &secondRevision
+	updated, err := st.UpdateMediaRequestsStatusByKey(items, "accepted", "batch", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated) != 2 || updated[0].Revision != 2 || updated[1].Revision != 2 || updated[0].AdminNote != "batch" || updated[1].AdminNote != "batch" {
+		t.Fatalf("unexpected batch result: %#v", updated)
+	}
+}
+
 func TestMediaRequestRevisionProtectsAdminMutations(t *testing.T) {
 	st := newJSONStoreForTest(t)
 	request, err := st.CreateMediaRequest(MediaRequest{

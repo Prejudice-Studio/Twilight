@@ -225,6 +225,7 @@ func (a *App) registerAdminRoutes() {
 	a.add(http.MethodPut, "/api/v1/admin/media-requests/:request_id", AuthAdmin, a.handleUpdateMediaRequestStatus)
 	a.add(http.MethodDelete, "/api/v1/admin/media-requests/:request_id", AuthAdmin, a.handleDeleteMediaRequest)
 	a.add(http.MethodPut, "/api/v1/admin/media-requests/by-key/:require_key", AuthAdmin, a.handleUpdateMediaRequestByKey)
+	a.add(http.MethodPut, "/api/v1/admin/media-requests/batch/by-key", AuthAdmin, a.handleUpdateMediaRequestsByKey)
 	a.add(http.MethodDelete, "/api/v1/admin/media-requests/by-key/:require_key", AuthAdmin, a.handleDeleteMediaRequestByKey)
 	a.add(http.MethodPost, "/api/v1/admin/whitelist", AuthAdmin, a.handleWhitelist)
 	a.add(http.MethodGet, "/api/v1/admin/stats", AuthAdmin, a.handleSystemStats)

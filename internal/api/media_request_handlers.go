@@ -216,23 +216,35 @@ func (a *App) handleAdminMediaRequests(w http.ResponseWriter, r *http.Request, _
 	query := truncateString(strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("q"), r.URL.Query().Get("query"))), 120)
 	page := clamp(queryInt(r, "page", 1), 1, 1000000)
 	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
-	result := a.store().ListMediaRequestsPageWithOptions(store.MediaRequestListOptions{
+	result := a.store().ListMediaRequestGroupsPageWithOptions(store.MediaRequestListOptions{
 		All: true, StatusFilter: statusFilter, Source: sourceFilter, Query: query,
 		Page: page, PerPage: perPage,
 	})
-	items := make([]map[string]any, 0, len(result.Requests))
-	for _, req := range result.Requests {
-		var user *store.User
-		if value, exists := result.Users[req.UID]; exists {
-			copy := value
-			user = &copy
+	items := make([]map[string]any, 0, len(result.Groups))
+	for _, group := range result.Groups {
+		members := make([]map[string]any, 0, len(group.Requests))
+		for _, req := range group.Requests {
+			var user *store.User
+			if value, exists := result.Users[req.UID]; exists {
+				copy := value
+				user = &copy
+			}
+			members = append(members, mediaRequestAdminDTO(req, user))
 		}
-		items = append(items, mediaRequestAdminDTO(req, user))
+		if len(members) == 0 {
+			continue
+		}
+		item := members[0]
+		item["group_key"] = group.Key
+		item["group_count"] = len(members)
+		item["grouped_requests"] = members
+		items = append(items, item)
 	}
 	w.Header().Set("Cache-Control", "private, no-store")
 	ok(w, "OK", map[string]any{
 		"requests":      items,
 		"total":         result.Total,
+		"request_total": result.RequestTotal,
 		"page":          result.Page,
 		"per_page":      result.PerPage,
 		"total_pages":   result.TotalPages,
@@ -285,6 +297,10 @@ func failMediaRequestMutation(w http.ResponseWriter, err error) bool {
 
 func decodeMediaRequestStatusUpdate(w http.ResponseWriter, r *http.Request) (string, string, *int64, bool) {
 	payload := decodeMap(r)
+	return decodeMediaRequestStatusUpdatePayload(w, r, payload)
+}
+
+func decodeMediaRequestStatusUpdatePayload(w http.ResponseWriter, r *http.Request, payload map[string]any) (string, string, *int64, bool) {
 	rawStatus := stringValue(payload, "status")
 	if rawStatus == "" {
 		failWithCode(w, http.StatusBadRequest, ErrMediaRequestStatusInvalid, "status required")
@@ -339,6 +355,57 @@ func (a *App) handleUpdateMediaRequestByKey(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	a.respondMediaRequestUpdated(w, r, req)
+}
+
+func (a *App) handleUpdateMediaRequestsByKey(w http.ResponseWriter, r *http.Request, _ Params) {
+	payload := decodeMap(r)
+	status, note, _, valid := decodeMediaRequestStatusUpdatePayload(w, r, payload)
+	if !valid {
+		return
+	}
+	rawItems, itemsValid := payload["items"].([]any)
+	if !itemsValid || len(rawItems) == 0 || len(rawItems) > 100 {
+		failWithCode(w, http.StatusBadRequest, ErrMediaRequestPayloadEmpty, "items must contain 1 to 100 requests")
+		return
+	}
+	items := make([]store.MediaRequestBatchItem, 0, len(rawItems))
+	for _, raw := range rawItems {
+		item, itemValid := raw.(map[string]any)
+		if !itemValid {
+			failWithCode(w, http.StatusBadRequest, ErrMediaRequestPayloadEmpty, "invalid batch item")
+			return
+		}
+		key := strings.TrimSpace(stringValue(item, "require_key"))
+		if key == "" {
+			failWithCode(w, http.StatusBadRequest, ErrMediaRequestPayloadEmpty, "require_key required")
+			return
+		}
+		var revision *int64
+		if _, exists := item["revision"]; exists {
+			rawRevision := stringValue(item, "revision")
+			parsed, err := strconv.ParseInt(rawRevision, 10, 64)
+			if err != nil || parsed < 0 {
+				failWithCode(w, http.StatusBadRequest, ErrMediaRequestRevisionInvalid, "invalid batch revision")
+				return
+			}
+			revision = &parsed
+		}
+		items = append(items, store.MediaRequestBatchItem{RequireKey: key, Revision: revision})
+	}
+	updated, err := a.store().UpdateMediaRequestsStatusByKey(items, status, note, false)
+	if failMediaRequestMutation(w, err) {
+		return
+	}
+	result := make([]map[string]any, 0, len(updated))
+	keys := make([]string, 0, len(updated))
+	for _, req := range updated {
+		result = append(result, mediaRequestAdminDTO(req, mediaRequestUserForDTO(a.store(), req)))
+		keys = append(keys, req.RequireKey)
+	}
+	a.audit(r, "batch_update_media_requests", "admin", 0, map[string]any{
+		"count": len(updated), "require_keys": keys, "status": store.MediaRequestAdminStatus(status),
+	})
+	ok(w, "状态已批量更新", map[string]any{"requests": result})
 }
 
 func (a *App) handleExternalMediaUpdate(w http.ResponseWriter, r *http.Request, _ Params) {

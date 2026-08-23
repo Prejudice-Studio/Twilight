@@ -1809,6 +1809,59 @@ func TestAdminMediaRequestListMetadataAndRevisionConflict(t *testing.T) {
 	}
 }
 
+func TestAdminMediaRequestGroupingAndBatchUpdate(t *testing.T) {
+	app := newTestApp(t)
+	adminCookies := registerAndLogin(t, app, "admin", "Admin123456")
+	first, err := app.store().CreateMediaRequest(store.MediaRequest{
+		UID: 1, Username: "admin", Title: "Shared Title", Source: "tmdb", MediaID: 11, MediaType: "movie",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := app.store().CreateMediaRequest(store.MediaRequest{
+		UID: 1, Username: "admin", Title: " shared   title ", Source: "bangumi", MediaID: 22, MediaType: "tv",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	list := doJSONWithHeaders(app, http.MethodGet, "/api/v1/admin/media-requests?status=all", ``, adminCookies, nil)
+	if list.Code != http.StatusOK {
+		t.Fatalf("group list status=%d body=%s", list.Code, list.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			Requests []struct {
+				GroupKey        string `json:"group_key"`
+				GroupCount      int    `json:"group_count"`
+				GroupedRequests []struct {
+					RequireKey string `json:"require_key"`
+				} `json:"grouped_requests"`
+			} `json:"requests"`
+			Total        int `json:"total"`
+			RequestTotal int `json:"request_total"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Data.Total != 1 || envelope.Data.RequestTotal != 2 || len(envelope.Data.Requests) != 1 || envelope.Data.Requests[0].GroupCount != 2 || len(envelope.Data.Requests[0].GroupedRequests) != 2 {
+		t.Fatalf("unexpected grouped response: %#v", envelope.Data)
+	}
+
+	body := fmt.Sprintf(`{"status":"accepted","note":"both","items":[{"require_key":%q,"revision":1},{"require_key":%q,"revision":1}]}`, first.RequireKey, second.RequireKey)
+	updated := doJSONWithHeaders(app, http.MethodPut, "/api/v1/admin/media-requests/batch/by-key", body, adminCookies, nil)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("batch update status=%d body=%s", updated.Code, updated.Body.String())
+	}
+	for _, key := range []string{first.RequireKey, second.RequireKey} {
+		request, ok := app.store().FindMediaRequestByKey(key)
+		if !ok || request.Status != store.MediaRequestStatusAccepted || request.Revision != 2 || request.AdminNote != "both" {
+			t.Fatalf("batch member %q not updated: %#v", key, request)
+		}
+	}
+}
+
 func TestEmbyURLsDoNotFallbackToInternalServerURL(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().EmbyURL = "http://127.0.0.1:8096"
