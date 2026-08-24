@@ -89,11 +89,11 @@ export function MediaSearchView(props: MediaSearchViewProps) {
   const landscapeResults = props.results.filter((media) => coverOrientations[mediaCacheKey(media)] === "landscape");
 
   const modeButton = (active: boolean) => cn(
-    "min-h-10 min-w-20 flex-1 px-3 text-sm font-medium transition-colors sm:flex-none sm:px-5",
+    "h-full min-h-10 w-full px-3 text-sm font-medium transition-colors sm:px-5",
     active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
   );
   const sourceButton = (active: boolean) => cn(
-    "h-14 min-w-20 flex-1 px-3 text-sm font-medium transition-colors sm:flex-none sm:px-5",
+    "h-full min-h-0 w-full px-3 text-sm font-medium transition-colors sm:px-5",
     active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground",
   );
 
@@ -165,39 +165,42 @@ export function MediaSearchView(props: MediaSearchViewProps) {
       >
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <span className="shrink-0 text-sm font-medium text-muted-foreground">{t("media.searchMode")}</span>
-          <div className="flex min-w-0 rounded-md border bg-muted/50 p-1">
+          <div className="grid min-h-10 min-w-0 grid-cols-2 rounded-md border bg-muted/50 p-1">
             <button type="button" className={modeButton(props.mode === "name")} onClick={() => props.onModeChange("name")}>{t("media.nameSearch")}</button>
             <button type="button" className={modeButton(props.mode === "id")} onClick={() => props.onModeChange("id")}>{t("media.idSearch")}</button>
           </div>
           {props.mode === "id" && <span className="text-xs text-muted-foreground">{t("media.idSearchHint")}</span>}
         </div>
 
-        <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(260px,1fr)_auto_auto_auto] xl:items-stretch">
-          <div className="relative min-w-0">
+        <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(260px,1fr)_minmax(12rem,auto)_minmax(10rem,auto)_7rem] xl:items-stretch">
+          <div className="relative min-h-14 min-w-0">
             <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={props.query}
               onChange={(event) => props.onQueryChange(event.target.value)}
               placeholder={props.mode === "id" ? t("media.idPlaceholder") : t("media.namePlaceholder")}
-              className="h-14 pl-11 text-base"
+              className="box-border h-14 min-h-14 pl-11 text-base"
               autoComplete="off"
             />
           </div>
 
-          <div className="flex h-14 min-w-0 overflow-hidden rounded-md border bg-background">
+          <div className={cn(
+            "grid h-14 min-h-14 min-w-0 overflow-hidden rounded-md border bg-background",
+            props.mode === "name" ? "grid-cols-3" : "grid-cols-2",
+          )}>
             {props.mode === "name" && <button type="button" className={sourceButton(props.source === "all")} onClick={() => props.onSourceChange("all")}>{t("media.allSources")}</button>}
             <button type="button" className={sourceButton(props.source === "tmdb")} onClick={() => props.onSourceChange("tmdb")}>TMDB</button>
             <button type="button" className={sourceButton(props.source === "bangumi")} onClick={() => props.onSourceChange("bangumi")}>Bangumi</button>
           </div>
 
           {props.mode === "id" && props.source === "tmdb" && (
-            <div className="flex h-14 overflow-hidden rounded-md border bg-background">
+            <div className="grid h-14 min-h-14 grid-cols-2 overflow-hidden rounded-md border bg-background">
               <button type="button" className={sourceButton(props.mediaType === "movie")} onClick={() => props.onMediaTypeChange("movie")}>{t("media.movie")}</button>
               <button type="button" className={sourceButton(props.mediaType === "tv")} onClick={() => props.onMediaTypeChange("tv")}>{t("media.tv")}</button>
             </div>
           )}
 
-          <Button type="submit" className="h-14 min-w-28 px-6" disabled={props.searching || !props.query.trim()}>
+          <Button type="submit" className="box-border h-14 min-h-14 w-full min-w-28 px-4" disabled={props.searching || !props.query.trim()}>
             {props.searching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
             {t("common.search")}
           </Button>
