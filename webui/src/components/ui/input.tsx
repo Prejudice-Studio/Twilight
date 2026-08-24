@@ -24,7 +24,7 @@ const inputVariants = cva(
       },
       inputSize: {
         sm: "h-9",
-        default: "h-12 sm:h-10",
+        default: "h-11 sm:h-10",
         lg: "h-12",
       },
     },
