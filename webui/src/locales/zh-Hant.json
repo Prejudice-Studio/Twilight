@@ -493,6 +493,8 @@
     "resultsTitle": "搜尋結果",
     "resultsDescription": "點擊條目查看完整海報、簡介與媒體庫狀態",
     "resultCount": "共 {count} 筆",
+    "landscapeResults": "橫版封面",
+    "portraitResults": "直版海報",
     "openDetails": "查看《{title}》詳情",
     "detailDialogDescription": "查看《{title}》的媒體詳情並提交求片",
     "requestsTitle": "我的求片紀錄",

@@ -4,6 +4,13 @@ import { sanitizeExternalUrl, sanitizeImageUrl } from "@/lib/safe-url";
 export type MediaSearchMode = "name" | "id";
 export type MediaSearchSource = "all" | "tmdb" | "bangumi";
 export type TMDBMediaType = "movie" | "tv";
+export type MediaCoverOrientation = "landscape" | "portrait";
+
+export function mediaCoverOrientationFromDimensions(width: number, height: number): MediaCoverOrientation {
+  return Number.isFinite(width) && Number.isFinite(height) && width > height
+    ? "landscape"
+    : "portrait";
+}
 
 export interface ResponseOutcome<T> {
   data?: T;

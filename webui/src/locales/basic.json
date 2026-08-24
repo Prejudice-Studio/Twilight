@@ -580,6 +580,8 @@
     "resultsTitle": "搜索结果",
     "resultsDescription": "点击任一条目查看完整海报、简介与库存状态",
     "resultCount": "共 {count} 条",
+    "landscapeResults": "横版封面",
+    "portraitResults": "竖版海报",
     "openDetails": "查看《{title}》详情",
     "detailDialogDescription": "查看《{title}》的媒体详情并提交求片",
     "openSource": "查看来源",

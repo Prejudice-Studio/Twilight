@@ -9,9 +9,11 @@ interface MediaPosterProps {
   alt: string;
   mediaType: string;
   eager?: boolean;
+  frameClassName?: string;
   imageClassName?: string;
   fallbackClassName?: string;
   iconClassName?: string;
+  onLoad?: (dimensions: { width: number; height: number }) => void;
 }
 
 export function MediaPoster({
@@ -19,9 +21,11 @@ export function MediaPoster({
   alt,
   mediaType,
   eager = false,
+  frameClassName,
   imageClassName,
   fallbackClassName,
   iconClassName,
+  onLoad,
 }: MediaPosterProps) {
   const [failed, setFailed] = useState(!src);
 
@@ -34,14 +38,20 @@ export function MediaPoster({
     return (
       <div
         data-media-poster-fallback
-        className={cn("flex aspect-[2/3] w-full items-center justify-center bg-muted", fallbackClassName)}
+        className={cn(
+          frameClassName
+            ? "flex h-full w-full items-center justify-center bg-muted"
+            : "flex aspect-[2/3] w-full items-center justify-center bg-muted",
+          frameClassName,
+          fallbackClassName,
+        )}
       >
         <Icon className={cn("h-12 w-12 text-muted-foreground/30", iconClassName)} />
       </div>
     );
   }
 
-  return (
+  const image = (
     // Native dimensions remain authoritative; failed remote images fall back without collapsing the layout.
     // eslint-disable-next-line @next/next/no-img-element
     <img
@@ -52,7 +62,16 @@ export function MediaPoster({
       decoding="async"
       draggable={false}
       onError={() => setFailed(true)}
-      className={cn("block h-auto w-full max-w-full", imageClassName)}
+      onLoad={(event) => {
+        setFailed(false);
+        onLoad?.({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight });
+      }}
+      className={cn(
+        frameClassName ? "block h-full w-full object-contain" : "block h-auto w-full max-w-full",
+        imageClassName,
+      )}
     />
   );
+
+  return frameClassName ? <div className={cn("relative h-full w-full", frameClassName)}>{image}</div> : image;
 }

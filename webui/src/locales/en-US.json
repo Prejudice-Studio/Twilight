@@ -493,6 +493,8 @@
     "resultsTitle": "Search Results",
     "resultsDescription": "Select a title to view its full poster, summary, and inventory status",
     "resultCount": "{count} results",
+    "landscapeResults": "Landscape covers",
+    "portraitResults": "Portrait posters",
     "openDetails": "View details for {title}",
     "detailDialogDescription": "View details for {title} and submit a media request",
     "requestsTitle": "My Media Requests",
