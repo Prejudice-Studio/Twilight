@@ -160,6 +160,8 @@ bash start_backend_dev.sh
 - 登录支持用户名和邮箱两种方式：`api.ts` 的 `login()` 自动检测 `@` 将 payload 从 `{username}` 切换为 `{email}`，后端 `handleLogin` 对应走 `FindUserByEmail`。
 - 认证页采用右侧固定面板布局：面板外壳由 `(auth)/layout.tsx` 渲染（跨页持久化，无闪动），各页面仅提供表单内容；共享样式常量与组件定义在 `(auth)/auth-ui.tsx`。
 - 页面按目录分组：`webui/src/app/(auth)`（登录 / 注册 / 找回密码）、`webui/src/app/(main)`（用户面板与各管理页）。新增页面时优先复用 `webui/src/components` 下的既有组件。
+- 共享表单控件的尺寸基线由 `components/ui` 统一维护：普通 `Input` / `SelectTrigger` 在手机端为 44px、桌面端为 40px，普通 `Button` 保持相同的最小高度；不要在业务页面为同一行控件分别设置互不一致的默认高度。共享 `Card` 使用不超过 8px 的圆角，页面需要更特殊的外观时再由业务类名明确覆盖。
+- 求片搜索结果必须保持接口返回的搜索顺序；图片加载完成后按自然尺寸分成横版封面与竖版海报两个分区，分区内继续保持原顺序。卡片图片使用受控的横版 / 竖版比例框与 `object-contain`，确保完整显示图片、不裁切，也不让横竖比例混在同一网格中。
 - 后台总入口为 `webui/src/app/(main)/admin/page.tsx`（管理导航）。迁移出的配置模块必须有独立管理页：邮箱管理、Telegram 管理、邀请系统管理、安全中心；配置管理只保留默认折叠的兼容入口和跳转提示。
 - 独立管理页若需要编辑配置，必须复用 `/system/admin/config/schema` 与 `api.updateConfigBySchema()`，写回同一个 `config.toml`；不要在前端或 store 中复制第二套配置源。
 - 用户管理页的单用户与批量操作必须按领域分组展示（账号状态、Emby、身份绑定、注册资格、危险操作），避免把所有操作平铺成过长菜单或按钮栏；新增用户操作时同步维护后端返回的 `admin_action_state` 与前端 `UserInfo` 类型，让前端能显示禁用原因。
