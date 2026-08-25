@@ -25,16 +25,17 @@ export function GithubProjectLink({ className, compact = false }: GithubProjectL
         compact && "h-10 rounded-md px-4 py-2",
         className,
       )}
-      title={t("common.externalLink")}
+      title={t("common.projectLegalLabel")}
+      aria-label={t("common.projectLegalLabel")}
     >
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
         <GithubIcon className="h-4 w-4" />
       </span>
       <span className="min-w-0 flex-1 text-left">
-        <span className="block truncate leading-tight">{t("common.githubProject")}</span>
+        <span className="block truncate leading-tight">{t("common.projectLegalTitle")}</span>
         {!compact && (
           <span className="block truncate text-[11px] font-normal text-muted-foreground group-hover:text-primary/80">
-            {t("common.projectSource")}
+            {t("common.projectLegalNotice")}
           </span>
         )}
       </span>

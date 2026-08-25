@@ -8,7 +8,7 @@
 
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js&logoColor=white)](https://nextjs.org/)
-[![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
+[![License](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue)](LICENSE)
 
 [文档中心](docs/README.md) · [安装部署](docs/guides/install.md) · [Docker 部署](docs/guides/docker.md) · [Telegram 频道](https://t.me/Twilightpanel) · [Telegram 群组](https://t.me/TwilightPanelChat)
 
@@ -111,6 +111,7 @@ pnpm build
 | [后端 API 详参](docs/reference/backend-api.md) | REST API 规范、认证、错误码、示例 |
 | [API Key 外部接入](docs/reference/api-key.md) | 第三方集成与权限矩阵 |
 | [开发者 JS 沙箱参考](docs/reference/developer-js.md) | Telegram Bot 自定义 JS 的内置对象、函数、权限边界与示例 |
+| [许可证与二次开发](docs/reference/license.md) | 商业使用、修改版开源、网络部署源码提供与署名保留要求 |
 | [邮箱验证](docs/features/email.md) | SMTP、验证码、强制绑定、找回密码和邮箱管理 |
 | [签到与积分续期](docs/features/signin.md) | 每日签到、手动积分续期与到期自动续期规则 |
 | [注册码与卡码](docs/features/regcodes.md) | 注册码、续期码、白名单码算法和使用规则 |
@@ -144,6 +145,18 @@ cd webui && pnpm lint && pnpm typecheck && pnpm build
 ```
 
 涉及架构、权限、配置、审计、缓存或外部副作用的改动，请先阅读 [模块化架构与解耦指南](docs/guides/modular-architecture.md)。
+
+## 许可证与二次开发
+
+当前版本采用 [GNU AGPL v3 或更高版本](LICENSE)，并受 [NOTICE](NOTICE) 中依据 GNU AGPL 第 7(b) 条声明的署名保留条款约束：
+
+- 允许个人或企业修改、销售、收费部署、提供商业托管与技术支持。
+- 分发原版或修改版时，必须继续使用 GNU AGPL，并提供完整的对应源代码。
+- 通过网络向用户提供修改版服务时，必须为这些用户提供该运行版本的完整对应源代码。
+- 必须保留 Twilight 原始项目名、Prejudice Studio 版权署名、GNU AGPL 许可证，以及上游开源地址 `https://github.com/Prejudice-Studio/Twilight`。
+- 可以增加改版名称、改版作者和改版仓库地址，但不得删除、隐藏、替换或冒充上述原始署名与上游地址，也不得将修改版闭源。
+
+法律文本以 [LICENSE](LICENSE) 和 [NOTICE](NOTICE) 为准。详细说明见 [许可证与二次开发](docs/reference/license.md)。已经在旧 MIT 许可证下公开的历史版本不受本次换证追溯影响，历史许可证文本保留于 [LICENSES/MIT-legacy.txt](LICENSES/MIT-legacy.txt)。
 
 ## 鸣谢
 

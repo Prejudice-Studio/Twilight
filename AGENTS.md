@@ -527,6 +527,14 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - When fixing encoding, restore content from Git first, then repair mojibake; do not discard sections to make the problem smaller.
 - Docker docs and compose files must keep the untested/LLM-generated warning.
 
+## License Rules
+
+- The current project license is `AGPL-3.0-or-later`, with the section 7(b) attribution terms in `NOTICE`.
+- Keep the official GNU AGPL text in `LICENSE` unmodified. Do not replace it with a summary or a custom license.
+- Do not remove or weaken `NOTICE`, the Prejudice Studio copyright attribution, the Twilight original-project name, or the upstream URL `https://github.com/Prejudice-Studio/Twilight`.
+- Commercial forks are allowed, but covered modifications and network deployments must remain GNU AGPL and provide corresponding source code. Do not describe closed-source redistribution as permitted.
+- `LICENSES/MIT-legacy.txt` records the irrevocable license of versions published before the 2026-08-25 relicensing. It is historical compliance material and must not be presented as a dual license for the current version.
+
 ## Validation
 
 Run checks proportional to the change. For broad backend/frontend work, run:

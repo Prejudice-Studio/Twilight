@@ -1,0 +1,59 @@
+Twilight Licensing and Attribution Notice
+==========================================
+
+Copyright (C) 2025-2026 Prejudice Studio
+Original project: Twilight
+Upstream source: https://github.com/Prejudice-Studio/Twilight
+
+Current License
+---------------
+
+Twilight is licensed under the GNU Affero General Public License, version 3,
+or (at your option) any later version (AGPL-3.0-or-later). The complete license
+text is in the LICENSE file.
+
+Commercial use is permitted. Distribution, modification, and operation of a
+modified version over a network remain subject to the GNU AGPL, including its
+requirements to license the covered work under the GNU AGPL and provide the
+complete corresponding source code to entitled recipients and remote users.
+
+Additional Attribution Terms under GNU AGPL version 3 section 7(b)
+-----------------------------------------------------------------
+
+The following are specified reasonable legal notices and author attributions
+that must be preserved in every covered copy and modified version of Twilight:
+
+1. The name "Twilight" as the original project name.
+2. The copyright notice "Copyright (C) 2025-2026 Prejudice Studio".
+3. The upstream source address
+   "https://github.com/Prejudice-Studio/Twilight".
+4. Identification of the applicable license as GNU AGPL version 3 or later.
+
+You may add the name, branding, copyright notices, and source address of your
+fork, but you may not remove, hide, replace, or misrepresent the notices above.
+
+Source distributions must retain the LICENSE and NOTICE files. Object-code
+distributions must include them in the accompanying materials and must provide
+the corresponding source in the manner required by the GNU AGPL.
+
+If a covered work provides an interactive user interface, it must retain an
+easily accessible legal, about, or source-code entry that displays the original
+project name, copyright notice, upstream source address, applicable license,
+and the source-code access required by GNU AGPL section 13. Existing Twilight
+source-project links and legal notices may be relocated or restyled, but may
+not be removed or obscured without an equally prominent replacement.
+
+These attribution terms do not prohibit charging money, offering paid hosting,
+selling support, or otherwise using Twilight commercially. They require that
+commercial and non-commercial modified versions remain open source under the
+GNU AGPL and preserve the notices identified above.
+
+Historical License Notice
+-------------------------
+
+Versions of Twilight that were publicly released before this relicensing
+change on 25 August 2026 were made available under the MIT License then
+included in the repository. Prior license grants cannot be revoked
+retroactively. The historical MIT text is retained in
+LICENSES/MIT-legacy.txt for attribution and compliance purposes; it does not
+make the current version dual-licensed.

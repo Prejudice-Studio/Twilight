@@ -191,4 +191,4 @@ location / {
 
 ## 许可证
 
-MIT License
+WebUI 与 Twilight 主项目一同采用 [GNU AGPL v3 或更高版本](../LICENSE)，并受 [NOTICE](../NOTICE) 中的署名保留条款约束。允许商业使用和改版，但分发或通过网络提供修改版时必须公开完整对应源代码，并保留 Twilight、Prejudice Studio 与上游项目地址。
