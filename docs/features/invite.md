@@ -58,7 +58,7 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 
 ## 用户接口
 
-均挂在 `/api/v1` 前缀下，路由见 `internal/api/routes.go` 的 `registerStatsInviteSigninAnnouncementDemoRoutes`。鉴权级别说明见 [API 路由索引](../reference/api-index.md)。
+均挂在 `/api/v1` 前缀下，路由见 `internal/api/routes.go` 的 `registerStatsInviteSigninAnnouncementRoutes`。鉴权级别说明见 [API 路由索引](../reference/api-index.md)。
 
 | Method | Path | 鉴权 | 描述 |
 | ------ | ---- | ---- | ---- |
