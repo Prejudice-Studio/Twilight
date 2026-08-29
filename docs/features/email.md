@@ -94,7 +94,7 @@
 - **尝试上限**：每条记录 `Attempts/MaxAttempts`，错码累加，达上限即删除记录并返回 `EMAIL_CODE_TOO_MANY`，挡在线爆破。
 - **有效期**：`ExpiresAt` 到点即作废（`EMAIL_CODE_EXPIRED`）；过期记录由定时任务清理。
 - **原子消费**：`ConsumeEmailVerificationAtomic` 在 store 全局写锁内完成「校验 + 计数 + 删除」，命中即一次性消费删除，杜绝并发重放。
-- **发信优先于落库**：先发信成功才把记录落库，避免 SMTP 失败却在 store 留下用户永远拿不到的「幽灵码」。
+- **发信优先于落库**：先发信成功才把记录落库，避免 SMTP 失败却在 store 留下用户永远拿不到的「幽灵码」。普通用户路径在发信失败时只返回通用的「邮件发送失败，请稍后重试」，SMTP 主机、网络地址、认证和底层错误只进入受控服务端日志；管理员 SMTP 测试接口才返回脱敏诊断结果。
 
 ## 验证码用途（purpose）
 
@@ -103,7 +103,7 @@
 | `bind` | 绑定 / 验证邮箱 | AuthUser | 给新邮箱发码；校验后写入 `User.Email` 并置 `EmailVerified=true`。 |
 | `reset_password` | 登出态找回系统密码 | AuthPublic | 按「已验证邮箱」命中账号发码；校验后重置系统密码。 |
 | `change_password` | 面板内改系统密码 / 关闭系统改密邮箱保护 | AuthUser | 给已绑定邮箱发码；全局强制或个人开启“改系统密码需邮箱验证码”时改密需附带，关闭该个人保护也需附带。 |
-| `change_emby_password` | 面板内改 Emby 密码 / 关闭 Emby 改密邮箱保护 | AuthUser | 同上，要求账号已关联 Emby；全局强制或个人开启“改 Emby 密码需邮箱验证码”时改密需附带，关闭该个人保护也需附带。 |
+| `change_emby_password` | 面板内改 Emby 密码 / 关闭 Emby 改密邮箱保护 | AuthUser | 同上，要求账号已关联 Emby；全局强制或个人开启“改 Emby 密码需邮箱验证码”且未启用当前 Web 密码保护时改密需附带，关闭该个人保护也需附带。 |
 
 跨用途防越权：校验时同时核对 `rec.UID == 当前用户` 与 `rec.Purpose == 期望用途`，不能拿 `bind` 的码去改密、也不能用别人申请的码。
 
@@ -113,7 +113,7 @@
 
 - **作用对象**：普通用户与白名单用户（`emailGateActive`）。**管理员豁免**，仅在仪表盘底部显示可关闭的提示横幅，不阻断。
 - **服务端硬门**：`requireEmailVerified`（`email_handlers.go`）是不可绕过的服务端防线，前端守卫只做体验。未验证邮箱的受约束用户访问「价值型接口」（如使用卡码 `code_use_handlers.go`、求片 `media_request_handlers.go` 等）会被 `403` + `USER_EMAIL_VERIFICATION_REQUIRED` 拦截。
-- **改密二次校验**：受全局强制约束，或用户在个人设置中开启对应保护后，改系统密码 / Emby 密码时 `consumePasswordChangeEmailCode` 要求附带 `verification_id` + `email_code`（命中本人、对应用途的有效码）；未开启时此步直接放行，保持向后兼容。关闭个人邮箱保护本身也需要对应用途的验证码，避免已登录会话先降级安全设置。
+- **改密二次校验**：受全局强制约束，或用户在个人设置中开启对应保护后，改系统密码 / Emby 密码时 `consumePasswordChangeEmailCode` 要求附带 `verification_id` + `email_code`（命中本人、对应用途的有效码）；未开启时此步直接放行，保持向后兼容。Emby 改密的当前 Web 密码保护与个人邮箱验证码保护互斥，启用当前 Web 密码后后端会关闭个人邮箱保护；历史上两个开关同时开启时也以当前 Web 密码为准。关闭个人邮箱保护本身需要对应用途的验证码，但当前已认证的管理员可以直接关闭自己的个人邮箱保护，以免测试环境 SMTP 故障阻断管理操作。
 - **Emby 改密旧密码保护**：用户可在个人设置中开启“修改 Emby 密码需要当前 Web 密码”。开启后 `POST /users/me/password/emby` 必须附带 `old_password` 并通过当前 Web 密码校验；关闭该保护也必须先输入当前 Web 密码。
 - 前端入口：全屏接管守卫见 `webui/src/components/email-verify-guard.tsx`（挂载于 `(main)/layout.tsx`）。
 

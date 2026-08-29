@@ -3647,6 +3647,117 @@ func TestPasswordSecuritySettingsRequireProofBeforeDisable(t *testing.T) {
 	}
 }
 
+func TestEmbyPasswordSecurityUsesSingleProof(t *testing.T) {
+	app := newTestApp(t)
+	_ = registerAndLogin(t, app, "admin", "Admin123456")
+	userCookies := registerAndLogin(t, app, "proofprefs", "User123456")
+	user, ok := app.store().FindUserByUsername("proofprefs")
+	if !ok {
+		t.Fatal("created user not found")
+	}
+	if _, err := app.store().UpdateUser(user.UID, func(u *store.User) error {
+		u.Email = "proofprefs@example.com"
+		u.EmailVerified = true
+		u.RequireEmailForEmbyPasswordChange = true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	app.cfg().EmailEnabled = true
+	app.cfg().SMTPHost = "smtp.example.com"
+	app.cfg().SMTPFromAddress = "noreply@example.com"
+
+	// 开启当前 Web 密码保护时，后端必须同步关闭 Emby 邮箱保护。
+	resp := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me", `{"emby_password_old_password_required":true}`, userCookies, map[string]string{"X-Twilight-Client": "webui"})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("enable current Web password proof status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	updated, _ := app.store().User(user.UID)
+	if !updated.RequireOldPasswordForEmbyPasswordChange || updated.RequireEmailForEmbyPasswordChange {
+		t.Fatalf("Emby proof settings should be exclusive after Web password enable: %#v", updated)
+	}
+
+	// 反向切换同样只能保留邮箱证明。
+	resp = doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me", `{"emby_password_email_required":true}`, userCookies, map[string]string{"X-Twilight-Client": "webui"})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("enable email proof status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	updated, _ = app.store().User(user.UID)
+	if !updated.RequireEmailForEmbyPasswordChange || updated.RequireOldPasswordForEmbyPasswordChange {
+		t.Fatalf("Emby proof settings should be exclusive after email enable: %#v", updated)
+	}
+
+	// 历史脏数据即使同时为 true，Web 密码证明也应在改密时优先。
+	if a := app.passwordChangeEmailRequired(store.User{
+		Role:                                    store.RoleNormal,
+		RequireEmailForEmbyPasswordChange:       true,
+		RequireOldPasswordForEmbyPasswordChange: true,
+	}, emailPurposeChangeEmby); a {
+		t.Fatal("current Web password proof must take precedence over the Emby email proof")
+	}
+}
+
+func TestAdminCanDisablePersonalEmailPasswordProtectionWithoutEmailCode(t *testing.T) {
+	app := newTestApp(t)
+	adminCookies := registerAndLogin(t, app, "admin", "Admin123456")
+	admin, ok := app.store().FindUserByUsername("admin")
+	if !ok {
+		t.Fatal("admin not found")
+	}
+	if _, err := app.store().UpdateUser(admin.UID, func(u *store.User) error {
+		u.RequireEmailForPasswordChange = true
+		u.RequireEmailForEmbyPasswordChange = true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, field := range []string{"password_change_email_required", "emby_password_email_required"} {
+		body := fmt.Sprintf(`{"%s":false}`, field)
+		resp := doJSONWithHeaders(app, http.MethodPut, "/api/v1/users/me", body, adminCookies, map[string]string{"X-Twilight-Client": "webui"})
+		if resp.Code != http.StatusOK {
+			t.Fatalf("admin disable %s status=%d body=%s", field, resp.Code, resp.Body.String())
+		}
+	}
+	updated, _ := app.store().User(admin.UID)
+	if updated.RequireEmailForPasswordChange || updated.RequireEmailForEmbyPasswordChange {
+		t.Fatalf("admin email password protections should be disabled without an email code: %#v", updated)
+	}
+}
+
+func TestUserEmailSendFailureDoesNotExposeSMTPDetails(t *testing.T) {
+	app := newTestApp(t)
+	_ = registerAndLogin(t, app, "admin", "Admin123456")
+	userCookies := registerAndLogin(t, app, "mailuser", "User123456")
+	user, ok := app.store().FindUserByUsername("mailuser")
+	if !ok {
+		t.Fatal("mail user not found")
+	}
+	if _, err := app.store().UpdateUser(user.UID, func(u *store.User) error {
+		u.Email = "mailuser@example.com"
+		u.EmailVerified = true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	app.cfg().EmailEnabled = true
+	app.cfg().SMTPHost = "127.0.0.1"
+	app.cfg().SMTPPort = 1
+	app.cfg().SMTPFromAddress = "noreply@example.com"
+	app.cfg().SMTPEncryption = "none"
+	app.cfg().SMTPTimeoutSeconds = 1
+	app.cfg().EmailResendCooldownSeconds = 0
+
+	resp := doJSONWithHeaders(app, http.MethodPost, "/api/v1/users/me/email/send-code", `{"purpose":"change_password"}`, userCookies, map[string]string{"X-Twilight-Client": "webui"})
+	body := resp.Body.String()
+	if resp.Code != http.StatusBadGateway || !strings.Contains(body, string(ErrEmailSendFailed)) {
+		t.Fatalf("email send failure status=%d body=%s", resp.Code, body)
+	}
+	if !strings.Contains(body, "邮件发送失败") || strings.Contains(body, "127.0.0.1") || strings.Contains(strings.ToLower(body), "dial") {
+		t.Fatalf("ordinary user response exposed SMTP details: %s", body)
+	}
+}
+
 func TestTelegramEndpointAcceptsCommonBaseURLs(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().TelegramMode = true

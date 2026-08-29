@@ -540,7 +540,9 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 				failWithCode(w, http.StatusForbidden, ErrEmailVerificationRequired, "全局已强制邮箱验证，不能关闭该项")
 				return
 			}
-			if p.User.RequireEmailForPasswordChange && !a.consumePasswordChangeEmailCode(w, payload, p.User, emailPurposeChangePass) {
+			// 管理员可以直接关闭自己的个人邮箱保护，避免测试环境 SMTP
+			// 故障阻断管理操作；普通用户仍必须证明邮箱归属。
+			if p.User.RequireEmailForPasswordChange && p.User.Role != store.RoleAdmin && !a.consumePasswordChangeEmailCode(w, payload, p.User, emailPurposeChangePass) {
 				return
 			}
 		}
@@ -569,7 +571,7 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 				failWithCode(w, http.StatusForbidden, ErrEmailVerificationRequired, "全局已强制邮箱验证，不能关闭该项")
 				return
 			}
-			if p.User.RequireEmailForEmbyPasswordChange && !a.consumePasswordChangeEmailCode(w, payload, p.User, emailPurposeChangeEmby) {
+			if p.User.RequireEmailForEmbyPasswordChange && p.User.Role != store.RoleAdmin && !a.consumePasswordChangeEmailCode(w, payload, p.User, emailPurposeChangeEmby) {
 				return
 			}
 		}
@@ -589,6 +591,16 @@ func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, _ Params) {
 				return
 			}
 		}
+	}
+	// Emby 改密只保留一种自助身份凭据。优先采用当前 Web 密码，避免用户
+	// 同时被要求输入 Web 密码和邮箱验证码；同时兼容旧版本可能已经保存的
+	// 两个开关均为 true 的数据。
+	if embyPasswordOldPasswordRequiredSet && embyPasswordOldPasswordRequiredNext {
+		embyPasswordEmailRequiredNext = false
+		embyPasswordEmailRequiredSet = true
+	} else if embyPasswordEmailRequiredSet && embyPasswordEmailRequiredNext {
+		embyPasswordOldPasswordRequiredNext = false
+		embyPasswordOldPasswordRequiredSet = true
 	}
 	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error {
 		if email := stringValue(payload, "email"); email != "" {

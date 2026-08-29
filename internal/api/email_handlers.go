@@ -76,7 +76,9 @@ func (a *App) passwordChangeEmailRequired(user store.User, purpose string) bool 
 	case emailPurposeChangePass:
 		return user.RequireEmailForPasswordChange
 	case emailPurposeChangeEmby:
-		return user.RequireEmailForEmbyPasswordChange
+		// 当前 Web 密码是 Emby 改密的明确身份凭据时，不再叠加邮箱验证码。
+		// 兼容历史上两个开关同时为 true 的数据，旧 Web 密码保护优先。
+		return user.RequireEmailForEmbyPasswordChange && !user.RequireOldPasswordForEmbyPasswordChange
 	default:
 		return false
 	}
@@ -112,6 +114,10 @@ func (a *App) handleSendEmailCode(w http.ResponseWriter, r *http.Request, _ Para
 	case emailPurposeChangeEmby:
 		if p.User.EmbyID == "" {
 			failWithCode(w, http.StatusBadRequest, ErrEmbyAccountUnlinked, "当前账号未关联 Emby")
+			return
+		}
+		if p.User.RequireOldPasswordForEmbyPasswordChange {
+			failWithCode(w, http.StatusConflict, ErrConflict, "当前已启用 Web 密码验证，无需邮箱验证码")
 			return
 		}
 		if !p.User.EmailVerified || strings.TrimSpace(p.User.Email) == "" {

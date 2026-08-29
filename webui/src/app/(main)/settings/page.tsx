@@ -159,7 +159,9 @@ export default function SettingsPage() {
   const hasTelegramBinding = Boolean(telegramStatus?.bound);
   const hasVerifiedEmail = emailVerified;
   const systemPasswordEmailGate = passwordChangeEmailRequired;
-  const embyPasswordEmailGate = embyPasswordEmailRequired;
+  // Emby 改密的两种用户自助证明保持互斥：启用当前 Web 密码后，
+  // 当前 Web 密码就是唯一证明，不再额外要求邮箱验证码。
+  const embyPasswordEmailGate = embyPasswordEmailRequired && !embyPasswordOldPasswordRequired;
   const passwordEmailForced = Boolean(settings?.password_change_email_forced) || (emailEnabled && forceBindEmail && user?.role !== 0);
   const embyPasswordEmailForced = Boolean(settings?.emby_password_email_forced) || (emailEnabled && forceBindEmail && user?.role !== 0);
   const [emailBindStage, setEmailBindStage] = useState<"email" | "code">("email");
@@ -770,6 +772,12 @@ export default function SettingsPage() {
     try {
       const res = await api.updateMySettings(payload);
       if (res.success) {
+        if (field === "emby_password_old_password_required" && value) {
+          setEmbyPasswordEmailRequired(false);
+        }
+        if (field === "emby_password_email_required" && value) {
+          setEmbyPasswordOldPasswordRequired(false);
+        }
         toast({ title: t("settings.securityPreferenceSaved"), variant: "success" });
         void loadData();
         void fetchUser();
@@ -799,13 +807,19 @@ export default function SettingsPage() {
       await savePasswordSecurity(field, true);
       return;
     }
+    // 管理员已通过当前登录会话完成鉴权，允许直接关闭个人邮箱保护，
+    // 避免测试环境 SMTP 故障把管理员锁在安全设置之外。
+    if (user?.role === 0 && (field === "password_change_email_required" || field === "emby_password_email_required")) {
+      await savePasswordSecurity(field, false);
+      return;
+    }
     setSecurityConfirm({ field, label, purpose, next: false });
   };
 
   const handleConfirmPasswordSecurity = async () => {
     if (!securityConfirm) return;
     const needsPassword = securityConfirm.field === "emby_password_old_password_required";
-    const needsEmail = securityConfirm.field === "password_change_email_required" || securityConfirm.field === "emby_password_email_required";
+    const needsEmail = user?.role !== 0 && (securityConfirm.field === "password_change_email_required" || securityConfirm.field === "emby_password_email_required");
     if (needsPassword && !securityConfirmPassword) {
       toast({ title: t("settings.currentPasswordRequired"), variant: "destructive" });
       return;
@@ -861,7 +875,7 @@ export default function SettingsPage() {
       variants={container}
       initial={hasAppeared ? false : "hidden"}
       animate="show"
-      className="space-y-6"
+      className="flex flex-col gap-6"
     >
       <div>
         <h1 className="text-3xl font-bold">{t("settings.title")}</h1>
@@ -869,7 +883,7 @@ export default function SettingsPage() {
       </div>
 
       {/* 快速导航 */}
-      <motion.div variants={item}>
+      <motion.div variants={item} className="order-[75]">
         <div className="grid gap-4 sm:grid-cols-3">
           <Link href="/settings/appearance" className="group">
             <Card className="glass-card cursor-pointer hover:shadow-lg transition-all h-full">
@@ -887,7 +901,7 @@ export default function SettingsPage() {
         </div>
       </motion.div>
 
-      <motion.div variants={item}>
+      <motion.div variants={item} className="order-[80]">
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -918,7 +932,7 @@ export default function SettingsPage() {
       </motion.div>
 
       {/* Account Info */}
-      <motion.div variants={item}>
+      <motion.div variants={item} className="order-[10]">
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -975,7 +989,7 @@ export default function SettingsPage() {
       </motion.div>
 
       {/* Telegram Binding */}
-      <motion.div variants={item}>
+      <motion.div variants={item} className="order-[20]">
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -1158,7 +1172,7 @@ export default function SettingsPage() {
       </motion.div>
 
       {/* Emby Binding */}
-      <motion.div variants={item}>
+      <motion.div variants={item} className="order-[30]">
         <Card className="glass-card border-primary/20 bg-primary/5">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -1264,7 +1278,7 @@ export default function SettingsPage() {
 
       {/* API Key Management */}
       {user?.emby_id && (
-        <motion.div variants={item}>
+        <motion.div variants={item} className="order-[35]">
           <Card className="glass-card">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -1296,7 +1310,7 @@ export default function SettingsPage() {
       )}
 
       {/* Password Change & Emby URLs */}
-      <motion.div variants={item}>
+      <motion.div variants={item} className="order-[40]">
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -1335,7 +1349,7 @@ export default function SettingsPage() {
       </motion.div>
 
       {linesRequireRenewal ? (
-        <motion.div variants={item}>
+        <motion.div variants={item} className="order-[45]">
           <Card className="glass-card border-destructive/30">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-destructive">
@@ -1349,7 +1363,7 @@ export default function SettingsPage() {
           </Card>
         </motion.div>
       ) : !linesRequireEmby && (
-      <motion.div variants={item}>
+      <motion.div variants={item} className="order-[50]">
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -1459,7 +1473,7 @@ export default function SettingsPage() {
 
       {/* Bangumi */}
       {bangumiAnyEnabled && (
-      <motion.div variants={item}>
+      <motion.div variants={item} className="order-[60]">
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -1473,8 +1487,8 @@ export default function SettingsPage() {
           <CardContent className="space-y-6">
             <div className="space-y-3">
               {bangumiSyncEnabled && (
-                <div className="flex items-center justify-between gap-4">
-                  <div className="space-y-0.5">
+                <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0 space-y-0.5">
                     <Label>{t("settings.bangumiSync")}</Label>
                     <p className="text-sm text-muted-foreground">
                       {t("settings.bangumiSyncDescription")}
@@ -1484,8 +1498,8 @@ export default function SettingsPage() {
                 </div>
               )}
               {bangumiManageEnabled && (
-                <div className="flex items-center justify-between gap-4">
-                  <div className="space-y-0.5">
+                <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0 space-y-0.5">
                     <Label>{t("settings.bangumiManage")}</Label>
                     <p className="text-sm text-muted-foreground">
                       {t("settings.bangumiManageDescription")}
@@ -1537,18 +1551,25 @@ export default function SettingsPage() {
       </motion.div>
       )}
 
-      <motion.div variants={item}>
+      <motion.div variants={item} className="order-[42]">
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Lock className="h-5 w-5" />
               {t("settings.passwordSecurityTitle")}
             </CardTitle>
-            <CardDescription>{t("settings.passwordSecurityDescription")}</CardDescription>
+            <CardDescription>
+              {t("settings.passwordSecurityDescription")}
+              {user?.role === 0 && (
+                <span className="mt-1 block text-amber-600 dark:text-amber-400">
+                  {t("settings.adminSecurityBypassHint")}
+                </span>
+              )}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center justify-between gap-4">
-              <div className="space-y-0.5">
+            <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0 space-y-0.5">
                 <Label>{t("settings.requireEmailForSystemPassword")}</Label>
                 <p className="text-sm text-muted-foreground">
                   {passwordEmailForced ? t("settings.securityForcedByAdmin") : t("settings.requireEmailForSystemPasswordDesc")}
@@ -1562,8 +1583,8 @@ export default function SettingsPage() {
               />
             </div>
             <Separator />
-            <div className="flex items-center justify-between gap-4">
-              <div className="space-y-0.5">
+            <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0 space-y-0.5">
                 <Label>{t("settings.requireOldPasswordForEmbyPassword")}</Label>
                 <p className="text-sm text-muted-foreground">{t("settings.requireOldPasswordForEmbyPasswordDesc")}</p>
               </div>
@@ -1573,8 +1594,8 @@ export default function SettingsPage() {
               />
             </div>
             <Separator />
-            <div className="flex items-center justify-between gap-4">
-              <div className="space-y-0.5">
+            <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0 space-y-0.5">
                 <Label>{t("settings.requireEmailForEmbyPassword")}</Label>
                 <p className="text-sm text-muted-foreground">
                   {embyPasswordEmailForced ? t("settings.securityForcedByAdmin") : t("settings.requireEmailForEmbyPasswordDesc")}
@@ -1592,7 +1613,7 @@ export default function SettingsPage() {
       </motion.div>
 
       {/* 登录通知 */}
-      <motion.div variants={item}>
+      <motion.div variants={item} className="order-[70]">
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -1604,8 +1625,8 @@ export default function SettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
+            <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0 space-y-0.5">
                 <Label>{t("settings.loginNotifyTelegram")}</Label>
                 <p className="text-sm text-muted-foreground">
                   {t("settings.loginNotifyTelegramDesc")}
@@ -1622,8 +1643,8 @@ export default function SettingsPage() {
               />
             </div>
             <Separator />
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
+            <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0 space-y-0.5">
                 <Label>{t("settings.loginNotifyEmail")}</Label>
                 <p className="text-sm text-muted-foreground">
                   {t("settings.loginNotifyEmailDesc")}
@@ -1640,8 +1661,8 @@ export default function SettingsPage() {
               />
             </div>
             <Separator />
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
+            <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0 space-y-0.5">
                 <Label>{t("settings.ticketNotifyTelegram")}</Label>
                 <p className="text-sm text-muted-foreground">
                   {t("settings.ticketNotifyTelegramDesc")}
