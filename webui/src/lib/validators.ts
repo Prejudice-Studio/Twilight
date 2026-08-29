@@ -162,7 +162,7 @@ export const ERROR_CODE_FRIENDLY: Partial<Record<ErrCode, string>> = {
   EMAIL_CODE_EXPIRED: "验证码已过期，请重新获取",
   EMAIL_CODE_TOO_MANY: "验证码错误次数过多，请重新获取",
   EMAIL_CODE_REQUIRED: "请先获取并填写邮箱验证码",
-  EMAIL_SEND_FAILED: "当前邮件服务发件量已达上限，请稍后再试，这不是你的问题（如长期无法收到，请联系管理员）",
+  EMAIL_SEND_FAILED: "邮件发送失败，请稍后重试，如持续失败请联系管理员",
   EMAIL_RESEND_COOLDOWN: "发送过于频繁，请稍后再试",
   EMAIL_RATE_LIMITED: "验证码请求过于频繁，请稍后再试",
   EMAIL_PURPOSE_INVALID: "验证用途无效",

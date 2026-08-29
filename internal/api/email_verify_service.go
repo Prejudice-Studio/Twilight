@@ -193,9 +193,9 @@ func (a *App) issueEmailCode(ctx context.Context, ip, purpose, email string, uid
 		if purpose == emailPurposeBind {
 			a.purgeFailedBindEmail(uid, email)
 		}
-		// 文案明确告知是"服务端全局发件能力达到上限"而非用户操作问题，并配合前端
-		// 对 EMAIL_SEND_FAILED 的本地冷却（120s），减少无效重试放大 SMTP 限流压力。
-		return "", http.StatusBadGateway, ErrEmailSendFailed, "当前邮件服务发件量已达上限，请稍后再试，这不是你的问题（如长期无法收到，请联系管理员）"
+		// 普通用户只能看到统一失败文案；SMTP 主机、网络地址、认证失败原因和
+		// 服务商返回内容不得通过响应暴露。管理员测试接口另有受控诊断结果。
+		return "", http.StatusBadGateway, ErrEmailSendFailed, "邮件发送失败，请稍后重试，如持续失败请联系管理员"
 	}
 	if err := a.store().PutEmailVerification(rec); err != nil {
 		return "", http.StatusInternalServerError, ErrInternal, "验证码保存失败"
