@@ -219,11 +219,12 @@ class ApiClient {
   }
 
   // Auth
-  async login(username: string, password: string) {
+  async login(username: string, password: string, signal?: AbortSignal) {
     const isEmail = username.includes("@");
     const res = await this.request<{ user: Partial<UserInfo> }>("/auth/login", {
       method: "POST",
       cache: "no-store",
+      signal,
       body: JSON.stringify(
         isEmail
           ? { email: username.trim(), username: "", password }
@@ -294,8 +295,8 @@ class ApiClient {
   }
 
   // User
-  async getMe() {
-    const res = await this.request<UserInfo>("/users/me", { cache: "no-store" }, { cacheRead: false, dedupe: false });
+  async getMe(signal?: AbortSignal) {
+    const res = await this.request<UserInfo>("/users/me", { cache: "no-store", signal }, { cacheRead: false, dedupe: false });
     if (res.success && res.data?.avatar) {
       res.data.avatar = this.toAbsoluteAssetUrl(res.data.avatar) || undefined;
     }

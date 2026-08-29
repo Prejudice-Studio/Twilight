@@ -92,15 +92,27 @@ interface AuthState {
 interface AuthInFlightSlots {
   initialize: Promise<void> | null;
   fetchUser: Promise<FetchUserResult> | null;
+  loginController: AbortController | null;
+  fetchUserController: AbortController | null;
   generation: number;
 }
 
-const inFlight: AuthInFlightSlots = { initialize: null, fetchUser: null, generation: 0 };
+const inFlight: AuthInFlightSlots = {
+  initialize: null,
+  fetchUser: null,
+  loginController: null,
+  fetchUserController: null,
+  generation: 0,
+};
 
 function bumpAuthGeneration(): number {
+  inFlight.loginController?.abort();
+  inFlight.fetchUserController?.abort();
   inFlight.generation += 1;
   inFlight.initialize = null;
   inFlight.fetchUser = null;
+  inFlight.loginController = null;
+  inFlight.fetchUserController = null;
   clearApiRequestCaches();
   return inFlight.generation;
 }
@@ -110,8 +122,12 @@ function bumpAuthGeneration(): number {
  * 一个测试用例的悬挂 Promise 不会污染下一个用例的 initialize / fetchUser。
  */
 export function resetAuthInFlight(): void {
+  inFlight.loginController?.abort();
+  inFlight.fetchUserController?.abort();
   inFlight.initialize = null;
   inFlight.fetchUser = null;
+  inFlight.loginController = null;
+  inFlight.fetchUserController = null;
   inFlight.generation = 0;
 }
 
@@ -154,8 +170,10 @@ export const useAuthStore = create<AuthState>()(
 
       login: async (username: string, password: string) => {
         const generation = bumpAuthGeneration();
+        const controller = new AbortController();
+        inFlight.loginController = controller;
         try {
-          const res = await api.login(username, password);
+          const res = await api.login(username, password, controller.signal);
           if (generation !== inFlight.generation) {
             return { ok: false, message: "登录状态已变化，请重新确认", errorCode: "AUTH_SESSION_CHANGED" };
           }
@@ -195,12 +213,19 @@ export const useAuthStore = create<AuthState>()(
           }
           return { ok: false, message: res.message, errorCode: res.error_code };
         } catch (error: any) {
+          if (generation !== inFlight.generation) {
+            return { ok: false, message: "登录状态已变化，请重新确认", errorCode: "AUTH_SESSION_CHANGED" };
+          }
           // ApiError 经 lib/api-request.ts 抛出，携带 errorCode/backendMessage。
           return {
             ok: false,
             message: error?.backendMessage || error?.message,
             errorCode: error?.errorCode,
           };
+        } finally {
+          if (inFlight.loginController === controller) {
+            inFlight.loginController = null;
+          }
         }
       },
 
@@ -227,12 +252,14 @@ export const useAuthStore = create<AuthState>()(
         if (inFlight.fetchUser) {
           return inFlight.fetchUser;
         }
+        const controller = new AbortController();
+        inFlight.fetchUserController = controller;
         const run = (async (): Promise<FetchUserResult> => {
           try {
             if (!silent) {
               set({ isLoading: true });
             }
-            const userRes = await api.getMe();
+            const userRes = await api.getMe(controller.signal);
             if (generation !== inFlight.generation) {
               return { success: false, errorCode: "AUTH_SESSION_CHANGED" };
             }
@@ -287,6 +314,9 @@ export const useAuthStore = create<AuthState>()(
         tracked = run.finally(() => {
           if (inFlight.fetchUser === tracked) {
             inFlight.fetchUser = null;
+          }
+          if (inFlight.fetchUserController === controller) {
+            inFlight.fetchUserController = null;
           }
         }) as Promise<FetchUserResult>;
         inFlight.fetchUser = tracked;
