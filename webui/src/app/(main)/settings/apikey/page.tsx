@@ -89,8 +89,8 @@ export default function ApiKeyPage() {
   const [revealedKeys, setRevealedKeys] = useState<Record<number, string>>({});
   const [showKeyId, setShowKeyId] = useState<number | null>(null);
 
-  const loadApiKeysResource = useCallback(async () => {
-    const res = await api.getMyApiKeys();
+  const loadApiKeysResource = useCallback(async (signal?: AbortSignal) => {
+    const res = await api.getMyApiKeys(signal);
     if (!res.success) {
       throw new Error(res.message || t("apiKey.loadFailed"));
     }

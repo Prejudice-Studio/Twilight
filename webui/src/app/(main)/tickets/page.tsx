@@ -64,8 +64,8 @@ export default function UserTicketsPage() {
   const [replyDrafts, setReplyDrafts] = useState<Record<number, string>>({});
   const [replyingId, setReplyingId] = useState<number | null>(null);
 
-  const loadTickets = useCallback(async () => {
-    const res = await api.getMyTickets();
+  const loadTickets = useCallback(async (signal?: AbortSignal) => {
+    const res = await api.getMyTickets(signal);
     if (res.success && res.data) return { tickets: res.data.tickets, types: res.data.ticket_types || [] };
     throw new Error(res.message || t("common.networkError"));
   }, [t]);

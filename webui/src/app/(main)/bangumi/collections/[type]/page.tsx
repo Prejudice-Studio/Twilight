@@ -223,8 +223,8 @@ export default function BangumiCollectionPage() {
   const offset = (page - 1) * pageSize;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-  const fetchCollections = useCallback(async (refresh = false) => {
-    const res = await api.getBangumiCollections(type, pageSize, offset, refresh);
+  const fetchCollections = useCallback(async (refresh = false, signal?: AbortSignal) => {
+    const res = await api.getBangumiCollections(type, pageSize, offset, refresh, signal);
     if (!res.success || !res.data) throw new Error(res.message || "加载失败");
     setItems(res.data.entries || []);
     setTotal(res.data.total || 0);
@@ -233,7 +233,7 @@ export default function BangumiCollectionPage() {
     return true;
   }, [offset, type, pageSize]);
 
-  const loadCollections = useCallback(() => fetchCollections(false), [fetchCollections]);
+  const loadCollections = useCallback((signal?: AbortSignal) => fetchCollections(false, signal), [fetchCollections]);
 
   const { isLoading, error, execute: reload } = useAsyncResource(loadCollections, { immediate: true });
 

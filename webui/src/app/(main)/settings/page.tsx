@@ -341,8 +341,8 @@ export default function SettingsPage() {
     }
   }, []);
 
-  const loadSettingsResource = useCallback(async () => {
-    const settingsRes = await api.getMySettings();
+  const loadSettingsResource = useCallback(async (signal?: AbortSignal) => {
+    const settingsRes = await api.getMySettings(signal);
     if (settingsRes.success && settingsRes.data) {
       setSettings(settingsRes.data);
       setBgmMode(settingsRes.data.bgm_mode);

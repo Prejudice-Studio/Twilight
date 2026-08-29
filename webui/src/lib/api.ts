@@ -309,8 +309,8 @@ class ApiClient {
     });
   }
 
-  async getMySettings() {
-    return this.request<UserSettings>("/users/me/settings", { cache: "no-store" }, { cacheRead: false, dedupe: false });
+  async getMySettings(signal?: AbortSignal) {
+    return this.request<UserSettings>("/users/me/settings", { cache: "no-store", signal }, { cacheRead: false, dedupe: false });
   }
 
   async updateMySettings(data: { bgm_mode?: boolean; bgm_manage_mode?: boolean; bgm_token?: string; email?: string; notify_on_login_telegram?: boolean; notify_on_login_email?: boolean; notify_on_ticket_telegram?: boolean; signin_auto_renewal?: boolean; password_change_email_required?: boolean; emby_password_email_required?: boolean; emby_password_old_password_required?: boolean; old_password?: string; verification_id?: string; email_code?: string; code?: string }) {
@@ -320,11 +320,11 @@ class ApiClient {
     });
   }
 
-  async getBangumiSyncStatus() {
-    return this.request<BangumiSyncStatus>("/bangumi/sync/status");
+  async getBangumiSyncStatus(signal?: AbortSignal) {
+    return this.request<BangumiSyncStatus>("/bangumi/sync/status", { signal });
   }
 
-  async getBangumiMe() {
+  async getBangumiMe(signal?: AbortSignal) {
     return this.request<{
       bgm_token_set: boolean;
       expired: boolean;
@@ -342,10 +342,10 @@ class ApiClient {
       };
       watching?: any[];
       wishlist?: any[];
-    }>("/bangumi/me");
+    }>("/bangumi/me", { signal });
   }
 
-  async getBangumiCollections(type: number, limit = 20, offset = 0, refresh = false) {
+  async getBangumiCollections(type: number, limit = 20, offset = 0, refresh = false, signal?: AbortSignal) {
     const params = new URLSearchParams({
       type: String(type),
       limit: String(limit),
@@ -359,7 +359,7 @@ class ApiClient {
       offset: number;
       cached?: boolean;
       cache_updated_at?: number | null;
-    }>(`/bangumi/collections?${params.toString()}`);
+    }>(`/bangumi/collections?${params.toString()}`, { signal });
   }
 
   async updateBangumiCollection(subjectId: string, data: { type: number; ep_status?: number; rate?: number }) {
@@ -1344,8 +1344,8 @@ class ApiClient {
     return res;
   }
 
-  async listConfigBackups() {
-    return this.request<{ backups: ConfigBackup[]; config_file: string; backup_dir: string }>("/system/admin/config/backups");
+  async listConfigBackups(signal?: AbortSignal) {
+    return this.request<{ backups: ConfigBackup[]; config_file: string; backup_dir: string }>("/system/admin/config/backups", { signal, cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
   async createConfigBackup() {
@@ -1355,8 +1355,8 @@ class ApiClient {
     });
   }
 
-  async getConfigBackup(name: string) {
-    return this.request<ConfigBackupView>(`/system/admin/config/backups/${encodeURIComponent(name)}`);
+  async getConfigBackup(name: string, signal?: AbortSignal) {
+    return this.request<ConfigBackupView>(`/system/admin/config/backups/${encodeURIComponent(name)}`, { signal, cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
   async restoreConfigBackup(name: string, options?: { dry_run?: boolean; preview?: boolean; confirm?: string }) {
@@ -2037,8 +2037,8 @@ class ApiClient {
   }
 
   // Appearance
-  async getUserBackground(uid: number) {
-    const res = await this.request<{ background: string | null }>(`/users/${uid}/background`);
+  async getUserBackground(uid: number, signal?: AbortSignal) {
+    const res = await this.request<{ background: string | null }>(`/users/${uid}/background`, { signal });
     if (res.success && res.data?.background) {
       try {
         const config = JSON.parse(res.data.background);
@@ -2094,8 +2094,8 @@ class ApiClient {
     return res;
   }
 
-  async getUserAvatar(uid: number) {
-    const res = await this.request<{ avatar: string | null; uid: number; username: string }>(`/users/${uid}/avatar`);
+  async getUserAvatar(uid: number, signal?: AbortSignal) {
+    const res = await this.request<{ avatar: string | null; uid: number; username: string }>(`/users/${uid}/avatar`, { signal });
     if (res.success && res.data?.avatar) {
       res.data.avatar = this.toAbsoluteAssetUrl(res.data.avatar);
     }
@@ -2152,8 +2152,8 @@ class ApiClient {
   }
 
   // Multi API Keys
-  async getMyApiKeys() {
-    return this.request<{ keys: ApiKeyItem[]; total: number }>('/users/me/apikeys');
+  async getMyApiKeys(signal?: AbortSignal) {
+    return this.request<{ keys: ApiKeyItem[]; total: number }>('/users/me/apikeys', { signal, cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
   async createMyApiKey(payload: {
@@ -2769,8 +2769,8 @@ class ApiClient {
 
   // ==================== Tickets ====================
 
-  async getMyTickets() {
-    return this.request<{ tickets: Ticket[]; total: number; ticket_types: string[] }>("/tickets", { cache: "no-store" }, { cacheRead: false, dedupe: false });
+  async getMyTickets(signal?: AbortSignal) {
+    return this.request<{ tickets: Ticket[]; total: number; ticket_types: string[] }>("/tickets", { cache: "no-store", signal }, { cacheRead: false, dedupe: false });
   }
 
   async createTicket(payload: { title: string; content: string; type?: string; priority?: string; notify_telegram?: boolean }) {

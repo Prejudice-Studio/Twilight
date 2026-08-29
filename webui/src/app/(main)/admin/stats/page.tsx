@@ -30,8 +30,8 @@ export default function AdminStatsPage() {
   const { t } = useI18n();
   const [stats, setStats] = useState<SystemStats | null>(null);
 
-  const loadStatsResource = useCallback(async () => {
-    const res = await api.getSystemStats();
+  const loadStatsResource = useCallback(async (signal?: AbortSignal) => {
+    const res = await api.getSystemStats(signal);
     if (res.success && res.data) {
       setStats(res.data);
     }

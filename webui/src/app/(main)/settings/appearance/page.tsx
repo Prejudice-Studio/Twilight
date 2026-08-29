@@ -135,15 +135,17 @@ export default function AppearanceSettingsPage() {
     }
   }, []);
 
-  const loadAppearanceResource = useCallback(async () => {
+  const loadAppearanceResource = useCallback(async (signal?: AbortSignal) => {
     if (!user?.uid) return true;
 
     // allSettled：背景 / 头像两个端点相互独立，任一失败都不该把整页打成错误态
     // （旧的 Promise.all 下，头像接口 500 会连带背景一起 PageError，用户连重置都点不到）。
     const [bgResult, avatarResult] = await Promise.allSettled([
-      api.getUserBackground(user.uid),
-      api.getUserAvatar(user.uid),
+      api.getUserBackground(user.uid, signal),
+      api.getUserAvatar(user.uid, signal),
     ]);
+
+    if (signal?.aborted) throw new DOMException("aborted", "AbortError");
 
     if (bgResult.status === "fulfilled" && bgResult.value.success && bgResult.value.data?.background) {
       // 存储的背景 JSON 可能因历史写入 / 截断而损坏：用 try/catch 兜住，损坏时退回

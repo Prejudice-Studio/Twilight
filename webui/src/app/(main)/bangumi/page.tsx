@@ -70,28 +70,27 @@ export default function BangumiPage() {
   const [logs, setLogs] = useState<BangumiSyncLog[]>([]);
   const [bgmMe, setBgmMe] = useState<any>(null);
 
-  const loadResource = useCallback(async () => {
-    const res = await api.getBangumiSyncStatus();
+  const loadResource = useCallback(async (signal?: AbortSignal) => {
+    const res = await api.getBangumiSyncStatus(signal);
     if (res.success && res.data) {
+      let nextBgmMe: any = null;
+      if (res.data.bgm_token_set) {
+        try {
+          const meRes = await api.getBangumiMe(signal);
+          if (meRes.success && meRes.data) {
+            nextBgmMe = meRes.data;
+          }
+        } catch (e) {
+          if (signal?.aborted) throw e;
+          console.error("加载 Bangumi 用户数据失败", e);
+        }
+      }
+      if (signal?.aborted) throw new DOMException("aborted", "AbortError");
       setStatus(res.data);
       setBgmMode(res.data.bgm_mode);
       setBgmManageMode(res.data.bgm_manage_mode);
       setLogs(res.data.recent_logs || []);
-
-      if (res.data.bgm_token_set) {
-        try {
-          const meRes = await api.getBangumiMe();
-          if (meRes.success && meRes.data) {
-            setBgmMe(meRes.data);
-          } else {
-            setBgmMe(null);
-          }
-        } catch (e) {
-          console.error("加载 Bangumi 用户数据失败", e);
-        }
-      } else {
-        setBgmMe(null);
-      }
+      setBgmMe(nextBgmMe);
       return true;
     }
     throw new Error(res.message || "加载失败");
