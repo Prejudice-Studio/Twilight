@@ -840,6 +840,7 @@ func (a *App) handleReviewRebindRequest(w http.ResponseWriter, r *http.Request, 
 	if statusFromError(w, err) {
 		return
 	}
+	a.audit(r, "review_telegram_rebind", "admin", req.UID, map[string]any{"request_id": id, "status": status})
 	ok(w, "reviewed", req)
 }
 
@@ -867,6 +868,9 @@ func (a *App) handleBatchReviewRebindRequests(w http.ResponseWriter, r *http.Req
 			result["errors"] = append(errorsList, map[string]any{"id": id, "error": err.Error()})
 		}
 	}
+	a.audit(r, "batch_review_telegram_rebind", "admin", 0, map[string]any{
+		"action": action, "requested": len(ids), "success": result["success"], "failed": result["failed"],
+	})
 	ok(w, "batch review complete", result)
 }
 
@@ -881,6 +885,7 @@ func (a *App) handleRevokeAllRebindApprovals(w http.ResponseWriter, r *http.Requ
 	if statusFromError(w, err) {
 		return
 	}
+	a.audit(r, "revoke_telegram_rebind_approvals", "admin", 0, map[string]any{"revoked": count})
 	ok(w, "revoked", map[string]any{"revoked": count})
 }
 

@@ -50,6 +50,7 @@ func (a *App) handleDeleteViolation(w http.ResponseWriter, r *http.Request, para
 	if statusFromError(w, a.store().DeleteViolationLog(id)) {
 		return
 	}
+	a.audit(r, "delete_violation_log", "admin", 0, map[string]any{"violation_id": id})
 	ok(w, "violation log deleted", nil)
 }
 
@@ -64,5 +65,6 @@ func (a *App) handleClearViolations(w http.ResponseWriter, r *http.Request, _ Pa
 		failWithCode(w, http.StatusInternalServerError, ErrViolationClearFailed, "清除失败")
 		return
 	}
+	a.audit(r, "clear_violation_logs", "admin", 0, map[string]any{})
 	ok(w, "all violation logs cleared", nil)
 }

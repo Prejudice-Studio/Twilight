@@ -620,6 +620,7 @@ func (a *App) handleDeleteAuditLog(w http.ResponseWriter, r *http.Request, param
 		failWithCode(w, http.StatusNotFound, ErrNotFound, "日志不存在")
 		return
 	}
+	a.audit(r, "delete_audit_log", "admin", 0, map[string]any{"log_id": id})
 	ok(w, "已删除", nil)
 }
 
@@ -634,6 +635,7 @@ func (a *App) handleClearAuditLogs(w http.ResponseWriter, r *http.Request, _ Par
 		failWithCode(w, http.StatusInternalServerError, ErrInternal, "清空失败")
 		return
 	}
+	a.audit(r, "clear_audit_logs", "admin", 0, map[string]any{"removed": removed})
 	ok(w, "审计日志已清空", map[string]any{"removed": removed})
 }
 
@@ -666,6 +668,10 @@ func (a *App) handlePruneAuditLogs(w http.ResponseWriter, r *http.Request, _ Par
 		failWithCode(w, http.StatusInternalServerError, ErrInternal, "裁剪失败")
 		return
 	}
+	a.audit(r, "prune_audit_logs", "admin", 0, map[string]any{
+		"max_entries": maxEntries, "retention_days": retentionDays,
+		"preserve_admin": preserveAdmin,
+	})
 	logs := []string{}
 	if maxEntries > 0 {
 		logs = append(logs, fmt.Sprintf("保留最近 %d 条，删除 %d 条", maxEntries, result.RemovedByLimit))
