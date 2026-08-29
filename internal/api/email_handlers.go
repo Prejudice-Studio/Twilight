@@ -116,7 +116,7 @@ func (a *App) handleSendEmailCode(w http.ResponseWriter, r *http.Request, _ Para
 			failWithCode(w, http.StatusBadRequest, ErrEmbyAccountUnlinked, "当前账号未关联 Emby")
 			return
 		}
-		if p.User.RequireOldPasswordForEmbyPasswordChange {
+		if p.User.RequireOldPasswordForEmbyPasswordChange && !a.emailGateActive(p.User) {
 			failWithCode(w, http.StatusConflict, ErrConflict, "当前已启用 Web 密码验证，无需邮箱验证码")
 			return
 		}

@@ -124,3 +124,15 @@ func TestEmailGateInactiveWhenForceBindOff(t *testing.T) {
 		t.Fatal("gate must be inactive when force_bind is off")
 	}
 }
+
+func TestGlobalEmailGateStillAppliesToEmbyPassword(t *testing.T) {
+	app := newEmailTestApp(t, true)
+	user := store.User{
+		Role:                                    store.RoleNormal,
+		RequireEmailForEmbyPasswordChange:       false,
+		RequireOldPasswordForEmbyPasswordChange: true,
+	}
+	if !app.passwordChangeEmailRequired(user, emailPurposeChangeEmby) {
+		t.Fatal("global email verification must still apply to Emby password changes")
+	}
+}

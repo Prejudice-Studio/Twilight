@@ -158,12 +158,12 @@ export default function SettingsPage() {
   const emailVerified = Boolean(user?.email_verified);
   const hasTelegramBinding = Boolean(telegramStatus?.bound);
   const hasVerifiedEmail = emailVerified;
-  const systemPasswordEmailGate = passwordChangeEmailRequired;
-  // Emby 改密的两种用户自助证明保持互斥：启用当前 Web 密码后，
-  // 当前 Web 密码就是唯一证明，不再额外要求邮箱验证码。
-  const embyPasswordEmailGate = embyPasswordEmailRequired && !embyPasswordOldPasswordRequired;
   const passwordEmailForced = Boolean(settings?.password_change_email_forced) || (emailEnabled && forceBindEmail && user?.role !== 0);
   const embyPasswordEmailForced = Boolean(settings?.emby_password_email_forced) || (emailEnabled && forceBindEmail && user?.role !== 0);
+  const systemPasswordEmailGate = passwordChangeEmailRequired || passwordEmailForced;
+  // Emby 改密的两种个人证明保持互斥：启用当前 Web 密码后，当前 Web
+  // 密码就是唯一的个人证明。全局强制邮箱验证属于管理员策略，仍然优先生效。
+  const embyPasswordEmailGate = embyPasswordEmailForced || (embyPasswordEmailRequired && !embyPasswordOldPasswordRequired);
   const [emailBindStage, setEmailBindStage] = useState<"email" | "code">("email");
   const [emailBindVerifId, setEmailBindVerifId] = useState("");
   const [emailBindCode, setEmailBindCode] = useState("");

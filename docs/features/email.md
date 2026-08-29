@@ -113,7 +113,7 @@
 
 - **作用对象**：普通用户与白名单用户（`emailGateActive`）。**管理员豁免**，仅在仪表盘底部显示可关闭的提示横幅，不阻断。
 - **服务端硬门**：`requireEmailVerified`（`email_handlers.go`）是不可绕过的服务端防线，前端守卫只做体验。未验证邮箱的受约束用户访问「价值型接口」（如使用卡码 `code_use_handlers.go`、求片 `media_request_handlers.go` 等）会被 `403` + `USER_EMAIL_VERIFICATION_REQUIRED` 拦截。
-- **改密二次校验**：受全局强制约束，或用户在个人设置中开启对应保护后，改系统密码 / Emby 密码时 `consumePasswordChangeEmailCode` 要求附带 `verification_id` + `email_code`（命中本人、对应用途的有效码）；未开启时此步直接放行，保持向后兼容。Emby 改密的当前 Web 密码保护与个人邮箱验证码保护互斥，启用当前 Web 密码后后端会关闭个人邮箱保护；历史上两个开关同时开启时也以当前 Web 密码为准。关闭个人邮箱保护本身需要对应用途的验证码，但当前已认证的管理员可以直接关闭自己的个人邮箱保护，以免测试环境 SMTP 故障阻断管理操作。
+- **改密二次校验**：受全局强制约束，或用户在个人设置中开启对应保护后，改系统密码 / Emby 密码时 `consumePasswordChangeEmailCode` 要求附带 `verification_id` + `email_code`（命中本人、对应用途的有效码）；未开启时此步直接放行，保持向后兼容。Emby 改密的当前 Web 密码保护与个人邮箱验证码保护互斥，启用当前 Web 密码后后端会关闭个人邮箱保护；历史上两个开关同时开启时也以当前 Web 密码为准。全局强制邮箱验证仍然优先，可能同时要求邮箱证明。关闭个人邮箱保护本身需要对应用途的验证码，但当前已认证的管理员可以直接关闭自己的个人邮箱保护，以免测试环境 SMTP 故障阻断管理操作。
 - **Emby 改密旧密码保护**：用户可在个人设置中开启“修改 Emby 密码需要当前 Web 密码”。开启后 `POST /users/me/password/emby` 必须附带 `old_password` 并通过当前 Web 密码校验；关闭该保护也必须先输入当前 Web 密码。
 - 前端入口：全屏接管守卫见 `webui/src/components/email-verify-guard.tsx`（挂载于 `(main)/layout.tsx`）。
 
