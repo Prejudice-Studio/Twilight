@@ -21,7 +21,7 @@
     transform 260ms ease,
     background-position 300ms ease,
     background-color 320ms ease;
-  will-change: clip-path, filter, opacity, transform;
+  will-change: auto;
 }
 
 /* 深色模式切换时，主表面元素一同平滑过渡，避免突变 */
@@ -48,6 +48,10 @@
 
 .twilight-bg-wipe-active {
   clip-path: polygon(-5% 0%, 130% 0%, 105% 100%, -30% 100%);
+}
+
+.twilight-bg-wipe {
+  will-change: clip-path;
 }
 
 /*
@@ -165,10 +169,8 @@
     text-size-adjust: 100%;
     color-scheme: light;
     font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
-    background-image:
-      radial-gradient(circle at 12% 8%, var(--shell-glow), transparent 28%),
-      radial-gradient(circle at 86% 90%, var(--shell-glow), transparent 25%);
-    background-attachment: fixed;
+    background-image: none;
+    background-attachment: scroll;
     transition: background-color 320ms ease, color 240ms ease;
   }
 
@@ -192,27 +194,6 @@
     min-width: 0;
     max-width: 100%;
     overflow-x: clip;
-  }
-
-  .shell-glow {
-    position: fixed;
-    height: 360px;
-    width: 360px;
-    border-radius: 9999px;
-    filter: blur(80px);
-    background: var(--shell-glow);
-    pointer-events: none;
-    z-index: 0;
-  }
-
-  .shell-glow-left {
-    left: -120px;
-    top: -80px;
-  }
-
-  .shell-glow-right {
-    bottom: -120px;
-    right: -80px;
   }
 
   /* Auth page text: multi-layer shadow ensures readability on custom background images */
@@ -683,6 +664,13 @@
     max-width: 100%;
   }
 
+  /* 主内容的直接子节点必须允许在窄视口中收缩；否则 flex/grid 的默认
+     min-width:auto 会把长用户名、URL 或操作组撑出页面边界。 */
+  .section-surface > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
   .admin-section-surface :where(code, pre) {
     max-width: 100%;
     white-space: pre-wrap;
@@ -720,6 +708,40 @@
 
     .admin-section-surface :where(h1) {
       font-size: 1.35rem;
+    }
+  }
+
+  /* 移动端优先保证滚动和响应速度。固定背景、全屏滤镜和多层 backdrop-filter
+     会持续创建合成层，在 Firefox Android/iOS 窄视口与开发者工具缩放下尤其昂贵。
+     自定义背景仍保留，只改为普通滚动和不模糊渲染。 */
+  @media (max-width: 767px) {
+    .twilight-bg-layer {
+      background-attachment: scroll !important;
+      filter: none !important;
+      transform: none !important;
+    }
+
+    .section-surface,
+    .header-surface,
+    .premium-card,
+    .glass-acrylic,
+    .glass-frosted,
+    .glass-liquid {
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+
+    .section-surface {
+      background: hsl(var(--card) / 0.94);
+    }
+
+    .section-surface :where(.flex, .inline-flex, .grid) {
+      min-width: 0;
+    }
+
+    .section-surface :where(input, textarea, select) {
+      min-width: 0;
+      max-width: 100%;
     }
   }
 

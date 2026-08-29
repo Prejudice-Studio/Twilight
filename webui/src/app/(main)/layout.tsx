@@ -256,13 +256,11 @@ export default function MainLayout({
           style={nextBgStyle}
         />
       )}
-      <div className="shell-glow shell-glow-left" />
-      <div className="shell-glow shell-glow-right" />
       <div className="relative z-10 flex min-h-screen">
         <Sidebar />
         <div className="flex min-h-screen min-w-0 flex-1 flex-col lg:pl-72">
           <Header />
-          <main id="main-content" tabIndex={-1} className="mx-auto w-full min-w-0 max-w-[1680px] flex-1 px-2 py-3 sm:p-4 md:p-6 xl:p-8">
+          <main id="main-content" tabIndex={-1} className="mx-auto w-full min-w-0 max-w-[1680px] flex-1 px-2 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4 md:p-6 xl:p-8">
             <div className={cn("section-surface", isAdminPage && "admin-section-surface")}>
               <ErrorBoundary>{children}</ErrorBoundary>
             </div>
