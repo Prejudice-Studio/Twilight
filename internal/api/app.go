@@ -1860,7 +1860,10 @@ func requireAdminForUIDParam(w http.ResponseWriter, r *http.Request, params Para
 	}
 	paramUID, err := int64Param(params, "uid")
 	if err != nil || paramUID <= 0 {
-		return caller.UID, false
+		// 路径参数解析失败不能回退到管理员自己的 UID：这会把一个拼写错误
+		// 变成对当前账号的误操作，也会让共用 handler 的错误响应失去一致性。
+		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "uid 必须是正整数")
+		return 0, true
 	}
 	return paramUID, false
 }

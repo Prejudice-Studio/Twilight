@@ -297,3 +297,19 @@ func TestAPIDocsConsoleUsesPublicFallbackAndRealAPIKeyHeader(t *testing.T) {
 		}
 	}
 }
+
+// TestUIDRouteRejectsMalformedTarget 防止共用 AuthUser/AuthAdmin handler 在目标
+// UID 解析失败时回退到当前管理员 UID。错误路径必须明确返回 400，不能执行任何
+// 针对当前账号的设备查询或变更。
+func TestUIDRouteRejectsMalformedTarget(t *testing.T) {
+	app := newTestApp(t)
+	adminCookies := registerAndLogin(t, app, "admin", "Admin123456")
+
+	resp := doJSON(app, http.MethodGet, "/api/v1/security/users/not-a-number/devices", "", adminCookies)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("malformed uid status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), "uid") {
+		t.Fatalf("malformed uid response should explain the parameter: %s", resp.Body.String())
+	}
+}
