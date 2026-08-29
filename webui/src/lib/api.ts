@@ -212,9 +212,10 @@ class ApiClient {
   private async requestForm<T>(
     endpoint: string,
     formData: FormData,
-    method: "POST" | "PUT" = "POST"
+    method: "POST" | "PUT" = "POST",
+    extra: ApiRequestExtraOptions = {},
   ): Promise<ApiResponse<T>> {
-    return apiRequestForm<T>(endpoint, formData, method);
+    return apiRequestForm<T>(endpoint, formData, method, extra);
   }
 
   // Auth
@@ -2080,14 +2081,15 @@ class ApiClient {
     });
   }
 
-  async uploadBackgroundImage(file: File, type: 'light' | 'dark') {
+  async uploadBackgroundImage(file: File, type: 'light' | 'dark', signal?: AbortSignal) {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('type', type);
     const res = await this.requestForm<{ url: string; type: string; filename: string }>(
       '/users/me/background/upload',
       formData,
-      'POST'
+      'POST',
+      { signal },
     );
     return res;
   }
@@ -2100,35 +2102,37 @@ class ApiClient {
     return res;
   }
 
-  async uploadAvatar(file: File) {
+  async uploadAvatar(file: File, signal?: AbortSignal) {
     const formData = new FormData();
     formData.append('file', file);
-    const res = await this.requestForm<{ avatar_url: string }>('/users/me/avatar/upload', formData, 'POST');
+    const res = await this.requestForm<{ avatar_url: string }>('/users/me/avatar/upload', formData, 'POST', { signal });
     if (res.success && res.data?.avatar_url) {
       res.data.avatar_url = this.toAbsoluteAssetUrl(res.data.avatar_url) || res.data.avatar_url;
     }
     return res;
   }
 
-  async uploadServerIcon(file: File) {
+  async uploadServerIcon(file: File, signal?: AbortSignal) {
     const formData = new FormData();
     formData.append('file', file);
     const res = await this.requestForm<{ url: string; server_icon: string; filename: string; reload?: unknown }>(
       '/system/admin/server-icon/upload',
       formData,
-      'POST'
+      'POST',
+      { signal },
     );
     if (res.success) this.invalidateConfigSchemaCache();
     return res;
   }
 
-  async uploadAuthBackground(file: File) {
+  async uploadAuthBackground(file: File, signal?: AbortSignal) {
     const formData = new FormData();
     formData.append('file', file);
     const res = await this.requestForm<{ url: string; filename: string; reload?: unknown }>(
       '/system/admin/config/upload-auth-background',
       formData,
-      'POST'
+      'POST',
+      { signal },
     );
     if (res.success) this.invalidateConfigSchemaCache();
     return res;
@@ -2799,13 +2803,14 @@ class ApiClient {
   }
 
   // 工单交流图片
-  async uploadTicketImage(ticketId: number, file: File) {
+  async uploadTicketImage(ticketId: number, file: File, signal?: AbortSignal) {
     const formData = new FormData();
     formData.append("file", file);
     return this.requestForm<{ ticket_id: number; attachment: TicketAttachment; attachments: TicketAttachment[] }>(
       `/tickets/${ticketId}/images`,
       formData,
       "POST",
+      { signal },
     );
   }
 

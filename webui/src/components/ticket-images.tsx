@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogOverlay } from "@/components/ui/dialog";
@@ -38,6 +38,7 @@ export function TicketImages({
   const { t } = useI18n();
   const { toast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
+  const uploadAbortRef = useRef<AbortController | null>(null);
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
@@ -46,6 +47,13 @@ export function TicketImages({
   const list = Array.isArray(attachments) ? attachments : [];
   const canAdd = editable && list.length < maxCount;
   const allowDelete = canDelete ?? editable;
+
+  useEffect(() => {
+    return () => {
+      uploadAbortRef.current?.abort();
+      uploadAbortRef.current = null;
+    };
+  }, []);
 
   const handlePick = () => inputRef.current?.click();
 
@@ -64,8 +72,11 @@ export function TicketImages({
       return;
     }
     setUploading(true);
+    uploadAbortRef.current?.abort();
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
     try {
-      const res = await api.uploadTicketImage(ticketId, file);
+      const res = await api.uploadTicketImage(ticketId, file, controller.signal);
       if (res.success && res.data) {
         toast({ title: t("tickets.imageUploaded") });
         onChange?.(res.data.attachments);
@@ -73,10 +84,14 @@ export function TicketImages({
         toast({ title: friendlyError(res.error_code, res.message), variant: "destructive" });
       }
     } catch (err: any) {
+      if (controller.signal.aborted) return;
       toast({ title: friendlyError(err?.errorCode, err?.message), variant: "destructive" });
     } finally {
-      setUploading(false);
-      if (inputRef.current) inputRef.current.value = "";
+      if (uploadAbortRef.current === controller) {
+        uploadAbortRef.current = null;
+        setUploading(false);
+        if (inputRef.current) inputRef.current.value = "";
+      }
     }
   };
 

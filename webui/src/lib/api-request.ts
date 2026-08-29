@@ -374,6 +374,8 @@ async function parseApiResponse<T>(
 export interface ApiRequestExtraOptions {
   /** 自定义超时（毫秒）；传 0 / Infinity 表示不加超时（SSE / 长轮询场景）。 */
   timeoutMs?: number;
+  /** 调用方取消信号；表单上传也必须支持页面卸载/重复操作时的取消。 */
+  signal?: AbortSignal;
   /** Disable same-tick GET/HEAD request coalescing for endpoints that must be fetched independently. */
   dedupe?: boolean;
   /** Disable the short successful GET/HEAD memory cache. Writes always clear this cache. */
@@ -496,7 +498,7 @@ export async function apiRequestForm<T>(
   const methodName = method.toUpperCase();
 
   const timeoutMs = extra.timeoutMs ?? FORM_REQUEST_TIMEOUT_MS;
-  const guard = withTimeoutSignal(null, timeoutMs);
+  const guard = withTimeoutSignal(extra.signal ?? null, timeoutMs);
 
   let response: Response;
   try {
@@ -506,7 +508,7 @@ export async function apiRequestForm<T>(
       body: formData,
       cache: "no-store",
       credentials: "include",
-      signal: guard.signal ?? null,
+      signal: guard.signal ?? extra.signal ?? null,
     });
   } catch (error) {
     if (guard.isTimeout() || isTimeoutError(error)) {
