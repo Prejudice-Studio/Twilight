@@ -143,7 +143,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Use `webui/src/lib/api.ts` rather than naked `fetch` for app API calls.
 - User-facing copy belongs in `basic.json`, `zh-Hant.json`, and `en-US.json`; `zh-Hans.json` remains sparse and falls back to `basic.json`.
 - Polling should check document visibility when useful and must clear intervals on unmount.
-- Dashboard Emby line probes are user-triggered only. Loading or refreshing the line list must not automatically fan out one probe per line or issue an extra Emby status precheck.
+- Dashboard Emby lines remain collapsed to an entry/count summary on the home page. Users may open the detail dialog to view the lines and trigger probing; loading or refreshing the line list must not automatically fan out one probe per line or issue an extra Emby status precheck.
 - Shared authenticated layout components must not import `framer-motion` for simple active-state or one-shot entrance effects. Use existing CSS/Tailwind transitions there so routes without page animation do not pay for Framer in the common layout bundle.
 - The admin landing page and system-statistics page are dense operational surfaces and must remain static; do not import `framer-motion` or add decorative gradient/orb layers to their metric cards. Stable CSS transitions are sufficient for hover feedback.
 - Keep controls dimensionally stable across languages.

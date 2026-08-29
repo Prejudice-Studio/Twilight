@@ -116,6 +116,7 @@ export default function DashboardPage() {
   const [linesRequireRenewal, setLinesRequireRenewal] = useState(false);
   const [lineLatencyMap, setLineLatencyMap] = useState<Record<string, LineLatencyInfo>>({});
   const [isLatencyTesting, setIsLatencyTesting] = useState(false);
+  const [showLineDetails, setShowLineDetails] = useState(false);
   const [signinSummary, setSigninSummary] = useState<SigninSummary | null>(null);
   const [signingIn, setSigningIn] = useState(false);
   const [renewingWithPoints, setRenewingWithPoints] = useState(false);
@@ -1152,15 +1153,11 @@ export default function DashboardPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => void runLineLatencyTests()}
-            disabled={isLatencyTesting || lineSlots.length === 0}
+            onClick={() => setShowLineDetails(true)}
+            disabled={lineSlots.length === 0}
           >
-            {isLatencyTesting ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            {t("dashboard.retest")}
+            <Globe className="mr-2 h-4 w-4" />
+            {t("dashboard.viewLines", { count: lineSlots.length })}
           </Button>
         </div>
 
@@ -1169,37 +1166,67 @@ export default function DashboardPage() {
             {isLoading ? t("dashboard.loadingLines") : t("dashboard.noLines")}
           </p>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {sortedLineSlots.map((slot) => (
-              <div
-                key={slot.key}
-                className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-card/60 px-4 py-3"
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  {slot.scope === "wl" ? (
-                    <Badge variant="outline" className="border-yellow-500/30 text-yellow-600 dark:text-yellow-400 text-[10px] shrink-0">
-                      {t("dashboard.dedicated")}
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-[10px] shrink-0">
-                      {t("dashboard.public")}
-                    </Badge>
-                  )}
-                  <span className="text-sm font-semibold truncate" title={slot.name}>
-                    {slot.name}
-                  </span>
-                </div>
-                <span
-                  className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold tabular-nums ${renderLatencyToneClass(slot.key)}`}
-                >
-                  {renderLatencyText(slot.key)}
-                </span>
-              </div>
-            ))}
+          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            <Badge variant="outline">{t("dashboard.publicLinesCount", { count: lineSlots.filter((slot) => slot.scope === "line").length })}</Badge>
+            {lineSlots.some((slot) => slot.scope === "wl") && (
+              <Badge variant="outline" className="border-yellow-500/30 text-yellow-600 dark:text-yellow-400">
+                {t("dashboard.dedicatedLinesCount", { count: lineSlots.filter((slot) => slot.scope === "wl").length })}
+              </Badge>
+            )}
+            <span>{t("dashboard.linesHiddenUntilOpened")}</span>
           </div>
         )}
       </motion.div>
       )}
+
+      <Dialog open={showLineDetails} onOpenChange={setShowLineDetails}>
+        <DialogContent className="max-h-[min(720px,calc(100dvh-2rem))] overflow-hidden sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{t("dashboard.serverLatency")}</DialogTitle>
+            <DialogDescription>{t("dashboard.lineDetailsDescription")}</DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 overflow-y-auto overscroll-contain pr-1 custom-scrollbar">
+            <div className="grid gap-3 sm:grid-cols-2">
+              {sortedLineSlots.map((slot) => (
+                <div
+                  key={slot.key}
+                  className="flex min-w-0 items-center justify-between gap-3 rounded-xl border border-border/60 bg-card/60 px-4 py-3"
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    {slot.scope === "wl" ? (
+                      <Badge variant="outline" className="shrink-0 border-yellow-500/30 text-[10px] text-yellow-600 dark:text-yellow-400">
+                        {t("dashboard.dedicated")}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="shrink-0 text-[10px]">
+                        {t("dashboard.public")}
+                      </Badge>
+                    )}
+                    <span className="truncate text-sm font-semibold" title={slot.name}>
+                      {slot.name}
+                    </span>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <span className={`inline-block rounded-full px-2.5 py-1 text-[11px] font-bold tabular-nums ${renderLatencyToneClass(slot.key)}`}>
+                      {renderLatencyText(slot.key)}
+                    </span>
+                    <p className="mt-1 max-w-[12rem] break-all text-left font-mono text-[11px] text-muted-foreground sm:max-w-[15rem]">
+                      {slot.url}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <DialogFooter className="flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-left text-xs text-muted-foreground">{t("dashboard.lineAddressShownHere")}</p>
+            <Button variant="outline" onClick={() => void runLineLatencyTests()} disabled={isLatencyTesting || lineSlots.length === 0}>
+              {isLatencyTesting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+              {t("dashboard.retest")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 注册码/续期码/邀请码 */}
       <motion.div variants={item} className="premium-card p-5 sm:p-6">
