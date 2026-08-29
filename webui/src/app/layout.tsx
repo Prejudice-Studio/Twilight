@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -14,6 +14,14 @@ import {
   SITE_TITLE,
 } from "../lib/site-config";
 import "./globals.css";
+
+// viewport-fit=cover 让 env(safe-area-inset-*) 在刘海屏设备上生效，
+// 否则 globals.css 里大量安全区适配 padding 会一直取到 0。
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
 
 function safeHTTPOrigin(raw: string | undefined): string {
   const value = raw?.trim();
