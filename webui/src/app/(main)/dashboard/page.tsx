@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -45,21 +44,6 @@ import { AnnouncementBoard } from "@/components/announcement-board";
 import { ForceReadAnnouncementModal } from "@/components/force-read-announcement-modal";
 import { useI18n } from "@/lib/i18n";
 import { validatePasswordStrength } from "@/lib/password";
-
-const container = {
-  hidden: { opacity: 0 },
-  show: {
-    opacity: 1,
-    transition: {
-      staggerChildren: 0.08,
-    },
-  },
-};
-
-const item = {
-  hidden: { opacity: 0, y: 16 },
-  show: { opacity: 1, y: 0 },
-};
 
 type LineLatencyStatus = "idle" | "testing" | "ok" | "timeout" | "error";
 interface LineLatencyInfo {
@@ -871,7 +855,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <motion.div variants={container} initial="hidden" animate="show" className="space-y-6 pb-10">
+    <div className="space-y-6 pb-10">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div className="min-w-0">
           <h1 className="text-3xl font-black tracking-tighter sm:text-4xl">
@@ -896,7 +880,7 @@ export default function DashboardPage() {
 
       {/* 顶部三块: 到期 / 状态 / Emby 绑定 */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <motion.div variants={item} className="premium-card p-5 sm:p-6">
+        <div className="premium-card p-5 sm:p-6">
           <div className="flex items-start justify-between gap-2">
             <div className="p-3 w-fit bg-amber-500/10 text-amber-500 rounded-2xl">
               <Calendar className="h-5 w-5" />
@@ -921,9 +905,9 @@ export default function DashboardPage() {
           <h3 className="text-2xl sm:text-3xl font-black mt-1 break-all">
             {isPendingEmby ? "—" : hasNoEmby ? t("dashboard.notApplicable") : isPermanent ? t("dashboard.permanentDisplay") : t("score.days", { days: daysLeft })}
           </h3>
-        </motion.div>
+        </div>
 
-        <motion.div variants={item} className="premium-card p-5 sm:p-6">
+        <div className="premium-card p-5 sm:p-6">
           <div className="p-3 w-fit rounded-2xl bg-info/10 text-info">
             <Clock className="h-5 w-5" />
           </div>
@@ -931,9 +915,9 @@ export default function DashboardPage() {
           <h3 className="text-2xl sm:text-3xl font-black mt-1">
             {isPendingEmby ? t("dashboard.embyNotOpened") : isPending ? t("dashboard.embyPending") : isExpired ? t("dashboard.expired") : t("dashboard.normal")}
           </h3>
-        </motion.div>
+        </div>
 
-        <motion.div variants={item} className="premium-card p-5 sm:p-6 sm:col-span-2 lg:col-span-1">
+        <div className="premium-card p-5 sm:p-6 sm:col-span-2 lg:col-span-1">
           <div className="p-3 w-fit bg-emerald-500/10 text-emerald-500 rounded-2xl">
             <Gift className="h-5 w-5" />
           </div>
@@ -941,13 +925,13 @@ export default function DashboardPage() {
           <h3 className="text-2xl sm:text-3xl font-black mt-1 truncate">
             {!user?.emby_id ? t("dashboard.unbound") : user?.active ? t("dashboard.normal") : t("dashboard.disabled")}
           </h3>
-        </motion.div>
+        </div>
       </div>
 
       {/* 第二行: Telegram / Emby 服务器 / 我的求片 */}
       <div className="grid gap-4 lg:grid-cols-4">
         {/* Telegram */}
-        <motion.div variants={item} className="premium-card p-5 sm:p-6 flex flex-col gap-3">
+        <div className="premium-card p-5 sm:p-6 flex flex-col gap-3">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
               <div className="p-2 bg-sky-500/10 text-sky-500 rounded-xl">
@@ -982,10 +966,10 @@ export default function DashboardPage() {
               </p>
             )}
           </div>
-        </motion.div>
+        </div>
 
         {/* Emby 服务器 */}
-        <motion.div variants={item} className="premium-card p-5 sm:p-6 flex flex-col gap-3">
+        <div className="premium-card p-5 sm:p-6 flex flex-col gap-3">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
               <div className="p-2 bg-emerald-500/10 text-emerald-500 rounded-xl">
@@ -1016,10 +1000,10 @@ export default function DashboardPage() {
               <p className="text-xs text-amber-500">{t("dashboard.embyUnbound")}</p>
             )}
           </div>
-        </motion.div>
+        </div>
 
         {/* 媒体概览 */}
-        <motion.div variants={item} className="premium-card p-5 sm:p-6 flex flex-col gap-3">
+        <div className="premium-card p-5 sm:p-6 flex flex-col gap-3">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
               <div className="p-2 rounded-xl bg-info/10 text-info">
@@ -1064,11 +1048,11 @@ export default function DashboardPage() {
           {(!embyStats?.enabled || !embyStats?.configured) && (
             <p className="text-xs text-muted-foreground">{t("dashboard.libraryStatsUnavailable")}</p>
           )}
-        </motion.div>
+        </div>
 
         {/* 求片状态 */}
         {mediaRequestEnabled && (
-        <motion.div variants={item} className="premium-card p-5 sm:p-6 flex flex-col gap-3">
+        <div className="premium-card p-5 sm:p-6 flex flex-col gap-3">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
               <div className="p-2 bg-primary/10 text-primary rounded-xl">
@@ -1105,13 +1089,13 @@ export default function DashboardPage() {
           ) : (
             <p className="text-xs text-muted-foreground mt-auto pt-1">{t("dashboard.noRequests")}</p>
           )}
-        </motion.div>
+        </div>
         )}
       </div>
 
       {/* 签到 / 积分 快捷区 */}
       {signinSummary?.enabled && (
-        <motion.div variants={item} className="premium-card p-5 sm:p-6">
+        <div className="premium-card p-5 sm:p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="flex items-center gap-4 min-w-0">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-500">
@@ -1173,11 +1157,11 @@ export default function DashboardPage() {
               </Button>
             </div>
           </div>
-        </motion.div>
+        </div>
       )}
 
       {linesRequireRenewal || embyDisabledByExpiry ? (
-        <motion.div variants={item} className="premium-card border-destructive/30 p-5 sm:p-6">
+        <div className="premium-card border-destructive/30 p-5 sm:p-6">
           <div className="flex items-start gap-3">
             <div className="rounded-xl bg-destructive/10 p-2 text-destructive">
               <AlertCircle className="h-5 w-5" />
@@ -1189,9 +1173,9 @@ export default function DashboardPage() {
               </p>
             </div>
           </div>
-        </motion.div>
+        </div>
       ) : !linesRequireEmby && (
-      <motion.div variants={item} className="premium-card p-5 sm:p-6">
+      <div className="premium-card p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-3 min-w-0">
             <div className="p-2 bg-primary/10 rounded-xl text-primary">
@@ -1230,7 +1214,7 @@ export default function DashboardPage() {
             <span>{t("dashboard.linesHiddenUntilOpened")}</span>
           </div>
         )}
-      </motion.div>
+      </div>
       )}
 
       <Dialog open={showLineDetails} onOpenChange={setShowLineDetails}>
@@ -1283,7 +1267,7 @@ export default function DashboardPage() {
       </Dialog>
 
       {/* 注册码/续期码/邀请码 */}
-      <motion.div variants={item} className="premium-card p-5 sm:p-6">
+      <div className="premium-card p-5 sm:p-6">
         <div className="flex items-center gap-3 mb-5">
           <div className="p-2 bg-primary/10 rounded-xl text-primary">
             <Key className="h-5 w-5" />
@@ -1309,11 +1293,11 @@ export default function DashboardPage() {
             {isUsingCode ? <Loader2 className="h-4 w-4 animate-spin" /> : t("dashboard.verifyAndUse")}
           </Button>
         </div>
-      </motion.div>
+      </div>
 
       {/* Emby 自由注册 / 管理员授予资格：登录后可在仪表盘开通 */}
       {showEmbyDirectRegisterCard && (
-        <motion.div variants={item} className="premium-card p-5 sm:p-6">
+        <div className="premium-card p-5 sm:p-6">
           <div className="flex items-center gap-3 mb-4">
             <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-500">
               <Gift className="h-5 w-5" />
@@ -1348,11 +1332,11 @@ export default function DashboardPage() {
               {t("dashboard.openEmbyNow")}
             </Button>
           </div>
-        </motion.div>
+        </div>
       )}
 
       {embyRegisterStored && embyRegisterStatus && (
-        <motion.div variants={item} className="premium-card p-5 sm:p-6 border-emerald-500/20 bg-emerald-500/5">
+        <div className="premium-card p-5 sm:p-6 border-emerald-500/20 bg-emerald-500/5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <h3 className="text-base font-black tracking-tight">{t("dashboard.registerQueueStatus")}</h3>
@@ -1381,13 +1365,13 @@ export default function DashboardPage() {
               )}
             </div>
           </div>
-        </motion.div>
+        </div>
       )}
 
       {/* 公告板 —— 仪表盘最下方 */}
-      <motion.div variants={item}>
+      <div>
         <AnnouncementBoard splitPinned />
-      </motion.div>
+      </div>
 
       {/* Emby 自由注册对话框 */}
       <Dialog open={showDirectRegisterDialog} onOpenChange={setShowDirectRegisterDialog}>
@@ -1569,7 +1553,7 @@ export default function DashboardPage() {
           onAllAcknowledged={() => setForceReadDone(true)}
         />
       )}
-    </motion.div>
+    </div>
   );
 }
 
