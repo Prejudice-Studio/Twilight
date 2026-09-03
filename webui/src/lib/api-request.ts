@@ -144,8 +144,19 @@ function isSessionIdentityRead(url: string): boolean {
   }
 }
 
-function isSharedReadAllowed(url: string, method: string, headers: Record<string, string>, cache?: RequestCache): boolean {
+function isSharedReadAllowed(
+  url: string,
+  method: string,
+  headers: Record<string, string>,
+  cache?: RequestCache,
+  credentials?: RequestCredentials,
+): boolean {
   if (method !== "GET" && method !== "HEAD") return false;
+  // Cookie-authenticated responses are session scoped, but HttpOnly cookies are
+  // intentionally invisible to JavaScript and therefore cannot be part of the
+  // cache key. Only explicitly public requests may use either shared cache or
+  // in-flight coalescing.
+  if (credentials !== "omit") return false;
   if (cache === "no-store" || cache === "reload") return false;
   if (hasHeader(headers, "x-twilight-intent")) return false;
   if (isSessionIdentityRead(url)) return false;
@@ -451,7 +462,13 @@ export async function apiRequest<T>(
   const isReadRequest = (method === "GET" || method === "HEAD") && options.body === undefined;
   const effectiveCache = options.cache ?? (isReadRequest ? "no-cache" : "no-store");
   const requestReadCacheEpoch = readCacheEpoch;
-  const canShareRead = isReadRequest && !options.signal?.aborted && isSharedReadAllowed(url, method, headers, effectiveCache);
+  const canShareRead = isReadRequest && !options.signal?.aborted && isSharedReadAllowed(
+    url,
+    method,
+    headers,
+    effectiveCache,
+    options.credentials,
+  );
   const canUseReadCache = canShareRead && extra.cacheRead !== false;
   const cacheKey = canUseReadCache ? requestCacheKey(url, method, headers) : "";
   if (cacheKey) {
@@ -487,7 +504,7 @@ export async function apiRequest<T>(
       ...options,
       headers,
       cache: effectiveCache,
-      credentials: "include",
+      credentials: options.credentials ?? "include",
       signal: guard.signal ?? options.signal ?? null,
     });
   } catch (error) {

@@ -272,7 +272,7 @@ class ApiClient {
 
   // System
   async getSystemInfo(signal?: AbortSignal) {
-    const res = await this.request<SystemInfo>("/system/info", { signal });
+    const res = await this.request<SystemInfo>("/system/info", { signal, credentials: "omit" });
     if (res.success && res.data?.icon) {
       res.data.icon = this.toAbsoluteAssetUrl(res.data.icon) || "";
     }
@@ -280,7 +280,7 @@ class ApiClient {
   }
 
   async getSetupStatus() {
-    return this.request<SetupStatus>("/setup/status");
+    return this.request<SetupStatus>("/setup/status", { credentials: "omit" });
   }
 
   async completeSetup(payload: SetupPayload) {
@@ -297,7 +297,7 @@ class ApiClient {
   }
 
   async getSystemHealth() {
-    return this.request<SystemHealth>("/system/health");
+    return this.request<SystemHealth>("/system/health", { credentials: "omit" });
   }
 
   async getSystemHealthApi(signal?: AbortSignal) {
@@ -511,7 +511,7 @@ class ApiClient {
   }
 
   async getRegisterAvailability(signal?: AbortSignal) {
-    return this.request<RegisterAvailability>("/users/check-available", { signal });
+    return this.request<RegisterAvailability>("/users/check-available", { signal, credentials: "omit" });
   }
 
   async getEmbyRegisterStatus(requestId: string, statusToken: string) {
@@ -2508,7 +2508,8 @@ class ApiClient {
   /** 公开列表：登录页 / 主页等场景可直接调用。 */
   async getActiveAnnouncements(limit: number = 50) {
     return this.request<{ announcements: Announcement[]; total: number }>(
-      `/announcements?limit=${limit}`
+      `/announcements?limit=${limit}`,
+      { credentials: "omit" },
     );
   }
 
