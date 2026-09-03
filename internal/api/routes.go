@@ -6,6 +6,8 @@ func (a *App) registerRoutes() {
 	a.add(http.MethodGet, "/", AuthPublic, a.handleRoot)
 	a.add(http.MethodGet, "/api/v1/openapi.json", AuthPublic, a.handleOpenAPI)
 	a.add(http.MethodGet, "/api/v1/docs", AuthPublic, a.handleDocs)
+	a.add(http.MethodGet, "/api/v2/system/health", AuthPublic, a.handleV2Health)
+	a.add(http.MethodGet, "/api/v2/system/capabilities", AuthPublic, a.handleV2Capabilities)
 	a.add(http.MethodGet, "/api/v1/setup/status", AuthPublic, a.handleSetupStatus)
 	a.add(http.MethodPost, "/api/v1/setup/complete", AuthPublic, a.handleSetupComplete)
 

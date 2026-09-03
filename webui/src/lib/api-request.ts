@@ -134,9 +134,11 @@ function requestCacheKey(url: string, method: string, headers: Record<string, st
 function isSessionIdentityRead(url: string): boolean {
   try {
     const parsed = new URL(url, typeof window !== "undefined" ? window.location.origin : "http://localhost");
-    return parsed.pathname.endsWith("/api/v1/users/me") || parsed.pathname.endsWith("/api/v1/auth/me");
+    return parsed.pathname.endsWith("/api/v1/users/me") || parsed.pathname.endsWith("/api/v1/auth/me") ||
+      parsed.pathname.endsWith("/api/v2/users/me") || parsed.pathname.endsWith("/api/v2/auth/me");
   } catch {
-    return url.endsWith("/api/v1/users/me") || url.endsWith("/api/v1/auth/me");
+    return url.endsWith("/api/v1/users/me") || url.endsWith("/api/v1/auth/me") ||
+      url.endsWith("/api/v2/users/me") || url.endsWith("/api/v2/auth/me");
   }
 }
 
@@ -372,6 +374,8 @@ async function parseApiResponse<T>(
 }
 
 export interface ApiRequestExtraOptions {
+  /** API major version. Existing callers default to v1; V2 callers opt in explicitly. */
+  apiVersion?: "v1" | "v2";
   /** 自定义超时（毫秒）；传 0 / Infinity 表示不加超时（SSE / 长轮询场景）。 */
   timeoutMs?: number;
   /** 调用方取消信号；表单上传也必须支持页面卸载/重复操作时的取消。 */
@@ -399,7 +403,8 @@ export async function apiRequest<T>(
     headers["X-Twilight-Client"] = "webui";
   }
 
-  const url = `${API_BASE}/api/v1${endpoint}`;
+  const apiVersion = extra.apiVersion ?? "v1";
+  const url = `${API_BASE}/api/${apiVersion}${endpoint}`;
   const isReadRequest = (method === "GET" || method === "HEAD") && options.body === undefined;
   const effectiveCache = options.cache ?? (isReadRequest ? "no-cache" : "no-store");
   const requestReadCacheEpoch = readCacheEpoch;
@@ -494,7 +499,8 @@ export async function apiRequestForm<T>(
     "Accept": "application/json; charset=utf-8",
     "X-Twilight-Client": "webui",
   };
-  const url = `${API_BASE}/api/v1${endpoint}`;
+  const apiVersion = extra.apiVersion ?? "v1";
+  const url = `${API_BASE}/api/${apiVersion}${endpoint}`;
   const methodName = method.toUpperCase();
 
   const timeoutMs = extra.timeoutMs ?? FORM_REQUEST_TIMEOUT_MS;

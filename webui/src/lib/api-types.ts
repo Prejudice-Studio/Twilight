@@ -110,6 +110,22 @@ export interface SystemHealth {
   time: number;
 }
 
+export interface V2Health {
+  api_version: "v2";
+  status: "ok";
+  server_version: string;
+  timestamp: number;
+}
+
+export interface V2Capabilities {
+  api_version: "v2";
+  compatible_api_versions: string[];
+  server_version: string;
+  features: Record<string, boolean>;
+  limits: Record<string, number>;
+  links: Record<string, string>;
+}
+
 export interface SystemHealthDetail {
   ok?: boolean;
   online?: boolean;

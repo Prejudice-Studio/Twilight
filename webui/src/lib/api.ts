@@ -96,6 +96,8 @@ import type {
   UserSettings,
   UserUpdateData,
   ViolationLog,
+  V2Capabilities,
+  V2Health,
 } from "./api-types";
 import { confirmPhrases } from "./confirm-phrases";
 import { API_BASE, ApiError, apiRequest, apiRequestForm, type ApiRequestExtraOptions } from "./api-request";
@@ -216,6 +218,21 @@ class ApiClient {
     extra: ApiRequestExtraOptions = {},
   ): Promise<ApiResponse<T>> {
     return apiRequestForm<T>(endpoint, formData, method, extra);
+  }
+
+  // V2 基础协议入口。版本显式传入请求层，避免页面自行拼接 /api/v2；
+  // 尚未迁移的 client 方法继续默认使用 V1。
+  async v2Health(signal?: AbortSignal) {
+    return this.request<V2Health>("/system/health", {
+      cache: "no-store",
+      signal,
+    }, { apiVersion: "v2", cacheRead: false, dedupe: false });
+  }
+
+  async v2Capabilities(signal?: AbortSignal) {
+    return this.request<V2Capabilities>("/system/capabilities", {
+      signal,
+    }, { apiVersion: "v2", cacheRead: false });
   }
 
   // Auth

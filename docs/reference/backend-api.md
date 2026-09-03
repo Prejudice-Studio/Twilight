@@ -14,6 +14,8 @@
 - 响应统一为 JSON 信封（envelope），结构见下文 [2.4 响应结构](#24-响应结构)。
 - 变更接口时需同步更新 [API 路由索引](../reference/api-index.md)；若接口有请求体、响应体、限流或安全注意事项，还需更新本文对应章节。
 
+V2 基础协议目前提供 `GET /api/v2/system/health` 和 `GET /api/v2/system/capabilities`。它们沿用统一 JSON envelope，但只返回公开能力信息；V2 业务接口会在对应模块完成迁移后逐步增加。未迁移调用继续使用 `/api/v1`。
+
 ### 1.1 文档分工
 
 | 文档 | 用途 |
