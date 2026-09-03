@@ -71,6 +71,7 @@ allow_credential = true
   - 合理的 `session_cookie_samesite`（默认 `lax`，可选 `strict` / `none`）。
 - session cookie（默认名 `twilight_session`）为 `HttpOnly`。`session_cookie_domain` 单 origin 部署留空；双子域部署（webui 与 API 不同子域）需设为 `.example.com` 让两子域共享 cookie。
 - WebUI 登录态以后端 `/users/me` 响应为准；`/users/me` 与 `/auth/me` 属于会话身份数据，后端 JSON 响应默认 `Cache-Control: no-store, private`，前端也不会对这两个端点做短缓存或 in-flight 合流。登录、登出、刷新这类会话边界会清理前端请求缓存并废弃旧的用户信息请求，避免多账号快速切换时旧响应覆盖新会话。
+- WebUI API 响应在客户端按字节流读取并限制为 8 MiB；超过限制的响应会在 JSON 解析前被取消，避免异常或被劫持的响应造成浏览器内存膨胀。该限制不替代后端各接口自己的分页和上传限制。
 - 会话 TTL 由 `session_cookie_ttl`（默认 7 天）控制；登出会清除 session cookie。
 - 服务端创建 session 时会把 token 当作不可重映射的 bearer 凭据：Redis 使用 NX 写入，PostgreSQL `twilight_sessions.token` 冲突时只重试新 token，不会把既有 token 覆盖到另一个 UID。
 

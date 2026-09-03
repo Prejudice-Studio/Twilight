@@ -109,6 +109,8 @@ const READ_RESPONSE_CACHE_TTL_MS = 3_000;
 const READ_RESPONSE_CACHE_MAX_ENTRIES = 32;
 const READ_RESPONSE_CACHE_MAX_SOURCE_CHARS = 64 * 1024;
 const READ_RESPONSE_CACHE_TOTAL_SOURCE_CHARS = 256 * 1024;
+/** API envelope responses are JSON; bound browser-side parsing before allocating a large string. */
+const MAX_API_RESPONSE_BYTES = 8 * 1024 * 1024;
 
 const inFlightReadRequests = new Map<string, { promise: Promise<ApiResponse<unknown>>; startedAt: number }>();
 const readResponseCache = new Map<string, { data: ApiResponse<unknown>; cachedAt: number; sourceChars: number }>();
@@ -277,17 +279,20 @@ function withTimeoutSignal(
   };
 }
 
-function describeApiTarget(endpoint: string, method: string): string {
-  return `${method} /api/v1${endpoint}`;
+type ApiVersion = "v1" | "v2";
+
+function describeApiTarget(endpoint: string, method: string, apiVersion: ApiVersion): string {
+  return `${method} /api/${apiVersion}${endpoint}`;
 }
 
 function buildHttpErrorMessage(
   status: number,
   endpoint: string,
   method: string,
+  apiVersion: ApiVersion,
   backendMessage?: string,
 ): string {
-  const target = describeApiTarget(endpoint, method);
+  const target = describeApiTarget(endpoint, method, apiVersion);
   const detail = backendMessage && backendMessage !== "接口不存在" ? `后端返回：${backendMessage}` : "";
 
   if (status === 404) {
@@ -331,8 +336,8 @@ function buildHttpErrorMessage(
   return backendMessage || `请求失败 (${status})：${target}`;
 }
 
-function buildParseErrorMessage(status: number, endpoint: string, method: string): string {
-  const target = describeApiTarget(endpoint, method);
+function buildParseErrorMessage(status: number, endpoint: string, method: string, apiVersion: ApiVersion): string {
+  const target = describeApiTarget(endpoint, method, apiVersion);
   if (status === 404) {
     return `接口不存在：${target}\n服务器没有返回标准 JSON，可能命中了前端页面 404、反向代理路径错误，或后端缺少该路由。`;
   }
@@ -346,15 +351,53 @@ async function parseApiResponse<T>(
   response: Response,
   endpoint: string,
   method: string,
+  apiVersion: ApiVersion,
 ): Promise<{ data: ApiResponse<T>; sourceChars: number }> {
   if (response.status === 204) {
     return { data: { success: true, message: "OK" }, sourceChars: 0 };
   }
 
-  const text = await response.text();
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_API_RESPONSE_BYTES) {
+    throw new Error(
+      `服务器响应过大：${describeApiTarget(endpoint, method, apiVersion)}\n` +
+      `响应超过 ${MAX_API_RESPONSE_BYTES / (1024 * 1024)} MiB 限制。`,
+    );
+  }
+
+  let text: string;
+  if (!response.body) {
+    throw new Error(`服务器响应不可读取：${describeApiTarget(endpoint, method, apiVersion)}\n响应没有可用的数据流。`);
+  } else {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const chunks: string[] = [];
+    let responseBytes = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        responseBytes += value.byteLength;
+        if (responseBytes > MAX_API_RESPONSE_BYTES) {
+          void reader.cancel().catch(() => undefined);
+          throw new Error(
+            `服务器响应过大：${describeApiTarget(endpoint, method, apiVersion)}\n` +
+            `响应超过 ${MAX_API_RESPONSE_BYTES / (1024 * 1024)} MiB 限制。`,
+          );
+        }
+        const chunk = decoder.decode(value, { stream: true });
+        if (chunk) chunks.push(chunk);
+      }
+      const finalChunk = decoder.decode();
+      if (finalChunk) chunks.push(finalChunk);
+      text = chunks.join("");
+    } finally {
+      reader.releaseLock();
+    }
+  }
   if (!text) {
     if (response.ok) {
-      throw new Error(`服务器返回空响应：${describeApiTarget(endpoint, method)}\nHTTP ${response.status} 没有返回标准 JSON。`);
+      throw new Error(`服务器返回空响应：${describeApiTarget(endpoint, method, apiVersion)}\nHTTP ${response.status} 没有返回标准 JSON。`);
     }
     return { data: { success: false, message: response.statusText }, sourceChars: 0 };
   }
@@ -369,7 +412,7 @@ async function parseApiResponse<T>(
       };
     }
     console.error("JSON parse error:", error);
-    throw new Error(buildParseErrorMessage(response.status, endpoint, method));
+    throw new Error(buildParseErrorMessage(response.status, endpoint, method, apiVersion));
   }
 }
 
@@ -454,7 +497,7 @@ export async function apiRequest<T>(
         endpoint,
         method,
         errorCode: "REQUEST_TIMEOUT",
-        message: `请求超时：${describeApiTarget(endpoint, method)}\n网络或后端响应过慢，请稍后重试。`,
+        message: `请求超时：${describeApiTarget(endpoint, method, apiVersion)}\n网络或后端响应过慢，请稍后重试。`,
       });
     }
     if (isAbortError(error)) {
@@ -462,13 +505,13 @@ export async function apiRequest<T>(
     }
     console.error("Network error:", error);
     throw new Error(
-      `无法连接后端接口：${describeApiTarget(endpoint, method)}\n请检查后端服务是否启动、API 地址是否正确、反向代理是否可达.`
+      `无法连接后端接口：${describeApiTarget(endpoint, method, apiVersion)}\n请检查后端服务是否启动、API 地址是否正确、反向代理是否可达.`
     );
   } finally {
     guard.cleanup();
   }
 
-  const parsed = await parseApiResponse<T>(response, endpoint, method);
+  const parsed = await parseApiResponse<T>(response, endpoint, method, apiVersion);
   const data = parsed.data;
   if (isReadRequest && response.ok && data?.success !== false && cacheKey && requestReadCacheEpoch === readCacheEpoch) {
     setCachedReadResponse(cacheKey, data as ApiResponse<unknown>, parsed.sourceChars);
@@ -481,7 +524,7 @@ export async function apiRequest<T>(
       method,
       errorCode: data?.error_code,
       backendMessage: data?.message,
-      message: buildHttpErrorMessage(response.status, endpoint, method, data?.message),
+      message: buildHttpErrorMessage(response.status, endpoint, method, apiVersion, data?.message),
       data: data?.data,
     });
   }
@@ -523,7 +566,7 @@ export async function apiRequestForm<T>(
         endpoint,
         method: methodName,
         errorCode: "REQUEST_TIMEOUT",
-        message: `上传超时：${describeApiTarget(endpoint, methodName)}\n文件较大或网络较慢，请稍后重试。`,
+        message: `上传超时：${describeApiTarget(endpoint, methodName, apiVersion)}\n文件较大或网络较慢，请稍后重试。`,
       });
     }
     if (isAbortError(error)) {
@@ -531,13 +574,13 @@ export async function apiRequestForm<T>(
     }
     console.error("Network error:", error);
     throw new Error(
-      `无法连接后端接口：${describeApiTarget(endpoint, methodName)}\n请检查后端服务是否启动、API 地址是否正确、反向代理是否可达。`
+      `无法连接后端接口：${describeApiTarget(endpoint, methodName, apiVersion)}\n请检查后端服务是否启动、API 地址是否正确、反向代理是否可达。`
     );
   } finally {
     guard.cleanup();
   }
 
-  const { data } = await parseApiResponse<T>(response, endpoint, methodName);
+  const { data } = await parseApiResponse<T>(response, endpoint, methodName, apiVersion);
 
   if (!response.ok) {
     throw new ApiError({
@@ -546,7 +589,7 @@ export async function apiRequestForm<T>(
       method: methodName,
       errorCode: data?.error_code,
       backendMessage: data?.message,
-      message: buildHttpErrorMessage(response.status, endpoint, methodName, data?.message),
+      message: buildHttpErrorMessage(response.status, endpoint, methodName, apiVersion, data?.message),
       data: data?.data,
     });
   }
