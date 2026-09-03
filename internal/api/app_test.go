@@ -2097,6 +2097,20 @@ func TestSystemUpdateRejectsUnsafeRepoURL(t *testing.T) {
 	}
 }
 
+func TestGitUpdateResponseDoesNotExposeProjectRoot(t *testing.T) {
+	projectRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := applyGitUpdate(context.Background(), "https://example.com/twilight.git", "main", false, true, false)
+	if _, ok := result["project_root"]; ok {
+		t.Fatalf("git update response leaked project_root: %#v", result)
+	}
+	if response := fmt.Sprint(result); strings.Contains(response, projectRoot) {
+		t.Fatalf("git update response leaked working directory %q: %s", projectRoot, response)
+	}
+}
+
 func TestRuntimeLogsRequireAdminAndRedactSecrets(t *testing.T) {
 	app := newTestApp(t)
 	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"admin","password":"Admin123456"}`, nil)

@@ -261,6 +261,7 @@ Git 自动更新（`internal/api/system_update.go`）：
 - 仅允许完整的 HTTPS 仓库 URL；拒绝非 https scheme、空路径、URL 内携带凭据（userinfo）、以及带 query / fragment 的 URL。分支名经白名单正则校验。
 - 使用 `git pull --ff-only`，不做 rebase / merge / reset。
 - 先执行 dry-run 预检（报告 worktree 是否 dirty）。正式更新时若 worktree 有本地改动，会先 `git stash push --include-untracked` 暂存，拉取后再 `git stash pop` 恢复；恢复出现冲突时会在响应里报告 `stash_conflicts`。
+- 更新响应只返回必要的仓库状态和脱敏诊断，不返回服务器本机项目绝对路径，避免管理员浏览器和前端日志暴露部署目录。
 - 自动更新命令输出与 stderr 经脱敏后才记日志，避免泄漏 `https://user:PAT@host` 形式的凭据。
 
 > 纠正：旧文档称「自动更新默认拒绝 dirty worktree」。当前实现并不拒绝，而是**先 stash 本地改动、拉取、再尝试恢复**。需要长期保留本地补丁时仍建议先提交或合并，避免依赖自动 stash/restore。

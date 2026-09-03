@@ -365,7 +365,7 @@ cd webui && pnpm dev
 
 ### Git 更新与 systemd 约定
 
-- 管理员 Git 更新接口（`/api/v1/system/admin/update`）支持 `dry_run` 预检，默认拒绝脏工作区；实现保持 `exec.Command` 参数化调用，禁止 shell 字符串拼接。
+- 管理员 Git 更新接口（`/api/v1/system/admin/update`）支持 `dry_run` 预检，默认拒绝脏工作区；实现保持 `exec.Command` 参数化调用，禁止 shell 字符串拼接。响应不得返回服务器本机项目绝对路径；仓库地址、命令输出和错误信息必须经过凭据脱敏。
 - systemd 安装前先执行 `sudo bash deploy/setup-systemd.sh --dry-run`。脚本会检测路径、配置、二进制、用户 / 组、端口、空白与 `%` 等 systemd 特殊字符，以及旧 Python 版 Twilight 的 unit。
 - 部署的 unit 必须指向 `bin/twilight`，不要重新引入旧后端启动命令。
 

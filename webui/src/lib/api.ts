@@ -1499,7 +1499,6 @@ class ApiClient {
     allow_dirty?: boolean;
   }) {
     return this.request<{
-      project_root: string;
       repo_url: string;
       branch: string;
       dry_run?: boolean;
