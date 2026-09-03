@@ -1,6 +1,5 @@
 "use client";
 
-import { motion } from "framer-motion";
 import { Megaphone } from "lucide-react";
 import { AnnouncementBoard } from "@/components/announcement-board";
 import { useI18n } from "@/lib/i18n";
@@ -9,11 +8,7 @@ export default function UserAnnouncementsPage() {
   const { t } = useI18n();
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="space-y-6"
-    >
+    <div className="space-y-6 page-enter">
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <Megaphone className="h-5 w-5" />
@@ -30,6 +25,6 @@ export default function UserAnnouncementsPage() {
         collapseAfter={200}
         showEmptyState
       />
-    </motion.div>
+    </div>
   );
 }

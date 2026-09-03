@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { motion } from "framer-motion";
 import {
   Bell,
   BookOpen,
@@ -130,7 +129,7 @@ function Section({ title, icon: Icon, children }: { title: string; icon: typeof 
 
 export default function WikiPage() {
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-6xl space-y-8 px-4 py-8">
+    <div className="mx-auto max-w-6xl space-y-8 px-4 py-8 page-enter">
       <header className="space-y-3">
         <Badge variant="outline" className="w-fit">Twilight Wiki</Badge>
         <div className="space-y-2">
@@ -268,6 +267,6 @@ export default function WikiPage() {
           ))}
         </div>
       </Section>
-    </motion.div>
+    </div>
   );
 }
