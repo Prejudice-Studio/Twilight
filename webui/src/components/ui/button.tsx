@@ -18,11 +18,11 @@ const buttonVariants = cva(
         glow: "bg-primary text-primary-foreground shadow-lg shadow-primary/30 hover:shadow-primary/50 hover:bg-primary/90",
       },
       size: {
-        default: "min-h-11 px-4 py-2 sm:min-h-10",
-        sm: "min-h-10 rounded-md px-3 sm:min-h-9",
+        default: "min-h-10 px-4 py-2",
+        sm: "min-h-9 rounded-md px-3",
         lg: "h-11 rounded-md px-8",
         xl: "h-12 rounded-lg px-10 text-base",
-        icon: "h-11 w-11 sm:h-10 sm:w-10",
+        icon: "h-10 w-10",
       },
     },
     defaultVariants: {
