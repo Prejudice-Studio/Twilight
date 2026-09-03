@@ -537,6 +537,26 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 
 ## Validation
 
+## V2 Refactor Rules
+
+The current V1 implementation remains the behavior and migration source of truth while V2 is being built on the dedicated `codex/v2-audit-foundation` branch. Do not replace V1 in place or mix an unreviewed V2 rewrite into the existing `/api/v1` handlers.
+
+- V2 work follows the order documented in `docs/v2/v1-audit.md` and `docs/v2/architecture.md`: audit, design, foundation, migration, new capabilities, security review, performance review, and full validation.
+- New native interfaces use `/api/v2`. V1 compatibility adapters may delegate to one V2 application service, but the same state transition must not be implemented twice.
+- The V1 user-visible feature matrix is mandatory. A feature is not considered migrated until its backend authorization, state transition, audit behavior, API client, responsive UI, i18n text, tests, and documentation are mapped.
+- V1 TOML, local TOML, `.env`/`TWILIGHT_*` overrides, and PostgreSQL data must remain importable. Unknown or incompatible settings must produce an explicit migration diagnostic; never silently reset them to defaults.
+- V2 repositories and application services must define transaction, idempotency, revision, cache invalidation, and external-side-effect boundaries before a route is added. HTTP handlers remain adapters and must not become a second domain layer.
+- PostgreSQL is the only runtime database. A V2 table migration must include a schema version, idempotent startup behavior, legacy backfill checks, count/hash verification, rollback or recovery behavior, and an update to the data-model documentation.
+- Caches are disposable accelerators. Every cache requires an owner, scope, bounded size, TTL, invalidation event, and explicit stale/error behavior. Session-scoped identity data must never be shared across users.
+- V2 import/export packages must validate format and version, authenticate integrity, reject Zip Slip/symlinks/ZIP bombs/resource exhaustion, detect conflicts, use temporary paths, and roll back database and resource changes on failure. Password mode uses a random salt, Argon2id, and AES-256-GCM; no home-grown encryption.
+- Viewing statistics must be event/segment based and idempotent. Activity logs remain retained independently. Do not add direct client-controlled duration accounting or an unbounded active-playback accumulator.
+- Firefox is the WebUI baseline on phone, tablet, desktop, and narrow devtools viewports. New V2 screens must use bounded `dvh` scroll regions, stable grid tracks, mobile-safe toolbars, abortable reads, and lazy rendering for large lists. Do not modify CORS behavior while improving transport or layout.
+- Each independently reviewable module gets its own Chinese commit. Before committing, run focused tests and scan the diff for unrelated changes, debug output, local absolute paths, secrets, tokens, passwords, cookies, and undocumented behavior changes.
+
+## V2 Validation Evidence
+
+Broad V2 milestones must provide more than a successful compile: include migration/compatibility tests, negative authorization tests, concurrency/idempotency tests, bounded-resource tests, and Firefox mobile/tablet/desktop interaction evidence where UI is involved. Performance claims must include measured request count, payload size, DOM/render scope, CPU, memory, and database query evidence for both ordinary and 2000+ user scenarios.
+
 Run checks proportional to the change. For broad backend/frontend work, run:
 
 - `go build ./...`
