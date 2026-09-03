@@ -202,7 +202,7 @@ func (a *App) registerAdminRoutes() {
 	a.add(http.MethodGet, "/api/v1/admin/emby/activity", AuthAdmin, a.handleEmbyActivity)
 	a.add(http.MethodGet, "/api/v1/admin/emby/activity-logs", AuthAdmin, a.handleEmbyActivityLogs)
 	a.add(http.MethodGet, "/api/v1/emby/items/:item_id/image", AuthUser, a.handleEmbyItemImage)
-	a.add(http.MethodGet, "/api/v1/emby/now-playing", AuthUser, a.handleEmbyNowPlaying)
+	a.add(http.MethodGet, "/api/v1/admin/emby/now-playing", AuthAdmin, a.handleEmbyNowPlaying)
 	a.add(http.MethodGet, "/api/v1/emby/online", AuthUser, a.handleEmbyOnline)
 	a.add(http.MethodGet, "/api/v1/admin/emby/users", AuthAdmin, a.handleAdminEmbyUsersV2)
 	a.add(http.MethodPost, "/api/v1/admin/emby/broadcast", AuthAdmin, a.handleEmbyBroadcast)

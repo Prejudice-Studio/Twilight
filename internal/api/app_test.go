@@ -765,6 +765,22 @@ func TestEmbyViewerCountRequiresLogin(t *testing.T) {
 	}
 }
 
+func TestEmbyNowPlayingIsAdminOnly(t *testing.T) {
+	app := newTestApp(t)
+	adminCookies := registerAndLogin(t, app, "admin", "Admin123456")
+	userCookies := registerAndLogin(t, app, "viewer", "Viewer123456")
+
+	if response := doJSON(app, http.MethodGet, "/api/v1/admin/emby/now-playing", "", userCookies); response.Code != http.StatusForbidden {
+		t.Fatalf("ordinary user now-playing status=%d body=%s, want 403", response.Code, response.Body.String())
+	}
+	if response := doJSON(app, http.MethodGet, "/api/v1/admin/emby/now-playing", "", adminCookies); response.Code != http.StatusOK {
+		t.Fatalf("admin now-playing status=%d body=%s, want 200", response.Code, response.Body.String())
+	}
+	if response := doJSON(app, http.MethodGet, "/api/v1/emby/now-playing", "", adminCookies); response.Code != http.StatusNotFound {
+		t.Fatalf("legacy ordinary-user now-playing route status=%d body=%s, want 404", response.Code, response.Body.String())
+	}
+}
+
 func TestEmbyStatusSkipsLibraryCountsWhenStatsDisabled(t *testing.T) {
 	app := newTestApp(t)
 	var countCalls atomic.Int64

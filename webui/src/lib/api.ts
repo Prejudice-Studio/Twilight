@@ -1645,8 +1645,17 @@ class ApiClient {
     );
   }
 
+  /** 管理员仪表盘观看详情；普通用户只允许读取 /system/emby-viewers。 */
+  async getAdminEmbyNowPlaying(signal?: AbortSignal) {
+    return this.request<EmbyNowPlaying>("/admin/emby/now-playing", {
+      signal,
+      cache: "no-store",
+    }, { cacheRead: false, dedupe: false });
+  }
+
+  /** @deprecated 使用 getAdminEmbyNowPlaying，避免误调用未授权的旧路径。 */
   async getEmbyNowPlaying(signal?: AbortSignal) {
-    return this.request<EmbyNowPlaying>("/emby/now-playing", { signal });
+    return this.getAdminEmbyNowPlaying(signal);
   }
 
   // 设备/IP 审查页的快速处置：按 Emby 用户 ID 单独启停 Emby（已关联本地用户时后端会
