@@ -220,7 +220,7 @@ export function clearApiRequestCaches(): void {
  * 退化路径手写同样语义，保证 SSR / 老浏览器也能跑。
  *
  * timeoutMs 传 0 / Infinity 表示不加超时；典型用于 SSE / 长轮询通道，调用方
- * 应当传入自己的 signal（fetch 完后立即关流不会受 20s 限制影响）。
+ * 应当传入自己的 signal。超时 signal 会保持到响应正文读取结束。
  *
  * 返回 cleanup 函数，无论 fetch 成功/失败都应调用，否则未触发的 setTimeout
  * 会留 200~500 个挂起的定时器。
@@ -491,6 +491,7 @@ export async function apiRequest<T>(
       signal: guard.signal ?? options.signal ?? null,
     });
   } catch (error) {
+    guard.cleanup();
     if (guard.isTimeout() || isTimeoutError(error)) {
       throw new ApiError({
         status: 0,
@@ -507,29 +508,44 @@ export async function apiRequest<T>(
     throw new Error(
       `无法连接后端接口：${describeApiTarget(endpoint, method, apiVersion)}\n请检查后端服务是否启动、API 地址是否正确、反向代理是否可达.`
     );
+  }
+
+  try {
+    // 保持超时 signal 到正文读取结束：fetch 只代表响应头已到达，响应体
+    // 仍可能因为代理或上游卡住。若此处提前 cleanup，退化定时器会失效。
+    const parsed = await parseApiResponse<T>(response, endpoint, method, apiVersion);
+    const data = parsed.data;
+    if (isReadRequest && response.ok && data?.success !== false && cacheKey && requestReadCacheEpoch === readCacheEpoch) {
+      setCachedReadResponse(cacheKey, data as ApiResponse<unknown>, parsed.sourceChars);
+    }
+
+    if (!response.ok) {
+      throw new ApiError({
+        status: response.status,
+        endpoint,
+        method,
+        errorCode: data?.error_code,
+        backendMessage: data?.message,
+        message: buildHttpErrorMessage(response.status, endpoint, method, apiVersion, data?.message),
+        data: data?.data,
+      });
+    }
+
+    return data;
+  } catch (error) {
+    if (guard.isTimeout() || isTimeoutError(error)) {
+      throw new ApiError({
+        status: 0,
+        endpoint,
+        method,
+        errorCode: "REQUEST_TIMEOUT",
+        message: `请求超时：${describeApiTarget(endpoint, method, apiVersion)}\n网络或后端响应过慢，请稍后重试。`,
+      });
+    }
+    throw error;
   } finally {
     guard.cleanup();
   }
-
-  const parsed = await parseApiResponse<T>(response, endpoint, method, apiVersion);
-  const data = parsed.data;
-  if (isReadRequest && response.ok && data?.success !== false && cacheKey && requestReadCacheEpoch === readCacheEpoch) {
-    setCachedReadResponse(cacheKey, data as ApiResponse<unknown>, parsed.sourceChars);
-  }
-
-  if (!response.ok) {
-    throw new ApiError({
-      status: response.status,
-      endpoint,
-      method,
-      errorCode: data?.error_code,
-      backendMessage: data?.message,
-      message: buildHttpErrorMessage(response.status, endpoint, method, apiVersion, data?.message),
-      data: data?.data,
-    });
-  }
-
-  return data;
 }
 
 export async function apiRequestForm<T>(
@@ -560,6 +576,7 @@ export async function apiRequestForm<T>(
       signal: guard.signal ?? extra.signal ?? null,
     });
   } catch (error) {
+    guard.cleanup();
     if (guard.isTimeout() || isTimeoutError(error)) {
       throw new ApiError({
         status: 0,
@@ -576,23 +593,36 @@ export async function apiRequestForm<T>(
     throw new Error(
       `无法连接后端接口：${describeApiTarget(endpoint, methodName, apiVersion)}\n请检查后端服务是否启动、API 地址是否正确、反向代理是否可达。`
     );
+  }
+
+  try {
+    const { data } = await parseApiResponse<T>(response, endpoint, methodName, apiVersion);
+
+    if (!response.ok) {
+      throw new ApiError({
+        status: response.status,
+        endpoint,
+        method: methodName,
+        errorCode: data?.error_code,
+        backendMessage: data?.message,
+        message: buildHttpErrorMessage(response.status, endpoint, methodName, apiVersion, data?.message),
+        data: data?.data,
+      });
+    }
+
+    return data;
+  } catch (error) {
+    if (guard.isTimeout() || isTimeoutError(error)) {
+      throw new ApiError({
+        status: 0,
+        endpoint,
+        method: methodName,
+        errorCode: "REQUEST_TIMEOUT",
+        message: `上传超时：${describeApiTarget(endpoint, methodName, apiVersion)}\n文件较大或网络较慢，请稍后重试。`,
+      });
+    }
+    throw error;
   } finally {
     guard.cleanup();
   }
-
-  const { data } = await parseApiResponse<T>(response, endpoint, methodName, apiVersion);
-
-  if (!response.ok) {
-    throw new ApiError({
-      status: response.status,
-      endpoint,
-      method: methodName,
-      errorCode: data?.error_code,
-      backendMessage: data?.message,
-      message: buildHttpErrorMessage(response.status, endpoint, methodName, apiVersion, data?.message),
-      data: data?.data,
-    });
-  }
-
-  return data;
 }
