@@ -1539,3 +1539,19 @@ export interface Ticket {
   resolved_at?: number;
   closed_at?: number;
 }
+
+/** Current-user ticket list item. Conversation data is fetched separately. */
+export interface UserTicketListItem {
+  id: number;
+  title: string;
+  type: string;
+  status: "open" | "in_progress" | "resolved" | "closed";
+  priority: "low" | "medium" | "high" | "urgent";
+  reply_count: number;
+  attachment_count: number;
+  notify_telegram: boolean;
+  created_at: number;
+  updated_at: number;
+  resolved_at?: number;
+  closed_at?: number;
+}

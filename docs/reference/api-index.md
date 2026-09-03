@@ -226,8 +226,9 @@ V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/ap
 
 | 方法 | 路径 | 鉴权 | 说明 |
 | ---- | ---- | ---- | ---- |
-| GET | `/api/v1/tickets` | User | 当前用户工单列表，返回 `replies` 双方回复时间线 |
+| GET | `/api/v1/tickets` | User | 当前用户工单摘要分页；`page` / `per_page` 上限分别为 1000000 / 100，回复正文、工单正文和附件 URL 需通过单条详情读取 |
 | POST | `/api/v1/tickets` | User | 创建工单 |
+| GET | `/api/v1/tickets/{ticket_id}` | User | 读取本人单条工单及完整双方回复、附件；非本人统一返回工单不存在 |
 | POST | `/api/v1/tickets/{ticket_id}/reply` | User | 追加工单回复；用户回复已解决工单会重新进入待处理 |
 | POST | `/api/v1/tickets/{ticket_id}/close` | User | 用户关闭自己的工单 |
 | POST | `/api/v1/tickets/{ticket_id}/reopen` | User | 用户重开已关闭工单 |

@@ -18,7 +18,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// handleMyTickets 用户查看自己提交的工单。
+// handleMyTickets 返回当前用户的紧凑工单列表。对话正文和附件 URL 只在
+// handleMyTicket 的单条详情中返回，避免长期用户每次打开工单页都下载全部历史。
 func (a *App) handleMyTickets(w http.ResponseWriter, r *http.Request, _ Params) {
 	cfg := a.cfg()
 	if !cfg.TicketSystemEnabled {
@@ -29,8 +30,42 @@ func (a *App) handleMyTickets(w http.ResponseWriter, r *http.Request, _ Params) 
 		return
 	}
 	p := current(r)
-	tickets := a.store().ListTickets(store.TicketFilter{UID: p.User.UID})
-	ok(w, "OK", map[string]any{"tickets": ticketDTOs(tickets, false), "total": len(tickets), "ticket_types": a.store().TicketTypes()})
+	page := clamp(queryInt(r, "page", 1), 1, 1000000)
+	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
+	result := a.store().ListTicketsPage(store.TicketFilter{UID: p.User.UID}, page, perPage)
+	ok(w, "OK", map[string]any{
+		"tickets":      userTicketListDTOs(result.Tickets),
+		"total":        result.Total,
+		"page":         page,
+		"per_page":     perPage,
+		"ticket_types": a.store().TicketTypes(),
+	})
+}
+
+// handleMyTicket 返回当前登录用户的一条完整工单会话。即使调用者本身也是
+// 管理员，这个用户侧端点也只允许读取自己的工单；管理员查看他人工单必须走
+// /admin/tickets/:ticket_id，确保对象归属和审计入口清晰。
+func (a *App) handleMyTicket(w http.ResponseWriter, r *http.Request, params Params) {
+	if !a.cfg().TicketSystemEnabled {
+		failWithCode(w, http.StatusServiceUnavailable, ErrTicketDisabled, "工单系统未启用")
+		return
+	}
+	id, err := int64Param(params, "ticket_id")
+	if err != nil || id <= 0 {
+		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的工单编号")
+		return
+	}
+	if a.refreshStoreForRequest(w, r) {
+		return
+	}
+	p := current(r)
+	ticket, found := a.store().Ticket(id)
+	if !found || ticket.UID != p.User.UID {
+		// 不区分不存在与非本人资源，避免枚举其他用户的工单编号。
+		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
+		return
+	}
+	ok(w, "OK", map[string]any{"ticket": ticketDTO(ticket, false), "ticket_types": a.store().TicketTypes()})
 }
 
 // handleCreateTicket 用户提交工单。
@@ -880,6 +915,52 @@ type adminTicketListDTO struct {
 	UpdatedAt       int64  `json:"updated_at"`
 	ResolvedAt      int64  `json:"resolved_at"`
 	ClosedAt        int64  `json:"closed_at"`
+}
+
+// userTicketListDTO 是普通用户工单首页的摘要。它有意不含 Content、Replies
+// 和 Attachments：这些可能包含大量文本和图片 URL，应按需读取单条详情。
+type userTicketListDTO struct {
+	ID              int64  `json:"id"`
+	Title           string `json:"title"`
+	Type            string `json:"type"`
+	Status          string `json:"status"`
+	Priority        string `json:"priority"`
+	ReplyCount      int    `json:"reply_count"`
+	AttachmentCount int    `json:"attachment_count"`
+	NotifyTelegram  bool   `json:"notify_telegram"`
+	CreatedAt       int64  `json:"created_at"`
+	UpdatedAt       int64  `json:"updated_at"`
+	ResolvedAt      int64  `json:"resolved_at"`
+	ClosedAt        int64  `json:"closed_at"`
+}
+
+func userTicketListItem(t store.Ticket) userTicketListDTO {
+	notifyTelegram := true
+	if t.NotifyTelegram != nil {
+		notifyTelegram = *t.NotifyTelegram
+	}
+	return userTicketListDTO{
+		ID:              t.ID,
+		Title:           t.Title,
+		Type:            t.Type,
+		Status:          t.Status,
+		Priority:        t.Priority,
+		ReplyCount:      len(t.Replies),
+		AttachmentCount: len(t.Attachments),
+		NotifyTelegram:  notifyTelegram,
+		CreatedAt:       t.CreatedAt,
+		UpdatedAt:       t.UpdatedAt,
+		ResolvedAt:      t.ResolvedAt,
+		ClosedAt:        t.ClosedAt,
+	}
+}
+
+func userTicketListDTOs(tickets []store.Ticket) []userTicketListDTO {
+	out := make([]userTicketListDTO, 0, len(tickets))
+	for _, ticket := range tickets {
+		out = append(out, userTicketListItem(ticket))
+	}
+	return out
 }
 
 // ticketListDTO deliberately excludes reply bodies and attachment URLs. Those

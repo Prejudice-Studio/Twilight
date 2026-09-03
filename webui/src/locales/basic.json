@@ -1547,7 +1547,8 @@
     "notifyTelegram": "Telegram 通知",
     "notifyTelegramDesc": "管理员回复或处理此工单时发送 Telegram 通知",
     "notifyOn": "通知已开启",
-    "notifyOff": "通知已关闭"
+    "notifyOff": "通知已关闭",
+    "pageSummary": "第 {page} / {total} 页，共 {count} 条"
   },
   "adminTickets": {
     "title": "工单管理",

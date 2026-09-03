@@ -89,6 +89,7 @@ import type {
   TelegramCommandCatalog,
   Ticket,
   TicketAttachment,
+  UserTicketListItem,
   TelegramRebindRequest,
   TelegramStatus,
   User,
@@ -2787,8 +2788,24 @@ class ApiClient {
 
   // ==================== Tickets ====================
 
-  async getMyTickets(signal?: AbortSignal) {
-    return this.request<{ tickets: Ticket[]; total: number; ticket_types: string[] }>("/tickets", { cache: "no-store", signal }, { cacheRead: false, dedupe: false });
+  async getMyTickets(params: { page?: number; per_page?: number } = {}, signal?: AbortSignal) {
+    const query = new URLSearchParams();
+    if (params.page) query.set("page", String(params.page));
+    if (params.per_page) query.set("per_page", String(params.per_page));
+    const suffix = query.size ? `?${query.toString()}` : "";
+    return this.request<{ tickets: UserTicketListItem[]; total: number; page: number; per_page: number; ticket_types: string[] }>(
+      `/tickets${suffix}`,
+      { cache: "no-store", signal },
+      { cacheRead: false, dedupe: false },
+    );
+  }
+
+  async getMyTicket(id: number, signal?: AbortSignal) {
+    return this.request<{ ticket: Ticket; ticket_types: string[] }>(
+      `/tickets/${id}`,
+      { cache: "no-store", signal },
+      { cacheRead: false, dedupe: false },
+    );
   }
 
   async createTicket(payload: { title: string; content: string; type?: string; priority?: string; notify_telegram?: boolean }) {

@@ -1287,9 +1287,11 @@ curl -X POST "http://localhost:5000/api/v1/admin/regcodes" \
 
 ### 9.4.1 工单系统
 
-用户接口：`GET /tickets`、`POST /tickets`、`POST /tickets/{ticket_id}/reply`、`POST /tickets/{ticket_id}/close`、`POST /tickets/{ticket_id}/reopen`、`PUT /tickets/{ticket_id}/notify-telegram`、`POST|DELETE /tickets/{ticket_id}/images`。
+用户接口：`GET /tickets`、`GET /tickets/{ticket_id}`、`POST /tickets`、`POST /tickets/{ticket_id}/reply`、`POST /tickets/{ticket_id}/close`、`POST /tickets/{ticket_id}/reopen`、`PUT /tickets/{ticket_id}/notify-telegram`、`POST|DELETE /tickets/{ticket_id}/images`。
 
 管理员接口：`GET /admin/tickets`、`GET /admin/tickets/{ticket_id}`、`PUT /admin/tickets/{ticket_id}`、`POST /admin/tickets/{ticket_id}/reply`、`DELETE /admin/tickets/{ticket_id}`、`GET|POST|PUT|DELETE /admin/ticket-types`。
+
+`GET /tickets` 是当前用户的摘要分页接口，可传 `page`（默认 1）和 `per_page`（默认 20，最大 100）。列表只返回标题、状态、优先级、回复/附件数量和时间等元数据，不返回工单正文、回复正文或附件 URL。`GET /tickets/{ticket_id}` 只允许当前登录用户读取自己的工单，返回完整正文、双方回复时间线和附件；管理员读取他人工单使用 `/admin/tickets/{ticket_id}`，用户侧接口不会因为当前账号具有管理员角色而扩大资源范围。
 
 `GET /admin/tickets` 默认只返回待处理 / 处理中工单，便于管理端聚焦当前队列；传 `all=1` 或 `status=all` 时返回全部状态，传具体 `status` 时按该状态过滤。列表使用紧凑 DTO，通过 `reply_count` 与 `attachment_count` 返回交流规模，不序列化完整 `replies` 或 `attachments`；完整对话正文与附件 URL 只由单工单详情接口返回。
 

@@ -894,7 +894,8 @@
     "notifyTelegram": "Telegram 通知",
     "notifyTelegramDesc": "管理員回覆或處理此工單時發送 Telegram 通知",
     "notifyOn": "通知已開啟",
-    "notifyOff": "通知已關閉"
+    "notifyOff": "通知已關閉",
+    "pageSummary": "第 {page} / {total} 頁，共 {count} 筆"
   },
   "adminTickets": {
     "title": "工單管理",
