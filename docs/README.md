@@ -49,6 +49,7 @@
 ## 其他
 
 - Swagger 交互式文档：服务启动后访问 `/api/v1/docs`
+- V2 重构文档：[V1 审计基线](./v2/v1-audit.md)、[V2 架构设计](./v2/architecture.md)
 
 ## 说明
 
