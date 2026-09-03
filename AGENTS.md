@@ -151,6 +151,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - The shared WebUI request wrapper must parse API responses through a bounded byte stream. Reject responses larger than the documented limit before JSON parsing, cancel the reader on overflow, keep the request timeout signal alive through response-body consumption, and keep API error diagnostics on the actual `apiVersion`; do not restore unbounded `response.text()` parsing.
 - Current-user identity endpoints (`/users/me` and `/auth/me`) must also stay out of in-flight read dedupe. Login, logout, and session-changing frontend flows must clear request caches and invalidate stale auth-store promises before writing user state.
 - Rapidly changing admin list/detail reads must pass `AbortSignal` through `api.ts`; refresh, filter/page changes, route changes, and unmount must cancel superseded requests, and stale responses must not overwrite newer state or produce abort-error toasts.
+- `useAsyncResource` defaults to recording non-cancel errors in its `error` state and resolving safely, so automatic or fire-and-forget loads cannot create unhandled Promise rejections. A caller that needs exception control flow may use `execute({ throwOnError: true })`; all manual fire-and-forget calls must still explicitly consume the Promise.
 - The admin user page cache is bounded to a small LRU window by both query count and
   retained row count. Keep cache hits moving to the newest position, and do not turn
   user-list filter/page history into an unbounded browser-side copy of the user base.

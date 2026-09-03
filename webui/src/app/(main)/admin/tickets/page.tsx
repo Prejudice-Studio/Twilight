@@ -269,13 +269,13 @@ export default function AdminTicketsPage() {
           } catch { setTypeMgmtTypes([]); }
           setTypeMgmtOpen(true);
         }} className="w-full sm:w-auto"><Settings2 className="mr-1 h-3.5 w-3.5" />{t("adminTickets.manageTypes")}</Button>
-        <Button variant="outline" size="sm" onClick={() => void reload()} disabled={isLoading} className="w-full sm:w-auto">
+        <Button variant="outline" size="sm" onClick={() => void reload().catch(() => undefined)} disabled={isLoading} className="w-full sm:w-auto">
           <RefreshCw className={`mr-1 h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />{t("common.refresh")}
         </Button>
       </div>
 
       {error ? (
-        <Card className="border-destructive/40"><CardContent className="p-6 text-center space-y-3"><AlertCircle className="h-8 w-8 mx-auto text-destructive" /><p className="text-sm">{error}</p><Button variant="outline" size="sm" onClick={() => void reload()}>{t("common.retry")}</Button></CardContent></Card>
+      <Card className="border-destructive/40"><CardContent className="p-6 text-center space-y-3"><AlertCircle className="h-8 w-8 mx-auto text-destructive" /><p className="text-sm">{error}</p><Button variant="outline" size="sm" onClick={() => void reload().catch(() => undefined)}>{t("common.retry")}</Button></CardContent></Card>
       ) : isLoading && !data ? (
         <Card className="border-dashed"><CardContent className="p-8 text-center"><Loader2 className="h-6 w-6 mx-auto animate-spin text-muted-foreground" /></CardContent></Card>
       ) : tickets.length === 0 ? (

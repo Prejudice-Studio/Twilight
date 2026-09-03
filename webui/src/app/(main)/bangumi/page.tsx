@@ -202,7 +202,7 @@ export default function BangumiPage() {
           <CardContent className="pt-6 flex flex-col items-center gap-3">
             <AlertCircle className="h-8 w-8 text-destructive" />
             <p className="text-sm text-muted-foreground">{String(error)}</p>
-            <Button variant="outline" onClick={() => { void reload(); }}>{t("common.retry")}</Button>
+            <Button variant="outline" onClick={() => { void reload().catch(() => undefined); }}>{t("common.retry")}</Button>
           </CardContent>
         </Card>
       </motion.div>

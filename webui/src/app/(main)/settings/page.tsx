@@ -391,7 +391,7 @@ export default function SettingsPage() {
       setBindCode(null);
       setBindCodeExpiry(0);
       toast({ title: t("settings.rebindCompleteTitle"), variant: "success" });
-      void loadData();
+      void loadData().catch(() => undefined);
       void fetchUser();
     },
     onTerminalError: (data) => {
@@ -513,7 +513,7 @@ export default function SettingsPage() {
         toast({ title: t("settings.rebindSubmitSuccess"), description: res.message, variant: "success" });
         setRebindDialogOpen(false);
         setRebindReason("");
-        loadData();
+        void loadData().catch(() => undefined);
       } else {
         toast({ title: t("settings.rebindSubmitFailed"), description: res.message, variant: "destructive" });
       }
@@ -532,7 +532,7 @@ export default function SettingsPage() {
         toast({ title: t("settings.unbindSuccess"), variant: "success" });
         setBindCode(null);
         setBindCodeExpiry(0);
-        loadData();
+        void loadData().catch(() => undefined);
         fetchUser();
       } else {
         toast({ title: t("settings.unbindFailed"), description: res.message, variant: "destructive" });
@@ -779,7 +779,7 @@ export default function SettingsPage() {
           setEmbyPasswordOldPasswordRequired(false);
         }
         toast({ title: t("settings.securityPreferenceSaved"), variant: "success" });
-        void loadData();
+        void loadData().catch(() => undefined);
         void fetchUser();
         return true;
       }
@@ -863,7 +863,7 @@ export default function SettingsPage() {
   }, [runLineLatencyTests]);
 
   if (error) {
-    return <PageError message={error} onRetry={() => void loadData()} />;
+    return <PageError message={error} onRetry={() => void loadData().catch(() => undefined)} />;
   }
 
   if (isLoading) {

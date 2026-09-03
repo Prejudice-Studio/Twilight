@@ -345,7 +345,7 @@ export function AdminConfigSections({
         <AlertTitle>{t("adminConfig.sectionEditor.loadFailed")}</AlertTitle>
         <AlertDescription className="space-y-3">
           <p className="break-words">{error}</p>
-          <Button variant="outline" size="sm" onClick={() => void reload()}>{t("common.retry")}</Button>
+          <Button variant="outline" size="sm" onClick={() => void reload().catch(() => undefined)}>{t("common.retry")}</Button>
         </AlertDescription>
       </Alert>
     );

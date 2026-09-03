@@ -121,7 +121,7 @@ export default function AdminTelegramRebindRequestsPage() {
         setSelectedIds(new Set());
         setAdminNote("");
         invalidateRequestsCache();
-        loadRequests();
+        void loadRequests().catch(() => undefined);
       } else {
         toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
       }
@@ -143,7 +143,7 @@ export default function AdminTelegramRebindRequestsPage() {
         });
         setRevokeOpen(false);
         invalidateRequestsCache();
-        loadRequests();
+        void loadRequests().catch(() => undefined);
       } else {
         toast({ title: t("common.operationFailed"), description: res.message, variant: "destructive" });
       }

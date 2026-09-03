@@ -155,6 +155,7 @@ bash start_backend_dev.sh
 ### 前端契约
 
 - 所有后端调用集中维护在 `webui/src/lib/api.ts`，底层请求逻辑在 `webui/src/lib/api-request.ts`。
+- 页面级异步读取统一使用 `webui/src/hooks/use-async-resource.ts`。非取消错误默认写入 `error` 状态并安全结束，避免自动加载和手动刷新产生未处理的 Promise rejection；确实需要在 `try/catch` 中处理失败的流程可调用 `execute({ throwOnError: true })`。加载器必须接收并向 `api.ts` 传递 `AbortSignal`，筛选、翻页、路由切换和卸载时取消过期读取。
 - 响应统一为 envelope 结构 `{ success, code, message, data, timestamp }`；前端按 HTTP 状态码与 `error_code` 分流处理（401 跳登录、403 权限提示、429 退避、5xx 通用故障，以及自定义业务 error_code）。
 - 新增或调整接口时，需同步检查前端调用路径、请求方法、鉴权等级、错误提示文案与移动端展示。
 - 登录支持用户名和邮箱两种方式：`api.ts` 的 `login()` 自动检测 `@` 将 payload 从 `{username}` 切换为 `{email}`，后端 `handleLogin` 对应走 `FindUserByEmail`。

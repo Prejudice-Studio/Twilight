@@ -327,7 +327,7 @@ export default function AdminAnnouncementsPage() {
           <CardContent className="p-6 text-center space-y-3">
             <AlertTriangle className="h-8 w-8 mx-auto text-destructive" />
             <p className="text-sm">{error}</p>
-            <Button variant="outline" size="sm" onClick={() => void reload()}>
+            <Button variant="outline" size="sm" onClick={() => void reload().catch(() => undefined)}>
               {t("common.retry")}
             </Button>
           </CardContent>
