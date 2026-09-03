@@ -737,6 +737,7 @@
 
     .section-surface :where(.flex, .inline-flex, .grid) {
       min-width: 0;
+      max-width: 100%;
     }
 
     .section-surface :where(input, textarea, select) {
