@@ -595,6 +595,89 @@ export interface AdminStatusPageData {
   refreshed_at: number;
 }
 
+export type ConfigFieldType = "string" | "textarea" | "int" | "float" | "bool" | "secret" | "list" | "select" | "command_map";
+
+export interface ConfigFieldOption {
+  label: string;
+  value: string | number;
+}
+
+export interface ConfigField {
+  key: string;
+  label: string;
+  type: ConfigFieldType;
+  description: string;
+  value: unknown;
+  options?: ConfigFieldOption[];
+  placeholder_hints?: string[];
+}
+
+export interface ConfigSection {
+  key: string;
+  title: string;
+  description: string;
+  category?: string;
+  collapsed?: boolean;
+  fields: ConfigField[];
+}
+
+export interface ConfigCategory {
+  key: string;
+  title: string;
+}
+
+export interface ConfigSchema {
+  sections: ConfigSection[];
+  categories?: ConfigCategory[];
+}
+
+export interface ConfigToml {
+  content: string;
+  raw_content?: string;
+  path: string;
+  completed?: boolean;
+}
+
+export interface ConfigBackup {
+  name: string;
+  path: string;
+  size: number;
+  created_at: number;
+}
+
+export interface ConfigBackupList {
+  backups: ConfigBackup[];
+  config_file?: string;
+  backup_dir?: string;
+}
+
+export interface ConfigBackupView {
+  backup: ConfigBackup;
+  content: string;
+  config_file?: string;
+}
+
+export interface ConfigRestoreResult {
+  operation: string;
+  dry_run: boolean;
+  requires_confirmation?: boolean;
+  confirm?: string;
+  restored: string;
+  backup: ConfigBackup;
+  config_file?: string;
+  content_bytes?: number;
+  warnings?: string[];
+  pre_restore_backup?: ConfigBackup;
+  pre_operation_backup?: ConfigBackup;
+}
+
+export interface AdminConfigPageData {
+  schema: ConfigSchema | null;
+  toml: ConfigToml | null;
+  backups: ConfigBackupList | null;
+  errors: string[];
+}
+
 export type AnnouncementLevel = "info" | "notice" | "warning" | "critical";
 
 export interface Announcement {
