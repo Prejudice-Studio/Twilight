@@ -1,14 +1,13 @@
 import { apiJSON } from "$lib/server/api";
 import type { PageServerLoad } from "./$types";
-import type { V2Capabilities, ViewerCount } from "$lib/types";
+import type { DashboardSummary } from "$lib/types";
 
 export const load: PageServerLoad = async (event) => {
-  const [capabilities, viewers] = await Promise.all([
-    apiJSON<V2Capabilities>(event, "/api/v2/system/capabilities", { cache: "no-store" }),
-    apiJSON<ViewerCount>(event, "/api/v1/system/emby-viewers", { cache: "no-store" })
-  ]);
+  const result = await apiJSON<DashboardSummary>(event, "/api/v2/dashboard/summary", { cache: "no-store" });
+  const summary = result?.success ? result.data || null : null;
   return {
-    capabilities: capabilities?.success ? capabilities.data : null,
-    viewers: viewers?.success ? viewers.data?.viewers ?? null : null
+    capabilities: summary?.capabilities || null,
+    viewers: summary?.viewers || null,
+    user: summary?.user || event.locals.user
   };
 };

@@ -19,15 +19,15 @@
   <div class="metrics">
     <article class="metric">
       <span>{t.onlineViewers}</span>
-      <strong>{data.viewers ?? "-"}</strong>
+      <strong>{data.viewers?.available ? data.viewers.count : "-"}</strong>
     </article>
     <article class="metric">
       <span>{t.account}</span>
-      <strong>{data.user.username}</strong>
+      <strong>{data.user?.username || "-"}</strong>
     </article>
     <article class="metric">
       <span>{t.embyBound}</span>
-      <strong>{data.user.emby_id ? t.bound : t.unbound}</strong>
+      <strong>{data.user?.emby_id ? t.bound : t.unbound}</strong>
     </article>
   </div>
 </section>

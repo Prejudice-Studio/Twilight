@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 	"time"
+
+	"github.com/prejudice-studio/twilight/internal/config"
 )
 
 // V2 的基础读取只描述协议能力，不返回配置秘密、完整路由库存或外部服务
@@ -14,6 +16,17 @@ type v2Capabilities struct {
 	Features              map[string]bool   `json:"features"`
 	Limits                map[string]int64  `json:"limits"`
 	Links                 map[string]string `json:"links"`
+}
+
+type v2DashboardSummary struct {
+	User         map[string]any `json:"user"`
+	Capabilities v2Capabilities `json:"capabilities"`
+	Viewers      v2ViewerState  `json:"viewers"`
+}
+
+type v2ViewerState struct {
+	Available bool `json:"available"`
+	Count     int  `json:"count"`
 }
 
 // handleV2Health 是 V2 的公共 API liveness 端点。它只确认 API 进程仍能处理
@@ -31,8 +44,11 @@ func (a *App) handleV2Health(w http.ResponseWriter, _ *http.Request, _ Params) {
 // handleV2Capabilities 提供前端选择协议能力所需的非敏感信息。布尔 feature
 // 是公开产品能力，不包含 token、URL、数据库信息、管理员名单或用户数据。
 func (a *App) handleV2Capabilities(w http.ResponseWriter, _ *http.Request, _ Params) {
-	cfg := a.cfg()
-	ok(w, "OK", v2Capabilities{
+	ok(w, "OK", v2CapabilitiesPayload(*a.cfg()))
+}
+
+func v2CapabilitiesPayload(cfg config.Config) v2Capabilities {
+	return v2Capabilities{
 		APIVersion:            "v2",
 		CompatibleAPIVersions: []string{"v1"},
 		ServerVersion:         cfg.Version,
@@ -44,7 +60,7 @@ func (a *App) handleV2Capabilities(w http.ResponseWriter, _ *http.Request, _ Par
 			"media_request": cfg.MediaRequestEnabled,
 			"signin":        cfg.SigninEnabled,
 			"invite":        cfg.InviteEnabled,
-			"email":         emailConfigured(cfg),
+			"email":         emailConfigured(&cfg),
 			"tickets":       cfg.TicketSystemEnabled,
 			"activity_logs": true,
 			"viewing_stats": false,
@@ -58,5 +74,25 @@ func (a *App) handleV2Capabilities(w http.ResponseWriter, _ *http.Request, _ Par
 			"openapi": "/api/v1/openapi.json",
 			"docs":    "/api/v1/docs",
 		},
+	}
+}
+
+// handleV2DashboardSummary 聚合仪表盘首屏确实需要的三类数据。用户身份和
+// 能力信息来自本地状态；在线人数是可降级的 Emby 读取，失败时明确标记
+// unavailable，不能把故障伪装成 0，也不能让单个外部依赖失败丢弃整个首页。
+func (a *App) handleV2DashboardSummary(w http.ResponseWriter, r *http.Request, _ Params) {
+	viewers := v2ViewerState{Available: true}
+	if a.embyConfigured() {
+		sessions, err := a.embySessionsSnapshot(r.Context(), false)
+		if err != nil {
+			viewers.Available = false
+		} else {
+			viewers.Count = countEmbyPlayingSessions(sessions)
+		}
+	}
+	ok(w, "OK", v2DashboardSummary{
+		User:         publicUser(current(r).User),
+		Capabilities: v2CapabilitiesPayload(*a.cfg()),
+		Viewers:      viewers,
 	})
 }

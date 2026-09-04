@@ -34,6 +34,15 @@ export interface ViewerCount {
   viewers: number;
 }
 
+export interface DashboardSummary {
+  user: UserInfo;
+  capabilities: V2Capabilities;
+  viewers: {
+    available: boolean;
+    count: number;
+  };
+}
+
 export interface EmailCodeSent {
   verification_id: string;
   email: string;

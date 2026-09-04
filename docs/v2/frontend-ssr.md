@@ -78,6 +78,8 @@ Telegram 注册绑定码生成使用独立的 `createBindCode` form action；启
 
 页面桌面端使用列表/会话双栏，移动端切为单列；列表和会话各自拥有 `overflow`、`overscroll-behavior` 和 Firefox 可见滚动条。用户侧详情仍由 Go 后端执行归属校验，V2 不依据隐藏按钮决定是否可操作，也不会把管理员内部备注渲染进用户会话。
 
+仪表盘使用 `/api/v2/dashboard/summary` 一次读取当前用户、公开能力和在线人数。Emby 失败时只显示“暂不可用”，不会把失败伪装为 0；本地用户和能力数据不受单个外部依赖影响。
+
 ## 已迁移模块：公告
 
 `/(app)/announcements` 在服务端读取 `/users/me/announcements`，首屏同时包含可见公告和当前账号尚未确认的强制阅读公告，不在浏览器端重复请求公告列表。公告正文以 Svelte 文本节点输出，保持字符转义，不复刻 V1 的富文本渲染路径；需要确认的公告通过 `acknowledge` form action 调用后端批量确认接口，并使用去重后的正整数 ID。

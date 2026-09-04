@@ -53,3 +53,30 @@ func TestV2CapabilitiesDoNotExposeSecrets(t *testing.T) {
 		t.Fatalf("v2 public feature contract missing: %s", resp.Body.String())
 	}
 }
+
+func TestV2DashboardSummaryKeepsLocalDataWhenEmbyUnavailable(t *testing.T) {
+	app := newTestApp(t)
+	cookies := registerAndLogin(t, app, "dashboard-user", "Dashboard123456")
+	app.cfg().EmbyURL = "http://emby.invalid"
+	app.cfg().EmbyToken = "test-token"
+
+	resp := doJSON(app, http.MethodGet, "/api/v2/dashboard/summary", "", cookies)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("dashboard summary status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var env envelope
+	if err := json.Unmarshal(resp.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode dashboard summary: %v", err)
+	}
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("dashboard summary data type=%T", env.Data)
+	}
+	if _, ok := data["user"].(map[string]any); !ok {
+		t.Fatalf("dashboard summary missing user: %v", data)
+	}
+	viewers, ok := data["viewers"].(map[string]any)
+	if !ok || viewers["available"] != false {
+		t.Fatalf("expected unavailable viewers state, got %v", data["viewers"])
+	}
+}
