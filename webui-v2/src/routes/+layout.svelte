@@ -17,6 +17,7 @@
     {#if data.user}
       <nav aria-label="主导航">
         <a href="/dashboard">{t.dashboard}</a>
+        <a href="/tickets">{t.tickets}</a>
         <a href="/settings">{t.settings}</a>
         <form method="POST" action="/logout">
           <button type="submit">{t.logout}</button>

@@ -106,6 +106,50 @@ export interface RegisterResponse {
   email_verification_sent?: string;
 }
 
+export type TicketStatus = "open" | "in_progress" | "resolved" | "closed";
+export type TicketPriority = "low" | "medium" | "high" | "urgent";
+
+export interface TicketReply {
+  uid: number;
+  username: string;
+  role: number;
+  author?: "admin" | "user";
+  content: string;
+  created_at: number;
+}
+
+export interface TicketAttachment {
+  filename: string;
+  content_type: string;
+  size: number;
+  uploaded_uid: number;
+  created_at: number;
+  url: string;
+}
+
+export interface TicketSummary {
+  id: number;
+  title: string;
+  type: string;
+  status: TicketStatus;
+  priority: TicketPriority;
+  reply_count: number;
+  attachment_count: number;
+  notify_telegram: boolean;
+  created_at: number;
+  updated_at: number;
+  resolved_at?: number;
+  closed_at?: number;
+}
+
+export interface Ticket extends TicketSummary {
+  uid: number;
+  username: string;
+  content: string;
+  replies?: TicketReply[];
+  attachments?: TicketAttachment[];
+}
+
 export interface SystemInfo {
   name?: string;
   version?: string;
