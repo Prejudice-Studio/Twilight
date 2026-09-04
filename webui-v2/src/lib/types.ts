@@ -452,14 +452,84 @@ export interface Ticket extends TicketSummary {
 
 export interface SystemInfo {
   name?: string;
+  icon?: string;
   version?: string;
+  api_version?: string;
   features?: Record<string, boolean>;
+  limits?: Record<string, number | null>;
+  storage_mismatch?: boolean;
+  storage_warning?: string;
   telegram_bot?: {
     username?: string | null;
     url?: string | null;
     enabled?: boolean;
     configured?: boolean;
   };
+}
+
+export interface SystemHealthDetail {
+  ok?: boolean;
+  online?: boolean;
+  configured?: boolean;
+  status?: string;
+  error?: string;
+  warning?: string;
+  backend?: string;
+  configured_driver?: string;
+  storage_mismatch?: boolean;
+  storage_warning?: string;
+  state_read_ok?: boolean;
+  user_count?: number;
+  ping_ok?: boolean;
+  open_connections?: number;
+  in_use?: number;
+  idle?: number;
+  server_name?: string;
+  version?: string;
+  operating_system?: string;
+  active_sessions?: number;
+  total_sessions?: number;
+  sessions_error?: string;
+  routes?: number;
+  uptime?: number;
+  timestamp?: number;
+}
+
+export interface SystemStats {
+  timestamp?: number;
+  users?: {
+    active?: number;
+    total?: number;
+    limit?: number | null;
+    usage_percent?: number;
+  };
+  regcodes?: {
+    active?: number;
+    total?: number;
+  };
+  redis_enabled?: boolean;
+  redis_fallback?: {
+    session?: number;
+    rate?: number;
+  };
+  routes?: number;
+  uptime?: number;
+}
+
+export interface HealthProbe<T> {
+  available: boolean;
+  data: T | null;
+}
+
+export interface AdminStatusPageData {
+  health: {
+    api: HealthProbe<SystemHealthDetail>;
+    database: HealthProbe<SystemHealthDetail>;
+    emby: HealthProbe<SystemHealthDetail>;
+  };
+  info: SystemInfo | null;
+  stats: SystemStats | null;
+  refreshed_at: number;
 }
 
 export type AnnouncementLevel = "info" | "notice" | "warning" | "critical";

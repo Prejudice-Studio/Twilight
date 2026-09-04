@@ -14,7 +14,7 @@
 - 响应统一为 JSON 信封（envelope），结构见下文 [2.4 响应结构](#24-响应结构)。
 - 变更接口时需同步更新 [API 路由索引](../reference/api-index.md)；若接口有请求体、响应体、限流或安全注意事项，还需更新本文对应章节。
 
-V2 基础协议目前提供 `GET /api/v2/system/health`、`GET /api/v2/system/capabilities`、受保护的 `GET /api/v2/dashboard/summary`、`GET /api/v2/signin/summary`、`GET /api/v2/invite/summary` 和 `GET /api/v2/bangumi/summary`。它们沿用统一 JSON envelope；仪表盘摘要一次返回当前用户、公开能力和在线人数状态。Emby 读取失败时只将 `data.viewers.available` 设为 `false`，本地用户和能力数据仍然返回，不把故障伪装为零人在线。签到摘要一次返回 `summary`、`config` 和最近 30 条 `history`；邀请摘要一次返回 `config` 与会话作用域的 `invite` 投影；Bangumi 摘要一次返回本地同步状态、公开账号资料、五类收藏的有限预览和最近动态，Bangumi 单类读取失败时保留其他成功结果并标记 `collections_partial`。Bangumi Token 永不进入 V2 响应。上述接口不改变 `/api/v1` 写入状态机，未迁移调用继续使用 `/api/v1`。
+V2 基础协议目前提供 `GET /api/v2/system/health`、`GET /api/v2/system/capabilities`、受保护的 `GET /api/v2/dashboard/summary`、`GET /api/v2/signin/summary`、`GET /api/v2/invite/summary` 和 `GET /api/v2/bangumi/summary`。它们沿用统一 JSON envelope；仪表盘摘要一次返回当前用户、公开能力和在线人数状态。Emby 读取失败时只将 `data.viewers.available` 设为 `false`，本地用户和能力数据仍然返回，不把故障伪装为零人在线。签到摘要一次返回 `summary`、`config` 和最近 30 条 `history`；邀请摘要一次返回 `config` 与会话作用域的 `invite` 投影；Bangumi 摘要一次返回本地同步状态、公开账号资料、五类收藏的有限预览和最近动态，Bangumi 单类读取失败时保留其他成功结果并标记 `collections_partial`。Bangumi Token 永不进入 V2 响应。管理员服务器状态页 `/(app)/admin/status` 使用服务端 `load` 并行读取下方三个 V1 管理员健康接口、系统信息和管理员统计；它是 WebUI 路由，不新增一套重复的健康探测 API。上述接口不改变 `/api/v1` 写入状态机，未迁移调用继续使用 `/api/v1`。
 
 ### 1.1 文档分工
 
@@ -1010,7 +1010,7 @@ curl -X GET "http://localhost:5000/api/v1/admin/users?status=active&page=1&per_p
 
 前端保持服务端分页：桌面用户表在受限 Firefox 滚动区域中显示并固定表头，手机和平板使用当前页用户卡片。单用户分组操作菜单与无效账号清理预览使用 `dvh` 视口边界，预览表可横纵滚动，不会因长列表或窄视口遮住确认操作。
 
-服务器状态页的 API、数据库和 Emby 健康检查分别调用 `/system/health/api`、`/system/health/database`、`/system/health/emby`，并与系统信息、统计请求共享一次可取消刷新。前端使用 `Promise.allSettled` 独立呈现结果，单个依赖不可用时不会把其他成功结果误报为整体异常。
+V1 服务器状态页的 API、数据库和 Emby 健康检查分别调用 `/system/health/api`、`/system/health/database`、`/system/health/emby`，并与系统信息、统计请求共享一次可取消刷新。V2 `/admin/status` 在服务端使用 `Promise.allSettled` 并行读取同一组独立接口，单个依赖不可用时不会把其他成功结果误报为整体异常；浏览器端仅进行一次 SSR 页面读取，不建立轮询。
 
 #### 更新用户信息
 

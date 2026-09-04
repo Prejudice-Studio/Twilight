@@ -2066,6 +2066,7 @@ func (a *App) databaseHealth(parent context.Context) map[string]any {
 	if st == nil {
 		return map[string]any{
 			"ok":                false,
+			"status":            "unavailable",
 			"backend":           "none",
 			"configured_driver": strings.ToLower(a.cfg().DatabaseDriver),
 			"error":             "store is not initialized",
@@ -2073,30 +2074,41 @@ func (a *App) databaseHealth(parent context.Context) map[string]any {
 	}
 	backend := st.Backend()
 	userCount := st.UserCount()
+	storageMismatch := a.runtimeDatabaseMismatch()
 	result := map[string]any{
-		"ok":                true,
+		"ok":                !storageMismatch,
+		"status":            "healthy",
 		"backend":           backend,
 		"configured_driver": strings.ToLower(a.cfg().DatabaseDriver),
-		"storage_mismatch":  a.runtimeDatabaseMismatch(),
+		"storage_mismatch":  storageMismatch,
 		"storage_warning":   a.databaseMismatchWarning(),
 		"state_read_ok":     true,
 		"user_count":        userCount,
+	}
+	if storageMismatch {
+		result["status"] = "configuration_mismatch"
 	}
 	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
 	defer cancel()
 	if db := st.DB(); db != nil || backend == store.BackendPostgres {
 		if db == nil {
 			result["ok"] = false
+			result["status"] = "unavailable"
 			result["error"] = "postgres backend has no active connection"
 			return result
 		}
 		if err := db.PingContext(ctx); err != nil {
+			result["ok"] = false
+			result["status"] = "unhealthy"
 			result["ping_ok"] = false
-			result["ping_error"] = truncateString(redactSensitiveText(err.Error()), 180)
 			result["warning"] = "database ping failed; active store remains readable"
 			return result
 		}
 		result["ping_ok"] = true
+		if storageMismatch {
+			result["ok"] = false
+			result["status"] = "configuration_mismatch"
+		}
 		stats := db.Stats()
 		result["open_connections"] = stats.OpenConnections
 		result["in_use"] = stats.InUse
@@ -2105,6 +2117,7 @@ func (a *App) databaseHealth(parent context.Context) map[string]any {
 	}
 	if _, err := st.Snapshot(); err != nil {
 		result["ok"] = false
+		result["status"] = "unhealthy"
 		result["error"] = "state snapshot failed"
 	}
 	return result
@@ -2118,7 +2131,6 @@ func (a *App) embyStatusSnapshot(parent context.Context, includeSessions bool) m
 	result := map[string]any{
 		"online":          false,
 		"configured":      a.embyConfigured(),
-		"server":          a.cfg().EmbyURL,
 		"active_sessions": 0,
 		"total_sessions":  0,
 	}
@@ -2132,7 +2144,6 @@ func (a *App) embyStatusSnapshot(parent context.Context, includeSessions bool) m
 	if err != nil {
 		result["status"] = "unreachable"
 		result["error"] = "Emby status request failed"
-		result["error_detail"] = truncateString(redactSensitiveText(err.Error()), 180)
 		return result
 	}
 	if info == nil {
@@ -2152,7 +2163,6 @@ func (a *App) embyStatusSnapshot(parent context.Context, includeSessions bool) m
 			result["total_sessions"] = len(sessions)
 		} else {
 			result["sessions_error"] = "Emby sessions request failed"
-			result["sessions_error_detail"] = truncateString(redactSensitiveText(sessionErr.Error()), 180)
 		}
 	}
 	return result

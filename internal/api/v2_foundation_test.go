@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -200,5 +201,69 @@ func TestV2BangumiSubjectPreservesDecimalScore(t *testing.T) {
 	}
 	if got, ok := rating["score"].(float64); !ok || got != 8.7 {
 		t.Fatalf("score was truncated: %#v", rating["score"])
+	}
+}
+
+func TestAdminHealthEndpointsRequireAdminAndKeepChecksIndependent(t *testing.T) {
+	app := newTestApp(t)
+	userCookies := registerAndLogin(t, app, "health-user", "HealthUser123456")
+	if response := doJSON(app, http.MethodGet, "/api/v1/system/health/api", "", userCookies); response.Code != http.StatusForbidden {
+		t.Fatalf("normal user health access status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	adminCookies := registerAndLogin(t, app, "admin", "HealthAdmin123456")
+	apiResponse := doJSON(app, http.MethodGet, "/api/v1/system/health/api", "", adminCookies)
+	if apiResponse.Code != http.StatusOK || !strings.Contains(apiResponse.Body.String(), `"ok":true`) {
+		t.Fatalf("api health status=%d body=%s", apiResponse.Code, apiResponse.Body.String())
+	}
+
+	databaseResponse := doJSON(app, http.MethodGet, "/api/v1/system/health/database", "", adminCookies)
+	if databaseResponse.Code != http.StatusOK || !strings.Contains(databaseResponse.Body.String(), `"ping_ok":true`) {
+		t.Fatalf("database health status=%d body=%s", databaseResponse.Code, databaseResponse.Body.String())
+	}
+
+	embyResponse := doJSON(app, http.MethodGet, "/api/v1/system/health/emby", "", adminCookies)
+	if embyResponse.Code != http.StatusOK || !strings.Contains(embyResponse.Body.String(), `"status":"not_configured"`) {
+		t.Fatalf("unconfigured emby health status=%d body=%s", embyResponse.Code, embyResponse.Body.String())
+	}
+}
+
+func TestEmbyHealthDoesNotExposeEndpointOrTransportDetails(t *testing.T) {
+	app := newTestApp(t)
+	adminCookies := registerAndLogin(t, app, "admin", "HealthAdmin123456")
+	const token = "health-transport-secret"
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ServerName":"Test Emby","Version":"1.0"}`))
+	}))
+	defer emby.Close()
+	app.cfg().EmbyURL = emby.URL
+	app.cfg().EmbyToken = token
+
+	response := doJSON(app, http.MethodGet, "/api/v1/system/health/emby", "", adminCookies)
+	if response.Code != http.StatusOK {
+		t.Fatalf("emby health status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, forbidden := range []string{emby.URL, token, "error_detail", "sessions_error_detail"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("emby health exposed %q: %s", forbidden, body)
+		}
+	}
+}
+
+func TestDatabaseHealthMarksClosedConnectionAsUnhealthy(t *testing.T) {
+	app := newTestApp(t)
+	db := app.store().DB()
+	if db == nil {
+		t.Fatal("test store has no database connection")
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close test database: %v", err)
+	}
+
+	result := app.databaseHealth(t.Context())
+	if result["ok"] != false || result["status"] != "unhealthy" || result["ping_ok"] != false {
+		t.Fatalf("closed database was not reported unhealthy: %#v", result)
 	}
 }

@@ -24,6 +24,7 @@
         <a href="/media">{t.media}</a>
         <a href="/tickets">{t.tickets}</a>
         <a href="/settings">{t.settings}</a>
+        {#if data.user.role === 0}<a href="/admin/status">{t.adminStatusTitle}</a>{/if}
         <form method="POST" action="/logout">
           <button type="submit">{t.logout}</button>
         </form>
