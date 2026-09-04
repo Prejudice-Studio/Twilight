@@ -11,6 +11,7 @@ export interface UserInfo {
   uid: number;
   username: string;
   email?: string;
+  email_verified?: boolean;
   role: number;
   role_name?: string;
   active: boolean;
@@ -31,6 +32,55 @@ export interface V2Capabilities {
 
 export interface ViewerCount {
   viewers: number;
+}
+
+export interface EmailCodeSent {
+  verification_id: string;
+  email: string;
+  expires_in: number;
+  resend_after: number;
+}
+
+export interface TelegramSettings {
+  bound: boolean;
+  telegram_id?: number;
+  telegram_username?: string;
+  force_bind: boolean;
+  can_unbind: boolean;
+  can_change: boolean;
+  pending_rebind_request?: boolean;
+  rebind_request_status?: string | null;
+}
+
+export interface UserSettings {
+  bgm_mode: boolean;
+  bgm_manage_mode?: boolean;
+  bgm_token_set: boolean;
+  api_key_enabled: boolean;
+  notify_on_login_telegram?: boolean;
+  notify_on_login_email?: boolean;
+  notify_on_ticket_telegram?: boolean;
+  signin_auto_renewal?: boolean;
+  password_change_email_required?: boolean;
+  emby_password_email_required?: boolean;
+  emby_password_old_password_required?: boolean;
+  password_change_email_forced?: boolean;
+  emby_password_email_forced?: boolean;
+  telegram: TelegramSettings;
+  emby_status: {
+    is_synced: boolean;
+    is_active: boolean;
+    can_unbind?: boolean;
+    active_sessions: number;
+    message: string;
+  };
+  system_config: {
+    device_limit_enabled: boolean;
+    max_devices: number;
+    max_streams: number;
+    bangumi_sync_enabled?: boolean;
+    bangumi_manage_enabled?: boolean;
+  };
 }
 
 export interface LoginPayload {

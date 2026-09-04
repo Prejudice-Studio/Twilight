@@ -17,6 +17,7 @@
     {#if data.user}
       <nav aria-label="主导航">
         <a href="/dashboard">{t.dashboard}</a>
+        <a href="/settings">{t.settings}</a>
         <form method="POST" action="/logout">
           <button type="submit">{t.logout}</button>
         </form>
@@ -30,6 +31,9 @@
   :global(*) { box-sizing: border-box; }
   :global(html) { background: #f4f6f8; color: #17202a; font-family: system-ui, sans-serif; }
   :global(body) { margin: 0; min-width: 320px; }
+  :global(button), :global(input) { font: inherit; }
+  :global(button) { min-height: 2.5rem; }
+  :global(a) { color: #245b75; }
   .app-shell { min-height: 100dvh; }
   .topbar { align-items: center; background: #17202a; color: #fff; display: flex; gap: 1rem; justify-content: space-between; min-height: 3.75rem; padding: 0.75rem max(1rem, env(safe-area-inset-right)) 0.75rem max(1rem, env(safe-area-inset-left)); }
   .brand { color: inherit; font-weight: 700; text-decoration: none; }
@@ -37,5 +41,6 @@
   nav a, nav button { background: transparent; border: 0; color: inherit; cursor: pointer; font: inherit; min-height: 2.25rem; padding: 0.5rem; text-decoration: none; }
   nav a:hover, nav button:hover { background: #2b3b4b; }
   .page-frame { margin: 0 auto; max-width: 72rem; padding: 1.25rem max(1rem, env(safe-area-inset-right)) 3rem max(1rem, env(safe-area-inset-left)); }
+  @media (prefers-reduced-motion: reduce) { :global(*), :global(*::before), :global(*::after) { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; } }
   @media (max-width: 560px) { .topbar { align-items: flex-start; flex-direction: column; } nav { justify-content: flex-start; width: 100%; } .page-frame { padding-top: 1rem; } }
 </style>
