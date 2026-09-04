@@ -678,6 +678,76 @@ export interface AdminConfigPageData {
   errors: string[];
 }
 
+export interface DatabaseBackup extends ConfigBackup {
+  note?: string;
+}
+
+export interface DatabaseStatus {
+  active_driver: string;
+  configured_driver: string;
+  active_label?: string;
+  configured_label?: string;
+  supported_drivers?: Array<{ driver: string; label: string; role: string }>;
+  state_file?: string;
+  backup_dir?: string;
+  backup_count: number;
+  storage_mismatch?: boolean;
+  storage_warning?: string;
+  migration_panel_enabled?: boolean;
+  postgres_configured: boolean;
+  redis_enabled: boolean;
+  user_count: number;
+}
+
+export interface DatabaseBackupInspectResult {
+  backup: DatabaseBackup;
+  snapshot_bytes: number;
+  counts: Record<string, number>;
+  users: number;
+  api_keys: number;
+  regcodes: number;
+  invite_codes: number;
+  media_requests: number;
+  announcements: number;
+}
+
+export interface DatabaseOperationResult {
+  operation?: string;
+  source_driver?: string;
+  configured_driver?: string;
+  target_driver?: string;
+  dry_run: boolean;
+  requires_confirmation?: boolean;
+  confirm?: string;
+  snapshot_bytes?: number;
+  target_snapshot_bytes?: number;
+  current_snapshot_bytes?: number;
+  source_ready?: Record<string, unknown>;
+  target_ready?: Record<string, unknown>;
+  backup_ready?: Record<string, unknown>;
+  warnings?: string[];
+  counts?: Record<string, number>;
+  current_counts?: Record<string, number>;
+  users: number;
+  api_keys: number;
+  regcodes: number;
+  invite_codes: number;
+  media_requests: number;
+  announcements: number;
+  state_file?: string;
+  backup?: DatabaseBackup;
+  restored?: string;
+  pre_restore_backup?: DatabaseBackup;
+  pre_migration_backup?: DatabaseBackup;
+  pre_operation_backup?: DatabaseBackup;
+}
+
+export interface AdminDatabasePageData {
+  status: DatabaseStatus | null;
+  backups: DatabaseBackup[];
+  errors: string[];
+}
+
 export type AnnouncementLevel = "info" | "notice" | "warning" | "critical";
 
 export interface Announcement {
