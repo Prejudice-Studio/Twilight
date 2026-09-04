@@ -2,6 +2,7 @@ import type { RequestEvent } from "@sveltejs/kit";
 import type { ApiEnvelope, UserInfo } from "$lib/types";
 
 const maxResponseBytes = 8 * 1024 * 1024;
+const maxProxyBodyBytes = 32 * 1024 * 1024;
 
 const defaultBackendURL = "http://127.0.0.1:5000";
 
@@ -27,14 +28,29 @@ function backendRequestURL(path: string): string {
   return new URL(path, backendURL()).toString();
 }
 
+function sessionCookieName(): string {
+  return process.env.SESSION_COOKIE_NAME?.trim() || "twilight_session";
+}
+
+function sessionCookieHeader(raw: string | null): string {
+  if (!raw) return "";
+  const allowed = sessionCookieName();
+  for (const item of raw.split(";")) {
+    const cookie = item.trim();
+    if (cookie.startsWith(`${allowed}=`)) return cookie;
+  }
+  return "";
+}
+
 export async function apiRequest<T>(
   event: Pick<RequestEvent, "request">,
   path: string,
   init: RequestInit = {}
 ): Promise<Response> {
   const headers = new Headers(init.headers);
-  const cookie = event.request.headers.get("cookie");
+  const cookie = sessionCookieHeader(event.request.headers.get("cookie"));
   if (cookie && !headers.has("cookie")) headers.set("cookie", cookie);
+  if (!cookie) headers.delete("cookie");
   headers.delete("authorization");
 
   return fetch(backendRequestURL(path), {
@@ -47,7 +63,10 @@ export async function apiRequest<T>(
 
 async function readJSON<T>(response: Response): Promise<T | null> {
   const length = Number(response.headers.get("content-length") || 0);
-  if (length > maxResponseBytes) return null;
+  if (length > maxResponseBytes) {
+    await response.body?.cancel();
+    return null;
+  }
   if (!response.body) return null;
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -80,33 +99,33 @@ async function readJSON<T>(response: Response): Promise<T | null> {
   }
 }
 
-async function readBoundedRequestBody(request: Request): Promise<ArrayBuffer | null> {
-  if (!request.body) return new ArrayBuffer(0);
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
+function limitedStream(source: ReadableStream<Uint8Array>, limit: number, overflow: { value: boolean }): ReadableStream<Uint8Array> {
+  const reader = source.getReader();
   let total = 0;
-  try {
-    while (true) {
-      const next = await reader.read();
-      if (next.done) break;
-      total += next.value.byteLength;
-      if (total > maxResponseBytes) {
-        await reader.cancel();
-        return null;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const next = await reader.read();
+        if (next.done) {
+          controller.close();
+          return;
+        }
+        total += next.value.byteLength;
+        if (total > limit) {
+          overflow.value = true;
+          await reader.cancel();
+          controller.error(new Error("request body exceeds limit"));
+          return;
+        }
+        controller.enqueue(next.value);
+      } catch (error) {
+        controller.error(error);
       }
-      chunks.push(next.value);
+    },
+    async cancel(reason) {
+      await reader.cancel(reason);
     }
-  } catch {
-    await reader.cancel().catch(() => undefined);
-    return null;
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes.buffer;
+  });
 }
 
 export async function apiJSONWithResponse<T>(
@@ -143,7 +162,7 @@ export async function currentUser(event: Pick<RequestEvent, "request">): Promise
   return envelope?.success && envelope.data ? envelope.data : null;
 }
 
-function parseSetCookie(value: string): { name: string; value: string; options: Parameters<import("@sveltejs/kit").Cookies["set"]>[2] } | null {
+function parseSetCookie(value: string, secure: boolean): { name: string; value: string; options: Parameters<import("@sveltejs/kit").Cookies["set"]>[2] } | null {
   const parts = value.split(";").map((part) => part.trim());
   const first = parts.shift();
   if (!first) return null;
@@ -154,11 +173,10 @@ function parseSetCookie(value: string): { name: string; value: string; options: 
   const options: Parameters<import("@sveltejs/kit").Cookies["set"]>[2] = {
     path: "/",
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure,
     sameSite: "lax"
   };
-  const allowedName = process.env.SESSION_COOKIE_NAME?.trim() || "twilight_session";
-  if (name !== allowedName) return null;
+  if (name !== sessionCookieName()) return null;
   for (const attribute of parts) {
     const [rawKey, ...rawValue] = attribute.split("=");
     const key = rawKey.toLowerCase();
@@ -179,7 +197,7 @@ export function copySetCookies(event: Pick<RequestEvent, "cookies" | "url">, res
     ? response.headers.getSetCookie()
     : (response.headers.get("set-cookie") || "").split(/,(?=[^;,]+=)/g).filter(Boolean);
   for (const value of values) {
-    const parsed = parseSetCookie(value);
+    const parsed = parseSetCookie(value, event.url.protocol === "https:");
     if (parsed) event.cookies.set(parsed.name, parsed.value, parsed.options);
   }
 }
@@ -190,7 +208,7 @@ export async function proxyAPIRequest(event: RequestEvent): Promise<Response> {
     return new Response("Not found", { status: 404 });
   }
   const contentLength = Number(event.request.headers.get("content-length") || 0);
-  if (contentLength > maxResponseBytes) {
+  if (contentLength > maxProxyBodyBytes) {
     return new Response("Payload too large", { status: 413 });
   }
 
@@ -203,12 +221,13 @@ export async function proxyAPIRequest(event: RequestEvent): Promise<Response> {
   headers.delete("authorization");
   headers.delete("x-api-key");
   headers.delete("content-length");
+  const cookie = sessionCookieHeader(event.request.headers.get("cookie"));
+  if (cookie) headers.set("cookie", cookie);
+  else headers.delete("cookie");
 
   const hasBody = !["GET", "HEAD"].includes(event.request.method);
-  const body = hasBody ? await readBoundedRequestBody(event.request) : undefined;
-  if (body === null) {
-    return new Response("Payload too large", { status: 413 });
-  }
+  const overflow = { value: false };
+  const body = hasBody && event.request.body ? limitedStream(event.request.body, maxProxyBodyBytes, overflow) : undefined;
 
   let upstream: Response;
   try {
@@ -216,9 +235,11 @@ export async function proxyAPIRequest(event: RequestEvent): Promise<Response> {
       method: event.request.method,
       headers,
       body,
-      redirect: "manual"
-    });
+      redirect: "manual",
+      ...(body ? { duplex: "half" as const } : {})
+    } as RequestInit & { duplex?: "half" });
   } catch {
+    if (overflow.value) return new Response("Payload too large", { status: 413 });
     return new Response(JSON.stringify({ success: false, code: 503, error_code: "UPSTREAM_UNAVAILABLE", message: "服务暂时不可用" }), {
       status: 503,
       headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }
@@ -231,7 +252,18 @@ export async function proxyAPIRequest(event: RequestEvent): Promise<Response> {
     if (!blocked.has(name.toLowerCase()) && name.toLowerCase() !== "set-cookie") responseHeaders.append(name, value);
   }
   const setCookies = typeof upstream.headers.getSetCookie === "function" ? upstream.headers.getSetCookie() : [];
-  for (const value of setCookies) responseHeaders.append("set-cookie", value);
+  for (const value of setCookies) {
+    const parsed = parseSetCookie(value, event.url.protocol === "https:");
+    if (!parsed) continue;
+    const cookieParts = [`${parsed.name}=${parsed.value}`];
+    if (parsed.options.path) cookieParts.push(`Path=${parsed.options.path}`);
+    if (parsed.options.maxAge !== undefined) cookieParts.push(`Max-Age=${parsed.options.maxAge}`);
+    cookieParts.push("HttpOnly");
+    if (parsed.options.secure) cookieParts.push("Secure");
+    if (parsed.options.sameSite) cookieParts.push(`SameSite=${String(parsed.options.sameSite).replace(/^./, (c) => c.toUpperCase())}`);
+    responseHeaders.append("set-cookie", cookieParts.join("; "));
+  }
   if (!responseHeaders.has("cache-control")) responseHeaders.set("cache-control", "no-store");
-  return new Response(upstream.body, { status: upstream.status, statusText: upstream.statusText, headers: responseHeaders });
+  const responseBody = upstream.body ? limitedStream(upstream.body, maxProxyBodyBytes, { value: false }) : null;
+  return new Response(responseBody, { status: upstream.status, statusText: upstream.statusText, headers: responseHeaders });
 }
