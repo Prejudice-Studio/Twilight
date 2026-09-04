@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from "$lib/i18n";
-  import { mediaPoster, mediaStatusLabel, mediaTitle, safeExternalURL, safeImageURL } from "$lib/media";
+  import { mediaPoster, mediaTitle, safeExternalURL, safeImageURL } from "$lib/media";
   import type { MediaDetail, MediaItem, MediaRequest } from "$lib/types";
   import type { PageData } from "./$types";
 
@@ -40,6 +40,18 @@
   function mediaTypeLabel(item: MediaItem | MediaDetail): string {
     if (item.source === "bangumi") return t.mediaBangumi;
     return item.media_type === "tv" ? t.mediaTV : t.mediaMovie;
+  }
+
+  function statusLabel(status: string): string {
+    switch (status.toLowerCase()) {
+      case "unhandled":
+      case "pending": return t.mediaRequestStatusUnhandled;
+      case "accepted": return t.mediaRequestStatusAccepted;
+      case "downloading": return t.mediaRequestStatusDownloading;
+      case "rejected": return t.mediaRequestStatusRejected;
+      case "completed": return t.mediaRequestStatusCompleted;
+      default: return status;
+    }
   }
 
   function sourceLabel(source: string): string {
@@ -131,7 +143,7 @@
             <article class="request-row">
               {#if poster(request)}<img class="request-poster" src={poster(request)} alt={t.mediaPosterAlt.replace("{title}", title(request))} loading="lazy" />{:else}<div class="poster-fallback small">{t.mediaNoPoster}</div>{/if}
               <div class="request-body">
-                <div class="request-head"><div><h3>{title(request)}</h3><p class="meta">{sourceLabel(request.source)} #{request.media_id}{request.season ? ` · ${t.mediaSeason.replace("{season}", String(request.season))}` : ""}</p></div><span class="status" data-status={request.status}>{mediaStatusLabel(request.status)}</span></div>
+                <div class="request-head"><div><h3>{title(request)}</h3><p class="meta">{sourceLabel(request.source)} #{request.media_id}{request.season ? ` · ${t.mediaSeason.replace("{season}", String(request.season))}` : ""}</p></div><span class="status" data-status={request.status}>{statusLabel(request.status)}</span></div>
                 {#if request.note}<p class="request-note">{request.note}</p>{/if}
                 {#if request.admin_note}<p class="admin-note">{t.mediaRequestAdminNote.replace("{note}", request.admin_note)}</p>{/if}
                 <div class="request-foot"><small>{t.mediaRequestCreatedAt.replace("{date}", dateLabel(request.timestamp))}</small><code>{request.require_key}</code><button class="link-button" type="button" onclick={() => copyKey(request.require_key)}>{t.mediaCopyKey}</button><form method="POST" action="?/deleteRequest" onsubmit={(event) => { if (!confirm(t.mediaRequestDeleteConfirm)) event.preventDefault(); }}><input type="hidden" name="require_key" value={request.require_key} /><button class="danger-link" type="submit">{t.mediaRequestDelete}</button></form></div>

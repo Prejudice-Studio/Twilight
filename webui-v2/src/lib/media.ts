@@ -33,18 +33,6 @@ export function mediaTitle(item: MediaItem | MediaRequest): string {
   return item.title || "";
 }
 
-export function mediaStatusLabel(status: string): string {
-  switch (status.toLowerCase()) {
-    case "unhandled":
-    case "pending": return "待处理";
-    case "accepted": return "已接受";
-    case "downloading": return "正在下载";
-    case "rejected": return "已拒绝";
-    case "completed": return "已完成";
-    default: return status;
-  }
-}
-
 export function mediaID(item: MediaItem | MediaDetail): string {
   return `${item.source}:${item.id}:${item.media_type}`;
 }
