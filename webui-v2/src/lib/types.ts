@@ -170,6 +170,87 @@ export interface RegisterResponse {
   email_verification_sent?: string;
 }
 
+export interface InviteConfig {
+  enabled: boolean;
+  max_depth: number;
+  invite_limit: number;
+  invite_root_user_limit: number;
+  require_emby: boolean;
+  default_days: number;
+  code_format?: string;
+  permanent_invite_max_days?: number;
+}
+
+export interface InviteCodeItem {
+  code: string;
+  inviter_uid: number;
+  inviter_username?: string;
+  days: number;
+  use_count_limit: number;
+  use_count: number;
+  expires_at?: number | null;
+  active: boolean;
+  created_at: number;
+  used_by_uid?: number | null;
+  used_by_username?: string;
+  used_at?: number | null;
+  note?: string | null;
+  target_username?: string;
+  target_uid?: number;
+}
+
+export interface InviteTreeNode {
+  uid: number;
+  username: string;
+  active: boolean;
+  has_emby: boolean;
+  emby_disabled?: boolean;
+  expired_at?: number | null;
+  expire_status?: string;
+  emby_expired?: boolean;
+  can_delete_emby_and_detach?: boolean;
+  depth: number;
+  children?: InviteTreeNode[];
+}
+
+export interface InviteChild {
+  uid: number;
+  username: string;
+  active: boolean;
+  has_emby: boolean;
+  emby_disabled?: boolean;
+  expired_at?: number | null;
+  expire_status?: string;
+  emby_expired?: boolean;
+  can_generate_renew_code?: boolean;
+  can_delete_emby_and_detach?: boolean;
+}
+
+export interface InviteStatus {
+  enabled: boolean;
+  is_root: boolean;
+  parent: { uid: number; username: string } | null;
+  children: InviteChild[];
+  tree?: {
+    self: InviteTreeNode;
+    descendants: InviteTreeNode[];
+    descendant_count: number;
+  };
+  depth: number;
+  max_depth: number;
+  can_invite: boolean;
+  invite_block_reason?: string;
+  max_code_days?: number;
+  max_code_days_reason?: string;
+  codes: InviteCodeItem[];
+  total: number;
+}
+
+export interface V2InviteSummary {
+  config: InviteConfig;
+  invite: InviteStatus;
+}
+
 export type TicketStatus = "open" | "in_progress" | "resolved" | "closed";
 export type TicketPriority = "low" | "medium" | "high" | "urgent";
 

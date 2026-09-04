@@ -14,7 +14,7 @@
 - 响应统一为 JSON 信封（envelope），结构见下文 [2.4 响应结构](#24-响应结构)。
 - 变更接口时需同步更新 [API 路由索引](../reference/api-index.md)；若接口有请求体、响应体、限流或安全注意事项，还需更新本文对应章节。
 
-V2 基础协议目前提供 `GET /api/v2/system/health`、`GET /api/v2/system/capabilities`、受保护的 `GET /api/v2/dashboard/summary` 和 `GET /api/v2/signin/summary`。它们沿用统一 JSON envelope；仪表盘摘要一次返回当前用户、公开能力和在线人数状态。Emby 读取失败时只将 `data.viewers.available` 设为 `false`，本地用户和能力数据仍然返回，不把故障伪装为零人在线。签到摘要一次返回 `summary`、`config` 和最近 30 条 `history`，不改变 `/api/v1/signin` 写入状态机。未迁移调用继续使用 `/api/v1`。
+V2 基础协议目前提供 `GET /api/v2/system/health`、`GET /api/v2/system/capabilities`、受保护的 `GET /api/v2/dashboard/summary`、`GET /api/v2/signin/summary` 和 `GET /api/v2/invite/summary`。它们沿用统一 JSON envelope；仪表盘摘要一次返回当前用户、公开能力和在线人数状态。Emby 读取失败时只将 `data.viewers.available` 设为 `false`，本地用户和能力数据仍然返回，不把故障伪装为零人在线。签到摘要一次返回 `summary`、`config` 和最近 30 条 `history`；邀请摘要一次返回 `config` 与会话作用域的 `invite` 投影，不改变 `/api/v1` 写入状态机。未迁移调用继续使用 `/api/v1`。
 
 ### 1.1 文档分工
 

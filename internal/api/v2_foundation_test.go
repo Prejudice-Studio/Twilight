@@ -106,3 +106,38 @@ func TestV2SigninSummaryUsesOneBoundedPagePayload(t *testing.T) {
 		}
 	}
 }
+
+func TestV2InviteSummaryAggregatesConfigAndUserProjection(t *testing.T) {
+	app := newTestApp(t)
+	cookies := registerAndLogin(t, app, "invite-summary-user", "InviteSummary123456")
+	app.cfg().InviteEnabled = true
+	app.cfg().InviteDefaultDays = 14
+	app.cfg().InviteCodeFormat = "INV-{random}"
+
+	resp := doJSON(app, http.MethodGet, "/api/v2/invite/summary", "", cookies)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("invite summary status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var env envelope
+	if err := json.Unmarshal(resp.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode invite summary: %v", err)
+	}
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("invite summary data type=%T", env.Data)
+	}
+	configData, ok := data["config"].(map[string]any)
+	if !ok || configData["enabled"] != true {
+		t.Fatalf("invite summary missing config: %v", data["config"])
+	}
+	inviteData, ok := data["invite"].(map[string]any)
+	if !ok {
+		t.Fatalf("invite summary missing invite projection: %v", data["invite"])
+	}
+	if _, ok := inviteData["children"]; !ok {
+		t.Fatalf("invite summary missing children: %v", inviteData)
+	}
+	if strings.Contains(resp.Body.String(), "InviteSummary123456") {
+		t.Fatalf("invite summary leaked password-like test value")
+	}
+}

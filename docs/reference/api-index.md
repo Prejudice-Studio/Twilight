@@ -41,6 +41,7 @@ V2 基础协议入口使用 `/api/v2`，当前只提供不带秘密的能力协�
 | GET | `/api/v2/system/capabilities` | Public | 返回 V2 版本、兼容版本、公开 feature 和受限上传额度 |
 | GET | `/api/v2/dashboard/summary` | User | 聚合当前用户、公开能力和在线人数摘要；Emby 失败时通过 `viewers.available=false` 独立降级 |
 | GET | `/api/v2/signin/summary` | User | 聚合签到摘要、公开奖励规则和最近 30 条记录；写操作仍使用 `/api/v1/signin*` |
+| GET | `/api/v2/invite/summary` | User | 聚合邀请配置、当前关系、直属下级、邀请树和本人邀请码；写操作仍由服务端 form action 转发至 `/api/v1/invite*` |
 
 V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/api/v1`，不能由前端自行拼接版本路径。
 
