@@ -485,10 +485,30 @@ export interface TicketSummary {
   closed_at?: number;
 }
 
+export interface AdminTicketSummary extends TicketSummary {
+  uid: number;
+  username: string;
+  admin_note?: string;
+}
+
+export interface AdminTicketListResponse {
+  tickets: AdminTicketSummary[];
+  total: number;
+  page: number;
+  per_page: number;
+  ticket_types: string[];
+}
+
+export interface AdminTicketDetailResponse {
+  ticket: Ticket;
+  ticket_types: string[];
+}
+
 export interface Ticket extends TicketSummary {
   uid: number;
   username: string;
   content: string;
+  admin_note?: string;
   replies?: TicketReply[];
   attachments?: TicketAttachment[];
 }

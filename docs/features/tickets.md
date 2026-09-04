@@ -21,7 +21,7 @@
 
 管理员元数据更新与聊天回复是两种独立操作：状态、优先级、类型和 `admin_note` 走元数据更新；聊天文字走 `AddTicketReply` 追加。两条路径都不能重建或替换 `replies`，从根源上避免管理员保存表单时覆盖用户追加回复。
 
-管理端工单处理页支持点击单个工单进入会话式详情页。详情页通过 `GET /admin/tickets/{ticket_id}` 读取完整对话，通过 `POST /admin/tickets/{ticket_id}/reply` 单独追加管理员文字回复；粘贴图片仍复用 `/tickets/{ticket_id}/images`，受全局工单图片大小和数量限制。
+管理端工单处理页支持点击单个工单进入会话式详情页。详情页通过 `GET /admin/tickets/{ticket_id}` 读取完整对话，通过 `POST /admin/tickets/{ticket_id}/reply` 单独追加管理员文字回复；图片上传、预览和删除复用 `/tickets/{ticket_id}/images`，受全局工单图片大小和数量限制。V1 支持粘贴图片，V2 SSR 页面使用同源 multipart 表单上传，后端规则不变。
 
 管理端工单列表默认只返回 `open` / `in_progress`，用于聚焦待处理队列。需要查看历史归档时，前端和外部调用方应显式传 `all=1`；后端同时兼容 `status=all`，两者都会返回 `resolved` / `closed` 等全部状态。
 

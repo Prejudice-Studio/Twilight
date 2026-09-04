@@ -53,6 +53,7 @@ Update docs in the same change when behavior changes.
 - `webui-v2/src/routes/(app)/media`: Media search, detail, Emby inventory checks, and user request actions through SSR.
 - `webui-v2/src/routes/(app)/admin/status`: Admin-only SSR server status, independent health probes, and bounded runtime summaries.
 - `webui-v2/src/routes/(app)/admin/users`: Admin-only SSR user list, server-side filters, grouped account actions, and bounded mobile-safe rendering.
+- `webui-v2/src/routes/(app)/admin/tickets`: Admin-only SSR ticket queue, summary pagination, conversation details, metadata actions, and bounded attachment handling.
 - `webui-v2/src/lib/server`: V2 server-only API proxy, bounded response parsing, and session forwarding.
 - `webui/src/lib/api-request.ts`: low-level request wrapper, credentials, timeout, and `ApiError`.
 - `webui/src/lib/api.ts`: frontend API client. New backend routes usually need matching client methods and `api-types.ts` types.
@@ -72,6 +73,7 @@ Update docs in the same change when behavior changes.
 | Registration codes | `regcode_handlers.go`, `code_use_handlers.go` | `RegCode` | `/admin/regcodes/*`, `/users/me/use-code` | `admin/regcodes` | `regcodes.md` |
 | Invite tree | `invite_handlers.go`, `invite_admin_handlers.go` | invite codes and relations | `/invite/*`, `/admin/invite/*` | `invite`, `admin/invite` | `invite.md` |
 | Media requests | `media_request_handlers.go`, `media_service.go` | `MediaRequest` | `/media/*` | `media`, `admin/requests` | `backend-api.md` |
+| Tickets | `ticket_handlers.go` | `Ticket`, replies, attachments | `/tickets/*`, `/admin/tickets/*` | `tickets`, `admin/tickets` | `tickets.md`, `backend-api.md` |
 | Sign-in/score | `signin_handlers.go` | `signin.go` | `/signin/*` | `score` | `backend-api.md` |
 | Announcements | `announcement_handlers.go` | `Announcement` | `/announcements`, `/admin/announcements/*` | announcement board | `announcements.md` |
 | Bangumi | `bangumi*.go` | Bangumi caches/logs | `/bangumi/*`, `/admin/bangumi/*` | `bangumi/*` | `bangumi.md` |
