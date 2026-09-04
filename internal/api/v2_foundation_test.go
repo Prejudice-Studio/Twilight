@@ -80,3 +80,29 @@ func TestV2DashboardSummaryKeepsLocalDataWhenEmbyUnavailable(t *testing.T) {
 		t.Fatalf("expected unavailable viewers state, got %v", data["viewers"])
 	}
 }
+
+func TestV2SigninSummaryUsesOneBoundedPagePayload(t *testing.T) {
+	app := newTestApp(t)
+	cookies := registerAndLogin(t, app, "signin-user", "Signin123456")
+	app.cfg().SigninRenewalEnabled = true
+	app.cfg().SigninRenewalCost = 2
+	app.cfg().SigninRenewalDays = 7
+
+	resp := doJSON(app, http.MethodGet, "/api/v2/signin/summary", "", cookies)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("signin summary status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var env envelope
+	if err := json.Unmarshal(resp.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode signin summary: %v", err)
+	}
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("signin summary data type=%T", env.Data)
+	}
+	for _, key := range []string{"summary", "config", "history"} {
+		if _, ok := data[key]; !ok {
+			t.Fatalf("signin summary missing %q: %v", key, data)
+		}
+	}
+}

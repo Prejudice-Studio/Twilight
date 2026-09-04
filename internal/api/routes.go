@@ -9,6 +9,7 @@ func (a *App) registerRoutes() {
 	a.add(http.MethodGet, "/api/v2/system/health", AuthPublic, a.handleV2Health)
 	a.add(http.MethodGet, "/api/v2/system/capabilities", AuthPublic, a.handleV2Capabilities)
 	a.add(http.MethodGet, "/api/v2/dashboard/summary", AuthUser, a.handleV2DashboardSummary)
+	a.add(http.MethodGet, "/api/v2/signin/summary", AuthUser, a.handleV2SigninSummary)
 	a.add(http.MethodGet, "/api/v1/setup/status", AuthPublic, a.handleSetupStatus)
 	a.add(http.MethodPost, "/api/v1/setup/complete", AuthPublic, a.handleSetupComplete)
 

@@ -18,6 +18,7 @@
       <nav aria-label="主导航">
         <a href="/dashboard">{t.dashboard}</a>
         <a href="/announcements">{t.announcements}</a>
+        <a href="/score">{t.signin}</a>
         <a href="/tickets">{t.tickets}</a>
         <a href="/settings">{t.settings}</a>
         <form method="POST" action="/logout">

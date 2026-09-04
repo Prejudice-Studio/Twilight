@@ -43,6 +43,61 @@ export interface DashboardSummary {
   };
 }
 
+export interface SigninRenewal {
+  enabled: boolean;
+  cost: number;
+  days: number;
+  affordable?: boolean;
+  auto_renewal_enabled?: boolean;
+  auto_renewal_user_enabled?: boolean;
+  auto_renewal_available?: boolean;
+}
+
+export interface SigninSummary {
+  enabled: boolean;
+  currency_name: string;
+  current_points: number;
+  current_streak: number;
+  longest_streak: number;
+  total_points: number;
+  last_signin_date: string | null;
+  today_signed: boolean;
+  next_bonus_in_days: number | null;
+  next_bonus_points: number | null;
+  renewal?: SigninRenewal;
+}
+
+export interface SigninBonusRule {
+  streak_days: number;
+  bonus_points: number;
+}
+
+export interface SigninPublicConfig {
+  enabled: boolean;
+  currency_name: string;
+  daily_min: number;
+  daily_max: number;
+  streak_bonus_enabled: boolean;
+  bonus_table: SigninBonusRule[];
+  reset_after_miss: boolean;
+  renewal?: SigninRenewal;
+}
+
+export interface SigninHistoryRecord {
+  date: string;
+  daily_points: number;
+  bonus_points: number;
+  total: number;
+  streak: number;
+  created_at: number;
+}
+
+export interface SigninPageData {
+  summary: SigninSummary;
+  config: SigninPublicConfig;
+  history: SigninHistoryRecord[];
+}
+
 export interface EmailCodeSent {
   verification_id: string;
   email: string;
