@@ -24,6 +24,7 @@ Twilight 是一个 Go 后端 + Web 管理前端的 Emby / Jellyfin 用户管理�
 - 后端：Go，入口为 `cmd/twilight`，部署目标为 Linux + systemd，也支持 Docker。
 - V1 前端：Next.js App Router、TypeScript、Tailwind CSS、Radix/shadcn 风格组件。
 - V2 前端：SvelteKit SSR + adapter-node，首屏数据和写操作默认在服务端边界处理；迁移完成前 V1 仍保留作为回退。
+- V2 用户端已迁移认证、设置、仪表盘、公告、签到、邀请、工单、Bangumi 和求片中心；求片搜索、详情与库存检查使用 SSR，求片写入使用服务端 form action。管理员后台继续按模块迁移，V1 保持可回退。
 - 存储：唯一运行后端为 PostgreSQL；主要业务状态保存在 `twilight_state` 单行 JSONB，操作审计、运行日志、会话、播放记录、Telegram 花名册与轮询游标使用独立表以降低高频写放大和常驻内存。JSON 仅用于备份导出和旧数据导入。
 - 配置：统一读取 `config.toml`、`config.local.toml` 与 `TWILIGHT_*` 环境变量覆盖。
 

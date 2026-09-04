@@ -2,6 +2,8 @@
 
 求片系统用于搜索 TMDB / Bangumi 条目、检查 Emby 库存、提交用户请求、管理员审核，以及外部下载系统回写处理状态。
 
+V2 用户端入口为 `webui-v2/src/routes/(app)/media`，采用 SvelteKit SSR。V1 `webui/src/app/(main)/media` 在 V2 迁移完成前继续保留作为回退实现。
+
 ## 搜索与详情
 
 - 名称搜索选择“全部来源”时，后端并行请求 TMDB 与 Bangumi，再按来源交错合并到 `limit`。这样单一来源结果较多时不会把另一来源全部截掉，聚合搜索耗时也由两路串行之和降低为较慢一路的耗时。

@@ -333,6 +333,79 @@ export interface BangumiCollectionPage {
   cache_updated_at?: number | null;
 }
 
+export interface MediaItem {
+  id: number;
+  title: string;
+  original_title?: string;
+  overview?: string;
+  poster?: string;
+  poster_url?: string;
+  year?: number | string | null;
+  release_date?: string;
+  source: string;
+  source_url?: string;
+  media_type: string;
+  rating?: number;
+  vote_average?: number;
+  media_type_label?: string;
+  logo?: string;
+  logo_url?: string;
+  logo_language?: "zh" | "ja" | "en" | string;
+}
+
+export interface MediaDetail extends MediaItem {
+  backdrop?: string;
+  backdrop_url?: string;
+  genres?: string[];
+  runtime?: number;
+  seasons?: number;
+  episodes?: number;
+  volumes?: number;
+  status?: string;
+  end_date?: string;
+  tagline?: string;
+  platform?: string;
+  broadcast?: string;
+  official_url?: string;
+  trailer_url?: string;
+  rank?: number;
+  vote_count?: number;
+  countries?: string[];
+  languages?: string[];
+  aliases?: string[];
+  creators?: string[];
+  studios?: string[];
+  cast?: string[];
+  extra?: Record<string, unknown>;
+}
+
+export interface InventoryCheckResult {
+  exists: boolean;
+  message: string;
+  media_item?: { id: string; name: string; year?: number };
+  item?: { id: string; name: string; year?: number };
+  seasons_available?: number[];
+  season_requested?: number | null;
+}
+
+export interface MediaRequest {
+  id: number;
+  revision: number;
+  source: string;
+  media_id: number | string;
+  status: string;
+  timestamp: number;
+  updated_at?: number;
+  title: string;
+  original_title?: string;
+  media_type: string;
+  season?: number;
+  require_key: string;
+  media_info?: Record<string, unknown>;
+  admin_note?: string;
+  note?: string;
+}
+
 export type TicketStatus = "open" | "in_progress" | "resolved" | "closed";
 export type TicketPriority = "low" | "medium" | "high" | "urgent";
 
