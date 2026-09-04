@@ -251,6 +251,88 @@ export interface V2InviteSummary {
   invite: InviteStatus;
 }
 
+export interface BangumiSyncLog {
+  id: number;
+  uid: number;
+  record_item_id: string;
+  subject_id?: string;
+  subject_name?: string;
+  episode?: number;
+  status: string;
+  message?: string;
+  created_at: number;
+}
+
+export interface BangumiSubject {
+  id?: string;
+  name?: string;
+  name_cn?: string;
+  summary?: string;
+  date?: string;
+  platform?: string;
+  eps?: number;
+  volumes?: number;
+  images?: Record<string, string>;
+  rating?: { score?: number; rank?: number; total?: number };
+  tags?: string[];
+}
+
+export interface BangumiCollectionEntry {
+  subject_id: number;
+  type: number;
+  ep_status: number;
+  rate: number;
+  updated_at: number;
+  collection_type?: number;
+  subject?: BangumiSubject;
+}
+
+export interface BangumiCollectionPreview {
+  entries: BangumiCollectionEntry[];
+  total: number;
+  cached: boolean;
+  cache_updated_at?: number;
+}
+
+export interface BangumiAccount {
+  id?: number;
+  username?: string;
+  nickname?: string;
+  sign?: string;
+  avatar?: Record<string, string>;
+  expired?: boolean;
+}
+
+export interface BangumiStatus {
+  sync_enabled: boolean;
+  manage_enabled: boolean;
+  bgm_mode: boolean;
+  bgm_manage_mode: boolean;
+  token_set: boolean;
+  sync_ready: boolean;
+  total_records: number;
+  synced_count: number;
+  recent_logs: BangumiSyncLog[];
+}
+
+export interface BangumiSummary {
+  status: BangumiStatus;
+  account?: BangumiAccount;
+  collections?: Record<string, BangumiCollectionPreview>;
+  recent_activity?: BangumiCollectionEntry[];
+  account_error?: boolean;
+  collections_partial?: boolean;
+}
+
+export interface BangumiCollectionPage {
+  entries: BangumiCollectionEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+  cached: boolean;
+  cache_updated_at?: number | null;
+}
+
 export type TicketStatus = "open" | "in_progress" | "resolved" | "closed";
 export type TicketPriority = "low" | "medium" | "high" | "urgent";
 

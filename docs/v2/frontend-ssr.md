@@ -31,6 +31,7 @@ webui-v2/
       (app)/score/            # 签到、积分续期和签到历史
       (app)/invite/           # 邀请摘要、邀请码和直属下级维护
       (app)/tickets/          # 用户工单摘要和会话
+      (app)/bangumi/          # Bangumi 账号摘要、同步和收藏分页
       api/[...path]/          # 仅 v1/v2 的同源 API 代理
 ```
 
@@ -103,3 +104,9 @@ Telegram 注册绑定码生成使用独立的 `createBindCode` form action；启
 - 邀请系统关闭时页面保留历史关系和清理入口，但新邀请码按钮由摘要状态禁用；最终是否允许生成、续期或清理仍由 Go handler、关系归属和 Store 原子操作判断。
 - 本人断开只在后端确认存在邀请上级且 Emby 已到期、Emby 已禁用或 Web 已禁用且仍绑定 Emby 时可用；执行会删除远端 Emby、清空本地绑定和待开通状态，并清理旧邀请码占用，Web 账号不会被删除。
 - 页面没有轮询；刷新通过普通 GET 重新获取 no-store 摘要，续期码只在当前 action 结果中展示。树和下级列表允许换行，窄 Firefox 视口下操作组会堆叠。
+
+## 已迁移模块：Bangumi 用户端
+
+`/(app)/bangumi` 使用受保护的 `/api/v2/bangumi/summary` 生成首屏。摘要由 Go 后端一次返回本地同步状态、Bangumi 公开账号字段、五类收藏的数量和有限预览；收藏预览在后端并行读取并分别降级，某一类上游失败不会清空同步状态或其他分类。Token 仅在服务端向 Bangumi 发起请求时使用，既不写入 V2 envelope，也不进入浏览器脚本。
+
+`/(app)/bangumi/collections/[type]` 使用服务端 `load` 读取当前分类的受限分页，状态修改、同步、清理历史和 Token/开关设置使用 form action 转发至现有 Go handler。收藏页不加载五类完整集合，不在浏览器端复制用户收藏数据库；分页、标签展示和收藏状态最终以 Bangumi 响应及后端权限为准。页面使用响应式单列/多列布局、有限滚动和原生表单降级，刷新由用户主动触发。

@@ -15,8 +15,10 @@
 | 同步日志与收藏缓存存储（`BangumiSyncLog` / `BangumiCollectionCache` / `BangumiSubjectCache`） | `internal/store/store.go` |
 | 配置项解析 | `internal/config/config.go` |
 | 用户级 `bgm_mode` / `bgm_token` 处理 | `internal/api/handlers.go` |
+| V2 用户端摘要接口 | `internal/api/bangumi_v2.go` (`GET /api/v2/bangumi/summary`) |
 | 用户端 Bangumi 仪表盘页面 | `webui/src/app/(main)/bangumi/page.tsx` |
 | 用户端 Bangumi 收藏分页页面 | `webui/src/app/(main)/bangumi/collections/[type]/page.tsx` |
+| V2 用户端 Bangumi 页面 | `webui-v2/src/routes/(app)/bangumi/` |
 | 管理员 Bangumi 管理页面 | `webui/src/app/(main)/admin/bangumi/page.tsx` |
 | 前端 API 客户端 | `webui/src/lib/api.ts` |
 | 前端类型定义 | `webui/src/lib/api-types.ts` |
@@ -399,6 +401,12 @@ Webhook 期望接收 JSON 通知。后端从负载中按以下规则解析：
 - 旧版 state 如果已经存了“用户缓存内嵌 subject”的条目，`State.ensure()` 会在加载时迁移到全局作品缓存，后续保存会落成新结构。
 
 ## 前端页面
+
+### V2 SSR 用户端
+
+V2 SvelteKit 页面位于 `/bangumi` 和 `/bangumi/collections/[type]`。仪表盘首屏只请求一次 `/api/v2/bangumi/summary`，由后端返回本地同步状态、公开 Bangumi 账号字段、五个收藏分类的总数和每类最多 8 条预览。收藏页按分类服务端分页，并通过普通 GET 主动刷新缓存；同步、清理历史、Token 和开关修改均由 SvelteKit form action 转发到既有 Go handler。
+
+V2 响应不会包含 Bangumi Token。收藏分类在后端独立读取，单类失败只标记 `collections_partial`，不影响其他分类和本地同步状态。页面不轮询，不把完整收藏列表复制到浏览器；V1 页面在迁移完成前继续保留。
 
 ### 用户端：Bangumi 仪表盘
 
