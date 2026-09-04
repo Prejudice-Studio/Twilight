@@ -74,7 +74,32 @@ export const messages = {
     actionFailed: "操作失败，请稍后重试",
     passwordMismatch: "两次输入的新密码不一致",
     passwordRequired: "请填写密码",
-    settingsLoadFailed: "设置暂时无法读取，请刷新后重试"
+    settingsLoadFailed: "设置暂时无法读取，请刷新后重试",
+    register: "注册",
+    registerIntro: "创建 Twilight Web 账号",
+    registerHint: "注册资格、邮箱和 Telegram 绑定状态由服务器最终校验。",
+    registerUnavailable: "当前暂不允许注册",
+    registerUnavailableHelp: "请联系管理员或稍后再试。",
+    registerCode: "注册码",
+    registerCodeHelp: "如果系统要求注册码，请填写管理员提供的注册码。",
+    telegramBindCode: "Telegram 注册绑定码",
+    telegramBindCodeHelp: "可选。先通过 Telegram Bot 获取并确认绑定码，提交时服务器会再次校验。",
+    getTelegramBindCode: "获取绑定码",
+    telegramBindCodeCreated: "绑定码已生成",
+    telegramBindCodeCreatedHelp: "请在 Telegram Bot 中完成绑定后再提交注册。",
+    registerSubmit: "创建账号",
+    alreadyHaveAccount: "已有账号？返回登录",
+    registerSuccess: "注册成功，请登录",
+    registerEmailOptional: "邮箱（可选）",
+    registerConfirmPassword: "确认密码",
+    registerPasswordHelp: "密码强度由服务器校验，建议使用至少 12 位的复杂密码。",
+    registerFailed: "注册失败，请检查填写内容后重试",
+    registerAvailability: "当前用户数",
+    registerQuotaUnlimited: "{current} 个用户",
+    registerQuota: "{current} / {max} 个用户",
+    telegramRequired: "Telegram 绑定为必需项。",
+    bindCodeUnavailable: "绑定码暂时无法生成，请稍后重试",
+    bindCodeReady: "绑定码已生成，请在 Telegram Bot 中完成绑定后再提交注册。"
   }
 } as const;
 

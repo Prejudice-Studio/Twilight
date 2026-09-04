@@ -3,9 +3,9 @@ import { apiJSONWithResponse, copySetCookies } from "$lib/server/api";
 import type { Actions, PageServerLoad } from "./$types";
 import type { LoginPayload, UserInfo } from "$lib/types";
 
-export const load: PageServerLoad = ({ locals }) => {
+export const load: PageServerLoad = ({ locals, url }) => {
   if (locals.user) throw redirect(303, "/dashboard");
-  return {};
+  return { registered: url.searchParams.get("registered") === "1" };
 };
 
 export const actions: Actions = {

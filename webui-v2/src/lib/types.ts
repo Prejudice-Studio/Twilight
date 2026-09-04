@@ -87,3 +87,33 @@ export interface LoginPayload {
   username: string;
   password: string;
 }
+
+export interface RegisterAvailability {
+  enabled?: boolean;
+  can_register?: boolean;
+  requires_reg_code?: boolean;
+  available: boolean;
+  message: string;
+  current_users: number;
+  max_users: number;
+  allow_pending_register?: boolean;
+}
+
+export interface RegisterResponse {
+  user?: UserInfo;
+  first_admin?: boolean;
+  reg_code_used?: string;
+  email_verification_sent?: string;
+}
+
+export interface SystemInfo {
+  name?: string;
+  version?: string;
+  features?: Record<string, boolean>;
+  telegram_bot?: {
+    username?: string | null;
+    url?: string | null;
+    enabled?: boolean;
+    configured?: boolean;
+  };
+}
