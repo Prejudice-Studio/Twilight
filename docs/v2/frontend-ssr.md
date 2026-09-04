@@ -26,6 +26,9 @@ webui-v2/
       login/                  # 登录 form action
       logout/                # 登出 server endpoint
       (app)/dashboard/        # 首个已迁移的仪表盘摘要
+      (app)/announcements/    # 公告和强制阅读确认
+      (app)/settings/         # 个人设置与账号绑定
+      (app)/tickets/          # 用户工单摘要和会话
       api/[...path]/          # 仅 v1/v2 的同源 API 代理
 ```
 
@@ -74,3 +77,9 @@ Telegram 注册绑定码生成使用独立的 `createBindCode` form action；启
 `/(app)/tickets` 直接使用后端的工单摘要分页和单条详情契约。SSR `load` 只请求当前页摘要；只有 URL 中存在 `ticket` 编号时才读取该工单的正文、回复时间线和附件。创建、回复、关闭、重开和 Telegram 通知切换均为服务端 form action，成功后使用 303 回到列表或当前会话，失败只回传通用页面错误与后端业务消息。
 
 页面桌面端使用列表/会话双栏，移动端切为单列；列表和会话各自拥有 `overflow`、`overscroll-behavior` 和 Firefox 可见滚动条。用户侧详情仍由 Go 后端执行归属校验，V2 不依据隐藏按钮决定是否可操作，也不会把管理员内部备注渲染进用户会话。
+
+## 已迁移模块：公告
+
+`/(app)/announcements` 在服务端读取 `/users/me/announcements`，首屏同时包含可见公告和当前账号尚未确认的强制阅读公告，不在浏览器端重复请求公告列表。公告正文以 Svelte 文本节点输出，保持字符转义，不复刻 V1 的富文本渲染路径；需要确认的公告通过 `acknowledge` form action 调用后端批量确认接口，并使用去重后的正整数 ID。
+
+公告列表按级别使用低饱和语义颜色区分，列表在桌面分为两列，在窄 Firefox 视口收为单列。长标题和正文允许换行，页面不使用无限滚动或定时刷新；用户需要新数据时使用浏览器原生刷新，避免公告页产生持续网络开支。

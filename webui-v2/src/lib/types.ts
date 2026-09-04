@@ -161,3 +161,27 @@ export interface SystemInfo {
     configured?: boolean;
   };
 }
+
+export type AnnouncementLevel = "info" | "notice" | "warning" | "critical";
+
+export interface Announcement {
+  id: number;
+  title: string | null;
+  content: string;
+  level: AnnouncementLevel;
+  render_mode?: "plain" | "markdown" | "bbcode";
+  pinned: boolean;
+  visible: boolean;
+  force_read?: boolean;
+  force_read_seconds?: number;
+  expires_at: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface UserAnnouncements {
+  announcements: Announcement[];
+  total: number;
+  unseen_force_read: Announcement[];
+  unseen_force_read_ids: number[];
+}

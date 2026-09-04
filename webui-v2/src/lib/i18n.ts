@@ -161,7 +161,26 @@ export const messages = {
     ticketReopenFailed: "重新打开工单失败，请稍后重试",
     ticketNotifyFailed: "通知设置更新失败，请稍后重试",
     ticketReplyEmpty: "请填写回复内容",
-    ticketCreatedDescription: "提交后，管理员会在同一条会话中处理。"
+    ticketCreatedDescription: "提交后，管理员会在同一条会话中处理。",
+    announcements: "公告",
+    announcementsIntro: "查看管理员发布的通知和服务变更。",
+    requiredAnnouncements: "需要确认的公告",
+    requiredAnnouncementsHelp: "请阅读以下内容后确认，确认状态会保存在当前账号中。",
+    acknowledgeAll: "全部确认",
+    announcementInfo: "信息",
+    announcementNotice: "通知",
+    announcementWarning: "警告",
+    announcementCritical: "重要",
+    announcementDefault: "公告",
+    announcementPinned: "置顶",
+    announcementUpdatedAt: "更新于",
+    announcementExpired: "已过期",
+    noAnnouncements: "暂无公告",
+    noAnnouncementsHelp: "管理员发布公告后会显示在这里",
+    noAnnouncementsToAcknowledge: "没有需要确认的公告",
+    announcementAcknowledgeFailed: "公告确认失败，请稍后重试",
+    announcementAcknowledged: "公告已确认",
+    announcementLoadFailed: "公告暂时无法读取，请刷新后重试"
   }
 } as const;
 
