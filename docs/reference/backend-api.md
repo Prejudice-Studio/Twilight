@@ -1008,7 +1008,7 @@ curl -X GET "http://localhost:5000/api/v1/admin/users?status=active&page=1&per_p
 
 用户列表与用户详情返回的用户对象包含 `admin_action_state`。这是后台用户管理 UI 使用的动作可用性提示字段，当前包括 `has_emby`、`protected_role`、`can_enable_emby`、`can_disable_emby`、`can_grant_registration_entitlement`、`can_clear_registration_queue`、`can_delete` 与 `reasons`。后端仍会在真正执行变更时重新鉴权和校验；前端只应把该字段用于分组展示、禁用按钮和显示原因。
 
-前端保持服务端分页：桌面用户表在受限 Firefox 滚动区域中显示并固定表头，手机和平板使用当前页用户卡片。单用户分组操作菜单与无效账号清理预览使用 `dvh` 视口边界，预览表可横纵滚动，不会因长列表或窄视口遮住确认操作。
+前端保持服务端分页：桌面用户表在受限 Firefox 滚动区域中显示并固定表头，手机和平板使用当前页用户卡片。单用户分组操作菜单与无效账号清理预览使用 `dvh` 视口边界，预览表可横纵滚动，不会因长列表或窄视口遮住确认操作。V2 的 `/(app)/admin/users` 使用同一列表契约，通过服务端 `load` 读取当前页，并以 form action 转发单用户写操作；它不会在浏览器端缓存完整用户库。
 
 V1 服务器状态页的 API、数据库和 Emby 健康检查分别调用 `/system/health/api`、`/system/health/database`、`/system/health/emby`，并与系统信息、统计请求共享一次可取消刷新。V2 `/admin/status` 在服务端使用 `Promise.allSettled` 并行读取同一组独立接口，单个依赖不可用时不会把其他成功结果误报为整体异常；浏览器端仅进行一次 SSR 页面读取，不建立轮询。
 

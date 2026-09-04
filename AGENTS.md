@@ -52,6 +52,7 @@ Update docs in the same change when behavior changes.
 - `webui-v2/src/routes/(app)/bangumi`: Bangumi SSR summary, collection pagination, and form actions.
 - `webui-v2/src/routes/(app)/media`: Media search, detail, Emby inventory checks, and user request actions through SSR.
 - `webui-v2/src/routes/(app)/admin/status`: Admin-only SSR server status, independent health probes, and bounded runtime summaries.
+- `webui-v2/src/routes/(app)/admin/users`: Admin-only SSR user list, server-side filters, grouped account actions, and bounded mobile-safe rendering.
 - `webui-v2/src/lib/server`: V2 server-only API proxy, bounded response parsing, and session forwarding.
 - `webui/src/lib/api-request.ts`: low-level request wrapper, credentials, timeout, and `ApiError`.
 - `webui/src/lib/api.ts`: frontend API client. New backend routes usually need matching client methods and `api-types.ts` types.
@@ -569,6 +570,7 @@ The current V1 implementation remains the behavior and migration source of truth
 - Each independently reviewable module gets its own Chinese commit. Before committing, run focused tests and scan the diff for unrelated changes, debug output, local absolute paths, secrets, tokens, passwords, cookies, and undocumented behavior changes.
 - V2 frontend is a separate SvelteKit SSR application under `webui-v2`; do not replace `webui` or change the production frontend entry until the V1 feature matrix is fully migrated and the cutover has a rollback plan.
 - V2 migrated modules must use server `load` for session-scoped read aggregation and SvelteKit form actions for writes. The migrated settings page is the reference implementation: do not move password, email-verification, binding, or preference decisions into browser-only state.
+- The V2 administrator user page uses server-side pagination and filters against `/api/v1/admin/users`; it must render only the current page, keep account/Emby/identity/dangerous actions grouped, and send every mutation through a server form action. The `admin_action_state` field is display guidance only; Go handlers remain the final authorization boundary.
 - V2 authentication pages must keep registration and Telegram bind-code consumption on server actions. The browser may progressively enhance bind-code generation, but registration must always revalidate availability, password, registration-code use, and confirmed Telegram state through the Go API.
 - The V2 user ticket route is the reference for high-frequency conversations: SSR lists use summary pagination, the selected ticket is loaded by identifier, and reply/status/notification writes use server form actions. Do not reintroduce full-ticket list payloads or client-only ownership checks.
 - The V2 user announcement route uses one SSR read for visible and force-read announcements; acknowledgements use a deduplicated server form action, and announcement content remains escaped text unless a reviewed safe renderer is explicitly migrated.

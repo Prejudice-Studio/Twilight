@@ -12,13 +12,56 @@ export interface UserInfo {
   username: string;
   email?: string;
   email_verified?: boolean;
+  telegram_username?: string;
   role: number;
   role_name?: string;
   active: boolean;
   emby_id?: string;
   emby_username?: string;
+  emby_bound?: boolean;
+  emby_disabled?: boolean;
+  emby_disabled_by_expiry?: boolean;
+  pending_emby?: boolean;
+  pending_emby_days?: number | null;
+  registration_source_name?: string;
+  admin_action_state?: AdminUserActionState;
   telegram_id?: number;
   expired_at?: number;
+}
+
+export interface AdminUserActionState {
+  has_emby: boolean;
+  protected_role: boolean;
+  can_enable_emby: boolean;
+  can_disable_emby: boolean;
+  can_grant_registration_entitlement: boolean;
+  can_clear_registration_queue: boolean;
+  can_delete: boolean;
+  reasons?: Record<string, string>;
+}
+
+export interface AdminUserListResponse {
+  users: UserInfo[];
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+}
+
+export interface AdminUsersPageData {
+  payload: AdminUserListResponse | null;
+  query: {
+    page: number;
+    per_page: number;
+    search: string;
+    role: string;
+    active: string;
+    emby: string;
+    emby_status: string;
+    email_status: string;
+    sort: string;
+  };
+  loadError: string | null;
 }
 
 export interface V2Capabilities {
