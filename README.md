@@ -7,7 +7,8 @@
 面向 Emby / Jellyfin 的用户、邀请、卡码、Bot 与运维管理面板。
 
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
-[![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js&logoColor=white)](https://nextjs.org/)
+[![V1 Next.js](https://img.shields.io/badge/V1%20Next.js-16-black?logo=next.js&logoColor=white)](https://nextjs.org/)
+[![V2 SvelteKit](https://img.shields.io/badge/V2-SvelteKit%20SSR-ff3e00?logo=svelte&logoColor=white)](https://kit.svelte.dev/)
 [![License](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue)](LICENSE)
 
 [文档中心](docs/README.md) · [安装部署](docs/guides/install.md) · [Docker 部署](docs/guides/docker.md) · [Telegram 频道](https://t.me/Twilightpanel) · [Telegram 群组](https://t.me/TwilightPanelChat)
@@ -16,12 +17,13 @@
 
 ## 项目定位
 
-Twilight 是一个 Go 后端 + Next.js 前端的 Emby / Jellyfin 用户管理系统，适合需要注册审核、卡码续期、邀请关系、Telegram Bot 绑定、设备/IP 审查和后台运维能力的媒体服务器站点。
+Twilight 是一个 Go 后端 + Web 管理前端的 Emby / Jellyfin 用户管理系统，适合需要注册审核、卡码续期、邀请关系、Telegram Bot 绑定、设备/IP 审查和后台运维能力的媒体服务器站点。当前 `webui/` 是 V1 Next.js 实现，`webui-v2/` 是正在渐进迁移的 SvelteKit SSR 实现。
 
 当前主线架构：
 
 - 后端：Go，入口为 `cmd/twilight`，部署目标为 Linux + systemd，也支持 Docker。
-- 前端：Next.js App Router、TypeScript、Tailwind CSS、Radix/shadcn 风格组件。
+- V1 前端：Next.js App Router、TypeScript、Tailwind CSS、Radix/shadcn 风格组件。
+- V2 前端：SvelteKit SSR + adapter-node，首屏数据和写操作默认在服务端边界处理；迁移完成前 V1 仍保留作为回退。
 - 存储：唯一运行后端为 PostgreSQL；主要业务状态保存在 `twilight_state` 单行 JSONB，操作审计、运行日志、会话、播放记录、Telegram 花名册与轮询游标使用独立表以降低高频写放大和常驻内存。JSON 仅用于备份导出和旧数据导入。
 - 配置：统一读取 `config.toml`、`config.local.toml` 与 `TWILIGHT_*` 环境变量覆盖。
 

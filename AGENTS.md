@@ -14,7 +14,8 @@ This file applies to the whole repository. Read it before changing code. If a ne
 
 - Twilight is an Emby / Jellyfin user-management panel.
 - Backend: Go module `github.com/prejudice-studio/twilight`, entrypoint `cmd/twilight`.
-- Frontend: `webui/`, Next.js App Router, TypeScript, Tailwind CSS, Radix/shadcn-style components, Zustand, and TanStack Query.
+- V1 frontend: `webui/`, Next.js App Router, TypeScript, Tailwind CSS, Radix/shadcn-style components, Zustand, and TanStack Query.
+- V2 frontend: `webui-v2/`, SvelteKit SSR with `@sveltejs/adapter-node`, server `load` functions and form actions; it must not reuse V1 React/Zustand page state as its runtime architecture.
 - Preferred deployment: Linux + systemd.
 - Current Go source and `docs/guides/development.md` are authoritative. Do not reintroduce old Python backend entrypoints, uvicorn, `requirements.txt`, or historical multi-SQLite migration notes.
 
@@ -47,6 +48,8 @@ Update docs in the same change when behavior changes.
 - `internal/redis`: RESP client for shared sessions and rate limits.
 - `internal/security`: tokens, password hashing, and secure random helpers.
 - `webui/src/app`: Next.js App Router pages.
+- `webui-v2/src/routes`: V2 SSR routes, server loads/actions, and progressive-enhancement UI.
+- `webui-v2/src/lib/server`: V2 server-only API proxy, bounded response parsing, and session forwarding.
 - `webui/src/lib/api-request.ts`: low-level request wrapper, credentials, timeout, and `ApiError`.
 - `webui/src/lib/api.ts`: frontend API client. New backend routes usually need matching client methods and `api-types.ts` types.
 - `webui/src/locales`: i18n catalogs.
@@ -558,6 +561,10 @@ The current V1 implementation remains the behavior and migration source of truth
 - Viewing statistics must be event/segment based and idempotent. Activity logs remain retained independently. Do not add direct client-controlled duration accounting or an unbounded active-playback accumulator.
 - Firefox is the WebUI baseline on phone, tablet, desktop, and narrow devtools viewports. New V2 screens must use bounded `dvh` scroll regions, stable grid tracks, mobile-safe toolbars, abortable reads, and lazy rendering for large lists. Do not modify CORS behavior while improving transport or layout.
 - Each independently reviewable module gets its own Chinese commit. Before committing, run focused tests and scan the diff for unrelated changes, debug output, local absolute paths, secrets, tokens, passwords, cookies, and undocumented behavior changes.
+- V2 frontend is a separate SvelteKit SSR application under `webui-v2`; do not replace `webui` or change the production frontend entry until the V1 feature matrix is fully migrated and the cutover has a rollback plan.
+- V2 SSR `load` functions are the default read boundary. Authenticated reads must forward the incoming HttpOnly session only on the server, use `no-store` for identity data, and return summaries rather than full histories or attachments.
+- V2 form actions are the default write boundary. Keep mutation requests same-origin, rely on SvelteKit origin checking, forward upstream session cookies as host-only HttpOnly cookies, and never expose bearer/session credentials to browser JavaScript.
+- V2 API proxy routes may forward only `/api/v1/*` and `/api/v2/*`, must strip hop-by-hop and browser origin headers, bound request bodies, preserve upstream status, and never become a second authorization layer.
 
 ## V2 Validation Evidence
 

@@ -94,7 +94,7 @@ go test -run '^$' -bench '^(BenchmarkTelegramUpdateEnvelopeDecode|BenchmarkTeleg
 
 ## 前端开发
 
-前端是位于 `webui/` 的 Next.js 应用，使用 pnpm 作为包管理器（见 `package.json` 中的 `packageManager`）。
+V1 前端是位于 `webui/` 的 Next.js 应用，使用 pnpm 作为包管理器。V2 前端位于 `webui-v2/`，使用 SvelteKit SSR + adapter-node；V1 在 V2 功能矩阵迁移完成前继续保留并作为生产回退。
 
 ### 常用命令
 
@@ -118,6 +118,21 @@ pnpm build
 ```
 
 > CI / 非交互环境说明：`webui/.npmrc` 关闭了 `node_modules` 重建确认，避免 `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`；`webui/pnpm-workspace.yaml` 显式批准 `esbuild`、`sharp`、`unrs-resolver`、`workerd` 的构建脚本。新增带 postinstall 的依赖时，必须同步更新该白名单或说明为什么应阻断，不能只在本机交互式运行 `pnpm approve-builds` 后不提交配置。
+
+### V2 SSR 前端
+
+```bash
+cd webui-v2
+pnpm install --frozen-lockfile
+pnpm check
+pnpm dev
+
+# 生产构建与预览
+pnpm build
+pnpm preview
+```
+
+V2 服务端通过 `BACKEND_URL` 访问 Go API（默认 `http://127.0.0.1:5000`），并在服务端转发请求 Cookie；部署 adapter-node 时由 `ORIGIN`、`HOST`、`PORT` 等运行环境变量决定外部地址。`/api/v1/*` 与 `/api/v2/*` 的同源代理只为后续渐进增强和兼容调用提供传输通道，不能替代 Go 后端鉴权。V2 登录和登出使用 SvelteKit form action，身份读取放在服务端 `load`，首屏不依赖浏览器启动后再拉取 `/users/me`。
 
 后端可单独启动配合调试：
 

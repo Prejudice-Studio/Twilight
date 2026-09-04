@@ -1,0 +1,41 @@
+<script lang="ts">
+  import { t } from "$lib/i18n";
+  import type { LayoutData } from "./$types";
+
+  let { data, children }: { data: LayoutData; children: import("svelte").Snippet } = $props();
+</script>
+
+<svelte:head>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#17202a" />
+  <title>{t.siteName}</title>
+</svelte:head>
+
+<div class="app-shell">
+  <header class="topbar">
+    <a class="brand" href={data.user ? "/dashboard" : "/login"}>{t.siteName}</a>
+    {#if data.user}
+      <nav aria-label="主导航">
+        <a href="/dashboard">{t.dashboard}</a>
+        <form method="POST" action="/logout">
+          <button type="submit">{t.logout}</button>
+        </form>
+      </nav>
+    {/if}
+  </header>
+  <main class="page-frame">{@render children()}</main>
+</div>
+
+<style>
+  :global(*) { box-sizing: border-box; }
+  :global(html) { background: #f4f6f8; color: #17202a; font-family: system-ui, sans-serif; }
+  :global(body) { margin: 0; min-width: 320px; }
+  .app-shell { min-height: 100dvh; }
+  .topbar { align-items: center; background: #17202a; color: #fff; display: flex; gap: 1rem; justify-content: space-between; min-height: 3.75rem; padding: 0.75rem max(1rem, env(safe-area-inset-right)) 0.75rem max(1rem, env(safe-area-inset-left)); }
+  .brand { color: inherit; font-weight: 700; text-decoration: none; }
+  nav { align-items: center; display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: flex-end; }
+  nav a, nav button { background: transparent; border: 0; color: inherit; cursor: pointer; font: inherit; min-height: 2.25rem; padding: 0.5rem; text-decoration: none; }
+  nav a:hover, nav button:hover { background: #2b3b4b; }
+  .page-frame { margin: 0 auto; max-width: 72rem; padding: 1.25rem max(1rem, env(safe-area-inset-right)) 3rem max(1rem, env(safe-area-inset-left)); }
+  @media (max-width: 560px) { .topbar { align-items: flex-start; flex-direction: column; } nav { justify-content: flex-start; width: 100%; } .page-frame { padding-top: 1rem; } }
+</style>

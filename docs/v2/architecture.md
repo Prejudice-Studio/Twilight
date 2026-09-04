@@ -23,11 +23,11 @@ cmd/twilight
                       -> external integration
        -> response / audit / metrics
 
-Next.js route shell
-  -> feature page
-       -> query controller / server action boundary
-            -> typed API client
-                 -> request transport
+SvelteKit SSR route shell (V2)
+  -> server load / form action
+       -> typed server API client
+            -> same-origin API proxy or backend
+                 -> Go auth / application service
 ```
 
 ### 后端层
@@ -51,6 +51,13 @@ Next.js route shell
 | API client | 类型、路径、请求参数、资源 URL 归一化 |
 | transport | credentials、超时、缓存/合流、响应解析、错误码 |
 | UI primitives | 稳定尺寸、Firefox 滚动、无障碍名称和 i18n |
+
+V2 前端实现约定：
+
+- `webui-v2` 使用 SvelteKit SSR 和 `@sveltejs/adapter-node`，服务端 `load` 负责首屏数据，form action 负责写操作，默认启用渐进增强而不是把整页变成客户端应用。
+- 浏览器只访问 V2 自身的同源路径。V2 服务端 API client 将请求转发到 Go 后端，认证 Cookie 只在服务端读取和转发；浏览器端不保存 Bearer Token，也不把用户身份放进跨页面 JS 缓存。
+- V2 的 `/api/[...path]` 代理只允许 `v1` / `v2` API 版本，限制请求体、移除 hop-by-hop 与浏览器 Origin/Referer 头，并保持上游状态码。它不是鉴权替代品，真正权限仍由 Go 后端执行。
+- V1 Next.js 应用在迁移完成前继续作为生产回退；每个迁移模块必须同时记录 V1 页面、V1 API、V2 route/load/action、权限、审计、移动端验证和回滚入口。
 
 ## 3. V2 API 策略
 
@@ -180,4 +187,3 @@ checksums/sha256.json
 8. 管理后台、移动端和性能收口。
 
 每次提交前运行与改动相称的 Go/前端测试，并扫描本次提交的 diff：不得出现本机绝对路径、真实凭据、调试输出、无关文件或未记录的行为改变。
-
