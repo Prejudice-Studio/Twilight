@@ -20,7 +20,7 @@ pnpm dev
 
 ## 设计边界
 
-管理员违规审计页、邀请系统页、求片管理页、注册码管理页和邮箱管理页已迁移到 `/(app)/admin/violations`、`/(app)/admin/invite`、`/(app)/admin/requests`、`/(app)/admin/regcodes`、`/(app)/admin/email`，使用 SSR 分页筛选和服务端表单操作；其余未迁移功能仍以 V1 为回退入口。
+管理员入口页、违规审计页、邀请系统页、求片管理页、注册码管理页和邮箱管理页已迁移到 `/(app)/admin`、`/(app)/admin/violations`、`/(app)/admin/invite`、`/(app)/admin/requests`、`/(app)/admin/regcodes`、`/(app)/admin/email`，使用 SSR 摘要/分页筛选和服务端表单操作；其余未迁移功能仍以 V1 为回退入口。
 
 - Go 后端是唯一认证、权限、限流、审计和业务状态边界。
 - 认证 Cookie 只由服务端转发，浏览器脚本不持有 Bearer Token。

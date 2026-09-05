@@ -833,6 +833,12 @@ export interface AdminStatusPageData {
   refreshed_at: number;
 }
 
+export interface AdminHomePageData {
+  info: SystemInfo | null;
+  stats: SystemStats | null;
+  loadError: string | null;
+}
+
 export type ConfigFieldType = "string" | "textarea" | "int" | "float" | "bool" | "secret" | "list" | "select" | "command_map";
 
 export interface ConfigFieldOption {

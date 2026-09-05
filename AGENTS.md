@@ -54,6 +54,7 @@ Update docs in the same change when behavior changes.
 - `webui-v2/src/routes/(app)/bangumi`: Bangumi SSR summary, collection pagination, and form actions.
 - `webui-v2/src/routes/(app)/media`: Media search, detail, Emby inventory checks, and user request actions through SSR.
 - `webui-v2/src/routes/(app)/admin/status`: Admin-only SSR server status, independent health probes, and bounded runtime summaries.
+- `webui-v2/src/routes/(app)/admin`: Admin-only SSR module index backed by lightweight system info and statistics summaries.
 - `webui-v2/src/routes/(app)/admin/users`: Admin-only SSR user list, server-side filters, grouped account actions, and bounded mobile-safe rendering.
 - `webui-v2/src/routes/(app)/admin/tickets`: Admin-only SSR ticket queue, summary pagination, conversation details, metadata actions, and bounded attachment handling.
 - `webui-v2/src/routes/(app)/admin/config`: Admin-only SSR configuration editor, TOML maintenance, backup preview/restore, and background upload actions.
