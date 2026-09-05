@@ -41,6 +41,7 @@ webui-v2/
       (app)/admin/config/     # 管理员配置 schema、TOML、备份和背景图维护
       (app)/admin/database/   # 管理员数据库状态、备份和迁移维护
       (app)/admin/emby/       # 管理员 Emby 账号、设备/IP 审查与活动日志
+      (app)/admin/bangumi/    # 管理员 Bangumi 用户同步状态与按需详情
       (app)/admin/audit-logs/ # 管理员操作日志分页、筛选与保留策略维护
       (app)/admin/violations/ # 管理员违规审计分页、筛选和清理
       (app)/admin/invite/     # 管理员邀请树、邀请码摘要和邀请配置
@@ -200,6 +201,12 @@ V2 调度器不使用浏览器轮询或 SSE。任务仍在后端异步运行，�
 `/(app)/admin/emby` 由管理员服务端布局保护。账号页通过 `/admin/emby/users` 做服务端搜索、筛选和分页，只把当前页发送到浏览器；失效本地绑定单独分页。设备/IP 页签只在管理员主动打开或刷新时读取 `/admin/emby/device-audit`，按 Emby 用户聚合设备，过滤 Twilight 自身连接，离线记录按设备名、客户端和版本合并，并使用独立的 Firefox 有界滚动区域。活动日志页签默认读取数据库中的 Emby ActivityLog，只有点击同步才从 Emby 拉取并入库，不恢复播放统计页面。
 
 连通性检测、用户列表、媒体库列表和本机回环候选探测都在 Go 后端发起；页面只接收服务器基本信息和通用失败文案，不接收 Emby URL、Token 或网络错误原文。同步、导入、清理、绑定重置、广播、独立账号创建、强制改密、账号启停和踢会话均通过 SvelteKit form action 转发 HttpOnly 会话，后端负责最终鉴权、参数校验、外部副作用和审计。生成的独立账号密码或强制重置密码只作为当前 action 结果显示，不进入 URL、缓存或持久化页面状态。
+
+## 已迁移模块：管理员 Bangumi 管理
+
+`/(app)/admin/bangumi` 由管理员服务端布局保护。首屏使用 `/admin/bangumi/users` 的分页结果和系统功能摘要，搜索、分页和详情类型都由 URL 表示；列表只返回用户 Bangumi 开关、Token 是否配置、就绪状态以及有限统计，不把 Token、播放记录或同步日志装入浏览器。
+
+播放记录和同步日志只有在管理员打开指定 UID 的详情时才通过 SSR `load` 读取，详情表格使用 Firefox 有界滚动并保留水平滚动空间。手动同步和清除日志通过 SvelteKit form action 转发，提交前的确认只是体验保护，Go 后端继续负责功能开关、用户校验、Bangumi 外部调用、持久化和审计。管理员用户列表的记录数和最近 100 条日志成功数由 Store 批量计算，避免在 2000+ 用户场景按用户形成 N+1 查询。
 
 ## 已迁移模块：管理员操作日志
 

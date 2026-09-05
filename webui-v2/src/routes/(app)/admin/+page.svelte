@@ -31,6 +31,7 @@
     { href: "/admin/database", title: t.adminDatabaseTitle, description: t.adminDatabaseDescription, category: "operations" },
     { href: "/admin/logs", title: t.adminRuntimeLogsTitle, description: t.adminRuntimeLogsDescription, category: "operations" },
     { href: "/admin/emby", title: t.adminEmbyTitle, description: t.adminEmbyDescription, category: "integration" },
+    { href: "/admin/bangumi", title: t.adminBangumiTitle, description: t.adminBangumiDescription, category: "integration" },
     { href: "/admin/telegram", title: t.adminTelegramTitle, description: t.adminTelegramDescription, category: "integration" },
     { href: "/admin/telegram-rebind-requests", title: t.adminTelegramRebindTitle, description: t.adminTelegramRebindDescription, category: "integration" },
     { href: "/admin/email", title: t.adminEmailTitle, description: t.adminEmailDescription, category: "integration" }

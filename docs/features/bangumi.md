@@ -19,7 +19,7 @@
 | 用户端 Bangumi 仪表盘页面 | `webui/src/app/(main)/bangumi/page.tsx` |
 | 用户端 Bangumi 收藏分页页面 | `webui/src/app/(main)/bangumi/collections/[type]/page.tsx` |
 | V2 用户端 Bangumi 页面 | `webui-v2/src/routes/(app)/bangumi/` |
-| 管理员 Bangumi 管理页面 | `webui/src/app/(main)/admin/bangumi/page.tsx` |
+| 管理员 Bangumi 管理页面 | `webui-v2/src/routes/(app)/admin/bangumi/`（V1 回退：`webui/src/app/(main)/admin/bangumi/page.tsx`） |
 | 前端 API 客户端 | `webui/src/lib/api.ts` |
 | 前端类型定义 | `webui/src/lib/api-types.ts` |
 
@@ -428,7 +428,7 @@ V2 响应不会包含 Bangumi Token。收藏分类在后端独立读取，单类
 
 路径：`/admin/bangumi`
 
-管理员用户列表按页查询（默认每页 20 条，后端最多接受 100 条），搜索和分页不会把全部用户复制到浏览器。用户播放记录与同步日志只在打开对应弹窗时读取；这些读取支持取消，切换用户或关闭弹窗会终止旧请求，避免慢响应覆盖当前用户。后台页面的长内容使用受限 `dvh` Firefox 滚动区域，移动端用户操作会自动换行。
+管理员用户列表按页查询（默认每页 20 条，后端最多接受 100 条），搜索和分页不会把全部用户复制到浏览器。V2 使用 SSR URL 状态，播放记录与同步日志只在打开指定 UID 的详情时读取；后台页面的长内容使用受限 `dvh` Firefox 滚动区域，移动端用户操作会自动换行。V1 仍保留可回退实现，直到生产入口完成切换。
 
 管理员用户列表的播放记录数和最近 100 条同步日志成功数由 Store 批量读取：PostgreSQL 使用一次 `GROUP BY` 统计，兼容回退路径只扫描一次有限的本地记录。页面分页、搜索和状态字段的语义不变，不会为当前页每个用户重复查询播放记录或同步日志。
 

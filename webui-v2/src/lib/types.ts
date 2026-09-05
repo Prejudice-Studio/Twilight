@@ -567,6 +567,55 @@ export interface BangumiStatus {
   recent_logs: BangumiSyncLog[];
 }
 
+export interface AdminBangumiUser {
+  uid: number;
+  username: string;
+  bgm_mode: boolean;
+  bgm_manage_mode: boolean;
+  token_set: boolean;
+  sync_ready: boolean;
+  sync_count: number;
+  record_count: number;
+}
+
+export interface PlaybackRecordWithSync {
+  uid: number;
+  item_id: string;
+  title: string;
+  series_name?: string;
+  media_type: string;
+  index_number?: number;
+  duration: number;
+  played_at: number;
+  synced_name?: string;
+}
+
+export interface AdminBangumiUsersResult {
+  users: AdminBangumiUser[];
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+}
+
+export interface AdminBangumiDetail {
+  kind: "records" | "logs";
+  uid: number;
+  user: AdminBangumiUser | null;
+  records: PlaybackRecordWithSync[];
+  logs: BangumiSyncLog[];
+  error: string | null;
+}
+
+export interface AdminBangumiPageData {
+  info: SystemInfo | null;
+  users: AdminBangumiUsersResult | null;
+  detail: AdminBangumiDetail | null;
+  query: { page: number; per_page: number; search: string; detail: "records" | "logs" | ""; uid: number };
+  notice: "synced" | "logs_cleared" | "";
+  loadError: string | null;
+}
+
 export interface BangumiSummary {
   status: BangumiStatus;
   account?: BangumiAccount;
