@@ -36,6 +36,7 @@ webui-v2/
       (app)/admin/status/     # 管理员服务器状态与独立健康检查
       (app)/admin/config/     # 管理员配置 schema、TOML、备份和背景图维护
       (app)/admin/database/   # 管理员数据库状态、备份和迁移维护
+      (app)/admin/emby/       # 管理员 Emby 账号、设备/IP 审查与活动日志
       api/[...path]/          # 仅 v1/v2 的同源 API 代理
 ```
 
@@ -163,3 +164,9 @@ V2 页面只接收状态展示所需的安全 DTO。Emby 内部地址、数据�
 `/(app)/admin/database` 在管理员服务端布局内运行，首屏通过 `Promise.allSettled` 并行读取数据库状态和备份元数据。页面不会加载完整状态快照、数据库连接串或任意文件路径；备份列表在 Firefox 中使用有界滚动区域，手机端操作按钮按列堆叠。
 
 创建备份、查看快照摘要、删除备份、恢复和数据库迁移均使用 SvelteKit form action。恢复先提交 dry-run 生成目标/当前计数和保护性备份提示，再以 `RESTORE_DATABASE_BACKUP` 明确确认；迁移先进行目标预检，再以 `MIGRATE_DATABASE` 确认执行。目标驱动、状态文件名和备份名在 SSR 层限制格式，最终的 Zip/路径/快照校验、数据库连通性、功能开关和原子写入仍由 Go 后端负责。
+
+## 已迁移模块：管理员 Emby 管理
+
+`/(app)/admin/emby` 由管理员服务端布局保护。账号页通过 `/admin/emby/users` 做服务端搜索、筛选和分页，只把当前页发送到浏览器；失效本地绑定单独分页。设备/IP 页签只在管理员主动打开或刷新时读取 `/admin/emby/device-audit`，按 Emby 用户聚合设备，过滤 Twilight 自身连接，离线记录按设备名、客户端和版本合并，并使用独立的 Firefox 有界滚动区域。活动日志页签默认读取数据库中的 Emby ActivityLog，只有点击同步才从 Emby 拉取并入库，不恢复播放统计页面。
+
+连通性检测、用户列表、媒体库列表和本机回环候选探测都在 Go 后端发起；页面只接收服务器基本信息和通用失败文案，不接收 Emby URL、Token 或网络错误原文。同步、导入、清理、绑定重置、广播、独立账号创建、强制改密、账号启停和踢会话均通过 SvelteKit form action 转发 HttpOnly 会话，后端负责最终鉴权、参数校验、外部副作用和审计。生成的独立账号密码或强制重置密码只作为当前 action 结果显示，不进入 URL、缓存或持久化页面状态。

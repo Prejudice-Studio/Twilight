@@ -132,7 +132,7 @@ pnpm build
 pnpm preview
 ```
 
-V2 服务端通过 `BACKEND_URL` 访问 Go API（默认 `http://127.0.0.1:5000`），并在服务端转发请求 Cookie；部署 adapter-node 时由 `ORIGIN`、`HOST`、`PORT` 等运行环境变量决定外部地址。`/api/v1/*` 与 `/api/v2/*` 的同源代理只为后续渐进增强和兼容调用提供传输通道，不能替代 Go 后端鉴权。V2 登录和登出使用 SvelteKit form action，身份读取放在服务端 `load`，首屏不依赖浏览器启动后再拉取 `/users/me`。
+V2 服务端通过 `BACKEND_URL` 访问 Go API（默认 `http://127.0.0.1:5000`），并在服务端转发请求 Cookie；部署 adapter-node 时由 `ORIGIN`、`HOST`、`PORT` 等运行环境变量决定外部地址。`/api/v1/*` 与 `/api/v2/*` 的同源代理只为后续渐进增强和兼容调用提供传输通道，不能替代 Go 后端鉴权。V2 登录和登出使用 SvelteKit form action，身份读取放在服务端 `load`，首屏不依赖浏览器启动后再拉取 `/users/me`。管理员 Emby 页面 `/(app)/admin/emby` 使用同一边界：账号、设备/IP 审查和活动日志按页签按需读取，管理写操作通过服务端 action 转发，避免浏览器持有凭据或重复请求大型列表。
 
 后端可单独启动配合调试：
 

@@ -1096,7 +1096,7 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/123/disable" \
 
 Emby 账号列表与本地活动日志均由管理员手动读取，离开页面或再次读取会取消过期请求，且不会复用短时前端读缓存。为适应 2000+ 账号，Emby 用户和孤儿记录按 300 行分批挂载，表格、页签和活动日志在 Firefox 中使用有高度边界的独立滚动区域。同步、导入、删除未绑定用户、清理孤儿和重置绑定互斥执行，避免管理员重复点击产生并发写操作。设备/IP 审查和从 Emby 同步活动日志仍只允许手动刷新，不会后台轮询；已入库活动日志继续保留。
 
-`GET /admin/emby/device-audit` 返回按 Emby 用户聚合的设备、在线会话 IP、活动日志登录 IP 与本地账号关联。接口会过滤 Twilight 自身连接 Emby 时产生的设备/会话（如 `Twilight`、`Twilight Bind`、`twilight-client`），避免把面板自身计入用户、IP、客户端和设备统计。设备名、客户端名、版本等展示字段会先解码 HTML 实体并清理异常尾随引号/反斜杠，避免 Emby 或第三方客户端返回的 `&quot;`、`"\` 原样出现在界面。离线保留设备会按同一 Emby 用户下的设备名、客户端名、客户端版本聚合，返回 `count` 与最新活动时间，避免同一手机/客户端的多条历史 DeviceId 刷屏；在线设备保留实时独立行。`summary.devices_available`、`summary.sessions_available` 和 `summary.activity_available` 分别表示 `/Devices`、`/Sessions`、`/System/ActivityLog` 来源是否可用；其中任一来源失败时接口会尽量返回其余可用数据，并在对应 `*_error` 字段写入脱敏后的简短错误。
+`GET /admin/emby/device-audit` 返回按 Emby 用户聚合的设备、在线会话 IP、活动日志登录 IP 与本地账号关联。接口会过滤 Twilight 自身连接 Emby 时产生的设备/会话（如 `Twilight`、`Twilight Bind`、`twilight-client`），避免把面板自身计入用户、IP、客户端和设备统计。设备名、客户端名、版本等展示字段会先解码 HTML 实体并清理异常尾随引号/反斜杠，避免 Emby 或第三方客户端返回的 `&quot;`、`"\` 原样出现在界面。离线保留设备会按同一 Emby 用户下的设备名、客户端名、客户端版本聚合，返回 `count` 与最新活动时间，避免同一手机/客户端的多条历史 DeviceId 刷屏；在线设备保留实时独立行。`summary.devices_available`、`summary.sessions_available` 和 `summary.activity_available` 分别表示 `/Devices`、`/Sessions`、`/System/ActivityLog` 来源是否可用；其中任一来源失败时接口会尽量返回其余可用数据，并在对应 `*_error` 字段写入固定的通用失败文案，原始诊断只写入服务端日志。
 
 前端按用户和按设备视图都只挂载当前 300 行，管理员主动点击「显示更多」才追加下一批，避免 2000+ 用户或保留设备一次生成全部 DOM。首次读取、手动刷新及处置后的刷新共用一个可取消且带请求序列保护的加载器；页面仍不自动轮询。
 
@@ -1108,7 +1108,7 @@ Emby 账号列表与本地活动日志均由管理员手动读取，离开页面
 | `GET /admin/emby/sessions` | 当前 Emby 会话 |
 | `GET /admin/emby/activity-logs` | 本地 Emby 活动日志；`refresh=1` 时手动从 Emby 拉取并入库 |
 | `GET /admin/emby/activity` | Emby 活动记录 |
-| `GET /admin/emby/users` | Emby 用户列表 |
+| `GET /admin/emby/users` | Emby 用户列表；支持 `page`、`per_page`、`search`、`link`、`attribute`，失效本地绑定使用 `orphan_page` / `orphan_per_page` 独立分页 |
 | `POST /admin/emby/broadcast` | 发送 Emby 广播消息 |
 | `POST /admin/emby/test` | 后端测试 Emby 连通性、用户列表、媒体库列表，并尝试本机 Emby 候选地址 |
 | `POST /admin/emby/cleanup-orphans` | 清理孤立 Emby 用户 |
@@ -1136,10 +1136,15 @@ curl -X POST "http://localhost:5000/api/v1/admin/emby/sync" \
 
 ```json
 {
-  "title": "系统通知",
-  "message": "Emby 服务器将在夜间维护。"
+  "header": "系统通知",
+  "text": "Emby 服务器将在夜间维护。",
+  "user_ids": ["emby-user-id"]
 }
 ```
+
+`header` 可选，`text` 必填；省略 `user_ids` 时发送给当前所有 Emby 会话。失败项只返回会话标识和通用失败文案，不返回上游网络错误。
+
+独立 Emby 账号创建和管理员强制改密都由后端检查密码必须为 8-128 位，并同时包含大小写字母和数字；页面的 `minlength` 仅用于提前提示，不能替代后端校验。
 
 #### 测试 Emby 连通性
 

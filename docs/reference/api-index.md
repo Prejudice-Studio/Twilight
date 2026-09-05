@@ -280,10 +280,10 @@ V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/ap
 | POST | `/api/v1/admin/emby/sync` | Admin | 同步 Emby 用户 |
 | GET | `/api/v1/admin/emby/sessions` | Admin | Emby 实时会话（含 `remote_endpoint` IP） |
 | GET | `/api/v1/admin/emby/now-playing` | Admin | 仪表盘管理员观看摘要（用户、媒体和进度） |
-| GET | `/api/v1/admin/emby/device-audit` | Admin | Emby 登录用户设备/IP 审查（按用户聚合）：`/Devices` 设备清单 + 实时会话 IP（解析掉端口）+ 活动日志历史登录 IP，映射完整本地账号；过滤 Twilight 自身 Emby 客户端并规范化设备/客户端展示名；离线设备按设备名/客户端/版本聚合并返回 count，单个来源失败时降级返回其余数据 |
+| GET | `/api/v1/admin/emby/device-audit` | Admin | 手动读取 Emby 登录用户设备/IP 审查（按用户聚合）；支持 `page`、`per_page`、`search`，过滤 Twilight 自身客户端，离线设备按设备名/客户端/版本聚合并返回 count，单个来源失败时降级返回其余数据，失败字段为通用文案 |
 | GET | `/api/v1/admin/emby/activity-logs` | Admin | 本地 Emby 活动日志；`?refresh=1` 手动从 Emby 拉取并入库 |
 | GET | `/api/v1/admin/emby/activity` | Admin | Emby 活动记录 |
-| GET | `/api/v1/admin/emby/users` | Admin | Emby 用户列表 |
+| GET | `/api/v1/admin/emby/users` | Admin | Emby 用户列表；支持 `page`、`per_page`、`search`、`link`、`attribute`，失效本地绑定使用独立分页 |
 | POST | `/api/v1/admin/emby/broadcast` | Admin | Emby 广播消息 |
 | POST | `/api/v1/admin/emby/test` | Admin | 后端测试 Emby 连接、用户列表、媒体库列表，并尝试本机 Emby 候选地址 |
 | POST | `/api/v1/admin/emby/cleanup-orphans` | Admin | 清理孤儿绑定 |
