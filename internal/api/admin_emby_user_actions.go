@@ -93,6 +93,11 @@ func (a *App) handleAdminEmbyUserToggle(w http.ResponseWriter, r *http.Request, 
 		failWithCode(w, http.StatusBadGateway, ErrEmbyDisableFailed, "Emby 状态更新失败")
 		return
 	}
+	targetUID := int64(0)
+	if linked, okLinked := a.store().FindUserByEmbyID(embyID); okLinked {
+		targetUID = linked.UID
+	}
+	a.audit(r, map[bool]string{true: "emby_user_enable", false: "emby_user_disable"}[enable], "admin", targetUID, map[string]any{"emby_user_id": embyID})
 	ok(w, "Emby 状态已更新", map[string]any{"emby_user_id": embyID, "emby_enabled": enable})
 }
 
@@ -108,5 +113,10 @@ func (a *App) handleAdminEmbyUserKick(w http.ResponseWriter, r *http.Request, pa
 		return
 	}
 	kicked := a.kickEmbySessions(r.Context(), embyID)
+	targetUID := int64(0)
+	if linked, okLinked := a.store().FindUserByEmbyID(embyID); okLinked {
+		targetUID = linked.UID
+	}
+	a.audit(r, "emby_user_kick", "admin", targetUID, map[string]any{"emby_user_id": embyID, "kicked_count": kicked})
 	ok(w, "会话踢出完成", map[string]any{"emby_user_id": embyID, "kicked_count": kicked})
 }

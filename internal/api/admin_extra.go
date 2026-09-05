@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/prejudice-studio/twilight/internal/security"
 	"github.com/prejudice-studio/twilight/internal/store"
+	"go.uber.org/zap"
 )
 
 const (
@@ -49,6 +51,7 @@ func (a *App) handleEmbySyncV2(w http.ResponseWriter, r *http.Request, _ Params)
 			}
 		}
 	}
+	a.audit(r, "emby_sync", "admin", 0, map[string]any{"updated": updated, "missing": len(missing)})
 	ok(w, "sync complete", map[string]any{"success": updated, "failed": len(missing), "errors": missing, "updated": updated, "missing": missing})
 }
 
@@ -73,6 +76,11 @@ func (a *App) handleAdminEmbyUsersV2(w http.ResponseWriter, r *http.Request, _ P
 	if a.requireEmbyConfigured(w) {
 		return
 	}
+	page := clamp(queryInt(r, "page", 1), 1, 1000000)
+	perPage := clamp(queryInt(r, "per_page", 50), 1, 200)
+	search := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
+	linkFilter := strings.TrimSpace(r.URL.Query().Get("link"))
+	attributeFilter := strings.TrimSpace(r.URL.Query().Get("attribute"))
 	var remote []map[string]any
 	if err := a.embyGet(r.Context(), "/Users", &remote); err != nil {
 		failWithCode(w, http.StatusBadGateway, ErrEmbyRemoteUsersFailed, "读取 Emby 用户列表失败，请稍后重试或检查上游 Emby 状态")
@@ -87,6 +95,7 @@ func (a *App) handleAdminEmbyUsersV2(w http.ResponseWriter, r *http.Request, _ P
 	}
 	embyUsers := make([]map[string]any, 0, len(remote))
 	seen := map[string]bool{}
+	totalLinked := 0
 	for _, eu := range remote {
 		id := asString(eu["Id"])
 		name := asString(eu["Name"])
@@ -95,18 +104,23 @@ func (a *App) handleAdminEmbyUsersV2(w http.ResponseWriter, r *http.Request, _ P
 		local := any(nil)
 		status := "unlinked"
 		if u, okUser := localByEmbyID[id]; okUser {
+			totalLinked++
 			local = map[string]any{"uid": u.UID, "username": u.Username, "telegram_id": nullableInt(u.TelegramID), "active": u.Active, "role": u.Role}
 			status = "synced"
 			if u.EmbyUsername != "" && !strings.EqualFold(u.EmbyUsername, name) {
 				status = "name_mismatch"
 			}
 		}
-		embyUsers = append(embyUsers, map[string]any{
+		item := map[string]any{
 			"emby_id": id, "emby_name": name, "has_password": eu["HasPassword"],
 			"is_admin": boolish(policy["IsAdministrator"]), "is_disabled": boolish(policy["IsDisabled"]), "is_hidden": boolish(policy["IsHidden"]),
 			"last_login": emptyNil(asString(eu["LastLoginDate"])), "last_activity": emptyNil(firstNonEmpty(asString(eu["LastActivityDate"]), asString(eu["DateLastActivity"]))),
 			"local_user": local, "sync_status": status,
-		})
+		}
+		if !adminEmbyUserMatches(item, search, linkFilter, attributeFilter) {
+			continue
+		}
+		embyUsers = append(embyUsers, item)
 	}
 	orphans := []map[string]any{}
 	for _, u := range users {
@@ -114,7 +128,65 @@ func (a *App) handleAdminEmbyUsersV2(w http.ResponseWriter, r *http.Request, _ P
 			orphans = append(orphans, map[string]any{"uid": u.UID, "username": u.Username, "emby_id": u.EmbyID, "telegram_id": nullableInt(u.TelegramID)})
 		}
 	}
-	ok(w, "OK", map[string]any{"emby_users": embyUsers, "users": embyUsers, "orphans": orphans, "total": len(embyUsers), "total_emby": len(embyUsers), "total_linked": len(localByEmbyID), "total_orphans": len(orphans)})
+	totalFiltered := len(embyUsers)
+	start := (page - 1) * perPage
+	if start > totalFiltered {
+		start = totalFiltered
+	}
+	end := min(start+perPage, totalFiltered)
+	pageUsers := embyUsers[start:end]
+	if pageUsers == nil {
+		pageUsers = []map[string]any{}
+	}
+	allOrphans := len(orphans)
+	orphanPage := clamp(queryInt(r, "orphan_page", 1), 1, 1000000)
+	orphanPerPage := clamp(queryInt(r, "orphan_per_page", 300), 1, 300)
+	pageOrphans := orphans
+	orphanPages := 0
+	orphanPages = pages(allOrphans, orphanPerPage)
+	orphanStart := (orphanPage - 1) * orphanPerPage
+	if orphanStart > allOrphans {
+		orphanStart = allOrphans
+	}
+	orphanEnd := min(orphanStart+orphanPerPage, allOrphans)
+	pageOrphans = orphans[orphanStart:orphanEnd]
+	if pageOrphans == nil {
+		pageOrphans = []map[string]any{}
+	}
+	ok(w, "OK", map[string]any{
+		"emby_users": pageUsers, "users": pageUsers, "orphans": pageOrphans,
+		"total": totalFiltered, "total_emby": len(remote), "total_linked": totalLinked, "total_orphans": allOrphans,
+		"page": page, "per_page": perPage, "pages": pages(totalFiltered, perPage),
+		"orphan_page": orphanPage, "orphan_per_page": orphanPerPage, "orphan_pages": orphanPages,
+	})
+}
+
+func adminEmbyUserMatches(item map[string]any, search, linkFilter, attributeFilter string) bool {
+	if search != "" {
+		haystack := strings.ToLower(strings.Join([]string{
+			asString(item["emby_id"]), asString(item["emby_name"]),
+			asString(item["last_login"]), asString(item["last_activity"]),
+		}, " "))
+		if local, ok := item["local_user"].(map[string]any); ok {
+			haystack += " " + strings.ToLower(strings.Join([]string{asString(local["username"]), asString(local["uid"]), asString(local["telegram_id"])}, " "))
+		}
+		if !strings.Contains(haystack, search) {
+			return false
+		}
+	}
+	linked := item["local_user"] != nil
+	if linkFilter == "linked" && !linked || linkFilter == "unlinked" && linked || linkFilter == "name_mismatch" && asString(item["sync_status"]) != "name_mismatch" {
+		return false
+	}
+	switch attributeFilter {
+	case "admin":
+		return boolish(item["is_admin"])
+	case "disabled":
+		return boolish(item["is_disabled"])
+	case "hidden":
+		return boolish(item["is_hidden"])
+	}
+	return true
 }
 
 func (a *App) handleEmbyBroadcast(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -148,11 +220,12 @@ func (a *App) handleEmbyBroadcast(w http.ResponseWriter, r *http.Request, _ Para
 		var ignored map[string]any
 		err := a.embyPost(r.Context(), "/Sessions/"+urlPathEscape(sid)+"/Message", map[string]any{"Header": header, "Text": text, "TimeoutMs": 10000}, &ignored)
 		if err != nil {
-			failedItems = append(failedItems, map[string]any{"session_id": sid, "error": err.Error()})
+			failedItems = append(failedItems, map[string]any{"session_id": sid, "error": "远端会话消息发送失败"})
 			continue
 		}
 		sent++
 	}
+	a.audit(r, "emby_broadcast", "admin", 0, map[string]any{"sent_count": sent, "failed_count": len(failedItems)})
 	ok(w, "broadcast complete", map[string]any{"sent_count": sent, "failed": failedItems})
 }
 
@@ -160,8 +233,8 @@ func (a *App) handleEmbyConnectivityTest(w http.ResponseWriter, r *http.Request,
 	configuredURL := strings.TrimSpace(a.cfg().EmbyURL) != ""
 	configuredToken := strings.TrimSpace(a.cfg().EmbyToken) != ""
 	tests := []map[string]any{
-		{"name": "configuration_url", "success": configuredURL, "message": "Emby URL configured"},
-		{"name": "configuration_token", "success": configuredToken, "message": "Emby API token configured"},
+		{"name": "configuration_url", "success": configuredURL, "message": map[bool]string{true: "已配置", false: "未配置"}[configuredURL]},
+		{"name": "configuration_token", "success": configuredToken, "message": map[bool]string{true: "已配置", false: "未配置"}[configuredToken]},
 	}
 	overall := configuredURL && configuredToken
 	var info map[string]any
@@ -174,9 +247,10 @@ func (a *App) handleEmbyConnectivityTest(w http.ResponseWriter, r *http.Request,
 		overall = overall && success
 		message := "OK"
 		if !success {
-			message = truncateString(redactSensitiveText(err.Error()), 180)
+			zap.L().Warn("admin Emby server info probe failed", zap.String("error", redactSensitiveText(err.Error())))
+			message = "Emby 服务器信息读取失败"
 		} else if got != nil {
-			info = got
+			info = safeEmbyServerInfo(got)
 		}
 		tests = append(tests, map[string]any{"name": "backend_server_info", "success": success, "latency_ms": time.Since(start).Milliseconds(), "message": message})
 
@@ -189,7 +263,8 @@ func (a *App) handleEmbyConnectivityTest(w http.ResponseWriter, r *http.Request,
 		overall = overall && usersOK
 		usersMessage := "OK"
 		if usersErr != nil {
-			usersMessage = truncateString(redactSensitiveText(usersErr.Error()), 180)
+			zap.L().Warn("admin Emby users probe failed", zap.String("error", redactSensitiveText(usersErr.Error())))
+			usersMessage = "Emby 用户列表读取失败"
 		}
 		tests = append(tests, map[string]any{"name": "backend_users", "success": usersOK, "latency_ms": time.Since(start).Milliseconds(), "message": usersMessage, "count": len(users)})
 
@@ -202,11 +277,12 @@ func (a *App) handleEmbyConnectivityTest(w http.ResponseWriter, r *http.Request,
 		overall = overall && libraryOK
 		libraryMessage := "OK"
 		if libraryErr != nil {
-			libraryMessage = truncateString(redactSensitiveText(libraryErr.Error()), 180)
+			zap.L().Warn("admin Emby libraries probe failed", zap.String("error", redactSensitiveText(libraryErr.Error())))
+			libraryMessage = "Emby 媒体库读取失败"
 		}
 		tests = append(tests, map[string]any{"name": "backend_libraries", "success": libraryOK, "latency_ms": time.Since(start).Milliseconds(), "message": libraryMessage, "count": len(libraries)})
 
-		for _, candidate := range a.embyBackendLocalProbeCandidates() {
+		for candidateIndex, candidate := range a.embyBackendLocalProbeCandidates() {
 			start = time.Now()
 			ctx, cancel = context.WithTimeout(r.Context(), 4*time.Second)
 			localInfo, localErr := a.embyHealthAt(ctx, candidate)
@@ -214,10 +290,11 @@ func (a *App) handleEmbyConnectivityTest(w http.ResponseWriter, r *http.Request,
 			localOK := localErr == nil
 			localMessage := "OK"
 			if localErr != nil {
-				localMessage = truncateString(redactSensitiveText(localErr.Error()), 180)
+				zap.L().Warn("admin Emby local probe failed", zap.Int("candidate", candidateIndex+1), zap.String("error", redactSensitiveText(localErr.Error())))
+				localMessage = "本机候选地址连接失败"
 			}
 			tests = append(tests, map[string]any{
-				"name":       "backend_local_" + candidate,
+				"name":       fmt.Sprintf("backend_local_%d", candidateIndex+1),
 				"success":    localOK,
 				"latency_ms": time.Since(start).Milliseconds(),
 				"message":    localMessage,
@@ -226,7 +303,19 @@ func (a *App) handleEmbyConnectivityTest(w http.ResponseWriter, r *http.Request,
 			})
 		}
 	}
-	ok(w, "OK", map[string]any{"success": overall, "url": a.cfg().EmbyURL, "emby_url": a.cfg().EmbyURL, "tests": tests, "overall": overall, "server_info": info})
+	ok(w, "OK", map[string]any{"success": overall, "tests": tests, "overall": overall, "server_info": info})
+}
+
+func safeEmbyServerInfo(info map[string]any) map[string]any {
+	if info == nil {
+		return nil
+	}
+	return map[string]any{
+		"name":    firstNonEmpty(asString(info["ServerName"]), asString(info["Name"])),
+		"version": asString(info["Version"]),
+		"os":      firstNonEmpty(asString(info["OperatingSystemDisplayName"]), asString(info["OperatingSystem"])),
+		"id":      asString(info["Id"]),
+	}
 }
 
 func (a *App) embyBackendLocalProbeCandidates() []string {
@@ -296,6 +385,7 @@ func (a *App) handleEmbyCleanupOrphans(w http.ResponseWriter, r *http.Request, _
 			cleaned = append(cleaned, map[string]any{"uid": updated.UID, "username": updated.Username, "old_emby_id": oldID})
 		}
 	}
+	a.audit(r, "emby_cleanup_orphans", "admin", 0, map[string]any{"count": len(cleaned)})
 	ok(w, "cleanup complete", map[string]any{"cleaned": cleaned, "count": len(cleaned)})
 }
 
@@ -381,9 +471,11 @@ func (a *App) handleEmbyResetBindings(w http.ResponseWriter, r *http.Request, _ 
 		}); err == nil {
 			count++
 		} else {
-			failedItems = append(failedItems, map[string]any{"uid": target.UID, "username": target.Username, "error": err.Error()})
+			zap.L().Warn("admin Emby binding reset failed", zap.Int64("uid", target.UID), zap.String("error", redactSensitiveText(err.Error())))
+			failedItems = append(failedItems, map[string]any{"uid": target.UID, "username": target.Username, "error": "本地绑定清理失败"})
 		}
 	}
+	a.audit(r, "emby_reset_bindings", "admin", 0, map[string]any{"count": count, "remote_disabled": remoteDisabled, "failed_count": len(failedItems)})
 	ok(w, "bindings reset", map[string]any{"count": count, "remote_disabled": remoteDisabled, "failed": failedItems})
 }
 
@@ -419,10 +511,13 @@ func (a *App) handleEmbyDeleteUnlinked(w http.ResponseWriter, r *http.Request, _
 			continue
 		}
 		if err := a.embyDelete(r.Context(), "/Users/"+urlPathEscape(id)); err != nil {
-			failedItems = append(failedItems, map[string]any{"emby_id": id, "emby_name": name, "reason": err.Error()})
+			failedItems = append(failedItems, map[string]any{"emby_id": id, "emby_name": name, "reason": "远端账号删除失败"})
 			continue
 		}
 		deleted = append(deleted, record)
+	}
+	if !dryRun {
+		a.audit(r, "emby_delete_unlinked", "admin", 0, map[string]any{"candidates": len(candidates), "deleted": len(deleted), "failed_count": len(failedItems)})
 	}
 	ok(w, "delete complete", map[string]any{"candidates": candidates, "deleted": deleted, "failed": failedItems, "count": len(candidates), "dry_run": dryRun})
 }
@@ -435,8 +530,10 @@ func (a *App) handleCreateStandaloneEmbyV2(w http.ResponseWriter, r *http.Reques
 		failWithCode(w, http.StatusBadRequest, ErrEmbyUsernameInvalid, "Emby 用户名不合法，长度需在 1-64 之间")
 		return
 	}
-	if len(password) < 8 {
-		failWithCode(w, http.StatusBadRequest, ErrEmbyPasswordTooShort, "密码长度需至少 8 位")
+	if okPass, message := validateStrongPassword(password, "password"); !okPass {
+		// 独立账号不会进入本地用户的密码修改链路，因此这里也必须走同一套
+		// 后端强度规则，不能只依赖 V1/V2 页面上的 minlength 提示。
+		failWithCode(w, http.StatusBadRequest, ErrPasswordWeak, message)
 		return
 	}
 	if a.requireEmbyConfigured(w) {
@@ -462,6 +559,7 @@ func (a *App) handleCreateStandaloneEmbyV2(w http.ResponseWriter, r *http.Reques
 		failWithCode(w, http.StatusBadGateway, ErrEmbySetPasswordFailed, "设置 Emby 用户密码失败，请稍后重试或检查上游 Emby 状态")
 		return
 	}
+	a.audit(r, "emby_create_standalone", "admin", 0, map[string]any{"emby_user_id": embyID})
 	ok(w, "Emby user created", map[string]any{"emby_id": embyID, "emby_username": firstNonEmpty(asString(createdUser["Name"]), username)})
 }
 
