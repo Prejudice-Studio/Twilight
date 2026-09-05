@@ -911,6 +911,79 @@ export interface AdminViolationsPageData {
   loadError: string | null;
 }
 
+export interface Regcode {
+  code: string;
+  type: number;
+  type_name: string;
+  is_decoy?: boolean;
+  days: number;
+  validity_time?: number;
+  expires_at?: number;
+  use_count?: number;
+  use_count_limit?: number;
+  active?: boolean;
+  status?: "available" | "disabled" | "used_up" | "expired" | string;
+  note?: string;
+  target_username?: string;
+  target_telegram_username?: string;
+  target_telegram_id?: number;
+  target_uid?: number;
+  target_resolved_username?: string;
+  used_by_uids?: number[];
+  used_by_usernames?: string[];
+  used_by_telegram_ids?: number[];
+  created_time?: number;
+  source?: string;
+  creator_uid?: number;
+  creator_username?: string;
+  paused_seconds?: number;
+  pause_start?: number;
+}
+
+export interface RegcodePage {
+  regcodes: Regcode[];
+  total: number;
+  page: number;
+  per_page: number;
+}
+
+export interface RegcodeUsageUser {
+  uid?: number;
+  username?: string;
+  active?: boolean;
+  emby_id?: string;
+  emby_bound?: boolean;
+  telegram_id?: number;
+  found: boolean;
+  source: "uid" | "telegram";
+}
+
+export interface RegcodeUsagePage {
+  code: string;
+  use_count: number;
+  users: RegcodeUsageUser[];
+  telegram_only?: Array<{ telegram_id: number; found: false; source: "telegram" }>;
+}
+
+export interface AdminRegcodesPageData {
+  payload: RegcodePage | null;
+  usage: RegcodeUsagePage | null;
+  query: {
+    page: number;
+    per_page: number;
+    type: string;
+    status: string;
+    source: string;
+    search: string;
+    sort: string;
+    order: string;
+    usage: string;
+  };
+  notice: "created" | "updated" | "deleted" | "batch_deleted" | "usage_cleared" | "";
+  loadError: string | null;
+  usageError: string | null;
+}
+
 export interface AdminEmbyAuditUser {
   emby_user_id: string;
   emby_user_name: string;
