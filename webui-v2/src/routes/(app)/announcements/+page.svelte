@@ -22,7 +22,8 @@
   }
 
   function isExpired(announcement: Announcement): boolean {
-    return announcement.expires_at > 0 && announcement.expires_at <= data.now;
+    const expiry = announcement.expired_at ?? announcement.expires_at ?? 0;
+    return expiry > 0 && expiry <= data.now;
   }
 </script>
 

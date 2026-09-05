@@ -968,9 +968,30 @@ export interface Announcement {
   visible: boolean;
   force_read?: boolean;
   force_read_seconds?: number;
-  expires_at: number;
+  expires_at?: number;
+  expired_at?: number;
   created_at: number;
   updated_at: number;
+}
+
+export interface AdminAnnouncementPage {
+  announcements: Announcement[];
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+}
+
+export interface AdminAnnouncementsPageData {
+  payload: AdminAnnouncementPage | null;
+  query: {
+    page: number;
+    per_page: number;
+    include_invisible: boolean;
+    include_expired: boolean;
+  };
+  notice?: "created" | "updated" | "deleted" | "hidden" | "shown" | "pinned" | "unpinned" | "";
+  loadError: string | null;
 }
 
 export interface UserAnnouncements {
