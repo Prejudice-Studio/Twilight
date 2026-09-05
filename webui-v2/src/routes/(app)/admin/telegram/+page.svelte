@@ -185,7 +185,7 @@
 <section class="telegram-page" aria-labelledby="telegram-title">
   <header class="page-heading">
     <div><p class="eyebrow">{t.adminArea}</p><h1 id="telegram-title">{t.adminTelegramTitle}</h1><p class="muted">{t.adminTelegramDescription}</p></div>
-    <div class="heading-actions"><a class="text-link" href="/admin/status">{t.adminStatusTitle}</a><a class="button secondary" href="/admin/telegram">{t.adminTelegramRefresh}</a></div>
+    <div class="heading-actions"><a class="text-link" href="/admin/status">{t.adminStatusTitle}</a><a class="text-link" href="/admin/telegram-rebind-requests">{t.adminTelegramRebindOpen}</a><a class="button secondary" href="/admin/telegram">{t.adminTelegramRefresh}</a></div>
   </header>
 
   {#if data.errors.length}<div class="notice warning" role="alert">{data.errors.join("；")}</div>{/if}

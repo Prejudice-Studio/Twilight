@@ -862,6 +862,35 @@ export interface AdminTelegramPageData {
   notice: string;
 }
 
+export interface TelegramRebindRequest {
+  id: number;
+  uid: number;
+  username?: string | null;
+  old_telegram_id?: number | null;
+  status: "pending" | "approved" | "rejected" | "revoked" | (string & {});
+  reason?: string | null;
+  admin_note?: string | null;
+  reviewer_uid?: number | null;
+  created_at: number;
+  reviewed_at?: number | null;
+}
+
+export interface TelegramRebindPage {
+  requests: TelegramRebindRequest[];
+  total: number;
+  page: number;
+  per_page: number;
+}
+
+export interface AdminTelegramRebindPageData {
+  payload: TelegramRebindPage | null;
+  status: "all" | "pending" | "approved" | "rejected" | "revoked";
+  page: number;
+  perPage: number;
+  loadError: string | null;
+  notice: "reviewed" | "batch_reviewed" | "revoked" | "";
+}
+
 export interface ConfigToml {
   content: string;
   raw_content?: string;

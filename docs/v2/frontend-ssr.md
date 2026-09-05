@@ -243,3 +243,9 @@ V2 调度器不使用浏览器轮询或 SSE。任务仍在后端异步运行，�
 配置保存和 Bot 测试都通过 SvelteKit form action 转发当前 HttpOnly 会话。action 会重新限制字段类型、列表数量、文本大小、并发范围和自定义指令结构，Go 后端继续负责最终配置归一、热重载、权限和审计。Bot 测试只回传成功摘要或通用失败文案，不回传 Telegram 上游错误、内部地址或 Token。
 
 内置指令目录来自 `/admin/telegram/commands/catalog`，禁用状态写回 `Telegram.disabled_commands`；自定义指令写回 `Telegram.bot_custom_commands`，不建立第二份运行时存储。内置指令不能被覆盖，JS 回复仍受开发者模式沙箱约束。页面不使用浏览器轮询/SSE，指令列表和编辑区域具有 Firefox 兼容的有界滚动，窄视口下控件堆叠并允许文本换行。
+
+## 已迁移模块：管理员 Telegram 换绑审批
+
+`/(app)/admin/telegram-rebind-requests` 使用管理员服务端布局和 URL 分页筛选，默认只读取待处理请求的当前 20 条摘要。单项批准/拒绝通过当前页面的 form action 提交；待处理请求可以用标准 checkbox 多选后批量处理，选中 ID 在服务端重新校验并限制在后端允许的批量范围内。
+
+撤销全部已批准但未使用的换绑许可是单独的危险操作，V2 action 要求输入固定确认短语后才会转发，并只显示通用失败文案。所有结果依赖 Go 后端的最终权限、状态转换、持久化和审计；页面没有浏览器缓存、轮询或 SSE，长列表使用 Firefox 有界滚动并在窄视口堆叠操作表单。
