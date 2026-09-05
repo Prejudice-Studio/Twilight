@@ -17,6 +17,7 @@
     {#if data.user}
       <nav aria-label="主导航">
         <a href="/dashboard">{t.dashboard}</a>
+        <a href="/wiki">Wiki</a>
         <a href="/announcements">{t.announcements}</a>
         <a href="/score">{t.signin}</a>
         <a href="/invite">{t.inviteTitle}</a>

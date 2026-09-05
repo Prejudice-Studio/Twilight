@@ -53,6 +53,7 @@ Update docs in the same change when behavior changes.
 - `webui-v2/src/routes/setup`: one-time SSR initialization wizard; the backend remains the setup gate and session issuer.
 - `webui-v2/src/routes/(app)/bangumi`: Bangumi SSR summary, collection pagination, and form actions.
 - `webui-v2/src/routes/(app)/media`: Media search, detail, Emby inventory checks, and user request actions through SSR.
+- `webui-v2/src/routes/wiki`: Public SSR usage guide and safe links to user/API entry points.
 - `webui-v2/src/routes/(app)/admin/status`: Admin-only SSR server status, independent health probes, and bounded runtime summaries.
 - `webui-v2/src/routes/(app)/admin`: Admin-only SSR module index backed by lightweight system info and statistics summaries.
 - `webui-v2/src/routes/(app)/admin/users`: Admin-only SSR user list, server-side filters, grouped account actions, and bounded mobile-safe rendering.
