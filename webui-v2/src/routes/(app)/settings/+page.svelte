@@ -47,6 +47,12 @@
         </dl>
       </article>
 
+      <article class="panel api-key-link-panel">
+        <div class="panel-heading"><h2>{t.apiKeyTitle}</h2></div>
+        <p class="muted">{t.apiKeyDescription}</p>
+        <a class="button secondary" href="/settings/apikey">{t.settingsOpenApiKeys}</a>
+      </article>
+
       <article class="panel">
         <div class="panel-heading"><h2>{t.notifications}</h2></div>
         <form method="POST" action="?/preferences" class="stack-form">

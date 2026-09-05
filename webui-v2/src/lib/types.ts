@@ -208,6 +208,29 @@ export interface AdminEmailPageData {
   notice: "revoked" | "cleaned" | "cleared" | "";
 }
 
+export interface ApiKeyItem {
+  id: number;
+  name: string;
+  key: string;
+  key_prefix: string;
+  key_suffix: string;
+  enabled: boolean;
+  allow_query: boolean;
+  permissions?: string[];
+  rate_limit: number;
+  request_count: number;
+  last_used: number | null;
+  created_at: number;
+  expired_at: number | null;
+}
+
+export interface MyApiKeysPageData {
+  keys: ApiKeyItem[];
+  total: number;
+  loadError: string | null;
+  notice: "updated" | "deleted" | "";
+}
+
 export interface TelegramSettings {
   bound: boolean;
   telegram_id?: number;
