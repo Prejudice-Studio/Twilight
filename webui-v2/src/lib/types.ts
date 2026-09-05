@@ -510,6 +510,34 @@ export interface MediaRequest {
   note?: string;
 }
 
+export interface AdminMediaRequest extends MediaRequest {
+  user?: { uid?: number; username?: string; telegram_id?: number };
+  group_key?: string;
+  group_count?: number;
+  grouped_requests?: AdminMediaRequest[];
+}
+
+export interface MediaRequestStatusCounts {
+  all: number;
+  active: number;
+  pending: number;
+  accepted: number;
+  downloading: number;
+  rejected: number;
+  completed: number;
+}
+
+export interface AdminMediaRequestListResponse {
+  requests: AdminMediaRequest[];
+  total: number;
+  request_total: number;
+  page: number;
+  per_page: number;
+  total_pages: number;
+  has_next: boolean;
+  status_counts: MediaRequestStatusCounts;
+}
+
 export type TicketStatus = "open" | "in_progress" | "resolved" | "closed";
 export type TicketPriority = "low" | "medium" | "high" | "urgent";
 
