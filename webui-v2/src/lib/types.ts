@@ -837,6 +837,48 @@ export interface AdminEmbyAuditLocalUser {
   pending_emby: boolean;
 }
 
+export interface AuditLogEntry {
+  id: number;
+  uid: number;
+  username: string;
+  action: string;
+  category: "admin" | "user" | "system" | string;
+  source?: "http" | "telegram" | "scheduler" | "system" | string;
+  method?: string;
+  target_uid?: number | null;
+  detail?: Record<string, unknown> | null;
+  ip?: string;
+  created_at: number;
+}
+
+export interface AuditLogPage {
+  logs: AuditLogEntry[];
+  total: number;
+  page: number;
+  per_page: number;
+  sort?: string;
+  order?: string;
+}
+
+export interface AdminAuditLogsPageData {
+  payload: AuditLogPage | null;
+  notice?: "deleted" | "cleared" | "pruned" | "";
+  query: {
+    page: number;
+    per_page: number;
+    preset: string;
+    category: string;
+    action: string;
+    time: string;
+    sort: string;
+    order: string;
+    uid: number;
+    target_uid: number;
+    search: string;
+  };
+  loadError: string | null;
+}
+
 export interface AdminEmbyAuditUser {
   emby_user_id: string;
   emby_user_name: string;
