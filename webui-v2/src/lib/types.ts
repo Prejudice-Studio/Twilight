@@ -809,6 +809,59 @@ export interface ConfigSchema {
   categories?: ConfigCategory[];
 }
 
+export interface TelegramCommandCatalogItem {
+  command: string;
+  name: string;
+  label: string;
+  description: string;
+  usage: string;
+  category: "user" | "admin" | "system" | "group" | (string & {});
+  private: boolean;
+  admin: boolean;
+  disableable: boolean;
+  disabled: boolean;
+}
+
+export interface TelegramCommandCatalog {
+  commands: TelegramCommandCatalogItem[];
+  disabled_commands: string[];
+}
+
+export interface TelegramRosterStats {
+  available: boolean;
+  reason?: string;
+  chat_id?: string;
+  active?: number;
+  inactive?: number;
+  bots?: number;
+  first_seen_at?: number | null;
+  last_seen_at?: number | null;
+}
+
+export interface TelegramBotTestResult {
+  target: string;
+  success: boolean;
+  error?: string;
+  username?: string;
+  bot_id?: number | null;
+  title?: string;
+  bot_status?: string;
+}
+
+export interface TelegramBotRuntime {
+  polling?: boolean;
+  last_ok_at?: number | null;
+  last_error_at?: number | null;
+}
+
+export interface AdminTelegramPageData {
+  telegram: ConfigSection | null;
+  commands: TelegramCommandCatalog | null;
+  roster: TelegramRosterStats | null;
+  errors: string[];
+  notice: string;
+}
+
 export interface ConfigToml {
   content: string;
   raw_content?: string;

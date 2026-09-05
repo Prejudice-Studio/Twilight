@@ -235,3 +235,11 @@ V2 调度器不使用浏览器轮询或 SSE。任务仍在后端异步运行，�
 批量断开、只清理已禁用 Emby、选中/子树/全量断开并续期、级联启停、级联删除和配置保存都通过 SvelteKit form action 转发当前 HttpOnly 会话。action 会重新校验 UID、数量、层级、续期天数和配置字段；确认短语、管理员保护、`renew_days=-1`、已禁用账号不续期以及邀请系统关闭后的历史维护仍由 Go 后端最终决定并写入审计。邀请码管理当前是服务端筛选分页的安全摘要读取，没有为不存在的管理员删除接口伪造删除能力。
 
 表格、邀请码列表和移动端操作组使用 Firefox 有界滚动/换行规则；页面没有轮询或浏览器端 API 请求。邀请配置只提交白名单字段，服务端 action 会先重新读取完整 schema，再合并邀请字段并保存，因而不会因旧页面或并发编辑覆盖其它配置段，也不会向浏览器暴露 secret 字段。
+
+## 已迁移模块：管理员 Telegram 管理
+
+`/(app)/admin/telegram` 是 Telegram 管理的 SSR 页面。服务端 `load` 并行读取 Telegram 配置 schema、后端权威指令目录和花名册摘要；失败项互不覆盖，浏览器只收到 Telegram 页面需要的白名单字段，不包含 Bot Token、API 地址或其它敏感配置。页面显示 Bot 手动连通性测试、群组/频道策略、Bot 文案、`/twguser` 面板模板、占位符和自定义文本/JS 指令编辑器。
+
+配置保存和 Bot 测试都通过 SvelteKit form action 转发当前 HttpOnly 会话。action 会重新限制字段类型、列表数量、文本大小、并发范围和自定义指令结构，Go 后端继续负责最终配置归一、热重载、权限和审计。Bot 测试只回传成功摘要或通用失败文案，不回传 Telegram 上游错误、内部地址或 Token。
+
+内置指令目录来自 `/admin/telegram/commands/catalog`，禁用状态写回 `Telegram.disabled_commands`；自定义指令写回 `Telegram.bot_custom_commands`，不建立第二份运行时存储。内置指令不能被覆盖，JS 回复仍受开发者模式沙箱约束。页面不使用浏览器轮询/SSE，指令列表和编辑区域具有 Firefox 兼容的有界滚动，窄视口下控件堆叠并允许文本换行。

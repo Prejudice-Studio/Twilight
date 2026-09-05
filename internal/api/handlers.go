@@ -2277,20 +2277,20 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request, _ Params) {
 	results := []map[string]any{}
 	if !a.cfg().TelegramMode {
 		results = append(results, map[string]any{"target": "配置", "success": false, "error": "telegram_mode 未启用"})
-		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatus()})
+		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatusSummary()})
 		return
 	}
 	if strings.TrimSpace(a.cfg().TelegramBotToken) == "" {
 		results = append(results, map[string]any{"target": "Bot Token", "success": false, "error": "未配置 Telegram Bot Token"})
-		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatus()})
+		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatusSummary()})
 		return
 	}
 	testCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	me, err := a.telegramGetMe(testCtx)
 	if err != nil {
-		results = append(results, map[string]any{"target": "Bot getMe", "success": false, "error": err.Error()})
-		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatus()})
+		results = append(results, map[string]any{"target": "Bot getMe", "success": false, "error": "Telegram 连接测试失败，请检查 Bot 配置和网络"})
+		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatusSummary()})
 		return
 	}
 	botID := me.ID
@@ -2300,13 +2300,13 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request, _ Params) {
 		chat, err := a.telegramGetChat(testCtx, chatID)
 		item := map[string]any{"target": " 群组 " + chatID, "success": err == nil}
 		if err != nil {
-			item["error"] = err.Error()
+			item["error"] = "Telegram 群组检测失败，请检查群组 ID 和 Bot 权限"
 		} else {
 			item["title"] = firstNonEmpty(chat.Title, chat.Username)
 			if botID != 0 {
 				if member, memberErr := a.telegramGetChatMember(testCtx, chatID, botID); memberErr != nil {
 					item["success"] = false
-					item["error"] = memberErr.Error()
+					item["error"] = "Telegram Bot 群组权限检测失败，请检查 Bot 是否仍在群组中"
 				} else {
 					item["bot_status"] = member.Status
 				}
@@ -2318,13 +2318,13 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request, _ Params) {
 		chat, err := a.telegramGetChat(testCtx, chatID)
 		item := map[string]any{"target": "频道 " + chatID, "success": err == nil}
 		if err != nil {
-			item["error"] = err.Error()
+			item["error"] = "Telegram 频道检测失败，请检查频道 ID 和 Bot 权限"
 		} else {
 			item["title"] = firstNonEmpty(chat.Title, chat.Username)
 		}
 		results = append(results, item)
 	}
-	ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatus()})
+	ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatusSummary()})
 }
 
 func (a *App) handleEmbyStatus(w http.ResponseWriter, r *http.Request, _ Params) {

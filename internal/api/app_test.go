@@ -7525,6 +7525,31 @@ func TestTelegramRosterStatsUsesObservedMembers(t *testing.T) {
 	}
 }
 
+func TestTelegramBotTestDoesNotExposeUpstreamError(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().TelegramMode = true
+	app.cfg().TelegramBotToken = "123:SECRET"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":false,"error_code":502,"description":"dial http://10.0.0.8:65535 failed with bot 123:SECRET"}`))
+	}))
+	defer upstream.Close()
+	app.cfg().TelegramAPIURL = upstream.URL
+
+	cookies := registerAndLogin(t, app, "admin", "Admin123456")
+	resp := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/bot/test", `{}`, cookies, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("bot test status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	body := resp.Body.String()
+	if strings.Contains(body, "123:SECRET") || strings.Contains(body, "10.0.0.8") || strings.Contains(body, "dial") {
+		t.Fatalf("bot test exposed upstream diagnostics: %s", body)
+	}
+	if !strings.Contains(body, "Telegram 连接测试失败") {
+		t.Fatalf("bot test did not return generic failure: %s", body)
+	}
+}
+
 func TestUserStatsEndpointRemoved(t *testing.T) {
 	app := newTestApp(t)
 	_ = doJSON(app, http.MethodPost, "/api/v1/users/register", `{"username":"root","password":"Root123456"}`, nil)

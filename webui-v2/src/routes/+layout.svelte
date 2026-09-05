@@ -24,7 +24,7 @@
         <a href="/media">{t.media}</a>
         <a href="/tickets">{t.tickets}</a>
         <a href="/settings">{t.settings}</a>
-        {#if data.user.role === 0}<a href="/admin/status">{t.adminStatusTitle}</a><a href="/admin/users">{t.adminUsersTitle}</a><a href="/admin/emby">{t.adminEmbyTitle}</a><a href="/admin/tickets">{t.adminTicketsTitle}</a><a href="/admin/requests">{t.adminRequestsTitle}</a><a href="/admin/invite">{t.adminInviteTitle}</a><a href="/admin/regcodes">{t.adminRegcodesTitle}</a><a href="/admin/audit-logs">{t.adminAuditLogTitle}</a><a href="/admin/violations">{t.adminViolationsTitle}</a><a href="/admin/announcements">{t.adminAnnouncementsTitle}</a><a href="/admin/logs">{t.adminRuntimeLogsTitle}</a><a href="/admin/config">{t.adminConfigTitle}</a><a href="/admin/database">{t.adminDatabaseTitle}</a>{/if}
+        {#if data.user.role === 0}<a href="/admin/status">{t.adminStatusTitle}</a><a href="/admin/users">{t.adminUsersTitle}</a><a href="/admin/emby">{t.adminEmbyTitle}</a><a href="/admin/telegram">{t.adminTelegramTitle}</a><a href="/admin/tickets">{t.adminTicketsTitle}</a><a href="/admin/requests">{t.adminRequestsTitle}</a><a href="/admin/invite">{t.adminInviteTitle}</a><a href="/admin/regcodes">{t.adminRegcodesTitle}</a><a href="/admin/audit-logs">{t.adminAuditLogTitle}</a><a href="/admin/violations">{t.adminViolationsTitle}</a><a href="/admin/announcements">{t.adminAnnouncementsTitle}</a><a href="/admin/logs">{t.adminRuntimeLogsTitle}</a><a href="/admin/config">{t.adminConfigTitle}</a><a href="/admin/database">{t.adminDatabaseTitle}</a>{/if}
         <form method="POST" action="/logout">
           <button type="submit">{t.logout}</button>
         </form>

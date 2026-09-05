@@ -110,6 +110,15 @@ func (a *App) telegramRuntimeStatus() map[string]any {
 	}
 }
 
+// telegramRuntimeStatusSummary is the browser-safe subset used by the admin
+// connectivity test. The detailed last_error remains an internal runtime
+// diagnostic because it can contain upstream URLs and transport metadata.
+func (a *App) telegramRuntimeStatusSummary() map[string]any {
+	status := a.telegramRuntimeStatus()
+	delete(status, "last_error")
+	return status
+}
+
 func (a *App) telegramSanitizeError(err error) string {
 	if err == nil {
 		return ""
