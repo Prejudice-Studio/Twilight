@@ -69,6 +69,7 @@ Update docs in the same change when behavior changes.
 - `webui-v2/src/routes/(app)/admin/scheduler`: Admin-only SSR scheduler job summaries, manual actions, schedule maintenance, and bounded run history.
 - `webui-v2/src/routes/(app)/admin/telegram`: Admin-only SSR Telegram configuration, Bot connectivity test, roster summary, command catalog, and bounded custom-command editor.
 - `webui-v2/src/routes/(app)/admin/telegram-rebind-requests`: Admin-only SSR Telegram rebind review, paginated status filters, bulk review, and guarded approval revocation.
+- `webui-v2/src/routes/(app)/admin/email`: Admin-only SSR email verification review, paginated account status, maintenance actions, and sanitized SMTP testing.
 - `webui-v2/src/lib/server`: V2 server-only API proxy, bounded response parsing, and session forwarding.
 - `webui/src/lib/api-request.ts`: low-level request wrapper, credentials, timeout, and `ApiError`.
 - `webui/src/lib/api.ts`: frontend API client. New backend routes usually need matching client methods and `api-types.ts` types.

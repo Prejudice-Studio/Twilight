@@ -148,6 +148,66 @@ export interface EmailCodeSent {
   resend_after: number;
 }
 
+export interface EmailVerificationRecord {
+  id: string;
+  purpose: string;
+  email: string;
+  email_masked?: string;
+  uid: number | null;
+  username: string | null;
+  attempts: number;
+  max_attempts: number;
+  created_at: number;
+  expires_at: number;
+  last_sent_at: number;
+  expired: boolean;
+}
+
+export interface EmailAccountRecord {
+  uid: number;
+  username: string;
+  email: string;
+  email_verified: boolean;
+  email_verified_at: number | null;
+  telegram_id: number | null;
+  telegram_username: string | null;
+  role: number;
+  active: boolean;
+}
+
+export interface EmailAdminSummary {
+  total_pending: number;
+  expired_pending: number;
+  total_with_email: number;
+  verified: number;
+  unverified: number;
+}
+
+export interface EmailAdminData {
+  view?: "pending" | "accounts" | "summary" | "";
+  page?: number;
+  per_page?: number;
+  total?: { pending: number; accounts: number };
+  pages?: { pending: number; accounts: number };
+  smtp_configured: boolean;
+  email_enabled: boolean;
+  force_bind: boolean;
+  pending: EmailVerificationRecord[];
+  accounts: EmailAccountRecord[];
+  summary: EmailAdminSummary;
+}
+
+export interface AdminEmailPageData {
+  payload: EmailAdminData | null;
+  view: "pending" | "accounts";
+  page: number;
+  perPage: number;
+  search: string;
+  verified: "all" | "verified" | "unverified";
+  loadError: string | null;
+  notice: "revoked" | "cleaned" | "cleared" | "";
+}
+
 export interface TelegramSettings {
   bound: boolean;
   telegram_id?: number;
