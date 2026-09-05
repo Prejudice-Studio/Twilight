@@ -22,6 +22,7 @@
     { href: "/admin/requests", title: t.adminRequestsTitle, description: t.adminRequestsDescription, category: "content" },
     { href: "/admin/tickets", title: t.adminTicketsTitle, description: t.adminTicketsDescription, category: "content" },
     { href: "/admin/announcements", title: t.adminAnnouncementsTitle, description: t.adminAnnouncementsDescription, category: "content" },
+    { href: "/admin/security", title: t.adminSecurityTitle, description: t.adminSecurityDescription, category: "security" },
     { href: "/admin/audit-logs", title: t.adminAuditLogTitle, description: t.adminAuditLogDescription, category: "security" },
     { href: "/admin/violations", title: t.adminViolationsTitle, description: t.adminViolationsDescription, category: "security" },
     { href: "/admin/status", title: t.adminStatusTitle, description: t.adminStatusDescription, category: "operations" },
