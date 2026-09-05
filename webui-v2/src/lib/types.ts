@@ -231,6 +231,71 @@ export interface MyApiKeysPageData {
   notice: "updated" | "deleted" | "";
 }
 
+export interface DeveloperJSPreset {
+  id: number;
+  name: string;
+  description?: string;
+  code: string;
+  creator_uid?: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface DeveloperJSPreviewResult {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  risk_tokens?: string[];
+  output?: string;
+  logs?: string[];
+  duration_ms?: number;
+  metrics?: { bytes: number; chars: number; lines: number; max_bytes: number; timeout_ms: number; reply_limit: number; log_limit: number };
+  diagnostics?: { severity: string; blocked_count: number; risk_count: number; requires_review: boolean };
+  preview_context?: { command: string; args: string[]; private_chat: boolean };
+}
+
+export interface DeveloperJSDocParam {
+  name: string;
+  type?: string;
+  required?: boolean;
+  description: string;
+  default?: string;
+}
+
+export interface DeveloperJSDocEntry {
+  name: string;
+  category: string;
+  type?: string;
+  description: string;
+  example?: string;
+  mutates?: boolean;
+  scope?: string;
+  fields?: string[];
+  params?: DeveloperJSDocParam[];
+  returns?: string;
+}
+
+export interface DeveloperJSDocs {
+  engine: { name: string; module: string; version: string; description: string; language: string; timeout_ms: number; sandbox: string[] };
+  bindings: DeveloperJSDocEntry[];
+  functions: DeveloperJSDocEntry[];
+  namespaces: DeveloperJSDocEntry[];
+  native_objects: DeveloperJSDocEntry[];
+  config_keys: string[];
+  env_keys: string[];
+  examples: Array<{ id: string; title: string; description: string; code: string }>;
+  blocked_tokens: string[];
+  risk_tokens?: string[];
+}
+
+export interface AdminDeveloperPageData {
+  developerModeEnabled: boolean;
+  presets: DeveloperJSPreset[];
+  docs: DeveloperJSDocs | null;
+  loadError: string | null;
+  notice: "saved" | "deleted" | "";
+}
+
 export interface TelegramSettings {
   bound: boolean;
   telegram_id?: number;
