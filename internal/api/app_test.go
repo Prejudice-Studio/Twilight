@@ -4886,6 +4886,50 @@ func TestSchedulerManualTriggerSpecDisablesAutoRun(t *testing.T) {
 	}
 }
 
+func TestSchedulerHistoryIsBoundedAndLastRunOmitsLogs(t *testing.T) {
+	app := newTestApp(t)
+	for i := 0; i < 25; i++ {
+		if err := app.store().AddSchedulerRun(store.SchedulerRun{
+			JobID:     "daily_stats",
+			Type:      "manual",
+			Trigger:   "manual",
+			Status:    "success",
+			StartedAt: int64(i + 1),
+			Logs:      []string{"sensitive-looking log output"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	historyReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scheduler/jobs/daily_stats/history?limit=200", nil)
+	historyRR := httptest.NewRecorder()
+	app.handleSchedulerHistory(historyRR, historyReq, Params{"job_id": "daily_stats"})
+	if historyRR.Code != http.StatusOK {
+		t.Fatalf("history status=%d body=%s", historyRR.Code, historyRR.Body.String())
+	}
+	var history struct {
+		Data struct {
+			History []store.SchedulerRun `json:"history"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(historyRR.Body.Bytes(), &history); err != nil {
+		t.Fatal(err)
+	}
+	if len(history.Data.History) != 20 {
+		t.Fatalf("history should be capped at 20 rows, got %d", len(history.Data.History))
+	}
+
+	lastReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scheduler/jobs/daily_stats/last-run", nil)
+	lastRR := httptest.NewRecorder()
+	app.handleSchedulerLastRun(lastRR, lastReq, Params{"job_id": "daily_stats"})
+	if lastRR.Code != http.StatusOK {
+		t.Fatalf("last-run status=%d body=%s", lastRR.Code, lastRR.Body.String())
+	}
+	if strings.Contains(lastRR.Body.String(), "sensitive-looking log output") {
+		t.Fatalf("last-run summary should not duplicate log output: %s", lastRR.Body.String())
+	}
+}
+
 func TestSchedulerJobsReconcileStaleRunningHistory(t *testing.T) {
 	app := newTestApp(t)
 	run, err := app.store().AddSchedulerRunReturning(store.SchedulerRun{JobID: "enforce_group_membership", Type: "auto", Trigger: "scheduler", Status: "running", Message: "running", StartedAt: time.Now().Add(-time.Hour).Unix()})

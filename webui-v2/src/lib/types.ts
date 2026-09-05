@@ -655,6 +655,59 @@ export interface SetupResult {
   setup_completed: boolean;
 }
 
+export interface SchedulerJobRun {
+  id?: number;
+  job_id?: string;
+  type?: "auto" | "manual";
+  trigger?: string;
+  status: "running" | "success" | "failed";
+  started_at: number;
+  finished_at: number | null;
+  error: string | null;
+  summary?: Record<string, unknown> | null;
+  logs?: string[];
+}
+
+export type SchedulerTriggerSpec =
+  | { type: "cron_daily"; hour: number; minute: number }
+  | { type: "interval"; seconds: number }
+  | { type: "manual" };
+
+export interface SchedulerJobItem {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  next_run_at: number | null;
+  last_run: SchedulerJobRun | null;
+  is_running: boolean;
+  trigger_spec: SchedulerTriggerSpec;
+  default_trigger_spec: SchedulerTriggerSpec;
+  is_custom: boolean;
+  auto_disabled?: boolean;
+  last_auto_run_at?: number | null;
+  last_manual_run_at?: number | null;
+  manual_only?: boolean;
+  runtime_params?: Record<string, unknown> | null;
+}
+
+export interface SchedulerRunDetail {
+  job_id: string;
+  last_run: SchedulerJobRun | null;
+  history: SchedulerJobRun[];
+}
+
+export interface AdminSchedulerPageData {
+  jobs: SchedulerJobItem[];
+  view: string;
+  notice: string;
+  selected_job_id: string;
+  selected_job: SchedulerJobItem | null;
+  logs: SchedulerRunDetail | null;
+  refreshed_at: number;
+  load_error: string | null;
+}
+
 export interface SystemHealthDetail {
   ok?: boolean;
   online?: boolean;
