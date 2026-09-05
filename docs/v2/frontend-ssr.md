@@ -24,6 +24,8 @@ webui-v2/
       +layout.server.ts      # 根布局会话数据
       +layout.svelte         # 轻量 SSR 壳层
       login/                  # 登录 form action
+      forgot-password/        # 邮箱/Emby 找回密码 form actions
+      setup/                   # 一次性初始化向导 form action
       logout/                # 登出 server endpoint
       (app)/dashboard/        # 首个已迁移的仪表盘摘要
       (app)/announcements/    # 公告和强制阅读确认
@@ -86,6 +88,12 @@ webui-v2/
 `/register` 使用服务端 `load` 读取注册开关/容量摘要与公开系统能力，默认 action 将用户名、邮箱、注册码和 Telegram 注册绑定码提交到 Go 的 `/users/register`。密码确认只用于用户体验，密码强度、注册码消费、Telegram 绑定码原子消费、邮箱冲突和容量限制仍由 Go 后端决定。
 
 Telegram 注册绑定码生成使用独立的 `createBindCode` form action；启用 JavaScript 时通过 `use:enhance` 只更新当前页的临时码，不把会话凭据或 Bot Token 放入浏览器。注册提交不依赖客户端状态判断，服务器会再次验证绑定码是否已确认，因此刷新、重复提交或旧页面状态不会绕过注册条件。
+
+## 已迁移模块：认证辅助页面
+
+`/forgot-password` 使用服务端 `load` 读取公开功能开关，邮箱发码、邮箱重置和 Emby 验证分别由 SvelteKit form action 转发到 Go 后端。浏览器不会直接调用找回密码 API，也不会接触上游错误原文；邮箱流程保留统一成功/失败文案以避免账号枚举，Emby 流程返回的临时 Web 密码只存在当前 action 结果中，不进入 URL、缓存或持久化状态。
+
+`/setup` 使用服务端 `load` 读取初始化可用状态和站点摘要，初始化表单由服务端构造严格的嵌套 payload，并携带 `X-Twilight-Client: webui` 与 `X-Twilight-Intent: complete-setup`。服务器接收后端下发的 host-only、HttpOnly 会话 Cookie 后再重定向到管理员状态页；初始化资格、密码强度、配置字段校验和一次性关闭入口仍由 Go 后端最终决定。Emby Token、Bot Token、SMTP 密码只在 action 请求体中传输，不被写入浏览器状态。
 
 ## 已迁移模块：用户工单
 

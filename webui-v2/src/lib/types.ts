@@ -617,6 +617,42 @@ export interface SystemInfo {
     enabled?: boolean;
     configured?: boolean;
   };
+  setup?: SetupStatus;
+}
+
+export interface SetupStatus {
+  available: boolean;
+  setup_mode?: boolean;
+  reasons: string[];
+  user_count: number;
+  config_file_exists: boolean;
+}
+
+export interface SetupLine {
+  name?: string;
+  url: string;
+}
+
+export interface SetupPayload {
+  admin: { username: string; password: string; email?: string };
+  global?: { server_name?: string };
+  emby?: { emby_url?: string; emby_token?: string; emby_url_list?: SetupLine[] };
+  telegram?: { enabled?: boolean; bot_token?: string; admin_id?: string[] };
+  email?: {
+    enabled?: boolean;
+    smtp_host?: string;
+    smtp_port?: number;
+    smtp_username?: string;
+    smtp_password?: string;
+    smtp_from_address?: string;
+    smtp_encryption?: string;
+  };
+  policy?: { register_mode?: boolean; register_code_limit?: boolean; allow_pending_register?: boolean };
+}
+
+export interface SetupResult {
+  user: UserInfo;
+  setup_completed: boolean;
 }
 
 export interface SystemHealthDetail {
