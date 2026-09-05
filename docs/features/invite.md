@@ -83,7 +83,7 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 
 ## 管理员接口
 
-管理员邀请树保留完整关系数据用于搜索、根筛选和批量选择，但前端表格默认只挂载 300 行，继续点击「显示更多」才追加下一批，避免 2000+ 用户同时生成大量 DOM 和复选框。表格在自身的受限 Firefox 滚动区域内滚动，不会把页面整体高度无限撑长。批量断开、快捷维护和级联操作在请求期间互斥，防止重复点击造成并发写入。
+管理员邀请树保留完整关系数据用于搜索、根筛选和批量选择，但 SSR 只向浏览器发送当前分页（默认 300 行）和明确选中的详情，避免 2000+ 用户同时生成大量 DOM 和复选框。表格在自身的受限 Firefox 滚动区域内滚动，不会把页面整体高度无限撑长。批量断开、快捷维护和级联操作在请求期间互斥，防止重复点击造成并发写入。
 
 | Method | Path | 鉴权 | 描述 |
 | ------ | ---- | ---- | ---- |
@@ -92,11 +92,13 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 | `POST` | `/admin/invite/users/:uid/detach-delete-emby` | AuthAdmin | 把指定用户从上级断开，并删除其远端 Emby 账号、清空本地 Emby 绑定字段。管理员账号受保护。 |
 | `POST` | `/admin/invite/users/detach-batch` | AuthAdmin | 批量断开邀请关系；请求体 `uids` 为目标 UID 列表，`delete_emby=true` 时同时删除远端 Emby 账号；再传 `only_emby_disabled=true` 时仅处理后端最新状态为 Emby 已禁用且仍有绑定的用户。返回 `total/success/failed/errors/deleted_emby/skipped_not_emby_disabled`。 |
 | `POST` | `/admin/invite/quick-maintenance` | AuthAdmin | 快捷维护：按 `selected` / `subtree` / `all` 范围断开上下级关系，并可给仍启用的下级统一续期指定天数或设为永久。确认短语为 `INVITE_QUICK_MAINTENANCE`。 |
-| `GET` | `/admin/invite/codes` | AuthAdmin | 列出全部邀请码（可按邀请人在前端过滤）。 |
+| `GET` | `/admin/invite/codes` | AuthAdmin | 默认兼容返回全部邀请码；传 `page`、`per_page` 或 `search` 时按 `code`、邀请人 UID/用户名、目标用户名和备注筛选并返回 `{codes,total,page,per_page,pages}`，服务端只富化当前页。 |
 | `POST` | `/admin/users/:uid/delete` | AuthAdmin | 删除用户，支持 JSON body 的 `mode` 与 `cascade_depth`（见下，推荐）。 |
 | `DELETE` | `/admin/users/:uid` | AuthAdmin | 删除用户兼容入口，保留简单删除和旧客户端调用。 |
 | `POST` | `/admin/users/:uid/disable` | AuthAdmin | 禁用用户，支持 `cascade_depth` 级联（见下）。 |
 | `POST` | `/admin/users/:uid/enable` | AuthAdmin | 启用用户，支持 `cascade_depth` 级联（见下）。 |
+
+V2 管理员邀请页只使用上述分页参数并在 SSR 服务端完成展示筛选，不会把全量邀请码或完整邀请森林写入浏览器。邀请树的关系快照仍需要在后端/SSR 边界读取一次，以便计算层级和后代统计，但浏览器只收到当前批次、根节点摘要和当前详情。
 
 > `/admin/users/:uid/delete`、`/admin/users/:uid`、`/admin/users/:uid/disable`、`/admin/users/:uid/enable` 是通用的用户管理接口，并非邀请模块专属，但其级联参数会沿邀请树展开，因此与邀请树语义强相关，下文一并说明。
 

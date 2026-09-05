@@ -247,6 +247,43 @@ func TestInviteReadsRefreshPersistedState(t *testing.T) {
 	}
 }
 
+func TestAdminInviteCodesSupportsBoundedPaginationAndSearch(t *testing.T) {
+	app := newTestApp(t)
+	admin := registerAndLogin(t, app, "admin", "Admin123456")
+	registerAndLogin(t, app, "invite-page-owner", "Owner123456")
+	owner, ok := app.store().FindUserByUsername("invite-page-owner")
+	if !ok {
+		t.Fatal("invite page owner missing")
+	}
+	for _, code := range []string{"INV-PAGE-1", "INV-PAGE-2", "INV-OTHER"} {
+		if err := app.store().UpsertInviteCode(store.InviteCode{
+			Code: code, UID: owner.UID, InviterUID: owner.UID, Days: 30,
+			UseCountLimit: 1, Active: true, Note: "page-test",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	response := doJSON(app, http.MethodGet, "/api/v1/admin/invite/codes?page=2&per_page=1&search=invite-page-owner", "", admin)
+	if response.Code != http.StatusOK {
+		t.Fatalf("paginated invite code status=%d body=%s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Data struct {
+			Codes   []map[string]any `json:"codes"`
+			Total   int              `json:"total"`
+			Page    int              `json:"page"`
+			PerPage int              `json:"per_page"`
+			Pages   int              `json:"pages"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Data.Total != 3 || payload.Data.Page != 2 || payload.Data.PerPage != 1 || payload.Data.Pages != 3 || len(payload.Data.Codes) != 1 {
+		t.Fatalf("unexpected paginated invite code response: %#v body=%s", payload.Data, response.Body.String())
+	}
+}
+
 func TestAdminInviteQuickMaintenanceDetachesAndRenews(t *testing.T) {
 	app := newTestApp(t)
 	admin := registerAndLogin(t, app, "admin", "Admin123456")

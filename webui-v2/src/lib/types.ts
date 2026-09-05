@@ -294,6 +294,67 @@ export interface V2InviteSummary {
   invite: InviteStatus;
 }
 
+export interface AdminInviteTreeRow {
+  uid: number;
+  username: string;
+  role: number;
+  emby_bound: boolean;
+  emby_disabled?: boolean;
+  active: boolean;
+  telegram_id?: number | null;
+  register_time?: number | null;
+  expired_at?: number | null;
+  is_root: boolean;
+  depth: number;
+  root_uid: number;
+  direct_children: number;
+  descendants: number;
+  collapsed: boolean;
+}
+
+export interface AdminInviteTreePage {
+  rows: AdminInviteTreeRow[];
+  selected: AdminInviteTreeRow | null;
+  roots: Array<{ uid: number; username: string }>;
+  total_rows: number;
+  total_nodes: number;
+  total_relations: number;
+  max_depth: number;
+  page: number;
+  per_page: number;
+  pages: number;
+  config: InviteConfig;
+}
+
+export interface AdminInviteCodesPage {
+  codes: InviteCodeItem[];
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+}
+
+export interface AdminInvitePageData {
+  view: "tree" | "codes" | "config";
+  tree: AdminInviteTreePage | null;
+  codes: AdminInviteCodesPage | null;
+  config: ConfigSection | null;
+  query: {
+    view: "tree" | "codes" | "config";
+    page: number;
+    per_page: number;
+    search: string;
+    root: string;
+    selected: number;
+    collapsed: number[];
+    code_page: number;
+    code_per_page: number;
+    code_search: string;
+  };
+  notice: "detached" | "deleted_emby" | "batch_detached" | "quick_maintained" | "cascade_updated" | "deleted" | "config_saved" | "";
+  loadError: string | null;
+}
+
 export interface BangumiSyncLog {
   id: number;
   uid: number;

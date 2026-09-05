@@ -1369,7 +1369,7 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/cleanup-invalid" \
 
 `POST /admin/invite/quick-maintenance` — 快捷维护邀请关系。请求体示例：`{"confirm":"INVITE_QUICK_MAINTENANCE","scope":"all","detach":true,"renew_days":30}`；`scope` 可为 `selected`（配合 `uids`）、`subtree`（配合 `root_uid` / `depth` / `include_root`）或 `all`。`detach=true` 会断开目标用户与上级关系，`renew_days=1..36500` 为目标用户追加有效期，`-1` 设为永久。管理员账号受保护；Web 已禁用目标仍可断开，但不会续期、改变到期时间或重新启用。接口返回 `total/success/failed/detached/renewed/renew_skipped_disabled/errors`。
 
-`GET /admin/invite/codes` — 列出全部邀请码。
+`GET /admin/invite/codes` — 列出管理员可见的邀请码。无查询参数时保留历史全量 `codes/total` 响应；传 `page`、`per_page` 或 `search` 时使用服务端分页，`search` 匹配邀请码、邀请人 UID/用户名、目标用户名和备注，返回 `codes/total/page/per_page/pages`，只对当前页执行用户字段富化。
 
 ### 9.8 违规与 Telegram 管理
 
