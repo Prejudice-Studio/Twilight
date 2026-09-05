@@ -748,6 +748,172 @@ export interface AdminDatabasePageData {
   errors: string[];
 }
 
+export interface EmbyConnectivityTest {
+  name: string;
+  success: boolean;
+  latency_ms?: number;
+  message: string;
+}
+
+export interface EmbyConnectivityResult {
+  overall: boolean;
+  tests: EmbyConnectivityTest[];
+  server_info?: {
+    name?: string;
+    version?: string;
+    os?: string;
+    id?: string;
+  };
+}
+
+export interface AdminEmbyLocalUser {
+  uid: number;
+  username: string;
+  telegram_id: number | null;
+  active: boolean;
+  role: number;
+}
+
+export interface AdminEmbyUser {
+  emby_id: string;
+  emby_name: string;
+  has_password: boolean;
+  is_admin: boolean;
+  is_disabled: boolean;
+  is_hidden: boolean;
+  last_login: string | null;
+  last_activity: string | null;
+  local_user: AdminEmbyLocalUser | null;
+  sync_status: "synced" | "name_mismatch" | "unlinked";
+}
+
+export interface AdminEmbyOrphan {
+  uid: number;
+  username: string;
+  emby_id: string;
+  telegram_id: number | null;
+}
+
+export interface AdminEmbyUsersResult {
+  emby_users: AdminEmbyUser[];
+  orphans: AdminEmbyOrphan[];
+  total?: number;
+  total_emby: number;
+  total_linked: number;
+  total_orphans: number;
+  page?: number;
+  per_page?: number;
+  pages?: number;
+  orphan_page?: number;
+  orphan_per_page?: number;
+  orphan_pages?: number;
+}
+
+export interface AdminEmbyDevice {
+  device_id: string;
+  device_name: string;
+  app_name: string;
+  app_version: string;
+  last_activity: string;
+  ip: string;
+  ip_approx: boolean;
+  online: boolean;
+  count?: number;
+}
+
+export interface AdminEmbyAuditLocalUser {
+  uid: number;
+  username: string;
+  email: string | null;
+  email_verified: boolean;
+  telegram_id: number | null;
+  telegram_username: string | null;
+  emby_username: string | null;
+  role: number;
+  active: boolean;
+  expired_at: number;
+  register_time: number;
+  created_at: number;
+  pending_emby: boolean;
+}
+
+export interface AdminEmbyAuditUser {
+  emby_user_id: string;
+  emby_user_name: string;
+  device_count: number;
+  online_count: number;
+  ip_count: number;
+  ips: string[];
+  last_activity: string | null;
+  devices: AdminEmbyDevice[];
+  local_user: AdminEmbyAuditLocalUser | null;
+}
+
+export interface AdminEmbyAuditSummary {
+  total_users: number;
+  linked_users: number;
+  total_devices: number;
+  online_devices: number;
+  total_ips: number;
+  sessions_available?: boolean;
+  sessions_error?: string | null;
+  devices_available?: boolean;
+  devices_error?: string | null;
+  activity_available: boolean;
+  activity_error?: string | null;
+  clients: Array<{ name: string; devices: number; online: number; users: number }>;
+}
+
+export interface AdminEmbyDeviceAuditResult {
+  emby_configured: boolean;
+  users: AdminEmbyAuditUser[];
+  summary: AdminEmbyAuditSummary;
+  total?: number;
+  page?: number;
+  per_page?: number;
+  pages?: number;
+}
+
+export interface AdminEmbyActivityLog {
+  id: number;
+  emby_log_id: number;
+  type: string;
+  name: string;
+  item_id?: string;
+  user_id: string;
+  user_name: string;
+  overview?: string;
+  date: number;
+  created_at: number;
+}
+
+export interface AdminEmbyActivityResult {
+  entries: AdminEmbyActivityLog[];
+  total: number;
+  refreshed?: boolean;
+  new_entries?: number;
+}
+
+export interface AdminEmbyPageData {
+  tab: "accounts" | "devices" | "activity";
+  users: AdminEmbyUsersResult | null;
+  deviceAudit: AdminEmbyDeviceAuditResult | null;
+  activity: AdminEmbyActivityResult | null;
+  query: {
+    page: number;
+    per_page: number;
+    search: string;
+    link: string;
+    attribute: string;
+    device_page: number;
+    device_per_page: number;
+    device_search: string;
+    orphan_page: number;
+    orphan_per_page: number;
+  };
+  errors: string[];
+}
+
 export type AnnouncementLevel = "info" | "notice" | "warning" | "critical";
 
 export interface Announcement {
