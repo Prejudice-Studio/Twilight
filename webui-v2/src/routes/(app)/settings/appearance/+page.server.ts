@@ -1,6 +1,7 @@
 import { fail, redirect } from "@sveltejs/kit";
 import type { Actions, PageServerLoad, RequestEvent } from "./$types";
 import { apiJSONWithResponse, copySetCookies } from "$lib/server/api";
+import { safeAvatarPath } from "$lib/assets";
 import { t } from "$lib/i18n";
 import type { BackgroundConfig } from "$lib/types";
 
@@ -100,7 +101,7 @@ export const load: PageServerLoad = ({ locals, url }) => {
     : "";
   return {
     background: readAppearance(locals.user?.background),
-    avatar: locals.user?.avatar || null,
+    avatar: safeAvatarPath(locals.user?.avatar) || null,
     result
   };
 };

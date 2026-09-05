@@ -66,6 +66,12 @@ webui-v2/
 
 `src/routes/api/[...path]/+server.ts` 只允许代理 `/api/v1/*` 与 `/api/v2/*`，通过流式上限限制请求体，移除 hop-by-hop、Origin、Referer、Authorization、API Key 和 Host 等头。Go 后端仍是唯一认证、权限、限流和业务状态边界。SvelteKit form action 默认启用同源 Origin 校验。
 
+## 应用壳层与导航
+
+`src/lib/navigation.ts` 是 V2 的唯一导航元数据源，集中定义主导航、账号菜单和管理员分组，并由 `isActivePath` 统一计算当前页面。响应式布局只改变展示方式，不复制目的地列表；管理员路由最多只有一个项目带 `aria-current="page"`。
+
+顶栏使用原生 `details` 菜单，不依赖常驻客户端状态。账号和管理员长菜单拥有受限 `dvh` 滚动区与 Firefox 标准滚动条，手机与窄开发者工具宽度下仍保持可滚动、可聚焦。头像仅渲染服务端生成的受保护资源路径，历史任意 URL 不会进入图片请求。
+
 ## 迁移规则
 
 一个功能完成迁移必须同时具备：
