@@ -38,6 +38,7 @@ webui-v2/
       (app)/admin/database/   # 管理员数据库状态、备份和迁移维护
       (app)/admin/emby/       # 管理员 Emby 账号、设备/IP 审查与活动日志
       (app)/admin/audit-logs/ # 管理员操作日志分页、筛选与保留策略维护
+      (app)/admin/violations/ # 管理员违规审计分页、筛选和清理
       (app)/admin/announcements/ # 管理员公告分页、发布、编辑与状态维护
       (app)/admin/logs/         # 管理员运行状态与手动运行日志快照
       api/[...path]/          # 仅 v1/v2 的同源 API 代理
@@ -185,6 +186,12 @@ V2 页面只接收状态展示所需的安全 DTO。Emby 内部地址、数据�
 `/(app)/admin/announcements` 使用管理员服务端布局和 `/admin/announcements` 分页接口。筛选条件（显示隐藏公告、显示过期公告、页码和每页数量）由 URL 表示，SSR `load` 只向浏览器发送当前页；页面不再在客户端保留完整公告历史，也没有自动轮询。创建、编辑、置顶/取消置顶、显示/隐藏和删除均通过 SvelteKit form action，成功后 303 回到原筛选条件并重新读取后端权威数据。
 
 编辑表单覆盖标题、内容、级别、渲染模式、过期时间、强制阅读和置顶/可见状态。前端只做长度、数值范围和确认交互，Go 后端继续负责安全渲染模式白名单、字段归一、审计和状态保存。旧 API 响应中的过期字段可能叫 `expired_at`，写入仍使用 `expires_at`；V2 DTO 同时兼容两者，避免历史数据在迁移期间丢失过期状态。SSR 预览使用文本节点和 `white-space: pre-wrap`，不会把公告正文当作 HTML 执行；安全富文本渲染器需要另行完成审查后才可接入。
+
+## 已迁移模块：管理员违规审计
+
+`/(app)/admin/violations` 使用管理员服务端布局保护。违规类型、搜索关键词、分页和每页条数由 URL 表示，SSR `load` 只读取后端当前分页，不把历史违规记录复制到浏览器，也不使用轮询或客户端缓存。
+
+单条删除和清空全部均通过 SvelteKit form action 转发到 Go 接口。action 会在服务端再次校验正整数记录 ID 和 `CLEAR_VIOLATIONS` 确认短语，后端继续负责管理员鉴权、状态写入和审计。违规用户名、注册码、原因、IP 等字段通过 Svelte 文本节点输出，列表拥有有界 Firefox 滚动区域，窄屏下危险操作会堆叠。
 
 ## 已迁移模块：管理员运行日志
 

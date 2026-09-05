@@ -879,6 +879,38 @@ export interface AdminAuditLogsPageData {
   loadError: string | null;
 }
 
+export interface ViolationLog {
+  id: number;
+  uid: number;
+  username: string;
+  code: string;
+  code_type: string;
+  reason: string;
+  action: string;
+  ip: string | null;
+  telegram_id: number | null;
+  created_at: number;
+}
+
+export interface ViolationLogPage {
+  violations: ViolationLog[];
+  total: number;
+  page: number;
+  per_page: number;
+}
+
+export interface AdminViolationsPageData {
+  payload: ViolationLogPage | null;
+  query: {
+    page: number;
+    per_page: number;
+    type: string;
+    search: string;
+  };
+  notice: "deleted" | "cleared" | "";
+  loadError: string | null;
+}
+
 export interface AdminEmbyAuditUser {
   emby_user_id: string;
   emby_user_name: string;
