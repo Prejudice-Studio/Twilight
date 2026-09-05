@@ -994,6 +994,51 @@ export interface AdminAnnouncementsPageData {
   loadError: string | null;
 }
 
+export interface RuntimeLogEntry {
+  id: number;
+  time: number;
+  level: string;
+  message: string;
+  attrs?: Record<string, string>;
+}
+
+export interface RuntimeLogsResponse {
+  entries: RuntimeLogEntry[];
+  next_cursor: number;
+  limit: number;
+}
+
+export interface RuntimeStatus {
+  started_at: number;
+  uptime_seconds: number;
+  host_uptime_seconds?: number;
+  hostname?: string;
+  go_version: string;
+  goos: string;
+  goarch: string;
+  goroutines: number;
+  cpu_count: number;
+  redis_enabled: boolean;
+  routes: number;
+  active_database: string;
+  config_database: string;
+  users: number;
+  log_level?: string;
+  runtime_log_limit?: number;
+  runtime_log_entries?: number;
+  runtime_log_backend?: string;
+  load_average?: number[];
+  memory?: Record<string, number>;
+  host_memory?: Record<string, number>;
+}
+
+export interface AdminRuntimeLogsPageData {
+  status: RuntimeStatus | null;
+  logs: RuntimeLogsResponse | null;
+  limit: number;
+  loadError: string | null;
+}
+
 export interface UserAnnouncements {
   announcements: Announcement[];
   total: number;
