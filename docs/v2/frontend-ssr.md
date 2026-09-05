@@ -72,6 +72,10 @@ webui-v2/
 
 顶栏使用原生 `details` 菜单，不依赖常驻客户端状态。账号和管理员长菜单拥有受限 `dvh` 滚动区与 Firefox 标准滚动条，手机与窄开发者工具宽度下仍保持可滚动、可聚焦。头像仅渲染服务端生成的受保护资源路径，历史任意 URL 不会进入图片请求。
 
+## 兼容入口
+
+为避免旧书签在迁移期间失效，V2 保留以下服务端重定向：`/admin/stats`、`/admin/test` → `/admin/status`；`/admin/device-audit` → `/admin/emby?tab=devices`；`/admin/telegram/commands` → `/admin/telegram`；`/admin/developer/js-docs` → `/admin/developer`；`/settings/background` → `/settings/appearance`。这些入口不创建第二套页面、请求或状态探测逻辑。
+
 ## 迁移规则
 
 一个功能完成迁移必须同时具备：

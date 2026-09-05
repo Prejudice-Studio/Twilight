@@ -57,6 +57,7 @@ Update docs in the same change when behavior changes.
 - `webui-v2/src/routes/wiki`: Public SSR usage guide and safe links to user/API entry points.
 - `webui-v2/src/routes/(app)/settings/apikey`: User API Key list, one-time plaintext creation result, and SSR form-action maintenance.
 - `webui-v2/src/routes/(app)/admin/status`: Admin-only SSR server status, independent health probes, and bounded runtime summaries.
+- `webui-v2/src/routes/(app)/admin/stats` and `test`: Compatibility redirects to the SSR status page; do not recreate duplicate status/stat probes.
 - `webui-v2/src/routes/(app)/admin`: Admin-only SSR module index backed by lightweight system info and statistics summaries.
 - `webui-v2/src/routes/(app)/admin/security`: Admin-only SSR security hub linking audited maintenance modules and the canonical configuration editor.
 - `webui-v2/src/routes/(app)/admin/users`: Admin-only SSR user list, server-side filters, grouped account actions, and bounded mobile-safe rendering.
@@ -64,6 +65,7 @@ Update docs in the same change when behavior changes.
 - `webui-v2/src/routes/(app)/admin/config`: Admin-only SSR configuration editor, TOML maintenance, backup preview/restore, and background upload actions.
 - `webui-v2/src/routes/(app)/admin/database`: Admin-only SSR database status, backup maintenance, restore preview, and guarded migration actions.
 - `webui-v2/src/routes/(app)/admin/emby`: Admin-only SSR Emby account management, connectivity probes, device/IP audit, activity-log sync, and bounded maintenance actions.
+- `webui-v2/src/routes/(app)/admin/device-audit`: Compatibility redirect to the Emby device/IP tab.
 - `webui-v2/src/routes/(app)/admin/bangumi`: Admin-only SSR Bangumi user pagination, manual sync actions, and on-demand record/log details.
 - `webui-v2/src/routes/(app)/admin/audit-logs`: Admin-only SSR audit-log filtering, pagination, deletion, clearing, and retention maintenance.
 - `webui-v2/src/routes/(app)/admin/violations`: Admin-only SSR violation-audit filtering, pagination, deletion, and clearing.
@@ -74,6 +76,8 @@ Update docs in the same change when behavior changes.
 - `webui-v2/src/routes/(app)/admin/logs`: Admin-only SSR runtime status and bounded manual runtime-log reads; no browser SSE or polling.
 - `webui-v2/src/routes/(app)/admin/scheduler`: Admin-only SSR scheduler job summaries, manual actions, schedule maintenance, and bounded run history.
 - `webui-v2/src/routes/(app)/admin/telegram`: Admin-only SSR Telegram configuration, Bot connectivity test, roster summary, command catalog, and bounded custom-command editor.
+- `webui-v2/src/routes/(app)/admin/telegram/commands`: Compatibility redirect to the unified Telegram management page.
+- `webui-v2/src/routes/(app)/admin/developer/js-docs`: Compatibility redirect to the unified developer sandbox page.
 - `webui-v2/src/routes/(app)/admin/telegram-rebind-requests`: Admin-only SSR Telegram rebind review, paginated status filters, bulk review, and guarded approval revocation.
 - `webui-v2/src/routes/(app)/admin/email`: Admin-only SSR email verification review, paginated account status, maintenance actions, and sanitized SMTP testing.
 - `webui-v2/src/lib/server`: V2 server-only API proxy, bounded response parsing, and session forwarding.
