@@ -27,6 +27,21 @@ export interface UserInfo {
   admin_action_state?: AdminUserActionState;
   telegram_id?: number;
   expired_at?: number;
+  avatar?: string | null;
+  background?: string | null;
+}
+
+export interface BackgroundConfig {
+  lightBg: string;
+  darkBg: string;
+  lightBgImage: string;
+  darkBgImage: string;
+  lightFlow: boolean;
+  darkFlow: boolean;
+  lightBlur: number;
+  darkBlur: number;
+  lightOpacity: number;
+  darkOpacity: number;
 }
 
 export interface AdminUserActionState {

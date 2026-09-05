@@ -50,7 +50,10 @@
       <article class="panel api-key-link-panel">
         <div class="panel-heading"><h2>{t.apiKeyTitle}</h2></div>
         <p class="muted">{t.apiKeyDescription}</p>
-        <a class="button secondary" href="/settings/apikey">{t.settingsOpenApiKeys}</a>
+        <div class="link-row">
+          <a class="button secondary" href="/settings/apikey">{t.settingsOpenApiKeys}</a>
+          <a class="button secondary" href="/settings/appearance">{t.settingsOpenAppearance}</a>
+        </div>
       </article>
 
       <article class="panel">
@@ -173,6 +176,7 @@
   .back-link { align-self: center; min-height: 2.5rem; padding: .55rem 0; }
   .settings-grid { align-items: start; display: grid; gap: 1rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .panel { background: #fff; border: 1px solid #d7dee5; border-radius: .45rem; min-width: 0; padding: 1.15rem; }
+  .link-row { display: flex; flex-wrap: wrap; gap: .65rem; }
   .profile-panel { grid-column: 1 / -1; }
   .status-chip { background: #eef2f4; border: 1px solid #c8d2da; border-radius: 999px; color: #486581; font-size: .8rem; padding: .25rem .55rem; white-space: nowrap; }
   .status-chip.ok { background: #edf7f0; border-color: #a9d5b4; color: #276749; }

@@ -30,6 +30,7 @@ webui-v2/
       (app)/dashboard/        # 首个已迁移的仪表盘摘要
       (app)/announcements/    # 公告和强制阅读确认
       (app)/settings/         # 个人设置与账号绑定
+      (app)/settings/appearance/ # 外观、背景上传和头像维护
       (app)/score/            # 签到、积分续期和签到历史
       (app)/invite/           # 邀请摘要、邀请码和直属下级维护
       (app)/tickets/          # 用户工单摘要和会话
