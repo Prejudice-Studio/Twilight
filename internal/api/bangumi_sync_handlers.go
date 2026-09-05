@@ -104,6 +104,8 @@ func (a *App) handleAdminBangumiUsers(w http.ResponseWriter, r *http.Request, _ 
 	})
 	pageUIDs := paginate(matchedUIDs, page, perPage)
 	usersByUID := a.store().UsersByUIDs(pageUIDs)
+	syncCounts := a.store().BangumiSyncSuccessCounts(pageUIDs)
+	recordCounts := a.store().PlaybackRecordCounts(pageUIDs)
 
 	type BangumiUserInfo struct {
 		UID           int64  `json:"uid"`
@@ -130,13 +132,8 @@ func (a *App) handleAdminBangumiUsers(w http.ResponseWriter, r *http.Request, _ 
 			TokenSet:      u.BGMToken != "",
 			SyncReady:     u.BGMMode && u.BGMToken != "",
 		}
-		syncLogs := a.store().ListBangumiSyncLogs(u.UID, 100)
-		for _, log := range syncLogs {
-			if log.Status == "success" {
-				info.SyncCount++
-			}
-		}
-		info.RecordCount = len(a.store().PlaybackRecords(u.UID, 0, 0))
+		info.SyncCount = syncCounts[u.UID]
+		info.RecordCount = recordCounts[u.UID]
 		result = append(result, info)
 	}
 
