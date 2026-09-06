@@ -47,6 +47,7 @@ Update docs in the same change when behavior changes.
 - `internal/store`: PostgreSQL persistence. Most business entities remain in the single `twilight_state` JSONB document; high-write audit logs, runtime logs, sessions, playback records, the Telegram roster, and the Telegram update cursor use dedicated tables. `Store` is constructed exclusively via `store.OpenPostgres`, so `s.db` is always non-nil. The `json` label survives only as a one-way export target in the database-migration panel and as the `migrate-json` import source; there is no JSON/file runtime backend, no flock, and no `.bak`/sidecar state files.
 - `internal/redis`: RESP client for shared sessions and rate limits.
 - `internal/security`: tokens, password hashing, and secure random helpers.
+- `internal/migration`: versioned Twilight ZIP export format, manifest integrity, bounded archive parsing, and Argon2id/AES-256-GCM payload protection. Keep this package independent from HTTP and filesystem writes; import/export orchestration belongs to API/store layers.
 - `webui/src/app`: legacy Next.js App Router pages kept only for emergency rollback.
 - `webui-v2/src/routes`: V2 SSR routes, server loads/actions, and progressive-enhancement UI.
 - `webui-v2/src/routes/forgot-password`: public SSR password recovery using server-side email/Emby actions.
@@ -108,6 +109,7 @@ Update docs in the same change when behavior changes.
 | API keys | `apikey_handlers.go` | `APIKey` | `/apikey/*`, `/users/me/apikeys` | `settings/apikey` | `api-key.md` |
 | Scheduler | `scheduler*.go` | `SchedulerRun` | `/admin/scheduler/*` | `admin/scheduler` | `backend.md` |
 | Config/runtime/database | `config_admin.go`, `runtime_logs.go`, `database_admin.go` | runtime logs/state | `/system/admin/*` | admin config/logs/database | `backend.md` |
+| Twilight migration core | `internal/migration` | versioned archive format and approved file entries | not exposed yet | later admin migration workflow | `data-migration.md` |
 | Emby activity logs / playback records | `emby_activity.go` | `playback.go` | `/admin/emby/activity-logs` | `admin/emby` | `backend-api.md` |
 | Developer JS | `developer_handlers.go`, `telegram_js*.go` | developer mode flag | `/admin/developer/*` | `admin/developer` | `developer-js.md` |
 
@@ -125,6 +127,7 @@ Update docs in the same change when behavior changes.
 - Server status health checks are split across `/system/health/api`, `/system/health/database`, and `/system/health/emby`. Keep public `/system/health` as a lightweight API-only liveness summary: it must not ping PostgreSQL, contact Emby, or expose private dependency details. Avoid adding database/Emby probes back into `/system/stats`.
 - Config-file signature checks are hot-reload polling, not request state. Keep the short process-wide throttle in `reloadConfigIfChanged`; do not restore per-request `stat` calls for both config files.
 - JSON request decoders must accept exactly one JSON value, followed only by whitespace/EOF, while preserving the shared size and nesting-depth limits.
+- Migration archives must use `internal/migration` validation before any extraction or persistence. Import code must enforce the manifest format/version, file namespace (`data/`, `config/`, `resources/`), SHA-256 and size limits, regular-file-only ZIP entries, and password-mode Argon2id + AES-256-GCM authentication. Never write archive paths directly to the filesystem.
 - HTTP route registration must go through `App.add`, which maintains immutable method/segment/domain indexes used by `App.match`. Do not append directly to `App.routes`, mutate routes after registration, or bypass the indexed 404/405 matching path.
 - `splitPath` must preserve `path.Clean` normalization for duplicate slashes and dot segments while avoiding unconditional string prefix allocation for normal slash-prefixed request paths.
 

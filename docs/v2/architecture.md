@@ -55,6 +55,7 @@ SvelteKit SSR route shell (V2)
 V2 前端实现约定：
 
 - `webui-v2` 使用 SvelteKit SSR 和 `@sveltejs/adapter-node`，服务端 `load` 负责首屏数据，form action 负责写操作，默认启用渐进增强而不是把整页变成客户端应用。
+- Twilight 数据迁移包由独立的 `internal/migration` 负责格式、manifest、哈希和加密载荷校验；它不直接写数据库或文件系统，避免把导入安全边界耦合到 HTTP 处理器。具体导出/导入编排必须经过后端鉴权、预检、冲突检查和事务回滚。
 - 浏览器只访问 V2 自身的同源路径。V2 服务端 API client 将请求转发到 Go 后端，认证 Cookie 只在服务端读取和转发；浏览器端不保存 Bearer Token，也不把用户身份放进跨页面 JS 缓存。
 - V2 的 `/api/[...path]` 代理只允许 `v1` / `v2` API 版本，限制请求体、移除 hop-by-hop 与浏览器 Origin/Referer 头，并保持上游状态码。它不是鉴权替代品，真正权限仍由 Go 后端执行。
 - V1 Next.js 应用保留为整站紧急回滚；每个 V2 模块仍必须记录 V1 页面、V1 API、V2 route/load/action、权限、审计、移动端验证和回滚入口。
