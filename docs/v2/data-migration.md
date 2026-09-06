@@ -71,10 +71,26 @@ payload.enc
 
 任何导入处理器都不得因为前端隐藏按钮而跳过管理员鉴权、确认或后端冲突检查。
 
+## 当前导出读取
+
+`internal/store.Store.ExportMigrationFiles` 已提供 PostgreSQL 一致性读取基础。它在一个 `REPEATABLE READ` 只读事务中读取：
+
+- `twilight_state` 主状态文档
+- `twilight_runtime_logs` 运行日志
+- `twilight_audit_logs` 操作审计
+- `twilight_telegram_roster` Telegram 花名册
+- `twilight_telegram_runtime` 更新游标
+- `twilight_playback_records` 全量播放记录（包含数据库行 ID 和创建时间）
+
+结果被拆为 `data/state.json`、`data/runtime-logs.json`、`data/audit-logs.json`、`data/telegram-roster.json`、`data/telegram-runtime.json` 和 `data/playback-records.json`，再交由 `internal/migration.Create` 生成 ZIP。主状态中的兼容性日志字段会在导出前移除，避免同一行被导入两次；播放记录兼容切片保留给历史读取者，完整独立表另行导出。
+
+`twilight_sessions` 不属于迁移数据：其中包含短期会话凭据，导出会扩大凭据泄露和跨实例会话混淆风险。导入后用户需要重新登录。配置文件和 `UploadDir` 下的静态资源尚未由该读取方法自动加入，接入时必须先经过资源白名单和安全路径检查。
+
 ## 实现位置
 
 - 格式、加密、manifest 和 ZIP 安全解析：`internal/migration`
-- PostgreSQL 数据读取和恢复：`internal/store`
+- PostgreSQL 一致性数据读取：`internal/store/migration_export.go`
+- PostgreSQL 数据恢复：`internal/store`（待接入事务恢复编排）
 - 管理员 HTTP 预检/导入/导出：`internal/api`
 - SSR 管理页面：`webui-v2/src/routes/(app)/admin/migration` 或数据库页面中的迁移区域
 

@@ -108,15 +108,13 @@ Service 入参应是明确类型，不直接接收 `http.Request`。需要操作
 
 ## 前端分层
 
-前端依赖方向：
+V2 前端依赖方向：
 
 ```text
-app routes
-  -> components / feature components
-       -> hooks
-       -> store
-       -> lib/api.ts
-            -> lib/api-request.ts
+SSR route load / form action
+  -> webui-v2/src/lib/server/api.ts
+       -> Go API
+            -> internal/store / external clients
 ```
 
 | 层级 | 职责 |

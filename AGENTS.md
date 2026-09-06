@@ -159,6 +159,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 | `emby_device_audit.go` | device/IP audit aggregation and refresh cache |
 | `scheduler_runner.go` | `runCheckExpired`, `runExpiryReminder`, `runDailyStats` |
 | `config_admin.go` | config schema, values, save, upload helpers |
+| `migration_export.go` | `ExportMigrationFiles`, consistent PostgreSQL migration snapshot readers |
 | `developer_handlers.go` | developer mode and JS sandbox docs endpoints |
 
 ## Store Model Index
@@ -178,6 +179,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 | `BangumiSubjectCache` | global Bangumi subject payload by subject ID |
 | `EmbyActivityLog` | ActivityLog entries synced from Emby and stored for audit/history |
 | `TelegramRosterEntry` | Runtime rows live in `twilight_telegram_roster`; `State.TelegramRoster` is import/export compatibility only |
+| `Migration snapshot` | `ExportMigrationFiles` reads the state document and dedicated business tables in one repeatable-read transaction; active sessions are intentionally excluded |
 
 ## Frontend Rules
 
