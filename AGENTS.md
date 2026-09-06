@@ -48,6 +48,7 @@ Update docs in the same change when behavior changes.
 - `internal/redis`: RESP client for shared sessions and rate limits.
 - `internal/security`: tokens, password hashing, and secure random helpers.
 - `internal/migration`: versioned Twilight ZIP export format, manifest integrity, bounded archive parsing, and Argon2id/AES-256-GCM payload protection. Keep this package independent from HTTP and filesystem writes; import/export orchestration belongs to API/store layers.
+- `internal/playback`: pure trusted playback-event state machine, pause/resume transitions, stale-event rejection, bounded segment duration, timezone-aware daily bucket splitting, and no HTTP/SQL dependencies.
 - `internal/api/migration_resources.go`: explicit UploadDir resource collector for migration snapshots. It maps approved upload namespaces to logical `resources/` paths and rejects symlinks, non-regular files, path escapes, and resource-budget violations.
 - `webui/src/app`: legacy Next.js App Router pages kept only for emergency rollback.
 - `webui-v2/src/routes`: V2 SSR routes, server loads/actions, and progressive-enhancement UI.
@@ -114,6 +115,7 @@ Update docs in the same change when behavior changes.
 | Scheduler | `scheduler*.go` | `SchedulerRun` | `/admin/scheduler/*` | `admin/scheduler` | `backend.md` |
 | Config/runtime/database | `config_admin.go`, `runtime_logs.go`, `database_admin.go` | runtime logs/state | `/system/admin/*` | admin config/logs/database | `backend.md` |
 | Twilight migration core | `internal/migration`, `internal/api/migration_resources.go`, `migration_handlers.go` | versioned archive format, validated data/config/resource files, and admin preview/import/export boundary | `/api/v1/system/admin/migration/*` | `admin/migration` | `data-migration.md`, `backend-api.md` |
+| Viewing events/statistics | `internal/playback`, future playback repository/API adapters | trusted event state machine and rebuildable daily buckets; persistence/API integration must remain separate from domain rules | `/api/v2/playback/*` (when enabled) | future V2 playback views | `v2/playback-events.md`, `v2/architecture.md` |
 | Emby activity logs / playback records | `emby_activity.go` | `playback.go` | `/admin/emby/activity-logs` | `admin/emby` | `backend-api.md` |
 | Developer JS | `developer_handlers.go`, `telegram_js*.go` | developer mode flag | `/admin/developer/*` | `admin/developer` | `developer-js.md` |
 
@@ -167,6 +169,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 | `migration_export.go` | `ExportMigrationFiles`, consistent PostgreSQL migration snapshot readers |
 | `migration_import.go` | `ImportMigrationArchive`, validated transactional replacement of migration business data |
 | `migration_resources.go` | explicit UploadDir resource collection and filesystem safety checks |
+| `internal/playback/state.go` | trusted playback event transitions, duration bounds, timezone bucket splitting |
 | `developer_handlers.go` | developer mode and JS sandbox docs endpoints |
 
 ## Store Model Index
