@@ -1,4 +1,6 @@
 <script lang="ts">
+  import PageHeader from "$lib/components/PageHeader.svelte";
+  import Panel from "$lib/components/Panel.svelte";
   import { t } from "$lib/i18n";
   import type { AdminTicketSummary, TicketPriority, TicketStatus } from "$lib/types";
   import type { PageData } from "./$types";
@@ -64,26 +66,18 @@
 <svelte:head><title>{t.adminTicketsTitle} - {t.siteName}</title></svelte:head>
 
 <section class="tickets-page" aria-labelledby="admin-tickets-title">
-  <header class="page-heading">
-    <div>
-      <p class="eyebrow">{t.adminArea}</p>
-      <h1 id="admin-tickets-title">{t.adminTicketsTitle}</h1>
-      <p class="muted">{t.adminTicketsDescription}</p>
-    </div>
-    <div class="heading-actions">
+  <PageHeader id="admin-tickets-title" eyebrow={t.adminArea} title={t.adminTicketsTitle} description={t.adminTicketsDescription}>
+    {#snippet actions()}
       <a class="text-link" href="/admin/status">{t.adminUsersServerStatus}</a>
       <a class="button secondary" href={queryHref(data.query.page)}>{t.adminTicketsRefresh}</a>
-    </div>
-  </header>
+    {/snippet}
+  </PageHeader>
 
   {#if data.loadError}<p class="notice error" role="alert">{data.loadError}</p>{/if}
   {#if action.error}<p class="notice error" role="alert">{action.error}</p>{/if}
 
-  <section class="panel filters" aria-labelledby="filters-title">
-    <div class="section-heading">
-      <div><h2 id="filters-title">{t.adminTicketsFilters}</h2><p class="muted">{t.adminTicketsFiltersHelp}</p></div>
-      <span class="count">{payload?.total?.toLocaleString("zh-CN") || "0"}</span>
-    </div>
+  <Panel id="filters-title" className="filters" title={t.adminTicketsFilters} description={t.adminTicketsFiltersHelp}>
+    <span class="count">{payload?.total?.toLocaleString("zh-CN") || "0"}</span>
     <form method="GET" action="/admin/tickets" class="filter-form">
       <label class="field">{t.adminTicketsStatus}<select name="status">
         <option value="" selected={data.query.status === ""}>{t.adminTicketsActive}</option>
@@ -110,7 +104,7 @@
       <label class="field">{t.adminTicketsJump}<input name="ticket" inputmode="numeric" required placeholder={t.adminTicketsJumpPlaceholder} /></label>
       <button class="button secondary" type="submit">{t.adminTicketsOpen}</button>
     </form>
-  </section>
+  </Panel>
 
   <details class="panel type-panel">
     <summary>{t.adminTicketsManageTypes}</summary>
@@ -143,10 +137,7 @@
   </details>
 
   {#if payload}
-    <section class="list-panel" aria-labelledby="list-title">
-      <div class="section-heading">
-        <div><h2 id="list-title">{t.adminTicketsQueue}</h2><p class="muted">{t.adminTicketsPageOf.replace("{page}", String(payload.page)).replace("{pages}", String(Math.max(1, Math.ceil(payload.total / Math.max(1, payload.per_page))))).replace("{total}", payload.total.toLocaleString("zh-CN"))}</p></div>
-      </div>
+    <Panel id="list-title" className="list-panel" title={t.adminTicketsQueue} description={t.adminTicketsPageOf.replace("{page}", String(payload.page)).replace("{pages}", String(Math.max(1, Math.ceil(payload.total / Math.max(1, payload.per_page))))).replace("{total}", payload.total.toLocaleString("zh-CN"))}>
       {#if payload.tickets.length === 0}
         <p class="empty">{t.adminTicketsNoTickets}</p>
       {:else}
@@ -196,34 +187,31 @@
           {#if payload.page < totalPages}<a class="button secondary" href={queryHref(payload.page + 1)}>{t.adminTicketsNext}</a>{:else}<span></span>{/if}
         </nav>
       {/if}
-    </section>
+    </Panel>
   {/if}
 </section>
 
 <style>
   .tickets-page { display: grid; gap: 1rem; min-width: 0; }
-  .page-heading, .heading-actions, .section-heading, .ticket-badges, .ticket-meta, .ticket-counts, .ticket-actions, .pagination { align-items: flex-start; display: flex; gap: .75rem; }
-  .page-heading, .section-heading, .ticket-card, .pagination { justify-content: space-between; }
-  .page-heading { border-bottom: 1px solid #d7dee5; padding-bottom: 1.15rem; }
-  .heading-actions { align-items: center; flex-wrap: wrap; }
-  .eyebrow { color: #486581; font-size: .8rem; font-weight: 700; letter-spacing: .08em; margin: 0 0 .45rem; text-transform: uppercase; }
-  h1, h2, p { overflow-wrap: anywhere; } h1, h2 { margin: 0; } h1 { font-size: 2rem; } h2 { font-size: 1.15rem; }
+  .ticket-badges, .ticket-meta, .ticket-counts, .ticket-actions, .pagination { align-items: flex-start; display: flex; gap: .75rem; }
+  .ticket-card, .pagination { justify-content: space-between; }
+  p { overflow-wrap: anywhere; }
   .muted { color: #52606d; margin: .4rem 0 0; } .text-link { min-height: 2.5rem; padding: .55rem 0; }
   .button { align-items: center; background: #e8eef2; border: 0; border-radius: .3rem; color: #16394a; cursor: pointer; display: inline-flex; font: inherit; font-weight: 650; justify-content: center; max-width: 100%; min-height: 2.5rem; padding: .5rem .85rem; text-decoration: none; white-space: normal; }
   .button.primary { background: #245b75; color: #fff; } .button.primary:hover { background: #1c465a; } .button.secondary:hover { background: #d6e1e7; }
   .button.warning { background: #fff0d2; color: #7b4f00; } .button.danger { background: #a63d40; color: #fff; } .button.compact { min-height: 2.25rem; padding: .35rem .6rem; }
-  .panel, .list-panel, .notice { background: #fff; border: 1px solid #d7dee5; border-radius: .45rem; min-width: 0; padding: 1rem; } .notice.error { background: #fff1f0; border-color: #f1a7a0; color: #a61b1b; }
+  .notice { background: #fff; border: 1px solid #d7dee5; border-radius: .45rem; min-width: 0; padding: 1rem; } .notice.error { background: #fff1f0; border-color: #f1a7a0; color: #a61b1b; }
   .count { background: #eef2f4; border-radius: 999px; color: #486581; flex: 0 0 auto; font-size: .8rem; padding: .25rem .55rem; }
-  .filter-form { align-items: end; display: grid; gap: .75rem; grid-template-columns: repeat(6, minmax(0, 1fr)); margin-top: 1rem; } .field { color: #243b53; display: grid; font-size: .85rem; font-weight: 650; gap: .35rem; min-width: 0; } .field.grow { flex: 1; }
+  .filter-form { align-items: end; display: grid; gap: .75rem; grid-template-columns: repeat(6, minmax(0, 1fr)); } .field { color: #243b53; display: grid; font-size: .85rem; font-weight: 650; gap: .35rem; min-width: 0; } .field.grow { flex: 1; }
   input, select { background: #fff; border: 1px solid #9fb3c8; border-radius: .3rem; font: inherit; min-height: 2.5rem; min-width: 0; padding: .5rem .65rem; } input:focus, select:focus, button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px solid #9fb3c8; outline-offset: 2px; }
   .jump-form { align-items: end; display: flex; gap: .75rem; margin-top: .85rem; max-width: 30rem; } .jump-form .field { flex: 1; }
-  .type-panel { display: grid; gap: .75rem; } .type-panel > summary { cursor: pointer; font-weight: 700; } .type-add-form { align-items: end; display: flex; gap: .75rem; } .type-list { display: grid; gap: .5rem; max-height: 18rem; overflow: auto; overscroll-behavior: contain; scrollbar-color: #9fb3c8 #eef2f4; scrollbar-width: thin; }
+  .type-panel { background: #fff; border: 1px solid #d7dee5; border-radius: .45rem; display: grid; gap: .75rem; min-width: 0; padding: 1rem; } .type-panel > summary { cursor: pointer; font-weight: 700; } .type-add-form { align-items: end; display: flex; gap: .75rem; } .type-list { display: grid; gap: .5rem; max-height: 18rem; overflow: auto; overscroll-behavior: contain; scrollbar-color: #9fb3c8 #eef2f4; scrollbar-width: thin; }
   .type-row { align-items: center; border-top: 1px solid #e1e8ed; display: flex; flex-wrap: wrap; gap: .5rem; min-width: 0; padding-top: .5rem; } .type-row > strong { min-width: 8rem; overflow-wrap: anywhere; } .type-action-form { align-items: end; display: flex; flex: 1 1 16rem; gap: .4rem; min-width: 0; } .type-action-form input { flex: 1; min-width: 8rem; }
-  .list-panel { display: grid; gap: .9rem; } .ticket-list { display: grid; gap: .7rem; max-height: 70dvh; overflow: auto; overscroll-behavior: contain; padding: .1rem; scrollbar-color: #9fb3c8 #eef2f4; scrollbar-width: thin; }
+  .ticket-list { display: grid; gap: .7rem; max-height: 70dvh; overflow: auto; overscroll-behavior: contain; padding: .1rem; scrollbar-color: #9fb3c8 #eef2f4; scrollbar-width: thin; }
   .ticket-card { align-items: flex-start; border: 1px solid #c8d2da; border-left: 4px solid #9fb3c8; display: flex; gap: 1rem; min-width: 0; padding: .9rem; } .ticket-card.closed { opacity: .75; } .ticket-main { display: grid; gap: .5rem; min-width: 0; } .ticket-badges { align-items: center; flex-wrap: wrap; } .status, .priority, .tag, .ticket-id { border: 1px solid #c8d2da; border-radius: 999px; font-size: .74rem; padding: .2rem .5rem; white-space: nowrap; } .status.open { background: #fff8e6; border-color: #e9c46a; color: #7b4f00; } .status.in_progress { background: #edf5f8; border-color: #a9c8d5; color: #245b75; } .status.resolved { background: #edf7f0; border-color: #a9d5b4; color: #276749; } .status.closed { background: #eef2f4; color: #52606d; } .priority { background: #f4f6f8; color: #52606d; } .priority.high { background: #fff8e6; color: #7b4f00; } .priority.urgent { background: #fff1f0; color: #a61b1b; } .tag { background: #f4f7f8; color: #16394a; } .ticket-id { color: #52606d; font-family: ui-monospace, monospace; }
   .ticket-title { color: #16394a; font-size: 1.08rem; font-weight: 700; overflow-wrap: anywhere; text-decoration: none; } .ticket-title:hover { text-decoration: underline; } .ticket-meta, .ticket-counts { color: #52606d; flex-wrap: wrap; font-size: .78rem; } .ticket-counts { color: #7b8794; }
   .ticket-actions { align-items: stretch; flex: 0 0 auto; flex-direction: column; } .quick-actions { border-top: 1px solid #e1e8ed; padding-top: .35rem; } .quick-actions summary { color: #245b75; cursor: pointer; font-size: .8rem; font-weight: 650; padding: .3rem 0; } .quick-action-list { display: grid; gap: .35rem; margin-top: .35rem; } .quick-action-list form, .quick-action-list .button { width: 100%; }
   .pagination { align-items: center; border-top: 1px solid #e1e8ed; padding-top: .75rem; } .empty { color: #52606d; padding: 2rem 1rem; text-align: center; }
   @media (max-width: 900px) { .filter-form { grid-template-columns: repeat(3, minmax(0, 1fr)); } .ticket-card { flex-direction: column; } .ticket-actions { align-items: stretch; flex-direction: row; flex-wrap: wrap; width: 100%; } .ticket-actions > .button { flex: 1 1 12rem; } .quick-actions { flex: 1 1 12rem; } }
-  @media (max-width: 600px) { .page-heading, .heading-actions, .section-heading, .ticket-card, .type-add-form, .jump-form, .pagination { align-items: stretch; flex-direction: column; } .heading-actions, .heading-actions .button, .heading-actions .text-link { width: 100%; } .filter-form { grid-template-columns: 1fr; } .filter-form .button, .jump-form .button, .type-add-form .button { width: 100%; } .type-row { align-items: stretch; flex-direction: column; } .type-row > strong { min-width: 0; } .type-action-form { flex-basis: auto; width: 100%; } .type-action-form .button { flex: 0 0 auto; } .ticket-actions, .ticket-actions > .button, .quick-actions { width: 100%; } .pagination { text-align: center; } .pagination .button { width: 100%; } .panel, .list-panel, .notice { padding: .85rem; } }
+  @media (max-width: 600px) { .ticket-card, .type-add-form, .jump-form, .pagination { align-items: stretch; flex-direction: column; } .filter-form { grid-template-columns: 1fr; } .filter-form .button, .jump-form .button, .type-add-form .button { width: 100%; } .type-row { align-items: stretch; flex-direction: column; } .type-row > strong { min-width: 0; } .type-action-form { flex-basis: auto; width: 100%; } .type-action-form .button { flex: 0 0 auto; } .ticket-actions, .ticket-actions > .button, .quick-actions { width: 100%; } .pagination { text-align: center; } .pagination .button, .type-panel { width: 100%; } .type-panel { padding: .85rem; } .notice { padding: .85rem; } }
 </style>
