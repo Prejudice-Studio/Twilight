@@ -1,5 +1,7 @@
 <script lang="ts">
   import { t } from "$lib/i18n";
+  import PageHeader from "$lib/components/PageHeader.svelte";
+  import Panel from "$lib/components/Panel.svelte";
   import type { Announcement, AnnouncementLevel } from "$lib/types";
   import type { PageData } from "./$types";
 
@@ -61,10 +63,12 @@
 <svelte:head><title>{t.adminAnnouncementsTitle} - {t.siteName}</title></svelte:head>
 
 <section class="announcements-page" aria-labelledby="announcements-title">
-  <header class="page-heading">
-    <div><p class="eyebrow">{t.adminArea}</p><h1 id="announcements-title">{t.adminAnnouncementsTitle}</h1><p class="muted">{t.adminAnnouncementsDescription}</p></div>
-    <div class="heading-actions"><a class="text-link" href="/admin/status">{t.adminStatusTitle}</a><a class="button secondary" href={pageHref(data.query.page)}>{t.adminAnnouncementsRefresh}</a></div>
-  </header>
+  <PageHeader id="announcements-title" eyebrow={t.adminArea} title={t.adminAnnouncementsTitle} description={t.adminAnnouncementsDescription}>
+    {#snippet actions()}
+      <a class="text-link" href="/admin/status">{t.adminStatusTitle}</a>
+      <a class="button secondary" href={pageHref(data.query.page)}>{t.adminAnnouncementsRefresh}</a>
+    {/snippet}
+  </PageHeader>
 
   {#if data.loadError}<p class="notice error" role="alert">{data.loadError}</p>{/if}
   {#if action.error}<p class="notice error" role="alert">{action.error}</p>{/if}
@@ -76,7 +80,7 @@
   {#if data.notice === "pinned"}<p class="notice success" role="status">{t.adminAnnouncementsPinnedDone}</p>{/if}
   {#if data.notice === "unpinned"}<p class="notice success" role="status">{t.adminAnnouncementsUnpinnedDone}</p>{/if}
 
-  <section class="panel filters" aria-labelledby="filter-title">
+  <Panel id="filter-title" className="filters">
     <header class="panel-heading"><div><h2 id="filter-title">{t.adminAnnouncementsFilter}</h2><p class="muted">{t.adminAnnouncementsTotal.replace("{count}", String(data.payload?.total || 0))}</p></div></header>
     <form method="GET" action="/admin/announcements" class="filter-form">
       <label>{t.adminAnnouncementsShowHidden}<select name="include_invisible"><option value="true" selected={data.query.include_invisible}>是</option><option value="false" selected={!data.query.include_invisible}>否</option></select></label>
@@ -86,9 +90,9 @@
       <button class="button primary" type="submit">{t.adminAuditLogApply}</button>
       <a class="button secondary" href="/admin/announcements">{t.adminAuditLogReset}</a>
     </form>
-  </section>
+  </Panel>
 
-  <details class="panel editor-panel" open>
+  <details class="editor-panel" open>
     <summary>{t.adminAnnouncementsCreate}</summary>
     <p class="muted">{t.adminAnnouncementsDescription}</p>
     <form method="POST" action="?/save" class="editor-form">
@@ -113,7 +117,7 @@
     </form>
   </details>
 
-  <section class="panel list-panel" aria-labelledby="list-title">
+  <Panel id="list-title" className="list-panel">
     <header class="panel-heading"><div><h2 id="list-title">{t.adminAnnouncementsList}</h2><p class="muted">{t.adminAnnouncementsPageOf.replace("{page}", String(data.payload?.page || data.query.page)).replace("{pages}", String(data.payload?.pages || 1))}</p></div></header>
     {#if data.payload?.announcements?.length}
       <div class="announcement-list">
@@ -150,21 +154,20 @@
       </div>
     {:else}<p class="empty">{t.adminAnnouncementsEmpty}</p>{/if}
     {#if (data.payload?.pages || 1) > 1}<nav class="pagination" aria-label={t.adminAnnouncementsTitle}>{#if (data.payload?.page || data.query.page) > 1}<a class="button secondary" href={pageHref((data.payload?.page || data.query.page) - 1)}>{t.adminAnnouncementsPrevious}</a>{:else}<span></span>{/if}<span>{t.adminAnnouncementsPageOf.replace("{page}", String(data.payload?.page || data.query.page)).replace("{pages}", String(data.payload?.pages || 1))}</span>{#if (data.payload?.page || data.query.page) < (data.payload?.pages || 1)}<a class="button secondary" href={pageHref((data.payload?.page || data.query.page) + 1)}>{t.adminAnnouncementsNext}</a>{:else}<span></span>{/if}</nav>{/if}
-  </section>
+  </Panel>
 </section>
 
 <style>
   .announcements-page { display: grid; gap: 1rem; min-width: 0; }
-  .page-heading, .heading-actions, .panel-heading, .filter-form, .editor-form, .editor-grid, .switch-grid, .announcement-header, .badges, .row-actions, .pagination { align-items: flex-start; display: flex; gap: .75rem; }
-  .page-heading, .panel-heading, .announcement-header, .pagination { justify-content: space-between; }
-  .page-heading { border-bottom: 1px solid #d7dee5; padding-bottom: 1.1rem; } .heading-actions { align-items: center; flex-wrap: wrap; }
-  .eyebrow { color: #486581; font-size: .8rem; font-weight: 700; letter-spacing: .08em; margin: 0 0 .45rem; text-transform: uppercase; } h1, h2, h3, p { overflow-wrap: anywhere; } h1, h2, h3 { margin: 0; } h1 { font-size: 2rem; } h2 { font-size: 1.15rem; } h3 { font-size: 1.05rem; } .muted, .meta, .help { color: #52606d; margin: .4rem 0 0; } .meta, .help { font-size: .78rem; }
+  .panel-heading, .filter-form, .editor-form, .editor-grid, .switch-grid, .announcement-header, .badges, .row-actions, .pagination { align-items: flex-start; display: flex; gap: .75rem; }
+  .panel-heading, .announcement-header, .pagination { justify-content: space-between; }
+  h2, h3, p { overflow-wrap: anywhere; } h2, h3 { margin: 0; } h2 { font-size: 1.15rem; } h3 { font-size: 1.05rem; } .muted, .meta, .help { color: #52606d; margin: .4rem 0 0; } .meta, .help { font-size: .78rem; }
   .text-link { min-height: 2.5rem; padding: .55rem 0; } .button { align-items: center; background: #e8eef2; border: 0; border-radius: .3rem; color: #16394a; cursor: pointer; display: inline-flex; font: inherit; font-weight: 650; justify-content: center; min-height: 2.5rem; max-width: 100%; padding: .5rem .85rem; text-decoration: none; white-space: normal; } .button.primary { background: #245b75; color: #fff; } .button.primary:hover { background: #1c465a; } .button.secondary:hover { background: #d6e1e7; } .button.danger { background: #a63d40; color: #fff; } .button.compact { min-height: 2.2rem; padding: .35rem .6rem; }
-  .panel { background: #fff; border: 1px solid #d7dee5; border-radius: .45rem; display: grid; gap: 1rem; min-width: 0; padding: 1rem; } .notice { border: 1px solid; border-radius: .35rem; margin: 0; padding: .7rem .8rem; } .notice.error { background: #fff1f0; border-color: #f1a7a0; color: #a61b1b; } .notice.success { background: #eef8f1; border-color: #a5d6b0; color: #276749; }
+  .editor-panel { background: #fff; border: 1px solid #d7dee5; border-radius: .45rem; display: grid; gap: 1rem; min-width: 0; padding: 1rem; } .notice { border: 1px solid; border-radius: .35rem; margin: 0; padding: .7rem .8rem; } .notice.error { background: #fff1f0; border-color: #f1a7a0; color: #a61b1b; } .notice.success { background: #eef8f1; border-color: #a5d6b0; color: #276749; }
   .filter-form { align-items: end; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto auto; } label { color: #243b53; display: grid; font-size: .84rem; font-weight: 650; gap: .35rem; min-width: 0; } input, select, textarea { background: #fff; border: 1px solid #9fb3c8; border-radius: .3rem; font: inherit; min-height: 2.5rem; min-width: 0; max-width: 100%; padding: .5rem .65rem; } textarea { min-height: 8rem; resize: vertical; } input[type="checkbox"] { min-height: 1rem; width: 1rem; } input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px solid #9fb3c8; outline-offset: 2px; }
   .editor-panel > summary, .inline-editor > summary { color: #245b75; cursor: pointer; font-weight: 700; } .editor-form { display: grid; grid-template-columns: minmax(0, 1fr); } .wide-field { grid-column: 1 / -1; } .editor-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); } .switch-grid { flex-wrap: wrap; } .check-field { align-items: center; display: flex; font-weight: 500; } .check-field input[type="checkbox"] { margin-right: .35rem; } .help { border-left: 3px solid #9fb3c8; padding-left: .6rem; }
   .preview { background: #f4f7f8; border: 1px solid #d7dee5; display: grid; gap: .3rem; padding: .7rem; } .preview p { margin: 0; } .announcement-list { display: grid; gap: .8rem; max-height: 70dvh; overflow: auto; overscroll-behavior: contain; padding-right: .15rem; scrollbar-color: #9fb3c8 #eef2f4; scrollbar-width: thin; } .announcement { border: 1px solid #d7dee5; display: grid; gap: .8rem; min-width: 0; padding: .9rem; } .announcement.dimmed { opacity: .7; } .announcement-title { min-width: 0; } .badges { flex-wrap: wrap; } .badge { background: #eef2f4; border: 1px solid #c8d2da; border-radius: 999px; color: #36566a; display: inline-block; font-size: .72rem; padding: .2rem .45rem; white-space: nowrap; } .level-info { background: #edf4f8; color: #245b75; } .level-notice { background: #eef8f1; color: #276749; } .level-warning { background: #fff8e6; color: #7b4f00; } .level-critical, .badge.expired { background: #fff1f0; color: #a61b1b; } .announcement-title h3 { margin-top: .45rem; } .meta { margin-top: .3rem; } .content { line-height: 1.65; margin: 0; white-space: pre-wrap; } .inline-editor { border-top: 1px solid #e1e8ed; padding-top: .7rem; } .delete-form { justify-self: end; }
   .pagination { align-items: center; border-top: 1px solid #e1e8ed; padding-top: .85rem; } .pagination span { color: #52606d; font-size: .84rem; } .empty { color: #52606d; padding: 1.5rem; text-align: center; }
   @media (max-width: 900px) { .filter-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } .editor-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @media (max-width: 600px) { .page-heading, .heading-actions, .panel-heading, .announcement-header { align-items: stretch; flex-direction: column; } .heading-actions, .heading-actions > *, .heading-actions .button { width: 100%; } .filter-form, .editor-grid { grid-template-columns: 1fr; } .filter-form .button { width: 100%; } .row-actions, .row-actions form, .row-actions .button, .delete-form, .delete-form .button { width: 100%; } .row-actions { flex-direction: column; } .delete-form { justify-self: stretch; } .panel { padding: .85rem; } h1 { font-size: 1.65rem; } }
+  @media (max-width: 600px) { .panel-heading, .announcement-header { align-items: stretch; flex-direction: column; } .filter-form, .editor-grid { grid-template-columns: 1fr; } .filter-form .button { width: 100%; } .row-actions, .row-actions form, .row-actions .button, .delete-form, .delete-form .button { width: 100%; } .row-actions { flex-direction: column; } .delete-form { justify-self: stretch; } .editor-panel { padding: .85rem; } }
 </style>
