@@ -7,7 +7,7 @@ const legacyRoot = join(projectRoot, "..", "webui", "src", "app");
 const v2Root = join(projectRoot, "src");
 const packageJSON = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"));
 
-const requiredScripts = ["check", "build"];
+const requiredScripts = ["check", "build", "verify"];
 for (const script of requiredScripts) {
   if (typeof packageJSON.scripts?.[script] !== "string") {
     throw new Error(`webui-v2 package.json is missing the ${script} script`);
@@ -90,14 +90,33 @@ if (!svelteConfig.includes("@sveltejs/adapter-node") || !/adapter\(\)/.test(svel
   throw new Error("svelte.config.js must configure adapter-node");
 }
 
+const productionEntrypoints = [
+  ["README.md", join(projectRoot, "..", "README.md"), /webui-v2/],
+  ["docker-compose.yml", join(projectRoot, "..", "docker-compose.yml"), /context:\s+\.[\\/]webui-v2/],
+  ["deploy/twilight-webui-v2.service", join(projectRoot, "..", "deploy", "twilight-webui-v2.service"), /webui-v2[\\/]+build/],
+  ["deploy/setup-systemd.sh", join(projectRoot, "..", "deploy", "setup-systemd.sh"), /webui-v2/],
+  ["deploy/nginx-twilight.conf", join(projectRoot, "..", "deploy", "nginx-twilight.conf"), /127\.0\.0\.1:3001/]
+];
+for (const [label, path, expected] of productionEntrypoints) {
+  const source = await readFile(path, "utf8");
+  if (!expected.test(source)) {
+    throw new Error(label + " must reference the V2 SSR frontend entrypoint");
+  }
+  if (/webui\/(?:build|\.next|src[\\/])/.test(source)) {
+    throw new Error(label + " still references the legacy frontend runtime");
+  }
+}
+
 const forbidden = /(?:from\s*["'](?:react|next|zustand)(?:\/|["'])|require\(\s*["'](?:react|next|zustand))/;
 const forbiddenClientRuntime = /\b(?:onMount|EventSource|WebSocket|setInterval)\b/;
 const directFetch = /\bfetch\s*\(/;
+const forbiddenBrowserState = /(?:\{@html\}|\b(?:localStorage|sessionStorage|indexedDB)\b|\bdocument\.cookie\b|\b(?:innerHTML|outerHTML)\b)/;
 const violations = [];
 for (const path of v2Files) {
   if (!/\.(?:svelte|ts)$/.test(path)) continue;
   const source = await readFile(path, "utf8");
   const label = relative(projectRoot, path).split(sep).join("/");
+  if (forbiddenBrowserState.test(source)) violations.push(label + ": unsafe HTML or browser-owned state boundary");
   if (forbidden.test(source)) violations.push(`${label}: legacy frontend dependency`);
   if (directFetch.test(source) && !label.endsWith("src/lib/server/api.ts")) violations.push(`${label}: direct fetch outside SSR API boundary`);
   if (forbiddenClientRuntime.test(source) && !label.endsWith("src/lib/server/api.ts")) {

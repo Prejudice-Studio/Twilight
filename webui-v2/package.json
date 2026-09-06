@@ -8,6 +8,7 @@
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
+    "verify": "pnpm check && pnpm build",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && node ./scripts/check-architecture.mjs",
     "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
   },

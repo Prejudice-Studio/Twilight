@@ -76,6 +76,12 @@ SSR 到 Go API 的请求以及同源 `/api/v1/*`、`/api/v2/*` 流式代理共�
 
 `src/routes/api/[...path]/+server.ts` 只允许代理 `/api/v1/*` 与 `/api/v2/*`，通过流式上限限制请求体，移除 hop-by-hop、Origin、Referer、Authorization、API Key 和 Host 等头。Go 后端仍是唯一认证、权限、限流和业务状态边界。SvelteKit form action 默认启用同源 Origin 校验。
 
+## 重写验收门禁
+
+\`webui-v2/scripts/check-architecture.mjs\` 会扫描旧 \`webui/src/app\` 的页面并确认 V2 存在对应 SSR 页面或服务端兼容入口，同时检查 systemd、Compose、Nginx 和根 README 的生产入口均指向 \`webui-v2\`。门禁禁止 V2 引入 React/Next/Zustand，禁止业务页面绕过 SSR API client 直接调用 \`fetch\`，也禁止 \`{@html}\`、浏览器存储、直接 DOM HTML 写入和客户端轮询状态。
+
+\`pnpm verify\` 会顺序执行 \`pnpm check\` 和 \`pnpm build\`，避免并行写入 \`.svelte-kit\` 生成目录。旧 \`webui/\` 仅作为整站回滚和行为对照保留，不参与默认开发、构建或运行时数据边界。
+
 ## 应用壳层与导航
 
 `src/lib/navigation.ts` 是 V2 的唯一导航元数据源，集中定义主导航、账号菜单和管理员分组，并由 `isActivePath` 统一计算当前页面。响应式布局只改变展示方式，不复制目的地列表；管理员路由最多只有一个项目带 `aria-current="page"`。
