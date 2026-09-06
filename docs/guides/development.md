@@ -96,6 +96,8 @@ go test -run '^$' -bench '^(BenchmarkTelegramUpdateEnvelopeDecode|BenchmarkTeleg
 
 默认前端位于 `webui-v2/`，使用 SvelteKit SSR + adapter-node；`webui/` 的 Next.js 实现仅保留为整站紧急回滚和行为对照，不与 V2 共享运行时页面状态。
 
+V2 管理页面的页面级标题与主要分区使用 `webui-v2/src/lib/components/PageHeader.svelte` 和 `Panel.svelte`。这两个组件是无状态的 SSR 结构基线，只负责语义标题、边界和窄视口换行；业务页不得重新定义一套全局标题/面板样式，领域样式仍留在对应路由内。用户管理与工单管理已按此方式迁移，写操作仍只通过 SvelteKit form action 完成。
+
 ### 常用命令
 
 ```bash
