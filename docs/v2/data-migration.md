@@ -111,7 +111,7 @@ payload.enc
 
 ## 管理员接口
 
-迁移面板默认关闭，需开启 `Database.migration_panel_enabled`。接口全部要求管理员会话：
+迁移面板默认关闭，需开启 `Database.migration_panel_enabled`。格式安全解析、PostgreSQL 一致性数据读取、受控静态资源收集、管理员 HTTP 预检/执行接口和 V2 SSR 管理页面均已接入。接口全部要求管理员会话：
 
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
@@ -119,7 +119,7 @@ payload.enc
 | POST | `/api/v1/system/admin/migration/export` | 生成 ZIP；JSON body 可选 `password`，空值表示无密码 |
 | POST | `/api/v1/system/admin/migration/import` | multipart 上传 `archive`，首次请求只生成预览；确认字段为 `IMPORT_TWILIGHT_DATA` |
 
-导入字段包括 `password`、`preview`、`apply_config` 和 `resource_mode`。`resource_mode=preserve`（默认）遇到不同内容的资源时只报告冲突；`resource_mode=replace` 需要管理员确认后覆盖。数据库导入失败会回滚数据库和已写入的资源，配置应用失败也会恢复原配置。
+导入字段包括 `password`、`preview`、`apply_config` 和 `resource_mode`。`resource_mode=preserve`（默认）遇到不同内容的资源时只报告冲突；`resource_mode=replace` 需要管理员确认后覆盖。数据库导入失败会回滚数据库和已写入的资源，配置应用失败也会恢复原配置。V2 页面在服务端完成上传转发，预览结果只返回摘要和冲突路径；确认导入时必须重新选择归档文件，不把归档或密码放入浏览器状态。
 
 `internal/store.Store.ImportMigrationArchive` 已提供数据恢复基础。它要求归档先经过 `migration.Open`，随后在一个可回滚的 Serializable 事务中替换主状态、运行日志、审计日志、Telegram 花名册、Telegram 更新游标和完整播放记录，并重建自增序列与播放记录的有限内存兼容窗口。数据库失败时事务不会留下半套状态；方法成功提交后才更新 Store 内存快照。当前恢复核心不触碰 `twilight_sessions`，也不会把 `config/*` 或 `resources/*` 直接写入文件系统。
 
@@ -132,6 +132,7 @@ payload.enc
 - PostgreSQL 数据恢复：`internal/store/migration_import.go`
 - 管理员 HTTP 预检/导入/导出：`internal/api/migration_handlers.go`
 - UploadDir 资源收集：`internal/api/migration_resources.go`
-- SSR 管理页面：`webui-v2/src/routes/(app)/admin/migration` 或数据库页面中的迁移区域
+- SSR 管理页面：`webui-v2/src/routes/(app)/admin/migration`
+- SSR 下载端点：`webui-v2/src/routes/(app)/admin/migration/export-download/+server.ts`；密码使用 POST body，响应 `Cache-Control: no-store`
 
 格式核心通过 `go test ./internal/migration` 验证；资源收集、路径冲突和失败回滚通过 `go test ./internal/api` 覆盖。新增导入功能必须继续补充恶意 ZIP、错误密码、manifest 篡改、路径穿越、重复文件、大小上限和失败回滚测试。

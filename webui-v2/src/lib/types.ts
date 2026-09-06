@@ -1226,6 +1226,40 @@ export interface AdminDatabasePageData {
   errors: string[];
 }
 
+export interface MigrationStatus {
+  enabled: boolean;
+  format_version: string;
+  database_schema_version: string;
+  max_archive_bytes: number;
+  resource_namespaces: string[];
+}
+
+export interface MigrationSummary {
+  format_version?: string;
+  twilight_version?: string;
+  database_schema_version?: string;
+  exported_at?: string;
+  encrypted?: boolean;
+  file_count?: number;
+  total_uncompressed_bytes?: number;
+  resource_count?: number;
+  resource_conflict_count?: number;
+  resource_conflicts?: string[];
+  resource_mode?: "preserve" | "replace";
+  apply_config_requested?: boolean;
+  config_applied?: boolean;
+  resources_written?: number;
+  dry_run?: boolean;
+  requires_confirmation?: boolean;
+  has_config?: boolean;
+  error?: string;
+}
+
+export interface AdminMigrationPageData {
+  status: MigrationStatus | null;
+  error: string | null;
+}
+
 export interface EmbyConnectivityTest {
   name: string;
   success: boolean;

@@ -29,6 +29,7 @@
     { href: "/admin/scheduler", title: t.adminSchedulerTitle, description: t.adminSchedulerDescription, category: "operations" },
     { href: "/admin/config", title: t.adminConfigTitle, description: t.adminConfigDescription, category: "operations" },
     { href: "/admin/database", title: t.adminDatabaseTitle, description: t.adminDatabaseDescription, category: "operations" },
+    { href: "/admin/migration", title: t.adminMigrationTitle, description: t.adminMigrationDescription, category: "operations" },
     { href: "/admin/logs", title: t.adminRuntimeLogsTitle, description: t.adminRuntimeLogsDescription, category: "operations" },
     { href: "/admin/emby", title: t.adminEmbyTitle, description: t.adminEmbyDescription, category: "integration" },
     { href: "/admin/bangumi", title: t.adminBangumiTitle, description: t.adminBangumiDescription, category: "integration" },

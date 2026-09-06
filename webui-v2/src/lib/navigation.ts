@@ -63,7 +63,8 @@ export const adminNavigation: NavigationGroup[] = [
       { href: "/admin/scheduler", label: "adminSchedulerTitle", match: "prefix" },
       { href: "/admin/logs", label: "adminRuntimeLogsTitle", match: "prefix" },
       { href: "/admin/config", label: "adminConfigTitle", match: "prefix" },
-      { href: "/admin/database", label: "adminDatabaseTitle", match: "prefix" }
+      { href: "/admin/database", label: "adminDatabaseTitle", match: "prefix" },
+      { href: "/admin/migration", label: "adminMigrationTitle", match: "prefix" }
     ]
   },
   {
