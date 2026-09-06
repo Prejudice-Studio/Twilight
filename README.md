@@ -95,7 +95,7 @@ pnpm check
 pnpm build
 ```
 
-旧 `webui/` 仅在验证整站紧急回滚时单独构建，不是默认开发入口。
+旧 `webui/` 仅在验证整站紧急回滚时单独构建，不是默认开发入口。CI 的默认前端检查针对 `webui-v2/`，旧版依赖只作为回滚维护项单独更新。
 
 更多约定见 [开发指南](docs/guides/development.md) 与 [模块化架构与解耦指南](docs/guides/modular-architecture.md)。
 

@@ -348,7 +348,7 @@ V2 通过 `BACKEND_URL=http://127.0.0.1:5000` 由服务端访问后端；同源 
 - [ ] `gofmt` 已执行（无格式化 diff）。
 - [ ] `go test ./...` 已通过。
 - [ ] `go vet ./...` 已通过。
-- [ ] V2 前端或 SSR API 边界有变更时，在 `webui-v2/` 执行 `pnpm check` 与 `pnpm build`；旧 `webui/` 只有回滚改动时才单独验证。
+- [ ] V2 前端或 SSR API 边界有变更时，在 `webui-v2/` 执行 `pnpm check` 与 `pnpm build`；CI 默认也只对 `webui-v2/` 执行前端质量门禁，旧 `webui/` 只有回滚改动时才单独验证。
 - [ ] 已扫描敏感信息（密钥、token、明文密码）。
 - [ ] 已扫描旧后端残留，确认 `start_backend_prod.sh` 与 `deploy/*.service` 指向 `bin/twilight`，未重新引入旧后端运行入口。
 - [ ] 已检查鉴权级别、路径穿越、文件类型白名单与 CORS 配置。
