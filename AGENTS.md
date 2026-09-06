@@ -14,8 +14,8 @@ This file applies to the whole repository. Read it before changing code. If a ne
 
 - Twilight is an Emby / Jellyfin user-management panel.
 - Backend: Go module `github.com/prejudice-studio/twilight`, entrypoint `cmd/twilight`.
-- V1 frontend: `webui/`, Next.js App Router, TypeScript, Tailwind CSS, Radix/shadcn-style components, Zustand, and TanStack Query.
-- V2 frontend: `webui-v2/`, SvelteKit SSR with `@sveltejs/adapter-node`, server `load` functions and form actions; it must not reuse V1 React/Zustand page state as its runtime architecture.
+- Default frontend: `webui-v2/`, SvelteKit SSR with `@sveltejs/adapter-node`, server `load` functions and form actions; it must not reuse V1 React/Zustand page state as its runtime architecture.
+- Emergency rollback frontend: `webui/`, the old Next.js App Router implementation. It remains in the repository for rollback and behavior comparison, but it is not the default production entry.
 - Preferred deployment: Linux + systemd.
 - Current Go source and `docs/guides/development.md` are authoritative. Do not reintroduce old Python backend entrypoints, uvicorn, `requirements.txt`, or historical multi-SQLite migration notes.
 
@@ -47,7 +47,7 @@ Update docs in the same change when behavior changes.
 - `internal/store`: PostgreSQL persistence. Most business entities remain in the single `twilight_state` JSONB document; high-write audit logs, runtime logs, sessions, playback records, the Telegram roster, and the Telegram update cursor use dedicated tables. `Store` is constructed exclusively via `store.OpenPostgres`, so `s.db` is always non-nil. The `json` label survives only as a one-way export target in the database-migration panel and as the `migrate-json` import source; there is no JSON/file runtime backend, no flock, and no `.bak`/sidecar state files.
 - `internal/redis`: RESP client for shared sessions and rate limits.
 - `internal/security`: tokens, password hashing, and secure random helpers.
-- `webui/src/app`: Next.js App Router pages.
+- `webui/src/app`: legacy Next.js App Router pages kept only for emergency rollback.
 - `webui-v2/src/routes`: V2 SSR routes, server loads/actions, and progressive-enhancement UI.
 - `webui-v2/src/routes/forgot-password`: public SSR password recovery using server-side email/Emby actions.
 - `webui-v2/src/routes/setup`: one-time SSR initialization wizard; the backend remains the setup gate and session issuer.
@@ -82,9 +82,10 @@ Update docs in the same change when behavior changes.
 - `webui-v2/src/routes/(app)/admin/email`: Admin-only SSR email verification review, paginated account status, maintenance actions, and sanitized SMTP testing.
 - `webui-v2/src/lib/server`: V2 server-only API proxy, bounded response parsing, and session forwarding.
 - `webui-v2/src/lib/navigation.ts`: Shared V2 primary/account/admin navigation metadata and active-path matching.
-- `webui/src/lib/api-request.ts`: low-level request wrapper, credentials, timeout, and `ApiError`.
-- `webui/src/lib/api.ts`: frontend API client. New backend routes usually need matching client methods and `api-types.ts` types.
-- `webui/src/locales`: i18n catalogs.
+- `webui-v2/src/lib/server/api.ts`: V2 SSR request boundary, Cookie forwarding, bounded streams, and same-origin API proxy.
+- `webui-v2/src/lib/types.ts`: V2 safe DTOs shared by server loads and Svelte pages.
+- `webui-v2/src/lib/i18n.ts`: V2 user-facing message catalog.
+- `webui/src/lib/api-request.ts`, `webui/src/lib/api.ts`, and `webui/src/locales`: legacy rollback client only.
 - `deploy/`: systemd units and install scripts; units must point to `bin/twilight`.
 
 ## Feature Location Guide
@@ -177,25 +178,23 @@ Use this index before broad search. Line numbers drift, so search by function na
 
 ## Frontend Rules
 
-- Use `webui/src/lib/api.ts` rather than naked `fetch` for app API calls.
-- User-facing copy belongs in `basic.json`, `zh-Hant.json`, and `en-US.json`; `zh-Hans.json` remains sparse and falls back to `basic.json`.
+- V2 server loads/actions must use `webui-v2/src/lib/server/api.ts`; do not add browser-side naked `fetch` calls for authenticated app data. The legacy `webui/src/lib/api.ts` is only for the rollback frontend.
+- V2 user-facing copy belongs in `webui-v2/src/lib/i18n.ts`; new locale-enabled V2 work must keep catalog keys stable. The JSON catalogs under `webui/src/locales` are legacy rollback resources.
 - Polling should check document visibility when useful and must clear intervals on unmount.
 - Dashboard Emby lines remain collapsed to an entry/count summary on the home page. Users may open the detail dialog to view the lines and trigger probing; loading or refreshing the line list must not automatically fan out one probe per line or issue an extra Emby status precheck.
 - Shared authenticated layout components must not import `framer-motion` for simple active-state or one-shot entrance effects. Use existing CSS/Tailwind transitions there so routes without page animation do not pay for Framer in the common layout bundle.
 - Ordinary route-level one-shot entrance effects should use the shared `page-enter` CSS class or CSS transitions. Reserve `framer-motion` for pages with real interactive or coordinated animation requirements; do not add it for a single opacity/translate wrapper.
 - The admin landing page and system-statistics page are dense operational surfaces and must remain static; do not import `framer-motion` or add decorative gradient/orb layers to their metric cards. Stable CSS transitions are sufficient for hover feedback.
 - Keep controls dimensionally stable across languages.
-- Coalesce duplicate in-flight `GET` / `HEAD` requests only in `webui/src/lib/api-request.ts`; never dedupe writes, caller-abortable requests, or endpoints that opt out with `dedupe: false`. The same wrapper owns the short successful-read memory cache; keep it bounded by entry count, per-response source size, and total source-size budget. Shared cache and in-flight coalescing are restricted to explicitly public `credentials: "omit"` reads because HttpOnly cookie sessions cannot safely participate in a JavaScript cache key. Keep `/users/me`, `refresh=1`, `X-Twilight-Intent`, `no-store` / `reload`, and `cacheRead: false` out of that cache.
-- The shared WebUI request wrapper must parse API responses through a bounded byte stream. Reject responses larger than the documented limit before JSON parsing, cancel the reader on overflow, keep the request timeout signal alive through response-body consumption, and keep API error diagnostics on the actual `apiVersion`; do not restore unbounded `response.text()` parsing.
-- Current-user identity endpoints (`/users/me` and `/auth/me`) must also stay out of in-flight read dedupe. Login, logout, and session-changing frontend flows must clear request caches and invalidate stale auth-store promises before writing user state.
-- Rapidly changing admin list/detail reads must pass `AbortSignal` through `api.ts`; refresh, filter/page changes, route changes, and unmount must cancel superseded requests, and stale responses must not overwrite newer state or produce abort-error toasts.
-- `useAsyncResource` defaults to recording non-cancel errors in its `error` state and resolving safely, so automatic or fire-and-forget loads cannot create unhandled Promise rejections. A caller that needs exception control flow may use `execute({ throwOnError: true })`; all manual fire-and-forget calls must still explicitly consume the Promise.
+- The legacy V1 request wrapper in `webui/src/lib/api-request.ts` may coalesce only explicitly public `GET` / `HEAD` reads; never copy that browser cache into V2. V2 session reads and form actions are server-side `no-store` operations, and the bounded stream/parser in `webui-v2/src/lib/server/api.ts` remains the only V2 transport boundary.
+- V2 current-user identity is held in the request-local server `event.locals`, never in a cross-user browser cache. Login, logout, and session-changing actions must refresh or redirect through the server boundary before rendering the next page.
+- V1 client list/detail reads use `AbortSignal` and `useAsyncResource` only for rollback maintenance. V2 uses URL state, server `load`, form actions, and request-local `Promise.allSettled`; it must not restore browser polling or a global client data store.
 - The admin user page cache is bounded to a small LRU window by both query count and
   retained row count. Keep cache hits moving to the newest position, and do not turn
   user-list filter/page history into an unbounded browser-side copy of the user base.
 - Admin tables, dialogs, dropdowns, and selects must stay usable in phone, tablet, and narrow desktop devtools viewports. Prefer stable dimensions, horizontal table overflow, wrapping button labels, and mobile card views over cramped desktop tables.
-- The admin registration-code search is a backend-filtered read and must debounce free-text input before changing the query; type/status/source/sort/order changes reset to page 1. Keep the existing abortable `useAsyncResource` request path and use `custom-scrollbar` on long code tables and dialogs.
-- Admin audit and violation list reads must opt out of the short read cache and pass the `AbortSignal` from `useAsyncResource`; filtering, pagination, and route changes must cancel obsolete requests. Destructive controls and result metadata must wrap on narrow Firefox viewports.
+- The admin registration-code search is a backend-filtered read and must debounce free-text input before changing the query; type/status/source/sort/order changes reset to page 1. V2 stores these filters in URL state and reads only the bounded SSR page. The legacy V1 path keeps its abortable request behavior.
+- Admin audit and violation list reads must be no-store, server-filtered, bounded, and cancelable at the active transport boundary; V2 uses SSR loads and redirects after form actions, while the legacy V1 path also passes `AbortSignal` and cancels obsolete browser reads.
 - The admin email page must call `/admin/email/verifications` with an explicit `view` and bounded pagination. Pending-code and account searches are backend-filtered, caller-abortable reads; switching to the configuration tab must not fetch either list. Keep the parameterless full response for compatibility only, and use mobile/tablet cards instead of rendering the wide desktop tables there.
 - The admin announcement page must use the backend-filtered `/admin/announcements` pagination contract (`page`, `per_page`, `include_invisible`, and `include_expired`) instead of loading the full announcement history. Pass the `AbortSignal` from `useAsyncResource`, opt out of the short read cache, and update a single announcement in local state after successful toggle/edit/delete actions where the response is sufficient. Icon-only announcement actions need accessible labels and must be disabled while another mutation is pending; action groups must wrap on narrow Firefox viewports, and long previews own their bounded scroll region.
 - The V2 `/admin/announcements` page must keep the same bounded pagination and filter contract in a server `load`; create/edit/toggle/delete operations must use form actions and let Go enforce the final field whitelist, audit, and safe render mode. The historical response may expose `expired_at` while write payloads use `expires_at`, so V2 DTOs must accept both during the migration. Announcement content must remain escaped text in the SSR preview unless the reviewed safe renderer is explicitly ported.
@@ -203,8 +202,8 @@ Use this index before broad search. Line numbers drift, so search by function na
 - The admin invite forest may contain thousands of rows. Keep the O(n) map/descendant calculation, avoid per-node array copies while traversing, and mount the table in bounded 300-row batches with an explicit load-more control. The table itself must own a bounded Firefox scroll region. Batch and cascade mutations must be mutually exclusive and disable duplicate controls until the request and refresh finish.
 - The admin database page must pass an `AbortSignal` to status and backup-list reads, cancel superseded reloads and ignore abort errors after unmount. Long backup lists and database preview dialogs must use bounded `dvh` Firefox scroll regions; do not let backup history expand the whole page.
 - The admin scheduler list has one shared abortable read path for manual refresh and visible running-job polling; a new read cancels the previous one. Running-job polling is visibility-aware and uses a 3-second interval. Scheduler last-run/history dialogs must cancel stale job reads, ignore abort toasts, and use bounded `dvh` Firefox scroll regions for log text.
-- Telegram command management loads config schema, developer presets, and the authoritative command catalog concurrently with one caller cancellation boundary. These reads bypass short response caching except that a completed schema read may seed the existing bounded schema cache. Long built-in/custom command collections must scroll inside bounded Firefox regions. Placeholder insertion must update the controlled React row state for the last focused reply textarea; do not mutate textarea DOM values and dispatch synthetic input events.
-- The full configuration page and every embedded `AdminConfigSections` editor must pass the `useAsyncResource` abort signal through schema/TOML reads. Superseded loads and unmounts must not write stale config state or show abort errors. Configuration source, backup, update-output, and pending-change previews use bounded Firefox scroll regions with contained overscroll.
+- Telegram command management loads config schema, developer presets, and the authoritative command catalog concurrently at the SSR boundary. Long built-in/custom command collections must scroll inside bounded Firefox regions. V2 placeholder insertion updates Svelte form state; do not mutate textarea DOM values or dispatch synthetic input events. The old React row-state rule applies only to the rollback frontend.
+- The full configuration page and every embedded editor must read schema/TOML through the SSR boundary. Superseded V2 loads must not write stale state; configuration source, backup, update-output, and pending-change previews use bounded Firefox scroll regions with contained overscroll. The legacy V1 editor additionally passes `useAsyncResource` abort signals.
 - Configuration image-upload headers and the search/action toolbar stay stacked through tablet and narrow devtools widths, returning to a shared row at `lg`. The action toolbar uses an explicit two-column grid below `lg`; do not let action buttons consume the search input's intrinsic width or wrap labels one character at a time.
 - Configuration's icon-only clear-search control must use the localized catalog and expose an `aria-label`; do not add a hard-coded accessible name in the page.
 - Firefox accepts only pixels or percentages in `IntersectionObserver.rootMargin`. Configuration section tracking and any new observer must not use `rem`, `em`, viewport units, or `calc()` there; an invalid margin must never crash the page.
@@ -224,7 +223,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - The admin user action menu, desktop table, and destructive-maintenance previews must own bounded `dvh` Firefox scroll regions. Keep the desktop table header sticky, allow preview tables to scroll in both directions on phones, and retain server-side pagination plus mobile cards instead of mounting the entire user base.
 - Registration-code selection, copy, export, and destructive actions use a two-column phone grid with explicit button widths and return to a wrapping row at `sm`. Do not use multiple `flex: 1 1 0%` text buttons in one phone-width row; Firefox may shrink them to one character per line.
 - Every icon-only registration-code action must have a localized `aria-label`, including generated-code copy, invite-code copy, enable/disable, edit, delete, note save, usage history, and pagination. A `title` tooltip alone is not an accessible name.
-- Developer-mode JS docs and preset reads must pass `AbortSignal`, opt out of the short read cache, and ignore obsolete responses on unmount. The symbol tree, category strip, tab list, and examples must stay inside bounded Firefox `dvh` scroll regions; keep the sandbox security contract unchanged.
+- Developer-mode JS docs and preset reads must be bounded, no-store, and server-authorized. The symbol tree, category strip, tab list, and examples must stay inside bounded Firefox `dvh` scroll regions; keep the sandbox security contract unchanged. The legacy V1 page additionally passes `AbortSignal` and ignores obsolete responses on unmount.
 - The V2 `/admin/security` route is a static SSR navigation hub. It must not create a second security-policy store or duplicate the schema editor; audit, runtime logs, violations, device/IP review, and configuration remain in their dedicated SSR routes and all mutations stay server-side.
 - The V1 server status page must keep API, database, and Emby health probes as three separate no-store requests. The V2 `/admin/status` page performs the same three independent reads from a server `load` with `Promise.allSettled`, then returns only safe display DTOs to the browser; it has no client polling. An unavailable probe must not discard successful results from the other probes, and a non-admin must be rejected by the server-side admin layout rather than hidden navigation.
 - The V2 scheduler page must use SSR reads and form actions. It must not restore browser polling or SSE; manual refresh is the only status refresh path. Manual run parameters must be rebuilt and bounded on the server, schedule edits must preserve the backend's manual-only job boundary, and run history/log output must remain bounded and no-store.
@@ -248,7 +247,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - `/users/me` user preference toggles must accept only JSON boolean values for boolean fields such as Bangumi modes, login/ticket notifications, and password-security preferences. Do not rely on frontend switches or string coercion for these fields.
 - Public OpenAPI output must expose only public routes. Full route inventory belongs behind admin auth at `/system/admin/apis`.
 - API Key `permissions` are enforced per `/apikey/*` route. Account reads require `account:read`, account mutations (including renewal and card use) require `account:write`, Emby status requires `emby:read`, and session kicks require `emby:write`. Missing scopes return `API_KEY_PERMISSION_DENIED`; do not reduce permissions to display-only metadata again.
-- Preserve the safe announcement renderer and URL allowlist in `webui/src/lib/safe-render.tsx`.
+- Preserve the safe announcement renderer and URL allowlist. New V2 pages must render user content as escaped Svelte text unless an equivalent reviewed safe renderer is added under `webui-v2`.
 - CORS behavior: an empty `cors_origins` list reflects any valid `http`/`https` Origin to reduce self-hosting misconfiguration pain; a non-empty list restricts cross-origin requests to those entries; `*` is accepted as the same relaxed mode. `corsOriginMatchesHost` must continue to allow an Origin that matches the current request host as `scheme://host[:port]`. There is no hidden `cors_allow_any_origin` bypass.
 
 ## Feature Gate Notes
@@ -537,8 +536,8 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - `sameHostRedirectPolicy` rejects cross-host redirects (max 5 hops same-host) to prevent token leakage via 302 to attacker-controlled hosts.
 - Hot-reloading a changed Emby URL or token must invalidate every server-scoped cache, including sessions, device/IP audit data, and Emby administrator decisions, before those results can be reused.
 - Telegram's protocol wrapper must keep HTTP 429 `parameters.retry_after` semantics, classify refused 3xx responses before decoding their bodies, and apply the shared redirect policy and connection pool without introducing a separate `http.Client`.
-- The root layout includes `<link rel="dns-prefetch">` and `<link rel="preconnect">` tags for configured API origin, TMDB image CDN, and Bangumi API to warm connections early.
-- Next owns `Cache-Control` for `/_next/static` hashed build assets. Do not override that path from `webui/next.config.mjs`; keep explicit cache headers limited to app-owned public assets such as `favicon.png`.
+- The V2 root layout and SSR boundary must not add speculative cross-origin preconnects for private or optional upstreams. Add connection hints only for an actually configured, browser-visible origin and document the request-cost tradeoff.
+- V2 adapter-node and the default Nginx config give only `/_app/immutable/` hashed build assets a long immutable cache lifetime. SSR HTML, form actions, `/_app/version.json`, and other session-sensitive or version-sensitive resources remain `no-store`.
 
 ## Rate Limit Rules
 
@@ -597,7 +596,7 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 
 ## V2 Refactor Rules
 
-The current V1 implementation remains the behavior and migration source of truth while V2 is being built on the dedicated `codex/v2-audit-foundation` branch. Do not replace V1 in place or mix an unreviewed V2 rewrite into the existing `/api/v1` handlers.
+The current V1 implementation remains the behavior and compatibility reference for the V2 rewrite on the dedicated `codex/v2-audit-foundation` branch. Do not mix V2 page state into V1 React/Zustand runtime code or duplicate business transitions in `/api/v1` handlers. V2 is the default WebUI entry; V1 is retained only as an explicit emergency rollback target.
 
 - V2 work follows the order documented in `docs/v2/v1-audit.md` and `docs/v2/architecture.md`: audit, design, foundation, migration, new capabilities, security review, performance review, and full validation.
 - New native interfaces use `/api/v2`. V1 compatibility adapters may delegate to one V2 application service, but the same state transition must not be implemented twice.
@@ -610,7 +609,7 @@ The current V1 implementation remains the behavior and migration source of truth
 - Viewing statistics must be event/segment based and idempotent. Activity logs remain retained independently. Do not add direct client-controlled duration accounting or an unbounded active-playback accumulator.
 - Firefox is the WebUI baseline on phone, tablet, desktop, and narrow devtools viewports. New V2 screens must use bounded `dvh` scroll regions, stable grid tracks, mobile-safe toolbars, abortable reads, and lazy rendering for large lists. Do not modify CORS behavior while improving transport or layout.
 - Each independently reviewable module gets its own Chinese commit. Before committing, run focused tests and scan the diff for unrelated changes, debug output, local absolute paths, secrets, tokens, passwords, cookies, and undocumented behavior changes.
-- V2 frontend is a separate SvelteKit SSR application under `webui-v2`; do not replace `webui` or change the production frontend entry until the V1 feature matrix is fully migrated and the cutover has a rollback plan.
+- V2 frontend is a separate SvelteKit SSR application under `webui-v2`; production Nginx/systemd and Docker Compose target it by default. Keep `webui` as a separately buildable emergency rollback target, and do not share browser state or credentials between the two implementations.
 - V2 migrated modules must use server `load` for session-scoped read aggregation and SvelteKit form actions for writes. The migrated settings page is the reference implementation: do not move password, email-verification, binding, or preference decisions into browser-only state.
 - The V2 app shell uses `webui-v2/src/lib/navigation.ts` as the only source of primary, account, and admin destinations. Keep active matching shared between responsive views, expose only one active admin destination, and retain bounded native-menu scrolling for Firefox.
 - The V2 `/settings/appearance` page must reuse the session-scoped avatar/background fields from the server identity response, sanitize legacy background values before rendering CSS, and keep background/avatar uploads and deletion in independent form actions. Do not nest HTML forms or expose uploaded filesystem paths; Go remains the final MIME, path, rate-limit, authorization, and persistence boundary.
@@ -640,8 +639,9 @@ Run checks proportional to the change. For broad backend/frontend work, run:
 - `go build ./...`
 - `go vet ./...`
 - `go test ./...`
-- `cd webui && pnpm lint`
-- `cd webui && pnpm build`
+- `cd webui-v2 && pnpm check`
+- `cd webui-v2 && pnpm build`
+- `cd webui && pnpm lint` and `cd webui && pnpm build` only when the emergency rollback frontend is changed or explicitly being validated.
 
 Use `gofmt` for Go changes and the repo lint/build tools for frontend changes.
 

@@ -1,6 +1,6 @@
 # Twilight V2 SSR 前端
 
-本文记录 V2 前端的实际基础实现。V2 不在 V1 的 Next.js/React 页面上继续堆叠客户端状态，而是在 `webui-v2/` 使用 SvelteKit SSR 和 `@sveltejs/adapter-node`，逐模块迁移 V1 能力。迁移完成前，V1 `webui/` 仍是生产回退入口。
+本文记录 V2 前端的实际实现。V2 不在 V1 的 Next.js/React 页面上继续堆叠客户端状态，而是在 `webui-v2/` 使用 SvelteKit SSR 和 `@sveltejs/adapter-node`，完整承载当前用户端与管理员端页面。V1 `webui/` 仅作为出现发布问题时的整站回滚入口。
 
 ## 目标
 
@@ -76,6 +76,12 @@ webui-v2/
 
 为避免旧书签在迁移期间失效，V2 保留以下服务端重定向：`/admin/stats`、`/admin/test` → `/admin/status`；`/admin/device-audit` → `/admin/emby?tab=devices`；`/admin/telegram/commands` → `/admin/telegram`；`/admin/developer/js-docs` → `/admin/developer`；`/settings/background` → `/settings/appearance`。这些入口不创建第二套页面、请求或状态探测逻辑。
 
+## 生产入口与回滚
+
+Linux + systemd 部署由 `deploy/setup-systemd.sh` 管理 `twilight-webui-v2.service`，构建产物为 `webui-v2/build`，默认监听 `127.0.0.1:3001`。`deploy/nginx-twilight.conf` 将 `/` 和 `/_app/` 反代到 adapter-node，`/api/` 仍按原配置直接转发到 Go API；这只是传输拓扑变化，不改变 CORS 策略。
+
+Docker Compose 的 `webui` 服务同样从 `webui-v2/Dockerfile` 构建。反向代理部署时需要设置 `WEBUI_ORIGIN` 为浏览器实际访问的完整 Origin；本地直连可使用默认的 `http://localhost:3000`。升级前应保留旧 V1 构建和上一版 V2 构建，回滚只切换反向代理前端目标，不回滚 PostgreSQL 数据或 Go API。
+
 ## 迁移规则
 
 一个功能完成迁移必须同时具备：
@@ -86,7 +92,7 @@ webui-v2/
 - 手机/平板/窄 Firefox 视口验证，长表格、对话框和聊天区域拥有自己的 `dvh` 滚动上下文。
 - V1 配置/数据兼容、回退入口和文档更新。
 
-未完成迁移的 V1 模块不能被 V2 壳层伪装成已支持，也不能通过前端隐藏按钮替代后端 feature gate。
+V2 页面覆盖 V1 当前用户可见的全部路由；兼容别名只负责旧书签跳转，不复制业务读取或写入逻辑。后端 feature gate、权限和状态机仍是唯一安全边界。
 
 ## 已迁移模块：个人中心
 
@@ -181,7 +187,7 @@ V2 调度器不使用浏览器轮询或 SSE。任务仍在后端异步运行，�
 
 单用户操作按账号状态、Emby、身份绑定、权限/危险操作分组。启停、续期、Emby 启停、状态刷新、Telegram/Emby 解绑、角色调整和删除均使用 SvelteKit form action，由服务端转发当前 HttpOnly 会话到 Go API；成功后 303 回到当前筛选结果，重新读取权威状态。页面根据 `admin_action_state` 提示不可用操作，但不会以隐藏按钮替代后端鉴权。
 
-创建账号仅在当前 action 结果中显示一次性临时密码，不把密码放进 URL、持久化状态或共享缓存。删除、角色调整、账号启停和 Emby 操作均保留确认步骤；级联深度由服务端再次限制。V1 用户管理页在 V2 完成全功能迁移前继续保留为回退入口。
+创建账号仅在当前 action 结果中显示一次性临时密码，不把密码放进 URL、持久化状态或共享缓存。删除、角色调整、账号启停和 Emby 操作均保留确认步骤；级联深度由服务端再次限制。旧 V1 用户管理页只作为整站紧急回滚入口。
 
 ## 已迁移模块：管理员工单
 
@@ -291,7 +297,7 @@ V2 调度器不使用浏览器轮询或 SSE。任务仍在后端异步运行，�
 
 ## 已迁移模块：管理员模块索引
 
-`/(app)/admin` 使用管理员服务端布局，只并行读取公开系统摘要和管理员轻量统计，不读取完整用户、日志或外部服务列表。页面按用户、内容、安全、运维和外部服务分组展示已经迁移到 V2 的入口，模块说明与实际路由一一对应；未迁移的 V1 页面不会伪装成 V2 功能入口。摘要读取失败只影响摘要区域，具体模块仍可直接打开并各自处理错误。
+`/(app)/admin` 使用管理员服务端布局，只并行读取公开系统摘要和管理员轻量统计，不读取完整用户、日志或外部服务列表。页面按用户、内容、安全、运维和外部服务分组展示 V2 的全部管理入口；摘要读取失败只影响摘要区域，具体模块仍可直接打开并各自处理错误。
 
 ## 已迁移模块：公开 Wiki
 

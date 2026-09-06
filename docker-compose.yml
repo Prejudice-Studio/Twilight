@@ -9,14 +9,14 @@
 # Quick start:
 #   1. Copy config.docker.toml → config.toml and edit secrets
 #   2. Copy deploy/docker/.env.example → .env and change secrets
-#   3. Optional: copy webui/.env.example → webui/.env for frontend overrides
+#   3. Optional: copy webui-v2/.env.example → webui-v2/.env for frontend overrides
 #   4. docker compose up -d
 #
 # Services:
 #   postgres  — PostgreSQL 17 (state store + sessions)
 #   redis     — Redis 7 (session sharing + rate limiting)
 #   twilight  — Go backend (API + scheduler + bot, "all" mode)
-#   webui     — Next.js frontend (standalone)
+#   webui     — SvelteKit SSR frontend (adapter-node)
 #
 # Volumes:
 #   postgres_data / redis_data — persisted databases
@@ -148,13 +148,13 @@ services:
     # ports:
     #   - "5000:5000"
 
-  # ---- Next.js Frontend ----
+  # ---- SvelteKit SSR Frontend ----
   webui:
     <<: *service-defaults
     build:
-      context: ./webui
+      context: ./webui-v2
       dockerfile: Dockerfile
-    image: twilight-webui:latest
+    image: twilight-webui-v2:latest
     container_name: twilight-webui
     restart: unless-stopped
     depends_on:
@@ -164,11 +164,11 @@ services:
       TZ: ${TZ:-Asia/Shanghai}
       NODE_ENV: production
       PORT: 3000
-      # API URL — set to the backend service name for internal networking.
-      # For production with a reverse proxy, set this to the public API URL.
       BACKEND_URL: ${BACKEND_URL:-http://twilight:5000}
+      # Set WEBUI_ORIGIN to the public origin when using a reverse proxy.
+      ORIGIN: ${WEBUI_ORIGIN:-http://localhost:3000}
     env_file:
-      - path: webui/.env
+      - path: webui-v2/.env
         required: false
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
