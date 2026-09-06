@@ -1,4 +1,6 @@
 <script lang="ts">
+  import PageHeader from "$lib/components/PageHeader.svelte";
+  import Panel from "$lib/components/Panel.svelte";
   import { t } from "$lib/i18n";
   import type { HealthProbe, SystemHealthDetail } from "$lib/types";
   import type { PageData } from "./$types";
@@ -77,19 +79,14 @@
 <svelte:head><title>{t.adminStatusTitle} - {t.siteName}</title></svelte:head>
 
 <section class="status-page" aria-labelledby="status-title">
-  <header class="page-heading">
-    <div>
-      <p class="eyebrow">{t.adminArea}</p>
-      <h1 id="status-title">{t.adminStatusTitle}</h1>
-      <p class="muted">{t.adminStatusDescription}</p>
-    </div>
-    <div class="heading-actions">
+  <PageHeader id="status-title" eyebrow={t.adminArea} title={t.adminStatusTitle} description={t.adminStatusDescription}>
+    {#snippet actions()}
       <a class="text-link" href="/dashboard">{t.backDashboard}</a>
       <form method="GET" action="/admin/status">
         <button class="button primary" type="submit">{t.adminStatusRefresh}</button>
       </form>
-    </div>
-  </header>
+    {/snippet}
+  </PageHeader>
 
   <p class="updated" role="status">{t.adminStatusUpdatedAt.replace("{date}", new Date(data.refreshed_at * 1000).toLocaleString("zh-CN"))}</p>
 
@@ -116,47 +113,40 @@
   </section>
 
   <div class="content-grid">
-    <section class="panel" aria-labelledby="system-title">
-      <div class="section-heading"><div><h2 id="system-title">{t.adminStatusSystemTitle}</h2><p class="muted">{t.adminStatusSystemDescription}</p></div></div>
+    <Panel id="system-title" title={t.adminStatusSystemTitle} description={t.adminStatusSystemDescription}>
       {#if data.info}
         <dl class="facts large"><div><dt>{t.adminStatusServiceName}</dt><dd>{valueLabel(data.info.name)}</dd></div><div><dt>{t.adminStatusVersion}</dt><dd>{valueLabel(data.info.version)}</dd></div></dl>
         <div class="subsection"><h3>{t.adminStatusFeatures}</h3><div class="feature-list">{#each Object.entries(data.info.features || {}) as [name, enabled]}<div><span>{featureLabels[name] || name}</span><strong class:enabled={enabled}>{enabled ? t.adminStatusOn : t.adminStatusOff}</strong></div>{/each}</div></div>
       {:else}<p class="muted">{t.adminStatusReadFailed}</p>{/if}
-    </section>
+    </Panel>
 
-    <section class="panel" aria-labelledby="stats-title">
-      <div class="section-heading"><div><h2 id="stats-title">{t.adminStatusStatsTitle}</h2><p class="muted">{t.adminStatusStatsDescription}</p></div></div>
+    <Panel id="stats-title" title={t.adminStatusStatsTitle} description={t.adminStatusStatsDescription}>
       {#if data.stats}
         <div class="stat-group"><h3>{t.adminStatusUserStats}</h3><dl class="facts"><div><dt>{t.adminStatusActiveUsers}</dt><dd>{number(data.stats.users?.active)}</dd></div><div><dt>{t.adminStatusTotalUsers}</dt><dd>{number(data.stats.users?.total)}</dd></div><div><dt>{t.adminStatusUserLimit}</dt><dd>{data.stats.users?.limit == null ? t.adminStatusUnlimited : number(data.stats.users.limit)}</dd></div><div><dt>{t.adminStatusUsage}</dt><dd>{data.stats.users?.usage_percent === undefined ? "-" : `${data.stats.users.usage_percent}%`}</dd></div></dl></div>
         <div class="stat-group"><h3>{t.adminStatusRegcodeStats}</h3><dl class="facts"><div><dt>{t.adminStatusActive}</dt><dd>{number(data.stats.regcodes?.active)}</dd></div><div><dt>{t.adminStatusTotal}</dt><dd>{number(data.stats.regcodes?.total)}</dd></div></dl></div>
         <div class="stat-group"><h3>{t.adminStatusRuntime}</h3><dl class="facts"><div><dt>{t.adminStatusRedis}</dt><dd>{valueLabel(data.stats.redis_enabled)}</dd></div><div><dt>{t.adminStatusRoutes}</dt><dd>{number(data.stats.routes)}</dd></div><div><dt>{t.adminStatusUptime}</dt><dd>{uptime(data.stats.uptime)}</dd></div></dl></div>
       {:else}<p class="muted">{t.adminStatusReadFailed}</p>{/if}
-    </section>
+    </Panel>
   </div>
 </section>
 
 <style>
   .status-page { display: grid; gap: 1.1rem; min-width: 0; }
-  .page-heading, .heading-actions, .section-heading, .health-card-heading { align-items: flex-start; display: flex; gap: .8rem; }
-  .page-heading, .section-heading, .health-card-heading { justify-content: space-between; }
-  .page-heading { border-bottom: 1px solid #d7dee5; padding-bottom: 1.15rem; }
-  .heading-actions { align-items: center; flex-wrap: wrap; }
-  .heading-actions form { display: flex; }
-  .eyebrow { color: #486581; font-size: .8rem; font-weight: 700; letter-spacing: .08em; margin: 0 0 .45rem; text-transform: uppercase; }
-  h1, h2, h3, p { overflow-wrap: anywhere; } h1, h2, h3 { margin: 0; } h1 { font-size: 2rem; } h2 { font-size: 1.2rem; } h3 { font-size: .98rem; }
+  .health-card-heading { align-items: flex-start; display: flex; gap: .8rem; justify-content: space-between; }
+  h2, h3, p { overflow-wrap: anywhere; } h2, h3 { margin: 0; } h2 { font-size: 1.2rem; } h3 { font-size: .98rem; }
   .muted, .updated { color: #52606d; margin: .4rem 0 0; } .updated { font-size: .82rem; margin: 0; }
   .text-link { min-height: 2.5rem; padding: .55rem 0; }
   .button { border: 0; border-radius: .3rem; cursor: pointer; font: inherit; font-weight: 650; min-height: 2.5rem; max-width: 100%; padding: .5rem .85rem; } .button.primary { background: #245b75; color: #fff; } .button.primary:hover { background: #1c465a; }
-  .health-grid, .panel { background: #fff; border: 1px solid #d7dee5; border-radius: .45rem; min-width: 0; padding: 1rem; }
+  .health-grid { background: #fff; border: 1px solid #d7dee5; border-radius: .45rem; min-width: 0; padding: 1rem; }
   .health-grid { display: grid; gap: 1rem; } .health-cards { display: grid; gap: .8rem; grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .health-card { border: 1px solid #c8d2da; border-left: 4px solid #2f855a; display: grid; gap: .75rem; min-width: 0; padding: .9rem; } .health-card.unavailable { border-left-color: #a0aec0; }
   .health-card-heading { align-items: center; } .health-card-heading p { color: #52606d; font-size: .8rem; margin: .25rem 0 0; } .health-card-heading strong { border-radius: 999px; flex: 0 0 auto; font-size: .78rem; padding: .25rem .5rem; white-space: nowrap; }
   .state-healthy { background: #edf7f0; color: #276749; } .state-unhealthy { background: #fff1f0; color: #a61b1b; } .state-unavailable, .state-not-configured { background: #eef2f4; color: #52606d; }
   .facts { display: grid; gap: .55rem; margin: 0; } .facts div { align-items: baseline; border-bottom: 1px solid #e1e8ed; display: flex; gap: .8rem; justify-content: space-between; min-width: 0; padding-bottom: .5rem; } .facts div:last-child { border-bottom: 0; padding-bottom: 0; } dt { color: #52606d; font-size: .82rem; } dd { font-weight: 650; margin: 0; max-width: 70%; overflow-wrap: anywhere; text-align: right; } .facts.large { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .detail-error { background: #fff8e6; border: 1px solid #e9c46a; color: #7b4f00; margin: 0; padding: .55rem .65rem; }
-  .content-grid { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .panel { display: grid; gap: 1rem; }
+  .content-grid { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .subsection, .stat-group { border-top: 1px solid #e1e8ed; display: grid; gap: .65rem; padding-top: .85rem; } .feature-list { display: grid; gap: .45rem; } .feature-list div { align-items: center; border: 1px solid #e1e8ed; display: flex; gap: .75rem; justify-content: space-between; min-width: 0; padding: .55rem .65rem; } .feature-list span { overflow-wrap: anywhere; } .feature-list strong { color: #a63d40; flex: 0 0 auto; font-size: .8rem; } .feature-list strong.enabled { color: #276749; }
   button:focus-visible, a:focus-visible { outline: 3px solid #9fb3c8; outline-offset: 2px; }
   @media (max-width: 900px) { .health-cards, .content-grid { grid-template-columns: 1fr; } }
-  @media (max-width: 560px) { .page-heading, .heading-actions, .section-heading, .health-card-heading { align-items: stretch; flex-direction: column; } .heading-actions { width: 100%; } .heading-actions .text-link, .heading-actions form, .heading-actions .button { width: 100%; } .facts.large { grid-template-columns: 1fr; } .health-card-heading strong { align-self: flex-start; } .health-grid, .panel { padding: .85rem; } }
+  @media (max-width: 560px) { .health-card-heading { align-items: stretch; flex-direction: column; } .facts.large { grid-template-columns: 1fr; } .health-card-heading strong { align-self: flex-start; } .health-grid { padding: .85rem; } }
 </style>
