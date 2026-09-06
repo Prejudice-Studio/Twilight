@@ -70,6 +70,8 @@ webui-v2/
 
 SSR 到 Go API 的请求以及同源 `/api/v1/*`、`/api/v2/*` 流式代理共享 15 秒有界截止时间，并合并 SvelteKit 当前请求的取消信号；该信号传递到响应体读取阶段。上游无响应或响应体读取超时会被页面/代理的通用错误状态吸收，不会让 Node worker 无限等待或把外部错误泄露给浏览器。该边界不修改后端 CORS 策略。
 
+`webui-v2/scripts/check-architecture.mjs` 会在 `pnpm check` 中执行迁移验收：扫描旧 `webui/src/app` 的页面并确认 V2 存在对应 `+page.svelte` 或服务端兼容入口，同时禁止 V2 引入 React/Next/Zustand，禁止业务页面绕过 SSR API client 直接调用 `fetch`。旧前端仍可作为回滚版本存在，但不能重新成为默认依赖或数据边界。
+
 `src/routes/api/[...path]/+server.ts` 只允许代理 `/api/v1/*` 与 `/api/v2/*`，通过流式上限限制请求体，移除 hop-by-hop、Origin、Referer、Authorization、API Key 和 Host 等头。Go 后端仍是唯一认证、权限、限流和业务状态边界。SvelteKit form action 默认启用同源 Origin 校验。
 
 ## 应用壳层与导航

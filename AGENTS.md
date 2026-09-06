@@ -191,6 +191,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - V2 root `+layout.svelte` only wires global CSS and `AppShell`; navigation, session-aware menu rendering and viewport-safe shell styles belong in `src/lib/components/AppShell.svelte`, not in individual routes.
 - V2 `+error.svelte` must render generic, localized status text and must not expose upstream errors, filesystem paths, cookies, tokens or raw exception messages.
 - V2 SSR API requests use the shared server boundary with a finite deadline that remains active during bounded response-body consumption. Do not add unbounded server-side `fetch` calls from route loads/actions.
+- `webui-v2/scripts/check-architecture.mjs` is part of `pnpm check`: every legacy `webui/src/app` page must have a V2 SSR route or server redirect, and V2 source must not import React/Next/Zustand or call `fetch` outside the server API boundary.
 - V2 user-facing copy belongs in `webui-v2/src/lib/i18n.ts`; new locale-enabled V2 work must keep catalog keys stable. The JSON catalogs under `webui/src/locales` are legacy rollback resources.
 - Polling should check document visibility when useful and must clear intervals on unmount.
 - Dashboard Emby lines remain collapsed to an entry/count summary on the home page. Users may open the detail dialog to view the lines and trigger probing; loading or refreshing the line list must not automatically fan out one probe per line or issue an extra Emby status precheck.
