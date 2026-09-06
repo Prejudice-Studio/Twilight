@@ -1,6 +1,6 @@
 # Twilight 数据迁移包
 
-本文记录 Twilight V2 使用的专用 ZIP 格式。当前提交只建立格式与安全解析核心；数据库读取、静态资源收集、导入事务和管理页面会在后续独立模块中接入，不能把当前格式包 API 误认为已经完成整站备份。
+本文记录 Twilight V2 使用的专用 ZIP 格式。当前已具备格式安全解析、PostgreSQL 一致性数据读取和受控静态资源收集基础；导出/导入 HTTP API、配置策略、资源原子落盘和管理页面仍需由后续独立模块接入，不能把当前格式包 API 误认为已经完成整站备份。
 
 ## 外层结构
 
@@ -84,7 +84,20 @@ payload.enc
 
 结果被拆为 `data/state.json`、`data/runtime-logs.json`、`data/audit-logs.json`、`data/telegram-roster.json`、`data/telegram-runtime.json` 和 `data/playback-records.json`，再交由 `internal/migration.Create` 生成 ZIP。主状态中的兼容性日志字段会在导出前移除，避免同一行被导入两次；播放记录兼容切片保留给历史读取者，完整独立表另行导出。
 
-`twilight_sessions` 不属于迁移数据：其中包含短期会话凭据，导出会扩大凭据泄露和跨实例会话混淆风险。导入后用户需要重新登录。配置文件和 `UploadDir` 下的静态资源尚未由该读取方法自动加入，接入时必须先经过资源白名单和安全路径检查。
+## 静态资源收集
+
+`internal/api/migration_resources.go` 提供受控的 `UploadDir` 资源收集器。它只读取以下目录：
+
+- `avatar/` → `resources/avatars/`
+- `background/` → `resources/backgrounds/`
+- `tickets/<ticket_id>/` → `resources/tickets/<ticket_id>/`
+- `server-icon/` → `resources/server-icon/`
+- `auth-background/` → `resources/auth-background/`
+- `bangumi/` → `resources/bangumi/`
+
+收集器不会把真实机器路径写入清单。根目录和每级条目都拒绝符号链接、非普通文件、路径越界和异常文件名；不存在的可选目录视为空目录，UploadDir 下其它目录不会被打包。单文件、总大小和文件数沿用迁移格式的有界预算，读取前后会复核文件状态，发现并发变化时终止快照。
+
+`twilight_sessions` 不属于迁移数据：其中包含短期会话凭据，导出会扩大凭据泄露和跨实例会话混淆风险。导入后用户需要重新登录。配置文件尚未由该读取方法自动加入；静态资源虽然已有收集基础，但仍必须由上层导出编排显式追加，不能把整个 UploadDir 直接加入归档。
 
 `internal/store.Store.ImportMigrationArchive` 已提供数据恢复基础。它要求归档先经过 `migration.Open`，随后在一个可回滚的 Serializable 事务中替换主状态、运行日志、审计日志、Telegram 花名册、Telegram 更新游标和完整播放记录，并重建自增序列与播放记录的有限内存兼容窗口。数据库失败时事务不会留下半套状态；方法成功提交后才更新 Store 内存快照。当前恢复核心不触碰 `twilight_sessions`，也不会把 `config/*` 或 `resources/*` 直接写入文件系统。
 
@@ -95,7 +108,8 @@ payload.enc
 - 格式、加密、manifest 和 ZIP 安全解析：`internal/migration`
 - PostgreSQL 一致性数据读取：`internal/store/migration_export.go`
 - PostgreSQL 数据恢复：`internal/store/migration_import.go`
-- 管理员 HTTP 预检/导入/导出：`internal/api`
+- 管理员 HTTP 预检/导入/导出：`internal/api`（待接入）
+- UploadDir 资源收集：`internal/api/migration_resources.go`
 - SSR 管理页面：`webui-v2/src/routes/(app)/admin/migration` 或数据库页面中的迁移区域
 
 格式核心通过 `go test ./internal/migration` 验证。新增导入功能必须补充恶意 ZIP、错误密码、manifest 篡改、路径穿越、重复文件、大小上限和失败回滚测试。

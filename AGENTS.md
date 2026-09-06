@@ -48,6 +48,7 @@ Update docs in the same change when behavior changes.
 - `internal/redis`: RESP client for shared sessions and rate limits.
 - `internal/security`: tokens, password hashing, and secure random helpers.
 - `internal/migration`: versioned Twilight ZIP export format, manifest integrity, bounded archive parsing, and Argon2id/AES-256-GCM payload protection. Keep this package independent from HTTP and filesystem writes; import/export orchestration belongs to API/store layers.
+- `internal/api/migration_resources.go`: explicit UploadDir resource collector for migration snapshots. It maps approved upload namespaces to logical `resources/` paths and rejects symlinks, non-regular files, path escapes, and resource-budget violations.
 - `webui/src/app`: legacy Next.js App Router pages kept only for emergency rollback.
 - `webui-v2/src/routes`: V2 SSR routes, server loads/actions, and progressive-enhancement UI.
 - `webui-v2/src/routes/forgot-password`: public SSR password recovery using server-side email/Emby actions.
@@ -111,7 +112,7 @@ Update docs in the same change when behavior changes.
 | API keys | `apikey_handlers.go` | `APIKey` | `/apikey/*`, `/users/me/apikeys` | `settings/apikey` | `api-key.md` |
 | Scheduler | `scheduler*.go` | `SchedulerRun` | `/admin/scheduler/*` | `admin/scheduler` | `backend.md` |
 | Config/runtime/database | `config_admin.go`, `runtime_logs.go`, `database_admin.go` | runtime logs/state | `/system/admin/*` | admin config/logs/database | `backend.md` |
-| Twilight migration core | `internal/migration` | versioned archive format and approved file entries | not exposed yet | later admin migration workflow | `data-migration.md` |
+| Twilight migration core | `internal/migration`, `internal/api/migration_resources.go` | versioned archive format, validated data files, and approved UploadDir resources | not exposed yet | later admin migration workflow | `data-migration.md` |
 | Emby activity logs / playback records | `emby_activity.go` | `playback.go` | `/admin/emby/activity-logs` | `admin/emby` | `backend-api.md` |
 | Developer JS | `developer_handlers.go`, `telegram_js*.go` | developer mode flag | `/admin/developer/*` | `admin/developer` | `developer-js.md` |
 
@@ -130,6 +131,7 @@ Update docs in the same change when behavior changes.
 - Config-file signature checks are hot-reload polling, not request state. Keep the short process-wide throttle in `reloadConfigIfChanged`; do not restore per-request `stat` calls for both config files.
 - JSON request decoders must accept exactly one JSON value, followed only by whitespace/EOF, while preserving the shared size and nesting-depth limits.
 - Migration archives must use `internal/migration` validation before any extraction or persistence. Import code must enforce the manifest format/version, file namespace (`data/`, `config/`, `resources/`), SHA-256 and size limits, regular-file-only ZIP entries, and password-mode Argon2id + AES-256-GCM authentication. Never write archive paths directly to the filesystem.
+- Migration resource export may read only `UploadDir/avatar`, `background`, `tickets`, `server-icon`, `auth-background`, and `bangumi`. The collector must emit logical `resources/` paths, ignore unrelated UploadDir entries, reject symlinks/non-regular files, and enforce bounded file/byte budgets before archive creation.
 - HTTP route registration must go through `App.add`, which maintains immutable method/segment/domain indexes used by `App.match`. Do not append directly to `App.routes`, mutate routes after registration, or bypass the indexed 404/405 matching path.
 - `splitPath` must preserve `path.Clean` normalization for duplicate slashes and dot segments while avoiding unconditional string prefix allocation for normal slash-prefixed request paths.
 
@@ -163,6 +165,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 | `config_admin.go` | config schema, values, save, upload helpers |
 | `migration_export.go` | `ExportMigrationFiles`, consistent PostgreSQL migration snapshot readers |
 | `migration_import.go` | `ImportMigrationArchive`, validated transactional replacement of migration business data |
+| `migration_resources.go` | explicit UploadDir resource collection and filesystem safety checks |
 | `developer_handlers.go` | developer mode and JS sandbox docs endpoints |
 
 ## Store Model Index
