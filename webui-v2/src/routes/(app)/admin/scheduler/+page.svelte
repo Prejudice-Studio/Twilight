@@ -1,5 +1,7 @@
 <script lang="ts">
   import { t } from "$lib/i18n";
+  import PageHeader from "$lib/components/PageHeader.svelte";
+  import Panel from "$lib/components/Panel.svelte";
   import type { SchedulerJobItem, SchedulerJobRun, SchedulerTriggerSpec } from "$lib/types";
   import type { ActionData, PageData } from "./$types";
 
@@ -93,10 +95,12 @@
 <svelte:head><title>{t.adminSchedulerTitle} - {t.siteName}</title></svelte:head>
 
 <section class="scheduler-page" aria-labelledby="scheduler-title">
-  <header class="page-heading">
-    <div><p class="eyebrow">{t.adminArea}</p><h1 id="scheduler-title">{t.adminSchedulerTitle}</h1><p class="muted">{t.adminSchedulerDescription}</p></div>
-    <div class="heading-actions"><a class="text-link" href="/admin/status">{t.adminStatusTitle}</a><a class="button primary" href={viewHref(data.view)}>{t.adminSchedulerRefresh}</a></div>
-  </header>
+  <PageHeader id="scheduler-title" eyebrow={t.adminArea} title={t.adminSchedulerTitle} description={t.adminSchedulerDescription}>
+    {#snippet actions()}
+      <a class="text-link" href="/admin/status">{t.adminStatusTitle}</a>
+      <a class="button primary" href={viewHref(data.view)}>{t.adminSchedulerRefresh}</a>
+    {/snippet}
+  </PageHeader>
 
   {#if data.load_error}<p class="notice error" role="alert">{data.load_error}</p>{/if}
   {#if actionError()}<p class="notice error" role="alert">{actionError()}</p>{/if}
@@ -112,17 +116,19 @@
     <div class="metric"><span>{t.adminSchedulerNext}</span><strong>{dateLabel(data.jobs.filter((job) => job.next_run_at).sort((a, b) => (a.next_run_at || 0) - (b.next_run_at || 0))[0]?.next_run_at)}</strong><small>{t.adminSchedulerNoSchedule}</small></div>
   </div>
 
-  <section class="panel filter-panel" aria-labelledby="scheduler-filter-title">
-    <div><h2 id="scheduler-filter-title">{t.adminSchedulerFilter}</h2><p class="muted">{t.adminSchedulerJobList}</p></div>
-    <nav class="filter-list" aria-label={t.adminSchedulerFilter}>
-      {#each [["all", t.adminSchedulerAll], ["running", t.adminSchedulerFilterRunning], ["failed", t.adminSchedulerFilterFailed], ["custom", t.adminSchedulerFilterCustom], ["manual", t.adminSchedulerFilterManual]] as [value, label]}
-        <a class:active={data.view === value} class="filter-link" href={viewHref(value)}>{label}</a>
-      {/each}
-    </nav>
-  </section>
+  <Panel id="scheduler-filter-title">
+    <div class="filter-layout">
+      <div><h2 id="scheduler-filter-title">{t.adminSchedulerFilter}</h2><p class="muted">{t.adminSchedulerJobList}</p></div>
+      <nav class="filter-list" aria-label={t.adminSchedulerFilter}>
+        {#each [["all", t.adminSchedulerAll], ["running", t.adminSchedulerFilterRunning], ["failed", t.adminSchedulerFilterFailed], ["custom", t.adminSchedulerFilterCustom], ["manual", t.adminSchedulerFilterManual]] as [value, label]}
+          <a class:active={data.view === value} class="filter-link" href={viewHref(value)}>{label}</a>
+        {/each}
+      </nav>
+    </div>
+  </Panel>
 
   {#if data.jobs.length === 0}
-    <section class="panel empty">{data.load_error ? t.adminSchedulerLoadFailed : t.adminSchedulerNoFilterJobs}</section>
+    <Panel><p class="empty">{data.load_error ? t.adminSchedulerLoadFailed : t.adminSchedulerNoFilterJobs}</p></Panel>
   {:else}
     <div class="job-list">
       {#each data.jobs as job (job.id)}
@@ -173,7 +179,7 @@
   {/if}
 
   {#if data.selected_job}
-    <section class="panel logs-panel" aria-labelledby="logs-title">
+    <Panel id="logs-title">
       <header class="panel-heading"><div><h2 id="logs-title">{data.selected_job.name} · {t.adminSchedulerLastRunDetail}</h2><p class="muted">{data.selected_job.description}</p></div><a class="button secondary" href={viewHref(data.view)}>{t.commonClose}</a></header>
       {#if !data.logs}<p class="notice warning">{t.adminSchedulerNoDetail}</p>{:else if !data.logs.last_run}<p class="empty">{t.adminSchedulerNoRun}</p>{:else}
         {@const run = data.logs.last_run}
@@ -182,22 +188,22 @@
         {#if run.logs?.length}<pre class="log-output">{run.logs.join("\n")}</pre>{:else}<p class="muted">{t.adminSchedulerNoLogs}</p>{/if}
         {#if data.logs.history.length}<section class="history"><h3>{t.adminSchedulerHistory.replace("{count}", String(data.logs.history.length))}</h3>{#each data.logs.history as history (history.id || history.started_at)}<details><summary><span>{dateLabel(history.started_at)}</span><span>{history.status} · {duration(history)}</span></summary>{#if history.error}<p class="error-text">{history.error}</p>{/if}{#if history.logs?.length}<pre class="log-output">{history.logs.join("\n")}</pre>{/if}</details>{/each}</section>{/if}
       {/if}
-    </section>
+    </Panel>
   {/if}
 </section>
 
 <style>
-  .scheduler-page { display: grid; gap: 1rem; min-width: 0; } .page-heading, .heading-actions, .panel-heading, .job-heading, .job-title, .secondary-actions { align-items: flex-start; display: flex; gap: .75rem; } .page-heading, .panel-heading, .job-heading { justify-content: space-between; } .page-heading { border-bottom: 1px solid #d7dee5; padding-bottom: 1rem; } .heading-actions, .secondary-actions { align-items: center; flex-wrap: wrap; }
-  .eyebrow { color: #486581; font-size: .8rem; font-weight: 700; letter-spacing: .08em; margin: 0 0 .45rem; text-transform: uppercase; } h1, h2, h3, p { overflow-wrap: anywhere; } h1, h2, h3 { margin: 0; } h1 { font-size: 2rem; } h2 { font-size: 1.1rem; } h3 { font-size: .95rem; } .muted { color: #52606d; margin: .35rem 0 0; }
+  .scheduler-page { display: grid; gap: 1rem; min-width: 0; } .panel-heading, .job-heading, .job-title, .secondary-actions { align-items: flex-start; display: flex; gap: .75rem; } .panel-heading, .job-heading { justify-content: space-between; } .secondary-actions { align-items: center; flex-wrap: wrap; }
+  h2, h3, p { overflow-wrap: anywhere; } h2, h3 { margin: 0; } h2 { font-size: 1.1rem; } h3 { font-size: .95rem; } .muted { color: #52606d; margin: .35rem 0 0; }
   .button { align-items: center; background: #e8eef2; border: 0; border-radius: .3rem; color: #16394a; cursor: pointer; display: inline-flex; font: inherit; font-weight: 650; justify-content: center; min-height: 2.45rem; max-width: 100%; padding: .5rem .8rem; text-decoration: none; } .button.primary { background: #245b75; color: #fff; } .button.primary:hover { background: #1c465a; } .button.danger { background: #a63d40; color: #fff; } .button.secondary:hover { background: #d6e1e7; } button:disabled { cursor: not-allowed; opacity: .6; }
   .notice { border: 1px solid; border-radius: .35rem; padding: .7rem .8rem; } .notice.error { background: #fff1f0; border-color: #f1a7a0; color: #a61b1b; } .notice.success { background: #edf7f0; border-color: #a9d5b4; color: #276749; } .notice.warning { background: #fff8e6; border-color: #e9c46a; color: #7b4f00; }
-  .metric-grid { display: grid; gap: .75rem; grid-template-columns: repeat(4, minmax(0, 1fr)); } .metric, .panel, .job-card { background: #fff; border: 1px solid #d7dee5; border-radius: .45rem; min-width: 0; } .metric { display: grid; gap: .3rem; padding: .8rem; } .metric span, .metric small { color: #52606d; font-size: .8rem; } .metric strong { font-size: 1.2rem; min-width: 0; overflow-wrap: anywhere; }
-  .panel { padding: 1rem; } .filter-panel { align-items: center; display: flex; gap: 1rem; justify-content: space-between; } .filter-list { display: flex; flex-wrap: wrap; gap: .35rem; } .filter-link { border: 1px solid #c8d2da; border-radius: .3rem; color: #243b53; min-height: 2.2rem; padding: .45rem .7rem; text-decoration: none; } .filter-link.active, .filter-link:hover { background: #e8eef2; border-color: #78909c; }
+  .metric-grid { display: grid; gap: .75rem; grid-template-columns: repeat(4, minmax(0, 1fr)); } .metric, .job-card { background: #fff; border: 1px solid #d7dee5; border-radius: .45rem; min-width: 0; } .metric { display: grid; gap: .3rem; padding: .8rem; } .metric span, .metric small { color: #52606d; font-size: .8rem; } .metric strong { font-size: 1.2rem; min-width: 0; overflow-wrap: anywhere; }
+  .filter-layout { align-items: center; display: flex; gap: 1rem; justify-content: space-between; } .filter-list { display: flex; flex-wrap: wrap; gap: .35rem; } .filter-link { border: 1px solid #c8d2da; border-radius: .3rem; color: #243b53; min-height: 2.2rem; padding: .45rem .7rem; text-decoration: none; } .filter-link.active, .filter-link:hover { background: #e8eef2; border-color: #78909c; }
   .job-list { display: grid; gap: .9rem; } .job-card { display: grid; gap: .85rem; padding: 1rem; } .job-title { align-items: center; flex-wrap: wrap; min-width: 0; } .job-title code { background: #eef2f4; color: #52606d; max-width: 100%; overflow-wrap: anywhere; padding: .15rem .35rem; } .status { border-radius: 999px; font-size: .75rem; padding: .25rem .5rem; white-space: nowrap; } .status.running { background: #e5f2f7; color: #14516a; } .status.success { background: #edf7f0; color: #276749; } .status.failed { background: #fff1f0; color: #a61b1b; } .status.idle { background: #eef2f4; color: #52606d; } .job-trigger { color: #52606d; flex: 0 0 auto; font-size: .82rem; } .job-description { color: #52606d; margin: 0; }
   .job-facts { display: grid; gap: .45rem; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; } .job-facts div { border-left: 3px solid #c8d2da; min-width: 0; padding-left: .6rem; } dt { color: #52606d; font-size: .75rem; } dd { font-weight: 650; margin: .2rem 0 0; overflow-wrap: anywhere; }
   .action-layout { display: grid; gap: .75rem; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .action-panel { border: 1px solid #e1e8ed; display: grid; gap: .65rem; min-width: 0; padding: .8rem; } .action-panel h3 { border-bottom: 1px solid #e1e8ed; padding-bottom: .5rem; } .params { border: 1px solid #e1e8ed; min-width: 0; padding: .5rem; } .params summary { cursor: pointer; font-weight: 650; } label { color: #243b53; display: grid; font-size: .82rem; gap: .3rem; min-width: 0; } input, textarea, select { background: #fff; border: 1px solid #9fb3c8; border-radius: .3rem; font: inherit; min-height: 2.35rem; min-width: 0; max-width: 100%; padding: .4rem .55rem; } textarea { resize: vertical; } .check { align-items: center; display: flex; grid-template-columns: auto 1fr; } .check input[type="checkbox"] { min-height: 1rem; width: 1rem; } .schedule-form, .schedule-runtime { display: grid; gap: .55rem; } .schedule-grid { display: grid; gap: .5rem; grid-template-columns: repeat(2, minmax(0, 1fr)); } .schedule-runtime { border-top: 1px solid #e1e8ed; padding-top: .55rem; }
-  .logs-panel { display: grid; gap: .8rem; } .run-detail, .summary { display: flex; flex-wrap: wrap; gap: .5rem .8rem; } .run-detail p { margin: 0; } .summary { border-top: 1px solid #e1e8ed; padding-top: .7rem; } .summary h3 { flex-basis: 100%; } .summary span { background: #eef2f4; border-radius: .25rem; font-size: .78rem; padding: .3rem .45rem; } .summary b { margin-right: .25rem; } .log-output { background: #111820; border: 1px solid #263442; color: #edf2f7; max-height: 40dvh; margin: 0; overflow: auto; overscroll-behavior: contain; padding: .75rem; scrollbar-color: #718096 #1f2d3a; scrollbar-width: thin; white-space: pre-wrap; overflow-wrap: anywhere; } .history { border-top: 1px solid #e1e8ed; display: grid; gap: .45rem; padding-top: .75rem; } .history details { border: 1px solid #e1e8ed; padding: .55rem; } .history summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: .5rem 1rem; justify-content: space-between; } .error-text { color: #a61b1b; overflow-wrap: anywhere; } .empty { color: #52606d; text-align: center; }
+  .run-detail, .summary { display: flex; flex-wrap: wrap; gap: .5rem .8rem; } .run-detail p { margin: 0; } .summary { border-top: 1px solid #e1e8ed; padding-top: .7rem; } .summary h3 { flex-basis: 100%; } .summary span { background: #eef2f4; border-radius: .25rem; font-size: .78rem; padding: .3rem .45rem; } .summary b { margin-right: .25rem; } .log-output { background: #111820; border: 1px solid #263442; color: #edf2f7; max-height: 40dvh; margin: 0; overflow: auto; overscroll-behavior: contain; padding: .75rem; scrollbar-color: #718096 #1f2d3a; scrollbar-width: thin; white-space: pre-wrap; overflow-wrap: anywhere; } .history { border-top: 1px solid #e1e8ed; display: grid; gap: .45rem; padding-top: .75rem; } .history details { border: 1px solid #e1e8ed; padding: .55rem; } .history summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: .5rem 1rem; justify-content: space-between; } .error-text { color: #a61b1b; overflow-wrap: anywhere; } .empty { color: #52606d; text-align: center; }
   a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid #9fb3c8; outline-offset: 2px; }
   @media (max-width: 900px) { .metric-grid, .job-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .action-layout { grid-template-columns: 1fr; } }
-  @media (max-width: 600px) { .page-heading, .heading-actions, .filter-panel, .panel-heading, .job-heading { align-items: stretch; flex-direction: column; } .heading-actions > *, .heading-actions .button { width: 100%; } .metric-grid, .job-facts { grid-template-columns: 1fr; } .job-title { align-items: flex-start; flex-direction: column; } .job-trigger { align-self: flex-start; } .schedule-grid { grid-template-columns: 1fr; } .secondary-actions > *, .secondary-actions form, .secondary-actions .button { width: 100%; } .panel, .job-card { padding: .8rem; } h1 { font-size: 1.65rem; } }
+  @media (max-width: 600px) { .filter-layout, .panel-heading, .job-heading { align-items: stretch; flex-direction: column; } .metric-grid, .job-facts { grid-template-columns: 1fr; } .job-title { align-items: flex-start; flex-direction: column; } .job-trigger { align-self: flex-start; } .schedule-grid { grid-template-columns: 1fr; } .secondary-actions > *, .secondary-actions form, .secondary-actions .button { width: 100%; } .job-card { padding: .8rem; } }
 </style>
