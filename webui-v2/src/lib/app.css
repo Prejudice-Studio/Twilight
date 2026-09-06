@@ -1,21 +1,56 @@
 :root {
   color-scheme: light;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #f4f6f8;
-  color: #17202a;
+  --tw-bg: #f4f6f8;
+  --tw-surface: #fff;
+  --tw-surface-muted: #f8fafb;
+  --tw-text: #17202a;
+  --tw-text-strong: #16394a;
+  --tw-text-muted: #52606d;
+  --tw-border: #d7dee5;
+  --tw-border-strong: #9fb3c8;
+  --tw-accent: #245b75;
+  --tw-accent-hover: #1c465a;
+  --tw-accent-soft: #e8eef2;
+  --tw-danger: #a63d40;
+  --tw-danger-soft: #fff1f0;
+  --tw-warning: #7b4f00;
+  --tw-warning-soft: #fff8e6;
+  --tw-success: #276749;
+  --tw-success-soft: #edf7f0;
+  --tw-control-height: 2.5rem;
+  --tw-control-height-compact: 2.25rem;
+  --tw-control-radius: .3rem;
+  background: var(--tw-bg);
+  color: var(--tw-text);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
-html { min-width: 320px; background: #f4f6f8; }
+html { min-width: 320px; background: var(--tw-bg); }
 body { margin: 0; min-width: 320px; min-height: 100dvh; }
 button, input, select, textarea { font: inherit; }
-button { min-width: 0; max-width: 100%; }
-a { color: #245b75; }
+button { min-width: 0; max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
+input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]), select, textarea { max-width: 100%; min-width: 0; }
+a { color: var(--tw-accent); }
 img { max-width: 100%; }
 
-:focus-visible { outline: 3px solid #9fb3c8; outline-offset: 2px; }
+:focus-visible { outline: 3px solid var(--tw-border-strong); outline-offset: 2px; }
+
+/* Shared baseline for pages that use the V2 native form controls. Route
+   styles may opt into a tighter compact variant, but must keep wrapping and
+   the viewport boundary intact on narrow Firefox layouts. */
+:where(.button, button[type="submit"], button[type="button"], input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]), select) {
+  min-height: var(--tw-control-height);
+}
+:where(.button.compact) { min-height: var(--tw-control-height-compact); }
+:where(textarea) { min-height: var(--tw-control-height); resize: vertical; }
+:where(.button, button, input, select, textarea) { border-radius: var(--tw-control-radius); }
+
+@media (max-width: 600px) {
+  :where(.button, button[type="submit"], button[type="button"]) { max-width: 100%; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
