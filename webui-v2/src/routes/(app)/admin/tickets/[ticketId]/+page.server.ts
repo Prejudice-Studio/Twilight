@@ -27,7 +27,7 @@ function idFromForm(form: FormData): number {
 async function mutate<T>(
   event: RequestEvent,
   path: string,
-  method: "POST" | "PUT" | "DELETE",
+  method: "POST" | "PATCH" | "DELETE",
   payload: Record<string, unknown> | undefined,
   action: string,
   fallback: string
@@ -51,7 +51,7 @@ function redirectToDetail(id: number): never {
 export const load: PageServerLoad = async (event) => {
   const id = idFromParams(event.params.ticketId);
   if (!id) throw redirect(303, "/admin/tickets");
-  const result = await apiJSON<AdminTicketDetailResponse>(event, `/api/v1/admin/tickets/${id}`, { cache: "no-store" });
+  const result = await apiJSON<AdminTicketDetailResponse>(event, `/api/v2/admin/tickets/${id}`, { cache: "no-store" });
   return {
     payload: result?.success ? result.data || null : null,
     loadError: result?.success ? null : t.adminTicketsLoadFailed,
@@ -70,7 +70,7 @@ export const actions: Actions = {
     if (field === "priority" && !priorities.has(value as TicketPriority)) return fail(400, { action: "updateMeta", error: t.adminTicketsInvalidPriority } satisfies FormState);
     if (field === "type" && !value) return fail(400, { action: "updateMeta", error: t.adminTicketsTypeRequired } satisfies FormState);
     if (!["status", "priority", "type", "admin_note"].includes(field)) return fail(400, { action: "updateMeta", error: t.adminTicketsInvalidMetadataField } satisfies FormState);
-    const result = await mutate(event, `/api/v1/admin/tickets/${id}`, "PUT", { [field]: value }, "updateMeta", t.adminTicketsUpdateFailed);
+    const result = await mutate(event, `/api/v2/admin/tickets/${id}`, "PATCH", { [field]: value }, "updateMeta", t.adminTicketsUpdateFailed);
     if (result.error) return result.error;
     redirectToDetail(id);
   },
@@ -81,7 +81,7 @@ export const actions: Actions = {
     const content = text(form.get("content"), 5000);
     if (!id) return fail(400, { action: "reply", error: t.adminTicketsInvalidTicketID } satisfies FormState);
     if (!content) return fail(400, { action: "reply", error: t.adminTicketsReplyRequired } satisfies FormState);
-    const result = await mutate(event, `/api/v1/admin/tickets/${id}/reply`, "POST", { content }, "reply", t.adminTicketsReplyFailed);
+    const result = await mutate(event, `/api/v2/admin/tickets/${id}/replies`, "POST", { content }, "reply", t.adminTicketsReplyFailed);
     if (result.error) return result.error;
     redirectToDetail(id);
   },
@@ -96,7 +96,7 @@ export const actions: Actions = {
     }
     const body = new FormData();
     body.set("file", file, file.name || "attachment");
-    const result = await apiJSONWithResponse<unknown>(event, `/api/v1/tickets/${id}/images`, { method: "POST", body });
+    const result = await apiJSONWithResponse<unknown>(event, `/api/v2/admin/tickets/${id}/attachments`, { method: "POST", body });
     const response = result?.response;
     const envelope = result?.envelope;
     if (!response || !envelope || !response.ok || !envelope.success) {
@@ -110,7 +110,7 @@ export const actions: Actions = {
     const id = idFromForm(form);
     const filename = text(form.get("filename"), 80);
     if (!id || !filename) return fail(400, { action: "deleteImage", error: t.adminTicketsImageInvalid } satisfies FormState);
-    const result = await mutate(event, `/api/v1/tickets/${id}/images/${encodeURIComponent(filename)}`, "DELETE", undefined, "deleteImage", t.adminTicketsImageDeleteFailed);
+    const result = await mutate(event, `/api/v2/admin/tickets/${id}/attachments/${encodeURIComponent(filename)}`, "DELETE", undefined, "deleteImage", t.adminTicketsImageDeleteFailed);
     if (result.error) return result.error;
     redirectToDetail(id);
   },
@@ -119,7 +119,7 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const id = idFromForm(form);
     if (!id) return fail(400, { action: "delete", error: t.adminTicketsInvalidTicketID } satisfies FormState);
-    const result = await mutate(event, `/api/v1/admin/tickets/${id}`, "DELETE", undefined, "delete", t.adminTicketsDeleteFailed);
+    const result = await mutate(event, `/api/v2/admin/tickets/${id}`, "DELETE", undefined, "delete", t.adminTicketsDeleteFailed);
     if (result.error) return result.error;
     throw redirect(303, "/admin/tickets");
   }

@@ -252,39 +252,10 @@ func (a *App) handleAdminTickets(w http.ResponseWriter, r *http.Request, _ Param
 	if a.refreshStoreForRequest(w, r) {
 		return
 	}
-	status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status")))
-	showAll := r.URL.Query().Get("all") == "1"
-	page := clamp(queryInt(r, "page", 1), 1, 1000000)
-	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
-	if status == "all" {
-		showAll = true
-		status = ""
-	}
-	if status != "" && !store.ValidTicketStatus(status) {
-		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的工单状态")
+	filter, page, perPage, invalid := a.adminTicketPageQuery(r)
+	if invalid != "" {
+		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, invalid)
 		return
-	}
-	ticketType := strings.TrimSpace(r.URL.Query().Get("type"))
-	if ticketType != "" {
-		ticketType = store.NormalizeTicketType(a.store().TicketTypes(), ticketType)
-	}
-	priority := strings.TrimSpace(r.URL.Query().Get("priority"))
-	if priority != "" {
-		if !store.ValidTicketPriority(priority) {
-			failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的优先级")
-			return
-		}
-		priority = store.NormalizeTicketPriority(priority)
-	}
-	filter := store.TicketFilter{
-		UID:        int64(queryInt(r, "uid", 0)),
-		Status:     store.NormalizeTicketStatus(status),
-		Type:       ticketType,
-		Priority:   priority,
-		ActiveOnly: status == "" && !showAll,
-	}
-	if status == "" {
-		filter.Status = ""
 	}
 	result := a.store().ListTicketsPage(filter, page, perPage)
 	ok(w, "OK", map[string]any{

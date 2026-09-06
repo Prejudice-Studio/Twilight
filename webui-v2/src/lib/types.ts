@@ -793,15 +793,18 @@ export interface AdminTicketSummary extends TicketSummary {
 }
 
 export interface AdminTicketListResponse {
-  tickets: AdminTicketSummary[];
-  total: number;
-  page: number;
-  per_page: number;
+  items: AdminTicketSummary[];
+  pagination: {
+    page: number;
+    per_page: number;
+    total: number;
+    total_pages: number;
+  };
   ticket_types: string[];
 }
 
 export interface AdminTicketDetailResponse {
-  ticket: Ticket;
+  item: Ticket;
   ticket_types: string[];
 }
 

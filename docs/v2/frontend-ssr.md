@@ -217,9 +217,9 @@ V2 调度器不使用浏览器轮询或 SSE。任务仍在后端异步运行，�
 
 `/(app)/admin/tickets` 使用服务端分页读取管理员工单摘要，默认只读取 `open` / `in_progress` 队列；状态、类型、优先级和 UID 筛选均转换为后端查询参数。列表只渲染标题、提交人、状态、优先级、回复/附件数量等摘要，打开编号后跳转到 `/(app)/admin/tickets/[ticketId]`，不会把全量工单正文和回复历史装入浏览器。
 
-管理员详情页通过 `GET /admin/tickets/{ticket_id}` 读取单个完整会话。文字回复固定提交到 `POST /admin/tickets/{ticket_id}/reply`，不会把 `admin_note` 当成聊天内容，也不会在保存属性时替换 `replies`。状态、优先级、类型和内部备注各自使用独立的 form action，减少两个管理员并发处理时的陈旧字段覆盖。
+管理员详情页通过 V2 资源 `GET /api/v2/admin/tickets/{ticket_id}` 读取单个完整会话。文字回复固定提交到 `POST /api/v2/admin/tickets/{ticket_id}/replies`，不会把 `admin_note` 当成聊天内容，也不会在保存属性时替换 `replies`。状态、优先级、类型和内部备注各自使用 `PATCH` 局部更新与独立 form action，减少两个管理员并发处理时的陈旧字段覆盖。
 
-附件上传、预览和删除继续走后端统一的 `/tickets/{ticket_id}/images` 接口。V2 使用同源服务端 multipart action 转发文件，浏览器只看到受鉴权的相对图片地址；服务端仍由 Go 校验工单归属、管理员权限、关闭状态、图片真实类型、大小、数量和安全文件名。管理员可以在关闭工单上继续追加排查回复和维护附件。
+附件上传、预览和删除使用 V2 的 `/api/v2/admin/tickets/{ticket_id}/attachments` 资源。V2 使用同源服务端 multipart action 转发文件，浏览器只看到受鉴权的相对图片地址；服务端仍由 Go 校验工单归属、管理员权限、关闭状态、图片真实类型、大小、数量和安全文件名。管理员可以在关闭工单上继续追加排查回复和维护附件。
 
 工单类型维护也使用服务端 action，并在 Go store/config 层持久化。列表与详情均使用 `no-store`，不轮询；手动刷新通过普通 GET 重新读取数据库权威状态。长队列、对话、附件和移动端操作组均有独立的 Firefox 兼容有界滚动区域。
 

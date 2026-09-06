@@ -317,6 +317,18 @@ V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/ap
 | POST | `/api/v1/admin/ticket-types` | Admin | 新增工单类型 |
 | PUT | `/api/v1/admin/ticket-types` | Admin | 重命名工单类型，并同步已有工单 |
 | DELETE | `/api/v1/admin/ticket-types` | Admin | 删除工单类型；已有工单保留历史类型 |
+| GET | `/api/v2/admin/tickets` | Admin | V2 工单资源集合；返回 `items` 与 `pagination`，默认仅返回待处理/处理中摘要 |
+| GET | `/api/v2/admin/tickets/{ticket_id}` | Admin | V2 单工单资源；返回完整回复时间线和附件元数据 |
+| PATCH | `/api/v2/admin/tickets/{ticket_id}` | Admin | V2 局部更新状态、优先级、类型或内部摘要 |
+| POST | `/api/v2/admin/tickets/{ticket_id}/replies` | Admin | V2 追加管理员文字回复，不覆盖已有回复 |
+| DELETE | `/api/v2/admin/tickets/{ticket_id}` | Admin | V2 删除工单并清理附件目录 |
+| POST | `/api/v2/admin/tickets/{ticket_id}/attachments` | Admin | V2 上传工单附件，复用图片大小/数量/真实类型限制 |
+| GET | `/api/v2/admin/tickets/{ticket_id}/attachments/{filename}` | Admin | V2 读取已登记的工单附件 |
+| DELETE | `/api/v2/admin/tickets/{ticket_id}/attachments/{filename}` | Admin | V2 删除单个工单附件 |
+| GET | `/api/v2/admin/ticket-types` | Admin | V2 工单类型资源集合 |
+| POST | `/api/v2/admin/ticket-types` | Admin | V2 新增工单类型 |
+| PATCH | `/api/v2/admin/ticket-types/{ticket_type}` | Admin | V2 按路径类型名重命名工单类型 |
+| DELETE | `/api/v2/admin/ticket-types/{ticket_type}` | Admin | V2 按路径类型名删除工单类型 |
 | POST | `/api/v1/admin/whitelist` | Admin | 设置白名单 |
 | GET | `/api/v1/admin/stats` | Admin | 管理统计 |
 | POST | `/api/v1/admin/users/bulk-expire` | Admin | 批量过期用户 |

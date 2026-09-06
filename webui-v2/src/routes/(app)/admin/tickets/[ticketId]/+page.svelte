@@ -35,7 +35,7 @@
   }
 
   function safeImageURL(url: string): string {
-    return /^\/api\/v1\/tickets\/\d+\/images\/[a-f0-9]{16}\.(jpg|png|gif|webp|bmp)$/.test(url) ? url : "";
+    return /^\/api\/v2\/admin\/tickets\/\d+\/attachments\/[a-f0-9]{16}\.(jpg|png|gif|webp|bmp)$/.test(url) ? url : "";
   }
 
   function confirmSubmit(event: SubmitEvent, message: string): void {
@@ -51,14 +51,14 @@
   }
 </script>
 
-<svelte:head><title>{payload?.ticket.title || t.adminTicketsTitle} - {t.siteName}</title></svelte:head>
+<svelte:head><title>{payload?.item.title || t.adminTicketsTitle} - {t.siteName}</title></svelte:head>
 
 <section class="detail-page" aria-labelledby="ticket-title">
   <header class="page-heading">
     <div class="heading-main">
       <a class="back-link" href="/admin/tickets">{t.adminTicketsBackToList}</a>
       {#if payload}
-        {@const ticket = payload.ticket}
+        {@const ticket = payload.item}
         <div class="ticket-badges"><span class={`status ${ticket.status}`}>{statusLabel(ticket.status)}</span><span class={`priority ${ticket.priority}`}>{priorityLabel(ticket.priority)}</span><span class="ticket-id">#{ticket.id}</span></div>
         <h1 id="ticket-title">{ticket.title}</h1>
         <p class="muted">{ticket.username} · UID {ticket.uid} · {t.adminTicketsCreatedAt.replace("{date}", dateLabel(ticket.created_at))}</p>
@@ -71,7 +71,7 @@
   {#if action.error}<p class="notice error" role="alert">{action.error}</p>{/if}
 
   {#if payload}
-    {@const ticket = payload.ticket}
+    {@const ticket = payload.item}
     {@const typeOptions = payload.ticket_types.includes(ticket.type) ? payload.ticket_types : [...payload.ticket_types, ticket.type]}
     <div class="detail-grid">
       <article class="conversation-panel" aria-labelledby="conversation-title">

@@ -6,12 +6,10 @@ func (a *App) registerRoutes() {
 	a.add(http.MethodGet, "/", AuthPublic, a.handleRoot)
 	a.add(http.MethodGet, "/api/v1/openapi.json", AuthPublic, a.handleOpenAPI)
 	a.add(http.MethodGet, "/api/v1/docs", AuthPublic, a.handleDocs)
-	a.add(http.MethodGet, "/api/v2/system/health", AuthPublic, a.handleV2Health)
-	a.add(http.MethodGet, "/api/v2/system/capabilities", AuthPublic, a.handleV2Capabilities)
-	a.add(http.MethodGet, "/api/v2/dashboard/summary", AuthUser, a.handleV2DashboardSummary)
-	a.add(http.MethodGet, "/api/v2/signin/summary", AuthUser, a.handleV2SigninSummary)
-	a.add(http.MethodGet, "/api/v2/invite/summary", AuthUser, a.handleV2InviteSummary)
-	a.add(http.MethodGet, "/api/v2/bangumi/summary", AuthUser, a.handleV2BangumiSummary)
+	a.registerV2Routes()
+
+	// The V1 routes below remain available only for the rollback frontend and
+	// external integrations during the V2 migration.
 	a.add(http.MethodGet, "/api/v1/setup/status", AuthPublic, a.handleSetupStatus)
 	a.add(http.MethodPost, "/api/v1/setup/complete", AuthPublic, a.handleSetupComplete)
 

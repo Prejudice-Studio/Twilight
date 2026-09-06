@@ -64,7 +64,7 @@ function formQuery(form: FormData) {
 async function mutate<T>(
   event: RequestEvent,
   path: string,
-  method: "POST" | "PUT" | "DELETE",
+  method: "POST" | "PATCH" | "DELETE",
   payload: Record<string, unknown> | undefined,
   action: string,
   fallback: string
@@ -99,7 +99,7 @@ export const load: PageServerLoad = async (event) => {
   const query = normalizeQuery(event.url);
   const params = new URLSearchParams(queryString(query));
   if (query.status === "all") params.set("all", "1");
-  const result = await apiJSON<AdminTicketListResponse>(event, `/api/v1/admin/tickets?${params.toString()}`, { cache: "no-store" });
+  const result = await apiJSON<AdminTicketListResponse>(event, `/api/v2/admin/tickets?${params.toString()}`, { cache: "no-store" });
   return {
     payload: result?.success ? result.data || null : null,
     query,
@@ -116,7 +116,7 @@ export const actions: Actions = {
     if (!["open", "in_progress", "resolved", "closed"].includes(status)) {
       return fail(400, { action: "quickStatus", error: t.adminTicketsInvalidStatus } satisfies FormState);
     }
-    const result = await mutate(event, `/api/v1/admin/tickets/${id}`, "PUT", { status }, "quickStatus", t.adminTicketsUpdateFailed);
+    const result = await mutate(event, `/api/v2/admin/tickets/${id}`, "PATCH", { status }, "quickStatus", t.adminTicketsUpdateFailed);
     if (result.error) return result.error;
     redirectToList(form);
   },
@@ -125,7 +125,7 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const id = requireTicketID(form);
     if (typeof id !== "number") return id;
-    const result = await mutate(event, `/api/v1/admin/tickets/${id}`, "DELETE", undefined, "delete", t.adminTicketsDeleteFailed);
+    const result = await mutate(event, `/api/v2/admin/tickets/${id}`, "DELETE", undefined, "delete", t.adminTicketsDeleteFailed);
     if (result.error) return result.error;
     redirectToList(form);
   },
@@ -134,7 +134,7 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const name = formText(form, "name", 50);
     if (!name) return fail(400, { action: "addType", error: t.adminTicketsTypeRequired } satisfies FormState);
-    const result = await mutate(event, "/api/v1/admin/ticket-types", "POST", { name }, "addType", t.adminTicketsTypeOperationFailed);
+    const result = await mutate(event, "/api/v2/admin/ticket-types", "POST", { name }, "addType", t.adminTicketsTypeOperationFailed);
     if (result.error) return result.error;
     redirectToList(form);
   },
@@ -143,7 +143,7 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const name = formText(form, "name", 50);
     if (!name) return fail(400, { action: "deleteType", error: t.adminTicketsTypeRequired } satisfies FormState);
-    const result = await mutate(event, "/api/v1/admin/ticket-types", "DELETE", { name }, "deleteType", t.adminTicketsTypeOperationFailed);
+    const result = await mutate(event, `/api/v2/admin/ticket-types/${encodeURIComponent(name)}`, "DELETE", undefined, "deleteType", t.adminTicketsTypeOperationFailed);
     if (result.error) return result.error;
     redirectToList(form);
   },
@@ -153,7 +153,7 @@ export const actions: Actions = {
     const oldName = formText(form, "old_name", 50);
     const newName = formText(form, "new_name", 50);
     if (!oldName || !newName) return fail(400, { action: "renameType", error: t.adminTicketsTypeRequired } satisfies FormState);
-    const result = await mutate(event, "/api/v1/admin/ticket-types", "PUT", { old_name: oldName, new_name: newName }, "renameType", t.adminTicketsTypeOperationFailed);
+    const result = await mutate(event, `/api/v2/admin/ticket-types/${encodeURIComponent(oldName)}`, "PATCH", { name: newName }, "renameType", t.adminTicketsTypeOperationFailed);
     if (result.error) return result.error;
     redirectToList(form);
   }

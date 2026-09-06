@@ -10,7 +10,7 @@
   let { data, form }: { data: PageData; form: unknown } = $props();
   let action = $derived((form ?? {}) as FormState);
   let payload = $derived(data.payload);
-  let totalPages = $derived(Math.max(1, Math.ceil((payload?.total || 0) / Math.max(1, payload?.per_page || 20))));
+  let totalPages = $derived(payload?.pagination.total_pages || 1);
 
   const statusLabels: Record<TicketStatus, string> = {
     open: t.ticketStatusOpen,
@@ -77,7 +77,7 @@
   {#if action.error}<p class="notice error" role="alert">{action.error}</p>{/if}
 
   <Panel id="filters-title" className="filters" title={t.adminTicketsFilters} description={t.adminTicketsFiltersHelp}>
-    <span class="count">{payload?.total?.toLocaleString("zh-CN") || "0"}</span>
+    <span class="count">{payload?.pagination.total.toLocaleString("zh-CN") || "0"}</span>
     <form method="GET" action="/admin/tickets" class="filter-form">
       <label class="field">{t.adminTicketsStatus}<select name="status">
         <option value="" selected={data.query.status === ""}>{t.adminTicketsActive}</option>
@@ -137,12 +137,12 @@
   </details>
 
   {#if payload}
-    <Panel id="list-title" className="list-panel" title={t.adminTicketsQueue} description={t.adminTicketsPageOf.replace("{page}", String(payload.page)).replace("{pages}", String(Math.max(1, Math.ceil(payload.total / Math.max(1, payload.per_page))))).replace("{total}", payload.total.toLocaleString("zh-CN"))}>
-      {#if payload.tickets.length === 0}
+    <Panel id="list-title" className="list-panel" title={t.adminTicketsQueue} description={t.adminTicketsPageOf.replace("{page}", String(payload.pagination.page)).replace("{pages}", String(payload.pagination.total_pages)).replace("{total}", payload.pagination.total.toLocaleString("zh-CN"))}>
+      {#if payload.items.length === 0}
         <p class="empty">{t.adminTicketsNoTickets}</p>
       {:else}
         <div class="ticket-list" role="list">
-          {#each payload.tickets as ticket (ticket.id)}
+          {#each payload.items as ticket (ticket.id)}
             <article class:closed={ticket.status === "closed"} class="ticket-card" role="listitem">
               <div class="ticket-main">
                 <div class="ticket-badges">
@@ -180,11 +180,11 @@
           {/each}
         </div>
       {/if}
-      {#if Math.ceil(payload.total / Math.max(1, payload.per_page)) > 1}
+      {#if payload.pagination.total_pages > 1}
         <nav class="pagination" aria-label={t.adminTicketsPagination}>
-          {#if payload.page > 1}<a class="button secondary" href={queryHref(payload.page - 1)}>{t.adminTicketsPrevious}</a>{:else}<span></span>{/if}
-          <span>{payload.page} / {totalPages}</span>
-          {#if payload.page < totalPages}<a class="button secondary" href={queryHref(payload.page + 1)}>{t.adminTicketsNext}</a>{:else}<span></span>{/if}
+          {#if payload.pagination.page > 1}<a class="button secondary" href={queryHref(payload.pagination.page - 1)}>{t.adminTicketsPrevious}</a>{:else}<span></span>{/if}
+          <span>{payload.pagination.page} / {totalPages}</span>
+          {#if payload.pagination.page < totalPages}<a class="button secondary" href={queryHref(payload.pagination.page + 1)}>{t.adminTicketsNext}</a>{:else}<span></span>{/if}
         </nav>
       {/if}
     </Panel>
