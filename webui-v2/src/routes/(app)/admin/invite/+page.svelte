@@ -1,4 +1,6 @@
 <script lang="ts">
+  import PageHeader from "$lib/components/PageHeader.svelte";
+  import Panel from "$lib/components/Panel.svelte";
   import { t } from "$lib/i18n";
   import type { AdminInviteTreeRow, ConfigField } from "$lib/types";
   import type { PageData } from "./$types";
@@ -103,17 +105,12 @@
 <svelte:head><title>{t.adminInviteTitle} - {t.siteName}</title></svelte:head>
 
 <section class="invite-admin-page" aria-labelledby="invite-admin-title">
-  <header class="page-heading">
-    <div>
-      <p class="eyebrow">{t.adminArea}</p>
-      <h1 id="invite-admin-title">{t.adminInviteTitle}</h1>
-      <p class="muted">{t.adminInviteDescription}</p>
-    </div>
-    <div class="heading-actions">
+  <PageHeader id="invite-admin-title" eyebrow={t.adminArea} title={t.adminInviteTitle} description={t.adminInviteDescription}>
+    {#snippet actions()}
       <a class="text-link" href="/admin/status">{t.adminStatusTitle}</a>
       <a class="button secondary" href={pageHref(data.query.page)}>{t.adminInviteRefresh}</a>
-    </div>
-  </header>
+    {/snippet}
+  </PageHeader>
 
   {#if data.loadError}<p class="notice error" role="alert">{data.loadError}</p>{/if}
   {#if action.error}<p class="notice error" role="alert">{action.error}</p>{/if}
@@ -132,11 +129,8 @@
   </nav>
 
   {#if data.view === "tree"}
-    <section class="panel" aria-labelledby="tree-filter-title">
-      <header class="panel-heading">
-        <div><h2 id="tree-filter-title">{t.adminInviteFilter}</h2><p class="muted">{totalLabel()}</p></div>
-        {#if data.tree}<span class="meta">{replace(t.adminInviteDepthSummary, "{depth}", String(data.tree.max_depth))}</span>{/if}
-      </header>
+    <Panel id="tree-filter-title" title={t.adminInviteFilter} description={totalLabel()}>
+      {#if data.tree}<span class="meta">{replace(t.adminInviteDepthSummary, "{depth}", String(data.tree.max_depth))}</span>{/if}
       <form method="GET" action="/admin/invite" class="filter-form">
         <input type="hidden" name="view" value="tree" />
         <input type="hidden" name="page" value="1" />
@@ -157,7 +151,7 @@
         <button class="button primary" type="submit">{t.adminInviteApply}</button>
         <a class="button secondary" href="/admin/invite">{t.adminInviteReset}</a>
       </form>
-    </section>
+    </Panel>
 
     {#if data.tree && data.tree.total_nodes > 0}
       <form id="invite-batch-form" method="POST" action="?/batchDetach" onsubmit={confirmBatch}>
@@ -219,13 +213,13 @@
         </nav>
       {/if}
     {:else if data.tree}
-      <section class="panel empty-panel"><strong>{t.adminInviteEmpty}</strong><p class="muted">{t.adminInviteEmptyDescription}</p></section>
+      <Panel className="empty-panel"><strong>{t.adminInviteEmpty}</strong><p class="muted">{t.adminInviteEmptyDescription}</p></Panel>
     {/if}
 
     {#if data.tree?.selected}
       {@const selected = data.tree.selected}
-      <section class="panel detail-panel" aria-labelledby="invite-detail-title">
-        <header class="panel-heading"><div><h2 id="invite-detail-title">{selected.username}</h2><p class="muted">{t.adminInviteUID} {selected.uid}</p></div><a class="button secondary compact" href={pageHref(data.tree.page, { selected: 0 })}>{t.adminInviteClearSelection}</a></header>
+      <Panel id="invite-detail-title" className="detail-panel">
+        <header class="detail-heading"><div><h2>{selected.username}</h2><p class="muted">{t.adminInviteUID} {selected.uid}</p></div><a class="button secondary compact" href={pageHref(data.tree.page, { selected: 0 })}>{t.adminInviteClearSelection}</a></header>
         <dl class="facts"><div><dt>{t.adminInviteRole}</dt><dd>{roleLabel(selected.role)}</dd></div><div><dt>{t.adminInviteStatus}</dt><dd>{selected.active ? t.adminInviteEnabled : t.adminInviteDisabled}</dd></div><div><dt>{t.adminInviteEmby}</dt><dd>{selected.emby_disabled ? t.adminInviteEmbyDisabled : selected.emby_bound ? t.adminInviteBound : t.adminInviteUnbound}</dd></div><div><dt>{t.adminInviteRegisteredAt}</dt><dd>{dateLabel(selected.register_time)}</dd></div><div><dt>{t.adminInviteExpiresAt}</dt><dd>{dateLabel(selected.expired_at)}</dd></div><div><dt>{t.adminInviteSubtree.replace("{count}", String(selected.descendants))}</dt><dd>{t.adminInviteRootUID} {selected.root_uid}</dd></div></dl>
         <div class="detail-actions">
           {#if selected.is_root}<span class="muted">{t.adminInviteAlreadyRoot}</span>{:else}<form method="POST" action="?/detach" onsubmit={(event) => confirmSubmit(event, t.adminInviteDetachDescription)}><input type="hidden" name="uid" value={selected.uid} /><input type="hidden" name="view" value="tree" /><input type="hidden" name="page" value={data.query.page} /><input type="hidden" name="per_page" value={data.query.per_page} /><input type="hidden" name="search" value={data.query.search} /><input type="hidden" name="root" value={data.query.root} /><input type="hidden" name="collapsed" value={data.query.collapsed.join(",")} /><button class="button secondary" type="submit">{t.adminInviteDetach}</button></form>{/if}
@@ -234,18 +228,16 @@
           <form method="POST" action="?/cascadeToggle" onsubmit={confirmCascade}><input type="hidden" name="uid" value={selected.uid} /><input type="hidden" name="enable" value="true" /><input type="hidden" name="view" value="tree" /><input type="hidden" name="page" value={data.query.page} /><input type="hidden" name="per_page" value={data.query.per_page} /><input type="hidden" name="search" value={data.query.search} /><input type="hidden" name="root" value={data.query.root} /><input type="hidden" name="collapsed" value={data.query.collapsed.join(",")} /><label>{t.adminInviteCascadeDepth}<input name="depth" type="number" min="-1" max="5000" value="1" /></label><button class="button secondary" type="submit" data-confirm={t.adminInviteCascadeConfirm}>{t.adminInviteCascadeEnable}</button></form>
           {#if selected.role !== 0}<form method="POST" action="?/cascadeDelete" onsubmit={(event) => confirmSubmit(event, t.adminInviteCascadeDeleteConfirm)}><input type="hidden" name="uid" value={selected.uid} /><input type="hidden" name="view" value="tree" /><input type="hidden" name="page" value={data.query.page} /><input type="hidden" name="per_page" value={data.query.per_page} /><input type="hidden" name="search" value={data.query.search} /><input type="hidden" name="root" value={data.query.root} /><input type="hidden" name="collapsed" value={data.query.collapsed.join(",")} /><label>{t.adminInviteCascadeDepth}<input name="depth" type="number" min="-1" max="5000" value="1" /></label><button class="button danger" type="submit">{t.adminInviteCascadeDelete}</button></form>{/if}
         </div>
-      </section>
+      </Panel>
     {/if}
   {:else if data.view === "codes"}
-    <section class="panel" aria-labelledby="codes-heading">
-      <header class="panel-heading"><div><h2 id="codes-heading">{t.adminInviteCodesTab}</h2><p class="muted">{t.adminInviteCodesDescription}</p></div></header>
+    <Panel id="codes-heading" title={t.adminInviteCodesTab} description={t.adminInviteCodesDescription}>
       <form method="GET" action="/admin/invite" class="filter-form code-filter"><input type="hidden" name="view" value="codes" /><input type="hidden" name="code_page" value="1" /><label class="search-field">{t.adminInviteCodeSearch}<input name="code_search" maxlength="120" value={data.query.code_search} /></label><label>{t.adminInvitePerPage}<select name="code_per_page">{#each [20, 50, 100] as size}<option value={size} selected={data.query.code_per_page === size}>{size}</option>{/each}</select></label><button class="button primary" type="submit">{t.adminInviteApply}</button><a class="button secondary" href={tabHref("codes")}>{t.adminInviteReset}</a></form>
       {#if data.codes?.codes.length}<div class="table-region code-region"><table class="codes-table"><thead><tr><th>{t.adminInviteCode}</th><th>{t.adminInviteInviter}</th><th>{t.adminInviteDays}</th><th>{t.adminInviteUse}</th><th>{t.adminInviteCodeStatus}</th><th>{t.adminInviteExpires}</th><th>{t.adminInviteCodeTarget}</th><th>{t.adminInviteCodeNote}</th></tr></thead><tbody>{#each data.codes.codes as code (code.code)}<tr><td><code>{code.code}</code></td><td>{code.inviter_username || `UID ${code.inviter_uid}`}</td><td>{code.days < 0 ? t.adminInvitePermanent : `${code.days} 天`}</td><td>{code.use_count} / {code.use_count_limit < 0 ? "∞" : code.use_count_limit}</td><td><span class="badge">{codeStatus(code)}</span></td><td>{dateLabel(code.expires_at)}</td><td>{code.target_username || "-"}</td><td>{code.note || "-"}</td></tr>{/each}</tbody></table></div>{:else}<p class="empty">{t.adminInviteCodeEmpty}</p>{/if}
       {#if data.codes && data.codes.pages > 1}<nav class="pagination" aria-label={t.adminInviteCodesTab}>{#if data.codes.page > 1}<a class="button secondary" href={pageHref(1, { view: "codes", page: 1, code_page: data.codes.page - 1 })}>{t.adminInvitePrevious}</a>{:else}<span></span>{/if}<span>{replace(t.adminInviteRows, "{page}", String(data.codes.page)).replace("{pages}", String(data.codes.pages)).replace("{count}", String(data.codes.total))}</span>{#if data.codes.page < data.codes.pages}<a class="button secondary" href={pageHref(1, { view: "codes", page: 1, code_page: data.codes.page + 1 })}>{t.adminInviteNext}</a>{:else}<span></span>{/if}</nav>{/if}
-    </section>
+    </Panel>
   {:else}
-    <section class="panel" aria-labelledby="config-heading">
-      <header class="panel-heading"><div><h2 id="config-heading">{t.adminInviteConfigTab}</h2><p class="muted">{t.adminInviteConfigDescription}</p></div></header>
+    <Panel id="config-heading" title={t.adminInviteConfigTab} description={t.adminInviteConfigDescription}>
       {#if data.config}
         <form method="POST" action="?/saveConfig" class="config-form"><input type="hidden" name="view" value="config" />
           {#each data.config.fields as field (field.key)}
@@ -254,23 +246,20 @@
           <footer class="form-footer"><p class="muted">{t.adminInviteConfigHelp}</p><button class="button primary" type="submit">{t.adminInviteConfigSave}</button></footer>
         </form>
       {:else}<p class="empty">{t.adminInviteConfigLoadFailed}</p>{/if}
-    </section>
+    </Panel>
   {/if}
 </section>
 
 <style>
   .invite-admin-page { display: grid; gap: 1rem; min-width: 0; }
-  .page-heading, .heading-actions, .panel-heading, .bulk-toolbar, .bulk-actions, .pagination, .detail-actions, .facts, .form-footer { align-items: flex-start; display: flex; gap: .75rem; }
-  .page-heading, .panel-heading, .bulk-toolbar, .pagination, .form-footer { justify-content: space-between; }
-  .page-heading { border-bottom: 1px solid #d7dee5; padding-bottom: 1.1rem; }
-  .heading-actions, .bulk-actions, .detail-actions { flex-wrap: wrap; }
-  .eyebrow { color: #486581; font-size: .8rem; font-weight: 700; letter-spacing: .08em; margin: 0 0 .45rem; text-transform: uppercase; }
-  h1, h2, p { overflow-wrap: anywhere; } h1, h2 { margin: 0; } h1 { font-size: 2rem; } h2 { font-size: 1.15rem; }
+  .bulk-toolbar, .bulk-actions, .pagination, .detail-heading, .detail-actions, .facts, .form-footer { align-items: flex-start; display: flex; gap: .75rem; }
+  .bulk-toolbar, .pagination, .form-footer, .detail-heading { justify-content: space-between; }
+  .bulk-actions, .detail-actions { flex-wrap: wrap; }
+  h2, p { overflow-wrap: anywhere; } h2 { margin: 0; font-size: 1.15rem; }
   .muted { color: #52606d; margin: .4rem 0 0; } .meta { color: #52606d; font-size: .82rem; }
   .text-link { min-height: 2.5rem; padding: .55rem 0; }
   .button { align-items: center; background: #e8eef2; border: 0; border-radius: .3rem; color: #16394a; cursor: pointer; display: inline-flex; font: inherit; font-weight: 650; justify-content: center; min-height: 2.5rem; max-width: 100%; padding: .5rem .85rem; text-decoration: none; white-space: normal; }
   .button.primary { background: #245b75; color: #fff; } .button.primary:hover { background: #1c465a; } .button.secondary:hover { background: #d6e1e7; } .button.danger { background: #a63d40; color: #fff; } .button.compact { min-height: 2.25rem; padding: .35rem .6rem; }
-  .panel { background: #fff; border: 1px solid #d7dee5; border-radius: .45rem; display: grid; gap: 1rem; min-width: 0; padding: 1rem; }
   .notice { border: 1px solid; border-radius: .35rem; margin: 0; padding: .7rem .8rem; } .notice.error { background: #fff1f0; border-color: #f1a7a0; color: #a61b1b; } .notice.success { background: #eef8f1; border-color: #a5d6b0; color: #276749; }
   .tabs { align-items: stretch; border-bottom: 1px solid #c8d2da; display: flex; gap: .35rem; overflow-x: auto; overscroll-behavior: contain; scrollbar-color: #9fb3c8 #eef2f4; scrollbar-width: thin; }
   .tabs a { color: #36566a; min-height: 2.7rem; padding: .65rem .85rem; text-decoration: none; white-space: nowrap; } .tabs a.active { border-bottom: 3px solid #245b75; color: #16394a; font-weight: 700; }
@@ -278,11 +267,11 @@
   label { color: #243b53; display: grid; font-size: .84rem; font-weight: 650; gap: .35rem; min-width: 0; } input, select { background: #fff; border: 1px solid #9fb3c8; border-radius: .3rem; font: inherit; min-height: 2.5rem; min-width: 0; max-width: 100%; padding: .5rem .65rem; } input:focus, select:focus, button:focus-visible, a:focus-visible { outline: 3px solid #9fb3c8; outline-offset: 2px; }
   .bulk-toolbar { align-items: center; background: #eef2f4; border: 1px solid #c8d2da; border-radius: .35rem; flex-wrap: wrap; padding: .75rem; } .selection-meta { color: #243b53; font-weight: 700; } .renew-field { align-items: center; display: flex; flex-direction: row; gap: .45rem; } .renew-field input { width: 7rem; }
   .table-region { max-height: min(70dvh, 900px); min-width: 0; overflow: auto; overscroll-behavior: contain; scrollbar-color: #9fb3c8 #eef2f4; scrollbar-width: thin; } table { border-collapse: collapse; width: 100%; } .invite-table { min-width: 980px; } .codes-table { min-width: 860px; } th, td { border-bottom: 1px solid #e1e8ed; padding: .7rem .65rem; text-align: left; vertical-align: top; } th { background: #f4f7f8; color: #243b53; font-size: .8rem; position: sticky; top: 0; z-index: 1; } tr.selected-row { background: #f0f5f7; } .check-col { width: 3rem; text-align: center; } .tree-user { align-items: flex-start; display: flex; gap: .45rem; padding-left: calc(var(--depth) * 1.1rem); } .collapse-link { align-items: center; border: 1px solid #9fb3c8; border-radius: .25rem; color: #36566a; display: inline-flex; flex: 0 0 1.5rem; height: 1.5rem; justify-content: center; line-height: 1; text-decoration: none; } .collapse-spacer { flex: 0 0 1.5rem; } .identity { display: grid; min-width: 0; } .identity a { color: #16394a; overflow-wrap: anywhere; } small { color: #52606d; overflow-wrap: anywhere; } .badge { background: #eef2f4; border: 1px solid #c8d2da; border-radius: 999px; color: #36566a; display: inline-block; font-size: .76rem; max-width: 100%; overflow-wrap: anywhere; padding: .2rem .45rem; white-space: normal; } .badge-danger { background: #fff1f0; border-color: #f1a7a0; color: #a61b1b; }
-  .empty, .empty-panel { color: #52606d; padding: 1.5rem; text-align: center; } .pagination { align-items: center; border-top: 1px solid #e1e8ed; padding-top: .85rem; } .pagination span { color: #52606d; font-size: .84rem; }
-  .detail-panel { scroll-margin-top: 1rem; } .facts { flex-wrap: wrap; margin: 0; } .facts div { min-width: 10rem; } dt { color: #52606d; font-size: .76rem; } dd { margin: .2rem 0 0; overflow-wrap: anywhere; } code { background: #f4f7f8; border: 1px solid #d7dee5; border-radius: .25rem; font: .78rem ui-monospace, SFMono-Regular, Consolas, monospace; max-width: 100%; overflow-wrap: anywhere; padding: .15rem .3rem; }
+  .empty { color: #52606d; padding: 1.5rem; text-align: center; } .pagination { align-items: center; border-top: 1px solid #e1e8ed; padding-top: .85rem; } .pagination span { color: #52606d; font-size: .84rem; }
+  :global(.empty-panel) { color: #52606d; } :global(.detail-panel) { scroll-margin-top: 1rem; } .facts { flex-wrap: wrap; margin: 0; } .facts div { min-width: 10rem; } dt { color: #52606d; font-size: .76rem; } dd { margin: .2rem 0 0; overflow-wrap: anywhere; } code { background: #f4f7f8; border: 1px solid #d7dee5; border-radius: .25rem; font: .78rem ui-monospace, SFMono-Regular, Consolas, monospace; max-width: 100%; overflow-wrap: anywhere; padding: .15rem .3rem; }
   .detail-actions form { align-items: end; display: flex; flex-wrap: wrap; gap: .45rem; } .detail-actions form label { min-width: 12rem; } .detail-actions form label input { width: 7rem; }
   .config-form { display: grid; gap: .75rem; } .config-field { align-items: start; border-bottom: 1px solid #e1e8ed; display: grid; gap: 1rem; grid-template-columns: minmax(0, 1.4fr) minmax(12rem, .8fr); padding: .8rem 0; } .config-field label:not(.switch) { color: #16394a; font-size: .95rem; } .config-field code { display: inline-block; margin-top: .3rem; } .config-control { min-width: 0; } .switch { align-items: center; display: flex; gap: .5rem; min-height: 2.5rem; } .form-footer { align-items: center; flex-wrap: wrap; padding-top: .5rem; }
   .sr-only { clip: rect(0, 0, 0, 0); clip-path: inset(50%); height: 1px; overflow: hidden; position: absolute; white-space: nowrap; width: 1px; }
   @media (max-width: 900px) { .filter-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } .search-field { grid-column: span 2; } .filter-form > .button, .filter-form > a { width: 100%; } .code-filter { grid-template-columns: minmax(0, 1fr) minmax(7rem, .45fr); } .code-filter .search-field { grid-column: span 2; } .code-filter > .button, .code-filter > a { width: 100%; } }
-  @media (max-width: 650px) { .page-heading, .heading-actions, .panel-heading, .bulk-toolbar, .form-footer { align-items: stretch; flex-direction: column; } .heading-actions, .heading-actions > *, .heading-actions .button { width: 100%; } .filter-form, .code-filter { grid-template-columns: 1fr; } .search-field, .code-filter .search-field { grid-column: auto; } .filter-form > .button, .filter-form > a, .code-filter > .button, .code-filter > a { width: 100%; } .bulk-actions { align-items: stretch; flex-direction: column; } .bulk-actions > *, .renew-field, .renew-field input { width: 100%; } .config-field { grid-template-columns: 1fr; } .detail-actions { display: grid; } .detail-actions form, .detail-actions form label, .detail-actions form button { width: 100%; } .pagination { align-items: stretch; } .pagination .button { min-width: 0; } h1 { font-size: 1.65rem; } .panel { padding: .85rem; } }
+  @media (max-width: 650px) { .detail-heading, .bulk-toolbar, .form-footer { align-items: stretch; flex-direction: column; } .filter-form, .code-filter { grid-template-columns: 1fr; } .search-field, .code-filter .search-field { grid-column: auto; } .filter-form > .button, .filter-form > a, .code-filter > .button, .code-filter > a { width: 100%; } .bulk-actions { align-items: stretch; flex-direction: column; } .bulk-actions > *, .renew-field, .renew-field input { width: 100%; } .config-field { grid-template-columns: 1fr; } .detail-actions { display: grid; } .detail-actions form, .detail-actions form label, .detail-actions form button { width: 100%; } .pagination { align-items: stretch; } .pagination .button { min-width: 0; } }
 </style>
