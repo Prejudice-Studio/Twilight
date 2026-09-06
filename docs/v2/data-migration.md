@@ -86,11 +86,15 @@ payload.enc
 
 `twilight_sessions` 不属于迁移数据：其中包含短期会话凭据，导出会扩大凭据泄露和跨实例会话混淆风险。导入后用户需要重新登录。配置文件和 `UploadDir` 下的静态资源尚未由该读取方法自动加入，接入时必须先经过资源白名单和安全路径检查。
 
+`internal/store.Store.ImportMigrationArchive` 已提供数据恢复基础。它要求归档先经过 `migration.Open`，随后在一个可回滚的 Serializable 事务中替换主状态、运行日志、审计日志、Telegram 花名册、Telegram 更新游标和完整播放记录，并重建自增序列与播放记录的有限内存兼容窗口。数据库失败时事务不会留下半套状态；方法成功提交后才更新 Store 内存快照。当前恢复核心不触碰 `twilight_sessions`，也不会把 `config/*` 或 `resources/*` 直接写入文件系统。
+
+恢复前仍必须由上层完成格式、密码、版本、资源、配置和冲突预检，并在最终确认后调用。不要把 `ImportMigrationArchive` 暴露为无需管理员权限的通用 Store 操作。
+
 ## 实现位置
 
 - 格式、加密、manifest 和 ZIP 安全解析：`internal/migration`
 - PostgreSQL 一致性数据读取：`internal/store/migration_export.go`
-- PostgreSQL 数据恢复：`internal/store`（待接入事务恢复编排）
+- PostgreSQL 数据恢复：`internal/store/migration_import.go`
 - 管理员 HTTP 预检/导入/导出：`internal/api`
 - SSR 管理页面：`webui-v2/src/routes/(app)/admin/migration` 或数据库页面中的迁移区域
 

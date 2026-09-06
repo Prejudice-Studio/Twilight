@@ -160,6 +160,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 | `scheduler_runner.go` | `runCheckExpired`, `runExpiryReminder`, `runDailyStats` |
 | `config_admin.go` | config schema, values, save, upload helpers |
 | `migration_export.go` | `ExportMigrationFiles`, consistent PostgreSQL migration snapshot readers |
+| `migration_import.go` | `ImportMigrationArchive`, validated transactional replacement of migration business data |
 | `developer_handlers.go` | developer mode and JS sandbox docs endpoints |
 
 ## Store Model Index
