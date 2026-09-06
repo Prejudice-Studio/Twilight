@@ -121,6 +121,9 @@ func Apply(segment *Segment, event Event, now int64) (Result, error) {
 	if _, err := time.LoadLocation(segment.TimeZone); err != nil {
 		return Result{}, fmt.Errorf("%w: %s", ErrInvalidTimeZone, segment.TimeZone)
 	}
+	if segment.DeviceID == "" {
+		segment.DeviceID = event.DeviceID
+	}
 	if segment.ItemID == "" {
 		segment.ItemID, segment.Title, segment.SeriesName, segment.MediaType = event.ItemID, event.Title, event.SeriesName, event.MediaType
 	}

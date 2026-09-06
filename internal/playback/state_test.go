@@ -11,7 +11,7 @@ func TestApplyPauseResumeOnlyCountsPlayingIntervals(t *testing.T) {
 		}
 		return result
 	}
-	apply(Event{UID: 1, PlaybackID: "p1", ItemID: "item", Type: EventStarted, At: 100, ReceivedAt: 100, TimeZone: "UTC"})
+	apply(Event{UID: 1, PlaybackID: "p1", DeviceID: "device-1", ItemID: "item", Type: EventStarted, At: 100, ReceivedAt: 100, TimeZone: "UTC"})
 	if got := apply(Event{UID: 1, PlaybackID: "p1", Type: EventPaused, At: 160, ReceivedAt: 160, TimeZone: "UTC"}).AddedSeconds; got != 60 {
 		t.Fatalf("pause added %d seconds, want 60", got)
 	}
@@ -23,6 +23,9 @@ func TestApplyPauseResumeOnlyCountsPlayingIntervals(t *testing.T) {
 	}
 	if segment.Duration != 120 || !segmentEnded(segment) {
 		t.Fatalf("unexpected segment: %+v", segment)
+	}
+	if segment.DeviceID != "device-1" {
+		t.Fatalf("segment device=%q, want device-1", segment.DeviceID)
 	}
 }
 
