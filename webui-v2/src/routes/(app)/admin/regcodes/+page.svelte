@@ -42,7 +42,7 @@
   }
 
   function totalPages(): number {
-    return Math.max(1, Math.ceil((data.payload?.total || 0) / Math.max(1, data.payload?.per_page || data.query.per_page)));
+    return data.payload?.pagination.total_pages || 1;
   }
 
   function queryHref(page: number, usage = ""): string {
@@ -121,7 +121,7 @@
     </form>
   </Panel>
 
-  <Panel id="filter-title" title={t.adminRegcodesFilter} description={t.adminRegcodesTotal.replace("{count}", String(data.payload?.total || 0))}>
+  <Panel id="filter-title" title={t.adminRegcodesFilter} description={t.adminRegcodesTotal.replace("{count}", String(data.payload?.pagination.total || 0))}>
     <form method="GET" action="/admin/regcodes" class="filter-form">
       <label>{t.adminRegcodesType}<select name="type"><option value="" selected={!data.query.type || data.query.type === "all"}>{t.adminRegcodesAllTypes}</option><option value="1" selected={data.query.type === "1"}>{t.adminRegcodesRegister}</option><option value="2" selected={data.query.type === "2"}>{t.adminRegcodesRenew}</option><option value="3" selected={data.query.type === "3"}>{t.adminRegcodesWhitelist}</option></select></label>
       <label>{t.adminRegcodesSource}<select name="source"><option value="" selected={!data.query.source || data.query.source === "all"}>{t.adminRegcodesAllSources}</option><option value="admin" selected={data.query.source === "admin"}>{t.adminRegcodesAdminSource}</option><option value="invite" selected={data.query.source === "invite"}>{t.adminRegcodesInviteSource}</option></select></label>
@@ -144,10 +144,10 @@
     </div>
   </form>
 
-  <Panel id="list-title" className="list-panel" title={t.adminRegcodesTitle} description={t.adminRegcodesPageOf.replace("{page}", String(data.payload?.page || data.query.page)).replace("{pages}", String(totalPages()))}>
-    {#if data.payload?.regcodes?.length}
+  <Panel id="list-title" className="list-panel" title={t.adminRegcodesTitle} description={t.adminRegcodesPageOf.replace("{page}", String(data.payload?.pagination.page || data.query.page)).replace("{pages}", String(totalPages()))}>
+    {#if data.payload?.items?.length}
       <div class="regcode-list">
-        {#each data.payload.regcodes as code (code.code)}
+        {#each data.payload.items as code (code.code)}
           <article class="regcode-entry">
             <input class="row-check" type="checkbox" name="codes" value={code.code} form="batch-delete" aria-label={`${t.adminRegcodesBatchDelete}: ${code.code}`} />
             <div class="regcode-main">
@@ -178,14 +178,14 @@
         {/each}
       </div>
     {:else}<p class="empty">{t.adminRegcodesEmpty}</p>{/if}
-    {#if totalPages() > 1}<nav class="pagination" aria-label={t.adminRegcodesTitle}>{#if (data.payload?.page || data.query.page) > 1}<a class="button secondary" href={queryHref((data.payload?.page || data.query.page) - 1)}>{t.adminAnnouncementsPrevious}</a>{:else}<span></span>{/if}<span>{t.adminRegcodesPageOf.replace("{page}", String(data.payload?.page || data.query.page)).replace("{pages}", String(totalPages()))}</span>{#if (data.payload?.page || data.query.page) < totalPages()}<a class="button secondary" href={queryHref((data.payload?.page || data.query.page) + 1)}>{t.adminAnnouncementsNext}</a>{:else}<span></span>{/if}</nav>{/if}
+    {#if totalPages() > 1}<nav class="pagination" aria-label={t.adminRegcodesTitle}>{#if (data.payload?.pagination.page || data.query.page) > 1}<a class="button secondary" href={queryHref((data.payload?.pagination.page || data.query.page) - 1)}>{t.adminAnnouncementsPrevious}</a>{:else}<span></span>{/if}<span>{t.adminRegcodesPageOf.replace("{page}", String(data.payload?.pagination.page || data.query.page)).replace("{pages}", String(totalPages()))}</span>{#if (data.payload?.pagination.page || data.query.page) < totalPages()}<a class="button secondary" href={queryHref((data.payload?.pagination.page || data.query.page) + 1)}>{t.adminAnnouncementsNext}</a>{:else}<span></span>{/if}</nav>{/if}
   </Panel>
 
   {#if data.query.usage}
-    <Panel id="usage-title" className="usage-panel" title={t.adminRegcodesUsageTitle} description={t.adminRegcodesUsageFor.replace("{code}", data.query.usage).replace("{count}", String(data.usage?.use_count || 0))}>
+    <Panel id="usage-title" className="usage-panel" title={t.adminRegcodesUsageTitle} description={t.adminRegcodesUsageFor.replace("{code}", data.query.usage).replace("{count}", String(data.usage?.item.use_count || 0))}>
       <a class="button secondary" href={queryHref(data.query.page)}>{t.adminRegcodesCloseUsage}</a>
-      {#if data.usage?.users?.length || data.usage?.telegram_only?.length}
-        <div class="usage-list">{#each data.usage.users as user}<div class="usage-row"><strong>{usageName(user)}</strong><span class="badge">{user.source === "uid" ? t.adminRegcodesUsageSourceUID : t.adminRegcodesUsageSourceTelegram}</span>{#if user.uid}<span>UID {user.uid}</span>{/if}{#if user.telegram_id}<span>TG {user.telegram_id}</span>{/if}</div>{/each}{#each data.usage.telegram_only || [] as user}<div class="usage-row"><strong>{t.adminRegcodesUsageUnknown}</strong><span class="badge">{t.adminRegcodesUsageSourceTelegram}</span><span>TG {user.telegram_id}</span></div>{/each}</div>
+      {#if data.usage?.item.users?.length || data.usage?.item.telegram_only?.length}
+        <div class="usage-list">{#each data.usage.item.users as user}<div class="usage-row"><strong>{usageName(user)}</strong><span class="badge">{user.source === "uid" ? t.adminRegcodesUsageSourceUID : t.adminRegcodesUsageSourceTelegram}</span>{#if user.uid}<span>UID {user.uid}</span>{/if}{#if user.telegram_id}<span>TG {user.telegram_id}</span>{/if}</div>{/each}{#each data.usage.item.telegram_only || [] as user}<div class="usage-row"><strong>{t.adminRegcodesUsageUnknown}</strong><span class="badge">{t.adminRegcodesUsageSourceTelegram}</span><span>TG {user.telegram_id}</span></div>{/each}</div>
       {:else}<p class="empty">{t.adminRegcodesUsageEmpty}</p>{/if}
       <form method="POST" action="?/clearUsage" class="usage-clear-form" onsubmit={(event) => confirmSubmit(event, t.adminRegcodesClearUsageConfirm)}><input type="hidden" name="code" value={data.query.usage} />{#each filterEntries().slice(0, 8) as [name, value]}<input type="hidden" name={name} value={value} />{/each}<button class="button danger" type="submit">{t.adminRegcodesClearUsage}</button></form>
     </Panel>

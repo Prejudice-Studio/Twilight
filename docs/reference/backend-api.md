@@ -1187,6 +1187,8 @@ curl -X POST "http://localhost:5000/api/v1/admin/emby/sync" \
 
 管理端注册码搜索由后端分页过滤，前端自由搜索会在短暂停止输入后再请求；`type`、`status`、`source`、`sort`、`order` 变化时应从第一页重新读取。大批量注册码不应由前端先下载全量再筛选。
 
+V2 管理注册码资源使用 `/api/v2/admin/regcodes`：列表返回 `items` 和 `pagination`，详情返回 `item`，使用记录按 `/usage` 按需读取；`PATCH` 使用局部字段更新，批量删除和使用记录清理仍需固定确认短语。V2 只改变资源契约和 SSR 页面调用路径，注册码消费、有效期暂停、引用清理、存储不一致保护、权限与审计继续由同一 Store/handler 执行，避免 V1/V2 双写或缓存事实分叉。
+
 #### 查询注册码列表
 
 `GET /admin/regcodes`

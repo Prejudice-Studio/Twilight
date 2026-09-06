@@ -1456,10 +1456,13 @@ export interface Regcode {
 }
 
 export interface RegcodePage {
-  regcodes: Regcode[];
-  total: number;
-  page: number;
-  per_page: number;
+  items: Regcode[];
+  pagination: {
+    page: number;
+    per_page: number;
+    total: number;
+    total_pages: number;
+  };
 }
 
 export interface RegcodeUsageUser {
@@ -1474,10 +1477,14 @@ export interface RegcodeUsageUser {
 }
 
 export interface RegcodeUsagePage {
-  code: string;
-  use_count: number;
-  users: RegcodeUsageUser[];
-  telegram_only?: Array<{ telegram_id: number; found: false; source: "telegram" }>;
+  item: {
+    code: string;
+    use_count: number;
+    users: RegcodeUsageUser[];
+    telegram_only?: Array<{ telegram_id: number; found: false; source: "telegram" }>;
+    unresolved_telegram_ids?: number[];
+    total?: number;
+  };
 }
 
 export interface AdminRegcodesPageData {

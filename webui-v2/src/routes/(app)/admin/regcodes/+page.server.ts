@@ -81,13 +81,13 @@ function listParams(query: RegcodeQuery): URLSearchParams {
 }
 
 function regcodePath(code: string, suffix = ""): string {
-  return `/api/v1/admin/regcodes/${encodeURIComponent(code)}${suffix}`;
+  return `/api/v2/admin/regcodes/${encodeURIComponent(code)}${suffix}`;
 }
 
 async function mutate(
   event: RequestEvent,
   path: string,
-  method: "POST" | "PUT" | "DELETE",
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
   payload: unknown,
   action: string,
   fallbackMessage = t.adminRegcodesOperationFailed
@@ -116,9 +116,9 @@ function boundedNumber(form: FormData, name: string, fallback: number, min: numb
 export const load: PageServerLoad = async (event): Promise<AdminRegcodesPageData> => {
   const query = normalizeQuery(event.url);
   const usageCode = query.usage;
-  const listPromise = apiJSON<RegcodePage>(event, `/api/v1/admin/regcodes?${listParams(query)}`, { cache: "no-store" });
+  const listPromise = apiJSON<RegcodePage>(event, `/api/v2/admin/regcodes?${listParams(query)}`, { cache: "no-store" });
   const usagePromise = usageCode
-    ? apiJSON<RegcodeUsagePage>(event, regcodePath(usageCode, "/users"), { cache: "no-store" })
+    ? apiJSON<RegcodeUsagePage>(event, regcodePath(usageCode, "/usage"), { cache: "no-store" })
     : Promise.resolve(null);
   const [listResult, usageResult] = await Promise.all([listPromise, usagePromise]);
   const noticeValue = text(event.url.searchParams.get("notice"), 24);
@@ -156,7 +156,7 @@ export const actions: Actions = {
     if ([targetUsername, targetTelegramUsername, targetTelegramIDText, targetUIDText].filter(Boolean).length > 1) {
       return fail(400, { action: "create", error: t.adminRegcodesOperationFailed } satisfies FormState);
     }
-    const result = await apiJSONWithResponse<{ codes?: string[] }>(event, "/api/v1/admin/regcodes", {
+    const result = await apiJSONWithResponse<{ codes?: string[] }>(event, "/api/v2/admin/regcodes", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -185,7 +185,7 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const code = text(form.get("code"), 200);
     if (!code) return fail(400, { action: "update", error: t.adminRegcodesOperationFailed } satisfies FormState);
-    const result = await mutate(event, regcodePath(code), "PUT", {
+    const result = await mutate(event, regcodePath(code), "PATCH", {
       active: form.getAll("active").some((value) => value === "true" || value === "on" || value === "1"),
       days: integer(text(form.get("days"), 16), 30),
       validity_time: integer(text(form.get("validity_time"), 16), -1),
@@ -217,7 +217,7 @@ export const actions: Actions = {
       const value = text(form.get(name), 120);
       if (value && value !== "all") filter[key] = value;
     }
-    const result = await mutate(event, "/api/v1/admin/regcodes/batch-delete", "POST", {
+    const result = await mutate(event, "/api/v2/admin/regcodes/batch-delete", "POST", {
       confirm: "BATCH_DELETE_REGCODES",
       select_all: selectAll,
       ...(selectAll ? { filter, exclude_codes: [] } : { codes: [...new Set(selected)] })
@@ -230,7 +230,7 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const code = text(form.get("code"), 200);
     if (!code) return fail(400, { action: "clearUsage", error: t.adminRegcodesOperationFailed } satisfies FormState);
-    const result = await mutate(event, regcodePath(code, "/clear-usage"), "POST", { confirm: "CLEAR_REGCODE_USAGE" }, "clearUsage");
+    const result = await mutate(event, regcodePath(code, "/usage/clear"), "POST", { confirm: "CLEAR_REGCODE_USAGE" }, "clearUsage");
     if (result.failure) return result.failure;
     const query = queryString(queryFromForm(form));
     throw redirect(303, `/admin/regcodes${query ? `?${query}&notice=usage_cleared` : "?notice=usage_cleared"}`);

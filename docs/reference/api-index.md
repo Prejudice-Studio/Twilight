@@ -302,6 +302,14 @@ V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/ap
 | DELETE | `/api/v1/admin/regcodes/{code}` | Admin | 删除注册码 |
 | GET | `/api/v1/admin/regcodes/{code}/users` | Admin | 查看注册码使用者 |
 | POST | `/api/v1/admin/regcodes/{code}/clear-usage` | Admin | 清理注册码使用记录 |
+| GET | `/api/v2/admin/regcodes` | Admin | V2 注册码资源集合；返回 `items` 与有界 `pagination`，支持类型/状态/来源/搜索/排序筛选 |
+| POST | `/api/v2/admin/regcodes` | Admin | V2 批量生成注册码；复用注册码参数、存储保护和审计 |
+| POST | `/api/v2/admin/regcodes/batch-delete` | Admin | V2 批量物理删除注册码；继续要求确认短语和数量上限 |
+| GET | `/api/v2/admin/regcodes/{code}` | Admin | V2 单注册码资源 |
+| PATCH | `/api/v2/admin/regcodes/{code}` | Admin | V2 局部更新注册码状态、有效期、次数、天数和备注 |
+| DELETE | `/api/v2/admin/regcodes/{code}` | Admin | V2 删除注册码并清理其引用 |
+| GET | `/api/v2/admin/regcodes/{code}/usage` | Admin | V2 按需读取注册码使用者和 Telegram-only 使用记录 |
+| POST | `/api/v2/admin/regcodes/{code}/usage/clear` | Admin | V2 清理注册码使用记录；继续要求确认短语 |
 | GET | `/api/v1/admin/media-requests` | Admin | 求片管理列表；支持 `status/source/q/page/per_page`，返回状态计数与分页元数据，不缓存 |
 | PUT | `/api/v1/admin/media-requests/{request_id}` | Admin | 更新求片状态 |
 | DELETE | `/api/v1/admin/media-requests/{request_id}` | Admin | 删除求片 |

@@ -28,4 +28,13 @@ func (a *App) registerV2Routes() {
 	a.add(http.MethodPost, "/api/v2/admin/ticket-types", AuthAdmin, a.handleAdminAddTicketType)
 	a.add(http.MethodPatch, "/api/v2/admin/ticket-types/:ticket_type", AuthAdmin, a.handleV2AdminRenameTicketType)
 	a.add(http.MethodDelete, "/api/v2/admin/ticket-types/:ticket_type", AuthAdmin, a.handleV2AdminDeleteTicketType)
+
+	a.add(http.MethodGet, "/api/v2/admin/regcodes", AuthAdmin, a.handleV2AdminRegcodes)
+	a.add(http.MethodPost, "/api/v2/admin/regcodes", AuthAdmin, a.handleV2CreateRegcodes)
+	a.add(http.MethodPost, "/api/v2/admin/regcodes/batch-delete", AuthAdmin, a.handleV2BatchDeleteRegcodes)
+	a.add(http.MethodGet, "/api/v2/admin/regcodes/:code", AuthAdmin, a.handleV2AdminRegcode)
+	a.add(http.MethodPatch, "/api/v2/admin/regcodes/:code", AuthAdmin, a.handleV2UpdateRegcode)
+	a.add(http.MethodDelete, "/api/v2/admin/regcodes/:code", AuthAdmin, a.handleV2DeleteRegcode)
+	a.add(http.MethodGet, "/api/v2/admin/regcodes/:code/usage", AuthAdmin, a.handleV2AdminRegcodeUsage)
+	a.add(http.MethodPost, "/api/v2/admin/regcodes/:code/usage/clear", AuthAdmin, a.handleV2ClearRegcodeUsage)
 }
