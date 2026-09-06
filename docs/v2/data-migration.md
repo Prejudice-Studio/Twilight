@@ -1,6 +1,6 @@
 # Twilight 数据迁移包
 
-本文记录 Twilight V2 使用的专用 ZIP 格式。当前已具备格式安全解析、PostgreSQL 一致性数据读取和受控静态资源收集基础；导出/导入 HTTP API、配置策略、资源原子落盘和管理页面仍需由后续独立模块接入，不能把当前格式包 API 误认为已经完成整站备份。
+本文记录 Twilight V2 使用的专用 ZIP 格式，以及当前管理员导出/导入边界。格式安全解析、PostgreSQL 一致性数据读取、受控静态资源收集和管理员 HTTP 预检/执行接口已经接入；V2 管理页面随后接入。配置策略和资源原子落盘规则见下文。
 
 ## 外层结构
 
@@ -97,7 +97,29 @@ payload.enc
 
 收集器不会把真实机器路径写入清单。根目录和每级条目都拒绝符号链接、非普通文件、路径越界和异常文件名；不存在的可选目录视为空目录，UploadDir 下其它目录不会被打包。单文件、总大小和文件数沿用迁移格式的有界预算，读取前后会复核文件状态，发现并发变化时终止快照。
 
-`twilight_sessions` 不属于迁移数据：其中包含短期会话凭据，导出会扩大凭据泄露和跨实例会话混淆风险。导入后用户需要重新登录。配置文件尚未由该读取方法自动加入；静态资源虽然已有收集基础，但仍必须由上层导出编排显式追加，不能把整个 UploadDir 直接加入归档。
+`twilight_sessions` 不属于迁移数据：其中包含短期会话凭据，导出会扩大凭据泄露和跨实例会话混淆风险。导入后用户需要重新登录。静态资源由管理员导出编排显式追加，不能把整个 UploadDir 直接加入归档。
+
+## 配置导出策略
+
+`config/effective.toml` 是按当前生效配置和已知 schema 生成的迁移配置，不是原始配置文件的逐字复制；真实机器路径、环境变量和受保护的管理员身份段不会被迁移配置覆盖。`config/policy.json` 记录配置格式与是否包含密钥：
+
+- 无密码导出：所有 schema 标记为 secret 的字段写成 `__TWILIGHT_SECRET_UNCHANGED__` 哨兵。导入时保留目标实例现有密钥。
+- 密码导出：在归档已由 Argon2id + AES-256-GCM 保护时，才允许写入当前生效密钥。导入仍只在管理员明确勾选“应用配置”后执行。
+- 导入不会覆盖目标实例的 `Admin` 身份、数据库目录、系统更新源等本地边界配置；未选择应用配置时只导入业务数据和资源。
+
+密码只存在于请求 body/multipart 字段的处理生命周期，不进入 URL、日志、清单或响应 JSON。
+
+## 管理员接口
+
+迁移面板默认关闭，需开启 `Database.migration_panel_enabled`。接口全部要求管理员会话：
+
+| 方法 | 路径 | 作用 |
+| --- | --- | --- |
+| GET | `/api/v1/system/admin/migration/status` | 返回格式、容量和允许的资源命名空间 |
+| POST | `/api/v1/system/admin/migration/export` | 生成 ZIP；JSON body 可选 `password`，空值表示无密码 |
+| POST | `/api/v1/system/admin/migration/import` | multipart 上传 `archive`，首次请求只生成预览；确认字段为 `IMPORT_TWILIGHT_DATA` |
+
+导入字段包括 `password`、`preview`、`apply_config` 和 `resource_mode`。`resource_mode=preserve`（默认）遇到不同内容的资源时只报告冲突；`resource_mode=replace` 需要管理员确认后覆盖。数据库导入失败会回滚数据库和已写入的资源，配置应用失败也会恢复原配置。
 
 `internal/store.Store.ImportMigrationArchive` 已提供数据恢复基础。它要求归档先经过 `migration.Open`，随后在一个可回滚的 Serializable 事务中替换主状态、运行日志、审计日志、Telegram 花名册、Telegram 更新游标和完整播放记录，并重建自增序列与播放记录的有限内存兼容窗口。数据库失败时事务不会留下半套状态；方法成功提交后才更新 Store 内存快照。当前恢复核心不触碰 `twilight_sessions`，也不会把 `config/*` 或 `resources/*` 直接写入文件系统。
 
@@ -108,8 +130,8 @@ payload.enc
 - 格式、加密、manifest 和 ZIP 安全解析：`internal/migration`
 - PostgreSQL 一致性数据读取：`internal/store/migration_export.go`
 - PostgreSQL 数据恢复：`internal/store/migration_import.go`
-- 管理员 HTTP 预检/导入/导出：`internal/api`（待接入）
+- 管理员 HTTP 预检/导入/导出：`internal/api/migration_handlers.go`
 - UploadDir 资源收集：`internal/api/migration_resources.go`
 - SSR 管理页面：`webui-v2/src/routes/(app)/admin/migration` 或数据库页面中的迁移区域
 
-格式核心通过 `go test ./internal/migration` 验证。新增导入功能必须补充恶意 ZIP、错误密码、manifest 篡改、路径穿越、重复文件、大小上限和失败回滚测试。
+格式核心通过 `go test ./internal/migration` 验证；资源收集、路径冲突和失败回滚通过 `go test ./internal/api` 覆盖。新增导入功能必须继续补充恶意 ZIP、错误密码、manifest 篡改、路径穿越、重复文件、大小上限和失败回滚测试。

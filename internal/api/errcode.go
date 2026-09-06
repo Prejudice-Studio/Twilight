@@ -201,6 +201,13 @@ const (
 	ErrDBStateFileBadPath   ErrCode = "DB_STATE_FILE_BAD_PATH"
 	ErrDBStateFileMkdirBad  ErrCode = "DB_STATE_FILE_MKDIR_FAILED"
 	ErrDBStateFileWriteBad  ErrCode = "DB_STATE_FILE_WRITE_FAILED"
+	ErrMigrationDisabled    ErrCode = "MIGRATION_DISABLED"
+	ErrMigrationUploadBad   ErrCode = "MIGRATION_UPLOAD_INVALID"
+	ErrMigrationArchiveBad  ErrCode = "MIGRATION_ARCHIVE_INVALID"
+	ErrMigrationConflict    ErrCode = "MIGRATION_RESOURCE_CONFLICT"
+	ErrMigrationConfirm     ErrCode = "MIGRATION_CONFIRM_REQUIRED"
+	ErrMigrationImportFail  ErrCode = "MIGRATION_IMPORT_FAILED"
+	ErrMigrationExportFail  ErrCode = "MIGRATION_EXPORT_FAILED"
 
 	// === Emby 远端调用 / Admin Emby 操作 ===
 	// admin_extra.go 中的 fail() 之前以英文裸串返回，前端 toast 难以做差异化

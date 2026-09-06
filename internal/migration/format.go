@@ -44,6 +44,11 @@ const (
 	aesNonceBytes        = 12
 )
 
+// MaxArchiveBytes is the maximum encoded outer ZIP size accepted by the HTTP
+// migration boundary. The format's uncompressed budget is smaller, but the
+// outer archive also contains ZIP headers and can be incompressible.
+const MaxArchiveBytes int64 = maxArchiveTotalBytes + 16<<20
+
 var (
 	ErrInvalidArchive    = errors.New("invalid Twilight migration archive")
 	ErrUnsupportedFormat = errors.New("unsupported Twilight migration format")

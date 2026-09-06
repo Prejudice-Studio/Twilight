@@ -1826,7 +1826,31 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 - 预检响应 `data` 包含 `source_driver`、`configured_driver`、`target_driver`、`snapshot_bytes`、`target_ready`、`backup_ready`、`warnings`、`counts`、`requires_confirmation`、`confirm`，并保留 `users`、`regcodes`、`invite_codes` 等兼容字段。PostgreSQL 目标会在权限允许时自动创建缺失数据库并准备 `twilight_state` 状态表，`target_ready.database_created` / `target_ready.schema_ready` 反映结果。
 - 执行响应会额外返回 `pre_operation_backup` / `pre_migration_backup`，确认写入前已自动创建保护性备份。
 
-### 10.15 Git 自动更新
+### 10.15 Twilight 数据迁移包
+
+以下接口默认关闭，开启 `Database.migration_panel_enabled` 后仅管理员可用：
+
+`GET /system/admin/migration/status`
+
+- 返回迁移格式版本、数据库结构版本、归档大小上限和允许的 `resources/` 命名空间。
+
+`POST /system/admin/migration/export`
+
+- 说明：生成 Twilight 专用 ZIP，包含 PostgreSQL 一致性业务数据、按白名单收集的上传资源和有效配置。
+- 请求体可选：`{"password":"..."}`。空密码生成无密码包；非空密码至少 8 个 UTF-8 字节，密码模式使用 Argon2id + AES-256-GCM。
+- 无密码包的配置 secret 使用 `__TWILIGHT_SECRET_UNCHANGED__` 哨兵；密码不会进入 URL、响应 JSON、清单或日志。
+- 响应：`application/zip` 下载，带 `Cache-Control: no-store`；不返回归档内容的 JSON 副本。
+
+`POST /system/admin/migration/import`
+
+- 请求类型：`multipart/form-data`，文件字段为 `archive`；可选字段为 `password`、`preview`、`apply_config`、`resource_mode` 和确认短语 `confirm`。
+- 首次请求或缺少 `confirm=IMPORT_TWILIGHT_DATA` 时只返回预览，不修改数据库、配置或资源。
+- `resource_mode=preserve` 为默认值，遇到不同内容的同名资源会返回冲突；`resource_mode=replace` 只有在确认后才覆盖。
+- `apply_config=true` 才应用归档中的可迁移配置。数据库目录、管理员身份、系统更新源等本地边界不会被归档配置覆盖；无密码包的 secret 保留目标值。
+- 导入失败会回滚 PostgreSQL 事务、已写入资源和已应用的配置；活动 session 不在归档中，也不会从源实例复制。
+- 后端拒绝 Zip Slip、绝对路径、反斜杠、重复条目、符号链接、非普通文件、超大文件、超多文件和不支持的命名空间。
+
+### 10.16 Git 自动更新
 
 `POST /system/admin/update`
 

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/prejudice-studio/twilight/internal/config"
+	"github.com/prejudice-studio/twilight/internal/migration"
 	"github.com/prejudice-studio/twilight/internal/redis"
 	"github.com/prejudice-studio/twilight/internal/store"
 )
@@ -106,6 +107,7 @@ type App struct {
 	embySessionsMu            sync.Mutex
 	embySessionsUntil         time.Time
 	embySessionsCache         []map[string]any
+	migrationMu               sync.Mutex
 	bindStatus                *bindStatusHub
 	// schedulerLocks: jobID -> *schedulerProcessRun。BATCH_07 之前在 package 级
 	// 声明 (`var schedulerProcessLocks sync.Map`)，单进程 prod 不显问题，但
@@ -773,8 +775,15 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		lw.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if a.cfg().MaxUploadSize > 0 {
-		r.Body = http.MaxBytesReader(lw, r.Body, a.cfg().MaxUploadSize)
+	bodyLimit := a.cfg().MaxUploadSize
+	if strings.HasPrefix(r.URL.Path, "/api/v1/system/admin/migration/") {
+		// Migration archives are bounded by the archive parser rather than the
+		// ordinary image-upload limit. The route still authenticates as admin
+		// before reading the body in its handler.
+		bodyLimit = migration.MaxArchiveBytes + 8<<20
+	}
+	if bodyLimit > 0 {
+		r.Body = http.MaxBytesReader(lw, r.Body, bodyLimit)
 	}
 	if !a.allowRate(r.Context(), rateKey("global:", clientIP), a.cfg().RateLimitGlobalPerMinute, time.Minute) {
 		failWithCode(lw, http.StatusTooManyRequests, ErrGlobalRateLimited, "请求过于频繁，请稍后再试")
