@@ -44,11 +44,18 @@ const legacyRoutes = new Set(
     .filter((path) => path.endsWith("page.tsx"))
     .map((path) => routeFromPath(path, legacyRoot, "page.tsx"))
 );
-const v2Routes = new Set(
+const v2RouteRoot = join(projectRoot, "src", "routes");
+const v2PageRoutes = new Set(
   v2Files
-    .filter((path) => path.endsWith("+page.svelte") || path.endsWith("+page.server.ts"))
-    .map((path) => routeFromPath(path, join(projectRoot, "src", "routes"), path.endsWith("+page.svelte") ? "+page.svelte" : "+page.server.ts"))
+    .filter((path) => path.endsWith("+page.svelte"))
+    .map((path) => routeFromPath(path, v2RouteRoot, "+page.svelte"))
 );
+const v2ServerRoutes = new Set(
+  v2Files
+    .filter((path) => path.endsWith("+page.server.ts"))
+    .map((path) => routeFromPath(path, v2RouteRoot, "+page.server.ts"))
+);
+const v2Routes = new Set([...v2PageRoutes, ...v2ServerRoutes]);
 
 const missing = [...legacyRoutes].filter((route) => !v2Routes.has(route)).sort();
 if (missing.length) {
@@ -65,6 +72,33 @@ const compatibilityRoutes = new Map([
   ["admin/developer/js-docs", "/admin/developer"],
   ["settings/background", "/settings/appearance"]
 ]);
+const redirectOnlyRoutes = new Set([""]);
+const staticSSRRoutes = new Set(["wiki", "admin/security"]);
+
+// A route is only migrated when it has a real Svelte page. Server-only files
+// are reserved for explicit compatibility redirects; otherwise a file-only
+// route can pass coverage while rendering no user-facing page at all.
+const missingPages = [...legacyRoutes]
+  .filter((route) => !compatibilityRoutes.has(route) && !redirectOnlyRoutes.has(route) && !v2PageRoutes.has(route))
+  .sort();
+if (missingPages.length) {
+  console.error("V2 page implementation coverage failed; missing real Svelte page(s):");
+  for (const route of missingPages) console.error(`  /${route}`);
+  process.exit(1);
+}
+
+// Every non-static page must have a server boundary. This keeps session reads
+// and mutations out of browser-only components while allowing public Wiki and
+// the admin security navigation hub to remain static under their layouts.
+const missingServerBoundaries = [...v2PageRoutes]
+  .filter((route) => !staticSSRRoutes.has(route) && !v2ServerRoutes.has(route))
+  .sort();
+if (missingServerBoundaries.length) {
+  console.error("V2 SSR boundary failed; page(s) missing +page.server.ts:");
+  for (const route of missingServerBoundaries) console.error(`  /${route}`);
+  process.exit(1);
+}
+
 for (const [route, target] of compatibilityRoutes) {
   const routeParts = route.split("/");
   const candidates = [
@@ -78,6 +112,14 @@ for (const [route, target] of compatibilityRoutes) {
   }
   if (!source || !/\bredirect\(/.test(source)) {
     throw new Error(`compatibility route /${route} must be a server redirect to ${target}`);
+  }
+}
+
+for (const route of redirectOnlyRoutes) {
+  const candidate = join(v2Root, "routes", ...(route ? route.split("/") : []), "+page.server.ts");
+  const source = await readFile(candidate, "utf8").catch(() => "");
+  if (!source || !/\bredirect\(/.test(source)) {
+    throw new Error(`redirect-only route /${route} must be implemented by a server redirect`);
   }
 }
 
@@ -129,4 +171,4 @@ if (violations.length) {
   process.exit(1);
 }
 
-console.log(`OK: ${legacyRoutes.size} legacy route(s) covered; SSR, adapter-node, compatibility redirects, API boundary, and no-polling rules passed.`);
+console.log(`OK: ${legacyRoutes.size} legacy route(s) covered by ${v2PageRoutes.size} Svelte page(s), ${compatibilityRoutes.size} compatibility redirect(s), and ${redirectOnlyRoutes.size} redirect-only entrypoint(s); SSR, adapter-node, API boundary, and no-polling rules passed.`);

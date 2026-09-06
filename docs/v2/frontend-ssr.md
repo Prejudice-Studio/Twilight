@@ -72,13 +72,13 @@ SSR 到 Go API 的请求以及同源 `/api/v1/*`、`/api/v2/*` 流式代理共�
 
 `webui-v2/scripts/check-architecture.mjs` 会在 `pnpm check` 中执行迁移验收：扫描旧 `webui/src/app` 的页面并确认 V2 存在对应 `+page.svelte` 或服务端兼容入口，同时禁止 V2 引入 React/Next/Zustand，禁止业务页面绕过 SSR API client 直接调用 `fetch`。旧前端仍可作为回滚版本存在，但不能重新成为默认依赖或数据边界。
 
-迁移门禁还会固定检查根布局显式保持 `ssr = true`、`csr = true`、`prerender = false`，生产构建使用 `@sveltejs/adapter-node`，旧书签兼容入口必须是服务端重定向，并禁止 V2 页面恢复 `onMount`、SSE、WebSocket 或 `setInterval` 等浏览器轮询运行时。旧 `webui/` 的存在只代表可回滚构建，不代表它参与默认部署；默认 systemd、Docker 和 CI 入口均以 `webui-v2/` 为准。
+迁移门禁还会固定检查根布局显式保持 `ssr = true`、`csr = true`、`prerender = false`，生产构建使用 `@sveltejs/adapter-node`，旧书签兼容入口必须是服务端重定向，并禁止 V2 页面恢复 `onMount`、SSE、WebSocket 或 `setInterval` 等浏览器轮询运行时。门禁会分别统计真实 `+page.svelte` 页面与 `+page.server.ts` 服务端边界：旧路由不能仅靠一个服务端文件伪装成已迁移页面，所有需要会话或写入的页面都必须有 SSR server load/action；只有公开 Wiki 和已由管理员布局保护的静态安全导航页允许没有独立 server 文件。旧 `webui/` 的存在只代表可回滚构建，不代表它参与默认部署；默认 systemd、Docker 和 CI 入口均以 `webui-v2/` 为准。
 
 `src/routes/api/[...path]/+server.ts` 只允许代理 `/api/v1/*` 与 `/api/v2/*`，通过流式上限限制请求体，移除 hop-by-hop、Origin、Referer、Authorization、API Key 和 Host 等头。Go 后端仍是唯一认证、权限、限流和业务状态边界。SvelteKit form action 默认启用同源 Origin 校验。
 
 ## 重写验收门禁
 
-\`webui-v2/scripts/check-architecture.mjs\` 会扫描旧 \`webui/src/app\` 的页面并确认 V2 存在对应 SSR 页面或服务端兼容入口，同时检查 systemd、Compose、Nginx 和根 README 的生产入口均指向 \`webui-v2\`。门禁禁止 V2 引入 React/Next/Zustand，禁止业务页面绕过 SSR API client 直接调用 \`fetch\`，也禁止 \`{@html}\`、浏览器存储、直接 DOM HTML 写入和客户端轮询状态。
+\`webui-v2/scripts/check-architecture.mjs\` 会扫描旧 \`webui/src/app\` 的页面并确认 V2 存在对应真实 Svelte 页面或明确的服务端兼容重定向，同时检查需要会话的页面拥有 \`+page.server.ts\` 数据/动作边界，并检查 systemd、Compose、Nginx 和根 README 的生产入口均指向 \`webui-v2\`。门禁禁止 V2 引入 React/Next/Zustand，禁止业务页面绕过 SSR API client 直接调用 \`fetch\`，也禁止 \`{@html}\`、浏览器存储、直接 DOM HTML 写入和客户端轮询状态。
 
 \`pnpm verify\` 会顺序执行 \`pnpm check\` 和 \`pnpm build\`，避免并行写入 \`.svelte-kit\` 生成目录。旧 \`webui/\` 仅作为整站回滚和行为对照保留，不参与默认开发、构建或运行时数据边界。
 
@@ -97,6 +97,8 @@ SSR 到 Go API 的请求以及同源 `/api/v1/*`、`/api/v2/*` 流式代理共�
 Linux + systemd 部署由 `deploy/setup-systemd.sh` 管理 `twilight-webui-v2.service`，构建产物为 `webui-v2/build`，默认监听 `127.0.0.1:3001`。`deploy/nginx-twilight.conf` 将 `/` 和 `/_app/` 反代到 adapter-node，`/api/` 仍按原配置直接转发到 Go API；这只是传输拓扑变化，不改变 CORS 策略。
 
 Docker Compose 的 `webui` 服务同样从 `webui-v2/Dockerfile` 构建。反向代理部署时需要设置 `WEBUI_ORIGIN` 为浏览器实际访问的完整 Origin；本地直连可使用默认的 `http://localhost:3000`。升级前应保留旧 V1 构建和上一版 V2 构建，回滚只切换反向代理前端目标，不回滚 PostgreSQL 数据或 Go API。
+
+根路径 `/` 是一个服务端条件重定向入口：已登录请求转到 `/dashboard`，未登录请求转到 `/login`。它不渲染旧版客户端 loading 壳，也不在浏览器启动后读取身份；门禁会单独检查该重定向实现。
 
 ## 迁移规则
 
