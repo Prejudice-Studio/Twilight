@@ -72,6 +72,8 @@ SSR 到 Go API 的请求以及同源 `/api/v1/*`、`/api/v2/*` 流式代理共�
 
 `webui-v2/scripts/check-architecture.mjs` 会在 `pnpm check` 中执行迁移验收：扫描旧 `webui/src/app` 的页面并确认 V2 存在对应 `+page.svelte` 或服务端兼容入口，同时禁止 V2 引入 React/Next/Zustand，禁止业务页面绕过 SSR API client 直接调用 `fetch`。旧前端仍可作为回滚版本存在，但不能重新成为默认依赖或数据边界。
 
+迁移门禁还会固定检查根布局显式保持 `ssr = true`、`csr = true`、`prerender = false`，生产构建使用 `@sveltejs/adapter-node`，旧书签兼容入口必须是服务端重定向，并禁止 V2 页面恢复 `onMount`、SSE、WebSocket 或 `setInterval` 等浏览器轮询运行时。旧 `webui/` 的存在只代表可回滚构建，不代表它参与默认部署；默认 systemd、Docker 和 CI 入口均以 `webui-v2/` 为准。
+
 `src/routes/api/[...path]/+server.ts` 只允许代理 `/api/v1/*` 与 `/api/v2/*`，通过流式上限限制请求体，移除 hop-by-hop、Origin、Referer、Authorization、API Key 和 Host 等头。Go 后端仍是唯一认证、权限、限流和业务状态边界。SvelteKit form action 默认启用同源 Origin 校验。
 
 ## 应用壳层与导航
