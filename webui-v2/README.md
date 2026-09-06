@@ -1,6 +1,6 @@
 # Twilight V2 Web UI
 
-V2 是 Twilight 的默认 SvelteKit SSR 前端，使用 `@sveltejs/adapter-node` 运行。旧的 V1 `webui/` Next.js 实现只作为紧急回滚和迁移对照保留；V2 页面通过服务端 `load` 和 form action 连接同一个 Go API 与 PostgreSQL 数据。
+V2 是 Twilight 的默认 SvelteKit SSR 前端，使用 `@sveltejs/adapter-node` 运行。旧的 V1 `webui/` Next.js 实现只作为紧急回滚和迁移对照保留；V2 页面通过服务端 `load` 和 form action 连接同一个 Go API 与 PostgreSQL 数据。V2 根布局强制 SSR，应用壳层和响应式导航由 `src/lib/components/AppShell.svelte` 统一承载，业务页面不得重新实现会话导航。
 
 ## 开发
 
@@ -26,6 +26,8 @@ V2 是默认生产 WebUI。Linux + systemd 使用 `twilight-webui-v2.service` �
 管理员入口页、违规审计页、邀请系统页、求片管理页、注册码管理页和邮箱管理页均位于 `/(app)/admin`、`/(app)/admin/violations`、`/(app)/admin/invite`、`/(app)/admin/requests`、`/(app)/admin/regcodes`、`/(app)/admin/email`，使用 SSR 摘要/分页筛选和服务端表单操作。V1 仅作为整站回滚入口，不与 V2 共享页面状态。
 
 - Go 后端是唯一认证、权限、限流、审计和业务状态边界。
+- 根布局显式关闭 prerender；认证页面和管理员页面不会输出静态会话 HTML。
+- SSR API 转发使用 15 秒请求截止时间、响应大小上限和当前请求取消信号；超时只显示通用错误，不泄露上游诊断。
 - 认证 Cookie 只由服务端转发，浏览器脚本不持有 Bearer Token。
 - 当前用户与权限数据 no-store；没有跨用户共享缓存。
 - API JSON 响应有 8 MiB 读取上限，代理请求/响应使用 32 MiB 流式上限。

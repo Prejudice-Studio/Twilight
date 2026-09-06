@@ -64,6 +64,12 @@ webui-v2/
 4. 登录 action 只接受配置的会话 Cookie（默认 `twilight_session`），解析上游 `Set-Cookie` 时忽略后端 Domain，只向当前 V2 站点写 host-only、HttpOnly Cookie，避免跨域扩大 Cookie 作用范围。
 5. SSR 读取默认为 `no-store`。当前用户身份、权限和会话状态不能进入共享浏览器缓存。
 
+`src/lib/components/AppShell.svelte` 是唯一的应用壳层：它承载登录前后的站点标题、主导航、账号菜单、管理员分组导航和移动端滚动边界；`+layout.svelte` 不再复制导航或页面样式，只负责注入全局 CSS 并传入 SSR 子内容。`src/lib/app.css` 提供全局盒模型、字体、焦点可见性、最小视口和 reduced-motion 基线，各业务页继续拥有自己的局部布局，避免页面间互相污染。
+
+根布局显式设置 `ssr = true`、`csr = true`、`prerender = false`。这不是性能开关，而是身份安全约束：任何带会话的页面都必须由 adapter-node 在请求时渲染，不能因为未来新增路由或更换 adapter 被静态化。根 `+error.svelte` 只展示本地化通用错误文案，不回显 Go、Emby、数据库或文件系统错误原文。
+
+SSR 到 Go API 的请求共享 15 秒有界截止时间，并合并 SvelteKit 当前请求的取消信号；该信号传递到响应体读取阶段。上游无响应或响应体读取超时会被页面的通用错误状态吸收，不会让 Node worker 无限等待或把外部错误泄露给浏览器。该边界不修改后端 CORS 策略。
+
 `src/routes/api/[...path]/+server.ts` 只允许代理 `/api/v1/*` 与 `/api/v2/*`，通过流式上限限制请求体，移除 hop-by-hop、Origin、Referer、Authorization、API Key 和 Host 等头。Go 后端仍是唯一认证、权限、限流和业务状态边界。SvelteKit form action 默认启用同源 Origin 校验。
 
 ## 应用壳层与导航

@@ -82,6 +82,8 @@ Update docs in the same change when behavior changes.
 - `webui-v2/src/routes/(app)/admin/telegram-rebind-requests`: Admin-only SSR Telegram rebind review, paginated status filters, bulk review, and guarded approval revocation.
 - `webui-v2/src/routes/(app)/admin/email`: Admin-only SSR email verification review, paginated account status, maintenance actions, and sanitized SMTP testing.
 - `webui-v2/src/lib/server`: V2 server-only API proxy, bounded response parsing, and session forwarding.
+- `webui-v2/src/lib/components/AppShell.svelte`: V2 shared SSR application shell, navigation and responsive menu boundary.
+- `webui-v2/src/lib/app.css`: V2 global browser baseline, Firefox-safe focus/scroll defaults and reduced-motion rules.
 - `webui-v2/src/lib/navigation.ts`: Shared V2 primary/account/admin navigation metadata and active-path matching.
 - `webui-v2/src/lib/server/api.ts`: V2 SSR request boundary, Cookie forwarding, bounded streams, and same-origin API proxy.
 - `webui-v2/src/lib/types.ts`: V2 safe DTOs shared by server loads and Svelte pages.
@@ -185,6 +187,10 @@ Use this index before broad search. Line numbers drift, so search by function na
 ## Frontend Rules
 
 - V2 server loads/actions must use `webui-v2/src/lib/server/api.ts`; do not add browser-side naked `fetch` calls for authenticated app data. The legacy `webui/src/lib/api.ts` is only for the rollback frontend.
+- V2 root `+layout.ts` must keep `ssr = true` and `prerender = false`; authenticated pages must never become static output by adapter or route inference.
+- V2 root `+layout.svelte` only wires global CSS and `AppShell`; navigation, session-aware menu rendering and viewport-safe shell styles belong in `src/lib/components/AppShell.svelte`, not in individual routes.
+- V2 `+error.svelte` must render generic, localized status text and must not expose upstream errors, filesystem paths, cookies, tokens or raw exception messages.
+- V2 SSR API requests use the shared server boundary with a finite deadline that remains active during bounded response-body consumption. Do not add unbounded server-side `fetch` calls from route loads/actions.
 - V2 user-facing copy belongs in `webui-v2/src/lib/i18n.ts`; new locale-enabled V2 work must keep catalog keys stable. The JSON catalogs under `webui/src/locales` are legacy rollback resources.
 - Polling should check document visibility when useful and must clear intervals on unmount.
 - Dashboard Emby lines remain collapsed to an entry/count summary on the home page. Users may open the detail dialog to view the lines and trigger probing; loading or refreshing the line list must not automatically fan out one probe per line or issue an extra Emby status precheck.

@@ -3,6 +3,7 @@ import type { ApiEnvelope, UserInfo } from "$lib/types";
 
 const maxResponseBytes = 8 * 1024 * 1024;
 const maxProxyBodyBytes = 32 * 1024 * 1024;
+const serverRequestTimeoutMs = 15_000;
 
 const defaultBackendURL = "http://127.0.0.1:5000";
 
@@ -53,11 +54,18 @@ export async function apiRequest<T>(
   if (!cookie) headers.delete("cookie");
   headers.delete("authorization");
 
+  // Keep the deadline active while the response body is consumed. The
+  // browser request signal also lets SvelteKit cancel work after navigation.
+  const timeoutSignal = AbortSignal.timeout(serverRequestTimeoutMs);
+  const signals = [event.request.signal, init.signal, timeoutSignal].filter(Boolean) as AbortSignal[];
+  const signal = signals.length === 1 ? signals[0] : AbortSignal.any(signals);
+
   return fetch(backendRequestURL(path), {
     ...init,
     headers,
     redirect: "manual",
-    credentials: "include"
+    credentials: "include",
+    signal
   });
 }
 
