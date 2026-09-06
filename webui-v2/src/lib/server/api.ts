@@ -238,12 +238,15 @@ export async function proxyAPIRequest(event: RequestEvent): Promise<Response> {
   const body = hasBody && event.request.body ? limitedStream(event.request.body, maxProxyBodyBytes, overflow) : undefined;
 
   let upstream: Response;
+  const timeoutSignal = AbortSignal.timeout(serverRequestTimeoutMs);
+  const signal = AbortSignal.any([event.request.signal, timeoutSignal]);
   try {
     upstream = await fetch(backendRequestURL(`/api/${suffix}`), {
       method: event.request.method,
       headers,
       body,
       redirect: "manual",
+      signal,
       ...(body ? { duplex: "half" as const } : {})
     } as RequestInit & { duplex?: "half" });
   } catch {

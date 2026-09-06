@@ -68,7 +68,7 @@ webui-v2/
 
 根布局显式设置 `ssr = true`、`csr = true`、`prerender = false`。这不是性能开关，而是身份安全约束：任何带会话的页面都必须由 adapter-node 在请求时渲染，不能因为未来新增路由或更换 adapter 被静态化。根 `+error.svelte` 只展示本地化通用错误文案，不回显 Go、Emby、数据库或文件系统错误原文。
 
-SSR 到 Go API 的请求共享 15 秒有界截止时间，并合并 SvelteKit 当前请求的取消信号；该信号传递到响应体读取阶段。上游无响应或响应体读取超时会被页面的通用错误状态吸收，不会让 Node worker 无限等待或把外部错误泄露给浏览器。该边界不修改后端 CORS 策略。
+SSR 到 Go API 的请求以及同源 `/api/v1/*`、`/api/v2/*` 流式代理共享 15 秒有界截止时间，并合并 SvelteKit 当前请求的取消信号；该信号传递到响应体读取阶段。上游无响应或响应体读取超时会被页面/代理的通用错误状态吸收，不会让 Node worker 无限等待或把外部错误泄露给浏览器。该边界不修改后端 CORS 策略。
 
 `src/routes/api/[...path]/+server.ts` 只允许代理 `/api/v1/*` 与 `/api/v2/*`，通过流式上限限制请求体，移除 hop-by-hop、Origin、Referer、Authorization、API Key 和 Host 等头。Go 后端仍是唯一认证、权限、限流和业务状态边界。SvelteKit form action 默认启用同源 Origin 校验。
 
