@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/prejudice-studio/twilight/internal/migration"
+	"github.com/prejudice-studio/twilight/internal/playback"
 )
 
 const (
@@ -42,11 +44,14 @@ type migrationImportPlaybackRecord struct {
 }
 
 type MigrationImportSummary struct {
-	Users           int `json:"users"`
-	RuntimeLogs     int `json:"runtime_logs"`
-	AuditLogs       int `json:"audit_logs"`
-	RosterEntries   int `json:"telegram_roster"`
-	PlaybackRecords int `json:"playback_records"`
+	Users                   int `json:"users"`
+	RuntimeLogs             int `json:"runtime_logs"`
+	AuditLogs               int `json:"audit_logs"`
+	RosterEntries           int `json:"telegram_roster"`
+	PlaybackRecords         int `json:"playback_records"`
+	TrustedPlaybackEvents   int `json:"trusted_playback_events"`
+	TrustedPlaybackSegments int `json:"trusted_playback_segments"`
+	TrustedPlaybackDaily    int `json:"trusted_playback_daily"`
 }
 
 // ImportMigrationArchive replaces Twilight's persistent business snapshot in
@@ -132,6 +137,15 @@ RETURNING version`, string(stateBytes), nextVersion).Scan(&storedVersion)
 	if err := insertMigrationPlayback(ctx, tx, data.playbackRecords); err != nil {
 		return MigrationImportSummary{}, err
 	}
+	if err := insertMigrationTrustedPlaybackEvents(ctx, tx, data.trustedEvents); err != nil {
+		return MigrationImportSummary{}, err
+	}
+	if err := insertMigrationTrustedPlaybackSegments(ctx, tx, data.trustedSegments); err != nil {
+		return MigrationImportSummary{}, err
+	}
+	if err := insertMigrationTrustedPlaybackDaily(ctx, tx, data.trustedDaily); err != nil {
+		return MigrationImportSummary{}, err
+	}
 	if err := syncMigrationSequences(ctx, tx); err != nil {
 		return MigrationImportSummary{}, err
 	}
@@ -147,6 +161,7 @@ RETURNING version`, string(stateBytes), nextVersion).Scan(&storedVersion)
 	return MigrationImportSummary{
 		Users: len(state.Users), RuntimeLogs: len(data.runtimeLogs), AuditLogs: len(data.auditLogs),
 		RosterEntries: len(data.roster), PlaybackRecords: len(data.playbackRecords),
+		TrustedPlaybackEvents: len(data.trustedEvents), TrustedPlaybackSegments: len(data.trustedSegments), TrustedPlaybackDaily: len(data.trustedDaily),
 	}, nil
 }
 
@@ -157,6 +172,9 @@ type parsedMigrationData struct {
 	roster          map[string]TelegramRosterEntry
 	telegramRuntime migrationImportTelegramRuntime
 	playbackRecords []migrationImportPlaybackRecord
+	trustedEvents   []migrationTrustedPlaybackEvent
+	trustedSegments []migrationTrustedPlaybackSegment
+	trustedDaily    []migrationTrustedPlaybackDaily
 }
 
 func parseMigrationArchive(archive migration.Archive) (parsedMigrationData, error) {
@@ -185,6 +203,21 @@ func parseMigrationArchive(archive migration.Archive) (parsedMigrationData, erro
 	if err := decodeMigrationJSON(files["data/playback-records.json"], &result.playbackRecords); err != nil {
 		return parsedMigrationData{}, fmt.Errorf("invalid playback records: %w", err)
 	}
+	if content, ok := files["data/trusted-playback-events.json"]; ok {
+		if err := decodeMigrationJSON(content, &result.trustedEvents); err != nil {
+			return parsedMigrationData{}, fmt.Errorf("invalid trusted playback events: %w", err)
+		}
+	}
+	if content, ok := files["data/trusted-playback-segments.json"]; ok {
+		if err := decodeMigrationJSON(content, &result.trustedSegments); err != nil {
+			return parsedMigrationData{}, fmt.Errorf("invalid trusted playback segments: %w", err)
+		}
+	}
+	if content, ok := files["data/trusted-playback-daily.json"]; ok {
+		if err := decodeMigrationJSON(content, &result.trustedDaily); err != nil {
+			return parsedMigrationData{}, fmt.Errorf("invalid trusted playback daily buckets: %w", err)
+		}
+	}
 	if err := validateMigrationData(result); err != nil {
 		return parsedMigrationData{}, err
 	}
@@ -211,7 +244,7 @@ func decodeMigrationJSON(data []byte, destination any) error {
 }
 
 func validateMigrationData(data parsedMigrationData) error {
-	if len(data.state.Users) > maxImportedUsers || len(data.runtimeLogs) > maxImportedRuntimeRows || len(data.auditLogs) > maxImportedAuditRows || len(data.roster) > maxImportedRosterEntries || len(data.playbackRecords) > maxImportedPlaybackRows {
+	if len(data.state.Users) > maxImportedUsers || len(data.runtimeLogs) > maxImportedRuntimeRows || len(data.auditLogs) > maxImportedAuditRows || len(data.roster) > maxImportedRosterEntries || len(data.playbackRecords) > maxImportedPlaybackRows || len(data.trustedEvents) > maxImportedPlaybackRows || len(data.trustedSegments) > maxImportedPlaybackRows || len(data.trustedDaily) > maxImportedPlaybackRows {
 		return fmt.Errorf("migration data exceeds row limits")
 	}
 	if data.telegramRuntime.UpdateOffset < 0 {
@@ -257,11 +290,14 @@ func validateMigrationData(data parsedMigrationData) error {
 			return fmt.Errorf("invalid audit log entry")
 		}
 	}
+	if err := validateTrustedPlaybackMigrationData(data); err != nil {
+		return err
+	}
 	return nil
 }
 
 func truncateMigrationTables(ctx context.Context, tx *sql.Tx) error {
-	_, err := tx.ExecContext(ctx, `TRUNCATE TABLE twilight_runtime_logs, twilight_audit_logs, twilight_telegram_roster, twilight_telegram_runtime, twilight_playback_records RESTART IDENTITY`)
+	_, err := tx.ExecContext(ctx, `TRUNCATE TABLE twilight_runtime_logs, twilight_audit_logs, twilight_telegram_roster, twilight_telegram_runtime, twilight_playback_records, twilight_playback_events, twilight_playback_segments, twilight_playback_daily RESTART IDENTITY`)
 	return err
 }
 
@@ -334,6 +370,52 @@ func insertMigrationPlayback(ctx context.Context, tx *sql.Tx, entries []migratio
 	return nil
 }
 
+func insertMigrationTrustedPlaybackEvents(ctx context.Context, tx *sql.Tx, entries []migrationTrustedPlaybackEvent) error {
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO twilight_playback_events (uid, event_id, playback_id, device_id, item_id, title, series_name, media_type, event_type, event_at, received_at, sequence, time_zone, source, payload_hash, applied_seconds, finalized, processed_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, entry := range entries {
+		hash := entry.PayloadHash
+		if hash == "" {
+			hash = migrationTrustedPlaybackPayloadHash(entry)
+		}
+		if _, err := stmt.ExecContext(ctx, entry.UID, entry.EventID, entry.PlaybackID, entry.DeviceID, entry.ItemID, entry.Title, entry.SeriesName, entry.MediaType, entry.EventType, entry.EventAt, entry.ReceivedAt, entry.Sequence, entry.TimeZone, entry.Source, hash, entry.AppliedSeconds, entry.Finalized, entry.ProcessedAt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func insertMigrationTrustedPlaybackSegments(ctx context.Context, tx *sql.Tx, entries []migrationTrustedPlaybackSegment) error {
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO twilight_playback_segments (uid, playback_id, device_id, item_id, title, series_name, media_type, started_at, last_at, ended_at, duration, status, last_sequence, time_zone, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, entry := range entries {
+		if _, err := stmt.ExecContext(ctx, entry.UID, entry.PlaybackID, entry.DeviceID, entry.ItemID, entry.Title, entry.SeriesName, entry.MediaType, entry.StartedAt, entry.LastAt, entry.EndedAt, entry.Duration, entry.Status, entry.LastSequence, entry.TimeZone, entry.UpdatedAt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func insertMigrationTrustedPlaybackDaily(ctx context.Context, tx *sql.Tx, entries []migrationTrustedPlaybackDaily) error {
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO twilight_playback_daily (uid, day, time_zone, seconds, updated_at) VALUES ($1, $2, $3, $4, $5)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, entry := range entries {
+		if _, err := stmt.ExecContext(ctx, entry.UID, entry.Day, entry.TimeZone, entry.Seconds, entry.UpdatedAt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func syncMigrationSequences(ctx context.Context, tx *sql.Tx) error {
 	for _, table := range []string{"twilight_runtime_logs", "twilight_audit_logs", "twilight_playback_records"} {
 		query := `SELECT setval(pg_get_serial_sequence('` + table + `', 'id'), COALESCE((SELECT MAX(id) FROM ` + table + `), 1), (SELECT MAX(id) IS NOT NULL FROM ` + table + `))`
@@ -367,4 +449,132 @@ func nextPositiveID[T any](entries []T, id func(T) int64) int64 {
 		}
 	}
 	return maxID + 1
+}
+
+func validateTrustedPlaybackMigrationData(data parsedMigrationData) error {
+	knownUsers := data.state.Users
+	eventKeys := make(map[string]struct{}, len(data.trustedEvents))
+	segmentKeys := make(map[string]struct{}, len(data.trustedSegments))
+	dailyKeys := make(map[string]struct{}, len(data.trustedDaily))
+	for _, entry := range data.trustedEvents {
+		if _, ok := knownUsers[entry.UID]; !ok || entry.UID <= 0 || strings.TrimSpace(entry.EventID) == "" || strings.TrimSpace(entry.PlaybackID) == "" || entry.EventAt <= 0 || entry.ReceivedAt <= 0 || entry.ProcessedAt <= 0 || entry.Sequence < 0 || entry.AppliedSeconds < 0 || entry.AppliedSeconds > playback.MaxSegmentSeconds || !validMigrationPlaybackEventType(entry.EventType) || !validMigrationPlaybackSource(entry.Source) || !validMigrationPlaybackTimeZone(entry.TimeZone) {
+			return fmt.Errorf("invalid trusted playback event")
+		}
+		if err := validateMigrationPlaybackText(entry.EventID, 128); err != nil {
+			return err
+		}
+		for _, value := range []struct {
+			name  string
+			value string
+			limit int
+		}{{"playback_id", entry.PlaybackID, 256}, {"device_id", entry.DeviceID, 256}, {"item_id", entry.ItemID, 256}, {"title", entry.Title, 1024}, {"series_name", entry.SeriesName, 1024}, {"media_type", entry.MediaType, 32}} {
+			if err := validateMigrationPlaybackText(value.value, value.limit); err != nil {
+				return fmt.Errorf("invalid trusted playback event %s: %w", value.name, err)
+			}
+		}
+		expectedHash := migrationTrustedPlaybackPayloadHash(entry)
+		if entry.PayloadHash != "" {
+			decoded, err := hex.DecodeString(entry.PayloadHash)
+			if err != nil || len(decoded) != 32 || !strings.EqualFold(entry.PayloadHash, expectedHash) {
+				return fmt.Errorf("invalid trusted playback event payload hash")
+			}
+		}
+		key := entry.EventID + "\x00" + fmt.Sprint(entry.UID)
+		if _, exists := eventKeys[key]; exists {
+			return fmt.Errorf("duplicate trusted playback event")
+		}
+		eventKeys[key] = struct{}{}
+	}
+	for _, entry := range data.trustedSegments {
+		if _, ok := knownUsers[entry.UID]; !ok || entry.UID <= 0 || strings.TrimSpace(entry.PlaybackID) == "" || strings.TrimSpace(entry.DeviceID) == "" || entry.StartedAt <= 0 || entry.LastAt < entry.StartedAt || entry.EndedAt < 0 || entry.Duration < 0 || entry.Duration > playback.MaxSegmentSeconds || entry.LastSequence < 0 || !validMigrationPlaybackSegmentStatus(entry.Status) || !validMigrationPlaybackTimeZone(entry.TimeZone) {
+			return fmt.Errorf("invalid trusted playback segment")
+		}
+		for _, value := range []struct {
+			name  string
+			value string
+			limit int
+		}{{"playback_id", entry.PlaybackID, 256}, {"device_id", entry.DeviceID, 256}, {"item_id", entry.ItemID, 256}, {"title", entry.Title, 1024}, {"series_name", entry.SeriesName, 1024}, {"media_type", entry.MediaType, 32}} {
+			if err := validateMigrationPlaybackText(value.value, value.limit); err != nil {
+				return fmt.Errorf("invalid trusted playback segment %s: %w", value.name, err)
+			}
+		}
+		key := fmt.Sprintf("%d\x00%s\x00%s", entry.UID, entry.PlaybackID, entry.DeviceID)
+		if _, exists := segmentKeys[key]; exists {
+			return fmt.Errorf("duplicate trusted playback segment")
+		}
+		segmentKeys[key] = struct{}{}
+	}
+	for _, entry := range data.trustedDaily {
+		if _, ok := knownUsers[entry.UID]; !ok || entry.UID <= 0 || entry.Seconds <= 0 || entry.UpdatedAt <= 0 || !validMigrationPlaybackDay(entry.Day) || !validMigrationPlaybackTimeZone(entry.TimeZone) {
+			return fmt.Errorf("invalid trusted playback daily bucket")
+		}
+		key := fmt.Sprintf("%d\x00%s\x00%s", entry.UID, entry.Day, entry.TimeZone)
+		if _, exists := dailyKeys[key]; exists {
+			return fmt.Errorf("duplicate trusted playback daily bucket")
+		}
+		dailyKeys[key] = struct{}{}
+	}
+	return nil
+}
+
+func validateMigrationPlaybackText(value string, limit int) error {
+	if len(value) > limit {
+		return fmt.Errorf("trusted playback text exceeds limit")
+	}
+	for _, r := range value {
+		if r == '\x00' || r == '\r' || r == '\n' || r == '\t' || r < 0x20 {
+			return fmt.Errorf("trusted playback text contains control characters")
+		}
+	}
+	return nil
+}
+
+func validMigrationPlaybackEventType(value string) bool {
+	switch value {
+	case string(playback.EventStarted), string(playback.EventPlaying), string(playback.EventPaused), string(playback.EventResumed), string(playback.EventStopped), string(playback.EventCompleted), string(playback.EventExpired):
+		return true
+	default:
+		return false
+	}
+}
+
+func validMigrationPlaybackSegmentStatus(value string) bool {
+	switch value {
+	case string(playback.EventPlaying), string(playback.EventPaused), string(playback.EventStopped), string(playback.EventCompleted), string(playback.EventExpired):
+		return true
+	default:
+		return false
+	}
+}
+
+func validMigrationPlaybackSource(value string) bool {
+	switch value {
+	case "client", "emby", "server", "scheduler":
+		return true
+	default:
+		return false
+	}
+}
+
+func validMigrationPlaybackTimeZone(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	_, err := time.LoadLocation(value)
+	return err == nil
+}
+
+func validMigrationPlaybackDay(value string) bool {
+	parsed, err := time.Parse("2006-01-02", value)
+	return err == nil && parsed.Format("2006-01-02") == value
+}
+
+func migrationTrustedPlaybackPayloadHash(entry migrationTrustedPlaybackEvent) string {
+	return trustedPlaybackPayloadHash(playback.Event{
+		UID: entry.UID, EventID: entry.EventID, PlaybackID: entry.PlaybackID,
+		DeviceID: entry.DeviceID, ItemID: entry.ItemID, Title: entry.Title,
+		SeriesName: entry.SeriesName, MediaType: entry.MediaType,
+		Type: playback.EventType(entry.EventType), At: entry.EventAt,
+		ReceivedAt: entry.ReceivedAt, Sequence: entry.Sequence, TimeZone: entry.TimeZone,
+	}, entry.Source)
 }

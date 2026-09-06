@@ -70,6 +70,18 @@ func (s *Store) ExportMigrationFiles(ctx context.Context) ([]migration.InputFile
 	if err != nil {
 		return nil, err
 	}
+	trustedEvents, err := migrationTrustedPlaybackEventsTx(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	trustedSegments, err := migrationTrustedPlaybackSegmentsTx(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	trustedDaily, err := migrationTrustedPlaybackDailyTx(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -97,6 +109,9 @@ func (s *Store) ExportMigrationFiles(ctx context.Context) ([]migration.InputFile
 		{name: "data/telegram-roster.json", value: roster},
 		{name: "data/telegram-runtime.json", value: telegramRuntime},
 		{name: "data/playback-records.json", value: playbackRecords},
+		{name: "data/trusted-playback-events.json", value: trustedEvents},
+		{name: "data/trusted-playback-segments.json", value: trustedSegments},
+		{name: "data/trusted-playback-daily.json", value: trustedDaily},
 	}
 	for _, item := range additional {
 		data, marshalErr := json.Marshal(item.value)
@@ -217,6 +232,78 @@ FROM twilight_playback_records ORDER BY id ASC`)
 	for rows.Next() {
 		var entry migrationPlaybackRecord
 		if err := rows.Scan(&entry.ID, &entry.UID, &entry.ItemID, &entry.Title, &entry.SeriesName, &entry.MediaType, &entry.IndexNumber, &entry.Duration, &entry.PlayedAt, &entry.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, entry)
+	}
+	return result, rows.Err()
+}
+
+func migrationTrustedPlaybackEventsTx(ctx context.Context, tx *sql.Tx) ([]migrationTrustedPlaybackEvent, error) {
+	rows, err := tx.QueryContext(ctx, `
+SELECT uid, event_id, playback_id, device_id, item_id, title, series_name,
+       media_type, event_type, event_at, received_at, sequence, time_zone,
+       source, payload_hash, applied_seconds, finalized, processed_at
+FROM twilight_playback_events ORDER BY uid ASC, event_at ASC, event_id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]migrationTrustedPlaybackEvent, 0)
+	for rows.Next() {
+		var entry migrationTrustedPlaybackEvent
+		if err := rows.Scan(
+			&entry.UID, &entry.EventID, &entry.PlaybackID, &entry.DeviceID, &entry.ItemID,
+			&entry.Title, &entry.SeriesName, &entry.MediaType, &entry.EventType,
+			&entry.EventAt, &entry.ReceivedAt, &entry.Sequence, &entry.TimeZone,
+			&entry.Source, &entry.PayloadHash, &entry.AppliedSeconds, &entry.Finalized,
+			&entry.ProcessedAt,
+		); err != nil {
+			return nil, err
+		}
+		result = append(result, entry)
+	}
+	return result, rows.Err()
+}
+
+func migrationTrustedPlaybackSegmentsTx(ctx context.Context, tx *sql.Tx) ([]migrationTrustedPlaybackSegment, error) {
+	rows, err := tx.QueryContext(ctx, `
+SELECT uid, playback_id, device_id, item_id, title, series_name, media_type,
+       started_at, last_at, ended_at, duration, status, last_sequence,
+       time_zone, updated_at
+FROM twilight_playback_segments ORDER BY uid ASC, updated_at ASC, playback_id ASC, device_id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]migrationTrustedPlaybackSegment, 0)
+	for rows.Next() {
+		var entry migrationTrustedPlaybackSegment
+		if err := rows.Scan(
+			&entry.UID, &entry.PlaybackID, &entry.DeviceID, &entry.ItemID, &entry.Title,
+			&entry.SeriesName, &entry.MediaType, &entry.StartedAt, &entry.LastAt,
+			&entry.EndedAt, &entry.Duration, &entry.Status, &entry.LastSequence,
+			&entry.TimeZone, &entry.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		result = append(result, entry)
+	}
+	return result, rows.Err()
+}
+
+func migrationTrustedPlaybackDailyTx(ctx context.Context, tx *sql.Tx) ([]migrationTrustedPlaybackDaily, error) {
+	rows, err := tx.QueryContext(ctx, `
+SELECT uid, day, time_zone, seconds, updated_at
+FROM twilight_playback_daily ORDER BY uid ASC, day ASC, time_zone ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]migrationTrustedPlaybackDaily, 0)
+	for rows.Next() {
+		var entry migrationTrustedPlaybackDaily
+		if err := rows.Scan(&entry.UID, &entry.Day, &entry.TimeZone, &entry.Seconds, &entry.UpdatedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, entry)

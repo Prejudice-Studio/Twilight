@@ -82,7 +82,9 @@ payload.enc
 - `twilight_telegram_runtime` 更新游标
 - `twilight_playback_records` 全量播放记录（包含数据库行 ID 和创建时间）
 
-结果被拆为 `data/state.json`、`data/runtime-logs.json`、`data/audit-logs.json`、`data/telegram-roster.json`、`data/telegram-runtime.json` 和 `data/playback-records.json`，再交由 `internal/migration.Create` 生成 ZIP。主状态中的兼容性日志字段会在导出前移除，避免同一行被导入两次；播放记录兼容切片保留给历史读取者，完整独立表另行导出。
+结果被拆为 `data/state.json`、`data/runtime-logs.json`、`data/audit-logs.json`、`data/telegram-roster.json`、`data/telegram-runtime.json`、`data/playback-records.json`、`data/trusted-playback-events.json`、`data/trusted-playback-segments.json` 和 `data/trusted-playback-daily.json`，再交由 `internal/migration.Create` 生成 ZIP。主状态中的兼容性日志字段会在导出前移除，避免同一行被导入两次；播放记录兼容切片保留给历史读取者，完整独立表另行导出。可信观看事件、播放段和日桶在同一 PostgreSQL 快照中读取，导入时在同一个 Serializable 事务内恢复。
+
+旧版迁移包可以缺少后三个可信观看文件，导入器会按空集合兼容处理；新生成的迁移包始终包含这三个文件。导入器会校验 UID 必须存在于 `state.json`、事件/播放段/日桶主键不能重复、状态/来源/时区合法、字段长度和控制字符受限，并校验事件 `payload_hash` 与事件字段一致，拒绝伪造或不完整的统计数据。
 
 ## 静态资源收集
 
@@ -121,7 +123,7 @@ payload.enc
 
 导入字段包括 `password`、`preview`、`apply_config` 和 `resource_mode`。`resource_mode=preserve`（默认）遇到不同内容的资源时只报告冲突；`resource_mode=replace` 需要管理员确认后覆盖。数据库导入失败会回滚数据库和已写入的资源，配置应用失败也会恢复原配置。V2 页面在服务端完成上传转发，预览结果只返回摘要和冲突路径；确认导入时必须重新选择归档文件，不把归档或密码放入浏览器状态。
 
-`internal/store.Store.ImportMigrationArchive` 已提供数据恢复基础。它要求归档先经过 `migration.Open`，随后在一个可回滚的 Serializable 事务中替换主状态、运行日志、审计日志、Telegram 花名册、Telegram 更新游标和完整播放记录，并重建自增序列与播放记录的有限内存兼容窗口。数据库失败时事务不会留下半套状态；方法成功提交后才更新 Store 内存快照。当前恢复核心不触碰 `twilight_sessions`，也不会把 `config/*` 或 `resources/*` 直接写入文件系统。
+`internal/store.Store.ImportMigrationArchive` 已提供数据恢复基础。它要求归档先经过 `migration.Open`，随后在一个可回滚的 Serializable 事务中替换主状态、运行日志、审计日志、Telegram 花名册、Telegram 更新游标、完整播放记录和可信观看三张表，并重建自增序列与播放记录的有限内存兼容窗口。数据库失败时事务不会留下半套状态；方法成功提交后才更新 Store 内存快照。当前恢复核心不触碰 `twilight_sessions`，也不会把 `config/*` 或 `resources/*` 直接写入文件系统。
 
 恢复前仍必须由上层完成格式、密码、版本、资源、配置和冲突预检，并在最终确认后调用。不要把 `ImportMigrationArchive` 暴露为无需管理员权限的通用 Store 操作。
 

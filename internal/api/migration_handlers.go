@@ -32,6 +32,18 @@ var migrationDataFileNames = map[string]struct{}{
 	"data/telegram-roster.json":  {},
 	"data/telegram-runtime.json": {},
 	"data/playback-records.json": {},
+	"data/trusted-playback-events.json":   {},
+	"data/trusted-playback-segments.json": {},
+	"data/trusted-playback-daily.json":    {},
+}
+
+var migrationRequiredDataFileNames = map[string]struct{}{
+	"data/state.json":            {},
+	"data/runtime-logs.json":     {},
+	"data/audit-logs.json":       {},
+	"data/telegram-roster.json":  {},
+	"data/telegram-runtime.json": {},
+	"data/playback-records.json": {},
 }
 
 var errMigrationResourceConflict = errors.New("migration resource conflict")
@@ -305,7 +317,7 @@ func validateMigrationArchiveFiles(archive migration.Archive) error {
 			return fmt.Errorf("unsupported migration file kind")
 		}
 	}
-	for path := range migrationDataFileNames {
+	for path := range migrationRequiredDataFileNames {
 		if _, ok := archive.Files[path]; !ok {
 			return fmt.Errorf("missing migration data file %q", path)
 		}
