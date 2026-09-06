@@ -56,6 +56,8 @@
 
 管理员列表接口 `GET /admin/regcodes` 支持 `?source=admin|invite` 筛选参数。后端 `handleListRegcodes` 中，`sourceFilter=admin` 会匹配显式 `"admin"` 和历史空值；`sourceFilter=invite` 仅匹配 `"invite"`。
 
+管理员注册码页面默认由 `webui-v2` 的 SSR 路由提供。页面标题、生成结果、筛选、列表和使用记录使用共享 `PageHeader` / `Panel` 结构；生成、编辑、删除、批量删除和使用记录清理仍通过服务端 form action 提交，注册码及使用者信息不会进入客户端缓存或 URL 之外的持久状态。
+
 ### 取值校验与规范化
 
 创建接口 `handleCreateRegcodes`（`internal/api/regcode_handlers.go`）的校验口径：
