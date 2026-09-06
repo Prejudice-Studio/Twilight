@@ -149,6 +149,11 @@ for (const [label, path, expected] of productionEntrypoints) {
   }
 }
 
+const nginxConfig = await readFile(join(projectRoot, "..", "deploy", "nginx-twilight.conf"), "utf8");
+if (!/location\s*=\s*\/_app\/version\.json\s*\{[\s\S]*?proxy_hide_header\s+Cache-Control;[\s\S]*?add_header\s+Cache-Control\s+"no-store"\s+always;/i.test(nginxConfig)) {
+  throw new Error("deploy/nginx-twilight.conf must keep /_app/version.json out of browser caches");
+}
+
 const forbidden = /(?:from\s*["'](?:react|next|zustand)(?:\/|["'])|require\(\s*["'](?:react|next|zustand))/;
 const forbiddenClientRuntime = /\b(?:onMount|EventSource|WebSocket|setInterval)\b/;
 const directFetch = /\bfetch\s*\(/;

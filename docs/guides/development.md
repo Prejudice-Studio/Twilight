@@ -224,7 +224,7 @@ Twilight 不对 Cookie 鉴权的变更类请求做 CSRF 令牌校验，也不做
 - API 响应解析由 V2 `webui-v2/src/lib/server/api.ts` 通过有界流读取，最大接受 8 MiB 的 JSON 响应；代理请求/响应使用 32 MiB 流式上限。读取过程中超过上限会取消流并拒绝解析，错误诊断必须带实际请求版本（`/api/v1` 或 `/api/v2`），不能把 V2 请求误报为 V1。V1 浏览器包装器只为回滚保留。
 - 绑定码、状态卡片等轮询必须在页面不可见时暂停请求并中断在途请求，回到前台再按上次执行时间补跑；绑定码 TTL / deadline 可继续计时，但后台页签不应持续打状态接口。
 - 仪表盘加载 Emby 线路时只读取线路列表，主页只显示线路入口和数量摘要；用户打开详情后才能查看具体线路。系统不自动发起逐线路探测，也不为测速额外预检 Emby 状态，测速由用户在详情中主动触发，避免首屏形成随线路数量增长的 N+1 请求。
-- V2 只对 `/_app/immutable/` 下的哈希静态资源设置长期缓存；`/_app/version.json`、其它 `/_app/` 资源、SSR HTML、form action 和会话页面必须使用 `Cache-Control: no-store`。不要让反向代理覆盖这个区分。
+- V2 只对 `/_app/immutable/` 下的哈希静态资源设置长期缓存；`/_app/version.json`、其它 `/_app/` 资源、SSR HTML、form action 和会话页面必须使用 `Cache-Control: no-store`。由于 adapter-node 会在 SvelteKit `handle` 之前直接提供版本清单，默认 Nginx 必须使用精确的 `location = /_app/version.json` 覆盖上游缓存头；不要让反向代理覆盖这个区分。
 - 默认 `favicon.png` 应保持小尺寸和合理压缩，避免每个新访客为浏览器图标下载数百 KB 资源；需要高清品牌图时优先通过后台 `server_icon` 或环境变量覆盖。
 - 管理后台页面要优先使用稳定尺寸、可换行按钮、可横向滚动表格和移动端卡片视图，避免手机、平板或浏览器打开开发者工具后的窄比例下文字越界、按钮互相覆盖。
 - 共享 `Button`、`Input`、`Textarea`、`SelectTrigger` 原子控件统一使用 40px/36px 高度基线，并默认允许 `min-width: 0`、`max-width: 100%` 与安全断词；页面不得用移动端单独改高度的方式修补溢出，长表格应在自己的滚动区域内处理。

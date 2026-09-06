@@ -562,6 +562,7 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - Telegram's protocol wrapper must keep HTTP 429 `parameters.retry_after` semantics, classify refused 3xx responses before decoding their bodies, and apply the shared redirect policy and connection pool without introducing a separate `http.Client`.
 - The V2 root layout and SSR boundary must not add speculative cross-origin preconnects for private or optional upstreams. Add connection hints only for an actually configured, browser-visible origin and document the request-cost tradeoff.
 - V2 adapter-node and the default Nginx config give only `/_app/immutable/` hashed build assets a long immutable cache lifetime. SSR HTML, form actions, `/_app/version.json`, and other session-sensitive or version-sensitive resources remain `no-store`.
+- Because adapter-node serves `/_app/version.json` before SvelteKit `handle` hooks, the default Nginx config must keep an exact-match `location = /_app/version.json` before the generic `/_app/` block and force `Cache-Control: no-store`; never rely on `hooks.server.ts` alone for this asset.
 
 ## Rate Limit Rules
 
