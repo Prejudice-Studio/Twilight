@@ -92,7 +92,7 @@ func Apply(segment *Segment, event Event, now int64) (Result, error) {
 	if now <= 0 {
 		now = time.Now().Unix()
 	}
-	at := canonicalEventTime(event, now)
+	at := CanonicalEventTime(event, now)
 	if segment.UID == 0 {
 		segment.UID = event.UID
 	}
@@ -198,7 +198,10 @@ func validateEvent(event Event) error {
 	return nil
 }
 
-func canonicalEventTime(event Event, now int64) int64 {
+// CanonicalEventTime returns the event timestamp used by the state machine.
+// Persistence adapters should use the same value so reporting cannot observe
+// a future or otherwise different timestamp from the one used for duration.
+func CanonicalEventTime(event Event, now int64) int64 {
 	at := event.At
 	if at <= 0 {
 		at = event.ReceivedAt

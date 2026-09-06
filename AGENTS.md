@@ -44,7 +44,7 @@ Update docs in the same change when behavior changes.
 - `internal/api`: HTTP routes, auth, rate limits, response helpers, handlers, external clients, scheduler, admin operations, runtime APIs.
 - `internal/api/routes.go`: centralized route registration.
 - `internal/config`: `config.toml`, `config.local.toml`, and `TWILIGHT_*` environment loading.
-- `internal/store`: PostgreSQL persistence. Most business entities remain in the single `twilight_state` JSONB document; high-write audit logs, runtime logs, sessions, playback records, the Telegram roster, and the Telegram update cursor use dedicated tables. `Store` is constructed exclusively via `store.OpenPostgres`, so `s.db` is always non-nil. The `json` label survives only as a one-way export target in the database-migration panel and as the `migrate-json` import source; there is no JSON/file runtime backend, no flock, and no `.bak`/sidecar state files.
+- `internal/store`: PostgreSQL persistence. Most business entities remain in the single `twilight_state` JSONB document; high-write audit logs, runtime logs, sessions, legacy playback records, trusted playback events/segments/daily buckets, the Telegram roster, and the Telegram update cursor use dedicated tables. `Store` is constructed exclusively via `store.OpenPostgres`, so `s.db` is always non-nil. The `json` label survives only as a one-way export target in the database-migration panel and as the `migrate-json` import source; there is no JSON/file runtime backend, no flock, and no `.bak`/sidecar state files.
 - `internal/redis`: RESP client for shared sessions and rate limits.
 - `internal/security`: tokens, password hashing, and secure random helpers.
 - `internal/migration`: versioned Twilight ZIP export format, manifest integrity, bounded archive parsing, and Argon2id/AES-256-GCM payload protection. Keep this package independent from HTTP and filesystem writes; import/export orchestration belongs to API/store layers.
@@ -116,8 +116,9 @@ Update docs in the same change when behavior changes.
 | Scheduler | `scheduler*.go` | `SchedulerRun` | `/admin/scheduler/*` | `admin/scheduler` | `backend.md` |
 | Config/runtime/database | `config_admin.go`, `runtime_logs.go`, `database_admin.go` | runtime logs/state | `/system/admin/*` | admin config/logs/database | `backend.md` |
 | Twilight migration core | `internal/migration`, `internal/api/migration_resources.go`, `migration_handlers.go` | versioned archive format, validated data/config/resource files, and admin preview/import/export boundary | `/api/v1/system/admin/migration/*` | `admin/migration` | `data-migration.md`, `backend-api.md` |
-| Viewing events/statistics | `internal/playback`, future playback repository/API adapters | trusted event state machine and rebuildable daily buckets; persistence/API integration must remain separate from domain rules | `/api/v2/playback/*` (when enabled) | future V2 playback views | `v2/playback-events.md`, `v2/architecture.md` |
-| Emby activity logs / playback records | `emby_activity.go` | `playback.go` | `/admin/emby/activity-logs` | `admin/emby` | `backend-api.md` |
+| Viewing events/statistics | `internal/playback` rules + `internal/store/trusted_playback.go` persistence adapter | trusted event state machine and rebuildable daily buckets; HTTP/API exposure remains a separate authenticated layer | `/api/v2/playback/*` (when enabled) | future V2 playback views | `v2/playback-events.md`, `v2/architecture.md` |
+| Emby activity logs / legacy playback records | `emby_activity.go` | `playback.go` | `/admin/emby/activity-logs` | `admin/emby` | `backend-api.md` |
+| Trusted viewing statistics | `internal/playback` rules + `internal/store/trusted_playback.go` repository adapter | `trusted_playback.go` and `twilight_playback_*` tables | `/api/v2/playback/*` when enabled | future V2 playback views | `v2/playback-events.md`, `v2/data-migration.md` |
 | Developer JS | `developer_handlers.go`, `telegram_js*.go` | developer mode flag | `/admin/developer/*` | `admin/developer` | `developer-js.md` |
 
 ## Backend Rules
@@ -684,7 +685,7 @@ DB-backed tests that open a `Store` must register `t.Cleanup(func() { _ = st.Clo
 Example (PowerShell):
 
 ```powershell
-$env:TWILIGHT_TEST_DSN = "postgres://twilight:secret@127.0.0.1:5432/twilight_test?sslmode=disable"
+$env:TWILIGHT_TEST_DSN = "postgres://<user>:<password>@<host>:<port>/<database>?sslmode=disable"
 go test -p 1 ./...
 ```
 

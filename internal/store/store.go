@@ -1053,46 +1053,56 @@ func (s *Store) saveStateLocked(force bool) error {
 	// 还原到 snapshot），磁盘和内存仍保持一致。
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if force {
-		// 强制覆盖：无视持久层现有 version，把它推进到「本进程读到值 +1」。
-		// RETURNING 回填本地版本，使后续守卫写以此为新基线。
-		var newVersion int64
-		err = s.db.QueryRowContext(
-			ctx,
-			`INSERT INTO twilight_state (id, state, version, updated_at) VALUES (1, $1::jsonb, $2, now())
-			 ON CONFLICT (id) DO UPDATE SET state = EXCLUDED.state, version = twilight_state.version + 1, updated_at = now()
-			 RETURNING version`,
-			string(data), s.stateVersion+1,
-		).Scan(&newVersion)
-		if err != nil {
-			return err
-		}
-		s.stateVersion = newVersion
-		s.stateRaw = data
-		return nil
-	}
-	// 版本守卫写：仅当持久层 version 仍等于本进程读到的 s.stateVersion 时才更新，
-	// 命中即 version+1 并 RETURNING；被他进程抢先递增则 UPDATE 匹配 0 行、
-	// QueryRow 得 sql.ErrNoRows，转成 errStateVersionConflict 交调用方重试 / 上抛。
-	// id=1 尚不存在（冷启动首写）时 INSERT 分支生效，version 落为期望值。
-	var newVersion int64
-	err = s.db.QueryRowContext(
-		ctx,
-		`INSERT INTO twilight_state (id, state, version, updated_at) VALUES (1, $1::jsonb, $2, now())
-		 ON CONFLICT (id) DO UPDATE SET state = EXCLUDED.state, version = twilight_state.version + 1, updated_at = now()
-		 WHERE twilight_state.version = $3
-		 RETURNING version`,
-		string(data), s.stateVersion+1, s.stateVersion,
-	).Scan(&newVersion)
-	if errors.Is(err, sql.ErrNoRows) {
-		return errStateVersionConflict
-	}
+	newVersion, err := persistStateRow(ctx, s.db, data, s.stateVersion, force)
 	if err != nil {
 		return err
 	}
 	s.stateVersion = newVersion
 	s.stateRaw = data
 	return nil
+}
+
+// saveStateInTxLocked writes the current state through an existing
+// transaction. The caller updates stateVersion/stateRaw only after commit.
+func (s *Store) saveStateInTxLocked(ctx context.Context, tx *sql.Tx, force bool) ([]byte, int64, error) {
+	s.state.ensure()
+	data, err := json.Marshal(s.state)
+	if err != nil {
+		return nil, 0, err
+	}
+	newVersion, err := persistStateRow(ctx, tx, data, s.stateVersion, force)
+	if err != nil {
+		return nil, 0, err
+	}
+	return data, newVersion, nil
+}
+
+type stateRowWriter interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func persistStateRow(ctx context.Context, writer stateRowWriter, data []byte, stateVersion int64, force bool) (int64, error) {
+	var newVersion int64
+	if force {
+		err := writer.QueryRowContext(ctx,
+			`INSERT INTO twilight_state (id, state, version, updated_at) VALUES (1, $1::jsonb, $2, now())
+			 ON CONFLICT (id) DO UPDATE SET state = EXCLUDED.state, version = twilight_state.version + 1, updated_at = now()
+			 RETURNING version`,
+			string(data), stateVersion+1,
+		).Scan(&newVersion)
+		return newVersion, err
+	}
+	err := writer.QueryRowContext(ctx,
+		`INSERT INTO twilight_state (id, state, version, updated_at) VALUES (1, $1::jsonb, $2, now())
+		 ON CONFLICT (id) DO UPDATE SET state = EXCLUDED.state, version = twilight_state.version + 1, updated_at = now()
+		 WHERE twilight_state.version = $3
+		 RETURNING version`,
+		string(data), stateVersion+1, stateVersion,
+	).Scan(&newVersion)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, errStateVersionConflict
+	}
+	return newVersion, err
 }
 
 // refreshLocked 在每次写前从 PostgreSQL 全量拉取最新 state + version。多个 Twilight
@@ -2613,154 +2623,203 @@ func (s *Store) BindUserEmbyAtomicWithUpdate(uid int64, embyID, embyUsername str
 func (s *Store) DeleteUser(uid int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.mutateAndSaveLocked(func() error {
-		u, ok := s.state.Users[uid]
-		if !ok {
-			return ErrNotFound
+	const maxAttempts = 8
+	for attempt := 0; ; attempt++ {
+		if err := s.refreshLocked(); err != nil {
+			return err
 		}
-		s.maintainUserIndexes(u, User{}, uid)
-		delete(s.state.Users, uid)
+		previous, err := s.snapshotStateLocked()
+		if err != nil {
+			return err
+		}
+		if err := s.deleteUserStateLocked(uid); err != nil {
+			s.restoreStateLocked(previous)
+			return err
+		}
 
-		// API keys 与会话凭证：必须清理，否则用户被删后旧 key 仍可调用接口。
-		for id, key := range s.state.APIKeys {
-			if key.UID == uid {
-				delete(s.state.APIKeys, id)
-				// 同步摘除 hash 索引，保持其为现存 key 的准确超集（复核已能挡住陈旧项，
-				// 此处清理只为不留悬垂条目；save 失败回滚会整表重建）。
-				if s.apiKeyHashMap != nil && key.Hash != "" && s.apiKeyHashMap[key.Hash] == id {
-					delete(s.apiKeyHashMap, key.Hash)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err == nil {
+			var data []byte
+			var version int64
+			data, version, err = s.saveStateInTxLocked(ctx, tx, false)
+			if err == nil {
+				for _, table := range []string{"twilight_playback_events", "twilight_playback_segments", "twilight_playback_daily"} {
+					if _, err = tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE uid = $1", uid); err != nil {
+						break
+					}
 				}
 			}
+			if err == nil {
+				err = tx.Commit()
+			}
+			if err == nil {
+				s.stateVersion = version
+				s.stateRaw = data
+				cancel()
+				return nil
+			}
+			_ = tx.Rollback()
 		}
+		cancel()
+		s.restoreStateLocked(previous)
+		if errors.Is(err, errStateVersionConflict) && attempt < maxAttempts-1 {
+			continue
+		}
+		return err
+	}
+}
 
-		// 邀请码：邀请人 / 接收人任一为该用户都失效。
-		for code, invite := range s.state.InviteCodes {
-			if invite.InviterUID == uid || invite.UID == uid || invite.UsedByUID == uid {
-				delete(s.state.InviteCodes, code)
+// deleteUserStateLocked removes the user's JSON-backed business data. The
+// caller owns the store lock and must persist the result together with any
+// dedicated-table cleanup in one transaction.
+func (s *Store) deleteUserStateLocked(uid int64) error {
+	u, ok := s.state.Users[uid]
+	if !ok {
+		return ErrNotFound
+	}
+	s.maintainUserIndexes(u, User{}, uid)
+	delete(s.state.Users, uid)
+
+	// API keys 与会话凭证：必须清理，否则用户被删后旧 key 仍可调用接口。
+	for id, key := range s.state.APIKeys {
+		if key.UID == uid {
+			delete(s.state.APIKeys, id)
+			// 同步摘除 hash 索引，保持其为现存 key 的准确超集（复核已能挡住陈旧项，
+			// 此处清理只为不留悬垂条目；save 失败回滚会整表重建）。
+			if s.apiKeyHashMap != nil && key.Hash != "" && s.apiKeyHashMap[key.Hash] == id {
+				delete(s.apiKeyHashMap, key.Hash)
 			}
 		}
+	}
 
-		// 邀请关系：自身作为 child 与作为 parent 的关系都断开（避免邀请树留孤儿）。
-		delete(s.state.InviteRelations, uid)
-		for child, rel := range s.state.InviteRelations {
-			if rel.ParentUID == uid {
-				delete(s.state.InviteRelations, child)
+	// 邀请码：邀请人 / 接收人任一为该用户都失效。
+	for code, invite := range s.state.InviteCodes {
+		if invite.InviterUID == uid || invite.UID == uid || invite.UsedByUID == uid {
+			delete(s.state.InviteCodes, code)
+		}
+	}
+
+	// 邀请关系：自身作为 child 与作为 parent 的关系都断开（避免邀请树留孤儿）。
+	delete(s.state.InviteRelations, uid)
+	for child, rel := range s.state.InviteRelations {
+		if rel.ParentUID == uid {
+			delete(s.state.InviteRelations, child)
+		}
+	}
+
+	// 求片记录：用户撤销，待办求片随之消失。
+	for id, req := range s.state.MediaRequests {
+		if req.UID == uid {
+			delete(s.state.MediaRequests, id)
+		}
+	}
+
+	// 签到积分 / 历史。
+	delete(s.state.Signin, uid)
+
+	// 设备指纹：要必须清，否则同 UID 重新创建（管理员复用编号）会继承
+	// 旧设备的 trusted 标记，等价于"复用 UID 直接绕过设备校验"。
+	for id, dev := range s.state.Devices {
+		if dev.UID == uid {
+			delete(s.state.Devices, id)
+		}
+	}
+
+	// 登录日志：包含 IP / 设备名 / Country 等个人信息，按 GDPR 右擦除。
+	if len(s.state.LoginLogs) > 0 {
+		filtered := s.state.LoginLogs[:0]
+		for _, log := range s.state.LoginLogs {
+			if log.UID != uid {
+				filtered = append(filtered, log)
 			}
 		}
+		s.state.LoginLogs = filtered
+	}
 
-		// 求片记录：用户撤销，待办求片随之消失。
-		for id, req := range s.state.MediaRequests {
-			if req.UID == uid {
-				delete(s.state.MediaRequests, id)
+	// 播放记录。
+	if len(s.state.PlaybackRecords) > 0 {
+		filtered := s.state.PlaybackRecords[:0]
+		for _, p := range s.state.PlaybackRecords {
+			if p.UID != uid {
+				filtered = append(filtered, p)
 			}
 		}
+		s.state.PlaybackRecords = filtered
+	}
 
-		// 签到积分 / 历史。
-		delete(s.state.Signin, uid)
-
-		// 设备指纹：要必须清，否则同 UID 重新创建（管理员复用编号）会继承
-		// 旧设备的 trusted 标记，等价于"复用 UID 直接绕过设备校验"。
-		for id, dev := range s.state.Devices {
-			if dev.UID == uid {
-				delete(s.state.Devices, id)
-			}
+	// 待审/已审的换绑请求：业务对象随用户消亡。
+	// 注意：仅清理"作为申请者 UID"的记录；ReviewerUID 字段保留（审计轨迹）。
+	for id, req := range s.state.RebindRequests {
+		if req.UID == uid {
+			delete(s.state.RebindRequests, id)
 		}
+	}
 
-		// 登录日志：包含 IP / 设备名 / Country 等个人信息，按 GDPR 右擦除。
-		if len(s.state.LoginLogs) > 0 {
-			filtered := s.state.LoginLogs[:0]
-			for _, log := range s.state.LoginLogs {
-				if log.UID != uid {
-					filtered = append(filtered, log)
+	// 绑定码（注册/绑定 telegram 流程的临时 ticket）。
+	for code, bc := range s.state.BindCodes {
+		if bc.UID == uid {
+			delete(s.state.BindCodes, code)
+		}
+	}
+
+	// RegCode：删除用户时清理所有引用并回退 UseCount，释放被占用的码额度。
+	for code, rc := range s.state.RegCodes {
+		dirty := false
+		if rc.UsedBy == uid {
+			rc.UsedBy = 0
+			dirty = true
+		}
+		if len(rc.UsedByUIDs) > 0 {
+			pruned := rc.UsedByUIDs[:0]
+			for _, u := range rc.UsedByUIDs {
+				if u == uid {
+					if rc.UseCount > 0 {
+						rc.UseCount--
+					}
+					continue
 				}
+				pruned = append(pruned, u)
 			}
-			s.state.LoginLogs = filtered
-		}
-
-		// 播放记录。
-		if len(s.state.PlaybackRecords) > 0 {
-			filtered := s.state.PlaybackRecords[:0]
-			for _, p := range s.state.PlaybackRecords {
-				if p.UID != uid {
-					filtered = append(filtered, p)
+			if len(pruned) != len(rc.UsedByUIDs) {
+				if len(pruned) == 0 {
+					rc.UsedByUIDs = nil
+				} else {
+					rc.UsedByUIDs = pruned
 				}
-			}
-			s.state.PlaybackRecords = filtered
-		}
-
-		// 待审/已审的换绑请求：业务对象随用户消亡。
-		// 注意：仅清理"作为申请者 UID"的记录；ReviewerUID 字段保留（审计轨迹）。
-		for id, req := range s.state.RebindRequests {
-			if req.UID == uid {
-				delete(s.state.RebindRequests, id)
-			}
-		}
-
-		// 绑定码（注册/绑定 telegram 流程的临时 ticket）。
-		for code, bc := range s.state.BindCodes {
-			if bc.UID == uid {
-				delete(s.state.BindCodes, code)
-			}
-		}
-
-		// RegCode：删除用户时清理所有引用并回退 UseCount，释放被占用的码额度。
-		for code, rc := range s.state.RegCodes {
-			dirty := false
-			if rc.UsedBy == uid {
-				rc.UsedBy = 0
 				dirty = true
 			}
-			if len(rc.UsedByUIDs) > 0 {
-				pruned := rc.UsedByUIDs[:0]
-				for _, u := range rc.UsedByUIDs {
-					if u == uid {
-						if rc.UseCount > 0 {
-							rc.UseCount--
-						}
-						continue
-					}
-					pruned = append(pruned, u)
-				}
-				if len(pruned) != len(rc.UsedByUIDs) {
-					if len(pruned) == 0 {
-						rc.UsedByUIDs = nil
-					} else {
-						rc.UsedByUIDs = pruned
-					}
-					dirty = true
-				}
-			}
-			if dirty {
-				if !rc.Active && rc.UseCountLimit != -1 && rc.UseCount < rc.UseCountLimit {
-					rc.Active = true
-				}
-				s.state.RegCodes[code] = rc
-			}
 		}
-
-		// 公告作者匿名化：公告本体不删，只清掉 CreatedByUID 引用。
-		for id, ann := range s.state.Announcements {
-			if ann.CreatedByUID == uid {
-				ann.CreatedByUID = 0
-				s.state.Announcements[id] = ann
+		if dirty {
+			if !rc.Active && rc.UseCountLimit != -1 && rc.UseCount < rc.UseCountLimit {
+				rc.Active = true
 			}
+			s.state.RegCodes[code] = rc
 		}
+	}
 
-		// 工单：用户删除时连带删除其提交的工单。
-		for id, ticket := range s.state.Tickets {
-			if ticket.UID == uid {
-				delete(s.state.Tickets, id)
-			}
+	// 公告作者匿名化：公告本体不删，只清掉 CreatedByUID 引用。
+	for id, ann := range s.state.Announcements {
+		if ann.CreatedByUID == uid {
+			ann.CreatedByUID = 0
+			s.state.Announcements[id] = ann
 		}
+	}
 
-		for key, entry := range s.state.BangumiCollectionCache {
-			if entry.UID == uid {
-				delete(s.state.BangumiCollectionCache, key)
-			}
+	// 工单：用户删除时连带删除其提交的工单。
+	for id, ticket := range s.state.Tickets {
+		if ticket.UID == uid {
+			delete(s.state.Tickets, id)
 		}
+	}
 
-		return nil
-	})
+	for key, entry := range s.state.BangumiCollectionCache {
+		if entry.UID == uid {
+			delete(s.state.BangumiCollectionCache, key)
+		}
+	}
+
+	return nil
 }
 
 func (s *Store) ListUsers() []User {

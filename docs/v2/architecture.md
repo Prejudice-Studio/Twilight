@@ -129,7 +129,7 @@ V2 前端实现约定：
 
 ## 6. 观看统计重构边界
 
-观看统计不是简单对 Emby session 做累加。当前已先建立无外部依赖的领域状态机 `internal/playback`；它是后续 PostgreSQL/API 适配器的唯一规则来源。V2 需要持久化规范化播放事件或可重建的播放段：`playback_id`、UID、Emby item、设备、事件类型、客户端事件时间、服务器接收时间、客户端序号和来源。
+观看统计不是简单对 Emby session 做累加。当前已建立无外部依赖的领域状态机 `internal/playback`，并由 `internal/store/trusted_playback.go` 通过 PostgreSQL 事务持久化；它是后续 API 适配器的唯一规则来源。持久化规范化播放事件和可重建播放段：`playback_id`、UID、Emby item、设备、事件类型、客户端事件时间、服务器接收时间、客户端序号和来源。
 
 状态机至少包括 `started`、`playing`、`paused`、`resumed`、`stopped`、`completed`、`expired`。服务端规则：
 
