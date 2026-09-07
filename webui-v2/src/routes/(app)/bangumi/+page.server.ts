@@ -45,9 +45,9 @@ export const load: PageServerLoad = async (event) => {
 };
 
 export const actions: Actions = {
-  sync: async (event) => mutate(event, "/api/v1/bangumi/sync/trigger", "POST", {}, "sync", t.bangumiSyncFailed),
+  sync: async (event) => mutate(event, "/api/v2/bangumi/sync", "POST", {}, "sync", t.bangumiSyncFailed),
 
-  clearHistory: async (event) => mutate(event, "/api/v1/bangumi/sync/history", "DELETE", undefined, "clear-history", t.bangumiClearFailed),
+  clearHistory: async (event) => mutate(event, "/api/v2/bangumi/sync/history", "DELETE", undefined, "clear-history", t.bangumiClearFailed),
 
   saveSettings: async (event) => {
     const form = await event.request.formData();
@@ -59,10 +59,10 @@ export const actions: Actions = {
     if (Object.keys(payload).length === 0) {
       return fail(400, { action: "settings", error: t.bangumiSettingsFailed } satisfies FormState);
     }
-    return mutate(event, "/api/v1/users/me", "PUT", payload, "settings", t.bangumiSettingsFailed);
+    return mutate(event, "/api/v2/bangumi/preferences", "PUT", payload, "settings", t.bangumiSettingsFailed);
   },
 
-  clearToken: async (event) => mutate(event, "/api/v1/users/me", "PUT", {
+  clearToken: async (event) => mutate(event, "/api/v2/bangumi/preferences", "PUT", {
     bgm_token: ""
   }, "clear-token", t.bangumiClearFailed)
 };

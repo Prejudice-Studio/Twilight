@@ -64,6 +64,7 @@ type v2BangumiCollectionResult struct {
 // partial Bangumi failure must not erase the local sync status or other cached
 // collection previews.
 func (a *App) handleV2BangumiSummary(w http.ResponseWriter, r *http.Request, _ Params) {
+	w.Header().Set("Cache-Control", "private, no-store")
 	u := current(r).User
 	logs := a.store().ListBangumiSyncLogs(u.UID, 50)
 	syncedCount := 0
@@ -122,6 +123,31 @@ func (a *App) handleV2BangumiSummary(w http.ResponseWriter, r *http.Request, _ P
 	summary.CollectionsPartial = partial
 	summary.RecentActivity = recentBangumiActivity(collections, 8)
 	ok(w, "OK", summary)
+}
+
+func (a *App) handleV2BangumiSync(w http.ResponseWriter, r *http.Request, p Params) {
+	w.Header().Set("Cache-Control", "private, no-store")
+	a.handleBangumiSyncTrigger(w, r, p)
+}
+
+func (a *App) handleV2BangumiClearHistory(w http.ResponseWriter, r *http.Request, p Params) {
+	w.Header().Set("Cache-Control", "private, no-store")
+	a.handleBangumiClearHistory(w, r, p)
+}
+
+func (a *App) handleV2BangumiPreferences(w http.ResponseWriter, r *http.Request, p Params) {
+	w.Header().Set("Cache-Control", "private, no-store")
+	a.handleUpdateMe(w, r, p)
+}
+
+func (a *App) handleV2BangumiCollections(w http.ResponseWriter, r *http.Request, p Params) {
+	w.Header().Set("Cache-Control", "private, no-store")
+	a.handleBangumiCollections(w, r, p)
+}
+
+func (a *App) handleV2UpdateBangumiCollection(w http.ResponseWriter, r *http.Request, p Params) {
+	w.Header().Set("Cache-Control", "private, no-store")
+	a.handleUpdateBangumiCollection(w, r, p)
 }
 
 func publicBangumiAccount(me map[string]any) v2BangumiAccount {

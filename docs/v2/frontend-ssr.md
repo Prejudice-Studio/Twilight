@@ -178,7 +178,7 @@ Telegram 注册绑定码生成使用独立的 `createBindCode` form action；启
 
 `/(app)/bangumi` 使用受保护的 `/api/v2/bangumi/summary` 生成首屏。摘要由 Go 后端一次返回本地同步状态、Bangumi 公开账号字段、五类收藏的数量和有限预览；收藏预览在后端并行读取并分别降级，某一类上游失败不会清空同步状态或其他分类。Token 仅在服务端向 Bangumi 发起请求时使用，既不写入 V2 envelope，也不进入浏览器脚本。
 
-`/(app)/bangumi/collections/[type]` 使用服务端 `load` 读取当前分类的受限分页，状态修改、同步、清理历史和 Token/开关设置使用 form action 转发至现有 Go handler。收藏页不加载五类完整集合，不在浏览器端复制用户收藏数据库；分页、标签展示和收藏状态最终以 Bangumi 响应及后端权限为准。页面使用响应式单列/多列布局、有限滚动和原生表单降级，刷新由用户主动触发。
+`/(app)/bangumi/collections/[type]` 使用服务端 `load` 读取 `/api/v2/bangumi/collections` 的当前分类受限分页，状态修改、同步、清理历史和 Token/开关设置使用 form action 进入 `/api/v2/bangumi/*`。收藏页不加载五类完整集合，不在浏览器端复制用户收藏数据库；分页、标签展示和收藏状态最终以 Bangumi 响应及后端权限为准。页面使用响应式单列/多列布局、有限滚动和原生表单降级，刷新由用户主动触发。
 
 ## 已迁移模块：用户求片中心
 

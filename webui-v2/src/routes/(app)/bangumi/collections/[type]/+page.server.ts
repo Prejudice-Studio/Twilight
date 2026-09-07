@@ -30,7 +30,7 @@ async function updateCollection(event: Parameters<NonNullable<Actions["update"]>
   }
   const payload: Record<string, unknown> = { type, rate };
   if (type === 3) payload.ep_status = episode;
-  const result = await apiJSONWithResponse(event, `/api/v1/bangumi/collections/${encodeURIComponent(subjectID)}`, {
+  const result = await apiJSONWithResponse(event, `/api/v2/bangumi/collections/${encodeURIComponent(subjectID)}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload)
@@ -53,7 +53,7 @@ export const load: PageServerLoad = async (event) => {
   const offset = (page - 1) * perPage;
   const query = new URLSearchParams({ type: String(type), limit: String(perPage), offset: String(offset) });
   if (["1", "true"].includes(event.url.searchParams.get("refresh") || "")) query.set("refresh", "1");
-  const result = await apiJSON<BangumiCollectionPage>(event, `/api/v1/bangumi/collections?${query.toString()}`, { cache: "no-store" });
+  const result = await apiJSON<BangumiCollectionPage>(event, `/api/v2/bangumi/collections?${query.toString()}`, { cache: "no-store" });
   return {
     collectionType: type,
     pageData: result?.success ? result.data || null : null,
