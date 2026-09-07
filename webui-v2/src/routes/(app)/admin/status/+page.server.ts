@@ -22,11 +22,11 @@ function settled<T>(result: PromiseSettledResult<ReadResult<T>>): ReadResult<T> 
 
 export const load: PageServerLoad = async (event): Promise<AdminStatusPageData> => {
   const results = await Promise.allSettled([
-    read<SystemHealthDetail>(event, "/api/v1/system/health/api"),
-    read<SystemHealthDetail>(event, "/api/v1/system/health/database"),
-    read<SystemHealthDetail>(event, "/api/v1/system/health/emby"),
-    read<SystemInfo>(event, "/api/v1/system/info"),
-    read<SystemStats>(event, "/api/v1/system/admin/stats")
+    read<SystemHealthDetail>(event, "/api/v2/admin/health/api"),
+    read<SystemHealthDetail>(event, "/api/v2/admin/health/database"),
+    read<SystemHealthDetail>(event, "/api/v2/admin/health/emby"),
+    read<SystemInfo>(event, "/api/v2/system/info"),
+    read<SystemStats>(event, "/api/v2/admin/stats")
   ]);
 
   return {

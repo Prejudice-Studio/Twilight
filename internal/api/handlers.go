@@ -2038,13 +2038,17 @@ func (a *App) handleHealthEmby(w http.ResponseWriter, r *http.Request, _ Params)
 }
 
 func (a *App) handleSystemStats(w http.ResponseWriter, r *http.Request, _ Params) {
+	ok(w, "OK", a.systemStatsData())
+}
+
+func (a *App) systemStatsData() map[string]any {
 	totalUsers, activeUsers := a.store().UserCounts()
 	totalRegcodes, activeRegcodes := a.store().RegCodeCounts()
 	usage := 0
 	if a.cfg().UserLimit > 0 {
 		usage = int(float64(totalUsers) / float64(a.cfg().UserLimit) * 100)
 	}
-	ok(w, "OK", map[string]any{
+	return map[string]any{
 		"timestamp":     time.Now().Unix(),
 		"cpu_count":     nil,
 		"users":         map[string]any{"active": activeUsers, "total": totalUsers, "limit": zeroNil(int64(a.cfg().UserLimit)), "usage_percent": usage},
@@ -2058,7 +2062,7 @@ func (a *App) handleSystemStats(w http.ResponseWriter, r *http.Request, _ Params
 		},
 		"routes": len(a.routes),
 		"uptime": int64(time.Since(runtimeStartedAt).Seconds()),
-	})
+	}
 }
 
 func (a *App) databaseHealth(parent context.Context) map[string]any {

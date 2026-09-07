@@ -5,8 +5,8 @@ import { t } from "$lib/i18n";
 
 export const load: PageServerLoad = async (event): Promise<AdminHomePageData> => {
   const results = await Promise.allSettled([
-    apiJSON<SystemInfo>(event, "/api/v1/system/info", { cache: "no-store" }),
-    apiJSON<SystemStats>(event, "/api/v1/system/admin/stats", { cache: "no-store" })
+    apiJSON<SystemInfo>(event, "/api/v2/system/info", { cache: "no-store" }),
+    apiJSON<SystemStats>(event, "/api/v2/admin/stats", { cache: "no-store" })
   ]);
   const infoResult = results[0].status === "fulfilled" ? results[0].value : null;
   const statsResult = results[1].status === "fulfilled" ? results[1].value : null;

@@ -39,6 +39,11 @@ V2 基础协议入口使用 `/api/v2`，当前只提供不带秘密的能力协�
 | ---- | ---- | ---- | ---- |
 | GET | `/api/v2/system/health` | Public | 仅确认 API 进程可处理请求，不探测数据库或 Emby |
 | GET | `/api/v2/system/capabilities` | Public | 返回 V2 版本、兼容版本、公开 feature 和受限上传额度 |
+| GET | `/api/v2/system/info` | Public | 返回 SSR 外壳和初始化页所需的安全系统摘要；不返回上游地址、Token 或配置秘密 |
+| GET | `/api/v2/admin/health/api` | Admin | 独立检测 API 进程；私有 `no-store`，不检测数据库或 Emby |
+| GET | `/api/v2/admin/health/database` | Admin | 独立检测当前数据库连接和状态快照；私有 `no-store` |
+| GET | `/api/v2/admin/health/emby` | Admin | 独立从后端连接 Emby 并读取有限服务状态；私有 `no-store`，失败不泄露上游诊断 |
+| GET | `/api/v2/admin/stats` | Admin | 返回用户、注册码、Redis 回退、路由和运行时间摘要；私有 `no-store`，不包含播放统计 |
 | POST | `/api/v2/auth/login` | Public | 使用 Web 用户名/邮箱和密码创建会话；响应不缓存 |
 | POST | `/api/v2/auth/login/apikey` | Public | 使用 API Key 创建会话；响应不缓存 |
 | POST | `/api/v2/auth/login/telegram` | Public | 保留 Telegram 直登录兼容入口；当前按策略返回不可用 |

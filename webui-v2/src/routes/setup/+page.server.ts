@@ -42,7 +42,7 @@ export const load: PageServerLoad = async (event) => {
   if (event.locals.user) throw redirect(303, "/dashboard");
   const [status, system] = await Promise.all([
     apiJSON<SetupStatus>(event, "/api/v1/setup/status", { cache: "no-store" }),
-    apiJSON<SystemInfo>(event, "/api/v1/system/info", { cache: "no-store" })
+    apiJSON<SystemInfo>(event, "/api/v2/system/info", { cache: "no-store" })
   ]);
   return {
     status: status?.success ? status.data || null : null,

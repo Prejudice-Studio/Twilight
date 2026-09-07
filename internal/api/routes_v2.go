@@ -8,6 +8,11 @@ import "net/http"
 func (a *App) registerV2Routes() {
 	a.add(http.MethodGet, "/api/v2/system/health", AuthPublic, a.handleV2Health)
 	a.add(http.MethodGet, "/api/v2/system/capabilities", AuthPublic, a.handleV2Capabilities)
+	a.add(http.MethodGet, "/api/v2/system/info", AuthPublic, a.handleV2SystemInfo)
+	a.add(http.MethodGet, "/api/v2/admin/health/api", AuthAdmin, a.handleV2AdminHealthAPI)
+	a.add(http.MethodGet, "/api/v2/admin/health/database", AuthAdmin, a.handleV2AdminHealthDatabase)
+	a.add(http.MethodGet, "/api/v2/admin/health/emby", AuthAdmin, a.handleV2AdminHealthEmby)
+	a.add(http.MethodGet, "/api/v2/admin/stats", AuthAdmin, a.handleV2AdminStats)
 	a.add(http.MethodPost, "/api/v2/auth/login", AuthPublic, a.handleV2Login)
 	a.add(http.MethodPost, "/api/v2/auth/login/apikey", AuthPublic, a.handleV2LoginByAPIKey)
 	a.add(http.MethodPost, "/api/v2/auth/login/telegram", AuthPublic, a.handleV2TelegramLogin)
