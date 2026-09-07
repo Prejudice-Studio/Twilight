@@ -159,7 +159,9 @@ Telegram 注册绑定码生成使用独立的 `createBindCode` form action；启
 
 ## 已迁移模块：用户工单
 
-`/(app)/tickets` 直接使用后端的工单摘要分页和单条详情契约。SSR `load` 只请求当前页摘要；只有 URL 中存在 `ticket` 编号时才读取该工单的正文、回复时间线和附件。创建、回复、关闭、重开和 Telegram 通知切换均为服务端 form action，成功后使用 303 回到列表或当前会话，失败只回传通用页面错误与后端业务消息。
+`/(app)/tickets` 使用 `/api/v2/tickets` 的 `items`/`pagination` 摘要资源和 `/api/v2/tickets/{ticket_id}` 的 `item` 详情资源。SSR `load` 只请求当前页摘要；只有 URL 中存在 `ticket` 编号时才读取该工单的正文、回复时间线和附件。创建、回复、关闭、重开和 Telegram 通知切换均为服务端 form action，成功后使用 303 回到列表或当前会话，失败只回传通用页面错误与后端业务消息。
+
+用户工单附件的预览 URL 使用受保护的 `/api/v2/tickets/{ticket_id}/attachments/{filename}`；上传、读取和删除继续由 Go 统一执行工单归属、关闭状态、图片真实类型、大小、数量、路径安全、审计和通知校验。V2 页面不把旧 V1 图片地址写入 SSR 数据。
 
 页面桌面端使用列表/会话双栏，移动端切为单列；列表和会话各自拥有 `overflow`、`overscroll-behavior` 和 Firefox 可见滚动条。用户侧详情仍由 Go 后端执行归属校验，V2 不依据隐藏按钮决定是否可操作，也不会把管理员内部备注渲染进用户会话。
 

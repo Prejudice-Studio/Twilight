@@ -308,6 +308,16 @@ V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/ap
 | POST | `/api/v1/tickets/{ticket_id}/images` | User | 上传工单交流图片 |
 | GET | `/api/v1/tickets/{ticket_id}/images/{filename}` | User | 读取工单图片 |
 | DELETE | `/api/v1/tickets/{ticket_id}/images/{filename}` | User | 删除工单图片；关闭后普通用户不可删除 |
+| GET | `/api/v2/tickets` | User | V2 当前用户工单摘要分页；返回 `items` 与 `pagination`，不返回正文、回复或附件 URL |
+| POST | `/api/v2/tickets` | User | V2 创建工单，复用服务端类型、配额、通知和审计规则 |
+| GET | `/api/v2/tickets/{ticket_id}` | User | V2 读取本人单条工单及完整双方回复、附件；非本人统一返回工单不存在 |
+| POST | `/api/v2/tickets/{ticket_id}/replies` | User | V2 追加工单回复，不覆盖已有对话 |
+| POST | `/api/v2/tickets/{ticket_id}/close` | User | V2 用户关闭自己的工单 |
+| POST | `/api/v2/tickets/{ticket_id}/reopen` | User | V2 用户重开已关闭工单 |
+| PUT | `/api/v2/tickets/{ticket_id}/notify-telegram` | User | V2 切换单工单 Telegram 通知 |
+| POST | `/api/v2/tickets/{ticket_id}/attachments` | User | V2 上传工单交流图片，复用全局大小/数量/真实类型限制 |
+| GET | `/api/v2/tickets/{ticket_id}/attachments/{filename}` | User | V2 读取本人已登记的工单附件 |
+| DELETE | `/api/v2/tickets/{ticket_id}/attachments/{filename}` | User | V2 删除工单附件；关闭后普通用户不可删除 |
 
 ## Admin
 

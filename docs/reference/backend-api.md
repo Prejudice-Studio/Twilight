@@ -1351,6 +1351,8 @@ V2 SSR 管理端使用 `/api/v2/admin/media-requests` 资源集合及其 `/by-ke
 
 管理员接口：`GET /admin/tickets`、`GET /admin/tickets/{ticket_id}`、`PUT /admin/tickets/{ticket_id}`、`POST /admin/tickets/{ticket_id}/reply`、`DELETE /admin/tickets/{ticket_id}`、`GET|POST|PUT|DELETE /admin/ticket-types`。
 
+V2 用户工单资源：`GET /api/v2/tickets`、`GET /api/v2/tickets/{ticket_id}`、`POST /api/v2/tickets`、`POST /api/v2/tickets/{ticket_id}/replies`、`POST /api/v2/tickets/{ticket_id}/close`、`POST /api/v2/tickets/{ticket_id}/reopen`、`PUT /api/v2/tickets/{ticket_id}/notify-telegram`，以及 `/attachments` 上传/读取/删除资源。V2 用户列表返回 `items` + `pagination`，详情返回 `item`，附件 URL 也只指向 V2 受保护资源；用户详情仍按当前会话 UID 做归属校验。
+
 V2 管理员工单资源：`GET /api/v2/admin/tickets`、`GET /api/v2/admin/tickets/{ticket_id}`、`PATCH /api/v2/admin/tickets/{ticket_id}`、`POST /api/v2/admin/tickets/{ticket_id}/replies`、`DELETE /api/v2/admin/tickets/{ticket_id}`，以及对应的 `/attachments/{filename}` 上传/读取/删除资源和 `/api/v2/admin/ticket-types` 集合。V2 列表统一返回 `items` + `pagination`，详情统一返回 `item`；它们复用同一 Store、权限、附件限制、审计和通知逻辑，V1 仅作为回滚及外部兼容入口保留。
 
 `GET /tickets` 是当前用户的摘要分页接口，可传 `page`（默认 1）和 `per_page`（默认 20，最大 100）。列表只返回标题、状态、优先级、回复/附件数量和时间等元数据，不返回工单正文、回复正文或附件 URL。`GET /tickets/{ticket_id}` 只允许当前登录用户读取自己的工单，返回完整正文、双方回复时间线和附件；管理员读取他人工单使用 `/admin/tickets/{ticket_id}`，用户侧接口不会因为当前账号具有管理员角色而扩大资源范围。

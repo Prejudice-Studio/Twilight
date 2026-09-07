@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -65,6 +66,126 @@ type v2AdminTicketDetailResponse struct {
 	TicketTypes []string       `json:"ticket_types"`
 }
 
+type v2UserTicketListResponse struct {
+	Items       []userTicketListDTO `json:"items"`
+	Pagination  v2TicketPagination  `json:"pagination"`
+	TicketTypes []string            `json:"ticket_types"`
+}
+
+type v2UserTicketDetailResponse struct {
+	Item        map[string]any `json:"item"`
+	TicketTypes []string       `json:"ticket_types"`
+}
+
+func v2UserTicketAttachmentURL(ticketID int64, filename string) string {
+	return "/api/v2/tickets/" + strconv.FormatInt(ticketID, 10) + "/attachments/" + url.PathEscape(filename)
+}
+
+func v2UserTicketDTO(ticket store.Ticket) map[string]any {
+	dto := ticketDTO(ticket, false)
+	attachments := make([]map[string]any, 0, len(ticket.Attachments))
+	for _, attachment := range ticket.Attachments {
+		attachments = append(attachments, map[string]any{
+			"filename":     attachment.Filename,
+			"url":          v2UserTicketAttachmentURL(ticket.ID, attachment.Filename),
+			"content_type": attachment.ContentType,
+			"size":         attachment.Size,
+			"uploaded_uid": attachment.UploadedUID,
+			"created_at":   attachment.CreatedAt,
+		})
+	}
+	dto["attachments"] = attachments
+	return dto
+}
+
+// User ticket resources keep the browser-facing contract independent from the
+// rollback API while delegating ownership, limits, status transitions,
+// notifications and persistence to the shared handlers below.
+func (a *App) handleV2UserTickets(w http.ResponseWriter, r *http.Request, _ Params) {
+	if !a.cfg().TicketSystemEnabled {
+		failWithCode(w, http.StatusServiceUnavailable, ErrTicketDisabled, "工单系统未启用")
+		return
+	}
+	if a.refreshStoreForRequest(w, r) {
+		return
+	}
+	p := current(r)
+	page := clamp(queryInt(r, "page", 1), 1, 1_000_000)
+	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
+	result := a.store().ListTicketsPage(store.TicketFilter{UID: p.User.UID}, page, perPage)
+	totalPages := (result.Total + perPage - 1) / perPage
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	ok(w, "OK", v2UserTicketListResponse{
+		Items: userTicketListDTOs(result.Tickets),
+		Pagination: v2TicketPagination{
+			Page:       page,
+			PerPage:    perPage,
+			Total:      result.Total,
+			TotalPages: totalPages,
+		},
+		TicketTypes: a.store().TicketTypes(),
+	})
+}
+
+func (a *App) handleV2UserTicket(w http.ResponseWriter, r *http.Request, params Params) {
+	if !a.cfg().TicketSystemEnabled {
+		failWithCode(w, http.StatusServiceUnavailable, ErrTicketDisabled, "工单系统未启用")
+		return
+	}
+	id, err := int64Param(params, "ticket_id")
+	if err != nil || id <= 0 {
+		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的工单编号")
+		return
+	}
+	if a.refreshStoreForRequest(w, r) {
+		return
+	}
+	p := current(r)
+	ticket, found := a.store().Ticket(id)
+	if !found || ticket.UID != p.User.UID {
+		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
+		return
+	}
+	ok(w, "OK", v2UserTicketDetailResponse{
+		Item:        v2UserTicketDTO(ticket),
+		TicketTypes: a.store().TicketTypes(),
+	})
+}
+
+func (a *App) handleV2CreateTicket(w http.ResponseWriter, r *http.Request, p Params) {
+	a.handleCreateTicket(w, r, p)
+}
+
+func (a *App) handleV2UserTicketReply(w http.ResponseWriter, r *http.Request, p Params) {
+	a.handleReplyToTicket(w, r, p)
+}
+
+func (a *App) handleV2CloseUserTicket(w http.ResponseWriter, r *http.Request, p Params) {
+	a.handleCloseOwnTicket(w, r, p)
+}
+
+func (a *App) handleV2ReopenUserTicket(w http.ResponseWriter, r *http.Request, p Params) {
+	a.handleReopenOwnTicket(w, r, p)
+}
+
+func (a *App) handleV2ToggleUserTicketNotify(w http.ResponseWriter, r *http.Request, p Params) {
+	a.handleToggleTicketNotify(w, r, p)
+}
+
+func (a *App) handleV2UserTicketAttachmentUpload(w http.ResponseWriter, r *http.Request, p Params) {
+	a.handleUploadTicketImage(w, r, p)
+}
+
+func (a *App) handleV2UserTicketAttachment(w http.ResponseWriter, r *http.Request, p Params) {
+	a.handleGetTicketImage(w, r, p)
+}
+
+func (a *App) handleV2UserTicketAttachmentDelete(w http.ResponseWriter, r *http.Request, p Params) {
+	a.handleDeleteTicketImage(w, r, p)
+}
+
 func (a *App) handleV2AdminTickets(w http.ResponseWriter, r *http.Request, _ Params) {
 	if a.refreshStoreForRequest(w, r) {
 		return
@@ -92,7 +213,7 @@ func (a *App) handleV2AdminTickets(w http.ResponseWriter, r *http.Request, _ Par
 }
 
 func v2AdminTicketAttachmentURL(ticketID int64, filename string) string {
-	return "/api/v2/admin/tickets/" + strconv.FormatInt(ticketID, 10) + "/attachments/" + filename
+	return "/api/v2/admin/tickets/" + strconv.FormatInt(ticketID, 10) + "/attachments/" + url.PathEscape(filename)
 }
 
 func v2AdminTicketDTO(ticket store.Ticket) map[string]any {

@@ -7,9 +7,9 @@
 
   let { data, form }: { data: PageData; form: unknown } = $props();
   let action = $derived((form ?? {}) as FormState);
-  let selected = $derived(data.detail?.ticket || null);
+  let selected = $derived(data.detail?.item || null);
   let types = $derived(data.list?.ticket_types || data.detail?.ticket_types || []);
-  let totalPages = $derived(Math.max(1, Math.ceil((data.list?.total || 0) / Math.max(1, data.list?.per_page || 20))));
+  let totalPages = $derived(data.list?.pagination.total_pages || 1);
 
   const statusLabels: Record<TicketStatus, string> = {
     open: t.ticketStatusOpen,
@@ -45,10 +45,10 @@
   {#if action.error}<p class="notice error" role="alert">{action.error}</p>{/if}
   <div class="workspace">
     <aside class="panel ticket-list" aria-label={t.ticketList}>
-      <div class="panel-heading"><h2>{t.ticketList}</h2><span class="count">{data.list?.total || 0}</span></div>
-      {#if data.list?.tickets.length}
+      <div class="panel-heading"><h2>{t.ticketList}</h2><span class="count">{data.list?.pagination.total || 0}</span></div>
+      {#if data.list?.items.length}
         <div class="list-scroll">
-          {#each data.list.tickets as ticket}
+          {#each data.list.items as ticket}
             <a class:selected={data.selectedID === ticket.id} class="ticket-row" href={`/tickets?ticket=${ticket.id}`}>
               <div class="row-top"><strong>#{ticket.id}</strong><span class={`status ${ticket.status}`}>{statusLabels[ticket.status]}</span></div>
               <h3>{ticket.title}</h3>
@@ -57,9 +57,9 @@
           {/each}
         </div>
         <nav class="pagination" aria-label="工单分页">
-          <span>{t.ticketPage.replace("{page}", String(data.list.page)).replace("{pages}", String(totalPages)).replace("{total}", String(data.list.total))}</span>
-          {#if data.list.page > 1}<a href={`/tickets?page=${data.list.page - 1}`}>{t.ticketPrevious}</a>{/if}
-          {#if data.list.page < totalPages}<a href={`/tickets?page=${data.list.page + 1}`}>{t.ticketNext}</a>{/if}
+          <span>{t.ticketPage.replace("{page}", String(data.list.pagination.page)).replace("{pages}", String(totalPages)).replace("{total}", String(data.list.pagination.total))}</span>
+          {#if data.list.pagination.page > 1}<a href={`/tickets?page=${data.list.pagination.page - 1}`}>{t.ticketPrevious}</a>{/if}
+          {#if data.list.pagination.page < totalPages}<a href={`/tickets?page=${data.list.pagination.page + 1}`}>{t.ticketNext}</a>{/if}
         </nav>
       {:else}<div class="empty"><strong>{t.ticketEmpty}</strong><p>{t.ticketEmptyHelp}</p></div>{/if}
     </aside>

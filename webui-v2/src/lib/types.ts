@@ -815,6 +815,22 @@ export interface AdminTicketDetailResponse {
   ticket_types: string[];
 }
 
+export interface UserTicketListResponse {
+  items: TicketSummary[];
+  pagination: {
+    page: number;
+    per_page: number;
+    total: number;
+    total_pages: number;
+  };
+  ticket_types: string[];
+}
+
+export interface UserTicketDetailResponse {
+  item: Ticket;
+  ticket_types: string[];
+}
+
 export interface Ticket extends TicketSummary {
   uid: number;
   username: string;
