@@ -1,7 +1,7 @@
 import { fail, redirect } from "@sveltejs/kit";
 import { apiJSON, apiJSONWithResponse } from "$lib/server/api";
 import type { Actions, PageServerLoad } from "./$types";
-import type { RegisterAvailability, RegisterResponse, SystemInfo } from "$lib/types";
+import type { RegisterAvailability, RegisterResponse, V2Capabilities } from "$lib/types";
 
 type FormState = {
   username?: string;
@@ -19,7 +19,7 @@ function text(form: FormData, name: string): string {
 }
 
 async function jsonAction<T>(event: Parameters<NonNullable<Actions["default"]>>[0], payload: Record<string, unknown>) {
-  return apiJSONWithResponse<T>(event, "/api/v1/users/register", {
+  return apiJSONWithResponse<T>(event, "/api/v2/registration", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload)
@@ -29,8 +29,8 @@ async function jsonAction<T>(event: Parameters<NonNullable<Actions["default"]>>[
 export const load: PageServerLoad = async (event) => {
   if (event.locals.user) throw redirect(303, "/dashboard");
   const [availability, system] = await Promise.all([
-    apiJSON<RegisterAvailability>(event, "/api/v1/users/check-available", { cache: "no-store" }),
-    apiJSON<SystemInfo>(event, "/api/v1/system/info", { cache: "no-store" })
+    apiJSON<RegisterAvailability>(event, "/api/v2/registration/availability", { cache: "no-store" }),
+    apiJSON<V2Capabilities>(event, "/api/v2/system/capabilities", { cache: "no-store" })
   ]);
   return {
     availability: availability?.success ? availability.data || null : null,
@@ -40,7 +40,7 @@ export const load: PageServerLoad = async (event) => {
 
 export const actions: Actions = {
   createBindCode: async (event) => {
-    const response = await apiJSONWithResponse<{ bind_code: string; expires_in: number }>(event, "/api/v1/users/telegram/register/bind-code", {
+    const response = await apiJSONWithResponse<{ bind_code: string; expires_in: number }>(event, "/api/v2/registration/telegram/bind-code", {
       headers: {
         "X-Twilight-Client": "webui",
         "X-Twilight-Intent": "create-bind-code"

@@ -15,7 +15,7 @@ export const actions: Actions = {
     const password = String(form.get("password") || "");
     if (!username || !password) return fail(400, { username, error: "请输入用户名和密码" });
 
-    const result = await apiJSONWithResponse<UserInfo>(event, "/api/v1/auth/login", {
+    const result = await apiJSONWithResponse<UserInfo>(event, "/api/v2/auth/login", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ username, password } satisfies LoginPayload)

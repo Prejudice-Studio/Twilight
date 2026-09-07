@@ -39,6 +39,19 @@ V2 基础协议入口使用 `/api/v2`，当前只提供不带秘密的能力协�
 | ---- | ---- | ---- | ---- |
 | GET | `/api/v2/system/health` | Public | 仅确认 API 进程可处理请求，不探测数据库或 Emby |
 | GET | `/api/v2/system/capabilities` | Public | 返回 V2 版本、兼容版本、公开 feature 和受限上传额度 |
+| POST | `/api/v2/auth/login` | Public | 使用 Web 用户名/邮箱和密码创建会话；响应不缓存 |
+| POST | `/api/v2/auth/login/apikey` | Public | 使用 API Key 创建会话；响应不缓存 |
+| POST | `/api/v2/auth/login/telegram` | Public | 保留 Telegram 直登录兼容入口；当前按策略返回不可用 |
+| GET | `/api/v2/auth/me` | User | 返回当前会话的用户摘要；私有 `no-store` |
+| POST | `/api/v2/auth/logout` | User | 注销当前会话 |
+| POST | `/api/v2/auth/logout/all` | User | 注销当前用户的全部会话 |
+| POST | `/api/v2/auth/refresh` | User | 轮换当前会话 |
+| POST | `/api/v2/auth/password/emby` | Public | 通过 Emby 凭据找回 Web 密码；错误响应不暴露上游细节 |
+| POST | `/api/v2/auth/password/email/request` | Public | 发送邮箱找回验证码；统一响应防止账号枚举 |
+| POST | `/api/v2/auth/password/email/reset` | Public | 校验邮箱验证码并重置 Web 密码 |
+| POST | `/api/v2/registration` | Public | 创建 Web 账号；后端最终校验密码、注册码和 Telegram 绑定码 |
+| GET | `/api/v2/registration/availability` | Public | 返回注册开关、容量和用户名可用性摘要 |
+| POST | `/api/v2/registration/telegram/bind-code` | Public | 创建注册阶段 Telegram 绑定码；需要 WebUI intent 头 |
 | GET | `/api/v2/dashboard/summary` | User | 聚合当前用户、公开能力和在线人数摘要；Emby 失败时通过 `viewers.available=false` 独立降级 |
 | GET | `/api/v2/settings` | User | 当前用户设置、Telegram/Emby 状态和密码安全策略；私有 `no-store` |
 | PUT | `/api/v2/settings/preferences` | User | 更新通知、自动续期和密码安全偏好；仅接受严格 JSON 布尔值 |

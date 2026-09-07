@@ -164,7 +164,7 @@ export async function apiJSON<T>(
 export async function currentUser(event: Pick<RequestEvent, "request">): Promise<UserInfo | null> {
   const cookie = event.request.headers.get("cookie");
   if (!cookie) return null;
-  const envelope = await apiJSON<UserInfo>(event, "/api/v1/auth/me", {
+  const envelope = await apiJSON<UserInfo>(event, "/api/v2/auth/me", {
     cache: "no-store"
   });
   return envelope?.success && envelope.data ? envelope.data : null;

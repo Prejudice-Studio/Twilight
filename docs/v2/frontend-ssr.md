@@ -139,6 +139,12 @@ V2 页面覆盖 V1 当前用户可见的全部路由；兼容别名只负责旧�
 
 页面服务端会再次限制历史背景 JSON、渐变表达式和资源 URL 后再渲染，异常值只显示默认预览。图片上传表单与背景保存表单保持独立，避免 HTML 嵌套表单导致错提交；Go 后端仍是最终的上传大小、MIME 嗅探、路径安全、归属授权和持久化边界。
 
+## 已迁移模块：认证与注册
+
+`/login`、`/register`、`/forgot-password` 和 `/logout` 使用 V2 认证/注册资源。认证页首屏通过 `/api/v2/system/capabilities`（只含布尔能力）与 `/api/v2/registration/availability` 获取有限公开能力，登录、注册、Telegram 注册绑定码、邮箱找回和 Emby 找回均由服务端 form action 转发到 V2；根 `handle` 也通过 `/api/v2/auth/me` 读取当前会话身份。Cookie 只在 SSR 服务端转发和接收，登录/注销后的会话变化通过服务端重定向生效。
+
+V2 认证接口是现有 Go 认证处理器的薄适配，不重新实现密码哈希、恒定代价校验、限流、账号状态、注册码/绑定码消费、审计、会话创建和会话删除。注册绑定码资源使用 POST 并保留 `X-Twilight-Client: webui` 与 `X-Twilight-Intent: create-bind-code` intent，避免新架构引入带副作用的无意 GET。找回密码继续使用统一错误文案，临时密码仅存在当前 form action 结果中。
+
 ## 已迁移模块：认证注册
 
 `/register` 使用服务端 `load` 读取注册开关/容量摘要与公开系统能力，默认 action 将用户名、邮箱、注册码和 Telegram 注册绑定码提交到 Go 的 `/users/register`。密码确认只用于用户体验，密码强度、注册码消费、Telegram 绑定码原子消费、邮箱冲突和容量限制仍由 Go 后端决定。

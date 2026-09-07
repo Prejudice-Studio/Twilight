@@ -2,7 +2,7 @@ import { fail } from "@sveltejs/kit";
 import type { Actions, RequestEvent } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
 import { apiJSON, apiJSONWithResponse } from "$lib/server/api";
-import type { SystemInfo } from "$lib/types";
+import type { V2Capabilities } from "$lib/types";
 
 type ForgotForm = {
   mode?: "email-reset" | "email-done" | "emby-result";
@@ -31,12 +31,12 @@ async function post<T>(event: RequestEvent, path: string, payload: Record<string
 }
 
 export const load: PageServerLoad = async (event) => {
-  const response = await apiJSON<SystemInfo>(event, "/api/v1/system/info", { cache: "no-store" });
+  const response = await apiJSON<V2Capabilities>(event, "/api/v2/system/capabilities", { cache: "no-store" });
   const features = response?.success ? response.data?.features || {} : {};
   return {
-    forgotPasswordEnabled: Boolean(features.forgot_password_enabled),
-    embyAvailable: Boolean(features.forgot_password_emby_enabled),
-    emailAvailable: Boolean(features.email_enabled && features.forgot_password_email_enabled)
+    forgotPasswordEnabled: Boolean(features.recovery),
+    embyAvailable: Boolean(features.recovery_emby),
+    emailAvailable: Boolean((features.email || features.email_enabled) && features.recovery_email)
   };
 };
 
@@ -47,7 +47,7 @@ export const actions: Actions = {
     const password = String(form.get("emby_password") ?? "");
     if (!username || !password) return fail(400, { emby_username: username, error: "请填写 Emby 用户名和密码" } satisfies ForgotForm);
 
-    const result = await post<{ username: string; new_password: string }>(event, "/api/v1/auth/forgot-password/emby", {
+    const result = await post<{ username: string; new_password: string }>(event, "/api/v2/auth/password/emby", {
       emby_username: username,
       emby_password: password
     });
@@ -65,7 +65,7 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const email = text(form, "email");
     if (!email) return fail(400, { email, error: "请输入邮箱地址" } satisfies ForgotForm);
-    const result = await post<{ resend_after?: number }>(event, "/api/v1/auth/password/email/request", { email });
+    const result = await post<{ resend_after?: number }>(event, "/api/v2/auth/password/email/request", { email });
     if (!result?.response.ok || !result.envelope?.success) return fail(400, { email, error: "操作失败，请稍后重试" } satisfies ForgotForm);
     return {
       mode: "email-reset",
@@ -85,7 +85,7 @@ export const actions: Actions = {
     if (password !== confirm) return fail(400, { email, mode: "email-reset", error: "两次输入的新密码不一致" } satisfies ForgotForm);
     if (password.length < 12) return fail(400, { email, mode: "email-reset", error: "新密码至少需要 12 位" } satisfies ForgotForm);
 
-    const result = await post<{ username: string }>(event, "/api/v1/auth/password/email/reset", {
+    const result = await post<{ username: string }>(event, "/api/v2/auth/password/email/reset", {
       email,
       code,
       new_password: password
