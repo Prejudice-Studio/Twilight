@@ -1263,6 +1263,8 @@ curl -X POST "http://localhost:5000/api/v1/admin/regcodes" \
 
 ### 9.4 求片管理（Admin 别名）
 
+V2 SSR 管理端使用 `/api/v2/admin/media-requests` 资源集合及其 `/by-key`、`/batch` 变更资源；V1 `/api/v1/admin/media-requests` 仍保留给旧客户端和回滚前端。V2 列表返回 `{items,pagination,request_total,has_next,status_counts}`，V1 列表继续返回历史字段名 `{requests,total,request_total,page,per_page,total_pages,has_next,status_counts}`。两者共享同一个后端筛选、同名聚合和 Store 快照，避免状态计数或分页结果漂移。
+
 `GET /admin/media-requests` — 查询管理员求片列表（与 `/media/request/pending` 同 handler）。
 
 默认筛选为 `status=active`，即 `UNHANDLED` / `ACCEPTED` / `DOWNLOADING` 活跃队列；`status=pending` 或 `status=unhandled` 仅返回真正待处理的 `UNHANDLED`，`status=all` 返回全部。可选参数：`source=all|tmdb|bangumi`、`q`（标题、用户名、请求 ID、媒体 ID、UID、Telegram ID、Key 模糊搜索）、`page`、`per_page`。`q` 最多 120 字符，`per_page` 最大 100。

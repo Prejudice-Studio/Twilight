@@ -10,6 +10,19 @@ type FormFailure = ActionFailure<FormState>;
 type RequestStatus = "active" | "all" | "pending" | "accepted" | "downloading" | "rejected" | "completed";
 type RequestSource = "all" | "tmdb" | "bangumi";
 
+type V2AdminMediaRequestResource = {
+  items: AdminMediaRequest[];
+  pagination: {
+    page: number;
+    per_page: number;
+    total: number;
+    total_pages: number;
+  };
+  request_total: number;
+  has_next: boolean;
+  status_counts: AdminMediaRequestListResponse["status_counts"];
+};
+
 const statuses = new Set<RequestStatus>(["active", "all", "pending", "accepted", "downloading", "rejected", "completed"]);
 const sources = new Set<RequestSource>(["all", "tmdb", "bangumi"]);
 
@@ -129,9 +142,19 @@ export const load: PageServerLoad = async (event) => {
     per_page: String(query.per_page)
   });
   if (query.query) params.set("q", query.query);
-  const result = await apiJSON<AdminMediaRequestListResponse>(event, `/api/v1/admin/media-requests?${params}`, { cache: "no-store" });
+  const result = await apiJSON<V2AdminMediaRequestResource>(event, `/api/v2/admin/media-requests?${params}`, { cache: "no-store" });
+  const payload = result?.success && result.data ? {
+    requests: result.data.items,
+    total: result.data.pagination.total,
+    request_total: result.data.request_total,
+    page: result.data.pagination.page,
+    per_page: result.data.pagination.per_page,
+    total_pages: result.data.pagination.total_pages,
+    has_next: result.data.has_next,
+    status_counts: result.data.status_counts
+  } satisfies AdminMediaRequestListResponse : null;
   return {
-    payload: result?.success && result.data ? result.data : null,
+    payload,
     query,
     notice: text(event.url.searchParams.get("notice"), 32),
     loadError: result?.success ? null : t.adminRequestsLoadFailed
@@ -148,7 +171,7 @@ export const actions: Actions = {
     if (!validKey(key) || !validStatus(status) || revision === null) {
       return fail(400, { action: "update", error: t.adminRequestsInvalidPayload } satisfies FormState);
     }
-    const failure = await mutate(event, `/api/v1/admin/media-requests/by-key/${encodeURIComponent(key)}`, "PUT", { status, note }, revision, "update", t.adminRequestsUpdateFailed);
+    const failure = await mutate(event, `/api/v2/admin/media-requests/by-key/${encodeURIComponent(key)}`, "PUT", { status, note }, revision, "update", t.adminRequestsUpdateFailed);
     if (failure) return failure;
     redirectToList(form, "updated");
   },
@@ -177,7 +200,7 @@ export const actions: Actions = {
       seen.add(key);
       items.push({ require_key: key, revision });
     }
-    const failure = await mutate(event, "/api/v1/admin/media-requests/batch/by-key", "PUT", { status, note, items }, null, "updateGroup", t.adminRequestsUpdateFailed);
+    const failure = await mutate(event, "/api/v2/admin/media-requests/batch", "PUT", { status, note, items }, null, "updateGroup", t.adminRequestsUpdateFailed);
     if (failure) return failure;
     redirectToList(form, "updated");
   },
@@ -187,7 +210,7 @@ export const actions: Actions = {
     const key = formText(form, "require_key", 160);
     const revision = revisionValue(formText(form, "revision", 24));
     if (!validKey(key) || revision === null) return fail(400, { action: "delete", error: t.adminRequestsInvalidPayload } satisfies FormState);
-    const failure = await mutate(event, `/api/v1/admin/media-requests/by-key/${encodeURIComponent(key)}`, "DELETE", undefined, revision, "delete", t.adminRequestsDeleteFailed);
+    const failure = await mutate(event, `/api/v2/admin/media-requests/by-key/${encodeURIComponent(key)}`, "DELETE", undefined, revision, "delete", t.adminRequestsDeleteFailed);
     if (failure) return failure;
     redirectToList(form, "deleted");
   }

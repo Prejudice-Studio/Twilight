@@ -320,6 +320,13 @@ V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/ap
 | POST | `/api/v2/admin/invite/users/{uid}/enable` | Admin | V2 级联启用邀请树用户 |
 | POST | `/api/v2/admin/invite/users/{uid}/delete` | Admin | V2 级联删除本地/Emby 用户 |
 | GET/PUT | `/api/v2/admin/invite/config/schema` | Admin | V2 邀请配置 SSR 读写资源；最终字段白名单仍由配置 handler 执行 |
+| GET | `/api/v2/admin/media-requests` | Admin | V2 求片管理资源集合；服务端完成状态/来源/关键词筛选、同名聚合和分页，返回 `items`、`pagination`、状态计数，不缓存 |
+| PUT | `/api/v2/admin/media-requests/{request_id}` | Admin | V2 按 ID 更新求片状态；兼容入口，管理端优先使用 require_key |
+| DELETE | `/api/v2/admin/media-requests/{request_id}` | Admin | V2 按 ID 删除求片；兼容入口 |
+| PUT | `/api/v2/admin/media-requests/by-key/{require_key}` | Admin | V2 按 key 更新求片；支持 `If-Match` revision 冲突保护 |
+| PUT | `/api/v2/admin/media-requests/batch` | Admin | V2 原子批量更新同名求片；校验 1-100 个 key/revision 后一次性持久化 |
+| PUT | `/api/v2/admin/media-requests/batch/by-key` | Admin | V2 批量更新兼容别名 |
+| DELETE | `/api/v2/admin/media-requests/by-key/{require_key}` | Admin | V2 按 key 删除求片；支持 `If-Match` revision 冲突保护 |
 | GET | `/api/v1/admin/media-requests` | Admin | 求片管理列表；支持 `status/source/q/page/per_page`，返回状态计数与分页元数据，不缓存 |
 | PUT | `/api/v1/admin/media-requests/{request_id}` | Admin | 更新求片状态 |
 | DELETE | `/api/v1/admin/media-requests/{request_id}` | Admin | 删除求片 |

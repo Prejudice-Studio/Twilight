@@ -200,44 +200,21 @@ func (a *App) handleMyMediaRequests(w http.ResponseWriter, r *http.Request, _ Pa
 }
 
 func (a *App) handleAdminMediaRequests(w http.ResponseWriter, r *http.Request, _ Params) {
-	statusFilter := strings.ToLower(firstNonEmpty(r.URL.Query().Get("status"), "active"))
-	if !validMediaRequestAdminFilter(statusFilter) {
-		failWithCode(w, http.StatusBadRequest, ErrMediaRequestStatusInvalid, "invalid status filter")
+	resource, code, message := a.adminMediaRequestListResource(r)
+	if code != "" {
+		failWithCode(w, http.StatusBadRequest, code, message)
 		return
-	}
-	sourceFilter := strings.ToLower(strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("source"), "all")))
-	if sourceFilter == "bgm" {
-		sourceFilter = "bangumi"
-	}
-	if sourceFilter != "all" && sourceFilter != "tmdb" && sourceFilter != "bangumi" {
-		failWithCode(w, http.StatusBadRequest, ErrMediaRequestSourceInvalid, "invalid source filter")
-		return
-	}
-	query := truncateString(strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("q"), r.URL.Query().Get("query"))), 120)
-	page := clamp(queryInt(r, "page", 1), 1, 1000000)
-	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
-	result := a.store().ListMediaRequestGroupsPageWithOptions(store.MediaRequestListOptions{
-		All: true, StatusFilter: statusFilter, Source: sourceFilter, Query: query,
-		Page: page, PerPage: perPage,
-	})
-	items := make([]map[string]any, 0, len(result.Groups))
-	for _, group := range result.Groups {
-		item := mediaRequestAdminGroupDTO(group, result.Users)
-		if item == nil {
-			continue
-		}
-		items = append(items, item)
 	}
 	w.Header().Set("Cache-Control", "private, no-store")
 	ok(w, "OK", map[string]any{
-		"requests":      items,
-		"total":         result.Total,
-		"request_total": result.RequestTotal,
-		"page":          result.Page,
-		"per_page":      result.PerPage,
-		"total_pages":   result.TotalPages,
-		"has_next":      result.HasNext,
-		"status_counts": result.StatusCounts,
+		"requests":      resource.Items,
+		"total":         resource.Pagination.Total,
+		"request_total": resource.RequestTotal,
+		"page":          resource.Pagination.Page,
+		"per_page":      resource.Pagination.PerPage,
+		"total_pages":   resource.Pagination.TotalPages,
+		"has_next":      resource.HasNext,
+		"status_counts": resource.StatusCounts,
 	})
 }
 

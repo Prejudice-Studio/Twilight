@@ -23,6 +23,13 @@ func (a *App) registerV2Routes() {
 	a.add(http.MethodPost, "/api/v2/admin/invite/users/:uid/delete", AuthAdmin, a.handleV2AdminInviteDeleteUser)
 	a.add(http.MethodGet, "/api/v2/admin/invite/config/schema", AuthAdmin, a.handleV2AdminInviteConfigSchema)
 	a.add(http.MethodPut, "/api/v2/admin/invite/config/schema", AuthAdmin, a.handleV2AdminInviteConfigSchema)
+	a.add(http.MethodGet, "/api/v2/admin/media-requests", AuthAdmin, a.handleV2AdminMediaRequests)
+	a.add(http.MethodPut, "/api/v2/admin/media-requests/:request_id", AuthAdmin, a.handleV2UpdateMediaRequestStatus)
+	a.add(http.MethodDelete, "/api/v2/admin/media-requests/:request_id", AuthAdmin, a.handleV2DeleteMediaRequest)
+	a.add(http.MethodPut, "/api/v2/admin/media-requests/by-key/:require_key", AuthAdmin, a.handleV2UpdateMediaRequestByKey)
+	a.add(http.MethodPut, "/api/v2/admin/media-requests/batch", AuthAdmin, a.handleV2UpdateMediaRequestsByKey)
+	a.add(http.MethodPut, "/api/v2/admin/media-requests/batch/by-key", AuthAdmin, a.handleV2UpdateMediaRequestsByKey)
+	a.add(http.MethodDelete, "/api/v2/admin/media-requests/by-key/:require_key", AuthAdmin, a.handleV2DeleteMediaRequestByKey)
 
 	// Admin ticket resources back the SSR queue and conversation page. Keep
 	// attachments inside the same protected resource family so rendered URLs
