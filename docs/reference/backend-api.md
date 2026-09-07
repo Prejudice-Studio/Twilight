@@ -1006,6 +1006,8 @@ V2 管理员用户资源为 `/api/v2/admin/users`。集合接口返回：
 
 管理员 Emby 页面使用 `/api/v2/admin/emby/*`。账号、设备/IP 与活动日志是三个独立资源：账号列表服务端筛选和分页；设备/IP 只有明确传入 `refresh=1` 才会重读 Emby；活动日志默认读取数据库，手动同步使用 `POST /api/v2/admin/emby/activity-logs/sync`，由后端从 Emby 拉取并入库。广播、账号创建、强制改密、绑定维护和会话操作都由相同的管理员权限、Emby URL 校验、审计和通用错误脱敏边界处理。V2 页面不得回退为浏览器直连 Emby、自动轮询或播放统计界面。
 
+管理员 Bangumi 页面使用 `/api/v2/admin/bangumi/*`。用户列表只返回服务端分页的当前页和批量统计，播放记录、同步日志必须带 UID 按需读取；同步和日志清理使用对应的 POST/DELETE 资源。页面配置摘要来自公开 `/api/v2/system/capabilities`，只展示功能开关，不包含 Bangumi Token；V1 管理员 Bangumi 路径保留为兼容入口。
+
 #### 查询用户列表
 
 `GET /admin/users?status=active&page=1&per_page=20`

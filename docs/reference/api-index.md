@@ -43,6 +43,11 @@ V2 基础协议入口使用 `/api/v2`，当前只提供不带秘密的能力协�
 | GET | `/api/v2/signin/summary` | User | 聚合签到摘要、公开奖励规则和最近 30 条记录；写操作仍使用 `/api/v1/signin*` |
 | GET | `/api/v2/invite/summary` | User | 聚合邀请配置、当前关系、直属下级、邀请树和本人邀请码；写操作仍由服务端 form action 转发至 `/api/v1/invite*` |
 | GET | `/api/v2/bangumi/summary` | User | 聚合 Bangumi 同步状态、公开账号资料、五类收藏数量与最近条目；Token 不出现在响应，外部分类读取可独立降级 |
+| GET | `/api/v2/admin/bangumi/users` | Admin | V2 管理员 Bangumi 用户分页资源；仅返回当前页状态与有限计数 |
+| GET | `/api/v2/admin/bangumi/users/{uid}/records` | Admin | V2 按 UID 按需读取有界播放记录详情 |
+| POST | `/api/v2/admin/bangumi/users/{uid}/sync` | Admin | V2 为指定用户手动触发 Bangumi 同步 |
+| GET | `/api/v2/admin/bangumi/users/{uid}/logs` | Admin | V2 按 UID 按需读取有界同步日志 |
+| DELETE | `/api/v2/admin/bangumi/users/{uid}/logs` | Admin | V2 清除指定用户同步日志 |
 
 V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/api/v1`，不能由前端自行拼接版本路径。
 

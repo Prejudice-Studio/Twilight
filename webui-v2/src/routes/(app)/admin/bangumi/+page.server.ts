@@ -9,7 +9,7 @@ import type {
   AdminBangumiUsersResult,
   BangumiSyncLog,
   PlaybackRecordWithSync,
-  SystemInfo
+  V2Capabilities
 } from "$lib/types";
 
 type FormState = { action?: "sync" | "clearLogs"; error?: string };
@@ -88,7 +88,7 @@ async function readDetail(event: RequestEvent, query: Query, users: AdminBangumi
   if (!query.detail || query.uid <= 0) return null;
   const user = users.get(query.uid) || null;
   if (query.detail === "records") {
-    const result = await apiJSON<{ records?: PlaybackRecordWithSync[] }>(event, `/api/v1/admin/bangumi/records/${query.uid}?limit=200`, { cache: "no-store" });
+    const result = await apiJSON<{ records?: PlaybackRecordWithSync[] }>(event, `/api/v2/admin/bangumi/users/${query.uid}/records?limit=200`, { cache: "no-store" });
     return {
       kind: "records",
       uid: query.uid,
@@ -98,7 +98,7 @@ async function readDetail(event: RequestEvent, query: Query, users: AdminBangumi
       error: result?.success ? null : t.adminBangumiOperationFailed
     };
   }
-  const result = await apiJSON<{ logs?: BangumiSyncLog[] }>(event, `/api/v1/admin/bangumi/logs/${query.uid}?limit=200`, { cache: "no-store" });
+  const result = await apiJSON<{ logs?: BangumiSyncLog[] }>(event, `/api/v2/admin/bangumi/users/${query.uid}/logs?limit=200`, { cache: "no-store" });
   return {
     kind: "logs",
     uid: query.uid,
@@ -116,8 +116,8 @@ export const load: PageServerLoad = async (event): Promise<AdminBangumiPageData>
   const query = normalizeQuery(event.url);
   const params = new URLSearchParams({ page: String(query.page), per_page: String(query.per_page) });
   if (query.search) params.set("search", query.search);
-  const userPromise = apiJSON<AdminBangumiUsersResult>(event, `/api/v1/admin/bangumi/users?${params}`, { cache: "no-store" });
-  const infoPromise = apiJSON<SystemInfo>(event, "/api/v1/system/info", { cache: "no-store" });
+  const userPromise = apiJSON<AdminBangumiUsersResult>(event, `/api/v2/admin/bangumi/users?${params}`, { cache: "no-store" });
+  const infoPromise = apiJSON<V2Capabilities>(event, "/api/v2/system/capabilities", { cache: "no-store" });
   const usersResult = await userPromise;
   const infoResult = await infoPromise;
   const users = usersResult?.success && usersResult.data ? usersResult.data : null;
@@ -146,7 +146,7 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const uid = uidFromText(formText(form, "uid", 24));
     if (!uid) return failure("sync", t.adminBangumiInvalidUser);
-    const result = await mutate(event, `/api/v1/admin/bangumi/sync/${uid}`, "POST", "sync");
+    const result = await mutate(event, `/api/v2/admin/bangumi/users/${uid}/sync`, "POST", "sync");
     if (result) return result;
     redirectToList(form, "synced");
   },
@@ -155,7 +155,7 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const uid = uidFromText(formText(form, "uid", 24));
     if (!uid) return failure("clearLogs", t.adminBangumiInvalidUser);
-    const result = await mutate(event, `/api/v1/admin/bangumi/logs/${uid}`, "DELETE", "clearLogs");
+    const result = await mutate(event, `/api/v2/admin/bangumi/users/${uid}/logs`, "DELETE", "clearLogs");
     if (result) return result;
     redirectToList(form, "logs_cleared");
   }

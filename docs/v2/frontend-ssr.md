@@ -249,9 +249,9 @@ V2 调度器不使用浏览器轮询或 SSE。任务仍在后端异步运行，�
 
 ## 已迁移模块：管理员 Bangumi 管理
 
-`/(app)/admin/bangumi` 由管理员服务端布局保护。首屏使用 `/admin/bangumi/users` 的分页结果和系统功能摘要，搜索、分页和详情类型都由 URL 表示；列表只返回用户 Bangumi 开关、Token 是否配置、就绪状态以及有限统计，不把 Token、播放记录或同步日志装入浏览器。
+`/(app)/admin/bangumi` 由管理员服务端布局保护。首屏使用 `/api/v2/admin/bangumi/users` 的分页结果和 `/api/v2/system/capabilities` 功能摘要，搜索、分页和详情类型都由 URL 表示；列表只返回用户 Bangumi 开关、Token 是否配置、就绪状态以及有限统计，不把 Token、播放记录或同步日志装入浏览器。
 
-播放记录和同步日志只有在管理员打开指定 UID 的详情时才通过 SSR `load` 读取，详情表格使用 Firefox 有界滚动并保留水平滚动空间。手动同步和清除日志通过 SvelteKit form action 转发，提交前的确认只是体验保护，Go 后端继续负责功能开关、用户校验、Bangumi 外部调用、持久化和审计。管理员用户列表的记录数和最近 100 条日志成功数由 Store 批量计算，避免在 2000+ 用户场景按用户形成 N+1 查询。
+播放记录和同步日志只有在管理员打开指定 UID 的详情时才通过 SSR `load` 读取，详情表格使用 Firefox 有界滚动并保留水平滚动空间。手动同步和清除日志通过 SvelteKit form action 转发到 `/api/v2/admin/bangumi/users/{uid}/sync` 与 `/logs`，提交前的确认只是体验保护，Go 后端继续负责功能开关、用户校验、Bangumi 外部调用、持久化和审计。管理员用户列表的记录数和最近 100 条日志成功数由 Store 批量计算，避免在 2000+ 用户场景按用户形成 N+1 查询。
 
 ## 已迁移模块：管理员操作日志
 

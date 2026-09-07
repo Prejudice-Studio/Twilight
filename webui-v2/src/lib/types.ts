@@ -625,7 +625,7 @@ export interface AdminBangumiDetail {
 }
 
 export interface AdminBangumiPageData {
-  info: SystemInfo | null;
+  info: V2Capabilities | null;
   users: AdminBangumiUsersResult | null;
   detail: AdminBangumiDetail | null;
   query: { page: number; per_page: number; search: string; detail: "records" | "logs" | ""; uid: number };
