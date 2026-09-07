@@ -6,7 +6,7 @@ import type { UserAnnouncements } from "$lib/types";
 type FormState = { error?: string; success?: boolean; message?: string };
 
 export const load: PageServerLoad = async (event) => {
-  const result = await apiJSON<UserAnnouncements>(event, "/api/v1/users/me/announcements", { cache: "no-store" });
+  const result = await apiJSON<UserAnnouncements>(event, "/api/v2/announcements", { cache: "no-store" });
   return {
     announcements: result?.success ? result.data || null : null,
     loadError: result?.success ? null : "公告暂时无法读取，请刷新后重试",
@@ -22,7 +22,7 @@ export const actions: Actions = {
       .filter((value) => Number.isSafeInteger(value) && value > 0);
     if (ids.length === 0) return fail(400, { error: "没有需要确认的公告" } satisfies FormState);
 
-    const result = await apiJSONWithResponse<{ acknowledged: number }>(event, "/api/v1/users/me/announcements/ack", {
+    const result = await apiJSONWithResponse<{ acknowledged: number }>(event, "/api/v2/announcements/ack", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ ids: [...new Set(ids)] })

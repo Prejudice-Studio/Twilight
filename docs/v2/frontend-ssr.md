@@ -154,7 +154,7 @@ Telegram 注册绑定码生成使用独立的 `createBindCode` form action；启
 
 ## 已迁移模块：公告
 
-`/(app)/announcements` 在服务端读取 `/users/me/announcements`，首屏同时包含可见公告和当前账号尚未确认的强制阅读公告，不在浏览器端重复请求公告列表。公告正文以 Svelte 文本节点输出，保持字符转义，不复刻 V1 的富文本渲染路径；需要确认的公告通过 `acknowledge` form action 调用后端批量确认接口，并使用去重后的正整数 ID。
+`/(app)/announcements` 在服务端读取原生 `/api/v2/announcements`，首屏同时包含可见公告和当前账号尚未确认的强制阅读公告，不在浏览器端重复请求公告列表。公告正文以 Svelte 文本节点输出，保持字符转义，不复刻 V1 的富文本渲染路径；需要确认的公告通过 `acknowledge` form action 调用 `/api/v2/announcements/ack`，并使用去重后的正整数 ID。两个 V2 资源都复用已有公告可见性、归属和确认持久化逻辑，返回私有 `no-store` 响应，不建立 V1/V2 双写状态。
 
 公告列表按级别使用低饱和语义颜色区分，列表在桌面分为两列，在窄 Firefox 视口收为单列。长标题和正文允许换行，页面不使用无限滚动或定时刷新；用户需要新数据时使用浏览器原生刷新，避免公告页产生持续网络开支。
 

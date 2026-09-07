@@ -40,6 +40,8 @@ V2 基础协议入口使用 `/api/v2`，当前只提供不带秘密的能力协�
 | GET | `/api/v2/system/health` | Public | 仅确认 API 进程可处理请求，不探测数据库或 Emby |
 | GET | `/api/v2/system/capabilities` | Public | 返回 V2 版本、兼容版本、公开 feature 和受限上传额度 |
 | GET | `/api/v2/dashboard/summary` | User | 聚合当前用户、公开能力和在线人数摘要；Emby 失败时通过 `viewers.available=false` 独立降级 |
+| GET | `/api/v2/announcements` | User | 聚合当前账号可见公告与未确认的强制阅读公告；私有 `no-store` 响应 |
+| POST | `/api/v2/announcements/ack` | User | 去重确认当前账号的强制阅读公告；最终归属与状态由后端复核 |
 | GET | `/api/v2/signin/summary` | User | 聚合签到摘要、公开奖励规则和最近 30 条记录；写操作仍使用 `/api/v1/signin*` |
 | GET | `/api/v2/invite/summary` | User | 聚合邀请配置、当前关系、直属下级、邀请树和本人邀请码；写操作仍由服务端 form action 转发至 `/api/v1/invite*` |
 | GET | `/api/v2/bangumi/summary` | User | 聚合 Bangumi 同步状态、公开账号资料、五类收藏数量与最近条目；Token 不出现在响应，外部分类读取可独立降级 |
