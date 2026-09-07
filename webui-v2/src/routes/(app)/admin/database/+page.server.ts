@@ -54,8 +54,8 @@ function readEnvelope<T>(result: PromiseSettledResult<ApiEnvelope<T>>): T | null
 
 export const load: PageServerLoad = async (event): Promise<AdminDatabasePageData> => {
   const results = await Promise.allSettled([
-    apiJSON<DatabaseStatus>(event, "/api/v1/system/admin/database/status", { cache: "no-store" }),
-    apiJSON<{ backups: DatabaseBackup[] }>(event, "/api/v1/system/admin/database/backups", { cache: "no-store" })
+    apiJSON<DatabaseStatus>(event, "/api/v2/admin/database/status", { cache: "no-store" }),
+    apiJSON<{ backups: DatabaseBackup[] }>(event, "/api/v2/admin/database/backups", { cache: "no-store" })
   ]);
   const status = readEnvelope(results[0] as PromiseSettledResult<ApiEnvelope<DatabaseStatus>>);
   const backupData = readEnvelope(results[1] as PromiseSettledResult<ApiEnvelope<{ backups: DatabaseBackup[] }>>);
@@ -68,7 +68,7 @@ export const load: PageServerLoad = async (event): Promise<AdminDatabasePageData
 export const actions: Actions = {
   createBackup: async (event) => {
     const form = await event.request.formData();
-    const result = await mutation(event, "/api/v1/system/admin/database/backup", "POST", { note: text(form.get("note"), 200) }, "createBackup");
+    const result = await mutation(event, "/api/v2/admin/database/backup", "POST", { note: text(form.get("note"), 200) }, "createBackup");
     if (result.failure) return result.failure;
     throw redirect(303, "/admin/database");
   },
@@ -76,7 +76,7 @@ export const actions: Actions = {
   inspectBackup: async (event) => {
     const name = backupName(await event.request.formData());
     if (!name) return fail(400, { action: "inspectBackup", error: t.adminDatabaseOperationFailed } satisfies FormState);
-    const result = await apiJSONWithResponse<DatabaseBackupInspectResult>(event, `/api/v1/system/admin/database/backups/${encodeURIComponent(name)}`, { cache: "no-store" });
+    const result = await apiJSONWithResponse<DatabaseBackupInspectResult>(event, `/api/v2/admin/database/backups/${encodeURIComponent(name)}`, { cache: "no-store" });
     if (!result?.response.ok || !result.envelope?.success || !result.envelope.data) return failResult("inspectBackup", result?.response, t.adminDatabaseOperationFailed);
     return { action: "inspectBackup", backupPreview: result.envelope.data } satisfies FormState;
   },
@@ -84,7 +84,7 @@ export const actions: Actions = {
   deleteBackup: async (event) => {
     const name = backupName(await event.request.formData());
     if (!name) return fail(400, { action: "deleteBackup", error: t.adminDatabaseOperationFailed } satisfies FormState);
-    const result = await mutation(event, `/api/v1/system/admin/database/backups/${encodeURIComponent(name)}`, "DELETE", undefined, "deleteBackup");
+    const result = await mutation(event, `/api/v2/admin/database/backups/${encodeURIComponent(name)}`, "DELETE", undefined, "deleteBackup");
     if (result.failure) return result.failure;
     throw redirect(303, "/admin/database");
   },
@@ -92,7 +92,7 @@ export const actions: Actions = {
   restorePreview: async (event) => {
     const name = backupName(await event.request.formData());
     if (!name) return fail(400, { action: "restorePreview", error: t.adminDatabaseOperationFailed } satisfies FormState);
-    const result = await mutation<DatabaseOperationResult>(event, "/api/v1/system/admin/database/restore", "POST", { name, dry_run: true }, "restorePreview");
+    const result = await mutation<DatabaseOperationResult>(event, "/api/v2/admin/database/restore", "POST", { name, dry_run: true }, "restorePreview");
     if (result.failure) return result.failure;
     return { action: "restorePreview", restorePreview: result.data } satisfies FormState;
   },
@@ -101,7 +101,7 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const name = backupName(form);
     if (!name || text(form.get("confirm"), 64) !== restoreConfirm) return fail(400, { action: "restore", error: t.adminDatabaseRestoreConfirm } satisfies FormState);
-    const result = await mutation(event, "/api/v1/system/admin/database/restore", "POST", { name, confirm: restoreConfirm }, "restore");
+    const result = await mutation(event, "/api/v2/admin/database/restore", "POST", { name, confirm: restoreConfirm }, "restore");
     if (result.failure) return result.failure;
     throw redirect(303, "/admin/database");
   },
@@ -110,7 +110,7 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const target = ["postgres", "json"].includes(text(form.get("target_driver"), 20)) ? text(form.get("target_driver"), 20) : "json";
     const stateFile = text(form.get("state_file"), 240);
-    const result = await mutation<DatabaseOperationResult>(event, "/api/v1/system/admin/database/migrate", "POST", { target_driver: target, ...(stateFile ? { state_file: stateFile } : {}), dry_run: true }, "migrationPreview");
+    const result = await mutation<DatabaseOperationResult>(event, "/api/v2/admin/database/migrate", "POST", { target_driver: target, ...(stateFile ? { state_file: stateFile } : {}), dry_run: true }, "migrationPreview");
     if (result.failure) return result.failure;
     return { action: "migrationPreview", migrationPreview: result.data } satisfies FormState;
   },
@@ -120,7 +120,7 @@ export const actions: Actions = {
     const target = ["postgres", "json"].includes(text(form.get("target_driver"), 20)) ? text(form.get("target_driver"), 20) : "json";
     const stateFile = text(form.get("state_file"), 240);
     if (text(form.get("confirm"), 64) !== migrateConfirm) return fail(400, { action: "migrate", error: t.adminDatabaseMigrationHelp } satisfies FormState);
-    const result = await mutation<DatabaseOperationResult>(event, "/api/v1/system/admin/database/migrate", "POST", { target_driver: target, ...(stateFile ? { state_file: stateFile } : {}), confirm: migrateConfirm }, "migrate");
+    const result = await mutation<DatabaseOperationResult>(event, "/api/v2/admin/database/migrate", "POST", { target_driver: target, ...(stateFile ? { state_file: stateFile } : {}), confirm: migrateConfirm }, "migrate");
     if (result.failure) return result.failure;
     throw redirect(303, "/admin/database");
   }

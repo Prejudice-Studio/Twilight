@@ -67,54 +67,53 @@ func (a *App) handleV2ConfigBackupInspect(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// v2ConfigResponseWriter lets compatibility handlers keep one implementation
-// of validation, persistence and audit behavior while removing filesystem
+// v2BufferedResponseWriter lets compatibility handlers keep one implementation
+// of validation, persistence and audit behavior while removing implementation
 // details from their V2 success payloads.
-type v2ConfigResponseWriter struct {
+type v2BufferedResponseWriter struct {
 	header http.Header
 	status int
 	body   bytes.Buffer
 }
 
-func (w *v2ConfigResponseWriter) Header() http.Header { return w.header }
+func (w *v2BufferedResponseWriter) Header() http.Header { return w.header }
 
-func (w *v2ConfigResponseWriter) WriteHeader(status int) {
+func (w *v2BufferedResponseWriter) WriteHeader(status int) {
 	if w.status == 0 {
 		w.status = status
 	}
 }
 
-func (w *v2ConfigResponseWriter) Write(data []byte) (int, error) {
+func (w *v2BufferedResponseWriter) Write(data []byte) (int, error) {
 	if w.status == 0 {
 		w.status = http.StatusOK
 	}
 	return w.body.Write(data)
 }
 
-func redactV2ConfigPaths(value any) {
+func redactV2PrivateFields(value any, blocked map[string]struct{}) {
 	switch typed := value.(type) {
 	case map[string]any:
 		for key := range typed {
-			switch strings.ToLower(key) {
-			case "path", "config_file", "backup_dir", "backup_path":
+			if _, blocked := blocked[strings.ToLower(key)]; blocked {
 				delete(typed, key)
-			default:
-				redactV2ConfigPaths(typed[key])
+				continue
 			}
+			redactV2PrivateFields(typed[key], blocked)
 		}
 	case []any:
 		for _, item := range typed {
-			redactV2ConfigPaths(item)
+			redactV2PrivateFields(item, blocked)
 		}
 	}
 }
 
-func sanitizeV2ConfigEnvelope(body []byte) []byte {
+func sanitizeV2Envelope(body []byte, blocked map[string]struct{}) []byte {
 	var envelope map[string]any
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		return body
 	}
-	redactV2ConfigPaths(envelope["data"])
+	redactV2PrivateFields(envelope["data"], blocked)
 	result, err := json.Marshal(envelope)
 	if err != nil {
 		return body
@@ -122,8 +121,8 @@ func sanitizeV2ConfigEnvelope(body []byte) []byte {
 	return append(result, '\n')
 }
 
-func (a *App) delegateV2ConfigHandler(w http.ResponseWriter, r *http.Request, p Params, handler func(http.ResponseWriter, *http.Request, Params)) {
-	buffered := &v2ConfigResponseWriter{header: make(http.Header)}
+func (a *App) delegateV2SafeHandler(w http.ResponseWriter, r *http.Request, p Params, handler func(http.ResponseWriter, *http.Request, Params), blocked map[string]struct{}) {
+	buffered := &v2BufferedResponseWriter{header: make(http.Header)}
 	handler(buffered, r, p)
 	for key, values := range buffered.header {
 		for _, value := range values {
@@ -135,7 +134,15 @@ func (a *App) delegateV2ConfigHandler(w http.ResponseWriter, r *http.Request, p 
 		status = http.StatusOK
 	}
 	w.WriteHeader(status)
-	_, _ = w.Write(sanitizeV2ConfigEnvelope(buffered.body.Bytes()))
+	_, _ = w.Write(sanitizeV2Envelope(buffered.body.Bytes(), blocked))
+}
+
+var v2ConfigPrivateFields = map[string]struct{}{
+	"path": {}, "config_file": {}, "backup_dir": {}, "backup_path": {},
+}
+
+func (a *App) delegateV2ConfigHandler(w http.ResponseWriter, r *http.Request, p Params, handler func(http.ResponseWriter, *http.Request, Params)) {
+	a.delegateV2SafeHandler(w, r, p, handler, v2ConfigPrivateFields)
 }
 
 func (a *App) handleV2ConfigSchema(w http.ResponseWriter, r *http.Request, p Params) {

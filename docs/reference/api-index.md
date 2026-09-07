@@ -119,6 +119,13 @@ V2 基础协议入口使用 `/api/v2`，当前只提供不带秘密的能力协�
 | POST | `/api/v2/admin/config/restore` | Admin | V2 生成恢复预览或确认恢复；执行恢复需要 `RESTORE_CONFIG_BACKUP` |
 | POST | `/api/v2/admin/config/sweep` | Admin | V2 整理配置并热重载 |
 | POST | `/api/v2/admin/config/upload-auth-background` | Admin | V2 上传认证页背景图；复用 MIME、大小、路径和限流校验 |
+| GET | `/api/v2/admin/database/status` | Admin | V2 数据库状态安全摘要；不返回状态文件、备份目录或数据库拓扑 |
+| GET | `/api/v2/admin/database/backups` | Admin | V2 数据库备份元数据；不返回服务器路径 |
+| GET | `/api/v2/admin/database/backups/{name}` | Admin | V2 读取数据库备份摘要；文件名由后端路径安全校验 |
+| DELETE | `/api/v2/admin/database/backups/{name}` | Admin | V2 删除数据库备份 |
+| POST | `/api/v2/admin/database/backup` | Admin | V2 创建数据库备份 |
+| POST | `/api/v2/admin/database/restore` | Admin | V2 生成恢复预览或确认恢复；执行恢复需要 `RESTORE_DATABASE_BACKUP` |
+| POST | `/api/v2/admin/database/migrate` | Admin | V2 生成数据库迁移预览或执行迁移；执行需要 `MIGRATE_DATABASE`，继续受功能开关与路径安全约束 |
 
 V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/api/v1`，不能由前端自行拼接版本路径。
 

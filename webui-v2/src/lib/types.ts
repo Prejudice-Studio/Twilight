@@ -1192,8 +1192,6 @@ export interface DatabaseStatus {
   active_label?: string;
   configured_label?: string;
   supported_drivers?: Array<{ driver: string; label: string; role: string }>;
-  state_file?: string;
-  backup_dir?: string;
   backup_count: number;
   storage_mismatch?: boolean;
   storage_warning?: string;
@@ -1238,7 +1236,6 @@ export interface DatabaseOperationResult {
   invite_codes: number;
   media_requests: number;
   announcements: number;
-  state_file?: string;
   backup?: DatabaseBackup;
   restored?: string;
   pre_restore_backup?: DatabaseBackup;
