@@ -87,4 +87,23 @@ func (a *App) registerV2Routes() {
 	a.add(http.MethodPost, "/api/v2/admin/users/:uid/bind-telegram", AuthAdmin, a.handleV2AdminBindTelegram)
 	a.add(http.MethodGet, "/api/v2/admin/users/by-telegram/:telegram_id", AuthAdmin, a.handleUserByTelegram)
 	a.add(http.MethodPost, "/api/v2/admin/users/:uid/bind-emby", AuthAdmin, a.handleV2AdminBindEmby)
+
+	// Emby management resources. Reads remain bounded and manual-refresh only;
+	// mutations reuse the audited legacy handlers during the V2 migration.
+	a.add(http.MethodGet, "/api/v2/admin/emby/users", AuthAdmin, a.handleV2AdminEmbyUsers)
+	a.add(http.MethodGet, "/api/v2/admin/emby/device-audit", AuthAdmin, a.handleV2AdminEmbyDeviceAudit)
+	a.add(http.MethodGet, "/api/v2/admin/emby/activity-logs", AuthAdmin, a.handleV2AdminEmbyActivityLogs)
+	a.add(http.MethodPost, "/api/v2/admin/emby/activity-logs/sync", AuthAdmin, a.handleV2AdminEmbyActivityLogSync)
+	a.add(http.MethodPost, "/api/v2/admin/emby/test", AuthAdmin, a.handleV2AdminEmbyConnectivityTest)
+	a.add(http.MethodPost, "/api/v2/admin/emby/broadcast", AuthAdmin, a.handleV2AdminEmbyBroadcast)
+	a.add(http.MethodPost, "/api/v2/admin/emby/sync", AuthAdmin, a.handleV2AdminEmbySync)
+	a.add(http.MethodPost, "/api/v2/admin/emby/import-users", AuthAdmin, a.handleV2AdminEmbyImportUsers)
+	a.add(http.MethodPost, "/api/v2/admin/emby/delete-unlinked", AuthAdmin, a.handleV2AdminEmbyDeleteUnlinked)
+	a.add(http.MethodPost, "/api/v2/admin/emby/cleanup-orphans", AuthAdmin, a.handleV2AdminEmbyCleanupOrphans)
+	a.add(http.MethodPost, "/api/v2/admin/emby/reset-bindings", AuthAdmin, a.handleV2AdminEmbyResetBindings)
+	a.add(http.MethodPost, "/api/v2/admin/emby/create-standalone", AuthAdmin, a.handleV2AdminEmbyCreateStandalone)
+	a.add(http.MethodPost, "/api/v2/admin/emby/force-set-password", AuthAdmin, a.handleV2AdminEmbyForceSetPassword)
+	a.add(http.MethodPost, "/api/v2/admin/emby/users/:embyId/enable", AuthAdmin, a.handleV2AdminEmbyUserToggle)
+	a.add(http.MethodPost, "/api/v2/admin/emby/users/:embyId/disable", AuthAdmin, a.handleV2AdminEmbyUserToggle)
+	a.add(http.MethodPost, "/api/v2/admin/emby/users/:embyId/kick", AuthAdmin, a.handleV2AdminEmbyUserKick)
 }

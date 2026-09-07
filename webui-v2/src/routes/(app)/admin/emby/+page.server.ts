@@ -138,18 +138,18 @@ export const load: PageServerLoad = async (event): Promise<AdminEmbyPageData> =>
 		if (query.attribute) params.set("attribute", query.attribute);
 		params.set("orphan_page", String(query.orphan_page));
 		params.set("orphan_per_page", String(query.orphan_per_page));
-    const result = await apiJSON<AdminEmbyUsersResult>(event, `/api/v1/admin/emby/users?${params}`, { cache: "no-store" });
+    const result = await apiJSON<AdminEmbyUsersResult>(event, `/api/v2/admin/emby/users?${params}`, { cache: "no-store" });
     users = result?.success ? result.data || null : null;
     if (!users) errors.push(t.adminEmbyOperationFailed);
   } else if (tab === "devices") {
     const params = new URLSearchParams({ page: String(query.device_page), per_page: String(query.device_per_page) });
     if (query.device_search) params.set("search", query.device_search);
     if (event.url.searchParams.get("refresh") === "1" || event.url.searchParams.get("refresh") === "true") params.set("refresh", "1");
-    const result = await apiJSON<AdminEmbyDeviceAuditResult>(event, `/api/v1/admin/emby/device-audit?${params}`, { cache: "no-store" });
+    const result = await apiJSON<AdminEmbyDeviceAuditResult>(event, `/api/v2/admin/emby/device-audit?${params}`, { cache: "no-store" });
     deviceAudit = result?.success ? result.data || null : null;
     if (!deviceAudit) errors.push(t.adminEmbyDeviceDescription);
   } else {
-    const result = await apiJSON<AdminEmbyActivityResult>(event, "/api/v1/admin/emby/activity-logs?limit=200", { cache: "no-store" });
+    const result = await apiJSON<AdminEmbyActivityResult>(event, "/api/v2/admin/emby/activity-logs?limit=200", { cache: "no-store" });
     activity = result?.success ? result.data || null : null;
     if (!activity) errors.push(t.adminEmbyActivityReadFailed);
   }
@@ -158,7 +158,7 @@ export const load: PageServerLoad = async (event): Promise<AdminEmbyPageData> =>
 
 export const actions: Actions = {
   testConnectivity: async (event) => {
-    const result = await mutation<EmbyConnectivityResult>(event, "/api/v1/admin/emby/test", "POST", {}, "testConnectivity");
+    const result = await mutation<EmbyConnectivityResult>(event, "/api/v2/admin/emby/test", "POST", {}, "testConnectivity");
     if (result.failure) return result.failure;
     return { action: "testConnectivity", success: true, connectivity: result.data } satisfies FormState;
   },
@@ -168,7 +168,7 @@ export const actions: Actions = {
     const message = formText(form, "text", 2000);
     if (!message) return fail(400, { action: "broadcast", error: t.adminEmbyBroadcastRequired } satisfies FormState);
     const header = formText(form, "header", 80);
-    const result = await mutation<BroadcastResult>(event, "/api/v1/admin/emby/broadcast", "POST", { text: message, ...(header ? { header } : {}) }, "broadcast");
+    const result = await mutation<BroadcastResult>(event, "/api/v2/admin/emby/broadcast", "POST", { text: message, ...(header ? { header } : {}) }, "broadcast");
     if (result.failure) return result.failure;
     return { action: "broadcast", success: true, broadcast: result.data } satisfies FormState;
   },
@@ -178,7 +178,7 @@ export const actions: Actions = {
     const username = formText(form, "username", 64);
     const password = formValue(form, "password", 256);
     if (!username || password.length < 8 || password.length > 128) return fail(400, { action: "createStandalone", error: t.adminEmbyPasswordInvalid } satisfies FormState);
-    const result = await mutation<StandaloneEmbyResult>(event, "/api/v1/admin/emby/create-standalone", "POST", { username, password }, "createStandalone");
+    const result = await mutation<StandaloneEmbyResult>(event, "/api/v2/admin/emby/create-standalone", "POST", { username, password }, "createStandalone");
     if (result.failure) return result.failure;
     return { action: "createStandalone", success: true, standalone: result.data } satisfies FormState;
   },
@@ -189,21 +189,21 @@ export const actions: Actions = {
     const password = formValue(form, "new_password", 256);
     if (!username) return fail(400, { action: "forceSetPassword", error: t.adminEmbyForcePasswordRequired } satisfies FormState);
     if (password && (password.length < 8 || password.length > 128)) return fail(400, { action: "forceSetPassword", error: t.adminEmbyPasswordInvalid } satisfies FormState);
-    const result = await mutation<EmbyPasswordResetResult>(event, "/api/v1/admin/emby/force-set-password", "POST", { emby_username: username, ...(password ? { new_password: password } : {}) }, "forceSetPassword");
+    const result = await mutation<EmbyPasswordResetResult>(event, "/api/v2/admin/emby/force-set-password", "POST", { emby_username: username, ...(password ? { new_password: password } : {}) }, "forceSetPassword");
     if (result.failure) return result.failure;
     return { action: "forceSetPassword", success: true, passwordReset: result.data } satisfies FormState;
   },
 
   sync: async (event) => {
     const form = await event.request.formData();
-    const result = await mutation(event, "/api/v1/admin/emby/sync", "POST", {}, "sync");
+    const result = await mutation(event, "/api/v2/admin/emby/sync", "POST", {}, "sync");
     if (result.failure) return result.failure;
     redirectToTab(form, "accounts");
   },
 
   importUsers: async (event) => {
     const form = await event.request.formData();
-    const result = await mutation(event, "/api/v1/admin/emby/import-users", "POST", {}, "importUsers");
+    const result = await mutation(event, "/api/v2/admin/emby/import-users", "POST", {}, "importUsers");
     if (result.failure) return result.failure;
     redirectToTab(form, "accounts");
   },
@@ -211,14 +211,14 @@ export const actions: Actions = {
   deleteUnlinked: async (event) => {
     const form = await event.request.formData();
     if (formText(form, "confirm", 80) !== "DELETE_UNLINKED_EMBY") return fail(400, { action: "deleteUnlinked", error: t.adminEmbyDeleteUnlinkedConfirm } satisfies FormState);
-    const result = await mutation(event, "/api/v1/admin/emby/delete-unlinked", "POST", { dry_run: false }, "deleteUnlinked");
+    const result = await mutation(event, "/api/v2/admin/emby/delete-unlinked", "POST", { dry_run: false }, "deleteUnlinked");
     if (result.failure) return result.failure;
     redirectToTab(form, "accounts");
   },
 
   cleanup: async (event) => {
     const form = await event.request.formData();
-    const result = await mutation(event, "/api/v1/admin/emby/cleanup-orphans", "POST", {}, "cleanup");
+    const result = await mutation(event, "/api/v2/admin/emby/cleanup-orphans", "POST", {}, "cleanup");
     if (result.failure) return result.failure;
     redirectToTab(form, "accounts");
   },
@@ -226,13 +226,13 @@ export const actions: Actions = {
   reset: async (event) => {
     const form = await event.request.formData();
     if (formText(form, "confirm", 80) !== "RESET_ALL_EMBY") return fail(400, { action: "reset", error: t.adminEmbyResetConfirm } satisfies FormState);
-    const result = await mutation(event, "/api/v1/admin/emby/reset-bindings", "POST", { confirm: "RESET_ALL_EMBY" }, "reset");
+    const result = await mutation(event, "/api/v2/admin/emby/reset-bindings", "POST", { confirm: "RESET_ALL_EMBY" }, "reset");
     if (result.failure) return result.failure;
     redirectToTab(form, "accounts");
   },
 
   syncActivity: async (event) => {
-    const result = await mutation<AdminEmbyActivityResult>(event, "/api/v1/admin/emby/activity-logs?limit=200&refresh=1&since_hours=24", "GET", undefined, "syncActivity");
+    const result = await mutation<AdminEmbyActivityResult>(event, "/api/v2/admin/emby/activity-logs/sync?limit=200&since_hours=24", "POST", {}, "syncActivity");
     if (result.failure) return result.failure;
     return { action: "syncActivity", success: true, activity: result.data } satisfies FormState;
   },
@@ -242,7 +242,7 @@ export const actions: Actions = {
     const embyID = formText(form, "emby_id", 256);
     if (!embyID) return fail(400, { action: "setEmbyEnabled", error: t.adminEmbyOperationFailed } satisfies FormState);
     const enabled = formText(form, "enabled", 8) === "true";
-    const result = await mutation(event, `/api/v1/admin/emby/users/${encodeURIComponent(embyID)}/${enabled ? "enable" : "disable"}`, "POST", {}, "setEmbyEnabled");
+    const result = await mutation(event, `/api/v2/admin/emby/users/${encodeURIComponent(embyID)}/${enabled ? "enable" : "disable"}`, "POST", {}, "setEmbyEnabled");
     if (result.failure) return result.failure;
     redirectToTab(form, "accounts");
   },
@@ -251,7 +251,7 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const embyID = formText(form, "emby_id", 256);
     if (!embyID) return fail(400, { action: "kickEmby", error: t.adminEmbyOperationFailed } satisfies FormState);
-    const result = await mutation(event, `/api/v1/admin/emby/users/${encodeURIComponent(embyID)}/kick`, "POST", {}, "kickEmby");
+    const result = await mutation(event, `/api/v2/admin/emby/users/${encodeURIComponent(embyID)}/kick`, "POST", {}, "kickEmby");
     if (result.failure) return result.failure;
     redirectToTab(form, "accounts");
   }

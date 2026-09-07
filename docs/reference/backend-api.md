@@ -1004,6 +1004,8 @@ V2 管理员用户资源为 `/api/v2/admin/users`。集合接口返回：
 
 `search`、`role`、`active`、`emby`、`emby_status`、`email_status`、`sort`、`page` 和 `per_page` 均在服务端解析并限制范围；列表只序列化当前页，用户详情中的 `admin_action_state` 只作为界面提示，不能替代后端权限判断。V2 写操作复用同一套 Store 原子更新、Emby 外部副作用和审计逻辑，V1 路径仅用于回滚及外部兼容调用。
 
+管理员 Emby 页面使用 `/api/v2/admin/emby/*`。账号、设备/IP 与活动日志是三个独立资源：账号列表服务端筛选和分页；设备/IP 只有明确传入 `refresh=1` 才会重读 Emby；活动日志默认读取数据库，手动同步使用 `POST /api/v2/admin/emby/activity-logs/sync`，由后端从 Emby 拉取并入库。广播、账号创建、强制改密、绑定维护和会话操作都由相同的管理员权限、Emby URL 校验、审计和通用错误脱敏边界处理。V2 页面不得回退为浏览器直连 Emby、自动轮询或播放统计界面。
+
 #### 查询用户列表
 
 `GET /admin/users?status=active&page=1&per_page=20`

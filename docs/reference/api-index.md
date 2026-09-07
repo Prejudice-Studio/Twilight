@@ -341,6 +341,22 @@ V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/ap
 | POST | `/api/v2/admin/users/{uid}/unbind-telegram` | Admin | V2 解绑用户 Telegram |
 | POST | `/api/v2/admin/users/{uid}/admin` | Admin | V2 设置或取消管理员角色 |
 | POST | `/api/v2/admin/users/{uid}/delete` | Admin | V2 删除用户；支持 `mode` 与 `cascade_depth`，推荐用于 SSR 管理操作 |
+| GET | `/api/v2/admin/emby/users` | Admin | V2 Emby 账号资源集合；服务端搜索、筛选和双分页本地孤儿绑定，手动读取且不缓存 |
+| GET | `/api/v2/admin/emby/device-audit` | Admin | V2 手动设备/IP 审查；按 Emby 用户聚合、过滤 Twilight 自身客户端，`refresh=1` 才强制刷新远端数据 |
+| GET | `/api/v2/admin/emby/activity-logs` | Admin | V2 本地 Emby 活动日志；仅 `refresh=1` 时从 Emby 同步并入库 |
+| POST | `/api/v2/admin/emby/activity-logs/sync` | Admin | V2 手动同步 Emby 活动日志并入库；默认读取最近 24 小时，可用 `since_hours` 调整范围 |
+| POST | `/api/v2/admin/emby/test` | Admin | V2 后端 Emby 连通性与本机候选探测 |
+| POST | `/api/v2/admin/emby/broadcast` | Admin | V2 向在线 Emby 会话发送广播，保留审计 |
+| POST | `/api/v2/admin/emby/sync` | Admin | V2 同步本地 Emby 用户名映射 |
+| POST | `/api/v2/admin/emby/import-users` | Admin | V2 扫描可导入的非管理员 Emby 账号 |
+| POST | `/api/v2/admin/emby/delete-unlinked` | Admin | V2 删除未绑定 Emby 账号；后端保留管理员保护与审计 |
+| POST | `/api/v2/admin/emby/cleanup-orphans` | Admin | V2 清理本地孤儿绑定 |
+| POST | `/api/v2/admin/emby/reset-bindings` | Admin | V2 经确认后重置所有本地 Emby 绑定 |
+| POST | `/api/v2/admin/emby/create-standalone` | Admin | V2 创建不关联 Web 账号的 Emby 用户 |
+| POST | `/api/v2/admin/emby/force-set-password` | Admin | V2 强制重置 Emby 密码；明文仅存在本次响应 |
+| POST | `/api/v2/admin/emby/users/{emby_id}/enable` | Admin | V2 启用单个 Emby 用户 |
+| POST | `/api/v2/admin/emby/users/{emby_id}/disable` | Admin | V2 禁用单个 Emby 用户 |
+| POST | `/api/v2/admin/emby/users/{emby_id}/kick` | Admin | V2 踢出单个 Emby 用户会话 |
 | GET | `/api/v1/admin/media-requests` | Admin | 求片管理列表；支持 `status/source/q/page/per_page`，返回状态计数与分页元数据，不缓存 |
 | PUT | `/api/v1/admin/media-requests/{request_id}` | Admin | 更新求片状态 |
 | DELETE | `/api/v1/admin/media-requests/{request_id}` | Admin | 删除求片 |

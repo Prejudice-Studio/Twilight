@@ -243,7 +243,7 @@ V2 调度器不使用浏览器轮询或 SSE。任务仍在后端异步运行，�
 
 ## 已迁移模块：管理员 Emby 管理
 
-`/(app)/admin/emby` 由管理员服务端布局保护。账号页通过 `/admin/emby/users` 做服务端搜索、筛选和分页，只把当前页发送到浏览器；失效本地绑定单独分页。设备/IP 页签只在管理员主动打开或刷新时读取 `/admin/emby/device-audit`，按 Emby 用户聚合设备，过滤 Twilight 自身连接，离线记录按设备名、客户端和版本合并，并使用独立的 Firefox 有界滚动区域。活动日志页签默认读取数据库中的 Emby ActivityLog，只有点击同步才从 Emby 拉取并入库，不恢复播放统计页面。
+`/(app)/admin/emby` 由管理员服务端布局保护。账号页通过 `/api/v2/admin/emby/users` 做服务端搜索、筛选和分页，只把当前页发送到浏览器；失效本地绑定单独分页。设备/IP 页签只在管理员主动打开或刷新时读取 `/api/v2/admin/emby/device-audit`，按 Emby 用户聚合设备，过滤 Twilight 自身连接，离线记录按设备名、客户端和版本合并，并使用独立的 Firefox 有界滚动区域。活动日志页签默认读取 `/api/v2/admin/emby/activity-logs` 中数据库保存的 Emby ActivityLog，点击同步时通过 `POST /api/v2/admin/emby/activity-logs/sync` 从 Emby 拉取并入库，不恢复播放统计页面。
 
 连通性检测、用户列表、媒体库列表和本机回环候选探测都在 Go 后端发起；页面只接收服务器基本信息和通用失败文案，不接收 Emby URL、Token 或网络错误原文。同步、导入、清理、绑定重置、广播、独立账号创建、强制改密、账号启停和踢会话均通过 SvelteKit form action 转发 HttpOnly 会话，后端负责最终鉴权、参数校验、外部副作用和审计。生成的独立账号密码或强制重置密码只作为当前 action 结果显示，不进入 URL、缓存或持久化页面状态。
 
