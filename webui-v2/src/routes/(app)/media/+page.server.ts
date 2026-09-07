@@ -5,7 +5,7 @@ import type { InventoryCheckResult, MediaDetail, MediaItem, MediaRequest } from 
 import { t } from "$lib/i18n";
 import { safeImageURL } from "$lib/media";
 
-type SearchData = { results: MediaItem[]; total?: number; warnings?: Record<string, string> };
+type SearchData = { items: MediaItem[]; total?: number; warnings?: Record<string, string> };
 type FormState = { action?: string; error?: string };
 
 function text(form: FormData, name: string): string {
@@ -41,7 +41,7 @@ function requestMediaType(source: string, value: string): boolean {
 function searchURL(query: string, source: string, mediaType: string): string {
   const params = new URLSearchParams({ q: query, source, limit: "20" });
   if (source !== "bangumi") params.set("type", mediaType);
-  return `/api/v1/media/search?${params.toString()}`;
+  return `/api/v2/media/search?${params.toString()}`;
 }
 
 async function mutation(
@@ -78,7 +78,7 @@ export const load: PageServerLoad = async (event) => {
   if (tab === "search" && query) {
     const search = await apiJSON<SearchData>(event, searchURL(query, source, mediaType), { cache: "no-store" });
     if (search?.success && search.data) {
-      results = Array.isArray(search.data.results) ? search.data.results : [];
+      results = Array.isArray(search.data.items) ? search.data.items : [];
       searchWarning = Object.keys(search.data.warnings || {}).length ? t.mediaSearchFailed : null;
     } else {
       searchFailed = true;
@@ -91,7 +91,7 @@ export const load: PageServerLoad = async (event) => {
     const selected = results.find((item) => String(item.id) === selectedID && (source === "all" || item.source === source));
     const selectedSource = selected?.source || (source === "all" ? "tmdb" : source);
     const selectedType = selected?.media_type || mediaType;
-    const detailPath = `/api/v1/media/detail?source=${encodeURIComponent(selectedSource)}&media_id=${selectedID}&media_type=${encodeURIComponent(selectedType)}`;
+    const detailPath = `/api/v2/media/detail?source=${encodeURIComponent(selectedSource)}&media_id=${selectedID}&media_type=${encodeURIComponent(selectedType)}`;
     const inventoryBody = {
       source: selectedSource,
       media_id: Number(selectedID),
@@ -102,15 +102,15 @@ export const load: PageServerLoad = async (event) => {
       ...(selectedSeason ? { season: selectedSeason } : {})
     };
     const [detailResponse, inventoryResponse] = await Promise.all([
-      apiJSON<MediaDetail>(event, detailPath, { cache: "no-store" }),
-      apiJSON<InventoryCheckResult>(event, "/api/v1/media/inventory/check", {
+      apiJSON<{ item: MediaDetail }>(event, detailPath, { cache: "no-store" }),
+      apiJSON<InventoryCheckResult>(event, "/api/v2/media/inventory/check", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(inventoryBody),
         cache: "no-store"
       })
     ]);
-    if (detailResponse?.success && detailResponse.data) detail = detailResponse.data;
+    if (detailResponse?.success && detailResponse.data?.item) detail = detailResponse.data.item;
     else if (selected) detail = selected as MediaDetail;
     if (inventoryResponse?.success && inventoryResponse.data) inventory = inventoryResponse.data;
   }
@@ -118,8 +118,8 @@ export const load: PageServerLoad = async (event) => {
   let requests: MediaRequest[] | null = null;
   let requestsFailed = false;
   if (tab === "requests") {
-    const response = await apiJSON<MediaRequest[]>(event, "/api/v1/media/request/my", { cache: "no-store" });
-    if (response?.success && Array.isArray(response.data)) requests = response.data;
+    const response = await apiJSON<{ items: MediaRequest[] }>(event, "/api/v2/media/requests", { cache: "no-store" });
+    if (response?.success && Array.isArray(response.data?.items)) requests = response.data.items;
     else requestsFailed = true;
   }
 
@@ -167,7 +167,7 @@ export const actions: Actions = {
       ...(seasonText && /^\d{1,3}$/.test(seasonText) ? { season: Number(seasonText) } : {}),
       ...(yearText && /^\d{4}$/.test(yearText) ? { year: Number(yearText) } : {})
     };
-    const error = await mutation(event, "/api/v1/media/request", "POST", body, "create", t.mediaRequestFailed);
+    const error = await mutation(event, "/api/v2/media/requests", "POST", body, "create", t.mediaRequestFailed);
     if (error) return error;
     throw redirect(303, "/media?tab=requests&result=created");
   },
@@ -178,7 +178,7 @@ export const actions: Actions = {
     if (!key || key.length > 128 || /[\\/]/.test(key)) {
       return fail(400, { action: "delete", error: t.mediaRequestDeleteFailed } satisfies FormState);
     }
-    const error = await mutation(event, `/api/v1/media/request/by-key/${encodeURIComponent(key)}`, "DELETE", undefined, "delete", t.mediaRequestDeleteFailed);
+    const error = await mutation(event, `/api/v2/media/requests/by-key/${encodeURIComponent(key)}`, "DELETE", undefined, "delete", t.mediaRequestDeleteFailed);
     if (error) return error;
     throw redirect(303, "/media?tab=requests&result=deleted");
   }

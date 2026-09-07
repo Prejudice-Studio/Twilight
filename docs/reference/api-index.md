@@ -323,6 +323,19 @@ V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/ap
 
 > 注：`/media/request/external/update` 路由本身注册为 Public，真正的访问控制来自请求体/请求头携带的内部密钥（`X-Internal-Secret` 或 `Authorization: Bearer`，见 `internal/api/media_request_handlers.go`），并非登录会话。
 
+V2 用户端媒体资源（默认 SSR 前端使用）：
+
+| 方法 | 路径 | 鉴权 | 说明 |
+| ---- | ---- | ---- | ---- |
+| GET | `/api/v2/media/search` | User | 受限 TMDB/Bangumi 聚合搜索；返回 `items`、`total` 和来源降级提示，不缓存 |
+| GET | `/api/v2/media/search/{source}` | User | 按路径来源搜索，`source` 为 `tmdb` 或 `bangumi` |
+| GET | `/api/v2/media/detail` | User | 返回 `{item}` 包装的媒体详情资源 |
+| POST | `/api/v2/media/inventory/check` | User | 检查 Emby 库存；响应不缓存，外部错误不会把内部地址返回给浏览器 |
+| GET | `/api/v2/media/requests` | User | 当前用户的求片资源集合，返回 `items` 和 `total` |
+| POST | `/api/v2/media/requests` | User | 创建求片；继续复用后端邮箱、Telegram、库存、队列上限、去重和审计规则 |
+| GET | `/api/v2/media/requests/by-key/{require_key}` | User | 按业务 key 读取本人或管理员可访问的求片 |
+| DELETE | `/api/v2/media/requests/by-key/{require_key}` | User | 删除本人可访问的求片 |
+
 ## Tickets
 
 | 方法 | 路径 | 鉴权 | 说明 |

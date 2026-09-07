@@ -199,6 +199,8 @@ Telegram 注册绑定码生成使用独立的 `createBindCode` form action；启
 
 `/(app)/media` 使用 URL 参数驱动的 SSR 页面：`q`、`source`、`type`、`media_id` 和 `tab=requests`。名称搜索只在服务端读取 TMDB/Bangumi 聚合结果；点击结果后，服务端并行读取媒体详情和 Emby 库存，详情接口失败时保留搜索结果中的标题和海报。浏览器不会接触后端会话令牌，也不会为详情再发起一组客户端 API 请求。
 
+该页面现在只依赖 `/api/v2/media/search`、`/api/v2/media/detail`、`/api/v2/media/inventory/check` 和 `/api/v2/media/requests`。V2 资源使用明确的 `items`/`item` 包装和私有 `no-store` 响应，SSR 服务端继续通过统一 API 边界转发会话 Cookie；V1 媒体接口只作为回滚和外部兼容入口保留。
+
 - “我的求片”只有在打开 `tab=requests` 或显式刷新时才读取，避免求片搜索首屏携带不必要的历史列表。
 - 创建和删除求片是 SvelteKit form action，邮箱验证、Telegram 绑定、库存检查、队列上限、同源同季去重、权限和审计仍由 Go 后端最终判断。服务端页面只做参数长度和格式限制，不复制业务资格判断。
 - 搜索结果、详情和求片记录中的图片 URL 只接受无 userinfo 的 HTTP(S) 地址。真实海报保持固有比例，使用 `height: auto` 和 `object-contain`，不使用固定比例黑色容器，因此横向图片和竖向海报不会被裁切或压缩。

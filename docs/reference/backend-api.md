@@ -975,6 +975,14 @@ curl -X POST "http://localhost:5000/api/v1/media/request/external/update" \
 
 - 认证：登录用户（`AuthUser`）
 
+### 7.4 V2 SSR 媒体资源
+
+默认 `webui-v2` 使用 `/api/v2/media/*`，而不是在浏览器中直接调用 V1 媒体接口。搜索、详情、库存和“我的求片”均由 SvelteKit 服务端 `load` 通过受保护的 SSR API 边界读取；创建与删除使用 form action。会话 Cookie 只在 SSR 服务端转发，V2 响应统一使用私有 `no-store` 缓存策略。
+
+`GET /api/v2/media/search` 返回 `{ items, total, warnings }`；`GET /api/v2/media/search/{source}` 用路径来源覆盖冲突的查询参数。`GET /api/v2/media/detail` 返回 `{ item }`，`POST /api/v2/media/inventory/check` 返回库存结果。V2 只改变资源包装和传输边界，媒体来源、Logo 语言优先级、海报 URL 安全校验、Emby 库存判断和求片业务规则仍由 Go 后端统一处理。
+
+`GET /api/v2/media/requests` 返回 `{ items, total }`，只包含当前登录用户的求片。`POST /api/v2/media/requests` 和 `DELETE /api/v2/media/requests/by-key/{require_key}` 继续复用 V1 的业务 handler，因此功能开关、邮箱验证、Telegram 绑定、请求配额、重复请求、审计和所有权判断不会因前端迁移产生第二套实现。V1 媒体路由仍保留给回滚前端和外部兼容调用。
+
 ## 8. Emby 模块
 
 ### 8.1 查询当前用户 Emby 状态
