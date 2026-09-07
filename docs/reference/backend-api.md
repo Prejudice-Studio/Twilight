@@ -2070,6 +2070,8 @@ Telegram 管理中的「Bot 指令管理」页面不会创建第二套指令存�
 | `GET /invite/check` | `AuthPublic` | 校验邀请码（IP 限流 10/60s） |
 | `POST /invite/use` | `AuthUser` | 使用邀请码 |
 
+V2 用户邀请资源为 `/api/v2/invite/summary`、`/api/v2/invite/codes`、`/api/v2/invite/renew-codes` 以及两个 `detach-expired` 路径。摘要为私有 `no-store` 聚合读取；V2 写入只是 SSR 资源适配器，继续使用同一套邀请开关、直属关系、真实 Emby 资格、历史关系维护、外部删除、Store 原子写入和审计规则。
+
 ### 11.4 Signin 模块
 
 > 签到积分默认仅记录余额；管理员可通过 `[SAR].signin_renewal_enabled` 或 `[Signin].renewal_enabled` 开启积分续期。关闭时 `/signin/me` 的 `renewal.enabled=false`，前端不展示兑换入口。完整规则见 [签到与积分续期](../features/signin.md)。
@@ -2081,6 +2083,8 @@ Telegram 管理中的「Bot 指令管理」页面不会创建第二套指令存�
 | `POST /signin` | `AuthUser` | 执行签到 |
 | `POST /signin/renew` | `AuthUser` | 使用签到积分续期；要求已绑定 Emby，消耗积分和续期天数由管理员配置 |
 | `GET /signin/history` | `AuthUser` | 签到历史 |
+
+V2 签到资源为 `GET /api/v2/signin/summary`、`POST /api/v2/signin`、`POST /api/v2/signin/renew` 和 `PUT /api/v2/signin/preferences`。它们返回私有 `no-store` 响应，V2 页面写入成功后重新由 SSR 读取权威摘要；签到日期幂等、Emby 绑定限制、自动续期资格、积分扣减和审计仍由共享 handler/Store 决定。
 
 `POST /signin/renew` 只续期已有 Emby 权益。用户没有 `EmbyID` 或仅持有 `PendingEmby` 待开通资格时返回 `409 RENEW_REQUIRES_EMBY`，Store 在原子写入内复核后才扣分，因此拒绝时积分和到期时间都不变。成功后在同一次状态写入中扣减 `signin.points` 并延长当前用户 `expired_at`；积分不足返回 `SIGNIN_INSUFFICIENT_POINTS`，功能未开启返回 `SIGNIN_RENEWAL_DISABLED`。
 

@@ -46,7 +46,12 @@ V2 基础协议入口使用 `/api/v2`，当前只提供不带秘密的能力协�
 | POST | `/api/v2/signin` | User | V2 签到动作；复用签到开关、幂等日期判断、积分记录和审计 |
 | POST | `/api/v2/signin/renew` | User | V2 积分续期动作；复用 Emby 绑定、余额和 Store 原子扣分校验 |
 | PUT | `/api/v2/signin/preferences` | User | V2 用户自动续期开关；只接受严格布尔值并复用资格、审计规则 |
-| GET | `/api/v2/invite/summary` | User | 聚合邀请配置、当前关系、直属下级、邀请树和本人邀请码；写操作仍由服务端 form action 转发至 `/api/v1/invite*` |
+| GET | `/api/v2/invite/summary` | User | 聚合邀请配置、当前关系、直属下级、邀请树和本人邀请码；私有 `no-store` 响应 |
+| POST | `/api/v2/invite/codes` | User | V2 创建邀请码；复用邀请开关、限额、目标用户和审计规则 |
+| POST | `/api/v2/invite/renew-codes` | User | V2 创建直属下级续期码；复用真实 Emby、有效期和原子存储校验 |
+| DELETE | `/api/v2/invite/codes/{code}` | User | V2 删除本人邀请码；删除邀请码不解除已建立的邀请关系 |
+| POST | `/api/v2/invite/children/{uid}/detach-expired` | User | V2 删除符合条件的直属下级 Emby 并断开关系；邀请关闭时仍可维护历史关系 |
+| POST | `/api/v2/invite/me/detach-expired` | User | V2 当前用户主动清理符合条件的上级关系及 Emby |
 | GET | `/api/v2/bangumi/summary` | User | 聚合 Bangumi 同步状态、公开账号资料、五类收藏数量与最近条目；Token 不出现在响应，外部分类读取可独立降级 |
 | GET | `/api/v2/admin/bangumi/users` | Admin | V2 管理员 Bangumi 用户分页资源；仅返回当前页状态与有限计数 |
 | GET | `/api/v2/admin/bangumi/users/{uid}/records` | Admin | V2 按 UID 按需读取有界播放记录详情 |

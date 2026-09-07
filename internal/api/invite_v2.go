@@ -12,10 +12,31 @@ type v2InviteSummary struct {
 // relationship projection and non-secret invite configuration; all eligibility
 // and mutation decisions remain in the Go invite handlers/store.
 func (a *App) handleV2InviteSummary(w http.ResponseWriter, r *http.Request, _ Params) {
+	w.Header().Set("Cache-Control", "private, no-store")
 	ok(w, "OK", v2InviteSummary{
 		Config: a.inviteConfigPayload(),
 		Invite: a.inviteMePayload(current(r).User),
 	})
+}
+
+func (a *App) handleV2CreateInviteCode(w http.ResponseWriter, r *http.Request, p Params) {
+	w.Header().Set("Cache-Control", "private, no-store")
+	a.handleCreateInviteCode(w, r, p)
+}
+
+func (a *App) handleV2DeleteInviteCode(w http.ResponseWriter, r *http.Request, p Params) {
+	w.Header().Set("Cache-Control", "private, no-store")
+	a.handleDeleteInviteCode(w, r, p)
+}
+
+func (a *App) handleV2DetachExpiredInviteChild(w http.ResponseWriter, r *http.Request, p Params) {
+	w.Header().Set("Cache-Control", "private, no-store")
+	a.handleDetachExpiredInviteChild(w, r, p)
+}
+
+func (a *App) handleV2DetachMyExpiredInvite(w http.ResponseWriter, r *http.Request, p Params) {
+	w.Header().Set("Cache-Control", "private, no-store")
+	a.handleDetachMyExpiredInvite(w, r, p)
 }
 
 func (a *App) inviteConfigPayload() map[string]any {

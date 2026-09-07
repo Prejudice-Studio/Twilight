@@ -62,7 +62,7 @@ export const actions: Actions = {
     const note = text(form, "note");
     const targetUsername = text(form, "target_username");
     if (days <= 0) return fail(400, { action: "create", error: t.inviteInvalidDays } satisfies FormState);
-    const result = await mutate<InviteCodeItem>(event, "/api/v1/invite/codes", "POST", {
+    const result = await mutate<InviteCodeItem>(event, "/api/v2/invite/codes", "POST", {
       days,
       ...(note ? { note } : {}),
       ...(targetUsername ? { target_username: targetUsername } : {})
@@ -78,7 +78,7 @@ export const actions: Actions = {
     if (!code || code.length > 128 || /[\\/]/.test(code)) {
       return fail(400, { action: "delete-code", error: t.inviteCodeOperationFailed } satisfies FormState);
     }
-    const result = await mutate<null>(event, `/api/v1/invite/codes/${encodeURIComponent(code)}`, "DELETE", undefined, "delete-code", t.inviteCodeOperationFailed);
+    const result = await mutate<null>(event, `/api/v2/invite/codes/${encodeURIComponent(code)}`, "DELETE", undefined, "delete-code", t.inviteCodeOperationFailed);
     if (result instanceof Response) return result;
     if ("status" in result && typeof result.status === "number") return result;
     throw redirect(303, "/invite?result=deleted");
@@ -99,7 +99,7 @@ export const actions: Actions = {
       target_username: string;
       days: number;
       validity_hours: number;
-    }>(event, "/api/v1/invite/renew-codes", "POST", {
+    }>(event, "/api/v2/invite/renew-codes", "POST", {
       target_uid: targetUID,
       days,
       validity_hours: validityHours,
@@ -121,14 +121,14 @@ export const actions: Actions = {
   detachChild: async (event) => {
     const uid = integer(await event.request.formData(), "uid");
     if (uid <= 0) return fail(400, { action: "detach-child", error: t.inviteDetachFailed } satisfies FormState);
-    const result = await mutate<unknown>(event, `/api/v1/invite/children/${uid}/detach-expired`, "POST", undefined, "detach-child", t.inviteDetachFailed);
+    const result = await mutate<unknown>(event, `/api/v2/invite/children/${uid}/detach-expired`, "POST", undefined, "detach-child", t.inviteDetachFailed);
     if (result instanceof Response) return result;
     if ("status" in result && typeof result.status === "number") return result;
     throw redirect(303, "/invite?result=detached");
   },
 
   detachSelf: async (event) => {
-    const result = await mutate<unknown>(event, "/api/v1/invite/me/detach-expired", "POST", undefined, "detach-self", t.inviteDetachFailed);
+    const result = await mutate<unknown>(event, "/api/v2/invite/me/detach-expired", "POST", undefined, "detach-self", t.inviteDetachFailed);
     if (result instanceof Response) return result;
     if ("status" in result && typeof result.status === "number") return result;
     throw redirect(303, "/invite?result=self-detached");
