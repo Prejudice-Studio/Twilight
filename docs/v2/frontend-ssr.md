@@ -160,7 +160,7 @@ Telegram 注册绑定码生成使用独立的 `createBindCode` form action；启
 
 ## 已迁移模块：签到与积分续期
 
-`/(app)/score` 通过受保护的 `/api/v2/signin/summary` 一次读取签到摘要、公开奖励规则和最近 30 条记录。签到、手动积分续期和用户自动续期开关分别使用服务端 form action；成功后采用 303 重新读取页面权威状态，避免浏览器本地积分、连续天数、Emby 绑定状态与 PostgreSQL 快照分叉。
+`/(app)/score` 通过受保护的 `/api/v2/signin/summary` 一次读取签到摘要、公开奖励规则和最近 30 条记录。签到、手动积分续期和用户自动续期开关分别使用服务端 form action 调用 `/api/v2/signin`、`/api/v2/signin/renew` 和 `/api/v2/signin/preferences`；成功后采用 303 重新读取页面权威状态，避免浏览器本地积分、连续天数、Emby 绑定状态与 PostgreSQL 快照分叉。V2 动作只是资源适配器，具体资格、严格布尔解析、审计和 Store 原子写入仍由共享 Go handler 决定。
 
 手动续期和自动续期使用不同的显示条件：手动续期只依据积分余额和 Emby 绑定提示，自动续期还必须满足到期、账号状态、管理员保护和后端续期资格。最终条件始终由 Go handler 和 Store 原子复核，页面上的 disabled 只是操作提示，不能作为安全边界。签到页不轮询，历史记录使用有界 Firefox 滚动区域。
 
