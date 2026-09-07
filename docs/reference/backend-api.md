@@ -31,6 +31,10 @@ V2 基础协议目前提供 `GET /api/v2/system/health`、`GET /api/v2/system/ca
 | POST | `/api/v2/settings/emby/bind` | 使用现有 Emby 凭据绑定当前账号 |
 | POST | `/api/v2/settings/emby/register` | 按后端资格创建并绑定 Emby 账号 |
 | POST | `/api/v2/settings/emby/unbind` | 按后端资格解除当前账号的 Emby 绑定 |
+| GET | `/api/v2/settings/apikeys` | 返回当前账号的掩码 API Key 列表 |
+| POST | `/api/v2/settings/apikeys` | 创建 API Key；明文只在当前响应中返回一次 |
+| PUT | `/api/v2/settings/apikeys/{key_id}` | 更新当前账号指定 API Key 的名称、启用、查询参数和限速设置 |
+| DELETE | `/api/v2/settings/apikeys/{key_id}` | 删除当前账号指定 API Key |
 
 这些端点是共享 V1 处理器的版本化适配，不建立第二套业务状态机。邮箱验证、密码强度、当前 Web 密码、Emby 管理员保护、注册资格、远端副作用、Store 原子写入、审计和会话 Cookie 都由 Go 后端最终决定。V1 设置端点继续保留给回滚前端与外部兼容调用；默认 V2 前端不再直接请求它们。
 

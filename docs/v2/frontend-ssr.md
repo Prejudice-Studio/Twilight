@@ -129,7 +129,7 @@ V2 页面覆盖 V1 当前用户可见的全部路由；兼容别名只负责旧�
 
 ## 已迁移模块：用户 API Key 管理
 
-`/(app)/settings/apikey` 使用 SSR `load` 读取 `/users/me/apikeys`，只向浏览器发送当前账号的掩码、权限、状态和受限使用摘要。创建、编辑和删除均为 SvelteKit form action；服务端 action 会限制名称、ID、布尔值和限速范围，但账号归属、权限、审计和持久化仍由 Go 后端最终判断。
+`/(app)/settings/apikey` 使用 SSR `load` 读取 `/api/v2/settings/apikeys`，只向浏览器发送当前账号的掩码、权限、状态和受限使用摘要。创建、编辑和删除均为 SvelteKit form action，并使用同一资源族的 POST、PUT、DELETE；服务端 action 会限制名称、ID、布尔值和限速范围，但账号归属、权限、审计和持久化仍由 Go 后端最终判断。
 
 新建 API Key 的明文只放在本次创建 action 的结果中显示一次，不写入 URL、缓存、持久化页面状态或日志；后续列表只显示掩码。页面提供独立的更新/删除确认和刷新入口，列表在桌面与窄 Firefox 视口使用稳定换行及有界滚动，不会把全部 Key 历史复制到浏览器缓存。
 

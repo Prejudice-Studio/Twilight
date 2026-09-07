@@ -32,7 +32,7 @@ function invalid(action: FormState["action"], message: string = t.apiKeyOperatio
 }
 
 async function update(event: RequestEvent, keyId: number, payload: Record<string, unknown>): Promise<FormFailure | null> {
-  const result = await apiJSONWithResponse(event, `/api/v1/users/me/apikeys/${keyId}`, {
+  const result = await apiJSONWithResponse(event, `/api/v2/settings/apikeys/${keyId}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload)
@@ -41,7 +41,7 @@ async function update(event: RequestEvent, keyId: number, payload: Record<string
 }
 
 export const load: PageServerLoad = async (event): Promise<MyApiKeysPageData> => {
-  const result = await apiJSON<{ keys?: ApiKeyItem[]; total?: number }>(event, "/api/v1/users/me/apikeys", { cache: "no-store" });
+  const result = await apiJSON<{ keys?: ApiKeyItem[]; total?: number }>(event, "/api/v2/settings/apikeys", { cache: "no-store" });
   return {
     keys: result?.success && Array.isArray(result.data?.keys) ? result.data.keys : [],
     total: result?.success ? result.data?.total || 0 : 0,
@@ -59,7 +59,7 @@ export const actions: Actions = {
     const rateLimit = integer(form, "rate_limit");
     if (!name) return invalid("create", t.apiKeyNameRequired);
     if (rateLimit < 0 || rateLimit > 100000) return invalid("create", t.apiKeyRateLimitInvalid);
-    const result = await apiJSONWithResponse<{ id?: number; name?: string; key?: string }>(event, "/api/v1/users/me/apikeys", {
+    const result = await apiJSONWithResponse<{ id?: number; name?: string; key?: string }>(event, "/api/v2/settings/apikeys", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name, allow_query: boolean(form, "allow_query"), rate_limit: rateLimit })
@@ -86,7 +86,7 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const keyId = keyID(form);
     if (!keyId) return invalid("delete");
-    const result = await apiJSONWithResponse(event, `/api/v1/users/me/apikeys/${keyId}`, { method: "DELETE" });
+    const result = await apiJSONWithResponse(event, `/api/v2/settings/apikeys/${keyId}`, { method: "DELETE" });
     if (!result?.response.ok || !result.envelope?.success) return fail(result?.response.status || 503, { action: "delete", error: t.apiKeyOperationFailed } satisfies FormState);
     throw redirect(303, "/settings/apikey?notice=deleted");
   }

@@ -49,6 +49,10 @@ V2 基础协议入口使用 `/api/v2`，当前只提供不带秘密的能力协�
 | POST | `/api/v2/settings/emby/bind` | User | 使用现有 Emby 凭据绑定当前账号 |
 | POST | `/api/v2/settings/emby/register` | User | 按资格创建并绑定 Emby 账号 |
 | POST | `/api/v2/settings/emby/unbind` | User | 按后端资格解除当前账号的 Emby 绑定 |
+| GET | `/api/v2/settings/apikeys` | User | 返回当前账号的掩码 API Key 列表；私有 `no-store` |
+| POST | `/api/v2/settings/apikeys` | User | 创建 API Key；明文仅在当前响应中返回一次 |
+| PUT | `/api/v2/settings/apikeys/{key_id}` | User | 更新当前账号指定 API Key 的名称、启用和限速设置 |
+| DELETE | `/api/v2/settings/apikeys/{key_id}` | User | 删除当前账号指定 API Key |
 | GET | `/api/v2/announcements` | User | 聚合当前账号可见公告与未确认的强制阅读公告；私有 `no-store` 响应 |
 | POST | `/api/v2/announcements/ack` | User | 去重确认当前账号的强制阅读公告；最终归属与状态由后端复核 |
 | GET | `/api/v2/signin/summary` | User | 聚合签到摘要、公开奖励规则和最近 30 条记录；私有 `no-store` 响应 |
