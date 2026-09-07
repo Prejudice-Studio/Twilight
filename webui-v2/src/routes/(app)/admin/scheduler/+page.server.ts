@@ -107,7 +107,7 @@ export const load: PageServerLoad = async (event) => {
   const notice = event.url.searchParams.get("notice") || "";
   const requestedView = event.url.searchParams.get("view") || "all";
   const view = validViews.has(requestedView) ? requestedView : "all";
-  const response = await apiJSON<{ jobs: SchedulerJobItem[] }>(event, "/api/v1/admin/scheduler/jobs", { cache: "no-store" });
+  const response = await apiJSON<{ jobs: SchedulerJobItem[] }>(event, "/api/v2/admin/scheduler/jobs", { cache: "no-store" });
   const allJobs = response?.success ? response.data?.jobs || [] : [];
   const jobs = allJobs.filter((job) => {
     if (view === "running") return job.is_running;
@@ -122,8 +122,8 @@ export const load: PageServerLoad = async (event) => {
   let logs: SchedulerRunDetail | null = null;
   if (selectedJob) {
     const results = await Promise.allSettled([
-      apiJSON<{ job_id: string; last_run: SchedulerJobRun | null }>(event, `/api/v1/admin/scheduler/jobs/${encodeURIComponent(logsID)}/last-run`, { cache: "no-store" }),
-      apiJSON<{ job_id: string; history: SchedulerJobRun[] }>(event, `/api/v1/admin/scheduler/jobs/${encodeURIComponent(logsID)}/history?limit=20`, { cache: "no-store" })
+      apiJSON<{ job_id: string; last_run: SchedulerJobRun | null }>(event, `/api/v2/admin/scheduler/jobs/${encodeURIComponent(logsID)}/last-run`, { cache: "no-store" }),
+      apiJSON<{ job_id: string; history: SchedulerJobRun[] }>(event, `/api/v2/admin/scheduler/jobs/${encodeURIComponent(logsID)}/history?limit=20`, { cache: "no-store" })
     ]);
     const last = results[0].status === "fulfilled" ? results[0].value : null;
     const history = results[1].status === "fulfilled" ? results[1].value : null;
@@ -153,7 +153,7 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const jobID = text(form, "job_id");
     if (!jobID) return fail(400, { error: "任务编号无效" } satisfies SchedulerAction);
-    const result = await post<{ job_id: string }>(event, `/api/v1/admin/scheduler/jobs/${encodeURIComponent(jobID)}/run`, {
+    const result = await post<{ job_id: string }>(event, `/api/v2/admin/scheduler/jobs/${encodeURIComponent(jobID)}/run`, {
       runtime_params: runtimeParams(jobID, form, true)
     });
     if (!result?.response.ok || !result.envelope?.success) return fail(result?.response.status || 400, { error: "任务启动失败，请稍后重试" } satisfies SchedulerAction);
@@ -164,7 +164,7 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const jobID = text(form, "job_id");
     if (!jobID) return fail(400, { error: "任务编号无效" } satisfies SchedulerAction);
-    const result = await post<{ job_id: string }>(event, `/api/v1/admin/scheduler/jobs/${encodeURIComponent(jobID)}/terminate`, {});
+    const result = await post<{ job_id: string }>(event, `/api/v2/admin/scheduler/jobs/${encodeURIComponent(jobID)}/terminate`, {});
     if (!result?.response.ok || !result.envelope?.success) return fail(result?.response.status || 400, { error: "终止任务失败，请稍后重试" } satisfies SchedulerAction);
     redirectAfterAction(event, "terminate");
   },
@@ -173,7 +173,7 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const jobID = text(form, "job_id");
     if (!jobID) return fail(400, { error: "任务编号无效" } satisfies SchedulerAction);
-    const result = await apiJSONWithResponse<{ job_id: string; trigger_spec: SchedulerTriggerSpec }>(event, `/api/v1/admin/scheduler/jobs/${encodeURIComponent(jobID)}/schedule`, {
+    const result = await apiJSONWithResponse<{ job_id: string; trigger_spec: SchedulerTriggerSpec }>(event, `/api/v2/admin/scheduler/jobs/${encodeURIComponent(jobID)}/schedule`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(schedulePayload(form))
@@ -186,9 +186,8 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const jobID = text(form, "job_id");
     if (!jobID) return fail(400, { error: "任务编号无效" } satisfies SchedulerAction);
-    const result = await apiJSONWithResponse(event, `/api/v1/admin/scheduler/jobs/${encodeURIComponent(jobID)}/schedule`, { method: "DELETE" });
+    const result = await apiJSONWithResponse(event, `/api/v2/admin/scheduler/jobs/${encodeURIComponent(jobID)}/schedule`, { method: "DELETE" });
     if (!result?.response.ok || !result.envelope?.success) return fail(result?.response.status || 400, { error: "任务计划恢复失败，请稍后重试" } satisfies SchedulerAction);
     redirectAfterAction(event, "reset");
   }
 };
-

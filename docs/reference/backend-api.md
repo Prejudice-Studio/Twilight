@@ -1044,6 +1044,8 @@ V2 管理员用户资源为 `/api/v2/admin/users`。集合接口返回：
 
 管理员运行日志页使用 `/api/v2/admin/runtime/status` 与 `/api/v2/admin/runtime/logs` 的有限快照资源。日志数量由后端上限约束，属性和消息沿用运行日志采集时的脱敏结果；V2 页面只手动刷新，不使用旧 SSE 流接口或浏览器轮询。
 
+管理员调度器页面使用 `/api/v2/admin/scheduler/jobs` 及其单任务资源。任务列表在后端批量读取摘要，最近运行结果和历史仅在打开指定任务时按需读取；运行、终止、计划保存和计划恢复通过 V2 写资源执行。任务参数在 SSR action 与 Go handler 两侧限制，手动任务不会被伪造为自动任务，运行历史保持有界且不进入浏览器共享缓存。
+
 管理员 Bangumi 页面使用 `/api/v2/admin/bangumi/*`。用户列表只返回服务端分页的当前页和批量统计，播放记录、同步日志必须带 UID 按需读取；同步和日志清理使用对应的 POST/DELETE 资源。页面配置摘要来自公开 `/api/v2/system/capabilities`，只展示功能开关，不包含 Bangumi Token；V1 管理员 Bangumi 路径保留为兼容入口。
 
 用户 Bangumi 页面使用 `/api/v2/bangumi/summary`、`/api/v2/bangumi/collections` 及其集合修改、同步、历史和偏好资源。集合读取是私有 `no-store` 的服务端分页，Token 只由 Go 服务端访问 Bangumi，绝不进入响应；V2 资源继续复用现有功能开关、Store 缓存失效、外部请求和审计逻辑。

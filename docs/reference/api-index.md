@@ -128,6 +128,13 @@ V2 基础协议入口使用 `/api/v2`，当前只提供不带秘密的能力协�
 | POST | `/api/v2/admin/database/migrate` | Admin | V2 生成数据库迁移预览或执行迁移；执行需要 `MIGRATE_DATABASE`，继续受功能开关与路径安全约束 |
 | GET | `/api/v2/admin/runtime/status` | Admin | V2 读取有限运行时状态；私有 `no-store`，不返回配置秘密或文件路径 |
 | GET | `/api/v2/admin/runtime/logs` | Admin | V2 读取有界运行日志快照；私有 `no-store`，不启用浏览器流式连接 |
+| GET | `/api/v2/admin/scheduler/jobs` | Admin | V2 读取调度任务摘要；服务端批量读取运行状态，私有 `no-store` |
+| POST | `/api/v2/admin/scheduler/jobs/{job_id}/run` | Admin | V2 手动启动指定任务；参数由服务端按任务白名单归一化 |
+| POST | `/api/v2/admin/scheduler/jobs/{job_id}/terminate` | Admin | V2 请求终止指定运行中的任务 |
+| GET | `/api/v2/admin/scheduler/jobs/{job_id}/last-run` | Admin | V2 按需读取指定任务最近一次运行结果 |
+| GET | `/api/v2/admin/scheduler/jobs/{job_id}/history` | Admin | V2 按需读取指定任务最多 20 条运行历史 |
+| PUT | `/api/v2/admin/scheduler/jobs/{job_id}/schedule` | Admin | V2 保存调度计划和受限运行参数 |
+| DELETE | `/api/v2/admin/scheduler/jobs/{job_id}/schedule` | Admin | V2 恢复指定任务默认计划 |
 
 V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/api/v1`，不能由前端自行拼接版本路径。
 
