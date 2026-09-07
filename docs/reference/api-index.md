@@ -48,6 +48,10 @@ V2 基础协议入口使用 `/api/v2`，当前只提供不带秘密的能力协�
 | POST | `/api/v2/admin/bangumi/users/{uid}/sync` | Admin | V2 为指定用户手动触发 Bangumi 同步 |
 | GET | `/api/v2/admin/bangumi/users/{uid}/logs` | Admin | V2 按 UID 按需读取有界同步日志 |
 | DELETE | `/api/v2/admin/bangumi/users/{uid}/logs` | Admin | V2 清除指定用户同步日志 |
+| GET | `/api/v2/admin/announcements` | Admin | V2 公告分页资源；服务端筛选隐藏/过期状态，不缓存 |
+| POST | `/api/v2/admin/announcements` | Admin | V2 创建公告；复用字段白名单、渲染模式归一化和审计 |
+| PUT | `/api/v2/admin/announcements/{announcement_id}` | Admin | V2 更新公告 |
+| DELETE | `/api/v2/admin/announcements/{announcement_id}` | Admin | V2 删除公告 |
 
 V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/api/v1`，不能由前端自行拼接版本路径。
 

@@ -142,10 +142,14 @@ V2 公告页与仪表盘分别位于 `webui-v2/src/routes/(app)/announcements` �
 
 | 方法 | 路径 | 说明 |
 | ---- | ---- | ---- |
-| `GET` | `/api/v1/admin/announcements` | 管理员筛选分页列表。`data` 为 `{ announcements, total, page, per_page, pages }`；默认包含隐藏与过期公告，可用 `include_invisible=false`、`include_expired=false` 排除。 |
-| `POST` | `/api/v1/admin/announcements` | 新建公告。成功返回 201 与新建记录。 |
-| `PUT` | `/api/v1/admin/announcements/:announcement_id` | 更新公告。未传字段沿用既有值；`created_by_uid` / `created_at` 保持不变。 |
-| `DELETE` | `/api/v1/admin/announcements/:announcement_id` | 删除公告。不存在则返回未找到错误。 |
+| `GET` | `/api/v2/admin/announcements` | V2 管理员筛选分页列表；响应字段与 V1 兼容，服务端返回当前页且 no-store。 |
+| `POST` | `/api/v2/admin/announcements` | V2 新建公告；复用字段白名单、渲染模式归一化和审计。 |
+| `PUT` | `/api/v2/admin/announcements/:announcement_id` | V2 更新公告。 |
+| `DELETE` | `/api/v2/admin/announcements/:announcement_id` | V2 删除公告。 |
+| `GET` | `/api/v1/admin/announcements` | V1 兼容：管理员筛选分页列表。 |
+| `POST` | `/api/v1/admin/announcements` | V1 兼容：新建公告。 |
+| `PUT` | `/api/v1/admin/announcements/:announcement_id` | V1 兼容：更新公告。 |
+| `DELETE` | `/api/v1/admin/announcements/:announcement_id` | V1 兼容：删除公告。 |
 
 创建 / 更新接受的请求体字段（`internal/api/announcement_handlers.go`）：
 

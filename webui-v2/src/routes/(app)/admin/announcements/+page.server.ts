@@ -123,7 +123,7 @@ export const load: PageServerLoad = async (event): Promise<AdminAnnouncementsPag
     include_invisible: String(query.include_invisible),
     include_expired: String(query.include_expired)
   });
-  const result = await apiJSON<AdminAnnouncementPage>(event, `/api/v1/admin/announcements?${params}`, { cache: "no-store" });
+  const result = await apiJSON<AdminAnnouncementPage>(event, `/api/v2/admin/announcements?${params}`, { cache: "no-store" });
   const rawNotice = text(event.url.searchParams.get("notice"), 16);
   const notice = ["created", "updated", "deleted", "hidden", "shown", "pinned", "unpinned"].includes(rawNotice)
     ? rawNotice as AdminAnnouncementsPageData["notice"]
@@ -142,7 +142,7 @@ export const actions: Actions = {
     const parsed = formPayload(form);
     if (parsed.failure || !parsed.payload) return parsed.failure;
     const id = Math.max(0, integer(formText(form, "announcement_id", 24), 0));
-    const result = await mutate(event, id > 0 ? `/api/v1/admin/announcements/${id}` : "/api/v1/admin/announcements", id > 0 ? "PUT" : "POST", parsed.payload, "save");
+    const result = await mutate(event, id > 0 ? `/api/v2/admin/announcements/${id}` : "/api/v2/admin/announcements", id > 0 ? "PUT" : "POST", parsed.payload, "save");
     if (result.failure) return result.failure;
     redirectToList(form, id > 0 ? "updated" : "created");
   },
@@ -152,7 +152,7 @@ export const actions: Actions = {
     const id = integer(formText(form, "announcement_id", 24), 0);
     if (id <= 0) return fail(400, { action: "toggleVisible", error: t.adminAnnouncementsOperationFailed } satisfies FormState);
     const visible = booleanField(form, "visible", false);
-    const result = await mutate(event, `/api/v1/admin/announcements/${id}`, "PUT", { visible }, "toggleVisible");
+    const result = await mutate(event, `/api/v2/admin/announcements/${id}`, "PUT", { visible }, "toggleVisible");
     if (result.failure) return result.failure;
     redirectToList(form, visible ? "shown" : "hidden");
   },
@@ -162,7 +162,7 @@ export const actions: Actions = {
     const id = integer(formText(form, "announcement_id", 24), 0);
     if (id <= 0) return fail(400, { action: "togglePinned", error: t.adminAnnouncementsOperationFailed } satisfies FormState);
     const pinned = booleanField(form, "pinned", false);
-    const result = await mutate(event, `/api/v1/admin/announcements/${id}`, "PUT", { pinned }, "togglePinned");
+    const result = await mutate(event, `/api/v2/admin/announcements/${id}`, "PUT", { pinned }, "togglePinned");
     if (result.failure) return result.failure;
     redirectToList(form, pinned ? "pinned" : "unpinned");
   },
@@ -171,7 +171,7 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const id = integer(formText(form, "announcement_id", 24), 0);
     if (id <= 0) return fail(400, { action: "delete", error: t.adminAnnouncementsOperationFailed } satisfies FormState);
-    const result = await mutate(event, `/api/v1/admin/announcements/${id}`, "DELETE", undefined, "delete");
+    const result = await mutate(event, `/api/v2/admin/announcements/${id}`, "DELETE", undefined, "delete");
     if (result.failure) return result.failure;
     redirectToList(form, "deleted");
   }

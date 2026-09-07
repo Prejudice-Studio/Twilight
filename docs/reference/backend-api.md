@@ -1008,6 +1008,8 @@ V2 管理员用户资源为 `/api/v2/admin/users`。集合接口返回：
 
 管理员 Bangumi 页面使用 `/api/v2/admin/bangumi/*`。用户列表只返回服务端分页的当前页和批量统计，播放记录、同步日志必须带 UID 按需读取；同步和日志清理使用对应的 POST/DELETE 资源。页面配置摘要来自公开 `/api/v2/system/capabilities`，只展示功能开关，不包含 Bangumi Token；V1 管理员 Bangumi 路径保留为兼容入口。
 
+管理员公告页面使用 `/api/v2/admin/announcements` 资源集合及其单公告写操作。列表筛选、分页和 no-store 响应由后端执行；创建、更新、显示/隐藏、置顶和删除仍走同一套 Store、字段归一化、渲染模式白名单与审计逻辑。正文在 SSR 页面中按文本显示，不执行未审查的 Markdown/BBCode HTML。
+
 #### 查询用户列表
 
 `GET /admin/users?status=active&page=1&per_page=20`
