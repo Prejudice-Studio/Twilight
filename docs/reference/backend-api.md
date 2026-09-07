@@ -1365,6 +1365,8 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/cleanup-invalid" \
 
 `GET /admin/invite/tree` — 查看邀请树。邀请开启时可包含仅持有码、尚未建立关系的潜在根节点；邀请关闭时只返回真实关系的两端，隐藏没有任何上下级关系的孤立持码用户，同时保留没有后代的末级下级以维持树结构完整。
 
+V2 管理邀请资源为 `/api/v2/admin/invite/tree`、`/api/v2/admin/invite/codes` 和 `/api/v2/admin/invite/config/schema`。树接口在后端按 `search`、`root`、`collapsed`、`page`、`per_page` 计算当前页，`data.item` 只返回 `rows`、根摘要、选中详情与分页统计；邀请码接口返回 `items` 与 `pagination`，搜索和当前页 DTO 富化均在后端完成。V2 配置接口只返回并接受邀请白名单字段，不可借此修改其它配置段；所有关系、续期、Emby 清理、保护账号、审计与原子 Store 语义继续复用下方 V1 handler。
+
 `POST /admin/invite/users/{uid}/detach` — 将指定用户从邀请树脱离。
 
 `POST /admin/invite/users/{uid}/detach-delete-emby` — 将指定用户从邀请树脱离，并删除其远端 Emby 账号；管理员账号受保护。

@@ -6,11 +6,9 @@ import type {
   AdminInviteCodesPage,
   AdminInvitePageData,
   AdminInviteTreePage,
-  AdminInviteTreeRow,
   ConfigSchema,
   ConfigSection,
-  InviteCodeItem,
-  InviteConfig
+  InviteCodeItem
 } from "$lib/types";
 import { t } from "$lib/i18n";
 
@@ -18,33 +16,18 @@ type FormState = { action?: string; error?: string };
 type FormFailure = ActionFailure<FormState>;
 type View = AdminInvitePageData["view"];
 
-type InviteForestNode = {
-  uid: number;
-  username: string;
-  role: number;
-  emby_id?: string | null;
-  emby_disabled?: boolean;
-  active: boolean;
-  telegram_id?: number | null;
-  register_time?: number | null;
-  expired_at?: number | null;
-  is_root: boolean;
+type InviteTreeResource = {
+  item: AdminInviteTreePage;
 };
 
-type InviteForest = {
-  nodes: InviteForestNode[];
-  edges: Array<{ parent: number; child: number; code?: string; created_at?: number }>;
-  roots: number[];
-  max_depth: number;
-  config: InviteConfig;
-};
-
-type InviteCodesResponse = {
-  codes: InviteCodeItem[];
-  total: number;
-  page?: number;
-  per_page?: number;
-  pages?: number;
+type InviteCodesResource = {
+  items: InviteCodeItem[];
+  pagination: {
+    page: number;
+    per_page: number;
+    total: number;
+    total_pages: number;
+  };
 };
 
 const treePerPage = 300;
@@ -143,6 +126,15 @@ function queryFromForm(form: FormData): AdminInvitePageData["query"] {
   return normalizeQuery(url);
 }
 
+function treeParams(query: AdminInvitePageData["query"]): URLSearchParams {
+  const params = new URLSearchParams({ page: String(query.page), per_page: String(query.per_page) });
+  if (query.search) params.set("search", query.search);
+  if (query.root !== "all") params.set("root", query.root);
+  if (query.selected > 0) params.set("selected", String(query.selected));
+  if (query.collapsed.length) params.set("collapsed", query.collapsed.join(","));
+  return params;
+}
+
 function redirectToPage(form: FormData, notice: AdminInvitePageData["notice"]): never {
   const query = queryString(queryFromForm(form), { selected: 0 });
   throw redirect(303, `/admin/invite${query ? `?${query}&notice=${notice}` : `?notice=${notice}`}`);
@@ -181,166 +173,6 @@ function selectedUIDs(form: FormData, max = 200): number[] | null {
   return result;
 }
 
-function inviteTreeRow(
-  node: InviteForestNode,
-  depth: number,
-  rootUID: number,
-  directChildren: number,
-  descendants: number,
-  collapsed: boolean
-): AdminInviteTreeRow {
-  return {
-    uid: node.uid,
-    username: node.username,
-    role: node.role,
-    emby_bound: Boolean(node.emby_id),
-    emby_disabled: Boolean(node.emby_disabled),
-    active: node.active,
-    telegram_id: node.telegram_id ?? null,
-    register_time: node.register_time ?? null,
-    expired_at: node.expired_at ?? null,
-    is_root: node.is_root,
-    depth,
-    root_uid: rootUID,
-    direct_children: directChildren,
-    descendants,
-    collapsed
-  };
-}
-
-function buildTreePage(forest: InviteForest, query: AdminInvitePageData["query"]): AdminInviteTreePage {
-  const nodes = new Map<number, InviteForestNode>();
-  const children = new Map<number, number[]>();
-  const parent = new Map<number, number>();
-  for (const node of forest.nodes || []) nodes.set(node.uid, node);
-  for (const edge of forest.edges || []) {
-    if (!nodes.has(edge.parent) || !nodes.has(edge.child)) continue;
-    const list = children.get(edge.parent) || [];
-    list.push(edge.child);
-    children.set(edge.parent, list);
-    if (!parent.has(edge.child)) parent.set(edge.child, edge.parent);
-  }
-  for (const list of children.values()) list.sort((a, b) => a - b);
-
-  const roots = (forest.roots || []).filter((uid) => nodes.has(uid)).sort((a, b) => a - b);
-  const rootOf = new Map<number, number>();
-  const depthOf = new Map<number, number>();
-  const descendants = new Map<number, number>();
-  for (const root of roots) {
-    if (rootOf.has(root)) continue;
-    const order: number[] = [];
-    const stack: Array<{ uid: number; depth: number }> = [{ uid: root, depth: 0 }];
-    rootOf.set(root, root);
-    depthOf.set(root, 0);
-    while (stack.length) {
-      const current = stack.pop()!;
-      order.push(current.uid);
-      for (const child of children.get(current.uid) || []) {
-        if (rootOf.has(child)) continue;
-        rootOf.set(child, root);
-        depthOf.set(child, current.depth + 1);
-        stack.push({ uid: child, depth: current.depth + 1 });
-      }
-    }
-    for (let index = order.length - 1; index >= 0; index -= 1) {
-      const uid = order[index];
-      let count = 0;
-      for (const child of children.get(uid) || []) count += 1 + (descendants.get(child) || 0);
-      descendants.set(uid, count);
-    }
-  }
-
-  const term = query.search.toLowerCase();
-  const included = new Set<number>();
-  if (term) {
-    for (const node of nodes.values()) {
-      if (!`${node.username} ${node.uid} ${node.telegram_id || ""}`.toLowerCase().includes(term)) continue;
-      let current: number | undefined = node.uid;
-      while (current && !included.has(current)) {
-        included.add(current);
-        current = parent.get(current);
-      }
-    }
-  }
-
-  const selectedRoot = query.root === "all" ? null : positiveInteger(query.root);
-  const visibleRoots = selectedRoot && roots.includes(selectedRoot) ? [selectedRoot] : roots;
-  const collapsed = new Set(query.collapsed);
-  const rows: AdminInviteTreeRow[] = [];
-  for (const root of visibleRoots) {
-    const stack: Array<{ uid: number; depth: number }> = [{ uid: root, depth: 0 }];
-    while (stack.length) {
-      const current = stack.pop()!;
-      const node = nodes.get(current.uid);
-      if (!node) continue;
-      const matched = !term || included.has(current.uid);
-      if (matched) {
-        rows.push(inviteTreeRow(
-          node,
-          current.depth,
-          rootOf.get(current.uid) || root,
-          (children.get(current.uid) || []).length,
-          descendants.get(current.uid) || 0,
-          collapsed.has(current.uid)
-        ));
-      }
-      // Search results always keep the matching path open, otherwise a collapsed
-      // ancestor would hide the result that the administrator just searched for.
-      if (collapsed.has(current.uid) && !term) continue;
-      const childIDs = children.get(current.uid) || [];
-      for (let index = childIDs.length - 1; index >= 0; index -= 1) {
-        stack.push({ uid: childIDs[index], depth: current.depth + 1 });
-      }
-    }
-  }
-
-  const perPage = query.per_page;
-  const pages = Math.max(1, Math.ceil(rows.length / perPage));
-  const page = Math.min(query.page, pages);
-  const pageRows = rows.slice((page - 1) * perPage, page * perPage);
-  const selectedNode = query.selected > 0 ? nodes.get(query.selected) : undefined;
-  const selected = selectedNode
-    ? inviteTreeRow(
-        selectedNode,
-        depthOf.get(selectedNode.uid) || 0,
-        rootOf.get(selectedNode.uid) || selectedNode.uid,
-        (children.get(selectedNode.uid) || []).length,
-        descendants.get(selectedNode.uid) || 0,
-        collapsed.has(selectedNode.uid)
-      )
-    : null;
-  return {
-    rows: pageRows,
-    selected,
-    roots: roots.map((uid) => ({ uid, username: nodes.get(uid)?.username || String(uid) })),
-    total_rows: rows.length,
-    total_nodes: nodes.size,
-    total_relations: (forest.edges || []).length,
-    max_depth: forest.max_depth || 0,
-    page,
-    per_page: perPage,
-    pages,
-    config: forest.config
-  };
-}
-
-function buildCodePage(payload: InviteCodesResponse, query: AdminInvitePageData["query"]): AdminInviteCodesPage {
-  const term = query.code_search.toLowerCase();
-  const codes = (payload.codes || []).filter((code) => {
-    if (!term) return true;
-    return `${code.code} ${code.inviter_username || ""} ${code.inviter_uid} ${code.target_username || ""} ${code.note || ""}`.toLowerCase().includes(term);
-  });
-  const pages = Math.max(1, Math.ceil(codes.length / query.code_per_page));
-  const page = Math.min(query.code_page, pages);
-  return {
-    codes: codes.slice((page - 1) * query.code_per_page, page * query.code_per_page),
-    total: codes.length,
-    page,
-    per_page: query.code_per_page,
-    pages
-  };
-}
-
 function inviteConfigSection(schema: ConfigSchema | null): ConfigSection | null {
   const section = schema?.sections?.find((item) => item.key === "SAR");
   if (!section) return null;
@@ -370,29 +202,25 @@ export const load: PageServerLoad = async (event): Promise<AdminInvitePageData> 
   let loadError: string | null = null;
 
   if (query.view === "tree") {
-    const result = await apiJSON<InviteForest>(event, "/api/v1/admin/invite/tree", { cache: "no-store" });
-    if (result?.success && result.data) tree = buildTreePage(result.data, query);
+    const result = await apiJSON<InviteTreeResource>(event, `/api/v2/admin/invite/tree?${treeParams(query)}`, { cache: "no-store" });
+    if (result?.success && result.data?.item) tree = result.data.item;
     else loadError = t.adminInviteLoadFailed;
   } else if (query.view === "codes") {
     const params = new URLSearchParams({ page: String(query.code_page), per_page: String(query.code_per_page) });
     if (query.code_search) params.set("search", query.code_search);
-    const result = await apiJSON<InviteCodesResponse>(event, `/api/v1/admin/invite/codes?${params}`, { cache: "no-store" });
+    const result = await apiJSON<InviteCodesResource>(event, `/api/v2/admin/invite/codes?${params}`, { cache: "no-store" });
     if (result?.success && result.data) {
-      // The paged backend response is already bounded. Keep the fallback
-      // slicer for older servers that return only codes/total.
-      codes = result.data.page && result.data.per_page && result.data.pages
-        ? {
-            codes: result.data.codes || [],
-            total: result.data.total || 0,
-            page: result.data.page,
-            per_page: result.data.per_page,
-            pages: result.data.pages
-          }
-        : buildCodePage(result.data, query);
+      codes = {
+        codes: result.data.items || [],
+        total: result.data.pagination.total,
+        page: result.data.pagination.page,
+        per_page: result.data.pagination.per_page,
+        pages: result.data.pagination.total_pages
+      };
     }
     else loadError = t.adminInviteCodesLoadFailed;
   } else {
-    const result = await apiJSON<ConfigSchema>(event, "/api/v1/system/admin/config/schema", { cache: "no-store" });
+    const result = await apiJSON<ConfigSchema>(event, "/api/v2/admin/invite/config/schema", { cache: "no-store" });
     config = result?.success ? inviteConfigSection(result.data || null) : null;
     if (!config) loadError = t.adminInviteConfigLoadFailed;
   }
@@ -423,7 +251,7 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const uid = positiveInteger(text(form.get("uid"), 24));
     if (uid <= 0) return fail(400, { action: "detach", error: t.adminInviteOperationFailed } satisfies FormState);
-    const failure = await mutate(event, `/api/v1/admin/invite/users/${uid}/detach`, "POST", undefined, "detach");
+    const failure = await mutate(event, `/api/v2/admin/invite/users/${uid}/detach`, "POST", undefined, "detach");
     if (failure) return failure;
     redirectToPage(form, "detached");
   },
@@ -432,7 +260,7 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const uid = positiveInteger(text(form.get("uid"), 24));
     if (uid <= 0) return fail(400, { action: "detachDeleteEmby", error: t.adminInviteOperationFailed } satisfies FormState);
-    const failure = await mutate(event, `/api/v1/admin/invite/users/${uid}/detach-delete-emby`, "POST", undefined, "detachDeleteEmby");
+    const failure = await mutate(event, `/api/v2/admin/invite/users/${uid}/detach-delete-emby`, "POST", undefined, "detachDeleteEmby");
     if (failure) return failure;
     redirectToPage(form, "deleted_emby");
   },
@@ -446,7 +274,7 @@ export const actions: Actions = {
     const deleteEmby = operation === "delete_emby" || operation === "only_emby_disabled";
     const onlyEmbyDisabled = operation === "only_emby_disabled";
     if (onlyEmbyDisabled && !deleteEmby) return fail(400, { action: "batchDetach", error: t.adminInviteOperationFailed } satisfies FormState);
-    const failure = await mutate(event, "/api/v1/admin/invite/users/detach-batch", "POST", {
+    const failure = await mutate(event, "/api/v2/admin/invite/users/detach-batch", "POST", {
       uids,
       delete_emby: deleteEmby,
       only_emby_disabled: onlyEmbyDisabled
@@ -484,7 +312,7 @@ export const actions: Actions = {
       payload.depth = Math.max(-1, Math.min(5000, integer(text(form.get("depth"), 16), -1)));
       payload.include_root = formBoolean(form, "include_root");
     }
-    const failure = await mutate(event, "/api/v1/admin/invite/quick-maintenance", "POST", payload, "quickMaintenance");
+    const failure = await mutate(event, "/api/v2/admin/invite/quick-maintenance", "POST", payload, "quickMaintenance");
     if (failure) return failure;
     redirectToPage(form, "quick_maintained");
   },
@@ -495,7 +323,7 @@ export const actions: Actions = {
     const enable = form.get("enable") === "true";
     const depth = Math.max(-1, Math.min(5000, integer(text(form.get("depth"), 16), 1)));
     if (uid <= 0) return fail(400, { action: "cascadeToggle", error: t.adminInviteOperationFailed } satisfies FormState);
-    const failure = await mutate(event, `/api/v1/admin/users/${uid}/${enable ? "enable" : "disable"}`, "POST", { cascade_depth: depth }, "cascadeToggle");
+    const failure = await mutate(event, `/api/v2/admin/invite/users/${uid}/${enable ? "enable" : "disable"}`, "POST", { cascade_depth: depth }, "cascadeToggle");
     if (failure) return failure;
     redirectToPage(form, "cascade_updated");
   },
@@ -505,14 +333,14 @@ export const actions: Actions = {
     const uid = positiveInteger(text(form.get("uid"), 24));
     const depth = Math.max(-1, Math.min(5000, integer(text(form.get("depth"), 16), 1)));
     if (uid <= 0) return fail(400, { action: "cascadeDelete", error: t.adminInviteOperationFailed } satisfies FormState);
-    const failure = await mutate(event, `/api/v1/admin/users/${uid}/delete`, "POST", { mode: "with_emby", cascade_depth: depth }, "cascadeDelete");
+    const failure = await mutate(event, `/api/v2/admin/invite/users/${uid}/delete`, "POST", { mode: "with_emby", cascade_depth: depth }, "cascadeDelete");
     if (failure) return failure;
     redirectToPage(form, "deleted");
   },
 
   saveConfig: async (event) => {
     const form = await event.request.formData();
-    const result = await apiJSON<ConfigSchema>(event, "/api/v1/system/admin/config/schema", { cache: "no-store" });
+    const result = await apiJSON<ConfigSchema>(event, "/api/v2/admin/invite/config/schema", { cache: "no-store" });
     const schema = result?.success ? result.data : null;
     if (!schema) return fail(503, { action: "saveConfig", error: t.adminInviteConfigLoadFailed } satisfies FormState);
     const sections = Object.fromEntries(schema.sections.map((section) => [
@@ -522,7 +350,7 @@ export const actions: Actions = {
         inviteConfigKeys.has(field.key) ? configValue(form, field) : field.value
       ]))
     ]));
-    const failure = await mutate(event, "/api/v1/system/admin/config/schema", "PUT", { sections }, "saveConfig");
+    const failure = await mutate(event, "/api/v2/admin/invite/config/schema", "PUT", { sections }, "saveConfig");
     if (failure) return failure;
     redirectToPage(form, "config_saved");
   }

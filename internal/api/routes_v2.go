@@ -12,6 +12,17 @@ func (a *App) registerV2Routes() {
 	a.add(http.MethodGet, "/api/v2/signin/summary", AuthUser, a.handleV2SigninSummary)
 	a.add(http.MethodGet, "/api/v2/invite/summary", AuthUser, a.handleV2InviteSummary)
 	a.add(http.MethodGet, "/api/v2/bangumi/summary", AuthUser, a.handleV2BangumiSummary)
+	a.add(http.MethodGet, "/api/v2/admin/invite/tree", AuthAdmin, a.handleV2AdminInviteTree)
+	a.add(http.MethodGet, "/api/v2/admin/invite/codes", AuthAdmin, a.handleV2AdminInviteCodes)
+	a.add(http.MethodPost, "/api/v2/admin/invite/users/:uid/detach", AuthAdmin, a.handleV2AdminInviteDetach)
+	a.add(http.MethodPost, "/api/v2/admin/invite/users/:uid/detach-delete-emby", AuthAdmin, a.handleV2AdminInviteDetachDeleteEmby)
+	a.add(http.MethodPost, "/api/v2/admin/invite/users/detach-batch", AuthAdmin, a.handleV2AdminInviteDetachBatch)
+	a.add(http.MethodPost, "/api/v2/admin/invite/quick-maintenance", AuthAdmin, a.handleV2AdminInviteQuickMaintenance)
+	a.add(http.MethodPost, "/api/v2/admin/invite/users/:uid/disable", AuthAdmin, a.handleV2AdminInviteToggleUser)
+	a.add(http.MethodPost, "/api/v2/admin/invite/users/:uid/enable", AuthAdmin, a.handleV2AdminInviteToggleUser)
+	a.add(http.MethodPost, "/api/v2/admin/invite/users/:uid/delete", AuthAdmin, a.handleV2AdminInviteDeleteUser)
+	a.add(http.MethodGet, "/api/v2/admin/invite/config/schema", AuthAdmin, a.handleV2AdminInviteConfigSchema)
+	a.add(http.MethodPut, "/api/v2/admin/invite/config/schema", AuthAdmin, a.handleV2AdminInviteConfigSchema)
 
 	// Admin ticket resources back the SSR queue and conversation page. Keep
 	// attachments inside the same protected resource family so rendered URLs

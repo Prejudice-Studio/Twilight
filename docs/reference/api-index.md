@@ -310,6 +310,16 @@ V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/ap
 | DELETE | `/api/v2/admin/regcodes/{code}` | Admin | V2 删除注册码并清理其引用 |
 | GET | `/api/v2/admin/regcodes/{code}/usage` | Admin | V2 按需读取注册码使用者和 Telegram-only 使用记录 |
 | POST | `/api/v2/admin/regcodes/{code}/usage/clear` | Admin | V2 清理注册码使用记录；继续要求确认短语 |
+| GET | `/api/v2/admin/invite/tree` | Admin | V2 邀请关系树资源；返回 `item`，仅管理端读取且不缓存 |
+| GET | `/api/v2/admin/invite/codes` | Admin | V2 邀请码资源集合；服务端搜索并返回 `items` 与有界 `pagination` |
+| POST | `/api/v2/admin/invite/users/{uid}/detach` | Admin | V2 断开指定邀请关系 |
+| POST | `/api/v2/admin/invite/users/{uid}/detach-delete-emby` | Admin | V2 断开关系并删除下级 Emby 账号 |
+| POST | `/api/v2/admin/invite/users/detach-batch` | Admin | V2 批量断开/删除 Emby；复用保护与审计规则 |
+| POST | `/api/v2/admin/invite/quick-maintenance` | Admin | V2 邀请快捷维护；支持断开、续期、子树和全量范围 |
+| POST | `/api/v2/admin/invite/users/{uid}/disable` | Admin | V2 级联禁用邀请树用户 |
+| POST | `/api/v2/admin/invite/users/{uid}/enable` | Admin | V2 级联启用邀请树用户 |
+| POST | `/api/v2/admin/invite/users/{uid}/delete` | Admin | V2 级联删除本地/Emby 用户 |
+| GET/PUT | `/api/v2/admin/invite/config/schema` | Admin | V2 邀请配置 SSR 读写资源；最终字段白名单仍由配置 handler 执行 |
 | GET | `/api/v1/admin/media-requests` | Admin | 求片管理列表；支持 `status/source/q/page/per_page`，返回状态计数与分页元数据，不缓存 |
 | PUT | `/api/v1/admin/media-requests/{request_id}` | Admin | 更新求片状态 |
 | DELETE | `/api/v1/admin/media-requests/{request_id}` | Admin | 删除求片 |
