@@ -40,6 +40,15 @@ V2 基础协议入口使用 `/api/v2`，当前只提供不带秘密的能力协�
 | GET | `/api/v2/system/health` | Public | 仅确认 API 进程可处理请求，不探测数据库或 Emby |
 | GET | `/api/v2/system/capabilities` | Public | 返回 V2 版本、兼容版本、公开 feature 和受限上传额度 |
 | GET | `/api/v2/dashboard/summary` | User | 聚合当前用户、公开能力和在线人数摘要；Emby 失败时通过 `viewers.available=false` 独立降级 |
+| GET | `/api/v2/settings` | User | 当前用户设置、Telegram/Emby 状态和密码安全策略；私有 `no-store` |
+| PUT | `/api/v2/settings/preferences` | User | 更新通知、自动续期和密码安全偏好；仅接受严格 JSON 布尔值 |
+| POST | `/api/v2/settings/email/send-code` | User | 发送邮箱绑定或密码操作验证码；邮箱和用途由后端校验 |
+| POST | `/api/v2/settings/email/verify` | User | 校验邮箱绑定验证码并完成当前账号邮箱验证 |
+| POST | `/api/v2/settings/password/system` | User | 修改 Web 密码；后端校验旧密码、强度、邮箱验证码和会话轮换 |
+| POST | `/api/v2/settings/password/emby` | User | 修改当前绑定的 Emby 密码；后端执行单一身份凭据和远端更新策略 |
+| POST | `/api/v2/settings/emby/bind` | User | 使用现有 Emby 凭据绑定当前账号 |
+| POST | `/api/v2/settings/emby/register` | User | 按资格创建并绑定 Emby 账号 |
+| POST | `/api/v2/settings/emby/unbind` | User | 按后端资格解除当前账号的 Emby 绑定 |
 | GET | `/api/v2/announcements` | User | 聚合当前账号可见公告与未确认的强制阅读公告；私有 `no-store` 响应 |
 | POST | `/api/v2/announcements/ack` | User | 去重确认当前账号的强制阅读公告；最终归属与状态由后端复核 |
 | GET | `/api/v2/signin/summary` | User | 聚合签到摘要、公开奖励规则和最近 30 条记录；私有 `no-store` 响应 |

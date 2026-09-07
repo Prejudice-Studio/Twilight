@@ -54,8 +54,32 @@ async function postJSON<T>(
   return { section, success: true, message: envelope.message || "操作成功" };
 }
 
+async function putJSON<T>(
+  event: Parameters<NonNullable<Actions["preferences"]>>[0],
+  path: string,
+  section: string,
+  payload: Record<string, unknown>,
+  fallback: string
+): Promise<FormResult | ReturnType<typeof fail>> {
+  const result = await apiJSONWithResponse<T>(event, path, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const response = result?.response;
+  const envelope = result?.envelope;
+  if (!response || !envelope || !response.ok || !envelope.success) {
+    return fail(response?.status || 503, {
+      section,
+      error: envelope?.message || fallback
+    } satisfies FormResult);
+  }
+  copySetCookies(event, response);
+  return { section, success: true, message: envelope.message || "操作成功" };
+}
+
 export const load: PageServerLoad = async (event) => {
-  const result = await apiJSON<UserSettings>(event, "/api/v1/users/me/settings", { cache: "no-store" });
+  const result = await apiJSON<UserSettings>(event, "/api/v2/settings", { cache: "no-store" });
   return {
     settings: result?.success ? result.data || null : null,
     loadError: result?.success ? null : "设置暂时无法读取，请刷新后重试"
@@ -69,14 +93,14 @@ export const actions: Actions = {
     for (const field of preferenceFields) {
       if (form.has(field)) payload[field] = formBoolean(form, field);
     }
-    return postJSON<UserInfo>(event, "/api/v1/users/me", "preferences", payload, "设置保存失败，请刷新后重试");
+    return putJSON<UserInfo>(event, "/api/v2/settings/preferences", "preferences", payload, "设置保存失败，请刷新后重试");
   },
 
   sendEmail: async (event) => {
     const form = await event.request.formData();
     const purpose = formString(form, "purpose") || "bind";
     const email = formString(form, "email");
-    const result = await apiJSONWithResponse<EmailCodeSent>(event, "/api/v1/users/me/email/send-code", {
+    const result = await apiJSONWithResponse<EmailCodeSent>(event, "/api/v2/settings/email/send-code", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ purpose, ...(email ? { email } : {}) })
@@ -100,7 +124,7 @@ export const actions: Actions = {
 
   verifyEmail: async (event) => {
     const form = await event.request.formData();
-    return postJSON<UserInfo>(event, "/api/v1/users/me/email/verify", "email", {
+    return postJSON<UserInfo>(event, "/api/v2/settings/email/verify", "email", {
       verification_id: formString(form, "verification_id"),
       code: formString(form, "code")
     }, "验证码无效或已失效，请重新获取");
@@ -112,7 +136,7 @@ export const actions: Actions = {
     const confirmPassword = formString(form, "confirm_password");
     if (!newPassword || !confirmPassword) return fail(400, { section: "password", error: "请填写新密码" } satisfies FormResult);
     if (newPassword !== confirmPassword) return fail(400, { section: "password", error: "两次输入的新密码不一致" } satisfies FormResult);
-    return postJSON<{ token?: string }>(event, "/api/v1/users/me/password/system", "password", {
+    return postJSON<{ token?: string }>(event, "/api/v2/settings/password/system", "password", {
       old_password: formString(form, "old_password"),
       new_password: newPassword,
       ...(formString(form, "verification_id") && formString(form, "email_code")
@@ -127,7 +151,7 @@ export const actions: Actions = {
     const confirmPassword = formString(form, "confirm_password");
     if (!newPassword || !confirmPassword) return fail(400, { section: "emby", error: "请填写新密码" } satisfies FormResult);
     if (newPassword !== confirmPassword) return fail(400, { section: "emby", error: "两次输入的新密码不一致" } satisfies FormResult);
-    return postJSON<null>(event, "/api/v1/users/me/password/emby", "emby", {
+    return postJSON<null>(event, "/api/v2/settings/password/emby", "emby", {
       new_password: newPassword,
       ...(formString(form, "old_password") ? { old_password: formString(form, "old_password") } : {}),
       ...(formString(form, "verification_id") && formString(form, "email_code")
@@ -138,7 +162,7 @@ export const actions: Actions = {
 
   bindEmby: async (event) => {
     const form = await event.request.formData();
-    return postJSON<{ user?: UserInfo }>(event, "/api/v1/users/me/emby/bind", "emby", {
+    return postJSON<{ user?: UserInfo }>(event, "/api/v2/settings/emby/bind", "emby", {
       emby_username: formString(form, "emby_username"),
       emby_password: formString(form, "emby_password")
     }, "Emby 绑定失败，请稍后重试");
@@ -146,11 +170,11 @@ export const actions: Actions = {
 
   registerEmby: async (event) => {
     const form = await event.request.formData();
-    return postJSON<{ user?: UserInfo }>(event, "/api/v1/users/me/emby/register", "emby", {
+    return postJSON<{ user?: UserInfo }>(event, "/api/v2/settings/emby/register", "emby", {
       emby_username: formString(form, "emby_username"),
       emby_password: formString(form, "emby_password")
     }, "Emby 开通失败，请稍后重试");
   },
 
-  unbindEmby: async (event) => postJSON<UserInfo>(event, "/api/v1/users/me/emby/unbind", "emby", {}, "解除 Emby 绑定失败，请稍后重试")
+  unbindEmby: async (event) => postJSON<UserInfo>(event, "/api/v2/settings/emby/unbind", "emby", {}, "解除 Emby 绑定失败，请稍后重试")
 };

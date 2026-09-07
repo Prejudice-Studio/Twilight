@@ -16,6 +16,24 @@
 
 V2 基础协议目前提供 `GET /api/v2/system/health`、`GET /api/v2/system/capabilities`、受保护的 `GET /api/v2/dashboard/summary`、`GET /api/v2/announcements`、`GET /api/v2/signin/summary`、`POST /api/v2/signin`、`POST /api/v2/signin/renew`、`PUT /api/v2/signin/preferences`、`GET /api/v2/invite/summary` 和 `GET /api/v2/bangumi/summary`。它们沿用统一 JSON envelope；仪表盘摘要一次返回当前用户、公开能力和在线人数状态。公告资源在一次私有 `no-store` 读取中返回可见公告和当前账号未确认的强制阅读公告，`POST /api/v2/announcements/ack` 只确认当前账号去重后的正整数 ID。Emby 读取失败时只将 `data.viewers.available` 设为 `false`，本地用户和能力数据仍然返回，不把故障伪装为零人在线。签到摘要一次返回 `summary`、`config` 和最近 30 条 `history`；签到、续期和自动续期开关也已经使用 V2 资源，后端仍在共享 handler 与 Store 中执行功能开关、Emby 资格、严格布尔解析、审计以及原子扣分。邀请摘要一次返回 `config` 与会话作用域的 `invite` 投影；Bangumi 摘要一次返回本地同步状态、公开账号资料、五类收藏的有限预览和最近动态，Bangumi 单类读取失败时保留其他成功结果并标记 `collections_partial`。Bangumi Token 永不进入 V2 响应。管理员服务器状态页 `/(app)/admin/status` 使用服务端 `load` 并行读取下方三个 V1 管理员健康接口、系统信息和管理员统计；它是 WebUI 路由，不新增一套重复的健康探测 API。上述接口不改变 `/api/v1` 写入状态机，未迁移调用继续使用 `/api/v1`。
 
+### V2 个人设置资源
+
+个人设置页面使用一组独立的 SSR 资源，全部要求 User 鉴权并返回 `Cache-Control: private, no-store`：
+
+| 方法 | 路径 | 说明 |
+| ---- | ---- | ---- |
+| GET | `/api/v2/settings` | 返回当前用户设置、Telegram/Emby 状态和密码安全策略 |
+| PUT | `/api/v2/settings/preferences` | 更新通知、自动续期和密码安全偏好；布尔字段必须是 JSON 布尔值 |
+| POST | `/api/v2/settings/email/send-code` | 发送邮箱绑定或密码操作验证码 |
+| POST | `/api/v2/settings/email/verify` | 校验邮箱绑定验证码并完成当前账号邮箱验证 |
+| POST | `/api/v2/settings/password/system` | 修改 Web 密码，并按策略校验旧密码、邮箱验证码和会话轮换 |
+| POST | `/api/v2/settings/password/emby` | 修改当前绑定的 Emby 密码 |
+| POST | `/api/v2/settings/emby/bind` | 使用现有 Emby 凭据绑定当前账号 |
+| POST | `/api/v2/settings/emby/register` | 按后端资格创建并绑定 Emby 账号 |
+| POST | `/api/v2/settings/emby/unbind` | 按后端资格解除当前账号的 Emby 绑定 |
+
+这些端点是共享 V1 处理器的版本化适配，不建立第二套业务状态机。邮箱验证、密码强度、当前 Web 密码、Emby 管理员保护、注册资格、远端副作用、Store 原子写入、审计和会话 Cookie 都由 Go 后端最终决定。V1 设置端点继续保留给回滚前端与外部兼容调用；默认 V2 前端不再直接请求它们。
+
 ### 1.1 文档分工
 
 | 文档 | 用途 |

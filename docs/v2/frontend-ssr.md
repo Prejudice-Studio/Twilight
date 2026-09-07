@@ -118,9 +118,10 @@ V2 页面覆盖 V1 当前用户可见的全部路由；兼容别名只负责旧�
 
 ## 已迁移模块：个人中心
 
-`/(app)/settings` 是第一个完整迁移的用户侧模块。页面首屏由服务端读取 `/users/me/settings`，其中包含当前用户摘要、Telegram/Emby 状态、通知偏好和密码安全策略；设置保存、邮箱发码/验证、系统密码、Emby 密码、绑定、开通和解绑均通过 SvelteKit form action 转发到 Go API。
+`/(app)/settings` 是第一个完整迁移的用户侧模块。页面首屏由服务端读取 `/api/v2/settings`，其中包含当前用户摘要、Telegram/Emby 状态、通知偏好和密码安全策略；设置保存、邮箱发码/验证、系统密码、Emby 密码、绑定、开通和解绑均通过 SvelteKit form action 转发到 `/api/v2/settings/*`。
 
 - 浏览器不读取或保存会话令牌，密码成功轮换会话时由 action 转发上游 `Set-Cookie`。
+- 偏好保存使用 `PUT /api/v2/settings/preferences`；旧页面曾把该操作误发到不匹配的 V1 `POST /users/me`，V2 不保留这个方法歧义。
 - 复选框在服务端转换成 JSON 布尔值，不能把字符串或前端显示状态当作权限边界。
 - 邮箱验证码记录 ID 只在当前 action 结果中回显，改密所需验证码仍由 Go 后端核验。
 - Emby 绑定/解绑的资格、邮箱验证、管理员保护和远端副作用仍由 Go 后端决定；V2 页面不自行复制这些规则。
