@@ -81,9 +81,9 @@ function readEnvelope<T>(result: PromiseSettledResult<ApiEnvelope<T>>): T | null
 
 export const load: PageServerLoad = async (event): Promise<AdminConfigPageData> => {
   const results = await Promise.allSettled([
-    apiJSON<ConfigSchema>(event, "/api/v1/system/admin/config/schema", { cache: "no-store" }),
-    apiJSON<ConfigToml>(event, "/api/v1/system/admin/config/toml", { cache: "no-store" }),
-    apiJSON<ConfigBackupList>(event, "/api/v1/system/admin/config/backups", { cache: "no-store" })
+    apiJSON<ConfigSchema>(event, "/api/v2/admin/config/schema", { cache: "no-store" }),
+    apiJSON<ConfigToml>(event, "/api/v2/admin/config/toml", { cache: "no-store" }),
+    apiJSON<ConfigBackupList>(event, "/api/v2/admin/config/backups", { cache: "no-store" })
   ]);
   const schema = readEnvelope(results[0] as PromiseSettledResult<ApiEnvelope<ConfigSchema>>);
   const toml = readEnvelope(results[1] as PromiseSettledResult<ApiEnvelope<ConfigToml>>);
@@ -99,7 +99,7 @@ export const actions: Actions = {
   saveSchema: async (event) => {
     const parsed = parseSections(await event.request.formData());
     if (parsed.failure || !parsed.value) return parsed.failure;
-    const result = await jsonMutation(event, "/api/v1/system/admin/config/schema", "PUT", { sections: parsed.value }, "saveSchema", t.adminConfigSaveFailed);
+    const result = await jsonMutation(event, "/api/v2/admin/config/schema", "PUT", { sections: parsed.value }, "saveSchema", t.adminConfigSaveFailed);
     if (result.failure) return result.failure;
     throw redirect(303, "/admin/config");
   },
@@ -110,13 +110,13 @@ export const actions: Actions = {
     if (typeof content !== "string" || new TextEncoder().encode(content).byteLength > maxTomlBytes) {
       return fail(413, { action: "saveToml", error: t.adminConfigSaveFailed } satisfies FormState);
     }
-    const result = await jsonMutation(event, "/api/v1/system/admin/config/toml", "PUT", { content }, "saveToml", t.adminConfigSaveFailed);
+    const result = await jsonMutation(event, "/api/v2/admin/config/toml", "PUT", { content }, "saveToml", t.adminConfigSaveFailed);
     if (result.failure) return result.failure;
     throw redirect(303, "/admin/config");
   },
 
   createBackup: async (event) => {
-    const result = await jsonMutation(event, "/api/v1/system/admin/config/backup", "POST", {}, "createBackup", t.adminConfigSaveFailed);
+    const result = await jsonMutation(event, "/api/v2/admin/config/backup", "POST", {}, "createBackup", t.adminConfigSaveFailed);
     if (result.failure) return result.failure;
     throw redirect(303, "/admin/config");
   },
@@ -124,7 +124,7 @@ export const actions: Actions = {
   inspectBackup: async (event) => {
     const name = backupName(await event.request.formData());
     if (!name) return fail(400, { action: "inspectBackup", error: t.adminConfigBackupsLoadFailed } satisfies FormState);
-    const result = await apiJSONWithResponse<ConfigBackupView>(event, `/api/v1/system/admin/config/backups/${encodeURIComponent(name)}`, { cache: "no-store" });
+    const result = await apiJSONWithResponse<ConfigBackupView>(event, `/api/v2/admin/config/backups/${encodeURIComponent(name)}`, { cache: "no-store" });
     if (!result?.response.ok || !result.envelope?.success || !result.envelope.data) return failResult("inspectBackup", result?.response, t.adminConfigBackupsLoadFailed);
     return { action: "inspectBackup", backupView: result.envelope.data } satisfies FormState;
   },
@@ -132,7 +132,7 @@ export const actions: Actions = {
   deleteBackup: async (event) => {
     const name = backupName(await event.request.formData());
     if (!name) return fail(400, { action: "deleteBackup", error: t.adminConfigBackupsLoadFailed } satisfies FormState);
-    const result = await jsonMutation(event, `/api/v1/system/admin/config/backups/${encodeURIComponent(name)}`, "DELETE", undefined, "deleteBackup", t.adminConfigBackupsLoadFailed);
+    const result = await jsonMutation(event, `/api/v2/admin/config/backups/${encodeURIComponent(name)}`, "DELETE", undefined, "deleteBackup", t.adminConfigBackupsLoadFailed);
     if (result.failure) return result.failure;
     throw redirect(303, "/admin/config");
   },
@@ -140,7 +140,7 @@ export const actions: Actions = {
   restorePreview: async (event) => {
     const name = backupName(await event.request.formData());
     if (!name) return fail(400, { action: "restorePreview", error: t.adminConfigBackupsLoadFailed } satisfies FormState);
-    const result = await jsonMutation<ConfigRestoreResult>(event, "/api/v1/system/admin/config/restore", "POST", { name, dry_run: true }, "restorePreview", t.adminConfigBackupsLoadFailed);
+    const result = await jsonMutation<ConfigRestoreResult>(event, "/api/v2/admin/config/restore", "POST", { name, dry_run: true }, "restorePreview", t.adminConfigBackupsLoadFailed);
     if (result.failure) return result.failure;
     return { action: "restorePreview", restorePreview: result.data } satisfies FormState;
   },
@@ -149,13 +149,13 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const name = backupName(form);
     if (!name || text(form.get("confirm"), 64) !== "RESTORE_CONFIG_BACKUP") return fail(400, { action: "restore", error: t.adminConfigRestoreConfirm } satisfies FormState);
-    const result = await jsonMutation(event, "/api/v1/system/admin/config/restore", "POST", { name, confirm: "RESTORE_CONFIG_BACKUP" }, "restore", t.adminConfigSaveFailed);
+    const result = await jsonMutation(event, "/api/v2/admin/config/restore", "POST", { name, confirm: "RESTORE_CONFIG_BACKUP" }, "restore", t.adminConfigSaveFailed);
     if (result.failure) return result.failure;
     throw redirect(303, "/admin/config");
   },
 
   sweep: async (event) => {
-    const result = await jsonMutation(event, "/api/v1/system/admin/config/sweep", "POST", {}, "sweep", t.adminConfigSaveFailed);
+    const result = await jsonMutation(event, "/api/v2/admin/config/sweep", "POST", {}, "sweep", t.adminConfigSaveFailed);
     if (result.failure) return result.failure;
     throw redirect(303, "/admin/config");
   },
@@ -168,7 +168,7 @@ export const actions: Actions = {
     }
     const body = new FormData();
     body.set("file", file, file.name || "background");
-    const result = await apiJSONWithResponse(event, "/api/v1/system/admin/config/upload-auth-background", { method: "POST", body });
+    const result = await apiJSONWithResponse(event, "/api/v2/admin/config/upload-auth-background", { method: "POST", body });
     if (!result?.response.ok || !result.envelope?.success) return failResult("uploadBackground", result?.response, t.adminConfigSaveFailed);
     throw redirect(303, "/admin/config");
   }

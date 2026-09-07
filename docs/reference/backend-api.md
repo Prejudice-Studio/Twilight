@@ -18,6 +18,10 @@ V2 基础协议目前提供 `GET /api/v2/system/health`、`GET /api/v2/system/ca
 
 管理员状态资源均要求 `AuthAdmin`。`/api/v2/admin/health/api` 只检查 API 进程，`/api/v2/admin/health/database` 只检查数据库状态，`/api/v2/admin/health/emby` 从后端发起 Emby 服务探测；三者都返回 `private, no-store`，单项失败不影响其它响应。`/api/v2/admin/stats` 只返回有限的用户、注册码、运行时和 Redis 回退摘要，也使用 `private, no-store`。公共 `/api/v2/system/info` 只返回站点名称、图标、版本、公开能力、受限额度和初始化状态，不返回 Emby/Telegram/数据库配置值。
 
+### V2 管理员配置资源
+
+配置管理页面使用 `/api/v2/admin/config/schema`、`/toml` 和 `/backups` 资源读取结构化配置、脱敏 TOML 与配置备份。V2 响应不返回服务器文件系统路径，secret 字段仍使用服务端脱敏哨兵；保存、创建/删除备份、整理、认证背景图上传和恢复均由服务端 form action 提交。恢复预览与实际恢复继续复用 Go 的配置解析、受保护字段、原子写入、热重载、失败回滚和 `RESTORE_CONFIG_BACKUP` 确认边界。
+
 ### V2 个人设置资源
 
 个人设置页面使用一组独立的 SSR 资源，全部要求 User 鉴权并返回 `Cache-Control: private, no-store`：

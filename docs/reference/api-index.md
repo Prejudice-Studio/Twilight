@@ -108,8 +108,21 @@ V2 基础协议入口使用 `/api/v2`，当前只提供不带秘密的能力协�
 | DELETE | `/api/v2/admin/audit-logs/{log_id}` | Admin | V2 删除单条审计日志；兼容 `log_id` 路由参数 |
 | POST | `/api/v2/admin/audit-logs/clear` | Admin | V2 清空审计日志；需要 `CLEAR_AUDIT_LOGS` |
 | POST | `/api/v2/admin/audit-logs/prune` | Admin | V2 按条数/天数裁剪审计日志；需要 `PRUNE_AUDIT_LOGS` |
+| GET | `/api/v2/admin/config/schema` | Admin | V2 读取脱敏结构化配置 schema；不返回服务器路径或 secret 明文 |
+| PUT | `/api/v2/admin/config/schema` | Admin | V2 保存结构化配置；复用字段白名单、secret 哨兵、备份、热重载和审计 |
+| GET | `/api/v2/admin/config/toml` | Admin | V2 读取脱敏 TOML；不返回服务器路径或 secret 明文 |
+| PUT | `/api/v2/admin/config/toml` | Admin | V2 保存 TOML；复用解析、受保护字段、备份、热重载和失败回滚 |
+| GET | `/api/v2/admin/config/backups` | Admin | V2 读取配置备份元数据；不返回备份路径 |
+| POST | `/api/v2/admin/config/backup` | Admin | V2 创建配置备份 |
+| GET | `/api/v2/admin/config/backups/{name}` | Admin | V2 读取脱敏配置备份预览；文件名由后端安全校验 |
+| DELETE | `/api/v2/admin/config/backups/{name}` | Admin | V2 删除配置备份 |
+| POST | `/api/v2/admin/config/restore` | Admin | V2 生成恢复预览或确认恢复；执行恢复需要 `RESTORE_CONFIG_BACKUP` |
+| POST | `/api/v2/admin/config/sweep` | Admin | V2 整理配置并热重载 |
+| POST | `/api/v2/admin/config/upload-auth-background` | Admin | V2 上传认证页背景图；复用 MIME、大小、路径和限流校验 |
 
 V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/api/v1`，不能由前端自行拼接版本路径。
+
+配置管理的 V2 资源位于 `/api/v2/admin/config/*`。schema、TOML 和备份读取均为管理员私有 `no-store` 资源；响应不包含服务器文件系统路径，敏感配置保持脱敏哨兵。保存、备份、整理、上传认证背景图和恢复操作均通过 V2 资源提交，恢复仍要求 `RESTORE_CONFIG_BACKUP` 确认短语。
 
 > 说明：`X-Twilight-Client` 只用于前端请求识别与 CORS 允许头，不参与鉴权。少数有副作用的 `GET`（如绑定码创建）还要求 `X-Twilight-Intent` 显式声明操作意图，用于拦截预取/探测误触发。
 

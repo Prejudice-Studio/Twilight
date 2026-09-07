@@ -1138,13 +1138,13 @@ export interface AdminTelegramRebindPageData {
 export interface ConfigToml {
   content: string;
   raw_content?: string;
-  path: string;
+  path?: string;
   completed?: boolean;
 }
 
 export interface ConfigBackup {
   name: string;
-  path: string;
+  path?: string;
   size: number;
   created_at: number;
 }
