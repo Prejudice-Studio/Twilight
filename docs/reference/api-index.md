@@ -52,6 +52,10 @@ V2 基础协议入口使用 `/api/v2`，当前只提供不带秘密的能力协�
 | POST | `/api/v2/admin/announcements` | Admin | V2 创建公告；复用字段白名单、渲染模式归一化和审计 |
 | PUT | `/api/v2/admin/announcements/{announcement_id}` | Admin | V2 更新公告 |
 | DELETE | `/api/v2/admin/announcements/{announcement_id}` | Admin | V2 删除公告 |
+| GET | `/api/v2/admin/audit-logs` | Admin | V2 操作审计日志分页资源；服务端筛选、参数化排序且不缓存 |
+| DELETE | `/api/v2/admin/audit-logs/{log_id}` | Admin | V2 删除单条审计日志；兼容 `log_id` 路由参数 |
+| POST | `/api/v2/admin/audit-logs/clear` | Admin | V2 清空审计日志；需要 `CLEAR_AUDIT_LOGS` |
+| POST | `/api/v2/admin/audit-logs/prune` | Admin | V2 按条数/天数裁剪审计日志；需要 `PRUNE_AUDIT_LOGS` |
 
 V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/api/v1`，不能由前端自行拼接版本路径。
 

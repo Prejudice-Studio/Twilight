@@ -1010,6 +1010,8 @@ V2 管理员用户资源为 `/api/v2/admin/users`。集合接口返回：
 
 管理员公告页面使用 `/api/v2/admin/announcements` 资源集合及其单公告写操作。列表筛选、分页和 no-store 响应由后端执行；创建、更新、显示/隐藏、置顶和删除仍走同一套 Store、字段归一化、渲染模式白名单与审计逻辑。正文在 SSR 页面中按文本显示，不执行未审查的 Markdown/BBCode HTML。
 
+管理员操作日志页面使用 `/api/v2/admin/audit-logs` 资源。列表只返回有界分页，筛选和排序在 PostgreSQL 查询边界完成；删除、清空和裁剪仍要求管理员及固定确认短语。审计维护操作不会在刚清理的同一审计表中递归追加新记录，避免“清空后又出现一条维护日志”。
+
 #### 查询用户列表
 
 `GET /admin/users?status=active&page=1&per_page=20`

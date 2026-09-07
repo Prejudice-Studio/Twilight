@@ -124,7 +124,7 @@ export const load: PageServerLoad = async (event): Promise<AdminAuditLogsPageDat
   const sort = sortParts(query.sort);
   params.set("sort", sort.sort);
   params.set("order", sort.order);
-  const result = await apiJSON<AuditLogPage>(event, `/api/v1/admin/audit-logs?${params}`, { cache: "no-store" });
+  const result = await apiJSON<AuditLogPage>(event, `/api/v2/admin/audit-logs?${params}`, { cache: "no-store" });
   const notice = ["deleted", "cleared", "pruned"].includes(text(event.url.searchParams.get("notice"), 16)) ? text(event.url.searchParams.get("notice"), 16) : "";
   return {
     payload: result?.success ? result.data || null : null,
@@ -139,14 +139,14 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const id = integer(text(form.get("log_id") as string | null, 24), 0);
     if (id <= 0) return fail(400, { action: "deleteLog", error: t.adminAuditLogOperationFailed } satisfies FormState);
-    const result = await mutate(event, `/api/v1/admin/audit-logs/${id}`, "DELETE", undefined, "deleteLog");
+    const result = await mutate(event, `/api/v2/admin/audit-logs/${id}`, "DELETE", undefined, "deleteLog");
     if (result.failure) return result.failure;
     redirectToList(form, "deleted");
   },
 
   clear: async (event) => {
     const form = await event.request.formData();
-    const result = await mutate(event, "/api/v1/admin/audit-logs/clear", "POST", { confirm: "CLEAR_AUDIT_LOGS" }, "clear");
+    const result = await mutate(event, "/api/v2/admin/audit-logs/clear", "POST", { confirm: "CLEAR_AUDIT_LOGS" }, "clear");
     if (result.failure) return result.failure;
     redirectToList(form, "cleared");
   },
@@ -157,7 +157,7 @@ export const actions: Actions = {
     const entries = Math.max(0, Math.min(100000, integer(text(form.get("max_entries") as string | null, 10), 0)));
     if (days === 0 && entries === 0) return fail(400, { action: "prune", error: t.adminAuditLogOperationFailed } satisfies FormState);
     const preserveAdmin = form.getAll("preserve_admin").some((value) => value === "true" || value === "on");
-    const result = await mutate(event, "/api/v1/admin/audit-logs/prune", "POST", {
+    const result = await mutate(event, "/api/v2/admin/audit-logs/prune", "POST", {
       confirm: "PRUNE_AUDIT_LOGS",
       ...(days > 0 ? { retention_days: days } : {}),
       ...(entries > 0 ? { max_entries: entries } : {}),
