@@ -975,6 +975,8 @@ curl -X POST "http://localhost:5000/api/v1/media/request/external/update" \
 
 - 认证：登录用户（`AuthUser`）
 
+管理员违规审计的默认 V2 SSR 资源为 `GET /api/v2/admin/violations`、`DELETE /api/v2/admin/violations/{violation_id}` 和 `POST /api/v2/admin/violations/clear`。V2 列表只返回有界分页，类型、搜索词和页码由服务端规范化，响应使用 `private, no-store`；删除与清空仍由原有 Store 和审计 handler 执行，清空必须提交 `CLEAR_VIOLATIONS`。V1 路径继续保留给回滚前端。
+
 ### 7.4 V2 SSR 媒体资源
 
 默认 `webui-v2` 使用 `/api/v2/media/*`，而不是在浏览器中直接调用 V1 媒体接口。搜索、详情、库存和“我的求片”均由 SvelteKit 服务端 `load` 通过受保护的 SSR API 边界读取；创建与删除使用 form action。会话 Cookie 只在 SSR 服务端转发，V2 响应统一使用私有 `no-store` 缓存策略。

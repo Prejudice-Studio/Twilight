@@ -81,7 +81,7 @@ export const load: PageServerLoad = async (event): Promise<AdminViolationsPageDa
   const params = new URLSearchParams({ page: String(query.page), per_page: String(query.per_page) });
   if (query.type && query.type !== "all") params.set("type", query.type);
   if (query.search) params.set("search", query.search);
-  const result = await apiJSON<ViolationLogPage>(event, `/api/v1/admin/violations?${params}`, { cache: "no-store" });
+  const result = await apiJSON<ViolationLogPage>(event, `/api/v2/admin/violations?${params}`, { cache: "no-store" });
   const noticeValue = text(event.url.searchParams.get("notice"), 16);
   const notice = noticeValue === "deleted" || noticeValue === "cleared" ? noticeValue : "";
   return {
@@ -100,7 +100,7 @@ export const actions: Actions = {
     if (!/^\d+$/.test(rawID) || id <= 0) {
       return fail(400, { action: "deleteViolation", error: t.adminViolationsDeleteFailed } satisfies FormState);
     }
-    const result = await mutate(event, `/api/v1/admin/violations/${id}`, "DELETE", undefined, "deleteViolation", t.adminViolationsDeleteFailed);
+    const result = await mutate(event, `/api/v2/admin/violations/${id}`, "DELETE", undefined, "deleteViolation", t.adminViolationsDeleteFailed);
     if (result.failure) return result.failure;
     redirectToList(form, "deleted");
   },
@@ -112,7 +112,7 @@ export const actions: Actions = {
     }
     const result = await mutate(
       event,
-      "/api/v1/admin/violations/clear",
+      "/api/v2/admin/violations/clear",
       "POST",
       { confirm: "CLEAR_VIOLATIONS" },
       "clearViolations",
