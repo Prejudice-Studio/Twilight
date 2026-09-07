@@ -24,6 +24,12 @@ V2 基础协议目前提供 `GET /api/v2/system/health`、`GET /api/v2/system/ca
 | ---- | ---- | ---- |
 | GET | `/api/v2/settings` | 返回当前用户设置、Telegram/Emby 状态和密码安全策略 |
 | PUT | `/api/v2/settings/preferences` | 更新通知、自动续期和密码安全偏好；布尔字段必须是 JSON 布尔值 |
+| GET | `/api/v2/settings/appearance` | 返回当前账号头像与背景配置；响应为私有 `no-store`，只返回资源 URL 和安全配置字符串 |
+| PUT | `/api/v2/settings/appearance/background` | 更新背景配置；渐变、上传资源路径和数值范围仍由共享 Go 背景校验器最终处理 |
+| DELETE | `/api/v2/settings/appearance/background` | 删除当前账号背景配置 |
+| POST | `/api/v2/settings/appearance/background/upload` | 上传背景图片，multipart 字段为 `file` 和 `type=light|dark` |
+| POST | `/api/v2/settings/appearance/avatar/upload` | 上传头像，multipart 字段为 `file` |
+| DELETE | `/api/v2/settings/appearance/avatar` | 删除当前账号头像 |
 | POST | `/api/v2/settings/email/send-code` | 发送邮箱绑定或密码操作验证码 |
 | POST | `/api/v2/settings/email/verify` | 校验邮箱绑定验证码并完成当前账号邮箱验证 |
 | POST | `/api/v2/settings/password/system` | 修改 Web 密码，并按策略校验旧密码、邮箱验证码和会话轮换 |

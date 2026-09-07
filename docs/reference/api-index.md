@@ -42,6 +42,12 @@ V2 基础协议入口使用 `/api/v2`，当前只提供不带秘密的能力协�
 | GET | `/api/v2/dashboard/summary` | User | 聚合当前用户、公开能力和在线人数摘要；Emby 失败时通过 `viewers.available=false` 独立降级 |
 | GET | `/api/v2/settings` | User | 当前用户设置、Telegram/Emby 状态和密码安全策略；私有 `no-store` |
 | PUT | `/api/v2/settings/preferences` | User | 更新通知、自动续期和密码安全偏好；仅接受严格 JSON 布尔值 |
+| GET | `/api/v2/settings/appearance` | User | 一次返回当前账号头像与背景配置；私有 `no-store` |
+| PUT | `/api/v2/settings/appearance/background` | User | 更新安全渐变、上传背景资源引用及显示参数；最终校验由 Go 完成 |
+| DELETE | `/api/v2/settings/appearance/background` | User | 清除当前账号背景配置 |
+| POST | `/api/v2/settings/appearance/background/upload` | User | 上传并应用浅色或深色背景图片；使用 multipart 的 `file` 与 `type` 字段 |
+| POST | `/api/v2/settings/appearance/avatar/upload` | User | 上传并应用当前账号头像；使用 multipart 的 `file` 字段 |
+| DELETE | `/api/v2/settings/appearance/avatar` | User | 清除当前账号头像 |
 | POST | `/api/v2/settings/email/send-code` | User | 发送邮箱绑定或密码操作验证码；邮箱和用途由后端校验 |
 | POST | `/api/v2/settings/email/verify` | User | 校验邮箱绑定验证码并完成当前账号邮箱验证 |
 | POST | `/api/v2/settings/password/system` | User | 修改 Web 密码；后端校验旧密码、强度、邮箱验证码和会话轮换 |

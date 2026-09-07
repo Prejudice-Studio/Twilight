@@ -1,9 +1,9 @@
 import { fail, redirect } from "@sveltejs/kit";
 import type { Actions, PageServerLoad, RequestEvent } from "./$types";
-import { apiJSONWithResponse, copySetCookies } from "$lib/server/api";
+import { apiJSON, apiJSONWithResponse, copySetCookies } from "$lib/server/api";
 import { safeAvatarPath } from "$lib/assets";
 import { t } from "$lib/i18n";
-import type { BackgroundConfig } from "$lib/types";
+import type { BackgroundConfig, UserAppearance } from "$lib/types";
 
 type FormState = { action?: string; error?: string; success?: string };
 
@@ -94,14 +94,15 @@ function readAppearance(value: string | null | undefined): BackgroundConfig {
   }
 }
 
-export const load: PageServerLoad = ({ locals, url }) => {
+export const load: PageServerLoad = async ({ locals, url, request }) => {
   const rawResult = url.searchParams.get("result") || "";
   const result = new Set(["background_saved", "background_reset", "background_uploaded", "avatar_uploaded", "avatar_deleted"]).has(rawResult)
     ? rawResult
     : "";
+  const appearance = await apiJSON<UserAppearance>({ request }, "/api/v2/settings/appearance", { cache: "no-store" });
   return {
-    background: readAppearance(locals.user?.background),
-    avatar: safeAvatarPath(locals.user?.avatar) || null,
+    background: readAppearance(appearance?.data?.background ?? locals.user?.background),
+    avatar: safeAvatarPath(appearance?.data?.avatar ?? locals.user?.avatar) || null,
     result
   };
 };
@@ -113,14 +114,14 @@ export const actions: Actions = {
     if (!payload.lightBg && !payload.darkBg && !payload.lightBgImage && !payload.darkBgImage) {
       return error("saveBackground", t.appearanceBackgroundInvalid);
     }
-    return mutation(event, "/api/v1/users/me/background", {
+    return mutation(event, "/api/v2/settings/appearance/background", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload)
     }, "saveBackground", "background_saved");
   },
 
-  resetBackground: async (event) => mutation(event, "/api/v1/users/me/background", { method: "DELETE" }, "resetBackground", "background_reset"),
+  resetBackground: async (event) => mutation(event, "/api/v2/settings/appearance/background", { method: "DELETE" }, "resetBackground", "background_reset"),
 
   uploadBackground: async (event) => {
     const form = await event.request.formData();
@@ -133,7 +134,7 @@ export const actions: Actions = {
     const body = new FormData();
     body.set("file", file, file.name || "background");
     body.set("type", type);
-    return mutation(event, "/api/v1/users/me/background/upload", { method: "POST", body }, "uploadBackground", "background_uploaded");
+    return mutation(event, "/api/v2/settings/appearance/background/upload", { method: "POST", body }, "uploadBackground", "background_uploaded");
   },
 
   uploadAvatar: async (event) => {
@@ -144,8 +145,8 @@ export const actions: Actions = {
     if (file.size <= 0 || file.size > maxAvatarBytes) return error("uploadAvatar", t.appearanceUploadTooLarge);
     const body = new FormData();
     body.set("file", file, file.name || "avatar");
-    return mutation(event, "/api/v1/users/me/avatar/upload", { method: "POST", body }, "uploadAvatar", "avatar_uploaded");
+    return mutation(event, "/api/v2/settings/appearance/avatar/upload", { method: "POST", body }, "uploadAvatar", "avatar_uploaded");
   },
 
-  deleteAvatar: async (event) => mutation(event, "/api/v1/users/me/avatar", { method: "DELETE" }, "deleteAvatar", "avatar_deleted")
+  deleteAvatar: async (event) => mutation(event, "/api/v2/settings/appearance/avatar", { method: "DELETE" }, "deleteAvatar", "avatar_deleted")
 };

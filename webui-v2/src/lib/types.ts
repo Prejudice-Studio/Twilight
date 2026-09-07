@@ -44,6 +44,11 @@ export interface BackgroundConfig {
   darkOpacity: number;
 }
 
+export interface UserAppearance {
+  avatar?: string | null;
+  background?: string | null;
+}
+
 export interface AdminUserActionState {
   has_emby: boolean;
   protected_role: boolean;
