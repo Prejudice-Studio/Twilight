@@ -31,6 +31,8 @@ func (a *App) registerV2Routes() {
 	a.add(http.MethodPost, "/api/v2/admin/database/backup", AuthAdmin, a.handleV2DatabaseBackup)
 	a.add(http.MethodPost, "/api/v2/admin/database/restore", AuthAdmin, a.handleV2DatabaseRestore)
 	a.add(http.MethodPost, "/api/v2/admin/database/migrate", AuthAdmin, a.handleV2DatabaseMigrate)
+	a.add(http.MethodGet, "/api/v2/admin/runtime/status", AuthAdmin, a.handleV2RuntimeStatus)
+	a.add(http.MethodGet, "/api/v2/admin/runtime/logs", AuthAdmin, a.handleV2RuntimeLogs)
 	a.add(http.MethodGet, "/api/v2/tickets", AuthUser, a.handleV2UserTickets)
 	a.add(http.MethodPost, "/api/v2/tickets", AuthUser, a.handleV2CreateTicket)
 	a.add(http.MethodGet, "/api/v2/tickets/:ticket_id", AuthUser, a.handleV2UserTicket)

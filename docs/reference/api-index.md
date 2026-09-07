@@ -126,6 +126,8 @@ V2 基础协议入口使用 `/api/v2`，当前只提供不带秘密的能力协�
 | POST | `/api/v2/admin/database/backup` | Admin | V2 创建数据库备份 |
 | POST | `/api/v2/admin/database/restore` | Admin | V2 生成恢复预览或确认恢复；执行恢复需要 `RESTORE_DATABASE_BACKUP` |
 | POST | `/api/v2/admin/database/migrate` | Admin | V2 生成数据库迁移预览或执行迁移；执行需要 `MIGRATE_DATABASE`，继续受功能开关与路径安全约束 |
+| GET | `/api/v2/admin/runtime/status` | Admin | V2 读取有限运行时状态；私有 `no-store`，不返回配置秘密或文件路径 |
+| GET | `/api/v2/admin/runtime/logs` | Admin | V2 读取有界运行日志快照；私有 `no-store`，不启用浏览器流式连接 |
 
 V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/api/v1`，不能由前端自行拼接版本路径。
 

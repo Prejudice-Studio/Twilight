@@ -11,8 +11,8 @@ function limitValue(value: string | null): number {
 export const load: PageServerLoad = async (event): Promise<AdminRuntimeLogsPageData> => {
   const limit = limitValue(event.url.searchParams.get("limit"));
   const results = await Promise.allSettled([
-    apiJSON<RuntimeStatus>(event, "/api/v1/system/admin/runtime/status", { cache: "no-store" }),
-    apiJSON<RuntimeLogsResponse>(event, `/api/v1/system/admin/runtime/logs?limit=${limit}`, { cache: "no-store" })
+    apiJSON<RuntimeStatus>(event, "/api/v2/admin/runtime/status", { cache: "no-store" }),
+    apiJSON<RuntimeLogsResponse>(event, `/api/v2/admin/runtime/logs?limit=${limit}`, { cache: "no-store" })
   ]);
   const statusResult = results[0].status === "fulfilled" ? results[0].value : null;
   const logsResult = results[1].status === "fulfilled" ? results[1].value : null;

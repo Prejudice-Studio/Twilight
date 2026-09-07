@@ -1042,6 +1042,8 @@ V2 管理员用户资源为 `/api/v2/admin/users`。集合接口返回：
 
 管理员数据库页使用 `/api/v2/admin/database/*`。状态和备份列表为私有 `no-store` 安全投影，不返回服务器文件路径、状态文件名、备份目录或 PostgreSQL 连接拓扑；备份预览、恢复、迁移的输入仍由 Go 后端执行文件名校验、快照校验、保护性备份、确认短语、功能开关和原子写入。数据库运行时仍以 PostgreSQL 为唯一后端，JSON 只保留为显式迁移导出目标。
 
+管理员运行日志页使用 `/api/v2/admin/runtime/status` 与 `/api/v2/admin/runtime/logs` 的有限快照资源。日志数量由后端上限约束，属性和消息沿用运行日志采集时的脱敏结果；V2 页面只手动刷新，不使用旧 SSE 流接口或浏览器轮询。
+
 管理员 Bangumi 页面使用 `/api/v2/admin/bangumi/*`。用户列表只返回服务端分页的当前页和批量统计，播放记录、同步日志必须带 UID 按需读取；同步和日志清理使用对应的 POST/DELETE 资源。页面配置摘要来自公开 `/api/v2/system/capabilities`，只展示功能开关，不包含 Bangumi Token；V1 管理员 Bangumi 路径保留为兼容入口。
 
 用户 Bangumi 页面使用 `/api/v2/bangumi/summary`、`/api/v2/bangumi/collections` 及其集合修改、同步、历史和偏好资源。集合读取是私有 `no-store` 的服务端分页，Token 只由 Go 服务端访问 Bangumi，绝不进入响应；V2 资源继续复用现有功能开关、Store 缓存失效、外部请求和审计逻辑。
