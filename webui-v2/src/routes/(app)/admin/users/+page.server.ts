@@ -83,7 +83,7 @@ function formQuery(form: FormData): AdminUsersPageData["query"] {
 }
 
 function actionPath(uid: number, suffix: string): string {
-  return `/api/v1/admin/users/${uid}${suffix}`;
+  return `/api/v2/admin/users/${uid}${suffix}`;
 }
 
 async function mutate<T>(
@@ -117,7 +117,7 @@ function requireUID(form: FormData): number | FormFailure {
 
 export const load: PageServerLoad = async (event) => {
   const query = normalizeQuery(event.url);
-  const result = await apiJSON<AdminUserListResponse>(event, `/api/v1/admin/users?${queryString(query)}`, { cache: "no-store" });
+  const result = await apiJSON<AdminUserListResponse>(event, `/api/v2/admin/users?${queryString(query)}`, { cache: "no-store" });
   return {
     payload: result?.success ? result.data || null : null,
     query,
@@ -219,7 +219,7 @@ export const actions: Actions = {
     const days = safeInteger(formText(form, "days", 12), 30);
     if (!username) return fail(400, { action: "create", error: t.adminUsersUsernameRequired } satisfies FormState);
     if (days < -1 || days > 36500) return fail(400, { action: "create", error: t.adminUsersDaysInvalid } satisfies FormState);
-    const result = await mutate<{ user: UserInfo; password: string }>(event, "/api/v1/admin/users", "POST", {
+    const result = await mutate<{ user: UserInfo; password: string }>(event, "/api/v2/admin/users", "POST", {
       username,
       ...(password ? { password } : {}),
       ...(email ? { email } : {}),

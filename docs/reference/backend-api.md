@@ -993,6 +993,17 @@ curl -X GET "http://localhost:5000/api/v1/emby/status" \
 
 ### 9.1 用户管理
 
+V2 管理员用户资源为 `/api/v2/admin/users`。集合接口返回：
+
+```json
+{
+  "items": [],
+  "pagination": {"page": 1, "per_page": 20, "total": 0, "total_pages": 0}
+}
+```
+
+`search`、`role`、`active`、`emby`、`emby_status`、`email_status`、`sort`、`page` 和 `per_page` 均在服务端解析并限制范围；列表只序列化当前页，用户详情中的 `admin_action_state` 只作为界面提示，不能替代后端权限判断。V2 写操作复用同一套 Store 原子更新、Emby 外部副作用和审计逻辑，V1 路径仅用于回滚及外部兼容调用。
+
 #### 查询用户列表
 
 `GET /admin/users?status=active&page=1&per_page=20`

@@ -327,6 +327,20 @@ V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/ap
 | PUT | `/api/v2/admin/media-requests/batch` | Admin | V2 原子批量更新同名求片；校验 1-100 个 key/revision 后一次性持久化 |
 | PUT | `/api/v2/admin/media-requests/batch/by-key` | Admin | V2 批量更新兼容别名 |
 | DELETE | `/api/v2/admin/media-requests/by-key/{require_key}` | Admin | V2 按 key 删除求片；支持 `If-Match` revision 冲突保护 |
+| GET | `/api/v2/admin/users` | Admin | V2 管理员用户资源集合；服务端完成搜索、角色/状态筛选、排序和分页，返回 `items` 与 `pagination`，不缓存 |
+| POST | `/api/v2/admin/users` | Admin | V2 创建 Web 用户；复用后端密码、角色、邮箱、Telegram 冲突校验和审计 |
+| GET | `/api/v2/admin/users/{uid}` | Admin | V2 单用户资源；返回受限公开用户字段和 `admin_action_state` |
+| PUT/DELETE | `/api/v2/admin/users/{uid}` | Admin | V2 更新或删除用户；沿用原子权限、保护账号和 Emby 清理规则 |
+| POST | `/api/v2/admin/users/{uid}/disable` | Admin | V2 禁用用户，可按级联深度处理邀请下级 |
+| POST | `/api/v2/admin/users/{uid}/enable` | Admin | V2 启用用户，可按级联深度处理邀请下级 |
+| POST | `/api/v2/admin/users/{uid}/renew` | Admin | V2 管理员续期用户；`days=-1` 表示永久 |
+| POST | `/api/v2/admin/users/{uid}/emby/enable` | Admin | V2 启用用户 Emby 账号 |
+| POST | `/api/v2/admin/users/{uid}/emby/disable` | Admin | V2 禁用用户 Emby 账号 |
+| POST | `/api/v2/admin/users/{uid}/force-unbind` | Admin | V2 强制解除本地 Emby 绑定 |
+| POST | `/api/v2/admin/users/{uid}/refresh-status` | Admin | V2 手动刷新用户 Telegram/Emby 外部状态 |
+| POST | `/api/v2/admin/users/{uid}/unbind-telegram` | Admin | V2 解绑用户 Telegram |
+| POST | `/api/v2/admin/users/{uid}/admin` | Admin | V2 设置或取消管理员角色 |
+| POST | `/api/v2/admin/users/{uid}/delete` | Admin | V2 删除用户；支持 `mode` 与 `cascade_depth`，推荐用于 SSR 管理操作 |
 | GET | `/api/v1/admin/media-requests` | Admin | 求片管理列表；支持 `status/source/q/page/per_page`，返回状态计数与分页元数据，不缓存 |
 | PUT | `/api/v1/admin/media-requests/{request_id}` | Admin | 更新求片状态 |
 | DELETE | `/api/v1/admin/media-requests/{request_id}` | Admin | 删除求片 |

@@ -56,11 +56,13 @@ export interface AdminUserActionState {
 }
 
 export interface AdminUserListResponse {
-  users: UserInfo[];
-  total: number;
-  page: number;
-  per_page: number;
-  pages: number;
+  items: UserInfo[];
+  pagination: {
+    page: number;
+    per_page: number;
+    total: number;
+    total_pages: number;
+  };
 }
 
 export interface AdminUsersPageData {

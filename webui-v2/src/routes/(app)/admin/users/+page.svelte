@@ -97,12 +97,12 @@
   </Panel>
 
   {#if payload}
-    <Panel id="list-title" className="list-panel" title={t.adminUsersList} description={t.adminUsersPageOf.replace("{page}", String(payload.page)).replace("{pages}", String(Math.max(payload.pages, 1))).replace("{total}", payload.total.toLocaleString("zh-CN"))}>
-      {#if payload.users.length === 0}
+    <Panel id="list-title" className="list-panel" title={t.adminUsersList} description={t.adminUsersPageOf.replace("{page}", String(payload.pagination.page)).replace("{pages}", String(Math.max(payload.pagination.total_pages, 1))).replace("{total}", payload.pagination.total.toLocaleString("zh-CN"))}>
+      {#if payload.items.length === 0}
         <p class="empty">{t.adminUsersEmpty}</p>
       {:else}
         <div class="user-list" role="list">
-          {#each payload.users as user (user.uid)}
+          {#each payload.items as user (user.uid)}
             {@const state = user.admin_action_state}
             <article class="user-card" role="listitem">
               <div class="user-summary">
@@ -171,11 +171,11 @@
           {/each}
         </div>
       {/if}
-      {#if payload.pages > 1}
+      {#if payload.pagination.total_pages > 1}
         <nav class="pagination" aria-label={t.adminUsersPagination}>
-          {#if payload.page > 1}<a class="button secondary" href={queryForPage(payload.page - 1)}>{t.adminUsersPrevious}</a>{:else}<span></span>{/if}
-          <span>{t.adminUsersPageSimple.replace("{page}", String(payload.page)).replace("{pages}", String(payload.pages))}</span>
-          {#if payload.page < payload.pages}<a class="button secondary" href={queryForPage(payload.page + 1)}>{t.adminUsersNext}</a>{:else}<span></span>{/if}
+          {#if payload.pagination.page > 1}<a class="button secondary" href={queryForPage(payload.pagination.page - 1)}>{t.adminUsersPrevious}</a>{:else}<span></span>{/if}
+          <span>{t.adminUsersPageSimple.replace("{page}", String(payload.pagination.page)).replace("{pages}", String(payload.pagination.total_pages))}</span>
+          {#if payload.pagination.page < payload.pagination.total_pages}<a class="button secondary" href={queryForPage(payload.pagination.page + 1)}>{t.adminUsersNext}</a>{:else}<span></span>{/if}
         </nav>
       {/if}
     </Panel>
