@@ -61,6 +61,10 @@ const (
 )
 
 func (a *App) systemUserLimitReached() (bool, int, int) {
+	return a.systemUserLimitReachedExcluding("", "")
+}
+
+func (a *App) systemUserLimitReachedExcluding(excludeRegCode, excludeInviteCode string) (bool, int, int) {
 	limit := a.cfg().UserLimit
 	if limit <= 0 {
 		return false, 0, limit
@@ -70,10 +74,18 @@ func (a *App) systemUserLimitReached() (bool, int, int) {
 	// 避免管理员批量生成卡码后实际用户数超过预期。
 	now := time.Now().Unix()
 	for _, code := range a.store().ListRegCodes() {
-		current += remainingRegCodeUserSlots(code, now)
+		slots := remainingRegCodeUserSlots(code, now)
+		if excludeRegCode != "" && strings.EqualFold(code.Code, excludeRegCode) && slots > 0 {
+			slots--
+		}
+		current += slots
 	}
 	for _, code := range a.store().ListAllInviteCodes() {
-		current += remainingInviteUserSlots(code, now)
+		slots := remainingInviteUserSlots(code, now)
+		if excludeInviteCode != "" && strings.EqualFold(code.Code, excludeInviteCode) && slots > 0 {
+			slots--
+		}
+		current += slots
 	}
 	return current >= limit, current, limit
 }

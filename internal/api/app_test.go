@@ -5605,6 +5605,24 @@ func TestEmbyCapacityCountsPendingEntitlementsSeparatelyFromSystemLimit(t *testi
 	}
 }
 
+func TestSystemUserLimitExcludesConsumedRegistrationSlot(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().UserLimit = 6
+	now := time.Now().Unix()
+	if _, err := app.store().CreateUser(store.User{Username: "existing", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store().UpsertRegCode(store.RegCode{Code: "REG-CONSUME", Type: 1, Days: 30, ValidityTime: -1, UseCountLimit: 5, Active: true, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if reached, current, limit := app.systemUserLimitReached(); !reached || current != 6 || limit != 6 {
+		t.Fatalf("unexcluded limit should include all pending slots, got reached=%v current=%d limit=%d", reached, current, limit)
+	}
+	if reached, current, limit := app.systemUserLimitReachedExcluding("REG-CONSUME", ""); reached || current != 5 || limit != 6 {
+		t.Fatalf("consumed registration slot should be excluded, got reached=%v current=%d limit=%d", reached, current, limit)
+	}
+}
+
 func TestMediaRequestInventoryIssueBypassesDuplicateGuard(t *testing.T) {
 	st := newTestStore(t)
 	defer st.Close()
