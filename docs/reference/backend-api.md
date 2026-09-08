@@ -48,7 +48,7 @@ V2 基础协议目前提供 `GET /api/v2/system/health`、`GET /api/v2/system/ca
 | PUT | `/api/v2/settings/apikeys/{key_id}` | 更新当前账号指定 API Key 的名称、启用、查询参数和限速设置 |
 | DELETE | `/api/v2/settings/apikeys/{key_id}` | 删除当前账号指定 API Key |
 
-这些端点是共享 V1 处理器的版本化适配，不建立第二套业务状态机。邮箱验证、密码强度、当前 Web 密码、Emby 管理员保护、注册资格、远端副作用、Store 原子写入、审计和会话 Cookie 都由 Go 后端最终决定。V1 设置端点继续保留给回滚前端与外部兼容调用；默认 V2 前端不再直接请求它们。
+这些端点是共享 Go 应用服务的版本化适配，不建立第二套业务状态机。邮箱验证、密码强度、当前 Web 密码、Emby 管理员保护、注册资格、远端副作用、Store 原子写入、审计和会话 Cookie 都由 Go 后端最终决定。V1 设置端点继续保留给回滚前端与外部兼容调用；默认 V2 前端不再直接请求它们。
 
 ### 1.1 文档分工
 

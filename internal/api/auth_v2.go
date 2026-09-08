@@ -1,12 +1,12 @@
 package api
 
-import "net/http"
+import (
+	"net/http"
+)
 
 // V2 authentication resources keep the SSR transport contract separate from
 // legacy HTTP handlers. Session reads and lifecycle operations are implemented
-// here on top of the shared session service; login, recovery and registration
-// remain in the next extraction step because they also coordinate external
-// providers and registration-code state.
+// here on top of shared application services and audited compatibility rules.
 func (a *App) handleV2Login(w http.ResponseWriter, r *http.Request, p Params) {
 	w.Header().Set("Cache-Control", "no-store")
 	a.handleLogin(w, r, p)
@@ -71,7 +71,7 @@ func (a *App) handleV2EmailPasswordReset(w http.ResponseWriter, r *http.Request,
 
 func (a *App) handleV2Register(w http.ResponseWriter, r *http.Request, p Params) {
 	w.Header().Set("Cache-Control", "no-store")
-	a.handleRegister(w, r, p)
+	a.handleRegistration(w, r)
 }
 
 func (a *App) handleV2RegistrationAvailability(w http.ResponseWriter, r *http.Request, p Params) {
