@@ -243,3 +243,4 @@ docs/AUDIT_REPORT.md
 kubeconfig*
 /.codex-reference-twilight
 /.corepack
+.dev-progress
