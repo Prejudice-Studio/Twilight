@@ -2,9 +2,11 @@ package api
 
 import "net/http"
 
-// V2 authentication resources are transport adapters for the existing auth
-// handlers. They keep session issuance, password verification, rate limits,
-// bind-code consumption, persistence and audit behavior single-sourced.
+// V2 authentication resources keep the SSR transport contract separate from
+// legacy HTTP handlers. Session reads and lifecycle operations are implemented
+// here on top of the shared session service; login, recovery and registration
+// remain in the next extraction step because they also coordinate external
+// providers and registration-code state.
 func (a *App) handleV2Login(w http.ResponseWriter, r *http.Request, p Params) {
 	w.Header().Set("Cache-Control", "no-store")
 	a.handleLogin(w, r, p)
@@ -22,22 +24,34 @@ func (a *App) handleV2TelegramLogin(w http.ResponseWriter, r *http.Request, p Pa
 
 func (a *App) handleV2CurrentUser(w http.ResponseWriter, r *http.Request, p Params) {
 	w.Header().Set("Cache-Control", "private, no-store")
-	a.handleCurrentUser(w, r, p)
+	ok(w, "OK", publicUser(current(r).User))
 }
 
 func (a *App) handleV2Logout(w http.ResponseWriter, r *http.Request, p Params) {
 	w.Header().Set("Cache-Control", "no-store")
-	a.handleLogout(w, r, p)
+	a.revokeSession(r.Context(), current(r).Token)
+	a.clearSessionCookie(w)
+	ok(w, "logged out", nil)
 }
 
 func (a *App) handleV2LogoutAll(w http.ResponseWriter, r *http.Request, p Params) {
 	w.Header().Set("Cache-Control", "no-store")
-	a.handleLogoutAll(w, r, p)
+	principal := current(r)
+	a.revokeAllSessions(r.Context(), principal.User.UID)
+	a.clearSessionCookie(w)
+	ok(w, "all sessions logged out", nil)
 }
 
 func (a *App) handleV2RefreshSession(w http.ResponseWriter, r *http.Request, p Params) {
 	w.Header().Set("Cache-Control", "private, no-store")
-	a.handleRefresh(w, r, p)
+	principal := current(r)
+	token, expires, err := a.refreshSession(r.Context(), principal.Token, principal.User.UID)
+	if err != nil {
+		failWithCode(w, http.StatusInternalServerError, ErrAuthSessionRefreshFailed, "刷新会话失败")
+		return
+	}
+	a.issueSessionCookies(w, token, expires)
+	ok(w, "刷新成功", map[string]any{"token": token, "user": publicUser(principal.User)})
 }
 
 func (a *App) handleV2ForgotPasswordByEmby(w http.ResponseWriter, r *http.Request, p Params) {

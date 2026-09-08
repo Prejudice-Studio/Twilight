@@ -67,6 +67,8 @@ V2 前端实现约定：
 
 - 新接口采用 `/api/v2`，不直接改变 `/api/v1` 的响应 envelope、错误码和鉴权语义。
 - V1 接口先由兼容 adapter 调用 V2 application service；同一状态转移不能保留两份业务实现。
+- 会话生命周期由共享应用操作统一实现：V1/V2 传输层可以有不同 envelope 和 Cookie 规则，
+  但撤销、全量撤销和轮换必须进入同一 session service；V2 不应反向调用 V1 HTTP handler。
 - 每个 V1 route 在迁移表中标记 `adapter`、`native`、`deprecated` 或 `removed-with-migration`。
 - 只有明确无法安全兼容的字段才版本化删除，并在 API 文档和启动诊断中给出迁移说明。
 

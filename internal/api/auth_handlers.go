@@ -305,22 +305,21 @@ func (a *App) handleForgotPassword(w http.ResponseWriter, r *http.Request, _ Par
 
 func (a *App) handleLogout(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
-	a.sessions().Delete(r.Context(), p.Token)
+	a.revokeSession(r.Context(), p.Token)
 	a.clearSessionCookie(w)
 	ok(w, "logged out", nil)
 }
 
 func (a *App) handleLogoutAll(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
-	a.sessions().DeleteUser(r.Context(), p.User.UID)
+	a.revokeAllSessions(r.Context(), p.User.UID)
 	a.clearSessionCookie(w)
 	ok(w, "all sessions logged out", nil)
 }
 
 func (a *App) handleRefresh(w http.ResponseWriter, r *http.Request, _ Params) {
 	p := current(r)
-	a.sessions().Delete(r.Context(), p.Token)
-	token, expires, err := a.sessions().Create(r.Context(), p.User.UID)
+	token, expires, err := a.refreshSession(r.Context(), p.Token, p.User.UID)
 	if err != nil {
 		failWithCode(w, http.StatusInternalServerError, ErrAuthSessionRefreshFailed, "刷新会话失败")
 		return

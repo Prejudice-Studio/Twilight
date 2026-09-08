@@ -64,6 +64,12 @@ webui-v2/
 4. 登录 action 只接受配置的会话 Cookie（默认 `twilight_session`），解析上游 `Set-Cookie` 时忽略后端 Domain，只向当前 V2 站点写 host-only、HttpOnly Cookie，避免跨域扩大 Cookie 作用范围。
 5. SSR 读取默认为 `no-store`。当前用户身份、权限和会话状态不能进入共享浏览器缓存。
 
+### 会话资源的独立实现
+
+V2 的 auth/me、auth/logout、auth/logout/all 和 auth/refresh 已由 auth_v2.go 独立编排，不再调用旧 V1 HTTP handler。
+它们通过 auth_session_service.go 使用同一个 session Store：V1 兼容入口和 V2 资源共享会话撤销/轮换规则，但各自负责版本化响应和 Cookie 传输。
+这样既不会产生两套会话事实源，也避免 SSR 资源继续依赖旧路由的响应副作用。登录、注册码注册、邮箱找回和外部 Emby 认证仍按外部副作用边界单独拆分，不能在前端复制。
+
 `src/lib/components/AppShell.svelte` 是唯一的应用壳层：它承载登录前后的站点标题、主导航、账号菜单、管理员分组导航和移动端滚动边界；`+layout.svelte` 不再复制导航或页面样式，只负责注入全局 CSS 并传入 SSR 子内容。`src/lib/components/PageHeader.svelte` 与 `Panel.svelte` 提供无状态的页面标题和内容区基线，业务页只保留领域内容和必要的局部布局。`src/lib/app.css` 提供全局盒模型、字体、焦点可见性、最小视口和 reduced-motion 基线，避免页面间互相污染。
 
 公共样式层提供低饱和蓝灰语义变量、40px 普通控件/36px 紧凑控件基线、最小宽度与安全换行约束。业务页可以为特定工具设置更紧的排版，但不能依赖固定宽度、单行按钮或 WebKit 专属滚动条；页面专属颜色和状态仍由对应路由决定，避免把所有页面强行套进同一张视觉卡片。

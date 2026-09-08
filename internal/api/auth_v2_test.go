@@ -45,6 +45,47 @@ func TestV2AuthResourcesKeepSessionBoundaries(t *testing.T) {
 	}
 }
 
+func TestV2SessionRefreshRotatesCookieAndKeepsOldSessionInvalid(t *testing.T) {
+	app := newTestApp(t)
+	cookies := registerAndLogin(t, app, "v2-refresh-user", "RefreshUser123456")
+	oldCookie := cookies[0]
+
+	refresh := doJSON(app, http.MethodPost, "/api/v2/auth/refresh", "", cookies)
+	if refresh.Code != http.StatusOK || refresh.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("v2 refresh status=%d cache=%q body=%s", refresh.Code, refresh.Header().Get("Cache-Control"), refresh.Body.String())
+	}
+	newCookie := findCookie(refresh.Result().Cookies(), "twilight_session")
+	if newCookie == nil || newCookie.Value == oldCookie.Value {
+		t.Fatalf("v2 refresh did not rotate session cookie: old=%q new=%v", oldCookie.Value, newCookie)
+	}
+	if response := doJSON(app, http.MethodGet, "/api/v2/auth/me", "", []*http.Cookie{oldCookie}); response.Code != http.StatusUnauthorized {
+		t.Fatalf("old v2 session remained valid after refresh: status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := doJSON(app, http.MethodGet, "/api/v2/auth/me", "", []*http.Cookie{newCookie}); response.Code != http.StatusOK {
+		t.Fatalf("rotated v2 session is invalid: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestV2LogoutAllRevokesOtherSessions(t *testing.T) {
+	app := newTestApp(t)
+	first := registerAndLogin(t, app, "v2-logout-all-user", "LogoutAllUser123456")
+	secondLogin := doJSON(app, http.MethodPost, "/api/v2/auth/login", `{"username":"v2-logout-all-user","password":"LogoutAllUser123456"}`, nil)
+	if secondLogin.Code != http.StatusOK {
+		t.Fatalf("second login status=%d body=%s", secondLogin.Code, secondLogin.Body.String())
+	}
+	second := findCookie(secondLogin.Result().Cookies(), "twilight_session")
+	if second == nil {
+		t.Fatal("second login did not issue a session cookie")
+	}
+	logoutAll := doJSON(app, http.MethodPost, "/api/v2/auth/logout/all", "", first)
+	if logoutAll.Code != http.StatusOK || logoutAll.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("v2 logout all status=%d cache=%q body=%s", logoutAll.Code, logoutAll.Header().Get("Cache-Control"), logoutAll.Body.String())
+	}
+	if response := doJSON(app, http.MethodGet, "/api/v2/auth/me", "", []*http.Cookie{second}); response.Code != http.StatusUnauthorized {
+		t.Fatalf("v2 logout all left another session valid: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestV2PublicCapabilitiesExposeOnlyAuthFeatureFlags(t *testing.T) {
 	app := newTestApp(t)
 	response := doJSON(app, http.MethodGet, "/api/v2/system/capabilities", "", nil)

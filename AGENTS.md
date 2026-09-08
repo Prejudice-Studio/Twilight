@@ -163,7 +163,8 @@ Use this index before broad search. Line numbers drift, so search by function na
 | `setup_v2.go` | `handleV2SetupStatus`, `handleV2SetupComplete` |
 | `migration_v2.go` | `handleV2MigrationStatus`, `handleV2MigrationExport`, `handleV2MigrationImport` |
 | `app.go` | `ServeHTTP`, `authenticate`, `current`, `clientIP`, `principal`, CORS helpers |
-| `auth_handlers.go` | `handleLogin`, `handleRegister`, `handleLogout`, `handleAuthMe`, password reset handlers |
+| `auth_handlers.go` | `handleLogin`, `handleRegister`, password reset handlers and V1 authentication compatibility entrypoints |
+| `auth_session_service.go` | Shared session revoke/rotate application operations used by V1 and V2 transport handlers |
 | `setup_handlers.go` | `handleSetupStatus`, `handleSetupComplete`, `setupConfigValues` |
 | `handlers.go` | user self-service, admin users, Emby binding, renewal, role, password, Telegram unbind helpers |
 | `business.go` | `sortUsers`, `regcodeDTO`, `regcodeStatus`, `generateRegCode`, `inviteForest`, `inviteTreeFor`, `canInvite`, `batchResult` |
