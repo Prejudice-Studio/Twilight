@@ -551,6 +551,9 @@ V2 用户端媒体资源（默认 SSR 前端使用）：
 | POST | `/api/v2/admin/telegram/rebind-requests/{request_id}/reject` | Admin | V2 拒绝换绑申请 |
 | POST | `/api/v2/admin/telegram/rebind-requests/batch` | Admin | V2 批量审核换绑申请 |
 | POST | `/api/v2/admin/telegram/rebind-requests/revoke-approved` | Admin | V2 撤销全部未使用的已批准换绑许可 |
+| GET | `/api/v2/admin/telegram/commands/catalog` | Admin | V2 Telegram Bot 内置指令目录与禁用状态；私有不缓存 |
+| GET | `/api/v2/admin/telegram/roster/stats` | Admin | V2 Telegram 花名册摘要；私有不缓存 |
+| POST | `/api/v2/admin/telegram/test` | Admin | V2 手动测试 Telegram Bot 连通性；私有不缓存 |
 | GET | `/api/v1/admin/telegram/commands/catalog` | Admin | Telegram Bot 内置指令目录与禁用状态 |
 | GET | `/api/v1/admin/telegram/roster/stats` | Admin | Telegram 花名册统计 |
 | POST | `/api/v1/admin/telegram/rejoined-users/enable` | Admin | 启用重新入群用户 |

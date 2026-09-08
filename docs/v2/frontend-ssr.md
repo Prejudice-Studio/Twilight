@@ -324,11 +324,11 @@ V2 调度器不使用浏览器轮询或 SSE。任务仍在后端异步运行，�
 
 ## 已迁移模块：管理员 Telegram 管理
 
-`/(app)/admin/telegram` 是 Telegram 管理的 SSR 页面。服务端 `load` 并行读取 Telegram 配置 schema、后端权威指令目录和花名册摘要；失败项互不覆盖，浏览器只收到 Telegram 页面需要的白名单字段，不包含 Bot Token、API 地址或其它敏感配置。页面显示 Bot 手动连通性测试、群组/频道策略、Bot 文案、`/twguser` 面板模板、占位符和自定义文本/JS 指令编辑器。
+`/(app)/admin/telegram` 是 Telegram 管理的 SSR 页面。服务端 `load` 并行读取 `/api/v2/admin/config/schema`、`/api/v2/admin/telegram/commands/catalog` 和 `/api/v2/admin/telegram/roster/stats`；失败项互不覆盖，浏览器只收到 Telegram 页面需要的白名单字段，不包含 Bot Token、API 地址或其它敏感配置。页面显示 Bot 手动连通性测试、群组/频道策略、Bot 文案、`/twguser` 面板模板、占位符和自定义文本/JS 指令编辑器。
 
-配置保存和 Bot 测试都通过 SvelteKit form action 转发当前 HttpOnly 会话。action 会重新限制字段类型、列表数量、文本大小、并发范围和自定义指令结构，Go 后端继续负责最终配置归一、热重载、权限和审计。Bot 测试只回传成功摘要或通用失败文案，不回传 Telegram 上游错误、内部地址或 Token。
+配置保存和 Bot 测试都通过 SvelteKit form action 转发当前 HttpOnly 会话到 V2 资源。action 会重新限制字段类型、列表数量、文本大小、并发范围和自定义指令结构，Go 后端继续负责最终配置归一、热重载、权限和审计。Bot 测试只回传成功摘要或通用失败文案，不回传 Telegram 上游错误、内部地址或 Token；配置、目录、花名册和测试响应均为私有 `no-store`。
 
-内置指令目录来自 `/admin/telegram/commands/catalog`，禁用状态写回 `Telegram.disabled_commands`；自定义指令写回 `Telegram.bot_custom_commands`，不建立第二份运行时存储。内置指令不能被覆盖，JS 回复仍受开发者模式沙箱约束。页面不使用浏览器轮询/SSE，指令列表和编辑区域具有 Firefox 兼容的有界滚动，窄视口下控件堆叠并允许文本换行。
+内置指令目录来自 `/api/v2/admin/telegram/commands/catalog`，禁用状态写回 `Telegram.disabled_commands`；自定义指令写回 `Telegram.bot_custom_commands`，不建立第二份运行时存储。内置指令不能被覆盖，JS 回复仍受开发者模式沙箱约束。页面不使用浏览器轮询/SSE，指令列表和编辑区域具有 Firefox 兼容的有界滚动，窄视口下控件堆叠并允许文本换行。V1 Telegram 管理接口仅保留为回滚与外部兼容入口。
 
 ## 已迁移模块：管理员安全中心
 

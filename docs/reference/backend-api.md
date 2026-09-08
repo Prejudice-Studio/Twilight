@@ -1470,6 +1470,9 @@ V2 管理邀请资源为 `/api/v2/admin/invite/tree`、`/api/v2/admin/invite/cod
 | `POST /api/v2/admin/telegram/rebind-requests/{request_id}/reject` | V2 拒绝换绑 |
 | `POST /api/v2/admin/telegram/rebind-requests/batch` | V2 批量审核换绑 |
 | `POST /api/v2/admin/telegram/rebind-requests/revoke-approved` | V2 撤销全部已批准未使用的换绑许可 |
+| `GET /api/v2/admin/telegram/commands/catalog` | V2 读取 Bot 内置指令目录和禁用状态（私有不缓存） |
+| `GET /api/v2/admin/telegram/roster/stats` | V2 读取 Telegram 花名册摘要（私有不缓存） |
+| `POST /api/v2/admin/telegram/test` | V2 手动测试 Bot 连通性（私有不缓存，失败信息已泛化） |
 | `GET /admin/telegram/commands/catalog` | Telegram Bot 内置指令目录与禁用状态 |
 | `GET /admin/telegram/roster/stats` | Telegram 群花名册统计 |
 | `POST /admin/telegram/rejoined-users/enable` | 启用重新入群用户 |
@@ -1477,7 +1480,7 @@ V2 管理邀请资源为 `/api/v2/admin/invite/tree`、`/api/v2/admin/invite/cod
 
 Telegram 相关行为见 [Telegram Bot 命令](../features/telegram-bot.md)。
 
-默认 V2 换绑审核页面改用 `/api/v2/admin/telegram/rebind-requests*`。V2 只复用同一组换绑状态转换和管理员审计，不会因前端版本绕过审批、批量数量限制或撤销逻辑；V1 接口仅作为回滚与外部兼容入口保留。
+默认 V2 Telegram 管理页面改用 `/api/v2/admin/config/schema`、`/api/v2/admin/telegram/commands/catalog`、`/api/v2/admin/telegram/roster/stats` 和 `/api/v2/admin/telegram/test`；这些资源只返回页面所需的非敏感数据，均禁止缓存。V2 换绑审核页面改用 `/api/v2/admin/telegram/rebind-requests*`。V2 只复用同一组配置校验、Bot 测试、换绑状态转换和管理员审计，不会因前端版本绕过审批、批量数量限制或撤销逻辑；V1 接口仅作为回滚与外部兼容入口保留。
 
 `GET /admin/telegram/commands/catalog` 是 Bot 指令管理页的后端权威数据源，返回 `commands` 与 `disabled_commands`。`commands` 内每项包含：
 

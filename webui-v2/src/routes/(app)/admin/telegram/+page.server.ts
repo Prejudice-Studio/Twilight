@@ -217,7 +217,7 @@ function safeBotResult(value: unknown): { results: TelegramBotTestResult[]; runt
 }
 
 async function saveTelegramSettings(event: RequestEvent, settings: Record<string, unknown>) {
-  return apiJSONWithResponse(event, "/api/v1/system/admin/config/schema", {
+  return apiJSONWithResponse(event, "/api/v2/admin/config/schema", {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ sections: { Telegram: settings } })
@@ -226,9 +226,9 @@ async function saveTelegramSettings(event: RequestEvent, settings: Record<string
 
 export const load: PageServerLoad = async (event): Promise<AdminTelegramPageData> => {
   const results = await Promise.allSettled([
-    apiJSON<ConfigSchema>(event, "/api/v1/system/admin/config/schema", { cache: "no-store" }),
-    apiJSON<TelegramCommandCatalog>(event, "/api/v1/admin/telegram/commands/catalog", { cache: "no-store" }),
-    apiJSON<TelegramRosterStats>(event, "/api/v1/admin/telegram/roster/stats", { cache: "no-store" })
+    apiJSON<ConfigSchema>(event, "/api/v2/admin/config/schema", { cache: "no-store" }),
+    apiJSON<TelegramCommandCatalog>(event, "/api/v2/admin/telegram/commands/catalog", { cache: "no-store" }),
+    apiJSON<TelegramRosterStats>(event, "/api/v2/admin/telegram/roster/stats", { cache: "no-store" })
   ]);
   const schema = readEnvelope(results[0] as PromiseSettledResult<ApiEnvelope<ConfigSchema>>);
   const commands = readEnvelope(results[1] as PromiseSettledResult<ApiEnvelope<TelegramCommandCatalog>>);
@@ -256,7 +256,7 @@ export const actions: Actions = {
   },
 
   botTest: async (event) => {
-    const result = await apiJSONWithResponse(event, "/api/v1/system/admin/bot/test", {
+    const result = await apiJSONWithResponse(event, "/api/v2/admin/telegram/test", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "{}"
