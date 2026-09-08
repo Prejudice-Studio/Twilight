@@ -49,7 +49,7 @@
 ## 其他
 
 - API 文档：服务启动后访问默认 SSR 页面 `/api-docs`；公开 OpenAPI 规范为 `/api/v2/openapi.json`。旧 `/api/v1/docs` 仅作为兼容入口保留。
-- V2 重构文档：[V1 审计基线](./v2/v1-audit.md)、[V2 架构设计](./v2/architecture.md)、[V2 SSR 前端](./v2/frontend-ssr.md)
+- V2 重构文档：[V1 审计基线](./v2/v1-audit.md)、[V2 架构设计](./v2/architecture.md)、[V2 SSR 前端](./v2/frontend-ssr.md)、[前端路由矩阵](./v2/frontend-route-matrix.md)
 
 ## 说明
 

@@ -200,10 +200,18 @@ function parseSetCookie(value: string, secure: boolean): { name: string; value: 
   return { name, value: cookieValue, options };
 }
 
+function setCookieValues(headers: Headers): string[] {
+  const getSetCookie = (headers as Headers & { getSetCookie?: () => string[] }).getSetCookie;
+  if (typeof getSetCookie === "function") return getSetCookie.call(headers);
+  const combined = headers.get("set-cookie");
+  if (!combined) return [];
+  // Expires may contain a comma. Split only at the comma that starts the
+  // next cookie pair so the fallback remains valid on older Node fetch APIs.
+  return combined.split(/,(?=\s*[^;,=\s]+\s*=)/).map((value) => value.trim()).filter(Boolean);
+}
+
 export function copySetCookies(event: Pick<RequestEvent, "cookies" | "url">, response: Response): void {
-  const values = typeof response.headers.getSetCookie === "function"
-    ? response.headers.getSetCookie()
-    : (response.headers.get("set-cookie") || "").split(/,(?=[^;,]+=)/g).filter(Boolean);
+  const values = setCookieValues(response.headers);
   for (const value of values) {
     const parsed = parseSetCookie(value, event.url.protocol === "https:");
     if (parsed) event.cookies.set(parsed.name, parsed.value, parsed.options);
@@ -262,7 +270,7 @@ export async function proxyAPIRequest(event: RequestEvent): Promise<Response> {
   for (const [name, value] of upstream.headers) {
     if (!blocked.has(name.toLowerCase()) && name.toLowerCase() !== "set-cookie") responseHeaders.append(name, value);
   }
-  const setCookies = typeof upstream.headers.getSetCookie === "function" ? upstream.headers.getSetCookie() : [];
+  const setCookies = setCookieValues(upstream.headers);
   for (const value of setCookies) {
     const parsed = parseSetCookie(value, event.url.protocol === "https:");
     if (!parsed) continue;

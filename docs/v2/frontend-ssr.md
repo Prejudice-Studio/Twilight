@@ -80,7 +80,7 @@ V2 的 auth/me、auth/logout、auth/logout/all 和 auth/refresh 已由 auth_v2.g
 
 SSR 到 Go API 的请求以及同源 `/api/v1/*`、`/api/v2/*` 流式代理共享 15 秒有界截止时间，并合并 SvelteKit 当前请求的取消信号；该信号传递到响应体读取阶段。上游无响应或响应体读取超时会被页面/代理的通用错误状态吸收，不会让 Node worker 无限等待或把外部错误泄露给浏览器。该边界不修改后端 CORS 策略。
 
-`webui-v2/scripts/check-architecture.mjs` 会在 `pnpm check` 中执行迁移验收：扫描旧 `webui/src/app` 的页面并确认 V2 存在对应 `+page.svelte` 或服务端兼容入口，同时禁止 V2 引入 React/Next/Zustand，禁止业务页面绕过 SSR API client 直接调用 `fetch`。旧前端仍可作为回滚版本存在，但不能重新成为默认依赖或数据边界。
+`webui-v2/scripts/check-architecture.mjs` 会在 `pnpm check` 中执行迁移验收：扫描旧 `webui/src/app` 的页面并确认 V2 存在对应 `+page.svelte` 或服务端兼容入口，同时校验 [前端路由矩阵](./frontend-route-matrix.md) 与实际旧页面树同步；还会禁止 V2 引入 React/Next/Zustand，禁止业务页面绕过 SSR API client 直接调用 `fetch`。旧前端仍可作为回滚版本存在，但不能重新成为默认依赖或数据边界。
 
 ## API 文档页
 

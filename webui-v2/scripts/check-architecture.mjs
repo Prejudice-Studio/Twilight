@@ -6,6 +6,7 @@ const projectRoot = join(fileURLToPath(new URL("..", import.meta.url)));
 const legacyRoot = join(projectRoot, "..", "webui", "src", "app");
 const v2Root = join(projectRoot, "src");
 const packageJSON = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"));
+const routeMatrixPath = join(projectRoot, "..", "docs", "v2", "frontend-route-matrix.md");
 
 const requiredScripts = ["check", "build", "verify"];
 for (const script of requiredScripts) {
@@ -61,6 +62,23 @@ const missing = [...legacyRoutes].filter((route) => !v2Routes.has(route)).sort()
 if (missing.length) {
   console.error(`V2 route coverage failed; missing ${missing.length} legacy route(s):`);
   for (const route of missing) console.error(`  /${route}`);
+  process.exit(1);
+}
+
+// Keep the human-facing migration inventory in lockstep with the executable
+// route inventory. The markers avoid accidentally treating prose links in the
+// rest of the document as route declarations.
+const routeMatrix = await readFile(routeMatrixPath, "utf8");
+const matrixSection = routeMatrix.match(/## 旧路由覆盖([\s\S]*?)(?=## V2 新增入口|$)/)?.[1] || "";
+const documentedLegacyRoutes = new Set(
+  [...matrixSection.matchAll(/^\|\s*`([^`]+)`\s*\|/gm)].map((match) => match[1].replace(/^\/+/, ""))
+);
+const undocumented = [...legacyRoutes].filter((route) => !documentedLegacyRoutes.has(route)).sort();
+const stale = [...documentedLegacyRoutes].filter((route) => !legacyRoutes.has(route)).sort();
+if (undocumented.length || stale.length) {
+  console.error("V2 route matrix failed; documentation and legacy page inventory differ:");
+  for (const route of undocumented) console.error(`  missing documentation: /${route}`);
+  for (const route of stale) console.error(`  stale documentation: /${route}`);
   process.exit(1);
 }
 
