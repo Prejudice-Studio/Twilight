@@ -95,7 +95,7 @@ Update docs in the same change when behavior changes.
 - `webui-v2/src/lib/types.ts`: V2 safe DTOs shared by server loads and Svelte pages.
 - `webui-v2/src/lib/i18n.ts`: V2 user-facing message catalog.
 - `internal/api/appearance_v2.go`: V2 appearance resource adapters; the existing upload handlers remain the only validation, safe-path, rate-limit, persistence, and asset-URL implementation.
-- `internal/api/auth_v2.go`: V2 authentication and recovery resource adapters. Registration transport is shared with the V1 compatibility route, while validation and registration-code/Telegram bind-code state transitions live in `internal/api/registration_service.go`.
+- `internal/api/auth_v2.go`: V2 authentication and recovery resource adapters. Login transport delegates to `login_service.go`; registration transport is shared with the V1 compatibility route, while validation and registration-code/Telegram bind-code state transitions live in `registration_service.go`.
 - `webui-v2/scripts/check-architecture.mjs`: migration gate for route coverage, explicit SSR/adapter-node settings, server-only compatibility redirects, and the no-legacy-client-runtime boundary.
 - `docs/v2/frontend-route-matrix.md`: auditable V1-to-V2 page route inventory; `pnpm check` verifies it remains synchronized with the legacy page tree.
 - `webui/src/lib/api-request.ts`, `webui/src/lib/api.ts`, and `webui/src/locales`: legacy rollback client only.
@@ -165,6 +165,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 | `migration_v2.go` | `handleV2MigrationStatus`, `handleV2MigrationExport`, `handleV2MigrationImport` |
 | `app.go` | `ServeHTTP`, `authenticate`, `current`, `clientIP`, `principal`, CORS helpers |
 | `auth_handlers.go` | `handleLogin`, `handleRegister`, password reset handlers and V1 authentication compatibility entrypoints |
+| `login_service.go` | Shared credential verification, password rehash, session creation, device/login history, audit and login notification application operations |
 | `auth_session_service.go` | Shared session revoke/rotate application operations used by V1 and V2 transport handlers |
 | `setup_handlers.go` | `handleSetupStatus`, `handleSetupComplete`, `setupConfigValues` |
 | `handlers.go` | user self-service, admin users, Emby binding, renewal, role, password, Telegram unbind helpers |

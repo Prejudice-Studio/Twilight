@@ -154,7 +154,7 @@ V2 页面覆盖 V1 当前用户可见的全部路由；兼容别名只负责旧�
 
 `/login`、`/register`、`/forgot-password` 和 `/logout` 使用 V2 认证/注册资源。认证页首屏通过 `/api/v2/system/capabilities`（只含布尔能力）与 `/api/v2/registration/availability` 获取有限公开能力，登录、注册、Telegram 注册绑定码、邮箱找回和 Emby 找回均由服务端 form action 转发到 V2；根 `handle` 也通过 `/api/v2/auth/me` 读取当前会话身份。Cookie 只在 SSR 服务端转发和接收，登录/注销后的会话变化通过服务端重定向生效。
 
-V2 认证接口是 Go 认证应用服务的薄适配，不重新实现密码哈希、恒定代价校验、限流、账号状态、注册码/绑定码消费、审计、会话创建和会话删除。注册绑定码资源使用 POST 并保留 `X-Twilight-Client: webui` 与 `X-Twilight-Intent: create-bind-code` intent，避免新架构引入带副作用的无意 GET。找回密码继续使用统一错误文案，临时密码仅存在当前 form action 结果中。
+V2 认证接口是 Go 认证应用服务的薄适配，不重新实现密码哈希、恒定代价校验、限流、账号状态、注册码/绑定码消费、审计、会话创建和会话删除。登录与注册分别进入共享的 `login_service.go` 和 `registration_service.go`，V1 入口只作为同一服务的兼容传输适配。注册绑定码资源使用 POST 并保留 `X-Twilight-Client: webui` 与 `X-Twilight-Intent: create-bind-code` intent，避免新架构引入带副作用的无意 GET。找回密码继续使用统一错误文案，临时密码仅存在当前 form action 结果中。
 
 ## 已迁移模块：认证注册
 

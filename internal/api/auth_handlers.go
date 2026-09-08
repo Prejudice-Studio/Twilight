@@ -21,7 +21,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/prejudice-studio/twilight/internal/config"
 	"github.com/prejudice-studio/twilight/internal/security"
 	"github.com/prejudice-studio/twilight/internal/store"
 )
@@ -36,139 +35,7 @@ import (
 const checkAvailableRatePerMin = 30
 
 func (a *App) handleLogin(w http.ResponseWriter, r *http.Request, _ Params) {
-	if !a.allowRate(r.Context(), rateKey("login:", a.clientIP(r)), a.cfg().RateLimitLoginPerMinute, time.Minute) {
-		failWithCode(w, http.StatusTooManyRequests, ErrLoginRateLimited, "登录过于频繁，请稍后再试")
-		return
-	}
-	payload := decodeMap(r)
-	username := stringValue(payload, "username")
-	email := stringValue(payload, "email")
-	password := stringValue(payload, "password")
-	if (username == "" && email == "") || password == "" {
-		failWithCode(w, http.StatusBadRequest, ErrAuthCredentialsEmpty, "用户名/邮箱和密码不能为空")
-		return
-	}
-	// 支持邮箱登录：email 字段优先于 username，或 username 本身常 @ 时视为邮箱
-	loginByEmail := email != "" || strings.Contains(username, "@")
-	var u store.User
-	var okUser bool
-	if loginByEmail {
-		lookupEmail := email
-		if lookupEmail == "" {
-			lookupEmail = username
-		}
-		u, okUser = a.store().FindUserByEmail(lookupEmail)
-	} else {
-		u, okUser = a.store().FindUserByUsername(username)
-	}
-	// 常量代价校验：用户名不存在时也对占位哈希跑一次等代价 PBKDF2，抹平
-	// "不存在(快) vs 存在但密码错(慢 ~150ms)"的时序差，避免用户名枚举旁路。
-	// verifyPasswordThrottled 还把并发哈希数压到 GOMAXPROCS-1，防 CPU 饿死。
-	encoded := dummyPasswordHash()
-	if okUser {
-		encoded = u.PasswordHash
-	}
-	valid := verifyPasswordThrottled(password, encoded)
-	if !okUser || !valid {
-		// 每用户名桶（10 次 / 5 分钟）只在「认证失败」时计数。
-		// 旧实现在认证前就消耗该桶，任何人都能用垃圾请求把受害者（尤其是已知
-		// 用户名的管理员）的桶打满，造成定向账号锁定 DoS。改为仅对失败计数后：
-		//   - 攻击者的垃圾尝试只会节流攻击者自己（撞库防护保留：分布式攻击同样
-		//     按用户名累计失败，10 次/5min 后该用户名被 429）；
-		//   - 持有正确密码的受害者认证成功、不触碰该桶，永不被锁定。
-		// 计数在常量代价校验之后进行，不影响上面的时序均一性。
-		if a.cfg().RateLimitLoginUserPer5m > 0 {
-			userKey := strings.ToLower(strings.TrimSpace(username))
-			if loginByEmail && userKey == "" {
-				userKey = strings.ToLower(strings.TrimSpace(email))
-			}
-			if userKey != "" && !a.allowRate(r.Context(), rateKey("login:user:", userKey), a.cfg().RateLimitLoginUserPer5m, 5*time.Minute) {
-				failWithCode(w, http.StatusTooManyRequests, ErrLoginRateLimited, "登录过于频繁，请稍后再试")
-				return
-			}
-		}
-		failWithCode(w, http.StatusUnauthorized, ErrLoginInvalid, "用户名或密码错误")
-		return
-	}
-	if !u.Active {
-		// 优先走 ErrAccountExpired，让 webui 把"账号到期需续费"和"管理员
-		// 主动禁用"两条 CTA 分开。check_expired 调度对非邀请用户会同时
-		// Active=false + ExpiredAt<now，单看 Active 分不出原因；这里以
-		// "ExpiredAt 落在过去"为信号区分。
-		if userExpiredOnly(u) {
-			failWithCode(w, http.StatusForbidden, ErrAccountExpired, "账号有效期已到期，请续费后再登录")
-			return
-		}
-		failWithCode(w, http.StatusForbidden, ErrAccountDisabled, "账号已被禁用")
-		return
-	}
-	// 登录成功后透明升级陈旧哈希（legacy Python salt$sha256，或迭代数低于当前门槛
-	// 的 PBKDF2）。尽力而为：UpdateUser 失败不阻断本次登录。放在 VerifyPassword
-	// 成功之后，损坏哈希不可能走到这里（那会先让校验失败）。
-	if security.NeedsRehash(u.PasswordHash) {
-		if h, hErr := security.HashPassword(password); hErr == nil {
-			_, _ = a.store().UpdateUser(u.UID, func(uu *store.User) error { uu.PasswordHash = h; return nil })
-		}
-	}
-	token, expires, err := a.sessions().Create(r.Context(), u.UID)
-	if err != nil {
-		failWithCode(w, http.StatusInternalServerError, ErrSessionCreateFailed, "创建会话失败")
-		return
-	}
-	a.issueSessionCookies(w, token, expires)
-	deviceID := firstNonEmpty(r.Header.Get("X-Twilight-Device"), r.UserAgent(), a.clientIP(r))
-	ua := firstNonEmpty(r.UserAgent(), "unknown")
-	ip := a.clientIP(r)
-	now := time.Now().Unix()
-	// 用 UpdateDevice 做读改写：保留既有 FirstSeen / Trusted / Blocked，只刷新本次
-	// 的 UA / IP / 最近登录时间。此前用 UpsertDevice 直接整条覆盖，会把每次登录的
-	// FirstSeen 重置、并把受信任 / 已封禁标记清掉（被封设备再次登录即被静默解封）。
-	_ = a.store().UpdateDevice(u.UID, deviceID, func(d *store.Device) {
-		d.DeviceName = ua
-		d.Client = "web"
-		d.LastIP = ip
-		d.LastSeen = now
-	})
-	_ = a.store().AddLoginLog(store.LoginLog{UID: u.UID, IP: ip, DeviceID: deviceID, DeviceName: ua, Client: "web", Time: now})
-	// 登录是 AuthPublic 接口，此时请求上下文尚无 principal（会话 Cookie 在响应里下发），
-	// 因此必须用 auditWithUser 显式传入已认证的用户身份，避免审计日志 uid=0/username=""。
-	a.auditWithUser(r, u.UID, u.Username, "login", "user", 0, map[string]any{"ip": ip, "device": deviceID})
-	// 登录通知：如果用户启用了 Telegram/邮箱登录通知，发送通知。
-	loginTime := time.Now().Format("2006-01-02 15:04:05")
-	notifValues := map[string]string{
-		"{username}":    u.Username,
-		"{time}":        loginTime,
-		"{ip}":          ip,
-		"{device}":      ua,
-		"{server_name}": a.cfg().AppName,
-	}
-	if a.telegramAvailable() && u.TelegramID != 0 && u.NotifyOnLoginTelegram {
-		tmpl := a.cfg().LoginNotifyTelegramTemplate
-		if tmpl == "" {
-			tmpl = config.DefaultLoginNotifyTelegramTemplate
-		}
-		text := replaceNotifPlaceholders(tmpl, notifValues)
-		a.telegramSendMessage(r.Context(), u.TelegramID, text)
-	}
-	if emailConfigured(a.cfg()) && u.Email != "" && u.EmailVerified && u.NotifyOnLoginEmail {
-		subjectTmpl := a.cfg().LoginNotifyEmailSubjectTemplate
-		if subjectTmpl == "" {
-			subjectTmpl = config.DefaultLoginNotifyEmailSubjectTemplate
-		}
-		bodyTmpl := a.cfg().LoginNotifyEmailBodyTemplate
-		if bodyTmpl == "" {
-			bodyTmpl = config.DefaultLoginNotifyEmailBodyTemplate
-		}
-		subject := replaceNotifPlaceholders(subjectTmpl, notifValues)
-		body := replaceNotifPlaceholders(bodyTmpl, notifValues)
-		smtpDeliver(r.Context(), *a.cfg(), u.Email, subject, body)
-	}
-	// 设备数限制为可选（默认关闭）：开启后淘汰超额的未受信任旧设备，绝不踢掉本次
-	// 登录设备或受信任设备，避免把用户锁在门外。
-	if cfg := a.cfg(); cfg.DeviceLimitEnabled && cfg.MaxDevices > 0 {
-		_ = a.store().EnforceDeviceLimit(u.UID, cfg.MaxDevices)
-	}
-	ok(w, "登录成功", map[string]any{"token": token, "user": publicUser(u)})
+	a.handleLoginResource(w, r)
 }
 
 func (a *App) handleLoginByAPIKey(w http.ResponseWriter, r *http.Request, _ Params) {

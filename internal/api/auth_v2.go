@@ -9,7 +9,7 @@ import (
 // here on top of shared application services and audited compatibility rules.
 func (a *App) handleV2Login(w http.ResponseWriter, r *http.Request, p Params) {
 	w.Header().Set("Cache-Control", "no-store")
-	a.handleLogin(w, r, p)
+	a.handleLoginResource(w, r)
 }
 
 func (a *App) handleV2LoginByAPIKey(w http.ResponseWriter, r *http.Request, p Params) {

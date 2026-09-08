@@ -68,6 +68,7 @@ V2 前端实现约定：
 - 新接口采用 `/api/v2`，不直接改变 `/api/v1` 的响应 envelope、错误码和鉴权语义。
 - V1 接口先由兼容 adapter 调用 V2 application service；同一状态转移不能保留两份业务实现。
 - 注册流程由 `internal/api/registration_service.go` 负责输入规范化、密码/邮箱/注册码/Telegram 绑定码校验、容量预检查和 Store 原子创建；V1 与 V2 只负责请求解码、限流和响应适配。
+- 登录流程由 `internal/api/login_service.go` 负责恒定代价密码验证、旧哈希升级、账号状态判断、会话创建、设备/登录历史、审计和登录通知；V1 与 V2 只负责协议响应和 Cookie 适配。
 - 会话生命周期由共享应用操作统一实现：V1/V2 传输层可以有不同 envelope 和 Cookie 规则，
   但撤销、全量撤销和轮换必须进入同一 session service；V2 不应反向调用 V1 HTTP handler。
 - 每个 V1 route 在迁移表中标记 `adapter`、`native`、`deprecated` 或 `removed-with-migration`。
