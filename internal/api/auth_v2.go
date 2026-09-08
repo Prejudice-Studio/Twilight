@@ -61,12 +61,12 @@ func (a *App) handleV2ForgotPasswordByEmby(w http.ResponseWriter, r *http.Reques
 
 func (a *App) handleV2EmailPasswordResetRequest(w http.ResponseWriter, r *http.Request, p Params) {
 	w.Header().Set("Cache-Control", "no-store")
-	a.handleForgotPasswordEmailRequest(w, r, p)
+	a.handleEmailPasswordResetRequestResource(w, r)
 }
 
 func (a *App) handleV2EmailPasswordReset(w http.ResponseWriter, r *http.Request, p Params) {
 	w.Header().Set("Cache-Control", "no-store")
-	a.handleForgotPasswordEmailReset(w, r, p)
+	a.handleEmailPasswordResetResource(w, r)
 }
 
 func (a *App) handleV2Register(w http.ResponseWriter, r *http.Request, p Params) {
