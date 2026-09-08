@@ -26,7 +26,24 @@ function backendRequestURL(path: string): string {
   if (!path.startsWith("/api/")) {
     throw new Error("V2 server API paths must stay under /api");
   }
-  return new URL(path, backendURL()).toString();
+  if (path.includes("#")) {
+    throw new Error("V2 server API paths must not contain fragments");
+  }
+  const pathname = path.split("?", 1)[0];
+  let decodedPathname: string;
+  try {
+    decodedPathname = decodeURIComponent(pathname);
+  } catch {
+    throw new Error("V2 server API path encoding is invalid");
+  }
+  if (decodedPathname.includes("\\") || decodedPathname.split("/").some((segment) => segment === "." || segment === "..")) {
+    throw new Error("V2 server API paths must not contain traversal segments");
+  }
+  const url = new URL(path, backendURL());
+  if (!url.pathname.startsWith("/api/")) {
+    throw new Error("V2 server API paths must stay under /api");
+  }
+  return url.toString();
 }
 
 function sessionCookieName(): string {
@@ -220,7 +237,7 @@ export function copySetCookies(event: Pick<RequestEvent, "cookies" | "url">, res
 
 export async function proxyAPIRequest(event: RequestEvent): Promise<Response> {
   const suffix = event.params.path || "";
-  if (!/^(v1|v2)(?:\/|$)/.test(suffix)) {
+  if (!isAllowedProxySuffix(suffix)) {
     return new Response("Not found", { status: 404 });
   }
   const contentLength = Number(event.request.headers.get("content-length") || 0);
@@ -285,4 +302,15 @@ export async function proxyAPIRequest(event: RequestEvent): Promise<Response> {
   if (!responseHeaders.has("cache-control")) responseHeaders.set("cache-control", "no-store");
   const responseBody = upstream.body ? limitedStream(upstream.body, maxProxyBodyBytes, { value: false }) : null;
   return new Response(responseBody, { status: upstream.status, statusText: upstream.statusText, headers: responseHeaders });
+}
+
+function isAllowedProxySuffix(suffix: string): boolean {
+  if (!/^(v1|v2)(?:\/|$)/.test(suffix) || suffix.includes("#")) return false;
+  const pathname = suffix.split("?", 1)[0];
+  try {
+    const decodedPathname = decodeURIComponent(pathname);
+    return !decodedPathname.includes("\\") && !decodedPathname.split("/").some((segment) => segment === "." || segment === "..");
+  } catch {
+    return false;
+  }
 }

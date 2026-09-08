@@ -696,6 +696,7 @@ The current V1 implementation remains the behavior and compatibility reference f
 - V2 SSR `load` functions are the default read boundary. Authenticated reads must forward the incoming HttpOnly session only on the server, use `no-store` for identity data, and return summaries rather than full histories or attachments.
 - V2 form actions are the default write boundary. Keep mutation requests same-origin, rely on SvelteKit origin checking, forward upstream session cookies as host-only HttpOnly cookies, and never expose bearer/session credentials to browser JavaScript.
 - V2 API proxy routes may forward only `/api/v1/*` and `/api/v2/*`, must strip hop-by-hop and browser origin headers, bound request bodies, preserve upstream status, and never become a second authorization layer.
+- The V2 SSR API boundary must reject raw or percent-encoded `.` / `..` path segments, backslashes, malformed path encoding, and fragments before constructing the backend URL. Query strings remain supported for backend-filtered reads, but URL normalization must never move a proxy request outside `/api/`.
 
 ## V2 Validation Evidence
 
