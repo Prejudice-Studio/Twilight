@@ -514,6 +514,12 @@ V2 用户端媒体资源（默认 SSR 前端使用）：
 | GET | `/api/v1/admin/email/verifications` | Admin | 邮箱验证审查；支持 `view=pending|accounts|summary`、`page`、`per_page`、`search`、`verified=all|verified|unverified`，列表视图分页且不返回另一类记录；无 `view` 时保留兼容全量响应 |
 | POST | `/api/v1/admin/email/verifications/cleanup` | Admin | 手动清理所有已过期的在用验证码 |
 | DELETE | `/api/v1/admin/email/verifications/{id}` | Admin | 撤销指定在用验证码记录（立即失效） |
+
+| POST | `/api/v2/admin/email/test` | Admin | V2 使用当前 SMTP 配置发送测试邮件 |
+| GET | `/api/v2/admin/email/verifications` | Admin | V2 邮箱验证审查分页资源；支持视图、搜索和验证状态筛选，私有不缓存 |
+| POST | `/api/v2/admin/email/verifications/cleanup` | Admin | V2 清理过期邮箱验证码 |
+| POST | `/api/v2/admin/email/verifications/clear-unverified` | Admin | V2 清理未验证账号邮箱 |
+| DELETE | `/api/v2/admin/email/verifications/{id}` | Admin | V2 撤销指定邮箱验证码 |
 | POST | `/api/v1/admin/users/kick-no-emby` | Admin | 踢出无 Emby 账号的用户 |
 | GET | `/api/v1/admin/invite/tree` | Admin | 邀请树；邀请关闭时隐藏没有真实关系的孤立持码用户 |
 | POST | `/api/v1/admin/invite/users/{uid}/detach` | Admin | 将用户脱离邀请关系；邀请关闭后仍可维护历史关系 |

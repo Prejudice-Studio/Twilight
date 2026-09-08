@@ -93,7 +93,7 @@ export const load: PageServerLoad = async (event): Promise<AdminEmailPageData> =
   const params = new URLSearchParams({ view: query.view, page: String(query.page), per_page: String(query.perPage) });
   if (query.search) params.set("search", query.search);
   if (query.view === "accounts") params.set("verified", query.verified);
-  const result = await apiJSON<EmailAdminData>(event, `/api/v1/admin/email/verifications?${params}`, { cache: "no-store" });
+  const result = await apiJSON<EmailAdminData>(event, `/api/v2/admin/email/verifications?${params}`, { cache: "no-store" });
   const rawNotice = text(event.url.searchParams.get("notice"), 16);
   return {
     payload: result?.success && result.data ? result.data : null,
@@ -110,7 +110,7 @@ export const actions: Actions = {
     const form = await event.request.formData();
     const id = formText(form, "verification_id", 128);
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) return failure("revoke", undefined);
-    const result = await mutation(event, `/api/v1/admin/email/verifications/${encodeURIComponent(id)}`, "DELETE", "revoke");
+    const result = await mutation(event, `/api/v2/admin/email/verifications/${encodeURIComponent(id)}`, "DELETE", "revoke");
     if (result) return result;
     redirectToList(form, "revoked");
   },
@@ -118,7 +118,7 @@ export const actions: Actions = {
   cleanup: async (event) => {
     const form = await event.request.formData();
     if (formText(form, "confirm", 64) !== "CLEANUP_EXPIRED_EMAILS") return failure("cleanup", undefined);
-    const result = await mutation(event, "/api/v1/admin/email/verifications/cleanup", "POST", "cleanup");
+    const result = await mutation(event, "/api/v2/admin/email/verifications/cleanup", "POST", "cleanup");
     if (result) return result;
     redirectToList(form, "cleaned");
   },
@@ -126,7 +126,7 @@ export const actions: Actions = {
   clearUnverified: async (event) => {
     const form = await event.request.formData();
     if (formText(form, "confirm", 64) !== "CLEAR_UNVERIFIED_EMAILS") return failure("clearUnverified", undefined);
-    const result = await mutation(event, "/api/v1/admin/email/verifications/clear-unverified", "POST", "clearUnverified");
+    const result = await mutation(event, "/api/v2/admin/email/verifications/clear-unverified", "POST", "clearUnverified");
     if (result) return result;
     redirectToList(form, "cleared");
   },
@@ -134,7 +134,7 @@ export const actions: Actions = {
   testEmail: async (event) => {
     const form = await event.request.formData();
     const to = formText(form, "to", 254);
-    const result = await apiJSONWithResponse<{ results?: EmailTestResult[] }>(event, "/api/v1/admin/email/test", {
+    const result = await apiJSONWithResponse<{ results?: EmailTestResult[] }>(event, "/api/v2/admin/email/test", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ to })

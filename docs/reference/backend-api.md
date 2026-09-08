@@ -1250,6 +1250,8 @@ curl -X POST "http://localhost:5000/api/v1/admin/emby/sync" \
 
 `DELETE /admin/email/verifications/{id}` 会立即撤销对应验证码；`POST /admin/email/verifications/cleanup` 清理全部过期验证码。两类成功写操作都会写入管理员审计日志，审计详情不记录完整邮箱或验证码材料。
 
+默认 V2 管理员邮箱页面使用 `/api/v2/admin/email/*`。验证审查接口仍只返回脱敏邮箱、关联账号和有限时间/尝试次数字段，响应为私有 `no-store`；SMTP 测试仅供管理员使用，普通用户发送邮件失败继续返回泛化错误，不向客户端暴露 SMTP、网络或服务器地址细节。V1 邮箱接口保留为回滚兼容入口。
+
 ### 9.3 注册码与卡码
 
 > 规则细节见 [注册码与卡码](../features/regcodes.md)。
