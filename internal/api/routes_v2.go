@@ -103,6 +103,7 @@ func (a *App) registerV2Routes() {
 	a.add(http.MethodPut, "/api/v2/bangumi/preferences", AuthUser, a.handleV2BangumiPreferences)
 	a.add(http.MethodGet, "/api/v2/bangumi/collections", AuthUser, a.handleV2BangumiCollections)
 	a.add(http.MethodPatch, "/api/v2/bangumi/collections/:subject_id", AuthUser, a.handleV2UpdateBangumiCollection)
+	a.add(http.MethodGet, "/api/v2/bangumi/covers/:subject_id", AuthPublic, a.handleV2BangumiCover)
 	a.add(http.MethodGet, "/api/v2/media/search", AuthUser, a.handleV2MediaSearch)
 	a.add(http.MethodGet, "/api/v2/media/search/:source", AuthUser, a.handleV2MediaSearch)
 	a.add(http.MethodGet, "/api/v2/media/detail", AuthUser, a.handleV2MediaDetail)

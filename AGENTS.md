@@ -174,6 +174,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 | `bangumi_sync_handlers.go` | status, trigger, history, collections, admin records/logs, collection cache refresh |
 | `bangumi_sync_service.go` | `syncBangumiForUser`, matching, ensure collection, mark episode |
 | `bangumi_cover.go` | public cover handler, local download, safe image URL checks |
+| `bangumi_cover_v2.go` | `handleV2BangumiCover` public V2 cover resource adapter |
 | `batch_user_handlers.go` | batch enable/disable, renew, delete, Emby grant/lock helpers, `filteredBatchUserUIDs` |
 | `emby_activity.go` | Emby ActivityLog collection and playback-record pairing |
 | `emby_client.go` | Emby HTTP helpers and server stats/viewer endpoints |
@@ -524,7 +525,7 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 
 - Covers are cached under `uploads/bangumi/{BGMID}.{ext}`.
 - BGMID must pass positive numeric validation before it is used in a filename.
-- Public cover URL: `GET /api/v1/bangumi/cover/:subject_id`.
+- Public cover URL for V2 pages: `GET /api/v2/bangumi/covers/:subject_id`; V1 remains as a compatibility URL.
 - Handler serves the local file first and may redirect to a safe Bangumi CDN URL as fallback.
 - Safe image URLs must use HTTPS and a Bangumi/BGM host suffix.
 - Downloads must validate response size, content type, detected MIME, extension, path root, and symlink safety.

@@ -37,7 +37,7 @@
   }
 
   function poster(item: BangumiCollectionEntry): string {
-    return `/api/v1/bangumi/cover/${item.subject_id}`;
+    return `/api/v2/bangumi/covers/${item.subject_id}`;
   }
 
   function dateLabel(value: number): string {

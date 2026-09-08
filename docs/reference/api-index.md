@@ -95,6 +95,7 @@ V2 基础协议入口使用 `/api/v2`，当前只提供不带秘密的能力协�
 | PUT | `/api/v2/bangumi/preferences` | User | V2 更新 Bangumi Token/同步与管理模式；后端重新校验功能开关和 Token |
 | GET | `/api/v2/bangumi/collections` | User | V2 服务端分页读取单类收藏；外部读取和本地缓存由后端控制 |
 | PATCH | `/api/v2/bangumi/collections/{subject_id}` | User | V2 更新单条收藏状态、评分或进度 |
+| GET | `/api/v2/bangumi/covers/{subject_id}` | Public | V2 获取 Bangumi 封面；本地优先、CDN 回退，按日公开缓存 |
 | GET | `/api/v2/admin/bangumi/users` | Admin | V2 管理员 Bangumi 用户分页资源；仅返回当前页状态与有限计数 |
 | GET | `/api/v2/admin/bangumi/users/{uid}/records` | Admin | V2 按 UID 按需读取有界播放记录详情 |
 | POST | `/api/v2/admin/bangumi/users/{uid}/sync` | Admin | V2 为指定用户手动触发 Bangumi 同步 |

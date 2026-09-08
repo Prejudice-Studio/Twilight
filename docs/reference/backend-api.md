@@ -1060,6 +1060,8 @@ V2 管理员用户资源为 `/api/v2/admin/users`。集合接口返回：
 
 用户 Bangumi 页面使用 `/api/v2/bangumi/summary`、`/api/v2/bangumi/collections` 及其集合修改、同步、历史和偏好资源。集合读取是私有 `no-store` 的服务端分页，Token 只由 Go 服务端访问 Bangumi，绝不进入响应；V2 资源继续复用现有功能开关、Store 缓存失效、外部请求和审计逻辑。
 
+V2 Bangumi 页面使用公开资源 `GET /api/v2/bangumi/covers/{subject_id}` 获取封面；它复用既有封面 handler 的正整数校验、本地 `uploads/bangumi` 安全访问、符号链接拒绝和 Bangumi CDN 白名单回退。命中本地文件时允许 `public, max-age=86400`，未命中时只允许安全的 HTTPS Bangumi 图床地址。V1 `/bangumi/cover/{subject_id}` 作为兼容入口保留。
+
 管理员公告页面使用 `/api/v2/admin/announcements` 资源集合及其单公告写操作。列表筛选、分页和 no-store 响应由后端执行；创建、更新、显示/隐藏、置顶和删除仍走同一套 Store、字段归一化、渲染模式白名单与审计逻辑。正文在 SSR 页面中按文本显示，不执行未审查的 Markdown/BBCode HTML。
 
 管理员操作日志页面使用 `/api/v2/admin/audit-logs` 资源。列表只返回有界分页，筛选和排序在 PostgreSQL 查询边界完成；删除、清空和裁剪仍要求管理员及固定确认短语。审计维护操作不会在刚清理的同一审计表中递归追加新记录，避免“清空后又出现一条维护日志”。
