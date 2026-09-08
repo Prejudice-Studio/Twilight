@@ -260,6 +260,12 @@ V2 调度器不使用浏览器轮询或 SSE。任务仍在后端异步运行，�
 
 创建备份、查看快照摘要、删除备份、恢复和数据库迁移均使用 SvelteKit form action。恢复先提交 dry-run 生成目标/当前计数和保护性备份提示，再以 `RESTORE_DATABASE_BACKUP` 明确确认；迁移先进行目标预检，再以 `MIGRATE_DATABASE` 确认执行。目标驱动、状态文件名和备份名在 SSR 层限制格式，最终的 Zip/路径/快照校验、数据库连通性、功能开关和原子写入仍由 Go 后端负责。
 
+## 已迁移模块：管理员迁移归档
+
+`/(app)/admin/migration` 使用 `/api/v2/admin/migration/status` 读取迁移能力和状态，导出通过 `export-download` 的 POST action 请求 `/api/v2/admin/migration/export` 并返回 ZIP，导入预览和确认通过 form action 请求 `/api/v2/admin/migration/import` 提交 multipart 归档。密码不会出现在 URL 或 SSR `PageData`；确认操作要求重新选择归档并输入 `IMPORT_TWILIGHT_DATA`，后端继续负责归档格式、哈希、大小、资源命名空间、路径安全、保护性备份和事务回滚。V1 迁移接口只作为回滚与外部兼容入口。
+
+页面不把完整归档或密码写入浏览器状态；状态响应为私有 `no-store`，导出保持私有 `no-store` 流式下载，预览结果只包含有界元数据和冲突路径。
+
 ## 已迁移模块：管理员 Emby 管理
 
 `/(app)/admin/emby` 由管理员服务端布局保护。账号页通过 `/api/v2/admin/emby/users` 做服务端搜索、筛选和分页，只把当前页发送到浏览器；失效本地绑定单独分页。设备/IP 页签只在管理员主动打开或刷新时读取 `/api/v2/admin/emby/device-audit`，按 Emby 用户聚合设备，过滤 Twilight 自身连接，离线记录按设备名、客户端和版本合并，并使用独立的 Firefox 有界滚动区域。活动日志页签默认读取 `/api/v2/admin/emby/activity-logs` 中数据库保存的 Emby ActivityLog，点击同步时通过 `POST /api/v2/admin/emby/activity-logs/sync` 从 Emby 拉取并入库，不恢复播放统计页面。

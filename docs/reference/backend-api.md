@@ -1933,6 +1933,8 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 
 以下接口默认关闭，开启 `Database.migration_panel_enabled` 后仅管理员可用：
 
+默认 V2 SSR 迁移页面使用 `/api/v2/admin/migration/status`、`/api/v2/admin/migration/export` 和 `/api/v2/admin/migration/import`。V2 只提供独立资源命名空间：导出仍为 POST 流式 ZIP，导入仍为受限 multipart 预览/确认；密码不进入 URL、日志或响应 JSON，归档内容不会进入浏览器状态。V1 迁移接口保留为回滚与外部兼容入口。
+
 `GET /system/admin/migration/status`
 
 - 返回迁移格式版本、数据库结构版本、归档大小上限和允许的 `resources/` 命名空间。

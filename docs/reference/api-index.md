@@ -263,6 +263,9 @@ V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/ap
 | GET | `/api/v1/system/admin/migration/status` | Admin | Twilight 迁移包能力、容量和资源命名空间 |
 | POST | `/api/v1/system/admin/migration/export` | Admin | 导出 Twilight 数据、配置和受控静态资源 ZIP |
 | POST | `/api/v1/system/admin/migration/import` | Admin | multipart 迁移包预览/确认导入 |
+| GET | `/api/v2/admin/migration/status` | Admin | V2 迁移包能力与资源命名空间；私有不缓存 |
+| POST | `/api/v2/admin/migration/export` | Admin | V2 流式导出 Twilight 迁移 ZIP；密码只在 POST body |
+| POST | `/api/v2/admin/migration/import` | Admin | V2 multipart 迁移包预览/确认导入 |
 | GET | `/api/v1/system/admin/config/toml` | Admin | 读取 TOML 配置 |
 | PUT | `/api/v1/system/admin/config/toml` | Admin | 保存 TOML 配置（安全校验版） |
 | GET | `/api/v1/system/admin/config/schema` | Admin | 配置表单 schema |

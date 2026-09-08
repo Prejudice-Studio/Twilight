@@ -44,7 +44,7 @@ function importForm(form: FormData, includeConfirmation: boolean): FormData | nu
 async function forwardImport(event: RequestEvent, form: FormData, action: "preview" | "import") {
   const body = importForm(form, action === "import");
   if (!body) return fail(400, { action, error: t.adminMigrationOperationFailed } satisfies FormState);
-  const result = await apiJSONWithResponse<MigrationSummary>(event, "/api/v1/system/admin/migration/import", { method: "POST", body });
+  const result = await apiJSONWithResponse<MigrationSummary>(event, "/api/v2/admin/migration/import", { method: "POST", body });
   if (!result?.response.ok || !result.envelope?.success || !result.envelope.data) {
     return fail(result?.response.status || 503, { action, error: t.adminMigrationOperationFailed } satisfies FormState);
   }
@@ -52,7 +52,7 @@ async function forwardImport(event: RequestEvent, form: FormData, action: "previ
 }
 
 export const load: PageServerLoad = async (event): Promise<AdminMigrationPageData> => {
-  const result = await apiJSONWithResponse<MigrationStatus>(event, "/api/v1/system/admin/migration/status", { cache: "no-store" });
+  const result = await apiJSONWithResponse<MigrationStatus>(event, "/api/v2/admin/migration/status", { cache: "no-store" });
   if (result?.response.status === 403) return { status: { enabled: false, format_version: "", database_schema_version: "", max_archive_bytes: 0, resource_namespaces: [] }, error: null };
   if (!result?.response.ok || !result.envelope?.success || !result.envelope.data) return { status: null, error: t.adminMigrationUnavailable };
   return { status: result.envelope.data, error: null };
