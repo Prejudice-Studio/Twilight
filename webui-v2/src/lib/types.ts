@@ -31,6 +31,26 @@ export interface UserInfo {
   background?: string | null;
 }
 
+export interface ApiDocRoute {
+  method: string;
+  path: string;
+  auth: "Public" | "User" | "Admin" | "API Key" | string;
+  version: "v1" | "v2" | "other" | string;
+}
+
+export interface ApiDocsPageData {
+  routes: ApiDocRoute[];
+  source: "public" | "admin";
+  total: number;
+  query: {
+    search: string;
+    method: string;
+    auth: string;
+    version: string;
+  };
+  loadError: string | null;
+}
+
 export interface BackgroundConfig {
   lightBg: string;
   darkBg: string;

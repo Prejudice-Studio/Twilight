@@ -59,6 +59,7 @@ Update docs in the same change when behavior changes.
 - `webui-v2/src/routes/(app)/media`: Media search, detail, Emby inventory checks, and user request actions through SSR.
 - `webui-v2/src/routes/(app)/settings/appearance`: User appearance SSR page for backgrounds, uploads, and avatars; `/settings/background` is a compatibility redirect.
 - `webui-v2/src/routes/wiki`: Public SSR usage guide and safe links to user/API entry points.
+- `webui-v2/src/routes/api-docs`: Public SSR API documentation page; anonymous users see public OpenAPI and administrator sessions see the protected full route inventory.
 - `webui-v2/src/routes/(app)/settings/apikey`: User API Key list, one-time plaintext creation result, and SSR form-action maintenance.
 - `webui-v2/src/routes/(app)/settings`: User account settings SSR page; reads `/api/v2/settings` and sends preferences, email verification, password, and Emby binding actions through `/api/v2/settings/*`.
 - `webui-v2/src/routes/(app)/admin/status`: Admin-only SSR server status, independent health probes, and bounded runtime summaries.
@@ -119,7 +120,8 @@ Update docs in the same change when behavior changes.
 | API keys | `apikey_handlers.go` | `APIKey` | `/apikey/*`, `/users/me/apikeys` | `settings/apikey` | `api-key.md` |
 | Scheduler | `scheduler*.go` | `SchedulerRun` | `/admin/scheduler/*` | `admin/scheduler` | `backend.md` |
 | Config/runtime/database | `config_admin.go`, `runtime_logs.go`, `database_admin.go`, `system_v2.go` | runtime logs/state | `/system/admin/*`, `/api/v2/admin/health/*`, `/api/v2/admin/stats` | admin config/logs/database/status | `backend.md`, `backend-api.md` |
-| Twilight migration core | `internal/migration`, `internal/api/migration_resources.go`, `migration_handlers.go` | versioned archive format, validated data/config/resource files, and admin preview/import/export boundary | `/api/v1/system/admin/migration/*` | `admin/migration` | `data-migration.md`, `backend-api.md` |
+| API documentation | `internal/api/docs_v2.go`, `handlers.go` | public V2 OpenAPI and admin-only route metadata | `/api/v2/openapi.json`, `/api/v2/admin/docs/routes` | `api-docs` | `api-index.md`, `backend-api.md`, `v2/frontend-ssr.md` |
+| Twilight migration core | `internal/migration`, `internal/api/migration_resources.go`, `migration_handlers.go` | versioned archive format, validated data/config/resource files, and admin preview/import/export boundary | `/api/v2/admin/migration/*` (V1 compatibility remains) | `admin/migration` | `data-migration.md`, `backend-api.md` |
 | Viewing events/statistics | `internal/playback` rules + `internal/store/trusted_playback.go` persistence adapter | trusted event state machine and rebuildable daily buckets; HTTP/API exposure remains a separate authenticated layer | `/api/v2/playback/*` (when enabled) | future V2 playback views | `v2/playback-events.md`, `v2/architecture.md` |
 | Emby activity logs / legacy playback records | `emby_activity.go` | `playback.go` | `/admin/emby/activity-logs` | `admin/emby` | `backend-api.md` |
 | Trusted viewing statistics | `internal/playback` rules + `internal/store/trusted_playback.go` repository adapter | `trusted_playback.go` and `twilight_playback_*` tables | `/api/v2/playback/*` when enabled | future V2 playback views | `v2/playback-events.md`, `v2/data-migration.md` |
@@ -623,8 +625,8 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 ## Wiki And API Docs Rules
 
 - `/wiki` is a public user-facing guide page. Keep it Chinese, practical, and free of secrets.
-- `/api/v1/docs` is a public API console embedded by the backend. It may try admin route inventory first, but must gracefully fall back to public OpenAPI when unauthorized. Dynamic route data must be rendered with DOM text nodes or explicit escaping, and API Key testing must use the real `X-API-Key` header.
-- `/api/v1/openapi.json` must remain public-route-only.
+- `/api-docs` is the default public SSR API documentation page. It may read `/api/v2/admin/docs/routes` only when the server-side session is an administrator; anonymous and non-admin sessions must remain on public OpenAPI. Dynamic route data must be rendered as escaped Svelte text.
+- `/api/v2/openapi.json` and its V1 compatibility counterpart must remain public-route-only; the protected full inventory must never be merged into the public specification.
 - `/api/v1/system/admin/apis` is the full inventory and must stay admin-protected.
 - Do not expose real config secrets, tokens, API keys, database URLs, or private route maps to unauthenticated users.
 

@@ -31,7 +31,7 @@
 
   <nav class="quick-links" aria-label={t.wikiQuickLinks}>
     <strong>{t.wikiQuickLinks}</strong>
-    <a href="/dashboard">{t.wikiBackDashboard}</a><a href="/settings">{t.wikiBackSettings}</a><a href="/invite">{t.wikiBackInvite}</a><a href="/tickets">{t.wikiBackTickets}</a><a href="/announcements">{t.wikiBackAnnouncements}</a><a href="/api/v1/docs">{t.wikiOpenApiDocs}</a>
+    <a href="/dashboard">{t.wikiBackDashboard}</a><a href="/settings">{t.wikiBackSettings}</a><a href="/invite">{t.wikiBackInvite}</a><a href="/tickets">{t.wikiBackTickets}</a><a href="/announcements">{t.wikiBackAnnouncements}</a><a href="/api-docs">{t.wikiOpenApiDocs}</a>
   </nav>
 
   <section class="guide-section" aria-labelledby="user-title"><h2 id="user-title">{t.wikiUserTitle}</h2><div class="card-grid">{#each userFlows as flow}<article class="guide-card"><h3>{flow.title}</h3><ul>{#each flow.items as item}<li>{item}</li>{/each}</ul></article>{/each}</div></section>

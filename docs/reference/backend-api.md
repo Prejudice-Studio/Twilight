@@ -9,8 +9,8 @@
 ## 1. 文档说明
 
 - Base URL：`http://localhost:5000/api/v1`
-- OpenAPI 文档：`GET /api/v1/openapi.json`
-- API 控制台：`http://localhost:5000/api/v1/docs`
+- OpenAPI 文档：`GET /api/v2/openapi.json`（V1 `/api/v1/openapi.json` 继续兼容）
+- 默认 API 文档页：`/api-docs`，由 `webui-v2` 使用 SvelteKit SSR 渲染；旧后端控制台 `http://localhost:5000/api/v1/docs` 仅作为兼容入口保留。
 - 响应统一为 JSON 信封（envelope），结构见下文 [2.4 响应结构](#24-响应结构)。
 - 变更接口时需同步更新 [API 路由索引](../reference/api-index.md)；若接口有请求体、响应体、限流或安全注意事项，还需更新本文对应章节。
 
@@ -58,7 +58,10 @@ V2 基础协议目前提供 `GET /api/v2/system/health`、`GET /api/v2/system/ca
 | [API 路由索引](../reference/api-index.md) | `/api/v1` 完整路由清单、鉴权级别、归属模块 |
 | [API Key 外部接入](../reference/api-key.md) | 外部系统 API Key 接入方式、权限矩阵、专用示例 |
 | [注册码与卡码](../features/regcodes.md) | 注册码 / 续期码 / 白名单码规则、兼容性与安全口径 |
-| `/api/v1/docs` | 运行时 API 控制台。未登录时读取公开 `openapi.json`，管理员登录后优先读取 `/system/admin/apis` 的完整路由清单；页面支持搜索、方法/鉴权过滤、API Key 或 Cookie 测试请求，并不会向未鉴权访问者暴露后台路由。 |
+| `/api/v2/openapi.json` | V2 公开 OpenAPI 规范，只输出 `AuthPublic` 路由；管理员私有路由不会被匿名枚举。 |
+| `/api/v2/admin/docs/routes` | Admin 私有路由元数据，为默认 SSR `/api-docs` 页面提供完整方法、路径、版本和鉴权级别清单；响应不包含处理器、配置或用户数据。 |
+| `/api-docs` | `webui-v2` 默认 SSR API 文档页。匿名访问公开接口，管理员会话读取完整路由清单；筛选条件通过 URL 保存，列表使用有界滚动。 |
+| `/api/v1/docs` | V1 兼容 API 控制台。未登录时读取公开 `openapi.json`，管理员登录后优先读取 `/system/admin/apis` 的完整路由清单；默认 V2 前端不再依赖该内嵌页面。 |
 
 ## 2. 鉴权与请求规范
 

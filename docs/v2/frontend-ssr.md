@@ -76,6 +76,10 @@ SSR 到 Go API 的请求以及同源 `/api/v1/*`、`/api/v2/*` 流式代理共�
 
 `webui-v2/scripts/check-architecture.mjs` 会在 `pnpm check` 中执行迁移验收：扫描旧 `webui/src/app` 的页面并确认 V2 存在对应 `+page.svelte` 或服务端兼容入口，同时禁止 V2 引入 React/Next/Zustand，禁止业务页面绕过 SSR API client 直接调用 `fetch`。旧前端仍可作为回滚版本存在，但不能重新成为默认依赖或数据边界。
 
+## API 文档页
+
+`/api-docs` 是默认的 API 文档页面，使用 SvelteKit SSR 从 `/api/v2/openapi.json` 读取公开规范；管理员会话再按需读取 `/api/v2/admin/docs/routes`，获得完整的 V1/V2 方法、路径、版本和鉴权级别元数据。筛选条件由 URL 表示，接口列表在有界 Firefox 滚动区域中渲染，页面不会把 Cookie、API Key、配置或用户数据放入客户端状态。`/api/v2/openapi.json` 是版本化公开规范入口，旧 `/api/v1/docs` 和 `/api/v1/openapi.json` 仍为外部客户端和旧版前端保留的兼容接口。
+
 迁移门禁还会固定检查根布局显式保持 `ssr = true`、`csr = true`、`prerender = false`，生产构建使用 `@sveltejs/adapter-node`，旧书签兼容入口必须是服务端重定向，并禁止 V2 页面恢复 `onMount`、SSE、WebSocket 或 `setInterval` 等浏览器轮询运行时。门禁会分别统计真实 `+page.svelte` 页面与 `+page.server.ts` 服务端边界：旧路由不能仅靠一个服务端文件伪装成已迁移页面，所有需要会话或写入的页面都必须有 SSR server load/action；只有公开 Wiki 和已由管理员布局保护的静态安全导航页允许没有独立 server 文件。旧 `webui/` 的存在只代表可回滚构建，不代表它参与默认部署；默认 systemd、Docker 和 CI 入口均以 `webui-v2/` 为准。
 
 `src/routes/api/[...path]/+server.ts` 只允许代理 `/api/v1/*` 与 `/api/v2/*`，通过流式上限限制请求体，移除 hop-by-hop、Origin、Referer、Authorization、API Key 和 Host 等头。Go 后端仍是唯一认证、权限、限流和业务状态边界。SvelteKit form action 默认启用同源 Origin 校验。
@@ -368,4 +372,4 @@ V2 调度器不使用浏览器轮询或 SSE。任务仍在后端异步运行，�
 
 ## 已迁移模块：公开 Wiki
 
-`/wiki` 是不需要登录的静态 SSR 使用指南。内容在服务端渲染为转义文本，快速入口只链接到 V2 已有的仪表盘、设置、邀请、工单、公告和 `/api/v1/docs`；页面不读取用户状态、配置密钥或外部服务，也没有客户端数据请求和自动刷新。FAQ 使用原生 `details`，在手机和平板上保持单列和自然换行。
+`/wiki` 是不需要登录的静态 SSR 使用指南。内容在服务端渲染为转义文本，快速入口只链接到 V2 已有的仪表盘、设置、邀请、工单、公告和 `/api-docs`；页面不读取配置密钥或外部服务，API 文档页本身才会在服务端按当前会话读取公开/管理员接口元数据。FAQ 使用原生 `details`，在手机和平板上保持单列和自然换行。

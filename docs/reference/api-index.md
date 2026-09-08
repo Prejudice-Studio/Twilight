@@ -39,6 +39,8 @@ V2 基础协议入口使用 `/api/v2`，当前只提供不带秘密的能力协�
 | ---- | ---- | ---- | ---- |
 | GET | `/api/v2/system/health` | Public | 仅确认 API 进程可处理请求，不探测数据库或 Emby |
 | GET | `/api/v2/system/capabilities` | Public | 返回 V2 版本、兼容版本、公开 feature 和受限上传额度 |
+| GET | `/api/v2/openapi.json` | Public | V2 公开 OpenAPI 规范，仅包含公开路由 |
+| GET | `/api/v2/admin/docs/routes` | Admin | V2 默认 SSR API 文档使用的完整路由元数据清单 |
 | GET | `/api/v2/system/info` | Public | 返回 SSR 外壳和初始化页所需的安全系统摘要；不返回上游地址、Token 或配置秘密 |
 | GET | `/api/v2/admin/health/api` | Admin | 独立检测 API 进程；私有 `no-store`，不检测数据库或 Emby |
 | GET | `/api/v2/admin/health/database` | Admin | 独立检测当前数据库连接和状态快照；私有 `no-store` |

@@ -31,7 +31,7 @@ var telegramPublicUsernamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{4,
 const generatedPasswordHexLen = 32
 
 func (a *App) handleRoot(w http.ResponseWriter, r *http.Request, _ Params) {
-	ok(w, "Twilight API", map[string]any{"name": a.cfg().AppName, "version": a.cfg().Version, "docs": "/api/v1/docs"})
+	ok(w, "Twilight API", map[string]any{"name": a.cfg().AppName, "version": a.cfg().Version, "docs": "/api-docs", "openapi": "/api/v2/openapi.json"})
 }
 
 func (a *App) handleOpenAPI(w http.ResponseWriter, r *http.Request, _ Params) {

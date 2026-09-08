@@ -77,8 +77,8 @@ func v2CapabilitiesPayload(cfg config.Config) v2Capabilities {
 			"ticket_image_max_count": int64(cfg.TicketImageMaxCount),
 		},
 		Links: map[string]string{
-			"openapi": "/api/v1/openapi.json",
-			"docs":    "/api/v1/docs",
+			"openapi": "/api/v2/openapi.json",
+			"docs":    "/api-docs",
 		},
 	}
 }

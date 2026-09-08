@@ -22,6 +22,7 @@ Twilight 是一个 Go 后端 + SvelteKit SSR Web 管理前端的 Emby / Jellyfin
 
 - 后端：Go，入口为 `cmd/twilight`，部署目标为 Linux + systemd，也支持 Docker。
 - Web 前端：SvelteKit SSR + adapter-node，首屏数据使用服务端 `load`，写操作使用 form action；浏览器不持有会话 Bearer Token，也不维护跨用户全局状态。
+- API 文档：默认页面为 `/api-docs`，公开 OpenAPI 规范为 `/api/v2/openapi.json`；管理员会话可在 SSR 页面查看完整路由元数据，V1 文档入口仅作兼容保留。
 - 旧版前端：`webui/` Next.js 仅作为整站紧急回滚和行为对照保留，不是默认生产入口。
 - 页面覆盖：认证、用户设置、仪表盘、公告、签到、邀请、工单、Bangumi、求片和全部管理员管理模块均已对应到 V2 路由；大列表按服务端分页/批次读取，健康检查、设备审查和活动日志按需手动读取。
 - 存储：唯一运行后端为 PostgreSQL；主要业务状态保存在 `twilight_state` 单行 JSONB，操作审计、运行日志、会话、播放记录、Telegram 花名册与轮询游标使用独立表以降低高频写放大和常驻内存。JSON 仅用于备份导出和旧数据导入。
