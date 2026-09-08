@@ -554,6 +554,12 @@ V2 用户端媒体资源（默认 SSR 前端使用）：
 | GET | `/api/v2/admin/telegram/commands/catalog` | Admin | V2 Telegram Bot 内置指令目录与禁用状态；私有不缓存 |
 | GET | `/api/v2/admin/telegram/roster/stats` | Admin | V2 Telegram 花名册摘要；私有不缓存 |
 | POST | `/api/v2/admin/telegram/test` | Admin | V2 手动测试 Telegram Bot 连通性；私有不缓存 |
+| POST | `/api/v2/admin/developer/js-sandbox` | Admin | V2 预检/运行受控 Telegram JS 沙箱；私有不缓存 |
+| GET | `/api/v2/admin/developer/js-docs` | Admin | V2 读取开发者 JS 文档；开发者模式关闭时拒绝 |
+| GET | `/api/v2/admin/developer/js-presets` | Admin | V2 读取开发者 JS 预设；私有不缓存 |
+| POST | `/api/v2/admin/developer/js-presets` | Admin | V2 创建开发者 JS 预设 |
+| PUT | `/api/v2/admin/developer/js-presets/{preset_id}` | Admin | V2 更新开发者 JS 预设 |
+| DELETE | `/api/v2/admin/developer/js-presets/{preset_id}` | Admin | V2 删除开发者 JS 预设 |
 | GET | `/api/v1/admin/telegram/commands/catalog` | Admin | Telegram Bot 内置指令目录与禁用状态 |
 | GET | `/api/v1/admin/telegram/roster/stats` | Admin | Telegram 花名册统计 |
 | POST | `/api/v1/admin/telegram/rejoined-users/enable` | Admin | 启用重新入群用户 |

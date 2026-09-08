@@ -330,6 +330,12 @@ V2 调度器不使用浏览器轮询或 SSE。任务仍在后端异步运行，�
 
 内置指令目录来自 `/api/v2/admin/telegram/commands/catalog`，禁用状态写回 `Telegram.disabled_commands`；自定义指令写回 `Telegram.bot_custom_commands`，不建立第二份运行时存储。内置指令不能被覆盖，JS 回复仍受开发者模式沙箱约束。页面不使用浏览器轮询/SSE，指令列表和编辑区域具有 Firefox 兼容的有界滚动，窄视口下控件堆叠并允许文本换行。V1 Telegram 管理接口仅保留为回滚与外部兼容入口。
 
+## 已迁移模块：管理员开发者 JS
+
+`/(app)/admin/developer` 使用服务端 `load` 读取 `/api/v2/admin/developer/js-presets` 和 `/api/v2/admin/developer/js-docs`；预设编辑、删除和沙箱预检均通过 SvelteKit form action，页面不会把后端 API 直接暴露给浏览器。服务端对脚本、参数和命令上下文做有限长度校验，Go 后端仍是开发者模式、脚本静态检查、Goja 沙箱、网络限制、审计和持久化的最终边界。V1 开发者接口只保留为回滚与外部兼容入口。
+
+页面不缓存脚本、日志、预检结果或文档响应；所有开发者资源使用私有 `no-store`。脚本输出、日志、文档和预设内容均按不可信文本展示，并保持有界 Firefox 滚动区域。
+
 ## 已迁移模块：管理员安全中心
 
 `/(app)/admin/security` 是不加载安全历史或配置副本的 SSR 管理入口。它只将管理员导向已经迁移的操作审计、运行日志、违规记录、Emby 设备/IP 审查和配置管理页面；页面本身不引入浏览器轮询、额外 API 请求或第二套安全策略状态。

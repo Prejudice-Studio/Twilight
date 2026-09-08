@@ -38,8 +38,8 @@ function read<T>(result: PromiseSettledResult<ApiEnvelope<T>>): T | null {
 
 export const load: PageServerLoad = async (event): Promise<AdminDeveloperPageData> => {
   const results = await Promise.allSettled([
-    apiJSON<{ presets?: DeveloperJSPreset[]; total?: number; developer_mode_enabled?: boolean }>(event, "/api/v1/admin/developer/js-presets", { cache: "no-store" }),
-    apiJSON<DeveloperJSDocs>(event, "/api/v1/admin/developer/js-docs", { cache: "no-store" })
+    apiJSON<{ presets?: DeveloperJSPreset[]; total?: number; developer_mode_enabled?: boolean }>(event, "/api/v2/admin/developer/js-presets", { cache: "no-store" }),
+    apiJSON<DeveloperJSDocs>(event, "/api/v2/admin/developer/js-docs", { cache: "no-store" })
   ]);
   const presetData = read(results[0] as PromiseSettledResult<ApiEnvelope<{ presets?: DeveloperJSPreset[]; total?: number; developer_mode_enabled?: boolean }>>);
   const docs = read(results[1] as PromiseSettledResult<ApiEnvelope<DeveloperJSDocs>>);
@@ -62,7 +62,7 @@ export const actions: Actions = {
     if (!code) return failure("preview", t.adminDeveloperCodeRequired);
     if (new TextEncoder().encode(code).byteLength > 8000) return failure("preview", t.adminDeveloperCodeTooLong);
     const args = text(form, "args_text", 2400);
-    const result = await apiJSONWithResponse<DeveloperJSPreviewResult>(event, "/api/v1/admin/developer/js-sandbox", {
+    const result = await apiJSONWithResponse<DeveloperJSPreviewResult>(event, "/api/v2/admin/developer/js-sandbox", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ code, command: command(text(form, "command", 80)), args_text: args, private_chat: boolean(form, "private_chat") })
@@ -81,7 +81,7 @@ export const actions: Actions = {
     const code = text(form, "code", 8000);
     if (!name) return failure("save", t.adminDeveloperNameRequired);
     if (new TextEncoder().encode(code).byteLength > 8000) return failure("save", t.adminDeveloperCodeTooLong);
-    const path = presetID > 0 ? `/api/v1/admin/developer/js-presets/${presetID}` : "/api/v1/admin/developer/js-presets";
+    const path = presetID > 0 ? `/api/v2/admin/developer/js-presets/${presetID}` : "/api/v2/admin/developer/js-presets";
     const result = await apiJSONWithResponse(event, path, {
       method: presetID > 0 ? "PUT" : "POST",
       headers: { "content-type": "application/json" },
@@ -96,7 +96,7 @@ export const actions: Actions = {
   delete: async (event) => {
     const presetID = id(await event.request.formData());
     if (!presetID) return failure("delete", t.adminDeveloperPresetRequired);
-    const result = await apiJSONWithResponse(event, `/api/v1/admin/developer/js-presets/${presetID}`, { method: "DELETE" });
+    const result = await apiJSONWithResponse(event, `/api/v2/admin/developer/js-presets/${presetID}`, { method: "DELETE" });
     if (!result?.response.ok || !result.envelope?.success) {
       return fail(result?.response.status || 503, { action: "delete", error: t.adminDeveloperOperationFailed } satisfies FormState);
     }

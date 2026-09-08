@@ -1473,6 +1473,12 @@ V2 管理邀请资源为 `/api/v2/admin/invite/tree`、`/api/v2/admin/invite/cod
 | `GET /api/v2/admin/telegram/commands/catalog` | V2 读取 Bot 内置指令目录和禁用状态（私有不缓存） |
 | `GET /api/v2/admin/telegram/roster/stats` | V2 读取 Telegram 花名册摘要（私有不缓存） |
 | `POST /api/v2/admin/telegram/test` | V2 手动测试 Bot 连通性（私有不缓存，失败信息已泛化） |
+| `POST /api/v2/admin/developer/js-sandbox` | V2 预检并运行受控 Goja 沙箱（私有不缓存） |
+| `GET /api/v2/admin/developer/js-docs` | V2 读取开发者 JS 文档（开发者模式关闭时拒绝） |
+| `GET /api/v2/admin/developer/js-presets` | V2 读取开发者 JS 预设（私有不缓存） |
+| `POST /api/v2/admin/developer/js-presets` | V2 创建开发者 JS 预设 |
+| `PUT /api/v2/admin/developer/js-presets/{preset_id}` | V2 更新开发者 JS 预设 |
+| `DELETE /api/v2/admin/developer/js-presets/{preset_id}` | V2 删除开发者 JS 预设 |
 | `GET /admin/telegram/commands/catalog` | Telegram Bot 内置指令目录与禁用状态 |
 | `GET /admin/telegram/roster/stats` | Telegram 群花名册统计 |
 | `POST /admin/telegram/rejoined-users/enable` | 启用重新入群用户 |
