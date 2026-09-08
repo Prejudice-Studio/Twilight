@@ -94,6 +94,28 @@ func TestV2AdminTicketResourcesRejectNormalUsers(t *testing.T) {
 	}
 }
 
+func TestV2UserTicketReplyUsesOwnershipAndAtomicAppend(t *testing.T) {
+	app := newTestApp(t)
+	enableTicketSystem(t, app, nil)
+	owner := registerAndLogin(t, app, "v2-reply-owner", "ReplyOwner123456")
+	other := registerAndLogin(t, app, "v2-reply-other", "ReplyOther123456")
+	id := createTicket(t, app, "reply boundary", "initial", owner)
+	path := "/api/v2/tickets/" + strconv.FormatInt(id, 10) + "/replies"
+
+	reply := doJSON(app, http.MethodPost, path, "{\"content\":\"owner reply\"}", owner)
+	if reply.Code != http.StatusOK || reply.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("owner v2 reply status=%d cache=%q body=%s", reply.Code, reply.Header().Get("Cache-Control"), reply.Body.String())
+	}
+	forbidden := doJSON(app, http.MethodPost, path, "{\"content\":\"not owner\"}", other)
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("other user v2 reply status=%d body=%s", forbidden.Code, forbidden.Body.String())
+	}
+	ticket, found := app.store().Ticket(id)
+	if !found || len(ticket.Replies) != 1 || ticket.Replies[0].Content != "owner reply" {
+		t.Fatalf("v2 reply changed ticket unexpectedly: found=%v ticket=%+v", found, ticket)
+	}
+}
+
 func TestV2AdminTicketTypeResourceUsesPathIdentity(t *testing.T) {
 	app := newTestApp(t)
 	admin := registerAndLogin(t, app, "v2-type-admin", "Admin123456")

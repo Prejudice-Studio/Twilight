@@ -170,6 +170,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 | `business.go` | `sortUsers`, `regcodeDTO`, `regcodeStatus`, `generateRegCode`, `inviteForest`, `inviteTreeFor`, `canInvite`, `batchResult` |
 | `regcode_handlers.go` | list/create/update/delete/batch-delete RegCodes and RegCode user history |
 | `code_use_handlers.go` | `handleUseCode`, queue status |
+| `ticket_reply_service.go` | V1/V2 共用的工单回复追加应用操作；负责归属、关闭状态和长度边界，传输层负责限流/审计/通知 |
 | `invite_handlers.go` | invite config, invite me, create invite code, renew code, use/check invite |
 | `invite_admin_handlers.go` | admin invite forest and detach/cascade helpers |
 | `email_handlers.go` | send/verify code, password reset by email, admin email tests and cleanup |

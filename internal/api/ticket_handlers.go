@@ -380,30 +380,11 @@ func (a *App) handleAdminReplyTicket(w http.ResponseWriter, r *http.Request, par
 	if a.refreshStoreForRequest(w, r) {
 		return
 	}
-	existing, foundTicket := a.store().Ticket(id)
-	if !foundTicket {
-		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
-		return
-	}
 	payload := decodeMap(r)
 	content := strings.TrimSpace(stringValue(payload, "content"))
-	if content == "" {
-		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "回复内容不能为空")
-		return
-	}
-	if len(content) > 5000 {
-		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "回复内容过长（上限 5000 字符）")
-		return
-	}
 	p := current(r)
-	reply := store.TicketReply{
-		UID:      p.User.UID,
-		Username: p.User.Username,
-		Role:     p.User.Role,
-		Content:  content,
-	}
-	ticket, err := a.store().AddTicketReply(id, reply)
-	if statusFromError(w, err) {
+	ticket, existing, err := a.appendTicketReply(id, p.User, content)
+	if writeTicketReplyFailure(w, err) {
 		return
 	}
 	a.audit(r, "reply_ticket", "admin", ticket.UID, map[string]any{"ticket_id": id, "reply_len": len(content)})
@@ -717,41 +698,10 @@ func (a *App) handleReplyToTicket(w http.ResponseWriter, r *http.Request, params
 	if a.refreshStoreForRequest(w, r) {
 		return
 	}
-	ticket, okTicket := a.store().Ticket(id)
-	if !okTicket {
-		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
-		return
-	}
-	if ticket.UID != p.User.UID && p.User.Role != store.RoleAdmin {
-		failWithCode(w, http.StatusForbidden, ErrForbidden, "无权回复此工单")
-		return
-	}
-	if !store.TicketStatusAllowsConversation(ticket.Status) && p.User.Role != store.RoleAdmin {
-		failWithCode(w, http.StatusBadRequest, ErrTicketAlreadyClosed, "工单已关闭，无法回复")
-		return
-	}
 	payload := decodeMap(r)
 	content := strings.TrimSpace(stringValue(payload, "content"))
-	if content == "" {
-		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "回复内容不能为空")
-		return
-	}
-	if len(content) > 5000 {
-		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "回复内容过长（上限 5000 字符）")
-		return
-	}
-	reply := store.TicketReply{
-		UID:      p.User.UID,
-		Username: p.User.Username,
-		Role:     p.User.Role,
-		Content:  content,
-	}
-	updated, err := a.store().AddTicketReply(id, reply)
-	if errors.Is(err, store.ErrTicketClosed) {
-		failWithCode(w, http.StatusBadRequest, ErrTicketAlreadyClosed, "工单已关闭，无法回复")
-		return
-	}
-	if statusFromError(w, err) {
+	updated, ticket, err := a.appendTicketReply(id, p.User, content)
+	if writeTicketReplyFailure(w, err) {
 		return
 	}
 	category := auditCategoryForRole(p.User.Role)
@@ -766,6 +716,24 @@ func (a *App) handleReplyToTicket(w http.ResponseWriter, r *http.Request, params
 		"ticket":    ticketDTO(updated, p.User.Role == store.RoleAdmin),
 		"replies":   ticketReplyDTOs(updated.Replies),
 	})
+}
+
+func writeTicketReplyFailure(w http.ResponseWriter, err error) bool {
+	switch {
+	case errors.Is(err, errTicketReplyEmpty):
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "回复内容不能为空")
+	case errors.Is(err, errTicketReplyTooLong):
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "回复内容过长（上限 5000 字符）")
+	case errors.Is(err, errTicketReplyForbidden):
+		failWithCode(w, http.StatusForbidden, ErrForbidden, "无权回复此工单")
+	case errors.Is(err, store.ErrTicketClosed):
+		failWithCode(w, http.StatusBadRequest, ErrTicketAlreadyClosed, "工单已关闭，无法回复")
+	case errors.Is(err, store.ErrNotFound):
+		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
+	default:
+		return statusFromError(w, err)
+	}
+	return true
 }
 
 func ticketHasAttachment(ticket store.Ticket, filename string) bool {

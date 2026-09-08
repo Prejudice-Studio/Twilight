@@ -177,7 +177,7 @@ func (a *App) registerV2Routes() {
 	a.add(http.MethodGet, "/api/v2/admin/tickets", AuthAdmin, a.handleV2AdminTickets)
 	a.add(http.MethodGet, "/api/v2/admin/tickets/:ticket_id", AuthAdmin, a.handleV2AdminTicket)
 	a.add(http.MethodPatch, "/api/v2/admin/tickets/:ticket_id", AuthAdmin, a.handleAdminUpdateTicket)
-	a.add(http.MethodPost, "/api/v2/admin/tickets/:ticket_id/replies", AuthAdmin, a.handleAdminReplyTicket)
+	a.add(http.MethodPost, "/api/v2/admin/tickets/:ticket_id/replies", AuthAdmin, a.handleV2AdminReplyTicket)
 	a.add(http.MethodDelete, "/api/v2/admin/tickets/:ticket_id", AuthAdmin, a.handleAdminDeleteTicket)
 	a.add(http.MethodPost, "/api/v2/admin/tickets/:ticket_id/attachments", AuthAdmin, a.handleUploadTicketImage)
 	a.add(http.MethodGet, "/api/v2/admin/tickets/:ticket_id/attachments/:filename", AuthAdmin, a.handleGetTicketImage)

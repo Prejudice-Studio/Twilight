@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/prejudice-studio/twilight/internal/store"
 )
@@ -99,8 +100,8 @@ func v2UserTicketDTO(ticket store.Ticket) map[string]any {
 }
 
 // User ticket resources keep the browser-facing contract independent from the
-// rollback API while delegating ownership, limits, status transitions,
-// notifications and persistence to the shared handlers below.
+// rollback API. Reply writes use the shared application operation so ownership,
+// closed-state checks and atomic persistence cannot drift between versions.
 func (a *App) handleV2UserTickets(w http.ResponseWriter, r *http.Request, _ Params) {
 	if !a.cfg().TicketSystemEnabled {
 		failWithCode(w, http.StatusServiceUnavailable, ErrTicketDisabled, "工单系统未启用")
@@ -159,7 +160,40 @@ func (a *App) handleV2CreateTicket(w http.ResponseWriter, r *http.Request, p Par
 }
 
 func (a *App) handleV2UserTicketReply(w http.ResponseWriter, r *http.Request, p Params) {
-	a.handleReplyToTicket(w, r, p)
+	w.Header().Set("Cache-Control", "private, no-store")
+	if !a.cfg().TicketSystemEnabled {
+		failWithCode(w, http.StatusServiceUnavailable, ErrTicketDisabled, "工单系统未启用")
+		return
+	}
+	actor := current(r).User
+	if !a.allowRate(r.Context(), rateKey("ticket-reply:uid:", actor.UID), 20, 10*time.Minute) {
+		failWithCode(w, http.StatusTooManyRequests, ErrTicketRateLimited, "回复过于频繁，请稍后再试")
+		return
+	}
+	id, err := int64Param(p, "ticket_id")
+	if err != nil || id <= 0 {
+		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的工单编号")
+		return
+	}
+	if a.refreshStoreForRequest(w, r) {
+		return
+	}
+	payload := decodeMap(r)
+	updated, existing, err := a.appendTicketReply(id, actor, stringValue(payload, "content"))
+	if writeTicketReplyFailure(w, err) {
+		return
+	}
+	a.audit(r, "reply_ticket", auditCategoryForRole(actor.Role), existing.UID, map[string]any{"ticket_id": id, "reply_len": len(strings.TrimSpace(stringValue(payload, "content")))})
+	if actor.Role == store.RoleAdmin {
+		a.notifyTicketOwner(r.Context(), updated, existing)
+	} else {
+		a.notifyTicketAdmins(r.Context(), "replied", updated, actor)
+	}
+	ok(w, "回复成功", map[string]any{
+		"ticket_id": id,
+		"ticket":    v2UserTicketDTO(updated),
+		"replies":   ticketReplyDTOs(updated.Replies),
+	})
 }
 
 func (a *App) handleV2CloseUserTicket(w http.ResponseWriter, r *http.Request, p Params) {
@@ -250,6 +284,33 @@ func (a *App) handleV2AdminTicket(w http.ResponseWriter, r *http.Request, params
 	ok(w, "OK", v2AdminTicketDetailResponse{
 		Item:        v2AdminTicketDTO(ticket),
 		TicketTypes: a.store().TicketTypes(),
+	})
+}
+
+func (a *App) handleV2AdminReplyTicket(w http.ResponseWriter, r *http.Request, params Params) {
+	w.Header().Set("Cache-Control", "private, no-store")
+	id, err := int64Param(params, "ticket_id")
+	if err != nil || id <= 0 {
+		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的工单编号")
+		return
+	}
+	if a.refreshStoreForRequest(w, r) {
+		return
+	}
+	payload := decodeMap(r)
+	actor := current(r).User
+	ticket, existing, err := a.appendTicketReply(id, actor, stringValue(payload, "content"))
+	if writeTicketReplyFailure(w, err) {
+		return
+	}
+	content := strings.TrimSpace(stringValue(payload, "content"))
+	a.audit(r, "reply_ticket", "admin", existing.UID, map[string]any{"ticket_id": id, "reply_len": len(content)})
+	a.notifyTicketOwner(r.Context(), ticket, existing)
+	a.notifyTicketAdmins(r.Context(), "admin_replied", ticket, actor)
+	ok(w, "回复成功", map[string]any{
+		"ticket_id": id,
+		"item":      v2AdminTicketDTO(ticket),
+		"replies":   ticketReplyDTOs(ticket.Replies),
 	})
 }
 
