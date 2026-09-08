@@ -156,6 +156,8 @@ V2 页面覆盖 V1 当前用户可见的全部路由；兼容别名只负责旧�
 
 V2 认证接口是 Go 认证应用服务的薄适配，不重新实现密码哈希、恒定代价校验、限流、账号状态、注册码/绑定码消费、审计、会话创建和会话删除。登录与注册分别进入共享的 `login_service.go` 和 `registration_service.go`，V1 入口只作为同一服务的兼容传输适配。注册绑定码资源使用 POST 并保留 `X-Twilight-Client: webui` 与 `X-Twilight-Intent: create-bind-code` intent，避免新架构引入带副作用的无意 GET。找回密码继续使用统一错误文案，临时密码仅存在当前 form action 结果中。
 
+Emby 找回密码也通过共享的 `password_reset_service.go` 执行；服务端先完成 Emby 鉴权、本地绑定和有效期校验，再生成一次性临时密码并撤销旧会话。V2 页面不会在浏览器保存临时密码，V1 兼容入口只适配同一个结果。
+
 ## 已迁移模块：认证注册
 
 `/register` 使用服务端 `load` 读取注册开关/容量摘要与公开系统能力，默认 action 将用户名、邮箱、注册码和 Telegram 注册绑定码提交到 Go 的 `/api/v2/registration`。V1 注册路径只保留兼容传输适配，两者共同调用 `registrationService`；密码确认只用于用户体验，密码强度、注册码消费、Telegram 绑定码原子消费、邮箱冲突和容量限制仍由 Go 后端决定。

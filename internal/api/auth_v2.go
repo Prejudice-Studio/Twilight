@@ -56,7 +56,7 @@ func (a *App) handleV2RefreshSession(w http.ResponseWriter, r *http.Request, p P
 
 func (a *App) handleV2ForgotPasswordByEmby(w http.ResponseWriter, r *http.Request, p Params) {
 	w.Header().Set("Cache-Control", "no-store")
-	a.handleForgotPassword(w, r, p)
+	a.handleForgotPasswordResource(w, r)
 }
 
 func (a *App) handleV2EmailPasswordResetRequest(w http.ResponseWriter, r *http.Request, p Params) {

@@ -20,9 +20,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/prejudice-studio/twilight/internal/security"
-	"github.com/prejudice-studio/twilight/internal/store"
 )
 
 // checkAvailableRatePerMin 限制 /api/v1/users/register/availability 的 IP 桶速率。
@@ -87,83 +84,7 @@ func (a *App) handleDirectLoginUnavailable(w http.ResponseWriter, r *http.Reques
 }
 
 func (a *App) handleForgotPassword(w http.ResponseWriter, r *http.Request, _ Params) {
-	cfg := a.cfg()
-	if !cfg.ForgotPasswordEnabled {
-		failWithCode(w, http.StatusServiceUnavailable, ErrForgotPasswordDisabled, "找回密码功能已关闭")
-		return
-	}
-	if !cfg.ForgotPasswordEmbyEnabled {
-		failWithCode(w, http.StatusServiceUnavailable, ErrForgotPasswordDisabled, "通过 Emby 找回密码已关闭")
-		return
-	}
-	ip := a.clientIP(r)
-	if !a.allowRate(r.Context(), rateKey("forgot-password:ip:", ip), cfg.RateLimitForgotPasswordIPPer10m, 10*time.Minute) {
-		failWithCode(w, http.StatusTooManyRequests, ErrPasswordResetTooMany, "重置密码尝试过于频繁，请稍后再试")
-		return
-	}
-	payload := decodeMap(r)
-	embyUsername := stringValue(payload, "emby_username")
-	embyPassword := stringValue(payload, "emby_password")
-	if embyUsername == "" || embyPassword == "" {
-		failWithCode(w, http.StatusBadRequest, ErrEmbyMissingCreds, "缺少 Emby 用户名或密码")
-		return
-	}
-	if len(embyUsername) > 100 || len(embyPassword) > 200 {
-		failWithCode(w, http.StatusBadRequest, ErrEmbyInputTooLong, "输入内容过长")
-		return
-	}
-	if !a.allowRate(r.Context(), rateKey("forgot-password:user:", strings.ToLower(embyUsername)), cfg.RateLimitForgotPasswordUserPer30m, 30*time.Minute) {
-		failWithCode(w, http.StatusTooManyRequests, ErrPasswordResetTooMany, "该账号重置密码尝试过于频繁，请稍后再试")
-		return
-	}
-	embyUser, okAuth, err := a.embyAuthenticateByName(r.Context(), embyUsername, embyPassword)
-	if err != nil {
-		failWithCode(w, http.StatusUnauthorized, ErrEmbyAuthFailed, "Emby 鉴权失败")
-		return
-	}
-	if !okAuth {
-		failWithCode(w, http.StatusUnauthorized, ErrLoginInvalid, "Emby 用户名或密码错误")
-		return
-	}
-	embyID := firstNonEmpty(asString(embyUser["Id"]), asString(embyUser["ID"]), asString(embyUser["id"]))
-	u, okUser := a.store().FindUserByEmbyID(embyID)
-	if !okUser {
-		failWithCode(w, http.StatusNotFound, ErrEmbyAccountUnlinked, "该 Emby 账号未关联面板账号")
-		return
-	}
-	if !u.Active {
-		if userExpiredOnly(u) {
-			failWithCode(w, http.StatusForbidden, ErrAccountExpired, "账号有效期已到期，请续费后再重置密码")
-			return
-		}
-		failWithCode(w, http.StatusForbidden, ErrAccountDisabled, "账号已被禁用")
-		return
-	}
-	// R62-7：账号 Active=true 但 entitlement 已过期（ExpiredAt < now）时不再
-	// 重置密码并往 emby 写新密码。两条原因：
-	//   1. embyShouldEnableUser 在过期态会返回 false，下面那条
-	//      embySetUserEnabled 会立即把账号 disable 掉——发出去的"new_password"
-	//      用户拿去登录会立刻被 emby 拒，UX 是"我刚改了密码就登不上"；
-	//   2. 攻击者只要凭 emby 密码就能换出一份"理论可用"的面板凭据，把已经
-	//      软冻结的账号当成绕开续费的入口。
-	// 这里返回 ErrAccountExpired 与 !u.Active && expired 分支同口径——前端
-	// 已经按这条错误码引导到"账号到期，请续费"，对用户最不困惑。
-	if !userEntitlementOK(u) {
-		failWithCode(w, http.StatusForbidden, ErrAccountExpired, "账号有效期已到期，请先续期再重置密码")
-		return
-	}
-	newPassword := "Twilight-" + randomCode(18)
-	hash, err := security.HashPassword(newPassword)
-	if err != nil {
-		failWithCode(w, http.StatusInternalServerError, ErrPasswordHashFailed, "密码处理失败")
-		return
-	}
-	u, err = a.store().UpdateUser(u.UID, func(u *store.User) error { u.PasswordHash = hash; return nil })
-	if statusFromError(w, err) {
-		return
-	}
-	a.sessions().DeleteUser(r.Context(), u.UID)
-	ok(w, "密码已重置", map[string]any{"username": u.Username, "new_password": newPassword})
+	a.handleForgotPasswordResource(w, r)
 }
 
 func (a *App) handleLogout(w http.ResponseWriter, r *http.Request, _ Params) {

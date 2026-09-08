@@ -166,6 +166,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 | `app.go` | `ServeHTTP`, `authenticate`, `current`, `clientIP`, `principal`, CORS helpers |
 | `auth_handlers.go` | `handleLogin`, `handleRegister`, password reset handlers and V1 authentication compatibility entrypoints |
 | `login_service.go` | Shared credential verification, password rehash, session creation, device/login history, audit and login notification application operations |
+| `password_reset_service.go` | Shared Emby password-recovery validation, external authentication, entitlement checks, password replacement and session revocation |
 | `auth_session_service.go` | Shared session revoke/rotate application operations used by V1 and V2 transport handlers |
 | `setup_handlers.go` | `handleSetupStatus`, `handleSetupComplete`, `setupConfigValues` |
 | `handlers.go` | user self-service, admin users, Emby binding, renewal, role, password, Telegram unbind helpers |
