@@ -50,7 +50,7 @@ function readEnvelope<T>(result: PromiseSettledResult<ApiEnvelope<T>>): T | null
 }
 
 async function review(event: RequestEvent, id: number, action: "approve" | "reject", adminNote: string) {
-  return apiJSONWithResponse(event, `/api/v1/admin/telegram/rebind-requests/${id}/${action}`, {
+  return apiJSONWithResponse(event, `/api/v2/admin/telegram/rebind-requests/${id}/${action}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ admin_note: adminNote })
@@ -60,7 +60,7 @@ async function review(event: RequestEvent, id: number, action: "approve" | "reje
 export const load: PageServerLoad = async (event): Promise<AdminTelegramRebindPageData> => {
   const status = parseStatus(event.url.searchParams.get("status"));
   const page = parsePage(event.url.searchParams.get("page"));
-  const result = await apiJSON<TelegramRebindPage>(event, `/api/v1/admin/telegram/rebind-requests?status=${encodeURIComponent(status)}&page=${page}&per_page=${pageSize}`, { cache: "no-store" });
+  const result = await apiJSON<TelegramRebindPage>(event, `/api/v2/admin/telegram/rebind-requests?status=${encodeURIComponent(status)}&page=${page}&per_page=${pageSize}`, { cache: "no-store" });
   return {
     payload: result?.success && result.data ? result.data : null,
     status,
@@ -98,7 +98,7 @@ export const actions: Actions = {
       return fail(400, { action: "batch", error: "批量换绑申请参数无效" } satisfies FormState);
     }
     const uniqueIDs = [...new Set(ids)];
-    const result = await apiJSONWithResponse(event, "/api/v1/admin/telegram/rebind-requests/batch", {
+    const result = await apiJSONWithResponse(event, "/api/v2/admin/telegram/rebind-requests/batch", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ ids: uniqueIDs, action, admin_note: adminNote })
@@ -117,7 +117,7 @@ export const actions: Actions = {
     }
     const adminNote = note(form.get("admin_note"));
     if (adminNote === null) return fail(400, { action: "revoke", error: "处理备注长度无效" } satisfies FormState);
-    const result = await apiJSONWithResponse<{ revoked: number }>(event, "/api/v1/admin/telegram/rebind-requests/revoke-approved", {
+    const result = await apiJSONWithResponse<{ revoked: number }>(event, "/api/v2/admin/telegram/rebind-requests/revoke-approved", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ admin_note: adminNote })

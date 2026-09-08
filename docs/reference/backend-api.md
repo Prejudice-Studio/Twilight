@@ -1465,12 +1465,19 @@ V2 管理邀请资源为 `/api/v2/admin/invite/tree`、`/api/v2/admin/invite/cod
 | `POST /admin/telegram/rebind-requests/{request_id}/approve` | 批准换绑 |
 | `POST /admin/telegram/rebind-requests/{request_id}/reject` | 拒绝换绑 |
 | `POST /admin/telegram/rebind-requests/batch` | 批量审核换绑 |
+| `GET /api/v2/admin/telegram/rebind-requests` | V2 分页读取换绑申请（私有不缓存） |
+| `POST /api/v2/admin/telegram/rebind-requests/{request_id}/approve` | V2 批准换绑 |
+| `POST /api/v2/admin/telegram/rebind-requests/{request_id}/reject` | V2 拒绝换绑 |
+| `POST /api/v2/admin/telegram/rebind-requests/batch` | V2 批量审核换绑 |
+| `POST /api/v2/admin/telegram/rebind-requests/revoke-approved` | V2 撤销全部已批准未使用的换绑许可 |
 | `GET /admin/telegram/commands/catalog` | Telegram Bot 内置指令目录与禁用状态 |
 | `GET /admin/telegram/roster/stats` | Telegram 群花名册统计 |
 | `POST /admin/telegram/rejoined-users/enable` | 启用重新入群用户 |
 | `POST /admin/telegram/kick-unbound` | 踢出未绑定用户 |
 
 Telegram 相关行为见 [Telegram Bot 命令](../features/telegram-bot.md)。
+
+默认 V2 换绑审核页面改用 `/api/v2/admin/telegram/rebind-requests*`。V2 只复用同一组换绑状态转换和管理员审计，不会因前端版本绕过审批、批量数量限制或撤销逻辑；V1 接口仅作为回滚与外部兼容入口保留。
 
 `GET /admin/telegram/commands/catalog` 是 Bot 指令管理页的后端权威数据源，返回 `commands` 与 `disabled_commands`。`commands` 内每项包含：
 
