@@ -9,6 +9,8 @@ func (a *App) registerV2Routes() {
 	a.add(http.MethodGet, "/api/v2/system/health", AuthPublic, a.handleV2Health)
 	a.add(http.MethodGet, "/api/v2/system/capabilities", AuthPublic, a.handleV2Capabilities)
 	a.add(http.MethodGet, "/api/v2/system/info", AuthPublic, a.handleV2SystemInfo)
+	a.add(http.MethodGet, "/api/v2/setup/status", AuthPublic, a.handleV2SetupStatus)
+	a.add(http.MethodPost, "/api/v2/setup/complete", AuthPublic, a.handleV2SetupComplete)
 	a.add(http.MethodGet, "/api/v2/admin/health/api", AuthAdmin, a.handleV2AdminHealthAPI)
 	a.add(http.MethodGet, "/api/v2/admin/health/database", AuthAdmin, a.handleV2AdminHealthDatabase)
 	a.add(http.MethodGet, "/api/v2/admin/health/emby", AuthAdmin, a.handleV2AdminHealthEmby)

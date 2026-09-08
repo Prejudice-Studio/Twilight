@@ -226,6 +226,8 @@ V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/ap
 | ---- | ---- | ---- | ---- |
 | GET | `/api/v1/setup/status` | Public | 查询初始化向导是否可用 |
 | POST | `/api/v1/setup/complete` | Public | 一次性完成初始化，需空系统硬门控与 WebUI intent 头 |
+| GET | `/api/v2/setup/status` | Public | V2 查询初始化向导是否可用；私有不缓存 |
+| POST | `/api/v2/setup/complete` | Public | V2 一次性完成初始化；服务端要求 WebUI intent 头并签发会话 |
 
 ## System
 

@@ -1707,6 +1707,8 @@ curl -X POST "http://localhost:5000/api/v1/setup/complete" \
   }'
 ```
 
+默认 V2 SSR 初始化页面使用 `/api/v2/setup/status` 与 `/api/v2/setup/complete`。V2 只提供独立资源命名空间，初始化可用性、显式 WebUI intent、限流、密码/地址校验、用户与配置回滚、审计和 host-only HttpOnly 会话 Cookie 仍由同一组 Go handler 最终处理；V1 入口保留为回滚与外部兼容入口。
+
 ### 10.4 服务器图标
 
 `GET /system/server-icon` — 读取服务器图标（公开）。

@@ -155,7 +155,7 @@ Telegram 注册绑定码生成使用独立的 `createBindCode` form action；启
 
 `/forgot-password` 使用服务端 `load` 读取公开功能开关，邮箱发码、邮箱重置和 Emby 验证分别由 SvelteKit form action 转发到 Go 后端。浏览器不会直接调用找回密码 API，也不会接触上游错误原文；邮箱流程保留统一成功/失败文案以避免账号枚举，Emby 流程返回的临时 Web 密码只存在当前 action 结果中，不进入 URL、缓存或持久化状态。
 
-`/setup` 使用服务端 `load` 读取初始化可用状态和站点摘要，初始化表单由服务端构造严格的嵌套 payload，并携带 `X-Twilight-Client: webui` 与 `X-Twilight-Intent: complete-setup`。服务器接收后端下发的 host-only、HttpOnly 会话 Cookie 后再重定向到管理员状态页；初始化资格、密码强度、配置字段校验和一次性关闭入口仍由 Go 后端最终决定。Emby Token、Bot Token、SMTP 密码只在 action 请求体中传输，不被写入浏览器状态。
+`/setup` 使用服务端 `load` 读取 `/api/v2/setup/status` 的初始化可用状态和 `/api/v2/system/info` 的站点摘要，初始化表单由服务端构造严格的嵌套 payload，并携带 `X-Twilight-Client: webui` 与 `X-Twilight-Intent: complete-setup` 提交到 `/api/v2/setup/complete`。服务器接收后端下发的 host-only、HttpOnly 会话 Cookie 后再重定向到管理员状态页；初始化资格、密码强度、配置字段校验和一次性关闭入口仍由 Go 后端最终决定。Emby Token、Bot Token、SMTP 密码只在 action 请求体中传输，不被写入浏览器状态。V1 setup 接口只保留为回滚与外部兼容入口。
 
 ## 已迁移模块：用户工单
 

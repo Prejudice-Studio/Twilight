@@ -27,7 +27,7 @@ function checked(form: FormData, name: string): boolean {
 }
 
 async function complete(event: RequestEvent, payload: SetupPayload) {
-  return apiJSONWithResponse<SetupResult>(event, "/api/v1/setup/complete", {
+  return apiJSONWithResponse<SetupResult>(event, "/api/v2/setup/complete", {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -41,7 +41,7 @@ async function complete(event: RequestEvent, payload: SetupPayload) {
 export const load: PageServerLoad = async (event) => {
   if (event.locals.user) throw redirect(303, "/dashboard");
   const [status, system] = await Promise.all([
-    apiJSON<SetupStatus>(event, "/api/v1/setup/status", { cache: "no-store" }),
+    apiJSON<SetupStatus>(event, "/api/v2/setup/status", { cache: "no-store" }),
     apiJSON<SystemInfo>(event, "/api/v2/system/info", { cache: "no-store" })
   ]);
   return {
