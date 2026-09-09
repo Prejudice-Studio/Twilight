@@ -76,7 +76,7 @@ func (a *App) handleV2Register(w http.ResponseWriter, r *http.Request, p Params)
 
 func (a *App) handleV2RegistrationAvailability(w http.ResponseWriter, r *http.Request, p Params) {
 	w.Header().Set("Cache-Control", "no-store")
-	a.handleRegisterAvailability(w, r, p)
+	a.handleRegistrationAvailability(w, r)
 }
 
 func (a *App) handleV2CreateRegistrationBindCode(w http.ResponseWriter, r *http.Request, p Params) {

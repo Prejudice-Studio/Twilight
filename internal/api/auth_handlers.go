@@ -16,7 +16,6 @@ package api
 //     app.go 维护；本文件只做"业务流程编排"。
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -121,56 +120,7 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request, _ Params) {
 }
 
 func (a *App) handleRegisterAvailability(w http.ResponseWriter, r *http.Request, _ Params) {
-	// 反枚举：未限速时攻击者可遍历常见用户名表来收集账户清单。
-	// 这里使用独立桶 register-availability:<ip>，30 次 / 分钟，足够普通用户在
-	// 注册表单上反复尝试用户名，但封堵脚本化扫描。命中限速时返回 429 + RATE_LIMITED，
-	// 前端按通用 RATE_LIMITED 引导即可。
-	if !a.allowRate(r.Context(), rateKey("register-availability:", a.clientIP(r)), checkAvailableRatePerMin, time.Minute) {
-		failWithCode(w, http.StatusTooManyRequests, ErrRateLimited, "请求过于频繁，请稍后再试")
-		return
-	}
-	username := strings.TrimSpace(r.URL.Query().Get("username"))
-	available := true
-	message := ""
-	if username != "" {
-		_, found := a.store().FindUserByUsername(username)
-		available = !found
-		if !available {
-			message = "用户名已被占用，请换一个用户名"
-		}
-	}
-	currentUsers := a.store().UserCount()
-	canRegister := a.cfg().RegisterEnabled || currentUsers == 0
-	if a.cfg().UserLimit > 0 && currentUsers >= a.cfg().UserLimit {
-		canRegister = false
-		available = false
-		message = fmt.Sprintf("系统用户数量已达上限 %d/%d", currentUsers, a.cfg().UserLimit)
-	}
-	embyBoundUsers := 0
-	for _, u := range a.store().ListUsers() {
-		if u.EmbyID != "" {
-			embyBoundUsers++
-		}
-	}
-	directDays := a.cfg().EmbyDirectRegisterDays
-	if directDays == 0 {
-		directDays = 30
-	}
-	ok(w, "OK", map[string]any{
-		"enabled":                      a.cfg().RegisterEnabled,
-		"register_mode":                a.cfg().RegisterEnabled,
-		"can_register":                 canRegister,
-		"requires_reg_code":            a.cfg().RegisterCodeLimit,
-		"available":                    available,
-		"message":                      message,
-		"current_users":                currentUsers,
-		"max_users":                    a.cfg().UserLimit,
-		"allow_pending_register":       a.cfg().AllowPendingRegister,
-		"emby_direct_register_enabled": a.cfg().EmbyDirectRegisterEnabled,
-		"emby_direct_register_days":    directDays,
-		"emby_user_limit":              a.cfg().EmbyUserLimit,
-		"emby_bound_users":             embyBoundUsers,
-	})
+	a.handleRegistrationAvailability(w, r)
 }
 
 // replaceNotifPlaceholders 替换通知模板中的占位符。

@@ -73,6 +73,55 @@ func (a *App) handleRegistration(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *App) handleRegistrationAvailability(w http.ResponseWriter, r *http.Request) {
+	if !a.allowRate(r.Context(), rateKey("register-availability:", a.clientIP(r)), checkAvailableRatePerMin, time.Minute) {
+		failWithCode(w, http.StatusTooManyRequests, ErrRateLimited, "请求过于频繁，请稍后再试")
+		return
+	}
+	username := strings.TrimSpace(r.URL.Query().Get("username"))
+	available := true
+	message := ""
+	if username != "" {
+		_, found := a.store().FindUserByUsername(username)
+		available = !found
+		if !available {
+			message = "用户名已被占用，请换一个用户名"
+		}
+	}
+	currentUsers := a.store().UserCount()
+	canRegister := a.cfg().RegisterEnabled || currentUsers == 0
+	if reached, current, limit := a.systemUserLimitReached(); reached {
+		canRegister = false
+		available = false
+		message = fmt.Sprintf("系统用户数量已达上限 %d/%d", current, limit)
+	}
+	embyBoundUsers := 0
+	for _, user := range a.store().ListUsers() {
+		if user.EmbyID != "" {
+			embyBoundUsers++
+		}
+	}
+	directDays := a.cfg().EmbyDirectRegisterDays
+	if directDays == 0 {
+		directDays = 30
+	}
+	ok(w, "OK", map[string]any{
+		"enabled":                      a.cfg().RegisterEnabled,
+		"register_mode":                a.cfg().RegisterEnabled,
+		"can_register":                 canRegister,
+		"requires_reg_code":            a.cfg().RegisterCodeLimit,
+		"available":                    available,
+		"message":                      message,
+		"current_users":                currentUsers,
+		"max_users":                    a.cfg().UserLimit,
+		"allow_pending_register":       a.cfg().AllowPendingRegister,
+		"emby_direct_register_enabled": a.cfg().EmbyDirectRegisterEnabled,
+		"emby_direct_register_days":    directDays,
+		"emby_user_limit":              a.cfg().EmbyUserLimit,
+		"emby_bound_users":             embyBoundUsers,
+	})
+}
+
 func sendRegistrationEmailVerification(a *App, r *http.Request, u store.User, email string) string {
 	if email == "" || !emailConfigured(a.cfg()) {
 		return ""
