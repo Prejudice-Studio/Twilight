@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/prejudice-studio/twilight/internal/config"
+	"github.com/prejudice-studio/twilight/internal/migration"
 	"github.com/prejudice-studio/twilight/internal/redis"
 	"github.com/prejudice-studio/twilight/internal/store"
 )
@@ -106,6 +107,7 @@ type App struct {
 	embySessionsMu            sync.Mutex
 	embySessionsUntil         time.Time
 	embySessionsCache         []map[string]any
+	migrationMu               sync.Mutex
 	bindStatus                *bindStatusHub
 	// schedulerLocks: jobID -> *schedulerProcessRun。BATCH_07 之前在 package 级
 	// 声明 (`var schedulerProcessLocks sync.Map`)，单进程 prod 不显问题，但
@@ -773,8 +775,15 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		lw.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if a.cfg().MaxUploadSize > 0 {
-		r.Body = http.MaxBytesReader(lw, r.Body, a.cfg().MaxUploadSize)
+	bodyLimit := a.cfg().MaxUploadSize
+	if strings.HasPrefix(r.URL.Path, "/api/v1/system/admin/migration/") {
+		// Migration archives are bounded by the archive parser rather than the
+		// ordinary image-upload limit. The route still authenticates as admin
+		// before reading the body in its handler.
+		bodyLimit = migration.MaxArchiveBytes + 8<<20
+	}
+	if bodyLimit > 0 {
+		r.Body = http.MaxBytesReader(lw, r.Body, bodyLimit)
 	}
 	if !a.allowRate(r.Context(), rateKey("global:", clientIP), a.cfg().RateLimitGlobalPerMinute, time.Minute) {
 		failWithCode(lw, http.StatusTooManyRequests, ErrGlobalRateLimited, "请求过于频繁，请稍后再试")
@@ -790,6 +799,11 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.store().IsIPBlacklisted(clientIP) {
 		failWithCode(lw, http.StatusForbidden, ErrIPBlacklisted, "IP 已被封禁")
+		return
+	}
+
+	// CSRF 保护：所有状态变更方法（POST/PUT/DELETE/PATCH）必须验证 CSRF token
+	if !a.requireCSRF(lw, r) {
 		return
 	}
 
@@ -1387,11 +1401,23 @@ func (a *App) clearSessionCookie(w http.ResponseWriter) {
 	// "default-domain (= 设置时的请求 host)" 寻找另一份同名 cookie，登出
 	// 留下幽灵 cookie 的概率极高——这正是双子域部署里常见的"登出后再访
 	// 问还是登录态"现象。
-	http.SetCookie(w, &http.Cookie{Name: a.cfg().SessionCookie, Path: "/", Domain: a.cfg().CookieDomain, MaxAge: -1, Expires: time.Unix(0, 0), HttpOnly: true, Secure: a.cfg().CookieSecure, SameSite: sameSite(a.cfg().CookieSameSite)})
+	cfg := a.cfg()
+	http.SetCookie(w, &http.Cookie{Name: cfg.SessionCookie, Path: "/", Domain: cfg.CookieDomain, MaxAge: -1, Expires: time.Unix(0, 0), HttpOnly: true, Secure: cfg.CookieSecure, SameSite: sameSite(cfg.CookieSameSite)})
+	// 同时清除 CSRF token cookie
+	http.SetCookie(w, &http.Cookie{Name: "twilight_csrf", Path: "/", Domain: cfg.CookieDomain, MaxAge: -1, Expires: time.Unix(0, 0), HttpOnly: false, Secure: cfg.CookieSecure, SameSite: http.SameSiteLaxMode})
 }
 
 func (a *App) issueSessionCookies(w http.ResponseWriter, sessionToken string, expires time.Time) {
 	a.setSessionCookie(w, sessionToken, expires)
+	// 同时颁发 CSRF token（Double Submit Cookie 方案）
+	csrfToken, err := generateCSRFToken()
+	if err != nil {
+		// CSRF token 生成失败不应阻止登录，记录日志并继续
+		// 用户在后续请求中会因为缺少 CSRF token 而被拒绝
+		zap.L().Error("failed to generate CSRF token", zap.Error(err))
+		return
+	}
+	a.issueCSRFCookie(w, csrfToken, expires)
 }
 
 func sameSite(value string) http.SameSite {

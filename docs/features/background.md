@@ -113,6 +113,14 @@ max_upload_size = 5242880
 
 `PUT /api/v1/users/me/background` 也兼容只传一个 `background` 或 `url` 字符串字段：若该字符串本身是合法 JSON 配置则按上表解析，否则当作单一渐变值处理（同时写入 `lightBg` 与 `darkBg`）。
 
+## V2 SSR 外观页面
+
+V2 页面位于 `webui-v2/src/routes/(app)/settings/appearance/`，通过服务端身份摘要读取当前用户的头像和背景配置，首屏不会再为头像、背景分别发起浏览器请求。背景保存、恢复默认、明暗主题图片上传、头像上传和头像删除均使用 SvelteKit form action；`/settings/background` 仅保留 308 兼容跳转。
+
+V2 页面使用 `GET /api/v2/settings/appearance` 一次读取头像和背景投影，写操作分别使用 `/api/v2/settings/appearance/background`、`/background/upload`、`/avatar/upload` 和 `/avatar`。这些接口是 SSR 前端的版本化资源适配，不复制旧处理器的业务规则；上传 MIME 嗅探、用户限流、文件名生成、路径穿越/符号链接拒绝、Store 更新和资源归属校验仍统一由 Go 处理。上传产物继续通过受保护的 `/api/v1/users/assets/{kind}/{filename}` 读取，避免在 V2 迁移期间出现第二套资源鉴权。
+
+V2 在服务端展示前会再次限制背景配置的长度、渐变函数、上传资源路径和数值范围，历史损坏配置只显示默认预览，不会直接进入 `style`。图片上传表单与背景保存表单保持独立，避免浏览器解析嵌套 form 导致错误提交；最终 MIME 嗅探、路径校验、限流和权限仍由 Go API 执行。
+
 ## 安全规则
 
 上传与资源访问链路的固定模板为「限流 → multipart 解析 → MIME 嗅探 → 路径净化 → 原子写盘 → 更新用户 / 配置」。具体安全措施：

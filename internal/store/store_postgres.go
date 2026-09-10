@@ -446,6 +446,105 @@ CREATE INDEX IF NOT EXISTS twilight_playback_records_item_id_idx ON twilight_pla
 		_ = db.Close()
 		return nil, status, describePostgresConnectionError(target, err)
 	}
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS twilight_playback_events (
+	uid bigint NOT NULL,
+	event_id text NOT NULL,
+	playback_id text NOT NULL,
+	device_id text NOT NULL DEFAULT '',
+	item_id text NOT NULL DEFAULT '',
+	title text NOT NULL DEFAULT '',
+	series_name text NOT NULL DEFAULT '',
+	media_type text NOT NULL DEFAULT '',
+	event_type text NOT NULL,
+	event_at bigint NOT NULL,
+	received_at bigint NOT NULL,
+	sequence bigint NOT NULL DEFAULT 0,
+	time_zone text NOT NULL DEFAULT 'UTC',
+	source text NOT NULL DEFAULT 'client',
+	payload_hash text NOT NULL DEFAULT '',
+	applied_seconds bigint NOT NULL DEFAULT 0,
+	finalized boolean NOT NULL DEFAULT false,
+	processed_at bigint NOT NULL,
+	PRIMARY KEY (uid, event_id)
+)`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
+	for _, statement := range []string{
+		`ALTER TABLE twilight_playback_events ADD COLUMN IF NOT EXISTS payload_hash text`,
+		`UPDATE twilight_playback_events SET payload_hash = '' WHERE payload_hash IS NULL`,
+		`ALTER TABLE twilight_playback_events ALTER COLUMN payload_hash SET DEFAULT ''`,
+		`ALTER TABLE twilight_playback_events ALTER COLUMN payload_hash SET NOT NULL`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			_ = db.Close()
+			return nil, status, describePostgresConnectionError(target, err)
+		}
+	}
+	for _, statement := range []string{
+		`CREATE INDEX IF NOT EXISTS twilight_playback_events_uid_received_idx ON twilight_playback_events (uid, received_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS twilight_playback_events_playback_idx ON twilight_playback_events (uid, playback_id, received_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS twilight_playback_events_event_at_idx ON twilight_playback_events (uid, event_at DESC)`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			_ = db.Close()
+			return nil, status, describePostgresConnectionError(target, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS twilight_playback_segments (
+	uid bigint NOT NULL,
+	playback_id text NOT NULL,
+	device_id text NOT NULL DEFAULT '',
+	item_id text NOT NULL DEFAULT '',
+	title text NOT NULL DEFAULT '',
+	series_name text NOT NULL DEFAULT '',
+	media_type text NOT NULL DEFAULT '',
+	started_at bigint NOT NULL DEFAULT 0,
+	last_at bigint NOT NULL DEFAULT 0,
+	ended_at bigint NOT NULL DEFAULT 0,
+	duration bigint NOT NULL DEFAULT 0,
+	status text NOT NULL DEFAULT '',
+	last_sequence bigint NOT NULL DEFAULT 0,
+	time_zone text NOT NULL DEFAULT 'UTC',
+	updated_at bigint NOT NULL,
+	PRIMARY KEY (uid, playback_id, device_id)
+)`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
+	for _, statement := range []string{
+		`CREATE INDEX IF NOT EXISTS twilight_playback_segments_uid_updated_idx ON twilight_playback_segments (uid, updated_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS twilight_playback_segments_active_idx ON twilight_playback_segments (uid, status, updated_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS twilight_playback_segments_playback_idx ON twilight_playback_segments (uid, playback_id, updated_at DESC)`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			_ = db.Close()
+			return nil, status, describePostgresConnectionError(target, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS twilight_playback_daily (
+	uid bigint NOT NULL,
+	day text NOT NULL,
+	time_zone text NOT NULL DEFAULT 'UTC',
+	seconds bigint NOT NULL DEFAULT 0,
+	updated_at bigint NOT NULL,
+	PRIMARY KEY (uid, day, time_zone)
+)`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
+	for _, statement := range []string{
+		`CREATE INDEX IF NOT EXISTS twilight_playback_daily_uid_day_idx ON twilight_playback_daily (uid, day DESC)`,
+		`CREATE INDEX IF NOT EXISTS twilight_playback_daily_updated_idx ON twilight_playback_daily (updated_at DESC)`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			_ = db.Close()
+			return nil, status, describePostgresConnectionError(target, err)
+		}
+	}
 	status.SchemaReady = true
 	return db, status, nil
 }

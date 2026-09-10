@@ -12,7 +12,7 @@
 >
 > **推荐部署方式**: 参见 [开发指南](development.md) 中的 Linux + systemd 部署说明。
 
-Twilight 提供完整的 Docker 支持，包含 PostgreSQL + Redis + Go 后端 + Next.js 前端的一键部署方案。
+Twilight 提供完整的 Docker 支持，包含 PostgreSQL + Redis + Go 后端 + SvelteKit SSR adapter-node 前端的一键部署方案。
 
 ## 目录
 
@@ -53,10 +53,10 @@ cp deploy/docker/config.docker.toml config.toml
 # 编辑 config.toml，至少填写 Emby URL 和 Token
 vim config.toml
 
-# 前端环境变量
-cp webui/.env.example webui/.env
-# 编辑 webui/.env，设置站点名称和 API 地址
-vim webui/.env
+# V2 SSR 前端环境变量（可选）
+cp webui-v2/.env.example webui-v2/.env
+# 编辑 webui-v2/.env，设置 BACKEND_URL/ORIGIN 等运行时变量
+vim webui-v2/.env
 ```
 
 ### 3. 设置环境变量（可选）
@@ -101,7 +101,7 @@ docker compose ps
 ├──────────────┬──────────────────┬───────────────────┤
 │              │                  │                    │
 │  twilight-webui   twilight-backend   postgres:5432  │
-│  (Next.js :3000)  (Go API :5000)    redis:6379      │
+│  (SvelteKit :3000) (Go API :5000)   redis:6379      │
 │              │                  │                    │
 │              └──────┬───────────┘                    │
 │                     │                                │
@@ -141,12 +141,13 @@ docker compose ps
   - `twilight-uploads`: 用户上传（头像/背景）
   - `twilight-backups`: 数据库备份
 
-### Next.js 前端 (`webui`)
+### SvelteKit SSR 前端 (`webui`)
 
-- 构建输出: `output: 'standalone'`
-- 端口: `3000`
-- 通过 `BACKEND_URL` 环境变量指向后端 API
-- `NEXT_PUBLIC_API_URL` 在构建时嵌入，跨域访问需要配置 CORS
+- 构建目录: `webui-v2/build`
+- 运行时: `@sveltejs/adapter-node`
+- 端口: 容器内 `3000`
+- 通过服务端 `BACKEND_URL` 环境变量指向后端 API，浏览器不会直接持有后端凭据
+- 通过 `ORIGIN` 设置浏览器实际访问的完整 Origin，form action 使用该值完成同源校验
 
 ## 配置管理
 
@@ -235,27 +236,28 @@ location /api/ {
     proxy_set_header X-Forwarded-Proto $scheme;
 }
 
-# 前端静态文件
+# V2 SSR 前端
 location / {
     proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
 }
 ```
 
 Nginx 也配置了限流 zone，参考 `deploy/nginx-rate-limit.conf`。
 
-### 前端配置
+### V2 前端配置
 
-当使用反向代理统一域名时，前端 `.env` 配置:
+当使用反向代理统一域名时，`webui-v2/.env` 配置:
 
 ```env
-# 同域代理（推荐）
-NEXT_PUBLIC_API_URL=
-
-# 跨域（需 CORS 配置）
-NEXT_PUBLIC_API_URL=https://api.yourdomain.com
+BACKEND_URL=http://twilight:5000
+HOST=0.0.0.0
+PORT=3000
+ORIGIN=https://panel.example.com
 ```
 
-`NEXT_PUBLIC_API_URL` 为空时，前端通过 Next.js rewrite 将 `/api/*` 代理到 `BACKEND_URL`。
+V2 的 SSR 页面和 form action 由服务端访问 `BACKEND_URL`；`/api/v1/*` 与 `/api/v2/*` 的同源代理仅用于需要渐进增强的页面。统一域名部署不需要为 V2 配置浏览器直连 API 的 CORS 来源。
 
 ## 升级与维护
 
@@ -299,8 +301,7 @@ docker compose ps
 # 手动检查后端（从容器网络内）
 docker compose exec twilight curl -fsS http://127.0.0.1:5000/api/v1/system/health
 
-# 预期响应
-# {"success":true,"data":{"api":true,"database":true,"emby":true}}
+# 预期响应为 API liveness；数据库和 Emby 健康检查仍使用独立接口。
 ```
 
 Compose 已为所有服务配置 `init: true`、`stop_grace_period: 30s`、`no-new-privileges` 和 Docker JSON 日志轮转。生产覆写文件额外启用后端只读根文件系统、临时 `/tmp` 与资源上限。

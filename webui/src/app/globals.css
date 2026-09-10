@@ -14,7 +14,7 @@
   }
 }
 
-.twilight-bg-layer {
+  .twilight-bg-layer {
   transition:
     filter 260ms ease,
     opacity 260ms ease,
@@ -156,6 +156,15 @@
     min-height: 100%;
     max-width: 100%;
     overflow-x: hidden;
+  }
+
+  .page-enter {
+    animation: page-enter 180ms ease-out both;
+  }
+
+  @keyframes page-enter {
+    from { opacity: 0; transform: translateY(0.5rem); }
+    to { opacity: 1; transform: translateY(0); }
   }
 
   html {
@@ -737,6 +746,7 @@
 
     .section-surface :where(.flex, .inline-flex, .grid) {
       min-width: 0;
+      max-width: 100%;
     }
 
     .section-surface :where(input, textarea, select) {

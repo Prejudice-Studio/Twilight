@@ -38,6 +38,20 @@ func (a *App) handleSigninMe(w http.ResponseWriter, r *http.Request, _ Params) {
 	ok(w, "OK", payload)
 }
 
+// signinPagePayload 是用户签到页的唯一读取组合。它复用现有摘要/历史 DTO
+// 生成逻辑，避免 V2 为同一业务再复制一套积分计算和兼容字段处理。
+func (a *App) signinPagePayload(user store.User, limit int) map[string]any {
+	cfg := *a.cfg()
+	si := a.store().Signin(user.UID)
+	summary := signinSummaryPayload(cfg, si)
+	a.attachSigninAutoRenewal(summary, cfg, si.Points, user)
+	return map[string]any{
+		"summary": summary,
+		"config":  signinConfigPayload(cfg),
+		"history": signinHistoryPayload(cfg, a.store().SigninHistoryRecords(user.UID, limit)),
+	}
+}
+
 func (a *App) handleSignin(w http.ResponseWriter, r *http.Request, _ Params) {
 	if a.requireSigninEnabled(w) {
 		return
@@ -74,7 +88,11 @@ func (a *App) handleSigninHistory(w http.ResponseWriter, r *http.Request, _ Para
 	if limit <= 0 || limit > 365 {
 		limit = 30
 	}
-	records := a.store().SigninHistoryRecords(current(r).User.UID, limit)
+	items := signinHistoryPayload(*a.cfg(), a.store().SigninHistoryRecords(current(r).User.UID, limit))
+	ok(w, "OK", map[string]any{"records": items, "currency_name": signinCurrencyName(*a.cfg())})
+}
+
+func signinHistoryPayload(_ config.Config, records []store.SigninRecord) []map[string]any {
 	items := make([]map[string]any, 0, len(records))
 	for _, record := range records {
 		total := record.Total
@@ -94,7 +112,7 @@ func (a *App) handleSigninHistory(w http.ResponseWriter, r *http.Request, _ Para
 			"created_at":   record.CreatedAt,
 		})
 	}
-	ok(w, "OK", map[string]any{"records": items, "currency_name": signinCurrencyName(*a.cfg())})
+	return items
 }
 
 func (a *App) handleSigninRenew(w http.ResponseWriter, r *http.Request, _ Params) {

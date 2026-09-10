@@ -216,7 +216,7 @@ export default function AdminEmailPage() {
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">{t("emailAdmin.description")}</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => void reload()} disabled={loading}>
+        <Button variant="outline" size="sm" onClick={() => void reload().catch(() => undefined)} disabled={loading}>
           {loading ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           ) : (

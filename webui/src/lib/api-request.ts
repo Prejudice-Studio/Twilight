@@ -109,6 +109,8 @@ const READ_RESPONSE_CACHE_TTL_MS = 3_000;
 const READ_RESPONSE_CACHE_MAX_ENTRIES = 32;
 const READ_RESPONSE_CACHE_MAX_SOURCE_CHARS = 64 * 1024;
 const READ_RESPONSE_CACHE_TOTAL_SOURCE_CHARS = 256 * 1024;
+/** API envelope responses are JSON; bound browser-side parsing before allocating a large string. */
+const MAX_API_RESPONSE_BYTES = 8 * 1024 * 1024;
 
 const inFlightReadRequests = new Map<string, { promise: Promise<ApiResponse<unknown>>; startedAt: number }>();
 const readResponseCache = new Map<string, { data: ApiResponse<unknown>; cachedAt: number; sourceChars: number }>();
@@ -134,14 +136,27 @@ function requestCacheKey(url: string, method: string, headers: Record<string, st
 function isSessionIdentityRead(url: string): boolean {
   try {
     const parsed = new URL(url, typeof window !== "undefined" ? window.location.origin : "http://localhost");
-    return parsed.pathname.endsWith("/api/v1/users/me") || parsed.pathname.endsWith("/api/v1/auth/me");
+    return parsed.pathname.endsWith("/api/v1/users/me") || parsed.pathname.endsWith("/api/v1/auth/me") ||
+      parsed.pathname.endsWith("/api/v2/users/me") || parsed.pathname.endsWith("/api/v2/auth/me");
   } catch {
-    return url.endsWith("/api/v1/users/me") || url.endsWith("/api/v1/auth/me");
+    return url.endsWith("/api/v1/users/me") || url.endsWith("/api/v1/auth/me") ||
+      url.endsWith("/api/v2/users/me") || url.endsWith("/api/v2/auth/me");
   }
 }
 
-function isSharedReadAllowed(url: string, method: string, headers: Record<string, string>, cache?: RequestCache): boolean {
+function isSharedReadAllowed(
+  url: string,
+  method: string,
+  headers: Record<string, string>,
+  cache?: RequestCache,
+  credentials?: RequestCredentials,
+): boolean {
   if (method !== "GET" && method !== "HEAD") return false;
+  // Cookie-authenticated responses are session scoped, but HttpOnly cookies are
+  // intentionally invisible to JavaScript and therefore cannot be part of the
+  // cache key. Only explicitly public requests may use either shared cache or
+  // in-flight coalescing.
+  if (credentials !== "omit") return false;
   if (cache === "no-store" || cache === "reload") return false;
   if (hasHeader(headers, "x-twilight-intent")) return false;
   if (isSessionIdentityRead(url)) return false;
@@ -216,7 +231,7 @@ export function clearApiRequestCaches(): void {
  * 退化路径手写同样语义，保证 SSR / 老浏览器也能跑。
  *
  * timeoutMs 传 0 / Infinity 表示不加超时；典型用于 SSE / 长轮询通道，调用方
- * 应当传入自己的 signal（fetch 完后立即关流不会受 20s 限制影响）。
+ * 应当传入自己的 signal。超时 signal 会保持到响应正文读取结束。
  *
  * 返回 cleanup 函数，无论 fetch 成功/失败都应调用，否则未触发的 setTimeout
  * 会留 200~500 个挂起的定时器。
@@ -275,17 +290,20 @@ function withTimeoutSignal(
   };
 }
 
-function describeApiTarget(endpoint: string, method: string): string {
-  return `${method} /api/v1${endpoint}`;
+type ApiVersion = "v1" | "v2";
+
+function describeApiTarget(endpoint: string, method: string, apiVersion: ApiVersion): string {
+  return `${method} /api/${apiVersion}${endpoint}`;
 }
 
 function buildHttpErrorMessage(
   status: number,
   endpoint: string,
   method: string,
+  apiVersion: ApiVersion,
   backendMessage?: string,
 ): string {
-  const target = describeApiTarget(endpoint, method);
+  const target = describeApiTarget(endpoint, method, apiVersion);
   const detail = backendMessage && backendMessage !== "接口不存在" ? `后端返回：${backendMessage}` : "";
 
   if (status === 404) {
@@ -329,8 +347,8 @@ function buildHttpErrorMessage(
   return backendMessage || `请求失败 (${status})：${target}`;
 }
 
-function buildParseErrorMessage(status: number, endpoint: string, method: string): string {
-  const target = describeApiTarget(endpoint, method);
+function buildParseErrorMessage(status: number, endpoint: string, method: string, apiVersion: ApiVersion): string {
+  const target = describeApiTarget(endpoint, method, apiVersion);
   if (status === 404) {
     return `接口不存在：${target}\n服务器没有返回标准 JSON，可能命中了前端页面 404、反向代理路径错误，或后端缺少该路由。`;
   }
@@ -344,15 +362,53 @@ async function parseApiResponse<T>(
   response: Response,
   endpoint: string,
   method: string,
+  apiVersion: ApiVersion,
 ): Promise<{ data: ApiResponse<T>; sourceChars: number }> {
   if (response.status === 204) {
     return { data: { success: true, message: "OK" }, sourceChars: 0 };
   }
 
-  const text = await response.text();
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_API_RESPONSE_BYTES) {
+    throw new Error(
+      `服务器响应过大：${describeApiTarget(endpoint, method, apiVersion)}\n` +
+      `响应超过 ${MAX_API_RESPONSE_BYTES / (1024 * 1024)} MiB 限制。`,
+    );
+  }
+
+  let text: string;
+  if (!response.body) {
+    throw new Error(`服务器响应不可读取：${describeApiTarget(endpoint, method, apiVersion)}\n响应没有可用的数据流。`);
+  } else {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const chunks: string[] = [];
+    let responseBytes = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        responseBytes += value.byteLength;
+        if (responseBytes > MAX_API_RESPONSE_BYTES) {
+          void reader.cancel().catch(() => undefined);
+          throw new Error(
+            `服务器响应过大：${describeApiTarget(endpoint, method, apiVersion)}\n` +
+            `响应超过 ${MAX_API_RESPONSE_BYTES / (1024 * 1024)} MiB 限制。`,
+          );
+        }
+        const chunk = decoder.decode(value, { stream: true });
+        if (chunk) chunks.push(chunk);
+      }
+      const finalChunk = decoder.decode();
+      if (finalChunk) chunks.push(finalChunk);
+      text = chunks.join("");
+    } finally {
+      reader.releaseLock();
+    }
+  }
   if (!text) {
     if (response.ok) {
-      throw new Error(`服务器返回空响应：${describeApiTarget(endpoint, method)}\nHTTP ${response.status} 没有返回标准 JSON。`);
+      throw new Error(`服务器返回空响应：${describeApiTarget(endpoint, method, apiVersion)}\nHTTP ${response.status} 没有返回标准 JSON。`);
     }
     return { data: { success: false, message: response.statusText }, sourceChars: 0 };
   }
@@ -367,11 +423,13 @@ async function parseApiResponse<T>(
       };
     }
     console.error("JSON parse error:", error);
-    throw new Error(buildParseErrorMessage(response.status, endpoint, method));
+    throw new Error(buildParseErrorMessage(response.status, endpoint, method, apiVersion));
   }
 }
 
 export interface ApiRequestExtraOptions {
+  /** API major version. Existing callers default to v1; V2 callers opt in explicitly. */
+  apiVersion?: "v1" | "v2";
   /** 自定义超时（毫秒）；传 0 / Infinity 表示不加超时（SSE / 长轮询场景）。 */
   timeoutMs?: number;
   /** 调用方取消信号；表单上传也必须支持页面卸载/重复操作时的取消。 */
@@ -399,11 +457,18 @@ export async function apiRequest<T>(
     headers["X-Twilight-Client"] = "webui";
   }
 
-  const url = `${API_BASE}/api/v1${endpoint}`;
+  const apiVersion = extra.apiVersion ?? "v1";
+  const url = `${API_BASE}/api/${apiVersion}${endpoint}`;
   const isReadRequest = (method === "GET" || method === "HEAD") && options.body === undefined;
   const effectiveCache = options.cache ?? (isReadRequest ? "no-cache" : "no-store");
   const requestReadCacheEpoch = readCacheEpoch;
-  const canShareRead = isReadRequest && !options.signal?.aborted && isSharedReadAllowed(url, method, headers, effectiveCache);
+  const canShareRead = isReadRequest && !options.signal?.aborted && isSharedReadAllowed(
+    url,
+    method,
+    headers,
+    effectiveCache,
+    options.credentials,
+  );
   const canUseReadCache = canShareRead && extra.cacheRead !== false;
   const cacheKey = canUseReadCache ? requestCacheKey(url, method, headers) : "";
   if (cacheKey) {
@@ -439,17 +504,18 @@ export async function apiRequest<T>(
       ...options,
       headers,
       cache: effectiveCache,
-      credentials: "include",
+      credentials: options.credentials ?? "include",
       signal: guard.signal ?? options.signal ?? null,
     });
   } catch (error) {
+    guard.cleanup();
     if (guard.isTimeout() || isTimeoutError(error)) {
       throw new ApiError({
         status: 0,
         endpoint,
         method,
         errorCode: "REQUEST_TIMEOUT",
-        message: `请求超时：${describeApiTarget(endpoint, method)}\n网络或后端响应过慢，请稍后重试。`,
+        message: `请求超时：${describeApiTarget(endpoint, method, apiVersion)}\n网络或后端响应过慢，请稍后重试。`,
       });
     }
     if (isAbortError(error)) {
@@ -457,31 +523,46 @@ export async function apiRequest<T>(
     }
     console.error("Network error:", error);
     throw new Error(
-      `无法连接后端接口：${describeApiTarget(endpoint, method)}\n请检查后端服务是否启动、API 地址是否正确、反向代理是否可达.`
+      `无法连接后端接口：${describeApiTarget(endpoint, method, apiVersion)}\n请检查后端服务是否启动、API 地址是否正确、反向代理是否可达.`
     );
+  }
+
+  try {
+    // 保持超时 signal 到正文读取结束：fetch 只代表响应头已到达，响应体
+    // 仍可能因为代理或上游卡住。若此处提前 cleanup，退化定时器会失效。
+    const parsed = await parseApiResponse<T>(response, endpoint, method, apiVersion);
+    const data = parsed.data;
+    if (isReadRequest && response.ok && data?.success !== false && cacheKey && requestReadCacheEpoch === readCacheEpoch) {
+      setCachedReadResponse(cacheKey, data as ApiResponse<unknown>, parsed.sourceChars);
+    }
+
+    if (!response.ok) {
+      throw new ApiError({
+        status: response.status,
+        endpoint,
+        method,
+        errorCode: data?.error_code,
+        backendMessage: data?.message,
+        message: buildHttpErrorMessage(response.status, endpoint, method, apiVersion, data?.message),
+        data: data?.data,
+      });
+    }
+
+    return data;
+  } catch (error) {
+    if (guard.isTimeout() || isTimeoutError(error)) {
+      throw new ApiError({
+        status: 0,
+        endpoint,
+        method,
+        errorCode: "REQUEST_TIMEOUT",
+        message: `请求超时：${describeApiTarget(endpoint, method, apiVersion)}\n网络或后端响应过慢，请稍后重试。`,
+      });
+    }
+    throw error;
   } finally {
     guard.cleanup();
   }
-
-  const parsed = await parseApiResponse<T>(response, endpoint, method);
-  const data = parsed.data;
-  if (isReadRequest && response.ok && data?.success !== false && cacheKey && requestReadCacheEpoch === readCacheEpoch) {
-    setCachedReadResponse(cacheKey, data as ApiResponse<unknown>, parsed.sourceChars);
-  }
-
-  if (!response.ok) {
-    throw new ApiError({
-      status: response.status,
-      endpoint,
-      method,
-      errorCode: data?.error_code,
-      backendMessage: data?.message,
-      message: buildHttpErrorMessage(response.status, endpoint, method, data?.message),
-      data: data?.data,
-    });
-  }
-
-  return data;
 }
 
 export async function apiRequestForm<T>(
@@ -494,7 +575,8 @@ export async function apiRequestForm<T>(
     "Accept": "application/json; charset=utf-8",
     "X-Twilight-Client": "webui",
   };
-  const url = `${API_BASE}/api/v1${endpoint}`;
+  const apiVersion = extra.apiVersion ?? "v1";
+  const url = `${API_BASE}/api/${apiVersion}${endpoint}`;
   const methodName = method.toUpperCase();
 
   const timeoutMs = extra.timeoutMs ?? FORM_REQUEST_TIMEOUT_MS;
@@ -511,13 +593,14 @@ export async function apiRequestForm<T>(
       signal: guard.signal ?? extra.signal ?? null,
     });
   } catch (error) {
+    guard.cleanup();
     if (guard.isTimeout() || isTimeoutError(error)) {
       throw new ApiError({
         status: 0,
         endpoint,
         method: methodName,
         errorCode: "REQUEST_TIMEOUT",
-        message: `上传超时：${describeApiTarget(endpoint, methodName)}\n文件较大或网络较慢，请稍后重试。`,
+        message: `上传超时：${describeApiTarget(endpoint, methodName, apiVersion)}\n文件较大或网络较慢，请稍后重试。`,
       });
     }
     if (isAbortError(error)) {
@@ -525,25 +608,38 @@ export async function apiRequestForm<T>(
     }
     console.error("Network error:", error);
     throw new Error(
-      `无法连接后端接口：${describeApiTarget(endpoint, methodName)}\n请检查后端服务是否启动、API 地址是否正确、反向代理是否可达。`
+      `无法连接后端接口：${describeApiTarget(endpoint, methodName, apiVersion)}\n请检查后端服务是否启动、API 地址是否正确、反向代理是否可达。`
     );
+  }
+
+  try {
+    const { data } = await parseApiResponse<T>(response, endpoint, methodName, apiVersion);
+
+    if (!response.ok) {
+      throw new ApiError({
+        status: response.status,
+        endpoint,
+        method: methodName,
+        errorCode: data?.error_code,
+        backendMessage: data?.message,
+        message: buildHttpErrorMessage(response.status, endpoint, methodName, apiVersion, data?.message),
+        data: data?.data,
+      });
+    }
+
+    return data;
+  } catch (error) {
+    if (guard.isTimeout() || isTimeoutError(error)) {
+      throw new ApiError({
+        status: 0,
+        endpoint,
+        method: methodName,
+        errorCode: "REQUEST_TIMEOUT",
+        message: `上传超时：${describeApiTarget(endpoint, methodName, apiVersion)}\n文件较大或网络较慢，请稍后重试。`,
+      });
+    }
+    throw error;
   } finally {
     guard.cleanup();
   }
-
-  const { data } = await parseApiResponse<T>(response, endpoint, methodName);
-
-  if (!response.ok) {
-    throw new ApiError({
-      status: response.status,
-      endpoint,
-      method: methodName,
-      errorCode: data?.error_code,
-      backendMessage: data?.message,
-      message: buildHttpErrorMessage(response.status, endpoint, methodName, data?.message),
-      data: data?.data,
-    });
-  }
-
-  return data;
 }

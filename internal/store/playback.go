@@ -304,6 +304,67 @@ func (s *Store) PlaybackRecords(uid int64, since int64, limit int) []PlaybackRec
 	return out
 }
 
+// PlaybackRecordCounts returns playback row counts for a bounded set of users
+// in one database query. The fallback scans the compact in-memory compatibility
+// slice once when PostgreSQL is unavailable or the query fails.
+func (s *Store) PlaybackRecordCounts(uids []int64) map[int64]int {
+	counts := make(map[int64]int, len(uids))
+	if len(uids) == 0 {
+		return counts
+	}
+	wanted := make(map[int64]struct{}, len(uids))
+	placeholders := make([]string, 0, len(uids))
+	args := make([]any, 0, len(uids))
+	for _, uid := range uids {
+		if uid <= 0 {
+			continue
+		}
+		if _, exists := wanted[uid]; exists {
+			continue
+		}
+		wanted[uid] = struct{}{}
+		placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)+1))
+		args = append(args, uid)
+	}
+	if len(wanted) == 0 {
+		return counts
+	}
+	if s.db != nil {
+		query := `SELECT uid, COUNT(*) FROM twilight_playback_records WHERE uid IN (` + strings.Join(placeholders, ",") + `) GROUP BY uid`
+		ctx, cancel := context.WithTimeout(context.Background(), pgPlaybackReadTimeout)
+		rows, err := s.db.QueryContext(ctx, query, args...)
+		if err == nil {
+			scanOK := true
+			for rows.Next() {
+				var uid int64
+				var count int
+				if scanErr := rows.Scan(&uid, &count); scanErr != nil {
+					scanOK = false
+					break
+				}
+				counts[uid] = count
+			}
+			rowErr := rows.Err()
+			_ = rows.Close()
+			cancel()
+			if scanOK && rowErr == nil {
+				return counts
+			}
+		} else {
+			cancel()
+		}
+		counts = make(map[int64]int, len(uids))
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, record := range s.state.PlaybackRecords {
+		if _, ok := wanted[record.UID]; ok {
+			counts[record.UID]++
+		}
+	}
+	return counts
+}
+
 func (s *Store) PlaybackRecordSummary(since int64) (totalPlays int, totalDuration int64, uniqueUsers int, err error) {
 	if s.db != nil {
 		err = queryPlaybackSummaryDB(s.db, since, &totalPlays, &totalDuration, &uniqueUsers)

@@ -22,6 +22,14 @@ func (a *App) handleInviteMe(w http.ResponseWriter, r *http.Request, _ Params) {
 	if !okUser {
 		return
 	}
+	ok(w, "OK", a.inviteMePayload(user))
+}
+
+// inviteMePayload is the shared, user-scoped invite projection used by the
+// legacy endpoint and the V2 summary endpoint. Keeping the projection in one
+// place prevents a frontend migration from silently changing relationship or
+// cleanup eligibility semantics.
+func (a *App) inviteMePayload(user store.User) map[string]any {
 	codes := a.store().ListInviteCodes(user.UID)
 	codeItems := make([]map[string]any, 0, len(codes))
 	for _, code := range codes {
@@ -59,7 +67,7 @@ func (a *App) handleInviteMe(w http.ResponseWriter, r *http.Request, _ Params) {
 		}
 	}
 	canInvite, reason := a.canInvite(user)
-	ok(w, "OK", map[string]any{"enabled": a.cfg().InviteEnabled, "is_root": parent == nil, "parent": parent, "children": children, "tree": a.inviteTreeFor(user), "depth": a.inviteDepth(user.UID), "max_depth": a.cfg().InviteMaxDepth, "can_invite": canInvite, "invite_block_reason": reason, "max_code_days": maxDays, "max_code_days_reason": maxReason, "codes": codeItems, "total": len(codeItems)})
+	return map[string]any{"enabled": a.cfg().InviteEnabled, "is_root": parent == nil, "parent": parent, "children": children, "tree": a.inviteTreeFor(user), "depth": a.inviteDepth(user.UID), "max_depth": a.cfg().InviteMaxDepth, "can_invite": canInvite, "invite_block_reason": reason, "max_code_days": maxDays, "max_code_days_reason": maxReason, "codes": codeItems, "total": len(codeItems)}
 }
 
 func (a *App) handleCreateInviteCode(w http.ResponseWriter, r *http.Request, _ Params) {

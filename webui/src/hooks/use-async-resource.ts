@@ -3,6 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 interface UseAsyncResourceOptions<T> {
   immediate?: boolean;
   initialData?: T;
+  /** Keep automatic page loads from creating unhandled Promise rejections. */
+  throwOnError?: boolean;
 }
 
 function isAbortError(err: unknown): boolean {
@@ -19,7 +21,7 @@ export function useAsyncResource<T>(
   loader: (signal?: AbortSignal) => Promise<T>,
   options: UseAsyncResourceOptions<T> = {}
 ) {
-  const { immediate = true, initialData } = options;
+  const { immediate = true, initialData, throwOnError = true } = options;
   const [data, setData] = useState<T | undefined>(initialData);
   const [isLoading, setIsLoading] = useState<boolean>(immediate);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +37,7 @@ export function useAsyncResource<T>(
     };
   }, []);
 
-  const execute = useCallback(async () => {
+  const execute = useCallback(async (executeOptions: { throwOnError?: boolean } = {}) => {
     abortControllerRef.current?.abort();
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -58,7 +60,10 @@ export function useAsyncResource<T>(
       if (mountedRef.current && currentRequestId === requestIdRef.current) {
         setError(message);
       }
-      throw err;
+      if (executeOptions.throwOnError ?? throwOnError) {
+        throw err;
+      }
+      return undefined;
     } finally {
       if (mountedRef.current && currentRequestId === requestIdRef.current) {
         setIsLoading(false);
@@ -69,14 +74,14 @@ export function useAsyncResource<T>(
         abortControllerRef.current = null;
       }
     }
-  }, [loader]);
+  }, [loader, throwOnError]);
 
   useEffect(() => {
     if (!immediate) {
       setIsLoading(false);
       return;
     }
-    void execute();
+    void execute({ throwOnError: false });
   }, [execute, immediate]);
 
   const setPartialData = useCallback((updater: (prev: T | undefined) => T) => {

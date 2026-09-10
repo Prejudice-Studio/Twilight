@@ -7,7 +7,7 @@
 面向 Emby / Jellyfin 的用户、邀请、卡码、Bot 与运维管理面板。
 
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
-[![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js&logoColor=white)](https://nextjs.org/)
+[![SvelteKit SSR](https://img.shields.io/badge/WebUI-SvelteKit%20SSR-ff3e00?logo=svelte&logoColor=white)](https://kit.svelte.dev/)
 [![License](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue)](LICENSE)
 
 [文档中心](docs/README.md) · [安装部署](docs/guides/install.md) · [Docker 部署](docs/guides/docker.md) · [Telegram 频道](https://t.me/Twilightpanel) · [Telegram 群组](https://t.me/TwilightPanelChat)
@@ -16,12 +16,15 @@
 
 ## 项目定位
 
-Twilight 是一个 Go 后端 + Next.js 前端的 Emby / Jellyfin 用户管理系统，适合需要注册审核、卡码续期、邀请关系、Telegram Bot 绑定、设备/IP 审查和后台运维能力的媒体服务器站点。
+Twilight 是一个 Go 后端 + SvelteKit SSR Web 管理前端的 Emby / Jellyfin 用户管理系统，适合需要注册审核、卡码续期、邀请关系、Telegram Bot 绑定、设备/IP 审查和后台运维能力的媒体服务器站点。当前生产 Web 入口为 `webui-v2/`；旧的 `webui/` Next.js 实现仅作为紧急回滚和迁移对照保留。
 
 当前主线架构：
 
 - 后端：Go，入口为 `cmd/twilight`，部署目标为 Linux + systemd，也支持 Docker。
-- 前端：Next.js App Router、TypeScript、Tailwind CSS、Radix/shadcn 风格组件。
+- Web 前端：SvelteKit SSR + adapter-node，首屏数据使用服务端 `load`，写操作使用 form action；浏览器不持有会话 Bearer Token，也不维护跨用户全局状态。
+- API 文档：默认页面为 `/api-docs`，公开 OpenAPI 规范为 `/api/v2/openapi.json`；管理员会话可在 SSR 页面查看完整路由元数据，V1 文档入口仅作兼容保留。
+- 旧版前端：`webui/` Next.js 仅作为整站紧急回滚和行为对照保留，不是默认生产入口。
+- 页面覆盖：认证、用户设置、仪表盘、公告、签到、邀请、工单、Bangumi、求片和全部管理员管理模块均已对应到 V2 路由；大列表按服务端分页/批次读取，健康检查、设备审查和活动日志按需手动读取。
 - 存储：唯一运行后端为 PostgreSQL；主要业务状态保存在 `twilight_state` 单行 JSONB，操作审计、运行日志、会话、播放记录、Telegram 花名册与轮询游标使用独立表以降低高频写放大和常驻内存。JSON 仅用于备份导出和旧数据导入。
 - 配置：统一读取 `config.toml`、`config.local.toml` 与 `TWILIGHT_*` 环境变量覆盖。
 
@@ -86,13 +89,14 @@ go run ./cmd/twilight api --host 0.0.0.0 --port 5000 --config config.toml --debu
 前端：
 
 ```bash
-cd webui
+cd webui-v2
 pnpm install --frozen-lockfile
 pnpm dev
-pnpm lint
-pnpm typecheck
+pnpm check
 pnpm build
 ```
+
+旧 `webui/` 仅在验证整站紧急回滚时单独构建，不是默认开发入口。CI 的默认前端检查针对 `webui-v2/`，旧版依赖只作为回滚维护项单独更新。
 
 更多约定见 [开发指南](docs/guides/development.md) 与 [模块化架构与解耦指南](docs/guides/modular-architecture.md)。
 
@@ -106,6 +110,9 @@ pnpm build
 | [开发指南](docs/guides/development.md) | 目录结构、开发命令、API 与安全规范、发布流程 |
 | [模块化架构与解耦指南](docs/guides/modular-architecture.md) | 分层边界、依赖方向、大文件拆分顺序与 review 清单 |
 | [安全加固](docs/guides/security.md) | 生产安全基线、敏感信息处理和上线检查清单 |
+| [V2 API 迁移指南](docs/v2/migration-guide.md) | V2 架构特性、端点映射、前端集成、数据库兼容性与迁移清单 |
+| [V2 架构设计](docs/v2/architecture.md) | 设计原则、分层职责、API 策略、数据库迁移路线 |
+| [V2 安全审计报告](docs/v2/security-audit-report.md) | 认证授权、CSRF、速率限制、输入验证、路径防护审计 |
 | [Go 后端架构与配置](docs/reference/backend.md) | 后端架构、配置加载、环境变量、Redis、迁移 |
 | [API 路由索引](docs/reference/api-index.md) | `/api/v1` 路由清单与鉴权级别 |
 | [后端 API 详参](docs/reference/backend-api.md) | REST API 规范、认证、错误码、示例 |
@@ -141,8 +148,10 @@ pnpm build
 ```bash
 gofmt -w ./cmd ./internal
 go test ./...
-cd webui && pnpm lint && pnpm typecheck && pnpm build
+cd webui-v2 && pnpm check && pnpm build
 ```
+
+旧版 `webui/` 只在修改或验收紧急回滚版本时单独检查。
 
 涉及架构、权限、配置、审计、缓存或外部副作用的改动，请先阅读 [模块化架构与解耦指南](docs/guides/modular-architecture.md)。
 
@@ -164,7 +173,7 @@ cd webui && pnpm lint && pnpm typecheck && pnpm build
 - [Jellyfin](https://jellyfin.org/)
 - [TMDB](https://www.themoviedb.org/)
 - [Bangumi 番组计划](https://bgm.tv/)
-- [Next.js](https://nextjs.org/)
+- [SvelteKit](https://kit.svelte.dev/)
 - [Sakura_embyboss](https://github.com/berry8838/Sakura_embyboss)
 - [Bangumi-syncer](https://github.com/SanaeMio/Bangumi-syncer)
 

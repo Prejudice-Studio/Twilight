@@ -108,26 +108,22 @@ Service 入参应是明确类型，不直接接收 `http.Request`。需要操作
 
 ## 前端分层
 
-前端依赖方向：
+V2 前端依赖方向：
 
 ```text
-app routes
-  -> components / feature components
-       -> hooks
-       -> store
-       -> lib/api.ts
-            -> lib/api-request.ts
+SSR route load / form action
+  -> webui-v2/src/lib/server/api.ts
+       -> Go API
+            -> internal/store / external clients
 ```
 
 | 层级 | 职责 |
 | ---- | ---- |
-| `webui/src/app` | 路由页面、布局、页面级数据加载和组合 |
-| `webui/src/components` | 可复用 UI 与业务面板；复杂后台页签可放 `components/admin/*` |
-| `webui/src/hooks` | 轮询、异步资源、区域刷新等复用行为 |
-| `webui/src/store` | 登录态、系统信息、跨页面轻状态；不保存第二套业务配置 |
-| `webui/src/lib/api.ts` | 唯一 API 客户端；处理路径、类型、资源 URL 归一化和短缓存 |
-| `webui/src/lib/api-request.ts` | credentials、timeout、envelope、`ApiError` |
-| `webui/src/locales` | i18n 文案；新增用户可见文案必须补 `basic`、`zh-Hant`、`en-US` |
+| `webui-v2/src/routes` | SSR 路由、布局、页面 `load` 与 form action |
+| `webui-v2/src/lib/server` | 服务端 API 代理、Cookie 转发、响应大小限制和脱敏边界 |
+| `webui-v2/src/lib` | V2 类型、导航、媒体和文案等共享纯模块 |
+| `webui-v2/src/app.html` | SSR 文档壳层与安全基础元数据 |
+| `webui` | 旧 Next.js 整站回滚版本，不参与默认运行时 |
 
 页面组件不应直接裸 `fetch`。如确有特殊场景，必须保持同样的 credentials、超时、错误处理和脱敏语义。
 
@@ -149,15 +145,15 @@ app routes
 | ---- | -------- |
 | 路由注册 | `internal/api/routes.go`，统一调用 `App.add` 维护方法/段数/业务域索引；禁止直接追加 `App.routes` |
 | 鉴权等级 | `AuthPublic`、`AuthUser`、`AuthAdmin`、`AuthAPIKey` |
-| 响应 envelope | `internal/api/response.go` 与 `webui/src/lib/api-request.ts` |
-| 错误码 | `internal/api/errcode.go` 与 `webui/src/lib/errcode.ts` |
+| 响应 envelope | `internal/api/response.go` 与 `webui-v2/src/lib/server/api.ts` |
+| 错误码 | `internal/api/errcode.go` 与 V2 页面通用错误文案 |
 | 审计日志 | `a.audit()`、`a.auditEntryIP()` |
 | 配置源 | `config.toml`、`config.local.toml`、`TWILIGHT_*` 覆盖 |
 | 配置 schema | `internal/api/config_admin.go` 与 `/system/admin/config/schema` |
 | 敏感信息脱敏 | 后端 redaction helper、schema `secret` 类型、前端禁止明文回显 |
 | 路径安全 | `internal/api/safepath.go` |
-| 前端 API | `webui/src/lib/api.ts` |
-| i18n | `webui/src/lib/i18n.tsx` 与 `webui/src/locales` |
+| 前端 API | `webui-v2/src/lib/server/api.ts` |
+| i18n | `webui-v2/src/lib/i18n.ts` |
 
 路由匹配在所有请求上执行。`App.add` 会按请求方法、路径段数和业务域构建启动期只读索引；`splitPath` 保留 `path.Clean` 对重复斜杠和点路径段的规范化，但正常的 `/api/...` 请求不得额外拼接路径前缀。新增路由只能通过集中注册入口进入这些索引。
 
@@ -188,7 +184,7 @@ app routes
 3. 先设计 store 状态和原子方法。
 4. 写 service/helper，避免直接依赖 HTTP。
 5. 写 handler 并注册路由。
-6. 同步 `webui/src/lib/api.ts`、`api-types.ts`、文案和页面。
+6. 同步 `webui-v2/src/lib/server/api.ts`、`types.ts`、文案和 SSR 页面；只有回滚版本变更才同步 `webui/`。
 7. 更新 API 文档、功能文档和本指南相关章节。
 8. 按风险运行 Go 测试、前端 lint/build。
 

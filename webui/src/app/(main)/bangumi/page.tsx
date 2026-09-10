@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { motion } from "framer-motion";
 import Link from "next/link";
 import { BookOpen, RefreshCw, Trash2, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Heart, Tv, ExternalLink, User as UserIcon, Star, ListChecks, Eye, EyeOff, BookmarkX } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -197,32 +196,32 @@ export default function BangumiPage() {
 
   if (error) {
     return (
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+      <div className="space-y-6 page-enter">
         <Card>
           <CardContent className="pt-6 flex flex-col items-center gap-3">
             <AlertCircle className="h-8 w-8 text-destructive" />
             <p className="text-sm text-muted-foreground">{String(error)}</p>
-            <Button variant="outline" onClick={() => { void reload(); }}>{t("common.retry")}</Button>
+            <Button variant="outline" onClick={() => { void reload().catch(() => undefined); }}>{t("common.retry")}</Button>
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
     );
   }
 
   if (isLoading) {
     return (
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+      <div className="space-y-6 page-enter">
         <Card>
           <CardContent className="pt-6 flex items-center justify-center">
             <Loader2 className="h-6 w-6 animate-spin text-primary" />
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
     );
   }
 
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+    <div className="space-y-6 page-enter">
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <BookOpen className="h-6 w-6" />
@@ -462,6 +461,6 @@ export default function BangumiPage() {
           </CardContent>
         </Card>
       )}
-    </motion.div>
+    </div>
   );
 }

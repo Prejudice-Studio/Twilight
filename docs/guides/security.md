@@ -71,6 +71,8 @@ allow_credential = true
   - 合理的 `session_cookie_samesite`（默认 `lax`，可选 `strict` / `none`）。
 - session cookie（默认名 `twilight_session`）为 `HttpOnly`。`session_cookie_domain` 单 origin 部署留空；双子域部署（webui 与 API 不同子域）需设为 `.example.com` 让两子域共享 cookie。
 - WebUI 登录态以后端 `/users/me` 响应为准；`/users/me` 与 `/auth/me` 属于会话身份数据，后端 JSON 响应默认 `Cache-Control: no-store, private`，前端也不会对这两个端点做短缓存或 in-flight 合流。登录、登出、刷新这类会话边界会清理前端请求缓存并废弃旧的用户信息请求，避免多账号快速切换时旧响应覆盖新会话。
+- 前端短响应缓存和在途 GET 合并只接受显式 `credentials: "omit"` 的公开 GET/HEAD。所有 Cookie 认证请求即使不是身份端点也不参与这两种共享机制，避免 HttpOnly 会话无法进入缓存键而造成账号切换后的私有数据复用。
+- WebUI API 响应在客户端按字节流读取并限制为 8 MiB；超过限制的响应会在 JSON 解析前被取消，避免异常或被劫持的响应造成浏览器内存膨胀。请求超时保护覆盖响应正文读取阶段，避免慢速响应占用连接并绕过客户端超时。该限制不替代后端各接口自己的分页和上传限制。
 - 会话 TTL 由 `session_cookie_ttl`（默认 7 天）控制；登出会清除 session cookie。
 - 服务端创建 session 时会把 token 当作不可重映射的 bearer 凭据：Redis 使用 NX 写入，PostgreSQL `twilight_sessions.token` 冲突时只重试新 token，不会把既有 token 覆盖到另一个 UID。
 
@@ -99,8 +101,8 @@ JSON 请求体由统一解码器限制为 256 KiB、最多 32 层嵌套且只能
 
 ### 4.1 运行时 API 文档边界
 
-- `GET /api/v1/openapi.json` 是公开接口，只输出 `AuthPublic` 路由，不能枚举后台管理或用户态路由。
-- `GET /api/v1/docs` 是公开可访问的轻量 API 控制台。页面会先尝试使用当前 Cookie 读取管理员完整路由；未登录或非管理员时自动降级到公开 OpenAPI。
+- `GET /api/v2/openapi.json` 是公开接口，只输出 `AuthPublic` 路由，不能枚举后台管理或用户态路由。旧 `/api/v1/openapi.json` 继续兼容。
+- 默认 `/api-docs` 是公开 SSR 页面：服务端读取公开 OpenAPI；只有当前会话是管理员时才读取受保护的 `/api/v2/admin/docs/routes`。旧 `/api/v1/docs` 仍是兼容控制台，但不再是默认前端。
 - 完整路由清单只来自受 `AuthAdmin` 保护的 `GET /api/v1/system/admin/apis`，不得把该清单内联到公开 HTML 或公开 OpenAPI。
 - API 控制台只提供本地测试便利。输入 API Key 后使用 `X-API-Key` 请求头发送，不会把密钥写入服务端文档、日志或页面静态内容；共享屏幕和截图时仍应手动清空敏感字段。
 
@@ -153,7 +155,7 @@ Emby 改密的当前 Web 密码证明与个人邮箱验证码证明只启用一�
 ## 8. 反向代理与暴露面
 
 - 用 Nginx / Caddy 暴露单一入口，仅开放 80/443；后端服务端口尽量仅监听内网或本机；限制管理接口访问来源（网段 / IP / WAF）。
-- 后端对所有响应附带安全响应头（`applySecurityHeaders`）：`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: strict-origin-when-cross-origin`、`Permissions-Policy`、`X-Permitted-Cross-Domain-Policies: none`、`Cross-Origin-Opener-Policy`、`Cross-Origin-Resource-Policy`，以及一条收紧的 `Content-Security-Policy`（`default-src 'none'`，后端只吐 JSON / 静态上传资源）。前端 Next.js 的 CSP 由 webui 自身负责。
+- 后端对所有响应附带安全响应头（`applySecurityHeaders`）：`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: strict-origin-when-cross-origin`、`Permissions-Policy`、`X-Permitted-Cross-Domain-Policies: none`、`Cross-Origin-Opener-Policy`、`Cross-Origin-Resource-Policy`，以及一条收紧的 `Content-Security-Policy`（`default-src 'none'`，后端只吐 JSON / 静态上传资源）。默认 WebUI 使用 SvelteKit SSR；Nginx 负责同源反代和缓存边界，SSR HTML 与版本文件保持 `no-store`。
 - 反向代理若覆盖这些头，应保持同等或更严格策略。
 - 信任代理头需谨慎：仅当 `API.trust_proxy_headers = true` **且** 直接上游落在 `API.trusted_proxy_cidrs` 列表内时，`clientIP` 才消费 `CF-Connecting-IP` / `X-Real-IP` / `X-Forwarded-For`；否则一律用 TCP 对端地址（fail-closed）。`trusted_proxy_cidrs` 为空时即便 `trust_proxy_headers = true` 也不会消费任何代理头，启动期会打 `Error` 提示。`X-Forwarded-For` 按从右向左逐跳验证，避免客户端伪造最左端 IP 绕过 IP 限流 / 黑名单。
 
@@ -168,7 +170,7 @@ Emby 改密的当前 Web 密码证明与个人邮箱验证码证明只启用一�
   - 背景图片只接受本系统上传的 `/api/v1/users/assets/background/{filename}` 资源，且文件名必须匹配白名单；不保存任意外部 URL。
 - 前端侧也会丢弃不安全的 URL scheme（`javascript:`、非图片 `data:`、跨域绝对地址）。如允许外部图片，请优先 HTTPS，避免混合内容与第三方 Referer 泄漏。
 - 新增定时任务 `cleanup_unused_uploads`：清理未被任何用户头像 / 背景 / 服务器图标引用的上传文件，对新文件保留 24 小时宽限期。
-- Next.js 已关闭 `X-Powered-By` 指纹头；标准 Node / 1Panel 部署应禁用 Next 图片优化器，避免服务端代拉任意远程图片 URL。若通过 CDN / 反代暴露前端，请同步隐藏上游技术栈指纹。
+- 默认 SvelteKit adapter-node 不启用远程图片代理；图片 URL 仍必须经过后端白名单和受保护资源规则。若通过 CDN / 反代暴露前端，请同步隐藏上游技术栈指纹。
 - 服务器图标不再以本地路径形式作为公开配置面暴露：管理员通过上传接口写入受控资源，公开信息端点固定返回内置图标。
 
 ## 10. 日志与审计
@@ -183,7 +185,7 @@ Emby 改密的当前 Web 密码证明与个人邮箱验证码证明只启用一�
 
 - 后台「安全中心」集中展示操作审计、运行日志、违规风控入口；设备/IP 审查入口指向「Emby 管理 → 设备 / IP 审查」页签。安全中心内嵌 `[Security]`、`[RateLimit]`、`[AuditLog]`、`[DeviceLimit]` 的结构化配置编辑。
 - 配置管理中的安全相关配置段保留兼容入口，但默认折叠并提示跳转安全中心；所有保存仍写入同一个 `config.toml`，不创建第二套配置源。
-- 所有新增管理端接口均使用 `AuthAdmin`，状态变更与沙箱执行写入审计日志。Telegram Bot 与群组 inline 管理面板产生的写操作使用 `source=telegram` 记录操作者、目标 UID 与动作详情；审计日志自身的删除、清空、裁剪接口不会在清理后向同一张审计日志表追加新记录，避免管理员无法真正清空日志。
+- 所有新增管理端接口均使用 `AuthAdmin`，状态变更与沙箱执行写入审计日志。Telegram Bot 与群组 inline 管理面板产生的写操作使用 `source=telegram` 记录操作者、目标 UID 与动作详情；审计日志自身的删除、清空、裁剪接口不会在清理后向同一张审计日志表追加新记录，避免管理员无法真正清空日志。V2 审计页面使用 `/api/v2/admin/audit-logs`，V1 路径仅保留兼容入口。
 - 操作审计保存在独立的 `twilight_audit_logs` 表，写入、检索和保留策略不再重写整份 `twilight_state`。筛选值全部使用 SQL 参数，排序字段只能从后端白名单选择，搜索中的 `%`、`_` 与反斜杠按字面量转义。历史快照里的 `audit_logs` 会在启动时幂等迁移；数据库备份仍包含完整审计历史。
 
 ## 11. 最小权限原则
@@ -260,6 +262,7 @@ Git 自动更新（`internal/api/system_update.go`）：
 - 仅允许完整的 HTTPS 仓库 URL；拒绝非 https scheme、空路径、URL 内携带凭据（userinfo）、以及带 query / fragment 的 URL。分支名经白名单正则校验。
 - 使用 `git pull --ff-only`，不做 rebase / merge / reset。
 - 先执行 dry-run 预检（报告 worktree 是否 dirty）。正式更新时若 worktree 有本地改动，会先 `git stash push --include-untracked` 暂存，拉取后再 `git stash pop` 恢复；恢复出现冲突时会在响应里报告 `stash_conflicts`。
+- 更新响应只返回必要的仓库状态和脱敏诊断，不返回服务器本机项目绝对路径，避免管理员浏览器和前端日志暴露部署目录。
 - 自动更新命令输出与 stderr 经脱敏后才记日志，避免泄漏 `https://user:PAT@host` 形式的凭据。
 
 > 纠正：旧文档称「自动更新默认拒绝 dirty worktree」。当前实现并不拒绝，而是**先 stash 本地改动、拉取、再尝试恢复**。需要长期保留本地补丁时仍建议先提交或合并，避免依赖自动 stash/restore。

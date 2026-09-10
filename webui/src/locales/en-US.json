@@ -603,6 +603,8 @@
     "libraryStatsUnavailable": "Library stats are disabled or unavailable.",
     "nowPlaying": "Now Watching",
     "nowPlayingCount": "{count} people watching now",
+    "unknownMedia": "Unknown media",
+    "unknownViewer": "Unknown user",
     "serverNetworkStatus": "On-demand line checks; no automatic probes",
     "retest": "Test lines",
     "notApplicable": "Not applicable"
@@ -894,7 +896,8 @@
     "notifyTelegram": "Telegram Notification",
     "notifyTelegramDesc": "Receive a Telegram notification when the admin replies to or processes this ticket",
     "notifyOn": "Notifications on",
-    "notifyOff": "Notifications off"
+    "notifyOff": "Notifications off",
+    "pageSummary": "Page {page} of {total}, {count} total"
   },
   "adminTickets": {
     "title": "Ticket Management",

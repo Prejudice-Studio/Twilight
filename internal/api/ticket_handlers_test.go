@@ -89,6 +89,87 @@ func createTicket(t *testing.T, app *App, title, content string, cookies []*http
 	return resp.Data.ID
 }
 
+func TestMyTicketListPaginatesAndDetailEnforcesOwnership(t *testing.T) {
+	app := newTestApp(t)
+	enableTicketSystem(t, app, nil)
+	owner := registerAndLogin(t, app, "ticket-owner", "Owner123456")
+	other := registerAndLogin(t, app, "ticket-other", "Other123456")
+	firstID := createTicket(t, app, "first ticket", "private first body", owner)
+	secondID := createTicket(t, app, "second ticket", "private second body", owner)
+
+	if _, err := app.store().AddTicketReply(secondID, store.TicketReply{
+		UID: 1, Username: "ticket-owner", Role: store.RoleNormal, Content: "private reply", CreatedAt: time.Now().Unix(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.store().AddTicketAttachment(secondID, store.TicketAttachment{
+		Filename: "test.png", ContentType: "image/png", Size: 12, UploadedUID: 1, CreatedAt: time.Now().Unix(),
+	}, store.RoleNormal); err != nil {
+		t.Fatal(err)
+	}
+
+	list := doJSON(app, http.MethodGet, "/api/v1/tickets?page=1&per_page=1", "", owner)
+	if list.Code != http.StatusOK {
+		t.Fatalf("ticket list status=%d body=%s", list.Code, list.Body.String())
+	}
+	var listPayload struct {
+		Data struct {
+			Tickets []map[string]json.RawMessage `json:"tickets"`
+			Total   int                       `json:"total"`
+			Page    int                       `json:"page"`
+			PerPage int                       `json:"per_page"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &listPayload); err != nil {
+		t.Fatal(err)
+	}
+	if listPayload.Data.Total != 2 || listPayload.Data.Page != 1 || listPayload.Data.PerPage != 1 || len(listPayload.Data.Tickets) != 1 {
+		t.Fatalf("unexpected paged ticket list: %#v", listPayload.Data)
+	}
+	item := listPayload.Data.Tickets[0]
+	if _, exists := item["content"]; exists {
+		t.Fatalf("ticket list must omit content: %s", list.Body.String())
+	}
+	if _, exists := item["replies"]; exists {
+		t.Fatalf("ticket list must omit replies: %s", list.Body.String())
+	}
+	if _, exists := item["attachments"]; exists {
+		t.Fatalf("ticket list must omit attachments: %s", list.Body.String())
+	}
+	if got := string(item["id"]); got != strconv.FormatInt(secondID, 10) {
+		t.Fatalf("latest ticket should be returned first, got id=%s want=%d", got, secondID)
+	}
+	if string(item["reply_count"]) != "1" || string(item["attachment_count"]) != "1" {
+		t.Fatalf("ticket list should include compact counts: %s", list.Body.String())
+	}
+
+	detail := doJSON(app, http.MethodGet, "/api/v1/tickets/"+strconv.FormatInt(secondID, 10), "", owner)
+	if detail.Code != http.StatusOK {
+		t.Fatalf("owner ticket detail status=%d body=%s", detail.Code, detail.Body.String())
+	}
+	var detailPayload struct {
+		Data struct {
+			Ticket struct {
+				ID          int64             `json:"id"`
+				Content     string            `json:"content"`
+				Replies     []json.RawMessage `json:"replies"`
+				Attachments []json.RawMessage `json:"attachments"`
+			} `json:"ticket"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(detail.Body.Bytes(), &detailPayload); err != nil {
+		t.Fatal(err)
+	}
+	if detailPayload.Data.Ticket.ID != secondID || detailPayload.Data.Ticket.Content != "private second body" || len(detailPayload.Data.Ticket.Replies) != 1 || len(detailPayload.Data.Ticket.Attachments) != 1 {
+		t.Fatalf("unexpected ticket detail: %#v", detailPayload.Data.Ticket)
+	}
+
+	forbidden := doJSON(app, http.MethodGet, "/api/v1/tickets/"+strconv.FormatInt(firstID, 10), "", other)
+	if forbidden.Code != http.StatusNotFound || !bytes.Contains(forbidden.Body.Bytes(), []byte(ErrTicketNotFound)) {
+		t.Fatalf("other user must not access ticket detail, status=%d body=%s", forbidden.Code, forbidden.Body.String())
+	}
+}
+
 // TestTicketUserOpenLimitEnforced 验证「每人同时处理中/待处理工单上限」服务端硬门 (子需求 A)。
 func TestTicketUserOpenLimitEnforced(t *testing.T) {
 	app := newTestApp(t)

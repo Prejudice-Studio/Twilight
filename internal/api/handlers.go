@@ -31,7 +31,7 @@ var telegramPublicUsernamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{4,
 const generatedPasswordHexLen = 32
 
 func (a *App) handleRoot(w http.ResponseWriter, r *http.Request, _ Params) {
-	ok(w, "Twilight API", map[string]any{"name": a.cfg().AppName, "version": a.cfg().Version, "docs": "/api/v1/docs"})
+	ok(w, "Twilight API", map[string]any{"name": a.cfg().AppName, "version": a.cfg().Version, "docs": "/api-docs", "openapi": "/api/v2/openapi.json"})
 }
 
 func (a *App) handleOpenAPI(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -2038,13 +2038,17 @@ func (a *App) handleHealthEmby(w http.ResponseWriter, r *http.Request, _ Params)
 }
 
 func (a *App) handleSystemStats(w http.ResponseWriter, r *http.Request, _ Params) {
+	ok(w, "OK", a.systemStatsData())
+}
+
+func (a *App) systemStatsData() map[string]any {
 	totalUsers, activeUsers := a.store().UserCounts()
 	totalRegcodes, activeRegcodes := a.store().RegCodeCounts()
 	usage := 0
 	if a.cfg().UserLimit > 0 {
 		usage = int(float64(totalUsers) / float64(a.cfg().UserLimit) * 100)
 	}
-	ok(w, "OK", map[string]any{
+	return map[string]any{
 		"timestamp":     time.Now().Unix(),
 		"cpu_count":     nil,
 		"users":         map[string]any{"active": activeUsers, "total": totalUsers, "limit": zeroNil(int64(a.cfg().UserLimit)), "usage_percent": usage},
@@ -2058,7 +2062,7 @@ func (a *App) handleSystemStats(w http.ResponseWriter, r *http.Request, _ Params
 		},
 		"routes": len(a.routes),
 		"uptime": int64(time.Since(runtimeStartedAt).Seconds()),
-	})
+	}
 }
 
 func (a *App) databaseHealth(parent context.Context) map[string]any {
@@ -2066,6 +2070,7 @@ func (a *App) databaseHealth(parent context.Context) map[string]any {
 	if st == nil {
 		return map[string]any{
 			"ok":                false,
+			"status":            "unavailable",
 			"backend":           "none",
 			"configured_driver": strings.ToLower(a.cfg().DatabaseDriver),
 			"error":             "store is not initialized",
@@ -2073,30 +2078,41 @@ func (a *App) databaseHealth(parent context.Context) map[string]any {
 	}
 	backend := st.Backend()
 	userCount := st.UserCount()
+	storageMismatch := a.runtimeDatabaseMismatch()
 	result := map[string]any{
-		"ok":                true,
+		"ok":                !storageMismatch,
+		"status":            "healthy",
 		"backend":           backend,
 		"configured_driver": strings.ToLower(a.cfg().DatabaseDriver),
-		"storage_mismatch":  a.runtimeDatabaseMismatch(),
+		"storage_mismatch":  storageMismatch,
 		"storage_warning":   a.databaseMismatchWarning(),
 		"state_read_ok":     true,
 		"user_count":        userCount,
+	}
+	if storageMismatch {
+		result["status"] = "configuration_mismatch"
 	}
 	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
 	defer cancel()
 	if db := st.DB(); db != nil || backend == store.BackendPostgres {
 		if db == nil {
 			result["ok"] = false
+			result["status"] = "unavailable"
 			result["error"] = "postgres backend has no active connection"
 			return result
 		}
 		if err := db.PingContext(ctx); err != nil {
+			result["ok"] = false
+			result["status"] = "unhealthy"
 			result["ping_ok"] = false
-			result["ping_error"] = truncateString(redactSensitiveText(err.Error()), 180)
 			result["warning"] = "database ping failed; active store remains readable"
 			return result
 		}
 		result["ping_ok"] = true
+		if storageMismatch {
+			result["ok"] = false
+			result["status"] = "configuration_mismatch"
+		}
 		stats := db.Stats()
 		result["open_connections"] = stats.OpenConnections
 		result["in_use"] = stats.InUse
@@ -2105,6 +2121,7 @@ func (a *App) databaseHealth(parent context.Context) map[string]any {
 	}
 	if _, err := st.Snapshot(); err != nil {
 		result["ok"] = false
+		result["status"] = "unhealthy"
 		result["error"] = "state snapshot failed"
 	}
 	return result
@@ -2118,7 +2135,6 @@ func (a *App) embyStatusSnapshot(parent context.Context, includeSessions bool) m
 	result := map[string]any{
 		"online":          false,
 		"configured":      a.embyConfigured(),
-		"server":          a.cfg().EmbyURL,
 		"active_sessions": 0,
 		"total_sessions":  0,
 	}
@@ -2132,7 +2148,6 @@ func (a *App) embyStatusSnapshot(parent context.Context, includeSessions bool) m
 	if err != nil {
 		result["status"] = "unreachable"
 		result["error"] = "Emby status request failed"
-		result["error_detail"] = truncateString(redactSensitiveText(err.Error()), 180)
 		return result
 	}
 	if info == nil {
@@ -2152,7 +2167,6 @@ func (a *App) embyStatusSnapshot(parent context.Context, includeSessions bool) m
 			result["total_sessions"] = len(sessions)
 		} else {
 			result["sessions_error"] = "Emby sessions request failed"
-			result["sessions_error_detail"] = truncateString(redactSensitiveText(sessionErr.Error()), 180)
 		}
 	}
 	return result
@@ -2267,20 +2281,20 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request, _ Params) {
 	results := []map[string]any{}
 	if !a.cfg().TelegramMode {
 		results = append(results, map[string]any{"target": "配置", "success": false, "error": "telegram_mode 未启用"})
-		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatus()})
+		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatusSummary()})
 		return
 	}
 	if strings.TrimSpace(a.cfg().TelegramBotToken) == "" {
 		results = append(results, map[string]any{"target": "Bot Token", "success": false, "error": "未配置 Telegram Bot Token"})
-		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatus()})
+		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatusSummary()})
 		return
 	}
 	testCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	me, err := a.telegramGetMe(testCtx)
 	if err != nil {
-		results = append(results, map[string]any{"target": "Bot getMe", "success": false, "error": err.Error()})
-		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatus()})
+		results = append(results, map[string]any{"target": "Bot getMe", "success": false, "error": "Telegram 连接测试失败，请检查 Bot 配置和网络"})
+		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatusSummary()})
 		return
 	}
 	botID := me.ID
@@ -2290,13 +2304,13 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request, _ Params) {
 		chat, err := a.telegramGetChat(testCtx, chatID)
 		item := map[string]any{"target": " 群组 " + chatID, "success": err == nil}
 		if err != nil {
-			item["error"] = err.Error()
+			item["error"] = "Telegram 群组检测失败，请检查群组 ID 和 Bot 权限"
 		} else {
 			item["title"] = firstNonEmpty(chat.Title, chat.Username)
 			if botID != 0 {
 				if member, memberErr := a.telegramGetChatMember(testCtx, chatID, botID); memberErr != nil {
 					item["success"] = false
-					item["error"] = memberErr.Error()
+					item["error"] = "Telegram Bot 群组权限检测失败，请检查 Bot 是否仍在群组中"
 				} else {
 					item["bot_status"] = member.Status
 				}
@@ -2308,13 +2322,13 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request, _ Params) {
 		chat, err := a.telegramGetChat(testCtx, chatID)
 		item := map[string]any{"target": "频道 " + chatID, "success": err == nil}
 		if err != nil {
-			item["error"] = err.Error()
+			item["error"] = "Telegram 频道检测失败，请检查频道 ID 和 Bot 权限"
 		} else {
 			item["title"] = firstNonEmpty(chat.Title, chat.Username)
 		}
 		results = append(results, item)
 	}
-	ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatus()})
+	ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatusSummary()})
 }
 
 func (a *App) handleEmbyStatus(w http.ResponseWriter, r *http.Request, _ Params) {

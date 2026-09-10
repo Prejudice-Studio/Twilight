@@ -15,11 +15,13 @@
 | 同步日志与收藏缓存存储（`BangumiSyncLog` / `BangumiCollectionCache` / `BangumiSubjectCache`） | `internal/store/store.go` |
 | 配置项解析 | `internal/config/config.go` |
 | 用户级 `bgm_mode` / `bgm_token` 处理 | `internal/api/handlers.go` |
-| 用户端 Bangumi 仪表盘页面 | `webui/src/app/(main)/bangumi/page.tsx` |
-| 用户端 Bangumi 收藏分页页面 | `webui/src/app/(main)/bangumi/collections/[type]/page.tsx` |
-| 管理员 Bangumi 管理页面 | `webui/src/app/(main)/admin/bangumi/page.tsx` |
-| 前端 API 客户端 | `webui/src/lib/api.ts` |
-| 前端类型定义 | `webui/src/lib/api-types.ts` |
+| V2 用户端摘要接口 | `internal/api/bangumi_v2.go` (`GET /api/v2/bangumi/summary`) |
+| 用户端 Bangumi 仪表盘页面 | `webui-v2/src/routes/(app)/bangumi/+page.svelte` |
+| 用户端 Bangumi 收藏分页页面 | `webui-v2/src/routes/(app)/bangumi/collections/[type]/+page.svelte` |
+| V2 用户端 Bangumi 页面 | `webui-v2/src/routes/(app)/bangumi/` |
+| 管理员 Bangumi 管理页面 | `webui-v2/src/routes/(app)/admin/bangumi/`（V1 回退：`webui/src/app/(main)/admin/bangumi/page.tsx`） |
+| V2 SSR API 客户端 | `webui-v2/src/lib/server/api.ts` |
+| V2 类型定义 | `webui-v2/src/lib/types.ts` |
 
 ## 功能总览
 
@@ -400,6 +402,14 @@ Webhook 期望接收 JSON 通知。后端从负载中按以下规则解析：
 
 ## 前端页面
 
+### V2 SSR 用户端
+
+V2 是默认生产 WebUI；旧 V1 页面仅作为整站紧急回滚入口保留。
+
+V2 SvelteKit 页面位于 `/bangumi` 和 `/bangumi/collections/[type]`。仪表盘首屏只请求一次 `/api/v2/bangumi/summary`，由后端返回本地同步状态、公开 Bangumi 账号字段、五个收藏分类的总数和每类最多 8 条预览。收藏页按分类服务端分页，并通过普通 GET 主动刷新缓存；同步、清理历史、Token 和开关修改均由 SvelteKit form action 转发到既有 Go handler。
+
+V2 响应不会包含 Bangumi Token。收藏分类在后端独立读取，单类失败只标记 `collections_partial`，不影响其他分类和本地同步状态。页面不轮询，不把完整收藏列表复制到浏览器；V1 页面在迁移完成前继续保留。
+
 ### 用户端：Bangumi 仪表盘
 
 路径：`/bangumi`
@@ -420,7 +430,9 @@ Webhook 期望接收 JSON 通知。后端从负载中按以下规则解析：
 
 路径：`/admin/bangumi`
 
-管理员用户列表按页查询（默认每页 20 条，后端最多接受 100 条），搜索和分页不会把全部用户复制到浏览器。用户播放记录与同步日志只在打开对应弹窗时读取；这些读取支持取消，切换用户或关闭弹窗会终止旧请求，避免慢响应覆盖当前用户。后台页面的长内容使用受限 `dvh` Firefox 滚动区域，移动端用户操作会自动换行。
+管理员用户列表按页查询（默认每页 20 条，后端最多接受 100 条），搜索和分页不会把全部用户复制到浏览器。V2 使用 SSR URL 状态和 `/api/v2/admin/bangumi/users` 资源，播放记录与同步日志只在打开指定 UID 的详情时通过 `/records`、`/logs` 读取；后台页面的长内容使用受限 `dvh` Firefox 滚动区域，移动端用户操作会自动换行。V1 仍保留可回退实现，直到生产入口完成切换。
+
+管理员用户列表的播放记录数和最近 100 条同步日志成功数由 Store 批量读取：PostgreSQL 使用一次 `GROUP BY` 统计，兼容回退路径只扫描一次有限的本地记录。页面分页、搜索和状态字段的语义不变，不会为当前页每个用户重复查询播放记录或同步日志。
 
 功能：
 
@@ -460,7 +472,12 @@ Webhook 期望接收 JSON 通知。后端从负载中按以下规则解析：
 
 | 方法 | 路径 | 鉴权 | 说明 |
 | --- | --- | --- | --- |
-| `GET` | `/api/v1/admin/bangumi/users` | `AuthAdmin` | 列出所有用户的 Bangumi 同步状态 |
+| `GET` | `/api/v2/admin/bangumi/users` | `AuthAdmin` | V2 分页列出用户的 Bangumi 同步状态 |
+| `GET` | `/api/v2/admin/bangumi/users/:uid/records` | `AuthAdmin` | V2 按 UID 查看有界播放记录 |
+| `POST` | `/api/v2/admin/bangumi/users/:uid/sync` | `AuthAdmin` | V2 为指定用户触发同步 |
+| `GET` | `/api/v2/admin/bangumi/users/:uid/logs` | `AuthAdmin` | V2 按 UID 查看有界同步日志 |
+| `DELETE` | `/api/v2/admin/bangumi/users/:uid/logs` | `AuthAdmin` | V2 清除指定用户同步日志 |
+| `GET` | `/api/v1/admin/bangumi/users` | `AuthAdmin` | V1 兼容：列出所有用户的 Bangumi 同步状态 |
 | `GET` | `/api/v1/admin/bangumi/records/:uid` | `AuthAdmin` | 查看某用户的播放记录（`?limit=`） |
 | `POST` | `/api/v1/admin/bangumi/sync/:uid` | `AuthAdmin` | 为某用户触发同步 |
 | `GET` | `/api/v1/admin/bangumi/logs/:uid` | `AuthAdmin` | 查看某用户的同步日志（`?limit=`） |

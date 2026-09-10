@@ -110,6 +110,22 @@ export interface SystemHealth {
   time: number;
 }
 
+export interface V2Health {
+  api_version: "v2";
+  status: "ok";
+  server_version: string;
+  timestamp: number;
+}
+
+export interface V2Capabilities {
+  api_version: "v2";
+  compatible_api_versions: string[];
+  server_version: string;
+  features: Record<string, boolean>;
+  limits: Record<string, number>;
+  links: Record<string, string>;
+}
+
 export interface SystemHealthDetail {
   ok?: boolean;
   online?: boolean;
@@ -1517,6 +1533,22 @@ export interface Ticket {
   attachments?: TicketAttachment[];
   reply_count?: number;
   attachment_count?: number;
+  notify_telegram: boolean;
+  created_at: number;
+  updated_at: number;
+  resolved_at?: number;
+  closed_at?: number;
+}
+
+/** Current-user ticket list item. Conversation data is fetched separately. */
+export interface UserTicketListItem {
+  id: number;
+  title: string;
+  type: string;
+  status: "open" | "in_progress" | "resolved" | "closed";
+  priority: "low" | "medium" | "high" | "urgent";
+  reply_count: number;
+  attachment_count: number;
   notify_telegram: boolean;
   created_at: number;
   updated_at: number;

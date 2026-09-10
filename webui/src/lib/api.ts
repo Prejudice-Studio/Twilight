@@ -89,6 +89,7 @@ import type {
   TelegramCommandCatalog,
   Ticket,
   TicketAttachment,
+  UserTicketListItem,
   TelegramRebindRequest,
   TelegramStatus,
   User,
@@ -96,6 +97,8 @@ import type {
   UserSettings,
   UserUpdateData,
   ViolationLog,
+  V2Capabilities,
+  V2Health,
 } from "./api-types";
 import { confirmPhrases } from "./confirm-phrases";
 import { API_BASE, ApiError, apiRequest, apiRequestForm, type ApiRequestExtraOptions } from "./api-request";
@@ -218,6 +221,21 @@ class ApiClient {
     return apiRequestForm<T>(endpoint, formData, method, extra);
   }
 
+  // V2 基础协议入口。版本显式传入请求层，避免页面自行拼接 /api/v2；
+  // 尚未迁移的 client 方法继续默认使用 V1。
+  async v2Health(signal?: AbortSignal) {
+    return this.request<V2Health>("/system/health", {
+      cache: "no-store",
+      signal,
+    }, { apiVersion: "v2", cacheRead: false, dedupe: false });
+  }
+
+  async v2Capabilities(signal?: AbortSignal) {
+    return this.request<V2Capabilities>("/system/capabilities", {
+      signal,
+    }, { apiVersion: "v2", cacheRead: false });
+  }
+
   // Auth
   async login(username: string, password: string, signal?: AbortSignal) {
     const isEmail = username.includes("@");
@@ -254,7 +272,7 @@ class ApiClient {
 
   // System
   async getSystemInfo(signal?: AbortSignal) {
-    const res = await this.request<SystemInfo>("/system/info", { signal });
+    const res = await this.request<SystemInfo>("/system/info", { signal, credentials: "omit" });
     if (res.success && res.data?.icon) {
       res.data.icon = this.toAbsoluteAssetUrl(res.data.icon) || "";
     }
@@ -262,7 +280,7 @@ class ApiClient {
   }
 
   async getSetupStatus() {
-    return this.request<SetupStatus>("/setup/status");
+    return this.request<SetupStatus>("/setup/status", { credentials: "omit" });
   }
 
   async completeSetup(payload: SetupPayload) {
@@ -279,7 +297,7 @@ class ApiClient {
   }
 
   async getSystemHealth() {
-    return this.request<SystemHealth>("/system/health");
+    return this.request<SystemHealth>("/system/health", { credentials: "omit" });
   }
 
   async getSystemHealthApi(signal?: AbortSignal) {
@@ -493,7 +511,7 @@ class ApiClient {
   }
 
   async getRegisterAvailability(signal?: AbortSignal) {
-    return this.request<RegisterAvailability>("/users/check-available", { signal });
+    return this.request<RegisterAvailability>("/users/check-available", { signal, credentials: "omit" });
   }
 
   async getEmbyRegisterStatus(requestId: string, statusToken: string) {
@@ -1481,7 +1499,6 @@ class ApiClient {
     allow_dirty?: boolean;
   }) {
     return this.request<{
-      project_root: string;
       repo_url: string;
       branch: string;
       dry_run?: boolean;
@@ -1627,8 +1644,17 @@ class ApiClient {
     );
   }
 
+  /** 管理员仪表盘观看详情；普通用户只允许读取 /system/emby-viewers。 */
+  async getAdminEmbyNowPlaying(signal?: AbortSignal) {
+    return this.request<EmbyNowPlaying>("/admin/emby/now-playing", {
+      signal,
+      cache: "no-store",
+    }, { cacheRead: false, dedupe: false });
+  }
+
+  /** @deprecated 使用 getAdminEmbyNowPlaying，避免误调用未授权的旧路径。 */
   async getEmbyNowPlaying(signal?: AbortSignal) {
-    return this.request<EmbyNowPlaying>("/emby/now-playing", { signal });
+    return this.getAdminEmbyNowPlaying(signal);
   }
 
   // 设备/IP 审查页的快速处置：按 Emby 用户 ID 单独启停 Emby（已关联本地用户时后端会
@@ -2482,7 +2508,8 @@ class ApiClient {
   /** 公开列表：登录页 / 主页等场景可直接调用。 */
   async getActiveAnnouncements(limit: number = 50) {
     return this.request<{ announcements: Announcement[]; total: number }>(
-      `/announcements?limit=${limit}`
+      `/announcements?limit=${limit}`,
+      { credentials: "omit" },
     );
   }
 
@@ -2770,8 +2797,24 @@ class ApiClient {
 
   // ==================== Tickets ====================
 
-  async getMyTickets(signal?: AbortSignal) {
-    return this.request<{ tickets: Ticket[]; total: number; ticket_types: string[] }>("/tickets", { cache: "no-store", signal }, { cacheRead: false, dedupe: false });
+  async getMyTickets(params: { page?: number; per_page?: number } = {}, signal?: AbortSignal) {
+    const query = new URLSearchParams();
+    if (params.page) query.set("page", String(params.page));
+    if (params.per_page) query.set("per_page", String(params.per_page));
+    const suffix = query.size ? `?${query.toString()}` : "";
+    return this.request<{ tickets: UserTicketListItem[]; total: number; page: number; per_page: number; ticket_types: string[] }>(
+      `/tickets${suffix}`,
+      { cache: "no-store", signal },
+      { cacheRead: false, dedupe: false },
+    );
+  }
+
+  async getMyTicket(id: number, signal?: AbortSignal) {
+    return this.request<{ ticket: Ticket; ticket_types: string[] }>(
+      `/tickets/${id}`,
+      { cache: "no-store", signal },
+      { cacheRead: false, dedupe: false },
+    );
   }
 
   async createTicket(payload: { title: string; content: string; type?: string; priority?: string; notify_telegram?: boolean }) {

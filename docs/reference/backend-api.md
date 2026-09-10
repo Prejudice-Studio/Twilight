@@ -9,10 +9,46 @@
 ## 1. 文档说明
 
 - Base URL：`http://localhost:5000/api/v1`
-- OpenAPI 文档：`GET /api/v1/openapi.json`
-- API 控制台：`http://localhost:5000/api/v1/docs`
+- OpenAPI 文档：`GET /api/v2/openapi.json`（V1 `/api/v1/openapi.json` 继续兼容）
+- 默认 API 文档页：`/api-docs`，由 `webui-v2` 使用 SvelteKit SSR 渲染；旧后端控制台 `http://localhost:5000/api/v1/docs` 仅作为兼容入口保留。
 - 响应统一为 JSON 信封（envelope），结构见下文 [2.4 响应结构](#24-响应结构)。
 - 变更接口时需同步更新 [API 路由索引](../reference/api-index.md)；若接口有请求体、响应体、限流或安全注意事项，还需更新本文对应章节。
+
+V2 基础协议目前提供 `GET /api/v2/system/health`、`GET /api/v2/system/capabilities`、公开安全系统摘要 `GET /api/v2/system/info`、管理员独立健康资源、管理员统计、V2 认证/注册资源、受保护的 `GET /api/v2/dashboard/summary`、`GET /api/v2/announcements`、`GET /api/v2/signin/summary`、`GET /api/v2/invite/summary` 和 `GET /api/v2/bangumi/summary`。认证页通过 V2 资源读取能力并提交登录、注册、Telegram 注册绑定码和找回密码动作；响应按公开或私有会话边界使用 `no-store`，不会把 Cookie、密码、Token 或临时凭据写入浏览器状态。它们沿用统一 JSON envelope；仪表盘摘要一次返回当前用户、公开能力和在线人数状态。公告资源在一次私有 `no-store` 读取中返回可见公告和当前账号未确认的强制阅读公告，`POST /api/v2/announcements/ack` 只确认当前账号去重后的正整数 ID。Emby 读取失败时只将 `data.viewers.available` 设为 `false`，本地用户和能力数据仍然返回，不把故障伪装为零人在线。签到摘要一次返回 `summary`、`config` 和最近 30 条 `history`；签到、续期和自动续期开关也已经使用 V2 资源，后端仍在共享 handler 与 Store 中执行功能开关、Emby 资格、严格布尔解析、审计以及原子扣分。邀请摘要一次返回 `config` 与会话作用域的 `invite` 投影；Bangumi 摘要一次返回本地同步状态、公开账号资料、五类收藏的有限预览和最近动态，Bangumi 单类读取失败时保留其他成功结果并标记 `collections_partial`。Bangumi Token 永不进入 V2 响应。管理员服务器状态页 `/(app)/admin/status` 使用服务端 `load` 并行读取 `/api/v2/admin/health/api`、`/api/v2/admin/health/database`、`/api/v2/admin/health/emby`、`/api/v2/system/info` 和 `/api/v2/admin/stats`；三个健康接口保持独立，每个只负责一个探针，统计不包含播放统计。上述接口不改变 `/api/v1` 写入状态机，未迁移调用继续使用 `/api/v1`。
+
+管理员状态资源均要求 `AuthAdmin`。`/api/v2/admin/health/api` 只检查 API 进程，`/api/v2/admin/health/database` 只检查数据库状态，`/api/v2/admin/health/emby` 从后端发起 Emby 服务探测；三者都返回 `private, no-store`，单项失败不影响其它响应。`/api/v2/admin/stats` 只返回有限的用户、注册码、运行时和 Redis 回退摘要，也使用 `private, no-store`。公共 `/api/v2/system/info` 只返回站点名称、图标、版本、公开能力、受限额度和初始化状态，不返回 Emby/Telegram/数据库配置值。
+
+### V2 管理员配置资源
+
+配置管理页面使用 `/api/v2/admin/config/schema`、`/toml` 和 `/backups` 资源读取结构化配置、脱敏 TOML 与配置备份。V2 响应不返回服务器文件系统路径，secret 字段仍使用服务端脱敏哨兵；保存、创建/删除备份、整理、认证背景图上传和恢复均由服务端 form action 提交。恢复预览与实际恢复继续复用 Go 的配置解析、受保护字段、原子写入、热重载、失败回滚和 `RESTORE_CONFIG_BACKUP` 确认边界。
+
+### V2 个人设置资源
+
+个人设置页面使用一组独立的 SSR 资源，全部要求 User 鉴权并返回 `Cache-Control: private, no-store`：
+
+| 方法 | 路径 | 说明 |
+| ---- | ---- | ---- |
+| GET | `/api/v2/settings` | 返回当前用户设置、Telegram/Emby 状态和密码安全策略 |
+| PUT | `/api/v2/settings/preferences` | 更新通知、自动续期和密码安全偏好；布尔字段必须是 JSON 布尔值 |
+| GET | `/api/v2/settings/appearance` | 返回当前账号头像与背景配置；响应为私有 `no-store`，只返回资源 URL 和安全配置字符串 |
+| PUT | `/api/v2/settings/appearance/background` | 更新背景配置；渐变、上传资源路径和数值范围仍由共享 Go 背景校验器最终处理 |
+| DELETE | `/api/v2/settings/appearance/background` | 删除当前账号背景配置 |
+| POST | `/api/v2/settings/appearance/background/upload` | 上传背景图片，multipart 字段为 `file` 和 `type=light|dark` |
+| POST | `/api/v2/settings/appearance/avatar/upload` | 上传头像，multipart 字段为 `file` |
+| DELETE | `/api/v2/settings/appearance/avatar` | 删除当前账号头像 |
+| POST | `/api/v2/settings/email/send-code` | 发送邮箱绑定或密码操作验证码 |
+| POST | `/api/v2/settings/email/verify` | 校验邮箱绑定验证码并完成当前账号邮箱验证 |
+| POST | `/api/v2/settings/password/system` | 修改 Web 密码，并按策略校验旧密码、邮箱验证码和会话轮换 |
+| POST | `/api/v2/settings/password/emby` | 修改当前绑定的 Emby 密码 |
+| POST | `/api/v2/settings/emby/bind` | 使用现有 Emby 凭据绑定当前账号 |
+| POST | `/api/v2/settings/emby/register` | 按后端资格创建并绑定 Emby 账号 |
+| POST | `/api/v2/settings/emby/unbind` | 按后端资格解除当前账号的 Emby 绑定 |
+| GET | `/api/v2/settings/apikeys` | 返回当前账号的掩码 API Key 列表 |
+| POST | `/api/v2/settings/apikeys` | 创建 API Key；明文只在当前响应中返回一次 |
+| PUT | `/api/v2/settings/apikeys/{key_id}` | 更新当前账号指定 API Key 的名称、启用、查询参数和限速设置 |
+| DELETE | `/api/v2/settings/apikeys/{key_id}` | 删除当前账号指定 API Key |
+
+这些端点是共享 Go 应用服务的版本化适配，不建立第二套业务状态机。邮箱验证、密码强度、当前 Web 密码、Emby 管理员保护、注册资格、远端副作用、Store 原子写入、审计和会话 Cookie 都由 Go 后端最终决定。V1 设置端点继续保留给回滚前端与外部兼容调用；默认 V2 前端不再直接请求它们。
 
 ### 1.1 文档分工
 
@@ -22,7 +58,10 @@
 | [API 路由索引](../reference/api-index.md) | `/api/v1` 完整路由清单、鉴权级别、归属模块 |
 | [API Key 外部接入](../reference/api-key.md) | 外部系统 API Key 接入方式、权限矩阵、专用示例 |
 | [注册码与卡码](../features/regcodes.md) | 注册码 / 续期码 / 白名单码规则、兼容性与安全口径 |
-| `/api/v1/docs` | 运行时 API 控制台。未登录时读取公开 `openapi.json`，管理员登录后优先读取 `/system/admin/apis` 的完整路由清单；页面支持搜索、方法/鉴权过滤、API Key 或 Cookie 测试请求，并不会向未鉴权访问者暴露后台路由。 |
+| `/api/v2/openapi.json` | V2 公开 OpenAPI 规范，只输出 `AuthPublic` 路由；管理员私有路由不会被匿名枚举。 |
+| `/api/v2/admin/docs/routes` | Admin 私有路由元数据，为默认 SSR `/api-docs` 页面提供完整方法、路径、版本和鉴权级别清单；响应不包含处理器、配置或用户数据。 |
+| `/api-docs` | `webui-v2` 默认 SSR API 文档页。匿名访问公开接口，管理员会话读取完整路由清单；筛选条件通过 URL 保存，列表使用有界滚动。 |
+| `/api/v1/docs` | V1 兼容 API 控制台。未登录时读取公开 `openapi.json`，管理员登录后优先读取 `/system/admin/apis` 的完整路由清单；默认 V2 前端不再依赖该内嵌页面。 |
 
 ## 2. 鉴权与请求规范
 
@@ -939,6 +978,16 @@ curl -X POST "http://localhost:5000/api/v1/media/request/external/update" \
 
 - 认证：登录用户（`AuthUser`）
 
+管理员违规审计的默认 V2 SSR 资源为 `GET /api/v2/admin/violations`、`DELETE /api/v2/admin/violations/{violation_id}` 和 `POST /api/v2/admin/violations/clear`。V2 列表只返回有界分页，类型、搜索词和页码由服务端规范化，响应使用 `private, no-store`；删除与清空仍由原有 Store 和审计 handler 执行，清空必须提交 `CLEAR_VIOLATIONS`。V1 路径继续保留给回滚前端。
+
+### 7.4 V2 SSR 媒体资源
+
+默认 `webui-v2` 使用 `/api/v2/media/*`，而不是在浏览器中直接调用 V1 媒体接口。搜索、详情、库存和“我的求片”均由 SvelteKit 服务端 `load` 通过受保护的 SSR API 边界读取；创建与删除使用 form action。会话 Cookie 只在 SSR 服务端转发，V2 响应统一使用私有 `no-store` 缓存策略。
+
+`GET /api/v2/media/search` 返回 `{ items, total, warnings }`；`GET /api/v2/media/search/{source}` 用路径来源覆盖冲突的查询参数。`GET /api/v2/media/detail` 返回 `{ item }`，`POST /api/v2/media/inventory/check` 返回库存结果。V2 只改变资源包装和传输边界，媒体来源、Logo 语言优先级、海报 URL 安全校验、Emby 库存判断和求片业务规则仍由 Go 后端统一处理。
+
+`GET /api/v2/media/requests` 返回 `{ items, total }`，只包含当前登录用户的求片。`POST /api/v2/media/requests` 和 `DELETE /api/v2/media/requests/by-key/{require_key}` 继续复用 V1 的业务 handler，因此功能开关、邮箱验证、Telegram 绑定、请求配额、重复请求、审计和所有权判断不会因前端迁移产生第二套实现。V1 媒体路由仍保留给回滚前端和外部兼容调用。
+
 ## 8. Emby 模块
 
 ### 8.1 查询当前用户 Emby 状态
@@ -991,6 +1040,35 @@ curl -X GET "http://localhost:5000/api/v1/emby/status" \
 
 ### 9.1 用户管理
 
+V2 管理员用户资源为 `/api/v2/admin/users`。集合接口返回：
+
+```json
+{
+  "items": [],
+  "pagination": {"page": 1, "per_page": 20, "total": 0, "total_pages": 0}
+}
+```
+
+`search`、`role`、`active`、`emby`、`emby_status`、`email_status`、`sort`、`page` 和 `per_page` 均在服务端解析并限制范围；列表只序列化当前页，用户详情中的 `admin_action_state` 只作为界面提示，不能替代后端权限判断。V2 写操作复用同一套 Store 原子更新、Emby 外部副作用和审计逻辑，V1 路径仅用于回滚及外部兼容调用。
+
+管理员 Emby 页面使用 `/api/v2/admin/emby/*`。账号、设备/IP 与活动日志是三个独立资源：账号列表服务端筛选和分页；设备/IP 只有明确传入 `refresh=1` 才会重读 Emby；活动日志默认读取数据库，手动同步使用 `POST /api/v2/admin/emby/activity-logs/sync`，由后端从 Emby 拉取并入库。广播、账号创建、强制改密、绑定维护和会话操作都由相同的管理员权限、Emby URL 校验、审计和通用错误脱敏边界处理。V2 页面不得回退为浏览器直连 Emby、自动轮询或播放统计界面。
+
+管理员数据库页使用 `/api/v2/admin/database/*`。状态和备份列表为私有 `no-store` 安全投影，不返回服务器文件路径、状态文件名、备份目录或 PostgreSQL 连接拓扑；备份预览、恢复、迁移的输入仍由 Go 后端执行文件名校验、快照校验、保护性备份、确认短语、功能开关和原子写入。数据库运行时仍以 PostgreSQL 为唯一后端，JSON 只保留为显式迁移导出目标。
+
+管理员运行日志页使用 `/api/v2/admin/runtime/status` 与 `/api/v2/admin/runtime/logs` 的有限快照资源。日志数量由后端上限约束，属性和消息沿用运行日志采集时的脱敏结果；V2 页面只手动刷新，不使用旧 SSE 流接口或浏览器轮询。
+
+管理员调度器页面使用 `/api/v2/admin/scheduler/jobs` 及其单任务资源。任务列表在后端批量读取摘要，最近运行结果和历史仅在打开指定任务时按需读取；运行、终止、计划保存和计划恢复通过 V2 写资源执行。任务参数在 SSR action 与 Go handler 两侧限制，手动任务不会被伪造为自动任务，运行历史保持有界且不进入浏览器共享缓存。
+
+管理员 Bangumi 页面使用 `/api/v2/admin/bangumi/*`。用户列表只返回服务端分页的当前页和批量统计，播放记录、同步日志必须带 UID 按需读取；同步和日志清理使用对应的 POST/DELETE 资源。页面配置摘要来自公开 `/api/v2/system/capabilities`，只展示功能开关，不包含 Bangumi Token；V1 管理员 Bangumi 路径保留为兼容入口。
+
+用户 Bangumi 页面使用 `/api/v2/bangumi/summary`、`/api/v2/bangumi/collections` 及其集合修改、同步、历史和偏好资源。集合读取是私有 `no-store` 的服务端分页，Token 只由 Go 服务端访问 Bangumi，绝不进入响应；V2 资源继续复用现有功能开关、Store 缓存失效、外部请求和审计逻辑。
+
+V2 Bangumi 页面使用公开资源 `GET /api/v2/bangumi/covers/{subject_id}` 获取封面；它复用既有封面 handler 的正整数校验、本地 `uploads/bangumi` 安全访问、符号链接拒绝和 Bangumi CDN 白名单回退。命中本地文件时允许 `public, max-age=86400`，未命中时只允许安全的 HTTPS Bangumi 图床地址。V1 `/bangumi/cover/{subject_id}` 作为兼容入口保留。
+
+管理员公告页面使用 `/api/v2/admin/announcements` 资源集合及其单公告写操作。列表筛选、分页和 no-store 响应由后端执行；创建、更新、显示/隐藏、置顶和删除仍走同一套 Store、字段归一化、渲染模式白名单与审计逻辑。正文在 SSR 页面中按文本显示，不执行未审查的 Markdown/BBCode HTML。
+
+管理员操作日志页面使用 `/api/v2/admin/audit-logs` 资源。列表只返回有界分页，筛选和排序在 PostgreSQL 查询边界完成；删除、清空和裁剪仍要求管理员及固定确认短语。审计维护操作不会在刚清理的同一审计表中递归追加新记录，避免“清空后又出现一条维护日志”。
+
 #### 查询用户列表
 
 `GET /admin/users?status=active&page=1&per_page=20`
@@ -1006,9 +1084,9 @@ curl -X GET "http://localhost:5000/api/v1/admin/users?status=active&page=1&per_p
 
 用户列表与用户详情返回的用户对象包含 `admin_action_state`。这是后台用户管理 UI 使用的动作可用性提示字段，当前包括 `has_emby`、`protected_role`、`can_enable_emby`、`can_disable_emby`、`can_grant_registration_entitlement`、`can_clear_registration_queue`、`can_delete` 与 `reasons`。后端仍会在真正执行变更时重新鉴权和校验；前端只应把该字段用于分组展示、禁用按钮和显示原因。
 
-前端保持服务端分页：桌面用户表在受限 Firefox 滚动区域中显示并固定表头，手机和平板使用当前页用户卡片。单用户分组操作菜单与无效账号清理预览使用 `dvh` 视口边界，预览表可横纵滚动，不会因长列表或窄视口遮住确认操作。
+前端保持服务端分页：桌面用户表在受限 Firefox 滚动区域中显示并固定表头，手机和平板使用当前页用户卡片。单用户分组操作菜单与无效账号清理预览使用 `dvh` 视口边界，预览表可横纵滚动，不会因长列表或窄视口遮住确认操作。V2 的 `/(app)/admin/users` 使用同一列表契约，通过服务端 `load` 读取当前页，并以 form action 转发单用户写操作；它不会在浏览器端缓存完整用户库。
 
-服务器状态页的 API、数据库和 Emby 健康检查分别调用 `/system/health/api`、`/system/health/database`、`/system/health/emby`，并与系统信息、统计请求共享一次可取消刷新。前端使用 `Promise.allSettled` 独立呈现结果，单个依赖不可用时不会把其他成功结果误报为整体异常。
+V1 服务器状态页的 API、数据库和 Emby 健康检查仍保留给回滚前端与外部兼容调用。V2 `/admin/status` 在服务端使用 `Promise.allSettled` 并行读取 V2 的三组独立健康资源、系统摘要和统计资源，单个依赖不可用时不会把其他成功结果误报为整体异常；浏览器端仅进行一次 SSR 页面读取，不建立轮询。
 
 #### 更新用户信息
 
@@ -1094,7 +1172,7 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/123/disable" \
 
 Emby 账号列表与本地活动日志均由管理员手动读取，离开页面或再次读取会取消过期请求，且不会复用短时前端读缓存。为适应 2000+ 账号，Emby 用户和孤儿记录按 300 行分批挂载，表格、页签和活动日志在 Firefox 中使用有高度边界的独立滚动区域。同步、导入、删除未绑定用户、清理孤儿和重置绑定互斥执行，避免管理员重复点击产生并发写操作。设备/IP 审查和从 Emby 同步活动日志仍只允许手动刷新，不会后台轮询；已入库活动日志继续保留。
 
-`GET /admin/emby/device-audit` 返回按 Emby 用户聚合的设备、在线会话 IP、活动日志登录 IP 与本地账号关联。接口会过滤 Twilight 自身连接 Emby 时产生的设备/会话（如 `Twilight`、`Twilight Bind`、`twilight-client`），避免把面板自身计入用户、IP、客户端和设备统计。设备名、客户端名、版本等展示字段会先解码 HTML 实体并清理异常尾随引号/反斜杠，避免 Emby 或第三方客户端返回的 `&quot;`、`"\` 原样出现在界面。离线保留设备会按同一 Emby 用户下的设备名、客户端名、客户端版本聚合，返回 `count` 与最新活动时间，避免同一手机/客户端的多条历史 DeviceId 刷屏；在线设备保留实时独立行。`summary.devices_available`、`summary.sessions_available` 和 `summary.activity_available` 分别表示 `/Devices`、`/Sessions`、`/System/ActivityLog` 来源是否可用；其中任一来源失败时接口会尽量返回其余可用数据，并在对应 `*_error` 字段写入脱敏后的简短错误。
+`GET /admin/emby/device-audit` 返回按 Emby 用户聚合的设备、在线会话 IP、活动日志登录 IP 与本地账号关联。接口会过滤 Twilight 自身连接 Emby 时产生的设备/会话（如 `Twilight`、`Twilight Bind`、`twilight-client`），避免把面板自身计入用户、IP、客户端和设备统计。设备名、客户端名、版本等展示字段会先解码 HTML 实体并清理异常尾随引号/反斜杠，避免 Emby 或第三方客户端返回的 `&quot;`、`"\` 原样出现在界面。离线保留设备会按同一 Emby 用户下的设备名、客户端名、客户端版本聚合，返回 `count` 与最新活动时间，避免同一手机/客户端的多条历史 DeviceId 刷屏；在线设备保留实时独立行。`summary.devices_available`、`summary.sessions_available` 和 `summary.activity_available` 分别表示 `/Devices`、`/Sessions`、`/System/ActivityLog` 来源是否可用；其中任一来源失败时接口会尽量返回其余可用数据，并在对应 `*_error` 字段写入固定的通用失败文案，原始诊断只写入服务端日志。
 
 前端按用户和按设备视图都只挂载当前 300 行，管理员主动点击「显示更多」才追加下一批，避免 2000+ 用户或保留设备一次生成全部 DOM。首次读取、手动刷新及处置后的刷新共用一个可取消且带请求序列保护的加载器；页面仍不自动轮询。
 
@@ -1106,7 +1184,7 @@ Emby 账号列表与本地活动日志均由管理员手动读取，离开页面
 | `GET /admin/emby/sessions` | 当前 Emby 会话 |
 | `GET /admin/emby/activity-logs` | 本地 Emby 活动日志；`refresh=1` 时手动从 Emby 拉取并入库 |
 | `GET /admin/emby/activity` | Emby 活动记录 |
-| `GET /admin/emby/users` | Emby 用户列表 |
+| `GET /admin/emby/users` | Emby 用户列表；支持 `page`、`per_page`、`search`、`link`、`attribute`，失效本地绑定使用 `orphan_page` / `orphan_per_page` 独立分页 |
 | `POST /admin/emby/broadcast` | 发送 Emby 广播消息 |
 | `POST /admin/emby/test` | 后端测试 Emby 连通性、用户列表、媒体库列表，并尝试本机 Emby 候选地址 |
 | `POST /admin/emby/cleanup-orphans` | 清理孤立 Emby 用户 |
@@ -1134,10 +1212,15 @@ curl -X POST "http://localhost:5000/api/v1/admin/emby/sync" \
 
 ```json
 {
-  "title": "系统通知",
-  "message": "Emby 服务器将在夜间维护。"
+  "header": "系统通知",
+  "text": "Emby 服务器将在夜间维护。",
+  "user_ids": ["emby-user-id"]
 }
 ```
+
+`header` 可选，`text` 必填；省略 `user_ids` 时发送给当前所有 Emby 会话。失败项只返回会话标识和通用失败文案，不返回上游网络错误。
+
+独立 Emby 账号创建和管理员强制改密都由后端检查密码必须为 8-128 位，并同时包含大小写字母和数字；页面的 `minlength` 仅用于提前提示，不能替代后端校验。
 
 #### 测试 Emby 连通性
 
@@ -1172,6 +1255,8 @@ curl -X POST "http://localhost:5000/api/v1/admin/emby/sync" \
 
 `DELETE /admin/email/verifications/{id}` 会立即撤销对应验证码；`POST /admin/email/verifications/cleanup` 清理全部过期验证码。两类成功写操作都会写入管理员审计日志，审计详情不记录完整邮箱或验证码材料。
 
+默认 V2 管理员邮箱页面使用 `/api/v2/admin/email/*`。验证审查接口仍只返回脱敏邮箱、关联账号和有限时间/尝试次数字段，响应为私有 `no-store`；SMTP 测试仅供管理员使用，普通用户发送邮件失败继续返回泛化错误，不向客户端暴露 SMTP、网络或服务器地址细节。V1 邮箱接口保留为回滚兼容入口。
+
 ### 9.3 注册码与卡码
 
 > 规则细节见 [注册码与卡码](../features/regcodes.md)。
@@ -1179,6 +1264,8 @@ curl -X POST "http://localhost:5000/api/v1/admin/emby/sync" \
 注册码管理接口读取前会刷新持久化的单一状态文档；公开校验和写入类接口的前置读取也会刷新最新状态。批量生成保持 store 层原子 create-only 语义：同批重复或最新持久化状态中已有同名码时整批失败，不覆盖旧码。
 
 管理端注册码搜索由后端分页过滤，前端自由搜索会在短暂停止输入后再请求；`type`、`status`、`source`、`sort`、`order` 变化时应从第一页重新读取。大批量注册码不应由前端先下载全量再筛选。
+
+V2 管理注册码资源使用 `/api/v2/admin/regcodes`：列表返回 `items` 和 `pagination`，详情返回 `item`，使用记录按 `/usage` 按需读取；`PATCH` 使用局部字段更新，批量删除和使用记录清理仍需固定确认短语。V2 只改变资源契约和 SSR 页面调用路径，注册码消费、有效期暂停、引用清理、存储不一致保护、权限与审计继续由同一 Store/handler 执行，避免 V1/V2 双写或缓存事实分叉。
 
 #### 查询注册码列表
 
@@ -1254,6 +1341,8 @@ curl -X POST "http://localhost:5000/api/v1/admin/regcodes" \
 
 ### 9.4 求片管理（Admin 别名）
 
+V2 SSR 管理端使用 `/api/v2/admin/media-requests` 资源集合及其 `/by-key`、`/batch` 变更资源；V1 `/api/v1/admin/media-requests` 仍保留给旧客户端和回滚前端。V2 列表返回 `{items,pagination,request_total,has_next,status_counts}`，V1 列表继续返回历史字段名 `{requests,total,request_total,page,per_page,total_pages,has_next,status_counts}`。两者共享同一个后端筛选、同名聚合和 Store 快照，避免状态计数或分页结果漂移。
+
 `GET /admin/media-requests` — 查询管理员求片列表（与 `/media/request/pending` 同 handler）。
 
 默认筛选为 `status=active`，即 `UNHANDLED` / `ACCEPTED` / `DOWNLOADING` 活跃队列；`status=pending` 或 `status=unhandled` 仅返回真正待处理的 `UNHANDLED`，`status=all` 返回全部。可选参数：`source=all|tmdb|bangumi`、`q`（标题、用户名、请求 ID、媒体 ID、UID、Telegram ID、Key 模糊搜索）、`page`、`per_page`。`q` 最多 120 字符，`per_page` 最大 100。
@@ -1285,9 +1374,15 @@ curl -X POST "http://localhost:5000/api/v1/admin/regcodes" \
 
 ### 9.4.1 工单系统
 
-用户接口：`GET /tickets`、`POST /tickets`、`POST /tickets/{ticket_id}/reply`、`POST /tickets/{ticket_id}/close`、`POST /tickets/{ticket_id}/reopen`、`PUT /tickets/{ticket_id}/notify-telegram`、`POST|DELETE /tickets/{ticket_id}/images`。
+用户接口：`GET /tickets`、`GET /tickets/{ticket_id}`、`POST /tickets`、`POST /tickets/{ticket_id}/reply`、`POST /tickets/{ticket_id}/close`、`POST /tickets/{ticket_id}/reopen`、`PUT /tickets/{ticket_id}/notify-telegram`、`POST|DELETE /tickets/{ticket_id}/images`。
 
 管理员接口：`GET /admin/tickets`、`GET /admin/tickets/{ticket_id}`、`PUT /admin/tickets/{ticket_id}`、`POST /admin/tickets/{ticket_id}/reply`、`DELETE /admin/tickets/{ticket_id}`、`GET|POST|PUT|DELETE /admin/ticket-types`。
+
+V2 用户工单资源：`GET /api/v2/tickets`、`GET /api/v2/tickets/{ticket_id}`、`POST /api/v2/tickets`、`POST /api/v2/tickets/{ticket_id}/replies`、`POST /api/v2/tickets/{ticket_id}/close`、`POST /api/v2/tickets/{ticket_id}/reopen`、`PUT /api/v2/tickets/{ticket_id}/notify-telegram`，以及 `/attachments` 上传/读取/删除资源。V2 用户列表返回 `items` + `pagination`，详情返回 `item`，附件 URL 也只指向 V2 受保护资源；用户详情仍按当前会话 UID 做归属校验。
+
+V2 管理员工单资源：`GET /api/v2/admin/tickets`、`GET /api/v2/admin/tickets/{ticket_id}`、`PATCH /api/v2/admin/tickets/{ticket_id}`、`POST /api/v2/admin/tickets/{ticket_id}/replies`、`DELETE /api/v2/admin/tickets/{ticket_id}`，以及对应的 `/attachments/{filename}` 上传/读取/删除资源和 `/api/v2/admin/ticket-types` 集合。V2 列表统一返回 `items` + `pagination`，详情统一返回 `item`；它们复用同一 Store、权限、附件限制、审计和通知逻辑，V1 仅作为回滚及外部兼容入口保留。
+
+`GET /tickets` 是当前用户的摘要分页接口，可传 `page`（默认 1）和 `per_page`（默认 20，最大 100）。列表只返回标题、状态、优先级、回复/附件数量和时间等元数据，不返回工单正文、回复正文或附件 URL。`GET /tickets/{ticket_id}` 只允许当前登录用户读取自己的工单，返回完整正文、双方回复时间线和附件；管理员读取他人工单使用 `/admin/tickets/{ticket_id}`，用户侧接口不会因为当前账号具有管理员角色而扩大资源范围。
 
 `GET /admin/tickets` 默认只返回待处理 / 处理中工单，便于管理端聚焦当前队列；传 `all=1` 或 `status=all` 时返回全部状态，传具体 `status` 时按该状态过滤。列表使用紧凑 DTO，通过 `reply_count` 与 `attachment_count` 返回交流规模，不序列化完整 `replies` 或 `attachments`；完整对话正文与附件 URL 只由单工单详情接口返回。
 
@@ -1352,6 +1447,8 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/cleanup-invalid" \
 
 `GET /admin/invite/tree` — 查看邀请树。邀请开启时可包含仅持有码、尚未建立关系的潜在根节点；邀请关闭时只返回真实关系的两端，隐藏没有任何上下级关系的孤立持码用户，同时保留没有后代的末级下级以维持树结构完整。
 
+V2 管理邀请资源为 `/api/v2/admin/invite/tree`、`/api/v2/admin/invite/codes` 和 `/api/v2/admin/invite/config/schema`。树接口在后端按 `search`、`root`、`collapsed`、`page`、`per_page` 计算当前页，`data.item` 只返回 `rows`、根摘要、选中详情与分页统计；邀请码接口返回 `items` 与 `pagination`，搜索和当前页 DTO 富化均在后端完成。V2 配置接口只返回并接受邀请白名单字段，不可借此修改其它配置段；所有关系、续期、Emby 清理、保护账号、审计与原子 Store 语义继续复用下方 V1 handler。
+
 `POST /admin/invite/users/{uid}/detach` — 将指定用户从邀请树脱离。
 
 `POST /admin/invite/users/{uid}/detach-delete-emby` — 将指定用户从邀请树脱离，并删除其远端 Emby 账号；管理员账号受保护。
@@ -1360,7 +1457,7 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/cleanup-invalid" \
 
 `POST /admin/invite/quick-maintenance` — 快捷维护邀请关系。请求体示例：`{"confirm":"INVITE_QUICK_MAINTENANCE","scope":"all","detach":true,"renew_days":30}`；`scope` 可为 `selected`（配合 `uids`）、`subtree`（配合 `root_uid` / `depth` / `include_root`）或 `all`。`detach=true` 会断开目标用户与上级关系，`renew_days=1..36500` 为目标用户追加有效期，`-1` 设为永久。管理员账号受保护；Web 已禁用目标仍可断开，但不会续期、改变到期时间或重新启用。接口返回 `total/success/failed/detached/renewed/renew_skipped_disabled/errors`。
 
-`GET /admin/invite/codes` — 列出全部邀请码。
+`GET /admin/invite/codes` — 列出管理员可见的邀请码。无查询参数时保留历史全量 `codes/total` 响应；传 `page`、`per_page` 或 `search` 时使用服务端分页，`search` 匹配邀请码、邀请人 UID/用户名、目标用户名和备注，返回 `codes/total/page/per_page/pages`，只对当前页执行用户字段富化。
 
 ### 9.8 违规与 Telegram 管理
 
@@ -1373,12 +1470,28 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/cleanup-invalid" \
 | `POST /admin/telegram/rebind-requests/{request_id}/approve` | 批准换绑 |
 | `POST /admin/telegram/rebind-requests/{request_id}/reject` | 拒绝换绑 |
 | `POST /admin/telegram/rebind-requests/batch` | 批量审核换绑 |
+| `GET /api/v2/admin/telegram/rebind-requests` | V2 分页读取换绑申请（私有不缓存） |
+| `POST /api/v2/admin/telegram/rebind-requests/{request_id}/approve` | V2 批准换绑 |
+| `POST /api/v2/admin/telegram/rebind-requests/{request_id}/reject` | V2 拒绝换绑 |
+| `POST /api/v2/admin/telegram/rebind-requests/batch` | V2 批量审核换绑 |
+| `POST /api/v2/admin/telegram/rebind-requests/revoke-approved` | V2 撤销全部已批准未使用的换绑许可 |
+| `GET /api/v2/admin/telegram/commands/catalog` | V2 读取 Bot 内置指令目录和禁用状态（私有不缓存） |
+| `GET /api/v2/admin/telegram/roster/stats` | V2 读取 Telegram 花名册摘要（私有不缓存） |
+| `POST /api/v2/admin/telegram/test` | V2 手动测试 Bot 连通性（私有不缓存，失败信息已泛化） |
+| `POST /api/v2/admin/developer/js-sandbox` | V2 预检并运行受控 Goja 沙箱（私有不缓存） |
+| `GET /api/v2/admin/developer/js-docs` | V2 读取开发者 JS 文档（开发者模式关闭时拒绝） |
+| `GET /api/v2/admin/developer/js-presets` | V2 读取开发者 JS 预设（私有不缓存） |
+| `POST /api/v2/admin/developer/js-presets` | V2 创建开发者 JS 预设 |
+| `PUT /api/v2/admin/developer/js-presets/{preset_id}` | V2 更新开发者 JS 预设 |
+| `DELETE /api/v2/admin/developer/js-presets/{preset_id}` | V2 删除开发者 JS 预设 |
 | `GET /admin/telegram/commands/catalog` | Telegram Bot 内置指令目录与禁用状态 |
 | `GET /admin/telegram/roster/stats` | Telegram 群花名册统计 |
 | `POST /admin/telegram/rejoined-users/enable` | 启用重新入群用户 |
 | `POST /admin/telegram/kick-unbound` | 踢出未绑定用户 |
 
 Telegram 相关行为见 [Telegram Bot 命令](../features/telegram-bot.md)。
+
+默认 V2 Telegram 管理页面改用 `/api/v2/admin/config/schema`、`/api/v2/admin/telegram/commands/catalog`、`/api/v2/admin/telegram/roster/stats` 和 `/api/v2/admin/telegram/test`；这些资源只返回页面所需的非敏感数据，均禁止缓存。V2 换绑审核页面改用 `/api/v2/admin/telegram/rebind-requests*`。V2 只复用同一组配置校验、Bot 测试、换绑状态转换和管理员审计，不会因前端版本绕过审批、批量数量限制或撤销逻辑；V1 接口仅作为回滚与外部兼容入口保留。
 
 `GET /admin/telegram/commands/catalog` 是 Bot 指令管理页的后端权威数据源，返回 `commands` 与 `disabled_commands`。`commands` 内每项包含：
 
@@ -1599,6 +1712,8 @@ curl -X POST "http://localhost:5000/api/v1/setup/complete" \
   }'
 ```
 
+默认 V2 SSR 初始化页面使用 `/api/v2/setup/status` 与 `/api/v2/setup/complete`。V2 只提供独立资源命名空间，初始化可用性、显式 WebUI intent、限流、密码/地址校验、用户与配置回滚、审计和 host-only HttpOnly 会话 Cookie 仍由同一组 Go handler 最终处理；V1 入口保留为回滚与外部兼容入口。
+
 ### 10.4 服务器图标
 
 `GET /system/server-icon` — 读取服务器图标（公开）。
@@ -1668,7 +1783,15 @@ curl -X GET "http://localhost:5000/api/v1/system/config" \
 - 说明：返回当前 Emby 正在播放会话的总人数，只统计含 `NowPlayingItem` 的会话，不返回用户、媒体条目、封面或进度。会话读取复用短时服务器缓存，避免仪表盘并发刷新重复请求 `/Sessions`。
 - 认证：登录用户（`AuthUser`），不允许匿名探测 Emby 会话状态。
 
-### 10.11 管理员运行状态与实时日志
+### 10.11 管理员当前观看摘要
+
+`GET /admin/emby/now-playing`
+
+- 说明：返回当前含 `NowPlayingItem` 会话的数量，以及管理员仪表盘所需的最小观看摘要（Emby 用户名、媒体名称、类型、剧集名称和播放进度）。接口复用短时 `/Sessions` 快照，并批量补充媒体元数据，不逐会话发起请求。
+- 认证：管理员（`AuthAdmin`）。
+- 安全：普通用户只能使用 `/system/emby-viewers` 读取人数；旧的 `/emby/now-playing` 普通用户路由不再注册，不能通过该路径读取观看者或媒体信息。
+
+### 10.12 管理员运行状态与实时日志
 
 `GET /system/admin/runtime/status`
 
@@ -1709,7 +1832,7 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
   -H "Authorization: Bearer <admin_token>"
 ```
 
-### 10.12 config.toml 读写与备份
+### 10.13 config.toml 读写与备份
 
 `GET /system/admin/config/toml` — 读取当前 config.toml（管理员）。
 
@@ -1749,7 +1872,7 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 | `POST /system/admin/config/restore` | 从备份恢复配置 |
 | `POST /system/admin/config/sweep` | 手动触发 config.toml 自动整理（迁移历史段、删孤立键、补默认值，带备份） |
 
-### 10.13 数据库状态、备份、恢复、迁移
+### 10.14 数据库状态、备份、恢复、迁移
 
 > Twilight 的主要业务状态保存在 PostgreSQL `twilight_state`（`id=1` 的一行 jsonb）；高频追加或独立生命周期数据使用 `twilight_audit_logs`、`twilight_runtime_logs`、`twilight_sessions`、`twilight_playback_records`、`twilight_telegram_roster`，Telegram 更新确认游标单独使用 `twilight_telegram_runtime`。审计、运行日志与花名册会合并回完整 JSON 备份；Telegram 游标属于运行确认状态，不随业务快照回滚，历史 JSON 中的旧游标只在导入时单调迁移一次。下列接口围绕该持久化体系操作。
 
@@ -1809,7 +1932,33 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 - 预检响应 `data` 包含 `source_driver`、`configured_driver`、`target_driver`、`snapshot_bytes`、`target_ready`、`backup_ready`、`warnings`、`counts`、`requires_confirmation`、`confirm`，并保留 `users`、`regcodes`、`invite_codes` 等兼容字段。PostgreSQL 目标会在权限允许时自动创建缺失数据库并准备 `twilight_state` 状态表，`target_ready.database_created` / `target_ready.schema_ready` 反映结果。
 - 执行响应会额外返回 `pre_operation_backup` / `pre_migration_backup`，确认写入前已自动创建保护性备份。
 
-### 10.14 Git 自动更新
+### 10.15 Twilight 数据迁移包
+
+以下接口默认关闭，开启 `Database.migration_panel_enabled` 后仅管理员可用：
+
+默认 V2 SSR 迁移页面使用 `/api/v2/admin/migration/status`、`/api/v2/admin/migration/export` 和 `/api/v2/admin/migration/import`。V2 只提供独立资源命名空间：导出仍为 POST 流式 ZIP，导入仍为受限 multipart 预览/确认；密码不进入 URL、日志或响应 JSON，归档内容不会进入浏览器状态。V1 迁移接口保留为回滚与外部兼容入口。
+
+`GET /system/admin/migration/status`
+
+- 返回迁移格式版本、数据库结构版本、归档大小上限和允许的 `resources/` 命名空间。
+
+`POST /system/admin/migration/export`
+
+- 说明：生成 Twilight 专用 ZIP，包含 PostgreSQL 一致性业务数据、按白名单收集的上传资源和有效配置。
+- 请求体可选：`{"password":"..."}`。空密码生成无密码包；非空密码至少 8 个 UTF-8 字节，密码模式使用 Argon2id + AES-256-GCM。
+- 无密码包的配置 secret 使用 `__TWILIGHT_SECRET_UNCHANGED__` 哨兵；密码不会进入 URL、响应 JSON、清单或日志。
+- 响应：`application/zip` 下载，带 `Cache-Control: no-store`；不返回归档内容的 JSON 副本。
+
+`POST /system/admin/migration/import`
+
+- 请求类型：`multipart/form-data`，文件字段为 `archive`；可选字段为 `password`、`preview`、`apply_config`、`resource_mode` 和确认短语 `confirm`。
+- 首次请求或缺少 `confirm=IMPORT_TWILIGHT_DATA` 时只返回预览，不修改数据库、配置或资源。
+- `resource_mode=preserve` 为默认值，遇到不同内容的同名资源会返回冲突；`resource_mode=replace` 只有在确认后才覆盖。
+- `apply_config=true` 才应用归档中的可迁移配置。数据库目录、管理员身份、系统更新源等本地边界不会被归档配置覆盖；无密码包的 secret 保留目标值。
+- 导入失败会回滚 PostgreSQL 事务、已写入资源和已应用的配置；活动 session 不在归档中，也不会从源实例复制。
+- 后端拒绝 Zip Slip、绝对路径、反斜杠、重复条目、符号链接、非普通文件、超大文件、超多文件和不支持的命名空间。
+
+### 10.16 Git 自动更新
 
 `POST /system/admin/update`
 
@@ -1826,11 +1975,11 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 }
 ```
 
-- 安全约束：仓库 URL 不允许携带凭据；分支名只允许安全字符；`dry_run` 只做预检；响应中 `repo_url` 与 `before.remote_url` 会移除凭据。
+- 安全约束：仓库 URL 不允许携带凭据；分支名只允许安全字符；`dry_run` 只做预检；返回的仓库地址和命令输出会脱敏，且不会返回服务器部署目录等本机绝对路径。
 - 重启策略：只有 commit 实际变化且请求 `restart_services=true` 时才调度重启；优先使用 `systemd-run --on-active=2` 延迟重启 `twilight`、`twilight-bot`、`twilight-scheduler`，失败时回退为后台 `systemctl restart`。
 - 响应字段：`updated` 表示 commit 是否变化，`restart_requested` 表示请求是否要求重启，`restart_scheduled` 表示是否成功安排重启，`restart_method` 表示使用的调度方式。
 
-### 10.15 测试 Telegram Bot 连通性
+### 10.16 测试 Telegram Bot 连通性
 
 `POST /system/admin/bot/test`
 
@@ -1857,14 +2006,14 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 }
 ```
 
-### 10.16 获取全部路由列表
+### 10.17 获取全部路由列表
 
 `GET /system/admin/apis`
 
 - 说明：获取后端注册的全部路由列表。
 - 认证：管理员（`AuthAdmin`）
 
-### 10.17 开发者模式与 JS 沙箱
+### 10.18 开发者模式与 JS 沙箱
 
 `POST /admin/developer-mode/activate`
 
@@ -2002,6 +2151,8 @@ Telegram 管理中的「Bot 指令管理」页面不会创建第二套指令存�
 | `GET /invite/check` | `AuthPublic` | 校验邀请码（IP 限流 10/60s） |
 | `POST /invite/use` | `AuthUser` | 使用邀请码 |
 
+V2 用户邀请资源为 `/api/v2/invite/summary`、`/api/v2/invite/codes`、`/api/v2/invite/renew-codes` 以及两个 `detach-expired` 路径。摘要为私有 `no-store` 聚合读取；V2 写入只是 SSR 资源适配器，继续使用同一套邀请开关、直属关系、真实 Emby 资格、历史关系维护、外部删除、Store 原子写入和审计规则。
+
 ### 11.4 Signin 模块
 
 > 签到积分默认仅记录余额；管理员可通过 `[SAR].signin_renewal_enabled` 或 `[Signin].renewal_enabled` 开启积分续期。关闭时 `/signin/me` 的 `renewal.enabled=false`，前端不展示兑换入口。完整规则见 [签到与积分续期](../features/signin.md)。
@@ -2013,6 +2164,8 @@ Telegram 管理中的「Bot 指令管理」页面不会创建第二套指令存�
 | `POST /signin` | `AuthUser` | 执行签到 |
 | `POST /signin/renew` | `AuthUser` | 使用签到积分续期；要求已绑定 Emby，消耗积分和续期天数由管理员配置 |
 | `GET /signin/history` | `AuthUser` | 签到历史 |
+
+V2 签到资源为 `GET /api/v2/signin/summary`、`POST /api/v2/signin`、`POST /api/v2/signin/renew` 和 `PUT /api/v2/signin/preferences`。它们返回私有 `no-store` 响应，V2 页面写入成功后重新由 SSR 读取权威摘要；签到日期幂等、Emby 绑定限制、自动续期资格、积分扣减和审计仍由共享 handler/Store 决定。
 
 `POST /signin/renew` 只续期已有 Emby 权益。用户没有 `EmbyID` 或仅持有 `PendingEmby` 待开通资格时返回 `409 RENEW_REQUIRES_EMBY`，Store 在原子写入内复核后才扣分，因此拒绝时积分和到期时间都不变。成功后在同一次状态写入中扣减 `signin.points` 并延长当前用户 `expired_at`；积分不足返回 `SIGNIN_INSUFFICIENT_POINTS`，功能未开启返回 `SIGNIN_RENEWAL_DISABLED`。
 

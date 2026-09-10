@@ -6,6 +6,10 @@ func (a *App) registerRoutes() {
 	a.add(http.MethodGet, "/", AuthPublic, a.handleRoot)
 	a.add(http.MethodGet, "/api/v1/openapi.json", AuthPublic, a.handleOpenAPI)
 	a.add(http.MethodGet, "/api/v1/docs", AuthPublic, a.handleDocs)
+	a.registerV2Routes()
+
+	// The V1 routes below remain available only for the rollback frontend and
+	// external integrations during the V2 migration.
 	a.add(http.MethodGet, "/api/v1/setup/status", AuthPublic, a.handleSetupStatus)
 	a.add(http.MethodPost, "/api/v1/setup/complete", AuthPublic, a.handleSetupComplete)
 
@@ -110,6 +114,9 @@ func (a *App) registerRoutes() {
 	a.add(http.MethodPost, "/api/v1/system/admin/database/backup", AuthAdmin, a.handleDatabaseBackup)
 	a.add(http.MethodPost, "/api/v1/system/admin/database/restore", AuthAdmin, a.handleDatabaseRestore)
 	a.add(http.MethodPost, "/api/v1/system/admin/database/migrate", AuthAdmin, a.handleDatabaseMigrate)
+	a.add(http.MethodGet, "/api/v1/system/admin/migration/status", AuthAdmin, a.handleMigrationStatus)
+	a.add(http.MethodPost, "/api/v1/system/admin/migration/export", AuthAdmin, a.handleMigrationExport)
+	a.add(http.MethodPost, "/api/v1/system/admin/migration/import", AuthAdmin, a.handleMigrationImport)
 	a.add(http.MethodGet, "/api/v1/system/admin/config/toml", AuthAdmin, a.handleConfigTOMLGet)
 	a.add(http.MethodPut, "/api/v1/system/admin/config/toml", AuthAdmin, a.handleConfigTOMLPutSafe)
 	a.add(http.MethodGet, "/api/v1/system/admin/config/schema", AuthAdmin, a.handleConfigSchemaFull)
@@ -200,7 +207,7 @@ func (a *App) registerAdminRoutes() {
 	a.add(http.MethodGet, "/api/v1/admin/emby/activity", AuthAdmin, a.handleEmbyActivity)
 	a.add(http.MethodGet, "/api/v1/admin/emby/activity-logs", AuthAdmin, a.handleEmbyActivityLogs)
 	a.add(http.MethodGet, "/api/v1/emby/items/:item_id/image", AuthUser, a.handleEmbyItemImage)
-	a.add(http.MethodGet, "/api/v1/emby/now-playing", AuthUser, a.handleEmbyNowPlaying)
+	a.add(http.MethodGet, "/api/v1/admin/emby/now-playing", AuthAdmin, a.handleEmbyNowPlaying)
 	a.add(http.MethodGet, "/api/v1/emby/online", AuthUser, a.handleEmbyOnline)
 	a.add(http.MethodGet, "/api/v1/admin/emby/users", AuthAdmin, a.handleAdminEmbyUsersV2)
 	a.add(http.MethodPost, "/api/v1/admin/emby/broadcast", AuthAdmin, a.handleEmbyBroadcast)
@@ -362,6 +369,7 @@ func (a *App) registerStatsInviteSigninAnnouncementRoutes() {
 	// 工单
 	a.add(http.MethodGet, "/api/v1/tickets", AuthUser, a.handleMyTickets)
 	a.add(http.MethodPost, "/api/v1/tickets", AuthUser, a.handleCreateTicket)
+	a.add(http.MethodGet, "/api/v1/tickets/:ticket_id", AuthUser, a.handleMyTicket)
 	a.add(http.MethodPost, "/api/v1/tickets/:ticket_id/close", AuthUser, a.handleCloseOwnTicket)
 	a.add(http.MethodPost, "/api/v1/tickets/:ticket_id/reopen", AuthUser, a.handleReopenOwnTicket)
 	a.add(http.MethodPut, "/api/v1/tickets/:ticket_id/notify-telegram", AuthUser, a.handleToggleTicketNotify)

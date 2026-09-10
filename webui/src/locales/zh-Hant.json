@@ -603,6 +603,8 @@
     "libraryStatsUnavailable": "媒體庫統計未啟用或暫不可用。",
     "nowPlaying": "正在觀看",
     "nowPlayingCount": "當前 {count} 人正在觀看",
+    "unknownMedia": "未知媒體",
+    "unknownViewer": "未知使用者",
     "serverNetworkStatus": "按需線路探測，不會自動測速",
     "retest": "測速線路",
     "notApplicable": "未對應"
@@ -894,7 +896,8 @@
     "notifyTelegram": "Telegram 通知",
     "notifyTelegramDesc": "管理員回覆或處理此工單時發送 Telegram 通知",
     "notifyOn": "通知已開啟",
-    "notifyOff": "通知已關閉"
+    "notifyOff": "通知已關閉",
+    "pageSummary": "第 {page} / {total} 頁，共 {count} 筆"
   },
   "adminTickets": {
     "title": "工單管理",

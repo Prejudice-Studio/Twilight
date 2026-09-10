@@ -1,5 +1,7 @@
 # 公告系统
 
+默认 WebUI 使用 `webui-v2` 的 SSR 页面和 form action；本文中保留的 React renderer、旧路由和旧组件路径属于 V1 紧急回滚参考，不是生产入口。
+
 本文说明 Twilight 的全站公告：数据模型、三种渲染模式（纯文本 / Markdown / BBCode）、前端安全约束、管理员发布页与仪表盘展示位置，以及公开列表接口与管理员 CRUD 接口。
 
 公告是一种由管理员发布、面向全站用户展示的通知。它支持级别标记、置顶、过期时间，并可选用 Markdown / BBCode 等富文本渲染。其它相邻功能见 [邀请树](./invite.md)，鉴权与安全机制见 [安全加固](../guides/security.md)，完整接口契约见 [后端 API 详参](../reference/backend-api.md)。
@@ -30,7 +32,7 @@
 | `updated_at` | int64 | 更新时间 | 每次写入都会刷新为当前时间。 |
 | `expired_at` | int64 | `0` | 过期时间（Unix 秒）。`0` 或 `<=0` 表示永不过期。后端字段名为 `expired_at`。 |
 
-关于过期字段，后端读取请求体时同时接受 `expires_at` 与 `expired_at` 两个键（见 `internal/api/announcement_handlers.go`），最终存为结构体上的 `ExpiredAt`。前端类型（`webui/src/lib/api-types.ts`）则统一用 `expires_at`，并约定 `-1` 表示永不过期。
+关于过期字段，后端读取请求体时同时接受 `expires_at` 与 `expired_at` 两个键（见 `internal/api/announcement_handlers.go`），最终存为结构体上的 `ExpiredAt`。V2 form action 统一提交 `expires_at`，并由后端解释永久值。
 
 ### 排序与可见性
 
@@ -52,11 +54,11 @@
 
 > 旧文档曾提到后端会兼容 `text` / `md` / `bb` 等别名并做规范化。当前 Go 实现的 `safeAnnouncementRenderMode` **不识别这些别名**：除 `markdown`、`bbcode` 之外的任何输入（含 `text` / `md` / `bb`）都会被归一化为 `plain`。
 
-实际渲染全部在前端完成，渲染器位于 `webui/src/lib/safe-render.tsx`，导出组件 `SafeAnnouncementContent({ content, mode })`。
+V2 默认页面当前使用转义纯文本预览和正文展示，位于 `webui-v2/src/routes/(app)/announcements` 与管理员公告页面；不得把正文直接交给 `{@html}`。V1 的白名单 renderer 位于 `webui/src/lib/safe-render.tsx`，只作为回滚参考。
 
 ## 前端安全约束
 
-公告内容由后端原样保存，所有解析都在前端 React 树里完成，**永远不会使用 `dangerouslySetInnerHTML`**，从根上规避 XSS。具体约束（均见 `webui/src/lib/safe-render.tsx`）：
+公告内容由后端原样保存。V2 以 Svelte 文本节点展示，**不会使用 `{@html}`**；如未来移植富文本，必须重新审查 URL、图片和标签白名单。以下 React 约束仅描述旧版回滚 renderer：
 
 - **纯文本（plain）**：用 `whitespace-pre-wrap break-words` 直接渲染原始字符串，保留换行；所有 `<`、`>` 等字符由 React 自动 HTML 转义。
 - **Markdown**：手写小型解析器输出 React 元素，不经过任何 HTML 字符串。支持的语法：
@@ -91,7 +93,7 @@
 
 ## 管理员发布页
 
-管理员侧边栏「公告管理」对应页面 `webui/src/app/(main)/admin/announcements/page.tsx`，前端路由 `/admin/announcements`。功能：
+管理员侧边栏「公告管理」对应 V2 页面 `webui-v2/src/routes/(app)/admin/announcements/+page.svelte`，前端路由 `/admin/announcements`。旧版页面 `webui/src/app/(main)/admin/announcements/page.tsx` 仅用于回滚。
 
 - 列表展示全部公告（含隐藏与已过期），带「显示已隐藏」「显示已过期」开关、级别徽标、置顶 / 隐藏 / 编辑 / 删除操作，以及分页控件。
 - 新建 / 编辑对话框包含：标题（可选）、内容（最多 10000 字）、级别下拉、**渲染方式下拉**（纯文本 / Markdown / BBCode）、截止时间（`datetime-local`，留空表示永久）、置顶开关、立即可见开关。
@@ -101,7 +103,7 @@
 
 ## 仪表盘与公开展示
 
-公告组件 `AnnouncementBoard`（`webui/src/components/announcement-board.tsx`）有两处使用：
+V2 公告页与仪表盘分别位于 `webui-v2/src/routes/(app)/announcements` 和 `webui-v2/src/routes/(app)/dashboard`；旧版 `AnnouncementBoard`（`webui/src/components/announcement-board.tsx`）仅用于回滚：
 
 - **仪表盘**（`webui/src/app/(main)/dashboard/page.tsx`）：以 `<AnnouncementBoard splitPinned />` 放在页面**最后一个区块**，避免占据首屏。`splitPinned` 模式会把「置顶公告」与「最新公告」分成两组分别展示与折叠。
 - **独立公告页**（`webui/src/app/(main)/announcements/page.tsx`，路由 `/announcements`）：以时间线视图展示全部公告（`limit=200`、`collapseAfter=200`、`showEmptyState`），不分置顶 / 最新两组。
@@ -140,10 +142,14 @@
 
 | 方法 | 路径 | 说明 |
 | ---- | ---- | ---- |
-| `GET` | `/api/v1/admin/announcements` | 管理员筛选分页列表。`data` 为 `{ announcements, total, page, per_page, pages }`；默认包含隐藏与过期公告，可用 `include_invisible=false`、`include_expired=false` 排除。 |
-| `POST` | `/api/v1/admin/announcements` | 新建公告。成功返回 201 与新建记录。 |
-| `PUT` | `/api/v1/admin/announcements/:announcement_id` | 更新公告。未传字段沿用既有值；`created_by_uid` / `created_at` 保持不变。 |
-| `DELETE` | `/api/v1/admin/announcements/:announcement_id` | 删除公告。不存在则返回未找到错误。 |
+| `GET` | `/api/v2/admin/announcements` | V2 管理员筛选分页列表；响应字段与 V1 兼容，服务端返回当前页且 no-store。 |
+| `POST` | `/api/v2/admin/announcements` | V2 新建公告；复用字段白名单、渲染模式归一化和审计。 |
+| `PUT` | `/api/v2/admin/announcements/:announcement_id` | V2 更新公告。 |
+| `DELETE` | `/api/v2/admin/announcements/:announcement_id` | V2 删除公告。 |
+| `GET` | `/api/v1/admin/announcements` | V1 兼容：管理员筛选分页列表。 |
+| `POST` | `/api/v1/admin/announcements` | V1 兼容：新建公告。 |
+| `PUT` | `/api/v1/admin/announcements/:announcement_id` | V1 兼容：更新公告。 |
+| `DELETE` | `/api/v1/admin/announcements/:announcement_id` | V1 兼容：删除公告。 |
 
 创建 / 更新接受的请求体字段（`internal/api/announcement_handlers.go`）：
 

@@ -765,6 +765,22 @@ func TestEmbyViewerCountRequiresLogin(t *testing.T) {
 	}
 }
 
+func TestEmbyNowPlayingIsAdminOnly(t *testing.T) {
+	app := newTestApp(t)
+	adminCookies := registerAndLogin(t, app, "admin", "Admin123456")
+	userCookies := registerAndLogin(t, app, "viewer", "Viewer123456")
+
+	if response := doJSON(app, http.MethodGet, "/api/v1/admin/emby/now-playing", "", userCookies); response.Code != http.StatusForbidden {
+		t.Fatalf("ordinary user now-playing status=%d body=%s, want 403", response.Code, response.Body.String())
+	}
+	if response := doJSON(app, http.MethodGet, "/api/v1/admin/emby/now-playing", "", adminCookies); response.Code != http.StatusOK {
+		t.Fatalf("admin now-playing status=%d body=%s, want 200", response.Code, response.Body.String())
+	}
+	if response := doJSON(app, http.MethodGet, "/api/v1/emby/now-playing", "", adminCookies); response.Code != http.StatusNotFound {
+		t.Fatalf("legacy ordinary-user now-playing route status=%d body=%s, want 404", response.Code, response.Body.String())
+	}
+}
+
 func TestEmbyStatusSkipsLibraryCountsWhenStatsDisabled(t *testing.T) {
 	app := newTestApp(t)
 	var countCalls atomic.Int64
@@ -2078,6 +2094,20 @@ func TestSystemUpdateRejectsUnsafeRepoURL(t *testing.T) {
 	resp := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/update", `{"repo_url":"https://user:pass@example.com/repo.git","branch":"main"}`, []*http.Cookie{cookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if resp.Code != http.StatusBadRequest {
 		t.Fatalf("unsafe update URL status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestGitUpdateResponseDoesNotExposeProjectRoot(t *testing.T) {
+	projectRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := applyGitUpdate(context.Background(), "https://example.com/twilight.git", "main", false, true, false)
+	if _, ok := result["project_root"]; ok {
+		t.Fatalf("git update response leaked project_root: %#v", result)
+	}
+	if response := fmt.Sprint(result); strings.Contains(response, projectRoot) {
+		t.Fatalf("git update response leaked working directory %q: %s", projectRoot, response)
 	}
 }
 
@@ -4856,6 +4886,50 @@ func TestSchedulerManualTriggerSpecDisablesAutoRun(t *testing.T) {
 	}
 }
 
+func TestSchedulerHistoryIsBoundedAndLastRunOmitsLogs(t *testing.T) {
+	app := newTestApp(t)
+	for i := 0; i < 25; i++ {
+		if err := app.store().AddSchedulerRun(store.SchedulerRun{
+			JobID:     "daily_stats",
+			Type:      "manual",
+			Trigger:   "manual",
+			Status:    "success",
+			StartedAt: int64(i + 1),
+			Logs:      []string{"sensitive-looking log output"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	historyReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scheduler/jobs/daily_stats/history?limit=200", nil)
+	historyRR := httptest.NewRecorder()
+	app.handleSchedulerHistory(historyRR, historyReq, Params{"job_id": "daily_stats"})
+	if historyRR.Code != http.StatusOK {
+		t.Fatalf("history status=%d body=%s", historyRR.Code, historyRR.Body.String())
+	}
+	var history struct {
+		Data struct {
+			History []store.SchedulerRun `json:"history"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(historyRR.Body.Bytes(), &history); err != nil {
+		t.Fatal(err)
+	}
+	if len(history.Data.History) != 20 {
+		t.Fatalf("history should be capped at 20 rows, got %d", len(history.Data.History))
+	}
+
+	lastReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scheduler/jobs/daily_stats/last-run", nil)
+	lastRR := httptest.NewRecorder()
+	app.handleSchedulerLastRun(lastRR, lastReq, Params{"job_id": "daily_stats"})
+	if lastRR.Code != http.StatusOK {
+		t.Fatalf("last-run status=%d body=%s", lastRR.Code, lastRR.Body.String())
+	}
+	if strings.Contains(lastRR.Body.String(), "sensitive-looking log output") {
+		t.Fatalf("last-run summary should not duplicate log output: %s", lastRR.Body.String())
+	}
+}
+
 func TestSchedulerJobsReconcileStaleRunningHistory(t *testing.T) {
 	app := newTestApp(t)
 	run, err := app.store().AddSchedulerRunReturning(store.SchedulerRun{JobID: "enforce_group_membership", Type: "auto", Trigger: "scheduler", Status: "running", Message: "running", StartedAt: time.Now().Add(-time.Hour).Unix()})
@@ -5528,6 +5602,24 @@ func TestEmbyCapacityCountsPendingEntitlementsSeparatelyFromSystemLimit(t *testi
 	}
 	if reached, current, limit := app.embyCapacityReached(0); !reached || current != 3 || limit != 3 {
 		t.Fatalf("emby capacity should count existing users and pending code slots, got reached=%v current=%d limit=%d", reached, current, limit)
+	}
+}
+
+func TestSystemUserLimitExcludesConsumedRegistrationSlot(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().UserLimit = 6
+	now := time.Now().Unix()
+	if _, err := app.store().CreateUser(store.User{Username: "existing", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store().UpsertRegCode(store.RegCode{Code: "REG-CONSUME", Type: 1, Days: 30, ValidityTime: -1, UseCountLimit: 5, Active: true, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if reached, current, limit := app.systemUserLimitReached(); !reached || current != 6 || limit != 6 {
+		t.Fatalf("unexcluded limit should include all pending slots, got reached=%v current=%d limit=%d", reached, current, limit)
+	}
+	if reached, current, limit := app.systemUserLimitReachedExcluding("REG-CONSUME", ""); reached || current != 5 || limit != 6 {
+		t.Fatalf("consumed registration slot should be excluded, got reached=%v current=%d limit=%d", reached, current, limit)
 	}
 }
 
@@ -7448,6 +7540,31 @@ func TestTelegramRosterStatsUsesObservedMembers(t *testing.T) {
 	resp := doJSONWithHeaders(app, http.MethodGet, "/api/v1/admin/telegram/roster/stats", ``, []*http.Cookie{cookie}, nil)
 	if resp.Code != http.StatusOK || !strings.Contains(resp.Body.String(), `"bound":1`) || !strings.Contains(resp.Body.String(), `"unbound":1`) || !strings.Contains(resp.Body.String(), `"bots":1`) {
 		t.Fatalf("roster stats status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestTelegramBotTestDoesNotExposeUpstreamError(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().TelegramMode = true
+	app.cfg().TelegramBotToken = "123:SECRET"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":false,"error_code":502,"description":"dial http://10.0.0.8:65535 failed with bot 123:SECRET"}`))
+	}))
+	defer upstream.Close()
+	app.cfg().TelegramAPIURL = upstream.URL
+
+	cookies := registerAndLogin(t, app, "admin", "Admin123456")
+	resp := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/bot/test", `{}`, cookies, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("bot test status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	body := resp.Body.String()
+	if strings.Contains(body, "123:SECRET") || strings.Contains(body, "10.0.0.8") || strings.Contains(body, "dial") {
+		t.Fatalf("bot test exposed upstream diagnostics: %s", body)
+	}
+	if !strings.Contains(body, "Telegram 连接测试失败") {
+		t.Fatalf("bot test did not return generic failure: %s", body)
 	}
 }
 

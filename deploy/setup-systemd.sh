@@ -1,19 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SERVICE_NAMES=("twilight" "twilight-bot" "twilight-scheduler")
+SERVICE_NAMES=("twilight" "twilight-bot" "twilight-scheduler" "twilight-webui-v2")
 LEGACY_PATTERN='python|uvicorn|gunicorn|main\.py|asgi\.py|src\.'
 
 usage() {
   cat <<'EOF'
 Usage:
-  sudo bash deploy/setup-systemd.sh [--dry-run] [--no-build] [--restart]
+  sudo bash deploy/setup-systemd.sh [--dry-run] [--no-build] [--no-build-webui] [--restart]
 
 Environment overrides:
   TWILIGHT_PROJECT_ROOT       Project root. Defaults to the parent of deploy/.
   TWILIGHT_GO_BIN            Backend binary path. Defaults to <project>/bin/twilight.
   TWILIGHT_API_HOST           API bind host. Defaults to 127.0.0.1.
   TWILIGHT_API_PORT           API bind port. Defaults to 5000.
+  TWILIGHT_WEBUI_ROOT         V2 Web UI root. Defaults to <project>/webui-v2.
+  TWILIGHT_WEBUI_HOST         V2 Web UI bind host. Defaults to 127.0.0.1.
+  TWILIGHT_WEBUI_PORT         V2 Web UI bind port. Defaults to 3001.
+  TWILIGHT_WEBUI_ORIGIN       V2 public origin. Defaults to http://127.0.0.1:3001.
+  TWILIGHT_NODE_BIN           Node executable. Defaults to the first node in PATH.
   TWILIGHT_SYSTEMD_USER       systemd service user. Defaults to root.
   TWILIGHT_SYSTEMD_GROUP      systemd service group. Defaults to TWILIGHT_SYSTEMD_USER.
 EOF
@@ -21,11 +26,13 @@ EOF
 
 DRY_RUN=0
 NO_BUILD=0
+NO_BUILD_WEBUI=0
 RESTART=0
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=1 ;;
     --no-build) NO_BUILD=1 ;;
+    --no-build-webui) NO_BUILD_WEBUI=1 ;;
     --restart) RESTART=1 ;;
     -h|--help)
       usage
@@ -64,10 +71,15 @@ need_cmd mktemp
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(realpath "${TWILIGHT_PROJECT_ROOT:-"$SCRIPT_DIR/.."}")"
 BIN_PATH="$(realpath -m "${TWILIGHT_GO_BIN:-"$PROJECT_ROOT/bin/twilight"}")"
+WEBUI_ROOT="$(realpath -m "${TWILIGHT_WEBUI_ROOT:-"$PROJECT_ROOT/webui-v2"}")"
 CONFIG_FILE="$(realpath -m "$PROJECT_ROOT/config.toml")"
 ENV_FILE="$PROJECT_ROOT/.env"
 API_HOST="${TWILIGHT_API_HOST:-127.0.0.1}"
 API_PORT="${TWILIGHT_API_PORT:-5000}"
+WEBUI_HOST="${TWILIGHT_WEBUI_HOST:-127.0.0.1}"
+WEBUI_PORT="${TWILIGHT_WEBUI_PORT:-3001}"
+WEBUI_ORIGIN="${TWILIGHT_WEBUI_ORIGIN:-http://$WEBUI_HOST:$WEBUI_PORT}"
+NODE_BIN="${TWILIGHT_NODE_BIN:-$(command -v node || true)}"
 SERVICE_USER="${TWILIGHT_SYSTEMD_USER:-root}"
 SERVICE_GROUP="${TWILIGHT_SYSTEMD_GROUP:-$SERVICE_USER}"
 UNIT_DIR="/etc/systemd/system"
@@ -87,20 +99,36 @@ if [[ ! -f "$PROJECT_ROOT/go.mod" || ! -d "$PROJECT_ROOT/cmd/twilight" ]]; then
   exit 1
 fi
 
-if [[ "$PROJECT_ROOT$BIN_PATH$CONFIG_FILE$ENV_FILE" =~ [[:space:]] ]]; then
+if [[ "$PROJECT_ROOT$BIN_PATH$WEBUI_ROOT$CONFIG_FILE$ENV_FILE" =~ [[:space:]] ]]; then
   echo "systemd setup does not support whitespace in project, binary, config, or env paths." >&2
   exit 1
 fi
-if [[ "$PROJECT_ROOT$BIN_PATH$CONFIG_FILE$ENV_FILE" == *%* ]]; then
+if [[ "$PROJECT_ROOT$BIN_PATH$WEBUI_ROOT$CONFIG_FILE$ENV_FILE" == *%* ]]; then
   echo "systemd setup does not support '%' in project, binary, config, or env paths because systemd treats it as a specifier." >&2
   exit 1
 fi
-if [[ "$API_HOST$API_PORT$SERVICE_USER$SERVICE_GROUP" =~ [[:space:]] ]]; then
+if [[ "$API_HOST$API_PORT$WEBUI_HOST$WEBUI_PORT$WEBUI_ORIGIN$SERVICE_USER$SERVICE_GROUP" =~ [[:space:]] ]]; then
   echo "systemd setup does not support whitespace in host, port, user, or group values." >&2
+  exit 1
+fi
+if [[ "$WEBUI_ORIGIN" == *%* ]]; then
+  echo "systemd setup does not support '%' in the Web UI origin because systemd treats it as a specifier." >&2
   exit 1
 fi
 if ! [[ "$API_PORT" =~ ^[0-9]{1,5}$ ]] || (( API_PORT < 1 || API_PORT > 65535 )); then
   echo "Invalid API port: $API_PORT" >&2
+  exit 1
+fi
+if ! [[ "$WEBUI_PORT" =~ ^[0-9]{1,5}$ ]] || (( WEBUI_PORT < 1 || WEBUI_PORT > 65535 )); then
+  echo "Invalid Web UI port: $WEBUI_PORT" >&2
+  exit 1
+fi
+if [[ ! -d "$WEBUI_ROOT" || ! -f "$WEBUI_ROOT/package.json" ]]; then
+  echo "V2 Web UI root does not look like a SvelteKit project: $WEBUI_ROOT" >&2
+  exit 1
+fi
+if [[ -z "$NODE_BIN" || ! -x "$NODE_BIN" ]]; then
+  echo "Node executable is missing; set TWILIGHT_NODE_BIN or install node." >&2
   exit 1
 fi
 
@@ -140,6 +168,20 @@ if [[ ! -x "$BIN_PATH" ]]; then
     install -d -m 0755 "$(dirname "$BIN_PATH")"
     (cd "$PROJECT_ROOT" && go build -o "$BIN_PATH" ./cmd/twilight)
     chmod 0755 "$BIN_PATH"
+  fi
+fi
+
+if [[ ! -f "$WEBUI_ROOT/build/index.js" && ! -f "$WEBUI_ROOT/build/index.mjs" ]]; then
+  if [[ "$NO_BUILD_WEBUI" -eq 1 ]]; then
+    echo "V2 Web UI build is missing under: $WEBUI_ROOT/build" >&2
+    exit 1
+  fi
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "V2 Web UI build is missing; dry run would build: $WEBUI_ROOT"
+  else
+    need_cmd pnpm
+    echo "Building V2 Web UI: $WEBUI_ROOT"
+    (cd "$WEBUI_ROOT" && pnpm install --frozen-lockfile && pnpm build)
   fi
 fi
 
@@ -210,6 +252,9 @@ Twilight systemd setup
   config:       $CONFIG_FILE
   env_file:     $ENV_FILE
   api:          $API_HOST:$API_PORT
+  webui_root:   $WEBUI_ROOT
+  webui:        $WEBUI_HOST:$WEBUI_PORT
+  node:         $NODE_BIN
   user/group:   $SERVICE_USER:$SERVICE_GROUP
   unit_dir:     $UNIT_DIR
 EOF
@@ -307,6 +352,43 @@ write_api_unit
 write_worker_unit "twilight-bot" "Twilight Go Telegram Bot Bridge" "bot" "512M" "15"
 write_worker_unit "twilight-scheduler" "Twilight Go Scheduler" "scheduler" "512M" "30"
 
+cat >"$UNIT_DIR/twilight-webui-v2.service" <<EOF
+[Unit]
+Description=Twilight SvelteKit SSR Web UI
+After=network-online.target twilight.service
+Wants=network-online.target
+PartOf=twilight.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=$SERVICE_USER
+Group=$SERVICE_GROUP
+WorkingDirectory=$WEBUI_ROOT
+ExecStart=$NODE_BIN $WEBUI_ROOT/build
+EnvironmentFile=-$WEBUI_ROOT/.env
+Environment=BACKEND_URL=http://$API_HOST:$API_PORT
+Environment=HOST=$WEBUI_HOST
+Environment=PORT=$WEBUI_PORT
+Environment=ORIGIN=$WEBUI_ORIGIN
+
+LimitNOFILE=65535
+MemoryMax=512M
+MemoryHigh=384M
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+KillMode=mixed
+KillSignal=SIGTERM
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=twilight-webui-v2
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 systemctl daemon-reload
 
 if grep -qP 'driver\s*=\s*"?(json|)(\s|$)' "$PROJECT_ROOT/config.toml" 2>/dev/null && \
@@ -315,15 +397,16 @@ if grep -qP 'driver\s*=\s*"?(json|)(\s|$)' "$PROJECT_ROOT/config.toml" 2>/dev/nu
   echo "    twilight-bot and twilight-scheduler will NOT be enabled."
   echo "    Use 'database.driver = \"postgres\"' for multi-process deployment."
   sed -i 's/^ExecStart=.*$/ExecStart='"$BIN_PATH"' all --host '"$API_HOST"' --port '"$API_PORT"' --config config.toml/' "$UNIT_DIR/twilight.service"
-  systemctl enable twilight.service
+  systemctl enable twilight.service twilight-webui-v2.service
   systemctl restart twilight.service || systemctl start twilight.service
+  systemctl restart twilight-webui-v2.service || systemctl start twilight-webui-v2.service
 else
-  systemctl enable twilight.service twilight-bot.service twilight-scheduler.service
+  systemctl enable twilight.service twilight-bot.service twilight-scheduler.service twilight-webui-v2.service
   if [[ "$RESTART" -eq 1 ]]; then
-    systemctl restart twilight.service twilight-bot.service twilight-scheduler.service
+    systemctl restart twilight.service twilight-bot.service twilight-scheduler.service twilight-webui-v2.service
   else
-    systemctl start twilight.service twilight-bot.service twilight-scheduler.service
+    systemctl start twilight.service twilight-bot.service twilight-scheduler.service twilight-webui-v2.service
   fi
 fi
 
-systemctl --no-pager --full status twilight.service twilight-bot.service twilight-scheduler.service || true
+systemctl --no-pager --full status twilight.service twilight-bot.service twilight-scheduler.service twilight-webui-v2.service || true
