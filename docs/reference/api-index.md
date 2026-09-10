@@ -209,7 +209,12 @@ V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/ap
 | POST | `/api/v1/users/me/telegram/rebind-request` | User | 提交 Telegram 换绑申请 |
 | POST | `/api/v1/users/me/telegram/unbind` | User | 解绑 Telegram |
 | GET | `/api/v1/users/me/telegram/bind-code` | User | 生成登录用户的 Telegram 绑定码（需 `X-Twilight-Intent: create-bind-code`） |
+| GET | `/api/v1/users/me/telegram/bind-code/status` | User | 获取换绑码状态 |
+| GET | `/api/v1/users/me/telegram/bind-code/ws` | User | WebSocket 监听换绑码完成事件 |
+| POST | `/api/v1/users/me/telegram/rebind-complete` | User | 完成 Telegram 换绑流程 |
 | GET | `/api/v1/users/me/settings` | User | 当前用户设置聚合 |
+| GET | `/api/v1/users/me/announcements` | User | 我的公告列表（已读/未读状态） |
+| POST | `/api/v1/users/me/announcements/ack` | User | 标记公告为已读 |
 | GET | `/api/v1/users/{uid}/background` | User | 获取指定用户背景（本人或管理员） |
 | PUT | `/api/v1/users/me/background` | User | 更新背景配置 |
 | DELETE | `/api/v1/users/me/background` | User | 删除背景配置 |
@@ -278,6 +283,8 @@ V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/ap
 | DELETE | `/api/v1/system/admin/config/backups/{name}` | Admin | 删除指定配置备份 |
 | POST | `/api/v1/system/admin/config/restore` | Admin | 从备份恢复配置 |
 | POST | `/api/v1/system/admin/config/sweep` | Admin | 手动整理配置文件（迁移历史段、删孤立键、补默认值） |
+| POST | `/api/v1/system/admin/config/upload-auth-background` | Admin | 上传认证背景图 |
+| GET | `/api/v1/system/auth-background` | Public | 获取认证背景图 |
 | GET | `/api/v1/system/admin/apis` | Admin | 当前路由列表 |
 | POST | `/api/v1/system/admin/bot/test` | Admin | Telegram Bot 连通性测试 |
 
@@ -288,6 +295,8 @@ V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/ap
 | 方法 | 路径 | 鉴权 | 说明 |
 | ---- | ---- | ---- | ---- |
 | GET | `/api/v1/emby/status` | User | Emby 服务器状态 |
+| GET | `/api/v1/emby/online` | Public | Emby 在线状态（公开接口） |
+| GET | `/api/v1/emby/items/{item_id}/image` | Public | Emby 媒体项图片代理 |
 | GET | `/api/v1/emby/urls` | Public（Deprecated） | 已弃用，改用 `/system/emby-urls` |
 | GET | `/api/v1/emby/search` | User | Emby 媒体搜索 |
 | GET | `/api/v1/emby/latest` | User | 最新媒体 |
@@ -298,6 +307,7 @@ V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/ap
 
 | 方法 | 路径 | 鉴权 | 说明 |
 | ---- | ---- | ---- | ---- |
+| GET | `/api/v1/bangumi/cover/{subject_id}` | Public | Bangumi 条目封面图代理 |
 | GET | `/api/v1/bangumi/sync/status` | User | 获取当前用户的 Bangumi 同步状态与最近日志 |
 | POST | `/api/v1/bangumi/sync/trigger` | User | 手动触发一次 Bangumi 同步 |
 | GET | `/api/v1/bangumi/sync/history` | User | 获取同步历史日志（`?limit=`） |
@@ -388,7 +398,11 @@ V2 用户端媒体资源（默认 SSR 前端使用）：
 | POST | `/api/v1/admin/users/{uid}/delete` | Admin | 删除用户（推荐；支持 JSON body 的 `mode` 与 `cascade_depth`） |
 | POST | `/api/v1/admin/users/{uid}/disable` | Admin | 禁用用户 |
 | POST | `/api/v1/admin/users/{uid}/enable` | Admin | 启用用户 |
+| POST | `/api/v1/admin/users/{uid}/set-expiry` | Admin | 设置用户到期时间（绝对覆盖） |
+| POST | `/api/v1/admin/users/{uid}/refresh-status` | Admin | 刷新用户状态（重新计算过期状态） |
 | DELETE | `/api/v1/admin/users/{uid}/emby` | Admin | 删除用户的 Emby 账号 |
+| POST | `/api/v1/admin/users/{uid}/emby/disable` | Admin | 禁用用户的 Emby 账号 |
+| POST | `/api/v1/admin/users/{uid}/emby/enable` | Admin | 启用用户的 Emby 账号 |
 | POST | `/api/v1/admin/users/{uid}/force-unbind` | Admin | 强制解除本地绑定 |
 | POST | `/api/v1/admin/users/{uid}/registration-queue/clear` | Admin | 清空指定用户的注册队列 |
 | POST | `/api/v1/admin/users/registration-queue/clear` | Admin | 清空注册队列 |
@@ -420,6 +434,9 @@ V2 用户端媒体资源（默认 SSR 前端使用）：
 | POST | `/api/v1/admin/emby/delete-unlinked` | Admin | 删除未绑定的 Emby 用户 |
 | POST | `/api/v1/admin/emby/create-standalone` | Admin | 创建独立 Emby 用户（不写本地 users 表） |
 | POST | `/api/v1/admin/users/{uid}/bind-emby` | Admin | 为用户绑定/强绑 Emby（冲突走 200+success=false 携带 conflict 详情） |
+| POST | `/api/v1/admin/emby/users/{embyId}/disable` | Admin | 禁用指定 Emby ID 的账号 |
+| POST | `/api/v1/admin/emby/users/{embyId}/enable` | Admin | 启用指定 Emby ID 的账号 |
+| POST | `/api/v1/admin/emby/users/{embyId}/kick` | Admin | 踢出指定 Emby ID 的会话 |
 | GET | `/api/v1/admin/regcodes` | Admin | 注册码列表 |
 | POST | `/api/v1/admin/regcodes` | Admin | 创建注册码 |
 | POST | `/api/v1/admin/regcodes/batch-delete` | Admin | 批量删除注册码 |
@@ -521,6 +538,7 @@ V2 用户端媒体资源（默认 SSR 前端使用）：
 | POST | `/api/v1/admin/email/test` | Admin | 用当前 SMTP 配置发送测试邮件 |
 | GET | `/api/v1/admin/email/verifications` | Admin | 邮箱验证审查；支持 `view=pending|accounts|summary`、`page`、`per_page`、`search`、`verified=all|verified|unverified`，列表视图分页且不返回另一类记录；无 `view` 时保留兼容全量响应 |
 | POST | `/api/v1/admin/email/verifications/cleanup` | Admin | 手动清理所有已过期的在用验证码 |
+| POST | `/api/v1/admin/email/verifications/clear-unverified` | Admin | 清理未验证账号邮箱 |
 | DELETE | `/api/v1/admin/email/verifications/{id}` | Admin | 撤销指定在用验证码记录（立即失效） |
 
 | POST | `/api/v2/admin/email/test` | Admin | V2 使用当前 SMTP 配置发送测试邮件 |
@@ -528,6 +546,7 @@ V2 用户端媒体资源（默认 SSR 前端使用）：
 | POST | `/api/v2/admin/email/verifications/cleanup` | Admin | V2 清理过期邮箱验证码 |
 | POST | `/api/v2/admin/email/verifications/clear-unverified` | Admin | V2 清理未验证账号邮箱 |
 | DELETE | `/api/v2/admin/email/verifications/{id}` | Admin | V2 撤销指定邮箱验证码 |
+| POST | `/api/v1/admin/audit-logs/prune` | Admin | 修剪审计日志（删除超过保留期的记录） |
 | POST | `/api/v1/admin/users/kick-no-emby` | Admin | 踢出无 Emby 账号的用户 |
 | GET | `/api/v1/admin/invite/tree` | Admin | 邀请树；邀请关闭时隐藏没有真实关系的孤立持码用户 |
 | POST | `/api/v1/admin/invite/users/{uid}/detach` | Admin | 将用户脱离邀请关系；邀请关闭后仍可维护历史关系 |
@@ -554,6 +573,7 @@ V2 用户端媒体资源（默认 SSR 前端使用）：
 | POST | `/api/v1/admin/telegram/rebind-requests/{request_id}/approve` | Admin | 通过换绑申请 |
 | POST | `/api/v1/admin/telegram/rebind-requests/{request_id}/reject` | Admin | 拒绝换绑申请 |
 | POST | `/api/v1/admin/telegram/rebind-requests/batch` | Admin | 批量审核换绑申请 |
+| POST | `/api/v1/admin/telegram/rebind-requests/revoke-approved` | Admin | 撤销全部未使用的已批准换绑许可 |
 | GET | `/api/v2/admin/telegram/rebind-requests` | Admin | V2 Telegram 换绑申请分页资源；私有不缓存 |
 | POST | `/api/v2/admin/telegram/rebind-requests/{request_id}/approve` | Admin | V2 批准换绑申请 |
 | POST | `/api/v2/admin/telegram/rebind-requests/{request_id}/reject` | Admin | V2 拒绝换绑申请 |
@@ -608,6 +628,10 @@ V2 用户端媒体资源（默认 SSR 前端使用）：
 | POST | `/api/v1/batch/users/enable` | Admin | 批量启用用户 |
 | POST | `/api/v1/batch/users/renew` | Admin | 批量续期用户 |
 | POST | `/api/v1/batch/users/delete` | Admin | 批量删除用户 |
+| POST | `/api/v1/batch/users/emby/disable` | Admin | 批量禁用用户的 Emby 账号 |
+| POST | `/api/v1/batch/users/emby/enable` | Admin | 批量启用用户的 Emby 账号 |
+| POST | `/api/v1/batch/users/emby/grant-all-libraries` | Admin | 批量为用户授予所有媒体库权限 |
+| POST | `/api/v1/batch/users/refresh-status` | Admin | 批量刷新用户状态 |
 | POST | `/api/v1/batch/users/emby-unbind-lock` | Admin | 批量禁止用户自助解绑 Emby |
 | POST | `/api/v1/batch/users/emby-grant-clear` | Admin | 批量清理无 Emby 账号用户的注册码/邀请码使用记录（解除误判的"已用过注册资格"锁定） |
 | GET | `/api/v1/batch/export/users` | Admin | 导出用户 |
