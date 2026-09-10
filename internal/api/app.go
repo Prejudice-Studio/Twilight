@@ -802,6 +802,11 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// CSRF 保护：所有状态变更方法（POST/PUT/DELETE/PATCH）必须验证 CSRF token
+	if !a.requireCSRF(lw, r) {
+		return
+	}
+
 	route, params, methodAllowed := a.match(r.Method, r.URL.Path)
 	if route == nil {
 		if methodAllowed {
@@ -1396,11 +1401,23 @@ func (a *App) clearSessionCookie(w http.ResponseWriter) {
 	// "default-domain (= 设置时的请求 host)" 寻找另一份同名 cookie，登出
 	// 留下幽灵 cookie 的概率极高——这正是双子域部署里常见的"登出后再访
 	// 问还是登录态"现象。
-	http.SetCookie(w, &http.Cookie{Name: a.cfg().SessionCookie, Path: "/", Domain: a.cfg().CookieDomain, MaxAge: -1, Expires: time.Unix(0, 0), HttpOnly: true, Secure: a.cfg().CookieSecure, SameSite: sameSite(a.cfg().CookieSameSite)})
+	cfg := a.cfg()
+	http.SetCookie(w, &http.Cookie{Name: cfg.SessionCookie, Path: "/", Domain: cfg.CookieDomain, MaxAge: -1, Expires: time.Unix(0, 0), HttpOnly: true, Secure: cfg.CookieSecure, SameSite: sameSite(cfg.CookieSameSite)})
+	// 同时清除 CSRF token cookie
+	http.SetCookie(w, &http.Cookie{Name: "twilight_csrf", Path: "/", Domain: cfg.CookieDomain, MaxAge: -1, Expires: time.Unix(0, 0), HttpOnly: false, Secure: cfg.CookieSecure, SameSite: http.SameSiteLaxMode})
 }
 
 func (a *App) issueSessionCookies(w http.ResponseWriter, sessionToken string, expires time.Time) {
 	a.setSessionCookie(w, sessionToken, expires)
+	// 同时颁发 CSRF token（Double Submit Cookie 方案）
+	csrfToken, err := generateCSRFToken()
+	if err != nil {
+		// CSRF token 生成失败不应阻止登录，记录日志并继续
+		// 用户在后续请求中会因为缺少 CSRF token 而被拒绝
+		zap.L().Error("failed to generate CSRF token", zap.Error(err))
+		return
+	}
+	a.issueCSRFCookie(w, csrfToken, expires)
 }
 
 func sameSite(value string) http.SameSite {

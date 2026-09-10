@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 	"time"
+
+	"github.com/prejudice-studio/twilight/internal/store"
 )
 
 func (a *App) handleSetupStatus(w http.ResponseWriter, r *http.Request, _ Params) {
