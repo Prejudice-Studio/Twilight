@@ -238,6 +238,19 @@ func (a *App) registerV2Routes() {
 	a.add(http.MethodPost, "/api/v2/admin/users/batch/emby-disable", AuthAdmin, a.handleV2BatchEmbyDisable)
 	a.add(http.MethodPost, "/api/v2/admin/users/batch/refresh-status", AuthAdmin, a.handleV2BatchRefreshStatus)
 
+	// Security management resources: devices, login history, IP blacklist
+	a.add(http.MethodGet, "/api/v2/security/devices", AuthUser, a.handleV2UserDevices)
+	a.add(http.MethodPost, "/api/v2/security/devices/:device_id/trust", AuthUser, a.handleV2TrustDevice)
+	a.add(http.MethodDelete, "/api/v2/security/devices/:device_id", AuthUser, a.handleV2DeleteDevice)
+	a.add(http.MethodGet, "/api/v2/security/login-history", AuthUser, a.handleV2UserLoginHistory)
+	a.add(http.MethodGet, "/api/v2/admin/security/users/:uid/devices", AuthAdmin, a.handleV2AdminUserDevices)
+	a.add(http.MethodPost, "/api/v2/admin/security/users/:uid/devices/:device_id/block", AuthAdmin, a.handleV2BlockDevice)
+	a.add(http.MethodGet, "/api/v2/admin/security/users/:uid/login-history", AuthAdmin, a.handleV2AdminLoginHistory)
+	a.add(http.MethodGet, "/api/v2/admin/security/ip-blacklist", AuthAdmin, a.handleV2IPBlacklist)
+	a.add(http.MethodPost, "/api/v2/admin/security/ip-blacklist", AuthAdmin, a.handleV2AddIPBlacklist)
+	a.add(http.MethodDelete, "/api/v2/admin/security/ip-blacklist", AuthAdmin, a.handleV2DeleteIPBlacklist)
+	a.add(http.MethodGet, "/api/v2/admin/security/suspicious", AuthAdmin, a.handleV2Suspicious)
+
 	// Emby management resources. Reads remain bounded and manual-refresh only;
 	// mutations reuse the audited legacy handlers during the V2 migration.
 	a.add(http.MethodGet, "/api/v2/admin/emby/users", AuthAdmin, a.handleV2AdminEmbyUsers)
