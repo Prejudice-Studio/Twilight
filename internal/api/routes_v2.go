@@ -278,4 +278,11 @@ func (a *App) registerV2Routes() {
 	a.add(http.MethodGet, "/api/v2/emby/urls", AuthUser, a.handleV2EmbyURLs)
 	a.add(http.MethodGet, "/api/v2/emby/sessions", AuthUser, a.handleV2EmbyUserSessions)
 	a.add(http.MethodGet, "/api/v2/admin/emby/sessions", AuthAdmin, a.handleV2EmbySessionsAdmin)
+
+	// Telegram extension resources: status, unbind, rebind request, command catalog, roster stats
+	a.add(http.MethodGet, "/api/v2/telegram/status", AuthUser, a.handleV2TelegramStatus)
+	a.add(http.MethodPost, "/api/v2/telegram/unbind", AuthUser, a.handleV2TelegramUnbind)
+	a.add(http.MethodPost, "/api/v2/telegram/rebind-request", AuthUser, a.handleV2TelegramRebindRequest)
+	a.add(http.MethodGet, "/api/v2/telegram/commands", AuthPublic, a.handleV2TelegramCommandCatalog)
+	a.add(http.MethodGet, "/api/v2/admin/telegram/roster/stats", AuthAdmin, a.handleV2TelegramRosterStats)
 }
