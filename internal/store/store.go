@@ -1669,6 +1669,45 @@ func (s *Store) CreateUser(u User) (User, error) {
 	return created, nil
 }
 
+// CreateInitialAdmin creates the first user only while the state is empty.
+// The emptiness check and insert share the same Store transaction boundary so
+// setup cannot race a normal registration into creating a second "first"
+// account.
+func (s *Store) CreateInitialAdmin(u User) (User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var created User
+	err := s.mutateAndSaveLocked(func() error {
+		if len(s.state.Users) != 0 {
+			return ErrSetupUnavailable
+		}
+		if s.usernameExistsLocked(u.Username) || s.emailTakenLocked(u.Email, 0) || s.telegramIDTakenLocked(u.TelegramID, 0) || s.embyIDTakenLocked(u.EmbyID, 0) {
+			return ErrConflict
+		}
+		now := time.Now().Unix()
+		u.UID = s.state.NextUserID
+		s.state.NextUserID++
+		if u.CreatedAt == 0 {
+			u.CreatedAt = now
+		}
+		if u.RegisterTime == 0 {
+			u.RegisterTime = now
+		}
+		if u.ExpiredAt == 0 {
+			u.ExpiredAt = -1
+		}
+		u.Active = true
+		s.state.Users[u.UID] = u
+		s.maintainUserIndexes(User{}, u, u.UID)
+		created = u
+		return nil
+	})
+	if err != nil {
+		return User{}, err
+	}
+	return created, nil
+}
+
 func (s *Store) usernameExistsLocked(username string) bool {
 	return s.usernameTakenLocked(username, 0)
 }
@@ -5353,12 +5392,13 @@ ON CONFLICT (id) DO UPDATE SET update_offset = 0, updated_at = now()`)
 }
 
 var (
-	ErrNotFound    = errors.New("not found")
-	ErrInvalid     = errors.New("invalid")
-	ErrConflict    = errors.New("conflict")
-	ErrExpired     = errors.New("expired")
-	ErrLastAdmin   = errors.New("last admin")
-	ErrGrantLocked = errors.New("emby grant locked")
+	ErrNotFound         = errors.New("not found")
+	ErrInvalid          = errors.New("invalid")
+	ErrConflict         = errors.New("conflict")
+	ErrSetupUnavailable = errors.New("setup unavailable")
+	ErrExpired          = errors.New("expired")
+	ErrLastAdmin        = errors.New("last admin")
+	ErrGrantLocked      = errors.New("emby grant locked")
 	// ErrRegCodeAlreadyUsedByUser 表示同一身份（UID 或 TelegramID）重复消费同一张
 	// 多次数/无限次注册码。语义为「N 次 = N 个人各一次」：UseCount 是可服务人数上限，
 	// 不是单人可叠加的次数。缺此守卫时，用户可对同一张 use_count_limit>1（或 -1）的码

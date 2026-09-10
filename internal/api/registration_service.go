@@ -144,6 +144,15 @@ func registrationFail(status int, code ErrCode, message string) error {
 // and other notifications are intentionally outside this operation so a
 // delivery failure cannot leave a half-created account.
 func (a *App) registerUser(input registrationInput, now int64) (registrationResult, error) {
+	// Setup and ordinary registration share the empty-system boundary. Keeping
+	// this lock in the application service prevents a setup rollback from
+	// interleaving with a registration request in the same process.
+	a.setupMu.Lock()
+	defer a.setupMu.Unlock()
+	return a.registerUserLocked(input, now)
+}
+
+func (a *App) registerUserLocked(input registrationInput, now int64) (registrationResult, error) {
 	input.Username = strings.TrimSpace(input.Username)
 	input.Email = strings.TrimSpace(input.Email)
 	input.RegCode = strings.TrimSpace(input.RegCode)
