@@ -285,4 +285,7 @@ func (a *App) registerV2Routes() {
 	a.add(http.MethodPost, "/api/v2/telegram/rebind-request", AuthUser, a.handleV2TelegramRebindRequest)
 	a.add(http.MethodGet, "/api/v2/telegram/commands", AuthPublic, a.handleV2TelegramCommandCatalog)
 	a.add(http.MethodGet, "/api/v2/admin/telegram/roster/stats", AuthAdmin, a.handleV2TelegramRosterStats)
+
+	// Export resources: users CSV export
+	a.add(http.MethodGet, "/api/v2/admin/export/users", AuthAdmin, a.handleV2ExportUsers)
 }
