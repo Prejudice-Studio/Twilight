@@ -230,6 +230,13 @@ func (a *App) registerV2Routes() {
 	a.add(http.MethodPost, "/api/v2/admin/users/:uid/bind-telegram", AuthAdmin, a.handleV2AdminBindTelegram)
 	a.add(http.MethodGet, "/api/v2/admin/users/by-telegram/:telegram_id", AuthAdmin, a.handleUserByTelegram)
 	a.add(http.MethodPost, "/api/v2/admin/users/:uid/bind-emby", AuthAdmin, a.handleV2AdminBindEmby)
+	a.add(http.MethodPost, "/api/v2/admin/users/batch/disable", AuthAdmin, a.handleV2BatchDisableUsers)
+	a.add(http.MethodPost, "/api/v2/admin/users/batch/enable", AuthAdmin, a.handleV2BatchEnableUsers)
+	a.add(http.MethodPost, "/api/v2/admin/users/batch/renew", AuthAdmin, a.handleV2BatchRenewUsers)
+	a.add(http.MethodPost, "/api/v2/admin/users/batch/delete", AuthAdmin, a.handleV2BatchDeleteUsers)
+	a.add(http.MethodPost, "/api/v2/admin/users/batch/emby-enable", AuthAdmin, a.handleV2BatchEmbyEnable)
+	a.add(http.MethodPost, "/api/v2/admin/users/batch/emby-disable", AuthAdmin, a.handleV2BatchEmbyDisable)
+	a.add(http.MethodPost, "/api/v2/admin/users/batch/refresh-status", AuthAdmin, a.handleV2BatchRefreshStatus)
 
 	// Emby management resources. Reads remain bounded and manual-refresh only;
 	// mutations reuse the audited legacy handlers during the V2 migration.
