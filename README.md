@@ -110,6 +110,9 @@ pnpm build
 | [开发指南](docs/guides/development.md) | 目录结构、开发命令、API 与安全规范、发布流程 |
 | [模块化架构与解耦指南](docs/guides/modular-architecture.md) | 分层边界、依赖方向、大文件拆分顺序与 review 清单 |
 | [安全加固](docs/guides/security.md) | 生产安全基线、敏感信息处理和上线检查清单 |
+| [V2 API 迁移指南](docs/v2/migration-guide.md) | V2 架构特性、端点映射、前端集成、数据库兼容性与迁移清单 |
+| [V2 架构设计](docs/v2/architecture.md) | 设计原则、分层职责、API 策略、数据库迁移路线 |
+| [V2 安全审计报告](docs/v2/security-audit-report.md) | 认证授权、CSRF、速率限制、输入验证、路径防护审计 |
 | [Go 后端架构与配置](docs/reference/backend.md) | 后端架构、配置加载、环境变量、Redis、迁移 |
 | [API 路由索引](docs/reference/api-index.md) | `/api/v1` 路由清单与鉴权级别 |
 | [后端 API 详参](docs/reference/backend-api.md) | REST API 规范、认证、错误码、示例 |
