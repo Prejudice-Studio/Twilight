@@ -288,4 +288,85 @@ func (a *App) registerV2Routes() {
 
 	// Export resources: users CSV export
 	a.add(http.MethodGet, "/api/v2/admin/export/users", AuthAdmin, a.handleV2ExportUsers)
+
+	// User self-service resources: username, password generation, renewal, code use, sessions
+	a.add(http.MethodPut, "/api/v2/settings/username", AuthUser, a.handleV2UpdateUsername)
+	a.add(http.MethodPut, "/api/v2/settings/password/generate", AuthUser, a.handleV2GeneratePassword)
+	a.add(http.MethodPost, "/api/v2/me/renew", AuthUser, a.handleV2Renew)
+	a.add(http.MethodPost, "/api/v2/me/use-code", AuthUser, a.handleV2UseCode)
+	a.add(http.MethodGet, "/api/v2/me/use-code/status", AuthUser, a.handleV2QueueStatus)
+	a.add(http.MethodGet, "/api/v2/me/sessions", AuthUser, a.handleV2Sessions)
+	a.add(http.MethodPost, "/api/v2/me/telegram/rebind-complete", AuthUser, a.handleV2RebindComplete)
+	a.add(http.MethodGet, "/api/v2/me/telegram/bind-code", AuthUser, a.handleV2UserBindCode)
+	a.add(http.MethodGet, "/api/v2/me/telegram/bind-code/status", AuthUser, a.handleV2UserBindCodeStatus)
+
+	// Registration flow polling endpoints
+	a.add(http.MethodGet, "/api/v2/registration/regcode/check", AuthPublic, a.handleV2RegcodeCheck)
+	a.add(http.MethodGet, "/api/v2/registration/telegram/bind-code/status", AuthPublic, a.handleV2BindCodeStatus)
+	a.add(http.MethodPost, "/api/v2/registration/telegram/bind-confirm", AuthPublic, a.handleV2BindConfirmSecure)
+	a.add(http.MethodGet, "/api/v2/registration/emby/queue-status", AuthPublic, a.handleV2QueueStatus)
+
+	// Public system resources: config, icons, backgrounds
+	a.add(http.MethodGet, "/api/v2/system/config", AuthUser, a.handleV2PublicConfig)
+	a.add(http.MethodGet, "/api/v2/system/server-icon", AuthPublic, a.handleV2ServerIcon)
+	a.add(http.MethodGet, "/api/v2/system/auth-background", AuthPublic, a.handleV2AuthBackground)
+	a.add(http.MethodGet, "/api/v2/admin/config", AuthAdmin, a.handleV2AdminConfig)
+	a.add(http.MethodGet, "/api/v2/admin/runtime/logs/stream", AuthAdmin, a.handleV2RuntimeLogStream)
+	a.add(http.MethodPost, "/api/v2/admin/system/update", AuthAdmin, a.handleV2SystemUpdate)
+	a.add(http.MethodPost, "/api/v2/admin/system/server-icon/upload", AuthAdmin, a.handleV2UploadServerIcon)
+	a.add(http.MethodPost, "/api/v2/admin/developer-mode/activate", AuthAdmin, a.handleV2DeveloperModeActivate)
+
+	// Emby extension resources: status, search, latest, sessions/count, images
+	a.add(http.MethodGet, "/api/v2/emby/status", AuthUser, a.handleV2EmbyStatus)
+	a.add(http.MethodGet, "/api/v2/emby/search", AuthUser, a.handleV2EmbySearch)
+	a.add(http.MethodGet, "/api/v2/emby/latest", AuthUser, a.handleV2EmbyLatest)
+	a.add(http.MethodGet, "/api/v2/emby/sessions/count", AuthUser, a.handleV2EmbySessionCount)
+	a.add(http.MethodGet, "/api/v2/emby/items/:item_id/image", AuthUser, a.handleV2EmbyItemImage)
+	a.add(http.MethodPost, "/api/v2/emby/urls/probe", AuthUser, a.handleV2EmbyURLProbe)
+	a.add(http.MethodPost, "/api/v2/emby/bangumi/webhook", AuthPublic, a.handleV2BangumiWebhook)
+	a.add(http.MethodGet, "/api/v2/admin/emby/activity", AuthAdmin, a.handleV2AdminEmbyActivity)
+
+	// Media extended endpoints
+	a.add(http.MethodGet, "/api/v2/media/detail/:source_type/:media_id", AuthUser, a.handleV2MediaDetail2)
+	a.add(http.MethodGet, "/api/v2/media/inventory/search", AuthUser, a.handleV2MediaInventorySearch)
+	a.add(http.MethodGet, "/api/v2/media/requests/:request_id", AuthUser, a.handleV2MediaRequestByID)
+	a.add(http.MethodDelete, "/api/v2/media/requests/:request_id", AuthUser, a.handleV2DeleteMediaRequestByKey)
+	a.add(http.MethodPost, "/api/v2/media/requests/external/update", AuthPublic, a.handleV2ExternalMediaUpdate)
+
+	// Invite/signin extended endpoints
+	a.add(http.MethodGet, "/api/v2/invite/config", AuthPublic, a.handleV2InviteConfig)
+	a.add(http.MethodGet, "/api/v2/invite/check", AuthPublic, a.handleV2InviteCheck)
+	a.add(http.MethodPost, "/api/v2/invite/use", AuthUser, a.handleV2InviteUse)
+	a.add(http.MethodGet, "/api/v2/signin/config", AuthPublic, a.handleV2SigninConfig)
+	a.add(http.MethodGet, "/api/v2/signin/history", AuthUser, a.handleV2SigninHistory)
+
+	// User appearance resources (public access)
+	a.add(http.MethodGet, "/api/v2/users/:uid/background", AuthUser, a.handleV2UserBackground)
+	a.add(http.MethodGet, "/api/v2/users/:uid/avatar", AuthUser, a.handleV2UserAvatar)
+	a.add(http.MethodGet, "/api/v2/users/assets/:kind/:filename", AuthUser, a.handleV2UserAsset)
+
+	// Admin extended user operations
+	a.add(http.MethodPost, "/api/v2/admin/users/bulk-expire", AuthAdmin, a.handleV2AdminBulkExpire)
+	a.add(http.MethodPost, "/api/v2/admin/users/bulk-enable-disabled", AuthAdmin, a.handleV2AdminBulkEnableDisabled)
+	a.add(http.MethodPost, "/api/v2/admin/users/cleanup-invalid", AuthAdmin, a.handleV2AdminCleanupInvalid)
+	a.add(http.MethodPost, "/api/v2/admin/users/clear-stale-pending-emby", AuthAdmin, a.handleV2AdminClearStalePendingEmby)
+	a.add(http.MethodPost, "/api/v2/admin/users/clear-emails", AuthAdmin, a.handleV2AdminClearUserEmails)
+	a.add(http.MethodPost, "/api/v2/admin/users/:uid/bind-email", AuthAdmin, a.handleV2AdminBindUserEmail)
+	a.add(http.MethodPost, "/api/v2/admin/users/:uid/email/verified", AuthAdmin, a.handleV2AdminSetUserEmailVerified)
+	a.add(http.MethodPost, "/api/v2/admin/users/kick-no-emby", AuthAdmin, a.handleV2AdminKickNoEmby)
+	a.add(http.MethodPost, "/api/v2/admin/whitelist", AuthAdmin, a.handleV2AdminWhitelist)
+
+	// Batch extended operations
+	a.add(http.MethodPost, "/api/v2/admin/users/batch/emby-unbind-lock", AuthAdmin, a.handleV2BatchEmbyUnbindLock)
+	a.add(http.MethodPost, "/api/v2/admin/users/batch/emby-grant-clear", AuthAdmin, a.handleV2BatchEmbyGrantClear)
+	a.add(http.MethodPost, "/api/v2/admin/users/batch/emby-grant-all-libraries", AuthAdmin, a.handleV2BatchGrantAllLibraries)
+	a.add(http.MethodGet, "/api/v2/admin/users/expiring", AuthAdmin, a.handleV2ExpiringUsers)
+	a.add(http.MethodPost, "/api/v2/admin/users/send-reminders", AuthAdmin, a.handleV2SendReminders)
+
+	// Telegram admin extended
+	a.add(http.MethodPost, "/api/v2/admin/telegram/rejoined-users/enable", AuthAdmin, a.handleV2TelegramRejoinedEnable)
+	a.add(http.MethodPost, "/api/v2/admin/telegram/kick-unbound", AuthAdmin, a.handleV2TelegramKickUnbound)
+
+	// Security extended
+	a.add(http.MethodPost, "/api/v2/security/devices/:device_id/block", AuthUser, a.handleV2SecurityBlockDevice)
 }
