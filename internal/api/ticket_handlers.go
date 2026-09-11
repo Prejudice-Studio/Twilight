@@ -1266,50 +1266,59 @@ func (a *App) notifyTicketOwner(ctx context.Context, updated, existing store.Tic
 		now := time.Now().Format("2006-01-02 15:04:05")
 		adminNote := ticketOwnerNotificationNote(updated, existing)
 		esc := telegramEscapeHTML
-		// HTML 版：值全部转义，{admin_note_content} 拼成带 blockquote 的安全片段。
+
+		baseParams := a.NewTemplateParams(sendCtx, owner).BuildAll()
+
+		ticketParams := map[string]string{
+			"ticket_id":  strconv.FormatInt(updated.ID, 10),
+			"title":      firstNonEmpty(strings.TrimSpace(updated.Title), "(无标题)"),
+			"status":     statusLabel(updated.Status),
+			"priority":   ticketPriorityLabel(updated.Priority),
+			"type":       strings.TrimSpace(updated.Type),
+			"admin_note": adminNote,
+			"time":       now,
+		}
+
+		// HTML 版本参数（带转义和富文本内容）
 		htmlNoteContent := ""
-		plainNoteContent := ""
 		if adminNote != "" {
 			htmlNoteContent = "\n💬 <b>回复内容</b>\n<blockquote>" + esc(truncateString(adminNote, 500)) + "</blockquote>"
+		}
+		htmlParams := make(map[string]string, len(baseParams)+len(ticketParams))
+		for k, v := range baseParams {
+			htmlParams[k] = esc(v)
+		}
+		for k, v := range ticketParams {
+			htmlParams[k] = esc(v)
+		}
+		htmlParams["status"] = esc(statusLabelWithEmoji(updated.Status))
+		htmlParams["admin_note_content"] = htmlNoteContent
+
+		// 纯文本版本参数
+		plainNoteContent := ""
+		if adminNote != "" {
 			plainNoteContent = "回复内容：\n" + adminNote
 		}
-		htmlValues := map[string]string{
-			"{ticket_id}":          strconv.FormatInt(updated.ID, 10),
-			"{title}":              esc(firstNonEmpty(strings.TrimSpace(updated.Title), "(无标题)")),
-			"{status}":             esc(statusLabelWithEmoji(updated.Status)),
-			"{priority}":           esc(ticketPriorityLabel(updated.Priority)),
-			"{type}":               esc(strings.TrimSpace(updated.Type)),
-			"{admin_note}":         esc(adminNote),
-			"{admin_note_content}": htmlNoteContent,
-			"{time}":               esc(now),
-			"{server_name}":        esc(a.cfg().AppName),
+		plainParams := make(map[string]string, len(baseParams)+len(ticketParams))
+		for k, v := range baseParams {
+			plainParams[k] = v
 		}
-		// 纯文本降级版：自定义模板混入裸 < / & 导致 HTML 解析失败时用原始值重发。
-		plainValues := map[string]string{
-			"{ticket_id}":          strconv.FormatInt(updated.ID, 10),
-			"{title}":              firstNonEmpty(strings.TrimSpace(updated.Title), "(无标题)"),
-			"{status}":             statusLabel(updated.Status),
-			"{priority}":           ticketPriorityLabel(updated.Priority),
-			"{type}":               strings.TrimSpace(updated.Type),
-			"{admin_note}":         adminNote,
-			"{admin_note_content}": plainNoteContent,
-			"{time}":               now,
-			"{server_name}":        a.cfg().AppName,
+		for k, v := range ticketParams {
+			plainParams[k] = v
 		}
+		plainParams["admin_note_content"] = plainNoteContent
+
 		tmpl := a.cfg().TicketNotifyTelegramTemplate
 		usingDefault := strings.TrimSpace(tmpl) == ""
 		if usingDefault {
 			tmpl = config.DefaultTicketNotifyTelegramTemplate
 		}
-		htmlText := replaceNotifPlaceholders(tmpl, htmlValues)
-		// 纯文本降级：默认模板含我们已知的 HTML 标签，去标签得到干净纯文本；
-		// 自定义模板历史上是纯文本，直接用原始值渲染，绝不 stripTelegramHTML——
-		// 否则模板里合法的裸 <（如“价格 < 100”）会把其后内容当标签吃掉。
+		htmlText := RenderTemplate(tmpl, htmlParams)
 		var plainText string
 		if usingDefault {
-			plainText = stripTelegramHTML(replaceNotifPlaceholders(tmpl, plainValues))
+			plainText = stripTelegramHTML(RenderTemplate(tmpl, plainParams))
 		} else {
-			plainText = replaceNotifPlaceholders(tmpl, plainValues)
+			plainText = RenderTemplate(tmpl, plainParams)
 		}
 		result := ticketNotificationResult{Targets: 1}
 		if err := a.telegramSendRichMessage(sendCtx, owner.TelegramID, htmlText, plainText); err != nil {

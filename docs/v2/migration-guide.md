@@ -305,6 +305,178 @@ const API_BASE = '/api/v1'; // 回滚到 V1
 
 **A**: 运行完整测试套件（`go test ./...` 和 `pnpm check`），确保所有测试通过。在暂存环境测试关键流程（登录、注册、用户管理）。
 
+## 模板参数系统增强
+
+### 概述
+
+V2 引入了统一的模板参数系统，大幅扩展了可在通知模板中使用的参数数量（从原来的约10个扩展到60+个），使管理员可以创建更丰富、更个性化的通知消息。
+
+### 新增参数分类
+
+#### 1. Emby 状态相关（新增重点功能）
+
+| 参数 | 说明 | 示例值 |
+|------|------|--------|
+| `{emby_enabled}` | Emby 是否启用 | 是 / 否 |
+| `{emby_disabled}` | Emby 是否禁用 | 是 / 否 |
+| `{emby_enabled_status}` | Emby 启用状态 | 已启用 / 已禁用 / - |
+| `{emby_disabled_reason}` | Emby 禁用原因 | 未绑定 / 正常 / Web账号被禁用 / 账号已过期 / 已禁用 |
+| `{emby_grant_locked}` | 是否已使用注册资格 | 是 / 否 |
+
+#### 2. 账号状态增强
+
+| 参数 | 说明 | 示例值 |
+|------|------|--------|
+| `{days_until_expiry}` | 到期剩余天数 | 永久 / 已过期 / 30天 / 不足1天 |
+| `{is_expired}` | 是否已过期 | 是 / 否 |
+| `{is_permanent}` | 是否永久账号 | 是 / 否 |
+| `{account_enabled}` | 账号启用状态 | 已启用 / 已禁用 |
+| `{expiry_time}` | 到期时间 | 2026-12-31 23:59:59 / 永久 |
+
+#### 3. 角色和权限
+
+| 参数 | 说明 | 示例值 |
+|------|------|--------|
+| `{role_name}` | 用户角色名称 | 管理员 / 普通用户 / 白名单用户 |
+| `{is_admin}` | 是否管理员 | 是 / 否 |
+| `{is_whitelist}` | 是否白名单用户 | 是 / 否 |
+| `{is_protected}` | 是否受保护账号 | 是 / 否 |
+
+#### 4. 绑定状态完整信息
+
+| 参数 | 说明 | 示例值 |
+|------|------|--------|
+| `{telegram_bound}` | Telegram 是否绑定 | 是 / 否 |
+| `{telegram_id}` | Telegram 用户ID | 123456789 / - |
+| `{email_bound}` | 邮箱是否绑定 | 是 / 否 |
+| `{email_verified_status}` | 邮箱验证状态 | 已验证 / 未验证 |
+| `{rebinding_in_progress}` | 是否换绑中 | 是 / 否 |
+
+#### 5. 通知设置
+
+| 参数 | 说明 | 示例值 |
+|------|------|--------|
+| `{notify_login_telegram}` | 是否开启登录 TG 通知 | 是 / 否 |
+| `{notify_login_email}` | 是否开启登录邮件通知 | 是 / 否 |
+| `{notify_ticket_telegram}` | 是否开启工单 TG 通知 | 是 / 否 |
+
+### 模板迁移示例
+
+#### 登录通知模板
+
+**V1 模板（仅支持基础参数）：**
+```
+新登录通知
+
+账号：{username}
+时间：{time}
+IP：{ip}
+设备：{device}
+```
+
+**V2 增强模板（可使用所有用户状态参数）：**
+```
+🔐 新登录通知
+
+== 基本信息 ==
+用户：{username} (UID: {uid})
+角色：{role_name}
+时间：{time}
+IP：{ip}
+设备：{device}
+
+== 账号状态 ==
+Web 状态：{account_enabled}
+到期：{expire_status} ({days_until_expiry})
+
+== 服务状态 ==
+Emby：{emby_enabled_status}
+{emby_disabled_reason}
+
+如非本人操作，请立即修改密码！
+```
+
+#### 工单通知模板
+
+**V1 模板：**
+```
+🎫 工单更新通知
+{server_name}
+━━━━━━━━━━━━━━
+🆔 #{ticket_id}  {title}
+📊 状态：{status}
+🕒 {time}
+{admin_note_content}
+```
+
+**V2 增强模板（新增用户状态信息）：**
+```
+🎫 工单更新通知
+{server_name}
+━━━━━━━━━━━━━━
+🆔 #{ticket_id}  {title}
+📊 状态：{status}
+🕒 {time}
+
+== 您的账号状态 ==
+Emby：{emby_enabled_status}
+到期：{days_until_expiry}
+
+{admin_note_content}
+```
+
+### 向后兼容性
+
+- ✅ **完全兼容**：所有 V1 参数在 V2 中继续可用
+- ✅ **平滑升级**：现有模板无需修改即可工作
+- ✅ **渐进增强**：管理员可按需逐步添加新参数
+- ✅ **参数缺失处理**：未识别的参数占位符保持原样，不会导致错误
+
+### 配置方式
+
+模板配置位置保持不变：
+
+**config.toml：**
+```toml
+[Notification]
+login_notify_telegram_template = """
+新登录通知
+账号：{username} (角色：{role_name})
+时间：{time}
+IP：{ip}
+Emby 状态：{emby_enabled_status}
+到期：{days_until_expiry}
+"""
+
+[Ticket]
+notify_telegram_template = """
+🎫 #{ticket_id} {title}
+状态：{status}
+用户 Emby：{emby_enabled_status}
+{admin_note_content}
+"""
+```
+
+**WebUI 配置界面（即将推出）：**
+- 可视化模板编辑器
+- 实时参数预览
+- 参数自动补全提示
+
+### 测试新参数
+
+```bash
+# 触发登录通知查看新参数效果
+curl -X POST http://localhost:5000/api/v2/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"test","password":"test123"}'
+
+# 触发工单通知查看新参数效果
+curl -X POST http://localhost:5000/api/v2/tickets/{ticket_id}/reply \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"content":"测试回复"}'
+```
+
 ## 下一步
 
 1. **阅读架构文档**: [V2 架构设计](./architecture.md)

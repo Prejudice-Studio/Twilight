@@ -411,6 +411,29 @@ CREATE TABLE IF NOT EXISTS twilight_telegram_runtime (
 		return nil, status, describePostgresConnectionError(target, err)
 	}
 	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS twilight_telegram_identity_history (
+	id bigserial PRIMARY KEY,
+	uid bigint NOT NULL,
+	telegram_id bigint NOT NULL,
+	telegram_username text NOT NULL DEFAULT '',
+	change_type text NOT NULL DEFAULT 'update',
+	recorded_at timestamptz NOT NULL DEFAULT now(),
+	recorded_unix bigint NOT NULL
+)`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
+	if _, err := db.ExecContext(ctx, `
+CREATE INDEX IF NOT EXISTS twilight_telegram_identity_history_uid_idx ON twilight_telegram_identity_history (uid, recorded_at DESC)`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
+	if _, err := db.ExecContext(ctx, `
+CREATE INDEX IF NOT EXISTS twilight_telegram_identity_history_telegram_id_idx ON twilight_telegram_identity_history (telegram_id, recorded_at DESC)`); err != nil {
+		_ = db.Close()
+		return nil, status, describePostgresConnectionError(target, err)
+	}
+	if _, err := db.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS twilight_playback_records (
 	id bigserial PRIMARY KEY,
 	uid bigint NOT NULL,

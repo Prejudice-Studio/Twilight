@@ -933,8 +933,20 @@ var (
 		"{bgm_mode}", "{bgm_token_status}", "{bgm_sync_status}",
 		"{api_key_status}", "{panel_ttl}", "{panel_ttl_seconds}",
 	}
-	placeholderHintsLoginNotify = []string{"{server_name}", "{username}", "{time}", "{ip}", "{device}"}
-	placeholderHintsTicketNotify = []string{"{ticket_id}", "{title}", "{status}", "{priority}", "{type}", "{admin_note}", "{admin_note_content}", "{time}", "{server_name}"}
+	placeholderHintsLoginNotify = []string{
+		"{server_name}", "{username}", "{uid}", "{time}", "{ip}", "{device}",
+		"{role}", "{role_name}", "{is_admin}", "{is_whitelist}", "{is_protected}",
+		"{account_enabled}", "{expire_status}", "{expired_at}", "{days_until_expiry}",
+		"{emby_status}", "{emby_enabled_status}", "{emby_disabled_reason}", "{emby_username}",
+		"{telegram_status}", "{telegram_username}", "{email}", "{email_verified_status}",
+	}
+	placeholderHintsTicketNotify = []string{
+		"{ticket_id}", "{title}", "{status}", "{priority}", "{type}", "{admin_note}", "{admin_note_content}", "{time}", "{server_name}",
+		"{username}", "{uid}", "{role}", "{role_name}",
+		"{account_enabled}", "{expire_status}", "{days_until_expiry}",
+		"{emby_status}", "{emby_enabled_status}", "{emby_disabled_reason}",
+		"{telegram_status}", "{email_verified_status}",
+	}
 	placeholderHintsEmailCode     = []string{"{site}", "{code}", "{ttl}"}
 )
 
