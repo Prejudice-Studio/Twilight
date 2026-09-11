@@ -7,11 +7,11 @@
 **面向 Emby / Jellyfin 的用户、邀请、卡码、Bot 与运维管理面板**
 
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
-[![SvelteKit](https://img.shields.io/badge/SvelteKit-SSR-ff3e00?logo=svelte&logoColor=white)](https://kit.svelte.dev/)
+[![Next.js](https://img.shields.io/badge/Next.js-React-black?logo=next.js&logoColor=white)](https://nextjs.org/)
 [![License](https://img.shields.io/badge/License-AGPL--3.0-blue)](LICENSE)
 [![Telegram](https://img.shields.io/badge/Telegram-频道-blue?logo=telegram)](https://t.me/Twilightpanel)
 
-[快速开始](#快速开始) · [功能特性](#功能特性) · [在线文档](docs/README.md) · [更新日志](CHANGELOG.md) · [Telegram 群组](https://t.me/TwilightPanelChat)
+[快速开始](#快速开始) · [功能特性](#功能特性) · [在线文档](docs/README.md) · [Telegram 群组](https://t.me/TwilightPanelChat)
 
 </div>
 
@@ -24,7 +24,7 @@ Twilight 是一个功能完善的 Emby / Jellyfin 用户管理系统，提供注
 ### 技术栈
 
 - **后端**: Go 1.25+ / PostgreSQL
-- **前端**: SvelteKit SSR / TypeScript / Tailwind CSS
+- **前端**: Next.js / React / TypeScript / Tailwind CSS
 - **部署**: Docker / Linux systemd
 
 ## 功能特性
