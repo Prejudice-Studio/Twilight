@@ -2574,6 +2574,15 @@ func (s *Store) BindUserTelegramAtomicWithUsername(uid int64, tgid int64, telegr
 	if err != nil {
 		return User{}, 0, err
 	}
+	if tgid != 0 {
+		changeType := "bind"
+		if old != 0 && old != tgid {
+			changeType = "rebind"
+		} else if old == tgid {
+			changeType = "update"
+		}
+		_ = s.RecordTelegramIdentity(context.Background(), uid, tgid, updated.TelegramUsername, changeType)
+	}
 	return updated, old, nil
 }
 

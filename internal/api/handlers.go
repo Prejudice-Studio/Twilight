@@ -1516,11 +1516,16 @@ func (a *App) handleUnbindTelegram(w http.ResponseWriter, r *http.Request, _ Par
 		}
 		consumeRebindID = latestReq.ID
 	}
+	oldTelegramID := p.User.TelegramID
+	oldTelegramUsername := p.User.TelegramUsername
 	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error { u.TelegramID = 0; u.TelegramUsername = ""; return nil })
 	if statusFromError(w, err) {
 		return
 	}
-	a.cleanupUserTelegramResidue(p.User.UID, p.User.TelegramID)
+	if oldTelegramID != 0 {
+		_ = a.store().RecordTelegramIdentity(r.Context(), p.User.UID, oldTelegramID, oldTelegramUsername, "unbind")
+	}
+	a.cleanupUserTelegramResidue(p.User.UID, oldTelegramID)
 	// Mark approved rebind request as consumed so it cannot be reused.
 	// 走 ConsumeRebindRequest 而非 ReviewRebindRequest：后者会把 ReviewerUID
 	// 覆盖成 0、用 "auto-consumed" 抹掉管理员原始审核备注、并把 ReviewedAt

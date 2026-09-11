@@ -701,7 +701,11 @@ func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelC
 		}
 		whitelisted := action == "whitelist_add"
 		updated, err := a.store().UpdateUser(target.UID, func(u *store.User) error {
-			u.Whitelisted = whitelisted
+			if whitelisted {
+				u.Role = store.RoleWhitelist
+			} else if u.Role == store.RoleWhitelist {
+				u.Role = store.RoleNormal
+			}
 			return nil
 		})
 		if err != nil {
@@ -857,7 +861,7 @@ func (a *App) telegramGroupUserPanelPlaceholders(ctx context.Context, chatID int
 		email = "-"
 	}
 	emailVerified := telegramYesNoLabel(u.EmailVerified)
-	whitelistStatus := telegramYesNoLabel(u.Whitelisted)
+	whitelistStatus := telegramYesNoLabel(u.Role == store.RoleWhitelist)
 	return map[string]string{
 		"server_name":          a.cfg().AppName,
 		"username":             u.Username,
@@ -1053,7 +1057,7 @@ func (a *App) telegramGroupUserPanelMarkup(token string, u store.User, confirmAc
 			{Text: "授予永久", Data: "gadm:act:grant_register_perm:" + token},
 		})
 	}
-	if u.Whitelisted {
+	if u.Role == store.RoleWhitelist {
 		panelRows = append(panelRows, []telegramInlineButton{{Text: "取消白名单", Data: "gadm:act:whitelist_remove:" + token}})
 	} else {
 		panelRows = append(panelRows, []telegramInlineButton{{Text: "加入白名单", Data: "gadm:act:whitelist_add:" + token}})

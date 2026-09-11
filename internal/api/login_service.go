@@ -101,19 +101,18 @@ func (a *App) completeLogin(r *http.Request, input loginInput, user store.User) 
 	})
 	a.auditWithUser(r, user.UID, user.Username, "login", "user", 0, map[string]any{"ip": input.IP, "device": deviceID})
 
-	notificationValues := map[string]string{
-		"{username}":    user.Username,
-		"{time}":        time.Now().Format("2006-01-02 15:04:05"),
-		"{ip}":          input.IP,
-		"{device}":      userAgent,
-		"{server_name}": a.cfg().AppName,
-	}
+	// 使用统一的模板参数系统，支持所有用户状态参数
+	templateParams := a.NewTemplateParams(r.Context(), user).BuildWithExtra(map[string]string{
+		"time":   time.Now().Format("2006-01-02 15:04:05"),
+		"ip":     input.IP,
+		"device": userAgent,
+	})
 	if a.telegramAvailable() && user.TelegramID != 0 && user.NotifyOnLoginTelegram {
 		template := a.cfg().LoginNotifyTelegramTemplate
 		if template == "" {
 			template = config.DefaultLoginNotifyTelegramTemplate
 		}
-		a.telegramSendMessage(r.Context(), user.TelegramID, replaceNotifPlaceholders(template, notificationValues))
+		a.telegramSendMessage(r.Context(), user.TelegramID, RenderTemplate(template, templateParams))
 	}
 	if emailConfigured(a.cfg()) && user.Email != "" && user.EmailVerified && user.NotifyOnLoginEmail {
 		subjectTemplate := a.cfg().LoginNotifyEmailSubjectTemplate
@@ -125,8 +124,8 @@ func (a *App) completeLogin(r *http.Request, input loginInput, user store.User) 
 			bodyTemplate = config.DefaultLoginNotifyEmailBodyTemplate
 		}
 		smtpDeliver(r.Context(), *a.cfg(), user.Email,
-			replaceNotifPlaceholders(subjectTemplate, notificationValues),
-			replaceNotifPlaceholders(bodyTemplate, notificationValues))
+			RenderTemplate(subjectTemplate, templateParams),
+			RenderTemplate(bodyTemplate, templateParams))
 	}
 	if cfg := a.cfg(); cfg.DeviceLimitEnabled && cfg.MaxDevices > 0 {
 		_ = a.store().EnforceDeviceLimit(user.UID, cfg.MaxDevices)
