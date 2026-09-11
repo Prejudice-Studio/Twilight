@@ -46,10 +46,22 @@
 | [背景与头像](./features/background.md) | 受控上传资源读取、背景 CSS 安全约束 |
 | [Telegram Bot 命令](./features/telegram-bot.md) | Bot 命令、权限边界、群聊安全约束与文案配置 |
 
+## V2 重构专题
+
+| 文档 | 用途 |
+| ---- | ---- |
+| [V2 架构设计](./v2/architecture.md) | 分层设计、应用服务、缓存策略 |
+| [V2 SSR 前端](./v2/frontend-ssr.md) | SvelteKit SSR 架构与实现 |
+| [V2 API 迁移指南](./v2/migration-guide.md) | V1 到 V2 端点映射与迁移路径 |
+| [模板参数系统](./v2/template-parameters.md) | 60+ 统一模板参数完整参考 |
+| [Telegram 身份历史](./v2/telegram-identity-history.md) | Username/UserID 变更追踪与审计 |
+| [前端路由矩阵](./v2/frontend-route-matrix.md) | SSR 页面路由与鉴权映射 |
+| [V2 安全审计报告](./v2/security-audit-report.md) | 安全增强与漏洞修复清单 |
+| [V1 审计基线](./v2/v1-audit.md) | V1 代码审查与技术债务 |
+
 ## 其他
 
 - API 文档：服务启动后访问默认 SSR 页面 `/api-docs`；公开 OpenAPI 规范为 `/api/v2/openapi.json`。旧 `/api/v1/docs` 仅作为兼容入口保留。
-- V2 重构文档：[V1 审计基线](./v2/v1-audit.md)、[V2 架构设计](./v2/architecture.md)、[V2 SSR 前端](./v2/frontend-ssr.md)、[前端路由矩阵](./v2/frontend-route-matrix.md)、[V2 安全审计报告](./v2/security-audit-report.md)、[V2 API 迁移指南](./v2/migration-guide.md)
 
 ## 说明
 
