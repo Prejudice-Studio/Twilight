@@ -694,6 +694,29 @@ func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelC
 			"emby_id": target.EmbyID,
 		})
 		a.telegramEditPanelWithNotice(ctx, panel, updated, "Emby 账号已删除，本地账号保留。")
+	case "whitelist_add", "whitelist_remove":
+		if a.telegramProtectedTarget(target) {
+			a.telegramEditPanelWithNotice(ctx, panel, target, "管理员账号无需白名单操作。")
+			return
+		}
+		whitelisted := action == "whitelist_add"
+		updated, err := a.store().UpdateUser(target.UID, func(u *store.User) error {
+			u.Whitelisted = whitelisted
+			return nil
+		})
+		if err != nil {
+			a.telegramEditPanelWithNotice(ctx, panel, target, "更新白名单状态失败: "+err.Error())
+			return
+		}
+		verb := "移出白名单"
+		if whitelisted {
+			verb = "加入白名单"
+		}
+		a.auditTelegramAction(actorID, "telegram_panel_"+action, "admin", target.UID, map[string]any{
+			"chat_id":     panel.ChatID,
+			"whitelisted": whitelisted,
+		})
+		a.telegramEditPanelWithNotice(ctx, panel, updated, "已"+verb+"。")
 	case "kick", "ban":
 		if target.TelegramID == 0 {
 			a.telegramEditPanelWithNotice(ctx, panel, target, "目标用户未绑定 Telegram，无法执行群组操作。")
@@ -829,10 +852,19 @@ func (a *App) telegramGroupUserPanelPlaceholders(ctx context.Context, chatID int
 	} else if u.BGMMode {
 		bgmSyncStatus = "可同步"
 	}
+	email := strings.TrimSpace(u.Email)
+	if email == "" {
+		email = "-"
+	}
+	emailVerified := telegramYesNoLabel(u.EmailVerified)
+	whitelistStatus := telegramYesNoLabel(u.Whitelisted)
 	return map[string]string{
 		"server_name":          a.cfg().AppName,
 		"username":             u.Username,
 		"uid":                  strconv.FormatInt(u.UID, 10),
+		"email":                email,
+		"email_verified":       emailVerified,
+		"whitelisted":          whitelistStatus,
 		"role":                 roleName(u.Role),
 		"role_id":              strconv.Itoa(u.Role),
 		"is_admin":             telegramYesNoLabel(u.Role == store.RoleAdmin),
@@ -1020,6 +1052,11 @@ func (a *App) telegramGroupUserPanelMarkup(token string, u store.User, confirmAc
 			{Text: "授予 365 天", Data: "gadm:act:grant_register_365:" + token},
 			{Text: "授予永久", Data: "gadm:act:grant_register_perm:" + token},
 		})
+	}
+	if u.Whitelisted {
+		panelRows = append(panelRows, []telegramInlineButton{{Text: "取消白名单", Data: "gadm:act:whitelist_remove:" + token}})
+	} else {
+		panelRows = append(panelRows, []telegramInlineButton{{Text: "加入白名单", Data: "gadm:act:whitelist_add:" + token}})
 	}
 	if confirmAction == "delete" {
 		panelRows = append(panelRows, []telegramInlineButton{{Text: "确认删除用户", Data: "gadm:act:delete_confirm:" + token}})
