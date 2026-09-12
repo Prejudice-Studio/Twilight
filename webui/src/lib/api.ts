@@ -509,7 +509,7 @@ class ApiClient {
       cache: "no-store",
       signal,
     }, { apiVersion: "v2", cacheRead: false, dedupe: false });
-    if (res.success && res.data?.user?.avatar) {
+    if (res.success && res.data && 'user' in res.data && res.data.user?.avatar) {
       res.data.user.avatar = this.toAbsoluteAssetUrl(res.data.user.avatar) || undefined;
     }
     return res;
