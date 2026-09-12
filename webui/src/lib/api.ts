@@ -482,14 +482,14 @@ class ApiClient {
   }
 
   async getCurrentUserV2(signal?: AbortSignal) {
-    const res = await this.request<V2CurrentUserResponse>("/auth/me", {
+    const res = await this.request<UserInfo>("/auth/me", {
       cache: "no-store",
       signal,
     }, { apiVersion: "v2", cacheRead: false, dedupe: false });
 
-    // V2 响应结构转换为 V1 格式
-    if (res.success && res.data?.user) {
-      const user = res.data.user;
+    // V2 后端直接在 data 字段返回用户对象,无需额外嵌套
+    if (res.success && res.data) {
+      const user = res.data;
       if (user.avatar) {
         user.avatar = this.toAbsoluteAssetUrl(user.avatar) || undefined;
       }
@@ -497,14 +497,14 @@ class ApiClient {
         success: true,
         message: res.message,
         data: user,
-      } as ApiResponse<UserInfo>;
+      };
     }
 
     return { success: false, message: res.message, error_code: res.error_code } as ApiResponse<UserInfo>;
   }
 
   async refreshSessionV2(signal?: AbortSignal) {
-    const res = await this.request<V2RefreshSessionResponse>("/auth/refresh", {
+    const res = await this.request<ApiResponse<{ token: string; user: UserInfo }>>("/auth/refresh", {
       method: "POST",
       cache: "no-store",
       signal,
