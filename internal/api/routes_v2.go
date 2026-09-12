@@ -274,8 +274,10 @@ func (a *App) registerV2Routes() {
 	a.add(http.MethodGet, "/api/v2/emby/stats", AuthPublic, a.handleV2EmbyStats)
 	a.add(http.MethodGet, "/api/v2/emby/viewer-count", AuthPublic, a.handleV2EmbyViewerCount)
 	a.add(http.MethodGet, "/api/v2/emby/now-playing", AuthPublic, a.handleV2EmbyNowPlaying)
+	a.add(http.MethodGet, "/api/v2/admin/emby/now-playing", AuthAdmin, a.handleV2AdminEmbyNowPlaying)
 	a.add(http.MethodGet, "/api/v2/emby/online", AuthPublic, a.handleV2EmbyOnline)
 	a.add(http.MethodGet, "/api/v2/emby/urls", AuthUser, a.handleV2EmbyURLs)
+	a.add(http.MethodGet, "/api/v2/admin/emby/urls", AuthAdmin, a.handleV2AdminEmbyURLs)
 	a.add(http.MethodGet, "/api/v2/emby/sessions", AuthUser, a.handleV2EmbyUserSessions)
 	a.add(http.MethodGet, "/api/v2/admin/emby/sessions", AuthAdmin, a.handleV2EmbySessionsAdmin)
 

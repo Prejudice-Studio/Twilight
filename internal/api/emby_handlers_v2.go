@@ -23,6 +23,11 @@ func (a *App) handleV2EmbyNowPlaying(w http.ResponseWriter, r *http.Request, _ P
 	ok(w, "OK", result)
 }
 
+func (a *App) handleV2AdminEmbyNowPlaying(w http.ResponseWriter, r *http.Request, _ Params) {
+	// Admin version uses the same V1 handler logic
+	a.handleEmbyNowPlaying(w, r, nil)
+}
+
 func (a *App) handleV2EmbyOnline(w http.ResponseWriter, r *http.Request, _ Params) {
 	result, _ := a.emby().online(r.Context())
 	ok(w, "OK", result)
@@ -109,4 +114,9 @@ func (a *App) handleV2EmbyURLs(w http.ResponseWriter, r *http.Request, _ Params)
 		lines = append(lines, map[string]string{"name": "默认线路", "url": cfg.EmbyPublicURL})
 	}
 	ok(w, "OK", map[string]any{"lines": lines})
+}
+
+func (a *App) handleV2AdminEmbyURLs(w http.ResponseWriter, r *http.Request, _ Params) {
+	// Admin version uses the same V1 handler logic
+	a.handleEmbyURLs(w, r, nil)
 }
