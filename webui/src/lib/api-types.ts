@@ -163,6 +163,7 @@ export interface User {
   username: string;
   role: number;
   role_name: string;
+  avatar?: string;
 }
 
 export interface UserInfo {
