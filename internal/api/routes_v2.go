@@ -93,7 +93,7 @@ func (a *App) registerV2Routes() {
 	a.add(http.MethodDelete, "/api/v2/settings/apikeys/:key_id", AuthUser, a.handleV2DeleteAPIKey)
 	a.add(http.MethodGet, "/api/v2/users/:uid/playback/history", AuthUser, a.handleGetUserPlaybackHistory)
 	a.add(http.MethodGet, "/api/v2/users/:uid/playback/sessions", AuthUser, a.handleGetUserPlaybackSessions)
-	a.add(http.MethodGet, "/api/v2/announcements", AuthUser, a.handleV2Announcements)
+	a.add(http.MethodGet, "/api/v2/announcements", AuthPublic, a.handleV2Announcements)
 	a.add(http.MethodPost, "/api/v2/announcements/ack", AuthUser, a.handleV2AckAnnouncements)
 	a.add(http.MethodGet, "/api/v2/signin/summary", AuthUser, a.handleV2SigninSummary)
 	a.add(http.MethodPost, "/api/v2/signin", AuthUser, a.handleV2Signin)
@@ -308,10 +308,12 @@ func (a *App) registerV2Routes() {
 	a.add(http.MethodPost, "/api/v2/registration/telegram/bind-confirm", AuthPublic, a.handleV2BindConfirmSecure)
 	a.add(http.MethodGet, "/api/v2/registration/emby/queue-status", AuthPublic, a.handleV2QueueStatus)
 
-	// Public system resources: config, icons, backgrounds
+	// Public system resources: config, icons, backgrounds, emby-urls
 	a.add(http.MethodGet, "/api/v2/system/config", AuthUser, a.handleV2PublicConfig)
 	a.add(http.MethodGet, "/api/v2/system/server-icon", AuthPublic, a.handleV2ServerIcon)
 	a.add(http.MethodGet, "/api/v2/system/auth-background", AuthPublic, a.handleV2AuthBackground)
+	a.add(http.MethodGet, "/api/v2/system/emby-urls", AuthUser, a.handleV2EmbyURLs)
+	a.add(http.MethodPost, "/api/v2/system/emby-urls/probe", AuthUser, a.handleV2EmbyURLProbe)
 	a.add(http.MethodGet, "/api/v2/admin/config", AuthAdmin, a.handleV2AdminConfig)
 	a.add(http.MethodGet, "/api/v2/admin/runtime/logs/stream", AuthAdmin, a.handleV2RuntimeLogStream)
 	a.add(http.MethodPost, "/api/v2/admin/system/update", AuthAdmin, a.handleV2SystemUpdate)
