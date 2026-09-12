@@ -510,7 +510,7 @@ class ApiClient {
       signal,
     }, { apiVersion: "v2", cacheRead: false, dedupe: false });
     if (res.success && res.data) {
-      const payload = res.data as { token: string; user: UserInfo };
+      const payload = res.data as unknown as { token: string; user: UserInfo };
       if (payload.user?.avatar) {
         payload.user.avatar = this.toAbsoluteAssetUrl(payload.user.avatar) || undefined;
       }
