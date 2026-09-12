@@ -87,8 +87,10 @@ import type {
   SystemInfo,
   SystemStats,
   TelegramCommandCatalog,
+  TelegramCommandCatalogItem,
   Ticket,
   TicketAttachment,
+  TicketReply,
   UserTicketListItem,
   TelegramRebindRequest,
   TelegramStatus,
@@ -123,6 +125,11 @@ import type {
   V2ChangePasswordResponse,
   V2ChangeEmbyPasswordRequest,
   V2ChangeEmbyPasswordResponse,
+  V2LoginByAPIKeyRequest,
+  V2TelegramLoginRequest,
+  V2TelegramLoginResponse,
+  V2CreateRegistrationBindCodeRequest,
+  V2CreateRegistrationBindCodeResponse,
   V2UserListParams,
   V2UserListResponse,
   V2UserDetailResponse,
@@ -396,15 +403,104 @@ class ApiClient {
     }
   }
 
+  async logoutAll() {
+    if (this.useV2.auth) {
+      return this.logoutAllV2();
+    }
+    try {
+      await this.request("/auth/logout/all", { method: "POST", cache: "no-store" });
+    } catch {
+      // 忽略网络异常，前端仍会清理本地状态
+    }
+  }
+
+  async logoutAllV2() {
+    try {
+      await this.request("/auth/logout/all", {
+        method: "POST",
+        cache: "no-store"
+      }, { apiVersion: "v2" });
+    } catch {
+      // 忽略网络异常，前端仍会清理本地状态
+    }
+  }
+
+  async loginByAPIKey(apikey: string, deviceId?: string, deviceName?: string) {
+    if (this.useV2.auth) {
+      return this.loginByAPIKeyV2({ apikey, device_id: deviceId, device_name: deviceName });
+    }
+    const res = await this.request<{ user: Partial<UserInfo> }>("/auth/login/apikey", {
+      method: "POST",
+      cache: "no-store",
+      body: JSON.stringify({ apikey, device_id: deviceId, device_name: deviceName }),
+    });
+    if (res.success && res.data?.user?.avatar) {
+      res.data.user.avatar = this.toAbsoluteAssetUrl(res.data.user.avatar) || undefined;
+    }
+    return res;
+  }
+
+  async loginByAPIKeyV2(request: V2LoginByAPIKeyRequest, signal?: AbortSignal) {
+    const res = await this.request<V2LoginResponse>("/auth/login/apikey", {
+      method: "POST",
+      cache: "no-store",
+      signal,
+      body: JSON.stringify(request),
+    }, { apiVersion: "v2" });
+    if (res.success && res.data?.user?.avatar) {
+      res.data.user.avatar = this.toAbsoluteAssetUrl(res.data.user.avatar) || undefined;
+    }
+    return res;
+  }
+
+  async telegramLogin(data: { telegram_id: number; auth_date: number; hash: string; first_name?: string; last_name?: string; username?: string; photo_url?: string }) {
+    if (this.useV2.auth) {
+      return this.telegramLoginV2(data);
+    }
+    const res = await this.request<{ user: Partial<UserInfo> }>("/auth/login/telegram", {
+      method: "POST",
+      cache: "no-store",
+      body: JSON.stringify(data),
+    });
+    if (res.success && res.data?.user?.avatar) {
+      res.data.user.avatar = this.toAbsoluteAssetUrl(res.data.user.avatar) || undefined;
+    }
+    return res;
+  }
+
+  async telegramLoginV2(request: V2TelegramLoginRequest, signal?: AbortSignal) {
+    const res = await this.request<V2TelegramLoginResponse>("/auth/login/telegram", {
+      method: "POST",
+      cache: "no-store",
+      signal,
+      body: JSON.stringify(request),
+    }, { apiVersion: "v2" });
+    if (res.success && res.data?.user?.avatar) {
+      res.data.user.avatar = this.toAbsoluteAssetUrl(res.data.user.avatar) || undefined;
+    }
+    return res;
+  }
+
   async getCurrentUserV2(signal?: AbortSignal) {
     const res = await this.request<V2CurrentUserResponse>("/auth/me", {
       cache: "no-store",
       signal,
     }, { apiVersion: "v2", cacheRead: false, dedupe: false });
-    if (res.success && res.data?.user?.avatar) {
-      res.data.user.avatar = this.toAbsoluteAssetUrl(res.data.user.avatar) || undefined;
+
+    // V2 响应结构转换为 V1 格式
+    if (res.success && res.data?.user) {
+      const user = res.data.user;
+      if (user.avatar) {
+        user.avatar = this.toAbsoluteAssetUrl(user.avatar) || undefined;
+      }
+      return {
+        success: true,
+        message: res.message,
+        data: user,
+      } as ApiResponse<UserInfo>;
     }
-    return res;
+
+    return { success: false, message: res.message, error_code: res.error_code } as ApiResponse<UserInfo>;
   }
 
   async refreshSessionV2(signal?: AbortSignal) {
@@ -590,15 +686,39 @@ class ApiClient {
   }
 
   async getBindCode() {
+    if (this.useV2.auth) {
+      return this.getBindCodeV2();
+    }
     return this.request<{ bind_code: string; expires_in: number }>("/users/me/telegram/bind-code", {
       headers: BIND_CODE_CREATE_HEADERS,
     });
   }
 
+  async getBindCodeV2(signal?: AbortSignal) {
+    return this.request<{ bind_code: string; expires_in: number }>("/me/telegram/bind-code", {
+      headers: BIND_CODE_CREATE_HEADERS,
+      cache: "no-store",
+      signal,
+    }, { apiVersion: "v2" });
+  }
+
   async getRegisterBindCode() {
+    if (this.useV2.auth) {
+      return this.getRegisterBindCodeV2();
+    }
     return this.request<{ bind_code: string; expires_in: number }>("/users/telegram/register/bind-code", {
       headers: BIND_CODE_CREATE_HEADERS,
     });
+  }
+
+  async getRegisterBindCodeV2(request?: V2CreateRegistrationBindCodeRequest, signal?: AbortSignal) {
+    return this.request<V2CreateRegistrationBindCodeResponse>("/registration/telegram/bind-code", {
+      method: "POST",
+      headers: BIND_CODE_CREATE_HEADERS,
+      cache: "no-store",
+      signal,
+      body: request ? JSON.stringify(request) : undefined,
+    }, { apiVersion: "v2" });
   }
 
   async getRegisterBindCodeStatus(code: string, signal?: AbortSignal) {
@@ -798,13 +918,12 @@ class ApiClient {
   }
 
   async verifyEmailCodeV2(request: V2VerifyEmailCodeRequest, signal?: AbortSignal) {
-    const res = await this.request<V2VerifyEmailCodeResponse>("/settings/email/verify", {
+    return this.request<V2VerifyEmailCodeResponse>("/settings/email/verify", {
       method: "POST",
       cache: "no-store",
       signal,
       body: JSON.stringify(request),
     }, { apiVersion: "v2" });
-    return res as ApiResponse<UserInfo>;
   }
 
   // 登出态找回：第一步请求验证码（防枚举，统一成功）。
@@ -1165,7 +1284,19 @@ class ApiClient {
         avatar: this.toAbsoluteAssetUrl(user.avatar) || undefined,
       }));
     }
-    return res as ApiResponse<AdminUserListResponse>;
+    // V2 响应结构转换为 V1 格式
+    if (res.success && res.data?.pagination) {
+      const v1Response: AdminUserListResponse = {
+        users: res.data.users as UserInfo[],
+        total: res.data.pagination.total,
+        page: res.data.pagination.page,
+        per_page: res.data.pagination.per_page,
+        pages: Math.ceil(res.data.pagination.total / res.data.pagination.per_page),
+      };
+      return { success: true, message: res.message, data: v1Response } as ApiResponse<AdminUserListResponse>;
+    }
+    // 失败或无数据时返回空响应
+    return { success: false, message: res.message, error_code: res.error_code } as ApiResponse<AdminUserListResponse>;
   }
 
   async getUser(uid: number) {
@@ -1175,12 +1306,16 @@ class ApiClient {
     return this.request<UserInfo>(`/admin/users/${uid}`);
   }
 
-  async getUserV2(uid: number) {
-    const res = await this.request<V2UserDetailResponse>(`/admin/users/${uid}`, {}, { apiVersion: "v2" });
+  async getUserV2(uid: number, signal?: AbortSignal) {
+    const res = await this.request<V2UserDetailResponse>(`/admin/users/${uid}`, { signal }, { apiVersion: "v2" });
     if (res.success && res.data?.user?.avatar) {
       res.data.user.avatar = this.toAbsoluteAssetUrl(res.data.user.avatar) || undefined;
     }
-    return res as ApiResponse<UserInfo>;
+    // V2 响应结构转换为 V1 格式
+    if (res.success && res.data?.user) {
+      return { success: true, message: res.message, data: res.data.user as UserInfo } as ApiResponse<UserInfo>;
+    }
+    return { success: false, message: res.message, error_code: res.error_code } as ApiResponse<UserInfo>;
   }
 
   async updateUser(uid: number, data: Partial<UserUpdateData>) {
@@ -1194,15 +1329,27 @@ class ApiClient {
     });
   }
 
-  async updateUserV2(uid: number, data: Partial<UserUpdateData>) {
+  async updateUserV2(uid: number, data: Partial<UserUpdateData>, signal?: AbortSignal) {
     const res = await this.request<V2UserUpdateResponse>(`/admin/users/${uid}`, {
       method: "PUT",
       body: JSON.stringify(data),
+      signal,
     }, { apiVersion: "v2" });
     if (res.success && res.data?.user?.avatar) {
       res.data.user.avatar = this.toAbsoluteAssetUrl(res.data.user.avatar) || undefined;
     }
-    return res as ApiResponse<UserInfo & { emby_sync_failed?: boolean }>;
+    // V2 响应结构转换为 V1 格式
+    if (res.success && res.data?.user) {
+      return {
+        success: true,
+        message: res.message,
+        data: {
+          ...(res.data.user as UserInfo),
+          emby_sync_failed: res.data.emby_sync_failed
+        }
+      } as ApiResponse<UserInfo & { emby_sync_failed?: boolean }>;
+    }
+    return { success: false, message: res.message, error_code: res.error_code } as ApiResponse<UserInfo & { emby_sync_failed?: boolean }>;
   }
 
   async adminCreateUser(payload: { username: string; password?: string; email?: string; role?: number; expired_at?: number; days?: number }) {
@@ -1228,7 +1375,7 @@ class ApiClient {
 
   async deleteUser(uid: number, options?: { deleteEmby?: boolean }) {
     if (this.useV2.users) {
-      return this.deleteUserV2(uid, options);
+      return this.deleteUserV2(uid, { delete_emby: options?.deleteEmby });
     }
     const deleteEmby = options?.deleteEmby ?? true;
     return this.request(`/admin/users/${uid}?delete_emby=${deleteEmby}`, {
@@ -1716,35 +1863,42 @@ class ApiClient {
   }
 
   async getTelegramCommandCatalogV2(signal?: AbortSignal) {
-    return this.request<V2TelegramCommandCatalogResponse>(
+    const res = await this.request<V2TelegramCommandCatalogResponse>(
       "/admin/telegram/commands/catalog",
       { signal, cache: "no-store" },
       { apiVersion: "v2", cacheRead: false, dedupe: false }
-    ) as Promise<ApiResponse<TelegramCommandCatalog>>;
-  }
+    );
 
-  async getTelegramRebindRequests(params: { page?: number; per_page?: number; status?: string } = {}, signal?: AbortSignal) {
-    if (this.useV2.telegram) {
-      return this.getTelegramRebindRequestsV2(params, signal);
+    // V2 响应结构转换为 V1 格式
+    if (res.success && res.data?.commands) {
+      const disabledCommands = res.data.disabled_commands || [];
+      const v1Commands: TelegramCommandCatalogItem[] = res.data.commands.map(cmd => ({
+        command: cmd.command,
+        name: cmd.command,
+        label: cmd.command,
+        description: cmd.description,
+        usage: `/${cmd.command}`,
+        category: cmd.admin_only ? "admin" : "user",
+        private: !cmd.group_only,
+        admin: cmd.admin_only,
+        disableable: true,
+        disabled: disabledCommands.includes(cmd.command),
+      }));
+
+      return {
+        success: true,
+        message: res.message,
+        data: {
+          commands: v1Commands,
+          disabled_commands: disabledCommands,
+        }
+      } as ApiResponse<TelegramCommandCatalog>;
     }
-    const query = new URLSearchParams();
-    if (params.page) query.set('page', String(params.page));
-    if (params.per_page) query.set('per_page', String(params.per_page));
-    if (params.status) query.set('status', params.status);
-    return this.request<{ requests: TelegramRebindRequest[]; total: number }>(`/admin/telegram/rebind-requests?${query}`, { signal });
+
+    return { success: false, message: res.message, error_code: res.error_code } as ApiResponse<TelegramCommandCatalog>;
   }
 
-  async getTelegramRebindRequestsV2(params: { page?: number; per_page?: number; status?: string } = {}, signal?: AbortSignal) {
-    const query = new URLSearchParams();
-    if (params.page) query.set('page', String(params.page));
-    if (params.per_page) query.set('per_page', String(params.per_page));
-    if (params.status) query.set('status', params.status);
-    return this.request<V2TelegramRebindRequestListResponse>(
-      `/admin/telegram/rebind-requests?${query}`,
-      { signal },
-      { apiVersion: "v2" }
-    ) as Promise<ApiResponse<{ requests: TelegramRebindRequest[]; total: number }>>;
-  }
+  async getSystemStats(signal?: AbortSignal) {
     return this.request<SystemStats>("/system/admin/stats", { signal, cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
@@ -2908,7 +3062,22 @@ class ApiClient {
       signal,
       body: JSON.stringify(request),
     }, { apiVersion: "v2" });
-    return res as ApiResponse<{ username: string; new_password: string }>;
+
+    // V2 响应结构转换为 V1 格式
+    // V2 只返回 success 和 message，V1 期望返回 username 和 new_password
+    // 但 V2 后端不返回密码（安全考虑），需要前端适配
+    if (res.success) {
+      return {
+        success: true,
+        message: res.message,
+        data: {
+          username: request.emby_username,
+          new_password: '', // V2 不返回密码
+        }
+      } as ApiResponse<{ username: string; new_password: string }>;
+    }
+
+    return { success: false, message: res.message, error_code: res.error_code } as ApiResponse<{ username: string; new_password: string }>;
   }
 
   async emailPasswordReset(data: { email: string }) {
@@ -3573,17 +3742,36 @@ class ApiClient {
       { cache: "no-store", signal },
       { apiVersion: "v2", cacheRead: false, dedupe: false },
     );
-    return {
-      success: response.success,
-      data: {
-        tickets: response.data.items,
-        total: response.data.pagination.total,
-        page: response.data.pagination.page,
-        per_page: response.data.pagination.per_page,
-        ticket_types: response.data.ticket_types,
-      },
-      message: response.message,
-    } as ApiResponse<{ tickets: UserTicketListItem[]; total: number; page: number; per_page: number; ticket_types: string[] }>;
+
+    // V2 响应结构转换为 V1 格式
+    if (response.success && response.data?.items) {
+      const v1Tickets: UserTicketListItem[] = response.data.items.map(item => ({
+        id: item.id,
+        title: item.title,
+        type: item.type,
+        status: item.status as "open" | "in_progress" | "resolved" | "closed",
+        priority: item.priority as "low" | "medium" | "high" | "urgent",
+        reply_count: 0, // V2 不提供此字段，使用默认值
+        attachment_count: 0, // V2 不提供此字段，使用默认值
+        notify_telegram: false, // V2 不提供此字段，使用默认值
+        created_at: item.created_at,
+        updated_at: item.updated_at,
+      }));
+
+      return {
+        success: true,
+        message: response.message,
+        data: {
+          tickets: v1Tickets,
+          total: response.data.pagination.total,
+          page: response.data.pagination.page,
+          per_page: response.data.pagination.per_page,
+          ticket_types: response.data.ticket_types,
+        }
+      } as ApiResponse<{ tickets: UserTicketListItem[]; total: number; page: number; per_page: number; ticket_types: string[] }>;
+    }
+
+    return { success: false, message: response.message, error_code: response.error_code } as ApiResponse<{ tickets: UserTicketListItem[]; total: number; page: number; per_page: number; ticket_types: string[] }>;
   }
 
   async getMyTicket(id: number, signal?: AbortSignal) {
@@ -3603,14 +3791,46 @@ class ApiClient {
       { cache: "no-store", signal },
       { apiVersion: "v2", cacheRead: false, dedupe: false },
     );
-    return {
-      success: response.success,
-      data: {
-        ticket: response.data.item,
-        ticket_types: response.data.ticket_types,
-      },
-      message: response.message,
-    } as ApiResponse<{ ticket: Ticket; ticket_types: string[] }>;
+
+    // V2 响应结构转换为 V1 格式
+    if (response.success && response.data?.item) {
+      const v2Item = response.data.item;
+      const v1Replies: TicketReply[] = v2Item.replies.map(reply => ({
+        uid: reply.uid,
+        username: reply.username,
+        role: reply.is_admin ? 1 : 0, // V2 使用 is_admin 布尔值，V1 使用 role 数字
+        author: reply.is_admin ? "admin" : "user",
+        content: reply.content,
+        created_at: reply.created_at,
+      }));
+
+      const v1Ticket: Ticket = {
+        id: v2Item.id,
+        uid: v2Item.uid,
+        username: v2Item.username,
+        title: v2Item.title,
+        content: v2Item.content,
+        status: v2Item.status as "open" | "in_progress" | "resolved" | "closed",
+        priority: v2Item.priority as "low" | "medium" | "high" | "urgent",
+        type: v2Item.type,
+        notify_telegram: v2Item.notify_telegram,
+        created_at: v2Item.created_at,
+        updated_at: v2Item.updated_at,
+        replies: v1Replies,
+        attachments: v2Item.attachments,
+      };
+
+      return {
+        success: true,
+        message: response.message,
+        data: {
+          ticket: v1Ticket,
+          ticket_types: response.data.ticket_types,
+        }
+      } as ApiResponse<{ ticket: Ticket; ticket_types: string[] }>;
+    }
+
+    return { success: false, message: response.message, error_code: response.error_code } as ApiResponse<{ ticket: Ticket; ticket_types: string[] }>;
   }
 
   async createTicket(payload: { title: string; content: string; type?: string; priority?: string; notify_telegram?: boolean }) {
@@ -3684,15 +3904,30 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify({ content }),
     }, { apiVersion: "v2" });
-    return {
-      success: response.success,
-      data: {
-        ticket_id: response.data.ticket_id,
-        ticket: response.data.ticket || response.data.item,
-        replies: response.data.replies,
-      },
-      message: response.message,
-    } as ApiResponse<{ ticket_id: number; ticket: Ticket; replies: Ticket["replies"] }>;
+
+    // V2 响应结构转换为 V1 格式
+    if (response.success && response.data) {
+      const v1Replies: TicketReply[] = response.data.replies.map(reply => ({
+        uid: reply.uid,
+        username: reply.username,
+        role: reply.is_admin ? 1 : 0,
+        author: reply.is_admin ? "admin" : "user",
+        content: reply.content,
+        created_at: reply.created_at,
+      }));
+
+      return {
+        success: true,
+        message: response.message,
+        data: {
+          ticket_id: response.data.ticket_id,
+          ticket: response.data.ticket || response.data.item,
+          replies: v1Replies,
+        }
+      } as ApiResponse<{ ticket_id: number; ticket: Ticket; replies: Ticket["replies"] }>;
+    }
+
+    return { success: false, message: response.message, error_code: response.error_code } as ApiResponse<{ ticket_id: number; ticket: Ticket; replies: Ticket["replies"] }>;
   }
 
   // 工单交流图片
@@ -3777,17 +4012,38 @@ class ApiClient {
       { cache: "no-store", signal },
       { apiVersion: "v2", cacheRead: false, dedupe: false },
     );
-    return {
-      success: response.success,
-      data: {
-        tickets: response.data.items,
-        total: response.data.pagination.total,
-        page: response.data.pagination.page,
-        per_page: response.data.pagination.per_page,
-        ticket_types: response.data.ticket_types,
-      },
-      message: response.message,
-    } as ApiResponse<{ tickets: Ticket[]; total: number; page?: number; per_page?: number; ticket_types: string[] }>;
+
+    // V2 响应结构转换为 V1 格式
+    if (response.success && response.data?.items) {
+      const v1Tickets: Ticket[] = response.data.items.map(item => ({
+        id: item.id,
+        uid: item.uid,
+        username: item.username,
+        title: item.title,
+        content: '', // V2 列表不返回 content
+        type: item.type,
+        status: item.status as "open" | "in_progress" | "resolved" | "closed",
+        priority: item.priority as "low" | "medium" | "high" | "urgent",
+        admin_note: item.admin_note,
+        notify_telegram: false, // V2 列表不返回此字段
+        created_at: item.created_at,
+        updated_at: item.updated_at,
+      }));
+
+      return {
+        success: true,
+        message: response.message,
+        data: {
+          tickets: v1Tickets,
+          total: response.data.pagination.total,
+          page: response.data.pagination.page,
+          per_page: response.data.pagination.per_page,
+          ticket_types: response.data.ticket_types,
+        }
+      } as ApiResponse<{ tickets: Ticket[]; total: number; page?: number; per_page?: number; ticket_types: string[] }>;
+    }
+
+    return { success: false, message: response.message, error_code: response.error_code } as ApiResponse<{ tickets: Ticket[]; total: number; page?: number; per_page?: number; ticket_types: string[] }>;
   }
 
   async adminGetTicket(id: number, signal?: AbortSignal) {
@@ -3807,14 +4063,47 @@ class ApiClient {
       { cache: "no-store", signal },
       { apiVersion: "v2", cacheRead: false, dedupe: false },
     );
-    return {
-      success: response.success,
-      data: {
-        ticket: response.data.item,
-        ticket_types: response.data.ticket_types,
-      },
-      message: response.message,
-    } as ApiResponse<{ ticket: Ticket; ticket_types: string[] }>;
+
+    // V2 响应结构转换为 V1 格式
+    if (response.success && response.data?.item) {
+      const v2Item = response.data.item;
+      const v1Replies: TicketReply[] = v2Item.replies.map(reply => ({
+        uid: reply.uid,
+        username: reply.username,
+        role: reply.is_admin ? 1 : 0,
+        author: reply.is_admin ? "admin" : "user",
+        content: reply.content,
+        created_at: reply.created_at,
+      }));
+
+      const v1Ticket: Ticket = {
+        id: v2Item.id,
+        uid: v2Item.uid,
+        username: v2Item.username,
+        title: v2Item.title,
+        content: v2Item.content,
+        status: v2Item.status as "open" | "in_progress" | "resolved" | "closed",
+        priority: v2Item.priority as "low" | "medium" | "high" | "urgent",
+        type: v2Item.type,
+        admin_note: v2Item.admin_note,
+        notify_telegram: v2Item.notify_telegram,
+        created_at: v2Item.created_at,
+        updated_at: v2Item.updated_at,
+        replies: v1Replies,
+        attachments: v2Item.attachments,
+      };
+
+      return {
+        success: true,
+        message: response.message,
+        data: {
+          ticket: v1Ticket,
+          ticket_types: response.data.ticket_types,
+        }
+      } as ApiResponse<{ ticket: Ticket; ticket_types: string[] }>;
+    }
+
+    return { success: false, message: response.message, error_code: response.error_code } as ApiResponse<{ ticket: Ticket; ticket_types: string[] }>;
   }
 
   async adminUpdateTicket(id: number, payload: { status?: string; priority?: string; type?: string; admin_note?: string }) {
@@ -3849,15 +4138,30 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify({ content }),
     }, { apiVersion: "v2" });
-    return {
-      success: response.success,
-      data: {
-        ticket_id: response.data.ticket_id,
-        ticket: response.data.ticket || response.data.item,
-        replies: response.data.replies,
-      },
-      message: response.message,
-    } as ApiResponse<{ ticket_id: number; ticket: Ticket; replies: Ticket["replies"] }>;
+
+    // V2 响应结构转换为 V1 格式
+    if (response.success && response.data) {
+      const v1Replies: TicketReply[] = response.data.replies.map(reply => ({
+        uid: reply.uid,
+        username: reply.username,
+        role: reply.is_admin ? 1 : 0,
+        author: reply.is_admin ? "admin" : "user",
+        content: reply.content,
+        created_at: reply.created_at,
+      }));
+
+      return {
+        success: true,
+        message: response.message,
+        data: {
+          ticket_id: response.data.ticket_id,
+          ticket: response.data.ticket || response.data.item,
+          replies: v1Replies,
+        }
+      } as ApiResponse<{ ticket_id: number; ticket: Ticket; replies: Ticket["replies"] }>;
+    }
+
+    return { success: false, message: response.message, error_code: response.error_code } as ApiResponse<{ ticket_id: number; ticket: Ticket; replies: Ticket["replies"] }>;
   }
 
   async adminDeleteTicket(id: number) {
@@ -3881,11 +4185,16 @@ class ApiClient {
 
   async adminGetTicketTypesV2() {
     const response = await this.request<{ items: string[] }>("/admin/ticket-types", {}, { apiVersion: "v2" });
-    return {
-      success: response.success,
-      data: { types: response.data.items },
-      message: response.message,
-    } as ApiResponse<{ types: string[] }>;
+
+    if (response.success && response.data) {
+      return {
+        success: true,
+        message: response.message,
+        data: { types: response.data.items },
+      } as ApiResponse<{ types: string[] }>;
+    }
+
+    return { success: false, message: response.message, error_code: response.error_code } as ApiResponse<{ types: string[] }>;
   }
 
   async adminAddTicketType(name: string) {
@@ -3903,11 +4212,16 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify({ name }),
     }, { apiVersion: "v2" });
-    return {
-      success: response.success,
-      data: { name: response.data.item, types: response.data.items },
-      message: response.message,
-    } as ApiResponse<{ name: string; types: string[] }>;
+
+    if (response.success && response.data) {
+      return {
+        success: true,
+        message: response.message,
+        data: { name: response.data.item, types: response.data.items },
+      } as ApiResponse<{ name: string; types: string[] }>;
+    }
+
+    return { success: false, message: response.message, error_code: response.error_code } as ApiResponse<{ name: string; types: string[] }>;
   }
 
   async adminDeleteTicketType(name: string) {
@@ -3924,11 +4238,16 @@ class ApiClient {
     const response = await this.request<{ items: string[] }>(`/admin/ticket-types/${encodeURIComponent(name)}`, {
       method: "DELETE",
     }, { apiVersion: "v2" });
-    return {
-      success: response.success,
-      data: { name, types: response.data.items },
-      message: response.message,
-    } as ApiResponse<{ name: string; types: string[] }>;
+
+    if (response.success && response.data) {
+      return {
+        success: true,
+        message: response.message,
+        data: { name, types: response.data.items },
+      } as ApiResponse<{ name: string; types: string[] }>;
+    }
+
+    return { success: false, message: response.message, error_code: response.error_code } as ApiResponse<{ name: string; types: string[] }>;
   }
 
   async adminRenameTicketType(oldName: string, newName: string) {
@@ -3946,11 +4265,16 @@ class ApiClient {
       method: "PUT",
       body: JSON.stringify({ name: newName }),
     }, { apiVersion: "v2" });
-    return {
-      success: response.success,
-      data: { old_name: oldName, new_name: response.data.item, types: response.data.items },
-      message: response.message,
-    } as ApiResponse<{ old_name: string; new_name: string; types: string[] }>;
+
+    if (response.success && response.data) {
+      return {
+        success: true,
+        message: response.message,
+        data: { old_name: oldName, new_name: response.data.item, types: response.data.items },
+      } as ApiResponse<{ old_name: string; new_name: string; types: string[] }>;
+    }
+
+    return { success: false, message: response.message, error_code: response.error_code } as ApiResponse<{ old_name: string; new_name: string; types: string[] }>;
   }
 }
 

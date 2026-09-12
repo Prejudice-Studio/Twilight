@@ -201,6 +201,52 @@ export interface V2ChangeEmbyPasswordResponse {
   message?: string;
 }
 
+/**
+ * V2 API Key 登录请求
+ */
+export interface V2LoginByAPIKeyRequest {
+  apikey: string;
+  device_id?: string;
+  device_name?: string;
+}
+
+/**
+ * V2 Telegram 登录请求
+ */
+export interface V2TelegramLoginRequest {
+  telegram_id: number;
+  auth_date: number;
+  hash: string;
+  first_name?: string;
+  last_name?: string;
+  username?: string;
+  photo_url?: string;
+}
+
+/**
+ * V2 Telegram 登录响应
+ */
+export interface V2TelegramLoginResponse {
+  token: string;
+  user: User;
+  expires_at?: number;
+}
+
+/**
+ * V2 创建 Telegram 绑定码请求（注册用）
+ */
+export interface V2CreateRegistrationBindCodeRequest {
+  regcode?: string;
+}
+
+/**
+ * V2 创建 Telegram 绑定码响应
+ */
+export interface V2CreateRegistrationBindCodeResponse {
+  bind_code: string;
+  expires_in: number;
+}
+
 // ==================== 用户管理模块 ====================
 
 /**
