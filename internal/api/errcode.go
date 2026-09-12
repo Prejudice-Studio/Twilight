@@ -34,7 +34,7 @@ const (
 	ErrPasswordWeak           ErrCode = "AUTH_PASSWORD_WEAK"
 	ErrPasswordHashFailed     ErrCode = "AUTH_PASSWORD_HASH_FAILED"
 	ErrForgotPasswordDisabled ErrCode = "AUTH_FORGOT_PASSWORD_DISABLED"
-	ErrCSRFTokenInvalid       ErrCode = "AUTH_CSRF_TOKEN_INVALID"
+	// ErrCSRFTokenInvalid       ErrCode = "AUTH_CSRF_TOKEN_INVALID" // V2 CSRF 已禁用 - V1 兼容性
 
 	// === 工单 ===
 	ErrTicketDisabled      ErrCode = "TICKET_DISABLED"
