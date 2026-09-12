@@ -174,20 +174,20 @@ function emailCodeBody(proof?: EmailCodeProof): Record<string, string> {
 }
 
 class ApiClient {
-  // V2 功能开关：控制是否使用 V2 API
+  // V2 功能开关：默认使用 V2 API，设置 NEXT_PUBLIC_USE_V1_COMPAT=true 启用 V1 兼容模式
   private useV2 = {
-    auth: process.env.NEXT_PUBLIC_USE_V2_AUTH === 'true',
-    users: process.env.NEXT_PUBLIC_USE_V2_USERS === 'true',
-    telegram: process.env.NEXT_PUBLIC_USE_V2_TELEGRAM === 'true',
-    tickets: process.env.NEXT_PUBLIC_USE_V2_TICKETS === 'true',
-    announcements: process.env.NEXT_PUBLIC_USE_V2_ANNOUNCEMENTS === 'true',
-    emby: process.env.NEXT_PUBLIC_USE_V2_EMBY === 'true',
-    invite: process.env.NEXT_PUBLIC_USE_V2_INVITE === 'true',
-    mediaRequests: process.env.NEXT_PUBLIC_USE_V2_MEDIA_REQUESTS === 'true',
-    audit: process.env.NEXT_PUBLIC_USE_V2_AUDIT === 'true',
-    config: process.env.NEXT_PUBLIC_USE_V2_CONFIG === 'true',
-    bangumi: process.env.NEXT_PUBLIC_USE_V2_BANGUMI === 'true',
-    email: process.env.NEXT_PUBLIC_USE_V2_EMAIL === 'true',
+    auth: process.env.NEXT_PUBLIC_USE_V1_COMPAT !== 'true',
+    users: process.env.NEXT_PUBLIC_USE_V1_COMPAT !== 'true',
+    telegram: process.env.NEXT_PUBLIC_USE_V1_COMPAT !== 'true',
+    tickets: process.env.NEXT_PUBLIC_USE_V1_COMPAT !== 'true',
+    announcements: process.env.NEXT_PUBLIC_USE_V1_COMPAT !== 'true',
+    emby: process.env.NEXT_PUBLIC_USE_V1_COMPAT !== 'true',
+    invite: process.env.NEXT_PUBLIC_USE_V1_COMPAT !== 'true',
+    mediaRequests: process.env.NEXT_PUBLIC_USE_V1_COMPAT !== 'true',
+    audit: process.env.NEXT_PUBLIC_USE_V1_COMPAT !== 'true',
+    config: process.env.NEXT_PUBLIC_USE_V1_COMPAT !== 'true',
+    bangumi: process.env.NEXT_PUBLIC_USE_V1_COMPAT !== 'true',
+    email: process.env.NEXT_PUBLIC_USE_V1_COMPAT !== 'true',
   };
 
   /**
