@@ -100,6 +100,50 @@ import type {
   V2Capabilities,
   V2Health,
 } from "./api-types";
+import type {
+  V2LoginRequest,
+  V2LoginResponse,
+  V2CurrentUserResponse,
+  V2RefreshSessionResponse,
+  V2RegisterRequest,
+  V2RegisterResponse,
+  V2RegistrationAvailabilityRequest,
+  V2RegistrationAvailabilityResponse,
+  V2ForgotPasswordByEmbyRequest,
+  V2ForgotPasswordResponse,
+  V2EmailPasswordResetRequest,
+  V2EmailPasswordResetResponse,
+  V2EmailPasswordResetConfirmRequest,
+  V2EmailPasswordResetConfirmResponse,
+  V2SendEmailCodeRequest,
+  V2SendEmailCodeResponse,
+  V2VerifyEmailCodeRequest,
+  V2VerifyEmailCodeResponse,
+  V2ChangePasswordRequest,
+  V2ChangePasswordResponse,
+  V2ChangeEmbyPasswordRequest,
+  V2ChangeEmbyPasswordResponse,
+  V2UserListParams,
+  V2UserListResponse,
+  V2UserDetailResponse,
+  V2UserUpdateRequest,
+  V2UserUpdateResponse,
+  V2CreateUserRequest,
+  V2CreateUserResponse,
+  V2DeleteUserOptions,
+  V2DeleteUserResponse,
+  V2ForceUnbindRequest,
+  V2ForceUnbindResponse,
+  V2AdminBindTelegramRequest,
+  V2AdminBindTelegramResponse,
+  V2TelegramCommandCatalogResponse,
+  V2TelegramRebindRequestListResponse,
+  V2UserTicketListResponse,
+  V2UserTicketDetailResponse,
+  V2AdminTicketListResponse,
+  V2AdminTicketDetailResponse,
+  V2TicketReplyResponse,
+} from "./api-types-v2";
 import { confirmPhrases } from "./confirm-phrases";
 import { API_BASE, ApiError, apiRequest, apiRequestForm, type ApiRequestExtraOptions } from "./api-request";
 import { deepClone } from "./deep-clone";
@@ -123,6 +167,43 @@ function emailCodeBody(proof?: EmailCodeProof): Record<string, string> {
 }
 
 class ApiClient {
+  // V2 功能开关：控制是否使用 V2 API
+  private useV2 = {
+    auth: process.env.NEXT_PUBLIC_USE_V2_AUTH === 'true',
+    users: process.env.NEXT_PUBLIC_USE_V2_USERS === 'true',
+    telegram: process.env.NEXT_PUBLIC_USE_V2_TELEGRAM === 'true',
+    tickets: process.env.NEXT_PUBLIC_USE_V2_TICKETS === 'true',
+    announcements: process.env.NEXT_PUBLIC_USE_V2_ANNOUNCEMENTS === 'true',
+    emby: process.env.NEXT_PUBLIC_USE_V2_EMBY === 'true',
+    invite: process.env.NEXT_PUBLIC_USE_V2_INVITE === 'true',
+    mediaRequests: process.env.NEXT_PUBLIC_USE_V2_MEDIA_REQUESTS === 'true',
+    audit: process.env.NEXT_PUBLIC_USE_V2_AUDIT === 'true',
+    config: process.env.NEXT_PUBLIC_USE_V2_CONFIG === 'true',
+    bangumi: process.env.NEXT_PUBLIC_USE_V2_BANGUMI === 'true',
+    email: process.env.NEXT_PUBLIC_USE_V2_EMAIL === 'true',
+  };
+
+  /**
+   * 启用指定模块的 V2 API
+   */
+  enableV2(module: keyof typeof this.useV2) {
+    this.useV2[module] = true;
+  }
+
+  /**
+   * 禁用指定模块的 V2 API（回退到 V1）
+   */
+  disableV2(module: keyof typeof this.useV2) {
+    this.useV2[module] = false;
+  }
+
+  /**
+   * 检查指定模块是否启用 V2 API
+   */
+  isV2Enabled(module: keyof typeof this.useV2): boolean {
+    return this.useV2[module];
+  }
+
   private configSchemaCache: { until: number; promise: Promise<ApiResponse<ConfigSchema>> | null; value: ApiResponse<ConfigSchema> | null } = {
     until: 0,
     promise: null,
@@ -238,6 +319,9 @@ class ApiClient {
 
   // Auth
   async login(username: string, password: string, signal?: AbortSignal) {
+    if (this.useV2.auth) {
+      return this.loginV2({ username, password }, signal);
+    }
     const isEmail = username.includes("@");
     const res = await this.request<{ user: Partial<UserInfo> }>("/auth/login", {
       method: "POST",
@@ -255,19 +339,84 @@ class ApiClient {
     return res;
   }
 
+  async loginV2(request: V2LoginRequest, signal?: AbortSignal) {
+    const res = await this.request<V2LoginResponse>("/auth/login", {
+      method: "POST",
+      cache: "no-store",
+      signal,
+      body: JSON.stringify(request),
+    }, { apiVersion: "v2" });
+    if (res.success && res.data?.user?.avatar) {
+      res.data.user.avatar = this.toAbsoluteAssetUrl(res.data.user.avatar) || undefined;
+    }
+    return res;
+  }
+
   async register(data: RegisterData) {
+    if (this.useV2.auth) {
+      return this.registerV2(data as V2RegisterRequest);
+    }
     return this.request<RegisterResponse>("/users/register", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
+  async registerV2(request: V2RegisterRequest) {
+    const res = await this.request<V2RegisterResponse>("/auth/register", {
+      method: "POST",
+      cache: "no-store",
+      body: JSON.stringify(request),
+    }, { apiVersion: "v2" });
+    if (res.success && res.data?.user?.avatar) {
+      res.data.user.avatar = this.toAbsoluteAssetUrl(res.data.user.avatar) || undefined;
+    }
+    return res;
+  }
+
   async logout() {
+    if (this.useV2.auth) {
+      return this.logoutV2();
+    }
     try {
       await this.request("/auth/logout", { method: "POST", cache: "no-store" });
     } catch {
       // 忽略网络异常，前端仍会清理本地状态
     }
+  }
+
+  async logoutV2() {
+    try {
+      await this.request("/auth/logout", {
+        method: "POST",
+        cache: "no-store"
+      }, { apiVersion: "v2" });
+    } catch {
+      // 忽略网络异常，前端仍会清理本地状态
+    }
+  }
+
+  async getCurrentUserV2(signal?: AbortSignal) {
+    const res = await this.request<V2CurrentUserResponse>("/auth/me", {
+      cache: "no-store",
+      signal,
+    }, { apiVersion: "v2", cacheRead: false, dedupe: false });
+    if (res.success && res.data?.user?.avatar) {
+      res.data.user.avatar = this.toAbsoluteAssetUrl(res.data.user.avatar) || undefined;
+    }
+    return res;
+  }
+
+  async refreshSessionV2(signal?: AbortSignal) {
+    const res = await this.request<V2RefreshSessionResponse>("/auth/refresh", {
+      method: "POST",
+      cache: "no-store",
+      signal,
+    }, { apiVersion: "v2", cacheRead: false, dedupe: false });
+    if (res.success && res.data?.user?.avatar) {
+      res.data.user.avatar = this.toAbsoluteAssetUrl(res.data.user.avatar) || undefined;
+    }
+    return res;
   }
 
   // System
@@ -314,6 +463,9 @@ class ApiClient {
 
   // User
   async getMe(signal?: AbortSignal) {
+    if (this.useV2.auth) {
+      return this.getCurrentUserV2(signal);
+    }
     const res = await this.request<UserInfo>("/users/me", { cache: "no-store", signal }, { cacheRead: false, dedupe: false });
     if (res.success && res.data?.avatar) {
       res.data.avatar = this.toAbsoluteAssetUrl(res.data.avatar) || undefined;
@@ -566,13 +718,28 @@ class ApiClient {
   }
 
   async changePassword(oldPassword: string, newPassword: string, emailCode?: EmailCodeProof) {
+    if (this.useV2.auth) {
+      return this.changePasswordV2({ old_password: oldPassword, new_password: newPassword, ...emailCodeBody(emailCode) });
+    }
     return this.request("/users/me/password/change", {
       method: "POST",
       body: JSON.stringify({ old_password: oldPassword, new_password: newPassword, ...emailCodeBody(emailCode) }),
     });
   }
 
+  async changePasswordV2(request: V2ChangePasswordRequest, signal?: AbortSignal) {
+    return this.request<V2ChangePasswordResponse>("/settings/password/system", {
+      method: "POST",
+      cache: "no-store",
+      signal,
+      body: JSON.stringify(request),
+    }, { apiVersion: "v2" });
+  }
+
   async changeSystemPassword(oldPassword: string, newPassword: string, emailCode?: EmailCodeProof) {
+    if (this.useV2.auth) {
+      return this.changePasswordV2({ old_password: oldPassword, new_password: newPassword, ...emailCodeBody(emailCode) });
+    }
     return this.request("/users/me/password/system", {
       method: "POST",
       body: JSON.stringify({ old_password: oldPassword, new_password: newPassword, ...emailCodeBody(emailCode) }),
@@ -580,27 +747,64 @@ class ApiClient {
   }
 
   async changeEmbyPassword(newPassword: string, emailCode?: EmailCodeProof, oldPassword?: string) {
+    if (this.useV2.auth) {
+      return this.changeEmbyPasswordV2({ new_password: newPassword, ...(oldPassword ? { old_password: oldPassword } : {}), ...emailCodeBody(emailCode) });
+    }
     return this.request("/users/me/password/emby", {
       method: "POST",
       body: JSON.stringify({ new_password: newPassword, ...(oldPassword ? { old_password: oldPassword } : {}), ...emailCodeBody(emailCode) }),
     });
   }
 
+  async changeEmbyPasswordV2(request: V2ChangeEmbyPasswordRequest, signal?: AbortSignal) {
+    return this.request<V2ChangeEmbyPasswordResponse>("/settings/password/emby", {
+      method: "POST",
+      cache: "no-store",
+      signal,
+      body: JSON.stringify(request),
+    }, { apiVersion: "v2" });
+  }
+
   // === 邮箱验证 ===
   // 登录态：绑定/换绑邮箱 或 改密前获取验证码（purpose 决定收件邮箱）。
   async sendEmailCode(data: { purpose: "bind" | "change_password" | "change_emby_password"; email?: string }) {
+    if (this.useV2.auth) {
+      return this.sendEmailCodeV2(data);
+    }
     return this.request<EmailCodeSent>("/users/me/email/send-code", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
+  async sendEmailCodeV2(request: V2SendEmailCodeRequest, signal?: AbortSignal) {
+    return this.request<V2SendEmailCodeResponse>("/settings/email/send-code", {
+      method: "POST",
+      cache: "no-store",
+      signal,
+      body: JSON.stringify(request),
+    }, { apiVersion: "v2" });
+  }
+
   // 登录态：校验 bind 验证码并完成邮箱绑定（返回更新后的用户）。
   async verifyEmailCode(data: { verification_id: string; code: string }) {
+    if (this.useV2.auth) {
+      return this.verifyEmailCodeV2(data);
+    }
     return this.request<UserInfo>("/users/me/email/verify", {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  async verifyEmailCodeV2(request: V2VerifyEmailCodeRequest, signal?: AbortSignal) {
+    const res = await this.request<V2VerifyEmailCodeResponse>("/settings/email/verify", {
+      method: "POST",
+      cache: "no-store",
+      signal,
+      body: JSON.stringify(request),
+    }, { apiVersion: "v2" });
+    return res as ApiResponse<UserInfo>;
   }
 
   // 登出态找回：第一步请求验证码（防枚举，统一成功）。
@@ -687,6 +891,9 @@ class ApiClient {
   }
 
   async getEmbyUrls(signal?: AbortSignal) {
+    if (this.useV2.emby) {
+      return this.getEmbyUrlsV2(signal);
+    }
     return this.request<{
       lines: Array<{ name: string; url: string }>;
       whitelist_lines?: Array<{ name: string; url: string }>;
@@ -694,6 +901,16 @@ class ApiClient {
       requires_renewal?: boolean;
       emby_disabled_by_expiry?: boolean;
     }>(`/system/emby-urls`, { signal });
+  }
+
+  async getEmbyUrlsV2(signal?: AbortSignal) {
+    return this.request<{
+      lines: Array<{ name: string; url: string }>;
+      whitelist_lines?: Array<{ name: string; url: string }>;
+      requires_emby_account?: boolean;
+      requires_renewal?: boolean;
+      emby_disabled_by_expiry?: boolean;
+    }>(`/system/emby-urls`, { signal }, { apiVersion: "v2" });
   }
 
   async probeEmbyUrl(url: string) {
@@ -864,26 +1081,59 @@ class ApiClient {
 
   // Emby
   async getEmbyInfo(signal?: AbortSignal) {
+    if (this.useV2.emby) {
+      return this.getEmbyInfoV2(signal);
+    }
     return this.request<EmbyInfo>("/emby/status", { signal });
   }
 
+  async getEmbyInfoV2(signal?: AbortSignal) {
+    return this.request<EmbyInfo>("/emby/status", { signal }, { apiVersion: "v2" });
+  }
+
   async getMySessions() {
+    if (this.useV2.emby) {
+      return this.getMySessionsV2();
+    }
     return this.request<EmbySession[]>("/users/me/sessions");
   }
 
+  async getMySessionsV2() {
+    return this.request<EmbySession[]>("/users/me/sessions", {}, { apiVersion: "v2" });
+  }
+
   async getMyDevices() {
+    if (this.useV2.emby) {
+      return this.getMyDevicesV2();
+    }
     return this.request<LoginDevice[]>("/users/me/devices");
   }
 
+  async getMyDevicesV2() {
+    return this.request<LoginDevice[]>("/users/me/devices", {}, { apiVersion: "v2" });
+  }
+
   async removeDevice(deviceId: string) {
+    if (this.useV2.emby) {
+      return this.removeDeviceV2(deviceId);
+    }
     return this.request(`/users/me/devices/${encodeURIComponent(deviceId)}`, {
       method: "DELETE",
     });
   }
 
+  async removeDeviceV2(deviceId: string) {
+    return this.request(`/users/me/devices/${encodeURIComponent(deviceId)}`, {
+      method: "DELETE",
+    }, { apiVersion: "v2" });
+  }
+
 
   // Admin
   async getUsers(params: AdminUserListParams = {}, signal?: AbortSignal) {
+    if (this.useV2.users) {
+      return this.getUsersV2(params, signal);
+    }
     const query = new URLSearchParams();
     if (params.page) query.set("page", String(params.page));
     if (params.per_page) query.set("per_page", String(params.per_page));
@@ -897,11 +1147,46 @@ class ApiClient {
     return this.request<AdminUserListResponse>(`/admin/users?${query}`, { signal });
   }
 
+  async getUsersV2(params: AdminUserListParams = {}, signal?: AbortSignal) {
+    const query = new URLSearchParams();
+    if (params.page) query.set("page", String(params.page));
+    if (params.per_page) query.set("per_page", String(params.per_page));
+    if (params.role !== undefined && params.role !== null) query.set("role", String(params.role));
+    if (params.active !== undefined && params.active !== null) query.set("active", String(params.active));
+    if (params.emby) query.set("emby", params.emby);
+    if (params.emby_status) query.set("emby_status", params.emby_status);
+    if (params.email_status) query.set("email_status", params.email_status);
+    if (params.search) query.set("search", params.search);
+    if (params.sort) query.set("sort", params.sort);
+    const res = await this.request<V2UserListResponse>(`/admin/users?${query}`, { signal }, { apiVersion: "v2" });
+    if (res.success && res.data?.users) {
+      res.data.users = res.data.users.map(user => ({
+        ...user,
+        avatar: this.toAbsoluteAssetUrl(user.avatar) || undefined,
+      }));
+    }
+    return res as ApiResponse<AdminUserListResponse>;
+  }
+
   async getUser(uid: number) {
+    if (this.useV2.users) {
+      return this.getUserV2(uid);
+    }
     return this.request<UserInfo>(`/admin/users/${uid}`);
   }
 
+  async getUserV2(uid: number) {
+    const res = await this.request<V2UserDetailResponse>(`/admin/users/${uid}`, {}, { apiVersion: "v2" });
+    if (res.success && res.data?.user?.avatar) {
+      res.data.user.avatar = this.toAbsoluteAssetUrl(res.data.user.avatar) || undefined;
+    }
+    return res as ApiResponse<UserInfo>;
+  }
+
   async updateUser(uid: number, data: Partial<UserUpdateData>) {
+    if (this.useV2.users) {
+      return this.updateUserV2(uid, data);
+    }
     // 改成禁用时 Emby 远端关停失败会附带 emby_sync_failed=true（其余字段为 publicUser）。
     return this.request<UserInfo & { emby_sync_failed?: boolean }>(`/admin/users/${uid}`, {
       method: "PUT",
@@ -909,37 +1194,103 @@ class ApiClient {
     });
   }
 
+  async updateUserV2(uid: number, data: Partial<UserUpdateData>) {
+    const res = await this.request<V2UserUpdateResponse>(`/admin/users/${uid}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }, { apiVersion: "v2" });
+    if (res.success && res.data?.user?.avatar) {
+      res.data.user.avatar = this.toAbsoluteAssetUrl(res.data.user.avatar) || undefined;
+    }
+    return res as ApiResponse<UserInfo & { emby_sync_failed?: boolean }>;
+  }
+
   async adminCreateUser(payload: { username: string; password?: string; email?: string; role?: number; expired_at?: number; days?: number }) {
+    if (this.useV2.users) {
+      return this.adminCreateUserV2(payload);
+    }
     return this.request<{ user: UserInfo; password: string; auto_generated: boolean }>("/admin/users", {
       method: "POST",
       body: JSON.stringify(payload),
     });
   }
 
+  async adminCreateUserV2(payload: V2CreateUserRequest) {
+    const res = await this.request<V2CreateUserResponse>("/admin/users", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }, { apiVersion: "v2" });
+    if (res.success && res.data?.user?.avatar) {
+      res.data.user.avatar = this.toAbsoluteAssetUrl(res.data.user.avatar) || undefined;
+    }
+    return res as ApiResponse<{ user: UserInfo; password: string; auto_generated: boolean }>;
+  }
+
   async deleteUser(uid: number, options?: { deleteEmby?: boolean }) {
+    if (this.useV2.users) {
+      return this.deleteUserV2(uid, options);
+    }
     const deleteEmby = options?.deleteEmby ?? true;
     return this.request(`/admin/users/${uid}?delete_emby=${deleteEmby}`, {
       method: "DELETE",
     });
   }
 
+  async deleteUserV2(uid: number, options?: V2DeleteUserOptions) {
+    const deleteEmby = options?.delete_emby ?? true;
+    return this.request<V2DeleteUserResponse>(`/admin/users/${uid}?delete_emby=${deleteEmby}`, {
+      method: "DELETE",
+    }, { apiVersion: "v2" });
+  }
+
   async deleteUserEmby(uid: number) {
+    if (this.useV2.users) {
+      return this.deleteUserEmbyV2(uid);
+    }
     return this.request(`/admin/users/${uid}/emby`, {
       method: "DELETE",
     });
   }
 
+  async deleteUserEmbyV2(uid: number) {
+    return this.request(`/admin/users/${uid}/emby`, {
+      method: "DELETE",
+    }, { apiVersion: "v2" });
+  }
+
   async forceUnbindUser(uid: number, scope: "telegram" | "emby" | "both" = "both") {
+    if (this.useV2.users) {
+      return this.forceUnbindUserV2(uid, scope);
+    }
     return this.request<{ changed: string[]; old: { telegram_id?: number | null; emby_id?: string | null } }>(
       `/admin/users/${uid}/force-unbind`,
       { method: "POST", body: JSON.stringify({ scope }) },
     );
   }
 
+  async forceUnbindUserV2(uid: number, scope: "telegram" | "emby" | "both" = "both") {
+    return this.request<V2ForceUnbindResponse>(
+      `/admin/users/${uid}/force-unbind`,
+      { method: "POST", body: JSON.stringify({ scope }) },
+      { apiVersion: "v2" }
+    );
+  }
+
   async adminBindTelegramToUser(uid: number, telegramId: number) {
+    if (this.useV2.users) {
+      return this.adminBindTelegramToUserV2(uid, telegramId);
+    }
     return this.request<{ uid: number; username: string; telegram_id: number; old_telegram_id: number | null }>(
       `/admin/users/${uid}/bind-telegram`,
       { method: "POST", body: JSON.stringify({ telegram_id: telegramId }) },
+    );
+  }
+
+  async adminBindTelegramToUserV2(uid: number, telegramId: number) {
+    return this.request<V2AdminBindTelegramResponse>(
+      `/admin/users/${uid}/bind-telegram`,
+      { method: "POST", body: JSON.stringify({ telegram_id: telegramId }) },
+      { apiVersion: "v2" }
     );
   }
 
@@ -1272,6 +1623,9 @@ class ApiClient {
   }
 
   async getTelegramRebindRequests(params: { page?: number; per_page?: number; status?: string } = {}, signal?: AbortSignal) {
+    if (this.useV2.telegram) {
+      return this.getTelegramRebindRequestsV2(params, signal);
+    }
     const query = new URLSearchParams();
     if (params.page) query.set('page', String(params.page));
     if (params.per_page) query.set('per_page', String(params.per_page));
@@ -1279,18 +1633,58 @@ class ApiClient {
     return this.request<{ requests: TelegramRebindRequest[]; total: number }>(`/admin/telegram/rebind-requests?${query}`, { signal });
   }
 
+  async getTelegramRebindRequestsV2(params: { page?: number; per_page?: number; status?: string } = {}, signal?: AbortSignal) {
+    const query = new URLSearchParams();
+    if (params.page) query.set('page', String(params.page));
+    if (params.per_page) query.set('per_page', String(params.per_page));
+    if (params.status) query.set('status', params.status);
+    return this.request<V2TelegramRebindRequestListResponse>(
+      `/admin/telegram/rebind-requests?${query}`,
+      { signal },
+      { apiVersion: "v2" }
+    ) as Promise<ApiResponse<{ requests: TelegramRebindRequest[]; total: number }>>;
+  }
+
   async approveTelegramRebindRequest(id: number, admin_note?: string) {
+    if (this.useV2.telegram) {
+      return this.approveTelegramRebindRequestV2(id, admin_note);
+    }
     return this.request(`/admin/telegram/rebind-requests/${id}/approve`, {
       method: "POST",
       body: JSON.stringify({ admin_note }),
     });
   }
 
+  async approveTelegramRebindRequestV2(id: number, admin_note?: string) {
+    return this.request(
+      `/admin/telegram/rebind-requests/${id}/approve`,
+      {
+        method: "POST",
+        body: JSON.stringify({ admin_note }),
+      },
+      { apiVersion: "v2" }
+    );
+  }
+
   async rejectTelegramRebindRequest(id: number, admin_note?: string) {
+    if (this.useV2.telegram) {
+      return this.rejectTelegramRebindRequestV2(id, admin_note);
+    }
     return this.request(`/admin/telegram/rebind-requests/${id}/reject`, {
       method: "POST",
       body: JSON.stringify({ admin_note }),
     });
+  }
+
+  async rejectTelegramRebindRequestV2(id: number, admin_note?: string) {
+    return this.request(
+      `/admin/telegram/rebind-requests/${id}/reject`,
+      {
+        method: "POST",
+        body: JSON.stringify({ admin_note }),
+      },
+      { apiVersion: "v2" }
+    );
   }
 
   async batchReviewTelegramRebindRequests(ids: number[], action: "approve" | "reject", admin_note?: string) {
@@ -1315,10 +1709,42 @@ class ApiClient {
   }
 
   async getTelegramCommandCatalog(signal?: AbortSignal) {
+    if (this.useV2.telegram) {
+      return this.getTelegramCommandCatalogV2(signal);
+    }
     return this.request<TelegramCommandCatalog>("/admin/telegram/commands/catalog", { signal, cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
-  async getSystemStats(signal?: AbortSignal) {
+  async getTelegramCommandCatalogV2(signal?: AbortSignal) {
+    return this.request<V2TelegramCommandCatalogResponse>(
+      "/admin/telegram/commands/catalog",
+      { signal, cache: "no-store" },
+      { apiVersion: "v2", cacheRead: false, dedupe: false }
+    ) as Promise<ApiResponse<TelegramCommandCatalog>>;
+  }
+
+  async getTelegramRebindRequests(params: { page?: number; per_page?: number; status?: string } = {}, signal?: AbortSignal) {
+    if (this.useV2.telegram) {
+      return this.getTelegramRebindRequestsV2(params, signal);
+    }
+    const query = new URLSearchParams();
+    if (params.page) query.set('page', String(params.page));
+    if (params.per_page) query.set('per_page', String(params.per_page));
+    if (params.status) query.set('status', params.status);
+    return this.request<{ requests: TelegramRebindRequest[]; total: number }>(`/admin/telegram/rebind-requests?${query}`, { signal });
+  }
+
+  async getTelegramRebindRequestsV2(params: { page?: number; per_page?: number; status?: string } = {}, signal?: AbortSignal) {
+    const query = new URLSearchParams();
+    if (params.page) query.set('page', String(params.page));
+    if (params.per_page) query.set('per_page', String(params.per_page));
+    if (params.status) query.set('status', params.status);
+    return this.request<V2TelegramRebindRequestListResponse>(
+      `/admin/telegram/rebind-requests?${query}`,
+      { signal },
+      { apiVersion: "v2" }
+    ) as Promise<ApiResponse<{ requests: TelegramRebindRequest[]; total: number }>>;
+  }
     return this.request<SystemStats>("/system/admin/stats", { signal, cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
@@ -1596,13 +2022,25 @@ class ApiClient {
   }
 
   async syncAllEmbyUsers() {
+    if (this.useV2.emby) {
+      return this.syncAllEmbyUsersV2();
+    }
     return this.request<{ success: number; failed: number; errors: string[] }>("/admin/emby/sync", {
       method: "POST",
     });
   }
 
+  async syncAllEmbyUsersV2() {
+    return this.request<{ success: number; failed: number; errors: string[] }>("/admin/emby/sync", {
+      method: "POST",
+    }, { apiVersion: "v2" });
+  }
+
   // Emby 管理
   async testEmbyConnectivity() {
+    if (this.useV2.emby) {
+      return this.testEmbyConnectivityV2();
+    }
     return this.request<{
       emby_url: string;
       tests: Array<{ name: string; success: boolean; latency_ms?: number; message: string }>;
@@ -1611,7 +2049,19 @@ class ApiClient {
     }>("/admin/emby/test", { method: "POST" });
   }
 
+  async testEmbyConnectivityV2() {
+    return this.request<{
+      emby_url: string;
+      tests: Array<{ name: string; success: boolean; latency_ms?: number; message: string }>;
+      overall: boolean;
+      server_info?: { name: string; version: string; os: string; id: string };
+    }>("/admin/emby/test", { method: "POST" }, { apiVersion: "v2" });
+  }
+
   async listEmbyUsers(signal?: AbortSignal) {
+    if (this.useV2.emby) {
+      return this.listEmbyUsersV2(signal);
+    }
     return this.request<{
       emby_users: Array<{
         emby_id: string; emby_name: string; has_password: boolean;
@@ -1625,13 +2075,37 @@ class ApiClient {
     }>("/admin/emby/users", { signal, cache: "no-store" }, { cacheRead: false, dedupe: false });
   }
 
+  async listEmbyUsersV2(signal?: AbortSignal) {
+    return this.request<{
+      emby_users: Array<{
+        emby_id: string; emby_name: string; has_password: boolean;
+        is_admin: boolean; is_disabled: boolean; is_hidden: boolean;
+        last_login: string | null; last_activity: string | null;
+        local_user: { uid: number; username: string; telegram_id: number | null; active: boolean; role: number } | null;
+        sync_status: 'synced' | 'name_mismatch' | 'unlinked';
+      }>;
+      orphans: Array<{ uid: number; username: string; emby_id: string; telegram_id: number | null }>;
+      total_emby: number; total_linked: number; total_orphans: number;
+    }>("/admin/emby/users", { signal, cache: "no-store" }, { cacheRead: false, dedupe: false, apiVersion: "v2" });
+  }
+
   // Emby 登录用户的设备 / IP 审查（按用户聚合）：
   // /Devices 设备清单 + 实时 /Sessions IP + 活动日志历史登录 IP，映射完整本地账号。
   async adminGetEmbyDeviceAudit(refresh = false, signal?: AbortSignal) {
+    if (this.useV2.emby) {
+      return this.adminGetEmbyDeviceAuditV2(refresh, signal);
+    }
     return this.request<EmbyDeviceAuditData>(`/admin/emby/device-audit${refresh ? "?refresh=1" : ""}`, { signal });
   }
 
+  async adminGetEmbyDeviceAuditV2(refresh = false, signal?: AbortSignal) {
+    return this.request<EmbyDeviceAuditData>(`/admin/emby/device-audit${refresh ? "?refresh=1" : ""}`, { signal }, { apiVersion: "v2" });
+  }
+
   async adminGetEmbyActivityLogs(limit = 100, refresh = false, sinceHours = 24, signal?: AbortSignal) {
+    if (this.useV2.emby) {
+      return this.adminGetEmbyActivityLogsV2(limit, refresh, sinceHours, signal);
+    }
     const params = new URLSearchParams({ limit: String(limit) });
     if (refresh) {
       params.set("refresh", "1");
@@ -1644,12 +2118,35 @@ class ApiClient {
     );
   }
 
+  async adminGetEmbyActivityLogsV2(limit = 100, refresh = false, sinceHours = 24, signal?: AbortSignal) {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (refresh) {
+      params.set("refresh", "1");
+      params.set("since_hours", String(sinceHours));
+    }
+    return this.request<EmbyActivityLogsResponse>(
+      `/admin/emby/activity-logs?${params.toString()}`,
+      { signal, cache: "no-store" },
+      { cacheRead: false, dedupe: false, apiVersion: "v2" },
+    );
+  }
+
   /** 管理员仪表盘观看详情；普通用户只允许读取 /system/emby-viewers。 */
   async getAdminEmbyNowPlaying(signal?: AbortSignal) {
+    if (this.useV2.emby) {
+      return this.getAdminEmbyNowPlayingV2(signal);
+    }
     return this.request<EmbyNowPlaying>("/admin/emby/now-playing", {
       signal,
       cache: "no-store",
     }, { cacheRead: false, dedupe: false });
+  }
+
+  async getAdminEmbyNowPlayingV2(signal?: AbortSignal) {
+    return this.request<EmbyNowPlaying>("/admin/emby/now-playing", {
+      signal,
+      cache: "no-store",
+    }, { cacheRead: false, dedupe: false, apiVersion: "v2" });
   }
 
   /** @deprecated 使用 getAdminEmbyNowPlaying，避免误调用未授权的旧路径。 */
@@ -1660,28 +2157,63 @@ class ApiClient {
   // 设备/IP 审查页的快速处置：按 Emby 用户 ID 单独启停 Emby（已关联本地用户时后端会
   // 沿用本地保护/有效期约束并同步镜像；未关联也可直接处置可疑 Emby 账号）。
   async setEmbyUserEnabledById(embyId: string, enable: boolean) {
+    if (this.useV2.emby) {
+      return this.setEmbyUserEnabledByIdV2(embyId, enable);
+    }
     return this.request<{ emby_user_id: string; emby_enabled: boolean }>(
       `/admin/emby/users/${encodeURIComponent(embyId)}/${enable ? "enable" : "disable"}`,
       { method: "POST" },
     );
   }
 
+  async setEmbyUserEnabledByIdV2(embyId: string, enable: boolean) {
+    return this.request<{ emby_user_id: string; emby_enabled: boolean }>(
+      `/admin/emby/users/${encodeURIComponent(embyId)}/${enable ? "enable" : "disable"}`,
+      { method: "POST" },
+      { apiVersion: "v2" },
+    );
+  }
+
   // 按 Emby 用户 ID 踢出其全部在线会话。
   async kickEmbyUserById(embyId: string) {
+    if (this.useV2.emby) {
+      return this.kickEmbyUserByIdV2(embyId);
+    }
     return this.request<{ emby_user_id: string; kicked_count: number }>(
       `/admin/emby/users/${encodeURIComponent(embyId)}/kick`,
       { method: "POST" },
     );
   }
 
+  async kickEmbyUserByIdV2(embyId: string) {
+    return this.request<{ emby_user_id: string; kicked_count: number }>(
+      `/admin/emby/users/${encodeURIComponent(embyId)}/kick`,
+      { method: "POST" },
+      { apiVersion: "v2" },
+    );
+  }
+
   async cleanupOrphanEmbyIds() {
+    if (this.useV2.emby) {
+      return this.cleanupOrphanEmbyIdsV2();
+    }
     return this.request<{
       cleaned: Array<{ uid: number; username: string; old_emby_id: string }>;
       count: number;
     }>("/admin/emby/cleanup-orphans", { method: "POST" });
   }
 
+  async cleanupOrphanEmbyIdsV2() {
+    return this.request<{
+      cleaned: Array<{ uid: number; username: string; old_emby_id: string }>;
+      count: number;
+    }>("/admin/emby/cleanup-orphans", { method: "POST" }, { apiVersion: "v2" });
+  }
+
   async importEmbyUsers(embyIds?: string[]) {
+    if (this.useV2.emby) {
+      return this.importEmbyUsersV2(embyIds);
+    }
     return this.request<{
       unlinked: Array<{ emby_id: string; emby_name: string; is_disabled: boolean; is_hidden: boolean }>;
       skipped: Array<{ emby_id: string; name: string; reason: string }>;
@@ -1692,7 +2224,21 @@ class ApiClient {
     });
   }
 
+  async importEmbyUsersV2(embyIds?: string[]) {
+    return this.request<{
+      unlinked: Array<{ emby_id: string; emby_name: string; is_disabled: boolean; is_hidden: boolean }>;
+      skipped: Array<{ emby_id: string; name: string; reason: string }>;
+      unlinked_count: number; skipped_count: number;
+    }>("/admin/emby/import-users", {
+      method: "POST",
+      body: JSON.stringify(embyIds ? { emby_ids: embyIds } : {}),
+    }, { apiVersion: "v2" });
+  }
+
   async deleteUnlinkedEmbyUsers(dryRun: boolean = false) {
+    if (this.useV2.emby) {
+      return this.deleteUnlinkedEmbyUsersV2(dryRun);
+    }
     return this.request<{
       candidates: Array<{ emby_id: string; emby_name: string; is_disabled: boolean; is_hidden: boolean }>;
       deleted: Array<{ emby_id: string; emby_name: string; is_disabled: boolean; is_hidden: boolean }>;
@@ -1705,11 +2251,34 @@ class ApiClient {
     });
   }
 
+  async deleteUnlinkedEmbyUsersV2(dryRun: boolean = false) {
+    return this.request<{
+      candidates: Array<{ emby_id: string; emby_name: string; is_disabled: boolean; is_hidden: boolean }>;
+      deleted: Array<{ emby_id: string; emby_name: string; is_disabled: boolean; is_hidden: boolean }>;
+      failed: Array<{ emby_id: string; emby_name: string; reason: string }>;
+      count: number;
+      dry_run: boolean;
+    }>("/admin/emby/delete-unlinked", {
+      method: "POST",
+      body: JSON.stringify({ dry_run: dryRun }),
+    }, { apiVersion: "v2" });
+  }
+
   async resetAllEmbyBindings() {
+    if (this.useV2.emby) {
+      return this.resetAllEmbyBindingsV2();
+    }
     return this.request<{ count: number }>("/admin/emby/reset-bindings", {
       method: "POST",
       body: JSON.stringify({ confirm: "RESET_ALL_EMBY" }),
     });
+  }
+
+  async resetAllEmbyBindingsV2() {
+    return this.request<{ count: number }>("/admin/emby/reset-bindings", {
+      method: "POST",
+      body: JSON.stringify({ confirm: "RESET_ALL_EMBY" }),
+    }, { apiVersion: "v2" });
   }
 
   /**
@@ -2323,10 +2892,83 @@ class ApiClient {
   }
 
   async forgotPasswordByEmby(data: { emby_username: string; emby_password: string }) {
+    if (this.useV2.auth) {
+      return this.forgotPasswordByEmbyV2({ emby_username: data.emby_username });
+    }
     return this.request<{ username: string; new_password: string }>("/auth/forgot-password/emby", {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  async forgotPasswordByEmbyV2(request: V2ForgotPasswordByEmbyRequest, signal?: AbortSignal) {
+    const res = await this.request<V2ForgotPasswordResponse>("/auth/forgot-password/emby", {
+      method: "POST",
+      cache: "no-store",
+      signal,
+      body: JSON.stringify(request),
+    }, { apiVersion: "v2" });
+    return res as ApiResponse<{ username: string; new_password: string }>;
+  }
+
+  async emailPasswordReset(data: { email: string }) {
+    if (this.useV2.auth) {
+      return this.emailPasswordResetV2(data);
+    }
+    return this.request<{ verification_id: string; message: string }>("/auth/forgot-password/email", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async emailPasswordResetV2(request: V2EmailPasswordResetRequest, signal?: AbortSignal) {
+    const res = await this.request<V2EmailPasswordResetResponse>("/auth/forgot-password/email", {
+      method: "POST",
+      cache: "no-store",
+      signal,
+      body: JSON.stringify(request),
+    }, { apiVersion: "v2" });
+    return res as ApiResponse<{ verification_id: string; message: string }>;
+  }
+
+  async emailPasswordResetConfirm(data: { verification_id: string; code: string; new_password: string }) {
+    if (this.useV2.auth) {
+      return this.emailPasswordResetConfirmV2(data);
+    }
+    return this.request<{ message: string }>("/auth/forgot-password/email/confirm", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async emailPasswordResetConfirmV2(request: V2EmailPasswordResetConfirmRequest, signal?: AbortSignal) {
+    const res = await this.request<V2EmailPasswordResetConfirmResponse>("/auth/forgot-password/email/confirm", {
+      method: "POST",
+      cache: "no-store",
+      signal,
+      body: JSON.stringify(request),
+    }, { apiVersion: "v2" });
+    return res as ApiResponse<{ message: string }>;
+  }
+
+  async checkRegistrationAvailability(data: { regcode: string }) {
+    if (this.useV2.auth) {
+      return this.checkRegistrationAvailabilityV2(data);
+    }
+    return this.request<{ available: boolean; requires_emby_username?: boolean; message?: string }>("/auth/register/check", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async checkRegistrationAvailabilityV2(request: V2RegistrationAvailabilityRequest, signal?: AbortSignal) {
+    const res = await this.request<V2RegistrationAvailabilityResponse>("/auth/register/check", {
+      method: "POST",
+      cache: "no-store",
+      signal,
+      body: JSON.stringify(request),
+    }, { apiVersion: "v2" });
+    return res;
   }
 
   // Violations audit
@@ -2507,13 +3149,27 @@ class ApiClient {
 
   /** 公开列表：登录页 / 主页等场景可直接调用。 */
   async getActiveAnnouncements(limit: number = 50) {
+    if (this.useV2.announcements) {
+      return this.getActiveAnnouncementsV2(limit);
+    }
     return this.request<{ announcements: Announcement[]; total: number }>(
       `/announcements?limit=${limit}`,
       { credentials: "omit" },
     );
   }
 
+  async getActiveAnnouncementsV2(limit: number = 50) {
+    return this.request<{ announcements: Announcement[]; total: number }>(
+      `/announcements?limit=${limit}`,
+      { credentials: "omit" },
+      { apiVersion: "v2" },
+    );
+  }
+
   async getMyAnnouncements() {
+    if (this.useV2.announcements) {
+      return this.getMyAnnouncementsV2();
+    }
     return this.request<{
       announcements: Announcement[];
       total: number;
@@ -2522,15 +3178,61 @@ class ApiClient {
     }>("/users/me/announcements");
   }
 
+  async getMyAnnouncementsV2() {
+    return this.request<{
+      announcements: Announcement[];
+      total: number;
+      unseen_force_read: Announcement[];
+      unseen_force_read_ids: number[];
+    }>("/announcements", {}, { apiVersion: "v2" });
+  }
+
   async ackAnnouncements(ids: number[]) {
+    if (this.useV2.announcements) {
+      return this.ackAnnouncementsV2(ids);
+    }
     return this.request<{ acknowledged: number }>("/users/me/announcements/ack", {
       method: "POST",
       body: JSON.stringify({ ids }),
     });
   }
 
-  /** 管理员视角列表，含历史与隐藏条目。 */
+  async ackAnnouncementsV2(ids: number[]) {
+    return this.request<{ acknowledged: number }>("/announcements/ack", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }, { apiVersion: "v2" });
+  }
+
+  /** 管理员视角列表,含历史与隐藏条目。 */
   async adminListAnnouncements(params: {
+    page?: number;
+    per_page?: number;
+    include_invisible?: boolean;
+    include_expired?: boolean;
+    signal?: AbortSignal;
+  } = {}) {
+    if (this.useV2.announcements) {
+      return this.adminListAnnouncementsV2(params);
+    }
+    const query = new URLSearchParams();
+    if (params.page) query.set('page', String(params.page));
+    if (params.per_page) query.set('per_page', String(params.per_page));
+    if (params.include_invisible !== undefined) query.set('include_invisible', String(params.include_invisible));
+    if (params.include_expired !== undefined) query.set('include_expired', String(params.include_expired));
+    return this.request<{
+      announcements: Announcement[];
+      total: number;
+      page: number;
+      per_page: number;
+      pages: number;
+    }>(`/admin/announcements?${query.toString()}`, {
+      signal: params.signal,
+      cache: "no-store",
+    }, { cacheRead: false, dedupe: false });
+  }
+
+  async adminListAnnouncementsV2(params: {
     page?: number;
     per_page?: number;
     include_invisible?: boolean;
@@ -2551,7 +3253,7 @@ class ApiClient {
     }>(`/admin/announcements?${query.toString()}`, {
       signal: params.signal,
       cache: "no-store",
-    }, { cacheRead: false, dedupe: false });
+    }, { cacheRead: false, dedupe: false, apiVersion: "v2" });
   }
 
   async adminCreateAnnouncement(payload: {
@@ -2565,10 +3267,30 @@ class ApiClient {
     force_read_seconds?: number;
     expires_at?: number;
   }) {
+    if (this.useV2.announcements) {
+      return this.adminCreateAnnouncementV2(payload);
+    }
     return this.request<Announcement>(`/admin/announcements`, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+  }
+
+  async adminCreateAnnouncementV2(payload: {
+    title?: string;
+    content: string;
+    level?: 'info' | 'notice' | 'warning' | 'critical';
+    render_mode?: AnnouncementRenderMode;
+    pinned?: boolean;
+    visible?: boolean;
+    force_read?: boolean;
+    force_read_seconds?: number;
+    expires_at?: number;
+  }) {
+    return this.request<Announcement>(`/admin/announcements`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }, { apiVersion: "v2" });
   }
 
   async adminUpdateAnnouncement(id: number, payload: {
@@ -2582,16 +3304,45 @@ class ApiClient {
     force_read_seconds?: number;
     expires_at?: number;
   }) {
+    if (this.useV2.announcements) {
+      return this.adminUpdateAnnouncementV2(id, payload);
+    }
     return this.request<Announcement>(`/admin/announcements/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
   }
 
+  async adminUpdateAnnouncementV2(id: number, payload: {
+    title?: string;
+    content?: string;
+    level?: 'info' | 'notice' | 'warning' | 'critical';
+    render_mode?: AnnouncementRenderMode;
+    pinned?: boolean;
+    visible?: boolean;
+    force_read?: boolean;
+    force_read_seconds?: number;
+    expires_at?: number;
+  }) {
+    return this.request<Announcement>(`/admin/announcements/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }, { apiVersion: "v2" });
+  }
+
   async adminDeleteAnnouncement(id: number) {
+    if (this.useV2.announcements) {
+      return this.adminDeleteAnnouncementV2(id);
+    }
     return this.request(`/admin/announcements/${id}`, {
       method: 'DELETE',
     });
+  }
+
+  async adminDeleteAnnouncementV2(id: number) {
+    return this.request(`/admin/announcements/${id}`, {
+      method: 'DELETE',
+    }, { apiVersion: "v2" });
   }
 
   // ==================== 邀请树 ====================
@@ -2798,6 +3549,9 @@ class ApiClient {
   // ==================== Tickets ====================
 
   async getMyTickets(params: { page?: number; per_page?: number } = {}, signal?: AbortSignal) {
+    if (this.useV2.tickets) {
+      return this.getMyTicketsV2(params, signal);
+    }
     const query = new URLSearchParams();
     if (params.page) query.set("page", String(params.page));
     if (params.per_page) query.set("per_page", String(params.per_page));
@@ -2809,7 +3563,33 @@ class ApiClient {
     );
   }
 
+  async getMyTicketsV2(params: { page?: number; per_page?: number } = {}, signal?: AbortSignal) {
+    const query = new URLSearchParams();
+    if (params.page) query.set("page", String(params.page));
+    if (params.per_page) query.set("per_page", String(params.per_page));
+    const suffix = query.size ? `?${query.toString()}` : "";
+    const response = await this.request<V2UserTicketListResponse>(
+      `/tickets${suffix}`,
+      { cache: "no-store", signal },
+      { apiVersion: "v2", cacheRead: false, dedupe: false },
+    );
+    return {
+      success: response.success,
+      data: {
+        tickets: response.data.items,
+        total: response.data.pagination.total,
+        page: response.data.pagination.page,
+        per_page: response.data.pagination.per_page,
+        ticket_types: response.data.ticket_types,
+      },
+      message: response.message,
+    } as ApiResponse<{ tickets: UserTicketListItem[]; total: number; page: number; per_page: number; ticket_types: string[] }>;
+  }
+
   async getMyTicket(id: number, signal?: AbortSignal) {
+    if (this.useV2.tickets) {
+      return this.getMyTicketV2(id, signal);
+    }
     return this.request<{ ticket: Ticket; ticket_types: string[] }>(
       `/tickets/${id}`,
       { cache: "no-store", signal },
@@ -2817,37 +3597,109 @@ class ApiClient {
     );
   }
 
+  async getMyTicketV2(id: number, signal?: AbortSignal) {
+    const response = await this.request<V2UserTicketDetailResponse>(
+      `/tickets/${id}`,
+      { cache: "no-store", signal },
+      { apiVersion: "v2", cacheRead: false, dedupe: false },
+    );
+    return {
+      success: response.success,
+      data: {
+        ticket: response.data.item,
+        ticket_types: response.data.ticket_types,
+      },
+      message: response.message,
+    } as ApiResponse<{ ticket: Ticket; ticket_types: string[] }>;
+  }
+
   async createTicket(payload: { title: string; content: string; type?: string; priority?: string; notify_telegram?: boolean }) {
+    if (this.useV2.tickets) {
+      return this.createTicketV2(payload);
+    }
     return this.request<Ticket>("/tickets", {
       method: "POST",
       body: JSON.stringify(payload),
     });
   }
 
+  async createTicketV2(payload: { title: string; content: string; type?: string; priority?: string; notify_telegram?: boolean }) {
+    return this.request<Ticket>("/tickets", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }, { apiVersion: "v2" });
+  }
+
   async closeOwnTicket(id: number) {
+    if (this.useV2.tickets) {
+      return this.closeOwnTicketV2(id);
+    }
     return this.request<Ticket>(`/tickets/${id}/close`, { method: "POST" });
   }
 
+  async closeOwnTicketV2(id: number) {
+    return this.request<Ticket>(`/tickets/${id}/close`, { method: "POST" }, { apiVersion: "v2" });
+  }
+
   async reopenOwnTicket(id: number) {
+    if (this.useV2.tickets) {
+      return this.reopenOwnTicketV2(id);
+    }
     return this.request<Ticket>(`/tickets/${id}/reopen`, { method: "POST" });
   }
 
+  async reopenOwnTicketV2(id: number) {
+    return this.request<Ticket>(`/tickets/${id}/reopen`, { method: "POST" }, { apiVersion: "v2" });
+  }
+
   async toggleTicketNotify(id: number, enabled: boolean) {
+    if (this.useV2.tickets) {
+      return this.toggleTicketNotifyV2(id, enabled);
+    }
     return this.request<Ticket>(`/tickets/${id}/notify-telegram`, {
       method: "PUT",
       body: JSON.stringify({ enabled }),
     });
   }
 
+  async toggleTicketNotifyV2(id: number, enabled: boolean) {
+    return this.request<Ticket>(`/tickets/${id}/notify-telegram`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    }, { apiVersion: "v2" });
+  }
+
   async replyTicket(id: number, content: string) {
+    if (this.useV2.tickets) {
+      return this.replyTicketV2(id, content);
+    }
     return this.request<{ ticket_id: number; ticket: Ticket; replies: Ticket["replies"] }>(`/tickets/${id}/reply`, {
       method: "POST",
       body: JSON.stringify({ content }),
     });
   }
 
+  async replyTicketV2(id: number, content: string) {
+    const response = await this.request<V2TicketReplyResponse>(`/tickets/${id}/reply`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    }, { apiVersion: "v2" });
+    return {
+      success: response.success,
+      data: {
+        ticket_id: response.data.ticket_id,
+        ticket: response.data.ticket || response.data.item,
+        replies: response.data.replies,
+      },
+      message: response.message,
+    } as ApiResponse<{ ticket_id: number; ticket: Ticket; replies: Ticket["replies"] }>;
+  }
+
   // 工单交流图片
   async uploadTicketImage(ticketId: number, file: File, signal?: AbortSignal) {
+    if (this.useV2.tickets) {
+      return this.uploadTicketImageV2(ticketId, file, signal);
+    }
     const formData = new FormData();
     formData.append("file", file);
     return this.requestForm<{ ticket_id: number; attachment: TicketAttachment; attachments: TicketAttachment[] }>(
@@ -2858,10 +3710,32 @@ class ApiClient {
     );
   }
 
+  async uploadTicketImageV2(ticketId: number, file: File, signal?: AbortSignal) {
+    const formData = new FormData();
+    formData.append("file", file);
+    return this.requestForm<{ ticket_id: number; attachment: TicketAttachment; attachments: TicketAttachment[] }>(
+      `/tickets/${ticketId}/attachments`,
+      formData,
+      "POST",
+      { signal, apiVersion: "v2" },
+    );
+  }
+
   async deleteTicketImage(ticketId: number, filename: string) {
+    if (this.useV2.tickets) {
+      return this.deleteTicketImageV2(ticketId, filename);
+    }
     return this.request<{ ticket_id: number; attachments: TicketAttachment[] }>(
       `/tickets/${ticketId}/images/${encodeURIComponent(filename)}`,
       { method: "DELETE" },
+    );
+  }
+
+  async deleteTicketImageV2(ticketId: number, filename: string) {
+    return this.request<{ ticket_id: number; attachments: TicketAttachment[] }>(
+      `/tickets/${ticketId}/attachments/${encodeURIComponent(filename)}`,
+      { method: "DELETE" },
+      { apiVersion: "v2" },
     );
   }
 
@@ -2871,6 +3745,9 @@ class ApiClient {
   }
 
   async adminListTickets(params: { uid?: number; status?: string; type?: string; priority?: string; all?: boolean; page?: number; per_page?: number } = {}, signal?: AbortSignal) {
+    if (this.useV2.tickets) {
+      return this.adminListTicketsV2(params, signal);
+    }
     const query = new URLSearchParams();
     if (params.uid) query.set("uid", String(params.uid));
     if (params.all) query.set("all", "1");
@@ -2886,7 +3763,37 @@ class ApiClient {
     );
   }
 
+  async adminListTicketsV2(params: { uid?: number; status?: string; type?: string; priority?: string; all?: boolean; page?: number; per_page?: number } = {}, signal?: AbortSignal) {
+    const query = new URLSearchParams();
+    if (params.uid) query.set("uid", String(params.uid));
+    if (params.all) query.set("all", "1");
+    if (params.status) query.set("status", params.status);
+    if (params.type) query.set("type", params.type);
+    if (params.priority) query.set("priority", params.priority);
+    if (params.page) query.set("page", String(params.page));
+    if (params.per_page) query.set("per_page", String(params.per_page));
+    const response = await this.request<V2AdminTicketListResponse>(
+      `/admin/tickets?${query.toString()}`,
+      { cache: "no-store", signal },
+      { apiVersion: "v2", cacheRead: false, dedupe: false },
+    );
+    return {
+      success: response.success,
+      data: {
+        tickets: response.data.items,
+        total: response.data.pagination.total,
+        page: response.data.pagination.page,
+        per_page: response.data.pagination.per_page,
+        ticket_types: response.data.ticket_types,
+      },
+      message: response.message,
+    } as ApiResponse<{ tickets: Ticket[]; total: number; page?: number; per_page?: number; ticket_types: string[] }>;
+  }
+
   async adminGetTicket(id: number, signal?: AbortSignal) {
+    if (this.useV2.tickets) {
+      return this.adminGetTicketV2(id, signal);
+    }
     return this.request<{ ticket: Ticket; ticket_types: string[] }>(
       `/admin/tickets/${id}`,
       { cache: "no-store", signal },
@@ -2894,48 +3801,156 @@ class ApiClient {
     );
   }
 
+  async adminGetTicketV2(id: number, signal?: AbortSignal) {
+    const response = await this.request<V2AdminTicketDetailResponse>(
+      `/admin/tickets/${id}`,
+      { cache: "no-store", signal },
+      { apiVersion: "v2", cacheRead: false, dedupe: false },
+    );
+    return {
+      success: response.success,
+      data: {
+        ticket: response.data.item,
+        ticket_types: response.data.ticket_types,
+      },
+      message: response.message,
+    } as ApiResponse<{ ticket: Ticket; ticket_types: string[] }>;
+  }
+
   async adminUpdateTicket(id: number, payload: { status?: string; priority?: string; type?: string; admin_note?: string }) {
+    if (this.useV2.tickets) {
+      return this.adminUpdateTicketV2(id, payload);
+    }
     return this.request<Ticket>(`/admin/tickets/${id}`, {
       method: "PUT",
       body: JSON.stringify(payload),
     });
   }
 
+  async adminUpdateTicketV2(id: number, payload: { status?: string; priority?: string; type?: string; admin_note?: string }) {
+    return this.request<Ticket>(`/admin/tickets/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }, { apiVersion: "v2" });
+  }
+
   async adminReplyTicket(id: number, content: string) {
+    if (this.useV2.tickets) {
+      return this.adminReplyTicketV2(id, content);
+    }
     return this.request<{ ticket_id: number; ticket: Ticket; replies: Ticket["replies"] }>(`/admin/tickets/${id}/reply`, {
       method: "POST",
       body: JSON.stringify({ content }),
     });
   }
 
+  async adminReplyTicketV2(id: number, content: string) {
+    const response = await this.request<V2TicketReplyResponse>(`/admin/tickets/${id}/reply`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    }, { apiVersion: "v2" });
+    return {
+      success: response.success,
+      data: {
+        ticket_id: response.data.ticket_id,
+        ticket: response.data.ticket || response.data.item,
+        replies: response.data.replies,
+      },
+      message: response.message,
+    } as ApiResponse<{ ticket_id: number; ticket: Ticket; replies: Ticket["replies"] }>;
+  }
+
   async adminDeleteTicket(id: number) {
+    if (this.useV2.tickets) {
+      return this.adminDeleteTicketV2(id);
+    }
     return this.request(`/admin/tickets/${id}`, { method: "DELETE" });
+  }
+
+  async adminDeleteTicketV2(id: number) {
+    return this.request(`/admin/tickets/${id}`, { method: "DELETE" }, { apiVersion: "v2" });
   }
 
   // 工单类型管理
   async adminGetTicketTypes() {
+    if (this.useV2.tickets) {
+      return this.adminGetTicketTypesV2();
+    }
     return this.request<{ types: string[] }>("/admin/ticket-types");
   }
 
+  async adminGetTicketTypesV2() {
+    const response = await this.request<{ items: string[] }>("/admin/ticket-types", {}, { apiVersion: "v2" });
+    return {
+      success: response.success,
+      data: { types: response.data.items },
+      message: response.message,
+    } as ApiResponse<{ types: string[] }>;
+  }
+
   async adminAddTicketType(name: string) {
+    if (this.useV2.tickets) {
+      return this.adminAddTicketTypeV2(name);
+    }
     return this.request<{ name: string; types: string[] }>("/admin/ticket-types", {
       method: "POST",
       body: JSON.stringify({ name }),
     });
   }
 
+  async adminAddTicketTypeV2(name: string) {
+    const response = await this.request<{ item: string; items: string[] }>("/admin/ticket-types", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }, { apiVersion: "v2" });
+    return {
+      success: response.success,
+      data: { name: response.data.item, types: response.data.items },
+      message: response.message,
+    } as ApiResponse<{ name: string; types: string[] }>;
+  }
+
   async adminDeleteTicketType(name: string) {
+    if (this.useV2.tickets) {
+      return this.adminDeleteTicketTypeV2(name);
+    }
     return this.request<{ name: string; types: string[] }>("/admin/ticket-types", {
       method: "DELETE",
       body: JSON.stringify({ name }),
     });
   }
 
+  async adminDeleteTicketTypeV2(name: string) {
+    const response = await this.request<{ items: string[] }>(`/admin/ticket-types/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }, { apiVersion: "v2" });
+    return {
+      success: response.success,
+      data: { name, types: response.data.items },
+      message: response.message,
+    } as ApiResponse<{ name: string; types: string[] }>;
+  }
+
   async adminRenameTicketType(oldName: string, newName: string) {
+    if (this.useV2.tickets) {
+      return this.adminRenameTicketTypeV2(oldName, newName);
+    }
     return this.request<{ old_name: string; new_name: string; types: string[] }>("/admin/ticket-types", {
       method: "PUT",
       body: JSON.stringify({ old_name: oldName, new_name: newName }),
     });
+  }
+
+  async adminRenameTicketTypeV2(oldName: string, newName: string) {
+    const response = await this.request<{ item: string; items: string[]; tickets_renamed: number }>(`/admin/ticket-types/${encodeURIComponent(oldName)}`, {
+      method: "PUT",
+      body: JSON.stringify({ name: newName }),
+    }, { apiVersion: "v2" });
+    return {
+      success: response.success,
+      data: { old_name: oldName, new_name: response.data.item, types: response.data.items },
+      message: response.message,
+    } as ApiResponse<{ old_name: string; new_name: string; types: string[] }>;
   }
 }
 
