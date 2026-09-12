@@ -3326,14 +3326,14 @@ class ApiClient {
     }
     return this.request<{ announcements: Announcement[]; total: number }>(
       `/announcements?limit=${limit}`,
-      { credentials: "omit" },
+      { credentials: "same-origin" },
     );
   }
 
   async getActiveAnnouncementsV2(limit: number = 50) {
     return this.request<{ announcements: Announcement[]; total: number }>(
       `/announcements?limit=${limit}`,
-      { credentials: "omit" },
+      { credentials: "same-origin" },
       { apiVersion: "v2" },
     );
   }
