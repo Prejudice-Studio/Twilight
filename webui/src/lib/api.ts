@@ -188,6 +188,7 @@ class ApiClient {
     config: process.env.NEXT_PUBLIC_USE_V1_COMPAT !== 'true',
     bangumi: process.env.NEXT_PUBLIC_USE_V1_COMPAT !== 'true',
     email: process.env.NEXT_PUBLIC_USE_V1_COMPAT !== 'true',
+    ticketTypes: process.env.NEXT_PUBLIC_USE_V1_COMPAT !== 'true',
   };
 
   /**
@@ -4180,7 +4181,7 @@ class ApiClient {
 
   // 工单类型管理
   async adminGetTicketTypes() {
-    if (this.useV2.tickets) {
+    if (this.useV2.ticketTypes) {
       return this.adminGetTicketTypesV2();
     }
     return this.request<{ types: string[] }>("/admin/ticket-types");
@@ -4201,7 +4202,7 @@ class ApiClient {
   }
 
   async adminAddTicketType(name: string) {
-    if (this.useV2.tickets) {
+    if (this.useV2.ticketTypes) {
       return this.adminAddTicketTypeV2(name);
     }
     return this.request<{ name: string; types: string[] }>("/admin/ticket-types", {
@@ -4228,7 +4229,7 @@ class ApiClient {
   }
 
   async adminDeleteTicketType(name: string) {
-    if (this.useV2.tickets) {
+    if (this.useV2.ticketTypes) {
       return this.adminDeleteTicketTypeV2(name);
     }
     return this.request<{ name: string; types: string[] }>("/admin/ticket-types", {
@@ -4254,7 +4255,7 @@ class ApiClient {
   }
 
   async adminRenameTicketType(oldName: string, newName: string) {
-    if (this.useV2.tickets) {
+    if (this.useV2.ticketTypes) {
       return this.adminRenameTicketTypeV2(oldName, newName);
     }
     return this.request<{ old_name: string; new_name: string; types: string[] }>("/admin/ticket-types", {
