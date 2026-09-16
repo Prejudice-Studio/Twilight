@@ -7,7 +7,7 @@
 **面向 Emby / Jellyfin 的用户、邀请、卡码、Bot 与运维管理面板**
 
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
-[![Next.js](https://img.shields.io/badge/Next.js-React-black?logo=next.js&logoColor=white)](https://nextjs.org/)
+[![SvelteKit](https://img.shields.io/badge/SvelteKit-SSR-orange?logo=svelte&logoColor=white)](https://kit.svelte.dev/)
 [![License](https://img.shields.io/badge/License-AGPL--3.0-blue)](LICENSE)
 [![Telegram](https://img.shields.io/badge/Telegram-频道-blue?logo=telegram)](https://t.me/Twilightpanel)
 
@@ -24,7 +24,8 @@ Twilight 是一个功能完善的 Emby / Jellyfin 用户管理系统，提供注
 ### 技术栈
 
 - **后端**: Go 1.25+ / PostgreSQL
-- **前端**: Next.js / React / TypeScript / Tailwind CSS
+- **默认前端**: SvelteKit SSR / Svelte / TypeScript（`webui-v2/`）
+- **回滚前端**: Next.js / React / TypeScript / Tailwind CSS（`webui/`，仅用于紧急回滚）
 - **部署**: Docker / Linux systemd
 
 ## 功能特性
@@ -62,7 +63,7 @@ nano .env  # 修改数据库密码等配置
 # 启动服务
 docker compose up -d --build
 
-# 访问 http://localhost:3000
+# 访问 http://localhost:3000（以 compose 配置为准）
 ```
 
 ### Linux 部署
@@ -80,7 +81,7 @@ sudo bash deploy/setup-systemd.sh
 ### 首次初始化
 
 1. 在 `config.toml` 中临时启用 `setup_mode = true`
-2. 打开 WebUI，按照向导创建管理员账号
+2. 打开默认的 SvelteKit SSR WebUI，按照向导创建管理员账号
 3. 配置 Emby、Telegram、邮箱等（可跳过稍后配置）
 
 完整部署指南：[安装文档](docs/guides/install.md) | [Docker 部署](docs/guides/docker.md)
