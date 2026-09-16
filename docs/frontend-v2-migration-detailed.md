@@ -184,6 +184,8 @@ renameTicketType()           → PUT /admin/ticket-types
 
 ### 7. 其他未迁移模块
 
+> 批量用户操作的状态已在 2026-09-16 更新：前端 `webui/src/lib/api.ts` 已增加 `useV2.batch`，并覆盖 Web 账号启停、批量删除、Emby 启停、外部状态刷新、Emby 解绑锁、授权清理和全媒体库授权。V2 删除接口使用 `POST /api/v2/admin/users/batch/delete`，确认短语、选择器和超时边界与兼容接口保持一致。下文关于“批量操作完全无开关”的历史描述不再适用。
+
 #### MediaRequests（有声明但未使用）
 ```typescript
 // useV2.mediaRequests 存在但所有方法硬编码 V1

@@ -189,6 +189,7 @@ class ApiClient {
     bangumi: process.env.NEXT_PUBLIC_USE_V1_COMPAT !== 'true',
     email: process.env.NEXT_PUBLIC_USE_V1_COMPAT !== 'true',
     ticketTypes: process.env.NEXT_PUBLIC_USE_V1_COMPAT !== 'true',
+    batch: process.env.NEXT_PUBLIC_USE_V1_COMPAT !== 'true',
   };
 
   /**
@@ -1626,8 +1627,11 @@ class ApiClient {
 
   // 批量单独启停 Emby 账号（保留 Web）。
   async batchToggleEmby(selection: number[] | BatchUserSelection, enable: boolean) {
+    const path = this.useV2.batch
+      ? `/api/v2/admin/users/batch/emby-${enable ? "enable" : "disable"}`
+      : `/batch/users/emby/${enable ? "enable" : "disable"}`;
     return this.request<BatchUserResult & { skipped_no_emby?: number; emby_enabled?: boolean }>(
-      `/batch/users/emby/${enable ? "enable" : "disable"}`,
+      path,
       {
         method: "POST",
         body: JSON.stringify({
@@ -1641,8 +1645,11 @@ class ApiClient {
 
   // 批量强制刷新外部状态。scope 控制只刷 TG / 只刷 Emby / 两者。非破坏性、无需确认短语。
   async batchRefreshStatus(selection: number[] | BatchUserSelection, scope: "telegram" | "emby" | "both" = "both") {
+    const path = this.useV2.batch
+      ? `/api/v2/admin/users/batch/refresh-status`
+      : `/batch/users/refresh-status`;
     return this.request<BatchUserResult & { telegram_updated?: number; emby_disabled?: number }>(
-      `/batch/users/refresh-status`,
+      path,
       {
         method: "POST",
         body: JSON.stringify({ ...this.batchUserSelectionBody(selection), scope }),
@@ -1655,8 +1662,15 @@ class ApiClient {
     return Array.isArray(selection) ? { uids: selection } : selection;
   }
 
+  private batchEndpoint(v2Path: string, v1Path: string) {
+    return this.useV2.batch ? v2Path : v1Path;
+  }
+
   async batchToggleUsers(selection: number[] | BatchUserSelection, enable: boolean) {
-    return this.request<BatchUserResult>(`/batch/users/${enable ? "enable" : "disable"}`, {
+    return this.request<BatchUserResult>(this.batchEndpoint(
+      `/api/v2/admin/users/batch/${enable ? "enable" : "disable"}`,
+      `/batch/users/${enable ? "enable" : "disable"}`,
+    ), {
       method: "POST",
       body: JSON.stringify({
         ...this.batchUserSelectionBody(selection),
@@ -1666,7 +1680,10 @@ class ApiClient {
   }
 
   async batchDeleteUsers(selection: number[] | BatchUserSelection, deleteEmby: boolean) {
-    return this.request<BatchUserResult>("/batch/users/delete", {
+    return this.request<BatchUserResult>(this.batchEndpoint(
+      "/api/v2/admin/users/batch/delete",
+      "/batch/users/delete",
+    ), {
       method: "POST",
       body: JSON.stringify({
         ...this.batchUserSelectionBody(selection),
@@ -1677,7 +1694,10 @@ class ApiClient {
   }
 
   async batchLockEmbyUnbind(selection: number[] | BatchUserSelection) {
-    return this.request<BatchUserResult>("/batch/users/emby-unbind-lock", {
+    return this.request<BatchUserResult>(this.batchEndpoint(
+      "/api/v2/admin/users/batch/emby-unbind-lock",
+      "/batch/users/emby-unbind-lock",
+    ), {
       method: "POST",
       body: JSON.stringify({
         ...this.batchUserSelectionBody(selection),
@@ -1689,7 +1709,10 @@ class ApiClient {
   }
 
   async batchClearEmbyGrant(selection: number[] | BatchUserSelection) {
-    return this.request<BatchUserResult>("/batch/users/emby-grant-clear", {
+    return this.request<BatchUserResult>(this.batchEndpoint(
+      "/api/v2/admin/users/batch/emby-grant-clear",
+      "/batch/users/emby-grant-clear",
+    ), {
       method: "POST",
       body: JSON.stringify({
         ...this.batchUserSelectionBody(selection),
@@ -1701,7 +1724,10 @@ class ApiClient {
   }
 
   async batchGrantAllLibraries(selection: number[] | BatchUserSelection) {
-    return this.request<BatchUserResult>("/batch/users/emby/grant-all-libraries", {
+    return this.request<BatchUserResult>(this.batchEndpoint(
+      "/api/v2/admin/users/batch/emby-grant-all-libraries",
+      "/batch/users/emby/grant-all-libraries",
+    ), {
       method: "POST",
       body: JSON.stringify({
         ...this.batchUserSelectionBody(selection),
