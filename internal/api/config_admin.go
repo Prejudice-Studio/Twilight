@@ -290,8 +290,39 @@ func (a *App) handleConfigBackupDelete(w http.ResponseWriter, r *http.Request, p
 	ok(w, "配置备份已删除", map[string]any{"backup": info})
 }
 
+// configFilePresentFields 逐行扫描磁盘上的 config.toml，返回 [section]field 是否
+// 在文件里显式出现过。
+//
+// 用途：configValues 返回的是"生效值"（缺键时用代码默认值补齐），所以页面看到的
+// 值不等于"文件里写了这个键"。管理员很难判断哪些配置只是默认值、改了会不会真的
+// 落盘。这里把事实摆出来，前端据此给字段打"未在配置文件中"标记；保存时
+// mergeConfigTOML 会把这些键真正写进文件。
+//
+// 用行扫描而不是 go-toml 反序列化，是为了和 maskTOMLSecrets / restoreTOMLSecrets
+// 同一套词法口径（不依赖文件能完整解析，且不会因 secret 被遮蔽而误判）。
+func configFilePresentFields(content string) map[string]map[string]bool {
+	present := map[string]map[string]bool{}
+	if strings.TrimSpace(content) == "" {
+		return present
+	}
+	section := ""
+	for _, line := range strings.Split(content, "\n") {
+		nextSection, key, isAssign := tomlSectionFieldFromLine(line, section)
+		section = canonicalConfigSection(nextSection)
+		if !isAssign || key == "" {
+			continue
+		}
+		if present[section] == nil {
+			present[section] = map[string]bool{}
+		}
+		present[section][strings.ToLower(key)] = true
+	}
+	return present
+}
+
 func (a *App) handleConfigSchemaFull(w http.ResponseWriter, r *http.Request, _ Params) {
 	values := configValues(*a.cfg())
+	present := configFilePresentFields(a.existingConfigContent())
 	sections := make([]map[string]any, 0, len(configSectionDefs()))
 	for _, def := range configSectionDefs() {
 		fields := make([]map[string]any, 0, len(def.Fields))
@@ -308,11 +339,12 @@ func (a *App) handleConfigSchemaFull(w http.ResponseWriter, r *http.Request, _ P
 				}
 			}
 			item := map[string]any{
-				"key":         field.Key,
-				"label":       field.Label,
-				"type":        field.Type,
-				"description": field.Description,
-				"value":       rawValue,
+				"key":             field.Key,
+				"label":           field.Label,
+				"type":            field.Type,
+				"description":     field.Description,
+				"value":           rawValue,
+				"present_in_file": present[def.Key][field.Key],
 			}
 			if len(field.Options) > 0 {
 				item["options"] = field.Options
@@ -941,7 +973,7 @@ const telegramGroupUserPanelTemplateDescription = "自定义 /twguser 群组用�
 	"{api_key_status}=旧 API Key 开关；{panel_ttl}=面板有效期；{panel_ttl_seconds}=面板有效秒数"
 
 var (
-	placeholderHintsBotText = []string{"{server_name}", "{bot_username}", "{user_name}"}
+	placeholderHintsBotText    = []string{"{server_name}", "{bot_username}", "{user_name}"}
 	placeholderHintsGroupPanel = []string{
 		"{server_name}", "{username}", "{uid}", "{role}", "{role_id}",
 		"{is_admin}", "{is_protected}", "{web_status}", "{web_active}",
@@ -969,7 +1001,7 @@ var (
 		"{emby_status}", "{emby_enabled_status}", "{emby_disabled_reason}",
 		"{telegram_status}", "{email_verified_status}",
 	}
-	placeholderHintsEmailCode     = []string{"{site}", "{code}", "{ttl}"}
+	placeholderHintsEmailCode = []string{"{site}", "{code}", "{ttl}"}
 )
 
 func configSectionDefs() []configSectionDef {
@@ -1021,6 +1053,7 @@ func configSectionDefs() []configSectionDef {
 			{Key: "emby_url_list_for_whitelist", Label: "白名单线路", Type: "list", Description: "管理员和白名单用户可见线路"},
 			{Key: "emby_stats_enabled", Label: "Emby库统计", Type: "bool", Description: "在首页仪表盘 Emby 卡片显示电影/剧集/集数统计"},
 			{Key: "emby_public_url", Label: "Emby 公开地址", Type: "string", Description: "浏览器侧访问 Emby 的地址；留空则使用后端地址"},
+			{Key: "emby_whitelist_url", Label: "白名单单线路地址", Type: "string", Description: "仅管理员与白名单用户可见的单一线路地址；留空则只使用上面的白名单线路列表"},
 			{Key: "play_rank_enabled", Label: "播放排行榜", Type: "bool", Description: "启用 Emby 播放日榜/周榜；关闭后除管理员后台外全部拒绝访问"},
 			{Key: "play_rank_user_visible", Label: "排行榜对普通用户开放", Type: "bool", Description: "普通用户可在侧边栏入口查看脱敏后的排行榜（用户名打码）；未登录访客无任何入口"},
 		}},
@@ -1232,11 +1265,12 @@ func configValues(cfg config.Config) map[string]map[string]any {
 			"emby_url": cfg.EmbyURL, "emby_token": cfg.EmbyToken, "emby_username": cfg.EmbyUsername, "emby_password": cfg.EmbyPassword,
 			"emby_url_list": linesToStrings(cfg.EmbyURLList), "emby_url_list_for_whitelist": linesToStrings(cfg.EmbyWhitelistURLList),
 			"emby_stats_enabled": cfg.EmbyStatsEnabled, "emby_public_url": cfg.EmbyPublicURL,
-			"play_rank_enabled": cfg.PlayRankEnabled, "play_rank_user_visible": cfg.PlayRankUserVisible,
+			"emby_whitelist_url": cfg.EmbyWhitelistURL,
+			"play_rank_enabled":  cfg.PlayRankEnabled, "play_rank_user_visible": cfg.PlayRankUserVisible,
 		},
 		"Telegram": {
 			"telegram_api_url": cfg.TelegramAPIURL, "bot_token": cfg.TelegramBotToken, "admin_id": int64sToAny(cfg.TelegramAdminIDs), "group_id": cfg.TelegramGroupIDs,
-			"force_subscribe": cfg.TelegramForceSubscribe,
+			"force_subscribe":  cfg.TelegramForceSubscribe,
 			"force_bind_group": cfg.TelegramForceBindGroup, "channel_id": cfg.TelegramChannelIDs, "force_bind_channel": cfg.TelegramForceBindChannel,
 			"require_group_membership": cfg.TelegramRequireMembership,
 			"enable_tg_panel":          cfg.TelegramEnablePanel, "ban_on_leave": cfg.TelegramBanOnLeave, "auto_enable_rejoined": cfg.TelegramAutoEnableRejoined, "group_check_concurrency": cfg.TelegramGroupCheckConcurrency, "group_action_concurrency": cfg.TelegramGroupActionConcurrency,

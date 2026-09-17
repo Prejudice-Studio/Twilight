@@ -106,13 +106,13 @@ type App struct {
 	embyDeviceAuditCache      map[string]any
 	// playRankCache 按 "range|limit|是否含身份" 分键缓存榜单，脱敏版与管理
 	// 员版互不相通。
-	playRankMu    sync.Mutex
-	playRankCache map[string]playRankSnapshot
-	embySessionsMu            sync.Mutex
-	embySessionsUntil         time.Time
-	embySessionsCache         []map[string]any
-	migrationMu               sync.Mutex
-	bindStatus                *bindStatusHub
+	playRankMu        sync.Mutex
+	playRankCache     map[string]playRankSnapshot
+	embySessionsMu    sync.Mutex
+	embySessionsUntil time.Time
+	embySessionsCache []map[string]any
+	migrationMu       sync.Mutex
+	bindStatus        *bindStatusHub
 	// schedulerLocks: jobID -> *schedulerProcessRun。BATCH_07 之前在 package 级
 	// 声明 (`var schedulerProcessLocks sync.Map`)，单进程 prod 不显问题，但
 	// 测试 setup 反复 New() 出多个 App 时这张表共享 → 一个 case cancel 的 job

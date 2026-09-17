@@ -87,6 +87,31 @@ func TestMergeConfigTOMLKeepsTopLevelScalars(t *testing.T) {
 	}
 }
 
+// 页面显示的"生效值"不等于"文件里写了这个键"。configFilePresentFields 必须如实
+// 反映文件里到底有没有这一行，否则管理员无法判断哪些配置只是默认值在兜底。
+func TestConfigFilePresentFields(t *testing.T) {
+	content := strings.Join([]string{
+		`SetupMode = false`,
+		``,
+		`[Emby]`,
+		`emby_url = "http://127.0.0.1:8096"`,
+		`# emby_public_url = "注释掉的也算没写"`,
+	}, "\n")
+	present := configFilePresentFields(content)
+	if !present["Emby"]["emby_url"] {
+		t.Fatalf("emby_url 在文件里，却判定为缺失: %#v", present)
+	}
+	if present["Emby"]["emby_public_url"] {
+		t.Fatalf("emby_public_url 不在文件里（注释行不算），却判定为存在: %#v", present)
+	}
+	if present["Emby"]["play_rank_enabled"] {
+		t.Fatalf("play_rank_enabled 不在文件里，却判定为存在: %#v", present)
+	}
+	if len(configFilePresentFields("")) != 0 {
+		t.Fatal("空文件不应产生任何判定")
+	}
+}
+
 // 底稿为空（首次保存）时不应报错，行为退化为"只写 schema 管理的字段"。
 func TestMergeConfigTOMLWithEmptySource(t *testing.T) {
 	values := map[string]map[string]any{"Global": {"server_name": "twilight"}}
