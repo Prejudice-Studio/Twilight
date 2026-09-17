@@ -39,7 +39,7 @@ import { useVisiblePolling } from "@/hooks/use-visible-polling";
 import { PageError } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
-import { api, type CodeUsePreview, type EmbyInfo, type EmbyNowPlaying, type MediaRequest, type TelegramStatus, type SigninSummary, type RegisterAvailability, type EmbyRegisterStatus } from "@/lib/api";
+import { api, type CodeUsePreview, type EmbyInfo, type MediaRequest, type TelegramStatus, type SigninSummary, type RegisterAvailability, type EmbyRegisterStatus } from "@/lib/api";
 import { AnnouncementBoard } from "@/components/announcement-board";
 import { ForceReadAnnouncementModal } from "@/components/force-read-announcement-modal";
 import { useI18n } from "@/lib/i18n";
@@ -64,15 +64,6 @@ interface StoredEmbyRegisterRequest {
 }
 
 type CodeCheckInfo = CodeUsePreview;
-
-function formatPlaybackDuration(seconds: number): string {
-  const total = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
-  const minutes = Math.floor(total / 60);
-  const remainingSeconds = total % 60;
-  if (minutes < 60) return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}:${(minutes % 60).toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
-}
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -102,7 +93,6 @@ export default function DashboardPage() {
   const [embyInfo, setEmbyInfo] = useState<EmbyInfo | null>(null);
   const [embyStats, setEmbyStats] = useState<any>(null);
   const [embyViewers, setEmbyViewers] = useState(0);
-  const [embyNowPlaying, setEmbyNowPlaying] = useState<EmbyNowPlaying | null>(null);
   const [embyStatsRefreshing, setEmbyStatsRefreshing] = useState(false);
   const [myRequests, setMyRequests] = useState<MediaRequest[]>([]);
   const [lineSlots, setLineSlots] = useState<LineSlot[]>([]);
@@ -317,26 +307,16 @@ export default function DashboardPage() {
   }, [t, toast]);
 
   const loadEmbyViewers = useCallback(async (signal?: AbortSignal) => {
-    if (user?.role === 0) {
-      const result = await api.getAdminEmbyNowPlaying(signal);
-      if (signal?.aborted) return;
-      if (result.success && result.data) {
-        setEmbyViewers(result.data.viewers ?? 0);
-        setEmbyNowPlaying(result.data);
-      }
-      return;
-    }
+    // 只展示在线人数：所有角色（含管理员）统一读取人数接口，不拉取观看者身份与播放明细。
     const result = await api.getEmbyViewerCount(signal);
     if (signal?.aborted) return;
     if (result.success) setEmbyViewers(result.data?.viewers ?? 0);
-    setEmbyNowPlaying(null);
-  }, [user?.role]);
+  }, []);
 
   // 独立拉取 Emby 统计（功能开关控制，避免污染主数据加载流程）
   useEffect(() => {
     if (!systemInfo?.features?.emby_stats) {
       setEmbyStats(null);
-      setEmbyViewers(0);
       return;
     }
     if (isLoading || embyStats) return;
@@ -345,17 +325,17 @@ export default function DashboardPage() {
     return () => controller.abort();
   }, [embyStats, isLoading, loadEmbyLibraryStats, systemInfo?.features?.emby_stats]);
 
-  // 管理员需要首屏看到观看详情；普通用户保持人数接口，不读取观看者身份。
+  // 在线人数首屏加载；管理员同样只取人数，不再拉取"谁在看什么"。
   useEffect(() => {
-    if (!systemInfo?.features?.emby_stats || user?.role !== 0) {
-      setEmbyNowPlaying(null);
+    if (!systemInfo?.features?.emby_stats) {
+      setEmbyViewers(0);
       return;
     }
     if (isLoading) return;
     const controller = new AbortController();
     void loadEmbyViewers(controller.signal);
     return () => controller.abort();
-  }, [isLoading, loadEmbyViewers, systemInfo?.features?.emby_stats, user?.role]);
+  }, [isLoading, loadEmbyViewers, systemInfo?.features?.emby_stats]);
 
   const embyStatsEnabled = systemInfo?.features?.emby_stats === true;
   useVisiblePolling(loadEmbyViewers, 60000, embyStatsEnabled);
@@ -1023,28 +1003,6 @@ export default function DashboardPage() {
             <StatPill icon={Tv} tone="info" label={t("dashboard.seriesCount")} value={embyStats?.series_count ?? 0} />
             <StatPill icon={Play} tone="warning" label={t("dashboard.episodeCount")} value={embyStats?.episode_count ?? 0} />
           </div>
-          {isAdmin && embyNowPlaying && embyNowPlaying.items.length > 0 && (
-            <div className="mt-1 space-y-2 border-t border-border/60 pt-3">
-              <div className="flex items-center justify-between gap-2 text-xs">
-                <span className="font-medium text-muted-foreground">{t("dashboard.nowPlaying")}</span>
-                <span className="text-muted-foreground">{t("dashboard.nowPlayingCount", { count: embyNowPlaying.viewers })}</span>
-              </div>
-              <div className="custom-scrollbar max-h-40 space-y-2 overflow-y-auto overscroll-contain pr-1">
-                {embyNowPlaying.items.map((entry, index) => (
-                  <div key={`${entry.item_id || entry.item_name}-${entry.user_name}-${index}`} className="min-w-0 rounded-md border border-border/50 bg-muted/20 px-2.5 py-2 text-xs">
-                    <div className="flex min-w-0 items-start justify-between gap-2">
-                      <span className="min-w-0 truncate font-medium" title={entry.item_name}>
-                        {entry.item_name || t("dashboard.unknownMedia")}
-                      </span>
-                      <span className="shrink-0 text-muted-foreground">{entry.user_name || t("dashboard.unknownViewer")}</span>
-                    </div>
-                    {entry.series_name && <p className="truncate text-muted-foreground">{entry.series_name}</p>}
-                    {entry.total_runtime > 0 && <p className="text-muted-foreground">{formatPlaybackDuration(entry.play_duration)} / {formatPlaybackDuration(entry.total_runtime)}</p>}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
           {(!embyStats?.enabled || !embyStats?.configured) && (
             <p className="text-xs text-muted-foreground">{t("dashboard.libraryStatsUnavailable")}</p>
           )}

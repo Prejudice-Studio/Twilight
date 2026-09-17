@@ -741,22 +741,6 @@ export interface EmbyLibraryStats {
 }
 
 
-export interface EmbyNowPlayingItem {
-  item_id: string;
-  item_name: string;
-  series_name?: string;
-  media_type: string;
-  image_url?: string;
-  user_name: string;
-  play_duration: number;
-  total_runtime: number;
-}
-
-export interface EmbyNowPlaying {
-  viewers: number;
-  items: EmbyNowPlayingItem[];
-}
-
 export interface RegisterData {
   telegram_bind_code?: string;
   username: string;

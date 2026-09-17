@@ -601,10 +601,6 @@
     "seriesCount": "劇集",
     "episodeCount": "集數",
     "libraryStatsUnavailable": "媒體庫統計未啟用或暫不可用。",
-    "nowPlaying": "正在觀看",
-    "nowPlayingCount": "當前 {count} 人正在觀看",
-    "unknownMedia": "未知媒體",
-    "unknownViewer": "未知使用者",
     "serverNetworkStatus": "按需線路探測，不會自動測速",
     "retest": "測速線路",
     "notApplicable": "未對應"
