@@ -542,6 +542,14 @@ func (a *App) telegramApplyPanelAction(ctx context.Context, panel telegramPanelC
 		panel.ConfirmAction = ""
 		a.telegramTouchPanel(panel)
 		a.telegramEditPanel(ctx, panel)
+	case "danger":
+		panel.ConfirmAction = "danger"
+		a.telegramTouchPanel(panel)
+		a.telegramEditPanel(ctx, panel)
+	case "back":
+		panel.ConfirmAction = ""
+		a.telegramTouchPanel(panel)
+		a.telegramEditPanel(ctx, panel)
 	case "enable", "disable":
 		enabled := action == "enable"
 		if !enabled && a.telegramProtectedTarget(target) {
@@ -1023,57 +1031,106 @@ func (a *App) telegramGroupUserPanelRemoteInfo(ctx context.Context, u store.User
 }
 
 func (a *App) telegramGroupUserPanelMarkup(token string, u store.User, confirmAction string) any {
-	panelRows := [][]telegramInlineButton{{
-		{Text: "刷新", Data: "gadm:act:refresh:" + token},
-		{Text: "关闭面板", Data: "gadm:act:close:" + token},
-	}}
-	protected := a.telegramProtectedTarget(u)
-	if protected {
-		return telegramInlineKeyboard(panelRows)
+	if a.telegramProtectedTarget(u) {
+		return telegramInlineKeyboard([][]telegramInlineButton{{
+			{Text: "🔄 刷新", Data: "gadm:act:refresh:" + token},
+			{Text: "❌ 关闭", Data: "gadm:act:close:" + token},
+		}})
 	}
+	// Destructive actions live behind a dedicated second level, so the primary
+	// panel stays short and an accidental tap cannot delete or ban anyone.
+	switch confirmAction {
+	case "danger", "delete", "emby_delete":
+		return telegramDangerPanelMarkup(token, u, confirmAction)
+	}
+	return telegramMainPanelMarkup(token, u)
+}
+
+func telegramMainPanelMarkup(token string, u store.User) any {
+	panelRows := [][]telegramInlineButton{{
+		{Text: "🔄 刷新", Data: "gadm:act:refresh:" + token},
+		{Text: "❌ 关闭", Data: "gadm:act:close:" + token},
+	}}
 	if u.Active {
-		panelRows = append(panelRows, []telegramInlineButton{{Text: "禁用 Web 账号", Data: "gadm:act:disable:" + token}})
+		panelRows = append(panelRows, []telegramInlineButton{{Text: "⏸ 禁用 Web 账号", Data: "gadm:act:disable:" + token}})
 	} else {
-		panelRows = append(panelRows, []telegramInlineButton{{Text: "启用 Web 账号", Data: "gadm:act:enable:" + token}})
+		panelRows = append(panelRows, []telegramInlineButton{{Text: "▶️ 启用 Web 账号", Data: "gadm:act:enable:" + token}})
 	}
 	if u.EmbyID != "" {
 		panelRows = append(panelRows, []telegramInlineButton{
-			{Text: "禁用 Emby", Data: "gadm:act:emby_disable:" + token},
-			{Text: "启用 Emby", Data: "gadm:act:emby_enable:" + token},
+			{Text: "⏹ 禁用 Emby", Data: "gadm:act:emby_disable:" + token},
+			{Text: "📺 启用 Emby", Data: "gadm:act:emby_enable:" + token},
 		})
-		if confirmAction == "emby_delete" {
-			panelRows = append(panelRows, []telegramInlineButton{{Text: "确认删除 Emby", Data: "gadm:act:emby_delete_confirm:" + token}})
-		} else {
-			panelRows = append(panelRows, []telegramInlineButton{{Text: "删除 Emby", Data: "gadm:act:emby_delete:" + token}})
-		}
-	}
-	if u.EmbyID == "" {
-		panelRows = append(panelRows, []telegramInlineButton{
-			{Text: "授予 7 天", Data: "gadm:act:grant_register_7:" + token},
-			{Text: "授予 30 天", Data: "gadm:act:grant_register_30:" + token},
-		})
-		panelRows = append(panelRows, []telegramInlineButton{
-			{Text: "授予 365 天", Data: "gadm:act:grant_register_365:" + token},
-			{Text: "授予永久", Data: "gadm:act:grant_register_perm:" + token},
-		})
+	} else {
+		panelRows = append(panelRows,
+			[]telegramInlineButton{
+				{Text: "🎁 授予 7 天", Data: "gadm:act:grant_register_7:" + token},
+				{Text: "🎁 授予 30 天", Data: "gadm:act:grant_register_30:" + token},
+			},
+			[]telegramInlineButton{
+				{Text: "🎁 授予 365 天", Data: "gadm:act:grant_register_365:" + token},
+				{Text: "🎁 授予永久", Data: "gadm:act:grant_register_perm:" + token},
+			},
+		)
 	}
 	if u.Role == store.RoleWhitelist {
-		panelRows = append(panelRows, []telegramInlineButton{{Text: "取消白名单", Data: "gadm:act:whitelist_remove:" + token}})
+		panelRows = append(panelRows, []telegramInlineButton{{Text: "⭐ 取消白名单", Data: "gadm:act:whitelist_remove:" + token}})
 	} else {
-		panelRows = append(panelRows, []telegramInlineButton{{Text: "加入白名单", Data: "gadm:act:whitelist_add:" + token}})
+		panelRows = append(panelRows, []telegramInlineButton{{Text: "⭐ 加入白名单", Data: "gadm:act:whitelist_add:" + token}})
 	}
+	panelRows = append(panelRows, []telegramInlineButton{{Text: "⚠️ 危险操作 ▸", Data: "gadm:act:danger:" + token}})
+	return telegramInlineKeyboard(panelRows)
+}
+
+// telegramDangerPanelMarkup renders the second-level panel holding every
+// irreversible action (delete user, delete Emby, kick, ban). Confirmations for
+// "delete" and "emby_delete" are shown here too so the operator never loses the
+// context of which destructive branch they are in.
+func telegramDangerPanelMarkup(token string, u store.User, confirmAction string) any {
+	rows := make([][]telegramInlineButton, 0, 5)
 	if confirmAction == "delete" {
-		panelRows = append(panelRows, []telegramInlineButton{{Text: "确认删除用户", Data: "gadm:act:delete_confirm:" + token}})
+		rows = append(rows, []telegramInlineButton{
+			{Text: "🗑 确认删除用户", Data: "gadm:act:delete_confirm:" + token},
+			{Text: "◀ 取消", Data: "gadm:act:back:" + token},
+		})
 	} else {
-		panelRows = append(panelRows, []telegramInlineButton{{Text: "删除用户", Data: "gadm:act:delete:" + token}})
+		rows = append(rows, []telegramInlineButton{{Text: "🗑 删除用户", Data: "gadm:act:delete:" + token}})
+	}
+	if u.EmbyID != "" {
+		if confirmAction == "emby_delete" {
+			rows = append(rows, []telegramInlineButton{
+				{Text: "🗑 确认删除 Emby", Data: "gadm:act:emby_delete_confirm:" + token},
+				{Text: "◀ 取消", Data: "gadm:act:back:" + token},
+			})
+		} else {
+			rows = append(rows, []telegramInlineButton{{Text: "🗑 删除 Emby 账号", Data: "gadm:act:emby_delete:" + token}})
+		}
 	}
 	if u.TelegramID != 0 {
-		panelRows = append(panelRows, []telegramInlineButton{
-			{Text: "移出群组", Data: "gadm:act:kick:" + token},
-			{Text: "封禁群组", Data: "gadm:act:ban:" + token},
+		rows = append(rows, []telegramInlineButton{
+			{Text: "👢 移出群组", Data: "gadm:act:kick:" + token},
+			{Text: "🚫 封禁群组", Data: "gadm:act:ban:" + token},
 		})
 	}
-	return telegramInlineKeyboard(panelRows)
+	rows = append(rows, []telegramInlineButton{{Text: "◀ 返回主面板", Data: "gadm:act:back:" + token}})
+	return telegramInlineKeyboard(rows)
+}
+
+// telegramInlineGrid lays buttons out into fixed-width rows. Panel code used to
+// hand-build every row, which is why wide lists degraded into a single column.
+func telegramInlineGrid(buttons []telegramInlineButton, perRow int) [][]telegramInlineButton {
+	if perRow < 1 {
+		perRow = 2
+	}
+	rows := make([][]telegramInlineButton, 0, (len(buttons)+perRow-1)/perRow)
+	for i := 0; i < len(buttons); i += perRow {
+		end := i + perRow
+		if end > len(buttons) {
+			end = len(buttons)
+		}
+		rows = append(rows, buttons[i:end])
+	}
+	return rows
 }
 
 func (a *App) telegramGrantRegisterDays(action string) int {

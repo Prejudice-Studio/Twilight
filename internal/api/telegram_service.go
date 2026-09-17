@@ -147,11 +147,22 @@ func (s *telegramService) rosterStats() (telegramRosterStatsResult, error) {
 	unbound := 0
 
 	if len(entries) > 0 {
+		// Resolve the whole roster in one indexed lookup instead of one
+		// FindUserByTelegramID call per member (N round trips through the store
+		// lock for a list that can hold thousands of entries).
+		ids := make([]int64, 0, len(entries))
 		for _, entry := range entries {
-			if entry.IsBot {
+			if entry.IsBot || entry.TelegramID == 0 {
 				continue
 			}
-			if _, okUser := s.app.store().FindUserByTelegramID(entry.TelegramID); okUser {
+			ids = append(ids, entry.TelegramID)
+		}
+		boundUsers := s.app.store().UsersByTelegramIDs(ids)
+		for _, entry := range entries {
+			if entry.IsBot || entry.TelegramID == 0 {
+				continue
+			}
+			if _, okUser := boundUsers[entry.TelegramID]; okUser {
 				bound++
 			} else {
 				unbound++
