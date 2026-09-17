@@ -2,13 +2,14 @@ import { API_BASE } from "./api-request";
 
 const SAFE_IMAGE_URL = /^(https?:\/\/|\/|data:image\/(png|jpe?g|gif|webp|avif|bmp)(;|,)|[a-zA-Z]:[\\/])/i;
 const SAFE_BG_CSS_FUNCTION = /^(linear-gradient|radial-gradient|conic-gradient|repeating-linear-gradient|repeating-radial-gradient)\s*\(/i;
-const SAFE_BACKGROUND_ASSET_PATH = /^\/api\/v1\/users\/assets\/background\/[a-f0-9]{16}\.(jpg|png|gif|webp|bmp)$/i;
+// 历史配置里可能仍存着 /api/v1 的资源地址，两个版本都接受，避免旧配置直接把背景判空。
+const SAFE_BACKGROUND_ASSET_PATH = /^\/api\/v[12]\/users\/assets\/background\/[a-f0-9]{16}\.(jpg|png|gif|webp|bmp)$/i;
 
 export function sanitizeImageUrl(url?: string | null): string | undefined {
   if (!url) return undefined;
   const value = url.trim();
   if (!value || !SAFE_IMAGE_URL.test(value)) return undefined;
-  if (/^[a-zA-Z]:[\\/]/.test(value)) return "/api/v1/system/server-icon";
+  if (/^[a-zA-Z]:[\\/]/.test(value)) return "/api/v2/system/server-icon";
   return value;
 }
 

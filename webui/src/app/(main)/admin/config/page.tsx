@@ -1109,7 +1109,7 @@ export default function AdminConfigPage() {
   const serverIconPreviewUrl =
     currentServerIcon && /^https:\/\/[^\s"'<>]+$/i.test(currentServerIcon)
       ? currentServerIcon
-      : `/api/v1/system/server-icon?ts=${encodeURIComponent(currentServerIcon || "default")}`;
+      : `/api/v2/system/server-icon?ts=${encodeURIComponent(currentServerIcon || "default")}`;
 
   // 搜索匹配
   const matchedFieldsBySection = useMemo(() => {

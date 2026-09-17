@@ -638,7 +638,7 @@ class ApiClient {
 
   getRegisterBindCodeStatusWebSocketUrl(code: string) {
     const base = API_BASE || (typeof window !== "undefined" ? window.location.origin : "http://localhost");
-    const url = new URL("/api/v1/users/telegram/register/bind-code/ws", base);
+    const url = new URL("/api/v2/users/telegram/register/bind-code/ws", base);
     url.searchParams.set("code", code);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     return url.toString();
@@ -667,7 +667,7 @@ class ApiClient {
 
   getBindCodeStatusWebSocketUrl(code: string) {
     const base = API_BASE || (typeof window !== "undefined" ? window.location.origin : "http://localhost");
-    const url = new URL("/api/v1/me/telegram/bind-code/ws", base);
+    const url = new URL("/api/v2/me/telegram/bind-code/ws", base);
     url.searchParams.set("code", code);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     return url.toString();

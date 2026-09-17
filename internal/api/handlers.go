@@ -1950,23 +1950,25 @@ func (a *App) handleServerIcon(w http.ResponseWriter, r *http.Request, _ Params)
 	_, _ = w.Write(serverIconPNG)
 }
 
+// publicServerIconURL 始终返回 V2 资源地址：WebUI 只调用 /api/v2/*，V1 路由
+// 仅为兼容回退保留。
 func (a *App) publicServerIconURL() string {
 	value := strings.TrimSpace(a.cfg().ServerIcon)
 	if value == "" {
-		return "/api/v1/system/server-icon"
+		return "/api/v2/system/server-icon"
 	}
 	if u, err := url.Parse(value); err == nil && u.Scheme != "" {
 		if u.Scheme == "https" && u.User == nil && u.Hostname() != "" {
 			return value
 		}
-		return "/api/v1/system/server-icon"
+		return "/api/v2/system/server-icon"
 	}
 	if iconPath, _, okIcon := a.configuredServerIconPath(); okIcon {
 		if info, err := os.Stat(iconPath); err == nil {
-			return "/api/v1/system/server-icon?v=" + strconv.FormatInt(info.ModTime().UnixNano(), 36) + "-" + strconv.FormatInt(info.Size(), 36)
+			return "/api/v2/system/server-icon?v=" + strconv.FormatInt(info.ModTime().UnixNano(), 36) + "-" + strconv.FormatInt(info.Size(), 36)
 		}
 	}
-	return "/api/v1/system/server-icon"
+	return "/api/v2/system/server-icon"
 }
 
 func (a *App) configuredServerIconPath() (string, string, bool) {
@@ -1992,7 +1994,7 @@ func (a *App) configuredServerIconPath() (string, string, bool) {
 		return "", "", false
 	}
 	// 必须经过 ResolveWithinRoot 约束在上传目录内：server_icon 是管理员可写的
-	// 配置项，而 /api/v1/system/server-icon 是 AuthPublic。若直接接受绝对路径或
+	// 配置项，而 /api/v2/system/server-icon 是 AuthPublic。若直接接受绝对路径或
 	// 含 ".." 的相对路径，一次"管理员写配置"就会变成"任意人读主机任意图片扩展名
 	// 文件"（也可经 handleConfigRestore 用构造的备份触发）。绝对路径不再被接受。
 	path, err := ResolveWithinRoot(firstNonEmpty(a.cfg().UploadDir, "uploads"), value)

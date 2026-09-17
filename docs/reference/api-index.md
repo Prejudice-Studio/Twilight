@@ -42,6 +42,8 @@ V2 基础协议入口使用 `/api/v2`，当前只提供不带秘密的能力协�
 | GET | `/api/v2/openapi.json` | Public | V2 公开 OpenAPI 规范，仅包含公开路由 |
 | GET | `/api/v2/admin/docs/routes` | Admin | 完整路由元数据清单，供管理端 API 文档页使用 |
 | GET | `/api/v2/system/info` | Public | 返回应用外壳和初始化页所需的安全系统摘要；不返回上游地址、Token 或配置秘密 |
+| GET | `/api/v2/system/server-icon` | Public | 读取站点 Server Icon（免登录）；WebUI 使用的图标地址由后端统一下发为 V2 路径 |
+| GET | `/api/v2/system/auth-background` | Public | 读取认证页背景图；由上传接口写入配置后由前端拼 V2 前缀访问 |
 | GET | `/api/v2/admin/health/api` | Admin | 独立检测 API 进程；私有 `no-store`，不检测数据库或 Emby |
 | GET | `/api/v2/admin/health/database` | Admin | 独立检测当前数据库连接和状态快照；私有 `no-store` |
 | GET | `/api/v2/admin/health/emby` | Admin | 独立从后端连接 Emby 并读取有限服务状态；私有 `no-store`，失败不泄露上游诊断 |

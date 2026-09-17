@@ -24,7 +24,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 const quickLinks = [
   { href: "/dashboard", label: "仪表盘", icon: Monitor },
   { href: "/settings", label: "账号设置", icon: Shield },
-  { href: "/api/v1/docs", label: "API 文档", icon: BookOpen },
+  { href: "/api/v2/docs", label: "API 文档", icon: BookOpen },
   { href: "/invite", label: "邀请", icon: UserPlus },
   { href: "/tickets", label: "工单", icon: Ticket },
   { href: "/announcements", label: "公告", icon: Bell },
@@ -60,7 +60,7 @@ const adminFeatures = [
   ["工单与公告", "按类型、状态、优先级处理用户工单，管理公告置顶和可见性。"],
   ["系统运维", "配置管理、数据库备份、运行日志、调度任务、健康检测和系统更新。"],
   ["安全审计", "查看操作审计、违规日志、登录历史、IP 黑名单和设备风险。"],
-  ["API 文档", "访问 /api/v1/docs 查看运行时接口；未登录只显示公开接口，管理员可查看完整清单。"],
+  ["API 文档", "访问 /api/v2/docs 查看运行时接口；未登录只显示公开接口，管理员可查看完整清单。"],
 ];
 
 const concepts = [
@@ -96,7 +96,7 @@ const faqs = [
   ["Emby 密码错误怎么办？", "可在设置页修改 Emby 密码；如果账号由管理员统一管理，请提交工单。"],
   ["如何获取注册码？", "注册码由管理员发放。已有用户也可能通过邀请页生成邀请码给新用户。"],
   ["Telegram 绑定失败怎么办？", "确认 Bot 已启动、自己已加入要求的群组，并且 Telegram ID 没有被其他账号绑定。"],
-  ["在哪里查看接口？", "打开 /api/v1/docs。未登录时只能看到公开接口；管理员登录后可查看完整路由并进行受控测试。"],
+  ["在哪里查看接口？", "打开 /api/v2/docs。未登录时只能看到公开接口；管理员登录后可查看完整路由并进行受控测试。"],
   ["设备/IP 审查为什么没有自动刷新？", "这是有意设计。审查类页面适合按需刷新，避免频繁请求 Emby 造成状态抖动和额外负载。"],
 ];
 
@@ -105,7 +105,7 @@ const adminWorkflow = [
   ["用户处理", "优先通过用户管理的分组操作处理账号状态、Emby 绑定、身份绑定和注册资格；危险操作需要二次确认。"],
   ["设备/IP 审查", "手动刷新后按用户、设备、客户端和 IP 聚合查看；只对明确异常的用户执行定向踢出或封禁。"],
   ["工单处理", "以回复记录作为沟通历史，状态、类型和优先级用于流程判断；关闭后普通用户不能再修改证据图片。"],
-  ["接口调试", "使用 /api/v1/docs 的 API Key 或当前 Cookie 测试接口；不要把真实密钥写入工单、公告、截图或日志。"],
+  ["接口调试", "使用 /api/v2/docs 的 API Key 或当前 Cookie 测试接口；不要把真实密钥写入工单、公告、截图或日志。"],
 ];
 
 const safetyNotes = [
