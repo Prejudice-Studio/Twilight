@@ -512,6 +512,13 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - `/api/v1/emby/online` and `/api/v2/emby/online` return viewer count only (`current_online`); they must never emit a populated `users` array of who/what is playing. The count-only contract is enforced in `online()`, not just in the UI. `/api/v2/emby/{stats,viewer-count,online}` are `AuthUser`, matching V1.
 - Do not restore the former `/api/v1/emby/now-playing` ordinary-user route. The protected replacement is `/api/v1/admin/emby/now-playing`; ordinary users must never receive watcher identity, media title, cover, or playback progress through any route.
 
+## Config Schema / TOML Round-Trip Rules
+
+- Saving config is a **merge, never a rewrite from schema alone**: `mergeConfigTOML(source, values)` starts from the existing file (or the admin-submitted raw TOML) and only overwrites fields that `configSectionDefs()` manages. Unmanaged sections, unmanaged fields inside managed sections, and top-level scalars survive a save.
+- Consequence to remember: adding a field to `config.Config` without adding it to `configSectionDefs()` **and** `configValues()` means it can never be edited from the admin page. Today's managed set must stay in sync in both places (`internal/api` tests assert the pairing).
+- `renderConfigTOML` keeps its original signature; `renderConfigTOMLWithExtras` is the variant that appends the preserved extras. Do not call the encoder to dump the whole tree — go-toml writes tables in map order and a top-level scalar placed after a table header silently becomes a field of that table.
+- `Ticket.types` is a normal editable list. Hiding it from the schema response once caused every save to reset it to `["all"]` and destroy custom ticket types.
+
 ## Playback Ranking (日榜/周榜) Rules
 
 - Data source: `twilight_playback_records`, written by the Emby activity-log sync (`persistEmbyPlaybackRecordsFromActivity`). Rankings are aggregates only — they answer "which title is hottest / who watched the most", never "who is watching what right now".
