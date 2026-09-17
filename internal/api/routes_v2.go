@@ -2,9 +2,10 @@ package api
 
 import "net/http"
 
-// registerV2Routes keeps the native SSR resource contract separate from the
-// legacy compatibility inventory. V1 remains registered below for rollback
-// and external clients; V2 pages must prefer this collection as it grows.
+// registerV2Routes keeps the native V2 resource contract separate from the
+// legacy compatibility inventory. V1 remains registered below for external
+// clients and the NEXT_PUBLIC_USE_V1_COMPAT rollback; the WebUI must prefer
+// this collection as it grows.
 func (a *App) registerV2Routes() {
 	a.add(http.MethodGet, "/api/v2/system/health", AuthPublic, a.handleV2Health)
 	a.add(http.MethodGet, "/api/v2/system/capabilities", AuthPublic, a.handleV2Capabilities)
@@ -177,7 +178,7 @@ func (a *App) registerV2Routes() {
 	a.add(http.MethodPut, "/api/v2/admin/media-requests/batch/by-key", AuthAdmin, a.handleV2UpdateMediaRequestsByKey)
 	a.add(http.MethodDelete, "/api/v2/admin/media-requests/by-key/:require_key", AuthAdmin, a.handleV2DeleteMediaRequestByKey)
 
-	// Admin ticket resources back the SSR queue and conversation page. Keep
+	// Admin ticket resources back the WebUI queue and conversation page. Keep
 	// attachments inside the same protected resource family so rendered URLs
 	// cannot accidentally fall back to a legacy browser-side request.
 	a.add(http.MethodGet, "/api/v2/admin/tickets", AuthAdmin, a.handleV2AdminTickets)

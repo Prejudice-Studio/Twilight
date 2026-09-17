@@ -3,7 +3,7 @@ package api
 import "net/http"
 
 // Developer resources expose the existing Goja validation, execution,
-// capability gate, audit and preset persistence through the SSR namespace.
+// capability gate, audit and preset persistence through the V2 namespace.
 // The adapter intentionally does not duplicate sandbox policy.
 func (a *App) handleV2DeveloperJSSandbox(w http.ResponseWriter, r *http.Request, p Params) {
 	w.Header().Set("Cache-Control", "private, no-store")

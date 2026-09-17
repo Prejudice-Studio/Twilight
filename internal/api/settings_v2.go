@@ -2,7 +2,7 @@ package api
 
 import "net/http"
 
-// V2 settings resources are the SSR-facing account-management boundary. The
+// V2 settings resources are the WebUI-facing account-management boundary. The
 // underlying handlers remain the single source of truth for validation,
 // feature gates, session rotation, Emby side effects, persistence and audit.
 // These adapters only give the new frontend explicit resource names and a

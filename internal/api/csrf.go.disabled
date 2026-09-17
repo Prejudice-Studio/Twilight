@@ -50,7 +50,7 @@ func (a *App) verifyCSRF(r *http.Request) bool {
 	// 2. 读取请求中的 token（优先 Header，其次 Form）
 	requestToken := r.Header.Get("X-CSRF-Token")
 	if requestToken == "" {
-		// SSR form action 可能通过 hidden input 提交
+		// 表单页面可能通过 hidden input 提交
 		if err := r.ParseForm(); err == nil {
 			requestToken = r.FormValue("csrf_token")
 		}

@@ -90,7 +90,7 @@ func (a *App) handleV2MediaRequests(w http.ResponseWriter, r *http.Request, _ Pa
 
 // Mutations deliberately keep one implementation of entitlement checks,
 // inventory checks, Store transactions, audit entries and revision conflicts.
-// The V2 resource only changes the transport namespace used by the SSR app.
+// The V2 resource only changes the transport namespace used by the WebUI.
 func (a *App) handleV2CreateMediaRequest(w http.ResponseWriter, r *http.Request, p Params) {
 	a.handleCreateMediaRequest(w, r, p)
 }

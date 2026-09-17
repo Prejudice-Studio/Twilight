@@ -13,7 +13,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// registrationInput is independent of HTTP so the V2 SSR action and legacy
+// registrationInput is independent of HTTP so the WebUI and legacy
 // compatibility route can share the same validation and state transition.
 type registrationInput struct {
 	Username         string

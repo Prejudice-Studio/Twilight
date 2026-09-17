@@ -2,7 +2,7 @@ package api
 
 import "net/http"
 
-// V2 Emby management routes keep the SSR resource namespace separate from the
+// V2 Emby management routes keep the WebUI resource namespace separate from the
 // legacy compatibility inventory. The underlying handlers remain single
 // sourced so permission checks, audit entries, manual-refresh behavior and
 // upstream error sanitization cannot drift during the migration.
@@ -19,7 +19,7 @@ func (a *App) handleV2AdminEmbyActivityLogs(w http.ResponseWriter, r *http.Reque
 }
 
 // Activity synchronization is a state-changing operation. Keep it on a POST
-// resource so SSR form actions and intermediaries cannot accidentally replay a
+// resource so page writes and intermediaries cannot accidentally replay a
 // write through a cached or prefetched GET URL.
 func (a *App) handleV2AdminEmbyActivityLogSync(w http.ResponseWriter, r *http.Request, p Params) {
 	query := r.URL.Query()

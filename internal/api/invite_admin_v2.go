@@ -42,7 +42,7 @@ var inviteAdminConfigKeys = map[string]bool{
 
 // handleV2AdminInviteTree resolves search, collapse, root selection, and
 // pagination at the API boundary. This keeps thousands of invite nodes out of
-// the Svelte page payload while preserving the existing relationship rules.
+// the WebUI payload while preserving the existing relationship rules.
 func (a *App) handleV2AdminInviteTree(w http.ResponseWriter, r *http.Request, _ Params) {
 	if a.refreshStoreForRequest(w, r) {
 		return

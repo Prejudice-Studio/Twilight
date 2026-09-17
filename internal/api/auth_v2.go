@@ -4,7 +4,7 @@ import (
 	"net/http"
 )
 
-// V2 authentication resources keep the SSR transport contract separate from
+// V2 authentication resources keep the V2 transport contract separate from
 // legacy HTTP handlers. Session reads and lifecycle operations are implemented
 // here on top of shared application services and audited compatibility rules.
 func (a *App) handleV2Login(w http.ResponseWriter, r *http.Request, p Params) {

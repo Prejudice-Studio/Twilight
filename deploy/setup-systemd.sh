@@ -388,7 +388,7 @@ ExecStart=$NODE_BIN $WEBUI_ENTRY
 EnvironmentFile=-$WEBUI_ROOT/.env
 Environment=NODE_ENV=production
 Environment=BACKEND_URL=http://$API_HOST:$API_PORT
-# Next.js standalone 读取 HOSTNAME / PORT（不是 SvelteKit adapter-node 的 HOST）。
+# Next.js standalone 读取 HOSTNAME / PORT（注意不是 HOST）。
 Environment=HOSTNAME=$WEBUI_HOST
 Environment=PORT=$WEBUI_PORT
 

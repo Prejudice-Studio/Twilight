@@ -2,7 +2,7 @@ package api
 
 import "net/http"
 
-// V2 Bangumi admin resources keep the SSR namespace explicit while reusing
+// V2 Bangumi admin resources keep the V2 namespace explicit while reusing
 // the existing Store, feature-gate, sync timeout and audit rules.
 func (a *App) handleV2AdminBangumiUsers(w http.ResponseWriter, r *http.Request, p Params) {
 	w.Header().Set("Cache-Control", "private, no-store")

@@ -24,7 +24,7 @@ func (a *App) handleAdminInviteCodes(w http.ResponseWriter, r *http.Request, _ P
 	}
 	codes := a.store().ListAllInviteCodes()
 	// Preserve the legacy full-list response when no pagination/search parameter
-	// is present. SSR callers opt into this bounded path explicitly so large code
+	// is present. WebUI callers opt into this bounded path explicitly so large code
 	// collections are filtered and sliced before DTO enrichment/JSON encoding.
 	if _, paged := r.URL.Query()["page"]; paged || r.URL.Query().Get("per_page") != "" || r.URL.Query().Get("search") != "" {
 		page := max(1, queryInt(r, "page", 1))

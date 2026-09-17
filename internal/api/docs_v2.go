@@ -13,7 +13,7 @@ func (a *App) handleV2OpenAPI(w http.ResponseWriter, r *http.Request, _ Params) 
 	a.handleOpenAPI(w, r, nil)
 }
 
-// handleV2AdminAPIRoutes is the SSR documentation page's private route
+// handleV2AdminAPIRoutes is the API console's private route
 // inventory. It returns metadata only: no handlers, source locations, config,
 // or request/response secrets are serialized.
 func (a *App) handleV2AdminAPIRoutes(w http.ResponseWriter, _ *http.Request, _ Params) {

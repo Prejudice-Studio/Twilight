@@ -5,7 +5,7 @@ import (
 )
 
 // handleV2SystemInfo exposes only the public system projection needed by the
-// SSR setup and shell pages. Configuration secrets, upstream addresses and
+// setup and shell pages. Configuration secrets, upstream addresses and
 // dependency diagnostics stay behind their dedicated admin resources.
 func (a *App) handleV2SystemInfo(w http.ResponseWriter, _ *http.Request, _ Params) {
 	cfg := a.cfg()

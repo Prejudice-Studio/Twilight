@@ -2,7 +2,7 @@ package api
 
 import "net/http"
 
-// V2 appearance resources keep the SSR frontend on one private read and
+// V2 appearance resources keep the WebUI on one private read and
 // explicit form-action writes. The existing upload/background handlers remain
 // the only business implementation for validation, rate limits, safe paths,
 // persistence and asset URLs.

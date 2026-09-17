@@ -100,7 +100,7 @@ func (a *App) handleV2AdminUser(w http.ResponseWriter, r *http.Request, params P
 
 // V2 mutations deliberately reuse the existing handlers. This keeps the
 // Store atomicity, permission checks, audit records and external side effects
-// single-sourced while the SSR frontend moves to the resource namespace.
+// single-sourced while the WebUI moves to the resource namespace.
 func (a *App) handleV2AdminCreateUser(w http.ResponseWriter, r *http.Request, p Params) {
 	a.handleAdminCreateUser(w, r, p)
 }

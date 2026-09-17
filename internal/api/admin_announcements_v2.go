@@ -2,7 +2,7 @@ package api
 
 import "net/http"
 
-// V2 announcement resources are the SSR-facing namespace. Validation,
+// V2 announcement resources are the WebUI-facing namespace. Validation,
 // rendering-mode normalization, Store writes and audit entries remain in the
 // shared handlers so V1 compatibility cannot drift from the new frontend.
 func (a *App) handleV2AdminAnnouncements(w http.ResponseWriter, r *http.Request, p Params) {

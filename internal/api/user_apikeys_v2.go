@@ -2,7 +2,7 @@ package api
 
 import "net/http"
 
-// V2 user API Key resources keep the browser on the SSR/form-action boundary.
+// V2 user API Key resources keep the browser on the API boundary.
 // Key ownership, masking, one-time plaintext creation, validation, persistence
 // and audit remain in the existing API Key handlers.
 func (a *App) handleV2ListAPIKeys(w http.ResponseWriter, r *http.Request, p Params) {
