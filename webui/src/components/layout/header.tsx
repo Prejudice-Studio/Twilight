@@ -37,8 +37,8 @@ export function Header() {
   const systemIcon = useMemo(() => sanitizeImageUrl(envIcon || systemInfo?.icon), [envIcon, systemInfo?.icon]);
   const displaySiteName = systemInfo?.name || "Twilight";
   const visibleUserNavItems = useMemo(
-    () => filterNavItems(userNavItems, systemInfo?.features),
-    [systemInfo?.features],
+    () => filterNavItems(userNavItems, systemInfo?.features, isAdmin),
+    [isAdmin, systemInfo?.features],
   );
   const visibleAdminNavItems = useMemo(
     () => filterNavItems(adminNavItems, systemInfo?.features),
