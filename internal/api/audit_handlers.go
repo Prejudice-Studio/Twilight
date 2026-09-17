@@ -142,17 +142,25 @@ func shouldFallbackAuditHTTPMutation(r *http.Request, route *Route, status int) 
 		return false
 	}
 	pattern := route.Pattern
-	if strings.HasPrefix(pattern, "/api/v1/admin/audit-logs") {
+	// V1 and V2 share the audit store, so both prefixes must be exempted.
+	// Without the V2 branch, clearing or pruning audit logs writes new audit
+	// rows that immediately become candidates for the next prune.
+	if strings.HasPrefix(pattern, "/api/v1/admin/audit-logs") ||
+		strings.HasPrefix(pattern, "/api/v2/admin/audit-logs") {
 		return false
 	}
-	if pattern == "/api/v1/auth/refresh" {
+	if pattern == "/api/v1/auth/refresh" || pattern == "/api/v2/auth/refresh" {
 		return false
 	}
 	return route.Auth == AuthUser || route.Auth == AuthAdmin || route.Auth == AuthAPIKey
 }
 
 func fallbackAuditAction(route *Route) string {
-	pattern := strings.TrimPrefix(route.Pattern, "/api/v1/")
+	pattern := route.Pattern
+	// Normalise both API versions to the same unprefixed action name so V1 and
+	// V2 mutations of one resource share a single audit action identifier.
+	pattern = strings.TrimPrefix(pattern, "/api/v1/")
+	pattern = strings.TrimPrefix(pattern, "/api/v2/")
 	return strings.ToLower(route.Method) + "_" + fallbackAuditActionReplacer.Replace(strings.Trim(pattern, "/"))
 }
 

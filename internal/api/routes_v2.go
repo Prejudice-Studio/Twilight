@@ -70,6 +70,9 @@ func (a *App) registerV2Routes() {
 	a.add(http.MethodPost, "/api/v2/auth/password/email/reset", AuthPublic, a.handleV2EmailPasswordReset)
 	a.add(http.MethodPost, "/api/v2/registration", AuthPublic, a.handleV2Register)
 	a.add(http.MethodGet, "/api/v2/registration/availability", AuthPublic, a.handleV2RegistrationAvailability)
+	// The product client posts the registration code instead of using a query
+	// string, so both verbs must resolve to the same bounded check.
+	a.add(http.MethodPost, "/api/v2/registration/availability", AuthPublic, a.handleV2RegistrationAvailability)
 	a.add(http.MethodPost, "/api/v2/registration/telegram/bind-code", AuthPublic, a.handleV2CreateRegistrationBindCode)
 	a.add(http.MethodGet, "/api/v2/dashboard/summary", AuthUser, a.handleV2DashboardSummary)
 	a.add(http.MethodGet, "/api/v2/settings", AuthUser, a.handleV2UserSettings)
@@ -373,4 +376,80 @@ func (a *App) registerV2Routes() {
 
 	// Security extended
 	a.add(http.MethodPost, "/api/v2/security/devices/:device_id/block", AuthUser, a.handleV2SecurityBlockDevice)
+
+	a.registerV2CompletionRoutes()
+}
+
+// registerV2CompletionRoutes closes the remaining V1-only gaps so the product
+// frontend can run entirely on /api/v2/*. Handlers are the audited V1
+// implementations: the goal of this block is contract parity, not behaviour
+// change, and the shared middleware chain already applies CORS, body limits,
+// rate limits, authentication and fallback auditing to every entry below.
+func (a *App) registerV2CompletionRoutes() {
+	// API key integration surface. V1 kept this behind AuthAPIKey only; V2
+	// mirrors it with the same permission wrappers so external clients can
+	// move off /api/v1 without weakening scopes.
+	a.add(http.MethodGet, "/api/v2/apikey/info", AuthAPIKey, a.withAPIKeyPermission(apiKeyPermissionAccountRead, a.handleAPIKeyInfo))
+	a.add(http.MethodGet, "/api/v2/apikey/status", AuthAPIKey, a.withAPIKeyPermission(apiKeyPermissionAccountRead, a.handleAPIKeyStatus))
+	a.add(http.MethodPost, "/api/v2/apikey/enable", AuthAPIKey, a.withAPIKeyPermission(apiKeyPermissionAccountWrite, a.handleAPIKeyEnableAccount))
+	a.add(http.MethodPost, "/api/v2/apikey/disable", AuthAPIKey, a.withAPIKeyPermission(apiKeyPermissionAccountWrite, a.handleAPIKeyDisableAccount))
+	a.add(http.MethodPost, "/api/v2/apikey/renew", AuthAPIKey, a.withAPIKeyPermission(apiKeyPermissionAccountWrite, a.handleAPIKeyRenew))
+	a.add(http.MethodPost, "/api/v2/apikey/key/refresh", AuthAPIKey, a.withAPIKeyPermission(apiKeyPermissionAccountWrite, a.handleLegacyAPIKeyGenerate))
+	a.add(http.MethodGet, "/api/v2/apikey/permissions", AuthAPIKey, a.handleAPIKeyPermissions)
+	a.add(http.MethodPut, "/api/v2/apikey/permissions", AuthAPIKey, a.handleForbiddenSelfPermission)
+	a.add(http.MethodPost, "/api/v2/apikey/key/disable", AuthAPIKey, a.handleAPIKeyDisableKey)
+	a.add(http.MethodPost, "/api/v2/apikey/key/enable", AuthAPIKey, a.handleAPIKeyEnableKey)
+	a.add(http.MethodGet, "/api/v2/apikey/emby/status", AuthAPIKey, a.withAPIKeyPermission(apiKeyPermissionEmbyRead, a.handleEmbyStatus))
+	a.add(http.MethodPost, "/api/v2/apikey/emby/kick", AuthAPIKey, a.withAPIKeyPermission(apiKeyPermissionEmbyWrite, a.handleAPIKeyEmbyKick))
+	a.add(http.MethodPost, "/api/v2/apikey/use-code", AuthAPIKey, a.withAPIKeyPermission(apiKeyPermissionAccountWrite, a.handleUseCode))
+
+	// Legacy per-user API key management kept under the auth resource family.
+	a.add(http.MethodGet, "/api/v2/auth/apikey", AuthUser, a.handleLegacyAPIKeyStatus)
+	a.add(http.MethodPost, "/api/v2/auth/apikey", AuthUser, a.handleLegacyAPIKeyGenerate)
+	a.add(http.MethodDelete, "/api/v2/auth/apikey", AuthUser, a.handleLegacyAPIKeyDelete)
+	a.add(http.MethodPost, "/api/v2/auth/apikey/enable", AuthUser, a.handleLegacyAPIKeyEnable)
+	a.add(http.MethodGet, "/api/v2/auth/apikey/permissions", AuthUser, a.handleLegacyAPIKeyPermissions)
+	a.add(http.MethodPut, "/api/v2/auth/apikey/permissions", AuthUser, a.handleLegacyAPIKeyPermissionsUpdate)
+
+	// Telegram bind-code websocket transports. V1 exposes them for both the
+	// public registration flow and the authenticated account page.
+	a.add(http.MethodGet, "/api/v2/users/telegram/register/bind-code/ws", AuthPublic, a.handleBindCodeStatusWS)
+	a.add(http.MethodGet, "/api/v2/me/telegram/bind-code/ws", AuthUser, a.handleUserBindCodeStatusWS)
+
+	// Personalised announcement feed. The public /api/v2/announcements route
+	// is anonymous and cannot carry per-user force-read state.
+	a.add(http.MethodGet, "/api/v2/me/announcements", AuthUser, a.handleAnnouncementsMe)
+
+	// Invite code listing for the account page.
+	a.add(http.MethodGet, "/api/v2/invite/codes", AuthUser, a.handleInviteCodes)
+	a.add(http.MethodGet, "/api/v2/invite/me", AuthUser, a.handleInviteMe)
+
+	// Bangumi read surface parity.
+	a.add(http.MethodGet, "/api/v2/bangumi/me", AuthUser, a.handleBangumiMe)
+	a.add(http.MethodGet, "/api/v2/bangumi/sync/status", AuthUser, a.handleBangumiSyncStatus)
+	a.add(http.MethodGet, "/api/v2/bangumi/sync/history", AuthUser, a.handleBangumiSyncHistory)
+
+	// Media detail aliases used by existing deep links.
+	a.add(http.MethodGet, "/api/v2/media/tmdb/:tmdb_id", AuthUser, a.handleMediaDetail)
+	a.add(http.MethodGet, "/api/v2/media/bangumi/:bgm_id", AuthUser, a.handleMediaDetail)
+
+	// Administrator self-service and Emby unbind parity. V1 accepted PUT on
+	// regcodes and tickets; V2 registered PATCH only, so V1 clients and any
+	// tooling still issuing PUT must keep working.
+	a.add(http.MethodPut, "/api/v2/admin/me/update", AuthAdmin, a.handleUpdateMe)
+	a.add(http.MethodDelete, "/api/v2/admin/users/:uid/emby", AuthAdmin, a.handleAdminUnbindEmby)
+	a.add(http.MethodPut, "/api/v2/admin/regcodes/:code", AuthAdmin, a.handleUpdateRegcode)
+	a.add(http.MethodPut, "/api/v2/admin/tickets/:ticket_id", AuthAdmin, a.handleAdminUpdateTicket)
+
+	// System statistics and documentation parity.
+	a.add(http.MethodPost, "/api/v2/settings/password/change", AuthUser, a.handleChangePassword)
+
+	// System statistics and documentation parity.
+	a.add(http.MethodGet, "/api/v2/system/stats", AuthAdmin, a.handleSystemStats)
+	a.add(http.MethodGet, "/api/v2/system/emby-stats", AuthUser, a.handleEmbyStats)
+	a.add(http.MethodGet, "/api/v2/system/emby-viewers", AuthUser, a.handleEmbyViewerCount)
+	a.add(http.MethodGet, "/api/v2/system/health/api", AuthAdmin, a.handleHealthAPI)
+	a.add(http.MethodGet, "/api/v2/system/health/database", AuthAdmin, a.handleHealthDatabase)
+	a.add(http.MethodGet, "/api/v2/system/health/emby", AuthAdmin, a.handleHealthEmby)
+	a.add(http.MethodGet, "/api/v2/docs", AuthPublic, a.handleDocs)
 }
