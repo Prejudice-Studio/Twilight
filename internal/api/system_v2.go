@@ -28,8 +28,10 @@ func (a *App) handleV2SystemInfo(w http.ResponseWriter, _ *http.Request, _ Param
 		"forgot_password_email_enabled": cfg.ForgotPasswordEmailEnabled,
 		"ticket_system":                 cfg.TicketSystemEnabled,
 		"developer_mode":                a.store().DeveloperModeEnabled(),
-		"activity_logs":                 true,
-		"viewing_stats":                 false,
+		// emby_stats 与 V1 /system/info 同名同义：仪表盘用它决定是否拉取媒体库
+		// 统计与在线观看人数，V2 一度漏掉它，导致这两项永远不加载。
+		"emby_stats":    cfg.EmbyStatsEnabled,
+		"activity_logs": true,
 	}
 	limits := map[string]any{
 		"user_limit":             zeroNil(int64(cfg.UserLimit)),
