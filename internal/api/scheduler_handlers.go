@@ -54,7 +54,13 @@ func (a *App) handleSchedulerJobs(w http.ResponseWriter, r *http.Request, _ Para
 		item := cloneMap(job)
 		jobID := jobIDs[i]
 		var spec map[string]any
-		if schedule, okSchedule := overview.Schedules[jobID]; okSchedule {
+		if schedulerJobManualOnly(jobID) {
+			// manual_only is a backend invariant. A stale or directly injected
+			// persisted schedule must not make a maintenance job look automatic.
+			spec = map[string]any{"type": "manual"}
+			item["is_custom"] = false
+			item["runtime_params"] = a.schedulerDefaultRuntimeParams(jobID)
+		} else if schedule, okSchedule := overview.Schedules[jobID]; okSchedule {
 			spec = schedule.TriggerSpec
 			item["is_custom"] = schedule.IsCustom
 			item["runtime_params"] = a.schedulerRuntimeParamsFromSchedule(jobID, schedule.RuntimeParams)
@@ -93,21 +99,26 @@ func (a *App) handleSchedulerTerminate(w http.ResponseWriter, r *http.Request, p
 	}
 	if !a.terminateSchedulerJob(jobID) {
 		a.reconcileSchedulerRunState(jobID, false, time.Now())
+		a.audit(r, "scheduler_terminate", "admin", 0, map[string]any{"job_id": jobID, "terminated": false, "already_stopped": true})
 		ok(w, "job is not running", map[string]any{"job_id": jobID, "terminated": false, "already_stopped": true})
 		return
 	}
+	a.audit(r, "scheduler_terminate", "admin", 0, map[string]any{"job_id": jobID, "terminated": true})
 	ok(w, "job termination requested", map[string]any{"job_id": jobID, "terminated": true})
 }
 func (a *App) handleSchedulerLastRun(w http.ResponseWriter, r *http.Request, params Params) {
 	runs := a.schedulerRunsForRead(params["job_id"], 1, time.Now())
 	var last any
 	if len(runs) > 0 {
-		last = runs[0]
+		last = schedulerRunListView(runs[0])
 	}
 	ok(w, "OK", map[string]any{"job_id": params["job_id"], "last_run": last})
 }
 func (a *App) handleSchedulerHistory(w http.ResponseWriter, r *http.Request, params Params) {
-	runs := a.schedulerRunsForRead(params["job_id"], queryInt(r, "limit", 20), time.Now())
+	// The UI only needs a short, bounded history. Do not let an arbitrary
+	// query value turn persisted log output into a large response.
+	limit := clamp(queryInt(r, "limit", 20), 1, 20)
+	runs := a.schedulerRunsForRead(params["job_id"], limit, time.Now())
 	ok(w, "OK", map[string]any{"job_id": params["job_id"], "history": runs, "total": len(runs)})
 }
 func (a *App) handleSchedulerSchedule(w http.ResponseWriter, r *http.Request, params Params) {
@@ -121,12 +132,17 @@ func (a *App) handleSchedulerSchedule(w http.ResponseWriter, r *http.Request, pa
 		if statusFromError(w, err) {
 			return
 		}
+		a.audit(r, "scheduler_reset_schedule", "admin", 0, map[string]any{"job_id": jobID})
 		ok(w, "schedule reset", map[string]any{"job_id": jobID, "trigger_spec": schedule.TriggerSpec, "runtime_params": a.schedulerDefaultRuntimeParams(jobID), "is_custom": false})
 		return
 	}
 	payload := decodeMap(r)
 	spec := map[string]any{"type": firstNonEmpty(stringValue(payload, "type"), "interval")}
-	if spec["type"] == "manual" {
+	if schedulerJobManualOnly(jobID) {
+		// Do not allow a crafted PUT to opt manual maintenance jobs into the
+		// automatic scheduler. Runtime parameters may still be customized.
+		spec = map[string]any{"type": "manual"}
+	} else if spec["type"] == "manual" {
 		spec = map[string]any{"type": "manual"}
 	} else if spec["type"] == "cron_daily" {
 		spec["hour"] = clamp(intValue(payload, "hour", 0), 0, 23)
@@ -140,7 +156,17 @@ func (a *App) handleSchedulerSchedule(w http.ResponseWriter, r *http.Request, pa
 	if statusFromError(w, err) {
 		return
 	}
+	a.audit(r, "scheduler_update_schedule", "admin", 0, map[string]any{"job_id": jobID, "trigger_type": spec["type"]})
 	ok(w, "schedule updated", map[string]any{"job_id": jobID, "trigger_spec": schedule.TriggerSpec, "runtime_params": a.schedulerRuntimeParamsFromSchedule(jobID, schedule.RuntimeParams), "is_custom": true})
+}
+
+func schedulerJobManualOnly(jobID string) bool {
+	for _, job := range schedulerJobs {
+		if fmt.Sprint(job["id"]) == jobID {
+			return boolish(job["manual_only"])
+		}
+	}
+	return false
 }
 
 func (a *App) schedulerDefaultRuntimeParams(jobID string) map[string]any {

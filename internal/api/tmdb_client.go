@@ -4,7 +4,17 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
+)
+
+// TMDB 与 Bangumi 共用 ttlCache（定义在 bangumi_client.go）。媒体元数据在数
+// 小时尺度内基本不变，而详情端点会展开 credits/videos/images，单次响应可达
+// 数十 KB；搜索更是随用户输入逐字符触发。缓存把重复查询折叠为本地命中。
+var (
+	tmdbSearchCache  = newTTLCache(256, 5*time.Minute)
+	tmdbDetailsCache = newTTLCache(512, 30*time.Minute)
 )
 
 // tmdbBase 校验并返回 TMDB API base URL（含 trim 右斜杠）。与 Emby /
@@ -33,6 +43,19 @@ func (a *App) tmdbBase() (string, error) {
 func (a *App) searchTMDB(ctx context.Context, query, mediaType string, limit int) ([]map[string]any, error) {
 	if a.cfg().TMDBAPIKey == "" {
 		return nil, fmt.Errorf("TMDB API Key 未配置")
+	}
+	// 缓存键必须同时区分「搜索端点类型」与「归一化后的结果类型」：同一 query
+	// 走 /search/multi 与 /search/tv 会返回不同集合，混用会串味。
+	cacheKey := strings.Join([]string{
+		strconv.Itoa(limit),
+		tmdbSearchMediaType(mediaType),
+		normalizeTMDBMediaType(mediaType),
+		strings.TrimSpace(query),
+	}, "|")
+	if cached, ok := tmdbSearchCache.get(cacheKey); ok {
+		if results, ok := cached.([]map[string]any); ok {
+			return results, nil
+		}
 	}
 	base, err := a.tmdbBase()
 	if err != nil {
@@ -72,6 +95,7 @@ func (a *App) searchTMDB(ctx context.Context, query, mediaType string, limit int
 			break
 		}
 	}
+	tmdbSearchCache.set(cacheKey, results)
 	return results, nil
 }
 
@@ -82,6 +106,12 @@ func (a *App) getTMDB(ctx context.Context, id, mediaType string) (map[string]any
 	mediaType = normalizeTMDBMediaType(mediaType)
 	if a.cfg().TMDBAPIKey == "" {
 		return nil, fmt.Errorf("TMDB API Key 未配置")
+	}
+	cacheKey := mediaType + "/" + id
+	if cached, ok := tmdbDetailsCache.get(cacheKey); ok {
+		if media, ok := cached.(map[string]any); ok {
+			return media, nil
+		}
 	}
 	base, err := a.tmdbBase()
 	if err != nil {
@@ -98,7 +128,9 @@ func (a *App) getTMDB(ctx context.Context, id, mediaType string) (map[string]any
 	if err := getJSON(ctx, endpoint+"?"+q.Encode(), nil, &payload); err != nil {
 		return nil, err
 	}
-	return tmdbToMedia(payload, mediaType, a.cfg().TMDBImageURL), nil
+	media := tmdbToMedia(payload, mediaType, a.cfg().TMDBImageURL)
+	tmdbDetailsCache.set(cacheKey, media)
+	return media, nil
 }
 
 func tmdbToMedia(item map[string]any, mediaType, imageBase string) map[string]any {

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/prejudice-studio/twilight/internal/config"
+	"github.com/prejudice-studio/twilight/internal/migration"
 	"github.com/prejudice-studio/twilight/internal/redis"
 	"github.com/prejudice-studio/twilight/internal/store"
 )
@@ -45,6 +46,11 @@ type Route struct {
 	Parts   []string
 	Auth    AuthLevel
 	Handler HandlerFunc
+	// Literals 是路径中字面量（非 `:param`）段的个数。匹配时同桶内优先选
+	// Literals 更大的路由：否则先注册的 `/admin/users/:uid` 会把后注册的
+	// `/admin/users/expiring`、`/admin/users/batch/disable` 之类静态路由整个
+	// 吃掉（请求以 uid="expiring"/"batch" 落到单用户 handler 上）。
+	Literals int
 }
 
 type routeIndexKey struct {
@@ -103,10 +109,15 @@ type App struct {
 	embyDeviceAuditMu         sync.Mutex
 	embyDeviceAuditUntil      time.Time
 	embyDeviceAuditCache      map[string]any
-	embySessionsMu            sync.Mutex
-	embySessionsUntil         time.Time
-	embySessionsCache         []map[string]any
-	bindStatus                *bindStatusHub
+	// playRankCache 按 "range|limit|是否含身份" 分键缓存榜单，脱敏版与管理
+	// 员版互不相通。
+	playRankMu        sync.Mutex
+	playRankCache     map[string]playRankSnapshot
+	embySessionsMu    sync.Mutex
+	embySessionsUntil time.Time
+	embySessionsCache []map[string]any
+	migrationMu       sync.Mutex
+	bindStatus        *bindStatusHub
 	// schedulerLocks: jobID -> *schedulerProcessRun。BATCH_07 之前在 package 级
 	// 声明 (`var schedulerProcessLocks sync.Map`)，单进程 prod 不显问题，但
 	// 测试 setup 反复 New() 出多个 App 时这张表共享 → 一个 case cancel 的 job
@@ -773,8 +784,15 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		lw.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if a.cfg().MaxUploadSize > 0 {
-		r.Body = http.MaxBytesReader(lw, r.Body, a.cfg().MaxUploadSize)
+	bodyLimit := a.cfg().MaxUploadSize
+	if strings.HasPrefix(r.URL.Path, "/api/v1/system/admin/migration/") {
+		// Migration archives are bounded by the archive parser rather than the
+		// ordinary image-upload limit. The route still authenticates as admin
+		// before reading the body in its handler.
+		bodyLimit = migration.MaxArchiveBytes + 8<<20
+	}
+	if bodyLimit > 0 {
+		r.Body = http.MaxBytesReader(lw, r.Body, bodyLimit)
 	}
 	if !a.allowRate(r.Context(), rateKey("global:", clientIP), a.cfg().RateLimitGlobalPerMinute, time.Minute) {
 		failWithCode(lw, http.StatusTooManyRequests, ErrGlobalRateLimited, "请求过于频繁，请稍后再试")
@@ -792,6 +810,11 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		failWithCode(lw, http.StatusForbidden, ErrIPBlacklisted, "IP 已被封禁")
 		return
 	}
+
+	// ============================================================
+	// 严禁修改 CSRF/CORS - V1 生产兼容性要求
+	// DO NOT MODIFY CSRF/CORS - V1 production compatibility required
+	// ============================================================
 
 	route, params, methodAllowed := a.match(r.Method, r.URL.Path)
 	if route == nil {
@@ -832,8 +855,14 @@ func (a *App) allowRate(ctx context.Context, key string, limit int, window time.
 }
 func (a *App) add(method, pattern string, auth AuthLevel, handler HandlerFunc) {
 	parts := splitPath(pattern)
+	literals := 0
+	for _, part := range parts {
+		if !strings.HasPrefix(part, ":") {
+			literals++
+		}
+	}
 	index := len(a.routes)
-	a.routes = append(a.routes, Route{Method: method, Pattern: pattern, Parts: parts, Auth: auth, Handler: handler})
+	a.routes = append(a.routes, Route{Method: method, Pattern: pattern, Parts: parts, Auth: auth, Handler: handler, Literals: literals})
 	if a.routeIndex == nil {
 		a.routeIndex = make(map[routeIndexKey][]int)
 		a.routePathIndex = make(map[routePathIndexKey][]int)
@@ -879,6 +908,13 @@ func (a *App) matchIndexedRoutes(exact, wildcard []int, requestParts []string, e
 	if len(exact) > 0 && len(wildcard) > 0 && &exact[0] == &wildcard[0] {
 		wildcard = nil
 	}
+	// 不再"首个匹配即返回"：同桶内可能同时存在 `/x/:id` 与 `/x/batch` 这类
+	// 同形路由，注册顺序决定了谁生效，而注册顺序是偶然的。这里按字面量段数
+	// 选最具体的那条（同分保留先注册的），让静态路由不再被参数位遮蔽。
+	var (
+		best       *Route
+		bestParams Params
+	)
 	exactPos, wildcardPos := 0, 0
 	for exactPos < len(exact) || wildcardPos < len(wildcard) {
 		index := 0
@@ -903,11 +939,16 @@ func (a *App) matchIndexedRoutes(exact, wildcard []int, requestParts []string, e
 		if excludeMethod != "" && route.Method == excludeMethod {
 			continue
 		}
+		if best != nil && route.Literals <= best.Literals {
+			// 不如已选中的具体；同分时保留先注册者。仍要试匹配吗？不需要——
+			// 即使它也匹配，按规则也不会取代 best。
+			continue
+		}
 		if params, ok := matchPattern(route.Parts, requestParts); ok {
-			return route, params
+			best, bestParams = route, params
 		}
 	}
-	return nil, nil
+	return best, bestParams
 }
 
 func routeGroup(parts []string) string {
@@ -1103,6 +1144,10 @@ func (a *App) applySecurityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Cross-Origin-Resource-Policy", "same-site")
 }
 
+// ============================================================
+// 严禁修改 CSRF/CORS - V1 生产兼容性要求
+// DO NOT MODIFY CSRF/CORS - V1 production compatibility required
+// ============================================================
 func (a *App) applyCORS(w http.ResponseWriter, r *http.Request) bool {
 	origin := strings.TrimSpace(r.Header.Get("Origin"))
 	if origin == "" {
@@ -1387,11 +1432,25 @@ func (a *App) clearSessionCookie(w http.ResponseWriter) {
 	// "default-domain (= 设置时的请求 host)" 寻找另一份同名 cookie，登出
 	// 留下幽灵 cookie 的概率极高——这正是双子域部署里常见的"登出后再访
 	// 问还是登录态"现象。
-	http.SetCookie(w, &http.Cookie{Name: a.cfg().SessionCookie, Path: "/", Domain: a.cfg().CookieDomain, MaxAge: -1, Expires: time.Unix(0, 0), HttpOnly: true, Secure: a.cfg().CookieSecure, SameSite: sameSite(a.cfg().CookieSameSite)})
+	cfg := a.cfg()
+	http.SetCookie(w, &http.Cookie{Name: cfg.SessionCookie, Path: "/", Domain: cfg.CookieDomain, MaxAge: -1, Expires: time.Unix(0, 0), HttpOnly: true, Secure: cfg.CookieSecure, SameSite: sameSite(cfg.CookieSameSite)})
+	// V1 兼容性：CSRF 保护已禁用
+	// 同时清除 CSRF token cookie
+	// http.SetCookie(w, &http.Cookie{Name: "twilight_csrf", Path: "/", Domain: cfg.CookieDomain, MaxAge: -1, Expires: time.Unix(0, 0), HttpOnly: false, Secure: cfg.CookieSecure, SameSite: http.SameSiteLaxMode})
 }
 
 func (a *App) issueSessionCookies(w http.ResponseWriter, sessionToken string, expires time.Time) {
 	a.setSessionCookie(w, sessionToken, expires)
+	// V1 兼容性：CSRF 保护已禁用
+	// 同时颁发 CSRF token（Double Submit Cookie 方案）
+	// csrfToken, err := generateCSRFToken()
+	// if err != nil {
+	// 	// CSRF token 生成失败不应阻止登录，记录日志并继续
+	// 	// 用户在后续请求中会因为缺少 CSRF token 而被拒绝
+	// 	zap.L().Error("failed to generate CSRF token", zap.Error(err))
+	// 	return
+	// }
+	// a.issueCSRFCookie(w, csrfToken, expires)
 }
 
 func sameSite(value string) http.SameSite {

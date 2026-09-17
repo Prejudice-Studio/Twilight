@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/prejudice-studio/twilight/internal/security"
 	"github.com/prejudice-studio/twilight/internal/store"
 	"github.com/prejudice-studio/twilight/internal/validate"
 )
@@ -175,118 +174,13 @@ func (a *App) handleVerifyEmailCode(w http.ResponseWriter, r *http.Request, _ Pa
 // handleForgotPasswordEmailRequest 登出态找回第一步：向已验证邮箱发送重置验证码。
 // 防枚举：无论邮箱是否对应账号，都回统一成功（仅 IP 级限流可见）。
 func (a *App) handleForgotPasswordEmailRequest(w http.ResponseWriter, r *http.Request, _ Params) {
-	cfg := a.cfg()
-	if !cfg.ForgotPasswordEnabled {
-		failWithCode(w, http.StatusServiceUnavailable, ErrForgotPasswordDisabled, "找回密码功能已关闭")
-		return
-	}
-	if !cfg.ForgotPasswordEmailEnabled {
-		failWithCode(w, http.StatusServiceUnavailable, ErrForgotPasswordDisabled, "通过邮箱找回密码已关闭")
-		return
-	}
-	if !emailConfigured(cfg) {
-		failWithCode(w, http.StatusServiceUnavailable, ErrEmailDisabled, "邮箱功能未启用")
-		return
-	}
-	if !a.allowRate(r.Context(), rateKey("email-reset:ip:", a.clientIP(r)), cfg.RateLimitForgotPasswordIPPer10m, 10*time.Minute) {
-		failWithCode(w, http.StatusTooManyRequests, ErrPasswordResetTooMany, "重置密码尝试过于频繁，请稍后再试")
-		return
-	}
-	payload := decodeMap(r)
-	email := strings.TrimSpace(stringValue(payload, "email"))
-	if err := validate.ValidateEmailFormat(email); err != nil {
-		failWithCode(w, http.StatusBadRequest, ErrEmailInvalid, err.Error())
-		return
-	}
-	// 仅当邮箱已被某账号验证时才真正发码；否则静默成功，避免账号枚举。
-	if user, found := a.store().FindUserByEmailVerified(email); found && user.Active {
-		// 发码内部失败（限流 / 冷却 / SMTP 故障）一律吞掉只记不抛，保持统一成功，
-		// 防止以"邮箱级限流提示"反推账号存在。
-		if _, _, ec, _ := a.issueEmailCode(r.Context(), a.clientIP(r), emailPurposeResetPassword, email, user.UID); ec != "" {
-			_ = ec
-		}
-	}
-	ok(w, "如果该邮箱已绑定账号，验证码已发送，请查收", map[string]any{
-		"resend_after": cfg.EmailResendCooldownSeconds,
-		"expires_in":   cfg.EmailCodeTTLMinutes * 60,
-	})
+	a.handleEmailPasswordResetRequestResource(w, r)
 }
 
-// handleForgotPasswordEmailReset 登出态找回第二步：校验验证码并重置系统密码。
 func (a *App) handleForgotPasswordEmailReset(w http.ResponseWriter, r *http.Request, _ Params) {
-	cfg := a.cfg()
-	if !cfg.ForgotPasswordEnabled {
-		failWithCode(w, http.StatusServiceUnavailable, ErrForgotPasswordDisabled, "找回密码功能已关闭")
-		return
-	}
-	if !cfg.ForgotPasswordEmailEnabled {
-		failWithCode(w, http.StatusServiceUnavailable, ErrForgotPasswordDisabled, "通过邮箱找回密码已关闭")
-		return
-	}
-	if !emailConfigured(cfg) {
-		failWithCode(w, http.StatusServiceUnavailable, ErrEmailDisabled, "邮箱功能未启用")
-		return
-	}
-	if !a.allowRate(r.Context(), rateKey("email-reset:ip:", a.clientIP(r)), cfg.RateLimitForgotPasswordIPPer10m, 10*time.Minute) {
-		failWithCode(w, http.StatusTooManyRequests, ErrPasswordResetTooMany, "重置密码尝试过于频繁，请稍后再试")
-		return
-	}
-	payload := decodeMap(r)
-	email := strings.TrimSpace(stringValue(payload, "email"))
-	code := firstNonEmpty(stringValue(payload, "code"), stringValue(payload, "email_code"))
-	newPassword := stringValue(payload, "new_password")
-	if email == "" || code == "" {
-		failWithCode(w, http.StatusBadRequest, ErrEmailCodeRequired, "请填写邮箱和验证码")
-		return
-	}
-	if err := validate.ValidatePasswordStrength(newPassword); err != nil {
-		failWithCode(w, http.StatusBadRequest, ErrPasswordWeak, err.Error())
-		return
-	}
-	user, found := a.store().FindUserByEmailVerified(email)
-	var rec store.EmailVerification
-	active := false
-	if found {
-		rec, active = a.store().FindActiveEmailVerification(emailPurposeResetPassword, email, time.Now().Unix())
-	}
-	if !found || !active {
-		// 不区分"账号不存在"与"无有效验证码"，避免账号枚举。
-		failWithCode(w, http.StatusBadRequest, ErrEmailCodeInvalid, "验证码无效或已失效，请重新获取")
-		return
-	}
-	verified, status, ec, msg := a.verifyEmailCodeByID(rec.ID, code)
-	if ec != "" {
-		failWithCode(w, status, ec, msg)
-		return
-	}
-	if verified.UID != user.UID || verified.Purpose != emailPurposeResetPassword {
-		failWithCode(w, http.StatusBadRequest, ErrEmailCodeInvalid, "验证码无效或已失效，请重新获取")
-		return
-	}
-	// 码已校验（证明邮箱归属），再做账号状态守卫，与 Emby 找回口径一致。
-	if !user.Active {
-		if userExpiredOnly(user) {
-			failWithCode(w, http.StatusForbidden, ErrAccountExpired, "账号有效期已到期，请续费后再重置密码")
-			return
-		}
-		failWithCode(w, http.StatusForbidden, ErrAccountDisabled, "账号已被禁用")
-		return
-	}
-	hash, err := security.HashPassword(newPassword)
-	if err != nil {
-		failWithCode(w, http.StatusInternalServerError, ErrPasswordHashFailed, "密码处理失败")
-		return
-	}
-	u, err := a.store().UpdateUser(user.UID, func(u *store.User) error { u.PasswordHash = hash; return nil })
-	if statusFromError(w, err) {
-		return
-	}
-	a.sessions().DeleteUser(r.Context(), u.UID)
-	ok(w, "密码已重置，请使用新密码登录", map[string]any{"username": u.Username})
+	a.handleEmailPasswordResetResource(w, r)
 }
 
-// handleAdminBindUserEmail 管理员强制把用户绑定到指定邮箱（默认直接标记已验证）。
-// force=true 时跳过黑白名单与占用冲突校验（管理员断言归属）。
 func (a *App) handleAdminBindUserEmail(w http.ResponseWriter, r *http.Request, params Params) {
 	uid, err := int64Param(params, "uid")
 	if err != nil {

@@ -6,9 +6,73 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
+)
+
+// ttlCache is a small bounded cache for third-party reads. Bangumi/TMDB lookups
+// are identical for every user typing the same title, and the clients had no
+// cache at all: one admin search fanned out into one upstream request per
+// keystroke-driven query, and subject lookups were re-fetched on every render.
+type ttlCache struct {
+	mu      sync.Mutex
+	ttl     time.Duration
+	maxSize int
+	items   map[string]ttlCacheEntry
+}
+
+type ttlCacheEntry struct {
+	value     any
+	expiresAt time.Time
+}
+
+func newTTLCache(maxSize int, ttl time.Duration) *ttlCache {
+	return &ttlCache{maxSize: maxSize, ttl: ttl, items: make(map[string]ttlCacheEntry, maxSize)}
+}
+
+func (c *ttlCache) get(key string) (any, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.items[key]
+	if !ok {
+		return nil, false
+	}
+	if time.Now().After(entry.expiresAt) {
+		delete(c.items, key)
+		return nil, false
+	}
+	return entry.value, true
+}
+
+func (c *ttlCache) set(key string, value any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now()
+	for k, entry := range c.items {
+		if now.After(entry.expiresAt) {
+			delete(c.items, k)
+		}
+	}
+	if len(c.items) >= c.maxSize {
+		// Bounded and simple: drop everything rather than tracking recency.
+		// A cold cache costs one upstream request per key, never unbounded RAM.
+		c.items = make(map[string]ttlCacheEntry, c.maxSize)
+	}
+	c.items[key] = ttlCacheEntry{value: value, expiresAt: now.Add(c.ttl)}
+}
+
+var (
+	bangumiSearchCache  = newTTLCache(256, 5*time.Minute)
+	bangumiSubjectCache = newTTLCache(512, 30*time.Minute)
 )
 
 func (a *App) searchBangumi(ctx context.Context, query string, limit int) ([]map[string]any, error) {
+	cacheKey := strconv.Itoa(limit) + "|" + strings.TrimSpace(query)
+	if cached, ok := bangumiSearchCache.get(cacheKey); ok {
+		if results, ok := cached.([]map[string]any); ok {
+			return results, nil
+		}
+	}
 	endpoint, err := bangumiEndpoint(a.cfg().BangumiAPIURL, "/search/subjects", url.Values{
 		"limit":  {fmt.Sprint(limit)},
 		"offset": {"0"},
@@ -33,6 +97,7 @@ func (a *App) searchBangumi(ctx context.Context, query string, limit int) ([]map
 			results = append(results, bangumiToMedia(item))
 		}
 	}
+	bangumiSearchCache.set(cacheKey, results)
 	return results, nil
 }
 
@@ -50,6 +115,11 @@ func (a *App) getBangumi(ctx context.Context, id string) (map[string]any, error)
 	if !isPositiveNumericID(id) {
 		return nil, fmt.Errorf("invalid Bangumi subject id")
 	}
+	if cached, ok := bangumiSubjectCache.get(id); ok {
+		if subject, ok := cached.(map[string]any); ok {
+			return subject, nil
+		}
+	}
 	endpoint, err := bangumiEndpoint(a.cfg().BangumiAPIURL, "/subjects/"+id, nil)
 	if err != nil {
 		return nil, err
@@ -58,7 +128,9 @@ func (a *App) getBangumi(ctx context.Context, id string) (map[string]any, error)
 	if err := getJSON(ctx, endpoint, a.bangumiSearchHeaders(), &payload); err != nil {
 		return nil, err
 	}
-	return bangumiToMedia(payload), nil
+	subject := bangumiToMedia(payload)
+	bangumiSubjectCache.set(id, subject)
+	return subject, nil
 }
 
 func (a *App) bangumiHeaders() map[string]string {

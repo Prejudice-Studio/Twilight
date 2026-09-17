@@ -402,7 +402,7 @@ func (a *App) handleUploadServerIcon(w http.ResponseWriter, r *http.Request, _ P
 	}
 	ok(w, "上传成功", map[string]any{
 		"server_icon": serverIcon,
-		"url":         "/api/v1/system/server-icon?ts=" + strconv.FormatInt(time.Now().Unix(), 10),
+		"url":         "/api/v2/system/server-icon?ts=" + strconv.FormatInt(time.Now().Unix(), 10),
 		"filename":    filename,
 		"reload":      info["reload"],
 	})

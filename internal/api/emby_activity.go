@@ -136,6 +136,8 @@ func (a *App) fetchAndStoreEmbyActivityLogsSince(ctx context.Context, since time
 		zap.L().Warn("failed to persist Emby playback records from activity logs", zap.Error(err))
 	} else if persisted > 0 {
 		zap.L().Info("persisted Emby playback records", zap.Int("records", persisted))
+		// 新写入的播放记录要立刻反映到日榜/周榜，否则管理员点了同步还要等缓存过期。
+		a.invalidatePlayRankCache()
 	}
 	return added, nil
 }

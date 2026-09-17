@@ -6,6 +6,10 @@ func (a *App) registerRoutes() {
 	a.add(http.MethodGet, "/", AuthPublic, a.handleRoot)
 	a.add(http.MethodGet, "/api/v1/openapi.json", AuthPublic, a.handleOpenAPI)
 	a.add(http.MethodGet, "/api/v1/docs", AuthPublic, a.handleDocs)
+	a.registerV2Routes()
+
+	// The V1 routes below remain available only for the rollback frontend and
+	// external integrations during the V2 migration.
 	a.add(http.MethodGet, "/api/v1/setup/status", AuthPublic, a.handleSetupStatus)
 	a.add(http.MethodPost, "/api/v1/setup/complete", AuthPublic, a.handleSetupComplete)
 
@@ -110,6 +114,9 @@ func (a *App) registerRoutes() {
 	a.add(http.MethodPost, "/api/v1/system/admin/database/backup", AuthAdmin, a.handleDatabaseBackup)
 	a.add(http.MethodPost, "/api/v1/system/admin/database/restore", AuthAdmin, a.handleDatabaseRestore)
 	a.add(http.MethodPost, "/api/v1/system/admin/database/migrate", AuthAdmin, a.handleDatabaseMigrate)
+	a.add(http.MethodGet, "/api/v1/system/admin/migration/status", AuthAdmin, a.handleMigrationStatus)
+	a.add(http.MethodPost, "/api/v1/system/admin/migration/export", AuthAdmin, a.handleMigrationExport)
+	a.add(http.MethodPost, "/api/v1/system/admin/migration/import", AuthAdmin, a.handleMigrationImport)
 	a.add(http.MethodGet, "/api/v1/system/admin/config/toml", AuthAdmin, a.handleConfigTOMLGet)
 	a.add(http.MethodPut, "/api/v1/system/admin/config/toml", AuthAdmin, a.handleConfigTOMLPutSafe)
 	a.add(http.MethodGet, "/api/v1/system/admin/config/schema", AuthAdmin, a.handleConfigSchemaFull)
@@ -181,11 +188,14 @@ func (a *App) registerAdminRoutes() {
 	a.add(http.MethodPost, "/api/v1/admin/users/registration-queue/clear", AuthAdmin, a.handleRegistrationQueueClear)
 	a.add(http.MethodPost, "/api/v1/admin/users/registration-queue/grant-entitlement-and-clear", AuthAdmin, a.handleRegistrationEntitlementBulk)
 	a.add(http.MethodPost, "/api/v1/admin/users/:uid/registration-entitlement", AuthAdmin, a.handleRegistrationEntitlement)
-	a.add(http.MethodPost, "/api/v1/admin/users/:uid/registration-entitlement/dequeue", AuthAdmin, a.handleRegistrationEntitlement)
+	// 已删除 /api/v1/admin/users/:uid/registration-entitlement/dequeue：它挂的是
+	// 同一个 handleRegistrationEntitlement，"出队"行为从未实现（后端没有运行时
+	// 注册队列，handleQueueStatus 只是恒返回 terminal:true 的兼容桩）。保留它只会
+	// 让调用方以为调用了不同的能力。
 	a.add(http.MethodPost, "/api/v1/admin/users/sync-bindings", AuthAdmin, a.handleSyncBindings)
 	a.add(http.MethodPost, "/api/v1/admin/users/:uid/refresh-status", AuthAdmin, a.handleAdminRefreshUserStatus)
 	a.add(http.MethodPost, "/api/v1/admin/users/:uid/renew", AuthAdmin, a.handleAdminRenewUser)
-	a.add(http.MethodPost, "/api/v1/admin/users/:uid/cancel-permanent", AuthAdmin, a.handleAdminSetUserExpiry)
+	a.add(http.MethodPost, "/api/v1/admin/users/:uid/cancel-permanent", AuthAdmin, a.handleAdminCancelPermanent)
 	a.add(http.MethodPost, "/api/v1/admin/users/:uid/set-expiry", AuthAdmin, a.handleAdminSetUserExpiry)
 	a.add(http.MethodPost, "/api/v1/admin/users/:uid/reset-password", AuthAdmin, a.handleAdminResetPassword)
 	a.add(http.MethodPost, "/api/v1/admin/users/:uid/kick", AuthAdmin, a.handleKickUser)
@@ -200,7 +210,7 @@ func (a *App) registerAdminRoutes() {
 	a.add(http.MethodGet, "/api/v1/admin/emby/activity", AuthAdmin, a.handleEmbyActivity)
 	a.add(http.MethodGet, "/api/v1/admin/emby/activity-logs", AuthAdmin, a.handleEmbyActivityLogs)
 	a.add(http.MethodGet, "/api/v1/emby/items/:item_id/image", AuthUser, a.handleEmbyItemImage)
-	a.add(http.MethodGet, "/api/v1/emby/now-playing", AuthUser, a.handleEmbyNowPlaying)
+	a.add(http.MethodGet, "/api/v1/admin/emby/now-playing", AuthAdmin, a.handleEmbyNowPlaying)
 	a.add(http.MethodGet, "/api/v1/emby/online", AuthUser, a.handleEmbyOnline)
 	a.add(http.MethodGet, "/api/v1/admin/emby/users", AuthAdmin, a.handleAdminEmbyUsersV2)
 	a.add(http.MethodPost, "/api/v1/admin/emby/broadcast", AuthAdmin, a.handleEmbyBroadcast)
@@ -362,6 +372,7 @@ func (a *App) registerStatsInviteSigninAnnouncementRoutes() {
 	// 工单
 	a.add(http.MethodGet, "/api/v1/tickets", AuthUser, a.handleMyTickets)
 	a.add(http.MethodPost, "/api/v1/tickets", AuthUser, a.handleCreateTicket)
+	a.add(http.MethodGet, "/api/v1/tickets/:ticket_id", AuthUser, a.handleMyTicket)
 	a.add(http.MethodPost, "/api/v1/tickets/:ticket_id/close", AuthUser, a.handleCloseOwnTicket)
 	a.add(http.MethodPost, "/api/v1/tickets/:ticket_id/reopen", AuthUser, a.handleReopenOwnTicket)
 	a.add(http.MethodPut, "/api/v1/tickets/:ticket_id/notify-telegram", AuthUser, a.handleToggleTicketNotify)

@@ -30,6 +30,9 @@ func newEmailTestApp(t *testing.T, forceBind bool) *App {
 		SessionTTL:        time.Hour,
 		CookieSameSite:    "lax",
 		BotInternalSecret: "test-secret-for-email-hmac",
+		// 与 newTestApp 同口径：管理员身份只来自配置，测试里注册的 "admin"
+		// 必须显式登记，否则它是普通用户、管理端接口全部 403。
+		AdminUsernames: []string{"admin"},
 		// 邮箱子系统：开启 + 配齐 SMTP 关键参数让 emailConfigured 为 true。
 		EmailEnabled:               true,
 		SMTPHost:                   "smtp.example.com",

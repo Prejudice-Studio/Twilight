@@ -99,6 +99,24 @@ func registerAndLogin(t *testing.T, app *App, username, password string) []*http
 	return []*http.Cookie{session}
 }
 
+// registerAdmin 注册并登录一个**管理员**账户。
+//
+// 安全模型里管理员身份只来自配置的 AdminUIDs / AdminUsernames（旧版"空库首注册者
+// 自动成为管理员"通道已移除）。newTestApp 只白名单了 "admin"，所以任何用其它
+// 用户名注册并期望拿到管理员权限的用例，都必须先把该用户名登记进
+// AdminUsernames——否则注册出来的是普通用户，管理端接口一律 403。
+func registerAdmin(t *testing.T, app *App, username, password string) []*http.Cookie {
+	t.Helper()
+	cfg := app.cfg()
+	for _, existing := range cfg.AdminUsernames {
+		if existing == username {
+			return registerAndLogin(t, app, username, password)
+		}
+	}
+	cfg.AdminUsernames = append(cfg.AdminUsernames, username)
+	return registerAndLogin(t, app, username, password)
+}
+
 // loginCookies 从已存在的账户登录，返回 session cookie 切片。
 // 仅用于 inline 登录流程（不走注册 helper）。
 func loginCookies(t *testing.T, app *App, username, password string) []*http.Cookie {
@@ -762,6 +780,22 @@ func TestEmbyViewerCountRequiresLogin(t *testing.T) {
 	response := doJSON(app, http.MethodGet, "/api/v1/system/emby-viewers", "", nil)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous viewer count status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestEmbyNowPlayingIsAdminOnly(t *testing.T) {
+	app := newTestApp(t)
+	adminCookies := registerAndLogin(t, app, "admin", "Admin123456")
+	userCookies := registerAndLogin(t, app, "viewer", "Viewer123456")
+
+	if response := doJSON(app, http.MethodGet, "/api/v1/admin/emby/now-playing", "", userCookies); response.Code != http.StatusForbidden {
+		t.Fatalf("ordinary user now-playing status=%d body=%s, want 403", response.Code, response.Body.String())
+	}
+	if response := doJSON(app, http.MethodGet, "/api/v1/admin/emby/now-playing", "", adminCookies); response.Code != http.StatusOK {
+		t.Fatalf("admin now-playing status=%d body=%s, want 200", response.Code, response.Body.String())
+	}
+	if response := doJSON(app, http.MethodGet, "/api/v1/emby/now-playing", "", adminCookies); response.Code != http.StatusNotFound {
+		t.Fatalf("legacy ordinary-user now-playing route status=%d body=%s, want 404", response.Code, response.Body.String())
 	}
 }
 
@@ -2078,6 +2112,20 @@ func TestSystemUpdateRejectsUnsafeRepoURL(t *testing.T) {
 	resp := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/update", `{"repo_url":"https://user:pass@example.com/repo.git","branch":"main"}`, []*http.Cookie{cookie}, map[string]string{"X-Twilight-Client": "webui"})
 	if resp.Code != http.StatusBadRequest {
 		t.Fatalf("unsafe update URL status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestGitUpdateResponseDoesNotExposeProjectRoot(t *testing.T) {
+	projectRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := applyGitUpdate(context.Background(), "https://example.com/twilight.git", "main", false, true, false)
+	if _, ok := result["project_root"]; ok {
+		t.Fatalf("git update response leaked project_root: %#v", result)
+	}
+	if response := fmt.Sprint(result); strings.Contains(response, projectRoot) {
+		t.Fatalf("git update response leaked working directory %q: %s", projectRoot, response)
 	}
 }
 
@@ -4577,9 +4625,22 @@ func TestTelegramGroupUserPanelShowsEmbyInfoAndActions(t *testing.T) {
 	}
 
 	labels := telegramInlineButtonLabels(app.telegramGroupUserPanelMarkup("tok", user, ""))
-	for _, want := range []string{"关闭面板", "禁用 Emby", "启用 Emby", "删除 Emby", "删除用户"} {
-		if !stringSliceContains(labels, want) {
+	for _, want := range []string{"关闭", "禁用 Emby", "启用 Emby", "危险操作"} {
+		if !telegramButtonLabelsContain(labels, want) {
 			t.Fatalf("panel buttons missing %q: %#v", want, labels)
+		}
+	}
+	// 不可逆操作刻意收在第二层"危险操作"面板里（主面板只留入口），避免误触直接
+	// 删人删号。所以删除类按钮不在首层，必须展开二级面板后才出现。
+	for _, want := range []string{"删除用户", "删除 Emby"} {
+		if telegramButtonLabelsContain(labels, want) {
+			t.Fatalf("destructive button %q must stay behind the danger sub-panel: %#v", want, labels)
+		}
+	}
+	danger := telegramInlineButtonLabels(app.telegramGroupUserPanelMarkup("tok", user, "danger"))
+	for _, want := range []string{"删除用户", "删除 Emby"} {
+		if !telegramButtonLabelsContain(danger, want) {
+			t.Fatalf("danger panel missing %q: %#v", want, danger)
 		}
 	}
 }
@@ -4756,7 +4817,8 @@ func TestTelegramProtectedTargetUsesUnifiedProtectedUsers(t *testing.T) {
 			t.Fatalf("expected protected Telegram target: %#v", user)
 		}
 		labels := telegramInlineButtonLabels(app.telegramGroupUserPanelMarkup("tok", user, ""))
-		if len(labels) != 2 || labels[0] != "刷新" || labels[1] != "关闭面板" {
+		// 按钮文案带 emoji 前缀，按"包含"匹配：受保护目标只暴露刷新与关闭。
+		if len(labels) != 2 || !strings.Contains(labels[0], "刷新") || !strings.Contains(labels[1], "关闭") {
 			t.Fatalf("protected target should only expose refresh and close buttons, got %#v", labels)
 		}
 	}
@@ -4777,6 +4839,17 @@ func telegramInlineButtonLabels(markup any) []string {
 func stringSliceContains(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+// telegramButtonLabelsContain 按子串匹配按钮文案。Telegram 面板按钮带 emoji 前缀
+// （"🔄 刷新"），断言写全等会随文案微调一起碎掉，这里只校验语义部分。
+func telegramButtonLabelsContain(labels []string, want string) bool {
+	for _, label := range labels {
+		if strings.Contains(label, want) {
 			return true
 		}
 	}
@@ -4853,6 +4926,50 @@ func TestSchedulerManualTriggerSpecDisablesAutoRun(t *testing.T) {
 	}
 	if next := app.schedulerNextRunAt("daily_stats", spec, time.Now()); next != 0 {
 		t.Fatalf("manual trigger should not have next run, got %d", next)
+	}
+}
+
+func TestSchedulerHistoryIsBoundedAndLastRunOmitsLogs(t *testing.T) {
+	app := newTestApp(t)
+	for i := 0; i < 25; i++ {
+		if err := app.store().AddSchedulerRun(store.SchedulerRun{
+			JobID:     "daily_stats",
+			Type:      "manual",
+			Trigger:   "manual",
+			Status:    "success",
+			StartedAt: int64(i + 1),
+			Logs:      []string{"sensitive-looking log output"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	historyReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scheduler/jobs/daily_stats/history?limit=200", nil)
+	historyRR := httptest.NewRecorder()
+	app.handleSchedulerHistory(historyRR, historyReq, Params{"job_id": "daily_stats"})
+	if historyRR.Code != http.StatusOK {
+		t.Fatalf("history status=%d body=%s", historyRR.Code, historyRR.Body.String())
+	}
+	var history struct {
+		Data struct {
+			History []store.SchedulerRun `json:"history"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(historyRR.Body.Bytes(), &history); err != nil {
+		t.Fatal(err)
+	}
+	if len(history.Data.History) != 20 {
+		t.Fatalf("history should be capped at 20 rows, got %d", len(history.Data.History))
+	}
+
+	lastReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scheduler/jobs/daily_stats/last-run", nil)
+	lastRR := httptest.NewRecorder()
+	app.handleSchedulerLastRun(lastRR, lastReq, Params{"job_id": "daily_stats"})
+	if lastRR.Code != http.StatusOK {
+		t.Fatalf("last-run status=%d body=%s", lastRR.Code, lastRR.Body.String())
+	}
+	if strings.Contains(lastRR.Body.String(), "sensitive-looking log output") {
+		t.Fatalf("last-run summary should not duplicate log output: %s", lastRR.Body.String())
 	}
 }
 
@@ -5492,8 +5609,13 @@ force_subscribe = true
 		t.Fatal(err)
 	}
 	content := string(data)
-	if strings.Contains(content, "force_subscribe") {
-		t.Fatalf("legacy force_subscribe was not removed: %s", content)
+	// force_subscribe 现在是一等公民配置项（config.Config.TelegramForceSubscribe
+	// 仍被读取，且已纳入可视化配置 schema），因此保存会**保留**它而不是像早期那样
+	// 因为没进 schema 而被顺手丢弃。迁移语义仍然成立：拆分的两个开关会被显式写成
+	// true，之后它们才是生效值（config.Load 里显式设置的 force_bind_* 会覆盖
+	// force_subscribe 的推导），所以"遗留键消失"不再是迁移完成的判据。
+	if !strings.Contains(content, "force_subscribe = true") {
+		t.Fatalf("managed force_subscribe should be preserved after save: %s", content)
 	}
 	if !strings.Contains(content, "force_bind_group = true") || !strings.Contains(content, "force_bind_channel = true") {
 		t.Fatalf("legacy force_subscribe was not migrated to split true values: %s", content)
@@ -5528,6 +5650,24 @@ func TestEmbyCapacityCountsPendingEntitlementsSeparatelyFromSystemLimit(t *testi
 	}
 	if reached, current, limit := app.embyCapacityReached(0); !reached || current != 3 || limit != 3 {
 		t.Fatalf("emby capacity should count existing users and pending code slots, got reached=%v current=%d limit=%d", reached, current, limit)
+	}
+}
+
+func TestSystemUserLimitExcludesConsumedRegistrationSlot(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().UserLimit = 6
+	now := time.Now().Unix()
+	if _, err := app.store().CreateUser(store.User{Username: "existing", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store().UpsertRegCode(store.RegCode{Code: "REG-CONSUME", Type: 1, Days: 30, ValidityTime: -1, UseCountLimit: 5, Active: true, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if reached, current, limit := app.systemUserLimitReached(); !reached || current != 6 || limit != 6 {
+		t.Fatalf("unexcluded limit should include all pending slots, got reached=%v current=%d limit=%d", reached, current, limit)
+	}
+	if reached, current, limit := app.systemUserLimitReachedExcluding("REG-CONSUME", ""); reached || current != 5 || limit != 6 {
+		t.Fatalf("consumed registration slot should be excluded, got reached=%v current=%d limit=%d", reached, current, limit)
 	}
 }
 
@@ -6530,6 +6670,74 @@ func TestAdminSetUserExpiryAbsolute(t *testing.T) {
 	}
 }
 
+// TestAdminCancelPermanentIgnoresPermanentFlag 锁定 /cancel-permanent 的语义：
+// 路由名就是「不再永久」，所以请求体里无论带 permanent:true、days:-1 还是
+// expired_at 永久哨兵，都必须被忽略——否则路由名与行为相反，管理员点"取消永久"
+// 反而把号设成永久。对照 /set-expiry：同一套逻辑下这些输入确实会设永久。
+func TestAdminCancelPermanentIgnoresPermanentFlag(t *testing.T) {
+	app := newTestApp(t)
+	adminCtx := func(r *http.Request) *http.Request {
+		return r.WithContext(context.WithValue(r.Context(), principalKey, principal{User: store.User{UID: 999, Role: store.RoleAdmin, Active: true}}))
+	}
+	call := func(uid int64, body string) *httptest.ResponseRecorder {
+		req := adminCtx(httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(body)))
+		rr := httptest.NewRecorder()
+		app.handleAdminCancelPermanent(rr, req, Params{"uid": strconv.FormatInt(uid, 10)})
+		return rr
+	}
+
+	permUser, err := app.store().CreateUser(store.User{Username: "cancel-perm-flag", Role: store.RoleNormal, Active: true, ExpiredAt: permanentExpiryUnix, EmbyID: "e-cp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 永久号 + 请求体要求永久 → 仍必须变成 now+30 天。
+	if rr := call(permUser.UID, `{"days":30,"permanent":true}`); rr.Code != http.StatusOK {
+		t.Fatalf("cancel-permanent status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	updated, _ := app.store().User(permUser.UID)
+	if expiryIsPermanent(updated.ExpiredAt) {
+		t.Fatalf("cancel-permanent must ignore permanent:true, got permanent expiry")
+	}
+	want := time.Now().Unix() + 30*86400
+	if diff := updated.ExpiredAt - want; diff < -120 || diff > 120 {
+		t.Fatalf("cancel-permanent expiry off by %d (got %d want ~%d)", diff, updated.ExpiredAt, want)
+	}
+
+	// expired_at 永久哨兵同样不能把号带回永久。
+	if rr := call(permUser.UID, `{"days":15,"expired_at":-1}`); rr.Code != http.StatusOK {
+		t.Fatalf("cancel-permanent with sentinel status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	updated, _ = app.store().User(permUser.UID)
+	if expiryIsPermanent(updated.ExpiredAt) {
+		t.Fatalf("cancel-permanent must ignore permanent expired_at sentinel")
+	}
+
+	// days:-1（历史"永久"写法）在 cancel-permanent 上应当被拒，而不是设永久。
+	if rr := call(permUser.UID, `{"days":-1}`); rr.Code != http.StatusBadRequest {
+		t.Fatalf("cancel-permanent with days:-1 should be rejected, got %d", rr.Code)
+	}
+	updated, _ = app.store().User(permUser.UID)
+	if expiryIsPermanent(updated.ExpiredAt) {
+		t.Fatalf("cancel-permanent with days:-1 must not set permanent")
+	}
+
+	// 对照：/set-expiry 传 permanent:true 仍然设永久，语义没有被一起改坏。
+	if rr := callSetExpiry(app, adminCtx, permUser.UID, `{"permanent":true}`); rr.Code != http.StatusOK {
+		t.Fatalf("set-expiry permanent status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	updated, _ = app.store().User(permUser.UID)
+	if !expiryIsPermanent(updated.ExpiredAt) {
+		t.Fatalf("set-expiry permanent:true should still set permanent, got %d", updated.ExpiredAt)
+	}
+}
+
+func callSetExpiry(app *App, adminCtx func(*http.Request) *http.Request, uid int64, body string) *httptest.ResponseRecorder {
+	req := adminCtx(httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(body)))
+	rr := httptest.NewRecorder()
+	app.handleAdminSetUserExpiry(rr, req, Params{"uid": strconv.FormatInt(uid, 10)})
+	return rr
+}
+
 func TestRenewEndpointHonorsPermanentRegcode(t *testing.T) {
 	app := newTestApp(t)
 	user, err := app.store().CreateUser(store.User{Username: "renew-permanent", Role: store.RoleNormal, Active: true, EmbyID: "emby-renew-permanent", ExpiredAt: time.Now().AddDate(0, 0, 1).Unix()})
@@ -7448,6 +7656,31 @@ func TestTelegramRosterStatsUsesObservedMembers(t *testing.T) {
 	resp := doJSONWithHeaders(app, http.MethodGet, "/api/v1/admin/telegram/roster/stats", ``, []*http.Cookie{cookie}, nil)
 	if resp.Code != http.StatusOK || !strings.Contains(resp.Body.String(), `"bound":1`) || !strings.Contains(resp.Body.String(), `"unbound":1`) || !strings.Contains(resp.Body.String(), `"bots":1`) {
 		t.Fatalf("roster stats status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestTelegramBotTestDoesNotExposeUpstreamError(t *testing.T) {
+	app := newTestApp(t)
+	app.cfg().TelegramMode = true
+	app.cfg().TelegramBotToken = "123:SECRET"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":false,"error_code":502,"description":"dial http://10.0.0.8:65535 failed with bot 123:SECRET"}`))
+	}))
+	defer upstream.Close()
+	app.cfg().TelegramAPIURL = upstream.URL
+
+	cookies := registerAndLogin(t, app, "admin", "Admin123456")
+	resp := doJSONWithHeaders(app, http.MethodPost, "/api/v1/system/admin/bot/test", `{}`, cookies, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("bot test status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	body := resp.Body.String()
+	if strings.Contains(body, "123:SECRET") || strings.Contains(body, "10.0.0.8") || strings.Contains(body, "dial") {
+		t.Fatalf("bot test exposed upstream diagnostics: %s", body)
+	}
+	if !strings.Contains(body, "Telegram 连接测试失败") {
+		t.Fatalf("bot test did not return generic failure: %s", body)
 	}
 }
 
@@ -8598,5 +8831,49 @@ func TestUnbindAlwaysRequiresApprovalEvenWithoutForceBind(t *testing.T) {
 	reblocked := doJSONWithHeaders(app, http.MethodPost, "/api/v1/users/me/telegram/unbind", "", userCookies, headers)
 	if reblocked.Code != http.StatusForbidden {
 		t.Fatalf("second unbind without new approval should be forbidden, status=%d body=%s", reblocked.Code, reblocked.Body.String())
+	}
+}
+
+// TestV2DeleteMediaRequestByIDRoute 锁住一条真实事故：v2 的
+// DELETE /api/v2/media/requests/{request_id} 曾经挂的是 ByKey 系列 handler，
+// 那个 handler 读 params["require_key"]，而本路由只有 request_id，于是
+// require_key 恒为空、删除永远 404。这里走完整路由表验证按 id 删除真的生效。
+func TestV2DeleteMediaRequestByIDRoute(t *testing.T) {
+	app := newTestApp(t)
+	const username = "mr-del-owner"
+	cookies := registerAndLogin(t, app, username, "Owner123456")
+	var uid int64
+	for _, u := range app.store().ListUsers() {
+		if u.Username == username {
+			uid = u.UID
+			break
+		}
+	}
+	if uid == 0 {
+		t.Fatalf("test user %q not found after registration", username)
+	}
+	created, err := app.store().CreateMediaRequest(store.MediaRequest{
+		UID: uid, Username: username, Title: "Delete By ID", Source: "tmdb", MediaID: 77, MediaType: "movie",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := app.store().MediaRequest(created.ID); !ok {
+		t.Fatal("media request was not persisted")
+	}
+
+	headers := map[string]string{"X-Twilight-Client": "webui", "If-Match": `"1"`}
+	rr := doJSONWithHeaders(app, http.MethodDelete, fmt.Sprintf("/api/v2/media/requests/%d", created.ID), ``, cookies, headers)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("delete by id status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if _, ok := app.store().MediaRequest(created.ID); ok {
+		t.Fatal("media request still exists after delete-by-id")
+	}
+
+	// 再删一次应当 404，而不是因为 require_key 为空以外的任何原因静默成功。
+	again := doJSONWithHeaders(app, http.MethodDelete, fmt.Sprintf("/api/v2/media/requests/%d", created.ID), ``, cookies, headers)
+	if again.Code != http.StatusNotFound {
+		t.Fatalf("second delete should be 404, status=%d body=%s", again.Code, again.Body.String())
 	}
 }

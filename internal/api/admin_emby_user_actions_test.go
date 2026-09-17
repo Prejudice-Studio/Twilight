@@ -12,6 +12,24 @@ import (
 	"github.com/prejudice-studio/twilight/internal/store"
 )
 
+func TestValidateStrongPassword(t *testing.T) {
+	if ok, _ := validateStrongPassword("short1A", "password"); ok {
+		t.Fatal("password shorter than eight characters must be rejected")
+	}
+	if ok, _ := validateStrongPassword("lowercase1", "password"); ok {
+		t.Fatal("password without uppercase letters must be rejected")
+	}
+	if ok, _ := validateStrongPassword("UppercaseA", "password"); ok {
+		t.Fatal("password without digits must be rejected")
+	}
+	if ok, _ := validateStrongPassword("StrongPass123", "password"); !ok {
+		t.Fatal("password containing upper, lower and digit should be accepted")
+	}
+	if ok, _ := validateStrongPassword(strings.Repeat("StrongPass123", 11), "password"); ok {
+		t.Fatal("password longer than 128 bytes must be rejected")
+	}
+}
+
 // TestAdminEmbyUserToggleByIdLinked 验证设备审查页按 emby_user_id 单独禁用 Emby：
 // 已关联本地用户时 Emby 被关停、本地 EmbyDisabled 镜像置真、Web 账号不变；Policy 回
 // 204 空 body 也能成功（回归 unexpected end of JSON input 修复）。

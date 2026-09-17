@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -142,7 +143,7 @@ func TestBuildEmbyDeviceAuditNormalizesDeviceDisplayNames(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/Sessions":
 			_, _ = w.Write([]byte(`[]`))
 		case r.Method == http.MethodGet && r.URL.Path == "/Devices":
-			_, _ = w.Write([]byte(`{"Items":[{"Id":"device-1","Name":"iPhone\"\\","AppName":"VidHub&quot;\\","AppVersion":"1.0&quot;\\","LastUserId":"emby-user","LastUserName":"user","DateLastActivity":"2026-05-16T12:13:40Z"}]}`))
+			_, _ = w.Write([]byte(`{"Items":[{"Id":"device-1","Name":"iPhone\"\\","AppName":"VidHub&quot;\\","AppVersion":"1.0&quot;\\","LastUserId":"emby-user","LastUserName":"user","DateLastActivity":"2026-05-16T12:13:40Z"},{"Id":"twilight-client","Name":"Twilight","AppName":"Twilight","LastUserId":"emby-user","LastUserName":"user"}]}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/System/ActivityLog/Entries":
 			_, _ = w.Write([]byte(`{"Items":[]}`))
 		default:
@@ -178,5 +179,74 @@ func TestBuildEmbyDeviceAuditNormalizesDeviceDisplayNames(t *testing.T) {
 	clients, _ := summary["clients"].([]map[string]any)
 	if len(clients) != 1 || asString(clients[0]["name"]) != "VidHub" {
 		t.Fatalf("clients=%#v, want one VidHub client", clients)
+	}
+}
+
+func TestPaginateEmbyDeviceAuditFiltersBeforePaging(t *testing.T) {
+	users := make([]map[string]any, 0, 5)
+	for i := 1; i <= 5; i++ {
+		users = append(users, map[string]any{
+			"emby_user_id":   "emby-" + strconv.Itoa(i),
+			"emby_user_name": "User " + strconv.Itoa(i),
+			"ips":            []string{"192.0.2." + strconv.Itoa(i)},
+		})
+	}
+	source := map[string]any{"users": users, "summary": map[string]any{"total_users": 5}}
+
+	page := paginateEmbyDeviceAudit(source, httptest.NewRequest(http.MethodGet, "/?page=2&per_page=2", nil))
+	pageUsers, ok := page["users"].([]map[string]any)
+	if !ok || len(pageUsers) != 2 || asString(pageUsers[0]["emby_user_id"]) != "emby-3" || asString(pageUsers[1]["emby_user_id"]) != "emby-4" {
+		t.Fatalf("page users=%#v, want emby-3 and emby-4", page["users"])
+	}
+	if page["pages"] != 3 || page["total"] != 5 {
+		t.Fatalf("page metadata=%#v, want pages=3 total=5", page)
+	}
+
+	filtered := paginateEmbyDeviceAudit(source, httptest.NewRequest(http.MethodGet, "/?page=1&per_page=2&search=192.0.2.4", nil))
+	filteredUsers, ok := filtered["users"].([]map[string]any)
+	if !ok || len(filteredUsers) != 1 || asString(filteredUsers[0]["emby_user_id"]) != "emby-4" {
+		t.Fatalf("filtered users=%#v, want only emby-4", filtered["users"])
+	}
+	if filtered["total"] != 1 || filtered["pages"] != 1 {
+		t.Fatalf("filtered metadata=%#v, want total=1 pages=1", filtered)
+	}
+}
+
+func TestAdminEmbyUserMatchesFiltersLinkedAndAttributes(t *testing.T) {
+	item := map[string]any{
+		"emby_id":     "emby-1",
+		"emby_name":   "Alice",
+		"local_user":  map[string]any{"uid": int64(42), "username": "alice-web"},
+		"sync_status": "synced",
+		"is_disabled": true,
+	}
+	if !adminEmbyUserMatches(item, "alice-web", "linked", "disabled") {
+		t.Fatal("linked disabled user should match")
+	}
+	if adminEmbyUserMatches(item, "alice-web", "unlinked", "") {
+		t.Fatal("linked user must not match unlinked filter")
+	}
+	if adminEmbyUserMatches(item, "missing", "linked", "") {
+		t.Fatal("missing search term must not match")
+	}
+}
+
+func TestSafeEmbyServerInfoOmitsConnectionDetails(t *testing.T) {
+	info := safeEmbyServerInfo(map[string]any{
+		"ServerName":                 "Test Emby",
+		"Version":                    "4.8",
+		"OperatingSystemDisplayName": "Linux",
+		"Id":                         "server-id",
+		"Url":                        "http://127.0.0.1:8096",
+		"AccessToken":                "secret",
+	})
+	if _, ok := info["Url"]; ok {
+		t.Fatal("server URL must not be returned")
+	}
+	if _, ok := info["AccessToken"]; ok {
+		t.Fatal("access token must not be returned")
+	}
+	if asString(info["name"]) != "Test Emby" || asString(info["version"]) != "4.8" {
+		t.Fatalf("safe info=%#v", info)
 	}
 }

@@ -31,7 +31,7 @@ var telegramPublicUsernamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{4,
 const generatedPasswordHexLen = 32
 
 func (a *App) handleRoot(w http.ResponseWriter, r *http.Request, _ Params) {
-	ok(w, "Twilight API", map[string]any{"name": a.cfg().AppName, "version": a.cfg().Version, "docs": "/api/v1/docs"})
+	ok(w, "Twilight API", map[string]any{"name": a.cfg().AppName, "version": a.cfg().Version, "docs": "/api/v2/docs", "openapi": "/api/v2/openapi.json"})
 }
 
 func (a *App) handleOpenAPI(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -1516,11 +1516,16 @@ func (a *App) handleUnbindTelegram(w http.ResponseWriter, r *http.Request, _ Par
 		}
 		consumeRebindID = latestReq.ID
 	}
+	oldTelegramID := p.User.TelegramID
+	oldTelegramUsername := p.User.TelegramUsername
 	u, err := a.store().UpdateUser(p.User.UID, func(u *store.User) error { u.TelegramID = 0; u.TelegramUsername = ""; return nil })
 	if statusFromError(w, err) {
 		return
 	}
-	a.cleanupUserTelegramResidue(p.User.UID, p.User.TelegramID)
+	if oldTelegramID != 0 {
+		_ = a.store().RecordTelegramIdentity(r.Context(), p.User.UID, oldTelegramID, oldTelegramUsername, "unbind")
+	}
+	a.cleanupUserTelegramResidue(p.User.UID, oldTelegramID)
 	// Mark approved rebind request as consumed so it cannot be reused.
 	// 走 ConsumeRebindRequest 而非 ReviewRebindRequest：后者会把 ReviewerUID
 	// 覆盖成 0、用 "auto-consumed" 抹掉管理员原始审核备注、并把 ReviewedAt
@@ -1794,6 +1799,8 @@ func (a *App) handleSystemInfo(w http.ResponseWriter, r *http.Request, _ Params)
 			"ticket_system":                 cfg.TicketSystemEnabled,
 			"developer_mode":                a.store().DeveloperModeEnabled(),
 			"emby_stats":                    cfg.EmbyStatsEnabled,
+			"play_rank":                     cfg.PlayRankEnabled,
+			"play_rank_user":                cfg.PlayRankEnabled && cfg.PlayRankUserVisible,
 		},
 		"auth_background_url": cfg.AuthBackgroundURL,
 		"limits": map[string]any{
@@ -1945,23 +1952,25 @@ func (a *App) handleServerIcon(w http.ResponseWriter, r *http.Request, _ Params)
 	_, _ = w.Write(serverIconPNG)
 }
 
+// publicServerIconURL 始终返回 V2 资源地址：WebUI 只调用 /api/v2/*，V1 路由
+// 仅为兼容回退保留。
 func (a *App) publicServerIconURL() string {
 	value := strings.TrimSpace(a.cfg().ServerIcon)
 	if value == "" {
-		return "/api/v1/system/server-icon"
+		return "/api/v2/system/server-icon"
 	}
 	if u, err := url.Parse(value); err == nil && u.Scheme != "" {
 		if u.Scheme == "https" && u.User == nil && u.Hostname() != "" {
 			return value
 		}
-		return "/api/v1/system/server-icon"
+		return "/api/v2/system/server-icon"
 	}
 	if iconPath, _, okIcon := a.configuredServerIconPath(); okIcon {
 		if info, err := os.Stat(iconPath); err == nil {
-			return "/api/v1/system/server-icon?v=" + strconv.FormatInt(info.ModTime().UnixNano(), 36) + "-" + strconv.FormatInt(info.Size(), 36)
+			return "/api/v2/system/server-icon?v=" + strconv.FormatInt(info.ModTime().UnixNano(), 36) + "-" + strconv.FormatInt(info.Size(), 36)
 		}
 	}
-	return "/api/v1/system/server-icon"
+	return "/api/v2/system/server-icon"
 }
 
 func (a *App) configuredServerIconPath() (string, string, bool) {
@@ -1987,7 +1996,7 @@ func (a *App) configuredServerIconPath() (string, string, bool) {
 		return "", "", false
 	}
 	// 必须经过 ResolveWithinRoot 约束在上传目录内：server_icon 是管理员可写的
-	// 配置项，而 /api/v1/system/server-icon 是 AuthPublic。若直接接受绝对路径或
+	// 配置项，而 /api/v2/system/server-icon 是 AuthPublic。若直接接受绝对路径或
 	// 含 ".." 的相对路径，一次"管理员写配置"就会变成"任意人读主机任意图片扩展名
 	// 文件"（也可经 handleConfigRestore 用构造的备份触发）。绝对路径不再被接受。
 	path, err := ResolveWithinRoot(firstNonEmpty(a.cfg().UploadDir, "uploads"), value)
@@ -2038,13 +2047,17 @@ func (a *App) handleHealthEmby(w http.ResponseWriter, r *http.Request, _ Params)
 }
 
 func (a *App) handleSystemStats(w http.ResponseWriter, r *http.Request, _ Params) {
+	ok(w, "OK", a.systemStatsData())
+}
+
+func (a *App) systemStatsData() map[string]any {
 	totalUsers, activeUsers := a.store().UserCounts()
 	totalRegcodes, activeRegcodes := a.store().RegCodeCounts()
 	usage := 0
 	if a.cfg().UserLimit > 0 {
 		usage = int(float64(totalUsers) / float64(a.cfg().UserLimit) * 100)
 	}
-	ok(w, "OK", map[string]any{
+	return map[string]any{
 		"timestamp":     time.Now().Unix(),
 		"cpu_count":     nil,
 		"users":         map[string]any{"active": activeUsers, "total": totalUsers, "limit": zeroNil(int64(a.cfg().UserLimit)), "usage_percent": usage},
@@ -2058,7 +2071,7 @@ func (a *App) handleSystemStats(w http.ResponseWriter, r *http.Request, _ Params
 		},
 		"routes": len(a.routes),
 		"uptime": int64(time.Since(runtimeStartedAt).Seconds()),
-	})
+	}
 }
 
 func (a *App) databaseHealth(parent context.Context) map[string]any {
@@ -2066,6 +2079,7 @@ func (a *App) databaseHealth(parent context.Context) map[string]any {
 	if st == nil {
 		return map[string]any{
 			"ok":                false,
+			"status":            "unavailable",
 			"backend":           "none",
 			"configured_driver": strings.ToLower(a.cfg().DatabaseDriver),
 			"error":             "store is not initialized",
@@ -2073,30 +2087,41 @@ func (a *App) databaseHealth(parent context.Context) map[string]any {
 	}
 	backend := st.Backend()
 	userCount := st.UserCount()
+	storageMismatch := a.runtimeDatabaseMismatch()
 	result := map[string]any{
-		"ok":                true,
+		"ok":                !storageMismatch,
+		"status":            "healthy",
 		"backend":           backend,
 		"configured_driver": strings.ToLower(a.cfg().DatabaseDriver),
-		"storage_mismatch":  a.runtimeDatabaseMismatch(),
+		"storage_mismatch":  storageMismatch,
 		"storage_warning":   a.databaseMismatchWarning(),
 		"state_read_ok":     true,
 		"user_count":        userCount,
+	}
+	if storageMismatch {
+		result["status"] = "configuration_mismatch"
 	}
 	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
 	defer cancel()
 	if db := st.DB(); db != nil || backend == store.BackendPostgres {
 		if db == nil {
 			result["ok"] = false
+			result["status"] = "unavailable"
 			result["error"] = "postgres backend has no active connection"
 			return result
 		}
 		if err := db.PingContext(ctx); err != nil {
+			result["ok"] = false
+			result["status"] = "unhealthy"
 			result["ping_ok"] = false
-			result["ping_error"] = truncateString(redactSensitiveText(err.Error()), 180)
 			result["warning"] = "database ping failed; active store remains readable"
 			return result
 		}
 		result["ping_ok"] = true
+		if storageMismatch {
+			result["ok"] = false
+			result["status"] = "configuration_mismatch"
+		}
 		stats := db.Stats()
 		result["open_connections"] = stats.OpenConnections
 		result["in_use"] = stats.InUse
@@ -2105,6 +2130,7 @@ func (a *App) databaseHealth(parent context.Context) map[string]any {
 	}
 	if _, err := st.Snapshot(); err != nil {
 		result["ok"] = false
+		result["status"] = "unhealthy"
 		result["error"] = "state snapshot failed"
 	}
 	return result
@@ -2118,7 +2144,6 @@ func (a *App) embyStatusSnapshot(parent context.Context, includeSessions bool) m
 	result := map[string]any{
 		"online":          false,
 		"configured":      a.embyConfigured(),
-		"server":          a.cfg().EmbyURL,
 		"active_sessions": 0,
 		"total_sessions":  0,
 	}
@@ -2132,7 +2157,6 @@ func (a *App) embyStatusSnapshot(parent context.Context, includeSessions bool) m
 	if err != nil {
 		result["status"] = "unreachable"
 		result["error"] = "Emby status request failed"
-		result["error_detail"] = truncateString(redactSensitiveText(err.Error()), 180)
 		return result
 	}
 	if info == nil {
@@ -2152,7 +2176,6 @@ func (a *App) embyStatusSnapshot(parent context.Context, includeSessions bool) m
 			result["total_sessions"] = len(sessions)
 		} else {
 			result["sessions_error"] = "Emby sessions request failed"
-			result["sessions_error_detail"] = truncateString(redactSensitiveText(sessionErr.Error()), 180)
 		}
 	}
 	return result
@@ -2267,20 +2290,20 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request, _ Params) {
 	results := []map[string]any{}
 	if !a.cfg().TelegramMode {
 		results = append(results, map[string]any{"target": "配置", "success": false, "error": "telegram_mode 未启用"})
-		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatus()})
+		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatusSummary()})
 		return
 	}
 	if strings.TrimSpace(a.cfg().TelegramBotToken) == "" {
 		results = append(results, map[string]any{"target": "Bot Token", "success": false, "error": "未配置 Telegram Bot Token"})
-		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatus()})
+		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatusSummary()})
 		return
 	}
 	testCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	me, err := a.telegramGetMe(testCtx)
 	if err != nil {
-		results = append(results, map[string]any{"target": "Bot getMe", "success": false, "error": err.Error()})
-		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatus()})
+		results = append(results, map[string]any{"target": "Bot getMe", "success": false, "error": "Telegram 连接测试失败，请检查 Bot 配置和网络"})
+		ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatusSummary()})
 		return
 	}
 	botID := me.ID
@@ -2290,13 +2313,13 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request, _ Params) {
 		chat, err := a.telegramGetChat(testCtx, chatID)
 		item := map[string]any{"target": " 群组 " + chatID, "success": err == nil}
 		if err != nil {
-			item["error"] = err.Error()
+			item["error"] = "Telegram 群组检测失败，请检查群组 ID 和 Bot 权限"
 		} else {
 			item["title"] = firstNonEmpty(chat.Title, chat.Username)
 			if botID != 0 {
 				if member, memberErr := a.telegramGetChatMember(testCtx, chatID, botID); memberErr != nil {
 					item["success"] = false
-					item["error"] = memberErr.Error()
+					item["error"] = "Telegram Bot 群组权限检测失败，请检查 Bot 是否仍在群组中"
 				} else {
 					item["bot_status"] = member.Status
 				}
@@ -2308,13 +2331,13 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request, _ Params) {
 		chat, err := a.telegramGetChat(testCtx, chatID)
 		item := map[string]any{"target": "频道 " + chatID, "success": err == nil}
 		if err != nil {
-			item["error"] = err.Error()
+			item["error"] = "Telegram 频道检测失败，请检查频道 ID 和 Bot 权限"
 		} else {
 			item["title"] = firstNonEmpty(chat.Title, chat.Username)
 		}
 		results = append(results, item)
 	}
-	ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatus()})
+	ok(w, "测试完成", map[string]any{"results": results, "runtime": a.telegramRuntimeStatusSummary()})
 }
 
 func (a *App) handleEmbyStatus(w http.ResponseWriter, r *http.Request, _ Params) {

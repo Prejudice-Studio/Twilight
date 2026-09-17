@@ -14,34 +14,14 @@ import (
 )
 
 func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request, _ Params) {
-	page := max(1, queryInt(r, "page", 1))
-	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
-	query := r.URL.Query()
-	filter := adminUserListFilter{
-		roleFilter:        query.Get("role"),
-		hasRole:           query.Get("role") != "",
-		activeFilter:      query.Get("active"),
-		hasActive:         query.Get("active") != "",
-		strictQueryActive: true,
-		embyFilter:        strings.ToLower(strings.TrimSpace(query.Get("emby"))),
-		embyStatusFilter:  strings.ToLower(strings.TrimSpace(query.Get("emby_status"))),
-		emailFilter:       strings.ToLower(strings.TrimSpace(query.Get("email_status"))),
-		search:            strings.ToLower(strings.TrimSpace(query.Get("search"))),
-		now:               time.Now().Unix(),
-	}
-	// 只在筛选中保留匹配用户（无 limit，与旧 ListUsers 语义一致）。排序时继续使用
-	// 轻量的 store.User，分页后才构造公开 DTO；大用户量下不能为页外用户创建完整 map。
-	matched := a.store().UsersMatching(0, func(u store.User) bool {
-		return adminUserMatchesListFilters(u, filter)
+	resource := a.adminUserListResource(r)
+	ok(w, "OK", map[string]any{
+		"users":    resource.Items,
+		"total":    resource.Pagination.Total,
+		"page":     resource.Pagination.Page,
+		"per_page": resource.Pagination.PerPage,
+		"pages":    resource.Pagination.TotalPages,
 	})
-	sortUsers(matched, query.Get("sort"))
-	total := len(matched)
-	pageUsers := paginate(matched, page, perPage)
-	items := make([]map[string]any, 0, len(pageUsers))
-	for _, u := range pageUsers {
-		items = append(items, publicUserAt(u, filter.now))
-	}
-	ok(w, "OK", map[string]any{"users": items, "total": total, "page": page, "per_page": perPage, "pages": pages(total, perPage)})
 }
 
 func (a *App) handleAdminCreateUser(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -747,18 +727,20 @@ func (a *App) handleAdminRenewUser(w http.ResponseWriter, r *http.Request, param
 	ok(w, "续期成功", publicUser(u))
 }
 
-// handleAdminSetUserExpiry 绝对式设置用户到期时间，区别于 handleAdminRenewUser 的
-// 叠加续期：这里直接把 ExpiredAt 覆盖为「从现在起 N 天后」或「永久」，不读取旧值做
-// base。它服务两条路由：
-//   - /cancel-permanent：把永久号改成 N 天后到期。旧实现复用叠加式 renew，base 取
-//     max(now, ExpiredAt)，而永久号的 ExpiredAt == permanentExpiryUnix（2534 年），
-//     于是 base+days 依旧 >= permanentExpiryUnix → expiryIsPermanent 仍为真，"取消
-//     永久"实际什么都没改。绝对式设置修掉这个静默失败。
-//   - /set-expiry：管理员手动把任意用户的剩余到期时间设为精确值（覆盖，不叠加）。
+// setUserExpiry 绝对式设置用户到期时间，区别于 handleAdminRenewUser 的叠加续期：
+// 这里直接把 ExpiredAt 覆盖为「从现在起 N 天后」或「永久」，不读取旧值做 base。
+// 旧实现复用叠加式 renew，base 取 max(now, ExpiredAt)，而永久号的 ExpiredAt ==
+// permanentExpiryUnix（2534 年），于是 base+days 依旧 >= permanentExpiryUnix →
+// expiryIsPermanent 仍为真，"取消永久"实际什么都没改。绝对式设置修掉这个静默失败。
 //
-// days < 0 或 permanent=true 或 expired_at 永久哨兵 → 设永久；否则 days 必须为正整数，
-// 上限 36500（与批量续期对齐），避免溢出或意外落进永久区间。
-func (a *App) handleAdminSetUserExpiry(w http.ResponseWriter, r *http.Request, params Params) {
+// forceNonPermanent 为 true 时（/cancel-permanent 路由）忽略请求体里的永久开关：
+// 那条路由的名字就是「不再永久」，若照着 permanent=true 把号设成永久，行为与路由
+// 名相反。/set-expiry 才允许设永久。
+//
+// days < 0 或 permanent=true 或 expired_at 永久哨兵 → 设永久（forceNonPermanent
+// 下不成立）；否则 days 必须为正整数，上限 36500（与批量续期对齐），避免溢出或
+// 意外落进永久区间。
+func (a *App) setUserExpiry(w http.ResponseWriter, r *http.Request, params Params, forceNonPermanent bool) {
 	uid, _ := int64Param(params, "uid")
 	payload := decodeMap(r)
 	permanent := boolValue(payload, "permanent", false)
@@ -768,6 +750,9 @@ func (a *App) handleAdminSetUserExpiry(w http.ResponseWriter, r *http.Request, p
 	rawDays := intValue(payload, "days", 0)
 	if rawDays < 0 {
 		permanent = true
+	}
+	if forceNonPermanent {
+		permanent = false
 	}
 	if !permanent {
 		if rawDays <= 0 {
@@ -791,8 +776,16 @@ func (a *App) handleAdminSetUserExpiry(w http.ResponseWriter, r *http.Request, p
 	if statusFromError(w, err) {
 		return
 	}
-	a.audit(r, "admin_set_expiry", "admin", uid, map[string]any{"days": rawDays, "permanent": permanent})
+	a.audit(r, "admin_set_expiry", "admin", uid, map[string]any{"days": rawDays, "permanent": permanent, "cancel_permanent": forceNonPermanent})
 	ok(w, "到期时间已更新", publicUser(u))
+}
+
+func (a *App) handleAdminSetUserExpiry(w http.ResponseWriter, r *http.Request, params Params) {
+	a.setUserExpiry(w, r, params, false)
+}
+
+func (a *App) handleAdminCancelPermanent(w http.ResponseWriter, r *http.Request, params Params) {
+	a.setUserExpiry(w, r, params, true)
 }
 
 func (a *App) handleAdminResetPassword(w http.ResponseWriter, r *http.Request, params Params) {

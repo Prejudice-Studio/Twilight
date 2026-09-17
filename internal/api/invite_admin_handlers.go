@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/prejudice-studio/twilight/internal/store"
@@ -22,6 +23,37 @@ func (a *App) handleAdminInviteCodes(w http.ResponseWriter, r *http.Request, _ P
 		return
 	}
 	codes := a.store().ListAllInviteCodes()
+	// Preserve the legacy full-list response when no pagination/search parameter
+	// is present. WebUI callers opt into this bounded path explicitly so large code
+	// collections are filtered and sliced before DTO enrichment/JSON encoding.
+	if _, paged := r.URL.Query()["page"]; paged || r.URL.Query().Get("per_page") != "" || r.URL.Query().Get("search") != "" {
+		page := max(1, queryInt(r, "page", 1))
+		perPage := clamp(queryInt(r, "per_page", 50), 1, 100)
+		search := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
+		filtered := make([]store.InviteCode, 0, len(codes))
+		for _, code := range codes {
+			if search != "" {
+				inviter := ""
+				if user, ok := a.store().User(code.InviterUID); ok {
+					inviter = user.Username
+				}
+				candidate := strings.ToLower(strings.Join([]string{code.Code, inviter, fmt.Sprintf("%d", code.InviterUID), code.TargetUsername, code.Note}, " "))
+				if !strings.Contains(candidate, search) {
+					continue
+				}
+			}
+			filtered = append(filtered, code)
+		}
+		total := len(filtered)
+		page = min(page, max(1, pages(total, perPage)))
+		filtered = paginate(filtered, page, perPage)
+		items := make([]map[string]any, 0, len(filtered))
+		for _, code := range filtered {
+			items = append(items, a.inviteCodeDTO(code))
+		}
+		ok(w, "OK", map[string]any{"codes": items, "total": total, "page": page, "per_page": perPage, "pages": pages(total, perPage)})
+		return
+	}
 	items := make([]map[string]any, 0, len(codes))
 	for _, code := range codes {
 		items = append(items, a.inviteCodeDTO(code))

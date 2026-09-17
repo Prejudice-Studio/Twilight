@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/prejudice-studio/twilight/internal/store"
+	"go.uber.org/zap"
 )
 
 // embyDeviceAuditActivityLimit 控制为补全历史登录 IP 而拉取的活动日志条数。
@@ -271,7 +272,8 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 	sessionsAvailable := sessionsErr == nil
 	sessionsError := ""
 	if sessionsErr != nil {
-		sessionsError = truncateString(redactSensitiveText(sessionsErr.Error()), 180)
+		zap.L().Warn("admin Emby session audit probe failed", zap.String("error", redactSensitiveText(sessionsErr.Error())))
+		sessionsError = "Emby 会话读取失败"
 	}
 	liveByDevice := map[string]liveSession{}
 	for _, s := range sessions {
@@ -307,7 +309,8 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 	devicesError := ""
 	if err := a.embyGet(ctx, "/Devices", &devResp); err != nil {
 		devicesAvailable = false
-		devicesError = truncateString(redactSensitiveText(err.Error()), 180)
+		zap.L().Warn("admin Emby device audit probe failed", zap.String("error", redactSensitiveText(err.Error())))
+		devicesError = "Emby 设备列表读取失败"
 		devResp.Items = nil
 	}
 
@@ -426,6 +429,7 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 	}
 
 	activityAvailable := false
+	activityError := ""
 	var actResp struct {
 		Items []map[string]any `json:"Items"`
 	}
@@ -451,6 +455,9 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 				u.lastSeen = date
 			}
 		}
+	} else {
+		zap.L().Warn("admin Emby activity audit probe failed", zap.String("error", redactSensitiveText(err.Error())))
+		activityError = "Emby 活动日志读取失败"
 	}
 
 	linked := 0
@@ -533,6 +540,7 @@ func (a *App) buildEmbyDeviceAudit(ctx context.Context) (map[string]any, error) 
 			"devices_available":  devicesAvailable,
 			"devices_error":      emptyNil(devicesError),
 			"activity_available": activityAvailable,
+			"activity_error":     emptyNil(activityError),
 			"clients":            clients,
 		},
 	}, nil
@@ -561,7 +569,7 @@ func (a *App) handleAdminEmbyDeviceAudit(w http.ResponseWriter, r *http.Request,
 		if a.embyDeviceAuditCache != nil && now.Before(a.embyDeviceAuditUntil) {
 			data := a.embyDeviceAuditCache
 			a.embyDeviceAuditMu.Unlock()
-			ok(w, "OK", data)
+			ok(w, "OK", paginateEmbyDeviceAudit(data, r))
 			return
 		}
 		a.embyDeviceAuditMu.Unlock()
@@ -577,5 +585,50 @@ func (a *App) handleAdminEmbyDeviceAudit(w http.ResponseWriter, r *http.Request,
 	a.embyDeviceAuditCache = data
 	a.embyDeviceAuditUntil = time.Now().Add(embyDeviceAuditCacheTTL)
 	a.embyDeviceAuditMu.Unlock()
+	data = paginateEmbyDeviceAudit(data, r)
 	ok(w, "OK", data)
+}
+
+func paginateEmbyDeviceAudit(source map[string]any, r *http.Request) map[string]any {
+	data := make(map[string]any, len(source)+3)
+	for key, value := range source {
+		data[key] = value
+	}
+	page := clamp(queryInt(r, "page", 1), 1, 1000000)
+	perPage := clamp(queryInt(r, "per_page", 50), 1, 200)
+	search := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
+	users, _ := source["users"].([]map[string]any)
+	if search != "" {
+		filtered := make([]map[string]any, 0, len(users))
+		for _, user := range users {
+			haystack := strings.ToLower(strings.Join([]string{
+				asString(user["emby_user_id"]), asString(user["emby_user_name"]),
+			}, " "))
+			if local, ok := user["local_user"].(map[string]any); ok {
+				haystack += " " + strings.ToLower(strings.Join([]string{asString(local["username"]), asString(local["uid"]), asString(local["telegram_id"])}, " "))
+			}
+			for _, ip := range stringSlice(user["ips"]) {
+				haystack += " " + strings.ToLower(ip)
+			}
+			if strings.Contains(haystack, search) {
+				filtered = append(filtered, user)
+			}
+		}
+		users = filtered
+	}
+	totalUsers := len(users)
+	start := (page - 1) * perPage
+	if start > totalUsers {
+		start = totalUsers
+	}
+	end := min(start+perPage, totalUsers)
+	data["users"] = users[start:end]
+	if data["users"] == nil {
+		data["users"] = []map[string]any{}
+	}
+	data["page"] = page
+	data["per_page"] = perPage
+	data["total"] = totalUsers
+	data["pages"] = pages(totalUsers, perPage)
+	return data
 }

@@ -10,6 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pelletier/go-toml/v2"
+	"go.uber.org/zap"
+
 	"github.com/prejudice-studio/twilight/internal/config"
 	"github.com/prejudice-studio/twilight/internal/store"
 )
@@ -287,15 +290,43 @@ func (a *App) handleConfigBackupDelete(w http.ResponseWriter, r *http.Request, p
 	ok(w, "配置备份已删除", map[string]any{"backup": info})
 }
 
+// configFilePresentFields 逐行扫描磁盘上的 config.toml，返回 [section]field 是否
+// 在文件里显式出现过。
+//
+// 用途：configValues 返回的是"生效值"（缺键时用代码默认值补齐），所以页面看到的
+// 值不等于"文件里写了这个键"。管理员很难判断哪些配置只是默认值、改了会不会真的
+// 落盘。这里把事实摆出来，前端据此给字段打"未在配置文件中"标记；保存时
+// mergeConfigTOML 会把这些键真正写进文件。
+//
+// 用行扫描而不是 go-toml 反序列化，是为了和 maskTOMLSecrets / restoreTOMLSecrets
+// 同一套词法口径（不依赖文件能完整解析，且不会因 secret 被遮蔽而误判）。
+func configFilePresentFields(content string) map[string]map[string]bool {
+	present := map[string]map[string]bool{}
+	if strings.TrimSpace(content) == "" {
+		return present
+	}
+	section := ""
+	for _, line := range strings.Split(content, "\n") {
+		nextSection, key, isAssign := tomlSectionFieldFromLine(line, section)
+		section = canonicalConfigSection(nextSection)
+		if !isAssign || key == "" {
+			continue
+		}
+		if present[section] == nil {
+			present[section] = map[string]bool{}
+		}
+		present[section][strings.ToLower(key)] = true
+	}
+	return present
+}
+
 func (a *App) handleConfigSchemaFull(w http.ResponseWriter, r *http.Request, _ Params) {
 	values := configValues(*a.cfg())
+	present := configFilePresentFields(a.existingConfigContent())
 	sections := make([]map[string]any, 0, len(configSectionDefs()))
 	for _, def := range configSectionDefs() {
 		fields := make([]map[string]any, 0, len(def.Fields))
 		for _, field := range def.Fields {
-			if def.Key == "Ticket" && field.Key == "types" {
-				continue
-			}
 			rawValue := values[def.Key][field.Key]
 			// 密钥字段不回传明文：非空 → sentinel；空 → 空串。前端 SecretField
 			// 在用户没有改动时会原样回传 sentinel，handleConfigSchemaUpdateSafe
@@ -308,11 +339,12 @@ func (a *App) handleConfigSchemaFull(w http.ResponseWriter, r *http.Request, _ P
 				}
 			}
 			item := map[string]any{
-				"key":         field.Key,
-				"label":       field.Label,
-				"type":        field.Type,
-				"description": field.Description,
-				"value":       rawValue,
+				"key":             field.Key,
+				"label":           field.Label,
+				"type":            field.Type,
+				"description":     field.Description,
+				"value":           rawValue,
+				"present_in_file": present[def.Key][field.Key],
 			}
 			if len(field.Options) > 0 {
 				item["options"] = field.Options
@@ -379,13 +411,34 @@ func (a *App) handleConfigSchemaUpdateSafe(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	ensureTicketDefaults(values)
-	info, status, message := a.saveConfigContent(renderConfigTOML(values))
+	// 以现有文件为底稿合并：schema 之外的键（管理员手写的段、尚未纳管的字段）
+	// 必须保留，否则一次可视化保存就会把 emby_public_url / Admin.uids 之类静默删掉。
+	content, mergeErr := mergeConfigTOML(a.existingConfigContent(), values)
+	if mergeErr != nil {
+		zap.L().Warn("config merge fell back to schema-only render", zap.Error(mergeErr))
+		content = renderConfigTOML(values)
+	}
+	info, status, message := a.saveConfigContent(content)
 	if status != http.StatusOK {
 		failWithCode(w, status, ErrConfigBackupInvalid, message)
 		return
 	}
 	a.audit(r, "update_config_schema", "admin", 0, map[string]any{"sections": sortedKeys(rawSections)})
 	ok(w, "配置已保存并热重载", info)
+}
+
+// existingConfigContent 返回磁盘上的配置原文。文件不存在或读不出来时返回空串，
+// 由 mergeConfigTOML 退化成"只写 schema 管理的字段"。
+func (a *App) existingConfigContent() string {
+	path := a.configFilePath()
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 func (a *App) saveConfigContent(content string) (map[string]any, int, string) {
@@ -538,7 +591,8 @@ func normalizeConfigContent(configFile, content string) (string, error) {
 	}
 	values := configValues(cfg)
 	ensureTicketDefaults(values)
-	return renderConfigTOML(values), nil
+	// 管理员直接编辑源文件时也要保住 schema 之外的键：以提交内容为底稿合并。
+	return mergeConfigTOML(content, values)
 }
 
 func ensureTicketDefaults(values map[string]map[string]any) {
@@ -919,7 +973,7 @@ const telegramGroupUserPanelTemplateDescription = "自定义 /twguser 群组用�
 	"{api_key_status}=旧 API Key 开关；{panel_ttl}=面板有效期；{panel_ttl_seconds}=面板有效秒数"
 
 var (
-	placeholderHintsBotText = []string{"{server_name}", "{bot_username}", "{user_name}"}
+	placeholderHintsBotText    = []string{"{server_name}", "{bot_username}", "{user_name}"}
 	placeholderHintsGroupPanel = []string{
 		"{server_name}", "{username}", "{uid}", "{role}", "{role_id}",
 		"{is_admin}", "{is_protected}", "{web_status}", "{web_active}",
@@ -933,9 +987,21 @@ var (
 		"{bgm_mode}", "{bgm_token_status}", "{bgm_sync_status}",
 		"{api_key_status}", "{panel_ttl}", "{panel_ttl_seconds}",
 	}
-	placeholderHintsLoginNotify = []string{"{server_name}", "{username}", "{time}", "{ip}", "{device}"}
-	placeholderHintsTicketNotify = []string{"{ticket_id}", "{title}", "{status}", "{priority}", "{type}", "{admin_note}", "{admin_note_content}", "{time}", "{server_name}"}
-	placeholderHintsEmailCode     = []string{"{site}", "{code}", "{ttl}"}
+	placeholderHintsLoginNotify = []string{
+		"{server_name}", "{username}", "{uid}", "{time}", "{ip}", "{device}",
+		"{role}", "{role_name}", "{is_admin}", "{is_whitelist}", "{is_protected}",
+		"{account_enabled}", "{expire_status}", "{expired_at}", "{days_until_expiry}",
+		"{emby_status}", "{emby_enabled_status}", "{emby_disabled_reason}", "{emby_username}",
+		"{telegram_status}", "{telegram_username}", "{email}", "{email_verified_status}",
+	}
+	placeholderHintsTicketNotify = []string{
+		"{ticket_id}", "{title}", "{status}", "{priority}", "{type}", "{admin_note}", "{admin_note_content}", "{time}", "{server_name}",
+		"{username}", "{uid}", "{role}", "{role_name}",
+		"{account_enabled}", "{expire_status}", "{days_until_expiry}",
+		"{emby_status}", "{emby_enabled_status}", "{emby_disabled_reason}",
+		"{telegram_status}", "{email_verified_status}",
+	}
+	placeholderHintsEmailCode = []string{"{site}", "{code}", "{ttl}"}
 )
 
 func configSectionDefs() []configSectionDef {
@@ -960,6 +1026,7 @@ func configSectionDefs() []configSectionDef {
 			{Key: "tmdb_api_url", Label: "TMDB API URL", Type: "string", Description: "TMDB API 基础地址"},
 			{Key: "tmdb_image_url", Label: "TMDB 图片 URL", Type: "string", Description: "TMDB 图片 CDN 地址"},
 			{Key: "bangumi_token", Label: "Bangumi Token", Type: "secret", Description: "Bangumi 全局 Token"},
+			{Key: "bangumi_app_id", Label: "Bangumi App ID", Type: "string", Description: "Bangumi OAuth 应用的 Client ID（回调里校验 audience 用）"},
 			{Key: "bangumi_api_url", Label: "Bangumi API URL", Type: "string", Description: "Bangumi API 基础地址"},
 		}},
 		{Key: "Database", Title: "数据库", Description: "JSON/PostgreSQL 存储和备份配置", Category: "ops", Collapsed: true, Fields: []configFieldDef{
@@ -985,12 +1052,17 @@ func configSectionDefs() []configSectionDef {
 			{Key: "emby_url_list", Label: "普通线路", Type: "list", Description: "格式：名称 : URL"},
 			{Key: "emby_url_list_for_whitelist", Label: "白名单线路", Type: "list", Description: "管理员和白名单用户可见线路"},
 			{Key: "emby_stats_enabled", Label: "Emby库统计", Type: "bool", Description: "在首页仪表盘 Emby 卡片显示电影/剧集/集数统计"},
+			{Key: "emby_public_url", Label: "Emby 公开地址", Type: "string", Description: "浏览器侧访问 Emby 的地址；留空则使用后端地址"},
+			{Key: "emby_whitelist_url", Label: "白名单单线路地址", Type: "string", Description: "仅管理员与白名单用户可见的单一线路地址；留空则只使用上面的白名单线路列表"},
+			{Key: "play_rank_enabled", Label: "播放排行榜", Type: "bool", Description: "启用 Emby 播放日榜/周榜；关闭后除管理员后台外全部拒绝访问"},
+			{Key: "play_rank_user_visible", Label: "排行榜对普通用户开放", Type: "bool", Description: "普通用户可在侧边栏入口查看脱敏后的排行榜（用户名打码）；未登录访客无任何入口"},
 		}},
 		{Key: "Telegram", Title: "Telegram", Description: "Bot、订阅校验和群组管理\n推荐在 Telegram 管理页面操作 Bot 基础设置，高级参数在此调整", Category: "integration", Collapsed: true, Fields: []configFieldDef{
 			{Key: "telegram_api_url", Label: "Bot API URL", Type: "string", Description: "Telegram Bot API 基础地址"},
 			{Key: "bot_token", Label: "Bot Token", Type: "secret", Description: "Telegram Bot Token"},
 			{Key: "admin_id", Label: "管理员 Telegram ID", Type: "list", Description: "Bot 管理员 ID 列表"},
 			{Key: "group_id", Label: "群组 ID", Type: "list", Description: "Bot 管理、强制绑定检查和巡检群组"},
+			{Key: "force_subscribe", Label: "强制订阅校验", Type: "bool", Description: "绑定 Telegram 时校验已加入群组或频道（旧开关，不依赖此项也可单独开启下面两项）"},
 			{Key: "force_bind_group", Label: "强制群组绑定检查", Type: "bool", Description: "用户在 Bot 中确认绑定码时，必须已加入配置的群组"},
 			{Key: "channel_id", Label: "频道 ID", Type: "list", Description: "Bot 推送和强制绑定检查的频道"},
 			{Key: "force_bind_channel", Label: "强制频道绑定检查", Type: "bool", Description: "用户在 Bot 中确认绑定码时，必须已加入配置的频道"},
@@ -1182,6 +1254,7 @@ func configValues(cfg config.Config) map[string]map[string]any {
 			"server_name": cfg.AppName, "server_icon": cfg.ServerIcon, "auth_background_url": cfg.AuthBackgroundURL, "databases_dir": cfg.DatabaseDir, "redis_url": cfg.RedisURL, "telegram_mode": cfg.TelegramMode, "force_bind_telegram": cfg.ForceBindTelegram,
 			"log_level": cfg.LogLevel, "runtime_log_limit": cfg.RuntimeLogLimit, "runtime_memory_limit_mb": cfg.RuntimeMemoryLimitMB,
 			"tmdb_api_key": cfg.TMDBAPIKey, "tmdb_api_url": cfg.TMDBAPIURL, "tmdb_image_url": cfg.TMDBImageURL, "bangumi_token": cfg.BangumiToken, "bangumi_api_url": cfg.BangumiAPIURL,
+			"bangumi_app_id": cfg.BangumiAppID,
 		},
 		"Database": {
 			"driver": cfg.DatabaseDriver, "state_file": cfg.StateFile, "url": cfg.DatabaseURL, "backup_dir": cfg.DatabaseBackupDir, "migration_panel_enabled": cfg.DatabaseMigrationPanelEnabled, "postgres_host": cfg.PostgresHost, "postgres_port": cfg.PostgresPort,
@@ -1191,10 +1264,13 @@ func configValues(cfg config.Config) map[string]map[string]any {
 		"Emby": {
 			"emby_url": cfg.EmbyURL, "emby_token": cfg.EmbyToken, "emby_username": cfg.EmbyUsername, "emby_password": cfg.EmbyPassword,
 			"emby_url_list": linesToStrings(cfg.EmbyURLList), "emby_url_list_for_whitelist": linesToStrings(cfg.EmbyWhitelistURLList),
-			"emby_stats_enabled": cfg.EmbyStatsEnabled,
+			"emby_stats_enabled": cfg.EmbyStatsEnabled, "emby_public_url": cfg.EmbyPublicURL,
+			"emby_whitelist_url": cfg.EmbyWhitelistURL,
+			"play_rank_enabled":  cfg.PlayRankEnabled, "play_rank_user_visible": cfg.PlayRankUserVisible,
 		},
 		"Telegram": {
 			"telegram_api_url": cfg.TelegramAPIURL, "bot_token": cfg.TelegramBotToken, "admin_id": int64sToAny(cfg.TelegramAdminIDs), "group_id": cfg.TelegramGroupIDs,
+			"force_subscribe":  cfg.TelegramForceSubscribe,
 			"force_bind_group": cfg.TelegramForceBindGroup, "channel_id": cfg.TelegramChannelIDs, "force_bind_channel": cfg.TelegramForceBindChannel,
 			"require_group_membership": cfg.TelegramRequireMembership,
 			"enable_tg_panel":          cfg.TelegramEnablePanel, "ban_on_leave": cfg.TelegramBanOnLeave, "auto_enable_rejoined": cfg.TelegramAutoEnableRejoined, "group_check_concurrency": cfg.TelegramGroupCheckConcurrency, "group_action_concurrency": cfg.TelegramGroupActionConcurrency,
@@ -1302,7 +1378,89 @@ func normalizeConfigField(field configFieldDef, value any) any {
 	}
 }
 
+// managedConfigFields 返回 schema 纳管的 [section]field 集合。mergeConfigTOML
+// 用它判断文件里哪些键是"自己人"，其余一律原样保留。
+func managedConfigFields() map[string]map[string]bool {
+	managed := make(map[string]map[string]bool, len(configSectionDefs()))
+	for _, section := range configSectionDefs() {
+		fields := make(map[string]bool, len(section.Fields))
+		for _, field := range section.Fields {
+			fields[field.Key] = true
+		}
+		managed[section.Key] = fields
+	}
+	return managed
+}
+
+// mergeConfigTOML 以 source（现有配置文件原文，或管理员提交的源文件）为底稿，
+// 用 schema 归一化后的值覆盖受管字段，其余内容原样保留。
+//
+// 背景：过去保存是"只写 schema 认识的键"，管理员手写的段或未纳管的字段
+// （Emby.emby_public_url、Telegram.force_subscribe、Admin.uids……）会在一次
+// 可视化保存后被静默删除，且再也补不回来。
+func mergeConfigTOML(source string, values map[string]map[string]any) (string, error) {
+	extras := map[string]map[string]any{}
+	topScalars := map[string]any{}
+	unmanagedSections := map[string]any{}
+
+	if strings.TrimSpace(source) != "" {
+		tree := map[string]any{}
+		if err := toml.Unmarshal([]byte(source), &tree); err != nil {
+			return "", err
+		}
+		managed := managedConfigFields()
+		for key, raw := range tree {
+			section, isTable := raw.(map[string]any)
+			if !isTable {
+				// 顶层标量（如 SetupMode）：schema 不管，原样写回。
+				topScalars[key] = raw
+				continue
+			}
+			fields, sectionManaged := managed[key]
+			if !sectionManaged {
+				unmanagedSections[key] = raw
+				continue
+			}
+			remaining := map[string]any{}
+			for fieldKey, fieldValue := range section {
+				if fields[fieldKey] {
+					continue
+				}
+				remaining[fieldKey] = fieldValue
+			}
+			if len(remaining) > 0 {
+				extras[key] = remaining
+			}
+		}
+	}
+
+	var b strings.Builder
+	if len(topScalars) > 0 {
+		for _, key := range sortedKeys(topScalars) {
+			b.WriteString(key)
+			b.WriteString(" = ")
+			b.WriteString(tomlValue(topScalars[key]))
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString(renderConfigTOMLWithExtras(values, extras))
+	if len(unmanagedSections) > 0 {
+		b.WriteString("\n")
+		block, err := toml.Marshal(unmanagedSections)
+		if err != nil {
+			return "", err
+		}
+		b.Write(block)
+	}
+	return b.String(), nil
+}
+
 func renderConfigTOML(values map[string]map[string]any) string {
+	return renderConfigTOMLWithExtras(values, nil)
+}
+
+func renderConfigTOMLWithExtras(values map[string]map[string]any, extras map[string]map[string]any) string {
 	var b strings.Builder
 	for _, section := range configSectionDefs() {
 		b.WriteString("[")
@@ -1312,6 +1470,13 @@ func renderConfigTOML(values map[string]map[string]any) string {
 			b.WriteString(field.Key)
 			b.WriteString(" = ")
 			b.WriteString(tomlValue(values[section.Key][field.Key]))
+			b.WriteString("\n")
+		}
+		// schema 未纳管、但文件里真实存在的字段：跟在同段后面写回，不新建同名表。
+		for _, key := range sortedKeys(extras[section.Key]) {
+			b.WriteString(key)
+			b.WriteString(" = ")
+			b.WriteString(tomlValue(extras[section.Key][key]))
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")

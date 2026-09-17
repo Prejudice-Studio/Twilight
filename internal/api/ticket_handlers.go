@@ -18,7 +18,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// handleMyTickets 用户查看自己提交的工单。
+// handleMyTickets 返回当前用户的紧凑工单列表。对话正文和附件 URL 只在
+// handleMyTicket 的单条详情中返回，避免长期用户每次打开工单页都下载全部历史。
 func (a *App) handleMyTickets(w http.ResponseWriter, r *http.Request, _ Params) {
 	cfg := a.cfg()
 	if !cfg.TicketSystemEnabled {
@@ -29,8 +30,42 @@ func (a *App) handleMyTickets(w http.ResponseWriter, r *http.Request, _ Params) 
 		return
 	}
 	p := current(r)
-	tickets := a.store().ListTickets(store.TicketFilter{UID: p.User.UID})
-	ok(w, "OK", map[string]any{"tickets": ticketDTOs(tickets, false), "total": len(tickets), "ticket_types": a.store().TicketTypes()})
+	page := clamp(queryInt(r, "page", 1), 1, 1000000)
+	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
+	result := a.store().ListTicketsPage(store.TicketFilter{UID: p.User.UID}, page, perPage)
+	ok(w, "OK", map[string]any{
+		"tickets":      userTicketListDTOs(result.Tickets),
+		"total":        result.Total,
+		"page":         page,
+		"per_page":     perPage,
+		"ticket_types": a.store().TicketTypes(),
+	})
+}
+
+// handleMyTicket 返回当前登录用户的一条完整工单会话。即使调用者本身也是
+// 管理员，这个用户侧端点也只允许读取自己的工单；管理员查看他人工单必须走
+// /admin/tickets/:ticket_id，确保对象归属和审计入口清晰。
+func (a *App) handleMyTicket(w http.ResponseWriter, r *http.Request, params Params) {
+	if !a.cfg().TicketSystemEnabled {
+		failWithCode(w, http.StatusServiceUnavailable, ErrTicketDisabled, "工单系统未启用")
+		return
+	}
+	id, err := int64Param(params, "ticket_id")
+	if err != nil || id <= 0 {
+		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的工单编号")
+		return
+	}
+	if a.refreshStoreForRequest(w, r) {
+		return
+	}
+	p := current(r)
+	ticket, found := a.store().Ticket(id)
+	if !found || ticket.UID != p.User.UID {
+		// 不区分不存在与非本人资源，避免枚举其他用户的工单编号。
+		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
+		return
+	}
+	ok(w, "OK", map[string]any{"ticket": ticketDTO(ticket, false), "ticket_types": a.store().TicketTypes()})
 }
 
 // handleCreateTicket 用户提交工单。
@@ -217,39 +252,10 @@ func (a *App) handleAdminTickets(w http.ResponseWriter, r *http.Request, _ Param
 	if a.refreshStoreForRequest(w, r) {
 		return
 	}
-	status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status")))
-	showAll := r.URL.Query().Get("all") == "1"
-	page := clamp(queryInt(r, "page", 1), 1, 1000000)
-	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
-	if status == "all" {
-		showAll = true
-		status = ""
-	}
-	if status != "" && !store.ValidTicketStatus(status) {
-		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的工单状态")
+	filter, page, perPage, invalid := a.adminTicketPageQuery(r)
+	if invalid != "" {
+		failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, invalid)
 		return
-	}
-	ticketType := strings.TrimSpace(r.URL.Query().Get("type"))
-	if ticketType != "" {
-		ticketType = store.NormalizeTicketType(a.store().TicketTypes(), ticketType)
-	}
-	priority := strings.TrimSpace(r.URL.Query().Get("priority"))
-	if priority != "" {
-		if !store.ValidTicketPriority(priority) {
-			failWithCode(w, http.StatusBadRequest, ErrInvalidPayload, "无效的优先级")
-			return
-		}
-		priority = store.NormalizeTicketPriority(priority)
-	}
-	filter := store.TicketFilter{
-		UID:        int64(queryInt(r, "uid", 0)),
-		Status:     store.NormalizeTicketStatus(status),
-		Type:       ticketType,
-		Priority:   priority,
-		ActiveOnly: status == "" && !showAll,
-	}
-	if status == "" {
-		filter.Status = ""
 	}
 	result := a.store().ListTicketsPage(filter, page, perPage)
 	ok(w, "OK", map[string]any{
@@ -374,30 +380,11 @@ func (a *App) handleAdminReplyTicket(w http.ResponseWriter, r *http.Request, par
 	if a.refreshStoreForRequest(w, r) {
 		return
 	}
-	existing, foundTicket := a.store().Ticket(id)
-	if !foundTicket {
-		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
-		return
-	}
 	payload := decodeMap(r)
 	content := strings.TrimSpace(stringValue(payload, "content"))
-	if content == "" {
-		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "回复内容不能为空")
-		return
-	}
-	if len(content) > 5000 {
-		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "回复内容过长（上限 5000 字符）")
-		return
-	}
 	p := current(r)
-	reply := store.TicketReply{
-		UID:      p.User.UID,
-		Username: p.User.Username,
-		Role:     p.User.Role,
-		Content:  content,
-	}
-	ticket, err := a.store().AddTicketReply(id, reply)
-	if statusFromError(w, err) {
+	ticket, existing, err := a.appendTicketReply(id, p.User, content)
+	if writeTicketReplyFailure(w, err) {
 		return
 	}
 	a.audit(r, "reply_ticket", "admin", ticket.UID, map[string]any{"ticket_id": id, "reply_len": len(content)})
@@ -711,41 +698,10 @@ func (a *App) handleReplyToTicket(w http.ResponseWriter, r *http.Request, params
 	if a.refreshStoreForRequest(w, r) {
 		return
 	}
-	ticket, okTicket := a.store().Ticket(id)
-	if !okTicket {
-		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
-		return
-	}
-	if ticket.UID != p.User.UID && p.User.Role != store.RoleAdmin {
-		failWithCode(w, http.StatusForbidden, ErrForbidden, "无权回复此工单")
-		return
-	}
-	if !store.TicketStatusAllowsConversation(ticket.Status) && p.User.Role != store.RoleAdmin {
-		failWithCode(w, http.StatusBadRequest, ErrTicketAlreadyClosed, "工单已关闭，无法回复")
-		return
-	}
 	payload := decodeMap(r)
 	content := strings.TrimSpace(stringValue(payload, "content"))
-	if content == "" {
-		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "回复内容不能为空")
-		return
-	}
-	if len(content) > 5000 {
-		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "回复内容过长（上限 5000 字符）")
-		return
-	}
-	reply := store.TicketReply{
-		UID:      p.User.UID,
-		Username: p.User.Username,
-		Role:     p.User.Role,
-		Content:  content,
-	}
-	updated, err := a.store().AddTicketReply(id, reply)
-	if errors.Is(err, store.ErrTicketClosed) {
-		failWithCode(w, http.StatusBadRequest, ErrTicketAlreadyClosed, "工单已关闭，无法回复")
-		return
-	}
-	if statusFromError(w, err) {
+	updated, ticket, err := a.appendTicketReply(id, p.User, content)
+	if writeTicketReplyFailure(w, err) {
 		return
 	}
 	category := auditCategoryForRole(p.User.Role)
@@ -760,6 +716,24 @@ func (a *App) handleReplyToTicket(w http.ResponseWriter, r *http.Request, params
 		"ticket":    ticketDTO(updated, p.User.Role == store.RoleAdmin),
 		"replies":   ticketReplyDTOs(updated.Replies),
 	})
+}
+
+func writeTicketReplyFailure(w http.ResponseWriter, err error) bool {
+	switch {
+	case errors.Is(err, errTicketReplyEmpty):
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "回复内容不能为空")
+	case errors.Is(err, errTicketReplyTooLong):
+		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "回复内容过长（上限 5000 字符）")
+	case errors.Is(err, errTicketReplyForbidden):
+		failWithCode(w, http.StatusForbidden, ErrForbidden, "无权回复此工单")
+	case errors.Is(err, store.ErrTicketClosed):
+		failWithCode(w, http.StatusBadRequest, ErrTicketAlreadyClosed, "工单已关闭，无法回复")
+	case errors.Is(err, store.ErrNotFound):
+		failWithCode(w, http.StatusNotFound, ErrTicketNotFound, "工单不存在")
+	default:
+		return statusFromError(w, err)
+	}
+	return true
 }
 
 func ticketHasAttachment(ticket store.Ticket, filename string) bool {
@@ -880,6 +854,52 @@ type adminTicketListDTO struct {
 	UpdatedAt       int64  `json:"updated_at"`
 	ResolvedAt      int64  `json:"resolved_at"`
 	ClosedAt        int64  `json:"closed_at"`
+}
+
+// userTicketListDTO 是普通用户工单首页的摘要。它有意不含 Content、Replies
+// 和 Attachments：这些可能包含大量文本和图片 URL，应按需读取单条详情。
+type userTicketListDTO struct {
+	ID              int64  `json:"id"`
+	Title           string `json:"title"`
+	Type            string `json:"type"`
+	Status          string `json:"status"`
+	Priority        string `json:"priority"`
+	ReplyCount      int    `json:"reply_count"`
+	AttachmentCount int    `json:"attachment_count"`
+	NotifyTelegram  bool   `json:"notify_telegram"`
+	CreatedAt       int64  `json:"created_at"`
+	UpdatedAt       int64  `json:"updated_at"`
+	ResolvedAt      int64  `json:"resolved_at"`
+	ClosedAt        int64  `json:"closed_at"`
+}
+
+func userTicketListItem(t store.Ticket) userTicketListDTO {
+	notifyTelegram := true
+	if t.NotifyTelegram != nil {
+		notifyTelegram = *t.NotifyTelegram
+	}
+	return userTicketListDTO{
+		ID:              t.ID,
+		Title:           t.Title,
+		Type:            t.Type,
+		Status:          t.Status,
+		Priority:        t.Priority,
+		ReplyCount:      len(t.Replies),
+		AttachmentCount: len(t.Attachments),
+		NotifyTelegram:  notifyTelegram,
+		CreatedAt:       t.CreatedAt,
+		UpdatedAt:       t.UpdatedAt,
+		ResolvedAt:      t.ResolvedAt,
+		ClosedAt:        t.ClosedAt,
+	}
+}
+
+func userTicketListDTOs(tickets []store.Ticket) []userTicketListDTO {
+	out := make([]userTicketListDTO, 0, len(tickets))
+	for _, ticket := range tickets {
+		out = append(out, userTicketListItem(ticket))
+	}
+	return out
 }
 
 // ticketListDTO deliberately excludes reply bodies and attachment URLs. Those
@@ -1246,50 +1266,59 @@ func (a *App) notifyTicketOwner(ctx context.Context, updated, existing store.Tic
 		now := time.Now().Format("2006-01-02 15:04:05")
 		adminNote := ticketOwnerNotificationNote(updated, existing)
 		esc := telegramEscapeHTML
-		// HTML 版：值全部转义，{admin_note_content} 拼成带 blockquote 的安全片段。
+
+		baseParams := a.NewTemplateParams(sendCtx, owner).BuildAll()
+
+		ticketParams := map[string]string{
+			"ticket_id":  strconv.FormatInt(updated.ID, 10),
+			"title":      firstNonEmpty(strings.TrimSpace(updated.Title), "(无标题)"),
+			"status":     statusLabel(updated.Status),
+			"priority":   ticketPriorityLabel(updated.Priority),
+			"type":       strings.TrimSpace(updated.Type),
+			"admin_note": adminNote,
+			"time":       now,
+		}
+
+		// HTML 版本参数（带转义和富文本内容）
 		htmlNoteContent := ""
-		plainNoteContent := ""
 		if adminNote != "" {
 			htmlNoteContent = "\n💬 <b>回复内容</b>\n<blockquote>" + esc(truncateString(adminNote, 500)) + "</blockquote>"
+		}
+		htmlParams := make(map[string]string, len(baseParams)+len(ticketParams))
+		for k, v := range baseParams {
+			htmlParams[k] = esc(v)
+		}
+		for k, v := range ticketParams {
+			htmlParams[k] = esc(v)
+		}
+		htmlParams["status"] = esc(statusLabelWithEmoji(updated.Status))
+		htmlParams["admin_note_content"] = htmlNoteContent
+
+		// 纯文本版本参数
+		plainNoteContent := ""
+		if adminNote != "" {
 			plainNoteContent = "回复内容：\n" + adminNote
 		}
-		htmlValues := map[string]string{
-			"{ticket_id}":          strconv.FormatInt(updated.ID, 10),
-			"{title}":              esc(firstNonEmpty(strings.TrimSpace(updated.Title), "(无标题)")),
-			"{status}":             esc(statusLabelWithEmoji(updated.Status)),
-			"{priority}":           esc(ticketPriorityLabel(updated.Priority)),
-			"{type}":               esc(strings.TrimSpace(updated.Type)),
-			"{admin_note}":         esc(adminNote),
-			"{admin_note_content}": htmlNoteContent,
-			"{time}":               esc(now),
-			"{server_name}":        esc(a.cfg().AppName),
+		plainParams := make(map[string]string, len(baseParams)+len(ticketParams))
+		for k, v := range baseParams {
+			plainParams[k] = v
 		}
-		// 纯文本降级版：自定义模板混入裸 < / & 导致 HTML 解析失败时用原始值重发。
-		plainValues := map[string]string{
-			"{ticket_id}":          strconv.FormatInt(updated.ID, 10),
-			"{title}":              firstNonEmpty(strings.TrimSpace(updated.Title), "(无标题)"),
-			"{status}":             statusLabel(updated.Status),
-			"{priority}":           ticketPriorityLabel(updated.Priority),
-			"{type}":               strings.TrimSpace(updated.Type),
-			"{admin_note}":         adminNote,
-			"{admin_note_content}": plainNoteContent,
-			"{time}":               now,
-			"{server_name}":        a.cfg().AppName,
+		for k, v := range ticketParams {
+			plainParams[k] = v
 		}
+		plainParams["admin_note_content"] = plainNoteContent
+
 		tmpl := a.cfg().TicketNotifyTelegramTemplate
 		usingDefault := strings.TrimSpace(tmpl) == ""
 		if usingDefault {
 			tmpl = config.DefaultTicketNotifyTelegramTemplate
 		}
-		htmlText := replaceNotifPlaceholders(tmpl, htmlValues)
-		// 纯文本降级：默认模板含我们已知的 HTML 标签，去标签得到干净纯文本；
-		// 自定义模板历史上是纯文本，直接用原始值渲染，绝不 stripTelegramHTML——
-		// 否则模板里合法的裸 <（如“价格 < 100”）会把其后内容当标签吃掉。
+		htmlText := RenderTemplate(tmpl, htmlParams)
 		var plainText string
 		if usingDefault {
-			plainText = stripTelegramHTML(replaceNotifPlaceholders(tmpl, plainValues))
+			plainText = stripTelegramHTML(RenderTemplate(tmpl, plainParams))
 		} else {
-			plainText = replaceNotifPlaceholders(tmpl, plainValues)
+			plainText = RenderTemplate(tmpl, plainParams)
 		}
 		result := ticketNotificationResult{Targets: 1}
 		if err := a.telegramSendRichMessage(sendCtx, owner.TelegramID, htmlText, plainText); err != nil {

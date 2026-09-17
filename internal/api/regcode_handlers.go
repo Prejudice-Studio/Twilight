@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -23,10 +22,7 @@ func (a *App) handleListRegcodes(w http.ResponseWriter, r *http.Request, _ Param
 	codes := a.store().ListRegCodes()
 	page := max(1, queryInt(r, "page", 1))
 	perPage := clamp(queryInt(r, "per_page", 20), 1, 100)
-	statusFilter := strings.ToLower(r.URL.Query().Get("status"))
-	typeFilter := r.URL.Query().Get("type")
-	sourceFilter := strings.ToLower(r.URL.Query().Get("source"))
-	search := strings.ToLower(r.URL.Query().Get("search"))
+	filter := regcodeListFilterFromQuery(r.URL.Query())
 	// 先按原始 RegCode 字段过滤（type/source/status/search 全是纯函数判定），只对命中的
 	// 码构造「廉价」DTO（package 级 regcodeDTO，不触碰 store）。真正昂贵的 a.regcodeDTO
 	// 富化——逐 used_by/creator/target 反查 User，每次拿一把 RLock——推迟到排序分页之后
@@ -34,25 +30,7 @@ func (a *App) handleListRegcodes(w http.ResponseWriter, r *http.Request, _ Param
 	items := make([]map[string]any, 0, len(codes))
 	byCode := make(map[string]store.RegCode, len(codes))
 	for _, code := range codes {
-		if typeFilter != "" && strconv.Itoa(code.Type) != typeFilter {
-			continue
-		}
-		// source 筛选：admin 包含历史空值和显式 "admin"，invite 只匹配 "invite"
-		if sourceFilter != "" && sourceFilter != "all" {
-			codeSource := code.Source
-			if codeSource == "" {
-				codeSource = "admin"
-			}
-			if codeSource != sourceFilter {
-				continue
-			}
-		}
-		if statusFilter != "" && statusFilter != "all" && regcodeStatus(code) != statusFilter {
-			if !(statusFilter == "decoy" && code.IsDecoy) && !(statusFilter == "active" && code.Active) {
-				continue
-			}
-		}
-		if !regcodeMatchesSearch(code, search) {
+		if !filter.matches(code) {
 			continue
 		}
 		items = append(items, regcodeDTO(code))
@@ -537,11 +515,7 @@ func regcodePayloadCodes(value any) []string {
 // 保持一致，否则“按筛选全选”会把筛选外的码卷入批量删除（AGENTS.md filter 口径一致约定）。
 // limit<=0 表示不限制返回数量。
 func (a *App) filteredBatchRegcodeCodes(payload map[string]any, limit int) []string {
-	filter, _ := payload["filter"].(map[string]any)
-	typeFilter := strings.TrimSpace(asString(filter["type"]))
-	statusFilter := strings.ToLower(strings.TrimSpace(asString(filter["status"])))
-	sourceFilter := strings.ToLower(strings.TrimSpace(asString(filter["source"])))
-	search := strings.ToLower(strings.TrimSpace(asString(filter["search"])))
+	filter := regcodeListFilterFromPayload(payload)
 
 	excluded := map[string]bool{}
 	for _, code := range regcodePayloadCodes(payload["exclude_codes"]) {
@@ -551,25 +525,7 @@ func (a *App) filteredBatchRegcodeCodes(payload map[string]any, limit int) []str
 	codes := a.store().ListRegCodes()
 	out := make([]string, 0, len(codes))
 	for _, code := range codes {
-		dto := a.regcodeDTO(code)
-		if typeFilter != "" && strconv.Itoa(code.Type) != typeFilter {
-			continue
-		}
-		if sourceFilter != "" && sourceFilter != "all" {
-			codeSource := code.Source
-			if codeSource == "" {
-				codeSource = "admin"
-			}
-			if codeSource != sourceFilter {
-				continue
-			}
-		}
-		if statusFilter != "" && statusFilter != "all" && dto["status"] != statusFilter {
-			if !(statusFilter == "decoy" && code.IsDecoy) && !(statusFilter == "active" && code.Active) {
-				continue
-			}
-		}
-		if !regcodeMatchesSearch(code, search) {
+		if !filter.matches(code) {
 			continue
 		}
 		if excluded[code.Code] {

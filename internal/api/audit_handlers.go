@@ -142,17 +142,25 @@ func shouldFallbackAuditHTTPMutation(r *http.Request, route *Route, status int) 
 		return false
 	}
 	pattern := route.Pattern
-	if strings.HasPrefix(pattern, "/api/v1/admin/audit-logs") {
+	// V1 and V2 share the audit store, so both prefixes must be exempted.
+	// Without the V2 branch, clearing or pruning audit logs writes new audit
+	// rows that immediately become candidates for the next prune.
+	if strings.HasPrefix(pattern, "/api/v1/admin/audit-logs") ||
+		strings.HasPrefix(pattern, "/api/v2/admin/audit-logs") {
 		return false
 	}
-	if pattern == "/api/v1/auth/refresh" {
+	if pattern == "/api/v1/auth/refresh" || pattern == "/api/v2/auth/refresh" {
 		return false
 	}
 	return route.Auth == AuthUser || route.Auth == AuthAdmin || route.Auth == AuthAPIKey
 }
 
 func fallbackAuditAction(route *Route) string {
-	pattern := strings.TrimPrefix(route.Pattern, "/api/v1/")
+	pattern := route.Pattern
+	// Normalise both API versions to the same unprefixed action name so V1 and
+	// V2 mutations of one resource share a single audit action identifier.
+	pattern = strings.TrimPrefix(pattern, "/api/v1/")
+	pattern = strings.TrimPrefix(pattern, "/api/v2/")
 	return strings.ToLower(route.Method) + "_" + fallbackAuditActionReplacer.Replace(strings.Trim(pattern, "/"))
 }
 
@@ -611,7 +619,7 @@ func normalizeSortOrder(value string) string {
 }
 
 func (a *App) handleDeleteAuditLog(w http.ResponseWriter, r *http.Request, params Params) {
-	id, _ := strconv.ParseInt(params["id"], 10, 64)
+	id, _ := strconv.ParseInt(firstNonEmpty(params["log_id"], params["id"]), 10, 64)
 	if id <= 0 {
 		failWithCode(w, http.StatusBadRequest, ErrBadRequest, "无效的日志 ID")
 		return
@@ -620,7 +628,6 @@ func (a *App) handleDeleteAuditLog(w http.ResponseWriter, r *http.Request, param
 		failWithCode(w, http.StatusNotFound, ErrNotFound, "日志不存在")
 		return
 	}
-	a.audit(r, "delete_audit_log", "admin", 0, map[string]any{"log_id": id})
 	ok(w, "已删除", nil)
 }
 
@@ -635,7 +642,6 @@ func (a *App) handleClearAuditLogs(w http.ResponseWriter, r *http.Request, _ Par
 		failWithCode(w, http.StatusInternalServerError, ErrInternal, "清空失败")
 		return
 	}
-	a.audit(r, "clear_audit_logs", "admin", 0, map[string]any{"removed": removed})
 	ok(w, "审计日志已清空", map[string]any{"removed": removed})
 }
 
@@ -668,10 +674,6 @@ func (a *App) handlePruneAuditLogs(w http.ResponseWriter, r *http.Request, _ Par
 		failWithCode(w, http.StatusInternalServerError, ErrInternal, "裁剪失败")
 		return
 	}
-	a.audit(r, "prune_audit_logs", "admin", 0, map[string]any{
-		"max_entries": maxEntries, "retention_days": retentionDays,
-		"preserve_admin": preserveAdmin,
-	})
 	logs := []string{}
 	if maxEntries > 0 {
 		logs = append(logs, fmt.Sprintf("保留最近 %d 条，删除 %d 条", maxEntries, result.RemovedByLimit))

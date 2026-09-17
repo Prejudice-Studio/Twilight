@@ -110,6 +110,15 @@ func (a *App) telegramRuntimeStatus() map[string]any {
 	}
 }
 
+// telegramRuntimeStatusSummary is the browser-safe subset used by the admin
+// connectivity test. The detailed last_error remains an internal runtime
+// diagnostic because it can contain upstream URLs and transport metadata.
+func (a *App) telegramRuntimeStatusSummary() map[string]any {
+	status := a.telegramRuntimeStatus()
+	delete(status, "last_error")
+	return status
+}
+
 func (a *App) telegramSanitizeError(err error) string {
 	if err == nil {
 		return ""
@@ -139,8 +148,21 @@ func (a *App) telegramSendMessage(ctx context.Context, chatID any, text string) 
 	if text == "" {
 		return fmt.Errorf("message text is empty")
 	}
+	mode := a.telegramParseMode()
+	err := a.telegramPostNoResult(ctx, "sendMessage", telegramSendMessageRequest{
+		ChatID: chatID, Text: text, ParseMode: mode, DisableWebPagePreview: true,
+	})
+	if err == nil || mode == "" || !telegramIsParseError(err) {
+		return err
+	}
+	// Unescaped user content makes Telegram reject the whole payload with a
+	// 400; retry as plain text so the message is still delivered.
+	plain := telegramStripMarkup(mode, text)
+	if plain == "" {
+		return err
+	}
 	return a.telegramPostNoResult(ctx, "sendMessage", telegramSendMessageRequest{
-		ChatID: chatID, Text: text, ParseMode: a.telegramParseMode(), DisableWebPagePreview: true,
+		ChatID: chatID, Text: plain, DisableWebPagePreview: true,
 	})
 }
 
@@ -158,11 +180,29 @@ func (a *App) telegramSendMessageWithMarkup(ctx context.Context, chatID any, tex
 	if text == "" {
 		return 0, fmt.Errorf("message text is empty")
 	}
+	mode := a.telegramParseMode()
 	body := telegramSendMessageRequest{
-		ChatID: chatID, Text: text, ParseMode: a.telegramParseMode(),
+		ChatID: chatID, Text: text, ParseMode: mode,
 		DisableWebPagePreview: true, ReplyMarkup: replyMarkup,
 	}
 	result, err := telegramPostResult[telegramMessageResult](a, ctx, "sendMessage", body, 20*time.Second)
+	if err == nil || mode == "" || !telegramIsParseError(err) {
+		if err != nil {
+			return 0, err
+		}
+		return result.MessageID, nil
+	}
+	// Panel text rejected by the parser: resend without markup so the inline
+	// keyboard still reaches the user instead of failing with a 400.
+	plain := telegramStripMarkup(mode, text)
+	if plain == "" {
+		return 0, err
+	}
+	fallback := telegramSendMessageRequest{
+		ChatID: chatID, Text: plain,
+		DisableWebPagePreview: true, ReplyMarkup: replyMarkup,
+	}
+	result, err = telegramPostResult[telegramMessageResult](a, ctx, "sendMessage", fallback, 20*time.Second)
 	if err != nil {
 		return 0, err
 	}
@@ -276,6 +316,80 @@ func telegramEscapeHTML(s string) string {
 	s = strings.ReplaceAll(s, "<", "&lt;")
 	s = strings.ReplaceAll(s, ">", "&gt;")
 	return s
+}
+
+// telegramEscapeMarkdownV2 转义 Telegram MarkdownV2 正文里必须转义的字符。
+// MarkdownV2 对未转义的 _ * [ ] ( ) ~ ` > # + - = | { } . ! 一律返回 400，
+// 而面板模板与命令回执天然包含 "=="、"2026-01-02 15:04"、"(Web 禁用)" 之类
+// 文本，未经转义必然失败。这是用户可控内容与模板变量的安全出口。
+func telegramEscapeMarkdownV2(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + len(s)/8)
+	for _, r := range s {
+		switch r {
+		case '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!':
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// telegramEscapeMarkdown 转义 legacy Markdown 子集需要转义的字符。
+func telegramEscapeMarkdown(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + len(s)/8)
+	for _, r := range s {
+		switch r {
+		case '*', '_', '`', '[':
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// telegramEscapeByParseMode 按当前 parse mode 选择转义实现，避免调用方在
+// 每个拼装点重复判断模式。空模式（纯文本）不做任何转义。
+func telegramEscapeByParseMode(mode, s string) string {
+	switch mode {
+	case "MarkdownV2":
+		return telegramEscapeMarkdownV2(s)
+	case "Markdown":
+		return telegramEscapeMarkdown(s)
+	case "HTML":
+		return telegramEscapeHTML(s)
+	}
+	return s
+}
+
+// telegramStripMarkup 把带标记的文本还原成纯文本，用于解析失败后的降级重发。
+// 消息宁可丢失排版也不能整体投递失败。
+func telegramStripMarkup(mode, s string) string {
+	var out string
+	switch mode {
+	case "MarkdownV2", "Markdown":
+		var b strings.Builder
+		b.Grow(len(s))
+		for _, r := range s {
+			if r == '\\' {
+				continue
+			}
+			switch r {
+			case '*', '_', '`', '~', '[', ']':
+				continue
+			}
+			b.WriteRune(r)
+		}
+		out = b.String()
+	default:
+		out = stripTelegramHTML(s)
+	}
+	out = truncateString(strings.TrimSpace(out), 3900)
+	if out == "" {
+		return ""
+	}
+	return out
 }
 
 // stripTelegramHTML 把我们发出的有限 HTML（<b>/<code>/<blockquote> 等）还原成

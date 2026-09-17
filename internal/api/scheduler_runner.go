@@ -93,6 +93,7 @@ func (a *App) handleSchedulerRunV2(w http.ResponseWriter, r *http.Request, param
 		failWithCode(w, http.StatusConflict, ErrSchedulerJobRunning, "调度任务正在运行中")
 		return
 	}
+	a.audit(r, "scheduler_run", "admin", 0, map[string]any{"job_id": jobID, "run_id": run.ID, "type": "manual"})
 	ok(w, "job started", map[string]any{"job_id": run.JobID, "last_run": run})
 }
 
