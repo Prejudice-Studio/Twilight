@@ -461,7 +461,7 @@ V2 用户端媒体资源（WebUI 媒体页使用）：
 | POST | `/api/v2/admin/invite/users/{uid}/disable` | Admin | V2 级联禁用邀请树用户 |
 | POST | `/api/v2/admin/invite/users/{uid}/enable` | Admin | V2 级联启用邀请树用户 |
 | POST | `/api/v2/admin/invite/users/{uid}/delete` | Admin | V2 级联删除本地/Emby 用户 |
-| GET/PUT | `/api/v2/admin/invite/config/schema` | Admin | V2 邀请配置 SSR 读写资源；最终字段白名单仍由配置 handler 执行 |
+| GET/PUT | `/api/v2/admin/invite/config/schema` | Admin | WebUI 邀请配置读写资源；最终字段白名单仍由配置 handler 执行 |
 | GET | `/api/v2/admin/media-requests` | Admin | V2 求片管理资源集合；服务端完成状态/来源/关键词筛选、同名聚合和分页，返回 `items`、`pagination`、状态计数，不缓存 |
 | PUT | `/api/v2/admin/media-requests/{request_id}` | Admin | V2 按 ID 更新求片状态；兼容入口，管理端优先使用 require_key |
 | DELETE | `/api/v2/admin/media-requests/{request_id}` | Admin | V2 按 ID 删除求片；兼容入口 |
@@ -482,7 +482,7 @@ V2 用户端媒体资源（WebUI 媒体页使用）：
 | POST | `/api/v2/admin/users/{uid}/refresh-status` | Admin | V2 手动刷新用户 Telegram/Emby 外部状态 |
 | POST | `/api/v2/admin/users/{uid}/unbind-telegram` | Admin | V2 解绑用户 Telegram |
 | POST | `/api/v2/admin/users/{uid}/admin` | Admin | V2 设置或取消管理员角色 |
-| POST | `/api/v2/admin/users/{uid}/delete` | Admin | V2 删除用户；支持 `mode` 与 `cascade_depth`，推荐用于 SSR 管理操作 |
+| POST | `/api/v2/admin/users/{uid}/delete` | Admin | V2 删除用户；支持 `mode` 与 `cascade_depth`，推荐用于 WebUI 管理操作 |
 | GET | `/api/v2/admin/emby/users` | Admin | V2 Emby 账号资源集合；服务端搜索、筛选和双分页本地孤儿绑定，手动读取且不缓存 |
 | GET | `/api/v2/admin/emby/device-audit` | Admin | V2 手动设备/IP 审查；按 Emby 用户聚合、过滤 Twilight 自身客户端，`refresh=1` 才强制刷新远端数据 |
 | GET | `/api/v2/admin/emby/activity-logs` | Admin | V2 本地 Emby 活动日志；仅 `refresh=1` 时从 Emby 同步并入库 |

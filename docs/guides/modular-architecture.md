@@ -108,19 +108,25 @@ Service 入参应是明确类型，不直接接收 `http.Request`。需要操作
 
 ## 前端分层
 
-V2 前端依赖方向：
+WebUI（`webui/`，Next.js App Router）是唯一前端，依赖方向：
 
 ```text
-SSR route load / form action
-       -> Go API
-            -> internal/store / external clients
+页面组件（"use client"）
+       -> @/lib/api.ts (ApiClient)
+            -> @/lib/api-request.ts (apiRequest：base URL / 版本 / envelope)
+                 -> Go API /api/v2/*
+                      -> internal/store / external clients
 ```
 
 | 层级 | 职责 |
 | ---- | ---- |
-| `webui` | 旧 Next.js 整站回滚版本，不参与默认运行时 |
+| `webui/src/lib` | API 客户端与请求边界、i18n、`safe-url` / `safe-render` 等横切能力 |
+| `webui/src/hooks` | `useAsyncResource` 等可复用读取 hook（负责 `AbortSignal` 取消与乱序保护） |
+| `webui/src/store` | 跨页面共享的小状态，例如系统信息 store |
+| `webui/src/components` | 公共与领域组件；管理页专用组件放 `components/admin/*` |
+| `webui/src/app` | 路由页面，只做组合，不堆业务巨型组件 |
 
-页面组件不应直接裸 `fetch`。如确有特殊场景，必须保持同样的 credentials、超时、错误处理和脱敏语义。
+页面组件不应直接裸 `fetch`。如确有特殊场景（流式下载、SSE、blob 上传），必须保持同样的 credentials、超时、错误处理和脱敏语义。
 
 ## 前端模块化规则
 
@@ -140,7 +146,7 @@ SSR route load / form action
 | ---- | -------- |
 | 路由注册 | `internal/api/routes.go`，统一调用 `App.add` 维护方法/段数/业务域索引；禁止直接追加 `App.routes` |
 | 鉴权等级 | `AuthPublic`、`AuthUser`、`AuthAdmin`、`AuthAPIKey` |
-| 错误码 | `internal/api/errcode.go` 与 V2 页面通用错误文案 |
+| 错误码 | `internal/api/errcode.go` 与 WebUI 通用错误文案 |
 | 审计日志 | `a.audit()`、`a.auditEntryIP()` |
 | 配置源 | `config.toml`、`config.local.toml`、`TWILIGHT_*` 覆盖 |
 | 配置 schema | `internal/api/config_admin.go` 与 `/system/admin/config/schema` |

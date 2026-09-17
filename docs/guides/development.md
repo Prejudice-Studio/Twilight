@@ -156,12 +156,12 @@ bash start_backend_dev.sh
 
 ### 前端契约
 
-- V2 页面不使用 V1 `useAsyncResource`、React store 或客户端全局请求缓存；重读通过导航、form action 返回或明确的手动刷新完成，不恢复无边界轮询。
+- 页面读取统一走 `@/lib/api.ts` + `useAsyncResource`，并把 `AbortSignal` 传到请求层：筛选、分页、路由切换与组件卸载都要取消旧请求，用请求序号防止过期响应覆盖新状态；除调度器可见性感知轮询外不新增无边界轮询。
 - 响应统一为 envelope 结构 `{ success, code, message, data, timestamp }`；前端按 HTTP 状态码与 `error_code` 分流处理（401 跳登录、403 权限提示、429 退避、5xx 通用故障，以及自定义业务 error_code）。
 - 新增或调整接口时，需同步检查前端调用路径、请求方法、鉴权等级、错误提示文案与移动端展示。
-- 登录支持用户名和邮箱两种方式：V2 登录 form action 将输入交给后端统一判断；旧 V1 `api.ts` 的 `login()` 仍兼容自动检测 `@`。
+- 登录支持用户名和邮箱两种方式：WebUI 把用户输入原样放进 `username` 提交给 `POST /api/v2/auth/login`，由后端判断是用户名还是邮箱，客户端不做 `@` 拆分。
 - 求片搜索结果必须保持接口返回的搜索顺序；图片加载完成后按自然尺寸分成横版封面与竖版海报两个分区，分区内继续保持原顺序。卡片图片使用受控的横版 / 竖版比例框与 `object-contain`，确保完整显示图片、不裁切，也不让横竖比例混在同一网格中。
-- 独立管理页若需要编辑配置，必须通过 V2 form action 复用 `/system/admin/config/schema` 的后端契约，写回同一个 `config.toml`；不要在前端或 store 中复制第二套配置源。旧 V1 客户端仍使用 `api.updateConfigBySchema()` 兼容同一接口。
+- 独立管理页若需要编辑配置，必须复用 `/api/v2/admin/config/schema` 的契约（`api.ts` + `components/admin/config-section-editor.tsx`），写回同一个 `config.toml`；不要在前端或 store 中复制第二套配置源。
 - 用户管理页的单用户与批量操作必须按领域分组展示（账号状态、Emby、身份绑定、注册资格、危险操作），避免把所有操作平铺成过长菜单或按钮栏；新增用户操作时同步维护后端返回的 `admin_action_state` 与前端 `UserInfo` 类型，让前端能显示禁用原因。
 - 用户管理的单用户操作菜单、桌面表格和危险清理预览必须使用受限 `dvh` Firefox 滚动区域；桌面表头保持可见，手机上的预览表允许横纵滚动。继续使用服务端分页和移动端卡片，不要把完整用户库一次挂载到浏览器。
 - 用户管理筛选变化必须只加载第一页，不能先请求已经失效的旧页；每页数量变化要清除跨页选择。选择“拥有 Emby 的用户”时，当前页全选只统计当前页已绑定 Emby 的行。
@@ -174,7 +174,7 @@ bash start_backend_dev.sh
 - 后台重型面板应按需加载：非默认页签不要在首屏自动请求大接口；公共系统信息走 `useSystemStore.fetchInfo()` 的 TTL 与 inflight 复用，配置保存后调用 `invalidate()`。
 - 后台弹窗和覆盖层优先复用现有 Radix 公共组件与 CSS 过渡；未引用的客户端组件应及时删除，不能让一次性抽屉或面板残留重型动画运行时依赖。
 - 管理首页和统计页不加载 Framer Motion，也不使用装饰性渐变圆形；这两个页面优先保证首屏包体、稳定尺寸和窄屏可读性，交互反馈使用 CSS/Tailwind。
-- V2 管理列表、详情和筛选结果通过 URL 状态和 SSR `load` 读取；form action 完成写入后以重定向或重新读取获得权威状态，不恢复客户端轮询或全局数据 store。旧 V1 页面才使用 `useAsyncResource` / `AbortSignal` 取消过期读取。
+- 管理列表、详情和筛选结果由 URL 状态驱动，页面通过 `useAsyncResource` + `AbortSignal` 读取；写操作成功后重新执行读取以获得权威状态，不用本地拼接结果替代权威数据，也不把完整数据集驻留在全局 store。
 - 侧边栏、移动菜单、管理导航等密集导航区域使用 `Link prefetch={false}`，避免首屏预载大量不一定访问的后台页面 chunk；只对明确的高频下一步保留预取。
 
 ## API 与安全规范
@@ -271,7 +271,7 @@ Twilight 不对 Cookie 鉴权的变更类请求做 CSRF 令牌校验，也不做
 ### 数据库性能与接口一致性
 
 - 性能优化优先从现有访问模式入手：分页 / 游标、批量读取、索引、短超时、限流、前端按需加载和必要缓存；不要为了局部慢查询把业务实体拆成独立表，除非先更新架构文档并明确快照一致性、迁移、备份恢复方案。
-- 管理员用户列表在大规模数据下必须先用轻量用户结构完成筛选、排序和分页，再为当前页构造公开 DTO；不得为页外用户提前创建 `map[string]any`。`/api/v2/admin/users` 是 V2 SSR 的正式资源边界，`/api/v1/admin/users` 只保留兼容用途；`per_page` 继续使用有上限的服务端参数，避免请求通过扩大页面大小制造内存峰值。
+- 管理员用户列表在大规模数据下必须先用轻量用户结构完成筛选、排序和分页，再为当前页构造公开 DTO；不得为页外用户提前创建 `map[string]any`。`/api/v2/admin/users` 是 WebUI 的正式资源边界，`/api/v1/admin/users` 只保留兼容用途；`per_page` 继续使用有上限的服务端参数，避免请求通过扩大页面大小制造内存峰值。
 - 管理员用户列表的前端查询缓存必须同时设置条目数和行数上限，并在命中时更新最近使用顺序；筛选、排序和分页组合不能无限保留用户对象。
 - 邀请森林读取只需要关系两端用户和（启用邀请时）邀请码持有人；应使用 Store 的 UID 范围快照，不要为一次树展示复制全量用户或完整邀请码列表。
 - 批量 `select_all` 只需要目标 UID 时应使用 Store 的 UID-only 匹配方法；它必须返回完整匹配计数，同时只保留请求上限内的 UID，避免用空回调触发全量 `[]User` 分配。
@@ -318,15 +318,16 @@ docker compose down
 
 ### 独立启动后端/前端（不用 Docker）
 
-与 Docker 环境并行或替代使用——V2 dev server 可单独启动，指向 Docker 中的后端：
+与 Docker 环境并行或替代使用——WebUI dev server 可单独启动，指向 Docker 中的后端：
 
 ```bash
 # 终端 1: Docker 后端 (PostgreSQL + Redis + API)
 docker compose up -d postgres redis twilight
-# 终端 2: V2 SSR dev server (hot reload)
+# 终端 2: WebUI dev server (Hot reload)
+cd webui && BACKEND_URL=http://127.0.0.1:5000 pnpm dev
 ```
 
-V2 通过 `BACKEND_URL=http://127.0.0.1:5000` 由服务端访问后端；同源 `/api/v1/*` 和 `/api/v2/*` 代理只用于渐进增强，不是浏览器鉴权边界。
+`BACKEND_URL` 只用于 rewrite：浏览器请求同源 `/api/*`，由 Next.js 在运行期代理到后端，因此开发时不需要处理跨域。跨域部署时改用构建期变量 `NEXT_PUBLIC_API_URL` 直连后端。无论哪种模式，鉴权都由 Go 后端的会话 Cookie 或 API Key 决定，代理本身不构成鉴权边界。
 
 ### Docker 开发注意事项
 

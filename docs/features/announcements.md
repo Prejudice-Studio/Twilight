@@ -31,7 +31,7 @@
 | `updated_at` | int64 | 更新时间 | 每次写入都会刷新为当前时间。 |
 | `expired_at` | int64 | `0` | 过期时间（Unix 秒）。`0` 或 `<=0` 表示永不过期。后端字段名为 `expired_at`。 |
 
-关于过期字段，后端读取请求体时同时接受 `expires_at` 与 `expired_at` 两个键（见 `internal/api/announcement_handlers.go`），最终存为结构体上的 `ExpiredAt`。V2 form action 统一提交 `expires_at`，并由后端解释永久值。
+关于过期字段，后端读取请求体时同时接受 `expires_at` 与 `expired_at` 两个键（见 `internal/api/announcement_handlers.go`），最终存为结构体上的 `ExpiredAt`。WebUI 统一提交 `expires_at`，并由后端解释永久值。
 
 ### 排序与可见性
 
@@ -56,7 +56,7 @@
 
 ## 前端安全约束
 
-公告内容由后端原样保存。V2 以 Svelte 文本节点展示，**不会使用 `{@html}`**；如未来移植富文本，必须重新审查 URL、图片和标签白名单。以下 React 约束仅描述旧版回滚 renderer：
+公告内容由后端原样保存。WebUI 通过 `@/lib/safe-render` 的 `SafeAnnouncementContent` 渲染，输出 React 元素而不是 HTML 字符串；如未来扩展富文本，必须重新审查 URL、图片和标签白名单。渲染约束如下：
 
 - **纯文本（plain）**：用 `whitespace-pre-wrap break-words` 直接渲染原始字符串，保留换行；所有 `<`、`>` 等字符由 React 自动 HTML 转义。
 - **Markdown**：手写小型解析器输出 React 元素，不经过任何 HTML 字符串。支持的语法：

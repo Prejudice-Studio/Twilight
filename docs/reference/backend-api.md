@@ -13,17 +13,17 @@
 - 响应统一为 JSON 信封（envelope），结构见下文 [2.4 响应结构](#24-响应结构)。
 - 变更接口时需同步更新 [API 路由索引](../reference/api-index.md)；若接口有请求体、响应体、限流或安全注意事项，还需更新本文对应章节。
 
-V2 基础协议目前提供 `GET /api/v2/system/health`、`GET /api/v2/system/capabilities`、公开安全系统摘要 `GET /api/v2/system/info`、管理员独立健康资源、管理员统计、V2 认证/注册资源、受保护的 `GET /api/v2/dashboard/summary`、`GET /api/v2/announcements`、`GET /api/v2/signin/summary`、`GET /api/v2/invite/summary` 和 `GET /api/v2/bangumi/summary`。认证页通过 V2 资源读取能力并提交登录、注册、Telegram 注册绑定码和找回密码动作；响应按公开或私有会话边界使用 `no-store`，不会把 Cookie、密码、Token 或临时凭据写入浏览器状态。它们沿用统一 JSON envelope；仪表盘摘要一次返回当前用户、公开能力和在线人数状态。公告资源在一次私有 `no-store` 读取中返回可见公告和当前账号未确认的强制阅读公告，`POST /api/v2/announcements/ack` 只确认当前账号去重后的正整数 ID。Emby 读取失败时只将 `data.viewers.available` 设为 `false`，本地用户和能力数据仍然返回，不把故障伪装为零人在线。签到摘要一次返回 `summary`、`config` 和最近 30 条 `history`；签到、续期和自动续期开关也已经使用 V2 资源，后端仍在共享 handler 与 Store 中执行功能开关、Emby 资格、严格布尔解析、审计以及原子扣分。邀请摘要一次返回 `config` 与会话作用域的 `invite` 投影；Bangumi 摘要一次返回本地同步状态、公开账号资料、五类收藏的有限预览和最近动态，Bangumi 单类读取失败时保留其他成功结果并标记 `collections_partial`。Bangumi Token 永不进入 V2 响应。管理员服务器状态页 `/(app)/admin/status` 使用服务端 `load` 并行读取 `/api/v2/admin/health/api`、`/api/v2/admin/health/database`、`/api/v2/admin/health/emby`、`/api/v2/system/info` 和 `/api/v2/admin/stats`；三个健康接口保持独立，每个只负责一个探针，统计不包含播放统计。上述接口不改变 `/api/v1` 写入状态机，未迁移调用继续使用 `/api/v1`。
+V2 基础协议目前提供 `GET /api/v2/system/health`、`GET /api/v2/system/capabilities`、公开安全系统摘要 `GET /api/v2/system/info`、管理员独立健康资源、管理员统计、V2 认证/注册资源、受保护的 `GET /api/v2/dashboard/summary`、`GET /api/v2/announcements`、`GET /api/v2/signin/summary`、`GET /api/v2/invite/summary` 和 `GET /api/v2/bangumi/summary`。认证页通过 V2 资源读取能力并提交登录、注册、Telegram 注册绑定码和找回密码动作；响应按公开或私有会话边界使用 `no-store`，不会把 Cookie、密码、Token 或临时凭据写入浏览器状态。它们沿用统一 JSON envelope；仪表盘摘要一次返回当前用户、公开能力和在线人数状态。公告资源在一次私有 `no-store` 读取中返回可见公告和当前账号未确认的强制阅读公告，`POST /api/v2/announcements/ack` 只确认当前账号去重后的正整数 ID。Emby 读取失败时只将 `data.viewers.available` 设为 `false`，本地用户和能力数据仍然返回，不把故障伪装为零人在线。签到摘要一次返回 `summary`、`config` 和最近 30 条 `history`；签到、续期和自动续期开关也已经使用 V2 资源，后端仍在共享 handler 与 Store 中执行功能开关、Emby 资格、严格布尔解析、审计以及原子扣分。邀请摘要一次返回 `config` 与会话作用域的 `invite` 投影；Bangumi 摘要一次返回本地同步状态、公开账号资料、五类收藏的有限预览和最近动态，Bangumi 单类读取失败时保留其他成功结果并标记 `collections_partial`。Bangumi Token 永不进入 V2 响应。WebUI 管理员服务器状态页 `/admin/status` 并行读取 `/api/v2/admin/health/api`、`/api/v2/admin/health/database`、`/api/v2/admin/health/emby`、`/api/v2/system/info` 和 `/api/v2/admin/stats`；三个健康接口保持独立，每个只负责一个探针，统计不包含播放统计。上述接口不改变 `/api/v1` 写入状态机；`/api/v1` 仅保留给外部 API Key 集成与 `NEXT_PUBLIC_USE_V1_COMPAT` 回退。
 
 管理员状态资源均要求 `AuthAdmin`。`/api/v2/admin/health/api` 只检查 API 进程，`/api/v2/admin/health/database` 只检查数据库状态，`/api/v2/admin/health/emby` 从后端发起 Emby 服务探测；三者都返回 `private, no-store`，单项失败不影响其它响应。`/api/v2/admin/stats` 只返回有限的用户、注册码、运行时和 Redis 回退摘要，也使用 `private, no-store`。公共 `/api/v2/system/info` 只返回站点名称、图标、版本、公开能力、受限额度和初始化状态，不返回 Emby/Telegram/数据库配置值。
 
 ### V2 管理员配置资源
 
-配置管理页面使用 `/api/v2/admin/config/schema`、`/toml` 和 `/backups` 资源读取结构化配置、脱敏 TOML 与配置备份。V2 响应不返回服务器文件系统路径，secret 字段仍使用服务端脱敏哨兵；保存、创建/删除备份、整理、认证背景图上传和恢复均由服务端 form action 提交。恢复预览与实际恢复继续复用 Go 的配置解析、受保护字段、原子写入、热重载、失败回滚和 `RESTORE_CONFIG_BACKUP` 确认边界。
+配置管理页面使用 `/api/v2/admin/config/schema`、`/toml` 和 `/backups` 资源读取结构化配置、脱敏 TOML 与配置备份。V2 响应不返回服务器文件系统路径，secret 字段仍使用服务端脱敏哨兵；保存、创建/删除备份、整理、认证背景图上传和恢复均由 WebUI 发起写请求。恢复预览与实际恢复继续复用 Go 的配置解析、受保护字段、原子写入、热重载、失败回滚和 `RESTORE_CONFIG_BACKUP` 确认边界。
 
 ### V2 个人设置资源
 
-个人设置页面使用一组独立的 SSR 资源，全部要求 User 鉴权并返回 `Cache-Control: private, no-store`：
+个人设置页面使用一组独立的资源，全部要求 User 鉴权并返回 `Cache-Control: private, no-store`：
 
 | 方法 | 路径 | 说明 |
 | ---- | ---- | ---- |
@@ -47,7 +47,7 @@ V2 基础协议目前提供 `GET /api/v2/system/health`、`GET /api/v2/system/ca
 | PUT | `/api/v2/settings/apikeys/{key_id}` | 更新当前账号指定 API Key 的名称、启用、查询参数和限速设置 |
 | DELETE | `/api/v2/settings/apikeys/{key_id}` | 删除当前账号指定 API Key |
 
-这些端点是共享 Go 应用服务的版本化适配，不建立第二套业务状态机。邮箱验证、密码强度、当前 Web 密码、Emby 管理员保护、注册资格、远端副作用、Store 原子写入、审计和会话 Cookie 都由 Go 后端最终决定。V1 设置端点继续保留给回滚前端与外部兼容调用；默认 V2 前端不再直接请求它们。
+这些端点是共享 Go 应用服务的版本化适配，不建立第二套业务状态机。邮箱验证、密码强度、当前 Web 密码、Emby 管理员保护、注册资格、远端副作用、Store 原子写入、审计和会话 Cookie 都由 Go 后端最终决定。V1 设置端点继续保留给外部兼容调用与 `NEXT_PUBLIC_USE_V1_COMPAT` 回退；WebUI 不再直接请求它们。
 
 ### 1.1 文档分工
 
@@ -58,8 +58,8 @@ V2 基础协议目前提供 `GET /api/v2/system/health`、`GET /api/v2/system/ca
 | [API Key 外部接入](../reference/api-key.md) | 外部系统 API Key 接入方式、权限矩阵、专用示例 |
 | [注册码与卡码](../features/regcodes.md) | 注册码 / 续期码 / 白名单码规则、兼容性与安全口径 |
 | `/api/v2/openapi.json` | V2 公开 OpenAPI 规范，只输出 `AuthPublic` 路由；管理员私有路由不会被匿名枚举。 |
-| `/api/v2/admin/docs/routes` | Admin 私有路由元数据，为默认 SSR `/api-docs` 页面提供完整方法、路径、版本和鉴权级别清单；响应不包含处理器、配置或用户数据。 |
-| `/api/v1/docs` | V1 兼容 API 控制台。未登录时读取公开 `openapi.json`，管理员登录后优先读取 `/system/admin/apis` 的完整路由清单；默认 V2 前端不再依赖该内嵌页面。 |
+| `/api/v2/admin/docs/routes` | Admin 私有路由元数据，为 Go API 控制台（`/api/v2/docs`）提供完整方法、路径、版本和鉴权级别清单；响应不包含处理器、配置或用户数据。 |
+| `/api/v1/docs` | V1 兼容 API 控制台。未登录时读取公开 `openapi.json`，管理员登录后优先读取 `/system/admin/apis` 的完整路由清单；WebUI 不再依赖该内嵌页面。 |
 
 ## 2. 鉴权与请求规范
 
@@ -976,14 +976,14 @@ curl -X POST "http://localhost:5000/api/v1/media/request/external/update" \
 
 - 认证：登录用户（`AuthUser`）
 
-管理员违规审计的默认 V2 SSR 资源为 `GET /api/v2/admin/violations`、`DELETE /api/v2/admin/violations/{violation_id}` 和 `POST /api/v2/admin/violations/clear`。V2 列表只返回有界分页，类型、搜索词和页码由服务端规范化，响应使用 `private, no-store`；删除与清空仍由原有 Store 和审计 handler 执行，清空必须提交 `CLEAR_VIOLATIONS`。V1 路径继续保留给回滚前端。
+管理员违规审计使用的 V2 资源为 `GET /api/v2/admin/violations`、`DELETE /api/v2/admin/violations/{violation_id}` 和 `POST /api/v2/admin/violations/clear`。V2 列表只返回有界分页，类型、搜索词和页码由服务端规范化，响应使用 `private, no-store`；删除与清空仍由原有 Store 和审计 handler 执行，清空必须提交 `CLEAR_VIOLATIONS`。V1 路径继续保留给外部兼容调用与回退。
 
-### 7.4 V2 SSR 媒体资源
+### 7.4 V2 媒体资源
 
 
 `GET /api/v2/media/search` 返回 `{ items, total, warnings }`；`GET /api/v2/media/search/{source}` 用路径来源覆盖冲突的查询参数。`GET /api/v2/media/detail` 返回 `{ item }`，`POST /api/v2/media/inventory/check` 返回库存结果。V2 只改变资源包装和传输边界，媒体来源、Logo 语言优先级、海报 URL 安全校验、Emby 库存判断和求片业务规则仍由 Go 后端统一处理。
 
-`GET /api/v2/media/requests` 返回 `{ items, total }`，只包含当前登录用户的求片。`POST /api/v2/media/requests` 和 `DELETE /api/v2/media/requests/by-key/{require_key}` 继续复用 V1 的业务 handler，因此功能开关、邮箱验证、Telegram 绑定、请求配额、重复请求、审计和所有权判断不会因前端迁移产生第二套实现。V1 媒体路由仍保留给回滚前端和外部兼容调用。
+`GET /api/v2/media/requests` 返回 `{ items, total }`，只包含当前登录用户的求片。`POST /api/v2/media/requests` 和 `DELETE /api/v2/media/requests/by-key/{require_key}` 继续复用 V1 的业务 handler，因此功能开关、邮箱验证、Telegram 绑定、请求配额、重复请求、审计和所有权判断不会因前端迁移产生第二套实现。V1 媒体路由仍保留给外部兼容调用与回退。
 
 ## 8. Emby 模块
 
@@ -1048,13 +1048,13 @@ V2 管理员用户资源为 `/api/v2/admin/users`。集合接口返回：
 
 `search`、`role`、`active`、`emby`、`emby_status`、`email_status`、`sort`、`page` 和 `per_page` 均在服务端解析并限制范围；列表只序列化当前页，用户详情中的 `admin_action_state` 只作为界面提示，不能替代后端权限判断。V2 写操作复用同一套 Store 原子更新、Emby 外部副作用和审计逻辑，V1 路径仅用于回滚及外部兼容调用。
 
-管理员 Emby 页面使用 `/api/v2/admin/emby/*`。账号、设备/IP 与活动日志是三个独立资源：账号列表服务端筛选和分页；设备/IP 只有明确传入 `refresh=1` 才会重读 Emby；活动日志默认读取数据库，手动同步使用 `POST /api/v2/admin/emby/activity-logs/sync`，由后端从 Emby 拉取并入库。广播、账号创建、强制改密、绑定维护和会话操作都由相同的管理员权限、Emby URL 校验、审计和通用错误脱敏边界处理。V2 页面不得回退为浏览器直连 Emby、自动轮询或播放统计界面。
+管理员 Emby 页面使用 `/api/v2/admin/emby/*`。账号、设备/IP 与活动日志是三个独立资源：账号列表服务端筛选和分页；设备/IP 只有明确传入 `refresh=1` 才会重读 Emby；活动日志默认读取数据库，手动同步使用 `POST /api/v2/admin/emby/activity-logs/sync`，由后端从 Emby 拉取并入库。广播、账号创建、强制改密、绑定维护和会话操作都由相同的管理员权限、Emby URL 校验、审计和通用错误脱敏边界处理。WebUI 管理页不得回退为浏览器直连 Emby、自动轮询或播放统计界面。
 
 管理员数据库页使用 `/api/v2/admin/database/*`。状态和备份列表为私有 `no-store` 安全投影，不返回服务器文件路径、状态文件名、备份目录或 PostgreSQL 连接拓扑；备份预览、恢复、迁移的输入仍由 Go 后端执行文件名校验、快照校验、保护性备份、确认短语、功能开关和原子写入。数据库运行时仍以 PostgreSQL 为唯一后端，JSON 只保留为显式迁移导出目标。
 
-管理员运行日志页使用 `/api/v2/admin/runtime/status` 与 `/api/v2/admin/runtime/logs` 的有限快照资源。日志数量由后端上限约束，属性和消息沿用运行日志采集时的脱敏结果；V2 页面只手动刷新，不使用旧 SSE 流接口或浏览器轮询。
+管理员运行日志页使用 `/api/v2/admin/runtime/status` 与 `/api/v2/admin/runtime/logs` 的有限快照资源。日志数量由后端上限约束，属性和消息沿用运行日志采集时的脱敏结果；WebUI 运行日志页只手动刷新，不使用旧 SSE 流接口或浏览器轮询。
 
-管理员调度器页面使用 `/api/v2/admin/scheduler/jobs` 及其单任务资源。任务列表在后端批量读取摘要，最近运行结果和历史仅在打开指定任务时按需读取；运行、终止、计划保存和计划恢复通过 V2 写资源执行。任务参数在 SSR action 与 Go handler 两侧限制，手动任务不会被伪造为自动任务，运行历史保持有界且不进入浏览器共享缓存。
+管理员调度器页面使用 `/api/v2/admin/scheduler/jobs` 及其单任务资源。任务列表在后端批量读取摘要，最近运行结果和历史仅在打开指定任务时按需读取；运行、终止、计划保存和计划恢复通过 V2 写资源执行。任务参数在 WebUI 与 Go handler 两侧限制，手动任务不会被伪造为自动任务，运行历史保持有界且不进入浏览器共享缓存。
 
 管理员 Bangumi 页面使用 `/api/v2/admin/bangumi/*`。用户列表只返回服务端分页的当前页和批量统计，播放记录、同步日志必须带 UID 按需读取；同步和日志清理使用对应的 POST/DELETE 资源。页面配置摘要来自公开 `/api/v2/system/capabilities`，只展示功能开关，不包含 Bangumi Token；V1 管理员 Bangumi 路径保留为兼容入口。
 
@@ -1062,7 +1062,7 @@ V2 管理员用户资源为 `/api/v2/admin/users`。集合接口返回：
 
 V2 Bangumi 页面使用公开资源 `GET /api/v2/bangumi/covers/{subject_id}` 获取封面；它复用既有封面 handler 的正整数校验、本地 `uploads/bangumi` 安全访问、符号链接拒绝和 Bangumi CDN 白名单回退。命中本地文件时允许 `public, max-age=86400`，未命中时只允许安全的 HTTPS Bangumi 图床地址。V1 `/bangumi/cover/{subject_id}` 作为兼容入口保留。
 
-管理员公告页面使用 `/api/v2/admin/announcements` 资源集合及其单公告写操作。列表筛选、分页和 no-store 响应由后端执行；创建、更新、显示/隐藏、置顶和删除仍走同一套 Store、字段归一化、渲染模式白名单与审计逻辑。正文在 SSR 页面中按文本显示，不执行未审查的 Markdown/BBCode HTML。
+管理员公告页面使用 `/api/v2/admin/announcements` 资源集合及其单公告写操作。列表筛选、分页和 no-store 响应由后端执行；创建、更新、显示/隐藏、置顶和删除仍走同一套 Store、字段归一化、渲染模式白名单与审计逻辑。正文在页面中按文本显示，不执行未审查的 Markdown/BBCode HTML。
 
 管理员操作日志页面使用 `/api/v2/admin/audit-logs` 资源。列表只返回有界分页，筛选和排序在 PostgreSQL 查询边界完成；删除、清空和裁剪仍要求管理员及固定确认短语。审计维护操作不会在刚清理的同一审计表中递归追加新记录，避免“清空后又出现一条维护日志”。
 
@@ -1081,9 +1081,9 @@ curl -X GET "http://localhost:5000/api/v1/admin/users?status=active&page=1&per_p
 
 用户列表与用户详情返回的用户对象包含 `admin_action_state`。这是后台用户管理 UI 使用的动作可用性提示字段，当前包括 `has_emby`、`protected_role`、`can_enable_emby`、`can_disable_emby`、`can_grant_registration_entitlement`、`can_clear_registration_queue`、`can_delete` 与 `reasons`。后端仍会在真正执行变更时重新鉴权和校验；前端只应把该字段用于分组展示、禁用按钮和显示原因。
 
-前端保持服务端分页：桌面用户表在受限 Firefox 滚动区域中显示并固定表头，手机和平板使用当前页用户卡片。单用户分组操作菜单与无效账号清理预览使用 `dvh` 视口边界，预览表可横纵滚动，不会因长列表或窄视口遮住确认操作。V2 的 `/(app)/admin/users` 使用同一列表契约，通过服务端 `load` 读取当前页，并以 form action 转发单用户写操作；它不会在浏览器端缓存完整用户库。
+前端保持服务端分页：桌面用户表在受限 Firefox 滚动区域中显示并固定表头，手机和平板使用当前页用户卡片。单用户分组操作菜单与无效账号清理预览使用 `dvh` 视口边界，预览表可横纵滚动，不会因长列表或窄视口遮住确认操作。WebUI 的 `/admin/users` 使用同一列表契约，按页请求当前页并在写操作成功后重新读取；它不会在浏览器端缓存完整用户库。
 
-V1 服务器状态页的 API、数据库和 Emby 健康检查仍保留给回滚前端与外部兼容调用。V2 `/admin/status` 在服务端使用 `Promise.allSettled` 并行读取 V2 的三组独立健康资源、系统摘要和统计资源，单个依赖不可用时不会把其他成功结果误报为整体异常；浏览器端仅进行一次 SSR 页面读取，不建立轮询。
+V1 服务器状态页的 API、数据库和 Emby 健康检查仍保留给外部兼容调用与回退。WebUI `/admin/status` 用 `Promise.allSettled` 并行读取 V2 的三组独立健康资源、系统摘要和统计资源，单个依赖不可用时不会把其他成功结果误报为整体异常；页面只做一次读取，不建立轮询。
 
 #### 更新用户信息
 
@@ -1252,7 +1252,7 @@ curl -X POST "http://localhost:5000/api/v1/admin/emby/sync" \
 
 `DELETE /admin/email/verifications/{id}` 会立即撤销对应验证码；`POST /admin/email/verifications/cleanup` 清理全部过期验证码。两类成功写操作都会写入管理员审计日志，审计详情不记录完整邮箱或验证码材料。
 
-默认 V2 管理员邮箱页面使用 `/api/v2/admin/email/*`。验证审查接口仍只返回脱敏邮箱、关联账号和有限时间/尝试次数字段，响应为私有 `no-store`；SMTP 测试仅供管理员使用，普通用户发送邮件失败继续返回泛化错误，不向客户端暴露 SMTP、网络或服务器地址细节。V1 邮箱接口保留为回滚兼容入口。
+WebUI 管理员邮箱页面使用 `/api/v2/admin/email/*`。验证审查接口仍只返回脱敏邮箱、关联账号和有限时间/尝试次数字段，响应为私有 `no-store`；SMTP 测试仅供管理员使用，普通用户发送邮件失败继续返回泛化错误，不向客户端暴露 SMTP、网络或服务器地址细节。V1 邮箱接口保留为外部兼容入口。
 
 ### 9.3 注册码与卡码
 
@@ -1262,7 +1262,7 @@ curl -X POST "http://localhost:5000/api/v1/admin/emby/sync" \
 
 管理端注册码搜索由后端分页过滤，前端自由搜索会在短暂停止输入后再请求；`type`、`status`、`source`、`sort`、`order` 变化时应从第一页重新读取。大批量注册码不应由前端先下载全量再筛选。
 
-V2 管理注册码资源使用 `/api/v2/admin/regcodes`：列表返回 `items` 和 `pagination`，详情返回 `item`，使用记录按 `/usage` 按需读取；`PATCH` 使用局部字段更新，批量删除和使用记录清理仍需固定确认短语。V2 只改变资源契约和 SSR 页面调用路径，注册码消费、有效期暂停、引用清理、存储不一致保护、权限与审计继续由同一 Store/handler 执行，避免 V1/V2 双写或缓存事实分叉。
+V2 管理注册码资源使用 `/api/v2/admin/regcodes`：列表返回 `items` 和 `pagination`，详情返回 `item`，使用记录按 `/usage` 按需读取；`PATCH` 使用局部字段更新，批量删除和使用记录清理仍需固定确认短语。V2 只改变资源契约和页面调用路径，注册码消费、有效期暂停、引用清理、存储不一致保护、权限与审计继续由同一 Store/handler 执行，避免 V1/V2 双写或缓存事实分叉。
 
 #### 查询注册码列表
 
@@ -1338,7 +1338,7 @@ curl -X POST "http://localhost:5000/api/v1/admin/regcodes" \
 
 ### 9.4 求片管理（Admin 别名）
 
-V2 SSR 管理端使用 `/api/v2/admin/media-requests` 资源集合及其 `/by-key`、`/batch` 变更资源；V1 `/api/v1/admin/media-requests` 仍保留给旧客户端和回滚前端。V2 列表返回 `{items,pagination,request_total,has_next,status_counts}`，V1 列表继续返回历史字段名 `{requests,total,request_total,page,per_page,total_pages,has_next,status_counts}`。两者共享同一个后端筛选、同名聚合和 Store 快照，避免状态计数或分页结果漂移。
+WebUI 管理端使用 `/api/v2/admin/media-requests` 资源集合及其 `/by-key`、`/batch` 变更资源；V1 `/api/v1/admin/media-requests` 仍保留给旧客户端与兼容回退。V2 列表返回 `{items,pagination,request_total,has_next,status_counts}`，V1 列表继续返回历史字段名 `{requests,total,request_total,page,per_page,total_pages,has_next,status_counts}`。两者共享同一个后端筛选、同名聚合和 Store 快照，避免状态计数或分页结果漂移。
 
 `GET /admin/media-requests` — 查询管理员求片列表（与 `/media/request/pending` 同 handler）。
 
@@ -1488,7 +1488,7 @@ V2 管理邀请资源为 `/api/v2/admin/invite/tree`、`/api/v2/admin/invite/cod
 
 Telegram 相关行为见 [Telegram Bot 命令](../features/telegram-bot.md)。
 
-默认 V2 Telegram 管理页面改用 `/api/v2/admin/config/schema`、`/api/v2/admin/telegram/commands/catalog`、`/api/v2/admin/telegram/roster/stats` 和 `/api/v2/admin/telegram/test`；这些资源只返回页面所需的非敏感数据，均禁止缓存。V2 换绑审核页面改用 `/api/v2/admin/telegram/rebind-requests*`。V2 只复用同一组配置校验、Bot 测试、换绑状态转换和管理员审计，不会因前端版本绕过审批、批量数量限制或撤销逻辑；V1 接口仅作为回滚与外部兼容入口保留。
+WebUI Telegram 管理页面改用 `/api/v2/admin/config/schema`、`/api/v2/admin/telegram/commands/catalog`、`/api/v2/admin/telegram/roster/stats` 和 `/api/v2/admin/telegram/test`；这些资源只返回页面所需的非敏感数据，均禁止缓存。WebUI 换绑审核页面改用 `/api/v2/admin/telegram/rebind-requests*`。V2 只复用同一组配置校验、Bot 测试、换绑状态转换和管理员审计，不会因前端版本绕过审批、批量数量限制或撤销逻辑；V1 接口仅作为回滚与外部兼容入口保留。
 
 `GET /admin/telegram/commands/catalog` 是 Bot 指令管理页的后端权威数据源，返回 `commands` 与 `disabled_commands`。`commands` 内每项包含：
 
@@ -1709,7 +1709,7 @@ curl -X POST "http://localhost:5000/api/v1/setup/complete" \
   }'
 ```
 
-默认 V2 SSR 初始化页面使用 `/api/v2/setup/status` 与 `/api/v2/setup/complete`。V2 只提供独立资源命名空间，初始化可用性、显式 WebUI intent、限流、密码/地址校验、用户与配置回滚、审计和 host-only HttpOnly 会话 Cookie 仍由同一组 Go handler 最终处理；V1 入口保留为回滚与外部兼容入口。
+WebUI 初始化页面使用 `/api/v2/setup/status` 与 `/api/v2/setup/complete`。V2 只提供独立资源命名空间，初始化可用性、显式 WebUI intent、限流、密码/地址校验、用户与配置回滚、审计和 host-only HttpOnly 会话 Cookie 仍由同一组 Go handler 最终处理；V1 入口保留为 `NEXT_PUBLIC_USE_V1_COMPAT` 回退与外部兼容入口。
 
 ### 10.4 服务器图标
 
@@ -1933,7 +1933,7 @@ curl -N "http://localhost:5000/api/v1/system/admin/runtime/logs/stream?limit=100
 
 以下接口默认关闭，开启 `Database.migration_panel_enabled` 后仅管理员可用：
 
-默认 V2 SSR 迁移页面使用 `/api/v2/admin/migration/status`、`/api/v2/admin/migration/export` 和 `/api/v2/admin/migration/import`。V2 只提供独立资源命名空间：导出仍为 POST 流式 ZIP，导入仍为受限 multipart 预览/确认；密码不进入 URL、日志或响应 JSON，归档内容不会进入浏览器状态。V1 迁移接口保留为回滚与外部兼容入口。
+WebUI 迁移页面使用 `/api/v2/admin/migration/status`、`/api/v2/admin/migration/export` 和 `/api/v2/admin/migration/import`。V2 只提供独立资源命名空间：导出仍为 POST 流式 ZIP，导入仍为受限 multipart 预览/确认；密码不进入 URL、日志或响应 JSON，归档内容不会进入浏览器状态。V1 迁移接口保留为 `NEXT_PUBLIC_USE_V1_COMPAT` 回退与外部兼容入口。
 
 `GET /system/admin/migration/status`
 
@@ -2148,7 +2148,7 @@ Telegram 管理中的「Bot 指令管理」页面不会创建第二套指令存�
 | `GET /invite/check` | `AuthPublic` | 校验邀请码（IP 限流 10/60s） |
 | `POST /invite/use` | `AuthUser` | 使用邀请码 |
 
-V2 用户邀请资源为 `/api/v2/invite/summary`、`/api/v2/invite/codes`、`/api/v2/invite/renew-codes` 以及两个 `detach-expired` 路径。摘要为私有 `no-store` 聚合读取；V2 写入只是 SSR 资源适配器，继续使用同一套邀请开关、直属关系、真实 Emby 资格、历史关系维护、外部删除、Store 原子写入和审计规则。
+V2 用户邀请资源为 `/api/v2/invite/summary`、`/api/v2/invite/codes`、`/api/v2/invite/renew-codes` 以及两个 `detach-expired` 路径。摘要为私有 `no-store` 聚合读取；V2 写入只是资源适配器，继续使用同一套邀请开关、直属关系、真实 Emby 资格、历史关系维护、外部删除、Store 原子写入和审计规则。
 
 ### 11.4 Signin 模块
 
@@ -2162,7 +2162,7 @@ V2 用户邀请资源为 `/api/v2/invite/summary`、`/api/v2/invite/codes`、`/a
 | `POST /signin/renew` | `AuthUser` | 使用签到积分续期；要求已绑定 Emby，消耗积分和续期天数由管理员配置 |
 | `GET /signin/history` | `AuthUser` | 签到历史 |
 
-V2 签到资源为 `GET /api/v2/signin/summary`、`POST /api/v2/signin`、`POST /api/v2/signin/renew` 和 `PUT /api/v2/signin/preferences`。它们返回私有 `no-store` 响应，V2 页面写入成功后重新由 SSR 读取权威摘要；签到日期幂等、Emby 绑定限制、自动续期资格、积分扣减和审计仍由共享 handler/Store 决定。
+V2 签到资源为 `GET /api/v2/signin/summary`、`POST /api/v2/signin`、`POST /api/v2/signin/renew` 和 `PUT /api/v2/signin/preferences`。它们返回私有 `no-store` 响应，页面写入成功后重新由后端读取权威摘要；签到日期幂等、Emby 绑定限制、自动续期资格、积分扣减和审计仍由共享 handler/Store 决定。
 
 `POST /signin/renew` 只续期已有 Emby 权益。用户没有 `EmbyID` 或仅持有 `PendingEmby` 待开通资格时返回 `409 RENEW_REQUIRES_EMBY`，Store 在原子写入内复核后才扣分，因此拒绝时积分和到期时间都不变。成功后在同一次状态写入中扣减 `signin.points` 并延长当前用户 `expired_at`；积分不足返回 `SIGNIN_INSUFFICIENT_POINTS`，功能未开启返回 `SIGNIN_RENEWAL_DISABLED`。
 

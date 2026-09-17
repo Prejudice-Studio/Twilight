@@ -102,7 +102,7 @@ JSON 请求体由统一解码器限制为 256 KiB、最多 32 层嵌套且只能
 ### 4.1 运行时 API 文档边界
 
 - `GET /api/v2/openapi.json` 是公开接口，只输出 `AuthPublic` 路由，不能枚举后台管理或用户态路由。旧 `/api/v1/openapi.json` 继续兼容。
-- 默认 `/api-docs` 是公开 SSR 页面：服务端读取公开 OpenAPI；只有当前会话是管理员时才读取受保护的 `/api/v2/admin/docs/routes`。旧 `/api/v1/docs` 仍是兼容控制台，但不再是默认前端。
+- 公开 API 控制台由 Go 直接提供：`GET /api/v2/docs`（旧 `/api/v1/docs` 兼容）。未登录时只读取公开 OpenAPI，当前会话是管理员时才读取受保护的 `/api/v2/admin/docs/routes`。WebUI 不再内置独立的 `/api-docs` 页面。
 - 完整路由清单只来自受 `AuthAdmin` 保护的 `GET /api/v1/system/admin/apis`，不得把该清单内联到公开 HTML 或公开 OpenAPI。
 - API 控制台只提供本地测试便利。输入 API Key 后使用 `X-API-Key` 请求头发送，不会把密钥写入服务端文档、日志或页面静态内容；共享屏幕和截图时仍应手动清空敏感字段。
 

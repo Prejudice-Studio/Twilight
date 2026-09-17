@@ -56,7 +56,7 @@
 
 管理员列表接口 `GET /admin/regcodes` 支持 `?source=admin|invite` 筛选参数。后端 `handleListRegcodes` 中，`sourceFilter=admin` 会匹配显式 `"admin"` 和历史空值；`sourceFilter=invite` 仅匹配 `"invite"`。
 
-V2 管理页面使用 `/api/v2/admin/regcodes` 资源集合：列表统一返回 `items` 和 `pagination`，详情使用 `/api/v2/admin/regcodes/{code}`，使用者明细使用 `/usage`。V2 的 `POST`、`PATCH`、`DELETE` 及批量/清理资源复用同一注册码 Store 与审计状态机，不建立第二份缓存或注册码事实源；V1 路径仅保留给回滚前端和外部兼容调用。
+WebUI 管理页使用 `/api/v2/admin/regcodes` 资源集合：列表统一返回 `items` 和 `pagination`，详情使用 `/api/v2/admin/regcodes/{code}`，使用者明细使用 `/usage`。V2 的 `POST`、`PATCH`、`DELETE` 及批量/清理资源复用同一注册码 Store 与审计状态机，不建立第二份缓存或注册码事实源；V1 路径仅保留给外部兼容调用与 `NEXT_PUBLIC_USE_V1_COMPAT` 回退。
 
 
 ### 取值校验与规范化

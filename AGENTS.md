@@ -77,7 +77,7 @@ Update docs in the same change when behavior changes.
 | API keys | `apikey_handlers.go` | `APIKey` | `/apikey/*`, `/users/me/apikeys` | `settings/apikey` | `api-key.md` |
 | Scheduler | `scheduler*.go` | `SchedulerRun` | `/admin/scheduler/*` | `admin/scheduler` | `backend.md` |
 | Config/runtime/database | `config_admin.go`, `runtime_logs.go`, `database_admin.go`, `system_v2.go` | runtime logs/state | `/system/admin/*`, `/api/v2/admin/health/*`, `/api/v2/admin/stats` | admin config/logs/database/status | `backend.md`, `backend-api.md` |
-| API documentation | `internal/api/docs_v2.go`, `handlers.go` | public V2 OpenAPI and admin-only route metadata | `/api/v2/openapi.json`, `/api/v2/admin/docs/routes` | `api-docs` | `api-index.md`, `backend-api.md` |
+| API documentation | `internal/api/docs_v2.go`, `handlers.go` | public V2 OpenAPI and admin-only route metadata | `/api/v2/openapi.json`, `/api/v2/docs`, `/api/v2/admin/docs/routes` | Go console at `/api/v2/docs` (no dedicated WebUI page) | `api-index.md`, `backend-api.md` |
 | Twilight migration core | `internal/migration`, `internal/api/migration_resources.go`, `migration_handlers.go` | versioned archive format, validated data/config/resource files, and admin preview/import/export boundary | `/api/v2/admin/migration/*` (V1 compatibility remains) | `admin/migration` | `backend-api.md`, `backend.md` |
 | Emby activity logs / legacy playback records | `emby_activity.go` | `playback.go` | `/admin/emby/activity-logs` | `admin/emby` | `backend-api.md` |
 | Trusted viewing statistics | `internal/playback` rules + `internal/store/trusted_playback.go` repository adapter | `trusted_playback.go` and `twilight_playback_*` tables; trusted event state machine with rebuildable daily buckets, exposed only behind an authenticated layer | `/api/v2/playback/*` when enabled | no WebUI surface yet | `backend.md`, `backend-api.md` |
@@ -179,7 +179,7 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Ordinary route-level one-shot entrance effects should use the shared `page-enter` CSS class or CSS transitions. Reserve `framer-motion` for pages with real interactive or coordinated animation requirements; do not add it for a single opacity/translate wrapper.
 - The admin landing page and system-statistics page are dense operational surfaces and must remain static; do not import `framer-motion` or add decorative gradient/orb layers to their metric cards. Stable CSS transitions are sufficient for hover feedback.
 - Keep controls dimensionally stable across languages.
-- V1 client list/detail reads use `AbortSignal` and `useAsyncResource` only for rollback maintenance. The product client targets `/api/v2/*`; verify coverage with `scripts/check-frontend-v2-coverage.py`, which cross-checks every call site in `webui/src/lib/api.ts` against `internal/api/routes_v2.go`.
+- The WebUI (`webui/`, Next.js) is the only frontend and targets `/api/v2/*`; page reads go through `useAsyncResource` with `AbortSignal` so superseded reads are cancelled. Verify coverage with `scripts/check-frontend-v2-coverage.py`, which cross-checks every call site in `webui/src/lib/api.ts` against `internal/api/routes_v2.go`. V1 stays reachable only via `NEXT_PUBLIC_USE_V1_COMPAT` and external API keys.
 - The admin user page cache is bounded to a small LRU window by both query count and
   retained row count. Keep cache hits moving to the newest position, and do not turn
   user-list filter/page history into an unbounded browser-side copy of the user base.
