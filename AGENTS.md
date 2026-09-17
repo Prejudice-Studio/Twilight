@@ -506,10 +506,11 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 
 ## Dashboard Online Viewer Rules
 
-- The dashboard's ordinary users may show only the current Emby online viewer count from `/system/emby-viewers`; this route is `AuthUser` and must never become anonymous again. Administrators may additionally read the bounded watcher/media summary from `/admin/emby/now-playing`, which is `AuthAdmin` only and must never be exposed through an ordinary-user route.
-- Ordinary users must not see who is watching, item names, covers, progress, or other now-playing details on the dashboard. The administrator dashboard may display the bounded summary returned by the admin-only endpoint.
-- `/api/v1/emby/online` returns viewer count only (`current_online`); it must never emit a populated `users` array of who/what is playing. The count-only contract is enforced in `handleEmbyOnline`, not just in the UI.
-- Do not restore the former `/api/v1/emby/now-playing` ordinary-user route. The protected replacement is `/api/v1/admin/emby/now-playing`; ordinary users must never receive watcher identity, media title, cover, or playback progress.
+- The dashboard shows only the current Emby online viewer count, for **every** role including administrators; the count comes from `/system/emby-viewers`, which is `AuthUser` and must never become anonymous again.
+- No role sees "who is watching what": no watcher identity, item name, cover, or playback progress is rendered anywhere in the WebUI. `/api/v2/admin/emby/now-playing` stays `AuthAdmin` for operator tooling, but the WebUI no longer calls it (the `getAdminEmbyNowPlaying` / `getEmbyNowPlaying` helpers and `EmbyNowPlaying` types were removed on purpose — do not re-add them to the dashboard).
+- There is no ordinary-user now-playing route. V2 must never register `/api/v2/emby/now-playing`: `AuthPublic` means fully anonymous in `authenticate()`, so registering it there exposed watcher identity to unauthenticated callers.
+- `/api/v1/emby/online` and `/api/v2/emby/online` return viewer count only (`current_online`); they must never emit a populated `users` array of who/what is playing. The count-only contract is enforced in `online()`, not just in the UI. `/api/v2/emby/{stats,viewer-count,online}` are `AuthUser`, matching V1.
+- Do not restore the former `/api/v1/emby/now-playing` ordinary-user route. The protected replacement is `/api/v1/admin/emby/now-playing`; ordinary users must never receive watcher identity, media title, cover, or playback progress through any route.
 
 ## Network Transport Rules
 

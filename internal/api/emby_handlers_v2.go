@@ -18,11 +18,6 @@ func (a *App) handleV2EmbyViewerCount(w http.ResponseWriter, r *http.Request, _ 
 	ok(w, "OK", map[string]any{"viewers": count})
 }
 
-func (a *App) handleV2EmbyNowPlaying(w http.ResponseWriter, r *http.Request, _ Params) {
-	result, _ := a.emby().nowPlaying(r.Context())
-	ok(w, "OK", result)
-}
-
 func (a *App) handleV2AdminEmbyNowPlaying(w http.ResponseWriter, r *http.Request, _ Params) {
 	// Admin version uses the same V1 handler logic
 	a.handleEmbyNowPlaying(w, r, nil)

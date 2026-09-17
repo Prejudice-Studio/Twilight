@@ -275,11 +275,14 @@ func (a *App) registerV2Routes() {
 	a.add(http.MethodPost, "/api/v2/admin/emby/users/:embyId/kick", AuthAdmin, a.handleV2AdminEmbyUserKick)
 
 	// Emby extension resources: stats, online status, now playing, sessions, URLs
-	a.add(http.MethodGet, "/api/v2/emby/stats", AuthPublic, a.handleV2EmbyStats)
-	a.add(http.MethodGet, "/api/v2/emby/viewer-count", AuthPublic, a.handleV2EmbyViewerCount)
-	a.add(http.MethodGet, "/api/v2/emby/now-playing", AuthPublic, a.handleV2EmbyNowPlaying)
+	// Emby 媒体库与人数的读取面与 V1 的 AuthUser 口径保持一致：不允许匿名访问，
+	// 匿名调用者不应拿到站点媒体规模或在线人数。
+	a.add(http.MethodGet, "/api/v2/emby/stats", AuthUser, a.handleV2EmbyStats)
+	a.add(http.MethodGet, "/api/v2/emby/viewer-count", AuthUser, a.handleV2EmbyViewerCount)
+	// 注意：不存在 /api/v2/emby/now-playing 普通用户路由。观看明细属于隐私数据，
+	// 任何角色都不能通过普通用户路由拉取"谁在看什么"。
 	a.add(http.MethodGet, "/api/v2/admin/emby/now-playing", AuthAdmin, a.handleV2AdminEmbyNowPlaying)
-	a.add(http.MethodGet, "/api/v2/emby/online", AuthPublic, a.handleV2EmbyOnline)
+	a.add(http.MethodGet, "/api/v2/emby/online", AuthUser, a.handleV2EmbyOnline)
 	a.add(http.MethodGet, "/api/v2/emby/urls", AuthUser, a.handleV2EmbyURLs)
 	a.add(http.MethodGet, "/api/v2/admin/emby/urls", AuthAdmin, a.handleV2AdminEmbyURLs)
 	a.add(http.MethodGet, "/api/v2/emby/sessions", AuthUser, a.handleV2EmbyUserSessions)
