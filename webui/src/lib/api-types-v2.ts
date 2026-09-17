@@ -266,23 +266,27 @@ export interface V2UserListParams {
 
 /**
  * V2 用户列表响应
+ *
+ * 集合沿用统一的 items/pagination 信封，与 internal/api/admin_user_v2.go 的
+ * v2AdminUserListResponse 保持一致；api.ts 负责还原成页面使用的 V1 字段。
  */
 export interface V2UserListResponse {
-  users: User[];
+  items: User[];
   pagination: {
     total: number;
     page: number;
     per_page: number;
-    next_cursor?: string;
-    has_next: boolean;
+    total_pages: number;
   };
 }
 
 /**
  * V2 用户详情响应
+ *
+ * 单个资源统一收在 item 里，与 handleV2AdminUser 的响应保持一致。
  */
 export interface V2UserDetailResponse {
-  user: User;
+  item: User;
 }
 
 /**

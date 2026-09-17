@@ -489,7 +489,22 @@ class ApiClient {
   }
 
   async getBangumiSyncStatus(signal?: AbortSignal) {
-    return this.request<BangumiSyncStatus>("/bangumi/summary", { signal });
+    const res = await this.request<BangumiSyncStatus & {
+      status?: BangumiSyncStatus & { token_set?: boolean };
+      account?: unknown;
+      collections?: unknown[];
+      recent_activity?: unknown[];
+    }>("/bangumi/summary", { signal });
+    // V2 响应结构转换为 V1 格式：同步状态收在 status 里，token_set 对应页面的 bgm_token_set。
+    if (res.success && res.data?.status) {
+      const status = res.data.status;
+      return {
+        success: true,
+        message: res.message,
+        data: { ...status, bgm_token_set: status.bgm_token_set ?? status.token_set ?? false } as BangumiSyncStatus,
+      } as ApiResponse<BangumiSyncStatus>;
+    }
+    return res as ApiResponse<BangumiSyncStatus>;
   }
 
   async getBangumiMe(signal?: AbortSignal) {
@@ -638,7 +653,7 @@ class ApiClient {
 
   getRegisterBindCodeStatusWebSocketUrl(code: string) {
     const base = API_BASE || (typeof window !== "undefined" ? window.location.origin : "http://localhost");
-    const url = new URL("/api/v2/users/telegram/register/bind-code/ws", base);
+    const url = new URL("/api/v1/users/telegram/register/bind-code/ws", base);
     url.searchParams.set("code", code);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     return url.toString();
@@ -1014,17 +1029,32 @@ class ApiClient {
 
   // Media
   async searchMedia(query: string, source = "all", signal?: AbortSignal) {
-    return this.request<{ results: MediaItem[]; total?: number; warnings?: Record<string, string> }>(
+    type MediaSearchPayload = { results: MediaItem[]; total?: number; warnings?: Record<string, string> };
+    const res = await this.request<{ items?: MediaItem[]; total?: number; warnings?: Record<string, string> }>(
       `/media/search?q=${encodeURIComponent(query)}&source=${source}`,
       { signal }
     );
+    // V2 集合返回 items，页面沿用 V1 的 results 字段名。
+    if (res.success && res.data?.items) {
+      return {
+        success: true,
+        message: res.message,
+        data: { results: res.data.items, total: res.data.total, warnings: res.data.warnings } as MediaSearchPayload,
+      } as ApiResponse<MediaSearchPayload>;
+    }
+    return res as ApiResponse<MediaSearchPayload>;
   }
 
   async getMediaDetail(source: string, mediaId: number, mediaType: string, signal?: AbortSignal) {
-    return this.request<MediaDetail>(
+    const res = await this.request<{ item?: MediaDetail } & MediaDetail>(
       `/media/detail?source=${source}&media_id=${mediaId}&media_type=${mediaType}`,
       { signal }
     );
+    // V2 把单个资源收在 item 里，页面直接消费详情对象。
+    if (res.success && res.data?.item) {
+      return { success: true, message: res.message, data: res.data.item } as ApiResponse<MediaDetail>;
+    }
+    return res as ApiResponse<MediaDetail>;
   }
 
   async getMediaByTmdbId(tmdbId: number, type: "movie" | "tv" = "movie", includeDetails = true, signal?: AbortSignal) {
@@ -1063,18 +1093,24 @@ class ApiClient {
   }
 
   async getMyRequests(signal?: AbortSignal) {
-    const res = await this.request<MediaRequest[]>(
+    const res = await this.request<{ items?: MediaRequest[]; total?: number }>(
       "/media/requests",
       { signal, cache: "no-store" },
       { cacheRead: false, dedupe: false },
     );
-    if (res.success && Array.isArray(res.data)) {
-      res.data = res.data.map((item) => ({
-        ...item,
-        status: normalizeMediaRequestStatus(item.status, "user"),
-      }));
+    // V2 集合返回 { items, total }，页面直接消费求片数组。
+    const items = Array.isArray(res.data) ? res.data : res.data?.items || [];
+    if (res.success) {
+      return {
+        success: true,
+        message: res.message,
+        data: items.map((item) => ({
+          ...item,
+          status: normalizeMediaRequestStatus(item.status, "user"),
+        })),
+      } as ApiResponse<MediaRequest[]>;
     }
-    return res;
+    return { success: false, message: res.message, error_code: res.error_code } as ApiResponse<MediaRequest[]>;
   }
 
   // Emby
@@ -1130,22 +1166,26 @@ class ApiClient {
     if (params.search) query.set("search", params.search);
     if (params.sort) query.set("sort", params.sort);
     const res = await this.request<V2UserListResponse>(`/admin/users?${query}`, { signal }, { apiVersion: "v2" });
-    if (res.success && res.data?.users) {
-      res.data.users = res.data.users.map(user => ({
+    // V2 响应结构转换为 V1 格式：集合统一是 items/pagination，页面仍按 users/total/pages 读取。
+    if (res.success && res.data?.items) {
+      const users = res.data.items.map(user => ({
         ...user,
         avatar: this.toAbsoluteAssetUrl(user.avatar) || undefined,
       }));
-    }
-    // V2 响应结构转换为 V1 格式
-    if (res.success && res.data?.pagination) {
-      const v1Response: AdminUserListResponse = {
-        users: res.data.users as UserInfo[],
-        total: res.data.pagination.total,
-        page: res.data.pagination.page,
-        per_page: res.data.pagination.per_page,
-        pages: Math.ceil(res.data.pagination.total / res.data.pagination.per_page),
-      };
-      return { success: true, message: res.message, data: v1Response } as ApiResponse<AdminUserListResponse>;
+      const pagination = res.data.pagination;
+      const total = pagination?.total ?? users.length;
+      const perPage = pagination?.per_page || users.length || 1;
+      return {
+        success: true,
+        message: res.message,
+        data: {
+          users: users as UserInfo[],
+          total,
+          page: pagination?.page ?? 1,
+          per_page: perPage,
+          pages: pagination?.total_pages ?? Math.ceil(total / perPage),
+        } as AdminUserListResponse,
+      } as ApiResponse<AdminUserListResponse>;
     }
     // 失败或无数据时返回空响应
     return { success: false, message: res.message, error_code: res.error_code } as ApiResponse<AdminUserListResponse>;
@@ -1157,12 +1197,13 @@ class ApiClient {
 
   async getUserV2(uid: number, signal?: AbortSignal) {
     const res = await this.request<V2UserDetailResponse>(`/admin/users/${uid}`, { signal }, { apiVersion: "v2" });
-    if (res.success && res.data?.user?.avatar) {
-      res.data.user.avatar = this.toAbsoluteAssetUrl(res.data.user.avatar) || undefined;
-    }
-    // V2 响应结构转换为 V1 格式
-    if (res.success && res.data?.user) {
-      return { success: true, message: res.message, data: res.data.user as UserInfo } as ApiResponse<UserInfo>;
+    // V2 把单个资源收在 item 里，页面按扁平的用户对象读取。
+    const detail = res.data?.item;
+    if (res.success && detail) {
+      if (detail.avatar) {
+        detail.avatar = this.toAbsoluteAssetUrl(detail.avatar) || undefined;
+      }
+      return { success: true, message: res.message, data: detail as UserInfo } as ApiResponse<UserInfo>;
     }
     return { success: false, message: res.message, error_code: res.error_code } as ApiResponse<UserInfo>;
   }
@@ -2659,11 +2700,28 @@ class ApiClient {
     if (params.sort) query.set("sort", params.sort);
     if (params.order) query.set("order", params.order);
     if (params.per_page) query.set("per_page", String(params.per_page));
-    return this.request<{ regcodes: Regcode[]; total: number }>(
+    const res = await this.request<{ items: Regcode[]; pagination?: { total?: number } }>(
       `/admin/regcodes?${query.toString()}`,
       { cache: "no-store", signal },
       { cacheRead: false, dedupe: false },
     );
+    // V2 响应结构转换为 V1 格式：集合统一是 items/pagination，页面仍按 regcodes/total 读取。
+    if (res.success && res.data?.items) {
+      const items = res.data.items;
+      return {
+        success: true,
+        message: res.message,
+        data: { regcodes: items, total: res.data.pagination?.total ?? items.length },
+      } as ApiResponse<{ regcodes: Regcode[]; total: number }>;
+    }
+    if (res.success && res.data) {
+      return {
+        success: true,
+        message: res.message,
+        data: { regcodes: [], total: 0 },
+      } as ApiResponse<{ regcodes: Regcode[]; total: number }>;
+    }
+    return { success: false, message: res.message, error_code: res.error_code } as ApiResponse<{ regcodes: Regcode[]; total: number }>;
   }
 
   async createRegcode(data: CreateRegcodeData) {
@@ -2730,12 +2788,19 @@ class ApiClient {
   }
 
   async getRegcodeUsers(code: string) {
-    return this.request<{
+    type RegcodeUsagePayload = {
       code: string;
       use_count: number;
       users: Array<(Partial<UserInfo> & { found: boolean; source: "uid" | "telegram" })>;
       telegram_only: Array<{ telegram_id: number; found: false; source: "telegram" }>;
-    }>(`/admin/regcodes/${encodeURIComponent(code)}/users`, { cache: "no-store" }, { cacheRead: false, dedupe: false });
+    };
+    const res = await this.request<{ item?: RegcodeUsagePayload } & RegcodeUsagePayload>(
+      `/admin/regcodes/${encodeURIComponent(code)}/usage`, { cache: "no-store" }, { cacheRead: false, dedupe: false });
+    // V2 把单个资源收在 item 里，页面按扁平字段读取。
+    if (res.success && res.data?.item) {
+      return { success: true, message: res.message, data: res.data.item } as ApiResponse<RegcodeUsagePayload>;
+    }
+    return res as ApiResponse<RegcodeUsagePayload>;
   }
 
   async clearRegcodeUsage(code: string) {
@@ -2744,17 +2809,29 @@ class ApiClient {
       cleared_use_count: number;
       cleared_used_by_uids: number[] | null;
       cleared_used_by_telegram: number[] | null;
-    }>(`/admin/regcodes/${encodeURIComponent(code)}/clear-usage`, {
+    }>(`/admin/regcodes/${encodeURIComponent(code)}/usage/clear`, {
       method: "POST",
       body: JSON.stringify({ confirm: "CLEAR_REGCODE_USAGE" }),
     });
   }
 
   async getAdminInviteCodes(signal?: AbortSignal) {
-    return this.request<{
-      codes: InviteCodeItem[];
-      total: number;
-    }>("/admin/invite/codes", { cache: "no-store", signal }, { cacheRead: false, dedupe: false });
+    type AdminInviteCodesPayload = { codes: InviteCodeItem[]; total: number };
+    const res = await this.request<{ items?: InviteCodeItem[]; pagination?: { total?: number } }>(
+      "/admin/invite/codes", { cache: "no-store", signal }, { cacheRead: false, dedupe: false });
+    // V2 响应结构转换为 V1 格式：items/pagination 还原为 codes/total。
+    if (res.success && res.data?.items) {
+      const items = res.data.items;
+      return {
+        success: true,
+        message: res.message,
+        data: { codes: items, total: res.data.pagination?.total ?? items.length },
+      } as ApiResponse<AdminInviteCodesPayload>;
+    }
+    if (res.success && res.data) {
+      return { success: true, message: res.message, data: { codes: [], total: 0 } } as ApiResponse<AdminInviteCodesPayload>;
+    }
+    return { success: false, message: res.message, error_code: res.error_code } as ApiResponse<AdminInviteCodesPayload>;
   }
 
   async forgotPasswordByEmby(data: { emby_username: string; emby_password: string }) {
@@ -2917,13 +2994,20 @@ class ApiClient {
     if (params.status) query.set("status", params.status);
     if (params.source && params.source !== "all") query.set("source", params.source);
     if (params.query?.trim()) query.set("q", params.query.trim());
-    const res = await this.request<AdminMediaRequestListResponse>(
+    const res = await this.request<{
+      items?: MediaRequest[];
+      pagination?: { page?: number; per_page?: number; total?: number; total_pages?: number };
+      request_total?: number;
+      has_next?: boolean;
+      status_counts?: AdminMediaRequestListResponse["status_counts"];
+    }>(
       `/admin/media-requests?${query}`,
       { signal, cache: "no-store" },
       { cacheRead: false, dedupe: false },
     );
-    if (res.success && res.data?.requests) {
-      res.data.requests = res.data.requests.map((item) => {
+    // V2 响应结构转换为 V1 格式：items/pagination 还原为 requests/total/page/per_page/total_pages。
+    if (res.success && res.data?.items) {
+      const requests = res.data.items.map((item) => {
         const groupedRequests = (item.grouped_requests || [item]).map((member) => ({
           ...member,
           status: normalizeMediaRequestStatus(member.status, "admin"),
@@ -2935,8 +3019,25 @@ class ApiClient {
           group_count: item.group_count || groupedRequests.length,
         };
       });
+      const pagination = res.data.pagination;
+      const total = pagination?.total ?? requests.length;
+      const perPage = pagination?.per_page || 20;
+      return {
+        success: true,
+        message: res.message,
+        data: {
+          requests,
+          total,
+          request_total: res.data.request_total ?? total,
+          page: pagination?.page ?? 1,
+          per_page: perPage,
+          total_pages: pagination?.total_pages ?? Math.ceil(total / perPage),
+          has_next: res.data.has_next ?? false,
+          status_counts: res.data.status_counts ?? ({} as AdminMediaRequestListResponse["status_counts"]),
+        } as AdminMediaRequestListResponse,
+      } as ApiResponse<AdminMediaRequestListResponse>;
     }
-    return res;
+    return res as ApiResponse<AdminMediaRequestListResponse>;
   }
 
   /**
@@ -3219,7 +3320,13 @@ class ApiClient {
 
   // 管理员：邀请森林
   async adminGetInviteTree(signal?: AbortSignal) {
-    return this.request<InviteForest>("/admin/invite/tree", { cache: "no-store", signal }, { cacheRead: false, dedupe: false });
+    const res = await this.request<{ item?: InviteForest } & InviteForest>(
+      "/admin/invite/tree", { cache: "no-store", signal }, { cacheRead: false, dedupe: false });
+    // V2 把单个资源收在 item 里，页面直接消费森林对象。
+    if (res.success && res.data?.item) {
+      return { success: true, message: res.message, data: res.data.item } as ApiResponse<InviteForest>;
+    }
+    return res as ApiResponse<InviteForest>;
   }
 
   async adminDetachInviteUser(uid: number) {
