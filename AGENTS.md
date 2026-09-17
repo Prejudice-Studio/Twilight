@@ -512,6 +512,15 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - `/api/v1/emby/online` and `/api/v2/emby/online` return viewer count only (`current_online`); they must never emit a populated `users` array of who/what is playing. The count-only contract is enforced in `online()`, not just in the UI. `/api/v2/emby/{stats,viewer-count,online}` are `AuthUser`, matching V1.
 - Do not restore the former `/api/v1/emby/now-playing` ordinary-user route. The protected replacement is `/api/v1/admin/emby/now-playing`; ordinary users must never receive watcher identity, media title, cover, or playback progress through any route.
 
+## Playback Ranking (日榜/周榜) Rules
+
+- Data source: `twilight_playback_records`, written by the Emby activity-log sync (`persistEmbyPlaybackRecordsFromActivity`). Rankings are aggregates only — they answer "which title is hottest / who watched the most", never "who is watching what right now".
+- Aggregation lives in `store.PlaybackRank(since, limit)`: two `GROUP BY` queries (media by `item_id`, users by `uid`) with a `played_at >= $1` filter, falling back to an in-memory scan of `state.PlaybackRecords` when PostgreSQL is unavailable. `duration` is **seconds**.
+- Windows are computed server-side in `playRankWindow`: `day` = today 00:00, `week` = Monday 00:00, both in server local time. Do not move window math into the frontend.
+- Gating is three independent config flags (`Emby.play_rank_enabled`, `play_rank_user_visible`, `play_rank_anonymous`, surfaced in the admin config Emby section): `/api/v2/emby/play-rank` is registered `AuthPublic` and decides access **inside** `handleV2PlayRank` — anonymous needs `play_rank_anonymous`, logged-in non-admins need `play_rank_user_visible`. `/api/v2/admin/emby/play-rank` is `AuthAdmin` and always available.
+- Privacy: the public ranking masks usernames (`maskPlayRankUsername`) and never returns `uid`; the admin ranking returns `uid` + raw `username`. Cache keys include the identity flag so the two payloads can never be served to the wrong audience.
+- Cache: 60s per `range|limit|identity`, `refresh=1` bypasses it, and `invalidatePlayRankCache` runs after activity-log sync persists new records.
+
 ## Network Transport Rules
 
 - `sharedHTTPTransport` is the single shared transport for all external HTTP calls (Emby, Telegram, Bangumi, TMDB), configured with `MaxIdleConns=64`, `MaxIdleConnsPerHost=8`, dial timeout 5s.
