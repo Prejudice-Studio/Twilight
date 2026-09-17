@@ -41,6 +41,7 @@ import type {
   EmbyDeviceAuditData,
   EmbyInfo,
   EmbyLibraryStats,
+  PlayRankResponse,
   EmbyRegisterStatus,
   EmbySession,
   LoginDevice,
@@ -1753,6 +1754,29 @@ class ApiClient {
 
   async getEmbyViewerCount(signal?: AbortSignal) {
     return this.request<{ viewers: number }>("/system/emby-viewers", { signal });
+  }
+
+  // 播放排行榜（日榜/周榜）。普通用户拿到的是脱敏榜单；管理员走 getAdminPlayRank。
+  async getPlayRank(range: "day" | "week" = "day", opts: { limit?: number; refresh?: boolean; signal?: AbortSignal } = {}) {
+    const params = new URLSearchParams({ range });
+    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.refresh) params.set("refresh", "1");
+    return this.request<PlayRankResponse>(
+      `/emby/play-rank?${params.toString()}`,
+      { signal: opts.signal, cache: "no-store" },
+      { cacheRead: false, dedupe: false, apiVersion: "v2" },
+    );
+  }
+
+  async getAdminPlayRank(range: "day" | "week" = "day", opts: { limit?: number; refresh?: boolean; signal?: AbortSignal } = {}) {
+    const params = new URLSearchParams({ range });
+    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.refresh) params.set("refresh", "1");
+    return this.request<PlayRankResponse>(
+      `/admin/emby/play-rank?${params.toString()}`,
+      { signal: opts.signal, cache: "no-store" },
+      { cacheRead: false, dedupe: false, apiVersion: "v2" },
+    );
   }
 
   async getRuntimeStatus(signal?: AbortSignal) {
