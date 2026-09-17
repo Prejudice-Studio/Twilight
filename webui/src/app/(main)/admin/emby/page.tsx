@@ -59,6 +59,8 @@ interface ConnectivityResult {
   emby_url: string;
   tests: TestResult[];
   overall: boolean;
+  /** not_configured / online / unreachable */
+  status?: string;
   server_info?: { name: string; version: string; os: string; id: string };
 }
 
@@ -370,7 +372,7 @@ export default function AdminEmbyPage() {
         className="space-y-5"
       >
         <div className="custom-scrollbar overflow-x-auto overscroll-x-contain pb-1">
-        <TabsList className="i18n-stable-tabs grid h-auto min-w-[34rem] grid-cols-3 sm:w-fit sm:min-w-0">
+        <TabsList className="i18n-stable-tabs grid h-auto w-full grid-cols-3 sm:w-fit">
           <TabsTrigger value="accounts" className="gap-2">
             <Server className="h-4 w-4" />
             {t("adminEmby.accountsTab")}

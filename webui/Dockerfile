@@ -18,6 +18,12 @@ FROM node:22-bookworm-slim AS build
 
 WORKDIR /app
 
+# Next.js bakes NEXT_PUBLIC_* into the browser bundle, so this must be present at
+# build time. Leave it empty for a same-origin deployment: the browser then calls
+# its own /api/* and next.config.mjs rewrites that to BACKEND_URL at runtime.
+ARG NEXT_PUBLIC_API_URL=
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
 # Enable pnpm
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 

@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
 import {
   Coins,
   Flame,
@@ -209,7 +208,7 @@ export default function ScorePage() {
   return (
     <div className="space-y-6">
       {/* 头部：余额 + 签到按钮 */}
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+      <div className="page-enter">
         <Card className="overflow-hidden border-border/60">
           <CardContent className="relative flex flex-col gap-6 p-6 md:flex-row md:items-center md:justify-between">
             <div className="flex items-center gap-5">
@@ -305,7 +304,7 @@ export default function ScorePage() {
             </div>
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
 
       {/* 三个统计卡 */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">

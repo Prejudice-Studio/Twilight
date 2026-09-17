@@ -2,7 +2,6 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { motion } from "framer-motion";
 import {
   User,
   RefreshCw,
@@ -63,16 +62,6 @@ import { friendlyError } from "@/lib/validators";
 import { EmailCodeInput } from "@/components/email-code-input";
 import { telegramBotUrl } from "@/lib/safe-url";
 
-const container = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.1 } },
-};
-
-const item = {
-  hidden: { opacity: 0, y: 20 },
-  show: { opacity: 1, y: 0 },
-};
-
 export default function SettingsPage() {
   const { toast } = useToast();
   const { locale, setLocale, t } = useI18n();
@@ -92,10 +81,6 @@ export default function SettingsPage() {
   const [passwordChangeEmailRequired, setPasswordChangeEmailRequired] = useState(false);
   const [embyPasswordEmailRequired, setEmbyPasswordEmailRequired] = useState(false);
   const [embyPasswordOldPasswordRequired, setEmbyPasswordOldPasswordRequired] = useState(false);
-
-  // 仅首次挂载播放进场动画；切语言不再重播
-  const [hasAppeared, setHasAppeared] = useState(false);
-  useEffect(() => { setHasAppeared(true); }, []);
 
   // Telegram bind code
   const [bindCode, setBindCode] = useState<string | null>(null);
@@ -391,7 +376,7 @@ export default function SettingsPage() {
       setBindCode(null);
       setBindCodeExpiry(0);
       toast({ title: t("settings.rebindCompleteTitle"), variant: "success" });
-      void loadData();
+      void loadData().catch(() => undefined);
       void fetchUser();
     },
     onTerminalError: (data) => {
@@ -513,7 +498,7 @@ export default function SettingsPage() {
         toast({ title: t("settings.rebindSubmitSuccess"), description: res.message, variant: "success" });
         setRebindDialogOpen(false);
         setRebindReason("");
-        loadData();
+        void loadData().catch(() => undefined);
       } else {
         toast({ title: t("settings.rebindSubmitFailed"), description: res.message, variant: "destructive" });
       }
@@ -532,7 +517,7 @@ export default function SettingsPage() {
         toast({ title: t("settings.unbindSuccess"), variant: "success" });
         setBindCode(null);
         setBindCodeExpiry(0);
-        loadData();
+        void loadData().catch(() => undefined);
         fetchUser();
       } else {
         toast({ title: t("settings.unbindFailed"), description: res.message, variant: "destructive" });
@@ -779,7 +764,7 @@ export default function SettingsPage() {
           setEmbyPasswordOldPasswordRequired(false);
         }
         toast({ title: t("settings.securityPreferenceSaved"), variant: "success" });
-        void loadData();
+        void loadData().catch(() => undefined);
         void fetchUser();
         return true;
       }
@@ -863,7 +848,7 @@ export default function SettingsPage() {
   }, [runLineLatencyTests]);
 
   if (error) {
-    return <PageError message={error} onRetry={() => void loadData()} />;
+    return <PageError message={error} onRetry={() => void loadData().catch(() => undefined)} />;
   }
 
   if (isLoading) {
@@ -871,19 +856,14 @@ export default function SettingsPage() {
   }
 
   return (
-    <motion.div
-      variants={container}
-      initial={hasAppeared ? false : "hidden"}
-      animate="show"
-      className="flex flex-col gap-6"
-    >
+    <div className="flex flex-col gap-6 page-enter">
       <div>
         <h1 className="text-3xl font-bold">{t("settings.title")}</h1>
         <p className="text-muted-foreground">{t("settings.description")}</p>
       </div>
 
       {/* 快速导航 */}
-      <motion.div variants={item} className="order-[75]">
+      <div className="order-[75]">
         <div className="grid gap-4 sm:grid-cols-3">
           <Link href="/settings/appearance" className="group">
             <Card className="glass-card cursor-pointer hover:shadow-lg transition-all h-full">
@@ -899,9 +879,9 @@ export default function SettingsPage() {
             </Card>
           </Link>
         </div>
-      </motion.div>
+      </div>
 
-      <motion.div variants={item} className="order-[80]">
+      <div className="order-[80]">
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -929,10 +909,10 @@ export default function SettingsPage() {
             <p className="text-xs text-muted-foreground">{t("settings.localeHelp")}</p>
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
 
       {/* Account Info */}
-      <motion.div variants={item} className="order-[10]">
+      <div className="order-[10]">
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -986,10 +966,10 @@ export default function SettingsPage() {
             </div>
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
 
       {/* Telegram Binding */}
-      <motion.div variants={item} className="order-[20]">
+      <div className="order-[20]">
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -1169,10 +1149,10 @@ export default function SettingsPage() {
             )}
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
 
       {/* Emby Binding */}
-      <motion.div variants={item} className="order-[30]">
+      <div className="order-[30]">
         <Card className="glass-card border-primary/20 bg-primary/5">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -1274,11 +1254,11 @@ export default function SettingsPage() {
             )}
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
 
       {/* API Key Management */}
       {user?.emby_id && (
-        <motion.div variants={item} className="order-[35]">
+        <div className="order-[35]">
           <Card className="glass-card">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -1306,11 +1286,11 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
-        </motion.div>
+        </div>
       )}
 
       {/* Password Change & Emby URLs */}
-      <motion.div variants={item} className="order-[40]">
+      <div className="order-[40]">
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -1346,10 +1326,10 @@ export default function SettingsPage() {
             </div>
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
 
       {linesRequireRenewal ? (
-        <motion.div variants={item} className="order-[45]">
+        <div className="order-[45]">
           <Card className="glass-card border-destructive/30">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-destructive">
@@ -1361,9 +1341,9 @@ export default function SettingsPage() {
               </CardDescription>
             </CardHeader>
           </Card>
-        </motion.div>
+        </div>
       ) : !linesRequireEmby && (
-      <motion.div variants={item} className="order-[50]">
+      <div className="order-[50]">
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -1468,12 +1448,12 @@ export default function SettingsPage() {
             )}
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
       )}
 
       {/* Bangumi */}
       {bangumiAnyEnabled && (
-      <motion.div variants={item} className="order-[60]">
+      <div className="order-[60]">
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -1548,10 +1528,10 @@ export default function SettingsPage() {
             <Separator />
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
       )}
 
-      <motion.div variants={item} className="order-[42]">
+      <div className="order-[42]">
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -1610,10 +1590,10 @@ export default function SettingsPage() {
             </div>
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
 
       {/* 登录通知 */}
-      <motion.div variants={item} className="order-[70]">
+      <div className="order-[70]">
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -1680,7 +1660,7 @@ export default function SettingsPage() {
             </div>
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
 
       {/* Bind Emby Dialog */}
       <Dialog open={bindEmbyOpen} onOpenChange={(open) => {
@@ -2106,6 +2086,6 @@ export default function SettingsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </motion.div>
+    </div>
   );
 }

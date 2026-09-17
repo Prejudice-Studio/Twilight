@@ -2,7 +2,6 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
-import { motion } from "framer-motion";
 import {
   Palette,
   Upload,
@@ -30,16 +29,6 @@ import { useI18n, type MessageKey } from "@/lib/i18n";
 import { emitRegionRefresh, RegionRefreshKeys } from "@/lib/region-refresh";
 import { normalizeBackgroundImageValue } from "@/lib/safe-url";
 import ThemeCustomizer from "@/components/theme-customizer";
-
-const container = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.1 } },
-};
-
-const item = {
-  hidden: { opacity: 0, y: 10 },
-  show: { opacity: 1, y: 0 },
-};
 
 interface BackgroundConfig {
   lightBg: string;
@@ -120,10 +109,6 @@ export default function AppearanceSettingsPage() {
 
   // 分发标签页
   const [activeTab, setActiveTab] = useState<"background" | "avatar" | "theme">("background");
-
-  // 仅首次挂载播放进场动画；切 Tab / 切换语言不再重播，避免闪动
-  const [hasAppeared, setHasAppeared] = useState(false);
-  useEffect(() => { setHasAppeared(true); }, []);
 
   const updatePreview = useCallback((css: string, img: string, type: "light" | "dark") => {
     const combined = normalizeBackgroundImageValue(img) || normalizeBackgroundImageValue(css);
@@ -568,12 +553,10 @@ export default function AppearanceSettingsPage() {
                 {gradientPresets.map((preset) => {
                   const selected = bgValue === preset.value && !imageValue;
                   return (
-                    <motion.button
+                    <button
                       key={preset.nameKey}
                       type="button"
-                      whileHover={{ scale: 1.03 }}
-                      whileTap={{ scale: 0.98 }}
-                      className={`group overflow-hidden rounded-xl border bg-background text-left transition-all ${
+                      className={`group overflow-hidden rounded-xl border bg-background text-left transition-transform hover:scale-[1.03] active:scale-[0.98] ${
                         selected ? "border-primary shadow-sm" : "border-border/70 hover:border-primary/50"
                       }`}
                       onClick={() => applyPreset(theme, preset.value)}
@@ -582,7 +565,7 @@ export default function AppearanceSettingsPage() {
                       <div className="px-2 py-1.5 text-xs text-muted-foreground group-hover:text-foreground">
                         {t(preset.nameKey)}
                       </div>
-                    </motion.button>
+                    </button>
                   );
                 })}
               </div>
@@ -696,14 +679,9 @@ export default function AppearanceSettingsPage() {
   };
 
   return (
-    <motion.div
-      variants={container}
-      initial={hasAppeared ? false : "hidden"}
-      animate="show"
-      className="space-y-6"
-    >
+    <div className="space-y-6 page-enter">
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "background" | "avatar" | "theme")} className="space-y-5">
-        <motion.div variants={item} className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0 space-y-1">
             <h1 className="text-2xl font-bold sm:text-3xl">{t("appearance.title")}</h1>
             <p className="text-sm text-muted-foreground">{t("appearance.description")}</p>
@@ -722,10 +700,10 @@ export default function AppearanceSettingsPage() {
               {t("appearance.themeTab")}
             </TabsTrigger>
           </TabsList>
-        </motion.div>
+        </div>
 
         <TabsContent value="background" className="mt-0 space-y-5">
-          <motion.div variants={item} className="grid gap-5">
+          <div className="grid gap-5">
             {renderBackgroundPanel("light")}
             {renderBackgroundPanel("dark")}
 
@@ -745,11 +723,11 @@ export default function AppearanceSettingsPage() {
                 </Button>
               </div>
             </div>
-          </motion.div>
+          </div>
         </TabsContent>
 
         <TabsContent value="avatar" className="mt-0">
-          <motion.div variants={item} className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
+          <div className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
             <Card className="border-border/80 bg-card/70 backdrop-blur-sm">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg">
@@ -835,19 +813,19 @@ export default function AppearanceSettingsPage() {
                 </Alert>
               </CardContent>
             </Card>
-          </motion.div>
+          </div>
         </TabsContent>
 
         <TabsContent value="theme" className="mt-0">
-          <motion.div variants={item}>
+          <div>
             <Card>
               <CardContent className="pt-6">
                 <ThemeCustomizer />
               </CardContent>
             </Card>
-          </motion.div>
+          </div>
         </TabsContent>
       </Tabs>
-    </motion.div>
+    </div>
   );
 }

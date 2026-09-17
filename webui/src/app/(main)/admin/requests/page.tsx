@@ -190,7 +190,7 @@ export default function AdminRequestsPage() {
   }, [page, perPage, query, requestKey, source, status, t]);
 
   useEffect(() => {
-    void loadRequests();
+    void loadRequests().catch(() => undefined);
     return () => requestAbortRef.current?.abort();
   }, [loadRequests]);
 
@@ -198,7 +198,7 @@ export default function AdminRequestsPage() {
     event.preventDefault();
     const nextQuery = searchInput.trim().slice(0, 120);
     if (nextQuery === query && page === 1) {
-      void loadRequests();
+      void loadRequests().catch(() => undefined);
       return;
     }
     setPage(1);
@@ -213,7 +213,7 @@ export default function AdminRequestsPage() {
       variant: "destructive",
     });
     setActionOpen(false);
-    void loadRequests();
+    void loadRequests().catch(() => undefined);
     return true;
   };
 
@@ -417,7 +417,7 @@ export default function AdminRequestsPage() {
   });
 
   if (loadError && !hasLoaded) {
-    return <PageError message={loadError} onRetry={() => void loadRequests()} />;
+    return <PageError message={loadError} onRetry={() => void loadRequests().catch(() => undefined)} />;
   }
 
   return (
@@ -458,7 +458,7 @@ export default function AdminRequestsPage() {
             <Search className="mr-2 h-4 w-4" />
             {t("common.search")}
           </Button>
-          <Button type="button" variant="outline" className="h-11 shrink-0" onClick={() => void loadRequests()} disabled={isLoading}>
+          <Button type="button" variant="outline" className="h-11 shrink-0" onClick={() => void loadRequests().catch(() => undefined)} disabled={isLoading}>
             <RefreshCw className={isLoading ? "mr-2 h-4 w-4 animate-spin" : "mr-2 h-4 w-4"} />
             {t("common.refresh")}
           </Button>
@@ -480,7 +480,7 @@ export default function AdminRequestsPage() {
       {loadError && hasLoaded && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
           <span>{loadError}</span>
-          <Button size="sm" variant="outline" onClick={() => void loadRequests()}>{t("common.retry")}</Button>
+          <Button size="sm" variant="outline" onClick={() => void loadRequests().catch(() => undefined)}>{t("common.retry")}</Button>
         </div>
       )}
 

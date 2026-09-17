@@ -39,7 +39,7 @@ export default function AuthLayout({
   const safeBg = useMemo(() => {
     if (!bgUrl) return undefined;
     if (bgUrl.startsWith("http")) return sanitizeImageUrl(bgUrl);
-    if (bgUrl.startsWith("/")) return sanitizeImageUrl(`${API_BASE}/api/v1${bgUrl}`);
+    if (bgUrl.startsWith("/")) return sanitizeImageUrl(`${API_BASE}/api/v2${bgUrl}`);
     return sanitizeImageUrl(bgUrl);
   }, [bgUrl]);
 

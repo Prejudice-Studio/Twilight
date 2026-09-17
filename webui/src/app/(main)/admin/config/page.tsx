@@ -124,6 +124,13 @@ function toEditorList(value: unknown): string[] {
   return [String(value)];
 }
 
+// 受控 input 不能直接吃 undefined/NaN，空值要渲染成空串而不是 "0"/"NaN"。
+function numericInputValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "";
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? String(numeric) : "";
+}
+
 function serializeListValue(
   fieldKey: string,
   value: unknown,
@@ -197,8 +204,17 @@ interface ConfigChangeItem {
   after: unknown;
 }
 
-function isConfigValueChanged(next: unknown, prev: unknown): boolean {
-  return JSON.stringify(next) !== JSON.stringify(prev);
+// 变更判定必须走"实际会提交的值"，不能直接比编辑态：数值框清空后是空串、
+// 列表里可能带空格，这些都不会真的改变配置。用 serializeFieldValue 归一化后再比，
+// 避免变更清单里出现"显示已改、保存却什么都没变"的假改动。
+function isConfigValueChanged(
+  field: ConfigField,
+  next: unknown,
+  prev: unknown
+): boolean {
+  const normalizedNext = serializeFieldValue(field, next, prev);
+  const normalizedPrev = serializeFieldValue(field, prev, prev);
+  return JSON.stringify(normalizedNext) !== JSON.stringify(normalizedPrev);
 }
 
 function truncateConfigPreview(value: string, emptyLabel: string): string {
@@ -248,6 +264,10 @@ const SECTION_ICONS: Record<string, React.ElementType> = {
 
 // ==================== 字段渲染组件 ====================
 
+// 后端对非空 secret 只回传哨兵，前端不能把它当明文显示（点"眼睛"会直接看到
+// 哨兵串）。未改动时输入框显示为空，改了才真正写入新值。
+const SECRET_UNCHANGED = "__TWILIGHT_SECRET_UNCHANGED__";
+
 function SecretField({
   value,
   onChange,
@@ -255,13 +275,35 @@ function SecretField({
   value: string;
   onChange: (v: string) => void;
 }) {
+  const { t } = useI18n();
   const [visible, setVisible] = useState(false);
+  const [draft, setDraft] = useState("");
+  const untouched = value === SECRET_UNCHANGED;
+  const shown = untouched ? draft : (value ?? "");
+
+  // 还原 / 重新加载会把 value 拉回哨兵，此时草稿必须一起清掉，否则输入框里
+  // 还留着用户刚敲的新值，看起来像"已经改了"但实际什么都没变。
+  useEffect(() => {
+    if (untouched) setDraft("");
+  }, [untouched]);
+
+  const handleChange = (next: string) => {
+    if (untouched) {
+      setDraft(next);
+      // 清空 = 没有修改，回传哨兵让后端保留原值。
+      onChange(next === "" ? SECRET_UNCHANGED : next);
+      return;
+    }
+    onChange(next);
+  };
+
   return (
     <div className="relative">
       <Input
         type={visible ? "text" : "password"}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+        value={shown}
+        placeholder={untouched ? t("adminConfig.secretUnchangedHint") : undefined}
+        onChange={(e) => handleChange(e.target.value)}
         className="pr-10"
       />
       <Button
@@ -466,12 +508,14 @@ function ConfigFieldEditor({
         />
       );
 
+    // 数值允许清空：空串在提交时回退成原值（serializeFieldValue），不会像
+    // `parseInt() || 0` 那样把"没填"悄悄写成 0。
     case "int":
       return (
         <Input
           type="number"
-          value={value as number}
-          onChange={(e) => onChange(parseInt(e.target.value) || 0)}
+          value={numericInputValue(value)}
+          onChange={(e) => onChange(e.target.value === "" ? "" : Number.parseInt(e.target.value, 10))}
         />
       );
 
@@ -480,8 +524,8 @@ function ConfigFieldEditor({
         <Input
           type="number"
           step="0.01"
-          value={value as number}
-          onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+          value={numericInputValue(value)}
+          onChange={(e) => onChange(e.target.value === "" ? "" : Number.parseFloat(e.target.value))}
         />
       );
 
@@ -605,6 +649,23 @@ function FieldRow({
               <Badge variant="warning" className="text-[10px] px-1.5 py-0 h-4">
                 {t("adminConfig.changed")}
               </Badge>
+            )}
+            {field.present_in_file === false && (
+              <TooltipProvider delayDuration={300}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge
+                      variant="outline"
+                      className="cursor-help border-dashed text-[10px] px-1.5 py-0 h-4 font-normal text-muted-foreground"
+                    >
+                      {t("adminConfig.notInFile")}
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs">
+                    {t("adminConfig.notInFileHint")}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             )}
             <TooltipProvider delayDuration={300}>
               <Tooltip>
@@ -768,7 +829,7 @@ function SectionCard({
                     ? values[field.key]
                     : field.value;
                 const origVal = originalValues[field.key];
-                const isChanged = isConfigValueChanged(val, origVal);
+                const isChanged = isConfigValueChanged(field, val, origVal);
                 return (
                   <FieldRow
                     key={field.key}
@@ -1073,7 +1134,7 @@ export default function AdminConfigPage() {
       for (const field of section.fields) {
         const edited = editedValues[section.key]?.[field.key];
         const orig = originalValues[section.key]?.[field.key];
-        if (isConfigValueChanged(edited, orig)) count++;
+        if (isConfigValueChanged(field, edited, orig)) count++;
       }
       counts[section.key] = count;
     }
@@ -1092,13 +1153,13 @@ export default function AdminConfigPage() {
       for (const field of section.fields) {
         const edited = editedValues[section.key]?.[field.key];
         const orig = originalValues[section.key]?.[field.key];
-        if (!isConfigValueChanged(edited, orig)) continue;
+        if (!isConfigValueChanged(field, edited, orig)) continue;
         changes.push({
           sectionKey: section.key,
           sectionTitle: section.title,
           field,
-          before: orig,
-          after: edited,
+          before: serializeFieldValue(field, orig, orig),
+          after: serializeFieldValue(field, edited, orig),
         });
       }
     }
@@ -1109,7 +1170,7 @@ export default function AdminConfigPage() {
   const serverIconPreviewUrl =
     currentServerIcon && /^https:\/\/[^\s"'<>]+$/i.test(currentServerIcon)
       ? currentServerIcon
-      : `/api/v1/system/server-icon?ts=${encodeURIComponent(currentServerIcon || "default")}`;
+      : `/api/v2/system/server-icon?ts=${encodeURIComponent(currentServerIcon || "default")}`;
 
   // 搜索匹配
   const matchedFieldsBySection = useMemo(() => {
@@ -1204,9 +1265,10 @@ export default function AdminConfigPage() {
     return true;
   }, [t]);
 
-  // 加载结构化配置
+  // 加载结构化配置。force=true 绕过 30 秒缓存：热重载之后页面必须看到磁盘上的
+  // 最新值，否则会出现"保存成功了但页面还是旧值"的错觉。
   const loadSchemaResource = useCallback(async (signal?: AbortSignal) => {
-    const res = await api.getConfigSchema(signal);
+    const res = await api.getConfigSchema(signal, true);
     if (res.success && res.data) {
       setSchema(res.data);
       const initial: Record<string, Record<string, unknown>> = {};

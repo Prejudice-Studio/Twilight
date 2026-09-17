@@ -110,6 +110,22 @@ export interface SystemHealth {
   time: number;
 }
 
+export interface V2Health {
+  api_version: "v2";
+  status: "ok";
+  server_version: string;
+  timestamp: number;
+}
+
+export interface V2Capabilities {
+  api_version: "v2";
+  compatible_api_versions: string[];
+  server_version: string;
+  features: Record<string, boolean>;
+  limits: Record<string, number>;
+  links: Record<string, string>;
+}
+
 export interface SystemHealthDetail {
   ok?: boolean;
   online?: boolean;
@@ -147,6 +163,7 @@ export interface User {
   username: string;
   role: number;
   role_name: string;
+  avatar?: string;
 }
 
 export interface UserInfo {
@@ -723,22 +740,39 @@ export interface EmbyLibraryStats {
   episode_count?: number;
 }
 
-
-export interface EmbyNowPlayingItem {
+// 播放排行榜（日榜/周榜）。duration 单位是秒。
+// 普通用户接口只给脱敏后的 user_name，不带 uid/username；管理员接口才带。
+export interface PlayRankMediaItem {
   item_id: string;
-  item_name: string;
+  title: string;
   series_name?: string;
   media_type: string;
-  image_url?: string;
-  user_name: string;
-  play_duration: number;
-  total_runtime: number;
+  plays: number;
+  duration: number;
+  viewers: number;
 }
 
-export interface EmbyNowPlaying {
-  viewers: number;
-  items: EmbyNowPlayingItem[];
+export interface PlayRankUserItem {
+  user_name: string;
+  plays: number;
+  duration: number;
+  items: number;
+  uid?: number;
+  username?: string;
 }
+
+export interface PlayRankResponse {
+  range: "day" | "week";
+  since: number;
+  updated_at: number;
+  summary: { plays: number; duration: number; viewers: number; items: number };
+  media: PlayRankMediaItem[];
+  users: PlayRankUserItem[];
+  enabled?: boolean;
+  user_visible?: boolean;
+  anonymous?: boolean;
+}
+
 
 export interface RegisterData {
   telegram_bind_code?: string;
@@ -945,6 +979,8 @@ export interface ConfigField {
   value: unknown;
   options?: ConfigFieldOption[];
   placeholder_hints?: string[];
+  /** 该键是否已显式写在 config.toml 中；false 表示当前只是代码默认值在生效。 */
+  present_in_file?: boolean;
 }
 
 export interface ConfigSection {
@@ -1517,6 +1553,22 @@ export interface Ticket {
   attachments?: TicketAttachment[];
   reply_count?: number;
   attachment_count?: number;
+  notify_telegram: boolean;
+  created_at: number;
+  updated_at: number;
+  resolved_at?: number;
+  closed_at?: number;
+}
+
+/** Current-user ticket list item. Conversation data is fetched separately. */
+export interface UserTicketListItem {
+  id: number;
+  title: string;
+  type: string;
+  status: "open" | "in_progress" | "resolved" | "closed";
+  priority: "low" | "medium" | "high" | "urgent";
+  reply_count: number;
+  attachment_count: number;
   notify_telegram: boolean;
   created_at: number;
   updated_at: number;

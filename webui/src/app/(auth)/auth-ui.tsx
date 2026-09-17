@@ -21,7 +21,7 @@ const envIcon = process.env.NEXT_PUBLIC_AUTH_ICON_URL;
 function serverIconUrl(icon?: string | null): string | undefined {
   if (!icon) return undefined;
   if (icon.startsWith("http")) return sanitizeImageUrl(icon);
-  if (icon.startsWith("/")) return sanitizeImageUrl(`${API_BASE}/api/v1${icon}`);
+  if (icon.startsWith("/")) return sanitizeImageUrl(`${API_BASE}/api/v2${icon}`);
   return sanitizeImageUrl(icon);
 }
 

@@ -111,7 +111,7 @@ export default function EmbyActivityLogs() {
           </div>
         </div>
         <div className="i18n-toolbar flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => void reload()} disabled={isLoading || refreshing}>
+          <Button variant="outline" size="sm" onClick={() => void reload().catch(() => undefined)} disabled={isLoading || refreshing}>
             {isLoading && !refreshing ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-1.5 h-4 w-4" />}
             {t("common.refresh")}
           </Button>

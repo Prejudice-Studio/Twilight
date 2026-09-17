@@ -85,7 +85,7 @@ export default function AdminViolationsPage() {
       const res = await api.deleteViolation(id);
       if (res.success) {
         toast({ title: t("adminViolations.deleted"), variant: "success" });
-        reload();
+        void reload().catch(() => undefined);
       } else {
         toast({ title: t("common.deleteFailed"), description: res.message, variant: "destructive" });
       }
@@ -101,7 +101,7 @@ export default function AdminViolationsPage() {
       if (res.success) {
         toast({ title: t("adminViolations.clearedAll"), variant: "success" });
         setClearOpen(false);
-        reload();
+        void reload().catch(() => undefined);
       } else {
         toast({ title: t("adminViolations.clearFailed"), description: res.message, variant: "destructive" });
       }

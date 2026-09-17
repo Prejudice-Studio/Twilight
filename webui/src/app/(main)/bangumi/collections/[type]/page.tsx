@@ -34,7 +34,7 @@ function itemTitle(item: any) {
 }
 
 function posterUrl(item: any) {
-  return `${API_BASE}/api/v1/bangumi/cover/${item.subject_id}`;
+  return `${API_BASE}/api/v2/bangumi/covers/${item.subject_id}`;
 }
 
 function hasPoster(item: any) {

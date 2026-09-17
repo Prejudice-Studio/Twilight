@@ -3,7 +3,7 @@
 import Link from "next/link";
 import {
   Users, Megaphone, MessageSquareMore, FileText, Network, Film, ShieldAlert,
-  ClipboardList, BookOpen, Mail, MessageSquare, Server,
+  ClipboardList, BookOpen, Mail, MessageSquare, Server, BarChart3,
   TimerReset, Database, FileCode, ScrollText, TestTube,
   AlertTriangle, Settings, Shield, Code2,
 } from "lucide-react";
@@ -37,6 +37,7 @@ const adminPages: AdminNavEntry[] = [
   { href: "/admin/developer", labelKey: "navigation.developerMode", icon: Code2, category: "ops" },
   { href: "/admin/test", labelKey: "navigation.serverInfo", icon: TestTube, category: "ops" },
   { href: "/admin/emby", labelKey: "navigation.embyAdmin", icon: Server, category: "integration" },
+  { href: "/admin/playrank", labelKey: "navigation.playRankAdmin", icon: BarChart3, category: "integration" },
   { href: "/admin/email", labelKey: "navigation.emailAdmin", icon: Mail, category: "integration" },
   { href: "/admin/telegram", labelKey: "navigation.telegramAdmin", icon: MessageSquare, category: "integration" },
 ];

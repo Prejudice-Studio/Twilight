@@ -953,36 +953,6 @@ export default function AdminUsersPage() {
     }
   };
 
-  const handleGrantRegistrationEntitlementAndDequeue = async (user: UserInfo) => {
-    const action = await confirmAction({
-      title: `授权并移出 ${user.username} 的未处理队列`,
-      description: "会先授予该用户 Emby 补建资格，然后只把尚未开始处理的注册码/Emby 注册请求从队列移出。若请求已经 processing，将保留执行状态，避免破坏正在创建的 Emby 账号。",
-      tone: "warning",
-      actions: [
-        { label: "授权默认时长并移出", value: "default", variant: "default" },
-        { label: "授权永久并移出", value: "permanent", variant: "outline" },
-      ],
-    });
-    if (!action) return;
-    try {
-      const days = action === "permanent" ? -1 : undefined;
-      const res = await api.grantUserRegistrationEntitlementAndDequeue(user.uid, days);
-      if (res.success) {
-        toast({
-          title: res.data?.dequeued ? "已授权并移出队列" : "已授权",
-          description: res.message,
-          variant: res.data?.processing_blocked?.length ? "default" : "success",
-        });
-        invalidateUsersCache();
-        await loadUsers();
-      } else {
-        toast({ title: "操作失败", description: res.message, variant: "destructive" });
-      }
-    } catch (err: any) {
-      toast({ title: "操作失败", description: err.message || "网络异常", variant: "destructive" });
-    }
-  };
-
   const handleSyncBindings = async (options: { uid?: number; currentFilter?: boolean } = {}) => {
     const ok = await confirmAction({
       title: options.uid ? "同步该用户绑定状态" : options.currentFilter ? "同步当前筛选用户" : "同步所有用户",
@@ -1930,7 +1900,6 @@ export default function AdminUsersPage() {
         onForceUnbind: handleForceUnbind,
         onClearRegistrationQueue: handleClearRegistrationQueue,
         onGrantRegistrationEntitlement: handleGrantRegistrationEntitlement,
-        onGrantRegistrationEntitlementAndDequeue: handleGrantRegistrationEntitlementAndDequeue,
         onToggleActive: handleToggleActive,
         onDelete: handleDelete,
       }}

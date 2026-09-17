@@ -32,6 +32,7 @@ import {
   MessageSquareMore,
   Shield,
   Code2,
+  BarChart3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -65,6 +66,7 @@ export const userNavItems: SidebarNavItem[] = [
   { href: "/tickets", labelKey: "navigation.tickets", icon: MessageSquareMore },
   { href: "/media", labelKey: "navigation.mediaRequest", icon: Film },
   { href: "/bangumi", labelKey: "navigation.bangumi", icon: BookOpen },
+  { href: "/playrank", labelKey: "navigation.playRank", icon: BarChart3 },
   { href: "/score", labelKey: "navigation.signin", icon: Coins },
   { href: "/invite", labelKey: "navigation.inviteCenter", icon: GitBranch },
   { href: "/settings", labelKey: "navigation.settings", icon: Settings },
@@ -77,6 +79,7 @@ export const adminNavItems: SidebarNavItem[] = [
   { href: "/admin/invite", labelKey: "navigation.inviteForest", icon: Network },
 
   { href: "/admin/emby", labelKey: "navigation.embyAdmin", icon: Server, category: "service" },
+  { href: "/admin/playrank", labelKey: "navigation.playRankAdmin", icon: BarChart3, category: "service" },
   { href: "/admin/bangumi", labelKey: "navigation.bangumiAdmin", icon: BookOpen, category: "service" },
   { href: "/admin/email", labelKey: "navigation.emailAdmin", icon: Mail, category: "service" },
   { href: "/admin/telegram", labelKey: "navigation.telegramAdmin", icon: MessageSquare, category: "service" },
@@ -118,12 +121,18 @@ export function groupNavItems(items: SidebarNavItem[]): SidebarNavGroup[] {
   return groups;
 }
 
+// isAdmin 影响排行榜入口：普通用户开关关闭时管理员仍要能看到用户侧榜单，
+// 便于确认普通用户看到的是什么（管理后台另有含 UID 的完整榜单）。
 export function filterNavItems(
   items: SidebarNavItem[],
   features?: Record<string, boolean> | null,
+  isAdmin = false,
 ) {
   return items.filter((item) => {
     if (features?.media_request === false && item.href === "/media") {
+      return false;
+    }
+    if (item.href === "/playrank" && (features?.play_rank === false || (features?.play_rank_user === false && !isAdmin))) {
       return false;
     }
     if (features?.signin === false && item.href === "/score") {
@@ -205,8 +214,8 @@ export function Sidebar() {
   const safeSystemIcon = useMemo(() => sanitizeImageUrl(envIcon || systemInfo?.icon), [envIcon, systemInfo?.icon]);
   const safeProfileAvatar = useMemo(() => sanitizeImageUrl(profileAvatar), [profileAvatar]);
   const visibleUserNavItems = useMemo(
-    () => filterNavItems(userNavItems, systemInfo?.features),
-    [systemInfo?.features],
+    () => filterNavItems(userNavItems, systemInfo?.features, isAdmin),
+    [isAdmin, systemInfo?.features],
   );
   const visibleAdminNavItems = useMemo(
     () => filterNavItems(adminNavItems, systemInfo?.features),

@@ -14,7 +14,6 @@ import {
   RefreshCcw,
   RefreshCw,
   Trash2,
-  UserCheck,
   UserPlus,
   UserX,
 } from "lucide-react";
@@ -115,7 +114,6 @@ export interface UserActionsMenuHandlers {
   onForceUnbind: (user: UserInfo) => void;
   onClearRegistrationQueue: (user: UserInfo) => void;
   onGrantRegistrationEntitlement: (user: UserInfo) => void;
-  onGrantRegistrationEntitlementAndDequeue: (user: UserInfo) => void;
   onToggleActive: (user: UserInfo) => void;
   onDelete: (user: UserInfo) => void;
 }
@@ -285,10 +283,6 @@ export function UserActionsMenu({
             <DropdownMenuItem onClick={() => handlers.onGrantRegistrationEntitlement(user)} disabled={entitlementDisabled} title={entitlementReason}>
               <UserPlus className="mr-2 h-4 w-4" />
               <MenuTitle title="授予注册资格" desc={entitlementReason || "允许后续自助创建 Emby"} />
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handlers.onGrantRegistrationEntitlementAndDequeue(user)} disabled={entitlementDisabled} title={entitlementReason}>
-              <UserCheck className="mr-2 h-4 w-4" />
-              <MenuTitle title="授予资格并出列" desc={entitlementReason || "授予并从等待队列移除"} />
             </DropdownMenuItem>
             </DropdownMenuSubContent>
           </DropdownMenuSub>

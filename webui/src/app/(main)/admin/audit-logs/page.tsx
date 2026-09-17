@@ -207,7 +207,7 @@ export default function AdminAuditLogsPage() {
       const res = await api.deleteAuditLog(id);
       if (res.success) {
         toast({ title: t("adminAuditLog.deleted"), variant: "success" });
-        reload();
+        void reload().catch(() => undefined);
       } else {
         toast({ title: t("common.deleteFailed"), description: res.message, variant: "destructive" });
       }
@@ -223,7 +223,7 @@ export default function AdminAuditLogsPage() {
       if (res.success) {
         toast({ title: t("adminAuditLog.clearedAll"), variant: "success" });
         setClearOpen(false);
-        reload();
+        void reload().catch(() => undefined);
       } else {
         toast({ title: t("adminAuditLog.clearFailed"), description: res.message, variant: "destructive" });
       }
@@ -245,7 +245,7 @@ export default function AdminAuditLogsPage() {
       if (res.success) {
         toast({ title: t("adminAuditLog.pruneDone"), description: res.data?.logs?.join("; "), variant: "success" });
         setPruneOpen(false);
-        reload();
+        void reload().catch(() => undefined);
       } else {
         toast({ title: t("adminAuditLog.pruneFailed"), description: res.message, variant: "destructive" });
       }
