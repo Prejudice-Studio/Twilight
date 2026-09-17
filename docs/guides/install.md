@@ -1,16 +1,14 @@
 # 安装部署
 
-本文介绍如何在生产环境部署 Twilight：Go 后端和 SvelteKit SSR 前端面向 Linux + systemd 设计，业务状态存储在 PostgreSQL，并通过 HTTPS 反向代理统一对外暴露。旧 Next.js 前端只用于紧急回滚。
+本文介绍如何在生产环境部署 Twilight：Go 后端和 Next.js 前端面向 Linux + systemd 设计，业务状态存储在 PostgreSQL，并通过 HTTPS 反向代理统一对外暴露。
 
-> **推荐**: 新部署优先使用 [Docker 部署](./docker.md)，一键启动 PostgreSQL + Redis + 后端 + 前端。
+> **推荐**: Linux + systemd 原生部署（`deploy/setup-systemd.sh`）。[Docker 部署](./docker.md) 也有，但开发者不推荐、且未经实测。
 
 ## 环境要求
 
 | 组件 | 要求 | 说明 |
 | --- | --- | --- |
 | Go | 1.25 或更高 | 仅构建后端二进制时需要；运行时不依赖 Go。 |
-| Node.js | 22 或更高 | 构建并运行 `webui-v2` adapter-node 前端。 |
-| pnpm | `webui-v2/package.json` 的 `packageManager` 指定版本 | V2 前端包管理与构建，建议通过 Corepack 启用。 |
 | PostgreSQL | 必需 | 唯一运行时存储后端。 |
 | Emby / Jellyfin | 可访问的实例 | 后端通过 API Token 调用，需在 Emby 后台生成 API 密钥。 |
 | Redis | 可选，生产建议 | 用于会话缓存与分布式速率限制计数；留空时退化为进程内内存。 |
@@ -131,24 +129,26 @@ TWILIGHT_DATABASES_DIR=/opt/Twilight/db
 
 迁移流程：管理端「数据库迁移」页先做预检（dry-run，预检会验证源快照和目标 PostgreSQL，并在目标库不存在且权限允许时自动创建数据库和 `twilight_state` 状态表，但不写入业务快照）；确认目标可用后再用确认短语二次确认执行。后端在实际写入前会自动创建保护性备份，并在响应中返回 `pre_operation_backup`。
 
-## V2 SSR 前端部署
+## 前端部署
+
+前端是 `webui/`（Next.js，`output: "standalone"`），构建产物为 `.next/standalone/server.js`：
 
 ```bash
-cd webui-v2
 corepack enable
 pnpm install --frozen-lockfile
 pnpm build
-BACKEND_URL=http://127.0.0.1:5000 \
-HOST=127.0.0.1 PORT=3001 ORIGIN=https://panel.example.com \
-node build
+# standalone 产物需要 static 与 public 一起就位
+cp -r .next/static .next/standalone/.next/static
+cp -r public .next/standalone/public
+HOST=127.0.0.1 PORT=3001 node .next/standalone/server.js
 ```
 
 部署形态：
 
-- V2 同域部署：Nginx 将 `/`、`/_app/` 转发到 adapter-node，将 `/api/` 保留给 Go API；浏览器只看到一个 Origin。
-- V2 服务端通过 `BACKEND_URL` 访问 Go API，登录、首屏读取和 form action 都在 SSR 服务端完成，不需要把 API 地址暴露为 `PUBLIC_*` 浏览器变量。
+- 同域部署：Nginx 将 `/` 转发到前端，将 `/api/` 保留给 Go API；浏览器只看到一个 Origin。
+- 前端是浏览器直连 Go API 的客户端应用：`NEXT_PUBLIC_API_URL` 在构建时注入，留空时走 Next.js rewrite 代理（运行时用 `BACKEND_URL` 指定上游）。
 - `ORIGIN` 必须填写浏览器实际访问的完整 Origin，例如 `https://panel.example.com`；本地直连可以使用 `http://127.0.0.1:3001`。
-- 旧 `webui/` Next.js 入口不再由默认 Nginx/Compose 配置引用；回滚时切换前端 upstream，并保留数据库与 Go API 版本兼容。
+- Docker 不是推荐部署路径，优先 Linux + systemd（`deploy/setup-systemd.sh`）。
 
 `cors_origins` 只能填写协议、主机和端口，例如 `https://panel.example.com`；尾斜杠会被自动处理，但不要带 `/admin` 这类路径。
 
@@ -183,7 +183,6 @@ node build
 
 ### Node / 反向代理
 
-标准 Node / 1Panel 部署直接运行 `webui-v2/build`，不需要 Next.js、OpenNext 或浏览器端 API 代理初始化。Cloudflare 等边缘运行时若要接入，需要单独适配 adapter-node 的 SSR 运行模型，并不能直接复用旧 V1 配置。
 
 ### systemd 路径限制
 
@@ -210,7 +209,6 @@ sudo bash deploy/setup-systemd.sh --restart
 - 创建运行目录：`db/`、`db/backups/`、`uploads/`、`config_backups/`。
 - 扫描 `twilight.service`、`twilight-bot.service`、`twilight-scheduler.service` 是否仍指向旧 Python 入口；检测到旧 Python unit 时会停止、禁用并备份旧 unit，再写入 Go 版 unit。
 - 写入 Go API、Bot、Scheduler 和 V2 Web UI unit 后执行 `systemctl daemon-reload`、`enable`，并 `start`（带 `--restart` 时改为 `restart`），最后打印各服务状态。
-- 同时构建并写入 `twilight-webui-v2.service`，默认从 `webui-v2/build` 启动 adapter-node，监听 `127.0.0.1:3001`；可用 `TWILIGHT_WEBUI_*` 和 `TWILIGHT_NODE_BIN` 覆盖。
 
 常用环境变量覆盖：
 
@@ -230,11 +228,11 @@ sudo TWILIGHT_PROJECT_ROOT=/opt/Twilight \
 | `TWILIGHT_GO_BIN` | `<project>/bin/twilight` | 后端二进制路径。 |
 | `TWILIGHT_API_HOST` | `127.0.0.1` | API 监听地址。 |
 | `TWILIGHT_API_PORT` | `5000` | API 监听端口。 |
-| `TWILIGHT_WEBUI_ROOT` | `<project>/webui-v2` | V2 SSR 前端目录。 |
-| `TWILIGHT_WEBUI_HOST` | `127.0.0.1` | V2 SSR 监听地址。 |
-| `TWILIGHT_WEBUI_PORT` | `3001` | V2 SSR 监听端口。 |
-| `TWILIGHT_WEBUI_ORIGIN` | `http://127.0.0.1:3001` | SvelteKit `ORIGIN`，生产填写浏览器实际访问的 Origin。 |
-| `TWILIGHT_NODE_BIN` | `PATH` 中的 `node` | adapter-node 运行时。 |
+| `TWILIGHT_WEBUI_ROOT` | `<project>/webui` | 前端源码目录（需先 `pnpm build`，脚本也会按需构建）。 |
+| `TWILIGHT_WEBUI_HOST` | `127.0.0.1` | 前端监听地址（写入 unit 的 `HOSTNAME`）。 |
+| `TWILIGHT_WEBUI_PORT` | `3001` | 前端监听端口。 |
+| `TWILIGHT_WEBUI_ORIGIN` | `http://127.0.0.1:3001` | 仅用于部署期校验，Next.js 本身不消费 `ORIGIN`。 |
+| `TWILIGHT_NODE_BIN` | `PATH` 中的 `node` | Next.js standalone 运行时。 |
 | `TWILIGHT_SYSTEMD_USER` | `root` | systemd 服务用户。 |
 | `TWILIGHT_SYSTEMD_GROUP` | 同 `TWILIGHT_SYSTEMD_USER` | systemd 服务组。 |
 
@@ -243,7 +241,7 @@ sudo TWILIGHT_PROJECT_ROOT=/opt/Twilight \
 - `twilight.service`：`ExecStart` 为 `<bin> api --host <host> --port <port> --config config.toml`，`Restart=always`，配有内存与文件描述符限制。
 - `twilight-bot.service`：`<bin> bot --config config.toml`，`PartOf=twilight.service`。Bot 在未启用 Telegram 或未配置 Bot Token 时会安全等待（每 3 秒重读配置），不会反复失败重启。
 - `twilight-scheduler.service`：`<bin> scheduler --config config.toml`，`PartOf=twilight.service`。
-- `twilight-webui-v2.service`：`<node> <project>/webui-v2/build`，通过 `BACKEND_URL` 转发 Go API，`PartOf=twilight.service`。
+- `twilight-webui.service`：`node <project>/webui/.next/standalone/server.js`，`PartOf=twilight.service`；脚本会在构建后把 `.next/static` 与 `public` 复制进 standalone 目录（缺了会退化成无样式页面）。
 
 > `EnvironmentFile=-$ENV_FILE` 表示项目根目录下的 `.env`（可选，存在才加载）。
 

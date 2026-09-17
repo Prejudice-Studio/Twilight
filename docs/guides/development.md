@@ -23,8 +23,6 @@
 | `internal/store` | 状态存储层：唯一运行后端 PostgreSQL，定义单一状态文档 `State`；`Store` 仅经 `store.OpenPostgres` 构造。 |
 | `internal/config` | TOML 配置与 `TWILIGHT_*` 环境变量加载。 |
 | `internal/security` | 密码哈希、安全随机数与兼容校验。 |
-| `webui-v2` | 默认 SvelteKit SSR + adapter-node 前端应用；`webui` 仅保留为整站紧急回滚版本。 |
-| `webui-v2/src/lib/server/api.ts` | V2 SSR 服务端 API 客户端，集中维护 Cookie 转发、响应上限和同源代理。 |
 | `start_backend_dev.sh` / `start_backend_prod.sh` | 后端本地启动脚本（开发 / 生产）。 |
 | `deploy/` | systemd unit 与安装脚本（`setup-systemd.sh`）。 |
 
@@ -94,14 +92,12 @@ go test -run '^$' -bench '^(BenchmarkTelegramUpdateEnvelopeDecode|BenchmarkTeleg
 
 ## 前端开发
 
-默认前端位于 `webui-v2/`，使用 SvelteKit SSR + adapter-node；`webui/` 的 Next.js 实现仅保留为整站紧急回滚和行为对照，不与 V2 共享运行时页面状态。
 
-V2 管理页面的页面级标题与主要分区使用 `webui-v2/src/lib/components/PageHeader.svelte` 和 `Panel.svelte`。这两个组件是无状态的 SSR 结构基线，只负责语义标题、边界和窄视口换行；业务页不得重新定义一套全局标题/面板样式，领域样式仍留在对应路由内。用户管理与工单管理已按此方式迁移，写操作仍只通过 SvelteKit form action 完成。
 
 ### 常用命令
 
 ```bash
-cd webui-v2
+cd webui
 
 # 安装依赖（锁定 lockfile）
 pnpm install --frozen-lockfile
@@ -109,16 +105,24 @@ pnpm install --frozen-lockfile
 # 本地开发服务器
 pnpm dev
 
-# Svelte 类型检查
-pnpm check
+# 类型检查
+pnpm typecheck
 
-# adapter-node 生产构建
+# Lint
+pnpm lint
+
+# 生产构建（output: "standalone"）
 pnpm build
 ```
 
-生产预览使用 `pnpm preview`，正式运行使用 `node build`。V2 不使用 Next.js rewrites、浏览器端全局身份 store 或 V1 React 页面状态。
+开发联调时不需要额外配置：`NEXT_PUBLIC_API_URL` 留空，Next.js 会把 `/api/*` 按 `next.config.mjs` 的 rewrite 代理到 `BACKEND_URL`（默认 `http://127.0.0.1:5000`），浏览器只看到同源请求。
 
-V2 服务端通过 `BACKEND_URL` 访问 Go API（默认 `http://127.0.0.1:5000`），并在服务端转发请求 Cookie；部署 adapter-node 时由 `ORIGIN`、`HOST`、`PORT` 等运行环境变量决定外部地址。`/api/v1/*` 与 `/api/v2/*` 的同源代理只为后续渐进增强和兼容调用提供传输通道，不能替代 Go 后端鉴权。V2 登录和登出使用 SvelteKit form action，身份读取放在服务端 `load`，首屏不依赖浏览器启动后再拉取 `/users/me`。管理员 Emby 页面 `/(app)/admin/emby` 使用同一边界：账号、设备/IP 审查和活动日志按页签按需读取，管理写操作通过服务端 action 转发，避免浏览器持有凭据或重复请求大型列表。
+生产部署分两种形态：
+
+- **同域**（推荐）：`NEXT_PUBLIC_API_URL` 留空，由反向代理把 `/api/` 直接转给 Go API，`/` 转给前端。前端不需要知道后端地址。
+- **子域分离**：`NEXT_PUBLIC_API_URL` 必须在**构建时**设为后端基址，否则浏览器会向错误来源发请求；同时后端 `cors_origins` 要包含前端 Origin，并在需要跨子域共享会话时设置 `session_cookie_domain`。
+
+前端是浏览器直连 Go API 的客户端应用：会话走 HttpOnly Cookie，浏览器不持有 Bearer Token 或 API Key，也不把身份信息当作全局缓存长期保留；`/api/v2/*` 是默认契约，`/api/v1/*` 只用于 `NEXT_PUBLIC_USE_V1_COMPAT=true` 的显式回退。Next.js 的 rewrite 只是传输通道，不能替代 Go 后端鉴权。
 
 后端可单独启动配合调试：
 
@@ -128,45 +132,39 @@ bash start_backend_dev.sh
 
 ### 前后端联调与环境变量
 
-旧 V1 前端的环境变量仅用于紧急回滚。V2 通过 `webui-v2/.env.example` 配置服务端运行时：
 
-- `BACKEND_URL` 只在 V2 服务端使用，默认 `http://127.0.0.1:5000`，不会成为浏览器公开环境变量。
-- `HOST`、`PORT`、`ORIGIN` 控制 adapter-node 监听地址、端口和浏览器实际访问 Origin；反向代理后 `ORIGIN` 必须填写外部 HTTPS Origin。
-- V2 的 form action 和 SSR `load` 只在服务端转发会话 Cookie，浏览器不读取 `/users/me` 作为全局身份缓存，也不持有后端 Bearer/API Key。
+- `BACKEND_URL` 只在未设置 `NEXT_PUBLIC_API_URL` 时生效，用于 Next.js rewrite 的上游地址，不进入浏览器 bundle。
+- `NEXT_PUBLIC_API_URL` 是**构建期**变量，会被打进前端 bundle，必须填协议 + 主机 + 端口（例如 `https://twilightapi.example.com`），不要带路径。
+- `HOSTNAME`、`PORT` 是 Next.js standalone 运行时的监听地址与端口（systemd 单元由 `deploy/setup-systemd.sh` 写入）。
 
-### V2 SSR 环境变量
+### WebUI 环境变量
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `BACKEND_URL` | `http://127.0.0.1:5000` | 仅由 SSR 服务端访问 Go API |
-| `HOST` | `127.0.0.1` | adapter-node 监听地址 |
-| `PORT` | `3001` | adapter-node 监听端口 |
-| `ORIGIN` | `http://127.0.0.1:3001` | 浏览器实际访问的完整 Origin |
-| `SESSION_COOKIE_NAME` | `twilight_session` | 后端会话 Cookie 名称，只有改名时才需要同步 |
+| 变量 | 生效时机 | 默认值 | 说明 |
+|------|----------|--------|------|
+| `NEXT_PUBLIC_API_URL` | 构建期 | 空 | Go API 基址；留空则由 rewrite 代理 `/api/*` 到 `BACKEND_URL` |
+| `NEXT_PUBLIC_CSP_CONNECT` | 构建期 | 空 | 追加到 CSP `connect-src` 的额外 origin 白名单，每项都会过 origin 校验 |
+| `NEXT_PUBLIC_USE_V1_COMPAT` | 构建期 | `false` | 设为 `true` 时前端回退调用 `/api/v1/*`，仅用于紧急回滚 |
+| `BACKEND_URL` | 运行期 | `http://127.0.0.1:5000` | rewrite 的上游地址，仅在 `NEXT_PUBLIC_API_URL` 为空时参与 |
+| `HOSTNAME` / `PORT` | 运行期 | `127.0.0.1` / `3001` | standalone 服务监听地址与端口 |
+| `SESSION_COOKIE_NAME` | 后端 | `twilight_session` | 后端会话 Cookie 名称，只有改名时才需要同步 |
 
-完整示例见 `webui-v2/.env.example`。`BACKEND_URL`、Cookie 和密码等值不得使用 `PUBLIC_` 前缀，也不得写入浏览器端代码。
 
 ### 前端文案与多语言
 
-- V2 的文案入口位于 `webui-v2/src/lib/i18n.ts`，当前由服务端安全渲染的简体中文消息表提供稳定键名。
-- V1 的 `webui/src/locales/` 仅供旧版回滚维护；新 V2 页面不得重新依赖 V1 React locale 或客户端 store。
+- 所有文案走 `webui/src/locales/`，不要在页面里内联硬编码中文或英文。
 - 新增文案、翻译或语言时，按 [前端多语言开发与翻译指南](./i18n.md) 操作。
 
 ### 前端契约
 
-- V2 所有 SSR 后端调用集中在 `webui-v2/src/lib/server/api.ts`；页面 `load` 和 form action 是服务端数据边界，浏览器端不得直接持有后端 Bearer/API Key。
 - V2 页面不使用 V1 `useAsyncResource`、React store 或客户端全局请求缓存；重读通过导航、form action 返回或明确的手动刷新完成，不恢复无边界轮询。
 - 响应统一为 envelope 结构 `{ success, code, message, data, timestamp }`；前端按 HTTP 状态码与 `error_code` 分流处理（401 跳登录、403 权限提示、429 退避、5xx 通用故障，以及自定义业务 error_code）。
 - 新增或调整接口时，需同步检查前端调用路径、请求方法、鉴权等级、错误提示文案与移动端展示。
 - 登录支持用户名和邮箱两种方式：V2 登录 form action 将输入交给后端统一判断；旧 V1 `api.ts` 的 `login()` 仍兼容自动检测 `@`。
-- 认证页、用户页和管理员页按 `webui-v2/src/routes` 分组；新增页面优先使用 server `load`、form action、原生可访问控件和局部 CSS，不把页面改回客户端 SPA。
 - 求片搜索结果必须保持接口返回的搜索顺序；图片加载完成后按自然尺寸分成横版封面与竖版海报两个分区，分区内继续保持原顺序。卡片图片使用受控的横版 / 竖版比例框与 `object-contain`，确保完整显示图片、不裁切，也不让横竖比例混在同一网格中。
-- 后台总入口为 `webui-v2/src/routes/(app)/admin/+page.svelte`（管理导航）。迁移出的配置模块必须有独立管理页：邮箱管理、Telegram 管理、邀请系统管理、安全中心；配置管理只保留默认折叠的兼容入口和跳转提示。
 - 独立管理页若需要编辑配置，必须通过 V2 form action 复用 `/system/admin/config/schema` 的后端契约，写回同一个 `config.toml`；不要在前端或 store 中复制第二套配置源。旧 V1 客户端仍使用 `api.updateConfigBySchema()` 兼容同一接口。
 - 用户管理页的单用户与批量操作必须按领域分组展示（账号状态、Emby、身份绑定、注册资格、危险操作），避免把所有操作平铺成过长菜单或按钮栏；新增用户操作时同步维护后端返回的 `admin_action_state` 与前端 `UserInfo` 类型，让前端能显示禁用原因。
 - 用户管理的单用户操作菜单、桌面表格和危险清理预览必须使用受限 `dvh` Firefox 滚动区域；桌面表头保持可见，手机上的预览表允许横纵滚动。继续使用服务端分页和移动端卡片，不要把完整用户库一次挂载到浏览器。
 - 用户管理筛选变化必须只加载第一页，不能先请求已经失效的旧页；每页数量变化要清除跨页选择。选择“拥有 Emby 的用户”时，当前页全选只统计当前页已绑定 Emby 的行。
-- Emby 管理与设备/IP 审查共用 `webui-v2/src/routes/(app)/admin/emby`，设备审查是页签级入口；`/admin/device-audit` 只作为兼容直达页面保留。设备审查不展示 Twilight 自身连接 Emby 时产生的设备/会话；全量 Emby 设备记录清理只放在调度器 `cleanup_emby_devices`，不要在审查页重新添加“清理全部/踢出全部”入口。
 - 工单页必须展示 `replies` 双方回复时间线；`admin_note` 仅作为最新管理员摘要和旧数据兼容字段。状态、优先级、类型归一、关闭/重开时间戳、开放工单计数与“更新时保留 replies/附件”逻辑统一放在 `internal/store`，前端和 handler 不要重复判断。
 - 管理员工单列表是处理队列，只返回并展示回复数、图片数、正文摘要和内部备注摘要；完整 `replies`、附件 URL、图片预览与双方对话只在单工单详情接口和对话页加载，避免历史消息随列表分页重复传输和渲染。
 - 邮箱管理的验证码与邮箱账号列表使用后端搜索和分页；前端必须传 `view=pending|accounts`，切换筛选、分页或页签时取消旧请求。手机和平板显示信息卡片，桌面显示可滚动表格；进入邮箱配置页签不额外请求两份列表。无 `view` 的全量响应只保留给旧客户端兼容。
@@ -185,7 +183,6 @@ bash start_backend_dev.sh
 
 - 新路由统一在 `internal/api/routes.go` 注册，通过 `a.add(method, pattern, auth, handler)` 声明方法、路径、鉴权级别和 handler；按功能域分布在 `registerAdminRoutes` / `registerAPIKeyRoutes` / `registerSecurityRoutes` / `registerBatchRoutes` 等分组函数中。
 - handler 只负责参数校验、鉴权、调用服务和整理响应；可复用的业务逻辑放到对应功能域文件，外部服务调用必须走独立 client/helper（Emby、TMDB、Bangumi、Telegram），不要散落在 handler 内。
-- 响应必须使用统一 envelope，并与 V2 `webui-v2/src/lib/server/api.ts` 及保留的 V1 客户端保持兼容。
 - JSON 请求体必须经统一解码器读取，限制为单个 JSON 值、256 KiB 和 32 层嵌套；不得只解码第一个值后忽略尾随第二份 JSON 文档。
 - 公开接口、登录接口，以及验证码 / 绑定码 / 邀请码 / 注册码检查类接口必须考虑限流。
 - 管理员的破坏性操作必须有明确权限边界，并尽量返回结构化的 `skipped`、`failed`、`details` 等字段，便于前端展示处理结果。
@@ -219,14 +216,12 @@ Twilight 不对 Cookie 鉴权的变更类请求做 CSRF 令牌校验，也不做
 
 ### 前端网络与布局性能
 
-- 旧 V1 WebUI 通过 `webui/src/lib/api-request.ts` 处理浏览器请求合流和短缓存；V2 不复制这套跨页面缓存，SSR `load` 与 form action 通过 `webui-v2/src/lib/server/api.ts` 按请求读取会话数据。
 - 前端对成功状态的空响应按协议错误处理，不显示误导性的 `OK`；后端 handler 必须保证返回数据可 JSON 序列化，尤其是聚合 DTO 不得形成循环引用。
 - 成功的公开读请求（调用方明确使用 `credentials: "omit"`）会进入 3 秒内存短缓存，也会合并同一时刻的重复请求，覆盖路由切换、组件重挂载和相邻组件同时挂载时的额外网络压力；缓存采用最近使用淘汰，最多保留 32 项，单响应源文本不超过 64K 字符，总源文本预算不超过 256K 字符。Cookie 登录态读请求不会参与共享缓存或在途合并，因为 HttpOnly Cookie 无法安全加入 JavaScript 缓存键。大型列表超过预算时不会深拷贝或缓存；任意写请求返回后会清空缓存。`/users/me`、带 `refresh=1` 的请求、带 `X-Twilight-Intent` 的有意图 GET、`no-store` / `reload` 请求和显式 `cacheRead: false` 的调用不进入短缓存。
 - 读请求默认使用浏览器 `no-cache` 语义，允许复用连接但仍向服务端确认 freshness；写请求继续使用 `no-store`。
-- API 响应解析由 V2 `webui-v2/src/lib/server/api.ts` 通过有界流读取，最大接受 8 MiB 的 JSON 响应；代理请求/响应使用 32 MiB 流式上限。读取过程中超过上限会取消流并拒绝解析，错误诊断必须带实际请求版本（`/api/v1` 或 `/api/v2`），不能把 V2 请求误报为 V1。V1 浏览器包装器只为回滚保留。
 - 绑定码、状态卡片等轮询必须在页面不可见时暂停请求并中断在途请求，回到前台再按上次执行时间补跑；绑定码 TTL / deadline 可继续计时，但后台页签不应持续打状态接口。
 - 仪表盘加载 Emby 线路时只读取线路列表，主页只显示线路入口和数量摘要；用户打开详情后才能查看具体线路。系统不自动发起逐线路探测，也不为测速额外预检 Emby 状态，测速由用户在详情中主动触发，避免首屏形成随线路数量增长的 N+1 请求。
-- V2 只对 `/_app/immutable/` 下的哈希静态资源设置长期缓存；`/_app/version.json`、其它 `/_app/` 资源、SSR HTML、form action 和会话页面必须使用 `Cache-Control: no-store`。由于 adapter-node 会在 SvelteKit `handle` 之前直接提供版本清单，默认 Nginx 必须使用精确的 `location = /_app/version.json` 覆盖上游缓存头；不要让反向代理覆盖这个区分。
+- 只有 `/_next/static/` 下带内容 hash 的构建产物设置长期缓存（`public, max-age=31536000, immutable`）；其余路径，尤其是 HTML 外壳，必须使用 `Cache-Control: no-store`。前端配置见 `webui/next.config.mjs` 的 `headers()`，默认 Nginx 配置见 `deploy/nginx-twilight.conf` 的 `location ^~ /_next/static/`；不要让反向代理把 HTML 一起缓存，否则部署后客户端会加载已被替换的 chunk。
 - 默认 `favicon.png` 应保持小尺寸和合理压缩，避免每个新访客为浏览器图标下载数百 KB 资源；需要高清品牌图时优先通过后台 `server_icon` 或环境变量覆盖。
 - 管理后台页面要优先使用稳定尺寸、可换行按钮、可横向滚动表格和移动端卡片视图，避免手机、平板或浏览器打开开发者工具后的窄比例下文字越界、按钮互相覆盖。
 - 共享 `Button`、`Input`、`Textarea`、`SelectTrigger` 原子控件统一使用 40px/36px 高度基线，并默认允许 `min-width: 0`、`max-width: 100%` 与安全断词；页面不得用移动端单独改高度的方式修补溢出，长表格应在自己的滚动区域内处理。
@@ -329,7 +324,6 @@ docker compose down
 # 终端 1: Docker 后端 (PostgreSQL + Redis + API)
 docker compose up -d postgres redis twilight
 # 终端 2: V2 SSR dev server (hot reload)
-cd webui-v2 && pnpm dev
 ```
 
 V2 通过 `BACKEND_URL=http://127.0.0.1:5000` 由服务端访问后端；同源 `/api/v1/*` 和 `/api/v2/*` 代理只用于渐进增强，不是浏览器鉴权边界。
@@ -350,7 +344,6 @@ V2 通过 `BACKEND_URL=http://127.0.0.1:5000` 由服务端访问后端；同源 
 - [ ] `gofmt` 已执行（无格式化 diff）。
 - [ ] `go test ./...` 已通过。
 - [ ] `go vet ./...` 已通过。
-- [ ] V2 前端或 SSR API 边界有变更时，在 `webui-v2/` 执行 `pnpm check` 与 `pnpm build`；CI 默认也只对 `webui-v2/` 执行前端质量门禁，旧 `webui/` 只有回滚改动时才单独验证。
 - [ ] 已扫描敏感信息（密钥、token、明文密码）。
 - [ ] 已扫描旧后端残留，确认 `start_backend_prod.sh` 与 `deploy/*.service` 指向 `bin/twilight`，未重新引入旧后端运行入口。
 - [ ] 已检查鉴权级别、路径穿越、文件类型白名单与 CORS 配置。

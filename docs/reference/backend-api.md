@@ -10,7 +10,6 @@
 
 - Base URL：`http://localhost:5000/api/v1`
 - OpenAPI 文档：`GET /api/v2/openapi.json`（V1 `/api/v1/openapi.json` 继续兼容）
-- 默认 API 文档页：`/api-docs`，由 `webui-v2` 使用 SvelteKit SSR 渲染；旧后端控制台 `http://localhost:5000/api/v1/docs` 仅作为兼容入口保留。
 - 响应统一为 JSON 信封（envelope），结构见下文 [2.4 响应结构](#24-响应结构)。
 - 变更接口时需同步更新 [API 路由索引](../reference/api-index.md)；若接口有请求体、响应体、限流或安全注意事项，还需更新本文对应章节。
 
@@ -60,7 +59,6 @@ V2 基础协议目前提供 `GET /api/v2/system/health`、`GET /api/v2/system/ca
 | [注册码与卡码](../features/regcodes.md) | 注册码 / 续期码 / 白名单码规则、兼容性与安全口径 |
 | `/api/v2/openapi.json` | V2 公开 OpenAPI 规范，只输出 `AuthPublic` 路由；管理员私有路由不会被匿名枚举。 |
 | `/api/v2/admin/docs/routes` | Admin 私有路由元数据，为默认 SSR `/api-docs` 页面提供完整方法、路径、版本和鉴权级别清单；响应不包含处理器、配置或用户数据。 |
-| `/api-docs` | `webui-v2` 默认 SSR API 文档页。匿名访问公开接口，管理员会话读取完整路由清单；筛选条件通过 URL 保存，列表使用有界滚动。 |
 | `/api/v1/docs` | V1 兼容 API 控制台。未登录时读取公开 `openapi.json`，管理员登录后优先读取 `/system/admin/apis` 的完整路由清单；默认 V2 前端不再依赖该内嵌页面。 |
 
 ## 2. 鉴权与请求规范
@@ -982,7 +980,6 @@ curl -X POST "http://localhost:5000/api/v1/media/request/external/update" \
 
 ### 7.4 V2 SSR 媒体资源
 
-默认 `webui-v2` 使用 `/api/v2/media/*`，而不是在浏览器中直接调用 V1 媒体接口。搜索、详情、库存和“我的求片”均由 SvelteKit 服务端 `load` 通过受保护的 SSR API 边界读取；创建与删除使用 form action。会话 Cookie 只在 SSR 服务端转发，V2 响应统一使用私有 `no-store` 缓存策略。
 
 `GET /api/v2/media/search` 返回 `{ items, total, warnings }`；`GET /api/v2/media/search/{source}` 用路径来源覆盖冲突的查询参数。`GET /api/v2/media/detail` 返回 `{ item }`，`POST /api/v2/media/inventory/check` 返回库存结果。V2 只改变资源包装和传输边界，媒体来源、Logo 语言优先级、海报 URL 安全校验、Emby 库存判断和求片业务规则仍由 Go 后端统一处理。
 

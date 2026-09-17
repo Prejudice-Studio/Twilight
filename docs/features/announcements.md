@@ -1,6 +1,5 @@
 # 公告系统
 
-默认 WebUI 使用 `webui-v2` 的 SSR 页面和 form action；本文中保留的 React renderer、旧路由和旧组件路径属于 V1 紧急回滚参考，不是生产入口。
 
 本文说明 Twilight 的全站公告：数据模型、三种渲染模式（纯文本 / Markdown / BBCode）、前端安全约束、管理员发布页与仪表盘展示位置，以及公开列表接口与管理员 CRUD 接口。
 
@@ -54,7 +53,6 @@
 
 > 旧文档曾提到后端会兼容 `text` / `md` / `bb` 等别名并做规范化。当前 Go 实现的 `safeAnnouncementRenderMode` **不识别这些别名**：除 `markdown`、`bbcode` 之外的任何输入（含 `text` / `md` / `bb`）都会被归一化为 `plain`。
 
-V2 默认页面当前使用转义纯文本预览和正文展示，位于 `webui-v2/src/routes/(app)/announcements` 与管理员公告页面；不得把正文直接交给 `{@html}`。V1 的白名单 renderer 位于 `webui/src/lib/safe-render.tsx`，只作为回滚参考。
 
 ## 前端安全约束
 
@@ -93,7 +91,6 @@ V2 默认页面当前使用转义纯文本预览和正文展示，位于 `webui-
 
 ## 管理员发布页
 
-管理员侧边栏「公告管理」对应 V2 页面 `webui-v2/src/routes/(app)/admin/announcements/+page.svelte`，前端路由 `/admin/announcements`。旧版页面 `webui/src/app/(main)/admin/announcements/page.tsx` 仅用于回滚。
 
 - 列表展示全部公告（含隐藏与已过期），带「显示已隐藏」「显示已过期」开关、级别徽标、置顶 / 隐藏 / 编辑 / 删除操作，以及分页控件。
 - 新建 / 编辑对话框包含：标题（可选）、内容（最多 10000 字）、级别下拉、**渲染方式下拉**（纯文本 / Markdown / BBCode）、截止时间（`datetime-local`，留空表示永久）、置顶开关、立即可见开关。
@@ -103,7 +100,6 @@ V2 默认页面当前使用转义纯文本预览和正文展示，位于 `webui-
 
 ## 仪表盘与公开展示
 
-V2 公告页与仪表盘分别位于 `webui-v2/src/routes/(app)/announcements` 和 `webui-v2/src/routes/(app)/dashboard`；旧版 `AnnouncementBoard`（`webui/src/components/announcement-board.tsx`）仅用于回滚：
 
 - **仪表盘**（`webui/src/app/(main)/dashboard/page.tsx`）：以 `<AnnouncementBoard splitPinned />` 放在页面**最后一个区块**，避免占据首屏。`splitPinned` 模式会把「置顶公告」与「最新公告」分成两组分别展示与折叠。
 - **独立公告页**（`webui/src/app/(main)/announcements/page.tsx`，路由 `/announcements`）：以时间线视图展示全部公告（`limit=200`、`collapseAfter=200`、`showEmptyState`），不分置顶 / 最新两组。

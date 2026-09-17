@@ -16,12 +16,6 @@
 | 配置项解析 | `internal/config/config.go` |
 | 用户级 `bgm_mode` / `bgm_token` 处理 | `internal/api/handlers.go` |
 | V2 用户端摘要接口 | `internal/api/bangumi_v2.go` (`GET /api/v2/bangumi/summary`) |
-| 用户端 Bangumi 仪表盘页面 | `webui-v2/src/routes/(app)/bangumi/+page.svelte` |
-| 用户端 Bangumi 收藏分页页面 | `webui-v2/src/routes/(app)/bangumi/collections/[type]/+page.svelte` |
-| V2 用户端 Bangumi 页面 | `webui-v2/src/routes/(app)/bangumi/` |
-| 管理员 Bangumi 管理页面 | `webui-v2/src/routes/(app)/admin/bangumi/`（V1 回退：`webui/src/app/(main)/admin/bangumi/page.tsx`） |
-| V2 SSR API 客户端 | `webui-v2/src/lib/server/api.ts` |
-| V2 类型定义 | `webui-v2/src/lib/types.ts` |
 
 ## 功能总览
 
@@ -402,13 +396,11 @@ Webhook 期望接收 JSON 通知。后端从负载中按以下规则解析：
 
 ## 前端页面
 
-### V2 SSR 用户端
+### 用户端：Bangumi 页面
 
-V2 是默认生产 WebUI；旧 V1 页面仅作为整站紧急回滚入口保留。
+`webui/`（Next.js）是唯一产品前端，页面位于 `/bangumi` 与 Bangumi 收藏分类视图。仪表盘首屏只请求一次 `/api/v2/bangumi/summary`，由后端返回本地同步状态、公开 Bangumi 账号字段、五个收藏分类的总数和每类最多 8 条预览；收藏分类走服务端分页读，不把完整收藏列表复制到浏览器。
 
-V2 SvelteKit 页面位于 `/bangumi` 和 `/bangumi/collections/[type]`。仪表盘首屏只请求一次 `/api/v2/bangumi/summary`，由后端返回本地同步状态、公开 Bangumi 账号字段、五个收藏分类的总数和每类最多 8 条预览。收藏页按分类服务端分页，并通过普通 GET 主动刷新缓存；同步、清理历史、Token 和开关修改均由 SvelteKit form action 转发到既有 Go handler。
-
-V2 响应不会包含 Bangumi Token。收藏分类在后端独立读取，单类失败只标记 `collections_partial`，不影响其他分类和本地同步状态。页面不轮询，不把完整收藏列表复制到浏览器；V1 页面在迁移完成前继续保留。
+同步、清理历史、Token 与开关修改都通过 `/api/v2/bangumi/*` 提交。响应不会包含 Bangumi Token。收藏分类在后端独立读取，单类失败只标记 `collections_partial`，不影响其他分类和本地同步状态。
 
 ### 用户端：Bangumi 仪表盘
 

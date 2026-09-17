@@ -12,7 +12,7 @@
 >
 > **推荐部署方式**: 参见 [开发指南](development.md) 中的 Linux + systemd 部署说明。
 
-Twilight 提供完整的 Docker 支持，包含 PostgreSQL + Redis + Go 后端 + SvelteKit SSR adapter-node 前端的一键部署方案。
+Twilight 提供完整的 Docker 支持，包含 PostgreSQL + Redis + Go 后端 + Next.js 前端的一键部署方案。
 
 ## 目录
 
@@ -53,10 +53,7 @@ cp deploy/docker/config.docker.toml config.toml
 # 编辑 config.toml，至少填写 Emby URL 和 Token
 vim config.toml
 
-# V2 SSR 前端环境变量（可选）
-cp webui-v2/.env.example webui-v2/.env
-# 编辑 webui-v2/.env，设置 BACKEND_URL/ORIGIN 等运行时变量
-vim webui-v2/.env
+# 前端环境变量（可选，见下方 deploy/docker/.env.example）
 ```
 
 ### 3. 设置环境变量（可选）
@@ -101,7 +98,7 @@ docker compose ps
 ├──────────────┬──────────────────┬───────────────────┤
 │              │                  │                    │
 │  twilight-webui   twilight-backend   postgres:5432  │
-│  (SvelteKit :3000) (Go API :5000)   redis:6379      │
+│  (Next.js :3000)  (Go API :5000)   redis:6379       │
 │              │                  │                    │
 │              └──────┬───────────┘                    │
 │                     │                                │
@@ -141,13 +138,12 @@ docker compose ps
   - `twilight-uploads`: 用户上传（头像/背景）
   - `twilight-backups`: 数据库备份
 
-### SvelteKit SSR 前端 (`webui`)
+### Next.js 前端 (`webui`)
 
-- 构建目录: `webui-v2/build`
-- 运行时: `@sveltejs/adapter-node`
+- 构建: `webui/Dockerfile`，Next.js `output: "standalone"`，运行 `node server.js`
 - 端口: 容器内 `3000`
-- 通过服务端 `BACKEND_URL` 环境变量指向后端 API，浏览器不会直接持有后端凭据
-- 通过 `ORIGIN` 设置浏览器实际访问的完整 Origin，form action 使用该值完成同源校验
+- 浏览器直连 Go API 的客户端应用：会话走 HttpOnly Cookie，浏览器不持有后端凭据
+- `NEXT_PUBLIC_API_URL` 是**构建期**变量，会被打进 bundle；留空时由同源 rewrite 代理 `/api/*` 到后端
 
 ## 配置管理
 
@@ -236,7 +232,7 @@ location /api/ {
     proxy_set_header X-Forwarded-Proto $scheme;
 }
 
-# V2 SSR 前端
+# 前端
 location / {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Host $host;
@@ -246,18 +242,15 @@ location / {
 
 Nginx 也配置了限流 zone，参考 `deploy/nginx-rate-limit.conf`。
 
-### V2 前端配置
-
-当使用反向代理统一域名时，`webui-v2/.env` 配置:
+### 前端配置
 
 ```env
-BACKEND_URL=http://twilight:5000
-HOST=0.0.0.0
+HOSTNAME=0.0.0.0
 PORT=3000
-ORIGIN=https://panel.example.com
+NEXT_PUBLIC_API_URL=
 ```
 
-V2 的 SSR 页面和 form action 由服务端访问 `BACKEND_URL`；`/api/v1/*` 与 `/api/v2/*` 的同源代理仅用于需要渐进增强的页面。统一域名部署不需要为 V2 配置浏览器直连 API 的 CORS 来源。
+`NEXT_PUBLIC_API_URL` 留空表示浏览器向同源 `/api/*` 发请求，由 Next.js rewrite 代理到 `BACKEND_URL`（本 compose 里是 `http://twilight:5000`）。这种同域形态不需要为前端配置浏览器直连 API 的 `cors_origins`。若改成子域分离部署（前端与 API 不同域名），必须在**构建期**设置 `NEXT_PUBLIC_API_URL` 为后端 Origin，并在后端 `cors_origins` 里列入前端 Origin。
 
 ## 升级与维护
 

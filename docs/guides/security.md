@@ -155,7 +155,7 @@ Emby 改密的当前 Web 密码证明与个人邮箱验证码证明只启用一�
 ## 8. 反向代理与暴露面
 
 - 用 Nginx / Caddy 暴露单一入口，仅开放 80/443；后端服务端口尽量仅监听内网或本机；限制管理接口访问来源（网段 / IP / WAF）。
-- 后端对所有响应附带安全响应头（`applySecurityHeaders`）：`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: strict-origin-when-cross-origin`、`Permissions-Policy`、`X-Permitted-Cross-Domain-Policies: none`、`Cross-Origin-Opener-Policy`、`Cross-Origin-Resource-Policy`，以及一条收紧的 `Content-Security-Policy`（`default-src 'none'`，后端只吐 JSON / 静态上传资源）。默认 WebUI 使用 SvelteKit SSR；Nginx 负责同源反代和缓存边界，SSR HTML 与版本文件保持 `no-store`。
+- 后端对所有响应附带安全响应头（`applySecurityHeaders`）：`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: strict-origin-when-cross-origin`、`Permissions-Policy`、`X-Permitted-Cross-Domain-Policies: none`、`Cross-Origin-Opener-Policy`、`Cross-Origin-Resource-Policy`，以及一条收紧的 `Content-Security-Policy`（`default-src 'none'`，后端只吐 JSON / 静态上传资源）。WebUI 由 Next.js 提供：`webui/src/proxy.ts`（Next.js middleware）按请求注入 CSP（`connect-src` 从 `NEXT_PUBLIC_API_URL` 推导，附加白名单逐条过 origin 校验），`next.config.mjs` 的 `headers()` 输出与请求上下文无关的静态安全头。Nginx 负责同源反代和缓存边界：只有 `/_next/static/` 下带 hash 的产物长期缓存，HTML 外壳保持 `no-store`。
 - 反向代理若覆盖这些头，应保持同等或更严格策略。
 - 信任代理头需谨慎：仅当 `API.trust_proxy_headers = true` **且** 直接上游落在 `API.trusted_proxy_cidrs` 列表内时，`clientIP` 才消费 `CF-Connecting-IP` / `X-Real-IP` / `X-Forwarded-For`；否则一律用 TCP 对端地址（fail-closed）。`trusted_proxy_cidrs` 为空时即便 `trust_proxy_headers = true` 也不会消费任何代理头，启动期会打 `Error` 提示。`X-Forwarded-For` 按从右向左逐跳验证，避免客户端伪造最左端 IP 绕过 IP 限流 / 黑名单。
 
@@ -170,7 +170,7 @@ Emby 改密的当前 Web 密码证明与个人邮箱验证码证明只启用一�
   - 背景图片只接受本系统上传的 `/api/v1/users/assets/background/{filename}` 资源，且文件名必须匹配白名单；不保存任意外部 URL。
 - 前端侧也会丢弃不安全的 URL scheme（`javascript:`、非图片 `data:`、跨域绝对地址）。如允许外部图片，请优先 HTTPS，避免混合内容与第三方 Referer 泄漏。
 - 新增定时任务 `cleanup_unused_uploads`：清理未被任何用户头像 / 背景 / 服务器图标引用的上传文件，对新文件保留 24 小时宽限期。
-- 默认 SvelteKit adapter-node 不启用远程图片代理；图片 URL 仍必须经过后端白名单和受保护资源规则。若通过 CDN / 反代暴露前端，请同步隐藏上游技术栈指纹。
+- Next.js 的图片优化器已被显式关闭（`images.unoptimized = true`），避免由它代拉任意远程 URL；图片 URL 仍必须经过后端白名单和受保护资源规则。若通过 CDN / 反代暴露前端，请同步隐藏上游技术栈指纹。
 - 服务器图标不再以本地路径形式作为公开配置面暴露：管理员通过上传接口写入受控资源，公开信息端点固定返回内置图标。
 
 ## 10. 日志与审计

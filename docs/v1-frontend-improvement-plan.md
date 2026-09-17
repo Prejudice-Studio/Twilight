@@ -1,5 +1,11 @@
 # V1 前端渐进式改进计划
 
+> **历史文档（已归档）**：本文描述的是 2026 年上半年的**渐进式**迁移方案，其中的逐模块开关
+> （`NEXT_PUBLIC_USE_V2_AUTH` 等）与 `useV2` 标志**均已不存在**。迁移最终一次性完成：
+> `webui/` 默认调用 `/api/v2/*`，唯一回退开关是 `NEXT_PUBLIC_USE_V1_COMPAT=true`。
+> 当前状态请看 [`docs/plan-v2-completion-and-optimization.md`](./plan-v2-completion-and-optimization.md)。
+> 保留本文仅供追溯当时的决策依据。
+
 ## 目标概述
 
 基于**选项 A：渐进式改进**，优先级如下：

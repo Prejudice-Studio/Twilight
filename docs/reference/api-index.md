@@ -40,8 +40,8 @@ V2 基础协议入口使用 `/api/v2`，当前只提供不带秘密的能力协�
 | GET | `/api/v2/system/health` | Public | 仅确认 API 进程可处理请求，不探测数据库或 Emby |
 | GET | `/api/v2/system/capabilities` | Public | 返回 V2 版本、兼容版本、公开 feature 和受限上传额度 |
 | GET | `/api/v2/openapi.json` | Public | V2 公开 OpenAPI 规范，仅包含公开路由 |
-| GET | `/api/v2/admin/docs/routes` | Admin | V2 默认 SSR API 文档使用的完整路由元数据清单 |
-| GET | `/api/v2/system/info` | Public | 返回 SSR 外壳和初始化页所需的安全系统摘要；不返回上游地址、Token 或配置秘密 |
+| GET | `/api/v2/admin/docs/routes` | Admin | 完整路由元数据清单，供管理端 API 文档页使用 |
+| GET | `/api/v2/system/info` | Public | 返回应用外壳和初始化页所需的安全系统摘要；不返回上游地址、Token 或配置秘密 |
 | GET | `/api/v2/admin/health/api` | Admin | 独立检测 API 进程；私有 `no-store`，不检测数据库或 Emby |
 | GET | `/api/v2/admin/health/database` | Admin | 独立检测当前数据库连接和状态快照；私有 `no-store` |
 | GET | `/api/v2/admin/health/emby` | Admin | 独立从后端连接 Emby 并读取有限服务状态；私有 `no-store`，失败不泄露上游诊断 |
@@ -341,7 +341,7 @@ V2 业务模块迁移采用兼容 adapter；未列入 V2 的接口仍使用 `/ap
 
 > 注：`/media/request/external/update` 路由本身注册为 Public，真正的访问控制来自请求体/请求头携带的内部密钥（`X-Internal-Secret` 或 `Authorization: Bearer`，见 `internal/api/media_request_handlers.go`），并非登录会话。
 
-V2 用户端媒体资源（默认 SSR 前端使用）：
+V2 用户端媒体资源（WebUI 媒体页使用）：
 
 | 方法 | 路径 | 鉴权 | 说明 |
 | ---- | ---- | ---- | ---- |
@@ -694,3 +694,37 @@ V2 用户端媒体资源（默认 SSR 前端使用）：
 | GET | `/api/v1/apikey/emby/status` | API Key | Emby 状态 |
 | POST | `/api/v1/apikey/emby/kick` | API Key | 将账号踢下线 |
 | POST | `/api/v1/apikey/use-code` | API Key | 使用卡码/注册码 |
+
+## V2 补齐端点
+
+以下端点在 2026-09-17 补齐，用于让产品前端（`webui/`）完整运行在 `/api/v2/*` 上。V1 同名端点继续保留，仅作为外部集成与 `NEXT_PUBLIC_USE_V1_COMPAT=true` 回退面。
+
+| 方法 | 路径 | 鉴权 | 说明 |
+| ---- | ---- | ---- | ---- |
+| GET/POST/DELETE | `/api/v2/auth/apikey` | User | 用户自助 API Key 的查询、生成、删除 |
+| POST | `/api/v2/auth/apikey/enable` | User | 启用用户 API Key |
+| GET/PUT | `/api/v2/auth/apikey/permissions` | User | 查询与更新用户 API Key 权限 |
+| GET | `/api/v2/apikey/info` | API Key | Key 绑定用户信息 |
+| GET | `/api/v2/apikey/status` | API Key | Key 状态 |
+| POST | `/api/v2/apikey/enable` / `/disable` | API Key | 启用 / 禁用当前账号 |
+| POST | `/api/v2/apikey/renew` | API Key | 续期当前账号 |
+| POST | `/api/v2/apikey/key/refresh` | API Key | 刷新 API Key |
+| GET/PUT | `/api/v2/apikey/permissions` | API Key | 权限查询；PUT 始终拒绝（禁止自行改权限） |
+| POST | `/api/v2/apikey/key/enable` / `/disable` | API Key | 启用 / 禁用 Key |
+| GET | `/api/v2/apikey/emby/status` | API Key | Emby 状态 |
+| POST | `/api/v2/apikey/emby/kick` | API Key | 将账号踢下线 |
+| POST | `/api/v2/apikey/use-code` | API Key | 使用卡码 / 注册码 |
+| GET | `/api/v2/users/telegram/register/bind-code/ws` | Public | 注册流程绑定码 WebSocket |
+| GET | `/api/v2/me/telegram/bind-code/ws` | User | 账户页绑定码 WebSocket |
+| GET | `/api/v2/me/announcements` | User | 个人公告态（含强制已读标记） |
+| GET | `/api/v2/invite/codes`、`/api/v2/invite/me` | User | 我的邀请码与邀请概览 |
+| GET | `/api/v2/bangumi/me`、`/bangumi/sync/status`、`/bangumi/sync/history` | User | Bangumi 个人视图与同步历史 |
+| GET | `/api/v2/media/tmdb/:tmdb_id`、`/media/bangumi/:bgm_id` | User | 媒体详情别名 |
+| PUT | `/api/v2/admin/me/update` | Admin | 管理员自助更新 |
+| DELETE | `/api/v2/admin/users/:uid/emby` | Admin | 解绑用户 Emby |
+| PUT | `/api/v2/admin/regcodes/:code`、`/api/v2/admin/tickets/:ticket_id` | Admin | V1 语义的 PUT 兼容（V2 另有 PATCH） |
+| POST | `/api/v2/settings/password/change` | User | 凭旧密码修改密码 |
+| POST | `/api/v2/registration/availability` | Public | 注册码可用性（POST 形式，与 GET 等价） |
+| GET | `/api/v2/system/stats`、`/system/emby-stats`、`/system/emby-viewers` | Admin / User | 统计面补齐 |
+| GET | `/api/v2/system/health/api`、`/database`、`/emby` | Admin | 独立健康探测（与 `/admin/health/*` 等价） |
+| GET | `/api/v2/docs` | Public | 接口文档页 |

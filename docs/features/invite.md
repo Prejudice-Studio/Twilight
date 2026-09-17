@@ -45,12 +45,10 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 
 ## 前端入口
 
-- **普通用户**：侧边栏「邀请中心」`/invite`（`webui-v2/src/routes/(app)/invite/+page.svelte`）
   - 查看自己的层级、直属上级、完整下级树（不返回多层上级信息）。
   - 生成 / 复制 / 撤销邀请码（仅当邀请系统开启）。
   - 为已有直属下级生成专属续期码；对 Emby 已到期或 Web 已禁用且仍绑定 Emby 的直属下级，可删除其 Emby 账号并断开关系。
   - 自己作为被邀请下级且 Emby 已到期或 Web 已禁用仍绑定 Emby 时，可通过后端自助接口删除自己的 Emby 账号并断开上级关系。
-- **管理员**：侧边栏「邀请系统管理」`/admin/invite`（`webui-v2/src/routes/(app)/admin/invite/+page.svelte`）
   - 查看邀请关系、根用户、直属下级与总下级统计。
   - 点击用户查看详情、解除上级关系、级联启停或删除。
 

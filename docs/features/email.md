@@ -1,6 +1,5 @@
 # 邮箱验证与找回密码
 
-默认前端入口位于 `webui-v2/src/routes`，使用 SSR `load` 和 form action；文中的 `webui/` 路径仅代表旧版紧急回滚实现。
 
 本文说明 Twilight 的邮箱验证子系统：SMTP 发信、验证码格式与有效期、绑定 / 验证邮箱、强制绑定门、改密二次校验、登出态邮箱找回密码、邮箱域名黑白名单，以及管理员的邮箱验证管理区。已对照后端代码（`internal/api/email_handlers.go`、`internal/api/email_verify_service.go`、`internal/api/email_client.go`、`internal/store/email_verification.go`、`internal/config/config.go`、`internal/api/config_admin.go`、`internal/api/routes.go`、`internal/api/errcode.go`）核对了字段、限流、原子消费与鉴权。
 
@@ -117,7 +116,6 @@
 - **服务端硬门**：`requireEmailVerified`（`email_handlers.go`）是不可绕过的服务端防线，前端守卫只做体验。未验证邮箱的受约束用户访问「价值型接口」（如使用卡码 `code_use_handlers.go`、求片 `media_request_handlers.go` 等）会被 `403` + `USER_EMAIL_VERIFICATION_REQUIRED` 拦截。
 - **改密二次校验**：受全局强制约束，或用户在个人设置中开启对应保护后，改系统密码 / Emby 密码时 `consumePasswordChangeEmailCode` 要求附带 `verification_id` + `email_code`（命中本人、对应用途的有效码）；未开启时此步直接放行，保持向后兼容。Emby 改密的当前 Web 密码保护与个人邮箱验证码保护互斥，启用当前 Web 密码后后端会关闭个人邮箱保护；历史上两个开关同时开启时也以当前 Web 密码为准。全局强制邮箱验证仍然优先，可能同时要求邮箱证明。关闭个人邮箱保护本身需要对应用途的验证码，但当前已认证的管理员可以直接关闭自己的个人邮箱保护，以免测试环境 SMTP 故障阻断管理操作。
 - **Emby 改密旧密码保护**：用户可在个人设置中开启“修改 Emby 密码需要当前 Web 密码”。开启后 `POST /users/me/password/emby` 必须附带 `old_password` 并通过当前 Web 密码校验；关闭该保护也必须先输入当前 Web 密码。
-- V2 前端入口：个人设置与认证辅助页见 `webui-v2/src/routes/(app)/settings`、`webui-v2/src/routes/forgot-password`；强制验证由服务端布局和后端鉴权共同执行。
 
 ## 登出态找回密码（防枚举）
 
@@ -130,7 +128,6 @@
 
 ## 管理员：邮箱验证管理区
 
-后台「用户管理」页（`webui-v2/src/routes/(app)/admin/users/`；旧版回滚路径为 `webui/src/app/(main)/admin/users/`）：
 
 - **筛选**：邮箱功能开启时新增「邮箱验证」筛选下拉——`verified`（已验证）/ `unverified`（已填邮箱未验证）/ `bound`（已填邮箱不论验证）/ `none`（未填邮箱）。该口径在后端 `listUsers`（`handlers.go`）与跨页全选 `filteredBatchUserUIDs`（`batch_user_handlers.go`）两处保持一致，避免「按邮箱筛选后全选跨页」误伤筛选外用户。
 - **行内状态**：用户列表邮箱旁显示「已验证 / 未验证」徽标。
