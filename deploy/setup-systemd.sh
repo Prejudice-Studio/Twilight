@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SERVICE_NAMES=("twilight" "twilight-bot" "twilight-scheduler" "twilight-webui-v2")
+SERVICE_NAMES=("twilight" "twilight-bot" "twilight-scheduler" "twilight-webui")
 LEGACY_PATTERN='python|uvicorn|gunicorn|main\.py|asgi\.py|src\.'
 
 usage() {
@@ -14,10 +14,11 @@ Environment overrides:
   TWILIGHT_GO_BIN            Backend binary path. Defaults to <project>/bin/twilight.
   TWILIGHT_API_HOST           API bind host. Defaults to 127.0.0.1.
   TWILIGHT_API_PORT           API bind port. Defaults to 5000.
-  TWILIGHT_WEBUI_ROOT         V2 Web UI root. Defaults to <project>/webui-v2.
-  TWILIGHT_WEBUI_HOST         V2 Web UI bind host. Defaults to 127.0.0.1.
-  TWILIGHT_WEBUI_PORT         V2 Web UI bind port. Defaults to 3001.
-  TWILIGHT_WEBUI_ORIGIN       V2 public origin. Defaults to http://127.0.0.1:3001.
+  TWILIGHT_WEBUI_ROOT         Web UI root. Defaults to <project>/webui.
+  TWILIGHT_WEBUI_HOST         Web UI bind host. Defaults to 127.0.0.1.
+  TWILIGHT_WEBUI_PORT         Web UI bind port. Defaults to 3001.
+  TWILIGHT_WEBUI_ORIGIN       Web UI public origin, validated only (Next.js itself
+                              does not consume ORIGIN). Defaults to http://<host>:<port>.
   TWILIGHT_NODE_BIN           Node executable. Defaults to the first node in PATH.
   TWILIGHT_SYSTEMD_USER       systemd service user. Defaults to root.
   TWILIGHT_SYSTEMD_GROUP      systemd service group. Defaults to TWILIGHT_SYSTEMD_USER.
@@ -71,7 +72,7 @@ need_cmd mktemp
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(realpath "${TWILIGHT_PROJECT_ROOT:-"$SCRIPT_DIR/.."}")"
 BIN_PATH="$(realpath -m "${TWILIGHT_GO_BIN:-"$PROJECT_ROOT/bin/twilight"}")"
-WEBUI_ROOT="$(realpath -m "${TWILIGHT_WEBUI_ROOT:-"$PROJECT_ROOT/webui-v2"}")"
+WEBUI_ROOT="$(realpath -m "${TWILIGHT_WEBUI_ROOT:-"$PROJECT_ROOT/webui"}")"
 CONFIG_FILE="$(realpath -m "$PROJECT_ROOT/config.toml")"
 ENV_FILE="$PROJECT_ROOT/.env"
 API_HOST="${TWILIGHT_API_HOST:-127.0.0.1}"
@@ -124,7 +125,7 @@ if ! [[ "$WEBUI_PORT" =~ ^[0-9]{1,5}$ ]] || (( WEBUI_PORT < 1 || WEBUI_PORT > 65
   exit 1
 fi
 if [[ ! -d "$WEBUI_ROOT" || ! -f "$WEBUI_ROOT/package.json" ]]; then
-  echo "V2 Web UI root does not look like a SvelteKit project: $WEBUI_ROOT" >&2
+  echo "Web UI root does not look like a Next.js project: $WEBUI_ROOT" >&2
   exit 1
 fi
 if [[ -z "$NODE_BIN" || ! -x "$NODE_BIN" ]]; then
@@ -171,18 +172,35 @@ if [[ ! -x "$BIN_PATH" ]]; then
   fi
 fi
 
-if [[ ! -f "$WEBUI_ROOT/build/index.js" && ! -f "$WEBUI_ROOT/build/index.mjs" ]]; then
+# Next.js `output: "standalone"` 的入口是 .next/standalone/server.js；
+# static 与 public 不在 standalone 目录里，需要在同一次部署里复制过去。
+WEBUI_ENTRY="$WEBUI_ROOT/.next/standalone/server.js"
+if [[ ! -f "$WEBUI_ENTRY" ]]; then
   if [[ "$NO_BUILD_WEBUI" -eq 1 ]]; then
-    echo "V2 Web UI build is missing under: $WEBUI_ROOT/build" >&2
+    echo "Web UI build is missing: $WEBUI_ENTRY" >&2
     exit 1
   fi
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "V2 Web UI build is missing; dry run would build: $WEBUI_ROOT"
+    echo "Web UI build is missing; dry run would build: $WEBUI_ROOT"
   else
     need_cmd pnpm
-    echo "Building V2 Web UI: $WEBUI_ROOT"
+    echo "Building Web UI: $WEBUI_ROOT"
     (cd "$WEBUI_ROOT" && pnpm install --frozen-lockfile && pnpm build)
   fi
+fi
+
+# standalone 产物不会自带 static 与 public，缺了会退化成无样式页面。
+# 先删目标再复制：`cp -r src dst` 在 dst 已存在时会嵌套成 dst/src 多一层。
+if [[ "$DRY_RUN" -eq 0 && -f "$WEBUI_ENTRY" ]]; then
+  (
+    cd "$WEBUI_ROOT"
+    rm -rf .next/standalone/.next/static .next/standalone/public
+    install -d .next/standalone/.next
+    cp -r .next/static .next/standalone/.next/static
+    if [[ -d public ]]; then
+      cp -r public .next/standalone/public
+    fi
+  )
 fi
 
 if [[ "$DRY_RUN" -eq 0 ]]; then
@@ -352,9 +370,9 @@ write_api_unit
 write_worker_unit "twilight-bot" "Twilight Go Telegram Bot Bridge" "bot" "512M" "15"
 write_worker_unit "twilight-scheduler" "Twilight Go Scheduler" "scheduler" "512M" "30"
 
-cat >"$UNIT_DIR/twilight-webui-v2.service" <<EOF
+cat >"$UNIT_DIR/twilight-webui.service" <<EOF
 [Unit]
-Description=Twilight SvelteKit SSR Web UI
+Description=Twilight Next.js Web UI
 After=network-online.target twilight.service
 Wants=network-online.target
 PartOf=twilight.service
@@ -365,13 +383,14 @@ StartLimitBurst=5
 Type=exec
 User=$SERVICE_USER
 Group=$SERVICE_GROUP
-WorkingDirectory=$WEBUI_ROOT
-ExecStart=$NODE_BIN $WEBUI_ROOT/build
+WorkingDirectory=$(dirname "$WEBUI_ENTRY")
+ExecStart=$NODE_BIN $WEBUI_ENTRY
 EnvironmentFile=-$WEBUI_ROOT/.env
+Environment=NODE_ENV=production
 Environment=BACKEND_URL=http://$API_HOST:$API_PORT
-Environment=HOST=$WEBUI_HOST
+# Next.js standalone 读取 HOSTNAME / PORT（不是 SvelteKit adapter-node 的 HOST）。
+Environment=HOSTNAME=$WEBUI_HOST
 Environment=PORT=$WEBUI_PORT
-Environment=ORIGIN=$WEBUI_ORIGIN
 
 LimitNOFILE=65535
 MemoryMax=512M
@@ -383,7 +402,7 @@ KillMode=mixed
 KillSignal=SIGTERM
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=twilight-webui-v2
+SyslogIdentifier=twilight-webui
 
 [Install]
 WantedBy=multi-user.target
@@ -397,16 +416,16 @@ if grep -qP 'driver\s*=\s*"?(json|)(\s|$)' "$PROJECT_ROOT/config.toml" 2>/dev/nu
   echo "    twilight-bot and twilight-scheduler will NOT be enabled."
   echo "    Use 'database.driver = \"postgres\"' for multi-process deployment."
   sed -i 's/^ExecStart=.*$/ExecStart='"$BIN_PATH"' all --host '"$API_HOST"' --port '"$API_PORT"' --config config.toml/' "$UNIT_DIR/twilight.service"
-  systemctl enable twilight.service twilight-webui-v2.service
+  systemctl enable twilight.service twilight-webui.service
   systemctl restart twilight.service || systemctl start twilight.service
-  systemctl restart twilight-webui-v2.service || systemctl start twilight-webui-v2.service
+  systemctl restart twilight-webui.service || systemctl start twilight-webui.service
 else
-  systemctl enable twilight.service twilight-bot.service twilight-scheduler.service twilight-webui-v2.service
+  systemctl enable twilight.service twilight-bot.service twilight-scheduler.service twilight-webui.service
   if [[ "$RESTART" -eq 1 ]]; then
-    systemctl restart twilight.service twilight-bot.service twilight-scheduler.service twilight-webui-v2.service
+    systemctl restart twilight.service twilight-bot.service twilight-scheduler.service twilight-webui.service
   else
-    systemctl start twilight.service twilight-bot.service twilight-scheduler.service twilight-webui-v2.service
+    systemctl start twilight.service twilight-bot.service twilight-scheduler.service twilight-webui.service
   fi
 fi
 
-systemctl --no-pager --full status twilight.service twilight-bot.service twilight-scheduler.service twilight-webui-v2.service || true
+systemctl --no-pager --full status twilight.service twilight-bot.service twilight-scheduler.service twilight-webui.service || true
