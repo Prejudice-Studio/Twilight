@@ -112,8 +112,11 @@ def load_frontend_calls():
             continue
         method_match = METHOD_RE.search(window)
         method = method_match.group(1) if method_match else "GET"
-        # The endpoint literal often sits on its own line below the call.
-        for offset, candidate in enumerate(lines[index - 1 : index + 3]):
+        # The endpoint literal often sits on its own line below the call. The
+        # window covers a multi-line response generic plus the init object, so a
+        # call whose path lands a few lines down is still checked (a `/usage`
+        # vs `/users` drift once hid behind a too-narrow window).
+        for offset, candidate in enumerate(lines[index - 1 : index + 4]):
                 for raw in PATH_LITERAL_RE.findall(candidate):
                     for path in normalised_variants(raw):
                         if len(path) < 2 or path.startswith("/_next") or "uploads" in path:
