@@ -1799,6 +1799,8 @@ func (a *App) handleSystemInfo(w http.ResponseWriter, r *http.Request, _ Params)
 			"ticket_system":                 cfg.TicketSystemEnabled,
 			"developer_mode":                a.store().DeveloperModeEnabled(),
 			"emby_stats":                    cfg.EmbyStatsEnabled,
+			"play_rank":                     cfg.PlayRankEnabled,
+			"play_rank_user":                cfg.PlayRankEnabled && cfg.PlayRankUserVisible,
 		},
 		"auth_background_url": cfg.AuthBackgroundURL,
 		"limits": map[string]any{

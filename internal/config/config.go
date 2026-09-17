@@ -149,6 +149,12 @@ type Config struct {
 	EmbyURL                        string
 	EmbyToken                      string
 	EmbyStatsEnabled               bool
+	// PlayRank* 控制「播放排行榜」：Enabled 是总开关（关掉后管理员后台之外全部拒绝），
+	// UserVisible 决定登录的普通用户能否查看，Anonymous 决定无账号访客能否查看。
+	// 三者独立：管理员始终可通过 /admin/emby/play-rank 查看完整榜单。
+	PlayRankEnabled     bool
+	PlayRankUserVisible bool
+	PlayRankAnonymous   bool
 	EmbyUsername                   string
 	EmbyPassword                   string
 	EmbyURLList                    []Line
@@ -396,6 +402,9 @@ func Load(path string) (Config, error) {
 	cfg.EmbyURL = reader.stringValue(cfg.EmbyURL, "Emby.emby_url", "emby_url")
 	cfg.EmbyToken = reader.stringValue(cfg.EmbyToken, "Emby.emby_token", "emby_token")
 	cfg.EmbyStatsEnabled = reader.boolValue(cfg.EmbyStatsEnabled, "Emby.emby_stats_enabled", "emby_stats_enabled")
+	cfg.PlayRankEnabled = reader.boolValue(cfg.PlayRankEnabled, "Emby.play_rank_enabled", "play_rank_enabled")
+	cfg.PlayRankUserVisible = reader.boolValue(cfg.PlayRankUserVisible, "Emby.play_rank_user_visible", "play_rank_user_visible")
+	cfg.PlayRankAnonymous = reader.boolValue(cfg.PlayRankAnonymous, "Emby.play_rank_anonymous", "play_rank_anonymous")
 	cfg.EmbyUsername = reader.stringValue(cfg.EmbyUsername, "Emby.emby_username", "emby_username")
 	cfg.EmbyPassword = reader.stringValue(cfg.EmbyPassword, "Emby.emby_password", "emby_password")
 	cfg.EmbyPublicURL = reader.stringValue(cfg.EmbyPublicURL, "Emby.emby_public_url", "emby_public_url")
@@ -615,6 +624,11 @@ func defaults() Config {
 		AllowCredential:      true,
 		TrustProxyHeaders:    false,
 		EmbyStatsEnabled:     true,
+		// 排行榜默认对登录用户开放、对匿名访客关闭：榜单是聚合统计而非观看明细，
+		// 脱敏后可以给普通用户看，但是否开放给未登录访客交给管理员决定。
+		PlayRankEnabled:     true,
+		PlayRankUserVisible: true,
+		PlayRankAnonymous:   false,
 		SessionCookie:        "twilight_session",
 		// CookieSecure 默认 true：HTTPS 是生产基线，HTTP 调试场景显式
 		// 改 toml 或 env 关掉。旧默认 false 在 HTTP 部署时也不告警，

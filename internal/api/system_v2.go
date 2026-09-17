@@ -32,6 +32,9 @@ func (a *App) handleV2SystemInfo(w http.ResponseWriter, _ *http.Request, _ Param
 		// 统计与在线观看人数，V2 一度漏掉它，导致这两项永远不加载。
 		"emby_stats":    cfg.EmbyStatsEnabled,
 		"activity_logs": true,
+		// play_rank：排行榜总开关；play_rank_user：登录的普通用户可见（管理员不受限）。
+		"play_rank":      cfg.PlayRankEnabled,
+		"play_rank_user": cfg.PlayRankEnabled && cfg.PlayRankUserVisible,
 	}
 	limits := map[string]any{
 		"user_limit":             zeroNil(int64(cfg.UserLimit)),
