@@ -16,6 +16,9 @@ import (
 	"syscall"
 	"time"
 
+	// Registers /debug/pprof/* on the default mux for runtime profiling.
+	_ "net/http/pprof"
+
 	"github.com/prejudice-studio/twilight/internal/api"
 	"github.com/prejudice-studio/twilight/internal/config"
 	"github.com/prejudice-studio/twilight/internal/store"
@@ -103,6 +106,21 @@ func runAPI(args []string) error {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       90 * time.Second,
 		MaxHeaderBytes:    1 << 20,
+	}
+
+	// Profiling runs on its own loopback listener. Serving it through the App
+	// handler would execute the per-request Store.Refresh and pollute the
+	// profile with state reloads no real user request needs.
+	if addr := strings.TrimSpace(os.Getenv("TWILIGHT_PPROF_ADDR")); addr != "off" {
+		if addr == "" {
+			addr = "127.0.0.1:6060"
+		}
+		go func() {
+			zap.L().Info("pprof listener started", zap.String("addr", addr))
+			if err := http.ListenAndServe(addr, nil); err != nil {
+				zap.L().Warn("pprof listener stopped", zap.Error(err))
+			}
+		}()
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

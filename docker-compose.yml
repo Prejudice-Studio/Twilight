@@ -16,7 +16,7 @@
 #   postgres  — PostgreSQL 17 (state store + sessions)
 #   redis     — Redis 7 (session sharing + rate limiting)
 #   twilight  — Go backend (API + scheduler + bot, "all" mode)
-#   webui     — Next.js frontend (standalone)
+#   webui     — Next.js product frontend
 #
 # Volumes:
 #   postgres_data / redis_data — persisted databases
@@ -148,12 +148,18 @@ services:
     # ports:
     #   - "5000:5000"
 
-  # ---- Next.js Frontend ----
+  # ---- Product frontend (Next.js, webui/) ----
+  # Docker is not the recommended deployment path; prefer Linux + systemd.
   webui:
     <<: *service-defaults
     build:
       context: ./webui
       dockerfile: Dockerfile
+      args:
+        # 留空 = 同域部署：浏览器请求同源 /api/*，由 Next.js rewrite 在运行期
+        # 代理到 BACKEND_URL。仅当前端与 API 不同域时才设置，因为 Next.js 会把
+        # 这个值在构建期打进浏览器 bundle。
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
     image: twilight-webui:latest
     container_name: twilight-webui
     restart: unless-stopped
@@ -164,8 +170,6 @@ services:
       TZ: ${TZ:-Asia/Shanghai}
       NODE_ENV: production
       PORT: 3000
-      # API URL — set to the backend service name for internal networking.
-      # For production with a reverse proxy, set this to the public API URL.
       BACKEND_URL: ${BACKEND_URL:-http://twilight:5000}
     env_file:
       - path: webui/.env

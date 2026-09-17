@@ -30,10 +30,15 @@
 !.env.example
 !.env.*.example
 .envrc
+.direnv/
 
 # ─── Local / Secret Configuration ───
-# 本地 tom 覆写（任意层级）
+# 本地覆写（任意层级，任意后缀）
 **/*.local.toml
+**/*.local.yml
+**/*.local.yaml
+**/*.local.json
+**/*.local.env
 **/*.private.toml
 **/*.secrets.toml
 # 根目录配置备份
@@ -51,8 +56,9 @@ config.toml.*
 1panel/
 
 # ─── Docker ───
-# 本地用户覆写（Docker Compose 标准机制）
+# 本地用户覆写（Docker Compose 标准机制，yml 与 yaml 两种后缀都要挡）
 docker-compose.override.yml
+docker-compose.override.yaml
 # 本地自定义 Dockerfile
 Dockerfile.local
 Dockerfile.*.local
@@ -68,14 +74,15 @@ Dockerfile.*.local
 *.sqlite
 *.sqlite3
 *.sqlite-*
-/db/
+db/
 database.db
 # 备份
 config_backups/
 backups/
-# 上传 & 临时
+db/backups/
+# 上传 & 临时（任意层级：历史上有 tmp/v2grep.txt 这类临时产物被误提交过）
 uploads/
-/tmp/
+tmp/
 temp/
 # 进程 & 缓存
 runtime/
@@ -87,7 +94,7 @@ data/
 
 # ─── Logs ───
 *.log
-/logs/
+logs/
 api_error.log
 npm-debug.log*
 yarn-debug.log*
@@ -145,6 +152,9 @@ coverage.html
 *.coverprofile
 *.prof
 *.pprof
+# pprof 抓取落盘目录（cmd/twilight 的 TWILIGHT_PPROF_ADDR 只用于在线抓取，
+# 但 `go tool pprof -http` / 手工 curl 保存的快照不应进库）
+pprof/
 # 工具配置
 .air.toml
 # Go workspace（本地多模块开发用）
@@ -211,13 +221,14 @@ id_ecdsa.*
 OPTIMIZATION_SUMMARY.md
 DEPLOY_LOCAL.txt
 /tests
-/.claude
+.claude/
 /memory/
 .notes/
 .aider*
 .codex/
 .continue/
 .copilot/
+.codebuddy/
 routes.txt
 routes.json
 openapi.json
@@ -242,3 +253,10 @@ docs/AUDIT_REPORT.md
 kubeconfig*
 /.codex-reference-twilight
 /.corepack
+.dev-progress
+# 过程性审计 / 审查 / 覆盖报告：一次性本地产物，记录某个时点的发现而非长期约定。
+# 结论以 docs/ 下的现行文档为准，不要提交，也不要作为文档索引来源。
+/.dev-*.md
+/.dev-*.txt
+# 本地 agent 工作目录（会话记忆、临时笔记），与仓库内容无关
+/.workbuddy/
