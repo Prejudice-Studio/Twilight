@@ -104,6 +104,10 @@ type App struct {
 	embyDeviceAuditMu         sync.Mutex
 	embyDeviceAuditUntil      time.Time
 	embyDeviceAuditCache      map[string]any
+	// playRankCache 按 "range|limit|是否含身份" 分键缓存榜单，脱敏版与管理
+	// 员版互不相通。
+	playRankMu    sync.Mutex
+	playRankCache map[string]playRankSnapshot
 	embySessionsMu            sync.Mutex
 	embySessionsUntil         time.Time
 	embySessionsCache         []map[string]any

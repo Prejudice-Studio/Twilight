@@ -499,6 +499,212 @@ func (s *Store) DeletePlaybackRecordsBefore(ctx context.Context, cutoff int64) (
 	return result.RowsAffected()
 }
 
+// playbackRankDefaultLimit / playbackRankMaxLimit 约束榜单长度：排行榜是聚合
+// 结果，返回全表没有意义，也容易被拿来拖库。
+const (
+	playbackRankDefaultLimit = 20
+	playbackRankMaxLimit     = 100
+)
+
+// PlaybackMediaRank 是一部媒体在某个时间窗内的聚合：播放次数、累计时长和看过
+// 的人数。它只回答"哪部最热"，不包含任何一次播放的时间点。
+type PlaybackMediaRank struct {
+	ItemID     string
+	Title      string
+	SeriesName string
+	MediaType  string
+	Plays      int
+	Duration   int64
+	Viewers    int
+}
+
+// PlaybackUserRank 是一个用户在同一时间窗内的聚合。UID 只下发给管理员接口，
+// 普通用户接口会把用户名脱敏后丢弃 UID。
+type PlaybackUserRank struct {
+	UID      int64
+	Plays    int
+	Duration int64
+	Items    int
+}
+
+// PlaybackRank 返回 since 之后的媒体榜与用户榜。PG 可用时两条 GROUP BY 直接
+// 在库里聚合；PG 不可用或查询失败时回落到内存副本（maxStoredPlaybackRecords
+// 条）做同样的聚合，保证降级时榜单仍然可用。
+func (s *Store) PlaybackRank(since int64, limit int) ([]PlaybackMediaRank, []PlaybackUserRank, error) {
+	if limit <= 0 {
+		limit = playbackRankDefaultLimit
+	}
+	if limit > playbackRankMaxLimit {
+		limit = playbackRankMaxLimit
+	}
+	if since < 0 {
+		since = 0
+	}
+
+	s.mu.RLock()
+	db := s.db
+	s.mu.RUnlock()
+
+	if db != nil {
+		media, mediaErr := queryPlaybackMediaRankDB(db, since, limit)
+		users, userErr := queryPlaybackUserRankDB(db, since, limit)
+		if mediaErr == nil && userErr == nil {
+			return media, users, nil
+		}
+		return s.playbackRankFromMemory(since, limit)
+	}
+	return s.playbackRankFromMemory(since, limit)
+}
+
+func queryPlaybackMediaRankDB(db *sql.DB, since int64, limit int) ([]PlaybackMediaRank, error) {
+	query := `SELECT item_id, MAX(title), COALESCE(MAX(series_name), ''), COALESCE(MAX(media_type), ''),
+	COUNT(*), COALESCE(SUM(duration), 0), COUNT(DISTINCT uid)
+FROM twilight_playback_records
+WHERE played_at >= $1 AND item_id <> ''
+GROUP BY item_id
+ORDER BY COUNT(*) DESC, COALESCE(SUM(duration), 0) DESC, item_id ASC
+LIMIT $2`
+	ctx, cancel := context.WithTimeout(context.Background(), pgPlaybackReadTimeout)
+	defer cancel()
+	rows, err := db.QueryContext(ctx, query, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]PlaybackMediaRank, 0, limit)
+	for rows.Next() {
+		var item PlaybackMediaRank
+		if err := rows.Scan(&item.ItemID, &item.Title, &item.SeriesName, &item.MediaType, &item.Plays, &item.Duration, &item.Viewers); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func queryPlaybackUserRankDB(db *sql.DB, since int64, limit int) ([]PlaybackUserRank, error) {
+	query := `SELECT uid, COUNT(*), COALESCE(SUM(duration), 0), COUNT(DISTINCT item_id)
+FROM twilight_playback_records
+WHERE played_at >= $1 AND uid > 0
+GROUP BY uid
+ORDER BY COALESCE(SUM(duration), 0) DESC, COUNT(*) DESC, uid ASC
+LIMIT $2`
+	ctx, cancel := context.WithTimeout(context.Background(), pgPlaybackReadTimeout)
+	defer cancel()
+	rows, err := db.QueryContext(ctx, query, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]PlaybackUserRank, 0, limit)
+	for rows.Next() {
+		var item PlaybackUserRank
+		if err := rows.Scan(&item.UID, &item.Plays, &item.Duration, &item.Items); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+// playbackRankFromMemory 是 PG 不可用时的兜底：内存副本本身就是最近的记录，
+// 只做一次线性扫描 + map 聚合，再按同样的排序口径截断。
+func (s *Store) playbackRankFromMemory(since int64, limit int) ([]PlaybackMediaRank, []PlaybackUserRank, error) {
+	type mediaAgg struct {
+		item    PlaybackMediaRank
+		viewers map[int64]struct{}
+	}
+	type userAgg struct {
+		item  PlaybackUserRank
+		items map[string]struct{}
+	}
+
+	mediaMap := map[string]*mediaAgg{}
+	userMap := map[int64]*userAgg{}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, record := range s.state.PlaybackRecords {
+		if since > 0 && record.PlayedAt < since {
+			continue
+		}
+		if record.ItemID != "" {
+			agg := mediaMap[record.ItemID]
+			if agg == nil {
+				agg = &mediaAgg{
+					item:    PlaybackMediaRank{ItemID: record.ItemID, Title: record.Title, SeriesName: record.SeriesName, MediaType: record.MediaType},
+					viewers: map[int64]struct{}{},
+				}
+				mediaMap[record.ItemID] = agg
+			}
+			agg.item.Plays++
+			agg.item.Duration += record.Duration
+			if agg.item.Title == "" {
+				agg.item.Title = record.Title
+			}
+			if agg.item.SeriesName == "" {
+				agg.item.SeriesName = record.SeriesName
+			}
+			if agg.item.MediaType == "" {
+				agg.item.MediaType = record.MediaType
+			}
+			if record.UID != 0 {
+				agg.viewers[record.UID] = struct{}{}
+			}
+		}
+		if record.UID > 0 {
+			agg := userMap[record.UID]
+			if agg == nil {
+				agg = &userAgg{item: PlaybackUserRank{UID: record.UID}, items: map[string]struct{}{}}
+				userMap[record.UID] = agg
+			}
+			agg.item.Plays++
+			agg.item.Duration += record.Duration
+			if record.ItemID != "" {
+				agg.items[record.ItemID] = struct{}{}
+			}
+		}
+	}
+
+	media := make([]PlaybackMediaRank, 0, minInt(limit, len(mediaMap)))
+	for _, agg := range mediaMap {
+		agg.item.Viewers = len(agg.viewers)
+		media = append(media, agg.item)
+	}
+	sort.Slice(media, func(i, j int) bool {
+		if media[i].Plays != media[j].Plays {
+			return media[i].Plays > media[j].Plays
+		}
+		if media[i].Duration != media[j].Duration {
+			return media[i].Duration > media[j].Duration
+		}
+		return media[i].ItemID < media[j].ItemID
+	})
+
+	users := make([]PlaybackUserRank, 0, minInt(limit, len(userMap)))
+	for _, agg := range userMap {
+		agg.item.Items = len(agg.items)
+		users = append(users, agg.item)
+	}
+	sort.Slice(users, func(i, j int) bool {
+		if users[i].Duration != users[j].Duration {
+			return users[i].Duration > users[j].Duration
+		}
+		if users[i].Plays != users[j].Plays {
+			return users[i].Plays > users[j].Plays
+		}
+		return users[i].UID < users[j].UID
+	})
+
+	if len(media) > limit {
+		media = media[:limit]
+	}
+	if len(users) > limit {
+		users = users[:limit]
+	}
+	return media, users, nil
+}
+
 func minInt(a, b int) int {
 	if a < b {
 		return a
