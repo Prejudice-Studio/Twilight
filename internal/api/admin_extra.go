@@ -230,57 +230,95 @@ func (a *App) handleEmbyBroadcast(w http.ResponseWriter, r *http.Request, _ Para
 }
 
 func (a *App) handleEmbyConnectivityTest(w http.ResponseWriter, r *http.Request, _ Params) {
-	configuredURL := strings.TrimSpace(a.cfg().EmbyURL) != ""
+	embyURL := strings.TrimSpace(a.cfg().EmbyURL)
+	configuredURL := embyURL != ""
 	configuredToken := strings.TrimSpace(a.cfg().EmbyToken) != ""
-	tests := []map[string]any{
-		{"name": "configuration_url", "success": configuredURL, "message": map[bool]string{true: "已配置", false: "未配置"}[configuredURL]},
-		{"name": "configuration_token", "success": configuredToken, "message": map[bool]string{true: "已配置", false: "未配置"}[configuredToken]},
+	configMessage := func(present bool) string {
+		if present {
+			return "已配置"
+		}
+		return "未配置"
 	}
+	tests := []map[string]any{
+		{"name": "configuration_url", "success": configuredURL, "message": configMessage(configuredURL)},
+		{"name": "configuration_token", "success": configuredToken, "message": configMessage(configuredToken)},
+	}
+	// overall 判定的是"能不能用"而不是"有没有填"：缺 Token 时需要鉴权的探测无法
+	// 进行，整体仍然是失败。但服务器信息探测不依赖 Token，必须照旧执行——否则页面
+	// 只看到两个配置项，既验证不了地址有效性，也读不到版本和状态。
 	overall := configuredURL && configuredToken
+	status := "not_configured"
 	var info map[string]any
-	if configuredURL && configuredToken {
+	if configuredURL {
+		// /System/Info/Public 是免鉴权端点，只填了 URL 也能确认地址真的指向一个
+		// Emby，并把服务器名称、版本、系统读出来给管理页展示。
 		start := time.Now()
 		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
-		got, err := a.embyHealthDetailed(ctx)
+		var err error
+		if configuredToken {
+			var got map[string]any
+			got, err = a.embyHealthDetailed(ctx)
+			info = safeEmbyServerInfo(got)
+		} else {
+			var got map[string]any
+			got, err = a.embyHealthAt(ctx, embyURL)
+			info = safeEmbyServerInfo(got)
+		}
 		cancel()
-		success := err == nil
+		success := err == nil && info != nil
 		overall = overall && success
 		message := "OK"
-		if !success {
+		switch {
+		case err != nil:
 			zap.L().Warn("admin Emby server info probe failed", zap.String("error", redactSensitiveText(err.Error())))
 			message = "Emby 服务器信息读取失败"
-		} else if got != nil {
-			info = safeEmbyServerInfo(got)
+		case info == nil:
+			message = "Emby 返回空的服务器信息"
+		}
+		if success {
+			status = "online"
+		} else {
+			status = "unreachable"
 		}
 		tests = append(tests, map[string]any{"name": "backend_server_info", "success": success, "latency_ms": time.Since(start).Milliseconds(), "message": message})
 
-		start = time.Now()
-		var users []map[string]any
-		ctx, cancel = context.WithTimeout(r.Context(), 8*time.Second)
-		usersErr := a.embyGet(ctx, "/Users", &users)
-		cancel()
-		usersOK := usersErr == nil
-		overall = overall && usersOK
-		usersMessage := "OK"
-		if usersErr != nil {
-			zap.L().Warn("admin Emby users probe failed", zap.String("error", redactSensitiveText(usersErr.Error())))
-			usersMessage = "Emby 用户列表读取失败"
-		}
-		tests = append(tests, map[string]any{"name": "backend_users", "success": usersOK, "latency_ms": time.Since(start).Milliseconds(), "message": usersMessage, "count": len(users)})
+		if !configuredToken {
+			for _, skipped := range []string{"backend_users", "backend_libraries"} {
+				tests = append(tests, map[string]any{
+					"name":    skipped,
+					"success": false,
+					"message": "Emby API Token 未配置，跳过需要鉴权的探测",
+				})
+			}
+		} else {
+			start = time.Now()
+			var users []map[string]any
+			ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+			usersErr := a.embyGet(ctx, "/Users", &users)
+			cancel()
+			usersOK := usersErr == nil
+			overall = overall && usersOK
+			usersMessage := "OK"
+			if usersErr != nil {
+				zap.L().Warn("admin Emby users probe failed", zap.String("error", redactSensitiveText(usersErr.Error())))
+				usersMessage = "Emby 用户列表读取失败"
+			}
+			tests = append(tests, map[string]any{"name": "backend_users", "success": usersOK, "latency_ms": time.Since(start).Milliseconds(), "message": usersMessage, "count": len(users)})
 
-		start = time.Now()
-		var libraries []map[string]any
-		ctx, cancel = context.WithTimeout(r.Context(), 8*time.Second)
-		libraryErr := a.embyGet(ctx, "/Library/VirtualFolders", &libraries)
-		cancel()
-		libraryOK := libraryErr == nil
-		overall = overall && libraryOK
-		libraryMessage := "OK"
-		if libraryErr != nil {
-			zap.L().Warn("admin Emby libraries probe failed", zap.String("error", redactSensitiveText(libraryErr.Error())))
-			libraryMessage = "Emby 媒体库读取失败"
+			start = time.Now()
+			var libraries []map[string]any
+			ctx, cancel = context.WithTimeout(r.Context(), 8*time.Second)
+			libraryErr := a.embyGet(ctx, "/Library/VirtualFolders", &libraries)
+			cancel()
+			libraryOK := libraryErr == nil
+			overall = overall && libraryOK
+			libraryMessage := "OK"
+			if libraryErr != nil {
+				zap.L().Warn("admin Emby libraries probe failed", zap.String("error", redactSensitiveText(libraryErr.Error())))
+				libraryMessage = "Emby 媒体库读取失败"
+			}
+			tests = append(tests, map[string]any{"name": "backend_libraries", "success": libraryOK, "latency_ms": time.Since(start).Milliseconds(), "message": libraryMessage, "count": len(libraries)})
 		}
-		tests = append(tests, map[string]any{"name": "backend_libraries", "success": libraryOK, "latency_ms": time.Since(start).Milliseconds(), "message": libraryMessage, "count": len(libraries)})
 
 		for candidateIndex, candidate := range a.embyBackendLocalProbeCandidates() {
 			start = time.Now()
@@ -303,7 +341,14 @@ func (a *App) handleEmbyConnectivityTest(w http.ResponseWriter, r *http.Request,
 			})
 		}
 	}
-	ok(w, "OK", map[string]any{"success": overall, "tests": tests, "overall": overall, "server_info": info})
+	ok(w, "OK", map[string]any{
+		"success":     overall,
+		"tests":       tests,
+		"overall":     overall,
+		"emby_url":    embyURL,
+		"status":      status,
+		"server_info": info,
+	})
 }
 
 func safeEmbyServerInfo(info map[string]any) map[string]any {

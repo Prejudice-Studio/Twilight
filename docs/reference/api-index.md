@@ -489,7 +489,7 @@ V2 用户端媒体资源（WebUI 媒体页使用）：
 | GET | `/api/v2/admin/emby/device-audit` | Admin | V2 手动设备/IP 审查；按 Emby 用户聚合、过滤 Twilight 自身客户端，`refresh=1` 才强制刷新远端数据 |
 | GET | `/api/v2/admin/emby/activity-logs` | Admin | V2 本地 Emby 活动日志；仅 `refresh=1` 时从 Emby 同步并入库 |
 | POST | `/api/v2/admin/emby/activity-logs/sync` | Admin | V2 手动同步 Emby 活动日志并入库；默认读取最近 24 小时，可用 `since_hours` 调整范围 |
-| POST | `/api/v2/admin/emby/test` | Admin | V2 后端 Emby 连通性与本机候选探测 |
+| POST | `/api/v2/admin/emby/test` | Admin | V2 后端 Emby 连通性与本机候选探测；只要配置了 Emby 地址就探测服务器信息（免鉴权 `/System/Info/Public`），返回 `emby_url`、`status`、`server_info`，缺 Token 时鉴权类探测显式标记跳过 |
 | POST | `/api/v2/admin/emby/broadcast` | Admin | V2 向在线 Emby 会话发送广播，保留审计 |
 | POST | `/api/v2/admin/emby/sync` | Admin | V2 同步本地 Emby 用户名映射 |
 | POST | `/api/v2/admin/emby/import-users` | Admin | V2 扫描可导入的非管理员 Emby 账号 |

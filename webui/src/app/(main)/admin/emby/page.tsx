@@ -59,6 +59,8 @@ interface ConnectivityResult {
   emby_url: string;
   tests: TestResult[];
   overall: boolean;
+  /** not_configured / online / unreachable */
+  status?: string;
   server_info?: { name: string; version: string; os: string; id: string };
 }
 
