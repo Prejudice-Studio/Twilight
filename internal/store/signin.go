@@ -6,7 +6,12 @@ import (
 )
 
 const signinDateLayout = "2006-01-02"
-const maxSigninRecords = 730 // 最多保留 730 条签到记录（约 2 年），超出的旧记录自动裁剪
+// maxSigninRecords bounds the per-user sign-in history kept inside the single
+// twilight_state JSONB document. Every record is marshalled on each write, so
+// the old 730-entry window was the largest single contributor to state size
+// (about 80 KB per user, i.e. 80 MB at 1000 users). 90 days still covers the
+// history UI and any operational query, and older rows are cheap to rebuild.
+const maxSigninRecords = 90 // 最多保留 90 天签到记录，超出的旧记录自动裁剪
 
 func (s *Store) Signin(uid int64) Signin {
 	s.mu.RLock()

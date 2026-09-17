@@ -924,9 +924,33 @@ func (s *Store) Refresh() error {
 	if s == nil {
 		return nil
 	}
+	// Most refreshes find the persisted version unchanged. Probing the version
+	// under a read lock keeps concurrent readers running; taking the write lock
+	// on every request serialised the whole process (HTTP, bot and scheduler
+	// share one Store) behind an empty round trip.
+	if s.persistedVersionUnchanged() {
+		return nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.refreshLocked()
+}
+
+// persistedVersionUnchanged reports whether the stored state version still
+// matches the in-memory one. A database error falls back to the locked full
+// refresh so refresh semantics never depend on the fast path succeeding.
+func (s *Store) persistedVersionUnchanged() bool {
+	s.mu.RLock()
+	version := s.stateVersion
+	s.mu.RUnlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var current int64
+	if err := s.db.QueryRowContext(ctx, `SELECT version FROM twilight_state WHERE id = 1`).Scan(&current); err != nil {
+		return false
+	}
+	return current == version
 }
 
 // stateSnapshot 持有变更前 State 的序列化副本，仅在真正回滚时才反序列化。
