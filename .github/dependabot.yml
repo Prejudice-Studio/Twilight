@@ -21,22 +21,7 @@ updates:
           - minor
           - patch
 
-  # 默认前端 npm (pnpm 兼容 dependabot npm 生态)
-  - package-ecosystem: npm
-    directory: /webui-v2
-    schedule:
-      interval: weekly
-      day: monday
-      time: "03:30"
-      timezone: Asia/Shanghai
-    open-pull-requests-limit: 5
-    labels:
-      - dependencies
-      - frontend
-    commit-message:
-      prefix: "deps(webui-v2)"
-
-  # 旧版 Next.js 仅作为紧急回滚版本维护，不参与默认生产构建。
+  # 前端 npm (pnpm 兼容 dependabot npm 生态)。webui 是唯一前端。
   - package-ecosystem: npm
     directory: /webui
     schedule:
@@ -49,7 +34,7 @@ updates:
       - dependencies
       - frontend
     commit-message:
-      prefix: "deps(webui-legacy)"
+      prefix: "deps(webui)"
     groups:
       radix-ui:
         patterns:
