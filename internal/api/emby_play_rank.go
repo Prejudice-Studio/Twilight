@@ -170,9 +170,8 @@ func (a *App) buildPlayRank(rangeKey string, limit int, includeIdentity bool) ma
 	}
 }
 
-// handleV2PlayRank 是普通用户 / 访客的榜单接口。路由级别是 AuthPublic（未登录
-// 也能进来），是否放行完全由配置决定——所以这里必须显式判断登录态，不能依赖
-// 路由鉴权。
+// handleV2PlayRank 是普通用户的榜单接口。路由级别就是 AuthUser：排行榜不向无账号
+// 访客开放，未登录请求在鉴权层即被拒绝，这里只按配置区分"普通用户能不能看"。
 func (a *App) handleV2PlayRank(w http.ResponseWriter, r *http.Request, _ Params) {
 	cfg := a.cfg()
 	if !cfg.PlayRankEnabled {
@@ -180,11 +179,7 @@ func (a *App) handleV2PlayRank(w http.ResponseWriter, r *http.Request, _ Params)
 		return
 	}
 	p := current(r)
-	switch {
-	case p.User.UID == 0 && !cfg.PlayRankAnonymous:
-		failWithCode(w, http.StatusUnauthorized, ErrUnauthorized, "排行榜未对未登录访客开放")
-		return
-	case p.User.UID != 0 && p.User.Role != store.RoleAdmin && !cfg.PlayRankUserVisible:
+	if p.User.Role != store.RoleAdmin && !cfg.PlayRankUserVisible {
 		failWithCode(w, http.StatusForbidden, ErrForbidden, "排行榜未对普通用户开放")
 		return
 	}
@@ -203,7 +198,6 @@ func (a *App) handleV2AdminPlayRank(w http.ResponseWriter, r *http.Request, _ Pa
 	data := a.playRankData(rangeKey, limit, true, refresh)
 	data["enabled"] = a.cfg().PlayRankEnabled
 	data["user_visible"] = a.cfg().PlayRankUserVisible
-	data["anonymous"] = a.cfg().PlayRankAnonymous
 	ok(w, "OK", data)
 }
 

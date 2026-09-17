@@ -279,9 +279,9 @@ func (a *App) registerV2Routes() {
 	// 匿名调用者不应拿到站点媒体规模或在线人数。
 	a.add(http.MethodGet, "/api/v2/emby/stats", AuthUser, a.handleV2EmbyStats)
 	a.add(http.MethodGet, "/api/v2/emby/viewer-count", AuthUser, a.handleV2EmbyViewerCount)
-	// 播放排行榜：AuthPublic 只是"允许匿名请求进来"，是否放行由 handler 按
-	// PlayRankAnonymous / PlayRankUserVisible 判断（见 handleV2PlayRank）。
-	a.add(http.MethodGet, "/api/v2/emby/play-rank", AuthPublic, a.handleV2PlayRank)
+	// 播放排行榜只对已登录账号开放（AuthUser）：无账号访客没有任何入口，
+	// 普通用户能否查看由 PlayRankUserVisible 在 handler 内判断。
+	a.add(http.MethodGet, "/api/v2/emby/play-rank", AuthUser, a.handleV2PlayRank)
 	a.add(http.MethodGet, "/api/v2/admin/emby/play-rank", AuthAdmin, a.handleV2AdminPlayRank)
 	// 注意：不存在 /api/v2/emby/now-playing 普通用户路由。观看明细属于隐私数据，
 	// 任何角色都不能通过普通用户路由拉取"谁在看什么"。

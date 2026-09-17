@@ -136,9 +136,6 @@ export default function AdminPlayRankPage() {
             {data?.enabled !== false && data?.user_visible === false && (
               <Badge variant="secondary" className="self-center">{t("playRank.userVisibleOff")}</Badge>
             )}
-            {data?.anonymous === true && (
-              <Badge variant="secondary" className="self-center">{t("playRank.anonymousOn")}</Badge>
-            )}
           </div>
 
           {data?.enabled === false && (
