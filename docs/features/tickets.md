@@ -21,7 +21,7 @@
 
 管理员元数据更新与聊天回复是两种独立操作：状态、优先级、类型和 `admin_note` 走元数据更新；聊天文字走 `AddTicketReply` 追加。两条路径都不能重建或替换 `replies`，从根源上避免管理员保存表单时覆盖用户追加回复。
 
-管理端工单处理页支持点击单个工单进入会话式详情页。详情页通过 `GET /admin/tickets/{ticket_id}` 读取完整对话，通过 `POST /admin/tickets/{ticket_id}/reply` 单独追加管理员文字回复；粘贴图片仍复用 `/tickets/{ticket_id}/images`，受全局工单图片大小和数量限制。
+管理端工单处理页支持点击单个工单进入会话式详情页。详情页读取完整对话、追加管理员文字回复、以及图片上传/预览/删除，在 V2（`webui` 默认版本）下分别对应 `/api/v2/admin/tickets/{ticket_id}`、`POST /api/v2/admin/tickets/{ticket_id}/replies`、`/api/v2/tickets/{ticket_id}/attachments`；V1 的同义路径是 `/admin/tickets/{ticket_id}`、`POST /admin/tickets/{ticket_id}/reply`、`/tickets/{ticket_id}/images`。附件受全局工单图片大小和数量限制。V1 支持粘贴图片，WebUI 详情页通过 `apiRequestForm` 提交同源 multipart 请求，后端规则不变。
 
 管理端工单列表默认只返回 `open` / `in_progress`，用于聚焦待处理队列。需要查看历史归档时，前端和外部调用方应显式传 `all=1`；后端同时兼容 `status=all`，两者都会返回 `resolved` / `closed` 等全部状态。
 

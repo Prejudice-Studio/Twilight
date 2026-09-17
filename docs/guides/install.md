@@ -1,17 +1,15 @@
 # 安装部署
 
-本文介绍如何在生产环境部署 Twilight：Go 后端面向 Linux + systemd 设计，前端为 Next.js，业务状态默认存储在 PostgreSQL（也可使用单一 JSON 状态文档），并通过 HTTPS 反向代理统一对外暴露。
+本文介绍如何在生产环境部署 Twilight：Go 后端和 Next.js 前端面向 Linux + systemd 设计，业务状态存储在 PostgreSQL，并通过 HTTPS 反向代理统一对外暴露。
 
-> **推荐**: 新部署优先使用 [Docker 部署](./docker.md)，一键启动 PostgreSQL + Redis + 后端 + 前端。
+> **推荐**: Linux + systemd 原生部署（`deploy/setup-systemd.sh`）。[Docker 部署](./docker.md) 也有，但开发者不推荐、且未经实测。
 
 ## 环境要求
 
 | 组件 | 要求 | 说明 |
 | --- | --- | --- |
 | Go | 1.25 或更高 | 仅构建后端二进制时需要；运行时不依赖 Go。 |
-| Node.js | 22 或更高 | 构建并运行 Next.js 前端。 |
-| pnpm | `webui/package.json` 的 `packageManager` 指定版本 | 前端包管理与构建，建议通过 Corepack 启用。 |
-| PostgreSQL | 推荐生产使用 | 默认存储后端；也可改用 JSON 状态文件做小型/迁移部署。 |
+| PostgreSQL | 必需 | 唯一运行时存储后端。 |
 | Emby / Jellyfin | 可访问的实例 | 后端通过 API Token 调用，需在 Emby 后台生成 API 密钥。 |
 | Redis | 可选，生产建议 | 用于会话缓存与分布式速率限制计数；留空时退化为进程内内存。 |
 
@@ -21,25 +19,30 @@
 
 ## 后端构建与启动
 
-构建二进制并以生产脚本启动：
+构建二进制后直接启动：
 
 ```bash
 go build -o bin/twilight ./cmd/twilight
 cp config.production.toml config.toml
-bash start_backend_prod.sh
-```
-
-`start_backend_prod.sh`（见仓库根目录）的行为：
-
-- 默认监听 `0.0.0.0:5000`，可用环境变量 `TWILIGHT_API_HOST` / `TWILIGHT_API_PORT` 覆盖。
-- 尝试把 `NOFILE` 提升到 `TWILIGHT_NOFILE_LIMIT`（默认 65535），失败时打印告警，提示改由 systemd `LimitNOFILE` 或容器 ulimit 设置。
-- 优先用 `TWILIGHT_GO_BIN` 指定的二进制；否则用 `./bin/twilight`；都没有时回退到 `go run ./cmd/twilight`。
-
-也可直接调用二进制：
-
-```bash
 ./bin/twilight api --host 0.0.0.0 --port 5000 --config config.toml
 ```
+
+生产环境推荐用 systemd 托管，见 `deploy/setup-systemd.sh`（支持 `--no-build`、`--no-build-webui`）。容器部署见 [Docker 部署](./docker.md)。
+
+可用环境变量覆盖配置（完整清单见 `internal/config/config.go` 的 `applyEnvOverrides`，命名规则为 `TWILIGHT_` + 配置键大写）：
+
+| 环境变量 | 对应配置 |
+| -------- | -------- |
+| `TWILIGHT_API_HOST` / `TWILIGHT_API_PORT` | `API.host` / `API.port` |
+| `TWILIGHT_CONFIG_FILE` | 配置文件路径 |
+| `TWILIGHT_CONFIG_LOCAL_FILE` | 额外叠加的本地覆盖文件（默认 `<config>.local.toml`） |
+| `TWILIGHT_POSTGRES_DSN` | `Database.url` |
+| `TWILIGHT_REDIS_URL` | `Global.redis_url` |
+| `TWILIGHT_LOG_LEVEL` | `Global.log_level` |
+| `TWILIGHT_ADMIN_UIDS` / `TWILIGHT_ADMIN_USERNAMES` | 管理员名单 |
+| `TWILIGHT_PPROF_ADDR` | pprof 监听地址，默认 `127.0.0.1:6060`，设为 `off` 关闭 |
+
+文件描述符上限请在 systemd 单元里用 `LimitNOFILE` 设置（或在容器里设 ulimit），程序自身不再尝试提升 `NOFILE`。
 
 子命令对照：
 
@@ -49,9 +52,12 @@ bash start_backend_prod.sh
 | `all` | 在单进程内同时跑 API、定时任务和 Telegram Bot。 |
 | `scheduler` | 仅运行定时任务调度器。 |
 | `bot` | 仅运行 Telegram Bot 桥接。 |
+| `migrate-json` | 把 JSON 状态迁移到 PostgreSQL（见下文的迁移章节）。 |
 | `version` | 打印版本号后退出。 |
 
-> 配置文件路径被固定为「运行目录下的 `config.toml`」。`--config` 只能指向同一个文件，传入其它路径会被运行入口拒绝（见 `runtimeConfigPath`），避免特殊部署环境误读到别处的配置。程序启动时会把代码里新增但 `config.toml` 缺失的配置项写回，并备份原文件到 `config_backups/`。
+> 配置文件路径被固定为「运行目录下的 `config.toml`」。`--config` 只能指向同一个文件，传入其它路径会被运行入口拒绝（见 `runtimeConfigPath`），避免特殊部署环境误读到别处的配置。可用环境变量 `TWILIGHT_CONFIG_FILE` 指定。
+>
+> **启动不会改写 `config.toml`。** `config.Load` 只读（外加可选的 `config.local.toml` 覆盖），缺失的键一律用代码默认值兜底。配置文件只在管理员主动保存或恢复时才会被写入，且写前会自动备份到 `<Database.backup_dir>/config`（默认 `db/backups/config`），不是 `config_backups/`。想让某个键真正落盘，在管理端「系统设置 → 配置」里保存一次即可（保存是合并语义，不会删掉手写的段，见 [Go 后端架构与配置](../reference/backend.md)）。
 
 ## PostgreSQL 配置
 
@@ -91,7 +97,7 @@ url = "postgres://twilight:请替换为高强度密码@127.0.0.1:5432/twilight?s
 
 全部业务状态（用户、注册码/卡码、邀请关系与邀请码、公告等）都保存在「单一状态文档」中：状态文档是 `twilight_state` 表里 `id = 1` 的那一行 `jsonb`。
 
-另有六张独立表：`twilight_audit_logs`（操作审计）、`twilight_sessions`（会话）、`twilight_runtime_logs`（后台实时日志）、`twilight_playback_records`（播放记录）、`twilight_telegram_roster`（Telegram 群成员花名册）、`twilight_telegram_runtime`（Telegram 更新确认游标）。这些表会由后端幂等创建，无需手工执行迁移 SQL；升级时旧主状态中的花名册会自动迁移并从 JSONB 清除。
+另有十张独立表：`twilight_audit_logs`（操作审计）、`twilight_sessions`（会话）、`twilight_runtime_logs`（后台实时日志）、`twilight_telegram_roster`（Telegram 群成员花名册）、`twilight_telegram_runtime`（Telegram 更新确认游标）、`twilight_telegram_identity_history`（Telegram 身份变更留痕）、`twilight_playback_records`（播放记录，排行榜与同步的数据源）、`twilight_playback_events`（可信观看原始事件）、`twilight_playback_segments`（播放段状态）、`twilight_playback_daily`（可重建日桶）。这些表会由后端幂等创建，无需手工执行迁移 SQL；升级时旧主状态中的花名册会自动迁移并从 JSONB 清除。
 
 > 不存在「邀请单表」「公告单独建表 / ALTER TABLE 加列」「`db/invites.db`、`db/signin.db` 之类独立数据库」这种结构——邀请、公告等都是上述单一状态文档里的字段（见 `internal/store`）。
 
@@ -133,19 +139,24 @@ TWILIGHT_DATABASES_DIR=/opt/Twilight/db
 
 ## 前端部署
 
+前端是 `webui/`（Next.js，`output: "standalone"`），构建产物为 `.next/standalone/server.js`：
+
 ```bash
-cd webui
 corepack enable
 pnpm install --frozen-lockfile
 pnpm build
-pnpm start -p 3000
+# standalone 产物需要 static 与 public 一起就位
+cp -r .next/static .next/standalone/.next/static
+cp -r public .next/standalone/public
+HOST=127.0.0.1 PORT=3001 node .next/standalone/server.js
 ```
 
 部署形态：
 
-- 同域部署：前端把 `/api/*` 反代到后端时，`NEXT_PUBLIC_API_URL` 可以留空。
-- 分离域名部署：把 `NEXT_PUBLIC_API_URL` 设为后端的 HTTPS 地址；`cors_origins` 留空或设为 `["*"]` 时会反射合法 Origin，填写列表后只允许列表内前端域名。
-- 登录态由客户端 layout 调 `/users/me` 校验，避免 Web 域无法读取 API 域 cookie 时误判。
+- 同域部署：Nginx 将 `/` 转发到前端，将 `/api/` 保留给 Go API；浏览器只看到一个 Origin。
+- 前端是浏览器直连 Go API 的客户端应用：`NEXT_PUBLIC_API_URL` 在构建时注入，留空时走 Next.js rewrite 代理（运行时用 `BACKEND_URL` 指定上游）。
+- `ORIGIN` 必须填写浏览器实际访问的完整 Origin，例如 `https://panel.example.com`；本地直连可以使用 `http://127.0.0.1:3001`。
+- Docker 不是推荐部署路径，优先 Linux + systemd（`deploy/setup-systemd.sh`）。
 
 `cors_origins` 只能填写协议、主机和端口，例如 `https://panel.example.com`；尾斜杠会被自动处理，但不要带 `/admin` 这类路径。
 
@@ -178,9 +189,8 @@ pnpm start -p 3000
 - 运行入口会拒绝其它目录的配置文件，避免面板环境误读。
 - 不要把 `config.toml`、`.env`、1Panel 运行配置提交到 Git。
 
-### Cloudflare / OpenNext
+### Node / 反向代理
 
-标准 Node / 1Panel 部署不需要启用 OpenNext dev 初始化；只有 Cloudflare 本地开发场景才需要设置 `TWILIGHT_OPENNEXT_DEV=true`。
 
 ### systemd 路径限制
 
@@ -206,7 +216,7 @@ sudo bash deploy/setup-systemd.sh --restart
 - 缺少可执行的 `bin/twilight` 时自动 `go build` 构建（`--no-build` 可跳过构建并要求二进制已存在）。
 - 创建运行目录：`db/`、`db/backups/`、`uploads/`、`config_backups/`。
 - 扫描 `twilight.service`、`twilight-bot.service`、`twilight-scheduler.service` 是否仍指向旧 Python 入口；检测到旧 Python unit 时会停止、禁用并备份旧 unit，再写入 Go 版 unit。
-- 写入三个 unit 后执行 `systemctl daemon-reload`、`enable`，并 `start`（带 `--restart` 时改为 `restart`），最后打印各服务状态。
+- 写入 Go API、Bot、Scheduler 和 V2 Web UI unit 后执行 `systemctl daemon-reload`、`enable`，并 `start`（带 `--restart` 时改为 `restart`），最后打印各服务状态。
 
 常用环境变量覆盖：
 
@@ -226,14 +236,20 @@ sudo TWILIGHT_PROJECT_ROOT=/opt/Twilight \
 | `TWILIGHT_GO_BIN` | `<project>/bin/twilight` | 后端二进制路径。 |
 | `TWILIGHT_API_HOST` | `127.0.0.1` | API 监听地址。 |
 | `TWILIGHT_API_PORT` | `5000` | API 监听端口。 |
+| `TWILIGHT_WEBUI_ROOT` | `<project>/webui` | 前端源码目录（需先 `pnpm build`，脚本也会按需构建）。 |
+| `TWILIGHT_WEBUI_HOST` | `127.0.0.1` | 前端监听地址（写入 unit 的 `HOSTNAME`）。 |
+| `TWILIGHT_WEBUI_PORT` | `3001` | 前端监听端口。 |
+| `TWILIGHT_WEBUI_ORIGIN` | `http://127.0.0.1:3001` | 仅用于部署期校验，Next.js 本身不消费 `ORIGIN`。 |
+| `TWILIGHT_NODE_BIN` | `PATH` 中的 `node` | Next.js standalone 运行时。 |
 | `TWILIGHT_SYSTEMD_USER` | `root` | systemd 服务用户。 |
 | `TWILIGHT_SYSTEMD_GROUP` | 同 `TWILIGHT_SYSTEMD_USER` | systemd 服务组。 |
 
-生成的三个 unit：
+生成的四个 unit：
 
 - `twilight.service`：`ExecStart` 为 `<bin> api --host <host> --port <port> --config config.toml`，`Restart=always`，配有内存与文件描述符限制。
 - `twilight-bot.service`：`<bin> bot --config config.toml`，`PartOf=twilight.service`。Bot 在未启用 Telegram 或未配置 Bot Token 时会安全等待（每 3 秒重读配置），不会反复失败重启。
 - `twilight-scheduler.service`：`<bin> scheduler --config config.toml`，`PartOf=twilight.service`。
+- `twilight-webui.service`：`node <project>/webui/.next/standalone/server.js`，`PartOf=twilight.service`；脚本会在构建后把 `.next/static` 与 `public` 复制进 standalone 目录（缺了会退化成无样式页面）。
 
 > `EnvironmentFile=-$ENV_FILE` 表示项目根目录下的 `.env`（可选，存在才加载）。
 

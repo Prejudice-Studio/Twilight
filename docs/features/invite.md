@@ -41,18 +41,18 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 
 修改这些字段后会触发整进程重启（保存 `config.toml` 后由外部 supervisor 拉起），详见 [开发指南](../guides/development.md) 与 [Go 后端架构与配置](../reference/backend.md)。
 
-> 邀请码格式是固定的：后端生成时取 `"INV" + 10 位随机串并转大写（形如 `INVXXXXXXXXXX`）。不存在 `invite_code_format` 配置项；`/invite/config` 返回的 `code_format` 字段是常量字符串 `"INV-{random}"`，仅供前端展示提示，不参与实际生成。
+> 邀请码格式由 `invite_code_format` 控制，默认值为 `INV{random}`；配置兼容 `SAR.invite_code_format`、`Register.invite_code_format` 和顶层 `invite_code_format`。生成器会按格式替换 `{random}`，并保留历史格式兼容。`invite_code_random_algorithm` 控制随机串算法（默认 `hex10`）。格式字段只影响新生成的邀请码，不会改写已经存在的邀请码。
 
 ## 前端入口
 
-- **普通用户**：侧边栏「邀请中心」`/invite`（`webui/src/app/(main)/invite/page.tsx`）
   - 查看自己的层级、直属上级、完整下级树（不返回多层上级信息）。
   - 生成 / 复制 / 撤销邀请码（仅当邀请系统开启）。
   - 为已有直属下级生成专属续期码；对 Emby 已到期或 Web 已禁用且仍绑定 Emby 的直属下级，可删除其 Emby 账号并断开关系。
   - 自己作为被邀请下级且 Emby 已到期或 Web 已禁用仍绑定 Emby 时，可通过后端自助接口删除自己的 Emby 账号并断开上级关系。
-- **管理员**：侧边栏「邀请系统管理」`/admin/invite`（`webui/src/app/(main)/admin/invite/page.tsx`）
   - 查看邀请关系、根用户、直属下级与总下级统计。
   - 点击用户查看详情、解除上级关系、级联启停或删除。
+
+管理员邀请页的标题、树筛选、邀请码、配置和选中用户详情通过 `/api/v2/admin/invite/*` 资源读取，树筛选、折叠、根选择、分页和邀请码搜索都在后端完成；浏览器只接收当前批次。批量维护、断开、Emby 清理、级联操作和配置保存由页面直接发起写请求；这不会把完整邀请森林或邀请码历史复制到浏览器。
 
 当 `invite_enabled` 为关闭时，前端会禁用「生成邀请码」，但保留已有下级的续期码与 Emby 清理入口；管理员「邀请系统管理」入口和后端关系接口不随开关隐藏，便于继续审计和维护既有关系。管理员断开、级联启停、级联删除等强制操作仍可用于历史邀请关系，开关只用于停止新邀请流量。
 
@@ -83,20 +83,24 @@ Twilight 的邀请树（Invite Tree）让已注册用户互相邀请生成新的
 
 ## 管理员接口
 
-管理员邀请树保留完整关系数据用于搜索、根筛选和批量选择，但前端表格默认只挂载 300 行，继续点击「显示更多」才追加下一批，避免 2000+ 用户同时生成大量 DOM 和复选框。表格在自身的受限 Firefox 滚动区域内滚动，不会把页面整体高度无限撑长。批量断开、快捷维护和级联操作在请求期间互斥，防止重复点击造成并发写入。
+管理员邀请树保留完整关系数据用于搜索、根筛选和批量选择，但后端只向浏览器发送当前分页（默认 300 行）和明确选中的详情，避免 2000+ 用户同时生成大量 DOM 和复选框。表格在自身的受限 Firefox 滚动区域内滚动，不会把页面整体高度无限撑长。批量断开、快捷维护和级联操作在请求期间互斥，防止重复点击造成并发写入。
 
 | Method | Path | 鉴权 | 描述 |
 | ------ | ---- | ---- | ---- |
-| `GET` | `/admin/invite/tree` | AuthAdmin | 返回整片森林：`nodes`（节点）+ `edges`（边）+ `roots`（树根 UID 列表）+ `max_depth`（全局最大深度）+ `config`（当前配置）。邀请关闭时不返回仅因持有码而出现、且没有真实上下级关系的孤立用户。 |
+| `GET` | `/admin/invite/tree` | AuthAdmin | V1 兼容接口，返回整片森林：`nodes` + `edges` + `roots` + `max_depth` + `config`。邀请关闭时不返回仅因持有码而出现、且没有真实上下级关系的孤立用户。 |
 | `POST` | `/admin/invite/users/:uid/detach` | AuthAdmin | 把指定用户从上级断开（删除其作为 `child` 的边，自身晋升新树根）。返回 `changed` 表示原本是否有上级。 |
 | `POST` | `/admin/invite/users/:uid/detach-delete-emby` | AuthAdmin | 把指定用户从上级断开，并删除其远端 Emby 账号、清空本地 Emby 绑定字段。管理员账号受保护。 |
 | `POST` | `/admin/invite/users/detach-batch` | AuthAdmin | 批量断开邀请关系；请求体 `uids` 为目标 UID 列表，`delete_emby=true` 时同时删除远端 Emby 账号；再传 `only_emby_disabled=true` 时仅处理后端最新状态为 Emby 已禁用且仍有绑定的用户。返回 `total/success/failed/errors/deleted_emby/skipped_not_emby_disabled`。 |
 | `POST` | `/admin/invite/quick-maintenance` | AuthAdmin | 快捷维护：按 `selected` / `subtree` / `all` 范围断开上下级关系，并可给仍启用的下级统一续期指定天数或设为永久。确认短语为 `INVITE_QUICK_MAINTENANCE`。 |
-| `GET` | `/admin/invite/codes` | AuthAdmin | 列出全部邀请码（可按邀请人在前端过滤）。 |
+| `GET` | `/admin/invite/codes` | AuthAdmin | 默认兼容返回全部邀请码；传 `page`、`per_page` 或 `search` 时按 `code`、邀请人 UID/用户名、目标用户名和备注筛选并返回 `{codes,total,page,per_page,pages}`，服务端只富化当前页。 |
 | `POST` | `/admin/users/:uid/delete` | AuthAdmin | 删除用户，支持 JSON body 的 `mode` 与 `cascade_depth`（见下，推荐）。 |
 | `DELETE` | `/admin/users/:uid` | AuthAdmin | 删除用户兼容入口，保留简单删除和旧客户端调用。 |
 | `POST` | `/admin/users/:uid/disable` | AuthAdmin | 禁用用户，支持 `cascade_depth` 级联（见下）。 |
 | `POST` | `/admin/users/:uid/enable` | AuthAdmin | 启用用户，支持 `cascade_depth` 级联（见下）。 |
+
+管理员邀请页只使用上述分页参数并在后端完成展示筛选，不会把全量邀请码或完整邀请森林写入浏览器。邀请树的关系快照仍需要在后端读取一次，以便计算层级和后代统计，但浏览器只收到当前批次、根节点摘要和当前详情。
+
+V2 管理资源：`GET /api/v2/admin/invite/tree` 返回 `data.item`，其中 `rows` 已按 `search`、`root`、`collapsed`、`page`、`per_page` 过滤并分页；`GET /api/v2/admin/invite/codes` 返回 `data.items` 与 `data.pagination`；`GET|PUT /api/v2/admin/invite/config/schema` 只允许邀请字段。V2 的写入路径使用相同的 `/api/v2/admin/invite/...` 前缀，但最终规则仍在 Go handler 和 Store 中复核。
 
 > `/admin/users/:uid/delete`、`/admin/users/:uid`、`/admin/users/:uid/disable`、`/admin/users/:uid/enable` 是通用的用户管理接口，并非邀请模块专属，但其级联参数会沿邀请树展开，因此与邀请树语义强相关，下文一并说明。
 

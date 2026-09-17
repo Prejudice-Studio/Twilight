@@ -23,10 +23,9 @@
 | `internal/store` | 状态存储层：唯一运行后端 PostgreSQL，定义单一状态文档 `State`；`Store` 仅经 `store.OpenPostgres` 构造。 |
 | `internal/config` | TOML 配置与 `TWILIGHT_*` 环境变量加载。 |
 | `internal/security` | 密码哈希、安全随机数与兼容校验。 |
-| `webui` | Next.js 前端应用。 |
-| `webui/src/lib/api.ts` | 前端 API 客户端，集中维护所有后端调用。 |
-| `start_backend_dev.sh` / `start_backend_prod.sh` | 后端本地启动脚本（开发 / 生产）。 |
-| `deploy/` | systemd unit 与安装脚本（`setup-systemd.sh`）。 |
+| `deploy/` | systemd unit 与安装脚本（`setup-systemd.sh`）、Docker 构建上下文（`deploy/docker/`）。 |
+| `scripts/check_docs_drift.go` | 路由-文档漂移门禁（v1 + v2 两套路由表都要在 `docs/*.md` 里出现）。 |
+| `scripts/check-frontend-v2-coverage.py` | 前端调用点与 V2 路由表的对账门禁。 |
 
 后端二进制构建产物固定为 `bin/twilight`。
 
@@ -49,22 +48,26 @@ go run ./cmd/twilight api --host 0.0.0.0 --port 5000 --config config.toml --debu
 go build -o bin/twilight ./cmd/twilight
 ```
 
-### 本地启动脚本
+### 启动约定
+
+没有 `start_backend_dev.sh` / `start_backend_prod.sh` 这类包装脚本（历史脚本只留在 `.codex-reference-twilight/` 参考副本里，不要照抄）。直接调用二进制或 `go run`：
 
 ```bash
-# 开发模式：自动追加 --debug，按 TWILIGHT_GO_BIN → ./bin/twilight → go run 顺序启动
-bash start_backend_dev.sh
-
-# 生产模式：先尝试抬高 NOFILE 上限，再启动（无 --debug）
-bash start_backend_prod.sh
+# 开发模式
+go run ./cmd/twilight api --host 0.0.0.0 --port 5000 --config config.toml --debug
 ```
 
-两个脚本的行为约定：
-
 - 监听地址来自环境变量 `TWILIGHT_API_HOST`（默认 `0.0.0.0`）与 `TWILIGHT_API_PORT`（默认 `5000`）。
-- 配置文件固定为工作目录下的 `config.toml`；运行时不接受指向其他路径或其他文件名的 `--config`（见 `cmd/twilight/main.go` 的 `runtimeConfigPath`）。
-- 二进制选取优先级：环境变量 `TWILIGHT_GO_BIN` 指定的可执行文件 → `./bin/twilight` → 回退到 `go run ./cmd/twilight`。
-- `start_backend_prod.sh` 额外尝试把 `NOFILE` 抬高到 `TWILIGHT_NOFILE_LIMIT`（默认 `65535`）；抬不动时打印告警，提示改由 systemd `LimitNOFILE` 或容器 ulimit 设置。
+- 配置文件固定为工作目录下的 `config.toml`；运行时不接受指向其他路径或其他文件名的 `--config`（见 `cmd/twilight/main.go` 的 `runtimeConfigPath`）。可用环境变量 `TWILIGHT_CONFIG_FILE` 改路径，用 `TWILIGHT_CONFIG_LOCAL_FILE` 叠加本地覆盖文件。
+- 文件描述符上限交给 systemd `LimitNOFILE` 或容器 ulimit，程序自身不再尝试抬高 `NOFILE`。
+
+### pprof
+
+`cmd/twilight/main.go` 会按 `TWILIGHT_PPROF_ADDR` 在**独立端口**起一个 pprof 监听（默认 `127.0.0.1:6060`，设为 `off` 关闭）。刻意不挂在 App 路由上——否则每个 profile 请求都会跑一次 `Store.Refresh`。
+
+```bash
+go tool pprof http://127.0.0.1:6060/debug/pprof/heap
+```
 
 ### 子命令
 
@@ -76,6 +79,7 @@ bash start_backend_prod.sh
 | `all` | 在同一进程内并行启动 API、调度器（scheduler）与 Telegram Bot。 |
 | `scheduler` | 仅启动后台调度器。 |
 | `bot` | 仅启动 Telegram Bot；未启用或未配置 token 时会循环等待配置生效。 |
+| `migrate-json` | 把 JSON 状态迁移到 PostgreSQL。 |
 | `version` | 打印版本号并退出（`--version` / `-v` 同义）。 |
 
 `api` 与 `all` 支持 `--host`、`--port`、`--config`、`--debug` 标志；`scheduler` 与 `bot` 仅支持 `--config`。`--debug` 会把日志级别提升到 debug。
@@ -94,7 +98,7 @@ go test -run '^$' -bench '^(BenchmarkTelegramUpdateEnvelopeDecode|BenchmarkTeleg
 
 ## 前端开发
 
-前端是位于 `webui/` 的 Next.js 应用，使用 pnpm 作为包管理器（见 `package.json` 中的 `packageManager`）。
+
 
 ### 常用命令
 
@@ -107,17 +111,24 @@ pnpm install --frozen-lockfile
 # 本地开发服务器
 pnpm dev
 
-# 代码检查（eslint src --ext .ts,.tsx）
-pnpm lint
-
-# TypeScript 类型检查
+# 类型检查
 pnpm typecheck
 
-# 生产构建（next build，输出 standalone）
+# Lint
+pnpm lint
+
+# 生产构建（output: "standalone"）
 pnpm build
 ```
 
-> CI / 非交互环境说明：`webui/.npmrc` 关闭了 `node_modules` 重建确认，避免 `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`；`webui/pnpm-workspace.yaml` 显式批准 `esbuild`、`sharp`、`unrs-resolver`、`workerd` 的构建脚本。新增带 postinstall 的依赖时，必须同步更新该白名单或说明为什么应阻断，不能只在本机交互式运行 `pnpm approve-builds` 后不提交配置。
+开发联调时不需要额外配置：`NEXT_PUBLIC_API_URL` 留空，Next.js 会把 `/api/*` 按 `next.config.mjs` 的 rewrite 代理到 `BACKEND_URL`（默认 `http://127.0.0.1:5000`），浏览器只看到同源请求。
+
+生产部署分两种形态：
+
+- **同域**（推荐）：`NEXT_PUBLIC_API_URL` 留空，由反向代理把 `/api/` 直接转给 Go API，`/` 转给前端。前端不需要知道后端地址。
+- **子域分离**：`NEXT_PUBLIC_API_URL` 必须在**构建时**设为后端基址，否则浏览器会向错误来源发请求；同时后端 `cors_origins` 要包含前端 Origin，并在需要跨子域共享会话时设置 `session_cookie_domain`。
+
+前端是浏览器直连 Go API 的客户端应用：会话走 HttpOnly Cookie，浏览器不持有 Bearer Token 或 API Key，也不把身份信息当作全局缓存长期保留；`/api/v2/*` 是默认契约，`/api/v1/*` 只用于 `NEXT_PUBLIC_USE_V1_COMPAT=true` 的显式回退。Next.js 的 rewrite 只是传输通道，不能替代 Go 后端鉴权。
 
 后端可单独启动配合调试：
 
@@ -127,46 +138,39 @@ bash start_backend_dev.sh
 
 ### 前后端联调与环境变量
 
-前端通过环境变量决定如何访问后端（见 `webui/.env.example` 与 `webui/next.config.mjs`）：
 
-- 设置了 `NEXT_PUBLIC_API_URL` 时，浏览器端直连该后端地址。
-- 未设置 `NEXT_PUBLIC_API_URL` 时（典型的本地开发），Next 的 `rewrites` 会把 `/api/*` 代理到 `BACKEND_URL`（默认 `http://localhost:5000`），避免跨域。
-- 设置了 `NEXT_PUBLIC_API_URL` 时，根布局会为该 API origin 注入 `dns-prefetch` / `preconnect`，减少分离域名部署下登录与首批数据请求的握手延迟。
-- 受保护路由由客户端 layout 调 `/users/me` 校验登录态，避免 Web 域读不到 API 域 cookie 导致登录后被踢回 `/login`。
-- `SITE_NAME` / `SITE_TITLE` / `SITE_DESCRIPTION` / `SITE_ICON` 是运行时可注入的展示文案，由 `app/layout.tsx` 每次请求读取，改完即生效，无需重新构建；默认图标路径是 `/favicon.png`，不要写成源码目录形式的 `public/favicon.png`。
+- `BACKEND_URL` 只在未设置 `NEXT_PUBLIC_API_URL` 时生效，用于 Next.js rewrite 的上游地址，不进入浏览器 bundle。
+- `NEXT_PUBLIC_API_URL` 是**构建期**变量，会被打进前端 bundle，必须填协议 + 主机 + 端口（例如 `https://twilightapi.example.com`），不要带路径。
+- `HOSTNAME`、`PORT` 是 Next.js standalone 运行时的监听地址与端口（systemd 单元由 `deploy/setup-systemd.sh` 写入）。
 
-**认证页外观定制**（全部可选，`NEXT_PUBLIC_*` 前缀，构建时注入）：
+### WebUI 环境变量
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `NEXT_PUBLIC_AUTH_TEXT_COLOR` | — | 登录/注册页文字颜色（CSS 颜色值），经正则防注入 |
-| `NEXT_PUBLIC_AUTH_ICON_URL` | — | 认证页品牌图标，优先于后端 `server_icon` |
-| `NEXT_PUBLIC_AUTH_BG_OVERLAY_OPACITY` | `0.4` | 背景图叠加层不透明度（0-1） |
-| `NEXT_PUBLIC_AUTH_PANEL_OPACITY` | `0.82` | 右侧面板毛玻璃不透明度（0-1），有背景图自动 +0.08 |
+| 变量 | 生效时机 | 默认值 | 说明 |
+|------|----------|--------|------|
+| `NEXT_PUBLIC_API_URL` | 构建期 | 空 | Go API 基址；留空则由 rewrite 代理 `/api/*` 到 `BACKEND_URL` |
+| `NEXT_PUBLIC_CSP_CONNECT` | 构建期 | 空 | 追加到 CSP `connect-src` 的额外 origin 白名单，每项都会过 origin 校验 |
+| `NEXT_PUBLIC_USE_V1_COMPAT` | 构建期 | `false` | 设为 `true` 时前端回退调用 `/api/v1/*`，仅用于紧急回滚 |
+| `BACKEND_URL` | 运行期 | `http://127.0.0.1:5000` | rewrite 的上游地址，仅在 `NEXT_PUBLIC_API_URL` 为空时参与 |
+| `HOSTNAME` / `PORT` | 运行期 | `127.0.0.1` / `3001` | standalone 服务监听地址与端口 |
+| `SESSION_COOKIE_NAME` | 后端 | `twilight_session` | 后端会话 Cookie 名称，只有改名时才需要同步 |
 
-> 所有前置变量均在 `webui/.env.example` 中列出，可直接复制到 `.env.local` 按需开启。
 
 ### 前端文案与多语言
 
-- 轻量 i18n 入口位于 `webui/src/lib/i18n.tsx`，语言文件统一存放在 `webui/src/locales/`。
-- 主分支只提供 `zh-Hans.json`、`zh-Hant.json`、`en-US.json` 三个显示语言，文件名使用 BCP 47 风格命名。
+- 所有文案走 `webui/src/locales/`，不要在页面里内联硬编码中文或英文。
 - 新增文案、翻译或语言时，按 [前端多语言开发与翻译指南](./i18n.md) 操作。
 
 ### 前端契约
 
-- 所有后端调用集中维护在 `webui/src/lib/api.ts`，底层请求逻辑在 `webui/src/lib/api-request.ts`。
+- 页面读取统一走 `@/lib/api.ts` + `useAsyncResource`，并把 `AbortSignal` 传到请求层：筛选、分页、路由切换与组件卸载都要取消旧请求，用请求序号防止过期响应覆盖新状态；除调度器可见性感知轮询外不新增无边界轮询。
 - 响应统一为 envelope 结构 `{ success, code, message, data, timestamp }`；前端按 HTTP 状态码与 `error_code` 分流处理（401 跳登录、403 权限提示、429 退避、5xx 通用故障，以及自定义业务 error_code）。
 - 新增或调整接口时，需同步检查前端调用路径、请求方法、鉴权等级、错误提示文案与移动端展示。
-- 登录支持用户名和邮箱两种方式：`api.ts` 的 `login()` 自动检测 `@` 将 payload 从 `{username}` 切换为 `{email}`，后端 `handleLogin` 对应走 `FindUserByEmail`。
-- 认证页采用右侧固定面板布局：面板外壳由 `(auth)/layout.tsx` 渲染（跨页持久化，无闪动），各页面仅提供表单内容；共享样式常量与组件定义在 `(auth)/auth-ui.tsx`。
-- 页面按目录分组：`webui/src/app/(auth)`（登录 / 注册 / 找回密码）、`webui/src/app/(main)`（用户面板与各管理页）。新增页面时优先复用 `webui/src/components` 下的既有组件。
+- 登录支持用户名和邮箱两种方式：WebUI 把用户输入原样放进 `username` 提交给 `POST /api/v2/auth/login`，由后端判断是用户名还是邮箱，客户端不做 `@` 拆分。
 - 求片搜索结果必须保持接口返回的搜索顺序；图片加载完成后按自然尺寸分成横版封面与竖版海报两个分区，分区内继续保持原顺序。卡片图片使用受控的横版 / 竖版比例框与 `object-contain`，确保完整显示图片、不裁切，也不让横竖比例混在同一网格中。
-- 后台总入口为 `webui/src/app/(main)/admin/page.tsx`（管理导航）。迁移出的配置模块必须有独立管理页：邮箱管理、Telegram 管理、邀请系统管理、安全中心；配置管理只保留默认折叠的兼容入口和跳转提示。
-- 独立管理页若需要编辑配置，必须复用 `/system/admin/config/schema` 与 `api.updateConfigBySchema()`，写回同一个 `config.toml`；不要在前端或 store 中复制第二套配置源。
+- 独立管理页若需要编辑配置，必须复用 `/api/v2/admin/config/schema` 的契约（`api.ts` + `components/admin/config-section-editor.tsx`），写回同一个 `config.toml`；不要在前端或 store 中复制第二套配置源。
 - 用户管理页的单用户与批量操作必须按领域分组展示（账号状态、Emby、身份绑定、注册资格、危险操作），避免把所有操作平铺成过长菜单或按钮栏；新增用户操作时同步维护后端返回的 `admin_action_state` 与前端 `UserInfo` 类型，让前端能显示禁用原因。
 - 用户管理的单用户操作菜单、桌面表格和危险清理预览必须使用受限 `dvh` Firefox 滚动区域；桌面表头保持可见，手机上的预览表允许横纵滚动。继续使用服务端分页和移动端卡片，不要把完整用户库一次挂载到浏览器。
 - 用户管理筛选变化必须只加载第一页，不能先请求已经失效的旧页；每页数量变化要清除跨页选择。选择“拥有 Emby 的用户”时，当前页全选只统计当前页已绑定 Emby 的行。
-- Emby 管理与设备/IP 审查共用 `webui/src/app/(main)/admin/emby`，设备审查是页签级入口；`/admin/device-audit` 只作为兼容直达页面保留。设备审查不展示 Twilight 自身连接 Emby 时产生的设备/会话；全量 Emby 设备记录清理只放在调度器 `cleanup_emby_devices`，不要在审查页重新添加“清理全部/踢出全部”入口。
 - 工单页必须展示 `replies` 双方回复时间线；`admin_note` 仅作为最新管理员摘要和旧数据兼容字段。状态、优先级、类型归一、关闭/重开时间戳、开放工单计数与“更新时保留 replies/附件”逻辑统一放在 `internal/store`，前端和 handler 不要重复判断。
 - 管理员工单列表是处理队列，只返回并展示回复数、图片数、正文摘要和内部备注摘要；完整 `replies`、附件 URL、图片预览与双方对话只在单工单详情接口和对话页加载，避免历史消息随列表分页重复传输和渲染。
 - 邮箱管理的验证码与邮箱账号列表使用后端搜索和分页；前端必须传 `view=pending|accounts`，切换筛选、分页或页签时取消旧请求。手机和平板显示信息卡片，桌面显示可滚动表格；进入邮箱配置页签不额外请求两份列表。无 `view` 的全量响应只保留给旧客户端兼容。
@@ -176,7 +180,7 @@ bash start_backend_dev.sh
 - 后台重型面板应按需加载：非默认页签不要在首屏自动请求大接口；公共系统信息走 `useSystemStore.fetchInfo()` 的 TTL 与 inflight 复用，配置保存后调用 `invalidate()`。
 - 后台弹窗和覆盖层优先复用现有 Radix 公共组件与 CSS 过渡；未引用的客户端组件应及时删除，不能让一次性抽屉或面板残留重型动画运行时依赖。
 - 管理首页和统计页不加载 Framer Motion，也不使用装饰性渐变圆形；这两个页面优先保证首屏包体、稳定尺寸和窄屏可读性，交互反馈使用 CSS/Tailwind。
-- 管理列表、详情和筛选结果应把 `AbortSignal` 从 `useAsyncResource` 或页面控制器传到 `api.ts`；分页、筛选、手动刷新、路由切换和卸载时取消旧读取，并用请求序列阻止旧响应覆盖新状态。取消请求不弹失败提示。
+- 管理列表、详情和筛选结果由 URL 状态驱动，页面通过 `useAsyncResource` + `AbortSignal` 读取；写操作成功后重新执行读取以获得权威状态，不用本地拼接结果替代权威数据，也不把完整数据集驻留在全局 store。
 - 侧边栏、移动菜单、管理导航等密集导航区域使用 `Link prefetch={false}`，避免首屏预载大量不一定访问的后台页面 chunk；只对明确的高频下一步保留预取。
 
 ## API 与安全规范
@@ -185,7 +189,6 @@ bash start_backend_dev.sh
 
 - 新路由统一在 `internal/api/routes.go` 注册，通过 `a.add(method, pattern, auth, handler)` 声明方法、路径、鉴权级别和 handler；按功能域分布在 `registerAdminRoutes` / `registerAPIKeyRoutes` / `registerSecurityRoutes` / `registerBatchRoutes` 等分组函数中。
 - handler 只负责参数校验、鉴权、调用服务和整理响应；可复用的业务逻辑放到对应功能域文件，外部服务调用必须走独立 client/helper（Emby、TMDB、Bangumi、Telegram），不要散落在 handler 内。
-- 响应必须使用统一 envelope，并与 `webui/src/lib/api.ts` 保持兼容。
 - JSON 请求体必须经统一解码器读取，限制为单个 JSON 值、256 KiB 和 32 层嵌套；不得只解码第一个值后忽略尾随第二份 JSON 文档。
 - 公开接口、登录接口，以及验证码 / 绑定码 / 邀请码 / 注册码检查类接口必须考虑限流。
 - 管理员的破坏性操作必须有明确权限边界，并尽量返回结构化的 `skipped`、`failed`、`details` 等字段，便于前端展示处理结果。
@@ -219,17 +222,18 @@ Twilight 不对 Cookie 鉴权的变更类请求做 CSRF 令牌校验，也不做
 
 ### 前端网络与布局性能
 
-- WebUI 统一通过 `webui/src/lib/api-request.ts` 发起应用 API 请求。无请求体的 `GET` / `HEAD` 会在短时间窗口内合并相同的在途请求，降低重复刷新、多个组件同时挂载和窄屏重排时的额外网络压力；写请求、带调用方 `signal` 的请求和显式 `dedupe: false` 的请求不参与合并。
 - 前端对成功状态的空响应按协议错误处理，不显示误导性的 `OK`；后端 handler 必须保证返回数据可 JSON 序列化，尤其是聚合 DTO 不得形成循环引用。
-- 成功的普通读请求会进入 3 秒内存短缓存，覆盖路由切换、组件重挂载和相邻组件重复读；缓存采用最近使用淘汰，最多保留 32 项，单响应源文本不超过 64K 字符，总源文本预算不超过 256K 字符。大型列表超过预算时不会深拷贝或缓存；任意写请求返回后会清空缓存。`/users/me`、带 `refresh=1` 的请求、带 `X-Twilight-Intent` 的有意图 GET、`no-store` / `reload` 请求和显式 `cacheRead: false` 的调用不进入短缓存。
+- 成功的公开读请求（调用方明确使用 `credentials: "omit"`）会进入 3 秒内存短缓存，也会合并同一时刻的重复请求，覆盖路由切换、组件重挂载和相邻组件同时挂载时的额外网络压力；缓存采用最近使用淘汰，最多保留 32 项，单响应源文本不超过 64K 字符，总源文本预算不超过 256K 字符。Cookie 登录态读请求不会参与共享缓存或在途合并，因为 HttpOnly Cookie 无法安全加入 JavaScript 缓存键。大型列表超过预算时不会深拷贝或缓存；任意写请求返回后会清空缓存。`/users/me`、带 `refresh=1` 的请求、带 `X-Twilight-Intent` 的有意图 GET、`no-store` / `reload` 请求和显式 `cacheRead: false` 的调用不进入短缓存。
 - 读请求默认使用浏览器 `no-cache` 语义，允许复用连接但仍向服务端确认 freshness；写请求继续使用 `no-store`。
 - 绑定码、状态卡片等轮询必须在页面不可见时暂停请求并中断在途请求，回到前台再按上次执行时间补跑；绑定码 TTL / deadline 可继续计时，但后台页签不应持续打状态接口。
 - 仪表盘加载 Emby 线路时只读取线路列表，主页只显示线路入口和数量摘要；用户打开详情后才能查看具体线路。系统不自动发起逐线路探测，也不为测速额外预检 Emby 状态，测速由用户在详情中主动触发，避免首屏形成随线路数量增长的 N+1 请求。
-- Next 自己管理 `/_next/static` 下 hashed 构建产物的 `Cache-Control`。不要在 `next.config.mjs` 的 `headers()` 里覆盖这一路径，否则会触发 Next 构建警告并可能破坏开发模式缓存行为。
+- 只有 `/_next/static/` 下带内容 hash 的构建产物设置长期缓存（`public, max-age=31536000, immutable`）；其余路径，尤其是 HTML 外壳，必须使用 `Cache-Control: no-store`。前端配置见 `webui/next.config.mjs` 的 `headers()`，默认 Nginx 配置见 `deploy/nginx-twilight.conf` 的 `location ^~ /_next/static/`；不要让反向代理把 HTML 一起缓存，否则部署后客户端会加载已被替换的 chunk。
 - 默认 `favicon.png` 应保持小尺寸和合理压缩，避免每个新访客为浏览器图标下载数百 KB 资源；需要高清品牌图时优先通过后台 `server_icon` 或环境变量覆盖。
 - 管理后台页面要优先使用稳定尺寸、可换行按钮、可横向滚动表格和移动端卡片视图，避免手机、平板或浏览器打开开发者工具后的窄比例下文字越界、按钮互相覆盖。
+- 共享 `Button`、`Input`、`Textarea`、`SelectTrigger` 原子控件统一使用 40px/36px 高度基线，并默认允许 `min-width: 0`、`max-width: 100%` 与安全断词；页面不得用移动端单独改高度的方式修补溢出，长表格应在自己的滚动区域内处理。
 - 后台卡片标题中带搜索框、刷新按钮或运行状态元数据时，手机宽度必须纵向堆叠并让输入框占满可用宽度；只有合计固有宽度足够时才恢复横排，不能把固定宽度输入框和操作按钮无条件塞进一行。
 - 登录后的公共布局、侧栏和全局守卫只使用 CSS/Tailwind 处理简单状态与一次性入场效果，不直接引入 `framer-motion`。复杂页面动画可以在具体路由内按需使用，避免无动画页面也下载并初始化动画运行时。
+- 普通路由的一次性淡入应使用共享 `page-enter` CSS 类；只有确实包含交互、编排或连续动画的页面才按需引入 `framer-motion`，避免单个包装元素增加路由包体和运行时初始化。
 - 下拉菜单、弹窗和 Select 内容应限制到视口宽度内，危险操作保持明确标签、二次确认和结果反馈。
 - 窄视口优先保证可操作性：工具栏与危险操作区在手机上折行或纵向排列；数据表保留列语义并使用容器级触控横向滚动，不能靠压缩文字、隐藏关键字段或让整页横向溢出来“适配”。共享按钮允许多行标签并使用最小高度，Tabs 必须在自身容器内滚动。
 - WebUI 以 Firefox 当前稳定版作为浏览器兼容基准。共享滚动区域必须使用标准的 `scrollbar-width`、`scrollbar-color`、`overscroll-behavior` 与 `dvh` 视口约束；`::-webkit-scrollbar` 只能作为非基准浏览器的补充，不能成为唯一实现。横向表格和 Tabs 仍需允许纵向页面手势，长弹窗、下拉菜单、Select 与侧栏则必须在视口内显示可见滚动条。
@@ -273,7 +277,7 @@ Twilight 不对 Cookie 鉴权的变更类请求做 CSRF 令牌校验，也不做
 ### 数据库性能与接口一致性
 
 - 性能优化优先从现有访问模式入手：分页 / 游标、批量读取、索引、短超时、限流、前端按需加载和必要缓存；不要为了局部慢查询把业务实体拆成独立表，除非先更新架构文档并明确快照一致性、迁移、备份恢复方案。
-- 管理员用户列表在大规模数据下必须先用轻量用户结构完成筛选、排序和分页，再为当前页构造公开 DTO；不得为页外用户提前创建 `map[string]any`。`per_page` 继续使用有上限的服务端参数，避免请求通过扩大页面大小制造内存峰值。
+- 管理员用户列表在大规模数据下必须先用轻量用户结构完成筛选、排序和分页，再为当前页构造公开 DTO；不得为页外用户提前创建 `map[string]any`。`/api/v2/admin/users` 是 WebUI 的正式资源边界，`/api/v1/admin/users` 只保留兼容用途；`per_page` 继续使用有上限的服务端参数，避免请求通过扩大页面大小制造内存峰值。
 - 管理员用户列表的前端查询缓存必须同时设置条目数和行数上限，并在命中时更新最近使用顺序；筛选、排序和分页组合不能无限保留用户对象。
 - 邀请森林读取只需要关系两端用户和（启用邀请时）邀请码持有人；应使用 Store 的 UID 范围快照，不要为一次树展示复制全量用户或完整邀请码列表。
 - 批量 `select_all` 只需要目标 UID 时应使用 Store 的 UID-only 匹配方法；它必须返回完整匹配计数，同时只保留请求上限内的 UID，避免用空回调触发全量 `[]User` 分配。
@@ -320,16 +324,16 @@ docker compose down
 
 ### 独立启动后端/前端（不用 Docker）
 
-与 Docker 环境并行或替代使用——前端 dev server 可单独启动，指向 Docker 中的后端：
+与 Docker 环境并行或替代使用——WebUI dev server 可单独启动，指向 Docker 中的后端：
 
 ```bash
 # 终端 1: Docker 后端 (PostgreSQL + Redis + API)
 docker compose up -d postgres redis twilight
-# 终端 2: 前端 dev server (hot reload)
-cd webui && pnpm dev
+# 终端 2: WebUI dev server (Hot reload)
+cd webui && BACKEND_URL=http://127.0.0.1:5000 pnpm dev
 ```
 
-前端 dev server 通过 Next.js rewrites 将 `/api/*` 代理到 `localhost:5000`（Docker 后端暴露的端口）。
+`BACKEND_URL` 只用于 rewrite：浏览器请求同源 `/api/*`，由 Next.js 在运行期代理到后端，因此开发时不需要处理跨域。跨域部署时改用构建期变量 `NEXT_PUBLIC_API_URL` 直连后端。无论哪种模式，鉴权都由 Go 后端的会话 Cookie 或 API Key 决定，代理本身不构成鉴权边界。
 
 ### Docker 开发注意事项
 
@@ -347,7 +351,6 @@ cd webui && pnpm dev
 - [ ] `gofmt` 已执行（无格式化 diff）。
 - [ ] `go test ./...` 已通过。
 - [ ] `go vet ./...` 已通过。
-- [ ] 前端或 API 客户端有变更时，在 `webui/` 执行 `pnpm lint`、`pnpm typecheck` 与 `pnpm build`。
 - [ ] 已扫描敏感信息（密钥、token、明文密码）。
 - [ ] 已扫描旧后端残留，确认 `start_backend_prod.sh` 与 `deploy/*.service` 指向 `bin/twilight`，未重新引入旧后端运行入口。
 - [ ] 已检查鉴权级别、路径穿越、文件类型白名单与 CORS 配置。
@@ -359,10 +362,12 @@ cd webui && pnpm dev
 - 破坏性管理操作必须保留明确的确认步骤或 dry-run 预检。
 - 上传与资产读取必须使用 `http.MaxBytesReader`、MIME 白名单、目录约束和统一响应 envelope。
 - 数据库备份、恢复、迁移、Git 更新和 systemd 操作都不得拼接 shell 字符串。
+- **新增路由必须同步文档**：`scripts/check_docs_drift.go` 会扫描 `internal/api/routes.go`（v1）与 `internal/api/routes_v2.go`（v2），任一条端点没在 `docs/*.md` 出现过就会让 CI 失败。v1 与 v2 路径是不同字符串，只写 v1 不算 v2 已文档化。极个别内部端点可在 `a.add` 行尾加 `// docs:skip` 豁免；历史欠账才写进 `scripts/docs_drift_baseline.txt`（该 baseline 只允许变小，条目被文档化后 lint 会要求删除）。
+- **新增前端调用点要对账**：`scripts/check-frontend-v2-coverage.py` 把 `webui/src/lib/api.ts` 的调用点与 `routes_v2.go` 逐条比对，未注册的 V2 路径会被报出来。
 
 ### Git 更新与 systemd 约定
 
-- 管理员 Git 更新接口（`/api/v1/system/admin/update`）支持 `dry_run` 预检，默认拒绝脏工作区；实现保持 `exec.Command` 参数化调用，禁止 shell 字符串拼接。
+- 管理员 Git 更新接口（`/api/v1/system/admin/update`）支持 `dry_run` 预检，默认拒绝脏工作区；实现保持 `exec.Command` 参数化调用，禁止 shell 字符串拼接。响应不得返回服务器本机项目绝对路径；仓库地址、命令输出和错误信息必须经过凭据脱敏。
 - systemd 安装前先执行 `sudo bash deploy/setup-systemd.sh --dry-run`。脚本会检测路径、配置、二进制、用户 / 组、端口、空白与 `%` 等 systemd 特殊字符，以及旧 Python 版 Twilight 的 unit。
 - 部署的 unit 必须指向 `bin/twilight`，不要重新引入旧后端启动命令。
 

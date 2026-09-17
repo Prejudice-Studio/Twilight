@@ -1,6 +1,8 @@
 # Go 后端架构与配置
 
-本文介绍 Twilight Go 后端的目录结构、启动方式、配置解析规则、环境变量、状态存储模型以及运行运维相关能力，供部署和二次开发参考。后端入口为 `cmd/twilight`，按 Linux + systemd 部署设计，前端调用路径统一为 `/api/v1/*`。
+本文介绍 Twilight Go 后端的目录结构、启动方式、配置解析规则、环境变量、状态存储模型以及运行运维相关能力，供部署和二次开发参考。后端入口为 `cmd/twilight`，按 Linux + systemd 部署设计。
+
+> **API 版本**：前端（`webui`）默认调用 `/api/v2/*`（`DEFAULT_API_VERSION="v2"`，仅在 `NEXT_PUBLIC_USE_V1_COMPAT=true` 时回退 v1）。两套路由表分别在 `internal/api/routes_v2.go` 与 `internal/api/routes.go`，新增接口请优先注册 v2 并在 [API 路由索引](./api-index.md) 登记。完整的环境变量清单见 [安装部署](../guides/install.md)。
 
 ## Emby 活动日志与播放记录
 
@@ -88,6 +90,18 @@ systemd 部署对应三个服务单元：`twilight`、`twilight-bot`、`twilight
 API、Scheduler 与 Bot 都会检测配置文件签名并支持热重载；签名探测在进程内按 500ms 节流，HTTP 并发不会为每个请求分别 `stat` 主配置和 local 配置。Emby URL 或 Token 发生变化时，会同步清空旧服务器的会话、设备/IP 审查和 Emby 管理员判定缓存，避免跨服务器复用陈旧结果。
 
 配置项使用 TOML 分段（如 `[Global]`、`[API]`、`[Database]`、`[Emby]`、`[Telegram]`、`[SAR]`、`[Email]`、`[RateLimit]`、`[Scheduler]`、`[SystemUpdate]`、`[Security]` 等）。读取时对每个字段都准备了多个候选键（含分段键、历史扁平键和裸键），存在历史命名兼容；例如签到相关项同时识别 `SAR.*` 与历史的 `Signin.*`。自动积分续期的管理员许可为 `SAR.signin_auto_renewal_enabled`，历史分段兼容键为 `Signin.auto_renewal_enabled`，默认关闭。
+
+### 可视化配置页的读写语义
+
+管理端「系统设置 → 配置」通过 `GET/PUT /api/v2/admin/config/schema` 读写配置。这里有三条容易踩空的约定：
+
+1. **保存是合并，不是重写。** `mergeConfigTOML(source, values)` 以磁盘上的现有文件（或管理员提交的源文本）为底稿，只覆盖 `configSectionDefs()` 纳管的字段，其余内容原样保留——手写的段（如 `Admin`）、尚未纳管的字段、以及 `SetupMode` 这类顶层标量都不会丢。早期实现只写 schema 认识的键，一次可视化保存就会静默删掉这些配置并无法恢复，不要再退回那种写法。
+2. **页面显示的是「生效值」，不等于「文件里写了这一项」。** `configValues()` 对缺失的键用代码默认值兜底。schema 响应里每个字段都带 `present_in_file`：`false` 表示该键不在 `config.toml` 里，页面上会打「未写入文件」标记，保存后才会真正落盘。
+3. **密钥不回传明文。** 非空 secret 字段一律回传哨兵 `__TWILIGHT_SECRET_UNCHANGED__`；PUT 时哨兵等价于「保持原值」，显式提交空串才算清空。
+
+新增 `config.Config` 字段时，必须同时挂进 `configSectionDefs()` 与 `configValues()`，否则页面读不到也存不住。`TestConfigSchemaSurfacesEveryConfigField` 会反射全字段做 `configValues → renderConfigTOML → config.Load` 往返，漏挂的字段会直接让测试失败（除非写进 `schemaUncoveredConfigFields` 白名单并说明原因）。
+
+保存前会自动备份到 `<Database.backup_dir>/config`（默认 `db/backups/config`），恢复与备份列表见管理端「配置 → 备份」页签。
 
 ### 关键默认值
 
@@ -309,8 +323,8 @@ Bangumi 收藏缓存采用两层结构：`BangumiSubjectCache` 以 Bangumi `subj
 ## 安全基线
 
 - 所有 JSON 响应使用统一 envelope：`success`、`code`、`message`、`data`、`timestamp`。
-- 鉴权级别（`internal/api/routes.go`）：
-  - `AuthPublic`：免登录。
+- 鉴权级别（`internal/api/routes.go` 为 v1、`internal/api/routes_v2.go` 为 v2，两者枚举相同）：
+  - `AuthPublic`：**完全匿名放行**——`authenticate()` 遇到它直接返回成功，不会做任何登录校验。带隐私的路由（观看记录、身份信息、配置）绝不能注册成这个级别；历史上 `/api/v2/emby/now-playing` 就因此把观看者身份泄露给未登录访客，已删除。
   - `AuthUser`：登录会话（Cookie）或 Bearer Token。
   - `AuthAdmin`：登录且 `Role == RoleAdmin`。
   - `AuthAPIKey`：`X-API-Key` 头、`Authorization: ApiKey/Bearer` 或 `?apikey=` 查询参数。

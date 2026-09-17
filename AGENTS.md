@@ -14,7 +14,7 @@ This file applies to the whole repository. Read it before changing code. If a ne
 
 - Twilight is an Emby / Jellyfin user-management panel.
 - Backend: Go module `github.com/prejudice-studio/twilight`, entrypoint `cmd/twilight`.
-- Frontend: `webui/`, Next.js App Router, TypeScript, Tailwind CSS, Radix/shadcn-style components, Zustand, and TanStack Query.
+- Product frontend: `webui/`, Next.js App Router with React and TypeScript. It is the only frontend shipped by this repository.
 - Preferred deployment: Linux + systemd.
 - Current Go source and `docs/guides/development.md` are authoritative. Do not reintroduce old Python backend entrypoints, uvicorn, `requirements.txt`, or historical multi-SQLite migration notes.
 
@@ -43,13 +43,18 @@ Update docs in the same change when behavior changes.
 - `internal/api`: HTTP routes, auth, rate limits, response helpers, handlers, external clients, scheduler, admin operations, runtime APIs.
 - `internal/api/routes.go`: centralized route registration.
 - `internal/config`: `config.toml`, `config.local.toml`, and `TWILIGHT_*` environment loading.
-- `internal/store`: PostgreSQL persistence. Most business entities remain in the single `twilight_state` JSONB document; high-write audit logs, runtime logs, sessions, playback records, the Telegram roster, and the Telegram update cursor use dedicated tables. `Store` is constructed exclusively via `store.OpenPostgres`, so `s.db` is always non-nil. The `json` label survives only as a one-way export target in the database-migration panel and as the `migrate-json` import source; there is no JSON/file runtime backend, no flock, and no `.bak`/sidecar state files.
+- `internal/store`: PostgreSQL persistence. Most business entities remain in the single `twilight_state` JSONB document; high-write audit logs, runtime logs, sessions, legacy playback records, trusted playback events/segments/daily buckets, the Telegram roster, and the Telegram update cursor use dedicated tables. `Store` is constructed exclusively via `store.OpenPostgres`, so `s.db` is always non-nil. The `json` label survives only as a one-way export target in the database-migration panel and as the `migrate-json` import source; there is no JSON/file runtime backend, no flock, and no `.bak`/sidecar state files.
 - `internal/redis`: RESP client for shared sessions and rate limits.
 - `internal/security`: tokens, password hashing, and secure random helpers.
-- `webui/src/app`: Next.js App Router pages.
-- `webui/src/lib/api-request.ts`: low-level request wrapper, credentials, timeout, and `ApiError`.
-- `webui/src/lib/api.ts`: frontend API client. New backend routes usually need matching client methods and `api-types.ts` types.
-- `webui/src/locales`: i18n catalogs.
+- `internal/migration`: versioned Twilight ZIP export format, manifest integrity, bounded archive parsing, and Argon2id/AES-256-GCM payload protection. Keep this package independent from HTTP and filesystem writes; import/export orchestration belongs to API/store layers.
+- `internal/playback`: pure trusted playback-event state machine, pause/resume transitions, stale-event rejection, bounded segment duration, timezone-aware daily bucket splitting, and no HTTP/SQL dependencies.
+- `internal/api/migration_resources.go`: explicit UploadDir resource collector for migration snapshots. It maps approved upload namespaces to logical `resources/` paths and rejects symlinks, non-regular files, path escapes, and resource-budget violations.
+- `internal/api/system_v2.go`: V2 safe system-info projection, administrator-only independent health probes, and bounded runtime statistics adapters.
+- `webui/src/app`: product Next.js App Router pages.
+- `webui/src/lib/api.ts`: product API client. New feature methods must prefer an existing `/api/v2/*` route and keep a bounded V1 compatibility branch only where the V2 endpoint is not yet available.
+- `internal/api/appearance_v2.go`: V2 appearance resource adapters; the existing upload handlers remain the only validation, safe-path, rate-limit, persistence, and asset-URL implementation.
+- `internal/api/auth_v2.go`: V2 authentication and recovery resource adapters. Login transport delegates to `login_service.go`; registration transport is shared with the V1 compatibility route, while validation and registration-code/Telegram bind-code state transitions live in `registration_service.go`.
+- `webui/src/lib/api-request.ts`, `webui/src/lib/api.ts`, and `webui/src/locales`: legacy rollback client only.
 - `deploy/`: systemd units and install scripts; units must point to `bin/twilight`.
 
 ## Feature Location Guide
@@ -65,13 +70,17 @@ Update docs in the same change when behavior changes.
 | Registration codes | `regcode_handlers.go`, `code_use_handlers.go` | `RegCode` | `/admin/regcodes/*`, `/users/me/use-code` | `admin/regcodes` | `regcodes.md` |
 | Invite tree | `invite_handlers.go`, `invite_admin_handlers.go` | invite codes and relations | `/invite/*`, `/admin/invite/*` | `invite`, `admin/invite` | `invite.md` |
 | Media requests | `media_request_handlers.go`, `media_service.go` | `MediaRequest` | `/media/*` | `media`, `admin/requests` | `backend-api.md` |
+| Tickets | `ticket_handlers.go` | `Ticket`, replies, attachments | `/tickets/*`, `/admin/tickets/*` | `tickets`, `admin/tickets` | `tickets.md`, `backend-api.md` |
 | Sign-in/score | `signin_handlers.go` | `signin.go` | `/signin/*` | `score` | `backend-api.md` |
 | Announcements | `announcement_handlers.go` | `Announcement` | `/announcements`, `/admin/announcements/*` | announcement board | `announcements.md` |
 | Bangumi | `bangumi*.go` | Bangumi caches/logs | `/bangumi/*`, `/admin/bangumi/*` | `bangumi/*` | `bangumi.md` |
 | API keys | `apikey_handlers.go` | `APIKey` | `/apikey/*`, `/users/me/apikeys` | `settings/apikey` | `api-key.md` |
 | Scheduler | `scheduler*.go` | `SchedulerRun` | `/admin/scheduler/*` | `admin/scheduler` | `backend.md` |
-| Config/runtime/database | `config_admin.go`, `runtime_logs.go`, `database_admin.go` | runtime logs/state | `/system/admin/*` | admin config/logs/database | `backend.md` |
-| Emby activity logs / playback records | `emby_activity.go` | `playback.go` | `/admin/emby/activity-logs` | `admin/emby` | `backend-api.md` |
+| Config/runtime/database | `config_admin.go`, `runtime_logs.go`, `database_admin.go`, `system_v2.go` | runtime logs/state | `/system/admin/*`, `/api/v2/admin/health/*`, `/api/v2/admin/stats` | admin config/logs/database/status | `backend.md`, `backend-api.md` |
+| API documentation | `internal/api/docs_v2.go`, `handlers.go` | public V2 OpenAPI and admin-only route metadata | `/api/v2/openapi.json`, `/api/v2/docs`, `/api/v2/admin/docs/routes` | Go console at `/api/v2/docs` (no dedicated WebUI page) | `api-index.md`, `backend-api.md` |
+| Twilight migration core | `internal/migration`, `internal/api/migration_resources.go`, `migration_handlers.go` | versioned archive format, validated data/config/resource files, and admin preview/import/export boundary | `/api/v2/admin/migration/*` (V1 compatibility remains) | `admin/migration` | `backend-api.md`, `backend.md` |
+| Emby activity logs / legacy playback records | `emby_activity.go` | `playback.go` | `/admin/emby/activity-logs` | `admin/emby` | `backend-api.md` |
+| Trusted viewing statistics | `internal/playback` rules + `internal/store/trusted_playback.go` repository adapter | `trusted_playback.go` and `twilight_playback_*` tables; trusted event state machine with rebuildable daily buckets, exposed only behind an authenticated layer | `/api/v2/playback/*` when enabled | no WebUI surface yet | `backend.md`, `backend-api.md` |
 | Developer JS | `developer_handlers.go`, `telegram_js*.go` | developer mode flag | `/admin/developer/*` | `admin/developer` | `developer-js.md` |
 
 ## Backend Rules
@@ -84,11 +93,22 @@ Update docs in the same change when behavior changes.
 - HTTP requests must refresh the shared Store snapshot once after cheap transport/rate-limit guards and before blacklist checks, routing, or authentication. Reuse the request-local refresh marker in any handler-level guard; do not add a second `Store.Refresh()` probe to ordinary reads. Scheduler jobs likewise refresh once at their execution boundary, and Telegram refreshes once per non-empty update batch.
 - Enforce feature gates in every relevant handler, not only in frontend visibility logic.
 - Do not read or print local secrets from config files unless explicitly requested.
+- Administrative diagnostics must expose only data required by the requested operation. Do not return server filesystem paths, raw process errors, environment values, or private upstream addresses in API envelopes; keep full diagnostics in sanitized server logs instead.
 - Server status health checks are split across `/system/health/api`, `/system/health/database`, and `/system/health/emby`. Keep public `/system/health` as a lightweight API-only liveness summary: it must not ping PostgreSQL, contact Emby, or expose private dependency details. Avoid adding database/Emby probes back into `/system/stats`.
 - Config-file signature checks are hot-reload polling, not request state. Keep the short process-wide throttle in `reloadConfigIfChanged`; do not restore per-request `stat` calls for both config files.
 - JSON request decoders must accept exactly one JSON value, followed only by whitespace/EOF, while preserving the shared size and nesting-depth limits.
+- Migration archives must use `internal/migration` validation before any extraction or persistence. Import code must enforce the manifest format/version, file namespace (`data/`, `config/`, `resources/`), SHA-256 and size limits, regular-file-only ZIP entries, and password-mode Argon2id + AES-256-GCM authentication. Never write archive paths directly to the filesystem. Admin import/export routes are feature-gated by `Database.migration_panel_enabled`, use preview before confirmation, and must not put archive passwords in URLs, logs, or response JSON.
+- Migration resource export may read only `UploadDir/avatar`, `background`, `tickets`, `server-icon`, `auth-background`, and `bangumi`. The collector must emit logical `resources/` paths, ignore unrelated UploadDir entries, reject symlinks/non-regular files, and enforce bounded file/byte budgets before archive creation.
 - HTTP route registration must go through `App.add`, which maintains immutable method/segment/domain indexes used by `App.match`. Do not append directly to `App.routes`, mutate routes after registration, or bypass the indexed 404/405 matching path.
 - `splitPath` must preserve `path.Clean` normalization for duplicate slashes and dot segments while avoiding unconditional string prefix allocation for normal slash-prefixed request paths.
+
+## Route Registration Rules
+
+- `App.match` picks the **most specific** route in a bucket, not the first registered one: candidates with the same method and segment count are compared by literal-segment count (`Route.Literals`), and the higher count wins. Ties still fall back to registration order.
+- Consequence: **do not** rely on registration order to make `/admin/users/expiring` beat `/admin/users/:uid`. The literal route now wins regardless of where it is registered. Keep this rule in mind before "fixing" a route by moving it earlier.
+- The rule exists because of a real outage: `/api/v2/admin/users/:uid` was registered before `/expiring` and `/batch/{enable,disable,renew,delete,refresh-status}`, so every one of those requests was served by the single-user handler with `uid="expiring"` / `uid="batch"` and always failed. `/api/v2/admin/media-requests/:request_id` swallowed `/batch` the same way. Nothing failed to compile and no single-route unit test noticed — only an end-to-end call did.
+- Ambiguity that specificity cannot resolve is still a bug: two routes with the same segment count **and** the same literal count but different parameter positions (for example `/api/v1/:a/y` and `/api/v1/x/:b`) both match `/api/v1/x/y`, so the winner depends on registration order. `scripts/route_shadow` fails on that shape.
+- Registering the same method + path twice is dead code: the second entry never runs. The same script fails on it.
 
 ## Backend Function Index
 
@@ -97,13 +117,27 @@ Use this index before broad search. Line numbers drift, so search by function na
 | File | Important functions |
 | ---- | ---- |
 | `routes.go` | `registerAllRoutes`, `registerAPIRoutes`, `registerAdminRoutes`, `registerAPIKeyRoutes`, `registerSecurityRoutes`, `registerBatchRoutes` |
+| `system_v2.go` | `handleV2SystemInfo`, `handleV2AdminHealthAPI`, `handleV2AdminHealthDatabase`, `handleV2AdminHealthEmby`, `handleV2AdminStats` |
+| `media_v2.go` | `handleV2MediaSearch`, `handleV2MediaDetail`, `handleV2MediaInventoryCheck`, `handleV2MediaRequests` |
+| `violation_v2.go` | `handleV2ListViolations`, `handleV2DeleteViolation`, `handleV2ClearViolations` |
+| `admin_email_v2.go` | `handleV2AdminEmailVerifications`, `handleV2AdminEmailTest`, `handleV2AdminCleanupEmailVerifications` |
+| `admin_telegram_rebind_v2.go` | `handleV2ListRebindRequests`, `handleV2ReviewRebindRequest`, `handleV2BatchReviewRebindRequests`, `handleV2RevokeAllRebindApprovals` |
+| `admin_telegram_v2.go` | `handleV2AdminTelegramCommandCatalog`, `handleV2AdminTelegramRosterStats`, `handleV2AdminTelegramBotTest` |
+| `developer_v2.go` | `handleV2DeveloperJSSandbox`, `handleV2DeveloperJSDocs`, `handleV2DeveloperJSPresets` and preset mutations |
+| `setup_v2.go` | `handleV2SetupStatus`, `handleV2SetupComplete` |
+| `migration_v2.go` | `handleV2MigrationStatus`, `handleV2MigrationExport`, `handleV2MigrationImport` |
 | `app.go` | `ServeHTTP`, `authenticate`, `current`, `clientIP`, `principal`, CORS helpers |
-| `auth_handlers.go` | `handleLogin`, `handleRegister`, `handleLogout`, `handleAuthMe`, password reset handlers |
+| `auth_handlers.go` | `handleLogin`, `handleRegister`, password reset handlers and V1 authentication compatibility entrypoints |
+| `login_service.go` | Shared credential verification, password rehash, session creation, device/login history, audit and login notification application operations |
+| `password_reset_service.go` | Shared Emby password-recovery validation, external authentication, entitlement checks, password replacement and session revocation |
+| `email_password_reset_service.go` | Shared email recovery-code issuance, verification, password-strength validation, password replacement and session revocation |
+| `auth_session_service.go` | Shared session revoke/rotate application operations used by V1 and V2 transport handlers |
 | `setup_handlers.go` | `handleSetupStatus`, `handleSetupComplete`, `setupConfigValues` |
 | `handlers.go` | user self-service, admin users, Emby binding, renewal, role, password, Telegram unbind helpers |
 | `business.go` | `sortUsers`, `regcodeDTO`, `regcodeStatus`, `generateRegCode`, `inviteForest`, `inviteTreeFor`, `canInvite`, `batchResult` |
 | `regcode_handlers.go` | list/create/update/delete/batch-delete RegCodes and RegCode user history |
 | `code_use_handlers.go` | `handleUseCode`, queue status |
+| `ticket_reply_service.go` | V1/V2 共用的工单回复追加应用操作；负责归属、关闭状态和长度边界，传输层负责限流/审计/通知 |
 | `invite_handlers.go` | invite config, invite me, create invite code, renew code, use/check invite |
 | `invite_admin_handlers.go` | admin invite forest and detach/cascade helpers |
 | `email_handlers.go` | send/verify code, password reset by email, admin email tests and cleanup |
@@ -112,12 +146,17 @@ Use this index before broad search. Line numbers drift, so search by function na
 | `bangumi_sync_handlers.go` | status, trigger, history, collections, admin records/logs, collection cache refresh |
 | `bangumi_sync_service.go` | `syncBangumiForUser`, matching, ensure collection, mark episode |
 | `bangumi_cover.go` | public cover handler, local download, safe image URL checks |
+| `bangumi_cover_v2.go` | `handleV2BangumiCover` public V2 cover resource adapter |
 | `batch_user_handlers.go` | batch enable/disable, renew, delete, Emby grant/lock helpers, `filteredBatchUserUIDs` |
 | `emby_activity.go` | Emby ActivityLog collection and playback-record pairing |
 | `emby_client.go` | Emby HTTP helpers and server stats/viewer endpoints |
 | `emby_device_audit.go` | device/IP audit aggregation and refresh cache |
 | `scheduler_runner.go` | `runCheckExpired`, `runExpiryReminder`, `runDailyStats` |
 | `config_admin.go` | config schema, values, save, upload helpers |
+| `migration_export.go` | `ExportMigrationFiles`, consistent PostgreSQL migration snapshot readers |
+| `migration_import.go` | `ImportMigrationArchive`, validated transactional replacement of migration business data |
+| `migration_resources.go` | explicit UploadDir resource collection and filesystem safety checks |
+| `internal/playback/state.go` | trusted playback event transitions, duration bounds, timezone bucket splitting |
 | `developer_handlers.go` | developer mode and JS sandbox docs endpoints |
 
 ## Store Model Index
@@ -137,39 +176,40 @@ Use this index before broad search. Line numbers drift, so search by function na
 | `BangumiSubjectCache` | global Bangumi subject payload by subject ID |
 | `EmbyActivityLog` | ActivityLog entries synced from Emby and stored for audit/history |
 | `TelegramRosterEntry` | Runtime rows live in `twilight_telegram_roster`; `State.TelegramRoster` is import/export compatibility only |
+| `Migration snapshot` | `ExportMigrationFiles` reads the state document and dedicated business tables in one repeatable-read transaction; active sessions are intentionally excluded |
 
 ## Frontend Rules
 
-- Use `webui/src/lib/api.ts` rather than naked `fetch` for app API calls.
-- User-facing copy belongs in `basic.json`, `zh-Hant.json`, and `en-US.json`; `zh-Hans.json` remains sparse and falls back to `basic.json`.
+- Product frontend data access must use `webui/src/lib/api.ts` and `webui/src/lib/api-request.ts`; do not add page-local authenticated `fetch` wrappers. New methods default to the V2 API version and must preserve `AbortSignal`, request coalescing, no-store reads, and explicit V1 compatibility behavior in the shared request boundary.
 - Polling should check document visibility when useful and must clear intervals on unmount.
 - Dashboard Emby lines remain collapsed to an entry/count summary on the home page. Users may open the detail dialog to view the lines and trigger probing; loading or refreshing the line list must not automatically fan out one probe per line or issue an extra Emby status precheck.
 - Shared authenticated layout components must not import `framer-motion` for simple active-state or one-shot entrance effects. Use existing CSS/Tailwind transitions there so routes without page animation do not pay for Framer in the common layout bundle.
+- Ordinary route-level one-shot entrance effects should use the shared `page-enter` CSS class or CSS transitions. Reserve `framer-motion` for pages with real interactive or coordinated animation requirements; do not add it for a single opacity/translate wrapper.
 - The admin landing page and system-statistics page are dense operational surfaces and must remain static; do not import `framer-motion` or add decorative gradient/orb layers to their metric cards. Stable CSS transitions are sufficient for hover feedback.
 - Keep controls dimensionally stable across languages.
-- Coalesce duplicate in-flight `GET` / `HEAD` requests only in `webui/src/lib/api-request.ts`; never dedupe writes, caller-abortable requests, or endpoints that opt out with `dedupe: false`. The same wrapper owns the short successful-read memory cache; keep it bounded by entry count, per-response source size, and total source-size budget, and keep `/users/me`, `refresh=1`, `X-Twilight-Intent`, `no-store` / `reload`, and `cacheRead: false` out of that cache.
-- Current-user identity endpoints (`/users/me` and `/auth/me`) must also stay out of in-flight read dedupe. Login, logout, and session-changing frontend flows must clear request caches and invalidate stale auth-store promises before writing user state.
-- Rapidly changing admin list/detail reads must pass `AbortSignal` through `api.ts`; refresh, filter/page changes, route changes, and unmount must cancel superseded requests, and stale responses must not overwrite newer state or produce abort-error toasts.
+- The WebUI (`webui/`, Next.js) is the only frontend and targets `/api/v2/*`; page reads go through `useAsyncResource` with `AbortSignal` so superseded reads are cancelled. Verify coverage with `scripts/check-frontend-v2-coverage.py`, which cross-checks every call site in `webui/src/lib/api.ts` against `internal/api/routes_v2.go`. V1 stays reachable only via `NEXT_PUBLIC_USE_V1_COMPAT` and external API keys.
 - The admin user page cache is bounded to a small LRU window by both query count and
   retained row count. Keep cache hits moving to the newest position, and do not turn
   user-list filter/page history into an unbounded browser-side copy of the user base.
 - Admin tables, dialogs, dropdowns, and selects must stay usable in phone, tablet, and narrow desktop devtools viewports. Prefer stable dimensions, horizontal table overflow, wrapping button labels, and mobile card views over cramped desktop tables.
-- The admin registration-code search is a backend-filtered read and must debounce free-text input before changing the query; type/status/source/sort/order changes reset to page 1. Keep the existing abortable `useAsyncResource` request path and use `custom-scrollbar` on long code tables and dialogs.
-- Admin audit and violation list reads must opt out of the short read cache and pass the `AbortSignal` from `useAsyncResource`; filtering, pagination, and route changes must cancel obsolete requests. Destructive controls and result metadata must wrap on narrow Firefox viewports.
-- The admin email page must call `/admin/email/verifications` with an explicit `view` and bounded pagination. Pending-code and account searches are backend-filtered, caller-abortable reads; switching to the configuration tab must not fetch either list. Keep the parameterless full response for compatibility only, and use mobile/tablet cards instead of rendering the wide desktop tables there.
+- New or rewritten admin tables should use the shared `webui/src/components/admin/admin-table.tsx` (`AdminTable<T>`), which renders the same column set as a table on `md+` and as stacked cards below. Do not reintroduce a hardcoded `min-w-[…]` table with no narrow-screen fallback. Columns declare their own `cell` renderers; mark non-identity columns `hideOnCard` when they would make the card unreadable, and use `onRowContextMenu` only when a right-click affordance is genuinely needed (the component does not advertise a click cursor for right-click-only rows).
+- The admin registration-code search is a backend-filtered read and must debounce free-text input before changing the query; type/status/source/sort/order changes reset to page 1. Filters live in URL state and only a bounded page is fetched.
+- Admin audit and violation list reads must be no-store, server-filtered, bounded, and cancelable at the active transport boundary. Every read passes `AbortSignal`; a superseded response must never overwrite newer state.
+- The admin email page must call `/api/v2/admin/email/verifications` with an explicit `view` and bounded pagination. Pending-code and account searches are backend-filtered, caller-abortable reads; switching to the configuration tab must not fetch either list. Keep the parameterless V1 response for compatibility only, and use mobile/tablet cards instead of rendering the wide desktop tables there.
 - The admin announcement page must use the backend-filtered `/admin/announcements` pagination contract (`page`, `per_page`, `include_invisible`, and `include_expired`) instead of loading the full announcement history. Pass the `AbortSignal` from `useAsyncResource`, opt out of the short read cache, and update a single announcement in local state after successful toggle/edit/delete actions where the response is sufficient. Icon-only announcement actions need accessible labels and must be disabled while another mutation is pending; action groups must wrap on narrow Firefox viewports, and long previews own their bounded scroll region.
+- The `/admin/announcements` page must use `/api/v2/admin/announcements` for its bounded pagination/filter contract; create/edit/toggle/delete go through the same `api.ts` client and let Go enforce the final field whitelist, audit, and safe render mode. The historical response may expose `expired_at` while write payloads use `expires_at`, so DTOs must accept both. Announcement content must remain escaped text in the preview unless a reviewed safe renderer is explicitly introduced.
 - The admin Bangumi page must pass `AbortSignal` through user, playback-record, and sync-log reads. Opening another detail view or closing a dialog must abort the previous request, and an aborted response must never replace the newly selected user's data. Keep record/log dialogs bounded to `dvh` with Firefox-compatible scrolling, and wrap per-user actions on narrow viewports.
 - The admin invite forest may contain thousands of rows. Keep the O(n) map/descendant calculation, avoid per-node array copies while traversing, and mount the table in bounded 300-row batches with an explicit load-more control. The table itself must own a bounded Firefox scroll region. Batch and cascade mutations must be mutually exclusive and disable duplicate controls until the request and refresh finish.
-- The admin database page must pass an `AbortSignal` to status and backup-list reads, cancel superseded reloads and ignore abort errors after unmount. Long backup lists and database preview dialogs must use bounded `dvh` Firefox scroll regions; do not let backup history expand the whole page.
-- The admin scheduler list has one shared abortable read path for manual refresh and visible running-job polling; a new read cancels the previous one. Running-job polling is visibility-aware and uses a 3-second interval. Scheduler last-run/history dialogs must cancel stale job reads, ignore abort toasts, and use bounded `dvh` Firefox scroll regions for log text.
-- Telegram command management loads config schema, developer presets, and the authoritative command catalog concurrently with one caller cancellation boundary. These reads bypass short response caching except that a completed schema read may seed the existing bounded schema cache. Long built-in/custom command collections must scroll inside bounded Firefox regions. Placeholder insertion must update the controlled React row state for the last focused reply textarea; do not mutate textarea DOM values and dispatch synthetic input events.
-- The full configuration page and every embedded `AdminConfigSections` editor must pass the `useAsyncResource` abort signal through schema/TOML reads. Superseded loads and unmounts must not write stale config state or show abort errors. Configuration source, backup, update-output, and pending-change previews use bounded Firefox scroll regions with contained overscroll.
+- The admin database page must pass an `AbortSignal` to status and backup-list reads, cancel superseded reloads and ignore abort errors after unmount. Long backup lists and database preview dialogs must use bounded `dvh` Firefox scroll regions; do not let backup history expand the whole page. The separate admin migration page must never retain the complete archive or migration password in browser state: the export password travels only in a POST body, the download response is `no-store`, and import always re-uploads the archive rather than keeping it client-side.
+- The admin scheduler list has one shared abortable read path for manual refresh and visible running-job polling; a new read cancels the previous one. Running-job polling is visibility-aware and uses a 3-second interval; this is the only status-refresh mechanism — do not add SSE. Scheduler last-run/history dialogs must cancel stale job reads, ignore abort toasts, and use bounded `dvh` Firefox scroll regions for log text. Manual run parameters must be bounded before submission, schedule edits must preserve the backend's manual-only job boundary, and run history stays bounded and no-store.
+- The full configuration page and every embedded editor must read schema/TOML through `api.ts`/`api-request.ts`. Superseded loads must not write stale state; configuration source, backup, update-output, and pending-change previews use bounded Firefox scroll regions with contained overscroll.
 - Configuration image-upload headers and the search/action toolbar stay stacked through tablet and narrow devtools widths, returning to a shared row at `lg`. The action toolbar uses an explicit two-column grid below `lg`; do not let action buttons consume the search input's intrinsic width or wrap labels one character at a time.
 - Configuration's icon-only clear-search control must use the localized catalog and expose an `aria-label`; do not add a hard-coded accessible name in the page.
 - Firefox accepts only pixels or percentages in `IntersectionObserver.rootMargin`. Configuration section tracking and any new observer must not use `rem`, `em`, viewport units, or `calc()` there; an invalid margin must never crash the page.
 - Remove unreferenced admin client components instead of retaining one-off overlays that import heavyweight animation runtimes. New admin dialogs and overlays should reuse the existing Radix-based shared primitives and CSS transitions.
 - The admin Emby account and ActivityLog reads are manual, caller-abortable, no-store requests. Keep Emby and orphan account tables mounted in bounded 300-row batches with explicit load-more controls, and keep their tables, tabs, and ActivityLog history inside bounded Firefox scroll regions. Emby account mutations are mutually exclusive; device/IP audit and ActivityLog synchronization remain manual-refresh only.
 - Shared responsive primitives must preserve the viewport boundary: toolbar and dangerous-action controls wrap or stack on narrow screens; tables scroll inside their own touch-friendly wrapper; tabs scroll inside their own list; and shared text buttons use a minimum height rather than clipping a translated label.
+- Shared `Button` default/small/icon sizes, `Input` default size, `Textarea`, and `SelectTrigger` use a common 40px/36px control baseline across breakpoints. These primitives must also have `min-width: 0`, `max-width: 100%`, and safe text wrapping so translated labels cannot widen a grid or overflow a narrow Firefox viewport. Do not add mobile-only height changes to one shared primitive; page-specific formats such as the media search toolbar must set their own explicit stable height on the wrapper and its children.
 - Admin card headers that contain search, refresh, or runtime metadata must stack at phone widths and return to horizontal layout only when their combined intrinsic widths fit. Do not pair fixed-width inputs with sibling actions in an unconditional row.
 - Firefox is the WebUI compatibility baseline. Shared scroll regions must use standards-based `scrollbar-width` / `scrollbar-color`, bounded `dvh` heights, and `overscroll-behavior`; do not rely on WebKit-only scrollbar selectors or `touch-action: pan-x` that blocks vertical page gestures. Long dialogs, dropdowns, selects, sidebars, tables, and tabs must scroll inside the viewport with a visible Firefox scrollbar.
 - Desktop and mobile navigation must share `isActivePath` and grouped admin navigation metadata. Exactly one flattened admin destination should have `aria-current=page`; opening either navigation should bring that item into its own scroll viewport, and mobile labels must wrap instead of truncating operational destinations.
@@ -182,9 +222,13 @@ Use this index before broad search. Line numbers drift, so search by function na
 - The admin user action menu, desktop table, and destructive-maintenance previews must own bounded `dvh` Firefox scroll regions. Keep the desktop table header sticky, allow preview tables to scroll in both directions on phones, and retain server-side pagination plus mobile cards instead of mounting the entire user base.
 - Registration-code selection, copy, export, and destructive actions use a two-column phone grid with explicit button widths and return to a wrapping row at `sm`. Do not use multiple `flex: 1 1 0%` text buttons in one phone-width row; Firefox may shrink them to one character per line.
 - Every icon-only registration-code action must have a localized `aria-label`, including generated-code copy, invite-code copy, enable/disable, edit, delete, note save, usage history, and pagination. A `title` tooltip alone is not an accessible name.
-- Developer-mode JS docs and preset reads must pass `AbortSignal`, opt out of the short read cache, and ignore obsolete responses on unmount. The symbol tree, category strip, tab list, and examples must stay inside bounded Firefox `dvh` scroll regions; keep the sandbox security contract unchanged.
-- The server status page must keep API, database, and Emby health probes as three separate no-store requests. Refresh with one shared abort controller and `Promise.allSettled`; an unavailable probe must not discard successful results from the other probes, and aborts/unmounts must not show error toasts or write stale state.
+- Developer-mode JS docs and preset reads must be bounded, no-store, and server-authorized. The symbol tree, category strip, tab list, and examples must stay inside bounded Firefox `dvh` scroll regions; keep the sandbox security contract unchanged. The legacy V1 page additionally passes `AbortSignal` and ignores obsolete responses on unmount.
+- The `/admin/security` route is a static navigation hub. It must not create a second security-policy store or duplicate the schema editor; audit, runtime logs, violations, device/IP review, and configuration remain in their dedicated routes, and Go remains the authorization and mutation boundary.
+- The server status page must read `/api/v2/admin/health/api`, `/api/v2/admin/health/database`, and `/api/v2/admin/health/emby` as three separate private no-store resources. `/api/v2/admin/stats` is separate from all probes, and `/api/v2/system/info` is a safe public projection for the shell/setup pages. The page performs these independent reads with `Promise.allSettled` and has no polling. An unavailable probe must not discard successful results from the other probes, and admin-only pages must still be gated by the router/route guard and the backend, not merely by hidden navigation.
+- The V2 `/admin/requests` page must use the backend-filtered, bounded media-request group response. Status/source/search/page state belongs in the URL; grouped same-title requests remain grouped for atomic handling, while an explicit URL split state lets an administrator inspect and update one member. Status and note mutations must send the backend revision through `If-Match`, batch group updates must preserve every member revision, and conflict responses must remain visible as a retryable generic error. The page must keep Bangumi and TMDB source badges distinct, render untrusted media metadata as escaped text, use safe image URLs, and keep the queue inside a bounded Firefox scroll region without client polling.
+- The `/admin/logs` page must use no-store reads for runtime status and a bounded log snapshot. It must not open the legacy SSE stream or a polling loop; refresh and larger snapshots are explicit user actions, and runtime messages/attributes are rendered as escaped text inside a bounded Firefox scroll region.
 - Admin device/IP tables, media-request queues, ticket conversations and attachment strips, registration-code usage dialogs, email tables, announcement previews, and runtime-log streams must use bounded Firefox scroll regions with contained overscroll. Flex conversation panes need `min-h-0` so internal scrolling works at narrow viewport ratios; long tables keep sticky headers and horizontal overflow inside their own region.
+- The V2 user ticket page must use `/api/v2/tickets` as a bounded `items`/`pagination` summary resource and load `/api/v2/tickets/:ticket_id` only for the selected conversation. Do not restore full reply bodies, ticket content, or attachment URLs to the user list response, and keep the selected conversation in a bounded `dvh` dialog with abortable detail reads. V2 user attachment URLs must stay under the protected `/api/v2/tickets/:ticket_id/attachments/:filename` resource.
 - Admin user-list filter changes must reset to page 1 without issuing a stale-page request; page-size changes must clear the cross-page selection scope. In the virtual `emby` selection scope, current-page select-all counts only rows with an Emby binding.
 
 ## Security Boundaries
@@ -195,7 +239,6 @@ Use this index before broad search. Line numbers drift, so search by function na
 - `/users/me` user preference toggles must accept only JSON boolean values for boolean fields such as Bangumi modes, login/ticket notifications, and password-security preferences. Do not rely on frontend switches or string coercion for these fields.
 - Public OpenAPI output must expose only public routes. Full route inventory belongs behind admin auth at `/system/admin/apis`.
 - API Key `permissions` are enforced per `/apikey/*` route. Account reads require `account:read`, account mutations (including renewal and card use) require `account:write`, Emby status requires `emby:read`, and session kicks require `emby:write`. Missing scopes return `API_KEY_PERMISSION_DENIED`; do not reduce permissions to display-only metadata again.
-- Preserve the safe announcement renderer and URL allowlist in `webui/src/lib/safe-render.tsx`.
 - CORS behavior: an empty `cors_origins` list reflects any valid `http`/`https` Origin to reduce self-hosting misconfiguration pain; a non-empty list restricts cross-origin requests to those entries; `*` is accepted as the same relaxed mode. `corsOriginMatchesHost` must continue to allow an Origin that matches the current request host as `scheme://host[:port]`. There is no hidden `cors_allow_any_origin` bypass.
 
 ## Feature Gate Notes
@@ -236,6 +279,8 @@ Use this index before broad search. Line numbers drift, so search by function na
 - After pending-interaction and bind-code handling, non-command Telegram text must return before command tokenization, registry lookup, and custom-command lookup. Parse the command token separately so no-argument commands do not allocate an argument slice; pass the canonical lowercase command through dispatch without repeatedly normalizing it.
 - Custom-command, disabled-command, and configured Telegram administrator lookups use the immutable per-config command index. Rebuild it when any backing configuration slice changes; do not restore a per-update linear scan. Dynamically assigned local administrator roles must still be checked through the Store Telegram-ID index after the configured-ID lookup.
 - Telegram group-user panel templates are rendered by a one-pass placeholder scanner. Preserve unknown placeholders verbatim, keep nested malformed-text compatibility, and do not rebuild a `strings.Replacer` from every placeholder on each panel refresh.
+- The V2 `/admin/developer` page must use `/api/v2/admin/developer/*` for sandbox, documentation, preset reads, and preset mutations. The Goja capability gate, static validation, network restrictions, audit writes, and developer-mode switch remain in the canonical handlers; do not expose sandbox results or preset code through a browser cache.
+- The V2 setup wizard must use `/api/v2/setup/status` and `/api/v2/setup/complete`. The one-time availability gate, explicit WebUI intent headers, rate limits, password and URL validation, transactional rollback, configuration write, audit, and host-only HttpOnly session cookie issuance remain in the canonical setup handlers.
 - Repeated custom JavaScript commands reuse the bounded cache of security-validated, compiled Goja programs keyed by script content. Never cache rejected scripts, never bypass `validateDeveloperJSCommand` on a cache miss, and keep the cache bounded.
 - Telegram `/emby` connectivity uses a short, configuration-keyed probe cache and a 1.5-second first-probe budget. Cache identity must hash the effective Emby URL and token rather than retaining another plaintext token copy; configuration changes must invalidate the result.
 - Latency-sensitive Telegram user search must use `Store.SearchUsers`, which scans the existing UID order under the store read lock and stops at the requested limit. Do not restore `ListUsers` full-copy/full-sort search in Bot handlers.
@@ -322,15 +367,17 @@ Use this index before broad search. Line numbers drift, so search by function na
 - Startup and config reload must repair historical registration residues: clear impossible `EmbyID != "" && PendingEmby` states, and restore missing user-side grant lock / `PendingEmby` fields from already-recorded RegCode or InviteCode usage without creating new invite relations or consuming new codes.
 - Media request statuses, aliases, active-queue checks, admin/user status labels, filters, creation quota checks, duplicate-active checks, and status updates belong in `internal/store/media_request.go` / store helpers. Handlers must call helpers such as `CreateMediaRequestWithOptions`, `NormalizeMediaRequestStatus`, `MediaRequestStatusMatches`, and `UpdateMediaRequestStatus` instead of mutating status fields or doing handler-side count-then-insert flows.
 - Media request admin filters must keep `active` (UNHANDLED / ACCEPTED / DOWNLOADING) separate from `pending` / `unhandled` (UNHANDLED only), so WebUI status tabs do not duplicate accepted/downloading rows under "pending".
-- The admin media-request list is a no-store query endpoint: `GET /admin/media-requests` accepts bounded `status`, `source`, `q`, `page`, and `per_page` filters. Normalize titles by trimming, collapsing whitespace, and case-folding; group before pagination so same-title TMDB/Bangumi requests cannot straddle pages. `total` counts groups, `request_total` and `status_counts` count raw requests. The WebUI must not cache this list or issue a second list GET after a successful mutation; it applies returned members locally and reserves reloads for manual refresh, page-boundary changes, or revision conflicts.
+- The admin media-request list is a no-store query endpoint: the canonical resource is `GET /api/v2/admin/media-requests` (V1 `/api/v1/admin/media-requests` remains a compatibility alias). Both accept bounded `status`, `source`, `q`, `page`, and `per_page` filters through the shared backend parser. Normalize titles by trimming, collapsing whitespace, and case-folding; group before pagination so same-title TMDB/Bangumi requests cannot straddle pages. `total` counts groups, `request_total` and `status_counts` count raw requests. The WebUI must not cache this list or issue a second list GET after a successful mutation; it applies returned members locally and reserves reloads for manual refresh, page-boundary changes, or revision conflicts.
 - Media-request mutations must use `require_key` routes for admin actions and may send `If-Match: \"<revision>\"`. Store updates/deletes must locate the key and mutate under one lock, increment `MediaRequest.Revision`, return `MEDIA_REQUEST_CONFLICT` on a stale revision, and expose the new revision as a quoted `ETag`. DTO construction must clone `MediaInfo` before adding compatibility fields so a read cannot mutate the resident state document.
-- Same-title group updates use `PUT /admin/media-requests/batch/by-key` with 1-100 unique `{require_key, revision}` items. Validate every key and revision before mutating any member, persist the batch once, and fail the whole operation on invalid, missing, duplicate, or stale members. WebUI splitting is a presentation-only escape hatch for single-member actions; do not destroy source-specific records when grouping.
+- Same-title group updates use the V2 `PUT /api/v2/admin/media-requests/batch` resource (V1 `/api/v1/admin/media-requests/batch/by-key` and the V2 `/batch/by-key` alias remain compatible) with 1-100 unique `{require_key, revision}` items. Validate every key and revision before mutating any member, persist the batch once, and fail the whole operation on invalid, missing, duplicate, or stale members. WebUI splitting is a presentation-only escape hatch for single-member actions; do not destroy source-specific records when grouping.
 - Admin media-request list DTOs must hydrate users from the same Store read snapshot; do not call `Store.User` once per row. Poster URLs in the WebUI must pass `sanitizeImageUrl`, and source badges must not trigger remote Logo/favicon requests for every row.
 - All-source media search runs TMDB and Bangumi independently and interleaves their results within the requested limit; do not restore sequential source calls or append-then-truncate behavior that can hide the second source. The WebUI detail dialog must display the selected search result and its sanitized poster immediately, load detail and inventory concurrently, preserve richer existing fields when one response is sparse, and prevent aborted/stale responses from replacing the current selection.
 - The `/media/search/tmdb` and `/media/search/bangumi` aliases must remain source-specific even when a conflicting `source` query is supplied; use `/media/search?source=all` for aggregation. Keep search limits clamped before calling the service so invalid values cannot create oversized allocations.
 - TMDB and Bangumi detail adapters must preserve fractional ratings and map available source metadata into bounded fields: aliases, rank, vote count, platform/broadcast, official/trailer URLs, creators, studios, cast, countries and languages. Do not expose unbounded `infobox`, credits or video payloads directly to the WebUI; keep compatibility extras under `extra`.
 - TMDB Logo selection is restricted to `zh`, then `ja`, then `en`; request only those image languages and never fall back to another language. Return at most one bounded `logo_url` with its `logo_language`, and sanitize it before WebUI rendering.
 - The user media-request frontend is split into `page.tsx` (request orchestration), `media-model.ts` (normalization/bounded caches), `media-search-view.tsx`, `media-detail-dialog.tsx`, `media-poster.tsx`, and `my-media-requests.tsx`. Keep display-heavy sections out of the orchestrator, abort stale search/detail/list requests, and use sequence guards so an old response cannot replace a newer selection.
+- V2 media results and detail posters must use sanitized HTTP(S) URLs, preserve the source image's intrinsic ratio, and render with `height: auto`/`object-contain`; never add black fixed-ratio stages, `object-cover`, or client-side viewport/image measurement. The selected detail may reuse the search result as a sparse-data fallback without clearing its poster.
+- The `tab=requests` view is the only path that reads the user's own media requests; search/detail loads must not fetch the request history. After a successful mutation the displayed state comes from the backend response or a no-store reload, not from an optimistic browser-side copy.
 - Media posters must render from their sanitized source URL at the browser's intrinsic aspect ratio (`display: block; width: 100%; height: auto`). Do not use `fill`, `object-cover`, JavaScript viewport/image-size calculations, fixed aspect-ratio wrappers around a real poster, or black image stages. `media-poster.tsx` must preserve a bounded poster-shaped fallback when a remote image is missing or fails, so a broken URL cannot collapse a card or detail column. On desktop the dialog uses a responsive `1140px` maximum, the poster's actual rendered width owns the left grid track, the poster establishes the grid row height, the right column scrolls within that same height, and the action footer occupies its own row without covering details. Narrow screens flow the full-width poster, details, and actions as one document column. TMDB Logo artwork remains transparent, unframed, and ratio-preserving above the localized/original title fallback.
 - `GET /media/request/my` is user-triggered when opening or refreshing the My Requests tab. Keep it out of the shared short read cache and in-flight dedupe, retain existing rows on a refresh failure, and update the list locally after a successful delete.
 
@@ -418,7 +465,7 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 
 - Covers are cached under `uploads/bangumi/{BGMID}.{ext}`.
 - BGMID must pass positive numeric validation before it is used in a filename.
-- Public cover URL: `GET /api/v1/bangumi/cover/:subject_id`.
+- Public cover URL for V2 pages: `GET /api/v2/bangumi/covers/:subject_id`; V1 remains as a compatibility URL.
 - Handler serves the local file first and may redirect to a safe Bangumi CDN URL as fallback.
 - Safe image URLs must use HTTPS and a Bangumi/BGM host suffix.
 - Downloads must validate response size, content type, detected MIME, extension, path root, and symlink safety.
@@ -467,10 +514,29 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 
 ## Dashboard Online Viewer Rules
 
-- The dashboard may show only the current Emby online viewer count from `/system/emby-viewers`; this route is `AuthUser` and must never become anonymous again.
-- Do not display who is watching, item names, covers, progress, or other now-playing details on the dashboard.
-- `/api/v1/emby/online` returns viewer count only (`current_online`); it must never emit a populated `users` array of who/what is playing. The count-only contract is enforced in `handleEmbyOnline`, not just in the UI.
-- `/api/v1/emby/now-playing` may exist for authenticated tooling, but the dashboard must not poll it or render its item/user details.
+- The dashboard shows only the current Emby online viewer count, for **every** role including administrators; the count comes from `/system/emby-viewers`, which is `AuthUser` and must never become anonymous again.
+- No role sees "who is watching what": no watcher identity, item name, cover, or playback progress is rendered anywhere in the WebUI. `/api/v2/admin/emby/now-playing` stays `AuthAdmin` for operator tooling, but the WebUI no longer calls it (the `getAdminEmbyNowPlaying` / `getEmbyNowPlaying` helpers and `EmbyNowPlaying` types were removed on purpose — do not re-add them to the dashboard).
+- There is no ordinary-user now-playing route. V2 must never register `/api/v2/emby/now-playing`: `AuthPublic` means fully anonymous in `authenticate()`, so registering it there exposed watcher identity to unauthenticated callers.
+- `/api/v1/emby/online` and `/api/v2/emby/online` return viewer count only (`current_online`); they must never emit a populated `users` array of who/what is playing. The count-only contract is enforced in `online()`, not just in the UI. `/api/v2/emby/{stats,viewer-count,online}` are `AuthUser`, matching V1.
+- Do not restore the former `/api/v1/emby/now-playing` ordinary-user route. The protected replacement is `/api/v1/admin/emby/now-playing`; ordinary users must never receive watcher identity, media title, cover, or playback progress through any route.
+
+## Config Schema / TOML Round-Trip Rules
+
+- Saving config is a **merge, never a rewrite from schema alone**: `mergeConfigTOML(source, values)` starts from the existing file (or the admin-submitted raw TOML) and only overwrites fields that `configSectionDefs()` manages. Unmanaged sections, unmanaged fields inside managed sections, and top-level scalars survive a save.
+- Consequence to remember: adding a field to `config.Config` without adding it to `configSectionDefs()` **and** `configValues()` means it can never be edited from the admin page. Today's managed set must stay in sync in both places (`internal/api` tests assert the pairing).
+- `renderConfigTOML` keeps its original signature; `renderConfigTOMLWithExtras` is the variant that appends the preserved extras. Do not call the encoder to dump the whole tree — go-toml writes tables in map order and a top-level scalar placed after a table header silently becomes a field of that table.
+- `Ticket.types` is a normal editable list. Hiding it from the schema response once caused every save to reset it to `["all"]` and destroy custom ticket types.
+- `TestConfigSchemaSurfacesEveryConfigField` reflects over `config.Config`, round-trips every field through `configValues` → `renderConfigTOML` → `config.Load`, and fails on any field that silently drops. A new `config.Config` field therefore **fails CI** until it is either wired into the schema or listed in `schemaUncoveredConfigFields` with a written reason. Never add to that map without a reason (`TestConfigSchemaNoUncoveredFieldWithoutReason` enforces it). `schemaRoundTripNormalizedFields` is the separate list for fields that *are* editable but whose value `config.Load` normalizes (e.g. `LogLevel`).
+- The schema GET response carries `present_in_file` per field: `false` means the key is absent from `config.toml` and the displayed value is the built-in default. The admin page badges those fields; saving writes them into the file for real. Do not infer "written to disk" from the presence of a value in `configValues()`.
+
+## Playback Ranking (日榜/周榜) Rules
+
+- Data source: `twilight_playback_records`, written by the Emby activity-log sync (`persistEmbyPlaybackRecordsFromActivity`). Rankings are aggregates only — they answer "which title is hottest / who watched the most", never "who is watching what right now".
+- Aggregation lives in `store.PlaybackRank(since, limit)`: two `GROUP BY` queries (media by `item_id`, users by `uid`) with a `played_at >= $1` filter, falling back to an in-memory scan of `state.PlaybackRecords` when PostgreSQL is unavailable. `duration` is **seconds**.
+- Windows are computed server-side in `playRankWindow`: `day` = today 00:00, `week` = Monday 00:00, both in server local time. Do not move window math into the frontend.
+- Gating is two independent config flags (`Emby.play_rank_enabled`, `play_rank_user_visible`, surfaced in the admin config Emby section). `/api/v2/emby/play-rank` is `AuthUser`: **no anonymous access exists at all** — unauthenticated callers are rejected by the auth layer, and logged-in non-admins additionally need `play_rank_user_visible`. `/api/v2/admin/emby/play-rank` is `AuthAdmin` and always available. Do not reintroduce a `play_rank_anonymous` flag or an `AuthPublic` ranking route.
+- Privacy: the public ranking masks usernames (`maskPlayRankUsername`) and never returns `uid`; the admin ranking returns `uid` + raw `username`. Cache keys include the identity flag so the two payloads can never be served to the wrong audience.
+- Cache: 60s per `range|limit|identity`, `refresh=1` bypasses it, and `invalidatePlayRankCache` runs after activity-log sync persists new records.
 
 ## Network Transport Rules
 
@@ -479,8 +545,7 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - `sameHostRedirectPolicy` rejects cross-host redirects (max 5 hops same-host) to prevent token leakage via 302 to attacker-controlled hosts.
 - Hot-reloading a changed Emby URL or token must invalidate every server-scoped cache, including sessions, device/IP audit data, and Emby administrator decisions, before those results can be reused.
 - Telegram's protocol wrapper must keep HTTP 429 `parameters.retry_after` semantics, classify refused 3xx responses before decoding their bodies, and apply the shared redirect policy and connection pool without introducing a separate `http.Client`.
-- The root layout includes `<link rel="dns-prefetch">` and `<link rel="preconnect">` tags for configured API origin, TMDB image CDN, and Bangumi API to warm connections early.
-- Next owns `Cache-Control` for `/_next/static` hashed build assets. Do not override that path from `webui/next.config.mjs`; keep explicit cache headers limited to app-owned public assets such as `favicon.png`.
+- The root layout must not add speculative cross-origin preconnects for private or optional upstreams. Add connection hints only for an actually configured, browser-visible origin and document the request-cost tradeoff.
 
 ## Rate Limit Rules
 
@@ -514,8 +579,7 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 ## Wiki And API Docs Rules
 
 - `/wiki` is a public user-facing guide page. Keep it Chinese, practical, and free of secrets.
-- `/api/v1/docs` is a public API console embedded by the backend. It may try admin route inventory first, but must gracefully fall back to public OpenAPI when unauthorized. Dynamic route data must be rendered with DOM text nodes or explicit escaping, and API Key testing must use the real `X-API-Key` header.
-- `/api/v1/openapi.json` must remain public-route-only.
+- `/api/v2/openapi.json` and its V1 compatibility counterpart must remain public-route-only; the protected full inventory must never be merged into the public specification.
 - `/api/v1/system/admin/apis` is the full inventory and must stay admin-protected.
 - Do not expose real config secrets, tokens, API keys, database URLs, or private route maps to unauthenticated users.
 
@@ -535,15 +599,49 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - Commercial forks are allowed, but covered modifications and network deployments must remain GNU AGPL and provide corresponding source code. Do not describe closed-source redistribution as permitted.
 - `LICENSES/MIT-legacy.txt` records the irrevocable license of versions published before the 2026-08-25 relicensing. It is historical compliance material and must not be presented as a dual license for the current version.
 
-## Validation
+## V2 Refactor Rules
+
+The product frontend is `webui/` and it calls `/api/v2/*` by default. `/api/v1/*` remains only as an explicit `NEXT_PUBLIC_USE_V1_COMPAT=true` fallback and for external API-key integrations. There is no second frontend runtime in this repository.
+
+- V2 work follows the order in `docs/plan-v2-completion-and-optimization.md`: route parity, transport wiring, Telegram hardening, performance, modularisation, responsive layout, then V1 convergence.
+- New native interfaces use `/api/v2`. V1 compatibility adapters may delegate to one V2 application service, but the same state transition must not be implemented twice.
+- The V1 user-visible feature matrix is mandatory. A feature is not considered migrated until its backend authorization, state transition, audit behavior, API client, responsive UI, i18n text, tests, and documentation are mapped.
+- V1 TOML, local TOML, `.env`/`TWILIGHT_*` overrides, and PostgreSQL data must remain importable. Unknown or incompatible settings must produce an explicit migration diagnostic; never silently reset them to defaults.
+- V2 repositories and application services must define transaction, idempotency, revision, cache invalidation, and external-side-effect boundaries before a route is added. HTTP handlers remain adapters and must not become a second domain layer.
+- PostgreSQL is the only runtime database. A V2 table migration must include a schema version, idempotent startup behavior, legacy backfill checks, count/hash verification, rollback or recovery behavior, and an update to the data-model documentation.
+- Caches are disposable accelerators. Every cache requires an owner, scope, bounded size, TTL, invalidation event, and explicit stale/error behavior. Session-scoped identity data must never be shared across users.
+- V2 import/export packages must validate format and version, authenticate integrity, reject Zip Slip/symlinks/ZIP bombs/resource exhaustion, detect conflicts, use temporary paths, and roll back database and resource changes on failure. Password mode uses a random salt, Argon2id, and AES-256-GCM; no home-grown encryption.
+- Viewing statistics must be event/segment based and idempotent. Activity logs remain retained independently. Do not add direct client-controlled duration accounting or an unbounded active-playback accumulator.
+- Firefox is the WebUI baseline on phone, tablet, desktop, and narrow devtools viewports. New V2 screens must use bounded `dvh` scroll regions, stable grid tracks, mobile-safe toolbars, abortable reads, and lazy rendering for large lists. Do not modify CORS behavior while improving transport or layout.
+- Each independently reviewable module gets its own Chinese commit. Before committing, run focused tests and scan the diff for unrelated changes, debug output, local absolute paths, secrets, tokens, passwords, cookies, and undocumented behavior changes.
+- The `/settings/appearance` page must reuse the session-scoped avatar/background fields from the identity response, sanitize legacy background values before rendering CSS, and keep background/avatar upload and deletion as separate operations. Do not expose uploaded filesystem paths; Go remains the final MIME, path, rate-limit, authorization, and persistence boundary.
+- The appearance page reads one private `GET /api/v2/settings/appearance` projection and writes only through `/api/v2/settings/appearance/background*` and `/api/v2/settings/appearance/avatar*`. Keep the legacy `/api/v1/users/assets/{kind}/{filename}` resource URL for protected image delivery until a separately reviewed asset-resource migration exists; do not add a second asset authorization implementation.
+- The `/settings/apikey` page must read only the current user's masked API Key summaries from `/api/v2/settings/apikeys`; creation, update, and deletion go through the same resource family. A plaintext Key may appear only in the current creation response and must never be put in a URL, browser cache, persistent page state, or logs. Name, rate-limit, identifier, and boolean checks in the client are UX guards only; Go remains the final ownership, permission, audit, and persistence boundary.
+- The `/admin/developer` page must read the developer-mode-sensitive preset list and sandbox documentation with no-store reads. Client-side checks only bound input resources and must not replace the Go sandbox validator, timeout, output cap, developer-mode gate, or audit. Script output, log output, documentation, and preset text are untrusted display data and must remain text-rendered inside bounded Firefox scroll regions.
+- The administrator user page uses the native `/api/v2/admin/users` collection with `items`/`pagination`; it must render only the current page, keep account/Emby/identity/dangerous actions grouped, and never call `/api/v1/admin/users`. The `admin_action_state` field is display guidance only; Go handlers remain the final authorization boundary.
+- Authentication pages must revalidate availability, password, registration-code use, and confirmed Telegram state through the Go API on every submission; registration and Telegram bind-code consumption are Go-side state transitions whose outcome the client must not cache or infer. Do not expose tokens or passwords in page data, URLs, or browser storage. Public capability flags must describe only booleans and must not embed configuration secrets or upstream diagnostics. Registration bind-code creation uses POST plus the existing WebUI intent headers so the resource does not add a side-effecting GET. Registration validation and state transitions must go through the shared `registrationService` application boundary; V1 is only a transport adapter.
+- The user ticket page is the reference for high-frequency conversations: lists use summary pagination, the selected ticket is loaded by identifier, and replies/status/notification changes go through the ticket resources. Do not reintroduce full-ticket list payloads or client-only ownership checks.
+- The admin registration-code page must use `/api/v2/admin/regcodes` with `items`/`pagination`, `/api/v2/admin/regcodes/:code` with `item`, and `/usage` for on-demand usage details. `PATCH`, batch deletion, and usage clearing must retain the V1 validation, storage-mismatch guard, confirmation phrases, atomic Store mutation, reference cleanup, and audit behavior; do not add a browser cache or second registration-code source of truth.
+- The admin configuration page reads schema, masked TOML, and backup metadata with `Promise.allSettled`. Secret values must remain masked, backup names must be constrained to safe leaf TOML files, and schema editing and raw TOML editing must stay separate modes so unsaved content is never silently exchanged between them.
+- The admin database page reads status and backup metadata with `Promise.allSettled`. Do not send snapshot JSON, database credentials, or unrestricted filesystem paths to the browser. Keep `RESTORE_DATABASE_BACKUP` and `MIGRATE_DATABASE` confirmations, and leave path validation, snapshot validation, protective backups, PostgreSQL checks, and feature gates in the Go handler.
+- The `/admin/migration` page uses `/api/v2/admin/migration/*` for capability/status reads and archive preview/import. Export passwords must be sent only in a POST body; the download response is `no-store` and must not be converted to a GET/query-string flow. The complete archive and password must never be retained in browser state. Import confirmation must require a fresh multipart upload plus `IMPORT_TWILIGHT_DATA`; preview summaries may expose only bounded metadata and conflict paths. The Go migration handlers remain the final feature-gate, archive-validation, password, filesystem-safety, transaction, and rollback boundary.
+- The admin Emby page is manual-refresh only and uses `/api/v2/admin/emby/*`: account reads use bounded server pagination/filtering, and device/IP audit and ActivityLog reads are separate tab loads. ActivityLog synchronization uses `POST /api/v2/admin/emby/activity-logs/sync`; do not use a state-changing GET. Keep Twilight self-devices excluded, offline device aggregation stable, Emby connectivity probes backend-originated, and diagnostics generic in response envelopes. Broadcast, standalone-account creation, forced password reset, and binding maintenance remain admin-only and audited; generated passwords may appear only in the current response, never in URLs or persistent browser state.
+- The user announcement view uses the private no-store `/api/v2/announcements` resource for visible and force-read announcements; acknowledgements use `/api/v2/announcements/ack` and must be deduplicated. Both must reuse the shared announcement handlers so visibility, ownership and persistence cannot diverge from V1 compatibility; announcement content remains escaped text unless a reviewed safe renderer is explicitly introduced.
+- The score page uses one private no-store `/api/v2/signin/summary` read for signin rules, balance, renewal state, and bounded history. Signin, manual renewal, and the auto-renewal preference use `/api/v2/signin`, `/api/v2/signin/renew`, and `/api/v2/signin/preferences`; the handlers must remain thin adapters over the shared Go rules. Manual renewal and automatic-renewal eligibility are separate concepts; both are finally enforced by the existing Go handler and Store transaction.
+- The Bangumi pages use private no-store `/api/v2/bangumi/*`. The summary read returns local sync state, public Bangumi account fields, five bounded collection previews, and recent activity; the handler may read the five upstream collection types concurrently but must return independent partial results and never serialize a user Token. Collection pages use server pagination. State updates, collection edits, sync, history clearing, token replacement, and mode toggles keep the existing Go feature gates. Do not move Bangumi tokens into browser state or let one failed collection request discard successful categories.
+- Authenticated client reads must send the session cookie as a same-origin credential and use `no-store` for identity data; they must return summaries rather than full histories or attachments. `/api/v1/*` must stay reachable only through the explicit compatibility switch (`NEXT_PUBLIC_USE_V1_COMPAT=true`) or the API-key surface.
+- The Next.js rewrite proxy (`webui/next.config.mjs`) may forward only `/api/*` and must preserve the upstream status; it must never become a second authorization layer. It must reject raw or percent-encoded `.` / `..` path segments, backslashes, malformed path encoding, and fragments before constructing the backend URL, and normalization must never move a forwarded request outside `/api/`.
+
+## V2 Validation Evidence
+
+Broad V2 milestones must provide more than a successful compile: include migration/compatibility tests, negative authorization tests, concurrency/idempotency tests, bounded-resource tests, and Firefox mobile/tablet/desktop interaction evidence where UI is involved. Performance claims must include measured request count, payload size, DOM/render scope, CPU, memory, and database query evidence for both ordinary and 2000+ user scenarios.
 
 Run checks proportional to the change. For broad backend/frontend work, run:
 
 - `go build ./...`
 - `go vet ./...`
 - `go test ./...`
-- `cd webui && pnpm lint`
-- `cd webui && pnpm build`
+- `cd webui && pnpm lint` and `cd webui && pnpm build` only when the emergency rollback frontend is changed or explicitly being validated.
 
 Use `gofmt` for Go changes and the repo lint/build tools for frontend changes.
 
@@ -560,10 +658,12 @@ Because every package shares one test database and resets it per test, run the D
 
 DB-backed tests that open a `Store` must register `t.Cleanup(func() { _ = st.Close() })` (or close it explicitly). The PostgreSQL pool keeps idle connections alive; a long package run that leaks one pool per test eventually fails with `SQLSTATE 53300` even when the product code is healthy.
 
+If the local PostgreSQL does **not** have a `twilight` role / `twilight` database, also set `TWILIGHT_DATABASE_URL` to a reachable DSN. Without it, the ~11 api tests that save `config.toml` and hot-reload it (`TestAdminServerIconUploadUpdatesConfig`, `TestConfigTOMLGetMasksSecretsAndPUTPreserves`, `TestTicketTypeAddPersistsToConfigFile`, setup flow tests, …) fail with `CONFIG_SAVE_FAILED` / `PostgreSQL login rejected for user "twilight"` — the reloaded config falls back to the built-in `twilight@127.0.0.1/twilight` defaults and tries to open a real pool. That is an environment gap, not a regression: those same tests pass once the URL points at a live database.
+
 Example (PowerShell):
 
 ```powershell
-$env:TWILIGHT_TEST_DSN = "postgres://twilight:secret@127.0.0.1:5432/twilight_test?sslmode=disable"
+$env:TWILIGHT_TEST_DSN = "postgres://<user>:<password>@<host>:<port>/<database>?sslmode=disable"
 go test -p 1 ./...
 ```
 

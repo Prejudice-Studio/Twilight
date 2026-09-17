@@ -1,6 +1,8 @@
 # API Key 外部接入
 
-本文面向外部系统集成，说明 `/api/v1/apikey/*` 前缀下的 API Key 认证接口：认证方式、通用响应、权限模型、关键接口、错误码以及调用示例与安全建议。配置项与整体架构见 [Go 后端架构与配置](../reference/backend.md)，完整路由清单见 [API 路由索引](../reference/api-index.md)，逐接口字段见 [后端 API 详参](../reference/backend-api.md)。
+本文面向外部系统集成，说明 `/apikey/*` 前缀下的 API Key 认证接口：认证方式、通用响应、权限模型、关键接口、错误码以及调用示例与安全建议。配置项与整体架构见 [Go 后端架构与配置](../reference/backend.md)，完整路由清单见 [API 路由索引](../reference/api-index.md)，逐接口字段见 [后端 API 详参](../reference/backend-api.md)。
+
+> **API 版本**：`/api/v2/apikey/*` 与 `/api/v1/apikey/*` 均已注册且行为一致（路由分别在 `internal/api/routes_v2.go` 与 `routes.go`）。**新集成请用 v2**，v1 保留给既有外部系统。
 
 > 与浏览器端的 Cookie / Bearer 会话不同，`/apikey/*` 接口专为「机器对机器」的长期凭证设计：使用 `X-API-Key`（或 `Authorization`）携带密钥，不依赖浏览器会话 Cookie。
 
@@ -8,9 +10,9 @@
 
 | 项目 | 说明 |
 | ---- | ---- |
-| Base URL | `https://your-domain.com/api/v1/apikey` |
+| Base URL | `https://your-domain.com/api/v2/apikey`（V1 兼容：`/api/v1/apikey`） |
 | 认证方式 | `X-API-Key` 头，或 `Authorization: ApiKey/Bearer <key>`，或 `?apikey=<key>`（需开启 `allow_query`） |
-| 鉴权级别 | 全部路由为 `AuthAPIKey`（见 `internal/api/routes.go` 的 `registerAPIKeyRoutes`） |
+| 鉴权级别 | 全部路由为 `AuthAPIKey`（见 `routes.go` 的 `registerAPIKeyRoutes` 与 `routes_v2.go` 的对应注册） |
 | 响应格式 | 统一 envelope：`success` / `code` / `error_code` / `message` / `data` / `timestamp` |
 | 密钥格式 | `key-` 前缀加 40 位随机串，例如 `key-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` |
 | 默认限速 | 每把 Key 每分钟默认 300 次（`RateLimit.api_key_default_per_minute`），可逐 Key 覆盖 |
@@ -124,23 +126,23 @@ API Key 记录上带有一个 `permissions` 字段（字符串数组），可取
 
 ## 5. 关键接口
 
-下表为 `registerAPIKeyRoutes` 中登记的全部路由（均为 `AuthAPIKey`）：
+下表为 API Key 路由（均为 `AuthAPIKey`）。**V2 与 V1 均已注册**，新集成请用 v2：
 
-| 方法 | 路径 | 所需权限 | 说明 |
-| ---- | ---- | ---- | ---- |
-| GET | `/api/v1/apikey/info` | `account:read` | 账号信息 + 当前 Key 权限 |
-| GET | `/api/v1/apikey/status` | `account:read` | 账号激活状态与到期时间 |
-| POST | `/api/v1/apikey/enable` | `account:write` | 启用当前账号 |
-| POST | `/api/v1/apikey/disable` | `account:write` | 禁用当前账号（并失效全部会话） |
-| POST | `/api/v1/apikey/renew` | `account:write` | 用续期码为当前账号续期 |
-| POST | `/api/v1/apikey/key/refresh` | `account:write` | 刷新（轮换）单键 Key，旧值立即失效 |
-| GET | `/api/v1/apikey/permissions` | 仅认证 | 查看当前 Key 权限与完整权限列表 |
-| PUT | `/api/v1/apikey/permissions` | 固定拒绝 | 不能用 Key 修改自身权限（见 4.1） |
-| POST | `/api/v1/apikey/key/disable` | 仅认证 | 禁用当前 Key |
-| POST | `/api/v1/apikey/key/enable` | 仅认证 | 启用当前 Key |
-| GET | `/api/v1/apikey/emby/status` | `emby:read` | 查看 Emby 服务状态 |
-| POST | `/api/v1/apikey/emby/kick` | `emby:write` | 踢出当前账号的 Emby 会话 |
-| POST | `/api/v1/apikey/use-code` | `account:write` | 使用注册码 / 邀请码 / 续期码 |
+| 方法 | V2 路径 | V1 路径 | 所需权限 | 说明 |
+| ---- | ---- | ---- | ---- | ---- |
+| GET | `/api/v2/apikey/info` | `/api/v1/apikey/info` | `account:read` | 账号信息 + 当前 Key 权限 |
+| GET | `/api/v2/apikey/status` | `/api/v1/apikey/status` | `account:read` | 账号激活状态与到期时间 |
+| POST | `/api/v2/apikey/enable` | `/api/v1/apikey/enable` | `account:write` | 启用当前账号 |
+| POST | `/api/v2/apikey/disable` | `/api/v1/apikey/disable` | `account:write` | 禁用当前账号（并失效全部会话） |
+| POST | `/api/v2/apikey/renew` | `/api/v1/apikey/renew` | `account:write` | 用续期码为当前账号续期 |
+| POST | `/api/v2/apikey/key/refresh` | `/api/v1/apikey/key/refresh` | `account:write` | 刷新（轮换）单键 Key，旧值立即失效 |
+| GET | `/api/v2/apikey/permissions` | `/api/v1/apikey/permissions` | 仅认证 | 查看当前 Key 权限与完整权限列表 |
+| PUT | `/api/v2/apikey/permissions` | `/api/v1/apikey/permissions` | 固定拒绝 | 不能用 Key 修改自身权限（见 4.1） |
+| POST | `/api/v2/apikey/key/disable` | `/api/v1/apikey/key/disable` | 仅认证 | 禁用**当前这把 Key**（无需传 ID，也无需额外权限） |
+| POST | `/api/v2/apikey/key/enable` | `/api/v1/apikey/key/enable` | 仅认证 | 启用当前 Key |
+| GET | `/api/v2/apikey/emby/status` | `/api/v1/apikey/emby/status` | `emby:read` | 查看 Emby 服务状态 |
+| POST | `/api/v2/apikey/emby/kick` | `/api/v1/apikey/emby/kick` | `emby:write` | 踢出当前账号的 Emby 会话 |
+| POST | `/api/v2/apikey/use-code` | `/api/v1/apikey/use-code` | `account:write` | 使用注册码 / 邀请码 / 续期码 |
 
 ### 5.1 账号信息与状态
 

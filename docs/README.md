@@ -23,8 +23,8 @@
 
 | 文档 | 用途 |
 | ---- | ---- |
-| [Go 后端架构与配置](./reference/backend.md) | 目录结构、配置加载、环境变量、Redis、状态存储、迁移、运行日志 |
-| [API 路由索引](./reference/api-index.md) | `/api/v1` 完整路由清单、鉴权级别、模块归属（依据 `routes.go`） |
+| [Go 后端架构与配置](./reference/backend.md) | 目录结构、配置加载与保存语义、环境变量、Redis、状态存储、迁移、运行日志 |
+| [API 路由索引](./reference/api-index.md) | `/api/v1` 与 `/api/v2` 完整路由清单、鉴权级别、模块归属（依据 `routes.go` 与 `routes_v2.go`） |
 | [后端 API 详参](./reference/backend-api.md) | REST 接口规范、认证、错误码、请求/响应示例 |
 | [API Key 外部接入](./reference/api-key.md) | 第三方系统集成、权限矩阵、调用示例 |
 | [开发者 JS 沙箱参考](./reference/developer-js.md) | Telegram Bot 自定义 JS 的运行模型、内置对象、函数、权限边界与示例 |
@@ -45,13 +45,17 @@
 | [Bangumi 同步](./features/bangumi.md) | Emby Webhook、Bangumi Token、用户个人同步规则 |
 | [背景与头像](./features/background.md) | 受控上传资源读取、背景 CSS 安全约束 |
 | [Telegram Bot 命令](./features/telegram-bot.md) | Bot 命令、权限边界、群聊安全约束与文案配置 |
+| [Emby 管理](./features/emby-admin.md) | 账号/设备/IP 审查、活动日志、线路下发与探测、播放数据可见性边界 |
+| [播放排行榜](./features/playback-rank.md) | 日榜/周榜的数据源、窗口、缓存、开关与脱敏口径 |
 
 ## 其他
 
-- Swagger 交互式文档：服务启动后访问 `/api/v1/docs`
+- API 文档：服务启动后访问 `/api/v2/docs`（`/api/v1/docs` 仅作兼容入口）
 
 ## 说明
 
 - 若文档与代码行为冲突，以 `internal/api/`、`internal/store/`、`internal/config/` 与实际接口返回为准。
 - 全部文档已对照 Go 后端源码核对；旧 Python 时代的描述（独立 SQLite 库、`X-Twilight-Client` 写请求校验等）已订正。
+- **API 版本**：前端默认调用 `/api/v2/*`，`/api/v1/*` 仅作外部集成与 `NEXT_PUBLIC_USE_V1_COMPAT=true` 回退面。文档中出现接口路径时，默认给 v2、括注 v1 同义路径。
+- **两条 CI 门禁保证文档不漂移**：`scripts/check_docs_drift.go` 校验 `routes.go` + `routes_v2.go` 的每个端点都在 `docs/*.md` 出现过；`scripts/check-frontend-v2-coverage.py` 校验前端调用点都能命中已注册的 v2 路由。新增接口请同步更新 [API 路由索引](./reference/api-index.md)。
 - 关键架构约定（主要业务状态单文档模型、唯一运行后端 PostgreSQL，以及 `twilight_audit_logs`/`twilight_sessions`/`twilight_runtime_logs`/`twilight_playback_records`/`twilight_telegram_roster`/`twilight_telegram_runtime` 独立表、配置热重载、CORS 与鉴权边界等）见 [开发指南](./guides/development.md) 与 [安全加固](./guides/security.md)。

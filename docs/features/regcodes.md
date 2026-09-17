@@ -56,6 +56,9 @@
 
 管理员列表接口 `GET /admin/regcodes` 支持 `?source=admin|invite` 筛选参数。后端 `handleListRegcodes` 中，`sourceFilter=admin` 会匹配显式 `"admin"` 和历史空值；`sourceFilter=invite` 仅匹配 `"invite"`。
 
+WebUI 管理页使用 `/api/v2/admin/regcodes` 资源集合：列表统一返回 `items` 和 `pagination`，详情使用 `/api/v2/admin/regcodes/{code}`，使用者明细使用 `/usage`。V2 的 `POST`、`PATCH`、`DELETE` 及批量/清理资源复用同一注册码 Store 与审计状态机，不建立第二份缓存或注册码事实源；V1 路径仅保留给外部兼容调用与 `NEXT_PUBLIC_USE_V1_COMPAT` 回退。
+
+
 ### 取值校验与规范化
 
 创建接口 `handleCreateRegcodes`（`internal/api/regcode_handlers.go`）的校验口径：
@@ -154,23 +157,29 @@
 
 同一处理逻辑也挂在 `POST /api/v1/apikey/use-code`（鉴权：AuthAPIKey），供外部系统接入，见 [API Key 外部接入](../reference/api-key.md)。
 
-### 公开校验 `GET /api/v1/users/regcode/check`（鉴权：AuthPublic）
+### 公开校验 `GET /api/v2/registration/regcode/check`（鉴权：AuthPublic）
+
+V1 同义路径为 `/api/v1/users/regcode/check`。
 
 `handleRegcodeCheck` 仅用于注册前的卡码预览，输入 `reg_code`，返回 `type`、`type_name`、`days`、`valid`：
 
 - **按 IP 限流**：每分钟最多 10 次，超限返回 `RATE_LIMITED`，防止枚举。
 - **不泄露使用者信息**：返回里没有 `used_by` / Telegram 等字段。
-- 诱饵码（`is_decoy`）与指名码（任一 `target_*` 非空）一律按「不存在」处理，返回 `REGCODE_NOT_FOUND`，避免在公开接口暴露其存在。
+- 诱饵码（`is_decoy`）与指名码（`target_username` / `target_telegram_username` / `target_telegram_id` / `target_uid` 任一非空）一律按「不存在」处理，返回 `REGCODE_NOT_FOUND`，避免在公开接口暴露其存在。
 
-### 旧续期入口 `POST /api/v1/users/me/renew`（鉴权：AuthUser）
+### 旧续期入口 `POST /api/v2/me/renew`（鉴权：AuthUser）
+
+V1 同义路径为 `/api/v1/users/me/renew`。
 
 `handleRenew`（`internal/api/handlers.go`）保留为兼容入口：必须提供 `reg_code`，且预览结果必须是 `source=regcode` 且 `type==2`（续期码），否则报错。当前用户必须已绑定 Emby；续期经 `ConsumeRegCodeAndUpdateUser` 在同一把锁内复核绑定、完成卡码消费与用户续期，并用 `renewExpiryAndReactivate` 顺带解禁因到期被停用的非邀请账号。
 
-### 公开注册 `POST /api/v1/users/register`（鉴权：AuthPublic）
+### 公开注册 `POST /api/v2/registration`（鉴权：AuthPublic）
 
-当 `[SAR].register_code_limit` 开启且非空库首次注册（`bootstrapMode`，即用户数已不为 0）时，注册必须带有效的 type=1 注册码：
+V1 同义路径为 `/api/v1/users/register`。
 
-> 注意：`bootstrapMode`（空库首注册）仅用于豁免注册码要求，**不再**赋予管理员身份。管理员身份只来自配置文件的 `Admin.uids` / `Admin.usernames`（见 [后端架构 · 管理员引导](../reference/backend.md#首个管理员引导)）。
+当 `[SAR].register_code_limit` 开启、且**不是**空库首注册时，注册必须带有效的 type=1 注册码。源码里 `bootstrapMode := currentUsers == 0`——**用户数为 0（空库）时才进入 bootstrapMode 并豁免注册码要求**，已有用户之后注册一律要码：
+
+> 注意：`bootstrapMode`（空库首注册，即 `currentUsers == 0`）仅用于豁免注册码要求，**不再**赋予管理员身份。管理员身份只来自配置文件的 `Admin.uids` / `Admin.usernames`（见 [后端架构 · 管理员引导](../reference/backend.md#管理员引导)）。
 
 - 注册整体按 IP 限流（`rate_limit_register_per_10m`）；带注册码时再叠加一道 `register:regcode:<ip>` 限流，每分钟 10 次。
 - 注册码校验同样排除诱饵码、`type!=1`、指名目标不匹配与不可用状态。若注册卡码指定了 TG 用户名或 TG ID，注册请求必须携带已确认的 `telegram_bind_code`，后端用绑定码中的 Telegram 身份做匹配。

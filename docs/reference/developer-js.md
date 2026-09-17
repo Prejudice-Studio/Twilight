@@ -1,6 +1,6 @@
 # 开发者 JS 沙箱参考
 
-本文档说明 Twilight 开发者模式中的 Telegram Bot 自定义 JS 指令。后台独立文档页为 `/admin/developer/js-docs`，由 `GET /api/v1/admin/developer/js-docs` 提供结构化数据，管理员登录后可查看完整函数参数表、返回值和示例。
+本文档说明 Twilight 开发者模式中的 Telegram Bot 自定义 JS 指令。后台独立文档页为 `/admin/developer/js-docs`，由 `GET /api/v2/admin/developer/js-docs`（V1 兼容：`/api/v1/admin/developer/js-docs`）提供结构化数据，管理员登录后可查看完整函数参数表、返回值和示例。
 
 ## 启用与入口
 

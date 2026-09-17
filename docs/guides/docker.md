@@ -53,10 +53,7 @@ cp deploy/docker/config.docker.toml config.toml
 # 编辑 config.toml，至少填写 Emby URL 和 Token
 vim config.toml
 
-# 前端环境变量
-cp webui/.env.example webui/.env
-# 编辑 webui/.env，设置站点名称和 API 地址
-vim webui/.env
+# 前端环境变量（可选，见下方 deploy/docker/.env.example）
 ```
 
 ### 3. 设置环境变量（可选）
@@ -101,7 +98,7 @@ docker compose ps
 ├──────────────┬──────────────────┬───────────────────┤
 │              │                  │                    │
 │  twilight-webui   twilight-backend   postgres:5432  │
-│  (Next.js :3000)  (Go API :5000)    redis:6379      │
+│  (Next.js :3000)  (Go API :5000)   redis:6379       │
 │              │                  │                    │
 │              └──────┬───────────┘                    │
 │                     │                                │
@@ -143,10 +140,10 @@ docker compose ps
 
 ### Next.js 前端 (`webui`)
 
-- 构建输出: `output: 'standalone'`
-- 端口: `3000`
-- 通过 `BACKEND_URL` 环境变量指向后端 API
-- `NEXT_PUBLIC_API_URL` 在构建时嵌入，跨域访问需要配置 CORS
+- 构建: `webui/Dockerfile`，Next.js `output: "standalone"`，运行 `node server.js`
+- 端口: 容器内 `3000`
+- 浏览器直连 Go API 的客户端应用：会话走 HttpOnly Cookie，浏览器不持有后端凭据
+- `NEXT_PUBLIC_API_URL` 是**构建期**变量，会被打进 bundle；留空时由同源 rewrite 代理 `/api/*` 到后端
 
 ## 配置管理
 
@@ -185,7 +182,7 @@ docker compose ps
 | `TWILIGHT_SMTP_HOST` | smtp.gmail.com | SMTP 服务器 |
 | `TWILIGHT_RATE_LIMIT_ENABLED` | true | 限流开关 |
 
-完整列表见 [`docs/reference/backend.md`](reference/backend.md)。
+完整列表见 [Go 后端架构与配置](../reference/backend.md)。
 
 ## 数据持久化
 
@@ -235,9 +232,11 @@ location /api/ {
     proxy_set_header X-Forwarded-Proto $scheme;
 }
 
-# 前端静态文件
+# 前端
 location / {
     proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
 }
 ```
 
@@ -245,17 +244,13 @@ Nginx 也配置了限流 zone，参考 `deploy/nginx-rate-limit.conf`。
 
 ### 前端配置
 
-当使用反向代理统一域名时，前端 `.env` 配置:
-
 ```env
-# 同域代理（推荐）
+HOSTNAME=0.0.0.0
+PORT=3000
 NEXT_PUBLIC_API_URL=
-
-# 跨域（需 CORS 配置）
-NEXT_PUBLIC_API_URL=https://api.yourdomain.com
 ```
 
-`NEXT_PUBLIC_API_URL` 为空时，前端通过 Next.js rewrite 将 `/api/*` 代理到 `BACKEND_URL`。
+`NEXT_PUBLIC_API_URL` 留空表示浏览器向同源 `/api/*` 发请求，由 Next.js rewrite 代理到 `BACKEND_URL`（本 compose 里是 `http://twilight:5000`）。这种同域形态不需要为前端配置浏览器直连 API 的 `cors_origins`。若改成子域分离部署（前端与 API 不同域名），必须在**构建期**设置 `NEXT_PUBLIC_API_URL` 为后端 Origin，并在后端 `cors_origins` 里列入前端 Origin。
 
 ## 升级与维护
 
@@ -299,8 +294,7 @@ docker compose ps
 # 手动检查后端（从容器网络内）
 docker compose exec twilight curl -fsS http://127.0.0.1:5000/api/v1/system/health
 
-# 预期响应
-# {"success":true,"data":{"api":true,"database":true,"emby":true}}
+# 预期响应为 API liveness；数据库和 Emby 健康检查仍使用独立接口。
 ```
 
 Compose 已为所有服务配置 `init: true`、`stop_grace_period: 30s`、`no-new-privileges` 和 Docker JSON 日志轮转。生产覆写文件额外启用后端只读根文件系统、临时 `/tmp` 与资源上限。

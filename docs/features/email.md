@@ -1,5 +1,6 @@
 # 邮箱验证与找回密码
 
+
 本文说明 Twilight 的邮箱验证子系统：SMTP 发信、验证码格式与有效期、绑定 / 验证邮箱、强制绑定门、改密二次校验、登出态邮箱找回密码、邮箱域名黑白名单，以及管理员的邮箱验证管理区。已对照后端代码（`internal/api/email_handlers.go`、`internal/api/email_verify_service.go`、`internal/api/email_client.go`、`internal/store/email_verification.go`、`internal/config/config.go`、`internal/api/config_admin.go`、`internal/api/routes.go`、`internal/api/errcode.go`）核对了字段、限流、原子消费与鉴权。
 
 配置项速查见 [`config.production.toml`](../../config.production.toml) 的 `[Email]` / `[SAR]` / `[RateLimit]` 段（密钥如 SMTP 密码放同目录 `config.local.toml`）；管理员也可在后台「系统配置 → 邮箱验证」可视化修改并热重载。邮箱属功能配置，统一在 `config.toml` 配置，不建议写进 `.env`。下表括号内的 `TWILIGHT_*` 仅为可选的环境变量覆盖名。
@@ -115,20 +116,18 @@
 - **服务端硬门**：`requireEmailVerified`（`email_handlers.go`）是不可绕过的服务端防线，前端守卫只做体验。未验证邮箱的受约束用户访问「价值型接口」（如使用卡码 `code_use_handlers.go`、求片 `media_request_handlers.go` 等）会被 `403` + `USER_EMAIL_VERIFICATION_REQUIRED` 拦截。
 - **改密二次校验**：受全局强制约束，或用户在个人设置中开启对应保护后，改系统密码 / Emby 密码时 `consumePasswordChangeEmailCode` 要求附带 `verification_id` + `email_code`（命中本人、对应用途的有效码）；未开启时此步直接放行，保持向后兼容。Emby 改密的当前 Web 密码保护与个人邮箱验证码保护互斥，启用当前 Web 密码后后端会关闭个人邮箱保护；历史上两个开关同时开启时也以当前 Web 密码为准。全局强制邮箱验证仍然优先，可能同时要求邮箱证明。关闭个人邮箱保护本身需要对应用途的验证码，但当前已认证的管理员可以直接关闭自己的个人邮箱保护，以免测试环境 SMTP 故障阻断管理操作。
 - **Emby 改密旧密码保护**：用户可在个人设置中开启“修改 Emby 密码需要当前 Web 密码”。开启后 `POST /users/me/password/emby` 必须附带 `old_password` 并通过当前 Web 密码校验；关闭该保护也必须先输入当前 Web 密码。
-- 前端入口：全屏接管守卫见 `webui/src/components/email-verify-guard.tsx`（挂载于 `(main)/layout.tsx`）。
 
 ## 登出态找回密码（防枚举）
 
 两步式，均按 IP 限流（`forgot_password_ip_per_10m`）：
 
-1. `POST /api/v1/auth/password/email/request`：只有当邮箱已被某 `Active` 账号**验证**时才真正发码；无论命中与否都返回统一成功文案，且吞掉内部失败（限流/冷却/SMTP），防止账号枚举。
-2. `POST /api/v1/auth/password/email/reset`：校验 `email + code + new_password`，命中 `reset_password` 用途且属于该账号才重置；通过后删除该用户全部会话。
+1. `POST /api/v2/auth/password/email/request`（V1：`/api/v1/auth/password/email/request`）：只有当邮箱已被某 `Active` 账号**验证**时才真正发码；无论命中与否都返回统一成功文案，且吞掉内部失败（限流/冷却/SMTP），防止账号枚举。
+2. `POST /api/v2/auth/password/email/reset`（V1：`/api/v1/auth/password/email/reset`）：校验 `email + code + new_password`，命中 `reset_password` 用途且属于该账号才重置；通过后删除该用户全部会话。
 
 > 只认 `EmailVerified=true` 的账号（`FindUserByEmailVerified`）：未验证邮箱不足以证明归属，否则把别人邮箱写成自己的未验证邮箱即可劫持对方找回入口。
 
 ## 管理员：邮箱验证管理区
 
-后台「用户管理」页（`webui/src/app/(main)/admin/users/`）：
 
 - **筛选**：邮箱功能开启时新增「邮箱验证」筛选下拉——`verified`（已验证）/ `unverified`（已填邮箱未验证）/ `bound`（已填邮箱不论验证）/ `none`（未填邮箱）。该口径在后端 `listUsers`（`handlers.go`）与跨页全选 `filteredBatchUserUIDs`（`batch_user_handlers.go`）两处保持一致，避免「按邮箱筛选后全选跨页」误伤筛选外用户。
 - **行内状态**：用户列表邮箱旁显示「已验证 / 未验证」徽标。
@@ -139,24 +138,29 @@
 
 | 方法与路径 | 处理函数 | 说明 |
 | ---- | ---- | ---- |
-| `POST /api/v1/admin/users/:uid/bind-email` | `handleAdminBindUserEmail` | 强制绑定指定邮箱。`mark_verified`（默认 true）控制是否同时标记已验证；`force=true` 时跳过黑白名单与占用冲突校验（管理员断言归属）。 |
-| `POST /api/v1/admin/users/:uid/email/verified` | `handleAdminSetUserEmailVerified` | 不改邮箱，仅置 / 撤销验证状态。 |
-| `POST /api/v1/admin/email/test` | `handleAdminEmailTest` | 用当前 SMTP 配置发测试邮件，结果脱敏返回。 |
-| `POST /api/v1/admin/users/clear-emails` | `handleAdminClearUserEmails` | 批量清空未绑定关系用户的邮箱（需确认短语）。 |
+| `POST /api/v2/admin/users/{uid}/bind-email` | `handleAdminBindUserEmail` | 强制绑定指定邮箱。`mark_verified`（默认 true）控制是否同时标记已验证；`force=true` 时跳过黑白名单与占用冲突校验（管理员断言归属）。 |
+| `POST /api/v2/admin/users/{uid}/email/verified` | `handleAdminSetUserEmailVerified` | 不改邮箱，仅置 / 撤销验证状态。 |
+| `POST /api/v2/admin/email/test` | `handleAdminEmailTest` | 用当前 SMTP 配置发测试邮件，结果脱敏返回。 |
+| `POST /api/v2/admin/users/clear-emails` | `handleAdminClearUserEmails` | 批量清空未绑定关系用户的邮箱（需确认短语，`dry_run` 默认 true）。 |
+
+> V1 同义路径为 `/api/v1/admin/users/:uid/bind-email`、`:uid/email/verified`、`/admin/email/test`、`/admin/users/clear-emails`。
 
 > 邮箱占用唯一性：`SetUserEmailVerifiedAtomic` 在 `verified=true` 且非 `force` 时校验是否被其它**已验证**账号占用，冲突返回 `USER_EMAIL_CONFLICT`。
 
 ## 接口速览
 
-| 入口 | 鉴权 | 限流 / 防护 |
-| ---- | ---- | ---- |
-| `POST /api/v1/users/me/email/send-code` | AuthUser | 发码：IP + 收件地址双限流 + 重发冷却；`bind` 用途先查邮箱占用 |
-| `POST /api/v1/users/me/email/verify` | AuthUser | 校验 `bind` 码并完成绑定 + 置已验证 |
-| `POST /api/v1/auth/password/email/request` | AuthPublic | 按 IP 限流；统一成功响应防枚举 |
-| `POST /api/v1/auth/password/email/reset` | AuthPublic | 按 IP 限流；仅命中已验证账号 + 对应用途码 |
-| `POST /api/v1/admin/users/:uid/bind-email` | AuthAdmin | 管理员强制绑定，可 `force` 越过名单/冲突 |
-| `POST /api/v1/admin/users/:uid/email/verified` | AuthAdmin | 置 / 撤销验证状态 |
-| `POST /api/v1/admin/email/test` | AuthAdmin | SMTP 发信连通性测试 |
+前端默认走 V2（`/api/v2`），V1 仅作为外部集成与 `NEXT_PUBLIC_USE_V1_COMPAT=true` 回退面。
+
+| V2 入口（默认） | V1 入口（兼容） | 鉴权 | 限流 / 防护 |
+| ---- | ---- | ---- | ---- |
+| `POST /api/v2/settings/email/send-code` | `POST /api/v1/users/me/email/send-code` | AuthUser | 发码：IP + 收件地址双限流 + 重发冷却；`bind` 用途先查邮箱占用 |
+| `POST /api/v2/settings/email/verify` | `POST /api/v1/users/me/email/verify` | AuthUser | 校验 `bind` 码并完成绑定 + 置已验证 |
+| `POST /api/v2/auth/password/email/request` | `POST /api/v1/auth/password/email/request` | AuthPublic | 按 IP 限流；统一成功响应防枚举 |
+| `POST /api/v2/auth/password/email/reset` | `POST /api/v1/auth/password/email/reset` | AuthPublic | 按 IP 限流；仅命中已验证账号 + 对应用途码 |
+| `POST /api/v2/admin/users/{uid}/bind-email` | `POST /api/v1/admin/users/:uid/bind-email` | AuthAdmin | 管理员强制绑定，可 `force` 越过名单/冲突 |
+| `POST /api/v2/admin/users/{uid}/email/verified` | `POST /api/v1/admin/users/:uid/email/verified` | AuthAdmin | 置 / 撤销验证状态 |
+| `POST /api/v2/admin/email/test` | `POST /api/v1/admin/email/test` | AuthAdmin | SMTP 发信连通性测试 |
+| `POST /api/v2/admin/users/clear-emails` | `POST /api/v1/admin/users/clear-emails` | AuthAdmin | 批量清空用户邮箱（需确认短语，`dry_run` 默认 true） |
 
 响应里的邮箱经 `maskEmail` 局部遮蔽（保留首尾少量字符），避免在共享屏幕 / 日志完整暴露。统一响应 envelope 与鉴权约定见 [API 路由索引](../reference/api-index.md) 与 [后端 API 详参](../reference/backend-api.md)。
 
