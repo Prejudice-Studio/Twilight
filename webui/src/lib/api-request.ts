@@ -4,6 +4,14 @@ import { deepClone } from "./deep-clone";
 export const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
 
 /**
+ * Product calls target the versioned /api/v2/* contract by default.
+ * NEXT_PUBLIC_USE_V1_COMPAT remains the explicit rollback switch for
+ * production incidents; nothing else may opt a call back into V1.
+ */
+export const DEFAULT_API_VERSION: "v1" | "v2" =
+  process.env.NEXT_PUBLIC_USE_V1_COMPAT === "true" ? "v1" : "v2";
+
+/**
  * ApiError 承载 HTTP 状态码 + 后端 envelope.error_code，
  * 让业务层可以通过 instanceof ApiError 分流处理：
  *   - 401  → 跳登录 / 刷新会话
@@ -428,7 +436,7 @@ async function parseApiResponse<T>(
 }
 
 export interface ApiRequestExtraOptions {
-  /** API major version. Existing callers default to v1; V2 callers opt in explicitly. */
+  /** API major version. Callers default to v2; V1 must be opted into explicitly. */
   apiVersion?: "v1" | "v2";
   /** 自定义超时（毫秒）；传 0 / Infinity 表示不加超时（SSE / 长轮询场景）。 */
   timeoutMs?: number;
@@ -457,7 +465,7 @@ export async function apiRequest<T>(
     headers["X-Twilight-Client"] = "webui";
   }
 
-  const apiVersion = extra.apiVersion ?? "v1";
+  const apiVersion = extra.apiVersion ?? DEFAULT_API_VERSION;
   const url = `${API_BASE}/api/${apiVersion}${endpoint}`;
   const isReadRequest = (method === "GET" || method === "HEAD") && options.body === undefined;
   const effectiveCache = options.cache ?? (isReadRequest ? "no-cache" : "no-store");
@@ -575,7 +583,7 @@ export async function apiRequestForm<T>(
     "Accept": "application/json; charset=utf-8",
     "X-Twilight-Client": "webui",
   };
-  const apiVersion = extra.apiVersion ?? "v1";
+  const apiVersion = extra.apiVersion ?? DEFAULT_API_VERSION;
   const url = `${API_BASE}/api/${apiVersion}${endpoint}`;
   const methodName = method.toUpperCase();
 
