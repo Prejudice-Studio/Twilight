@@ -979,6 +979,8 @@ export interface ConfigField {
   value: unknown;
   options?: ConfigFieldOption[];
   placeholder_hints?: string[];
+  /** 该键是否已显式写在 config.toml 中；false 表示当前只是代码默认值在生效。 */
+  present_in_file?: boolean;
 }
 
 export interface ConfigSection {

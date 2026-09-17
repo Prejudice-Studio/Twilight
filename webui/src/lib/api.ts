@@ -1842,9 +1842,11 @@ class ApiClient {
     });
   }
 
-  async getConfigSchema(signal?: AbortSignal) {
+  // force=true 跳过 30 秒缓存：配置页进入与"重新加载"必须读到磁盘上的最新值，
+  // 否则热重载之后页面还是会拿旧快照渲染（曾导致改动看起来没生效）。
+  async getConfigSchema(signal?: AbortSignal, force = false) {
     const now = Date.now();
-    if (this.configSchemaCache.value && now < this.configSchemaCache.until) {
+    if (!force && this.configSchemaCache.value && now < this.configSchemaCache.until) {
       return this.cloneResponse(this.configSchemaCache.value);
     }
     if (signal) {
