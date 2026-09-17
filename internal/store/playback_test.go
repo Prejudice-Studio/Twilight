@@ -29,6 +29,10 @@ func TestPlaybackRecordsFiltersDefaultsAndLimits(t *testing.T) {
 	if len(uidRecords) != 3 || uidRecords[0].ItemID != "new" || uidRecords[2].ItemID != "old" {
 		t.Fatalf("unexpected uid records: %#v", uidRecords)
 	}
+	counts := st.PlaybackRecordCounts([]int64{1, 2, 999})
+	if counts[1] != 3 || counts[2] != 1 || counts[999] != 0 {
+		t.Fatalf("unexpected playback counts: %#v", counts)
+	}
 
 	recent := st.PlaybackRecords(1, 25, 1)
 	if len(recent) != 1 || recent[0].ItemID != "new" {
@@ -41,6 +45,29 @@ func TestPlaybackRecordsFiltersDefaultsAndLimits(t *testing.T) {
 	defaulted := st.PlaybackRecords(3, 0, 1)
 	if len(defaulted) != 1 || defaulted[0].PlayedAt == 0 {
 		t.Fatalf("expected PlayedAt default, got %#v", defaulted)
+	}
+}
+
+func TestBangumiSyncSuccessCountsUseRecentHundredPerUser(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	st.mu.Lock()
+	for i := 0; i < 101; i++ {
+		st.state.BangumiSyncLogs = append(st.state.BangumiSyncLogs, BangumiSyncLog{UID: 1, Status: "success"})
+	}
+	st.state.BangumiSyncLogs = append(st.state.BangumiSyncLogs, BangumiSyncLog{UID: 1, Status: "failed"})
+	st.state.BangumiSyncLogs = append(st.state.BangumiSyncLogs, BangumiSyncLog{UID: 2, Status: "success"})
+	st.mu.Unlock()
+
+	// 窗口是"最近 100 条同步日志"而不是"最近 100 条成功日志"：uid=1 最新的那条
+	// 是 failed，它同样占掉一个窗口名额，所以成功数封顶在 99。
+	counts := st.BangumiSyncSuccessCounts([]int64{1, 2})
+	if counts[1] != 99 || counts[2] != 1 {
+		t.Fatalf("unexpected Bangumi success counts: %#v", counts)
 	}
 }
 

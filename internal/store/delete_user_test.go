@@ -68,6 +68,23 @@ func TestDeleteUserCascadesAllDerivedData(t *testing.T) {
 	if err := st.AddViolationLog(ViolationLog{UID: target, Code: "X", Reason: "decoy"}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := st.db.Exec(`
+INSERT INTO twilight_playback_events
+	(uid, event_id, playback_id, event_type, event_at, received_at, processed_at)
+VALUES ($1, 'delete-event', 'delete-playback', 'started', 100, 100, 100)`, target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.Exec(`
+INSERT INTO twilight_playback_segments
+	(uid, playback_id, device_id, started_at, updated_at)
+VALUES ($1, 'delete-playback', 'delete-device', 100, 100)`, target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.Exec(`
+INSERT INTO twilight_playback_daily (uid, day, seconds, updated_at)
+VALUES ($1, '1970-01-01', 60, 100)`, target); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := st.DeleteUser(target); err != nil {
 		t.Fatalf("DeleteUser: %v", err)
@@ -76,6 +93,15 @@ func TestDeleteUserCascadesAllDerivedData(t *testing.T) {
 	// 用户本体 + 全部 GDPR-删除域：target 不再出现。
 	if _, ok := st.state.Users[target]; ok {
 		t.Fatalf("user %d still present", target)
+	}
+	for _, table := range []string{"twilight_playback_events", "twilight_playback_segments", "twilight_playback_daily"} {
+		var count int
+		if err := st.db.QueryRow("SELECT COUNT(*) FROM "+table+" WHERE uid = $1", target).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("trusted playback table %s still references deleted user", table)
+		}
 	}
 	for id, k := range st.state.APIKeys {
 		if k.UID == target {

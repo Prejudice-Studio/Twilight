@@ -40,9 +40,17 @@ func TestStrconv36(t *testing.T) {
 
 func TestUserUIDsMatchingKeepsOrderAndCountWithoutUserCopies(t *testing.T) {
 	st := newJSONStoreForTest(t)
+	// CreateUser 一律把 Active 置 true（store.go 的 CreateUser 强制覆盖入参），
+	// 想造一个停用账号必须在创建之后再 UpdateUser 关掉。
 	for _, username := range []string{"alpha", "beta", "gamma", "delta"} {
-		if _, err := st.CreateUser(User{Username: username, Role: RoleNormal, Active: username != "beta"}); err != nil {
+		created, err := st.CreateUser(User{Username: username, Role: RoleNormal})
+		if err != nil {
 			t.Fatal(err)
+		}
+		if username == "beta" {
+			if _, err := st.UpdateUser(created.UID, func(u *User) error { u.Active = false; return nil }); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 
@@ -487,7 +495,9 @@ func TestSearchUsersByIdentityRestrictsConfiguredField(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.CreateUser(User{Username: "other-testuser", Role: RoleNormal, TelegramID: 923456, TelegramUsername: "other-tg"}); err != nil {
+	// 干扰账号的每一项取值都不能包含上面要查的子串：搜索是子串匹配，用户名里
+	// 带 "testuser"、Telegram ID 里带 "2345" 都会让它一起命中。
+	if _, err := st.CreateUser(User{Username: "other-user", Role: RoleNormal, TelegramID: 923456, TelegramUsername: "other-tg"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -496,7 +506,7 @@ func TestSearchUsersByIdentityRestrictsConfiguredField(t *testing.T) {
 		field UserIdentitySearchField
 	}{
 		{query: "testuser", field: UserIdentitySearchUsername},
-		{query: "2345", field: UserIdentitySearchTelegramID},
+		{query: "8123", field: UserIdentitySearchTelegramID},
 		{query: "testuser", field: UserIdentitySearchTelegramUsername},
 		{query: strconv.FormatInt(alpha.UID, 10), field: UserIdentitySearchUID},
 	} {
@@ -569,7 +579,10 @@ func TestStoreCountHelpersMatchListSemantics(t *testing.T) {
 	if err := st.UpsertRegCode(RegCode{Code: "REG-1", Type: 1, Days: 7, ValidityTime: -1, UseCountLimit: 1, Active: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.UpsertRegCode(RegCode{Code: "REG-2", Type: 2, Days: 30, ValidityTime: -1, UseCountLimit: 1, Active: false}); err != nil {
+	// UpsertRegCode 对新建的码有一条规定：`!Active && UseCount == 0` 时会被强制
+	// 置为启用（Go 零值分不清"没设置"和"显式 false"，新建的码默认就该可用）。
+	// 所以要造一个停用状态的码，必须让它带使用次数——也就是已用尽的码。
+	if err := st.UpsertRegCode(RegCode{Code: "REG-2", Type: 2, Days: 30, ValidityTime: -1, UseCountLimit: 1, UseCount: 1, Active: false}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := st.CountRegCodes(), len(st.ListRegCodes()); got != want {
@@ -594,9 +607,11 @@ func TestStoreCountHelpersMatchListSemantics(t *testing.T) {
 	if got, want := st.CountAnnouncements(true), len(st.ListAnnouncements(true)); got != want || got != 3 {
 		t.Fatalf("all announcement count=%d want list len %d and all=3", got, want)
 	}
-	if got := st.ListAnnouncementsFiltered(false, true); len(got) != 1 || got[0].Title != "visible" {
+	// 形参是 (includeHidden, includeExpired)：只看"可见且未过期"要传 (false, false)。
+	if got := st.ListAnnouncementsFiltered(false, false); len(got) != 1 || got[0].Title != "visible" {
 		t.Fatalf("visible-only announcement filter returned %#v", got)
 	}
+	// 含隐藏但排除过期：visible + hidden = 2（expired 那条约 10 秒前到期，被排除）。
 	if got := st.ListAnnouncementsFiltered(true, false); len(got) != 2 {
 		t.Fatalf("non-expired announcement filter returned %d items, want 2", len(got))
 	}
@@ -1220,7 +1235,9 @@ func TestListMediaRequestGroupsBeforePagination(t *testing.T) {
 	if page.Total != 2 || page.RequestTotal != 3 || page.TotalPages != 2 || !page.HasNext {
 		t.Fatalf("unexpected grouped metadata: %#v", page)
 	}
-	if len(page.Groups) != 1 || page.Groups[0].Key != "request:"+third.RequireKey || len(page.Groups[0].Requests) != 1 {
+	// 分组键取归一化后的标题，只有标题为空才回落成 "request:<RequireKey>"，
+	// 所以 third 的键是 "other"；组间按组内首条 ID 降序，third.ID 最大排第一页。
+	if len(page.Groups) != 1 || page.Groups[0].Key != "other" || len(page.Groups[0].Requests) != 1 || page.Groups[0].Requests[0].ID != third.ID {
 		t.Fatalf("first grouped page=%#v", page.Groups)
 	}
 	page = st.ListMediaRequestGroupsPageWithOptions(MediaRequestListOptions{

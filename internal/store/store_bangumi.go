@@ -48,6 +48,35 @@ func (s *Store) ListBangumiSyncLogs(uid int64, limit int) []BangumiSyncLog {
 	return out
 }
 
+// BangumiSyncSuccessCounts mirrors the per-user recent-log count shown by the
+// admin endpoint without rescanning the shared log slice once per user.
+func (s *Store) BangumiSyncSuccessCounts(uids []int64) map[int64]int {
+	counts := make(map[int64]int, len(uids))
+	if len(uids) == 0 {
+		return counts
+	}
+	wanted := make(map[int64]struct{}, len(uids))
+	seen := make(map[int64]int, len(uids))
+	for _, uid := range uids {
+		if uid > 0 {
+			wanted[uid] = struct{}{}
+		}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for i := len(s.state.BangumiSyncLogs) - 1; i >= 0; i-- {
+		entry := s.state.BangumiSyncLogs[i]
+		if _, ok := wanted[entry.UID]; !ok || seen[entry.UID] >= 100 {
+			continue
+		}
+		seen[entry.UID]++
+		if entry.Status == "success" {
+			counts[entry.UID]++
+		}
+	}
+	return counts
+}
+
 func (s *Store) DeleteBangumiSyncLog(id int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
