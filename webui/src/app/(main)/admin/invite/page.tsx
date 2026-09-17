@@ -30,6 +30,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { AdminConfigSections } from "@/components/admin/config-section-editor";
+import { AdminTable } from "@/components/admin/admin-table";
 import { useToast } from "@/hooks/use-toast";
 import { api, type InviteForest, type InviteForestNode } from "@/lib/api";
 import { useI18n, type MessageKey } from "@/lib/i18n";
@@ -667,90 +668,105 @@ export default function AdminInviteTreePage() {
       ) : (
         <Card>
           <CardContent className="p-0">
-            <div className="custom-scrollbar max-h-[min(70dvh,900px)] overflow-auto overscroll-contain">
-              <table className="w-full min-w-[920px] text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/50">
-                    <th className="w-12 px-4 py-3 text-left font-medium">
-                      <Checkbox
-                        checked={allVisibleSelected ? true : someVisibleSelected ? "indeterminate" : false}
-                        onCheckedChange={(checked) => toggleVisibleSelection(checked === true)}
-                        aria-label={t("adminInvite.selectVisible")}
-                      />
-                    </th>
-                    <th className="px-4 py-3 text-left font-medium">{t("adminInvite.user")}</th>
-                    <th className="px-4 py-3 text-left font-medium">{t("adminInvite.role")}</th>
-                    <th className="px-4 py-3 text-left font-medium">{t("adminInvite.status")}</th>
-                    <th className="px-4 py-3 text-left font-medium">Emby</th>
-                    <th className="px-4 py-3 text-left font-medium">Telegram</th>
-                    <th className="px-4 py-3 text-left font-medium">{t("adminInvite.children")}</th>
-                    <th className="px-4 py-3 text-right font-medium">{t("adminInvite.actions")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map(({ node, depth, root, childCount }) => {
-                    const descendants = maps?.descendants.get(node.uid) ?? 0;
-                    const isCollapsed = collapsed.has(node.uid);
-                    return (
-                      <tr
-                        key={node.uid}
-                        className={`border-b hover:bg-muted/30 ${selectedUid === node.uid ? "bg-primary/5" : ""}`}
-                        onContextMenu={(event) => {
-                          event.preventDefault();
-                          setSelectedUid(node.uid);
-                        }}
-                      >
-                        <td className="px-4 py-3">
-                          <Checkbox
-                            checked={selectedUids.has(node.uid)}
-                            onCheckedChange={(checked) => toggleSelected(node.uid, checked === true)}
-                            aria-label={t("adminInvite.selectUser", { username: node.username })}
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2" style={{ paddingLeft: depth * 18 }}>
-                            {childCount > 0 ? (
-                              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => toggleCollapse(node.uid)}>
-                                {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                              </Button>
-                            ) : (
-                              <span className="h-7 w-7" />
-                            )}
-                            <div className="min-w-0">
-                              <button className="truncate text-left font-medium hover:underline" onClick={() => setSelectedUid(node.uid)}>
-                                {node.username}
-                              </button>
-                              <p className="text-xs text-muted-foreground">
-                                UID {node.uid} · L{depth + 1} · root {root}
-                              </p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">{t(roleLabelKey(node.role))}</td>
-                        <td className="px-4 py-3">
-                          <Badge variant={node.active ? "success" : "destructive"}>{node.active ? t("adminInvite.enable") : t("adminInvite.disable")}</Badge>
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge variant={node.emby_disabled ? "destructive" : node.emby_id ? "outline" : "secondary"}>
-                            {node.emby_disabled ? t("adminInvite.embyDisabled") : node.emby_id ? t("adminInvite.bound") : t("adminInvite.unbound")}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3">{node.telegram_id || "-"}</td>
-                        <td className="px-4 py-3">{t("adminInvite.childSummary", { direct: childCount, total: descendants })}</td>
-                        <td className="px-4 py-3 text-right">
-                          <Button variant="outline" size="sm" onClick={() => setSelectedUid(node.uid)} disabled={Boolean(busyAction)}>
-                            {t("adminInvite.details")}
-                          </Button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {rows.length === 0 && (
-              <div className="p-8 text-center text-sm text-muted-foreground">{t("adminInvite.noMatches")}</div>
-            )}
+            <AdminTable<TreeRow>
+              rows={rows}
+              rowKey={(row) => row.node.uid}
+              containerClassName="max-h-[min(70dvh,900px)]"
+              rowClassName={(row) => (selectedUid === row.node.uid ? "bg-primary/5" : "")}
+              onRowContextMenu={(row, event) => {
+                event.preventDefault();
+                setSelectedUid(row.node.uid);
+              }}
+              empty={<div className="p-8 text-center text-sm text-muted-foreground">{t("adminInvite.noMatches")}</div>}
+              columns={[
+                {
+                  key: "select",
+                  hideOnCard: true,
+                  headerClassName: "w-12",
+                  header: (
+                    <Checkbox
+                      checked={allVisibleSelected ? true : someVisibleSelected ? "indeterminate" : false}
+                      onCheckedChange={(checked) => toggleVisibleSelection(checked === true)}
+                      aria-label={t("adminInvite.selectVisible")}
+                    />
+                  ),
+                  cell: (row) => (
+                    <Checkbox
+                      checked={selectedUids.has(row.node.uid)}
+                      onCheckedChange={(checked) => toggleSelected(row.node.uid, checked === true)}
+                      aria-label={t("adminInvite.selectUser", { username: row.node.username })}
+                    />
+                  ),
+                },
+                {
+                  key: "user",
+                  header: t("adminInvite.user"),
+                  cell: ({ node, depth, root, childCount }) => (
+                    <div className="flex items-center gap-2" style={{ paddingLeft: depth * 18 }}>
+                      {childCount > 0 ? (
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => toggleCollapse(node.uid)}>
+                          {collapsed.has(node.uid) ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                        </Button>
+                      ) : (
+                        <span className="h-7 w-7" />
+                      )}
+                      <div className="min-w-0">
+                        <button className="truncate text-left font-medium hover:underline" onClick={() => setSelectedUid(node.uid)}>
+                          {node.username}
+                        </button>
+                        <p className="text-xs text-muted-foreground">
+                          UID {node.uid} · L{depth + 1} · root {root}
+                        </p>
+                      </div>
+                    </div>
+                  ),
+                },
+                { key: "role", header: t("adminInvite.role"), cell: (row) => t(roleLabelKey(row.node.role)) },
+                {
+                  key: "status",
+                  header: t("adminInvite.status"),
+                  cell: (row) => (
+                    <Badge variant={row.node.active ? "success" : "destructive"}>
+                      {row.node.active ? t("adminInvite.enable") : t("adminInvite.disable")}
+                    </Badge>
+                  ),
+                },
+                {
+                  key: "emby",
+                  header: "Emby",
+                  cell: (row) => (
+                    <Badge variant={row.node.emby_disabled ? "destructive" : row.node.emby_id ? "outline" : "secondary"}>
+                      {row.node.emby_disabled
+                        ? t("adminInvite.embyDisabled")
+                        : row.node.emby_id
+                          ? t("adminInvite.bound")
+                          : t("adminInvite.unbound")}
+                    </Badge>
+                  ),
+                },
+                { key: "telegram", header: "Telegram", cell: (row) => row.node.telegram_id || "-" },
+                {
+                  key: "children",
+                  header: t("adminInvite.children"),
+                  cell: (row) =>
+                    t("adminInvite.childSummary", {
+                      direct: row.childCount,
+                      total: maps?.descendants.get(row.node.uid) ?? 0,
+                    }),
+                },
+                {
+                  key: "actions",
+                  header: t("adminInvite.actions"),
+                  className: "text-right",
+                  headerClassName: "text-right",
+                  cell: (row) => (
+                    <Button variant="outline" size="sm" onClick={() => setSelectedUid(row.node.uid)} disabled={Boolean(busyAction)}>
+                      {t("adminInvite.details")}
+                    </Button>
+                  ),
+                },
+              ]}
+            />
             {allRows.length > 0 && (
               <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 text-xs text-muted-foreground">
                 <span>{t("adminInvite.renderedRows", { shown: rows.length, total: allRows.length })}</span>

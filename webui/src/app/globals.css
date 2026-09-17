@@ -690,11 +690,27 @@
     .admin-section-surface :where(th, td) {
       max-width: 22rem;
     }
+
+    /* 平板区间同样收缩表格。此前只有 <=767px 生效，768–1023px 的页面会出现
+       "表格仍按 min-w-* 撑开、但卡片兜底要等 lg 才出现"的空档，横向滚动
+       与两列挤压同时发生。 */
+    .admin-section-surface :where(.overflow-x-auto > table) {
+      min-width: 0 !important;
+    }
   }
 
   @media (max-width: 767px) {
+    /* 窄屏不再强制 760px 最小宽度：那会让每张管理表格都比视口宽一倍，
+       把每个页面都变成必须横向拖动的表。改为让表格自然收缩、单元格换行；
+       !important 用于压过页面上的 min-w-[980px] / min-w-[1160px] 之类
+       固定值，overflow-x-auto 容器仍保留作为最后兜底。 */
     .admin-section-surface :where(.overflow-x-auto > table) {
-      min-width: 760px;
+      min-width: 0 !important;
+    }
+
+    .admin-section-surface :where(th, td) {
+      white-space: normal;
+      overflow-wrap: anywhere;
     }
 
     .admin-section-surface :where(.grid-cols-2, .grid-cols-3, .grid-cols-4, .grid-cols-5) {

@@ -324,7 +324,7 @@ export default function AdminEmailPage() {
                 <Card><CardContent className="flex items-center justify-center gap-2 p-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />{t("common.loading")}</CardContent></Card>
               ) : (
                 <>
-                  <div className="space-y-2 lg:hidden">
+                  <div className="space-y-2 lg:hidden md:hidden">
                     {filteredPending.map((p) => {
                       const purposeKey = PURPOSE_LABEL[p.purpose];
                       return (
@@ -359,7 +359,7 @@ export default function AdminEmailPage() {
                     })}
                     {filteredPending.length === 0 && <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">{t("emailAdmin.emptyPending")}</div>}
                   </div>
-                  <div className="hidden overflow-hidden rounded-lg border lg:block">
+                  <div className="hidden overflow-hidden rounded-lg border md:block">
                     <div className="custom-scrollbar overflow-x-auto overscroll-x-contain">
                       <table className="w-full min-w-[760px] text-sm">
                     <thead className="bg-muted/50">
@@ -478,7 +478,7 @@ export default function AdminEmailPage() {
                 <Card><CardContent className="flex items-center justify-center gap-2 p-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />{t("common.loading")}</CardContent></Card>
               ) : (
                 <>
-                  <div className="space-y-2 lg:hidden">
+                  <div className="space-y-2 lg:hidden md:hidden">
                     {filteredAccounts.map((acc) => (
                       <div key={acc.uid} className="space-y-3 rounded-lg border p-3">
                         <div className="flex min-w-0 items-start justify-between gap-2">
@@ -508,7 +508,7 @@ export default function AdminEmailPage() {
                     ))}
                     {filteredAccounts.length === 0 && <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">{t("emailAdmin.emptyAccounts")}</div>}
                   </div>
-                  <div className="hidden overflow-hidden rounded-lg border lg:block">
+                  <div className="hidden overflow-hidden rounded-lg border md:block">
                     <div className="custom-scrollbar overflow-x-auto overscroll-x-contain">
                       <table className="w-full min-w-[680px] text-sm">
                     <thead className="bg-muted/50">
