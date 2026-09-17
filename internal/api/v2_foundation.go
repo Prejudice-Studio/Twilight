@@ -78,7 +78,7 @@ func v2CapabilitiesPayload(cfg config.Config) v2Capabilities {
 		},
 		Links: map[string]string{
 			"openapi": "/api/v2/openapi.json",
-			"docs":    "/api-docs",
+			"docs":    "/api/v2/docs",
 		},
 	}
 }
