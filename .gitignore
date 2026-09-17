@@ -254,5 +254,9 @@ kubeconfig*
 /.codex-reference-twilight
 /.corepack
 .dev-progress
+# 过程性审计 / 审查 / 覆盖报告：一次性本地产物，记录某个时点的发现而非长期约定。
+# 结论以 docs/ 下的现行文档为准，不要提交，也不要作为文档索引来源。
+/.dev-*.md
+/.dev-*.txt
 # 本地 agent 工作目录（会话记忆、临时笔记），与仓库内容无关
 /.workbuddy/
