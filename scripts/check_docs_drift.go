@@ -1,15 +1,19 @@
-// scripts/check_docs_drift.go 是 CI 一致性 lint：保证 routes.go 注册的每条
-// (METHOD, PATH) 都在 docs/*.md 任一文档里出现至少一次，否则 fail。
+// scripts/check_docs_drift.go 是 CI 一致性 lint：保证 routes.go 与 routes_v2.go
+// 注册的每条 (METHOD, PATH) 都在 docs/*.md 任一文档里出现至少一次，否则 fail。
 // 触达背景：BACKEND_API.md 目前对 routes.go 已有大量历史漂移，新人接入时
 // 只能从源码反推；这条 lint 阻止下次 PR 又少写一条。
+//
+// 两个文件都必须覆盖：前端默认 API 版本已经是 v2（DEFAULT_API_VERSION="v2"），
+// 只 lint  routes.go 会让 `/api/v2/*` 的漂移完全逃过 CI——v1 路径与 v2 路径是
+// 不同的字符串，文档里写了 v1 并不会让 v2 端点"被文档化"。
 //
 // 运行方式（本地或 CI）：
 //
 //	go run ./scripts/check_docs_drift.go
 //
 // 退出码：
-//   - 0：所有 routes.go 注册的端点都在 docs 中至少出现一次，或被 baseline
-//     文件显式 grandfather。
+//   - 0：所有 routes.go / routes_v2.go 注册的端点都在 docs 中至少出现一次，
+//     或被 baseline 文件显式 grandfather。
 //   - 1：检测到 drift，stdout 列出未在 docs 中出现且不在 baseline 中的
 //     (METHOD, PATH)；或 baseline 中存在已经被消除（路由消失或文档已补全）
 //     的"陈旧"条目，需要从 baseline 中删除。
@@ -17,18 +21,19 @@
 //
 // 解析规则：
 //
-//   - 从 internal/api/routes.go 提取 `a.add(http.Method<X>, "<PATH>", ...)`。
+//   - 从 internal/api/routes.go 与 internal/api/routes_v2.go 提取
+//     `a.add(http.Method<X>, "<PATH>", ...)`。
 //   - 把 ":foo" 形式的路径参数归一化成 "{foo}"，再做包含匹配——docs 里两种
 //     写法都允许，但内部规范化后只看路径形状。
-//   - 跳过 routes.go 里以 `// docs:skip` 结尾的行：极个别内部端点（diagnostic
-//     探针 / 临时调试）可以显式标记不参加 lint。
+//   - 跳过以 `// docs:skip` 结尾的行：极个别内部端点（diagnostic 探针 /
+//     临时调试）可以显式标记不参加 lint。
 //
 // Baseline 机制：
 //
 //   - scripts/docs_drift_baseline.txt 保存"已知未文档化"清单，每行
 //     "METHOD PATH"（# 开头的行视作注释）。新增路由必须文档化或写入 baseline；
 //     baseline 是 PR 可见 diff，避免静悄悄绕过 lint。
-//   - 如果 baseline 里某条已经被文档化、或 routes.go 已经移除该路由，lint
+//   - 如果 baseline 里某条已经被文档化、或路由表已经移除该路由，lint
 //     报错要求清理 baseline——保证 baseline 只会变小不会僵化成永久噪音。
 package main
 
@@ -59,6 +64,15 @@ var addPattern = regexp.MustCompile(`a\.add\(http\.Method([A-Z][a-zA-Z]+),\s*"([
 // 不在 path segment 边界外做替换：":foo/bar/:baz" 也都安全。
 var pathParamPattern = regexp.MustCompile(`:([a-zA-Z_][a-zA-Z0-9_]*)`)
 
+// braceParamPattern 是 pathParamPattern 的逆向：把已归一化的 "{foo}" 还原成
+// routes.go 原生的 ":foo"。
+//
+// 曾经这里直接用 pathParamPattern 做"反归一化"，但它匹配的是冒号而不是花括号，
+// 对已经是 "{foo}" 的字符串永远替换不出东西——结果是文档里按源码写法引用
+// `/api/v2/media/tmdb/:tmdb_id` 时永远匹配不上，lint 把已文档化的端点误报成
+// drift。两个方向必须是两条不同的正则。
+var braceParamPattern = regexp.MustCompile(`\{([a-zA-Z_][a-zA-Z0-9_]*)\}`)
+
 type endpoint struct {
 	Method string
 	Path   string
@@ -72,14 +86,19 @@ func main() {
 		fmt.Fprintf(os.Stderr, "check_docs_drift: %v\n", err)
 		os.Exit(2)
 	}
-	routesFile := filepath.Join(repoRoot, "internal", "api", "routes.go")
-	endpoints, totalAdds, err := parseRoutes(routesFile)
+	// v1 与 v2 两套路由表都参与 lint：v2 是当前前端默认版本，只查 v1 会让
+	// 三百多条 v2 端点完全逃过文档检查。
+	routeFiles := []string{
+		filepath.Join(repoRoot, "internal", "api", "routes.go"),
+		filepath.Join(repoRoot, "internal", "api", "routes_v2.go"),
+	}
+	endpoints, totalAdds, err := parseRoutes(routeFiles)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "check_docs_drift: parse routes.go: %v\n", err)
+		fmt.Fprintf(os.Stderr, "check_docs_drift: parse route tables: %v\n", err)
 		os.Exit(2)
 	}
 	if len(endpoints) == 0 {
-		fmt.Fprintf(os.Stderr, "check_docs_drift: routes.go has 0 a.add() calls — pattern out of date?\n")
+		fmt.Fprintf(os.Stderr, "check_docs_drift: route tables have 0 a.add() calls — pattern out of date?\n")
 		os.Exit(2)
 	}
 	// sanity：parsed 与 grep 计数一致才相信解析覆盖完整。如果有人引入多行
@@ -222,45 +241,50 @@ func findRepoRoot() (string, error) {
 	}
 }
 
-func parseRoutes(path string) ([]endpoint, int, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer f.Close()
-
+// parseRoutes 汇总多个路由表文件。跨文件按 (METHOD, PATH) 去重——v1/v2 路径
+// 前缀不同所以天然不冲突，但同一个文件里同一路径注册两次（例如 v2 为兼容
+// V1 方法补注册）只会算一条。
+func parseRoutes(paths []string) ([]endpoint, int, error) {
 	var (
 		eps      []endpoint
 		seen     = map[string]struct{}{}
 		totalAdd int
 	)
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 1<<20), 1<<20)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.Contains(line, "a.add(http.Method") {
-			continue
+	for _, path := range paths {
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, 0, err
 		}
-		totalAdd++
-		if strings.Contains(line, "// docs:skip") {
-			continue
+		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 0, 1<<20), 1<<20)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.Contains(line, "a.add(http.Method") {
+				continue
+			}
+			totalAdd++
+			if strings.Contains(line, "// docs:skip") {
+				continue
+			}
+			m := addPattern.FindStringSubmatch(line)
+			if m == nil {
+				continue
+			}
+			method := strings.ToUpper(m[1])
+			raw := m[2]
+			normalized := pathParamPattern.ReplaceAllString(raw, "{$1}")
+			key := method + " " + normalized
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			eps = append(eps, endpoint{Method: method, Path: normalized})
 		}
-		m := addPattern.FindStringSubmatch(line)
-		if m == nil {
-			continue
+		if err := scanner.Err(); err != nil {
+			f.Close()
+			return nil, 0, err
 		}
-		method := strings.ToUpper(m[1])
-		raw := m[2]
-		normalized := pathParamPattern.ReplaceAllString(raw, "{$1}")
-		key := method + " " + normalized
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		eps = append(eps, endpoint{Method: method, Path: normalized})
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, 0, err
+		f.Close()
 	}
 	return eps, totalAdd, nil
 }
@@ -300,7 +324,7 @@ func loadDocsCorpus(dir string) (string, error) {
 //	`GET /api/v1/x/{id}`
 //	GET /api/v1/x/:id     # routes.go 风格也兼容（向后给运维空间）
 func endpointDocumented(corpus string, ep endpoint) bool {
-	rawPath := pathParamPattern.ReplaceAllString(ep.Path, ":$1") // 反归一化拿回 :foo 形式
+	rawPath := braceParamPattern.ReplaceAllString(ep.Path, ":$1") // 反归一化拿回 :foo 形式
 	candidates := []string{
 		ep.Method + " " + ep.Path,
 		ep.Method + " " + rawPath,

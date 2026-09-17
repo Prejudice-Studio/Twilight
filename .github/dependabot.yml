@@ -21,7 +21,7 @@ updates:
           - minor
           - patch
 
-  # 前端 npm (pnpm 兼容 dependabot npm 生态)
+  # 前端 npm (pnpm 兼容 dependabot npm 生态)。webui 是唯一前端。
   - package-ecosystem: npm
     directory: /webui
     schedule:

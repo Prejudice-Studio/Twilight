@@ -29,7 +29,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version-file: go.mod
         cache: true
@@ -61,7 +61,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version-file: go.mod
         cache: true
@@ -96,6 +96,12 @@ jobs:
       # 只在 Ubuntu 跑一份；脚本是纯文本扫描，无平台差异。
       run: go run ./scripts/check_docs_drift.go
 
+    - name: Check route shadowing
+      # 抓"注册了但永远匹配不到"的路由：同方法同路径重复注册，以及段数与
+      # 字面量数都相同、胜负只能靠注册顺序的真歧义路由对。历史上
+      # /admin/users/:uid 就把 /expiring 与 /batch/* 全部吃掉过。
+      run: go run ./scripts/route_shadow
+
   nix:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -121,33 +127,31 @@ jobs:
         working-directory: webui
     env:
       CI: 'true'
-      NEXT_TELEMETRY_DISABLED: '1'
     steps:
     - uses: actions/checkout@v4
 
     - name: Setup pnpm
       # 不传 version，让 action 从 webui/package.json 的 packageManager 字段读，
       # 与本地 corepack / docs / Nix 保持单一事实源。
-      uses: pnpm/action-setup@v4
+      uses: pnpm/action-setup@v6
       with:
         package_json_file: webui/package.json
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       with:
-        # 通过 .nvmrc 锁版本，docs/INSTALL.md / flake.nix / 本地 nvm 全部对齐
-        node-version-file: webui/.nvmrc
+        node-version: 22
         cache: 'pnpm'
         cache-dependency-path: webui/pnpm-lock.yaml
 
     - name: Install dependencies
       run: pnpm install --frozen-lockfile --prefer-offline
 
-    - name: Lint
-      run: pnpm lint
-
     - name: Type check
       run: pnpm typecheck
+
+    - name: Lint
+      run: pnpm lint
 
     - name: Build
       run: pnpm build
