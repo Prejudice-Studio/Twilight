@@ -502,7 +502,7 @@ V2 用户端媒体资源（WebUI 媒体页使用）：
 | POST | `/api/v2/admin/emby/users/{emby_id}/enable` | Admin | V2 启用单个 Emby 用户 |
 | POST | `/api/v2/admin/emby/users/{emby_id}/disable` | Admin | V2 禁用单个 Emby 用户 |
 | POST | `/api/v2/admin/emby/users/{emby_id}/kick` | Admin | V2 踢出单个 Emby 用户会话 |
-| GET | `/api/v2/admin/emby/play-rank` | Admin | V2 播放日榜/周榜（含 UID 与完整用户名）；`range=day\|week`、`limit`、`refresh=1`，60 秒缓存，活动日志同步写入后自动失效 |
+| GET | `/api/v2/admin/emby/play-rank` | Admin | V2 播放榜单（含 UID 与完整用户名）；`range=day\|week\|month\|all`、`days=N`、`limit`、`refresh=1`，60 秒缓存，活动日志同步写入后自动失效 |
 | GET | `/api/v2/emby/play-rank` | User | V2 播放日榜/周榜（用户名脱敏、不下发 UID）；`AuthUser`，未登录一律拒绝，普通用户能否查看由 `play_rank_enabled` / `play_rank_user_visible` 决定 |
 | GET | `/api/v1/admin/media-requests` | Admin | 求片管理列表；支持 `status/source/q/page/per_page`，返回状态计数与分页元数据，不缓存 |
 | PUT | `/api/v1/admin/media-requests/{request_id}` | Admin | 更新求片状态 |
