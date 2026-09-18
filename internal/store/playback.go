@@ -387,6 +387,43 @@ func (s *Store) PlaybackRecordSummary(since int64) (totalPlays int, totalDuratio
 	return
 }
 
+// PlaybackRecordCoverage 回答"系统到底记录了多少播放数据"：总条数、最早与最晚
+// 播放时间。榜单默认只开窗到今天/本周，运营无从判断库里还沉淀了多少历史可看，
+// 这个覆盖面让前端能把"系统已记录区间"直接显示出来。
+func (s *Store) PlaybackRecordCoverage() (total int64, earliest int64, latest int64, err error) {
+	s.mu.RLock()
+	db := s.db
+	s.mu.RUnlock()
+	if db != nil {
+		if err = queryPlaybackCoverageDB(db, &total, &earliest, &latest); err == nil {
+			return total, earliest, latest, nil
+		}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, record := range s.state.PlaybackRecords {
+		total++
+		if record.PlayedAt <= 0 {
+			continue
+		}
+		if earliest == 0 || record.PlayedAt < earliest {
+			earliest = record.PlayedAt
+		}
+		if record.PlayedAt > latest {
+			latest = record.PlayedAt
+		}
+	}
+	return total, earliest, latest, nil
+}
+
+func queryPlaybackCoverageDB(db *sql.DB, total *int64, earliest *int64, latest *int64) error {
+	query := `SELECT COUNT(*), COALESCE(MIN(played_at), 0), COALESCE(MAX(played_at), 0)
+FROM twilight_playback_records`
+	ctx, cancel := context.WithTimeout(context.Background(), pgPlaybackReadTimeout)
+	defer cancel()
+	return db.QueryRowContext(ctx, query).Scan(total, earliest, latest)
+}
+
 func queryPlaybackRecordsDB(db *sql.DB, uid int64, since int64, limit int) ([]PlaybackRecord, error) {
 	var args []any
 	var clauses []string

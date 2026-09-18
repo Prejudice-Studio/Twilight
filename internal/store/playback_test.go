@@ -48,6 +48,39 @@ func TestPlaybackRecordsFiltersDefaultsAndLimits(t *testing.T) {
 	}
 }
 
+// TestPlaybackRecordCoverageReportsStoredExtent 盯住"系统到底记录了多少"这个口径：
+// 榜单窗口可以很窄，但覆盖面必须是整库的，否则前端没法告诉用户还能往回看多远。
+func TestPlaybackRecordCoverageReportsStoredExtent(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	total, earliest, latest, err := st.PlaybackRecordCoverage()
+	if err != nil || total != 0 || earliest != 0 || latest != 0 {
+		t.Fatalf("empty coverage should be zeroed: total=%d earliest=%d latest=%d err=%v", total, earliest, latest, err)
+	}
+
+	for _, record := range []PlaybackRecord{
+		{UID: 1, ItemID: "a", PlayedAt: 300},
+		{UID: 2, ItemID: "b", PlayedAt: 100},
+		{UID: 1, ItemID: "c", PlayedAt: 200},
+	} {
+		if err := st.AddPlaybackRecord(record); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	total, earliest, latest, err = st.PlaybackRecordCoverage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 3 || earliest != 100 || latest != 300 {
+		t.Fatalf("unexpected coverage: total=%d earliest=%d latest=%d", total, earliest, latest)
+	}
+}
+
 func TestBangumiSyncSuccessCountsUseRecentHundredPerUser(t *testing.T) {
 	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
 	if err != nil {
