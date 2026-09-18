@@ -67,6 +67,7 @@ func TestBangumiSyncSuccessCountsUseRecentHundredPerUser(t *testing.T) {
 	// 是 failed，它同样占掉一个窗口名额，所以成功数封顶在 99。
 	counts := st.BangumiSyncSuccessCounts([]int64{1, 2})
 	if counts[1] != 99 || counts[2] != 1 {
+
 		t.Fatalf("unexpected Bangumi success counts: %#v", counts)
 	}
 }

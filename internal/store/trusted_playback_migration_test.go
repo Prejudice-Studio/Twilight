@@ -82,6 +82,7 @@ func TestTrustedPlaybackMigrationRoundTrip(t *testing.T) {
 	// 这段播放跨了 UTC 午夜（23:59:50 → 次日 00:00:10），splitBuckets 会按本地
 	// 日界切成两桶各 10 秒；迁移必须原样保留这个切分。
 	if len(daily) != 2 || daily[0].Seconds != 10 || daily[1].Seconds != 10 {
+
 		t.Fatalf("trusted playback daily buckets changed after migration: %+v", daily)
 	}
 }

@@ -38,6 +38,7 @@ func TestV2AdminHealthResourcesAreIndependentAndPrivate(t *testing.T) {
 	app := newTestApp(t)
 	adminCookies := registerAdmin(t, app, "system-admin", "SystemAdmin123456")
 
+
 	for _, path := range []string{
 		"/api/v2/admin/health/api",
 		"/api/v2/admin/health/database",

@@ -12,6 +12,7 @@ import (
 func TestV2AdminMediaRequestsUseResourceShapeAndSharedGrouping(t *testing.T) {
 	app := newTestApp(t)
 	admin := registerAdmin(t, app, "v2-media-admin", "Admin123456")
+
 	first, err := app.store().CreateMediaRequest(store.MediaRequest{
 		UID: 1, Username: "v2-media-admin", Title: "Shared title", Source: "tmdb", MediaID: 101, MediaType: "movie",
 	})
@@ -82,6 +83,7 @@ func TestV2AdminMediaRequestsRejectNormalUsersAndInvalidFilters(t *testing.T) {
 		t.Fatalf("expected admin rejection, got %d body=%s", response.Code, response.Body.String())
 	}
 	admin := registerAdmin(t, app, "v2-media-filter-admin", "Admin123456")
+
 	invalid := doJSON(app, http.MethodGet, "/api/v2/admin/media-requests?source=invalid", "", admin)
 	if invalid.Code != http.StatusBadRequest || !strings.Contains(invalid.Body.String(), `"MEDIA_REQUEST_SOURCE_INVALID"`) {
 		t.Fatalf("invalid source status=%d body=%s", invalid.Code, invalid.Body.String())

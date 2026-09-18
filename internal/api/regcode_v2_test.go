@@ -13,6 +13,7 @@ func TestV2AdminRegcodeResourcesUseBoundedResourceShape(t *testing.T) {
 	app := newTestApp(t)
 	admin := registerAdmin(t, app, "v2-reg-admin", "Admin123456")
 
+
 	created := doJSON(app, http.MethodPost, "/api/v2/admin/regcodes", `{"type":1,"days":30,"validity_time":-1,"use_count_limit":-1,"count":1,"note":"v2"}`, admin)
 	if created.Code != http.StatusOK {
 		t.Fatalf("v2 create status=%d body=%s", created.Code, created.Body.String())
@@ -121,6 +122,7 @@ func TestV2AdminRegcodeResourcesRejectNormalUsers(t *testing.T) {
 func TestV2RegcodeUsageKeepsTelegramOnlyIdentity(t *testing.T) {
 	app := newTestApp(t)
 	admin := registerAdmin(t, app, "v2-reg-usage-admin", "Admin123456")
+
 	code := "V2-USAGE-TEST"
 	if err := app.store().UpsertRegCode(store.RegCode{Code: code, Type: 1, Days: 30, ValidityTime: -1, UseCountLimit: -1, Active: true, UsedByTelegramIDs: []int64{987654321}}); err != nil {
 		t.Fatalf("upsert regcode: %v", err)

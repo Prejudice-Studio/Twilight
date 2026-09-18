@@ -15,6 +15,7 @@ func (a *App) handleV2Announcements(w http.ResponseWriter, r *http.Request, p Pa
 
 // handleV2AnnouncementsMe 是登录用户视角：可见公告 + 该用户未确认的强制已读公告。
 func (a *App) handleV2AnnouncementsMe(w http.ResponseWriter, r *http.Request, p Params) {
+
 	w.Header().Set("Cache-Control", "private, no-store")
 	a.handleAnnouncementsMe(w, r, p)
 }

@@ -26,6 +26,7 @@ func TestV2UserAnnouncementResourcesRequireUserAndDoNotCache(t *testing.T) {
 
 	cookies := registerAndLogin(t, app, "v2-announcement-user", "Announcement123456")
 	read := doJSON(app, http.MethodGet, "/api/v2/me/announcements", "", cookies)
+
 	if read.Code != http.StatusOK || read.Header().Get("Cache-Control") != "private, no-store" {
 		t.Fatalf("v2 announcement read status=%d cache=%q body=%s", read.Code, read.Header().Get("Cache-Control"), read.Body.String())
 	}

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+
 	"strings"
 	"testing"
 )
@@ -23,6 +24,7 @@ func TestV2ConfigResourcesDoNotExposeFilesystemPaths(t *testing.T) {
 		"[Admin]\nadmin_usernames = \"admin\"\n\n" +
 		"[Database]\ndriver = " + strconv.Quote(app.cfg().DatabaseDriver) + "\nbackup_dir = " + strconv.Quote(app.cfg().DatabaseBackupDir) + "\nstate_file = " + strconv.Quote(app.cfg().StateFile) + "\n"
 	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+
 		t.Fatal(err)
 	}
 	backupDir := app.configBackupDir()

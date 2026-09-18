@@ -825,7 +825,7 @@ V2 用户端媒体资源（WebUI 媒体页使用）：
 | GET | `/api/v2/telegram/commands` | Public | Telegram 命令目录。**可以公开的原因**：数据 100% 来自编译期静态注册表，只输出命令名、说明、用法、是否管理员命令、是否被禁用这类文案元数据，不含用户资料或服务器状态，也无法据此执行任何命令 |
 | GET | `/api/v2/telegram/status` | User | 当前账号的 Telegram 绑定与换绑能力；`can_unbind` / `can_change` 会依据是否存在 pending/approved 换绑申请动态计算 |
 | POST | `/api/v2/telegram/unbind` | User | 解绑 Telegram。非管理员必须先有 approved 的换绑申请，否则 403；成功后清理 TG 残留、消费申请，已绑 Emby 时连带停用远端 Emby |
-| POST | `/api/v2/telegram/rebind-request` | User | 提交换绑申请（`reason` 可选，截断 500）。前置：当前必须已绑定 Telegram，否则 400；审批走 `/admin/telegram/rebind-requests/:id/approve\|reject` |
+| POST | `/api/v2/telegram/rebind-request` | User | 提交换绑申请（`reason` 可选，截断 500）。前置：当前必须已绑定 Telegram，否则 400；审批走 `/admin/telegram/rebind-requests/:id/approve|reject` |
 
 ### 用户管理（Admin）
 

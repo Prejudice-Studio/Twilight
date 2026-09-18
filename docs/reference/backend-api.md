@@ -51,6 +51,42 @@ V2 基础协议目前提供 `GET /api/v2/system/health`、`GET /api/v2/system/ca
 
 这些端点是共享 Go 应用服务的版本化适配，不建立第二套业务状态机。邮箱验证、密码强度、当前 Web 密码、Emby 管理员保护、注册资格、远端副作用、Store 原子写入、审计和会话 Cookie 都由 Go 后端最终决定。V1 设置端点继续保留给外部兼容调用与 `NEXT_PUBLIC_USE_V1_COMPAT` 回退；WebUI 不再直接请求它们。
 
+V2 基础协议目前提供 `GET /api/v2/system/health`、`GET /api/v2/system/capabilities`、公开安全系统摘要 `GET /api/v2/system/info`、管理员独立健康资源、管理员统计、V2 认证/注册资源、受保护的 `GET /api/v2/dashboard/summary`、`GET /api/v2/announcements`、`GET /api/v2/signin/summary`、`GET /api/v2/invite/summary` 和 `GET /api/v2/bangumi/summary`。认证页通过 V2 资源读取能力并提交登录、注册、Telegram 注册绑定码和找回密码动作；响应按公开或私有会话边界使用 `no-store`，不会把 Cookie、密码、Token 或临时凭据写入浏览器状态。它们沿用统一 JSON envelope；仪表盘摘要一次返回当前用户、公开能力和在线人数状态。公告资源在一次私有 `no-store` 读取中返回可见公告和当前账号未确认的强制阅读公告，`POST /api/v2/announcements/ack` 只确认当前账号去重后的正整数 ID。Emby 读取失败时只将 `data.viewers.available` 设为 `false`，本地用户和能力数据仍然返回，不把故障伪装为零人在线。签到摘要一次返回 `summary`、`config` 和最近 30 条 `history`；签到、续期和自动续期开关也已经使用 V2 资源，后端仍在共享 handler 与 Store 中执行功能开关、Emby 资格、严格布尔解析、审计以及原子扣分。邀请摘要一次返回 `config` 与会话作用域的 `invite` 投影；Bangumi 摘要一次返回本地同步状态、公开账号资料、五类收藏的有限预览和最近动态，Bangumi 单类读取失败时保留其他成功结果并标记 `collections_partial`。Bangumi Token 永不进入 V2 响应。WebUI 管理员服务器状态页 `/admin/status` 并行读取 `/api/v2/admin/health/api`、`/api/v2/admin/health/database`、`/api/v2/admin/health/emby`、`/api/v2/system/info` 和 `/api/v2/admin/stats`；三个健康接口保持独立，每个只负责一个探针，统计不包含播放统计。上述接口不改变 `/api/v1` 写入状态机；`/api/v1` 仅保留给外部 API Key 集成与 `NEXT_PUBLIC_USE_V1_COMPAT` 回退。
+
+管理员状态资源均要求 `AuthAdmin`。`/api/v2/admin/health/api` 只检查 API 进程，`/api/v2/admin/health/database` 只检查数据库状态，`/api/v2/admin/health/emby` 从后端发起 Emby 服务探测；三者都返回 `private, no-store`，单项失败不影响其它响应。`/api/v2/admin/stats` 只返回有限的用户、注册码、运行时和 Redis 回退摘要，也使用 `private, no-store`。公共 `/api/v2/system/info` 只返回站点名称、图标、版本、公开能力、受限额度和初始化状态，不返回 Emby/Telegram/数据库配置值。
+
+### V2 管理员配置资源
+
+配置管理页面使用 `/api/v2/admin/config/schema`、`/toml` 和 `/backups` 资源读取结构化配置、脱敏 TOML 与配置备份。V2 响应不返回服务器文件系统路径，secret 字段仍使用服务端脱敏哨兵；保存、创建/删除备份、整理、认证背景图上传和恢复均由 WebUI 发起写请求。恢复预览与实际恢复继续复用 Go 的配置解析、受保护字段、原子写入、热重载、失败回滚和 `RESTORE_CONFIG_BACKUP` 确认边界。
+
+### V2 个人设置资源
+
+个人设置页面使用一组独立的资源，全部要求 User 鉴权并返回 `Cache-Control: private, no-store`：
+
+| 方法 | 路径 | 说明 |
+| ---- | ---- | ---- |
+| GET | `/api/v2/settings` | 返回当前用户设置、Telegram/Emby 状态和密码安全策略 |
+| PUT | `/api/v2/settings/preferences` | 更新通知、自动续期和密码安全偏好；布尔字段必须是 JSON 布尔值 |
+| GET | `/api/v2/settings/appearance` | 返回当前账号头像与背景配置；响应为私有 `no-store`，只返回资源 URL 和安全配置字符串 |
+| PUT | `/api/v2/settings/appearance/background` | 更新背景配置；渐变、上传资源路径和数值范围仍由共享 Go 背景校验器最终处理 |
+| DELETE | `/api/v2/settings/appearance/background` | 删除当前账号背景配置 |
+| POST | `/api/v2/settings/appearance/background/upload` | 上传背景图片，multipart 字段为 `file` 和 `type=light|dark` |
+| POST | `/api/v2/settings/appearance/avatar/upload` | 上传头像，multipart 字段为 `file` |
+| DELETE | `/api/v2/settings/appearance/avatar` | 删除当前账号头像 |
+| POST | `/api/v2/settings/email/send-code` | 发送邮箱绑定或密码操作验证码 |
+| POST | `/api/v2/settings/email/verify` | 校验邮箱绑定验证码并完成当前账号邮箱验证 |
+| POST | `/api/v2/settings/password/system` | 修改 Web 密码，并按策略校验旧密码、邮箱验证码和会话轮换 |
+| POST | `/api/v2/settings/password/emby` | 修改当前绑定的 Emby 密码 |
+| POST | `/api/v2/settings/emby/bind` | 使用现有 Emby 凭据绑定当前账号 |
+| POST | `/api/v2/settings/emby/register` | 按后端资格创建并绑定 Emby 账号 |
+| POST | `/api/v2/settings/emby/unbind` | 按后端资格解除当前账号的 Emby 绑定 |
+| GET | `/api/v2/settings/apikeys` | 返回当前账号的掩码 API Key 列表 |
+| POST | `/api/v2/settings/apikeys` | 创建 API Key；明文只在当前响应中返回一次 |
+| PUT | `/api/v2/settings/apikeys/{key_id}` | 更新当前账号指定 API Key 的名称、启用、查询参数和限速设置 |
+| DELETE | `/api/v2/settings/apikeys/{key_id}` | 删除当前账号指定 API Key |
+
+这些端点是共享 Go 应用服务的版本化适配，不建立第二套业务状态机。邮箱验证、密码强度、当前 Web 密码、Emby 管理员保护、注册资格、远端副作用、Store 原子写入、审计和会话 Cookie 都由 Go 后端最终决定。V1 设置端点继续保留给外部兼容调用与 `NEXT_PUBLIC_USE_V1_COMPAT` 回退；WebUI 不再直接请求它们。
+
 ### 1.1 文档分工
 
 | 文档 | 用途 |

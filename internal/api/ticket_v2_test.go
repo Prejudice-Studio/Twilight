@@ -13,6 +13,7 @@ func TestV2AdminTicketResourcesUseResourceShapeAndPreserveConversation(t *testin
 	app := newTestApp(t)
 	enableTicketSystem(t, app, nil)
 	admin := registerAdmin(t, app, "v2-admin", "Admin123456")
+
 	user := registerAndLogin(t, app, "v2-ticket-user", "User12345678")
 	id := createTicket(t, app, "v2 resource", "initial message", user)
 
@@ -119,6 +120,7 @@ func TestV2UserTicketReplyUsesOwnershipAndAtomicAppend(t *testing.T) {
 func TestV2AdminTicketTypeResourceUsesPathIdentity(t *testing.T) {
 	app := newTestApp(t)
 	admin := registerAdmin(t, app, "v2-type-admin", "Admin123456")
+
 	if err := app.store().AddTicketType("BugReport"); err != nil {
 		t.Fatalf("add type: %v", err)
 	}

@@ -13,6 +13,7 @@ func TestV2AdminInviteResourcesUseBoundedShapes(t *testing.T) {
 	app := newTestApp(t)
 	app.cfg().InviteEnabled = true
 	admin := registerAdmin(t, app, "v2-invite-admin", "Admin123456")
+
 	owner, err := app.store().CreateUser(store.User{Username: "v2-invite-owner", Role: store.RoleNormal, Active: true})
 	if err != nil {
 		t.Fatal(err)
@@ -73,6 +74,7 @@ func TestV2AdminInviteResourcesUseBoundedShapes(t *testing.T) {
 func TestV2AdminInviteConfigExposesOnlyInviteFields(t *testing.T) {
 	app := newTestApp(t)
 	admin := registerAdmin(t, app, "v2-invite-config-admin", "Admin123456")
+
 	response := doJSON(app, http.MethodGet, "/api/v2/admin/invite/config/schema", "", admin)
 	if response.Code != http.StatusOK {
 		t.Fatalf("v2 invite config status=%d body=%s", response.Code, response.Body.String())
@@ -106,6 +108,7 @@ func TestV2AdminInviteConfigExposesOnlyInviteFields(t *testing.T) {
 func TestV2AdminInviteTreeAppliesCollapsedSearchAndSelectedProjection(t *testing.T) {
 	app := newTestApp(t)
 	admin := registerAdmin(t, app, "v2-invite-tree-admin", "Admin123456")
+
 	parent, err := app.store().CreateUser(store.User{Username: "v2-tree-parent", Role: store.RoleNormal, Active: true})
 	if err != nil {
 		t.Fatal(err)

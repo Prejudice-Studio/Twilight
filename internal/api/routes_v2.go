@@ -228,6 +228,7 @@ func (a *App) registerV2Routes() {
 	a.add(http.MethodPost, "/api/v2/admin/users/:uid/refresh-status", AuthAdmin, a.handleV2AdminRefreshUserStatus)
 	a.add(http.MethodPost, "/api/v2/admin/users/:uid/renew", AuthAdmin, a.handleV2AdminRenewUser)
 	a.add(http.MethodPost, "/api/v2/admin/users/:uid/cancel-permanent", AuthAdmin, a.handleV2AdminCancelPermanent)
+
 	a.add(http.MethodPost, "/api/v2/admin/users/:uid/set-expiry", AuthAdmin, a.handleV2AdminSetUserExpiry)
 	a.add(http.MethodPost, "/api/v2/admin/users/:uid/reset-password", AuthAdmin, a.handleV2AdminResetPassword)
 	a.add(http.MethodPost, "/api/v2/admin/users/:uid/kick", AuthAdmin, a.handleV2AdminKickUser)
@@ -304,6 +305,7 @@ func (a *App) registerV2Routes() {
 	// handleV2TelegramRosterStats，但路由按注册顺序匹配，第二条永远不生效；
 	// 重复注册还会让 scripts/check_docs_drift.go 的端点计数对不上。删掉死注册。
 
+
 	// Export resources: users CSV export
 	a.add(http.MethodGet, "/api/v2/admin/export/users", AuthAdmin, a.handleV2ExportUsers)
 
@@ -354,6 +356,7 @@ func (a *App) registerV2Routes() {
 	// handleV2DeleteMediaRequestByKey，那个 handler 读 params["require_key"]，
 	// 而本路由只有 request_id，于是 require_key 恒为空、删除恒 404。
 	a.add(http.MethodDelete, "/api/v2/media/requests/:request_id", AuthUser, a.handleV2DeleteMediaRequest)
+
 	a.add(http.MethodPost, "/api/v2/media/requests/external/update", AuthPublic, a.handleV2ExternalMediaUpdate)
 
 	// Invite/signin extended endpoints
@@ -435,6 +438,7 @@ func (a *App) registerV2CompletionRoutes() {
 	// Personalised announcement feed. The public /api/v2/announcements route
 	// is anonymous and cannot carry per-user force-read state.
 	a.add(http.MethodGet, "/api/v2/me/announcements", AuthUser, a.handleV2AnnouncementsMe)
+
 
 	// Invite code listing for the account page.
 	a.add(http.MethodGet, "/api/v2/invite/codes", AuthUser, a.handleInviteCodes)

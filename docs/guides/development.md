@@ -23,6 +23,7 @@
 | `internal/store` | 状态存储层：唯一运行后端 PostgreSQL，定义单一状态文档 `State`；`Store` 仅经 `store.OpenPostgres` 构造。 |
 | `internal/config` | TOML 配置与 `TWILIGHT_*` 环境变量加载。 |
 | `internal/security` | 密码哈希、安全随机数与兼容校验。 |
+| `start_backend_dev.sh` / `start_backend_prod.sh` | 后端本地启动脚本（开发 / 生产）。 |
 | `deploy/` | systemd unit 与安装脚本（`setup-systemd.sh`）、Docker 构建上下文（`deploy/docker/`）。 |
 | `scripts/check_docs_drift.go` | 路由-文档漂移门禁（v1 + v2 两套路由表都要在 `docs/*.md` 里出现）。 |
 | `scripts/check-frontend-v2-coverage.py` | 前端调用点与 V2 路由表的对账门禁。 |
