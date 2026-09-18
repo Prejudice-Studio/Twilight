@@ -154,6 +154,11 @@ type Config struct {
 	// 无账号访客不参与 Emby 数据，不能读取榜单。
 	PlayRankEnabled     bool
 	PlayRankUserVisible bool
+	// PlaybackReportingEnabled 允许用 Emby 的 Playback Reporting 插件作为播放记录
+	// 数据源。插件可用时用它记的 PlayDuration - PauseDuration（净时长，扣掉暂停），
+	// 比活动日志配对出的墙上时钟差准；插件没装或探测失败时自动回退活动日志，
+	// 不需要改这个开关。
+	PlaybackReportingEnabled bool
 	EmbyUsername                   string
 	EmbyPassword                   string
 	EmbyURLList                    []Line
@@ -626,6 +631,10 @@ func defaults() Config {
 		// 用户看，但只对已登录账号开放，无账号访客没有任何读取路径。
 		PlayRankEnabled:     true,
 		PlayRankUserVisible: true,
+		// 默认开启，因为它只是"许可"，不是"生效"：真正决定用不用的是探测。
+		// 没装插件时 Emby 会拒绝那个端点，同步照旧走活动日志，管理员不用为此
+		// 改配置。装了插件又不想用它的净时长口径，才需要显式关掉。
+		PlaybackReportingEnabled: true,
 		SessionCookie:        "twilight_session",
 		// CookieSecure 默认 true：HTTPS 是生产基线，HTTP 调试场景显式
 		// 改 toml 或 env 关掉。旧默认 false 在 HTTP 部署时也不告警，

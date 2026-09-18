@@ -469,6 +469,21 @@ CREATE INDEX IF NOT EXISTS twilight_playback_records_item_id_idx ON twilight_pla
 		_ = db.Close()
 		return nil, status, describePostgresConnectionError(target, err)
 	}
+	// source 标记这条播放来自活动日志还是 Playback Reporting 插件。存量行统一
+	// 归为活动日志——在加这一列之前只可能有那一个来源。
+	// 回填只在第一次加列时真的命中行：之后 WHERE source = '' 匹配 0 行，只剩一次
+	// 索引扫描，不会每轮启动都重写整张表。
+	for _, statement := range []string{
+		`ALTER TABLE twilight_playback_records ADD COLUMN IF NOT EXISTS source text`,
+		`UPDATE twilight_playback_records SET source = 'activity_log' WHERE source IS NULL OR source = ''`,
+		`ALTER TABLE twilight_playback_records ALTER COLUMN source SET DEFAULT 'activity_log'`,
+		`ALTER TABLE twilight_playback_records ALTER COLUMN source SET NOT NULL`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			_ = db.Close()
+			return nil, status, describePostgresConnectionError(target, err)
+		}
+	}
 	if _, err := db.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS twilight_playback_events (
 	uid bigint NOT NULL,

@@ -497,7 +497,20 @@ type PlaybackRecord struct {
 	IndexNumber int    `json:"index_number,omitempty"`
 	Duration    int64  `json:"duration"`
 	PlayedAt    int64  `json:"played_at"`
+	// Source 记录这条播放是从哪来的：活动日志配对（PlaybackSourceActivityLog）
+	// 还是 Playback Reporting 插件（PlaybackSourceReporting）。没有它就无法判断
+	// 一行时长是墙面时钟差还是净时长，也没法防止两个数据源把同一次播放记两遍。
+	Source string `json:"source,omitempty"`
+	// WallDuration 是含暂停的墙上时长，只有插件路径会填。它不入库，只用来把插件
+	// 的行和活动日志的行对上：两者对"这一场播放发生在什么时刻"的记法不同。
+	WallDuration int64 `json:"-"`
 }
+
+// 播放记录来源。空字符串视为"活动日志"（存量行没有 source 列时的默认值）。
+const (
+	PlaybackSourceActivityLog = "activity_log"
+	PlaybackSourceReporting   = "playback_reporting"
+)
 
 type PlaybackSession struct {
 	UID       int64  `json:"uid"`

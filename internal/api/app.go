@@ -113,6 +113,14 @@ type App struct {
 	// 员版互不相通。
 	playRankMu        sync.Mutex
 	playRankCache     map[string]playRankSnapshot
+	// playbackReportingReady 缓存 Playback Reporting 插件的探测结果。探测要往
+	// Emby 发一次自定义 SQL，不能每次同步都做；插件没装时必须静默回退，不能
+	// 每轮都往日志里写一条 warn。
+	playbackReportingMu        sync.Mutex
+	playbackReportingUntil     time.Time
+	playbackReportingReady     bool
+	playbackReportingLastError string
+	playbackReportingSyncedAt  int64
 	embySessionsMu    sync.Mutex
 	embySessionsUntil time.Time
 	embySessionsCache []map[string]any

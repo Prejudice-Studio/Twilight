@@ -81,6 +81,84 @@ func TestPlaybackRecordCoverageReportsStoredExtent(t *testing.T) {
 	}
 }
 
+// TestApplyPlaybackReportingUpdatesSameSessionInsteadOfAddingRow 盯住这条链路最
+// 容易出事的地方：插件和活动日志都记录了同一场播放。若不去重，同一场播放在榜单
+// 里会变成两次，播放次数直接翻倍。
+func TestApplyPlaybackReportingUpdatesSameSessionInsteadOfAddingRow(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	// 活动日志先写一行：停止时刻 1000，墙上时长 3600（其中 1200 秒是暂停）。
+	if err := st.AddPlaybackRecord(PlaybackRecord{
+		UID: 1, ItemID: "item-1", Duration: 3600, PlayedAt: 1000, Source: PlaybackSourceActivityLog,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 插件这一行的时间戳比活动日志早 8 小时（时区记法不同），净时长 2400。
+	matched, inserted, err := st.ApplyPlaybackReportingRecords([]PlaybackRecord{{
+		UID: 1, ItemID: "item-1", Duration: 2400, PlayedAt: 1000 - 8*3600,
+		WallDuration: 3600, Source: PlaybackSourceReporting,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if matched != 1 || inserted != 0 {
+		t.Fatalf("same session must be corrected, not duplicated: matched=%d inserted=%d", matched, inserted)
+	}
+	records := st.PlaybackRecords(1, 0, 10)
+	if len(records) != 1 {
+		t.Fatalf("expected one row, got %#v", records)
+	}
+	if records[0].Duration != 2400 {
+		t.Fatalf("duration should be the net 2400, got %d", records[0].Duration)
+	}
+	if records[0].Source != PlaybackSourceReporting {
+		t.Fatalf("source should be upgraded to reporting, got %q", records[0].Source)
+	}
+}
+
+// TestApplyPlaybackReportingAppendsUnknownSessionAndStaysIdempotent 覆盖另外两种
+// 情况：活动日志没记到的播放要补进来；同一批数据重放时既不该新增也不该重复修正。
+func TestApplyPlaybackReportingAppendsUnknownSessionAndStaysIdempotent(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	reporting := []PlaybackRecord{{
+		UID: 7, ItemID: "item-7", Title: "仅插件记到的一场", Duration: 1800, PlayedAt: 5000,
+		WallDuration: 2000, Source: PlaybackSourceReporting,
+	}}
+	matched, inserted, err := st.ApplyPlaybackReportingRecords(reporting)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if matched != 0 || inserted != 1 {
+		t.Fatalf("unknown session must be inserted: matched=%d inserted=%d", matched, inserted)
+	}
+
+	// 重放同一批：行数不变，也不该再报一次新增。
+	matched, inserted, err = st.ApplyPlaybackReportingRecords(reporting)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := st.PlaybackRecords(7, 0, 10)
+	if len(records) != 1 {
+		t.Fatalf("replay must not duplicate rows, got %#v", records)
+	}
+	if inserted != 0 {
+		t.Fatalf("replay must not report inserts, got %d", inserted)
+	}
+	if matched != 0 {
+		t.Fatalf("rows already corrected must not be matched again, got %d", matched)
+	}
+}
+
 func TestBangumiSyncSuccessCountsUseRecentHundredPerUser(t *testing.T) {
 	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
 	if err != nil {

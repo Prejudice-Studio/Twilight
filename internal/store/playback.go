@@ -442,7 +442,7 @@ func queryPlaybackRecordsDB(db *sql.DB, uid int64, since int64, limit int) ([]Pl
 	if limit <= 0 {
 		limit = 10000
 	}
-	query := fmt.Sprintf(`SELECT uid, item_id, title, series_name, media_type, index_number, duration, played_at
+	query := fmt.Sprintf(`SELECT uid, item_id, title, series_name, media_type, index_number, duration, played_at, source
 FROM twilight_playback_records %s ORDER BY played_at DESC LIMIT $%d`, where, len(args)+1)
 	args = append(args, limit)
 	ctx, cancel := context.WithTimeout(context.Background(), pgPlaybackReadTimeout)
@@ -455,7 +455,7 @@ FROM twilight_playback_records %s ORDER BY played_at DESC LIMIT $%d`, where, len
 	var records []PlaybackRecord
 	for rows.Next() {
 		var r PlaybackRecord
-		if err := rows.Scan(&r.UID, &r.ItemID, &r.Title, &r.SeriesName, &r.MediaType, &r.IndexNumber, &r.Duration, &r.PlayedAt); err != nil {
+		if err := rows.Scan(&r.UID, &r.ItemID, &r.Title, &r.SeriesName, &r.MediaType, &r.IndexNumber, &r.Duration, &r.PlayedAt, &r.Source); err != nil {
 			return records, err
 		}
 		records = append(records, r)
@@ -474,10 +474,10 @@ FROM twilight_playback_records WHERE played_at >= $1`
 func insertPlaybackRecordDB(db *sql.DB, record PlaybackRecord) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), pgPlaybackWriteTimeout)
 	defer cancel()
-	result, err := db.ExecContext(ctx, `INSERT INTO twilight_playback_records (uid, item_id, title, series_name, media_type, index_number, duration, played_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	result, err := db.ExecContext(ctx, `INSERT INTO twilight_playback_records (uid, item_id, title, series_name, media_type, index_number, duration, played_at, source)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (uid, item_id, played_at) DO NOTHING`,
-		record.UID, record.ItemID, record.Title, record.SeriesName, record.MediaType, record.IndexNumber, record.Duration, record.PlayedAt)
+		record.UID, record.ItemID, record.Title, record.SeriesName, record.MediaType, record.IndexNumber, record.Duration, record.PlayedAt, playbackSourceForWrite(record.Source))
 	if err != nil {
 		return false, err
 	}
@@ -509,15 +509,15 @@ func insertPlaybackRecordChunkDB(db *sql.DB, chunk []PlaybackRecord) {
 		return
 	}
 	var b strings.Builder
-	b.WriteString(`INSERT INTO twilight_playback_records (uid, item_id, title, series_name, media_type, index_number, duration, played_at) VALUES `)
-	args := make([]any, 0, len(chunk)*8)
+	b.WriteString(`INSERT INTO twilight_playback_records (uid, item_id, title, series_name, media_type, index_number, duration, played_at, source) VALUES `)
+	args := make([]any, 0, len(chunk)*9)
 	for i, record := range chunk {
 		if i > 0 {
 			b.WriteByte(',')
 		}
-		base := i * 8
-		fmt.Fprintf(&b, "($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)", base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8)
-		args = append(args, record.UID, record.ItemID, record.Title, record.SeriesName, record.MediaType, record.IndexNumber, record.Duration, record.PlayedAt)
+		base := i * 9
+		fmt.Fprintf(&b, "($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)", base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9)
+		args = append(args, record.UID, record.ItemID, record.Title, record.SeriesName, record.MediaType, record.IndexNumber, record.Duration, record.PlayedAt, playbackSourceForWrite(record.Source))
 	}
 	b.WriteString(` ON CONFLICT (uid, item_id, played_at) DO NOTHING`)
 	ctx, cancel := context.WithTimeout(context.Background(), pgPlaybackWriteTimeout)
@@ -534,6 +534,178 @@ func (s *Store) DeletePlaybackRecordsBefore(ctx context.Context, cutoff int64) (
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+// playbackSourceForWrite 把来源收敛到两个枚举值之一。空来源一律算活动日志——
+// 在加 source 列之前写入的存量行只可能来自活动日志配对。
+func playbackSourceForWrite(source string) string {
+	if source == PlaybackSourceReporting {
+		return PlaybackSourceReporting
+	}
+	return PlaybackSourceActivityLog
+}
+
+// playbackReportingMatchSlack 是判断"这两行是不是同一场播放"的容差（秒）。
+//
+// 两个数据源对"这一场播放发生在什么时刻"的记法并不一致，而且偏差没有可靠办法
+// 推算：
+//   - 插件记的是它自己那条 PlaybackActivity 的时间，活动日志记录的是停止事件的
+//     时间，两者相差最多一场播放的长度；
+//   - 插件的 SQLite 时间戳可能是 UTC（DateTime('now')），而活动日志走服务器本地
+//     时区，两者再差若干个整小时，且取决于 Emby 那台机器的时区配置。
+//
+// 所以容差取得比较宽，并在候选里挑时间最接近的那一条：同一用户同一集在一天内
+// 看两遍时，两条各配各的最近项，不会整体错位。放宽的代价是极端情况下（同一集
+// 反复重看）可能配错，而配错只是把两场时长对调，不会凭空多出一次播放——相比
+// 配不上导致的"一次播放记两遍"，这是划算的取舍。
+const playbackReportingMatchSlack = 12 * 60 * 60
+
+// ApplyPlaybackReportingRecords 用 Playback Reporting 插件的行修正并补充播放记录，
+// 返回被修正的条数与新增的条数。
+//
+// 这里最要紧的是**不能把一次播放记成两次**：活动日志早就为同一场播放写过一行
+// （时间是停止时刻、时长是墙上时钟差），插件若直接再插一行，"播放次数"就会翻倍，
+// 榜单立刻失真。所以命中同场播放时只把那一行的时长换成净时长并改来源，只有没
+// 命中时才插入新行。
+//
+// 只修正非插件来源的行：已经被插件修正过的行重复同步时不应再次参与匹配，否则
+// 时长会被后来的、可能更短的窗口数据覆盖回去。
+func (s *Store) ApplyPlaybackReportingRecords(records []PlaybackRecord) (int, int, error) {
+	if len(records) == 0 {
+		return 0, 0, nil
+	}
+	s.mu.RLock()
+	db := s.db
+	s.mu.RUnlock()
+	if db != nil {
+		matched, inserted, err := applyPlaybackReportingDB(db, records)
+		if err == nil {
+			return matched, inserted, nil
+		}
+	}
+	return s.applyPlaybackReportingMemory(records)
+}
+
+func playbackReportingWindow(record PlaybackRecord) (int64, int64) {
+	window := record.WallDuration
+	if window < 0 {
+		window = 0
+	}
+	return record.PlayedAt - window - playbackReportingMatchSlack, record.PlayedAt + window + playbackReportingMatchSlack
+}
+
+func applyPlaybackReportingDB(db *sql.DB, records []PlaybackRecord) (int, int, error) {
+	matched, inserted := 0, 0
+	for _, record := range records {
+		if record.UID == 0 || record.ItemID == "" {
+			continue
+		}
+		low, high := playbackReportingWindow(record)
+		ctx, cancel := context.WithTimeout(context.Background(), pgPlaybackWriteTimeout)
+		var id int64
+		err := db.QueryRowContext(ctx, `SELECT id FROM twilight_playback_records
+WHERE uid = $1 AND item_id = $2 AND played_at BETWEEN $3 AND $4 AND source <> $5
+ORDER BY played_at DESC LIMIT 1`,
+			record.UID, record.ItemID, low, high, PlaybackSourceReporting).Scan(&id)
+		if err == nil {
+			if _, execErr := db.ExecContext(ctx, `UPDATE twilight_playback_records
+SET duration = $1, source = $2 WHERE id = $3`, record.Duration, PlaybackSourceReporting, id); execErr == nil {
+				matched++
+			}
+			cancel()
+			continue
+		}
+		// xmax = 0 表示这一行是真的插进去的，而不是撞上 (uid,item_id,played_at)
+		// 走了 DO UPDATE。重复同步同一窗口时才不会把"新增"虚报一遍。
+		var wasInsert bool
+		err = db.QueryRowContext(ctx, `INSERT INTO twilight_playback_records
+(uid, item_id, title, series_name, media_type, index_number, duration, played_at, source)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (uid, item_id, played_at) DO UPDATE SET duration = EXCLUDED.duration, source = EXCLUDED.source
+RETURNING (xmax = 0)`,
+			record.UID, record.ItemID, record.Title, record.SeriesName, record.MediaType, record.IndexNumber,
+			record.Duration, record.PlayedAt, PlaybackSourceReporting).Scan(&wasInsert)
+		cancel()
+		if err != nil {
+			return matched, inserted, err
+		}
+		if wasInsert {
+			inserted++
+		}
+	}
+	return matched, inserted, nil
+}
+
+func (s *Store) applyPlaybackReportingMemory(records []PlaybackRecord) (int, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.refreshLocked(); err != nil {
+		return 0, 0, err
+	}
+	matched, inserted := 0, 0
+	accepted := make([]PlaybackRecord, 0, len(records))
+	for _, record := range records {
+		if record.UID == 0 || record.ItemID == "" {
+			continue
+		}
+		low, high := playbackReportingWindow(record)
+		hit := -1
+		for index := range s.state.PlaybackRecords {
+			existing := &s.state.PlaybackRecords[index]
+			if existing.UID != record.UID || existing.ItemID != record.ItemID {
+				continue
+			}
+			if existing.PlayedAt < low || existing.PlayedAt > high {
+				continue
+			}
+			if existing.Source == PlaybackSourceReporting {
+				continue
+			}
+			if hit < 0 || absInt64(existing.PlayedAt-record.PlayedAt) < absInt64(s.state.PlaybackRecords[hit].PlayedAt-record.PlayedAt) {
+				hit = index
+			}
+		}
+		if hit >= 0 {
+			s.state.PlaybackRecords[hit].Duration = record.Duration
+			s.state.PlaybackRecords[hit].Source = PlaybackSourceReporting
+			matched++
+			continue
+		}
+		duplicate := false
+		for index := range s.state.PlaybackRecords {
+			existing := &s.state.PlaybackRecords[index]
+			if existing.UID == record.UID && existing.ItemID == record.ItemID && existing.PlayedAt == record.PlayedAt {
+				existing.Duration = record.Duration
+				existing.Source = PlaybackSourceReporting
+				duplicate = true
+				break
+			}
+		}
+		if duplicate {
+			continue
+		}
+		stored := record
+		stored.Source = PlaybackSourceReporting
+		accepted = append(accepted, stored)
+		inserted++
+	}
+	if len(accepted) == 0 {
+		return matched, inserted, nil
+	}
+	head := make([]PlaybackRecord, 0, len(accepted)+len(s.state.PlaybackRecords))
+	for i := len(accepted) - 1; i >= 0; i-- {
+		head = append(head, accepted[i])
+	}
+	head = append(head, s.state.PlaybackRecords...)
+	s.state.PlaybackRecords = compactHead(head, maxStoredPlaybackRecords)
+	return matched, inserted, s.saveLocked()
+}
+
+func absInt64(value int64) int64 {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 // playbackRankDefaultLimit / playbackRankMaxLimit 约束榜单长度：排行榜是聚合

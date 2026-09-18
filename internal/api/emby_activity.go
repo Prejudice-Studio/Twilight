@@ -139,7 +139,25 @@ func (a *App) fetchAndStoreEmbyActivityLogsSince(ctx context.Context, since time
 		// 新写入的播放记录要立刻反映到日榜/周榜，否则管理员点了同步还要等缓存过期。
 		a.invalidatePlayRankCache()
 	}
+	// 活动日志落地后再让插件把时长修一遍：装了 Playback Reporting 时它的净时长
+	// 会覆盖同场播放的墙上时钟差，活动日志压根没记到那一场才新增。没装插件时
+	// 这一步是空操作，不会打断上面的流程。
+	a.applyPlaybackReporting(ctx, since)
 	return added, nil
+}
+
+// applyPlaybackReporting 是插件数据源在同步流程里的挂钩。它自己吞掉所有错误：
+// 这条链路是增强而非关键路径，失败只意味着时长口径差一点，不该让调度任务报错。
+func (a *App) applyPlaybackReporting(ctx context.Context, since time.Time) {
+	updated, inserted, err := a.syncPlaybackReporting(ctx, since, time.Now().Add(time.Hour))
+	if err != nil {
+		zap.L().Warn("failed to sync playback reporting records", zap.Error(err))
+		return
+	}
+	if updated > 0 || inserted > 0 {
+		zap.L().Info("applied playback reporting records",
+			zap.Int("updated", updated), zap.Int("inserted", inserted))
+	}
 }
 
 func (a *App) parseEmbyDate(s string) int64 {

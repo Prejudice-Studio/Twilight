@@ -244,6 +244,10 @@ func (a *App) handleV2AdminPlayRank(w http.ResponseWriter, r *http.Request, _ Pa
 	data := a.playRankData(rangeKey, since, limit, true, refresh)
 	data["enabled"] = a.cfg().PlayRankEnabled
 	data["user_visible"] = a.cfg().PlayRankUserVisible
+	// 管理员要能确认自己看到的时长到底是净时长还是墙上时钟差，否则"排行榜数字
+	// 和 Emby 对不上"根本无从排查。available 走探测结果的 10 分钟缓存，不会每次
+	// 刷新都去问 Emby。
+	data["playback_reporting"] = a.playbackReportingStatus(r.Context())
 	ok(w, "OK", data)
 }
 

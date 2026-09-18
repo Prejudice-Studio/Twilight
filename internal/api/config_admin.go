@@ -1056,6 +1056,7 @@ func configSectionDefs() []configSectionDef {
 			{Key: "emby_whitelist_url", Label: "白名单单线路地址", Type: "string", Description: "仅管理员与白名单用户可见的单一线路地址；留空则只使用上面的白名单线路列表"},
 			{Key: "play_rank_enabled", Label: "播放排行榜", Type: "bool", Description: "启用 Emby 播放日榜/周榜；关闭后除管理员后台外全部拒绝访问"},
 			{Key: "play_rank_user_visible", Label: "排行榜对普通用户开放", Type: "bool", Description: "普通用户可在侧边栏入口查看脱敏后的排行榜（用户名打码）；未登录访客无任何入口"},
+			{Key: "playback_reporting_enabled", Label: "使用 Playback Reporting 净时长", Type: "bool", Description: "装了 Emby 的 Playback Reporting 插件时，用它的 PlayDuration − PauseDuration 作为播放时长（扣除暂停）；插件不可用会自动回退活动日志，无需手动关闭"},
 		}},
 		{Key: "Telegram", Title: "Telegram", Description: "Bot、订阅校验和群组管理\n推荐在 Telegram 管理页面操作 Bot 基础设置，高级参数在此调整", Category: "integration", Collapsed: true, Fields: []configFieldDef{
 			{Key: "telegram_api_url", Label: "Bot API URL", Type: "string", Description: "Telegram Bot API 基础地址"},
@@ -1267,6 +1268,7 @@ func configValues(cfg config.Config) map[string]map[string]any {
 			"emby_stats_enabled": cfg.EmbyStatsEnabled, "emby_public_url": cfg.EmbyPublicURL,
 			"emby_whitelist_url": cfg.EmbyWhitelistURL,
 			"play_rank_enabled":  cfg.PlayRankEnabled, "play_rank_user_visible": cfg.PlayRankUserVisible,
+			"playback_reporting_enabled": cfg.PlaybackReportingEnabled,
 		},
 		"Telegram": {
 			"telegram_api_url": cfg.TelegramAPIURL, "bot_token": cfg.TelegramBotToken, "admin_id": int64sToAny(cfg.TelegramAdminIDs), "group_id": cfg.TelegramGroupIDs,
