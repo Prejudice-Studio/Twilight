@@ -181,6 +181,11 @@ export default function AdminPlayRankPage() {
             {data?.enabled !== false && data?.user_visible === false && (
               <Badge variant="secondary" className="self-center">{t("playRank.userVisibleOff")}</Badge>
             )}
+            {data?.playback_reporting?.available ? (
+              <Badge variant="success" className="self-center">{t("playRank.sourcePlugin")}</Badge>
+            ) : (
+              <Badge variant="secondary" className="self-center">{t("playRank.sourceActivityLog")}</Badge>
+            )}
           </div>
 
           {data?.enabled === false && (
@@ -209,6 +214,22 @@ export default function AdminPlayRankPage() {
           ) : (
             <p className="text-xs text-muted-foreground">{t("playRank.recordedEmpty")}</p>
           )}
+
+          <p className="text-xs text-muted-foreground">
+            {data?.playback_reporting?.available
+              ? t("playRank.sourcePluginHint")
+              : t("playRank.sourceActivityLogHint")}
+          </p>
+
+          {/* 探测没过时把原因直接摆出来：插件确实装了却用不上是最难自查的情况，
+              只显示"活动日志"会让人以为没装。 */}
+          {data?.playback_reporting?.enabled !== false &&
+            !data?.playback_reporting?.available &&
+            data?.playback_reporting?.last_error && (
+              <p className="text-xs text-destructive">
+                {t("playRank.sourceProbeFailed", { message: data.playback_reporting.last_error })}
+              </p>
+            )}
         </CardContent>
       </Card>
 

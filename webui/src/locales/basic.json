@@ -835,7 +835,12 @@
     "syncFailed": "同步失败：{message}",
     "syncWindow": "同步窗口",
     "syncWindowHours": "近 {hours} 小时",
-    "syncWindowDays": "近 {days} 天"
+    "syncWindowDays": "近 {days} 天",
+    "sourcePlugin": "净时长（已扣除暂停）",
+    "sourceActivityLog": "墙上时长（含暂停）",
+    "sourcePluginHint": "时长来自 Emby 的 Playback Reporting 插件：PlayDuration 减去 PauseDuration，暂停与挂机不计入。活动中看不到这条徽标，说明插件未安装或探测失败，已回退活动日志。",
+    "sourceActivityLogHint": "时长由活动日志的播放开始/停止事件配对得出，暂停时间也算在内。想扣除暂停，请在 Emby 安装 Playback Reporting 插件并在配置里开启对应开关。",
+    "sourceProbeFailed": "插件探测失败，已回退活动日志：{message}"
   },
   "adminStats": {
     "unknown": "未知",

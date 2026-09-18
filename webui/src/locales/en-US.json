@@ -658,7 +658,12 @@
     "syncFailed": "Sync failed: {message}",
     "syncWindow": "Sync window",
     "syncWindowHours": "Last {hours}h",
-    "syncWindowDays": "Last {days} days"
+    "syncWindowDays": "Last {days} days",
+    "sourcePlugin": "Net duration (pauses excluded)",
+    "sourceActivityLog": "Wall-clock duration (pauses included)",
+    "sourcePluginHint": "Durations come from Emby's Playback Reporting plugin: PlayDuration minus PauseDuration, so pauses and idle time are excluded. If this badge is missing, the plugin is not installed or the probe failed and the system fell back to activity logs.",
+    "sourceActivityLogHint": "Durations are paired from activity-log playback start/stop events, so paused time counts. To exclude pauses, install Emby's Playback Reporting plugin and enable the matching config switch.",
+    "sourceProbeFailed": "Plugin probe failed, fell back to activity logs: {message}"
   },
   "invite": {
     "embyDisabled": "Emby disabled"

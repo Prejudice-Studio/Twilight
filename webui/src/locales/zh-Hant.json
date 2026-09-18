@@ -658,7 +658,12 @@
     "syncFailed": "同步失敗：{message}",
     "syncWindow": "同步視窗",
     "syncWindowHours": "近 {hours} 小時",
-    "syncWindowDays": "近 {days} 天"
+    "syncWindowDays": "近 {days} 天",
+    "sourcePlugin": "淨時長（已扣除暫停）",
+    "sourceActivityLog": "牆上時長（含暫停）",
+    "sourcePluginHint": "時長來自 Emby 的 Playback Reporting 外掛：PlayDuration 減去 PauseDuration，暫停與掛機不計入。看不到這枚徽標表示外掛未安裝或探測失敗，已回退活動日誌。",
+    "sourceActivityLogHint": "時長由活動日誌的播放開始/停止事件配對得出，暫停時間也算在內。想扣除暫停，請在 Emby 安裝 Playback Reporting 外掛並開啟對應開關。",
+    "sourceProbeFailed": "外掛探測失敗，已回退活動日誌：{message}"
   },
   "invite": {
     "embyDisabled": "Emby 已停用"

@@ -779,6 +779,17 @@ export interface PlayRankResponse {
   enabled?: boolean;
   user_visible?: boolean;
   anonymous?: boolean;
+  // 播放时长的数据来源：装了 Emby 的 Playback Reporting 插件且探测通过时，
+  // 时长是 PlayDuration − PauseDuration 的净时长（扣掉暂停）；否则是活动日志
+  // 配对出的墙上时钟差，暂停时间也算在内。
+  // enabled=false 是开关关掉；enabled=true 但 available=false 说明探测没过，
+  // 此时 last_error 是给管理员排查用的原因（插件未装 / 端点拒绝 / Emby 未配置）。
+  playback_reporting?: {
+    enabled: boolean;
+    available: boolean;
+    last_error?: string;
+    last_sync_at?: number;
+  };
 }
 
 
