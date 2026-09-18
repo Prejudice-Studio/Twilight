@@ -44,10 +44,24 @@
 系统里沉淀了多少播放数据，和「今天有多少」是两件事。管理员后台默认只同步最近 24 小时的活动日志，日榜/周榜经常是空的，很容易被误读成「系统没记录」。所以：
 
 - 响应里带 `recorded`（`total` / `earliest` / `latest`），是**整库覆盖面**，不随窗口变化；
+- 管理端响应另带 `playback_reporting`（`enabled` / `available`），管理员据此确认当前时长口径；
 - 窗口内没有数据但 `recorded.total > 0` 时，前端提示切换到总榜，而不是笼统显示「暂无数据」；
 - 管理页的「同步活动日志」可选窗口（24 小时 / 3 天 / 7 天 / 30 天）。想让总榜有历史可看，得先用长窗口把日志拉回来——活动日志只能按「过去 N 小时」回拉。
 
-时长口径与 Sakura EmbyBoss 有差异：那边读的是 Emby `PlaybackActivity` 表的 `PlayDuration - PauseDuration`（净时长，需要 UserUsageStats 插件），这边由 ActivityLog 的播放开始/停止事件配对出**墙上时钟差**，中间暂停的时间也算在内。两边都叫「播放时长」，但不是同一个数。
+## 两个数据源，两种时长口径
+
+| 数据源 | 依赖 | 时长怎么来的 | 暂停算不算 |
+| ------ | ---- | ------------ | ---------- |
+| 活动日志（内置） | 无 | 播放开始/停止事件配对，停止时刻减开始时刻 | **算**，挂机也计时 |
+| Playback Reporting 插件 | Emby 插件目录里的 **Playback Reporting**（它的 API 路径前缀是 `/emby/user_usage_stats/...`，常被误叫成 UserUsageStats） | `PlayDuration - PauseDuration` | 不算，是真看进去的净时长 |
+
+插件可用时优先用插件（开关 `[Emby] playback_reporting_enabled`，默认开；真正的门槛是探测——没装插件时 Emby 会拒绝那个端点，自动回退活动日志，不用改配置）。
+
+**修正而不是追加**：活动日志早就为同一场播放写过一行，插件若直接再插一行，播放次数就会翻倍。所以 `store.ApplyPlaybackReportingRecords` 会先找同一 `(uid, item_id)`、时间最接近且尚未被插件修正过的那一行，命中就把它的 `duration` 换成净时长并把 `source` 改成 `playback_reporting`；只有活动日志压根没记到那一场才插入新行。
+
+两个源的"这一场播放发生在什么时刻"记法不同（插件可能记开始、活动日志记录停止，且插件的 SQLite 时间戳可能是 UTC），容差取 12 小时并在候选里挑时间最接近的一条。代价是同一集反复重看时可能配错——配错只是两场时长对调，不会凭空多出一次播放；相比配不上导致的"一次播放记两遍"，这个取舍划算。
+
+`twilight_playback_records.source` 就是为这件事加的：没有它就分不清一行时长是墙上时钟差还是净时长。存量行统一标记为 `activity_log`。
 
 ## 接口
 
@@ -89,6 +103,6 @@
 | 路径 | 说明 |
 | ---- | ---- |
 | `/playrank` | 用户页，脱敏榜单，日/周/月/总榜切换 |
-| `/admin/playrank` | 管理页，含 `uid`、同步窗口选择与「同步活动日志」按钮（调 `adminGetEmbyActivityLogs`） |
+| `/admin/playrank` | 管理页，含 `uid`、同步窗口选择与「同步活动日志」按钮（调 `adminGetEmbyActivityLogs`），并用徽标显示当前时长口径是净时长还是墙上时长 |
 
 > 若要真正对无账号访客开放，页面必须放在 `(main)` 路由组之外——`(main)/layout.tsx` 在未登录时会跳 `/login`。可参考既有公开页 `webui/src/app/wiki/page.tsx`。
