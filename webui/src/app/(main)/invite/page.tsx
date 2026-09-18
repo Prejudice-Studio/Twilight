@@ -34,6 +34,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { api, type InviteCodeItem, type InviteConfig, type InviteMyStatus, type InviteTreeNode } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { FeatureDisabledNotice, useFeatureEnabled } from "@/components/feature-disabled";
 
 function formatExpires(unix: number | null | undefined, locale: string, neverExpires: string): string {
   if (!unix || unix <= 0) return neverExpires;
@@ -87,7 +88,14 @@ function InviteTreeNodeList({ nodes }: { nodes: InviteTreeNode[] }) {
   );
 }
 
+// 邀请系统关闭时整个页面没有可操作内容：生成邀请码、邀请森林都会 403。
 export default function InviteCenterPage() {
+  const enabled = useFeatureEnabled("invite");
+  if (!enabled) return <FeatureDisabledNotice />;
+  return <InviteCenterContent />;
+}
+
+function InviteCenterContent() {
   const { toast } = useToast();
   const { confirm } = useConfirm();
   const { locale, t } = useI18n();

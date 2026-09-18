@@ -23,6 +23,7 @@ import {
   type SigninPublicConfig,
   type SigninHistoryRecord,
 } from "@/lib/api";
+import { FeatureDisabledNotice, useFeatureEnabled } from "@/components/feature-disabled";
 
 function formatDate(date: string | null | undefined): string {
   if (!date) return "—";
@@ -38,7 +39,14 @@ function formatRelative(ts: number, locale: string): string {
   }
 }
 
+// 签到关闭时签到接口一律 403，页面只会显示一堆 0 和报错。
 export default function ScorePage() {
+  const enabled = useFeatureEnabled("signin");
+  if (!enabled) return <FeatureDisabledNotice />;
+  return <ScoreContent />;
+}
+
+function ScoreContent() {
   const { toast } = useToast();
   const { user, fetchUser, setUser } = useAuthStore();
   const { locale, t } = useI18n();

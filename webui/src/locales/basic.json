@@ -70,6 +70,8 @@
     }
   },
   "common": {
+    "featureDisabled": "功能未开启",
+    "featureDisabledHint": "该功能未开启或未对当前账号开放，如需使用请联系管理员",
     "networkError": "网络异常",
     "checkNetwork": "请检查网络连接",
     "checkBackendConnection": "请检查后端连接",
@@ -789,8 +791,17 @@
     "description": "按播放次数与时长统计的热度榜单，数据来自 Emby 活动日志同步的播放记录",
     "day": "日榜",
     "week": "周榜",
+    "month": "月榜",
+    "all": "总榜",
     "dayHint": "今日 00:00 起",
     "weekHint": "本周一 00:00 起",
+    "monthHint": "本月 1 日 00:00 起",
+    "allHint": "系统已记录到的全部播放数据",
+    "recorded": "系统已记录 {total} 条播放数据",
+    "recordedSince": "最早 {date}",
+    "recordedUntil": "最晚 {date}",
+    "recordedEmpty": "系统还没有记录到任何播放数据，可先同步 Emby 活动日志",
+    "emptyHintSwitchRange": "当前窗口没有数据；系统里已有历史记录，切到「总榜」即可查看",
     "summaryPlays": "播放次数",
     "summaryDuration": "播放时长",
     "summaryViewers": "观看人数",
@@ -821,7 +832,10 @@
     "sync": "同步活动日志",
     "syncing": "正在同步...",
     "syncDone": "已同步 {count} 条播放记录",
-    "syncFailed": "同步失败：{message}"
+    "syncFailed": "同步失败：{message}",
+    "syncWindow": "同步窗口",
+    "syncWindowHours": "近 {hours} 小时",
+    "syncWindowDays": "近 {days} 天"
   },
   "adminStats": {
     "unknown": "未知",

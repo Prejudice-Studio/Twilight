@@ -219,6 +219,8 @@
     }
   },
   "common": {
+    "featureDisabled": "Feature unavailable",
+    "featureDisabledHint": "This feature is disabled or not open to your account. Contact an administrator if you need it.",
     "networkError": "Network error",
     "checkNetwork": "Check your network connection",
     "checkBackendConnection": "Check the backend connection",
@@ -612,8 +614,17 @@
     "description": "Popularity ranking by play count and duration, built from playback records synced via Emby activity logs",
     "day": "Daily",
     "week": "Weekly",
+    "month": "Monthly",
+    "all": "All time",
     "dayHint": "Since 00:00 today",
     "weekHint": "Since Monday 00:00",
+    "monthHint": "Since the 1st of this month, 00:00",
+    "allHint": "Everything the system has recorded",
+    "recorded": "{total} playback records stored",
+    "recordedSince": "oldest {date}",
+    "recordedUntil": "newest {date}",
+    "recordedEmpty": "No playback data recorded yet — sync Emby activity logs first",
+    "emptyHintSwitchRange": "No data in this window; history exists — switch to “All time”",
     "summaryPlays": "Plays",
     "summaryDuration": "Duration",
     "summaryViewers": "Viewers",
@@ -644,7 +655,10 @@
     "sync": "Sync activity logs",
     "syncing": "Syncing...",
     "syncDone": "Synced {count} playback records",
-    "syncFailed": "Sync failed: {message}"
+    "syncFailed": "Sync failed: {message}",
+    "syncWindow": "Sync window",
+    "syncWindowHours": "Last {hours}h",
+    "syncWindowDays": "Last {days} days"
   },
   "invite": {
     "embyDisabled": "Emby disabled"

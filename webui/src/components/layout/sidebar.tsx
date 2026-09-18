@@ -138,6 +138,11 @@ export function filterNavItems(
     if (features?.signin === false && item.href === "/score") {
       return false;
     }
+    // 邀请中心只在邀请系统开启时才有内容；管理员的“邀请森林”走 /admin/invite，
+    // 不受这条限制——后台仍要能看到配置页。
+    if (features?.invite === false && item.href === "/invite") {
+      return false;
+    }
     if (item.href === "/bangumi" && features?.bangumi_sync === false && features?.bangumi_manage === false) {
       return false;
     }

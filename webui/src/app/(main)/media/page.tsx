@@ -34,12 +34,21 @@ import {
 } from "./media-model";
 import { MediaSearchView } from "./media-search-view";
 import { MyMediaRequests } from "./my-media-requests";
+import { FeatureDisabledNotice, useFeatureEnabled } from "@/components/feature-disabled";
 
 const MAX_SEARCH_CACHE_ENTRIES = 16;
 const MAX_DETAIL_CACHE_ENTRIES = 24;
 const MAX_INVENTORY_CACHE_ENTRIES = 24;
 
+// 求片功能关闭时直接给出结论：下面的请求会全部 403，照常渲染只会得到一个含义
+// 不明的空列表。放在外层判断还能让内部 hooks 完全不执行，不发无谓的请求。
 export default function MediaPage() {
+  const enabled = useFeatureEnabled("media_request");
+  if (!enabled) return <FeatureDisabledNotice />;
+  return <MediaPageContent />;
+}
+
+function MediaPageContent() {
   const { t } = useI18n();
   const { toast } = useToast();
   const { confirm } = useConfirm();

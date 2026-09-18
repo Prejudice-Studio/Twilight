@@ -5,21 +5,45 @@ import { BarChart3, Trophy, Film, Clock, Users, RefreshCw, Loader2, DownloadClou
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n } from "@/lib/i18n";
-import { api, type PlayRankResponse } from "@/lib/api";
+import { api, type PlayRankRange, type PlayRankResponse } from "@/lib/api";
 
-type RankRange = "day" | "week";
+const rankRanges: PlayRankRange[] = ["day", "week", "month", "all"];
+
+// 同步窗口：活动日志只能按"过去 N 小时"回拉，默认 24 小时。想让榜单覆盖更久的
+// 历史，得先按更长的窗口把日志拉回来——否则库里没有数据，切到总榜也是空的。
+const syncWindows = [24, 72, 168, 720];
+
+function rangeHintKey(range: PlayRankRange): "playRank.dayHint" | "playRank.weekHint" | "playRank.monthHint" | "playRank.allHint" {
+  if (range === "week") return "playRank.weekHint";
+  if (range === "month") return "playRank.monthHint";
+  if (range === "all") return "playRank.allHint";
+  return "playRank.dayHint";
+}
+
+function formatDay(unix: number): string {
+  if (!unix || unix <= 0) return "-";
+  return new Date(unix * 1000).toLocaleDateString();
+}
 
 export default function AdminPlayRankPage() {
   const { t } = useI18n();
   const { toast } = useToast();
 
-  const [range, setRange] = useState<RankRange>("day");
+  const [range, setRange] = useState<PlayRankRange>("day");
   const [data, setData] = useState<PlayRankResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [syncHours, setSyncHours] = useState(24);
   const [error, setError] = useState<string | null>(null);
 
   const formatDuration = (seconds: number) => {
@@ -30,7 +54,7 @@ export default function AdminPlayRankPage() {
     return t("playRank.unitMinutes", { value: total > 0 ? Math.max(1, minutes) : 0 });
   };
 
-  const load = useCallback(async (target: RankRange, force = false) => {
+  const load = useCallback(async (target: PlayRankRange, force = false) => {
     if (force) setRefreshing(true);
     else setLoading(true);
     setError(null);
@@ -59,7 +83,7 @@ export default function AdminPlayRankPage() {
     if (syncing) return;
     setSyncing(true);
     try {
-      const res = await api.adminGetEmbyActivityLogs(1, true, 24);
+      const res = await api.adminGetEmbyActivityLogs(1, true, syncHours);
       if (res.success && res.data) {
         toast({
           title: t("playRank.syncDone", { count: res.data.new_entries ?? 0 }),
@@ -83,8 +107,11 @@ export default function AdminPlayRankPage() {
   };
 
   const summary = data?.summary;
+  const recorded = data?.recorded;
   const media = data?.media || [];
   const users = data?.users || [];
+  const emptyHint =
+    range !== "all" && (recorded?.total ?? 0) > 0 ? t("playRank.emptyHintSwitchRange") : t("playRank.emptyHint");
 
   return (
     <div className="page-enter space-y-6">
@@ -100,7 +127,21 @@ export default function AdminPlayRankPage() {
                 <p className="mt-0.5 text-sm text-muted-foreground">{t("playRank.adminDescription")}</p>
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={String(syncHours)} onValueChange={(value) => setSyncHours(Number(value))}>
+                <SelectTrigger className="h-8 w-[7.5rem] text-xs" aria-label={t("playRank.syncWindow")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {syncWindows.map((hours) => (
+                    <SelectItem key={hours} value={String(hours)} className="text-xs">
+                      {hours < 168
+                        ? t("playRank.syncWindowHours", { hours })
+                        : t("playRank.syncWindowDays", { days: hours / 24 })}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Button variant="secondary" size="sm" onClick={() => void handleSync()} disabled={syncing}>
                 {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <DownloadCloud className="h-4 w-4" />}
                 {syncing ? t("playRank.syncing") : t("playRank.sync")}
@@ -113,7 +154,7 @@ export default function AdminPlayRankPage() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {(["day", "week"] as RankRange[]).map((item) => (
+            {rankRanges.map((item) => (
               <button
                 key={item}
                 type="button"
@@ -124,12 +165,16 @@ export default function AdminPlayRankPage() {
                     : "bg-muted text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {item === "day" ? t("playRank.day") : t("playRank.week")}
+                {item === "day"
+                  ? t("playRank.day")
+                  : item === "week"
+                    ? t("playRank.week")
+                    : item === "month"
+                      ? t("playRank.month")
+                      : t("playRank.all")}
               </button>
             ))}
-            <span className="self-center text-xs text-muted-foreground">
-              {range === "day" ? t("playRank.dayHint") : t("playRank.weekHint")}
-            </span>
+            <span className="self-center text-xs text-muted-foreground">{t(rangeHintKey(range))}</span>
             {data?.enabled === false && (
               <Badge variant="destructive" className="self-center">{t("playRank.disabled")}</Badge>
             )}
@@ -150,6 +195,20 @@ export default function AdminPlayRankPage() {
             <SummaryCard icon={Users} label={t("playRank.summaryViewers")} value={summary?.viewers ?? 0} />
             <SummaryCard icon={Film} label={t("playRank.summaryItems")} value={summary?.items ?? 0} />
           </div>
+
+          {recorded && recorded.total > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {t("playRank.recorded", { total: recorded.total })}
+              {recorded.earliest > 0
+                ? ` · ${t("playRank.recordedSince", { date: formatDay(recorded.earliest) })}`
+                : ""}
+              {recorded.latest > 0
+                ? ` · ${t("playRank.recordedUntil", { date: formatDay(recorded.latest) })}`
+                : ""}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">{t("playRank.recordedEmpty")}</p>
+          )}
         </CardContent>
       </Card>
 
@@ -185,7 +244,7 @@ export default function AdminPlayRankPage() {
                 <span className="w-20 shrink-0 text-right">{t("playRank.duration")}</span>
               </div>
               {media.length === 0 ? (
-                <Empty hint={t("playRank.emptyHint")} />
+                <Empty hint={emptyHint} />
               ) : (
                 media.map((item, index) => (
                   <div key={`${item.item_id}-${index}`} className="flex items-center gap-3 border-t border-border/50 px-3 py-2.5">
@@ -220,7 +279,7 @@ export default function AdminPlayRankPage() {
                 <span className="w-20 shrink-0 text-right">{t("playRank.duration")}</span>
               </div>
               {users.length === 0 ? (
-                <Empty hint={t("playRank.emptyHint")} />
+                <Empty hint={emptyHint} />
               ) : (
                 users.map((item, index) => (
                   <div key={`${item.uid ?? item.user_name}-${index}`} className="flex items-center gap-3 border-t border-border/50 px-3 py-2.5">

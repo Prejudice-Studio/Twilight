@@ -41,6 +41,7 @@ import type {
   EmbyDeviceAuditData,
   EmbyInfo,
   EmbyLibraryStats,
+  PlayRankRange,
   PlayRankResponse,
   EmbyRegisterStatus,
   EmbySession,
@@ -1735,10 +1736,16 @@ class ApiClient {
     return this.request<{ viewers: number }>("/system/emby-viewers", { signal });
   }
 
-  // 播放排行榜（日榜/周榜）。普通用户拿到的是脱敏榜单；管理员走 getAdminPlayRank。
-  async getPlayRank(range: "day" | "week" = "day", opts: { limit?: number; refresh?: boolean; signal?: AbortSignal } = {}) {
+  // 播放排行榜。窗口有日历口径（day/week/month）和"系统已记录的全部"（all），
+  // 也可以用 days 指定"过去 N 天"的滑动窗口（给了 days 就优先于 range）。
+  // 普通用户拿到的是脱敏榜单；管理员走 getAdminPlayRank。
+  async getPlayRank(
+    range: PlayRankRange = "day",
+    opts: { limit?: number; days?: number; refresh?: boolean; signal?: AbortSignal } = {},
+  ) {
     const params = new URLSearchParams({ range });
     if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.days && opts.days > 0) params.set("days", String(opts.days));
     if (opts.refresh) params.set("refresh", "1");
     return this.request<PlayRankResponse>(
       `/emby/play-rank?${params.toString()}`,
@@ -1747,9 +1754,13 @@ class ApiClient {
     );
   }
 
-  async getAdminPlayRank(range: "day" | "week" = "day", opts: { limit?: number; refresh?: boolean; signal?: AbortSignal } = {}) {
+  async getAdminPlayRank(
+    range: PlayRankRange = "day",
+    opts: { limit?: number; days?: number; refresh?: boolean; signal?: AbortSignal } = {},
+  ) {
     const params = new URLSearchParams({ range });
     if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.days && opts.days > 0) params.set("days", String(opts.days));
     if (opts.refresh) params.set("refresh", "1");
     return this.request<PlayRankResponse>(
       `/admin/emby/play-rank?${params.toString()}`,

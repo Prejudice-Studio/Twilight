@@ -17,6 +17,7 @@ import { useI18n } from "@/lib/i18n";
 import { API_BASE } from "@/lib/api-request";
 import { useAuthStore } from "@/store/auth";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { FeatureDisabledNotice, useFeatureEnabled } from "@/components/feature-disabled";
 
 function formatTime(unix: number): string {
   if (!unix) return "";
@@ -54,7 +55,16 @@ function activityIcon(type: number) {
   }
 }
 
+// Bangumi 的可见性口径与侧边栏保持一致：同步与订阅管理两个开关都关掉才算
+// 关闭，只关其中一个时用户仍有一半功能可用。
 export default function BangumiPage() {
+  const syncEnabled = useFeatureEnabled("bangumi_sync");
+  const manageEnabled = useFeatureEnabled("bangumi_manage");
+  if (!syncEnabled && !manageEnabled) return <FeatureDisabledNotice />;
+  return <BangumiContent />;
+}
+
+function BangumiContent() {
   const { toast } = useToast();
   const { confirm } = useConfirm();
   const { t } = useI18n();

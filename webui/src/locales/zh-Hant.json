@@ -219,6 +219,8 @@
     }
   },
   "common": {
+    "featureDisabled": "功能未開啟",
+    "featureDisabledHint": "該功能未開啟或未對目前帳號開放，如需使用請聯絡管理員",
     "networkError": "網路異常",
     "checkNetwork": "請檢查網路連線",
     "checkBackendConnection": "請檢查後端連線",
@@ -612,8 +614,17 @@
     "description": "依播放次數與時長統計的熱度榜單，資料來自 Emby 活動日誌同步的播放記錄",
     "day": "日榜",
     "week": "週榜",
+    "month": "月榜",
+    "all": "總榜",
     "dayHint": "今日 00:00 起",
     "weekHint": "本週一 00:00 起",
+    "monthHint": "本月 1 日 00:00 起",
+    "allHint": "系統已記錄到的全部播放資料",
+    "recorded": "系統已記錄 {total} 條播放資料",
+    "recordedSince": "最早 {date}",
+    "recordedUntil": "最晚 {date}",
+    "recordedEmpty": "系統還沒有記錄到任何播放資料，可先同步 Emby 活動日誌",
+    "emptyHintSwitchRange": "目前視窗沒有資料；系統裡已有歷史記錄，切到「總榜」即可查看",
     "summaryPlays": "播放次數",
     "summaryDuration": "播放時長",
     "summaryViewers": "觀看人數",
@@ -644,7 +655,10 @@
     "sync": "同步活動日誌",
     "syncing": "正在同步...",
     "syncDone": "已同步 {count} 條播放記錄",
-    "syncFailed": "同步失敗：{message}"
+    "syncFailed": "同步失敗：{message}",
+    "syncWindow": "同步視窗",
+    "syncWindowHours": "近 {hours} 小時",
+    "syncWindowDays": "近 {days} 天"
   },
   "invite": {
     "embyDisabled": "Emby 已停用"

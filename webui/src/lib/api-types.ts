@@ -740,8 +740,12 @@ export interface EmbyLibraryStats {
   episode_count?: number;
 }
 
-// 播放排行榜（日榜/周榜）。duration 单位是秒。
+// 播放排行榜。duration 单位是秒。
+// 窗口有两类：日历窗口 day/week/month，以及"系统已记录的全部" all；另外可以用
+// days=N 指定"过去 N 天"的滑动窗口，此时后端回传的 range 形如 "30d"。
 // 普通用户接口只给脱敏后的 user_name，不带 uid/username；管理员接口才带。
+export type PlayRankRange = "day" | "week" | "month" | "all";
+
 export interface PlayRankMediaItem {
   item_id: string;
   title: string;
@@ -762,10 +766,14 @@ export interface PlayRankUserItem {
 }
 
 export interface PlayRankResponse {
-  range: "day" | "week";
+  // range 可能是 "day"/"week"/"month"/"all"，也可能是 days= 产生的 "30d"。
+  range: PlayRankRange | string;
   since: number;
   updated_at: number;
   summary: { plays: number; duration: number; viewers: number; items: number };
+  // recorded 是整库覆盖面，不随当前窗口变化：当前窗口没数据时，靠它告诉用户
+  // 系统里其实还存着多少、最早记到什么时候，往回切窗口还能看到。
+  recorded?: { total: number; earliest: number; latest: number };
   media: PlayRankMediaItem[];
   users: PlayRankUserItem[];
   enabled?: boolean;

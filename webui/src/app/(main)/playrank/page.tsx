@@ -8,9 +8,21 @@ import { Badge } from "@/components/ui/badge";
 import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
 import { useI18n } from "@/lib/i18n";
-import { api, type PlayRankResponse } from "@/lib/api";
+import { api, type PlayRankRange, type PlayRankResponse } from "@/lib/api";
 
-type RankRange = "day" | "week";
+const rankRanges: PlayRankRange[] = ["day", "week", "month", "all"];
+
+function rangeHintKey(range: PlayRankRange): "playRank.dayHint" | "playRank.weekHint" | "playRank.monthHint" | "playRank.allHint" {
+  if (range === "week") return "playRank.weekHint";
+  if (range === "month") return "playRank.monthHint";
+  if (range === "all") return "playRank.allHint";
+  return "playRank.dayHint";
+}
+
+function formatDay(unix: number): string {
+  if (!unix || unix <= 0) return "-";
+  return new Date(unix * 1000).toLocaleDateString();
+}
 
 export default function PlayRankPage() {
   const { t } = useI18n();
@@ -18,7 +30,7 @@ export default function PlayRankPage() {
   const { info: systemInfo } = useSystemStore();
   const isAdmin = user?.role === 0;
 
-  const [range, setRange] = useState<RankRange>("day");
+  const [range, setRange] = useState<PlayRankRange>("day");
   const [data, setData] = useState<PlayRankResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -38,7 +50,7 @@ export default function PlayRankPage() {
     return t("playRank.unitMinutes", { value: total > 0 ? Math.max(1, minutes) : 0 });
   };
 
-  const load = useCallback(async (target: RankRange, force = false) => {
+  const load = useCallback(async (target: PlayRankRange, force = false) => {
     if (force) setRefreshing(true);
     else setLoading(true);
     setError(null);
@@ -86,8 +98,13 @@ export default function PlayRankPage() {
   }
 
   const summary = data?.summary;
+  const recorded = data?.recorded;
   const media = data?.media || [];
   const users = data?.users || [];
+  // 当前窗口没数据、但系统里其实存着历史时，别简单显示"暂无数据"——那会让
+  // 运营以为系统没记录。提示往回切窗口。
+  const emptyHint =
+    range !== "all" && (recorded?.total ?? 0) > 0 ? t("playRank.emptyHintSwitchRange") : t("playRank.emptyHint");
 
   return (
     <div className="page-enter space-y-6">
@@ -109,8 +126,8 @@ export default function PlayRankPage() {
             </Button>
           </div>
 
-          <div className="flex gap-2">
-            {(["day", "week"] as RankRange[]).map((item) => (
+          <div className="flex flex-wrap gap-2">
+            {rankRanges.map((item) => (
               <button
                 key={item}
                 type="button"
@@ -121,12 +138,16 @@ export default function PlayRankPage() {
                     : "bg-muted text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {item === "day" ? t("playRank.day") : t("playRank.week")}
+                {item === "day"
+                  ? t("playRank.day")
+                  : item === "week"
+                    ? t("playRank.week")
+                    : item === "month"
+                      ? t("playRank.month")
+                      : t("playRank.all")}
               </button>
             ))}
-            <span className="self-center text-xs text-muted-foreground">
-              {range === "day" ? t("playRank.dayHint") : t("playRank.weekHint")}
-            </span>
+            <span className="self-center text-xs text-muted-foreground">{t(rangeHintKey(range))}</span>
           </div>
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -135,6 +156,15 @@ export default function PlayRankPage() {
             <SummaryCard icon={Users} label={t("playRank.summaryViewers")} value={summary?.viewers ?? 0} />
             <SummaryCard icon={Film} label={t("playRank.summaryItems")} value={summary?.items ?? 0} />
           </div>
+
+          {recorded && recorded.total > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {t("playRank.recorded", { total: recorded.total })}
+              {recorded.earliest > 0
+                ? ` · ${t("playRank.recordedSince", { date: formatDay(recorded.earliest) })}`
+                : ""}
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -158,7 +188,7 @@ export default function PlayRankPage() {
           <RankCard
             title={t("playRank.mediaTitle")}
             empty={media.length === 0}
-            emptyHint={t("playRank.emptyHint")}
+            emptyHint={emptyHint}
             header={[t("playRank.rank"), t("playRank.media"), t("playRank.plays"), t("playRank.duration")]}
           >
             {media.map((item, index) => (
@@ -180,7 +210,7 @@ export default function PlayRankPage() {
           <RankCard
             title={t("playRank.userTitle")}
             empty={users.length === 0}
-            emptyHint={t("playRank.emptyHint")}
+            emptyHint={emptyHint}
             header={[t("playRank.rank"), t("playRank.user"), t("playRank.plays"), t("playRank.duration")]}
           >
             {users.map((item, index) => (
