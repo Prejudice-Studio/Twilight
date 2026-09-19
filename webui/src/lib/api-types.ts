@@ -776,11 +776,18 @@ export interface PlayRankUserItem {
 // 媒体榜的聚合维度：item 是逐集/逐部，series 把一部剧的所有集合并成一行。
 export type PlayRankGroupBy = "item" | "series";
 
+// 榜单按哪个指标排序：plays 是播放次数（偏向热度），duration 是累计时长（偏向
+// 实际投入）。一部 20 分钟的番刷 30 遍和一部三小时电影看 1 次，两种排序给出的
+// 名次是反的，所以必须由用户显式选。
+export type PlayRankSortBy = "plays" | "duration";
+
 export interface PlayRankResponse {
   // range 可能是 "day"/"week"/"month"/"all"，也可能是 days= 产生的 "30d"。
   range: PlayRankRange | string;
   since: number;
   group_by: PlayRankGroupBy;
+  // 后端实际采用的排序口径，前端据此高亮当前指标列。
+  sort_by: PlayRankSortBy;
   updated_at: number;
   summary: { plays: number; duration: number; viewers: number; items: number };
   // recorded 是整库覆盖面，不随当前窗口变化：当前窗口没数据时，靠它告诉用户

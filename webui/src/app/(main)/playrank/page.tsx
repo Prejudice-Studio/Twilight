@@ -8,11 +8,18 @@ import { Badge } from "@/components/ui/badge";
 import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
 import { useI18n } from "@/lib/i18n";
-import { api, type PlayRankGroupBy, type PlayRankRange, type PlayRankResponse } from "@/lib/api";
+import { api, type PlayRankGroupBy, type PlayRankRange, type PlayRankResponse, type PlayRankSortBy } from "@/lib/api";
 import { PlayRankMediaLabel } from "@/components/play-rank-media-label";
 
 const rankRanges: PlayRankRange[] = ["day", "week", "month", "all"];
 const rankGroups: PlayRankGroupBy[] = ["item", "series"];
+const rankSorts: PlayRankSortBy[] = ["plays", "duration"];
+
+// 当前排序指标用正常字重显示，另一个压暗。不这么做的话，两列数字并排、
+// 看的人不知道这一屏究竟是照哪一列排的。
+function metricClass(active: boolean): string {
+  return active ? "text-sm font-medium text-foreground" : "text-xs text-muted-foreground";
+}
 
 function rangeHintKey(range: PlayRankRange): "playRank.dayHint" | "playRank.weekHint" | "playRank.monthHint" | "playRank.allHint" {
   if (range === "week") return "playRank.weekHint";
@@ -34,6 +41,7 @@ export default function PlayRankPage() {
 
   const [range, setRange] = useState<PlayRankRange>("day");
   const [groupBy, setGroupBy] = useState<PlayRankGroupBy>("item");
+  const [sortBy, setSortBy] = useState<PlayRankSortBy>("plays");
   const [data, setData] = useState<PlayRankResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -53,12 +61,12 @@ export default function PlayRankPage() {
     return t("playRank.unitMinutes", { value: total > 0 ? Math.max(1, minutes) : 0 });
   };
 
-  const load = useCallback(async (target: PlayRankRange, group: PlayRankGroupBy, force = false) => {
+  const load = useCallback(async (target: PlayRankRange, group: PlayRankGroupBy, sort: PlayRankSortBy, force = false) => {
     if (force) setRefreshing(true);
     else setLoading(true);
     setError(null);
     try {
-      const res = await api.getPlayRank(target, { groupBy: group, refresh: force });
+      const res = await api.getPlayRank(target, { groupBy: group, sortBy: sort, refresh: force });
       if (res.success && res.data) {
         setData(res.data);
       } else {
@@ -74,12 +82,12 @@ export default function PlayRankPage() {
 
   useEffect(() => {
     if (!canView) return;
-    void load(range, groupBy);
-  }, [canView, load, range, groupBy]);
+    void load(range, groupBy, sortBy);
+  }, [canView, load, range, groupBy, sortBy]);
 
   const handleRefresh = () => {
     if (refreshing) return;
-    void load(range, groupBy, true);
+    void load(range, groupBy, sortBy, true);
   };
 
   if (!canView) {
@@ -174,6 +182,27 @@ export default function PlayRankPage() {
             </span>
           </div>
 
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">{t("playRank.sortBy")}</span>
+            {rankSorts.map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => setSortBy(item)}
+                className={`rounded-lg px-3 py-1 text-xs font-medium transition-colors ${
+                  sortBy === item
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {item === "plays" ? t("playRank.sortPlays") : t("playRank.sortDuration")}
+              </button>
+            ))}
+            <span className="self-center text-xs text-muted-foreground">
+              {sortBy === "plays" ? t("playRank.sortPlaysHint") : t("playRank.sortDurationHint")}
+            </span>
+          </div>
+
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <SummaryCard icon={Trophy} label={t("playRank.summaryPlays")} value={summary?.plays ?? 0} />
             <SummaryCard icon={Clock} label={t("playRank.summaryDuration")} value={formatDuration(summary?.duration ?? 0)} />
@@ -202,7 +231,7 @@ export default function PlayRankPage() {
         <Card className="border-border/60">
           <CardContent className="flex min-h-[200px] flex-col items-center justify-center gap-3 text-center">
             <p className="text-sm text-muted-foreground">{error}</p>
-            <Button variant="secondary" size="sm" onClick={() => void load(range, groupBy)}>
+            <Button variant="secondary" size="sm" onClick={() => void load(range, groupBy, sortBy)}>
               {t("common.retry")}
             </Button>
           </CardContent>
@@ -213,14 +242,19 @@ export default function PlayRankPage() {
             title={groupBy === "series" ? t("playRank.mediaTitleSeries") : t("playRank.mediaTitle")}
             empty={media.length === 0}
             emptyHint={emptyHint}
-            header={[t("playRank.rank"), t("playRank.media"), t("playRank.plays"), t("playRank.duration")]}
+            header={[
+              { label: t("playRank.rank") },
+              { label: t("playRank.media") },
+              { label: t("playRank.plays"), active: sortBy === "plays" },
+              { label: t("playRank.duration"), active: sortBy === "duration" },
+            ]}
           >
             {media.map((item, index) => (
               <div key={`${item.item_id || item.title}-${index}`} className="flex items-center gap-3 border-b border-border/50 px-3 py-2.5 last:border-0">
                 <span className="w-6 shrink-0 text-center text-sm font-semibold text-muted-foreground">{index + 1}</span>
                 <PlayRankMediaLabel item={item} groupBy={groupBy} showViewers />
-                <span className="shrink-0 text-sm tabular-nums">{item.plays}</span>
-                <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{formatDuration(item.duration)}</span>
+                <span className={`shrink-0 tabular-nums ${metricClass(sortBy === "plays")}`}>{item.plays}</span>
+                <span className={`w-20 shrink-0 text-right tabular-nums ${metricClass(sortBy === "duration")}`}>{formatDuration(item.duration)}</span>
               </div>
             ))}
           </RankCard>
@@ -229,7 +263,12 @@ export default function PlayRankPage() {
             title={t("playRank.userTitle")}
             empty={users.length === 0}
             emptyHint={emptyHint}
-            header={[t("playRank.rank"), t("playRank.user"), t("playRank.plays"), t("playRank.duration")]}
+            header={[
+              { label: t("playRank.rank") },
+              { label: t("playRank.user") },
+              { label: t("playRank.plays"), active: sortBy === "plays" },
+              { label: t("playRank.duration"), active: sortBy === "duration" },
+            ]}
           >
             {users.map((item, index) => (
               <div key={`${item.user_name}-${index}`} className="flex items-center gap-3 border-b border-border/50 px-3 py-2.5 last:border-0">
@@ -240,8 +279,8 @@ export default function PlayRankPage() {
                     {t("playRank.titles")} {item.items}
                   </p>
                 </div>
-                <span className="shrink-0 text-sm tabular-nums">{item.plays}</span>
-                <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{formatDuration(item.duration)}</span>
+                <span className={`shrink-0 tabular-nums ${metricClass(sortBy === "plays")}`}>{item.plays}</span>
+                <span className={`w-20 shrink-0 text-right tabular-nums ${metricClass(sortBy === "duration")}`}>{formatDuration(item.duration)}</span>
               </div>
             ))}
           </RankCard>
@@ -271,7 +310,8 @@ function RankCard({
   children,
 }: {
   title: string;
-  header: string[];
+  // active 标出当前排序指标：两列数字并排时，不标出来就看不出这一屏照哪列排。
+  header: { label: string; active?: boolean }[];
   empty: boolean;
   emptyHint: string;
   children: React.ReactNode;
@@ -285,10 +325,10 @@ function RankCard({
           {empty && <Badge variant="secondary" className="ml-auto text-xs">0</Badge>}
         </div>
         <div className="flex items-center gap-3 px-3 py-2 text-xs font-medium text-muted-foreground">
-          <span className="w-6 shrink-0 text-center">{header[0]}</span>
-          <span className="min-w-0 flex-1">{header[1]}</span>
-          <span className="shrink-0">{header[2]}</span>
-          <span className="w-20 shrink-0 text-right">{header[3]}</span>
+          <span className="w-6 shrink-0 text-center">{header[0]?.label}</span>
+          <span className="min-w-0 flex-1">{header[1]?.label}</span>
+          <span className={`shrink-0 ${header[2]?.active ? "text-foreground" : ""}`}>{header[2]?.label}</span>
+          <span className={`w-20 shrink-0 text-right ${header[3]?.active ? "text-foreground" : ""}`}>{header[3]?.label}</span>
         </div>
         {empty ? (
           <div className="flex min-h-[120px] flex-col items-center justify-center gap-1 px-4 py-6 text-center">

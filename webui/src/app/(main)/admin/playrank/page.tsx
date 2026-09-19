@@ -14,11 +14,18 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n } from "@/lib/i18n";
-import { api, type PlayRankGroupBy, type PlayRankRange, type PlayRankResponse } from "@/lib/api";
+import { api, type PlayRankGroupBy, type PlayRankRange, type PlayRankResponse, type PlayRankSortBy } from "@/lib/api";
 import { PlayRankMediaLabel } from "@/components/play-rank-media-label";
 
 const rankRanges: PlayRankRange[] = ["day", "week", "month", "all"];
 const rankGroups: PlayRankGroupBy[] = ["item", "series"];
+const rankSorts: PlayRankSortBy[] = ["plays", "duration"];
+
+// 当前排序指标用正常字重显示，另一个压暗。不这么做的话，两列数字并排、
+// 看的人不知道这一屏究竟是照哪一列排的。
+function metricClass(active: boolean): string {
+  return active ? "text-sm font-medium text-foreground" : "text-xs text-muted-foreground";
+}
 
 // 同步窗口：活动日志只能按"过去 N 小时"回拉，默认 24 小时。想让榜单覆盖更久的
 // 历史，得先按更长的窗口把日志拉回来——否则库里没有数据，切到总榜也是空的。
@@ -42,6 +49,7 @@ export default function AdminPlayRankPage() {
 
   const [range, setRange] = useState<PlayRankRange>("day");
   const [groupBy, setGroupBy] = useState<PlayRankGroupBy>("item");
+  const [sortBy, setSortBy] = useState<PlayRankSortBy>("plays");
   const [data, setData] = useState<PlayRankResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -57,12 +65,12 @@ export default function AdminPlayRankPage() {
     return t("playRank.unitMinutes", { value: total > 0 ? Math.max(1, minutes) : 0 });
   };
 
-  const load = useCallback(async (target: PlayRankRange, group: PlayRankGroupBy, force = false) => {
+  const load = useCallback(async (target: PlayRankRange, group: PlayRankGroupBy, sort: PlayRankSortBy, force = false) => {
     if (force) setRefreshing(true);
     else setLoading(true);
     setError(null);
     try {
-      const res = await api.getAdminPlayRank(target, { groupBy: group, refresh: force });
+      const res = await api.getAdminPlayRank(target, { groupBy: group, sortBy: sort, refresh: force });
       if (res.success && res.data) {
         setData(res.data);
       } else {
@@ -77,8 +85,8 @@ export default function AdminPlayRankPage() {
   }, [t]);
 
   useEffect(() => {
-    void load(range, groupBy);
-  }, [load, range, groupBy]);
+    void load(range, groupBy, sortBy);
+  }, [load, range, groupBy, sortBy]);
 
   // 榜单数据来自 Emby 活动日志同步：手动同步一次可以让刚发生的播放立刻入榜，
   // 不必等定时任务或 60 秒缓存过期。
@@ -92,7 +100,7 @@ export default function AdminPlayRankPage() {
           title: t("playRank.syncDone", { count: res.data.new_entries ?? 0 }),
           variant: "success",
         });
-        await load(range, groupBy, true);
+        await load(range, groupBy, sortBy, true);
       } else {
         toast({
           title: t("playRank.syncFailed", { message: res.message || t("common.networkError") }),
@@ -149,7 +157,7 @@ export default function AdminPlayRankPage() {
                 {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <DownloadCloud className="h-4 w-4" />}
                 {syncing ? t("playRank.syncing") : t("playRank.sync")}
               </Button>
-              <Button variant="secondary" size="sm" onClick={() => void load(range, groupBy, true)} disabled={refreshing || loading}>
+              <Button variant="secondary" size="sm" onClick={() => void load(range, groupBy, sortBy, true)} disabled={refreshing || loading}>
                 {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                 {t("playRank.refresh")}
               </Button>
@@ -212,6 +220,27 @@ export default function AdminPlayRankPage() {
             </span>
           </div>
 
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">{t("playRank.sortBy")}</span>
+            {rankSorts.map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => setSortBy(item)}
+                className={`rounded-lg px-3 py-1 text-xs font-medium transition-colors ${
+                  sortBy === item
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {item === "plays" ? t("playRank.sortPlays") : t("playRank.sortDuration")}
+              </button>
+            ))}
+            <span className="self-center text-xs text-muted-foreground">
+              {sortBy === "plays" ? t("playRank.sortPlaysHint") : t("playRank.sortDurationHint")}
+            </span>
+          </div>
+
           {data?.enabled === false && (
             <p className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
               {t("playRank.disabledAdminHint")}
@@ -267,7 +296,7 @@ export default function AdminPlayRankPage() {
         <Card className="border-border/60">
           <CardContent className="flex min-h-[200px] flex-col items-center justify-center gap-3 text-center">
             <p className="text-sm text-muted-foreground">{error}</p>
-            <Button variant="secondary" size="sm" onClick={() => void load(range, groupBy)}>
+            <Button variant="secondary" size="sm" onClick={() => void load(range, groupBy, sortBy)}>
               {t("common.retry")}
             </Button>
           </CardContent>
@@ -287,8 +316,8 @@ export default function AdminPlayRankPage() {
                 <span className="w-6 shrink-0 text-center">{t("playRank.rank")}</span>
                 <span className="min-w-0 flex-1">{t("playRank.media")}</span>
                 <span className="w-14 shrink-0 text-right">{t("playRank.viewers")}</span>
-                <span className="shrink-0">{t("playRank.plays")}</span>
-                <span className="w-20 shrink-0 text-right">{t("playRank.duration")}</span>
+                <span className={`shrink-0 ${sortBy === "plays" ? "text-foreground" : ""}`}>{t("playRank.plays")}</span>
+                <span className={`w-20 shrink-0 text-right ${sortBy === "duration" ? "text-foreground" : ""}`}>{t("playRank.duration")}</span>
               </div>
               {media.length === 0 ? (
                 <Empty hint={emptyHint} />
@@ -298,8 +327,8 @@ export default function AdminPlayRankPage() {
                     <span className="w-6 shrink-0 text-center text-sm font-semibold text-muted-foreground">{index + 1}</span>
                     <PlayRankMediaLabel item={item} groupBy={groupBy} />
                     <span className="w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{item.viewers}</span>
-                    <span className="shrink-0 text-sm tabular-nums">{item.plays}</span>
-                    <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{formatDuration(item.duration)}</span>
+                    <span className={`shrink-0 tabular-nums ${metricClass(sortBy === "plays")}`}>{item.plays}</span>
+                    <span className={`w-20 shrink-0 text-right tabular-nums ${metricClass(sortBy === "duration")}`}>{formatDuration(item.duration)}</span>
                   </div>
                 ))
               )}
@@ -317,8 +346,8 @@ export default function AdminPlayRankPage() {
                 <span className="w-6 shrink-0 text-center">{t("playRank.rank")}</span>
                 <span className="min-w-0 flex-1">{t("playRank.username")}</span>
                 <span className="w-14 shrink-0 text-right">{t("playRank.titles")}</span>
-                <span className="shrink-0">{t("playRank.plays")}</span>
-                <span className="w-20 shrink-0 text-right">{t("playRank.duration")}</span>
+                <span className={`shrink-0 ${sortBy === "plays" ? "text-foreground" : ""}`}>{t("playRank.plays")}</span>
+                <span className={`w-20 shrink-0 text-right ${sortBy === "duration" ? "text-foreground" : ""}`}>{t("playRank.duration")}</span>
               </div>
               {users.length === 0 ? (
                 <Empty hint={emptyHint} />
@@ -333,8 +362,8 @@ export default function AdminPlayRankPage() {
                       </p>
                     </div>
                     <span className="w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{item.items}</span>
-                    <span className="shrink-0 text-sm tabular-nums">{item.plays}</span>
-                    <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{formatDuration(item.duration)}</span>
+                    <span className={`shrink-0 tabular-nums ${metricClass(sortBy === "plays")}`}>{item.plays}</span>
+                    <span className={`w-20 shrink-0 text-right tabular-nums ${metricClass(sortBy === "duration")}`}>{formatDuration(item.duration)}</span>
                   </div>
                 ))
               )}
