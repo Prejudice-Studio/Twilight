@@ -731,6 +731,37 @@ func PlaybackRankGroup(value string) string {
 	return PlaybackRankGroupItem
 }
 
+// 榜单的排序口径。两个指标回答的不是同一个问题：
+//
+//	plays    —— "被点开过多少次"，偏向热度与流行度；
+//	duration —— "一共占用了多少时间"，偏向实际投入。
+//
+// 一部 20 分钟的番剧刷 30 遍和一部三小时电影看 1 次，按次数和按时长排出来
+// 的名次是反的，所以必须由调用方显式选，不能替它默认。
+const (
+	PlaybackRankSortPlays    = "plays"
+	PlaybackRankSortDuration = "duration"
+)
+
+// PlaybackRankSort 把外部传入的排序参数收敛成两个枚举值之一。未知值一律回退
+// plays：它是"最热"这个默认语境下的口径，且绝不能让未过滤的字符串进 ORDER BY。
+func PlaybackRankSort(value string) string {
+	if value == PlaybackRankSortDuration {
+		return PlaybackRankSortDuration
+	}
+	return PlaybackRankSortPlays
+}
+
+// PlaybackRankOptions 是榜单查询参数。用结构体而不是逐个传参，是因为这四个
+// 参数里两个是字符串、两个是整数，按位置传很容易错位——since 与 limit 换个
+// 位置不报编译错，只会静默返回错的数据。
+type PlaybackRankOptions struct {
+	Since   int64
+	Limit   int
+	GroupBy string
+	SortBy  string
+}
+
 // PlaybackMediaRank 是一部媒体在某个时间窗内的聚合：播放次数、累计时长和看过
 // 的人数。它只回答"哪部最热"，不包含任何一次播放的时间点。
 //
@@ -763,31 +794,75 @@ type PlaybackUserRank struct {
 //
 // groupBy 只影响媒体榜（用户榜始终按 uid 聚合）：传 PlaybackRankGroupSeries 时
 // 把一部剧的所有集合成一行。
-func (s *Store) PlaybackRank(since int64, limit int, groupBy string) ([]PlaybackMediaRank, []PlaybackUserRank, error) {
-	if limit <= 0 {
-		limit = playbackRankDefaultLimit
+//
+// sortBy 同时作用于两个榜：此前媒体榜写死按次数排、用户榜写死按时长排，两个榜
+// 的"第一名"根本不是同一个口径，也没法切换。现在统一由 sortBy 决定。
+func (s *Store) PlaybackRank(opts PlaybackRankOptions) ([]PlaybackMediaRank, []PlaybackUserRank, error) {
+	if opts.Limit <= 0 {
+		opts.Limit = playbackRankDefaultLimit
 	}
-	if limit > playbackRankMaxLimit {
-		limit = playbackRankMaxLimit
+	if opts.Limit > playbackRankMaxLimit {
+		opts.Limit = playbackRankMaxLimit
 	}
-	if since < 0 {
-		since = 0
+	if opts.Since < 0 {
+		opts.Since = 0
 	}
-	groupBy = PlaybackRankGroup(groupBy)
+	opts.GroupBy = PlaybackRankGroup(opts.GroupBy)
+	opts.SortBy = PlaybackRankSort(opts.SortBy)
 
 	s.mu.RLock()
 	db := s.db
 	s.mu.RUnlock()
 
 	if db != nil {
-		media, mediaErr := queryPlaybackMediaRankDB(db, since, limit, groupBy)
-		users, userErr := queryPlaybackUserRankDB(db, since, limit)
+		media, mediaErr := queryPlaybackMediaRankDB(db, opts)
+		users, userErr := queryPlaybackUserRankDB(db, opts)
 		if mediaErr == nil && userErr == nil {
 			return media, users, nil
 		}
-		return s.playbackRankFromMemory(since, limit, groupBy)
+		return s.playbackRankFromMemory(opts)
 	}
-	return s.playbackRankFromMemory(since, limit, groupBy)
+	return s.playbackRankFromMemory(opts)
+}
+
+// playbackRankLess 是内存兜底路径的比较器，与 playbackRankOrderBy 一一对应：
+// 主排序键由 sortBy 决定，另一个指标做次排序键，tieBreak 兜底保证完全确定。
+//
+// 写成函数而不是在每个 sort.Slice 里各写一遍，是为了让两条路径（SQL / 内存）
+// 的排序口径只有一处定义——PG 降级时榜单名次不能变，否则用户会觉得数据错了。
+func playbackRankLess(sortBy string, playsA, playsB int, durationA, durationB int64, tieBreak func() bool) bool {
+	if sortBy == PlaybackRankSortDuration {
+		if durationA != durationB {
+			return durationA > durationB
+		}
+		if playsA != playsB {
+			return playsA > playsB
+		}
+		return tieBreak()
+	}
+	if playsA != playsB {
+		return playsA > playsB
+	}
+	if durationA != durationB {
+		return durationA > durationB
+	}
+	return tieBreak()
+}
+
+// playbackRankOrderBy 生成 ORDER BY 子句。
+//
+// 排序表达式只能从这两个白名单常量里挑，绝不能把外部字符串拼进来；次排序键
+// 固定用另一个指标，保证同分时顺序稳定（否则同一份数据每次刷新名次都在跳），
+// 最后再跟一个唯一键兜底做到完全确定。
+func playbackRankOrderBy(sortBy string, tieBreak string) string {
+	const (
+		plays    = "COUNT(*)"
+		duration = "COALESCE(SUM(duration), 0)"
+	)
+	if sortBy == PlaybackRankSortDuration {
+		return duration + " DESC, " + plays + " DESC, " + tieBreak + " ASC"
+	}
+	return plays + " DESC, " + duration + " DESC, " + tieBreak + " ASC"
 }
 
 // playbackSeriesKey 是 series 模式的分组键：剧集取剧名，电影取自己的标题，两者
@@ -797,32 +872,32 @@ func (s *Store) PlaybackRank(since int64, limit int, groupBy string) ([]Playback
 // 并成一行——可接受的近似，真要精确得再存一列。
 const playbackSeriesKey = `COALESCE(NULLIF(series_name, ''), NULLIF(title, ''), item_id)`
 
-func queryPlaybackMediaRankDB(db *sql.DB, since int64, limit int, groupBy string) ([]PlaybackMediaRank, error) {
+func queryPlaybackMediaRankDB(db *sql.DB, opts PlaybackRankOptions) ([]PlaybackMediaRank, error) {
 	query := `SELECT item_id, MAX(title), COALESCE(MAX(series_name), ''), COALESCE(MAX(media_type), ''),
 COUNT(*), COALESCE(SUM(duration), 0), COUNT(DISTINCT uid), COUNT(DISTINCT item_id)
 FROM twilight_playback_records
 WHERE played_at >= $1 AND item_id <> ''
 GROUP BY item_id
-ORDER BY COUNT(*) DESC, COALESCE(SUM(duration), 0) DESC, item_id ASC
+ORDER BY ` + playbackRankOrderBy(opts.SortBy, "item_id") + `
 LIMIT $2`
-	if groupBy == PlaybackRankGroupSeries {
+	if opts.GroupBy == PlaybackRankGroupSeries {
 		query = `SELECT '' AS item_id, MAX(` + playbackSeriesKey + `) AS title, '' AS series_name,
 COALESCE(MAX(media_type), '') AS media_type,
 COUNT(*), COALESCE(SUM(duration), 0), COUNT(DISTINCT uid), COUNT(DISTINCT item_id)
 FROM twilight_playback_records
 WHERE played_at >= $1 AND item_id <> '' AND ` + playbackSeriesKey + ` <> ''
 GROUP BY ` + playbackSeriesKey + `
-ORDER BY COUNT(*) DESC, COALESCE(SUM(duration), 0) DESC, 2 ASC
+ORDER BY ` + playbackRankOrderBy(opts.SortBy, "2") + `
 LIMIT $2`
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), pgPlaybackReadTimeout)
 	defer cancel()
-	rows, err := db.QueryContext(ctx, query, since, limit)
+	rows, err := db.QueryContext(ctx, query, opts.Since, opts.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]PlaybackMediaRank, 0, limit)
+	out := make([]PlaybackMediaRank, 0, opts.Limit)
 	for rows.Next() {
 		var item PlaybackMediaRank
 		if err := rows.Scan(&item.ItemID, &item.Title, &item.SeriesName, &item.MediaType, &item.Plays, &item.Duration, &item.Viewers, &item.Episodes); err != nil {
@@ -833,21 +908,21 @@ LIMIT $2`
 	return out, rows.Err()
 }
 
-func queryPlaybackUserRankDB(db *sql.DB, since int64, limit int) ([]PlaybackUserRank, error) {
+func queryPlaybackUserRankDB(db *sql.DB, opts PlaybackRankOptions) ([]PlaybackUserRank, error) {
 	query := `SELECT uid, COUNT(*), COALESCE(SUM(duration), 0), COUNT(DISTINCT item_id)
 FROM twilight_playback_records
 WHERE played_at >= $1 AND uid > 0
 GROUP BY uid
-ORDER BY COALESCE(SUM(duration), 0) DESC, COUNT(*) DESC, uid ASC
+ORDER BY ` + playbackRankOrderBy(opts.SortBy, "uid") + `
 LIMIT $2`
 	ctx, cancel := context.WithTimeout(context.Background(), pgPlaybackReadTimeout)
 	defer cancel()
-	rows, err := db.QueryContext(ctx, query, since, limit)
+	rows, err := db.QueryContext(ctx, query, opts.Since, opts.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]PlaybackUserRank, 0, limit)
+	out := make([]PlaybackUserRank, 0, opts.Limit)
 	for rows.Next() {
 		var item PlaybackUserRank
 		if err := rows.Scan(&item.UID, &item.Plays, &item.Duration, &item.Items); err != nil {
@@ -860,7 +935,8 @@ LIMIT $2`
 
 // playbackRankFromMemory 是 PG 不可用时的兜底：内存副本本身就是最近的记录，
 // 只做一次线性扫描 + map 聚合，再按同样的排序口径截断。
-func (s *Store) playbackRankFromMemory(since int64, limit int, groupBy string) ([]PlaybackMediaRank, []PlaybackUserRank, error) {
+func (s *Store) playbackRankFromMemory(opts PlaybackRankOptions) ([]PlaybackMediaRank, []PlaybackUserRank, error) {
+	since, limit, groupBy := opts.Since, opts.Limit, opts.GroupBy
 	type mediaAgg struct {
 		item     PlaybackMediaRank
 		viewers  map[int64]struct{}
@@ -955,17 +1031,16 @@ func (s *Store) playbackRankFromMemory(since int64, limit int, groupBy string) (
 		}
 		media = append(media, agg.item)
 	}
+	// 与 SQL 路径的 playbackRankOrderBy 同口径：主排序键由 sortBy 决定，另一
+	// 个指标做次排序键，最后用唯一键兜底。PG 挂掉走内存时名次必须与 PG 一致，
+	// 否则同一次刷新前后榜单会跳。
 	sort.Slice(media, func(i, j int) bool {
-		if media[i].Plays != media[j].Plays {
-			return media[i].Plays > media[j].Plays
+		if groupBy == PlaybackRankGroupSeries {
+			return playbackRankLess(opts.SortBy, media[i].Plays, media[j].Plays, media[i].Duration, media[j].Duration,
+				func() bool { return media[i].Title < media[j].Title })
 		}
-		if media[i].Duration != media[j].Duration {
-			return media[i].Duration > media[j].Duration
-		}
-		if media[i].Title != media[j].Title {
-			return media[i].Title < media[j].Title
-		}
-		return media[i].ItemID < media[j].ItemID
+		return playbackRankLess(opts.SortBy, media[i].Plays, media[j].Plays, media[i].Duration, media[j].Duration,
+			func() bool { return media[i].ItemID < media[j].ItemID })
 	})
 
 	users := make([]PlaybackUserRank, 0, minInt(limit, len(userMap)))
@@ -974,13 +1049,8 @@ func (s *Store) playbackRankFromMemory(since int64, limit int, groupBy string) (
 		users = append(users, agg.item)
 	}
 	sort.Slice(users, func(i, j int) bool {
-		if users[i].Duration != users[j].Duration {
-			return users[i].Duration > users[j].Duration
-		}
-		if users[i].Plays != users[j].Plays {
-			return users[i].Plays > users[j].Plays
-		}
-		return users[i].UID < users[j].UID
+		return playbackRankLess(opts.SortBy, users[i].Plays, users[j].Plays, users[i].Duration, users[j].Duration,
+			func() bool { return users[i].UID < users[j].UID })
 	})
 
 	if len(media) > limit {

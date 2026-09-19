@@ -70,7 +70,7 @@ func TestPlaybackRankGroupBySeriesMergesEpisodes(t *testing.T) {
 		}
 	}
 
-	byItem, _, err := st.PlaybackRank(0, 10, PlaybackRankGroupItem)
+	byItem, _, err := st.PlaybackRank(PlaybackRankOptions{Limit: 10, GroupBy: PlaybackRankGroupItem})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestPlaybackRankGroupBySeriesMergesEpisodes(t *testing.T) {
 		}
 	}
 
-	bySeries, _, err := st.PlaybackRank(0, 10, PlaybackRankGroupSeries)
+	bySeries, _, err := st.PlaybackRank(PlaybackRankOptions{Limit: 10, GroupBy: PlaybackRankGroupSeries})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,12 +107,87 @@ func TestPlaybackRankGroupBySeriesMergesEpisodes(t *testing.T) {
 	}
 
 	// 未知分组值必须退回逐条明细，绝不能把未过滤的字符串带进 GROUP BY。
-	fallback, _, err := st.PlaybackRank(0, 10, "series; DROP TABLE twilight_playback_records")
+	fallback, _, err := st.PlaybackRank(PlaybackRankOptions{Limit: 10, GroupBy: "series; DROP TABLE twilight_playback_records"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(fallback) != 3 {
 		t.Fatalf("unknown group must fall back to item mode, got %d rows", len(fallback))
+	}
+}
+
+// TestPlaybackRankSortBySeparatesPlaysFromDuration 盯住"次数"和"时长"是两套名次：
+// 一段 10 分钟的短视频刷 5 次（50 分钟）与一部 3 小时电影看 1 次（180 分钟），
+// 按次数排短视频第一，按时长排电影第一。两个榜（媒体 / 用户）都必须跟着 sortBy
+// 走——此前媒体榜写死按次数、用户榜写死按时长，两边"第一名"根本不是同一个口径。
+func TestPlaybackRankSortBySeparatesPlaysFromDuration(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	// clip: 5 次 × 600 秒 = 3000 秒；movie: 1 次 × 10800 秒 = 10800 秒。
+	for _, record := range []PlaybackRecord{
+		{UID: 1, ItemID: "clip", Title: "短视频", MediaType: "movie", PlayedAt: 100, Duration: 600},
+		{UID: 1, ItemID: "clip", Title: "短视频", MediaType: "movie", PlayedAt: 101, Duration: 600},
+		{UID: 1, ItemID: "clip", Title: "短视频", MediaType: "movie", PlayedAt: 102, Duration: 600},
+		{UID: 1, ItemID: "clip", Title: "短视频", MediaType: "movie", PlayedAt: 103, Duration: 600},
+		{UID: 1, ItemID: "clip", Title: "短视频", MediaType: "movie", PlayedAt: 104, Duration: 600},
+		{UID: 2, ItemID: "movie", Title: "长片", MediaType: "movie", PlayedAt: 200, Duration: 10800},
+	} {
+		if err := st.AddPlaybackRecord(record); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	byPlays, usersByPlays, err := st.PlaybackRank(PlaybackRankOptions{Limit: 10, SortBy: PlaybackRankSortPlays})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byPlays[0].Title != "短视频" || byPlays[0].Plays != 5 {
+		t.Fatalf("sort by plays must rank the frequently replayed item first, got %+v", byPlays[0])
+	}
+	if len(usersByPlays) < 2 || usersByPlays[0].UID != 1 {
+		t.Fatalf("user board must follow sort_by=plays too, got %+v", usersByPlays)
+	}
+
+	byDuration, usersByDuration, err := st.PlaybackRank(PlaybackRankOptions{Limit: 10, SortBy: PlaybackRankSortDuration})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byDuration[0].Title != "长片" || byDuration[0].Plays != 1 {
+		t.Fatalf("sort by duration must rank the long item first, got %+v", byDuration[0])
+	}
+	if len(usersByDuration) < 2 || usersByDuration[0].UID != 2 {
+		t.Fatalf("user board must follow sort_by=duration too, got %+v", usersByDuration)
+	}
+
+	// series 模式的 ORDER BY 用的是列序号兜底键（"2 ASC"），与 item 模式的
+	// item_id 不同，得单独跑一次确认 SQL 有效。
+	seriesByDuration, _, err := st.PlaybackRank(PlaybackRankOptions{
+		Limit:   10,
+		GroupBy: PlaybackRankGroupSeries,
+		SortBy:  PlaybackRankSortDuration,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seriesByDuration) == 0 || seriesByDuration[0].Title != "长片" {
+		t.Fatalf("series mode with duration sort failed: %+v", seriesByDuration)
+	}
+
+	// 未知取值回退 plays，绝不能把未过滤的字符串带进 ORDER BY。
+	fallback, _, err := st.PlaybackRank(PlaybackRankOptions{Limit: 10, SortBy: "duration; DROP TABLE twilight_playback_records"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fallback[0].Title != "短视频" {
+		t.Fatalf("unknown sort must fall back to plays, got %+v", fallback[0])
+	}
+	// 同口径下两种排序必须是同一批数据的两种排列，条数不能变。
+	if len(byPlays) != len(byDuration) {
+		t.Fatalf("sorting must not change the row set: %d vs %d", len(byPlays), len(byDuration))
 	}
 }
 

@@ -73,12 +73,31 @@ const (
 	playRankGroupSeries = "series"
 )
 
-// playRankQuery 解析并夹取 range / days / limit / group_by。非法取值一律回退默认，
-// 避免把未过滤的参数带进 store 查询。
+// 排序口径：plays 是播放次数，duration 是累计时长。
+const (
+	playRankSortPlays    = "plays"
+	playRankSortDuration = "duration"
+)
+
+// playRankRequest 是一次榜单请求解析后的全部参数。
+//
+// 原本 playRankQuery 返回四个裸值（rangeKey, since, limit, groupBy），加排序
+// 后变五个，按位置接返回值极易错位——since 与 limit 换一下不报编译错，只会
+// 静默返回错的数据。改成结构体后每个字段自带名字。
+type playRankRequest struct {
+	rangeKey string
+	since    int64
+	limit    int
+	groupBy  string
+	sortBy   string
+}
+
+// playRankQuery 解析并夹取 range / days / limit / group_by / sort_by。非法取值
+// 一律回退默认，避免把未过滤的参数带进 store 查询。
 //
 // days 是"过去 N 天"的滑动窗口，与日/周/月这些日历窗口互补：运营想看"最近 30
 // 天"时不必等到月末。显式给出 days 时它优先于 range，并成为缓存 key 的一部分。
-func playRankQuery(r *http.Request) (string, int64, int, string) {
+func playRankQuery(r *http.Request) playRankRequest {
 	query := r.URL.Query()
 	rangeKey := playRankRangeDay
 	switch query.Get("range") {
@@ -113,7 +132,12 @@ func playRankQuery(r *http.Request) (string, int64, int, string) {
 	if query.Get("group_by") == playRankGroupSeries {
 		groupBy = playRankGroupSeries
 	}
-	return rangeKey, since, limit, groupBy
+	// 排序只有两个合法值，其余（含大小写不同的 "Plays"）一律回退 plays。
+	sortBy := playRankSortPlays
+	if query.Get("sort_by") == playRankSortDuration {
+		sortBy = playRankSortDuration
+	}
+	return playRankRequest{rangeKey: rangeKey, since: since, limit: limit, groupBy: groupBy, sortBy: sortBy}
 }
 
 // maskPlayRankUsername 把用户名打码：保留首尾字符，中间固定抹掉。打码后的
@@ -134,8 +158,10 @@ func maskPlayRankUsername(name string) string {
 
 // playRankData 返回榜单数据。includeIdentity=true 时带 uid 与完整用户名；
 // refresh=true 时跳过缓存并写回新结果。
-func (a *App) playRankData(ctx context.Context, rangeKey string, since int64, limit int, groupBy string, includeIdentity bool, refresh bool) map[string]any {
-	key := rangeKey + "|" + strconv.FormatInt(since, 10) + "|" + strconv.Itoa(limit) + "|" + groupBy + "|" + strconv.FormatBool(includeIdentity)
+func (a *App) playRankData(ctx context.Context, req playRankRequest, includeIdentity bool, refresh bool) map[string]any {
+	// 排序必须进缓存键：两组排序是两份不同的榜单，共用一个键会互相覆盖。
+	key := req.rangeKey + "|" + strconv.FormatInt(req.since, 10) + "|" + strconv.Itoa(req.limit) + "|" +
+		req.groupBy + "|" + req.sortBy + "|" + strconv.FormatBool(includeIdentity)
 
 	a.playRankMu.Lock()
 	if !refresh {
@@ -146,7 +172,7 @@ func (a *App) playRankData(ctx context.Context, rangeKey string, since int64, li
 	}
 	a.playRankMu.Unlock()
 
-	data := a.buildPlayRank(ctx, rangeKey, since, limit, groupBy, includeIdentity)
+	data := a.buildPlayRank(ctx, req, includeIdentity)
 
 	a.playRankMu.Lock()
 	// 缓存按 key 分开存放：脱敏版与管理员版互不相通，避免管理员的完整用户名
@@ -159,8 +185,14 @@ func (a *App) playRankData(ctx context.Context, rangeKey string, since int64, li
 	return data
 }
 
-func (a *App) buildPlayRank(ctx context.Context, rangeKey string, since int64, limit int, groupBy string, includeIdentity bool) map[string]any {
-	media, users, _ := a.store().PlaybackRank(since, limit, groupBy)
+func (a *App) buildPlayRank(ctx context.Context, req playRankRequest, includeIdentity bool) map[string]any {
+	since, rangeKey := req.since, req.rangeKey
+	media, users, _ := a.store().PlaybackRank(store.PlaybackRankOptions{
+		Since:   req.since,
+		Limit:   req.limit,
+		GroupBy: req.groupBy,
+		SortBy:  req.sortBy,
+	})
 	totalPlays, totalDuration, uniqueUsers, _ := a.store().PlaybackRecordSummary(since)
 	// 覆盖面不受窗口影响：它回答的是"系统一共记录了多少、最早记到什么时候"，
 	// 前端拿它提示用户还能往回看多远，而不是当前窗口里有多少条。
@@ -219,7 +251,8 @@ func (a *App) buildPlayRank(ctx context.Context, rangeKey string, since int64, l
 	return map[string]any{
 		"range":      rangeKey,
 		"since":      since,
-		"group_by":   groupBy,
+		"group_by":   req.groupBy,
+		"sort_by":    req.sortBy,
 		"updated_at": time.Now().Unix(),
 		"summary": map[string]any{
 			"plays":    totalPlays,
@@ -306,18 +339,18 @@ func (a *App) handleV2PlayRank(w http.ResponseWriter, r *http.Request, _ Params)
 		return
 	}
 
-	rangeKey, since, limit, groupBy := playRankQuery(r)
+	req := playRankQuery(r)
 	refresh := r.URL.Query().Get("refresh") == "1"
-	ok(w, "OK", a.playRankData(r.Context(), rangeKey, since, limit, groupBy, false, refresh))
+	ok(w, "OK", a.playRankData(r.Context(), req, false, refresh))
 }
 
 // handleV2AdminPlayRank 是管理员榜单：带 uid 与完整用户名，且不受排行榜总开关
 // 影响（管理员后台始终要能看到数据）。
 func (a *App) handleV2AdminPlayRank(w http.ResponseWriter, r *http.Request, _ Params) {
 	w.Header().Set("Cache-Control", "private, no-store")
-	rangeKey, since, limit, groupBy := playRankQuery(r)
+	req := playRankQuery(r)
 	refresh := r.URL.Query().Get("refresh") == "1"
-	data := a.playRankData(r.Context(), rangeKey, since, limit, groupBy, true, refresh)
+	data := a.playRankData(r.Context(), req, true, refresh)
 	data["enabled"] = a.cfg().PlayRankEnabled
 	data["user_visible"] = a.cfg().PlayRankUserVisible
 	// 管理员要能确认自己看到的时长到底是净时长还是墙上时钟差，否则"排行榜数字

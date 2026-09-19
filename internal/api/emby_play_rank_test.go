@@ -51,38 +51,38 @@ func TestPlayRankWindowCoversCalendarRangesAndAllTime(t *testing.T) {
 func TestPlayRankQueryParsesRangeDaysAndLimit(t *testing.T) {
 	now := time.Now()
 
-	rangeKey, since, limit, _ := playRankQuery(httptest.NewRequest(http.MethodGet, "/play-rank?range=all", nil))
-	if rangeKey != playRankRangeAll || since != 0 || limit != playRankDefaultLimit {
-		t.Fatalf("range=all parsed as %q since=%d limit=%d", rangeKey, since, limit)
+	req := playRankQuery(httptest.NewRequest(http.MethodGet, "/play-rank?range=all", nil))
+	if req.rangeKey != playRankRangeAll || req.since != 0 || req.limit != playRankDefaultLimit {
+		t.Fatalf("range=all parsed as %q since=%d limit=%d", req.rangeKey, req.since, req.limit)
 	}
 
-	rangeKey, since, _, _ = playRankQuery(httptest.NewRequest(http.MethodGet, "/play-rank?range=month", nil))
+	req = playRankQuery(httptest.NewRequest(http.MethodGet, "/play-rank?range=month", nil))
 	wantMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).Unix()
-	if rangeKey != playRankRangeMonth || since != wantMonth {
-		t.Fatalf("range=month parsed as %q since=%d want %d", rangeKey, since, wantMonth)
+	if req.rangeKey != playRankRangeMonth || req.since != wantMonth {
+		t.Fatalf("range=month parsed as %q since=%d want %d", req.rangeKey, req.since, wantMonth)
 	}
 
 	// days 是"过去 N 天"的滑动窗口，优先于 range，并成为缓存 key 的一部分。
-	rangeKey, since, _, _ = playRankQuery(httptest.NewRequest(http.MethodGet, "/play-rank?range=week&days=30", nil))
-	if rangeKey != "30d" {
-		t.Fatalf("days should win over range, got %q", rangeKey)
+	req = playRankQuery(httptest.NewRequest(http.MethodGet, "/play-rank?range=week&days=30", nil))
+	if req.rangeKey != "30d" {
+		t.Fatalf("days should win over range, got %q", req.rangeKey)
 	}
 	wantDays := now.AddDate(0, 0, -30).Unix()
-	if since < wantDays-5 || since > wantDays+5 {
-		t.Fatalf("days=30 since=%d want ~%d", since, wantDays)
+	if req.since < wantDays-5 || req.since > wantDays+5 {
+		t.Fatalf("days=30 since=%d want ~%d", req.since, wantDays)
 	}
 
 	// 超长窗口夹到上限，避免一个请求把整表聚合拖垮。
-	rangeKey, _, _, _ = playRankQuery(httptest.NewRequest(http.MethodGet, "/play-rank?days=99999", nil))
-	if rangeKey != "730d" {
-		t.Fatalf("days should be clamped, got %q", rangeKey)
+	req = playRankQuery(httptest.NewRequest(http.MethodGet, "/play-rank?days=99999", nil))
+	if req.rangeKey != "730d" {
+		t.Fatalf("days should be clamped, got %q", req.rangeKey)
 	}
 
 	// 非法取值一律回退默认，绝不把未过滤的参数带进 store 查询。
-	rangeKey, since, limit, _ = playRankQuery(httptest.NewRequest(http.MethodGet, "/play-rank?range=year&days=abc&limit=500", nil))
+	req = playRankQuery(httptest.NewRequest(http.MethodGet, "/play-rank?range=year&days=abc&limit=500", nil))
 	wantDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
-	if rangeKey != playRankRangeDay || since != wantDay || limit != playRankMaxLimit {
-		t.Fatalf("invalid input parsed as %q since=%d limit=%d", rangeKey, since, limit)
+	if req.rangeKey != playRankRangeDay || req.since != wantDay || req.limit != playRankMaxLimit {
+		t.Fatalf("invalid input parsed as %q since=%d limit=%d", req.rangeKey, req.since, req.limit)
 	}
 }
 
@@ -91,13 +91,29 @@ func TestPlayRankQueryParsesGroupBy(t *testing.T) {
 	// 未经白名单校验的字符串带进 store 的 GROUP BY。
 	for _, raw := range []string{"", "item", "series", "SERIES", "all", "; DROP TABLE x"} {
 		// 必须转义：httptest.NewRequest 会把未编码的空格当成 HTTP 版本分隔符。
-		_, _, _, groupBy := playRankQuery(httptest.NewRequest(http.MethodGet, "/play-rank?group_by="+url.QueryEscape(raw), nil))
+		req := playRankQuery(httptest.NewRequest(http.MethodGet, "/play-rank?group_by="+url.QueryEscape(raw), nil))
 		want := playRankGroupItem
 		if raw == "series" {
 			want = playRankGroupSeries
 		}
-		if groupBy != want {
-			t.Fatalf("group_by=%q parsed as %q want %q", raw, groupBy, want)
+		if req.groupBy != want {
+			t.Fatalf("group_by=%q parsed as %q want %q", raw, req.groupBy, want)
+		}
+	}
+}
+
+// TestPlayRankQueryParsesSortBy 盯住排序口径的白名单：只有 plays / duration 两个
+// 合法值，其余一律回退 plays。排序表达式要拼进 SQL 的 ORDER BY，未经校验的字符
+// 串绝不能流到那里。
+func TestPlayRankQueryParsesSortBy(t *testing.T) {
+	for _, raw := range []string{"", "plays", "duration", "DURATION", "count", "; DROP TABLE x"} {
+		req := playRankQuery(httptest.NewRequest(http.MethodGet, "/play-rank?sort_by="+url.QueryEscape(raw), nil))
+		want := playRankSortPlays
+		if raw == "duration" {
+			want = playRankSortDuration
+		}
+		if req.sortBy != want {
+			t.Fatalf("sort_by=%q parsed as %q want %q", raw, req.sortBy, want)
 		}
 	}
 }
