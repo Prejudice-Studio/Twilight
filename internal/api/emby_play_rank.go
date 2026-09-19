@@ -167,9 +167,9 @@ func (a *App) buildPlayRank(ctx context.Context, rangeKey string, since int64, l
 	totalRecords, earliestAt, latestAt, _ := a.store().PlaybackRecordCoverage()
 
 	// 季号/集号不落在播放记录表里，而是每次构建榜单时向 Emby 批量取回来补上。
-	// 这样历史记录不需要迁移就能显示 S1E8；Emby 不可用时拿不到编号，只是少了
+	// 这样历史记录不需要迁移就能显示集数；Emby 不可用时拿不到编号，只是少了
 	// 一个标识，榜单本身照常返回。
-	episodes := a.playRankEpisodeLabels(ctx, media)
+	episodes := a.playRankEpisodes(ctx, media)
 
 	mediaItems := make([]map[string]any, 0, len(media))
 	for _, item := range media {
@@ -183,8 +183,9 @@ func (a *App) buildPlayRank(ctx context.Context, rangeKey string, since int64, l
 			"viewers":     item.Viewers,
 			"episodes":    item.Episodes,
 		}
-		if label := episodes[item.ItemID]; label != "" {
-			entry["episode_label"] = label
+		if position, ok := episodes[item.ItemID]; ok {
+			entry["season_number"] = position.Season
+			entry["episode_number"] = position.Episode
 		}
 		mediaItems = append(mediaItems, entry)
 	}
@@ -238,30 +239,28 @@ func (a *App) buildPlayRank(ctx context.Context, rangeKey string, since int64, l
 	}
 }
 
-// playRankEpisodeLabel 拼出界面上的集数标识，形如 S1E8。
+// playRankEpisode 是一部剧集的位置：季号 + 集号。
 //
-// 两个编号都缺失（电影、音乐、或 Emby 没给）时返回空串——调用方据此决定要不要
-// 带这个字段，前端也就不会渲染出一个空的徽标。只有集号没有季号时退化为 E8，
-// 反过来只有季号没有集号没有意义（不知道是这季的哪一集），一律不显示。
-func playRankEpisodeLabel(season, episode int) string {
-	if episode <= 0 {
-		return ""
-	}
-	if season <= 0 {
-		return "E" + strconv.Itoa(episode)
-	}
-	return "S" + strconv.Itoa(season) + "E" + strconv.Itoa(episode)
+// 后端只给数字，**不拼显示字符串**。季号缺失（媒体库没有季层级，或元数据没刮到）
+// 时 Season 为 0，此时该怎么显示是前端的事：中文界面说"第 8 集"，硬套一个
+// "E8" 既不本地化，也是在用我们自己发明的格式掩盖"其实不知道第几季"。
+type playRankEpisode struct {
+	Season  int
+	Episode int
 }
 
-// playRankEpisodeLabels 批量补上媒体榜每一行的集数标识，返回 item_id -> 标识。
+// playRankEpisodes 批量补上媒体榜每一行的集数，返回 item_id -> 位置。
+//
+// 只收录确实知道集号的行：没有集号就没有"第几集"可言（电影、音乐，或 Emby 没
+// 返回编号），前端会据此整段不渲染，不会冒出一个空徽标。
 //
 // 只在 item 模式下有意义：series 模式一行代表整部剧，本来就没有"第几集"可言。
 // 这里最多几百个 id，embyItemMetadata 内部按 100 个一批去问，通常一次请求搞定；
 // 榜单本身有 60 秒缓存，不会每次刷新都打到 Emby。
-func (a *App) playRankEpisodeLabels(ctx context.Context, media []store.PlaybackMediaRank) map[string]string {
-	labels := make(map[string]string, len(media))
+func (a *App) playRankEpisodes(ctx context.Context, media []store.PlaybackMediaRank) map[string]playRankEpisode {
+	episodes := make(map[string]playRankEpisode, len(media))
 	if len(media) == 0 {
-		return labels
+		return episodes
 	}
 	ids := make([]string, 0, len(media))
 	for _, item := range media {
@@ -271,14 +270,26 @@ func (a *App) playRankEpisodeLabels(ctx context.Context, media []store.PlaybackM
 		ids = append(ids, item.ItemID)
 	}
 	if len(ids) == 0 {
-		return labels
+		return episodes
 	}
-	for id, meta := range a.embyItemMetadata(ctx, ids) {
-		if label := playRankEpisodeLabel(meta.ParentIndexNumber, meta.IndexNumber); label != "" {
-			labels[id] = label
+	return playRankEpisodesFromMetadata(a.embyItemMetadata(ctx, ids))
+}
+
+// playRankEpisodesFromMetadata 把 Emby 的元数据收敛成"位置"表，纯粹为了可单测：
+// embyItemMetadata 要走网络且 validateEmbyURL 拒绝 loopback，没法用 httptest 打桩。
+func playRankEpisodesFromMetadata(metadata map[string]embyItemMetadata) map[string]playRankEpisode {
+	episodes := make(map[string]playRankEpisode, len(metadata))
+	for id, meta := range metadata {
+		if meta.IndexNumber <= 0 {
+			continue
 		}
+		season := meta.ParentIndexNumber
+		if season < 0 {
+			season = 0
+		}
+		episodes[id] = playRankEpisode{Season: season, Episode: meta.IndexNumber}
 	}
-	return labels
+	return episodes
 }
 
 // handleV2PlayRank 是普通用户的榜单接口。路由级别就是 AuthUser：排行榜不向无账号

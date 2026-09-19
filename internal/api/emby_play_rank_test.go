@@ -11,19 +11,19 @@ import (
 	"github.com/prejudice-studio/twilight/internal/store"
 )
 
-func TestPlayRankEpisodeLabelsSkipMoviesAndUnknownItems(t *testing.T) {
-	// Emby 不可用时 embyItemMetadata 返回空 map，这里不能报错也不能产出标识——
-	// 榜单照常返回，只是少了 S1E8。
+func TestPlayRankEpisodesSkipMoviesAndUnknownItems(t *testing.T) {
+	// Emby 不可用时 embyItemMetadata 返回空 map，这里不能报错也不能产出集数——
+	// 榜单照常返回，只是少了集数标识。
 	app := &App{}
-	labels := app.playRankEpisodeLabels(context.Background(), []store.PlaybackMediaRank{
+	episodes := app.playRankEpisodes(context.Background(), []store.PlaybackMediaRank{
 		{ItemID: "ep1", Title: "第八集"},
 		{ItemID: "", Title: "没有 item_id 的一行"},
 	})
-	if len(labels) != 0 {
-		t.Fatalf("unexpected labels without Emby metadata: %#v", labels)
+	if len(episodes) != 0 {
+		t.Fatalf("unexpected episodes without Emby metadata: %#v", episodes)
 	}
-	if got := app.playRankEpisodeLabels(context.Background(), nil); len(got) != 0 {
-		t.Fatalf("empty media should yield no labels, got %#v", got)
+	if got := app.playRankEpisodes(context.Background(), nil); len(got) != 0 {
+		t.Fatalf("empty media should yield no episodes, got %#v", got)
 	}
 }
 
@@ -102,24 +102,32 @@ func TestPlayRankQueryParsesGroupBy(t *testing.T) {
 	}
 }
 
-func TestPlayRankEpisodeLabelFormatsSeasonAndEpisode(t *testing.T) {
-	cases := []struct {
-		season, episode int
-		want            string
-	}{
-		{1, 8, "S1E8"},
-		{12, 205, "S12E205"},
-		// 只有集号：退化为 E8，总比什么都不显示强。
-		{0, 8, "E8"},
-		// 没有集号就没有"第几集"可言，季号再明确也不显示。
-		{2, 0, ""},
-		{2, -3, ""},
-		// 电影：两个编号都没有。
-		{0, 0, ""},
+// TestPlayRankEpisodesKeepsSeasonUnknownRatherThanGuessing 盯住"季号缺失"的口径：
+// 后端必须如实交出 Season=0，不能替前端猜第几季，更不能拼成 "E8" 这种自造格式——
+// 那是拿格式掩盖"其实不知道第几季"。没有集号的行（电影等）整条不收录。
+func TestPlayRankEpisodesKeepsSeasonUnknownRatherThanGuessing(t *testing.T) {
+	episodes := playRankEpisodesFromMetadata(map[string]embyItemMetadata{
+		"s1e8":  {ID: "s1e8", Type: "Episode", ParentIndexNumber: 1, IndexNumber: 8},
+		"nosed": {ID: "nosed", Type: "Episode", IndexNumber: 8},
+		"movie": {ID: "movie", Type: "Movie"},
+		"neg":   {ID: "neg", Type: "Episode", ParentIndexNumber: -2, IndexNumber: 3},
+	})
+
+	if got := episodes["s1e8"]; got.Season != 1 || got.Episode != 8 {
+		t.Fatalf("season/episode not passed through: %+v", got)
 	}
-	for _, item := range cases {
-		if got := playRankEpisodeLabel(item.season, item.episode); got != item.want {
-			t.Fatalf("playRankEpisodeLabel(%d, %d)=%q want %q", item.season, item.episode, got, item.want)
-		}
+	// 季号缺失必须如实留 0：不能替前端猜第几季，更不能拼成 "E8" 那种自造格式。
+	if got := episodes["nosed"]; got.Season != 0 || got.Episode != 8 {
+		t.Fatalf("missing season must stay 0, not be guessed: %+v", got)
+	}
+	if got := episodes["neg"]; got.Season != 0 || got.Episode != 3 {
+		t.Fatalf("negative season must normalize to 0: %+v", got)
+	}
+	// 电影没有集号，整条不收录——前端据此不渲染徽标。
+	if _, ok := episodes["movie"]; ok {
+		t.Fatalf("items without an episode number must be omitted: %#v", episodes)
+	}
+	if len(episodes) != 3 {
+		t.Fatalf("unexpected episode count: %#v", episodes)
 	}
 }
