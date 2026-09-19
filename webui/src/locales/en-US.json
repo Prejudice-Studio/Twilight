@@ -637,6 +637,8 @@
     "groupItemHint": "One row per episode or movie",
     "groupSeriesHint": "All episodes of a show merged into one row",
     "episodeCount": "{count} eps",
+    "seasonEpisode": "S{season}E{episode}",
+    "episodeOnly": "Episode {n}",
     "userTitle": "Top Users",
     "rank": "#",
     "media": "Media",

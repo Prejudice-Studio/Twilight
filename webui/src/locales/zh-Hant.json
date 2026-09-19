@@ -637,6 +637,8 @@
     "groupItemHint": "每一集、每一部電影單獨算一行",
     "groupSeriesHint": "一部劇的所有集合併成一行",
     "episodeCount": "{count} 集",
+    "seasonEpisode": "S{season}E{episode}",
+    "episodeOnly": "第 {n} 集",
     "userTitle": "用戶榜",
     "rank": "#",
     "media": "媒體",

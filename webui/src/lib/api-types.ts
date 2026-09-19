@@ -756,9 +756,12 @@ export interface PlayRankMediaItem {
   viewers: number;
   // 这一行覆盖了多少个不同的媒体条目：逐集模式下恒为 1，按剧聚合时是看过的集数。
   episodes?: number;
-  // 集数标识，形如 "S1E8"。只有集号没有季号时是 "E8"；拿不到（电影，或 Emby
-  // 未返回编号）时后端不下发这个字段。series 模式下不会出现。
-  episode_label?: string;
+  // 季号与集号。后端只给数字、不替前端拼显示文案——季号为 0 表示"不知道第几季"
+  // （媒体库没有季层级，或元数据没刮到），此时该显示什么由前端按语言决定。
+  // 拿不到集号时（电影、音乐，或 Emby 未返回）后端两个字段都不下发。
+  // series 模式下不会出现——整部剧没有"第几集"可言。
+  season_number?: number;
+  episode_number?: number;
 }
 
 export interface PlayRankUserItem {
