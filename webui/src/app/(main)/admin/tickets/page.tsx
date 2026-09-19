@@ -214,6 +214,13 @@ export default function AdminTicketsPage() {
     setPage(1);
     setPriorityFilter(value);
   };
+  const hasFilters = statusFilter !== "all" || typeFilter !== "all" || priorityFilter !== "all";
+  const resetFilters = () => {
+    setPage(1);
+    setStatusFilter("all");
+    setTypeFilter("all");
+    setPriorityFilter("all");
+  };
   const typeLabelFor = (value: string) => {
     const known = DEFAULT_TYPES.find((d) => d.value === value);
     return known ? t(known.labelKey as any) : value;
@@ -226,52 +233,66 @@ export default function AdminTicketsPage() {
         <p className="text-sm text-muted-foreground mt-1">{t("adminTickets.description")}</p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[repeat(3,minmax(0,12rem))_minmax(13rem,18rem)_1fr_auto_auto] xl:items-end">
-        <Select value={statusFilter} onValueChange={updateStatusFilter}>
-          <SelectTrigger className="w-full"><SelectValue placeholder={t("adminTickets.filterAll")} /></SelectTrigger>
-          <SelectContent>{Object.entries(STATUS_MAP).map(([v, s]) => <SelectItem key={v} value={v}>{t(s.labelKey as any)}</SelectItem>)}<SelectItem value="all">{t("adminTickets.filterAll")}</SelectItem></SelectContent>
-        </Select>
-        <Select value={typeFilter} onValueChange={updateTypeFilter}>
-          <SelectTrigger className="w-full"><SelectValue placeholder={t("adminTickets.filterAllTypes")} /></SelectTrigger>
-          <SelectContent><SelectItem value="all">{t("adminTickets.filterAllTypes")}</SelectItem>
-            {types.map((tp: string) => <SelectItem key={tp} value={tp}>{typeLabelFor(tp)}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={priorityFilter} onValueChange={updatePriorityFilter}>
-          <SelectTrigger className="w-full"><SelectValue placeholder={t("adminTickets.filterAllPriorities")} /></SelectTrigger>
-          <SelectContent><SelectItem value="all">{t("adminTickets.filterAllPriorities")}</SelectItem>
-            {Object.entries(PRIORITY_MAP).map(([v, p]) => <SelectItem key={v} value={v}>{t(p.labelKey as any)}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <form
-          className="flex min-w-0 gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            handleJump();
-          }}
-        >
-          <Input
-            value={jumpId}
-            onChange={(event) => setJumpId(event.target.value)}
-            inputMode="numeric"
-            placeholder={t("adminTickets.jumpPlaceholder")}
-            className="min-w-0"
-          />
-          <Button type="submit" variant="outline" size="icon" className="h-10 w-10 shrink-0" title={t("adminTickets.jump")}>
-            <ArrowRight className="h-4 w-4" />
-          </Button>
-        </form>
-        <span className="text-xs text-muted-foreground xl:ml-auto">{t("adminTickets.total", { count: totalTickets })}</span>
-        <Button variant="outline" size="sm" onClick={async () => {
-          try {
-            const res = await api.adminGetTicketTypes();
-            setTypeMgmtTypes(res.success && res.data ? res.data.types : []);
-          } catch { setTypeMgmtTypes([]); }
-          setTypeMgmtOpen(true);
-        }} className="w-full sm:w-auto"><Settings2 className="mr-1 h-3.5 w-3.5" />{t("adminTickets.manageTypes")}</Button>
-        <Button variant="outline" size="sm" onClick={() => void reload().catch(() => undefined)} disabled={isLoading} className="w-full sm:w-auto">
-          <RefreshCw className={`mr-1 h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />{t("common.refresh")}
-        </Button>
+      {/* 筛选与操作分成两行：原先是一串 7 列的 xl 网格，前四列的最小宽度加起来
+          就超过多数屏幕的可用宽度，按钮会被挤出容器产生横向滚动。 */}
+      <div className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Select value={statusFilter} onValueChange={updateStatusFilter}>
+            <SelectTrigger className="w-full"><SelectValue placeholder={t("adminTickets.filterAll")} /></SelectTrigger>
+            <SelectContent>{Object.entries(STATUS_MAP).map(([v, s]) => <SelectItem key={v} value={v}>{t(s.labelKey as any)}</SelectItem>)}<SelectItem value="all">{t("adminTickets.filterAll")}</SelectItem></SelectContent>
+          </Select>
+          <Select value={typeFilter} onValueChange={updateTypeFilter}>
+            <SelectTrigger className="w-full"><SelectValue placeholder={t("adminTickets.filterAllTypes")} /></SelectTrigger>
+            <SelectContent><SelectItem value="all">{t("adminTickets.filterAllTypes")}</SelectItem>
+              {types.map((tp: string) => <SelectItem key={tp} value={tp}>{typeLabelFor(tp)}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={priorityFilter} onValueChange={updatePriorityFilter}>
+            <SelectTrigger className="w-full"><SelectValue placeholder={t("adminTickets.filterAllPriorities")} /></SelectTrigger>
+            <SelectContent><SelectItem value="all">{t("adminTickets.filterAllPriorities")}</SelectItem>
+              {Object.entries(PRIORITY_MAP).map(([v, p]) => <SelectItem key={v} value={v}>{t(p.labelKey as any)}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <form
+            className="flex min-w-0 flex-1 gap-2 sm:max-w-[18rem]"
+            onSubmit={(event) => {
+              event.preventDefault();
+              handleJump();
+            }}
+          >
+            <Input
+              value={jumpId}
+              onChange={(event) => setJumpId(event.target.value)}
+              inputMode="numeric"
+              placeholder={t("adminTickets.jumpPlaceholder")}
+              className="min-w-0"
+            />
+            <Button type="submit" variant="outline" size="icon" className="h-10 w-10 shrink-0" title={t("adminTickets.jump")} aria-label={t("adminTickets.jump")}>
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </form>
+          <span className="text-xs text-muted-foreground">{t("adminTickets.total", { count: totalTickets })}</span>
+          {hasFilters ? (
+            <Button variant="ghost" size="sm" onClick={resetFilters}>
+              <RotateCcw className="mr-1 h-3.5 w-3.5" />{t("adminTickets.resetFilters")}
+            </Button>
+          ) : null}
+          <div className="ml-auto flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={async () => {
+              try {
+                const res = await api.adminGetTicketTypes();
+                setTypeMgmtTypes(res.success && res.data ? res.data.types : []);
+              } catch { setTypeMgmtTypes([]); }
+              setTypeMgmtOpen(true);
+            }}><Settings2 className="mr-1 h-3.5 w-3.5" />{t("adminTickets.manageTypes")}</Button>
+            <Button variant="outline" size="sm" onClick={() => void reload().catch(() => undefined)} disabled={isLoading}>
+              <RefreshCw className={`mr-1 h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />{t("common.refresh")}
+            </Button>
+          </div>
+        </div>
       </div>
 
       {error ? (
@@ -366,18 +387,32 @@ export default function AdminTicketsPage() {
                       <ImageIcon className="h-3.5 w-3.5" />
                       {t("adminTickets.imageCount", { count: ticket.attachment_count ?? ticket.attachments?.length ?? 0 })}
                     </span>
-                    {ticket.admin_note && (
-                      <span className="min-w-0 flex-1 truncate" title={ticket.admin_note}>
-                        {t("adminTickets.adminNoteSummary", { note: ticket.admin_note })}
-                      </span>
-                    )}
                   </div>
 
-                  <div className="flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap">
-                    <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{new Date(ticket.created_at * 1000).toLocaleString()}</span>
-                    {ticket.updated_at !== ticket.created_at && (<span>· {new Date(ticket.updated_at * 1000).toLocaleString()}</span>)}
-                    {ticket.resolved_at && ticket.resolved_at > 0 && <span className="text-success">· {t("tickets.resolvedAt", { time: new Date(ticket.resolved_at * 1000).toLocaleString() })}</span>}
-                    {isClosed && ticket.closed_at && ticket.closed_at > 0 && <span>· {t("tickets.closedAt", { time: new Date(ticket.closed_at * 1000).toLocaleString() })}</span>}
+                  {/* 内部备注独占一行：挤在计数旁边会被 flex-1 压成半截，还容易和
+                      工单正文混在一起。 */}
+                  {ticket.admin_note && (
+                    <p className="line-clamp-2 rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                      {t("adminTickets.adminNoteSummary", { note: ticket.admin_note })}
+                    </p>
+                  )}
+
+                  {/* 每个时间戳都带标签：原来只有一个裸的时间串跟在 "·" 后面，
+                      看不出那是创建时间还是更新时间。 */}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                    <span className="flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      {t("tickets.createdAt", { time: new Date(ticket.created_at * 1000).toLocaleString() })}
+                    </span>
+                    {ticket.updated_at !== ticket.created_at && (
+                      <span>{t("tickets.updatedAt", { time: new Date(ticket.updated_at * 1000).toLocaleString() })}</span>
+                    )}
+                    {ticket.resolved_at && ticket.resolved_at > 0 && (
+                      <span className="text-success">{t("tickets.resolvedAt", { time: new Date(ticket.resolved_at * 1000).toLocaleString() })}</span>
+                    )}
+                    {isClosed && ticket.closed_at && ticket.closed_at > 0 && (
+                      <span>{t("tickets.closedAt", { time: new Date(ticket.closed_at * 1000).toLocaleString() })}</span>
+                    )}
                   </div>
                 </CardContent>
               </Card>

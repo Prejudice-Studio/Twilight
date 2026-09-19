@@ -292,7 +292,7 @@ export default function UserTicketsPage() {
       )}
 
       {data && data.total > 0 ? (
-        <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-t pt-4 sm:flex sm:justify-end">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
           <Button variant="outline" size="sm" aria-label={t("common.previousPage")} onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page <= 1 || isLoading}><ChevronLeft className="h-4 w-4" /></Button>
           <p className="min-w-0 text-center text-xs text-muted-foreground">{t("tickets.pageSummary", { page, total: totalPages, count: data.total })}</p>
           <Button variant="outline" size="sm" aria-label={t("common.nextPage")} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={page >= totalPages || isLoading}><ChevronRight className="h-4 w-4" /></Button>
@@ -380,7 +380,9 @@ function TicketListRow({
             <span className="flex items-center gap-1"><ImageIcon className="h-3.5 w-3.5" />{ticket.attachment_count}</span>
           </div>
         </div>
-        <div className="grid shrink-0 grid-cols-[auto_1fr] gap-2 sm:flex sm:flex-wrap sm:justify-end">
+        {/* 三个操作按钮此前排在两列网格里，第三个会掉到第二行第一列、和铃铛图标
+            对齐，看着像两对不同功能。改成自由换行的一排。 */}
+        <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
           <Button variant="ghost" size="icon" aria-label={ticket.notify_telegram ? t("tickets.notifyOn") : t("tickets.notifyOff")} title={ticket.notify_telegram ? t("tickets.notifyOn") : t("tickets.notifyOff")} onClick={onToggleNotify} disabled={busy}>{ticket.notify_telegram ? <Bell className="h-4 w-4 text-info" /> : <BellOff className="h-4 w-4 text-muted-foreground" />}</Button>
           <Button variant="outline" size="sm" onClick={onOpen} disabled={busy}>{t("common.view")}</Button>
           {!closed ? <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={onClose} disabled={busy}><Archive className="mr-1.5 h-3.5 w-3.5" />{t("tickets.closeTicket")}</Button> : <Button variant="ghost" size="sm" onClick={onReopen} disabled={busy}><RotateCcw className="mr-1.5 h-3.5 w-3.5" />{t("tickets.reopenTicket")}</Button>}

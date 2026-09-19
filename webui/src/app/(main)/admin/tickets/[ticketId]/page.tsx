@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   AlertCircle,
   Archive,
@@ -9,12 +10,14 @@ import {
   ArrowRight,
   CheckCircle2,
   Clock,
+  ExternalLink,
   ImagePlus,
   Loader2,
   MessageSquareMore,
   PlayCircle,
   RefreshCw,
   Send,
+  ShieldAlert,
   Trash2,
   User,
   X,
@@ -25,6 +28,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogOverlay } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -38,6 +42,10 @@ import { useSystemStore } from "@/store/system";
 const DEFAULT_TICKET_IMAGE_MAX_SIZE = 5 * 1024 * 1024;
 const DEFAULT_TICKET_IMAGE_MAX_COUNT = 5;
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp"];
+
+// 状态是工单处理里最高频的操作，做成一排分段按钮放在处理面板最上方：点一下就
+// 保存，不用再去找"保存"按钮——之前改了状态忘记点保存，改动就静默丢了。
+const STATUS_FLOW = ["open", "in_progress", "resolved", "closed"] as const;
 
 const STATUS_MAP: Record<string, { labelKey: string; className: string; icon: typeof AlertCircle }> = {
   open: { labelKey: "tickets.statusOpen", className: "bg-warning/10 text-warning border-warning/30", icon: AlertCircle },
@@ -97,16 +105,16 @@ export default function AdminTicketDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [savingNote, setSavingNote] = useState(false);
   const [uploadingPaste, setUploadingPaste] = useState(false);
   const [deletingReplyImage, setDeletingReplyImage] = useState<string | null>(null);
   const [replyAttachments, setReplyAttachments] = useState<TicketAttachment[]>([]);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const [jumpId, setJumpId] = useState("");
-  const [statusDraft, setStatusDraft] = useState("");
-  const [priorityDraft, setPriorityDraft] = useState("");
-  const [typeDraft, setTypeDraft] = useState("");
+  // 只有内部备注还需要草稿——状态/优先级/类型改成即时保存，不再有草稿与服务端值
+  // 打架的问题（原先回复一次会把未保存的草稿冲掉）。
   const [noteDraft, setNoteDraft] = useState("");
+  const [patchingField, setPatchingField] = useState<string | null>(null);
 
   const loadTicket = useCallback(async () => {
     loadAbortRef.current?.abort();
@@ -145,16 +153,11 @@ export default function AdminTicketDetailPage() {
     return () => loadAbortRef.current?.abort();
   }, [loadTicket]);
 
-  // 仅在「切换到另一张工单」时用服务端值初始化草稿（依赖 ticket?.id）。
-  // 此前依赖整个 ticket 对象：发送回复 / 保存元数据后的 setTicket 都会重跑本 effect，
-  // 把管理员正在编辑但尚未保存的 status/priority/type/处理备注草稿全部重置回服务端值，
-  // 表现为「回复后无法自动保存」「回复与聊天信息互相覆盖 / 部分消失」。
-  // 收窄到 id 后：同一张工单的后续刷新不再重置草稿，仅换单时才重新初始化。
+  // 仅在「切换到另一张工单」时用服务端值初始化备注草稿。依赖整个 ticket 对象的
+  // 话，发送回复 / 保存元数据后的 setTicket 都会重跑本 effect，把管理员正在编辑
+  // 但尚未保存的备注冲掉。
   useEffect(() => {
     if (!ticket) return;
-    setStatusDraft(ticket.status);
-    setPriorityDraft(ticket.priority);
-    setTypeDraft(ticket.type);
     setNoteDraft(ticket.admin_note || "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticket?.id]);
@@ -191,31 +194,32 @@ export default function AdminTicketDetailPage() {
     node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
   }, [messages.length, ticket?.id]);
 
-  const goToTicket = () => {
-    const nextId = Number(jumpId.trim());
-    if (!Number.isInteger(nextId) || nextId <= 0) {
-      toast({ title: t("adminTickets.invalidTicketId"), variant: "destructive" });
-      return;
-    }
-    router.push(`/admin/tickets/${nextId}`);
-  };
-
-  const handleSaveMeta = async () => {
+  // patchTicket 只提交一个字段。后端按 patch 语义处理，未提供即"不动此字段"，
+  // 两个管理员并发各改一处时不会用陈旧快照回退对方的改动。
+  const patchTicket = useCallback(async (field: string, payload: { status?: string; priority?: string; type?: string }) => {
     if (!ticket) return;
-    // 只提交相对服务端当前值真正改动的字段：后端按 patch 语义处理，未提交字段保持最新落库值不变，
-    // 避免并发编辑同一工单时用陈旧草稿把他人刚改的字段回退（last-writer-wins）。
-    const payload: { status?: string; priority?: string; type?: string; admin_note?: string } = {};
-    if (statusDraft !== ticket.status) payload.status = statusDraft;
-    if (priorityDraft !== ticket.priority) payload.priority = priorityDraft;
-    if (typeDraft !== ticket.type) payload.type = typeDraft;
-    if (noteDraft.trim() !== (ticket.admin_note || "")) payload.admin_note = noteDraft.trim();
-    if (Object.keys(payload).length === 0) {
-      toast({ title: t("adminTickets.updated") });
-      return;
-    }
-    setSaving(true);
+    setPatchingField(field);
     try {
       const res = await api.adminUpdateTicket(ticket.id, payload);
+      if (res.success && res.data) {
+        setTicket(res.data);
+      } else {
+        toast({ title: res.message || t("common.updateFailed"), variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: friendlyError(err?.errorCode, err?.message), variant: "destructive" });
+    } finally {
+      setPatchingField(null);
+    }
+  }, [ticket, t, toast]);
+
+  const handleSaveNote = async () => {
+    if (!ticket) return;
+    const note = noteDraft.trim();
+    if (note === (ticket.admin_note || "")) return;
+    setSavingNote(true);
+    try {
+      const res = await api.adminUpdateTicket(ticket.id, { admin_note: note });
       if (res.success && res.data) {
         setTicket(res.data);
         toast({ title: t("adminTickets.updated") });
@@ -225,7 +229,7 @@ export default function AdminTicketDetailPage() {
     } catch (err: any) {
       toast({ title: friendlyError(err?.errorCode, err?.message), variant: "destructive" });
     } finally {
-      setSaving(false);
+      setSavingNote(false);
     }
   };
 
@@ -238,18 +242,11 @@ export default function AdminTicketDetailPage() {
     }
     setSending(true);
     try {
-      const prevStatus = ticket.status;
       const res = await api.adminReplyTicket(ticket.id, content);
       if (res.success && res.data?.ticket) {
-        const nextTicket = res.data.ticket;
-        setTicket(nextTicket);
-        // 后端在管理员回复 open 工单时会自动流转 open→in_progress。effect 已收窄到
-        // ticket?.id 不再自动同步草稿，这里仅当管理员尚未手动改动状态草稿
-        // （statusDraft 仍等于回复前的服务端状态）时，把状态草稿跟随这次自动流转，
-        // 避免下拉框显示 open 而实际已是 in_progress、随后保存又把它改回 open。
-        if (statusDraft === prevStatus && nextTicket.status !== prevStatus) {
-          setStatusDraft(nextTicket.status);
-        }
+        // 后端在管理员回复 open 工单时会自动流转 open→in_progress，这里直接采信
+        // 服务端返回的整张工单——状态已经没有本地草稿了，不会互相打架。
+        setTicket(res.data.ticket);
         setReply("");
         setReplyAttachments([]);
         toast({ title: t("tickets.replySent") });
@@ -349,6 +346,15 @@ export default function AdminTicketDetailPage() {
     }
   };
 
+  const goToTicket = () => {
+    const nextId = Number(jumpId.trim());
+    if (!Number.isInteger(nextId) || nextId <= 0) {
+      toast({ title: t("adminTickets.invalidTicketId"), variant: "destructive" });
+      return;
+    }
+    router.push(`/admin/tickets/${nextId}`);
+  };
+
   if (loading && !ticket) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
@@ -378,9 +384,11 @@ export default function AdminTicketDetailPage() {
   const status = STATUS_MAP[ticket.status] || STATUS_MAP.open;
   const priority = PRIORITY_MAP[ticket.priority] || PRIORITY_MAP.medium;
   const StatusIcon = status.icon;
+  const noteDirty = noteDraft.trim() !== (ticket.admin_note || "");
 
   return (
     <div className="space-y-4">
+      {/* 头部：返回 + 标题 + 状态概览 + 刷新。跳转放在最右，不占主要视线。 */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-2">
           <Button variant="ghost" size="sm" className="-ml-2" onClick={() => router.push("/admin/tickets")}>
@@ -394,6 +402,7 @@ export default function AdminTicketDetailPage() {
                 {t(status.labelKey as any)}
               </Badge>
               <Badge variant="outline" className={priority.className}>{t(priority.labelKey as any)}</Badge>
+              {ticket.type ? <Badge variant="secondary">{ticket.type === "all" ? t("tickets.typeAll") : ticket.type}</Badge> : null}
               <Badge variant="secondary" className="font-mono">#{ticket.id}</Badge>
             </div>
             <h1 className="break-words text-2xl font-bold">{ticket.title}</h1>
@@ -403,20 +412,40 @@ export default function AdminTicketDetailPage() {
             </p>
           </div>
         </div>
-        <Button variant="outline" onClick={() => void loadTicket()} disabled={loading}>
-          <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          {t("common.refresh")}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <form
+            className="flex min-w-0 gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              goToTicket();
+            }}
+          >
+            <Input
+              value={jumpId}
+              onChange={(event) => setJumpId(event.target.value)}
+              inputMode="numeric"
+              placeholder={t("adminTickets.jumpPlaceholder")}
+              className="w-32"
+            />
+            <Button type="submit" variant="outline" size="icon" className="shrink-0" title={t("adminTickets.jump")} aria-label={t("adminTickets.jump")}>
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </form>
+          <Button variant="outline" onClick={() => void loadTicket()} disabled={loading}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            {t("common.refresh")}
+          </Button>
+        </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_21rem]">
+        {/* 左：会话。回复框明确标注"用户可见"，与右侧的内部备注形成对照。 */}
         <Card className="overflow-hidden">
           <CardContent className="flex min-h-[65dvh] min-w-0 flex-col p-0">
-            <div className="border-b px-4 py-3">
-              <div className="flex items-center gap-2 text-sm font-semibold">
-                <MessageSquareMore className="h-4 w-4 text-primary" />
-                {t("tickets.conversation")}
-              </div>
+            <div className="flex items-center gap-2 border-b px-4 py-3">
+              <MessageSquareMore className="h-4 w-4 text-primary" />
+              <span className="text-sm font-semibold">{t("tickets.conversation")}</span>
+              <Badge variant="secondary" className="ml-auto text-xs">{messages.length}</Badge>
             </div>
             <div ref={conversationRef} className="custom-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain bg-muted/20 p-4">
               {messages.map((message) => {
@@ -436,7 +465,7 @@ export default function AdminTicketDetailPage() {
             </div>
             <div className="border-t bg-background p-4">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                <span>{t("adminTickets.pasteImageHint")}</span>
+                <span className="font-medium text-foreground">{t("adminTickets.replyToUser")}</span>
                 {replyAttachments.length > 0 && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 font-medium text-foreground">
                     <ImagePlus className="h-3.5 w-3.5" />
@@ -495,64 +524,103 @@ export default function AdminTicketDetailPage() {
                   {uploadingPaste ? t("adminTickets.pasteImageUploading") : t("tickets.replySubmit")}
                 </Button>
               </div>
+              <p className="mt-2 text-[11px] text-muted-foreground">{t("adminTickets.pasteImageHint")}</p>
             </div>
           </CardContent>
         </Card>
 
+        {/* 右：处理面板。顺序按使用频率排，移动端堆叠后也是这个顺序。 */}
         <div className="space-y-4">
           <Card>
             <CardContent className="space-y-4 p-4">
               <div className="space-y-2">
-                <Label>{t("adminTickets.jump")}</Label>
-                <form
-                  className="flex gap-2"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    goToTicket();
-                  }}
-                >
-                  <Input value={jumpId} onChange={(event) => setJumpId(event.target.value)} inputMode="numeric" placeholder={t("adminTickets.jumpPlaceholder")} />
-                  <Button type="submit" variant="outline" size="icon" className="shrink-0">
-                    <ArrowRight className="h-4 w-4" />
-                  </Button>
-                </form>
-              </div>
-              <div className="grid gap-3">
-                <div className="space-y-2">
-                  <Label>{t("adminTickets.changeStatus")}</Label>
-                  <Select value={statusDraft} onValueChange={setStatusDraft}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>{Object.entries(STATUS_MAP).map(([value, item]) => <SelectItem key={value} value={value}>{t(item.labelKey as any)}</SelectItem>)}</SelectContent>
-                  </Select>
+                <Label>{t("adminTickets.changeStatus")}</Label>
+                {/* 分段按钮：点即保存，不用再找保存按钮。 */}
+                <div className="grid grid-cols-2 gap-2">
+                  {STATUS_FLOW.map((value) => {
+                    const option = STATUS_MAP[value];
+                    const Icon = option.icon;
+                    const active = ticket.status === value;
+                    return (
+                      <Button
+                        key={value}
+                        type="button"
+                        size="sm"
+                        variant={active ? "default" : "outline"}
+                        className="justify-start text-xs"
+                        disabled={patchingField !== null}
+                        onClick={() => void patchTicket("status", { status: value })}
+                      >
+                        {patchingField === "status" && active ? (
+                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Icon className="mr-1.5 h-3.5 w-3.5" />
+                        )}
+                        {t(option.labelKey as any)}
+                      </Button>
+                    );
+                  })}
                 </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
                 <div className="space-y-2">
                   <Label>{t("tickets.priority")}</Label>
-                  <Select value={priorityDraft} onValueChange={setPriorityDraft}>
+                  <Select
+                    value={ticket.priority}
+                    disabled={patchingField !== null}
+                    onValueChange={(value) => void patchTicket("priority", { priority: value })}
+                  >
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>{Object.entries(PRIORITY_MAP).map(([value, item]) => <SelectItem key={value} value={value}>{t(item.labelKey as any)}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
                   <Label>{t("tickets.type")}</Label>
-                  <Select value={typeDraft} onValueChange={setTypeDraft}>
+                  <Select
+                    value={ticket.type}
+                    disabled={patchingField !== null || typeOptions.length === 0}
+                    onValueChange={(value) => void patchTicket("type", { type: value })}
+                  >
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>{typeOptions.map((value) => <SelectItem key={value} value={value}>{value === "all" ? t("tickets.typeAll") : value}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2">
-                  <Label>{t("adminTickets.adminNote")}</Label>
-                  <Textarea value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} maxLength={5000} rows={4} />
+              </div>
+
+              <Separator />
+
+              {/* 内部备注单独一块并显式标注"用户看不到"：它和左边的回复框长得很像，
+                  不隔开的话很容易把内部备注当回复发出去，或者反过来。 */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="flex items-center gap-1">{t("adminTickets.adminNote")}</Label>
+                  {noteDirty ? (
+                    <Badge variant="outline" className="text-[10px] text-warning border-warning/40">{t("adminTickets.unsavedNote")}</Badge>
+                  ) : null}
                 </div>
-                <Button onClick={() => void handleSaveMeta()} disabled={saving}>
-                  {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  {t("adminTickets.saveMetadata")}
+                <Textarea
+                  value={noteDraft}
+                  onChange={(event) => setNoteDraft(event.target.value)}
+                  maxLength={5000}
+                  rows={4}
+                  placeholder={t("adminTickets.adminNotePlaceholder")}
+                  className="resize-y bg-muted/30"
+                />
+                <p className="flex items-start gap-1 text-[11px] text-muted-foreground">
+                  <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  {t("adminTickets.adminNoteNotVisible")}
+                </p>
+                <Button size="sm" className="w-full" onClick={() => void handleSaveNote()} disabled={savingNote || !noteDirty}>
+                  {savingNote && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {t("adminTickets.saveNote")}
                 </Button>
               </div>
             </CardContent>
           </Card>
 
           <Card>
-            <CardContent className="space-y-4 p-4">
+            <CardContent className="space-y-3 p-4">
               <TicketImages
                 ticketId={ticket.id}
                 attachments={ticket.attachments || []}
@@ -567,26 +635,43 @@ export default function AdminTicketDetailPage() {
 
           <Card>
             <CardContent className="space-y-3 p-4 text-sm">
-              <div className="flex justify-between gap-3">
-                <span className="text-muted-foreground">{t("tickets.createdAt", { time: "" }).replace(/\s*\{time\}\s*/g, "").trim() || t("tickets.createdAt", { time: toDateTime(ticket.created_at) })}</span>
-                <span>{toDateTime(ticket.created_at)}</span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium">{t("adminTickets.submitter")}</span>
+                <Link
+                  href="/admin/users"
+                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  {t("adminTickets.viewInUserAdmin")}
+                  <ExternalLink className="h-3 w-3" />
+                </Link>
               </div>
-              <div className="flex justify-between gap-3">
-                <span className="text-muted-foreground">{t("tickets.updatedAt", { time: "" }).replace(/\s*\{time\}\s*/g, "").trim() || t("tickets.updatedAt", { time: toDateTime(ticket.updated_at) })}</span>
-                <span>{toDateTime(ticket.updated_at)}</span>
+              <p className="break-words">
+                {ticket.username} <span className="text-muted-foreground">(UID: {ticket.uid})</span>
+              </p>
+
+              <Separator />
+
+              <div className="space-y-1.5 text-xs">
+                <TimelineRow label={t("adminTickets.labelCreated")} value={toDateTime(ticket.created_at)} />
+                <TimelineRow label={t("adminTickets.labelUpdated")} value={toDateTime(ticket.updated_at)} />
+                {ticket.resolved_at && ticket.resolved_at > 0 && (
+                  <TimelineRow label={t("adminTickets.labelResolved")} value={toDateTime(ticket.resolved_at)} />
+                )}
+                {ticket.closed_at && ticket.closed_at > 0 && (
+                  <TimelineRow label={t("adminTickets.labelClosed")} value={toDateTime(ticket.closed_at)} />
+                )}
               </div>
-              {ticket.resolved_at && ticket.resolved_at > 0 && (
-                <div className="flex justify-between gap-3">
-                  <span className="text-muted-foreground">{t("tickets.statusResolved")}</span>
-                  <span>{toDateTime(ticket.resolved_at)}</span>
-                </div>
-              )}
-              {ticket.closed_at && ticket.closed_at > 0 && (
-                <div className="flex justify-between gap-3">
-                  <span className="text-muted-foreground">{t("tickets.statusClosed")}</span>
-                  <span>{toDateTime(ticket.closed_at)}</span>
-                </div>
-              )}
+            </CardContent>
+          </Card>
+
+          {/* 危险区独立成块：原先删除按钮挤在一堆只读时间信息里，很容易误点。 */}
+          <Card className="border-destructive/40">
+            <CardContent className="space-y-2 p-4">
+              <p className="flex items-center gap-1.5 text-sm font-medium text-destructive">
+                <ShieldAlert className="h-4 w-4" />
+                {t("adminTickets.dangerZone")}
+              </p>
+              <p className="text-xs text-muted-foreground">{t("adminTickets.dangerZoneHint")}</p>
               <Button variant="destructive" className="w-full" onClick={() => void handleDelete()}>
                 <Trash2 className="mr-2 h-4 w-4" />
                 {t("adminTickets.deleteAndBack")}
@@ -611,6 +696,15 @@ export default function AdminTicketDetailPage() {
           {previewSrc && <img src={previewSrc} alt="" className="mx-auto max-h-[85dvh] w-auto rounded-lg object-contain" />}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function TimelineRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <span className="text-right">{value}</span>
     </div>
   );
 }
