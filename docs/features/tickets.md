@@ -23,7 +23,15 @@
 
 管理端工单处理页支持点击单个工单进入会话式详情页。详情页读取完整对话、追加管理员文字回复、以及图片上传/预览/删除，在 V2（`webui` 默认版本）下分别对应 `/api/v2/admin/tickets/{ticket_id}`、`POST /api/v2/admin/tickets/{ticket_id}/replies`、`/api/v2/tickets/{ticket_id}/attachments`；V1 的同义路径是 `/admin/tickets/{ticket_id}`、`POST /admin/tickets/{ticket_id}/reply`、`/tickets/{ticket_id}/images`。附件受全局工单图片大小和数量限制。V1 支持粘贴图片，WebUI 详情页通过 `apiRequestForm` 提交同源 multipart 请求，后端规则不变。
 
-管理端工单列表默认只返回 `open` / `in_progress`，用于聚焦待处理队列。需要查看历史归档时，前端和外部调用方应显式传 `all=1`；后端同时兼容 `status=all`，两者都会返回 `resolved` / `closed` 等全部状态。
+### 管理端处理页的信息分区
+
+管理员详情页（`webui/src/app/(main)/admin/tickets/[ticketId]/page.tsx`）左侧是会话、右侧是处理面板，刻意分成互不混淆的几块：
+
+- **状态 / 优先级 / 类型**改为即时保存（每次只 PATCH 一个字段），不再有"改完还得记得点保存"的问题。管理员回复 `open` 工单时后端会自动流转到 `in_progress`；页面直接采信服务端返回的整张工单，本地不保留状态草稿——草稿曾与这次自动流转打架，把工单又改回 `open`。
+- **内部备注**是唯一保留草稿 + 显式保存的字段：它是长文本，逐键自动保存反而更糟。旁边明确标注"用户看不到"，与左侧标注"用户可见"的回复框形成对照。
+- **附件、提交人、时间线**各自成卡，**删除**单独放进红框的危险区，不再混在只读时间信息里。
+
+管理端工单列表默认只返回 `open` / `in_progress`，用于聚焦待处理队列。需要查看历史归档时，前端和外部调用方应显式传 `all=1`；后端同时兼容 `status=all`，两者都会返回 `resolved` / `closed` 等全部状态。列表的每个时间戳都带"创建于 / 更新于 / 解决于 / 关闭于"标签，不出现无标签的裸时间串。
 
 用户创建工单成功后，后端会先完成 store 持久化，再写入 `create_ticket` 审计日志并发送 Telegram 管理员通知；运行日志会记录不含正文的 `ticket_id`、提交人、类型和优先级，便于排查“通知已到但后台未显示”的问题。WebUI 的用户工单列表、管理端工单列表、管理端工单详情和审计日志列表都绕过前端短读缓存，手动刷新应直接读取后端当前状态。
 
