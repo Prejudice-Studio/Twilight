@@ -15,41 +15,8 @@ import (
 	"go.uber.org/zap"
 )
 
-func queryInt(r *http.Request, key string, fallback int) int {
-	if value := r.URL.Query().Get(key); value != "" {
-		if parsed, err := strconv.Atoi(value); err == nil {
-			return parsed
-		}
-	}
-	return fallback
-}
-
-func clamp(value, minValue, maxValue int) int {
-	if value < minValue {
-		return minValue
-	}
-	if value > maxValue {
-		return maxValue
-	}
-	return value
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func pages(total, perPage int) int {
-	if perPage <= 0 {
-		return 1
-	}
-	if total == 0 {
-		return 0
-	}
-	return (total + perPage - 1) / perPage
-}
+// 查询参数解析与夹取 helper 已迁到 params.go，避免每个 handler 各写一遍
+// ParseInt + 吞错误（详见该文件顶部说明）。
 
 const permanentExpiryUnix int64 = 253402214400
 

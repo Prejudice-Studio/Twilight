@@ -186,13 +186,6 @@ func newRuntimeLogBuffer(limit int) *runtimeLogBuffer {
 	return b
 }
 
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func (b *runtimeLogBuffer) append(entry RuntimeLogEntry) {
 	b.mu.Lock()
 	b.nextID++
@@ -610,7 +603,7 @@ func (a *App) handleRuntimeStatus(w http.ResponseWriter, r *http.Request, _ Para
 func (a *App) handleRuntimeLogs(w http.ResponseWriter, r *http.Request, _ Params) {
 	maxLimit, _ := runtimeLogs.stats()
 	limit := clamp(queryInt(r, "limit", 200), 1, maxLimit)
-	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+	after := queryInt64(r, "after", 0)
 	entries, next := runtimeLogs.snapshot(limit, after)
 	ok(w, "OK", runtimeLogPayload(entries, next, limit))
 }
@@ -636,7 +629,7 @@ func (a *App) handleRuntimeLogStream(w http.ResponseWriter, r *http.Request, _ P
 
 	maxLimit, _ := runtimeLogs.stats()
 	limit := clamp(queryInt(r, "limit", 100), 1, minInt(maxLimit, 1000))
-	cursor, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+	cursor := queryInt64(r, "after", 0)
 	send := func(event string, data any) bool {
 		payload, err := json.Marshal(data)
 		if err != nil {

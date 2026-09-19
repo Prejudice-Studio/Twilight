@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/prejudice-studio/twilight/internal/store"
 )
@@ -19,20 +18,8 @@ func (a *App) handleGetUserPlaybackHistory(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// 解析查询参数
-	since := int64(0)
-	if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
-		if parsed, err := strconv.ParseInt(sinceStr, 10, 64); err == nil {
-			since = parsed
-		}
-	}
-
-	limit := 100
-	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 && parsed <= 1000 {
-			limit = parsed
-		}
-	}
+	since := queryInt64(r, "since", 0)
+	limit := queryIntClamped(r, "limit", 100, 1, 1000)
 
 	records := a.store().PlaybackRecords(uid, since, limit)
 
@@ -54,12 +41,7 @@ func (a *App) handleGetUserPlaybackSessions(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	limit := 50
-	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 && parsed <= 500 {
-			limit = parsed
-		}
-	}
+	limit := queryIntClamped(r, "limit", 50, 1, 500)
 
 	sessions := a.store().UserPlaybackSessions(uid, limit)
 
@@ -71,12 +53,7 @@ func (a *App) handleGetUserPlaybackSessions(w http.ResponseWriter, r *http.Reque
 
 // handleGetPlaybackSummary 返回全局播放统计摘要（仅管理员）。
 func (a *App) handleGetPlaybackSummary(w http.ResponseWriter, r *http.Request, _ Params) {
-	since := int64(0)
-	if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
-		if parsed, err := strconv.ParseInt(sinceStr, 10, 64); err == nil {
-			since = parsed
-		}
-	}
+	since := queryInt64(r, "since", 0)
 
 	totalPlays, totalDuration, uniqueUsers, err := a.store().PlaybackRecordSummary(since)
 	if err != nil {

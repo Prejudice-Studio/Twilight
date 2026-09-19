@@ -499,16 +499,16 @@ func (a *App) handleListAuditLogs(w http.ResponseWriter, r *http.Request, _ Para
 	presetFilter := strings.ToLower(r.URL.Query().Get("preset"))
 	categoryFilter := strings.ToLower(r.URL.Query().Get("category"))
 	actionFilter := strings.ToLower(r.URL.Query().Get("action"))
-	uidFilter := r.URL.Query().Get("uid")
-	targetUIDFilter := r.URL.Query().Get("target_uid")
 	search := strings.ToLower(r.URL.Query().Get("search"))
 	from := auditLogUnixQuery(r, "from", "start")
 	to := auditLogUnixQuery(r, "to", "end")
 	sortBy := normalizeAuditLogSort(r.URL.Query().Get("sort"))
 	order := normalizeSortOrder(r.URL.Query().Get("order"))
 
-	uid, _ := strconv.ParseInt(uidFilter, 10, 64)
-	targetUID, _ := strconv.ParseInt(targetUIDFilter, 10, 64)
+	// 0 表示"不过滤"：这两个是可选筛选条件，非法值回退 0 等价于不筛选，
+	// 而不是筛出 UID 0（该系统不存在 UID 0 的用户）。
+	uid := queryInt64(r, "uid", 0)
+	targetUID := queryInt64(r, "target_uid", 0)
 	if categoryFilter == "all" {
 		categoryFilter = ""
 	}

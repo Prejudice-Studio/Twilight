@@ -111,8 +111,8 @@ type App struct {
 	embyDeviceAuditCache      map[string]any
 	// playRankCache 按 "range|limit|是否含身份" 分键缓存榜单，脱敏版与管理
 	// 员版互不相通。
-	playRankMu        sync.Mutex
-	playRankCache     map[string]playRankSnapshot
+	playRankMu    sync.Mutex
+	playRankCache map[string]playRankSnapshot
 	// playbackReportingReady 缓存 Playback Reporting 插件的探测结果。探测要往
 	// Emby 发一次自定义 SQL，不能每次同步都做；插件没装时必须静默回退，不能
 	// 每轮都往日志里写一条 warn。
@@ -121,11 +121,11 @@ type App struct {
 	playbackReportingReady     bool
 	playbackReportingLastError string
 	playbackReportingSyncedAt  int64
-	embySessionsMu    sync.Mutex
-	embySessionsUntil time.Time
-	embySessionsCache []map[string]any
-	migrationMu       sync.Mutex
-	bindStatus        *bindStatusHub
+	embySessionsMu             sync.Mutex
+	embySessionsUntil          time.Time
+	embySessionsCache          []map[string]any
+	migrationMu                sync.Mutex
+	bindStatus                 *bindStatusHub
 	// schedulerLocks: jobID -> *schedulerProcessRun。BATCH_07 之前在 package 级
 	// 声明 (`var schedulerProcessLocks sync.Map`)，单进程 prod 不显问题，但
 	// 测试 setup 反复 New() 出多个 App 时这张表共享 → 一个 case cancel 的 job
