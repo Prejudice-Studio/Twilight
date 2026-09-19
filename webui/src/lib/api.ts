@@ -41,6 +41,7 @@ import type {
   EmbyDeviceAuditData,
   EmbyInfo,
   EmbyLibraryStats,
+  PlayRankGroupBy,
   PlayRankRange,
   PlayRankResponse,
   EmbyRegisterStatus,
@@ -1741,11 +1742,12 @@ class ApiClient {
   // 普通用户拿到的是脱敏榜单；管理员走 getAdminPlayRank。
   async getPlayRank(
     range: PlayRankRange = "day",
-    opts: { limit?: number; days?: number; refresh?: boolean; signal?: AbortSignal } = {},
+    opts: { limit?: number; days?: number; groupBy?: PlayRankGroupBy; refresh?: boolean; signal?: AbortSignal } = {},
   ) {
     const params = new URLSearchParams({ range });
     if (opts.limit) params.set("limit", String(opts.limit));
     if (opts.days && opts.days > 0) params.set("days", String(opts.days));
+    if (opts.groupBy) params.set("group_by", opts.groupBy);
     if (opts.refresh) params.set("refresh", "1");
     return this.request<PlayRankResponse>(
       `/emby/play-rank?${params.toString()}`,
@@ -1756,11 +1758,12 @@ class ApiClient {
 
   async getAdminPlayRank(
     range: PlayRankRange = "day",
-    opts: { limit?: number; days?: number; refresh?: boolean; signal?: AbortSignal } = {},
+    opts: { limit?: number; days?: number; groupBy?: PlayRankGroupBy; refresh?: boolean; signal?: AbortSignal } = {},
   ) {
     const params = new URLSearchParams({ range });
     if (opts.limit) params.set("limit", String(opts.limit));
     if (opts.days && opts.days > 0) params.set("days", String(opts.days));
+    if (opts.groupBy) params.set("group_by", opts.groupBy);
     if (opts.refresh) params.set("refresh", "1");
     return this.request<PlayRankResponse>(
       `/admin/emby/play-rank?${params.toString()}`,

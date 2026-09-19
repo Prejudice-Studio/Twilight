@@ -14,9 +14,11 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n } from "@/lib/i18n";
-import { api, type PlayRankRange, type PlayRankResponse } from "@/lib/api";
+import { api, type PlayRankGroupBy, type PlayRankRange, type PlayRankResponse } from "@/lib/api";
+import { PlayRankMediaLabel } from "@/components/play-rank-media-label";
 
 const rankRanges: PlayRankRange[] = ["day", "week", "month", "all"];
+const rankGroups: PlayRankGroupBy[] = ["item", "series"];
 
 // 同步窗口：活动日志只能按"过去 N 小时"回拉，默认 24 小时。想让榜单覆盖更久的
 // 历史，得先按更长的窗口把日志拉回来——否则库里没有数据，切到总榜也是空的。
@@ -39,6 +41,7 @@ export default function AdminPlayRankPage() {
   const { toast } = useToast();
 
   const [range, setRange] = useState<PlayRankRange>("day");
+  const [groupBy, setGroupBy] = useState<PlayRankGroupBy>("item");
   const [data, setData] = useState<PlayRankResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -54,12 +57,12 @@ export default function AdminPlayRankPage() {
     return t("playRank.unitMinutes", { value: total > 0 ? Math.max(1, minutes) : 0 });
   };
 
-  const load = useCallback(async (target: PlayRankRange, force = false) => {
+  const load = useCallback(async (target: PlayRankRange, group: PlayRankGroupBy, force = false) => {
     if (force) setRefreshing(true);
     else setLoading(true);
     setError(null);
     try {
-      const res = await api.getAdminPlayRank(target, { refresh: force });
+      const res = await api.getAdminPlayRank(target, { groupBy: group, refresh: force });
       if (res.success && res.data) {
         setData(res.data);
       } else {
@@ -74,8 +77,8 @@ export default function AdminPlayRankPage() {
   }, [t]);
 
   useEffect(() => {
-    void load(range);
-  }, [load, range]);
+    void load(range, groupBy);
+  }, [load, range, groupBy]);
 
   // 榜单数据来自 Emby 活动日志同步：手动同步一次可以让刚发生的播放立刻入榜，
   // 不必等定时任务或 60 秒缓存过期。
@@ -89,7 +92,7 @@ export default function AdminPlayRankPage() {
           title: t("playRank.syncDone", { count: res.data.new_entries ?? 0 }),
           variant: "success",
         });
-        await load(range, true);
+        await load(range, groupBy, true);
       } else {
         toast({
           title: t("playRank.syncFailed", { message: res.message || t("common.networkError") }),
@@ -146,7 +149,7 @@ export default function AdminPlayRankPage() {
                 {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <DownloadCloud className="h-4 w-4" />}
                 {syncing ? t("playRank.syncing") : t("playRank.sync")}
               </Button>
-              <Button variant="secondary" size="sm" onClick={() => void load(range, true)} disabled={refreshing || loading}>
+              <Button variant="secondary" size="sm" onClick={() => void load(range, groupBy, true)} disabled={refreshing || loading}>
                 {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                 {t("playRank.refresh")}
               </Button>
@@ -186,6 +189,27 @@ export default function AdminPlayRankPage() {
             ) : (
               <Badge variant="secondary" className="self-center">{t("playRank.sourceActivityLog")}</Badge>
             )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">{t("playRank.groupBy")}</span>
+            {rankGroups.map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => setGroupBy(item)}
+                className={`rounded-lg px-3 py-1 text-xs font-medium transition-colors ${
+                  groupBy === item
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {item === "item" ? t("playRank.groupItem") : t("playRank.groupSeries")}
+              </button>
+            ))}
+            <span className="self-center text-xs text-muted-foreground">
+              {groupBy === "item" ? t("playRank.groupItemHint") : t("playRank.groupSeriesHint")}
+            </span>
           </div>
 
           {data?.enabled === false && (
@@ -243,7 +267,7 @@ export default function AdminPlayRankPage() {
         <Card className="border-border/60">
           <CardContent className="flex min-h-[200px] flex-col items-center justify-center gap-3 text-center">
             <p className="text-sm text-muted-foreground">{error}</p>
-            <Button variant="secondary" size="sm" onClick={() => void load(range)}>
+            <Button variant="secondary" size="sm" onClick={() => void load(range, groupBy)}>
               {t("common.retry")}
             </Button>
           </CardContent>
@@ -254,7 +278,9 @@ export default function AdminPlayRankPage() {
             <CardContent className="p-0">
               <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
                 <Trophy className="h-4 w-4 text-primary" />
-                <h2 className="text-sm font-semibold">{t("playRank.mediaTitle")}</h2>
+                <h2 className="text-sm font-semibold">
+                  {groupBy === "series" ? t("playRank.mediaTitleSeries") : t("playRank.mediaTitle")}
+                </h2>
                 <Badge variant="secondary" className="ml-auto text-xs">{media.length}</Badge>
               </div>
               <div className="flex items-center gap-3 px-3 py-2 text-xs font-medium text-muted-foreground">
@@ -268,14 +294,9 @@ export default function AdminPlayRankPage() {
                 <Empty hint={emptyHint} />
               ) : (
                 media.map((item, index) => (
-                  <div key={`${item.item_id}-${index}`} className="flex items-center gap-3 border-t border-border/50 px-3 py-2.5">
+                  <div key={`${item.item_id || item.title}-${index}`} className="flex items-center gap-3 border-t border-border/50 px-3 py-2.5">
                     <span className="w-6 shrink-0 text-center text-sm font-semibold text-muted-foreground">{index + 1}</span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium" title={item.title}>{item.title || t("playRank.unknown")}</p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {item.series_name || item.media_type || t("playRank.unknown")}
-                      </p>
-                    </div>
+                    <PlayRankMediaLabel item={item} groupBy={groupBy} />
                     <span className="w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{item.viewers}</span>
                     <span className="shrink-0 text-sm tabular-nums">{item.plays}</span>
                     <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{formatDuration(item.duration)}</span>

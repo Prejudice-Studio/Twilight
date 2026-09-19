@@ -754,6 +754,11 @@ export interface PlayRankMediaItem {
   plays: number;
   duration: number;
   viewers: number;
+  // 这一行覆盖了多少个不同的媒体条目：逐集模式下恒为 1，按剧聚合时是看过的集数。
+  episodes?: number;
+  // 集数标识，形如 "S1E8"。只有集号没有季号时是 "E8"；拿不到（电影，或 Emby
+  // 未返回编号）时后端不下发这个字段。series 模式下不会出现。
+  episode_label?: string;
 }
 
 export interface PlayRankUserItem {
@@ -765,10 +770,14 @@ export interface PlayRankUserItem {
   username?: string;
 }
 
+// 媒体榜的聚合维度：item 是逐集/逐部，series 把一部剧的所有集合并成一行。
+export type PlayRankGroupBy = "item" | "series";
+
 export interface PlayRankResponse {
   // range 可能是 "day"/"week"/"month"/"all"，也可能是 days= 产生的 "30d"。
   range: PlayRankRange | string;
   since: number;
+  group_by: PlayRankGroupBy;
   updated_at: number;
   summary: { plays: number; duration: number; viewers: number; items: number };
   // recorded 是整库覆盖面，不随当前窗口变化：当前窗口没数据时，靠它告诉用户

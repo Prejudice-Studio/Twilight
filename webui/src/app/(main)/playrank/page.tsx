@@ -8,9 +8,11 @@ import { Badge } from "@/components/ui/badge";
 import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
 import { useI18n } from "@/lib/i18n";
-import { api, type PlayRankRange, type PlayRankResponse } from "@/lib/api";
+import { api, type PlayRankGroupBy, type PlayRankRange, type PlayRankResponse } from "@/lib/api";
+import { PlayRankMediaLabel } from "@/components/play-rank-media-label";
 
 const rankRanges: PlayRankRange[] = ["day", "week", "month", "all"];
+const rankGroups: PlayRankGroupBy[] = ["item", "series"];
 
 function rangeHintKey(range: PlayRankRange): "playRank.dayHint" | "playRank.weekHint" | "playRank.monthHint" | "playRank.allHint" {
   if (range === "week") return "playRank.weekHint";
@@ -31,6 +33,7 @@ export default function PlayRankPage() {
   const isAdmin = user?.role === 0;
 
   const [range, setRange] = useState<PlayRankRange>("day");
+  const [groupBy, setGroupBy] = useState<PlayRankGroupBy>("item");
   const [data, setData] = useState<PlayRankResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -50,12 +53,12 @@ export default function PlayRankPage() {
     return t("playRank.unitMinutes", { value: total > 0 ? Math.max(1, minutes) : 0 });
   };
 
-  const load = useCallback(async (target: PlayRankRange, force = false) => {
+  const load = useCallback(async (target: PlayRankRange, group: PlayRankGroupBy, force = false) => {
     if (force) setRefreshing(true);
     else setLoading(true);
     setError(null);
     try {
-      const res = await api.getPlayRank(target, { refresh: force });
+      const res = await api.getPlayRank(target, { groupBy: group, refresh: force });
       if (res.success && res.data) {
         setData(res.data);
       } else {
@@ -71,12 +74,12 @@ export default function PlayRankPage() {
 
   useEffect(() => {
     if (!canView) return;
-    void load(range);
-  }, [canView, load, range]);
+    void load(range, groupBy);
+  }, [canView, load, range, groupBy]);
 
   const handleRefresh = () => {
     if (refreshing) return;
-    void load(range, true);
+    void load(range, groupBy, true);
   };
 
   if (!canView) {
@@ -150,6 +153,27 @@ export default function PlayRankPage() {
             <span className="self-center text-xs text-muted-foreground">{t(rangeHintKey(range))}</span>
           </div>
 
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">{t("playRank.groupBy")}</span>
+            {rankGroups.map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => setGroupBy(item)}
+                className={`rounded-lg px-3 py-1 text-xs font-medium transition-colors ${
+                  groupBy === item
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {item === "item" ? t("playRank.groupItem") : t("playRank.groupSeries")}
+              </button>
+            ))}
+            <span className="self-center text-xs text-muted-foreground">
+              {groupBy === "item" ? t("playRank.groupItemHint") : t("playRank.groupSeriesHint")}
+            </span>
+          </div>
+
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <SummaryCard icon={Trophy} label={t("playRank.summaryPlays")} value={summary?.plays ?? 0} />
             <SummaryCard icon={Clock} label={t("playRank.summaryDuration")} value={formatDuration(summary?.duration ?? 0)} />
@@ -178,7 +202,7 @@ export default function PlayRankPage() {
         <Card className="border-border/60">
           <CardContent className="flex min-h-[200px] flex-col items-center justify-center gap-3 text-center">
             <p className="text-sm text-muted-foreground">{error}</p>
-            <Button variant="secondary" size="sm" onClick={() => void load(range)}>
+            <Button variant="secondary" size="sm" onClick={() => void load(range, groupBy)}>
               {t("common.retry")}
             </Button>
           </CardContent>
@@ -186,21 +210,15 @@ export default function PlayRankPage() {
       ) : (
         <div className="grid gap-6 lg:grid-cols-2">
           <RankCard
-            title={t("playRank.mediaTitle")}
+            title={groupBy === "series" ? t("playRank.mediaTitleSeries") : t("playRank.mediaTitle")}
             empty={media.length === 0}
             emptyHint={emptyHint}
             header={[t("playRank.rank"), t("playRank.media"), t("playRank.plays"), t("playRank.duration")]}
           >
             {media.map((item, index) => (
-              <div key={`${item.item_id}-${index}`} className="flex items-center gap-3 border-b border-border/50 px-3 py-2.5 last:border-0">
+              <div key={`${item.item_id || item.title}-${index}`} className="flex items-center gap-3 border-b border-border/50 px-3 py-2.5 last:border-0">
                 <span className="w-6 shrink-0 text-center text-sm font-semibold text-muted-foreground">{index + 1}</span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium" title={item.title}>{item.title || t("playRank.unknown")}</p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {item.series_name ? `${item.series_name} · ` : ""}
-                    {t("playRank.viewers")} {item.viewers}
-                  </p>
-                </div>
+                <PlayRankMediaLabel item={item} groupBy={groupBy} showViewers />
                 <span className="shrink-0 text-sm tabular-nums">{item.plays}</span>
                 <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{formatDuration(item.duration)}</span>
               </div>
