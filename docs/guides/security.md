@@ -28,12 +28,13 @@
 - base URL 不允许携带 query / fragment，避免后续路径拼接被污染；
 - 若 host 是字面 IP，交由 `refuseUnsafeOutboundIP` 否决典型 SSRF 目标：链路本地（`169.254.0.0/16`、IPv6 `fe80::/10`）、未指定地址（`0.0.0.0` / `::`）、云元数据 magic IP（如 `100.100.100.200`）。
 - 显式放行 loopback（`127.0.0.1` / `::1`）：自托管同机 docker-compose、反代回环部署普遍依赖该路径；不强制 HTTPS（HTTPS 由部署侧反向代理承担）。
+- **拨号阶段再校验一次**（`guardOutboundDialAddress`，挂在 `sharedHTTPTransport` 的 `net.Dialer.Control` 上）：上面几步都作用在**配置字符串**上，管不到 host 是域名的情况——一个解析到 `169.254.169.254` 的主机名就能绕过。而 `Control` 回调拿到的是 **DNS 解析之后**的 `IP:port`，在这一刻拦截既覆盖了域名，也顺带堵住了 DNS rebinding（校验时返回公网 IP、拨号时返回内网 IP）。开发者 JS 沙箱的 `fetch()` 早先就是这么做的，现在系统侧出站与之对齐。
 
 配置面被入侵或管理员误填时，这一层避免可信的 `X-Emby-Token` / Bot Token / TMDB Key 被发往攻击者控制的内部地址。
 
 > **已知边界（M1，刻意保留、仅文档标注）**：`validateOutboundBaseURL` / `refuseUnsafeOutboundIP` 的过滤有意收窄，属于自托管取舍而非疏漏，运维需知悉其边界：
-> - **只拦字面 IP**：`refuseUnsafeOutboundIP` 仅在 `net.ParseIP(host) != nil`（host 本身就是 IP 字面量）时生效。**不做 DNS 解析**——若 base URL 填的是主机名，即使该主机名解析到内网 / loopback / 云元数据地址，也不会被拦截（含 DNS rebinding 场景）。
-> - **不拦 RFC1918 / CGNAT / ULA**：即使是字面 IP，`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`、CGNAT `100.64.0.0/10`、IPv6 ULA `fc00::/7` 均**不在**否决列表内；只拦 link-local（`169.254.0.0/16`、`fe80::/10`，AWS/GCP 元数据 `169.254.169.254` 借此被拦）、unspecified（`0.0.0.0`/`::`）与阿里云元数据 `100.100.100.200`。loopback（`127.0.0.1`/`::1`）显式放行。
+> - **不拦 RFC1918 / CGNAT / ULA**：`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`、CGNAT `100.64.0.0/10`、IPv6 ULA `fc00::/7` 均**不在**否决列表内；只拦 link-local（`169.254.0.0/16`、`fe80::/10`，AWS/GCP 元数据 `169.254.169.254` 借此被拦）、unspecified（`0.0.0.0`/`::`）与阿里云元数据 `100.100.100.200`。loopback（`127.0.0.1`/`::1`）显式放行。
+> - 早期版本**只拦字面 IP**（host 本身是 IP 才校验，填域名则完全绕过，含 DNS rebinding）。该缺口已由上述拨号阶段校验补齐；域名与 rebinding 不再是盲区。
 > - **触发面是管理员配置面，非用户输入**：这些 base URL（`Emby.emby_url` / `Bangumi.api_url` / `Telegram.api_url` / `Global.tmdb_api_url`）只有管理员能改，普通用户无法注入。实际风险是「配置面被入侵 / 管理员误填 / 从旧库迁入被污染值」时，可信凭据被发往内网服务，属于纵深防御的最后一环而非首要边界。
 > - 之所以不进一步收紧：自托管、docker-compose 同栈、内网反代普遍要求把 Emby / Bangumi 指向 RFC1918 或主机名地址，一刀切拦截会打死绝大多数现网部署。**如果你的部署不需要出站到内网**，可在反向代理 / 出口防火墙层面对后端做 egress 限制，作为这层之外的补充。
 

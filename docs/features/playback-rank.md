@@ -74,11 +74,20 @@
 
 未知取值一律退回 `item`：宁可给明细，也不能让未经白名单校验的字符串进到 `GROUP BY`。
 
-### 集数标识 S1E8
+### 集数标识
 
-季号与集号**不在播放记录表里**，而是每次构建榜单时由 `playRankEpisodeLabels` 向 Emby 批量取 `ParentIndexNumber` / `IndexNumber` 补上，拼成 `S1E8` 下发在 `episode_label` 字段。这么做是为了让历史记录不用迁移就能显示集数；Emby 不可用时拿不到编号，只是少了这个徽标，榜单本身照常返回。
+季号与集号**不在播放记录表里**，而是每次构建榜单时由 `playRankEpisodes` 向 Emby 批量取 `ParentIndexNumber` / `IndexNumber` 补上，下发 `season_number` / `episode_number` 两个数字。这么做是为了让历史记录不用迁移就能显示集数；Emby 不可用时拿不到编号，只是少了这个徽标，榜单本身照常返回。`series` 模式下整部剧没有「第几集」可言，不会下发这两个字段。
 
-只有集号没有季号时退化成 `E8`；没有集号就完全不显示（电影、音乐，或 Emby 未返回编号）。`series` 模式下整部剧没有「第几集」可言，不会下发这个字段。
+后端只给数字、**不拼显示文案**：拼好的字符串没法翻译，也没法让不同语言按自己的习惯表达。显示规则在前端 `play-rank-media-label.tsx`：
+
+| 拿到的编号 | 显示 | 文案 key |
+| --- | --- | --- |
+| 季号 + 集号 | `S1E8` | `playRank.seasonEpisode` |
+| 只有集号 | 第 8 集 / Episode 8 | `playRank.episodeOnly` |
+| 都没有，但这一行是剧集 | 未知（弱化描边徽标） | `playRank.episodeUnknown` |
+| 电影 / 音乐 | 不显示徽标 | — |
+
+「未知」占位不能省：只有剧名没有集号的一行看起来会像在统计整部剧，实际是一次单集播放。**更不能用 `S1E8` 之类的默认值顶上**——那是拿编造的编号冒充真实数据，误导性比留白更强。判断是否「本该有集数」的依据是媒体类型为剧集或带剧名；电影、音乐没有集数概念，不给徽标。真实编号用实心徽标、「未知」用描边弱化，两者不能长得一样，否则看的人会把「没查到」当成「查到了就是这个」。
 
 ## 接口
 
@@ -97,7 +106,7 @@
 | `group_by` | `item`（默认，逐集/逐部）/ `series`（按整部剧聚合） |
 | `refresh` | 传 `1` 时绕过缓存 |
 
-响应含 `range`、`since`（窗口起点）、`group_by`、`updated_at`、总览 `summary`、媒体榜 `media`、用户榜 `users`，以及整库覆盖面 `recorded`。媒体榜每行带 `episodes`（覆盖的条目数）与可选的 `episode_label`（`S1E8`）：
+响应含 `range`、`since`（窗口起点）、`group_by`、`updated_at`、总览 `summary`、媒体榜 `media`、用户榜 `users`，以及整库覆盖面 `recorded`。媒体榜每行带 `episodes`（覆盖的条目数），剧集另有可选的 `season_number` / `episode_number` 两个数字：
 
 ```jsonc
 {
@@ -123,6 +132,6 @@
 | `/playrank` | 用户页，脱敏榜单，日/周/月/总榜切换 + 按单集/按整部剧切换 |
 | `/admin/playrank` | 管理页，含 `uid`、同步窗口选择与「同步活动日志」按钮（调 `adminGetEmbyActivityLogs`），并用徽标显示当前时长口径是净时长还是墙上时长 |
 
-两个页面的媒体榜共用 `webui/src/components/play-rank-media-label.tsx` 渲染标题区（剧名 + 集数徽标 + 单集标题），改样式改一处即可。集数的文案走 `playRank.seasonEpisode` / `playRank.episodeOnly` 两条 i18n key，改显示方式不用动后端。
+两个页面的媒体榜共用 `webui/src/components/play-rank-media-label.tsx` 渲染标题区（剧名 + 集数徽标或「未知」占位 + 单集标题），改样式改一处即可。集数的文案走 `playRank.seasonEpisode` / `playRank.episodeOnly` / `playRank.episodeUnknown` 三条 i18n key，改显示方式不用动后端。
 
 > 若要真正对无账号访客开放，页面必须放在 `(main)` 路由组之外——`(main)/layout.tsx` 在未登录时会跳 `/login`。可参考既有公开页 `webui/src/app/wiki/page.tsx`。
