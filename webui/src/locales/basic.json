@@ -816,6 +816,7 @@
     "episodeCount": "{count} 集",
     "seasonEpisode": "S{season}E{episode}",
     "episodeOnly": "第 {n} 集",
+    "episodeUnknown": "未知",
     "userTitle": "用户榜",
     "rank": "#",
     "media": "媒体",

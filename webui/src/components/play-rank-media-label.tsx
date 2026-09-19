@@ -43,17 +43,27 @@ export function PlayRankMediaLabel({
   // 副行退回显示媒体类型。
   const secondary = series ? item.title || "" : item.media_type || t("playRank.unknown");
 
-  // 两个编号都缺（电影、音乐，或 Emby 没返回）时整段不渲染，不会冒出空徽标。
+  // 这一行本该有集数却拿不到时（Emby 不可达、条目已从库里删掉、元数据没刮到），
+  // 要明确标"未知"，不能留白——留白会让只有剧名的一行看起来像整部剧，看的人以
+  // 为统计的是全剧，实际是一次单集播放。更不能用 S1E8 之类的默认值顶上：那是拿
+  // 编造的编号冒充真实数据，误导性比留白还强。
+  //
+  // 什么算"本该有集数"：媒体类型就是剧集，或者带剧名（说明是某部剧的一集）。
+  // 电影、音乐没有集数概念，不给徽标。
   const episode = item.episode_number ?? 0;
   const season = item.season_number ?? 0;
+  const shouldHaveEpisode = /episode/i.test(item.media_type ?? "") || series !== "";
   let badge: string | null = null;
+  let badgeUnknown = false;
   if (episode > 0) {
     // 只有集号说明媒体库没有季层级（或元数据没刮到季号），用本地化的"第 8 集"。
-    // 不要退化成 "E8"：那是拿一个自造的缩写掩盖"其实不知道第几季"，中文界面里
-    // 尤其别扭。
+    // 不要退化成 "E8"：那是拿一个自造的缩写掩盖"其实不知道第几季"。
     badge = season > 0
       ? t("playRank.seasonEpisode", { season, episode })
       : t("playRank.episodeOnly", { n: episode });
+  } else if (shouldHaveEpisode) {
+    badge = t("playRank.episodeUnknown");
+    badgeUnknown = true;
   }
 
   return (
@@ -63,7 +73,12 @@ export function PlayRankMediaLabel({
           {primary}
         </p>
         {badge ? (
-          <Badge variant="secondary" className="shrink-0 px-1.5 py-0 font-mono text-[10px]">
+          // 真实编号用实心徽标，"未知"用描边弱化——两者不能长得一样，否则看的人
+          // 会把"没查到"当成"查到了就是这个"。
+          <Badge
+            variant={badgeUnknown ? "outline" : "secondary"}
+            className={`shrink-0 px-1.5 py-0 text-[10px] ${badgeUnknown ? "font-normal text-muted-foreground" : "font-mono"}`}
+          >
             {badge}
           </Badge>
         ) : null}
