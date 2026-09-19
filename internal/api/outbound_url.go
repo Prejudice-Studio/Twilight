@@ -67,6 +67,32 @@ func validateOutboundBaseURL(raw, service string) (string, error) {
 	return cleaned, nil
 }
 
+// guardOutboundDialAddress 在**拨号阶段**再校验一次真正要连的 IP。
+//
+// 只有 URL 层校验是不够的：validateOutboundBaseURL 只对字面 IP 生效，配置里写
+// 域名时完全绕过——一个解析到 169.254.169.254 或内网地址的域名就能把
+// X-Emby-Token / Bot-Token 送过去。更糟的是即便在校验那一刻解析一次域名，
+// 攻击者仍可用 DNS rebinding（校验时返回公网 IP、拨号时返回内网 IP）绕过；
+// 而 net.Dialer.Control 拿到的 address 是**解析之后**的 IP:port，此时拦截才是
+// 真正生效的时机。
+//
+// 允许 loopback 是刻意的：Emby 与本项目用 docker-compose 同机部署、以及单测用
+// httptest 都依赖 127.0.0.1，禁掉会直接打死现网部署和测试。
+func guardOutboundDialAddress(network, address string) error {
+	if network != "tcp" && network != "tcp4" && network != "tcp6" {
+		return nil
+	}
+	host, _, splitErr := net.SplitHostPort(address)
+	if splitErr != nil {
+		host = address
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return fmt.Errorf("出站连接地址不是可校验的 IP: %q", address)
+	}
+	return refuseUnsafeOutboundIP(ip, "出站连接")
+}
+
 // refuseUnsafeOutboundIP 否决典型 SSRF 目标。允许 loopback（见上方注释）；
 // 拒绝 link-local（169.254.0.0/16、IPv6 fe80::/10）、unspecified（0.0.0.0/::）
 // 与未被 link-local 覆盖的云元数据 magic IP（阿里云 100.100.100.200）。

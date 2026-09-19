@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -23,6 +24,12 @@ var sharedHTTPTransport = &http.Transport{
 	DialContext: (&net.Dialer{
 		Timeout:   5 * time.Second,
 		KeepAlive: 30 * time.Second,
+		// 拨号阶段拦截 SSRF：Control 拿到的是**解析之后**的 IP:port，因此配置里
+		// 写域名（URL 层校验管不到）以及 DNS rebinding 都能挡住。见
+		// outbound_url.go::guardOutboundDialAddress。
+		Control: func(network, address string, _ syscall.RawConn) error {
+			return guardOutboundDialAddress(network, address)
+		},
 	}).DialContext,
 	ForceAttemptHTTP2:      true,
 	MaxIdleConns:           64,
