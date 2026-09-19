@@ -19,6 +19,10 @@ type embyItemMetadata struct {
 	Type       string `json:"Type"`
 	SeriesID   string `json:"SeriesId"`
 	SeriesName string `json:"SeriesName"`
+	// ParentIndexNumber 是剧集的季号，IndexNumber 是集号，两者拼起来就是界面上
+	// 那个「S1E8」。电影没有这两个值（都是 0）。
+	ParentIndexNumber int `json:"ParentIndexNumber"`
+	IndexNumber       int `json:"IndexNumber"`
 }
 
 func embyItemImageURL(itemID string) string {
@@ -133,7 +137,9 @@ func (a *App) embyItemMetadata(ctx context.Context, ids []string) map[string]emb
 		query := embyItemQuery(map[string]string{
 			"Ids":       strings.Join(cleanIDs[start:end], ","),
 			"Recursive": "true",
-			"Fields":    "SeriesId,SeriesName",
+			// ParentIndexNumber / IndexNumber 是季号与集号，播放排行要显示
+			// 「S1E8」就得把它们一并取回来。
+			"Fields": "SeriesId,SeriesName,ParentIndexNumber,IndexNumber",
 		})
 		if err := a.embyGet(ctx, "/Items"+query, &payload); err != nil {
 			zap.L().Warn("failed to batch read Emby item metadata", zap.Error(err))

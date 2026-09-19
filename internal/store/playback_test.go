@@ -50,6 +50,72 @@ func TestPlaybackRecordsFiltersDefaultsAndLimits(t *testing.T) {
 
 // TestPlaybackRecordCoverageReportsStoredExtent 盯住"系统到底记录了多少"这个口径：
 // 榜单窗口可以很窄，但覆盖面必须是整库的，否则前端没法告诉用户还能往回看多远。
+// TestPlaybackRankGroupBySeriesMergesEpisodes 盯住"按整部剧聚合"这个口径：一部
+// 剧的两集必须并成一行、Episodes 记为 2，而电影因为没有剧名只能自己成一行。
+// 反过来，逐条模式下每一行都必须是单个 item（Episodes 恒为 1）。
+func TestPlaybackRankGroupBySeriesMergesEpisodes(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	for _, record := range []PlaybackRecord{
+		{UID: 1, ItemID: "ep1", Title: "第一集", SeriesName: "长征", MediaType: "episode", PlayedAt: 100, Duration: 60},
+		{UID: 2, ItemID: "ep2", Title: "第二集", SeriesName: "长征", MediaType: "episode", PlayedAt: 200, Duration: 60},
+		{UID: 1, ItemID: "movie", Title: "某部电影", MediaType: "movie", PlayedAt: 300, Duration: 90},
+	} {
+		if err := st.AddPlaybackRecord(record); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	byItem, _, err := st.PlaybackRank(0, 10, PlaybackRankGroupItem)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byItem) != 3 {
+		t.Fatalf("item mode should keep one row per item, got %d: %#v", len(byItem), byItem)
+	}
+	for _, item := range byItem {
+		if item.Episodes != 1 {
+			t.Fatalf("item mode Episodes should always be 1, got %d for %+v", item.Episodes, item)
+		}
+		if item.ItemID == "" {
+			t.Fatalf("item mode must keep item_id for episode lookup, got %+v", item)
+		}
+	}
+
+	bySeries, _, err := st.PlaybackRank(0, 10, PlaybackRankGroupSeries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bySeries) != 2 {
+		t.Fatalf("series mode should merge the two episodes into one row, got %d: %#v", len(bySeries), bySeries)
+	}
+	// 两集合计 2 次播放，排在最前。
+	top := bySeries[0]
+	if top.Title != "长征" || top.Plays != 2 || top.Episodes != 2 || top.Viewers != 2 {
+		t.Fatalf("unexpected top series row: %+v", top)
+	}
+	// series 模式下这一行代表整部剧，不该再带单集的 item_id / series_name。
+	if top.ItemID != "" || top.SeriesName != "" {
+		t.Fatalf("series row must not carry per-episode identity: %+v", top)
+	}
+	if bySeries[1].Title != "某部电影" || bySeries[1].Episodes != 1 {
+		t.Fatalf("unexpected movie row: %+v", bySeries[1])
+	}
+
+	// 未知分组值必须退回逐条明细，绝不能把未过滤的字符串带进 GROUP BY。
+	fallback, _, err := st.PlaybackRank(0, 10, "series; DROP TABLE twilight_playback_records")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fallback) != 3 {
+		t.Fatalf("unknown group must fall back to item mode, got %d rows", len(fallback))
+	}
+}
+
 func TestPlaybackRecordCoverageReportsStoredExtent(t *testing.T) {
 	st, err := Open(filepath.Join(t.TempDir(), "state.json"))
 	if err != nil {

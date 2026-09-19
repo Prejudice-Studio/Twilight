@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -66,12 +67,18 @@ func playRankWindow(now time.Time, rangeKey string) int64 {
 	}
 }
 
-// playRankQuery 解析并夹取 range / days / limit。非法取值一律回退默认，避免把
-// 未过滤的参数带进 store 查询。
+// 媒体榜的分组维度：item 是逐集/逐部，series 是把一部剧的所有集合成一行。
+const (
+	playRankGroupItem   = "item"
+	playRankGroupSeries = "series"
+)
+
+// playRankQuery 解析并夹取 range / days / limit / group_by。非法取值一律回退默认，
+// 避免把未过滤的参数带进 store 查询。
 //
 // days 是"过去 N 天"的滑动窗口，与日/周/月这些日历窗口互补：运营想看"最近 30
 // 天"时不必等到月末。显式给出 days 时它优先于 range，并成为缓存 key 的一部分。
-func playRankQuery(r *http.Request) (string, int64, int) {
+func playRankQuery(r *http.Request) (string, int64, int, string) {
 	query := r.URL.Query()
 	rangeKey := playRankRangeDay
 	switch query.Get("range") {
@@ -102,7 +109,11 @@ func playRankQuery(r *http.Request) (string, int64, int) {
 	if limit > playRankMaxLimit {
 		limit = playRankMaxLimit
 	}
-	return rangeKey, since, limit
+	groupBy := playRankGroupItem
+	if query.Get("group_by") == playRankGroupSeries {
+		groupBy = playRankGroupSeries
+	}
+	return rangeKey, since, limit, groupBy
 }
 
 // maskPlayRankUsername 把用户名打码：保留首尾字符，中间固定抹掉。打码后的
@@ -123,8 +134,8 @@ func maskPlayRankUsername(name string) string {
 
 // playRankData 返回榜单数据。includeIdentity=true 时带 uid 与完整用户名；
 // refresh=true 时跳过缓存并写回新结果。
-func (a *App) playRankData(rangeKey string, since int64, limit int, includeIdentity bool, refresh bool) map[string]any {
-	key := rangeKey + "|" + strconv.FormatInt(since, 10) + "|" + strconv.Itoa(limit) + "|" + strconv.FormatBool(includeIdentity)
+func (a *App) playRankData(ctx context.Context, rangeKey string, since int64, limit int, groupBy string, includeIdentity bool, refresh bool) map[string]any {
+	key := rangeKey + "|" + strconv.FormatInt(since, 10) + "|" + strconv.Itoa(limit) + "|" + groupBy + "|" + strconv.FormatBool(includeIdentity)
 
 	a.playRankMu.Lock()
 	if !refresh {
@@ -135,7 +146,7 @@ func (a *App) playRankData(rangeKey string, since int64, limit int, includeIdent
 	}
 	a.playRankMu.Unlock()
 
-	data := a.buildPlayRank(rangeKey, since, limit, includeIdentity)
+	data := a.buildPlayRank(ctx, rangeKey, since, limit, groupBy, includeIdentity)
 
 	a.playRankMu.Lock()
 	// 缓存按 key 分开存放：脱敏版与管理员版互不相通，避免管理员的完整用户名
@@ -148,16 +159,21 @@ func (a *App) playRankData(rangeKey string, since int64, limit int, includeIdent
 	return data
 }
 
-func (a *App) buildPlayRank(rangeKey string, since int64, limit int, includeIdentity bool) map[string]any {
-	media, users, _ := a.store().PlaybackRank(since, limit)
+func (a *App) buildPlayRank(ctx context.Context, rangeKey string, since int64, limit int, groupBy string, includeIdentity bool) map[string]any {
+	media, users, _ := a.store().PlaybackRank(since, limit, groupBy)
 	totalPlays, totalDuration, uniqueUsers, _ := a.store().PlaybackRecordSummary(since)
 	// 覆盖面不受窗口影响：它回答的是"系统一共记录了多少、最早记到什么时候"，
 	// 前端拿它提示用户还能往回看多远，而不是当前窗口里有多少条。
 	totalRecords, earliestAt, latestAt, _ := a.store().PlaybackRecordCoverage()
 
+	// 季号/集号不落在播放记录表里，而是每次构建榜单时向 Emby 批量取回来补上。
+	// 这样历史记录不需要迁移就能显示 S1E8；Emby 不可用时拿不到编号，只是少了
+	// 一个标识，榜单本身照常返回。
+	episodes := a.playRankEpisodeLabels(ctx, media)
+
 	mediaItems := make([]map[string]any, 0, len(media))
 	for _, item := range media {
-		mediaItems = append(mediaItems, map[string]any{
+		entry := map[string]any{
 			"item_id":     item.ItemID,
 			"title":       firstNonEmpty(item.Title, item.ItemID),
 			"series_name": item.SeriesName,
@@ -165,7 +181,12 @@ func (a *App) buildPlayRank(rangeKey string, since int64, limit int, includeIden
 			"plays":       item.Plays,
 			"duration":    item.Duration,
 			"viewers":     item.Viewers,
-		})
+			"episodes":    item.Episodes,
+		}
+		if label := episodes[item.ItemID]; label != "" {
+			entry["episode_label"] = label
+		}
+		mediaItems = append(mediaItems, entry)
 	}
 
 	userItems := make([]map[string]any, 0, len(users))
@@ -197,6 +218,7 @@ func (a *App) buildPlayRank(rangeKey string, since int64, limit int, includeIden
 	return map[string]any{
 		"range":      rangeKey,
 		"since":      since,
+		"group_by":   groupBy,
 		"updated_at": time.Now().Unix(),
 		"summary": map[string]any{
 			"plays":    totalPlays,
@@ -216,6 +238,49 @@ func (a *App) buildPlayRank(rangeKey string, since int64, limit int, includeIden
 	}
 }
 
+// playRankEpisodeLabel 拼出界面上的集数标识，形如 S1E8。
+//
+// 两个编号都缺失（电影、音乐、或 Emby 没给）时返回空串——调用方据此决定要不要
+// 带这个字段，前端也就不会渲染出一个空的徽标。只有集号没有季号时退化为 E8，
+// 反过来只有季号没有集号没有意义（不知道是这季的哪一集），一律不显示。
+func playRankEpisodeLabel(season, episode int) string {
+	if episode <= 0 {
+		return ""
+	}
+	if season <= 0 {
+		return "E" + strconv.Itoa(episode)
+	}
+	return "S" + strconv.Itoa(season) + "E" + strconv.Itoa(episode)
+}
+
+// playRankEpisodeLabels 批量补上媒体榜每一行的集数标识，返回 item_id -> 标识。
+//
+// 只在 item 模式下有意义：series 模式一行代表整部剧，本来就没有"第几集"可言。
+// 这里最多几百个 id，embyItemMetadata 内部按 100 个一批去问，通常一次请求搞定；
+// 榜单本身有 60 秒缓存，不会每次刷新都打到 Emby。
+func (a *App) playRankEpisodeLabels(ctx context.Context, media []store.PlaybackMediaRank) map[string]string {
+	labels := make(map[string]string, len(media))
+	if len(media) == 0 {
+		return labels
+	}
+	ids := make([]string, 0, len(media))
+	for _, item := range media {
+		if item.ItemID == "" {
+			continue
+		}
+		ids = append(ids, item.ItemID)
+	}
+	if len(ids) == 0 {
+		return labels
+	}
+	for id, meta := range a.embyItemMetadata(ctx, ids) {
+		if label := playRankEpisodeLabel(meta.ParentIndexNumber, meta.IndexNumber); label != "" {
+			labels[id] = label
+		}
+	}
+	return labels
+}
+
 // handleV2PlayRank 是普通用户的榜单接口。路由级别就是 AuthUser：排行榜不向无账号
 // 访客开放，未登录请求在鉴权层即被拒绝，这里只按配置区分"普通用户能不能看"。
 func (a *App) handleV2PlayRank(w http.ResponseWriter, r *http.Request, _ Params) {
@@ -230,18 +295,18 @@ func (a *App) handleV2PlayRank(w http.ResponseWriter, r *http.Request, _ Params)
 		return
 	}
 
-	rangeKey, since, limit := playRankQuery(r)
+	rangeKey, since, limit, groupBy := playRankQuery(r)
 	refresh := r.URL.Query().Get("refresh") == "1"
-	ok(w, "OK", a.playRankData(rangeKey, since, limit, false, refresh))
+	ok(w, "OK", a.playRankData(r.Context(), rangeKey, since, limit, groupBy, false, refresh))
 }
 
 // handleV2AdminPlayRank 是管理员榜单：带 uid 与完整用户名，且不受排行榜总开关
 // 影响（管理员后台始终要能看到数据）。
 func (a *App) handleV2AdminPlayRank(w http.ResponseWriter, r *http.Request, _ Params) {
 	w.Header().Set("Cache-Control", "private, no-store")
-	rangeKey, since, limit := playRankQuery(r)
+	rangeKey, since, limit, groupBy := playRankQuery(r)
 	refresh := r.URL.Query().Get("refresh") == "1"
-	data := a.playRankData(rangeKey, since, limit, true, refresh)
+	data := a.playRankData(r.Context(), rangeKey, since, limit, groupBy, true, refresh)
 	data["enabled"] = a.cfg().PlayRankEnabled
 	data["user_visible"] = a.cfg().PlayRankUserVisible
 	// 管理员要能确认自己看到的时长到底是净时长还是墙上时钟差，否则"排行榜数字

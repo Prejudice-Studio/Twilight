@@ -715,8 +715,28 @@ const (
 	playbackRankMaxLimit     = 100
 )
 
+// 媒体榜的两种聚合维度。item 是"每一集/每一部电影单独一行"，series 是"把一部剧
+// 的所有集合并成一行"——后者回答"哪部剧最受欢迎"，前者回答"哪一集最受欢迎"。
+const (
+	PlaybackRankGroupItem   = "item"
+	PlaybackRankGroupSeries = "series"
+)
+
+// PlaybackRankGroup 把外部传入的分组参数收敛成两个枚举值之一。空值与未知值一律
+// 按 item 处理：宁可退回逐条明细，也不要让未过滤的字符串进到 SQL 的 GROUP BY 里。
+func PlaybackRankGroup(value string) string {
+	if value == PlaybackRankGroupSeries {
+		return PlaybackRankGroupSeries
+	}
+	return PlaybackRankGroupItem
+}
+
 // PlaybackMediaRank 是一部媒体在某个时间窗内的聚合：播放次数、累计时长和看过
 // 的人数。它只回答"哪部最热"，不包含任何一次播放的时间点。
+//
+// Episodes 是这一行覆盖了多少个不同的 item：item 模式下恒为 1，series 模式下是
+// 这部剧被看过的集数。"播放 30 次"到底是 30 个人各看一集、还是一个人刷了同一集
+// 30 遍，光看 Plays 分不出来，必须靠它。
 type PlaybackMediaRank struct {
 	ItemID     string
 	Title      string
@@ -725,6 +745,7 @@ type PlaybackMediaRank struct {
 	Plays      int
 	Duration   int64
 	Viewers    int
+	Episodes   int
 }
 
 // PlaybackUserRank 是一个用户在同一时间窗内的聚合。UID 只下发给管理员接口，
@@ -739,7 +760,10 @@ type PlaybackUserRank struct {
 // PlaybackRank 返回 since 之后的媒体榜与用户榜。PG 可用时两条 GROUP BY 直接
 // 在库里聚合；PG 不可用或查询失败时回落到内存副本（maxStoredPlaybackRecords
 // 条）做同样的聚合，保证降级时榜单仍然可用。
-func (s *Store) PlaybackRank(since int64, limit int) ([]PlaybackMediaRank, []PlaybackUserRank, error) {
+//
+// groupBy 只影响媒体榜（用户榜始终按 uid 聚合）：传 PlaybackRankGroupSeries 时
+// 把一部剧的所有集合成一行。
+func (s *Store) PlaybackRank(since int64, limit int, groupBy string) ([]PlaybackMediaRank, []PlaybackUserRank, error) {
 	if limit <= 0 {
 		limit = playbackRankDefaultLimit
 	}
@@ -749,30 +773,48 @@ func (s *Store) PlaybackRank(since int64, limit int) ([]PlaybackMediaRank, []Pla
 	if since < 0 {
 		since = 0
 	}
+	groupBy = PlaybackRankGroup(groupBy)
 
 	s.mu.RLock()
 	db := s.db
 	s.mu.RUnlock()
 
 	if db != nil {
-		media, mediaErr := queryPlaybackMediaRankDB(db, since, limit)
+		media, mediaErr := queryPlaybackMediaRankDB(db, since, limit, groupBy)
 		users, userErr := queryPlaybackUserRankDB(db, since, limit)
 		if mediaErr == nil && userErr == nil {
 			return media, users, nil
 		}
-		return s.playbackRankFromMemory(since, limit)
+		return s.playbackRankFromMemory(since, limit, groupBy)
 	}
-	return s.playbackRankFromMemory(since, limit)
+	return s.playbackRankFromMemory(since, limit, groupBy)
 }
 
-func queryPlaybackMediaRankDB(db *sql.DB, since int64, limit int) ([]PlaybackMediaRank, error) {
+// playbackSeriesKey 是 series 模式的分组键：剧集取剧名，电影取自己的标题，两者
+// 都缺失时退回 item_id。
+//
+// 用剧名而不是 SeriesId 分组，是因为表里根本没有存 SeriesId。代价是同名剧会被
+// 并成一行——可接受的近似，真要精确得再存一列。
+const playbackSeriesKey = `COALESCE(NULLIF(series_name, ''), NULLIF(title, ''), item_id)`
+
+func queryPlaybackMediaRankDB(db *sql.DB, since int64, limit int, groupBy string) ([]PlaybackMediaRank, error) {
 	query := `SELECT item_id, MAX(title), COALESCE(MAX(series_name), ''), COALESCE(MAX(media_type), ''),
-	COUNT(*), COALESCE(SUM(duration), 0), COUNT(DISTINCT uid)
+COUNT(*), COALESCE(SUM(duration), 0), COUNT(DISTINCT uid), COUNT(DISTINCT item_id)
 FROM twilight_playback_records
 WHERE played_at >= $1 AND item_id <> ''
 GROUP BY item_id
 ORDER BY COUNT(*) DESC, COALESCE(SUM(duration), 0) DESC, item_id ASC
 LIMIT $2`
+	if groupBy == PlaybackRankGroupSeries {
+		query = `SELECT '' AS item_id, MAX(` + playbackSeriesKey + `) AS title, '' AS series_name,
+COALESCE(MAX(media_type), '') AS media_type,
+COUNT(*), COALESCE(SUM(duration), 0), COUNT(DISTINCT uid), COUNT(DISTINCT item_id)
+FROM twilight_playback_records
+WHERE played_at >= $1 AND item_id <> '' AND ` + playbackSeriesKey + ` <> ''
+GROUP BY ` + playbackSeriesKey + `
+ORDER BY COUNT(*) DESC, COALESCE(SUM(duration), 0) DESC, 2 ASC
+LIMIT $2`
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), pgPlaybackReadTimeout)
 	defer cancel()
 	rows, err := db.QueryContext(ctx, query, since, limit)
@@ -783,7 +825,7 @@ LIMIT $2`
 	out := make([]PlaybackMediaRank, 0, limit)
 	for rows.Next() {
 		var item PlaybackMediaRank
-		if err := rows.Scan(&item.ItemID, &item.Title, &item.SeriesName, &item.MediaType, &item.Plays, &item.Duration, &item.Viewers); err != nil {
+		if err := rows.Scan(&item.ItemID, &item.Title, &item.SeriesName, &item.MediaType, &item.Plays, &item.Duration, &item.Viewers, &item.Episodes); err != nil {
 			return nil, err
 		}
 		out = append(out, item)
@@ -818,10 +860,11 @@ LIMIT $2`
 
 // playbackRankFromMemory 是 PG 不可用时的兜底：内存副本本身就是最近的记录，
 // 只做一次线性扫描 + map 聚合，再按同样的排序口径截断。
-func (s *Store) playbackRankFromMemory(since int64, limit int) ([]PlaybackMediaRank, []PlaybackUserRank, error) {
+func (s *Store) playbackRankFromMemory(since int64, limit int, groupBy string) ([]PlaybackMediaRank, []PlaybackUserRank, error) {
 	type mediaAgg struct {
-		item    PlaybackMediaRank
-		viewers map[int64]struct{}
+		item     PlaybackMediaRank
+		viewers  map[int64]struct{}
+		episodes map[string]struct{}
 	}
 	type userAgg struct {
 		item  PlaybackUserRank
@@ -838,13 +881,32 @@ func (s *Store) playbackRankFromMemory(since int64, limit int) ([]PlaybackMediaR
 			continue
 		}
 		if record.ItemID != "" {
-			agg := mediaMap[record.ItemID]
+			// series 模式按剧名归并：剧集用 series_name，电影没有剧名就用自己
+			// 的标题，与 PG 路径的 playbackSeriesKey 完全一致。
+			key := record.ItemID
+			if groupBy == PlaybackRankGroupSeries {
+				switch {
+				case record.SeriesName != "":
+					key = record.SeriesName
+				case record.Title != "":
+					key = record.Title
+				default:
+					key = record.ItemID
+				}
+			}
+			agg := mediaMap[key]
 			if agg == nil {
 				agg = &mediaAgg{
-					item:    PlaybackMediaRank{ItemID: record.ItemID, Title: record.Title, SeriesName: record.SeriesName, MediaType: record.MediaType},
-					viewers: map[int64]struct{}{},
+					item: PlaybackMediaRank{
+						ItemID:     record.ItemID,
+						Title:      record.Title,
+						SeriesName: record.SeriesName,
+						MediaType:  record.MediaType,
+					},
+					viewers:  map[int64]struct{}{},
+					episodes: map[string]struct{}{},
 				}
-				mediaMap[record.ItemID] = agg
+				mediaMap[key] = agg
 			}
 			agg.item.Plays++
 			agg.item.Duration += record.Duration
@@ -860,6 +922,7 @@ func (s *Store) playbackRankFromMemory(since int64, limit int) ([]PlaybackMediaR
 			if record.UID != 0 {
 				agg.viewers[record.UID] = struct{}{}
 			}
+			agg.episodes[record.ItemID] = struct{}{}
 		}
 		if record.UID > 0 {
 			agg := userMap[record.UID]
@@ -878,6 +941,18 @@ func (s *Store) playbackRankFromMemory(since int64, limit int) ([]PlaybackMediaR
 	media := make([]PlaybackMediaRank, 0, minInt(limit, len(mediaMap)))
 	for _, agg := range mediaMap {
 		agg.item.Viewers = len(agg.viewers)
+		agg.item.Episodes = len(agg.episodes)
+		if groupBy == PlaybackRankGroupSeries {
+			// 与 PG 路径对齐：series 模式下这一行代表整部剧，标题取剧名，
+			// 不带单集的 item_id / series_name，前端不必再判断该显示哪个。
+			title := agg.item.SeriesName
+			if title == "" {
+				title = agg.item.Title
+			}
+			agg.item.Title = title
+			agg.item.SeriesName = ""
+			agg.item.ItemID = ""
+		}
 		media = append(media, agg.item)
 	}
 	sort.Slice(media, func(i, j int) bool {
@@ -886,6 +961,9 @@ func (s *Store) playbackRankFromMemory(since int64, limit int) ([]PlaybackMediaR
 		}
 		if media[i].Duration != media[j].Duration {
 			return media[i].Duration > media[j].Duration
+		}
+		if media[i].Title != media[j].Title {
+			return media[i].Title < media[j].Title
 		}
 		return media[i].ItemID < media[j].ItemID
 	})
