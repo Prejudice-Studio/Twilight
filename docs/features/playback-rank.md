@@ -27,7 +27,7 @@
 ## 数据源与窗口
 
 - 数据来源 `twilight_playback_records` 表，由 Emby ActivityLog 同步写入（配对播放开始/停止事件，幂等）。**`duration` 字段单位是秒**。
-- 聚合在 `store.PlaybackRank(since, limit, groupBy)`：两条 `GROUP BY` 查询——媒体榜按 `item_id`（或按剧名，见下）、用户榜按 `uid`，都带 `played_at >= $1` 过滤。PostgreSQL 不可用时退化为扫描内存副本（`state.PlaybackRecords`，上限 5000 条）做同样聚合。
+- 聚合在 `store.PlaybackRank(PlaybackRankOptions{Since, Limit, GroupBy, SortBy})`：两条 `GROUP BY` 查询——媒体榜按 `item_id`（或按剧名，见下）、用户榜按 `uid`，都带 `played_at >= $1` 过滤。PostgreSQL 不可用时退化为扫描内存副本（`state.PlaybackRecords`，上限 5000 条）做同样聚合。用结构体传参而不是逐个传参，是因为四个参数里两个字符串两个整数，按位置传很容易错位——`since` 与 `limit` 换个位置不报编译错，只会静默返回错的数据。
 - 窗口在**后端**计算（`playRankWindow`），不要挪到前端，一律按服务器本地时区：
 
 | `range` | 起点 |
@@ -74,6 +74,19 @@
 
 未知取值一律退回 `item`：宁可给明细，也不能让未经白名单校验的字符串进到 `GROUP BY`。
 
+### 排序口径：次数 vs 时长
+
+`sort_by` 取 `plays`（默认）或 `duration`，**同时作用于媒体榜与用户榜**。两个指标回答的不是同一个问题：
+
+- `plays`：被点开过多少次，偏向热度 / 流行度；
+- `duration`：一共占用了多少时间，偏向实际投入。
+
+一部 20 分钟的番剧刷 30 遍（10 小时）和一部三小时电影看 1 次（3 小时），按次数排是番剧第一、按时长排是电影第一——**两个榜单的名次是反的**，所以必须由调用方显式选，不能替它默认。
+
+> 历史问题：早期媒体榜写死按次数排、用户榜写死按时长排，两个榜的「第一名」根本不是同一个口径，也没法切换。现在统一由 `sort_by` 决定。
+
+排序表达式只能从 `playbackRankOrderBy` 的两个白名单常量里拼，**绝不能把外部字符串流进 `ORDER BY`**；次排序键固定用另一个指标（同分时顺序稳定，否则每次刷新名次都在跳），最后跟唯一键（`item_id` / 列序号 / `uid`）兜底做到完全确定。内存兜底路径的比较器 `playbackRankLess` 与之一一对应——PG 降级时名次不能变。
+
 ### 集数标识
 
 季号与集号**不在播放记录表里**，而是每次构建榜单时由 `playRankEpisodes` 向 Emby 批量取 `ParentIndexNumber` / `IndexNumber` 补上，下发 `season_number` / `episode_number` 两个数字。这么做是为了让历史记录不用迁移就能显示集数；Emby 不可用时拿不到编号，只是少了这个徽标，榜单本身照常返回。`series` 模式下整部剧没有「第几集」可言，不会下发这两个字段。
@@ -104,9 +117,10 @@
 | `days` | 「过去 N 天」滑动窗口，优先于 `range`，上限 730 |
 | `limit` | 每榜条数，默认 20，上限 100 |
 | `group_by` | `item`（默认，逐集/逐部）/ `series`（按整部剧聚合） |
+| `sort_by` | `plays`（默认，按播放次数）/ `duration`（按累计时长） |
 | `refresh` | 传 `1` 时绕过缓存 |
 
-响应含 `range`、`since`（窗口起点）、`group_by`、`updated_at`、总览 `summary`、媒体榜 `media`、用户榜 `users`，以及整库覆盖面 `recorded`。媒体榜每行带 `episodes`（覆盖的条目数），剧集另有可选的 `season_number` / `episode_number` 两个数字：
+响应含 `range`、`since`（窗口起点）、`group_by`、`sort_by`、`updated_at`、总览 `summary`、媒体榜 `media`、用户榜 `users`，以及整库覆盖面 `recorded`。媒体榜每行带 `episodes`（覆盖的条目数），剧集另有可选的 `season_number` / `episode_number` 两个数字：
 
 ```jsonc
 {
@@ -121,7 +135,7 @@
 
 ## 缓存
 
-- 60 秒缓存，键为 `range|since|limit|group_by|是否含身份`。**身份参与键计算**，保证管理员的完整用户名不会串到普通响应里。
+- 60 秒缓存，键为 `range|since|limit|group_by|sort_by|是否含身份`。**身份参与键计算**，保证管理员的完整用户名不会串到普通响应里；`sort_by` 同样参与，否则两种排序会互相覆盖。
 - `refresh=1` 绕过缓存。
 - ActivityLog 同步成功写入记录后会调用 `invalidatePlayRankCache()`，所以管理端点「同步」后立刻能看到新数据。
 
@@ -129,9 +143,11 @@
 
 | 路径 | 说明 |
 | ---- | ---- |
-| `/playrank` | 用户页，脱敏榜单，日/周/月/总榜切换 + 按单集/按整部剧切换 |
+| `/playrank` | 用户页，脱敏榜单，日/周/月/总榜切换 + 按单集/按整部剧切换 + 按次数/按时长切换 |
 | `/admin/playrank` | 管理页，含 `uid`、同步窗口选择与「同步活动日志」按钮（调 `adminGetEmbyActivityLogs`），并用徽标显示当前时长口径是净时长还是墙上时长 |
 
 两个页面的媒体榜共用 `webui/src/components/play-rank-media-label.tsx` 渲染标题区（剧名 + 集数徽标或「未知」占位 + 单集标题），改样式改一处即可。集数的文案走 `playRank.seasonEpisode` / `playRank.episodeOnly` / `playRank.episodeUnknown` 三条 i18n key，改显示方式不用动后端。
+
+两个榜都把当前排序指标那一列用正常字重显示、另一列压暗，表头同步高亮：两列数字并排时，不标出来就看不出这一屏究竟是照哪一列排的。
 
 > 若要真正对无账号访客开放，页面必须放在 `(main)` 路由组之外——`(main)/layout.tsx` 在未登录时会跳 `/login`。可参考既有公开页 `webui/src/app/wiki/page.tsx`。
