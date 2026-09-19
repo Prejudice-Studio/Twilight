@@ -474,10 +474,10 @@ class ApiClient {
   }
 
   async updateMe(data: { email?: string; username?: string; bgm_mode?: boolean; bgm_token?: string }) {
-    return this.request<UserInfo>("/auth/me", {
+    return this.request<UserInfo>("/settings/preferences", {
       method: "PUT",
       body: JSON.stringify(data),
-    });
+    }, { apiVersion: "v2" });
   }
 
   async getMySettings(signal?: AbortSignal) {
@@ -485,10 +485,10 @@ class ApiClient {
   }
 
   async updateMySettings(data: { bgm_mode?: boolean; bgm_manage_mode?: boolean; bgm_token?: string; email?: string; notify_on_login_telegram?: boolean; notify_on_login_email?: boolean; notify_on_ticket_telegram?: boolean; signin_auto_renewal?: boolean; password_change_email_required?: boolean; emby_password_email_required?: boolean; emby_password_old_password_required?: boolean; old_password?: string; verification_id?: string; email_code?: string; code?: string }) {
-    return this.request<UserInfo>("/auth/me", {
+    return this.request<UserInfo>("/settings/preferences", {
       method: "PUT",
       body: JSON.stringify(data),
-    });
+    }, { apiVersion: "v2" });
   }
 
   async getBangumiSyncStatus(signal?: AbortSignal) {
@@ -3905,7 +3905,7 @@ class ApiClient {
 
   async adminRenameTicketTypeV2(oldName: string, newName: string) {
     const response = await this.request<{ item: string; items: string[]; tickets_renamed: number }>(`/admin/ticket-types/${encodeURIComponent(oldName)}`, {
-      method: "PUT",
+      method: "PATCH",
       body: JSON.stringify({ name: newName }),
     }, { apiVersion: "v2" });
 
