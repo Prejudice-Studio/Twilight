@@ -123,6 +123,6 @@
 | `/playrank` | 用户页，脱敏榜单，日/周/月/总榜切换 + 按单集/按整部剧切换 |
 | `/admin/playrank` | 管理页，含 `uid`、同步窗口选择与「同步活动日志」按钮（调 `adminGetEmbyActivityLogs`），并用徽标显示当前时长口径是净时长还是墙上时长 |
 
-两个页面的媒体榜共用 `webui/src/components/play-rank-media-label.tsx` 渲染标题区（剧名 + S1E8 徽标 + 单集标题），改样式改一处即可。
+两个页面的媒体榜共用 `webui/src/components/play-rank-media-label.tsx` 渲染标题区（剧名 + 集数徽标 + 单集标题），改样式改一处即可。集数的文案走 `playRank.seasonEpisode` / `playRank.episodeOnly` 两条 i18n key，改显示方式不用动后端。
 
 > 若要真正对无账号访客开放，页面必须放在 `(main)` 路由组之外——`(main)/layout.tsx` 在未登录时会跳 `/login`。可参考既有公开页 `webui/src/app/wiki/page.tsx`。
