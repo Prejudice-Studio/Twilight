@@ -31,13 +31,13 @@ func snapshotTwoFactors(ctx context.Context, tx *sql.Tx) (map[int64]TwoFactorAcc
 	return result, rows.Err()
 }
 
-func ValidateTwoFactorBackup(state State) error {
+func ValidateTwoFactorBackup(state State, configuredKey ...string) error {
 	for uid, a := range state.TwoFactorAccounts {
 		if uid <= 0 || a.UID != uid || a.Version == "" || state.Users[uid].UID != uid || a.EnabledAt < 0 || len(a.Recovery) > 10 {
 			return fmt.Errorf("invalid two-factor backup")
 		}
 		if a.EnabledAt > 0 {
-			key, err := security.TwoFactorKey()
+			key, err := security.TwoFactorKey(configuredKey...)
 			if err != nil {
 				return err
 			}

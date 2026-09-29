@@ -38,7 +38,8 @@ func (l tomlStringLeaf) pathKey() string { return strings.Join(l.path, "\x00") }
 // secretConfigKeyNames 是 schema 中 Type=="secret" 字段的键名（小写）。
 // "url" 过于通用，单独按父表判断，不放进"任意位置都算密钥"的集合。
 func secretConfigKeyNames() map[string]bool {
-	names := map[string]bool{}
+	// Server-only keys are absent from the editable schema but still need masking.
+	names := map[string]bool{"two_factor_key": true}
 	for _, section := range configSectionDefs() {
 		for _, field := range section.Fields {
 			if field.Type == "secret" && field.Key != "url" {

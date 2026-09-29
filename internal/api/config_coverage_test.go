@@ -16,6 +16,7 @@ import (
 // 的字段。新增字段一旦忘记挂到 configSectionDefs，本测试会失败——要么把它加进
 // schema（页面能编辑），要么在这里写明为什么不能暴露。禁止无脑往清单里塞。
 var schemaUncoveredConfigFields = map[string]string{
+	"TwoFactorKey":    "部署加密密钥，仅由服务器配置文件或环境变量提供，禁止网页修改及迁移导出",
 	"Version":         "构建期常量，不接受用户配置",
 	"ConfigFile":      "由启动参数决定，写进文件反而自指",
 	"AdminUIDs":       "管理员名单，走后台用户管理，页面误改会把自己锁在外面",

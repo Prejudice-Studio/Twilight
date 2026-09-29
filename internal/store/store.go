@@ -1463,13 +1463,13 @@ FROM twilight_audit_logs ORDER BY id ASC`)
 	return out, maxID + 1, nil
 }
 
-func (s *Store) LoadSnapshot(data []byte) error {
+func (s *Store) LoadSnapshot(data []byte, configuredKey ...string) error {
 	var state State
 	if err := json.Unmarshal(data, &state); err != nil {
 		return err
 	}
 	state.ensure()
-	if err := ValidateTwoFactorBackup(state); err != nil {
+	if err := ValidateTwoFactorBackup(state, configuredKey...); err != nil {
 		return err
 	}
 	factors := state.TwoFactorAccounts
@@ -1690,12 +1690,12 @@ func (s *Store) BackupWithNote(dir, note string) (BackupInfo, error) {
 	return info, nil
 }
 
-func (s *Store) RestoreFrom(path string) error {
+func (s *Store) RestoreFrom(path string, configuredKey ...string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	return s.LoadSnapshot(data)
+	return s.LoadSnapshot(data, configuredKey...)
 }
 
 func ListBackups(dir string) ([]BackupInfo, error) {

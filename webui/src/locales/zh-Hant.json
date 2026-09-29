@@ -3547,7 +3547,7 @@
     "copy": "複製備援碼",
     "restoreWarning": "還原會覆蓋雙重驗證設定；不含 2FA 資料的舊備份會清除現有設定。",
     "adminReady": "雙重驗證加密密鑰已設定，可開放新啟用。",
-    "adminNotReady": "雙重驗證加密密鑰尚未就緒：請在伺服器環境設定 TWILIGHT_TWO_FACTOR_KEY 後重啟 API，再開放新啟用。",
+    "adminNotReady": "雙重驗證加密金鑰尚未就緒：請在伺服器設定檔設定 Security.two_factor_key，或設定 TWILIGHT_TWO_FACTOR_KEY 環境變數並重啟 API，再開放新啟用。",
     "adminUnknown": "暫時無法確認雙重驗證設定狀態，請重新整理頁面重試。"
   }
 }

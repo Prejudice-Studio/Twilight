@@ -48,13 +48,13 @@ var (
 	//   1) 让审计 / grep 一眼可见保护范围；
 	//   2) 杜绝未来如果通用关键字被收窄时悄悄漏过；
 	//   3) 与 sensitiveLogKey 的 normalized 子串列表保持一字段一映射。
-	sensitivePattern = regexp.MustCompile(`(?i)(authorization|cookie|session[_-]?(?:id|token)|x[_-]?emby[_-]?(?:token|authorization)|emby[_-]?(?:token|authorization)|media[_-]?browser[_-]?token|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|private[_-]?key|connection[_-]?string|database[_-]?url|token|secret|password|passwd|api[_-]?key|x[_-]?api[_-]?key|bot[_-]?token|dsn)\s*[:=]\s*[^ \t\r\n,;]+`)
+	sensitivePattern = regexp.MustCompile(`(?i)(authorization|cookie|session[_-]?(?:id|token)|x[_-]?emby[_-]?(?:token|authorization)|emby[_-]?(?:token|authorization)|media[_-]?browser[_-]?token|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|private[_-]?key|two[_-]?factor[_-]?key|connection[_-]?string|database[_-]?url|token|secret|password|passwd|api[_-]?key|x[_-]?api[_-]?key|bot[_-]?token|dsn)\s*[:=]\s*[^ \t\r\n,;]+`)
 	// 引号包围的 key="value" 变体（Emby Authorization 头的标准格式：
 	//   MediaBrowser Client="Twilight", Token="xxx", DeviceId="..."
 	// 普通 sensitivePattern 的值末尾用 [^ \t\r\n,;]+ 截断，但 quoted value
 	// 内若含逗号 / 空格反而会被截掉一部分；另起一支 quoted regex 兜底。
 	// 必须与 sensitivePattern 列表保持镜像，新增条目两边都要补。
-	sensitiveQuotedPattern = regexp.MustCompile(`(?i)(authorization|cookie|session[_-]?(?:id|token)|x[_-]?emby[_-]?(?:token|authorization)|emby[_-]?(?:token|authorization)|media[_-]?browser[_-]?token|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|private[_-]?key|connection[_-]?string|database[_-]?url|token|secret|password|passwd|api[_-]?key|x[_-]?api[_-]?key|bot[_-]?token|dsn)\s*=\s*"[^"]*"`)
+	sensitiveQuotedPattern = regexp.MustCompile(`(?i)(authorization|cookie|session[_-]?(?:id|token)|x[_-]?emby[_-]?(?:token|authorization)|emby[_-]?(?:token|authorization)|media[_-]?browser[_-]?token|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|private[_-]?key|two[_-]?factor[_-]?key|connection[_-]?string|database[_-]?url|token|secret|password|passwd|api[_-]?key|x[_-]?api[_-]?key|bot[_-]?token|dsn)\s*=\s*"[^"]*"`)
 	bearerPattern          = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._~+/=-]{12,}`)
 	keyPattern             = regexp.MustCompile(`key-[A-Za-z0-9._~+/=-]{12,}`)
 )
@@ -490,6 +490,7 @@ func zapFieldValueString(field zapcore.Field) string {
 func sensitiveLogKey(key string) bool {
 	normalized := sensitiveLogKeyReplacer.Replace(strings.ToLower(key))
 	return normalized == "key" ||
+		strings.Contains(normalized, "twofactorkey") ||
 		strings.Contains(normalized, "bindcode") ||
 		strings.Contains(normalized, "linksecret") ||
 		strings.Contains(normalized, "starttoken") ||

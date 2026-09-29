@@ -24,9 +24,15 @@ import (
 var ErrTwoFactorKey = errors.New("two-factor encryption key unavailable or invalid")
 var ErrTwoFactorCode = errors.New("two-factor code invalid or already used")
 
-// The deployment key is intentionally absent from the editable config schema.
-func TwoFactorKey() ([]byte, error) {
-	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(os.Getenv("TWILIGHT_TWO_FACTOR_KEY")))
+// TwoFactorKey accepts the server configuration as a fallback. A nonempty
+// environment override takes precedence, including invalid values (fail closed).
+// Callers without a configuration retain the environment-only behavior.
+func TwoFactorKey(configured ...string) ([]byte, error) {
+	value := os.Getenv("TWILIGHT_TWO_FACTOR_KEY")
+	if value == "" && len(configured) > 0 {
+		value = configured[0]
+	}
+	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(value))
 	if err != nil || len(key) != 32 {
 		return nil, ErrTwoFactorKey
 	}

@@ -437,6 +437,9 @@ func (a *App) saveConfigContentLocked(content, expectedRevision string) (map[str
 	}
 	content = normalizedContent
 	content = mergeProtectedAdminConfig(content, string(existing))
+	if err := preserveTwoFactorConfigKey(content, string(existing)); err != nil {
+		return nil, http.StatusBadRequest, "two_factor_key 只能在服务器配置文件或环境变量中修改"
+	}
 	// repo_url 与 admin_uids/admin_usernames 同属"禁止网页改写"字段：无论磁盘原文
 	// 是否写了 repo_url 行，写盘前一律强制为磁盘文件本身解析出的值（见
 	// enforceProtectedRepoURL）。
@@ -534,6 +537,9 @@ func (a *App) saveInitialSetupConfigContentLocked(content, adminUsername string)
 	hadExisting := readErr == nil
 	if readErr != nil && !os.IsNotExist(readErr) {
 		return nil, http.StatusInternalServerError, "读取配置失败"
+	}
+	if err := preserveTwoFactorConfigKey(content, string(existing)); err != nil {
+		return nil, http.StatusBadRequest, "two_factor_key 只能在服务器配置文件或环境变量中修改"
 	}
 	if status, message := enforceRepoURLForSave(configFile, &content); status != http.StatusOK {
 		return nil, status, message
@@ -1189,7 +1195,7 @@ func configSectionDefs() []configSectionDef {
 			{Key: "trusted_proxy_cidrs", Label: "可信反代 CIDR", Type: "list", Description: "上游反代的 IP / CIDR；启用 trust_proxy_headers 时必须配置，否则任何客户端都可伪造 X-Forwarded-For"},
 		}},
 		{Key: "Security", Title: "安全", Description: "内部密钥和安全开关\n推荐在「安全中心」页面维护", Category: "security", Collapsed: true, Fields: []configFieldDef{
-			{Key: "two_factor_enrollment_enabled", Label: "允许用户启用双重验证", Type: "bool", Description: "需要配置 TWILIGHT_TWO_FACTOR_KEY；关闭只停止新启用，已启用账户仍需验证码"},
+			{Key: "two_factor_enrollment_enabled", Label: "允许用户启用双重验证", Type: "bool", Description: "需要在服务器设置 Security.two_factor_key 或 TWILIGHT_TWO_FACTOR_KEY；关闭只停止新启用，已启用账户仍需验证码"},
 			{Key: "forgot_password_enabled", Label: "启用找回密码", Type: "bool", Description: "总开关：关闭后所有找回密码途径均不可用"},
 			{Key: "forgot_password_emby_enabled", Label: "Emby 找回密码", Type: "bool", Description: "允许通过 Emby 账号验证重置 Web 面板密码；依赖上图总开关"},
 			{Key: "forgot_password_email_enabled", Label: "邮箱找回密码", Type: "bool", Description: "允许通过绑定邮箱验证码重置 Web 面板密码；依赖上图总开关"},

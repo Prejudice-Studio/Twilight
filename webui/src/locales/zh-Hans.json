@@ -529,7 +529,7 @@
     "copy": "复制备用码",
     "restoreWarning": "恢复会覆盖双重验证设置；不包含 2FA 数据的旧备份会清除现有设置。",
     "adminReady": "双重验证加密密钥已配置，可开放新启用。",
-    "adminNotReady": "双重验证加密密钥未就绪：请在服务器环境设置 TWILIGHT_TWO_FACTOR_KEY 后重启 API，再开放新启用。",
+    "adminNotReady": "双重验证加密密钥未就绪：请在服务器配置文件设置 Security.two_factor_key，或设置 TWILIGHT_TWO_FACTOR_KEY 环境变量并重启 API，再开放新启用。",
     "adminUnknown": "暂时无法确认双重验证配置状态，请刷新页面重试。"
   }
 }

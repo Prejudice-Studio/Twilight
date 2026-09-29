@@ -441,7 +441,7 @@ func runMigrateJSON(args []string) error {
 		return fmt.Errorf("target postgres already holds %d users; refusing to overwrite without --force", existing)
 	}
 
-	if err := st.LoadSnapshot(snapshot); err != nil {
+	if err := st.LoadSnapshot(snapshot, cfg.TwoFactorKey); err != nil {
 		return fmt.Errorf("import snapshot into postgres: %w", err)
 	}
 	zap.L().Info("legacy JSON state imported into PostgreSQL",

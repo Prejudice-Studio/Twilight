@@ -76,6 +76,11 @@ func factorData(t *testing.T, r *httptest.ResponseRecorder) map[string]any {
 func factorEnroll(t *testing.T, app *App) (store.User, string, []string, []*http.Cookie) {
 	t.Helper()
 	t.Setenv("TWILIGHT_TWO_FACTOR_KEY", base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 32))))
+	return factorEnrollWithCurrentKey(t, app)
+}
+
+func factorEnrollWithCurrentKey(t *testing.T, app *App) (store.User, string, []string, []*http.Cookie) {
+	t.Helper()
 	app.cfg().TwoFactorEnrollmentEnabled = true
 	password, _ := security.HashPassword(factorTestPassword)
 	u, err := app.store().CreateUser(store.User{Username: "factor-user", PasswordHash: password, Active: true, TelegramID: 789})

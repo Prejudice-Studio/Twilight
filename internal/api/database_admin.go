@@ -167,7 +167,7 @@ func (a *App) handleDatabaseRestore(w http.ResponseWriter, r *http.Request, _ Pa
 		return
 	}
 	currentState.EnsureForMigration()
-	if err := store.ValidateTwoFactorBackup(targetState); err != nil {
+	if err := store.ValidateTwoFactorBackup(targetState, a.cfg().TwoFactorKey); err != nil {
 		a.twoFactorError(w, err)
 		return
 	}
@@ -211,7 +211,7 @@ func (a *App) handleDatabaseRestore(w http.ResponseWriter, r *http.Request, _ Pa
 	}
 	// 恢复会回卷 UID 分配，先吊销全部会话（含 Redis），否则旧会话可能落到新用户身上。
 	a.sessions().DeleteAll(r.Context())
-	if err := a.store().LoadSnapshot(targetData); err != nil {
+	if err := a.store().LoadSnapshot(targetData, a.cfg().TwoFactorKey); err != nil {
 		failWithCode(w, http.StatusBadRequest, ErrDBRestoreFailed, "备份恢复失败")
 		return
 	}
@@ -304,7 +304,7 @@ func (a *App) handleDatabaseMigrate(w http.ResponseWriter, r *http.Request, _ Pa
 		targetStore.ConfigurePostgres(a.cfg().PostgresMaxOpenConns, a.cfg().PostgresMaxIdleConns)
 		targetReady["connected"] = true
 		targetReady["schema_ready"] = true
-		if err := targetStore.LoadSnapshot(snapshot); err != nil {
+		if err := targetStore.LoadSnapshot(snapshot, a.cfg().TwoFactorKey); err != nil {
 			failWithCode(w, http.StatusInternalServerError, ErrDBPostgresWriteFail, "写入 PostgreSQL 失败")
 			return
 		}

@@ -3547,7 +3547,7 @@
     "copy": "Copy codes",
     "restoreWarning": "Restoring replaces two-factor settings. Older backups without 2FA data clear existing settings.",
     "adminReady": "The two-factor encryption key is configured. Enrollment can be opened.",
-    "adminNotReady": "Two-factor encryption is not ready. Configure TWILIGHT_TWO_FACTOR_KEY in the server environment and restart the API before opening enrollment.",
+    "adminNotReady": "Two-factor encryption is not ready. Set Security.two_factor_key in the server configuration, or set TWILIGHT_TWO_FACTOR_KEY in the environment and restart the API before opening enrollment.",
     "adminUnknown": "Two-factor readiness could not be confirmed. Refresh this page to retry."
   }
 }

@@ -32,7 +32,7 @@ func (a *App) handleTwoFactorStatus(w http.ResponseWriter, r *http.Request, _ Pa
 		a.twoFactorError(w, err)
 		return
 	}
-	_, keyErr := security.TwoFactorKey()
+	_, keyErr := security.TwoFactorKey(a.cfg().TwoFactorKey)
 	ok(w, "OK", map[string]any{"enabled": factor.EnabledAt > 0, "enabled_at": factor.EnabledAt, "recovery_remaining": len(factor.Recovery), "enrollment_allowed": a.cfg().TwoFactorEnrollmentEnabled, "key_ready": keyErr == nil})
 }
 
@@ -60,7 +60,7 @@ func (a *App) handleTwoFactorSetup(w http.ResponseWriter, r *http.Request, _ Par
 	if !a.twoFactorPassword(w, r, payload) {
 		return
 	}
-	key, err := security.TwoFactorKey()
+	key, err := security.TwoFactorKey(a.cfg().TwoFactorKey)
 	if err != nil {
 		a.twoFactorError(w, err)
 		return
@@ -104,7 +104,7 @@ func (a *App) handleTwoFactorEnable(w http.ResponseWriter, r *http.Request, _ Pa
 		failWithCode(w, 429, ErrRateLimited, "验证过于频繁")
 		return
 	}
-	key, err := security.TwoFactorKey()
+	key, err := security.TwoFactorKey(a.cfg().TwoFactorKey)
 	if err != nil {
 		a.twoFactorError(w, err)
 		return
@@ -131,7 +131,7 @@ func (a *App) handleTwoFactorChange(w http.ResponseWriter, r *http.Request, _ Pa
 		return
 	}
 	disable := r.Method == http.MethodDelete
-	key, err := security.TwoFactorKey()
+	key, err := security.TwoFactorKey(a.cfg().TwoFactorKey)
 	if err != nil {
 		a.twoFactorError(w, err)
 		return
@@ -221,7 +221,7 @@ func (a *App) handleTwoFactorLogin(w http.ResponseWriter, r *http.Request, _ Par
 		a.twoFactorError(w, store.ErrTwoFactorInvalid)
 		return
 	}
-	key, err := security.TwoFactorKey()
+	key, err := security.TwoFactorKey(a.cfg().TwoFactorKey)
 	if err != nil {
 		a.twoFactorError(w, err)
 		return

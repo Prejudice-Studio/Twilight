@@ -168,6 +168,7 @@ type Config struct {
 	TelegramMode                   bool
 	TelegramLoginEnabled           bool
 	TwoFactorEnrollmentEnabled     bool
+	TwoFactorKey                   string // Server-managed; excluded from the web config schema.
 	ForceBindTelegram              bool
 	TelegramBotToken               string
 	TelegramAPIURL                 string
@@ -461,6 +462,7 @@ func loadConfig(path string, overrides bool) (Config, error) {
 	cfg.EmbyWhitelistURLList = parseLinesList(reader.stringListValue(nil, "Emby.emby_url_list_for_whitelist", "emby_url_list_for_whitelist"))
 	cfg.TelegramMode = reader.boolValue(cfg.TelegramMode, "Global.telegram_mode", "telegram_mode")
 	cfg.TwoFactorEnrollmentEnabled = reader.boolValue(cfg.TwoFactorEnrollmentEnabled, "Security.two_factor_enrollment_enabled")
+	cfg.TwoFactorKey = reader.stringValue(cfg.TwoFactorKey, "Security.two_factor_key")
 	cfg.TelegramLoginEnabled = reader.boolValue(cfg.TelegramLoginEnabled, "Telegram.login_enabled")
 	cfg.ForceBindTelegram = reader.boolValue(cfg.ForceBindTelegram, "Global.force_bind_telegram", "force_bind_telegram")
 	cfg.TelegramBotToken = reader.stringValue(cfg.TelegramBotToken, "Telegram.bot_token", "bot_token")
@@ -1027,6 +1029,9 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("TWILIGHT_BOT_INTERNAL_SECRET"); v != "" {
 		cfg.BotInternalSecret = v
+	}
+	if v := os.Getenv("TWILIGHT_TWO_FACTOR_KEY"); v != "" {
+		cfg.TwoFactorKey = v
 	}
 	if v := os.Getenv("TWILIGHT_NOTIFICATION_LOGIN_TELEGRAM_ENABLED"); v != "" {
 		cfg.LoginNotifyTelegramEnabled = boolValue(v, cfg.LoginNotifyTelegramEnabled)

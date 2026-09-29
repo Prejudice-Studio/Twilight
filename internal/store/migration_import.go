@@ -60,7 +60,7 @@ type MigrationImportSummary struct {
 //
 // Session rows are never touched. They contain short-lived authentication
 // credentials and must not survive a cross-instance data import.
-func (s *Store) ImportMigrationArchive(ctx context.Context, archive migration.Archive) (MigrationImportSummary, error) {
+func (s *Store) ImportMigrationArchive(ctx context.Context, archive migration.Archive, configuredKey ...string) (MigrationImportSummary, error) {
 	if s == nil || s.db == nil {
 		return MigrationImportSummary{}, fmt.Errorf("store database is unavailable")
 	}
@@ -69,7 +69,7 @@ func (s *Store) ImportMigrationArchive(ctx context.Context, archive migration.Ar
 	}
 	ctx, cancel := context.WithTimeout(ctx, migrationImportTimeout)
 	defer cancel()
-	data, err := parseMigrationArchive(archive)
+	data, err := parseMigrationArchive(archive, configuredKey...)
 	if err != nil {
 		return MigrationImportSummary{}, err
 	}
@@ -190,7 +190,7 @@ type parsedMigrationData struct {
 	trustedDaily    []migrationTrustedPlaybackDaily
 }
 
-func parseMigrationArchive(archive migration.Archive) (parsedMigrationData, error) {
+func parseMigrationArchive(archive migration.Archive, configuredKey ...string) (parsedMigrationData, error) {
 	files := archive.Files
 	for _, name := range migrationDataFiles {
 		if _, ok := files[name]; !ok {
@@ -201,7 +201,7 @@ func parseMigrationArchive(archive migration.Archive) (parsedMigrationData, erro
 	if err := decodeMigrationJSON(files["data/state.json"], &result.state); err != nil {
 		return parsedMigrationData{}, fmt.Errorf("invalid migration state: %w", err)
 	}
-	if err := ValidateTwoFactorBackup(result.state); err != nil {
+	if err := ValidateTwoFactorBackup(result.state, configuredKey...); err != nil {
 		return parsedMigrationData{}, err
 	}
 	if err := decodeMigrationJSON(files["data/runtime-logs.json"], &result.runtimeLogs); err != nil {

@@ -317,6 +317,10 @@ trusted_proxy_cidrs = ["127.0.0.0/8", "::1/128"]
 
 # ───────── 安全 ─────────
 [Security]
+# 2FA 部署加密密钥：openssl rand -base64 32；可放在 config.local.toml 的同名配置项。
+# TWILIGHT_TWO_FACTOR_KEY 环境变量优先。已有用户启用 2FA 后不能重新生成覆盖。
+# 仅服务器端配置，网页不可修改；迁移包不导出此密钥，请单独安全备份。
+two_factor_key = ""
 # 找回密码总开关：关闭后所有途径均不可用
 forgot_password_enabled = true
 # 允许通过 Emby 账号验证重置 Web 面板密码

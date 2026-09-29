@@ -72,6 +72,16 @@ func (a *App) completeSetup(ctx context.Context, payload map[string]any) (setupR
 	if err != nil {
 		return setupResult{}, setupFail(http.StatusBadRequest, ErrInvalidPayload, err.Error())
 	}
+	// Keep the server-managed key from the primary file, never an env/local override.
+	key, err := twoFactorConfigKeyValue(a.existingConfigContent())
+	if err != nil {
+		return setupResult{}, setupFail(http.StatusBadRequest, ErrInvalidPayload, "读取配置文件失败")
+	}
+	extras := map[string]map[string]any{}
+	if key != nil {
+		extras["Security"] = map[string]any{"two_factor_key": key}
+	}
+	content := renderConfigTOMLWithExtras(values, extras)
 	passwordHash, err := security.HashPassword(password)
 	if err != nil {
 		return setupResult{}, setupFail(http.StatusInternalServerError, ErrPasswordHashFailed, "密码处理失败")
@@ -103,7 +113,7 @@ func (a *App) completeSetup(ctx context.Context, payload map[string]any) (setupR
 		}
 	}
 
-	info, saveStatus, _ := a.saveInitialSetupConfigContent(renderConfigTOML(values), u.Username)
+	info, saveStatus, _ := a.saveInitialSetupConfigContent(content, u.Username)
 	if saveStatus != http.StatusOK {
 		if rollbackErr := a.deleteLocalUser(ctx, u); rollbackErr != nil {
 			zap.L().Error("rollback setup admin user failed", zap.Int64("uid", u.UID), zap.Error(rollbackErr))
