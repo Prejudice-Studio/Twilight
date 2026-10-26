@@ -29,7 +29,7 @@ export interface SystemInfo {
   limits: Record<string, number | null>;
   storage_mismatch?: boolean;
   storage_warning?: string;
-  /** 登录/注册页背景图片 HTTPS URL；留空使用默认渐变背景 */
+  /** 登录/注册页公开背景资源路径或 HTTP(S) URL；留空使用默认背景 */
   auth_background_url?: string;
   telegram_bot?: {
     username: string | null;

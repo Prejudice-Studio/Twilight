@@ -421,7 +421,7 @@ Admin user listing `/admin/users` and `filteredBatchUserUIDs` must interpret fil
 - Config key: `Global.auth_background_url`.
 - Env override: `TWILIGHT_AUTH_BACKGROUND_URL`.
 - The uploaded filename is fixed as `background.<ext>`.
-- The frontend reads `auth_background_url` from system info and lets `AuthLayout` handle path composition.
+- V2 system info must include the public `auth_background_url`: normalize the built-in and legacy V1 background paths to `/api/v2/system/auth-background`; do not expose filesystem paths or URL credentials. `AuthLayout` adds the configured API origin once, without duplicating the version prefix. External image origins still require the explicit CSP image allowlist.
 
 ## Ticket Rules
 

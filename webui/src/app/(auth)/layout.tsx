@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo } from "react";
 import { useSystemStore } from "@/store/system";
-import { sanitizeImageUrl } from "@/lib/safe-url";
+import { resolveAuthBackgroundUrl } from "@/lib/auth-background";
 import { API_BASE } from "@/lib/api-request";
 
 // Validate env color against a strict CSS color pattern to prevent injection
@@ -36,12 +36,7 @@ export default function AuthLayout({
 }) {
   const { info: systemInfo, fetchInfo } = useSystemStore();
   const bgUrl = systemInfo?.auth_background_url;
-  const safeBg = useMemo(() => {
-    if (!bgUrl) return undefined;
-    if (bgUrl.startsWith("http")) return sanitizeImageUrl(bgUrl);
-    if (bgUrl.startsWith("/")) return sanitizeImageUrl(`${API_BASE}/api/v2${bgUrl}`);
-    return sanitizeImageUrl(bgUrl);
-  }, [bgUrl]);
+  const safeBg = useMemo(() => resolveAuthBackgroundUrl(bgUrl, API_BASE), [bgUrl]);
 
   useEffect(() => {
     void fetchInfo();
@@ -49,7 +44,7 @@ export default function AuthLayout({
 
   const backgroundStyle = safeBg
     ? {
-        backgroundImage: `url(${safeBg})`,
+        backgroundImage: `url(${JSON.stringify(safeBg)})`,
         backgroundSize: "cover",
         backgroundPosition: "center",
         backgroundRepeat: "no-repeat",
@@ -78,7 +73,7 @@ export default function AuthLayout({
         }
       `}</style>
       <div
-        className={`relative min-h-screen overflow-hidden bg-background ${safeBg ? "auth-has-bg" : ""}`}
+        className={`relative min-h-dvh bg-background ${safeBg ? "auth-has-bg" : ""}`}
         style={backgroundStyle}
       >
         {!safeBg && (

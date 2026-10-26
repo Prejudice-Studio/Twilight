@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+	"net/url"
+	"strings"
 )
 
 // handleV2SystemInfo exposes only the public system projection needed by the
@@ -44,14 +46,39 @@ func (a *App) handleV2SystemInfo(w http.ResponseWriter, _ *http.Request, _ Param
 		"ticket_image_max_count": cfg.TicketImageMaxCount,
 	}
 	ok(w, "OK", map[string]any{
-		"name":        cfg.AppName,
-		"icon":        a.publicServerIconURL(),
-		"version":     cfg.Version,
-		"api_version": "v2",
-		"features":    features,
-		"limits":      limits,
-		"setup":       a.setupStatusData(),
+		"name":                cfg.AppName,
+		"icon":                a.publicServerIconURL(),
+		"auth_background_url": publicAuthBackgroundURL(cfg.AuthBackgroundURL),
+		"version":             cfg.Version,
+		"api_version":         "v2",
+		"features":            features,
+		"limits":              limits,
+		"setup":               a.setupStatusData(),
 	})
+}
+
+// Publish only a browser resource, never a configured filesystem path or URL
+// credentials. Uploaded backgrounds share the existing public image handler.
+func publicAuthBackgroundURL(raw string) string {
+	value := strings.TrimSpace(raw)
+	if strings.ContainsAny(value, "\\\r\n\t") {
+		return ""
+	}
+	u, err := url.Parse(value)
+	if err != nil || u.User != nil {
+		return ""
+	}
+	if u.Hostname() != "" && (u.Scheme == "https" || u.Scheme == "http") {
+		return u.String()
+	}
+	if u.Scheme == "" && u.Host == "" {
+		switch u.Path {
+		case "/system/auth-background", "/api/v1/system/auth-background", "/api/v2/system/auth-background":
+			u.Path = "/api/v2/system/auth-background"
+			return u.String()
+		}
+	}
+	return ""
 }
 
 func markV2AdminHealth(w http.ResponseWriter) {

@@ -4,6 +4,16 @@ Twilight 允许用户自定义个人主题背景（渐变 + 背景图）与头�
 
 实现集中在 `internal/api/upload_handlers.go`（上传 / 资源访问 / 背景配置净化）、`internal/api/handlers.go`（`handleGetBackground` / `handleGetAvatar` 等读取入口）、`internal/api/safepath.go`（路径穿越防护）与 `internal/config/config.go`（上传目录与大小上限）。
 
+## 登录与注册页背景
+
+认证页背景由管理员配置，与登录后的个人背景相互独立。在配置页上传图片后，`Global.auth_background_url` 保存为 `/system/auth-background`；也可通过 `TWILIGHT_AUTH_BACKGROUND_URL` 覆盖。
+
+公开接口 `GET /api/v2/system/info` 的 `auth_background_url` 字段返回可供浏览器访问的地址：内置上传路径及历史 V1 路径统一映射为 `/api/v2/system/auth-background`，外部 HTTP(S) 图片保留其地址。空配置或无效值返回空串，认证页显示默认背景。文件系统路径、URL 用户名和密码不会作为背景地址公开。
+
+前后端分域部署时，WebUI 为内置资源拼接 `NEXT_PUBLIC_API_URL`，不会重复添加 `/api/v2`。外部图片域名需要加入 `NEXT_PUBLIC_CSP_IMG` 的 origin 白名单并重新构建前端；HTTPS 站点应使用 HTTPS 图片，避免浏览器混合内容拦截。不需要放宽全局 CSP。
+
+排查上传后背景未显示时，先检查系统信息中是否包含非空的背景字段，再检查对应图片请求是否成功。图片仍通过现有公开背景接口读取，上传目录不直接暴露。
+
 ## 受控资源读取模型
 
 传统做法是把上传目录直接挂到 Web 服务器（例如 Nginx 暴露 `/uploads/`）。Twilight 不这么做，原因是：

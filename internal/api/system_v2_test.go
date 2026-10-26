@@ -12,6 +12,7 @@ func TestV2SystemInfoIsPublicSafeProjection(t *testing.T) {
 	app.cfg().EmbyToken = "system-info-emby-secret"
 	app.cfg().TelegramBotToken = "system-info-telegram-secret"
 	app.cfg().PostgresPassword = "system-info-postgres-secret"
+	app.cfg().AuthBackgroundURL = "/system/auth-background"
 
 	response := doJSON(app, http.MethodGet, "/api/v2/system/info", "", nil)
 	if response.Code != http.StatusOK {
@@ -26,11 +27,36 @@ func TestV2SystemInfoIsPublicSafeProjection(t *testing.T) {
 		"system-info-telegram-secret",
 		"system-info-postgres-secret",
 		"emby.internal:8096",
-		"auth_background_url",
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("system info exposed %q: %s", forbidden, body)
 		}
+	}
+	if !strings.Contains(body, `"auth_background_url":"/api/v2/system/auth-background"`) {
+		t.Fatalf("missing public authentication background: %s", body)
+	}
+}
+
+func TestPublicAuthBackgroundURL(t *testing.T) {
+	for _, tc := range []struct{ raw, want string }{
+		{"", ""},
+		{" /system/auth-background ", "/api/v2/system/auth-background"},
+		{"/api/v1/system/auth-background?v=2", "/api/v2/system/auth-background?v=2"},
+		{"/api/v2/system/auth-background", "/api/v2/system/auth-background"},
+		{"https://images.example/background%20image.jpg", "https://images.example/background%20image.jpg"},
+		{"http://images.example/background.jpg", "http://images.example/background.jpg"},
+		{"https://user:secret@images.example/bg.jpg", ""},
+		{"//images.example/bg.jpg", ""},
+		{"/srv/twilight/uploads/background.png", ""},
+		{`C:\uploads\background.png`, ""},
+		{"javascript:alert(1)", ""},
+		{"https://images.example/\nbg.jpg", ""},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			if got := publicAuthBackgroundURL(tc.raw); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
