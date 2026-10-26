@@ -721,7 +721,7 @@ export default function DashboardPage() {
       </div>
 
       {/* 顶部三块: 到期 / 状态 / Emby 绑定 */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <div className="premium-card p-5 sm:p-6">
           <div className="flex items-start justify-between gap-2">
             <div className="p-3 w-fit bg-amber-500/10 text-amber-500 rounded-2xl">
@@ -744,7 +744,7 @@ export default function DashboardPage() {
             )}
           </div>
           <p className="mt-4 text-[10px] font-black uppercase tracking-widest text-muted-foreground">{t("dashboard.expiryCountdown")}</p>
-          <h3 className="text-2xl sm:text-3xl font-black mt-1 break-all">
+          <h3 className="text-2xl sm:text-3xl font-black mt-1 break-words">
             {isPendingEmby ? "—" : hasNoEmby ? t("dashboard.notApplicable") : isPermanent ? t("dashboard.permanentDisplay") : t("score.days", { days: daysLeft })}
           </h3>
         </div>
@@ -759,7 +759,7 @@ export default function DashboardPage() {
           </h3>
         </div>
 
-        <div className="premium-card p-5 sm:p-6 sm:col-span-2 lg:col-span-1">
+        <div className="premium-card p-5 sm:p-6 sm:col-span-2 xl:col-span-1">
           <div className="p-3 w-fit bg-emerald-500/10 text-emerald-500 rounded-2xl">
             <Gift className="h-5 w-5" />
           </div>
@@ -771,7 +771,7 @@ export default function DashboardPage() {
       </div>
 
       {/* 第二行: Telegram / Emby 服务器 / 我的求片 */}
-      <div className="grid gap-4 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
         {/* Telegram */}
         <div className="premium-card p-5 sm:p-6 flex flex-col gap-3">
           <div className="flex items-start justify-between gap-2">
@@ -853,7 +853,7 @@ export default function DashboardPage() {
               </div>
               <h3 className="text-sm font-black uppercase tracking-widest text-muted-foreground">{t("dashboard.mediaOverview")}</h3>
             </div>
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => void loadEmbyLibraryStats(true)} disabled={embyStatsRefreshing}>
+            <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={t("common.refresh")} onClick={() => void loadEmbyLibraryStats(true)} disabled={embyStatsRefreshing}>
               {embyStatsRefreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
               <span className="sr-only">{t("common.refresh")}</span>
             </Button>
@@ -885,7 +885,7 @@ export default function DashboardPage() {
             </Badge>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-2 text-xs">
             <StatPill icon={Hourglass} tone="warning" label={t("media.statusUnhandled")} value={requestStats.pending} />
             <StatPill icon={CheckCircle2} tone="primary" label={t("media.statusAccepted")} value={requestStats.accepted} />
             <StatPill icon={Download} tone="info" label={t("media.statusDownloading")} value={requestStats.downloading} />
@@ -932,7 +932,7 @@ export default function DashboardPage() {
                   <h3 className="text-2xl font-black tracking-tight">{signinSummary.current_points}</h3>
                   <span className="text-sm text-muted-foreground truncate">{signinSummary.currency_name}</span>
                 </div>
-                <p className="mt-0.5 text-xs text-muted-foreground inline-flex items-center gap-1">
+                <p className="mt-0.5 text-xs text-muted-foreground flex flex-wrap items-center gap-1">
                   <Flame className="h-3 w-3 text-orange-500" />
                   {t("dashboard.streak", { days: signinSummary.current_streak })}
                   {signinSummary.next_bonus_in_days && signinSummary.next_bonus_points ? (
@@ -1038,7 +1038,7 @@ export default function DashboardPage() {
       )}
 
       <Dialog open={showLineDetails} onOpenChange={setShowLineDetails}>
-        <DialogContent className="max-h-[min(720px,calc(100dvh-2rem))] overflow-hidden sm:max-w-2xl">
+        <DialogContent className="flex max-h-[min(720px,calc(100dvh-2rem))] flex-col overflow-hidden sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{t("dashboard.serverLatency")}</DialogTitle>
             <DialogDescription>{t("dashboard.lineDetailsDescription")}</DialogDescription>
@@ -1048,7 +1048,7 @@ export default function DashboardPage() {
               {sortedLineSlots.map((slot) => (
                 <div
                   key={slot.key}
-                  className="flex min-w-0 items-center justify-between gap-3 rounded-xl border border-border/60 bg-card/60 px-4 py-3"
+                  className="flex min-w-0 flex-col gap-3 rounded-xl border border-border/60 bg-card/60 px-4 py-3"
                 >
                   <div className="flex min-w-0 items-center gap-2">
                     {slot.scope === "wl" ? (
@@ -1060,16 +1060,16 @@ export default function DashboardPage() {
                         {t("dashboard.public")}
                       </Badge>
                     )}
-                    <span className="truncate text-sm font-semibold" title={slot.name}>
+                    <span className="min-w-0 break-words text-sm font-semibold" title={slot.name}>
                       {slot.name}
                     </span>
                   </div>
-                  <div className="shrink-0 text-right">
+                  <div className="min-w-0 text-left">
                     <span className={`inline-block rounded-full px-2.5 py-1 text-[11px] font-bold tabular-nums ${renderLatencyToneClass(slot.key)}`}>
                       {renderLatencyText(slot.key)}
                     </span>
                     <div className="mt-1 flex items-start gap-1">
-                      <p className="max-w-[12rem] break-all text-left font-mono text-[11px] text-muted-foreground sm:max-w-[15rem]">
+                      <p className="min-w-0 flex-1 break-all text-left font-mono text-[11px] text-muted-foreground">
                         {slot.url}
                       </p>
                       <Button
@@ -1131,7 +1131,7 @@ export default function DashboardPage() {
           <Button
             onClick={handleCheckRegcode}
             disabled={isLoading || isUsingCode}
-            className="h-12 rounded-xl font-black md:w-auto w-full"
+            className="min-h-12 shrink-0 rounded-xl font-black md:w-auto w-full"
           >
             {isUsingCode ? <Loader2 className="h-4 w-4 animate-spin" /> : t("dashboard.verifyAndUse")}
           </Button>
@@ -1386,10 +1386,10 @@ function StatPill({
     destructive: "bg-destructive/10 text-destructive",
   };
   return (
-    <div className={`flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 ${toneClass[tone]}`}>
-      <span className="flex items-center gap-1.5 truncate">
+    <div className={`flex min-w-0 flex-col items-start gap-1 rounded-lg px-2.5 py-1.5 ${toneClass[tone]}`}>
+      <span className="flex min-w-0 items-start gap-1.5">
         <Icon className="h-3.5 w-3.5 shrink-0" />
-        <span className="truncate">{label}</span>
+        <span className="min-w-0 break-words">{label}</span>
       </span>
       <span className="font-bold tabular-nums">{value}</span>
     </div>

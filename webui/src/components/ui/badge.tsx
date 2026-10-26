@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 
 const badgeVariants = cva(
   // focus → focus-visible：仅键盘导航绘制焦点环，鼠标点击不显示
-  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+  "inline-flex min-w-0 max-w-full items-center whitespace-normal [overflow-wrap:anywhere] rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
   {
     variants: {
       variant: {

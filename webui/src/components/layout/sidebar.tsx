@@ -355,6 +355,7 @@ export function Sidebar() {
             <Button
               type="button"
               variant="outline"
+              size="icon"
               className="h-10 rounded-full border-border/70 bg-background/60 transition-all hover:bg-destructive/10 hover:text-destructive"
               onClick={() => void logout()}
               title={t("common.logout")}

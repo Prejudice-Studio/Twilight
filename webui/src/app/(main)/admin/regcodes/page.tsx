@@ -764,13 +764,13 @@ export default function AdminRegcodesPage() {
           </div>
         </div>
       )}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold">{t("adminRegcodes.pageTitle")}</h1>
           <p className="text-sm text-muted-foreground">{t("adminRegcodes.pageSubtitle")}</p>
         </div>
-        <div className="flex gap-2">
-          <div className="flex rounded-lg border bg-muted/30 p-0.5">
+        <div className="flex flex-wrap gap-2">
+          <div className="grid min-w-0 grid-cols-2 rounded-lg border bg-muted/30 p-0.5">
             <Button
               variant={viewMode === "regcodes" ? "default" : "ghost"}
               size="sm"
@@ -1151,7 +1151,7 @@ export default function AdminRegcodesPage() {
               }
               return (
               <>
-                <div className="space-y-3 p-3 md:hidden">
+                <div className="space-y-3 p-3 xl:hidden">
                   {filtered.map((u) => (
                     <div key={u.code + u._kind} className="rounded-xl border bg-background p-4 shadow-sm">
                       <div className="flex items-center gap-2">
@@ -1226,7 +1226,7 @@ export default function AdminRegcodesPage() {
                     </div>
                   ))}
                 </div>
-                <div className="custom-scrollbar hidden overflow-x-auto overscroll-x-contain md:block">
+                <div className="custom-scrollbar hidden max-h-[70dvh] overflow-auto overscroll-contain xl:block">
                   <table className="w-full min-w-[1000px]">
                     <thead>
                       <tr className="border-b bg-muted/50">
@@ -1370,7 +1370,7 @@ export default function AdminRegcodesPage() {
       </div>
 
       <Card>
-        <CardContent className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[minmax(200px,1fr)_0.7fr_0.7fr_0.7fr_0.7fr_0.7fr_auto]">
+        <CardContent className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
           <Input
             placeholder={t("adminRegcodes.searchRegcodePlaceholder")}
             value={searchInput}
@@ -1423,7 +1423,7 @@ export default function AdminRegcodesPage() {
               <SelectItem value="asc">{t("adminRegcodes.orderAsc")}</SelectItem>
             </SelectContent>
           </Select>
-          <div className="flex gap-2 sm:col-span-2 lg:col-span-3 xl:col-span-1 xl:min-w-0">
+          <div className="grid grid-cols-2 gap-2 sm:col-span-2 sm:flex sm:flex-wrap xl:col-span-3">
             <Button className="flex-1 md:flex-none" variant="outline" onClick={clearFilters}>{t("adminRegcodes.reset")}</Button>
             <Button className="flex-1 md:flex-none" variant="outline" onClick={() => void loadRegcodes()}>{t("adminRegcodes.refresh")}</Button>
           </div>
@@ -1442,10 +1442,10 @@ export default function AdminRegcodesPage() {
             </div>
           ) : (
             <>
-            <div className="space-y-3 p-3 md:hidden">
+            <div className="space-y-3 p-3 xl:hidden">
               {regcodes.map((code) => (
                 <div key={code.code} className="rounded-xl border bg-background p-4 shadow-sm">
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex flex-col gap-3">
                     <label className="flex min-w-0 flex-1 items-start gap-3">
                       <input
                         type="checkbox"
@@ -1454,7 +1454,7 @@ export default function AdminRegcodesPage() {
                         className="mt-1 shrink-0"
                       />
                       <span className="min-w-0">
-                        <code className="block truncate rounded bg-muted px-2 py-1 text-sm" title={code.code}>
+                        <code className="block break-all rounded bg-muted px-2 py-1 text-sm" title={code.code}>
                           {code.code}
                         </code>
                         <span className="mt-2 flex flex-wrap gap-1">
@@ -1466,7 +1466,7 @@ export default function AdminRegcodesPage() {
                         </span>
                       </span>
                     </label>
-                    <div className="flex shrink-0 items-center gap-1">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Button
                         size="icon"
                         variant="ghost"
@@ -1573,7 +1573,7 @@ export default function AdminRegcodesPage() {
               ))}
             </div>
 
-            <div className="custom-scrollbar hidden overflow-x-auto overscroll-x-contain md:block">
+            <div className="custom-scrollbar hidden max-h-[70dvh] overflow-auto overscroll-contain xl:block">
               <table className="w-full min-w-[1160px] table-fixed">
                 <colgroup>
                   <col className="w-12" />

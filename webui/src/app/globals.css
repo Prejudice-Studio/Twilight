@@ -183,16 +183,11 @@
     transition: background-color 320ms ease, color 240ms ease;
   }
 
-  :lang(zh-Hans), :lang(zh-Hant) {
-    word-break: keep-all;
-    overflow-wrap: anywhere;
-  }
-
-  :lang(en-US) {
-    /* anywhere 会把 “Unbound” 这类短单词拦腰截断（Unboun / d），只在单词本身
-       放不下时才断开即可；未翻译回退的中文仍按 keep-all 不在词中间断行。 */
+  html:lang(zh-Hans), html:lang(zh-Hant), html:lang(en-US) {
+    /* Inherit wrapping so component utilities (truncate, break-all) can override
+       it. Matching :lang on every descendant overrode those utilities. */
     word-break: normal;
-    overflow-wrap: break-word;
+    overflow-wrap: anywhere;
   }
 
   .dark body { color-scheme: dark; }
@@ -288,6 +283,7 @@
   .auth-panel-inner {
     margin: auto;
     width: 100%;
+    min-width: 0;
     max-width: 420px;
     padding: 2.5rem 1.5rem;
   }
@@ -489,6 +485,8 @@
   .sidebar-footer {
     margin-top: 0.6rem;
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 0;
     gap: 0.7rem;
   }
 
@@ -682,7 +680,7 @@
     max-width: 100%;
   }
 
-  .admin-section-surface :where(code, pre) {
+  .admin-section-surface :where(pre) {
     max-width: 100%;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
@@ -692,35 +690,12 @@
     .admin-section-surface :where(th, td) {
       max-width: 22rem;
     }
-
-    /* 平板区间同样收缩表格。此前只有 <=767px 生效，768–1023px 的页面会出现
-       "表格仍按 min-w-* 撑开、但卡片兜底要等 lg 才出现"的空档，横向滚动
-       与两列挤压同时发生。 */
-    .admin-section-surface :where(.overflow-x-auto > table) {
-      min-width: 0 !important;
-    }
   }
 
   @media (max-width: 767px) {
-    /* 窄屏不再强制 760px 最小宽度：那会让每张管理表格都比视口宽一倍，
-       把每个页面都变成必须横向拖动的表。改为让表格自然收缩、单元格换行；
-       !important 用于压过页面上的 min-w-[980px] / min-w-[1160px] 之类
-       固定值，overflow-x-auto 容器仍保留作为最后兜底。 */
-    .admin-section-surface :where(.overflow-x-auto > table) {
-      min-width: 0 !important;
-    }
-
     .admin-section-surface :where(th, td) {
       white-space: normal;
       overflow-wrap: anywhere;
-    }
-
-    .admin-section-surface :where(.grid-cols-2, .grid-cols-3, .grid-cols-4, .grid-cols-5) {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .admin-section-surface :where(.text-right) {
-      text-align: left;
     }
   }
 

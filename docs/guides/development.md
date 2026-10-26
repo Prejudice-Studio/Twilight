@@ -394,6 +394,26 @@ cd webui && BACKEND_URL=http://127.0.0.1:5000 pnpm dev
 - systemd 安装前先执行 `sudo bash deploy/setup-systemd.sh --dry-run`。脚本会检测路径、配置、二进制、用户 / 组、端口、空白与 `%` 等 systemd 特殊字符，以及旧 Python 版 Twilight 的 unit。
 - 部署的 unit 必须指向 `bin/twilight`，不要重新引入旧后端启动命令。
 
+### Firefox 响应式回归
+
+主页、注册码管理与认证页使用 Firefox 作为布局基准。语言换行规则只从 `html` 继承，不对每个后代元素直接设置 `:lang`，以免覆盖组件的截断和长字符串换行。公共样式不能强制把所有两列网格改成一列，也不能强制压缩宽表格；各页自行设置卡片断点，桌面表格在内部滚动。
+
+主页在平板和带侧栏的窄桌面上使用两列信息卡，宽桌面才排四列；统计数字和标签分行展示。注册码列表在 1280px 以下使用卡片，码值、绑定目标与操作按钮分开排布，筛选器采用普通响应式网格。共享徽标允许长目标名称换行，侧栏底部使用可收缩的网格轨道。
+
+在 `webui/` 中执行以下检查：
+
+```bash
+pnpm exec playwright install firefox
+pnpm dev --hostname 127.0.0.1 --port 3100
+# 另一个终端（仍位于 webui/）
+pnpm test:responsive-firefox
+pnpm test:auth-background
+```
+
+浏览器回归使用合成接口数据，不连接真实用户或执行写操作。覆盖登录页、主页和注册码管理，简中/繁中/英文，以及 360、768、1024、1280、1536px 视口；检查长用户名、注册码、绑定目标、统计数值、侧栏、线路弹窗、生成弹窗、筛选下拉与背景图片请求。截图写入已忽略的 `webui/test-results/responsive/`。可通过 `WEBUI_TEST_URL` 指定本地测试地址，或通过 `PLAYWRIGHT_MODULE` 指向测试环境已有的 Playwright 模块。
+
+这些测试验证 Firefox 引擎下的模拟视口，不代表 iOS/Android 真机验证；后端背景上传及公开接口集成测试仍需独立的 `TWILIGHT_TEST_DSN`。
+
 ### 分支与合并发布流程
 
 - 在 `main` 之外的特性分支上开发；提交保持原子化，便于 review 与回退。
