@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Megaphone,
   Plus,
@@ -118,6 +118,7 @@ export default function AdminAnnouncementsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm());
+  const [previewContent, setPreviewContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
 
@@ -144,14 +145,23 @@ export default function AdminAnnouncementsPage() {
     execute: reload,
   } = useAsyncResource(loadResource, { immediate: true });
 
+  // Rich-text parsing can be noticeable for long announcements. Keep typing and
+  // the character counter synchronous, but update the preview after input settles.
+  useEffect(() => {
+    const timer = window.setTimeout(() => setPreviewContent(form.content), 200);
+    return () => window.clearTimeout(timer);
+  }, [form.content]);
+
   const openCreate = () => {
     setEditingId(null);
     setForm(emptyForm());
+    setPreviewContent("");
     setCreateOpen(true);
   };
 
   const openEdit = (ann: Announcement) => {
     setEditingId(ann.id);
+    setPreviewContent(ann.content || "");
     setForm({
       title: ann.title || "",
       content: ann.content,
@@ -558,11 +568,11 @@ export default function AdminAnnouncementsPage() {
                 />
               </div>
             </div>
-            {form.content.trim() && (
+            {previewContent.trim() && (
               <div className="space-y-1">
                 <Label className="text-[11px] text-muted-foreground">{t("adminAnnouncements.preview")}</Label>
                 <div className="custom-scrollbar max-h-48 overflow-y-auto overscroll-contain rounded-md border bg-muted/30 p-3">
-                  <SafeAnnouncementContent content={form.content} mode={form.renderMode} />
+                  <SafeAnnouncementContent content={previewContent} mode={form.renderMode} />
                 </div>
               </div>
             )}

@@ -124,7 +124,11 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
       }
     }
 
-    const autoLink = /^https?:\/\/[^\s<>)]+/i.exec(text.slice(i));
+    // Avoid matching against the entire remaining suffix at every character.
+    // Markdown without URLs used to rescan O(n) text O(n) times while typing.
+    const autoLink = text[i] === "h" || text[i] === "H"
+      ? /^https?:\/\/[^\s<>)]+/i.exec(text.slice(i))
+      : null;
     if (autoLink) {
       const url = autoLink[0].replace(/[.,!?;:]+$/, "");
       const trailing = autoLink[0].slice(url.length);
@@ -297,7 +301,7 @@ function renderBBCode(content: string): React.ReactNode {
   return renderMarkdown(translated);
 }
 
-export function SafeAnnouncementContent({ content, mode }: { content: string; mode?: Mode | null }) {
+export const SafeAnnouncementContent = React.memo(function SafeAnnouncementContent({ content, mode }: { content: string; mode?: Mode | null }) {
   const selected = (mode || "plain") as Mode;
   if (selected === "markdown") {
     return <div className="text-sm">{renderMarkdown(content)}</div>;
@@ -306,4 +310,4 @@ export function SafeAnnouncementContent({ content, mode }: { content: string; mo
     return <div className="text-sm">{renderBBCode(content)}</div>;
   }
   return <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">{content}</div>;
-}
+});
